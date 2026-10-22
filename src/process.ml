@@ -90,7 +90,17 @@ let forwarded_signals = [ Sys.sigterm; Sys.sighup ]
 let rec retry_interrupted f =
   try f () with Unix.Unix_error (Unix.EINTR, _, _) -> retry_interrupted f
 
-let run_program path argv =
+let run_program_windows path argv =
+  flush stdout;
+  flush stderr;
+  try
+    let pid = Unix.create_process path argv Unix.stdin Unix.stdout Unix.stderr in
+    match snd (retry_interrupted (fun () -> Unix.waitpid [] pid)) with
+    | Unix.WEXITED code -> Ok code
+    | Unix.WSIGNALED s | Unix.WSTOPPED s -> Ok (128 + posix_signal s)
+  with Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+
+let run_program_posix path argv =
   let child = ref None in
   let forward signal =
     Option.iter
@@ -142,6 +152,9 @@ let run_program path argv =
                 | Unix.WEXITED code -> code
                 | Unix.WSIGNALED s | Unix.WSTOPPED s -> 128 + posix_signal s)
       with Unix.Unix_error (code, _, _) -> Error (Unix.error_message code))
+
+let run_program path argv =
+  if Sys.win32 then run_program_windows path argv else run_program_posix path argv
 
 let signal_names =
   [
