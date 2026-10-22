@@ -116,7 +116,8 @@ let usage =
   \  --sanitize=LIST instrument with address and/or undefined behavior sanitizers\n\
    environment:\n\
   \  FAS_OPT, FAS_LLC, FAS_CC, FAS_PROFDATA select opt, llc, the C compiler and \
-   llvm-profdata (defaults: opt-22, llc-22, clang-22, llvm-profdata-22)\n\
+   llvm-profdata (defaults: opt-22, llc-22, clang-22, llvm-profdata-22; without those, \
+   opt, llc, clang, llvm-profdata when they report LLVM 22)\n\
   \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)"
 
 let default_output emit input =

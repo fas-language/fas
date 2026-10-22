@@ -544,13 +544,6 @@ let emit_text config text =
             ])
   else Ok text
 
-let tool name default =
-  match Sys.getenv_opt name with Some value when value <> "" -> value | _ -> default
-
-let tools () =
-  (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", tool "FAS_CC" "clang-22")
-
-let profdata () = tool "FAS_PROFDATA" "llvm-profdata-22"
 let version = "0.6.0"
 
 let find_executable name =
@@ -575,6 +568,47 @@ let find_executable name =
 
 let executable_path name =
   match find_executable name with Some path -> path | None -> name
+
+let llvm_suffix = "-22"
+
+let reports_llvm_22 path =
+  match Process.run [| path; "--version" |] with
+  | Ok (stdout, _) ->
+      let needle = "version 22." in
+      let rec scan index =
+        index + String.length needle <= String.length stdout
+        && (String.sub stdout index (String.length needle) = needle || scan (index + 1))
+      in
+      scan 0
+  | Error _ -> false
+
+let resolved_tools = Hashtbl.create 4
+
+let tool name default =
+  match Sys.getenv_opt name with
+  | Some value when value <> "" -> value
+  | _ when not (String.ends_with ~suffix:llvm_suffix default) -> default
+  | _ -> (
+      match Hashtbl.find_opt resolved_tools default with
+      | Some resolved -> resolved
+      | None ->
+          let plain =
+            String.sub default 0 (String.length default - String.length llvm_suffix)
+          in
+          let resolved =
+            if Option.is_some (find_executable default) then default
+            else
+              match find_executable plain with
+              | Some path when reports_llvm_22 path -> plain
+              | _ -> default
+          in
+          Hashtbl.replace resolved_tools default resolved;
+          resolved)
+
+let tools () =
+  (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", tool "FAS_CC" "clang-22")
+
+let profdata () = tool "FAS_PROFDATA" "llvm-profdata-22"
 
 let first_non_empty_line text =
   String.split_on_char '\n' text
