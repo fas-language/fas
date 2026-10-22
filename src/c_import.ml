@@ -668,8 +668,8 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     declarations;
   let roots = List.filter (fun node -> kind node = Some "RecordDecl") all_nodes in
   let probes = Hashtbl.create (List.length top_declarations + 64) in
-  let add_probe target expression =
-    Option.iter (fun target -> Hashtbl.replace probes target expression) target
+  let add_probe ?(names = []) target expression =
+    Option.iter (fun target -> Hashtbl.replace probes target (expression, names)) target
   in
   let strip_nullability value =
     let output = Buffer.create (String.length value) in
@@ -757,7 +757,8 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
                             fields :=
                               ( field_name,
                                 target,
-                                "((" ^ base_type ^ " *)0)->" ^ field_name )
+                                ( "((" ^ base_type ^ " *)0)->" ^ field_name,
+                                  [ field_name ] ) )
                               :: !fields)
                           (source_key child)
                     | None ->
@@ -782,14 +783,14 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
             in
             if duplicates <> [] then Hashtbl.replace collision_names root_name ();
             List.iter
-              (fun (field_name, target, expression) ->
+              (fun (field_name, target, (expression, names)) ->
                 if not (List.mem field_name duplicates) then
-                  add_probe (Some target) expression)
+                  add_probe ~names (Some target) expression)
               !fields)
           base)
     roots;
   let candidates =
-    Hashtbl.fold (fun target expression acc -> (target, expression) :: acc) probes []
+    Hashtbl.fold (fun target probe acc -> (target, probe) :: acc) probes []
   in
   let probe_prefix = "__fas_probe_" ^ Digest.to_hex (Digest.string unit_path) ^ "_" in
   let prefix = probe_prefix ^ "type_" in
@@ -800,7 +801,11 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
   let should_run = indexed <> [] || macro_candidates <> [] in
   let probe = Filename.temp_file "fas-c-type-probe-" ".c" in
   paths := probe :: !paths;
-  let macro_start_line = 2 + List.length indexed in
+  let macro_start_line =
+    List.fold_left
+      (fun line (_, _, (_, names)) -> line + 1 + (3 * List.length names))
+      2 indexed
+  in
   let append_type_probes () =
     let out = open_out_bin probe in
     Fun.protect
@@ -808,8 +813,13 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
       (fun () ->
         Printf.fprintf out "#include %S\n" unit_path;
         List.iter
-          (fun (index, _, expression) ->
-            Printf.fprintf out "typedef __typeof__(%s) %s%d;\n" expression prefix index)
+          (fun (index, _, (expression, names)) ->
+            List.iter
+              (fun name ->
+                Printf.fprintf out "#pragma push_macro(%S)\n#undef %s\n" name name)
+              names;
+            Printf.fprintf out "typedef __typeof__(%s) %s%d;\n" expression prefix index;
+            List.iter (Printf.fprintf out "#pragma pop_macro(%S)\n") (List.rev names))
           indexed;
         List.iteri
           (fun index (name, _, _, _) ->
@@ -978,7 +988,7 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
                       ( List.nth_opt indexed index,
                         List.find_opt is_type_node (children node) )
                     with
-                    | Some (_, target, expression), Some type_of_expr ->
+                    | Some (_, target, (expression, _)), Some type_of_expr ->
                         Option.map
                           (fun tree ->
                             C_import_json.make_obj
