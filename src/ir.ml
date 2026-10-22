@@ -2091,7 +2091,7 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false)
             newline ();
             add
               "!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: \
-               \"fas 0.6.0\", isOptimized: false, runtimeVersion: 0, emissionKind: \
+               \"fas 0.6.1\", isOptimized: false, runtimeVersion: 0, emissionKind: \
                LineTablesOnly)";
             newline ();
             List.iter
