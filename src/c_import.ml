@@ -155,7 +155,14 @@ let compilation_error ?source ?(headers = []) ?(prefix = "C compilation failed")
         (fallback, notes)
     | None -> (fallback, [])
   in
-  Diag.error ~notes span
+  let help =
+    if missing_header && (Target_layout.current ()).os = Target_layout.Windows then
+      Some
+        "building for Windows needs a MinGW C toolchain: put llvm-mingw's bin \
+         directory on PATH or set FAS_CC"
+    else None
+  in
+  Diag.error ~notes ?help span
     (if missing_header then message
      else if message = "" then prefix
      else prefix ^ ": " ^ message)
@@ -270,7 +277,10 @@ let macro_type = function
       Some ((if code = 3 then "short" else "unsigned short"), 16, code = 4)
   | (5 | 6) as code -> Some ((if code = 5 then "int" else "unsigned int"), 32, code = 6)
   | (7 | 8) as code ->
-      Some ((if code = 7 then "long" else "unsigned long"), 64, code = 8)
+      Some
+        ( (if code = 7 then "long" else "unsigned long"),
+          (Target_layout.current ()).c_long_bits,
+          code = 8 )
   | (9 | 10) as code ->
       Some ((if code = 9 then "long long" else "unsigned long long"), 64, code = 10)
   | 11 -> Some ("_Bool", 8, true)
@@ -380,7 +390,7 @@ let fas_macro_value width unsigned literal =
   else Int64.to_string value
 
 let c_import_args ~cc ~c_flags ~source =
-  [ cc; "-x"; "c"; "--target=x86_64-unknown-linux-gnu" ]
+  [ cc; "-x"; "c"; "--target=" ^ (Target_layout.current ()).triple ]
   @ c_flags
   @ [ "-iquote"; Filename.dirname source ]
 
@@ -501,6 +511,10 @@ let builtin_info_of_name = function
   | "unsigned short" -> Some (Integer (Ast.Int Ast.U16))
   | "int" -> Some (Integer (Ast.Int Ast.I32))
   | "unsigned int" -> Some (Integer (Ast.Int Ast.U32))
+  | "long" when (Target_layout.current ()).c_long_bits = 32 ->
+      Some (Integer (Ast.Int Ast.I32))
+  | "unsigned long" when (Target_layout.current ()).c_long_bits = 32 ->
+      Some (Integer (Ast.Int Ast.U32))
   | "long" | "long long" -> Some (Integer (Ast.Int Ast.I64))
   | "unsigned long" | "unsigned long long" -> Some (Integer (Ast.Int Ast.U64))
   | "__int128" | "unsigned __int128" -> Some Unsupported_integer
@@ -828,7 +842,7 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
           macro_candidates)
   in
   let common =
-    [ "-x"; "c"; "--target=x86_64-unknown-linux-gnu" ]
+    [ "-x"; "c"; "--target=" ^ (Target_layout.current ()).triple ]
     @ c_flags
     @ [ "-iquote"; Filename.dirname source ]
   in
@@ -1246,7 +1260,7 @@ let imported_probe_nodes ~cc ~c_flags ~source ~unit_path ~paths ~definitions
     in
     write_probe ();
     let common =
-      [ "-x"; "c"; "--target=x86_64-unknown-linux-gnu" ]
+      [ "-x"; "c"; "--target=" ^ (Target_layout.current ()).triple ]
       @ c_flags
       @ [ "-iquote"; Filename.dirname source ]
     in
@@ -1530,7 +1544,7 @@ let import_argv ~cc ~c_flags ~source ~headers unit_path =
        "-Xclang";
        "-fdump-record-layouts-complete";
        "-H";
-       "--target=x86_64-unknown-linux-gnu";
+       "--target=" ^ (Target_layout.current ()).triple;
      ]
     @ c_flags
     @ reproducible_flags (stable_unit_name source headers) unit_path

@@ -2290,7 +2290,7 @@ let rec static_type_bytes structs visiting ty =
   | F32 -> Ok 4
   | F64 -> Ok 8
   | Void -> Ok 0
-  | Pointer _ -> Ok Target_layout.current.pointer_size
+  | Pointer _ -> Ok (Target_layout.current ()).pointer_size
   | Struct name ->
       if List.mem name visiting then Error ()
       else
@@ -2334,13 +2334,13 @@ let rec static_type_bytes structs visiting ty =
           | I128 -> Ok 128
           | F32 -> Ok 32
           | F64 -> Ok 64
-          | Pointer _ -> Ok (Target_layout.current.pointer_size * 8)
+          | Pointer _ -> Ok ((Target_layout.current ()).pointer_size * 8)
           | _ -> Error ()
         in
         match elem_bits with
         | Error () -> Error ()
         | Ok bits -> (
-            match Target_layout.vector Target_layout.current length bits with
+            match Target_layout.vector (Target_layout.current ()) length bits with
             | Error _ -> Error ()
             | Ok (size, _) -> Ok size))
 

@@ -95,7 +95,7 @@ let rec ty = function
   | Hir.Int Hir.U32 | Hir.Int Hir.I32 -> I32
   | Hir.Int Hir.U64 | Hir.Int Hir.I64 -> I64
   | Hir.Int Hir.Usize | Hir.Int Hir.Isize -> (
-      match Target_layout.pointer_integer_bits Target_layout.current with
+      match Target_layout.pointer_integer_bits (Target_layout.current ()) with
       | Ok 32 -> I32
       | Ok 64 -> I64
       | Ok bits -> invalid_arg (Printf.sprintf "unsupported pointer width: %d" bits)
@@ -120,9 +120,9 @@ let ir_extension = function
   | Target_layout.C_zero_extension -> Ir.Zero_extension
 
 let c_extension = function
-  | Hir.Bool -> ir_extension Target_layout.current.c_abi_bool_extension
+  | Hir.Bool -> ir_extension (Target_layout.current ()).c_abi_bool_extension
   | Hir.Int kind ->
-      Target_layout.c_integer_extension Target_layout.current
+      Target_layout.c_integer_extension (Target_layout.current ())
         ~signed:
           (match kind with Hir.I8 | I16 | I32 | I64 | Isize -> true | _ -> false)
         (Hir.int_bytes kind * 8)
@@ -540,7 +540,7 @@ let normalize_index_type s index_ty span value =
     | Hir.Int (Hir.U16 | Hir.I16) -> Ok 16
     | Hir.Int (Hir.U32 | Hir.I32) -> Ok 32
     | Hir.Int (Hir.U64 | Hir.I64) -> Ok 64
-    | Hir.Int (Hir.Usize | Hir.Isize) -> Ok (Target_layout.current.pointer_size * 8)
+    | Hir.Int (Hir.Usize | Hir.Isize) -> Ok ((Target_layout.current ()).pointer_size * 8)
     | _ -> error span "internal error: index lowering received a non-integer value"
   in
   let t = match index_ty with Hir.Vec (_, element) -> element | _ -> index_ty in
@@ -889,7 +889,7 @@ and lower_builtin s b args t span =
           | U16 | I16 -> 16
           | U32 | I32 -> 32
           | U64 | I64 -> 64
-          | Usize | Isize -> Target_layout.current.pointer_size * 8
+          | Usize | Isize -> (Target_layout.current ()).pointer_size * 8
         in
         let conversion =
           match destination with
@@ -3147,7 +3147,7 @@ let global_storage structs (global : Hir.global) =
 let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
   let* () =
-    match Target_layout.pointer_integer_bits Target_layout.current with
+    match Target_layout.pointer_integer_bits (Target_layout.current ()) with
     | Ok 32 | Ok 64 -> Ok ()
     | Ok bits ->
         error Span.synthetic
@@ -3167,7 +3167,7 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
   let field_align t =
     match Hir.layout p.structs t with
     | Ok (_, a) -> (
-        match Target_layout.validate_type_alignment Target_layout.current a with
+        match Target_layout.validate_type_alignment (Target_layout.current ()) a with
         | Ok () -> Ok a
         | Error m -> no_layout t m)
     | Error m -> no_layout t m
@@ -3217,7 +3217,9 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
     Result_list.map
       (fun (d : Hir.struct_def) ->
         let* () =
-          match Target_layout.validate_type_alignment Target_layout.current d.align with
+          match
+            Target_layout.validate_type_alignment (Target_layout.current ()) d.align
+          with
           | Ok () -> Ok ()
           | Error message -> malformed_struct d message
         in
@@ -3321,8 +3323,8 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
   in
   let module_ =
     {
-      Ir.target_triple = Target_layout.current.triple;
-      data_layout = Target_layout.current.llvm_data_layout;
+      Ir.target_triple = (Target_layout.current ()).triple;
+      data_layout = (Target_layout.current ()).llvm_data_layout;
       structs;
       globals = strings @ arrays @ storage_globals;
       funcs = funcs @ intrinsic_decls funcs;

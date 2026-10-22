@@ -102,7 +102,7 @@ let validate_object ?opaque_span ?vector_element_span limits structs span ty =
 let validate_struct_alignment limits span = function
   | Some alignment ->
       let* () =
-        Target_layout.validate_type_alignment Target_layout.current alignment
+        Target_layout.validate_type_alignment (Target_layout.current ()) alignment
         |> Result.map_error (fun message -> [ Diag.error span message ])
       in
       if alignment <= limits.Limits.max_object_alignment then Ok ()

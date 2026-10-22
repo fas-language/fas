@@ -30,7 +30,8 @@ let report (config : Cli.t) diagnostics =
   | Cli.Json -> prerr_endline (Diag.render_json diagnostics)
 
 let run_program (config : Cli.t) args =
-  match Filename.temp_file "fas-run-" "" with
+  let suffix = if config.Cli.os = Target_layout.Windows then ".exe" else "" in
+  match Filename.temp_file "fas-run-" suffix with
   | exception Sys_error message ->
       prerr_endline ("fas: " ^ message);
       1
@@ -190,8 +191,17 @@ let perf_command (config : Cli.t) (options : Cli.perf_options) baseline args =
          with Sys_error _ -> ());
       status
 
+let select_os = function
+  | Ok (Cli.Run config | Cli.Check config | Cli.Run_program (config, _)) ->
+      Target_layout.select config.Cli.os
+  | Ok (Cli.Perf (config, _, _)) -> Target_layout.select config.Cli.os
+  | Ok (Cli.Lsp options) -> Target_layout.select options.Cli.lsp_os
+  | Ok (Cli.Help | Cli.Version) | Error _ -> ()
+
 let () =
-  match Cli.parse Sys.argv with
+  let parsed = Cli.parse Sys.argv in
+  select_os parsed;
+  match parsed with
   | Ok Cli.Help -> print_endline Cli.usage
   | Ok Cli.Version -> List.iter print_endline (Driver.version_lines ())
   | Ok (Cli.Run config) -> (
@@ -211,6 +221,11 @@ let () =
           exit 1)
   | Ok (Cli.Lsp options) -> exit (Lsp.run options)
   | Ok (Cli.Run_program (config, args)) -> exit (run_program config args)
+  | Ok (Cli.Perf (config, _, _)) when config.Cli.os = Target_layout.Windows ->
+      prerr_endline
+        "fas perf measures Linux builds only; this build is for Windows \
+         (`--os=windows`)";
+      exit 2
   | Ok (Cli.Perf (config, options, args)) -> (
       match options.mode with
       | Cli.Tune output ->

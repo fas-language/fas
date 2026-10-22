@@ -432,7 +432,7 @@ let add_size left right =
     Error "aggregate size overflows"
   else Ok (left + right)
 
-let int_bytes ?(target = Target_layout.current) = function
+let int_bytes ?(target = Target_layout.current ()) = function
   | U8 | I8 -> 1
   | U16 | I16 -> 2
   | U32 | I32 -> 4
@@ -449,7 +449,7 @@ let scalar_bits target = function
   | Addr | Handle _ -> Ok (target.Target_layout.pointer_size * 8)
   | _ -> Error "vector element type must be `bool` or an integer type"
 
-let layout ?(target = Target_layout.current) structs ty =
+let layout ?(target = Target_layout.current ()) structs ty =
   let rec go visiting = function
     | Bool -> Target_layout.integer target 1
     | Int k -> int_layout target k
@@ -497,7 +497,7 @@ let first_index entries = Hashtbl.of_seq (List.to_seq (List.rev entries))
 let nested_index entries =
   first_index (List.map (fun (key, value) -> (key, first_index value)) entries)
 
-let struct_layout_cache ?(target = Target_layout.current) ?(unions = [])
+let struct_layout_cache ?(target = Target_layout.current ()) ?(unions = [])
     ?(field_offsets = []) ?(field_reasons = []) ?(byte_storage = [])
     ?(struct_sizes = []) decls =
   let declarations =

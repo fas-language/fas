@@ -159,6 +159,7 @@ let config_for state key : Cli.t =
     output = key;
     output_explicit = false;
     target_explicit = false;
+    os = state.options.lsp_os;
     emit = Cli.Ir;
     keep = false;
     optimization = 2;

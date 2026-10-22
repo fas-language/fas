@@ -19,6 +19,7 @@ type t = {
   tune_cpu : string option;
   target : target;
   target_explicit : bool;
+  os : Target_layout.os;
   target_features : string option;
   profile : string option;
   all_errors : bool;
@@ -42,7 +43,11 @@ type perf_options = {
   check_with : string list option;
 }
 
-type lsp_options = { lsp_c_flags : string list; lsp_target : target }
+type lsp_options = {
+  lsp_c_flags : string list;
+  lsp_target : target;
+  lsp_os : Target_layout.os;
+}
 
 type command =
   | Run of t

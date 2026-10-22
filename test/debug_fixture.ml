@@ -81,8 +81,8 @@ let module_ ~markers =
     }
   in
   {
-    Ir.target_triple = Target_layout.current.triple;
-    data_layout = Target_layout.current.llvm_data_layout;
+    Ir.target_triple = (Target_layout.current ()).triple;
+    data_layout = (Target_layout.current ()).llvm_data_layout;
     structs = [];
     globals = [];
     funcs = [ main; helper; plain ];

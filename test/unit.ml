@@ -33,17 +33,17 @@ let () =
   let handle_view_type = Ast.Handle (Ast.Named_type ("Opaque", Span.synthetic)) in
   assert (
     Sema_substitution.view_source_type (Some handle_view_type) = Some handle_view_type);
-  assert (Target_layout.pointer_integer_bits Target_layout.current = Ok 64);
+  assert (Target_layout.pointer_integer_bits (Target_layout.current ()) = Ok 64);
   assert (
     Sema_types.source_ty [] (Ast.Applied_type ("G", Span.synthetic, [], Span.synthetic))
     = Error "internal error: generic type application reached ordinary type checking");
   assert (
     Target_layout.pointer_integer_bits
-      { Target_layout.current with pointer_size = 4; pointer_align = 4 }
+      { (Target_layout.current ()) with pointer_size = 4; pointer_align = 4 }
     = Ok 32);
   assert (
     Target_layout.pointer_integer_bits
-      { Target_layout.current with pointer_size = 16; pointer_align = 16 }
+      { (Target_layout.current ()) with pointer_size = 16; pointer_align = 16 }
     = Error "unsupported pointer size: 16");
   let layout_declarations =
     [
@@ -67,7 +67,9 @@ let () =
     | Error message -> failwith message);
   assert (Hir.Hashtbl.length layout_cache.definitions = 4);
   let pointer_declarations = [ ("Address", [ ("value", Hir.Addr) ], None) ] in
-  let target32 = { Target_layout.current with pointer_size = 4; pointer_align = 4 } in
+  let target32 =
+    { (Target_layout.current ()) with pointer_size = 4; pointer_align = 4 }
+  in
   let pointer64 =
     match
       Hir.compute_struct_cached (Hir.struct_layout_cache pointer_declarations) "Address"
@@ -402,8 +404,8 @@ let () =
   assert (List.length lowered.Ir.funcs = 2);
   let ir_module ?(structs = []) ?(globals = []) ?(no_inline_functions = []) funcs =
     {
-      Ir.target_triple = Target_layout.current.triple;
-      data_layout = Target_layout.current.llvm_data_layout;
+      Ir.target_triple = (Target_layout.current ()).triple;
+      data_layout = (Target_layout.current ()).llvm_data_layout;
       structs;
       globals;
       funcs;

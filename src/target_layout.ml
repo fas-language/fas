@@ -1,6 +1,8 @@
 type c_abi_extension = C_no_extension | C_sign_extension | C_zero_extension
+type os = Linux | Windows
 
 type t = {
+  os : os;
   triple : string;
   llvm_data_layout : string;
   pointer_size : int;
@@ -10,10 +12,12 @@ type t = {
   max_type_alignment : int;
   c_abi_bool_extension : c_abi_extension;
   c_abi_integer_extensions : (int * c_abi_extension * c_abi_extension) list;
+  c_long_bits : int;
 }
 
 let x86_64_linux =
   {
+    os = Linux;
     triple = "x86_64-unknown-linux-gnu";
     llvm_data_layout =
       "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
@@ -27,9 +31,25 @@ let x86_64_linux =
       [
         (8, C_sign_extension, C_zero_extension); (16, C_sign_extension, C_zero_extension);
       ];
+    c_long_bits = 64;
   }
 
-let current = x86_64_linux
+let x86_64_windows =
+  {
+    x86_64_linux with
+    os = Windows;
+    triple = "x86_64-w64-windows-gnu";
+    llvm_data_layout =
+      "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    c_abi_integer_extensions = [];
+    c_long_bits = 32;
+  }
+
+let of_os = function Linux -> x86_64_linux | Windows -> x86_64_windows
+let host_os = if Sys.win32 || Sys.cygwin then Windows else Linux
+let selected = ref (of_os host_os)
+let select os = selected := of_os os
+let current () = !selected
 
 let ( let* ) result f =
   match result with Ok value -> f value | Error message -> Error message

@@ -553,15 +553,22 @@ let find_executable name =
       not (Sys.is_directory path)
     with Unix.Unix_error _ | Sys_error _ -> false
   in
-  if String.contains name '/' then if is_executable name then Some name else None
+  let names =
+    if Sys.win32 && not (Filename.check_suffix name ".exe") then [ name ^ ".exe"; name ]
+    else [ name ]
+  in
+  if String.contains name '/' || (Sys.win32 && String.contains name '\\') then
+    List.find_opt is_executable names
   else
     let directories =
-      String.split_on_char ':' (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+      String.split_on_char
+        (if Sys.win32 then ';' else ':')
+        (Option.value ~default:"" (Sys.getenv_opt "PATH"))
     in
     let candidates =
-      List.map
+      List.concat_map
         (fun directory ->
-          Filename.concat (if directory = "" then "." else directory) name)
+          List.map (Filename.concat (if directory = "" then "." else directory)) names)
         directories
     in
     List.find_opt is_executable candidates
@@ -605,8 +612,25 @@ let tool name default =
           Hashtbl.replace resolved_tools default resolved;
           resolved)
 
-let tools () =
-  (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", tool "FAS_CC" "clang-22")
+let mingw_cc = "x86_64-w64-mingw32-clang"
+
+let c_compiler () =
+  match (Target_layout.current ()).os with
+  | Target_layout.Windows
+    when (not Sys.win32)
+         && (match Sys.getenv_opt "FAS_CC" with
+           | Some value -> value = ""
+           | None -> true)
+         && Option.is_some (find_executable mingw_cc) ->
+      mingw_cc
+  | _ -> tool "FAS_CC" "clang-22"
+
+let tools () = (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", c_compiler ())
+
+let c_target_flags () =
+  match (Target_layout.current ()).os with
+  | Target_layout.Linux -> []
+  | Target_layout.Windows -> [ "--target=" ^ (Target_layout.current ()).triple ]
 
 let profdata () = tool "FAS_PROFDATA" "llvm-profdata-22"
 
@@ -983,7 +1007,7 @@ let host_cpu =
   lazy
     (let _, _, cc = tools () in
      match
-       Process.run [| cc; "-march=native"; "-###"; "-x"; "c"; "-c"; "/dev/null" |]
+       Process.run [| cc; "-march=native"; "-###"; "-x"; "c"; "-c"; Filename.null |]
      with
      | Error failure ->
          Error (Printf.sprintf "%s failed (%s)" cc (status_name failure.Process.status))
@@ -1571,7 +1595,7 @@ let with_debug_c_inputs ~enabled ~pgo_flags config cc f =
               let* () =
                 run_tool cc
                   (Array.of_list
-                     ([ cc ] @ debug
+                     ([ cc ] @ c_target_flags () @ debug
                      @ [ "-c"; path; "-o"; object_path ]
                      @ host_march config @ c_tuning config @ config.Cli.c_flags
                      @ c_sanitizer_flags config @ pgo_flags))
@@ -1586,8 +1610,8 @@ let executable_command config cc asm_path c_objects link_flags =
   let argv =
     Array.of_list
       (cc :: asm_path
-      :: (c_objects @ host_march config @ config.Cli.c_flags @ c_sanitizer_flags config
-        @ config.Cli.link_inputs @ link_flags @ math_library
+      :: (c_target_flags () @ c_objects @ host_march config @ config.Cli.c_flags
+        @ c_sanitizer_flags config @ config.Cli.link_inputs @ link_flags @ math_library
         @ [ "-o"; config.Cli.output ]))
   in
   if config.Cli.keep then
@@ -1709,7 +1733,9 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
                       in
                       let argv =
                         Array.of_list
-                          ((cc :: "-r" :: fas_object :: c_objects) @ [ "-o"; output ])
+                          ((cc :: c_target_flags ())
+                          @ ("-r" :: fas_object :: c_objects)
+                          @ [ "-o"; output ])
                       in
                       if config.Cli.keep then
                         prerr_endline
@@ -1956,7 +1982,7 @@ let compile_c_units ~pgo config cc units adapters standard_headers declaration_h
             Array.of_list
               ([
                  cc;
-                 "--target=x86_64-unknown-linux-gnu";
+                 "--target=" ^ (Target_layout.current ()).triple;
                  "-fPIC";
                  llc_opt (effective_level config);
                ]

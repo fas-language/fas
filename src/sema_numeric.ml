@@ -3,7 +3,7 @@ let int_bits = function
   | U16 | I16 -> 16
   | U32 | I32 -> 32
   | U64 | I64 -> 64
-  | Usize | Isize -> Target_layout.current.pointer_size * 8
+  | Usize | Isize -> (Target_layout.current ()).pointer_size * 8
 
 let integer_value_bit_width = function
   | Hir.Bool -> Some 1

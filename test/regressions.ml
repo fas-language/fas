@@ -1047,7 +1047,9 @@ let () =
     failwith "usize-identity: usize collapsed into u64";
   if Hir.ty_equal (Hir.Int Hir.Isize) (Hir.Int Hir.I64) then
     failwith "isize-identity: isize collapsed into i64";
-  let target32 = { Target_layout.current with pointer_size = 4; pointer_align = 4 } in
+  let target32 =
+    { (Target_layout.current ()) with pointer_size = 4; pointer_align = 4 }
+  in
   (match Hir.layout ~target:target32 [] (Hir.Int Hir.Usize) with
   | Ok (4, 4) -> ()
   | Ok (size, align) ->

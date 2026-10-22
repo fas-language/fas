@@ -19,6 +19,7 @@ type t = {
   tune_cpu : string option;
   target : target;
   target_explicit : bool;
+  os : Target_layout.os;
   target_features : string option;
   profile : string option;
   all_errors : bool;
@@ -42,7 +43,11 @@ type perf_options = {
   check_with : string list option;
 }
 
-type lsp_options = { lsp_c_flags : string list; lsp_target : target }
+type lsp_options = {
+  lsp_c_flags : string list;
+  lsp_target : target;
+  lsp_os : Target_layout.os;
+}
 
 type command =
   | Run of t
@@ -89,8 +94,10 @@ let usage =
   \  --target=portable  baseline x86-64, runs on any x86-64 CPU (default)\n\
   \  --target=force-native  use this CPU's instructions everywhere, without prediction \
    (normal compile time; can be slower than portable in places)\n\
+  \  --os linux|windows  operating system to build for (default: the one fas runs on)\n\
    output:\n\
-  \  -o PATH       output path (default a.out, INPUT.o with -c, INPUT.s with -S)\n\
+  \  -o PATH       output path (default a.out, a.exe for Windows, INPUT.o with -c, \
+   INPUT.s with -S)\n\
   \  --emit-header write an ABI-checked C header (stdout without -o)\n\
   \  --emit-llvm[=optimized]  print LLVM IR before (default) or after opt, verified\n\
   \  --emit-asm, -S emit assembly\n\
@@ -120,11 +127,15 @@ let usage =
    opt, llc, clang, llvm-profdata when they report LLVM 22)\n\
   \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)"
 
-let default_output emit input =
+let default_output os emit input =
   let source_output extension =
     Filename.remove_extension (Filename.basename input) ^ extension
   in
-  match emit with Asm -> source_output ".s" | Obj -> source_output ".o" | _ -> "a.out"
+  match (emit, os) with
+  | Asm, _ -> source_output ".s"
+  | Obj, _ -> source_output ".o"
+  | _, Target_layout.Linux -> "a.out"
+  | _, Target_layout.Windows -> "a.exe"
 
 let target_of_value value =
   match value with
@@ -135,6 +146,24 @@ let target_of_value value =
         ("unknown --target value `" ^ value
        ^ "`; accepted values are `portable` and `force-native`")
 
+let os_of_value value =
+  match value with
+  | "linux" -> Ok Target_layout.Linux
+  | "windows" -> Ok Target_layout.Windows
+  | _ ->
+      Error
+        ("unknown --os value `" ^ value ^ "`; accepted values are `linux` and `windows`")
+
+let os_argument argv i =
+  let flag = argv.(i) in
+  if flag = "--os" then
+    if i + 1 >= Array.length argv then Error "--os requires an argument"
+    else Result.map (fun os -> (os, i + 2)) (os_of_value argv.(i + 1))
+  else
+    Result.map
+      (fun os -> (os, i + 1))
+      (os_of_value (String.sub flag 5 (String.length flag - 5)))
+
 let parse_invocation ~subcommand argv =
   let n = Array.length argv in
   let header_selected = ref false and other_output = ref false in
@@ -144,6 +173,7 @@ let parse_invocation ~subcommand argv =
   let diagnostics = ref Text in
   let target = ref Portable in
   let target_explicit = ref false in
+  let os = ref Target_layout.host_os in
   let profile = ref None in
   let all_errors = ref false in
   let profile_conflict emit =
@@ -190,7 +220,9 @@ let parse_invocation ~subcommand argv =
             let input = Option.get input in
             let output_explicit = Option.is_some output in
             let output =
-              match output with Some path -> path | None -> default_output emit input
+              match output with
+              | Some path -> path
+              | None -> default_output !os emit input
             in
             let config =
               {
@@ -210,6 +242,7 @@ let parse_invocation ~subcommand argv =
                 tune_cpu = None;
                 target = !target;
                 target_explicit = !target_explicit;
+                os = !os;
                 target_features = None;
                 profile = !profile;
                 all_errors = !all_errors;
@@ -296,6 +329,13 @@ let parse_invocation ~subcommand argv =
           in
           match target_of_value value with
           | Ok selected -> select selected
+          | Error message -> Error message)
+      | flag when flag = "--os" || String.starts_with ~prefix:"--os=" flag -> (
+          match os_argument argv i with
+          | Ok (selected, next) ->
+              os := selected;
+              loop next input output emit keep optimization optimization_explicit debug
+                no_inline_function
           | Error message -> Error message)
       | "--keep" ->
           loop (i + 1) input output emit true optimization optimization_explicit debug
@@ -525,10 +565,13 @@ let perf_command config options args =
 
 let parse_lsp argv =
   let n = Array.length argv in
-  let c_flags_rev = ref [] and target = ref Portable in
+  let c_flags_rev = ref []
+  and target = ref Portable
+  and os = ref Target_layout.host_os in
   let rec loop i =
     if i >= n then
-      Ok (Lsp { lsp_c_flags = List.rev !c_flags_rev; lsp_target = !target })
+      Ok
+        (Lsp { lsp_c_flags = List.rev !c_flags_rev; lsp_target = !target; lsp_os = !os })
     else
       match argv.(i) with
       | "--help" | "-h" -> Ok Help
@@ -552,6 +595,12 @@ let parse_lsp argv =
           | Ok selected ->
               target := selected;
               loop (i + 1)
+          | Error message -> Error message)
+      | flag when flag = "--os" || String.starts_with ~prefix:"--os=" flag -> (
+          match os_argument argv i with
+          | Ok (selected, next) ->
+              os := selected;
+              loop next
           | Error message -> Error message)
       | flag when String.length flag > 0 && flag.[0] = '-' ->
           Error ("unknown option: " ^ flag)
