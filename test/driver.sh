@@ -156,7 +156,7 @@ fi
 "$OCAML_FAS" --version >"$WORK/version" 2>"$WORK/stderr" || fail "--version failed"
 [ ! -s "$WORK/stderr" ] || fail "--version wrote stderr"
 [ "$(wc -l <"$WORK/version")" -eq 9 ] || fail "--version line count changed"
-head -n 1 "$WORK/version" | grep -E '^fas 0\.6\.1 \(([0-9a-f]+|unknown)\)$' >/dev/null \
+head -n 1 "$WORK/version" | grep -E '^fas 0\.6\.2 \(([0-9a-f]+|unknown)\)$' >/dev/null \
   || fail "--version first line changed"
 grep -F -- "opt: $WORK/opt-wrap (" "$WORK/version" >/dev/null || fail "--version omitted the opt in use"
 grep -F -- "llc: $WORK/llc-wrap (" "$WORK/version" >/dev/null || fail "--version omitted the llc in use"

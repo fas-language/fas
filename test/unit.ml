@@ -1053,7 +1053,7 @@ b0:
 attributes #0 = { "no-builtin-helper" }
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!3, !4}
-!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: "fas 0.6.1", isOptimized: false, runtimeVersion: 0, emissionKind: LineTablesOnly)
+!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: "fas 0.6.2", isOptimized: false, runtimeVersion: 0, emissionKind: LineTablesOnly)
 !1 = !DIFile(filename: "main.fas", directory: "/work/app")
 !2 = !DIFile(filename: "util.fas", directory: "/work/lib")
 !3 = !{i32 7, !"Dwarf Version", i32 5}
