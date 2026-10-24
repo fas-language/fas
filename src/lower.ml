@@ -545,12 +545,18 @@ let normalize_index_type s index_ty span value =
   in
   let t = match index_ty with Hir.Vec (_, element) -> element | _ -> index_ty in
   let* source_bits = bits t in
-  if source_bits = 64 then Ok value
+  let target_bits = (Target_layout.current ()).pointer_size * 8 in
+  if source_bits = target_bits then Ok value
   else
     let id = fresh s in
-    let kind = if unsigned t then "zext" else "sext" in
-    emit s (Ir.Cast (id, kind, value_ty value, value, Ir.I64));
-    Ok (Ir.Local (id, Ir.I64))
+    let kind =
+      if source_bits > target_bits then "trunc"
+      else if unsigned t then "zext"
+      else "sext"
+    in
+    let pointer_int = ty (Hir.Int Hir.Usize) in
+    emit s (Ir.Cast (id, kind, value_ty value, value, pointer_int));
+    Ok (Ir.Local (id, pointer_int))
 
 let normalize_index s expression value =
   normalize_index_type s (Hir.expr_ty expression) (Hir.expr_span expression) value
@@ -677,10 +683,11 @@ let rec expr s = function
       | Ast.Add -> address_step s Ir.Add x y
       | Ast.Sub -> address_step s Ir.Sub x y
       | Ast.Eq | Ast.Ne | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge ->
+          let pointer_int = ty (Hir.Int Hir.Usize) in
           let x_id = fresh s in
-          emit s (Ir.Cast (x_id, "ptrtoint", Ir.Pointer Ir.I8, x, Ir.I64));
+          emit s (Ir.Cast (x_id, "ptrtoint", Ir.Pointer Ir.I8, x, pointer_int));
           let y_id = fresh s in
-          emit s (Ir.Cast (y_id, "ptrtoint", Ir.Pointer Ir.I8, y, Ir.I64));
+          emit s (Ir.Cast (y_id, "ptrtoint", Ir.Pointer Ir.I8, y, pointer_int));
           let comparison =
             match op with
             | Ast.Eq -> Ir.Eq
@@ -693,7 +700,11 @@ let rec expr s = function
           let id = fresh s in
           emit s
             (Ir.Cmp
-               (id, comparison, Ir.I64, Ir.Local (x_id, Ir.I64), Ir.Local (y_id, Ir.I64)));
+               ( id,
+                 comparison,
+                 pointer_int,
+                 Ir.Local (x_id, pointer_int),
+                 Ir.Local (y_id, pointer_int) ));
           Ok (Ir.Local (id, Ir.I1))
       | _ -> error span "internal error: invalid address binary operation")
   | Hir.Binary (op, a, b, t, span) ->
@@ -830,15 +841,25 @@ let rec expr s = function
       load_value s t (Ir.Local (ptr_id, Ir.Pointer (ty t))) alignment
 
 and address_step s operation pointer offset =
+  let pointer_int = ty (Hir.Int Hir.Usize) in
   let pointer_bits = fresh s in
-  emit s (Ir.Cast (pointer_bits, "ptrtoint", Ir.Pointer Ir.I8, pointer, Ir.I64));
+  emit s (Ir.Cast (pointer_bits, "ptrtoint", Ir.Pointer Ir.I8, pointer, pointer_int));
   let result_bits = fresh s in
   emit s
-    (Ir.Bin (result_bits, operation, Ir.I64, Ir.Local (pointer_bits, Ir.I64), offset));
+    (Ir.Bin
+       ( result_bits,
+         operation,
+         pointer_int,
+         Ir.Local (pointer_bits, pointer_int),
+         offset ));
   let result = fresh s in
   emit s
     (Ir.Cast
-       (result, "inttoptr", Ir.I64, Ir.Local (result_bits, Ir.I64), Ir.Pointer Ir.I8));
+       ( result,
+         "inttoptr",
+         pointer_int,
+         Ir.Local (result_bits, pointer_int),
+         Ir.Pointer Ir.I8 ));
   Ok (Ir.Local (result, Ir.Pointer Ir.I8))
 
 and exprs s xs = Result_list.map (expr s) xs
@@ -1182,6 +1203,45 @@ and lower_builtin s b args t span =
               chain (i + 1) (Some next)
       in
       chain 0 None
+  | Compress, [ v; mk ]
+    when (Target_layout.current ()).os = Target_layout.Wasi
+         && match rt with Ir.Vector (n, _) -> n > 1 | _ -> false ->
+      let bits_ty =
+        match rt with
+        | Ir.Vector (n, Ir.F32) -> Ir.Vector (n, Ir.I32)
+        | Ir.Vector (n, Ir.F64) -> Ir.Vector (n, Ir.I64)
+        | Ir.Vector (n, Ir.I1) -> Ir.Vector (n, Ir.I8)
+        | t -> t
+      in
+      let convert kind value from target =
+        if from = target then value
+        else
+          let id = fresh s in
+          emit s (Ir.Cast (id, kind, from, value, target));
+          Ir.Local (id, target)
+      in
+      let into, back =
+        match rt with
+        | Ir.Vector (_, Ir.I1) -> ("zext", "trunc")
+        | _ -> ("bitcast", "bitcast")
+      in
+      let bitcast value from target =
+        convert (if from = rt then into else back) value from target
+      in
+      let* name = intrinsic_suffix span bits_ty in
+      let id = fresh s in
+      emit s
+        (Ir.Call
+           ( Some id,
+             Ir.No_extension,
+             bits_ty,
+             "llvm.experimental.vector.compress." ^ name,
+             [
+               (bits_ty, Ir.No_extension, bitcast v rt bits_ty);
+               (value_ty mk, Ir.No_extension, mk);
+               (bits_ty, Ir.No_extension, Ir.Zero bits_ty);
+             ] ));
+      Ok (bitcast (Ir.Local (id, bits_ty)) bits_ty rt)
   | Compress, [ v; mk ] ->
       let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
       let elem_ty = match rt with Ir.Vector (_, e) -> e | _ -> Ir.I1 in
@@ -1551,14 +1611,20 @@ and volatile_store s span access_ty value pointer =
 
 and simd_memory_address s span stride base index_ty index_value =
   let* offset = normalize_index_type s index_ty span index_value in
+  let pointer_int = ty (Hir.Int Hir.Usize) in
   let offset =
     match stride with
     | None | Some 1 -> offset
     | Some bytes ->
         let id = fresh s in
         emit s
-          (Ir.Bin (id, Ir.Mul, Ir.I64, offset, Ir.Const (Ir.I64, Int64.of_int bytes)));
-        Ir.Local (id, Ir.I64)
+          (Ir.Bin
+             ( id,
+               Ir.Mul,
+               pointer_int,
+               offset,
+               Ir.Const (pointer_int, Int64.of_int bytes) ));
+        Ir.Local (id, pointer_int)
   in
   match stride with
   | Some _ ->
@@ -1567,12 +1633,17 @@ and simd_memory_address s span stride base index_ty index_value =
       Ok (Ir.Local (id, Ir.Pointer Ir.I8))
   | None ->
       let bits = fresh s in
-      emit s (Ir.Cast (bits, "ptrtoint", Ir.Pointer Ir.I8, base, Ir.I64));
+      emit s (Ir.Cast (bits, "ptrtoint", Ir.Pointer Ir.I8, base, pointer_int));
       let sum = fresh s in
-      emit s (Ir.Bin (sum, Ir.Add, Ir.I64, Ir.Local (bits, Ir.I64), offset));
+      emit s (Ir.Bin (sum, Ir.Add, pointer_int, Ir.Local (bits, pointer_int), offset));
       let pointer = fresh s in
       emit s
-        (Ir.Cast (pointer, "inttoptr", Ir.I64, Ir.Local (sum, Ir.I64), Ir.Pointer Ir.I8));
+        (Ir.Cast
+           ( pointer,
+             "inttoptr",
+             pointer_int,
+             Ir.Local (sum, pointer_int),
+             Ir.Pointer Ir.I8 ));
       Ok (Ir.Local (pointer, Ir.Pointer Ir.I8))
 
 and simd_memory_load_lane s span access_ty pointer =
@@ -1726,7 +1797,7 @@ and simd_lane_load s span access_ty indices index_ty base mask fallback stride =
       enter s active;
       let index_value =
         match indices with
-        | None -> Ir.Const (Ir.I64, Int64.of_int lane)
+        | None -> Ir.Const (ty (Hir.Int Hir.Usize), Int64.of_int lane)
         | Some vector ->
             let index_id = fresh s in
             emit s (Ir.Extract (index_id, value_ty vector, vector, lane_index));

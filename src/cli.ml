@@ -94,10 +94,11 @@ let usage =
   \  --target=portable  baseline x86-64, runs on any x86-64 CPU (default)\n\
   \  --target=force-native  use this CPU's instructions everywhere, without prediction \
    (normal compile time; can be slower than portable in places)\n\
-  \  --os linux|windows  operating system to build for (default: the one fas runs on)\n\
+  \  --os linux|windows|wasi  operating system to build for (default: the one fas runs \
+   on; wasi: a wasm32 WASI program)\n\
    output:\n\
-  \  -o PATH       output path (default a.out, a.exe for Windows, INPUT.o with -c, \
-   INPUT.s with -S)\n\
+  \  -o PATH       output path (default a.out, a.exe for Windows, a.wasm for WASI, \
+   INPUT.o with -c, INPUT.s with -S)\n\
   \  --emit-header write an ABI-checked C header (stdout without -o)\n\
   \  --emit-llvm[=optimized]  print LLVM IR before (default) or after opt, verified\n\
   \  --emit-asm, -S emit assembly\n\
@@ -125,7 +126,10 @@ let usage =
   \  FAS_OPT, FAS_LLC, FAS_CC, FAS_PROFDATA select opt, llc, the C compiler and \
    llvm-profdata (defaults: opt-22, llc-22, clang-22, llvm-profdata-22; without those, \
    opt, llc, clang, llvm-profdata when they report LLVM 22)\n\
-  \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)"
+  \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)\n\
+  \  WASI_SDK_PATH  wasi-sdk used as the C compiler for --os wasi (default \
+   /opt/wasi-sdk)\n\
+  \  FAS_WASMTIME  runner for fas run --os wasi (default: wasmtime)"
 
 let default_output os emit input =
   let source_output extension =
@@ -136,6 +140,7 @@ let default_output os emit input =
   | Obj, _ -> source_output ".o"
   | _, Target_layout.Linux -> "a.out"
   | _, Target_layout.Windows -> "a.exe"
+  | _, Target_layout.Wasi -> "a.wasm"
 
 let target_of_value value =
   match value with
@@ -150,9 +155,11 @@ let os_of_value value =
   match value with
   | "linux" -> Ok Target_layout.Linux
   | "windows" -> Ok Target_layout.Windows
+  | "wasi" -> Ok Target_layout.Wasi
   | _ ->
       Error
-        ("unknown --os value `" ^ value ^ "`; accepted values are `linux` and `windows`")
+        ("unknown --os value `" ^ value
+       ^ "`; accepted values are `linux`, `windows` and `wasi`")
 
 let os_argument argv i =
   let flag = argv.(i) in
@@ -216,6 +223,10 @@ let parse_invocation ~subcommand argv =
       else
         match profile_conflict emit with
         | Some message -> Error message
+        | None when !os = Target_layout.Wasi && Option.is_some !sanitizers ->
+            Error "sanitizers are not available for WASI builds (`--os=wasi`)"
+        | None when !os = Target_layout.Wasi && Option.is_some !profile ->
+            Error "`--profile` is not available for WASI builds (`--os=wasi`)"
         | None ->
             let input = Option.get input in
             let output_explicit = Option.is_some output in

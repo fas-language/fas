@@ -1107,7 +1107,7 @@ let validate module_ =
           && List.for_all
                (fun (offset, symbol, _) ->
                  offset >= 0
-                 && offset <= size - 8
+                 && offset <= size - (Target_layout.current ()).pointer_size
                  && (List.exists
                        (fun global -> global_name global = symbol)
                        module_.globals
@@ -1117,7 +1117,8 @@ let validate module_ =
                pointers
           && (let rec ordered = function
                 | (offset, _, _) :: ((next, _, _) :: _ as rest) ->
-                    next >= offset + 8 && ordered rest
+                    next >= offset + (Target_layout.current ()).pointer_size
+                    && ordered rest
                 | _ -> true
               in
               ordered pointers)
@@ -1949,7 +1950,7 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false)
                    (fun (offset, symbol, displacement) ->
                      bytes_until offset;
                      pieces := `Pointer (symbol, displacement) :: !pieces;
-                     cursor := offset + 8)
+                     cursor := offset + (Target_layout.current ()).pointer_size)
                    pointers;
                  bytes_until size;
                  let pieces = List.rev !pieces in

@@ -1,5 +1,5 @@
 type c_abi_extension = C_no_extension | C_sign_extension | C_zero_extension
-type os = Linux | Windows
+type os = Linux | Windows | Wasi
 
 type t = {
   os : os;
@@ -45,7 +45,23 @@ let x86_64_windows =
     c_long_bits = 32;
   }
 
-let of_os = function Linux -> x86_64_linux | Windows -> x86_64_windows
+let wasm32_wasi =
+  {
+    x86_64_linux with
+    os = Wasi;
+    triple = "wasm32-unknown-wasip1";
+    llvm_data_layout =
+      "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20";
+    pointer_size = 4;
+    pointer_align = 4;
+    c_long_bits = 32;
+  }
+
+let of_os = function
+  | Linux -> x86_64_linux
+  | Windows -> x86_64_windows
+  | Wasi -> wasm32_wasi
+
 let host_os = if Sys.win32 || Sys.cygwin then Windows else Linux
 let selected = ref (of_os host_os)
 let select os = selected := of_os os

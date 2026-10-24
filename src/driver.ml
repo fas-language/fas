@@ -623,6 +623,13 @@ let c_compiler () =
            | None -> true)
          && Option.is_some (find_executable mingw_cc) ->
       mingw_cc
+  | Target_layout.Wasi when Option.is_none (Sys.getenv_opt "FAS_CC") ->
+      let sdk =
+        match Sys.getenv_opt "WASI_SDK_PATH" with
+        | Some path when path <> "" -> path
+        | _ -> "/opt/wasi-sdk"
+      in
+      Filename.concat (Filename.concat sdk "bin") "clang"
   | _ -> tool "FAS_CC" "clang-22"
 
 let tools () = (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", c_compiler ())
@@ -630,8 +637,10 @@ let tools () = (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", c_compiler ())
 let c_target_flags () =
   match (Target_layout.current ()).os with
   | Target_layout.Linux -> []
-  | Target_layout.Windows -> [ "--target=" ^ (Target_layout.current ()).triple ]
+  | Target_layout.Windows | Target_layout.Wasi ->
+      [ "--target=" ^ (Target_layout.current ()).triple ]
 
+let wasm () = (Target_layout.current ()).os = Target_layout.Wasi
 let profdata () = tool "FAS_PROFDATA" "llvm-profdata-22"
 
 let first_non_empty_line text =
@@ -1019,6 +1028,13 @@ let host_cpu =
 let resolve_target config =
   match config.Cli.target with
   | Cli.Portable -> Ok config
+  | Cli.Force_native when wasm () ->
+      Ok
+        {
+          config with
+          Cli.target_cpu = Some "generic";
+          target_features = Some "+simd128";
+        }
   | Cli.Force_native -> (
       match Lazy.force host_cpu with
       | Ok (cpu, features) ->
@@ -1032,6 +1048,8 @@ let resolve_target config =
 
 let target_attributes config =
   match (config.Cli.target, config.Cli.target_cpu, config.Cli.target_features) with
+  | Cli.Portable, None, None when wasm () ->
+      Some { Ir.target_cpu = "generic"; target_tune = None; target_features = None }
   | Cli.Portable, None, None ->
       Some
         {
@@ -1045,6 +1063,7 @@ let target_attributes config =
 
 let host_march config =
   match config.Cli.target with
+  | Cli.Force_native when wasm () -> [ "-msimd128" ]
   | Cli.Force_native -> [ "-march=native" ]
   | Cli.Portable -> []
 
@@ -1612,7 +1631,8 @@ let executable_command config cc asm_path c_objects link_flags =
       (cc :: asm_path
       :: (c_target_flags () @ c_objects @ host_march config @ config.Cli.c_flags
         @ c_sanitizer_flags config @ config.Cli.link_inputs @ link_flags @ math_library
-        @ [ "-o"; config.Cli.output ]))
+         @ (if wasm () then [ "-Wl,-z,stack-size=8388608" ] else [])
+         @ [ "-o"; config.Cli.output ]))
   in
   if config.Cli.keep then
     prerr_endline ("fas: CC command: " ^ String.concat " " (Array.to_list argv));
@@ -1625,6 +1645,7 @@ let remark_option = function
 let target_cpu_option config =
   match (config.Cli.target, config.Cli.target_cpu) with
   | _, Some cpu -> [ "-mcpu=" ^ cpu ]
+  | Cli.Portable, None when wasm () -> [ "-mcpu=generic" ]
   | Cli.Portable, None -> [ "-mcpu=x86-64" ]
   | Cli.Force_native, None -> []
 
@@ -1644,7 +1665,7 @@ let run_llc ?llc_remarks config llc ~filetype ~input ~output =
        ([
           llc;
           llc_opt (effective_level config);
-          "-relocation-model=pic";
+          (if wasm () then "-relocation-model=static" else "-relocation-model=pic");
           "-filetype=" ^ filetype;
         ]
        @ (match config.Cli.align_loops with
@@ -1734,6 +1755,7 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
                       let argv =
                         Array.of_list
                           ((cc :: c_target_flags ())
+                          @ (if wasm () then [ "-nostdlib" ] else [])
                           @ ("-r" :: fas_object :: c_objects)
                           @ [ "-o"; output ])
                       in
@@ -1983,7 +2005,7 @@ let compile_c_units ~pgo config cc units adapters standard_headers declaration_h
               ([
                  cc;
                  "--target=" ^ (Target_layout.current ()).triple;
-                 "-fPIC";
+                 (if wasm () then "-fno-PIC" else "-fPIC");
                  llc_opt (effective_level config);
                ]
               @ host_march config @ c_tuning config @ unit.c_flags
@@ -2083,10 +2105,17 @@ let add_static_adapters units referenced_names ir =
       if adapters <> [] && Option.is_none unit.assembly then
         C_import.append_adapters unit.unit_path adapters)
     units;
+  let entry =
+    match List.find_opt (fun (f : Ir.func) -> f.name = "main") ir.Ir.funcs with
+    | Some f when wasm () ->
+        [ ("main", if f.params = [] then "__main_void" else "__main_argc_argv") ]
+    | _ -> []
+  in
   let redirects =
-    List.map
-      (fun (adapter : C_import.adapter) -> (adapter.c_name, adapter.symbol))
-      adapters
+    entry
+    @ List.map
+        (fun (adapter : C_import.adapter) -> (adapter.c_name, adapter.symbol))
+        adapters
   in
   let redirect name = Option.value ~default:name (List.assoc_opt name redirects) in
   match Ir.validate ir with

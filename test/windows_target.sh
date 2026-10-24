@@ -53,7 +53,7 @@ expect_error() {
   grep -F -- "$expected" "$TMP/error.out" >/dev/null \
     || { cat "$TMP/error.out" >&2; fail "missing error: $expected"; }
 }
-expect_error 'unknown --os value `macos`; accepted values are `linux` and `windows`' \
+expect_error 'unknown --os value `macos`; accepted values are `linux`, `windows` and `wasi`' \
   --os macos "$TMP/plain.fas"
 expect_error '--os requires an argument' "$TMP/plain.fas" --os
 expect_error 'fas perf measures Linux builds only' perf --os windows "$TMP/plain.fas"

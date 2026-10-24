@@ -156,11 +156,14 @@ let compilation_error ?source ?(headers = []) ?(prefix = "C compilation failed")
     | None -> (fallback, [])
   in
   let help =
-    if missing_header && (Target_layout.current ()).os = Target_layout.Windows then
-      Some
-        "building for Windows needs a MinGW C toolchain: put llvm-mingw's bin \
-         directory on PATH or set FAS_CC"
-    else None
+    match (missing_header, (Target_layout.current ()).os) with
+    | true, Target_layout.Windows ->
+        Some
+          "building for Windows needs a MinGW C toolchain: put llvm-mingw's bin \
+           directory on PATH or set FAS_CC"
+    | true, Target_layout.Wasi ->
+        Some "building for WASI needs wasi-sdk: set WASI_SDK_PATH or FAS_CC"
+    | _ -> None
   in
   Diag.error ~notes ?help span
     (if missing_header then message

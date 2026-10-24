@@ -30,7 +30,12 @@ let report (config : Cli.t) diagnostics =
   | Cli.Json -> prerr_endline (Diag.render_json diagnostics)
 
 let run_program (config : Cli.t) args =
-  let suffix = if config.Cli.os = Target_layout.Windows then ".exe" else "" in
+  let suffix =
+    match config.Cli.os with
+    | Target_layout.Windows -> ".exe"
+    | Target_layout.Wasi -> ".wasm"
+    | Target_layout.Linux -> ""
+  in
   match Filename.temp_file "fas-run-" suffix with
   | exception Sys_error message ->
       prerr_endline ("fas: " ^ message);
@@ -50,7 +55,20 @@ let run_program (config : Cli.t) args =
                 Option.value ~default:config.input
                   (Filename.chop_suffix_opt ~suffix:".fas" config.input)
               in
-              match Process.run_program path (Array.of_list (name :: args)) with
+              let program, argv =
+                match config.Cli.os with
+                | Target_layout.Wasi ->
+                    let runner =
+                      match Sys.getenv_opt "FAS_WASMTIME" with
+                      | Some runner when runner <> "" -> runner
+                      | _ -> "wasmtime"
+                    in
+                    ( Driver.executable_path runner,
+                      runner :: "run" :: "--dir=." :: "--argv0" :: name :: path :: args
+                    )
+                | Target_layout.Linux | Target_layout.Windows -> (path, name :: args)
+              in
+              match Process.run_program program (Array.of_list argv) with
               | Ok status -> status
               | Error message ->
                   prerr_endline ("fas: cannot run " ^ path ^ ": " ^ message);
@@ -221,10 +239,14 @@ let () =
           exit 1)
   | Ok (Cli.Lsp options) -> exit (Lsp.run options)
   | Ok (Cli.Run_program (config, args)) -> exit (run_program config args)
-  | Ok (Cli.Perf (config, _, _)) when config.Cli.os = Target_layout.Windows ->
+  | Ok (Cli.Perf (config, _, _)) when config.Cli.os <> Target_layout.Linux ->
       prerr_endline
-        "fas perf measures Linux builds only; this build is for Windows \
-         (`--os=windows`)";
+        (match config.Cli.os with
+        | Target_layout.Wasi ->
+            "fas perf measures Linux builds only; this build is for WASI (`--os=wasi`)"
+        | _ ->
+            "fas perf measures Linux builds only; this build is for Windows \
+             (`--os=windows`)");
       exit 2
   | Ok (Cli.Perf (config, options, args)) -> (
       match options.mode with
