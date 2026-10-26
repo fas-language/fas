@@ -555,7 +555,7 @@ let emit_text config text =
             ])
   else Ok text
 
-let version = "0.6.2"
+let version = "0.6.3"
 
 let find_executable name =
   let is_executable path =
