@@ -33,16 +33,30 @@ type adapter = {
   signature : string;
 }
 
+let quoted_include path =
+  if Sys.win32 then "#include \"" ^ path ^ "\"\n"
+  else Printf.sprintf "#include %S\n" path
+
+let quoted_include_path line =
+  if Sys.win32 then
+    let prefix = "#include \"" in
+    if not (String.starts_with ~prefix line) then raise (Scanf.Scan_failure line)
+    else
+      let start = String.length prefix in
+      match String.index_from_opt line start '"' with
+      | Some stop -> String.sub line start (stop - start)
+      | None -> raise (Scanf.Scan_failure line)
+  else Scanf.sscanf line "#include %S" Fun.id
+
 let include_line source fragment_path = function
   | { spelling = Ast.C_quoted path; _ } ->
       let path =
         if Filename.is_relative path then Filename.concat (Filename.dirname source) path
         else path
       in
-      Printf.sprintf "#include %S\n" path
+      quoted_include path
   | { spelling = Ast.C_system path; _ } -> "#include <" ^ path ^ ">\n"
-  | { spelling = Ast.C_fragment _; _ } ->
-      Printf.sprintf "#include %S\n" (Option.get fragment_path)
+  | { spelling = Ast.C_fragment _; _ } -> quoted_include (Option.get fragment_path)
 
 let find_text text needle start =
   let limit = String.length text - String.length needle in
@@ -415,7 +429,7 @@ let imported_macro_expansions ~cc ~c_flags ~source ~unit_path ~paths candidates 
     let digest = Digest.to_hex (Digest.string unit_path) in
     let marker index side = Printf.sprintf "__fas_macro_%s_%s_%d" digest side index in
     let output = open_out_bin probe in
-    Printf.fprintf output "#include %S\n" unit_path;
+    output_string output (quoted_include unit_path);
     List.iteri
       (fun index (name, _, _, _) ->
         Printf.fprintf output "%s %s %s\n" (marker index "b") name (marker index "e"))
@@ -527,6 +541,9 @@ let builtin_info_of_name = function
       Some (Floating 0)
   | _ -> None
 
+let unnamed_file file =
+  if Sys.win32 then String.map (function '\\' -> '/' | c -> c) file else file
+
 let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     ?referenced_names ~probe_all_declarations ~macro_candidates declarations =
   let field key node = C_import_json.field key node in
@@ -617,7 +634,7 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
             in
             Option.bind (number "line") (fun line ->
                 Option.map
-                  (Printf.sprintf "enum (unnamed at %s:%d:%d)" file line)
+                  (Printf.sprintf "enum (unnamed at %s:%d:%d)" (unnamed_file file) line)
                   (number "col"))))
   in
   List.iter
@@ -828,7 +845,7 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     Fun.protect
       ~finally:(fun () -> close_out_noerr out)
       (fun () ->
-        Printf.fprintf out "#include %S\n" unit_path;
+        output_string out (quoted_include unit_path);
         List.iter
           (fun (index, _, (expression, names)) ->
             List.iter
@@ -1218,7 +1235,7 @@ let imported_probe_nodes ~cc ~c_flags ~source ~unit_path ~paths ~definitions
       Fun.protect
         ~finally:(fun () -> close_out_noerr output)
         (fun () ->
-          Printf.fprintf output "#include %S\n" unit_path;
+          output_string output (quoted_include unit_path);
           List.iteri
             (fun index (_, c_type) ->
               Printf.fprintf output
@@ -1432,6 +1449,11 @@ let feature_test_macros =
 let trace_entries trace =
   String.split_on_char '\n' trace
   |> List.filter_map (fun line ->
+      let line =
+        if Sys.win32 && String.ends_with ~suffix:"\r" line then
+          String.sub line 0 (String.length line - 1)
+        else line
+      in
       let depth = ref 0 in
       while !depth < String.length line && line.[!depth] = '.' do
         incr depth
@@ -3653,6 +3675,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
         and col = Option.bind (get "col" loc) number in
         match (file, line, col) with
         | Some file, Some line, Some col ->
+            let file = unnamed_file file in
             let tag = Option.value ~default:"struct" (string "tagUsed" node) in
             let name = Printf.sprintf "%s (unnamed at %s:%d:%d)" tag file line col in
             let suffix = Printf.sprintf "::(unnamed at %s:%d:%d)" file line col in
@@ -3694,6 +3717,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                   let col = Option.bind (get "col" loc) number in
                   match (file, line, col) with
                   | Some file, Some line, Some col ->
+                      let file = unnamed_file file in
                       let spellings =
                         [
                           Printf.sprintf "%s %s::(unnamed at %s:%d:%d)" tag name file

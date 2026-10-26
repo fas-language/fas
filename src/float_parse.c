@@ -8,6 +8,119 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+typedef int locale_t;
+#define LC_NUMERIC_MASK 0
+#define newlocale(mask, name, base) 1
+#define strtof_l(text, end, locale) __mingw_strtof(text, end)
+#define strtod_l(text, end, locale) __mingw_strtod(text, end)
+#define roundevenf nearbyintf
+#define roundeven nearbyint
+
+typedef unsigned __int128 fas_u128;
+
+static void fas_split(double x, fas_u128 *mantissa, int *exponent) {
+  uint64_t bits;
+  memcpy(&bits, &x, sizeof(bits));
+  int biased = (int)((bits >> 52) & 0x7ff);
+  uint64_t fraction = bits & ((1ULL << 52) - 1);
+  *mantissa = biased == 0 ? fraction : (fraction | (1ULL << 52));
+  *exponent = biased == 0 ? -1074 : biased - 1075;
+}
+
+static int fas_top_bit(fas_u128 value) {
+  uint64_t high = (uint64_t)(value >> 64);
+  return high ? 127 - __builtin_clzll(high) : 63 - __builtin_clzll((uint64_t)value);
+}
+
+static void fas_normalize(fas_u128 *mantissa, int *exponent) {
+  int move = 125 - fas_top_bit(*mantissa);
+  *mantissa <<= move;
+  *exponent -= move;
+}
+
+static uint64_t fas_exact_fma(double x, double y, double z, int precision, int min_exp,
+                              int max_biased) {
+  fas_u128 product, addend;
+  int product_exp, addend_exp, y_exp;
+  fas_u128 y_mantissa;
+  fas_split(x, &product, &product_exp);
+  fas_split(y, &y_mantissa, &y_exp);
+  product *= y_mantissa;
+  product_exp += y_exp;
+  fas_split(z, &addend, &addend_exp);
+  int product_sign = !signbit(x) != !signbit(y);
+  int addend_sign = signbit(z) != 0;
+  fas_normalize(&product, &product_exp);
+  fas_normalize(&addend, &addend_exp);
+  fas_u128 big = product, small = addend;
+  int big_exp = product_exp, small_exp = addend_exp, sign = product_sign;
+  if (addend_exp > product_exp || (addend_exp == product_exp && addend > product)) {
+    big = addend;
+    small = product;
+    big_exp = addend_exp;
+    small_exp = product_exp;
+    sign = addend_sign;
+  }
+  int distance = big_exp - small_exp;
+  if (distance >= 128)
+    small = 1;
+  else if (distance > 0) {
+    fas_u128 lost = small & ((((fas_u128)1) << distance) - 1);
+    small = (small >> distance) | (lost != 0);
+  }
+  fas_u128 sum = product_sign == addend_sign ? big + small : big - small;
+  if (sum == 0) return 0;
+  int top = fas_top_bit(sum);
+  int shift = top + big_exp >= min_exp ? top - (precision - 1)
+                                       : (min_exp - (precision - 1)) - big_exp;
+  uint64_t sign_bit = (uint64_t)sign << (precision == 53 ? 63 : 31);
+  if (shift > top + 1) return sign_bit;
+  fas_u128 kept = shift <= 0 ? sum << -shift : sum >> shift;
+  if (shift > 0) {
+    fas_u128 rest = sum & ((((fas_u128)1) << shift) - 1);
+    fas_u128 half = ((fas_u128)1) << (shift - 1);
+    if (rest > half || (rest == half && (kept & 1))) kept += 1;
+  }
+  int low_exp = shift + big_exp;
+  uint64_t significand = (uint64_t)kept;
+  uint64_t hidden = 1ULL << (precision - 1);
+  if (significand == hidden << 1) {
+    significand = hidden;
+    low_exp += 1;
+  }
+  if (significand < hidden) return sign_bit | significand;
+  int biased = low_exp + (precision - 1) - (min_exp - 1);
+  if (biased >= max_biased) return sign_bit | ((uint64_t)max_biased << (precision - 1));
+  return sign_bit | ((uint64_t)biased << (precision - 1)) | (significand - hidden);
+}
+
+static double fas_fma(double x, double y, double z) {
+  if (!isfinite(x) || !isfinite(y)) return x * y + z;
+  if (!isfinite(z)) return z;
+  if (x == 0 || y == 0) return x * y + z;
+  if (z == 0) return x * y;
+  uint64_t bits = fas_exact_fma(x, y, z, 53, -1022, 2047);
+  double result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
+}
+
+static float fas_fmaf(float x, float y, float z) {
+  if (!isfinite(x) || !isfinite(y)) return x * y + z;
+  if (!isfinite(z)) return z;
+  if (x == 0 || y == 0) return x * y + z;
+  if (z == 0) return x * y;
+  uint32_t bits = (uint32_t)fas_exact_fma(x, y, z, 24, -126, 255);
+  float result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
+}
+
+#define fma fas_fma
+#define fmaf fas_fmaf
+#endif
+
 static locale_t fas_c_locale;
 
 static locale_t get_c_locale(void) {

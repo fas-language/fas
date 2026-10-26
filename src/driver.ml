@@ -28,6 +28,15 @@ let path_error_detail path message =
   | None -> message
 
 let normalize_absolute path =
+  let root, separator, path =
+    if Sys.win32 && String.length path >= 2 && path.[1] = ':' then
+      ( String.sub path 0 2 ^ "\\",
+        "\\",
+        String.map
+          (function '\\' -> '/' | c -> c)
+          (String.sub path 2 (String.length path - 2)) )
+    else ("/", "/", path)
+  in
   let parts = String.split_on_char '/' path in
   let parts =
     List.fold_left
@@ -39,7 +48,7 @@ let normalize_absolute path =
       [] parts
     |> List.rev
   in
-  "/" ^ String.concat "/" parts
+  root ^ String.concat separator parts
 
 let rec canonical_path path =
   try Unix.realpath path
@@ -66,7 +75,9 @@ let use_path_error path =
 
 let display_dependency_path importer dependency =
   let directory = Filename.dirname importer in
-  if directory = "." then dependency else Filename.concat directory dependency
+  if directory = "." then dependency
+  else if Sys.win32 then directory ^ "/" ^ dependency
+  else Filename.concat directory dependency
 
 let use_target importer_display importer_canonical dependency =
   let target = Filename.concat (Filename.dirname importer_canonical) dependency in
@@ -1943,7 +1954,7 @@ let compile_c_units ~pgo config cc units adapters standard_headers declaration_h
              let include_path line =
                if not (String.starts_with ~prefix:"#include " line) then None
                else
-                 try Some (Scanf.sscanf line "#include %S" Fun.id)
+                 try Some (C_import.quoted_include_path line)
                  with Scanf.Scan_failure _ -> None
              in
              let is_fragment_path path =
@@ -2404,7 +2415,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                                     else path
                                   in
                                   if origin = Some path then
-                                    Some (Printf.sprintf "#include %S\n" path)
+                                    Some (C_import.quoted_include path)
                                   else None
                               | Ast.C_system path ->
                                   if
@@ -2439,7 +2450,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                                   Filename.concat (Filename.dirname source) path
                                 else path
                               in
-                              Some (Printf.sprintf "#include %S\n" path)
+                              Some (C_import.quoted_include path)
                           | Ast.C_system path -> Some ("#include <" ^ path ^ ">\n")
                           | Ast.C_fragment _ -> None)
                         headers)
@@ -2702,8 +2713,8 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 List.map
                   (fun line ->
                     if String.starts_with ~prefix:"#include \"" line then
-                      let path = Scanf.sscanf line "#include %S" Fun.id in
-                      Printf.sprintf "#include %S\n"
+                      let path = C_import.quoted_include_path line in
+                      C_import.quoted_include
                         (C_exports.relative_path
                            (if config.Cli.output_explicit then Filename.dirname output
                             else Sys.getcwd ())
