@@ -5,7 +5,7 @@
 #include <string.h>
 #include <x86intrin.h>
 
-#include "../crypto/mc_chacha20.h"
+#include "chacha20/mc_chacha20.h"
 
 int c_mc_chacha20_block(uint8_t out[64], const uint8_t key[32], const uint8_t nonce[12], uint32_t counter);
 int c_mc_chacha20_init(mc_chacha20_ctx *ctx, const uint8_t key[32], const uint8_t nonce[12], uint32_t counter);

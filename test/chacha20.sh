@@ -8,7 +8,7 @@ OCAML_FAS=${OCAML_FAS:-$ROOT/_build/default/bin/main.exe}
 CHACHA_TMP=$(mktemp -d)
 trap 'rm -rf "$CHACHA_TMP"' EXIT HUP INT TERM
 
-"$OCAML_FAS" --emit-llvm "$ROOT/crypto/mc_chacha20.fas" >"$CHACHA_TMP/chacha20.ll"
+"$OCAML_FAS" --emit-llvm "$ROOT/test/chacha20/mc_chacha20.fas" >"$CHACHA_TMP/chacha20.ll"
 "$LLVM_OPT" -passes=verify "$CHACHA_TMP/chacha20.ll" -disable-output
 
 ulimit -c 0 || true
@@ -29,7 +29,7 @@ for level in 0 2; do
     -Dmc_chacha20_xor=c_mc_chacha20_xor \
     -Dmc_chacha20_keystream=c_mc_chacha20_keystream \
     -Dmc_chacha20_wipe=c_mc_chacha20_wipe \
-    -c "$ROOT/crypto/mc_chacha20.c" -o "$CHACHA_TMP/ref-$level.o"
+    -c "$ROOT/test/chacha20/mc_chacha20.c" -o "$CHACHA_TMP/ref-$level.o"
   "$CC" -Werror "$CHACHA_TMP/fas-$level.o" \
     "$CHACHA_TMP/harness-$level.o" "$CHACHA_TMP/ref-$level.o" \
     -o "$CHACHA_TMP/chacha20-$level"

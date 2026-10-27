@@ -329,7 +329,7 @@ best_ms() {
   done
   printf '%s\n' "$best"
 }
-CHACHA="$ROOT/crypto/mc_chacha20.fas"
+CHACHA="$ROOT/test/chacha20/mc_chacha20.fas"
 check_ms=$(best_ms "$OCAML_FAS" check "$CHACHA")
 build_ms=$(best_ms "$OCAML_FAS" -O0 -c "$CHACHA" -o "$WORK/chacha.o")
 echo "check_command: check $check_ms ms, -O0 -c $build_ms ms (best of 3, mc_chacha20.fas)"
