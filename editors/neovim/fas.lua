@@ -19,7 +19,7 @@ vim.api.nvim_create_autocmd("User", {
     end
     parsers.fas = {
       install_info = {
-        url = "https://github.com/Globexix/fas",
+        url = "https://github.com/fas-language/fas",
         location = "editors/tree-sitter-fas",
         files = { "src/parser.c", "src/scanner.c" },
         revision = "b251583a6f12bb14dbe20baed061bfa03223d954",

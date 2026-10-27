@@ -4,14 +4,14 @@ version = "0.1.0"
 schema_version = 1
 authors = ["Globex"]
 description = "Fas language support with tree-sitter highlighting and the fas language server."
-repository = "https://github.com/Globexix/fas"
+repository = "https://github.com/fas-language/fas"
 
 [lib]
 kind = "Rust"
 version = "0.7.0"
 
 [grammars.fas]
-repository = "https://github.com/Globexix/fas"
+repository = "https://github.com/fas-language/fas"
 rev = "b83c24fc2b6e3d383224d41543b72cc5cd0028d2"
 path = "editors/tree-sitter-fas"
 

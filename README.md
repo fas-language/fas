@@ -48,7 +48,7 @@ $ seq 1 1000000 | fas run wcl.fas
 
 ## Install
 
-**Prebuilt.** [Releases](https://github.com/Globexix/fas/releases) has the compiler for Linux and Windows (x86-64). Put `fas` or `fas.exe` on your `PATH`.
+**Prebuilt.** [Releases](https://github.com/fas-language/fas/releases) has the compiler for Linux and Windows (x86-64). Put `fas` or `fas.exe` on your `PATH`.
 
 - **Linux:** `fas-<version>-linux-x86_64.tar.gz`, a static binary for any x86-64 Linux. Fas needs **LLVM 22** to build programs: `clang-22`, `opt-22` and `llc-22` (or the plain names when they are LLVM 22). On Debian and Ubuntu, [apt.llvm.org](https://apt.llvm.org) has them: `wget https://apt.llvm.org/llvm.sh && sudo bash llvm.sh 22`.
 - **Windows:** `fas-<version>-windows-x86_64.zip`. Fas needs `clang` from [llvm-mingw](https://github.com/mingw-w64/llvm-mingw) and `opt` and `llc` from the [LLVM 22 release](https://github.com/llvm/llvm-project/releases), all on `PATH`.
@@ -57,7 +57,7 @@ $ seq 1 1000000 | fas run wcl.fas
 
 ```sh
 opam install dune
-git clone https://github.com/Globexix/fas.git && cd fas
+git clone https://github.com/fas-language/fas.git && cd fas
 dune build --release bin/main.exe
 cp _build/default/bin/main.exe ~/.local/bin/fas
 ```
