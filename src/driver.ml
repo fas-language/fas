@@ -2507,7 +2507,13 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                   ~intrinsic_masked_loads:(config.Cli.target = Cli.Force_native)
                   hir
               in
-              let ir = Ir_fold.module_ ir in
+              (* The IR dumps show lowering's output; everything compiled is
+                 folded first. *)
+              let ir =
+                match config.Cli.emit with
+                | Cli.Ir | Cli.Ir_json -> ir
+                | _ -> Ir_fold.module_ ir
+              in
               let* ir = apply_no_inline config ir in
               let ir = apply_inline program ir in
               let* ir, adapters, redirect =

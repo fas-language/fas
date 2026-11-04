@@ -188,6 +188,8 @@ def ir_tag(line):
         return "fneg"
     if rhs.startswith("alloca "):
         return "alloca"
+    if rhs.startswith('call i64 asm sideeffect "syscall"'):
+        return "syscall"
     if rhs.startswith("call "):
         return "call_indirect" if re.search(r"\s%[A-Za-z0-9_.]+\(", rhs) else "call"
     if rhs.startswith("phi "):
@@ -416,7 +418,7 @@ expected = {
     "value": {"const", "vconst", "null", "undef", "zero", "local", "param", "func"},
     "instr": {"bin", "cmp", "fneg", "alloca", "load", "load_volatile", "store",
               "store_volatile", "gep", "cast", "call", "phi", "select", "extract",
-              "insert", "shuffle_zero", "shufflevector", "string_ptr", "global_ptr", "call_indirect", "trap"},
+              "insert", "shuffle_zero", "shufflevector", "string_ptr", "global_ptr", "call_indirect", "trap", "syscall"},
     "terminator": {"ret", "br", "condbr", "switch", "unreachable"},
     "global": {"string", "array", "storage"},
     "ty": {"i1", "i8", "i16", "i32", "i64", "i128", "float", "double",
@@ -612,6 +614,16 @@ for source_name in ("c_interop", "sdl_headers", "ir_json_static_address"):
 for source_name in ("c_interop", "sdl_headers", "ir_json_static_address"):
     expected = read_json(os.path.join(expected_root, source_name + ".json.gz"))
     actual = read_json(os.path.join(root, "pairs", str(source_indexes[source_name]) + ".json"))
+    # Lowering now places local stack slots at the top of the entry block,
+    # which the snapshot predates; compare entry blocks with allocas first.
+    for module in (expected, actual):
+        for function in module["funcs"]:
+            if function.get("blocks"):
+                entry = function["blocks"][0]["instrs"]
+                function["blocks"][0]["instrs"] = (
+                    sorted((i for i in entry if i[0] == "alloca"), key=lambda i: i[1])
+                    + [i for i in entry if i[0] != "alloca"]
+                )
     functions = {function["name"] for function in actual["funcs"]}
     assert_legacy_values(expected, actual, functions, (source_name,))
 
