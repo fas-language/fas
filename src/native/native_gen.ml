@@ -66,7 +66,13 @@ let field_offset ctx name index =
 
 type anchor = Reg of value | Sym of string | Frame of int  (** alloca id *)
 type form = { anchor : anchor; off : int; idx : (value * int) option }
-type addrs = { forms : (int, form) Hashtbl.t; skip : (int, unit) Hashtbl.t }
+
+type addrs = {
+  forms : (int, form) Hashtbl.t;
+  skip : (int, unit) Hashtbl.t;
+  dead : (int, unit) Hashtbl.t;
+      (** index arithmetic that folding into addresses left unused *)
+}
 
 let plain v = { anchor = Reg v; off = 0; idx = None }
 let is_const_form f = f.idx = None && match f.anchor with Reg _ -> false | _ -> true
@@ -84,11 +90,13 @@ let scalar_access = function
 
 let analyse_addrs ctx (f : func) =
   let defs = Hashtbl.create 64 in
+  let arith = Hashtbl.create 64 in
   List.iter
     (fun (b : block) ->
       List.iter
         (fun ins ->
           match ins with
+          | Bin (id, (Mul | Shl | Add), I64, _, Const _) -> Hashtbl.replace arith id ins
           | Gep (id, _, _, _)
           | Global_ptr (id, _, _)
           | String_ptr (id, _, _)
@@ -140,7 +148,29 @@ let analyse_addrs ctx (f : func) =
       | Index v ->
           if value_ty v <> I64 || (not (List.mem size [ 1; 2; 4; 8 ])) || !f.idx <> None
           then raise No;
-          f := { !f with idx = Some (v, size) }
+          (* (x + c) * k with k * size a valid scale: x scaled, c * size
+             in the displacement *)
+          let rec scaled v size =
+            match v with
+            | Local (id, _) -> (
+                let small n = Int64.compare (Int64.abs n) 0x1000_0000L < 0 in
+                match Hashtbl.find_opt arith id with
+                | Some (Bin (_, Mul, _, x, Const (_, k)))
+                  when small k && List.mem (Int64.to_int k * size) [ 1; 2; 4; 8 ] ->
+                    scaled x (Int64.to_int k * size)
+                | Some (Bin (_, Shl, _, x, Const (_, k)))
+                  when Int64.compare k 0L >= 0
+                       && Int64.compare k 3L <= 0
+                       && List.mem (size lsl Int64.to_int k) [ 1; 2; 4; 8 ] ->
+                    scaled x (size lsl Int64.to_int k)
+                | Some (Bin (_, Add, _, x, Const (_, c))) when small c ->
+                    add (Int64.mul c (Int64.of_int size));
+                    scaled x size
+                | _ -> (v, size))
+            | _ -> (v, size)
+          in
+          let idx = scaled v size in
+          f := { !f with idx = Some idx }
     in
     let rec walk ty = function
       | [] -> ()
@@ -195,7 +225,44 @@ let analyse_addrs ctx (f : func) =
     (fun id f ->
       if is_const_form f || not (Hashtbl.mem escapes id) then Hashtbl.replace skip id ())
     forms;
-  { forms; skip }
+  (* Index arithmetic whose only readers now read through the folded form *)
+  let dead = Hashtbl.create 16 in
+  let addrs0 = { forms; skip; dead } in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    let used = Hashtbl.create 64 in
+    let use = function Local (id, _) -> Hashtbl.replace used id () | _ -> () in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (fun ins ->
+            match instruction_result ins with
+            | Some (id, _) when Hashtbl.mem dead id -> ()
+            | _ -> (
+                match (ins, scalar_access ins) with
+                | Gep (id, _, _, _), _ when Hashtbl.mem forms id ->
+                    if not (Hashtbl.mem skip id) then
+                      List.iter use (form_operands (Hashtbl.find forms id))
+                | _, Some (v, p) -> (
+                    Option.iter use v;
+                    match p with
+                    | Local (id, _) when Hashtbl.mem skip id ->
+                        List.iter use (form_operands (Hashtbl.find forms id))
+                    | p -> use p)
+                | _ -> Regalloc.iter_operands use ins))
+          b.instrs;
+        Regalloc.iter_term_operands use b.terminator)
+      f.blocks;
+    Hashtbl.iter
+      (fun id _ ->
+        if (not (Hashtbl.mem used id)) && not (Hashtbl.mem dead id) then begin
+          Hashtbl.replace dead id ();
+          changed := true
+        end)
+      arith
+  done;
+  addrs0
 
 (* What an instruction reads once folded addresses are expanded *)
 let operands_view addrs ins =
@@ -206,6 +273,7 @@ let operands_view addrs ins =
     | p -> [ p ]
   in
   match (ins, scalar_access ins) with
+  | Bin (id, _, _, _, _), _ when Hashtbl.mem addrs.dead id -> []
   | Gep (id, _, _, _), _ when Hashtbl.mem addrs.forms id ->
       if Hashtbl.mem addrs.skip id then []
       else form_operands (Hashtbl.find addrs.forms id)
@@ -364,8 +432,9 @@ let build_frame ctx (f : func) =
       params = Hashtbl.create 8;
       size = 0;
       homes =
-        Regalloc.allocate ~skip:(Hashtbl.mem addrs.skip) ~operands:(operands_view addrs)
-          f;
+        Regalloc.allocate
+          ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
+          ~operands:(operands_view addrs) f;
       saved = [];
     }
   in
@@ -703,6 +772,7 @@ let gen_instr ctx fr ins =
   let a = ctx.a in
   match ins with
   | Location _ -> ()
+  | Bin (id, _, _, _, _) when Hashtbl.mem fr.addrs.dead id -> ()
   | Bin (id, op, ty, x, y) -> (
       match op with
       | Add | Sub | And | Or | Xor | Mul ->
@@ -1039,6 +1109,52 @@ let gen_function ctx (f : func) =
   let has_phis id =
     List.exists (function Phi _ -> true | _ -> false) (Hashtbl.find blocks id).instrs
   in
+  (* load; op; store back to the same place, with the loaded and computed
+     values used nowhere else, becomes one `op [mem], y`. *)
+  let rmw ins rest =
+    let rec skip = function Location _ :: r -> skip r | r -> r in
+    let once id = Hashtbl.find_opt uses id = Some 1 in
+    match ins with
+    | Load (l, ty, p, _)
+      when once l && match ty with I8 | I16 | I32 | I64 -> true | _ -> false -> (
+        match skip rest with
+        | Bin (r, op, ty', x, y) :: rest
+          when ty' = ty && once r
+               && match op with Add | Sub | And | Or | Xor -> true | _ -> false -> (
+            let operand =
+              match (x, y) with
+              | Local (i, _), y when i = l -> Some y
+              | x, Local (i, _) when i = l && op <> Sub -> Some x
+              | _ -> None
+            in
+            match (operand, skip rest) with
+            | Some y, Store (ty'', Local (s, _), p', _) :: rest
+              when ty'' = ty && s = r && p' = p
+                   && match y with Local (i, _) -> i <> l | _ -> true ->
+                let alu =
+                  match op with
+                  | Add -> A.Add
+                  | Sub -> A.Sub
+                  | And -> A.And
+                  | Or -> A.Or
+                  | _ -> A.Xor
+                in
+                let size = mem_size ctx ty in
+                let imm =
+                  match y with
+                  | Const (t, n) when size < 8 -> Some (Int64.to_int (norm_const t n))
+                  | _ -> imm32 y
+                in
+                (match imm with
+                | Some k -> A.alu_mi a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) k
+                | None ->
+                    let src = in_reg ctx fr y A.Rcx in
+                    A.alu_mr a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src);
+                Some rest
+            | _ -> None)
+        | _ -> None)
+    | _ -> None
+  in
   let position = Hashtbl.create 16 in
   Array.iteri (fun i id -> Hashtbl.replace position id i) order;
   let fusions = Hashtbl.create 16 in
@@ -1050,6 +1166,7 @@ let gen_function ctx (f : func) =
   let silent ins =
     match ins with
     | Phi _ | Location _ -> true
+    | Bin (id, _, _, _, _) -> Hashtbl.mem fr.addrs.dead id
     | Gep (id, _, _, _)
     | Global_ptr (id, _, _)
     | String_ptr (id, _, _)
@@ -1119,12 +1236,18 @@ let gen_function ctx (f : func) =
       next_block := if i + 1 < Array.length order then order.(i + 1) else -1;
       A.place a (block_label b.id);
       let fusion = fused b in
-      List.iter
-        (fun ins ->
-          match fusion with
-          | Some (cmp, _, _, _) when ins == cmp -> ()
-          | _ -> gen_instr ctx fr ins)
-        b.instrs;
+      let rec emit = function
+        | [] -> ()
+        | ins :: rest -> (
+            match rmw ins rest with
+            | Some rest -> emit rest
+            | None ->
+                (match fusion with
+                | Some (cmp, _, _, _) when ins == cmp -> ()
+                | _ -> gen_instr ctx fr ins);
+                emit rest)
+      in
+      emit b.instrs;
       match b.terminator with
       | Ret None -> epilogue ()
       | Ret (Some (_, v)) ->

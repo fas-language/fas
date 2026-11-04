@@ -84,8 +84,39 @@ fn gcd(a u64, b u64) u64 {
   return x
 }
 
+var g8 u8 = 5
+var g16 u16 = 1000
+var g32 u32 = 70000
+var g64 u64 = 5000000000
+var cells arr[64, u8] = {}
+
+// Read-modify-write of globals and of indexed memory at every width, with
+// indices folded into scaled, displaced address operands.
+fn bump(p addr, i usize, k u32) void {
+  g8 |= 0x80
+  g16 ^= 0xfff0
+  g32 &= 0xfffffff0
+  g64 += 0x7fffffff
+  p[u32, i] += k
+  p[u32, i + 1] -= 7
+  p[u8, i] ^= trunc[u8](k)
+  p[u16, i + 5] |= 0x8001
+  p[u64, (i << 1) + 3] &= 0xffffffff0000ffff
+  p[u64, (i << 1) + 3] -= 1
+}
+
+fn memops() void {
+  for i usize = 0; i < 3; i += 1 { bump(&cells, i, trunc[u32](i * 977 + 3)) }
+  line(zext[i64](g8))
+  line(zext[i64](g16))
+  line(zext[i64](g32))
+  line(bitcast[i64](g64))
+  for i usize = 0; i < 8; i += 1 { q addr = &cells; line(bitcast[i64](q[u64, i])) }
+}
+
 fn main() i32 {
   write_str("native backend\n", 15)
+  memops()
   line(bitcast[i64](sum8(1, 2, 3, 4, 5, 6, 7, 8)))
   line(sum7(10, 20, 30, 40, 50, 60, -70))
   line(bitcast[i64](classify(0) + classify(3) + classify(9) + classify(4)))
