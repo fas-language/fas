@@ -6,10 +6,11 @@
    the usual backward fixpoint, and each value gets one conservative interval
    from its first to its last live position (no holes).
 
-   Registers: the callee-saved rbx and r12-r15 are free for any value; r8, r9
-   and r10 only for values whose interval holds no call or syscall (counting a
-   use as an argument), because argument set-up writes them. Code generation
-   keeps rax, rcx, rdx, rsi, rdi and r11 as scratch. When too many values are
+   Registers: the callee-saved rbx and r12-r15 are free for any value; r8-r11,
+   rsi and rdi only for values whose interval holds no call or syscall
+   (counting a use as an argument), because argument set-up writes them, and
+   rsi and rdi not across block copies or intrinsics either, which use them as
+   scratch. Code generation keeps rax, rcx and rdx as scratch. When too many values are
    live, the one whose interval ends last stays in its stack slot.
 
    The caller passes a view of the code: [skip] names values that get no
@@ -26,7 +27,10 @@ open Ir
 type key = V of int | P of string
 
 let callee_saved = [ X64.Rbx; X64.R12; X64.R13; X64.R14; X64.R15 ]
-let caller_saved = [ X64.R8; X64.R9; X64.R10 ]
+let caller_saved = [ X64.R8; X64.R9; X64.R10; X64.R11; X64.Rsi; X64.Rdi ]
+
+(* Registers that block copies and some intrinsics use as scratch *)
+let string_regs = [ X64.Rsi; X64.Rdi ]
 let scalar = function I1 | I8 | I16 | I32 | I64 | Pointer _ -> true | _ -> false
 
 let key_of_skip skip = function
@@ -65,6 +69,15 @@ let clobbers = function
   | Call_indirect _ | Syscall _ -> true
   | _ -> false
 
+let uses_string_regs = function
+  | Call (_, _, _, name, _) -> String.starts_with ~prefix:"llvm." name
+  | Load (_, (Struct _ | Array _), _, _)
+  | Load_volatile (_, (Struct _ | Array _), _, _)
+  | Store ((Struct _ | Array _), _, _, _)
+  | Store_volatile ((Struct _ | Array _), _, _, _) ->
+      true
+  | _ -> false
+
 (* [skip] holds the ids of instructions whose code is folded into their
    block's terminator; they define nothing that needs a home. *)
 let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) =
@@ -73,7 +86,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
   let start_pos = Hashtbl.create 16 and end_pos = Hashtbl.create 16 in
   let block_starts = Hashtbl.create 16 in
   let n = ref 1 in
-  let calls = ref [] in
+  let calls = ref [] and string_ops = ref [] in
   List.iter
     (fun (b : block) ->
       Hashtbl.replace start_pos b.id !n;
@@ -82,12 +95,14 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
       List.iter
         (fun ins ->
           if clobbers ins then calls := !n :: !calls;
+          if uses_string_regs ins then string_ops := !n :: !string_ops;
           incr n)
         b.instrs;
       Hashtbl.replace end_pos b.id !n;
       incr n)
     f.blocks;
   let calls = Array.of_list (List.rev !calls) in
+  let string_ops = Array.of_list (List.rev !string_ops) in
   (* Local uses and defs, and phi uses per edge *)
   let blocks = Hashtbl.create 16 in
   List.iter (fun (b : block) -> Hashtbl.replace blocks b.id b) f.blocks;
@@ -239,10 +254,11 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
       ranges []
     |> List.sort compare
   in
-  let crosses_call rs =
+  let crosses_at points rs =
     (* a call at position c clobbers values live across it or used by it *)
-    List.exists (fun (l, h) -> Array.exists (fun c -> l < c && c <= h) calls) rs
+    List.exists (fun (l, h) -> Array.exists (fun c -> l < c && c <= h) points) rs
   in
+  let crosses_call = crosses_at calls in
   (* Phi webs: a phi and its incoming values like to share a register. *)
   let related = Hashtbl.create 32 in
   let relate a b =
@@ -297,7 +313,11 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                (Hashtbl.find held r)))
         all;
       let crossing = crosses_call rs in
-      let usable r = (not crossing) || List.mem r callee_saved in
+      let string_crossing = crosses_at string_ops rs in
+      let usable r =
+        ((not crossing) || List.mem r callee_saved)
+        && not (string_crossing && List.mem r string_regs)
+      in
       let fits r =
         usable r
         && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Hashtbl.find held r))
