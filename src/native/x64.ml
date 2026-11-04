@@ -400,6 +400,25 @@ let alu_mi a op size mem imm =
   end
   else int32 a v
 
+(* mov [mem], imm on the low [size] bytes; a 64-bit store sign-extends a
+   32-bit immediate. *)
+let mov_mi a size mem imm =
+  let sext v bits = (v lsl (63 - bits)) asr (63 - bits) in
+  let v = if size = 8 then imm else sext imm (size * 8) in
+  if size = 8 && not (fits_i32 v) then invalid_arg "x64.mov_mi: immediate";
+  let tail = match size with 1 -> 1 | 2 -> 2 | _ -> 4 in
+  let mem = match mem with Rip (s, ad) -> Rip (s, ad - tail) | m -> m in
+  if size = 2 then byte a 0x66;
+  rex a ~w:(size = 8) ~r:0 ~x:(mem_x_bits mem) ~b:(mem_b_bits mem) ();
+  byte a (if size = 1 then 0xc6 else 0xc7);
+  mem_operand a 0 mem;
+  match size with
+  | 1 -> byte a v
+  | 2 ->
+      byte a v;
+      byte a (v asr 8)
+  | _ -> int32 a v
+
 (* op [mem], src on the low [size] bytes *)
 let alu_mr a op size mem src =
   match size with

@@ -884,8 +884,19 @@ let gen_instr ctx fr ins =
         | _ -> unsupported "aggregate store of a constant"
       end
       else begin
-        let src = in_reg ctx fr v A.Rcx in
-        A.store a (mem_size ctx ty) (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src
+        let size = mem_size ctx ty in
+        let imm =
+          match v with
+          | Const (_, c) when size < 8 || A.fits_i32 (Int64.to_int c) ->
+              Some (Int64.to_int c)
+          | Null _ -> Some 0
+          | _ -> None
+        in
+        match imm with
+        | Some c -> A.mov_mi a size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) c
+        | None ->
+            let src = in_reg ctx fr v A.Rcx in
+            A.store a size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src
       end
   | (Gep (id, _, _, _) | Global_ptr (id, _, _) | String_ptr (id, _, _))
     when Hashtbl.mem fr.addrs.skip id ->
