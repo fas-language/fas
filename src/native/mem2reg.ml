@@ -1013,5 +1013,130 @@ let cse (f : func) =
     }
 
 (* After folding: constant branches leave dead code and empty blocks. *)
-let cleanup_func f = prune (thread (dce (cse f)))
+
+(* If-conversion: a branch around at most a few cheap pure instructions (a
+   triangle, or a diamond with two such arms) whose join merges only those
+   paths becomes straight-line code with selects, so data-dependent
+   conditions cost a cmov instead of a mispredicted jump. The join's phis
+   turn into selects in place and [merge] later joins the blocks. *)
+let ifconv_on = Sys.getenv_opt "FAS_NATIVE_NOIFCONV" <> Some "1"
+
+let ifconvert (f : func) =
+  match f.blocks with
+  | [] | [ _ ] -> f
+  | _ when not ifconv_on -> f
+  | _ ->
+      let preds = Hashtbl.create 32 in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (fun s ->
+              Hashtbl.replace preds s
+                (b.id :: Option.value ~default:[] (Hashtbl.find_opt preds s)))
+            (List.sort_uniq compare (terminator_successors b.terminator)))
+        f.blocks;
+      let by_id = Hashtbl.create 32 in
+      List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) f.blocks;
+      let cheap ins = match ins with Phi _ | Call _ -> false | _ -> pure ins in
+      let selectable = function
+        | I1 | I8 | I16 | I32 | I64 | Pointer _ -> true
+        | _ -> false
+      in
+      (* an arm: a block of [a] alone that jumps to [j] after cheap work *)
+      let arm a id j =
+        match Hashtbl.find_opt by_id id with
+        | Some ({ terminator = Br j'; _ } as b)
+          when j' = j
+               && Hashtbl.find_opt preds id = Some [ a ]
+               && List.length b.instrs <= 4
+               && List.for_all cheap b.instrs ->
+            Some b
+        | _ -> None
+      in
+      let changed = ref false in
+      List.iter
+        (fun (b0 : block) ->
+          let a = Hashtbl.find by_id b0.id in
+          match a.terminator with
+          | CondBr ((Local _ as c), t, e) when t <> e && t <> a.id && e <> a.id -> (
+              (* arms on the true and false side, and the join *)
+              let shape =
+                match (arm a.id t e, arm a.id e t) with
+                | Some bt, _ -> Some (Some bt, None, e)
+                | None, Some be -> Some (None, Some be, t)
+                | None, None -> (
+                    match Hashtbl.find_opt by_id t with
+                    | Some { terminator = Br j; _ } when j <> a.id -> (
+                        match (arm a.id t j, arm a.id e j) with
+                        | Some bt, Some be -> Some (Some bt, Some be, j)
+                        | _ -> None)
+                    | _ -> None)
+              in
+              match shape with
+              | None -> ()
+              | Some (bt, be, j) -> (
+                  let from_t = match bt with Some b -> b.id | None -> a.id in
+                  let from_e = match be with Some b -> b.id | None -> a.id in
+                  let jp = List.sort_uniq compare [ from_t; from_e ] in
+                  match Hashtbl.find_opt by_id j with
+                  | Some jb
+                    when j <> a.id
+                         && List.sort_uniq compare
+                              (Option.value ~default:[] (Hashtbl.find_opt preds j))
+                            = jp ->
+                      let phis =
+                        List.filter_map
+                          (function Phi (i, ty, ins) -> Some (i, ty, ins) | _ -> None)
+                          jb.instrs
+                      in
+                      let ok =
+                        phis <> []
+                        && List.for_all
+                             (fun (_, ty, ins) ->
+                               selectable ty
+                               && List.mem_assoc from_t
+                                    (List.map (fun (v, p) -> (p, v)) ins)
+                               && List.mem_assoc from_e
+                                    (List.map (fun (v, p) -> (p, v)) ins))
+                             phis
+                      in
+                      if ok then begin
+                        changed := true;
+                        let incoming ins p =
+                          fst (List.find (fun (_, q) -> q = p) ins)
+                        in
+                        let instrs =
+                          List.map
+                            (function
+                              | Phi (i, _, ins) ->
+                                  Select (i, c, incoming ins from_t, incoming ins from_e)
+                              | ins -> ins)
+                            jb.instrs
+                        in
+                        let hoist = function
+                          | Some (b : block) -> b.instrs
+                          | None -> []
+                        in
+                        Hashtbl.replace by_id a.id
+                          {
+                            a with
+                            instrs = a.instrs @ hoist bt @ hoist be;
+                            terminator = Br j;
+                          };
+                        Hashtbl.replace by_id j { jb with instrs };
+                        (* the join now has the one predecessor [a] *)
+                        Hashtbl.replace preds j [ a.id ]
+                      end
+                  | _ -> ()))
+          | _ -> ())
+        f.blocks;
+      if not !changed then f
+      else
+        prune
+          {
+            f with
+            blocks = List.map (fun (b : block) -> Hashtbl.find by_id b.id) f.blocks;
+          }
+
+let cleanup_func f = prune (thread (dce (cse (ifconvert f))))
 let cleanup (m : module_) = { m with funcs = List.map cleanup_func m.funcs }
