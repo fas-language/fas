@@ -15,9 +15,9 @@
    immediates into operands, and turns load/op/store of one place into a
    read-modify-write instruction.
 
-   Phis: each phi has a second "incoming" home. Edges write the incoming homes
-   and the phi's block copies them into the phi homes on entry, so a phi that
-   reads another phi of the same block always sees the old value.
+   Phis: each edge writes the phi homes of its target as one parallel move
+   (cycles broken through a scratch register), so a phi that reads another
+   phi of the same block always sees the old value.
 
    Calls between Fas functions use the SysV integer registers for the first
    six arguments and the stack for the rest, with the result in rax. Floats,
@@ -1221,8 +1221,20 @@ let gen_function ctx (f : func) =
   in
   let forward id = forward [] id in
   let rotating = ref false in
-  (* A loop header that only compares and branches is copied to the end of
-     each back edge, so the loop runs one branch per iteration. *)
+  (* A loop header that only compares and branches, possibly after a little
+     cheap arithmetic, is copied to the end of each back edge, so the loop runs
+     one branch per iteration. Recomputing a header value there is safe: its
+     register conflicts with everything live into the header. *)
+  let cheap = function
+    | Bin
+        ( id,
+          (Add | Sub | And | Or | Xor | Shl | Lshr | Ashr),
+          (I8 | I16 | I32 | I64),
+          _,
+          _ ) ->
+        not (Hashtbl.mem fr.addrs.dead id)
+    | _ -> false
+  in
   let rec jump_to from_id target =
     edge_copies ctx fr blocks from_id target;
     let t = forward target in
@@ -1231,8 +1243,12 @@ let gen_function ctx (f : func) =
     | Some ((cmp, c, x, y) : instr * cmp * value * value), CondBr (_, yes, no)
       when (not !rotating) && t <> !next_block
            && Hashtbl.find position t <= Hashtbl.find position from_id
-           && List.for_all (fun ins -> ins == cmp || silent ins) header.instrs ->
+           && List.for_all
+                (fun ins -> ins == cmp || silent ins || cheap ins)
+                header.instrs
+           && List.length (List.filter cheap header.instrs) <= 2 ->
         rotating := true;
+        List.iter (fun ins -> if cheap ins then gen_instr ctx fr ins) header.instrs;
         compare_flags ctx fr c x y;
         branch t (cond_of c) yes no;
         rotating := false
