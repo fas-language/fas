@@ -533,9 +533,51 @@ let reassociate (m : module_) =
   in
   { m with funcs = List.map one m.funcs }
 
+(* `addr + n` lowers to inttoptr (add (ptrtoint p) n); as `gep i8 p, n` it
+   folds into memory operands like any other address. *)
+let addresses (f : func) =
+  let defs = Hashtbl.create 64 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          match instruction_result ins with
+          | Some (i, _) -> Hashtbl.replace defs i ins
+          | None -> ())
+        b.instrs)
+    f.blocks;
+  let pointer_of = function
+    | Local (i, _) -> (
+        match Hashtbl.find_opt defs i with
+        | Some (Cast (_, "ptrtoint", Pointer _, p, I64)) -> Some p
+        | _ -> None)
+    | _ -> None
+  in
+  let rewrite = function
+    | Cast (id, "inttoptr", I64, Local (s, _), (Pointer _ as pty)) as ins -> (
+        match Hashtbl.find_opt defs s with
+        | Some (Bin (_, Add, I64, x, y)) -> (
+            match (pointer_of x, pointer_of y) with
+            | Some p, _ when value_ty p = pty -> Gep (id, I8, p, [ Index y ])
+            | _, Some p when value_ty p = pty -> Gep (id, I8, p, [ Index x ])
+            | _ -> ins)
+        | _ -> ins)
+    | ins -> ins
+  in
+  {
+    f with
+    blocks =
+      List.map
+        (fun (b : block) -> { b with instrs = List.map rewrite b.instrs })
+        f.blocks;
+  }
+
 (* Promotion and DCE empty more blocks, so thread again afterwards. *)
 let module_ (m : module_) =
-  { m with funcs = List.map (fun f -> prune (thread (dce (promote f)))) m.funcs }
+  {
+    m with
+    funcs = List.map (fun f -> prune (thread (dce (addresses (promote f))))) m.funcs;
+  }
 
 (* After folding: constant branches leave dead code and empty blocks. *)
 let cleanup (m : module_) =

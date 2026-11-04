@@ -1111,8 +1111,27 @@ let gen_function ctx (f : func) =
   in
   (* load; op; store back to the same place, with the loaded and computed
      values used nowhere else, becomes one `op [mem], y`. *)
+  let same_place p q =
+    p = q
+    ||
+    match (p, q) with
+    | Local (i, _), Local (j, _) -> (
+        match
+          (Hashtbl.find_opt fr.addrs.forms i, Hashtbl.find_opt fr.addrs.forms j)
+        with
+        | Some f, Some g ->
+            Hashtbl.mem fr.addrs.skip i && Hashtbl.mem fr.addrs.skip j && f = g
+        | _ -> false)
+    | _ -> false
+  in
   let rmw ins rest =
-    let rec skip = function Location _ :: r -> skip r | r -> r in
+    let rec skip = function
+      | Location _ :: r -> skip r
+      | (Gep (id, _, _, _) | Global_ptr (id, _, _) | String_ptr (id, _, _)) :: r
+        when Hashtbl.mem fr.addrs.skip id ->
+          skip r
+      | r -> r
+    in
     let once id = Hashtbl.find_opt uses id = Some 1 in
     match ins with
     | Load (l, ty, p, _)
@@ -1129,7 +1148,7 @@ let gen_function ctx (f : func) =
             in
             match (operand, skip rest) with
             | Some y, Store (ty'', Local (s, _), p', _) :: rest
-              when ty'' = ty && s = r && p' = p
+              when ty'' = ty && s = r && same_place p p'
                    && match y with Local (i, _) -> i <> l | _ -> true ->
                 let alu =
                   match op with
