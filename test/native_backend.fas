@@ -139,6 +139,17 @@ fn arrays(x u64, n usize) void {
   b8 u8 = 251
   line(zext[i64](b8 / 4))
   line(zext[i64](b8 % 8))
+  // Byte accesses sharing base + b: one address, then [q + o]
+  q addr = &cells
+  o1 usize = n - 4
+  o2 usize = n + 2
+  o3 usize = n * 2
+  for b usize = 0; b < 48; b += 16 {
+    q[u8, b + o1] |= 0x11
+    q[u8, b + o2] ^= 0x22
+    q[u8, o3 + b] += 3
+  }
+  for i usize = 0; i < 8; i += 1 { line(bitcast[i64](q[u64, i])) }
 }
 
 fn main() i32 {
