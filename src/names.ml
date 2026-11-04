@@ -32,6 +32,7 @@ type value_operation =
   | Compress
   | Expand
   | Addr_bits
+  | Syscall
   | Addr_from_bits
   | Handle_addr
   | Handle_from_addr
@@ -170,6 +171,7 @@ let operations =
     ("volatile_load", Reserved);
     ("volatile_store", Reserved);
     ("addr_bits", Value Addr_bits);
+    ("syscall", Value Syscall);
     ("addr_from_bits", Value Addr_from_bits);
     ("handle_addr", Value Handle_addr);
     ("handle_from_addr", Value Handle_from_addr);

@@ -1845,6 +1845,30 @@ let emit_optimized_llvm ~pgo config program ir redirect =
       in
       emit_text config (with_fas_module_id text))
 
+(* `fn f(...) R @inline { ... }`: every emitted instance of `f` gets LLVM
+   `alwaysinline`, unless `--no-inline` names it too. *)
+let apply_inline (program : Ast.program) (ir : Ir.module_) =
+  let marked =
+    List.filter_map
+      (function Ast.Func { name; inline = true; _ } -> Some name | _ -> None)
+      program.Ast.items
+  in
+  let inline_functions =
+    List.filter_map
+      (fun (f : Ir.func) ->
+        let base =
+          Option.value (Ast.specialization_template_name f.name) ~default:f.name
+        in
+        if
+          f.blocks <> []
+          && (List.mem f.name marked || List.mem base marked)
+          && not (List.mem f.name ir.Ir.no_inline_functions)
+        then Some f.name
+        else None)
+      ir.Ir.funcs
+  in
+  { ir with Ir.inline_functions }
+
 let apply_no_inline config ir =
   let squeeze text =
     String.concat "" (String.split_on_char ' ' text |> List.filter (( <> ) ""))
@@ -2483,7 +2507,9 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                   ~intrinsic_masked_loads:(config.Cli.target = Cli.Force_native)
                   hir
               in
+              let ir = Ir_fold.module_ ir in
               let* ir = apply_no_inline config ir in
+              let ir = apply_inline program ir in
               let* ir, adapters, redirect =
                 add_static_adapters (List.rev !c_units) referenced_names ir
               in

@@ -410,6 +410,7 @@ let () =
       globals;
       funcs;
       no_inline_functions;
+      inline_functions = [];
     }
   in
   let ir_function blocks =

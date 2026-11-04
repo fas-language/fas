@@ -1,0 +1,16 @@
+// The `syscall` builtin on Linux x86-64: number first, then up to six
+// integer or addr arguments; the raw kernel result comes back as i64.
+fn write(fd i32, text addr, n usize) i64 {
+  return syscall(1, fd, text, n)
+}
+
+fn main() i32 {
+  written i64 = write(1, "hello from syscall\n", 19)
+  if written != 19 { return 1 }
+  pid i64 = syscall(39)
+  if pid <= 0 { return 2 }
+  narrow u8 = 1
+  bad i64 = syscall(narrow, -1, "x", 1)   // write to fd -1: -EBADF
+  if bad != -9 { return 3 }
+  return 0
+}

@@ -79,6 +79,7 @@ type builtin =
   | Compress
   | Expand
   | Addr_bits
+  | Syscall
   | Addr_from_bits
   | Cvt of ty
   | Float_math of float_builtin

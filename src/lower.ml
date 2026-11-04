@@ -19,6 +19,11 @@ type state = {
   mutable next_block : int;
   blocks : block_state Queue.t;
   entry : block_state;
+  entry_allocas : Ir.instr Queue.t;
+      (* Stack slots, placed at the very top of the entry block when the function
+         is assembled. Appending them to [entry] instead would put a slot declared
+         after a call behind that call, and inlining the call then turns the slot
+         into a dynamic stack allocation. *)
   mutable current : block_state;
   env : (int, Ir.value * int) Hashtbl.t;
   mutable env_scopes : (int * (Ir.value * int) option) list list;
@@ -60,7 +65,7 @@ let fresh_block s =
   b
 
 let emit s i = Queue.add i s.current.instrs
-let emit_entry s i = Queue.add i s.entry.instrs
+let emit_entry s i = Queue.add i s.entry_allocas
 
 let mark s (span : Span.t) =
   if (not (Span.is_synthetic span)) && Some span.Span.file = s.file then (
@@ -656,12 +661,22 @@ let rec expr s = function
       | Ast.Neg ->
           let id = fresh s in
           if is_float_type t then emit s (Ir.Fneg (id, rt, v))
-          else emit s (Ir.Bin (id, Sub, rt, zero rt, v));
+          else
+            emit s
+              (Ir.Bin
+                 ( id,
+                   Sub,
+                   rt,
+                   (match rt with Ir.Vector _ -> Ir.Zero rt | _ -> zero rt),
+                   v ));
           Ok (Ir.Local (id, rt))
       | Bit_not ->
-          let* mask = ones span rt in
+          let* mask =
+            ones span (match rt with Ir.Vector (_, elem) -> elem | _ -> rt)
+          in
+          let all_ones = value_const s rt mask in
           let id = fresh s in
-          emit s (Ir.Bin (id, Xor, rt, v, Ir.Const (rt, mask)));
+          emit s (Ir.Bin (id, Xor, rt, v, all_ones));
           Ok (Ir.Local (id, rt))
       | Not when rt = Ir.I1 ->
           let id = fresh s in
@@ -875,6 +890,29 @@ and lower_builtin s b args t span =
       let id = fresh s in
       emit s (Ir.Cast (id, "ptrtoint", Ir.value_ty x, x, rt));
       Ok (Ir.Local (id, rt))
+  | Syscall, values ->
+      let* words =
+        Result_list.map
+          (fun (arg, v) ->
+            match (Hir.expr_ty arg, Ir.value_ty v) with
+            | _, Ir.Pointer _ ->
+                let id = fresh s in
+                emit s (Ir.Cast (id, "ptrtoint", Ir.value_ty v, v, Ir.I64));
+                Ok (Ir.Local (id, Ir.I64))
+            | _, Ir.I64 -> Ok v
+            | Hir.Int (Hir.I8 | I16 | I32 | Isize), from ->
+                let id = fresh s in
+                emit s (Ir.Cast (id, "sext", from, v, Ir.I64));
+                Ok (Ir.Local (id, Ir.I64))
+            | _, from ->
+                let id = fresh s in
+                emit s (Ir.Cast (id, "zext", from, v, Ir.I64));
+                Ok (Ir.Local (id, Ir.I64)))
+          (List.combine args values)
+      in
+      let id = fresh s in
+      emit s (Ir.Syscall (id, words));
+      Ok (Ir.Local (id, Ir.I64))
   | Addr_from_bits, [ x ] ->
       let id = fresh s in
       emit s (Ir.Cast (id, "inttoptr", Ir.value_ty x, x, Ir.Pointer Ir.I8));
@@ -1038,7 +1076,7 @@ and lower_builtin s b args t span =
             | Sub_sat, false -> Ok "llvm.ssub.sat."
             | ( ( Rotl | Rotr | Popcount | Ctz | Clz | Mul_hi | Any | All | Select
                 | Shuffle | Permute | Reduce_sum | Reduce_min | Reduce_max | Reduce_and
-                | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits
+                | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
                 | Handle_from_addr _ | Volatile_load _ | Simd_load _ ),
                 _ ) ->
@@ -1371,7 +1409,7 @@ and materialize s e =
   let ht = Hir.expr_ty e in
   let* alignment = align s ht in
   let id = fresh s in
-  emit s (Ir.Alloca (id, storage_ty ht, alignment));
+  emit_entry s (Ir.Alloca (id, storage_ty ht, alignment));
   let p = Ir.Local (id, Ir.Pointer (storage_ty ht)) in
   let* () = store_value s ht v p alignment in
   Ok p
@@ -2975,6 +3013,7 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
           next_block = 1;
           blocks;
           entry;
+          entry_allocas = Queue.create ();
           current = entry;
           env = Hashtbl.create 32;
           env_scopes = [];
@@ -3047,7 +3086,11 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
                   ({
                      Ir.id = b.id;
                      label = "b" ^ string_of_int b.id;
-                     instrs = List.of_seq (Queue.to_seq b.instrs);
+                     instrs =
+                       (if b.id = s.entry.id then
+                          List.of_seq (Queue.to_seq s.entry_allocas)
+                        else [])
+                       @ List.of_seq (Queue.to_seq b.instrs);
                      terminator;
                    }
                     : Ir.block))
@@ -3400,6 +3443,7 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
       globals = strings @ arrays @ storage_globals;
       funcs = funcs @ intrinsic_decls funcs;
       no_inline_functions = [];
+      inline_functions = [];
     }
   in
   match Ir.validate module_ with

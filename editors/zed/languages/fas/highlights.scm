@@ -113,5 +113,5 @@
     "reduce_and" "reduce_or" "reduce_xor" "shuffle" "permute" "compress"
     "expand" "masked_load" "masked_store" "gather" "gather_bytes" "scatter"
     "scatter_bytes" "copy" "call_addr" "volatile_load" "volatile_store"
-    "addr_bits" "addr_from_bits" "handle_addr" "handle_from_addr" "sqrt"
+    "addr_bits" "addr_from_bits" "handle_addr" "handle_from_addr" "syscall" "sqrt"
     "fma" "floor" "ceil" "round" "abs" "cvt"))

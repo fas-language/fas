@@ -332,7 +332,8 @@ fn main() i32 {
 ```text
 4 16
 ```
-- **`@align(N)`** raises a struct's alignment. It is the only annotation.
+- **`@align(N)`** raises a struct's alignment.
+- **`@inline`** after a function's result type (`fn add(a u64, b u64) u64 @inline {`) inlines every call to it, at any `-O`. On a generic it applies to every instance. `--no-inline` overrides it. These are the only two annotations.
 - **`opaque Name`** declares a type you only hold as `handle[Name]`, a typed address with no arithmetic. It is mostly for C types like `FILE`.
 
 ## Generics
@@ -1011,6 +1012,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `addr_bits(p)` `addr_from_bits(n)` | `usize`, `addr` | |
 | | `handle_addr(h)` `handle_from_addr[T](p)` | `addr`, `handle[T]` | |
 | | `call_addr[R](p, args...)` | `R` or `void` | indirect call through `addr`, using the C ABI |
+| **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |
 | | `select(m, yes, no)` | type of `yes` | lane `i` comes from `yes[i]` when `m[i]` is true, otherwise `no[i]`. Both sides are evaluated |
 | | `any(m)` `all(m)` | `bool` | |

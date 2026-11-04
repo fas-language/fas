@@ -147,6 +147,7 @@ let instr ?(redirect = Fun.id) ~is_function instr =
   | String_ptr (d, s, n) -> arr [ str "string_ptr"; int d; int s; int n ]
   | Global_ptr (d, n, t) -> arr [ str "global_ptr"; int d; str n; ty t ]
   | Trap -> arr [ str "trap" ]
+  | Syscall (d, args) -> arr (str "syscall" :: int d :: List.map value args)
   | Location _ -> invalid_arg "internal error: location markers are not serialized"
 
 let terminator is_function = function

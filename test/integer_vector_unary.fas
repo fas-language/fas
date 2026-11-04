@@ -1,0 +1,28 @@
+// `~` and unary `-` on integer vectors, lane by lane.
+fn main() i32 {
+  a vec[4,u64] = {1, 2, 3, 0}
+  b vec[4,u64] = ~a
+  if b[0] != 18446744073709551614 { return 1 }
+  if b[3] != 18446744073709551615 { return 2 }
+
+  c vec[4,i32] = {5, -6, 0, 2147483647}
+  d vec[4,i32] = -c
+  if d[0] != -5 { return 3 }
+  if d[1] != 6 { return 4 }
+  if d[2] != 0 { return 5 }
+  if d[3] != -2147483647 { return 6 }
+
+  e vec[8,u8] = {1, 2, 3, 4, 5, 6, 7, 255}
+  f vec[8,u8] = ~e
+  if f[0] != 254 { return 7 }
+  if f[7] != 0 { return 8 }
+
+  g vec[4,u32] = {1, 0, 7, 4294967295}
+  h vec[4,u32] = -g
+  if h[0] != 4294967295 { return 9 }
+  if h[3] != 1 { return 10 }
+
+  k vec[4,u64] = ~(a | splat(4))
+  if k[0] != 18446744073709551610 { return 11 }
+  return 0
+}

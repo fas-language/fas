@@ -13658,6 +13658,7 @@ let () =
       ("round", "fn probe(x f64) f64 { return round(x) }\n");
       ("trunc", "fn probe(x vec[2,u16]) vec[2,u8] { return trunc[vec[2,u8]](x) }\n");
       ("abs", "fn probe(x f64) f64 { return abs(x) }\n");
+      ("syscall", "fn probe() i64 { return syscall(39) }\n");
       ( "select",
         "fn probe(mask vec[2,bool], yes vec[2,u32], no vec[2,u32]) vec[2,u32] {\n\
          return select(mask, yes, no) }\n" );

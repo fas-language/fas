@@ -2101,7 +2101,7 @@ and check_expr_inner ?destination (c : context) expected expression =
             match Hir.expr_ty te with Hir.Vec (_, Hir.Float _) -> true | _ -> false
           in
           if
-            (not (is_int (Hir.expr_ty te)))
+            (not (is_numeric (Hir.expr_ty te)))
             && not (op = Ast.Neg && (is_float (Hir.expr_ty te) || floating))
           then
             let operator = if op = Ast.Neg then "-" else "~" in
@@ -2113,7 +2113,7 @@ and check_expr_inner ?destination (c : context) expected expression =
             in
             let expectation =
               if op = Ast.Bit_not then "an integer or integer vector"
-              else "an integer or floating-point vector"
+              else "a number or a numeric vector"
             in
             Error
               [
@@ -3710,6 +3710,7 @@ and check_call_inner c expected fn args s =
         | Some Names.Compress -> Some Hir.Compress
         | Some Names.Expand -> Some Hir.Expand
         | Some Names.Addr_bits -> Some Hir.Addr_bits
+        | Some Names.Syscall -> Some Hir.Syscall
         | Some Names.Addr_from_bits -> Some Hir.Addr_from_bits
         | Some Names.Handle_addr -> Some Hir.Handle_addr
         | Some Names.Handle_from_addr -> Some (Hir.Handle_from_addr "")
@@ -4026,6 +4027,24 @@ and check_call_inner c expected fn args s =
               match Hir.expr_ty a with
               | Hir.Addr -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Int Hir.Usize, s))
               | _ -> error s "addr_bits argument must be an addr")
+        | Hir.Syscall ->
+            let count = List.length args in
+            if count < 1 || count > 7 then
+              error s
+                (Printf.sprintf "builtin `%s` expects one to seven arguments" name)
+            else if (Target_layout.current ()).Target_layout.os <> Target_layout.Linux
+            then error s "builtin `syscall` is only available on Linux x86-64"
+            else
+              let* checked =
+                Result_list.map
+                  (fun a ->
+                    let* a = check_expr c None a in
+                    match Hir.expr_ty a with
+                    | Hir.Int _ | Hir.Addr -> Ok a
+                    | _ -> error s "syscall arguments must be integers or addrs")
+                  args
+              in
+              Ok (Hir.Call (Hir.Builtin b, checked, Hir.Int Hir.I64, s))
         | Hir.Addr_from_bits -> (
             if List.length args <> 1 then
               error s (Printf.sprintf "builtin `%s` expects one argument" name)

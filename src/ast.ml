@@ -193,6 +193,7 @@ and item =
       span : Span.t;
       extent : Span.t;
       body_span : Span.t;
+      inline : bool;
     }
 
 type program = { items : item list }
@@ -910,7 +911,7 @@ let render_program program =
     | Opaque { name; _ } ->
         text "opaque ";
         add_name name
-    | Func { name; generic_params; params; ret; body; linkage; _ } ->
+    | Func { name; generic_params; params; ret; body; linkage; inline; _ } ->
         text (match linkage with Internal -> "fn " | External_c -> "extern fn ");
         add_name name;
         emit_generic_params generic_params;
@@ -923,6 +924,7 @@ let render_program program =
           params;
         text ") ";
         emit_ty ret;
+        if inline then text " @inline";
         emit_body body
   in
   List.iteri

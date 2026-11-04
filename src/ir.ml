@@ -87,6 +87,7 @@ type instr =
   | String_ptr of int * int * int
   | Global_ptr of int * string * ty
   | Trap
+  | Syscall of int * value list
   | Location of int * int
 
 type terminator =
@@ -136,6 +137,7 @@ type module_ = {
   globals : global list;
   funcs : func list;
   no_inline_functions : string list;
+  inline_functions : string list;
 }
 
 let real_instrs block =
@@ -270,6 +272,7 @@ let instruction_result = function
   | Call_indirect (Some id, _, ty, _, _) -> Some (id, ty)
   | String_ptr (id, _, _) -> Some (id, Pointer I8)
   | Global_ptr (id, _, ty) -> Some (id, Pointer ty)
+  | Syscall (id, _) -> Some (id, I64)
   | Store _ | Store_volatile _
   | Call (None, _, _, _, _)
   | Call_indirect (None, _, _, _, _)
@@ -720,6 +723,11 @@ let validate_function struct_names globals functions (func : func) =
         | Some _ -> fail "block %d global pointer `%s` has the wrong type" block_id name
         )
     | Trap -> Ok ()
+    | Syscall (_, args) ->
+        if List.length args < 1 || List.length args > 7 then
+          fail "block %d syscall needs one to seven operands" block_id
+        else if List.for_all (fun v -> type_equal (value_ty v) I64) args then Ok ()
+        else fail "block %d syscall operands must be i64" block_id
     | Location (line, column) ->
         if line < 0 || column < 0 then
           fail "block %d has a negative source location" block_id
@@ -936,6 +944,7 @@ let validate_function struct_names globals functions (func : func) =
       | Call_indirect (_, _, _, callee, arguments) ->
           callee :: List.map (fun (_, _, value) -> value) arguments
       | Select (_, condition, yes, no) -> [ condition; yes; no ]
+      | Syscall (_, args) -> args
       | Extract (_, _, vector, index) -> [ vector; index ]
       | Insert (_, _, vector, index, value) -> [ vector; index; value ]
       | Shuffle_zero (_, _, vector) -> [ vector ]
@@ -1662,6 +1671,23 @@ let emit_instr variadic_signatures sink = function
       sink.text n;
       sink.text ", i64 0"
   | Trap -> sink.text "  call void @llvm.trap()"
+  | Syscall (i, args) ->
+      (* Linux x86-64: number in rax, arguments in rdi rsi rdx r10 r8 r9; the
+         kernel clobbers rcx and r11. *)
+      let registers = [ "{rax}"; "{rdi}"; "{rsi}"; "{rdx}"; "{r10}"; "{r8}"; "{r9}" ] in
+      let used = List.filteri (fun n _ -> n < List.length args) registers in
+      sink.text "  %v";
+      sink.text (string_of_int i);
+      sink.text " = call i64 asm sideeffect \"syscall\", \"={rax},";
+      sink.text (String.concat "," used);
+      sink.text ",~{rcx},~{r11},~{memory}\"(";
+      List.iteri
+        (fun n v ->
+          if n > 0 then sink.text ", ";
+          sink.text "i64 ";
+          emit_value sink v)
+        args;
+      sink.text ")"
   | Location _ -> invalid_arg "internal error: location markers are not instructions"
 
 let instr_line variadic_signatures instr =
@@ -1996,7 +2022,9 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false)
            else
              let link = if f.linkage = Internal then "internal " else "" in
              let no_inline =
-               if List.mem f.name m.no_inline_functions then " noinline" else ""
+               if List.mem f.name m.no_inline_functions then " noinline"
+               else if List.mem f.name m.inline_functions then " alwaysinline"
+               else ""
              in
              let sanitize_address =
                if sanitize_address then " sanitize_address" else ""

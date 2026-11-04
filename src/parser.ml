@@ -1039,6 +1039,21 @@ module P = struct
     in
     let* generic_params = generic_params p in
     let* ps, ret, var, ret_span = signature p allow_variadic in
+    let* inline =
+      if at p Token.At then
+        let at_span = span p in
+        let* () = expected p Token.At in
+        let* attr_name = ident p in
+        if attr_name = "inline" then Ok true
+        else if attr_name = "align" then
+          Error
+            [
+              Diag.error ~help:"write `struct P @align(16) {`" at_span
+                "attribute `@align` applies to structs";
+            ]
+        else Error [ Diag.error at_span ("unknown attribute `@" ^ attr_name ^ "`") ]
+      else Ok false
+    in
     if allow_variadic then
       if at p Token.Lbrace then
         if var then
@@ -1066,7 +1081,10 @@ module P = struct
                  span = s;
                  extent = s;
                  body_span;
+                 inline;
                })
+      else if inline then
+        Error [ Diag.error (span p) "`@inline` needs a function body" ]
       else
         let* () = end_stmt p in
         Ok
@@ -1084,6 +1102,7 @@ module P = struct
                span = s;
                extent = s;
                body_span = s;
+               inline;
              })
     else
       let bstart = span p in
@@ -1104,6 +1123,7 @@ module P = struct
              span = s;
              extent = s;
              body_span;
+             inline;
            })
 
   and block p =
