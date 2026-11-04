@@ -553,6 +553,7 @@ let reserve fr bytes align =
 let build_frame ctx (f : func) =
   let addrs = analyse_addrs ctx f in
   let shared = Hashtbl.create 16 in
+  let xshared = Hashtbl.create 16 in
   let fr =
     {
       addrs;
@@ -567,7 +568,7 @@ let build_frame ctx (f : func) =
       xhomes =
         Regalloc.allocate_xmm
           ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-          ~operands:(operands_view addrs) f;
+          ~operands:(operands_view addrs) ~slot_of:xshared f;
       xtmp = 0;
       saved = [];
     }
@@ -586,7 +587,8 @@ let build_frame ctx (f : func) =
           match instruction_result ins with
           | Some (id, ty) when Regalloc.v128 ty ->
               has_v128 := true;
-              Hashtbl.replace fr.slots id (reserve fr 16 16)
+              if not (Hashtbl.mem xshared id) then
+                Hashtbl.replace fr.slots id (reserve fr 16 16)
           | Some (id, ty) when is_aggregate ty ->
               Hashtbl.replace fr.slots id (reserve fr (max 1 (size_of ctx ty)) 16)
           | Some (id, _) when Hashtbl.mem shared id -> ()
@@ -595,16 +597,18 @@ let build_frame ctx (f : func) =
         b.instrs)
     f.blocks;
   (* phi webs sharing a slot: members take their representative's *)
-  Hashtbl.iter
-    (fun id r ->
-      if id <> r then
-        match Hashtbl.find_opt fr.slots r with
-        | Some o -> Hashtbl.replace fr.slots id o
-        | None ->
-            let o = reserve fr 8 8 in
-            Hashtbl.replace fr.slots r o;
-            Hashtbl.replace fr.slots id o)
-    shared;
+  let share bytes =
+    Hashtbl.iter (fun id r ->
+        if id <> r then
+          match Hashtbl.find_opt fr.slots r with
+          | Some o -> Hashtbl.replace fr.slots id o
+          | None ->
+              let o = reserve fr bytes bytes in
+              Hashtbl.replace fr.slots r o;
+              Hashtbl.replace fr.slots id o)
+  in
+  share 8 shared;
+  share 16 xshared;
   let used =
     Hashtbl.fold (fun _ r acc -> if List.mem r acc then acc else r :: acc) fr.homes []
   in
@@ -823,6 +827,8 @@ let xmem fr v =
 let xload ctx fr (x : int) v =
   match (v, xhome fr v) with
   | (Zero _ | Undef _), _ -> A.pop_xx ctx.a A.Pxor 64 x x
+  | Const_vector (_, xs), _ when List.for_all (fun k -> k = 0L) xs ->
+      A.pop_xx ctx.a A.Pxor 64 x x
   | _, Some h -> A.movdqa ctx.a x h
   | _ -> (
       match xmem fr v with
@@ -898,12 +904,19 @@ let gen_v128 ctx fr ins =
           xload ctx fr 1 x;
           A.pshift_imm a A.Psrl 64 1 32;
           xop ctx fr A.Pmuludq 64 1 y;
-          if not (hi_zero y) then begin
-            xload ctx fr 2 y;
-            A.pshift_imm a A.Psrl 64 2 32;
-            xop ctx fr A.Pmuludq 64 2 x;
-            A.pop_xx a A.Padd 64 1 2
-          end;
+          (match y with
+          | _ when hi_zero y -> ()
+          | Const_vector (t, ys) ->
+              (* hi(y) straight from the pool *)
+              xload ctx fr 2 x;
+              xop ctx fr A.Pmuludq 64 2
+                (Const_vector (t, List.map (fun k -> Int64.shift_right_logical k 32) ys));
+              A.pop_xx a A.Padd 64 1 2
+          | _ ->
+              xload ctx fr 2 y;
+              A.pshift_imm a A.Psrl 64 2 32;
+              xop ctx fr A.Pmuludq 64 2 x;
+              A.pop_xx a A.Padd 64 1 2);
           A.pshift_imm a A.Psll 64 1 32;
           xload ctx fr d x;
           xop ctx fr A.Pmuludq 64 d y;

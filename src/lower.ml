@@ -1929,30 +1929,8 @@ and raw_load s t p =
       let id = fresh s in
       emit s (Ir.Load (id, pt, p, 1));
       Ok (Ir.Local (id, pt))
-  | Hir.Vec (lanes, Hir.Int k) ->
-      let et = ty (Hir.Int k) in
-      let eb = int_ty_bytes et in
-      let vt = Ir.Vector (lanes, et) in
-      let rec go i cur =
-        if i = lanes then Ok cur
-        else
-          let off_id = fresh s in
-          emit s
-            (Ir.Gep
-               ( off_id,
-                 Ir.I8,
-                 p,
-                 [ Ir.Index (Ir.Const (Ir.I64, Int64.of_int (i * eb))) ] ));
-          let lid = fresh s in
-          emit s (Ir.Load (lid, et, Ir.Local (off_id, Ir.Pointer Ir.I8), 1));
-          let iid = fresh s in
-          emit s
-            (Ir.Insert
-               (iid, vt, cur, Ir.Const (Ir.I64, Int64.of_int i), Ir.Local (lid, et)));
-          go (i + 1) (Ir.Local (iid, vt))
-      in
-      go 0 (Ir.Undef vt)
-  | Hir.Vec (_, Hir.Float _) ->
+  | Hir.Vec (_, (Hir.Float _ | Hir.Int _)) ->
+      (* every lane type is whole bytes: one unaligned vector load *)
       let id = fresh s in
       let vector_ty = ty t in
       emit s (Ir.Load (id, vector_ty, p, 1));
@@ -1977,28 +1955,7 @@ and raw_store s t v p =
   | Hir.Addr | Hir.Handle _ ->
       emit s (Ir.Store (Ir.Pointer Ir.I8, v, p, 1));
       Ok ()
-  | Hir.Vec (lanes, Hir.Int k) ->
-      let et = ty (Hir.Int k) in
-      let eb = int_ty_bytes et in
-      let vt = Ir.Vector (lanes, et) in
-      let rec go i =
-        if i = lanes then Ok ()
-        else
-          let xid = fresh s in
-          emit s (Ir.Extract (xid, vt, v, Ir.Const (Ir.I64, Int64.of_int i)));
-          let off_id = fresh s in
-          emit s
-            (Ir.Gep
-               ( off_id,
-                 Ir.I8,
-                 p,
-                 [ Ir.Index (Ir.Const (Ir.I64, Int64.of_int (i * eb))) ] ));
-          emit s
-            (Ir.Store (et, Ir.Local (xid, et), Ir.Local (off_id, Ir.Pointer Ir.I8), 1));
-          go (i + 1)
-      in
-      go 0
-  | Hir.Vec (_, Hir.Float _) ->
+  | Hir.Vec (_, (Hir.Float _ | Hir.Int _)) ->
       emit s (Ir.Store (ty t, v, p, 1));
       Ok ()
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_store s false lanes v p

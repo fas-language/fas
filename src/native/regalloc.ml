@@ -498,6 +498,6 @@ let allocate ?skip ?operands ?slot_of f =
    slot. *)
 let xmm_regs = List.init 13 (fun i -> i + 3)
 
-let allocate_xmm ?skip ?operands f =
+let allocate_xmm ?skip ?operands ?slot_of f =
   allocate_class ~in_class:v128 ~callee:[] ~caller:xmm_regs ~strings:[]
-    ~reg_name:(Printf.sprintf "xmm%d") ?skip ?operands f
+    ~reg_name:(Printf.sprintf "xmm%d") ?skip ?operands ?slot_of f
