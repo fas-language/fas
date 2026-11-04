@@ -212,6 +212,132 @@ let operands_view addrs ins =
   | _, Some (v, p) -> Option.to_list v @ ptr p
   | _ -> Regalloc.default_operands ins
 
+(* Store-to-load forwarding and dead-store elimination inside each block.
+   Two accesses are the same location when their address forms have the same
+   anchor, index and offset; they are disjoint when the anchors are distinct
+   globals or stack slots, or when the anchor and index match and the byte
+   ranges do not overlap. Anything else may alias. A load of a location whose
+   value is known (stored or loaded earlier in the block, nothing that may
+   alias written since) takes that value; a store that a later store to the
+   same bytes overwrites, with no read of them in between, is dropped. Calls,
+   system calls, volatile accesses and traps forget everything. This is what
+   merges `for const` read-modify-write chains on one word into one store. *)
+let forward_memory ctx (f : func) =
+  let addrs = analyse_addrs ctx f in
+  let form_of = function
+    | Local (id, _) as v -> (
+        match Hashtbl.find_opt addrs.forms id with Some fm -> fm | None -> plain v)
+    | Global (name, _) -> { anchor = Sym name; off = 0; idx = None }
+    | v -> plain v
+  in
+  let distinct a b =
+    match (a, b) with
+    | Sym x, Sym y -> x <> y
+    | Frame x, Frame y -> x <> y
+    | Sym _, Frame _ | Frame _, Sym _ -> true
+    | _ -> false
+  in
+  let disjoint (f1, s1) (f2, s2) =
+    distinct f1.anchor f2.anchor
+    || f1.anchor = f2.anchor && f1.idx = f2.idx
+       && (f1.off + s1 <= f2.off || f2.off + s2 <= f1.off)
+  in
+  let covers (f1, s1) (f2, s2) =
+    (* [f1, s1] holds all of [f2, s2] *)
+    f1.anchor = f2.anchor && f1.idx = f2.idx && f1.off <= f2.off
+    && f2.off + s2 <= f1.off + s1
+  in
+  let env = Hashtbl.create 64 in
+  let rec resolve = function
+    | Local (i, _) as v -> (
+        match Hashtbl.find_opt env i with Some w -> resolve w | None -> v)
+    | v -> v
+  in
+  let size ty = try Some (size_of ctx ty) with Unsupported _ -> None in
+  let blocks =
+    List.map
+      (fun (b : block) ->
+        (* (location, type, value) known to be in memory *)
+        let known = ref [] in
+        (* stores not read since: (location, position in the block) *)
+        let pending = ref [] in
+        let dead = Hashtbl.create 8 in
+        let forget () =
+          known := [];
+          pending := []
+        in
+        let read loc = pending := List.filter (fun (l, _) -> disjoint l loc) !pending in
+        let instrs = List.map (Ir_fold.map_instr resolve) b.instrs in
+        let instrs =
+          List.mapi
+            (fun pos ins ->
+              match ins with
+              | Load (id, ty, p, _) -> (
+                  match size ty with
+                  | Some n when not (is_aggregate ty) -> (
+                      let loc = (form_of p, n) in
+                      match
+                        List.find_opt (fun (l, t, _) -> l = loc && t = ty) !known
+                      with
+                      | Some (_, _, v) ->
+                          Hashtbl.replace env id v;
+                          None
+                      | None ->
+                          read loc;
+                          known := (loc, ty, Local (id, ty)) :: !known;
+                          Some ins)
+                  | Some n ->
+                      read (form_of p, n);
+                      Some ins
+                  | None ->
+                      pending := [];
+                      Some ins)
+              | Store (ty, v, p, _) -> (
+                  match size ty with
+                  | Some n ->
+                      let loc = (form_of p, n) in
+                      pending :=
+                        List.filter
+                          (fun (l, at) ->
+                            if covers loc l then (
+                              Hashtbl.replace dead at ();
+                              false)
+                            else true)
+                          !pending;
+                      known := List.filter (fun (l, _, _) -> disjoint l loc) !known;
+                      if not (is_aggregate ty) then known := (loc, ty, v) :: !known;
+                      pending := (loc, pos) :: !pending;
+                      Some ins
+                  | None ->
+                      forget ();
+                      Some ins)
+              | Load_volatile _ | Store_volatile _ | Call _ | Call_indirect _
+              | Syscall _ | Trap ->
+                  forget ();
+                  Some ins
+              | _ -> Some ins)
+            instrs
+        in
+        let instrs =
+          List.filteri (fun pos ins -> ins <> None && not (Hashtbl.mem dead pos)) instrs
+          |> List.filter_map Fun.id
+        in
+        { b with instrs })
+      f.blocks
+  in
+  {
+    f with
+    blocks =
+      List.map
+        (fun (b : block) ->
+          {
+            b with
+            instrs = List.map (Ir_fold.map_instr resolve) b.instrs;
+            terminator = Ir_fold.map_term resolve b.terminator;
+          })
+        blocks;
+  }
+
 (* Per-function frame *)
 
 type frame = {
@@ -1040,6 +1166,14 @@ let int_le buf size v =
 let compile (m : module_) =
   try
     let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m)) in
+    let m =
+      let ctx = { m; a = A.create (); func_labels = Hashtbl.create 1 } in
+      {
+        m with
+        funcs = List.map (fun f -> forward_memory ctx (Mem2reg.merge f)) m.funcs;
+      }
+    in
+    let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.reassociate m)) in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     let a = A.create () in
     let ctx = { m; a; func_labels = Hashtbl.create 64 } in

@@ -414,6 +414,125 @@ let prune (f : func) =
         blocks = List.filter (fun (b : block) -> Hashtbl.mem seen b.id) f.blocks;
       }
 
+(* A block that only jumps on to a block with no other predecessor and no
+   phis absorbs it. `for const` bodies arrive as one block per iteration. *)
+let merge (f : func) =
+  match f.blocks with
+  | [] -> f
+  | entry :: _ ->
+      let preds = Hashtbl.create 32 in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (fun s ->
+              Hashtbl.replace preds s
+                (1 + Option.value ~default:0 (Hashtbl.find_opt preds s)))
+            (terminator_successors b.terminator))
+        f.blocks;
+      let by_id = Hashtbl.create 32 in
+      List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) f.blocks;
+      let into = Hashtbl.create 16 in
+      let rec absorb (b : block) =
+        match b.terminator with
+        | Br c
+          when c <> b.id && c <> entry.id
+               && Hashtbl.find_opt preds c = Some 1
+               && not (Hashtbl.mem into c) -> (
+            match Hashtbl.find_opt by_id c with
+            | Some cb
+              when not (List.exists (function Phi _ -> true | _ -> false) cb.instrs) ->
+                Hashtbl.replace into c b.id;
+                absorb
+                  { b with instrs = b.instrs @ cb.instrs; terminator = cb.terminator }
+            | _ -> b)
+        | _ -> b
+      in
+      let merged =
+        List.filter_map
+          (fun (b : block) ->
+            if Hashtbl.mem into b.id then None
+            else begin
+              let b' = absorb (Hashtbl.find by_id b.id) in
+              Hashtbl.replace by_id b.id b';
+              Some b.id
+            end)
+          f.blocks
+      in
+      (* Blocks absorbed before their absorber was reached are gone too *)
+      let merged = List.filter (fun id -> not (Hashtbl.mem into id)) merged in
+      let rec owner id =
+        match Hashtbl.find_opt into id with Some o -> owner o | None -> id
+      in
+      let rename = function
+        | Phi (i, t, ins) -> Phi (i, t, List.map (fun (v, p) -> (v, owner p)) ins)
+        | ins -> ins
+      in
+      {
+        f with
+        blocks =
+          List.map
+            (fun id ->
+              let b = Hashtbl.find by_id id in
+              { b with instrs = List.map rename b.instrs })
+            merged;
+      }
+
+(* (x op c1) op c2 becomes x op (c1 op c2) for associative integer ops, so a
+   chain of constant ORs into one word ends as one OR. *)
+let reassociate (m : module_) =
+  let one (f : func) =
+    let defs = Hashtbl.create 64 in
+    let combine op w a b =
+      let v =
+        match op with
+        | Add -> Some (Int64.add a b)
+        | Mul -> Some (Int64.mul a b)
+        | And -> Some (Int64.logand a b)
+        | Or -> Some (Int64.logor a b)
+        | Xor -> Some (Int64.logxor a b)
+        | _ -> None
+      in
+      Option.map (Ir_fold.norm w) v
+    in
+    let rewrite ins =
+      match ins with
+      | Bin (i, ((Add | Mul | And | Or | Xor) as op), ty, a, b) -> (
+          let a, b = match (a, b) with Const _, Local _ -> (b, a) | _ -> (a, b) in
+          let ins = Bin (i, op, ty, a, b) in
+          match (Ir_fold.width ty, a, b) with
+          | Some w, Local (x, _), Const (_, c2) -> (
+              match Hashtbl.find_opt defs x with
+              | Some (Bin (_, op', ty', a', Const (_, c1))) when op' = op && ty' = ty
+                -> (
+                  match combine op w c1 c2 with
+                  | Some c -> Bin (i, op, ty, a', Const (ty, c))
+                  | None -> ins)
+              | _ -> ins)
+          | _ -> ins)
+      | ins -> ins
+    in
+    {
+      f with
+      blocks =
+        List.map
+          (fun (b : block) ->
+            {
+              b with
+              instrs =
+                List.map
+                  (fun ins ->
+                    let ins = rewrite ins in
+                    (match ins with
+                    | Bin (i, _, _, _, _) -> Hashtbl.replace defs i ins
+                    | _ -> ());
+                    ins)
+                  b.instrs;
+            })
+          f.blocks;
+    }
+  in
+  { m with funcs = List.map one m.funcs }
+
 (* Promotion and DCE empty more blocks, so thread again afterwards. *)
 let module_ (m : module_) =
   { m with funcs = List.map (fun f -> prune (thread (dce (promote f)))) m.funcs }

@@ -1,0 +1,159 @@
+// Minimal standard library on the `syscall` builtin (Linux x86-64): output,
+// exit, clock and a recycling allocator. Needs no libc, so programs that use
+// only this file build with `--backend=native`. On the LLVM path it works too,
+// which keeps libc available as an oracle.
+
+const SYS_WRITE u64 = 1
+const SYS_MMAP u64 = 9
+const SYS_MUNMAP u64 = 11
+const SYS_CLOCK_GETTIME u64 = 228
+const SYS_EXIT_GROUP u64 = 231
+
+const STDOUT i32 = 1
+const STDERR i32 = 2
+
+fn sys_exit(code i32) void {
+    r i64 = syscall(SYS_EXIT_GROUP, code)
+}
+
+// Writes all `n` bytes at `p` to `fd`, retrying short writes.
+fn write_fd(fd i32, p addr, n usize) void {
+    done usize = 0
+    while done < n {
+        r i64 = syscall(SYS_WRITE, fd, p + done, n - done)
+        if r <= 0 { return }
+        done += bitcast[u64](r)
+    }
+}
+
+fn write_str(s addr, n usize) void { write_fd(STDOUT, s, n) }
+
+// Writes a NUL-terminated string.
+fn write_cstr(s addr) void {
+    n usize = 0
+    while s[u8, n] != 0 { n += 1 }
+    write_fd(STDOUT, s, n)
+}
+
+fn write_err(s addr) void {
+    n usize = 0
+    while s[u8, n] != 0 { n += 1 }
+    write_fd(STDERR, s, n)
+}
+
+fn write_char(c u8) void {
+    b arr[1, u8] = {}
+    b[0] = c
+    write_fd(STDOUT, &b[0], 1)
+}
+
+// Decimal, left-padded with zeros to at least `width` digits.
+fn write_u64_pad(x u64, width usize) void {
+    buf arr[24, u8] = {}
+    i usize = 24
+    v u64 = x
+    while true {
+        i -= 1
+        buf[i] = trunc[u8](v % 10) + 48
+        v = v / 10
+        if v == 0 { break }
+    }
+    while 24 - i < width && i > 0 {
+        i -= 1
+        buf[i] = 48
+    }
+    write_fd(STDOUT, &buf[i], 24 - i)
+}
+
+fn write_u64(x u64) void { write_u64_pad(x, 1) }
+
+fn write_i64(x i64) void {
+    if x < 0 {
+        write_char(45)
+        write_u64(bitcast[u64](0 - x))
+    } else {
+        write_u64(bitcast[u64](x))
+    }
+}
+
+// Lowercase hex, left-padded with zeros to at least `digits` digits.
+fn write_hex(x u64, digits usize) void {
+    buf arr[16, u8] = {}
+    i usize = 16
+    v u64 = x
+    while true {
+        i -= 1
+        d u8 = trunc[u8](v & 15)
+        buf[i] = if d < 10 { d + 48 } else { d + 87 }
+        v = v >> 4
+        if v == 0 { break }
+    }
+    while 16 - i < digits && i > 0 {
+        i -= 1
+        buf[i] = 48
+    }
+    write_fd(STDOUT, &buf[i], 16 - i)
+}
+
+// Monotonic clock in nanoseconds.
+fn clock_ns() u64 {
+    ts arr[2, i64] = {}
+    r i64 = syscall(SYS_CLOCK_GETTIME, 1, &ts[0])
+    return bitcast[u64](ts[0]) * 1_000_000_000 + bitcast[u64](ts[1])
+}
+
+// Allocator: power-of-two size classes from 128 bytes up, each block with a
+// 64-byte header holding its class, so every block is 64-byte aligned. Freed blocks go on a per-class list and
+// are reused; nothing is returned to the system. Fresh memory comes from
+// mmap, so it is zeroed; reused memory is zeroed by `sys_alloc_zeroed` only.
+
+const HEADER usize = 64
+
+var free_lists arr[64, addr] = {}
+
+fn size_class(n usize) usize {
+    c usize = 7
+    size usize = 128
+    while size < n + HEADER {
+        size = size << 1
+        c += 1
+    }
+    return c
+}
+
+fn sys_alloc(n usize) addr {
+    c usize = size_class(n)
+    p addr = free_lists[c]
+    if p != null {
+        free_lists[c] = p[addr]
+        p[u64] = c                              // the link overwrote the class
+        return p + HEADER
+    }
+    one usize = 1
+    size usize = one << c
+    // PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS
+    r i64 = syscall(SYS_MMAP, 0, size, 3, 0x22, -1, 0)
+    if r < 0 && r > -4096 { return null }
+    q addr = addr_from_bits(bitcast[usize](r))
+    q[u64] = c
+    return q + HEADER
+}
+
+fn sys_alloc_zeroed(n usize) addr {
+    p addr = sys_alloc(n)
+    if p == null { return null }
+    c usize = (p - HEADER)[u64]
+    // Zero what a previous owner may have written
+    one usize = 1
+    words usize = ((one << c) - HEADER) / 8
+    for i usize = 0; i < words; i += 1 { p[u64, i] = 0 }
+    return p
+}
+
+fn sys_free(p addr) void {
+    if p == null { return }
+    q addr = p - HEADER
+    c usize = q[u64]
+    q[addr] = free_lists[c]
+    free_lists[c] = q
+}
