@@ -1720,17 +1720,21 @@ let t name f x =
 let compile (m : module_) =
   if timing then begin
     Printf.eprintf "front end      %8.2f ms (cpu)\n%!" (Sys.time () *. 1000.);
-    let n = ref 0 and nb = ref 0 in
+    let n = ref 0 and nb = ref 0 and nl = ref 0 in
     List.iter
       (fun (f : func) ->
         List.iter
           (fun (b : block) ->
             incr nb;
-            n := !n + List.length b.instrs)
+            n := !n + List.length b.instrs;
+            nl :=
+              !nl
+              + List.length
+                  (List.filter (function Location _ -> true | _ -> false) b.instrs))
           f.blocks)
       m.funcs;
-    Printf.eprintf "input          %d instrs, %d blocks, %d funcs\n%!" !n !nb
-      (List.length m.funcs)
+    Printf.eprintf "input          %d instrs (%d locations), %d blocks, %d funcs\n%!" !n
+      !nl !nb (List.length m.funcs)
   end;
   try
     (* No debug info yet: source locations only slow every pass down *)
