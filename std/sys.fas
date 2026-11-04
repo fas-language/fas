@@ -157,3 +157,18 @@ fn sys_free(p addr) void {
     q[addr] = free_lists[c]
     free_lists[c] = q
 }
+
+// Grows (or keeps) the block at `p` to hold `n` bytes; `p` may be null.
+fn sys_realloc(p addr, n usize) addr {
+    if p == null { return sys_alloc(n) }
+    c usize = (p - HEADER)[u64]
+    one usize = 1
+    have usize = (one << c) - HEADER
+    if n <= have { return p }
+    q addr = sys_alloc(n)
+    if q == null { return null }
+    words usize = have / 8
+    for i usize = 0; i < words; i += 1 { q[u64, i] = p[u64, i] }
+    sys_free(p)
+    return q
+}

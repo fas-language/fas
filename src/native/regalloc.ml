@@ -11,8 +11,9 @@
    (counting a use as an argument), because argument set-up writes them, and
    rsi and rdi not across block copies or intrinsics either, which use them as
    scratch. Code generation keeps rax, rcx and rdx as scratch. When too many values are
-   live, the one with the lowest spill weight (uses scaled by loop depth; ties
-   go to the interval ending last) stays in its stack slot.
+   live, the one with the lowest spill weight (uses scaled by loop depth, per
+   position of its interval; ties go to the interval ending last) stays in its
+   stack slot.
 
    The caller passes a view of the code: [skip] names values that get no
    register (addresses rebuilt where they are used) and [operands] lists the
@@ -100,7 +101,8 @@ let uses_string_regs = function
 
 (* [skip] holds the ids of instructions whose code is folded into their
    block's terminator; they define nothing that needs a home. *)
-let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) =
+let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f : func)
+    =
   let key_of = key_of_skip skip in
   let iter_operands g ins = List.iter g (operands ins) in
   let start_pos = Hashtbl.create 16 and end_pos = Hashtbl.create 16 in
@@ -346,7 +348,12 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
   in
   let conflict r1 r2 = List.exists (fun x -> List.exists (ranges_conflict x) r2) r1 in
   let last_end rs = List.fold_left (fun acc (_, b) -> max acc b) 0 rs in
-  let weight k = Option.value ~default:0. (Hashtbl.find_opt weights k) in
+  (* spill cost per position: a short interval with a use in a loop is
+     costly to spill, a long one used once is cheap *)
+  let span rs = List.fold_left (fun acc (a, b) -> acc + b - a + 1) 0 rs in
+  let weight k rs =
+    Option.value ~default:0. (Hashtbl.find_opt weights k) /. float_of_int (span rs)
+  in
   let debug = Sys.getenv_opt "FAS_RA_DEBUG" = Some "1" in
   let assignment = Hashtbl.create 64 in
   (* per register: the intervals it holds that may still conflict *)
@@ -403,11 +410,11 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                           (Ptbl.find held r)
                       with
                       | [ ((_, vk, vrs) as victim) ] ->
-                          Some ((weight vk, -last_end vrs), r, vk, victim)
+                          Some ((weight vk vrs, -last_end vrs), r, vk, victim)
                       | _ -> None)
                   order
               in
-              let mine = (weight k, -last_end rs) in
+              let mine = (weight k rs, -last_end rs) in
               match
                 List.sort (fun (a, _, _, _) (b, _, _, _) -> compare a b) candidates
               with
@@ -418,6 +425,48 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                   take r
               | _ -> ())))
     intervals;
+  (* Spilled phis share a stack slot with their spilled incoming values when
+     the intervals allow it (the same rule as for registers), so their edge
+     copies vanish. [slot_of] receives member -> representative. *)
+  (match slot_of with
+  | None -> ()
+  | Some out ->
+      let rs_of = Hashtbl.create 64 in
+      List.iter (fun (_, k, rs) -> Hashtbl.replace rs_of k rs) intervals;
+      let group = Hashtbl.create 16 in
+      (* representative -> ranges of all members *)
+      let rec find k =
+        match Hashtbl.find_opt out k with Some r when r <> k -> find r | _ -> k
+      in
+      let ranges_of r =
+        match Hashtbl.find_opt group r with
+        | Some rs -> rs
+        | None -> Option.value ~default:[] (Hashtbl.find_opt rs_of r)
+      in
+      let spilled k = k >= 0 && Hashtbl.mem rs_of k && not (Hashtbl.mem assignment k) in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (function
+              | Phi (id, ty, incoming) when scalar ty && spilled id ->
+                  List.iter
+                    (fun (v, _) ->
+                      match key_of v with
+                      | Some k when spilled k ->
+                          let a = find id and b = find k in
+                          if a <> b then begin
+                            let ra = ranges_of a and rb = ranges_of b in
+                            if not (conflict ra rb) then begin
+                              Hashtbl.replace out b a;
+                              Hashtbl.replace group a (ra @ rb)
+                            end
+                          end
+                      | _ -> ())
+                    incoming
+              | _ -> ())
+            b.instrs)
+        f.blocks;
+      Hashtbl.iter (fun k _ -> Hashtbl.replace out k (find k)) out);
   if debug then
     List.iter
       (fun (_, k, rs) ->

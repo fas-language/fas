@@ -95,7 +95,12 @@ let is_aggregate = function Struct _ | Array _ -> true | _ -> false
 let calls_anything (f : func) =
   List.exists
     (fun (b : block) ->
-      List.exists (function Call _ | Call_indirect _ -> true | _ -> false) b.instrs)
+      List.exists
+        (function
+          | Call (_, _, _, name, _) -> not (String.starts_with ~prefix:"llvm." name)
+          | Call_indirect _ -> true
+          | _ -> false)
+        b.instrs)
     f.blocks
 
 let calls_self (f : func) =
@@ -104,14 +109,21 @@ let calls_self (f : func) =
       List.exists (function Call (_, _, _, n, _) -> n = f.name | _ -> false) b.instrs)
     f.blocks
 
-(* Functions whose calls this pass replaces *)
-let candidates (m : module_) =
+(* Functions whose calls this pass replaces. [sizes] holds sizes measured
+   before vector scalarization, so a short vector function is judged by its
+   vector instructions rather than by its lanes. *)
+let candidates sizes (m : module_) =
   let small = 24 in
   let tbl = Ptbl.create 16 in
   List.iter
     (fun (f : func) ->
       let marked = List.mem f.name m.inline_functions in
-      let auto = f.linkage = Internal && size f <= small && not (calls_anything f) in
+      let auto =
+        f.linkage = Internal
+        && (match Ptbl.find_opt sizes f.name with Some n -> n | None -> size f)
+           <= small
+        && not (calls_anything f)
+      in
       if
         f.blocks <> [] && (marked || auto) && (not f.variadic)
         && (not (calls_self f))
@@ -263,8 +275,8 @@ let func cands (f : func) =
   in
   go f 0
 
-let module_ (m : module_) =
-  let cands = candidates m in
+let module_ ?(sizes = Ptbl.create 1) (m : module_) =
+  let cands = candidates sizes m in
   if Ptbl.length cands = 0 then (m, false)
   else
     let changed = ref false in

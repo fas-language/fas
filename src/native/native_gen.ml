@@ -550,6 +550,7 @@ let reserve fr bytes align =
 
 let build_frame ctx (f : func) =
   let addrs = analyse_addrs ctx f in
+  let shared = Hashtbl.create 16 in
   let fr =
     {
       addrs;
@@ -560,7 +561,7 @@ let build_frame ctx (f : func) =
       homes =
         Regalloc.allocate
           ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-          ~operands:(operands_view addrs) f;
+          ~operands:(operands_view addrs) ~slot_of:shared f;
       saved = [];
     }
   in
@@ -577,10 +578,22 @@ let build_frame ctx (f : func) =
           match instruction_result ins with
           | Some (id, ty) when is_aggregate ty ->
               Hashtbl.replace fr.slots id (reserve fr (max 1 (size_of ctx ty)) 16)
+          | Some (id, _) when Hashtbl.mem shared id -> ()
           | Some (id, _) -> Hashtbl.replace fr.slots id (reserve fr 8 8)
           | None -> ())
         b.instrs)
     f.blocks;
+  (* phi webs sharing a slot: members take their representative's *)
+  Hashtbl.iter
+    (fun id r ->
+      if id <> r then
+        match Hashtbl.find_opt fr.slots r with
+        | Some o -> Hashtbl.replace fr.slots id o
+        | None ->
+            let o = reserve fr 8 8 in
+            Hashtbl.replace fr.slots r o;
+            Hashtbl.replace fr.slots id o)
+    shared;
   let used =
     Hashtbl.fold (fun _ r acc -> if List.mem r acc then acc else r :: acc) fr.homes []
   in
@@ -1794,6 +1807,14 @@ let compile (m : module_) =
             m.funcs;
       }
     in
+    (* The inliner judges a vector function by its vector instructions, not
+       by the lanes scalarization turns them into *)
+    let vector_sizes = Ptbl.create 8 in
+    List.iter
+      (fun (f : func) ->
+        if Scalarize.has_vectors f then
+          Ptbl.replace vector_sizes f.name (Scalarize.vector_size f))
+      m.funcs;
     let m = t "scalarize" Scalarize.module_ m in
     let m = t "promote" Mem2reg.module_ m in
     let m = t "fold" Ir_fold.module_ m in
@@ -1801,7 +1822,7 @@ let compile (m : module_) =
     let m =
       if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" then m
       else
-        match t "inline" Inline.module_ m with
+        match t "inline" (Inline.module_ ~sizes:vector_sizes) m with
         | m', true ->
             (* Only the functions that changed need promoting again *)
             let again (fs, gs) =

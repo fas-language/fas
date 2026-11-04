@@ -500,6 +500,95 @@ let instr st ins =
   | ins -> emit st ins
 
 (* Does [f] mention vectors at all? *)
+(* Instructions that expand into [per] scalar instructions for each lane,
+   lane after lane, each reading only the same lane of its vector operands.
+   Plain loads and stores of a vector alloca of the function qualify: every
+   access to it inside a run has the same lane layout (any other pointer ends
+   the run), so lane order cannot reorder overlapping accesses. *)
+let lane_local allocas = function
+  | Bin (_, _, Vector (n, _), _, _)
+  | Fneg (_, Vector (n, _), _)
+  | Cmp (_, _, Vector (n, _), _, _) ->
+      Some (n, 1)
+  | Select (_, _, a, _) -> (
+      match value_ty a with Vector (n, _) -> Some (n, 1) | _ -> None)
+  | Cast (_, kind, Vector (n, _), _, Vector (m, _)) when n = m && kind <> "bitcast" ->
+      Some (n, 1)
+  | Load (_, Vector (n, t), Local (p, _), _)
+  | Store (Vector (n, t), _, Local (p, _), _)
+    when t <> I1 && Hashtbl.mem allocas p ->
+      Some (n, 2)
+  | _ -> None
+
+let lane_major st allocas instrs =
+  let buckets = ref [||] in
+  let flush () =
+    (* each bucket is reversed, like [st.out] *)
+    Array.iter (fun l -> st.out <- l @ st.out) !buckets;
+    buckets := [||]
+  in
+  List.iter
+    (fun ins ->
+      match lane_local allocas ins with
+      | Some (n, per) when n > 1 ->
+          let saved = st.out in
+          st.out <- [];
+          instr st ins;
+          let emitted = st.out in
+          st.out <- saved;
+          if List.length emitted <> n * per then begin
+            flush ();
+            st.out <- emitted @ st.out
+          end
+          else begin
+            if Array.length !buckets <> n then begin
+              flush ();
+              buckets := Array.make n []
+            end;
+            (* [emitted] is reversed: lane n-1 first *)
+            List.iteri
+              (fun k x ->
+                let i = n - 1 - (k / per) in
+                !buckets.(i) <- x :: !buckets.(i))
+              emitted
+          end
+      | _ ->
+          let saved = st.out in
+          st.out <- [];
+          instr st ins;
+          let emitted = st.out in
+          st.out <- saved;
+          if emitted <> [] then begin
+            flush ();
+            st.out <- emitted @ st.out
+          end)
+    instrs;
+  flush ()
+
+(* A size for the inliner that leaves out what promotion and scalarization
+   remove: allocas, loads and stores of allocas, and splats *)
+let vector_size (f : func) =
+  let allocas = Hashtbl.create 16 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function Alloca (d, _, _) -> Hashtbl.replace allocas d () | _ -> ())
+        b.instrs)
+    f.blocks;
+  let local = function Local (i, _) -> Hashtbl.mem allocas i | _ -> false in
+  List.fold_left
+    (fun n (b : block) ->
+      List.fold_left
+        (fun n ins ->
+          match ins with
+          | Alloca _ | Location _ | Shuffle_zero _ -> n
+          | Insert (_, _, (Zero _ | Undef _), _, _) -> n
+          | Shufflevector (_, _, _, _, Zero _) -> n
+          | (Load (_, _, p, _) | Store (_, _, p, _)) when local p -> n
+          | _ -> n + 1)
+        n b.instrs)
+    0 f.blocks
+
 let has_vectors (f : func) =
   is_vector f.ret
   || List.exists (fun (p : param) -> is_vector p.ty) f.params
@@ -548,6 +637,13 @@ let func structs (f : func) =
           b.instrs)
       f.blocks;
     st.next <- !top + 1;
+    let allocas = Hashtbl.create 8 in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (function Alloca (d, Vector _, _) -> Hashtbl.replace allocas d () | _ -> ())
+          b.instrs)
+      f.blocks;
     List.iter
       (fun (b : block) ->
         List.iter
@@ -563,7 +659,7 @@ let func structs (f : func) =
       List.map
         (fun (b : block) ->
           st.out <- [];
-          List.iter (instr st) b.instrs;
+          lane_major st allocas b.instrs;
           let terminator =
             match b.terminator with
             | Ret (Some ((Vector _ as vt), v)) ->
