@@ -1105,6 +1105,30 @@ let gen_instr ctx fr ins =
   | Bin (id, _, _, _, _) when Hashtbl.mem fr.addrs.dead id -> ()
   | Bin (id, op, ty, x, y) -> (
       match op with
+      | Sub when imm32 x = Some 0 ->
+          let d = dest_reg fr id [] in
+          load ctx fr d y;
+          A.neg a d;
+          store_result ctx fr id ty d
+      | (Add | Sub | And | Or | Xor)
+        when Hashtbl.find_opt fr.homes id = None
+             && (ty = I64 || match op with And | Or | Xor -> true | _ -> false)
+             && (slot_of fr x = Some (slot fr id)
+                || (op <> Sub && slot_of fr y = Some (slot fr id))) -> (
+          (* The result shares its stack slot with an operand (a spilled
+             phi web): update the slot in place. *)
+          let y = if slot_of fr x = Some (slot fr id) then y else x in
+          let alu =
+            match op with
+            | Add -> A.Add
+            | Sub -> A.Sub
+            | And -> A.And
+            | Or -> A.Or
+            | _ -> A.Xor
+          in
+          match imm32 y with
+          | Some k -> A.alu_mi a alu 8 (slot fr id) k
+          | None -> A.alu_mr a alu 8 (slot fr id) (in_reg ctx fr y A.Rcx))
       | Add | Sub | And | Or | Xor | Mul ->
           let commutes = op <> Sub in
           (* When the result's home already holds [y], compute [y op x]. *)
@@ -1149,9 +1173,11 @@ let gen_instr ctx fr ins =
           | _, Some k ->
               load ctx fr d x;
               A.alu_ri a alu d k
-          | _, None ->
+          | _, None -> (
               load ctx fr d x;
-              A.alu_rr a alu d (in_reg ctx fr y A.Rcx));
+              match slot_of fr y with
+              | Some m -> A.alu_rm a alu d m
+              | None -> A.alu_rr a alu d (in_reg ctx fr y A.Rcx)));
           (* Bitwise operations on canonical (zero-extended) inputs stay
              canonical. *)
           if match op with And | Or | Xor -> true | _ -> false then put ctx fr id d

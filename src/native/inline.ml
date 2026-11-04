@@ -92,48 +92,75 @@ let size (f : func) =
 
 let is_aggregate = function Struct _ | Array _ -> true | _ -> false
 
-let calls_anything (f : func) =
-  List.exists
-    (fun (b : block) ->
-      List.exists
-        (function
-          | Call (_, _, _, name, _) -> not (String.starts_with ~prefix:"llvm." name)
-          | Call_indirect _ -> true
-          | _ -> false)
-        b.instrs)
-    f.blocks
-
 let calls_self (f : func) =
   List.exists
     (fun (b : block) ->
       List.exists (function Call (_, _, _, n, _) -> n = f.name | _ -> false) b.instrs)
     f.blocks
 
-(* Functions whose calls this pass replaces. [sizes] holds sizes measured
-   before vector scalarization, so a short vector function is judged by its
-   vector instructions rather than by its lanes. *)
+(* Functions whose calls this pass replaces: those marked `@inline`, and
+   small internal ones. A function that calls only other candidates counts as
+   small when its size plus theirs is, so leaf helpers inline through their
+   small callers. [sizes] holds sizes measured before vector scalarization,
+   so a short vector function is judged by its vector instructions rather
+   than by its lanes. *)
 let candidates sizes (m : module_) =
-  let small = 24 in
+  let small = 32 in
   let tbl = Ptbl.create 16 in
+  let eligible (f : func) =
+    f.blocks <> [] && (not f.variadic)
+    && (not (calls_self f))
+    && f.name <> "main"
+    && (not (List.mem f.name m.no_inline_functions))
+    && (not (is_aggregate f.ret))
+    && not (List.exists (fun (p : param) -> is_aggregate p.ty) f.params)
+  in
+  let own_size (f : func) =
+    match Ptbl.find_opt sizes f.name with Some n -> n | None -> size f
+  in
+  (* total size with the candidate callees, None if it calls anything else *)
+  let total (f : func) =
+    List.fold_left
+      (fun acc (b : block) ->
+        List.fold_left
+          (fun acc ins ->
+            match (acc, ins) with
+            | None, _ -> None
+            | Some n, Call (_, _, _, name, _)
+              when String.starts_with ~prefix:"llvm." name ->
+                Some n
+            | Some n, Call (_, _, _, name, _) -> (
+                match Ptbl.find_opt tbl name with
+                | Some (_, k) -> Some (n + k)
+                | None -> None)
+            | Some _, Call_indirect _ -> None
+            | acc, _ -> acc)
+          acc b.instrs)
+      (Some (own_size f))
+      f.blocks
+  in
   List.iter
     (fun (f : func) ->
-      let marked = List.mem f.name m.inline_functions in
-      let auto =
-        f.linkage = Internal
-        && (match Ptbl.find_opt sizes f.name with Some n -> n | None -> size f)
-           <= small
-        && not (calls_anything f)
-      in
-      if
-        f.blocks <> [] && (marked || auto) && (not f.variadic)
-        && (not (calls_self f))
-        && f.name <> "main"
-        && (not (List.mem f.name m.no_inline_functions))
-        && (not (is_aggregate f.ret))
-        && not (List.exists (fun (p : param) -> is_aggregate p.ty) f.params)
-      then Ptbl.replace tbl f.name f)
+      if eligible f && List.mem f.name m.inline_functions then
+        Ptbl.replace tbl f.name (f, own_size f))
     m.funcs;
-  tbl
+  let rec rounds k =
+    let added = ref false in
+    List.iter
+      (fun (f : func) ->
+        if f.linkage = Internal && (not (Ptbl.mem tbl f.name)) && eligible f then
+          match total f with
+          | Some n when n <= small ->
+              Ptbl.replace tbl f.name (f, n);
+              added := true
+          | _ -> ())
+      m.funcs;
+    if !added && k > 1 then rounds (k - 1)
+  in
+  rounds 4;
+  let out = Ptbl.create (Ptbl.length tbl) in
+  Ptbl.iter (fun name (f, _) -> Ptbl.replace out name f) tbl;
+  out
 
 (* Replace the call at position [pos] of block [bid] in [f] by [callee]. *)
 let inline_at (f : func) bid pos (callee : func) =
