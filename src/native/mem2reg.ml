@@ -477,8 +477,15 @@ let merge (f : func) =
             merged;
       }
 
+let is_pow2 c = Int64.compare c 0L > 0 && Int64.logand c (Int64.pred c) = 0L
+
+let log2 c =
+  let rec go k c = if c = 1L then k else go (k + 1) (Int64.shift_right_logical c 1) in
+  go 0 c
+
 (* (x op c1) op c2 becomes x op (c1 op c2) for associative integer ops, so a
-   chain of constant ORs into one word ends as one OR. *)
+   chain of constant ORs into one word ends as one OR. Unsigned division and remainder by a power of two
+   become a shift and a mask. *)
 let reassociate (m : module_) =
   let one (f : func) =
     let defs = Hashtbl.create 64 in
@@ -509,6 +516,11 @@ let reassociate (m : module_) =
                   | None -> ins)
               | _ -> ins)
           | _ -> ins)
+      (* Unsigned division and remainder by a power of two *)
+      | Bin (i, Udiv, ty, a, Const (_, c)) when is_pow2 c ->
+          Bin (i, Lshr, ty, a, Const (ty, Int64.of_int (log2 c)))
+      | Bin (i, Urem, ty, a, Const (_, c)) when is_pow2 c ->
+          Bin (i, And, ty, a, Const (ty, Int64.pred c))
       | ins -> ins
     in
     {
@@ -572,11 +584,155 @@ let addresses (f : func) =
         f.blocks;
   }
 
+(* Scalar replacement of local arrays: an `arr[N, T]` local with a scalar `T`
+   whose every use is a constant-index element address (`gep [N x T], a, 0, k`)
+   loaded or stored as a `T`, or a zero fill, becomes N scalar slots, which
+   [promote] then turns into registers. This is what `for const` filling a
+   local array buys (plan, rule 1). *)
+let sroa (f : func) =
+  let candidates = Hashtbl.create 8 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function
+          | Alloca (id, (Array (n, elt) as ty), al) when scalar elt && n > 0 && n <= 64
+            ->
+              Hashtbl.replace candidates id (ty, n, elt, al)
+          | _ -> ())
+        b.instrs)
+    f.blocks;
+  if Hashtbl.length candidates = 0 then f
+  else begin
+    let const_index = function
+      | Index (Const (_, k)) -> Some (Int64.to_int k)
+      | Zero -> Some 0
+      | Index _ -> None
+    in
+    (* gep id -> (array, element) *)
+    let elements = Hashtbl.create 16 in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (function
+            | Gep (g, gty, Local (a, _), [ i0; ik ]) when Hashtbl.mem candidates a -> (
+                let ty, n, _, _ = Hashtbl.find candidates a in
+                match (const_index i0, const_index ik) with
+                | Some 0, Some k when gty = ty && k >= 0 && k < n ->
+                    Hashtbl.replace elements g (a, k)
+                | _ -> Hashtbl.remove candidates a)
+            | _ -> ())
+          b.instrs)
+      f.blocks;
+    let reject_value = function
+      | Local (v, _) -> (
+          Hashtbl.remove candidates v;
+          match Hashtbl.find_opt elements v with
+          | Some (a, _) -> Hashtbl.remove candidates a
+          | None -> ())
+      | _ -> ()
+    in
+    let element_ok g ty =
+      match Hashtbl.find_opt elements g with
+      | Some (a, _) -> (
+          match Hashtbl.find_opt candidates a with
+          | Some (_, _, elt, _) -> elt = ty
+          | None -> false)
+      | None -> false
+    in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (fun ins ->
+            match ins with
+            | Gep (g, _, Local (a, _), _) when Hashtbl.mem elements g ->
+                ignore a (* the base use is accounted for by [elements] *)
+            | Load (_, ty, Local (g, _), _) when Hashtbl.mem elements g ->
+                if not (element_ok g ty) then reject_value (Local (g, ty))
+            | Store (ty, v, Local (g, _), _) when Hashtbl.mem elements g ->
+                if not (element_ok g ty) then reject_value (Local (g, ty));
+                reject_value v
+            | Store (ty, Zero _, Local (a, _), _) when Hashtbl.mem candidates a -> (
+                match Hashtbl.find_opt candidates a with
+                | Some (aty, _, _, _) when aty = ty -> ()
+                | _ -> Hashtbl.remove candidates a)
+            | ins -> Regalloc.iter_operands reject_value ins)
+          b.instrs;
+        Regalloc.iter_term_operands reject_value b.terminator)
+      f.blocks;
+    if Hashtbl.length candidates = 0 then f
+    else begin
+      let next =
+        ref
+          (1
+          + List.fold_left
+              (fun acc (b : block) ->
+                List.fold_left
+                  (fun acc ins ->
+                    match instruction_result ins with
+                    | Some (id, _) -> max acc id
+                    | None -> acc)
+                  acc b.instrs)
+              0 f.blocks)
+      in
+      (* array id -> element slot ids *)
+      let slots = Hashtbl.create 8 in
+      Hashtbl.iter
+        (fun a (_, n, _, _) ->
+          Hashtbl.replace slots a
+            (Array.init n (fun _ ->
+                 let id = !next in
+                 incr next;
+                 id)))
+        candidates;
+      let zero elt = match elt with Pointer _ -> Null elt | t -> Const (t, 0L) in
+      let resolve = function
+        | Local (g, t) as v -> (
+            match Hashtbl.find_opt elements g with
+            | Some (a, k) when Hashtbl.mem slots a ->
+                Local ((Hashtbl.find slots a).(k), t)
+            | _ -> v)
+        | v -> v
+      in
+      let rewrite ins =
+        match ins with
+        | Alloca (a, _, al) when Hashtbl.mem slots a ->
+            let _, _, elt, _ = Hashtbl.find candidates a in
+            Array.to_list
+              (Array.map (fun s -> Alloca (s, elt, al)) (Hashtbl.find slots a))
+        | Gep (g, _, _, _)
+          when match Hashtbl.find_opt elements g with
+               | Some (a, _) -> Hashtbl.mem slots a
+               | None -> false ->
+            []
+        | Store (_, Zero _, (Local (a, _) as p), al) when Hashtbl.mem slots a ->
+            let _, _, elt, _ = Hashtbl.find candidates a in
+            Array.to_list
+              (Array.map
+                 (fun s -> Store (elt, zero elt, Local (s, value_ty p), al))
+                 (Hashtbl.find slots a))
+        | ins -> [ Ir_fold.map_instr resolve ins ]
+      in
+      {
+        f with
+        blocks =
+          List.map
+            (fun (b : block) ->
+              {
+                b with
+                instrs = List.concat_map rewrite b.instrs;
+                terminator = Ir_fold.map_term resolve b.terminator;
+              })
+            f.blocks;
+      }
+    end
+  end
+
 (* Promotion and DCE empty more blocks, so thread again afterwards. *)
 let module_ (m : module_) =
   {
     m with
-    funcs = List.map (fun f -> prune (thread (dce (addresses (promote f))))) m.funcs;
+    funcs =
+      List.map (fun f -> prune (thread (dce (addresses (promote (sroa f)))))) m.funcs;
   }
 
 (* After folding: constant branches leave dead code and empty blocks. *)

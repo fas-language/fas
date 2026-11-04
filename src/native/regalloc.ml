@@ -11,7 +11,8 @@
    (counting a use as an argument), because argument set-up writes them, and
    rsi and rdi not across block copies or intrinsics either, which use them as
    scratch. Code generation keeps rax, rcx and rdx as scratch. When too many values are
-   live, the one whose interval ends last stays in its stack slot.
+   live, the one with the lowest spill weight (uses scaled by loop depth; ties
+   go to the interval ending last) stays in its stack slot.
 
    The caller passes a view of the code: [skip] names values that get no
    register (addresses rebuilt where they are used) and [operands] lists the
@@ -186,13 +187,43 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
      ranges, merged, form an interval with holes. *)
   let first = Hashtbl.create 64 and last = Hashtbl.create 64 in
   let ranges = Hashtbl.create 64 in
+  (* Spill weights: each use counts 10^depth, where a block's loop depth is
+     the number of back edges (to an earlier block in layout order) whose
+     span covers it. *)
+  let index = Hashtbl.create 16 in
+  List.iteri (fun i (b : block) -> Hashtbl.replace index b.id i) f.blocks;
+  let back_edges =
+    List.concat_map
+      (fun (b : block) ->
+        let i = Hashtbl.find index b.id in
+        List.filter_map
+          (fun s ->
+            match Hashtbl.find_opt index s with
+            | Some j when j <= i -> Some (j, i)
+            | _ -> None)
+          (terminator_successors b.terminator))
+      f.blocks
+  in
+  let block_weight (b : block) =
+    let i = Hashtbl.find index b.id in
+    let depth = List.length (List.filter (fun (j, k) -> j <= i && i <= k) back_edges) in
+    let rec pow w d = if d = 0 then w else pow (w *. 10.) (d - 1) in
+    pow 1. (min depth 6)
+  in
+  let weights = Hashtbl.create 64 in
+  let weigh w k =
+    Hashtbl.replace weights k
+      (w +. Option.value ~default:0. (Hashtbl.find_opt weights k))
+  in
   let entry_id = match f.blocks with b :: _ -> b.id | [] -> -1 in
   List.iter
     (fun (b : block) ->
       Hashtbl.reset first;
       Hashtbl.reset last;
       let s = Hashtbl.find start_pos b.id and e = Hashtbl.find end_pos b.id in
+      let w = block_weight b in
       let touch k p =
+        weigh w k;
         if not (Hashtbl.mem first k) then Hashtbl.replace first k p;
         Hashtbl.replace last k p
       in
@@ -295,6 +326,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
   in
   let conflict r1 r2 = List.exists (fun x -> List.exists (ranges_conflict x) r2) r1 in
   let last_end rs = List.fold_left (fun acc (_, b) -> max acc b) 0 rs in
+  let weight k = Option.value ~default:0. (Hashtbl.find_opt weights k) in
   let debug = Sys.getenv_opt "FAS_RA_DEBUG" = Some "1" in
   let assignment = Hashtbl.create 64 in
   (* per register: the intervals it holds that may still conflict *)
@@ -340,8 +372,8 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
           match List.find_opt fits order with
           | Some r -> take r
           | None -> (
-              (* Evict the single conflicting interval that ends last, if it
-                 ends after this one. *)
+              (* Evict the cheapest single conflicting interval if it is
+                 cheaper than this one, or as cheap and ending later. *)
               let candidates =
                 List.filter_map
                   (fun r ->
@@ -353,14 +385,15 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                           (Hashtbl.find held r)
                       with
                       | [ ((_, vk, vrs) as victim) ] ->
-                          Some (last_end vrs, r, vk, victim)
+                          Some ((weight vk, -last_end vrs), r, vk, victim)
                       | _ -> None)
                   order
               in
+              let mine = (weight k, -last_end rs) in
               match
-                List.sort (fun (a, _, _, _) (b, _, _, _) -> compare b a) candidates
+                List.sort (fun (a, _, _, _) (b, _, _, _) -> compare a b) candidates
               with
-              | (vend, r, vk, victim) :: _ when vend > last_end rs ->
+              | (cost, r, vk, victim) :: _ when cost < mine ->
                   Hashtbl.remove assignment vk;
                   Hashtbl.replace held r
                     (List.filter (fun x -> x != victim) (Hashtbl.find held r));
