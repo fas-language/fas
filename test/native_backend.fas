@@ -165,10 +165,37 @@ fn arrays(x u64, n usize) void {
   line(zext[i64](m8))
 }
 
+// Inlining: several returns, a callee alloca with a runtime index, a call
+// in a loop body, nested inline calls and a void callee
+fn pick(a u64, b u64, c usize) u64 @inline {
+  t arr[4, u64] = {}
+  t[c & 3] = a
+  if a > b { return t[c & 3] - b }
+  if a == b { return 7 }
+  return b * 3
+}
+
+fn twice(x u64) u64 @inline { return pick(x, 10, 1) + pick(x, 20, 2) }
+
+fn bump_inl(p addr, k usize) void @inline {
+  if k == 0 { return }
+  p[u64, 0] += k
+}
+
+fn inlined(n usize) void {
+  s u64 = 0
+  for i usize = 0; i < n; i += 1 { s += twice(i) ^ pick(i, n, i) }
+  line(bitcast[i64](s))
+  cell arr[1, u64] = {}
+  for i usize = 0; i < 5; i += 1 { bump_inl(&cell, i) }
+  line(bitcast[i64](cell[0]))
+}
+
 fn main() i32 {
   write_str("native backend\n", 15)
   memops()
   arrays(1000003, 5)
+  inlined(30)
   line(bitcast[i64](sum8(1, 2, 3, 4, 5, 6, 7, 8)))
   line(sum7(10, 20, 30, 40, 50, 60, -70))
   line(bitcast[i64](classify(0) + classify(3) + classify(9) + classify(4)))

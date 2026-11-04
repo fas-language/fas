@@ -1403,6 +1403,13 @@ let compile (m : module_) =
   try
     let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m)) in
     let m =
+      if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" then m
+      else
+        match Inline.module_ m with
+        | m, true -> Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m))
+        | m, false -> m
+    in
+    let m =
       let ctx = { m; a = A.create (); func_labels = Hashtbl.create 1 } in
       {
         m with
