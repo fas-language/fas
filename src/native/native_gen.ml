@@ -830,6 +830,21 @@ let gen_instr ctx fr ins =
             | _ -> A.Cmp
           in
           (match (op, imm32 y) with
+          (* Three-operand add: lea leaves both inputs in their registers *)
+          | Add, k
+            when home fr x <> None
+                 && home fr x <> Some d
+                 && (k <> None || (home fr y <> None && home fr y <> Some d)) -> (
+              let hx = Option.get (home fr x) in
+              let index, disp =
+                match k with
+                | Some k -> (None, k)
+                | None -> (Some (Option.get (home fr y), 1), 0)
+              in
+              match index with
+              | None -> A.lea a d (A.Base (hx, disp))
+              | Some (index, scale) ->
+                  A.lea a d (A.Sib { base = Some hx; index; scale; disp; sym = None }))
           | Mul, Some k -> A.imul_rri a d (in_reg ctx fr x d) k
           | Mul, None ->
               load ctx fr d x;
