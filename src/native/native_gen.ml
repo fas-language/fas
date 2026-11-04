@@ -1,13 +1,22 @@
-(* Native code generation from [Ir], milestone 2: correctness first.
+(* Native code generation from [Ir]: scalar integers.
 
-   Every SSA value lives in its own 8-byte stack slot (aggregates in a slot of
-   their size); each instruction loads its operands into fixed scratch
-   registers, computes, and stores the result. Integer values are kept
-   canonical in their slot: zero-extended from their width to 64 bits, with
-   `i1` as 0 or 1. Signed operations sign-extend their operands first.
+   Pipeline ([compile]): Mem2reg (promotion, addr+n as gep, DCE, jump
+   threading, pruning), Ir_fold, store forwarding and block merging,
+   reassociation, then per function: address analysis ([analyse_addrs] folds
+   gep chains and constant index arithmetic into [base + idx*scale + disp]
+   forms), linear-scan allocation (Regalloc), RPO block layout with loop
+   rotation, and emission.
 
-   Phis: each phi has a second "incoming" slot. Edges write the incoming slots
-   and the phi's block copies them into the phi slots on entry, so a phi that
+   Every SSA value has a home: a register from Regalloc or an 8-byte stack
+   slot (aggregates get a slot of their size). Scratch registers are rax, rcx
+   and rdx. Integer values are kept canonical: zero-extended from their width
+   to 64 bits, with `i1` as 0 or 1; signed operations sign-extend operands.
+   Instruction selection fuses compare-and-branch, folds address forms and
+   immediates into operands, and turns load/op/store of one place into a
+   read-modify-write instruction.
+
+   Phis: each phi has a second "incoming" home. Edges write the incoming homes
+   and the phi's block copies them into the phi homes on entry, so a phi that
    reads another phi of the same block always sees the old value.
 
    Calls between Fas functions use the SysV integer registers for the first
