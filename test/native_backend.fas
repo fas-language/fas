@@ -158,6 +158,11 @@ fn arrays(x u64, n usize) void {
   q[u64, 2] = 0x7fff_ffff
   q[u64, 3] = 0x1_0000_0000
   for i usize = 0; i < 4; i += 1 { line(bitcast[i64](q[u64, i])) }
+  // Repeated subexpressions and multiplication by powers of two
+  h usize = (n >> 1) - 1
+  line(bitcast[i64](((n >> 1) - 1) * 4 + ((n >> 1) - 1) * 2 + h * 8))
+  m8 u8 = trunc[u8](x) * 16
+  line(zext[i64](m8))
 }
 
 fn main() i32 {

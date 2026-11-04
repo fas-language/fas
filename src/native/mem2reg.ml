@@ -537,7 +537,12 @@ let reassociate (m : module_) =
                     (match ins with
                     | Bin (i, _, _, _, _) -> Hashtbl.replace defs i ins
                     | _ -> ());
-                    ins)
+                    (* x * 2^k as x << k, after combining constant chains *)
+                    match ins with
+                    | Bin (i, Mul, ty, a, Const (_, c))
+                      when is_pow2 c && Int64.compare c 1L > 0 ->
+                        Bin (i, Shl, ty, a, Const (ty, Int64.of_int (log2 c)))
+                    | ins -> ins)
                   b.instrs;
             })
           f.blocks;
@@ -818,6 +823,62 @@ let module_ (m : module_) =
       List.map (fun f -> prune (thread (dce (addresses (promote (sroa f)))))) m.funcs;
   }
 
+(* Block-local common subexpressions: a second identical arithmetic or cast
+   instruction in a block reuses the first one's result. Comparisons and
+   geps stay, since isel fuses each one into its single user (a branch, a
+   memory operand); division stays because it may trap. *)
+let cse (f : func) =
+  let subst = Hashtbl.create 16 in
+  let rec resolve = function
+    | Local (id, _) as v -> (
+        match Hashtbl.find_opt subst id with Some w -> resolve w | None -> v)
+    | v -> v
+  in
+  let blocks =
+    List.map
+      (fun (b : block) ->
+        let seen = Hashtbl.create 16 in
+        let instrs =
+          List.filter_map
+            (fun ins ->
+              let ins = Ir_fold.map_instr resolve ins in
+              let key, id, ty =
+                match ins with
+                | Bin (_, (Udiv | Sdiv | Urem | Srem), _, _, _) -> (None, 0, Void)
+                | Bin (i, op, ty, a, b) -> (Some (Bin (0, op, ty, a, b)), i, ty)
+                | Cast (i, k, t1, v, t2) -> (Some (Cast (0, k, t1, v, t2)), i, t2)
+                | _ -> (None, 0, Void)
+              in
+              match key with
+              | None -> Some ins
+              | Some k -> (
+                  match Hashtbl.find_opt seen k with
+                  | Some first ->
+                      Hashtbl.replace subst id (Local (first, ty));
+                      None
+                  | None ->
+                      Hashtbl.replace seen k id;
+                      Some ins))
+            b.instrs
+        in
+        { b with instrs })
+      f.blocks
+  in
+  if Hashtbl.length subst = 0 then f
+  else
+    {
+      f with
+      blocks =
+        List.map
+          (fun (b : block) ->
+            {
+              b with
+              instrs = List.map (Ir_fold.map_instr resolve) b.instrs;
+              terminator = Ir_fold.map_term resolve b.terminator;
+            })
+          blocks;
+    }
+
 (* After folding: constant branches leave dead code and empty blocks. *)
 let cleanup (m : module_) =
-  { m with funcs = List.map (fun f -> prune (thread (dce f))) m.funcs }
+  { m with funcs = List.map (fun f -> prune (thread (dce (cse f)))) m.funcs }
