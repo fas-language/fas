@@ -673,6 +673,7 @@ let setcc a c r =
   zero_extend a 8 r
 
 let cmov a c dst src = rr a [ 0x0f; 0x40 + cond_num c ] ~reg:dst ~rm:src
+let cmov_rm a c dst mem = rm a [ 0x0f; 0x40 + cond_num c ] ~reg:dst mem
 
 (* Control flow *)
 

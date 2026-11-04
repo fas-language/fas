@@ -1795,6 +1795,47 @@ let edge_copies ctx fr blocks from_id target =
   resolve moves (R A.Rax);
   resolve xmoves (XR 0)
 
+(* [sid] = select ([x] c [y]), [tv], [fv] as cmp; cmovCC, without the
+   condition as a value. [d] takes one arm before the compare (moves keep
+   the flags, but a zero constant loads with xor, so all loads come first)
+   and the other arm, in a register or memory, moves in on the condition. *)
+let fused_select ctx fr sid c x y tv fv =
+  let a = ctx.a in
+  let d =
+    match Hashtbl.find_opt fr.homes sid with
+    | Some r when not (List.mem r (List.concat_map (avoid_of fr) [ x; y ])) -> r
+    | _ -> A.Rdx
+  in
+  let float = float_cmp c in
+  (* the arm that moves in on the condition must be a register or memory *)
+  let src v =
+    match home fr v with
+    | Some r when r <> d -> Some (`R r)
+    | Some _ -> None
+    | None -> (
+        match slot_of fr v with
+        | Some m -> Some (`M m)
+        | None -> if d <> A.Rdx then Some `Rdx else None)
+  in
+  let plan =
+    match (src tv, src fv) with
+    | Some s, _ -> Some (fv, tv, s, cond_of c)
+    | None, Some s when not float -> Some (tv, fv, s, negate (cond_of c))
+    | _ -> None
+  in
+  match plan with
+  | None -> false
+  | Some (first, second, s, cc) ->
+      (match s with `Rdx -> load ctx fr A.Rdx second | _ -> ());
+      load ctx fr d first;
+      compare_flags ctx fr c x y;
+      (match s with
+      | `R r -> A.cmov a cc d r
+      | `Rdx -> A.cmov a cc d A.Rdx
+      | `M m -> A.cmov_rm a cc d m);
+      if Hashtbl.find_opt fr.homes sid <> Some d then put ctx fr sid d;
+      true
+
 let gen_function ctx (f : func) =
   let a = ctx.a in
   let fr = build_frame ctx f in
@@ -2025,6 +2066,14 @@ let gen_function ctx (f : func) =
       let fusion = fused b in
       let rec emit = function
         | [] -> ()
+        | Cmp (id, c, cty, x, y) :: Select (sid, Local (cid, _), tv, fv) :: rest
+          when cid = id
+               && Hashtbl.find_opt uses id = Some 1
+               && (match c with Foeq | Fune -> false | _ -> true)
+               && (match cty with Vector _ -> false | _ -> true)
+               && (not (is_aggregate (value_ty tv)))
+               && fused_select ctx fr sid c x y tv fv ->
+            emit rest
         | ins :: rest -> (
             match rmw ins rest with
             | Some rest -> emit rest

@@ -191,11 +191,62 @@ fn inlined(n usize) void {
   line(bitcast[i64](cell[0]))
 }
 
+// If-conversion: small branches become selects (cmp; cmov), with signed
+// narrow, unsigned, float and pointer conditions, constant and spilled arms
+fn sel_mix(x i64, y i64, k i8, f f64) i64 {
+  r i64 = x
+  if k < 3 { r = y }
+  if x > y { r += 7 }
+  if f < 0.5 { r ^= 0x5555 }
+  u u64 = bitcast[u64](x)
+  if u >= 1000 { r = r - 1 }
+  t i64 = 0
+  if k == -1 { t = 42 } else { t = -42 }
+  if f >= 2.0 { t += 3 }
+  q i8 = k
+  if q > 100 { q = 100 }
+  return r + t * 1000 + sext[i64](q) * 1000000
+}
+
+fn sel_spill(n i64) i64 {
+  a i64 = n
+  b i64 = n * 3
+  c i64 = n * 5
+  d i64 = n * 7
+  e i64 = n * 11
+  g i64 = n * 13
+  h i64 = n * 17
+  i i64 = n * 19
+  j i64 = n * 23
+  m i64 = n * 29
+  o i64 = n * 31
+  p i64 = n * 37
+  if a > 10 { a = b }
+  if c < d { e = g } else { e = h }
+  if i == j { m = o }
+  if p != 0 { p = a + e }
+  return a + b + c + d + e + g + h + i + j + m + o + p
+}
+
+fn selects() void {
+  ks arr[6, i8] = {-1, 0, 2, 3, 101, -128}
+  fs arr[4, f64] = {0.25, 0.5, 2.0, -1.0}
+  h i64 = 0
+  for i usize = 0; i < 24; i += 1 {
+    x i64 = bitcast[i64](i * 997) - 5000
+    y i64 = bitcast[i64](i * 31)
+    h = h * 31 + sel_mix(x, y, ks[i % 6], fs[i % 4])
+    h = h * 31 + sel_spill(bitcast[i64](i) - 12)
+  }
+  line(h)
+}
+
 fn main() i32 {
   write_str("native backend\n", 15)
   memops()
   arrays(1000003, 5)
   inlined(30)
+  selects()
   line(bitcast[i64](sum8(1, 2, 3, 4, 5, 6, 7, 8)))
   line(sum7(10, 20, 30, 40, 50, 60, -70))
   line(bitcast[i64](classify(0) + classify(3) + classify(9) + classify(4)))
