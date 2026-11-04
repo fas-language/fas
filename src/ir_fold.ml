@@ -118,9 +118,37 @@ let map_term f = function
   | Switch (t, v, cases, d) -> Switch (t, f v, cases, d)
   | (Ret None | Br _ | Unreachable) as x -> x
 
+(* Algebraic identities with one constant operand: `x + 0`, `x * 1`,
+   `x & -1`, `x << 0` and so on are `x`; `x * 0` and `x & 0` are `0`. *)
+let identity op ty a b =
+  match width ty with
+  | None -> None
+  | Some w -> (
+      let ones = norm w (-1L) in
+      let is k v =
+        match int_const v with Some (_, x) -> x = norm w k | None -> false
+      in
+      let all_ones v =
+        match int_const v with Some (_, x) -> x = ones | None -> false
+      in
+      match op with
+      | (Add | Or | Xor) when is 0L b -> Some a
+      | (Add | Or | Xor) when is 0L a -> Some b
+      | (Sub | Shl | Lshr | Ashr) when is 0L b -> Some a
+      | Mul when is 1L b -> Some a
+      | Mul when is 1L a -> Some b
+      | (Mul | And) when is 0L b || is 0L a -> const ty 0L
+      | And when all_ones b -> Some a
+      | And when all_ones a -> Some b
+      | (Udiv | Sdiv) when is 1L b -> Some a
+      | _ -> None)
+
 (* The folded value of an instruction, if all it needs is constants. *)
 let evaluate = function
-  | Bin (i, op, t, a, b) -> Option.map (fun v -> (i, v)) (fold_bin op t a b)
+  | Bin (i, op, t, a, b) -> (
+      match fold_bin op t a b with
+      | Some v -> Some (i, v)
+      | None -> Option.map (fun v -> (i, v)) (identity op t a b))
   | Cmp (i, c, _, a, b) -> Option.map (fun v -> (i, v)) (fold_cmp c a b)
   | Cast (i, k, ft, v, tt) -> Option.map (fun v -> (i, v)) (fold_cast k ft v tt)
   | Select (i, Const (I1, c), a, b) -> Some (i, if c <> 0L then a else b)

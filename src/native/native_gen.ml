@@ -706,8 +706,17 @@ let gen_instr ctx fr ins =
   | Bin (id, op, ty, x, y) -> (
       match op with
       | Add | Sub | And | Or | Xor | Mul ->
+          let commutes = op <> Sub in
+          (* When the result's home already holds [y], compute [y op x]. *)
+          let x, y =
+            match (Hashtbl.find_opt fr.homes (Regalloc.V id), home fr y) with
+            | Some r, Some ry when commutes && r = ry && home fr x <> Some r -> (y, x)
+            | _ -> (x, y)
+          in
+          let x, y =
+            if commutes && imm32 x <> None && imm32 y = None then (y, x) else (x, y)
+          in
           let d = dest_reg fr id (avoid_of fr y) in
-          load ctx fr d x;
           let alu =
             match op with
             | Add -> A.Add
@@ -718,16 +727,26 @@ let gen_instr ctx fr ins =
             | _ -> A.Cmp
           in
           (match (op, imm32 y) with
-          | Mul, _ -> A.imul_rr a d (in_reg ctx fr y A.Rcx)
-          | _, Some k -> A.alu_ri a alu d k
-          | _, None -> A.alu_rr a alu d (in_reg ctx fr y A.Rcx));
-          store_result ctx fr id ty d
+          | Mul, Some k -> A.imul_rri a d (in_reg ctx fr x d) k
+          | Mul, None ->
+              load ctx fr d x;
+              A.imul_rr a d (in_reg ctx fr y A.Rcx)
+          | _, Some k ->
+              load ctx fr d x;
+              A.alu_ri a alu d k
+          | _, None ->
+              load ctx fr d x;
+              A.alu_rr a alu d (in_reg ctx fr y A.Rcx));
+          (* Bitwise operations on canonical (zero-extended) inputs stay
+             canonical. *)
+          if match op with And | Or | Xor -> true | _ -> false then put ctx fr id d
+          else store_result ctx fr id ty d
       | Udiv | Urem ->
           load ctx fr A.Rax x;
           load ctx fr A.Rcx y;
           A.mov_imm a A.Rdx 0L;
           A.div a A.Rcx;
-          store_result ctx fr id ty (if op = Udiv then A.Rax else A.Rdx)
+          put ctx fr id (if op = Udiv then A.Rax else A.Rdx)
       | Sdiv | Srem ->
           load_signed ctx fr A.Rax x;
           load_signed ctx fr A.Rcx y;
@@ -743,7 +762,7 @@ let gen_instr ctx fr ins =
           | _ ->
               load ctx fr A.Rcx y;
               A.shift_cl a sh d);
-          store_result ctx fr id ty d
+          if op = Lshr then put ctx fr id d else store_result ctx fr id ty d
       | Fadd | Fsub | Fmul | Fdiv -> unsupported "floating-point arithmetic")
   | Fneg _ -> unsupported "floating-point negation"
   | Cmp (id, c, _, x, y) ->

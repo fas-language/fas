@@ -382,6 +382,18 @@ let alu_ri a op dst imm =
 let test_rr a x y = rr a [ 0x85 ] ~reg:y ~rm:x
 let imul_rr a dst src = rr a [ 0x0f; 0xaf ] ~reg:dst ~rm:src
 
+(* imul dst, src, imm (64-bit) *)
+let imul_rri a dst src imm =
+  if fits_i8 imm then begin
+    rr a [ 0x6b ] ~reg:dst ~rm:src;
+    byte a imm
+  end
+  else if fits_i32 imm then begin
+    rr a [ 0x69 ] ~reg:dst ~rm:src;
+    int32 a imm
+  end
+  else invalid_arg "x64.imul_rri: immediate does not fit in 32 bits"
+
 type shift = Shl | Shr | Sar
 
 (* shift dst, cl *)
