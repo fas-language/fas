@@ -197,6 +197,7 @@ let config_for state key : Cli.t =
     target_features = None;
     profile = None;
     all_errors = false;
+    native = false;
     align_loops = None;
     align_functions = None;
     tune_options = [];

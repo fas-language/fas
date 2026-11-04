@@ -1,0 +1,288 @@
+(* Promote scalar stack slots to SSA values, for the native backend.
+
+   Lowering gives every Fas local an `alloca` with loads and stores. A slot
+   whose address is only ever used as the pointer of a plain load or store of
+   its own scalar type is promoted: phis are placed on the iterated dominance
+   frontier of its stores (Cytron et al.), loads are replaced by the value
+   reaching them along the dominator tree, and phis that merge one value are
+   removed again. Volatile accesses and slots whose address escapes stay in
+   memory. *)
+
+open Ir
+
+let scalar = Regalloc.scalar
+
+module Imap = Map.Make (Int)
+
+let promote (f : func) =
+  match f.blocks with
+  | [] -> f
+  | entry :: _ ->
+      let by_id = Hashtbl.create 32 in
+      List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) f.blocks;
+      (* Reverse postorder of the reachable blocks *)
+      let visited = Hashtbl.create 32 in
+      let post = ref [] in
+      let rec dfs id =
+        if not (Hashtbl.mem visited id) then begin
+          Hashtbl.replace visited id ();
+          (match Hashtbl.find_opt by_id id with
+          | Some b -> List.iter dfs (terminator_successors b.terminator)
+          | None -> ());
+          post := id :: !post
+        end
+      in
+      dfs entry.id;
+      let rpo = Array.of_list !post in
+      let order = Hashtbl.create 32 in
+      Array.iteri (fun i id -> Hashtbl.replace order id i) rpo;
+      let blocks = List.filter (fun (b : block) -> Hashtbl.mem order b.id) f.blocks in
+      (* Predecessor edges, with multiplicity *)
+      let preds = Hashtbl.create 32 in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (fun s ->
+              Hashtbl.replace preds s
+                (b.id :: Option.value ~default:[] (Hashtbl.find_opt preds s)))
+            (terminator_successors b.terminator))
+        blocks;
+      let preds_of id = Option.value ~default:[] (Hashtbl.find_opt preds id) in
+      (* Dominators: Cooper, Harvey and Kennedy *)
+      let n = Array.length rpo in
+      let idom = Array.make n (-1) in
+      idom.(0) <- 0;
+      let changed = ref true in
+      let rec intersect a b =
+        if a = b then a
+        else if a > b then intersect idom.(a) b
+        else intersect a idom.(b)
+      in
+      while !changed do
+        changed := false;
+        for i = 1 to n - 1 do
+          let ps =
+            List.filter_map
+              (fun p ->
+                match Hashtbl.find_opt order p with
+                | Some j when idom.(j) >= 0 -> Some j
+                | _ -> None)
+              (preds_of rpo.(i))
+          in
+          match ps with
+          | [] -> ()
+          | first :: rest ->
+              let d = List.fold_left intersect first rest in
+              if idom.(i) <> d then begin
+                idom.(i) <- d;
+                changed := true
+              end
+        done
+      done;
+      (* Dominance frontiers, in rpo indices *)
+      let df = Array.make n [] in
+      for i = 0 to n - 1 do
+        let ps =
+          List.sort_uniq compare
+            (List.filter_map (Hashtbl.find_opt order) (preds_of rpo.(i)))
+        in
+        if List.length ps >= 2 then
+          List.iter
+            (fun p ->
+              let r = ref p in
+              while !r <> idom.(i) do
+                if not (List.mem i df.(!r)) then df.(!r) <- i :: df.(!r);
+                r := idom.(!r)
+              done)
+            ps
+      done;
+      let children = Array.make n [] in
+      for i = n - 1 downto 1 do
+        children.(idom.(i)) <- i :: children.(idom.(i))
+      done;
+      (* Promotable slots *)
+      let slots = Hashtbl.create 16 in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (function
+              | Alloca (id, ty, _) when scalar ty -> Hashtbl.replace slots id ty
+              | _ -> ())
+            b.instrs)
+        blocks;
+      let reject = function Local (id, _) -> Hashtbl.remove slots id | _ -> () in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (function
+              | Load (_, ty, Local (p, _), _) when Hashtbl.find_opt slots p = Some ty ->
+                  ()
+              | Store (ty, v, Local (p, _), _) when Hashtbl.find_opt slots p = Some ty
+                ->
+                  reject v
+              | ins -> Regalloc.iter_operands reject ins)
+            b.instrs;
+          Regalloc.iter_term_operands reject b.terminator)
+        blocks;
+      if Hashtbl.length slots = 0 then { f with blocks }
+      else begin
+        let next =
+          ref
+            (1
+            + List.fold_left
+                (fun acc (b : block) ->
+                  List.fold_left
+                    (fun acc ins ->
+                      match instruction_result ins with
+                      | Some (id, _) -> max acc id
+                      | None -> acc)
+                    acc b.instrs)
+                0 blocks)
+        in
+        (* Phi placement: (block index, slot) -> phi id *)
+        let phis = Hashtbl.create 32 in
+        let block_phis = Array.make n [] in
+        Hashtbl.iter
+          (fun slot ty ->
+            let work = ref [] in
+            List.iter
+              (fun (b : block) ->
+                if
+                  List.exists
+                    (function Store (_, _, Local (p, _), _) -> p = slot | _ -> false)
+                    b.instrs
+                then work := Hashtbl.find order b.id :: !work)
+              blocks;
+            let placed = Hashtbl.create 8 in
+            while !work <> [] do
+              let i = List.hd !work in
+              work := List.tl !work;
+              List.iter
+                (fun d ->
+                  if not (Hashtbl.mem placed d) then begin
+                    Hashtbl.replace placed d ();
+                    let id = !next in
+                    incr next;
+                    Hashtbl.replace phis (d, slot) id;
+                    block_phis.(d) <- (slot, ty, id) :: block_phis.(d);
+                    work := d :: !work
+                  end)
+                df.(i)
+            done)
+          slots;
+        (* Renaming along the dominator tree *)
+        let subst = Hashtbl.create 64 in
+        let incoming =
+          Hashtbl.create 32
+          (* phi id -> (value, pred) list, reversed *)
+        in
+        let new_instrs = Array.make n [] in
+        let rec rename i env =
+          let b = Hashtbl.find by_id rpo.(i) in
+          let env =
+            List.fold_left
+              (fun env (slot, ty, id) -> Imap.add slot (Local (id, ty)) env)
+              env block_phis.(i)
+          in
+          let env = ref env in
+          let kept =
+            List.filter
+              (fun ins ->
+                match ins with
+                | Alloca (id, _, _) when Hashtbl.mem slots id -> false
+                | Load (id, _, Local (p, _), _) when Hashtbl.mem slots p ->
+                    Hashtbl.replace subst id (Imap.find p !env);
+                    false
+                | Store (_, v, Local (p, _), _) when Hashtbl.mem slots p ->
+                    env := Imap.add p v !env;
+                    false
+                | _ -> true)
+              b.instrs
+          in
+          new_instrs.(i) <- kept;
+          List.iter
+            (fun s ->
+              match Hashtbl.find_opt order s with
+              | None -> ()
+              | Some si ->
+                  List.iter
+                    (fun (slot, _, id) ->
+                      let prev =
+                        Option.value ~default:[] (Hashtbl.find_opt incoming id)
+                      in
+                      Hashtbl.replace incoming id ((Imap.find slot !env, b.id) :: prev))
+                    block_phis.(si))
+            (terminator_successors b.terminator);
+          List.iter (fun c -> rename c !env) children.(i)
+        in
+        let initial =
+          Hashtbl.fold
+            (fun slot ty env -> Imap.add slot (Undef ty) env)
+            slots Imap.empty
+        in
+        rename 0 initial;
+        (* Remove phis that merge a single value *)
+        let rec resolve = function
+          | Local (id, _) as v -> (
+              match Hashtbl.find_opt subst id with Some w -> resolve w | None -> v)
+          | v -> v
+        in
+        let live_phis = Hashtbl.create 32 in
+        Array.iter
+          (List.iter (fun (_, ty, id) -> Hashtbl.replace live_phis id ty))
+          block_phis;
+        let progress = ref true in
+        while !progress do
+          progress := false;
+          Hashtbl.iter
+            (fun id _ ->
+              if not (Hashtbl.mem subst id) then
+                let values =
+                  List.filter_map
+                    (fun (v, _) ->
+                      match resolve v with
+                      | Local (j, _) when j = id -> None
+                      | v -> Some v)
+                    (Option.value ~default:[] (Hashtbl.find_opt incoming id))
+                  |> List.sort_uniq compare
+                in
+                match values with
+                | [ v ] ->
+                    Hashtbl.replace subst id v;
+                    progress := true
+                | _ -> ())
+            live_phis
+        done;
+        let blocks =
+          List.map
+            (fun (b : block) ->
+              let i = Hashtbl.find order b.id in
+              let phi_instrs =
+                List.filter_map
+                  (fun (_, ty, id) ->
+                    if Hashtbl.mem subst id then None
+                    else
+                      let ins =
+                        List.rev_map
+                          (fun (v, p) -> (resolve v, p))
+                          (Option.value ~default:[] (Hashtbl.find_opt incoming id))
+                      in
+                      Some (Phi (id, ty, ins)))
+                  (List.rev block_phis.(i))
+              in
+              let instrs = List.map (Ir_fold.map_instr resolve) new_instrs.(i) in
+              (* Existing phis stay first *)
+              let old_phis, rest =
+                List.partition (function Phi _ -> true | _ -> false) instrs
+              in
+              {
+                b with
+                instrs = old_phis @ phi_instrs @ rest;
+                terminator = Ir_fold.map_term resolve b.terminator;
+              })
+            blocks
+        in
+        { f with blocks }
+      end
+
+let module_ (m : module_) = { m with funcs = List.map promote m.funcs }

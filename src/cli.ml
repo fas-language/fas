@@ -23,6 +23,7 @@ type t = {
   target_features : string option;
   profile : string option;
   all_errors : bool;
+  native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
   align_loops : int option;
   align_functions : int option;
   tune_options : string list;
@@ -106,6 +107,8 @@ let usage =
   \  --diagnostics=text|json  print diagnostics as text (default) or one JSON line\n\
   \  --all-errors  report every error in function bodies instead of stopping at the \
    first\n\
+  \  --backend=llvm|native  build executables with LLVM (default) or the built-in \
+   x86-64 Linux code generator (experimental: integers only, no C)\n\
   \  --version     print the fas version and the opt, llc and C compiler in use\n\
   \  -h, --help    show this help\n\
    C inputs:\n\
@@ -183,6 +186,7 @@ let parse_invocation ~subcommand argv =
   let os = ref Target_layout.host_os in
   let profile = ref None in
   let all_errors = ref false in
+  let native = ref false in
   let profile_conflict emit =
     match (!profile, emit) with
     | None, _ | Some _, (Optimized_llvm | Asm | Obj | Executable) -> None
@@ -257,6 +261,7 @@ let parse_invocation ~subcommand argv =
                 target_features = None;
                 profile = !profile;
                 all_errors = !all_errors;
+                native = !native;
                 align_loops = None;
                 align_functions = None;
                 tune_options = [];
@@ -353,6 +358,10 @@ let parse_invocation ~subcommand argv =
             no_inline_function
       | "--all-errors" ->
           all_errors := true;
+          loop (i + 1) input output emit keep optimization optimization_explicit debug
+            no_inline_function
+      | "--backend=native" | "--backend=llvm" ->
+          native := argv.(i) = "--backend=native";
           loop (i + 1) input output emit keep optimization optimization_explicit debug
             no_inline_function
       | "--profile" ->

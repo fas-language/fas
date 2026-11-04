@@ -1,0 +1,144 @@
+// Differential program for `--backend=native`: prints through `syscall` only,
+// so the native build and the LLVM build must print the same bytes.
+
+struct Point { x i32 y i64 tag u8 }
+struct Pair { a Point b Point }
+
+var counter u64 = 7
+const TABLE arr[5, u32] = {3, 1, 4, 1, 5}
+var scratch arr[16, u8] = {}
+
+fn write_str(s addr, n usize) void {
+  r i64 = syscall(1, 1, s, n)
+}
+
+fn write_u64(x u64) void {
+  buf arr[20, u8] = {}
+  i usize = 20
+  v u64 = x
+  while true {
+    i = i - 1
+    buf[i] = trunc[u8](v % 10) + 48
+    v = v / 10
+    if v == 0 { break }
+  }
+  r i64 = syscall(1, 1, &buf[i], 20 - i)
+}
+
+fn write_i64(x i64) void {
+  if x < 0 {
+    write_str("-", 1)
+    write_u64(bitcast[u64](0 - x))
+  } else {
+    write_u64(bitcast[u64](x))
+  }
+}
+
+fn line(x i64) void {
+  write_i64(x)
+  write_str("\n", 1)
+}
+
+fn sum8(a u64, b u64, c u64, d u64, e u64, f u64, g u64, h u64) u64 {
+  return a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f + 7 * g + 8 * h
+}
+
+fn sum7(a i32, b i32, c i32, d i32, e i32, f i32, g i32) i64 {
+  return sext[i64](a - b + c - d + e - f + g)
+}
+
+fn classify(x u64) u64 {
+  switch x {
+    case 0: { return 100 }
+    case 3: { return 300 }
+    case 9: { return 900 }
+    default: { return x }
+  }
+}
+
+fn move(p addr, dx i32) void {
+  q Point = {}
+  copy(q, p[Point])
+  q.x = q.x + dx
+  q.tag = q.tag + 1
+  copy(p[Point], q)
+}
+
+fn swap_pair(dst addr, src addr) void {
+  p Pair = {}
+  copy(p, src[Pair])
+  out Pair = {}
+  copy(out.a, p.b)
+  copy(out.b, p.a)
+  copy(dst[Pair], out)
+}
+
+fn gcd(a u64, b u64) u64 {
+  x u64 = a
+  y u64 = b
+  while y != 0 {
+    t u64 = x % y
+    x = y
+    y = t
+  }
+  return x
+}
+
+fn main() i32 {
+  write_str("native backend\n", 15)
+  line(bitcast[i64](sum8(1, 2, 3, 4, 5, 6, 7, 8)))
+  line(sum7(10, 20, 30, 40, 50, 60, -70))
+  line(bitcast[i64](classify(0) + classify(3) + classify(9) + classify(4)))
+  // Signed and unsigned narrow arithmetic
+  a i8 = -100
+  b i8 = 3
+  line(sext[i64](a / b))
+  line(sext[i64](a % b))
+  line(sext[i64](a >> 2))
+  c u8 = 200
+  line(zext[i64](c + c))
+  line(zext[i64](c >> 3))
+  d i16 = -30000
+  line(sext[i64](d - 10000))
+  line(zext[i64](add_sat(c, c)))
+  line(sext[i64](sub_sat(a, b * 20)))
+  h u16 = 0xf0f0
+  one u32 = 1
+  bit u32 = 0x80
+  byte u8 = 0x81
+  word u32 = 0x12345678
+  line(zext[i64](popcount(h)))
+  line(zext[i64](clz(one)))
+  line(zext[i64](ctz(bit)))
+  line(zext[i64](rotl(byte, 1)))
+  line(zext[i64](rotr(word, 8)))
+  // Structs and memory
+  p Point = {}
+  p.x = -5
+  p.y = 1 << 40
+  p.tag = 255
+  move(&p, 12)
+  line(sext[i64](p.x))
+  line(p.y)
+  line(zext[i64](p.tag))
+  pair Pair = {}
+  pair.a.x = 1
+  pair.b.x = 2
+  swapped Pair = {}
+  swap_pair(&swapped, &pair)
+  line(sext[i64](swapped.a.x * 10 + swapped.b.x))
+  // Globals
+  counter = counter * 6
+  line(bitcast[i64](counter))
+  total u32 = 0
+  for i usize = 0; i < 5; i += 1 { total = total + TABLE[i] }
+  line(zext[i64](total))
+  scratch[3] = 42
+  line(zext[i64](scratch[3]) + zext[i64](scratch[4]))
+  line(bitcast[i64](gcd(1071, 462)))
+  // Comparisons across signedness
+  m i32 = -1
+  n u32 = 1
+  if m < 0 && n > 0 { write_str("cmp ok\n", 7) }
+  return 3
+}

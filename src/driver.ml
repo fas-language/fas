@@ -2798,11 +2798,32 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                     ]
                 else Ok ()
               in
-              let* link_flags =
-                pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
-              in
-              emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-                ir c_objects link_flags redirect)
+              if config.Cli.native then
+                if config.Cli.link_inputs <> [] || c_objects <> [] || link_pkgs <> []
+                then
+                  Error
+                    [
+                      Diag.error Span.synthetic
+                        "`--backend=native` cannot link C objects or libraries yet";
+                    ]
+                else
+                  match Native_gen.compile ir with
+                  | Error message -> Error [ Diag.error Span.synthetic message ]
+                  | Ok image -> (
+                      try
+                        let oc = open_out_bin config.Cli.output in
+                        output_bytes oc image;
+                        close_out oc;
+                        Unix.chmod config.Cli.output 0o755;
+                        Ok ""
+                      with Sys_error message | Failure message ->
+                        Error [ Diag.error Span.synthetic message ])
+              else
+                let* link_flags =
+                  pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
+                in
+                emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
+                  ir c_objects link_flags redirect)
 
 let run_unstaged ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache
     ~pgo config =

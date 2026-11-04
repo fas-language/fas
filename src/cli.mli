@@ -23,6 +23,7 @@ type t = {
   target_features : string option;
   profile : string option;
   all_errors : bool;
+  native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
   align_loops : int option;
   align_functions : int option;
   tune_options : string list;
