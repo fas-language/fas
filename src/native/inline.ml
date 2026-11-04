@@ -104,6 +104,9 @@ let calls_self (f : func) =
    small callers. [sizes] holds sizes measured before vector scalarization,
    so a short vector function is judged by its vector instructions rather
    than by its lanes. *)
+let sole_site_limit = 300
+let slot_arg_limit = 160
+
 let candidates ?(only = fun _ -> true) sizes (m : module_) =
   let small = 32 in
   let tbl = Ptbl.create 16 in
@@ -160,159 +163,282 @@ let candidates ?(only = fun _ -> true) sizes (m : module_) =
   rounds 4;
   let out = Ptbl.create (Ptbl.length tbl) in
   Ptbl.iter (fun name (f, _) -> Ptbl.replace out name f) tbl;
-  out
+  (* Larger internal functions inline at some sites only: their only call
+     site (the code does not grow), and calls passing the caller's stack
+     slots, which inlining lets the caller promote to registers. *)
+  let sites = Ptbl.create 64 in
+  List.iter
+    (fun (f : func) ->
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (function
+              | Call (_, _, _, name, _) ->
+                  Ptbl.replace sites name
+                    (1 + Option.value ~default:0 (Ptbl.find_opt sites name))
+              | _ -> ())
+            b.instrs)
+        f.blocks)
+    m.funcs;
+  let extra = Ptbl.create 16 in
+  List.iter
+    (fun (f : func) ->
+      if f.linkage = Internal && (not (Ptbl.mem out f.name)) && eligible f then
+        let n = own_size f in
+        let once = Ptbl.find_opt sites f.name = Some 1 in
+        if (once && n <= sole_site_limit) || n <= slot_arg_limit then
+          Ptbl.replace extra f.name (f, n, once))
+    m.funcs;
+  (out, extra)
 
-(* Replace the call at position [pos] of block [bid] in [f] by [callee]. *)
-let inline_at (f : func) bid pos (callee : func) =
-  let mv, mb = max_ids f in
-  let kv = mv + 1 and kb = mb + 1 in
-  let cont = kb + (snd (max_ids callee) + 1) in
-  let blk = List.find (fun (b : block) -> b.id = bid) f.blocks in
-  let before = List.filteri (fun i _ -> i < pos) blk.instrs in
-  let call = List.nth blk.instrs pos in
-  let after = List.filteri (fun i _ -> i > pos) blk.instrs in
-  let dst, ret_ty, args =
-    match call with
-    | Call (d, _, t, _, args) -> (d, t, args)
-    | _ -> invalid_arg "inline_at"
-  in
-  let env = Ptbl.create 8 in
-  List.iter2 (fun (p : param) (_, _, v) -> Ptbl.replace env p.name v) callee.params args;
-  let value = function
-    | Local (i, t) -> Local (i + kv, t)
-    | Param (n, t) -> (
-        match Ptbl.find_opt env n with Some v -> v | None -> Param (n, t))
-    | v -> v
-  in
-  let allocas = ref [] in
-  let returns = ref [] in
-  let copied =
-    List.map
-      (fun (b : block) ->
-        let id = b.id + kb in
-        let instrs =
-          List.filter_map
-            (fun ins ->
-              let ins =
-                shift_phi_blocks kb (shift_def kv (Ir_fold.map_instr value ins))
-              in
-              match ins with
-              | Alloca _ ->
-                  allocas := ins :: !allocas;
-                  None
-              | ins -> Some ins)
-            b.instrs
-        in
-        let terminator =
-          match b.terminator with
-          | Ret r ->
-              (match r with
-              | Some (_, v) -> returns := (value v, id) :: !returns
-              | None -> ());
-              Br cont
-          | t -> shift_term kb (Ir_fold.map_term value t)
-        in
-        { id; label = callee.name ^ "." ^ b.label; instrs; terminator })
-      callee.blocks
-  in
-  let entry = match copied with b :: _ -> b.id | [] -> invalid_arg "inline_at" in
-  (* The call's result: the single returned value, or a phi *)
-  let subst, phi =
-    match (dst, !returns) with
-    | None, _ -> (None, [])
-    | Some d, [ (v, _) ] -> (Some (d, v), [])
-    | Some d, [] -> (Some (d, Undef ret_ty), [])
-    | Some d, rs -> (None, [ Phi (d, ret_ty, List.rev rs) ])
-  in
-  let continuation =
-    {
-      id = cont;
-      label = blk.label ^ ".cont";
-      instrs = phi @ after;
-      terminator = blk.terminator;
-    }
-  in
-  let succs = targets blk.terminator in
-  let first = match f.blocks with b :: _ -> b.id | [] -> bid in
-  (* The successors of [blk] are now reached from [cont] *)
-  let from_cont instrs =
-    List.map
-      (function
-        | Phi (i, t, ins) ->
-            Phi (i, t, List.map (fun (v, p) -> (v, if p = bid then cont else p)) ins)
-        | x -> x)
-      instrs
-  in
-  let blocks =
-    List.concat_map
-      (fun (b : block) ->
-        let instrs = if b.id = bid then before else b.instrs in
-        let instrs = if List.mem b.id succs then from_cont instrs else instrs in
-        let instrs = if b.id = first then List.rev !allocas @ instrs else instrs in
-        if b.id = bid then
-          ({ b with instrs; terminator = Br entry } :: copied) @ [ continuation ]
-        else [ { b with instrs } ])
-      f.blocks
-  in
-  let blocks =
-    match subst with
-    | None -> blocks
-    | Some (d, v) ->
-        let rec resolve = function Local (i, _) when i = d -> resolve v | x -> x in
-        List.map
-          (fun (b : block) ->
-            {
-              b with
-              instrs = List.map (Ir_fold.map_instr resolve) b.instrs;
-              terminator = Ir_fold.map_term resolve b.terminator;
-            })
-          blocks
-  in
-  { f with blocks }
+let allocas (f : func) =
+  let t = Hashtbl.create 16 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function Alloca (id, _, _) -> Hashtbl.replace t id () | _ -> ())
+        b.instrs)
+    f.blocks;
+  t
 
 let budget_instrs = 20000
 let budget_calls = 256
 
-let func cands (f : func) =
-  let rec go f n =
-    if n >= budget_calls || size f > budget_instrs then f
-    else
-      let site =
-        List.find_map
-          (fun (b : block) ->
-            List.find_mapi
-              (fun i ins ->
-                match ins with
-                | Call (_, _, _, name, args) when name <> f.name -> (
-                    match Ptbl.find_opt cands name with
-                    | Some (c : func)
-                      when List.length c.params = List.length args
-                           && List.for_all2
-                                (fun (p : param) (t, _, _) -> p.ty = t)
-                                c.params args ->
-                        Some (b.id, i, c)
-                    | _ -> None)
-                | _ -> None)
-              b.instrs)
-          f.blocks
-      in
-      match site with
-      | None -> f
-      | Some (bid, pos, c) -> go (inline_at f bid pos c) (n + 1)
+(* Inline the chosen call sites of [f] in one pass: a block splits at each
+   inlined call into its head, the copied callee and a continuation, and the
+   copies are scanned in turn for further sites. The call results and the
+   predecessor renames for the phis are substituted once at the end. *)
+let func (cands, extra) (f : func) =
+  let mv, mb = max_ids f in
+  let next_v = ref (mv + 1) and next_b = ref (mb + 1) in
+  let total = ref (size f) and count = ref 0 in
+  let slots = allocas f in
+  let hoisted = ref [] in
+  let subst = Hashtbl.create 16 in
+  (* the block that now ends with the terminator of a split block *)
+  let moved = Hashtbl.create 16 in
+  let rec resolve = function
+    | Local (i, _) as v -> (
+        match Hashtbl.find_opt subst i with Some w -> resolve w | None -> v)
+    | v -> v
   in
-  go f 0
+  let rec final b =
+    match Hashtbl.find_opt moved b with Some c -> final c | None -> b
+  in
+  let ids = Ptbl.create 8 in
+  let callee_ids (c : func) =
+    match Ptbl.find_opt ids c.name with
+    | Some x -> x
+    | None ->
+        let mv, mb = max_ids c in
+        let x = (mv, mb, size c) in
+        Ptbl.replace ids c.name x;
+        x
+  in
+  let chosen name args =
+    let c =
+      match Ptbl.find_opt cands name with
+      | Some c -> Some c
+      | None -> (
+          match Ptbl.find_opt extra name with
+          | Some (c, _, true) -> Some c
+          | Some (c, _, false)
+            when List.exists
+                   (fun (_, _, v) ->
+                     match resolve v with
+                     | Local (id, _) -> Hashtbl.mem slots id
+                     | _ -> false)
+                   args ->
+              Some c
+          | _ -> None)
+    in
+    match c with
+    | Some (c : func)
+      when name <> f.name && !count < budget_calls && !total <= budget_instrs
+           && List.length c.params = List.length args
+           && List.for_all2 (fun (p : param) (t, _, _) -> p.ty = t) c.params args ->
+        Some c
+    | _ -> None
+  in
+  let out = ref [] in
+  let rec emit (blk : block) =
+    let rec split before = function
+      | [] -> out := blk :: !out
+      | (Call (dst, _, ret_ty, name, args) as ins) :: after -> (
+          match chosen name args with
+          | None -> split (ins :: before) after
+          | Some callee ->
+              if Sys.getenv_opt "FAS_INLINE_DEBUG" = Some "1" then
+                Printf.eprintf "inline %s <- %s %d (%s)\n" f.name callee.name
+                  (size callee)
+                  (if Ptbl.mem cands callee.name then "small"
+                   else
+                     match Ptbl.find_opt extra callee.name with
+                     | Some (_, _, true) -> "sole"
+                     | _ -> "slots");
+              incr count;
+              let cmv, cmb, csize = callee_ids callee in
+              total := !total + csize;
+              let kv = !next_v and kb = !next_b in
+              next_v := kv + cmv + 1;
+              let cont = kb + cmb + 1 in
+              next_b := cont + 1;
+              let env = Ptbl.create 8 in
+              List.iter2
+                (fun (p : param) (_, _, v) -> Ptbl.replace env p.name v)
+                callee.params args;
+              let value = function
+                | Local (i, t) -> Local (i + kv, t)
+                | Param (n, t) -> (
+                    match Ptbl.find_opt env n with Some v -> v | None -> Param (n, t))
+                | v -> v
+              in
+              let returns = ref [] in
+              let copied =
+                List.map
+                  (fun (b : block) ->
+                    let id = b.id + kb in
+                    let instrs =
+                      List.filter_map
+                        (fun ins ->
+                          match
+                            shift_phi_blocks kb
+                              (shift_def kv (Ir_fold.map_instr value ins))
+                          with
+                          | Alloca (i, _, _) as ins ->
+                              Hashtbl.replace slots i ();
+                              hoisted := ins :: !hoisted;
+                              None
+                          | ins -> Some ins)
+                        b.instrs
+                    in
+                    let terminator =
+                      match b.terminator with
+                      | Ret r ->
+                          (match r with
+                          | Some (_, v) -> returns := (value v, id) :: !returns
+                          | None -> ());
+                          Br cont
+                      | t -> shift_term kb (Ir_fold.map_term value t)
+                    in
+                    { id; label = callee.name ^ "." ^ b.label; instrs; terminator })
+                  callee.blocks
+              in
+              let entry =
+                match copied with b :: _ -> b.id | [] -> invalid_arg "Inline.func"
+              in
+              let phi =
+                match (dst, !returns) with
+                | None, _ -> []
+                | Some d, [ (v, _) ] ->
+                    Hashtbl.replace subst d v;
+                    []
+                | Some d, [] ->
+                    Hashtbl.replace subst d (Undef ret_ty);
+                    []
+                | Some d, rs -> [ Phi (d, ret_ty, List.rev rs) ]
+              in
+              Hashtbl.replace moved blk.id cont;
+              out :=
+                { blk with instrs = List.rev before; terminator = Br entry } :: !out;
+              List.iter emit copied;
+              emit
+                {
+                  id = cont;
+                  label = blk.label ^ ".cont";
+                  instrs = phi @ after;
+                  terminator = blk.terminator;
+                })
+      | ins :: after -> split (ins :: before) after
+    in
+    split [] blk.instrs
+  in
+  List.iter emit f.blocks;
+  if !count = 0 then f
+  else
+    let fix_phi = function
+      | Phi (i, t, ins) -> Phi (i, t, List.map (fun (v, p) -> (resolve v, final p)) ins)
+      | ins -> Ir_fold.map_instr resolve ins
+    in
+    let blocks =
+      List.mapi
+        (fun k (b : block) ->
+          let instrs = List.map fix_phi b.instrs in
+          {
+            b with
+            instrs = (if k = 0 then List.rev !hoisted @ instrs else instrs);
+            terminator = Ir_fold.map_term resolve b.terminator;
+          })
+        (List.rev !out)
+    in
+    { f with blocks }
 
+(* The functions reachable from the exported ones and from global data;
+   internal functions whose every call was inlined are not. *)
+let reachable (m : module_) =
+  let by_name = Ptbl.create 64 in
+  List.iter (fun (f : func) -> Ptbl.replace by_name f.name f) m.funcs;
+  let live = Ptbl.create 64 in
+  let rec mark name =
+    if not (Ptbl.mem live name) then begin
+      Ptbl.replace live name ();
+      match Ptbl.find_opt by_name name with
+      | None -> ()
+      | Some (f : func) ->
+          let value = function Global (n, _) -> mark n | _ -> () in
+          List.iter
+            (fun (b : block) ->
+              List.iter
+                (fun ins ->
+                  (match ins with
+                  | Call (_, _, _, n, _) | Global_ptr (_, n, _) -> mark n
+                  | _ -> ());
+                  ignore
+                    (Ir_fold.map_instr
+                       (fun v ->
+                         value v;
+                         v)
+                       ins))
+                b.instrs;
+              ignore
+                (Ir_fold.map_term
+                   (fun v ->
+                     value v;
+                     v)
+                   b.terminator))
+            f.blocks
+    end
+  in
+  List.iter
+    (function
+      | Storage_global { pointers; _ } -> List.iter (fun (_, n, _) -> mark n) pointers
+      | _ -> ())
+    m.globals;
+  List.iter (fun (f : func) -> if f.linkage <> Internal then mark f.name) m.funcs;
+  live
+
+(* A function inlined at its only call site is copied before its own calls
+   are inlined, so its callees are inlined (and scanned) once, in the copy;
+   one still reachable afterwards, for lack of budget, is done after. *)
 let module_ ?only ?(sizes = Ptbl.create 1) (m : module_) =
-  let cands = candidates ?only sizes m in
-  if Ptbl.length cands = 0 then (m, false)
+  let ((c, e) as cands) = candidates ?only sizes m in
+  if Ptbl.length c = 0 && Ptbl.length e = 0 then (m, false)
   else
     let changed = ref false in
-    let funcs =
+    let sole (f : func) =
+      match Ptbl.find_opt e f.name with Some (_, _, once) -> once | None -> false
+    in
+    let run pick funcs =
       List.map
         (fun (f : func) ->
-          let g = func cands f in
-          if g != f then changed := true;
-          g)
-        m.funcs
+          if not (pick f) then f
+          else
+            let g = func cands f in
+            if g != f then changed := true;
+            g)
+        funcs
     in
+    let funcs = run (fun f -> not (sole f)) m.funcs in
+    let live = reachable { m with funcs } in
+    let funcs = run (fun f -> sole f && Ptbl.mem live f.name) funcs in
     ({ m with funcs }, !changed)

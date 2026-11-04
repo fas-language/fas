@@ -2285,12 +2285,16 @@ let compile (m : module_) =
         match t "inline" (Inline.module_ ~sizes:vector_sizes) m with
         | m', true ->
             (* Only the functions that changed need promoting again *)
+            let live = Inline.reachable m' in
             let again (fs, gs) =
-              List.map2
-                (fun (f : func) g ->
-                  if f == g then g
-                  else Mem2reg.cleanup_func (Ir_fold.fold_function (Mem2reg.func g)))
-                fs gs
+              List.concat
+                (List.map2
+                   (fun (f : func) (g : func) ->
+                     if not (Ptbl.mem live g.name) then []
+                     else if f == g then [ g ]
+                     else
+                       [ Mem2reg.cleanup_func (Ir_fold.fold_function (Mem2reg.func g)) ])
+                   fs gs)
             in
             { m' with funcs = t "reclean" again (m.funcs, m'.funcs) }
         | m, false -> m

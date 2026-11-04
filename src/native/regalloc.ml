@@ -157,14 +157,29 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
         | Phi (id, ty, _) when in_class ty && not (skip id) -> Some id | _ -> None)
       b.instrs
   in
-  let gen = Hashtbl.create 16 and kill = Hashtbl.create 16 in
+  (* Liveness over bitsets of dense value indices. A phi's definition is in
+     its block's kill set and never in its gen set, so it never reaches
+     live-in: live-out(b) = U over successors s of live-in(s) and the values
+     b feeds to the phis of s. *)
+  let dense = Hashtbl.create 64 and keys = ref [] and nkeys = ref 0 in
+  let idx k =
+    match Hashtbl.find_opt dense k with
+    | Some i -> i
+    | None ->
+        let i = !nkeys in
+        Hashtbl.replace dense k i;
+        keys := k :: !keys;
+        incr nkeys;
+        i
+  in
+  let raw_gen = Hashtbl.create 16 and raw_kill = Hashtbl.create 16 in
   List.iter
     (fun (b : block) ->
-      let defs = Hashtbl.create 16 and uses = Hashtbl.create 16 in
+      let defs = Hashtbl.create 16 and uses = ref [] in
       List.iter (fun k -> Hashtbl.replace defs k ()) (phi_defs b);
       let use v =
         match key_of v with
-        | Some k when not (Hashtbl.mem defs k) -> Hashtbl.replace uses k ()
+        | Some k when not (Hashtbl.mem defs k) -> uses := idx k :: !uses
         | _ -> ()
       in
       List.iter
@@ -176,44 +191,82 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
           | _ -> ())
         b.instrs;
       iter_term_operands use b.terminator;
-      Hashtbl.replace gen b.id uses;
-      Hashtbl.replace kill b.id defs)
+      Hashtbl.replace raw_gen b.id !uses;
+      Hashtbl.replace raw_kill b.id
+        (Hashtbl.fold (fun k () acc -> idx k :: acc) defs []))
     f.blocks;
+  let edge_uses = Stdlib.Hashtbl.create 16 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun s ->
+          Stdlib.Hashtbl.replace edge_uses (b.id, s) (List.map idx (phi_uses b.id s)))
+        (terminator_successors b.terminator))
+    f.blocks;
+  let words = (!nkeys + 62) / 63 in
+  let key_at = Array.of_list (List.rev !keys) in
+  let set_of l =
+    let v = Array.make words 0 in
+    List.iter (fun i -> v.(i / 63) <- v.(i / 63) lor (1 lsl (i mod 63))) l;
+    v
+  in
+  let mem v k =
+    match Hashtbl.find_opt dense k with
+    | Some i -> v.(i / 63) land (1 lsl (i mod 63)) <> 0
+    | None -> false
+  in
+  let iter_set g v =
+    Array.iteri
+      (fun w x ->
+        if x <> 0 then
+          for j = 0 to 62 do
+            if x land (1 lsl j) <> 0 then g key_at.((w * 63) + j)
+          done)
+      v
+  in
+  let gen = Hashtbl.create 16 and kill = Hashtbl.create 16 in
   let live_in = Hashtbl.create 16 and live_out = Hashtbl.create 16 in
   List.iter
     (fun (b : block) ->
-      Hashtbl.replace live_in b.id (Hashtbl.create 8);
-      Hashtbl.replace live_out b.id (Hashtbl.create 8))
+      Hashtbl.replace gen b.id (set_of (Hashtbl.find raw_gen b.id));
+      Hashtbl.replace kill b.id (set_of (Hashtbl.find raw_kill b.id));
+      Hashtbl.replace live_in b.id (Array.make words 0);
+      Hashtbl.replace live_out b.id (Array.make words 0))
     f.blocks;
+  let edges =
+    List.rev_map
+      (fun (b : block) ->
+        ( Hashtbl.find live_out b.id,
+          Hashtbl.find live_in b.id,
+          Hashtbl.find gen b.id,
+          Hashtbl.find kill b.id,
+          List.filter_map
+            (fun s ->
+              Option.map
+                (fun ins -> (ins, set_of (Stdlib.Hashtbl.find edge_uses (b.id, s))))
+                (Hashtbl.find_opt live_in s))
+            (terminator_successors b.terminator) ))
+      f.blocks
+  in
   let changed = ref true in
-  let rev_blocks = List.rev f.blocks in
   while !changed do
     changed := false;
     List.iter
-      (fun (b : block) ->
-        let out = Hashtbl.find live_out b.id in
-        let add tbl k =
-          if not (Hashtbl.mem tbl k) then begin
-            Hashtbl.replace tbl k ();
+      (fun (out, inn, g, k, succs) ->
+        for w = 0 to words - 1 do
+          let o =
+            List.fold_left
+              (fun acc (sin, phis) -> acc lor sin.(w) lor phis.(w))
+              out.(w) succs
+          in
+          out.(w) <- o;
+          let i = g.(w) lor (o land lnot k.(w)) in
+          if i <> inn.(w) then begin
+            inn.(w) <- i;
             changed := true
           end
-        in
-        List.iter
-          (fun s ->
-            List.iter (add out) (phi_uses b.id s);
-            match (Hashtbl.find_opt live_in s, Hashtbl.find_opt blocks s) with
-            | Some ins, Some sb ->
-                let sdefs = phi_defs sb in
-                Hashtbl.iter
-                  (fun k () -> if not (List.exists (Int.equal k) sdefs) then add out k)
-                  ins
-            | _ -> ())
-          (terminator_successors b.terminator);
-        let inn = Hashtbl.find live_in b.id in
-        Hashtbl.iter (fun k () -> add inn k) (Hashtbl.find gen b.id);
-        let defs = Hashtbl.find kill b.id in
-        Hashtbl.iter (fun k () -> if not (Hashtbl.mem defs k) then add inn k) out)
-      rev_blocks
+        done)
+      edges
   done;
   (* Live ranges: per block, from the definition (or the block start when
      live in) to the last use (or the block end when live out). A value's
@@ -281,17 +334,16 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       let inn = Hashtbl.find live_in b.id and out = Hashtbl.find live_out b.id in
       let keys = Hashtbl.create 16 in
       Hashtbl.iter (fun k _ -> Hashtbl.replace keys k ()) first;
-      Hashtbl.iter (fun k () -> Hashtbl.replace keys k ()) inn;
-      Hashtbl.iter (fun k () -> Hashtbl.replace keys k ()) out;
+      iter_set (fun k -> Hashtbl.replace keys k ()) inn;
+      iter_set (fun k -> Hashtbl.replace keys k ()) out;
       Hashtbl.iter
         (fun k () ->
           let lo =
-            if Hashtbl.mem inn k then if b.id = entry_id then 0 else s
+            if mem inn k then if b.id = entry_id then 0 else s
             else Option.value ~default:s (Hashtbl.find_opt first k)
           in
           let hi =
-            if Hashtbl.mem out k then e
-            else Option.value ~default:lo (Hashtbl.find_opt last k)
+            if mem out k then e else Option.value ~default:lo (Hashtbl.find_opt last k)
           in
           Hashtbl.replace ranges k
             ((lo, hi) :: Option.value ~default:[] (Hashtbl.find_opt ranges k)))
