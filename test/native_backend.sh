@@ -40,13 +40,25 @@ FAS_OPT="$LLVM_OPT" FAS_LLC="$LLVM_LLC" FAS_CC="$CC" \
 "$NATIVE_TMP/floats" >"$NATIVE_TMP/floats.out"
 cmp "$NATIVE_TMP/floats_llvm.out" "$NATIVE_TMP/floats.out"
 
+# Vectors (scalarized): the native and LLVM builds print the same bits
+FAS_OPT="$LLVM_OPT" FAS_LLC="$LLVM_LLC" FAS_CC="$CC" \
+  "$OCAML_FAS" -O2 "$ROOT/test/native_vectors.fas" -o "$NATIVE_TMP/vectors_llvm"
+"$OCAML_FAS" --backend=native "$ROOT/test/native_vectors.fas" -o "$NATIVE_TMP/vectors"
+"$NATIVE_TMP/vectors_llvm" >"$NATIVE_TMP/vectors_llvm.out"
+"$NATIVE_TMP/vectors" >"$NATIVE_TMP/vectors.out"
+cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors.out"
+"$OCAML_FAS" --backend=native --target=force-native "$ROOT/test/native_vectors.fas" \
+  -o "$NATIVE_TMP/vectors_masked"
+"$NATIVE_TMP/vectors_masked" >"$NATIVE_TMP/vectors_masked.out"
+cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors_masked.out"
+
 # Unsupported features are diagnosed, not miscompiled
-printf 'fn main() i32 {\n  v vec[4, u32] = splat(3)\n  return bitcast[i32](v[1] + v[2])\n}\n' \
-  >"$NATIVE_TMP/vector.fas"
-if "$OCAML_FAS" --backend=native "$NATIVE_TMP/vector.fas" -o "$NATIVE_TMP/vector" \
-  2>"$NATIVE_TMP/vector.err"; then
-  echo "native backend accepted vectors" >&2; exit 1
+printf 'use "C" <stdio.h>\nfn main() i32 {\n  puts(c"hi")\n  return 0\n}\n' \
+  >"$NATIVE_TMP/unsupported.fas"
+if "$OCAML_FAS" --backend=native "$NATIVE_TMP/unsupported.fas" -o "$NATIVE_TMP/unsupported" \
+  2>"$NATIVE_TMP/unsupported.err"; then
+  echo "native backend accepted a C call" >&2; exit 1
 fi
-grep -q 'native backend:' "$NATIVE_TMP/vector.err"
+grep -q 'native backend:' "$NATIVE_TMP/unsupported.err"
 
 echo "native backend: ok"

@@ -342,8 +342,20 @@ let promote (f : func) =
 (* Mark-and-sweep removal of pure instructions nothing needs; it also drops
    the phi cycles promotion leaves behind for variables that are dead after a
    loop. Division stays (it may trap), and so do memory operations. *)
+(* Intrinsics with no effect besides their result *)
+let pure_call name =
+  String.starts_with ~prefix:"llvm." name
+  && not
+       (String.starts_with ~prefix:"llvm.lifetime." name
+       || String.starts_with ~prefix:"llvm.masked." name
+       || String.starts_with ~prefix:"llvm.fas.store_if" name
+       || String.starts_with ~prefix:"llvm.fas.load_if" name
+       || String.starts_with ~prefix:"llvm.trap" name
+       || String.starts_with ~prefix:"llvm.experimental." name)
+
 let pure = function
   | Phi _ | Cmp _ | Gep _ | Cast _ | Select _ | Global_ptr _ | String_ptr _ -> true
+  | Call (Some _, _, _, name, _) -> pure_call name
   | Bin (_, (Udiv | Sdiv | Urem | Srem), _, _, _) -> false
   | Bin _ -> true
   | _ -> false

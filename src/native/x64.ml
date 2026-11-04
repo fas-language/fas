@@ -463,6 +463,8 @@ let neg a r = ext_r a [ 0xf7 ] 3 r
 let not_ a r = ext_r a [ 0xf7 ] 2 r
 let div a r = ext_r a [ 0xf7 ] 6 r
 let idiv a r = ext_r a [ 0xf7 ] 7 r
+let mul1 a r = ext_r a [ 0xf7 ] 4 r
+let imul1 a r = ext_r a [ 0xf7 ] 5 r
 
 let cqo a =
   byte a 0x48;

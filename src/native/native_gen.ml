@@ -28,7 +28,7 @@ module Hashtbl = Itbl
 module Ptbl = Stdlib.Hashtbl
 module A = X64
 
-exception Unsupported of string
+exception Unsupported = Scalarize.Unsupported
 
 let unsupported fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
@@ -504,6 +504,7 @@ let forward_memory ctx (f : func) =
                   | None ->
                       forget ();
                       Some ins)
+              | Call (_, _, _, name, _) when Mem2reg.pure_call name -> Some ins
               | Load_volatile _ | Store_volatile _ | Call _ | Call_indirect _
               | Syscall _ | Trap ->
                   forget ();
@@ -856,6 +857,38 @@ let gen_intrinsic ctx fr result ret_ty name args =
     match result with Some id -> from_xmm ctx fr id ret_ty x | None -> ()
   in
   if prefix "llvm.lifetime." then ()
+  else if prefix "llvm.fas.store_if" then begin
+    (* store_if(cond, value, pointer) *)
+    let _, _, v = List.nth args 1 in
+    let size = bits (value_ty v) / 8 in
+    let skip = A.new_label a in
+    load ctx fr A.Rax (arg 0);
+    A.test_rr a A.Rax A.Rax;
+    A.jcc a A.E skip;
+    load ctx fr A.Rcx v;
+    load ctx fr A.Rdx (arg 2);
+    A.store a size (A.Base (A.Rdx, 0)) A.Rcx;
+    A.place a skip
+  end
+  else if prefix "llvm.fas.load_if" then begin
+    (* load_if(cond, pointer, passthru) *)
+    let size = bits ret_ty / 8 in
+    let skip = A.new_label a in
+    load ctx fr A.Rcx (arg 0);
+    load ctx fr A.Rax (arg 2);
+    A.test_rr a A.Rcx A.Rcx;
+    A.jcc a A.E skip;
+    load ctx fr A.Rdx (arg 1);
+    A.load_zx a size A.Rax (A.Base (A.Rdx, 0));
+    A.place a skip;
+    store A.Rax
+  end
+  else if prefix "llvm.fas.umulh" || prefix "llvm.fas.smulh" then begin
+    load ctx fr A.Rax (arg 0);
+    load ctx fr A.Rcx (arg 1);
+    if prefix "llvm.fas.umulh" then A.mul1 a A.Rcx else A.imul1 a A.Rcx;
+    store A.Rdx
+  end
   else if prefix "llvm.ctpop." then begin
     (* Bit-by-bit population count; M2 favours simplicity. *)
     load ctx fr A.Rcx (arg 0);
@@ -1761,6 +1794,7 @@ let compile (m : module_) =
             m.funcs;
       }
     in
+    let m = t "scalarize" Scalarize.module_ m in
     let m = t "promote" Mem2reg.module_ m in
     let m = t "fold" Ir_fold.module_ m in
     let m = t "cleanup" Mem2reg.cleanup m in
