@@ -1700,12 +1700,34 @@ let gen_instr ctx fr ins =
   | Select (id, c, x, y) ->
       let ty = value_ty x in
       if is_aggregate ty then unsupported "aggregate select";
-      load ctx fr A.Rax y;
-      load ctx fr A.Rcx x;
-      load ctx fr A.Rdx c;
-      A.test_rr a A.Rdx A.Rdx;
-      A.cmov a A.Ne A.Rax A.Rcx;
-      store_result ctx fr id ty A.Rax
+      (* d = the false arm, then cmovne the true arm in; both arms are
+         canonical, so the result is too *)
+      let d =
+        match Hashtbl.find_opt fr.homes id with
+        | Some r when home fr c <> Some r && home fr x <> Some r -> r
+        | _ -> A.Rax
+      in
+      let src =
+        match (home fr x, slot_of fr x) with
+        | Some r, _ -> `R r
+        | None, Some m -> `M m
+        | None, None ->
+            load ctx fr A.Rcx x;
+            `R A.Rcx
+      in
+      let cond =
+        match (home fr c, slot_of fr c) with
+        | Some r, _ -> `R r
+        | None, Some m -> `M m
+        | None, None ->
+            load ctx fr A.Rdx c;
+            `R A.Rdx
+      in
+      (* a mov never touches the flags, but a zero constant loads as xor *)
+      load ctx fr d y;
+      (match cond with `R r -> A.test_rr a r r | `M m -> A.alu_mi a A.Cmp 8 m 0);
+      (match src with `R r -> A.cmov a A.Ne d r | `M m -> A.cmov_rm a A.Ne d m);
+      if Hashtbl.find_opt fr.homes id <> Some d then put ctx fr id d
   | Extract _ | Insert _ | Shuffle_zero _ | Shufflevector _ ->
       unsupported "vector operations"
   | String_ptr (id, index, _) ->
