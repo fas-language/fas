@@ -339,6 +339,17 @@ let zero_extend a bits r =
   | 64 -> ()
   | _ -> invalid_arg "x64.zero_extend"
 
+(* [dst] = the low [bits] of [src], zero-extended *)
+let zero_extend_rr a bits dst src =
+  match bits with
+  | 8 -> rr a ~w:false ~force:(reg_num src >= 4) [ 0x0f; 0xb6 ] ~reg:dst ~rm:src
+  | 16 -> rr a ~w:false [ 0x0f; 0xb7 ] ~reg:dst ~rm:src
+  | 32 -> rr a ~w:false [ 0x89 ] ~reg:src ~rm:dst
+  | 64 -> if dst <> src then rr a [ 0x89 ] ~reg:src ~rm:dst
+  | _ ->
+      if dst <> src then rr a [ 0x89 ] ~reg:src ~rm:dst;
+      zero_extend a bits dst
+
 (* Sign-extend the low [bits] of a register in place. *)
 let sign_extend a bits r =
   match bits with
@@ -461,7 +472,7 @@ let shift_imm a op dst k =
   byte a (k land 63)
 
 let neg a r = ext_r a [ 0xf7 ] 3 r
-let not_ a r = ext_r a [ 0xf7 ] 2 r
+let not_ a ?(w = true) r = ext_r a ~w [ 0xf7 ] 2 r
 let div a r = ext_r a [ 0xf7 ] 6 r
 let idiv a r = ext_r a [ 0xf7 ] 7 r
 let mul1 a r = ext_r a [ 0xf7 ] 4 r

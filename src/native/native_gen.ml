@@ -1047,6 +1047,7 @@ let compare_flags ctx fr c x y =
   else
     let rx = in_reg ctx fr x A.Rax in
     match imm32 y with
+    | Some 0 -> A.test_rr a rx rx
     | Some k -> A.alu_ri a A.Cmp rx k
     | None -> (
         (* slots hold the canonical 64-bit value, so compare in memory *)
@@ -1391,6 +1392,18 @@ let gen_instr ctx fr ins =
           load ctx fr d y;
           A.neg a d;
           store_result ctx fr id ty d
+      | Xor
+        when (ty = I64 || ty = I32)
+             && List.exists
+                  (function
+                    | Const (_, n) -> norm_const ty n = norm_const ty (-1L) | _ -> false)
+                  [ x; y ] ->
+          (* xor with all ones: not (the 32-bit form zero-extends) *)
+          let v = match y with Const _ -> x | _ -> y in
+          let d = dest_reg fr id [] in
+          load ctx fr d v;
+          A.not_ a ~w:(ty = I64) d;
+          put ctx fr id d
       | (Add | Sub | And | Or | Xor)
         when Hashtbl.find_opt fr.homes id = None
              && (ty = I64 || match op with And | Or | Xor -> true | _ -> false)
@@ -1517,8 +1530,10 @@ let gen_instr ctx fr ins =
       put ctx fr id A.Rax
   | Cmp (id, c, _, x, y) ->
       compare_flags ctx fr c x y;
-      A.setcc a (cond_of c) A.Rax;
-      store_result ctx fr id I1 A.Rax
+      (* setcc zero-extends: the result is canonical *)
+      let d = dest_reg fr id [] in
+      A.setcc a (cond_of c) d;
+      put ctx fr id d
   | Alloca (id, _, _) when Hashtbl.mem fr.addrs.skip id -> ()
   | Alloca (id, _, _) ->
       A.lea a A.Rax (A.Base (A.Rbp, Hashtbl.find fr.allocas id));
@@ -1631,8 +1646,16 @@ let gen_instr ctx fr ins =
       | "zext" | "bitcast" | "ptrtoint" | "inttoptr" | "trunc" ->
           if kind = "bitcast" && (is_aggregate target || is_aggregate from) then
             unsupported "aggregate bitcast";
-          load ctx fr A.Rax v;
-          store_result ctx fr id target A.Rax
+          (* straight into the result's register; a canonical source is
+             already its zero extension *)
+          let d = dest_reg fr id [] in
+          (match (kind, home fr v) with
+          | "trunc", Some r -> A.zero_extend_rr a (bits target) d r
+          | "zext", _ -> load ctx fr d v
+          | _ ->
+              load ctx fr d v;
+              A.zero_extend a (bits target) d);
+          put ctx fr id d
       | "sext" ->
           load ctx fr A.Rax v;
           A.sign_extend a (bits from) A.Rax;
