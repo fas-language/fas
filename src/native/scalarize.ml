@@ -53,6 +53,12 @@ type st = {
   mutable next : int;
   mutable out : instr list; (* reversed *)
   mutable entry : instr list; (* allocas for the entry block, reversed *)
+  chunk : bool;
+      (* chunk mode: a vector is split into 128-bit pieces `<c x t>` that stay
+         vectors (SSE2 registers) instead of into lanes *)
+  split : value array Hashtbl.t; (* chunk mode: vector alloca -> piece allocas *)
+  ppieces : (string, value array) Ptbl.t; (* chunk mode: vector param -> pieces *)
+  ins0 : value Hashtbl.t; (* insert at lane 0 -> the inserted scalar *)
 }
 
 let fresh st =
@@ -81,22 +87,41 @@ let packed_ty st vt =
   | 8 -> I64
   | _ -> unsupported "bool vector wider than 64 lanes"
 
+(* Lanes per piece, the type of a piece and the number of pieces *)
+let per st t = if st.chunk then 128 / lane_bits t else 1
+
+let piece_ty st = function
+  | Vector (_, t) -> if st.chunk then Vector (per st t, t) else t
+  | t -> t
+
+let npieces st = function Vector (n, t) -> n / per st t | _ -> 1
+
 let lid st d i =
   match Hashtbl.find_opt st.base d with
   | Some b -> b + i
   | None -> unsupported "vector value without a definition"
 
+(* The pieces of a vector value: its lanes, or its 128-bit chunks *)
 let lanes st v =
   match v with
-  | Local (id, Vector (n, t)) ->
-      let b = lid st id 0 in
-      Array.init n (fun i -> Local (b + i, t))
+  | Local (id, (Vector _ as vt)) ->
+      let b = lid st id 0 and pt = piece_ty st vt in
+      Array.init (npieces st vt) (fun i -> Local (b + i, pt))
+  | Param (name, _) when Ptbl.mem st.ppieces name -> Ptbl.find st.ppieces name
   | Param (name, Vector (n, t)) -> Array.init n (fun i -> Param (lane_name name i, t))
-  | Const_vector (Vector (n, t), xs) ->
+  | Const_vector ((Vector (n, t) as vt), xs) ->
       if List.length xs <> n then unsupported "vector constant";
-      Array.of_list (List.map (fun x -> Const (t, x)) xs)
-  | Zero (Vector (n, t)) -> Array.make n (zero t)
-  | Undef (Vector (n, t)) -> Array.make n (Undef t)
+      if st.chunk then
+        let c = per st t and a = Array.of_list xs in
+        Array.init (n / c) (fun i ->
+            Const_vector (piece_ty st vt, Array.to_list (Array.sub a (i * c) c)))
+      else Array.of_list (List.map (fun x -> Const (t, x)) xs)
+  | Zero (Vector (n, t) as vt) ->
+      if st.chunk then Array.make (npieces st vt) (Zero (piece_ty st vt) : value)
+      else Array.make n (zero t)
+  | Undef (Vector (n, t) as vt) ->
+      if st.chunk then Array.make (npieces st vt) (Undef (piece_ty st vt))
+      else Array.make n (Undef t)
   | _ -> unsupported "vector operand"
 
 let set st d i v = Hashtbl.replace st.subst (lid st d i) v
@@ -212,6 +237,15 @@ let load_lanes st ~volatile vt p al =
       emit st (if volatile then Load_volatile (d, it, p, al) else Load (d, it, p, al));
       let w = cast st "zext" it (Local (d, it)) I64 in
       unpack st [| w |] n I1
+  | Vector (_, t) when st.chunk ->
+      let pt = piece_ty st vt and c = per st t in
+      Array.init (npieces st vt) (fun i ->
+          let q = lane_ptr st vt p (i * c) in
+          let d = fresh st in
+          let al = if al <= 0 then lane_bits t / 8 else min al 16 in
+          emit st
+            (if volatile then Load_volatile (d, pt, q, al) else Load (d, pt, q, al));
+          Local (d, pt))
   | Vector (n, t) ->
       Array.init n (fun i ->
           let q = lane_ptr st vt p i in
@@ -228,6 +262,15 @@ let store_lanes st ~volatile vt (ls : value array) p al =
       let w = (pack st I1 ls).(0) in
       let x = cast st "trunc" I64 w it in
       emit st (if volatile then Store_volatile (it, x, p, al) else Store (it, x, p, al))
+  | Vector (_, t) when st.chunk ->
+      let pt = piece_ty st vt and c = per st t in
+      Array.iteri
+        (fun i v ->
+          let q = lane_ptr st vt p (i * c) in
+          let al = if al <= 0 then lane_bits t / 8 else min al 16 in
+          emit st
+            (if volatile then Store_volatile (pt, v, q, al) else Store (pt, v, q, al)))
+        ls
   | Vector (_, t) ->
       Array.iteri
         (fun i v ->
@@ -263,6 +306,12 @@ let expand_args st args =
   List.concat_map
     (fun ((t, e, v) as a) ->
       match t with
+      | Vector (n, lt) when st.chunk ->
+          let ps = lanes st v and c = per st lt and pt = piece_ty st t in
+          List.init n (fun j ->
+              let d = fresh st in
+              emit st (Extract (d, pt, ps.(j / c), Const (I32, Int64.of_int (j mod c))));
+              (lt, No_extension, Local (d, lt)))
       | Vector (_, lt) ->
           Array.to_list (Array.map (fun l -> (lt, No_extension, l)) (lanes st v))
       | _ ->
@@ -270,11 +319,11 @@ let expand_args st args =
           [ a ])
     args
 
-let instr st ins =
+let instr_lanes st ins =
   match ins with
-  | Bin (d, op, Vector (n, t), a, b) ->
-      let la = lanes st a and lb = lanes st b in
-      for i = 0 to n - 1 do
+  | Bin (d, op, (Vector _ as vt), a, b) ->
+      let la = lanes st a and lb = lanes st b and t = piece_ty st vt in
+      for i = 0 to npieces st vt - 1 do
         emit st (Bin (lid st d i, op, t, la.(i), lb.(i)))
       done
   | Fneg (d, Vector (n, t), a) ->
@@ -297,9 +346,9 @@ let instr st ins =
   | Cast (d, "bitcast", from, v, target) when is_vector from || is_vector target -> (
       if from = target then
         match target with
-        | Vector (n, _) ->
+        | Vector _ ->
             let lv = lanes st v in
-            for i = 0 to n - 1 do
+            for i = 0 to npieces st target - 1 do
               set st d i lv.(i)
             done
         | _ -> Hashtbl.replace st.subst d v
@@ -368,7 +417,8 @@ let instr st ins =
   | Load_volatile (d, (Vector (n, _) as vt), p, al) ->
       let volatile = match ins with Load_volatile _ -> true | _ -> false in
       let ls = load_lanes st ~volatile vt p al in
-      for i = 0 to n - 1 do
+      for i = 0 to Array.length ls - 1 do
+        ignore n;
         set st d i ls.(i)
       done
   | Store ((Vector _ as vt), v, p, al) | Store_volatile ((Vector _ as vt), v, p, al) ->
@@ -380,9 +430,10 @@ let instr st ins =
       | I1, [ _ ] -> emit st (Gep (d, packed_ty st vt, p, idx))
       | I1, _ -> unsupported "address of a bool vector lane"
       | _ -> emit st (Gep (d, lane_array st vt, p, idx)))
-  | Phi (d, Vector (n, t), incoming) ->
+  | Phi (d, (Vector _ as vt), incoming) ->
       let ins = List.map (fun (v, b) -> (lanes st v, b)) incoming in
-      for i = 0 to n - 1 do
+      let t = piece_ty st vt in
+      for i = 0 to npieces st vt - 1 do
         emit st (Phi (lid st d i, t, List.map (fun (l, b) -> (l.(i), b)) ins))
       done
   | Call (dst, ext, rty, name, args)
@@ -484,8 +535,8 @@ let instr st ins =
             | Some d -> (
                 let ls = load_lanes st ~volatile:false rty p 32 in
                 match rty with
-                | Vector (n, _) ->
-                    for i = 0 to n - 1 do
+                | Vector _ ->
+                    for i = 0 to Array.length ls - 1 do
                       set st d i ls.(i)
                     done
                 | _ -> ())
@@ -499,25 +550,253 @@ let instr st ins =
       unsupported "vector syscall argument"
   | ins -> emit st ins
 
+(* A vector of [vt]'s piece type with scalar [x] in every lane *)
+let splat st vt x =
+  let pt = piece_ty st vt in
+  match x with
+  | Const (_, k) ->
+      Const_vector
+        (pt, List.init (match pt with Vector (c, _) -> c | _ -> 1) (fun _ -> k))
+  | Undef _ -> Undef pt
+  | _ ->
+      let i = fresh st in
+      emit st (Insert (i, pt, Undef pt, Const (I32, 0L), x));
+      let s = fresh st in
+      emit st (Shuffle_zero (s, pt, Local (i, pt)));
+      Local (s, pt)
+
+(* Lane 0 of [v], when it is known as a scalar *)
+let lane0 st (v : value) =
+  match v with
+  | Local (i, _) -> Hashtbl.find_opt st.ins0 i
+  | Const_vector (Vector (_, t), k :: _) -> Some (Const (t, k))
+  | Zero (Vector (_, t)) -> Some (zero t)
+  | Undef (Vector (_, t)) -> Some (Undef t)
+  | _ -> None
+
+let zero_mask : value -> bool = function
+  | Zero _ -> true
+  | Const_vector (_, xs) -> List.for_all (fun x -> x = 0L) xs
+  | _ -> false
+
+(* Chunk mode: the operations whose pieces are not independent *)
+let instr_chunk st ins =
+  match ins with
+  | Shufflevector (d, (Vector _ as vt), a, _, mask) when zero_mask mask ->
+      let v =
+        match lane0 st a with
+        | Some x -> splat st vt x
+        | None ->
+            let pt = piece_ty st vt and s = fresh st in
+            emit st (Shuffle_zero (s, pt, (lanes st a).(0)));
+            Local (s, pt)
+      in
+      for i = 0 to npieces st vt - 1 do
+        set st d i v
+      done
+  | Shuffle_zero (d, (Vector _ as vt), a) ->
+      let v =
+        match lane0 st a with
+        | Some x -> splat st vt x
+        | None ->
+            let pt = piece_ty st vt and s = fresh st in
+            emit st (Shuffle_zero (s, pt, (lanes st a).(0)));
+            Local (s, pt)
+      in
+      for i = 0 to npieces st vt - 1 do
+        set st d i v
+      done
+  | Extract (d, (Vector (n, t) as vt), v, idx) -> (
+      match index_const idx with
+      | Some k when k >= 0 && k < n ->
+          let c = per st t in
+          emit st
+            (Extract
+               ( d,
+                 piece_ty st vt,
+                 (lanes st v).(k / c),
+                 Const (I32, Int64.of_int (k mod c)) ))
+      | _ -> Hashtbl.replace st.subst d (Undef t))
+  | Insert (d, (Vector (n, t) as vt), v, idx, x) -> (
+      let lv = lanes st v in
+      match index_const idx with
+      | Some k when k >= 0 && k < n ->
+          let c = per st t and pt = piece_ty st vt in
+          if k = 0 then Hashtbl.replace st.ins0 d x;
+          Array.iteri
+            (fun i p ->
+              if i = k / c then
+                emit st
+                  (Insert (lid st d i, pt, p, Const (I32, Int64.of_int (k mod c)), x))
+              else set st d i p)
+            lv
+      | _ -> Array.iteri (fun i p -> set st d i p) lv)
+  | Cast (d, "bitcast", (Vector _ as from), v, (Vector _ as target)) when from <> target
+    ->
+      let lv = lanes st v and pf = piece_ty st from and pt = piece_ty st target in
+      Array.iteri (fun i p -> emit st (Cast (lid st d i, "bitcast", pf, p, pt))) lv
+  | Alloca (d, (Vector _ as vt), al) when Hashtbl.mem st.split d ->
+      let pt = piece_ty st vt in
+      Array.iter
+        (function
+          | Local (q, _) -> emit st (Alloca (q, pt, if al <= 0 then 16 else min al 16))
+          | _ -> ())
+        (Hashtbl.find st.split d)
+  | Load (d, (Vector _ as vt), Local (p, _), al) when Hashtbl.mem st.split p ->
+      let pt = piece_ty st vt in
+      Array.iteri
+        (fun i q ->
+          emit st (Load (lid st d i, pt, q, if al <= 0 then 16 else min al 16)))
+        (Hashtbl.find st.split p)
+  | Store ((Vector _ as vt), v, Local (p, _), al) when Hashtbl.mem st.split p ->
+      let pt = piece_ty st vt and lv = lanes st v in
+      Array.iteri
+        (fun i q -> emit st (Store (pt, lv.(i), q, if al <= 0 then 16 else min al 16)))
+        (Hashtbl.find st.split p)
+  | ins -> instr_lanes st ins
+
+let instr st ins = if st.chunk then instr_chunk st ins else instr_lanes st ins
+
+(* Chunk mode applies to a function whose vectors all have integer lanes and a
+   multiple of 128 bits, and whose vector operations all have SSE2 forms. *)
+let simd = Sys.getenv_opt "FAS_NATIVE_NOSIMD" <> Some "1"
+let chunk_lane = function I8 | I16 | I32 | I64 -> true | _ -> false
+
+let chunk_ty = function
+  | Vector (n, t) -> chunk_lane t && n * lane_bits t mod 128 = 0
+  | Struct _ | Array _ | Pointer _ | I1 | I8 | I16 | I32 | I64 | I128 | F32 | F64 | Void
+    ->
+      true
+
+let types_of ins =
+  let ops = ref [] in
+  Regalloc.iter_operands (fun v -> ops := value_ty v :: !ops) ins;
+  let own =
+    match ins with
+    | Store (t, _, _, _)
+    | Store_volatile (t, _, _, _)
+    | Alloca (_, t, _)
+    | Gep (_, t, _, _) ->
+        [ t ]
+    | Call (_, _, t, _, args) -> t :: List.map (fun (t, _, _) -> t) args
+    | Call_indirect (_, _, t, _, args) -> t :: List.map (fun (t, _, _) -> t) args
+    | Phi (_, t, incoming) -> t :: List.map (fun (v, _) -> value_ty v) incoming
+    | _ -> []
+  in
+  (match instruction_result ins with Some (_, t) -> [ t ] | None -> []) @ own @ !ops
+
+let chunkable (f : func) =
+  simd
+  &&
+  let splats = Hashtbl.create 16 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function
+          | Shuffle_zero (d, _, _) -> Hashtbl.replace splats d ()
+          | Shufflevector (d, _, _, _, m) when zero_mask m ->
+              Hashtbl.replace splats d ()
+          | _ -> ())
+        b.instrs)
+    f.blocks;
+  let uniform : value -> bool = function
+    | Const_vector (_, x :: xs) -> List.for_all (fun y -> y = x) xs
+    | Zero _ | Undef _ -> true
+    | Local (i, _) -> Hashtbl.mem splats i
+    | _ -> false
+  in
+  let ok ins =
+    let tys = types_of ins in
+    List.for_all chunk_ty tys
+    && ((not (List.exists is_vector tys))
+       ||
+       match ins with
+       | Bin (_, op, Vector (_, t), _, y) -> (
+           match op with
+           | Add | Sub | And | Or | Xor -> true
+           | Mul -> t = I64 || t = I16
+           | Shl | Lshr -> t <> I8 && uniform y
+           | Ashr -> (t = I32 || t = I16) && uniform y
+           | _ -> false)
+       | Extract (_, _, _, idx) | Insert (_, _, _, idx, _) -> index_const idx <> None
+       | Shuffle_zero _ -> true
+       | Shufflevector (_, _, _, _, m) -> zero_mask m
+       | Load _ | Store _ | Alloca _ | Gep _ | Phi _ -> true
+       | Cast (_, "bitcast", Vector _, _, Vector _) -> true
+       | Call (_, _, _, name, _) -> not (String.starts_with ~prefix:"llvm." name)
+       | _ -> false)
+  in
+  let debug = Sys.getenv_opt "FAS_SIMD_DEBUG" = Some "1" in
+  let ok ins =
+    let r = ok ins in
+    if (not r) && debug then
+      Printf.eprintf "%s: no chunk mode: %s\n" f.name
+        (match ins with
+        | Bin (_, op, _, _, _) -> (
+            match op with
+            | Mul -> "mul"
+            | Shl -> "shl"
+            | Lshr -> "lshr"
+            | Ashr -> "ashr"
+            | Udiv | Sdiv | Urem | Srem -> "div"
+            | _ -> "bin")
+        | Cmp _ -> "cmp"
+        | Select _ -> "select"
+        | Cast (_, k, _, _, _) -> "cast " ^ k
+        | Call (_, _, _, n, _) -> "call " ^ n
+        | Shufflevector _ -> "shufflevector"
+        | Extract _ -> "extract"
+        | Insert _ -> "insert"
+        | _ -> "other");
+    r
+  in
+  List.for_all (fun (p : param) -> chunk_ty p.ty) f.params
+  && chunk_ty f.ret
+  && List.for_all (fun (b : block) -> List.for_all ok b.instrs) f.blocks
+
+(* Chunk mode: vector allocas used only by whole loads and stores of their
+   own type become one alloca per piece *)
+let splittable (f : func) =
+  let cand = Hashtbl.create 8 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function
+          | Alloca (d, (Vector _ as t), _) -> Hashtbl.replace cand d t | _ -> ())
+        b.instrs)
+    f.blocks;
+  let reject = function Local (i, _) -> Hashtbl.remove cand i | _ -> () in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          match ins with
+          | Load (_, t, Local (p, _), _) when Hashtbl.find_opt cand p = Some t -> ()
+          | Store (t, v, Local (p, _), _) when Hashtbl.find_opt cand p = Some t ->
+              reject v
+          | ins -> Regalloc.iter_operands reject ins)
+        b.instrs;
+      Regalloc.iter_term_operands reject b.terminator)
+    f.blocks;
+  cand
+
 (* Does [f] mention vectors at all? *)
 (* Instructions that expand into [per] scalar instructions for each lane,
    lane after lane, each reading only the same lane of its vector operands.
    Plain loads and stores of a vector alloca of the function qualify: every
    access to it inside a run has the same lane layout (any other pointer ends
    the run), so lane order cannot reorder overlapping accesses. *)
-let lane_local allocas = function
-  | Bin (_, _, Vector (n, _), _, _)
-  | Fneg (_, Vector (n, _), _)
-  | Cmp (_, _, Vector (n, _), _, _) ->
-      Some (n, 1)
+let lane_local st allocas = function
+  | Bin (_, _, (Vector _ as vt), _, _) -> Some (npieces st vt, 1)
+  | Fneg (_, Vector (n, _), _) | Cmp (_, _, Vector (n, _), _, _) -> Some (n, 1)
   | Select (_, _, a, _) -> (
       match value_ty a with Vector (n, _) -> Some (n, 1) | _ -> None)
   | Cast (_, kind, Vector (n, _), _, Vector (m, _)) when n = m && kind <> "bitcast" ->
       Some (n, 1)
-  | Load (_, Vector (n, t), Local (p, _), _)
-  | Store (Vector (n, t), _, Local (p, _), _)
+  | Load (_, (Vector (_, t) as vt), Local (p, _), _)
+  | Store ((Vector (_, t) as vt), _, Local (p, _), _)
     when t <> I1 && Hashtbl.mem allocas p ->
-      Some (n, 2)
+      Some (npieces st vt, if Hashtbl.mem st.split p then 1 else 2)
   | _ -> None
 
 let lane_major st allocas scalars instrs =
@@ -529,7 +808,7 @@ let lane_major st allocas scalars instrs =
   in
   List.iter
     (fun ins ->
-      match lane_local allocas ins with
+      match lane_local st allocas ins with
       | Some (n, per) when n > 1 ->
           let saved = st.out in
           st.out <- [];
@@ -630,6 +909,10 @@ let func structs (f : func) =
         next = 0;
         out = [];
         entry = [];
+        chunk = chunkable f;
+        split = Hashtbl.create 8;
+        ppieces = Ptbl.create 4;
+        ins0 = Hashtbl.create 16;
       }
     in
     let top = ref 0 in
@@ -658,16 +941,54 @@ let func structs (f : func) =
         List.iter
           (fun ins ->
             match instruction_result ins with
-            | Some (i, Vector (n, _)) ->
+            | Some (i, (Vector _ as vt)) ->
                 Hashtbl.replace st.base i st.next;
-                st.next <- st.next + n
+                st.next <- st.next + npieces st vt
             | _ -> ())
           b.instrs)
       f.blocks;
+    (* chunk mode: piece allocas, and pieces built from the lanes of vector
+       parameters at entry *)
+    let prologue =
+      if not st.chunk then []
+      else begin
+        Hashtbl.iter
+          (fun d vt ->
+            let pt = piece_ty st vt in
+            Hashtbl.replace st.split d
+              (Array.init (npieces st vt) (fun _ -> Local (fresh st, Pointer pt))))
+          (splittable f);
+        st.out <- [];
+        List.iter
+          (fun (p : param) ->
+            match p.ty with
+            | Vector (_, t) as vt ->
+                let pt = piece_ty st vt and c = per st t in
+                Ptbl.replace st.ppieces p.name
+                  (Array.init (npieces st vt) (fun i ->
+                       let acc = ref (Undef pt) in
+                       for j = 0 to c - 1 do
+                         let d = fresh st in
+                         emit st
+                           (Insert
+                              ( d,
+                                pt,
+                                !acc,
+                                Const (I32, Int64.of_int j),
+                                Param (lane_name p.name ((i * c) + j), t) ));
+                         acc := Local (d, pt)
+                       done;
+                       !acc))
+            | _ -> ())
+          f.params;
+        List.rev st.out
+      end
+    in
     let blocks =
-      List.map
-        (fun (b : block) ->
+      List.mapi
+        (fun bi (b : block) ->
           st.out <- [];
+          if bi = 0 then st.out <- List.rev prologue;
           lane_major st allocas scalars b.instrs;
           let terminator =
             match b.terminator with

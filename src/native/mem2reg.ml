@@ -152,7 +152,8 @@ let promote (f : func) =
         (fun (b : block) ->
           List.iter
             (function
-              | Alloca (id, ty, _) when scalar ty -> Hashtbl.replace slots id ty
+              | Alloca (id, ty, _) when scalar ty || Regalloc.v128 ty ->
+                  Hashtbl.replace slots id ty
               | _ -> ())
             b.instrs)
         blocks;
@@ -354,7 +355,9 @@ let pure_call name =
        || String.starts_with ~prefix:"llvm.experimental." name)
 
 let pure = function
-  | Phi _ | Cmp _ | Gep _ | Cast _ | Select _ | Global_ptr _ | String_ptr _ -> true
+  | Phi _ | Cmp _ | Gep _ | Cast _ | Select _ | Global_ptr _ | String_ptr _ | Extract _
+  | Insert _ | Shuffle_zero _ | Shufflevector _ ->
+      true
   | Call (Some _, _, _, name, _) -> pure_call name
   | Bin (_, (Udiv | Sdiv | Urem | Srem), _, _, _) -> false
   | Bin _ -> true

@@ -563,6 +563,100 @@ let round_xx a ~double (dst : xmm) (src : xmm) mode =
   modrm a 3 dst src;
   byte a (mode lor 8)
 
+(* SSE2 packed integers on 128-bit values, for vectors that stay vectors.
+   Lane widths are 8, 16, 32 or 64 bits. *)
+
+type pop =
+  | Padd
+  | Psub
+  | Pand
+  | Pandn
+  | Por
+  | Pxor
+  | Pmuludq
+  | Pmullw
+  | Pcmpeq
+  | Pcmpgt
+
+let pop_code op w =
+  match (op, w) with
+  | Padd, 8 -> 0xfc
+  | Padd, 16 -> 0xfd
+  | Padd, 32 -> 0xfe
+  | Padd, _ -> 0xd4
+  | Psub, 8 -> 0xf8
+  | Psub, 16 -> 0xf9
+  | Psub, 32 -> 0xfa
+  | Psub, _ -> 0xfb
+  | Pand, _ -> 0xdb
+  | Pandn, _ -> 0xdf
+  | Por, _ -> 0xeb
+  | Pxor, _ -> 0xef
+  | Pmuludq, _ -> 0xf4
+  | Pmullw, _ -> 0xd5
+  | Pcmpeq, 8 -> 0x74
+  | Pcmpeq, 16 -> 0x75
+  | Pcmpeq, _ -> 0x76
+  | Pcmpgt, 8 -> 0x64
+  | Pcmpgt, 16 -> 0x65
+  | Pcmpgt, _ -> 0x66
+
+let pop_xx a op w (dst : xmm) (src : xmm) =
+  sse_rr a 0x66 (pop_code op w) ~reg:dst ~rm:src
+
+let pop_xm a op w (dst : xmm) mem = sse_rm a 0x66 (pop_code op w) ~reg:dst mem
+
+type pshift = Psll | Psrl | Psra
+
+(* psllw/d/q, psrlw/d/q, psraw/d by an immediate *)
+let pshift_imm a op w (x : xmm) k =
+  let opc = match w with 16 -> 0x71 | 32 -> 0x72 | _ -> 0x73 in
+  let ext = match op with Psll -> 6 | Psrl -> 2 | Psra -> 4 in
+  sse_rr a 0x66 opc ~reg:ext ~rm:x;
+  byte a k
+
+(* the same by the count in the low 64 bits of [count] *)
+let pshift_xx a op w (x : xmm) (count : xmm) =
+  let code =
+    match (op, w) with
+    | Psll, 16 -> 0xf1
+    | Psll, 32 -> 0xf2
+    | Psll, _ -> 0xf3
+    | Psrl, 16 -> 0xd1
+    | Psrl, 32 -> 0xd2
+    | Psrl, _ -> 0xd3
+    | Psra, 16 -> 0xe1
+    | Psra, _ -> 0xe2
+  in
+  sse_rr a 0x66 code ~reg:x ~rm:count
+
+(* movdqu xmm, [mem] and movdqu [mem], xmm (no alignment needed) *)
+let movdqu_load a (x : xmm) mem = sse_rm a 0xf3 0x6f ~reg:x mem
+let movdqu_store a mem (x : xmm) = sse_rm a 0xf3 0x7f ~reg:x mem
+
+(* pshufd dst, src, imm *)
+let pshufd a (dst : xmm) (src : xmm) k =
+  sse_rr a 0x66 0x70 ~reg:dst ~rm:src;
+  byte a k
+
+(* pshuflw dst, src, imm (low four words) *)
+let pshuflw a (dst : xmm) (src : xmm) k =
+  sse_rr a 0xf2 0x70 ~reg:dst ~rm:src;
+  byte a k
+
+(* punpcklqdq / punpcklbw dst, src *)
+let punpcklqdq a (dst : xmm) (src : xmm) = sse_rr a 0x66 0x6c ~reg:dst ~rm:src
+let punpcklbw a (dst : xmm) (src : xmm) = sse_rr a 0x66 0x60 ~reg:dst ~rm:src
+
+(* pextrw r32, xmm, imm (zero-extends) *)
+let pextrw a r (x : xmm) k =
+  sse_rr a 0x66 0xc5 ~reg:(reg_num r) ~rm:x;
+  byte a k
+
+(* movdqa dst, src *)
+let movdqa a (dst : xmm) (src : xmm) =
+  if dst <> src then sse_rr a 0x66 0x6f ~reg:dst ~rm:src
+
 (* bt/bts/btr/btc r64, imm8 *)
 let bit_ri a op r k =
   ext_r a [ 0x0f; 0xba ]

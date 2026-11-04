@@ -54,9 +54,19 @@ let scalar = function
   | I1 | I8 | I16 | I32 | I64 | F32 | F64 | Pointer _ -> true
   | _ -> false
 
-let key_of_skip skip = function
-  | Local (id, ty) when scalar ty && not (skip id) -> Some id
-  | Param (name, ty) when scalar ty -> Some (pkey name)
+(* 128-bit vectors, which live in xmm registers *)
+let v128 = function
+  | Vector (n, (I8 | I16 | I32 | I64)) as t -> (
+      match t with
+      | Vector (_, I8) -> n = 16
+      | Vector (_, I16) -> n = 8
+      | Vector (_, I32) -> n = 4
+      | _ -> n = 2)
+  | _ -> false
+
+let key_of_skip ?(in_class = scalar) skip = function
+  | Local (id, ty) when in_class ty && not (skip id) -> Some id
+  | Param (name, ty) when in_class ty -> Some (pkey name)
   | _ -> None
 
 let default_operands ins =
@@ -101,9 +111,9 @@ let uses_string_regs = function
 
 (* [skip] holds the ids of instructions whose code is folded into their
    block's terminator; they define nothing that needs a home. *)
-let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f : func)
-    =
-  let key_of = key_of_skip skip in
+let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -> false)
+    ?(operands = default_operands) ?slot_of (f : func) =
+  let key_of = key_of_skip ~in_class skip in
   let iter_operands g ins = List.iter g (operands ins) in
   let start_pos = Hashtbl.create 16 and end_pos = Hashtbl.create 16 in
   let block_starts = Hashtbl.create 16 in
@@ -144,7 +154,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
   let phi_defs (b : block) =
     List.filter_map
       (function
-        | Phi (id, ty, _) when scalar ty && not (skip id) -> Some id | _ -> None)
+        | Phi (id, ty, _) when in_class ty && not (skip id) -> Some id | _ -> None)
       b.instrs
   in
   let gen = Hashtbl.create 16 and kill = Hashtbl.create 16 in
@@ -161,7 +171,8 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
         (fun ins ->
           (match ins with Phi _ -> () | _ -> iter_operands use ins);
           match instruction_result ins with
-          | Some (id, ty) when scalar ty && not (skip id) -> Hashtbl.replace defs id ()
+          | Some (id, ty) when in_class ty && not (skip id) ->
+              Hashtbl.replace defs id ()
           | _ -> ())
         b.instrs;
       iter_term_operands use b.terminator;
@@ -258,7 +269,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
           | _ ->
               iter_operands (fun v -> Option.iter (fun k -> touch k p) (key_of v)) ins);
           match instruction_result ins with
-          | Some (id, ty) when scalar ty && not (skip id) -> touch id p
+          | Some (id, ty) when in_class ty && not (skip id) -> touch id p
           | _ -> ())
         b.instrs;
       iter_term_operands
@@ -288,7 +299,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
     f.blocks;
   List.iter
     (fun (p : param) ->
-      if scalar p.ty && not (Hashtbl.mem ranges (pkey p.name)) then
+      if in_class p.ty && not (Hashtbl.mem ranges (pkey p.name)) then
         Hashtbl.replace ranges (pkey p.name) [ (0, 0) ])
     f.params;
   let merge rs =
@@ -322,7 +333,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
     (fun (b : block) ->
       List.iter
         (function
-          | Phi (id, ty, incoming) when scalar ty && not (skip id) ->
+          | Phi (id, ty, incoming) when in_class ty && not (skip id) ->
               List.iter
                 (fun (v, _) ->
                   match key_of v with
@@ -358,7 +369,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
   let assignment = Hashtbl.create 64 in
   (* per register: the intervals it holds that may still conflict *)
   let held = Ptbl.create 8 in
-  let all = callee_saved @ caller_saved in
+  let all = callee @ caller in
   List.iter (fun r -> Ptbl.replace held r []) all;
   List.iter
     (fun (start, k, rs) ->
@@ -372,8 +383,8 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
       let crossing = crosses_call rs in
       let string_crossing = crosses_at string_ops rs in
       let usable r =
-        ((not crossing) || List.mem r callee_saved)
-        && not (string_crossing && List.mem r string_regs)
+        ((not crossing) || List.mem r callee)
+        && not (string_crossing && List.mem r strings)
       in
       let fits r =
         usable r
@@ -381,7 +392,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
       in
       (* Prefer caller-saved registers for short, call-free intervals so the
          callee-saved ones stay for values that need them. *)
-      let order = if crossing then callee_saved else caller_saved @ callee_saved in
+      let order = if crossing then callee else caller @ callee in
       let hinted =
         List.filter_map
           (fun k' -> Hashtbl.find_opt assignment k')
@@ -448,7 +459,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
         (fun (b : block) ->
           List.iter
             (function
-              | Phi (id, ty, incoming) when scalar ty && spilled id ->
+              | Phi (id, ty, incoming) when in_class ty && spilled id ->
                   List.iter
                     (fun (v, _) ->
                       match key_of v with
@@ -473,7 +484,20 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) ?slot_of (f
         Printf.eprintf "%s %s %s -> %s\n" f.name (key_name k)
           (String.concat " " (List.map (fun (a, b) -> Printf.sprintf "[%d,%d]" a b) rs))
           (match Hashtbl.find_opt assignment k with
-          | Some r -> X64.reg_name r
+          | Some r -> reg_name r
           | None -> "mem"))
       intervals;
   assignment
+
+let allocate ?skip ?operands ?slot_of f =
+  allocate_class ~in_class:scalar ~callee:callee_saved ~caller:caller_saved
+    ~strings:string_regs ~reg_name:X64.reg_name ?skip ?operands ?slot_of f
+
+(* 128-bit vectors in xmm3..xmm15 (xmm0..xmm2 are scratch). Every xmm
+   register is caller-saved, so a vector live across a call stays in its
+   slot. *)
+let xmm_regs = List.init 13 (fun i -> i + 3)
+
+let allocate_xmm ?skip ?operands f =
+  allocate_class ~in_class:v128 ~callee:[] ~caller:xmm_regs ~strings:[]
+    ~reg_name:(Printf.sprintf "xmm%d") ?skip ?operands f

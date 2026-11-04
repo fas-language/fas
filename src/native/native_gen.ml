@@ -541,6 +541,8 @@ type frame = {
   params : (string, int) Ptbl.t;
   mutable size : int;
   homes : A.reg Hashtbl.t;  (** values that live in a register *)
+  xhomes : int Hashtbl.t;  (** 128-bit vectors that live in an xmm register *)
+  xtmp : int;  (** rbp offset of a 16-byte scratch slot for vector lanes *)
   saved : (A.reg * int) list;  (** callee-saved registers used, and their save slots *)
 }
 
@@ -562,9 +564,15 @@ let build_frame ctx (f : func) =
         Regalloc.allocate
           ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
           ~operands:(operands_view addrs) ~slot_of:shared f;
+      xhomes =
+        Regalloc.allocate_xmm
+          ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
+          ~operands:(operands_view addrs) f;
+      xtmp = 0;
       saved = [];
     }
   in
+  let has_v128 = ref false in
   List.iter (fun (p : param) -> Ptbl.replace fr.params p.name (reserve fr 8 8)) f.params;
   List.iter
     (fun (b : block) ->
@@ -576,6 +584,9 @@ let build_frame ctx (f : func) =
                 (reserve fr (max 1 (size_of ctx ty)) (max 1 align))
           | _ -> ());
           match instruction_result ins with
+          | Some (id, ty) when Regalloc.v128 ty ->
+              has_v128 := true;
+              Hashtbl.replace fr.slots id (reserve fr 16 16)
           | Some (id, ty) when is_aggregate ty ->
               Hashtbl.replace fr.slots id (reserve fr (max 1 (size_of ctx ty)) 16)
           | Some (id, _) when Hashtbl.mem shared id -> ()
@@ -602,7 +613,8 @@ let build_frame ctx (f : func) =
       (fun r -> if List.mem r used then Some (r, reserve fr 8 8) else None)
       Regalloc.callee_saved
   in
-  let fr = { fr with saved } in
+  let xtmp = if !has_v128 then reserve fr 16 16 else 0 in
+  let fr = { fr with saved; xtmp } in
   fr.size <- (fr.size + 15) / 16 * 16;
   fr
 
@@ -761,6 +773,244 @@ let from_xmm ctx fr id ty x =
   let d = dest_reg fr id [] in
   A.mov_rx ctx.a ~double:(ty = F64) d x;
   put ctx fr id d
+
+(* 128-bit vectors (SSE2). They live in xmm3..xmm15 or in 16-byte aligned
+   slots; xmm0..xmm2 are scratch. Constants come from a 16-byte .rodata pool,
+   so every operand without a register is aligned memory. *)
+
+let vpool : (string, string) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+let lane_w = function Vector (_, t) -> bits t | _ -> 64
+
+let vec_bytes ty xs =
+  let w = lane_w ty / 8 in
+  let b = Buffer.create 16 in
+  List.iter
+    (fun k ->
+      for i = 0 to w - 1 do
+        Buffer.add_char b
+          (Char.chr
+             (Int64.to_int (Int64.logand (Int64.shift_right_logical k (8 * i)) 0xffL)))
+      done)
+    xs;
+  Buffer.contents b
+
+let vconst ty xs =
+  let key = vec_bytes ty xs in
+  let name =
+    match Stdlib.Hashtbl.find_opt vpool key with
+    | Some s -> s
+    | None ->
+        let s = Printf.sprintf "__fas_v%d" (Stdlib.Hashtbl.length vpool) in
+        Stdlib.Hashtbl.replace vpool key s;
+        s
+  in
+  A.Rip (name, 0)
+
+(* Zero and undef as constants, so every operand has a register or memory *)
+let vnorm : value -> value = function
+  | Zero (Vector (n, _) as t) | Undef (Vector (n, _) as t) ->
+      Const_vector (t, List.init n (fun _ -> 0L))
+  | v -> v
+
+let xhome fr = function Local (id, _) -> Hashtbl.find_opt fr.xhomes id | _ -> None
+
+let xmem fr v =
+  match vnorm v with
+  | Local (id, _) when not (Hashtbl.mem fr.xhomes id) -> Some (slot fr id)
+  | Const_vector (ty, xs) -> Some (vconst ty xs)
+  | _ -> None
+
+let xload ctx fr (x : int) v =
+  match (v, xhome fr v) with
+  | (Zero _ | Undef _), _ -> A.pop_xx ctx.a A.Pxor 64 x x
+  | _, Some h -> A.movdqa ctx.a x h
+  | _ -> (
+      match xmem fr v with
+      | Some m -> A.movdqu_load ctx.a x m
+      | None -> unsupported "vector operand")
+
+let xin ctx fr v scratch =
+  match xhome fr v with
+  | Some h -> h
+  | None ->
+      xload ctx fr scratch v;
+      scratch
+
+let xdest fr id avoid =
+  match Hashtbl.find_opt fr.xhomes id with
+  | Some r when not (List.mem r avoid) -> r
+  | _ -> 0
+
+let xput ctx fr id x =
+  match Hashtbl.find_opt fr.xhomes id with
+  | Some h -> A.movdqa ctx.a h x
+  | None -> A.movdqu_store ctx.a (slot fr id) x
+
+(* [d] op= [v] *)
+let xop ctx fr op w d v =
+  match xhome fr v with
+  | Some h -> A.pop_xx ctx.a op w d h
+  | None -> (
+      match xmem fr v with
+      | Some m -> A.pop_xm ctx.a op w d m
+      | None -> unsupported "vector operand")
+
+let is_v128_instr = function
+  | Bin (_, _, ty, _, _) | Load (_, ty, _, _) | Store (ty, _, _, _) -> Regalloc.v128 ty
+  | Extract _ | Insert _ | Shuffle_zero _ -> true
+  | Cast (_, "bitcast", from, _, target) -> Regalloc.v128 from || Regalloc.v128 target
+  | _ -> false
+
+let gen_v128 ctx fr ins =
+  let a = ctx.a in
+  let avoid v = match xhome fr v with Some h -> [ h ] | None -> [] in
+  match ins with
+  | Bin (id, op, ty, x, y) -> (
+      let w = lane_w ty in
+      let x = vnorm x and y = vnorm y in
+      let simple pop commutes =
+        let d0 = xdest fr id [] in
+        let x, y =
+          if commutes && xhome fr y = Some d0 && xhome fr x <> Some d0 then (y, x)
+          else (x, y)
+        in
+        let d = xdest fr id (avoid y) in
+        xload ctx fr d x;
+        xop ctx fr pop w d y;
+        xput ctx fr id d
+      in
+      match op with
+      | Add -> simple A.Padd true
+      | Sub -> simple A.Psub false
+      | And -> simple A.Pand true
+      | Or -> simple A.Por true
+      | Xor -> simple A.Pxor true
+      | Mul when w = 16 -> simple A.Pmullw true
+      | Mul when w = 64 ->
+          let hi_zero = function
+            | Const_vector (_, xs) ->
+                List.for_all (fun k -> Int64.shift_right_logical k 32 = 0L) xs
+            | _ -> false
+          in
+          let x, y = if hi_zero x && not (hi_zero y) then (y, x) else (x, y) in
+          let d = xdest fr id (avoid y) in
+          (* lo(x) lo(y) + (hi(x) lo(y) + lo(x) hi(y)) << 32 *)
+          xload ctx fr 1 x;
+          A.pshift_imm a A.Psrl 64 1 32;
+          xop ctx fr A.Pmuludq 64 1 y;
+          if not (hi_zero y) then begin
+            xload ctx fr 2 y;
+            A.pshift_imm a A.Psrl 64 2 32;
+            xop ctx fr A.Pmuludq 64 2 x;
+            A.pop_xx a A.Padd 64 1 2
+          end;
+          A.pshift_imm a A.Psll 64 1 32;
+          xload ctx fr d x;
+          xop ctx fr A.Pmuludq 64 d y;
+          A.pop_xx a A.Padd 64 d 1;
+          xput ctx fr id d
+      | Shl | Lshr | Ashr -> (
+          let sh = match op with Shl -> A.Psll | Lshr -> A.Psrl | _ -> A.Psra in
+          let d = xdest fr id (avoid y) in
+          match y with
+          | Const_vector (_, k :: _) ->
+              xload ctx fr d x;
+              A.pshift_imm a sh w d (Int64.to_int (Int64.logand k 0xffL));
+              xput ctx fr id d
+          | _ ->
+              (* a splat: the count is lane 0 *)
+              let c = xin ctx fr y 2 in
+              let c =
+                if w = 64 then c
+                else begin
+                  A.mov_rx a ~double:true A.Rax c;
+                  A.zero_extend a w A.Rax;
+                  A.mov_xr a ~double:true 2 A.Rax;
+                  2
+                end
+              in
+              xload ctx fr d x;
+              A.pshift_xx a sh w d c;
+              xput ctx fr id d)
+      | _ -> unsupported "vector operation")
+  | Load (id, _, p, _) ->
+      let d = xdest fr id [] in
+      A.movdqu_load a d (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx);
+      xput ctx fr id d
+  | Store (_, v, p, _) ->
+      let m = mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx in
+      A.movdqu_store a m (xin ctx fr v 0)
+  | Insert (id, ty, v, idx, x) -> (
+      let w = lane_w ty in
+      let k =
+        match idx with Const (_, k) -> Int64.to_int k | _ -> unsupported "lane"
+      in
+      let d = xdest fr id [] in
+      load ctx fr A.Rax x;
+      match (v, w, k) with
+      | (Undef _ | Zero _), _, 0 ->
+          A.mov_xr a ~double:true d A.Rax;
+          xput ctx fr id d
+      | _, 64, 1 ->
+          A.mov_xr a ~double:true 1 A.Rax;
+          xload ctx fr d v;
+          A.punpcklqdq a d 1;
+          xput ctx fr id d
+      | _, 16, _ ->
+          xload ctx fr d v;
+          A.sse_rr a 0x66 0xc4 ~reg:d ~rm:(A.reg_num A.Rax);
+          A.byte a k;
+          xput ctx fr id d
+      | _ ->
+          let t = A.Base (A.Rbp, fr.xtmp) in
+          A.movdqu_store a t (xin ctx fr v 1);
+          A.store a (w / 8) (A.Base (A.Rbp, fr.xtmp + (k * w / 8))) A.Rax;
+          A.movdqu_load a d t;
+          xput ctx fr id d)
+  | Extract (id, ty, v, idx) ->
+      let w = lane_w ty in
+      let k =
+        match idx with Const (_, k) -> Int64.to_int k | _ -> unsupported "lane"
+      in
+      let x = xin ctx fr v 1 in
+      let d = dest_reg fr id [] in
+      (match w with
+      | 64 ->
+          if k = 0 then A.mov_rx a ~double:true d x
+          else begin
+            A.pshufd a 1 x 0xee;
+            A.mov_rx a ~double:true d 1
+          end
+      | 32 ->
+          if k = 0 then A.mov_rx a ~double:false d x
+          else begin
+            A.pshufd a 1 x k;
+            A.mov_rx a ~double:false d 1
+          end
+      | 16 -> A.pextrw a d x k
+      | _ ->
+          A.pextrw a d x (k / 2);
+          if k mod 2 = 1 then A.shift_imm a A.Shr d 8);
+      let t = match ty with Vector (_, t) -> t | t -> t in
+      store_result ctx fr id t d
+  | Shuffle_zero (id, ty, v) ->
+      let x = xin ctx fr v 1 in
+      let d = xdest fr id [] in
+      (match lane_w ty with
+      | 64 -> A.pshufd a d x 0x44
+      | 32 -> A.pshufd a d x 0
+      | 16 ->
+          A.pshuflw a d x 0;
+          A.pshufd a d d 0
+      | _ ->
+          A.movdqa a d x;
+          A.punpcklbw a d d;
+          A.pshuflw a d d 0;
+          A.pshufd a d d 0);
+      xput ctx fr id d
+  | Cast (id, _, from, v, target) when Regalloc.v128 from && Regalloc.v128 target ->
+      xput ctx fr id (xin ctx fr v 0)
+  | _ -> unsupported "vector operation"
 
 let float_cmp = function Foeq | Fune | Folt | Fole | Fogt | Foge -> true | _ -> false
 
@@ -1120,6 +1370,7 @@ let gen_instr ctx fr ins =
   match ins with
   | Location _ -> ()
   | Bin (id, _, _, _, _) when Hashtbl.mem fr.addrs.dead id -> ()
+  | ins when is_v128_instr ins -> gen_v128 ctx fr ins
   | Bin (id, op, ty, x, y) -> (
       match op with
       | Sub when imm32 x = Some 0 ->
@@ -1440,7 +1691,7 @@ let gen_instr ctx fr ins =
 (* Edge copies: the phis of [target] take their values for the edge from
    [from_id], as one parallel move straight into each phi's home. rax breaks
    cycles and rcx carries memory-to-memory moves. *)
-type loc = R of A.reg | M of int | C of value
+type loc = R of A.reg | M of int | C of value | XR of int | XM of int | XC of value
 
 let edge_moves ctx fr blocks from_id target =
   ignore ctx;
@@ -1454,9 +1705,23 @@ let edge_moves ctx fr blocks from_id target =
     | None, Param (name, _) -> M (Ptbl.find fr.params name)
     | _ -> C v
   in
+  let xloc_of v =
+    match (xhome fr v, v) with
+    | Some r, _ -> XR r
+    | None, Local (id, _) -> (
+        match slot fr id with A.Base (_, o) -> XM o | _ -> XC v)
+    | _ -> XC v
+  in
   let moves =
     List.filter_map
       (function
+        | Phi (id, ty, incoming) when Regalloc.v128 ty -> (
+            match List.find_opt (fun (_, p) -> p = from_id) incoming with
+            | Some (v, _) ->
+                let dst = xloc_of (Local (id, ty)) and src = xloc_of v in
+                if dst = src then None else Some (dst, src)
+            | None ->
+                unsupported "phi in b%d has no value for edge from b%d" target from_id)
         | Phi (id, ty, incoming) -> (
             if is_aggregate ty then unsupported "aggregate phi";
             match List.find_opt (fun (_, p) -> p = from_id) incoming with
@@ -1485,20 +1750,37 @@ let edge_copies ctx fr blocks from_id target =
     | M o, C v ->
         load ctx fr A.Rcx v;
         A.store a 8 (A.Base (A.Rbp, o)) A.Rcx
-    | C _, _ -> invalid_arg "edge_copies"
+    | XR r, XR q -> A.movdqa a r q
+    | XR r, XM o -> A.movdqu_load a r (A.Base (A.Rbp, o))
+    | XR r, XC v -> xload ctx fr r v
+    | XM o, XR q -> A.movdqu_store a (A.Base (A.Rbp, o)) q
+    | XM o, XM o2 ->
+        A.movdqu_load a 1 (A.Base (A.Rbp, o2));
+        A.movdqu_store a (A.Base (A.Rbp, o)) 1
+    | XM o, XC v ->
+        xload ctx fr 1 v;
+        A.movdqu_store a (A.Base (A.Rbp, o)) 1
+    | _ -> invalid_arg "edge_copies"
   in
-  let pending = ref moves in
-  while !pending <> [] do
-    let is_source l = List.exists (fun (_, s) -> s = l) !pending in
-    match List.find_opt (fun (d, _) -> not (is_source d)) !pending with
-    | Some ((d, s) as m) ->
-        emit d s;
-        pending := List.filter (fun x -> x != m) !pending
-    | None ->
-        let d, _ = List.hd !pending in
-        emit (R A.Rax) d;
-        pending := List.map (fun (d', s) -> (d', if s = d then R A.Rax else s)) !pending
-  done
+  let resolve moves temp =
+    let pending = ref moves in
+    while !pending <> [] do
+      let is_source l = List.exists (fun (_, s) -> s = l) !pending in
+      match List.find_opt (fun (d, _) -> not (is_source d)) !pending with
+      | Some ((d, s) as m) ->
+          emit d s;
+          pending := List.filter (fun x -> x != m) !pending
+      | None ->
+          let d, _ = List.hd !pending in
+          emit temp d;
+          pending := List.map (fun (d', s) -> (d', if s = d then temp else s)) !pending
+    done
+  in
+  let xmoves, moves =
+    List.partition (function (XR _ | XM _), _ -> true | _ -> false) moves
+  in
+  resolve moves (R A.Rax);
+  resolve xmoves (XR 0)
 
 let gen_function ctx (f : func) =
   let a = ctx.a in
@@ -1917,6 +2199,7 @@ let compile (m : module_) =
     let m = t "cleanup3" Mem2reg.cleanup m in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     Stdlib.Hashtbl.reset const_pool;
+    Stdlib.Hashtbl.reset vpool;
     let a = A.create () in
     let ctx = { m; a; func_labels = Ptbl.create 64 } in
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
@@ -1962,6 +2245,11 @@ let compile (m : module_) =
         place_data rodata Elf64.Rodata ~name ~align:8 ~size:8 (fun _ ->
             int_le rodata.buf 8 k))
       const_pool;
+    Stdlib.Hashtbl.iter
+      (fun bytes name ->
+        place_data rodata Elf64.Rodata ~name ~align:16 ~size:16 (fun _ ->
+            Buffer.add_string rodata.buf bytes))
+      vpool;
     let bss = ref 0 and bss_syms = ref [] in
     List.iter
       (function

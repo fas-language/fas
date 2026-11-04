@@ -51,6 +51,10 @@ cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors.out"
   -o "$NATIVE_TMP/vectors_masked"
 "$NATIVE_TMP/vectors_masked" >"$NATIVE_TMP/vectors_masked.out"
 cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors_masked.out"
+FAS_NATIVE_NOSIMD=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vectors.fas" \
+  -o "$NATIVE_TMP/vectors_lanes"
+"$NATIVE_TMP/vectors_lanes" >"$NATIVE_TMP/vectors_lanes.out"
+cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors_lanes.out"
 
 # Unsupported features are diagnosed, not miscompiled
 printf 'use "C" <stdio.h>\nfn main() i32 {\n  puts(c"hi")\n  return 0\n}\n' \
