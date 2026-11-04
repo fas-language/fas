@@ -32,7 +32,10 @@ let caller_saved = [ X64.R8; X64.R9; X64.R10; X64.R11; X64.Rsi; X64.Rdi ]
 
 (* Registers that block copies and some intrinsics use as scratch *)
 let string_regs = [ X64.Rsi; X64.Rdi ]
-let scalar = function I1 | I8 | I16 | I32 | I64 | Pointer _ -> true | _ -> false
+
+let scalar = function
+  | I1 | I8 | I16 | I32 | I64 | F32 | F64 | Pointer _ -> true
+  | _ -> false
 
 let key_of_skip skip = function
   | Local (id, ty) when scalar ty && not (skip id) -> Some (V id)

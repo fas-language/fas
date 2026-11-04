@@ -1,0 +1,259 @@
+// Differential float program for `--backend=native`: the native build and
+// the LLVM build must print the same bytes. NaN results of arithmetic are
+// printed as one canonical NaN (payload propagation is not part of the
+// contract); sign-bit operations (neg, abs) print their raw bits.
+
+const EDGE32 arr[28, u32] = {
+  0x00000000, 0x80000000, 0x00000001, 0x80000001,
+  0x007fffff, 0x807fffff, 0x00800000, 0x80800000,
+  0x7f7fffff, 0xff7fffff, 0x7f800000, 0xff800000,
+  0x7fc00001, 0xffc12345, 0x3f000000, 0xbf000000,
+  0x3fc00000, 0xbfc00000, 0x40200000, 0xc0200000,
+  0x4b000000, 0x4b000001, 0x4b800000, 0x4b800001,
+  0x4f800000, 0x5f000000, 0x5f800000, 0xcf000000
+}
+
+const EDGE64 arr[28, u64] = {
+  0x0000000000000000, 0x8000000000000000,
+  0x0000000000000001, 0x8000000000000001,
+  0x000fffffffffffff, 0x800fffffffffffff,
+  0x0010000000000000, 0x8010000000000000,
+  0x7fefffffffffffff, 0xffefffffffffffff,
+  0x7ff0000000000000, 0xfff0000000000000,
+  0x7ff8000000000001, 0xfff8123456789abc,
+  0x3fe0000000000000, 0xbfe0000000000000,
+  0x3ff8000000000000, 0xbff8000000000000,
+  0x4004000000000000, 0xc004000000000000,
+  0x4330000000000000, 0x4330000000000001,
+  0x4340000000000000, 0x4340000000000001,
+  0x41f0000000000000, 0x43e0000000000000,
+  0x43f0000000000000, 0xc1e0000000000000
+}
+
+// Values near the integer conversion limits
+const NEAR64 arr[16, u64] = {
+  0x406fffffffffffff, 0x4070000000000000, 0xc060200000000000, 0xc060000000000000,
+  0x40effffe00000000, 0x40dfffc000000000, 0x41efffffffe00000, 0x41dfffffffc00000,
+  0xc1e0000000200000, 0x43dfffffffffffff, 0x43e0000000000000, 0x43efffffffffffff,
+  0xc3e0000000000001, 0x4072c66666666666, 0xc0605ccccccccccd, 0x3fefffffffffffff
+}
+
+const INTS arr[12, u64] = {
+  0, 1, 0xffffffffffffffff, 0x8000000000000000,
+  0x8000000000000001, 0x8000010000000001, 0x7fffffffffffffff, 0x00000000ffffffff,
+  0x0020000000000001, 0x0000000001000001, 0xfffffffffffff801, 12345678901234567
+}
+
+fn write_str(s addr, n usize) void {
+  r i64 = syscall(1, 1, s, n)
+}
+
+fn write_hex(x u64) void {
+  buf arr[17, u8] = {}
+  for i usize = 0; i < 16; i += 1 {
+    d u8 = trunc[u8]((x >> (60 - 4 * i)) & 15)
+    if d < 10 { buf[i] = d + 48 } else { buf[i] = d + 87 }
+  }
+  buf[16] = 10
+  r i64 = syscall(1, 1, &buf[0], 17)
+}
+
+fn b64(x f64) u64 {
+  if x != x { return 0x7ff8000000000000 }
+  return bitcast[u64](x)
+}
+
+fn b32(x f32) u64 {
+  if x != x { return 0x7fc00000 }
+  return zext[u64](bitcast[u32](x))
+}
+
+fn mix(h u64, x u64) u64 { return (h ^ x) * 0x100000001b3 }
+
+fn flag(c bool) u64 {
+  if c { return 1 }
+  return 0
+}
+
+fn cmps64(a f64, b f64) u64 {
+  r u64 = flag(a < b)
+  r = r | (flag(a <= b) << 1)
+  r = r | (flag(a > b) << 2)
+  r = r | (flag(a >= b) << 3)
+  r = r | (flag(a == b) << 4)
+  r = r | (flag(a != b) << 5)
+  return r
+}
+
+fn cmps32(a f32, b f32) u64 {
+  r u64 = flag(a < b)
+  r = r | (flag(a <= b) << 1)
+  r = r | (flag(a > b) << 2)
+  r = r | (flag(a >= b) << 3)
+  r = r | (flag(a == b) << 4)
+  r = r | (flag(a != b) << 5)
+  return r
+}
+
+// Branches on float compares (the fused compare-and-branch path)
+fn branches64(a f64, b f64) u64 {
+  r u64 = 0
+  if a < b { r = r | 1 }
+  if a <= b { r = r | 2 }
+  if a > b { r = r | 4 }
+  if a >= b { r = r | 8 }
+  if a == b { r = r | 16 }
+  if a != b { r = r | 32 }
+  if !(a < b) { r = r | 64 }
+  return r
+}
+
+fn pairs64() void {
+  for i usize = 0; i < 28; i += 1 {
+    a f64 = bitcast[f64](EDGE64[i])
+    h u64 = 0
+    for j usize = 0; j < 28; j += 1 {
+      b f64 = bitcast[f64](EDGE64[j])
+      h = mix(h, b64(a + b))
+      h = mix(h, b64(a - b))
+      h = mix(h, b64(a * b))
+      h = mix(h, b64(a / b))
+      h = mix(h, cmps64(a, b))
+      h = mix(h, branches64(a, b))
+    }
+    write_hex(h)
+  }
+}
+
+fn pairs32() void {
+  for i usize = 0; i < 28; i += 1 {
+    a f32 = bitcast[f32](EDGE32[i])
+    h u64 = 0
+    for j usize = 0; j < 28; j += 1 {
+      b f32 = bitcast[f32](EDGE32[j])
+      h = mix(h, b32(a + b))
+      h = mix(h, b32(a - b))
+      h = mix(h, b32(a * b))
+      h = mix(h, b32(a / b))
+      h = mix(h, cmps32(a, b))
+    }
+    write_hex(h)
+  }
+}
+
+fn to_ints64(x f64) u64 {
+  h u64 = mix(0, zext[u64](bitcast[u8](cvt[i8](x))))
+  h = mix(h, zext[u64](cvt[u8](x)))
+  h = mix(h, zext[u64](bitcast[u16](cvt[i16](x))))
+  h = mix(h, zext[u64](cvt[u16](x)))
+  h = mix(h, zext[u64](bitcast[u32](cvt[i32](x))))
+  h = mix(h, zext[u64](cvt[u32](x)))
+  h = mix(h, bitcast[u64](cvt[i64](x)))
+  h = mix(h, cvt[u64](x))
+  return h
+}
+
+fn to_ints32(x f32) u64 {
+  h u64 = mix(0, zext[u64](bitcast[u8](cvt[i8](x))))
+  h = mix(h, zext[u64](cvt[u8](x)))
+  h = mix(h, zext[u64](bitcast[u16](cvt[i16](x))))
+  h = mix(h, zext[u64](cvt[u16](x)))
+  h = mix(h, zext[u64](bitcast[u32](cvt[i32](x))))
+  h = mix(h, zext[u64](cvt[u32](x)))
+  h = mix(h, bitcast[u64](cvt[i64](x)))
+  h = mix(h, cvt[u64](x))
+  return h
+}
+
+fn unary64(x f64) void {
+  h u64 = mix(0, bitcast[u64](-x))
+  h = mix(h, bitcast[u64](abs(x)))
+  h = mix(h, b64(sqrt(x)))
+  h = mix(h, b64(floor(x)))
+  h = mix(h, b64(ceil(x)))
+  h = mix(h, b64(round(x)))
+  h = mix(h, b32(cvt[f32](x)))
+  h = mix(h, to_ints64(x))
+  write_hex(h)
+}
+
+fn unary32(x f32) void {
+  h u64 = mix(0, zext[u64](bitcast[u32](-x)))
+  h = mix(h, zext[u64](bitcast[u32](abs(x))))
+  h = mix(h, b32(sqrt(x)))
+  h = mix(h, b32(floor(x)))
+  h = mix(h, b32(ceil(x)))
+  h = mix(h, b32(round(x)))
+  h = mix(h, b64(cvt[f64](x)))
+  h = mix(h, to_ints32(x))
+  write_hex(h)
+}
+
+fn from_ints() void {
+  for i usize = 0; i < 12; i += 1 {
+    v u64 = INTS[i]
+    h u64 = mix(0, b64(cvt[f64](v)))
+    h = mix(h, b32(cvt[f32](v)))
+    h = mix(h, b64(cvt[f64](bitcast[i64](v))))
+    h = mix(h, b32(cvt[f32](bitcast[i64](v))))
+    h = mix(h, b64(cvt[f64](trunc[u32](v))))
+    h = mix(h, b32(cvt[f32](bitcast[i32](trunc[u32](v)))))
+    h = mix(h, b64(cvt[f64](bitcast[i16](trunc[u16](v)))))
+    h = mix(h, b32(cvt[f32](trunc[u8](v))))
+    write_hex(h)
+  }
+}
+
+struct Body { mass f32 pos f64 vel f64 }
+
+fn step(b addr, dt f64) void {
+  b[Body].pos = b[Body].pos + b[Body].vel * dt
+  b[Body].vel = b[Body].vel - b[Body].pos * dt * cvt[f64](b[Body].mass)
+}
+
+// Loops with float phis and float loop conditions
+fn loops() void {
+  x f64 = 1.0
+  n u64 = 0
+  while x < 1.0e6 {
+    x = x * 1.5 + 0.25
+    n += 1
+  }
+  write_hex(n)
+  write_hex(b64(x))
+  s f32 = 0.0
+  for i u32 = 1; i <= 1000; i += 1 { s += 1.0 / cvt[f32](i) }
+  write_hex(b32(s))
+  body Body = {}
+  body.mass = 0.5
+  body.pos = 1.0
+  body.vel = 0.0
+  for i usize = 0; i < 1000; i += 1 { step(&body, 0.01) }
+  write_hex(b64(body.pos))
+  write_hex(b64(body.vel))
+  // Newton iteration through a function taking and returning floats
+  r f64 = 2.0
+  for i usize = 0; i < 6; i += 1 { r = newton(r, 2.0) }
+  write_hex(b64(r))
+  arr_ arr[8, f64] = {}
+  for i usize = 0; i < 8; i += 1 { arr_[i] = cvt[f64](i) * 0.5 - 1.0 }
+  m f64 = arr_[0]
+  for i usize = 1; i < 8; i += 1 {
+    if arr_[i] > m { m = arr_[i] }
+  }
+  write_hex(b64(m))
+}
+
+fn newton(r f64, a f64) f64 { return (r + a / r) * 0.5 }
+
+fn main() i32 {
+  pairs64()
+  pairs32()
+  for i usize = 0; i < 28; i += 1 { unary64(bitcast[f64](EDGE64[i])) }
+  for i usize = 0; i < 16; i += 1 { unary64(bitcast[f64](NEAR64[i])) }
+  for i usize = 0; i < 28; i += 1 { unary32(bitcast[f32](EDGE32[i])) }
+  for i usize = 0; i < 16; i += 1 { unary32(cvt[f32](bitcast[f64](NEAR64[i]))) }
+  from_ints()
+  loops()
+  return 0
+}

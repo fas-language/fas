@@ -44,7 +44,8 @@ let bits = function
   | I32 -> 32
   | I64 | Pointer _ -> 64
   | I128 -> unsupported "i128 values"
-  | F32 | F64 -> unsupported "floating-point values"
+  | F32 -> 32
+  | F64 -> 64
   | Vector _ -> unsupported "vector values"
   | Struct _ | Array _ -> unsupported "aggregate value in a scalar position"
   | Void -> unsupported "void value"
@@ -607,11 +608,37 @@ let slot_of fr v =
       | _ -> None)
   | _ -> None
 
-(* Set the flags for [cmp c x y]. *)
+(* Floats travel as bit patterns in general registers and slots; xmm0..2
+   are scratch for the instructions that need them. *)
+
+(* Load float [v] into xmm [x], from its slot or through [scratch]. *)
+let to_xmm ctx fr x v scratch =
+  let double = value_ty v = F64 in
+  match slot_of fr v with
+  | Some m -> A.mov_xm ctx.a ~double x m
+  | None -> A.mov_xr ctx.a ~double x (in_reg ctx fr v scratch)
+
+(* Write xmm [x] as the float result [id] of type [ty]. *)
+let from_xmm ctx fr id ty x =
+  let d = dest_reg fr id [] in
+  A.mov_rx ctx.a ~double:(ty = F64) d x;
+  put ctx fr id d
+
+let float_cmp = function Foeq | Fune | Folt | Fole | Fogt | Foge -> true | _ -> false
+
+(* Set the flags for [cmp c x y]. A float compare sets them as ucomis does
+   (an unsigned compare, PF on unordered), with the operands of < and <=
+   swapped so that every ordered compare reads `a` or `ae`. *)
 let compare_flags ctx fr c x y =
   let a = ctx.a in
   let w = bits (value_ty x) in
-  if (match c with Slt | Sle | Sgt | Sge -> true | _ -> false) && w < 64 then begin
+  if float_cmp c then begin
+    let x, y = match c with Folt | Fole -> (y, x) | _ -> (x, y) in
+    to_xmm ctx fr 0 x A.Rax;
+    to_xmm ctx fr 1 y A.Rcx;
+    A.ucomi a ~double:(value_ty x = F64) 0 1
+  end
+  else if (match c with Slt | Sle | Sgt | Sge -> true | _ -> false) && w < 64 then begin
     load_signed ctx fr A.Rax x;
     load_signed ctx fr A.Rcx y;
     A.alu_rr a A.Cmp A.Rax A.Rcx
@@ -630,8 +657,8 @@ let mem_size _ctx ty =
   match ty with
   | I1 | I8 -> 1
   | I16 -> 2
-  | I32 -> 4
-  | I64 | Pointer _ -> 8
+  | I32 | F32 -> 4
+  | I64 | F64 | Pointer _ -> 8
   | ty ->
       ignore (bits ty);
       unsupported "memory access of this type"
@@ -656,7 +683,9 @@ let cond_of = function
   | Ule -> A.Be
   | Ugt -> A.A
   | Uge -> A.Ae
-  | _ -> unsupported "floating-point comparison"
+  | Fogt | Folt -> A.A
+  | Foge | Fole -> A.Ae
+  | Foeq | Fune -> invalid_arg "cond_of: needs two flags"
 
 let negate = function
   | A.E -> A.Ne
@@ -716,6 +745,9 @@ let gen_intrinsic ctx fr result ret_ty name args =
   let store r =
     match result with Some id -> store_result ctx fr id ret_ty r | None -> ()
   in
+  let fstore x =
+    match result with Some id -> from_xmm ctx fr id ret_ty x | None -> ()
+  in
   if prefix "llvm.lifetime." then ()
   else if prefix "llvm.ctpop." then begin
     (* Bit-by-bit population count; M2 favours simplicity. *)
@@ -771,6 +803,118 @@ let gen_intrinsic ctx fr result ret_ty name args =
     A.jcc a A.E skip;
     A.alu_rr a A.Or A.Rax A.Rdx;
     A.place a skip;
+    store A.Rax
+  end
+  else if prefix "llvm.sqrt." then begin
+    to_xmm ctx fr 0 (arg 0) A.Rax;
+    A.fop_xx a ~double:(ret_ty = F64) A.Fsqrt 0 0;
+    fstore 0
+  end
+  else if prefix "llvm.fabs." then begin
+    load ctx fr A.Rax (arg 0);
+    A.bit_ri a `Btr A.Rax (result_bits () - 1);
+    store A.Rax
+  end
+  else if prefix "llvm.roundeven." || prefix "llvm.floor." || prefix "llvm.ceil." then begin
+    (* SSE2 only (roundsd is SSE4.1): for |x| < 2^52 (2^23 for f32),
+       (|x| + 2^52) - 2^52 rounds to the nearest even integer. floor and ceil
+       then step by 1 towards x's side, and the result takes x's sign so
+       that zeros keep it. Larger values, infinities and NaN are integral
+       already and pass through. *)
+    let double = ret_ty = F64 in
+    let w = result_bits () in
+    let fbits x =
+      if double then Int64.bits_of_float x
+      else Int64.logand (Int64.of_int32 (Int32.bits_of_float x)) 0xffff_ffffL
+    in
+    let pass = A.new_label a and done_ = A.new_label a in
+    load ctx fr A.Rax (arg 0);
+    (* rsi := sign of x *)
+    A.mov_rr a A.Rsi A.Rax;
+    A.shift_imm a A.Shr A.Rsi (w - 1);
+    A.shift_imm a A.Shl A.Rsi (w - 1);
+    A.mov_rr a A.Rdx A.Rax;
+    A.bit_ri a `Btr A.Rdx (w - 1);
+    A.mov_xr a ~double 0 A.Rdx;
+    A.mov_imm a A.Rcx (fbits (Float.ldexp 1.0 (if double then 52 else 23)));
+    A.mov_xr a ~double 1 A.Rcx;
+    A.ucomi a ~double 1 0;
+    A.jcc a A.Be pass;
+    A.fop_xx a ~double A.Fadd 0 1;
+    A.fop_xx a ~double A.Fsub 0 1;
+    A.mov_rx a ~double A.Rdx 0;
+    A.alu_rr a A.Or A.Rdx A.Rsi;
+    if not (prefix "llvm.roundeven.") then begin
+      let floor = prefix "llvm.floor." in
+      let exact = A.new_label a in
+      A.mov_xr a ~double 0 A.Rdx;
+      A.mov_xr a ~double 2 A.Rax;
+      (* floor: r > x needs r - 1; ceil: x > r needs r + 1 *)
+      if floor then A.ucomi a ~double 0 2 else A.ucomi a ~double 2 0;
+      A.jcc a A.Be exact;
+      A.mov_imm a A.Rcx (fbits 1.0);
+      A.mov_xr a ~double 1 A.Rcx;
+      A.fop_xx a ~double (if floor then A.Fsub else A.Fadd) 0 1;
+      A.mov_rx a ~double A.Rdx 0;
+      A.alu_rr a A.Or A.Rdx A.Rsi;
+      A.place a exact
+    end;
+    A.jmp a done_;
+    A.place a pass;
+    A.mov_rr a A.Rdx A.Rax;
+    A.place a done_;
+    store A.Rdx
+  end
+  else if prefix "llvm.fptosi.sat." || prefix "llvm.fptoui.sat." then begin
+    (* Saturating float -> integer: NaN gives 0, out-of-range values clamp. *)
+    let w = result_bits () in
+    let double = String.ends_with ~suffix:".f64" name in
+    let fbits x =
+      if double then Int64.bits_of_float x
+      else Int64.logand (Int64.of_int32 (Int32.bits_of_float x)) 0xffff_ffffL
+    in
+    (* xmm1 := 2^k *)
+    let bound k =
+      A.mov_imm a A.Rcx (fbits (Float.ldexp 1.0 k));
+      A.mov_xr a ~double 1 A.Rcx
+    in
+    to_xmm ctx fr 0 (arg 0) A.Rax;
+    A.cvt_f2si a ~double A.Rax 0;
+    if prefix "llvm.fptosi." then begin
+      (* below the range (and NaN) cvtt gives a value under min, or 2^63 *)
+      if w < 64 then begin
+        A.mov_imm a A.Rcx (Int64.neg (Int64.shift_left 1L (w - 1)));
+        A.alu_rr a A.Cmp A.Rax A.Rcx;
+        A.cmov a A.L A.Rax A.Rcx
+      end;
+      bound (w - 1);
+      A.mov_imm a A.Rcx (Int64.pred (Int64.shift_left 1L (w - 1)));
+      A.ucomi a ~double 0 1;
+      A.cmov a A.Ae A.Rax A.Rcx;
+      A.mov_imm a A.Rdx 0L;
+      A.ucomi a ~double 0 0;
+      A.cmov a A.P A.Rax A.Rdx
+    end
+    else begin
+      (* negative values and NaN convert to a negative number: make it 0 *)
+      A.mov_imm a A.Rdx 0L;
+      A.test_rr a A.Rax A.Rax;
+      A.cmov a A.S A.Rax A.Rdx;
+      if w = 64 then begin
+        (* [2^63, 2^64): convert x - 2^63 and set the top bit back *)
+        bound 63;
+        A.mov_xx a 2 0;
+        A.fop_xx a ~double A.Fsub 2 1;
+        A.cvt_f2si a ~double A.Rcx 2;
+        A.bit_ri a `Btc A.Rcx 63;
+        A.ucomi a ~double 0 1;
+        A.cmov a A.Ae A.Rax A.Rcx
+      end;
+      bound w;
+      A.mov_imm a A.Rcx (if w = 64 then -1L else Int64.pred (Int64.shift_left 1L w));
+      A.ucomi a ~double 0 1;
+      A.cmov a A.Ae A.Rax A.Rcx
+    end;
     store A.Rax
   end
   else if
@@ -881,8 +1025,34 @@ let gen_instr ctx fr ins =
               load ctx fr A.Rcx y;
               A.shift_cl a sh d);
           if op = Lshr then put ctx fr id d else store_result ctx fr id ty d
-      | Fadd | Fsub | Fmul | Fdiv -> unsupported "floating-point arithmetic")
-  | Fneg _ -> unsupported "floating-point negation"
+      | Fadd | Fsub | Fmul | Fdiv ->
+          let double = ty = F64 in
+          to_xmm ctx fr 0 x A.Rax;
+          let fop =
+            match op with
+            | Fadd -> A.Fadd
+            | Fsub -> A.Fsub
+            | Fmul -> A.Fmul
+            | _ -> A.Fdiv
+          in
+          (match slot_of fr y with
+          | Some m -> A.fop_xm a ~double fop 0 m
+          | None ->
+              to_xmm ctx fr 1 y A.Rcx;
+              A.fop_xx a ~double fop 0 1);
+          from_xmm ctx fr id ty 0)
+  | Fneg (id, ty, x) ->
+      let d = dest_reg fr id [] in
+      load ctx fr d x;
+      A.bit_ri a `Btc d (bits ty - 1);
+      put ctx fr id d
+  | Cmp (id, ((Foeq | Fune) as c), _, x, y) ->
+      compare_flags ctx fr c x y;
+      let c1, c2, op = if c = Foeq then (A.E, A.Np, A.And) else (A.Ne, A.P, A.Or) in
+      A.setcc a c1 A.Rax;
+      A.setcc a c2 A.Rcx;
+      A.alu_rr a op A.Rax A.Rcx;
+      put ctx fr id A.Rax
   | Cmp (id, c, _, x, y) ->
       compare_flags ctx fr c x y;
       A.setcc a (cond_of c) A.Rax;
@@ -1005,6 +1175,35 @@ let gen_instr ctx fr ins =
           load ctx fr A.Rax v;
           A.sign_extend a (bits from) A.Rax;
           store_result ctx fr id target A.Rax
+      | "sitofp" ->
+          load_signed ctx fr A.Rax v;
+          A.cvt_si2f a ~double:(target = F64) 0 A.Rax;
+          from_xmm ctx fr id target 0
+      | "uitofp" ->
+          let double = target = F64 in
+          load ctx fr A.Rax v;
+          if bits from < 64 then A.cvt_si2f a ~double 0 A.Rax
+          else begin
+            (* Above 2^63: halve keeping the low bit sticky, convert, double. *)
+            let big = A.new_label a and done_ = A.new_label a in
+            A.test_rr a A.Rax A.Rax;
+            A.jcc a A.S big;
+            A.cvt_si2f a ~double 0 A.Rax;
+            A.jmp a done_;
+            A.place a big;
+            A.mov_rr a A.Rcx A.Rax;
+            A.shift_imm a A.Shr A.Rcx 1;
+            A.alu_ri a A.And A.Rax 1;
+            A.alu_rr a A.Or A.Rcx A.Rax;
+            A.cvt_si2f a ~double 0 A.Rcx;
+            A.fop_xx a ~double A.Fadd 0 0;
+            A.place a done_
+          end;
+          from_xmm ctx fr id target 0
+      | "fpext" | "fptrunc" ->
+          to_xmm ctx fr 0 v A.Rax;
+          A.cvt_ff a ~from_double:(kind = "fptrunc") 0 0;
+          from_xmm ctx fr id target 0
       | k -> unsupported "cast %s" k)
   | Call (result, _, ret, name, args) ->
       if String.starts_with ~prefix:"llvm." name then
@@ -1158,8 +1357,9 @@ let gen_function ctx (f : func) =
            && Hashtbl.find_opt uses id = Some 1
            && (match c with
              | Eq | Ne | Slt | Sle | Sgt | Sge | Ult | Ule | Ugt | Uge -> true
-             | _ -> false)
-           && match ty with F32 | F64 | Vector _ -> false | _ -> true ->
+             | Folt | Fole | Fogt | Foge -> true
+             | Foeq | Fune -> false)
+           && match ty with Vector _ -> false | _ -> true ->
         Some (cmp, c, x, y)
     | _ -> None
   in

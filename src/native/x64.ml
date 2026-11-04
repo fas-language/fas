@@ -468,6 +468,105 @@ let cqo a =
   byte a 0x48;
   byte a 0x99
 
+(* SSE scalar floating point. XMM registers are numbered 0..15; the
+   backend keeps float values as bit patterns in general registers and uses
+   xmm0..xmm2 only as scratch around arithmetic, compares and conversions. *)
+
+type xmm = int
+
+(* [prefix] [REX] 0F [op] ModRM(reg, rm), register-register form *)
+let sse_rr a ?(w = false) prefix op ~reg ~rm =
+  if prefix <> 0 then byte a prefix;
+  rex a ~w ~r:reg ~b:rm ();
+  byte a 0x0f;
+  byte a op;
+  modrm a 3 reg rm
+
+(* [prefix] [REX] 0F [op] ModRM(reg, mem) *)
+let sse_rm a ?(w = false) prefix op ~reg mem =
+  if prefix <> 0 then byte a prefix;
+  rex a ~w ~r:reg ~x:(mem_x_bits mem) ~b:(mem_b_bits mem) ();
+  byte a 0x0f;
+  byte a op;
+  mem_operand a reg mem
+
+(* movd/movq xmm, r32/r64 *)
+let mov_xr a ~double (x : xmm) r = sse_rr a ~w:double 0x66 0x6e ~reg:x ~rm:(reg_num r)
+
+(* movd/movq r32/r64, xmm (movd zero-extends into the 64-bit register) *)
+let mov_rx a ~double r (x : xmm) = sse_rr a ~w:double 0x66 0x7e ~reg:x ~rm:(reg_num r)
+
+(* movss/movsd xmm, [mem] *)
+let mov_xm a ~double (x : xmm) mem =
+  sse_rm a (if double then 0xf2 else 0xf3) 0x10 ~reg:x mem
+
+let fprefix double = if double then 0xf2 else 0xf3
+
+type fop = Fadd | Fsub | Fmul | Fdiv | Fsqrt | Fmin | Fmax
+
+let fop_code = function
+  | Fadd -> 0x58
+  | Fsub -> 0x5c
+  | Fmul -> 0x59
+  | Fdiv -> 0x5e
+  | Fsqrt -> 0x51
+  | Fmin -> 0x5d
+  | Fmax -> 0x5f
+
+(* addsd/subsd/... dst, src *)
+let fop_xx a ~double op (dst : xmm) (src : xmm) =
+  sse_rr a (fprefix double) (fop_code op) ~reg:dst ~rm:src
+
+(* addsd/... dst, [mem] *)
+let fop_xm a ~double op (dst : xmm) mem =
+  sse_rm a (fprefix double) (fop_code op) ~reg:dst mem
+
+(* ucomisd/ucomiss x, y: flags as an unsigned compare of x with y; PF set
+   when unordered (ZF and CF are then set too). *)
+let ucomi a ~double (x : xmm) (y : xmm) =
+  sse_rr a (if double then 0x66 else 0) 0x2e ~reg:x ~rm:y
+
+(* cvtsi2sd/ss xmm, r64 *)
+let cvt_si2f a ~double (x : xmm) r =
+  sse_rr a ~w:true (fprefix double) 0x2a ~reg:x ~rm:(reg_num r)
+
+(* cvttsd2si/cvttss2si r64, xmm (truncating) *)
+let cvt_f2si a ~double r (x : xmm) =
+  sse_rr a ~w:true (fprefix double) 0x2c ~reg:(reg_num r) ~rm:x
+
+(* cvtss2sd (from single) or cvtsd2ss (from double) *)
+let cvt_ff a ~from_double (dst : xmm) (src : xmm) =
+  sse_rr a (fprefix from_double) 0x5a ~reg:dst ~rm:src
+
+(* andpd/andps, orpd/orps, xorpd/xorps xmm, xmm *)
+let logic_xx a ~double op (dst : xmm) (src : xmm) =
+  let code =
+    match op with `And -> 0x54 | `Andn -> 0x55 | `Or -> 0x56 | `Xor -> 0x57
+  in
+  sse_rr a (if double then 0x66 else 0) code ~reg:dst ~rm:src
+
+(* movaps dst, src *)
+let mov_xx a (dst : xmm) (src : xmm) =
+  if dst <> src then sse_rr a 0 0x28 ~reg:dst ~rm:src
+
+(* roundsd/roundss dst, src, mode (SSE4.1): 0 nearest-even, 1 floor, 2 ceil,
+   3 truncate; bit 3 suppresses the inexact exception. *)
+let round_xx a ~double (dst : xmm) (src : xmm) mode =
+  byte a 0x66;
+  rex a ~w:false ~r:dst ~b:src ();
+  byte a 0x0f;
+  byte a 0x3a;
+  byte a (if double then 0x0b else 0x0a);
+  modrm a 3 dst src;
+  byte a (mode lor 8)
+
+(* bt/bts/btr/btc r64, imm8 *)
+let bit_ri a op r k =
+  ext_r a [ 0x0f; 0xba ]
+    (match op with `Bt -> 4 | `Bts -> 5 | `Btr -> 6 | `Btc -> 7)
+    r;
+  byte a k
+
 (* setcc r8, then zero-extend to 64 bits *)
 let setcc a c r =
   rex a ~force:(reg_num r >= 4) ~w:false ~r:0 ~b:(reg_num r) ();

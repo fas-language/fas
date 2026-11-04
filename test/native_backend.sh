@@ -32,13 +32,21 @@ if command -v readelf >/dev/null 2>&1; then
   readelf -s "$NATIVE_TMP/native" | grep -q ' main$'
 fi
 
+# Scalar floats: the native and LLVM builds print the same bits
+FAS_OPT="$LLVM_OPT" FAS_LLC="$LLVM_LLC" FAS_CC="$CC" \
+  "$OCAML_FAS" -O2 "$ROOT/test/native_floats.fas" -o "$NATIVE_TMP/floats_llvm"
+"$OCAML_FAS" --backend=native "$ROOT/test/native_floats.fas" -o "$NATIVE_TMP/floats"
+"$NATIVE_TMP/floats_llvm" >"$NATIVE_TMP/floats_llvm.out"
+"$NATIVE_TMP/floats" >"$NATIVE_TMP/floats.out"
+cmp "$NATIVE_TMP/floats_llvm.out" "$NATIVE_TMP/floats.out"
+
 # Unsupported features are diagnosed, not miscompiled
-printf 'fn main() i32 {\n  x f64 = 1.5\n  return trunc[i32](cvt[i64](x * 2.0))\n}\n' \
-  >"$NATIVE_TMP/float.fas"
-if "$OCAML_FAS" --backend=native "$NATIVE_TMP/float.fas" -o "$NATIVE_TMP/float" \
-  2>"$NATIVE_TMP/float.err"; then
-  echo "native backend accepted floats" >&2; exit 1
+printf 'fn main() i32 {\n  v vec[4, u32] = splat(3)\n  return bitcast[i32](v[1] + v[2])\n}\n' \
+  >"$NATIVE_TMP/vector.fas"
+if "$OCAML_FAS" --backend=native "$NATIVE_TMP/vector.fas" -o "$NATIVE_TMP/vector" \
+  2>"$NATIVE_TMP/vector.err"; then
+  echo "native backend accepted vectors" >&2; exit 1
 fi
-grep -q 'native backend:' "$NATIVE_TMP/float.err"
+grep -q 'native backend:' "$NATIVE_TMP/vector.err"
 
 echo "native backend: ok"
