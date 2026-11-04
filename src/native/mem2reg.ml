@@ -14,7 +14,8 @@ let scalar = Regalloc.scalar
 
 module Imap = Map.Make (Int)
 
-(* Jumps into an empty block that only jumps on go straight to its target,
+(* Jumps into an empty block (debug locations aside) that only jumps on go
+   straight to its target,
    when the target has no phis to keep apart by predecessor. *)
 let thread (f : func) =
   match f.blocks with
@@ -29,8 +30,11 @@ let thread (f : func) =
       in
       let rec final seen id =
         match Hashtbl.find_opt by_id id with
-        | Some { instrs = []; terminator = Br t; _ }
-          when id <> entry.id && (not (List.mem id seen)) && not (has_phis t) ->
+        | Some { instrs; terminator = Br t; _ }
+          when id <> entry.id
+               && List.for_all (function Location _ -> true | _ -> false) instrs
+               && (not (List.mem id seen))
+               && not (has_phis t) ->
             final (id :: seen) t
         | _ -> id
       in
@@ -388,5 +392,32 @@ let dce (f : func) =
         f.blocks;
   }
 
+(* Drop the blocks no longer reachable from the entry, keeping the order. *)
+let prune (f : func) =
+  match f.blocks with
+  | [] -> f
+  | entry :: _ ->
+      let by_id = Hashtbl.create 32 in
+      List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) f.blocks;
+      let seen = Hashtbl.create 32 in
+      let rec visit id =
+        if not (Hashtbl.mem seen id) then begin
+          Hashtbl.replace seen id ();
+          match Hashtbl.find_opt by_id id with
+          | Some b -> List.iter visit (terminator_successors b.terminator)
+          | None -> ()
+        end
+      in
+      visit entry.id;
+      {
+        f with
+        blocks = List.filter (fun (b : block) -> Hashtbl.mem seen b.id) f.blocks;
+      }
+
+(* Promotion and DCE empty more blocks, so thread again afterwards. *)
 let module_ (m : module_) =
-  { m with funcs = List.map (fun f -> dce (promote f)) m.funcs }
+  { m with funcs = List.map (fun f -> prune (thread (dce (promote f)))) m.funcs }
+
+(* After folding: constant branches leave dead code and empty blocks. *)
+let cleanup (m : module_) =
+  { m with funcs = List.map (fun f -> prune (thread (dce f))) m.funcs }

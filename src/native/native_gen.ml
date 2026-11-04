@@ -771,8 +771,8 @@ let gen_instr ctx fr ins =
    cycles and rcx carries memory-to-memory moves. *)
 type loc = R of A.reg | M of int | C of value
 
-let edge_copies ctx fr blocks from_id target =
-  let a = ctx.a in
+let edge_moves ctx fr blocks from_id target =
+  ignore ctx;
   let b : block = Hashtbl.find blocks target in
   let loc_of v =
     match (home fr v, v) with
@@ -797,6 +797,11 @@ let edge_copies ctx fr blocks from_id target =
         | _ -> None)
       b.instrs
   in
+  moves
+
+let edge_copies ctx fr blocks from_id target =
+  let a = ctx.a in
+  let moves = edge_moves ctx fr blocks from_id target in
   let emit dst src =
     match (dst, src) with
     | R r, R q -> A.mov_rr a r q
@@ -889,22 +894,70 @@ let gen_function ctx (f : func) =
   let has_phis id =
     List.exists (function Phi _ -> true | _ -> false) (Hashtbl.find blocks id).instrs
   in
-  let jump_to from_id target =
-    edge_copies ctx fr blocks from_id target;
-    if target <> !next_block then A.jmp a (block_label target)
+  let position = Hashtbl.create 16 in
+  Array.iteri (fun i id -> Hashtbl.replace position id i) order;
+  let fusions = Hashtbl.create 16 in
+  List.iter
+    (fun (b : block) ->
+      match fused b with Some f -> Hashtbl.replace fusions b.id f | None -> ())
+    f.blocks;
+  (* Instructions that emit no code of their own *)
+  let silent ins =
+    match ins with
+    | Phi _ | Location _ -> true
+    | Gep (id, _, _, _)
+    | Global_ptr (id, _, _)
+    | String_ptr (id, _, _)
+    | Alloca (id, _, _) ->
+        Hashtbl.mem fr.addrs.skip id
+    | _ -> false
   in
+  let plain from_id target = edge_moves ctx fr blocks from_id target = [] in
+  (* A block with no code and no copies on to its jump target can be jumped
+     over: jumps to it go straight on. *)
+  let rec forward seen id =
+    let b : block = Hashtbl.find blocks id in
+    match b.terminator with
+    | Br next
+      when (not (List.mem id seen)) && List.for_all silent b.instrs && plain id next ->
+        forward (id :: seen) next
+    | _ -> id
+  in
+  let forward id = forward [] id in
+  let rotating = ref false in
+  (* A loop header that only compares and branches is copied to the end of
+     each back edge, so the loop runs one branch per iteration. *)
+  let rec jump_to from_id target =
+    edge_copies ctx fr blocks from_id target;
+    let t = forward target in
+    let header = Hashtbl.find blocks t in
+    match (Hashtbl.find_opt fusions t, header.terminator) with
+    | Some ((cmp, c, x, y) : instr * cmp * value * value), CondBr (_, yes, no)
+      when (not !rotating) && t <> !next_block
+           && Hashtbl.find position t <= Hashtbl.find position from_id
+           && List.for_all (fun ins -> ins == cmp || silent ins) header.instrs ->
+        rotating := true;
+        compare_flags ctx fr c x y;
+        branch t (cond_of c) yes no;
+        rotating := false
+    | _ -> if target <> !next_block && t <> !next_block then A.jmp a (block_label t)
   (* Branch on condition [c] (already in the flags) to [yes] or [no]. *)
-  let branch from_id c yes no =
-    if not (has_phis yes) then
-      begin if (not (has_phis no)) && yes = !next_block then
-        A.jcc a (negate c) (block_label no)
+  and branch from_id c yes no =
+    let py = plain from_id yes and pn = plain from_id no in
+    if py && pn then begin
+      let y = forward yes and n = forward no in
+      if y = !next_block || yes = !next_block then A.jcc a (negate c) (block_label n)
       else begin
-        A.jcc a c (block_label yes);
-        jump_to from_id no
+        A.jcc a c (block_label y);
+        if n <> !next_block && no <> !next_block then A.jmp a (block_label n)
       end
-      end
-    else if not (has_phis no) then begin
-      A.jcc a (negate c) (block_label no);
+    end
+    else if py then begin
+      A.jcc a c (block_label (forward yes));
+      jump_to from_id no
+    end
+    else if pn then begin
+      A.jcc a (negate c) (block_label (forward no));
       jump_to from_id yes
     end
     else begin
@@ -986,7 +1039,8 @@ let int_le buf size v =
 
 let compile (m : module_) =
   try
-    let m = Ir_fold.module_ (Mem2reg.module_ m) in
+    let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m)) in
+    if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     let a = A.create () in
     let ctx = { m; a; func_labels = Hashtbl.create 64 } in
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
