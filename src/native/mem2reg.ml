@@ -572,6 +572,96 @@ let reassociate (m : module_) =
   in
   { m with funcs = List.map one m.funcs }
 
+(* Demanded bits: below `and x, 2^k-1` only the low k bits of [x] matter,
+   and through single-use add, sub, mul, bitwise operations and constant
+   left shifts only the low bits of their operands, so an operand
+   `and y, m'` whose mask keeps those bits reads [y] instead. *)
+let demanded_bits (f : func) =
+  let defs = Hashtbl.create 64 and uses = Hashtbl.create 64 in
+  let count v =
+    (match v with
+    | Local (i, _) ->
+        Hashtbl.replace uses i (1 + Option.value ~default:0 (Hashtbl.find_opt uses i))
+    | _ -> ());
+    v
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          (match instruction_result ins with
+          | Some (i, _) -> Hashtbl.replace defs i ins
+          | None -> ());
+          ignore (Ir_fold.map_instr count ins))
+        b.instrs;
+      ignore (Ir_fold.map_term count b.terminator))
+    f.blocks;
+  let low_mask m = Int64.compare m 0L > 0 && Int64.logand m (Int64.succ m) = 0L in
+  let changed = Hashtbl.create 8 in
+  let rec strip m v =
+    match v with
+    | Local (i, _) -> (
+        match Hashtbl.find_opt defs i with
+        | Some (Bin (_, And, _, z, Const (_, m'))) when Int64.logand m m' = m ->
+            strip m z
+        | _ ->
+            narrow m i;
+            v)
+    | _ -> v
+  and narrow m i =
+    if Hashtbl.find_opt uses i = Some 1 && not (Hashtbl.mem changed i) then
+      match Hashtbl.find_opt defs i with
+      | Some (Bin (d, ((Add | Sub | Mul | And | Or | Xor) as op), ty, a, b)) ->
+          let a' = strip m a and b' = strip m b in
+          if a' != a || b' != b then begin
+            let ins = Bin (d, op, ty, a', b') in
+            Hashtbl.replace defs i ins;
+            Hashtbl.replace changed i ins
+          end
+      | Some (Bin (d, Shl, ty, a, (Const (_, c) as k)))
+        when Int64.compare c 0L > 0 && Int64.compare c 64L < 0 ->
+          let m' = Int64.shift_right_logical m (Int64.to_int c) in
+          if Int64.compare m' 0L > 0 then begin
+            let a' = strip m' a in
+            if a' != a then begin
+              let ins = Bin (d, Shl, ty, a', k) in
+              Hashtbl.replace defs i ins;
+              Hashtbl.replace changed i ins
+            end
+          end
+      | _ -> ()
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function
+          | Bin (_, And, _, Local (x, _), Const (_, m)) when low_mask m -> narrow m x
+          | _ -> ())
+        b.instrs)
+    f.blocks;
+  if Hashtbl.length changed = 0 then f
+  else
+    {
+      f with
+      blocks =
+        List.map
+          (fun (b : block) ->
+            {
+              b with
+              instrs =
+                List.map
+                  (fun ins ->
+                    match instruction_result ins with
+                    | Some (i, _) -> (
+                        match Hashtbl.find_opt changed i with
+                        | Some n -> n
+                        | None -> ins)
+                    | None -> ins)
+                  b.instrs;
+            })
+          f.blocks;
+    }
+
 (* `addr + n` lowers to inttoptr (add (ptrtoint p) n); as `gep i8 p, n` it
    folds into memory operands like any other address. *)
 let addresses (f : func) =

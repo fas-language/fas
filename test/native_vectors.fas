@@ -259,6 +259,31 @@ fn masked(n usize) u64 {
   return h
 }
 
+// Demanded bits: inner masks that the outer mask makes redundant, and ones
+// it does not (a wider use, a too-narrow mask, a right shift); an inlined
+// vector helper with a scalar splat inside a loop
+fn lcg_step(v vec[4, u64]) vec[4, u64] {
+  s vec[4, u64] = ((v >> 16) ^ splat(0x5deece66d)) & splat(0xffffffffffff)
+  return ((s * splat(0x5deece66d) + splat(11)) & splat(0xffffffffffff)) >> 7
+}
+
+fn masks(i usize, j usize) u64 {
+  x u64 = seed(i) ^ seed(j + 3)
+  a u64 = ((x & 0xffffffffffff) * 0x5deece66d + 11) & 0xffffffffffff
+  w u64 = x & 0xffffffffff
+  b u64 = ((w * 0x5deece66d) & 0xffffffffffff) ^ (w >> 3)
+  c u64 = (((x & 0xffff) << 8) + x) & 0xffffff
+  d u64 = ((x & 0xffffffffffff) >> 4) & 0xfff
+  v vec[4, u64] = {seed(i), seed(j), seed(i + j), seed(i ^ j)}
+  acc vec[4, u64] = splat(0)
+  for k u64 = 0; k < 5; k += 1 {
+    bit u64 = zext[u64](1) << (k ^ x & 31)
+    v = lcg_step(v)
+    acc |= (splat(0) - (v & splat(1))) & splat(bit)
+  }
+  return a ^ b ^ (c << 1) ^ (d << 2) ^ acc[0] ^ acc[1] ^ acc[2] ^ acc[3]
+}
+
 fn main() i32 {
   for n usize = 0; n <= 11; n += 1 { write_hex(masked(n)) }
   for i usize = 0; i < 16; i += 1 {
@@ -269,6 +294,7 @@ fn main() i32 {
       h = mix(h, shuffles(i, j))
       h = mix(h, floats(i, j))
       h = mix(h, bools(i, j))
+      h = mix(h, masks(i, j))
     }
     write_hex(h)
   }

@@ -662,6 +662,23 @@ let home fr = function
   | _ -> None
 
 (* [v] as a sign-extended 32-bit immediate equal to its canonical value *)
+(* 64-bit constants that do not fit an immediate, read from .rodata by the
+   instructions that use them instead of going through a register *)
+let const_pool : (int64, string) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+let pooled = function
+  | Const (I64, n) when not (A.fits_i32_64 n) ->
+      let name =
+        match Stdlib.Hashtbl.find_opt const_pool n with
+        | Some s -> s
+        | None ->
+            let s = Printf.sprintf "__fas_k%d" (Stdlib.Hashtbl.length const_pool) in
+            Stdlib.Hashtbl.replace const_pool n s;
+            s
+      in
+      Some (A.Rip (name, 0))
+  | _ -> None
+
 let imm32 = function
   | Const (ty, n) ->
       let c = norm_const ty n in
@@ -1167,17 +1184,19 @@ let gen_instr ctx fr ins =
               | Some (index, scale) ->
                   A.lea a d (A.Sib { base = Some hx; index; scale; disp; sym = None }))
           | Mul, Some k -> A.imul_rri a d (in_reg ctx fr x d) k
-          | Mul, None ->
+          | Mul, None -> (
               load ctx fr d x;
-              A.imul_rr a d (in_reg ctx fr y A.Rcx)
+              match (pooled y, slot_of fr y) with
+              | Some m, _ | None, Some m -> A.imul_rm a d m
+              | None, None -> A.imul_rr a d (in_reg ctx fr y A.Rcx))
           | _, Some k ->
               load ctx fr d x;
               A.alu_ri a alu d k
           | _, None -> (
               load ctx fr d x;
-              match slot_of fr y with
-              | Some m -> A.alu_rm a alu d m
-              | None -> A.alu_rr a alu d (in_reg ctx fr y A.Rcx)));
+              match (pooled y, slot_of fr y) with
+              | Some m, _ | None, Some m -> A.alu_rm a alu d m
+              | None, None -> A.alu_rr a alu d (in_reg ctx fr y A.Rcx)));
           (* Bitwise operations on canonical (zero-extended) inputs stay
              canonical. *)
           if match op with And | Or | Xor -> true | _ -> false then put ctx fr id d
@@ -1841,9 +1860,35 @@ let compile (m : module_) =
         if Scalarize.has_vectors f then
           Ptbl.replace vector_sizes f.name (Scalarize.vector_size f))
       m.funcs;
+    (* Vector functions inline before scalarization, so their lanes join the
+       caller's lane-major runs instead of going through memory *)
+    let m =
+      if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" || Ptbl.length vector_sizes = 0
+      then m
+      else
+        match
+          t "vinline"
+            (Inline.module_ ~only:(Ptbl.mem vector_sizes) ~sizes:vector_sizes)
+            m
+        with
+        | m', true ->
+            {
+              m' with
+              funcs =
+                List.map2
+                  (fun (f : func) g -> if f == g then g else Mem2reg.merge g)
+                  m.funcs m'.funcs;
+            }
+        | m, false -> m
+    in
     let m = t "scalarize" Scalarize.module_ m in
     let m = t "promote" Mem2reg.module_ m in
     let m = t "fold" Ir_fold.module_ m in
+    let m =
+      t "demanded"
+        (fun m -> { m with funcs = List.map Mem2reg.demanded_bits m.funcs })
+        m
+    in
     let m = t "cleanup" Mem2reg.cleanup m in
     let m =
       if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" then m
@@ -1871,6 +1916,7 @@ let compile (m : module_) =
     let m = t "fold3" Ir_fold.module_ m in
     let m = t "cleanup3" Mem2reg.cleanup m in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
+    Stdlib.Hashtbl.reset const_pool;
     let a = A.create () in
     let ctx = { m; a; func_labels = Ptbl.create 64 } in
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
@@ -1911,6 +1957,11 @@ let compile (m : module_) =
     in
     let rodata = { buf = Buffer.create 256; relocs = []; syms = [] } in
     let data = { buf = Buffer.create 256; relocs = []; syms = [] } in
+    Stdlib.Hashtbl.iter
+      (fun k name ->
+        place_data rodata Elf64.Rodata ~name ~align:8 ~size:8 (fun _ ->
+            int_le rodata.buf 8 k))
+      const_pool;
     let bss = ref 0 and bss_syms = ref [] in
     List.iter
       (function

@@ -520,7 +520,7 @@ let lane_local allocas = function
       Some (n, 2)
   | _ -> None
 
-let lane_major st allocas instrs =
+let lane_major st allocas scalars instrs =
   let buckets = ref [||] in
   let flush () =
     (* each bucket is reversed, like [st.out] *)
@@ -552,16 +552,22 @@ let lane_major st allocas instrs =
                 !buckets.(i) <- x :: !buckets.(i))
               emitted
           end
-      | _ ->
+      | _ -> (
           let saved = st.out in
           st.out <- [];
           instr st ins;
           let emitted = st.out in
           st.out <- saved;
-          if emitted <> [] then begin
-            flush ();
-            st.out <- emitted @ st.out
-          end)
+          match ins with
+          | Load (_, _, Local (p, _), _) when Hashtbl.mem scalars p ->
+              (* a scalar alloca is not touched by the pending lanes, so its
+                 load goes ahead of them and the run continues *)
+              st.out <- emitted @ st.out
+          | _ ->
+              if emitted <> [] then begin
+                flush ();
+                st.out <- emitted @ st.out
+              end))
     instrs;
   flush ()
 
@@ -637,11 +643,14 @@ let func structs (f : func) =
           b.instrs)
       f.blocks;
     st.next <- !top + 1;
-    let allocas = Hashtbl.create 8 in
+    let allocas = Hashtbl.create 8 and scalars = Hashtbl.create 8 in
     List.iter
       (fun (b : block) ->
         List.iter
-          (function Alloca (d, Vector _, _) -> Hashtbl.replace allocas d () | _ -> ())
+          (function
+            | Alloca (d, Vector _, _) -> Hashtbl.replace allocas d ()
+            | Alloca (d, _, _) -> Hashtbl.replace scalars d ()
+            | _ -> ())
           b.instrs)
       f.blocks;
     List.iter
@@ -659,7 +668,7 @@ let func structs (f : func) =
       List.map
         (fun (b : block) ->
           st.out <- [];
-          lane_major st allocas b.instrs;
+          lane_major st allocas scalars b.instrs;
           let terminator =
             match b.terminator with
             | Ret (Some ((Vector _ as vt), v)) ->

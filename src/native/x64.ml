@@ -435,6 +435,7 @@ let alu_mr a op size mem src =
 
 let test_rr a x y = rr a [ 0x85 ] ~reg:y ~rm:x
 let imul_rr a dst src = rr a [ 0x0f; 0xaf ] ~reg:dst ~rm:src
+let imul_rm a dst mem = rm a [ 0x0f; 0xaf ] ~reg:dst mem
 
 (* imul dst, src, imm (64-bit) *)
 let imul_rri a dst src imm =

@@ -104,11 +104,11 @@ let calls_self (f : func) =
    small callers. [sizes] holds sizes measured before vector scalarization,
    so a short vector function is judged by its vector instructions rather
    than by its lanes. *)
-let candidates sizes (m : module_) =
+let candidates ?(only = fun _ -> true) sizes (m : module_) =
   let small = 32 in
   let tbl = Ptbl.create 16 in
   let eligible (f : func) =
-    f.blocks <> [] && (not f.variadic)
+    f.blocks <> [] && only f.name && (not f.variadic)
     && (not (calls_self f))
     && f.name <> "main"
     && (not (List.mem f.name m.no_inline_functions))
@@ -302,8 +302,8 @@ let func cands (f : func) =
   in
   go f 0
 
-let module_ ?(sizes = Ptbl.create 1) (m : module_) =
-  let cands = candidates sizes m in
+let module_ ?only ?(sizes = Ptbl.create 1) (m : module_) =
+  let cands = candidates ?only sizes m in
   if Ptbl.length cands = 0 then (m, false)
   else
     let changed = ref false in
