@@ -24,13 +24,15 @@
    vectors and `i128` are not supported yet and raise [Unsupported]. *)
 
 open Ir
+module Hashtbl = Itbl
+module Ptbl = Stdlib.Hashtbl
 module A = X64
 
 exception Unsupported of string
 
 let unsupported fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
-type ctx = { m : module_; a : A.t; func_labels : (string, A.label) Hashtbl.t }
+type ctx = { m : module_; a : A.t; func_labels : (string, A.label) Ptbl.t }
 
 let size_of ctx ty =
   match static_type_bytes ctx.m.structs [] ty with
@@ -78,10 +80,9 @@ type anchor = Reg of value | Sym of string | Frame of int  (** alloca id *)
 type form = { anchor : anchor; off : int; idx : (value * int) option }
 
 type addrs = {
-  forms : (int, form) Hashtbl.t;
-  skip : (int, unit) Hashtbl.t;
-  dead : (int, unit) Hashtbl.t;
-      (** index arithmetic that folding into addresses left unused *)
+  forms : form Hashtbl.t;
+  skip : unit Hashtbl.t;
+  dead : unit Hashtbl.t;  (** index arithmetic that folding into addresses left unused *)
 }
 
 let plain v = { anchor = Reg v; off = 0; idx = None }
@@ -306,6 +307,138 @@ let operands_view addrs ins =
    same bytes overwrites, with no read of them in between, is dropped. Calls,
    system calls, volatile accesses and traps forget everything. This is what
    merges `for const` read-modify-write chains on one word into one store. *)
+(* Locations known in a block, indexed so that each access only looks at the
+   entries it may alias: groups by (anchor, index), entries by offset. *)
+module Locs = struct
+  type key = anchor * (value * int) option
+
+  type 'a group = {
+    at : (int * 'a) list Hashtbl.t;  (** offset -> (size, payload) *)
+    mutable widest : int;
+  }
+
+  type 'a t = {
+    fixed : (anchor, ((value * int) option, 'a group) Ptbl.t) Ptbl.t;
+        (** groups anchored on a global or a stack slot, by anchor *)
+    regs : (key, 'a group) Ptbl.t;  (** groups anchored on a register value *)
+  }
+
+  let create () = { fixed = Ptbl.create 8; regs = Ptbl.create 8 }
+
+  let clear t =
+    Ptbl.reset t.fixed;
+    Ptbl.reset t.regs
+
+  let find_group t (fm : form) =
+    match fm.anchor with
+    | Reg _ -> Ptbl.find_opt t.regs (fm.anchor, fm.idx)
+    | a -> (
+        match Ptbl.find_opt t.fixed a with
+        | Some g -> Ptbl.find_opt g fm.idx
+        | None -> None)
+
+  let group t (fm : form) =
+    match find_group t fm with
+    | Some g -> g
+    | None ->
+        let g = { at = Hashtbl.create 8; widest = 0 } in
+        (match fm.anchor with
+        | Reg _ -> Ptbl.replace t.regs (fm.anchor, fm.idx) g
+        | a ->
+            let tbl =
+              match Ptbl.find_opt t.fixed a with
+              | Some tbl -> tbl
+              | None ->
+                  let tbl = Ptbl.create 4 in
+                  Ptbl.replace t.fixed a tbl;
+                  tbl
+            in
+            Ptbl.replace tbl fm.idx g);
+        g
+
+  let add t (fm, n) x =
+    let g = group t fm in
+    g.widest <- max g.widest n;
+    Hashtbl.replace g.at fm.off
+      ((n, x) :: Option.value ~default:[] (Hashtbl.find_opt g.at fm.off))
+
+  (* The entries of [g] whose bytes overlap [off, off + n) *)
+  let overlapping g off n =
+    let hit o (m, _) = o < off + n && off < o + m in
+    if Hashtbl.length g.at <= n + g.widest then
+      Hashtbl.fold
+        (fun o es acc -> if List.exists (hit o) es then o :: acc else acc)
+        g.at []
+    else
+      let acc = ref [] in
+      for o = off - g.widest + 1 to off + n - 1 do
+        match Hashtbl.find_opt g.at o with
+        | Some es when List.exists (hit o) es -> acc := o :: !acc
+        | _ -> ()
+      done;
+      !acc
+
+  (* Remove every entry that may alias [loc] *)
+  let kill t ((fm : form), n) =
+    let own = find_group t fm in
+    (match fm.anchor with
+    | Reg _ ->
+        Ptbl.reset t.fixed;
+        Ptbl.reset t.regs
+    | a ->
+        Ptbl.reset t.regs;
+        Option.iter Ptbl.reset (Ptbl.find_opt t.fixed a));
+    match own with
+    | None -> ()
+    | Some g -> (
+        List.iter
+          (fun o ->
+            match
+              List.filter
+                (fun (m, _) -> not (o < fm.off + n && fm.off < o + m))
+                (Hashtbl.find g.at o)
+            with
+            | [] -> Hashtbl.remove g.at o
+            | es -> Hashtbl.replace g.at o es)
+          (overlapping g fm.off n);
+        match fm.anchor with
+        | Reg _ -> Ptbl.replace t.regs (fm.anchor, fm.idx) g
+        | a -> (
+            match Ptbl.find_opt t.fixed a with
+            | Some tbl -> Ptbl.replace tbl fm.idx g
+            | None ->
+                let tbl = Ptbl.create 4 in
+                Ptbl.replace tbl fm.idx g;
+                Ptbl.replace t.fixed a tbl))
+
+  (* Remove the entries whose bytes lie inside [loc], passing each to [f] *)
+  let remove_covered t ((fm : form), n) f =
+    match find_group t fm with
+    | None -> ()
+    | Some g ->
+        List.iter
+          (fun o ->
+            let inside, rest =
+              List.partition
+                (fun (m, _) -> fm.off <= o && o + m <= fm.off + n)
+                (Hashtbl.find g.at o)
+            in
+            List.iter (fun (_, x) -> f x) inside;
+            match rest with
+            | [] -> Hashtbl.remove g.at o
+            | _ -> Hashtbl.replace g.at o rest)
+          (overlapping g fm.off n)
+
+  let find t ((fm : form), n) p =
+    match find_group t fm with
+    | None -> None
+    | Some g -> (
+        match Hashtbl.find_opt g.at fm.off with
+        | Some es ->
+            List.find_map (fun (m, x) -> if m = n && p x then Some x else None) es
+        | None -> None)
+end
+
 let forward_memory ctx (f : func) =
   let addrs = analyse_addrs ctx f in
   let form_of = function
@@ -314,23 +447,6 @@ let forward_memory ctx (f : func) =
     | Global (name, _) -> { anchor = Sym name; off = 0; idx = None }
     | v -> plain v
   in
-  let distinct a b =
-    match (a, b) with
-    | Sym x, Sym y -> x <> y
-    | Frame x, Frame y -> x <> y
-    | Sym _, Frame _ | Frame _, Sym _ -> true
-    | _ -> false
-  in
-  let disjoint (f1, s1) (f2, s2) =
-    distinct f1.anchor f2.anchor
-    || f1.anchor = f2.anchor && f1.idx = f2.idx
-       && (f1.off + s1 <= f2.off || f2.off + s2 <= f1.off)
-  in
-  let covers (f1, s1) (f2, s2) =
-    (* [f1, s1] holds all of [f2, s2] *)
-    f1.anchor = f2.anchor && f1.idx = f2.idx && f1.off <= f2.off
-    && f2.off + s2 <= f1.off + s1
-  in
   let env = Hashtbl.create 64 in
   let rec resolve = function
     | Local (i, _) as v -> (
@@ -338,59 +454,52 @@ let forward_memory ctx (f : func) =
     | v -> v
   in
   let size ty = try Some (size_of ctx ty) with Unsupported _ -> None in
+  (* (type, value) known to be in memory at a location *)
+  let known = Locs.create () in
+  (* stores not read since, by their position in the block *)
+  let pending = Locs.create () in
   let blocks =
     List.map
       (fun (b : block) ->
-        (* (location, type, value) known to be in memory *)
-        let known = ref [] in
-        (* stores not read since: (location, position in the block) *)
-        let pending = ref [] in
+        Locs.clear known;
+        Locs.clear pending;
         let dead = Hashtbl.create 8 in
         let forget () =
-          known := [];
-          pending := []
+          Locs.clear known;
+          Locs.clear pending
         in
-        let read loc = pending := List.filter (fun (l, _) -> disjoint l loc) !pending in
-        let instrs = List.map (Ir_fold.map_instr resolve) b.instrs in
         let instrs =
           List.mapi
             (fun pos ins ->
+              let ins = Ir_fold.map_instr resolve ins in
               match ins with
               | Load (id, ty, p, _) -> (
                   match size ty with
                   | Some n when not (is_aggregate ty) -> (
                       let loc = (form_of p, n) in
-                      match
-                        List.find_opt (fun (l, t, _) -> l = loc && t = ty) !known
-                      with
-                      | Some (_, _, v) ->
+                      match Locs.find known loc (fun (t, _) -> t = ty) with
+                      | Some (_, v) ->
                           Hashtbl.replace env id v;
                           None
                       | None ->
-                          read loc;
-                          known := (loc, ty, Local (id, ty)) :: !known;
+                          Locs.kill pending loc;
+                          Locs.add known loc (ty, Local (id, ty));
                           Some ins)
                   | Some n ->
-                      read (form_of p, n);
+                      Locs.kill pending (form_of p, n);
                       Some ins
                   | None ->
-                      pending := [];
+                      Locs.clear pending;
                       Some ins)
               | Store (ty, v, p, _) -> (
                   match size ty with
                   | Some n ->
                       let loc = (form_of p, n) in
-                      pending :=
-                        List.filter
-                          (fun (l, at) ->
-                            if covers loc l then (
-                              Hashtbl.replace dead at ();
-                              false)
-                            else true)
-                          !pending;
-                      known := List.filter (fun (l, _, _) -> disjoint l loc) !known;
-                      if not (is_aggregate ty) then known := (loc, ty, v) :: !known;
-                      pending := (loc, pos) :: !pending;
+                      Locs.remove_covered pending loc (fun at ->
+                          Hashtbl.replace dead at ());
+                      Locs.kill known loc;
+                      if not (is_aggregate ty) then Locs.add known loc (ty, v);
+                      Locs.add pending loc pos;
                       Some ins
                   | None ->
                       forget ();
@@ -400,10 +509,10 @@ let forward_memory ctx (f : func) =
                   forget ();
                   Some ins
               | _ -> Some ins)
-            instrs
+            b.instrs
         in
         let instrs =
-          List.filteri (fun pos ins -> ins <> None && not (Hashtbl.mem dead pos)) instrs
+          List.filteri (fun pos _ -> not (Hashtbl.mem dead pos)) instrs
           |> List.filter_map Fun.id
         in
         { b with instrs })
@@ -426,11 +535,11 @@ let forward_memory ctx (f : func) =
 
 type frame = {
   addrs : addrs;
-  slots : (int, int) Hashtbl.t;  (** SSA id -> rbp offset *)
-  allocas : (int, int) Hashtbl.t;  (** alloca id -> rbp offset of its memory *)
-  params : (string, int) Hashtbl.t;
+  slots : int Hashtbl.t;  (** SSA id -> rbp offset *)
+  allocas : int Hashtbl.t;  (** alloca id -> rbp offset of its memory *)
+  params : (string, int) Ptbl.t;
   mutable size : int;
-  homes : (Regalloc.key, A.reg) Hashtbl.t;  (** values that live in a register *)
+  homes : A.reg Hashtbl.t;  (** values that live in a register *)
   saved : (A.reg * int) list;  (** callee-saved registers used, and their save slots *)
 }
 
@@ -445,7 +554,7 @@ let build_frame ctx (f : func) =
       addrs;
       slots = Hashtbl.create 64;
       allocas = Hashtbl.create 8;
-      params = Hashtbl.create 8;
+      params = Ptbl.create 8;
       size = 0;
       homes =
         Regalloc.allocate
@@ -454,9 +563,7 @@ let build_frame ctx (f : func) =
       saved = [];
     }
   in
-  List.iter
-    (fun (p : param) -> Hashtbl.replace fr.params p.name (reserve fr 8 8))
-    f.params;
+  List.iter (fun (p : param) -> Ptbl.replace fr.params p.name (reserve fr 8 8)) f.params;
   List.iter
     (fun (b : block) ->
       List.iter
@@ -507,14 +614,14 @@ let load ctx fr r v =
           A.lea a r (A.Base (A.Rbp, Hashtbl.find fr.allocas al + off))
       | _ -> invalid_arg "folded address used as a value")
   | Local (id, _) -> (
-      match Hashtbl.find_opt fr.homes (Regalloc.V id) with
+      match Hashtbl.find_opt fr.homes id with
       | Some home -> A.mov_rr a r home
       | None -> A.load_zx a 8 r (slot fr id))
   | Param (name, _) -> (
-      match Hashtbl.find_opt fr.homes (Regalloc.P name) with
+      match Hashtbl.find_opt fr.homes (Regalloc.pkey name) with
       | Some home -> A.mov_rr a r home
       | None -> (
-          match Hashtbl.find_opt fr.params name with
+          match Ptbl.find_opt fr.params name with
           | Some o -> A.load_zx a 8 r (A.Base (A.Rbp, o))
           | None -> unsupported "unknown parameter %s" name))
   | Global (name, _) -> A.lea a r (A.Rip (name, 0))
@@ -531,13 +638,13 @@ let rec store_result ctx fr id ty r =
 
 (* Write a 64-bit register that is already canonical to [id]'s home. *)
 and put ctx fr id r =
-  match Hashtbl.find_opt fr.homes (Regalloc.V id) with
+  match Hashtbl.find_opt fr.homes id with
   | Some home -> A.mov_rr ctx.a home r
   | None -> A.store ctx.a 8 (slot fr id) r
 
 let home fr = function
-  | Local (id, _) -> Hashtbl.find_opt fr.homes (Regalloc.V id)
-  | Param (name, _) -> Hashtbl.find_opt fr.homes (Regalloc.P name)
+  | Local (id, _) -> Hashtbl.find_opt fr.homes id
+  | Param (name, _) -> Hashtbl.find_opt fr.homes (Regalloc.pkey name)
   | _ -> None
 
 (* [v] as a sign-extended 32-bit immediate equal to its canonical value *)
@@ -588,7 +695,7 @@ let mem_at ctx fr p ~sb ~si =
 
 (* Where to compute [id]: its home register unless that is in [avoid]. *)
 let dest_reg fr id avoid =
-  match Hashtbl.find_opt fr.homes (Regalloc.V id) with
+  match Hashtbl.find_opt fr.homes id with
   | Some r when not (List.mem r avoid) -> r
   | _ -> A.Rax
 
@@ -603,7 +710,7 @@ let slot_of fr v =
       | None, Some o -> Some (A.Base (A.Rbp, o))
       | _ -> None)
   | Param (name, _) -> (
-      match (home fr v, Hashtbl.find_opt fr.params name) with
+      match (home fr v, Ptbl.find_opt fr.params name) with
       | None, Some o -> Some (A.Base (A.Rbp, o))
       | _ -> None)
   | _ -> None
@@ -719,7 +826,7 @@ let gen_call ctx fr result ret_ty target args =
   List.iteri (fun i (_, _, v) -> if i < 6 then load ctx fr arg_regs.(i) v) args;
   (match target with
   | `Direct name -> (
-      match Hashtbl.find_opt ctx.func_labels name with
+      match Ptbl.find_opt ctx.func_labels name with
       | Some l -> A.call_label a l
       | None ->
           unsupported
@@ -956,7 +1063,7 @@ let gen_instr ctx fr ins =
           let commutes = op <> Sub in
           (* When the result's home already holds [y], compute [y op x]. *)
           let x, y =
-            match (Hashtbl.find_opt fr.homes (Regalloc.V id), home fr y) with
+            match (Hashtbl.find_opt fr.homes id, home fr y) with
             | Some r, Some ry when commutes && r = ry && home fr x <> Some r -> (y, x)
             | _ -> (x, y)
           in
@@ -1253,7 +1360,7 @@ let edge_moves ctx fr blocks from_id target =
     | None, Local (id, _) when Hashtbl.mem fr.addrs.skip id -> C v
     | None, Local (id, ty) when not (is_aggregate ty) -> (
         match slot fr id with A.Base (_, o) -> M o | _ -> C v)
-    | None, Param (name, _) -> M (Hashtbl.find fr.params name)
+    | None, Param (name, _) -> M (Ptbl.find fr.params name)
     | _ -> C v
   in
   let moves =
@@ -1311,14 +1418,14 @@ let gen_function ctx (f : func) =
   List.iter (fun (b : block) -> Hashtbl.replace labels b.id (A.new_label a)) f.blocks;
   let block_label id = Hashtbl.find labels id in
   A.align a 16;
-  A.place a (Hashtbl.find ctx.func_labels f.name);
+  A.place a (Ptbl.find ctx.func_labels f.name);
   let start = A.pos a in
   A.push a A.Rbp;
   A.mov_rr a A.Rbp A.Rsp;
   if fr.size > 0 then A.alu_ri a A.Sub A.Rsp fr.size;
   List.iteri
     (fun i (p : param) ->
-      let dst = A.Base (A.Rbp, Hashtbl.find fr.params p.name) in
+      let dst = A.Base (A.Rbp, Ptbl.find fr.params p.name) in
       if i < 6 then A.store a 8 dst arg_regs.(i)
       else begin
         A.load_zx a 8 A.Rax (A.Base (A.Rbp, 16 + (8 * (i - 6))));
@@ -1328,8 +1435,8 @@ let gen_function ctx (f : func) =
   List.iter (fun (r, o) -> A.store a 8 (A.Base (A.Rbp, o)) r) fr.saved;
   List.iter
     (fun (p : param) ->
-      match Hashtbl.find_opt fr.homes (Regalloc.P p.name) with
-      | Some home -> A.load_zx a 8 home (A.Base (A.Rbp, Hashtbl.find fr.params p.name))
+      match Hashtbl.find_opt fr.homes (Regalloc.pkey p.name) with
+      | Some home -> A.load_zx a 8 home (A.Base (A.Rbp, Ptbl.find fr.params p.name))
       | None -> ())
     f.params;
   let epilogue () =
@@ -1599,47 +1706,107 @@ let int_le buf size v =
       (Char.unsafe_chr (Int64.to_int (Int64.shift_right_logical v (8 * i)) land 0xff))
   done
 
+let timing = Sys.getenv_opt "FAS_NATIVE_TIME" = Some "1"
+
+(* [t name f x] runs [f x], reporting its time when FAS_NATIVE_TIME=1 *)
+let t name f x =
+  if not timing then f x
+  else
+    let t0 = Unix.gettimeofday () in
+    let r = f x in
+    Printf.eprintf "%-14s %8.2f ms\n%!" name ((Unix.gettimeofday () -. t0) *. 1000.);
+    r
+
 let compile (m : module_) =
+  if timing then begin
+    Printf.eprintf "front end      %8.2f ms (cpu)\n%!" (Sys.time () *. 1000.);
+    let n = ref 0 and nb = ref 0 in
+    List.iter
+      (fun (f : func) ->
+        List.iter
+          (fun (b : block) ->
+            incr nb;
+            n := !n + List.length b.instrs)
+          f.blocks)
+      m.funcs;
+    Printf.eprintf "input          %d instrs, %d blocks, %d funcs\n%!" !n !nb
+      (List.length m.funcs)
+  end;
   try
-    let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m)) in
+    (* No debug info yet: source locations only slow every pass down *)
+    let m =
+      {
+        m with
+        funcs =
+          List.map
+            (fun (f : func) ->
+              {
+                f with
+                blocks =
+                  List.map
+                    (fun (b : block) ->
+                      {
+                        b with
+                        instrs =
+                          List.filter
+                            (function Location _ -> false | _ -> true)
+                            b.instrs;
+                      })
+                    f.blocks;
+              })
+            m.funcs;
+      }
+    in
+    let m = t "promote" Mem2reg.module_ m in
+    let m = t "fold" Ir_fold.module_ m in
+    let m = t "cleanup" Mem2reg.cleanup m in
     let m =
       if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" then m
       else
-        match Inline.module_ m with
-        | m, true -> Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.module_ m))
+        match t "inline" Inline.module_ m with
+        | m', true ->
+            (* Only the functions that changed need promoting again *)
+            let again (fs, gs) =
+              List.map2
+                (fun (f : func) g ->
+                  if f == g then g
+                  else Mem2reg.cleanup_func (Ir_fold.fold_function (Mem2reg.func g)))
+                fs gs
+            in
+            { m' with funcs = t "reclean" again (m.funcs, m'.funcs) }
         | m, false -> m
     in
     let m =
-      let ctx = { m; a = A.create (); func_labels = Hashtbl.create 1 } in
-      {
-        m with
-        funcs = List.map (fun f -> forward_memory ctx (Mem2reg.merge f)) m.funcs;
-      }
+      let ctx = { m; a = A.create (); func_labels = Ptbl.create 1 } in
+      let merge = t "merge" (List.map Mem2reg.merge) m.funcs in
+      { m with funcs = t "forward_mem" (List.map (forward_memory ctx)) merge }
     in
-    let m =
-      Mem2reg.cleanup
-        (Ir_fold.module_ (Mem2reg.split_addresses (Mem2reg.reassociate m)))
-    in
+    let m = t "reassociate" Mem2reg.reassociate m in
+    let m = t "split_addr" Mem2reg.split_addresses m in
+    let m = t "fold3" Ir_fold.module_ m in
+    let m = t "cleanup3" Mem2reg.cleanup m in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     let a = A.create () in
-    let ctx = { m; a; func_labels = Hashtbl.create 64 } in
+    let ctx = { m; a; func_labels = Ptbl.create 64 } in
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
     List.iter
-      (fun (f : func) -> Hashtbl.replace ctx.func_labels f.name (A.new_label a))
+      (fun (f : func) -> Ptbl.replace ctx.func_labels f.name (A.new_label a))
       defined;
-    if not (Hashtbl.mem ctx.func_labels "main") then unsupported "no `main` function";
+    if not (Ptbl.mem ctx.func_labels "main") then unsupported "no `main` function";
     (* _start: argc/argv from the initial stack, call main, exit_group(result) *)
     A.alu_rr a A.Xor A.Rbp A.Rbp;
     A.load_zx a 8 A.Rdi (A.Base (A.Rsp, 0));
     A.lea a A.Rsi (A.Base (A.Rsp, 8));
     A.alu_ri a A.And A.Rsp (-16);
-    A.call_label a (Hashtbl.find ctx.func_labels "main");
+    A.call_label a (Ptbl.find ctx.func_labels "main");
     A.rr a ~w:false [ 0x89 ] ~reg:A.Rax ~rm:A.Rdi;
     A.mov_imm a A.Rax 231L;
     A.syscall a;
     A.ud2 a;
     let start_size = A.pos a in
-    let sizes = List.map (fun (f : func) -> (f, gen_function ctx f)) defined in
+    let sizes =
+      t "codegen" (List.map (fun (f : func) -> (f, gen_function ctx f))) defined
+    in
     let text, text_relocs = A.finish a in
     let func_syms =
       {
@@ -1652,7 +1819,7 @@ let compile (m : module_) =
       :: List.map
            (fun ((f : func), size) ->
              let offset =
-               Option.get (A.label_offset a (Hashtbl.find ctx.func_labels f.name))
+               Option.get (A.label_offset a (Ptbl.find ctx.func_labels f.name))
              in
              { Elf64.name = f.name; section = Elf64.Text; offset; size; func = true })
            sizes

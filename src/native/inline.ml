@@ -9,6 +9,8 @@
    is in SSA form after promotion: parameters are never stored to. *)
 
 open Ir
+module Hashtbl = Itbl
+module Ptbl = Stdlib.Hashtbl
 
 let def = function
   | Bin (i, _, _, _, _)
@@ -105,7 +107,7 @@ let calls_self (f : func) =
 (* Functions whose calls this pass replaces *)
 let candidates (m : module_) =
   let small = 24 in
-  let tbl = Hashtbl.create 16 in
+  let tbl = Ptbl.create 16 in
   List.iter
     (fun (f : func) ->
       let marked = List.mem f.name m.inline_functions in
@@ -117,7 +119,7 @@ let candidates (m : module_) =
         && (not (List.mem f.name m.no_inline_functions))
         && (not (is_aggregate f.ret))
         && not (List.exists (fun (p : param) -> is_aggregate p.ty) f.params)
-      then Hashtbl.replace tbl f.name f)
+      then Ptbl.replace tbl f.name f)
     m.funcs;
   tbl
 
@@ -135,14 +137,12 @@ let inline_at (f : func) bid pos (callee : func) =
     | Call (d, _, t, _, args) -> (d, t, args)
     | _ -> invalid_arg "inline_at"
   in
-  let env = Hashtbl.create 8 in
-  List.iter2
-    (fun (p : param) (_, _, v) -> Hashtbl.replace env p.name v)
-    callee.params args;
+  let env = Ptbl.create 8 in
+  List.iter2 (fun (p : param) (_, _, v) -> Ptbl.replace env p.name v) callee.params args;
   let value = function
     | Local (i, t) -> Local (i + kv, t)
     | Param (n, t) -> (
-        match Hashtbl.find_opt env n with Some v -> v | None -> Param (n, t))
+        match Ptbl.find_opt env n with Some v -> v | None -> Param (n, t))
     | v -> v
   in
   let allocas = ref [] in
@@ -245,7 +245,7 @@ let func cands (f : func) =
               (fun i ins ->
                 match ins with
                 | Call (_, _, _, name, args) when name <> f.name -> (
-                    match Hashtbl.find_opt cands name with
+                    match Ptbl.find_opt cands name with
                     | Some (c : func)
                       when List.length c.params = List.length args
                            && List.for_all2
@@ -265,7 +265,7 @@ let func cands (f : func) =
 
 let module_ (m : module_) =
   let cands = candidates m in
-  if Hashtbl.length cands = 0 then (m, false)
+  if Ptbl.length cands = 0 then (m, false)
   else
     let changed = ref false in
     let funcs =

@@ -24,9 +24,25 @@
    copies on the back edge. *)
 
 open Ir
+module Hashtbl = Itbl
+module Ptbl = Stdlib.Hashtbl
 
-type key = V of int | P of string
+(* Allocation keys: a value id (>= 0) or an interned parameter name (< 0) *)
+type key = int
 
+let param_keys : (string, int) Ptbl.t = Ptbl.create 16
+let param_names : (int, string) Ptbl.t = Ptbl.create 16
+
+let pkey name =
+  match Ptbl.find_opt param_keys name with
+  | Some k -> k
+  | None ->
+      let k = -1 - Ptbl.length param_keys in
+      Ptbl.replace param_keys name k;
+      Ptbl.replace param_names k name;
+      k
+
+let key_name k = if k >= 0 then Printf.sprintf "v%d" k else Ptbl.find param_names k
 let callee_saved = [ X64.Rbx; X64.R12; X64.R13; X64.R14; X64.R15 ]
 let caller_saved = [ X64.R8; X64.R9; X64.R10; X64.R11; X64.Rsi; X64.Rdi ]
 
@@ -38,8 +54,8 @@ let scalar = function
   | _ -> false
 
 let key_of_skip skip = function
-  | Local (id, ty) when scalar ty && not (skip id) -> Some (V id)
-  | Param (name, ty) when scalar ty -> Some (P name)
+  | Local (id, ty) when scalar ty && not (skip id) -> Some id
+  | Param (name, ty) when scalar ty -> Some (pkey name)
   | _ -> None
 
 let default_operands ins =
@@ -126,7 +142,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
   let phi_defs (b : block) =
     List.filter_map
       (function
-        | Phi (id, ty, _) when scalar ty && not (skip id) -> Some (V id) | _ -> None)
+        | Phi (id, ty, _) when scalar ty && not (skip id) -> Some id | _ -> None)
       b.instrs
   in
   let gen = Hashtbl.create 16 and kill = Hashtbl.create 16 in
@@ -143,8 +159,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
         (fun ins ->
           (match ins with Phi _ -> () | _ -> iter_operands use ins);
           match instruction_result ins with
-          | Some (id, ty) when scalar ty && not (skip id) ->
-              Hashtbl.replace defs (V id) ()
+          | Some (id, ty) when scalar ty && not (skip id) -> Hashtbl.replace defs id ()
           | _ -> ())
         b.instrs;
       iter_term_operands use b.terminator;
@@ -176,7 +191,9 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
             match (Hashtbl.find_opt live_in s, Hashtbl.find_opt blocks s) with
             | Some ins, Some sb ->
                 let sdefs = phi_defs sb in
-                Hashtbl.iter (fun k () -> if not (List.mem k sdefs) then add out k) ins
+                Hashtbl.iter
+                  (fun k () -> if not (List.exists (Int.equal k) sdefs) then add out k)
+                  ins
             | _ -> ())
           (terminator_successors b.terminator);
         let inn = Hashtbl.find live_in b.id in
@@ -239,7 +256,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
           | _ ->
               iter_operands (fun v -> Option.iter (fun k -> touch k p) (key_of v)) ins);
           match instruction_result ins with
-          | Some (id, ty) when scalar ty && not (skip id) -> touch (V id) p
+          | Some (id, ty) when scalar ty && not (skip id) -> touch id p
           | _ -> ())
         b.instrs;
       iter_term_operands
@@ -269,8 +286,8 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
     f.blocks;
   List.iter
     (fun (p : param) ->
-      if scalar p.ty && not (Hashtbl.mem ranges (P p.name)) then
-        Hashtbl.replace ranges (P p.name) [ (0, 0) ])
+      if scalar p.ty && not (Hashtbl.mem ranges (pkey p.name)) then
+        Hashtbl.replace ranges (pkey p.name) [ (0, 0) ])
     f.params;
   let merge rs =
     let rec go = function
@@ -308,8 +325,8 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                 (fun (v, _) ->
                   match key_of v with
                   | Some k ->
-                      relate (V id) k;
-                      relate k (V id)
+                      relate id k;
+                      relate k id
                   | None -> ())
                 incoming
           | _ -> ())
@@ -333,19 +350,17 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
   let debug = Sys.getenv_opt "FAS_RA_DEBUG" = Some "1" in
   let assignment = Hashtbl.create 64 in
   (* per register: the intervals it holds that may still conflict *)
-  let held = Hashtbl.create 8 in
+  let held = Ptbl.create 8 in
   let all = callee_saved @ caller_saved in
-  List.iter (fun r -> Hashtbl.replace held r []) all;
+  List.iter (fun r -> Ptbl.replace held r []) all;
   List.iter
     (fun (start, k, rs) ->
       (* forget intervals that ended before this start: later intervals start
          no earlier *)
       List.iter
         (fun r ->
-          Hashtbl.replace held r
-            (List.filter
-               (fun (_, _, rs') -> last_end rs' >= start)
-               (Hashtbl.find held r)))
+          Ptbl.replace held r
+            (List.filter (fun (_, _, rs') -> last_end rs' >= start) (Ptbl.find held r)))
         all;
       let crossing = crosses_call rs in
       let string_crossing = crosses_at string_ops rs in
@@ -355,7 +370,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
       in
       let fits r =
         usable r
-        && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Hashtbl.find held r))
+        && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find held r))
       in
       (* Prefer caller-saved registers for short, call-free intervals so the
          callee-saved ones stay for values that need them. *)
@@ -367,7 +382,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
       in
       let take r =
         Hashtbl.replace assignment k r;
-        Hashtbl.replace held r ((start, k, rs) :: Hashtbl.find held r)
+        Ptbl.replace held r ((start, k, rs) :: Ptbl.find held r)
       in
       match List.find_opt fits hinted with
       | Some r -> take r
@@ -385,7 +400,7 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
                       match
                         List.filter
                           (fun (_, _, rs') -> conflict rs rs')
-                          (Hashtbl.find held r)
+                          (Ptbl.find held r)
                       with
                       | [ ((_, vk, vrs) as victim) ] ->
                           Some ((weight vk, -last_end vrs), r, vk, victim)
@@ -398,16 +413,15 @@ let allocate ?(skip = fun _ -> false) ?(operands = default_operands) (f : func) 
               with
               | (cost, r, vk, victim) :: _ when cost < mine ->
                   Hashtbl.remove assignment vk;
-                  Hashtbl.replace held r
-                    (List.filter (fun x -> x != victim) (Hashtbl.find held r));
+                  Ptbl.replace held r
+                    (List.filter (fun x -> x != victim) (Ptbl.find held r));
                   take r
               | _ -> ())))
     intervals;
   if debug then
     List.iter
       (fun (_, k, rs) ->
-        Printf.eprintf "%s %s %s -> %s\n" f.name
-          (match k with V i -> Printf.sprintf "v%d" i | P n -> n)
+        Printf.eprintf "%s %s %s -> %s\n" f.name (key_name k)
           (String.concat " " (List.map (fun (a, b) -> Printf.sprintf "[%d,%d]" a b) rs))
           (match Hashtbl.find_opt assignment k with
           | Some r -> X64.reg_name r

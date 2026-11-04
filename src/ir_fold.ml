@@ -11,6 +11,14 @@
 
 open Ir
 
+(* Int-keyed tables (value and block ids) without the polymorphic hash *)
+module Itbl = Hashtbl.Make (struct
+  type t = int
+
+  let equal = Int.equal
+  let hash x = x land max_int
+end)
+
 let width = function
   | I1 -> Some 1
   | I8 -> Some 8
@@ -87,36 +95,114 @@ let fold_cast kind from v target =
       | _ -> None)
   | _ -> None
 
-let map_instr f = function
-  | Bin (i, op, t, a, b) -> Bin (i, op, t, f a, f b)
-  | Fneg (i, t, a) -> Fneg (i, t, f a)
-  | Cmp (i, c, t, a, b) -> Cmp (i, c, t, f a, f b)
-  | Alloca _ as x -> x
-  | Load (i, t, p, a) -> Load (i, t, f p, a)
-  | Load_volatile (i, t, p, a) -> Load_volatile (i, t, f p, a)
-  | Store (t, v, p, a) -> Store (t, f v, f p, a)
-  | Store_volatile (t, v, p, a) -> Store_volatile (t, f v, f p, a)
+(* [map_instr f] and [map_term f] apply [f] to every operand. They return
+   the instruction itself when [f] changes nothing, which keeps passes that
+   rewrite few operands from copying the whole function. *)
+let map_instr f ins =
+  let g v = f v in
+  let list l =
+    let l' = List.map g l in
+    if List.for_all2 ( == ) l l' then l else l'
+  in
+  match ins with
+  | Bin (i, op, t, a, b) ->
+      let a' = g a and b' = g b in
+      if a' == a && b' == b then ins else Bin (i, op, t, a', b')
+  | Fneg (i, t, a) ->
+      let a' = g a in
+      if a' == a then ins else Fneg (i, t, a')
+  | Cmp (i, c, t, a, b) ->
+      let a' = g a and b' = g b in
+      if a' == a && b' == b then ins else Cmp (i, c, t, a', b')
+  | Alloca _ -> ins
+  | Load (i, t, p, al) ->
+      let p' = g p in
+      if p' == p then ins else Load (i, t, p', al)
+  | Load_volatile (i, t, p, al) ->
+      let p' = g p in
+      if p' == p then ins else Load_volatile (i, t, p', al)
+  | Store (t, v, p, al) ->
+      let v' = g v and p' = g p in
+      if v' == v && p' == p then ins else Store (t, v', p', al)
+  | Store_volatile (t, v, p, al) ->
+      let v' = g v and p' = g p in
+      if v' == v && p' == p then ins else Store_volatile (t, v', p', al)
   | Gep (i, t, p, idx) ->
-      Gep (i, t, f p, List.map (function Zero -> Zero | Index v -> Index (f v)) idx)
-  | Cast (i, k, ft, v, tt) -> Cast (i, k, ft, f v, tt)
+      let p' = g p in
+      let idx' =
+        List.map
+          (function
+            | Zero as z -> z
+            | Index v as x ->
+                let v' = g v in
+                if v' == v then x else Index v')
+          idx
+      in
+      if p' == p && List.for_all2 ( == ) idx idx' then ins else Gep (i, t, p', idx')
+  | Cast (i, k, ft, v, tt) ->
+      let v' = g v in
+      if v' == v then ins else Cast (i, k, ft, v', tt)
   | Call (i, e, t, n, args) ->
-      Call (i, e, t, n, List.map (fun (t, e, v) -> (t, e, f v)) args)
+      let args' =
+        List.map
+          (fun ((t, e, v) as x) ->
+            let v' = g v in
+            if v' == v then x else (t, e, v'))
+          args
+      in
+      if List.for_all2 ( == ) args args' then ins else Call (i, e, t, n, args')
   | Call_indirect (i, e, t, c, args) ->
-      Call_indirect (i, e, t, f c, List.map (fun (t, e, v) -> (t, e, f v)) args)
-  | Phi (i, t, ins) -> Phi (i, t, List.map (fun (v, b) -> (f v, b)) ins)
-  | Select (i, c, a, b) -> Select (i, f c, f a, f b)
-  | Extract (i, t, v, l) -> Extract (i, t, f v, f l)
-  | Insert (i, t, v, l, x) -> Insert (i, t, f v, f l, f x)
-  | Shuffle_zero (i, t, v) -> Shuffle_zero (i, t, f v)
-  | Shufflevector (i, t, a, b, m) -> Shufflevector (i, t, f a, f b, f m)
-  | Syscall (i, args) -> Syscall (i, List.map f args)
-  | (String_ptr _ | Global_ptr _ | Trap | Location _) as x -> x
+      let c' = g c in
+      let args' =
+        List.map
+          (fun ((t, e, v) as x) ->
+            let v' = g v in
+            if v' == v then x else (t, e, v'))
+          args
+      in
+      if c' == c && List.for_all2 ( == ) args args' then ins
+      else Call_indirect (i, e, t, c', args')
+  | Phi (i, t, incoming) ->
+      let incoming' =
+        List.map
+          (fun ((v, b) as x) ->
+            let v' = g v in
+            if v' == v then x else (v', b))
+          incoming
+      in
+      if List.for_all2 ( == ) incoming incoming' then ins else Phi (i, t, incoming')
+  | Select (i, c, a, b) ->
+      let c' = g c and a' = g a and b' = g b in
+      if c' == c && a' == a && b' == b then ins else Select (i, c', a', b')
+  | Extract (i, t, v, l) ->
+      let v' = g v and l' = g l in
+      if v' == v && l' == l then ins else Extract (i, t, v', l')
+  | Insert (i, t, v, l, x) ->
+      let v' = g v and l' = g l and x' = g x in
+      if v' == v && l' == l && x' == x then ins else Insert (i, t, v', l', x')
+  | Shuffle_zero (i, t, v) ->
+      let v' = g v in
+      if v' == v then ins else Shuffle_zero (i, t, v')
+  | Shufflevector (i, t, a, b, m) ->
+      let a' = g a and b' = g b and m' = g m in
+      if a' == a && b' == b && m' == m then ins else Shufflevector (i, t, a', b', m')
+  | Syscall (i, args) ->
+      let args' = list args in
+      if args' == args then ins else Syscall (i, args')
+  | String_ptr _ | Global_ptr _ | Trap | Location _ -> ins
 
-let map_term f = function
-  | Ret (Some (t, v)) -> Ret (Some (t, f v))
-  | CondBr (c, a, b) -> CondBr (f c, a, b)
-  | Switch (t, v, cases, d) -> Switch (t, f v, cases, d)
-  | (Ret None | Br _ | Unreachable) as x -> x
+let map_term f t =
+  match t with
+  | Ret (Some (ty, v)) ->
+      let v' = f v in
+      if v' == v then t else Ret (Some (ty, v'))
+  | CondBr (c, a, b) ->
+      let c' = f c in
+      if c' == c then t else CondBr (c', a, b)
+  | Switch (ty, v, cases, d) ->
+      let v' = f v in
+      if v' == v then t else Switch (ty, v', cases, d)
+  | Ret None | Br _ | Unreachable -> t
 
 (* Algebraic identities with one constant operand: `x + 0`, `x * 1`,
    `x & -1`, `x << 0` and so on are `x`; `x * 0` and `x & 0` are `0`. *)
@@ -172,10 +258,10 @@ let fold_term = function
   | term -> term
 
 let fold_function (func : func) =
-  let env = Hashtbl.create 64 in
+  let env = Itbl.create 64 in
   let rec resolve = function
     | Local (i, _) as v -> (
-        match Hashtbl.find_opt env i with Some w -> resolve w | None -> v)
+        match Itbl.find_opt env i with Some w -> resolve w | None -> v)
     | v -> v
   in
   let blocks = ref func.blocks in
@@ -190,8 +276,8 @@ let fold_function (func : func) =
         List.iter
           (fun ins ->
             match evaluate (map_instr resolve ins) with
-            | Some (i, v) when not (Hashtbl.mem env i) ->
-                Hashtbl.replace env i v;
+            | Some (i, v) when not (Itbl.mem env i) ->
+                Itbl.replace env i v;
                 changed := true
             | _ -> ())
           b.instrs)
@@ -204,7 +290,7 @@ let fold_function (func : func) =
             List.filter_map
               (fun ins ->
                 match instruction_result ins with
-                | Some (i, _) when Hashtbl.mem env i -> None
+                | Some (i, _) when Itbl.mem env i -> None
                 | _ -> Some (map_instr resolve ins))
               b.instrs
           in
@@ -216,20 +302,18 @@ let fold_function (func : func) =
     match !blocks with
     | [] -> ()
     | entry :: _ ->
-        let by_id = Hashtbl.create 64 in
-        List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) !blocks;
-        let reachable = Hashtbl.create 64 in
+        let by_id = Itbl.create 64 in
+        List.iter (fun (b : block) -> Itbl.replace by_id b.id b) !blocks;
+        let reachable = Itbl.create 64 in
         let rec visit id =
-          if not (Hashtbl.mem reachable id) then (
-            Hashtbl.replace reachable id ();
-            match Hashtbl.find_opt by_id id with
+          if not (Itbl.mem reachable id) then (
+            Itbl.replace reachable id ();
+            match Itbl.find_opt by_id id with
             | Some b -> List.iter visit (terminator_successors b.terminator)
             | None -> ())
         in
         visit entry.id;
-        let live =
-          List.filter (fun (b : block) -> Hashtbl.mem reachable b.id) !blocks
-        in
+        let live = List.filter (fun (b : block) -> Itbl.mem reachable b.id) !blocks in
         if List.length live <> List.length !blocks then changed := true;
         (* Edge multiplicity pred -> succ among live blocks *)
         let edges = Hashtbl.create 64 in
@@ -249,7 +333,7 @@ let fold_function (func : func) =
                 List.map
                   (function
                     | Phi (i, t, ins) ->
-                        let seen = Hashtbl.create 4 in
+                        let seen = Itbl.create 4 in
                         let ins' =
                           List.filter
                             (fun (_, p) ->
@@ -258,10 +342,10 @@ let fold_function (func : func) =
                                   (Hashtbl.find_opt edges (p, b.id))
                               in
                               let used =
-                                Option.value ~default:0 (Hashtbl.find_opt seen p)
+                                Option.value ~default:0 (Itbl.find_opt seen p)
                               in
                               if used < allowed then (
-                                Hashtbl.replace seen p (used + 1);
+                                Itbl.replace seen p (used + 1);
                                 true)
                               else false)
                             ins

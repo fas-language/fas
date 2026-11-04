@@ -9,6 +9,8 @@
    memory. *)
 
 open Ir
+module Hashtbl = Itbl
+module Ptbl = Stdlib.Hashtbl
 
 let scalar = Regalloc.scalar
 
@@ -184,19 +186,28 @@ let promote (f : func) =
                 0 blocks)
         in
         (* Phi placement: (block index, slot) -> phi id *)
-        let phis = Hashtbl.create 32 in
         let block_phis = Array.make n [] in
+        (* Blocks storing to each slot, in one pass *)
+        let def_blocks = Hashtbl.create 32 in
+        List.iter
+          (fun (b : block) ->
+            let i = Hashtbl.find order b.id in
+            List.iter
+              (function
+                | Store (_, _, Local (p, _), _) when Hashtbl.mem slots p -> (
+                    match Hashtbl.find_opt def_blocks p with
+                    | Some (j :: _) when j = i -> ()
+                    | prev ->
+                        Hashtbl.replace def_blocks p (i :: Option.value ~default:[] prev)
+                    )
+                | _ -> ())
+              b.instrs)
+          blocks;
         Hashtbl.iter
           (fun slot ty ->
-            let work = ref [] in
-            List.iter
-              (fun (b : block) ->
-                if
-                  List.exists
-                    (function Store (_, _, Local (p, _), _) -> p = slot | _ -> false)
-                    b.instrs
-                then work := Hashtbl.find order b.id :: !work)
-              blocks;
+            let work =
+              ref (Option.value ~default:[] (Hashtbl.find_opt def_blocks slot))
+            in
             let placed = Hashtbl.create 8 in
             while !work <> [] do
               let i = List.hd !work in
@@ -207,7 +218,6 @@ let promote (f : func) =
                     Hashtbl.replace placed d ();
                     let id = !next in
                     incr next;
-                    Hashtbl.replace phis (d, slot) id;
                     block_phis.(d) <- (slot, ty, id) :: block_phis.(d);
                     work := d :: !work
                   end)
@@ -770,10 +780,9 @@ let split_addresses (m : module_) =
       | _ -> None
     in
     let block (b : block) =
-      let counts = Hashtbl.create 8 in
+      let counts = Ptbl.create 8 in
       let count k =
-        Hashtbl.replace counts k
-          (1 + Option.value ~default:0 (Hashtbl.find_opt counts k))
+        Ptbl.replace counts k (1 + Option.value ~default:0 (Ptbl.find_opt counts k))
       in
       List.iter
         (fun ins ->
@@ -783,25 +792,25 @@ let split_addresses (m : module_) =
               if y <> x then count (base, y)
           | None -> ())
         b.instrs;
-      let shared = Hashtbl.create 8 in
+      let shared = Ptbl.create 8 in
       let instrs =
         List.concat_map
           (fun ins ->
             match (ins, split_index ins) with
             | Gep (g, _, _, _), Some (base, x, y) -> (
-                let n k = Option.value ~default:0 (Hashtbl.find_opt counts k) in
+                let n k = Option.value ~default:0 (Ptbl.find_opt counts k) in
                 let common, other =
                   if n (base, x) >= n (base, y) then (x, y) else (y, x)
                 in
                 if n (base, common) < 2 then [ ins ]
                 else
                   let pty = value_ty base in
-                  match Hashtbl.find_opt shared (base, common) with
+                  match Ptbl.find_opt shared (base, common) with
                   | Some q -> [ Gep (g, I8, Local (q, pty), [ Index other ]) ]
                   | None ->
                       let q = !next in
                       incr next;
-                      Hashtbl.replace shared (base, common) q;
+                      Ptbl.replace shared (base, common) q;
                       [
                         Gep (q, I8, base, [ Index common ]);
                         Gep (g, I8, Local (q, pty), [ Index other ]);
@@ -815,13 +824,32 @@ let split_addresses (m : module_) =
   in
   { m with funcs = List.map one m.funcs }
 
+let tm_acc = Ptbl.create 8
+let tm_on = Sys.getenv_opt "FAS_NATIVE_TIME" = Some "1"
+
+let tm name f x =
+  if not tm_on then f x
+  else
+    let t0 = Unix.gettimeofday () in
+    let r = f x in
+    let d = Unix.gettimeofday () -. t0 in
+    Ptbl.replace tm_acc name (d +. Option.value ~default:0. (Ptbl.find_opt tm_acc name));
+    r
+
+let () =
+  if tm_on then
+    at_exit (fun () ->
+        Ptbl.iter (fun k v -> Printf.eprintf "  %-12s %8.2f ms\n" k (v *. 1000.)) tm_acc)
+
 (* Promotion and DCE empty more blocks, so thread again afterwards. *)
-let module_ (m : module_) =
-  {
-    m with
-    funcs =
-      List.map (fun f -> prune (thread (dce (addresses (promote (sroa f)))))) m.funcs;
-  }
+let func f =
+  let f = tm "sroa" sroa f in
+  let f = tm "promote" promote f in
+  let f = tm "addresses" addresses f in
+  let f = tm "dce" dce f in
+  prune (tm "thread" thread f)
+
+let module_ (m : module_) = { m with funcs = List.map func m.funcs }
 
 (* Block-local common subexpressions: a second identical arithmetic or cast
    instruction in a block reuses the first one's result. Comparisons and
@@ -837,7 +865,7 @@ let cse (f : func) =
   let blocks =
     List.map
       (fun (b : block) ->
-        let seen = Hashtbl.create 16 in
+        let seen = Ptbl.create 16 in
         let instrs =
           List.filter_map
             (fun ins ->
@@ -852,12 +880,12 @@ let cse (f : func) =
               match key with
               | None -> Some ins
               | Some k -> (
-                  match Hashtbl.find_opt seen k with
+                  match Ptbl.find_opt seen k with
                   | Some first ->
                       Hashtbl.replace subst id (Local (first, ty));
                       None
                   | None ->
-                      Hashtbl.replace seen k id;
+                      Ptbl.replace seen k id;
                       Some ins))
             b.instrs
         in
@@ -880,5 +908,5 @@ let cse (f : func) =
     }
 
 (* After folding: constant branches leave dead code and empty blocks. *)
-let cleanup (m : module_) =
-  { m with funcs = List.map (fun f -> prune (thread (dce (cse f)))) m.funcs }
+let cleanup_func f = prune (thread (dce (cse f)))
+let cleanup (m : module_) = { m with funcs = List.map cleanup_func m.funcs }
