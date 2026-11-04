@@ -138,7 +138,8 @@ let analyse_addrs ctx (f : func) =
     | v -> plain v
   and gep_form ty p indices =
     let exception No in
-    let f = ref (value_form p) in
+    let base = value_form p in
+    let f = ref base in
     let add n =
       let o = Int64.add (Int64.of_int !f.off) n in
       if Int64.compare (Int64.abs o) 0x4000_0000L > 0 then raise No;
@@ -155,6 +156,11 @@ let analyse_addrs ctx (f : func) =
           if Int64.compare (Int64.abs n) 0x4000_0000L > 0 then raise No;
           add (Int64.mul n (Int64.of_int size))
       | Index v ->
+          (* A base that already uses the index slot, untouched so far, is
+             used from its register instead: [q + v] *)
+          (match p with
+          | Local _ when !f.idx <> None && !f == base -> f := plain p
+          | _ -> ());
           if value_ty v <> I64 || (not (List.mem size [ 1; 2; 4; 8 ])) || !f.idx <> None
           then raise No;
           (* (x + c) * k with k * size a valid scale: x scaled, c * size
@@ -1343,7 +1349,10 @@ let compile (m : module_) =
         funcs = List.map (fun f -> forward_memory ctx (Mem2reg.merge f)) m.funcs;
       }
     in
-    let m = Mem2reg.cleanup (Ir_fold.module_ (Mem2reg.reassociate m)) in
+    let m =
+      Mem2reg.cleanup
+        (Ir_fold.module_ (Mem2reg.split_addresses (Mem2reg.reassociate m)))
+    in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     let a = A.create () in
     let ctx = { m; a; func_labels = Hashtbl.create 64 } in

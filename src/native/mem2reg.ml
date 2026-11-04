@@ -727,6 +727,89 @@ let sroa (f : func) =
     end
   end
 
+(* `p[u8, b + o1]`, `p[u8, b + o2]`, ... in one block: x86 addressing has one
+   base and one index, so `p + (b + ok)` costs an add per access. When one
+   addend of the index repeats across byte geps on the same base in a block,
+   compute `q = p + b` once and address `[q + ok]`. *)
+let split_addresses (m : module_) =
+  let one (f : func) =
+    let defs = Hashtbl.create 64 in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (fun ins ->
+            match ins with
+            | Bin (id, Add, I64, (Local _ as x), (Local _ as y)) ->
+                Hashtbl.replace defs id (x, y)
+            | _ -> ())
+          b.instrs)
+      f.blocks;
+    let next =
+      ref
+        (1
+        + List.fold_left
+            (fun acc (b : block) ->
+              List.fold_left
+                (fun acc ins ->
+                  match instruction_result ins with
+                  | Some (id, _) -> max acc id
+                  | None -> acc)
+                acc b.instrs)
+            0 f.blocks)
+    in
+    let split_index = function
+      | Gep (_, I8, ((Local _ | Param _) as base), [ Index (Local (s, _)) ]) -> (
+          match Hashtbl.find_opt defs s with
+          | Some (x, y) -> Some (base, x, y)
+          | None -> None)
+      | _ -> None
+    in
+    let block (b : block) =
+      let counts = Hashtbl.create 8 in
+      let count k =
+        Hashtbl.replace counts k
+          (1 + Option.value ~default:0 (Hashtbl.find_opt counts k))
+      in
+      List.iter
+        (fun ins ->
+          match split_index ins with
+          | Some (base, x, y) ->
+              count (base, x);
+              if y <> x then count (base, y)
+          | None -> ())
+        b.instrs;
+      let shared = Hashtbl.create 8 in
+      let instrs =
+        List.concat_map
+          (fun ins ->
+            match (ins, split_index ins) with
+            | Gep (g, _, _, _), Some (base, x, y) -> (
+                let n k = Option.value ~default:0 (Hashtbl.find_opt counts k) in
+                let common, other =
+                  if n (base, x) >= n (base, y) then (x, y) else (y, x)
+                in
+                if n (base, common) < 2 then [ ins ]
+                else
+                  let pty = value_ty base in
+                  match Hashtbl.find_opt shared (base, common) with
+                  | Some q -> [ Gep (g, I8, Local (q, pty), [ Index other ]) ]
+                  | None ->
+                      let q = !next in
+                      incr next;
+                      Hashtbl.replace shared (base, common) q;
+                      [
+                        Gep (q, I8, base, [ Index common ]);
+                        Gep (g, I8, Local (q, pty), [ Index other ]);
+                      ])
+            | _ -> [ ins ])
+          b.instrs
+      in
+      { b with instrs }
+    in
+    { f with blocks = List.map block f.blocks }
+  in
+  { m with funcs = List.map one m.funcs }
+
 (* Promotion and DCE empty more blocks, so thread again afterwards. *)
 let module_ (m : module_) =
   {
