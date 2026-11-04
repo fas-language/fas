@@ -114,9 +114,37 @@ fn memops() void {
   for i usize = 0; i < 8; i += 1 { q addr = &cells; line(bitcast[i64](q[u64, i])) }
 }
 
+// Local arrays: constant indices only (scalar replacement), a runtime index
+// (stays in memory), address elements; division by powers of two.
+fn arrays(x u64, n usize) void {
+  offs arr[4, u64] = {}
+  for const k usize in 0..4 { offs[k] = x / 4 + k * x }
+  small arr[3, u8] = {}
+  small[1] = trunc[u8](x)
+  ptrs arr[2, addr] = {}
+  t u64 = 0
+  for i usize = 0; i < n; i += 1 {
+    for const k usize in 0..4 { t += offs[k] ^ i }
+  }
+  line(bitcast[i64](t))
+  line(zext[i64](small[0]) + zext[i64](small[1]) + zext[i64](small[2]))
+  if ptrs[1] == null { line(1) } else { line(0) }
+  mixed arr[4, u64] = {}
+  mixed[0] = 7
+  mixed[n & 3] = 9
+  line(bitcast[i64](mixed[0] + mixed[1] + mixed[2] + mixed[3]))
+  big u64 = 0xffff_ffff_ffff_fff5
+  line(bitcast[i64](big / 8))
+  line(bitcast[i64](big % 16))
+  b8 u8 = 251
+  line(zext[i64](b8 / 4))
+  line(zext[i64](b8 % 8))
+}
+
 fn main() i32 {
   write_str("native backend\n", 15)
   memops()
+  arrays(1000003, 5)
   line(bitcast[i64](sum8(1, 2, 3, 4, 5, 6, 7, 8)))
   line(sum7(10, 20, 30, 40, 50, 60, -70))
   line(bitcast[i64](classify(0) + classify(3) + classify(9) + classify(4)))
