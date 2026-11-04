@@ -368,6 +368,9 @@ let alu_ext = function Add -> 0 | Or -> 1 | And -> 4 | Sub -> 5 | Xor -> 6 | Cmp
 (* op dst, src (64-bit) *)
 let alu_rr a op dst src = rr a [ alu_opcode op ] ~reg:src ~rm:dst
 
+(* op dst, [mem] (64-bit) *)
+let alu_rm a op dst mem = rm a [ alu_opcode op + 2 ] ~reg:dst mem
+
 let alu_ri a op dst imm =
   if fits_i8 imm then begin
     ext_r a [ 0x83 ] (alu_ext op) dst;

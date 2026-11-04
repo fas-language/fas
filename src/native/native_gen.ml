@@ -593,6 +593,20 @@ let dest_reg fr id avoid =
 
 let avoid_of fr v = match home fr v with Some r -> [ r ] | None -> []
 
+(* The stack slot of a scalar value that has no register home *)
+let slot_of fr v =
+  match v with
+  | Local (id, ty) when (not (is_aggregate ty)) && not (Hashtbl.mem fr.addrs.skip id)
+    -> (
+      match (home fr v, Hashtbl.find_opt fr.slots id) with
+      | None, Some o -> Some (A.Base (A.Rbp, o))
+      | _ -> None)
+  | Param (name, _) -> (
+      match (home fr v, Hashtbl.find_opt fr.params name) with
+      | None, Some o -> Some (A.Base (A.Rbp, o))
+      | _ -> None)
+  | _ -> None
+
 (* Set the flags for [cmp c x y]. *)
 let compare_flags ctx fr c x y =
   let a = ctx.a in
@@ -606,7 +620,11 @@ let compare_flags ctx fr c x y =
     let rx = in_reg ctx fr x A.Rax in
     match imm32 y with
     | Some k -> A.alu_ri a A.Cmp rx k
-    | None -> A.alu_rr a A.Cmp rx (in_reg ctx fr y A.Rcx)
+    | None -> (
+        (* slots hold the canonical 64-bit value, so compare in memory *)
+        match slot_of fr y with
+        | Some m -> A.alu_rm a A.Cmp rx m
+        | None -> A.alu_rr a A.Cmp rx (in_reg ctx fr y A.Rcx))
 
 let mem_size _ctx ty =
   match ty with
