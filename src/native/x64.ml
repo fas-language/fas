@@ -80,8 +80,21 @@ let cond_num = function
   | Le -> 14
   | G -> 15
 
-(* A memory operand: [base + disp] or [rip + symbol + disp]. *)
-type mem = Base of reg * int | Rip of string * int
+(* A memory operand: [base + disp], [rip + symbol + disp], or
+   [base + index * scale + disp] where the base may be absent and the
+   displacement may name a symbol (absolute, sign-extended 32 bits: the
+   executable is not position independent and lives below 2 GiB). *)
+type mem =
+  | Base of reg * int
+  | Rip of string * int
+  | Sib of {
+      base : reg option;
+      index : reg;
+      scale : int;
+      disp : int;
+      sym : string option;
+    }
+
 type label = int
 
 (* A reference the linker patches once symbol addresses are known. *)
@@ -89,6 +102,8 @@ type reloc =
   | Rel32 of { offset : int; symbol : string; addend : int }
       (** 32-bit PC-relative: value = S + addend - (address of the next byte). *)
   | Abs64 of { offset : int; symbol : string; addend : int }
+  | Abs32s of { offset : int; symbol : string; addend : int }
+      (** 32-bit absolute, sign-extended by the CPU. *)
 
 type t = {
   code : Buffer.t;
@@ -173,9 +188,12 @@ let label_offset a l = a.labels.(l)
 
 (* REX with W, and the high bits of reg (R), index (X) and base/rm (B).
    [force] emits it even when empty, for byte registers spl..dil. *)
-let rex a ?(force = false) ~w ~r ~b () =
+let rex a ?(force = false) ?(x = 0) ~w ~r ~b () =
   let v =
-    (if w then 8 else 0) lor (if r >= 8 then 4 else 0) lor if b >= 8 then 1 else 0
+    (if w then 8 else 0)
+    lor (if r >= 8 then 4 else 0)
+    lor (if x >= 8 then 2 else 0)
+    lor if b >= 8 then 1 else 0
   in
   if v <> 0 || force then byte a (0x40 lor v)
 
@@ -197,8 +215,46 @@ let mem_operand a reg_field = function
          offset + 4. *)
       a.relocs <- Rel32 { offset = pos a; symbol; addend } :: a.relocs;
       int32 a 0
+  | Sib { base; index; scale; disp; sym } -> (
+      let i = reg_num index in
+      if i = 4 then invalid_arg "x64: rsp as an index";
+      let ss =
+        match scale with
+        | 1 -> 0
+        | 2 -> 1
+        | 4 -> 2
+        | 8 -> 3
+        | _ -> invalid_arg "x64: scale"
+      in
+      let disp32 () =
+        (match sym with
+        | Some symbol ->
+            a.relocs <- Abs32s { offset = pos a; symbol; addend = disp } :: a.relocs
+        | None -> ());
+        int32 a (if sym = None then disp else 0)
+      in
+      match base with
+      | None ->
+          modrm a 0 reg_field 4;
+          byte a ((ss lsl 6) lor ((i land 7) lsl 3) lor 5);
+          disp32 ()
+      | Some b ->
+          let b = reg_num b in
+          let md =
+            if sym <> None then 2
+            else if disp = 0 && b land 7 <> 5 then 0
+            else if fits_i8 disp then 1
+            else 2
+          in
+          modrm a md reg_field 4;
+          byte a ((ss lsl 6) lor ((i land 7) lsl 3) lor (b land 7));
+          if md = 1 then byte a disp else if md = 2 then disp32 ())
 
-let mem_b_bits = function Base (base, _) -> reg_num base | Rip _ -> 0
+let mem_b_bits = function
+  | Base (base, _) | Sib { base = Some base; _ } -> reg_num base
+  | Rip _ | Sib { base = None; _ } -> 0
+
+let mem_x_bits = function Sib { index; _ } -> reg_num index | _ -> 0
 
 (* op reg, r/m (reg-reg) *)
 let rr a ?(w = true) ?(force = false) opcode ~reg ~rm =
@@ -208,7 +264,7 @@ let rr a ?(w = true) ?(force = false) opcode ~reg ~rm =
 
 (* op reg, [mem] *)
 let rm a ?(w = true) ?(force = false) opcode ~reg mem =
-  rex a ~force ~w ~r:(reg_num reg) ~b:(mem_b_bits mem) ();
+  rex a ~force ~w ~r:(reg_num reg) ~x:(mem_x_bits mem) ~b:(mem_b_bits mem) ();
   List.iter (byte a) opcode;
   mem_operand a (reg_num reg) mem
 

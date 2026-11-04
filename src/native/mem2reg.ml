@@ -14,7 +14,45 @@ let scalar = Regalloc.scalar
 
 module Imap = Map.Make (Int)
 
+(* Jumps into an empty block that only jumps on go straight to its target,
+   when the target has no phis to keep apart by predecessor. *)
+let thread (f : func) =
+  match f.blocks with
+  | [] -> f
+  | entry :: _ ->
+      let by_id = Hashtbl.create 32 in
+      List.iter (fun (b : block) -> Hashtbl.replace by_id b.id b) f.blocks;
+      let has_phis id =
+        match Hashtbl.find_opt by_id id with
+        | Some b -> List.exists (function Phi _ -> true | _ -> false) b.instrs
+        | None -> true
+      in
+      let rec final seen id =
+        match Hashtbl.find_opt by_id id with
+        | Some { instrs = []; terminator = Br t; _ }
+          when id <> entry.id && (not (List.mem id seen)) && not (has_phis t) ->
+            final (id :: seen) t
+        | _ -> id
+      in
+      let retarget = function
+        | Br t -> Br (final [] t)
+        | CondBr (c, y, n) -> CondBr (c, final [] y, final [] n)
+        | Switch (ty, v, cases, d) ->
+            Switch (ty, v, List.map (fun (k, t) -> (k, final [] t)) cases, final [] d)
+        | t -> t
+      in
+      (* Only rewrite edges into blocks without phis: a phi's incoming labels
+         must keep naming real predecessors. *)
+      {
+        f with
+        blocks =
+          List.map
+            (fun (b : block) -> { b with terminator = retarget b.terminator })
+            f.blocks;
+      }
+
 let promote (f : func) =
+  let f = thread f in
   match f.blocks with
   | [] -> f
   | entry :: _ ->
@@ -27,7 +65,7 @@ let promote (f : func) =
         if not (Hashtbl.mem visited id) then begin
           Hashtbl.replace visited id ();
           (match Hashtbl.find_opt by_id id with
-          | Some b -> List.iter dfs (terminator_successors b.terminator)
+          | Some b -> List.iter dfs (List.rev (terminator_successors b.terminator))
           | None -> ());
           post := id :: !post
         end
@@ -36,7 +74,9 @@ let promote (f : func) =
       let rpo = Array.of_list !post in
       let order = Hashtbl.create 32 in
       Array.iteri (fun i id -> Hashtbl.replace order id i) rpo;
-      let blocks = List.filter (fun (b : block) -> Hashtbl.mem order b.id) f.blocks in
+      (* Reverse postorder is also the code layout: loop bodies follow their
+         header and values get short intervals. *)
+      let blocks = Array.to_list (Array.map (Hashtbl.find by_id) rpo) in
       (* Predecessor edges, with multiplicity *)
       let preds = Hashtbl.create 32 in
       List.iter
@@ -285,4 +325,68 @@ let promote (f : func) =
         { f with blocks }
       end
 
-let module_ (m : module_) = { m with funcs = List.map promote m.funcs }
+(* Mark-and-sweep removal of pure instructions nothing needs; it also drops
+   the phi cycles promotion leaves behind for variables that are dead after a
+   loop. Division stays (it may trap), and so do memory operations. *)
+let pure = function
+  | Phi _ | Cmp _ | Gep _ | Cast _ | Select _ | Global_ptr _ | String_ptr _ -> true
+  | Bin (_, (Udiv | Sdiv | Urem | Srem), _, _, _) -> false
+  | Bin _ -> true
+  | _ -> false
+
+let dce (f : func) =
+  let def = Hashtbl.create 64 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          match instruction_result ins with
+          | Some (id, _) -> Hashtbl.replace def id ins
+          | None -> ())
+        b.instrs)
+    f.blocks;
+  let live = Hashtbl.create 64 in
+  let work = ref [] in
+  let mark = function
+    | Local (id, _) when not (Hashtbl.mem live id) ->
+        Hashtbl.replace live id ();
+        work := id :: !work
+    | _ -> ()
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins -> if not (pure ins) then Regalloc.iter_operands mark ins)
+        b.instrs;
+      List.iter
+        (fun ins ->
+          match instruction_result ins with
+          | Some (id, _) when not (pure ins) -> mark (Local (id, Void))
+          | _ -> ())
+        b.instrs;
+      Regalloc.iter_term_operands mark b.terminator)
+    f.blocks;
+  while !work <> [] do
+    let id = List.hd !work in
+    work := List.tl !work;
+    match Hashtbl.find_opt def id with
+    | Some ins -> Regalloc.iter_operands mark ins
+    | None -> ()
+  done;
+  let keep ins =
+    (not (pure ins))
+    ||
+    match instruction_result ins with
+    | Some (id, _) -> Hashtbl.mem live id
+    | None -> true
+  in
+  {
+    f with
+    blocks =
+      List.map
+        (fun (b : block) -> { b with instrs = List.filter keep b.instrs })
+        f.blocks;
+  }
+
+let module_ (m : module_) =
+  { m with funcs = List.map (fun f -> dce (promote f)) m.funcs }

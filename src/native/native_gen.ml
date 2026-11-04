@@ -56,9 +56,166 @@ let field_offset ctx name index =
       in
       go 0 0 d.fields
 
+(* Address forms. A pointer computed by `getelementptr`, `alloca` or a
+   global is described as an anchor plus a constant offset plus at most one
+   scaled 64-bit index, which is exactly an x86 memory operand. Pointers that
+   are only ever used as the address of scalar loads and stores are folded
+   into those instructions and never computed; constant ones (a global or a
+   stack slot plus an offset) are rebuilt with one `lea` wherever a register
+   needs them. *)
+
+type anchor = Reg of value | Sym of string | Frame of int  (** alloca id *)
+type form = { anchor : anchor; off : int; idx : (value * int) option }
+type addrs = { forms : (int, form) Hashtbl.t; skip : (int, unit) Hashtbl.t }
+
+let plain v = { anchor = Reg v; off = 0; idx = None }
+let is_const_form f = f.idx = None && match f.anchor with Reg _ -> false | _ -> true
+
+let form_operands f =
+  (match f.anchor with Reg v -> [ v ] | _ -> [])
+  @ match f.idx with Some (v, _) -> [ v ] | None -> []
+
+let scalar_access = function
+  | (Load (_, ty, p, _) | Load_volatile (_, ty, p, _)) when not (is_aggregate ty) ->
+      Some (None, p)
+  | (Store (ty, v, p, _) | Store_volatile (ty, v, p, _)) when not (is_aggregate ty) ->
+      Some (Some v, p)
+  | _ -> None
+
+let analyse_addrs ctx (f : func) =
+  let defs = Hashtbl.create 64 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          match ins with
+          | Gep (id, _, _, _)
+          | Global_ptr (id, _, _)
+          | String_ptr (id, _, _)
+          | Alloca (id, _, _) ->
+              Hashtbl.replace defs id ins
+          | _ -> ())
+        b.instrs)
+    f.blocks;
+  let memo = Hashtbl.create 64 in
+  let rec form_of_id id =
+    match Hashtbl.find_opt memo id with
+    | Some r -> r
+    | None ->
+        let r =
+          match Hashtbl.find_opt defs id with
+          | Some (Global_ptr (_, name, _)) ->
+              Some { anchor = Sym name; off = 0; idx = None }
+          | Some (String_ptr (_, i, _)) ->
+              Some { anchor = Sym (Printf.sprintf ".str.%d" i); off = 0; idx = None }
+          | Some (Alloca (id, _, _)) -> Some { anchor = Frame id; off = 0; idx = None }
+          | Some (Gep (_, ty, p, indices)) -> gep_form ty p indices
+          | _ -> None
+        in
+        Hashtbl.replace memo id r;
+        r
+  and value_form v =
+    match v with
+    | Local (id, _) -> ( match form_of_id id with Some f -> f | None -> plain v)
+    | Global (name, _) -> { anchor = Sym name; off = 0; idx = None }
+    | v -> plain v
+  and gep_form ty p indices =
+    let exception No in
+    let f = ref (value_form p) in
+    let add n =
+      let o = Int64.add (Int64.of_int !f.off) n in
+      if Int64.compare (Int64.abs o) 0x4000_0000L > 0 then raise No;
+      f := { !f with off = Int64.to_int o }
+    in
+    let step size = function
+      | Zero -> ()
+      | Index (Const (ity, n)) ->
+          let w = bits ity in
+          let n =
+            if w >= 64 then n
+            else Int64.shift_right (Int64.shift_left n (64 - w)) (64 - w)
+          in
+          if Int64.compare (Int64.abs n) 0x4000_0000L > 0 then raise No;
+          add (Int64.mul n (Int64.of_int size))
+      | Index v ->
+          if value_ty v <> I64 || (not (List.mem size [ 1; 2; 4; 8 ])) || !f.idx <> None
+          then raise No;
+          f := { !f with idx = Some (v, size) }
+    in
+    let rec walk ty = function
+      | [] -> ()
+      | idx :: rest -> (
+          match ty with
+          | Struct name ->
+              let n =
+                match idx with
+                | Zero -> 0
+                | Index (Const (_, n)) -> Int64.to_int n
+                | Index _ -> raise No
+              in
+              add (Int64.of_int (field_offset ctx name n));
+              let d = List.find (fun (d : struct_def) -> d.name = name) ctx.m.structs in
+              walk (List.nth d.fields n) rest
+          | Array (_, elem) | Vector (_, elem) ->
+              step (size_of ctx elem) idx;
+              walk elem rest
+          | _ -> raise No)
+    in
+    try
+      (match indices with
+      | [] -> ()
+      | first :: rest ->
+          step (size_of ctx ty) first;
+          walk ty rest);
+      Some !f
+    with No | Unsupported _ | Not_found | Failure _ | Invalid_argument _ -> None
+  in
+  let forms = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun id _ ->
+      match form_of_id id with Some f -> Hashtbl.replace forms id f | None -> ())
+    defs;
+  (* Which form-carrying values are used other than as a scalar address? *)
+  let escapes = Hashtbl.create 32 in
+  let escape = function Local (id, _) -> Hashtbl.replace escapes id () | _ -> () in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          match (ins, scalar_access ins) with
+          | Gep (id, _, _, _), _ when Hashtbl.mem forms id ->
+              List.iter escape (form_operands (Hashtbl.find forms id))
+          | _, Some (v, _) -> Option.iter escape v
+          | _ -> Regalloc.iter_operands escape ins)
+        b.instrs;
+      Regalloc.iter_term_operands escape b.terminator)
+    f.blocks;
+  let skip = Hashtbl.create 32 in
+  Hashtbl.iter
+    (fun id f ->
+      if is_const_form f || not (Hashtbl.mem escapes id) then Hashtbl.replace skip id ())
+    forms;
+  { forms; skip }
+
+(* What an instruction reads once folded addresses are expanded *)
+let operands_view addrs ins =
+  let ptr p =
+    match p with
+    | Local (id, _) when Hashtbl.mem addrs.skip id ->
+        form_operands (Hashtbl.find addrs.forms id)
+    | p -> [ p ]
+  in
+  match (ins, scalar_access ins) with
+  | Gep (id, _, _, _), _ when Hashtbl.mem addrs.forms id ->
+      if Hashtbl.mem addrs.skip id then []
+      else form_operands (Hashtbl.find addrs.forms id)
+  | _, Some (v, p) -> Option.to_list v @ ptr p
+  | _ -> Regalloc.default_operands ins
+
 (* Per-function frame *)
 
 type frame = {
+  addrs : addrs;
   slots : (int, int) Hashtbl.t;  (** SSA id -> rbp offset *)
   allocas : (int, int) Hashtbl.t;  (** alloca id -> rbp offset of its memory *)
   params : (string, int) Hashtbl.t;
@@ -72,13 +229,17 @@ let reserve fr bytes align =
   -fr.size
 
 let build_frame ctx (f : func) =
+  let addrs = analyse_addrs ctx f in
   let fr =
     {
+      addrs;
       slots = Hashtbl.create 64;
       allocas = Hashtbl.create 8;
       params = Hashtbl.create 8;
       size = 0;
-      homes = Regalloc.allocate f;
+      homes =
+        Regalloc.allocate ~skip:(Hashtbl.mem addrs.skip) ~operands:(operands_view addrs)
+          f;
       saved = [];
     }
   in
@@ -127,6 +288,13 @@ let load ctx fr r v =
   | Const (ty, n) -> A.mov_imm a r (norm_const ty n)
   | Null _ | Zero _ | Undef _ -> A.mov_imm a r 0L
   | Local (id, ty) when is_aggregate ty -> A.lea a r (slot fr id)
+  | Local (id, _) when Hashtbl.mem fr.addrs.skip id -> (
+      let f = Hashtbl.find fr.addrs.forms id in
+      match f with
+      | { anchor = Sym s; idx = None; off } -> A.lea a r (A.Rip (s, off))
+      | { anchor = Frame al; idx = None; off } ->
+          A.lea a r (A.Base (A.Rbp, Hashtbl.find fr.allocas al + off))
+      | _ -> invalid_arg "folded address used as a value")
   | Local (id, _) -> (
       match Hashtbl.find_opt fr.homes (Regalloc.V id) with
       | Some home -> A.mov_rr a r home
@@ -176,6 +344,36 @@ let in_reg ctx fr v scratch =
   | None ->
       load ctx fr scratch v;
       scratch
+
+(* The memory operand for a form, loading its registers into the scratch
+   registers [sb] and [si] when they have no home. *)
+let mem_of_form ctx fr f ~sb ~si =
+  let index () = Option.map (fun (v, sc) -> (in_reg ctx fr v si, sc)) f.idx in
+  match f.anchor with
+  | Sym s -> (
+      match index () with
+      | None -> A.Rip (s, f.off)
+      | Some (index, scale) ->
+          A.Sib { base = None; index; scale; disp = f.off; sym = Some s })
+  | Frame al -> (
+      let off = Hashtbl.find fr.allocas al + f.off in
+      match index () with
+      | None -> A.Base (A.Rbp, off)
+      | Some (index, scale) ->
+          A.Sib { base = Some A.Rbp; index; scale; disp = off; sym = None })
+  | Reg v -> (
+      let base = in_reg ctx fr v sb in
+      match index () with
+      | None -> A.Base (base, f.off)
+      | Some (index, scale) ->
+          A.Sib { base = Some base; index; scale; disp = f.off; sym = None })
+
+(* The memory operand addressed by pointer [p] *)
+let mem_at ctx fr p ~sb ~si =
+  match p with
+  | Local (id, _) when Hashtbl.mem fr.addrs.skip id ->
+      mem_of_form ctx fr (Hashtbl.find fr.addrs.forms id) ~sb ~si
+  | p -> A.Base (in_reg ctx fr p sb, 0)
 
 (* Where to compute [id]: its home register unless that is in [avoid]. *)
 let dest_reg fr id avoid =
@@ -426,6 +624,7 @@ let gen_instr ctx fr ins =
       compare_flags ctx fr c x y;
       A.setcc a (cond_of c) A.Rax;
       store_result ctx fr id I1 A.Rax
+  | Alloca (id, _, _) when Hashtbl.mem fr.addrs.skip id -> ()
   | Alloca (id, _, _) ->
       A.lea a A.Rax (A.Base (A.Rbp, Hashtbl.find fr.allocas id));
       put ctx fr id A.Rax
@@ -436,10 +635,10 @@ let gen_instr ctx fr ins =
         copy_bytes ctx (size_of ctx ty)
       end
       else begin
-        let base = in_reg ctx fr p A.Rax in
+        let mem = mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx in
         let d = dest_reg fr id [] in
-        A.load_zx a (mem_size ctx ty) d (A.Base (base, 0));
-        store_result ctx fr id ty d
+        A.load_zx a (mem_size ctx ty) d mem;
+        put ctx fr id d
       end
   | Store (ty, v, p, _) | Store_volatile (ty, v, p, _) ->
       if is_aggregate ty then begin
@@ -456,9 +655,18 @@ let gen_instr ctx fr ins =
       end
       else begin
         let src = in_reg ctx fr v A.Rcx in
-        let base = in_reg ctx fr p A.Rax in
-        A.store a (mem_size ctx ty) (A.Base (base, 0)) src
+        A.store a (mem_size ctx ty) (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src
       end
+  | (Gep (id, _, _, _) | Global_ptr (id, _, _) | String_ptr (id, _, _))
+    when Hashtbl.mem fr.addrs.skip id ->
+      ()
+  | Gep (id, _, _, _) when Hashtbl.mem fr.addrs.forms id ->
+      let mem =
+        mem_of_form ctx fr (Hashtbl.find fr.addrs.forms id) ~sb:A.Rax ~si:A.Rdx
+      in
+      let d = dest_reg fr id [] in
+      A.lea a d mem;
+      put ctx fr id d
   | Gep (id, ty, p, indices) ->
       load ctx fr A.Rax p;
       let step size v =
@@ -569,8 +777,9 @@ let edge_copies ctx fr blocks from_id target =
   let loc_of v =
     match (home fr v, v) with
     | Some r, _ -> R r
+    | None, Local (id, _) when Hashtbl.mem fr.addrs.skip id -> C v
     | None, Local (id, ty) when not (is_aggregate ty) -> (
-        match slot fr id with A.Base (_, o) -> M o | A.Rip _ -> C v)
+        match slot fr id with A.Base (_, o) -> M o | _ -> C v)
     | None, Param (name, _) -> M (Hashtbl.find fr.params name)
     | _ -> C v
   in

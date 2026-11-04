@@ -81,6 +81,11 @@ let link (i : input) =
         if v < -0x8000_0000 || v > 0x7fff_ffff then
           invalid_arg ("elf64: rel32 out of range for " ^ symbol);
         set_u32 bytes offset v
+    | X64.Abs32s { offset; symbol; addend } ->
+        let v = address symbol + addend in
+        if v < -0x8000_0000 || v > 0x7fff_ffff then
+          invalid_arg ("elf64: abs32 out of range for " ^ symbol);
+        set_u32 bytes offset v
     | X64.Abs64 { offset; symbol; addend } ->
         set_u64 bytes offset (address symbol + addend)
   in
