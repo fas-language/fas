@@ -102,6 +102,14 @@ Linux compatibility milestone includes the following before its scope freezes:
   explicit multiple-definition policy and shared-output interpreter handling
   support Chibicc's unmodified self-hosting and driver suites. Both stages and
   all 82 C runtime comparisons pass. Wider compiler/libc versions remain open.
+- **Native compiler hosted startup — implemented**: automatic C runtime selection
+  and explicit hosted/freestanding overrides, positional C compilation,
+  embedded C/assembly/packages and C harnesses supplying `main` have driver
+  regressions. GCC/Clang dry-run plans supply CRT/interpreter/library policy;
+  Fas performs the link. Glibc fixed/PIE/static/static-PIE and isolated musl
+  fixed/PIE/static plans pass. Closed programs and explicit freestanding object
+  links retain the tool-free path. C driver discovery is a bootstrap dependency;
+  a compiler-independent hosted SDK configuration remains future work.
 - **Scale**: replace initial resource caps only with large-input, memory and
   overflow tests. Exercise address-space gaps and relocation boundaries, not just
   large file sizes; continue multicore scale qualification in v0.8 and large CI

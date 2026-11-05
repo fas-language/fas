@@ -56,12 +56,16 @@ FAS_NATIVE_NOSIMD=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vectors.fas
 "$NATIVE_TMP/vectors_lanes" >"$NATIVE_TMP/vectors_lanes.out"
 cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors_lanes.out"
 
-# Unsupported features are diagnosed, not miscompiled
+# C imports select hosted startup; explicit freestanding keeps libc unresolved.
 printf 'use "C" <stdio.h>\nfn main() i32 {\n  puts(c"hi")\n  return 0\n}\n' \
   >"$NATIVE_TMP/unsupported.fas"
-if "$OCAML_FAS" --backend=native "$NATIVE_TMP/unsupported.fas" -o "$NATIVE_TMP/unsupported" \
+FAS_CC="$CC" "$OCAML_FAS" --backend=native "$NATIVE_TMP/unsupported.fas" \
+  -o "$NATIVE_TMP/hosted"
+"$NATIVE_TMP/hosted" >"$NATIVE_TMP/hosted.out"
+grep -qx 'hi' "$NATIVE_TMP/hosted.out"
+if "$OCAML_FAS" --backend=native --freestanding "$NATIVE_TMP/unsupported.fas" -o "$NATIVE_TMP/unsupported" \
   2>"$NATIVE_TMP/unsupported.err"; then
-  echo "native backend accepted a C call" >&2; exit 1
+  echo "freestanding native link unexpectedly resolved libc" >&2; exit 1
 fi
 grep -q 'native backend:' "$NATIVE_TMP/unsupported.err"
 

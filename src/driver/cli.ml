@@ -1,6 +1,7 @@
 type emit = Ir | Ir_json | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
 type diagnostics = Text | Json
 type target = Portable | Force_native
+type native_runtime = Auto | Freestanding | Hosted
 
 type t = {
   input : string;
@@ -24,6 +25,7 @@ type t = {
   profile : string option;
   all_errors : bool;
   native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
+  native_runtime : native_runtime;
   align_loops : int option;
   align_functions : int option;
   tune_options : string list;
@@ -109,6 +111,9 @@ let usage =
    first\n\
   \  --backend=llvm|native  use LLVM (default) or the built-in Linux x86-64 \
    generator/linker; native -c emits ELF objects (experimental)\n\
+  \  --hosted     native executable with system C startup and libraries (FAS_CC)\n\
+  \  --freestanding  native executable with Fas startup and no C tools\n\
+  \               default: hosted for C inputs/imports, freestanding otherwise\n\
   \  --version     print the fas version and the opt, llc and C compiler in use\n\
   \  -h, --help    show this help\n\
    C inputs:\n\
@@ -201,6 +206,7 @@ let parse_invocation ~subcommand argv =
   let profile = ref None in
   let all_errors = ref false in
   let native = ref false in
+  let runtime = ref None in
   let profile_conflict emit =
     match (!profile, emit) with
     | None, _ | Some _, (Optimized_llvm | Asm | Obj | Executable) -> None
@@ -239,6 +245,12 @@ let parse_invocation ~subcommand argv =
         Error "--emit-header cannot be combined with other output modes"
       else if !link_inputs_rev <> [] && emit <> Executable then
         Error "C inputs and link flags require an executable output"
+      else if Option.is_some !runtime && ((not !native) || emit <> Executable) then
+        Error "--hosted/--freestanding require a --backend=native executable"
+      else if Option.is_some !runtime && subcommand = Check_subcommand then
+        Error "--hosted/--freestanding have no effect with fas check"
+      else if !native && Option.is_some !sanitizers then
+        Error "--sanitize is not supported by --backend=native"
       else
         match profile_conflict emit with
         | Some message -> Error message
@@ -277,6 +289,7 @@ let parse_invocation ~subcommand argv =
                 profile = !profile;
                 all_errors = !all_errors;
                 native = !native;
+                native_runtime = Option.value ~default:Auto !runtime;
                 align_loops = None;
                 align_functions = None;
                 tune_options = [];
@@ -379,6 +392,14 @@ let parse_invocation ~subcommand argv =
           native := argv.(i) = "--backend=native";
           loop (i + 1) input output emit keep optimization optimization_explicit debug
             no_inline_function
+      | ("--hosted" | "--freestanding") as flag ->
+          let selected = if flag = "--hosted" then Hosted else Freestanding in
+          if Option.is_some !runtime && !runtime <> Some selected then
+            Error "--hosted and --freestanding cannot be combined"
+          else (
+            runtime := Some selected;
+            loop (i + 1) input output emit keep optimization optimization_explicit debug
+              no_inline_function)
       | "--profile" ->
           if subcommand = Check_subcommand then
             Error "`--profile` has no effect with `fas check`"

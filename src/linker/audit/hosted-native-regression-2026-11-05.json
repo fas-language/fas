@@ -1,0 +1,81 @@
+{
+  "date_utc": "2026-11-05T19:44:09.230773+00:00",
+  "scope": "Hosted Linux x86-64 native compiler driver, with built-in Fas linker; no new linker performance claims",
+  "git_parent": "97a1bb560b2cf78abffad89c55adf306394ccd0f",
+  "handoff_commits": [
+    "8bc3edd",
+    "97a1bb5"
+  ],
+  "results": {
+    "python_cases": 243,
+    "python_groups": 41,
+    "compiler_regression_checks": 3782,
+    "skipped_cases": 0,
+    "ocaml_checks": "passed",
+    "development_build": "passed",
+    "native_shell_smoke": "passed"
+  },
+  "commands": {
+    "development_build": {
+      "command": "dune build",
+      "exit_code": 0,
+      "local_log": "/tmp/fas-hosted-native-development-20261105.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "full_release": {
+      "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --force --profile release",
+      "exit_code": 0,
+      "local_log": "/tmp/fas-hosted-native-release-final-20261105.log",
+      "log_sha256": "6f0405e04f11dbed08a54ef7d1b48beb96baae786f305b82deb82e31fd8a0be1"
+    },
+    "focused_hosted": {
+      "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot python3 src/linker/test/hosted_native_integration.py _build/default/bin/main.exe _build/default/src/linker/bin/main.exe",
+      "exit_code": 0,
+      "local_log": "/tmp/fas-hosted-native-focused-qualified-20261105.log",
+      "log_sha256": "14b50fbddbbad4f2ed569ad69e244fe7e18c5b9d5e6658d2eea16e6e559796e2"
+    },
+    "native_shell": {
+      "command": "sh test/native_backend.sh",
+      "exit_code": 0,
+      "local_log": "/tmp/fas-hosted-native-shell-20261105.log",
+      "log_sha256": "ff57a2d2e0aa6f67a7bbee071ff8421b88211233875052c912a27936f8c672f5"
+    }
+  },
+  "binaries": {
+    "_build/default/bin/main.exe": "b9e6b39584add286d3de768b88440d23486bf0166792a533d9749eff614de7f0",
+    "_build/default/src/linker/bin/main.exe": "0443bd5a1e9cacecd1692866fb4c1b985f08e461c2e489df85813238b25bc4f9"
+  },
+  "sources": {
+    "src/driver/cli.ml": "a651e51db1140e77099f75b8894871b3ba05bcacbfa740f65d3c6bbeecae1d9d",
+    "src/driver/cli.mli": "401b6252050da59501a6654034bc7ea4661269e796db87b67a818810274994c0",
+    "src/driver/driver.ml": "68babf064b8fe50dc3eb7e63d056e66969abe47a96d5feccbf11b7aa0f17c5f9",
+    "src/driver/driver.mli": "4e7c9a44900a183a9633eafcfeed20845dd50b3b6a7ea866085d3ca7001da3ae",
+    "src/driver/hosted_link.ml": "d595f98425f6ccdb5c8366ed88ac2f1471a31cfeeab0f055c8dc43cdf50c5bf2",
+    "src/driver/hosted_link.mli": "c090127ad8036c066b5329a9a8b0956493adbdd20cbaae2f328c23a2c7e8f1bb",
+    "src/fas/lsp/lsp.ml": "110ce1e271f784619ab9b7dabb510f3f30e9621a2aa97367c1df82e5bdeb13e6",
+    "src/linker/test/hosted_native_integration.py": "ad5599007479c9840327e61aa2c8786eaed0c282e068053a382e53da0a03cdd7",
+    "src/linker/test/native_integration.py": "75ef80e5f9aab5759f9bd91bf455569d90796ea97050f189bf6b3bc2e2544be9",
+    "src/linker/test/dune": "c6b136afd20eb263822a61022f289747f0558374a6055a88509a34023c0dc58e",
+    "test/native_backend.sh": "d7f003684b8e973e0ee50faee907f305df9e468c0a93df5a9a4a0572d9291284"
+  },
+  "coverage": [
+    "GCC and Clang dry-run link plans; external linker never executed",
+    "automatic and explicit hosted/freestanding startup",
+    "libc, constructors/destructors and buffered stdio",
+    "positional C compilation with defines and paths containing spaces",
+    "C objects, archives, shared libraries, C main harness calling Fas",
+    "embedded C/header imports and assembly",
+    "package -pthread compilation and runtime",
+    "argc; glibc fixed/PIE/static/static-PIE; isolated musl fixed/PIE/static",
+    "GNU-stack/non-executable stack; tool-free objects and intrinsic calls",
+    "unsupported options/invalid plans, atomic failure and original C-source alias preservation"
+  ],
+  "limits": [
+    "Hosted startup discovery requires GCC/Clang; independent hosted SDK configuration is not implemented",
+    "Existing Fas header import and embedded assembly paths require Clang",
+    "External ABI expansion belongs to the backend branch and is not part of this driver commit",
+    "Only Linux x86-64; no LTO implementation or C++ scope expansion",
+    "These tests do not establish general position independence of every native code/data pattern",
+    "Local log paths are preserved session artifacts, not a durable release archive"
+  ]
+}

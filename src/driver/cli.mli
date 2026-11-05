@@ -1,6 +1,7 @@
 type emit = Ir | Ir_json | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
 type diagnostics = Text | Json
 type target = Portable | Force_native
+type native_runtime = Auto | Freestanding | Hosted
 
 type t = {
   input : string;
@@ -24,6 +25,7 @@ type t = {
   profile : string option;
   all_errors : bool;
   native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
+  native_runtime : native_runtime;
   align_loops : int option;
   align_functions : int option;
   tune_options : string list;

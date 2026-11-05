@@ -265,6 +265,16 @@
 (rule
  (alias runtest)
  (deps
+  hosted_native_integration.py
+  native_integration.py
+  (env_var FAS_MUSL_SYSROOT))
+ (action
+  (run python3 %{dep:hosted_native_integration.py}
+   %{exe:../../../bin/main.exe} %{exe:../bin/main.exe})))
+
+(rule
+ (alias runtest)
+ (deps
   native_integration.py
   (source_tree ../../../test))
  (action

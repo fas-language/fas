@@ -23,6 +23,7 @@ type checked = {
   declarations : string;
   artifacts : string list;
   link_pkgs : Ast.pkg list;
+  uses_c_runtime : bool;
   keep : bool;
 }
 

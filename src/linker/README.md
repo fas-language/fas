@@ -390,8 +390,9 @@ order for ties. `.init`/`.fini` CRT fragments are combined with executable NOP
 padding; DT_INIT/FINI and array tags describe them. GCC/Clang hosted fixtures pass
 with explicit glibc CRT objects and either libc.so's input script or libc.so.6 plus
 libc_nonshared.a, including arguments, environment, buffered stdio, constructor
-priorities, atexit and destructors. Hosted Fas objects pass this startup path too;
-the native driver's generated startup remains freestanding.
+priorities, atexit and destructors. The native compiler driver selects this C
+startup path for hosted builds and retains its own syscall startup for
+freestanding builds.
 
 Dynamic output supports ELF TLS templates and PT_TLS, with local-exec,
 initial-exec, general-dynamic and local-dynamic code sequences. Input relocations
@@ -561,17 +562,50 @@ assembler or external linker:
 ```sh
 dune build --profile release bin/main.exe
 _build/default/bin/main.exe --backend=native -c library.fas -o library.o
-_build/default/bin/main.exe --backend=native main.fas library.o -o program
+_build/default/bin/main.exe --backend=native --freestanding main.fas library.o -o program
+# C inputs select the C runtime automatically; Fas still performs the final link.
+_build/default/bin/main.exe --backend=native main.fas helper.c -o hosted-program
+# Explicitly request C startup even for a closed Fas program.
+_build/default/bin/main.exe --backend=native --hosted main.fas -o hosted-program
 ```
 
 Object output has no generated `_start` and does not require `main`. Executable
-output adds argc/argv startup and a Linux exit syscall. Use `extern "C"` exports
+output defaults to freestanding for closed Fas programs: it adds argc/argv
+startup and a Linux exit syscall without invoking C tools. C/header/assembly or
+package imports, additional objects/archives/shared libraries, `-l` inputs,
+external declarations/imported globals, or a main supplied by another input
+conservatively select hosted startup. Linker policy flags alone do not change
+this choice. `--hosted` and `--freestanding` explicitly override it and require
+a native executable output; they do not apply to `-c`.
+
+Hosted links call the configured `FAS_CC` GCC/Clang driver with `-###` to discover
+the platform's CRT objects, interpreter and runtime library order. Fas parses
+that plan and links it itself; no printed command or external linker is
+executed. The compiler is a bootstrap dependency for this discovery, and also
+compiles positional `.c` inputs and embedded C/assembly. No LLVM `opt`/`llc` tools
+are used. C header imports and embedded assembly retain their existing Clang
+requirement. For a link
+with explicit CRT inputs and no C driver discovery, emit a native object with
+`-c` and invoke `fas-ld` directly.
+
+Hosted output is non-PIE by default to match the native code generator. Forward
+`-Wl,-pie`, `-Wl,-static` or `-Wl,-static-pie` to select the matching C startup
+plan; glibc covers all four modes and isolated musl covers dynamic fixed/PIE and
+static startup. These tests do not establish that every native instruction/data
+pattern is position independent. C `main` harnesses can call exported Fas
+functions without any Fas `main`. Constructors, buffered stdio, destructors,
+package `-pthread`, C source flags and argument passing have driver regressions.
+Native sanitizer options fail explicitly rather than producing uninstrumented
+output.
+
+Use `extern "C"` exports
 for symbols that must be visible between objects; ordinary definitions remain
 local. Separate-object external calls currently support only non-variadic
 i32/i64/pointer parameters and results (or void results), checked against GCC.
 Internal Fas float/vector calls remain supported. Exported external float/vector
-or aggregate ABIs, embedded C/assembly, package libraries, native `-S`, and other
-targets fail explicitly. Additional objects/archives and explicit `-L`/`-l` use
+or aggregate ABIs, native `-S`, and other targets fail explicitly. The backend
+owns ABI classification independently of the driver's runtime choice.
+Additional objects/archives and explicit `-L`/`-l` use
 the standalone linker's rules. Use `-Wl,--gc-sections,--start-group`,
 `-Wl,--end-group`, `-Wl,--whole-archive`, or `-Xlinker @inputs.rsp` for linker
 policy/response arguments. Compiler output/entry/map/statistics overrides are

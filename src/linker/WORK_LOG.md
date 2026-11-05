@@ -1,5 +1,42 @@
 # Linker implementation work log
 
+### Current checkpoint: hosted native compiler driver
+
+The migration and complete linker/object handoff are now local commits
+`8bc3edd` and `97a1bb5` on `native-prep-frontend-fixes`. Claude confirmed merging
+them onto `backend-v2` and owns further C ABI/codegen changes there. No commits
+were pushed. The handoff preserves the compiler source bytes and excludes
+generated Python caches and corpus artifacts outside the checked-in evidence.
+
+Native executable builds now select the C runtime conservatively for C inputs,
+imports, packages and external declarations; closed programs retain tool-free
+Fas startup. Explicit `--hosted`/`--freestanding` overrides are available.
+Hosted links emit a native object without `_start`, ask GCC/Clang for its dry-run
+link plan and execute that plan with the Fas linker. CRT discovery has no
+hardcoded distro paths and never runs an external linker. Positional C sources
+and embedded C/assembly/package objects are supported. C harnesses may supply
+`main`. Hosted runtime discovery still requires a configured C compiler; raw
+native object emission and explicit freestanding linking remain independent.
+
+Driver regressions cover GCC/Clang, libc, lifecycle, C source and object inputs,
+archives/DSOs, no-Fas-main C harnesses, embedded C/header imports and assembly,
+thread package flags, argc, glibc PIE/static/static-PIE and isolated musl startup.
+They also verify no external linker execution, `.note.GNU-stack`/non-executable
+stack, explicit tool-free linking, invalid plans/options, output preservation
+and original C-source aliases. Native sanitizers are rejected explicitly.
+The existing native shell smoke check now accepts hosted libc and retains an
+explicit freestanding unresolved-libc check. Backend ABI expansion is separate;
+this branch still enforces its existing external ABI gate.
+
+Final validation passes: the development build, a forced full release run with
+isolated musl enabled (243 Python cases across 41 groups, OCaml checks and 3,782
+compiler regression checks, no skips), and `test/native_backend.sh`. The smoke
+test caught intrinsic declarations being mistaken for C externals; runtime
+selection now excludes backend-handled `llvm.*` declarations, with a tool-free
+popcount/ctz regression. Evidence is recorded in
+`audit/hosted-native-regression-2026-11-05.json`. No new performance measurements
+were taken during this driver work.
+
 ### Current checkpoint: executable data imports and upstream C builds
 
 After these compatibility changes, the user provided a quiet-PC interval for

@@ -2171,6 +2171,7 @@ type checked = {
   declarations : string;
   artifacts : string list;
   link_pkgs : Ast.pkg list;
+  uses_c_runtime : bool;
   keep : bool;
 }
 
@@ -2565,6 +2566,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                      declarations;
                      artifacts = !c_artifacts;
                      link_pkgs = List.concat_map (fun (_, _, pkgs) -> pkgs) c_imports;
+                     uses_c_runtime = c_imports <> [] || assembly_imports <> [];
                      keep = config.Cli.keep;
                    })))
 
@@ -2734,6 +2736,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
             declaration_headers;
             declarations;
             link_pkgs;
+            uses_c_runtime;
             _;
           } =
             checked
@@ -2835,12 +2838,61 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 else Ok ()
               in
               if config.Cli.native then
-                if c_objects <> [] || link_pkgs <> [] then
+                let* hosted =
+                  try
+                    Ok
+                      (match config.Cli.native_runtime with
+                      | Hosted -> true
+                      | Freestanding -> false
+                      | Auto ->
+                          uses_c_runtime || c_objects <> [] || link_pkgs <> []
+                          || (match
+                                Fas_linker.Command_line.parse ~link_only:true
+                                  (Cli.native_linker_arguments config.Cli.link_inputs)
+                              with
+                            | Link link -> link.inputs <> []
+                            | Help | Version -> assert false)
+                          || (not
+                                (List.exists
+                                   (fun (f : Ir.func) ->
+                                     f.name = "main" && f.blocks <> [])
+                                   ir.Ir.funcs))
+                          || List.exists
+                               (fun (f : Ir.func) ->
+                                 f.linkage = External && f.blocks = []
+                                 && not
+                                      (String.starts_with ~prefix:"llvm." f.name
+                                      || Ir.is_atomic_name f.name))
+                               ir.Ir.funcs
+                          || List.exists
+                               (function
+                                 | Ir.Storage_global
+                                     { linkage = Ast.Import_c | Import_const_c; _ } ->
+                                     true
+                                 | _ -> false)
+                               ir.Ir.globals)
+                  with Fas_linker.Error.Error message ->
+                    Error
+                      [
+                        Diag.error Span.synthetic ("native backend: linker: " ^ message);
+                      ]
+                in
+                if hosted then
+                  let* link_flags =
+                    pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
+                  in
+                  match
+                    Result.bind (Fir_hook.apply ir)
+                      (Hosted_link.link ~cc:(c_compiler ()) ~config ~c_objects ~link_flags)
+                  with
+                  | Ok () -> Ok ""
+                  | Error message -> Error [ Diag.error Span.synthetic message ]
+                else if c_objects <> [] || link_pkgs <> [] then
                   Error
                     [
                       Diag.error Span.synthetic
-                        "`--backend=native` cannot compile embedded C/assembly or \
-                         package libraries yet";
+                        "native embedded C/assembly or package libraries require \
+                         --hosted";
                     ]
                 else
                   try
