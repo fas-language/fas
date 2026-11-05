@@ -328,9 +328,7 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
       Array.iteri
         (fun slot (source_file, symbol) ->
           let value =
-            match
-              Static_ifunc.stub ~placements ~resolved static_ifunc source_file symbol
-            with
+            match Static_ifunc.stub ~placements static_ifunc source_file symbol with
             | Some address -> Int64.of_int address
             | None -> (
                 match got.models.(slot) with
@@ -385,8 +383,7 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
                       o.sections.(r.target).name = ".eh_frame"
                       || Got.relocation r.kind || Got.base_relocation r.kind
                     then None
-                    else
-                      Static_ifunc.stub ~placements ~resolved static_ifunc file r.symbol
+                    else Static_ifunc.stub ~placements static_ifunc file r.symbol
                   in
                   if static_stub <> None then static_stub
                   else if

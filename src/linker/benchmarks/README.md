@@ -1,5 +1,22 @@
 # Linker performance evidence
 
+## IFUNC reference allocation checkpoint
+
+The next untimed profile showed static IFUNC stub lookup allocating canonical
+definition keys and option closures for ordinary relocations. The planner now
+records trampoline indices once per symbol; emission uses integer array lookups.
+The table is allocated only when a static link has live IFUNCs. Removing the
+option closure on the empty path also reduces dynamic/static-PIE allocation.
+
+Relative to the SHA-1 checkpoint, the static Chibicc link allocates 814,438 fewer
+words (7.6%). The other three replay workloads drop by 0.5–1.7%. All four output
+images remain byte-identical and pass their runtime checks. A GNU/LLD differential
+fixture also verifies a weak IFUNC overridden by an ordinary strong function,
+a weak declaration resolving to an IFUNC, and missing weak references, with GC
+and partial links. These are allocation results, without new speed or peak-RSS
+claims. [Pinned evidence](results/2026-11-05/allocation-ifunc-references.json)
+includes tool/source hashes and the focused IFUNC test log.
+
 ## Build-ID allocation checkpoint
 
 Untimed OCaml 5.4 Memprof sampling found SHA-1 schedule/state boxing accounted
