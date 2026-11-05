@@ -1,5 +1,22 @@
 # Linker implementation work log
 
+### Current checkpoint: saved corpus harness replay
+
+Qualification exposed a replay-harness bug: under /tmp the copied script's
+relative ROOT becomes /, so every output was rejected as inside the repository.
+The output protection now applies when that computed root actually contains the
+project marker. Defaults still require explicit saved linker/compiler paths for
+external snapshots, as documented.
+
+An actual saved-harness run now passes all 21 upstream cJSON programs with Fas
+and GNU (42 executions). The checkout harness still rejects an output inside
+the repository before creating files. This is a harness-only correction, with
+no linker or compiler implementation changes. The report and verification are
+corpus/results/2026-11-05/snapshot-harness-replay.json and
+audit/corpus-snapshot-replay-2026-11-05.json.
+
+
+
 ### Current checkpoint: SQLite production qualification
 
 User deferred the main performance pass until the supported functionality and

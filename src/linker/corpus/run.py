@@ -25,7 +25,7 @@ class Corpus:
     def __init__(self, args):
         self.args = args
         self.root = args.output.resolve()
-        if self.root.is_relative_to(ROOT):
+        if (ROOT/'dune-project').is_file() and self.root.is_relative_to(ROOT):
             raise ValueError('output must be outside the repository')
         self.root.mkdir(parents=True, exist_ok=False)
         linker_source = args.linker.resolve()
