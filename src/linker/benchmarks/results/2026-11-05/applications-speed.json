@@ -1,0 +1,1665 @@
+{
+  "started": "2026-11-05T21:20:59+0100",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "tools": {
+    "Fas": {
+      "path": "/tmp/fas-application-link-speed-20261105/tools/0/fas-after",
+      "original": "/tmp/fas-ifunc-reference-profile-20261105/fas-after",
+      "sha256": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be",
+      "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+    },
+    "LLD": {
+      "path": "/tmp/fas-application-link-speed-20261105/tools/1/ld.lld-22",
+      "original": "/usr/bin/ld.lld-22",
+      "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+      "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+    },
+    "GNU": {
+      "path": "/tmp/fas-application-link-speed-20261105/tools/2/ld",
+      "original": "/usr/bin/ld",
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+    }
+  },
+  "manifest_sha256": "0a425e55382b4935f8fcf793845f6c5ea83360c0456afae4bb712dd6491e4463",
+  "harness_sha256": "51fd11205b92bd641faad46053d2e547de23c90f103ffe777c5c75cbcdfebf92",
+  "bench_helpers_sha256": "ba167632f8ad21c78866f589f21d712f0002345bde88056257f49eb8f9970fbe",
+  "methodology": "Warm cache; spawn-through-exit wall/CPU; rotated order; default linker workers; runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.",
+  "runs": 21,
+  "warmups": 3,
+  "timing_comparison": true,
+  "input_provenance": {
+    "/tmp/fas-native-projects-20261105/report.json": "cbd9d7d0e52c90e0ad37c5b131822130c3c7c3b351e13b6cf8a3bd1f150c0363",
+    "/tmp/fas-doom-render-v2-20261105/report.json": "df90983a46c40b363e31ae0e188b6e53c08fc0c88132e02c9cded64d97930549"
+  },
+  "limitations": [
+    "Explicit argv inputs are hashed; -l/script/transitive closures require the associated corpus/sysroot provenance.",
+    "Single machine and warm cache; no general linker ranking or production qualification."
+  ],
+  "workloads": [
+    {
+      "name": "fas-sieve-native",
+      "cwd": "/tmp/fas-native-projects-20261105",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+        "/tmp/fas-native-projects-20261105/sieve/primes_zero3-native.o": "7dda99340503a5ff7ec07b6561dd39f73cc48716d0500e0e933efb89569c900d",
+        "/usr/lib/x86_64-linux-gnu/libc.so": "649e1aa91af2551216685f45effca270fcc09ef39e28acd4b22745f0ae77e7f2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdout_contains": ";1;algorithm=base,faithful=yes,bits=1",
+        "args": [],
+        "cwd": "/tmp/fas-native-projects-20261105",
+        "exit": 0,
+        "env": {}
+      },
+      "results": {
+        "Fas": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/0/fas-after",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/0/0",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-native-projects-20261105/sieve/primes_zero3-native.o",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "2323551565d44f0f6ac22846493ffa95a439a29bceeb97b442c01ca69a032ae5",
+          "output_bytes": 223584,
+          "peak_rss_kib": 16124,
+          "samples": [
+            {
+              "wall_ms": 18.777046992909163,
+              "user_ms": 7.141,
+              "system_ms": 11.221
+            },
+            {
+              "wall_ms": 19.27384699229151,
+              "user_ms": 11.045,
+              "system_ms": 8.032
+            },
+            {
+              "wall_ms": 18.998546001967043,
+              "user_ms": 10.413,
+              "system_ms": 8.329999999999998
+            },
+            {
+              "wall_ms": 28.368148996378295,
+              "user_ms": 10.049,
+              "system_ms": 18.089000000000002
+            },
+            {
+              "wall_ms": 20.23011600249447,
+              "user_ms": 6.947,
+              "system_ms": 12.901
+            },
+            {
+              "wall_ms": 28.473418002249673,
+              "user_ms": 14.048,
+              "system_ms": 14.048
+            },
+            {
+              "wall_ms": 22.044216995709576,
+              "user_ms": 9.844000000000001,
+              "system_ms": 11.812999999999999
+            },
+            {
+              "wall_ms": 30.479473003651947,
+              "user_ms": 12.098999999999998,
+              "system_ms": 18.147999999999996
+            },
+            {
+              "wall_ms": 28.873956005554646,
+              "user_ms": 11.838999999999999,
+              "system_ms": 16.772
+            },
+            {
+              "wall_ms": 31.54878599161748,
+              "user_ms": 14.678999999999998,
+              "system_ms": 15.657999999999998
+            },
+            {
+              "wall_ms": 28.552097006468102,
+              "user_ms": 12.695,
+              "system_ms": 15.625
+            },
+            {
+              "wall_ms": 31.452614013687707,
+              "user_ms": 13.661,
+              "system_ms": 17.564
+            },
+            {
+              "wall_ms": 30.64911300316453,
+              "user_ms": 17.249,
+              "system_ms": 13.189999999999998
+            },
+            {
+              "wall_ms": 20.435373997315764,
+              "user_ms": 12.536,
+              "system_ms": 7.7139999999999995
+            },
+            {
+              "wall_ms": 41.02177299500909,
+              "user_ms": 24.881,
+              "system_ms": 15.924000000000001
+            },
+            {
+              "wall_ms": 36.74101700016763,
+              "user_ms": 18.775,
+              "system_ms": 17.786
+            },
+            {
+              "wall_ms": 18.574543995782733,
+              "user_ms": 9.11,
+              "system_ms": 9.11
+            },
+            {
+              "wall_ms": 36.437843009480275,
+              "user_ms": 18.54,
+              "system_ms": 17.564
+            },
+            {
+              "wall_ms": 29.683186003239825,
+              "user_ms": 8.79,
+              "system_ms": 20.51
+            },
+            {
+              "wall_ms": 20.465501002036035,
+              "user_ms": 6.741,
+              "system_ms": 13.482
+            },
+            {
+              "wall_ms": 19.40583599207457,
+              "user_ms": 8.038,
+              "system_ms": 11.053
+            }
+          ],
+          "median_wall_ms": 28.473418002249673,
+          "min_wall_ms": 18.574543995782733,
+          "max_wall_ms": 41.02177299500909
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/1/ld.lld-22",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/0/1",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-native-projects-20261105/sieve/primes_zero3-native.o",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "2b7b73d6eeef76283190c9a727f6ffa3b097bf84a062344c64056df053de0aeb",
+          "output_bytes": 211432,
+          "peak_rss_kib": 65804,
+          "samples": [
+            {
+              "wall_ms": 18.137548002414405,
+              "user_ms": 7.047,
+              "system_ms": 14.095
+            },
+            {
+              "wall_ms": 17.54721099860035,
+              "user_ms": 9.321,
+              "system_ms": 10.485999999999999
+            },
+            {
+              "wall_ms": 17.914676005602814,
+              "user_ms": 2.658,
+              "system_ms": 18.605999999999998
+            },
+            {
+              "wall_ms": 17.988235005759634,
+              "user_ms": 6.760999999999999,
+              "system_ms": 14.489
+            },
+            {
+              "wall_ms": 17.843080990132876,
+              "user_ms": 10.520999999999999,
+              "system_ms": 9.469
+            },
+            {
+              "wall_ms": 17.381928002578206,
+              "user_ms": 7.357,
+              "system_ms": 12.261999999999999
+            },
+            {
+              "wall_ms": 18.7896709976485,
+              "user_ms": 5.0569999999999995,
+              "system_ms": 16.184
+            },
+            {
+              "wall_ms": 27.518471993971616,
+              "user_ms": 11.066999999999998,
+              "system_ms": 18.73
+            },
+            {
+              "wall_ms": 21.147010003915057,
+              "user_ms": 6.992,
+              "system_ms": 16.607999999999997
+            },
+            {
+              "wall_ms": 20.91097299125977,
+              "user_ms": 14.525,
+              "system_ms": 8.938
+            },
+            {
+              "wall_ms": 19.262285000877455,
+              "user_ms": 8.296,
+              "system_ms": 13.135
+            },
+            {
+              "wall_ms": 25.621503998991102,
+              "user_ms": 12.184,
+              "system_ms": 16.246
+            },
+            {
+              "wall_ms": 16.327484001521952,
+              "user_ms": 6.522,
+              "system_ms": 11.956999999999999
+            },
+            {
+              "wall_ms": 15.877782992902212,
+              "user_ms": 9.037999999999998,
+              "system_ms": 9.037999999999998
+            },
+            {
+              "wall_ms": 17.348305002087727,
+              "user_ms": 6.76,
+              "system_ms": 13.52
+            },
+            {
+              "wall_ms": 17.52199300972279,
+              "user_ms": 8.952,
+              "system_ms": 11.19
+            },
+            {
+              "wall_ms": 19.475549008348025,
+              "user_ms": 4.715,
+              "system_ms": 16.976
+            },
+            {
+              "wall_ms": 18.143779001547955,
+              "user_ms": 9.571,
+              "system_ms": 11.485
+            },
+            {
+              "wall_ms": 23.76659499714151,
+              "user_ms": 10.569,
+              "system_ms": 15.854
+            },
+            {
+              "wall_ms": 29.382577995420434,
+              "user_ms": 12.257,
+              "system_ms": 19.407999999999998
+            },
+            {
+              "wall_ms": 25.80968000984285,
+              "user_ms": 7.993,
+              "system_ms": 19.982
+            }
+          ],
+          "median_wall_ms": 18.143779001547955,
+          "min_wall_ms": 15.877782992902212,
+          "max_wall_ms": 29.382577995420434
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/2/ld",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/0/2",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-native-projects-20261105/sieve/primes_zero3-native.o",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "0c6be9709364bc6fa475e52484eeebb3302a31066eebe785505bc145c923e185",
+          "output_bytes": 219640,
+          "peak_rss_kib": 9044,
+          "samples": [
+            {
+              "wall_ms": 13.912205002270639,
+              "user_ms": 8.772,
+              "system_ms": 4.872999999999999
+            },
+            {
+              "wall_ms": 13.97680799709633,
+              "user_ms": 9.518,
+              "system_ms": 4.2299999999999995
+            },
+            {
+              "wall_ms": 14.703200999065302,
+              "user_ms": 12.438999999999998,
+              "system_ms": 2.073
+            },
+            {
+              "wall_ms": 20.110148994717747,
+              "user_ms": 9.376,
+              "system_ms": 10.418000000000001
+            },
+            {
+              "wall_ms": 14.449141002842225,
+              "user_ms": 10.041,
+              "system_ms": 3.972
+            },
+            {
+              "wall_ms": 13.433870000881143,
+              "user_ms": 10.045,
+              "system_ms": 2.997
+            },
+            {
+              "wall_ms": 14.113525990978815,
+              "user_ms": 10.081,
+              "system_ms": 3.822
+            },
+            {
+              "wall_ms": 21.006003007641993,
+              "user_ms": 14.215,
+              "system_ms": 6.56
+            },
+            {
+              "wall_ms": 13.422889998764731,
+              "user_ms": 8.071,
+              "system_ms": 5.044
+            },
+            {
+              "wall_ms": 14.47428901155945,
+              "user_ms": 7.196999999999999,
+              "system_ms": 7.029
+            },
+            {
+              "wall_ms": 14.496019997750409,
+              "user_ms": 7.156,
+              "system_ms": 7.156
+            },
+            {
+              "wall_ms": 13.247317998320796,
+              "user_ms": 5.994999999999999,
+              "system_ms": 6.994
+            },
+            {
+              "wall_ms": 22.038306007743813,
+              "user_ms": 12.149000000000001,
+              "system_ms": 9.718
+            },
+            {
+              "wall_ms": 16.5995080024004,
+              "user_ms": 10.055,
+              "system_ms": 6.3469999999999995
+            },
+            {
+              "wall_ms": 12.791515997378156,
+              "user_ms": 8.765,
+              "system_ms": 3.885
+            },
+            {
+              "wall_ms": 12.887286997283809,
+              "user_ms": 8.463,
+              "system_ms": 4.231
+            },
+            {
+              "wall_ms": 19.374096009414643,
+              "user_ms": 9.045,
+              "system_ms": 10.05
+            },
+            {
+              "wall_ms": 23.76933000050485,
+              "user_ms": 10.263,
+              "system_ms": 13.133
+            },
+            {
+              "wall_ms": 18.732523007201962,
+              "user_ms": 7.189,
+              "system_ms": 11.297
+            },
+            {
+              "wall_ms": 14.108215997111984,
+              "user_ms": 6.011,
+              "system_ms": 7.854
+            },
+            {
+              "wall_ms": 23.6857220006641,
+              "user_ms": 17.573999999999998,
+              "system_ms": 5.8709999999999996
+            }
+          ],
+          "median_wall_ms": 14.47428901155945,
+          "min_wall_ms": 12.791515997378156,
+          "max_wall_ms": 23.76933000050485
+        }
+      }
+    },
+    {
+      "name": "doom-32-frames",
+      "cwd": "/tmp/fas-doom-render-v2-20261105",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+        "/tmp/fas-doom-render-v2-20261105/doom/am_map.o": "b49d9ba8980112b0bc3975572efaf0049b3996fc58ac2d82ba2d56d9b8be3ade",
+        "/tmp/fas-doom-render-v2-20261105/doom/d_items.o": "62d043d64ff4f96a559c23fe1b333bf9b2c38ef073beabbf6081f6412b7660b7",
+        "/tmp/fas-doom-render-v2-20261105/doom/d_main.o": "806cacc7aebc71371b86d767f203ad12dbda824bbb9360940d8b9cc07d106238",
+        "/tmp/fas-doom-render-v2-20261105/doom/d_net.o": "d22022617ac1c559fbab8cbe3dabf41952b11e7029ac8cfbe077043cfde4439d",
+        "/tmp/fas-doom-render-v2-20261105/doom/doomdef.o": "eb12c3c71057d6e1d47bce0520fb029099d2eddbb81ec0459f6df4f719a9365c",
+        "/tmp/fas-doom-render-v2-20261105/doom/doomstat.o": "84943ca3f47e480c17c4d8ddfdc6b2f1520e17e2274af7977747b33a3eee55f7",
+        "/tmp/fas-doom-render-v2-20261105/doom/dstrings.o": "6124ee75d72dd1e0e63318ceffc5e4e041d80e12181d543ee9471e8742225b96",
+        "/tmp/fas-doom-render-v2-20261105/doom/f_finale.o": "747dd4eac629b9fc311bff8289b74f7ebe1e19b7dc8d22ac43f5d61ac1b6090f",
+        "/tmp/fas-doom-render-v2-20261105/doom/f_wipe.o": "6b69341715e80b64053bdefb137cf6c14ac9e1b69e202b8c14a5598c2890dfc5",
+        "/tmp/fas-doom-render-v2-20261105/doom/g_game.o": "6812b516dccd58fab2eca2017bc20cac1683bc05609037dc65cd13d0e919b6ed",
+        "/tmp/fas-doom-render-v2-20261105/doom/hu_lib.o": "428a3de06661571c74e3c0bf95bedfb87dcaa3c9afc83d31d57e04a41c99eccf",
+        "/tmp/fas-doom-render-v2-20261105/doom/hu_stuff.o": "291c12043c87a78239a25e6d213bc4320b1d51f88592d8c4c3c7819c5b7c2535",
+        "/tmp/fas-doom-render-v2-20261105/doom/i_main.o": "76396c83cf53d540eaf7ec255e53812cf58529e670574b5679e06529a7e95027",
+        "/tmp/fas-doom-render-v2-20261105/doom/i_net.o": "99a77d194cf2d92565cf602db2cea646902f7a5853396567450d72db22583a9a",
+        "/tmp/fas-doom-render-v2-20261105/doom/i_system.o": "0f8641c613822071ff7069baa618f687004ddcd673663f198e0d3e7656f354eb",
+        "/tmp/fas-doom-render-v2-20261105/doom/info.o": "7b2a962e9b6a5adf8142909b3984a417be9b2538ace0bca8dc056a47e9bd6d60",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_argv.o": "effff09b7b72c1ac6470766d8175f985537be12175ac823500ed6b607256f99b",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_bbox.o": "9e100e260b3d43626000388ad88aabba329b76e521ec457a9118071650e8f4c0",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_cheat.o": "a162f3d683c611b8d16efd6a08fe4ba147e80e348b5ad25894daf8941c1f832f",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_fixed.o": "0476513059f7fd940fd06e9cd066d65e70e0ea13f0210f0e11bfd7312bcb4577",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_menu.o": "517b3345f5bcc30a5cf7420a256672dc2638d881713ff5e1ce75c9d5677a43a0",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_misc.o": "a31a0bf379770d718a50a7691eebc11f8f6c645bf319be1a9883c3d2b897adcb",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_random.o": "7e8a2626e127c58faff44df11918fc05879b3f7ac64e197a264cc450bc6706e8",
+        "/tmp/fas-doom-render-v2-20261105/doom/m_swap.o": "9914dadb56279689ec689620eea6245b6170c9d3f00ebcda0d6dd15f06420b35",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_ceilng.o": "a0e9dbf4bdc34bc08dcf61793b303caf8a32669e126eef942ca474ebab1cc935",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_doors.o": "aa1fe0167aa589ca13728712ffc7846c93b02fd2ffd088da870c521bdb2aa995",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_enemy.o": "9541cf8af3dd97c799120225e6f6aa1a643bb28ba7961bb3dddd1e48bb6a69ce",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_floor.o": "05e937117e665391a27b6c25cf45849f254716ffacd6e41b5be36b2deffffa9b",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_inter.o": "d665bb1ffb0323cb80a217f810042210384b3c5a03da84fdc99c2cdf0abe0a70",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_lights.o": "f93d78760d418d861f9b2f02bc27e010818a9cf688da80ada9fd90ea54570621",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_map.o": "59caa9cfe2ca76d32715f56942071b607ded9ce0183a7d16baa464a2095d15b7",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_maputl.o": "517121bc8d9e1316ae7704a128bd8f16ab981232b886b2c9e29585e9ca6c1aee",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_mobj.o": "77904dddf35d6a68ddfeac5e9a5e30fefce7511ba835afbb060cdfaacc8bf812",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_plats.o": "96d99e92319e4949dfa4f1896ae31fbc3257b004e41bbce25d8ee74f75d18d02",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_pspr.o": "8b993e478f73b9251bcd2ffb66e97e8730c1bff296cc57e16c4dfc3c32419094",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_saveg.o": "e35ff04a7a304bca5a1e0f11b51f21f9bdfe9dbea50d844fe233e63d115dc228",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_setup.o": "82bb34e1eb522d5ec03aa44155329f1c14d2fb5a64de76e7369b873a659473cc",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_sight.o": "bfc3182f5a7bd6f95208221e6917f729652244217c2ccdf9e97917d9f2e8b904",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_spec.o": "28e4d861489152e3fc899298b9a29b675cbbd9cff9325674573b99c6754b206f",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_switch.o": "fd64c0d1077d91348b1ceccf540b2b209698607905937dd9308a53e4862b7bca",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_telept.o": "04b45723f3eaf453bcb076fb15164b407b571c26b458d740ece5c20f23de2455",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_tick.o": "a5216758305d7fbbb9067bb3eb075518fc7b983145e5c06b6e7a249df5143acb",
+        "/tmp/fas-doom-render-v2-20261105/doom/p_user.o": "05666e73ac696546b726a379537e3ac53b812d833ffb205e02831a1d98b7df2e",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_bsp.o": "02190b20818721295806748b35371b6256e8d4ccc0b2e51261990b68490bcb6f",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_data.o": "7860fa65e0040b75d1b12d481e6f1099198649e302c4fc6753005bc2f2bdc339",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_draw.o": "e8a3f4d0f3601b975d9e51bcb893fcf9a1311d52e4bdb28b2f9507a81f0d9f56",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_main.o": "62adc52e66447d03a349bcd938a75ea81927e381b21f7844a1e3110f7831bd9f",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_plane.o": "0d69f252cd784de73aac5554e7df08fa19c37c74a4710494c965c17861dadde7",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_segs.o": "2dc61b73208b4682f57cc70f4d8aa7fd4c425f23b5615628a41a547dc344e633",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_sky.o": "68446ee3b1739b3344772827aa231b8b8c57cb6c62b5dd9cd543f6ebe305292a",
+        "/tmp/fas-doom-render-v2-20261105/doom/r_things.o": "e1283c18d01d0cd75df167ccc7cad2e4fd9254c761091e5c2524144f4118ea52",
+        "/tmp/fas-doom-render-v2-20261105/doom/s_sound.o": "49277b9642cb663bdd9f85130216799efd4150e70e0ce1956fe88ee5f45d1036",
+        "/tmp/fas-doom-render-v2-20261105/doom/sounds.o": "60bc7d84592f1de45316839f51db579e1f4cd0164ba072b66298f8086ed19635",
+        "/tmp/fas-doom-render-v2-20261105/doom/st_lib.o": "873940bbde79a6effdbf3530d567abc74d6d235d33f896d34dd13bea4a6fbf26",
+        "/tmp/fas-doom-render-v2-20261105/doom/st_stuff.o": "8f45dfcdbf5df200969e0c386c08b22b5d2eeb9e9c603ecf882f0e39b1016064",
+        "/tmp/fas-doom-render-v2-20261105/doom/tables.o": "a39140f2456c44bde7f7a7276a8b037d86fb4e169eb6436d75ef611080f49541",
+        "/tmp/fas-doom-render-v2-20261105/doom/v_video.o": "72a0543b1c54c96109ef171dc141829f64622035eaa7c65c37dc666526de8915",
+        "/tmp/fas-doom-render-v2-20261105/doom/w_wad.o": "67360ae002fa3ec85d0a2efcc82c82a57ebc665e7591ea3053fce71422219d34",
+        "/tmp/fas-doom-render-v2-20261105/doom/wi_stuff.o": "c3e377ab0e9f684eeb92d24a24c1f6b7f2335bb9c2aabec8f1859a85f5589c05",
+        "/tmp/fas-doom-render-v2-20261105/doom/z_zone.o": "e5250d2d9c244d01d6bd3ec5f4d03e833953b535b642c8c0eca0569b8f13cdc8",
+        "/tmp/fas-doom-render-v2-20261105/doom/i_video-probe.o": "6886c374fceb78b3212f3ee8f5ef30e35b0889b79b422eab09f9fe341f8c3a62",
+        "/tmp/fas-doom-render-v2-20261105/doom/i_sound-probe.o": "cdebc0e6af2bf0e2ac65b79d552284cf17dc679fc3d07ac07a3d57b6273eff16",
+        "/tmp/fas-doom-render-v2-20261105/doom/doom-frame.o": "c57f844ddb5a63f0bc560f78691b8f82077f71179f73f2c2068a77158d5ec7ba",
+        "/usr/lib/x86_64-linux-gnu/libXext.so.6.4.0": "9e358938dc783704b75a8a27f07b9a2cc7dfb7ff73fd05cbcfe634b8c2afc74a",
+        "/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0": "badd43566333da97d916ab365c61227751d49cd5c0df5d49dabdbd67b8c6fd19",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6": "1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8",
+        "/usr/lib/x86_64-linux-gnu/libc.so": "649e1aa91af2551216685f45effca270fcc09ef39e28acd4b22745f0ae77e7f2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdout_contains": "frames=32 gametic=32 framebuffer=52e20f0b442bf948",
+        "args": [
+          "-config",
+          "/tmp/fas-doom-render-v2-20261105/doom/empty.cfg",
+          "-warp",
+          "1",
+          "1",
+          "-skill",
+          "3"
+        ],
+        "cwd": "/tmp/fas-doom-render-v2-20261105/doom",
+        "exit": 0,
+        "env": {
+          "DISPLAY": "",
+          "DOOMWADDIR": "/tmp/fas-doom-render-v2-20261105/doom"
+        }
+      },
+      "results": {
+        "Fas": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/0/fas-after",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/1/0",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/am_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_items.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomdef.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomstat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/dstrings.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_finale.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_wipe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/g_game.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_system.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/info.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_argv.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_bbox.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_cheat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_fixed.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_menu.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_misc.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_random.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_swap.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_ceilng.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_doors.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_enemy.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_floor.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_inter.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_lights.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_maputl.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_mobj.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_plats.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_pspr.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_saveg.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_setup.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_sight.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_spec.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_switch.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_telept.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_tick.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_user.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_bsp.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_data.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_draw.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_plane.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_segs.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_sky.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_things.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/s_sound.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/sounds.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/tables.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/v_video.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/w_wad.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/wi_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/z_zone.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_video-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_sound-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doom-frame.o",
+            "/usr/lib/x86_64-linux-gnu/libXext.so",
+            "/usr/lib/x86_64-linux-gnu/libX11.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "e5cee8464675c2ff8260a2f50823ad889dd911b7456b812362b10f48e67573e2",
+          "output_bytes": 2725704,
+          "peak_rss_kib": 52448,
+          "samples": [
+            {
+              "wall_ms": 118.38852400251199,
+              "user_ms": 81.94699999999999,
+              "system_ms": 35.976
+            },
+            {
+              "wall_ms": 125.92995900195092,
+              "user_ms": 82.597,
+              "system_ms": 42.791
+            },
+            {
+              "wall_ms": 130.61336800456047,
+              "user_ms": 93.111,
+              "system_ms": 37.044000000000004
+            },
+            {
+              "wall_ms": 125.76198199531063,
+              "user_ms": 84.648,
+              "system_ms": 40.83
+            },
+            {
+              "wall_ms": 118.15279901202302,
+              "user_ms": 77.89599999999999,
+              "system_ms": 39.946
+            },
+            {
+              "wall_ms": 132.8310630051419,
+              "user_ms": 89.11800000000001,
+              "system_ms": 43.056999999999995
+            },
+            {
+              "wall_ms": 144.68662899162155,
+              "user_ms": 101.559,
+              "system_ms": 42.814
+            },
+            {
+              "wall_ms": 127.97098999726586,
+              "user_ms": 84.648,
+              "system_ms": 42.821999999999996
+            },
+            {
+              "wall_ms": 117.10861300525721,
+              "user_ms": 78.719,
+              "system_ms": 37.864999999999995
+            },
+            {
+              "wall_ms": 121.26389300101437,
+              "user_ms": 83.938,
+              "system_ms": 36.972
+            },
+            {
+              "wall_ms": 129.86342000658624,
+              "user_ms": 89.514,
+              "system_ms": 39.784
+            },
+            {
+              "wall_ms": 119.73611400753725,
+              "user_ms": 87.41799999999999,
+              "system_ms": 31.787999999999997
+            },
+            {
+              "wall_ms": 129.55512599728536,
+              "user_ms": 89.195,
+              "system_ms": 39.085
+            },
+            {
+              "wall_ms": 123.92037799872924,
+              "user_ms": 82.262,
+              "system_ms": 41.131
+            },
+            {
+              "wall_ms": 124.26663300720975,
+              "user_ms": 86.827,
+              "system_ms": 36.926
+            },
+            {
+              "wall_ms": 122.5474709935952,
+              "user_ms": 83.147,
+              "system_ms": 39.069
+            },
+            {
+              "wall_ms": 121.60519800090697,
+              "user_ms": 85.50099999999999,
+              "system_ms": 35.791
+            },
+            {
+              "wall_ms": 124.84231099369936,
+              "user_ms": 85.673,
+              "system_ms": 38.851
+            },
+            {
+              "wall_ms": 124.52489099814557,
+              "user_ms": 79.108,
+              "system_ms": 45.062
+            },
+            {
+              "wall_ms": 123.27302301127929,
+              "user_ms": 80.389,
+              "system_ms": 42.204
+            },
+            {
+              "wall_ms": 127.00678600231186,
+              "user_ms": 83.672,
+              "system_ms": 42.831999999999994
+            }
+          ],
+          "median_wall_ms": 124.52489099814557,
+          "min_wall_ms": 117.10861300525721,
+          "max_wall_ms": 144.68662899162155
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/1/ld.lld-22",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/1/1",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/am_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_items.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomdef.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomstat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/dstrings.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_finale.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_wipe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/g_game.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_system.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/info.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_argv.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_bbox.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_cheat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_fixed.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_menu.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_misc.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_random.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_swap.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_ceilng.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_doors.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_enemy.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_floor.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_inter.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_lights.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_maputl.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_mobj.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_plats.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_pspr.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_saveg.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_setup.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_sight.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_spec.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_switch.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_telept.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_tick.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_user.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_bsp.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_data.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_draw.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_plane.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_segs.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_sky.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_things.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/s_sound.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/sounds.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/tables.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/v_video.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/w_wad.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/wi_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/z_zone.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_video-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_sound-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doom-frame.o",
+            "/usr/lib/x86_64-linux-gnu/libXext.so",
+            "/usr/lib/x86_64-linux-gnu/libX11.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "1cf01fb9b8d3a461c6c44a447f5d37702de4b0407ab0725f0af9384d8e994dc6",
+          "output_bytes": 1714016,
+          "peak_rss_kib": 76072,
+          "samples": [
+            {
+              "wall_ms": 47.86866500217002,
+              "user_ms": 33.080999999999996,
+              "system_ms": 39.284
+            },
+            {
+              "wall_ms": 41.92990099545568,
+              "user_ms": 32.167,
+              "system_ms": 33.359
+            },
+            {
+              "wall_ms": 40.252388003864326,
+              "user_ms": 32.979,
+              "system_ms": 30.230999999999998
+            },
+            {
+              "wall_ms": 42.80633899907116,
+              "user_ms": 36.644999999999996,
+              "system_ms": 29.826999999999998
+            },
+            {
+              "wall_ms": 31.980141007807106,
+              "user_ms": 29.122,
+              "system_ms": 27.243
+            },
+            {
+              "wall_ms": 31.729206995805725,
+              "user_ms": 27.624,
+              "system_ms": 25.718999999999998
+            },
+            {
+              "wall_ms": 49.981812000623904,
+              "user_ms": 32.037,
+              "system_ms": 40.58
+            },
+            {
+              "wall_ms": 40.19557099672966,
+              "user_ms": 28.211999999999996,
+              "system_ms": 40.478
+            },
+            {
+              "wall_ms": 34.93981900101062,
+              "user_ms": 40.556,
+              "system_ms": 22.878
+            },
+            {
+              "wall_ms": 39.72789700492285,
+              "user_ms": 36.00599999999999,
+              "system_ms": 28.13
+            },
+            {
+              "wall_ms": 31.82595998805482,
+              "user_ms": 29.133,
+              "system_ms": 31.780999999999995
+            },
+            {
+              "wall_ms": 45.283575003850274,
+              "user_ms": 47.782,
+              "system_ms": 27.448999999999998
+            },
+            {
+              "wall_ms": 33.210107998456806,
+              "user_ms": 29.533,
+              "system_ms": 28.19
+            },
+            {
+              "wall_ms": 30.792795005254447,
+              "user_ms": 29.087,
+              "system_ms": 27.923999999999996
+            },
+            {
+              "wall_ms": 33.14439298992511,
+              "user_ms": 33.394,
+              "system_ms": 24.182
+            },
+            {
+              "wall_ms": 37.17205100110732,
+              "user_ms": 35.818,
+              "system_ms": 26.532
+            },
+            {
+              "wall_ms": 32.45686300215311,
+              "user_ms": 25.415999999999997,
+              "system_ms": 30.5
+            },
+            {
+              "wall_ms": 32.77283000352327,
+              "user_ms": 34.257,
+              "system_ms": 25.447999999999997
+            },
+            {
+              "wall_ms": 36.118369011092,
+              "user_ms": 35.998,
+              "system_ms": 24.352
+            },
+            {
+              "wall_ms": 34.88412400474772,
+              "user_ms": 37.644,
+              "system_ms": 21.674
+            },
+            {
+              "wall_ms": 40.2755819959566,
+              "user_ms": 34.568999999999996,
+              "system_ms": 29.110999999999997
+            }
+          ],
+          "median_wall_ms": 36.118369011092,
+          "min_wall_ms": 30.792795005254447,
+          "max_wall_ms": 49.981812000623904
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/2/ld",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/1/2",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/am_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_items.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/d_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomdef.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doomstat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/dstrings.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_finale.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/f_wipe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/g_game.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/hu_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_net.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_system.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/info.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_argv.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_bbox.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_cheat.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_fixed.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_menu.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_misc.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_random.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/m_swap.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_ceilng.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_doors.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_enemy.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_floor.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_inter.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_lights.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_map.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_maputl.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_mobj.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_plats.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_pspr.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_saveg.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_setup.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_sight.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_spec.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_switch.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_telept.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_tick.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/p_user.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_bsp.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_data.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_draw.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_main.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_plane.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_segs.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_sky.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/r_things.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/s_sound.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/sounds.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_lib.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/st_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/tables.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/v_video.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/w_wad.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/wi_stuff.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/z_zone.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_video-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/i_sound-probe.o",
+            "/tmp/fas-doom-render-v2-20261105/doom/doom-frame.o",
+            "/usr/lib/x86_64-linux-gnu/libXext.so",
+            "/usr/lib/x86_64-linux-gnu/libX11.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "525a438b634977a8d7958ce812739e530994498748f0a42c225981ded7c7d742",
+          "output_bytes": 1724080,
+          "peak_rss_kib": 18892,
+          "samples": [
+            {
+              "wall_ms": 78.90483000664972,
+              "user_ms": 51.729,
+              "system_ms": 26.858999999999998
+            },
+            {
+              "wall_ms": 69.54279199999291,
+              "user_ms": 48.084999999999994,
+              "system_ms": 21.037
+            },
+            {
+              "wall_ms": 78.86410300852731,
+              "user_ms": 45.786,
+              "system_ms": 32.577000000000005
+            },
+            {
+              "wall_ms": 78.06141499895602,
+              "user_ms": 48.864,
+              "system_ms": 28.919
+            },
+            {
+              "wall_ms": 68.03725399367977,
+              "user_ms": 43.861999999999995,
+              "system_ms": 23.924999999999997
+            },
+            {
+              "wall_ms": 62.40607200015802,
+              "user_ms": 39.945,
+              "system_ms": 21.968999999999998
+            },
+            {
+              "wall_ms": 63.42688399308827,
+              "user_ms": 36.098,
+              "system_ms": 27.073
+            },
+            {
+              "wall_ms": 80.8754979952937,
+              "user_ms": 49.698,
+              "system_ms": 30.813
+            },
+            {
+              "wall_ms": 73.91623398871161,
+              "user_ms": 44.6,
+              "system_ms": 28.742
+            },
+            {
+              "wall_ms": 68.98695000563748,
+              "user_ms": 42.431,
+              "system_ms": 26.266
+            },
+            {
+              "wall_ms": 63.93894199572969,
+              "user_ms": 36.378,
+              "system_ms": 27.282999999999998
+            },
+            {
+              "wall_ms": 62.13119300082326,
+              "user_ms": 39.756,
+              "system_ms": 21.865
+            },
+            {
+              "wall_ms": 70.11395299923606,
+              "user_ms": 46.532,
+              "system_ms": 23.266
+            },
+            {
+              "wall_ms": 76.55158900888637,
+              "user_ms": 43.157000000000004,
+              "system_ms": 33.12
+            },
+            {
+              "wall_ms": 66.30813398805913,
+              "user_ms": 37.433,
+              "system_ms": 28.328
+            },
+            {
+              "wall_ms": 66.70154799940065,
+              "user_ms": 45.233,
+              "system_ms": 21.107999999999997
+            },
+            {
+              "wall_ms": 64.22965200908948,
+              "user_ms": 36.952,
+              "system_ms": 26.965
+            },
+            {
+              "wall_ms": 63.81896500533912,
+              "user_ms": 40.726,
+              "system_ms": 22.845999999999997
+            },
+            {
+              "wall_ms": 76.42097100324463,
+              "user_ms": 50.062999999999995,
+              "system_ms": 26.032
+            },
+            {
+              "wall_ms": 67.5985340058105,
+              "user_ms": 40.148999999999994,
+              "system_ms": 27.099999999999998
+            },
+            {
+              "wall_ms": 62.876791998860426,
+              "user_ms": 38.212999999999994,
+              "system_ms": 24.134
+            }
+          ],
+          "median_wall_ms": 68.03725399367977,
+          "min_wall_ms": 62.13119300082326,
+          "max_wall_ms": 80.8754979952937
+        }
+      }
+    },
+    {
+      "name": "wolf3d-3-frames",
+      "cwd": "/tmp/fas-native-projects-20261105",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_ca.o": "7e45eb685914756d7592cbc783622a5fedbfee5a58973ce3488a79c21be398f0",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_in.o": "e685a318eb5b6fbdd05200d5886564fbad5be3ea2559184633eb2df844715118",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_pm.o": "6b8237ae0e1ad00e68e50f6d5e57d2c14f64a577f6b379cb0570d055e7c677f3",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_sd.o": "d1c9f02f2dbd894ac4b9252b979f717895e47e90d71895f5aa9a36b19ae5972f",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_us_1.o": "01089d869a8ed007c86a36f06714d4b475f4425dbcf3f8bbcee0012b9746b532",
+        "/tmp/fas-native-projects-20261105/wolf3d/id_vl.o": "638d9bb9fee88a0f05c85091e95f931bdea4fe183dd67080bd032e6ecd7082d7",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_act1.o": "4c4dd697717bcc2babc651dd9af9054a2461902b83df547ae5d6d296f0a57bed",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_act2.o": "ea8059cc96bec4ca21401ac3df760660fa3603d858f5ad5a269e6ad7ea41fb9e",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_agent.o": "e9b378b313f273d875241f076fa1c92f0fb81564a0bb5ec4be536388a96848f2",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_inter.o": "fe039d3112a60486cd611761043ca55831f30e0c0e925021dc09df5d50ff93e7",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_menu.o": "04b159655d50777b1c1d87d1f6dbafc2b8165437f184ab83ec96fe7afdb19a47",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_play.o": "f90dd28cede9de1758d5808fb2535e9bcee60e3875a9de421244f1dde2c16e64",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_state.o": "7cbfd620c6f6568f874be437d7aa351c7b1394c071ba73d9a967cac25de8290a",
+        "/tmp/fas-native-projects-20261105/wolf3d/fmopl.o": "a4c45b090c7f22680e7210bd065ecbc6743ae0e99a8b5c5481139a9de4ce9a96",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_draw-probe.o": "6d6d09daccd727e021191e174f3df42f8437c2cb743ecc46396aea1465892d0b",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_game-probe.o": "939a3f7c4cbec278fb57705d233c19bd39dcc172cc5ffef03c3a9dd54e8f4039",
+        "/tmp/fas-native-projects-20261105/wolf3d/wl_main-probe.o": "4eae8ec0beada8d54a2e5faa65a4e0993af16328bce0f785a0cd0aac7113a6eb",
+        "/tmp/fas-native-projects-20261105/wolf3d/frame.o": "aa7fb07fd5da64de22a2724589e9c943c96b748d2efd777b09cc00918f1a68d6",
+        "/usr/lib/x86_64-linux-gnu/libSDL-1.2.so.1.2.72": "5715b314893b4af56661e0692c1b55c079cee628e458fa94b0e011d6ba2157f2",
+        "/usr/lib/x86_64-linux-gnu/libSDL_mixer-1.2.so.0.12.0": "46e262ebce58016fccaf96d243fa365909e230d5d4b43a72885fa1dc1e1a0df9",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6": "1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8",
+        "/usr/lib/x86_64-linux-gnu/libc.so": "649e1aa91af2551216685f45effca270fcc09ef39e28acd4b22745f0ae77e7f2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdout_contains": "frames=3 framebuffer=38d3d4bed65dfa55",
+        "args": [],
+        "cwd": "/tmp/fas-native-projects-20261105/wolf-assets/source",
+        "exit": 0,
+        "env": {
+          "SDL_VIDEODRIVER": "dummy",
+          "SDL_AUDIODRIVER": "dummy",
+          "DISPLAY": ":0"
+        }
+      },
+      "results": {
+        "Fas": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/0/fas-after",
+            "-pie",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/2/0",
+            "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_ca.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_in.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_pm.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_sd.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_us_1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_vl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act2.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_agent.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_inter.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_menu.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_play.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_state.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/fmopl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_draw-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_game-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_main-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/frame.o",
+            "/usr/lib/x86_64-linux-gnu/libSDL.so",
+            "/usr/lib/x86_64-linux-gnu/libSDL_mixer.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "80c7fb20358f6f138f1f1ff1b274184193482aabb1610a81baf8b403a8e69c12",
+          "output_bytes": 475928,
+          "peak_rss_kib": 23348,
+          "samples": [
+            {
+              "wall_ms": 48.45412199210841,
+              "user_ms": 26.546,
+              "system_ms": 21.441
+            },
+            {
+              "wall_ms": 37.618665999616496,
+              "user_ms": 23.083,
+              "system_ms": 14.05
+            },
+            {
+              "wall_ms": 39.327619000687264,
+              "user_ms": 26.879,
+              "system_ms": 11.946
+            },
+            {
+              "wall_ms": 39.06306800490711,
+              "user_ms": 23.781999999999996,
+              "system_ms": 14.863999999999999
+            },
+            {
+              "wall_ms": 38.41134600224905,
+              "user_ms": 19.932,
+              "system_ms": 17.939
+            },
+            {
+              "wall_ms": 43.28930299379863,
+              "user_ms": 24.836999999999996,
+              "system_ms": 17.881999999999998
+            },
+            {
+              "wall_ms": 48.9211349922698,
+              "user_ms": 29.359999999999996,
+              "system_ms": 19.235
+            },
+            {
+              "wall_ms": 38.26258399931248,
+              "user_ms": 22.858999999999998,
+              "system_ms": 14.908
+            },
+            {
+              "wall_ms": 37.75084599328693,
+              "user_ms": 23.532999999999998,
+              "system_ms": 13.728
+            },
+            {
+              "wall_ms": 54.33250100759324,
+              "user_ms": 32.86899999999999,
+              "system_ms": 20.916
+            },
+            {
+              "wall_ms": 57.252893995610066,
+              "user_ms": 30.348,
+              "system_ms": 26.302
+            },
+            {
+              "wall_ms": 37.529678011196665,
+              "user_ms": 22.425,
+              "system_ms": 14.625
+            },
+            {
+              "wall_ms": 41.16918200452346,
+              "user_ms": 24.785999999999998,
+              "system_ms": 15.862999999999998
+            },
+            {
+              "wall_ms": 38.0509739916306,
+              "user_ms": 22.473,
+              "system_ms": 15.323
+            },
+            {
+              "wall_ms": 38.2173679972766,
+              "user_ms": 16.992,
+              "system_ms": 20.99
+            },
+            {
+              "wall_ms": 44.372810996719636,
+              "user_ms": 23.061999999999998,
+              "system_ms": 21.055999999999997
+            },
+            {
+              "wall_ms": 50.29627599287778,
+              "user_ms": 28.932,
+              "system_ms": 20.950999999999997
+            },
+            {
+              "wall_ms": 38.631711999187246,
+              "user_ms": 25.249999999999996,
+              "system_ms": 13.129999999999999
+            },
+            {
+              "wall_ms": 51.701263000722975,
+              "user_ms": 34.272999999999996,
+              "system_ms": 15.12
+            },
+            {
+              "wall_ms": 48.53133800497744,
+              "user_ms": 27.992,
+              "system_ms": 19.993999999999996
+            },
+            {
+              "wall_ms": 46.20799300028011,
+              "user_ms": 30.846,
+              "system_ms": 14.924999999999999
+            }
+          ],
+          "median_wall_ms": 41.16918200452346,
+          "min_wall_ms": 37.529678011196665,
+          "max_wall_ms": 57.252893995610066
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/1/ld.lld-22",
+            "-pie",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/2/1",
+            "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_ca.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_in.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_pm.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_sd.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_us_1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_vl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act2.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_agent.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_inter.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_menu.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_play.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_state.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/fmopl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_draw-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_game-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_main-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/frame.o",
+            "/usr/lib/x86_64-linux-gnu/libSDL.so",
+            "/usr/lib/x86_64-linux-gnu/libSDL_mixer.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "a99f03267f4c962d837dc96716774a6e10ad72f22b3e63269385ac8fedf6df13",
+          "output_bytes": 359840,
+          "peak_rss_kib": 67520,
+          "samples": [
+            {
+              "wall_ms": 25.3702079935465,
+              "user_ms": 13.793,
+              "system_ms": 19.310000000000002
+            },
+            {
+              "wall_ms": 31.15283598890528,
+              "user_ms": 20.955,
+              "system_ms": 17.731
+            },
+            {
+              "wall_ms": 30.401996002183296,
+              "user_ms": 14.809999999999999,
+              "system_ms": 23.923
+            },
+            {
+              "wall_ms": 38.3842849987559,
+              "user_ms": 20.097,
+              "system_ms": 25.384999999999998
+            },
+            {
+              "wall_ms": 21.582382993074134,
+              "user_ms": 13.462,
+              "system_ms": 16.454
+            },
+            {
+              "wall_ms": 21.419053999125026,
+              "user_ms": 11.11,
+              "system_ms": 18.886999999999997
+            },
+            {
+              "wall_ms": 23.741147000691853,
+              "user_ms": 9.172999999999998,
+              "system_ms": 24.461999999999996
+            },
+            {
+              "wall_ms": 21.19831700110808,
+              "user_ms": 13.575,
+              "system_ms": 14.809999999999999
+            },
+            {
+              "wall_ms": 21.396041003754362,
+              "user_ms": 11.661,
+              "system_ms": 19.081999999999997
+            },
+            {
+              "wall_ms": 21.35929200449027,
+              "user_ms": 14.445999999999998,
+              "system_ms": 15.349
+            },
+            {
+              "wall_ms": 22.058583999751136,
+              "user_ms": 9.488,
+              "system_ms": 22.426
+            },
+            {
+              "wall_ms": 20.577182003762573,
+              "user_ms": 13.595999999999998,
+              "system_ms": 14.729
+            },
+            {
+              "wall_ms": 21.933648007689044,
+              "user_ms": 7.541999999999999,
+              "system_ms": 22.626
+            },
+            {
+              "wall_ms": 25.811493003857322,
+              "user_ms": 19.029999999999998,
+              "system_ms": 12.409999999999998
+            },
+            {
+              "wall_ms": 21.278558007907122,
+              "user_ms": 14.844,
+              "system_ms": 14.844
+            },
+            {
+              "wall_ms": 21.24104800168425,
+              "user_ms": 12.83,
+              "system_ms": 16.038
+            },
+            {
+              "wall_ms": 30.874930002028123,
+              "user_ms": 17.133,
+              "system_ms": 20.156999999999996
+            },
+            {
+              "wall_ms": 20.93527899705805,
+              "user_ms": 12.709,
+              "system_ms": 16.619
+            },
+            {
+              "wall_ms": 29.169683999498375,
+              "user_ms": 17.513,
+              "system_ms": 19.702
+            },
+            {
+              "wall_ms": 20.81473098951392,
+              "user_ms": 7.654999999999999,
+              "system_ms": 20.095
+            },
+            {
+              "wall_ms": 20.23658801044803,
+              "user_ms": 11.876999999999999,
+              "system_ms": 14.036999999999999
+            }
+          ],
+          "median_wall_ms": 21.582382993074134,
+          "min_wall_ms": 20.23658801044803,
+          "max_wall_ms": 38.3842849987559
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-application-link-speed-20261105/tools/2/ld",
+            "-pie",
+            "--gc-sections",
+            "--dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-o",
+            "/tmp/fas-application-link-speed-20261105/2/2",
+            "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_ca.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_in.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_pm.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_sd.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_us_1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/id_vl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act1.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_act2.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_agent.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_inter.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_menu.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_play.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_state.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/fmopl.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_draw-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_game-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/wl_main-probe.o",
+            "/tmp/fas-native-projects-20261105/wolf3d/frame.o",
+            "/usr/lib/x86_64-linux-gnu/libSDL.so",
+            "/usr/lib/x86_64-linux-gnu/libSDL_mixer.so",
+            "/usr/lib/x86_64-linux-gnu/libm.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "2ba6065ca16986f622143ac708eb03ce4c4142793826f3f94d133315d59e0327",
+          "output_bytes": 363152,
+          "peak_rss_kib": 31408,
+          "samples": [
+            {
+              "wall_ms": 127.87148999632336,
+              "user_ms": 103.332,
+              "system_ms": 24.076999999999998
+            },
+            {
+              "wall_ms": 133.02172199473716,
+              "user_ms": 105.55099999999999,
+              "system_ms": 27.141
+            },
+            {
+              "wall_ms": 128.26059600047302,
+              "user_ms": 100.253,
+              "system_ms": 27.455000000000002
+            },
+            {
+              "wall_ms": 128.14966599398758,
+              "user_ms": 102.434,
+              "system_ms": 25.438
+            },
+            {
+              "wall_ms": 148.72092699806672,
+              "user_ms": 115.187,
+              "system_ms": 33.053
+            },
+            {
+              "wall_ms": 133.27429999480955,
+              "user_ms": 104.88,
+              "system_ms": 27.857
+            },
+            {
+              "wall_ms": 147.40443699702155,
+              "user_ms": 120.431,
+              "system_ms": 26.459999999999997
+            },
+            {
+              "wall_ms": 148.66655399964657,
+              "user_ms": 122.46399999999998,
+              "system_ms": 25.886
+            },
+            {
+              "wall_ms": 136.33817499794532,
+              "user_ms": 107.372,
+              "system_ms": 28.462999999999997
+            },
+            {
+              "wall_ms": 143.4888799994951,
+              "user_ms": 111.846,
+              "system_ms": 31.313
+            },
+            {
+              "wall_ms": 127.9839730123058,
+              "user_ms": 102.582,
+              "system_ms": 24.898
+            },
+            {
+              "wall_ms": 130.28231999487616,
+              "user_ms": 101.104,
+              "system_ms": 28.672
+            },
+            {
+              "wall_ms": 158.7805449962616,
+              "user_ms": 129.434,
+              "system_ms": 29.096999999999998
+            },
+            {
+              "wall_ms": 181.7669229931198,
+              "user_ms": 151.417,
+              "system_ms": 30.081999999999997
+            },
+            {
+              "wall_ms": 144.41398999770172,
+              "user_ms": 115.37,
+              "system_ms": 28.782
+            },
+            {
+              "wall_ms": 161.48276600870304,
+              "user_ms": 127.086,
+              "system_ms": 34.022999999999996
+            },
+            {
+              "wall_ms": 147.51634899585042,
+              "user_ms": 121.60799999999999,
+              "system_ms": 25.612
+            },
+            {
+              "wall_ms": 140.42640800471418,
+              "user_ms": 112.41199999999999,
+              "system_ms": 27.580000000000002
+            },
+            {
+              "wall_ms": 136.60765399981756,
+              "user_ms": 108.23299999999999,
+              "system_ms": 28.06
+            },
+            {
+              "wall_ms": 133.78239999292418,
+              "user_ms": 99.368,
+              "system_ms": 34.059
+            },
+            {
+              "wall_ms": 136.22660300461575,
+              "user_ms": 111.774,
+              "system_ms": 23.951
+            }
+          ],
+          "median_wall_ms": 136.60765399981756,
+          "min_wall_ms": 127.87148999632336,
+          "max_wall_ms": 181.7669229931198
+        }
+      }
+    }
+  ]
+}

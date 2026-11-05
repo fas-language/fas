@@ -1,0 +1,5060 @@
+{
+  "started": "2026-11-05T21:19:29+0100",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "tools": {
+    "Fas-before": {
+      "path": "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/0/fas-before",
+      "original": "/tmp/fas-allocation-profile-20261105/fas-before",
+      "sha256": "0443bd5a1e9cacecd1692866fb4c1b985f08e461c2e489df85813238b25bc4f9",
+      "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+    },
+    "Fas-current": {
+      "path": "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/1/fas-after",
+      "original": "/tmp/fas-ifunc-reference-profile-20261105/fas-after",
+      "sha256": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be",
+      "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+    },
+    "LLD": {
+      "path": "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/2/ld.lld-22",
+      "original": "/usr/bin/ld.lld-22",
+      "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+      "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+    },
+    "GNU": {
+      "path": "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/3/ld",
+      "original": "/usr/bin/ld",
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+    }
+  },
+  "manifest_sha256": "5f341cd9364b669cf2e11c94a8cfd64b828de0bfba60015ad8359ba9d2c5bd7a",
+  "harness_sha256": "203f5ba2fa2f11eb83469ebfab111f71431ef70553193fb41d59f81dc59b90a4",
+  "bench_helpers_sha256": "ba167632f8ad21c78866f589f21d712f0002345bde88056257f49eb8f9970fbe",
+  "methodology": "Warm cache; spawn-through-exit wall/CPU; rotated order; default linker workers; runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.",
+  "runs": 51,
+  "warmups": 5,
+  "timing_comparison": true,
+  "input_provenance": {
+    "/tmp/fas-corpus-static-glibc-final-20261105/report.json": "398794205414dd997034a8eca2bd2f3852fb18e9dab7950dd4ddc6900663190a",
+    "/tmp/fas-corpus-static-pie-20261105/report.json": "5ee7ec430782d98710f2e500902b626ad8f730187b28bedbaed07ff923222c52",
+    "/tmp/fas-chibicc-selfhost-final-20261105/report.json": "264f83c771879095e467c5459139a09da2f64cbec671f07181e47af647da6455"
+  },
+  "limitations": [
+    "Explicit argv inputs are hashed; -l/script/transitive closures require the associated corpus/sysroot provenance.",
+    "Single machine and warm cache; no general linker ranking or production qualification."
+  ],
+  "workloads": [
+    {
+      "name": "chibicc-stage1-dynamic",
+      "cwd": "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/codegen.o": "85f046c43ddf94972dbf2a7c355efb5f98ba7ac2056ca531f7e31d27f3f0d882",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/hashmap.o": "dd0d8c4df42c59f4d3d875ae11b61722b10f3be399431d68ed549e5a4b5838cf",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/main.o": "73187ad0d680438cbd6cdc0d46e9a2297d01e463b94c03fd2ca0586f1eed53ee",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/parse.o": "e84c7f7d431596b9ff45d5b5c3febc0c1614fa7466cb9ba63b8e5f402a362c69",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/preprocess.o": "3fd8db96da9f1749a181b66facbc1dc65c0eb1e1d0715be61416424520d655e0",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/strings.o": "291a197e5ff8afd656331a00761d62020ecb455ef53756829369636bf27f4b54",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/tokenize.o": "d44f91d4a730ce806c6c4fe325b0901a36dd49c768a8a76efd5489f425bcc0ed",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/type.o": "d521766adad9eebd00bf31efae61334681b4b67aca649f76b0de76c56ba8eea8",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/unicode.o": "d0b6909f8c9fc52573e654162984c535c8481f24152fa638a6bb15ad66a5c0e0",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "Fas-before": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/0/fas-before",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/0/0",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d",
+          "output_bytes": 334920,
+          "peak_rss_kib": 19136,
+          "samples": [
+            {
+              "wall_ms": 30.505285001709126,
+              "user_ms": 18.016000000000002,
+              "system_ms": 12.011
+            },
+            {
+              "wall_ms": 30.966867998358794,
+              "user_ms": 18.279999999999998,
+              "system_ms": 12.185999999999998
+            },
+            {
+              "wall_ms": 30.6709689903073,
+              "user_ms": 15.543,
+              "system_ms": 14.572
+            },
+            {
+              "wall_ms": 30.257826001616195,
+              "user_ms": 19.872999999999998,
+              "system_ms": 9.936
+            },
+            {
+              "wall_ms": 33.82875201350544,
+              "user_ms": 20.059,
+              "system_ms": 13.037999999999998
+            },
+            {
+              "wall_ms": 30.36541999608744,
+              "user_ms": 21.893,
+              "system_ms": 7.960999999999999
+            },
+            {
+              "wall_ms": 32.02380800212268,
+              "user_ms": 21.845,
+              "system_ms": 9.929
+            },
+            {
+              "wall_ms": 29.75864200561773,
+              "user_ms": 15.264999999999999,
+              "system_ms": 14.248
+            },
+            {
+              "wall_ms": 36.94987599737942,
+              "user_ms": 20.820999999999998,
+              "system_ms": 15.863999999999999
+            },
+            {
+              "wall_ms": 31.65077201265376,
+              "user_ms": 21.090999999999998,
+              "system_ms": 10.043
+            },
+            {
+              "wall_ms": 31.49015799863264,
+              "user_ms": 13.658,
+              "system_ms": 17.56
+            },
+            {
+              "wall_ms": 36.33048399933614,
+              "user_ms": 24.081,
+              "system_ms": 12.04
+            },
+            {
+              "wall_ms": 52.85531299887225,
+              "user_ms": 32.766999999999996,
+              "system_ms": 19.858
+            },
+            {
+              "wall_ms": 31.842445008805953,
+              "user_ms": 22.314999999999998,
+              "system_ms": 9.127999999999998
+            },
+            {
+              "wall_ms": 41.04025299602654,
+              "user_ms": 21.410999999999998,
+              "system_ms": 19.372
+            },
+            {
+              "wall_ms": 30.909578999853693,
+              "user_ms": 17.183,
+              "system_ms": 13.139999999999999
+            },
+            {
+              "wall_ms": 53.53680199186783,
+              "user_ms": 30.126,
+              "system_ms": 23.096
+            },
+            {
+              "wall_ms": 31.082065994269215,
+              "user_ms": 20.694999999999997,
+              "system_ms": 9.854
+            },
+            {
+              "wall_ms": 39.55630600103177,
+              "user_ms": 25.211,
+              "system_ms": 14.117999999999999
+            },
+            {
+              "wall_ms": 39.3122750101611,
+              "user_ms": 21.04,
+              "system_ms": 18.034
+            },
+            {
+              "wall_ms": 40.90508799708914,
+              "user_ms": 26.269,
+              "system_ms": 14.145
+            },
+            {
+              "wall_ms": 32.08034399722237,
+              "user_ms": 18.877,
+              "system_ms": 12.915999999999999
+            },
+            {
+              "wall_ms": 39.89889399963431,
+              "user_ms": 22.792999999999996,
+              "system_ms": 16.847
+            },
+            {
+              "wall_ms": 30.334101000335068,
+              "user_ms": 14.953,
+              "system_ms": 14.953
+            },
+            {
+              "wall_ms": 34.91292300168425,
+              "user_ms": 17.838,
+              "system_ms": 16.847
+            },
+            {
+              "wall_ms": 31.779044002178125,
+              "user_ms": 17.72,
+              "system_ms": 13.781999999999998
+            },
+            {
+              "wall_ms": 29.995460994541645,
+              "user_ms": 19.848,
+              "system_ms": 9.924
+            },
+            {
+              "wall_ms": 29.893466999055818,
+              "user_ms": 17.82,
+              "system_ms": 11.88
+            },
+            {
+              "wall_ms": 39.09626499807928,
+              "user_ms": 23.884,
+              "system_ms": 14.927
+            },
+            {
+              "wall_ms": 30.38030800234992,
+              "user_ms": 19.107,
+              "system_ms": 11.062
+            },
+            {
+              "wall_ms": 32.21433798898943,
+              "user_ms": 17.006999999999998,
+              "system_ms": 15.005999999999998
+            },
+            {
+              "wall_ms": 30.95146900159307,
+              "user_ms": 20.644,
+              "system_ms": 9.83
+            },
+            {
+              "wall_ms": 55.453346998547204,
+              "user_ms": 30.089,
+              "system_ms": 25.073999999999998
+            },
+            {
+              "wall_ms": 30.909339009667747,
+              "user_ms": 14.759,
+              "system_ms": 15.743
+            },
+            {
+              "wall_ms": 34.72215199144557,
+              "user_ms": 20.105999999999998,
+              "system_ms": 14.074
+            },
+            {
+              "wall_ms": 40.09501499240287,
+              "user_ms": 22.817,
+              "system_ms": 16.865
+            },
+            {
+              "wall_ms": 32.84799700486474,
+              "user_ms": 22.289,
+              "system_ms": 10.131
+            },
+            {
+              "wall_ms": 40.58347899990622,
+              "user_ms": 22.127,
+              "system_ms": 18.104
+            },
+            {
+              "wall_ms": 54.5835319935577,
+              "user_ms": 29.043,
+              "system_ms": 25.037
+            },
+            {
+              "wall_ms": 31.28426799958106,
+              "user_ms": 18.893,
+              "system_ms": 11.932
+            },
+            {
+              "wall_ms": 43.243231004453264,
+              "user_ms": 22.898,
+              "system_ms": 19.910999999999998
+            },
+            {
+              "wall_ms": 32.557557002292015,
+              "user_ms": 20.197,
+              "system_ms": 12.118
+            },
+            {
+              "wall_ms": 39.28869000810664,
+              "user_ms": 25.048,
+              "system_ms": 14.027
+            },
+            {
+              "wall_ms": 30.167535005602986,
+              "user_ms": 22.787,
+              "system_ms": 6.935
+            },
+            {
+              "wall_ms": 45.40311598975677,
+              "user_ms": 25.915999999999997,
+              "system_ms": 18.938999999999997
+            },
+            {
+              "wall_ms": 33.649782999418676,
+              "user_ms": 20.599,
+              "system_ms": 12.751
+            },
+            {
+              "wall_ms": 33.038857000065036,
+              "user_ms": 20.340999999999998,
+              "system_ms": 12.203999999999999
+            },
+            {
+              "wall_ms": 45.46004299481865,
+              "user_ms": 21.008,
+              "system_ms": 24.009
+            },
+            {
+              "wall_ms": 33.89423499174882,
+              "user_ms": 19.205,
+              "system_ms": 14.150999999999998
+            },
+            {
+              "wall_ms": 47.29986400343478,
+              "user_ms": 24.017,
+              "system_ms": 23.016
+            },
+            {
+              "wall_ms": 38.55258699331898,
+              "user_ms": 23.046,
+              "system_ms": 15.03
+            }
+          ],
+          "median_wall_ms": 33.038857000065036,
+          "min_wall_ms": 29.75864200561773,
+          "max_wall_ms": 55.453346998547204
+        },
+        "Fas-current": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/1/fas-after",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/0/1",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d",
+          "output_bytes": 334920,
+          "peak_rss_kib": 19240,
+          "samples": [
+            {
+              "wall_ms": 29.5076379989041,
+              "user_ms": 17.003,
+              "system_ms": 12.001999999999999
+            },
+            {
+              "wall_ms": 33.54472399223596,
+              "user_ms": 17.187,
+              "system_ms": 15.165
+            },
+            {
+              "wall_ms": 29.29400400898885,
+              "user_ms": 14.902999999999999,
+              "system_ms": 13.909999999999998
+            },
+            {
+              "wall_ms": 29.325312993023545,
+              "user_ms": 17.873,
+              "system_ms": 10.921999999999999
+            },
+            {
+              "wall_ms": 31.194308001431637,
+              "user_ms": 14.835999999999999,
+              "system_ms": 15.825
+            },
+            {
+              "wall_ms": 30.519040999934077,
+              "user_ms": 18.026999999999997,
+              "system_ms": 12.017999999999999
+            },
+            {
+              "wall_ms": 29.482330006430857,
+              "user_ms": 13.997,
+              "system_ms": 14.997
+            },
+            {
+              "wall_ms": 29.372381992288865,
+              "user_ms": 18.043,
+              "system_ms": 11.026
+            },
+            {
+              "wall_ms": 40.001257992116734,
+              "user_ms": 20.791,
+              "system_ms": 18.810999999999996
+            },
+            {
+              "wall_ms": 29.794570989906788,
+              "user_ms": 15.135,
+              "system_ms": 14.126
+            },
+            {
+              "wall_ms": 37.81378999701701,
+              "user_ms": 19.779999999999998,
+              "system_ms": 17.802
+            },
+            {
+              "wall_ms": 33.214448994840495,
+              "user_ms": 16.999999999999996,
+              "system_ms": 16.0
+            },
+            {
+              "wall_ms": 30.663133002235554,
+              "user_ms": 19.208,
+              "system_ms": 11.12
+            },
+            {
+              "wall_ms": 31.723118998343125,
+              "user_ms": 15.207999999999998,
+              "system_ms": 16.222
+            },
+            {
+              "wall_ms": 31.86493698740378,
+              "user_ms": 21.395999999999997,
+              "system_ms": 10.187999999999999
+            },
+            {
+              "wall_ms": 40.2913869911572,
+              "user_ms": 20.898999999999997,
+              "system_ms": 18.907999999999998
+            },
+            {
+              "wall_ms": 29.04050399956759,
+              "user_ms": 19.79,
+              "system_ms": 8.905
+            },
+            {
+              "wall_ms": 31.192805006867275,
+              "user_ms": 19.761,
+              "system_ms": 10.867999999999999
+            },
+            {
+              "wall_ms": 28.782295004930347,
+              "user_ms": 15.757,
+              "system_ms": 12.803
+            },
+            {
+              "wall_ms": 40.07631000422407,
+              "user_ms": 21.901,
+              "system_ms": 17.919
+            },
+            {
+              "wall_ms": 39.314509005635045,
+              "user_ms": 23.003,
+              "system_ms": 16.002
+            },
+            {
+              "wall_ms": 30.610693997005,
+              "user_ms": 17.076999999999998,
+              "system_ms": 13.058
+            },
+            {
+              "wall_ms": 29.34338701015804,
+              "user_ms": 17.951999999999998,
+              "system_ms": 10.971
+            },
+            {
+              "wall_ms": 30.23742898949422,
+              "user_ms": 16.895999999999997,
+              "system_ms": 12.921
+            },
+            {
+              "wall_ms": 28.776694991393015,
+              "user_ms": 16.742,
+              "system_ms": 11.817
+            },
+            {
+              "wall_ms": 49.42248899897095,
+              "user_ms": 30.972999999999995,
+              "system_ms": 17.984
+            },
+            {
+              "wall_ms": 32.749329999205656,
+              "user_ms": 20.345,
+              "system_ms": 12.206999999999999
+            },
+            {
+              "wall_ms": 28.743481991114095,
+              "user_ms": 17.313,
+              "system_ms": 11.202
+            },
+            {
+              "wall_ms": 38.816455999040045,
+              "user_ms": 13.15,
+              "system_ms": 25.29
+            },
+            {
+              "wall_ms": 29.698158003157005,
+              "user_ms": 18.669999999999998,
+              "system_ms": 10.809
+            },
+            {
+              "wall_ms": 29.597909000585787,
+              "user_ms": 20.244,
+              "system_ms": 9.108999999999998
+            },
+            {
+              "wall_ms": 31.29870499833487,
+              "user_ms": 20.404,
+              "system_ms": 10.202
+            },
+            {
+              "wall_ms": 30.520854008500464,
+              "user_ms": 18.018,
+              "system_ms": 12.012
+            },
+            {
+              "wall_ms": 30.410856008529663,
+              "user_ms": 17.533,
+              "system_ms": 12.662999999999998
+            },
+            {
+              "wall_ms": 31.37977900041733,
+              "user_ms": 19.882,
+              "system_ms": 10.935
+            },
+            {
+              "wall_ms": 41.240080987336114,
+              "user_ms": 19.383,
+              "system_ms": 21.423
+            },
+            {
+              "wall_ms": 29.51236700755544,
+              "user_ms": 19.049999999999997,
+              "system_ms": 10.026
+            },
+            {
+              "wall_ms": 30.99734499119222,
+              "user_ms": 21.808999999999997,
+              "system_ms": 8.921999999999999
+            },
+            {
+              "wall_ms": 39.84018300252501,
+              "user_ms": 22.650999999999996,
+              "system_ms": 16.742
+            },
+            {
+              "wall_ms": 29.49635699042119,
+              "user_ms": 18.020999999999997,
+              "system_ms": 11.013
+            },
+            {
+              "wall_ms": 29.652491997694597,
+              "user_ms": 15.581999999999999,
+              "system_ms": 13.633999999999999
+            },
+            {
+              "wall_ms": 40.166279999539256,
+              "user_ms": 25.801,
+              "system_ms": 13.892999999999999
+            },
+            {
+              "wall_ms": 36.8645239941543,
+              "user_ms": 19.309,
+              "system_ms": 17.276
+            },
+            {
+              "wall_ms": 29.839955997886136,
+              "user_ms": 18.218999999999998,
+              "system_ms": 11.133
+            },
+            {
+              "wall_ms": 29.33159499661997,
+              "user_ms": 17.006999999999998,
+              "system_ms": 12.005
+            },
+            {
+              "wall_ms": 29.39534500183072,
+              "user_ms": 18.109999999999996,
+              "system_ms": 11.066999999999998
+            },
+            {
+              "wall_ms": 38.93101299763657,
+              "user_ms": 19.240999999999996,
+              "system_ms": 19.240999999999996
+            },
+            {
+              "wall_ms": 30.767460993956774,
+              "user_ms": 16.572,
+              "system_ms": 13.647
+            },
+            {
+              "wall_ms": 40.03778701007832,
+              "user_ms": 23.316999999999997,
+              "system_ms": 16.22
+            },
+            {
+              "wall_ms": 32.274602010147646,
+              "user_ms": 19.035,
+              "system_ms": 13.024
+            },
+            {
+              "wall_ms": 30.275810000603087,
+              "user_ms": 15.935999999999998,
+              "system_ms": 13.943999999999999
+            }
+          ],
+          "median_wall_ms": 30.663133002235554,
+          "min_wall_ms": 28.743481991114095,
+          "max_wall_ms": 49.42248899897095
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/2/ld.lld-22",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/0/2",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9658cc0e3bece7f9185c71b82c05976b854935ccb2d1f9627baf591e9843438d",
+          "output_bytes": 301864,
+          "peak_rss_kib": 70584,
+          "samples": [
+            {
+              "wall_ms": 19.771590988966636,
+              "user_ms": 6.698,
+              "system_ms": 16.745
+            },
+            {
+              "wall_ms": 19.743818003917113,
+              "user_ms": 10.735999999999999,
+              "system_ms": 13.42
+            },
+            {
+              "wall_ms": 20.94830600253772,
+              "user_ms": 12.202,
+              "system_ms": 14.421
+            },
+            {
+              "wall_ms": 19.786589007708244,
+              "user_ms": 8.456999999999999,
+              "system_ms": 15.857
+            },
+            {
+              "wall_ms": 24.07558298727963,
+              "user_ms": 11.987,
+              "system_ms": 16.782999999999998
+            },
+            {
+              "wall_ms": 20.3456369927153,
+              "user_ms": 8.89,
+              "system_ms": 16.511
+            },
+            {
+              "wall_ms": 20.96195300691761,
+              "user_ms": 7.43,
+              "system_ms": 18.576
+            },
+            {
+              "wall_ms": 22.145351002109237,
+              "user_ms": 8.858999999999998,
+              "system_ms": 18.604
+            },
+            {
+              "wall_ms": 20.01061300688889,
+              "user_ms": 10.265,
+              "system_ms": 15.055
+            },
+            {
+              "wall_ms": 20.898753005894832,
+              "user_ms": 9.706,
+              "system_ms": 16.177
+            },
+            {
+              "wall_ms": 21.82777000416536,
+              "user_ms": 16.354999999999997,
+              "system_ms": 9.344999999999999
+            },
+            {
+              "wall_ms": 19.014138000784442,
+              "user_ms": 9.020999999999999,
+              "system_ms": 14.66
+            },
+            {
+              "wall_ms": 21.11726599105168,
+              "user_ms": 12.791,
+              "system_ms": 13.953
+            },
+            {
+              "wall_ms": 19.70779999101069,
+              "user_ms": 7.504,
+              "system_ms": 16.885
+            },
+            {
+              "wall_ms": 20.607853002729826,
+              "user_ms": 12.279,
+              "system_ms": 14.735
+            },
+            {
+              "wall_ms": 20.948738005245104,
+              "user_ms": 13.008,
+              "system_ms": 13.008
+            },
+            {
+              "wall_ms": 20.219156998791732,
+              "user_ms": 11.396999999999998,
+              "system_ms": 13.928999999999998
+            },
+            {
+              "wall_ms": 30.45767500589136,
+              "user_ms": 14.93,
+              "system_ms": 20.672
+            },
+            {
+              "wall_ms": 30.614130999310873,
+              "user_ms": 14.661999999999999,
+              "system_ms": 19.173
+            },
+            {
+              "wall_ms": 20.898451999528334,
+              "user_ms": 11.629,
+              "system_ms": 14.801
+            },
+            {
+              "wall_ms": 26.742426998680457,
+              "user_ms": 9.642,
+              "system_ms": 22.899
+            },
+            {
+              "wall_ms": 21.065307999379,
+              "user_ms": 12.168999999999999,
+              "system_ms": 14.197
+            },
+            {
+              "wall_ms": 20.055947999935597,
+              "user_ms": 11.254,
+              "system_ms": 14.067
+            },
+            {
+              "wall_ms": 28.673409993643872,
+              "user_ms": 15.386,
+              "system_ms": 18.463
+            },
+            {
+              "wall_ms": 22.107700002379715,
+              "user_ms": 10.289,
+              "system_ms": 17.148
+            },
+            {
+              "wall_ms": 21.117906988365576,
+              "user_ms": 10.435,
+              "system_ms": 16.232
+            },
+            {
+              "wall_ms": 30.732715007616207,
+              "user_ms": 13.592,
+              "system_ms": 21.520999999999997
+            },
+            {
+              "wall_ms": 20.49904700834304,
+              "user_ms": 12.903999999999998,
+              "system_ms": 12.903999999999998
+            },
+            {
+              "wall_ms": 29.580065005575307,
+              "user_ms": 15.167,
+              "system_ms": 19.5
+            },
+            {
+              "wall_ms": 20.252740010619164,
+              "user_ms": 9.927,
+              "system_ms": 14.891
+            },
+            {
+              "wall_ms": 21.272861005854793,
+              "user_ms": 12.834999999999999,
+              "system_ms": 13.823
+            },
+            {
+              "wall_ms": 20.14414498989936,
+              "user_ms": 9.063999999999998,
+              "system_ms": 16.115000000000002
+            },
+            {
+              "wall_ms": 21.21031199931167,
+              "user_ms": 11.573,
+              "system_ms": 15.045
+            },
+            {
+              "wall_ms": 20.269161992473528,
+              "user_ms": 12.960999999999999,
+              "system_ms": 11.783
+            },
+            {
+              "wall_ms": 21.240157991996966,
+              "user_ms": 9.69,
+              "system_ms": 17.443
+            },
+            {
+              "wall_ms": 19.71409200632479,
+              "user_ms": 7.736,
+              "system_ms": 16.578
+            },
+            {
+              "wall_ms": 20.83936998678837,
+              "user_ms": 11.035,
+              "system_ms": 14.714
+            },
+            {
+              "wall_ms": 41.92909499397501,
+              "user_ms": 16.654,
+              "system_ms": 31.349999999999994
+            },
+            {
+              "wall_ms": 20.219698999426328,
+              "user_ms": 8.957999999999998,
+              "system_ms": 16.797
+            },
+            {
+              "wall_ms": 26.962584001012146,
+              "user_ms": 13.588999999999999,
+              "system_ms": 18.118
+            },
+            {
+              "wall_ms": 21.289641998009756,
+              "user_ms": 11.33,
+              "system_ms": 15.45
+            },
+            {
+              "wall_ms": 28.64752100140322,
+              "user_ms": 11.49,
+              "system_ms": 21.832
+            },
+            {
+              "wall_ms": 26.909091990091838,
+              "user_ms": 10.454,
+              "system_ms": 20.908
+            },
+            {
+              "wall_ms": 20.392224003444426,
+              "user_ms": 8.872,
+              "system_ms": 16.857
+            },
+            {
+              "wall_ms": 19.162087002769113,
+              "user_ms": 11.578999999999999,
+              "system_ms": 12.737
+            },
+            {
+              "wall_ms": 19.60409300227184,
+              "user_ms": 13.675999999999998,
+              "system_ms": 10.745
+            },
+            {
+              "wall_ms": 41.52606199204456,
+              "user_ms": 11.923,
+              "system_ms": 33.784
+            },
+            {
+              "wall_ms": 21.15446698735468,
+              "user_ms": 12.447999999999999,
+              "system_ms": 14.711
+            },
+            {
+              "wall_ms": 27.964196997345425,
+              "user_ms": 15.026,
+              "system_ms": 17.173000000000002
+            },
+            {
+              "wall_ms": 21.745594989624806,
+              "user_ms": 10.577,
+              "system_ms": 16.346
+            },
+            {
+              "wall_ms": 22.296917988569476,
+              "user_ms": 11.822,
+              "system_ms": 15.046
+            }
+          ],
+          "median_wall_ms": 21.065307999379,
+          "min_wall_ms": 19.014138000784442,
+          "max_wall_ms": 41.92909499397501
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/3/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/0/3",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "7d54aad73fc67b79b4676fe7c685b4b357b19e2ffe70da1d02949ff0bcf722b0",
+          "output_bytes": 306128,
+          "peak_rss_kib": 10264,
+          "samples": [
+            {
+              "wall_ms": 22.01672800583765,
+              "user_ms": 13.866,
+              "system_ms": 7.922999999999999
+            },
+            {
+              "wall_ms": 25.75859599164687,
+              "user_ms": 13.221,
+              "system_ms": 12.203999999999999
+            },
+            {
+              "wall_ms": 26.180262997513637,
+              "user_ms": 12.804999999999998,
+              "system_ms": 12.804999999999998
+            },
+            {
+              "wall_ms": 17.653834001976065,
+              "user_ms": 12.140999999999998,
+              "system_ms": 5.059
+            },
+            {
+              "wall_ms": 19.179059003363363,
+              "user_ms": 10.846,
+              "system_ms": 7.887999999999999
+            },
+            {
+              "wall_ms": 19.396812000195496,
+              "user_ms": 10.956999999999999,
+              "system_ms": 7.969
+            },
+            {
+              "wall_ms": 19.054074000450782,
+              "user_ms": 10.884999999999998,
+              "system_ms": 7.9159999999999995
+            },
+            {
+              "wall_ms": 18.14977299363818,
+              "user_ms": 10.39,
+              "system_ms": 7.273
+            },
+            {
+              "wall_ms": 28.801421998650767,
+              "user_ms": 16.167,
+              "system_ms": 12.124999999999998
+            },
+            {
+              "wall_ms": 27.900798013433814,
+              "user_ms": 18.24,
+              "system_ms": 9.12
+            },
+            {
+              "wall_ms": 22.05715399759356,
+              "user_ms": 11.085999999999999,
+              "system_ms": 8.737
+            },
+            {
+              "wall_ms": 17.36757300386671,
+              "user_ms": 10.102,
+              "system_ms": 7.071
+            },
+            {
+              "wall_ms": 28.459584995289333,
+              "user_ms": 18.102,
+              "system_ms": 10.057
+            },
+            {
+              "wall_ms": 42.96559598878957,
+              "user_ms": 23.080999999999996,
+              "system_ms": 19.632
+            },
+            {
+              "wall_ms": 19.382675003726035,
+              "user_ms": 10.085,
+              "system_ms": 9.068999999999999
+            },
+            {
+              "wall_ms": 29.51508099795319,
+              "user_ms": 14.038,
+              "system_ms": 14.988
+            },
+            {
+              "wall_ms": 32.52879300271161,
+              "user_ms": 17.979,
+              "system_ms": 14.192
+            },
+            {
+              "wall_ms": 40.442853001877666,
+              "user_ms": 18.977999999999998,
+              "system_ms": 20.975
+            },
+            {
+              "wall_ms": 21.97580100619234,
+              "user_ms": 15.514999999999999,
+              "system_ms": 6.2059999999999995
+            },
+            {
+              "wall_ms": 17.353295988868922,
+              "user_ms": 8.014000000000001,
+              "system_ms": 9.136
+            },
+            {
+              "wall_ms": 19.004950998350978,
+              "user_ms": 11.254,
+              "system_ms": 7.4719999999999995
+            },
+            {
+              "wall_ms": 21.991981004248373,
+              "user_ms": 12.09,
+              "system_ms": 9.607
+            },
+            {
+              "wall_ms": 23.695844007306732,
+              "user_ms": 10.866,
+              "system_ms": 8.565999999999999
+            },
+            {
+              "wall_ms": 17.841418986790814,
+              "user_ms": 7.164,
+              "system_ms": 10.18
+            },
+            {
+              "wall_ms": 27.716039010556415,
+              "user_ms": 17.995,
+              "system_ms": 9.427999999999999
+            },
+            {
+              "wall_ms": 19.191022001905367,
+              "user_ms": 10.921999999999999,
+              "system_ms": 7.9430000000000005
+            },
+            {
+              "wall_ms": 22.7532099961536,
+              "user_ms": 16.368000000000002,
+              "system_ms": 6.145
+            },
+            {
+              "wall_ms": 17.239559994777665,
+              "user_ms": 8.013,
+              "system_ms": 9.015
+            },
+            {
+              "wall_ms": 43.749397998908535,
+              "user_ms": 25.727,
+              "system_ms": 17.786
+            },
+            {
+              "wall_ms": 39.83157699985895,
+              "user_ms": 25.245,
+              "system_ms": 14.386
+            },
+            {
+              "wall_ms": 18.749687005765736,
+              "user_ms": 11.386000000000001,
+              "system_ms": 7.1899999999999995
+            },
+            {
+              "wall_ms": 18.381601010332815,
+              "user_ms": 10.929999999999998,
+              "system_ms": 6.9559999999999995
+            },
+            {
+              "wall_ms": 18.939246001536958,
+              "user_ms": 11.844999999999999,
+              "system_ms": 6.908999999999999
+            },
+            {
+              "wall_ms": 20.411090008565225,
+              "user_ms": 13.681,
+              "system_ms": 5.2620000000000005
+            },
+            {
+              "wall_ms": 26.393698004540056,
+              "user_ms": 15.068999999999999,
+              "system_ms": 11.049999999999999
+            },
+            {
+              "wall_ms": 17.799941007979214,
+              "user_ms": 9.177,
+              "system_ms": 8.157
+            },
+            {
+              "wall_ms": 18.838346004486084,
+              "user_ms": 5.877,
+              "system_ms": 12.731
+            },
+            {
+              "wall_ms": 22.409290002542548,
+              "user_ms": 14.421999999999999,
+              "system_ms": 7.651
+            },
+            {
+              "wall_ms": 18.91709500341676,
+              "user_ms": 12.608999999999998,
+              "system_ms": 5.819
+            },
+            {
+              "wall_ms": 18.525824008975178,
+              "user_ms": 11.052,
+              "system_ms": 7.0329999999999995
+            },
+            {
+              "wall_ms": 19.29025999561418,
+              "user_ms": 13.597999999999999,
+              "system_ms": 5.2299999999999995
+            },
+            {
+              "wall_ms": 25.71453199198004,
+              "user_ms": 16.302,
+              "system_ms": 9.17
+            },
+            {
+              "wall_ms": 18.997235005372204,
+              "user_ms": 9.899,
+              "system_ms": 8.909
+            },
+            {
+              "wall_ms": 17.429699990316294,
+              "user_ms": 9.138,
+              "system_ms": 8.047
+            },
+            {
+              "wall_ms": 35.80047200375702,
+              "user_ms": 21.788999999999998,
+              "system_ms": 13.802
+            },
+            {
+              "wall_ms": 42.047287002787925,
+              "user_ms": 25.096999999999998,
+              "system_ms": 16.737
+            },
+            {
+              "wall_ms": 50.34412199165672,
+              "user_ms": 30.002,
+              "system_ms": 17.000999999999998
+            },
+            {
+              "wall_ms": 18.626624005264603,
+              "user_ms": 10.086999999999998,
+              "system_ms": 8.068999999999999
+            },
+            {
+              "wall_ms": 19.400849007070065,
+              "user_ms": 10.081,
+              "system_ms": 9.072999999999999
+            },
+            {
+              "wall_ms": 19.108036009129137,
+              "user_ms": 9.95,
+              "system_ms": 8.955
+            },
+            {
+              "wall_ms": 40.36799099412747,
+              "user_ms": 21.058,
+              "system_ms": 19.052
+            }
+          ],
+          "median_wall_ms": 20.411090008565225,
+          "min_wall_ms": 17.239559994777665,
+          "max_wall_ms": 50.34412199165672
+        }
+      }
+    },
+    {
+      "name": "chibicc-stage2-copy",
+      "cwd": "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/codegen.o": "0517c476b26bee776f1f65aca4883d2a29afd0f6e5a6dd271ae8ca8d8b48dd92",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/hashmap.o": "2d9a7c89f6d30bb851d3f7038912a1e395a96687ab9b5a9212b8435095cabe93",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/main.o": "b50a8fe72b80b0b90c3172357f3c72b2a4156e154385080d55ec8aa9f8f9d083",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/parse.o": "180dc7bfd98606f1c3fdc7d4ee4834a04ec5b086f0c072c4207f9e46953b749e",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/preprocess.o": "5d51e15e21f883dd8ae3b8bd1c45bee1ebbc794397b6875753e25f65040475ed",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/strings.o": "12381f09028cfb5263b5bb0382ee84282855d4cf282da8bf044da25a25139af5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/tokenize.o": "cd53292cc361db0ada1d21f49f99c902a95bec89981c94fed0e7515d6f823d08",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/type.o": "7ebe166d0234a76b5bba143d01a3e0a171ad40ef551aa9039528d3d50e514590",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/unicode.o": "27ed0533d31884cd7c2a0722b99e5229edcc322ac28f29626628f6d55b6eb627",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "Fas-before": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/0/fas-before",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/1/0",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68",
+          "output_bytes": 424496,
+          "peak_rss_kib": 19012,
+          "samples": [
+            {
+              "wall_ms": 41.314131012768485,
+              "user_ms": 24.923,
+              "system_ms": 15.95
+            },
+            {
+              "wall_ms": 34.98696298629511,
+              "user_ms": 25.857,
+              "system_ms": 8.95
+            },
+            {
+              "wall_ms": 36.166413003229536,
+              "user_ms": 20.974,
+              "system_ms": 14.982
+            },
+            {
+              "wall_ms": 44.83926900138613,
+              "user_ms": 22.695999999999998,
+              "system_ms": 21.709
+            },
+            {
+              "wall_ms": 37.55555099633057,
+              "user_ms": 25.035999999999998,
+              "system_ms": 12.017
+            },
+            {
+              "wall_ms": 34.83590699033812,
+              "user_ms": 13.753,
+              "system_ms": 20.63
+            },
+            {
+              "wall_ms": 41.319301002658904,
+              "user_ms": 25.903,
+              "system_ms": 14.943999999999999
+            },
+            {
+              "wall_ms": 34.66014399600681,
+              "user_ms": 21.145999999999997,
+              "system_ms": 13.09
+            },
+            {
+              "wall_ms": 36.1070710059721,
+              "user_ms": 25.451999999999998,
+              "system_ms": 10.181
+            },
+            {
+              "wall_ms": 35.47735000029206,
+              "user_ms": 23.549999999999997,
+              "system_ms": 11.262999999999998
+            },
+            {
+              "wall_ms": 36.5987609984586,
+              "user_ms": 24.269,
+              "system_ms": 12.133999999999999
+            },
+            {
+              "wall_ms": 34.339256992097944,
+              "user_ms": 21.939999999999998,
+              "system_ms": 11.967
+            },
+            {
+              "wall_ms": 36.284696994698606,
+              "user_ms": 22.912,
+              "system_ms": 12.95
+            },
+            {
+              "wall_ms": 35.300424991874024,
+              "user_ms": 23.041,
+              "system_ms": 12.020999999999999
+            },
+            {
+              "wall_ms": 34.115414004190825,
+              "user_ms": 21.517,
+              "system_ms": 12.294999999999998
+            },
+            {
+              "wall_ms": 33.83562400995288,
+              "user_ms": 20.241,
+              "system_ms": 13.156999999999998
+            },
+            {
+              "wall_ms": 60.465499002020806,
+              "user_ms": 37.994,
+              "system_ms": 21.996
+            },
+            {
+              "wall_ms": 55.27923800400458,
+              "user_ms": 37.973,
+              "system_ms": 16.988
+            },
+            {
+              "wall_ms": 34.85650599759538,
+              "user_ms": 20.590999999999998,
+              "system_ms": 13.727
+            },
+            {
+              "wall_ms": 34.485092997783795,
+              "user_ms": 25.959,
+              "system_ms": 7.986999999999999
+            },
+            {
+              "wall_ms": 36.95712900662329,
+              "user_ms": 23.386,
+              "system_ms": 13.217999999999998
+            },
+            {
+              "wall_ms": 34.64752000581939,
+              "user_ms": 21.451999999999998,
+              "system_ms": 12.676
+            },
+            {
+              "wall_ms": 34.851887001423165,
+              "user_ms": 24.2,
+              "system_ms": 10.083
+            },
+            {
+              "wall_ms": 34.91927399591077,
+              "user_ms": 22.22,
+              "system_ms": 12.12
+            },
+            {
+              "wall_ms": 57.06879199715331,
+              "user_ms": 32.757,
+              "system_ms": 23.823
+            },
+            {
+              "wall_ms": 36.16042199428193,
+              "user_ms": 20.839999999999996,
+              "system_ms": 14.885
+            },
+            {
+              "wall_ms": 45.80373399949167,
+              "user_ms": 29.581999999999997,
+              "system_ms": 15.777
+            },
+            {
+              "wall_ms": 34.90464700735174,
+              "user_ms": 23.214,
+              "system_ms": 11.101999999999999
+            },
+            {
+              "wall_ms": 48.40542499732692,
+              "user_ms": 32.097,
+              "system_ms": 16.048
+            },
+            {
+              "wall_ms": 34.380715995212086,
+              "user_ms": 22.081999999999997,
+              "system_ms": 12.045
+            },
+            {
+              "wall_ms": 33.96048999275081,
+              "user_ms": 22.68,
+              "system_ms": 10.847
+            },
+            {
+              "wall_ms": 46.329036995302886,
+              "user_ms": 29.956,
+              "system_ms": 15.976
+            },
+            {
+              "wall_ms": 51.23106999963056,
+              "user_ms": 31.962999999999997,
+              "system_ms": 18.977999999999998
+            },
+            {
+              "wall_ms": 44.2283540032804,
+              "user_ms": 26.895,
+              "system_ms": 16.933999999999997
+            },
+            {
+              "wall_ms": 40.63308199692983,
+              "user_ms": 26.604,
+              "system_ms": 13.793999999999999
+            },
+            {
+              "wall_ms": 35.52968899020925,
+              "user_ms": 24.086999999999996,
+              "system_ms": 11.039
+            },
+            {
+              "wall_ms": 59.12107501353603,
+              "user_ms": 34.882999999999996,
+              "system_ms": 23.92
+            },
+            {
+              "wall_ms": 34.17409400572069,
+              "user_ms": 24.903,
+              "system_ms": 8.965
+            },
+            {
+              "wall_ms": 44.12928599049337,
+              "user_ms": 29.588,
+              "system_ms": 14.284
+            },
+            {
+              "wall_ms": 34.071360001689754,
+              "user_ms": 21.302999999999997,
+              "system_ms": 12.173
+            },
+            {
+              "wall_ms": 43.13692900177557,
+              "user_ms": 28.458,
+              "system_ms": 14.229
+            },
+            {
+              "wall_ms": 38.26682599901687,
+              "user_ms": 22.820999999999998,
+              "system_ms": 14.883
+            },
+            {
+              "wall_ms": 35.69178600446321,
+              "user_ms": 20.691,
+              "system_ms": 14.778999999999998
+            },
+            {
+              "wall_ms": 44.27264700643718,
+              "user_ms": 27.979999999999997,
+              "system_ms": 15.988
+            },
+            {
+              "wall_ms": 46.24450700066518,
+              "user_ms": 29.874,
+              "system_ms": 15.933
+            },
+            {
+              "wall_ms": 33.52137999900151,
+              "user_ms": 24.242,
+              "system_ms": 9.09
+            },
+            {
+              "wall_ms": 37.150545002077706,
+              "user_ms": 22.934,
+              "system_ms": 13.96
+            },
+            {
+              "wall_ms": 33.80203098640777,
+              "user_ms": 15.710999999999999,
+              "system_ms": 17.675
+            },
+            {
+              "wall_ms": 36.54833599284757,
+              "user_ms": 22.153,
+              "system_ms": 14.097
+            },
+            {
+              "wall_ms": 34.75516400067136,
+              "user_ms": 23.706999999999997,
+              "system_ms": 10.865
+            },
+            {
+              "wall_ms": 41.40091499721166,
+              "user_ms": 25.085,
+              "system_ms": 16.054
+            }
+          ],
+          "median_wall_ms": 36.166413003229536,
+          "min_wall_ms": 33.52137999900151,
+          "max_wall_ms": 60.465499002020806
+        },
+        "Fas-current": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/1/fas-after",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/1/1",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68",
+          "output_bytes": 424496,
+          "peak_rss_kib": 19064,
+          "samples": [
+            {
+              "wall_ms": 33.60668200184591,
+              "user_ms": 26.197,
+              "system_ms": 7.052999999999999
+            },
+            {
+              "wall_ms": 34.0162469947245,
+              "user_ms": 22.846999999999998,
+              "system_ms": 10.927
+            },
+            {
+              "wall_ms": 32.113908004248515,
+              "user_ms": 15.952999999999998,
+              "system_ms": 15.952999999999998
+            },
+            {
+              "wall_ms": 33.21960900211707,
+              "user_ms": 21.874,
+              "system_ms": 10.937
+            },
+            {
+              "wall_ms": 32.75263500108849,
+              "user_ms": 22.154,
+              "system_ms": 10.069999999999999
+            },
+            {
+              "wall_ms": 34.01056599977892,
+              "user_ms": 21.887999999999998,
+              "system_ms": 11.939
+            },
+            {
+              "wall_ms": 33.468030000221916,
+              "user_ms": 20.999,
+              "system_ms": 11.998999999999999
+            },
+            {
+              "wall_ms": 61.68280099518597,
+              "user_ms": 39.482,
+              "system_ms": 21.715
+            },
+            {
+              "wall_ms": 32.477275002747774,
+              "user_ms": 21.156,
+              "system_ms": 11.081
+            },
+            {
+              "wall_ms": 43.95159000705462,
+              "user_ms": 27.74,
+              "system_ms": 15.851
+            },
+            {
+              "wall_ms": 33.50222400331404,
+              "user_ms": 18.595999999999997,
+              "system_ms": 14.681
+            },
+            {
+              "wall_ms": 33.80091898725368,
+              "user_ms": 20.585,
+              "system_ms": 12.742999999999999
+            },
+            {
+              "wall_ms": 33.78051100298762,
+              "user_ms": 17.643,
+              "system_ms": 15.683
+            },
+            {
+              "wall_ms": 55.42864000017289,
+              "user_ms": 31.508000000000003,
+              "system_ms": 23.631
+            },
+            {
+              "wall_ms": 33.29706599470228,
+              "user_ms": 20.038999999999998,
+              "system_ms": 13.025
+            },
+            {
+              "wall_ms": 33.39334799966309,
+              "user_ms": 20.96,
+              "system_ms": 11.977
+            },
+            {
+              "wall_ms": 32.82057499745861,
+              "user_ms": 25.269,
+              "system_ms": 7.074999999999999
+            },
+            {
+              "wall_ms": 42.718787997728214,
+              "user_ms": 23.72,
+              "system_ms": 18.778
+            },
+            {
+              "wall_ms": 43.50679900380783,
+              "user_ms": 30.041999999999998,
+              "system_ms": 13.018
+            },
+            {
+              "wall_ms": 33.33680098876357,
+              "user_ms": 19.919,
+              "system_ms": 12.947000000000001
+            },
+            {
+              "wall_ms": 33.20560199790634,
+              "user_ms": 18.900999999999996,
+              "system_ms": 13.927
+            },
+            {
+              "wall_ms": 38.369049012544565,
+              "user_ms": 25.002999999999997,
+              "system_ms": 13.001
+            },
+            {
+              "wall_ms": 37.79099599341862,
+              "user_ms": 30.173,
+              "system_ms": 7.039999999999999
+            },
+            {
+              "wall_ms": 33.96951699687634,
+              "user_ms": 22.247,
+              "system_ms": 11.123
+            },
+            {
+              "wall_ms": 33.453812007792294,
+              "user_ms": 19.947,
+              "system_ms": 12.965
+            },
+            {
+              "wall_ms": 32.88134900503792,
+              "user_ms": 21.367,
+              "system_ms": 11.191999999999998
+            },
+            {
+              "wall_ms": 44.81709699030034,
+              "user_ms": 27.618999999999996,
+              "system_ms": 16.767999999999997
+            },
+            {
+              "wall_ms": 33.817579998867586,
+              "user_ms": 23.182,
+              "system_ms": 10.078999999999999
+            },
+            {
+              "wall_ms": 43.92563099099789,
+              "user_ms": 26.782999999999998,
+              "system_ms": 16.863
+            },
+            {
+              "wall_ms": 34.271037991857156,
+              "user_ms": 17.856,
+              "system_ms": 15.872
+            },
+            {
+              "wall_ms": 44.12831399531569,
+              "user_ms": 24.843,
+              "system_ms": 18.88
+            },
+            {
+              "wall_ms": 44.46317799738608,
+              "user_ms": 27.994,
+              "system_ms": 15.996
+            },
+            {
+              "wall_ms": 32.85843599587679,
+              "user_ms": 21.259999999999998,
+              "system_ms": 11.136
+            },
+            {
+              "wall_ms": 33.54085600585677,
+              "user_ms": 18.003999999999998,
+              "system_ms": 15.002999999999998
+            },
+            {
+              "wall_ms": 32.77151100337505,
+              "user_ms": 23.642999999999997,
+              "system_ms": 8.866
+            },
+            {
+              "wall_ms": 33.25947500707116,
+              "user_ms": 21.859999999999996,
+              "system_ms": 10.929999999999998
+            },
+            {
+              "wall_ms": 32.75410900823772,
+              "user_ms": 22.628,
+              "system_ms": 9.838
+            },
+            {
+              "wall_ms": 44.902428999193944,
+              "user_ms": 28.778,
+              "system_ms": 15.876999999999999
+            },
+            {
+              "wall_ms": 45.784137008013204,
+              "user_ms": 30.244,
+              "system_ms": 15.122
+            },
+            {
+              "wall_ms": 32.78922400204465,
+              "user_ms": 25.269999999999996,
+              "system_ms": 7.074999999999999
+            },
+            {
+              "wall_ms": 33.306462995824404,
+              "user_ms": 22.804,
+              "system_ms": 9.914
+            },
+            {
+              "wall_ms": 43.34717700839974,
+              "user_ms": 31.349,
+              "system_ms": 11.754999999999999
+            },
+            {
+              "wall_ms": 32.370022003306076,
+              "user_ms": 23.072,
+              "system_ms": 9.027999999999999
+            },
+            {
+              "wall_ms": 32.769718003692105,
+              "user_ms": 19.165,
+              "system_ms": 13.111999999999998
+            },
+            {
+              "wall_ms": 32.771800993941724,
+              "user_ms": 16.65,
+              "system_ms": 15.67
+            },
+            {
+              "wall_ms": 43.84928599756677,
+              "user_ms": 25.721999999999998,
+              "system_ms": 17.807
+            },
+            {
+              "wall_ms": 46.44736000045668,
+              "user_ms": 29.071999999999996,
+              "system_ms": 17.041999999999998
+            },
+            {
+              "wall_ms": 33.24118000455201,
+              "user_ms": 18.88,
+              "system_ms": 13.911
+            },
+            {
+              "wall_ms": 32.202294998569414,
+              "user_ms": 21.961,
+              "system_ms": 9.982
+            },
+            {
+              "wall_ms": 34.15160199801903,
+              "user_ms": 21.951999999999998,
+              "system_ms": 11.972999999999999
+            },
+            {
+              "wall_ms": 32.69510700192768,
+              "user_ms": 20.651,
+              "system_ms": 11.799999999999999
+            }
+          ],
+          "median_wall_ms": 33.54085600585677,
+          "min_wall_ms": 32.113908004248515,
+          "max_wall_ms": 61.68280099518597
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/2/ld.lld-22",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/1/2",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "72a2853ca1725ca03cf5e57393808df69a80d98d534c6e4f963b611c7aad6f28",
+          "output_bytes": 408936,
+          "peak_rss_kib": 70956,
+          "samples": [
+            {
+              "wall_ms": 29.744325001956895,
+              "user_ms": 14.998,
+              "system_ms": 18.46
+            },
+            {
+              "wall_ms": 21.0436969937291,
+              "user_ms": 11.686,
+              "system_ms": 14.024
+            },
+            {
+              "wall_ms": 20.113567006774247,
+              "user_ms": 11.431999999999999,
+              "system_ms": 12.575
+            },
+            {
+              "wall_ms": 20.49121200980153,
+              "user_ms": 9.639999999999999,
+              "system_ms": 14.995999999999999
+            },
+            {
+              "wall_ms": 20.687812997493893,
+              "user_ms": 9.998,
+              "system_ms": 14.998
+            },
+            {
+              "wall_ms": 19.44080500106793,
+              "user_ms": 8.421999999999999,
+              "system_ms": 14.972
+            },
+            {
+              "wall_ms": 19.6009170031175,
+              "user_ms": 6.648,
+              "system_ms": 16.62
+            },
+            {
+              "wall_ms": 30.214946003980003,
+              "user_ms": 11.219,
+              "system_ms": 22.439
+            },
+            {
+              "wall_ms": 20.140096996328793,
+              "user_ms": 12.471,
+              "system_ms": 12.471
+            },
+            {
+              "wall_ms": 21.277498992276378,
+              "user_ms": 7.915,
+              "system_ms": 18.091
+            },
+            {
+              "wall_ms": 23.562661997857504,
+              "user_ms": 7.29,
+              "system_ms": 18.227
+            },
+            {
+              "wall_ms": 21.77942800335586,
+              "user_ms": 9.985,
+              "system_ms": 16.642
+            },
+            {
+              "wall_ms": 21.747617996879853,
+              "user_ms": 12.529,
+              "system_ms": 13.668
+            },
+            {
+              "wall_ms": 20.907358994008973,
+              "user_ms": 7.0809999999999995,
+              "system_ms": 18.588
+            },
+            {
+              "wall_ms": 20.176858000922948,
+              "user_ms": 12.626,
+              "system_ms": 11.724
+            },
+            {
+              "wall_ms": 28.883767998195253,
+              "user_ms": 12.378,
+              "system_ms": 20.336
+            },
+            {
+              "wall_ms": 20.56724599970039,
+              "user_ms": 10.206,
+              "system_ms": 14.289
+            },
+            {
+              "wall_ms": 29.913484991993755,
+              "user_ms": 13.618,
+              "system_ms": 20.950999999999997
+            },
+            {
+              "wall_ms": 25.481712000328116,
+              "user_ms": 7.667999999999999,
+              "system_ms": 21.909
+            },
+            {
+              "wall_ms": 20.579288000590168,
+              "user_ms": 12.999,
+              "system_ms": 11.916
+            },
+            {
+              "wall_ms": 21.47591499669943,
+              "user_ms": 11.068999999999999,
+              "system_ms": 15.325999999999999
+            },
+            {
+              "wall_ms": 20.36168600898236,
+              "user_ms": 8.208,
+              "system_ms": 17.589000000000002
+            },
+            {
+              "wall_ms": 20.49732299929019,
+              "user_ms": 11.672,
+              "system_ms": 13.793999999999999
+            },
+            {
+              "wall_ms": 21.329789000446908,
+              "user_ms": 11.206,
+              "system_ms": 13.696
+            },
+            {
+              "wall_ms": 20.892991989967413,
+              "user_ms": 12.45,
+              "system_ms": 12.45
+            },
+            {
+              "wall_ms": 20.169723997241817,
+              "user_ms": 14.733999999999998,
+              "system_ms": 9.067
+            },
+            {
+              "wall_ms": 21.464112011017278,
+              "user_ms": 10.778999999999998,
+              "system_ms": 15.27
+            },
+            {
+              "wall_ms": 20.703051995951682,
+              "user_ms": 13.267,
+              "system_ms": 11.793
+            },
+            {
+              "wall_ms": 20.583076009643264,
+              "user_ms": 9.039,
+              "system_ms": 17.073999999999998
+            },
+            {
+              "wall_ms": 21.393929011537693,
+              "user_ms": 12.73,
+              "system_ms": 13.477999999999998
+            },
+            {
+              "wall_ms": 20.577284987666644,
+              "user_ms": 9.214,
+              "system_ms": 16.125
+            },
+            {
+              "wall_ms": 20.419274995219894,
+              "user_ms": 9.871999999999998,
+              "system_ms": 14.809
+            },
+            {
+              "wall_ms": 19.414775000768714,
+              "user_ms": 9.652,
+              "system_ms": 13.512999999999998
+            },
+            {
+              "wall_ms": 20.625135992304422,
+              "user_ms": 14.360999999999999,
+              "system_ms": 10.770999999999999
+            },
+            {
+              "wall_ms": 27.29026299493853,
+              "user_ms": 14.726999999999999,
+              "system_ms": 16.831
+            },
+            {
+              "wall_ms": 20.556324991048314,
+              "user_ms": 8.708,
+              "system_ms": 16.328
+            },
+            {
+              "wall_ms": 21.368692003306933,
+              "user_ms": 11.647999999999998,
+              "system_ms": 14.56
+            },
+            {
+              "wall_ms": 22.126265001134016,
+              "user_ms": 6.1,
+              "system_ms": 20.742
+            },
+            {
+              "wall_ms": 21.76542198867537,
+              "user_ms": 7.9399999999999995,
+              "system_ms": 18.148999999999997
+            },
+            {
+              "wall_ms": 21.70802299224306,
+              "user_ms": 12.052,
+              "system_ms": 15.064999999999998
+            },
+            {
+              "wall_ms": 21.88555999600794,
+              "user_ms": 8.518999999999998,
+              "system_ms": 18.104
+            },
+            {
+              "wall_ms": 20.275543996831402,
+              "user_ms": 12.376,
+              "system_ms": 12.376
+            },
+            {
+              "wall_ms": 20.775017997948453,
+              "user_ms": 11.958,
+              "system_ms": 11.958
+            },
+            {
+              "wall_ms": 28.287830005865544,
+              "user_ms": 14.244,
+              "system_ms": 18.314
+            },
+            {
+              "wall_ms": 31.396681006299332,
+              "user_ms": 15.085999999999999,
+              "system_ms": 20.474
+            },
+            {
+              "wall_ms": 32.70551699097268,
+              "user_ms": 16.545,
+              "system_ms": 20.222
+            },
+            {
+              "wall_ms": 22.189744995557703,
+              "user_ms": 13.928999999999998,
+              "system_ms": 12.934
+            },
+            {
+              "wall_ms": 21.943719999399036,
+              "user_ms": 14.093,
+              "system_ms": 11.925
+            },
+            {
+              "wall_ms": 19.64390899229329,
+              "user_ms": 11.264999999999999,
+              "system_ms": 12.392
+            },
+            {
+              "wall_ms": 20.303847995819524,
+              "user_ms": 12.258999999999999,
+              "system_ms": 12.258999999999999
+            },
+            {
+              "wall_ms": 21.28850000735838,
+              "user_ms": 9.266,
+              "system_ms": 16.68
+            }
+          ],
+          "median_wall_ms": 21.0436969937291,
+          "min_wall_ms": 19.414775000768714,
+          "max_wall_ms": 32.70551699097268
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/3/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/1/3",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9be5c1d0bba4f0ccdad00a918d71f8ee5b1ffabf59cb35f48458dac781b2ee48",
+          "output_bytes": 417080,
+          "peak_rss_kib": 10272,
+          "samples": [
+            {
+              "wall_ms": 18.535801995312795,
+              "user_ms": 12.633999999999999,
+              "system_ms": 5.599
+            },
+            {
+              "wall_ms": 18.793078997987323,
+              "user_ms": 13.705,
+              "system_ms": 4.894
+            },
+            {
+              "wall_ms": 18.704592002904974,
+              "user_ms": 8.777,
+              "system_ms": 9.753
+            },
+            {
+              "wall_ms": 27.532781998161227,
+              "user_ms": 15.179,
+              "system_ms": 12.142999999999999
+            },
+            {
+              "wall_ms": 18.514722993131727,
+              "user_ms": 6.1259999999999994,
+              "system_ms": 12.197
+            },
+            {
+              "wall_ms": 24.02111899573356,
+              "user_ms": 15.472999999999999,
+              "system_ms": 8.27
+            },
+            {
+              "wall_ms": 26.987580000422895,
+              "user_ms": 18.536,
+              "system_ms": 8.238
+            },
+            {
+              "wall_ms": 17.5440669991076,
+              "user_ms": 11.101999999999999,
+              "system_ms": 6.034
+            },
+            {
+              "wall_ms": 29.821541989804246,
+              "user_ms": 15.046,
+              "system_ms": 12.544
+            },
+            {
+              "wall_ms": 26.27600499545224,
+              "user_ms": 12.017,
+              "system_ms": 13.923
+            },
+            {
+              "wall_ms": 19.14828098961152,
+              "user_ms": 9.460999999999999,
+              "system_ms": 9.460999999999999
+            },
+            {
+              "wall_ms": 17.414331989130005,
+              "user_ms": 8.975999999999999,
+              "system_ms": 7.977999999999999
+            },
+            {
+              "wall_ms": 43.201791995670646,
+              "user_ms": 20.031999999999996,
+              "system_ms": 22.896
+            },
+            {
+              "wall_ms": 18.86851199378725,
+              "user_ms": 9.701999999999998,
+              "system_ms": 8.731
+            },
+            {
+              "wall_ms": 26.8705089983996,
+              "user_ms": 15.363999999999999,
+              "system_ms": 11.267
+            },
+            {
+              "wall_ms": 17.251002005650662,
+              "user_ms": 10.021,
+              "system_ms": 7.015
+            },
+            {
+              "wall_ms": 40.08180899836589,
+              "user_ms": 19.948,
+              "system_ms": 19.948
+            },
+            {
+              "wall_ms": 41.277882002759725,
+              "user_ms": 19.921,
+              "system_ms": 20.916999999999998
+            },
+            {
+              "wall_ms": 21.977814001729712,
+              "user_ms": 12.246,
+              "system_ms": 9.184
+            },
+            {
+              "wall_ms": 18.84893600072246,
+              "user_ms": 10.184999999999999,
+              "system_ms": 8.148
+            },
+            {
+              "wall_ms": 18.897576999734156,
+              "user_ms": 12.379999999999999,
+              "system_ms": 6.1899999999999995
+            },
+            {
+              "wall_ms": 24.43099400261417,
+              "user_ms": 13.933,
+              "system_ms": 9.951999999999998
+            },
+            {
+              "wall_ms": 19.45635399897583,
+              "user_ms": 11.927,
+              "system_ms": 6.957
+            },
+            {
+              "wall_ms": 17.731792002450675,
+              "user_ms": 11.131,
+              "system_ms": 6.016
+            },
+            {
+              "wall_ms": 37.60316100670025,
+              "user_ms": 19.133999999999997,
+              "system_ms": 18.126
+            },
+            {
+              "wall_ms": 18.88801901077386,
+              "user_ms": 11.089,
+              "system_ms": 7.507
+            },
+            {
+              "wall_ms": 19.836603009025566,
+              "user_ms": 12.608999999999998,
+              "system_ms": 6.789
+            },
+            {
+              "wall_ms": 17.369156004860997,
+              "user_ms": 9.955,
+              "system_ms": 6.940999999999999
+            },
+            {
+              "wall_ms": 29.199003998655826,
+              "user_ms": 14.203999999999999,
+              "system_ms": 14.562
+            },
+            {
+              "wall_ms": 18.913015999714844,
+              "user_ms": 9.811,
+              "system_ms": 8.83
+            },
+            {
+              "wall_ms": 41.37259100389201,
+              "user_ms": 23.029999999999998,
+              "system_ms": 18.023
+            },
+            {
+              "wall_ms": 17.384625010890886,
+              "user_ms": 11.008,
+              "system_ms": 6.004
+            },
+            {
+              "wall_ms": 20.19350801128894,
+              "user_ms": 16.907999999999998,
+              "system_ms": 2.983
+            },
+            {
+              "wall_ms": 33.74416100268718,
+              "user_ms": 23.184,
+              "system_ms": 10.079999999999998
+            },
+            {
+              "wall_ms": 18.871046995627694,
+              "user_ms": 14.456,
+              "system_ms": 4.13
+            },
+            {
+              "wall_ms": 25.353239005198702,
+              "user_ms": 12.02,
+              "system_ms": 12.931
+            },
+            {
+              "wall_ms": 41.648462996818125,
+              "user_ms": 24.262999999999998,
+              "system_ms": 17.186
+            },
+            {
+              "wall_ms": 29.30521499365568,
+              "user_ms": 19.997999999999998,
+              "system_ms": 8.999
+            },
+            {
+              "wall_ms": 43.183736997889355,
+              "user_ms": 23.980999999999998,
+              "system_ms": 18.985
+            },
+            {
+              "wall_ms": 17.582279004273005,
+              "user_ms": 8.081,
+              "system_ms": 9.047999999999998
+            },
+            {
+              "wall_ms": 27.26656899903901,
+              "user_ms": 15.011,
+              "system_ms": 12.007
+            },
+            {
+              "wall_ms": 19.36993098934181,
+              "user_ms": 11.408,
+              "system_ms": 7.2589999999999995
+            },
+            {
+              "wall_ms": 18.793290000758134,
+              "user_ms": 8.809,
+              "system_ms": 9.788
+            },
+            {
+              "wall_ms": 26.592983995215036,
+              "user_ms": 11.722999999999999,
+              "system_ms": 14.653999999999998
+            },
+            {
+              "wall_ms": 28.50353800749872,
+              "user_ms": 14.423,
+              "system_ms": 13.75
+            },
+            {
+              "wall_ms": 39.19974100426771,
+              "user_ms": 18.0,
+              "system_ms": 20.999999999999996
+            },
+            {
+              "wall_ms": 19.115208997391164,
+              "user_ms": 9.918,
+              "system_ms": 8.926
+            },
+            {
+              "wall_ms": 18.008446000749245,
+              "user_ms": 10.655999999999999,
+              "system_ms": 6.781
+            },
+            {
+              "wall_ms": 18.8376839942066,
+              "user_ms": 9.811,
+              "system_ms": 8.811
+            },
+            {
+              "wall_ms": 18.424291993142106,
+              "user_ms": 11.162999999999998,
+              "system_ms": 7.051
+            },
+            {
+              "wall_ms": 19.025909990887158,
+              "user_ms": 6.927999999999999,
+              "system_ms": 11.876999999999999
+            }
+          ],
+          "median_wall_ms": 19.45635399897583,
+          "min_wall_ms": 17.251002005650662,
+          "max_wall_ms": 43.201791995670646
+        }
+      }
+    },
+    {
+      "name": "chibicc-static-glibc",
+      "cwd": "/",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o": "c4d6bba12db08f2a48c6f411dea6fc14b51019d71e8a4677e437f9c2f392728a",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o": "fa5e506141cd1cf758937816953daff8f3276c40a214141c7a1db5a9bea2f0b8",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o": "f38d05736e9f96c3a3446ab6533ce2c726fb6e63b3b03c70c2da366046f9dee4",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o": "c0898cce6983af90ff2ec62a991858efccc65f9ccaea04dfc9b749c7c1777124",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o": "3e6a8aca6e6e93c23f0a5bed01988b124fdfa9bd7e51ffee391a23ec0aa7e95d",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o": "d822758ab9053c9b1be034ea126eaa34e03c2656a494a30980edb00881ee1bf0",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o": "c6611d35eabd82ad3b1b65407b397f4b98290e51511221f590c6bb31f574f117",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o": "fa58580c8e7d011d89bbfdfe4fac92ccc4101ac3672bb0ea40687eccb3c97468",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o": "59ee6109f64a7a9fd48f8272c3c65a43b93691a8809aa3e62d95162755f58a3a",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140",
+        "/usr/lib/x86_64-linux-gnu/libc.a": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "Fas-before": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/0/fas-before",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/2/0",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e",
+          "output_bytes": 2083320,
+          "peak_rss_kib": 39500,
+          "samples": [
+            {
+              "wall_ms": 107.05001799215097,
+              "user_ms": 76.42699999999999,
+              "system_ms": 30.167999999999996
+            },
+            {
+              "wall_ms": 93.6140629928559,
+              "user_ms": 63.07899999999999,
+              "system_ms": 30.037
+            },
+            {
+              "wall_ms": 95.04558000480756,
+              "user_ms": 68.382,
+              "system_ms": 26.146
+            },
+            {
+              "wall_ms": 93.5844060004456,
+              "user_ms": 69.029,
+              "system_ms": 24.01
+            },
+            {
+              "wall_ms": 116.58239900134504,
+              "user_ms": 84.48,
+              "system_ms": 31.804
+            },
+            {
+              "wall_ms": 94.57840600225609,
+              "user_ms": 73.023,
+              "system_ms": 21.006
+            },
+            {
+              "wall_ms": 111.88583500916138,
+              "user_ms": 84.258,
+              "system_ms": 27.083
+            },
+            {
+              "wall_ms": 96.79855599824805,
+              "user_ms": 75.19800000000001,
+              "system_ms": 21.054999999999996
+            },
+            {
+              "wall_ms": 95.01555300084874,
+              "user_ms": 72.78099999999999,
+              "system_ms": 21.933999999999997
+            },
+            {
+              "wall_ms": 98.01038799923845,
+              "user_ms": 68.338,
+              "system_ms": 29.144
+            },
+            {
+              "wall_ms": 95.85348800464999,
+              "user_ms": 68.51499999999999,
+              "system_ms": 26.810000000000002
+            },
+            {
+              "wall_ms": 95.65555400331505,
+              "user_ms": 70.09599999999999,
+              "system_ms": 25.034
+            },
+            {
+              "wall_ms": 105.41085600561928,
+              "user_ms": 71.05199999999999,
+              "system_ms": 34.025
+            },
+            {
+              "wall_ms": 108.66599499422591,
+              "user_ms": 77.154,
+              "system_ms": 31.061999999999998
+            },
+            {
+              "wall_ms": 94.25502399972174,
+              "user_ms": 67.804,
+              "system_ms": 25.925
+            },
+            {
+              "wall_ms": 92.5938520085765,
+              "user_ms": 70.04599999999999,
+              "system_ms": 22.014
+            },
+            {
+              "wall_ms": 96.80504800053313,
+              "user_ms": 75.39,
+              "system_ms": 21.108999999999998
+            },
+            {
+              "wall_ms": 95.55187700607348,
+              "user_ms": 70.96600000000001,
+              "system_ms": 23.988
+            },
+            {
+              "wall_ms": 95.13804400921799,
+              "user_ms": 64.391,
+              "system_ms": 30.182999999999996
+            },
+            {
+              "wall_ms": 96.24335500120651,
+              "user_ms": 60.792,
+              "system_ms": 34.88099999999999
+            },
+            {
+              "wall_ms": 111.7339470074512,
+              "user_ms": 77.262,
+              "system_ms": 34.115
+            },
+            {
+              "wall_ms": 94.9301210057456,
+              "user_ms": 75.194,
+              "system_ms": 19.049
+            },
+            {
+              "wall_ms": 104.16371800238267,
+              "user_ms": 69.672,
+              "system_ms": 33.840999999999994
+            },
+            {
+              "wall_ms": 95.06064699962735,
+              "user_ms": 72.39099999999999,
+              "system_ms": 22.119
+            },
+            {
+              "wall_ms": 97.4669690040173,
+              "user_ms": 70.136,
+              "system_ms": 27.052
+            },
+            {
+              "wall_ms": 94.37675400113221,
+              "user_ms": 62.91,
+              "system_ms": 30.955
+            },
+            {
+              "wall_ms": 94.3277210026281,
+              "user_ms": 62.840999999999994,
+              "system_ms": 30.921999999999997
+            },
+            {
+              "wall_ms": 95.65364899754059,
+              "user_ms": 70.351,
+              "system_ms": 24.770999999999997
+            },
+            {
+              "wall_ms": 96.33336600381881,
+              "user_ms": 69.014,
+              "system_ms": 27.005
+            },
+            {
+              "wall_ms": 114.11835699982475,
+              "user_ms": 81.88199999999999,
+              "system_ms": 31.953999999999997
+            },
+            {
+              "wall_ms": 97.82325400738046,
+              "user_ms": 65.20700000000001,
+              "system_ms": 32.102
+            },
+            {
+              "wall_ms": 105.55872600525618,
+              "user_ms": 71.032,
+              "system_ms": 34.01499999999999
+            },
+            {
+              "wall_ms": 103.39025400753599,
+              "user_ms": 77.031,
+              "system_ms": 26.009999999999998
+            },
+            {
+              "wall_ms": 96.92439300124533,
+              "user_ms": 65.234,
+              "system_ms": 31.111
+            },
+            {
+              "wall_ms": 101.49922700657044,
+              "user_ms": 70.022,
+              "system_ms": 31.008999999999997
+            },
+            {
+              "wall_ms": 92.71163400262594,
+              "user_ms": 67.074,
+              "system_ms": 25.026999999999997
+            },
+            {
+              "wall_ms": 99.02686899295077,
+              "user_ms": 75.81299999999999,
+              "system_ms": 22.942999999999998
+            },
+            {
+              "wall_ms": 95.23079899372533,
+              "user_ms": 71.533,
+              "system_ms": 23.171999999999997
+            },
+            {
+              "wall_ms": 92.41664598812349,
+              "user_ms": 64.91199999999999,
+              "system_ms": 26.962999999999997
+            },
+            {
+              "wall_ms": 96.1318939953344,
+              "user_ms": 67.755,
+              "system_ms": 27.899
+            },
+            {
+              "wall_ms": 103.9628470025491,
+              "user_ms": 79.75699999999999,
+              "system_ms": 23.927
+            },
+            {
+              "wall_ms": 110.21885099762585,
+              "user_ms": 82.79899999999999,
+              "system_ms": 26.934
+            },
+            {
+              "wall_ms": 92.31756901135668,
+              "user_ms": 62.803,
+              "system_ms": 28.909
+            },
+            {
+              "wall_ms": 95.16793000511825,
+              "user_ms": 67.661,
+              "system_ms": 26.865
+            },
+            {
+              "wall_ms": 98.72739300772082,
+              "user_ms": 67.247,
+              "system_ms": 31.114
+            },
+            {
+              "wall_ms": 92.09556800487917,
+              "user_ms": 68.312,
+              "system_ms": 23.105
+            },
+            {
+              "wall_ms": 99.35249600675888,
+              "user_ms": 74.92,
+              "system_ms": 23.974
+            },
+            {
+              "wall_ms": 119.27005200413987,
+              "user_ms": 81.868,
+              "system_ms": 36.94
+            },
+            {
+              "wall_ms": 100.92905799683649,
+              "user_ms": 71.77300000000001,
+              "system_ms": 28.908
+            },
+            {
+              "wall_ms": 97.23795599711593,
+              "user_ms": 73.53899999999999,
+              "system_ms": 23.169999999999998
+            },
+            {
+              "wall_ms": 95.96632000466343,
+              "user_ms": 69.609,
+              "system_ms": 25.854
+            }
+          ],
+          "median_wall_ms": 96.33336600381881,
+          "min_wall_ms": 92.09556800487917,
+          "max_wall_ms": 119.27005200413987
+        },
+        "Fas-current": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/1/fas-after",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/2/1",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e",
+          "output_bytes": 2083320,
+          "peak_rss_kib": 39680,
+          "samples": [
+            {
+              "wall_ms": 93.8452490081545,
+              "user_ms": 66.198,
+              "system_ms": 27.080999999999996
+            },
+            {
+              "wall_ms": 92.78488300333265,
+              "user_ms": 65.491,
+              "system_ms": 26.791
+            },
+            {
+              "wall_ms": 92.98428100009914,
+              "user_ms": 67.595,
+              "system_ms": 24.851
+            },
+            {
+              "wall_ms": 91.80291599477641,
+              "user_ms": 65.14399999999999,
+              "system_ms": 26.057
+            },
+            {
+              "wall_ms": 96.45651900791563,
+              "user_ms": 69.948,
+              "system_ms": 25.98
+            },
+            {
+              "wall_ms": 108.16747200442478,
+              "user_ms": 80.46499999999999,
+              "system_ms": 27.156999999999996
+            },
+            {
+              "wall_ms": 104.17892700934317,
+              "user_ms": 77.531,
+              "system_ms": 26.179
+            },
+            {
+              "wall_ms": 93.43461200478487,
+              "user_ms": 68.90599999999999,
+              "system_ms": 23.967
+            },
+            {
+              "wall_ms": 93.3235219999915,
+              "user_ms": 65.547,
+              "system_ms": 27.226999999999997
+            },
+            {
+              "wall_ms": 109.4699759996729,
+              "user_ms": 79.02199999999999,
+              "system_ms": 30.008
+            },
+            {
+              "wall_ms": 92.41428200039081,
+              "user_ms": 70.925,
+              "system_ms": 20.978
+            },
+            {
+              "wall_ms": 95.42508800223004,
+              "user_ms": 69.94399999999999,
+              "system_ms": 24.98
+            },
+            {
+              "wall_ms": 95.25603801012039,
+              "user_ms": 69.815,
+              "system_ms": 24.933999999999997
+            },
+            {
+              "wall_ms": 94.19400899787433,
+              "user_ms": 69.573,
+              "system_ms": 24.198999999999998
+            },
+            {
+              "wall_ms": 93.79812999395654,
+              "user_ms": 71.20499999999998,
+              "system_ms": 22.063
+            },
+            {
+              "wall_ms": 91.70197400089819,
+              "user_ms": 70.377,
+              "system_ms": 20.815
+            },
+            {
+              "wall_ms": 93.88321000733413,
+              "user_ms": 65.547,
+              "system_ms": 27.808
+            },
+            {
+              "wall_ms": 93.85124999971595,
+              "user_ms": 69.494,
+              "system_ms": 23.826
+            },
+            {
+              "wall_ms": 95.42684099869803,
+              "user_ms": 64.91999999999999,
+              "system_ms": 29.963
+            },
+            {
+              "wall_ms": 95.61722099897452,
+              "user_ms": 69.003,
+              "system_ms": 26.001
+            },
+            {
+              "wall_ms": 95.17573600169271,
+              "user_ms": 70.72099999999999,
+              "system_ms": 23.904999999999998
+            },
+            {
+              "wall_ms": 96.30518300400581,
+              "user_ms": 67.72699999999999,
+              "system_ms": 27.886999999999997
+            },
+            {
+              "wall_ms": 94.51411401096266,
+              "user_ms": 69.91,
+              "system_ms": 23.968999999999998
+            },
+            {
+              "wall_ms": 93.62746600527316,
+              "user_ms": 74.03999999999999,
+              "system_ms": 19.009999999999998
+            },
+            {
+              "wall_ms": 95.52065799653064,
+              "user_ms": 67.98,
+              "system_ms": 26.991999999999997
+            },
+            {
+              "wall_ms": 95.69197200471535,
+              "user_ms": 68.452,
+              "system_ms": 26.785
+            },
+            {
+              "wall_ms": 96.81917399575468,
+              "user_ms": 60.562999999999995,
+              "system_ms": 35.742
+            },
+            {
+              "wall_ms": 92.34445000765845,
+              "user_ms": 64.82199999999999,
+              "system_ms": 26.926
+            },
+            {
+              "wall_ms": 94.13869399577379,
+              "user_ms": 68.76599999999999,
+              "system_ms": 24.915
+            },
+            {
+              "wall_ms": 95.97712100367062,
+              "user_ms": 67.49199999999999,
+              "system_ms": 27.79
+            },
+            {
+              "wall_ms": 91.50007300195284,
+              "user_ms": 60.15599999999999,
+              "system_ms": 31.08
+            },
+            {
+              "wall_ms": 113.42608700215351,
+              "user_ms": 84.922,
+              "system_ms": 27.974
+            },
+            {
+              "wall_ms": 105.07229600625578,
+              "user_ms": 73.746,
+              "system_ms": 30.893
+            },
+            {
+              "wall_ms": 92.87496301112697,
+              "user_ms": 66.609,
+              "system_ms": 25.848
+            },
+            {
+              "wall_ms": 102.61261300183833,
+              "user_ms": 73.03,
+              "system_ms": 29.011
+            },
+            {
+              "wall_ms": 93.41927300556563,
+              "user_ms": 70.878,
+              "system_ms": 21.962
+            },
+            {
+              "wall_ms": 106.35184599959757,
+              "user_ms": 72.87199999999999,
+              "system_ms": 32.942
+            },
+            {
+              "wall_ms": 93.4529259975534,
+              "user_ms": 71.056,
+              "system_ms": 22.017
+            },
+            {
+              "wall_ms": 93.08191400486976,
+              "user_ms": 71.666,
+              "system_ms": 20.902
+            },
+            {
+              "wall_ms": 120.0859949894948,
+              "user_ms": 86.87199999999999,
+              "system_ms": 32.951
+            },
+            {
+              "wall_ms": 102.61126999102999,
+              "user_ms": 76.128,
+              "system_ms": 26.043
+            },
+            {
+              "wall_ms": 93.27098200446926,
+              "user_ms": 66.821,
+              "system_ms": 25.93
+            },
+            {
+              "wall_ms": 93.02420500898734,
+              "user_ms": 68.607,
+              "system_ms": 23.863
+            },
+            {
+              "wall_ms": 95.34206900571007,
+              "user_ms": 69.484,
+              "system_ms": 25.175
+            },
+            {
+              "wall_ms": 92.30905199365225,
+              "user_ms": 65.813,
+              "system_ms": 25.926
+            },
+            {
+              "wall_ms": 91.88462900056038,
+              "user_ms": 61.345,
+              "system_ms": 30.169999999999998
+            },
+            {
+              "wall_ms": 99.94363399164286,
+              "user_ms": 67.68199999999999,
+              "system_ms": 31.849999999999998
+            },
+            {
+              "wall_ms": 104.89906699513085,
+              "user_ms": 72.27799999999999,
+              "system_ms": 32.123
+            },
+            {
+              "wall_ms": 96.11477100406773,
+              "user_ms": 70.87199999999999,
+              "system_ms": 24.955
+            },
+            {
+              "wall_ms": 95.36249800294172,
+              "user_ms": 71.931,
+              "system_ms": 22.977999999999998
+            },
+            {
+              "wall_ms": 100.59639900282491,
+              "user_ms": 70.218,
+              "system_ms": 30.093
+            }
+          ],
+          "median_wall_ms": 95.17573600169271,
+          "min_wall_ms": 91.50007300195284,
+          "max_wall_ms": 120.0859949894948
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/2/ld.lld-22",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/2/2",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "2346924fb457a058c6a6ea20619e682a77dedfeb260471acec71c80abfcb534b",
+          "output_bytes": 1815480,
+          "peak_rss_kib": 77080,
+          "samples": [
+            {
+              "wall_ms": 40.29130600974895,
+              "user_ms": 38.885,
+              "system_ms": 43.458999999999996
+            },
+            {
+              "wall_ms": 33.82531499664765,
+              "user_ms": 23.244999999999997,
+              "system_ms": 54.942
+            },
+            {
+              "wall_ms": 33.022506002453156,
+              "user_ms": 22.578999999999997,
+              "system_ms": 50.28999999999999
+            },
+            {
+              "wall_ms": 34.199222005554475,
+              "user_ms": 36.835,
+              "system_ms": 41.3
+            },
+            {
+              "wall_ms": 40.9007480047876,
+              "user_ms": 35.089999999999996,
+              "system_ms": 57.184
+            },
+            {
+              "wall_ms": 45.73752799478825,
+              "user_ms": 41.910999999999994,
+              "system_ms": 43.044
+            },
+            {
+              "wall_ms": 34.71790300682187,
+              "user_ms": 20.801999999999996,
+              "system_ms": 55.904999999999994
+            },
+            {
+              "wall_ms": 33.852697000838816,
+              "user_ms": 33.235,
+              "system_ms": 42.467
+            },
+            {
+              "wall_ms": 44.44925099960528,
+              "user_ms": 28.19,
+              "system_ms": 55.254
+            },
+            {
+              "wall_ms": 47.45460599951912,
+              "user_ms": 35.375,
+              "system_ms": 56.599999999999994
+            },
+            {
+              "wall_ms": 40.23390699876472,
+              "user_ms": 36.043,
+              "system_ms": 59.297
+            },
+            {
+              "wall_ms": 39.81133800698444,
+              "user_ms": 39.254999999999995,
+              "system_ms": 47.336999999999996
+            },
+            {
+              "wall_ms": 33.52786198956892,
+              "user_ms": 35.261,
+              "system_ms": 39.963
+            },
+            {
+              "wall_ms": 34.13388799526729,
+              "user_ms": 33.698,
+              "system_ms": 44.156
+            },
+            {
+              "wall_ms": 33.106614006101154,
+              "user_ms": 33.632999999999996,
+              "system_ms": 40.840999999999994
+            },
+            {
+              "wall_ms": 38.89348100346979,
+              "user_ms": 26.073,
+              "system_ms": 55.702999999999996
+            },
+            {
+              "wall_ms": 33.72650800156407,
+              "user_ms": 23.605999999999998,
+              "system_ms": 50.431
+            },
+            {
+              "wall_ms": 33.57213600247633,
+              "user_ms": 32.907,
+              "system_ms": 47.305
+            },
+            {
+              "wall_ms": 32.96157100703567,
+              "user_ms": 29.023,
+              "system_ms": 44.115
+            },
+            {
+              "wall_ms": 34.53366400208324,
+              "user_ms": 31.756,
+              "system_ms": 45.366
+            },
+            {
+              "wall_ms": 67.99117299669888,
+              "user_ms": 41.577,
+              "system_ms": 70.451
+            },
+            {
+              "wall_ms": 32.87097899010405,
+              "user_ms": 36.271,
+              "system_ms": 37.48
+            },
+            {
+              "wall_ms": 33.10264700849075,
+              "user_ms": 31.24,
+              "system_ms": 46.116
+            },
+            {
+              "wall_ms": 34.19434200623073,
+              "user_ms": 30.517,
+              "system_ms": 50.861999999999995
+            },
+            {
+              "wall_ms": 64.55537299916614,
+              "user_ms": 40.375,
+              "system_ms": 66.17099999999999
+            },
+            {
+              "wall_ms": 34.33886499260552,
+              "user_ms": 34.122,
+              "system_ms": 45.49699999999999
+            },
+            {
+              "wall_ms": 40.21019198989961,
+              "user_ms": 32.230000000000004,
+              "system_ms": 48.943
+            },
+            {
+              "wall_ms": 33.71382300974801,
+              "user_ms": 39.218999999999994,
+              "system_ms": 41.283
+            },
+            {
+              "wall_ms": 45.598874989082105,
+              "user_ms": 43.538000000000004,
+              "system_ms": 42.391999999999996
+            },
+            {
+              "wall_ms": 42.706924010417424,
+              "user_ms": 39.129,
+              "system_ms": 47.154999999999994
+            },
+            {
+              "wall_ms": 34.1724809986772,
+              "user_ms": 40.092999999999996,
+              "system_ms": 41.387
+            },
+            {
+              "wall_ms": 46.84646500390954,
+              "user_ms": 36.12,
+              "system_ms": 60.199999999999996
+            },
+            {
+              "wall_ms": 33.77287500188686,
+              "user_ms": 32.637,
+              "system_ms": 41.63999999999999
+            },
+            {
+              "wall_ms": 48.81789399951231,
+              "user_ms": 38.391,
+              "system_ms": 51.879
+            },
+            {
+              "wall_ms": 44.491541004390456,
+              "user_ms": 45.244,
+              "system_ms": 40.217
+            },
+            {
+              "wall_ms": 37.104116010596044,
+              "user_ms": 31.006,
+              "system_ms": 49.38
+            },
+            {
+              "wall_ms": 33.07839100307319,
+              "user_ms": 36.704,
+              "system_ms": 35.519999999999996
+            },
+            {
+              "wall_ms": 46.683426000527106,
+              "user_ms": 33.6,
+              "system_ms": 51.6
+            },
+            {
+              "wall_ms": 39.61666900431737,
+              "user_ms": 33.414,
+              "system_ms": 49.545
+            },
+            {
+              "wall_ms": 34.09151699452195,
+              "user_ms": 25.936999999999998,
+              "system_ms": 42.537
+            },
+            {
+              "wall_ms": 34.04290499747731,
+              "user_ms": 35.698,
+              "system_ms": 39.152
+            },
+            {
+              "wall_ms": 43.520143008208834,
+              "user_ms": 39.076,
+              "system_ms": 48.27
+            },
+            {
+              "wall_ms": 42.41019299661275,
+              "user_ms": 39.832,
+              "system_ms": 42.401999999999994
+            },
+            {
+              "wall_ms": 33.913509992999025,
+              "user_ms": 34.681,
+              "system_ms": 39.016
+            },
+            {
+              "wall_ms": 33.9740659983363,
+              "user_ms": 28.09,
+              "system_ms": 45.775999999999996
+            },
+            {
+              "wall_ms": 34.54986499855295,
+              "user_ms": 40.525,
+              "system_ms": 36.949999999999996
+            },
+            {
+              "wall_ms": 33.55102500063367,
+              "user_ms": 25.017999999999997,
+              "system_ms": 50.035999999999994
+            },
+            {
+              "wall_ms": 40.185774996643886,
+              "user_ms": 33.003,
+              "system_ms": 48.005
+            },
+            {
+              "wall_ms": 43.027330000768416,
+              "user_ms": 27.761999999999997,
+              "system_ms": 57.66
+            },
+            {
+              "wall_ms": 32.36394000123255,
+              "user_ms": 33.69499999999999,
+              "system_ms": 41.556999999999995
+            },
+            {
+              "wall_ms": 33.1269829912344,
+              "user_ms": 29.218999999999998,
+              "system_ms": 47.199999999999996
+            }
+          ],
+          "median_wall_ms": 34.53366400208324,
+          "min_wall_ms": 32.36394000123255,
+          "max_wall_ms": 67.99117299669888
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/3/ld",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/2/3",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "afe473e49e5eeb919ee55c8b154b8e572b70a1cc84d2ab5c9abb84b2ec957be6",
+          "output_bytes": 1814864,
+          "peak_rss_kib": 47392,
+          "samples": [
+            {
+              "wall_ms": 84.89616100268904,
+              "user_ms": 29.855999999999998,
+              "system_ms": 54.737
+            },
+            {
+              "wall_ms": 81.02580001286697,
+              "user_ms": 36.885,
+              "system_ms": 43.863
+            },
+            {
+              "wall_ms": 85.49074600159656,
+              "user_ms": 40.104,
+              "system_ms": 44.115
+            },
+            {
+              "wall_ms": 79.84437500999775,
+              "user_ms": 38.082,
+              "system_ms": 41.089
+            },
+            {
+              "wall_ms": 83.68651299679186,
+              "user_ms": 35.145999999999994,
+              "system_ms": 48.201
+            },
+            {
+              "wall_ms": 95.55841999826953,
+              "user_ms": 44.119,
+              "system_ms": 51.138
+            },
+            {
+              "wall_ms": 88.18554299068637,
+              "user_ms": 31.956,
+              "system_ms": 55.92399999999999
+            },
+            {
+              "wall_ms": 89.61765200365335,
+              "user_ms": 30.012999999999998,
+              "system_ms": 59.025999999999996
+            },
+            {
+              "wall_ms": 88.4385819954332,
+              "user_ms": 32.677,
+              "system_ms": 55.452999999999996
+            },
+            {
+              "wall_ms": 87.94569899328053,
+              "user_ms": 38.099000000000004,
+              "system_ms": 49.541999999999994
+            },
+            {
+              "wall_ms": 83.00943199719768,
+              "user_ms": 37.796,
+              "system_ms": 44.758
+            },
+            {
+              "wall_ms": 89.9217270052759,
+              "user_ms": 40.187,
+              "system_ms": 49.22899999999999
+            },
+            {
+              "wall_ms": 81.50262100389227,
+              "user_ms": 38.101,
+              "system_ms": 43.114
+            },
+            {
+              "wall_ms": 85.04869000171311,
+              "user_ms": 38.881,
+              "system_ms": 45.86
+            },
+            {
+              "wall_ms": 80.92538999335375,
+              "user_ms": 37.828,
+              "system_ms": 42.806
+            },
+            {
+              "wall_ms": 82.52764999633655,
+              "user_ms": 35.04,
+              "system_ms": 47.054
+            },
+            {
+              "wall_ms": 85.24314800160937,
+              "user_ms": 43.973,
+              "system_ms": 40.974999999999994
+            },
+            {
+              "wall_ms": 81.38919700286351,
+              "user_ms": 46.272,
+              "system_ms": 34.784
+            },
+            {
+              "wall_ms": 81.84613099729177,
+              "user_ms": 35.809,
+              "system_ms": 45.756
+            },
+            {
+              "wall_ms": 81.44930099660996,
+              "user_ms": 38.946999999999996,
+              "system_ms": 41.943
+            },
+            {
+              "wall_ms": 84.42357700550929,
+              "user_ms": 33.963,
+              "system_ms": 49.946
+            },
+            {
+              "wall_ms": 81.88299099856522,
+              "user_ms": 37.80199999999999,
+              "system_ms": 43.771
+            },
+            {
+              "wall_ms": 81.72799801104702,
+              "user_ms": 37.163999999999994,
+              "system_ms": 44.195
+            },
+            {
+              "wall_ms": 80.40670800255612,
+              "user_ms": 33.957,
+              "system_ms": 45.942
+            },
+            {
+              "wall_ms": 81.33318099135067,
+              "user_ms": 35.013,
+              "system_ms": 46.016999999999996
+            },
+            {
+              "wall_ms": 82.2762450115988,
+              "user_ms": 45.992,
+              "system_ms": 35.992999999999995
+            },
+            {
+              "wall_ms": 80.62871800211724,
+              "user_ms": 34.249,
+              "system_ms": 46.029999999999994
+            },
+            {
+              "wall_ms": 81.8916169955628,
+              "user_ms": 34.686,
+              "system_ms": 46.57899999999999
+            },
+            {
+              "wall_ms": 85.15138400252908,
+              "user_ms": 39.955999999999996,
+              "system_ms": 44.951
+            },
+            {
+              "wall_ms": 89.96297500561923,
+              "user_ms": 36.882999999999996,
+              "system_ms": 52.833
+            },
+            {
+              "wall_ms": 80.86060699133668,
+              "user_ms": 33.192,
+              "system_ms": 47.273999999999994
+            },
+            {
+              "wall_ms": 93.06093399936799,
+              "user_ms": 30.88,
+              "system_ms": 61.76
+            },
+            {
+              "wall_ms": 88.60869299678598,
+              "user_ms": 39.708,
+              "system_ms": 48.641999999999996
+            },
+            {
+              "wall_ms": 86.62751599331386,
+              "user_ms": 44.178999999999995,
+              "system_ms": 42.171
+            },
+            {
+              "wall_ms": 82.02533000439871,
+              "user_ms": 30.904999999999998,
+              "system_ms": 50.84499999999999
+            },
+            {
+              "wall_ms": 82.75195400347002,
+              "user_ms": 34.666,
+              "system_ms": 47.542
+            },
+            {
+              "wall_ms": 83.45149700471666,
+              "user_ms": 45.098,
+              "system_ms": 38.083
+            },
+            {
+              "wall_ms": 80.51102500758134,
+              "user_ms": 37.076,
+              "system_ms": 43.088
+            },
+            {
+              "wall_ms": 79.80643199698534,
+              "user_ms": 34.214999999999996,
+              "system_ms": 45.285
+            },
+            {
+              "wall_ms": 79.26813400990795,
+              "user_ms": 34.315,
+              "system_ms": 44.407
+            },
+            {
+              "wall_ms": 84.26126900303643,
+              "user_ms": 35.979,
+              "system_ms": 46.972
+            },
+            {
+              "wall_ms": 96.57685499405488,
+              "user_ms": 46.173,
+              "system_ms": 50.04
+            },
+            {
+              "wall_ms": 83.75851801247336,
+              "user_ms": 37.196,
+              "system_ms": 44.233999999999995
+            },
+            {
+              "wall_ms": 89.45197799766902,
+              "user_ms": 36.922,
+              "system_ms": 51.891
+            },
+            {
+              "wall_ms": 87.0179339981405,
+              "user_ms": 32.903,
+              "system_ms": 53.842
+            },
+            {
+              "wall_ms": 80.85575701261405,
+              "user_ms": 30.820999999999998,
+              "system_ms": 49.711999999999996
+            },
+            {
+              "wall_ms": 95.00537299027201,
+              "user_ms": 40.868,
+              "system_ms": 53.827
+            },
+            {
+              "wall_ms": 81.01829500810709,
+              "user_ms": 40.798,
+              "system_ms": 39.803
+            },
+            {
+              "wall_ms": 93.37539899570402,
+              "user_ms": 43.025,
+              "system_ms": 50.028999999999996
+            },
+            {
+              "wall_ms": 93.6424050014466,
+              "user_ms": 46.342,
+              "system_ms": 47.028
+            },
+            {
+              "wall_ms": 81.46329601004254,
+              "user_ms": 33.065999999999995,
+              "system_ms": 48.096
+            }
+          ],
+          "median_wall_ms": 83.45149700471666,
+          "min_wall_ms": 79.26813400990795,
+          "max_wall_ms": 96.57685499405488
+        }
+      }
+    },
+    {
+      "name": "cjson-static-pie",
+      "cwd": "/",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/rcrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o": "14e221321a4779a8173b276b187c091faa6a311756a60b7cdab9a607de21e815",
+        "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o": "cd2fad2826bc69ef4dbd03ea3ebcbda379bb4d0c8f8412144a38cfd3c3a59565",
+        "/usr/lib/x86_64-linux-gnu/libm.a": "a3e037975e7fb816d8a1d69f4a8aec71071700539aa2eb8743b805a905179e7a",
+        "/usr/lib/x86_64-linux-gnu/libmvec.a": "85ac05390efeaf0bdf59b1ce61e70d09c8e8c716e30b722127a7a7c8d145c757",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140",
+        "/usr/lib/x86_64-linux-gnu/libc.a": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "exit": 0,
+        "cwd": "/tmp/fas-corpus-static-pie-20261105/cjson/source/tests"
+      },
+      "results": {
+        "Fas-before": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/0/fas-before",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/3/0",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3",
+          "output_bytes": 1294352,
+          "peak_rss_kib": 38284,
+          "samples": [
+            {
+              "wall_ms": 84.03270599956159,
+              "user_ms": 56.381,
+              "system_ms": 27.184
+            },
+            {
+              "wall_ms": 80.8350680017611,
+              "user_ms": 51.596,
+              "system_ms": 28.775
+            },
+            {
+              "wall_ms": 84.3638619990088,
+              "user_ms": 57.952999999999996,
+              "system_ms": 25.979
+            },
+            {
+              "wall_ms": 79.42603300034534,
+              "user_ms": 52.932,
+              "system_ms": 25.966
+            },
+            {
+              "wall_ms": 102.16051699535456,
+              "user_ms": 76.88499999999999,
+              "system_ms": 24.962
+            },
+            {
+              "wall_ms": 84.81055698939599,
+              "user_ms": 56.351,
+              "system_ms": 28.174999999999997
+            },
+            {
+              "wall_ms": 81.0859920020448,
+              "user_ms": 58.695,
+              "system_ms": 21.886
+            },
+            {
+              "wall_ms": 79.74110799841583,
+              "user_ms": 54.095,
+              "system_ms": 25.044
+            },
+            {
+              "wall_ms": 80.92708200274501,
+              "user_ms": 57.386,
+              "system_ms": 23.156
+            },
+            {
+              "wall_ms": 80.91265399707481,
+              "user_ms": 55.628,
+              "system_ms": 24.834
+            },
+            {
+              "wall_ms": 79.33003999642096,
+              "user_ms": 57.888,
+              "system_ms": 20.959
+            },
+            {
+              "wall_ms": 79.61882700328715,
+              "user_ms": 53.051,
+              "system_ms": 26.025
+            },
+            {
+              "wall_ms": 83.32257300207857,
+              "user_ms": 60.041,
+              "system_ms": 23.014999999999997
+            },
+            {
+              "wall_ms": 78.68500999757089,
+              "user_ms": 51.144999999999996,
+              "system_ms": 27.077
+            },
+            {
+              "wall_ms": 80.70626299013384,
+              "user_ms": 60.141999999999996,
+              "system_ms": 20.047
+            },
+            {
+              "wall_ms": 82.50607798981946,
+              "user_ms": 58.114,
+              "system_ms": 24.047
+            },
+            {
+              "wall_ms": 90.30030100257136,
+              "user_ms": 62.012,
+              "system_ms": 28.005
+            },
+            {
+              "wall_ms": 79.99321400711779,
+              "user_ms": 53.805,
+              "system_ms": 25.906
+            },
+            {
+              "wall_ms": 82.96257100300863,
+              "user_ms": 56.427,
+              "system_ms": 26.198
+            },
+            {
+              "wall_ms": 90.55888099828735,
+              "user_ms": 59.051,
+              "system_ms": 31.025999999999996
+            },
+            {
+              "wall_ms": 83.33889399364125,
+              "user_ms": 55.035000000000004,
+              "system_ms": 28.017999999999997
+            },
+            {
+              "wall_ms": 90.47558299789671,
+              "user_ms": 60.451,
+              "system_ms": 29.73
+            },
+            {
+              "wall_ms": 78.87582099647261,
+              "user_ms": 55.409,
+              "system_ms": 23.171
+            },
+            {
+              "wall_ms": 78.78431800054386,
+              "user_ms": 59.221,
+              "system_ms": 19.070999999999998
+            },
+            {
+              "wall_ms": 86.25272499921266,
+              "user_ms": 55.866,
+              "system_ms": 29.928
+            },
+            {
+              "wall_ms": 79.49322799686342,
+              "user_ms": 53.953,
+              "system_ms": 24.978
+            },
+            {
+              "wall_ms": 79.29939200403169,
+              "user_ms": 55.88999999999999,
+              "system_ms": 22.953999999999997
+            },
+            {
+              "wall_ms": 78.55353200284299,
+              "user_ms": 56.020999999999994,
+              "system_ms": 22.008
+            },
+            {
+              "wall_ms": 85.45511598640587,
+              "user_ms": 58.07599999999999,
+              "system_ms": 27.035
+            },
+            {
+              "wall_ms": 79.75746899319347,
+              "user_ms": 55.157,
+              "system_ms": 24.067999999999998
+            },
+            {
+              "wall_ms": 80.11797101062257,
+              "user_ms": 51.714999999999996,
+              "system_ms": 27.846
+            },
+            {
+              "wall_ms": 79.15620200219564,
+              "user_ms": 56.404999999999994,
+              "system_ms": 22.159
+            },
+            {
+              "wall_ms": 90.220580008463,
+              "user_ms": 60.911,
+              "system_ms": 25.962
+            },
+            {
+              "wall_ms": 82.1886780031491,
+              "user_ms": 55.913,
+              "system_ms": 25.959
+            },
+            {
+              "wall_ms": 91.85972099658102,
+              "user_ms": 64.263,
+              "system_ms": 27.11
+            },
+            {
+              "wall_ms": 87.73832500446588,
+              "user_ms": 58.058,
+              "system_ms": 29.029
+            },
+            {
+              "wall_ms": 83.27543300401885,
+              "user_ms": 57.967,
+              "system_ms": 24.985999999999997
+            },
+            {
+              "wall_ms": 78.9728939998895,
+              "user_ms": 54.446999999999996,
+              "system_ms": 24.197999999999997
+            },
+            {
+              "wall_ms": 78.57766600500327,
+              "user_ms": 54.139,
+              "system_ms": 24.062
+            },
+            {
+              "wall_ms": 79.11737699760124,
+              "user_ms": 51.748999999999995,
+              "system_ms": 26.868999999999996
+            },
+            {
+              "wall_ms": 82.51903198834043,
+              "user_ms": 54.97299999999999,
+              "system_ms": 26.987
+            },
+            {
+              "wall_ms": 78.39282701024786,
+              "user_ms": 55.092999999999996,
+              "system_ms": 23.039
+            },
+            {
+              "wall_ms": 78.64382099069189,
+              "user_ms": 51.068999999999996,
+              "system_ms": 27.037
+            },
+            {
+              "wall_ms": 90.62120701128151,
+              "user_ms": 60.105,
+              "system_ms": 30.052
+            },
+            {
+              "wall_ms": 81.9184059946565,
+              "user_ms": 56.687,
+              "system_ms": 24.863
+            },
+            {
+              "wall_ms": 79.35312300105579,
+              "user_ms": 52.028,
+              "system_ms": 27.014
+            },
+            {
+              "wall_ms": 79.20075500442181,
+              "user_ms": 57.469,
+              "system_ms": 21.173
+            },
+            {
+              "wall_ms": 79.40200599841774,
+              "user_ms": 54.913999999999994,
+              "system_ms": 23.961999999999996
+            },
+            {
+              "wall_ms": 85.42166199185885,
+              "user_ms": 65.066,
+              "system_ms": 20.02
+            },
+            {
+              "wall_ms": 79.34436701179948,
+              "user_ms": 54.841,
+              "system_ms": 23.93
+            },
+            {
+              "wall_ms": 78.88855399505701,
+              "user_ms": 59.510999999999996,
+              "system_ms": 18.845
+            }
+          ],
+          "median_wall_ms": 80.8350680017611,
+          "min_wall_ms": 78.39282701024786,
+          "max_wall_ms": 102.16051699535456
+        },
+        "Fas-current": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/1/fas-after",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/3/1",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3",
+          "output_bytes": 1294352,
+          "peak_rss_kib": 38244,
+          "samples": [
+            {
+              "wall_ms": 83.03312498901505,
+              "user_ms": 54.693,
+              "system_ms": 27.843
+            },
+            {
+              "wall_ms": 82.87279200158082,
+              "user_ms": 53.227999999999994,
+              "system_ms": 29.124
+            },
+            {
+              "wall_ms": 80.16672400117386,
+              "user_ms": 55.403999999999996,
+              "system_ms": 24.176
+            },
+            {
+              "wall_ms": 79.7415590059245,
+              "user_ms": 55.436,
+              "system_ms": 23.758
+            },
+            {
+              "wall_ms": 99.74306399817578,
+              "user_ms": 70.033,
+              "system_ms": 29.012999999999998
+            },
+            {
+              "wall_ms": 82.16714700392913,
+              "user_ms": 60.921,
+              "system_ms": 20.973
+            },
+            {
+              "wall_ms": 89.96761300659273,
+              "user_ms": 59.275999999999996,
+              "system_ms": 30.14
+            },
+            {
+              "wall_ms": 79.220573999919,
+              "user_ms": 53.73199999999999,
+              "system_ms": 24.875999999999998
+            },
+            {
+              "wall_ms": 79.37121800205205,
+              "user_ms": 54.857,
+              "system_ms": 23.937
+            },
+            {
+              "wall_ms": 80.30782100104261,
+              "user_ms": 50.019999999999996,
+              "system_ms": 30.011999999999997
+            },
+            {
+              "wall_ms": 80.10611899953801,
+              "user_ms": 51.384,
+              "system_ms": 28.209999999999997
+            },
+            {
+              "wall_ms": 79.63321400166024,
+              "user_ms": 56.355,
+              "system_ms": 22.738999999999997
+            },
+            {
+              "wall_ms": 79.98448800935876,
+              "user_ms": 59.342,
+              "system_ms": 20.116
+            },
+            {
+              "wall_ms": 80.12077599414624,
+              "user_ms": 50.91499999999999,
+              "system_ms": 28.950999999999997
+            },
+            {
+              "wall_ms": 82.75316499930341,
+              "user_ms": 57.117,
+              "system_ms": 25.051000000000002
+            },
+            {
+              "wall_ms": 85.06035999744199,
+              "user_ms": 61.647,
+              "system_ms": 22.869
+            },
+            {
+              "wall_ms": 81.33234799606726,
+              "user_ms": 58.553999999999995,
+              "system_ms": 22.21
+            },
+            {
+              "wall_ms": 82.95429599820636,
+              "user_ms": 59.227999999999994,
+              "system_ms": 23.089
+            },
+            {
+              "wall_ms": 80.77818900346756,
+              "user_ms": 49.128,
+              "system_ms": 31.080999999999996
+            },
+            {
+              "wall_ms": 90.70589899783954,
+              "user_ms": 61.146,
+              "system_ms": 29.069
+            },
+            {
+              "wall_ms": 79.55911400495097,
+              "user_ms": 54.012,
+              "system_ms": 25.005
+            },
+            {
+              "wall_ms": 79.28297099715564,
+              "user_ms": 54.022999999999996,
+              "system_ms": 25.009999999999998
+            },
+            {
+              "wall_ms": 79.50640399940312,
+              "user_ms": 54.980999999999995,
+              "system_ms": 23.991
+            },
+            {
+              "wall_ms": 79.24617100798059,
+              "user_ms": 50.441,
+              "system_ms": 28.246
+            },
+            {
+              "wall_ms": 79.29095599683933,
+              "user_ms": 55.826,
+              "system_ms": 22.928
+            },
+            {
+              "wall_ms": 83.38146400637925,
+              "user_ms": 55.888,
+              "system_ms": 26.945999999999998
+            },
+            {
+              "wall_ms": 78.96380699821748,
+              "user_ms": 47.674,
+              "system_ms": 30.788999999999998
+            },
+            {
+              "wall_ms": 90.24159000546206,
+              "user_ms": 52.837999999999994,
+              "system_ms": 36.88699999999999
+            },
+            {
+              "wall_ms": 91.07286299695261,
+              "user_ms": 61.75,
+              "system_ms": 28.883
+            },
+            {
+              "wall_ms": 78.73760999063961,
+              "user_ms": 57.15899999999999,
+              "system_ms": 21.058
+            },
+            {
+              "wall_ms": 89.84477000194602,
+              "user_ms": 61.544999999999995,
+              "system_ms": 27.794
+            },
+            {
+              "wall_ms": 80.10504599951673,
+              "user_ms": 54.724999999999994,
+              "system_ms": 24.874999999999996
+            },
+            {
+              "wall_ms": 80.12726799643133,
+              "user_ms": 52.717,
+              "system_ms": 26.855999999999998
+            },
+            {
+              "wall_ms": 84.37407099700067,
+              "user_ms": 59.894,
+              "system_ms": 23.957
+            },
+            {
+              "wall_ms": 92.0707500044955,
+              "user_ms": 59.744,
+              "system_ms": 31.862999999999996
+            },
+            {
+              "wall_ms": 84.87859599699732,
+              "user_ms": 59.245,
+              "system_ms": 25.103
+            },
+            {
+              "wall_ms": 80.92749099887442,
+              "user_ms": 58.571,
+              "system_ms": 21.84
+            },
+            {
+              "wall_ms": 78.27194800483994,
+              "user_ms": 48.97,
+              "system_ms": 28.981999999999996
+            },
+            {
+              "wall_ms": 79.01622699864674,
+              "user_ms": 52.322,
+              "system_ms": 26.161
+            },
+            {
+              "wall_ms": 78.76071298960596,
+              "user_ms": 51.498999999999995,
+              "system_ms": 26.74
+            },
+            {
+              "wall_ms": 79.29829000204336,
+              "user_ms": 54.788999999999994,
+              "system_ms": 23.907999999999998
+            },
+            {
+              "wall_ms": 91.78166299534496,
+              "user_ms": 58.1,
+              "system_ms": 33.056999999999995
+            },
+            {
+              "wall_ms": 78.54640699224547,
+              "user_ms": 55.995999999999995,
+              "system_ms": 21.998
+            },
+            {
+              "wall_ms": 79.92042700061575,
+              "user_ms": 43.22,
+              "system_ms": 36.184
+            },
+            {
+              "wall_ms": 78.7289830041118,
+              "user_ms": 59.153,
+              "system_ms": 19.049
+            },
+            {
+              "wall_ms": 89.57966699381359,
+              "user_ms": 57.079,
+              "system_ms": 32.044
+            },
+            {
+              "wall_ms": 79.84482300525997,
+              "user_ms": 51.556,
+              "system_ms": 27.761
+            },
+            {
+              "wall_ms": 79.85929001006298,
+              "user_ms": 56.181,
+              "system_ms": 23.073999999999998
+            },
+            {
+              "wall_ms": 79.04537100694142,
+              "user_ms": 55.660999999999994,
+              "system_ms": 22.86
+            },
+            {
+              "wall_ms": 80.11547500791494,
+              "user_ms": 55.596,
+              "system_ms": 23.826999999999998
+            },
+            {
+              "wall_ms": 79.9347230058629,
+              "user_ms": 55.568,
+              "system_ms": 23.814999999999998
+            }
+          ],
+          "median_wall_ms": 80.11547500791494,
+          "min_wall_ms": 78.27194800483994,
+          "max_wall_ms": 99.74306399817578
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/2/ld.lld-22",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/3/2",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "a23c2dddd20aec1634111bcd056bca4f8c7915c5ca8bc74fd2489efb87e39055",
+          "output_bytes": 1143168,
+          "peak_rss_kib": 82904,
+          "samples": [
+            {
+              "wall_ms": 41.31633300858084,
+              "user_ms": 29.453,
+              "system_ms": 40.056000000000004
+            },
+            {
+              "wall_ms": 41.97886699694209,
+              "user_ms": 30.889999999999997,
+              "system_ms": 39.315
+            },
+            {
+              "wall_ms": 35.51172401057556,
+              "user_ms": 31.542,
+              "system_ms": 31.542
+            },
+            {
+              "wall_ms": 33.613252991926856,
+              "user_ms": 26.244999999999997,
+              "system_ms": 36.744
+            },
+            {
+              "wall_ms": 35.492035996867344,
+              "user_ms": 20.79,
+              "system_ms": 41.581
+            },
+            {
+              "wall_ms": 42.47341299196705,
+              "user_ms": 31.578000000000003,
+              "system_ms": 41.76499999999999
+            },
+            {
+              "wall_ms": 40.74435199436266,
+              "user_ms": 24.461999999999996,
+              "system_ms": 45.43
+            },
+            {
+              "wall_ms": 32.69589800038375,
+              "user_ms": 28.714,
+              "system_ms": 35.340999999999994
+            },
+            {
+              "wall_ms": 33.143183987704106,
+              "user_ms": 23.368999999999996,
+              "system_ms": 40.364999999999995
+            },
+            {
+              "wall_ms": 34.837938990676776,
+              "user_ms": 27.718999999999998,
+              "system_ms": 33.262
+            },
+            {
+              "wall_ms": 31.87077699112706,
+              "user_ms": 27.605999999999998,
+              "system_ms": 31.964
+            },
+            {
+              "wall_ms": 34.68597200117074,
+              "user_ms": 24.583,
+              "system_ms": 36.289
+            },
+            {
+              "wall_ms": 42.00329400191549,
+              "user_ms": 36.087,
+              "system_ms": 33.681
+            },
+            {
+              "wall_ms": 32.22148001077585,
+              "user_ms": 24.218999999999998,
+              "system_ms": 33.18899999999999
+            },
+            {
+              "wall_ms": 32.32202101207804,
+              "user_ms": 29.875,
+              "system_ms": 29.875
+            },
+            {
+              "wall_ms": 34.37345099519007,
+              "user_ms": 29.028,
+              "system_ms": 32.512
+            },
+            {
+              "wall_ms": 32.09421900101006,
+              "user_ms": 23.337999999999997,
+              "system_ms": 36.303
+            },
+            {
+              "wall_ms": 33.17400200467091,
+              "user_ms": 25.996,
+              "system_ms": 29.540999999999997
+            },
+            {
+              "wall_ms": 41.346559999510646,
+              "user_ms": 35.725,
+              "system_ms": 32.268
+            },
+            {
+              "wall_ms": 32.905512998695485,
+              "user_ms": 24.368,
+              "system_ms": 38.702
+            },
+            {
+              "wall_ms": 33.644581999396905,
+              "user_ms": 28.354999999999997,
+              "system_ms": 36.295
+            },
+            {
+              "wall_ms": 30.457924003712833,
+              "user_ms": 29.553,
+              "system_ms": 26.983
+            },
+            {
+              "wall_ms": 31.84876500745304,
+              "user_ms": 20.258,
+              "system_ms": 38.896
+            },
+            {
+              "wall_ms": 32.14316199591849,
+              "user_ms": 27.366999999999997,
+              "system_ms": 32.58
+            },
+            {
+              "wall_ms": 32.86297299200669,
+              "user_ms": 21.564999999999998,
+              "system_ms": 46.211
+            },
+            {
+              "wall_ms": 34.10852899833117,
+              "user_ms": 27.779999999999998,
+              "system_ms": 37.33
+            },
+            {
+              "wall_ms": 32.65496999665629,
+              "user_ms": 24.604999999999997,
+              "system_ms": 36.907
+            },
+            {
+              "wall_ms": 41.8978139932733,
+              "user_ms": 29.609999999999996,
+              "system_ms": 42.769999999999996
+            },
+            {
+              "wall_ms": 32.47163300693501,
+              "user_ms": 26.093999999999998,
+              "system_ms": 33.4
+            },
+            {
+              "wall_ms": 33.123124987469055,
+              "user_ms": 23.041,
+              "system_ms": 40.961
+            },
+            {
+              "wall_ms": 32.65407799335662,
+              "user_ms": 25.855,
+              "system_ms": 33.458999999999996
+            },
+            {
+              "wall_ms": 32.45446999790147,
+              "user_ms": 29.034999999999997,
+              "system_ms": 30.195999999999998
+            },
+            {
+              "wall_ms": 33.86731300270185,
+              "user_ms": 31.105999999999998,
+              "system_ms": 34.068999999999996
+            },
+            {
+              "wall_ms": 32.652335008606315,
+              "user_ms": 25.601,
+              "system_ms": 39.565999999999995
+            },
+            {
+              "wall_ms": 31.286080993595533,
+              "user_ms": 31.405999999999995,
+              "system_ms": 27.480999999999998
+            },
+            {
+              "wall_ms": 42.70081299182493,
+              "user_ms": 29.644000000000002,
+              "system_ms": 40.230999999999995
+            },
+            {
+              "wall_ms": 31.978751008864492,
+              "user_ms": 24.987,
+              "system_ms": 36.981
+            },
+            {
+              "wall_ms": 32.65106200706214,
+              "user_ms": 27.524,
+              "system_ms": 37.051
+            },
+            {
+              "wall_ms": 31.742363004013896,
+              "user_ms": 27.826,
+              "system_ms": 35.085
+            },
+            {
+              "wall_ms": 31.893118997686543,
+              "user_ms": 26.816,
+              "system_ms": 35.754
+            },
+            {
+              "wall_ms": 32.26413000083994,
+              "user_ms": 31.211,
+              "system_ms": 31.211
+            },
+            {
+              "wall_ms": 39.73153600236401,
+              "user_ms": 26.098,
+              "system_ms": 39.147
+            },
+            {
+              "wall_ms": 33.58624200336635,
+              "user_ms": 26.764999999999997,
+              "system_ms": 38.235
+            },
+            {
+              "wall_ms": 31.462243001442403,
+              "user_ms": 22.017,
+              "system_ms": 39.398999999999994
+            },
+            {
+              "wall_ms": 33.87324399955105,
+              "user_ms": 25.811999999999998,
+              "system_ms": 40.266999999999996
+            },
+            {
+              "wall_ms": 41.55961399374064,
+              "user_ms": 34.128,
+              "system_ms": 36.656
+            },
+            {
+              "wall_ms": 32.462666000355966,
+              "user_ms": 22.310999999999996,
+              "system_ms": 37.832
+            },
+            {
+              "wall_ms": 33.704083994962275,
+              "user_ms": 23.424999999999997,
+              "system_ms": 44.04
+            },
+            {
+              "wall_ms": 32.29685200494714,
+              "user_ms": 21.176000000000002,
+              "system_ms": 35.294
+            },
+            {
+              "wall_ms": 32.42153699102346,
+              "user_ms": 18.15,
+              "system_ms": 40.333
+            },
+            {
+              "wall_ms": 32.76332400855608,
+              "user_ms": 23.93,
+              "system_ms": 39.043
+            }
+          ],
+          "median_wall_ms": 32.905512998695485,
+          "min_wall_ms": 30.457924003712833,
+          "max_wall_ms": 42.70081299182493
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/tools/3/ld",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-hash-ifunc-repeat-20261105/3/3",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9322defb103322cfc325797c2c1fee9fe1daf3eb24037f874d97fe50fd9919f5",
+          "output_bytes": 1144432,
+          "peak_rss_kib": 33876,
+          "samples": [
+            {
+              "wall_ms": 53.55598599999212,
+              "user_ms": 18.127999999999997,
+              "system_ms": 35.132
+            },
+            {
+              "wall_ms": 63.562395007465966,
+              "user_ms": 29.656,
+              "system_ms": 33.611
+            },
+            {
+              "wall_ms": 60.182130997418426,
+              "user_ms": 24.967999999999996,
+              "system_ms": 34.955
+            },
+            {
+              "wall_ms": 52.48483100149315,
+              "user_ms": 24.908,
+              "system_ms": 26.900999999999996
+            },
+            {
+              "wall_ms": 55.05366899888031,
+              "user_ms": 17.020999999999997,
+              "system_ms": 37.766
+            },
+            {
+              "wall_ms": 57.61718899884727,
+              "user_ms": 29.085,
+              "system_ms": 28.082
+            },
+            {
+              "wall_ms": 73.552642003051,
+              "user_ms": 27.724,
+              "system_ms": 45.547
+            },
+            {
+              "wall_ms": 52.00395999418106,
+              "user_ms": 24.208000000000002,
+              "system_ms": 27.233999999999998
+            },
+            {
+              "wall_ms": 52.716277990839444,
+              "user_ms": 25.215999999999998,
+              "system_ms": 27.233999999999998
+            },
+            {
+              "wall_ms": 54.11916199955158,
+              "user_ms": 25.921999999999997,
+              "system_ms": 27.916
+            },
+            {
+              "wall_ms": 55.42496200359892,
+              "user_ms": 25.066,
+              "system_ms": 30.08
+            },
+            {
+              "wall_ms": 52.61687900929246,
+              "user_ms": 25.025,
+              "system_ms": 27.026999999999997
+            },
+            {
+              "wall_ms": 54.89188300271053,
+              "user_ms": 22.265,
+              "system_ms": 32.385999999999996
+            },
+            {
+              "wall_ms": 56.078979003359564,
+              "user_ms": 28.898999999999997,
+              "system_ms": 26.906
+            },
+            {
+              "wall_ms": 56.85405399708543,
+              "user_ms": 16.16,
+              "system_ms": 40.400999999999996
+            },
+            {
+              "wall_ms": 52.92262899456546,
+              "user_ms": 24.169,
+              "system_ms": 28.197999999999997
+            },
+            {
+              "wall_ms": 53.92318099620752,
+              "user_ms": 25.811999999999998,
+              "system_ms": 27.798
+            },
+            {
+              "wall_ms": 57.24695800745394,
+              "user_ms": 26.026,
+              "system_ms": 28.009
+            },
+            {
+              "wall_ms": 53.88134199893102,
+              "user_ms": 24.284,
+              "system_ms": 29.342999999999996
+            },
+            {
+              "wall_ms": 61.01021700305864,
+              "user_ms": 26.814999999999998,
+              "system_ms": 33.666000000000004
+            },
+            {
+              "wall_ms": 55.21256898646243,
+              "user_ms": 22.104,
+              "system_ms": 32.874
+            },
+            {
+              "wall_ms": 54.40488200110849,
+              "user_ms": 25.078,
+              "system_ms": 29.090999999999998
+            },
+            {
+              "wall_ms": 52.59694199776277,
+              "user_ms": 26.189999999999998,
+              "system_ms": 26.189999999999998
+            },
+            {
+              "wall_ms": 50.92943699855823,
+              "user_ms": 27.229999999999997,
+              "system_ms": 23.195
+            },
+            {
+              "wall_ms": 57.54414999682922,
+              "user_ms": 25.089999999999996,
+              "system_ms": 32.114999999999995
+            },
+            {
+              "wall_ms": 54.74881200643722,
+              "user_ms": 22.081,
+              "system_ms": 32.118
+            },
+            {
+              "wall_ms": 56.34818799444474,
+              "user_ms": 25.956999999999997,
+              "system_ms": 29.950999999999997
+            },
+            {
+              "wall_ms": 50.89654499897733,
+              "user_ms": 19.811,
+              "system_ms": 30.573999999999998
+            },
+            {
+              "wall_ms": 53.68566099787131,
+              "user_ms": 15.182999999999998,
+              "system_ms": 38.144999999999996
+            },
+            {
+              "wall_ms": 53.84696600958705,
+              "user_ms": 24.346,
+              "system_ms": 29.232999999999997
+            },
+            {
+              "wall_ms": 54.13916900579352,
+              "user_ms": 26.404999999999998,
+              "system_ms": 27.420999999999996
+            },
+            {
+              "wall_ms": 52.15475500153843,
+              "user_ms": 20.849,
+              "system_ms": 30.778
+            },
+            {
+              "wall_ms": 56.97254899132531,
+              "user_ms": 26.868,
+              "system_ms": 29.854
+            },
+            {
+              "wall_ms": 54.03645499609411,
+              "user_ms": 23.001,
+              "system_ms": 30.738
+            },
+            {
+              "wall_ms": 57.00829600391444,
+              "user_ms": 26.345,
+              "system_ms": 30.398
+            },
+            {
+              "wall_ms": 51.473366998834535,
+              "user_ms": 23.986,
+              "system_ms": 26.983999999999998
+            },
+            {
+              "wall_ms": 55.16691300726961,
+              "user_ms": 25.958,
+              "system_ms": 28.953
+            },
+            {
+              "wall_ms": 51.79734899138566,
+              "user_ms": 21.342999999999996,
+              "system_ms": 30.147999999999996
+            },
+            {
+              "wall_ms": 54.95811799482908,
+              "user_ms": 21.245,
+              "system_ms": 33.385
+            },
+            {
+              "wall_ms": 51.25626600056421,
+              "user_ms": 19.278,
+              "system_ms": 31.453000000000003
+            },
+            {
+              "wall_ms": 52.23617899173405,
+              "user_ms": 25.017999999999997,
+              "system_ms": 26.865
+            },
+            {
+              "wall_ms": 52.90404299739748,
+              "user_ms": 22.003999999999998,
+              "system_ms": 30.677
+            },
+            {
+              "wall_ms": 62.17107200063765,
+              "user_ms": 21.213,
+              "system_ms": 40.406
+            },
+            {
+              "wall_ms": 82.57310499902815,
+              "user_ms": 35.015,
+              "system_ms": 47.021
+            },
+            {
+              "wall_ms": 76.37857699592132,
+              "user_ms": 33.04899999999999,
+              "system_ms": 39.772999999999996
+            },
+            {
+              "wall_ms": 54.797183998744,
+              "user_ms": 28.743,
+              "system_ms": 25.769999999999996
+            },
+            {
+              "wall_ms": 53.99371399835218,
+              "user_ms": 19.862,
+              "system_ms": 33.76499999999999
+            },
+            {
+              "wall_ms": 52.74920001102146,
+              "user_ms": 21.08,
+              "system_ms": 31.118
+            },
+            {
+              "wall_ms": 53.313486991100945,
+              "user_ms": 26.057999999999996,
+              "system_ms": 26.933
+            },
+            {
+              "wall_ms": 54.380376008339226,
+              "user_ms": 31.008,
+              "system_ms": 23.006
+            },
+            {
+              "wall_ms": 53.84841900377069,
+              "user_ms": 26.272,
+              "system_ms": 27.281999999999996
+            }
+          ],
+          "median_wall_ms": 54.13916900579352,
+          "min_wall_ms": 50.89654499897733,
+          "max_wall_ms": 82.57310499902815
+        }
+      }
+    }
+  ]
+}

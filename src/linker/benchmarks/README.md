@@ -1,5 +1,71 @@
 # Linker performance evidence
 
+## Quiet-PC measurements after build-ID/IFUNC changes
+
+The user provided an idle-PC window beginning at 21:17 CET on 2026-11-05;
+measurements finished by 21:22. All tools ran sequentially from pinned release
+snapshots with warm inputs and default worker settings. No CPU affinity, governor
+or cache policy changed. Fas has one worker; LLD is 22.1.8 and GNU ld is 2.46.
+The first replay includes pre-change, SHA-1-only and final Fas snapshots at
+21 samples/three warm-ups. A longer repeat compares pre-change/final/LLD/GNU
+at 51 samples/five warm-ups; its medians are the four rows below. The three
+additional application rows use 21 samples/three warm-ups.
+
+| Workload | Current Fas | LLD | GNU ld | Fas/LLD time |
+| --- | ---: | ---: | ---: | ---: |
+| Chibicc stage 1, dynamic | 30.66 ms | 21.07 ms | 20.41 ms | 1.46x |
+| Chibicc stage 2, COPY | 33.54 ms | 21.04 ms | 19.46 ms | 1.59x |
+| Chibicc, static glibc | 95.18 ms | 34.53 ms | 83.45 ms | 2.76x |
+| cJSON, static PIE | 80.12 ms | 32.91 ms | 54.14 ms | 2.43x |
+| Fas native Sieve | 28.47 ms | 18.14 ms | 14.47 ms | 1.57x |
+| Doom 1.10, fixed | 124.52 ms | 36.12 ms | 68.04 ms | 3.45x |
+| Wolf3D, PIE | 41.17 ms | 21.58 ms | 136.61 ms | 1.91x |
+
+The longer repeat shows approximately 7% lower dynamic Chibicc medians versus
+before the SHA-1/IFUNC changes. Static differences are around 1%, too small to
+claim a reliable speed gain here. Both complete reports preserve ranges and raw
+samples: short runs and desktop background services produce visible variation.
+All before/after Fas images are byte-identical and runtime checks pass.
+
+Fas still trails LLD. Single-process peak RSS is lower in these seven workloads;
+these are separate GNU-time samples, not private-memory or retained-heap figures.
+The allocation reductions do not establish a comparable peak-RSS reduction.
+Application checks run outside timed intervals: the original native Sieve
+prime-count check, Doom's 32-frame hash and Wolf3D's three-frame hash all pass
+for Fas, LLD and GNU. Game checks use explicit headless environment overrides.
+Compilation and five-second Sieve execution are excluded from link timing.
+
+Current synthetic scaling also uses 21 samples/three warm-ups:
+
+| Workload | Fas | LLD | GNU ld |
+| --- | ---: | ---: | ---: |
+| 257 separate objects | 58.45 ms | 27.15 ms | 47.17 ms |
+| 769 separate objects | 184.68 ms | 55.02 ms | 149.83 ms |
+| Archive, 256 members needed | 72.08 ms | 23.50 ms | 33.11 ms |
+| Archive, 1024 members needed | 328.68 ms | 55.08 ms | 160.33 ms |
+| Archive, one of 1,024 members needed | 54.47 ms | 33.77 ms | 8.43 ms |
+
+The largest all-member archive remains about six times LLD's elapsed time. The
+lazy-archive stats sample records about 46 ms in the aggregate parse phase
+despite loading only one member; that phase includes container/index and object
+parsing. Archive indexing and symbol/relocation storage remain the main
+scaling work; build-ID changes do not improve these build-ID-free synthetic
+recipes. This is one machine and warm-cache evidence, not a general ranking.
+Mold is unavailable.
+
+Pinned reports: [51-sample repeat](results/2026-11-05/hash-ifunc-real-51.json),
+[21-sample staged replay](results/2026-11-05/hash-ifunc-real-21.json),
+[application links](results/2026-11-05/applications-speed.json),
+[application manifest](results/2026-11-05/applications-speed-manifest.json),
+[objects](results/2026-11-05/hash-ifunc-objects.json),
+[all-member archives](results/2026-11-05/hash-ifunc-archive-all.json) and
+[lazy archive](results/2026-11-05/hash-ifunc-archive-lazy.json).
+Full snapshots remain under `/tmp/fas-real-link-hash-ifunc{,-repeat}-20261105`,
+`/tmp/fas-application-link-speed-20261105` and
+`/tmp/fas-scaling-hash-ifunc-20261105`. The replay harness now supports `check.env`
+and `check.stdout_contains` for qualified application behavior checks.
+
+
 ## IFUNC reference allocation checkpoint
 
 The next untimed profile showed static IFUNC stub lookup allocating canonical
