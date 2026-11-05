@@ -23,6 +23,21 @@ fn seed(i i32) u8 { if i == 0 { return 13 } return 19 }
 fn sum4(a vec[4,u64]) u64 { return reduce_sum(a) }
 fn any_wide(m vec[128,bool]) bool { return any(m) }
 
+const MASK vec[32,bool] = {true, false, true, false, true, true, false, false, true, false, true, false, true, true, false, false, true, false, true, false, true, true, false, false, true, false, true, false, true, true, false, false}
+
+// Lanes of a constant mask read at a runtime index, in a function that holds
+// no vector value of its own (reached through call_addr, so it is not inlined
+// into a caller that has one). Scalarize skipped such functions.
+fn mask_bits(n usize) u64 {
+  bits u64 = 0
+  lane usize = 0
+  while lane < n {
+    bits = bits | (zext[u64](MASK[lane]) << lane)
+    lane = lane + 1
+  }
+  return bits
+}
+
 fn main() i32 {
   // indirect calls with vector arguments and results
   fa addr = &add_sq
@@ -63,5 +78,8 @@ fn main() i32 {
   v vec[256,u8] = splat(SeedA)
   v[Lane] = SeedB
   if v[Lane] != SeedB || v[Lane + 1] != SeedA { return 8 }
+
+  // constant mask lanes at a runtime index
+  if call_addr[u64](&mask_bits, zext[usize](Lane - 168)) != 0x35353535 { return 9 }
   return 0
 }

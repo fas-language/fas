@@ -1143,6 +1143,10 @@ let has_vectors (f : func) =
                  is_vector t
              | Call (_, _, _, _, args) ->
                  List.exists (fun (t, _, _) -> is_vector t) args
+             (* a scalar read from a vector constant, e.g. a table lookup
+                `extractelement <32 x i1> <...>, i64 %i`, has no vector
+                result but still needs lowering *)
+             | Extract (_, t, _, _) -> is_vector t
              | _ -> false)
            b.instrs
          || match b.terminator with Ret (Some (t, _)) -> is_vector t | _ -> false)
