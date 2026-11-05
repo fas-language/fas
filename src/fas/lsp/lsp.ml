@@ -198,6 +198,7 @@ let config_for state key : Cli.t =
     profile = None;
     all_errors = false;
     native = false;
+    native_runtime = Cli.Auto;
     align_loops = None;
     align_functions = None;
     tune_options = [];

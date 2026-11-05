@@ -59,7 +59,7 @@ class NativeTests(unittest.TestCase):
 
     def compile(self, name, source, *inputs, object=False, extra=(), env=None):
         output = self.root / name
-        run(COMPILER, "--backend=native", *("-c",) if object else (), source,
+        run(COMPILER, "--backend=native", *(("-c",) if object else ("--freestanding",)), source,
             *inputs, *extra, "-o", output, env=self.no_tools if env is None else env)
         return output
 
@@ -88,7 +88,7 @@ fn main() i32 { return helper() }
         run("ar", "rcs", archive, libobj)
         run(self.compile("separate-archive", bootstrap, mainobj, archive), expected=42)
         run(self.compile("separate-search", bootstrap, mainobj, extra=("-L", self.root, "-lseparate")), expected=42)
-        result = run(COMPILER, "--backend=native", bootstrap, archive, mainobj,
+        result = run(COMPILER, "--backend=native", "--freestanding", bootstrap, archive, mainobj,
                      "-o", self.root / "wrong-order", expected=1, env=self.no_tools)
         self.assertIn(b"undefined symbol answer", result.stderr)
         run(self.compile("separate-group", bootstrap,
