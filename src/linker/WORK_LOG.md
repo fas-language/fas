@@ -1,5 +1,36 @@
 # Linker implementation work log
 
+### Current checkpoint: combined native real-program qualification
+
+Qualification runs use the isolated `linker-qualification-20261105` worktree,
+pinned to Claude's combined ABI/driver merge `5fd063f`. Preserve his atomic
+intrinsic exclusion in automatic runtime selection and his FIR hook. Claude
+reports 3,792 compiler checks, native ABI/atomics/shell suites and broad
+native-versus-LLVM differential checks passing; those are his integration
+results, separate from the locally observed corpus evidence below.
+
+All four original Sieve sources pass both backends and Fas/GNU object links.
+Native sources additionally pass the direct automatic hosted driver: 20 dynamic
+executions, then 12 native static-glibc executions. Every program's original
+prime-count assertion runs unchanged; native compilation uses nonexistent
+`opt`/`llc` paths to detect fallback. The harness now snapshots the compiler and
+itself as well as the linker, and selected backend failures fail qualification.
+No native backend or original corpus source files were changed.
+
+Doom's 62-object startup comparison and Wolf3D's three-frame probe pass again.
+A new optional Doom device harness renders 32 single-tic E1M1 skill-3 frames.
+Fas/GNU fixed/PIE outputs share framebuffer hash `52e20f0b442bf948`. The initial
+attempt used modern `-iwad`, which Doom 1.10 does not implement; lowercase IWAD
+snapshot discovery via `DOOMWADDIR` fixes the harness. Original rendering and
+simulation run; display/audio output is bypassed. General gameplay is unverified.
+Only local temporary copies contain assets and instrumentation.
+
+Pinned reports are `corpus/results/2026-11-05/{native-hosted,native-static,doom-render}.json`.
+Their harness/tool/source hashes match the preserved local snapshots. Program
+elapsed times are output evidence only, not performance comparisons. No new
+linker core changes or timing measurements were needed for this qualification.
+
+
 ### Current checkpoint: hosted native compiler driver
 
 The migration and complete linker/object handoff are now local commits

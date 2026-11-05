@@ -32,13 +32,23 @@ class Corpus:
         tools.mkdir()
         self.linker = tools/'fas-ld'
         shutil.copy2(linker_source, self.linker)
-        self.compiler = args.compiler.resolve()
+        harness = tools/'corpus-run.py'
+        shutil.copy2(Path(__file__), harness)
+        compiler_source = args.compiler.resolve()
+        self.compiler = tools/'fas-compiler'
+        if args.sieve:
+            shutil.copy2(compiler_source, self.compiler)
         self.report = {'started': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
                        'harness_sha256': digest(Path(__file__)),
+                       'harness_snapshot': str(harness),
                        'linker_sha256': digest(self.linker),
                        'linker_source': str(linker_source),
                        'linker_snapshot': str(self.linker), 'tests': [], 'sources': {},
                        'limitations': [], 'timing_comparison': False}
+        if args.sieve:
+            self.report['compiler'] = {'source': str(compiler_source),
+                                       'snapshot': str(self.compiler),
+                                       'sha256': digest(self.compiler)}
         self.report['linkage'] = 'static-pie' if args.static_pie else 'static' if args.static else 'dynamic'
         self.dependency_paths = [str(p.resolve()) for p in args.dependency_path]
         self.report['dependency_policy'] = {
@@ -67,7 +77,8 @@ class Corpus:
             log.write(json.dumps({'argv': args, 'cwd': str(cwd) if cwd else None,
                                   'environment_overrides': {k: env[k] for k in
                                       ('SDL_VIDEODRIVER', 'SDL_AUDIODRIVER', 'DISPLAY',
-                                       'CC', 'CFLAGS', 'LDFLAGS', 'LD_LIBRARY_PATH')
+                                       'CC', 'CFLAGS', 'LDFLAGS', 'LD_LIBRARY_PATH',
+                                       'FAS_OPT', 'FAS_LLC', 'FAS_CC', 'FAS_FIR', 'DOOMWADDIR')
                                       if env and k in env},
                                   'status': result.returncode,
                                   'stdout': result.stdout.decode(errors='replace'),
@@ -86,6 +97,7 @@ class Corpus:
         self.report['tests'].append(row)
         self.save()
         print(row['status'].upper(), name, flush=True)
+        return row
 
     def snapshot(self, name, source):
         source = source.resolve()
@@ -314,25 +326,55 @@ os.execv({gcc!r},[{gcc!r},{'-B'+str(tools)+'/'!r},'-fno-use-linker-plugin','-fPI
     def sieve(self, source):
         src = self.snapshot('sieve', source)
         build = src.parent
-        for path in sorted(src.glob('*.fas')):
-            def check(path=path):
-                obj = build/(path.stem+'.o')
-                self.run([self.compiler, '-O3', '-c', path, '-o', obj], timeout=240)
-                program = self.hosted(build/path.stem, [obj], pie=False)
-                result = self.run([program], timeout=30)
-                assert b';1;' in result.stdout, result.stdout
-                return {'backend': 'llvm', 'stdout': result.stdout.decode()}
-            self.test('sieve/'+path.name, check)
-        native_obj = build/'native.o'
-        native = self.run([self.compiler, '--backend=native', '-O3', '-c',
-                           src/'primes_zero3.fas', '-o', native_obj], expected=None, timeout=240)
-        if native.returncode:
-            self.report['limitations'].append({'project': 'sieve/native-backend',
-                                               'diagnostic': native.stderr.decode(errors='replace')})
-        else:
-            program = self.hosted(build/'native', [native_obj], pie=False)
-            self.run([program], timeout=30)
-        return {'native_compile_status': native.returncode}
+        paths = sorted(src.glob('*.fas'))
+        if not paths:
+            raise RuntimeError('Sieve corpus has no .fas sources')
+        backends = ('llvm', 'native') if self.args.sieve_backend == 'both' else (self.args.sieve_backend,)
+        rows = []
+        for path in paths:
+            for backend in backends:
+                def check(path=path, backend=backend):
+                    flags = ['--backend=native'] if backend == 'native' else []
+                    env = dict(os.environ, FAS_FIR='')
+                    if backend == 'native':
+                        # A real native build must not fall back to opt/llc.
+                        env.update(FAS_OPT='/nonexistent/opt', FAS_LLC='/nonexistent/llc')
+                    obj = build/(path.stem+'-'+backend+'.o')
+                    self.run([self.compiler, *flags, '-O3', '-c', path, '-o', obj],
+                             env=env, timeout=240)
+                    executions = []
+                    def execute(program, producer):
+                        result = self.run([program], timeout=30)
+                        line = result.stdout.strip()
+                        match = re.fullmatch(
+                            rb'fas_extreme-hybrid;([0-9]+);([0-9]+)\.([0-9]{9});1;'
+                            rb'algorithm=base,faithful=yes,bits=1', line)
+                        assert match and int(match[1]) > 0, result.stdout
+                        assert not result.stderr, result.stderr
+                        executions.append({'producer': producer, 'path': str(program),
+                                           'sha256': digest(program),
+                                           'stdout': result.stdout.decode()})
+                    for tool, tag in ((self.linker, 'fas'), ('ld', 'gnu')):
+                        program = self.hosted(build/(path.stem+'-'+backend+'-'+tag),
+                                              [obj], tool=tool, pie=False)
+                        execute(program, tag)
+                    if backend == 'native':
+                        driver = build/(path.stem+'-native-driver')
+                        mode = ['-Wl,-static'] if self.args.static else []
+                        self.run([self.compiler, *flags, '-O3', path, *mode, '-o', driver],
+                                 env=env, timeout=240)
+                        execute(driver, 'native-driver')
+                    return {'backend': backend, 'object_sha256': digest(obj),
+                            'executions': executions,
+                            'validation': 'unmodified built-in EXPECTED prime-count check',
+                            'timing_comparison': False}
+                rows.append(self.test('sieve/'+path.name+'/'+backend, check))
+        failures = [row['name'] for row in rows if row['status'] != 'passed']
+        if failures:
+            raise AssertionError('Sieve qualification failed: '+', '.join(failures))
+        return {'sources': len(paths), 'backends': list(backends),
+                'native_driver': 'native' in backends, 'oracle': 'GNU ld',
+                'timing_comparison': False}
 
     def cjson(self, source):
         src = self.snapshot('cjson', source)
@@ -381,8 +423,92 @@ os.execv({gcc!r},[{gcc!r},{'-B'+str(tools)+'/'!r},'-fno-use-linker-plugin','-fPI
                 assert b'W_InitFiles: no files found' in result.stderr, result.stderr
                 outputs.append((result.stdout, result.stderr))
         assert all(value == outputs[0] for value in outputs), 'Doom startup differs'
-        self.report['limitations'].append({'project': 'doom', 'scope': 'link/startup failure path; no gameplay/WAD acceptance'})
-        return {'objects': len(objects), 'modes': ['fixed', 'pie'], 'oracle': 'GNU ld'}
+        detail = {'objects': len(objects), 'modes': ['fixed', 'pie'], 'oracle': 'GNU ld'}
+        if self.args.doom_wad:
+            detail['rendering'] = self.doom_render(src, build, objects, libraries, flags)
+        else:
+            self.report['limitations'].append({'project': 'doom',
+                'scope': 'link/startup failure path; pass --doom-wad for bounded headless rendering'})
+        return detail
+
+    def doom_render(self, src, build, objects, libraries, flags):
+        wad_source = self.args.doom_wad.resolve()
+        # Linux Doom 1.10 predates -iwad and discovers lowercase names here.
+        if wad_source.name.lower() not in ('doom1.wad', 'doom.wad', 'doomu.wad',
+                                            'doom2.wad', 'doom2f.wad'):
+            raise RuntimeError('Doom 1.10 requires a recognized IWAD filename')
+        wad = build/wad_source.name.lower()
+        shutil.copy2(wad_source, wad)
+        self.report['sources']['doom-wad'] = {'path': str(wad_source),
+                                              'sha256': digest(wad), 'snapshot': str(wad)}
+        changes = []
+        def replace(path, before, after):
+            text = path.read_text()
+            assert text.count(before) == 1, f'unknown Doom fixture: {path.name}'
+            path.write_text(text.replace(before, after))
+            changes.append({'path': str(path.relative_to(src)),
+                            'before': before, 'after': after})
+        # Keep all gameplay/rendering code. Replace only display/audio device
+        # interaction in the snapshot and advance exactly one game tic per frame.
+        replace(src/'i_video.c', 'void I_InitGraphics(void)\n{',
+                'void I_InitGraphics(void)\n{\n    singletics = true;\n'
+                '    wipegamestate = GS_LEVEL;\n    return;')
+        replace(src/'i_video.c', 'void I_SetPalette (byte* palette)\n{',
+                'void I_SetPalette (byte* palette)\n{\n    return;')
+        replace(src/'i_video.c', 'void I_FinishUpdate (void)\n{',
+                'extern void corpus_frame(const unsigned char *);\n'
+                'void I_FinishUpdate (void)\n{\n    corpus_frame(screens[0]);\n    return;')
+        sound = (src/'i_sound.c').read_text()
+        start = sound.index('  // Secure and configure sound device first.')
+        end = sound.index('  // Initialize external data (all sounds) at start, keep static.', start)
+        replace(src/'i_sound.c', sound[start:end],
+                '  /* Headless device sink; keep sound loading and mixing. */\n'
+                '  audio_fd = open("/dev/null", O_WRONLY);\n\n')
+        hook = build/'doom-frame.c'
+        hook.write_text(r'''
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "doomstat.h"
+void corpus_frame(const unsigned char *pixels){
+  static int frames,last_tic=-1;
+  static uint64_t hash=UINT64_C(14695981039346656037);
+  if(gamestate!=GS_LEVEL || gametic==last_tic)return;
+  last_tic=gametic;
+  for(int n=0;n<SCREENWIDTH*SCREENHEIGHT;n++){
+    hash^=pixels[n];hash*=UINT64_C(1099511628211);
+  }
+  if(++frames==32){
+    printf("frames=32 gametic=%d framebuffer=%016llx\n",gametic,(unsigned long long)hash);
+    exit(0);
+  }
+}
+''')
+        objects = [obj for obj in objects if obj.stem not in ('i_video', 'i_sound')]
+        objects += [self.compile(src/(name+'.c'), build/(name+'-probe.o'), flags, src)
+                    for name in ('i_video', 'i_sound')]
+        objects.append(self.compile(hook, build/'doom-frame.o', ('-I'+str(src), '-std=gnu99')))
+        (build/'instrumentation.json').write_text(json.dumps(changes, indent=2)+'\n')
+        config = build/'empty.cfg'
+        config.write_text('')
+        outputs = []
+        for tool, tag in ((self.linker, 'fas'), ('ld', 'gnu')):
+            for pie in (False, True):
+                program = self.hosted(build/f'render-{tag}-{pie}', objects, libraries,
+                                      tool=tool, pie=pie)
+                result = self.run([program, '-config', config,
+                                   '-warp', '1', '1', '-skill', '3'], cwd=build,
+                                  env=dict(os.environ, DISPLAY='', DOOMWADDIR=str(build)), timeout=30)
+                checksum = re.search(rb'frames=32 gametic=32 framebuffer=[0-9a-f]{16}',
+                                     result.stdout)
+                assert checksum, result.stdout
+                outputs.append(checksum.group())
+        assert all(value == outputs[0] for value in outputs), 'Doom framebuffer differs'
+        return {'instrumented_runtime': outputs[0].decode(), 'oracle': 'GNU ld',
+                'modes': ['fixed', 'pie'], 'frames': 32,
+                'instrumentation_sha256': digest(build/'instrumentation.json'),
+                'hook_sha256': digest(hook),
+                'scope': 'E1M1 skill 3, 32 single-tic frames, headless device harness; no input/gameplay acceptance'}
 
     def wolf3d(self, source):
         src = self.snapshot('wolf3d', source)
@@ -451,6 +577,10 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--linker', type=Path, default=ROOT/'_build/default/src/linker/bin/main.exe')
     parser.add_argument('--compiler', type=Path, default=ROOT/'_build/default/bin/main.exe')
+    parser.add_argument('--sieve-backend', choices=('llvm', 'native', 'both'), default='both',
+                        help='required Sieve backends (default: both); failures fail qualification')
+    parser.add_argument('--doom-wad', type=Path,
+                        help='local Doom WAD for a bounded 32-frame headless rendering check')
     parser.add_argument('--strict-dependencies', action='store_true')
     linkage = parser.add_mutually_exclusive_group()
     linkage.add_argument('--static', action='store_true',
@@ -461,6 +591,8 @@ def main():
     for name in ('sieve', 'chibicc', 'chibicc-selfhost', 'cjson', 'zlib', 'doom', 'wolf3d', 'wolf-data'):
         parser.add_argument('--'+name, type=Path)
     args = parser.parse_args()
+    if args.doom_wad and not args.doom:
+        parser.error('--doom-wad requires --doom')
     if not any((args.sieve, args.chibicc, args.chibicc_selfhost, args.cjson, args.zlib, args.doom, args.wolf3d)):
         parser.error('select at least one source project')
     if args.chibicc_selfhost and (args.static or args.static_pie or args.strict_dependencies):

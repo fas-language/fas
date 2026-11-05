@@ -187,7 +187,7 @@ assuming that arbitrary layout scripts are necessary for this use case.
 
 | Area | Existing evidence | Remaining work / release decision |
 | --- | --- | --- |
-| Fas native toolchain | Tool-free native objects and links, separate compilation, archives, scalar C interoperability, supplied freestanding fixtures; automatic hosted CRT/libc linking, C sources/objects/libraries, embedded C/assembly/packages and C main harnesses | All four real Sieve sources still use LLVM-generated objects for linker acceptance. This snapshot's native backend rejects their variadic calls; ABI expansion is being integrated separately. Qualify native Fas applications after that integration. Hosted startup discovery currently requires GCC/Clang; a standalone hosted SDK configuration is future work. |
+| Fas native toolchain | Tool-free native objects and links, separate compilation, archives, scalar C interoperability, supplied freestanding fixtures; automatic hosted CRT/libc linking, C sources/objects/libraries, embedded C/assembly/packages and C main harnesses | The combined ABI/driver snapshot passes all four unmodified Sieve sources with native objects linked by Fas/GNU and with direct native driver builds, dynamically and with static glibc. Broaden native applications beyond Sieve and the existing fixtures. Hosted startup discovery currently requires GCC/Clang; a standalone hosted SDK configuration is future work. |
 | Hosted C | GCC/Clang drivers, fixed/PIE/shared output, CRT lifecycle, glibc and isolated musl, threads/TLS, declared executable COPY subset and full Chibicc self-hosting/driver suites | Publish supported compiler/libc/kernel baselines and run them in CI. COPY storage with overlapping aliases, protected/unique data and mixed version spellings requires PIC; arbitrary text relocations remain unsupported. |
 | Static C | Static ET_EXEC glibc/musl and IFUNC startup; declared static PIE with CRT self-relocation, ASLR, lifecycle, threaded/aligned TLS and glibc IFUNC ordering | Wider real static PIE programs and libc versions remain qualification work. Static GD/LD/TLSDESC relaxation is absent and must remain explicit. |
 | Archives and partial links | Regular/thin GNU archives, indexes, groups, weak/common/COMDAT, multi-stage `-r`, independent consumers | Broader build-system acceptance, sustained container/member fuzzing, and declared behavior for empty archive selections. BSD archive support is optional unless a required toolchain emits it. |
@@ -203,9 +203,10 @@ assuming that arbitrary layout scripts are necessary for this use case.
 Existing corpora have useful but bounded acceptance: Chibicc's stage 1/stage 2
 compilers, both upstream driver suites and 82 C runtime comparisons pass, as do
 cJSON's 21 upstream tests. The new Chibicc gate uses a checksum-pinned unmodified
-snapshot and logs every actual Fas invocation. Doom
-covers the missing-WAD startup path. Wolf3D covers three deterministic headless
-frames, not general gameplay. Add broader C projects and real build systems;
+snapshot and logs every actual Fas invocation. Doom covers the missing-WAD
+startup path and 32 deterministic headless E1M1 frames across Fas/GNU fixed/PIE
+links. Wolf3D covers three deterministic headless frames. These instrumented
+rendering probes do not establish general gameplay acceptance. Add broader C projects and real build systems;
 successful link commands alone do not establish application behavior.
 
 C++ exceptions/RTTI/lifecycle coverage stays as regression evidence for shared

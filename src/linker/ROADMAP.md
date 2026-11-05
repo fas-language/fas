@@ -110,6 +110,10 @@ Linux compatibility milestone includes the following before its scope freezes:
   fixed/PIE/static plans pass. Closed programs and explicit freestanding object
   links retain the tool-free path. C driver discovery is a bootstrap dependency;
   a compiler-independent hosted SDK configuration remains future work.
+  The combined ABI/driver snapshot passes all four original Sieve sources with
+  native objects linked by Fas/GNU and direct native driver executables, including
+  static glibc. Native runs disable LLVM tools; C header imports and hosted
+  discovery retain the documented C compiler bootstrap dependency.
 - **Scale**: replace initial resource caps only with large-input, memory and
   overflow tests. Exercise address-space gaps and relocation boundaries, not just
   large file sizes; continue multicore scale qualification in v0.8 and large CI
