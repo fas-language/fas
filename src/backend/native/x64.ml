@@ -106,6 +106,11 @@ type reloc =
   | Abs64 of { offset : int; symbol : string; addend : int }
   | Abs32s of { offset : int; symbol : string; addend : int }
       (** 32-bit absolute, sign-extended by the CPU. *)
+  | Gotpcrel of { offset : int; symbol : string; addend : int }
+      (** PC-relative address of the symbol's GOT entry, in a
+          `mov r64, [rip + sym@GOTPCREL]` (see [load_got]); same "next byte"
+          convention as [Rel32]. Position-independent objects reach symbols
+          another module may define or interpose through it. *)
 
 type t = {
   code : Buffer.t;
@@ -354,6 +359,18 @@ let mfence a =
   byte a 0xf0
 
 let lea a dst mem = rm a [ 0x8d ] ~reg:dst mem
+
+(* mov dst, [rip + symbol@GOTPCREL]: the address of [symbol] read from its
+   GOT entry. Always REX.W 8B /r with a RIP-relative ModRM, the exact form
+   R_X86_64_REX_GOTPCRELX promises, so a linker may relax it to a lea when
+   the symbol turns out to be local. *)
+let load_got a dst symbol =
+  let d = reg_num dst in
+  rex a ~w:true ~r:d ~b:0 ();
+  byte a 0x8b;
+  modrm a 0 d 5;
+  a.relocs <- Gotpcrel { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  int32 a 0
 
 (* Zero-extend the low [bits] of a register in place. *)
 let zero_extend a bits r =

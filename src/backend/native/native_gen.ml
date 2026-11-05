@@ -831,6 +831,30 @@ let slot fr id =
   | Some o -> A.Base (A.Rbp, o)
   | None -> unsupported "use of %%v%d before any definition" id
 
+(* Position independence. A static image from [compile] / [link_files] has a
+   fixed address, so symbols are reached directly: [rip + sym], or a 32-bit
+   absolute displacement in an indexed operand. An object for an external
+   linker ([compile_object]: `fas -c` and hosted links) may land in a PIE or
+   a shared library, where neither is allowed for every symbol:
+   - an indexed operand cannot carry an absolute address; the symbol's
+     address goes to a base register first (lea base, [rip + sym]);
+   - a symbol another module may define or interpose (exported and imported
+     data, External functions and declarations) is addressed through its GOT
+     entry, as LLVM's pic model does without dso_local. The linker relaxes
+     the load back to a lea when the symbol resolves locally.
+   Calls to functions keep Call32 (PLT32) either way. *)
+let pic = ref false
+let got_syms : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 64
+let via_got s = !pic && Stdlib.Hashtbl.mem got_syms s
+
+(* [r] <- address of [s] + [off] *)
+let sym_addr a r s off =
+  if via_got s then begin
+    A.load_got a r s;
+    if off <> 0 then A.lea a r (A.Base (r, off))
+  end
+  else A.lea a r (A.Rip (s, off))
+
 (* Values *)
 
 (* Load a scalar value into [r], canonical (zero-extended). *)
@@ -843,7 +867,7 @@ let load ctx fr r v =
   | Local (id, _) when Hashtbl.mem fr.addrs.skip id -> (
       let f = Hashtbl.find fr.addrs.forms id in
       match f with
-      | { anchor = Sym s; idx = None; off } -> A.lea a r (A.Rip (s, off))
+      | { anchor = Sym s; idx = None; off } -> sym_addr a r s off
       | { anchor = Frame al; idx = None; off } ->
           A.lea a r (A.Base (A.Rbp, Hashtbl.find fr.allocas al + off))
       | _ -> invalid_arg "folded address used as a value")
@@ -858,7 +882,7 @@ let load ctx fr r v =
           match Ptbl.find_opt fr.params name with
           | Some o -> A.load_zx a 8 r (A.Base (A.Rbp, o))
           | None -> unsupported "unknown parameter %s" name))
-  | Global (name, _) -> A.lea a r (A.Rip (name, 0))
+  | Global (name, _) -> sym_addr a r name 0
   | Const_vector _ -> unsupported "vector constants"
 
 let load_signed ctx fr r v =
@@ -920,10 +944,21 @@ let mem_of_form ctx fr f ~sb ~si =
   let index () = Option.map (fun (v, sc) -> (in_reg ctx fr v si, sc)) f.idx in
   match f.anchor with
   | Sym s -> (
-      match index () with
-      | None -> A.Rip (s, f.off)
-      | Some (index, scale) ->
-          A.Sib { base = None; index; scale; disp = f.off; sym = Some s })
+      let idx = index () in
+      if via_got s || (!pic && idx <> None) then begin
+        (* see [pic]: the address goes to [sb] (after the index, which is
+           in a home or in [si]) *)
+        sym_addr ctx.a sb s 0;
+        match idx with
+        | None -> A.Base (sb, f.off)
+        | Some (index, scale) ->
+            A.Sib { base = Some sb; index; scale; disp = f.off; sym = None }
+      end
+      else
+        match idx with
+        | None -> A.Rip (s, f.off)
+        | Some (index, scale) ->
+            A.Sib { base = None; index; scale; disp = f.off; sym = Some s })
   | Frame al -> (
       let off = Hashtbl.find fr.allocas al + f.off in
       match index () with
@@ -2177,7 +2212,7 @@ let gen_instr ctx fr ins =
       A.lea a A.Rax (A.Rip (Printf.sprintf ".str.%d" index, 0));
       put ctx fr id A.Rax
   | Global_ptr (id, name, _) ->
-      A.lea a A.Rax (A.Rip (name, 0));
+      sym_addr a A.Rax name 0;
       put ctx fr id A.Rax
   | Trap -> A.ud2 a
   | Syscall (id, args) ->
@@ -2662,6 +2697,21 @@ let generate ~startup (m : module_) =
   try
     if m.target_triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported";
+    pic := not startup;
+    Stdlib.Hashtbl.reset got_syms;
+    if !pic then begin
+      List.iter
+        (fun (f : func) ->
+          if f.linkage = External then Stdlib.Hashtbl.replace got_syms f.name ())
+        m.funcs;
+      List.iter
+        (function
+          | Storage_global { name; linkage = Ast.Export_c | Import_c | Import_const_c; _ }
+            ->
+              Stdlib.Hashtbl.replace got_syms name ()
+          | _ -> ())
+        m.globals
+    end;
     (* No debug info yet: source locations only slow every pass down *)
     let m =
       {
@@ -2888,8 +2938,13 @@ let generate ~startup (m : module_) =
                   bss := !bss + size
                 end
                 else
+                  (* A pointer in a position-independent object needs a
+                     load-time relocation, which read-only pages cannot take
+                     (TEXTREL), so such a constant goes to .data *)
                   let d, section =
-                    if readonly then (rodata, Elf64.Rodata) else (data, Elf64.Data)
+                    if readonly && not (!pic && pointers <> []) then
+                      (rodata, Elf64.Rodata)
+                    else (data, Elf64.Data)
                   in
                   place_data d section ~name ~align ~size (fun offset ->
                       (match bytes with
@@ -2907,6 +2962,7 @@ let generate ~startup (m : module_) =
           | A.Rel32 { symbol; _ }
           | A.Call32 { symbol; _ }
           | A.Abs32s { symbol; _ }
+          | A.Gotpcrel { symbol; _ }
           | A.Abs64 { symbol; _ }
           -> Ptbl.replace referenced symbol ()))
       [ text_relocs; rodata.relocs; data.relocs ];

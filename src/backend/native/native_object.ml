@@ -58,6 +58,9 @@ let emit ~global ~alignments (input : Elf64.input) =
                 (offset, symbol, 11, Int64.of_int addend)
             | X64.Abs64 { offset; symbol; addend } ->
                 (offset, symbol, 1, Int64.of_int addend)
+            | X64.Gotpcrel { offset; symbol; addend } ->
+                (* R_X86_64_REX_GOTPCRELX; same next-byte adjustment as PC32 *)
+                (offset, symbol, 42, Int64.sub (Int64.of_int addend) 4L)
           in
           let symbol = reference name in
           relocations :=

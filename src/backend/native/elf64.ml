@@ -88,6 +88,9 @@ let link (i : input) =
         set_u32 bytes offset v
     | X64.Abs64 { offset; symbol; addend } ->
         set_u64 bytes offset (address symbol + addend)
+    | X64.Gotpcrel { symbol; _ } ->
+        (* only position-independent objects use the GOT *)
+        invalid_arg ("elf64: GOT reference in a static image for " ^ symbol)
   in
   let text = Bytes.copy i.text
   and rodata = Bytes.copy i.rodata
