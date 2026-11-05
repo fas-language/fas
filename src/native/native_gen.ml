@@ -2293,7 +2293,11 @@ let compile (m : module_) =
                      if not (Ptbl.mem live g.name) then []
                      else if f == g then [ g ]
                      else
-                       [ Mem2reg.cleanup_func (Ir_fold.fold_function (Mem2reg.func g)) ])
+                       [
+                         Mem2reg.cleanup_func
+                           (Ir_fold.fold_function
+                              (Mem2reg.func (Ir_fold.fold_function g)));
+                       ])
                    fs gs)
             in
             { m' with funcs = t "reclean" again (m.funcs, m'.funcs) }

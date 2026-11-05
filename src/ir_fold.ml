@@ -236,7 +236,20 @@ let evaluate = function
       | Some v -> Some (i, v)
       | None -> Option.map (fun v -> (i, v)) (identity op t a b))
   | Cmp (i, c, _, a, b) -> Option.map (fun v -> (i, v)) (fold_cmp c a b)
-  | Cast (i, k, ft, v, tt) -> Option.map (fun v -> (i, v)) (fold_cast k ft v tt)
+  | Cast (i, k, ft, v, tt) -> (
+      match fold_cast k ft v tt with
+      | Some v -> Some (i, v)
+      | None -> (
+          (* a bitcast to the same type, or between pointers, is a copy *)
+          match (k, ft, tt) with
+          | "bitcast", Pointer _, Pointer _ -> Some (i, v)
+          | "bitcast", (I8 | I16 | I32 | I64), _ when ft = tt -> Some (i, v)
+          | _ -> None))
+  (* a byte address at offset zero is its base (aggregate element zero
+     keeps its two-index form, which scalar replacement looks for) *)
+  | Gep (i, _, p, [ Index v ])
+    when int_const v <> None && snd (Option.get (int_const v)) = 0L ->
+      Some (i, p)
   | Select (i, Const (I1, c), a, b) -> Some (i, if c <> 0L then a else b)
   | Phi (i, _, ((Const _ as v), _) :: rest) when List.for_all (fun (w, _) -> w = v) rest
     ->
