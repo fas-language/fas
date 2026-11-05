@@ -195,8 +195,34 @@ let convert_inst cx (i : inst) =
       | Or -> bin Ir.Or | Xor -> bin Ir.Xor | Shl -> bin Ir.Shl | Lshr -> bin Ir.Lshr
       | Ashr -> bin Ir.Ashr
       | Smin -> minmax Ir.Slt | Smax -> minmax Ir.Sgt | Umin -> minmax Ir.Ult | Umax -> minmax Ir.Ugt
-      | Umulh -> intrinsic cx (r 0) "llvm.fas.umulh" [ arg cx a; arg cx b ]
-      | Smulh -> intrinsic cx (r 0) "llvm.fas.smulh" [ arg cx a; arg cx b ]
+      | Umulh | Smulh -> (
+          (* trunc ((ext a * ext b) >> w) in twice the width, the same shape
+             Fas lowers `mul_hi` to. LLVM matches it to one mul; the native
+             scalarize pass (mul_high) turns the i128 form back into its
+             llvm.fas.umulh/smulh pseudo-intrinsic, which LLVM itself does
+             not know. *)
+          let t = ir_ty (ty_of f a) in
+          let wide =
+            match t with
+            | Ir.I8 -> Ir.I16 | Ir.I16 -> Ir.I32 | Ir.I32 -> Ir.I64 | Ir.I64 -> Ir.I128
+            | _ -> unsupported "vector or i1 mul-high"
+          in
+          let w = match t with Ir.I8 -> 8L | Ir.I16 -> 16L | Ir.I32 -> 32L | _ -> 64L in
+          let signed = k = Smulh in
+          let ext x =
+            let id = fresh cx in
+            add cx (Ir.Cast (id, (if signed then "sext" else "zext"), t, v x, wide));
+            Ir.Local (id, wide)
+          in
+          let xa = ext a in
+          let xb = ext b in
+          let p = fresh cx in
+          add cx (Ir.Bin (p, Ir.Mul, wide, xa, xb));
+          let h = fresh cx in
+          add cx
+            (Ir.Bin
+               (h, (if signed then Ir.Ashr else Ir.Lshr), wide, Ir.Local (p, wide), Ir.Const (wide, w)));
+          def cx (r 0) (fun id t -> Ir.Cast (id, "trunc", wide, Ir.Local (h, wide), t)))
       | Uadd_sat -> intrinsic cx (r 0) ("llvm.uadd.sat." ^ sfx) [ arg cx a; arg cx b ]
       | Sadd_sat -> intrinsic cx (r 0) ("llvm.sadd.sat." ^ sfx) [ arg cx a; arg cx b ]
       | Usub_sat -> intrinsic cx (r 0) ("llvm.usub.sat." ^ sfx) [ arg cx a; arg cx b ]

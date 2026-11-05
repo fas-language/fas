@@ -108,7 +108,7 @@ and gen_int_op g w =
   | 10 ->
       (* funnel shifts take the count modulo the width *)
       line g "%s = %s %s %s, %s, %s" r (choose g [ "fshl"; "fshr" ]) t a b (pick g (I w))
-  | 0 | 1 -> line g "%s = %s %s %s, %s" r (choose g [ "add"; "sub"; "mul" ]) t a b
+  | 0 | 1 -> line g "%s = %s %s %s, %s" r (choose g [ "add"; "sub"; "mul"; "umulh"; "smulh" ]) t a b
   | 2 -> line g "%s = %s %s %s, %s" r (choose g [ "and"; "or"; "xor" ]) t a b
   | 3 ->
       let s = fresh g in
