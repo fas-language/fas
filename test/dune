@@ -74,3 +74,11 @@
  (name fir_test)
  (modules fir_test)
  (libraries fas_compiler))
+
+; Differential fuzzer: random Fir modules, native backend against LLVM.
+; Not run by `dune runtest` (it needs clang and takes a while); see
+; test/fir_fuzz.sh.
+(executable
+ (name fir_fuzz)
+ (modules fir_fuzz)
+ (libraries fas_compiler))
