@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -36,8 +37,14 @@ class Corpus:
         shutil.copy2(Path(__file__), harness)
         compiler_source = args.compiler.resolve()
         self.compiler = tools/'fas-compiler'
-        if args.sieve:
+        if args.sieve or args.sqlite:
             shutil.copy2(compiler_source, self.compiler)
+        self.sqlite_fixtures = {}
+        if args.sqlite:
+            for name in ('sqlite_consumer.c', 'sqlite_consumer.fas', 'sqlite_extension.c'):
+                fixture = tools/name
+                shutil.copy2(Path(__file__).with_name(name), fixture)
+                self.sqlite_fixtures[name] = fixture
         self.report = {'started': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
                        'harness_sha256': digest(Path(__file__)),
                        'harness_snapshot': str(harness),
@@ -45,10 +52,13 @@ class Corpus:
                        'linker_source': str(linker_source),
                        'linker_snapshot': str(self.linker), 'tests': [], 'sources': {},
                        'limitations': [], 'timing_comparison': False}
-        if args.sieve:
+        if args.sieve or args.sqlite:
             self.report['compiler'] = {'source': str(compiler_source),
                                        'snapshot': str(self.compiler),
                                        'sha256': digest(self.compiler)}
+        if args.sqlite:
+            self.report['sqlite_fixture_sha256'] = {
+                name: digest(path) for name, path in self.sqlite_fixtures.items()}
         self.report['linkage'] = 'static-pie' if args.static_pie else 'static' if args.static else 'dynamic'
         self.dependency_paths = [str(p.resolve()) for p in args.dependency_path]
         self.report['dependency_policy'] = {
@@ -56,9 +66,9 @@ class Corpus:
         self.crts = {}
         crt_names = ['crt1.o', 'Scrt1.o', 'crti.o', 'crtbegin.o', 'crtbeginS.o',
                      'crtend.o', 'crtendS.o', 'crtn.o', 'libgcc.a']
-        if args.static or args.static_pie:
+        if args.static or args.static_pie or args.sqlite:
             crt_names += ['crtbeginT.o', 'libgcc_eh.a', 'libc.a', 'libm.a', 'libmvec.a']
-        if args.static_pie:
+        if args.static_pie or args.sqlite:
             crt_names += ['rcrt1.o']
         for name in crt_names:
             path = Path(self.run(['gcc', '-print-file-name='+name]).stdout.decode().strip()).resolve()
@@ -153,6 +163,228 @@ class Corpus:
                   crt['crtendS.o' if pie else 'crtend.o'], crt['crtn.o']])
         self.run(['readelf', '-aW', output])
         return output
+
+    def sqlite(self, source):
+        src = self.snapshot('sqlite', source)
+        build = src.parent/'build'
+        build.mkdir()
+        wrappers = build/'toolchain'
+        wrappers.mkdir()
+        calls = build/'linker-invocations.jsonl'
+        inputs = build/'link-inputs'
+        inputs.mkdir()
+        gcc = shutil.which('gcc')
+        # Retain temporary compiler objects before collect2 removes them. This
+        # lets GNU consume exactly the same testfixture/CLI/DSO input objects.
+        for name, body in (
+            ('ld', f'''import hashlib,json,os,shutil,sys,tempfile
+from pathlib import Path
+directory=Path(tempfile.mkdtemp(prefix='link-',dir={str(inputs)!r}))
+arguments=sys.argv[1:]; replay=list(arguments); saved={{}}
+for index,arg in enumerate(arguments):
+    path=Path(arg)
+    if arg.endswith('.o') and path.is_file():
+        target=directory/(str(index)+'-'+path.name)
+        shutil.copy2(path,target); replay[index]=str(target)
+        saved[str(target)]=hashlib.sha256(target.read_bytes()).hexdigest()
+with open({str(calls)!r},'a') as out:
+    out.write(json.dumps({{'argv':arguments,'replay':replay,'cwd':os.getcwd(),'saved_object_sha256':saved}})+'\\n')
+os.execv({str(self.linker)!r},[{str(self.linker)!r},*arguments])
+'''),
+            ('cc', f'''import os,sys
+os.execv({gcc!r},[{gcc!r},{'-B'+str(wrappers)+'/'!r},'-fno-use-linker-plugin',*sys.argv[1:]])
+''')):
+            path = wrappers/name
+            path.write_text('#!'+sys.executable+'\n'+body)
+            path.chmod(0o755)
+        environment = dict(os.environ, CC=str(wrappers/'cc'), CFLAGS='-O2 -g -fPIC')
+        configure = [src/'configure', '--all', '--disable-readline']
+        if self.args.sqlite_tcl_config:
+            configure.append('--with-tcl='+str(self.args.sqlite_tcl_config.resolve()))
+        if self.args.sqlite_tclsh:
+            configure.append('--with-tclsh='+str(self.args.sqlite_tclsh.resolve()))
+        self.run(configure, cwd=build, env=environment)
+        self.run(['nice', '-n', '10', 'make', '-j2', 'sqlite3', 'libsqlite3.so',
+                  'libsqlite3.a', 'testfixture'], cwd=build, env=environment, timeout=600)
+        invocations = [json.loads(line) for line in calls.read_text().splitlines()]
+        assert invocations, 'upstream SQLite build did not invoke Fas'
+
+        def oracle(name):
+            matches = [row for row in invocations if '-o' in row['argv']
+                       and Path(row['argv'][row['argv'].index('-o')+1]).name == name]
+            assert len(matches) == 1, (name, len(matches))
+            row = matches[0]
+            arguments = list(row['replay'])
+            target = build/(name+'-gnu')
+            arguments[arguments.index('-o')+1] = str(target)
+            self.run(['ld', *arguments], cwd=row['cwd'])
+            return target
+
+        gnu_shell = oracle('sqlite3')
+        gnu_fixture = oracle('testfixture')
+        gnu_library = oracle('libsqlite3.so')
+        library_dirs = {}
+        for tag, library in (('fas', build/'libsqlite3.so'), ('gnu', gnu_library)):
+            directory = build/('library-'+tag)
+            directory.mkdir()
+            shutil.copy2(library, directory/'libsqlite3.so')
+            library_dirs[tag] = directory
+        extension_object = self.compile(self.sqlite_fixtures['sqlite_extension.c'],
+                                        build/'extension.o', ('-I'+str(build),))
+        extensions = {}
+        for tag, linker in (('fas', self.linker), ('gnu', 'ld')):
+            extensions[tag] = build/('extension-'+tag+'.so')
+            self.run([linker, '-shared', '--hash-style=both', '-o', extensions[tag],
+                      extension_object], cwd=build)
+        compared = []
+        compilers = [('gcc', gcc)]
+        clang = shutil.which('clang-22') or shutil.which('clang')
+        if clang:
+            compilers.append(('clang', clang))
+        else:
+            self.report['limitations'].append('SQLite Clang consumers unverified: Clang unavailable')
+        for cc_tag, cc in compilers:
+            obj = build/('consumer-'+cc_tag+'.o')
+            self.run([cc, '-c', '-O2', '-g', '-fPIC', '-pthread', '-I'+str(build),
+                      self.sqlite_fixtures['sqlite_consumer.c'], '-o', obj])
+            modes = [('archive-pie', ['-pie'], [build/'libsqlite3.a'], False),
+                     ('archive-fixed', ['-no-pie'], [build/'libsqlite3.a'], False),
+                     ('static', ['-static'], [build/'libsqlite3.a'], True),
+                     ('static-pie', ['-static-pie'], [build/'libsqlite3.a'], True)]
+            for producer, directory in library_dirs.items():
+                modes.append(('shared-'+producer, ['-pie'],
+                              ['-L'+str(directory), '-Wl,-rpath,'+str(directory),
+                               '-lsqlite3'], False))
+            for mode, flags, library, static in modes:
+                outputs = []
+                for tag in ('fas', 'gnu'):
+                    program = build/f'{cc_tag}-{mode}-{tag}'
+                    selection = ['-B'+str(wrappers)+'/'] if tag == 'fas' else ['-fuse-ld=bfd']
+                    if cc_tag == 'gcc':
+                        selection.append('-fno-use-linker-plugin')
+                    self.run([cc, *selection, *flags, '-o', program, obj, *library,
+                              '-lm', '-ldl', '-pthread'], cwd=build)
+                    inspected = self.run(['readelf', '-aW', program])
+                    assert not inspected.stderr, inspected.stderr
+                    data = program.read_bytes()
+                    elf_type = struct.unpack_from('<H', data, 16)[0]
+                    assert elf_type == (2 if mode in ('archive-fixed', 'static') else 3)
+                    phoff = struct.unpack_from('<Q', data, 32)[0]
+                    phnum = struct.unpack_from('<H', data, 56)[0]
+                    kinds = [struct.unpack_from('<I', data, phoff+n*56)[0] for n in range(phnum)]
+                    assert (3 in kinds) == (not static), 'unexpected interpreter policy'
+                    for ext_tag, extension in ([('none', '-')] if static else extensions.items()):
+                        runtime = build/f'run-{cc_tag}-{mode}-{tag}-{ext_tag}'
+                        runtime.mkdir()
+                        result = self.run([program, runtime/'test.db', extension], cwd=runtime)
+                        outputs.append(result.stdout)
+                        compared.append({'compiler': cc_tag, 'mode': mode, 'linker': tag,
+                                         'extension_linker': ext_tag, 'program_sha256': digest(program),
+                                         'stdout_sha256': hashlib.sha256(result.stdout).hexdigest()})
+                assert all(value == outputs[0] for value in outputs), 'SQLite API outputs differ'
+        native = []
+        for mode, flags, library in (
+                ('archive', [], [build/'libsqlite3.a']),
+                ('shared', [], ['-L', library_dirs['fas'], '-lsqlite3',
+                                '-Wl,-rpath,'+str(library_dirs['fas'])]),
+                ('static', ['-Wl,-static'], [build/'libsqlite3.a']),
+                ('static-pie', ['-Wl,-static-pie'], [build/'libsqlite3.a'])):
+            program = build/('fas-native-'+mode)
+            self.run([self.compiler, '--backend=native', self.sqlite_fixtures['sqlite_consumer.fas'],
+                      *flags, *library, '-lm', '-ldl', '-o', program],
+                     env=dict(os.environ, FAS_CC=gcc, FAS_FIR='',
+                              FAS_OPT='/nonexistent/opt', FAS_LLC='/nonexistent/llc'), timeout=120)
+            self.run([program])
+            data = program.read_bytes()
+            assert struct.unpack_from('<H', data, 16)[0] == (3 if mode == 'static-pie' else 2)
+            phoff = struct.unpack_from('<Q', data, 32)[0]
+            phnum = struct.unpack_from('<H', data, 56)[0]
+            kinds = [struct.unpack_from('<I', data, phoff+n*56)[0] for n in range(phnum)]
+            assert (3 in kinds) == (mode not in ('static', 'static-pie'))
+            native.append({'mode': mode, 'program_sha256': digest(program)})
+        # Cross-read an on-disk database and a shell dump through both linkers.
+        database = build/'shell.db'
+        sql = ('CREATE TABLE t(x INTEGER); INSERT INTO t VALUES(19),(23);'
+               'SELECT sum(x) FROM t; PRAGMA integrity_check;\n')
+        result = self.run([build/'sqlite3', database, sql])
+        assert result.stdout == b'42\nok\n', result.stdout
+        assert self.run([gnu_shell, database, 'SELECT sum(x) FROM t']).stdout == b'42\n'
+        dumped = self.run([build/'sqlite3', database, '.dump']).stdout.decode()
+        restored = build/'restored.db'
+        self.run([gnu_shell, restored, dumped])
+        assert self.run([build/'sqlite3', restored, 'SELECT sum(x) FROM t']).stdout == b'42\n'
+        upstream = []
+        # Save completed API/native coverage even if an upstream test fails.
+        detail = {'version': (src/'VERSION').read_text().strip(),
+                  'api_executions': compared, 'native_fas_consumers': native,
+                  'upstream': upstream, 'shell_cross_read_and_restore': 'passed'}
+        suite_environment = dict(os.environ)
+        for variable in ('QUICKTEST_OMIT', 'QUICKTEST_INCLUDE', 'TEST_FAILURE'):
+            suite_environment.pop(variable, None)
+        detail['test_selection_environment'] = 'QUICKTEST_OMIT/QUICKTEST_INCLUDE/TEST_FAILURE unset'
+        self.report['sqlite_qualification'] = detail
+        self.save()
+        for tag, fixture in (('fas', build/'testfixture'), ('gnu', gnu_fixture)):
+            # tester.tcl discovers subprocesses beside its own executable.
+            # Give each oracle its matching CLI rather than sharing Fas's CLI.
+            home = build/('fixture-'+tag)
+            home.mkdir()
+            shutil.copy2(fixture, home/'testfixture')
+            shutil.copy2(build/'sqlite3' if tag == 'fas' else gnu_shell, home/'sqlite3')
+            runtime = build/('upstream-'+tag)
+            runtime.mkdir()
+            # Use upstream's current runner: each test gets its own process and
+            # scratch directory. The legacy extraquick.test sources everything
+            # into one interpreter and leaks test state between scripts.
+            selection = ['extraquick'] if self.args.sqlite_extraquick else ['veryquick', '^test/main.test$']
+            print('SQLite upstream '+tag+': '+' '.join(selection), flush=True)
+            result = self.run(['nice', '-n', '10', home/'testfixture',
+                               src/'test/testrunner.tcl', '--jobs', '2', *selection],
+                              cwd=runtime, env=suite_environment, expected=None, timeout=1200)
+            text = result.stdout.decode(errors='replace')
+            summary = re.search(r'(\d+) errors out of (\d+) tests', text)
+            with sqlite3.connect('file:'+str(runtime/'testrunner.db')+'?mode=ro', uri=True) as db:
+                jobs = [dict(zip(('name', 'state', 'tests', 'errors'), row)) for row in
+                        db.execute('SELECT displayname,state,ntest,nerr FROM jobs ORDER BY displayname')]
+            upstream.append({'linker': tag, 'runner': 'test/testrunner.tcl',
+                             'selection': selection, 'exit_status': result.returncode,
+                             'tests': int(summary[2]) if summary else None,
+                             'errors': int(summary[1]) if summary else None,
+                             'jobs': jobs, 'summary_tail': text[-4000:],
+                             'stdout_sha256': hashlib.sha256(result.stdout).hexdigest(),
+                             'test_log_sha256': digest(runtime/'testrunner.log')})
+            self.save()
+        # Run and record both oracles before deciding whether qualification passed.
+        for row in upstream:
+            assert row['exit_status'] == 0 and row['errors'] == 0 and row['tests'], row['summary_tail']
+            assert row['jobs'] and all(job['state'] == 'done' for job in row['jobs']), row['linker']
+        assert [job['name'] for job in upstream[0]['jobs']] == [
+                job['name'] for job in upstream[1]['jobs']], 'upstream test selections differ'
+        # Some upstream scripts use Tcl rand() to generate a variable number
+        # of assertions (e.g. FTS5 distinct random terms). Each oracle must pass
+        # its own assertions; their assertion counts need not be identical.
+        detail['upstream_assertion_count_differences'] = [
+            {'name': left['name'], 'fas': left['tests'], 'gnu': right['tests']}
+            for left, right in zip(upstream[0]['jobs'], upstream[1]['jobs'])
+            if left['tests'] != right['tests']]
+        invocations = [json.loads(line) for line in calls.read_text().splitlines()]
+        expected_outputs = {'sqlite3', 'testfixture', 'libsqlite3.so'}
+        expected_outputs.update(f'{cc}-{mode}-fas' for cc, _ in compilers
+                                for mode, *_ in modes)
+        linked_outputs = {Path(row['argv'][row['argv'].index('-o')+1]).name
+                          for row in invocations if '-o' in row['argv']}
+        assert expected_outputs <= linked_outputs, 'selected builds bypassed Fas'
+        for name in ('sqlite3', 'libsqlite3.so', 'testfixture'):
+            self.run(['readelf', '-aW', build/name])
+        detail.update({'actual_linker_invocations': len(invocations),
+                'linker_invocations_sha256': digest(calls), 'api_executions': compared,
+                'native_fas_consumers': native, 'upstream': upstream,
+                'shell_cross_read_and_restore': 'passed',
+                'artifacts': {name: digest(build/name) for name in
+                              ('sqlite3', 'libsqlite3.so', 'libsqlite3.a', 'testfixture')},
+                'limits': 'Public Tcl suite only; upstream testfixture defines SQLITE_NO_SYNC. No TH3, full SQLite release suite, power-loss or timing claim.',
+                'scope': 'upstream configure/make --all; GCC/Clang API consumers; static/fixed/PIE/static-PIE; Fas/GNU DSOs and loadable extensions; WAL/thread/backup/JSON/FTS5/RTREE; native Fas'})
+        return detail
 
     def zlib(self, source):
         src = self.snapshot('zlib', source)
@@ -581,6 +813,12 @@ def main():
                         help='required Sieve backends (default: both); failures fail qualification')
     parser.add_argument('--doom-wad', type=Path,
                         help='local Doom WAD for a bounded 32-frame headless rendering check')
+    parser.add_argument('--sqlite-tcl-config', type=Path,
+                        help='SQLite --with-tcl directory containing tclConfig.sh')
+    parser.add_argument('--sqlite-tclsh', type=Path,
+                        help='SQLite code-generation Tcl interpreter (otherwise upstream discovery)')
+    parser.add_argument('--sqlite-extraquick', action='store_true',
+                        help='run the upstream isolated extraquick selection instead of main.test')
     parser.add_argument('--strict-dependencies', action='store_true')
     linkage = parser.add_mutually_exclusive_group()
     linkage.add_argument('--static', action='store_true',
@@ -588,13 +826,17 @@ def main():
     linkage.add_argument('--static-pie', action='store_true',
                          help='CRT-relocated static PIE glibc corpus (cJSON/zlib PIC objects only)')
     parser.add_argument('--dependency-path', action='append', type=Path, default=[])
-    for name in ('sieve', 'chibicc', 'chibicc-selfhost', 'cjson', 'zlib', 'doom', 'wolf3d', 'wolf-data'):
+    for name in ('sieve', 'chibicc', 'chibicc-selfhost', 'cjson', 'zlib', 'sqlite', 'doom', 'wolf3d', 'wolf-data'):
         parser.add_argument('--'+name, type=Path)
     args = parser.parse_args()
     if args.doom_wad and not args.doom:
         parser.error('--doom-wad requires --doom')
-    if not any((args.sieve, args.chibicc, args.chibicc_selfhost, args.cjson, args.zlib, args.doom, args.wolf3d)):
+    if not any((args.sieve, args.chibicc, args.chibicc_selfhost, args.cjson, args.zlib, args.sqlite, args.doom, args.wolf3d)):
         parser.error('select at least one source project')
+    if (args.sqlite_tcl_config or args.sqlite_tclsh or args.sqlite_extraquick) and not args.sqlite:
+        parser.error('--sqlite-* options require --sqlite')
+    if args.sqlite and (args.static or args.static_pie or args.strict_dependencies):
+        parser.error('--sqlite runs its own archive/shared/fixed/PIE/static/static-PIE matrix; select it separately')
     if args.chibicc_selfhost and (args.static or args.static_pie or args.strict_dependencies):
         parser.error('--chibicc-selfhost qualifies the upstream driver policy; use --chibicc for alternate raw-link modes')
     if args.dependency_path and not args.strict_dependencies:
@@ -606,7 +848,7 @@ def main():
     if (args.static or args.static_pie) and args.strict_dependencies:
         parser.error('static modes have no DSO dependency graph to validate')
     corpus = Corpus(args)
-    for name in ('chibicc', 'chibicc_selfhost', 'sieve', 'cjson', 'zlib', 'doom', 'wolf3d'):
+    for name in ('chibicc', 'chibicc_selfhost', 'sieve', 'cjson', 'zlib', 'sqlite', 'doom', 'wolf3d'):
         path = getattr(args, name)
         if path:
             corpus.test(name, lambda name=name, path=path: getattr(corpus, name)(path))

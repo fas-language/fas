@@ -10,6 +10,11 @@ exports image-relative semantics, preserve creation permissions, implement the
 declared registry subset and reject unsupported legacy lifecycle lists. Release
 qualification remains separate from passing these regression gates.
 
+Current priority (user decision, 2026-11-05): finish the declared Linux Fas/C
+functionality and production qualification before the main performance pass.
+Keep the existing timing evidence as a baseline; do not schedule optimization
+campaigns while compatibility and release gates remain the active work.
+
 Fas and native C are the release priorities. Existing C++ tests remain useful
 regression coverage; keep that usable interoperability level without expanding
 the C++ scope. Compiler-specific LTO is explicitly out of scope, including future
@@ -24,14 +29,15 @@ roadmap work, per the user's scope decision.
 | **0.5 — implemented dynamic-executable subset** | Dynamically linked executables and PIE: shared-library inputs, eager GOT/PLT, dynamic relocations, required import versions, four traditional TLS code models, init/fini and explicit startup integration; minimal INPUT/GROUP/AS_NEEDED scripts | Hosted GCC/Clang C and Fas objects run against the installed glibc CRT/libc, including startup, shutdown, imported data and per-thread TLS isolation. Broader sysroot compatibility, TLS relaxation/TLSDESC and general scripts remain later gates |
 | **0.6 — implemented declared shared-library subset** | Shared-library output, visibility/preemption, complete declared TLS models and symbol-version behavior, IFUNC where required; RELRO/binding options | Producer/consumer, preemption, GD/LD/IE/TLSDESC, late dlopen, lifecycle, named version aliases, imported/defined IFUNC and loader-enforced RELRO pass. Deliberate limits remain: no TLS relaxation or base-version aliases; alias hiding follows the tested LLD policy. Static IFUNC was added during v0.7 |
 | **0.7 — in progress** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
-| **0.8 — initial work started** | Main performance pass: invocation-local read reuse measured, SHA-1 word boxing removed and static IFUNC references precomputed; packed storage, fewer allocations/copies, efficient strings/symbols, mapped I/O where useful, domain workers and parallel emission remain | Published single-worker and multicore results, bounded memory, identical output across worker counts; 51-sample real-program timing, application checks and archive scaling are recorded in benchmarks/README.md; Fas still trails LLD and multicore work remains |
+| **0.8 — qualification in progress** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
 | **0.9 — release candidate** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
 | **1.0 — production Linux release** | Stable documented CLI/library and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
 
-Performance work starts in 0.2 and continues through every version. Version 0.8
-is the main scaling milestone, not the first time performance matters. Likewise,
-malformed-input tests and fuzzing grow continuously; hardening is not postponed
-until 0.9. Large milestones can have several prereleases.
+Earlier performance work and all recorded measurements remain valid history.
+The main optimization pass is now a later track, after production qualification,
+per the user's revised priority. Malformed-input tests and fuzzing grow
+continuously; hardening is not postponed until 0.9. Large milestones can have
+several prereleases.
 
 Version 0.3 can be useful before general hosted C support. Version 1.0 does not
 claim every GNU ld flag/script, C++ ecosystem, LLVM bitcode LTO, Windows, or every
@@ -170,6 +176,12 @@ comparisons when available. Beating mold by another 2x would be a separate,
 considerably more speculative target.
 
 ## Later tracks
+
+- Main performance pass after the supported production baseline is qualified:
+  packed symbol/relocation storage, archive indexing, fewer copies/allocations
+  and domain workers. Preserve behavior with the established corpus and
+  differential tests. Existing SHA-1/IFUNC/read-cache changes and timing reports
+  remain the starting evidence; the LLD stretch target is unachieved.
 
 - Port the tested implementation to freestanding Fas when the language/runtime
   supports its actual needs. Keep the corpus and benchmark gates; do not assume

@@ -14,6 +14,16 @@ separately here. The roadmap distinguishes current status from historical plans.
 
 ## Subsequent repair status — 2026-11-05
 
+SQLite real-library qualification now builds the canonical 3.54.1 CLI, archive,
+DSO and test executable through Fas and retained identical objects through GNU.
+All 40 C API executions and four native Fas modes pass; each linker passes the
+1,300-script isolated upstream extraquick selection with zero errors. The
+[verification record](audit/sqlite-qualification-2026-11-05.json) pins the exact
+counts, snapshots and earlier failure triage. This is local glibc/public-Tcl
+coverage; hosted CI and broader release qualification remain open. The user's
+current priority defers the main performance campaign until that baseline is
+qualified.
+
 
 The native driver also now carries generated static C adapter symbols into
 native IR, including callback constants, after the FIR hook. Previously the
@@ -203,7 +213,7 @@ assuming that arbitrary layout scripts are necessary for this use case.
 | Discovery and scripts | SONAME/DT_NEEDED, RUNPATH/RPATH, explicit sysroot paths, bounded SEARCH_DIR, strict transitive checks, common libc scripts; GNU-compatible indirect archive boundary | Wider GNU default search policy and additional required driver flags. Indirect DSO references intentionally do not extract archive members; use explicit objects/roots or direct DSO references. GCC currently needs `-fno-use-linker-plugin` even for ordinary native links. Decide whether that documented flag is sufficient for v1; ignoring compiler plugins silently is unsuitable. |
 | Debugging and unwinding | DWARF 4/5 readelf/addr2line/GDB fixtures, zlib input, CFI and personality/LSDA pointers | Wider optimized/debug configurations and larger programs. Extended unwind lengths, zstd/legacy compressed debug and output compression remain explicit limits; add only when required by the chosen matrix. |
 | Scale and memory | Checked arithmetic, relocation overflows, roughly 1 GiB sparse NOBITS, 64 MiB file-backed data, 200k symbols/relocations, 65,260 retained payload sections and 1,024 independent files with boundary rejections | Current caps include 1024 input files, 128 MiB per file, 256 MiB aggregate input/decoded debug, 512 MiB output and 1 GiB image. Real large programs, peak memory, further address-space boundaries and resource failures remain unqualified; limits are unchanged. |
-| Speed | Warm-cache real-program/object/archive baselines, 21 samples per workload; invocation-local read reuse gives measured Chibicc gains; untimed SHA-1 and IFUNC reference planning reduces allocation with identical outputs | One worker per Fas link; Fas still trails LLD on the real workloads. Packed storage, archive/index costs, parallel work, cold-cache behavior and larger programs remain v0.8 work. No 2x-LLD result is established. Measurement requires a quiet-PC interval. |
+| Speed | Warm-cache real-program/object/archive baselines, 21 samples per workload; invocation-local read reuse gives measured Chibicc gains; untimed SHA-1 and IFUNC reference planning reduces allocation with identical outputs | One worker per Fas link; Fas still trails LLD on the real workloads. Packed storage, archive/index costs, parallel work and cold-cache behavior remain deferred performance work; larger-program correctness remains qualification work. No 2x-LLD result is established. Measurement requires a quiet-PC interval. |
 | Correctness automation | Independent inspectors/loaders, GNU/LLD comparisons, malformed fixtures, short AFL campaigns, reentry and publication failure tests; correctness/weekly fuzz CI defined and validated | Execute and qualify hosted CI and longer fuzzing; broaden generated semantic differential tests, dependency graphs and deterministic queue replay. Fuzz campaigns primarily detect parser exceptions/hangs, not wrong emitted program behavior. |
 | Operational reliability | Atomic individual-file publication, alias protection, bounded regular reads, creation permissions and concurrent regression coverage; test-only Linux interposition verifies ENOSPC, partial-write/EIO, close/chmod/rename failures, short writes/EINTR and a killed writer | Wider filesystem/resource qualification remains. Binary/map publication is not one transaction. A killed writer may leave a private incomplete temporary; later links ignore it. Crash durability via fsync is not currently promised; decide whether v1 needs that guarantee. |
 | Distribution and API | Source-build executable, staged Makefile install as `fas-ld`, wrapped invocation-owned library, repeated/concurrent-call checks; CI installation gate defined | Hosted CI qualification, versioned CLI/library contract and durable release artifacts remain open. The Makefile installs only the executable; no installed OCaml API is promised. Most internal modules are exposed by inferred interfaces; define the supported public surface before promising API stability. |

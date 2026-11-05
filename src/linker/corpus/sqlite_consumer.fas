@@ -1,0 +1,25 @@
+extern "C" {
+    fn sqlite3_open(filename addr, database addr) i32
+    fn sqlite3_exec(database addr, sql addr, callback addr, context addr, error addr) i32
+    fn sqlite3_prepare_v2(database addr, sql addr, length i32, statement addr, tail addr) i32
+    fn sqlite3_step(statement addr) i32
+    fn sqlite3_column_int(statement addr, column i32) i32
+    fn sqlite3_finalize(statement addr) i32
+    fn sqlite3_close(database addr) i32
+}
+var database addr = null
+var statement addr = null
+
+fn main() i32 {
+    if sqlite3_open(c":memory:", &database) != 0 { return 1 }
+    if sqlite3_exec(database, c"CREATE TABLE t(x); INSERT INTO t VALUES(19),(23)",
+                    null, null, null) != 0 { return 2 }
+    if sqlite3_prepare_v2(database, c"SELECT sum(x) FROM t", -1, &statement, null) != 0 {
+        return 3
+    }
+    if sqlite3_step(statement) != 100 { return 4 }
+    if sqlite3_column_int(statement, 0) != 42 { return 5 }
+    if sqlite3_step(statement) != 101 { return 6 }
+    if sqlite3_finalize(statement) != 0 { return 7 }
+    return sqlite3_close(database)
+}

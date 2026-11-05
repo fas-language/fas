@@ -1,5 +1,41 @@
 # Linker implementation work log
 
+### Current checkpoint: SQLite production qualification
+
+User deferred the main performance pass until the supported functionality and
+production baseline are qualified. No timings or optimization changes were made.
+SQLite 3.54.1 complete canonical source is pinned with SHA-256 and the published
+SHA3-256. All 2,290 source files remain byte-identical to the release archive.
+Upstream configure/make builds CLI, static archive, shared library and testfixture
+through Fas; GNU independently links retained identical input objects.
+
+The final gate passes 40 GCC/Clang API executions across archive fixed/PIE,
+full-static/static-PIE and Fas/GNU DSOs, including both extension producers.
+Checks cover on-disk reopen, WAL/four writer threads, transactions/savepoints,
+prepared statements, JSON/FTS5/RTREE, callback/destructor, backup and integrity.
+Four native Fas archive/shared/static/static-PIE consumers pass with unavailable
+opt/llc paths. Shell database cross-read and dump/restore pass too.
+
+The official isolated extraquick runner passes all 1,300 scripts under each
+linker: 398,233 Fas and 398,261 GNU assertions, zero errors. Randomized FTS5
+assertion counts are recorded rather than required to match. Preserved triage
+shows three identical legacy-entry failures under GNU/Fas and transient I/O
+errors from parallel suites on /tmp tmpfs; the final disk-backed gate passes
+without excluding those scripts. An earlier native static-PIE harness flag was
+also corrected. No linker-core changes were needed.
+
+CI now defines the SQLite matrix, main.test on ordinary runs and isolated
+extraquick on weekly/manual runs, with Tcl build dependencies and retained
+reports/logs. YAML and all 12 shell steps validate locally; hosted CI is not
+claimed. Release build and incremental musl-enabled Dune gate pass, including
+3,792 compiler checks. This remains glibc/public-Tcl qualification, not TH3,
+full SQLite release, power-loss or general production completion.
+Evidence: audit/sqlite-qualification-2026-11-05.json and
+corpus/results/2026-11-05/sqlite{,-inputs,-triage}.json.
+Local snapshot: /home/glonex/.cache/fas-linker-qualification/sqlite-stable-20261105.
+
+
+
 
 ### Current checkpoint: native C static-adapter symbols
 
