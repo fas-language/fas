@@ -406,6 +406,10 @@ let load_program_with ?(overlay = fun _ -> None) ?recovery ?(edits = []) ~limits
                       in
                       let rec dependencies = function
                         | [] -> Ok ()
+                        | Ast.Use { os = Some os; c_header = None; _ } :: rest
+                          when os <> (Target_layout.current ()).Target_layout.os ->
+                            (* built for another OS: not part of this program *)
+                            dependencies rest
                         | Ast.Use { path = dependency; c_header = None; span; _ }
                           :: rest -> (
                             match use_path_error dependency with

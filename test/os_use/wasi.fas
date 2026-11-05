@@ -1,0 +1,2 @@
+// selected by --os wasi
+fn os_id() i32 { return 33 }

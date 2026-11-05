@@ -827,6 +827,16 @@ fn main() i32 {
 
 `use "path.fas"` is relative to the file that contains it. The whole `use` closure shares one namespace: there are no modules, qualifiers or visibility. Give the compiler only the root file.
 
+`use linux "path.fas"`, `use windows "path.fas"` and `use wasi "path.fas"` make a file part of the program only when building for that OS (`--os`, default: the OS fas runs on). The files for other OSes are never read, so each OS file can define the same functions its own way:
+
+<!-- skip -->
+```fas
+use linux "sys_linux.fas"     // defines fn write_out(p addr, n usize) via syscall
+use windows "sys_windows.fas" // the same function via the C runtime
+```
+
+Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS file.
+
 ## Known limits
 
 - **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
@@ -844,6 +854,7 @@ fn main() i32 {
 ```fas
 // top level
 use "util.fas"                          // another Fas file, relative to this one
+use linux "sys_linux.fas"               // only when building for --os linux (also windows, wasi)
 use "C" <stdio.h>                       // C header from the system path
 use "C" "lib.h"                         // C header relative to this file
 // C source, up to a line holding only the tag; nothing may follow <<C

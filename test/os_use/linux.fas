@@ -1,0 +1,2 @@
+// selected by --os linux (and by default on Linux)
+fn os_id() i32 { return 11 }

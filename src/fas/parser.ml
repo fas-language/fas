@@ -675,6 +675,31 @@ module P = struct
           let span = extent p s in
           let* () = end_stmt p in
           Ok [ Ast.Pkg { pkg; span } ]
+        else if
+          match (peek p).kind with
+          | Token.Ident ("linux" | "windows" | "wasi") -> true
+          | _ -> false
+        then begin
+          (* `use linux|windows|wasi "file.fas"`: a Fas file that is part of
+             the program only when building for that OS. The driver skips it
+             for the others, so it is never read there. *)
+          let os =
+            match (peek p).kind with
+            | Token.Ident "linux" -> Target_layout.Linux
+            | Token.Ident "windows" -> Target_layout.Windows
+            | _ -> Target_layout.Wasi
+          in
+          ignore (bump p);
+          let path_span = span p in
+          let* path = string p in
+          if path = "C" || path = "asm" then
+            error path_span
+              "an OS-conditional use takes a Fas file; put C headers and blocks \
+               inside that file"
+          else
+            let* () = end_stmt p in
+            Ok [ Ast.Use { path; c_header = None; os = Some os; span = path_span } ]
+        end
         else
           let path_span = span p in
           let* path = string p in
@@ -689,10 +714,10 @@ module P = struct
               | Ast.C_quoted _ | Ast.C_system _ -> header_start
               | Ast.C_fragment _ -> s
             in
-            Ok [ Ast.Use { path; c_header = Some header; span } ]
+            Ok [ Ast.Use { path; c_header = Some header; os = None; span } ]
           else
             let* () = end_stmt p in
-            Ok [ Ast.Use { path; c_header = None; span = path_span } ]
+            Ok [ Ast.Use { path; c_header = None; os = None; span = path_span } ]
     | Token.Kw_const ->
         let start = span p in
         let* x = const_item p in

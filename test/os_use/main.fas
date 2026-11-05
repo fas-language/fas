@@ -1,0 +1,9 @@
+// `use linux|windows|wasi "file.fas"`: each OS file defines os_id(); --os
+// picks which one is part of the program.
+use linux "linux.fas"
+use windows "windows.fas"
+use wasi "wasi.fas"
+
+fn main() i32 {
+    return os_id()
+}

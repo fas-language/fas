@@ -147,7 +147,14 @@ and c_header = C_quoted of string | C_system of string | C_fragment of c_fragmen
 and pkg = { modules : string; modules_span : Span.t }
 
 and item =
-  | Use of { path : string; c_header : c_header option; span : Span.t }
+  (* [os]: `use linux "f.fas"` — only part of the program when building for
+     that OS (--os). None for an unconditional use. *)
+  | Use of {
+      path : string;
+      c_header : c_header option;
+      os : Target_layout.os option;
+      span : Span.t;
+    }
   | Pkg of { pkg : pkg; span : Span.t }
   | Const of {
       name : string;
@@ -849,10 +856,14 @@ let render_program program =
         text "use pkg \"";
         add_escaped modules;
         text "\""
-    | Use { path; c_header; _ } -> (
+    | Use { path; c_header; os; _ } -> (
         match c_header with
         | None ->
-            text "use \"";
+            text "use ";
+            (match os with
+            | Some os -> text (Target_layout.os_name os ^ " ")
+            | None -> ());
+            text "\"";
             add_escaped path;
             text "\""
         | Some (C_quoted header) ->

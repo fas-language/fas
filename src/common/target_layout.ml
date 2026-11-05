@@ -62,6 +62,8 @@ let of_os = function
   | Windows -> x86_64_windows
   | Wasi -> wasm32_wasi
 
+let os_name = function Linux -> "linux" | Windows -> "windows" | Wasi -> "wasi"
+
 let host_os = if Sys.win32 || Sys.cygwin then Windows else Linux
 let selected = ref (of_os host_os)
 let select os = selected := of_os os
