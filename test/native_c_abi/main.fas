@@ -1,0 +1,18 @@
+extern "C" {
+    fn mix(a f64, i i32, b f32, j i64, c f64, s i16, d f64, t i8, e f64, u i32, f f64, v i32, g f64, h f64, w i32, z f64) f64
+    fn half(x f32) f32
+    fn sum3(a i8, b i16, c u8) i32
+    fn check() i32
+    fn fas_scale(x f64, y f32, k i32) f64 {
+        return x * y + cvt[f64](k)
+    }
+}
+
+fn main() i32 {
+    r f64 = mix(1.0, 2, 3.5, 4, 5.0, -6, 7.0, -8, 9.0, 10, 11.0, 12, 13.0, 14.0, 15, 16.5)
+    if r != 109.0 { return 1 }
+    if half(5.0) != 2.5 { return 2 }
+    if sum3(-3, -300, 200) != -103 { return 3 }
+    if check() != 600 { return 4 }
+    return 0
+}

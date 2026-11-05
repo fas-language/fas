@@ -265,10 +265,12 @@ int check_initialization(void){return initialized+35;}
                     self.assertEqual(result.stdout, run(reference, expected=status).stdout)
 
     def test_unsupported_abi_target_and_output_mode(self):
+        # Every scalar, floats included, crosses object boundaries by SysV
+        # (vectors and aggregates are refused earlier, by the front end).
         float_export = self.source("float-export", 'extern "C" { fn f(x f64) f64 { return x } }\n')
-        result = run(COMPILER, "--backend=native", "-c", float_export, "-o", self.root / "unsupported.o",
-                     env=self.no_tools, expected=1)
-        self.assertIn(b"unsupported external ABI", result.stderr)
+        run(COMPILER, "--backend=native", "-c", float_export, "-o", self.root / "float.o",
+            env=self.no_tools)
+        self.assertTrue((self.root / "float.o").exists())
         basic = self.source("target", "fn main() i32 { return 0 }\n")
         for os_name in ("windows", "wasi"):
             result = run(COMPILER, "--backend=native", "--os=" + os_name, basic,

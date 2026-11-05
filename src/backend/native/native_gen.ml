@@ -1313,13 +1313,19 @@ let negate = function
 
 let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
 
-(* Internal Fas float/vector calls use this backend's own representation. Expose
-   only the independently checked integer/pointer subset across object boundaries. *)
+(* What may cross an object boundary: every scalar, passed by the SysV rules
+   in [classify_args]/[gen_call] and the prologue (integers and pointers in
+   rdi..r9, floats in xmm0..7, the rest on the stack; narrow integers are
+   extended per [ret_extension]/param extension; variadic calls set al).
+   Vectors still use this backend's own representation, and aggregates by
+   value reach C through clang-built adapters, so neither is exposed.
+   Variadic functions can be called but not defined here. *)
 let external_abi (f : func) =
-  let scalar = function I32 | I64 | Pointer _ -> true | _ -> false in
-  (not f.variadic)
-  && (f.ret = Void || scalar f.ret)
-  && List.for_all (fun (p : param) -> scalar p.ty) f.params
+  let scalar = function
+    | I1 | I8 | I16 | I32 | I64 | F32 | F64 | Pointer _ -> true
+    | _ -> false
+  in
+  (f.ret = Void || scalar f.ret) && List.for_all (fun (p : param) -> scalar p.ty) f.params
 
 (* Values in caller-saved registers that [ins] (a call or syscall) would
    clobber: stored to their slots first, read from there while the arguments
@@ -1425,8 +1431,8 @@ let gen_call ctx fr ~variadic result ret_ty target args =
           A.call_symbol a name
       | None ->
           unsupported
-            "call to `%s` requires an unsupported external ABI (only non-variadic \
-             i32/i64/pointer parameters and results are supported)"
+            "call to `%s` requires an unsupported external ABI (only scalar \
+             parameters and results are supported)"
             name)
   | `Indirect v ->
       load ctx fr A.R11 v;
@@ -2703,7 +2709,7 @@ let generate ~startup (m : module_) =
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
     List.iter
       (fun (f : func) ->
-        if f.linkage = External && not (external_abi f) then
+        if f.linkage = External && (f.variadic || not (external_abi f)) then
           unsupported "exported function `%s` requires an unsupported external ABI"
             f.name)
       defined;
