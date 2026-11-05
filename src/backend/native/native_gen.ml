@@ -1663,7 +1663,14 @@ let gen_intrinsic ctx fr result ret_ty name args =
     end;
     A.jmp a done_;
     A.place a pass;
-    A.mov_rr a A.Rdx A.Rax;
+    (* x + 0.0: integral values here are large (never -0.0) or infinite and
+       come back unchanged, while a signaling NaN is quieted with its payload
+       kept, like roundsd and libm do (float_proof compares the bits) *)
+    A.mov_xr a ~double 0 A.Rax;
+    A.alu_rr a A.Xor A.Rcx A.Rcx;
+    A.mov_xr a ~double 1 A.Rcx;
+    A.fop_xx a ~double A.Fadd 0 1;
+    A.mov_rx a ~double A.Rdx 0;
     A.place a done_;
     store A.Rdx
   end

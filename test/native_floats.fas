@@ -246,6 +246,27 @@ fn loops() void {
 
 fn newton(r f64, a f64) f64 { return (r + a / r) * 0.5 }
 
+// Signaling NaN inputs, raw result bits: rounding and sqrt quiet them and
+// keep the payload (the SSE2 rounding sequence passed NaN through unquieted)
+const SNAN32 arr[2, u32] = { 0xff800005, 0x7fa00000 }
+const SNAN64 arr[2, u64] = { 0xfff0000000000005, 0x7ff4000000000000 }
+
+fn quieting() void {
+  for i usize = 0; i < 2; i += 1 {
+    x f32 = bitcast[f32](SNAN32[i])
+    h u64 = mix(0, zext[u64](bitcast[u32](sqrt(x))))
+    h = mix(h, zext[u64](bitcast[u32](floor(x))))
+    h = mix(h, zext[u64](bitcast[u32](ceil(x))))
+    h = mix(h, zext[u64](bitcast[u32](round(x))))
+    y f64 = bitcast[f64](SNAN64[i])
+    h = mix(h, bitcast[u64](sqrt(y)))
+    h = mix(h, bitcast[u64](floor(y)))
+    h = mix(h, bitcast[u64](ceil(y)))
+    h = mix(h, bitcast[u64](round(y)))
+    write_hex(h)
+  }
+}
+
 fn main() i32 {
   pairs64()
   pairs32()
@@ -255,5 +276,6 @@ fn main() i32 {
   for i usize = 0; i < 16; i += 1 { unary32(cvt[f32](bitcast[f64](NEAR64[i]))) }
   from_ints()
   loops()
+  quieting()
   return 0
 }
