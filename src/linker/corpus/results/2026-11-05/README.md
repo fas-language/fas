@@ -89,3 +89,9 @@ final gate pass. Full snapshots, objects and logs remain at
 This is installed-glibc/public-Tcl qualification; it does not establish SQLite
 on musl, TH3/full SQLite release coverage or power-loss behavior. Upstream
 testfixture defines SQLITE_NO_SYNC. No performance measurements were taken.
+
+`snapshot-harness-replay.json` records a saved `/tmp` harness replay after the
+output-root correction: all 21 cJSON programs pass with Fas/GNU (42 executions).
+The checkout's protection against creating corpus outputs inside the repository
+still rejects before writing. This verifies harness portability separately from
+the SQLite source/build/runtime gate.

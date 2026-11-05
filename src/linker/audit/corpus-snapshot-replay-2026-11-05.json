@@ -1,0 +1,26 @@
+{
+  "purpose": "Replay a saved corpus harness from /tmp while preserving checkout output protection",
+  "before": "Original snapshot rejects every output because ROOT becomes /",
+  "after_report": "/tmp/fas-corpus-saved-replay-fixed-20261105/report.json",
+  "source_repo_rejection": {
+    "command": [
+      "python3",
+      "src/linker/corpus/run.py",
+      "--output",
+      "corpus-output-must-reject-20261105",
+      "--cjson",
+      "/tmp/fas-cjson-20261105/cJSON-1.7.19"
+    ],
+    "exit": 1,
+    "stderr": "Traceback (most recent call last):\n  File \"/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/corpus/run.py\", line 860, in <module>\n    main()\n    ~~~~^^\n  File \"/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/corpus/run.py\", line 850, in main\n    corpus = Corpus(args)\n  File \"/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/corpus/run.py\", line 29, in __init__\n    raise ValueError('output must be outside the repository')\nValueError: output must be outside the repository\n",
+    "created_output": false
+  },
+  "date": "2026-11-05",
+  "harness_sha256": "d54b86ad8257e479fef4e1fc89376a84299864d40a1b1f02c52f15c1e1a7fca6",
+  "linker_sha256": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be",
+  "cjson_programs": 21,
+  "executions": 42,
+  "report_sha256": "98232bc30acbecfdf819928ab646e7ebedef08a3939a1223593a79e15506fcf7",
+  "report_path": "src/linker/corpus/results/2026-11-05/snapshot-harness-replay.json",
+  "base_commit": "168d77c655297bab531b7539779e264579951b01"
+}
