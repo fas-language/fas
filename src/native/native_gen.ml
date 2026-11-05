@@ -612,7 +612,55 @@ type frame = {
   call_saves : (instr * (int * bool) list) list;
       (** per call: allocation keys in caller-saved registers to store before it, each
           with whether it is reloaded after *)
+  loose : unit Hashtbl.t;
+      (** narrow results whose every use reads only their low bits, so they may skip the
+          zero extension to canonical form *)
 }
+
+(* Narrow add/sub/mul/shl and trunc results that only feed narrow stores,
+   truncs and further low-bit arithmetic never need their upper bits cleared. *)
+let loose_values addrs (f : func) =
+  let narrow = function I8 | I16 | I32 -> true | _ -> false in
+  let cand = Hashtbl.create 16 and strict = Hashtbl.create 64 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          (match ins with
+          | Bin (id, (Add | Sub | Mul | Shl), ty, _, _)
+            when narrow ty && not (Hashtbl.mem addrs.dead id) ->
+              Hashtbl.replace cand id ()
+          | Cast (id, "trunc", _, _, ty) when narrow ty -> Hashtbl.replace cand id ()
+          | _ -> ());
+          let ok_use v =
+            match (ins, v) with
+            | ( ( Store (ty, Local (x, _), p, _)
+                | Store_volatile (ty, Local (x, _), p, _) ),
+                Local (y, _) )
+              when x = y && narrow ty && p <> v ->
+                true
+            | Cast (_, "trunc", _, _, _), _ -> true
+            | Bin (id, (Add | Sub | Mul), ty, _, _), _ ->
+                narrow ty && not (Hashtbl.mem addrs.dead id)
+            | Bin (id, Shl, ty, x, y), _ ->
+                narrow ty && (not (Hashtbl.mem addrs.dead id)) && x = v && y <> v
+            | _ -> false
+          in
+          Regalloc.iter_operands
+            (fun v ->
+              match v with
+              | Local (id, _) when not (ok_use v) -> Hashtbl.replace strict id ()
+              | _ -> ())
+            ins)
+        b.instrs;
+      Regalloc.iter_term_operands
+        (function Local (id, _) -> Hashtbl.replace strict id () | _ -> ())
+        b.terminator)
+    f.blocks;
+  Hashtbl.filter_map_inplace
+    (fun id () -> if Hashtbl.mem strict id then None else Some ())
+    cand;
+  cand
 
 let reserve fr bytes align =
   fr.size <- (fr.size + bytes + align - 1) / align * align;
@@ -647,6 +695,9 @@ let build_frame ?xmm ctx (f : func) =
       xtmp = 0;
       saved = [];
       call_saves = !call_saves;
+      loose =
+        (if Sys.getenv_opt "FAS_NATIVE_NOLOOSE" = None then loose_values addrs f
+         else Hashtbl.create 1);
     }
   in
   let has_v128 = ref false in
@@ -739,7 +790,7 @@ let load_signed ctx fr r v =
 
 (* Store [r] as the result [id] of type [ty], normalizing to canonical form. *)
 let rec store_result ctx fr id ty r =
-  A.zero_extend ctx.a (bits ty) r;
+  if not (Hashtbl.mem fr.loose id) then A.zero_extend ctx.a (bits ty) r;
   put ctx fr id r
 
 (* Write a 64-bit register that is already canonical to [id]'s home. *)
@@ -1781,6 +1832,9 @@ let gen_instr ctx fr ins =
              already its zero extension *)
           let d = dest_reg fr id [] in
           (match (kind, home fr v) with
+          | "trunc", Some r when Hashtbl.mem fr.loose id ->
+              if d <> r then A.mov_rr a d r
+          | "trunc", _ when Hashtbl.mem fr.loose id -> load ctx fr d v
           | "trunc", Some r -> A.zero_extend_rr a (bits target) d r
           | "zext", _ -> load ctx fr d v
           | _ ->
