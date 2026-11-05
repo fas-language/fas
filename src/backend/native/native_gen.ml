@@ -1343,21 +1343,68 @@ let around_call ctx fr ins body =
           if reload then A.load_zx a 8 r m)
         regs
 
-let gen_call ctx fr result ret_ty target args =
+(* The SysV x86-64 calling convention, used for every call so that Fas
+   functions, C functions and function pointers all agree:
+   - integer and pointer arguments take rdi, rsi, rdx, rcx, r8, r9;
+   - float and double arguments take xmm0..xmm7;
+   - the rest go on the stack, 8 bytes each, first argument lowest;
+   - results come back in rax, or xmm0 for a float or double.
+   Values are canonical (zero-extended) in our registers; C callers and
+   callees only guarantee the low 32 bits of a narrow integer, extended as
+   its `signext`/`zeroext` attribute says, so both edges normalize. *)
+type arg_class = Gpr of int | Xmm of int | Stack of int
+
+let is_float_ty = function F32 | F64 -> true | _ -> false
+
+(* The width of a narrow integer; 64 for anything held whole in a register
+   (or passed by address) *)
+let narrow_bits = function I1 -> 1 | I8 -> 8 | I16 -> 16 | I32 -> 32 | _ -> 64
+
+(* Where each argument of the given types goes, and how many stack words
+   the call needs. *)
+let classify_args tys =
+  let gi = ref 0 and xi = ref 0 and si = ref 0 in
+  let classes =
+    List.map
+      (fun ty ->
+        if is_float_ty ty && !xi < 8 then (incr xi; Xmm (!xi - 1))
+        else if (not (is_float_ty ty)) && !gi < 6 then (incr gi; Gpr (!gi - 1))
+        else (incr si; Stack (!si - 1)))
+      tys
+  in
+  (classes, !xi, !si)
+
+(* [variadic]: %al must carry an upper bound on the number of vector
+   registers used, for the callee's va_start. *)
+let gen_call ctx fr ~variadic result ret_ty target args =
   let a = ctx.a in
-  let n = List.length args in
-  let stack_args = max 0 (n - 6) in
+  let classes, nxmm, stack_args =
+    classify_args (List.map (fun (_, _, v) -> value_ty v) args)
+  in
+  let args = List.combine classes args in
   let pad = if stack_args mod 2 = 1 then 8 else 0 in
   if pad > 0 then A.alu_ri a A.Sub A.Rsp pad;
   (* Stack arguments, last first *)
-  List.iteri
-    (fun i (_, _, v) ->
-      if n - 1 - i >= 6 then begin
-        load ctx fr A.Rax v;
-        A.push a A.Rax
-      end)
+  List.iter
+    (function
+      | Stack _, (_, _, v) ->
+          load ctx fr A.Rax v;
+          A.push a A.Rax
+      | _ -> ())
     (List.rev args);
-  List.iteri (fun i (_, _, v) -> if i < 6 then load ctx fr arg_regs.(i) v) args;
+  (* Float arguments go through rax, which is no argument register. *)
+  List.iter
+    (function Xmm x, (_, _, v) -> to_xmm ctx fr x v A.Rax | _ -> ())
+    args;
+  List.iter
+    (function
+      | Gpr i, (_, ext, v) ->
+          load ctx fr arg_regs.(i) v;
+          let b = narrow_bits (value_ty v) in
+          if ext = Sign_extension && b < 32 then A.sign_extend a b arg_regs.(i)
+      | _ -> ())
+    args;
+  if variadic then A.mov_imm a A.Rax (Int64.of_int nxmm);
   (match target with
   | `Direct name -> (
       match Ptbl.find_opt ctx.func_labels name with
@@ -1372,6 +1419,7 @@ let gen_call ctx fr result ret_ty target args =
   let cleanup = (8 * stack_args) + pad in
   if cleanup > 0 then A.alu_ri a A.Add A.Rsp cleanup;
   match result with
+  | Some id when is_float_ty ret_ty -> from_xmm ctx fr id ret_ty 0
   | Some id when ret_ty <> Void -> store_result ctx fr id ret_ty A.Rax
   | _ -> ()
 
@@ -1956,11 +2004,15 @@ let gen_instr ctx fr ins =
       if String.starts_with ~prefix:"llvm." name then
         gen_intrinsic ctx fr result ret name args
       else
+        let variadic =
+          List.exists (fun (g : func) -> g.name = name && g.variadic) ctx.m.funcs
+        in
         around_call ctx fr ins (fun () ->
-            gen_call ctx fr result ret (`Direct name) args)
+            gen_call ctx fr ~variadic result ret (`Direct name) args)
   | Call_indirect (result, _, ret, callee, args) ->
       around_call ctx fr ins (fun () ->
-          gen_call ctx fr result ret (`Indirect callee) args)
+          (* the callee might be variadic C: setting %al costs one mov *)
+          gen_call ctx fr ~variadic:true result ret (`Indirect callee) args)
   | Phi _ -> () (* copied in from the incoming slot at block entry *)
   | Select (id, c, x, y) ->
       let ty = value_ty x in
@@ -2182,15 +2234,24 @@ let gen_function ctx (f : func) =
   A.push a A.Rbp;
   A.mov_rr a A.Rbp A.Rsp;
   if fr.size > 0 then A.alu_ri a A.Sub A.Rsp fr.size;
-  List.iteri
-    (fun i (p : param) ->
+  (* Parameters to their slots, canonical (see [classify_args]) *)
+  let classes, _, _ = classify_args (List.map (fun (p : param) -> p.ty) f.params) in
+  List.iter2
+    (fun (p : param) cls ->
       let dst = A.Base (A.Rbp, Ptbl.find fr.params p.name) in
-      if i < 6 then A.store a 8 dst arg_regs.(i)
-      else begin
-        A.load_zx a 8 A.Rax (A.Base (A.Rbp, 16 + (8 * (i - 6))));
-        A.store a 8 dst A.Rax
-      end)
-    f.params;
+      let narrow = narrow_bits p.ty in
+      match cls with
+      | Gpr i ->
+          A.zero_extend a narrow arg_regs.(i);
+          A.store a 8 dst arg_regs.(i)
+      | Xmm x ->
+          A.mov_rx a ~double:(p.ty = F64) A.Rax x;
+          A.store a 8 dst A.Rax
+      | Stack k ->
+          A.load_zx a 8 A.Rax (A.Base (A.Rbp, 16 + (8 * k)));
+          A.zero_extend a narrow A.Rax;
+          A.store a 8 dst A.Rax)
+    f.params classes;
   List.iter (fun (r, o) -> A.store a 8 (A.Base (A.Rbp, o)) r) fr.saved;
   List.iter
     (fun (p : param) ->
@@ -2380,8 +2441,13 @@ let gen_function ctx (f : func) =
       emit b.instrs;
       match b.terminator with
       | Ret None -> epilogue ()
+      | Ret (Some (_, v)) when is_float_ty (value_ty v) ->
+          to_xmm ctx fr 0 v A.Rax;
+          epilogue ()
       | Ret (Some (_, v)) ->
           load ctx fr A.Rax v;
+          let b = narrow_bits (value_ty v) in
+          if f.ret_extension = Sign_extension && b < 32 then A.sign_extend a b A.Rax;
           epilogue ()
       | Br target -> jump_to b.id target
       | CondBr (_, yes, no) when fusion <> None ->
