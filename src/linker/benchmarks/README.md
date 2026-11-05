@@ -1,5 +1,42 @@
 # Linker performance evidence
 
+## Build-ID allocation checkpoint
+
+Untimed OCaml 5.4 Memprof sampling found SHA-1 schedule/state boxing accounted
+for approximately 35%/39% of allocated-word samples in the two dynamic Chibicc
+links below. The implementation now uses masked immediate integer words on the
+supported 64-bit host. Exact `--stats` counters fall from 4,197,750 to 2,726,996
+words (35%) for stage 1 and 4,702,235 to 2,838,387 (40%) for stage 2. Both output
+images are byte-identical. The static Chibicc/cJSON replay recipes omit build IDs
+and remain byte-identical with unchanged allocation counts. These observations
+do not measure elapsed-time gains or change the LLD comparison below.
+
+Validation includes 717 deterministic binary inputs compared with Python's
+`hashlib.sha1`, padding-boundary/high-byte unit vectors, image-level build-ID
+checks and the full release suite with isolated musl: 243 Python cases across
+41 groups, OCaml checks and 3,792 compiler regression checks, no skips.
+[Allocation evidence](results/2026-11-05/allocation-sha1.json) pins binaries,
+source overrides, the replay manifest and raw local profile hashes. Full samples
+and commands remain under `/tmp/fas-allocation-profile-20261105`.
+
+The optional [allocation sampler](allocation_profile.ml) reports estimated
+allocated words by call stack, not CPU time or retained memory. Build it outside
+the source tree (OCaml 5.4 used for this checkpoint), then pass ordinary linker
+arguments with a temporary output path:
+
+```sh
+dune build --profile release src/linker/fas_linker.cmxa
+mkdir -p /tmp/fas-allocation-sampler
+cp src/linker/benchmarks/allocation_profile.ml /tmp/fas-allocation-sampler/
+ocamlopt -g -I +unix -I _build/default/src/linker \
+  -I _build/default/src/linker/.fas_linker.objs/byte \
+  -I _build/default/src/linker/.fas_linker.objs/native \
+  unix.cmxa _build/default/src/linker/fas_linker.cmxa \
+  /tmp/fas-allocation-sampler/allocation_profile.ml \
+  -o /tmp/fas-allocation-sampler/profile
+/tmp/fas-allocation-sampler/profile -o /tmp/profile-program input.o
+```
+
 ## Real-program and archive baseline, 2026-11-05
 
 With the user leaving the PC idle, recorded 21 samples per tool/workload after
