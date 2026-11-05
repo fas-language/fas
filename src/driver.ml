@@ -2813,7 +2813,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                         "`--backend=native` cannot link C objects or libraries yet";
                     ]
                 else
-                  match Native_gen.compile ir with
+                  match Result.bind (Fir_hook.apply ir) Native_gen.compile with
                   | Error message -> Error [ Diag.error Span.synthetic message ]
                   | Ok image -> (
                       try

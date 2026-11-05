@@ -69,3 +69,8 @@
  (name debug_info_render)
  (modules debug_info_render)
  (libraries fas_compiler debug_fixture))
+
+(test
+ (name fir_test)
+ (modules fir_test)
+ (libraries fas_compiler))
