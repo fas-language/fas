@@ -1,5 +1,32 @@
 # Linker implementation work log
 
+
+### Current checkpoint: quiet-PC performance replay
+
+The idle-PC interval on 2026-11-05 ran from 21:17 to 21:22 CET. Pinned release
+snapshots, unchanged machine settings and warm-cache rotated sequential runs
+compare the SHA-1/IFUNC changes with LLD 22.1.8 and GNU ld 2.46. The 51-sample
+repeat shows approximately 7% lower dynamic Chibicc medians; static changes are
+around 1%, insufficient for a speed claim. Fas remains 1.46–2.76 times LLD's
+elapsed time across those four workloads. Separate 21-sample application links
+put native Sieve/Doom/Wolf3D at 28.47/124.52/41.17 ms versus LLD's
+18.14/36.12/21.58 ms. Runtime checks pass for all tools, outside link timing.
+
+Synthetic scaling exposes the next bottleneck: extracting all 1,024 archive
+members takes 328.68 ms versus LLD's 55.08 ms. One-of-1,024 extraction still
+spends most of its untimed phase sample in parsing (container/index and objects). Archive indexing and
+packed symbol/relocation storage remain priorities. Lower process peak RSS than
+LLD in these application samples is not private memory or a new allocation-to-RSS
+claim. No general ranking, cold-cache, multicore or production claim follows.
+
+Seven raw reports/manifests are preserved under `benchmarks/results/2026-11-05/`;
+`benchmarks/README.md` records methodology, results and temporary snapshots.
+The replay harness now supports runtime environment overrides and required
+stdout text. The Doom framebuffer check passes for Fas/LLD/GNU, and a deliberate
+wrong-output expectation fails as required. No fresh timing runs assume the PC
+is still idle after the announced end of the quiet window.
+
+
 ### Current checkpoint: static IFUNC reference planning
 
 The next static Chibicc profile identified per-relocation definition-key and

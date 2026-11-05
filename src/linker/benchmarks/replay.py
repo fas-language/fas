@@ -2,7 +2,8 @@
 """Warm-cache linker comparisons from explicit, already-qualified link commands.
 
 The manifest contains workloads with name/cwd/args/check fields. Each args list
-must contain exactly one '-o PATH'. check accepts args, cwd, exit and stdin (text).
+must contain exactly one '-o PATH'. check accepts args, cwd, exit, stdin (text),
+env overrides and stdout_contains (text).
 Input compilation and runtime checks are outside the measured link interval.
 """
 import argparse
@@ -111,10 +112,13 @@ def main():
                 check = workload['check']
                 result = subprocess.run([str(program), *check.get('args', [])],
                                         cwd=check.get('cwd', str(cwd)),
+                                        env=dict(os.environ, **check.get('env', {})),
                                         input=check.get('stdin', '').encode(),
                                         capture_output=True, timeout=30)
                 if result.returncode != check.get('exit', 0):
                     raise RuntimeError(f'{label}: runtime check failed: {result.stderr!r}')
+                if check.get('stdout_contains', '').encode() not in result.stdout:
+                    raise RuntimeError(f'{label}: runtime output check failed: {result.stdout!r}')
                 baseline[label] = digest(program)
                 if not args.verify_only:
                     for _ in range(args.warmups):
