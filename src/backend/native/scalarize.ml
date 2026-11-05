@@ -62,6 +62,19 @@ type st = {
   dyn : (ty, value) Ptbl.t;
       (* chunk mode: per vector type, a stack slot for lane accesses at a
          variable index *)
+  pairs : unit Hashtbl.t;
+      (* i128 values split into two i64 words, see [i128_pairs] *)
+  slot_of : value Hashtbl.t;
+      (* lane mode, current block: vector definition -> a stack slot that
+         holds its lanes, see [slot_lane] *)
+  users : (int * bool) list Hashtbl.t;
+      (* vector definition -> per use, its block and whether the use is a
+         variable-index extract or insert reading it from a slot *)
+  mutable cur : int; (* index of the block being rewritten *)
+  const_slot : (value, value) Ptbl.t; (* like [slot_of], for constants *)
+  guarded : (int, ty * value * value * value) Ptbl.t;
+      (* variable insert whose only use is `select c (insert v i x) v`:
+         lowered with the select, as a conditional store into v's slot *)
 }
 
 let fresh st =
@@ -81,14 +94,16 @@ let lane_array st = function
   | Vector (_, t) as vt -> Array (bytes st vt / (lane_bits t / 8), t)
   | _ -> invalid_arg "lane_array"
 
-(* The integer type holding a bool vector in memory *)
+(* The type holding a bool vector in memory: one integer up to 64 lanes,
+   an array of i64 words beyond (lane i is bit i mod 64 of word i / 64) *)
 let packed_ty st vt =
   match bytes st vt with
   | 1 -> I8
   | 2 -> I16
   | 4 -> I32
   | 8 -> I64
-  | _ -> unsupported "bool vector wider than 64 lanes"
+  | n when n mod 8 = 0 -> Array (n / 8, I64)
+  | _ -> unsupported "bool vector of %d bytes" (bytes st vt)
 
 (* Lanes per piece, the type of a piece and the number of pieces *)
 let per st t = if st.chunk then 128 / lane_bits t else 1
@@ -110,6 +125,9 @@ let lanes st v =
   | Local (id, (Vector _ as vt)) ->
       let b = lid st id 0 and pt = piece_ty st vt in
       Array.init (npieces st vt) (fun i -> Local (b + i, pt))
+  | Local (id, I128) when Hashtbl.mem st.pairs id ->
+      let b = lid st id 0 in
+      [| Local (b, I64); Local (b + 1, I64) |]
   | Param (name, _) when Ptbl.mem st.ppieces name -> Ptbl.find st.ppieces name
   | Param (name, Vector (n, t)) -> Array.init n (fun i -> Param (lane_name name i, t))
   | Const_vector ((Vector (n, t) as vt), xs) ->
@@ -214,6 +232,7 @@ let words_of st v =
       [|
         (if lane_bits t = 64 then x else cast st "zext" (int_ty (lane_bits t)) x I64);
       |]
+  | I128 -> lanes st v
   | _ -> unsupported "bitcast of this type"
 
 let scalar_of_words st words t =
@@ -234,12 +253,24 @@ let lane_align al t =
 (* Lanes of a vector loaded from [p] *)
 let load_lanes st ~volatile vt p al =
   match vt with
-  | Vector (n, I1) ->
-      let it = packed_ty st vt in
-      let d = fresh st in
-      emit st (if volatile then Load_volatile (d, it, p, al) else Load (d, it, p, al));
-      let w = cast st "zext" it (Local (d, it)) I64 in
-      unpack st [| w |] n I1
+  | Vector (n, I1) -> (
+      match packed_ty st vt with
+      | Array (k, _) as at ->
+          let words =
+            Array.init k (fun i ->
+                let q = fresh st and d = fresh st in
+                emit st (Gep (q, at, p, [ Zero; Index (Const (I64, Int64.of_int i)) ]));
+                let q = Local (q, Pointer at) and al = if al <= 0 then 8 else min al 8 in
+                emit st
+                  (if volatile then Load_volatile (d, I64, q, al) else Load (d, I64, q, al));
+                Local (d, I64))
+          in
+          unpack st words n I1
+      | it ->
+          let d = fresh st in
+          emit st (if volatile then Load_volatile (d, it, p, al) else Load (d, it, p, al));
+          let w = cast st "zext" it (Local (d, it)) I64 in
+          unpack st [| w |] n I1)
   | Vector (_, t) when st.chunk ->
       let pt = piece_ty st vt and c = per st t in
       Array.init (npieces st vt) (fun i ->
@@ -260,11 +291,21 @@ let load_lanes st ~volatile vt p al =
 
 let store_lanes st ~volatile vt (ls : value array) p al =
   match vt with
-  | Vector (_, I1) ->
-      let it = packed_ty st vt in
-      let w = (pack st I1 ls).(0) in
-      let x = cast st "trunc" I64 w it in
-      emit st (if volatile then Store_volatile (it, x, p, al) else Store (it, x, p, al))
+  | Vector (_, I1) -> (
+      match packed_ty st vt with
+      | Array (_, _) as at ->
+          Array.iteri
+            (fun i w ->
+              let q = fresh st in
+              emit st (Gep (q, at, p, [ Zero; Index (Const (I64, Int64.of_int i)) ]));
+              let q = Local (q, Pointer at) and al = if al <= 0 then 8 else min al 8 in
+              emit st
+                (if volatile then Store_volatile (I64, w, q, al) else Store (I64, w, q, al)))
+            (pack st I1 ls)
+      | it ->
+          let w = (pack st I1 ls).(0) in
+          let x = cast st "trunc" I64 w it in
+          emit st (if volatile then Store_volatile (it, x, p, al) else Store (it, x, p, al)))
   | Vector (_, t) when st.chunk ->
       let pt = piece_ty st vt and c = per st t in
       Array.iteri
@@ -321,6 +362,91 @@ let expand_args st args =
           ignore e;
           [ a ])
     args
+
+(* Lane mode: an extract or insert at a variable index on a wide vector goes
+   through a stack slot (store the lanes once, then one indexed access)
+   instead of a compare and select per lane, which is quadratic for the
+   permute / compress / expand loops on 256 lanes. *)
+let slot_lane st = function
+  | Vector (n, t) -> (not st.chunk) && n >= 16 && n land (n - 1) = 0 && t <> I1
+  | _ -> false
+
+let slot_new st vt =
+  let sty = lane_array st vt and tmp = fresh st in
+  st.entry <- Alloca (tmp, sty, 16) :: st.entry;
+  Local (tmp, Pointer sty)
+
+(* A slot holding [v]: the one it was put in earlier in this block, or a new
+   one it is stored to now *)
+let slot_with st vt v =
+  match v with
+  | Local (id, _) when Hashtbl.mem st.slot_of id -> Hashtbl.find st.slot_of id
+  | (Const_vector _ | Zero _) when Ptbl.mem st.const_slot v -> Ptbl.find st.const_slot v
+  | _ ->
+      let p = slot_new st vt in
+      store_lanes st ~volatile:false vt (lanes st v) p 16;
+      (match v with
+      | Local (id, _) -> Hashtbl.replace st.slot_of id p
+      | Const_vector _ | Zero _ -> Ptbl.replace st.const_slot v p
+      | _ -> ());
+      p
+
+let slot_elem st vt p idx =
+  let n = match vt with Vector (n, _) -> n | _ -> invalid_arg "slot_elem" in
+  let i = match value_ty idx with I64 -> idx | it -> cast st "zext" it idx I64 in
+  (* out of range is poison; the mask keeps the access inside the slot *)
+  let i = bin st And I64 i (Const (I64, Int64.of_int (n - 1))) in
+  let g = fresh st in
+  emit st (Gep (g, lane_array st vt, p, [ Zero; Index i ]));
+  Local (g, Pointer (lane_array st vt))
+
+let uses_of st id = Option.value (Hashtbl.find_opt st.users id) ~default:[]
+
+(* The slot [d] (a vector made from [v]) is written in: [v]'s own when [d]
+   is the only thing left reading [v] ([own] uses), else a copy *)
+let slot_for_update st vt v own =
+  match v with
+  | Local (id, _) when Hashtbl.mem st.slot_of id && List.length (uses_of st id) = own ->
+      Hashtbl.find st.slot_of id
+  | _ ->
+      let p = slot_new st vt in
+      store_lanes st ~volatile:false vt (lanes st v) p 16;
+      p
+
+(* [d] now lives in slot [p]; its lanes are loaded only when something
+   other than slot accesses in this block reads it *)
+let slot_result st vt d p =
+  Hashtbl.replace st.slot_of d p;
+  if List.exists (fun (b, ok) -> b <> st.cur || not ok) (uses_of st d) then
+    Array.iteri (fun i l -> set st d i l) (load_lanes st ~volatile:false vt p 16)
+
+let instr_slot st ins =
+  match ins with
+  | Insert (d, _, _, _, _) when Ptbl.mem st.guarded d -> true
+  | Select (d, c, Local (a, _), _) when Ptbl.mem st.guarded a ->
+      let vt, v, idx, x = Ptbl.find st.guarded a in
+      let t = match vt with Vector (_, t) -> t | _ -> assert false in
+      (* v is read by the insert and by the select *)
+      let p = slot_for_update st vt v 2 in
+      let q = slot_elem st vt p idx and al = lane_bits t / 8 in
+      let old = fresh st in
+      emit st (Load (old, t, q, al));
+      emit st (Store (t, select st c x (Local (old, t)), q, al));
+      slot_result st vt d p;
+      true
+  | Extract (d, (Vector (_, t) as vt), v, idx)
+    when slot_lane st vt && index_const idx = None ->
+      let p = slot_with st vt v in
+      let al = lane_bits t / 8 in
+      emit st (Load (d, t, slot_elem st vt p idx, al));
+      true
+  | Insert (d, (Vector (_, t) as vt), v, idx, x)
+    when slot_lane st vt && index_const idx = None ->
+      let p = slot_for_update st vt v 1 in
+      emit st (Store (t, x, slot_elem st vt p idx, lane_bits t / 8));
+      slot_result st vt d p;
+      true
+  | _ -> false
 
 let instr_lanes st ins =
   match ins with
@@ -690,7 +816,50 @@ let instr_chunk st ins =
         (Hashtbl.find st.split p)
   | ins -> instr_lanes st ins
 
-let instr st ins = if st.chunk then instr_chunk st ins else instr_lanes st ins
+(* i128 pairs: the low word at [p], the high word at [p + 8] *)
+let pair_ptr st p i =
+  if i = 0 then p
+  else
+    let q = fresh st in
+    emit st (Gep (q, Array (2, I64), p, [ Zero; Index (Const (I64, Int64.of_int i)) ]));
+    Local (q, Pointer (Array (2, I64)))
+
+let is_pair st = function Local (id, I128) -> Hashtbl.mem st.pairs id | _ -> false
+
+let instr_pair st ins =
+  match ins with
+  | (Load (d, I128, p, al) | Load_volatile (d, I128, p, al)) when Hashtbl.mem st.pairs d ->
+      let al = if al <= 0 then 8 else min al 8 in
+      for i = 0 to 1 do
+        let q = pair_ptr st p i in
+        emit st
+          (match ins with
+          | Load_volatile _ -> Load_volatile (lid st d i, I64, q, al)
+          | _ -> Load (lid st d i, I64, q, al))
+      done;
+      true
+  | (Store (I128, v, p, al) | Store_volatile (I128, v, p, al)) when is_pair st v ->
+      let al = if al <= 0 then 8 else min al 8 in
+      Array.iteri
+        (fun i w ->
+          let q = pair_ptr st p i in
+          emit st
+            (match ins with
+            | Store_volatile _ -> Store_volatile (I64, w, q, al)
+            | _ -> Store (I64, w, q, al)))
+        (lanes st v);
+      true
+  | Cast (d, "bitcast", Vector _, v, I128) when Hashtbl.mem st.pairs d ->
+      Array.iteri (fun i w -> set st d i w) (words_of st v);
+      true
+  | Cast (d, "bitcast", I128, v, Vector (n, t)) when is_pair st v ->
+      Array.iteri (fun i x -> set st d i x) (unpack st (lanes st v) n t);
+      true
+  | _ -> false
+
+let instr st ins =
+  if not (instr_pair st ins || instr_slot st ins) then
+    if st.chunk then instr_chunk st ins else instr_lanes st ins
 
 (* Chunk mode applies to a function whose vectors all have integer lanes and a
    multiple of 128 bits, and whose vector operations all have SSE2 forms. *)
@@ -835,6 +1004,16 @@ let lane_local st allocas = function
       Some (npieces st vt, if Hashtbl.mem st.split p then 1 else 2)
   | _ -> None
 
+(* An instruction that emits nothing but makes lane i of its result (or a
+   scalar) stand for another lane's value: the pending runs must be flushed
+   first, as a later lane i may read a lane that is still in a later bucket *)
+let moves_lanes = function
+  | Shuffle_zero _ | Alloca _ -> false
+  | Shufflevector (_, _, _, _, m) -> not (zero_mask m)
+  | Insert (_, _, _, idx, _) -> index_const idx = None
+  | Cast (_, "bitcast", from, _, target) -> from <> target
+  | ins -> List.exists is_vector (types_of ins)
+
 let lane_major st allocas scalars instrs =
   let buckets = ref [||] in
   let flush () =
@@ -860,12 +1039,14 @@ let lane_major st allocas scalars instrs =
               flush ();
               buckets := Array.make n []
             end;
-            (* [emitted] is reversed: lane n-1 first *)
+            (* [emitted] is reversed (lane n-1 first); walk it in program
+               order so each bucket stays reversed, also within a lane's
+               [per] instructions (a gep before its store) *)
             List.iteri
               (fun k x ->
-                let i = n - 1 - (k / per) in
+                let i = k / per in
                 !buckets.(i) <- x :: !buckets.(i))
-              emitted
+              (List.rev emitted)
           end
       | _ -> (
           let saved = st.out in
@@ -879,7 +1060,7 @@ let lane_major st allocas scalars instrs =
                  load goes ahead of them and the run continues *)
               st.out <- emitted @ st.out
           | _ ->
-              if emitted <> [] then begin
+              if emitted <> [] || moves_lanes ins then begin
                 flush ();
                 st.out <- emitted @ st.out
               end))
@@ -909,6 +1090,42 @@ let vector_size (f : func) =
           | _ -> n + 1)
         n b.instrs)
     0 f.blocks
+
+(* Bool vectors over 64 lanes reach memory through i128: the front end
+   bitcasts each <128 x i1> chunk to i128 and loads or stores that. The native
+   backend has no i128 values, so such an i128 becomes a pair of i64 words,
+   when every use of it is a store of it or a bitcast back to a vector. *)
+let i128_pairs (f : func) =
+  let cand = Hashtbl.create 8 in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (function
+          | Load (d, I128, _, _) | Load_volatile (d, I128, _, _)
+          | Cast (d, "bitcast", Vector _, _, I128) ->
+              Hashtbl.replace cand d ()
+          | _ -> ())
+        b.instrs)
+    f.blocks;
+  if Hashtbl.length cand > 0 then begin
+    let bad v =
+      (match v with Local (i, _) -> Hashtbl.remove cand i | _ -> ());
+      v
+    in
+    List.iter
+      (fun (b : block) ->
+        List.iter
+          (fun ins ->
+            match ins with
+            | Store (I128, Local _, p, _) | Store_volatile (I128, Local _, p, _) ->
+                ignore (bad p)
+            | Cast (_, "bitcast", I128, Local _, Vector _) -> ()
+            | _ -> ignore (Ir_fold.map_instr bad ins))
+          b.instrs;
+        ignore (Ir_fold.map_term bad b.terminator))
+      f.blocks
+  end;
+  cand
 
 let has_vectors (f : func) =
   is_vector f.ret
@@ -950,8 +1167,84 @@ let func structs (f : func) =
         ppieces = Ptbl.create 4;
         ins0 = Hashtbl.create 16;
         dyn = Ptbl.create 2;
+        pairs = i128_pairs f;
+        slot_of = Hashtbl.create 8;
+        users = Hashtbl.create 64;
+        cur = 0;
+        const_slot = Ptbl.create 4;
+        guarded = Ptbl.create 16;
       }
     in
+    (* uses of vector definitions, for the slot lowering *)
+    if not st.chunk then begin
+      (* variable inserts used once, by `select c (insert v i x) v` in the
+         same block *)
+      let var_ins = Hashtbl.create 16 and count = Hashtbl.create 64 in
+      let tally v =
+        (match v with
+        | Local (id, _) ->
+            Hashtbl.replace count id (1 + Option.value (Hashtbl.find_opt count id) ~default:0)
+        | _ -> ());
+        v
+      in
+      List.iter
+        (fun (b : block) ->
+          List.iter
+            (fun ins ->
+              (match ins with
+              | Insert (d, vt, v, idx, x) when slot_lane st vt && index_const idx = None ->
+                  Hashtbl.replace var_ins d (vt, v, idx, x)
+              | _ -> ());
+              ignore (Ir_fold.map_instr tally ins))
+            b.instrs;
+          ignore (Ir_fold.map_term tally b.terminator))
+        f.blocks;
+      List.iter
+        (fun (b : block) ->
+          let here = Hashtbl.create 16 in
+          List.iter
+            (fun ins ->
+              match ins with
+              | Insert (d, _, _, _, _) when Hashtbl.mem var_ins d -> Hashtbl.replace here d ()
+              | Select (_, c, Local (a, _), w)
+                when Hashtbl.mem here a
+                     && Hashtbl.find_opt count a = Some 1
+                     && (not (is_vector (value_ty c)))
+                     && (let _, v, _, _ = Hashtbl.find var_ins a in v = w) ->
+                  Ptbl.replace st.guarded a (Hashtbl.find var_ins a)
+              | _ -> ())
+            b.instrs)
+        f.blocks
+    end;
+    if not st.chunk then
+      List.iteri
+        (fun bi (b : block) ->
+          let note ok v =
+            (match v with
+            | Local (id, Vector _) ->
+                Hashtbl.replace st.users id ((bi, ok) :: uses_of st id)
+            | _ -> ());
+            v
+          in
+          List.iter
+            (fun ins ->
+              match ins with
+              | Extract (_, vt, (Local _ as v), idx)
+                when slot_lane st vt && index_const idx = None ->
+                  ignore (note true v);
+                  ignore (note false idx)
+              | Insert (_, vt, (Local _ as v), idx, x)
+                when slot_lane st vt && index_const idx = None ->
+                  ignore (note true v);
+                  ignore (note false idx);
+                  ignore (note false x)
+              | Select (_, c, Local (a, _), w) when Ptbl.mem st.guarded a ->
+                  ignore (note false c);
+                  ignore (note true w)
+              | _ -> ignore (Ir_fold.map_instr (note false) ins))
+            b.instrs;
+          ignore (Ir_fold.map_term (note false) b.terminator))
+        f.blocks;
     let top = ref 0 in
     List.iter
       (fun (b : block) ->
@@ -981,6 +1274,9 @@ let func structs (f : func) =
             | Some (i, (Vector _ as vt)) ->
                 Hashtbl.replace st.base i st.next;
                 st.next <- st.next + npieces st vt
+            | Some (i, I128) when Hashtbl.mem st.pairs i ->
+                Hashtbl.replace st.base i st.next;
+                st.next <- st.next + 2
             | _ -> ())
           b.instrs)
       f.blocks;
@@ -1025,6 +1321,10 @@ let func structs (f : func) =
       List.mapi
         (fun bi (b : block) ->
           st.out <- [];
+          st.cur <- bi;
+          (* a slot filled in another block may not dominate this one *)
+          Hashtbl.reset st.slot_of;
+          Ptbl.reset st.const_slot;
           if bi = 0 then st.out <- List.rev prologue;
           lane_major st allocas scalars b.instrs;
           let terminator =

@@ -28,6 +28,14 @@ open Ir
 module Hashtbl = Itbl
 module Ptbl = Stdlib.Hashtbl
 
+(* The ranges a register holds, (lo, hi, key) ordered by lo *)
+module Occ = Set.Make (struct
+  type t = int * int * int
+
+  let compare ((a : int), (b : int), (c : int)) (d, e, f) =
+    if a <> d then Int.compare a d else if b <> e then Int.compare b e else Int.compare c f
+end)
+
 (* Allocation keys: a value id (>= 0) or an interned parameter name (< 0) *)
 type key = int
 
@@ -449,8 +457,9 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
      result (code generation reads operands first). Not at block starts,
      where several phis are written together, nor at 0, the parameters. *)
   let single_point_ok p = p > 0 && not (Hashtbl.mem block_starts p) in
-  let ranges_conflict (a1, b1) (a2, b2) =
-    let lo = max a1 a2 and hi = min b1 b2 in
+  let ranges_conflict ((a1 : int), (b1 : int)) ((a2 : int), (b2 : int)) =
+    (* monomorphic: polymorphic max/min call compare_val *)
+    let lo = if a1 > a2 then a1 else a2 and hi = if b1 < b2 then b1 else b2 in
     lo <= hi
     && not
          (lo = hi && single_point_ok lo
@@ -458,13 +467,6 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   in
   let conflict_any r1 r2 =
     List.exists (fun x -> List.exists (ranges_conflict x) r2) r1
-  in
-  (* range lists are sorted and disjoint: walk both at once *)
-  let rec conflict r1 r2 =
-    match (r1, r2) with
-    | [], _ | _, [] -> false
-    | ((_, b1) as x) :: t1, ((_, b2) as y) :: t2 ->
-        ranges_conflict x y || if b1 < b2 then conflict t1 r2 else conflict r1 t2
   in
   let ends = Hashtbl.create 256 in
   List.iter
@@ -480,16 +482,57 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   in
   let debug = Sys.getenv_opt "FAS_RA_DEBUG" = Some "1" in
   let assignment = Hashtbl.create 64 in
-  (* per register: the intervals it holds that may still conflict *)
-  let held = Ptbl.create 8 in
-  (* per register: every interval it holds, for re-placing an evicted one *)
-  let ever = Ptbl.create 8 in
+  (* per register: the ranges of every interval it holds. They do not
+     conflict with each other, so they are disjoint but for single points
+     shared by a value dying where another is defined, and a query only looks
+     at the range before its own start and those starting inside it. This
+     keeps allocation near linear on functions with 100k values. *)
+  let occ = Ptbl.create 8 in
   let all = callee @ caller in
-  List.iter
-    (fun r ->
-      Ptbl.replace held r [];
-      Ptbl.replace ever r [])
-    all;
+  List.iter (fun r -> Ptbl.replace occ r Occ.empty) all;
+  let iv_of = Hashtbl.create 64 in
+  List.iter (fun ((_, k, _) as iv) -> Hashtbl.replace iv_of k iv) intervals;
+  (* keys of the intervals in [r] that conflict with [rs], up to [limit] *)
+  let conflicts ?(limit = max_int) r rs =
+    let set = Ptbl.find occ r in
+    let found = ref [] and n = ref 0 in
+    let add k =
+      if not (List.mem k !found) then begin
+        found := k :: !found;
+        incr n
+      end
+    in
+    (try
+       List.iter
+         (fun (a, b) ->
+           (match Occ.find_last_opt (fun (lo, _, _) -> lo < a) set with
+           | Some (lo, hi, k) when ranges_conflict (a, b) (lo, hi) -> add k
+           | _ -> ());
+           if !n >= limit then raise Exit;
+           let rec walk sq =
+             match sq () with
+             | Seq.Cons ((lo, hi, k), rest) when lo <= b ->
+                 if ranges_conflict (a, b) (lo, hi) then begin
+                   add k;
+                   if !n >= limit then raise Exit
+                 end;
+                 walk rest
+             | _ -> ()
+           in
+           walk (Occ.to_seq_from (a, min_int, min_int) set))
+         rs
+     with Exit -> ());
+    !found
+  in
+  let free_in r rs = conflicts ~limit:1 r rs = [] in
+  let occupy r (_, k, rs) =
+    Ptbl.replace occ r
+      (List.fold_left (fun s (lo, hi) -> Occ.add (lo, hi, k) s) (Ptbl.find occ r) rs)
+  in
+  let vacate r (_, k, rs) =
+    Ptbl.replace occ r
+      (List.fold_left (fun s (lo, hi) -> Occ.remove (lo, hi, k) s) (Ptbl.find occ r) rs)
+  in
   let usable_for rs =
     let crossing = crosses_call rs in
     let string_crossing = crosses_at string_ops rs in
@@ -499,19 +542,9 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   in
   List.iter
     (fun (start, k, rs) ->
-      (* forget intervals that ended before this start: later intervals start
-         no earlier *)
-      List.iter
-        (fun r ->
-          Ptbl.replace held r
-            (List.filter (fun (_, k', _) -> end_of k' >= start) (Ptbl.find held r)))
-        all;
       let crossing = crosses_call rs in
       let usable = usable_for rs in
-      let fits r =
-        usable r
-        && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find held r))
-      in
+      let fits r = usable r && free_in r rs in
       (* Prefer caller-saved registers for short, call-free intervals so the
          callee-saved ones stay for values that need them. *)
       let order = if crossing then callee else caller @ callee in
@@ -522,8 +555,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       in
       let take_as ((_, k, _) as iv) r =
         Hashtbl.replace assignment k r;
-        Ptbl.replace held r (iv :: Ptbl.find held r);
-        Ptbl.replace ever r (iv :: Ptbl.find ever r)
+        occupy r iv
       in
       let take = take_as (start, k, rs) in
       match List.find_opt fits hinted with
@@ -539,12 +571,9 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
                   (fun r ->
                     if not (usable r) then None
                     else
-                      match
-                        List.filter
-                          (fun (_, _, rs') -> conflict rs rs')
-                          (Ptbl.find held r)
-                      with
-                      | [ ((_, vk, vrs) as victim) ] ->
+                      match conflicts ~limit:2 r rs with
+                      | [ vk ] ->
+                          let ((_, _, vrs) as victim) = Hashtbl.find iv_of vk in
                           Some ((weight vk vrs, -end_of vk), r, vk, victim)
                       | _ -> None)
                   order
@@ -555,12 +584,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
               with
               | (cost, r, vk, victim) :: _ when cost < mine -> (
                   Hashtbl.remove assignment vk;
-                  let drop t =
-                    Ptbl.replace t r
-                      (List.filter (fun x -> x != victim) (Ptbl.find t r))
-                  in
-                  drop held;
-                  drop ever;
+                  vacate r victim;
                   take r;
                   (* the victim may still fit another register whole *)
                   let _, _, vrs = victim in
@@ -568,12 +592,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
                   let vorder = if crosses_call vrs then callee else caller @ callee in
                   match
                     List.find_opt
-                      (fun r' ->
-                        r' <> r && vusable r'
-                        && not
-                             (List.exists
-                                (fun (_, _, rs') -> conflict vrs rs')
-                                (Ptbl.find ever r')))
+                      (fun r' -> r' <> r && vusable r' && free_in r' vrs)
                       vorder
                   with
                   | Some r' -> take_as victim r'
@@ -590,12 +609,10 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       let usable = usable_for rs in
       let crossing = crosses_call rs in
       let order = if crossing then callee else caller @ callee in
-      let free r =
-        not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find ever r))
-      in
+      let free r = free_in r rs in
       let place r =
         Hashtbl.replace assignment k r;
-        Ptbl.replace ever r (iv :: Ptbl.find ever r)
+        occupy r iv
       in
       match List.find_opt (fun r -> usable r && free r) order with
       | Some r -> place r
