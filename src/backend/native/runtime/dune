@@ -1,0 +1,12 @@
+; Embed the Fas runtime sources as OCaml strings (Native_runtime compiles
+; them on demand).
+(rule
+ (targets native_runtime_source.ml)
+ (deps fma.fas)
+ (action
+  (with-stdout-to
+   %{targets}
+   (progn
+    (echo "let fma = {fas|")
+    (cat fma.fas)
+    (echo "|fas}\n")))))

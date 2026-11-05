@@ -1,0 +1,190 @@
+// Correctly rounded fused multiply-add for the native backend.
+//
+// Baseline x86-64 (SSE2) has no FMA instruction and a freestanding program
+// has no libm, so the native backend compiles `fma` to calls to these
+// functions. They are compiled once to Fir (native_runtime.ml embeds the text)
+// and added to a module only when it uses `fma`. Rounding is
+// round-to-nearest-even; floating-point exception flags are not modelled.
+//
+// fma64 follows musl's fma.c: unpack both operands to integers, form the exact
+// 106-bit product, align and add the third operand with a sticky bit, keep the
+// top 63 bits (bit 0 sticky) and let one int->double conversion do the only
+// rounding. Subnormal results are rounded by hand instead.
+
+// Significand of a finite nonzero x scaled to [2^53, 2^54).
+fn unpack_m(x f64) u64 {
+  ix u64 = bitcast[u64](x)
+  if (ix >> 52) & 0x7ff == 0 {
+    ix = bitcast[u64](x * 9223372036854775808.0)   // * 2^63 normalizes
+  }
+  return ((ix & 0xfffffffffffff) | 0x10000000000000) << 1
+}
+
+// Exponent with x == unpack_m(x) * 2^unpack_e(x); 0x800 - 1076 for zero and
+// 0x7ff - 1076 for infinities and NaN, so both are >= ZEROINFNAN.
+fn unpack_e(x f64) i32 {
+  ix u64 = bitcast[u64](x)
+  e i32 = bitcast[i32](trunc[u32]((ix >> 52) & 0x7ff))
+  if e == 0 {
+    if ix & 0x7fffffffffffffff == 0 {
+      e = 0x800
+    } else {
+      ix = bitcast[u64](x * 9223372036854775808.0)
+      e = bitcast[i32](trunc[u32]((ix >> 52) & 0x7ff)) - 63
+    }
+  }
+  return e - 1076
+}
+
+const ZEROINFNAN i32 = 0x7ff - 1076
+
+extern "C" {
+fn fas_rt_fma64(x f64, y f64, z f64) f64 {
+  ex i32 = unpack_e(x)
+  ey i32 = unpack_e(y)
+  ez i32 = unpack_e(z)
+  // A NaN z goes through the addition too, which quiets a signaling NaN.
+  if ex >= ZEROINFNAN || ey >= ZEROINFNAN || z != z {
+    return x * y + z
+  }
+  if ez >= ZEROINFNAN {
+    if ez > ZEROINFNAN {
+      // z is zero and the product is not: the exact sum is the product, so
+      // its rounding keeps the product's sign even when it underflows to
+      // zero (x * y + z would turn -0 + +0 into +0).
+      return x * y
+    }
+    return z                  // z is infinite and the product finite
+  }
+  mx u64 = unpack_m(x)
+  my u64 = unpack_m(y)
+  mz u64 = unpack_m(z)
+  rhi u64 = mul_hi(mx, my)
+  rlo u64 = mx * my
+  zhi u64 = 0
+  zlo u64 = 0
+  // Align: shift z left or the product right so both share exponent e.
+  e i32 = ex + ey
+  d i32 = ez - e
+  if d > 0 {
+    if d < 64 {
+      s u64 = zext[u64](bitcast[u32](d))
+      zlo = mz << s
+      zhi = mz >> (64 - s)
+    } else {
+      zlo = 0
+      zhi = mz
+      e = ez - 64
+      d = d - 64
+      if d == 0 {
+      } else if d < 64 {
+        s u64 = zext[u64](bitcast[u32](d))
+        sticky u64 = zext[u64](rlo << (64 - s) != 0)
+        rlo = (rhi << (64 - s)) | (rlo >> s) | sticky
+        rhi = rhi >> s
+      } else {
+        rlo = 1
+        rhi = 0
+      }
+    }
+  } else {
+    zhi = 0
+    d = -d
+    if d == 0 {
+      zlo = mz
+    } else if d < 64 {
+      s u64 = zext[u64](bitcast[u32](d))
+      zlo = (mz >> s) | zext[u64](mz << (64 - s) != 0)
+    } else {
+      zlo = 1
+    }
+  }
+  // Add or subtract z.
+  negative bool = (bitcast[u64](x) ^ bitcast[u64](y)) >> 63 != 0
+  z_negative bool = bitcast[u64](z) >> 63 != 0
+  nonzero bool = true
+  if negative == z_negative {
+    rlo = rlo + zlo
+    rhi = rhi + zhi + zext[u64](rlo < zlo)
+  } else {
+    t u64 = rlo
+    rlo = rlo - zlo
+    rhi = rhi - zhi - zext[u64](t < rlo)
+    if rhi >> 63 != 0 {
+      rlo = 0 - rlo
+      rhi = 0 - rhi - zext[u64](rlo != 0)
+      negative = !negative
+    }
+    nonzero = rhi != 0
+  }
+  // Keep the top 63 bits, bit 0 sticky.
+  if nonzero {
+    e = e + 64
+    n u64 = clz(rhi) - 1
+    d = bitcast[i32](trunc[u32](n))
+    rhi = (rhi << n) | (rlo >> (64 - n)) | zext[u64](rlo << n != 0)
+  } else if rlo != 0 {
+    n u64 = clz(rlo)
+    if n == 0 {
+      rhi = (rlo >> 1) | (rlo & 1)
+      d = -1
+    } else {
+      rhi = rlo << (n - 1)
+      d = bitcast[i32](trunc[u32](n)) - 1
+    }
+  } else {
+    return x * y + z          // exact zero: +0 in round-to-nearest
+  }
+  e = e - d
+  // value = rhi * 2^e with rhi in [2^62, 2^63)
+  sign u64 = if negative { 0x8000000000000000 } else { 0 }
+  if e < -1084 {
+    // Subnormal (or rounds up to the smallest normal): round at 2^-1074.
+    k i32 = -1074 - e
+    if k >= 64 {
+      return bitcast[f64](sign)
+    }
+    s u64 = zext[u64](bitcast[u32](k))
+    q u64 = rhi >> s
+    rem u64 = rhi & ((1 << s) - 1)
+    half u64 = 1 << (s - 1)
+    if rem > half || (rem == half && q & 1 != 0) {
+      q = q + 1
+    }
+    return bitcast[f64](q | sign)
+  }
+  i i64 = bitcast[i64](rhi)
+  r f64 = cvt[f64](i)                    // the one rounding, to 53 bits
+  bits u64 = bitcast[u64](r)
+  field i64 = bitcast[i64]((bits >> 52) & 0x7ff) + sext[i64](e)
+  if field >= 0x7ff {
+    return bitcast[f64](0x7ff0000000000000 | sign)
+  }
+  return bitcast[f64]((bits & 0xfffffffffffff) | (bitcast[u64](field) << 52) | sign)
+}
+}
+
+// f32: the product is exact in f64. Round the sum to odd at 53 bits, then
+// to nearest at 24: with at least two extra bits, round-to-odd followed by
+// round-to-nearest rounds once (Boldo and Melquiond).
+extern "C" {
+fn fas_rt_fma32(x f32, y f32, z f32) f32 {
+  p f64 = cvt[f64](x) * cvt[f64](y)
+  w f64 = cvt[f64](z)
+  s f64 = p + w
+  bits u64 = bitcast[u64](s)
+  if (bits >> 52) & 0x7ff != 0x7ff && bits & 1 == 0 {
+    // TwoSum: err is the exact rounding error of p + w.
+    bb f64 = s - p
+    err f64 = (p - (s - bb)) + (w - bb)
+    if err != 0.0 {
+      if (err > 0.0) == (s > 0.0) {
+        bits = bits + 1
+      } else {
+        bits = bits - 1
+      }
+    }
+  }
+  return cvt[f32](bitcast[f64](bits))
+}
+}

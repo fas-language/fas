@@ -2715,7 +2715,10 @@ let generate ~startup (m : module_) =
             }
         | m, false -> m
     in
+    let m = t "runtime" Native_runtime.add m in
     let m = t "scalarize" Scalarize.module_ m in
+    (* After scalarization, so vector fma arrives as scalar lanes *)
+    let m = t "runtime_calls" Native_runtime.rewrite m in
     let m = t "promote" Mem2reg.module_ m in
     let m = t "fold" Ir_fold.module_ m in
     let m =

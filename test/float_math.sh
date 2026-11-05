@@ -38,4 +38,13 @@ for level in 0 2; do
   diff -u "$TMP/expected" "$TMP/actual"
 done
 
-echo 'float math: sqrt, fma, floor, ceil, round, abs, constants and 2048 random patterns per width at O0/O2: ok'
+# Native backend: fma goes through the software runtime (runtime/fma.fas)
+"$OCAML_FAS" --backend=native "$ROOT/test/float_math.fas" -o "$TMP/float_math.native"
+timeout 60 "$TMP/float_math.native" >"$TMP/actual"
+diff -u "$TMP/expected" "$TMP/actual"
+FAS_FIR=roundtrip "$OCAML_FAS" --backend=native "$ROOT/test/float_math.fas" \
+  -o "$TMP/float_math.fir"
+timeout 60 "$TMP/float_math.fir" >"$TMP/actual"
+diff -u "$TMP/expected" "$TMP/actual"
+
+echo 'float math: sqrt, fma, floor, ceil, round, abs, constants and 2048 random patterns per width at O0/O2 and native: ok'
