@@ -106,6 +106,7 @@ let calls_self (f : func) =
    than by its lanes. *)
 let sole_site_limit = 300
 let slot_arg_limit = 160
+let few_sites_growth = 96
 
 let candidates ?(only = fun _ -> true) sizes (m : module_) =
   let small = 32 in
@@ -185,7 +186,9 @@ let candidates ?(only = fun _ -> true) sizes (m : module_) =
     (fun (f : func) ->
       if f.linkage = Internal && (not (Ptbl.mem out f.name)) && eligible f then
         let n = own_size f in
-        let once = Ptbl.find_opt sites f.name = Some 1 in
+        let k = Option.value ~default:0 (Ptbl.find_opt sites f.name) in
+        (* inlined everywhere: one site, or a few whose copies stay small *)
+        let once = k = 1 || (k <= 3 && n * (k - 1) <= few_sites_growth) in
         if (once && n <= sole_site_limit) || n <= slot_arg_limit then
           Ptbl.replace extra f.name (f, n, once))
     m.funcs;
