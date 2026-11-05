@@ -884,6 +884,44 @@ and lower_builtin s b args t span =
   let rt = ty t in
   match (b, vs) with
   | Volatile_load access_ty, [ pointer ] -> volatile_load s span access_ty pointer
+  | Atomic (op, order, _), values ->
+      (* Atomics travel through the old Ir as calls to `__fas_atomic_<op>_<order>`
+         (Ir.atomic_name). The LLVM renderer prints the real atomic instruction;
+         native passes see an opaque, memory-clobbering call. *)
+      let op =
+        match op with
+        | Hir.Atomic_load -> Ir.A_load
+        | Hir.Atomic_store -> Ir.A_store
+        | Hir.Atomic_add -> Ir.A_add
+        | Hir.Atomic_sub -> Ir.A_sub
+        | Hir.Atomic_and -> Ir.A_and
+        | Hir.Atomic_or -> Ir.A_or
+        | Hir.Atomic_xor -> Ir.A_xor
+        | Hir.Atomic_xchg -> Ir.A_xchg
+        | Hir.Atomic_cas -> Ir.A_cas
+        | Hir.Atomic_fence -> Ir.A_fence
+      and order =
+        match order with
+        | Hir.Relaxed -> Ir.Relaxed
+        | Hir.Acquire -> Ir.Acquire
+        | Hir.Release -> Ir.Release
+        | Hir.Acq_rel -> Ir.Acq_rel
+        | Hir.Seq_cst -> Ir.Seq_cst
+      in
+      let args = List.map (fun v -> (Ir.value_ty v, Ir.No_extension, v)) values in
+      let name =
+        match args with
+        | [] -> Ir.atomic_name op order
+        | (_ :: _ :: _) -> Ir.atomic_name ~ty:(let t, _, _ = List.nth args 1 in t) op order
+        | [ _ ] -> Ir.atomic_name ~ty:rt op order
+      in
+      if rt = Ir.Void then (
+        emit s (Ir.Call (None, Ir.No_extension, Ir.Void, name, args));
+        Ok (Ir.Const (Ir.I1, 0L)))
+      else
+        let id = fresh s in
+        emit s (Ir.Call (Some id, Ir.No_extension, rt, name, args));
+        Ok (Ir.Local (id, rt))
   | Simd_load (access_ty, kind), values ->
       simd_memory_load s span access_ty kind args values
   | Addr_bits, [ x ] ->
@@ -1078,7 +1116,7 @@ and lower_builtin s b args t span =
                 | Shuffle | Permute | Reduce_sum | Reduce_min | Reduce_max | Reduce_and
                 | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
-                | Handle_from_addr _ | Volatile_load _ | Simd_load _ ),
+                | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _ ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -3078,7 +3116,7 @@ let intrinsic_decls funcs =
             List.filter_map
               (function
                 | Ir.Call (_, _, ret, name, args)
-                  when String.starts_with ~prefix:"llvm." name ->
+                  when String.starts_with ~prefix:"llvm." name || Ir.is_atomic_name name ->
                     Some (name, ret, List.map (fun (ty, _, _) -> ty) args)
                 | Ir.Trap -> Some ("llvm.trap", Ir.Void, [])
                 | _ -> None)

@@ -151,9 +151,15 @@ let conv_ir = function
   | Ptrtoint -> "ptrtoint" | Inttoptr -> "inttoptr" | Bitcast -> "bitcast"
   | k -> unsupported "conversion %s" (Fir_print.conv_name k)
 
-let mem_align (m : mem) =
-  if m.order <> Plain then unsupported "atomic memory access";
-  m.align
+let mem_align (m : mem) = m.align
+
+let atomic_order : ordering -> Ir.atomic_order = function
+  | Relaxed -> Ir.Relaxed
+  | Acquire -> Ir.Acquire
+  | Release -> Ir.Release
+  | Acq_rel -> Ir.Acq_rel
+  | Seq_cst -> Ir.Seq_cst
+  | Plain -> unsupported "plain ordering on an atomic"
 
 (* An entry-block slot of [n] bytes *)
 let slot cx n align =
@@ -268,6 +274,14 @@ let convert_inst cx (i : inst) =
       match const_int cx n with
       | Some n -> def cx (r 0) (fun id _ -> Ir.Alloca (id, bytes (Int64.to_int n), align))
       | None -> unsupported "variable-size alloca")
+  | Load (m, p) when m.order <> Plain ->
+      let t = ir_ty (ty_of f (r 0)) in
+      intrinsic cx (r 0) (Ir.atomic_name ~ty:t Ir.A_load (atomic_order m.order))
+        [ (Ir.Pointer Ir.I8, Ir.No_extension, v p) ]
+  | Store (m, x, p) when m.order <> Plain ->
+      let t = ir_ty (ty_of f x) in
+      call cx None Ir.Void (Ir.atomic_name ~ty:t Ir.A_store (atomic_order m.order))
+        [ (Ir.Pointer Ir.I8, Ir.No_extension, v p); arg cx x ]
   | Load (m, p) ->
       let al = mem_align m in
       def cx (r 0) (fun id t -> if m.volatile then Ir.Load_volatile (id, t, v p, al) else Ir.Load (id, t, v p, al))
@@ -326,7 +340,27 @@ let convert_inst cx (i : inst) =
           let z : Ir.value = Ir.Zero (bytes n) in
           add cx (if vol then Ir.Store_volatile (bytes n, z, v d, 1) else Ir.Store (bytes n, z, v d, 1))
       | _ -> unsupported "memset other than a constant-size clear")
-  | Rmw _ | Cmpxchg _ | Fence _ -> unsupported "atomics"
+  | Rmw (k, m, p, x) ->
+      (* back to `__fas_atomic_*` pseudo-calls (Ir.atomic_name) *)
+      let op =
+        match k with
+        | Xchg -> Ir.A_xchg
+        | Radd -> Ir.A_add
+        | Rsub -> Ir.A_sub
+        | Rand -> Ir.A_and
+        | Ror -> Ir.A_or
+        | Rxor -> Ir.A_xor
+        | _ -> unsupported "atomic_rmw %s" (Fir_print.rmw_name k)
+      in
+      let t = ir_ty (ty_of f x) in
+      intrinsic cx (r 0) (Ir.atomic_name ~ty:t op (atomic_order m.order)) [ (Ir.Pointer Ir.I8, Ir.No_extension, v p); arg cx x ]
+  | Cmpxchg c ->
+      (* the old Ir keeps only the old value; the success flag is old = expected *)
+      let t = ir_ty (ty_of f c.expected) in
+      intrinsic cx (r 0) (Ir.atomic_name ~ty:t Ir.A_cas (atomic_order c.mem.order))
+        [ (Ir.Pointer Ir.I8, Ir.No_extension, v c.p); arg cx c.expected; arg cx c.desired ];
+      def cx (r 1) (fun id _ -> Ir.Cmp (id, Ir.Eq, t, vv cx (r 0), v c.expected))
+  | Fence o -> call cx None Ir.Void (Ir.atomic_name Ir.A_fence (atomic_order o)) []
   | Extract (x, l) -> def cx (r 0) (fun id _ -> Ir.Extract (id, ir_ty (ty_of f x), v x, v l))
   | Insert (x, e, l) -> def cx (r 0) (fun id t -> Ir.Insert (id, t, v x, v l, v e))
   | Shuffle (a, b, mask) ->

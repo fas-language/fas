@@ -1732,6 +1732,82 @@ let gen_intrinsic ctx fr result ret_ty name args =
   end
   else unsupported "intrinsic %s" name
 
+(* Atomics (calls to `__fas_atomic_<op>_<order>.<ty>`, see Ir.atomic_name).
+   x86-64 is TSO: every naturally aligned load is an acquire load and every
+   store a release store, so only seq_cst stores need xchg and only seq_cst
+   fences need mfence. The read-modify-writes use lock xadd / xchg / lock
+   cmpxchg, which are full barriers whatever the ordering. and/or/xor have
+   no fetch form, so they loop on cmpxchg. Only rax/rcx/rdx are used (see
+   Regalloc.clobbers). Results are re-canonicalised after 1- and 2-byte
+   forms, which leave the register's upper bits alone. *)
+let gen_atomic ctx fr result ret name args =
+  let a = ctx.a in
+  let op, order =
+    match Ir.parse_atomic_name name with
+    | Some x -> x
+    | None -> unsupported "malformed atomic %s" name
+  in
+  let arg i =
+    let _, _, v = List.nth args i in
+    v
+  in
+  let size_of ty = match ty with Pointer _ -> 8 | t -> bits t / 8 in
+  let finish r size =
+    match result with
+    | Some id ->
+        if size < 4 then A.zero_extend a (size * 8) r;
+        store_result ctx fr id ret r
+    | None -> ()
+  in
+  let mem = A.Base (A.Rdx, 0) in
+  match op with
+  | Ir.A_fence -> if order = Ir.Seq_cst then A.mfence a
+  | Ir.A_load ->
+      let size = size_of ret in
+      load ctx fr A.Rdx (arg 0);
+      A.load_zx a size A.Rax mem;
+      finish A.Rax 8
+  | Ir.A_store ->
+      let size = size_of (value_ty (arg 1)) in
+      load ctx fr A.Rax (arg 1);
+      load ctx fr A.Rdx (arg 0);
+      if order = Ir.Seq_cst then A.xchg_mr a size mem A.Rax else A.store a size mem A.Rax
+  | Ir.A_xchg ->
+      let size = size_of ret in
+      load ctx fr A.Rax (arg 1);
+      load ctx fr A.Rdx (arg 0);
+      A.xchg_mr a size mem A.Rax;
+      finish A.Rax size
+  | Ir.A_add | Ir.A_sub ->
+      let size = size_of ret in
+      load ctx fr A.Rax (arg 1);
+      load ctx fr A.Rdx (arg 0);
+      if op = Ir.A_sub then A.neg a A.Rax;
+      A.lock_xadd a size mem A.Rax;
+      finish A.Rax size
+  | Ir.A_cas ->
+      let size = size_of ret in
+      load ctx fr A.Rcx (arg 2);
+      load ctx fr A.Rax (arg 1);
+      load ctx fr A.Rdx (arg 0);
+      A.lock_cmpxchg a size mem A.Rcx;
+      finish A.Rax size
+  | Ir.A_and | Ir.A_or | Ir.A_xor ->
+      (* rax = old; loop: rcx = rax op v; lock cmpxchg [p], rcx; jne loop.
+         v is reloaded each round since rcx is the scratch for the new value
+         and there is no fourth scratch register. *)
+      let size = size_of ret in
+      load ctx fr A.Rdx (arg 0);
+      A.load_zx a size A.Rax mem;
+      let top = A.new_label a in
+      A.place a top;
+      load ctx fr A.Rcx (arg 1);
+      A.alu_rr a (match op with Ir.A_and -> A.And | Ir.A_or -> A.Or | _ -> A.Xor) A.Rcx A.Rax;
+      load ctx fr A.Rdx (arg 0);
+      A.lock_cmpxchg a size mem A.Rcx;
+      A.jcc a A.Ne top;
+      finish A.Rax size
+
 let gen_instr ctx fr ins =
   let a = ctx.a in
   match ins with
@@ -2048,6 +2124,8 @@ let gen_instr ctx fr ins =
           A.cvt_ff a ~from_double:(kind = "fptrunc") 0 0;
           from_xmm ctx fr id target 0
       | k -> unsupported "cast %s" k)
+  | Call (result, _, ret, name, args) when Ir.is_atomic_name name ->
+      gen_atomic ctx fr result ret name args
   | Call (result, _, ret, name, args) ->
       if String.starts_with ~prefix:"llvm." name then
         gen_intrinsic ctx fr result ret name args

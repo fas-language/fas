@@ -327,6 +327,32 @@ let store a size mem src =
   | 8 -> rm a [ 0x89 ] ~reg:src mem
   | _ -> invalid_arg "x64.store"
 
+(* Atomics. [sized_rm] encodes an r/m-with-register op of [size] bytes,
+   optionally with a lock prefix. xchg with memory is locked implicitly;
+   cmpxchg compares with the low [size] bytes of rax. For 1- and 2-byte forms
+   the upper bits of the register operand are left as they were. *)
+let sized_rm a ~lock size op8 op ~reg mem =
+  if lock then byte a 0xf0;
+  match size with
+  | 1 -> rm a ~w:false ~force:(reg_num reg >= 4) op8 ~reg mem
+  | 2 ->
+      byte a 0x66;
+      rm a ~w:false op ~reg mem
+  | 4 -> rm a ~w:false op ~reg mem
+  | 8 -> rm a op ~reg mem
+  | _ -> invalid_arg "x64.sized_rm"
+
+let xchg_mr a size mem src = sized_rm a ~lock:false size [ 0x86 ] [ 0x87 ] ~reg:src mem
+let lock_xadd a size mem src = sized_rm a ~lock:true size [ 0x0f; 0xc0 ] [ 0x0f; 0xc1 ] ~reg:src mem
+
+let lock_cmpxchg a size mem src =
+  sized_rm a ~lock:true size [ 0x0f; 0xb0 ] [ 0x0f; 0xb1 ] ~reg:src mem
+
+let mfence a =
+  byte a 0x0f;
+  byte a 0xae;
+  byte a 0xf0
+
 let lea a dst mem = rm a [ 0x8d ] ~reg:dst mem
 
 (* Zero-extend the low [bits] of a register in place. *)

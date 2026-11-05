@@ -1,0 +1,32 @@
+// Exported to the pthread driver in threads.c: an atomic counter, a
+// test-and-set spinlock built on atomic_cas guarding a plain counter, and a
+// release/acquire message pass.
+extern "C" {
+    fn fas_bump(counter addr, n i64) void {
+        i i64 = 0
+        while i < n {
+            atomic_add[i64, relaxed](counter, 1)
+            i = i + 1
+        }
+    }
+
+    fn fas_locked_bump(lock addr, counter addr, n i64) void {
+        i i64 = 0
+        while i < n {
+            while atomic_cas[u32, acquire](lock, 0, 1) != 0 {}
+            counter[i64] = counter[i64] + 1
+            atomic_store[u32, release](lock, 0)
+            i = i + 1
+        }
+    }
+
+    fn fas_publish(data addr, flag addr, value i64) void {
+        data[i64] = value
+        atomic_store[u32, release](flag, 1)
+    }
+
+    fn fas_consume(data addr, flag addr) i64 {
+        while atomic_load[u32, acquire](flag) == 0 {}
+        return data[i64]
+    }
+}

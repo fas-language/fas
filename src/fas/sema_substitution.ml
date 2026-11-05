@@ -399,6 +399,17 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         let* () = validate_expression_names value_names type_names callee in
         Result_list.iter (validate_expression_names value_names type_names) arguments
     | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
+      when List.mem name Names.atomic_names ->
+        (* Only the leading type argument names something; the trailing
+           ordering is a keyword-like bare name. *)
+        let arguments =
+          if name = "atomic_fence" then []
+          else match arguments with first :: _ -> [ first ] | [] -> []
+        in
+        Result_list.iter
+          (validate_generic_argument_names value_names type_names span)
+          arguments
+    | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
            || name = "cvt"
            || List.mem name simd_memory_names ->
@@ -2383,6 +2394,26 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         in
         let* arguments = resolve_exprs arguments in
         Ok (Ast.Call (callee, arguments, span))
+    | Ast.Generic_args (Ast.Ident (name, ident_span), first :: rest, span)
+      when List.mem name Names.atomic_names && name <> "atomic_fence" ->
+        (* Resolve the access type; keep the ordering name as written. *)
+        let* first =
+          match if is_shadowed_argument first then first else bind_argument first with
+          | Ast.Type_arg ty | Ast.Type_or_index ty ->
+              let* ty =
+                resolve_ty ~values ~defer_const_structs substitutions depth span ty
+              in
+              Ok (Ast.Type_arg ty)
+          | Ast.Name_arg (n, name_span) ->
+              let* ty =
+                resolve_ty ~values ~defer_const_structs substitutions depth name_span
+                  (Ast.Named_type (n, name_span))
+              in
+              Ok (Ast.Type_arg ty)
+          | Ast.Const_arg _ as a -> Ok a
+        in
+        Ok (Ast.Generic_args (Ast.Ident (name, ident_span), first :: rest, span))
+    | Ast.Generic_args (Ast.Ident ("atomic_fence", _), _, _) as e -> Ok e
     | Ast.Generic_args (Ast.Ident (name, ident_span), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
            || name = "cvt"

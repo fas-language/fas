@@ -170,6 +170,16 @@ let operations =
     ("call_addr", Reserved);
     ("volatile_load", Reserved);
     ("volatile_store", Reserved);
+    ("atomic_load", Reserved);
+    ("atomic_store", Reserved);
+    ("atomic_add", Reserved);
+    ("atomic_sub", Reserved);
+    ("atomic_and", Reserved);
+    ("atomic_or", Reserved);
+    ("atomic_xor", Reserved);
+    ("atomic_xchg", Reserved);
+    ("atomic_cas", Reserved);
+    ("atomic_fence", Reserved);
     ("addr_bits", Value Addr_bits);
     ("syscall", Value Syscall);
     ("addr_from_bits", Value Addr_from_bits);
@@ -243,6 +253,13 @@ let missing_type_arguments_message name =
   | "handle_from_addr" -> needs "a type argument" "handle_from_addr[T](p)"
   | "volatile_load" -> needs "a type argument" "volatile_load[T](p)"
   | "volatile_store" -> needs "a type argument" "volatile_store[T](p, x)"
+  | "atomic_load" -> needs "a type and an ordering" "atomic_load[T, seq_cst](p)"
+  | "atomic_store" -> needs "a type and an ordering" "atomic_store[T, seq_cst](p, x)"
+  | "atomic_add" | "atomic_sub" | "atomic_and" | "atomic_or" | "atomic_xor"
+  | "atomic_xchg" ->
+      needs "a type and an ordering" (name ^ "[T, seq_cst](p, x)")
+  | "atomic_cas" -> needs "a type and an ordering" "atomic_cas[T, seq_cst](p, expected, desired)"
+  | "atomic_fence" -> needs "an ordering" "atomic_fence[seq_cst]()"
   | "masked_load" -> needs "a type argument" "masked_load[T](p, m, fallback)"
   | "masked_store" -> needs "a type argument" "masked_store[T](p, m, values)"
   | "gather" -> needs "a type argument" "gather[T](p, idx, m, fallback)"
@@ -273,3 +290,12 @@ let float_math name =
   match List.assoc_opt name operations with
   | Some (Float_math operation) -> Some operation
   | Some (Parser _ | Value _ | Reserved) | None -> None
+
+(* Atomic builtins: `atomic_<op>[T, ordering](...)` and `atomic_fence[ordering]()`.
+   The ordering is a bare name, not a type, so substitution and name checks
+   leave it alone and sema_check reads it with [atomic_ordering]. *)
+let atomic_names =
+  [ "atomic_load"; "atomic_store"; "atomic_add"; "atomic_sub"; "atomic_and"; "atomic_or";
+    "atomic_xor"; "atomic_xchg"; "atomic_cas"; "atomic_fence" ]
+
+let atomic_orderings = [ "relaxed"; "acquire"; "release"; "acq_rel"; "seq_cst" ]

@@ -3040,6 +3040,138 @@ and generic_const_argument span = function
       Ok (Ast.Select (Ast.Ident (name, span), [ Ast.Const_arg index ], span))
   | Ast.Type_arg _ -> error span "expected a const argument"
 
+(* atomic_<op>[T, ordering](...) and atomic_fence[ordering](). T is an
+   integer or addr (bitwise and arithmetic ops: integers only); the access is
+   naturally aligned, so the pointer must be aligned to sizeof(T) at run
+   time. Atomics are synchronisation points: like an opaque call they drop
+   every remembered address, value and mask fact. *)
+and atomic_ordering_name = function
+  | Ast.Name_arg (n, span) -> Some (n, span)
+  | Ast.Type_arg (Ast.Named_type (n, span)) | Ast.Type_or_index (Ast.Named_type (n, span))
+    ->
+      Some (n, span)
+  | _ -> None
+
+and check_atomic c name generic_args span args s =
+  let op =
+    match name with
+    | "atomic_load" -> Hir.Atomic_load
+    | "atomic_store" -> Hir.Atomic_store
+    | "atomic_add" -> Hir.Atomic_add
+    | "atomic_sub" -> Hir.Atomic_sub
+    | "atomic_and" -> Hir.Atomic_and
+    | "atomic_or" -> Hir.Atomic_or
+    | "atomic_xor" -> Hir.Atomic_xor
+    | "atomic_xchg" -> Hir.Atomic_xchg
+    | "atomic_cas" -> Hir.Atomic_cas
+    | _ -> Hir.Atomic_fence
+  in
+  let ordering argument =
+    match atomic_ordering_name argument with
+    | Some ("relaxed", _) -> Ok Hir.Relaxed
+    | Some ("acquire", _) -> Ok Hir.Acquire
+    | Some ("release", _) -> Ok Hir.Release
+    | Some ("acq_rel", _) -> Ok Hir.Acq_rel
+    | Some ("seq_cst", _) -> Ok Hir.Seq_cst
+    | Some (other, other_span) ->
+        error other_span
+          (Printf.sprintf
+             "unknown memory ordering `%s`; expected relaxed, acquire, release, acq_rel               or seq_cst"
+             other)
+    | None ->
+        error span
+          "expected a memory ordering: relaxed, acquire, release, acq_rel or seq_cst"
+  in
+  let* access_ty, order =
+    match (op, generic_args) with
+    | Hir.Atomic_fence, [ o ] ->
+        let* order = ordering o in
+        Ok (Hir.Void, order)
+    | Hir.Atomic_fence, _ ->
+        error span "`atomic_fence` expects one ordering: `atomic_fence[seq_cst]()`"
+    | _, [ t; o ] ->
+        let* access_ty =
+          match t with
+          | Ast.Type_arg ty | Ast.Type_or_index ty -> source_ty_in_context c span ty
+          | Ast.Name_arg (n, name_span) ->
+              source_ty_in_context c name_span (Ast.Named_type (n, name_span))
+          | Ast.Const_arg _ -> error span (Printf.sprintf "`%s` expects a type first" name)
+        in
+        let* order = ordering o in
+        Ok (access_ty, order)
+    | _ ->
+        error span
+          (Printf.sprintf "`%s` expects a type and an ordering: `%s[T, seq_cst]`" name name)
+  in
+  let* () =
+    match (op, access_ty) with
+    | Hir.Atomic_fence, _ -> Ok ()
+    | _, Hir.Int _ -> Ok ()
+    | (Hir.Atomic_load | Hir.Atomic_store | Hir.Atomic_xchg | Hir.Atomic_cas), Hir.Addr ->
+        Ok ()
+    | _ ->
+        error span
+          (Printf.sprintf "`%s` needs an integer%s type, got `%s`" name
+             (match op with
+             | Hir.Atomic_load | Hir.Atomic_store | Hir.Atomic_xchg | Hir.Atomic_cas ->
+                 " or addr"
+             | _ -> "")
+             (Sema_types.diagnostic_ty_name access_ty))
+  in
+  let* () =
+    match (op, order) with
+    | Hir.Atomic_load, (Hir.Release | Hir.Acq_rel) ->
+        error span "an atomic load cannot have release or acq_rel ordering"
+    | Hir.Atomic_store, (Hir.Acquire | Hir.Acq_rel) ->
+        error span "an atomic store cannot have acquire or acq_rel ordering"
+    | Hir.Atomic_fence, Hir.Relaxed -> error span "a fence cannot be relaxed"
+    | _ -> Ok ()
+  in
+  let arity =
+    match op with
+    | Hir.Atomic_fence -> 0
+    | Hir.Atomic_load -> 1
+    | Hir.Atomic_cas -> 3
+    | _ -> 2
+  in
+  if List.length args <> arity then
+    error s (Printf.sprintf "builtin `%s` expects %d argument%s" name arity
+               (if arity = 1 then "" else "s"))
+  else
+    let* checked =
+      Result_list.map
+        (fun (i, arg) ->
+          let expected = if i = 0 then Hir.Addr else access_ty in
+          let* x = check_expr c (Some expected) arg in
+          let* () =
+            ensure_expected
+              ~context:(Printf.sprintf "argument %d of `%s`" (i + 1) name)
+              ~checked_expression:x ~expression:arg (Hir.expr_ty x) expected
+              (Ast.expr_span arg)
+          in
+          Ok x)
+        (List.mapi (fun i a -> (i, a)) args)
+    in
+    let* () =
+      match (op, checked) with
+      | Hir.Atomic_fence, _ | _, [] -> Ok ()
+      | _, pointer :: _ ->
+          let* size =
+            match access_footprint c access_ty with
+            | Some size -> Ok size
+            | None -> error s "atomic access type has no storage layout"
+          in
+          check_address_access c s ~write:(op <> Hir.Atomic_load) (address_fact c pointer)
+            size
+    in
+    Sema_flow.forget_all_addresses c.flow;
+    Sema_flow.forget_all_values c.flow;
+    Sema_flow.forget_all_masks c.flow;
+    let result_ty =
+      match op with Hir.Atomic_store | Hir.Atomic_fence -> Hir.Void | _ -> access_ty
+    in
+    Ok (Hir.Call (Hir.Builtin (Hir.Atomic (op, order, access_ty)), checked, result_ty, s))
+
 and volatile_access_type c name span arguments =
   let* access_ty =
     match arguments with
@@ -3521,6 +3653,9 @@ and check_call_inner c expected fn args s =
              checked,
              Hir.Vec (lanes, access_ty),
              s ))
+  | Ast.Generic_args (Ast.Ident (name, _), generic_args, application_span)
+    when List.mem name Names.atomic_names ->
+      check_atomic c name generic_args application_span args s
   | Ast.Generic_args (Ast.Ident ("volatile_load", _), generic_args, application_span) ->
       let* access_ty =
         volatile_access_type c "volatile_load" application_span generic_args

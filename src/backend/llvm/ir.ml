@@ -167,6 +167,70 @@ let rec ty_name = function
   | Array (n, t) -> Printf.sprintf "[%d x %s]" n (ty_name t)
   | Void -> "void"
 
+(* Atomics. The old Ir has no atomic instructions; an atomic access is a call
+   to `__fas_atomic_<op>_<ordering>` whose arguments are (p), (p, v) or
+   (p, expected, desired) and whose result is the old value (void for store
+   and fence). Being an ordinary call keeps every native pass conservative:
+   it clobbers memory and lets pointers escape. The LLVM renderer prints the
+   real instruction instead of a call (see [emit_atomic]), and lower.ml
+   declares these names like `llvm.*` intrinsics so validation sees a
+   matching function. *)
+type atomic_op = A_load | A_store | A_add | A_sub | A_and | A_or | A_xor | A_xchg | A_cas | A_fence
+type atomic_order = Relaxed | Acquire | Release | Acq_rel | Seq_cst
+
+let atomic_prefix = "__fas_atomic_"
+
+let atomic_ops =
+  [ (A_load, "load"); (A_store, "store"); (A_add, "add"); (A_sub, "sub"); (A_and, "and");
+    (A_or, "or"); (A_xor, "xor"); (A_xchg, "xchg"); (A_cas, "cas"); (A_fence, "fence") ]
+
+let atomic_orders =
+  [ (Relaxed, "relaxed"); (Acquire, "acquire"); (Release, "release"); (Acq_rel, "acq_rel");
+    (Seq_cst, "seq_cst") ]
+
+(* The access type is part of the name (`.i32`, `.ptr`, nothing for fence) so
+   the per-name declarations lower.ml makes have one signature each. *)
+let atomic_name ?ty op order =
+  let suffix =
+    match ty with
+    | None -> ""
+    | Some (Pointer _) -> ".ptr"
+    | Some t -> "." ^ ty_name t
+  in
+  atomic_prefix ^ List.assoc op atomic_ops ^ "_" ^ List.assoc order atomic_orders ^ suffix
+
+let is_atomic_name n = String.starts_with ~prefix:atomic_prefix n
+
+let parse_atomic_name n =
+  if not (is_atomic_name n) then None
+  else
+    let rest = String.sub n 13 (String.length n - 13) in
+    let rest = match String.index_opt rest '.' with Some i -> String.sub rest 0 i | None -> rest in
+    List.find_map
+      (fun (op, op_name) ->
+        let p = op_name ^ "_" in
+        if String.starts_with ~prefix:p rest then
+          let o = String.sub rest (String.length p) (String.length rest - String.length p) in
+          List.find_map
+            (fun (order, order_name) -> if order_name = o then Some (op, order) else None)
+            atomic_orders
+        else None)
+      atomic_ops
+
+(* LLVM spelling of an ordering, and the cmpxchg failure ordering C derives
+   from a success ordering (failure cannot release). *)
+let atomic_order_llvm = function
+  | Relaxed -> "monotonic"
+  | Acquire -> "acquire"
+  | Release -> "release"
+  | Acq_rel -> "acq_rel"
+  | Seq_cst -> "seq_cst"
+
+let cas_failure_order = function
+  | Release | Relaxed -> Relaxed
+  | Acquire | Acq_rel -> Acquire
+  | Seq_cst -> Seq_cst
+
 let value_ty = function
   | Const (t, _)
   | Const_vector (t, _)
@@ -1516,6 +1580,98 @@ let emit_instr variadic_signatures sink = function
       emit_value sink v;
       sink.text " to ";
       emit_ty sink dt
+  | Call (result, _, t, n, args) when is_atomic_name n -> (
+      let op, order =
+        match parse_atomic_name n with
+        | Some x -> x
+        | None -> invalid_arg ("malformed atomic call " ^ n)
+      in
+      let ord = atomic_order_llvm order in
+      (* Atomic accesses are naturally aligned: align = size of the type. *)
+      let align ty =
+        match ty with
+        | I1 | I8 -> "1"
+        | I16 -> "2"
+        | I32 -> "4"
+        | _ -> "8"
+      in
+      let dst () =
+        match result with
+        | Some i ->
+            sink.text "  %v";
+            sink.text (string_of_int i);
+            sink.text " = "
+        | None -> sink.text "  "
+      in
+      match (op, args) with
+      | A_fence, [] ->
+          sink.text "  fence ";
+          sink.text ord
+      | A_load, [ (_, _, p) ] ->
+          dst ();
+          sink.text "load atomic ";
+          emit_ty sink t;
+          sink.text ", ptr ";
+          emit_value sink p;
+          sink.text " ";
+          sink.text ord;
+          sink.text ", align ";
+          sink.text (align t)
+      | A_store, [ (_, _, p); (vt, _, v) ] ->
+          sink.text "  store atomic ";
+          emit_ty sink vt;
+          sink.text " ";
+          emit_value sink v;
+          sink.text ", ptr ";
+          emit_value sink p;
+          sink.text " ";
+          sink.text ord;
+          sink.text ", align ";
+          sink.text (align vt)
+      | A_cas, [ (_, _, p); (vt, _, e); (_, _, d) ] ->
+          (* cmpxchg yields { T, i1 }; keep the old value. The pair lives in a
+             name derived from the result so it cannot collide with %vN. *)
+          let i = match result with Some i -> i | None -> invalid_arg "atomic cas result" in
+          sink.text "  %cas";
+          sink.text (string_of_int i);
+          sink.text " = cmpxchg ptr ";
+          emit_value sink p;
+          sink.text ", ";
+          emit_ty sink vt;
+          sink.text " ";
+          emit_value sink e;
+          sink.text ", ";
+          emit_ty sink vt;
+          sink.text " ";
+          emit_value sink d;
+          sink.text " ";
+          sink.text ord;
+          sink.text " ";
+          sink.text (atomic_order_llvm (cas_failure_order order));
+          sink.text ", align ";
+          sink.text (align vt);
+          sink.text "\n  %v";
+          sink.text (string_of_int i);
+          sink.text " = extractvalue { ";
+          emit_ty sink vt;
+          sink.text ", i1 } %cas";
+          sink.text (string_of_int i);
+          sink.text ", 0"
+      | (A_add | A_sub | A_and | A_or | A_xor | A_xchg), [ (_, _, p); (vt, _, v) ] ->
+          dst ();
+          sink.text "atomicrmw ";
+          sink.text (List.assoc op atomic_ops);
+          sink.text " ptr ";
+          emit_value sink p;
+          sink.text ", ";
+          emit_ty sink vt;
+          sink.text " ";
+          emit_value sink v;
+          sink.text " ";
+          sink.text ord;
+          sink.text ", align ";
+          sink.text (align vt)
+      | _ -> invalid_arg ("malformed atomic call " ^ n))
   | Call (result, extension, t, n, args) ->
       (match result with
       | Some i ->

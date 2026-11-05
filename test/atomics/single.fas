@@ -1,0 +1,54 @@
+// Atomic builtins on one thread: every op, width and ordering class gives
+// the documented old value and leaves the documented new value.
+var w64 i64 = 0
+var w32 u32 = 5
+var w16 u16 = 0xfff0
+var w8 i8 = -1
+var slot addr = null
+
+fn main() i32 {
+    p addr = &w64
+    atomic_store[i64, release](p, 10)
+    if atomic_add[i64, seq_cst](p, 5) != 10 { return 1 }
+    if atomic_load[i64, acquire](p) != 15 { return 2 }
+    if atomic_sub[i64, acq_rel](p, 20) != 15 { return 3 }
+    if atomic_load[i64, relaxed](p) != -5 { return 4 }
+    atomic_store[i64, seq_cst](p, 0x0f0f)
+    if atomic_xor[i64, relaxed](p, 0xff) != 0x0f0f { return 5 }
+    if w64 != 0x0ff0 { return 6 }
+
+    q addr = &w32
+    if atomic_or[u32, relaxed](q, 8) != 5 { return 10 }
+    if atomic_cas[u32, acq_rel](q, 13, 99) != 13 { return 11 }
+    if atomic_cas[u32, seq_cst](q, 13, 7) != 99 { return 12 }  // fails, unchanged
+    if atomic_xchg[u32, seq_cst](q, 0xffffffff) != 99 { return 13 }
+    if atomic_add[u32, relaxed](q, 2) != 0xffffffff { return 14 }  // wraps
+    if w32 != 1 { return 15 }
+
+    // narrow widths: results stay canonical, neighbours untouched
+    h addr = &w16
+    if atomic_add[u16, seq_cst](h, 0x20) != 0xfff0 { return 20 }
+    if atomic_load[u16, seq_cst](h) != 0x10 { return 21 }
+    if atomic_and[u16, release](h, 0x18) != 0x10 { return 22 }
+    if w16 != 0x10 { return 23 }
+    b addr = &w8
+    if atomic_add[i8, seq_cst](b, 1) != -1 { return 24 }
+    if atomic_xchg[i8, acquire](b, -128) != 0 { return 25 }
+    if atomic_sub[i8, relaxed](b, 1) != -128 { return 26 }
+    if w8 != 127 { return 27 }
+    if atomic_cas[i8, relaxed](b, 127, -3) != 127 { return 28 }
+    if w8 != -3 { return 29 }
+
+    atomic_fence[acquire]()
+    atomic_fence[release]()
+    atomic_fence[acq_rel]()
+    atomic_fence[seq_cst]()
+
+    s addr = &slot
+    if atomic_xchg[addr, seq_cst](s, p) != null { return 30 }
+    if atomic_cas[addr, seq_cst](s, p, q) != p { return 31 }
+    if atomic_load[addr, acquire](s) != q { return 32 }
+    atomic_store[addr, relaxed](s, null)
+    if slot != null { return 33 }
+    return 0
+}

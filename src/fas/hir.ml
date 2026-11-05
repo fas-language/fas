@@ -56,7 +56,24 @@ type float_builtin =
   | Float_round
   | Float_abs
 
+(* Atomic memory operations. Load, the read-modify-writes and cas give the
+   old value; store and fence give void. Cas takes (p, expected, desired). *)
+type atomic_op =
+  | Atomic_load
+  | Atomic_store
+  | Atomic_add
+  | Atomic_sub
+  | Atomic_and
+  | Atomic_or
+  | Atomic_xor
+  | Atomic_xchg
+  | Atomic_cas
+  | Atomic_fence
+
+type atomic_ordering = Relaxed | Acquire | Release | Acq_rel | Seq_cst
+
 type builtin =
+  | Atomic of atomic_op * atomic_ordering * ty
   | Rotl
   | Rotr
   | Popcount

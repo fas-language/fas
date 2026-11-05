@@ -66,7 +66,7 @@ hello, fas!
 10. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error when no NUL remains, so use `c"..."` there. A later integer length parameter, as in `strncmp`, permits a plain string.
 11. **Generic calls infer their arguments from parameter types**: `max(x, 1)` infers `T` from `x`, and the literal takes that type. Inference covers `T`, `handle[T]`, `vec[N, T]` and generic structs behind handles. Every generic parameter must be determined by an argument. There is no inference from literals alone or from the result type. Explicit forms such as `max[u32](x, 1)` always work.
 12. **Reading a provably uninitialized local is an error.** `{}` zero-fills an array or struct.
-13. **Not in Fas:** heap, strings, threads and atomics, methods, overloading, macros, enums, unions, function types and closures. Function addresses use `addr` and `call_addr`.
+13. **Not in Fas:** heap, strings, threads (atomics exist; start threads through C), methods, overloading, macros, enums, unions, function types and closures. Function addresses use `addr` and `call_addr`.
 
 **Why there is no typed pointer.** Fas has no `T *` and no `ptr[T]` or `addr[T]`, and this is deliberate. In Fas the type sits on each access (`p[u32, i]`), not on the address.
 
@@ -1023,6 +1023,12 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `addr_bits(p)` `addr_from_bits(n)` | `usize`, `addr` | |
 | | `handle_addr(h)` `handle_from_addr[T](p)` | `addr`, `handle[T]` | |
 | | `call_addr[R](p, args...)` | `R` or `void` | indirect call through `addr`, using the C ABI |
+| **Atomics** | `atomic_load[T, o](p)` | `T` | `T` is an integer or `addr`; `p` must be aligned to `sizeof[T]` |
+| | `atomic_store[T, o](p, x)` | statement | |
+| | `atomic_add[T, o](p, x)` `atomic_sub` `atomic_and` `atomic_or` `atomic_xor` | `T`, the old value | integers only, and add/sub wrap |
+| | `atomic_xchg[T, o](p, x)` | `T`, the old value | |
+| | `atomic_cas[T, o](p, expected, desired)` | `T`, the old value | stores `desired` only when the old value equals `expected`, so success is `old == expected` |
+| | `atomic_fence[o]()` | statement | |
 | **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |
 | | `select(m, yes, no)` | type of `yes` | lane `i` comes from `yes[i]` when `m[i]` is true, otherwise `no[i]`. Both sides are evaluated |
@@ -1045,6 +1051,8 @@ In the masked, gather and scatter forms, `T` is the lane type, every vector has 
 When every operand of `rotl`, `rotr`, `popcount`, `clz`, `ctz`, `add_sat`, `sub_sat` or `mul_hi` is an untyped literal, the literals take the destination type: `x u32 = rotl(0x80000001, 1)` is `3`, and `s u8 = add_sat(250, 10)` saturates at `255`. A typed operand still decides the type, and with no destination the literals are `i32`.
 
 Every builtin name in this table, `cvt` and the float builtins included, is reserved: a variable, parameter, field, function or const named `sqrt` or `popcount` is an error (`` `sqrt` is a builtin and cannot be used as a name ``), and so are type names (`u8`, `f32`), literals (`true`, `null`) and `view`, `use` and `var`. A C declaration with such a name is imported but cannot be used from Fas.
+
+**Memory orderings.** The `o` argument of an atomic is `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`, with C11 meanings. A load cannot be `release` or `acq_rel`, a store cannot be `acquire` or `acq_rel`, and a fence cannot be `relaxed`. A failed `atomic_cas` uses the strongest ordering valid for a load: `acquire` for `acq_rel`, `relaxed` for `release`. An atomic access to an address that is not aligned to `sizeof[T]` is undefined. A plain access racing with an atomic or with another plain write is a data race, as in C. The WASI target runs a single thread, so atomics there are ordinary accesses.
 
 ### Builtin cost by CPU level
 

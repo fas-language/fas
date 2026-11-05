@@ -393,6 +393,52 @@ let convert_instr cx b (ins : Ir.instr) =
         if k = Bitcast && ty_of f x = rt then define cx id x
         else define cx id (emit1 cx b (Conv (k, x)) rt)
       end
+  | Ir.Call (result, _, ret, name, args) when Ir.is_atomic_name name -> (
+      (* `__fas_atomic_*` pseudo-calls (Ir.atomic_name) become Fir atomics *)
+      let op, order =
+        match Ir.parse_atomic_name name with Some x -> x | None -> unsupported "atomic %s" name
+      in
+      let fo : ordering =
+        match order with
+        | Ir.Relaxed -> Relaxed
+        | Ir.Acquire -> Acquire
+        | Ir.Release -> Release
+        | Ir.Acq_rel -> Acq_rel
+        | Ir.Seq_cst -> Seq_cst
+      in
+      let a i = let _, _, x = List.nth args i in v x in
+      let am t = { (mem (size_of_old cx.lc t)) with order = fo } in
+      let def r = match result with Some id -> define cx id r | None -> () in
+      match op with
+      | Ir.A_fence -> emit0 cx b (Fence fo)
+      | Ir.A_load -> def (emit1 cx b (Load (am ret, a 0)) (rt_ty ret))
+      | Ir.A_store ->
+          let t, _, x = List.nth args 1 in
+          emit0 cx b (Store (am t, v x, a 0))
+      | Ir.A_cas ->
+          let fail : ordering =
+            match Ir.cas_failure_order order with
+            | Ir.Relaxed -> Relaxed
+            | Ir.Acquire -> Acquire
+            | _ -> Seq_cst
+          in
+          let rs =
+            emit ~loc:cx.loc cx.f b
+              (Cmpxchg { mem = am ret; fail; weak = false; p = a 0; expected = a 1; desired = a 2 })
+              [| rt_ty ret; i1 |]
+          in
+          def rs.(0)
+      | Ir.A_add | Ir.A_sub | Ir.A_and | Ir.A_or | Ir.A_xor | Ir.A_xchg ->
+          let k =
+            match op with
+            | Ir.A_add -> Radd
+            | Ir.A_sub -> Rsub
+            | Ir.A_and -> Rand
+            | Ir.A_or -> Ror
+            | Ir.A_xor -> Rxor
+            | _ -> Xchg
+          in
+          def (emit1 cx b (Rmw (k, am ret, a 0, a 1)) (rt_ty ret)))
   | Ir.Call (result, _, ret, name, args) when starts "llvm." name -> (
       match (intrinsic cx b name ret args, result) with
       | Some r, Some id -> define cx id r

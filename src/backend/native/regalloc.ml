@@ -96,7 +96,9 @@ let iter_term_operands f t =
        t)
 
 let clobbers = function
-  | Call (_, _, _, name, _) -> not (String.starts_with ~prefix:"llvm." name)
+  | Call (_, _, _, name, _) ->
+      (* intrinsics and atomics are emitted inline using only rax/rcx/rdx *)
+      not (String.starts_with ~prefix:"llvm." name || Ir.is_atomic_name name)
   | Call_indirect _ | Syscall _ -> true
   | _ -> false
 
