@@ -2078,7 +2078,7 @@ let gen_function ctx (f : func) =
   let f, fr =
     if not Licm.split_on then (f, fr)
     else
-      let want = function
+      let want fr = function
         | Local (id, _) ->
             not
               (Hashtbl.mem fr.addrs.skip id || Hashtbl.mem fr.addrs.dead id
@@ -2086,10 +2086,13 @@ let gen_function ctx (f : func) =
         | Param (name, _) -> not (Hashtbl.mem fr.homes (Regalloc.pkey name))
         | _ -> false
       in
-      match Licm.split ~want f with
-      | None -> (f, fr)
       (* the copies are scalar and call nothing: vector homes still hold *)
-      | Some f -> (f, build_frame ~xmm:(fr.xhomes, fr.xshared) ctx f)
+      let round ?inner (f, fr) =
+        match Licm.split ?inner ~want:(want fr) f with
+        | None -> (f, fr)
+        | Some f -> (f, build_frame ~xmm:(fr.xhomes, fr.xshared) ctx f)
+      in
+      round ~inner:true (round (f, fr))
   in
   let blocks = Hashtbl.create 16 in
   List.iter (fun (b : block) -> Hashtbl.replace blocks b.id b) f.blocks;

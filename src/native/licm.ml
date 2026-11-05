@@ -282,7 +282,7 @@ let module_ (m : module_) = if on then { m with funcs = List.map func m.funcs } 
    short and dense, so it can take a register that is free in the loop
    while the original stays in memory. Returns [None] when nothing is
    split. *)
-let split ~want (f : func) =
+let split ?(inner = false) ~want (f : func) =
   match f.blocks with
   | [] -> None
   | entry :: _ ->
@@ -388,8 +388,12 @@ let split ~want (f : func) =
         List.filter (fun l -> not (List.exists (fun l' -> inside l' l) loops)) loops
       in
       let chosen =
-        List.filter (fun l -> not (List.exists (fun l' -> inside l l') free)) free
-        @ List.filter (fun l -> not (List.memq l free)) innermost
+        if inner then
+          (* second round: nested innermost loops, for values still in memory *)
+          List.filter (fun l -> List.exists (fun l' -> inside l l') loops) innermost
+        else
+          List.filter (fun l -> not (List.exists (fun l' -> inside l l') free)) free
+          @ List.filter (fun l -> not (List.memq l free)) innermost
       in
       let def_block = Hashtbl.create 256 in
       let next_value = ref 0 in
