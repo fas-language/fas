@@ -2741,6 +2741,9 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
           } =
             checked
           in
+          let native_ir () =
+            Result.bind (Fir_hook.apply ir) (Native_symbols.apply ~redirect)
+          in
           match config.emit with
           | Cli.Header ->
               let output = Option.value ~default:config.Cli.output header_output in
@@ -2803,7 +2806,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                        package libraries";
                   ]
               else
-                match Result.bind (Fir_hook.apply ir) Native_gen.compile_object with
+                match Result.bind (native_ir ()) Native_gen.compile_object with
                 | Error message -> Error [ Diag.error Span.synthetic message ]
                 | Ok image -> (
                     try
@@ -2882,8 +2885,9 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                     pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
                   in
                   match
-                    Result.bind (Fir_hook.apply ir)
-                      (Hosted_link.link ~cc:(c_compiler ()) ~config ~c_objects ~link_flags)
+                    Result.bind (native_ir ())
+                      (Hosted_link.link ~cc:(c_compiler ()) ~config ~c_objects
+                         ~link_flags)
                   with
                   | Ok () -> Ok ""
                   | Error message -> Error [ Diag.error Span.synthetic message ]
@@ -2907,9 +2911,9 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                       | Help | Version -> assert false
                     in
                     match
-                      Result.bind (Fir_hook.apply ir)
-                        (Native_gen.link_files ~inputs:link.inputs
-                           ~options:link.options ~output:config.Cli.output)
+                      Result.bind (native_ir ())
+                        (Native_gen.link_files ~inputs:link.inputs ~options:link.options
+                           ~output:config.Cli.output)
                     with
                     | Error message -> Error [ Diag.error Span.synthetic message ]
                     | Ok () -> Ok ""

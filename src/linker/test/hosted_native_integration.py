@@ -130,6 +130,32 @@ fn main() i32 { return embedded_answer() }
         out, _ = self.compile("argc hosted", source, "--hosted")
         run(out, "one", "two", expected=2)
 
+    def test_static_c_adapters_calls_and_callback_addresses(self):
+        cc = shutil.which("clang-22") or shutil.which("clang")
+        if not cc:
+            self.skipTest("Fas C header importer requires Clang")
+        helper = 'static int local_answer(int value){return value+1;}\n'
+        header = self.source("static helper", helper, ".h")
+        callback = '''
+use "C" <<CALLBACK
+int invoke(int (*callback)(int),int value){return callback(value);}
+CALLBACK
+const saved_callback addr = &local_answer
+fn main() i32 {
+    if local_answer(0) != 1 { return 1 }
+    if invoke(&local_answer, 40) != 41 { return 2 }
+    return invoke(saved_callback, 41)
+}
+'''
+        for mode, imports in (("container", 'use "C" <<HELPER\n'+helper+'HELPER\n'),
+                              ("header", 'use "C" "'+str(header)+'"\n')):
+            source = self.source("static adapter "+mode, imports+callback)
+            for fir in ("", "roundtrip"):
+                with self.subTest(mode=mode, fir=fir):
+                    out, _ = self.compile("static adapter", source,
+                                          env=self.env(cc, FAS_FIR=fir))
+                    run(out, expected=42)
+
     def test_embedded_assembly(self):
         cc = shutil.which("clang-22") or shutil.which("clang")
         if not cc:

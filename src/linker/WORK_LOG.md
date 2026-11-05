@@ -1,6 +1,32 @@
 # Linker implementation work log
 
 
+### Current checkpoint: native C static-adapter symbols
+
+Claude's inbox message 23 reported the assembly linkage and header-clash
+fixtures. The header clash is intentionally rejected by its shell harness. The
+assembly fixture requires `-DASSEMBLY_TABLE_VALUE=42`; adding that define makes
+LLVM succeed but exposes a real native-driver undefined `fas_container_add3`.
+C import had already generated an external adapter for that static C helper,
+but only the LLVM renderer applied its symbol redirect.
+
+The native driver now applies that existing mapping after the FIR hook, before
+object emission or hosted/freestanding linking. It rewrites declarations,
+direct calls, function addresses, constant callback initializers and optimization
+name lists, then validates the mapped IR. Identity mappings retain the existing
+fast path. Backend/codegen sources, automatic atomic runtime exclusion and
+LLVM emission remain intact. The original assembly fixture now compiles/runs
+with the define and nonexistent `opt`/`llc` paths.
+
+A permanent native-hosted regression covers embedded static C helpers and
+quoted headers, direct calls and immediate/global-constant callback addresses,
+with FIR disabled and round-tripped. The release gate, development build and
+formatting pass; the verification record below distinguishes the fresh forced
+suite's optional-musl skips from the subsequent enabled-musl gate.
+Evidence: `audit/native-static-adapters-2026-11-05.json`.
+
+
+
 ### Current checkpoint: quiet-PC performance replay
 
 The idle-PC interval on 2026-11-05 ran from 21:17 to 21:22 CET. Pinned release

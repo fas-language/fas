@@ -1,0 +1,158 @@
+{
+  "date": "2026-11-05",
+  "purpose": "Native-driver C static adapter symbol mapping, including callback constants and FIR roundtrip",
+  "base_commit": "67c5b8390b3fbe34dc06d6099abee6b9d704bd3a",
+  "source_sha256": {
+    "src/driver/driver.ml": "d0043f3b68dec13f4879674f0ef76ca3c31032dbd979778c7e91d8b60dce6c95",
+    "src/driver/native_symbols.ml": "9bcc0552a886d1ca01ca7ae80f5ab97df6f04131cc304b6573d9169297a9c7e1",
+    "src/linker/test/hosted_native_integration.py": "28509d339898501cf687432af21f0dbf0b9afc7e05cde1a5db30c3f9375b910c",
+    "test/assembly_linkage.fas": "1273681f586b68d0c2e1f11699ef3a45d4c144ee3a987b95f46ce40f73c3f5d6",
+    "test/assembly_linkage.c": "a98fdae3446df7a3709ed3e6aa7d72c861e88d01ba136670af42a8e7a4dfe367",
+    "test/assembly_unit.S": "ff09008a0b8263133c2b972955bf394fb415a5575c106e40d5e01e1c62a75d06",
+    "test/assembly_linkage.sh": "dd1f42b306360051988bffe7deca1050b6a07f694bd51c8cd1784167a4e19599",
+    "test/c_header_clash.fas": "05922028eef339f067ada07fdc8a00828fbd47fd8283990b38abd5add080980f",
+    "test/c_header_clash.sh": "fbf78d56d1834cbd9cfb23d95d5cc249171585c21cef316c3b309a7b5bc312fc"
+  },
+  "regression": {
+    "release_gate_exit": 0,
+    "forced_release_gate_exit": 0,
+    "forced_python_cases": 245,
+    "forced_python_groups": 41,
+    "forced_optional_musl_skips": 6,
+    "forced_executed_python_cases": 239,
+    "focused_enabled_musl_cases": 6,
+    "focused_enabled_musl_skips": 0,
+    "compiler_checks": 3792,
+    "ocaml_and_zlib_checks": "passed; includes 3550 zlib differential checks",
+    "development_build_exit": 0,
+    "ocamlformat_and_git_diff_check_exit": 0,
+    "new_case_subtests": "embedded C or quoted header; FIR disabled or roundtrip; direct, immediate callback and constant-global callback use",
+    "subsequent_musl_enabled_release_gate_exit": 0
+  },
+  "logs": {
+    "/tmp/fas-static-adapter-focused-20261105.log": {
+      "sha256": "b7c91c2b71da2fc85336f1654543bd59fe061f2d9365bba232ef458096b706e1",
+      "bytes": 237
+    },
+    "/tmp/fas-static-adapter-release-20261105.log": {
+      "sha256": "310fb0b95b92d094b68192b017fa9005d2ba045a6d0ac5179808b3e20442942a",
+      "bytes": 4829
+    },
+    "/tmp/fas-static-adapter-release-full-20261105.log": {
+      "sha256": "370134a72bbc4c34ecf03677dece7f8e5578fab66bbe6a7a3fcb26f7f2598926",
+      "bytes": 38452
+    },
+    "/tmp/fas-static-adapter-musl-focused-20261105.log": {
+      "sha256": "62a340f89429fcdabda4ba9ac5fa4c83b67a69ce093abe52d607224904c19ee7",
+      "bytes": 2616
+    },
+    "/tmp/fas-static-adapter-dev-build-20261105.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/fas-static-adapter-musl-release-20261105.log": {
+      "sha256": "0613f1a9f715c4ef19ebd3513a119aee7bf82bcaacafd4b03c66b4d0d801bc88",
+      "bytes": 4829
+    }
+  },
+  "original_report_triage": [
+    {
+      "backend": "llvm",
+      "command": [
+        "/tmp/fas-native-projects-20261105/tools/fas-compiler",
+        "--backend=llvm",
+        "-DASSEMBLY_TABLE_VALUE=42",
+        "test/assembly_linkage.fas",
+        "test/assembly_linkage.c",
+        "-o",
+        "/tmp/fas-driver-report-triage-20261105/assembly-llvm"
+      ],
+      "status": 0,
+      "stdout": "",
+      "stderr": "",
+      "execution": {
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "backend": "llvm",
+      "fixture": "negative-header-clash",
+      "command": [
+        "/tmp/fas-native-projects-20261105/tools/fas-compiler",
+        "--backend=llvm",
+        "test/c_header_clash.fas",
+        "-o",
+        "/tmp/fas-driver-report-triage-20261105/clash-llvm"
+      ],
+      "status": 1,
+      "stdout": "",
+      "stderr": "test/c_header_clash.fas:3:1: error: duplicate declaration `remove`\n  fn remove(x u64) u64 {\n  ^~\nnote: `remove` is also declared by `<stdio.h>` at /usr/include/stdio.h:162\n\n"
+    },
+    {
+      "backend": "native",
+      "command": [
+        "/tmp/fas-native-projects-20261105/tools/fas-compiler",
+        "--backend=native",
+        "-DASSEMBLY_TABLE_VALUE=42",
+        "test/assembly_linkage.fas",
+        "test/assembly_linkage.c",
+        "-o",
+        "/tmp/fas-driver-report-triage-20261105/assembly-native"
+      ],
+      "status": 1,
+      "stdout": "",
+      "stderr": "error: hosted native: /tmp/fas-hosted-21a037.o: undefined symbol fas_container_add3\n"
+    },
+    {
+      "backend": "native",
+      "fixture": "negative-header-clash",
+      "command": [
+        "/tmp/fas-native-projects-20261105/tools/fas-compiler",
+        "--backend=native",
+        "test/c_header_clash.fas",
+        "-o",
+        "/tmp/fas-driver-report-triage-20261105/clash-native"
+      ],
+      "status": 1,
+      "stdout": "",
+      "stderr": "test/c_header_clash.fas:3:1: error: duplicate declaration `remove`\n  fn remove(x u64) u64 {\n  ^~\nnote: `remove` is also declared by `<stdio.h>` at /usr/include/stdio.h:162\n\n"
+    }
+  ],
+  "fixed_original_assembly_fixture": {
+    "command": [
+      "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/bin/main.exe",
+      "--backend=native",
+      "-DASSEMBLY_TABLE_VALUE=42",
+      "test/assembly_linkage.fas",
+      "test/assembly_linkage.c",
+      "-o",
+      "/tmp/fas-driver-report-triage-20261105/assembly-native-fixed"
+    ],
+    "status": 0,
+    "stdout": "",
+    "stderr": "",
+    "execution": {
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  "fixed_fixture_environment": {
+    "FAS_CC": "clang-22",
+    "FAS_OPT": "/nonexistent/opt",
+    "FAS_LLC": "/nonexistent/llc",
+    "FAS_FIR": ""
+  },
+  "limitations": [
+    "Based on combined ABI/hosted merge 5fd063f plus qualification commits; not a claim that Claude backend-v2 61d29a5 was tested.",
+    "Header-clash fixture is an expected rejection; assembly fixture requires -DASSEMBLY_TABLE_VALUE=42.",
+    "No native backend implementation changes or new C++/LTO scope."
+  ],
+  "release_binary_sha256": {
+    "_build/default/bin/main.exe": "55e1b37663ccf7f84c521ea3bb735e6f5b8786f71634dac04ca2751871fa1cab",
+    "_build/default/src/linker/bin/main.exe": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be"
+  },
+  "triage_before_compiler_sha256": "02f8d169f6388dd88d721075571b01f51ee2eb8b841ea74583d45c0749f98245"
+}
