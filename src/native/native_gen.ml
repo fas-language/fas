@@ -2328,6 +2328,7 @@ let compile (m : module_) =
     A.rr a ~w:false [ 0x89 ] ~reg:A.Rax ~rm:A.Rdi;
     A.mov_imm a A.Rax 231L;
     A.syscall a;
+    let m = t "sink_cmp" Mem2reg.sink_compares_module m in
     A.ud2 a;
     let start_size = A.pos a in
     let sizes =

@@ -1140,3 +1140,56 @@ let ifconvert (f : func) =
 
 let cleanup_func f = prune (thread (dce (cse (ifconvert f))))
 let cleanup (m : module_) = { m with funcs = List.map cleanup_func m.funcs }
+
+(* A compare used once, by a select or the branch of its own block, moves
+   down next to that user, so code generation fuses the two into cmp + cmov
+   or cmp + jcc instead of materializing the flag with setcc. *)
+let sink_compares (f : func) =
+  let uses = Hashtbl.create 64 in
+  let count = function
+    | Local (id, _) ->
+        Hashtbl.replace uses id (1 + Option.value ~default:0 (Hashtbl.find_opt uses id))
+    | _ -> ()
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter (Regalloc.iter_operands count) b.instrs;
+      Regalloc.iter_term_operands count b.terminator)
+    f.blocks;
+  let once id = Hashtbl.find_opt uses id = Some 1 in
+  let block (b : block) =
+    let pending = Hashtbl.create 4 in
+    let branch_cmp =
+      match b.terminator with CondBr (Local (c, _), _, _) -> c | _ -> -1
+    in
+    let selected = Hashtbl.create 8 in
+    List.iter
+      (function
+        | Select (_, Local (s, _), _, _) -> Hashtbl.replace selected s () | _ -> ())
+      b.instrs;
+    let rec go acc = function
+      | [] -> List.rev acc
+      | (Cmp (id, _, _, _, _) as c) :: rest
+        when once id && (id = branch_cmp || Hashtbl.mem selected id) ->
+          Hashtbl.replace pending id c;
+          go acc rest
+      | (Select (_, Local (s, _), _, _) as sel) :: rest when Hashtbl.mem pending s ->
+          let c = Hashtbl.find pending s in
+          Hashtbl.remove pending s;
+          go (sel :: c :: acc) rest
+      | ins :: rest -> go (ins :: acc) rest
+    in
+    let instrs = go [] b.instrs in
+    match Hashtbl.find_opt pending branch_cmp with
+    | Some c -> { b with instrs = instrs @ [ c ] }
+    | None -> { b with instrs }
+  in
+  if
+    List.exists
+      (fun (b : block) -> List.exists (function Cmp _ -> true | _ -> false) b.instrs)
+      f.blocks
+  then { f with blocks = List.map block f.blocks }
+  else f
+
+let sink_compares_module (m : module_) =
+  { m with funcs = List.map sink_compares m.funcs }
