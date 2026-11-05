@@ -493,7 +493,7 @@ for index in range(count):
 
 for key, tags in expected.items():
     missing = tags - observed[key]
-    assert not missing, f"missing {key} forms from IR constructors in src/ir.ml: {sorted(missing)}"
+    assert not missing, f"missing {key} forms from IR constructors in src/backend/llvm/ir.ml: {sorted(missing)}"
 
 fixture = read_json(os.path.join(root, "out.json"))
 assert list(fixture) == ["structs", "globals", "funcs", "format", "version",

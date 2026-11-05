@@ -4,8 +4,8 @@ export DEBUGINFOD_URLS=
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 GRAMMAR_DIR="$ROOT/editors/tree-sitter-fas"
-LEXER="$ROOT/src/lexer.ml"
-NAMES="$ROOT/src/names.ml"
+LEXER="$ROOT/src/fas/lexer.ml"
+NAMES="$ROOT/src/fas/names.ml"
 GRAMMAR="$GRAMMAR_DIR/grammar.js"
 HIGHLIGHTS="$GRAMMAR_DIR/queries/highlights.scm"
 GATE_TMP=$(mktemp -d)
