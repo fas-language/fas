@@ -1,0 +1,410 @@
+{
+  "linker_sha256": "3a473fa4df88743c9def94cd89285b13fd1cb12ca1af95aaefa7239d0f68c7a9",
+  "linker_snapshot": "/tmp/fas-static-planning-replay-20261105/fas-ld",
+  "prior_report": "/tmp/fas-corpus-static-glibc-final-20261105/report.json",
+  "timing_comparison": false,
+  "tests": [
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/chibicc",
+      "status": "passed",
+      "bytes": 2083320,
+      "sha256": "c503b41fb95e6752829e61dba6bf4a804b6bc66941593da17889ddd1c6acb17d"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/alignof-fas",
+      "status": "passed",
+      "bytes": 946464,
+      "sha256": "3cae147da6171beefb0379ebba59f9febb7596b2414f49fc34dc71e028660e7d"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/alloca-fas",
+      "status": "passed",
+      "bytes": 944976,
+      "sha256": "0e570c65bbeaa567539cdb25aad9ea2597b817cf317df6557dd4415019e5dad8"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/arith-fas",
+      "status": "passed",
+      "bytes": 963928,
+      "sha256": "a9b4c3d4da02051699674e91dd42bf9faae5fd52852af1d8573b9e6c5cb923e5"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/asm-fas",
+      "status": "passed",
+      "bytes": 944472,
+      "sha256": "d813876c424cc214736cd55e987f080a2401b108049c51dcb55167683e823b9e"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/atomic-fas",
+      "status": "passed",
+      "bytes": 1095952,
+      "sha256": "793c5b02899b50c71ec719c474786ca41ae3b2ef4c5efbabdf35bba1a7c820e7"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/attribute-fas",
+      "status": "passed",
+      "bytes": 946808,
+      "sha256": "f5b8ad227a57a0791146d9947126b70351f273feacd1284b7221f7045b76335a"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/bitfield-fas",
+      "status": "passed",
+      "bytes": 950160,
+      "sha256": "b0662c6b6de6643446683c58a10246bb7a798223ad9a9c6ab7ae13adc9565429"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/builtin-fas",
+      "status": "passed",
+      "bytes": 946168,
+      "sha256": "bb134c174b09b14b6283f675b7fd1f89c0a9f587f06e7e472c6ca1cfb6aa680b"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/cast-fas",
+      "status": "passed",
+      "bytes": 950520,
+      "sha256": "f295f66eed5c30853398dacdfd72954451c6102a818c931f9b852eedbed43725"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/commonsym-fas",
+      "status": "passed",
+      "bytes": 944720,
+      "sha256": "964f935bee828beac2b563da50a9550eb9429a7461ad4b385b94672d2daee7b1"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/compat-fas",
+      "status": "passed",
+      "bytes": 944008,
+      "sha256": "bf70fc368cb77c74ac14c75c0afe8feb338bff82c70a48607dc0028960be4b78"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/complit-fas",
+      "status": "passed",
+      "bytes": 944912,
+      "sha256": "f89b588feffa751b5fa6f5bf7ec01949b6c0e94c1f7ef8e240cc6d1bf65a4c14"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/const-fas",
+      "status": "passed",
+      "bytes": 944568,
+      "sha256": "757be4e41066875b3b6e5bf8ac636cf726602935ce31bb4e9dc9489ae18308a8"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/constexpr-fas",
+      "status": "passed",
+      "bytes": 951472,
+      "sha256": "620bbd857a01e6675e99ae38492e151eda3a4d5b632b0bfda10df085f2faae08"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/control-fas",
+      "status": "passed",
+      "bytes": 964344,
+      "sha256": "26d9d5dd6c477fed266d2c269cefcdebcd0a70d1e7edcc735b8e246debff6401"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/decl-fas",
+      "status": "passed",
+      "bytes": 944984,
+      "sha256": "11b3788ccafd33500fec87db2ce1318c2487af64482a76435c6bae16e7e64794"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/enum-fas",
+      "status": "passed",
+      "bytes": 945144,
+      "sha256": "952cd6a8e75e0d6cfc76bc97ca11c180c965c3d80f492e8049aeabfb69b2f1f1"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/extern-fas",
+      "status": "passed",
+      "bytes": 945088,
+      "sha256": "e2f268d2a610aac6c6cd028a22039dfee8d665413d935b45d02a0f2f57780b15"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/float-fas",
+      "status": "passed",
+      "bytes": 951448,
+      "sha256": "e6f995d56ae2e79e0516d6b8c3da6fa414efc0913581b4265ca393855b111a2a"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/function-fas",
+      "status": "passed",
+      "bytes": 989576,
+      "sha256": "d76cf9269af989b2fdf0921d8037af1af216b92eca9f985abc8b67bae49d6162"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/generic-fas",
+      "status": "passed",
+      "bytes": 944728,
+      "sha256": "6fa18bf64eed9cc6ae82ec7dd374742c75ade6be8b1425899a344c49bf371ecf"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/initializer-fas",
+      "status": "passed",
+      "bytes": 1001520,
+      "sha256": "7673157863767ac3fae485a04002bde6c59badbd8640b0b75c1aa3e520710efc"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/line-fas",
+      "status": "passed",
+      "bytes": 944632,
+      "sha256": "3536d0a050cbaf4f173099bc6a28831b407a6ec7b24fdc505a99266228022245"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/literal-fas",
+      "status": "passed",
+      "bytes": 951416,
+      "sha256": "73e122e0033a869d5e3dab88dc73cecbf6ac92ae86fc989c841c2c420e92d752"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/macro-fas",
+      "status": "passed",
+      "bytes": 958592,
+      "sha256": "44470be901364d8350f5c3ed3548bee03278f1b732d09cebd2a4bb50520ca313"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/offsetof-fas",
+      "status": "passed",
+      "bytes": 944504,
+      "sha256": "4ee575c2d9419137490052ed4a2ab2e9786a2a09936b60838be158d70873a5b6"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/pointer-fas",
+      "status": "passed",
+      "bytes": 951800,
+      "sha256": "2f8a0a6c7107eaedc433c14bb955d9d2f47be4e18c8c27ac963a24a1cbdc380c"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/pragma-once-fas",
+      "status": "passed",
+      "bytes": 943840,
+      "sha256": "decf99e09ed9442a83ba3d4bc60e1793b62f7e81aafeb1b1778b822efff94af0"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/sizeof-fas",
+      "status": "passed",
+      "bytes": 951960,
+      "sha256": "fa9b51bf95937b0371956d9bddde49cd1d788896d26982d564e95dfac99d2bc6"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/stdhdr-fas",
+      "status": "passed",
+      "bytes": 944296,
+      "sha256": "09801ae17d030a101af88fa70907f413d496d36f0d744b92f3bd748d67fb3a2b"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/string-fas",
+      "status": "passed",
+      "bytes": 951288,
+      "sha256": "4e6269f72244913f4b38f5c0ab0278851a86e37ba4bbfd099fd083868fcc5587"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/struct-fas",
+      "status": "passed",
+      "bytes": 953016,
+      "sha256": "ddad2a0412a6d4fafde76fd0c40f06c1d6911d33fa09bd0139eff64cb6e1dadd"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tls-fas",
+      "status": "passed",
+      "bytes": 1096360,
+      "sha256": "c0d2859da3e1254e4a05d9695118dd56b2511e9898ad320d58e78a9c01788e24"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/typedef-fas",
+      "status": "passed",
+      "bytes": 944824,
+      "sha256": "11e9357ac9a1ff8b8394add5215f3678a3055c2381c4c6ccbbc213c80b749d2f"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/typeof-fas",
+      "status": "passed",
+      "bytes": 944728,
+      "sha256": "07a7f896db5d469deb30ea0441b3e270d5010b343c6b14eff90a15871a558828"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode-fas",
+      "status": "passed",
+      "bytes": 957360,
+      "sha256": "becf35f255d246d87b5f95c985ec5ef8c07f13397ed82efe892106fcab7ee2a7"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/union-fas",
+      "status": "passed",
+      "bytes": 945720,
+      "sha256": "eb46f88220abbe1f1582b5e28eec544384f1e63a9088a81a7b5af5f75ae11524"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/usualconv-fas",
+      "status": "passed",
+      "bytes": 945456,
+      "sha256": "196a124521a9adbc5bfebb5a125b8f5e5bbe6a2b55eb9330de6d7cae17eff1a1"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/varargs-fas",
+      "status": "passed",
+      "bytes": 950256,
+      "sha256": "7e348cde85bc05adb1d86c5e3f8ec4cc510903e4e1a670cd0ac608bb6729c95f"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/variable-fas",
+      "status": "passed",
+      "bytes": 952208,
+      "sha256": "ce7367e41b53eb917a89e3021d87f1287b7849a9ce57d3dad3d6c2e63fdbb287"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/vla-fas",
+      "status": "passed",
+      "bytes": 950392,
+      "sha256": "c7cd5bd1dfac54a282dc2036c095e65d183990107a93a4dad56b50a0cdd02416"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/sieve/primes",
+      "status": "passed",
+      "bytes": 1038480,
+      "sha256": "c783406ebafaaea6e809038df22eb9e6dd1c5b1170e37461f6d34199cc34158d"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/sieve/primes_const",
+      "status": "passed",
+      "bytes": 1164768,
+      "sha256": "56b5c30e4fddc7d2894dbd9a225a7fb8409ddae06b788edb69af51279e87d5d5"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/sieve/primes_long_chunks",
+      "status": "passed",
+      "bytes": 1164768,
+      "sha256": "4ae214492f79297430ffa8793fb4ceca759b11d3e2c846ae8260ad7976ed7f80"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/sieve/primes_zero3",
+      "status": "passed",
+      "bytes": 1164664,
+      "sha256": "10c8085c0b9f65c61aca91abd4d0b81bed4408d5c9c67811d8e64e8c0a96f66a"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_examples-fas",
+      "status": "passed",
+      "bytes": 1256488,
+      "sha256": "d7f2249f2cda22daea22c0aa37cfd8877cad50ead33b3812edf94c37c08a350e"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_number-fas",
+      "status": "passed",
+      "bytes": 1133088,
+      "sha256": "0ffd1a3783c08ba490b7af6ace3a8585335042ff8f6e420befc5b26394a0677a"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_hex4-fas",
+      "status": "passed",
+      "bytes": 1080040,
+      "sha256": "ecab02f7663aaaf6a6cc558c62ec77638fb2784a8f89fa3693eda4172bae6f57"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_string-fas",
+      "status": "passed",
+      "bytes": 1084936,
+      "sha256": "5af970f28bf2adab5df4cf86ce45eaf1565528fa8953d665367c0c74ce13bb20"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_array-fas",
+      "status": "passed",
+      "bytes": 1133096,
+      "sha256": "c74eccbc8cfc497681428fdecced5fa96ee3801c34cbc01fd9ec6eb2347a7fed"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_object-fas",
+      "status": "passed",
+      "bytes": 1133776,
+      "sha256": "9e8013ea1dfd497e05033d7d43d80b4dd322bda9bf11c7155873331e64ec94ed"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_value-fas",
+      "status": "passed",
+      "bytes": 1128672,
+      "sha256": "4b00483fda8d497cac2de75c385c4b69cb1d2f4914c64b437ecde258423d515c"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/print_string-fas",
+      "status": "passed",
+      "bytes": 1079680,
+      "sha256": "659ef4eb06d9808ea0018a718fb9484d314887f7bd685f1df9c406249a59c0a9"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/print_number-fas",
+      "status": "passed",
+      "bytes": 1234304,
+      "sha256": "11b654b86e116bcf815ee4ec87a51e37b94aa8f0c3d4121e3d9fa72406d8aec9"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/print_array-fas",
+      "status": "passed",
+      "bytes": 1237824,
+      "sha256": "41ca43e61c05a017b7b55331a91c83295505de19f37cd2081fe80599c180b655"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/print_object-fas",
+      "status": "passed",
+      "bytes": 1237976,
+      "sha256": "6b909b9ff5f0d54076cfc1cde00b4c2e2d85440919e73ff887933e6f8f5886ec"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/print_value-fas",
+      "status": "passed",
+      "bytes": 1237816,
+      "sha256": "051431341b1213b1bf2570b152b0a9a2337c13ffa2d311dc5b4c3f0f540666e9"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/misc_tests-fas",
+      "status": "passed",
+      "bytes": 1324112,
+      "sha256": "b02e6fe240172715285446a8384ed020d7b22110f1042d2fba3c8f296a8913aa"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/parse_with_opts-fas",
+      "status": "passed",
+      "bytes": 1130568,
+      "sha256": "f59ed847efbb60635b2dab2ef2281abab41c9bcde5734f1750ee4c9d89341309"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/compare_tests-fas",
+      "status": "passed",
+      "bytes": 1144488,
+      "sha256": "77c528ab47c04ccf39889e1a8fb7b4900ef58698645db02c7e8539d6ecd68866"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/cjson_add-fas",
+      "status": "passed",
+      "bytes": 1116368,
+      "sha256": "4d337f1a927acfe3678d556f291da0e262f020a71894b13181ecaac705041161"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/readme_examples-fas",
+      "status": "passed",
+      "bytes": 1248496,
+      "sha256": "b7fd5ec1b015091db4d572be22bab27834677ff98a1a0015432819d525db0c50"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/minify_tests-fas",
+      "status": "passed",
+      "bytes": 1082624,
+      "sha256": "5a012957f4cd5be159451d96adc4ad320a67d60b8e9156d6ca9184286638852f"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/json_patch_tests-fas",
+      "status": "passed",
+      "bytes": 1311744,
+      "sha256": "45fb8a23d965a2ec7fca78869a2c5ed6775d6f60582d42a4f9a4512cc4bc7394"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/old_utils_tests-fas",
+      "status": "passed",
+      "bytes": 1309840,
+      "sha256": "c9b986b1b5a68695427ee3fe7d4add32e39c5fe9daf76cb38216538e6c37a296"
+    },
+    {
+      "program": "/tmp/fas-corpus-static-glibc-final-20261105/cjson/misc_utils_tests-fas",
+      "status": "passed",
+      "bytes": 1140800,
+      "sha256": "908ce3cc9b3042278accf43b24b4b9c2c230af606c0abad9edbb066c7e00cac2"
+    }
+  ]
+}

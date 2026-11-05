@@ -1,0 +1,58 @@
+[
+  {
+    "name": "chibicc-stage1-dynamic",
+    "results": {
+      "Fas-before": {
+        "allocated_words": 5435665,
+        "cache_hits": 0
+      },
+      "Fas-read-cache": {
+        "allocated_words": 4198552,
+        "cache_hits": 5
+      }
+    },
+    "byte_identical": true
+  },
+  {
+    "name": "chibicc-stage2-copy",
+    "results": {
+      "Fas-before": {
+        "allocated_words": 5940133,
+        "cache_hits": 0
+      },
+      "Fas-read-cache": {
+        "allocated_words": 4703035,
+        "cache_hits": 5
+      }
+    },
+    "byte_identical": true
+  },
+  {
+    "name": "chibicc-static-glibc",
+    "results": {
+      "Fas-before": {
+        "allocated_words": 10681616,
+        "cache_hits": 0
+      },
+      "Fas-read-cache": {
+        "allocated_words": 10681875,
+        "cache_hits": 0
+      }
+    },
+    "byte_identical": true
+  },
+  {
+    "name": "cjson-static-pie",
+    "results": {
+      "Fas-before": {
+        "allocated_words": 8745263,
+        "cache_hits": 0
+      },
+      "Fas-read-cache": {
+        "allocated_words": 8516883,
+        "cache_hits": 1
+      }
+    },
+    "byte_identical": true
+  }
+]

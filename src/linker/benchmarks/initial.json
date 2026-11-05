@@ -1,0 +1,448 @@
+{
+  "timestamp_utc": "2026-11-05T01:40:33.625338+00:00",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": 12,
+  "filesystem_cache": "warm; no cache eviction attempted",
+  "runs": 7,
+  "warmups": 1,
+  "tool_versions": {
+    "fas-ld": "fas-ld 0.1 (ELF64 x86-64 static subset)",
+    "GNU ld": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+    "LLD": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+  },
+  "tool_sha256": {
+    "fas-ld": "d9f6e308de9c4172587946669aa1f45ffd232f360e81ab8ab9d240dd91577be5",
+    "GNU ld": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+    "LLD": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982"
+  },
+  "assembler_version": "GNU assembler (GNU Binutils for Ubuntu) 2.46",
+  "methodology": "wall time includes spawn and exit; CPU from wait4; peak RSS from one separate untimed GNU time run per tool/corpus; tool default worker counts; no GC, ICF, or build ID requested; outputs are verified by execution",
+  "note": "Synthetic object-only baseline, not a general linker ranking. Output layout and size differ. Allocation/GC and per-phase instrumentation are not implemented yet.",
+  "corpora": [
+    {
+      "input_objects": 2,
+      "generated_functions": 64,
+      "generated_relocations": 65,
+      "input_bytes": 6056,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 2.52462099888362,
+          "min_wall_ms": 2.1707440027967095,
+          "max_wall_ms": 3.302454002550803,
+          "peak_rss_kib": 4216,
+          "output_bytes": 11504,
+          "samples": [
+            {
+              "wall_ms": 2.989615000842605,
+              "user_ms": 0.0,
+              "system_ms": 2.732
+            },
+            {
+              "wall_ms": 3.302454002550803,
+              "user_ms": 1.034,
+              "system_ms": 2.068
+            },
+            {
+              "wall_ms": 2.5849940029729623,
+              "user_ms": 0.0,
+              "system_ms": 2.4229999999999996
+            },
+            {
+              "wall_ms": 2.427227002044674,
+              "user_ms": 1.132,
+              "system_ms": 1.132
+            },
+            {
+              "wall_ms": 2.52462099888362,
+              "user_ms": 0.7859999999999999,
+              "system_ms": 1.573
+            },
+            {
+              "wall_ms": 2.4174889986170456,
+              "user_ms": 0.0,
+              "system_ms": 2.231
+            },
+            {
+              "wall_ms": 2.1707440027967095,
+              "user_ms": 0.0,
+              "system_ms": 2.005
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 3.0705370008945465,
+          "min_wall_ms": 2.706531999137951,
+          "max_wall_ms": 4.266096999344882,
+          "peak_rss_kib": 4856,
+          "output_bytes": 11312,
+          "samples": [
+            {
+              "wall_ms": 4.266096999344882,
+              "user_ms": 2.065,
+              "system_ms": 1.966
+            },
+            {
+              "wall_ms": 3.209840000636177,
+              "user_ms": 0.0,
+              "system_ms": 3.012
+            },
+            {
+              "wall_ms": 2.9077619983581826,
+              "user_ms": 1.436,
+              "system_ms": 1.301
+            },
+            {
+              "wall_ms": 3.0705370008945465,
+              "user_ms": 0.582,
+              "system_ms": 2.323
+            },
+            {
+              "wall_ms": 3.129087999695912,
+              "user_ms": 0.0,
+              "system_ms": 2.969
+            },
+            {
+              "wall_ms": 2.8431389982870314,
+              "user_ms": 0.0,
+              "system_ms": 2.682
+            },
+            {
+              "wall_ms": 2.706531999137951,
+              "user_ms": 1.091,
+              "system_ms": 1.452
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 15.866533998632804,
+          "min_wall_ms": 14.49873099772958,
+          "max_wall_ms": 17.233034999662777,
+          "peak_rss_kib": 61372,
+          "output_bytes": 3960,
+          "samples": [
+            {
+              "wall_ms": 15.866533998632804,
+              "user_ms": 7.749,
+              "system_ms": 9.963
+            },
+            {
+              "wall_ms": 17.233034999662777,
+              "user_ms": 6.712,
+              "system_ms": 12.306
+            },
+            {
+              "wall_ms": 16.626783999527106,
+              "user_ms": 7.395,
+              "system_ms": 10.565
+            },
+            {
+              "wall_ms": 16.12635299898102,
+              "user_ms": 5.959,
+              "system_ms": 11.918999999999999
+            },
+            {
+              "wall_ms": 14.49873099772958,
+              "user_ms": 7.427,
+              "system_ms": 8.488
+            },
+            {
+              "wall_ms": 14.807421001023613,
+              "user_ms": 7.07,
+              "system_ms": 9.427
+            },
+            {
+              "wall_ms": 15.564015000563813,
+              "user_ms": 4.537999999999999,
+              "system_ms": 12.48
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "596312f0388aac9694c378b91eec4f9d02fb713ff7f99fab57ee6d0fc7fcc574"
+    },
+    {
+      "input_objects": 33,
+      "generated_functions": 2048,
+      "generated_relocations": 2049,
+      "input_bytes": 168912,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 13.10738300162484,
+          "min_wall_ms": 9.625239999877522,
+          "max_wall_ms": 19.988428997748997,
+          "peak_rss_kib": 7488,
+          "output_bytes": 110728,
+          "samples": [
+            {
+              "wall_ms": 9.625239999877522,
+              "user_ms": 6.122,
+              "system_ms": 3.061
+            },
+            {
+              "wall_ms": 12.950467000337085,
+              "user_ms": 7.429,
+              "system_ms": 5.306
+            },
+            {
+              "wall_ms": 13.10738300162484,
+              "user_ms": 7.93,
+              "system_ms": 4.9559999999999995
+            },
+            {
+              "wall_ms": 19.988428997748997,
+              "user_ms": 9.908,
+              "system_ms": 9.908
+            },
+            {
+              "wall_ms": 18.99185499860323,
+              "user_ms": 13.826999999999998,
+              "system_ms": 4.938
+            },
+            {
+              "wall_ms": 18.62981399972341,
+              "user_ms": 6.79,
+              "system_ms": 11.639999999999999
+            },
+            {
+              "wall_ms": 11.081590000685537,
+              "user_ms": 3.9709999999999996,
+              "system_ms": 6.949
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 10.414554999442771,
+          "min_wall_ms": 8.323520996782463,
+          "max_wall_ms": 19.003695997525938,
+          "peak_rss_kib": 6896,
+          "output_bytes": 104056,
+          "samples": [
+            {
+              "wall_ms": 8.323520996782463,
+              "user_ms": 3.941,
+              "system_ms": 3.941
+            },
+            {
+              "wall_ms": 10.414554999442771,
+              "user_ms": 3.124,
+              "system_ms": 7.038999999999999
+            },
+            {
+              "wall_ms": 16.689972999301972,
+              "user_ms": 6.302,
+              "system_ms": 10.168
+            },
+            {
+              "wall_ms": 19.003695997525938,
+              "user_ms": 9.905,
+              "system_ms": 8.914
+            },
+            {
+              "wall_ms": 18.014816003415035,
+              "user_ms": 9.896,
+              "system_ms": 7.917000000000001
+            },
+            {
+              "wall_ms": 8.394786000280874,
+              "user_ms": 2.065,
+              "system_ms": 6.117
+            },
+            {
+              "wall_ms": 9.59079499807558,
+              "user_ms": 3.8569999999999998,
+              "system_ms": 5.575
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 19.117891999485437,
+          "min_wall_ms": 15.877915000601206,
+          "max_wall_ms": 31.44777100169449,
+          "peak_rss_kib": 62088,
+          "output_bytes": 96320,
+          "samples": [
+            {
+              "wall_ms": 15.877915000601206,
+              "user_ms": 4.921,
+              "system_ms": 13.533999999999999
+            },
+            {
+              "wall_ms": 18.352862000028836,
+              "user_ms": 6.949999999999999,
+              "system_ms": 13.899999999999999
+            },
+            {
+              "wall_ms": 23.735589998977957,
+              "user_ms": 9.148,
+              "system_ms": 17.153
+            },
+            {
+              "wall_ms": 31.44777100169449,
+              "user_ms": 9.075999999999999,
+              "system_ms": 26.473
+            },
+            {
+              "wall_ms": 16.792465998150874,
+              "user_ms": 5.295999999999999,
+              "system_ms": 13.769
+            },
+            {
+              "wall_ms": 19.117891999485437,
+              "user_ms": 9.707,
+              "system_ms": 9.707
+            },
+            {
+              "wall_ms": 19.464804001472658,
+              "user_ms": 11.559,
+              "system_ms": 11.559
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "ee1080b0d8f0d3f5a0184c29520dddcfe736424834d6a155ac7c8b44623f4120"
+    },
+    {
+      "input_objects": 257,
+      "generated_functions": 16384,
+      "generated_relocations": 16385,
+      "input_bytes": 1359824,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 55.21054299970274,
+          "min_wall_ms": 45.96423499970115,
+          "max_wall_ms": 69.6425870009989,
+          "peak_rss_kib": 16636,
+          "output_bytes": 839080,
+          "samples": [
+            {
+              "wall_ms": 55.26351099979365,
+              "user_ms": 38.999,
+              "system_ms": 15.998999999999999
+            },
+            {
+              "wall_ms": 55.21054299970274,
+              "user_ms": 37.955999999999996,
+              "system_ms": 16.979999999999997
+            },
+            {
+              "wall_ms": 54.83068700050353,
+              "user_ms": 32.309,
+              "system_ms": 22.212
+            },
+            {
+              "wall_ms": 60.22915499852388,
+              "user_ms": 38.944,
+              "system_ms": 20.97
+            },
+            {
+              "wall_ms": 69.6425870009989,
+              "user_ms": 48.56,
+              "system_ms": 20.811
+            },
+            {
+              "wall_ms": 47.0911550000892,
+              "user_ms": 30.816999999999997,
+              "system_ms": 15.905
+            },
+            {
+              "wall_ms": 45.96423499970115,
+              "user_ms": 29.718999999999998,
+              "system_ms": 15.85
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 55.1684740021301,
+          "min_wall_ms": 43.63904999991064,
+          "max_wall_ms": 58.20855300044059,
+          "peak_rss_kib": 23060,
+          "output_bytes": 785592,
+          "samples": [
+            {
+              "wall_ms": 55.92963500021142,
+              "user_ms": 19.148,
+              "system_ms": 36.281
+            },
+            {
+              "wall_ms": 57.92964899956132,
+              "user_ms": 32.202,
+              "system_ms": 25.158
+            },
+            {
+              "wall_ms": 45.57053399912547,
+              "user_ms": 22.293999999999997,
+              "system_ms": 22.97
+            },
+            {
+              "wall_ms": 55.1684740021301,
+              "user_ms": 27.965,
+              "system_ms": 26.720999999999997
+            },
+            {
+              "wall_ms": 58.20855300044059,
+              "user_ms": 27.81,
+              "system_ms": 29.796999999999997
+            },
+            {
+              "wall_ms": 43.63904999991064,
+              "user_ms": 19.304,
+              "system_ms": 23.924999999999997
+            },
+            {
+              "wall_ms": 55.006567999953404,
+              "user_ms": 24.8,
+              "system_ms": 29.759999999999998
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 33.889925998664694,
+          "min_wall_ms": 25.81693599859136,
+          "max_wall_ms": 39.90456300016376,
+          "peak_rss_kib": 66916,
+          "output_bytes": 777856,
+          "samples": [
+            {
+              "wall_ms": 36.49931599647971,
+              "user_ms": 19.002,
+              "system_ms": 30.403
+            },
+            {
+              "wall_ms": 26.449926997884177,
+              "user_ms": 11.608,
+              "system_ms": 28.573999999999998
+            },
+            {
+              "wall_ms": 26.21057700162055,
+              "user_ms": 14.194,
+              "system_ms": 26.497
+            },
+            {
+              "wall_ms": 33.889925998664694,
+              "user_ms": 16.195999999999998,
+              "system_ms": 31.313
+            },
+            {
+              "wall_ms": 25.81693599859136,
+              "user_ms": 11.562999999999999,
+              "system_ms": 25.793999999999997
+            },
+            {
+              "wall_ms": 39.90456300016376,
+              "user_ms": 18.033,
+              "system_ms": 33.660999999999994
+            },
+            {
+              "wall_ms": 37.61470400058897,
+              "user_ms": 27.188999999999997,
+              "system_ms": 25.49
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "af7dd6087220f22ce9b2c1018e3d676e47391997c4ff90bfabd4a541511ec82d"
+    }
+  ],
+  "filesystem": "tmpfs"
+}

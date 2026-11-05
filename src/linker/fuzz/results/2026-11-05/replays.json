@@ -1,0 +1,66 @@
+[
+  {
+    "group": "crashes",
+    "input": "id:000000,sig:06,src:000000,time:52969,execs:32334,op:flip1,pos:2772",
+    "target": "before",
+    "exit": 2,
+    "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\n",
+    "seconds": 0.0063
+  },
+  {
+    "group": "crashes",
+    "input": "id:000000,sig:06,src:000000,time:52969,execs:32334,op:flip1,pos:2772",
+    "target": "after",
+    "exit": 0,
+    "stderr": "",
+    "seconds": 0.0029
+  },
+  {
+    "group": "crashes",
+    "input": "id:000001,sig:06,src:000000,time:96641,execs:57596,op:havoc,rep:1",
+    "target": "before",
+    "exit": 2,
+    "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\n",
+    "seconds": 0.0022
+  },
+  {
+    "group": "crashes",
+    "input": "id:000001,sig:06,src:000000,time:96641,execs:57596,op:havoc,rep:1",
+    "target": "after",
+    "exit": 0,
+    "stderr": "",
+    "seconds": 0.0026
+  },
+  {
+    "group": "hangs",
+    "input": "id:000000,src:000000,time:65342,execs:38782,op:arith8,pos:2772,val:+11",
+    "target": "before",
+    "exit": 2,
+    "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\n",
+    "seconds": 0.0022
+  },
+  {
+    "group": "hangs",
+    "input": "id:000000,src:000000,time:65342,execs:38782,op:arith8,pos:2772,val:+11",
+    "target": "after",
+    "exit": 0,
+    "stderr": "",
+    "seconds": 0.0027
+  },
+  {
+    "group": "hangs",
+    "input": "id:000001,src:000000,time:67361,execs:38790,op:arith8,pos:2772,val:+17",
+    "target": "before",
+    "exit": 2,
+    "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\n",
+    "seconds": 0.0024
+  },
+  {
+    "group": "hangs",
+    "input": "id:000001,src:000000,time:67361,execs:38790,op:arith8,pos:2772,val:+17",
+    "target": "after",
+    "exit": 0,
+    "stderr": "",
+    "seconds": 0.0026
+  }
+]

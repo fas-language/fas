@@ -1,0 +1,136 @@
+{
+  "date": "2026-11-05",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "architecture": "x86_64",
+  "python": "3.13.9 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 19:16:10) [GCC 11.2.0]",
+  "concurrent_desktop_use": true,
+  "tools": {
+    "ocaml": [
+      "5.4.1"
+    ],
+    "dune": [
+      "3.24.2"
+    ],
+    "gcc": [
+      "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+      "Copyright (C) 2025 Free Software Foundation, Inc.",
+      "This is free software; see the source for copying conditions.  There is NO"
+    ],
+    "clang": [
+      "Ubuntu clang version 21.1.8 (6ubuntu1)",
+      "Target: x86_64-pc-linux-gnu",
+      "Thread model: posix"
+    ],
+    "GNU_ld": [
+      "GNU ld (GNU Binutils for Ubuntu) 2.46",
+      "Copyright (C) 2026 Free Software Foundation, Inc.",
+      "This program is free software; you may redistribute it under the terms of"
+    ],
+    "LLD": [
+      "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+    ],
+    "gdb": [
+      "GNU gdb (Ubuntu 17.1-2ubuntu1) 17.1",
+      "Copyright (C) 2025 Free Software Foundation, Inc.",
+      "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>"
+    ],
+    "glibc": [
+      "ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43",
+      "Copyright (C) 2024 Free Software Foundation, Inc.",
+      "This is free software; see the source for copying conditions.  There is NO"
+    ],
+    "AFL": [
+      "",
+      "afl-fuzz [ options ] -- /path/to/fuzzed_app [ ... ]",
+      ""
+    ],
+    "clang22": [
+      "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)",
+      "Target: x86_64-pc-linux-gnu",
+      "Thread model: posix"
+    ],
+    "g++": [
+      "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+      "Copyright (C) 2025 Free Software Foundation, Inc.",
+      "This is free software; see the source for copying conditions.  There is NO"
+    ]
+  },
+  "sysroot_files": {
+    "/lib/x86_64-linux-gnu/libc.so.6": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "sha256": "85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7"
+    },
+    "/lib64/ld-linux-x86-64.so.2": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+      "sha256": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crt1.o": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/crt1.o",
+      "sha256": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/Scrt1.o",
+      "sha256": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/crti.o",
+      "sha256": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+      "sha256": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+      "sha256": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/crtn.o",
+      "sha256": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libc_nonshared.a",
+      "sha256": "8fc3f78f6a5cac0cbe80a4fd96a00dcf5269425941fa33a0f2b7d25b96941662"
+    },
+    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35",
+      "sha256": "5bb0d21308f123b6ad46c6f35b42cedfcb8d6d439a53aa3dae04d880aaffdde3"
+    },
+    "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "sha256": "9d339ecb409578d6a5d587e6c537a8f9589b8a13fefba30d167433a4b5758bee"
+    },
+    "/usr/lib/x86_64-linux-gnu/libSDL.so": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libSDL-1.2.so.1.2.72",
+      "sha256": "5715b314893b4af56661e0692c1b55c079cee628e458fa94b0e011d6ba2157f2"
+    },
+    "/usr/lib/x86_64-linux-gnu/libSDL_mixer.so": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libSDL_mixer-1.2.so.0.12.0",
+      "sha256": "46e262ebce58016fccaf96d243fa365909e230d5d4b43a72885fa1dc1e1a0df9"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc.a": {
+      "realpath": "/usr/lib/x86_64-linux-gnu/libc.a",
+      "sha256": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+      "sha256": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+      "sha256": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+      "sha256": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o",
+      "sha256": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014"
+    },
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": {
+      "realpath": "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+      "sha256": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246"
+    }
+  }
+}

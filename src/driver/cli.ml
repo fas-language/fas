@@ -107,13 +107,14 @@ let usage =
   \  --diagnostics=text|json  print diagnostics as text (default) or one JSON line\n\
   \  --all-errors  report every error in function bodies instead of stopping at the \
    first\n\
-  \  --backend=llvm|native  build executables with LLVM (default) or the built-in \
-   x86-64 Linux code generator (experimental: integers only, no C)\n\
+  \  --backend=llvm|native  use LLVM (default) or the built-in Linux x86-64 \
+   generator/linker; native -c emits ELF objects (experimental)\n\
   \  --version     print the fas version and the opt, llc and C compiler in use\n\
   \  -h, --help    show this help\n\
    C inputs:\n\
   \  -I DIR, -isystem DIR, -D NAME[=VALUE] (attached or separate)\n\
   \  -l, -L        link flags (attached or separate)\n\
+  \  -Wl,ARG,..., -Xlinker ARG  pass arguments to the selected linker\n\
   \  FILE.c, FILE.o, FILE.a, FILE.so  C inputs linked with the program\n\
    debugging:\n\
   \  --emit-ir     print the compiler's custom IR dump\n\
@@ -144,6 +145,19 @@ let default_output os emit input =
   | _, Target_layout.Linux -> "a.out"
   | _, Target_layout.Windows -> "a.exe"
   | _, Target_layout.Wasi -> "a.wasm"
+
+(* External C drivers interpret these wrappers themselves. The built-in linker
+   receives their payloads in the original order, without shell tokenization. *)
+let native_linker_arguments arguments =
+  let rec expand = function
+    | [] -> []
+    | "-Xlinker" :: argument :: rest -> argument :: expand rest
+    | flag :: rest when String.starts_with ~prefix:"-Wl," flag ->
+        String.split_on_char ',' (String.sub flag 4 (String.length flag - 4))
+        @ expand rest
+    | argument :: rest -> argument :: expand rest
+  in
+  expand arguments
 
 let target_of_value value =
   match value with
@@ -214,7 +228,8 @@ let parse_invocation ~subcommand argv =
         || String.starts_with ~prefix:"--emit-" flag
         || String.starts_with ~prefix:"-l" flag
         || String.starts_with ~prefix:"-L" flag
-        || passthrough_file flag
+        || String.starts_with ~prefix:"-Wl," flag
+        || flag = "-Xlinker" || passthrough_file flag
   in
   let rec loop i input output emit keep optimization optimization_explicit debug
       no_inline_function =
@@ -410,6 +425,20 @@ let parse_invocation ~subcommand argv =
           else (
             add_link_inputs [ flag; argv.(i + 1) ];
             loop (i + 2) input output emit keep optimization optimization_explicit debug
+              no_inline_function)
+      | "-Xlinker" ->
+          if i + 1 >= n || argv.(i + 1) = "" then Error "-Xlinker requires an argument"
+          else (
+            add_link_inputs [ "-Xlinker"; argv.(i + 1) ];
+            loop (i + 2) input output emit keep optimization optimization_explicit debug
+              no_inline_function)
+      | flag when String.starts_with ~prefix:"-Wl," flag ->
+          let arguments = String.sub flag 4 (String.length flag - 4) in
+          if List.exists (( = ) "") (String.split_on_char ',' arguments) then
+            Error "-Wl, requires nonempty comma-separated linker arguments"
+          else (
+            add_link_inputs [ flag ];
+            loop (i + 1) input output emit keep optimization optimization_explicit debug
               no_inline_function)
       | ("-I" | "-isystem" | "-D") as flag ->
           if i + 1 >= n || argv.(i + 1) = "" then Error (flag ^ " requires an argument")

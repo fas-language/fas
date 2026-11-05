@@ -1,0 +1,2033 @@
+{
+  "started": "2026-11-05T19:42:20+0100",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "tools": {
+    "fas-ld": {
+      "path": "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+      "original": "/home/glonex/fas-experimental-backend/fas/_build/default/src/linker/bin/main.exe",
+      "sha256": "50fbe0c2d3dcd0a49638883270f13cfc776f145162a7aa84c98fe222ebc097d5",
+      "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+    },
+    "GNU": {
+      "path": "/tmp/fas-real-link-baseline-20261105/tools/1/ld",
+      "original": "/usr/bin/ld",
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+    },
+    "LLD": {
+      "path": "/tmp/fas-real-link-baseline-20261105/tools/2/ld.lld-22",
+      "original": "/usr/bin/ld.lld-22",
+      "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+      "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+    }
+  },
+  "manifest_sha256": "5f341cd9364b669cf2e11c94a8cfd64b828de0bfba60015ad8359ba9d2c5bd7a",
+  "harness_sha256": "e3b0b5fe2559988795bb65cacc49f8e03ca621c29cce452fae3308f2c49e27f1",
+  "bench_helpers_sha256": "b41db5673b2a2a7045d5ad3aa4b0f4a717e906e7577e93375ffc7a34ef8835f4",
+  "methodology": "Warm cache; spawn-through-exit wall/CPU; rotated order; default linker workers; runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.",
+  "runs": 21,
+  "warmups": 3,
+  "timing_comparison": true,
+  "input_provenance": {
+    "/tmp/fas-corpus-static-glibc-final-20261105/report.json": "398794205414dd997034a8eca2bd2f3852fb18e9dab7950dd4ddc6900663190a",
+    "/tmp/fas-corpus-static-pie-20261105/report.json": "5ee7ec430782d98710f2e500902b626ad8f730187b28bedbaed07ff923222c52",
+    "/tmp/fas-chibicc-selfhost-final-20261105/report.json": "264f83c771879095e467c5459139a09da2f64cbec671f07181e47af647da6455"
+  },
+  "limitations": [
+    "Explicit argv inputs are hashed; -l/script/transitive closures require the associated corpus/sysroot provenance.",
+    "Single machine and warm cache; no general linker ranking or production qualification."
+  ],
+  "workloads": [
+    {
+      "name": "chibicc-stage1-dynamic",
+      "cwd": "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/codegen.o": "85f046c43ddf94972dbf2a7c355efb5f98ba7ac2056ca531f7e31d27f3f0d882",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/hashmap.o": "dd0d8c4df42c59f4d3d875ae11b61722b10f3be399431d68ed549e5a4b5838cf",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/main.o": "73187ad0d680438cbd6cdc0d46e9a2297d01e463b94c03fd2ca0586f1eed53ee",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/parse.o": "e84c7f7d431596b9ff45d5b5c3febc0c1614fa7466cb9ba63b8e5f402a362c69",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/preprocess.o": "3fd8db96da9f1749a181b66facbc1dc65c0eb1e1d0715be61416424520d655e0",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/strings.o": "291a197e5ff8afd656331a00761d62020ecb455ef53756829369636bf27f4b54",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/tokenize.o": "d44f91d4a730ce806c6c4fe325b0901a36dd49c768a8a76efd5489f425bcc0ed",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/type.o": "d521766adad9eebd00bf31efae61334681b4b67aca649f76b0de76c56ba8eea8",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/unicode.o": "d0b6909f8c9fc52573e654162984c535c8481f24152fa638a6bb15ad66a5c0e0",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "fas-ld": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/0/0",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d",
+          "output_bytes": 334920,
+          "peak_rss_kib": 28608,
+          "samples": [
+            {
+              "wall_ms": 42.92356100631878,
+              "user_ms": 18.871,
+              "system_ms": 23.837
+            },
+            {
+              "wall_ms": 67.84718499693554,
+              "user_ms": 34.183,
+              "system_ms": 33.177
+            },
+            {
+              "wall_ms": 42.00741399836261,
+              "user_ms": 23.424,
+              "system_ms": 18.331999999999997
+            },
+            {
+              "wall_ms": 46.9282230042154,
+              "user_ms": 23.255,
+              "system_ms": 23.255
+            },
+            {
+              "wall_ms": 48.911473000771366,
+              "user_ms": 25.804000000000002,
+              "system_ms": 22.827
+            },
+            {
+              "wall_ms": 40.541505004512146,
+              "user_ms": 20.169,
+              "system_ms": 20.169
+            },
+            {
+              "wall_ms": 49.70565901021473,
+              "user_ms": 20.11,
+              "system_ms": 29.159
+            },
+            {
+              "wall_ms": 41.11512200324796,
+              "user_ms": 23.316,
+              "system_ms": 17.232999999999997
+            },
+            {
+              "wall_ms": 63.854865002213046,
+              "user_ms": 32.268,
+              "system_ms": 31.259999999999994
+            },
+            {
+              "wall_ms": 39.87772601249162,
+              "user_ms": 17.166999999999998,
+              "system_ms": 22.216
+            },
+            {
+              "wall_ms": 41.20521299773827,
+              "user_ms": 19.987,
+              "system_ms": 20.985999999999997
+            },
+            {
+              "wall_ms": 51.50438900454901,
+              "user_ms": 25.134999999999998,
+              "system_ms": 26.14
+            },
+            {
+              "wall_ms": 40.721105004195124,
+              "user_ms": 21.723,
+              "system_ms": 18.761
+            },
+            {
+              "wall_ms": 44.89958599151578,
+              "user_ms": 23.289,
+              "system_ms": 19.238
+            },
+            {
+              "wall_ms": 44.9297440063674,
+              "user_ms": 24.301,
+              "system_ms": 20.250999999999998
+            },
+            {
+              "wall_ms": 49.977974005742,
+              "user_ms": 24.154,
+              "system_ms": 25.159999999999997
+            },
+            {
+              "wall_ms": 40.41352099739015,
+              "user_ms": 19.049,
+              "system_ms": 21.054999999999996
+            },
+            {
+              "wall_ms": 42.987039996660315,
+              "user_ms": 20.842,
+              "system_ms": 21.835
+            },
+            {
+              "wall_ms": 51.427422993583605,
+              "user_ms": 23.006,
+              "system_ms": 28.008
+            },
+            {
+              "wall_ms": 42.5896269880468,
+              "user_ms": 23.612,
+              "system_ms": 18.692999999999998
+            },
+            {
+              "wall_ms": 41.78789599973243,
+              "user_ms": 22.146,
+              "system_ms": 19.126
+            }
+          ],
+          "median_wall_ms": 42.987039996660315,
+          "min_wall_ms": 39.87772601249162,
+          "max_wall_ms": 67.84718499693554
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/1/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/0/1",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "7d54aad73fc67b79b4676fe7c685b4b357b19e2ffe70da1d02949ff0bcf722b0",
+          "output_bytes": 306128,
+          "peak_rss_kib": 10244,
+          "samples": [
+            {
+              "wall_ms": 18.872151005780324,
+              "user_ms": 10.794999999999998,
+              "system_ms": 7.851
+            },
+            {
+              "wall_ms": 27.106342007755302,
+              "user_ms": 16.835,
+              "system_ms": 9.903
+            },
+            {
+              "wall_ms": 18.8159739918774,
+              "user_ms": 11.337,
+              "system_ms": 7.2139999999999995
+            },
+            {
+              "wall_ms": 30.206329000066034,
+              "user_ms": 16.851,
+              "system_ms": 12.886
+            },
+            {
+              "wall_ms": 20.15877999656368,
+              "user_ms": 10.355,
+              "system_ms": 9.318999999999999
+            },
+            {
+              "wall_ms": 30.271053008618765,
+              "user_ms": 15.046,
+              "system_ms": 15.016
+            },
+            {
+              "wall_ms": 17.629344001761638,
+              "user_ms": 9.115,
+              "system_ms": 8.036
+            },
+            {
+              "wall_ms": 23.560670000733808,
+              "user_ms": 14.253,
+              "system_ms": 9.084999999999999
+            },
+            {
+              "wall_ms": 17.764681004337035,
+              "user_ms": 9.188,
+              "system_ms": 8.126
+            },
+            {
+              "wall_ms": 18.512208000174724,
+              "user_ms": 8.959999999999999,
+              "system_ms": 8.931999999999999
+            },
+            {
+              "wall_ms": 23.52915999654215,
+              "user_ms": 11.932,
+              "system_ms": 11.318999999999999
+            },
+            {
+              "wall_ms": 20.345773998997174,
+              "user_ms": 13.569999999999999,
+              "system_ms": 6.523999999999999
+            },
+            {
+              "wall_ms": 28.349519008770585,
+              "user_ms": 17.103,
+              "system_ms": 11.032
+            },
+            {
+              "wall_ms": 19.12642299430445,
+              "user_ms": 10.912999999999998,
+              "system_ms": 7.936
+            },
+            {
+              "wall_ms": 18.348327008425258,
+              "user_ms": 7.93,
+              "system_ms": 9.896
+            },
+            {
+              "wall_ms": 18.365840005571954,
+              "user_ms": 8.938,
+              "system_ms": 8.938
+            },
+            {
+              "wall_ms": 32.56353898905218,
+              "user_ms": 13.148,
+              "system_ms": 17.194000000000003
+            },
+            {
+              "wall_ms": 19.40592199389357,
+              "user_ms": 11.932,
+              "system_ms": 6.993
+            },
+            {
+              "wall_ms": 17.911468996317126,
+              "user_ms": 10.283999999999999,
+              "system_ms": 7.136
+            },
+            {
+              "wall_ms": 19.10692499950528,
+              "user_ms": 10.79,
+              "system_ms": 7.832000000000001
+            },
+            {
+              "wall_ms": 17.659229997661896,
+              "user_ms": 9.093,
+              "system_ms": 8.081999999999999
+            }
+          ],
+          "median_wall_ms": 19.12642299430445,
+          "min_wall_ms": 17.629344001761638,
+          "max_wall_ms": 32.56353898905218
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/2/ld.lld-22",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/0/2",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "codegen.o",
+            "hashmap.o",
+            "main.o",
+            "parse.o",
+            "preprocess.o",
+            "strings.o",
+            "tokenize.o",
+            "type.o",
+            "unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9658cc0e3bece7f9185c71b82c05976b854935ccb2d1f9627baf591e9843438d",
+          "output_bytes": 301864,
+          "peak_rss_kib": 70448,
+          "samples": [
+            {
+              "wall_ms": 20.747617003507912,
+              "user_ms": 10.697,
+              "system_ms": 15.450999999999999
+            },
+            {
+              "wall_ms": 24.853701004758477,
+              "user_ms": 14.456999999999999,
+              "system_ms": 15.660999999999998
+            },
+            {
+              "wall_ms": 23.05939899815712,
+              "user_ms": 10.164,
+              "system_ms": 17.787
+            },
+            {
+              "wall_ms": 29.222323995782062,
+              "user_ms": 16.581,
+              "system_ms": 18.654
+            },
+            {
+              "wall_ms": 20.328211001469754,
+              "user_ms": 12.423,
+              "system_ms": 12.423
+            },
+            {
+              "wall_ms": 23.36843499506358,
+              "user_ms": 13.360999999999999,
+              "system_ms": 14.388
+            },
+            {
+              "wall_ms": 21.72673199675046,
+              "user_ms": 6.529999999999999,
+              "system_ms": 20.406
+            },
+            {
+              "wall_ms": 20.761351988767274,
+              "user_ms": 15.697,
+              "system_ms": 10.866999999999999
+            },
+            {
+              "wall_ms": 20.74202500807587,
+              "user_ms": 6.853,
+              "system_ms": 18.602
+            },
+            {
+              "wall_ms": 30.8900160016492,
+              "user_ms": 15.928999999999998,
+              "system_ms": 19.910999999999998
+            },
+            {
+              "wall_ms": 29.463099999702536,
+              "user_ms": 13.758,
+              "system_ms": 22.012999999999998
+            },
+            {
+              "wall_ms": 28.23174600780476,
+              "user_ms": 8.421,
+              "system_ms": 25.265
+            },
+            {
+              "wall_ms": 19.852148005156778,
+              "user_ms": 11.15,
+              "system_ms": 13.722999999999999
+            },
+            {
+              "wall_ms": 20.783022991963662,
+              "user_ms": 9.344999999999999,
+              "system_ms": 16.354
+            },
+            {
+              "wall_ms": 26.91476901236456,
+              "user_ms": 14.985999999999999,
+              "system_ms": 17.291
+            },
+            {
+              "wall_ms": 25.011831006850116,
+              "user_ms": 6.866,
+              "system_ms": 23.651
+            },
+            {
+              "wall_ms": 22.148752002976835,
+              "user_ms": 11.363999999999999,
+              "system_ms": 16.53
+            },
+            {
+              "wall_ms": 28.436643988243304,
+              "user_ms": 10.848999999999998,
+              "system_ms": 22.903999999999996
+            },
+            {
+              "wall_ms": 21.63257398933638,
+              "user_ms": 15.344999999999999,
+              "system_ms": 11.509
+            },
+            {
+              "wall_ms": 19.89244499418419,
+              "user_ms": 10.343,
+              "system_ms": 14.481
+            },
+            {
+              "wall_ms": 19.10413001314737,
+              "user_ms": 13.496999999999998,
+              "system_ms": 9.898
+            }
+          ],
+          "median_wall_ms": 22.148752002976835,
+          "min_wall_ms": 19.10413001314737,
+          "max_wall_ms": 30.8900160016492
+        }
+      }
+    },
+    {
+      "name": "chibicc-stage2-copy",
+      "cwd": "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/codegen.o": "0517c476b26bee776f1f65aca4883d2a29afd0f6e5a6dd271ae8ca8d8b48dd92",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/hashmap.o": "2d9a7c89f6d30bb851d3f7038912a1e395a96687ab9b5a9212b8435095cabe93",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/main.o": "b50a8fe72b80b0b90c3172357f3c72b2a4156e154385080d55ec8aa9f8f9d083",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/parse.o": "180dc7bfd98606f1c3fdc7d4ee4834a04ec5b086f0c072c4207f9e46953b749e",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/preprocess.o": "5d51e15e21f883dd8ae3b8bd1c45bee1ebbc794397b6875753e25f65040475ed",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/strings.o": "12381f09028cfb5263b5bb0382ee84282855d4cf282da8bf044da25a25139af5",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/tokenize.o": "cd53292cc361db0ada1d21f49f99c902a95bec89981c94fed0e7515d6f823d08",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/type.o": "7ebe166d0234a76b5bba143d01a3e0a171ad40ef551aa9039528d3d50e514590",
+        "/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/source/stage2/unicode.o": "27ed0533d31884cd7c2a0722b99e5229edcc322ac28f29626628f6d55b6eb627",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "fas-ld": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/1/0",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68",
+          "output_bytes": 424496,
+          "peak_rss_kib": 27416,
+          "samples": [
+            {
+              "wall_ms": 47.97434600186534,
+              "user_ms": 29.851,
+              "system_ms": 17.91
+            },
+            {
+              "wall_ms": 42.60042701207567,
+              "user_ms": 26.24,
+              "system_ms": 16.147
+            },
+            {
+              "wall_ms": 53.5693230049219,
+              "user_ms": 30.182999999999996,
+              "system_ms": 23.139999999999997
+            },
+            {
+              "wall_ms": 44.656085010501556,
+              "user_ms": 28.115,
+              "system_ms": 16.064999999999998
+            },
+            {
+              "wall_ms": 46.76459199981764,
+              "user_ms": 25.637,
+              "system_ms": 20.707
+            },
+            {
+              "wall_ms": 45.78566500276793,
+              "user_ms": 27.104999999999997,
+              "system_ms": 18.07
+            },
+            {
+              "wall_ms": 47.45556099805981,
+              "user_ms": 26.074,
+              "system_ms": 21.06
+            },
+            {
+              "wall_ms": 44.86323600576725,
+              "user_ms": 25.801,
+              "system_ms": 18.854
+            },
+            {
+              "wall_ms": 54.30215199885424,
+              "user_ms": 30.882,
+              "system_ms": 22.912
+            },
+            {
+              "wall_ms": 42.130375004489906,
+              "user_ms": 26.424,
+              "system_ms": 15.243999999999998
+            },
+            {
+              "wall_ms": 57.67683999147266,
+              "user_ms": 34.245,
+              "system_ms": 23.165
+            },
+            {
+              "wall_ms": 44.27028200007044,
+              "user_ms": 27.016,
+              "system_ms": 17.01
+            },
+            {
+              "wall_ms": 54.49073998897802,
+              "user_ms": 32.039,
+              "system_ms": 22.026999999999997
+            },
+            {
+              "wall_ms": 44.25475299649406,
+              "user_ms": 23.869999999999997,
+              "system_ms": 19.892
+            },
+            {
+              "wall_ms": 43.87326000141911,
+              "user_ms": 24.195999999999998,
+              "system_ms": 19.154999999999998
+            },
+            {
+              "wall_ms": 54.1348749975441,
+              "user_ms": 31.805,
+              "system_ms": 21.866
+            },
+            {
+              "wall_ms": 44.5275490055792,
+              "user_ms": 26.173,
+              "system_ms": 18.12
+            },
+            {
+              "wall_ms": 47.855869997874834,
+              "user_ms": 28.182,
+              "system_ms": 19.122999999999998
+            },
+            {
+              "wall_ms": 41.65577499952633,
+              "user_ms": 23.105,
+              "system_ms": 18.082
+            },
+            {
+              "wall_ms": 44.29871500178706,
+              "user_ms": 24.997,
+              "system_ms": 18.997
+            },
+            {
+              "wall_ms": 45.09786098788027,
+              "user_ms": 27.924999999999997,
+              "system_ms": 16.954
+            }
+          ],
+          "median_wall_ms": 45.09786098788027,
+          "min_wall_ms": 41.65577499952633,
+          "max_wall_ms": 57.67683999147266
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/1/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/1/1",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9be5c1d0bba4f0ccdad00a918d71f8ee5b1ffabf59cb35f48458dac781b2ee48",
+          "output_bytes": 417080,
+          "peak_rss_kib": 10316,
+          "samples": [
+            {
+              "wall_ms": 16.987877010251395,
+              "user_ms": 11.838,
+              "system_ms": 4.9159999999999995
+            },
+            {
+              "wall_ms": 25.013203005073592,
+              "user_ms": 15.851999999999999,
+              "system_ms": 8.916
+            },
+            {
+              "wall_ms": 20.70803099195473,
+              "user_ms": 12.121,
+              "system_ms": 8.081
+            },
+            {
+              "wall_ms": 29.513966001104563,
+              "user_ms": 16.04,
+              "system_ms": 13.032
+            },
+            {
+              "wall_ms": 25.14190699730534,
+              "user_ms": 13.040999999999999,
+              "system_ms": 11.653
+            },
+            {
+              "wall_ms": 18.080699010170065,
+              "user_ms": 10.517,
+              "system_ms": 7.249
+            },
+            {
+              "wall_ms": 18.731572999968193,
+              "user_ms": 7.093999999999999,
+              "system_ms": 11.148
+            },
+            {
+              "wall_ms": 18.819129007169977,
+              "user_ms": 10.075,
+              "system_ms": 8.137
+            },
+            {
+              "wall_ms": 17.786762007744983,
+              "user_ms": 10.133,
+              "system_ms": 7.092999999999999
+            },
+            {
+              "wall_ms": 18.14315700903535,
+              "user_ms": 8.288,
+              "system_ms": 9.368999999999998
+            },
+            {
+              "wall_ms": 40.78330199990887,
+              "user_ms": 24.782,
+              "system_ms": 15.78
+            },
+            {
+              "wall_ms": 27.431677997810766,
+              "user_ms": 14.124999999999998,
+              "system_ms": 13.027
+            },
+            {
+              "wall_ms": 17.360092999297194,
+              "user_ms": 10.954,
+              "system_ms": 5.974
+            },
+            {
+              "wall_ms": 19.00302799185738,
+              "user_ms": 10.072,
+              "system_ms": 8.485999999999999
+            },
+            {
+              "wall_ms": 28.453956998419017,
+              "user_ms": 15.369,
+              "system_ms": 12.615999999999998
+            },
+            {
+              "wall_ms": 18.662682006834075,
+              "user_ms": 13.065,
+              "system_ms": 4.0200000000000005
+            },
+            {
+              "wall_ms": 18.843825993826613,
+              "user_ms": 13.091000000000001,
+              "system_ms": 5.528
+            },
+            {
+              "wall_ms": 17.631758004426956,
+              "user_ms": 10.026,
+              "system_ms": 7.018
+            },
+            {
+              "wall_ms": 17.58390699978918,
+              "user_ms": 7.044,
+              "system_ms": 10.062999999999999
+            },
+            {
+              "wall_ms": 23.037487000692636,
+              "user_ms": 14.714,
+              "system_ms": 7.8469999999999995
+            },
+            {
+              "wall_ms": 27.97076899150852,
+              "user_ms": 15.85,
+              "system_ms": 11.863999999999999
+            }
+          ],
+          "median_wall_ms": 18.843825993826613,
+          "min_wall_ms": 16.987877010251395,
+          "max_wall_ms": 40.78330199990887
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/2/ld.lld-22",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/1/2",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "-L/tmp/fas-chibicc-selfhost-final-20261105/chibicc-selfhost/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "stage2/codegen.o",
+            "stage2/hashmap.o",
+            "stage2/main.o",
+            "stage2/parse.o",
+            "stage2/preprocess.o",
+            "stage2/strings.o",
+            "stage2/tokenize.o",
+            "stage2/type.o",
+            "stage2/unicode.o",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "72a2853ca1725ca03cf5e57393808df69a80d98d534c6e4f963b611c7aad6f28",
+          "output_bytes": 408936,
+          "peak_rss_kib": 70672,
+          "samples": [
+            {
+              "wall_ms": 20.94837700133212,
+              "user_ms": 6.358,
+              "system_ms": 19.076
+            },
+            {
+              "wall_ms": 21.335078999982215,
+              "user_ms": 14.416,
+              "system_ms": 10.812
+            },
+            {
+              "wall_ms": 18.528689004597254,
+              "user_ms": 9.318999999999999,
+              "system_ms": 12.813999999999998
+            },
+            {
+              "wall_ms": 29.620037006679922,
+              "user_ms": 12.764,
+              "system_ms": 20.968999999999998
+            },
+            {
+              "wall_ms": 19.784468997386284,
+              "user_ms": 10.064,
+              "system_ms": 13.418999999999999
+            },
+            {
+              "wall_ms": 20.376772998133674,
+              "user_ms": 13.805,
+              "system_ms": 10.353
+            },
+            {
+              "wall_ms": 21.446569997351617,
+              "user_ms": 13.935999999999998,
+              "system_ms": 12.194
+            },
+            {
+              "wall_ms": 18.035974993836135,
+              "user_ms": 5.754,
+              "system_ms": 15.826
+            },
+            {
+              "wall_ms": 19.99581001291517,
+              "user_ms": 3.36,
+              "system_ms": 21.006
+            },
+            {
+              "wall_ms": 20.381402006023563,
+              "user_ms": 11.550999999999998,
+              "system_ms": 13.476
+            },
+            {
+              "wall_ms": 19.235319006838836,
+              "user_ms": 7.7749999999999995,
+              "system_ms": 15.549999999999999
+            },
+            {
+              "wall_ms": 21.355998993385583,
+              "user_ms": 8.975999999999999,
+              "system_ms": 16.83
+            },
+            {
+              "wall_ms": 22.17949999612756,
+              "user_ms": 14.392999999999999,
+              "system_ms": 12.178999999999998
+            },
+            {
+              "wall_ms": 21.453553999890573,
+              "user_ms": 8.616,
+              "system_ms": 16.154999999999998
+            },
+            {
+              "wall_ms": 28.972579006222077,
+              "user_ms": 15.716000000000001,
+              "system_ms": 17.811999999999998
+            },
+            {
+              "wall_ms": 32.438861002447084,
+              "user_ms": 10.31,
+              "system_ms": 25.377999999999997
+            },
+            {
+              "wall_ms": 18.875776004279032,
+              "user_ms": 9.361999999999998,
+              "system_ms": 12.482
+            },
+            {
+              "wall_ms": 29.313946011825465,
+              "user_ms": 15.087,
+              "system_ms": 19.111
+            },
+            {
+              "wall_ms": 20.669667996116914,
+              "user_ms": 7.414,
+              "system_ms": 18.005999999999997
+            },
+            {
+              "wall_ms": 19.356638003955595,
+              "user_ms": 7.930999999999999,
+              "system_ms": 14.729
+            },
+            {
+              "wall_ms": 19.178490998456255,
+              "user_ms": 14.317,
+              "system_ms": 8.350999999999999
+            }
+          ],
+          "median_wall_ms": 20.669667996116914,
+          "min_wall_ms": 18.035974993836135,
+          "max_wall_ms": 32.438861002447084
+        }
+      }
+    },
+    {
+      "name": "chibicc-static-glibc",
+      "cwd": "/",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o": "c4d6bba12db08f2a48c6f411dea6fc14b51019d71e8a4677e437f9c2f392728a",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o": "fa5e506141cd1cf758937816953daff8f3276c40a214141c7a1db5a9bea2f0b8",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o": "f38d05736e9f96c3a3446ab6533ce2c726fb6e63b3b03c70c2da366046f9dee4",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o": "c0898cce6983af90ff2ec62a991858efccc65f9ccaea04dfc9b749c7c1777124",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o": "3e6a8aca6e6e93c23f0a5bed01988b124fdfa9bd7e51ffee391a23ec0aa7e95d",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o": "d822758ab9053c9b1be034ea126eaa34e03c2656a494a30980edb00881ee1bf0",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o": "c6611d35eabd82ad3b1b65407b397f4b98290e51511221f590c6bb31f574f117",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o": "fa58580c8e7d011d89bbfdfe4fac92ccc4101ac3672bb0ea40687eccb3c97468",
+        "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o": "59ee6109f64a7a9fd48f8272c3c65a43b93691a8809aa3e62d95162755f58a3a",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140",
+        "/usr/lib/x86_64-linux-gnu/libc.a": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "args": [
+          "--help"
+        ],
+        "exit": 0
+      },
+      "results": {
+        "fas-ld": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/2/0",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e",
+          "output_bytes": 2083320,
+          "peak_rss_kib": 39548,
+          "samples": [
+            {
+              "wall_ms": 110.82092300057411,
+              "user_ms": 82.402,
+              "system_ms": 28.137
+            },
+            {
+              "wall_ms": 95.0779070117278,
+              "user_ms": 67.856,
+              "system_ms": 26.941999999999997
+            },
+            {
+              "wall_ms": 116.22240200813394,
+              "user_ms": 84.948,
+              "system_ms": 30.980999999999998
+            },
+            {
+              "wall_ms": 97.40630899614189,
+              "user_ms": 75.934,
+              "system_ms": 20.980999999999998
+            },
+            {
+              "wall_ms": 100.18787300214171,
+              "user_ms": 71.943,
+              "system_ms": 27.976999999999997
+            },
+            {
+              "wall_ms": 104.10068200144451,
+              "user_ms": 74.81599999999999,
+              "system_ms": 28.927999999999997
+            },
+            {
+              "wall_ms": 123.5283120040549,
+              "user_ms": 90.015,
+              "system_ms": 33.005
+            },
+            {
+              "wall_ms": 95.04078300960828,
+              "user_ms": 65.72200000000001,
+              "system_ms": 28.877
+            },
+            {
+              "wall_ms": 104.64957999647595,
+              "user_ms": 80.51599999999999,
+              "system_ms": 23.855999999999998
+            },
+            {
+              "wall_ms": 112.07793299399782,
+              "user_ms": 85.463,
+              "system_ms": 26.141
+            },
+            {
+              "wall_ms": 105.18152799340896,
+              "user_ms": 80.661,
+              "system_ms": 24.197999999999997
+            },
+            {
+              "wall_ms": 98.08188800525386,
+              "user_ms": 69.88799999999999,
+              "system_ms": 27.955
+            },
+            {
+              "wall_ms": 102.08104900084436,
+              "user_ms": 75.474,
+              "system_ms": 26.164
+            },
+            {
+              "wall_ms": 97.84690199012402,
+              "user_ms": 70.397,
+              "system_ms": 27.153
+            },
+            {
+              "wall_ms": 115.88790500536561,
+              "user_ms": 85.712,
+              "system_ms": 29.898999999999997
+            },
+            {
+              "wall_ms": 95.53747301106341,
+              "user_ms": 70.066,
+              "system_ms": 25.023
+            },
+            {
+              "wall_ms": 101.31639901374001,
+              "user_ms": 72.98299999999999,
+              "system_ms": 27.993
+            },
+            {
+              "wall_ms": 114.65639898960944,
+              "user_ms": 84.273,
+              "system_ms": 30.096999999999998
+            },
+            {
+              "wall_ms": 113.51905199990142,
+              "user_ms": 77.009,
+              "system_ms": 36.004
+            },
+            {
+              "wall_ms": 94.80413200799376,
+              "user_ms": 70.377,
+              "system_ms": 24.128999999999998
+            },
+            {
+              "wall_ms": 98.1648829911137,
+              "user_ms": 75.92699999999999,
+              "system_ms": 21.977999999999998
+            }
+          ],
+          "median_wall_ms": 102.08104900084436,
+          "min_wall_ms": 94.80413200799376,
+          "max_wall_ms": 123.5283120040549
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/1/ld",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/2/1",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "afe473e49e5eeb919ee55c8b154b8e572b70a1cc84d2ab5c9abb84b2ec957be6",
+          "output_bytes": 1814864,
+          "peak_rss_kib": 47396,
+          "samples": [
+            {
+              "wall_ms": 89.50575201015454,
+              "user_ms": 45.958,
+              "system_ms": 42.961
+            },
+            {
+              "wall_ms": 96.33022100024391,
+              "user_ms": 42.026,
+              "system_ms": 54.033
+            },
+            {
+              "wall_ms": 85.76148199790623,
+              "user_ms": 44.205999999999996,
+              "system_ms": 41.192
+            },
+            {
+              "wall_ms": 80.04895200429019,
+              "user_ms": 37.81699999999999,
+              "system_ms": 41.797999999999995
+            },
+            {
+              "wall_ms": 84.54145000723656,
+              "user_ms": 40.025,
+              "system_ms": 44.028
+            },
+            {
+              "wall_ms": 92.99461499904282,
+              "user_ms": 40.796,
+              "system_ms": 51.74099999999999
+            },
+            {
+              "wall_ms": 95.95047800394241,
+              "user_ms": 48.762,
+              "system_ms": 46.771
+            },
+            {
+              "wall_ms": 85.64955899782944,
+              "user_ms": 34.153999999999996,
+              "system_ms": 51.231
+            },
+            {
+              "wall_ms": 87.38706300209742,
+              "user_ms": 34.099,
+              "system_ms": 52.858999999999995
+            },
+            {
+              "wall_ms": 91.5108820045134,
+              "user_ms": 46.022,
+              "system_ms": 45.021
+            },
+            {
+              "wall_ms": 91.2385749979876,
+              "user_ms": 44.369,
+              "system_ms": 46.385999999999996
+            },
+            {
+              "wall_ms": 81.44879399333149,
+              "user_ms": 38.303999999999995,
+              "system_ms": 42.949999999999996
+            },
+            {
+              "wall_ms": 93.99092200328596,
+              "user_ms": 39.22,
+              "system_ms": 54.303999999999995
+            },
+            {
+              "wall_ms": 81.60874700115528,
+              "user_ms": 37.135,
+              "system_ms": 44.16
+            },
+            {
+              "wall_ms": 91.17733799212147,
+              "user_ms": 40.864,
+              "system_ms": 49.833999999999996
+            },
+            {
+              "wall_ms": 89.58650099521037,
+              "user_ms": 46.561,
+              "system_ms": 42.599
+            },
+            {
+              "wall_ms": 93.36161700775847,
+              "user_ms": 39.025,
+              "system_ms": 54.035
+            },
+            {
+              "wall_ms": 91.5929850016255,
+              "user_ms": 34.245999999999995,
+              "system_ms": 57.031
+            },
+            {
+              "wall_ms": 90.2911870070966,
+              "user_ms": 43.919,
+              "system_ms": 45.916
+            },
+            {
+              "wall_ms": 82.59467499738093,
+              "user_ms": 31.028,
+              "system_ms": 51.046
+            },
+            {
+              "wall_ms": 85.09394200518727,
+              "user_ms": 41.836999999999996,
+              "system_ms": 42.833
+            }
+          ],
+          "median_wall_ms": 89.58650099521037,
+          "min_wall_ms": 80.04895200429019,
+          "max_wall_ms": 96.33022100024391
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/2/ld.lld-22",
+            "-static",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/2/2",
+            "/usr/lib/x86_64-linux-gnu/crt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/codegen.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/hashmap.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/main.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/parse.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/preprocess.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/strings.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/tokenize.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/type.o",
+            "/tmp/fas-corpus-static-glibc-final-20261105/chibicc/unicode.o",
+            "--start-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "2346924fb457a058c6a6ea20619e682a77dedfeb260471acec71c80abfcb534b",
+          "output_bytes": 1815480,
+          "peak_rss_kib": 77448,
+          "samples": [
+            {
+              "wall_ms": 41.28912898886483,
+              "user_ms": 33.062999999999995,
+              "system_ms": 54.458
+            },
+            {
+              "wall_ms": 41.876482995576225,
+              "user_ms": 40.132999999999996,
+              "system_ms": 46.47
+            },
+            {
+              "wall_ms": 32.908599998336285,
+              "user_ms": 29.955,
+              "system_ms": 46.730999999999995
+            },
+            {
+              "wall_ms": 42.63501999957953,
+              "user_ms": 38.337999999999994,
+              "system_ms": 59.14999999999999
+            },
+            {
+              "wall_ms": 42.98978300357703,
+              "user_ms": 36.094,
+              "system_ms": 60.909
+            },
+            {
+              "wall_ms": 47.682318996521644,
+              "user_ms": 43.115,
+              "system_ms": 51.528
+            },
+            {
+              "wall_ms": 40.571557998191565,
+              "user_ms": 36.947,
+              "system_ms": 47.673
+            },
+            {
+              "wall_ms": 40.57712899520993,
+              "user_ms": 27.198999999999998,
+              "system_ms": 67.998
+            },
+            {
+              "wall_ms": 37.877459995797835,
+              "user_ms": 25.563,
+              "system_ms": 51.126
+            },
+            {
+              "wall_ms": 39.73087300255429,
+              "user_ms": 43.405,
+              "system_ms": 45.689
+            },
+            {
+              "wall_ms": 36.71212100016419,
+              "user_ms": 39.105000000000004,
+              "system_ms": 41.54899999999999
+            },
+            {
+              "wall_ms": 49.73844600317534,
+              "user_ms": 31.49,
+              "system_ms": 62.98
+            },
+            {
+              "wall_ms": 33.03579099883791,
+              "user_ms": 32.876,
+              "system_ms": 40.812
+            },
+            {
+              "wall_ms": 32.83471900795121,
+              "user_ms": 27.241999999999997,
+              "system_ms": 50.126
+            },
+            {
+              "wall_ms": 36.630646005505696,
+              "user_ms": 27.382,
+              "system_ms": 50.003
+            },
+            {
+              "wall_ms": 43.42625899880659,
+              "user_ms": 30.570999999999998,
+              "system_ms": 53.5
+            },
+            {
+              "wall_ms": 42.963371000951156,
+              "user_ms": 30.632999999999996,
+              "system_ms": 51.841
+            },
+            {
+              "wall_ms": 34.27497000666335,
+              "user_ms": 35.556999999999995,
+              "system_ms": 42.439
+            },
+            {
+              "wall_ms": 43.07214799337089,
+              "user_ms": 41.547999999999995,
+              "system_ms": 46.875
+            },
+            {
+              "wall_ms": 33.076887993956916,
+              "user_ms": 25.348,
+              "system_ms": 47.074999999999996
+            },
+            {
+              "wall_ms": 48.803241996211,
+              "user_ms": 32.532,
+              "system_ms": 59.981
+            }
+          ],
+          "median_wall_ms": 40.57712899520993,
+          "min_wall_ms": 32.83471900795121,
+          "max_wall_ms": 49.73844600317534
+        }
+      }
+    },
+    {
+      "name": "cjson-static-pie",
+      "cwd": "/",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/rcrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o": "14e221321a4779a8173b276b187c091faa6a311756a60b7cdab9a607de21e815",
+        "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o": "cd2fad2826bc69ef4dbd03ea3ebcbda379bb4d0c8f8412144a38cfd3c3a59565",
+        "/usr/lib/x86_64-linux-gnu/libm.a": "a3e037975e7fb816d8a1d69f4a8aec71071700539aa2eb8743b805a905179e7a",
+        "/usr/lib/x86_64-linux-gnu/libmvec.a": "85ac05390efeaf0bdf59b1ce61e70d09c8e8c716e30b722127a7a7c8d145c757",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140",
+        "/usr/lib/x86_64-linux-gnu/libc.a": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2",
+        "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "exit": 0,
+        "cwd": "/tmp/fas-corpus-static-pie-20261105/cjson/source/tests"
+      },
+      "results": {
+        "fas-ld": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/3/0",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3",
+          "output_bytes": 1294352,
+          "peak_rss_kib": 40020,
+          "samples": [
+            {
+              "wall_ms": 89.78329200181179,
+              "user_ms": 57.681999999999995,
+              "system_ms": 31.823999999999998
+            },
+            {
+              "wall_ms": 92.34579899930395,
+              "user_ms": 63.032999999999994,
+              "system_ms": 29.015
+            },
+            {
+              "wall_ms": 86.74969999992754,
+              "user_ms": 54.211,
+              "system_ms": 32.125
+            },
+            {
+              "wall_ms": 93.93340899259783,
+              "user_ms": 64.319,
+              "system_ms": 29.144
+            },
+            {
+              "wall_ms": 94.13159399991855,
+              "user_ms": 67.892,
+              "system_ms": 25.958
+            },
+            {
+              "wall_ms": 84.41733800282236,
+              "user_ms": 46.029,
+              "system_ms": 38.023999999999994
+            },
+            {
+              "wall_ms": 98.0936949927127,
+              "user_ms": 64.437,
+              "system_ms": 33.224999999999994
+            },
+            {
+              "wall_ms": 94.41509201133158,
+              "user_ms": 61.432,
+              "system_ms": 32.698
+            },
+            {
+              "wall_ms": 90.34092600631993,
+              "user_ms": 58.994,
+              "system_ms": 30.997
+            },
+            {
+              "wall_ms": 95.31730099115521,
+              "user_ms": 63.943,
+              "system_ms": 30.972
+            },
+            {
+              "wall_ms": 107.19352500746027,
+              "user_ms": 70.94,
+              "system_ms": 35.969
+            },
+            {
+              "wall_ms": 92.20445000391919,
+              "user_ms": 56.965999999999994,
+              "system_ms": 34.979
+            },
+            {
+              "wall_ms": 89.41692399093881,
+              "user_ms": 60.958,
+              "system_ms": 27.979999999999997
+            },
+            {
+              "wall_ms": 83.12909399683122,
+              "user_ms": 53.903,
+              "system_ms": 28.947999999999997
+            },
+            {
+              "wall_ms": 89.22991900180932,
+              "user_ms": 63.943,
+              "system_ms": 24.977
+            },
+            {
+              "wall_ms": 81.8340890109539,
+              "user_ms": 62.245,
+              "system_ms": 19.075
+            },
+            {
+              "wall_ms": 83.4482280042721,
+              "user_ms": 57.943999999999996,
+              "system_ms": 24.976
+            },
+            {
+              "wall_ms": 80.74773900443688,
+              "user_ms": 51.059999999999995,
+              "system_ms": 29.034
+            },
+            {
+              "wall_ms": 80.54836098745,
+              "user_ms": 49.035,
+              "system_ms": 31.022
+            },
+            {
+              "wall_ms": 89.20668400241993,
+              "user_ms": 62.977999999999994,
+              "system_ms": 25.991
+            },
+            {
+              "wall_ms": 84.25521699246019,
+              "user_ms": 61.991,
+              "system_ms": 21.997
+            }
+          ],
+          "median_wall_ms": 89.41692399093881,
+          "min_wall_ms": 80.54836098745,
+          "max_wall_ms": 107.19352500746027
+        },
+        "GNU": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/1/ld",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/3/1",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "9322defb103322cfc325797c2c1fee9fe1daf3eb24037f874d97fe50fd9919f5",
+          "output_bytes": 1144432,
+          "peak_rss_kib": 33932,
+          "samples": [
+            {
+              "wall_ms": 51.4995830017142,
+              "user_ms": 20.072,
+              "system_ms": 30.976
+            },
+            {
+              "wall_ms": 57.83631600206718,
+              "user_ms": 27.944999999999997,
+              "system_ms": 29.606
+            },
+            {
+              "wall_ms": 64.30499999260064,
+              "user_ms": 21.926,
+              "system_ms": 41.859
+            },
+            {
+              "wall_ms": 72.33302800159436,
+              "user_ms": 24.034999999999997,
+              "system_ms": 47.978
+            },
+            {
+              "wall_ms": 57.96365700371098,
+              "user_ms": 26.336,
+              "system_ms": 31.281999999999996
+            },
+            {
+              "wall_ms": 65.08239299000707,
+              "user_ms": 27.854999999999997,
+              "system_ms": 36.808
+            },
+            {
+              "wall_ms": 65.29380299616605,
+              "user_ms": 25.002999999999997,
+              "system_ms": 40.004
+            },
+            {
+              "wall_ms": 55.64309799228795,
+              "user_ms": 21.73,
+              "system_ms": 33.583
+            },
+            {
+              "wall_ms": 61.0868769872468,
+              "user_ms": 23.252,
+              "system_ms": 37.406
+            },
+            {
+              "wall_ms": 51.80709500564262,
+              "user_ms": 22.703999999999997,
+              "system_ms": 28.627
+            },
+            {
+              "wall_ms": 57.157768998877145,
+              "user_ms": 32.358,
+              "system_ms": 24.267999999999997
+            },
+            {
+              "wall_ms": 62.071553998976015,
+              "user_ms": 22.858,
+              "system_ms": 38.75899999999999
+            },
+            {
+              "wall_ms": 50.56488899572287,
+              "user_ms": 20.034,
+              "system_ms": 30.052
+            },
+            {
+              "wall_ms": 56.13746399467345,
+              "user_ms": 22.845999999999997,
+              "system_ms": 31.786
+            },
+            {
+              "wall_ms": 51.15085998841096,
+              "user_ms": 20.865,
+              "system_ms": 29.807
+            },
+            {
+              "wall_ms": 51.088250998873264,
+              "user_ms": 23.259999999999998,
+              "system_ms": 27.305
+            },
+            {
+              "wall_ms": 55.08310499135405,
+              "user_ms": 26.898,
+              "system_ms": 27.894
+            },
+            {
+              "wall_ms": 52.58602100366261,
+              "user_ms": 20.01,
+              "system_ms": 32.016
+            },
+            {
+              "wall_ms": 52.02816300152335,
+              "user_ms": 25.243,
+              "system_ms": 26.253
+            },
+            {
+              "wall_ms": 59.44790900684893,
+              "user_ms": 28.038999999999998,
+              "system_ms": 31.043
+            },
+            {
+              "wall_ms": 50.87047799315769,
+              "user_ms": 26.157999999999998,
+              "system_ms": 24.145999999999997
+            }
+          ],
+          "median_wall_ms": 56.13746399467345,
+          "min_wall_ms": 50.56488899572287,
+          "max_wall_ms": 72.33302800159436
+        },
+        "LLD": {
+          "command": [
+            "/tmp/fas-real-link-baseline-20261105/tools/2/ld.lld-22",
+            "-static",
+            "-pie",
+            "--no-dynamic-linker",
+            "-z",
+            "text",
+            "--eh-frame-hdr",
+            "--gc-sections",
+            "-o",
+            "/tmp/fas-real-link-baseline-20261105/3/2",
+            "/usr/lib/x86_64-linux-gnu/rcrt1.o",
+            "/usr/lib/x86_64-linux-gnu/crti.o",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/parse_examples.o",
+            "/tmp/fas-corpus-static-pie-20261105/cjson/unity.o",
+            "--start-group",
+            "/usr/lib/x86_64-linux-gnu/libm.a",
+            "/usr/lib/x86_64-linux-gnu/libmvec.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a",
+            "/usr/lib/x86_64-linux-gnu/libc.a",
+            "--end-group",
+            "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+            "/usr/lib/x86_64-linux-gnu/crtn.o"
+          ],
+          "output_sha256": "a23c2dddd20aec1634111bcd056bca4f8c7915c5ca8bc74fd2489efb87e39055",
+          "output_bytes": 1143168,
+          "peak_rss_kib": 82492,
+          "samples": [
+            {
+              "wall_ms": 32.193892999202944,
+              "user_ms": 28.1,
+              "system_ms": 31.765999999999995
+            },
+            {
+              "wall_ms": 44.60567400383297,
+              "user_ms": 33.094,
+              "system_ms": 41.67399999999999
+            },
+            {
+              "wall_ms": 43.68064999289345,
+              "user_ms": 32.272999999999996,
+              "system_ms": 38.479
+            },
+            {
+              "wall_ms": 33.464841995737515,
+              "user_ms": 30.945999999999998,
+              "system_ms": 33.08
+            },
+            {
+              "wall_ms": 41.005017003044486,
+              "user_ms": 20.172,
+              "system_ms": 49.171
+            },
+            {
+              "wall_ms": 33.45947300840635,
+              "user_ms": 27.368999999999996,
+              "system_ms": 31.747999999999998
+            },
+            {
+              "wall_ms": 41.0995869897306,
+              "user_ms": 30.792,
+              "system_ms": 37.162
+            },
+            {
+              "wall_ms": 41.25103300611954,
+              "user_ms": 28.843999999999998,
+              "system_ms": 42.065
+            },
+            {
+              "wall_ms": 31.860150003922172,
+              "user_ms": 22.211,
+              "system_ms": 41.090999999999994
+            },
+            {
+              "wall_ms": 36.95874600089155,
+              "user_ms": 25.642,
+              "system_ms": 39.888
+            },
+            {
+              "wall_ms": 41.67240101378411,
+              "user_ms": 39.94,
+              "system_ms": 29.955
+            },
+            {
+              "wall_ms": 32.003161002648994,
+              "user_ms": 27.173,
+              "system_ms": 32.349
+            },
+            {
+              "wall_ms": 32.16395499475766,
+              "user_ms": 24.955,
+              "system_ms": 38.568
+            },
+            {
+              "wall_ms": 33.426599999074824,
+              "user_ms": 27.756,
+              "system_ms": 35.229
+            },
+            {
+              "wall_ms": 40.49153300002217,
+              "user_ms": 31.883000000000003,
+              "system_ms": 34.160999999999994
+            },
+            {
+              "wall_ms": 33.20170199731365,
+              "user_ms": 26.444,
+              "system_ms": 35.257999999999996
+            },
+            {
+              "wall_ms": 41.35119299462531,
+              "user_ms": 28.766999999999996,
+              "system_ms": 41.42399999999999
+            },
+            {
+              "wall_ms": 34.50709700700827,
+              "user_ms": 26.723,
+              "system_ms": 41.994
+            },
+            {
+              "wall_ms": 33.01356500014663,
+              "user_ms": 27.118,
+              "system_ms": 37.729
+            },
+            {
+              "wall_ms": 33.34530399297364,
+              "user_ms": 29.514,
+              "system_ms": 32.677
+            },
+            {
+              "wall_ms": 31.562725009280257,
+              "user_ms": 19.256,
+              "system_ms": 39.525999999999996
+            }
+          ],
+          "median_wall_ms": 33.464841995737515,
+          "min_wall_ms": 31.562725009280257,
+          "max_wall_ms": 44.60567400383297
+        }
+      }
+    }
+  ]
+}

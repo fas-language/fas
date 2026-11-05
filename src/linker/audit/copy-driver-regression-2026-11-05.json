@@ -1,0 +1,115 @@
+{
+  "date": "2026-11-05",
+  "purpose": "Linux x86-64 executable COPY and upstream C-driver compatibility; no production-readiness or speedup claim",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "git_head": "e64e668b7ca4a2f596f01fb1ba81951d6dcfbcb2",
+  "linker_sha256": "50fbe0c2d3dcd0a49638883270f13cfc776f145162a7aa84c98fe222ebc097d5",
+  "implementation_sha256": {
+    "copy_relocation.ml": "bac545c729594778c65d0d16a1a3827ef7ec937c9aa0a41eda3bb909110558c2",
+    "shared_object.ml": "e3388b49f305c00330fcdeaa95dc610616f440718e1c6e3c5e73cef99d073d28",
+    "static_link.ml": "32befdb06518c28680d1d6936cbbb362d5e1acab8f5471c49871bd88d5d593e7",
+    "dynamic.ml": "006950ffa98e18da1d97a3770f91e2b01033bb13fc4997b601e8e962aeee5e82",
+    "command_line.ml": "4eddb81a6dae42016c91764ac18b8483a5a595bb1f87655f1dace819b29bf234",
+    "options.ml": "5ec5f704c1209347ad7af5b220f748f98d69982c0b3be634596b8ae8753234b6",
+    "resolver.ml": "ce12c951b471cc30cf695b63cc8d1e9d371a8ff521bb55d4ea53ca0c39ed963b",
+    "file_io.ml": "639c8c0a3833e9db051f6c20ace8796081e683cfdf4140db3bdc5896fd49382e",
+    "bin/main.ml": "06ef27b6eca32e61e791601228f48e3c984f4b100801f1b62c57677332c64155",
+    "fuzz/target.ml": "95b6ee4bb1ae0e94bf9c18bb753192a4560fc552c40408f33203a156795eac8b",
+    "fuzz/run.py": "fcb75fa9378ad35d43b0a4e16b63edac67a52a8a97046e7b974566d055a42025",
+    "corpus/run.py": "345d7919700ab38bf88cf6254fe7fcda44c386d664749faccdcd5feb8957e098",
+    "corpus/fetch.py": "8d16995e80a123fc536dc523ae72dbbba42930041b5c9deacdb9dc85dec5f9c7",
+    "test/copy_integration.py": "3e8ec074082af10084df4323431154f3a8d87504d3434a1b71d41f4050d34f81",
+    "test/discovery_integration.py": "d533c17085322390ba0da7610ff167d99efd67f4109b579b9c899847c58794e3",
+    "test/publication_integration.py": "d2d4f9c8e6694e3de7684da00d585d38ed7fe0aae621c474af66c3a537d753c3",
+    "test/driver_options_integration.py": "0f9ce33ea36bec9e0f21e0382e5b952f5749d78b53e8fd1aa3ebf2f72db10901",
+    "test/shared_integration.py": "e35cb8a8736035418df11a48d23e9c34054e6b2e66397203ca759a0c38d40e05",
+    "test/dune": "177c5bd4b4836ac124e735c4cf905ec12ecbf87b0c09f410886263a162a7c755"
+  },
+  "workflow_sha256": "2166a9860c9cd168e8608c3aca1994fef212d407ba7e77a73fa4df119fc0e482",
+  "regression": {
+    "python_cases": 228,
+    "python_groups": 40,
+    "compiler_checks": 3782,
+    "musl_sysroot": "/tmp/fas-musl-20261105/sysroot",
+    "skips": 0,
+    "dune_followup_exit": 0,
+    "final_cached_release_confirmation_exit": 0,
+    "note": "Initial full run found one obsolete rejection expectation for direct imported data. It now checks unsupported direct function references; affected suites pass on the follow-up. Unchanged successful Dune actions were cached."
+  },
+  "builds": {
+    "release": "passed",
+    "development": "passed",
+    "ocamlformat": "passed",
+    "python_syntax": "passed",
+    "git_diff_check": "passed",
+    "actionlint": "passed; hosted workflow not run"
+  },
+  "chibicc": {
+    "report": "../corpus/results/2026-11-05/chibicc-selfhost.json",
+    "source_manifest": "/tmp/fas-chibicc-pinned-20261105/source.json",
+    "full_artifacts": "/tmp/fas-chibicc-selfhost-final-20261105",
+    "actual_fas_links": 116,
+    "driver_runs": 2,
+    "driver_checks": 126,
+    "gnu_runtime_comparisons": 82,
+    "source_changes": false,
+    "bootstrap_policy": "GCC PIC; plugin disabled; original Chibicc stage-2 generation policy",
+    "before_copy_report": "../corpus/results/2026-11-05/chibicc-selfhost-before-copy.json"
+  },
+  "fuzz": {
+    "report": "../fuzz/results/2026-11-05/copy-shared.json",
+    "full_artifacts": "/tmp/fas-copy-fuzz-20261105",
+    "seconds_per_target": 180,
+    "targets": {
+      "copy-link": {
+        "execs_done": 115071,
+        "edges_found": 1522,
+        "corpus_count": 296,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "run_time": 180
+      },
+      "shared": {
+        "execs_done": 122342,
+        "edges_found": 742,
+        "corpus_count": 239,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "run_time": 180
+      }
+    },
+    "scope": "COPY/GOT/dynamic planning and DSO parsing, not loader fuzzing; no output execution"
+  },
+  "untimed_profiles": {
+    "directory": "/tmp/fas-copy-profile-preparation-20261105",
+    "scope": "Both Chibicc compiler-stage links; allocation counts and replay argv; incidental raw phase times are not benchmark evidence"
+  },
+  "copy_limits": [
+    "Dynamic executables only; shared output retains PIC import requirement",
+    "OBJECT data in allocatable non-TLS PROGBITS/NOBITS; positive in-section size",
+    "256 MiB combined storage; at most 2 MiB alignment; ordinary image/output caps remain",
+    "Protected/unique and overlapping exports unsupported",
+    "Mixed version spellings of the same copied definition unsupported",
+    "Text relocations and direct narrow/PC-relative imported function addresses remain unsupported"
+  ],
+  "compatibility_notes": [
+    "BFD 2.46 and LLD 22 coalesce a two-version COPY fixture; Fas independently checks distinct expected values. Single-version imports are compared with both.",
+    "Indirect DSO references do not extract regular/thin archive members, matching tested GNU behavior. Explicit callback objects/roots work.",
+    "Canonical /dev/null output validates and discards without opening or replacing device; other special outputs still fail.",
+    "Explicit muldefs keeps first strong definition, including partial links; default remains strict."
+  ],
+  "log_sha256": {
+    "/tmp/fas-copy-full-build-final-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-copy-development-build-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-copy-release-final-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-copy-regression-20261105.log": "eb14f5eb1e301f5c29f357d801467a410d7220b7f17554e9470e8f7a76c179b7",
+    "/tmp/fas-copy-regression-followup-20261105.log": "9e08a6da7eed528b80b7d7ee2f258c4add09ff16d7b3d91765bd0773f8130403",
+    "/tmp/fas-copy-release-confirm-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-copy-actionlint-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-chibicc-selfhost-final-20261105.log": "c025d902c9ceb061b153ed3529f32048561cdddc1608eeb2c3eb8b52245cfa24",
+    "/tmp/fas-copy-fuzz-20261105.log": "fd648311e2ccb7eb285cfa51d3a7df3cedba51ad7f7f57824446dafaeec36c75"
+  },
+  "timing_comparison": false,
+  "compiler_implementation_changes": false,
+  "commits_or_index_changes": false
+}

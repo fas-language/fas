@@ -1,0 +1,1055 @@
+{
+  "started": "2026-11-05T13:43:17+0100",
+  "linker_sha256": "9862155b14cb75526f001bb65785646ffe4a6d5e36037c8dde2390b9886becc4",
+  "linker_source": "/home/glonex/fas-experimental-backend/fas/_build/default/linker/bin/main.exe",
+  "linker_snapshot": "/tmp/fas-corpus-final-static-unwind-20261105/tools/fas-ld",
+  "tests": [
+    {
+      "name": "chibicc/alignof.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "4590ec5d6535364194c30a272741cde81f9471caed958948b868fb73f668ad8d"
+      }
+    },
+    {
+      "name": "chibicc/alloca.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "8b1716b2d072628eabaee58f6aa4f0a7479f521095513c451d13af733d4c6d85"
+      }
+    },
+    {
+      "name": "chibicc/arith.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "f47739b4b51c3c5890cc230adf3277c3dc266fa1560db0526af527163acbd4d7"
+      }
+    },
+    {
+      "name": "chibicc/asm.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "3561042b2ec8898acd96698595164dd5ca2ca93a8cbf00a15a8fec8cde431302"
+      }
+    },
+    {
+      "name": "chibicc/atomic.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "71f46dce8a2ec686497763c8780fdfbddd4e76365827ffbd34d09d27dd0e794f"
+      }
+    },
+    {
+      "name": "chibicc/attribute.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "d1d68c9fe9641cb773e0c422f22a69fe4b69bce3d049fb46f2669c658312a6c0"
+      }
+    },
+    {
+      "name": "chibicc/bitfield.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "2026f8ae6c74fd96b0765a41208a80d759690d62565d9b4997d182963e6d3aa4"
+      }
+    },
+    {
+      "name": "chibicc/builtin.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "8fff1a148626ef314eb7853b36b20ce5dac01648c905df27e83947d8f6388dd7"
+      }
+    },
+    {
+      "name": "chibicc/cast.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a895fd3d7f017467a879f16c4ef00eb79c3f37ccbadf6e32164b54c36c9c5362"
+      }
+    },
+    {
+      "name": "chibicc/commonsym.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "896836f535c4939abc108df7292077589877bb61d898d1b631eade545034fd04"
+      }
+    },
+    {
+      "name": "chibicc/compat.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+      }
+    },
+    {
+      "name": "chibicc/complit.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "90b5afb75044a4b140f224c7d8a019981a6adf53fbb58fe4abd3b30c9d445ad9"
+      }
+    },
+    {
+      "name": "chibicc/const.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "2323bc8147811fb239ad4d7166014d123dfd707c3113becf3c40a425ca3aa0d3"
+      }
+    },
+    {
+      "name": "chibicc/constexpr.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a0f79355f6726e502098e9a0a90810850e113c9a09613390dc3ca3a8f3931335"
+      }
+    },
+    {
+      "name": "chibicc/control.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "992204647f6ee7c42f9a8f64958077a80ed678aae96acf381c354de024e4a1ee"
+      }
+    },
+    {
+      "name": "chibicc/decl.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "b07fc19092dde0ae67a49721357c47b2cdbaa26f3d909430afa56c6aadd532ff"
+      }
+    },
+    {
+      "name": "chibicc/enum.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "afe55b7c73833b59ae1b766a7b9d685c6f6fc99f43422c9e4ec3cee8f28d9433"
+      }
+    },
+    {
+      "name": "chibicc/extern.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "0f36019150a8f620f3accef37af32f8e31c4feedfba2ab42cacb1c74bd48d082"
+      }
+    },
+    {
+      "name": "chibicc/float.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "89cc23c951f692937c1a4a31bf5cff72db472366cc6c41c4ba5e4368f2209b38"
+      }
+    },
+    {
+      "name": "chibicc/function.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "b921ffff0640037a1cfb70056dce8475eeb7d0e08d4f4d5a076cfaab9d14d1ac"
+      }
+    },
+    {
+      "name": "chibicc/generic.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "cc4768e70f5c51ed3cafb385a188d3f0d3164495d229b18fb6148e04b14d56fb"
+      }
+    },
+    {
+      "name": "chibicc/initializer.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a3c9456f7d87d98a4f1761b9d839a277bcdcf3cb0d1949c9191ee98ea3781d54"
+      }
+    },
+    {
+      "name": "chibicc/line.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "76cccdf7b602a5bf1d1375c144e9a01cbbc6b76a119f7373b34daf5c2c6d2d83"
+      }
+    },
+    {
+      "name": "chibicc/literal.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "1e6e7ab4f03ca9b17e6e0dcd39cce3065e39fb8760aa1844008fd55faf2c7938"
+      }
+    },
+    {
+      "name": "chibicc/macro.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "8195ecfea2e577ea2d75f1455b1175e4970a82623cd433508d2865b883781d52"
+      }
+    },
+    {
+      "name": "chibicc/offsetof.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "0b3d2d9a5eb2a40919d7c4387fda0e9ea62a123a93efcda2f457877eab0c003c"
+      }
+    },
+    {
+      "name": "chibicc/pointer.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a22ec9572434912693508435de5327c228292bc65ad32c09f8c9d8d8cc16b528"
+      }
+    },
+    {
+      "name": "chibicc/pragma-once.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+      }
+    },
+    {
+      "name": "chibicc/sizeof.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "54d6b29000e681ec7f6fca3c225c633a137ba29651381c8937be49ce600659bd"
+      }
+    },
+    {
+      "name": "chibicc/stdhdr.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+      }
+    },
+    {
+      "name": "chibicc/string.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "24da57ec989f81a952213a074b2ee45e3cd813e0c648ccb40934f5888664c476"
+      }
+    },
+    {
+      "name": "chibicc/struct.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "e1590b5e57c0a5961b9c87183818ecaf7a23af6fa07629d4b79d8a15534bdc95"
+      }
+    },
+    {
+      "name": "chibicc/tls.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "5c5b3dde0f1a938d79e5cbe4036a03eee6f9a94ad7332d86679d60267cc7bbfe"
+      }
+    },
+    {
+      "name": "chibicc/typedef.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "e8421f8d2ebac2b773f9849304f9a7b441a6bbb15886f1abfe8015fa528a43c1"
+      }
+    },
+    {
+      "name": "chibicc/typeof.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "ad52bd943c871190a066aa0cdf11c3b4862f624342fee19c4a2e76ecc576ac21"
+      }
+    },
+    {
+      "name": "chibicc/unicode.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "02b386e14b7619b6924851856c35ca92bf5aa80d5be53d53b1b35e186a75f559"
+      }
+    },
+    {
+      "name": "chibicc/union.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "4365eba65a24856c3abb43a1c361aea4f1ddb67d7eb7d2eeed846b048f4726d1"
+      }
+    },
+    {
+      "name": "chibicc/usualconv.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "f19cf931bddde5e4688b8650b37cc0405d0ca44b5c2dde1083372084c70f6a0b"
+      }
+    },
+    {
+      "name": "chibicc/varargs.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "072073e9862eb742ef55f306af5bea560134ce679fb0d8f73fab9e0c60b3c29c"
+      }
+    },
+    {
+      "name": "chibicc/variable.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "666cb9f02b032b7dcc0a188d9fdb8a6d28dab47538e54bbf9c0d607ee09dc95b"
+      }
+    },
+    {
+      "name": "chibicc/vla.c",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "c39f3e1cdffe33d67e67fddf10f36c21db68133a613b8a6ce9eab0aa1dab9e7c"
+      }
+    },
+    {
+      "name": "chibicc",
+      "status": "passed",
+      "detail": {
+        "objects": 9,
+        "tests": 41
+      }
+    },
+    {
+      "name": "sieve/primes.fas",
+      "status": "passed",
+      "detail": {
+        "backend": "llvm",
+        "stdout": "fas_extreme-hybrid;37507;5.000073765;1;algorithm=base,faithful=yes,bits=1\n"
+      }
+    },
+    {
+      "name": "sieve/primes_const.fas",
+      "status": "passed",
+      "detail": {
+        "backend": "llvm",
+        "stdout": "fas_extreme-hybrid;39092;5.000059289;1;algorithm=base,faithful=yes,bits=1\n"
+      }
+    },
+    {
+      "name": "sieve/primes_long_chunks.fas",
+      "status": "passed",
+      "detail": {
+        "backend": "llvm",
+        "stdout": "fas_extreme-hybrid;38574;5.000083840;1;algorithm=base,faithful=yes,bits=1\n"
+      }
+    },
+    {
+      "name": "sieve/primes_zero3.fas",
+      "status": "passed",
+      "detail": {
+        "backend": "llvm",
+        "stdout": "fas_extreme-hybrid;32377;5.000069756;1;algorithm=base,faithful=yes,bits=1\n"
+      }
+    },
+    {
+      "name": "sieve",
+      "status": "passed",
+      "detail": {
+        "native_compile_status": 1
+      }
+    },
+    {
+      "name": "cjson/parse_examples",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "9733a5da1d70fd730da75c8377bdfa99f68676f65f1ab7c0866291a3188041f9"
+      }
+    },
+    {
+      "name": "cjson/parse_number",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "40cdae23a14fbd761a30e70cd52a284eeefb5fa739daa2e8bc2caa080e2fb87e"
+      }
+    },
+    {
+      "name": "cjson/parse_hex4",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "e6a5452ea009f1b25d001a79a3d8efd45bbd5fddc85b8dffee94e8269e1789e3"
+      }
+    },
+    {
+      "name": "cjson/parse_string",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "eaffb68e3388d386fe9d64b025b5bb2b85de1f31c849a3e85a8796ec9660e3cd"
+      }
+    },
+    {
+      "name": "cjson/parse_array",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "ead95cb180dc94ea8c667d05fb033410913e55992222dae9e2830aab764f9afe"
+      }
+    },
+    {
+      "name": "cjson/parse_object",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "c22c9e129e8c8c478fde0454915e3cf699286522d906678330fb1445635380ae"
+      }
+    },
+    {
+      "name": "cjson/parse_value",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "eb5a07627421080406ddc7de7acfb959458e767025a7010bb28a5159f7176a42"
+      }
+    },
+    {
+      "name": "cjson/print_string",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "b72629dcb451a38e236c9cd8615efb3159249b16f94bc4a3971cc6fefef9d89c"
+      }
+    },
+    {
+      "name": "cjson/print_number",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "3247180ce904a75645c7059cbc81a053d2ce969f360da3c05ddd7a8c568ea9c2"
+      }
+    },
+    {
+      "name": "cjson/print_array",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "a11077ce2ba8ae2ea3121c61f117ecccd00689c52e18b20337a02dc3b193d0b6"
+      }
+    },
+    {
+      "name": "cjson/print_object",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "30b035c25fbc95bbb6ef0c2ff542c4cb437cfeded348b5504e5715ff2efa2404"
+      }
+    },
+    {
+      "name": "cjson/print_value",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "c7f2288ff82e5cba80f6977d94ab1ac4197ad9f91c8dc9dfb0700e44876630cd"
+      }
+    },
+    {
+      "name": "cjson/misc_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "c71475968b76bd9c783f7e0f558dea0e50e36e6fbe9877ed45194dbe2a43e872"
+      }
+    },
+    {
+      "name": "cjson/parse_with_opts",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "980f841641a45712fbc8ed0dd6f56c19be73ea5ce578ffc0d5b86eed47396e77"
+      }
+    },
+    {
+      "name": "cjson/compare_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "d3a5600fed1c1d368d0dcc664867475326a4fc585c60600bcdbffb95f0cc4871"
+      }
+    },
+    {
+      "name": "cjson/cjson_add",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "7d7930ada80cfe7480198057a7234e246134772c5d86bdaa52564de609c99180"
+      }
+    },
+    {
+      "name": "cjson/readme_examples",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "88e9c3f98d4b3637f02ff79e5d9a0400c6253ca4c9207675c9d04e7870b757da"
+      }
+    },
+    {
+      "name": "cjson/minify_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "c523676bdad3db40d0b9ec5d3bd43a33287c80d2490e02ac42b6b8460a19fe5e"
+      }
+    },
+    {
+      "name": "cjson/json_patch_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "833e5b2e49e41c28c143c4bae53aabbbe221e297e9f330988c42e1a2d3136dbe"
+      }
+    },
+    {
+      "name": "cjson/old_utils_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "11ac011e41861c3cbff4cbd7d478084074faab0e19bec09be5b188fb1f694acf"
+      }
+    },
+    {
+      "name": "cjson/misc_utils_tests",
+      "status": "passed",
+      "detail": {
+        "stdout_sha256": "1419085c124d23ab43d9e3398d27ed6c974529645efe2836ffee9f201a3467ea"
+      }
+    },
+    {
+      "name": "cjson",
+      "status": "passed",
+      "detail": {
+        "upstream_test_programs": 21
+      }
+    },
+    {
+      "name": "doom",
+      "status": "passed",
+      "detail": {
+        "objects": 62,
+        "modes": [
+          "fixed",
+          "pie"
+        ],
+        "oracle": "GNU ld"
+      }
+    },
+    {
+      "name": "wolf3d",
+      "status": "passed",
+      "detail": {
+        "objects": 18,
+        "instrumented_runtime": "frames=3 framebuffer=38d3d4bed65dfa55",
+        "oracle": "GNU ld",
+        "scope": "first three E1M1 frames, deterministic harness"
+      }
+    }
+  ],
+  "sources": {
+    "chibicc": {
+      "path": "/home/glonex/fas-experimental-backend/chibicc",
+      "sha256": {
+        ".gitignore": "7f7d5ae2267048e22515cdb135e09d1387fc088225d8ce3488bac71f27406cce",
+        "LICENSE": "65b0d1ecab8aad646a7ab9df3f459edaf1bc1214acd01d03258c5a3107505ad4",
+        "Makefile": "7e7c568034d3217d80bb2a4a67b5b9df8ca4b5924912de7db6a4a9240aa81441",
+        "README.md": "ee647d88c6999db0b4d7adbe1b62e8adb95393ba7047d3bb7446088ce2566265",
+        "chibicc.h": "8154bbef23f84ecdfdb325c8965e6ffa6e1c03a1b78a7316e98256f1728900a2",
+        "codegen.c": "b0491ac6438c8e9d125e4c1752057c1820826c3629ccc7fa68d7ef98a224fc4e",
+        "hashmap.c": "3c34396d0bf6df362dbdec740580c2b8fdd54dd74a1624ffcb8824bd1f1bcbdb",
+        "include/float.h": "4b35ff104069cd69361f33ff07b428238f90d5d8f1e1943973c33919e9aa429d",
+        "include/stdalign.h": "b7c63d27c6806b28765a79d2bf3805b0af13c2fc5f9deebf0e4bb3c92ce16cb5",
+        "include/stdarg.h": "f895248cc07743ecdceb86c4046f05df7de745f68e9c619856d5b47dd76b11c4",
+        "include/stdatomic.h": "b9db31cb2aa3121bf222879a4ece5ad50474a5449fcfea226fa7d1831ba20c07",
+        "include/stdbool.h": "d4056f3c4e3a75216bb08a5cfd72e94946aa155774a6579b02ee887969938d6e",
+        "include/stddef.h": "65bf6bf477eb54c047d53f99536a24654b0e09bd227948fb868902bedd9c3b85",
+        "include/stdnoreturn.h": "172a6a6c759072cf76490af8117491c9d9af0ad7c73a0abdd8228396faa4cb2b",
+        "main.c": "b2b6570363dd7ebdd4d456e555501639422b410bbcd4d1eb3150bc18a675e46c",
+        "parse.c": "6fba1f2497f443819c3b936e206f5d1045c3a16ed378fc34bfb5b2e478126c92",
+        "preprocess.c": "9fec813839210036d772eb8ba40980e3af70bf7166ba81b8e3814a659d83b3f1",
+        "strings.c": "e7e413d70e6f1d3582eb783999132a0a7fb9cd7b370f6320d73886a2fa6e8c5e",
+        "test/alignof.c": "0d7a3eb876d5512f8b5d5719b8017505815811196ce268b473b885435c747449",
+        "test/alloca.c": "2f5c8d1a0e959d206d56876b8b5402494ea7819ee9b5ebb2dd4b84612911cf23",
+        "test/arith.c": "83786c3d35dee2aa2eb6c5c2fdcaacd0e6e82a35cbbe1da7c6821e2a3feb40d5",
+        "test/asm.c": "257228c8f73b09ce1e7846fedba90540c1d7217f701de42d0ead21827d0d5ae0",
+        "test/atomic.c": "ebff47cc3954950506bc4561ab29739aa78b5a9359218a40f3243aa2f0d50dac",
+        "test/attribute.c": "04b99d55e45132099add94d0bfd12a55e23787d48a37507f03cf15471fb225c5",
+        "test/bitfield.c": "8a4584d22ac7149c78046bd4f9f97640d9254b1b35af1b3b2985c97ed0258ecc",
+        "test/builtin.c": "e22e1d4af249e3f5f91c4034bfa636da7031b1e635913c7e50ae8198c6978ebf",
+        "test/cast.c": "4cea1f40d8de2dd7430f0448d04e30e298c1028a8896852788733aabab8a366e",
+        "test/common": "9a985e5a988f317e6043b1afcceae0c633f272f2620bc7dae7f15192c7d87e5a",
+        "test/commonsym.c": "f39f4da53a928ef88a9ad213d725351e5bc5030d98f1730f01ffb32e2ca8c5e2",
+        "test/compat.c": "fcc1686ae61c6dbbd4757055dbbfd1778945df48b854e5d0341dabd09d18a8cd",
+        "test/complit.c": "4244415d87b8eb9cd7ce41350900d9a61790e525cc257d8f2b84423cbc49daef",
+        "test/const.c": "e1f293bf024826ec51a19aaaeec4d9e8bb75118c354fd50b68ccf928cdc5d745",
+        "test/constexpr.c": "8cab401cadf1f79d236b091283f882ee5306862026c96fe67f16a7e8411652b1",
+        "test/control.c": "21d0bdac64e0b786078904a3f54587d16a3012ea43b35f558837908ee6ea6294",
+        "test/decl.c": "ef97acedf5d26e2cc50df547b937bc83716da1552c42723730cf792f7e088be8",
+        "test/driver.sh": "d8f4039b3a01dd6fa11866798fa632159857425d0c7d05746104593316db71ef",
+        "test/enum.c": "d6fb53be1f86c3446fc78d7d5f3463261c3cfceb1418d22ee715a192b8360fb0",
+        "test/extern.c": "bb0ae39da0f3f8a66406b19b00525acc3321c209b48e4f844633071fe557d479",
+        "test/float.c": "2d818b35aa260c7e234eda42740ee9a6af4816b92652e7d169987ed8310f9021",
+        "test/function.c": "a889ad65e4647cadc6548b05ae2b73428e76a4987c48459963e093e365cb3e9f",
+        "test/generic.c": "d15cf55fb12d23eae83e01b8b3bbe0ae62404658b0ba2f15dc68432f3dc81587",
+        "test/include1.h": "368a620fc411d9125ee1eda9770728fbe4a168180a8ea96cbaeffd30135246d6",
+        "test/include2.h": "b8c12439b0cd59c6994f56167478fd2154eb456f9786b16731e54d0e8ef2f134",
+        "test/include3.h": "2966131d769aa4520f2ffdad3b2e008df275332bf828b2f77c8a69b542051a0c",
+        "test/include4.h": "627eecad1d4e5ccc5d21c9e69d5aeaad0bdb6deb05d9223d18f9721f60cd040c",
+        "test/initializer.c": "1d0e8c7b2ddf8d655c7bc6ab8e4a05359e616258abd3d58c6a77ad8bb122250e",
+        "test/line.c": "38de2d0ba7d8776796256adfe6f655c5a54d122fa2bfe12648a4a395820f9aed",
+        "test/literal.c": "aea5c3a2b99c70104a5bf16e1ecd587b5a6ea1a8056b3492c6c1296e670ce45e",
+        "test/macro.c": "f5dc031f475537c5ba40623951349207f2db4ee4e2aa7bb62fa6e2b0a6842f8e",
+        "test/offsetof.c": "2f3ab8a20761873340dd7ea3782e84ea7641b793f0fb977931c210822cb914eb",
+        "test/pointer.c": "27113ed03b356b7d6b8eb4a88f8fdf6c8808c1c46e1b9450986e136c7dea49e1",
+        "test/pragma-once.c": "05516fefe286a560d8d9521a0747e0e7e12f448e13b254f2636fd05f80dbf313",
+        "test/sizeof.c": "bfe45073940ba64078ca2ecc16bc3f936ae14f300e46046e43248455ac6dcbea",
+        "test/stdhdr.c": "0a5c00953fd7de3f62dd6a5168965beaf573af2bdfa7b05aad12e7be6fa5ec03",
+        "test/string.c": "e3c2a095068cd91f0381f964b5c8fb835481cc25b525727f4cb30bb2f03e4513",
+        "test/struct.c": "26a357e1cba63e74b53de79310af12f7f342efcacc12b4796ddd19a5e0bd259b",
+        "test/test.h": "6497da96d7f9267ea5e6a3bf64b60fcf9333475c279d0a00818b7c9ad2e698b9",
+        "test/thirdparty/common": "cd16b75a02223eedd606178a9b893baf928c335bdf0ca552378aef2701ca2ea0",
+        "test/thirdparty/cpython.sh": "5c55b780d51dce4c0af872d3b47cd9736c040be4268e5865ebfaab21bfb4bae4",
+        "test/thirdparty/git.sh": "4b98fc95bf0d350589950bc74a83748a45a835fd2fc7657135c0efcc3e93c93f",
+        "test/thirdparty/libpng.sh": "2ce2f0cd7affc296654e0919fe7199f8a5f2d44a36573a8cf3c64b9c274a042c",
+        "test/thirdparty/sqlite.sh": "b84a4ce6419b8e42096f5ff961cc70896b724e94f893b834d6f2dc7df597a145",
+        "test/thirdparty/tinycc.sh": "a34f6fd796b1f6fa0f6c7536b2311cd716c5db88971682cb67a385a3c7cf7c1a",
+        "test/tls.c": "e592080eb631f7615cc20010d9fb5f44043f7a0620f307438ae0d64a1898132a",
+        "test/typedef.c": "4cb553183a136a27c8d89b7ec2b6f2ad44f4bcaa51187f9051016328debb9ff4",
+        "test/typeof.c": "5f2c256ea70e2d877e76dd92a29a32bf25d30627a78e76eb72336e71a8ac913f",
+        "test/unicode.c": "8853757c12c3485af9bc9c0fd726d001bee6c66965152b53c4f3575e5053501b",
+        "test/union.c": "90838cc1b16643d8fa2839ee9c3e2f481fa8450735c653de9cc2edaa921fd92b",
+        "test/usualconv.c": "45d530d8772cf2a8d72d2a3a2d4d9dcaddc5f942da00fec0257e22de4e7d4496",
+        "test/varargs.c": "5ebdc6852fcbc6bb30fc1a28539ce16553859dc716e3cd31038154d98fa9b050",
+        "test/variable.c": "50e2bea1973f945837fae52de5856b4a1e5c9a116565a0b0f682383728d60a0b",
+        "test/vla.c": "b7fa4e874728ecaff8804358417903fd0c8045b514c9cdee83c72025e93a2a04",
+        "tokenize.c": "787f83b0f009ea69763e6aca3243f73224214068931b29c98fa60068f8b235dd",
+        "type.c": "a8756271f3be4bceb3cd4820ce3251f55a1fbee241a428ba24e2c7e003feb327",
+        "unicode.c": "67311a3aab39522bc7555a8318840c971dfd01b0e92943da62d8b28d2091f953"
+      }
+    },
+    "sieve": {
+      "path": "/home/glonex/sieve/fas_solution",
+      "sha256": {
+        "README.md": "34a1fed5b1380a849687650c09c1fb5ab122d3e3d10bc05ab60782876f914a3e",
+        "primes": "7f5ede294bfdad8577933e1b3ad12cce0946f6217ae227a00d3323af16856a50",
+        "primes.fas": "173d016ca37142c91bacfa8bb93795dc3f21b46f8d1975dfc7dacfa86de28b7b",
+        "primes_const": "c423a6b0285942d34a75d3d6329a31595b93d11a9da6eb6ec341f6c242b7411e",
+        "primes_const.fas": "328449cb30c3871a3a7fa2f74cb0cddb8bea1ee696c6d21e82c943a4de8f3dda",
+        "primes_long_chunks": "dfa6a2ea5290c1f9895bbcceaa5c3dddd42d5ae2cd1395c123245350f267e089",
+        "primes_long_chunks.fas": "1b26e8666b9a7c0a03a5e462538f20e5f95ddb77bf0e1c695b8a9052e581fc77",
+        "primes_zero3.fas": "c9c7ef240393711a4c727f6153852d3eeae4e1cf9e871fbfe449946a116a5fcd"
+      }
+    },
+    "cjson": {
+      "path": "/tmp/fas-cjson-20261105/cJSON-1.7.19",
+      "sha256": {
+        "CHANGELOG.md": "adec9eeee3c855842a770e75f2b4538a3bb21cc998d832395fff361dbd21d316",
+        "CMakeLists.txt": "cdcb1302634cb81778130e9c30c2e952f80157bb9fee6b3f8489be8c15de9d34",
+        "CONTRIBUTORS.md": "48b3c704097b40d9ef908db883001041bafd051b4d2787957438f2a71f7fb63c",
+        "LICENSE": "a36dda207c36db5818729c54e7ad4e8b0c6fba847491ba64f372c1a2037b6d5c",
+        "Makefile": "410bdeb55e6b8ecd49a6d34f61ce53e2e7643136c8aebe148ba1baa28c505b94",
+        "README.md": "c588125722bcd6e91e7e322fe9ce90252a5eca5c9fdf81ec967a3d45102010d6",
+        "SECURITY.md": "213c3a4c10fb81ba6b431ab259513c262023685191d6a6be2cca0b39ce6fd1e0",
+        "appveyor.yml": "48e9f4f585df68114d2213b6f9113d7d32ec3626689a90dfb63a2450d72b7509",
+        "cJSON.c": "298581a04a36c0165da4b0aade235c23088cb2faa58651d720ea2f3706ed0b0d",
+        "cJSON.h": "25b0145150d500498e4d209cec69c18c42cf818bffcc54690be3b895a2a16dee",
+        "cJSON_Utils.c": "bf3092696763a9a446c39365d7c35f23e5acfdca1bd1da33ef66c1161f9243e9",
+        "cJSON_Utils.h": "1050a7cce8ffe352c509e0c1faad505b9b8a09cac3a1c45c544447868e05f3b5",
+        "fuzzing/CMakeLists.txt": "80a356c8ad968c1f88498d89e263a20f46765b8fb343f2b82c290e2fbf8f7065",
+        "fuzzing/afl-prepare-linux.sh": "c86a6dfee8758becb7e44e184a429225f1e99ea705b28fcf37a24f7327a06170",
+        "fuzzing/afl.c": "179261ee7e9a55e1bd1609bbe9f1995f17e6a5e1611378abed85b4eddb1cdd31",
+        "fuzzing/afl.sh": "9614b91989583e8fe2e1961b56b47e660ff053dfccb9b28ecf221320c207b3b5",
+        "fuzzing/cjson_read_fuzzer.c": "a8e9443438bfb323dcaed5af86dfc3fae7dfbc970a992b0af569a58e1b8c9376",
+        "fuzzing/fuzz_main.c": "880426b8d17e75f41157f0b06d26716d99801b3f9578245183cd4bf718c8c882",
+        "fuzzing/inputs/test1": "575a805b8582fcafe96e4e49b9b0c8cf42a49759ed41afe1046a27656e126ea2",
+        "fuzzing/inputs/test10": "0411a8d09c3329fee6fdd1cfcdaeb8ecc30cc7a150fea5226b8af787c22e6099",
+        "fuzzing/inputs/test11": "e426feb8b6664ddaf3fab041829ce34439161371e6d1c9a3360c11d6b1bb3894",
+        "fuzzing/inputs/test2": "2b3b1a75dca9ca58523f2bcc9066345220bff8fbe959daed1fa2647dba747450",
+        "fuzzing/inputs/test3": "ef5c0435dcdea047bb105c44a5ea059772cd55ebb4e3db293849f8e7c3be6cc4",
+        "fuzzing/inputs/test3.bu": "38e8f277565a0dd5194fc8bf1dc028469d70149eba3b75b730eb8802921c5b27",
+        "fuzzing/inputs/test3.uf": "5f0911f8e7bd504fb9485d11f5097a666c323f6a26fc12b865c78c940effc595",
+        "fuzzing/inputs/test3.uu": "7ab9252284ec773b973208aa60d48f199a2b72b1f8e1136248171362cbbebdfc",
+        "fuzzing/inputs/test4": "ddb6276d3aebc311a9b042459f544f80c1b3e1f11591e43926e29b519225530e",
+        "fuzzing/inputs/test5": "6a9b241591ac80f24357f94d518487501984578411cb57657b79142a8c56f6bb",
+        "fuzzing/inputs/test6": "bfe13f225816216354d11c3c147b75414ec69b669cc84dcd2c4b05ae29530986",
+        "fuzzing/inputs/test7": "ff934c7141f8b6a5429b1a45250024187258c0b030b0eff236c467fb9440fb38",
+        "fuzzing/inputs/test8": "03812794e39a3cec68aaf709d3ff1f890bdccae55f2ccc0c8b5287b79b795e7e",
+        "fuzzing/inputs/test9": "2933710b91761580feafa16315e57281f24b1defa74687f38705a511ba05fe92",
+        "fuzzing/json.dict": "715638fc7ae17e2fad98c7f5db17e5834f134e9aa03fe7e89d6c9816646ff12e",
+        "fuzzing/ossfuzz.sh": "a832e5c52839fa54637b052d3cfd9f63da8deb66f3ea6890af3adf4ff6557927",
+        "library_config/cJSONConfig.cmake.in": "ce9b592eae998427aad7b506e4a7661db303ef038c524f2fcc7ba56319a26c65",
+        "library_config/cJSONConfigVersion.cmake.in": "8a8e1a78f45a121db7732cd81800530b82fc5ace4cd410aa401ade6aa49315af",
+        "library_config/libcjson.pc.in": "051388ae79065c08400dae18cfedf32abbaa34b6a4db9cf547d8db2ff5b04b9b",
+        "library_config/libcjson_utils.pc.in": "9df4bd96583141c2b735b3215d0fb66c0d28364b39278de41ef676c0b27beb68",
+        "library_config/uninstall.cmake": "5bbe69cc217ccdeb00836f0e7009ee0ffe2da149464dc8381c8da58484b9a45f",
+        "test.c": "9073e70d626d83f202768c3a486aa5496ac33277b7f265fdba200888fc93941e",
+        "tests/CMakeLists.txt": "4f98fd9f350148ca49e7f0c3a41875288ed67ae63694add225b01144fd40856d",
+        "tests/cjson_add.c": "4b9bf117c07e2be9d1ce5db32a63f57e479369516f97a91b5f4d6c8aaccff30e",
+        "tests/common.h": "c1f106726a5865965aad9597687df8c7ba43b587a495fa5e17c23231a99ddaa2",
+        "tests/compare_tests.c": "c7d38712a8346763b40e836d9a1c6519e3e2c3ee1510c7493597308594ca1198",
+        "tests/inputs/test1": "b03c70f84fecd61f88de1d480a6b151157db38d1459d79fcb08046189946e6ae",
+        "tests/inputs/test1.expected": "01cc16b9a569a5b5a5fa3b42703d95fb90c3adf152283e6d102ea216b62007f0",
+        "tests/inputs/test10": "8cb1309e2c70a9737a690ab6d0da386db20150e50eaf1aedb3c822f2cdf8b887",
+        "tests/inputs/test10.expected": "18b7b68090fa1ba3858cbf8d54128b0ca7d4402bc9b457c6734ec5e40aab59bd",
+        "tests/inputs/test11": "323abb1689f7030df78c587b4d4622341fc155ac8b4fe3c477568eb653ec624e",
+        "tests/inputs/test11.expected": "d24e688e245600ebe2d69ee831993eb8fd1e80857f038f6166bc1721e06c360d",
+        "tests/inputs/test2": "bcf0193107b78a8835fe4bbbee161caa6d803d709cff043f2a1191a49d117c7b",
+        "tests/inputs/test2.expected": "5640449d7438834c6771f2ab5b10773241877b059578a28c38bcce1903ddab87",
+        "tests/inputs/test3": "06fc27d33b348407fe50b34a4c4397e33cb7acae094cbeb232daad07e7715f60",
+        "tests/inputs/test3.expected": "d4495f02b4c3879f5707c681f5e62bfbc01eae07b464533c33aa70e9d5190886",
+        "tests/inputs/test4": "a01e18f77d08bdef9a872d9c3d2b5f58b86c3ed6db1f9bf68db969357b0743e4",
+        "tests/inputs/test4.expected": "21c53d49a9c3c5070d3b98c2c9525ec52cdefb42a8858add687c0f2b50458c48",
+        "tests/inputs/test5": "c13f3e1957ddb0aaec77173a0aaae9838f910f8d0b4d6cd0bbdb37e8b49f5bd9",
+        "tests/inputs/test5.expected": "7cdd2bf7e176bdf18db4b0edd61343c55292f427e1b34be2081747d9aee4ca11",
+        "tests/inputs/test6": "bbb2d49cf5e36d7f09e3e23843022c61f8226afbb8b33ec859668ab57173e206",
+        "tests/inputs/test7": "800ee3dbe3b5ac0eb3c84d3c408594837d25cb017cfe461f11afe6b5d895466d",
+        "tests/inputs/test7.expected": "58a05d06ab633aad6c15c63f5054f0da76907dba2223a7c5914fcaa7fe9982e5",
+        "tests/inputs/test8": "8f12cafffed5858bcf1db7add4f96e7ddf302ce0920b4262f925720dfe756aea",
+        "tests/inputs/test8.expected": "cf91affe773c43b3301e666b01bbcf96b7cfe24e607a5cdd5807454e25c19bb0",
+        "tests/inputs/test9": "99956a0476bef0fa482b71764091dc9ad46851f91ddac1e62e9b69abffb3135d",
+        "tests/inputs/test9.expected": "dc09889048190fe3ed20d5d92186337e5fd3ad34cd000dc711fd17c102fb1b8f",
+        "tests/json-patch-tests/.npmignore": "67ee5983a254b254a70464d1700d3e9c5bfc182f84d326129c7826cc7cd5c366",
+        "tests/json-patch-tests/README.md": "f995d6a6e1babf653444b40783b21420a3840962889cf1c1024a70549e603828",
+        "tests/json-patch-tests/cjson-utils-tests.json": "7903cc19a66ba441cd8808d09490c58749132f5d3fefcca8633c7b180d270059",
+        "tests/json-patch-tests/package.json": "7c808769bf7b0d72976d21273afb43ed44df71dd3e3c31b1cd33430b4ff2f493",
+        "tests/json-patch-tests/spec_tests.json": "a26b050292207033e5cccc5d6102b7bd6f8add7db0d0680e5d46a7ecf40a8c7b",
+        "tests/json-patch-tests/tests.json": "c7c42a57d29a8029d60160eba8efa6daec560912dca07772d0e86e64589117b0",
+        "tests/json_patch_tests.c": "348555d7a3ff837e43f47688e25a542cca1c551b0e557229293d15737aa49d63",
+        "tests/minify_tests.c": "23b0f6af10660fc7b7a9da1e8d7083644513525263f56ff8f43fcd2e045ba7e7",
+        "tests/misc_tests.c": "b175a47de431f5dfac58dcfdc8b3ede51d3d49fa2f7ff8aa909e46c30001c4b7",
+        "tests/misc_utils_tests.c": "0a3874130b4f320a3a0f02f1045df5407d0df0633e355bbf30bd718915920e31",
+        "tests/old_utils_tests.c": "2df8a031f08b2ed95c92bf5850022cac89fdc9c2e24fb47d10db57a202343d1f",
+        "tests/parse_array.c": "d9ff0f6b59708f341e3ff1ea8d3915c4e4104c70021e306f9e4e1c2afc8cceee",
+        "tests/parse_examples.c": "e1d1e69d69377eb01050cc85f4f10218cd7c0cef9e63418c21c39abced5dc373",
+        "tests/parse_hex4.c": "308710a6a164cce203e950d64c0acda8a20cc21f0ee19572d7d5c404c73e65ad",
+        "tests/parse_number.c": "dc55d81687735f7d2f3986bf90f4d3ef9f183d73f79ac178e71b123c56d13de2",
+        "tests/parse_object.c": "87a58dd9a3505e13cee37aaedf9ef6e2f458979f201f7d2d596fdf31bcc2d6ea",
+        "tests/parse_string.c": "d665ea70b7cb94eb2e370268355bbdb9ab19a7d7e8a4f66c761d36dd134773d1",
+        "tests/parse_value.c": "7c675a2840915d5bda6cb70bf8ea793ae2969c83a6450c21acaa45470d854c8d",
+        "tests/parse_with_opts.c": "a38e8a2a6986c886c3d44ba2f6d0f549fc00c00c294dd35078afdf5bdb8a4f36",
+        "tests/print_array.c": "2de8a850c1a9df40e105d49cd724ae0f527a8e6dedd54e5c4faad76b2f73ed9f",
+        "tests/print_number.c": "e548a3d5010c5325a451148af05b7ab7b663800e06914cd0547b0e6b1308cd38",
+        "tests/print_object.c": "af397c6fc869ebdc68a913b64fff53219a765a5788db13fa2908602742b16028",
+        "tests/print_string.c": "0f495b80145aca503ffcdc5ff0d18eff87cc33a06a7e398ce251c56407bfb7cf",
+        "tests/print_value.c": "40a7db740adc05df72d9e98d23147b8de3d9736a237d11168b651eb09b7a177d",
+        "tests/readme_examples.c": "506fa8132eff2c50a4a80087201aa4c67550f72d3b253ef2defa9087c500ed90",
+        "tests/unity/README.md": "c8922237978b31ecfeb41ea90c93946310cccd60068d1c8772726266fc3e0a2f",
+        "tests/unity/auto/colour_prompt.rb": "b25f12cab00233838cc1ec2478b78868d8cb380aff93479db855cfc73a6a5d6f",
+        "tests/unity/auto/colour_reporter.rb": "825b4b4bfc28449c6b24c804d9ffc2d1f1f5855a6655f6101debbeb69d461e64",
+        "tests/unity/auto/generate_config.yml": "85c5702a168e366148e8ec89df416eae888278a526c79459162c0f37641a02fe",
+        "tests/unity/auto/generate_module.rb": "40a016ee8a8c53f1bbaa8b47026318e14fec1e3742ef55e0eb1b81c11250c4b1",
+        "tests/unity/auto/generate_test_runner.rb": "ec7f43dddfc24648e34871f5babefe07f4b427e8ebd2abf16d51dbaa179e1f54",
+        "tests/unity/auto/parse_output.rb": "9af7bb80491c7d01998fbd6b17ef58fd212dbba89d6d714b1f668d1f879743d4",
+        "tests/unity/auto/stylize_as_junit.rb": "8350efa8dac6ea49c460dd0125c979bd011b992528571e640ae8d03fce703a2b",
+        "tests/unity/auto/test_file_filter.rb": "3797fd7cfcc40c643f0b66555e751fbba36ba0c7517c01e3537ffc659af4ea37",
+        "tests/unity/auto/type_sanitizer.rb": "ecc5677ac9820f343aca50893463602fca940c24daf07a4784b4e9e0801c3f4b",
+        "tests/unity/auto/unity_test_summary.py": "8912c5cacee70c5be95e35ff4c48746e5ecdc31819ff528f076f6fd64a32dd69",
+        "tests/unity/auto/unity_test_summary.rb": "ba1e76115ebc4d4221a919c682fb3faae6d0e375a1d7910c199f2abff9caa736",
+        "tests/unity/auto/unity_to_junit.py": "0743f26b5ae67af204981293337f9cc9a8cb46c90aaa3f46f31fd9658ab65990",
+        "tests/unity/docs/ThrowTheSwitchCodingStandard.md": "a1838b8c9e20ac3c15bf96742b716b6621c0607c9273ae0f92a6769e3aa45f41",
+        "tests/unity/docs/UnityAssertionsCheatSheetSuitableforPrintingandPossiblyFraming.pdf": "251fcb21ea66444941a34f8b932a3baf0c47aed4c7827215e027006f06013bea",
+        "tests/unity/docs/UnityAssertionsReference.md": "2d72b94d517b22ff743245145ed8bb0ab0a6b72c37a5314810d7ff3cabb7af37",
+        "tests/unity/docs/UnityConfigurationGuide.md": "7f014f736a317d36d807bc4bded65d89919e1a9a88fa39cdbfd93202b88c43b1",
+        "tests/unity/docs/UnityGettingStartedGuide.md": "f1845c8483f193271e13e309cb644d8fa20c2fca30f5a15cbcd2778379178dbe",
+        "tests/unity/docs/UnityHelperScriptsGuide.md": "57136398257546b59443eaec9469166e17664a3df68112adbc3765422b90c783",
+        "tests/unity/docs/license.txt": "3ed9b51da86f52c729c96cc99fdde6444b2297c788a9cf4ad1d3649dc34c4985",
+        "tests/unity/examples/example_1/makefile": "367e10ef968648ec5c531f144bb0ee257a619091a76fcc17516c220bf20539e6",
+        "tests/unity/examples/example_1/readme.txt": "4d72d51f1a385cd4aeb594e4485ca2439d5b86247523cd2d2b89acc2173d8a24",
+        "tests/unity/examples/example_1/src/ProductionCode.c": "29d42fce2d89d95fb2b14b649d3b2d7406d225a071e01e86d6ec0cdb04c7e614",
+        "tests/unity/examples/example_1/src/ProductionCode.h": "25cfcc42b79140f4c399363e0ef10a6e518a1831e10c61cc138d6d9a230425ce",
+        "tests/unity/examples/example_1/src/ProductionCode2.c": "c2cc0a76cb2ea145d3861bd9ccc467ac45ad3e8230d5075ed174ce3a5cd50a76",
+        "tests/unity/examples/example_1/src/ProductionCode2.h": "d4db1a4eea2bee3d668a203d4953f415f23be64a826c5a73059ef221f61b3882",
+        "tests/unity/examples/example_1/test/TestProductionCode.c": "2cc1611df09a030abb8ec11569d200dc313645662577b6a6eb32065a193b4343",
+        "tests/unity/examples/example_1/test/TestProductionCode2.c": "11387f2ecdc97ee3344c0df42123e73cae899702b348d5597e09e9760db267aa",
+        "tests/unity/examples/example_1/test/test_runners/TestProductionCode2_Runner.c": "2c84d6b954a6810a7c509dc861ee0c18a562dd23a5dd7747ea524f0c1467d9a4",
+        "tests/unity/examples/example_1/test/test_runners/TestProductionCode_Runner.c": "b6ec7bb984eddea80c178ecb30f6f772325a745ff9812a5e3f41f236c43e19e0",
+        "tests/unity/examples/example_2/makefile": "9c925a4b80f11ce51cb65fef51f8e1279113dc67838c71b5bc8b0c31009e65bb",
+        "tests/unity/examples/example_2/readme.txt": "a03bf4ac2d294a037189b42f7bf8fdff0bf50524857e3f8933eba76085f22f04",
+        "tests/unity/examples/example_2/src/ProductionCode.c": "75136eec7a43d0dbe980dea19ec46f6e16c0da92093686e59f6143d8ae8b5bb7",
+        "tests/unity/examples/example_2/src/ProductionCode.h": "25cfcc42b79140f4c399363e0ef10a6e518a1831e10c61cc138d6d9a230425ce",
+        "tests/unity/examples/example_2/src/ProductionCode2.c": "a929e7ef393ec5ccc53e3f885d663a1c8fbe5cc5f72a0fcad5c0d2f6cbc8b210",
+        "tests/unity/examples/example_2/src/ProductionCode2.h": "d4db1a4eea2bee3d668a203d4953f415f23be64a826c5a73059ef221f61b3882",
+        "tests/unity/examples/example_2/test/TestProductionCode.c": "cae04759fdca5834d1c2f926c0bfdb222da048069470722361bbdfcc3017233c",
+        "tests/unity/examples/example_2/test/TestProductionCode2.c": "332f23e940a9676504c84dc92d1a6cf72cd9204afe7f664c16b58ee7dbff312d",
+        "tests/unity/examples/example_2/test/test_runners/TestProductionCode2_Runner.c": "14aef95de310f1e1381feaaf256ea94d0905a538311b5e3fdc944f927e75b287",
+        "tests/unity/examples/example_2/test/test_runners/TestProductionCode_Runner.c": "a782491bcd8dd857b26a62df58e8671f1cb7641d6c0fe7f7853c079732ccd8e9",
+        "tests/unity/examples/example_2/test/test_runners/all_tests.c": "fe5c0418201d70dc696b0db6acf60b2ea0069d74fa94fb96d7169b8752e00d17",
+        "tests/unity/examples/example_3/helper/UnityHelper.c": "091c2466d25deffd8958332ad03d393ca1ec1b1f6150c16626d57d5901eb1b21",
+        "tests/unity/examples/example_3/helper/UnityHelper.h": "a95bb6d3704c51637bb0855787236b41229e3836601ba97e88768f95779f3d4d",
+        "tests/unity/examples/example_3/rakefile.rb": "7a1113adb71787b2ae7cd29fe9a5c7b50dec87c041aa6500aaa836ae2c4a0d4f",
+        "tests/unity/examples/example_3/rakefile_helper.rb": "a545c40149bdaeb2592322771b5e180bc103d67c783b23c74dcb8b0fb619a5aa",
+        "tests/unity/examples/example_3/readme.txt": "2af5e731fb1db0ddf5c739f0b08fb2724e4acc7efb7ee0a02fe474a3e69d284a",
+        "tests/unity/examples/example_3/src/ProductionCode.c": "75136eec7a43d0dbe980dea19ec46f6e16c0da92093686e59f6143d8ae8b5bb7",
+        "tests/unity/examples/example_3/src/ProductionCode.h": "25cfcc42b79140f4c399363e0ef10a6e518a1831e10c61cc138d6d9a230425ce",
+        "tests/unity/examples/example_3/src/ProductionCode2.c": "a929e7ef393ec5ccc53e3f885d663a1c8fbe5cc5f72a0fcad5c0d2f6cbc8b210",
+        "tests/unity/examples/example_3/src/ProductionCode2.h": "d4db1a4eea2bee3d668a203d4953f415f23be64a826c5a73059ef221f61b3882",
+        "tests/unity/examples/example_3/target_gcc_32.yml": "d7ab74bbff3a1b2a50432636ffbd4d7d7e87df592bf5a5754de56275f44ca521",
+        "tests/unity/examples/example_3/test/TestProductionCode.c": "b0e815e2285b1730d7dcd24b400d15b4efccfe5e4776d96248a2165c2f0caec6",
+        "tests/unity/examples/example_3/test/TestProductionCode2.c": "895f437abd40bd461fd86a3b8ed6bc02c5c283fc3926aafe53b473e477fa0a5a",
+        "tests/unity/examples/unity_config.h": "c3d7d8f48c9dfb38a4cbaabc2d30a0a5335d2bdd8b454fd70326876e90133299",
+        "tests/unity/extras/eclipse/error_parsers.txt": "72204789cf143e044ed448e826a7d1eb1cc9c74b580e36902fbaec98bca02582",
+        "tests/unity/extras/fixture/rakefile.rb": "52800d045e67262e1bd53f9867417b6fc1f56eb7cf446bcbaa20dba0c41f10a8",
+        "tests/unity/extras/fixture/rakefile_helper.rb": "3e9ccb2a4370fbc68d1228a115e5a6a5d6ab689db1805266206a261cdc04f58c",
+        "tests/unity/extras/fixture/readme.txt": "5692862a5fbc1910978be7ea4751899bafb6b913ce34cffa5517c0eba1fe40e3",
+        "tests/unity/extras/fixture/src/unity_fixture.c": "cf55816ca47f37c29ee446468ca076c96860ca506d47c6832e81cb1d82b48c4c",
+        "tests/unity/extras/fixture/src/unity_fixture.h": "d99045365d5fc89535b283b9608631883bf5aa35d41665889f25c9bfcb925b29",
+        "tests/unity/extras/fixture/src/unity_fixture_internals.h": "fbdafda4dd395e08ff7503180022c074947d622f4e83256256297ce05c154e73",
+        "tests/unity/extras/fixture/src/unity_fixture_malloc_overrides.h": "446d4a58dd88ce0bceba6e095ac4f26a4c55898e67265d688450fa3aacc7741c",
+        "tests/unity/extras/fixture/test/Makefile": "665bba3afaf6ebd289432b039e40b03a24c7fee6f4dde8f82b1a7468fe82a7e7",
+        "tests/unity/extras/fixture/test/main/AllTests.c": "1ec0a0e004f8a70d03dc76e28f38f09519bbaf7306d48d17d5bf0573d34c87c0",
+        "tests/unity/extras/fixture/test/template_fixture_tests.c": "3ca4c500397fc3dd7370b419e7d4f7abb3a8b05deacaf72a4e2ccb396669003a",
+        "tests/unity/extras/fixture/test/unity_fixture_Test.c": "d8d631a1e192b25ae24ea6ecf3bb53e86eff8f0615a1ad7095106d847b847d18",
+        "tests/unity/extras/fixture/test/unity_fixture_TestRunner.c": "e739cdf119f943d482fe99b6acec671aa88a78b9cb38bb2b459d946ab962a200",
+        "tests/unity/extras/fixture/test/unity_output_Spy.c": "efa0dfae695ba004c67a120c0b0e3d6f93f72cf7a992662bd4ab15d725c3ff45",
+        "tests/unity/extras/fixture/test/unity_output_Spy.h": "b5adfe4f07d3c1c4b7cb0178344ccf608c60a08713d768c8b3e073c6f030dde5",
+        "tests/unity/release/build.info": "d068d6cff7b4f86fea550f0c3a9d37b227c5c18c20da61d2f73553906484999f",
+        "tests/unity/release/version.info": "86328f4d3186c9624da589a8ee8238f55e9518d4c5d8edd5f3a99a944a41aec6",
+        "tests/unity/src/unity.c": "b9dc88ba266f4140ade6cb8b6b74869d9d0927fdc1bf791ef51ae306d4c8f965",
+        "tests/unity/src/unity.h": "2d356dcffe0f8d887ece0ad8d5cd0d388aeef5482800a7b8fea6d415be8bcf1f",
+        "tests/unity/src/unity_internals.h": "874c2af0bcebead08d0f609f77e2306a735ba55205b7776d937120cb616d4304",
+        "tests/unity/test/.rubocop.yml": "8d80c9a0ad12c1b02ef92151523a27e8c7219de7303899f134e69f327ecc4583",
+        "tests/unity/test/Makefile": "6eb94e8d682068fd80d7155c83486cdebabd2ff0ca218d5c2ca643f9e8c61e2b",
+        "tests/unity/test/expectdata/testsample_cmd.c": "832ec9c8c30fd374adea6620dd38c19c689047bdad0513984066e525eefc0723",
+        "tests/unity/test/expectdata/testsample_def.c": "246d3d9bc73ccef28f7a70b8748d95cd31eb85b9874e6972d30be1f74000fb8c",
+        "tests/unity/test/expectdata/testsample_head1.c": "ed31f2c63e4bb7ba015a5388429b34287ecefa098551e55ae5864b883c3cdad4",
+        "tests/unity/test/expectdata/testsample_head1.h": "fc279a298e45f70a559d05132ae888973c8f5aad913c0b2d6d8425ccbde5c998",
+        "tests/unity/test/expectdata/testsample_mock_cmd.c": "b826f44458088555058b6c3b9c7ef15c2a5528c8efe01034d0f1debee06a739e",
+        "tests/unity/test/expectdata/testsample_mock_def.c": "1016f1162a3ea3be49dffd824e529493d2845860d1139cb44cc32f0fe0a0701f",
+        "tests/unity/test/expectdata/testsample_mock_head1.c": "cb7b253cefa315d7b4edaa386bffb63a728f3b33c869bf55ecfcd53d1e47eaaf",
+        "tests/unity/test/expectdata/testsample_mock_head1.h": "9cb779d98b40e5dfcf70db57f7d3deae6310cac80547140c972ecde585f56c18",
+        "tests/unity/test/expectdata/testsample_mock_new1.c": "4e5d73972dce4276dc688016eeb310e93ef96ea7beee0e6839092f0459798856",
+        "tests/unity/test/expectdata/testsample_mock_new2.c": "74418cfefe544ac366a043972648c31742b2a4652155507c93a1a2a38471a5eb",
+        "tests/unity/test/expectdata/testsample_mock_param.c": "6a8edda1c9b5a56d38e705d2d0341232ca9a55f1fb7383171475cb972c9b6c18",
+        "tests/unity/test/expectdata/testsample_mock_run1.c": "4e5d73972dce4276dc688016eeb310e93ef96ea7beee0e6839092f0459798856",
+        "tests/unity/test/expectdata/testsample_mock_run2.c": "74418cfefe544ac366a043972648c31742b2a4652155507c93a1a2a38471a5eb",
+        "tests/unity/test/expectdata/testsample_mock_yaml.c": "763d37bc5a5edc7566bf6625dd38878aed8cc94a5cec8f6e23aee16e30bdaad6",
+        "tests/unity/test/expectdata/testsample_new1.c": "983abee21894ba9fb5d667a69b046558867f9f16eaf546d259671f54dd4be626",
+        "tests/unity/test/expectdata/testsample_new2.c": "9726bdaec7a5c8e99b4e6bbfc41b91c8687665bbafdb617be4514eadc30b023c",
+        "tests/unity/test/expectdata/testsample_param.c": "7ab6834f8376908625b9999a4c5dad32ad65c8f3fd852e78b6d9c3bc871fc639",
+        "tests/unity/test/expectdata/testsample_run1.c": "983abee21894ba9fb5d667a69b046558867f9f16eaf546d259671f54dd4be626",
+        "tests/unity/test/expectdata/testsample_run2.c": "9726bdaec7a5c8e99b4e6bbfc41b91c8687665bbafdb617be4514eadc30b023c",
+        "tests/unity/test/expectdata/testsample_yaml.c": "17714f87e28c7723608fdc832189965482404e3540e3f3ec55afa7f07054e0a7",
+        "tests/unity/test/rakefile": "bcf952c92696d59e0a5b01f1e44f54f798bb16d5e6364714a2c5bdea0a51357e",
+        "tests/unity/test/rakefile_helper.rb": "5423a66a42384ddce1b9fb9cfa690f8fea3e3e062ae3d66910356d011147646a",
+        "tests/unity/test/spec/generate_module_existing_file_spec.rb": "41d0b6bf8255f97e4fbf6c4f5fb2dcc61d846d2ddaf2cad763c1f500b8a68727",
+        "tests/unity/test/targets/clang_file.yml": "afbb70db8cc433aca8e6ea3d04d2f5142cc8bd1a8f6e421006038c9601222d32",
+        "tests/unity/test/targets/clang_strict.yml": "336cc5344beccd0c3a6c83227b764c8945193b464600ba56ade14c3c44c98b27",
+        "tests/unity/test/targets/gcc_32.yml": "734debdb4392b83942cdccfb31ca724a43b923617a8b45d86bf6a1fefa86a7e6",
+        "tests/unity/test/targets/gcc_64.yml": "530851623a24956399add9f0c0fe18719eb6dc428c1bec03ae6b255a9d0ae972",
+        "tests/unity/test/targets/gcc_auto_limits.yml": "fbd96dc8a94c4de70dae87ff378312b3ee07cb8219d6290af17d36e3b34d0f6e",
+        "tests/unity/test/targets/gcc_auto_stdint.yml": "c9ec9f61987603d059d4509f4befe0744f5fa99a137d95be359ddd2c71443281",
+        "tests/unity/test/targets/gcc_manual_math.yml": "3bd8b0d4eb9fa693f4cf74fdaf61e31183b85351c4e957577bc8497cdc8f15a0",
+        "tests/unity/test/targets/hitech_picc18.yml": "7b2a4ea56f3125fd75bb7d8e9baf1f26706b206f98c6f88e4d4b4091361fc546",
+        "tests/unity/test/targets/iar_arm_v4.yml": "3df93ad02fd4e1cc17d28a63f824881eee4f73e1db54e43ff36909dd2f5eabaf",
+        "tests/unity/test/targets/iar_arm_v5.yml": "bb6f961bbf3cf2c4651a33bf415818726b4d609c05cb9fdeabe6dc7a94d47e6b",
+        "tests/unity/test/targets/iar_arm_v5_3.yml": "bb6f961bbf3cf2c4651a33bf415818726b4d609c05cb9fdeabe6dc7a94d47e6b",
+        "tests/unity/test/targets/iar_armcortex_LM3S9B92_v5_4.yml": "8835f98e84e75b920fb9e27c0ebcc9c11f14bff768b382441099a01cbf7a129d",
+        "tests/unity/test/targets/iar_cortexm3_v5.yml": "70ba518b050162526cf5cfd3cdc90a00a6aad0d0ef65558612d384c855513d52",
+        "tests/unity/test/targets/iar_msp430.yml": "527ef25ba8d5056a8b44fce38302895a1a8ed342331edeed69db067b831c8e7b",
+        "tests/unity/test/targets/iar_sh2a_v6.yml": "b99162afd271d76014220cabda53ff3951aae6595b198520eba36ef095e57746",
+        "tests/unity/test/testdata/CException.h": "3d791048e28a3a83580dc5cb7a03d918323247128bde97b055e1037924a4a3a0",
+        "tests/unity/test/testdata/Defs.h": "309f8524e59399b7e9e5f2a02ab7a1a4e21d6f808bdb05730ad41366412b72ea",
+        "tests/unity/test/testdata/cmock.h": "f600e74488bfc56862df2daedce1a3525eaad43ed72c6706817f6629b180a1ec",
+        "tests/unity/test/testdata/mockMock.h": "f198c43bad6e541c08b5e32c204d894be499ff005032c3ffa25e7ed7ba176001",
+        "tests/unity/test/testdata/testRunnerGenerator.c": "019b92525eaf472f608028dd6a68d3921ea39032d7973a3aabfaf0776f7bac64",
+        "tests/unity/test/testdata/testRunnerGeneratorSmall.c": "84391f905960812afd4640f92aae9c34c4e391f3a944d8bc93cc6db14f89d952",
+        "tests/unity/test/testdata/testRunnerGeneratorWithMocks.c": "5771f02d8a44f71d3abebe2509e83c3d53e228e16b3791a1621e440994670c8a",
+        "tests/unity/test/tests/test_generate_test_runner.rb": "bbcfbcd8c45d6c8dcd05fc2400914805d965e378297d536a63276cb2760deda3",
+        "tests/unity/test/tests/testparameterized.c": "baed74f82c4b452063bb0b33ad488acbb6df0cf2362a5209bc53a396b946bcea",
+        "tests/unity/test/tests/testunity.c": "89c5ac06926074a73ff5fcb89bddd923d9040aa3e5cd3108d733315714c9c71b",
+        "tests/unity_setup.c": "5f00ce6ea0455d5b898b5da3abc483e616f7d1f37fd2f8cc0ca84b09ff23e067",
+        "valgrind.supp": "5f721f7cff3acb7712af9836cdec19b7f352b851d73829b8e37e994e6f513ec1"
+      }
+    },
+    "doom": {
+      "path": "/home/glonex/doom/reference/linuxdoom-1.10",
+      "sha256": {
+        "ChangeLog": "21819ee48d39b293b8e22ac99a47974e0dc626bfaa71883a71075afb9e6fed76",
+        "DOOMLIC.TXT": "38f4b4239a60d5e73f899bbd6539aa58df084ff0a42f2c9df9242e2559d873f5",
+        "FILES": "0282bf127daebbdc2beae43e097aeeac62fc5b110ae6adcf1b38882decc5ee03",
+        "FILES2": "c08b7015d1bdf7fa1c2e18af6b3e5090b4a8b564874f28f675762233390d68aa",
+        "Makefile": "3dd1795bfaeb82e00e9f55a36a7c4c36a1fa23f20c53ff13e13f90158acd9e09",
+        "README.asm": "187f80381f8ed992cd6e67e765d859bc371fbc936b8c0f01873e55ecadd8ba3b",
+        "README.b": "9e514bf16dd153cde3c1e9ef43f26117a6b1c865a8a6f7912769b1a92171c186",
+        "README.book": "7f2041a98550c661577b90478c5c5dd080eb983240a67d10331f1fad3c31200e",
+        "README.gl": "0a3126584fe4fa1350ff3cc63f599251dd409639cffae6076ea7a115157c31e2",
+        "README.sound": "5d215221d722dd6a6979bf4b161a3a4bb555e6e0c8e9c4f1d2e239b93d0768cd",
+        "TODO": "8ff3c3caaca36ffb232b919300646afd68a7842d12629d8eb1559db198a50dfd",
+        "am_map.c": "c43cae103f537636ef2acb4132890d1fd8db1fa7ea35cb1ad4bde5aa5ed3b06e",
+        "am_map.h": "c8ac810976b1e758cc12ac59bbec5c43cf3071a2c657e03c102a63bd23c74a9e",
+        "d_englsh.h": "9030767d81cf5cce10beb226926e3a955c9682bac403704dd7b1bbf2f560ca36",
+        "d_event.h": "ec4ccfc98b0bad4aaaab11d9237d6f5763c52395a799b10269e166ee67f78adb",
+        "d_french.h": "fd12520d64192cd34d533a0de4902c8695a73233fc014aff3b6a6914ca6f95ef",
+        "d_items.c": "3a19ec3a9b45ffc583429a8724c2a838e67826a9d44772a2e17cd730a477c726",
+        "d_items.h": "d962f4490b56837e08cdfbfb7ad22427e0bb8d81726067d9c7c7d3b84ddddc26",
+        "d_main.c": "6092aa8310064afa95e85e797b32255d4fce4a80aef172991b162fc3d08c7a20",
+        "d_main.h": "ecb8c909bbc6e3c2fb719dea253671c8b07bb8af85905bc653977e0b2e90dc19",
+        "d_net.c": "46e3d0ae5076282d7700c4681b820ea10fcf3e769c2411fb66de01356c554df5",
+        "d_net.h": "a5135e9f52397f240461ae192f6bfc168363d470d3a1f62a7745b053a42e55ae",
+        "d_player.h": "2adeca507ee9289c69f3c3c005aea869c932c63cdcbbcc6bfa1c0c6f2337b8ec",
+        "d_textur.h": "9d81dd33042288b6a8ceb930aaff9a3246f87950470284905e3bfc8223f7c4ea",
+        "d_think.h": "53befad0eacf66f82843710559f2c60b286535dc241d9032db5a693c44e5c1c0",
+        "d_ticcmd.h": "b12448adbfce62c2740dc72b6d1f70e3a2be8581b92977b28ff00f07c808ad8b",
+        "doomdata.h": "21b3d4bc9d0e5ac97f91a61f353156a54e23a3ce56fd4d2c9ae51cdfa28f115c",
+        "doomdef.c": "1a165c65d6c3f75fe971dd4c96b5aee961a1f9f2941f88ba83318d4d82599448",
+        "doomdef.h": "9b47f74b24dde9bc97b14f58784cfee3b6f909617ebad5a55010b69b67d0e9b5",
+        "doomstat.c": "917101db74ea8be94e5cf6c26536d96f6b80471e37019c913cdd5c2f5b2021a8",
+        "doomstat.h": "05b2ee6cb69c5b9232c04c47520e4bf6de7b6cf92f401ee27997d36470180822",
+        "doomtype.h": "b9b0a06dcfe9c55801c94e79ae8a3ed637ab377b6da95fc29b6d50e2d766c412",
+        "dstrings.c": "a6fa671fbbe79b605e0d87365d522cb2c7a1304f1e887359469e43217c11c289",
+        "dstrings.h": "c3418515c8562405c2d6cbceeb6e02dad58ea4933b9e5cf42624d9d0c0d27622",
+        "f_finale.c": "7693e1756865f867d981d361a9afd92b96dca8d03374ddedd3a8177c79d713d2",
+        "f_finale.h": "b6b0fcd3004a59140ffa01eeea483c92f4e7c065ee29b478e77946154db338a4",
+        "f_wipe.c": "436f7797009b2eb2f6588d61f9157cb900203d4f928faa0b2c43ca9dacc0f2a7",
+        "f_wipe.h": "670104b27b7517c057d39b0729678ffefb5ca25711a9cdd06dc5b6aa868b59bb",
+        "g_game.c": "19dc156d3fa6773fb95107b1d733fdc3d5dd1834eaeee3dece1917ec80911881",
+        "g_game.h": "637c79a97baee6b9468945980f469fe265120df329e4ee3fe887585aed632111",
+        "hu_lib.c": "387d76ffd54942afde00346c61af69cb6254f029a57d812c2c3bd16ab093dc36",
+        "hu_lib.h": "e97511a79d7c7cd1bef310e740b083e30394cf1ff0dd17bdc46e4deb5bc7e07f",
+        "hu_stuff.c": "72f5b25c116af65cefc9d7a24c3039dcf5105c1cb24ea2e77a8ae8e2fef85e4f",
+        "hu_stuff.h": "5ca5b9f2267eaf3c7ff4740eec21228ebd7a757a1ee86a15a87ad3ac11d1d569",
+        "i_main.c": "c59faf3de2f58e7eb9f5b34722ccd0091677b008bc2a308d208415076859f6e8",
+        "i_net.c": "7c7491c1074dd24f948fa1099e2ed313cf8a28520e5b772ea8ac8b32ae9ca0ed",
+        "i_net.h": "6f54c2dda2b26b516a8089d342ca2c1c76dec21e391ab2d2ee1bd7d5ee562c15",
+        "i_sound.c": "3577b24eac306fcaa2bf3933952fee3469a8666f1ca7acbe8b755784a1c5cf00",
+        "i_sound.h": "411ee57300e1df9a425364e9e46dc94c5554fadfef64bd6ae03c6edd6ae233ad",
+        "i_system.c": "1b2dae4cab8fccf8d9037762600182dda8c3a17c45618d56fae82e76810f8d89",
+        "i_system.h": "def5f5b9e2ac7b7bf0cd63dc93e7f829ad626ecf8ec349c68e5b3d2d20655639",
+        "i_video.c": "bbe06a3ae48a66977197327eaa46032d139dd6a00c85aa79a0fe26eb9e1bbfcf",
+        "i_video.h": "a0a578989046071bf0805d33802f7bd9e3a4f28efa59c436f9684020e7827357",
+        "info.c": "e04b039df7652bc9138db811acd7e54ae17984490356997ebccfb31c885143bb",
+        "info.h": "57f29e28ffc83e0ef84d8d48c3b7c6c4d9d5a69702daae46096d5bbfc7e865a1",
+        "linux/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "linux/linuxxdoom": "0fe8e7e69042fa1135d92b88e8a8ad1fef55f24e3e678a1458ab303305f85a56",
+        "m_argv.c": "276d6782c7f5ca61b05d5cbbf3a1ce3096f3be1675d0f21dd964481fd29a22a5",
+        "m_argv.h": "8f2bc0992f09677ef2711c1a03fbdb57480bc73e73d6c5e466c478565a3fe07d",
+        "m_bbox.c": "f021adedf810b42f9872c5be9f76d61617beae44a6548397c80f816a37bdd37c",
+        "m_bbox.h": "c87b0578a777d281441af8f85ee7112d670574f6217d010d6049b24cc2ab14a0",
+        "m_cheat.c": "07a3411480e047cd000e38f38fc1b9444525e2912667893b3230aa9f7295eb0f",
+        "m_cheat.h": "e293c9dbb8383825bea1b161c4bd7e3df7e4701ad9aefe4bbcd06b552412321f",
+        "m_fixed.c": "a870b9a7be77419ecff2a19f8babf3837c131ef64dfd686ccd2ad892507b6f69",
+        "m_fixed.h": "9e238da90e631e57b216865546a8a65bd602525361bde980ae9902ff729798fa",
+        "m_menu.c": "609e9e4f0defb5091fb9d74ea56951003736206720e034744aee079816e1ae02",
+        "m_menu.h": "50a37222bb2615f38c4476e850ce3be4a48789e50941b161463cdfcf173a30cf",
+        "m_misc.c": "64d721265e70e5b7788eeb3cf16301349d53ededdb0bc0df513b5823d60c6d9e",
+        "m_misc.h": "d6160598e3ae70671b8cd990b89813d3e058a746c8ea6bac72da114370e441e4",
+        "m_random.c": "b53c3ec991215d307e500481e9eae34cfeb3c1bfe60c6f36cf0fdaee05843531",
+        "m_random.h": "13732329ed27c29bdc4a3d7694daffd2feb13e4bf7c16396b2fed96cf1f8a125",
+        "m_swap.c": "ab526883b3fae9ae5d2ad507a26a18ec9715885bfb9bc590bfe560dc81c126a1",
+        "m_swap.h": "0e4136e088e9dd7d795a42430385efc8641995b7ce0dd47746733e71221dad48",
+        "p_ceilng.c": "02aa9c25f356c3ef7e1cdcc621d72bc3e02e1884d887f1119422769e1016f36f",
+        "p_doors.c": "64c2c9f182ffbf62c6ce5607823acc39fa756893f2b4622662f8c13839c06513",
+        "p_enemy.c": "f61a777cb6aca9290ce038c70e5f8b7064bce64d38a68658e3cb4c5b63ae1057",
+        "p_floor.c": "b821079df824f324ca103cf3a65c16bf6b6988e9de1e2481566c852a1ec810be",
+        "p_inter.c": "d19679131ebe1cd06568700f933369b1e79206aca3526d5f2789ef847068c78f",
+        "p_inter.h": "e8fdb79d26842abd02f3319db13029e2b058b3cbb6e50172010f4a5a3e7d8398",
+        "p_lights.c": "10fb9d7cf2e3c492d048d410b08249e575f9ccf60cb02be6b05ab0821fef6179",
+        "p_local.h": "52ae113d35f60c106b7e341b85e96f88eefcce6d7cb4bf6ed3b41156a07e946a",
+        "p_map.c": "4c4ee258bbe6003b70b978bb8f3b0d1db1a7d7baded45db803f11554129350e3",
+        "p_maputl.c": "43ae53c0b7dbacc315c316c937503c30ae05fe30c1aacc2cf47dac188f45661f",
+        "p_mobj.c": "a1480c37c3c81ce86e4760d745aef4525cd3cb836e6193a7a4bc79fe82552b3c",
+        "p_mobj.h": "5c790e4bd083b4c9f4308230ac2361ac441739b6a5b58f780840cb9e38c2f2c3",
+        "p_plats.c": "294e07bfcf734738f3402747a0842cab4b054545aa44a5fdc1478779ea0ea31d",
+        "p_pspr.c": "eadd27b8e074382f4459ac6ff3d3269d12297b44aa34d445931cdecfce0bf8ba",
+        "p_pspr.h": "e5f69b30e8ad12ffcdf574f63c59cdf28a09c1d28f70cb7b07326d7204cb714d",
+        "p_saveg.c": "8a3447283a7fc883559911b11ac3c8e32fc7c9aaf05eae5951f9d8bfa5b207c6",
+        "p_saveg.h": "c48e201efbc7abff22b467bfed2a687c04abdbfdee86f51164e7961fb739bc0c",
+        "p_setup.c": "94b77de5e873aeaf767ce83ffc3459daeeb98ed158cf073c9b141d171a7e1507",
+        "p_setup.h": "7d0af828a473c1c8793a00c6f5fa2e681a7936bd5749caf687a797f62ff18461",
+        "p_sight.c": "e5174d872ea20a6bcb56610e522e9c48a8dc6d4c1c25eaf0538d4d29c27ea438",
+        "p_spec.c": "87e8b57988a8bb963e10e95a44eb3f003397ac1f97a2f228928a3dec42b0f6ec",
+        "p_spec.h": "92de972c6bd65a223821acd12b05aecf54dbc8e9da200bc09e11b3418939268d",
+        "p_switch.c": "f009bf90e98de8b02f1e671a96a84e140fb4bce2d2fe4d9c1104782c48b23180",
+        "p_telept.c": "709bae70fbb60ba759f9e7294dae94e7c8d0502d662b937bf066bc6ec89683e6",
+        "p_tick.c": "3af6878ce862949023c56bcf55f4c67639d2c9c294411ea5e91ba3c365591096",
+        "p_tick.h": "84179bafba26d5d726268959676e19adb857b8a7f481f7e3ba7fb375b00d80a7",
+        "p_user.c": "df213509bf02bcbad0b9a7d909ba3987f2678cb5c6847cb8a32e7f74320dcb14",
+        "r_bsp.c": "64ff9719803bd069f097c7a28d186ff29bca06f0039c6ec0e3a226f2b8942560",
+        "r_bsp.h": "d0f1c5b192324cc7f1161a8d3ae226a7c873071fbf8449995218c12fcf0fff29",
+        "r_data.c": "f5fab3992ad3685385afac9e2bd0699a3a006a4a423ebb6dfaac9b6c0089090d",
+        "r_data.h": "2d29b833b7ba208d3777c89a49344ea2ec1d20e57d466a34a97f2d8d7f77cec8",
+        "r_defs.h": "bb47878d9196edc6fe2d8833ca0ad8d68419e85c56946bc77ccdaa9d9f73a67d",
+        "r_draw.c": "210b19fa71d27766508960eeacfdfd8e43c1af578f21c5faa3fe4811a690ca03",
+        "r_draw.h": "5e877e5c0dc20e190cfa2cb2e98aaef0a1e5a8c8f2f8a954060cb948c1636e67",
+        "r_local.h": "8c435a72109659b5fa8ca3610ede02a4feeb9e2879f71899ab5cdd5e22469adf",
+        "r_main.c": "6b65aa6b6f477c61036a714cd6e122a5bd12804d75d0307075ba442761141c01",
+        "r_main.h": "42e9e05a4d1f9cbbd9839b199838ad9d65649e6d7ebdfec6a0f26b007fa12efa",
+        "r_plane.c": "0a60e674c8b075f68feb12e46e0510226db53157045ada6357d06f18dffa7e79",
+        "r_plane.h": "57e51bdbe6062fe79a79654d8a1f42b23f8ccacd2eae03aa52075c4a1c03440e",
+        "r_segs.c": "9568117df5f6bd5502ff81f49b1b828d9eb7da61cfe70c898ee6b77d98d45df6",
+        "r_segs.h": "c928574c15bda199147583d374776938cf63ca1b969c93c5b66f71e383ca2b78",
+        "r_sky.c": "c0feb5b1a1c239388daa7993372a646964696575d37093511af719907f2fdcc3",
+        "r_sky.h": "b27c4e0db007272a5562158eff47bf7bbf6632688513b985a47b464dd576abf9",
+        "r_state.h": "d548250ebde280cb00d764ec51622f8994946dce617cc183b3b83b1f869f87ae",
+        "r_things.c": "279cbdbac5c15c806ba22b4f6f0dba3c4cb091d13b83d57abfceadbb13531c0e",
+        "r_things.h": "c7fc3e5c3925908838c66bdc28c5d49ebaf6bb7ada546f33fd66afe44b56b676",
+        "s_sound.c": "d52dee042f2633f5f423c2ffb442198ab2aae351ee6f1165e71f730c6fe22998",
+        "s_sound.h": "2296c62e5eeccf9f81b996593ed0857024e0ccfde4518c60577257209c59a887",
+        "sounds.c": "41c317fcaeba0da0840cd1b54b6025c3d9eb2ad92f5598714658039ffb29530d",
+        "sounds.h": "fa5a6bb43465796d6f93f8fe8a743f8e939e21ef61aebb975462c5442e3c06ed",
+        "st_lib.c": "772d8fd1e9e273180d438f8b1e4dad2c47a808d4e7670e8875bb678b1a682d49",
+        "st_lib.h": "ff3907aeed0fb8e29ac42b2e2e25b6d05b896617835e49538148cef934a9a130",
+        "st_stuff.c": "fed1af0bf1d713816e70d874e04c69683b1b5f699ce74930bf6d12f4619439e2",
+        "st_stuff.h": "af165dc1c49c0f4ca37775becbba996b4b31fdb98990983f5ec52322bed6cbe1",
+        "tables.c": "82357701a7f8747ab0ca8b080c6add2fe67877c63f62879709f0d9cf57837f5d",
+        "tables.h": "b5f1f846c57a2d065f150a5f1d67d69942a6a42203adb43ef370726eb03922f6",
+        "v_video.c": "6f0bb2a0530d0b0780b761d401abf40aa9dfc530254ce658433c555a575d7b73",
+        "v_video.h": "608e4575eaeb29f380c93be6724d35ed5833b6f81a8248b3999dc758797ecaff",
+        "w_wad.c": "70163cbddad7dc519f2d83b46b6416145a4058c0021f2671cacb23799e3d3d1f",
+        "w_wad.h": "8a3edaa58e27a7c82ba02c7ae9aa749f3f93c98c0e89c64ba0702adb6b760159",
+        "wi_stuff.c": "5024fce0f924e8240dbe4ce0772a135bda6452b4161d53908027944f7f3ef2fe",
+        "wi_stuff.h": "58be76a9ccbab3d48708bcc56e336f243ec61a81a2fde6a0c80dc67e83c8b98b",
+        "z_zone.c": "a82cd4511206456080fc2dba6cd8573b8815b3790a1de7dda6290a9382325e73",
+        "z_zone.h": "48c74bc3010529c67a2493eb0a9638597bd95c4c2bab8c4aebb86fd5c051936d"
+      }
+    },
+    "wolf3d": {
+      "path": "/home/glonex/wolf3d/minimal_reference/wolf4sdl",
+      "sha256": {
+        "README.txt": "1e704df12b3826eb7e251ffa05939c37a373afd71ec4ffb5814a41c693f88b66",
+        "audiowl6.h": "039237a5dbc7a2abab0bbf398c550ca8fa3e90b899712e4078b97b513eb7cf1f",
+        "gfxv_wl6.h": "546c32d66abf88315dae8c1f77c6b9c746faeead39f7976ab1ae4f858f57eb8c",
+        "id_ca.c": "28d7edd8a5ae0253285b09fc1c4faed527577077eb5dbb09ea83872c1b57176f",
+        "id_ca.h": "5b89578cbf5c334be81072c9703e905677e59c71230492d5bb167d2712678537",
+        "id_in.c": "1aafcccbb025d60fe4cc3c5941c28f50f77b0191ae939f320ad13496dfbdadbd",
+        "id_in.h": "34dca049bd405f33a5b2c0748e5915da6e1fbf4abb2844155c0fb1663d957ad5",
+        "id_pm.c": "e12ebeecc31984ba18b1a363d33d0ad5d5509c6f9078c56a40672c372777b768",
+        "id_pm.h": "2e82a379264d4cb2367c099e54180608e34aa5f59e6e9637cd1f9e4ac61218b2",
+        "id_sd.c": "1a125a0ef11e915873e8dc479050a446e2cf492ddf17decdcce9b60863a045eb",
+        "id_sd.h": "af5b29b440d515c915bf1983ebccd34ddf30ddcc384bafbd6662df5158fc5264",
+        "id_us.h": "a26a62562d1c0ba0e1ac8f06d0466bf50d02c59686e82ffd2173514f884305d2",
+        "id_us_1.c": "5c292b2dfa55aa95e5986d12b2e4ff3931d2d9b2b3e2c7ff8d648c14337680fa",
+        "id_vl.c": "daf8b2279908c11c1c0f2f15e0a84f791ed70f043778fac42d92ed5828311069",
+        "id_vl.h": "29fee39eb319bcdcfc3a7c6833588f3e2bfa89aec4aa34050b48506997c2d99d",
+        "license-gpl.txt": "31af02b73a7d7fa7c533ec0d32997b09bd5dfc5e87898978b5846d7d5b4eb35b",
+        "license-id.txt": "25166cc269ac0a1220723f2d2250f87960cafb068bccb0ce00a7a53d4f4abc88",
+        "license-mame.txt": "4c3d4d57b2cd575f97e657b482d386c4ebb97b92328fdc6963078a76c0f639d5",
+        "mame/fmopl.c": "5154834c5f28ba1ab5e3016dba44f3072f7a909876ba86d05f09bf27b1a6cad9",
+        "mame/fmopl.h": "aa061ec7588abf9ccabadf70878f6409b7bb5c4063d73018b683a65728e004b1",
+        "wl_act1.c": "21b2f03c66d6cc988ed4bd29aef66eb2888073e50511bbbbb7436bf385fea863",
+        "wl_act2.c": "bc0491a2cc83dff45c2b64a0477e44a2f066cce908d481f67f601910d4b78032",
+        "wl_agent.c": "2e72347b18dd90cb8af3a59e555dfd9d4572f31039943e15dbf2ed17f7f858bf",
+        "wl_def.h": "b56c9f98c9090b9e39125a42da85cf507a2aee773696fa312ea486bb9125a505",
+        "wl_draw.c": "b3d5dd3e473cdcdebe66905f4372c3818c19e995742608634bde861c86dc25a5",
+        "wl_game.c": "f441e963d052a91602913b7719696d382a0a0207033de62303fa42af717c3eb0",
+        "wl_inter.c": "0e1c2479f9dd87e9ba88199a34128866fe9e4fff79b0a528cd2f03e7462d47bf",
+        "wl_main.c": "bec4a14189c0fb11995506264e7a3ca5de5a4d7ec713b5cd7848015bd0d97992",
+        "wl_menu.c": "7357fc4b29b7dc2525d148401f26deaf884187615c1da5b807c90afb06e7b1df",
+        "wl_menu.h": "d316cd37baae6dbb183467db87da8015d2d59bf7bd49aeb4e396d41c429c5b2c",
+        "wl_play.c": "79979e7de5af0bfb5ec61fc790fc08fc900aeb77182fdf3094f448dc13a88075",
+        "wl_state.c": "2d6d8ef2fab93b2bc208501f5e58908e30c261d286675cb38391ce2c31e0bf4b",
+        "wolfpal.inc": "2256410bbb61a7566fe831bcd1373a3ea6595aebfcfca49281e5e17e28c26197"
+      }
+    },
+    "wolf-assets": {
+      "path": "/tmp/fas-corpus-replay-20261105/wolf-assets/source",
+      "sha256": {
+        "audiohed.wl6": "a39ff1b21a8b33fc51317b7afd2b04557d7ac52b0754a8e09c73b5a176a91097",
+        "audiot.wl6": "022b4c80cc6bbd56fba58ff0e280e1c138615b84b05abedbaf579aba1b681634",
+        "gamemaps.wl6": "b268042cdcf1b725fe17997482572f81d4ad485d32a692d29bdf2560d95ae805",
+        "maphead.wl6": "a9637cf2760dbd7ac34a6b1f13cb31c0e76ecc0e282f0f0599210eb392d158c8",
+        "vgadict.wl6": "30dcfc71cbad29c126b20223dd81bf3a722c1288b7357353bc5b10077f870144",
+        "vgagraph.wl6": "0d018e36dc1993071bd8cb4b7e442cafa9e9bd6eb94eaeff5e1d0c7d7940f9cf",
+        "vgahead.wl6": "f76fbe9f3e16794c4fc19d06b4a1dae2645320d5a966b0aea72d4ca3b85059d0",
+        "vswap.wl6": "d4b886fc9b47f848f111d8b015969014ba460e980bed9895e219dff29169bcf9"
+      }
+    }
+  },
+  "limitations": [
+    {
+      "project": "sieve/native-backend",
+      "diagnostic": "error: native backend: call to `fprintf` requires an unsupported external ABI (only non-variadic i32/i64/pointer parameters and results are supported)\n"
+    },
+    {
+      "project": "doom",
+      "scope": "link/startup failure path; no gameplay/WAD acceptance"
+    }
+  ],
+  "timing_comparison": false,
+  "dependency_policy": {
+    "strict": true,
+    "search_paths": [
+      "/usr/lib/x86_64-linux-gnu"
+    ]
+  },
+  "toolchain_inputs": {
+    "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+    "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+    "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+  }
+}
