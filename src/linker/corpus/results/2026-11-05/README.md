@@ -6,8 +6,8 @@ preserved in the accompanying JSON. Reproduction commands are in `../../README.m
 | Corpus | Result | Limits |
 | --- | --- | --- |
 | Chibicc | GCC-built compiler linked with fas-ld; all 41 C test programs in the snapshot compile, link, run and match GNU ld, dynamically and with static glibc | Stage 2 and compiler-driver tests unverified |
-| Fas Sieve | All four original sources, including `primes_zero3.fas`, run and pass their prime-count check | LLVM-generated object + fas-ld; native backend rejects variadic calls |
-| Doom 1.10 reference | 62 C objects link fixed/PIE; startup output/status match GNU ld | Missing-WAD path; no gameplay verification |
+| Fas Sieve | All four original sources pass their prime-count check with LLVM/native objects linked by Fas/GNU; native automatic hosted driver also passes, dynamically and with static glibc | Native runs disable `opt`/`llc`; header imports and hosted discovery still require a C compiler |
+| Doom 1.10 reference | 62 C objects link fixed/PIE; startup matches GNU ld; headless 32-frame rendering hash `52e20f0b442bf948` matches across all four links | Instrumented device hooks, local Doom shareware IWAD; no general gameplay verification |
 | Minimal Wolf3D reference | Links; instrumented copy renders three E1M1 frames headlessly and matches GNU ld framebuffer hash `38d3d4bed65dfa55` | Deterministic bounded harness, not general gameplay |
 | cJSON v1.7.19 | All 21 upstream core/utility test programs pass and match GNU ld | GCC PIC, PIE, installed glibc |
 | musl 1.2.5 isolated sysroot | Static LE/IE, fixed/PIE LE/IE/GD/LD/TLSDESC, lifecycle/thread/errno checks; late dlopen TLS | No static GD/LD/TLSDESC relaxation; glibc is tested separately |
@@ -15,6 +15,19 @@ preserved in the accompanying JSON. Reproduction commands are in `../../README.m
 
 The JSON captures observed Sieve pass counts/elapsed time only as program output.
 Those values are not linker or language performance results.
+
+`native-hosted.json` pins the combined ABI/driver snapshot at `5fd063f`: all
+four sources pass 20 executions (eight LLVM object consumers, eight native
+object consumers and four direct native driver builds). The same run repeats
+Doom startup and Wolf3D rendering acceptance. `native-static.json` adds 12
+native static glibc executions. Selected backend failures now fail the corpus;
+they are no longer recorded as optional limitations. `doom-render.json` adds
+32-frame E1M1 skill-3 rendering with identical Fas/GNU fixed/PIE hashes. The
+first development attempt used unsupported `-iwad`; correcting the harness to
+use Doom 1.10's `DOOMWADDIR` discovery resolved it without linker changes.
+The reports preserve separate harness hashes and snapshots. Full logs are in
+`/tmp/fas-native-projects-20261105`, `/tmp/fas-native-sieve-static-20261105` and
+`/tmp/fas-doom-render-v2-20261105`. Assets and binaries are not checked in.
 
 Full local snapshots, binaries and command logs:
 

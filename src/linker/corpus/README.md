@@ -5,8 +5,10 @@ snapshots into a new output directory, records source/toolchain hashes and all
 commands, and compares behavior against GNU ld. It makes no timing comparisons.
 Current paths/library names target the tested Debian-style Linux x86-64 sysroot.
 Source inputs and game assets are not redistributed or changed.
-Each run copies the selected linker into its output directory and hashes that
-snapshot, so rebuilding the development executable cannot change a running replay.
+Each run copies the harness, selected linker and (for Sieve) compiler into its
+output directory and hashes those snapshots, so rebuilding development
+executables cannot change a running replay. To replay a saved harness from its
+temporary directory, pass explicit `--linker` and `--compiler` snapshot paths.
 
 From `fas`, after a release build:
 
@@ -24,7 +26,14 @@ development libraries. No display is opened. Wolf3D runtime probes use SDL's dum
 video/audio drivers and a recorded change to the snapshot: bypass menus, fix the
 random seed and hash the first three E1M1 game frames. This is a bounded rendering
 check, not general gameplay acceptance. Without assets, Wolf3D is link-only.
-Doom currently compares startup's missing-WAD failure path; gameplay is unverified.
+Doom compares startup's missing-WAD failure path. Add `--doom-wad /path/to/DOOM1.WAD`
+to also render 32 single-tic frames headlessly with fixed and PIE Fas/GNU links.
+The recorded snapshot changes bypass display/audio devices and hash indexed
+framebuffer pixels; simulation, asset loading and rendering still run. Local
+assets are copied into the temporary directory and hashed, never redistributed.
+Linux Doom 1.10 discovers recognized lowercase IWAD filenames via `DOOMWADDIR`;
+the runner normalizes the supplied filename. This remains bounded rendering
+coverage; input, audio output and general gameplay are unverified.
 
 Add `--strict-dependencies --dependency-path /usr/lib/x86_64-linux-gnu` to replay
 hosted links with `--no-allow-shlib-undefined` on both Fas and GNU ld. Repeat the
@@ -51,10 +60,16 @@ This mode cannot be combined with static/static-PIE or strict-dependency options
 the upstream driver suite chooses its own shared/static/dynamic link policies.
 
 Sieve runs each original `.fas` source and its built-in prime-count validation.
-The default path uses LLVM-generated objects with fas-ld. Native compilation is
-attempted separately and recorded as a backend limitation if it fails. Current
-native scalar ABI support rejects these programs' variadic calls. Sieve prints
-its own elapsed time/pass count; these values are not benchmark comparisons.
+By default both LLVM and native backends are required; select only one with
+`--sieve-backend llvm` or `--sieve-backend native`. Every object is linked and
+executed with Fas and GNU ld. Native sources also compile and run through the
+automatic hosted driver. Native compilation sets unavailable `opt`/`llc` paths
+to catch LLVM fallback. Any selected backend failure fails qualification.
+The combined native ABI/driver branch passes all four original sources,
+including variadic libc calls, dynamically and with static glibc. C header
+import and hosted CRT discovery still use the configured C compiler.
+Sieve prints its own elapsed time/pass count; these values are not benchmark
+comparisons, and pass counts need not match across executions.
 
 Download a pinned small library and run its upstream tests:
 
