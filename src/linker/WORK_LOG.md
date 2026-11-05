@@ -1,5 +1,24 @@
 # Linker implementation work log
 
+### Current checkpoint: build-ID allocation reduction
+
+Untimed Memprof samples identify SHA-1 boxing as roughly 35%/39% of allocated
+words in stage-1/stage-2 dynamic Chibicc links. Masked immediate integer words
+remove that loop allocation on the supported 64-bit host. Exact stats show
+35%/40% fewer total allocated words, with byte-identical outputs. Static replay
+recipes omit build IDs and remain unchanged. No new wall-time claim is made;
+the quiet-PC question is pending and Claude is running integration checks.
+
+SHA-1 matches Python hashlib on 717 deterministic binary inputs, including every
+length 0..512, random larger payloads and a 1 MiB input. Additional high-byte and
+padding boundary vectors are permanent units. The full local release suite with
+isolated musl passes 243 Python cases in 41 groups, OCaml checks and all 3,792
+compiler checks, without skips. All four pinned real-link replay outputs retain
+identical bytes and pass their runtime checks. Evidence and the reusable optional
+allocation sampler are under `benchmarks/`; raw logs/profiles remain in
+`/tmp/fas-allocation-profile-20261105` and `/tmp/fas-sha1-release-20261105.log`.
+
+
 ### Current checkpoint: combined native real-program qualification
 
 Qualification runs use the isolated `linker-qualification-20261105` worktree,

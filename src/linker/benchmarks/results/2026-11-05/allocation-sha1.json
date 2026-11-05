@@ -1,0 +1,157 @@
+{
+  "methodology": "Untimed single-run --stats allocated-word counters and OCaml 5.4 Memprof word samples (rate 0.002, stack depth 10). Desktop activity unspecified; no timing comparison.",
+  "timing_comparison": false,
+  "base_commit": "a54bbf8",
+  "baseline_binary": {
+    "path": "/tmp/fas-allocation-profile-20261105/fas-before",
+    "sha256": "0443bd5a1e9cacecd1692866fb4c1b985f08e461c2e489df85813238b25bc4f9"
+  },
+  "candidate_binary": {
+    "path": "/tmp/fas-allocation-profile-20261105/fas-after",
+    "sha256": "5be1118afa61c7874ec9bb29129a82092e261b3d43ba74d2fdc39432993fd25d"
+  },
+  "source_overrides": {
+    "src/linker/sha1.ml": "fb8c366114e849e857f65e7f1b9e6f80f2a104750bcd63e24febc9f3cdcb5382",
+    "src/linker/test/unit.ml": "561a00b7dc0cd2da55d3d853da2cd72d18980be3b631ab0dd4b2c165aab837e5"
+  },
+  "manifest": {
+    "path": "/tmp/fas-real-link-read-cache-20261105/manifest.json",
+    "sha256": "5f341cd9364b669cf2e11c94a8cfd64b828de0bfba60015ad8359ba9d2c5bd7a"
+  },
+  "comparison": [
+    {
+      "name": "chibicc-stage1-dynamic",
+      "results": {
+        "before": {
+          "allocated_words": 4197750,
+          "emit_allocated_words": 1965628,
+          "sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d"
+        },
+        "after": {
+          "allocated_words": 2727796,
+          "emit_allocated_words": 494874,
+          "sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d"
+        }
+      },
+      "byte_identical": true,
+      "allocation_samples": {
+        "before": {
+          "total_word_samples": 8560,
+          "sha1_word_samples": 3001
+        },
+        "after": {
+          "total_word_samples": 5558,
+          "sha1_word_samples": 0
+        }
+      }
+    },
+    {
+      "name": "chibicc-stage2-copy",
+      "results": {
+        "before": {
+          "allocated_words": 4702235,
+          "emit_allocated_words": 2318727,
+          "sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68"
+        },
+        "after": {
+          "allocated_words": 2839169,
+          "emit_allocated_words": 454863,
+          "sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68"
+        }
+      },
+      "byte_identical": true,
+      "allocation_samples": {
+        "before": {
+          "total_word_samples": 9422,
+          "sha1_word_samples": 3709
+        },
+        "after": {
+          "total_word_samples": 5713,
+          "sha1_word_samples": 0
+        }
+      }
+    },
+    {
+      "name": "chibicc-static-glibc",
+      "results": {
+        "before": {
+          "allocated_words": 10681187,
+          "emit_allocated_words": 4958650,
+          "sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e"
+        },
+        "after": {
+          "allocated_words": 10681873,
+          "emit_allocated_words": 4958650,
+          "sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e"
+        }
+      },
+      "byte_identical": true,
+      "allocation_samples": {
+        "before": {
+          "total_word_samples": 21438,
+          "sha1_word_samples": 0
+        },
+        "after": {
+          "total_word_samples": 21359,
+          "sha1_word_samples": 0
+        }
+      }
+    },
+    {
+      "name": "cjson-static-pie",
+      "results": {
+        "before": {
+          "allocated_words": 8516347,
+          "emit_allocated_words": 3516526,
+          "sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3"
+        },
+        "after": {
+          "allocated_words": 8516881,
+          "emit_allocated_words": 3516526,
+          "sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3"
+        }
+      },
+      "byte_identical": true,
+      "allocation_samples": {
+        "before": {
+          "total_word_samples": 16978,
+          "sha1_word_samples": 0
+        },
+        "after": {
+          "total_word_samples": 17010,
+          "sha1_word_samples": 0
+        }
+      }
+    }
+  ],
+  "profile_harness": {
+    "path": "/tmp/fas-allocation-profile-20261105/profile.ml",
+    "sha256": "1edd5217f9308606a8ee9d136ac83b570827e807ac779ee8c0ea379d4ccfb61f"
+  },
+  "raw_profiles": {
+    "/tmp/fas-allocation-profile-20261105/cjson-static-pie-after.txt": "41c2c07d3f307126cfd01e98d108ee730f9c4d4127f4043dd4eb84b3420911ca",
+    "/tmp/fas-allocation-profile-20261105/chibicc-static-glibc-after.txt": "9f39da35a779e1e14118cb4e72c21f192aebde773bf31fe4d04ae42b516e4e3f",
+    "/tmp/fas-allocation-profile-20261105/chibicc-stage2-copy-after.txt": "b997f9d71ed689b926b9580ffd9c4d610f060f78bfab6985981af7f0e738c677",
+    "/tmp/fas-allocation-profile-20261105/chibicc-stage1-dynamic-after.txt": "7d7b112fdccaef0b314223159f9f73439f8c4c0943e0a096e5ae134e0ca2fd74",
+    "/tmp/fas-allocation-profile-20261105/cjson-static-pie.txt": "11a1968cbee4c18d57560eb3a5a17ecc2c818895fd4792738e48d5bf7f2fb7f8",
+    "/tmp/fas-allocation-profile-20261105/chibicc-static-glibc.txt": "63cdf5d720d5605d8d67056a43d9479cab002f5280b946a3a06b6308b5cabb34",
+    "/tmp/fas-allocation-profile-20261105/chibicc-stage2-copy.txt": "baf7e793efbb23a54eefa8c3e4a48076b453ed2f4c39c8e7bc173c8c8d119023",
+    "/tmp/fas-allocation-profile-20261105/chibicc-stage1-dynamic.txt": "1e536b7469fe48314a26843c654a3f1eeabac5e5fb7c50f3b3b6e877e2edf3fb"
+  },
+  "differential": {
+    "oracle": "Python hashlib.sha1",
+    "cases": 717,
+    "status": "passed",
+    "report_sha256": "13b19f14cf62a96a4bc0d5ab256ff101a6416ed2ea15d1557968192cb72cb98f"
+  },
+  "regression": {
+    "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --profile release",
+    "status": "passed",
+    "python_groups": 41,
+    "python_cases": 243,
+    "compiler_checks": 3792,
+    "skips": 0,
+    "log": "/tmp/fas-sha1-release-20261105.log",
+    "log_sha256": "8db865259ab4d78d84ec8d2e056aa565c406bde5b47b4f5d26cee61b11c44322"
+  }
+}

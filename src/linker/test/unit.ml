@@ -40,6 +40,36 @@ let () =
       (65, "11655326c708d70319be2610e8a57d9a5b959d3b");
       (1_000_000, "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
     ];
+  (* Independent hashlib vectors: all byte values, wrapping additions and
+     both sides of SHA-1's one/two-block padding boundaries. *)
+  List.iter
+    (fun (length, expected) ->
+      let input =
+        Bytes.init length (fun i ->
+            Char.chr (((i * 197) + (i / 7 * 31) + 128) land 255))
+      in
+      let digest = Sha1.digest input in
+      let hex =
+        String.to_seq digest
+        |> Seq.map (fun c -> Printf.sprintf "%02x" (Char.code c))
+        |> List.of_seq |> String.concat ""
+      in
+      assert (hex = expected))
+    [
+      (2, "f8556eaf16ebf49f8c35467a7515d9e86713b712");
+      (55, "67c99092ae33f8fe6f758d86ffae3e3c03de7657");
+      (56, "871678b25b88d2c2002c17a162f2ee578a0e94bf");
+      (63, "2b4854216054db8e9debc9e905db32cdaefb2d0e");
+      (64, "d13c70a561483b8417b46b2a3147d8fa2612fba6");
+      (65, "c68f2017c573094d4978d0795fd8d2e2b86ba845");
+      (119, "f6d5a51b78f1df628c3609ee2903af7720afafd9");
+      (120, "7444e27a57d6bf2c588510b64c25b2ea37415e22");
+      (127, "09128d67047a5d173569242be722161c754a8166");
+      (128, "61605dac973c67cce695bc284a9ddbc946b0d2ce");
+      (129, "32b0d6f84f80e7451005db7e1fb0012ca718e7b8");
+      (256, "bd65ecc1ceddfa0c0e13275a5b3ac6917c75fef5");
+      (4097, "7e9ad3cc14deb00e468aa7b4ce309b1908e7126d");
+    ];
   relocation 1 0x1122334455667788L 0L 0L "\136\119\102\085\068\051\034\017";
   relocation 1 0L (-1L) 0L "\255\255\255\255\255\255\255\255";
   relocation 1 (-1L) 1L 0L "\000\000\000\000\000\000\000\000";
