@@ -421,8 +421,21 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   let assignment = Hashtbl.create 64 in
   (* per register: the intervals it holds that may still conflict *)
   let held = Ptbl.create 8 in
+  (* per register: every interval it holds, for re-placing an evicted one *)
+  let ever = Ptbl.create 8 in
   let all = callee @ caller in
-  List.iter (fun r -> Ptbl.replace held r []) all;
+  List.iter
+    (fun r ->
+      Ptbl.replace held r [];
+      Ptbl.replace ever r [])
+    all;
+  let usable_for rs =
+    let crossing = crosses_call rs in
+    let string_crossing = crosses_at string_ops rs in
+    fun r ->
+      ((not crossing) || List.mem r callee)
+      && not (string_crossing && List.mem r strings)
+  in
   List.iter
     (fun (start, k, rs) ->
       (* forget intervals that ended before this start: later intervals start
@@ -433,11 +446,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
             (List.filter (fun (_, _, rs') -> last_end rs' >= start) (Ptbl.find held r)))
         all;
       let crossing = crosses_call rs in
-      let string_crossing = crosses_at string_ops rs in
-      let usable r =
-        ((not crossing) || List.mem r callee)
-        && not (string_crossing && List.mem r strings)
-      in
+      let usable = usable_for rs in
       let fits r =
         usable r
         && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find held r))
@@ -450,10 +459,12 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
           (fun k' -> Hashtbl.find_opt assignment k')
           (Option.value ~default:[] (Hashtbl.find_opt related k))
       in
-      let take r =
+      let take_as ((_, k, _) as iv) r =
         Hashtbl.replace assignment k r;
-        Ptbl.replace held r ((start, k, rs) :: Ptbl.find held r)
+        Ptbl.replace held r (iv :: Ptbl.find held r);
+        Ptbl.replace ever r (iv :: Ptbl.find ever r)
       in
+      let take = take_as (start, k, rs) in
       match List.find_opt fits hinted with
       | Some r -> take r
       | None -> (
@@ -481,13 +492,52 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
               match
                 List.sort (fun (a, _, _, _) (b, _, _, _) -> compare a b) candidates
               with
-              | (cost, r, vk, victim) :: _ when cost < mine ->
+              | (cost, r, vk, victim) :: _ when cost < mine -> (
                   Hashtbl.remove assignment vk;
-                  Ptbl.replace held r
-                    (List.filter (fun x -> x != victim) (Ptbl.find held r));
-                  take r
+                  let drop t =
+                    Ptbl.replace t r
+                      (List.filter (fun x -> x != victim) (Ptbl.find t r))
+                  in
+                  drop held;
+                  drop ever;
+                  take r;
+                  (* the victim may still fit another register whole *)
+                  let _, _, vrs = victim in
+                  let vusable = usable_for vrs in
+                  let vorder = if crosses_call vrs then callee else caller @ callee in
+                  match
+                    List.find_opt
+                      (fun r' ->
+                        r' <> r && vusable r'
+                        && not
+                             (List.exists
+                                (fun (_, _, rs') -> conflict vrs rs')
+                                (Ptbl.find ever r')))
+                      vorder
+                  with
+                  | Some r' -> take_as victim r'
+                  | None -> ())
               | _ -> ())))
     intervals;
+  (* Second chance: a spilled interval that now fits a register whole (its
+     evictor may itself have been evicted) takes it, costliest first. *)
+  List.filter (fun (_, k, _) -> not (Hashtbl.mem assignment k)) intervals
+  |> List.map (fun ((_, k, rs) as iv) -> (-.weight k rs, iv))
+  |> List.stable_sort (fun (a, _) (b, _) -> compare a b)
+  |> List.iter (fun (_, ((_, k, rs) as iv)) ->
+      let usable = usable_for rs in
+      let order = if crosses_call rs then callee else caller @ callee in
+      match
+        List.find_opt
+          (fun r ->
+            usable r
+            && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find ever r)))
+          order
+      with
+      | Some r ->
+          Hashtbl.replace assignment k r;
+          Ptbl.replace ever r (iv :: Ptbl.find ever r)
+      | None -> ());
   (* Spilled phis share a stack slot with their spilled incoming values when
      the intervals allow it (the same rule as for registers), so their edge
      copies vanish. [slot_of] receives member -> representative. *)
