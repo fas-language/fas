@@ -2487,6 +2487,21 @@ let compile (m : module_) =
     in
     let m = t "cleanup" Mem2reg.cleanup m in
     let m =
+      t "unroll"
+        (fun m ->
+          {
+            m with
+            funcs =
+              List.map
+                (fun f ->
+                  match Unroll.func f with
+                  | f, true -> Mem2reg.cleanup_func (Ir_fold.fold_function f)
+                  | f, false -> f)
+                m.funcs;
+          })
+        m
+    in
+    let m =
       if Sys.getenv_opt "FAS_NATIVE_NOINLINE" = Some "1" then m
       else
         match t "inline" (Inline.module_ ~sizes:vector_sizes) m with

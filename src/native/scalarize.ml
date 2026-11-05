@@ -59,6 +59,9 @@ type st = {
   split : value array Hashtbl.t; (* chunk mode: vector alloca -> piece allocas *)
   ppieces : (string, value array) Ptbl.t; (* chunk mode: vector param -> pieces *)
   ins0 : value Hashtbl.t; (* insert at lane 0 -> the inserted scalar *)
+  dyn : (ty, value) Ptbl.t;
+      (* chunk mode: per vector type, a stack slot for lane accesses at a
+         variable index *)
 }
 
 let fresh st =
@@ -580,8 +583,40 @@ let zero_mask : value -> bool = function
   | _ -> false
 
 (* Chunk mode: the operations whose pieces are not independent *)
+(* Chunk mode, variable lane index: spill the pieces to a stack slot and
+   address the lane there. The index is masked into range, since an
+   out-of-range lane is poison but must not touch other memory. *)
+let dyn_lane st vt pieces idx =
+  let n, t = match vt with Vector (n, t) -> (n, t) | _ -> invalid_arg "dyn_lane" in
+  if n land (n - 1) <> 0 then unsupported "vector of %d lanes" n;
+  let sty = storage_ty st vt in
+  let p =
+    match Ptbl.find_opt st.dyn vt with
+    | Some p -> p
+    | None ->
+        let tmp = fresh st in
+        st.entry <- Alloca (tmp, sty, 16) :: st.entry;
+        let p = Local (tmp, Pointer sty) in
+        Ptbl.replace st.dyn vt p;
+        p
+  in
+  store_lanes st ~volatile:false vt pieces p 16;
+  let i = match value_ty idx with I64 -> idx | it -> cast st "zext" it idx I64 in
+  let i = bin st And I64 i (Const (I64, Int64.of_int (n - 1))) in
+  let g = fresh st in
+  emit st (Gep (g, sty, p, [ Zero; Index i ]));
+  (p, Local (g, Pointer sty), lane_bits t / 8)
+
 let instr_chunk st ins =
   match ins with
+  | Extract (d, (Vector (_, t) as vt), v, idx) when index_const idx = None ->
+      let _, q, al = dyn_lane st vt (lanes st v) idx in
+      emit st (Load (d, t, q, al))
+  | Insert (d, (Vector (_, t) as vt), v, idx, x) when index_const idx = None ->
+      let p, q, al = dyn_lane st vt (lanes st v) idx in
+      emit st (Store (t, x, q, al));
+      let ls = load_lanes st ~volatile:false vt p 16 in
+      Array.iteri (fun i l -> set st d i l) ls
   | Shufflevector (d, (Vector _ as vt), a, _, mask) when zero_mask mask ->
       let v =
         match lane0 st a with
@@ -718,7 +753,8 @@ let chunkable (f : func) =
            | Shl | Lshr -> t <> I8 && uniform y
            | Ashr -> (t = I32 || t = I16) && uniform y
            | _ -> false)
-       | Extract (_, _, _, idx) | Insert (_, _, _, idx, _) -> index_const idx <> None
+       | Extract (_, Vector (n, _), _, idx) | Insert (_, Vector (n, _), _, idx, _) ->
+           index_const idx <> None || n land (n - 1) = 0
        | Shuffle_zero _ -> true
        | Shufflevector (_, _, _, _, m) -> zero_mask m
        | Load _ | Store _ | Alloca _ | Gep _ | Phi _ -> true
@@ -913,6 +949,7 @@ let func structs (f : func) =
         split = Hashtbl.create 8;
         ppieces = Ptbl.create 4;
         ins0 = Hashtbl.create 16;
+        dyn = Ptbl.create 2;
       }
     in
     let top = ref 0 in
