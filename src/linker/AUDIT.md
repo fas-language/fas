@@ -14,6 +14,15 @@ separately here. The roadmap distinguishes current status from historical plans.
 
 ## Subsequent repair status — 2026-11-05
 
+
+The native driver also now carries generated static C adapter symbols into
+native IR, including callback constants, after the FIR hook. Previously the
+LLVM renderer applied these names while native emission kept the source helper
+name and could fail at link time. Embedded-C/header and callback regressions,
+plus the original assembly fixture with its required preprocessor define,
+verify this handoff. [Verification record](audit/native-static-adapters-2026-11-05.json).
+
+
 - **Synthetic dynamic exports fixed:** generated image endpoints use regular
   `.dynsym` section indexes so loader lookups include the image load bias.
   Explicit input absolute symbols remain absolute. Header/startup/loader
