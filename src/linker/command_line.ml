@@ -10,6 +10,7 @@ type config = {
   entry : string;
   inputs : Input.t list;
   statistics : bool;
+  print_version : bool;
   map_file : string option;
   options : Options.t;
   relocatable : bool;
@@ -25,6 +26,7 @@ let parse ?(link_only = false) arguments =
   try
     let output = ref "a.out" and entry = ref "_start" in
     let relocatable = ref false in
+    let print_version = ref false in
     let map_file = ref None in
     let gc_sections = ref false and undefined = ref [] in
     let pie = ref false and interpreter = ref None in
@@ -70,6 +72,10 @@ let parse ?(link_only = false) arguments =
       | "--version" :: _ ->
           application_option "--version";
           raise (Stop Version)
+      | "-v" :: rest ->
+          application_option "-v";
+          print_version := true;
+          options depth collected false rest
       | "--" :: rest -> options depth collected true rest
       | (("-r" | "--relocatable") as flag) :: rest ->
           application_option flag;
@@ -301,6 +307,7 @@ let parse ?(link_only = false) arguments =
             false rest
     in
     let items, _ = options 0 [] false args in
+    if !print_version && items = [] then raise (Stop Version);
     let directories = List.rev !directories in
     if
       !relocatable
@@ -329,6 +336,7 @@ let parse ?(link_only = false) arguments =
         entry = !entry;
         inputs = List.map input items;
         statistics = !statistics;
+        print_version = !print_version;
         map_file = !map_file;
         options =
           {
