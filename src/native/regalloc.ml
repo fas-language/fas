@@ -112,13 +112,13 @@ let uses_string_regs = function
 (* [skip] holds the ids of instructions whose code is folded into their
    block's terminator; they define nothing that needs a home. *)
 let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -> false)
-    ?(operands = default_operands) ?slot_of (f : func) =
+    ?(operands = default_operands) ?slot_of ?saves (f : func) =
   let key_of = key_of_skip ~in_class skip in
   let iter_operands g ins = List.iter g (operands ins) in
   let start_pos = Hashtbl.create 16 and end_pos = Hashtbl.create 16 in
   let block_starts = Hashtbl.create 16 in
   let n = ref 1 in
-  let calls = ref [] and string_ops = ref [] in
+  let calls = ref [] and call_ins = ref [] and string_ops = ref [] in
   List.iter
     (fun (b : block) ->
       Hashtbl.replace start_pos b.id !n;
@@ -126,7 +126,10 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       incr n;
       List.iter
         (fun ins ->
-          if clobbers ins then calls := !n :: !calls;
+          if clobbers ins then begin
+            calls := !n :: !calls;
+            call_ins := ins :: !call_ins
+          end;
           if uses_string_regs ins then string_ops := !n :: !string_ops;
           incr n)
         b.instrs;
@@ -134,6 +137,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       incr n)
     f.blocks;
   let calls = Array.of_list (List.rev !calls) in
+  let call_ins = Array.of_list (List.rev !call_ins) in
   let string_ops = Array.of_list (List.rev !string_ops) in
   (* Local uses and defs, and phi uses per edge *)
   let blocks = Hashtbl.create 16 in
@@ -290,6 +294,20 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
     let rec pow w d = if d = 0 then w else pow (w *. 10.) (d - 1) in
     pow 1. (min depth 6)
   in
+  (* block weight per call, for the cost of saving a register around it *)
+  let call_weight = Array.make (Array.length calls) 1. in
+  let ci = ref 0 in
+  List.iter
+    (fun (b : block) ->
+      let e = Hashtbl.find end_pos b.id in
+      if !ci < Array.length calls && calls.(!ci) < e then begin
+        let w = block_weight b in
+        while !ci < Array.length calls && calls.(!ci) < e do
+          call_weight.(!ci) <- w;
+          incr ci
+        done
+      end)
+    f.blocks;
   let weights = Hashtbl.create 64 in
   let weigh w k =
     Hashtbl.replace weights k
@@ -560,6 +578,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
                   | None -> ())
               | _ -> ())))
     intervals;
+  let saved_keys = Hashtbl.create 8 in
   (* Second chance: a spilled interval that now fits a register whole (its
      evictor may itself have been evicted) takes it, costliest first. *)
   List.filter (fun (_, k, _) -> not (Hashtbl.mem assignment k)) intervals
@@ -567,18 +586,66 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   |> List.stable_sort (fun (a, _) (b, _) -> compare a b)
   |> List.iter (fun (_, ((_, k, rs) as iv)) ->
       let usable = usable_for rs in
-      let order = if crosses_call rs then callee else caller @ callee in
-      match
-        List.find_opt
-          (fun r ->
-            usable r
-            && not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find ever r)))
-          order
-      with
-      | Some r ->
-          Hashtbl.replace assignment k r;
-          Ptbl.replace ever r (iv :: Ptbl.find ever r)
+      let crossing = crosses_call rs in
+      let order = if crossing then callee else caller @ callee in
+      let free r =
+        not (List.exists (fun (_, _, rs') -> conflict rs rs') (Ptbl.find ever r))
+      in
+      let place r =
+        Hashtbl.replace assignment k r;
+        Ptbl.replace ever r (iv :: Ptbl.find ever r)
+      in
+      match List.find_opt (fun r -> usable r && free r) order with
+      | Some r -> place r
+      | None when crossing && saves <> None -> (
+          (* a caller-saved register, stored and reloaded around each call
+             it crosses, when that is cheaper than living in memory *)
+          let string_crossing = crosses_at string_ops rs in
+          let cost = ref 0. in
+          Array.iteri
+            (fun i c ->
+              if List.exists (fun (l, h) -> l < c && c <= h) rs then
+                cost := !cost +. call_weight.(i))
+            calls;
+          let raw = Option.value ~default:0. (Hashtbl.find_opt weights k) in
+          if debug then
+            Printf.eprintf "save? %s %s raw=%.0f cost=%.0f free=%s\n" f.name
+              (key_name k) raw !cost
+              (String.concat "," (List.map reg_name (List.filter free caller)));
+          if raw > !cost then
+            match
+              List.find_opt
+                (fun r -> (not (string_crossing && List.mem r strings)) && free r)
+                caller
+            with
+            | Some r ->
+                place r;
+                Hashtbl.replace saved_keys k ()
+            | None -> ())
       | None -> ());
+  (* per clobbering instruction: the keys whose caller-saved register must be
+     stored before it (arguments are then read from memory), each with
+     whether it is reloaded after it (still live) *)
+  (match saves with
+  | None -> ()
+  | Some out ->
+      let rs_of = Hashtbl.create 16 in
+      List.iter
+        (fun (_, k, rs) -> if Hashtbl.mem saved_keys k then Hashtbl.replace rs_of k rs)
+        intervals;
+      if Hashtbl.length rs_of > 0 then
+        Array.iteri
+          (fun i c ->
+            let ks =
+              Hashtbl.fold
+                (fun k rs acc ->
+                  if List.exists (fun (l, h) -> l < c && c <= h) rs then
+                    (k, List.exists (fun (l, h) -> l <= c + 1 && c + 1 <= h) rs) :: acc
+                  else acc)
+                rs_of []
+            in
+            if ks <> [] then out := (call_ins.(i), ks) :: !out)
+          calls);
   (* Spilled phis share a stack slot with their spilled incoming values when
      the intervals allow it (the same rule as for registers), so their edge
      copies vanish. [slot_of] receives member -> representative. *)
@@ -632,9 +699,9 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       intervals;
   assignment
 
-let allocate ?skip ?operands ?slot_of f =
+let allocate ?skip ?operands ?slot_of ?saves f =
   allocate_class ~in_class:scalar ~callee:callee_saved ~caller:caller_saved
-    ~strings:string_regs ~reg_name:X64.reg_name ?skip ?operands ?slot_of f
+    ~strings:string_regs ~reg_name:X64.reg_name ?skip ?operands ?slot_of ?saves f
 
 (* 128-bit vectors in xmm3..xmm15 (xmm0..xmm2 are scratch). Every xmm
    register is caller-saved, so a vector live across a call stays in its

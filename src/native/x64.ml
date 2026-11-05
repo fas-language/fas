@@ -445,6 +445,22 @@ let alu_mr a op size mem src =
   | _ -> invalid_arg "x64.alu_mr"
 
 let test_rr a x y = rr a [ 0x85 ] ~reg:y ~rm:x
+
+(* test r, imm for 0 <= imm < 2^31: the 8-bit form for a byte mask, else the
+   32-bit one (the upper half of the register is not tested) *)
+let test_ri a r imm =
+  if imm >= 0 && imm < 256 then begin
+    rex a ~force:(reg_num r >= 4) ~w:false ~r:0 ~b:(reg_num r) ();
+    byte a 0xf6;
+    modrm a 3 0 (reg_num r);
+    byte a imm
+  end
+  else if imm >= 0 && fits_i32 imm then begin
+    ext_r a ~w:false [ 0xf7 ] 0 r;
+    int32 a imm
+  end
+  else invalid_arg "x64.test_ri: immediate"
+
 let imul_rr a dst src = rr a [ 0x0f; 0xaf ] ~reg:dst ~rm:src
 let imul_rm a dst mem = rm a [ 0x0f; 0xaf ] ~reg:dst mem
 

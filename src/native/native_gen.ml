@@ -82,7 +82,10 @@ type form = { anchor : anchor; off : int; idx : (value * int) option }
 type addrs = {
   forms : form Hashtbl.t;
   skip : unit Hashtbl.t;
-  dead : unit Hashtbl.t;  (** index arithmetic that folding into addresses left unused *)
+  dead : unit Hashtbl.t;
+      (** index arithmetic that folding into addresses left unused *)
+  tests : (value * int) Hashtbl.t;
+      (** a mask whose only use is a branch on it being zero: [test v, mask] *)
 }
 
 let plain v = { anchor = Reg v; off = 0; idx = None }
@@ -244,7 +247,64 @@ let analyse_addrs ctx (f : func) =
     forms;
   (* Index arithmetic whose only readers now read through the folded form *)
   let dead = Hashtbl.create 16 in
-  let addrs0 = { forms; skip; dead } in
+  (* `br (x & m) != 0`, also through `(x >> k) & m`, as `test x, m'`: the
+     mask and shift, used only there, are left out *)
+  let tests = Hashtbl.create 8 in
+  let uses = Hashtbl.create 64 and masks = Hashtbl.create 16 in
+  let count = function
+    | Local (id, _) ->
+        Hashtbl.replace uses id (1 + Option.value ~default:0 (Hashtbl.find_opt uses id))
+    | _ -> ()
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter
+        (fun ins ->
+          (match ins with
+          | Bin (id, (And | Lshr), _, (Local _ | Param _), Const _) ->
+              Hashtbl.replace masks id ins
+          | _ -> ());
+          Regalloc.iter_operands count ins)
+        b.instrs;
+      Regalloc.iter_term_operands count b.terminator)
+    f.blocks;
+  if Hashtbl.length masks > 0 then begin
+    let once id = Hashtbl.find_opt uses id = Some 1 in
+    List.iter
+      (fun (b : block) ->
+        match (List.rev b.instrs, b.terminator) with
+        | ( Cmp (id, (Eq | Ne), (I8 | I16 | I32 | I64), Local (x, _), Const (_, 0L)) :: _,
+            CondBr (Local (c, _), _, _) )
+          when c = id && once id && once x -> (
+            match Hashtbl.find_opt masks x with
+            | Some (Bin (_, And, ty, v, Const (_, m))) ->
+                let w = bits ty in
+                let wmask =
+                  if w = 64 then -1L else Int64.pred (Int64.shift_left 1L w)
+                in
+                let v, m, shift =
+                  match v with
+                  | Local (sid, _) when once sid -> (
+                      match Hashtbl.find_opt masks sid with
+                      | Some (Bin (_, Lshr, _, v', Const (_, k)))
+                        when Int64.compare k 0L >= 0
+                             && Int64.compare k (Int64.of_int w) < 0 ->
+                          ( v',
+                            Int64.logand (Int64.shift_left m (Int64.to_int k)) wmask,
+                            Some sid )
+                      | _ -> (v, m, None))
+                  | _ -> (v, m, None)
+                in
+                if Int64.compare m 0L > 0 && Int64.compare m 0x7fffffffL <= 0 then begin
+                  Hashtbl.replace tests x (v, Int64.to_int m);
+                  Hashtbl.replace dead x ();
+                  Option.iter (fun sid -> Hashtbl.replace dead sid ()) shift
+                end
+            | _ -> ())
+        | _ -> ())
+      f.blocks
+  end;
+  let addrs0 = { forms; skip; dead; tests } in
   let changed = ref true in
   while !changed do
     changed := false;
@@ -267,6 +327,8 @@ let analyse_addrs ctx (f : func) =
                     | Local (id, _) when Hashtbl.mem skip id ->
                         List.iter use (form_operands (Hashtbl.find forms id))
                     | p -> use p)
+                | Cmp (_, _, _, Local (x, _), _), _ when Hashtbl.mem tests x ->
+                    use (fst (Hashtbl.find tests x))
                 | _ -> Regalloc.iter_operands use ins))
           b.instrs;
         Regalloc.iter_term_operands use b.terminator)
@@ -291,6 +353,8 @@ let operands_view addrs ins =
   in
   match (ins, scalar_access ins) with
   | Bin (id, _, _, _, _), _ when Hashtbl.mem addrs.dead id -> []
+  | Cmp (_, _, _, Local (x, _), _), _ when Hashtbl.mem addrs.tests x ->
+      [ fst (Hashtbl.find addrs.tests x) ]
   | Gep (id, _, _, _), _ when Hashtbl.mem addrs.forms id ->
       if Hashtbl.mem addrs.skip id then []
       else form_operands (Hashtbl.find addrs.forms id)
@@ -545,6 +609,9 @@ type frame = {
   xshared : int Hashtbl.t;  (** spilled vector -> phi-web slot representative *)
   xtmp : int;  (** rbp offset of a 16-byte scratch slot for vector lanes *)
   saved : (A.reg * int) list;  (** callee-saved registers used, and their save slots *)
+  call_saves : (instr * (int * bool) list) list;
+      (** per call: allocation keys in caller-saved registers to store before it, each
+          with whether it is reloaded after *)
 }
 
 let reserve fr bytes align =
@@ -554,7 +621,13 @@ let reserve fr bytes align =
 let build_frame ?xmm ctx (f : func) =
   let addrs = analyse_addrs ctx f in
   let shared = Hashtbl.create 16 in
+  let call_saves = ref [] in
   let xshared = match xmm with Some (_, x) -> x | None -> Hashtbl.create 16 in
+  let homes =
+    Regalloc.allocate
+      ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
+      ~operands:(operands_view addrs) ~slot_of:shared ~saves:call_saves f
+  in
   let fr =
     {
       addrs;
@@ -562,10 +635,7 @@ let build_frame ?xmm ctx (f : func) =
       allocas = Hashtbl.create 8;
       params = Ptbl.create 8;
       size = 0;
-      homes =
-        Regalloc.allocate
-          ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-          ~operands:(operands_view addrs) ~slot_of:shared f;
+      homes;
       xhomes =
         (match xmm with
         | Some (homes, _) -> homes
@@ -576,6 +646,7 @@ let build_frame ?xmm ctx (f : func) =
       xshared;
       xtmp = 0;
       saved = [];
+      call_saves = !call_saves;
     }
   in
   let has_v128 = ref false in
@@ -1050,15 +1121,20 @@ let compare_flags ctx fr c x y =
     A.alu_rr a A.Cmp A.Rax A.Rcx
   end
   else
-    let rx = in_reg ctx fr x A.Rax in
-    match imm32 y with
-    | Some 0 -> A.test_rr a rx rx
-    | Some k -> A.alu_ri a A.Cmp rx k
-    | None -> (
-        (* slots hold the canonical 64-bit value, so compare in memory *)
-        match slot_of fr y with
-        | Some m -> A.alu_rm a A.Cmp rx m
-        | None -> A.alu_rr a A.Cmp rx (in_reg ctx fr y A.Rcx))
+    match x with
+    | Local (t, _) when Hashtbl.mem fr.addrs.tests t ->
+        let v, m = Hashtbl.find fr.addrs.tests t in
+        A.test_ri a (in_reg ctx fr v A.Rax) m
+    | _ -> (
+        let rx = in_reg ctx fr x A.Rax in
+        match imm32 y with
+        | Some 0 -> A.test_rr a rx rx
+        | Some k -> A.alu_ri a A.Cmp rx k
+        | None -> (
+            (* slots hold the canonical 64-bit value, so compare in memory *)
+            match slot_of fr y with
+            | Some m -> A.alu_rm a A.Cmp rx m
+            | None -> A.alu_rr a A.Cmp rx (in_reg ctx fr y A.Rcx)))
 
 let mem_size _ctx ty =
   match ty with
@@ -1108,6 +1184,36 @@ let negate = function
   | _ -> invalid_arg "negate"
 
 let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
+
+(* Values in caller-saved registers that [ins] (a call or syscall) would
+   clobber: stored to their slots first, read from there while the arguments
+   are set up, and reloaded afterwards when still live. *)
+let around_call ctx fr ins body =
+  match List.assq_opt ins fr.call_saves with
+  | None -> body ()
+  | Some ks ->
+      let a = ctx.a in
+      let regs =
+        List.map
+          (fun (k, reload) ->
+            let m =
+              if k >= 0 then slot fr k
+              else A.Base (A.Rbp, Ptbl.find fr.params (Ptbl.find Regalloc.param_names k))
+            in
+            (k, Hashtbl.find fr.homes k, reload, m))
+          ks
+      in
+      List.iter
+        (fun (k, r, _, m) ->
+          A.store a 8 m r;
+          Hashtbl.remove fr.homes k)
+        regs;
+      body ();
+      List.iter
+        (fun (k, r, reload, m) ->
+          Hashtbl.replace fr.homes k r;
+          if reload then A.load_zx a 8 r m)
+        regs
 
 let gen_call ctx fr result ret_ty target args =
   let a = ctx.a in
@@ -1698,9 +1804,12 @@ let gen_instr ctx fr ins =
   | Call (result, _, ret, name, args) ->
       if String.starts_with ~prefix:"llvm." name then
         gen_intrinsic ctx fr result ret name args
-      else gen_call ctx fr result ret (`Direct name) args
+      else
+        around_call ctx fr ins (fun () ->
+            gen_call ctx fr result ret (`Direct name) args)
   | Call_indirect (result, _, ret, callee, args) ->
-      gen_call ctx fr result ret (`Indirect callee) args
+      around_call ctx fr ins (fun () ->
+          gen_call ctx fr result ret (`Indirect callee) args)
   | Phi _ -> () (* copied in from the incoming slot at block entry *)
   | Select (id, c, x, y) ->
       let ty = value_ty x in
@@ -1743,6 +1852,7 @@ let gen_instr ctx fr ins =
       put ctx fr id A.Rax
   | Trap -> A.ud2 a
   | Syscall (id, args) ->
+      around_call ctx fr ins @@ fun () ->
       let regs = [| A.Rax; A.Rdi; A.Rsi; A.Rdx; A.R10; A.R8; A.R9 |] in
       (* Load the number last: rax is also a scratch register for nothing
          here, but keep the order obvious. *)
