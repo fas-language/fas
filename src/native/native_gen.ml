@@ -662,19 +662,97 @@ let loose_values addrs (f : func) =
     cand;
   cand
 
+(* load; op; store back to the same place, with the loaded and computed
+   values used nowhere else: code generation emits one `op [mem], y`, so the
+   two values never need a register. Gives the load and op ids, the op, the
+   type, the other operand, the place and the instructions after the store. *)
+let same_place addrs p q =
+  p = q
+  ||
+  match (p, q) with
+  | Local (i, _), Local (j, _) -> (
+      match (Hashtbl.find_opt addrs.forms i, Hashtbl.find_opt addrs.forms j) with
+      | Some f, Some g -> Hashtbl.mem addrs.skip i && Hashtbl.mem addrs.skip j && f = g
+      | _ -> false)
+  | _ -> false
+
+let rmw_match addrs once ins rest =
+  let rec skip = function
+    | Location _ :: r -> skip r
+    | (Gep (id, _, _, _) | Global_ptr (id, _, _) | String_ptr (id, _, _)) :: r
+      when Hashtbl.mem addrs.skip id ->
+        skip r
+    | r -> r
+  in
+  match ins with
+  | Load (l, ty, p, _)
+    when once l && match ty with I8 | I16 | I32 | I64 -> true | _ -> false -> (
+      match skip rest with
+      | Bin (r, op, ty', x, y) :: rest
+        when ty' = ty && once r
+             && match op with Add | Sub | And | Or | Xor -> true | _ -> false -> (
+          let operand =
+            match (x, y) with
+            | Local (i, _), y when i = l -> Some y
+            | x, Local (i, _) when i = l && op <> Sub -> Some x
+            | _ -> None
+          in
+          match (operand, skip rest) with
+          | Some y, Store (ty'', Local (s, _), p', _) :: rest
+            when ty'' = ty && s = r && same_place addrs p p'
+                 && match y with Local (i, _) -> i <> l | _ -> true ->
+              Some (l, r, op, ty, y, p, rest)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
+
+(* The values that [rmw_match] folds away *)
+let rmw_temps addrs (f : func) =
+  let uses = Hashtbl.create 64 in
+  let count = function
+    | Local (id, _) ->
+        Hashtbl.replace uses id (1 + Option.value ~default:0 (Hashtbl.find_opt uses id))
+    | _ -> ()
+  in
+  List.iter
+    (fun (b : block) ->
+      List.iter (Regalloc.iter_operands count) b.instrs;
+      Regalloc.iter_term_operands count b.terminator)
+    f.blocks;
+  let once id = Hashtbl.find_opt uses id = Some 1 in
+  let temps = Hashtbl.create 8 in
+  List.iter
+    (fun (b : block) ->
+      let rec walk = function
+        | [] -> ()
+        | ins :: rest -> (
+            match rmw_match addrs once ins rest with
+            | Some (l, r, _, _, _, _, rest) ->
+                Hashtbl.replace temps l ();
+                Hashtbl.replace temps r ();
+                walk rest
+            | None -> walk rest)
+      in
+      walk b.instrs)
+    f.blocks;
+  temps
+
 let reserve fr bytes align =
   fr.size <- (fr.size + bytes + align - 1) / align * align;
   -fr.size
 
 let build_frame ?xmm ctx (f : func) =
   let addrs = analyse_addrs ctx f in
+  let rmw = rmw_temps addrs f in
+  let skip id =
+    Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id || Hashtbl.mem rmw id
+  in
   let shared = Hashtbl.create 16 in
   let call_saves = ref [] in
   let xshared = match xmm with Some (_, x) -> x | None -> Hashtbl.create 16 in
   let homes =
-    Regalloc.allocate
-      ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-      ~operands:(operands_view addrs) ~slot_of:shared ~saves:call_saves f
+    Regalloc.allocate ~skip ~operands:(operands_view addrs) ~slot_of:shared
+      ~saves:call_saves f
   in
   let fr =
     {
@@ -688,9 +766,8 @@ let build_frame ?xmm ctx (f : func) =
         (match xmm with
         | Some (homes, _) -> homes
         | None ->
-            Regalloc.allocate_xmm
-              ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-              ~operands:(operands_view addrs) ~slot_of:xshared f);
+            Regalloc.allocate_xmm ~skip ~operands:(operands_view addrs) ~slot_of:xshared
+              f);
       xshared;
       xtmp = 0;
       saved = [];
@@ -2157,70 +2234,32 @@ let gen_function ctx (f : func) =
   let has_phis id =
     List.exists (function Phi _ -> true | _ -> false) (Hashtbl.find blocks id).instrs
   in
-  (* load; op; store back to the same place, with the loaded and computed
-     values used nowhere else, becomes one `op [mem], y`. *)
-  let same_place p q =
-    p = q
-    ||
-    match (p, q) with
-    | Local (i, _), Local (j, _) -> (
-        match
-          (Hashtbl.find_opt fr.addrs.forms i, Hashtbl.find_opt fr.addrs.forms j)
-        with
-        | Some f, Some g ->
-            Hashtbl.mem fr.addrs.skip i && Hashtbl.mem fr.addrs.skip j && f = g
-        | _ -> false)
-    | _ -> false
-  in
+  let once id = Hashtbl.find_opt uses id = Some 1 in
+  (* load; op; store back to the same place becomes one `op [mem], y` *)
   let rmw ins rest =
-    let rec skip = function
-      | Location _ :: r -> skip r
-      | (Gep (id, _, _, _) | Global_ptr (id, _, _) | String_ptr (id, _, _)) :: r
-        when Hashtbl.mem fr.addrs.skip id ->
-          skip r
-      | r -> r
-    in
-    let once id = Hashtbl.find_opt uses id = Some 1 in
-    match ins with
-    | Load (l, ty, p, _)
-      when once l && match ty with I8 | I16 | I32 | I64 -> true | _ -> false -> (
-        match skip rest with
-        | Bin (r, op, ty', x, y) :: rest
-          when ty' = ty && once r
-               && match op with Add | Sub | And | Or | Xor -> true | _ -> false -> (
-            let operand =
-              match (x, y) with
-              | Local (i, _), y when i = l -> Some y
-              | x, Local (i, _) when i = l && op <> Sub -> Some x
-              | _ -> None
-            in
-            match (operand, skip rest) with
-            | Some y, Store (ty'', Local (s, _), p', _) :: rest
-              when ty'' = ty && s = r && same_place p p'
-                   && match y with Local (i, _) -> i <> l | _ -> true ->
-                let alu =
-                  match op with
-                  | Add -> A.Add
-                  | Sub -> A.Sub
-                  | And -> A.And
-                  | Or -> A.Or
-                  | _ -> A.Xor
-                in
-                let size = mem_size ctx ty in
-                let imm =
-                  match y with
-                  | Const (t, n) when size < 8 -> Some (Int64.to_int (norm_const t n))
-                  | _ -> imm32 y
-                in
-                (match imm with
-                | Some k -> A.alu_mi a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) k
-                | None ->
-                    let src = in_reg ctx fr y A.Rcx in
-                    A.alu_mr a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src);
-                Some rest
-            | _ -> None)
-        | _ -> None)
-    | _ -> None
+    match rmw_match fr.addrs once ins rest with
+    | Some (_, _, op, ty, y, p, rest) ->
+        let alu =
+          match op with
+          | Add -> A.Add
+          | Sub -> A.Sub
+          | And -> A.And
+          | Or -> A.Or
+          | _ -> A.Xor
+        in
+        let size = mem_size ctx ty in
+        let imm =
+          match y with
+          | Const (t, n) when size < 8 -> Some (Int64.to_int (norm_const t n))
+          | _ -> imm32 y
+        in
+        (match imm with
+        | Some k -> A.alu_mi a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) k
+        | None ->
+            let src = in_reg ctx fr y A.Rcx in
+            A.alu_mr a alu size (mem_at ctx fr p ~sb:A.Rax ~si:A.Rdx) src);
+        Some rest
+    | None -> None
   in
   let position = Hashtbl.create 16 in
   Array.iteri (fun i id -> Hashtbl.replace position id i) order;
