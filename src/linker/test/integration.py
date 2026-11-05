@@ -371,6 +371,28 @@ class LinkerTests(unittest.TestCase):
         os.mkfifo(fifo)
         self.rejected(fifo, "regular file")
 
+    def test_short_version_continues_linking_and_gcc_abi_probe(self):
+        self.assertIn(b"fas-ld", run(LINKER, "-v").stdout)
+        output = self.root / "version-output"
+        args = ("-o", output, self.simple, self.answer)
+        self.assertIn(b"fas-ld", run(LINKER, "-v", *args).stdout)
+        run(output, expected=42)
+        output.unlink()
+        run(LINKER, "--version", *args)
+        self.assertFalse(output.exists())
+        run(LINKER, "-v", self.root / "missing-input.o", expected=1)
+        # CMake identifies the ABI using GCC -v -Wl,-v. This must produce
+        # an executable as well as the version text.
+        tools = self.root / "version-toolchain"
+        tools.mkdir()
+        (tools / "ld").symlink_to(LINKER)
+        source = self.root / "version-probe.c"
+        source.write_text("int main(void) { return 0; }\n")
+        result = run("gcc", "-B" + str(tools) + "/", "-fno-use-linker-plugin",
+                     "-v", "-Wl,-v", source, "-o", output)
+        self.assertIn(b"fas-ld", result.stdout)
+        run(output)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

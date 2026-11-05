@@ -47,13 +47,18 @@ let usage =
    -nostdlib               ignore script SEARCH_DIR paths; retain explicit -L\n\
    --                      end options\n\
    --help                  show this help\n\
-   --version               show version\n"
+   -v                      show version and continue linking inputs\n\
+   --version               show version and exit\n"
+
+let print_version () =
+  print_endline "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
 
 let run () =
   match Command_line.parse (Array.to_list Sys.argv |> List.tl) with
   | Help -> print_string usage
-  | Version -> print_endline "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+  | Version -> print_version ()
   | Link config ->
+      if config.print_version then print_version ();
       let stats = if config.statistics then Some (Stats.create ()) else None in
       Fun.protect
         (fun () ->

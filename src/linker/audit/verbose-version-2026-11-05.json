@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-05",
+  "trigger": "CMake GCC ABI probe passes ld -v; rejected before fix",
+  "behavior": "-v prints version and links supplied inputs; --version exits without linking; no-input -v succeeds",
+  "focused_gcc_probe_exit": 0,
+  "musl_enabled_release_gate_exit": 0,
+  "musl_sysroot": "/tmp/fas-musl-20261105/sysroot",
+  "gate_log": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/linker-v-option-gate-20261105.log",
+    "sha256": "fbcd30688bd25e3204d4aa8a2d7bb208484608def039e96f1dbac5b8467da0fe"
+  },
+  "python_cases_rerun": 38,
+  "note": "Incremental Dune gate after CLI change; earlier invalid musl path was corrected before this successful run."
+}
