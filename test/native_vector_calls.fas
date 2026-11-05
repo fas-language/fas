@@ -1,0 +1,67 @@
+// Native backend: vector values through function addresses, wide and bool
+// vectors in the internal lane convention, and lane-crossing operations on
+// 256-lane vectors. Exits 0 when every check passes; a nonzero exit names
+// the failing check. Run by test/native_backend.sh against LLVM.
+
+var SeedA u8 = 13
+var SeedB u8 = 19
+var Lane u32 = 200
+const SPLAT_LAST vec[256,u8] = splat(255)
+
+fn add_sq(a vec[8,f32], b vec[8,f32]) vec[8,f32] { return a + b * b }
+fn flip(a vec[16,u8], k u8) vec[16,u8] {
+  s vec[16,u8] = splat(k)
+  return a ^ s
+}
+fn greater(a vec[32,i16], b vec[32,i16]) vec[32,bool] { return a > b }
+fn bump(a vec[256,u8]) vec[256,u8] {
+  one vec[256,u8] = splat(1)
+  return a + one
+}
+// Opaque to the native inliner (indirect calls are never inlined)
+fn seed(i i32) u8 { if i == 0 { return 13 } return 19 }
+fn sum4(a vec[4,u64]) u64 { return reduce_sum(a) }
+fn any_wide(m vec[128,bool]) bool { return any(m) }
+
+fn main() i32 {
+  // indirect calls with vector arguments and results
+  fa addr = &add_sq
+  fm addr = &flip
+  fg addr = &greater
+  fw addr = &bump
+  fs addr = &sum4
+  fb addr = &any_wide
+  a vec[8,f32] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+  r vec[8,f32] = call_addr[vec[8,f32]](fa, a, a)
+  if r[0] != 2.0 || r[7] != 72.0 { return 1 }
+  m vec[16,u8] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+  x vec[16,u8] = call_addr[vec[16,u8]](fm, m, 255)
+  if x[3] != 252 || x[15] != 240 { return 2 }
+  i vec[32,i16] = splat(3)
+  j vec[32,i16] = splat(2)
+  j[5] = 9
+  g vec[32,bool] = call_addr[vec[32,bool]](fg, i, j)
+  if g[5] || !g[6] { return 3 }
+  w vec[256,u8] = splat(SeedA)
+  w2 vec[256,u8] = call_addr[vec[256,u8]](fw, w)
+  if w2[200] != 14 { return 4 }
+  q vec[4,u64] = {1, 2, 3, 4}
+  if call_addr[u64](fs, q) != 10 { return 5 }
+  big vec[128,u8] = splat(SeedA)
+  big[100] = SeedB
+  wide_mask vec[128,bool] = big == splat(SeedB)
+  if !call_addr[bool](fb, wide_mask) { return 6 }
+
+  // a 256-lane splat shuffle: index 255 is the last lane of the first operand
+  get addr = &seed
+  sa vec[256,u8] = splat(call_addr[u8](get, 0))
+  sb vec[256,u8] = splat(call_addr[u8](get, 1))
+  s vec[256,u8] = shuffle(sa, sb, SPLAT_LAST)
+  if !all(s == sa) || s[7] != 13 { return 7 }
+
+  // runtime lane index on a wide vector
+  v vec[256,u8] = splat(SeedA)
+  v[Lane] = SeedB
+  if v[Lane] != SeedB || v[Lane + 1] != SeedA { return 8 }
+  return 0
+}

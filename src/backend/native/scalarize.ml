@@ -367,6 +367,26 @@ let expand_args st args =
    through a stack slot (store the lanes once, then one indexed access)
    instead of a compare and select per lane, which is quadratic for the
    permute / compress / expand loops on 256 lanes. *)
+(* A call with vector arguments or result, in the internal convention:
+   vector arguments are passed lane by lane, and a vector result is stored
+   through a hidden last pointer argument into an entry slot. [mk] builds
+   the direct or indirect call. *)
+let vector_call st dst ext rty args mk =
+  let args = expand_args st args in
+  match rty with
+  | Vector _ -> (
+      let sty = storage_ty st rty in
+      let tmp = fresh st in
+      st.entry <- Alloca (tmp, sty, 32) :: st.entry;
+      let p = Local (tmp, Pointer sty) in
+      emit st (mk None No_extension Void (args @ [ (Pointer I8, No_extension, p) ]));
+      match dst with
+      | Some d ->
+          let ls = load_lanes st ~volatile:false rty p 32 in
+          Array.iteri (fun i l -> set st d i l) ls
+      | None -> ())
+  | _ -> emit st (mk dst ext rty args)
+
 let slot_lane st = function
   | Vector (n, t) -> (not st.chunk) && n >= 16 && n land (n - 1) = 0 && t <> I1
   | _ -> false
@@ -645,36 +665,13 @@ let instr_lanes st ins =
             done
         | _ -> unsupported "intrinsic %s" name
         end
-      else begin
-        let args = expand_args st args in
-        match rty with
-        | Vector _ -> (
-            let sty = storage_ty st rty in
-            let tmp = fresh st in
-            st.entry <- Alloca (tmp, sty, 32) :: st.entry;
-            let p = Local (tmp, Pointer sty) in
-            emit st
-              (Call
-                 ( None,
-                   No_extension,
-                   Void,
-                   name,
-                   args @ [ (Pointer I8, No_extension, p) ] ));
-            match dst with
-            | Some d -> (
-                let ls = load_lanes st ~volatile:false rty p 32 in
-                match rty with
-                | Vector _ ->
-                    for i = 0 to Array.length ls - 1 do
-                      set st d i ls.(i)
-                    done
-                | _ -> ())
-            | None -> ())
-        | _ -> emit st (Call (dst, ext, rty, name, args))
-      end
-  | Call_indirect (_, _, rty, _, args)
+      else vector_call st dst ext rty args (fun d e t a -> Call (d, e, t, name, a))
+  | Call_indirect (dst, ext, rty, callee, args)
     when is_vector rty || List.exists (fun (t, _, _) -> is_vector t) args ->
-      unsupported "indirect call with vector values"
+      (* The callee is a Fas function whose address was taken; its
+         signature was rewritten to the same lane convention as a direct
+         call (lanes as parameters, hidden return pointer). *)
+      vector_call st dst ext rty args (fun d e t a -> Call_indirect (d, e, t, callee, a))
   | Syscall (_, args) when List.exists (fun v -> is_vector (value_ty v)) args ->
       unsupported "vector syscall argument"
   | ins -> emit st ins

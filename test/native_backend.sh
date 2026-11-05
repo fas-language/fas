@@ -56,6 +56,20 @@ FAS_NATIVE_NOSIMD=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vectors.fas
 "$NATIVE_TMP/vectors_lanes" >"$NATIVE_TMP/vectors_lanes.out"
 cmp "$NATIVE_TMP/vectors_llvm.out" "$NATIVE_TMP/vectors_lanes.out"
 
+# Vector values through function addresses, wide bool vectors, 256-lane
+# shuffles and runtime lane indices: every build exits 0
+FAS_OPT="$LLVM_OPT" FAS_LLC="$LLVM_LLC" FAS_CC="$CC" \
+  "$OCAML_FAS" -O2 "$ROOT/test/native_vector_calls.fas" -o "$NATIVE_TMP/vcalls_llvm"
+"$NATIVE_TMP/vcalls_llvm"
+"$OCAML_FAS" --backend=native "$ROOT/test/native_vector_calls.fas" -o "$NATIVE_TMP/vcalls"
+"$NATIVE_TMP/vcalls"
+FAS_NATIVE_NOINLINE=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vector_calls.fas" \
+  -o "$NATIVE_TMP/vcalls_noinline"
+"$NATIVE_TMP/vcalls_noinline"
+FAS_NATIVE_NOSIMD=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vector_calls.fas" \
+  -o "$NATIVE_TMP/vcalls_lanes"
+"$NATIVE_TMP/vcalls_lanes"
+
 # C imports select hosted startup; explicit freestanding keeps libc unresolved.
 printf 'use "C" <stdio.h>\nfn main() i32 {\n  puts(c"hi")\n  return 0\n}\n' \
   >"$NATIVE_TMP/unsupported.fas"
