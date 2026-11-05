@@ -1525,24 +1525,29 @@ let gen_intrinsic ctx fr result ret_ty name args =
     store A.Rdx
   end
   else if prefix "llvm.fshl." || prefix "llvm.fshr." then begin
-    (* Only rotations (both inputs equal) come from Fas: rotl/rotr. *)
+    (* General funnel shift, k = arg2 mod w:
+         fshl a b k = (a << k) | (b >> (w - k))   (a when k = 0)
+         fshr a b k = (b >> k) | (a << (w - k))   (b when k = 0)
+       Fas's rotl/rotr pass a = b, but Fir allows any pair. Both cases put
+       the "kept" input in rax (shifted by k) and the other one in rdx
+       (shifted the other way by w - k). k = 0 is a branch, since an x86
+       shift by w = 64 is a no-op instead of giving 0. *)
     let w = result_bits () in
-    load ctx fr A.Rax (arg 0);
+    let left = prefix "llvm.fshl." in
+    load ctx fr A.Rax (arg (if left then 0 else 1));
+    load ctx fr A.Rdx (arg (if left then 1 else 0));
     load ctx fr A.Rcx (arg 2);
     A.alu_ri a A.And A.Rcx (w - 1);
-    let left = prefix "llvm.fshl." in
-    (* rot = (x << k) | (x >> (w - k)) computed in 64 bits on a canonical x *)
-    A.mov_rr a A.Rdx A.Rax;
+    let skip = A.new_label a in
+    A.jcc a A.E skip;
     A.shift_cl a (if left then A.Shl else A.Shr) A.Rax;
     A.mov_rr a A.Rsi A.Rcx;
     A.mov_imm a A.Rcx (Int64.of_int w);
     A.alu_rr a A.Sub A.Rcx A.Rsi;
-    (* shifting a 64-bit value by 64 is a no-op on x86; mask k = 0 below *)
     A.shift_cl a (if left then A.Shr else A.Shl) A.Rdx;
-    A.test_rr a A.Rsi A.Rsi;
-    let skip = A.new_label a in
-    A.jcc a A.E skip;
     A.alu_rr a A.Or A.Rax A.Rdx;
+    (* the left shift can carry bits past w: keep the value canonical *)
+    if w < 64 then A.zero_extend a w A.Rax;
     A.place a skip;
     store A.Rax
   end
@@ -1663,9 +1668,29 @@ let gen_intrinsic ctx fr result ret_ty name args =
     || prefix "llvm.ssub.sat."
   then begin
     let w = result_bits () in
-    if w >= 64 then unsupported "64-bit saturating arithmetic (M2)";
     let signed = prefix "llvm.s" in
     let add = prefix "llvm.uadd" || prefix "llvm.sadd" in
+    if w >= 64 then begin
+      (* No wider register to compute in, so use the flags: CF is the
+         unsigned overflow, OF the signed one. The saturated value goes in
+         rdx before the add/sub, since mov_imm may emit a flag-clobbering
+         xor. *)
+      load ctx fr A.Rax (arg 0);
+      load ctx fr A.Rcx (arg 1);
+      if signed then begin
+        (* signed overflow always saturates toward x's sign:
+           not (x sar 63) with bit 63 flipped is MIN for x < 0, MAX else *)
+        A.mov_rr a A.Rdx A.Rax;
+        A.shift_imm a A.Sar A.Rdx 63;
+        A.not_ a A.Rdx;
+        A.bit_ri a `Btc A.Rdx 63
+      end
+      else A.mov_imm a A.Rdx (if add then -1L else 0L);
+      A.alu_rr a (if add then A.Add else A.Sub) A.Rax A.Rcx;
+      A.cmov a (if signed then A.O else A.B) A.Rax A.Rdx;
+      store A.Rax
+    end
+    else
     let ld r v = if signed then load_signed ctx fr r v else load ctx fr r v in
     ld A.Rax (arg 0);
     ld A.Rcx (arg 1);
@@ -1874,7 +1899,9 @@ let gen_instr ctx fr ins =
         let size = mem_size ctx ty in
         let imm =
           match v with
-          | Const (_, c) when size < 8 || A.fits_i32 (Int64.to_int c) ->
+          (* compare as Int64: Int64.to_int drops bit 63, so 0x8000...0
+             would look like 0 *)
+          | Const (_, c) when size < 8 || A.fits_i32_64 c ->
               Some (Int64.to_int c)
           | Null _ -> Some 0
           | _ -> None
