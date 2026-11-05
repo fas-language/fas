@@ -2307,6 +2307,7 @@ let compile (m : module_) =
     let m = t "reassociate" Mem2reg.reassociate m in
     let m = t "split_addr" Mem2reg.split_addresses m in
     let m = t "fold3" Ir_fold.module_ m in
+    let m = t "licm" Licm.module_ m in
     let m = t "cleanup3" Mem2reg.cleanup m in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     Stdlib.Hashtbl.reset const_pool;
