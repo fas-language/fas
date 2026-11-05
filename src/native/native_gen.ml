@@ -1311,6 +1311,26 @@ let gen_intrinsic ctx fr result ret_ty name args =
     A.place a done_;
     store A.Rax
   end
+  else if
+    (prefix "llvm.cttz." || prefix "llvm.ctlz.")
+    && match args with [ _; (_, _, Const (_, 1L)) ] -> true | _ -> false
+  then begin
+    (* zero is poison: a bare bsf, or bsr turned into a count from the top *)
+    let w = result_bits () in
+    let src = in_reg ctx fr (arg 0) A.Rax in
+    let d =
+      match result with
+      | Some id -> (
+          match Hashtbl.find_opt fr.homes id with Some r -> r | None -> A.Rdx)
+      | None -> A.Rdx
+    in
+    if prefix "llvm.cttz." then A.rr a [ 0x0f; 0xbc ] ~reg:d ~rm:src
+    else begin
+      A.rr a [ 0x0f; 0xbd ] ~reg:d ~rm:src;
+      A.alu_ri a A.Xor d (w - 1)
+    end;
+    store d
+  end
   else if prefix "llvm.cttz." || prefix "llvm.ctlz." then begin
     let w = result_bits () in
     load ctx fr A.Rax (arg 0);
@@ -2466,6 +2486,11 @@ let compile (m : module_) =
     A.mov_imm a A.Rax 231L;
     A.syscall a;
     let m = t "sink_cmp" Mem2reg.sink_compares_module m in
+    let m =
+      t "nonzero"
+        (fun m -> { m with funcs = List.map Mem2reg.nonzero_counts m.funcs })
+        m
+    in
     A.ud2 a;
     let start_size = A.pos a in
     let sizes =

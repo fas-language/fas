@@ -1193,3 +1193,89 @@ let sink_compares (f : func) =
 
 let sink_compares_module (m : module_) =
   { m with funcs = List.map sink_compares m.funcs }
+
+(* `cttz`/`ctlz` of a value that a dominating branch proved nonzero: the
+   block (or a chain of single-predecessor blocks above it) is entered only
+   on the `x != 0` edge, so zero is impossible and the count is a bare
+   bit scan. *)
+let nonzero_counts (f : func) =
+  let has_count =
+    List.exists
+      (fun (b : block) ->
+        List.exists
+          (function
+            | Call (_, _, _, name, _) ->
+                String.starts_with ~prefix:"llvm.cttz." name
+                || String.starts_with ~prefix:"llvm.ctlz." name
+            | _ -> false)
+          b.instrs)
+      f.blocks
+  in
+  if not has_count then f
+  else begin
+    let preds = Hashtbl.create 64 and blocks = Hashtbl.create 64 in
+    let cmps = Hashtbl.create 64 in
+    List.iter
+      (fun (b : block) ->
+        Hashtbl.replace blocks b.id b;
+        List.iter
+          (function Cmp (id, _, _, _, _) as c -> Hashtbl.replace cmps id c | _ -> ())
+          b.instrs;
+        List.iter
+          (fun s ->
+            Hashtbl.replace preds s
+              (b.id :: Option.value ~default:[] (Hashtbl.find_opt preds s)))
+          (List.sort_uniq compare (terminator_successors b.terminator)))
+      f.blocks;
+    (* values known nonzero on entry to block [id] *)
+    let rec known id depth =
+      if depth = 0 then []
+      else
+        match Hashtbl.find_opt preds id with
+        | Some [ p ] when p <> id -> (
+            let pb : block = Hashtbl.find blocks p in
+            let here =
+              match pb.terminator with
+              | CondBr (Local (c, _), t, e) when t <> e -> (
+                  match Hashtbl.find_opt cmps c with
+                  | Some (Cmp (_, Ne, _, x, (Const (_, 0L) | Null _))) when t = id -> [ x ]
+                  | Some (Cmp (_, Eq, _, x, (Const (_, 0L) | Null _))) when e = id -> [ x ]
+                  | _ -> [])
+              | _ -> []
+            in
+            here @ known p (depth - 1))
+        | _ -> []
+    in
+    {
+      f with
+      blocks =
+        List.map
+          (fun (b : block) ->
+            if
+              not
+                (List.exists
+                   (function
+                     | Call (_, _, _, name, [ _; (_, _, Const (_, 0L)) ]) ->
+                         String.starts_with ~prefix:"llvm.cttz." name
+                         || String.starts_with ~prefix:"llvm.ctlz." name
+                     | _ -> false)
+                   b.instrs)
+            then b
+            else
+              let nz = known b.id 4 in
+              {
+                b with
+                instrs =
+                  List.map
+                    (function
+                      | Call (r, cc, ty, name, [ x; (t1, a1, Const (ct, 0L)) ])
+                        when (String.starts_with ~prefix:"llvm.cttz." name
+                             || String.starts_with ~prefix:"llvm.ctlz." name)
+                             && List.mem (let _, _, v = x in v) nz ->
+                          Call (r, cc, ty, name, [ x; (t1, a1, Const (ct, 1L)) ])
+                      | ins -> ins)
+                    b.instrs;
+              })
+          f.blocks;
+    }
+  end
