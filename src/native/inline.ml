@@ -196,7 +196,13 @@ let allocas (f : func) =
   List.iter
     (fun (b : block) ->
       List.iter
-        (function Alloca (id, _, _) -> Hashtbl.replace t id () | _ -> ())
+        (function
+          | Alloca (id, _, _) -> Hashtbl.replace t id ()
+          (* addresses derived from a slot count as the slot *)
+          | (Cast (id, "bitcast", _, Local (j, _), _) | Gep (id, _, Local (j, _), _))
+            when Hashtbl.mem t j ->
+              Hashtbl.replace t id ()
+          | _ -> ())
         b.instrs)
     f.blocks;
   t
