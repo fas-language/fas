@@ -111,6 +111,53 @@ int answer(void){
                                         self.assertTrue(any(p['flags'] & 2 and p['address'] <= target < p['address']+p['memory_size'] for p in core.elf_segments(data)))
                                         self.assertTrue(any(p['flags'] & 1 and p['address'] <= resolver < p['address']+p['memory_size'] for p in core.elf_segments(data)))
 
+    def test_canonical_definition_overrides_symbol_type_and_weak_references(self):
+        start = self.assemble('static-canonical-start', START)
+        weak = self.assemble('static-canonical-weak', r'''
+.text
+.weak overridden
+.type overridden,@gnu_indirect_function
+overridden: ud2
+.globl via_weak
+.type via_weak,@function
+via_weak: jmp overridden
+.section .note.GNU-stack,"",@progbits
+''')
+        definition = self.compile('static-canonical-definition', r'''
+int overridden(void){return 5;}
+static int implementation(void){return 37;}
+static void *resolve(void){return implementation;}
+int selected(void) __attribute__((ifunc("resolve")));
+''', flags=('-fPIC',))
+        consumer = self.compile('static-canonical-consumer', r'''
+extern int selected(void) __attribute__((weak));
+extern int missing(void) __attribute__((weak));
+int via_weak(void);
+int answer(void){
+ if(!selected || missing)return 1;
+ return selected()+via_weak();
+}
+''', flags=('-fPIC',))
+        # A weak IFUNC is replaced by an ordinary strong function; a weak
+        # undefined declaration resolves to the other object's live IFUNC.
+        # Its original symbol type cannot decide which address to use.
+        for partial in (False, True):
+            objects = (start, weak, definition, consumer)
+            if partial:
+                objects = (self.link('static-canonical-partial.o', *objects,
+                                     options=('-r',)),)
+            for gc in (False, True):
+                for tool in self.tools():
+                    with self.subTest(partial=partial, gc=gc, tool=tool):
+                        out = self.link('static-canonical-program', *objects,
+                                        linker=tool,
+                                        options=('--gc-sections',) if gc else ())
+                        run(out, expected=42)
+                        if tool == core.LINKER:
+                            rela = next(s for s in core.elf_sections(out.read_bytes())
+                                        if s['name'] == '.rela.iplt')
+                            self.assertEqual(rela['size'], 24)
+
     def test_installed_static_glibc_threads_tls_ifunc_lifecycle_and_memory(self):
         source = r'''
 #include <errno.h>

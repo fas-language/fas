@@ -3,11 +3,7 @@
 module E = Elf_reader
 module B = Binary
 
-type t = {
-  file : int;
-  symbols : (int * int) array;
-  indices : (int * int, int) Hashtbl.t;
-}
+type t = { file : int; symbols : (int * int) array; references : int array array }
 
 let prepare ?stats ~(options : Options.t) ~kept (resolved : Resolver.t) =
   if options.mode <> Options.Static then (resolved, kept, None)
@@ -62,6 +58,25 @@ let prepare ?stats ~(options : Options.t) ~kept (resolved : Resolver.t) =
     else begin
       let indices = Hashtbl.create ~random:true count in
       Array.iteri (fun index key -> Hashtbl.add indices key index) symbols;
+      (* Resolve aliases once per symbol instead of allocating definition keys
+         and option closures for every ordinary relocation in a static link. *)
+      let references =
+        Array.map
+          (fun (object_ : E.t) -> Array.make (Array.length object_.symbols) (-1))
+          resolved.objects
+      in
+      Array.iteri
+        (fun file (object_ : E.t) ->
+          Array.iteri
+            (fun symbol _ ->
+              match Got.definition resolved file symbol with
+              | None -> ()
+              | Some key -> (
+                  match Hashtbl.find_opt indices key with
+                  | None -> ()
+                  | Some index -> references.(file).(symbol) <- index))
+            object_.symbols)
+        resolved.objects;
       let bytes =
         B.add ~context:"static IFUNC tables" ~limit:(Layout.max_output / 48) 0 count
         * 48
@@ -116,18 +131,19 @@ let prepare ?stats ~(options : Options.t) ~kept (resolved : Resolver.t) =
             Array.append resolved.discarded [| [| false; false; false; false |] |];
         },
         Array.append kept [| [| false; true; true; true |] |],
-        Some { file; symbols; indices } )
+        Some { file; symbols; references = Array.append references [| [| -1 |] |] } )
     end
   end
 
-let stub ~placements ~resolved t file symbol =
-  Option.bind t (fun t ->
-      Option.bind (Got.definition resolved file symbol) (fun key ->
-          Option.map
-            (fun index ->
-              let p : Layout.placement = Option.get placements.(t.file).(1) in
-              p.address + (index * 16))
-            (Hashtbl.find_opt t.indices key)))
+let stub ~placements t file symbol =
+  match t with
+  | None -> None
+  | Some t ->
+      let index = t.references.(file).(symbol) in
+      if index < 0 then None
+      else
+        let p : Layout.placement = Option.get placements.(t.file).(1) in
+        Some (p.address + (index * 16))
 
 let boundary ~placements t last =
   match t with

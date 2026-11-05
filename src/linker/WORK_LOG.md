@@ -1,5 +1,27 @@
 # Linker implementation work log
 
+### Current checkpoint: static IFUNC reference planning
+
+The next static Chibicc profile identified per-relocation definition-key and
+option-closure allocation in static IFUNC trampoline lookup. Planning now builds
+an invocation-local integer reference table once per symbol, only when live
+static IFUNCs exist. Emission uses direct table lookup; the no-IFUNC path also
+avoids its previous closure. Canonical definitions determine the mapping,
+including weak references and overridden IFUNC declarations.
+
+Compared with the SHA-1 checkpoint, static Chibicc allocates 814,438 fewer words
+(7.6%); dynamic Chibicc and static-PIE cJSON drop by 0.5–1.7%. All four pinned
+replay outputs remain byte-identical and pass runtime checks. Existing static
+IFUNC tests, glibc lifecycle/TLS/thread tests and concurrent/repeated links pass.
+A new GNU/LLD oracle case covers an ordinary strong definition overriding a weak
+IFUNC, weak declarations resolving to live IFUNCs and absent weak references,
+with direct/partial links and GC. The release gate passes with musl: 244 Python cases across 41 groups (including
+the final incremental IFUNC rerun), OCaml checks and 3,792 compiler checks.
+The development build and formatting checks also pass. No timings or peak-RSS claims are made.
+Evidence: `benchmarks/results/2026-11-05/allocation-ifunc-references.json` and
+`/tmp/fas-ifunc-reference-{profile,release,canonical}-20261105*`.
+
+
 ### Current checkpoint: build-ID allocation reduction
 
 Untimed Memprof samples identify SHA-1 boxing as roughly 35%/39% of allocated

@@ -1,0 +1,128 @@
+{
+  "base_commit": "b06f34b",
+  "methodology": "Untimed single --stats runs on pinned real-program link inputs; no wall-time or RSS comparison. Baseline includes the SHA1 optimization.",
+  "timing_comparison": false,
+  "binaries": {
+    "before": {
+      "path": "/tmp/fas-ifunc-reference-profile-20261105/fas-before",
+      "sha256": "5be1118afa61c7874ec9bb29129a82092e261b3d43ba74d2fdc39432993fd25d"
+    },
+    "after": {
+      "path": "/tmp/fas-ifunc-reference-profile-20261105/fas-after",
+      "sha256": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be"
+    }
+  },
+  "manifest": {
+    "path": "/tmp/fas-real-link-read-cache-20261105/manifest.json",
+    "sha256": "5f341cd9364b669cf2e11c94a8cfd64b828de0bfba60015ad8359ba9d2c5bd7a"
+  },
+  "source_overrides": {
+    "src/linker/static_ifunc.ml": "16560fd2b5430556b12f2380eef120f998eeb275576197b7686a1900e0b58596",
+    "src/linker/static_link.ml": "84591cfadb60280d90d0a6bcc5d48b2eb151591c07bacad9df402ec29713e051"
+  },
+  "comparison": [
+    {
+      "name": "chibicc-stage1-dynamic",
+      "results": {
+        "before": {
+          "allocated_words": 2726998,
+          "emit_allocated_words": 494874,
+          "sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d"
+        },
+        "after": {
+          "allocated_words": 2680462,
+          "emit_allocated_words": 448338,
+          "sha256": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d"
+        }
+      },
+      "byte_identical": true,
+      "runtime_status": "passed"
+    },
+    {
+      "name": "chibicc-stage2-copy",
+      "results": {
+        "before": {
+          "allocated_words": 2838380,
+          "emit_allocated_words": 454872,
+          "sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68"
+        },
+        "after": {
+          "allocated_words": 2823386,
+          "emit_allocated_words": 439878,
+          "sha256": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68"
+        }
+      },
+      "byte_identical": true,
+      "runtime_status": "passed"
+    },
+    {
+      "name": "chibicc-static-glibc",
+      "results": {
+        "before": {
+          "allocated_words": 10681189,
+          "emit_allocated_words": 4958650,
+          "sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e"
+        },
+        "after": {
+          "allocated_words": 9866751,
+          "emit_allocated_words": 4144212,
+          "sha256": "532628d683a552cc30aeb824173ee685922a8764875173e9881c048e2880ee9e"
+        }
+      },
+      "byte_identical": true,
+      "runtime_status": "passed"
+    },
+    {
+      "name": "cjson-static-pie",
+      "results": {
+        "before": {
+          "allocated_words": 8516349,
+          "emit_allocated_words": 3516526,
+          "sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3"
+        },
+        "after": {
+          "allocated_words": 8384434,
+          "emit_allocated_words": 3384611,
+          "sha256": "125dce0bcb3ca62100c6cc67bcc3afad9a40f22588856d377a0b9bfb5bf62ce3"
+        }
+      },
+      "byte_identical": true,
+      "runtime_status": "passed"
+    }
+  ],
+  "focused_tests": {
+    "cases": 7,
+    "status": "passed",
+    "command": "python3 src/linker/test/static_ifunc_integration.py _build/default/src/linker/bin/main.exe _build/default/src/linker/test/reentry.exe _build/default/src/linker/test/dynamic_reentry.exe",
+    "log": "/tmp/fas-ifunc-reference-canonical-20261105.log",
+    "sha256": "a6657382fa69b46a20a57a9b92af2807c03f131698dbb27677eacd16f880deef"
+  },
+  "raw_stats": {
+    "/tmp/fas-ifunc-reference-profile-20261105/cjson-static-pie-after-stats.json": "4238467b91ba8f7a08f837e56d6eb9ad28cf4fe2d7afd824ad66981da328c044",
+    "/tmp/fas-ifunc-reference-profile-20261105/cjson-static-pie-before-stats.json": "9e4ce5e5d7dee2ec9f3790f869d3770d35dcbf28b91571e0ec9ae70a774decb9",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-static-glibc-after-stats.json": "dffb00cae7147d5fec67e2aed88ef0d66d7b0790ce5f7c2196c2a325e8fe3cd2",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-static-glibc-before-stats.json": "96277dfafbba0c4b78eac8ef12a61333d5f12ef19577df0ee3cc7c7e11d3149d",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-stage2-copy-after-stats.json": "474bb93c4d0214dc25c359f01b8c6cb844e23df2bf5f515d0dd386cc931bdd0a",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-stage2-copy-before-stats.json": "1c6afca422fcbec54a576c993a93b076c66d293ffc6eec8096f93a7e1d443db3",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-stage1-dynamic-after-stats.json": "75b24d15e92b4c11fe4f9b2bbaca0ef7c5bb1da3467dac7a77d4e439fd2ec7ac",
+    "/tmp/fas-ifunc-reference-profile-20261105/chibicc-stage1-dynamic-before-stats.json": "ff93bcfb649aaf7c5e22b2100f4e929b67f8bba7ca2057d5913d6a34ad60a36c"
+  },
+  "regression": {
+    "status": "passed",
+    "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --profile release",
+    "compiler_checks": 3792,
+    "python_cases": 244,
+    "python_groups": 41,
+    "skips": 0,
+    "qualification": "Full 243-case core run followed by Dune incremental rerun including the new seventh static IFUNC case. Unchanged checks reused by Dune.",
+    "logs": {
+      "/tmp/fas-ifunc-reference-release-20261105.log": "09d993ad7a1209d08df43014463eb7efb4cf14b7ef2d23916df80aeb6905ec0d",
+      "/tmp/fas-ifunc-reference-final-20261105.log": "b50a8c35718a583fed23f7fe299431e62b94c9a2458a9497ae219ff6e9bcaaa4"
+    }
+  },
+  "development_build": {
+    "status": "passed",
+    "log": "/tmp/fas-ifunc-reference-dev-build-20261105.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
