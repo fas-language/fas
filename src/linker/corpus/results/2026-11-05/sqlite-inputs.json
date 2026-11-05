@@ -1,0 +1,29 @@
+{
+  "source_release": {
+    "release": "sqlite-src-3540100",
+    "source_url": "https://www.sqlite.org/2026/sqlite-src-3540100.zip",
+    "sha256": "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
+    "source": "/tmp/fas-sqlite-fetch-20261105/sqlite-src-3540100",
+    "commands": [],
+    "sha3_256": "877c6f4996ce7adb368686bce21638de9e3d91534832ad3d9d119037d1bc22ad"
+  },
+  "canonical_files_verified_unchanged": 2290,
+  "tool_versions": {
+    "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "clang-22": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)",
+    "ld": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+    "make": "GNU Make 4.4.1",
+    "/home/glonex/miniconda3/bin/tclsh": "8.6.15"
+  },
+  "note": "Source and input provenance supplements the corpus report. Not a performance measurement.",
+  "runtime_libraries_sha256": {
+    "/usr/lib/x86_64-linux-gnu/libm.so.6": "1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8",
+    "/usr/lib/x86_64-linux-gnu/libz.so.1.3.1": "27fa6c6cb94fb5b099ead61758a300dbc392d1dbf307fff6c16a9b8e57fdc9de",
+    "/usr/lib/x86_64-linux-gnu/libc.so.6": "85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7",
+    "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+    "/home/glonex/miniconda3/lib/libtcl8.6.so": "ac33b38c4ea0f8d019f2d37c2603837d8146936aaef67dd9288dab2f10c87dcb",
+    "/usr/lib/x86_64-linux-gnu/libdl.so.2": "59d725ca30596a9863f4fa2552a7125f834842abc86b40890231c129358965d2",
+    "/usr/lib/x86_64-linux-gnu/libpthread.so.0": "1327fc40710691dbd94e88b6cf4efce27fefe8fbb93f7d1164a75b4dccaea696"
+  },
+  "retained_link_object_hashes_verified": 297
+}

@@ -5,9 +5,20 @@ x86-64 gate using OCaml 5.4.1 and Dune 3.24.2. Pull requests and pushes affectin
 source/build/test files run the linker regressions, an isolated musl 1.2.5 build,
 the full large-input runner, zlib 1.3.1 dynamic/static/static-PIE upstream tests,
 checksum-pinned Chibicc self-hosting and both compiler-driver suites,
+SQLite static/shared libraries and GCC/Clang/native-Fas consumers,
 and a staged executable install/compile/run check. The linker Dune alias includes
 native compiler integration tests; this workflow does not replace the separate
 full compiler regression suite.
+
+SQLite correctness runs build the unmodified 3.54.1 canonical source with
+`configure --all`, then independently link the same objects with GNU ld. Normal
+runs use upstream `main.test`; weekly/manual runs select `extraquick` through
+upstream `test/testrunner.tcl` with two workers and isolated per-file processes. Tcl
+development files are build/test dependencies, not linker runtime dependencies.
+The corpus also checks on-disk databases, WAL/threads, backup, callbacks,
+JSON/FTS5/RTREE and Fas/GNU loadable extensions, plus full-static/static-PIE
+consumers. The public Tcl suite does not establish SQLite full-release or
+power-loss qualification.
 
 Weekly and manual runs add fourteen coverage-guided targets at 600 seconds each,
 sequentially at reduced scheduling priority. The fuzz job has a three-hour limit.

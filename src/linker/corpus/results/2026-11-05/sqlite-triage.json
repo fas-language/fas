@@ -1,0 +1,145 @@
+{
+  "purpose": "Preserve pre-qualification failures; none are silently excluded from the final suite.",
+  "source": {
+    "release": "sqlite-src-3540100",
+    "source_url": "https://www.sqlite.org/2026/sqlite-src-3540100.zip",
+    "sha256": "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
+    "source": "/tmp/fas-sqlite-fetch-20261105/sqlite-src-3540100",
+    "commands": [],
+    "sha3_256": "877c6f4996ce7adb368686bce21638de9e3d91534832ad3d9d119037d1bc22ad"
+  },
+  "legacy": [
+    {
+      "linker": "fas",
+      "entry": "test/extraquick.test",
+      "exit_status": 1,
+      "summary_tail": " Ok\nzipfile-1.6.9... Ok\nzipfile-1.6.10... Ok\nzipfile-1.6.11... Ok\nzipfile-1.7... Ok\nzipfile-2.1... Ok\nzipfile-2.2... Ok\nzipfile-2.3... Ok\nzipfile-2.4... Ok\nzipfile-2.4a.1.1... Ok\nzipfile-2.4a.1.2... Ok\nzipfile-2.4a.2.1... Ok\nzipfile-2.4a.2.2... Ok\nzipfile-2.5.1... Ok\nzipfile-2.5.2... Ok\nzipfile-2.5.3... Ok\nzipfile-2.5.4... Ok\nzipfile-2.5.5... Ok\nzipfile-3.0... Ok\nzipfile-3.1.1.0... Ok\nzipfile-3.1.1.1... Ok\nzipfile-3.1.1.2... Ok\nzipfile-3.1.2.0... Ok\nzipfile-3.1.2.1... Ok\nzipfile-3.1.2.2... Ok\nzipfile-3.1.3.0... Ok\nzipfile-3.1.3.1... Ok\nzipfile-3.1.3.2... Ok\nzipfile-3.2... Ok\nzipfile-4.1... Ok\nzipfile-4.2... Ok\nzipfile-4.3... Ok\nzipfile-4.4... Ok\nzipfile-4.5.1... Ok\nzipfile-4.5.2... Ok\nzipfile-4.5.3... Ok\nzipfile-4.6... Ok\nzipfile-4.7... Ok\nzipfile-4.8... Ok\nzipfile-4.9... Ok\nzipfile-5.0... Ok\nzipfile-6.0... Ok\nzipfile-6.0b... Ok\nzipfile-6.1... Ok\nzipfile-6.2... Ok\nzipfile-6.3... Ok\nzipfile-7.0... Ok\nzipfile-8.0.1... Ok\nzipfile-8.0.2... Ok\nzipfile-8.0.3... Ok\nzipfile-8.1.1... Ok\nzipfile-8.1.2... Ok\nzipfile-8.2.1... Ok\nzipfile-8.2.2... Ok\nzipfile-8.2.3... Ok\nzipfile-8.3.1... Ok\nzipfile-9.0... Ok\nzipfile-10.0... Ok\nzipfile-10.1... Ok\nzipfile-10.2... Ok\nzipfile-10.3... Ok\nzipfile-10.4... Ok\nzipfile-10.5... Ok\nzipfile-10.6... Ok\nzipfile-11.1... Ok\nzipfile-11.2... Ok\nzipfile-11.3... Ok\nzipfile-11.4... Ok\nzipfile-11.5... Ok\nzipfile-11.6... Ok\nzipfile-11.7... Ok\nzipfile-11.8... Ok\nzipfile-11.9... Ok\nzipfile-11.10... Ok\nzipfile-11.11... Ok\nzipfile-12.0... Ok\nzipfile-12.1... Ok\nzipfile-12.2... Ok\nzipfile-12.4... Ok\nzipfile-12.5... Ok\nzipfile-13.10... Ok\nzipfile-14.10... Ok\nzipfile-15.10... Ok\nzipfile-15.20... Ok\nzipfile-16.10... Ok\nzipfile-16.20... Ok\nzipfile-17.1... Ok\nzipfile-18.1... Ok\nzipfile-19.1... Ok\nzipfile-20.0... Ok\nzipfile-20.1... Ok\nzipfile-20.2... Ok\nzipfile-21.0... Ok\nzipfile-22.0... Ok\nzipfile-24.0... Ok\nzipfile-24.1... Ok\nzipfile-24.2... Ok\nzipfile-25.0...\n! zipfile-25.0 expected: [1 {cannot open file: x}]\n! zipfile-25.0 got:      [0 a]\nzipfile-26.0... Ok\nzipfile-26.1... Ok\nzipfile-26.2... Ok\nzipfile-26.3... Ok\nzipfile.test-closeallfiles... Ok\nzipfile.test-sharedcachesetting... Ok\nTime: zipfile.test 611 ms\nMemory used:          now         16  max    9295824  max-size  400240008\nAllocation count:     now          1  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nzipfile2-1.0... Ok\nzipfile2-2.0... Ok\nzipfile2-3.2... Ok\nzipfile2-3.3.0... Ok\nzipfile2-3.3.1... Ok\nzipfile2-3.3.2... Ok\nzipfile2-3.3.3... Ok\nzipfile2-3.3.4... Ok\nzipfile2-3.4.0... Ok\nzipfile2-3.4.1... Ok\nzipfile2-3.4.2... Ok\nzipfile2-3.4.3... Ok\nzipfile2-3.5.0... Ok\nzipfile2-3.5.1... Ok\nzipfile2-3.5.2... Ok\nzipfile2-3.5.3... Ok\nzipfile2-4.0... Ok\nzipfile2-4.1... Ok\nzipfile2-4.2... Ok\nzipfile2-4.3.1... Ok\nzipfile2-4.3.2... Ok\nzipfile2-4.3.3... Ok\nzipfile2-4.3.4... Ok\nzipfile2-5.0... Ok\nzipfile2-6.0... Ok\nzipfile2-6.1... Ok\nzipfile2-6.2... Ok\nzipfile2-6.3... Ok\nzipfile2-7.0... Ok\nzipfile2-7.1... Ok\nzipfile2-8.0... Ok\nzipfile2.test-closeallfiles... Ok\nzipfile2.test-sharedcachesetting... Ok\nTime: zipfile2.test 15 ms\nMemory used:          now         16  max    9295824  max-size  400240008\nAllocation count:     now          1  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nSQLite 2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76\n3 errors out of 400817 tests on glonex-AB350M-DS3H-V2 Linux 64-bit\n!Failures on these tests: sessionnoact-4.3 shell1-3.21.7 zipfile-25.0\nAll memory allocations freed - no leaks\nMemory used:          now          0  max    9295824  max-size  400240008\nAllocation count:     now          0  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nMaximum memory usage: 9295824 bytes\nCurrent memory usage: 0 bytes\nNumber of malloc()  : -1 calls\n",
+      "stdout_sha256": "ea109e82b25ef607faa7a277c167b91e9e4a042605a64437e31e2a939d2263d3",
+      "raw_log": "/tmp/fas-sqlite-acceptance-v2-20261105/commands.jsonl"
+    },
+    {
+      "linker": "gnu",
+      "entry": "test/extraquick.test",
+      "exit_status": 1,
+      "summary_tail": " Ok\nzipfile-1.6.9... Ok\nzipfile-1.6.10... Ok\nzipfile-1.6.11... Ok\nzipfile-1.7... Ok\nzipfile-2.1... Ok\nzipfile-2.2... Ok\nzipfile-2.3... Ok\nzipfile-2.4... Ok\nzipfile-2.4a.1.1... Ok\nzipfile-2.4a.1.2... Ok\nzipfile-2.4a.2.1... Ok\nzipfile-2.4a.2.2... Ok\nzipfile-2.5.1... Ok\nzipfile-2.5.2... Ok\nzipfile-2.5.3... Ok\nzipfile-2.5.4... Ok\nzipfile-2.5.5... Ok\nzipfile-3.0... Ok\nzipfile-3.1.1.0... Ok\nzipfile-3.1.1.1... Ok\nzipfile-3.1.1.2... Ok\nzipfile-3.1.2.0... Ok\nzipfile-3.1.2.1... Ok\nzipfile-3.1.2.2... Ok\nzipfile-3.1.3.0... Ok\nzipfile-3.1.3.1... Ok\nzipfile-3.1.3.2... Ok\nzipfile-3.2... Ok\nzipfile-4.1... Ok\nzipfile-4.2... Ok\nzipfile-4.3... Ok\nzipfile-4.4... Ok\nzipfile-4.5.1... Ok\nzipfile-4.5.2... Ok\nzipfile-4.5.3... Ok\nzipfile-4.6... Ok\nzipfile-4.7... Ok\nzipfile-4.8... Ok\nzipfile-4.9... Ok\nzipfile-5.0... Ok\nzipfile-6.0... Ok\nzipfile-6.0b... Ok\nzipfile-6.1... Ok\nzipfile-6.2... Ok\nzipfile-6.3... Ok\nzipfile-7.0... Ok\nzipfile-8.0.1... Ok\nzipfile-8.0.2... Ok\nzipfile-8.0.3... Ok\nzipfile-8.1.1... Ok\nzipfile-8.1.2... Ok\nzipfile-8.2.1... Ok\nzipfile-8.2.2... Ok\nzipfile-8.2.3... Ok\nzipfile-8.3.1... Ok\nzipfile-9.0... Ok\nzipfile-10.0... Ok\nzipfile-10.1... Ok\nzipfile-10.2... Ok\nzipfile-10.3... Ok\nzipfile-10.4... Ok\nzipfile-10.5... Ok\nzipfile-10.6... Ok\nzipfile-11.1... Ok\nzipfile-11.2... Ok\nzipfile-11.3... Ok\nzipfile-11.4... Ok\nzipfile-11.5... Ok\nzipfile-11.6... Ok\nzipfile-11.7... Ok\nzipfile-11.8... Ok\nzipfile-11.9... Ok\nzipfile-11.10... Ok\nzipfile-11.11... Ok\nzipfile-12.0... Ok\nzipfile-12.1... Ok\nzipfile-12.2... Ok\nzipfile-12.4... Ok\nzipfile-12.5... Ok\nzipfile-13.10... Ok\nzipfile-14.10... Ok\nzipfile-15.10... Ok\nzipfile-15.20... Ok\nzipfile-16.10... Ok\nzipfile-16.20... Ok\nzipfile-17.1... Ok\nzipfile-18.1... Ok\nzipfile-19.1... Ok\nzipfile-20.0... Ok\nzipfile-20.1... Ok\nzipfile-20.2... Ok\nzipfile-21.0... Ok\nzipfile-22.0... Ok\nzipfile-24.0... Ok\nzipfile-24.1... Ok\nzipfile-24.2... Ok\nzipfile-25.0...\n! zipfile-25.0 expected: [1 {cannot open file: x}]\n! zipfile-25.0 got:      [0 a]\nzipfile-26.0... Ok\nzipfile-26.1... Ok\nzipfile-26.2... Ok\nzipfile-26.3... Ok\nzipfile.test-closeallfiles... Ok\nzipfile.test-sharedcachesetting... Ok\nTime: zipfile.test 204 ms\nMemory used:          now         16  max    9295824  max-size  400240008\nAllocation count:     now          1  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nzipfile2-1.0... Ok\nzipfile2-2.0... Ok\nzipfile2-3.2... Ok\nzipfile2-3.3.0... Ok\nzipfile2-3.3.1... Ok\nzipfile2-3.3.2... Ok\nzipfile2-3.3.3... Ok\nzipfile2-3.3.4... Ok\nzipfile2-3.4.0... Ok\nzipfile2-3.4.1... Ok\nzipfile2-3.4.2... Ok\nzipfile2-3.4.3... Ok\nzipfile2-3.5.0... Ok\nzipfile2-3.5.1... Ok\nzipfile2-3.5.2... Ok\nzipfile2-3.5.3... Ok\nzipfile2-4.0... Ok\nzipfile2-4.1... Ok\nzipfile2-4.2... Ok\nzipfile2-4.3.1... Ok\nzipfile2-4.3.2... Ok\nzipfile2-4.3.3... Ok\nzipfile2-4.3.4... Ok\nzipfile2-5.0... Ok\nzipfile2-6.0... Ok\nzipfile2-6.1... Ok\nzipfile2-6.2... Ok\nzipfile2-6.3... Ok\nzipfile2-7.0... Ok\nzipfile2-7.1... Ok\nzipfile2-8.0... Ok\nzipfile2.test-closeallfiles... Ok\nzipfile2.test-sharedcachesetting... Ok\nTime: zipfile2.test 22 ms\nMemory used:          now         16  max    9295824  max-size  400240008\nAllocation count:     now          1  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nSQLite 2026-10-16 14:45:20 555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76\n3 errors out of 400821 tests on glonex-AB350M-DS3H-V2 Linux 64-bit\n!Failures on these tests: sessionnoact-4.3 shell1-3.21.7 zipfile-25.0\nAll memory allocations freed - no leaks\nMemory used:          now          0  max    9295824  max-size  400240008\nAllocation count:     now          0  max     400518\nPage-cache used:      now          0  max         13  max-size      65808\nPage-cache overflow:  now          0  max   38963216\nMaximum memory usage: 9295824 bytes\nCurrent memory usage: 0 bytes\nNumber of malloc()  : -1 calls\n",
+      "stdout_sha256": "2b534a75a9b98372e756907c4220d60a593c3ffeabd8e6f2126f10af51035814",
+      "raw_log": "/tmp/fas-sqlite-acceptance-v2-20261105/gnu-extraquick.log"
+    }
+  ],
+  "parallel_tmpfs_probe": [
+    {
+      "linker": "fas",
+      "jobs": 1300,
+      "tests": 398245,
+      "errors": 12,
+      "failed_jobs": [
+        {
+          "name": "config=extraquick ext/fts5/test/fts5bigpl.test",
+          "state": "failed",
+          "tests": 5,
+          "errors": 1
+        },
+        {
+          "name": "config=extraquick ext/intck/intck1.test",
+          "state": "failed",
+          "tests": 70,
+          "errors": 11
+        }
+      ],
+      "log": "/tmp/fas-sqlite-acceptance-v2-20261105/sqlite/build/isolated-extraquick-fas/testrunner.log",
+      "log_sha256": "fe70bbfe1dd64ade53456a914a06b37d58fc5c0fa50820aa811888509fa84c32"
+    },
+    {
+      "linker": "gnu",
+      "jobs": 1300,
+      "tests": 398247,
+      "errors": 31,
+      "failed_jobs": [
+        {
+          "name": "config=extraquick ext/fts5/test/fts5bigpl.test",
+          "state": "failed",
+          "tests": 5,
+          "errors": 1
+        },
+        {
+          "name": "config=extraquick ext/fts5/test/fts5tokenizer2.test",
+          "state": "failed",
+          "tests": 17,
+          "errors": 8
+        },
+        {
+          "name": "config=extraquick ext/rtree/rtreeJ.test",
+          "state": "failed",
+          "tests": 23,
+          "errors": 22
+        }
+      ],
+      "log": "/tmp/fas-sqlite-acceptance-v2-20261105/sqlite/build/isolated-extraquick-gnu/testrunner.log",
+      "log_sha256": "b0c873a0184f3ad7823099739e447d63fbbd8f89d0c331887eec9b5cbb2cbf0e"
+    }
+  ],
+  "focused_official_runner": [
+    {
+      "name": "config=extraquick ext/session/sessionnoact.test",
+      "state": "done",
+      "tests": 32,
+      "errors": 0
+    },
+    {
+      "name": "config=extraquick test/shell1.test",
+      "state": "done",
+      "tests": 199,
+      "errors": 0
+    },
+    {
+      "name": "config=extraquick test/zipfile.test",
+      "state": "done",
+      "tests": 146,
+      "errors": 0
+    },
+    {
+      "name": "config=extraquick test/zipfile2.test",
+      "state": "done",
+      "tests": 32,
+      "errors": 0
+    }
+  ],
+  "triage": "GNU reproduces the same three legacy failures. All four focused official-runner jobs pass (409 assertions). Two simultaneous full official-runner probes encounter transient disk I/O errors in /tmp tmpfs. Final qualification uses disk storage and sequential Fas/GNU suites; its result is recorded separately.",
+  "disk_comparison_before_count_fix": {
+    "directory": "/home/glonex/.cache/fas-linker-qualification/sqlite-20261105",
+    "api_executions": 40,
+    "native_consumers": 4,
+    "upstream": [
+      {
+        "linker": "fas",
+        "jobs": 1300,
+        "tests": 398239,
+        "errors": 0,
+        "exit_status": 0
+      },
+      {
+        "linker": "gnu",
+        "jobs": 1300,
+        "tests": 398241,
+        "errors": 0,
+        "exit_status": 0
+      }
+    ],
+    "harness_failure": "upstream per-file test counts differ",
+    "count_differences": [
+      {
+        "name": "config=extraquick ext/fts5/test/fts5bigtok.test",
+        "fas": 291,
+        "gnu": 293
+      }
+    ],
+    "cause": "FTS5 big-token test uses Tcl rand() and asserts once per distinct generated term. Both independent upstream suites pass; exact assertion-count equality was an invalid harness requirement."
+  },
+  "initial_native_static_pie_harness_flag": {
+    "report": "/tmp/fas-sqlite-acceptance-20261105/report.json",
+    "report_sha256": "80bf9301a94da2d417341651f2e994c0ccd7ad95ed3fd0de087b34f6118913df",
+    "result": "failed",
+    "error": "/tmp/fas-sqlite-acceptance-20261105/tools/fas-compiler --backend=native /tmp/fas-sqlite-acceptance-20261105/tools/sqlite_consumer.fas -Wl,-static,-pie /tmp/fas-sqlite-acceptance-20261105/sqlite/build/libsqlite3.a -lm -ldl -o /tmp/fas-sqlite-acceptance-20261105/sqlite/build/fas-native-static-pie: exit 1, expected 0\nerror: hosted native: cannot find -lgcc_s in explicit -L directories\n",
+    "fix": "Use the native driver flag -Wl,-static-pie, rather than -Wl,-static,-pie. Corrected four-mode native matrix passes."
+  }
+}

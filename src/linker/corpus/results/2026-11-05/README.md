@@ -69,3 +69,23 @@ examples and gzip programs consume the same upstream objects and archives.
 Dynamic modes also exercise a GNU-linked consumer of the Fas-built versioned
 DSO. These are correctness results, not performance comparisons. Each report
 pins its harness, linker snapshot, source inputs and complete local command log.
+
+SQLite 3.54.1 qualification is preserved in `sqlite.json`, with official source
+checksums and tool/runtime provenance in `sqlite-inputs.json`. The complete
+canonical source builds through Fas and unchanged retained objects through GNU.
+All 40 GCC/Clang API executions and four native Fas consumers pass across
+archive/shared/fixed/PIE/static/static-PIE modes, including Fas/GNU extensions.
+CLI database cross-read and dump/restore pass. The isolated official extraquick
+runner passes all 1,300 scripts for each linker: 398,233 Fas and 398,261 GNU
+assertions, zero errors. Counts can differ in randomized FTS5 checks; per-file
+results and differences are retained.
+
+`sqlite-triage.json` retains earlier failures and their causes: a wrong native
+static-PIE harness flag, legacy same-process test contamination reproduced with
+GNU, transient I/O errors in concurrent tmpfs runs, and an invalid requirement
+that randomized assertion counts match. No scripts are omitted to make the
+final gate pass. Full snapshots, objects and logs remain at
+`/home/glonex/.cache/fas-linker-qualification/sqlite-stable-20261105`.
+This is installed-glibc/public-Tcl qualification; it does not establish SQLite
+on musl, TH3/full SQLite release coverage or power-loss behavior. Upstream
+testfixture defines SQLITE_NO_SYNC. No performance measurements were taken.

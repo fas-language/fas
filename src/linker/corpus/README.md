@@ -5,7 +5,7 @@ snapshots into a new output directory, records source/toolchain hashes and all
 commands, and compares behavior against GNU ld. It makes no timing comparisons.
 Current paths/library names target the tested Debian-style Linux x86-64 sysroot.
 Source inputs and game assets are not redistributed or changed.
-Each run copies the harness, selected linker and (for Sieve) compiler into its
+Each run copies the harness, selected linker and (for Sieve/SQLite) compiler into its
 output directory and hashes those snapshots, so rebuilding development
 executables cannot change a running replay. To replay a saved harness from its
 temporary directory, pass explicit `--linker` and `--compiler` snapshot paths.
@@ -145,3 +145,45 @@ python3 src/linker/corpus/run.py --output /tmp/fas-zlib-static-pie --static-pie 
 [Preserved results](results/2026-11-05/README.md) distinguish tested scopes and
 remaining limitations. Full binaries, snapshots and command logs remain in the
 recorded temporary directories; they are not durable release artifacts.
+
+SQLite 3.54.1 uses the complete canonical source release, pinned by SHA-256 and
+SQLite's published SHA3-256. Tcl development files are required (`tcl-dev` on
+the CI host). The runner invokes upstream `configure --all` and `make` through
+Fas, building the CLI, static archive, shared library and Tcl test executable.
+Temporary compiler objects are retained so GNU ld can link the same CLI, DSO
+and test-executable inputs independently.
+
+```sh
+python3 src/linker/corpus/fetch.py sqlite --output /tmp/fas-sqlite-source
+python3 src/linker/corpus/run.py --output /tmp/fas-sqlite-tests \
+  --sqlite /tmp/fas-sqlite-source/sqlite-src-3540100 --sqlite-extraquick
+```
+
+Without `--sqlite-extraquick`, upstream `main.test` is the short gate. The larger
+selection runs through unmodified `test/testrunner.tcl --jobs 2 extraquick`,
+which gives each test its own process and scratch directory. Both selections
+use that official runner with separate Fas/GNU working directories and the
+matching CLI beside each test executable. Per-file results and assertion counts
+are retained, and both oracles run before upstream failures fail qualification.
+Each must pass the same script selection; assertion counts can differ where
+upstream generates a variable number of checks from random data. Those count
+differences are recorded explicitly. This is the public Tcl suite,
+not SQLite's proprietary TH3 or full release suite; upstream's test executable
+defines `SQLITE_NO_SYNC`, so it does not establish power-loss durability.
+Optional `--sqlite-tcl-config DIR` and `--sqlite-tclsh PATH` select a local Tcl
+installation without changing system files.
+
+This SQLite matrix currently uses the installed glibc toolchain; SQLite on
+musl is not qualified by the separate libc smoke tests.
+GCC and, when available, Clang API consumers exercise the SQLite archive in
+fixed/PIE/full-static/static-PIE executables and both Fas/GNU shared libraries.
+Dynamic consumers load both Fas/GNU extensions. Checks include prepared
+statements, transactions/savepoints, on-disk reopen, WAL with four writer
+threads, JSON, FTS5, RTREE, callback/destructor execution, backup and integrity.
+Native Fas consumers use archive/shared/full-static/static-PIE links with LLVM
+tools unavailable. The shell also cross-reads databases and restores dumps
+between independent linkers. All modes are selected by this one corpus option;
+do not combine `--sqlite` with the runner's global linkage/dependency options.
+No timing comparisons are collected. The larger suite creates large databases;
+allow several GiB of free scratch space and prefer disk storage over a small
+`/tmp` tmpfs.

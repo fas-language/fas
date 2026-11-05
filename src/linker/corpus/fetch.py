@@ -8,8 +8,12 @@ from pathlib import Path
 import subprocess
 import tarfile
 import urllib.request
+import zipfile
 
 SOURCES = {
+    'sqlite': ('https://www.sqlite.org/2026/sqlite-src-3540100.zip',
+               '387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b',
+               'sqlite-src-3540100'),
     'chibicc': ('https://codeload.github.com/rui314/chibicc/tar.gz/90d1f7f199cc55b13c7fdb5839d1409806633fdb',
                 'cadb44e82354002000f6d2bbf41d3155f47a9b3e9abd50a309fdcd9b5ef791e0',
                 'chibicc-90d1f7f199cc55b13c7fdb5839d1409806633fdb'),
@@ -38,7 +42,7 @@ def main():
         parser.error('--build-musl requires project musl')
     root.mkdir(parents=True, exist_ok=False)
     url, checksum, directory = SOURCES[args.project]
-    archive = root/'source.tar.gz'
+    archive = root/('source.zip' if url.endswith('.zip') else 'source.tar.gz')
     with urllib.request.urlopen(url, timeout=60) as response, archive.open('wb') as out:
         total = 0
         while chunk := response.read(1024 * 1024):
@@ -48,10 +52,28 @@ def main():
             out.write(chunk)
     if hashlib.sha256(archive.read_bytes()).hexdigest() != checksum:
         raise ValueError('source archive checksum mismatch')
-    with tarfile.open(archive) as source:
-        source.extractall(root, filter='data')
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as source:
+            for entry in source.infolist():
+                target = (root/entry.filename).resolve()
+                if not target.is_relative_to(root):
+                    raise ValueError('archive member escapes output directory')
+            source.extractall(root)
+            for entry in source.infolist():
+                target = root/entry.filename
+                if target.is_file():
+                    target.chmod((entry.external_attr >> 16) & 0o777 or 0o644)
+    else:
+        with tarfile.open(archive) as source:
+            source.extractall(root, filter='data')
     report = {'release': directory, 'source_url': url, 'sha256': checksum,
               'source': str(root/directory), 'commands': []}
+    if args.project == 'sqlite':
+        # Independently verified against SQLite's published release checksum.
+        expected = '877c6f4996ce7adb368686bce21638de9e3d91534832ad3d9d119037d1bc22ad'
+        if hashlib.sha3_256(archive.read_bytes()).hexdigest() != expected:
+            raise ValueError('SQLite release SHA3-256 mismatch')
+        report['sha3_256'] = expected
     if args.build_musl:
         prefix = root/'sysroot'
         commands = [['./configure', '--prefix='+str(prefix),

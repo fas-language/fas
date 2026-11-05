@@ -1,0 +1,113 @@
+{
+  "date": "2026-11-05",
+  "purpose": "Real SQLite canonical-source library, shell, native Fas and public upstream Tcl qualification; performance deferred",
+  "base_commit": "b9f89eec43dd2a036132d2f745851785fae3b651",
+  "gate_exit": 0,
+  "report": "src/linker/corpus/results/2026-11-05/sqlite.json",
+  "report_sha256": "df47d43ce7f7f67df3f0ebfc82c12770559803947745dcae91366d989a221ca8",
+  "local_snapshot": "/home/glonex/.cache/fas-linker-qualification/sqlite-stable-20261105",
+  "linker_sha256": "209acf1b4302e9f8f1e01157d115f23c3bebaa756484fa270457a8ccde7a08be",
+  "compiler_sha256": "4ca73a8a20ae3684abbc7eee21f362e92ac0ddf5bb4e5b0c9ee7d89d1d0ac020",
+  "tested_harness_sha256": "86a07e1db3f930b504c9f2314b1a614f776802b1bef5084bbab07fe71e786c0c",
+  "source_sha256": {
+    "src/linker/corpus/fetch.py": "5ef46f54a40023a3f025db30fcb3a9eaa6ecce0b2a575f0157fec6aeb965b93b",
+    "src/linker/corpus/sqlite_consumer.c": "df5338f2724f92f1aef65bfb8dea68bc85e1252a4238ddaec4027cc71d376751",
+    "src/linker/corpus/sqlite_consumer.fas": "52c6ba6089fb7b56853a59327adadda28d29a1787763f57c1673175f0e8c125c",
+    "src/linker/corpus/sqlite_extension.c": "9161320a0b78677388013ceb4b3cef355620a2288a9a927aee066fdffd307dab",
+    ".github/workflows/linker.yml": "35e6c9f436648b6c6c3ff78f51cc502f227b8f6fdc448b3305ecc3d1f793ba00"
+  },
+  "api_executions": 40,
+  "native_fas_modes": [
+    "archive",
+    "shared",
+    "static",
+    "static-pie"
+  ],
+  "upstream": [
+    {
+      "linker": "fas",
+      "scripts": 1300,
+      "assertions": 398233,
+      "errors": 0
+    },
+    {
+      "linker": "gnu",
+      "scripts": 1300,
+      "assertions": 398261,
+      "errors": 0
+    }
+  ],
+  "assertion_count_differences": [
+    {
+      "name": "config=extraquick ext/fts5/test/fts5bigtok.test",
+      "fas": 285,
+      "gnu": 313
+    }
+  ],
+  "provenance": {
+    "source_release": {
+      "release": "sqlite-src-3540100",
+      "source_url": "https://www.sqlite.org/2026/sqlite-src-3540100.zip",
+      "sha256": "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
+      "source": "/tmp/fas-sqlite-fetch-20261105/sqlite-src-3540100",
+      "commands": [],
+      "sha3_256": "877c6f4996ce7adb368686bce21638de9e3d91534832ad3d9d119037d1bc22ad"
+    },
+    "canonical_files_verified_unchanged": 2290,
+    "tool_versions": {
+      "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+      "clang-22": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)",
+      "ld": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+      "make": "GNU Make 4.4.1",
+      "/home/glonex/miniconda3/bin/tclsh": "8.6.15"
+    },
+    "note": "Source and input provenance supplements the corpus report. Not a performance measurement.",
+    "runtime_libraries_sha256": {
+      "/usr/lib/x86_64-linux-gnu/libm.so.6": "1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8",
+      "/usr/lib/x86_64-linux-gnu/libz.so.1.3.1": "27fa6c6cb94fb5b099ead61758a300dbc392d1dbf307fff6c16a9b8e57fdc9de",
+      "/usr/lib/x86_64-linux-gnu/libc.so.6": "85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7",
+      "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+      "/home/glonex/miniconda3/lib/libtcl8.6.so": "ac33b38c4ea0f8d019f2d37c2603837d8146936aaef67dd9288dab2f10c87dcb",
+      "/usr/lib/x86_64-linux-gnu/libdl.so.2": "59d725ca30596a9863f4fa2552a7125f834842abc86b40890231c129358965d2",
+      "/usr/lib/x86_64-linux-gnu/libpthread.so.0": "1327fc40710691dbd94e88b6cf4efce27fefe8fbb93f7d1164a75b4dccaea696"
+    },
+    "retained_link_object_hashes_verified": 297
+  },
+  "regression": {
+    "release_build_exit": 0,
+    "incremental_musl_enabled_dune_gate_exit": 0,
+    "compiler_checks": 3792,
+    "baseline_forced_linker_gate": "audit/native-static-adapters-2026-11-05.json",
+    "note": "No linker-core or compiler implementation changed during SQLite qualification. Current dune run is incremental; earlier forced and enabled-musl results remain separately recorded."
+  },
+  "workflow_validation": {
+    "yaml_parsed": true,
+    "bash_syntax_steps": 12,
+    "hosted_run": "not executed"
+  },
+  "logs": {
+    "/home/glonex/.cache/fas-linker-qualification/sqlite-stable-20261105/commands.jsonl": {
+      "bytes": 13074194,
+      "sha256": "d4f5e8c22876bf354485b49e06ca83082176df2562d059d77dcaf595d4415b52"
+    },
+    "/home/glonex/.cache/fas-linker-qualification/sqlite-stable-20261105/sqlite/build/linker-invocations.jsonl": {
+      "bytes": 166314,
+      "sha256": "edfcb93fb433de4a7bec4e0f338454ccdd07caf0c633e772c5f74d6f91538775"
+    },
+    "/tmp/fas-sqlite-release-build-20261105.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/fas-sqlite-existing-gate-20261105.log": {
+      "bytes": 4829,
+      "sha256": "2d1b1dddc663c81599aa1f7ab89bd8e3b6a212c98211d5f71a7d4f7f59cde8f4"
+    }
+  },
+  "limitations": [
+    "Installed glibc with GCC 15.2 and Clang 22 consumers; SQLite/musl is not qualified.",
+    "Public extraquick Tcl selection only; no TH3 or full SQLite release-suite claim.",
+    "Upstream testfixture uses SQLITE_NO_SYNC; no power-loss qualification.",
+    "GCC wrapper disables linker plugins; no LTO support or performance claim.",
+    "Uses b9f89ee qualification snapshot; newer Claude backend work is not included."
+  ]
+}
