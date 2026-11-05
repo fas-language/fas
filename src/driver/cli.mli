@@ -61,3 +61,4 @@ type command =
 
 val parse : string array -> (command, string) result
 val usage : string
+val native_linker_arguments : string list -> string list

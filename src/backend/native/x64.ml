@@ -101,6 +101,8 @@ type label = int
 type reloc =
   | Rel32 of { offset : int; symbol : string; addend : int }
       (** 32-bit PC-relative: value = S + addend - (address of the next byte). *)
+  | Call32 of { offset : int; symbol : string; addend : int }
+      (** Direct call, allowing an external linker to select a PLT target. *)
   | Abs64 of { offset : int; symbol : string; addend : int }
   | Abs32s of { offset : int; symbol : string; addend : int }
       (** 32-bit absolute, sign-extended by the CPU. *)
@@ -720,7 +722,7 @@ let call_label a l =
 (* call to a symbol resolved by the linker *)
 let call_symbol a symbol =
   byte a 0xe8;
-  a.relocs <- Rel32 { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  a.relocs <- Call32 { offset = pos a; symbol; addend = 0 } :: a.relocs;
   int32 a 0
 
 let call_r a r = ext_r a ~w:false [ 0xff ] 2 r

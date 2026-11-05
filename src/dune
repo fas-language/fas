@@ -3,7 +3,7 @@
 (library
  (name fas_compiler)
  (wrapped false)
- (libraries unix)
+ (libraries unix fas_linker)
  (foreign_stubs
   (language c)
   (names float_parse build_limit))

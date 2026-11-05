@@ -1,0 +1,132 @@
+# Real-program acceptance
+
+This opt-in corpus complements the self-contained linker tests. It compiles
+snapshots into a new output directory, records source/toolchain hashes and all
+commands, and compares behavior against GNU ld. It makes no timing comparisons.
+Current paths/library names target the tested Debian-style Linux x86-64 sysroot.
+Source inputs and game assets are not redistributed or changed.
+Each run copies the selected linker into its output directory and hashes that
+snapshot, so rebuilding the development executable cannot change a running replay.
+
+From `fas`, after a release build:
+
+```sh
+python3 src/linker/corpus/run.py --output /tmp/fas-corpus-new \
+  --chibicc /path/to/chibicc \
+  --sieve /path/to/fas_solution \
+  --doom /path/to/linuxdoom-1.10 \
+  --wolf3d /path/to/wolf4sdl --wolf-data /path/to/data
+```
+
+Select any subset. Requires GCC, GNU tools and Clang/LLVM for Fas's LLVM backend;
+Doom requires X11 development libraries; Wolf3D requires SDL 1.2 and SDL_mixer
+development libraries. No display is opened. Wolf3D runtime probes use SDL's dummy
+video/audio drivers and a recorded change to the snapshot: bypass menus, fix the
+random seed and hash the first three E1M1 game frames. This is a bounded rendering
+check, not general gameplay acceptance. Without assets, Wolf3D is link-only.
+Doom currently compares startup's missing-WAD failure path; gameplay is unverified.
+
+Add `--strict-dependencies --dependency-path /usr/lib/x86_64-linux-gnu` to replay
+hosted links with `--no-allow-shlib-undefined` on both Fas and GNU ld. Repeat the
+dependency-path option for other declared sysroot directories. The report records
+this policy separately; no environment/cache/default-directory discovery is added.
+
+Chibicc's GCC-built compiler is linked by fas-ld, then compiles its upstream C
+test programs. Each is linked by Fas/GNU and both executions must pass and match.
+The source filename stays relative because upstream tests assert `__FILE__`.
+That `--chibicc` mode covers stage 1. For the unmodified upstream self-hosting
+build, both driver suites and 82 GNU/Fas C runtime comparisons, use:
+
+```sh
+python3 src/linker/corpus/fetch.py chibicc --output /tmp/fas-chibicc-source
+python3 src/linker/corpus/run.py --output /tmp/fas-chibicc-selfhost \
+  --chibicc-selfhost /tmp/fas-chibicc-source/chibicc-90d1f7f199cc55b13c7fdb5839d1409806633fdb
+```
+
+The bootstrap `cc` wrapper uses GCC with `-fPIC -fno-use-linker-plugin` and selects
+Fas through `-B`. Chibicc's own generated stage-2 objects keep their upstream
+code-generation policy and exercise imported-data COPY relocations. Both `cc`
+and `ld` wrappers are confined to the test directory; source files are unchanged.
+This mode cannot be combined with static/static-PIE or strict-dependency options:
+the upstream driver suite chooses its own shared/static/dynamic link policies.
+
+Sieve runs each original `.fas` source and its built-in prime-count validation.
+The default path uses LLVM-generated objects with fas-ld. Native compilation is
+attempted separately and recorded as a backend limitation if it fails. Current
+native scalar ABI support rejects these programs' variadic calls. Sieve prints
+its own elapsed time/pass count; these values are not benchmark comparisons.
+
+Download a pinned small library and run its upstream tests:
+
+```sh
+python3 src/linker/corpus/fetch.py cjson --output /tmp/fas-cjson-new
+python3 src/linker/corpus/run.py --output /tmp/fas-cjson-tests-new \
+  --cjson /tmp/fas-cjson-new/cJSON-1.7.19
+```
+
+The cJSON v1.7.19 corpus covers 21 upstream core/utility test programs, using the
+upstream Unity framework. Some tests include `cJSON.c` to exercise private code;
+the runner respects that arrangement. GNU and Fas executables must pass and have
+identical output. Download URLs and SHA-256 hashes are pinned in `fetch.py`.
+
+Build musl 1.2.5 into a temporary, isolated sysroot:
+
+```sh
+python3 src/linker/corpus/fetch.py musl --output /tmp/fas-musl-new --build-musl
+FAS_MUSL_SYSROOT=/tmp/fas-musl-new/sysroot dune runtest --profile release src/linker
+```
+
+Both the install prefix and runtime loader path remain under the selected
+directory. Host `/lib` and `/usr` are not modified. `musl_integration.py` checks
+static/fixed/PIE startup, libc calls, arguments/environment, constructor priority,
+atexit/destructors, independent threads/errno, LE/IE/GD/LD/TLSDESC and late-loaded
+TLS. Static output currently supports LE/IE/DTPOFF with runtime-owned TLS startup;
+GD/LD/TLSDESC instruction relaxation remains outside this gate. Installed static
+glibc has a separate `static_ifunc_integration.py` suite in the default tests.
+Without the environment variable, the default suite explicitly reports musl as
+skipped. The self-contained static TLS startup test still runs.
+
+For a real-program static glibc replay, select Chibicc, Sieve and/or cJSON:
+
+```sh
+python3 src/linker/corpus/run.py --output /tmp/fas-static-corpus --static \
+  --chibicc /path/to/chibicc --sieve /path/to/fas_solution \
+  --cjson /path/to/cJSON-1.7.19
+```
+
+This mode uses the installed static CRT/libc/libgcc/libm archives and records their
+hashes. It verifies ET_EXEC output without interpreter or dynamic program headers.
+Chibicc's upstream tests and cJSON's 21 test programs compare behavior with GNU ld;
+Sieve retains its prime-count checks. Static game dependency
+closures remain unqualified; `--static` cannot be combined with the dynamic
+strict-dependency option or the Doom/Wolf3D corpus selections.
+
+For CRT-relocated static PIE, use `--static-pie --cjson /path/to/cJSON-1.7.19`.
+This selects `rcrt1.o`, PIC-compatible objects and static libc/libgcc/libm, verifies
+ET_DYN with PT_DYNAMIC and no interpreter, and compares all 21 upstream test
+programs against GNU ld. The mode accepts cJSON and zlib; the existing
+Chibicc/Sieve object policies do not establish PIC compatibility, and game static
+dependency closures remain unqualified. `--static` and `--static-pie` are mutually
+exclusive. Both reject dynamic strict-dependency options.
+
+The zlib 1.3.1 corpus uses its upstream `configure`/`make` build with GCC invoking
+Fas as `ld`. The test-only compiler wrapper disables GCC's linker plugin; no LTO
+is used. Every actual linker invocation is retained. Dynamic mode builds the
+versioned shared library as well as the static archive and executes upstream
+static/shared/large-file API tests. GNU consumers load the Fas-produced DSO;
+Fas/GNU gzip producers and consumers cross-decode the same payload. Static and
+static PIE modes exercise the upstream archive build with the corresponding
+GCC driver flags, inspect the resulting executable types and compare GNU links.
+These are correctness checks, without timing comparisons.
+
+```sh
+python3 src/linker/corpus/fetch.py zlib --output /tmp/fas-zlib-new
+python3 src/linker/corpus/run.py --output /tmp/fas-zlib-dynamic \
+  --zlib /tmp/fas-zlib-new/zlib-1.3.1
+python3 src/linker/corpus/run.py --output /tmp/fas-zlib-static-pie --static-pie \
+  --zlib /tmp/fas-zlib-new/zlib-1.3.1
+```
+
+[Preserved results](results/2026-11-05/README.md) distinguish tested scopes and
+remaining limitations. Full binaries, snapshots and command logs remain in the
+recorded temporary directories; they are not durable release artifacts.

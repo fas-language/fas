@@ -1,0 +1,700 @@
+{
+  "started": "2026-11-05T19:36:19+0100",
+  "harness_sha256": "345d7919700ab38bf88cf6254fe7fcda44c386d664749faccdcd5feb8957e098",
+  "linker_sha256": "50fbe0c2d3dcd0a49638883270f13cfc776f145162a7aa84c98fe222ebc097d5",
+  "linker_source": "/home/glonex/fas-experimental-backend/fas/_build/default/src/linker/bin/main.exe",
+  "linker_snapshot": "/tmp/fas-chibicc-selfhost-final-20261105/tools/fas-ld",
+  "tests": [
+    {
+      "name": "chibicc_selfhost",
+      "status": "passed",
+      "detail": {
+        "compiler_sha256": {
+          "stage1": "8331ee29ad74abc9849c6c9d858a9128854bc7c44130f227ace7080e6242d39d",
+          "stage2": "41752ccb62707804bb4a51932859cdc77b65cc0578040c9125e72d1dc5940b68"
+        },
+        "tests_per_stage": 41,
+        "gnu_runtime_comparisons": [
+          {
+            "stage": "stage1",
+            "test": "alignof.c",
+            "fas_sha256": "008a7fcbcd3bd665a811614057966d043919db95c3b0500f0651c2fbcc5a677c",
+            "gnu_sha256": "0939a3adc2fea0c727295817f532e1c8c50f5c6b3cab44323de9170e1eea015d",
+            "stdout_sha256": "4590ec5d6535364194c30a272741cde81f9471caed958948b868fb73f668ad8d"
+          },
+          {
+            "stage": "stage1",
+            "test": "alloca.c",
+            "fas_sha256": "c398c972df907f4a85b6108183fedac731468a793a2e65e942144e6b9e8e2e43",
+            "gnu_sha256": "fcd3188a0fa60da859e4f42bbd34173d79e29d7c1e5a2fc4e4e1fe7c5ace617f",
+            "stdout_sha256": "8b1716b2d072628eabaee58f6aa4f0a7479f521095513c451d13af733d4c6d85"
+          },
+          {
+            "stage": "stage1",
+            "test": "arith.c",
+            "fas_sha256": "4644ea420ca6aad337499ef7c9eb594179f351fc9ce07cffc03644c7e6ac7cae",
+            "gnu_sha256": "08ea66968d952d807415d474ee80d1deb8b939670d51274d940c436e0e80caca",
+            "stdout_sha256": "f47739b4b51c3c5890cc230adf3277c3dc266fa1560db0526af527163acbd4d7"
+          },
+          {
+            "stage": "stage1",
+            "test": "asm.c",
+            "fas_sha256": "aca45d8ffc7a9a15bef5daf1ed808cb5f5db87b6a8e2d7f06232e06d97c5bf6c",
+            "gnu_sha256": "4c125e9fc024aa72cf5b3aed3bafbdf7dc24e73d6493735a3294994f977a1c59",
+            "stdout_sha256": "3561042b2ec8898acd96698595164dd5ca2ca93a8cbf00a15a8fec8cde431302"
+          },
+          {
+            "stage": "stage1",
+            "test": "atomic.c",
+            "fas_sha256": "7bda98218082cd4a7643df4917399d4817a30b28896264ee0641a03e1a1c4a61",
+            "gnu_sha256": "45b9f04ae50d343973daa40270af462c7494e952bd12c47d181501f005fd83ca",
+            "stdout_sha256": "71f46dce8a2ec686497763c8780fdfbddd4e76365827ffbd34d09d27dd0e794f"
+          },
+          {
+            "stage": "stage1",
+            "test": "attribute.c",
+            "fas_sha256": "12e617326bb9d1f6418e1e4fc77457ffe3bfd6c404dc9099e263cb38bc92430a",
+            "gnu_sha256": "1933b1ea5b71d7019491e84b2dd7a6eee20bd6f4eb8db9c29da051f4f592af9d",
+            "stdout_sha256": "d1d68c9fe9641cb773e0c422f22a69fe4b69bce3d049fb46f2669c658312a6c0"
+          },
+          {
+            "stage": "stage1",
+            "test": "bitfield.c",
+            "fas_sha256": "53e3883f2a8b83260a9621f0bdcb1ae45b5ac9195d26e11a2e5aab8c92b2042a",
+            "gnu_sha256": "f17ddc9781fd0a254fc32300db730e21ff6c0b659fe82a99e2ec5bbc122f6085",
+            "stdout_sha256": "2026f8ae6c74fd96b0765a41208a80d759690d62565d9b4997d182963e6d3aa4"
+          },
+          {
+            "stage": "stage1",
+            "test": "builtin.c",
+            "fas_sha256": "7bbe8ca86bbba04fb9b7cbbd29007a7edb12bed7ab88ddb6a96092f143454883",
+            "gnu_sha256": "86704a20aee660007126e437a613bacaadd98952a6ebcfee5fc42ef9287cbe0c",
+            "stdout_sha256": "8fff1a148626ef314eb7853b36b20ce5dac01648c905df27e83947d8f6388dd7"
+          },
+          {
+            "stage": "stage1",
+            "test": "cast.c",
+            "fas_sha256": "bc038b02b6adc21d99a9d31c1b2ddf1fbc41650df27f99c37990f87708559fab",
+            "gnu_sha256": "797a6997a020f93b1939112ec62ed36084b111747b923905a912394e33182bcb",
+            "stdout_sha256": "a895fd3d7f017467a879f16c4ef00eb79c3f37ccbadf6e32164b54c36c9c5362"
+          },
+          {
+            "stage": "stage1",
+            "test": "commonsym.c",
+            "fas_sha256": "638556c1078c952d94ecee86a474bcf9b2d4abb3f2393a33a3c2d4a59779d26e",
+            "gnu_sha256": "eadc55e3a8d3e4dff22d3f8dc845700b408c93fbc909b3b8cdf1dfcd1059bb4f",
+            "stdout_sha256": "896836f535c4939abc108df7292077589877bb61d898d1b631eade545034fd04"
+          },
+          {
+            "stage": "stage1",
+            "test": "compat.c",
+            "fas_sha256": "2e9d454b71659611e1d525c19d49d722690e2f5077567dab15880bf317571b28",
+            "gnu_sha256": "8c6d57df23a0b787613b5f2aa38f8ce14003fe3bcc5c5b03c985e095c224d9f8",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage1",
+            "test": "complit.c",
+            "fas_sha256": "1fc3c92ed4e58b186d56fe6902498206c075b4ce54b1c32bd418aad8a00b57f6",
+            "gnu_sha256": "2369d03c127b12958c6cd3d4c2d4e1c56eeeb8ed9f539065ed3d31a30f2f7f7e",
+            "stdout_sha256": "90b5afb75044a4b140f224c7d8a019981a6adf53fbb58fe4abd3b30c9d445ad9"
+          },
+          {
+            "stage": "stage1",
+            "test": "const.c",
+            "fas_sha256": "6cad3ff03ea349f49c2915aae6d8fcb4bcc724d07833cb3162bed1e5ea74c6f6",
+            "gnu_sha256": "5a569a47fe5979c922bebfb0c57df638a37b8b7f02d72519733e0cf933a6b5f1",
+            "stdout_sha256": "2323bc8147811fb239ad4d7166014d123dfd707c3113becf3c40a425ca3aa0d3"
+          },
+          {
+            "stage": "stage1",
+            "test": "constexpr.c",
+            "fas_sha256": "3962a039088fb59c12e210b7f8cd0458adb32b56bbb4cf176fbbc8c52baf61e9",
+            "gnu_sha256": "41166d26180e537df210e4f6034b970e363b312bffbcc2afb30e7881f5c33268",
+            "stdout_sha256": "a0f79355f6726e502098e9a0a90810850e113c9a09613390dc3ca3a8f3931335"
+          },
+          {
+            "stage": "stage1",
+            "test": "control.c",
+            "fas_sha256": "9d9311dfafe25bff9eef34e771a4d2f3f99fe1b3e3c5bf6f93613efaba836ed5",
+            "gnu_sha256": "24b9c7d38e56d5e989f466cf5cbab103db9821d936cefcd9eb88476ba0cdd27e",
+            "stdout_sha256": "992204647f6ee7c42f9a8f64958077a80ed678aae96acf381c354de024e4a1ee"
+          },
+          {
+            "stage": "stage1",
+            "test": "decl.c",
+            "fas_sha256": "b7e5ebea79fef58d6716598504583c5f48ccc638fbd79a20491a4014dc61ccaf",
+            "gnu_sha256": "fe2764cc5d6f69d779d474844fe3cfd5cba250e7b195b7de5ecb7de75b0cbe9f",
+            "stdout_sha256": "b07fc19092dde0ae67a49721357c47b2cdbaa26f3d909430afa56c6aadd532ff"
+          },
+          {
+            "stage": "stage1",
+            "test": "enum.c",
+            "fas_sha256": "752c6153b588ed4d56f3ea7b774c468ebd0f3040ce853345a9c32dc68873ef9f",
+            "gnu_sha256": "47756d3f61a34846d8eb9ea37819ba5e7cbab4ae6ef9f75002acad20f2a2685a",
+            "stdout_sha256": "afe55b7c73833b59ae1b766a7b9d685c6f6fc99f43422c9e4ec3cee8f28d9433"
+          },
+          {
+            "stage": "stage1",
+            "test": "extern.c",
+            "fas_sha256": "ace443b852f2782053064f8835cdea8bd884103ca437f561ce7cc9872b30b07f",
+            "gnu_sha256": "f8df4876c6f5e4e06ccad1832fc1da309c073bcda2fdbd1550ba3ebaa1386924",
+            "stdout_sha256": "0f36019150a8f620f3accef37af32f8e31c4feedfba2ab42cacb1c74bd48d082"
+          },
+          {
+            "stage": "stage1",
+            "test": "float.c",
+            "fas_sha256": "3d145d12e26c9124928903fbea5bd09626c03cc302951287ebb0da7b5ad8e1e3",
+            "gnu_sha256": "1150d35dec63c0825138823c70339330a351cda8f372a6f544c9f75832c5bb9c",
+            "stdout_sha256": "89cc23c951f692937c1a4a31bf5cff72db472366cc6c41c4ba5e4368f2209b38"
+          },
+          {
+            "stage": "stage1",
+            "test": "function.c",
+            "fas_sha256": "5826ee593358ae32df9768207a398cc823a044f8cbf177da212a4824f27a0cae",
+            "gnu_sha256": "62d40cb241f188ea0657dd68e0bd2ad709c0592fa3e27e50394cc72f4d388203",
+            "stdout_sha256": "b921ffff0640037a1cfb70056dce8475eeb7d0e08d4f4d5a076cfaab9d14d1ac"
+          },
+          {
+            "stage": "stage1",
+            "test": "generic.c",
+            "fas_sha256": "c01fd28f143928fbf1881cddb90a7f47c6b02526c9aaad0e7a1ebc838d4e79ac",
+            "gnu_sha256": "9414db7ea335a2477705746ddfece7a42092917a249a4e63f519e124780ff1a8",
+            "stdout_sha256": "cc4768e70f5c51ed3cafb385a188d3f0d3164495d229b18fb6148e04b14d56fb"
+          },
+          {
+            "stage": "stage1",
+            "test": "initializer.c",
+            "fas_sha256": "e315773b800692579ce6dbf0ae24319e26ff4f1e9c2217bf2cfd3fc187ba66a6",
+            "gnu_sha256": "f63431d0516e8e769a0df117c5b5af6949033d09b27a3219ebbffc1393a0fce0",
+            "stdout_sha256": "a3c9456f7d87d98a4f1761b9d839a277bcdcf3cb0d1949c9191ee98ea3781d54"
+          },
+          {
+            "stage": "stage1",
+            "test": "line.c",
+            "fas_sha256": "af185f1d013ff3d00fb6785c59b8ca4c4f5f025148cbdb36298b215625a87f9c",
+            "gnu_sha256": "dcfd323d8658303ded8a46a4b10a087833d11b7fbcc39239c348466860e650fc",
+            "stdout_sha256": "76cccdf7b602a5bf1d1375c144e9a01cbbc6b76a119f7373b34daf5c2c6d2d83"
+          },
+          {
+            "stage": "stage1",
+            "test": "literal.c",
+            "fas_sha256": "c26118a1b20e0498bd0ffdc1306a30aa1bbb83e924fbc0560a43ec4aba2e647b",
+            "gnu_sha256": "a2d8a92ad1010e21976151fe494e6049b35653fc457e527a99e91728062c5088",
+            "stdout_sha256": "1e6e7ab4f03ca9b17e6e0dcd39cce3065e39fb8760aa1844008fd55faf2c7938"
+          },
+          {
+            "stage": "stage1",
+            "test": "macro.c",
+            "fas_sha256": "fd650b3c7d89be1beb3b019b10924f81c587f01664cc8df08023403ac38f4bff",
+            "gnu_sha256": "541efa53946c98957bd0d3daf61b5b73301f07efd5124e97624fa46344086032",
+            "stdout_sha256": "c31b0abf8aaf11047f624231fcdc276e6ed39afd99e31de01fcc9510d89f2e22"
+          },
+          {
+            "stage": "stage1",
+            "test": "offsetof.c",
+            "fas_sha256": "bb0baf67bfd47cb3d02eb8b422eadf7d740b0f9031907f83055dbeb01e66d63f",
+            "gnu_sha256": "a5b176a417e100218eeef7579383215f8fb15483cb160b5f10e94cef9d9335b1",
+            "stdout_sha256": "0b3d2d9a5eb2a40919d7c4387fda0e9ea62a123a93efcda2f457877eab0c003c"
+          },
+          {
+            "stage": "stage1",
+            "test": "pointer.c",
+            "fas_sha256": "4a8b4fd14343d00d119ed3b50f7f5b6c9906c8b68838c8cfea7aa092d808fe90",
+            "gnu_sha256": "cb87a0cdcd43b9b3abfd60735160be6b2a814cc800ea368f8bd321f7b23f532b",
+            "stdout_sha256": "a22ec9572434912693508435de5327c228292bc65ad32c09f8c9d8d8cc16b528"
+          },
+          {
+            "stage": "stage1",
+            "test": "pragma-once.c",
+            "fas_sha256": "185d5ffd6c26357b335207f8fcbad856b99872ccc54f6ff8e068fa6857b1bfdc",
+            "gnu_sha256": "bc58129b9c6217413ab2e60ddb791610cfe604a31ea313270e530a1cf459e3bb",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage1",
+            "test": "sizeof.c",
+            "fas_sha256": "405d8a986846fb7327863531ac0f235f676f3328cbcee323a9cd8e8dca4ad56b",
+            "gnu_sha256": "6485fd4797c04bebcfdf3fe3bd765625879844f7c62d20f784d86599cd2c5558",
+            "stdout_sha256": "54d6b29000e681ec7f6fca3c225c633a137ba29651381c8937be49ce600659bd"
+          },
+          {
+            "stage": "stage1",
+            "test": "stdhdr.c",
+            "fas_sha256": "7f8e5bffe849bc504073c6852c4b7ec1d0947140f95071924c400e0085d80d90",
+            "gnu_sha256": "4e6c4808917511e8a950b43b7c7fac2fd9d63726600e08f05d932b6a9f4525db",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage1",
+            "test": "string.c",
+            "fas_sha256": "963e4c79cc1c837e1e1cb87443fe9fe1469524d5cbacb423ad6738c72497018a",
+            "gnu_sha256": "d35679ebfa38f9d6fc106e5716a6640c47bc1ac796eec01f1df90eafb8a88eb8",
+            "stdout_sha256": "24da57ec989f81a952213a074b2ee45e3cd813e0c648ccb40934f5888664c476"
+          },
+          {
+            "stage": "stage1",
+            "test": "struct.c",
+            "fas_sha256": "9ac6a6a40318fdb65e8a98c17039a881b45b5f948676ad084ffbb92e71fc88bd",
+            "gnu_sha256": "7dc698d7d0158fb8517c04228bb3fd646b1af86d67c3622889e014e99ddd26a5",
+            "stdout_sha256": "e1590b5e57c0a5961b9c87183818ecaf7a23af6fa07629d4b79d8a15534bdc95"
+          },
+          {
+            "stage": "stage1",
+            "test": "tls.c",
+            "fas_sha256": "f3cfe8f0898a9df0d17cec644fd86955f046f0c9edb68e633f45e1a1d677ea59",
+            "gnu_sha256": "8235718ff13ac6ad6bae2d0e9823070cbebef079a0056b731e5c3509dfaa9d1d",
+            "stdout_sha256": "5c5b3dde0f1a938d79e5cbe4036a03eee6f9a94ad7332d86679d60267cc7bbfe"
+          },
+          {
+            "stage": "stage1",
+            "test": "typedef.c",
+            "fas_sha256": "1dbd319dec47b031efd2913e415900d7754c1a519d18674c9e967787326994e0",
+            "gnu_sha256": "23a6bf7abd78e4be4a0eebb8215a824da7aa49254515d5fde3f609d17984665e",
+            "stdout_sha256": "e8421f8d2ebac2b773f9849304f9a7b441a6bbb15886f1abfe8015fa528a43c1"
+          },
+          {
+            "stage": "stage1",
+            "test": "typeof.c",
+            "fas_sha256": "89293f3401beac521b75985d6d6305feadeb2b14942fa48a5cd9417761978f08",
+            "gnu_sha256": "557be9307b5d91d69bd9f82e55f89b8fae447286b084a8dcefa28557767f4954",
+            "stdout_sha256": "ad52bd943c871190a066aa0cdf11c3b4862f624342fee19c4a2e76ecc576ac21"
+          },
+          {
+            "stage": "stage1",
+            "test": "unicode.c",
+            "fas_sha256": "f89bd675c7e14543dd5428d13e6a3be506d0c2fc23631f4fac8afad032e0c536",
+            "gnu_sha256": "24bca5b18cbfe1a6ebfb0990c08bf9ff1ec52f0f407a5337819e682be5cc72ef",
+            "stdout_sha256": "02b386e14b7619b6924851856c35ca92bf5aa80d5be53d53b1b35e186a75f559"
+          },
+          {
+            "stage": "stage1",
+            "test": "union.c",
+            "fas_sha256": "28083955f04926cd5f148a54bff30f63d3da96b838904362c866dc046c7f4f1e",
+            "gnu_sha256": "48e1bea15ac59f7746bf35dd4b0216b97b98404efeb16bcd00b9459c9cd16264",
+            "stdout_sha256": "4365eba65a24856c3abb43a1c361aea4f1ddb67d7eb7d2eeed846b048f4726d1"
+          },
+          {
+            "stage": "stage1",
+            "test": "usualconv.c",
+            "fas_sha256": "7886aa8bcde78df35c1f32707e1b21a77b087884fbe3353408f8821a2a4673a3",
+            "gnu_sha256": "9aa67b6969ebd9fa36365b655529fe5a9f32c46a31cf0176fe26ec470101e9b9",
+            "stdout_sha256": "f19cf931bddde5e4688b8650b37cc0405d0ca44b5c2dde1083372084c70f6a0b"
+          },
+          {
+            "stage": "stage1",
+            "test": "varargs.c",
+            "fas_sha256": "4346374864ff624b2185cc3c80320269e9bd56b919d95a761ebcb39f4f98cca4",
+            "gnu_sha256": "058e403d5bc2822969bb93382cb896a3119ca7632fd57b169fb1176b7013472f",
+            "stdout_sha256": "072073e9862eb742ef55f306af5bea560134ce679fb0d8f73fab9e0c60b3c29c"
+          },
+          {
+            "stage": "stage1",
+            "test": "variable.c",
+            "fas_sha256": "a8176921c6dc0c42019bfa52fb420a3f4923041053f10f758972f21e78af59bd",
+            "gnu_sha256": "cf7fda743610a30b861c52b74ae8a8bd51f2080b6fb4564ce4bc7697a317d2ff",
+            "stdout_sha256": "666cb9f02b032b7dcc0a188d9fdb8a6d28dab47538e54bbf9c0d607ee09dc95b"
+          },
+          {
+            "stage": "stage1",
+            "test": "vla.c",
+            "fas_sha256": "8254ee4a682c7171a6e59b52b2e0a49137fae6a92bb7f56c6edb8d70ef068f2a",
+            "gnu_sha256": "28104ee2f72574e9b1febce057b3aea344a747d7eb7dbfdd5d017b8113a65f17",
+            "stdout_sha256": "c39f3e1cdffe33d67e67fddf10f36c21db68133a613b8a6ce9eab0aa1dab9e7c"
+          },
+          {
+            "stage": "stage2",
+            "test": "alignof.c",
+            "fas_sha256": "008a7fcbcd3bd665a811614057966d043919db95c3b0500f0651c2fbcc5a677c",
+            "gnu_sha256": "0939a3adc2fea0c727295817f532e1c8c50f5c6b3cab44323de9170e1eea015d",
+            "stdout_sha256": "4590ec5d6535364194c30a272741cde81f9471caed958948b868fb73f668ad8d"
+          },
+          {
+            "stage": "stage2",
+            "test": "alloca.c",
+            "fas_sha256": "c398c972df907f4a85b6108183fedac731468a793a2e65e942144e6b9e8e2e43",
+            "gnu_sha256": "fcd3188a0fa60da859e4f42bbd34173d79e29d7c1e5a2fc4e4e1fe7c5ace617f",
+            "stdout_sha256": "8b1716b2d072628eabaee58f6aa4f0a7479f521095513c451d13af733d4c6d85"
+          },
+          {
+            "stage": "stage2",
+            "test": "arith.c",
+            "fas_sha256": "4644ea420ca6aad337499ef7c9eb594179f351fc9ce07cffc03644c7e6ac7cae",
+            "gnu_sha256": "08ea66968d952d807415d474ee80d1deb8b939670d51274d940c436e0e80caca",
+            "stdout_sha256": "f47739b4b51c3c5890cc230adf3277c3dc266fa1560db0526af527163acbd4d7"
+          },
+          {
+            "stage": "stage2",
+            "test": "asm.c",
+            "fas_sha256": "aca45d8ffc7a9a15bef5daf1ed808cb5f5db87b6a8e2d7f06232e06d97c5bf6c",
+            "gnu_sha256": "4c125e9fc024aa72cf5b3aed3bafbdf7dc24e73d6493735a3294994f977a1c59",
+            "stdout_sha256": "3561042b2ec8898acd96698595164dd5ca2ca93a8cbf00a15a8fec8cde431302"
+          },
+          {
+            "stage": "stage2",
+            "test": "atomic.c",
+            "fas_sha256": "7bda98218082cd4a7643df4917399d4817a30b28896264ee0641a03e1a1c4a61",
+            "gnu_sha256": "45b9f04ae50d343973daa40270af462c7494e952bd12c47d181501f005fd83ca",
+            "stdout_sha256": "71f46dce8a2ec686497763c8780fdfbddd4e76365827ffbd34d09d27dd0e794f"
+          },
+          {
+            "stage": "stage2",
+            "test": "attribute.c",
+            "fas_sha256": "12e617326bb9d1f6418e1e4fc77457ffe3bfd6c404dc9099e263cb38bc92430a",
+            "gnu_sha256": "1933b1ea5b71d7019491e84b2dd7a6eee20bd6f4eb8db9c29da051f4f592af9d",
+            "stdout_sha256": "d1d68c9fe9641cb773e0c422f22a69fe4b69bce3d049fb46f2669c658312a6c0"
+          },
+          {
+            "stage": "stage2",
+            "test": "bitfield.c",
+            "fas_sha256": "53e3883f2a8b83260a9621f0bdcb1ae45b5ac9195d26e11a2e5aab8c92b2042a",
+            "gnu_sha256": "f17ddc9781fd0a254fc32300db730e21ff6c0b659fe82a99e2ec5bbc122f6085",
+            "stdout_sha256": "2026f8ae6c74fd96b0765a41208a80d759690d62565d9b4997d182963e6d3aa4"
+          },
+          {
+            "stage": "stage2",
+            "test": "builtin.c",
+            "fas_sha256": "7bbe8ca86bbba04fb9b7cbbd29007a7edb12bed7ab88ddb6a96092f143454883",
+            "gnu_sha256": "86704a20aee660007126e437a613bacaadd98952a6ebcfee5fc42ef9287cbe0c",
+            "stdout_sha256": "8fff1a148626ef314eb7853b36b20ce5dac01648c905df27e83947d8f6388dd7"
+          },
+          {
+            "stage": "stage2",
+            "test": "cast.c",
+            "fas_sha256": "bc038b02b6adc21d99a9d31c1b2ddf1fbc41650df27f99c37990f87708559fab",
+            "gnu_sha256": "797a6997a020f93b1939112ec62ed36084b111747b923905a912394e33182bcb",
+            "stdout_sha256": "a895fd3d7f017467a879f16c4ef00eb79c3f37ccbadf6e32164b54c36c9c5362"
+          },
+          {
+            "stage": "stage2",
+            "test": "commonsym.c",
+            "fas_sha256": "638556c1078c952d94ecee86a474bcf9b2d4abb3f2393a33a3c2d4a59779d26e",
+            "gnu_sha256": "eadc55e3a8d3e4dff22d3f8dc845700b408c93fbc909b3b8cdf1dfcd1059bb4f",
+            "stdout_sha256": "896836f535c4939abc108df7292077589877bb61d898d1b631eade545034fd04"
+          },
+          {
+            "stage": "stage2",
+            "test": "compat.c",
+            "fas_sha256": "2e9d454b71659611e1d525c19d49d722690e2f5077567dab15880bf317571b28",
+            "gnu_sha256": "8c6d57df23a0b787613b5f2aa38f8ce14003fe3bcc5c5b03c985e095c224d9f8",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage2",
+            "test": "complit.c",
+            "fas_sha256": "1fc3c92ed4e58b186d56fe6902498206c075b4ce54b1c32bd418aad8a00b57f6",
+            "gnu_sha256": "2369d03c127b12958c6cd3d4c2d4e1c56eeeb8ed9f539065ed3d31a30f2f7f7e",
+            "stdout_sha256": "90b5afb75044a4b140f224c7d8a019981a6adf53fbb58fe4abd3b30c9d445ad9"
+          },
+          {
+            "stage": "stage2",
+            "test": "const.c",
+            "fas_sha256": "6cad3ff03ea349f49c2915aae6d8fcb4bcc724d07833cb3162bed1e5ea74c6f6",
+            "gnu_sha256": "5a569a47fe5979c922bebfb0c57df638a37b8b7f02d72519733e0cf933a6b5f1",
+            "stdout_sha256": "2323bc8147811fb239ad4d7166014d123dfd707c3113becf3c40a425ca3aa0d3"
+          },
+          {
+            "stage": "stage2",
+            "test": "constexpr.c",
+            "fas_sha256": "3962a039088fb59c12e210b7f8cd0458adb32b56bbb4cf176fbbc8c52baf61e9",
+            "gnu_sha256": "41166d26180e537df210e4f6034b970e363b312bffbcc2afb30e7881f5c33268",
+            "stdout_sha256": "a0f79355f6726e502098e9a0a90810850e113c9a09613390dc3ca3a8f3931335"
+          },
+          {
+            "stage": "stage2",
+            "test": "control.c",
+            "fas_sha256": "9d9311dfafe25bff9eef34e771a4d2f3f99fe1b3e3c5bf6f93613efaba836ed5",
+            "gnu_sha256": "24b9c7d38e56d5e989f466cf5cbab103db9821d936cefcd9eb88476ba0cdd27e",
+            "stdout_sha256": "992204647f6ee7c42f9a8f64958077a80ed678aae96acf381c354de024e4a1ee"
+          },
+          {
+            "stage": "stage2",
+            "test": "decl.c",
+            "fas_sha256": "b7e5ebea79fef58d6716598504583c5f48ccc638fbd79a20491a4014dc61ccaf",
+            "gnu_sha256": "fe2764cc5d6f69d779d474844fe3cfd5cba250e7b195b7de5ecb7de75b0cbe9f",
+            "stdout_sha256": "b07fc19092dde0ae67a49721357c47b2cdbaa26f3d909430afa56c6aadd532ff"
+          },
+          {
+            "stage": "stage2",
+            "test": "enum.c",
+            "fas_sha256": "752c6153b588ed4d56f3ea7b774c468ebd0f3040ce853345a9c32dc68873ef9f",
+            "gnu_sha256": "47756d3f61a34846d8eb9ea37819ba5e7cbab4ae6ef9f75002acad20f2a2685a",
+            "stdout_sha256": "afe55b7c73833b59ae1b766a7b9d685c6f6fc99f43422c9e4ec3cee8f28d9433"
+          },
+          {
+            "stage": "stage2",
+            "test": "extern.c",
+            "fas_sha256": "ace443b852f2782053064f8835cdea8bd884103ca437f561ce7cc9872b30b07f",
+            "gnu_sha256": "f8df4876c6f5e4e06ccad1832fc1da309c073bcda2fdbd1550ba3ebaa1386924",
+            "stdout_sha256": "0f36019150a8f620f3accef37af32f8e31c4feedfba2ab42cacb1c74bd48d082"
+          },
+          {
+            "stage": "stage2",
+            "test": "float.c",
+            "fas_sha256": "3d145d12e26c9124928903fbea5bd09626c03cc302951287ebb0da7b5ad8e1e3",
+            "gnu_sha256": "1150d35dec63c0825138823c70339330a351cda8f372a6f544c9f75832c5bb9c",
+            "stdout_sha256": "89cc23c951f692937c1a4a31bf5cff72db472366cc6c41c4ba5e4368f2209b38"
+          },
+          {
+            "stage": "stage2",
+            "test": "function.c",
+            "fas_sha256": "5826ee593358ae32df9768207a398cc823a044f8cbf177da212a4824f27a0cae",
+            "gnu_sha256": "62d40cb241f188ea0657dd68e0bd2ad709c0592fa3e27e50394cc72f4d388203",
+            "stdout_sha256": "b921ffff0640037a1cfb70056dce8475eeb7d0e08d4f4d5a076cfaab9d14d1ac"
+          },
+          {
+            "stage": "stage2",
+            "test": "generic.c",
+            "fas_sha256": "c01fd28f143928fbf1881cddb90a7f47c6b02526c9aaad0e7a1ebc838d4e79ac",
+            "gnu_sha256": "9414db7ea335a2477705746ddfece7a42092917a249a4e63f519e124780ff1a8",
+            "stdout_sha256": "cc4768e70f5c51ed3cafb385a188d3f0d3164495d229b18fb6148e04b14d56fb"
+          },
+          {
+            "stage": "stage2",
+            "test": "initializer.c",
+            "fas_sha256": "e315773b800692579ce6dbf0ae24319e26ff4f1e9c2217bf2cfd3fc187ba66a6",
+            "gnu_sha256": "f63431d0516e8e769a0df117c5b5af6949033d09b27a3219ebbffc1393a0fce0",
+            "stdout_sha256": "a3c9456f7d87d98a4f1761b9d839a277bcdcf3cb0d1949c9191ee98ea3781d54"
+          },
+          {
+            "stage": "stage2",
+            "test": "line.c",
+            "fas_sha256": "af185f1d013ff3d00fb6785c59b8ca4c4f5f025148cbdb36298b215625a87f9c",
+            "gnu_sha256": "dcfd323d8658303ded8a46a4b10a087833d11b7fbcc39239c348466860e650fc",
+            "stdout_sha256": "76cccdf7b602a5bf1d1375c144e9a01cbbc6b76a119f7373b34daf5c2c6d2d83"
+          },
+          {
+            "stage": "stage2",
+            "test": "literal.c",
+            "fas_sha256": "c26118a1b20e0498bd0ffdc1306a30aa1bbb83e924fbc0560a43ec4aba2e647b",
+            "gnu_sha256": "a2d8a92ad1010e21976151fe494e6049b35653fc457e527a99e91728062c5088",
+            "stdout_sha256": "1e6e7ab4f03ca9b17e6e0dcd39cce3065e39fb8760aa1844008fd55faf2c7938"
+          },
+          {
+            "stage": "stage2",
+            "test": "macro.c",
+            "fas_sha256": "90269d7157527a951c218efa9bd3039cbf81d298903d7f9535e6d001922b9f2f",
+            "gnu_sha256": "330648fe13149cce75c79406fc5005e9361bbceb90a3007b126b824f823dd9fd",
+            "stdout_sha256": "8042fb203a7880a0a2575d12fda47e5ba7cd474a18b0c605e86ced0d2aed5305"
+          },
+          {
+            "stage": "stage2",
+            "test": "offsetof.c",
+            "fas_sha256": "bb0baf67bfd47cb3d02eb8b422eadf7d740b0f9031907f83055dbeb01e66d63f",
+            "gnu_sha256": "a5b176a417e100218eeef7579383215f8fb15483cb160b5f10e94cef9d9335b1",
+            "stdout_sha256": "0b3d2d9a5eb2a40919d7c4387fda0e9ea62a123a93efcda2f457877eab0c003c"
+          },
+          {
+            "stage": "stage2",
+            "test": "pointer.c",
+            "fas_sha256": "4a8b4fd14343d00d119ed3b50f7f5b6c9906c8b68838c8cfea7aa092d808fe90",
+            "gnu_sha256": "cb87a0cdcd43b9b3abfd60735160be6b2a814cc800ea368f8bd321f7b23f532b",
+            "stdout_sha256": "a22ec9572434912693508435de5327c228292bc65ad32c09f8c9d8d8cc16b528"
+          },
+          {
+            "stage": "stage2",
+            "test": "pragma-once.c",
+            "fas_sha256": "185d5ffd6c26357b335207f8fcbad856b99872ccc54f6ff8e068fa6857b1bfdc",
+            "gnu_sha256": "bc58129b9c6217413ab2e60ddb791610cfe604a31ea313270e530a1cf459e3bb",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage2",
+            "test": "sizeof.c",
+            "fas_sha256": "405d8a986846fb7327863531ac0f235f676f3328cbcee323a9cd8e8dca4ad56b",
+            "gnu_sha256": "6485fd4797c04bebcfdf3fe3bd765625879844f7c62d20f784d86599cd2c5558",
+            "stdout_sha256": "54d6b29000e681ec7f6fca3c225c633a137ba29651381c8937be49ce600659bd"
+          },
+          {
+            "stage": "stage2",
+            "test": "stdhdr.c",
+            "fas_sha256": "7f8e5bffe849bc504073c6852c4b7ec1d0947140f95071924c400e0085d80d90",
+            "gnu_sha256": "4e6c4808917511e8a950b43b7c7fac2fd9d63726600e08f05d932b6a9f4525db",
+            "stdout_sha256": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87"
+          },
+          {
+            "stage": "stage2",
+            "test": "string.c",
+            "fas_sha256": "963e4c79cc1c837e1e1cb87443fe9fe1469524d5cbacb423ad6738c72497018a",
+            "gnu_sha256": "d35679ebfa38f9d6fc106e5716a6640c47bc1ac796eec01f1df90eafb8a88eb8",
+            "stdout_sha256": "24da57ec989f81a952213a074b2ee45e3cd813e0c648ccb40934f5888664c476"
+          },
+          {
+            "stage": "stage2",
+            "test": "struct.c",
+            "fas_sha256": "9ac6a6a40318fdb65e8a98c17039a881b45b5f948676ad084ffbb92e71fc88bd",
+            "gnu_sha256": "7dc698d7d0158fb8517c04228bb3fd646b1af86d67c3622889e014e99ddd26a5",
+            "stdout_sha256": "e1590b5e57c0a5961b9c87183818ecaf7a23af6fa07629d4b79d8a15534bdc95"
+          },
+          {
+            "stage": "stage2",
+            "test": "tls.c",
+            "fas_sha256": "f3cfe8f0898a9df0d17cec644fd86955f046f0c9edb68e633f45e1a1d677ea59",
+            "gnu_sha256": "8235718ff13ac6ad6bae2d0e9823070cbebef079a0056b731e5c3509dfaa9d1d",
+            "stdout_sha256": "5c5b3dde0f1a938d79e5cbe4036a03eee6f9a94ad7332d86679d60267cc7bbfe"
+          },
+          {
+            "stage": "stage2",
+            "test": "typedef.c",
+            "fas_sha256": "1dbd319dec47b031efd2913e415900d7754c1a519d18674c9e967787326994e0",
+            "gnu_sha256": "23a6bf7abd78e4be4a0eebb8215a824da7aa49254515d5fde3f609d17984665e",
+            "stdout_sha256": "e8421f8d2ebac2b773f9849304f9a7b441a6bbb15886f1abfe8015fa528a43c1"
+          },
+          {
+            "stage": "stage2",
+            "test": "typeof.c",
+            "fas_sha256": "89293f3401beac521b75985d6d6305feadeb2b14942fa48a5cd9417761978f08",
+            "gnu_sha256": "557be9307b5d91d69bd9f82e55f89b8fae447286b084a8dcefa28557767f4954",
+            "stdout_sha256": "ad52bd943c871190a066aa0cdf11c3b4862f624342fee19c4a2e76ecc576ac21"
+          },
+          {
+            "stage": "stage2",
+            "test": "unicode.c",
+            "fas_sha256": "f89bd675c7e14543dd5428d13e6a3be506d0c2fc23631f4fac8afad032e0c536",
+            "gnu_sha256": "24bca5b18cbfe1a6ebfb0990c08bf9ff1ec52f0f407a5337819e682be5cc72ef",
+            "stdout_sha256": "02b386e14b7619b6924851856c35ca92bf5aa80d5be53d53b1b35e186a75f559"
+          },
+          {
+            "stage": "stage2",
+            "test": "union.c",
+            "fas_sha256": "28083955f04926cd5f148a54bff30f63d3da96b838904362c866dc046c7f4f1e",
+            "gnu_sha256": "48e1bea15ac59f7746bf35dd4b0216b97b98404efeb16bcd00b9459c9cd16264",
+            "stdout_sha256": "4365eba65a24856c3abb43a1c361aea4f1ddb67d7eb7d2eeed846b048f4726d1"
+          },
+          {
+            "stage": "stage2",
+            "test": "usualconv.c",
+            "fas_sha256": "7886aa8bcde78df35c1f32707e1b21a77b087884fbe3353408f8821a2a4673a3",
+            "gnu_sha256": "9aa67b6969ebd9fa36365b655529fe5a9f32c46a31cf0176fe26ec470101e9b9",
+            "stdout_sha256": "f19cf931bddde5e4688b8650b37cc0405d0ca44b5c2dde1083372084c70f6a0b"
+          },
+          {
+            "stage": "stage2",
+            "test": "varargs.c",
+            "fas_sha256": "4346374864ff624b2185cc3c80320269e9bd56b919d95a761ebcb39f4f98cca4",
+            "gnu_sha256": "058e403d5bc2822969bb93382cb896a3119ca7632fd57b169fb1176b7013472f",
+            "stdout_sha256": "072073e9862eb742ef55f306af5bea560134ce679fb0d8f73fab9e0c60b3c29c"
+          },
+          {
+            "stage": "stage2",
+            "test": "variable.c",
+            "fas_sha256": "a8176921c6dc0c42019bfa52fb420a3f4923041053f10f758972f21e78af59bd",
+            "gnu_sha256": "cf7fda743610a30b861c52b74ae8a8bd51f2080b6fb4564ce4bc7697a317d2ff",
+            "stdout_sha256": "666cb9f02b032b7dcc0a188d9fdb8a6d28dab47538e54bbf9c0d607ee09dc95b"
+          },
+          {
+            "stage": "stage2",
+            "test": "vla.c",
+            "fas_sha256": "8254ee4a682c7171a6e59b52b2e0a49137fae6a92bb7f56c6edb8d70ef068f2a",
+            "gnu_sha256": "28104ee2f72574e9b1febce057b3aea344a747d7eb7dbfdd5d017b8113a65f17",
+            "stdout_sha256": "c39f3e1cdffe33d67e67fddf10f36c21db68133a613b8a6ce9eab0aa1dab9e7c"
+          }
+        ],
+        "upstream_driver_runs": 2,
+        "upstream_driver_checks": 126,
+        "actual_linker_invocations": 116,
+        "scope": "Unmodified upstream Makefile, both compiler stages, C tests and driver scripts; GCC native bootstrap with PIC and no plugin"
+      }
+    }
+  ],
+  "sources": {
+    "chibicc-selfhost": {
+      "path": "/tmp/fas-chibicc-pinned-20261105/chibicc-90d1f7f199cc55b13c7fdb5839d1409806633fdb",
+      "sha256": {
+        ".gitignore": "7f7d5ae2267048e22515cdb135e09d1387fc088225d8ce3488bac71f27406cce",
+        "LICENSE": "65b0d1ecab8aad646a7ab9df3f459edaf1bc1214acd01d03258c5a3107505ad4",
+        "Makefile": "7e7c568034d3217d80bb2a4a67b5b9df8ca4b5924912de7db6a4a9240aa81441",
+        "README.md": "ee647d88c6999db0b4d7adbe1b62e8adb95393ba7047d3bb7446088ce2566265",
+        "chibicc.h": "8154bbef23f84ecdfdb325c8965e6ffa6e1c03a1b78a7316e98256f1728900a2",
+        "codegen.c": "b0491ac6438c8e9d125e4c1752057c1820826c3629ccc7fa68d7ef98a224fc4e",
+        "hashmap.c": "3c34396d0bf6df362dbdec740580c2b8fdd54dd74a1624ffcb8824bd1f1bcbdb",
+        "include/float.h": "4b35ff104069cd69361f33ff07b428238f90d5d8f1e1943973c33919e9aa429d",
+        "include/stdalign.h": "b7c63d27c6806b28765a79d2bf3805b0af13c2fc5f9deebf0e4bb3c92ce16cb5",
+        "include/stdarg.h": "f895248cc07743ecdceb86c4046f05df7de745f68e9c619856d5b47dd76b11c4",
+        "include/stdatomic.h": "b9db31cb2aa3121bf222879a4ece5ad50474a5449fcfea226fa7d1831ba20c07",
+        "include/stdbool.h": "d4056f3c4e3a75216bb08a5cfd72e94946aa155774a6579b02ee887969938d6e",
+        "include/stddef.h": "65bf6bf477eb54c047d53f99536a24654b0e09bd227948fb868902bedd9c3b85",
+        "include/stdnoreturn.h": "172a6a6c759072cf76490af8117491c9d9af0ad7c73a0abdd8228396faa4cb2b",
+        "main.c": "b2b6570363dd7ebdd4d456e555501639422b410bbcd4d1eb3150bc18a675e46c",
+        "parse.c": "6fba1f2497f443819c3b936e206f5d1045c3a16ed378fc34bfb5b2e478126c92",
+        "preprocess.c": "9fec813839210036d772eb8ba40980e3af70bf7166ba81b8e3814a659d83b3f1",
+        "strings.c": "e7e413d70e6f1d3582eb783999132a0a7fb9cd7b370f6320d73886a2fa6e8c5e",
+        "test/alignof.c": "0d7a3eb876d5512f8b5d5719b8017505815811196ce268b473b885435c747449",
+        "test/alloca.c": "2f5c8d1a0e959d206d56876b8b5402494ea7819ee9b5ebb2dd4b84612911cf23",
+        "test/arith.c": "83786c3d35dee2aa2eb6c5c2fdcaacd0e6e82a35cbbe1da7c6821e2a3feb40d5",
+        "test/asm.c": "257228c8f73b09ce1e7846fedba90540c1d7217f701de42d0ead21827d0d5ae0",
+        "test/atomic.c": "ebff47cc3954950506bc4561ab29739aa78b5a9359218a40f3243aa2f0d50dac",
+        "test/attribute.c": "04b99d55e45132099add94d0bfd12a55e23787d48a37507f03cf15471fb225c5",
+        "test/bitfield.c": "8a4584d22ac7149c78046bd4f9f97640d9254b1b35af1b3b2985c97ed0258ecc",
+        "test/builtin.c": "e22e1d4af249e3f5f91c4034bfa636da7031b1e635913c7e50ae8198c6978ebf",
+        "test/cast.c": "4cea1f40d8de2dd7430f0448d04e30e298c1028a8896852788733aabab8a366e",
+        "test/common": "9a985e5a988f317e6043b1afcceae0c633f272f2620bc7dae7f15192c7d87e5a",
+        "test/commonsym.c": "f39f4da53a928ef88a9ad213d725351e5bc5030d98f1730f01ffb32e2ca8c5e2",
+        "test/compat.c": "fcc1686ae61c6dbbd4757055dbbfd1778945df48b854e5d0341dabd09d18a8cd",
+        "test/complit.c": "4244415d87b8eb9cd7ce41350900d9a61790e525cc257d8f2b84423cbc49daef",
+        "test/const.c": "e1f293bf024826ec51a19aaaeec4d9e8bb75118c354fd50b68ccf928cdc5d745",
+        "test/constexpr.c": "8cab401cadf1f79d236b091283f882ee5306862026c96fe67f16a7e8411652b1",
+        "test/control.c": "21d0bdac64e0b786078904a3f54587d16a3012ea43b35f558837908ee6ea6294",
+        "test/decl.c": "ef97acedf5d26e2cc50df547b937bc83716da1552c42723730cf792f7e088be8",
+        "test/driver.sh": "d8f4039b3a01dd6fa11866798fa632159857425d0c7d05746104593316db71ef",
+        "test/enum.c": "d6fb53be1f86c3446fc78d7d5f3463261c3cfceb1418d22ee715a192b8360fb0",
+        "test/extern.c": "bb0ae39da0f3f8a66406b19b00525acc3321c209b48e4f844633071fe557d479",
+        "test/float.c": "2d818b35aa260c7e234eda42740ee9a6af4816b92652e7d169987ed8310f9021",
+        "test/function.c": "a889ad65e4647cadc6548b05ae2b73428e76a4987c48459963e093e365cb3e9f",
+        "test/generic.c": "d15cf55fb12d23eae83e01b8b3bbe0ae62404658b0ba2f15dc68432f3dc81587",
+        "test/include1.h": "368a620fc411d9125ee1eda9770728fbe4a168180a8ea96cbaeffd30135246d6",
+        "test/include2.h": "b8c12439b0cd59c6994f56167478fd2154eb456f9786b16731e54d0e8ef2f134",
+        "test/include3.h": "2966131d769aa4520f2ffdad3b2e008df275332bf828b2f77c8a69b542051a0c",
+        "test/include4.h": "627eecad1d4e5ccc5d21c9e69d5aeaad0bdb6deb05d9223d18f9721f60cd040c",
+        "test/initializer.c": "1d0e8c7b2ddf8d655c7bc6ab8e4a05359e616258abd3d58c6a77ad8bb122250e",
+        "test/line.c": "38de2d0ba7d8776796256adfe6f655c5a54d122fa2bfe12648a4a395820f9aed",
+        "test/literal.c": "aea5c3a2b99c70104a5bf16e1ecd587b5a6ea1a8056b3492c6c1296e670ce45e",
+        "test/macro.c": "f5dc031f475537c5ba40623951349207f2db4ee4e2aa7bb62fa6e2b0a6842f8e",
+        "test/offsetof.c": "2f3ab8a20761873340dd7ea3782e84ea7641b793f0fb977931c210822cb914eb",
+        "test/pointer.c": "27113ed03b356b7d6b8eb4a88f8fdf6c8808c1c46e1b9450986e136c7dea49e1",
+        "test/pragma-once.c": "05516fefe286a560d8d9521a0747e0e7e12f448e13b254f2636fd05f80dbf313",
+        "test/sizeof.c": "bfe45073940ba64078ca2ecc16bc3f936ae14f300e46046e43248455ac6dcbea",
+        "test/stdhdr.c": "0a5c00953fd7de3f62dd6a5168965beaf573af2bdfa7b05aad12e7be6fa5ec03",
+        "test/string.c": "e3c2a095068cd91f0381f964b5c8fb835481cc25b525727f4cb30bb2f03e4513",
+        "test/struct.c": "26a357e1cba63e74b53de79310af12f7f342efcacc12b4796ddd19a5e0bd259b",
+        "test/test.h": "6497da96d7f9267ea5e6a3bf64b60fcf9333475c279d0a00818b7c9ad2e698b9",
+        "test/thirdparty/common": "cd16b75a02223eedd606178a9b893baf928c335bdf0ca552378aef2701ca2ea0",
+        "test/thirdparty/cpython.sh": "5c55b780d51dce4c0af872d3b47cd9736c040be4268e5865ebfaab21bfb4bae4",
+        "test/thirdparty/git.sh": "4b98fc95bf0d350589950bc74a83748a45a835fd2fc7657135c0efcc3e93c93f",
+        "test/thirdparty/libpng.sh": "2ce2f0cd7affc296654e0919fe7199f8a5f2d44a36573a8cf3c64b9c274a042c",
+        "test/thirdparty/sqlite.sh": "b84a4ce6419b8e42096f5ff961cc70896b724e94f893b834d6f2dc7df597a145",
+        "test/thirdparty/tinycc.sh": "a34f6fd796b1f6fa0f6c7536b2311cd716c5db88971682cb67a385a3c7cf7c1a",
+        "test/tls.c": "e592080eb631f7615cc20010d9fb5f44043f7a0620f307438ae0d64a1898132a",
+        "test/typedef.c": "4cb553183a136a27c8d89b7ec2b6f2ad44f4bcaa51187f9051016328debb9ff4",
+        "test/typeof.c": "5f2c256ea70e2d877e76dd92a29a32bf25d30627a78e76eb72336e71a8ac913f",
+        "test/unicode.c": "8853757c12c3485af9bc9c0fd726d001bee6c66965152b53c4f3575e5053501b",
+        "test/union.c": "90838cc1b16643d8fa2839ee9c3e2f481fa8450735c653de9cc2edaa921fd92b",
+        "test/usualconv.c": "45d530d8772cf2a8d72d2a3a2d4d9dcaddc5f942da00fec0257e22de4e7d4496",
+        "test/varargs.c": "5ebdc6852fcbc6bb30fc1a28539ce16553859dc716e3cd31038154d98fa9b050",
+        "test/variable.c": "50e2bea1973f945837fae52de5856b4a1e5c9a116565a0b0f682383728d60a0b",
+        "test/vla.c": "b7fa4e874728ecaff8804358417903fd0c8045b514c9cdee83c72025e93a2a04",
+        "tokenize.c": "787f83b0f009ea69763e6aca3243f73224214068931b29c98fa60068f8b235dd",
+        "type.c": "a8756271f3be4bceb3cd4820ce3251f55a1fbee241a428ba24e2c7e003feb327",
+        "unicode.c": "67311a3aab39522bc7555a8318840c971dfd01b0e92943da62d8b28d2091f953"
+      }
+    }
+  },
+  "limitations": [],
+  "timing_comparison": false,
+  "linkage": "dynamic",
+  "dependency_policy": {
+    "strict": false,
+    "search_paths": []
+  },
+  "toolchain_inputs": {
+    "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+    "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+    "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+  }
+}

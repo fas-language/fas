@@ -76,7 +76,7 @@ let link (i : input) =
     | None -> invalid_arg ("elf64: undefined symbol " ^ name)
   in
   let apply bytes section_base = function
-    | X64.Rel32 { offset; symbol; addend } ->
+    | X64.Rel32 { offset; symbol; addend } | X64.Call32 { offset; symbol; addend } ->
         let v = address symbol + addend - (section_base + offset + 4) in
         if v < -0x8000_0000 || v > 0x7fff_ffff then
           invalid_arg ("elf64: rel32 out of range for " ^ symbol);

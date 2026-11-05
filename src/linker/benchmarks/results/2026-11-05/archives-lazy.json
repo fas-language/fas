@@ -1,0 +1,893 @@
+{
+  "timestamp_utc": "2026-11-05T18:45:50.485840+00:00",
+  "harness_sha256": "ba167632f8ad21c78866f589f21d712f0002345bde88056257f49eb8f9970fbe",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": 12,
+  "filesystem_cache": "warm; no cache eviction attempted",
+  "runs": 21,
+  "warmups": 3,
+  "tool_versions": {
+    "fas-ld": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)",
+    "GNU ld": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+    "LLD": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+  },
+  "tool_sha256": {
+    "fas-ld": "50fbe0c2d3dcd0a49638883270f13cfc776f145162a7aa84c98fe222ebc097d5",
+    "GNU ld": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+    "LLD": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982"
+  },
+  "assembler_version": "GNU assembler (GNU Binutils for Ubuntu) 2.46",
+  "methodology": "wall time includes spawn and exit; CPU from wait4; peak RSS from one separate untimed GNU time run per tool/corpus; tool default worker counts; no GC, ICF, or build ID requested; outputs are verified by execution",
+  "note": "Synthetic static-link corpus, not a general linker ranking. Output layout and size differ. Statistics, when requested, come from a separate untimed fas-ld run; phases can overlap.",
+  "archive_mode": "lazy",
+  "corpora": [
+    {
+      "input_objects": 257,
+      "input_files": 2,
+      "expected_linked_objects": 2,
+      "generated_functions": 16384,
+      "generated_relocations": 16385,
+      "input_bytes": 1595032,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 13.238479004940018,
+          "min_wall_ms": 11.92552299471572,
+          "max_wall_ms": 24.773844008450396,
+          "peak_rss_kib": 9816,
+          "output_bytes": 11504,
+          "output_sha256": "ed9b1f77d1ef3d3b8040c6781ed894391272b89323774782d194550fa8b8460b",
+          "samples": [
+            {
+              "wall_ms": 13.738847002969123,
+              "user_ms": 8.325,
+              "system_ms": 5.203
+            },
+            {
+              "wall_ms": 13.471040001604706,
+              "user_ms": 8.122,
+              "system_ms": 5.076
+            },
+            {
+              "wall_ms": 13.236665996373631,
+              "user_ms": 8.014000000000001,
+              "system_ms": 5.0089999999999995
+            },
+            {
+              "wall_ms": 15.72945699444972,
+              "user_ms": 10.348999999999998,
+              "system_ms": 5.1739999999999995
+            },
+            {
+              "wall_ms": 12.414348995662294,
+              "user_ms": 8.159999999999998,
+              "system_ms": 4.079999999999999
+            },
+            {
+              "wall_ms": 12.936988001456484,
+              "user_ms": 7.809,
+              "system_ms": 4.88
+            },
+            {
+              "wall_ms": 12.154045994975604,
+              "user_ms": 8.975,
+              "system_ms": 2.9909999999999997
+            },
+            {
+              "wall_ms": 24.773844008450396,
+              "user_ms": 14.302999999999999,
+              "system_ms": 10.216
+            },
+            {
+              "wall_ms": 13.420464005321264,
+              "user_ms": 6.612,
+              "system_ms": 6.612
+            },
+            {
+              "wall_ms": 11.92552299471572,
+              "user_ms": 4.273,
+              "system_ms": 7.478
+            },
+            {
+              "wall_ms": 13.433077998342924,
+              "user_ms": 8.155,
+              "system_ms": 5.0969999999999995
+            },
+            {
+              "wall_ms": 13.165570999262854,
+              "user_ms": 7.998999999999999,
+              "system_ms": 4.999
+            },
+            {
+              "wall_ms": 12.8869339969242,
+              "user_ms": 8.489999999999998,
+              "system_ms": 4.244999999999999
+            },
+            {
+              "wall_ms": 13.680404998012818,
+              "user_ms": 7.267999999999999,
+              "system_ms": 6.228999999999999
+            },
+            {
+              "wall_ms": 13.414893008302897,
+              "user_ms": 5.079999999999999,
+              "system_ms": 8.128
+            },
+            {
+              "wall_ms": 12.35503600037191,
+              "user_ms": 7.05,
+              "system_ms": 5.034999999999999
+            },
+            {
+              "wall_ms": 13.118371993186884,
+              "user_ms": 7.9559999999999995,
+              "system_ms": 4.9719999999999995
+            },
+            {
+              "wall_ms": 13.717887006350793,
+              "user_ms": 7.718999999999999,
+              "system_ms": 5.789
+            },
+            {
+              "wall_ms": 13.238479004940018,
+              "user_ms": 6.979,
+              "system_ms": 5.981999999999999
+            },
+            {
+              "wall_ms": 13.104815996484831,
+              "user_ms": 7.962999999999999,
+              "system_ms": 4.976999999999999
+            },
+            {
+              "wall_ms": 15.07002700236626,
+              "user_ms": 10.506,
+              "system_ms": 4.202
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 3.90386299113743,
+          "min_wall_ms": 3.618451999500394,
+          "max_wall_ms": 10.165710002183914,
+          "peak_rss_kib": 5312,
+          "output_bytes": 11312,
+          "output_sha256": "4368d777c5452ad9738fff8f42a56dff58952011c8cc6c450060882f0b83959d",
+          "samples": [
+            {
+              "wall_ms": 3.8181609997991472,
+              "user_ms": 2.392,
+              "system_ms": 1.196
+            },
+            {
+              "wall_ms": 5.263507002382539,
+              "user_ms": 1.1440000000000001,
+              "system_ms": 3.948
+            },
+            {
+              "wall_ms": 10.165710002183914,
+              "user_ms": 3.307,
+              "system_ms": 6.62
+            },
+            {
+              "wall_ms": 3.618451999500394,
+              "user_ms": 3.4,
+              "system_ms": 0.0
+            },
+            {
+              "wall_ms": 5.307540996000171,
+              "user_ms": 1.15,
+              "system_ms": 3.9709999999999996
+            },
+            {
+              "wall_ms": 3.90386299113743,
+              "user_ms": 0.0,
+              "system_ms": 3.659
+            },
+            {
+              "wall_ms": 3.729973002918996,
+              "user_ms": 0.0,
+              "system_ms": 3.575
+            },
+            {
+              "wall_ms": 9.176656996714883,
+              "user_ms": 4.9159999999999995,
+              "system_ms": 3.904
+            },
+            {
+              "wall_ms": 3.816978001850657,
+              "user_ms": 2.0889999999999995,
+              "system_ms": 1.544
+            },
+            {
+              "wall_ms": 3.6526469921227545,
+              "user_ms": 1.168,
+              "system_ms": 2.337
+            },
+            {
+              "wall_ms": 3.846823994535953,
+              "user_ms": 1.06,
+              "system_ms": 2.6310000000000002
+            },
+            {
+              "wall_ms": 3.7446009955601767,
+              "user_ms": 2.104,
+              "system_ms": 1.5019999999999998
+            },
+            {
+              "wall_ms": 3.859618998831138,
+              "user_ms": 1.708,
+              "system_ms": 1.9889999999999999
+            },
+            {
+              "wall_ms": 5.45648300612811,
+              "user_ms": 2.3309999999999995,
+              "system_ms": 2.937
+            },
+            {
+              "wall_ms": 4.11753699881956,
+              "user_ms": 1.9269999999999998,
+              "system_ms": 1.9269999999999998
+            },
+            {
+              "wall_ms": 5.3725430043414235,
+              "user_ms": 2.788,
+              "system_ms": 2.402
+            },
+            {
+              "wall_ms": 4.200484007014893,
+              "user_ms": 3.955,
+              "system_ms": 0.0
+            },
+            {
+              "wall_ms": 4.344837987446226,
+              "user_ms": 1.771,
+              "system_ms": 2.336
+            },
+            {
+              "wall_ms": 3.949578996980563,
+              "user_ms": 1.8399999999999999,
+              "system_ms": 1.8399999999999999
+            },
+            {
+              "wall_ms": 3.8436380127677694,
+              "user_ms": 0.0,
+              "system_ms": 3.673
+            },
+            {
+              "wall_ms": 3.855680988635868,
+              "user_ms": 3.651,
+              "system_ms": 0.0
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 18.328146994463168,
+          "min_wall_ms": 17.3359889886342,
+          "max_wall_ms": 37.03325899550691,
+          "peak_rss_kib": 66348,
+          "output_bytes": 3960,
+          "output_sha256": "dcaed2bc72f40b5292e58b59f204fa9aed62c6d3fc62eab1f24fad8f3ab87f38",
+          "samples": [
+            {
+              "wall_ms": 17.3359889886342,
+              "user_ms": 6.677,
+              "system_ms": 12.400999999999998
+            },
+            {
+              "wall_ms": 18.028209000476636,
+              "user_ms": 10.36,
+              "system_ms": 9.495999999999999
+            },
+            {
+              "wall_ms": 17.357789998641238,
+              "user_ms": 6.061,
+              "system_ms": 13.133
+            },
+            {
+              "wall_ms": 17.46888099296484,
+              "user_ms": 7.821,
+              "system_ms": 11.732
+            },
+            {
+              "wall_ms": 18.98555300431326,
+              "user_ms": 9.299999999999999,
+              "system_ms": 11.366999999999999
+            },
+            {
+              "wall_ms": 18.337765999604017,
+              "user_ms": 5.46,
+              "system_ms": 14.197
+            },
+            {
+              "wall_ms": 17.898434001835994,
+              "user_ms": 3.418,
+              "system_ms": 16.406999999999996
+            },
+            {
+              "wall_ms": 37.03325899550691,
+              "user_ms": 18.974999999999998,
+              "system_ms": 19.973
+            },
+            {
+              "wall_ms": 18.842180987121537,
+              "user_ms": 11.391,
+              "system_ms": 9.113
+            },
+            {
+              "wall_ms": 17.875379999168217,
+              "user_ms": 9.41,
+              "system_ms": 10.454999999999998
+            },
+            {
+              "wall_ms": 33.69114999077283,
+              "user_ms": 14.985999999999999,
+              "system_ms": 20.604999999999997
+            },
+            {
+              "wall_ms": 18.09235999826342,
+              "user_ms": 9.802999999999999,
+              "system_ms": 9.802999999999999
+            },
+            {
+              "wall_ms": 18.328146994463168,
+              "user_ms": 6.423,
+              "system_ms": 13.916
+            },
+            {
+              "wall_ms": 23.417425007210113,
+              "user_ms": 8.693,
+              "system_ms": 16.421
+            },
+            {
+              "wall_ms": 18.455798999639228,
+              "user_ms": 13.351999999999999,
+              "system_ms": 6.675999999999999
+            },
+            {
+              "wall_ms": 23.608847011928447,
+              "user_ms": 8.581999999999999,
+              "system_ms": 17.163999999999998
+            },
+            {
+              "wall_ms": 17.947496991837397,
+              "user_ms": 12.081,
+              "system_ms": 7.435
+            },
+            {
+              "wall_ms": 18.04100300068967,
+              "user_ms": 8.767,
+              "system_ms": 10.957999999999998
+            },
+            {
+              "wall_ms": 18.319860988412984,
+              "user_ms": 7.666999999999999,
+              "system_ms": 12.459
+            },
+            {
+              "wall_ms": 26.051682987599634,
+              "user_ms": 10.277,
+              "system_ms": 17.471999999999998
+            },
+            {
+              "wall_ms": 19.028613998671062,
+              "user_ms": 7.924,
+              "system_ms": 12.875999999999998
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "83130c3d12f2fb5e26e7584b81db18d30956aa57a1d9fc66ac5a45a9990265be",
+      "fas_statistics": {
+        "wall_seconds": 0.009344101,
+        "cpu_seconds": 0.009337,
+        "phases": {
+          "emit": {
+            "wall_seconds": 0.000110149,
+            "cpu_seconds": 0.00011,
+            "allocated_words": 11204,
+            "promoted_words": 0
+          },
+          "gc": {
+            "wall_seconds": 2.861e-06,
+            "cpu_seconds": 3e-06,
+            "allocated_words": 91,
+            "promoted_words": 0
+          },
+          "merge": {
+            "wall_seconds": 4.053e-06,
+            "cpu_seconds": 4e-06,
+            "allocated_words": 181,
+            "promoted_words": 0
+          },
+          "parse": {
+            "wall_seconds": 0.007529259,
+            "cpu_seconds": 0.007513,
+            "allocated_words": 498933,
+            "promoted_words": 120232
+          },
+          "read": {
+            "wall_seconds": 0.001434088,
+            "cpu_seconds": 0.001432,
+            "allocated_words": 199531,
+            "promoted_words": 1702
+          },
+          "relocate": {
+            "wall_seconds": 2.1935e-05,
+            "cpu_seconds": 2.1e-05,
+            "allocated_words": 2279,
+            "promoted_words": 0
+          },
+          "resolve": {
+            "wall_seconds": 7.7963e-05,
+            "cpu_seconds": 7.7e-05,
+            "allocated_words": 7243,
+            "promoted_words": 0
+          },
+          "unwind": {
+            "wall_seconds": 3.099e-06,
+            "cpu_seconds": 2e-06,
+            "allocated_words": 158,
+            "promoted_words": 0
+          },
+          "write": {
+            "wall_seconds": 0.000109911,
+            "cpu_seconds": 0.000108,
+            "allocated_words": 249,
+            "promoted_words": 0
+          }
+        },
+        "counts": {
+          "archives": 1,
+          "extracted_members": 1,
+          "input_bytes": 1595032,
+          "input_files": 2,
+          "objects": 2,
+          "output_bytes": 11504,
+          "relocations": 65,
+          "symbols": 68,
+          "unwind_fdes": 0
+        },
+        "gc": {
+          "allocated_words": 718001,
+          "promoted_words": 121934,
+          "minor_collections": 4,
+          "major_collections": 4
+        }
+      }
+    },
+    {
+      "input_objects": 1025,
+      "input_files": 2,
+      "expected_linked_objects": 2,
+      "generated_functions": 65536,
+      "generated_relocations": 65537,
+      "input_bytes": 6422680,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 53.58013100340031,
+          "min_wall_ms": 45.148295001126826,
+          "max_wall_ms": 79.16076300898567,
+          "peak_rss_kib": 21896,
+          "output_bytes": 11504,
+          "output_sha256": "ed9b1f77d1ef3d3b8040c6781ed894391272b89323774782d194550fa8b8460b",
+          "samples": [
+            {
+              "wall_ms": 53.28018400177825,
+              "user_ms": 41.867000000000004,
+              "system_ms": 10.965
+            },
+            {
+              "wall_ms": 68.62436101073399,
+              "user_ms": 42.196,
+              "system_ms": 26.121
+            },
+            {
+              "wall_ms": 79.16076300898567,
+              "user_ms": 52.812,
+              "system_ms": 25.908
+            },
+            {
+              "wall_ms": 53.14267400535755,
+              "user_ms": 33.827,
+              "system_ms": 18.903
+            },
+            {
+              "wall_ms": 64.60586198954843,
+              "user_ms": 43.199,
+              "system_ms": 21.096999999999998
+            },
+            {
+              "wall_ms": 69.64919199526776,
+              "user_ms": 46.480999999999995,
+              "system_ms": 22.746
+            },
+            {
+              "wall_ms": 52.388115000212565,
+              "user_ms": 38.007,
+              "system_ms": 14.001999999999999
+            },
+            {
+              "wall_ms": 46.76362399186473,
+              "user_ms": 33.641,
+              "system_ms": 12.862
+            },
+            {
+              "wall_ms": 53.58013100340031,
+              "user_ms": 39.25899999999999,
+              "system_ms": 14.093
+            },
+            {
+              "wall_ms": 53.92779999237973,
+              "user_ms": 37.398,
+              "system_ms": 16.172
+            },
+            {
+              "wall_ms": 62.43333700695075,
+              "user_ms": 38.116,
+              "system_ms": 24.072999999999997
+            },
+            {
+              "wall_ms": 67.87977000931278,
+              "user_ms": 49.437,
+              "system_ms": 18.16
+            },
+            {
+              "wall_ms": 53.0007339984877,
+              "user_ms": 30.331,
+              "system_ms": 22.243
+            },
+            {
+              "wall_ms": 49.25221699522808,
+              "user_ms": 33.01,
+              "system_ms": 16.005
+            },
+            {
+              "wall_ms": 72.78075200156309,
+              "user_ms": 45.714,
+              "system_ms": 26.831999999999997
+            },
+            {
+              "wall_ms": 53.02718399616424,
+              "user_ms": 33.772999999999996,
+              "system_ms": 18.872999999999998
+            },
+            {
+              "wall_ms": 55.864137000753544,
+              "user_ms": 34.253,
+              "system_ms": 21.156
+            },
+            {
+              "wall_ms": 68.61416000174358,
+              "user_ms": 50.51,
+              "system_ms": 17.826999999999998
+            },
+            {
+              "wall_ms": 45.148295001126826,
+              "user_ms": 29.479,
+              "system_ms": 15.247
+            },
+            {
+              "wall_ms": 46.88661699765362,
+              "user_ms": 33.505,
+              "system_ms": 13.198999999999998
+            },
+            {
+              "wall_ms": 47.17300798802171,
+              "user_ms": 31.831,
+              "system_ms": 14.92
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 12.900189001811668,
+          "min_wall_ms": 6.167629995616153,
+          "max_wall_ms": 17.72736999555491,
+          "peak_rss_kib": 6760,
+          "output_bytes": 11312,
+          "output_sha256": "4368d777c5452ad9738fff8f42a56dff58952011c8cc6c450060882f0b83959d",
+          "samples": [
+            {
+              "wall_ms": 6.341118001728319,
+              "user_ms": 3.241,
+              "system_ms": 2.6319999999999997
+            },
+            {
+              "wall_ms": 6.841085007181391,
+              "user_ms": 2.155,
+              "system_ms": 4.31
+            },
+            {
+              "wall_ms": 15.525230002822354,
+              "user_ms": 7.970999999999999,
+              "system_ms": 7.145
+            },
+            {
+              "wall_ms": 16.110757991555147,
+              "user_ms": 7.034,
+              "system_ms": 8.701
+            },
+            {
+              "wall_ms": 12.704117005341686,
+              "user_ms": 5.273,
+              "system_ms": 7.217
+            },
+            {
+              "wall_ms": 12.900189001811668,
+              "user_ms": 6.776,
+              "system_ms": 5.808
+            },
+            {
+              "wall_ms": 14.07225799630396,
+              "user_ms": 8.416,
+              "system_ms": 5.26
+            },
+            {
+              "wall_ms": 9.340197007986717,
+              "user_ms": 5.222,
+              "system_ms": 3.882
+            },
+            {
+              "wall_ms": 6.167629995616153,
+              "user_ms": 4.654,
+              "system_ms": 1.163
+            },
+            {
+              "wall_ms": 8.171444002073258,
+              "user_ms": 4.221,
+              "system_ms": 3.752
+            },
+            {
+              "wall_ms": 8.94198298919946,
+              "user_ms": 4.383,
+              "system_ms": 4.383
+            },
+            {
+              "wall_ms": 6.467628001701087,
+              "user_ms": 2.783,
+              "system_ms": 3.247
+            },
+            {
+              "wall_ms": 16.0408660012763,
+              "user_ms": 8.34,
+              "system_ms": 7.298
+            },
+            {
+              "wall_ms": 14.776391006307676,
+              "user_ms": 5.823,
+              "system_ms": 8.734
+            },
+            {
+              "wall_ms": 14.213645990821533,
+              "user_ms": 6.378,
+              "system_ms": 7.441
+            },
+            {
+              "wall_ms": 6.246037999517284,
+              "user_ms": 2.177,
+              "system_ms": 3.734
+            },
+            {
+              "wall_ms": 13.405164005234838,
+              "user_ms": 8.122,
+              "system_ms": 5.076
+            },
+            {
+              "wall_ms": 6.42441600211896,
+              "user_ms": 1.684,
+              "system_ms": 4.3229999999999995
+            },
+            {
+              "wall_ms": 17.72736999555491,
+              "user_ms": 8.289,
+              "system_ms": 9.033
+            },
+            {
+              "wall_ms": 14.956491999328136,
+              "user_ms": 5.088,
+              "system_ms": 9.671
+            },
+            {
+              "wall_ms": 13.880975006031804,
+              "user_ms": 6.195,
+              "system_ms": 7.313999999999999
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 33.043111994629726,
+          "min_wall_ms": 28.68351600773167,
+          "max_wall_ms": 51.41963101050351,
+          "peak_rss_kib": 77468,
+          "output_bytes": 3960,
+          "output_sha256": "dcaed2bc72f40b5292e58b59f204fa9aed62c6d3fc62eab1f24fad8f3ab87f38",
+          "samples": [
+            {
+              "wall_ms": 31.593979001627304,
+              "user_ms": 14.315999999999999,
+              "system_ms": 19.429
+            },
+            {
+              "wall_ms": 32.14043300249614,
+              "user_ms": 12.310999999999998,
+              "system_ms": 22.16
+            },
+            {
+              "wall_ms": 33.043111994629726,
+              "user_ms": 10.218,
+              "system_ms": 25.544999999999998
+            },
+            {
+              "wall_ms": 36.38367798703257,
+              "user_ms": 16.936,
+              "system_ms": 21.169999999999998
+            },
+            {
+              "wall_ms": 33.044424999388866,
+              "user_ms": 14.789,
+              "system_ms": 19.719
+            },
+            {
+              "wall_ms": 40.59755799244158,
+              "user_ms": 22.834999999999997,
+              "system_ms": 19.721
+            },
+            {
+              "wall_ms": 42.7950289886212,
+              "user_ms": 20.461999999999996,
+              "system_ms": 24.555
+            },
+            {
+              "wall_ms": 29.93771199544426,
+              "user_ms": 13.479999999999999,
+              "system_ms": 18.664
+            },
+            {
+              "wall_ms": 30.62842000508681,
+              "user_ms": 16.406,
+              "system_ms": 16.406
+            },
+            {
+              "wall_ms": 31.685480993473902,
+              "user_ms": 14.763,
+              "system_ms": 18.980999999999998
+            },
+            {
+              "wall_ms": 40.44486900966149,
+              "user_ms": 21.625,
+              "system_ms": 20.596
+            },
+            {
+              "wall_ms": 35.01652900013141,
+              "user_ms": 18.498,
+              "system_ms": 18.498
+            },
+            {
+              "wall_ms": 41.672493010992184,
+              "user_ms": 19.467,
+              "system_ms": 24.874
+            },
+            {
+              "wall_ms": 47.89286199957132,
+              "user_ms": 22.616999999999997,
+              "system_ms": 26.73
+            },
+            {
+              "wall_ms": 28.856224002083763,
+              "user_ms": 13.769,
+              "system_ms": 16.947
+            },
+            {
+              "wall_ms": 38.72999100713059,
+              "user_ms": 18.441,
+              "system_ms": 22.539
+            },
+            {
+              "wall_ms": 32.71775601024274,
+              "user_ms": 12.367999999999999,
+              "system_ms": 22.834
+            },
+            {
+              "wall_ms": 30.705005003255792,
+              "user_ms": 16.881,
+              "system_ms": 15.888
+            },
+            {
+              "wall_ms": 28.68351600773167,
+              "user_ms": 10.543000000000001,
+              "system_ms": 20.208000000000002
+            },
+            {
+              "wall_ms": 51.41963101050351,
+              "user_ms": 24.206,
+              "system_ms": 29.467999999999996
+            },
+            {
+              "wall_ms": 30.82960100437049,
+              "user_ms": 16.299999999999997,
+              "system_ms": 16.299999999999997
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "3adfdf87381108143071f874aae9505d13b13fd44bd1ffe1410d955d0a2ae495",
+      "fas_statistics": {
+        "wall_seconds": 0.044457197,
+        "cpu_seconds": 0.04445,
+        "phases": {
+          "emit": {
+            "wall_seconds": 7.6771e-05,
+            "cpu_seconds": 7.8e-05,
+            "allocated_words": 11204,
+            "promoted_words": 0
+          },
+          "gc": {
+            "wall_seconds": 4.053e-06,
+            "cpu_seconds": 4e-06,
+            "allocated_words": 91,
+            "promoted_words": 0
+          },
+          "merge": {
+            "wall_seconds": 3.099e-06,
+            "cpu_seconds": 2e-06,
+            "allocated_words": 181,
+            "promoted_words": 0
+          },
+          "parse": {
+            "wall_seconds": 0.039488792,
+            "cpu_seconds": 0.039474,
+            "allocated_words": 1984273,
+            "promoted_words": 830917
+          },
+          "read": {
+            "wall_seconds": 0.004621983,
+            "cpu_seconds": 0.00462,
+            "allocated_words": 802987,
+            "promoted_words": 1702
+          },
+          "relocate": {
+            "wall_seconds": 1.0967e-05,
+            "cpu_seconds": 1e-05,
+            "allocated_words": 2279,
+            "promoted_words": 0
+          },
+          "resolve": {
+            "wall_seconds": 5.9843e-05,
+            "cpu_seconds": 5.9e-05,
+            "allocated_words": 7244,
+            "promoted_words": 0
+          },
+          "unwind": {
+            "wall_seconds": 2.861e-06,
+            "cpu_seconds": 3e-06,
+            "allocated_words": 158,
+            "promoted_words": 0
+          },
+          "write": {
+            "wall_seconds": 0.000114202,
+            "cpu_seconds": 0.000113,
+            "allocated_words": 249,
+            "promoted_words": 0
+          }
+        },
+        "counts": {
+          "archives": 1,
+          "extracted_members": 1,
+          "input_bytes": 6422680,
+          "input_files": 2,
+          "objects": 2,
+          "output_bytes": 11504,
+          "relocations": 65,
+          "symbols": 68,
+          "unwind_fdes": 0
+        },
+        "gc": {
+          "allocated_words": 2810638,
+          "promoted_words": 832619,
+          "minor_collections": 14,
+          "major_collections": 6
+        }
+      }
+    }
+  ],
+  "filesystem": "tmpfs"
+}

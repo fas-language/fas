@@ -1,0 +1,623 @@
+{
+  "timestamp_utc": "2026-11-05T02:17:09.059854+00:00",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": 12,
+  "filesystem_cache": "warm; no cache eviction attempted",
+  "runs": 7,
+  "warmups": 1,
+  "tool_versions": {
+    "fas-ld": "fas-ld 0.2-dev (ELF64 x86-64 static subset)",
+    "GNU ld": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+    "LLD": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+  },
+  "tool_sha256": {
+    "fas-ld": "89ce08c97d48769c3a88ddfa3a03f0a3460e5d867c087d49e3245c89faeb6dfa",
+    "GNU ld": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+    "LLD": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982"
+  },
+  "assembler_version": "GNU assembler (GNU Binutils for Ubuntu) 2.46",
+  "methodology": "wall time includes spawn and exit; CPU from wait4; peak RSS from one separate untimed GNU time run per tool/corpus; tool default worker counts; no GC, ICF, or build ID requested; outputs are verified by execution",
+  "note": "Synthetic static-link corpus, not a general linker ranking. Output layout and size differ. Statistics, when requested, come from a separate untimed fas-ld run; phases can overlap.",
+  "archive_mode": "none",
+  "corpora": [
+    {
+      "input_objects": 2,
+      "input_files": 2,
+      "expected_linked_objects": 2,
+      "generated_functions": 64,
+      "generated_relocations": 65,
+      "input_bytes": 6056,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 2.5767949991859496,
+          "min_wall_ms": 2.3053420009091496,
+          "max_wall_ms": 2.6416879991302267,
+          "peak_rss_kib": 4264,
+          "output_bytes": 11504,
+          "samples": [
+            {
+              "wall_ms": 2.506962999177631,
+              "user_ms": 0.0,
+              "system_ms": 2.045
+            },
+            {
+              "wall_ms": 2.629094000440091,
+              "user_ms": 0.0,
+              "system_ms": 2.1609999999999996
+            },
+            {
+              "wall_ms": 2.6416879991302267,
+              "user_ms": 0.0,
+              "system_ms": 2.198
+            },
+            {
+              "wall_ms": 2.3053420009091496,
+              "user_ms": 0.0,
+              "system_ms": 1.8699999999999999
+            },
+            {
+              "wall_ms": 2.366116998018697,
+              "user_ms": 1.0939999999999999,
+              "system_ms": 1.0939999999999999
+            },
+            {
+              "wall_ms": 2.6222810010949615,
+              "user_ms": 1.188,
+              "system_ms": 1.188
+            },
+            {
+              "wall_ms": 2.5767949991859496,
+              "user_ms": 1.1949999999999998,
+              "system_ms": 1.1949999999999998
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 3.115855000942247,
+          "min_wall_ms": 2.7765230006480124,
+          "max_wall_ms": 3.6388640000950545,
+          "peak_rss_kib": 4756,
+          "output_bytes": 11312,
+          "samples": [
+            {
+              "wall_ms": 2.952666000055615,
+              "user_ms": 0.919,
+              "system_ms": 1.591
+            },
+            {
+              "wall_ms": 3.6388640000950545,
+              "user_ms": 1.062,
+              "system_ms": 2.1249999999999996
+            },
+            {
+              "wall_ms": 3.244308001740137,
+              "user_ms": 0.951,
+              "system_ms": 1.8449999999999998
+            },
+            {
+              "wall_ms": 2.869037998607382,
+              "user_ms": 0.57,
+              "system_ms": 1.8439999999999999
+            },
+            {
+              "wall_ms": 3.1209539993142243,
+              "user_ms": 0.971,
+              "system_ms": 1.942
+            },
+            {
+              "wall_ms": 3.115855000942247,
+              "user_ms": 0.0,
+              "system_ms": 2.9299999999999997
+            },
+            {
+              "wall_ms": 2.7765230006480124,
+              "user_ms": 0.94,
+              "system_ms": 1.671
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 14.241202999983216,
+          "min_wall_ms": 13.369985001190798,
+          "max_wall_ms": 23.39169499828131,
+          "peak_rss_kib": 61416,
+          "output_bytes": 3960,
+          "samples": [
+            {
+              "wall_ms": 23.39169499828131,
+              "user_ms": 9.139999999999999,
+              "system_ms": 15.539
+            },
+            {
+              "wall_ms": 14.241202999983216,
+              "user_ms": 8.998,
+              "system_ms": 6.999
+            },
+            {
+              "wall_ms": 14.439889000641415,
+              "user_ms": 9.046999999999999,
+              "system_ms": 6.784999999999999
+            },
+            {
+              "wall_ms": 13.769209999736631,
+              "user_ms": 4.342,
+              "system_ms": 10.856
+            },
+            {
+              "wall_ms": 14.220664001186378,
+              "user_ms": 4.55,
+              "system_ms": 11.376
+            },
+            {
+              "wall_ms": 15.462743998796213,
+              "user_ms": 6.357,
+              "system_ms": 10.596
+            },
+            {
+              "wall_ms": 13.369985001190798,
+              "user_ms": 3.9299999999999993,
+              "system_ms": 10.809
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "596312f0388aac9694c378b91eec4f9d02fb713ff7f99fab57ee6d0fc7fcc574",
+      "fas_statistics": {
+        "wall_seconds": 0.000500202,
+        "cpu_seconds": 0.000504,
+        "phases": {
+          "emit": {
+            "wall_seconds": 0.000125885,
+            "cpu_seconds": 0.000126,
+            "allocated_words": 13129,
+            "promoted_words": 0
+          },
+          "parse": {
+            "wall_seconds": 0.000159979,
+            "cpu_seconds": 0.000158,
+            "allocated_words": 18319,
+            "promoted_words": 0
+          },
+          "read": {
+            "wall_seconds": 4.2915e-05,
+            "cpu_seconds": 4e-05,
+            "allocated_words": 909,
+            "promoted_words": 0
+          },
+          "relocate": {
+            "wall_seconds": 8.5115e-05,
+            "cpu_seconds": 8.4e-05,
+            "allocated_words": 7527,
+            "promoted_words": 0
+          },
+          "resolve": {
+            "wall_seconds": 1.3828e-05,
+            "cpu_seconds": 1.4e-05,
+            "allocated_words": 1457,
+            "promoted_words": 0
+          },
+          "write": {
+            "wall_seconds": 5.3883e-05,
+            "cpu_seconds": 5.4e-05,
+            "allocated_words": 55,
+            "promoted_words": 0
+          }
+        },
+        "counts": {
+          "input_bytes": 6056,
+          "input_files": 2,
+          "objects": 2,
+          "output_bytes": 11504,
+          "relocations": 65,
+          "symbols": 68
+        },
+        "gc": {
+          "allocated_words": 35901,
+          "promoted_words": 0,
+          "minor_collections": 0,
+          "major_collections": 0
+        }
+      }
+    },
+    {
+      "input_objects": 33,
+      "input_files": 33,
+      "expected_linked_objects": 33,
+      "generated_functions": 2048,
+      "generated_relocations": 2049,
+      "input_bytes": 168912,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 10.02359399717534,
+          "min_wall_ms": 9.014314997330075,
+          "max_wall_ms": 13.876142998924479,
+          "peak_rss_kib": 8188,
+          "output_bytes": 110728,
+          "samples": [
+            {
+              "wall_ms": 13.876142998924479,
+              "user_ms": 9.431999999999999,
+              "system_ms": 4.191999999999999
+            },
+            {
+              "wall_ms": 9.970273000362795,
+              "user_ms": 5.887,
+              "system_ms": 3.9239999999999995
+            },
+            {
+              "wall_ms": 10.525723002501763,
+              "user_ms": 3.722,
+              "system_ms": 6.513
+            },
+            {
+              "wall_ms": 9.612846999516478,
+              "user_ms": 3.777,
+              "system_ms": 5.666
+            },
+            {
+              "wall_ms": 10.02359399717534,
+              "user_ms": 3.287,
+              "system_ms": 6.575
+            },
+            {
+              "wall_ms": 10.093205000885064,
+              "user_ms": 5.941,
+              "system_ms": 3.96
+            },
+            {
+              "wall_ms": 9.014314997330075,
+              "user_ms": 3.9299999999999993,
+              "system_ms": 4.913
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 7.416901000397047,
+          "min_wall_ms": 6.711016998451669,
+          "max_wall_ms": 16.877730999112828,
+          "peak_rss_kib": 7128,
+          "output_bytes": 104056,
+          "samples": [
+            {
+              "wall_ms": 7.105513002898078,
+              "user_ms": 3.16,
+              "system_ms": 3.718
+            },
+            {
+              "wall_ms": 16.877730999112828,
+              "user_ms": 3.124,
+              "system_ms": 13.54
+            },
+            {
+              "wall_ms": 7.482536002498819,
+              "user_ms": 3.297,
+              "system_ms": 3.975
+            },
+            {
+              "wall_ms": 6.837787001131801,
+              "user_ms": 3.07,
+              "system_ms": 3.6119999999999997
+            },
+            {
+              "wall_ms": 16.815603001305135,
+              "user_ms": 11.213,
+              "system_ms": 5.411
+            },
+            {
+              "wall_ms": 7.416901000397047,
+              "user_ms": 4.146,
+              "system_ms": 3.109
+            },
+            {
+              "wall_ms": 6.711016998451669,
+              "user_ms": 3.275,
+              "system_ms": 3.275
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 15.67715000055614,
+          "min_wall_ms": 14.752701001270907,
+          "max_wall_ms": 23.29237600133638,
+          "peak_rss_kib": 62100,
+          "output_bytes": 96320,
+          "samples": [
+            {
+              "wall_ms": 15.67715000055614,
+              "user_ms": 7.132,
+              "system_ms": 11.207
+            },
+            {
+              "wall_ms": 15.721242998552043,
+              "user_ms": 7.3,
+              "system_ms": 10.950999999999999
+            },
+            {
+              "wall_ms": 14.752701001270907,
+              "user_ms": 6.832999999999999,
+              "system_ms": 10.248999999999999
+            },
+            {
+              "wall_ms": 14.9834469993948,
+              "user_ms": 6.039999999999999,
+              "system_ms": 12.081
+            },
+            {
+              "wall_ms": 15.735671000584261,
+              "user_ms": 4.589,
+              "system_ms": 13.769
+            },
+            {
+              "wall_ms": 23.29237600133638,
+              "user_ms": 9.538,
+              "system_ms": 15.896999999999998
+            },
+            {
+              "wall_ms": 15.123713001230499,
+              "user_ms": 7.143999999999999,
+              "system_ms": 11.226999999999999
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "ee1080b0d8f0d3f5a0184c29520dddcfe736424834d6a155ac7c8b44623f4120",
+      "fas_statistics": {
+        "wall_seconds": 0.015475988,
+        "cpu_seconds": 0.015461,
+        "phases": {
+          "emit": {
+            "wall_seconds": 0.003740072,
+            "cpu_seconds": 0.003716,
+            "allocated_words": 348075,
+            "promoted_words": 73755
+          },
+          "parse": {
+            "wall_seconds": 0.007771969,
+            "cpu_seconds": 0.0077,
+            "allocated_words": 498338,
+            "promoted_words": 50512
+          },
+          "read": {
+            "wall_seconds": 0.001186609,
+            "cpu_seconds": 0.001121,
+            "allocated_words": 23622,
+            "promoted_words": 0
+          },
+          "relocate": {
+            "wall_seconds": 0.002683163,
+            "cpu_seconds": 0.002657,
+            "allocated_words": 235917,
+            "promoted_words": 73755
+          },
+          "resolve": {
+            "wall_seconds": 0.002038956,
+            "cpu_seconds": 0.002036,
+            "allocated_words": 51292,
+            "promoted_words": 29110
+          },
+          "write": {
+            "wall_seconds": 0.000158787,
+            "cpu_seconds": 0.000159,
+            "allocated_words": 55,
+            "promoted_words": 0
+          }
+        },
+        "counts": {
+          "input_bytes": 168912,
+          "input_files": 33,
+          "objects": 33,
+          "output_bytes": 110728,
+          "relocations": 2049,
+          "symbols": 2083
+        },
+        "gc": {
+          "allocated_words": 953825,
+          "promoted_words": 153377,
+          "minor_collections": 4,
+          "major_collections": 3
+        }
+      }
+    },
+    {
+      "input_objects": 257,
+      "input_files": 257,
+      "expected_linked_objects": 257,
+      "generated_functions": 16384,
+      "generated_relocations": 16385,
+      "input_bytes": 1359824,
+      "results": {
+        "fas-ld": {
+          "median_wall_ms": 61.35953699777019,
+          "min_wall_ms": 54.953937000391306,
+          "max_wall_ms": 72.30151699695853,
+          "peak_rss_kib": 20232,
+          "output_bytes": 839080,
+          "samples": [
+            {
+              "wall_ms": 63.68887300050119,
+              "user_ms": 42.096000000000004,
+              "system_ms": 18.040999999999997
+            },
+            {
+              "wall_ms": 72.30151699695853,
+              "user_ms": 49.971999999999994,
+              "system_ms": 21.987
+            },
+            {
+              "wall_ms": 67.96330900033354,
+              "user_ms": 45.471,
+              "system_ms": 22.23
+            },
+            {
+              "wall_ms": 57.75928400180419,
+              "user_ms": 44.446,
+              "system_ms": 12.84
+            },
+            {
+              "wall_ms": 56.47163899993757,
+              "user_ms": 45.138,
+              "system_ms": 11.033
+            },
+            {
+              "wall_ms": 61.35953699777019,
+              "user_ms": 45.010999999999996,
+              "system_ms": 15.002999999999998
+            },
+            {
+              "wall_ms": 54.953937000391306,
+              "user_ms": 40.334999999999994,
+              "system_ms": 14.116999999999999
+            }
+          ]
+        },
+        "GNU ld": {
+          "median_wall_ms": 45.93099600242567,
+          "min_wall_ms": 43.245196000498254,
+          "max_wall_ms": 62.237145997642074,
+          "peak_rss_kib": 23160,
+          "output_bytes": 785592,
+          "samples": [
+            {
+              "wall_ms": 45.93099600242567,
+              "user_ms": 20.345,
+              "system_ms": 25.082
+            },
+            {
+              "wall_ms": 44.2336960004468,
+              "user_ms": 22.838,
+              "system_ms": 20.852
+            },
+            {
+              "wall_ms": 43.245196000498254,
+              "user_ms": 25.061,
+              "system_ms": 17.723
+            },
+            {
+              "wall_ms": 52.08644200320123,
+              "user_ms": 29.006999999999998,
+              "system_ms": 22.607
+            },
+            {
+              "wall_ms": 52.177614998072386,
+              "user_ms": 27.437,
+              "system_ms": 21.287
+            },
+            {
+              "wall_ms": 62.237145997642074,
+              "user_ms": 33.891999999999996,
+              "system_ms": 27.910999999999998
+            },
+            {
+              "wall_ms": 43.67026999898371,
+              "user_ms": 21.081,
+              "system_ms": 22.085
+            }
+          ]
+        },
+        "LLD": {
+          "median_wall_ms": 28.087389000575058,
+          "min_wall_ms": 25.607366998883663,
+          "max_wall_ms": 39.28983299920219,
+          "peak_rss_kib": 66988,
+          "output_bytes": 777856,
+          "samples": [
+            {
+              "wall_ms": 37.48305400222307,
+              "user_ms": 13.517,
+              "system_ms": 35.638
+            },
+            {
+              "wall_ms": 25.607366998883663,
+              "user_ms": 13.395,
+              "system_ms": 24.426999999999996
+            },
+            {
+              "wall_ms": 26.65762399919913,
+              "user_ms": 16.159,
+              "system_ms": 23.227999999999998
+            },
+            {
+              "wall_ms": 39.28983299920219,
+              "user_ms": 14.274,
+              "system_ms": 37.114000000000004
+            },
+            {
+              "wall_ms": 26.04268000141019,
+              "user_ms": 23.776,
+              "system_ms": 15.85
+            },
+            {
+              "wall_ms": 36.691427001642296,
+              "user_ms": 19.639999999999997,
+              "system_ms": 27.909
+            },
+            {
+              "wall_ms": 28.087389000575058,
+              "user_ms": 19.049,
+              "system_ms": 22.858999999999998
+            }
+          ]
+        }
+      },
+      "ordered_input_sha256": "af7dd6087220f22ce9b2c1018e3d676e47391997c4ff90bfabd4a541511ec82d",
+      "fas_statistics": {
+        "wall_seconds": 0.05370903,
+        "cpu_seconds": 0.053691,
+        "phases": {
+          "emit": {
+            "wall_seconds": 0.015444994,
+            "cpu_seconds": 0.015431,
+            "allocated_words": 2770865,
+            "promoted_words": 295109
+          },
+          "parse": {
+            "wall_seconds": 0.018472672,
+            "cpu_seconds": 0.018211,
+            "allocated_words": 4001266,
+            "promoted_words": 496023
+          },
+          "read": {
+            "wall_seconds": 0.003899097,
+            "cpu_seconds": 0.003663,
+            "allocated_words": 189510,
+            "promoted_words": 0
+          },
+          "relocate": {
+            "wall_seconds": 0.005326986,
+            "cpu_seconds": 0.005324,
+            "allocated_words": 1886349,
+            "promoted_words": 68225
+          },
+          "resolve": {
+            "wall_seconds": 0.009191036,
+            "cpu_seconds": 0.009189,
+            "allocated_words": 416678,
+            "promoted_words": 265713
+          },
+          "write": {
+            "wall_seconds": 0.000681877,
+            "cpu_seconds": 0.000681,
+            "allocated_words": 55,
+            "promoted_words": 0
+          }
+        },
+        "counts": {
+          "input_bytes": 1359824,
+          "input_files": 257,
+          "objects": 257,
+          "output_bytes": 839080,
+          "relocations": 16385,
+          "symbols": 16643
+        },
+        "gc": {
+          "allocated_words": 7630561,
+          "promoted_words": 1274202,
+          "minor_collections": 33,
+          "major_collections": 8
+        }
+      }
+    }
+  ],
+  "filesystem": "tmpfs"
+}

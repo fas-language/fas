@@ -1,0 +1,123 @@
+{
+  "date": "2026-11-05",
+  "purpose": "Invocation-local positional input byte reuse; correctness, real-program compatibility and quiet-PC warm-cache baseline",
+  "git_head": "e64e668b7ca4a2f596f01fb1ba81951d6dcfbcb2",
+  "linker_sha256": "0443bd5a1e9cacecd1692866fb4c1b985f08e461c2e489df85813238b25bc4f9",
+  "source_sha256": {
+    "src/linker/resolver.ml": "8d67aa335f6a752cc8d3bec532c4a0f6e278e69ff14a1a1289b19bb451b61dd6",
+    "src/linker/test/archive_integration.py": "0e831cdf4524cf88e512fcc4027b6d9defdf54f56af2c53118622a05207e0f6d",
+    "src/linker/bench.py": "ba167632f8ad21c78866f589f21d712f0002345bde88056257f49eb8f9970fbe",
+    "src/linker/benchmarks/replay.py": "203f5ba2fa2f11eb83469ebfab111f71431ef70553193fb41d59f81dc59b90a4"
+  },
+  "behavior": [
+    "First bytes read by canonical positional filename reused within this invocation",
+    "All occurrences still charged to logical input count/byte budgets; alias checks retained",
+    "Parse/member selection state remains per occurrence",
+    "No cache survives the invocation or is shared across domains"
+  ],
+  "regression": {
+    "release_exit": 0,
+    "python_cases": 229,
+    "python_groups": 40,
+    "ocaml_unit_checks": "passed",
+    "compiler_checks": 3782,
+    "musl_sysroot": "/tmp/fas-musl-20261105/sysroot",
+    "skips": 0,
+    "development_build": "passed",
+    "format_syntax_diff_checks": "passed",
+    "focused_archive_cases": 16,
+    "new_checks": [
+      "archive before/after consumer, repeated and symlink occurrences",
+      "whole-archive duplicate errors and explicit muldefs",
+      "nine repeated 32 MiB inputs rejected at original 256 MiB budget"
+    ]
+  },
+  "chibicc": {
+    "report": "../corpus/results/2026-11-05/chibicc-selfhost-read-cache.json",
+    "full_artifacts": "/tmp/fas-chibicc-selfhost-read-cache-20261105",
+    "actual_fas_links": 116,
+    "driver_checks": 126,
+    "gnu_runtime_comparisons": 82
+  },
+  "benchmarks": {
+    "user_permission": "Yes, I can leave it idle now; temporary quiet-PC interval explicitly provided",
+    "quiet_interval_started_utc": "2026-11-05 18:39:52 UTC",
+    "methodology": "21 samples after 3 warmups, rotated order; warm cache, default workers; separate untimed RSS and runtime checks; no affinity/governor changes",
+    "tools": {
+      "Fas-before": {
+        "path": "/tmp/fas-real-link-read-cache-20261105/tools/0/main.exe",
+        "original": "/tmp/fas-real-link-baseline-20261105/tools/0/main.exe",
+        "sha256": "50fbe0c2d3dcd0a49638883270f13cfc776f145162a7aa84c98fe222ebc097d5",
+        "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+      },
+      "Fas-read-cache": {
+        "path": "/tmp/fas-real-link-read-cache-20261105/tools/1/main.exe",
+        "original": "/home/glonex/fas-experimental-backend/fas/_build/default/src/linker/bin/main.exe",
+        "sha256": "0443bd5a1e9cacecd1692866fb4c1b985f08e461c2e489df85813238b25bc4f9",
+        "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+      },
+      "GNU": {
+        "path": "/tmp/fas-real-link-read-cache-20261105/tools/2/ld",
+        "original": "/usr/bin/ld",
+        "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+        "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+      },
+      "LLD": {
+        "path": "/tmp/fas-real-link-read-cache-20261105/tools/3/ld.lld-22",
+        "original": "/usr/bin/ld.lld-22",
+        "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+        "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+      }
+    },
+    "results_directory": "../benchmarks/results/2026-11-05",
+    "report_sha256": {
+      "cjson-static-pie-Fas-read-cache-stats.json": "1ff65009fa694c193ae7c13b58034feba81fb4a93eb96e6017acbe11f26f31d6",
+      "manifest.json": "5f341cd9364b669cf2e11c94a8cfd64b828de0bfba60015ad8359ba9d2c5bd7a",
+      "objects.json": "47563cc9a4d9f0936b17cf64cb4abbd9b9bb5d4cc51e483457dbbd5815a3791a",
+      "chibicc-static-glibc-Fas-before-stats.json": "4f1eb911ea8c728ea78555c2e227231ff3e2aa5c1e024413bddef56fb9a2fb66",
+      "archives-all.json": "885f491b0aa32f06a4e955c67eb0982dc9c22a9578556d0eeea675f3cdeebc00",
+      "read-cache-allocations.json": "d3b3b145f86d270be536ee58e15021b4d93133c81a0f8303d0f4cbadf15f29a4",
+      "chibicc-stage1-dynamic-Fas-before-stats.json": "f35e4079e5005e0a6cadc5a0b2bf2997a4ae14482baf2a5511a432b745a15348",
+      "chibicc-stage2-copy-Fas-read-cache-stats.json": "3bc10b4e3c9d0153d117878b1e51e2ec7490483fe18b7ad7478aeeb45247450b",
+      "cjson-static-pie-Fas-before-stats.json": "c4d52e290e73823430bd4417c4a17b2e94a10ad9a182dfc97e25ca6a145f77f3",
+      "real-read-cache.json": "106ddc5ef9b0f8b0af88ff58b3535c29d39af1b5a66a6688ff8a3b6e4175f4c8",
+      "chibicc-stage1-dynamic-Fas-read-cache-stats.json": "19bb06ca7c68b8cd8e3d85d439fb0d0bf327d745f678041cad1971c7e4acbea0",
+      "archives-lazy.json": "7d702fee2ba2b48a7a464d6abc70fccd3bd145b7bb4606140da23f817607e3ab",
+      "chibicc-stage2-copy-Fas-before-stats.json": "2705cb10f305daba59194d877af31e953bbb445c39648e1b0e0d911d6ada5f49",
+      "chibicc-static-glibc-Fas-read-cache-stats.json": "2eef27de276d0c60ed38db360e21da19077fff5518c4bec26854d16a51c27b72",
+      "real-baseline.json": "bdf1f23f42c979b86cf4ad1b9a679863195a693d7dacc75fe93bf6ecd7bcd969"
+    },
+    "full_artifacts": [
+      "/tmp/fas-real-link-baseline-20261105",
+      "/tmp/fas-real-link-read-cache-20261105"
+    ],
+    "real_before_after_outputs_byte_identical": true,
+    "median_dynamic_chibicc_reduction_percent": [
+      13.32,
+      24.21
+    ],
+    "mold": "not installed",
+    "synthetic_reports_precede_optimization": true,
+    "replay_harness_portability": "Repo harness and its copied artifact both passed --verify-only replays"
+  },
+  "limits": [
+    "Fas remains slower than default LLD on the four real workloads; no general speedup or 2x-LLD claim",
+    "Warm cache, one host/toolchain; cold-cache, wide large DSO sets and parallel scaling unqualified",
+    "Read cache keeps first file bytes live through invocation, within existing input cap",
+    "Full implicit -l/script closures require associated corpus/sysroot provenance; replay hashes explicit argv files",
+    "No new IO-cache AFL campaign; deterministic full-suite and reentry coverage only. COPY/DSO fuzz results remain recorded separately."
+  ],
+  "previous_compatibility_audit": "copy-driver-regression-2026-11-05.json",
+  "log_sha256": {
+    "/tmp/fas-read-cache-build-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-read-cache-focused-20261105.log": "7c22a99099b6a37c1e8540c8398755bc2c67b5f019c3d78fdada7c55cbb5d173",
+    "/tmp/fas-read-cache-regression-20261105.log": "72d72c1b0ed77003da7797d5caa89089ec48a1d57d173f911561333485ad8904",
+    "/tmp/fas-chibicc-selfhost-read-cache-20261105.log": "c025d902c9ceb061b153ed3529f32048561cdddc1608eeb2c3eb8b52245cfa24",
+    "/tmp/fas-read-cache-development-build-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-read-cache-release-final-20261105.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/fas-replay-portability-first-20261105.log": "fcaf12d5340efd4cf0ba02e5f504f8773dc822d10bb9e61f9b0c9a59644e5106",
+    "/tmp/fas-replay-portability-second-20261105.log": "384d09edc16108fb9a213032984b3a882298455782692928442916de2d1862e0"
+  },
+  "commits_or_index_changes": false,
+  "compiler_implementation_changes": false
+}

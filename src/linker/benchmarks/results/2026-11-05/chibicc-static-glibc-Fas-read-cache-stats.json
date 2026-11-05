@@ -1,0 +1,86 @@
+{
+  "wall_seconds": 0.093226194,
+  "cpu_seconds": 0.093213,
+  "phases": {
+    "emit": {
+      "wall_seconds": 0.038312912,
+      "cpu_seconds": 0.03829,
+      "allocated_words": 4958650,
+      "promoted_words": 671528
+    },
+    "gc": {
+      "wall_seconds": 0.008478165,
+      "cpu_seconds": 0.008454,
+      "allocated_words": 623600,
+      "promoted_words": 333796
+    },
+    "merge": {
+      "wall_seconds": 0.000985861,
+      "cpu_seconds": 0.000983,
+      "allocated_words": 53443,
+      "promoted_words": 15883
+    },
+    "parse": {
+      "wall_seconds": 0.033283234,
+      "cpu_seconds": 0.032691,
+      "allocated_words": 3528871,
+      "promoted_words": 919913
+    },
+    "read": {
+      "wall_seconds": 0.010430574,
+      "cpu_seconds": 0.010396,
+      "allocated_words": 1343223,
+      "promoted_words": 108919
+    },
+    "relocate": {
+      "wall_seconds": 0.007219076,
+      "cpu_seconds": 0.007215,
+      "allocated_words": 1671814,
+      "promoted_words": 127723
+    },
+    "resolve": {
+      "wall_seconds": 0.025162935,
+      "cpu_seconds": 0.025161,
+      "allocated_words": 3093348,
+      "promoted_words": 786927
+    },
+    "unwind": {
+      "wall_seconds": 0.004673958,
+      "cpu_seconds": 0.004673,
+      "allocated_words": 814915,
+      "promoted_words": 88585
+    },
+    "write": {
+      "wall_seconds": 0.001710892,
+      "cpu_seconds": 0.00171,
+      "allocated_words": 252,
+      "promoted_words": 0
+    }
+  },
+  "counts": {
+    "archives": 3,
+    "discarded_comdat_groups": 34,
+    "discarded_sections": 2339,
+    "extracted_members": 729,
+    "gnu_properties": 2,
+    "got_entries": 92,
+    "indexed_unwind_fdes": 1831,
+    "input_bytes": 10733842,
+    "input_files": 17,
+    "linker_symbols": 10,
+    "merged_bytes": 4799,
+    "merged_sections": 58,
+    "objects": 743,
+    "output_bytes": 2083320,
+    "relocations": 43188,
+    "static_ifunc_resolvers": 35,
+    "symbols": 11670,
+    "unwind_fdes": 1850
+  },
+  "gc": {
+    "allocated_words": 10681875,
+    "promoted_words": 1787414,
+    "minor_collections": 51,
+    "major_collections": 10
+  }
+}

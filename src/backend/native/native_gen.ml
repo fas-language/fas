@@ -1313,6 +1313,14 @@ let negate = function
 
 let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
 
+(* Internal Fas float/vector calls use this backend's own representation. Expose
+   only the independently checked integer/pointer subset across object boundaries. *)
+let external_abi (f : func) =
+  let scalar = function I32 | I64 | Pointer _ -> true | _ -> false in
+  (not f.variadic)
+  && (f.ret = Void || scalar f.ret)
+  && List.for_all (fun (p : param) -> scalar p.ty) f.params
+
 (* Values in caller-saved registers that [ins] (a call or syscall) would
    clobber: stored to their slots first, read from there while the arguments
    are set up, and reloaded afterwards when still live. *)
@@ -1409,9 +1417,16 @@ let gen_call ctx fr ~variadic result ret_ty target args =
   | `Direct name -> (
       match Ptbl.find_opt ctx.func_labels name with
       | Some l -> A.call_label a l
+      | None
+        when List.exists
+               (fun (f : func) ->
+                 f.name = name && f.linkage = External && external_abi f)
+               ctx.m.funcs ->
+          A.call_symbol a name
       | None ->
           unsupported
-            "call to `%s`, which has no Fas definition (C functions are not available)"
+            "call to `%s` requires an unsupported external ABI (only non-variadic \
+             i32/i64/pointer parameters and results are supported)"
             name)
   | `Indirect v ->
       load ctx fr A.R11 v;
@@ -2510,11 +2525,13 @@ let gen_function ctx (f : func) =
 
 type data_out = {
   buf : Buffer.t;
+  mutable alignment : int;
   mutable relocs : A.reloc list;
   mutable syms : Elf64.symbol list;
 }
 
 let place_data (d : data_out) section ~name ~align ~size write =
+  d.alignment <- max d.alignment align;
   while Buffer.length d.buf mod max 1 align <> 0 do
     Buffer.add_char d.buf '\000'
   done;
@@ -2539,7 +2556,7 @@ let t name f x =
     Printf.eprintf "%-14s %8.2f ms\n%!" name ((Unix.gettimeofday () -. t0) *. 1000.);
     r
 
-let compile (m : module_) =
+let generate ~startup (m : module_) =
   if timing then begin
     Printf.eprintf "front end      %8.2f ms (cpu)\n%!" (Sys.time () *. 1000.);
     let n = ref 0 and nb = ref 0 and nl = ref 0 in
@@ -2559,6 +2576,8 @@ let compile (m : module_) =
       !nl !nb (List.length m.funcs)
   end;
   try
+    if m.target_triple <> Target_layout.x86_64_linux.triple then
+      unsupported "only Linux x86-64 object emission is supported";
     (* No debug info yet: source locations only slow every pass down *)
     let m =
       {
@@ -2670,6 +2689,12 @@ let compile (m : module_) =
     let m = t "fold3" Ir_fold.module_ m in
     let m = t "licm" Licm.module_ m in
     let m = t "cleanup3" Mem2reg.cleanup m in
+    let m = t "sink_cmp" Mem2reg.sink_compares_module m in
+    let m =
+      t "nonzero"
+        (fun m -> { m with funcs = List.map Mem2reg.nonzero_counts m.funcs })
+        m
+    in
     if Sys.getenv_opt "FAS_NATIVE_IR" = Some "1" then prerr_string (Ir.render_debug m);
     Stdlib.Hashtbl.reset const_pool;
     Stdlib.Hashtbl.reset vpool;
@@ -2677,59 +2702,70 @@ let compile (m : module_) =
     let ctx = { m; a; func_labels = Ptbl.create 64 } in
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
     List.iter
+      (fun (f : func) ->
+        if f.linkage = External && not (external_abi f) then
+          unsupported "exported function `%s` requires an unsupported external ABI"
+            f.name)
+      defined;
+    List.iter
       (fun (f : func) -> Ptbl.replace ctx.func_labels f.name (A.new_label a))
       defined;
-    if not (Ptbl.mem ctx.func_labels "main") then unsupported "no `main` function";
-    (* _start: argc/argv from the initial stack, call main, exit_group(result) *)
-    A.alu_rr a A.Xor A.Rbp A.Rbp;
-    A.load_zx a 8 A.Rdi (A.Base (A.Rsp, 0));
-    A.lea a A.Rsi (A.Base (A.Rsp, 8));
-    A.alu_ri a A.And A.Rsp (-16);
-    A.call_label a (Ptbl.find ctx.func_labels "main");
-    A.rr a ~w:false [ 0x89 ] ~reg:A.Rax ~rm:A.Rdi;
-    A.mov_imm a A.Rax 231L;
-    A.syscall a;
-    let m = t "sink_cmp" Mem2reg.sink_compares_module m in
-    let m =
-      t "nonzero"
-        (fun m -> { m with funcs = List.map Mem2reg.nonzero_counts m.funcs })
-        m
-    in
-    A.ud2 a;
+    if startup then begin
+      (* _start: argc/argv from the initial stack, call main, exit_group(result) *)
+      A.alu_rr a A.Xor A.Rbp A.Rbp;
+      A.load_zx a 8 A.Rdi (A.Base (A.Rsp, 0));
+      A.lea a A.Rsi (A.Base (A.Rsp, 8));
+      A.alu_ri a A.And A.Rsp (-16);
+      (match Ptbl.find_opt ctx.func_labels "main" with
+      | Some label -> A.call_label a label
+      | None -> A.call_symbol a "main");
+      A.rr a ~w:false [ 0x89 ] ~reg:A.Rax ~rm:A.Rdi;
+      A.mov_imm a A.Rax 231L;
+      A.syscall a;
+      A.ud2 a
+    end;
     let start_size = A.pos a in
     let sizes =
       t "codegen" (List.map (fun (f : func) -> (f, gen_function ctx f))) defined
     in
     let text, text_relocs = A.finish a in
     let func_syms =
-      {
-        Elf64.name = "_start";
-        section = Elf64.Text;
-        offset = 0;
-        size = start_size;
-        func = true;
-      }
-      :: List.map
-           (fun ((f : func), size) ->
-             let offset =
-               Option.get (A.label_offset a (Ptbl.find ctx.func_labels f.name))
-             in
-             { Elf64.name = f.name; section = Elf64.Text; offset; size; func = true })
-           sizes
+      (if startup then
+         [
+           {
+             Elf64.name = "_start";
+             section = Elf64.Text;
+             offset = 0;
+             size = start_size;
+             func = true;
+           };
+         ]
+       else [])
+      @ List.map
+          (fun ((f : func), size) ->
+            let offset =
+              Option.get (A.label_offset a (Ptbl.find ctx.func_labels f.name))
+            in
+            { Elf64.name = f.name; section = Elf64.Text; offset; size; func = true })
+          sizes
     in
-    let rodata = { buf = Buffer.create 256; relocs = []; syms = [] } in
-    let data = { buf = Buffer.create 256; relocs = []; syms = [] } in
-    Stdlib.Hashtbl.iter
-      (fun k name ->
+    let rodata = { buf = Buffer.create 256; alignment = 16; relocs = []; syms = [] } in
+    let data = { buf = Buffer.create 256; alignment = 1; relocs = []; syms = [] } in
+    let sorted_pool pool =
+      Stdlib.Hashtbl.to_seq pool |> List.of_seq
+      |> List.sort (fun (_, a) (_, b) -> String.compare a b)
+    in
+    List.iter
+      (fun (k, name) ->
         place_data rodata Elf64.Rodata ~name ~align:8 ~size:8 (fun _ ->
             int_le rodata.buf 8 k))
-      const_pool;
-    Stdlib.Hashtbl.iter
-      (fun bytes name ->
+      (sorted_pool const_pool);
+    List.iter
+      (fun (bytes, name) ->
         place_data rodata Elf64.Rodata ~name ~align:16 ~size:16 (fun _ ->
             Buffer.add_string rodata.buf bytes))
-      vpool;
-    let bss = ref 0 and bss_syms = ref [] in
+      (sorted_pool vpool);
+    let bss = ref 0 and bss_alignment = ref 1 and bss_syms = ref [] in
     List.iter
       (function
         | String_global { name; bytes } ->
@@ -2740,39 +2776,75 @@ let compile (m : module_) =
             place_data rodata Elf64.Rodata ~name ~align
               ~size:(es * List.length elems)
               (fun _ -> List.iter (int_le rodata.buf es) elems)
-        | Storage_global { name; size; bytes; pointers; readonly; align; linkage; _ } ->
-            (match linkage with
-            | Ast.Import_c | Ast.Import_const_c ->
-                unsupported "imported C global `%s`" name
-            | _ -> ());
-            let zero =
-              match bytes with
-              | None -> true
-              | Some b -> String.for_all (( = ) '\000') b
-            in
-            if zero && pointers = [] && not readonly then begin
-              bss := (!bss + align - 1) / max 1 align * max 1 align;
-              bss_syms :=
-                { Elf64.name; section = Elf64.Bss; offset = !bss; size; func = false }
-                :: !bss_syms;
-              bss := !bss + size
-            end
-            else
-              let d, section =
-                if readonly then (rodata, Elf64.Rodata) else (data, Elf64.Data)
-              in
-              place_data d section ~name ~align ~size (fun offset ->
-                  (match bytes with
-                  | Some b -> Buffer.add_string d.buf b
-                  | None -> Buffer.add_string d.buf (String.make size '\000'));
-                  List.iter
-                    (fun (o, symbol, addend) ->
-                      d.relocs <-
-                        A.Abs64 { offset = offset + o; symbol; addend } :: d.relocs)
-                    pointers))
+        | Storage_global { name; size; bytes; pointers; readonly; align; linkage; _ }
+          -> (
+            match linkage with
+            | Ast.Import_c | Ast.Import_const_c -> ()
+            | _ ->
+                let zero =
+                  match bytes with
+                  | None -> true
+                  | Some b -> String.for_all (( = ) '\000') b
+                in
+                if zero && pointers = [] && not readonly then begin
+                  bss_alignment := max !bss_alignment align;
+                  bss := (!bss + align - 1) / max 1 align * max 1 align;
+                  bss_syms :=
+                    {
+                      Elf64.name;
+                      section = Elf64.Bss;
+                      offset = !bss;
+                      size;
+                      func = false;
+                    }
+                    :: !bss_syms;
+                  bss := !bss + size
+                end
+                else
+                  let d, section =
+                    if readonly then (rodata, Elf64.Rodata) else (data, Elf64.Data)
+                  in
+                  place_data d section ~name ~align ~size (fun offset ->
+                      (match bytes with
+                      | Some b -> Buffer.add_string d.buf b
+                      | None -> Buffer.add_string d.buf (String.make size '\000'));
+                      List.iter
+                        (fun (o, symbol, addend) ->
+                          d.relocs <-
+                            A.Abs64 { offset = offset + o; symbol; addend } :: d.relocs)
+                        pointers)))
+      m.globals;
+    let referenced = Ptbl.create 64 in
+    List.iter
+      (List.iter (function
+          | A.Rel32 { symbol; _ }
+          | A.Call32 { symbol; _ }
+          | A.Abs32s { symbol; _ }
+          | A.Abs64 { symbol; _ }
+          -> Ptbl.replace referenced symbol ()))
+      [ text_relocs; rodata.relocs; data.relocs ];
+    List.iter
+      (fun (f : func) ->
+        if f.linkage = External && Ptbl.mem referenced f.name && not (external_abi f)
+        then
+          unsupported
+            "reference to external function `%s` requires an unsupported external ABI"
+            f.name)
+      m.funcs;
+    let globals = Ptbl.create 64 in
+    if startup then Ptbl.add globals "_start" ();
+    List.iter
+      (fun (f : func) -> if f.linkage = External then Ptbl.replace globals f.name ())
+      m.funcs;
+    List.iter
+      (function
+        | Storage_global { name; linkage = Ast.Export_c; _ } ->
+            Ptbl.replace globals name ()
+        | _ -> ())
       m.globals;
     let image =
-      Elf64.link
+      Native_object.emit ~global:(Ptbl.mem globals)
+        ~alignments:[| 16; rodata.alignment; data.alignment; !bss_alignment |]
         {
           text;
           text_relocs;
@@ -2788,4 +2860,33 @@ let compile (m : module_) =
     Ok image
   with
   | Unsupported message -> Error ("native backend: " ^ message)
+  | Fas_linker.Error.Error message -> Error ("native backend: " ^ message)
   | Invalid_argument message -> Error ("native backend internal error: " ^ message)
+
+let compile_object m = generate ~startup:false m
+
+let compile ?(inputs = []) m =
+  match generate ~startup:true m with
+  | Error _ as error -> error
+  | Ok object_ -> (
+      try
+        Ok
+          (Fas_linker.Static_link.link_inputs
+             (Fas_linker.Input.Object
+                { path = "<native module>"; data = Bytes.to_string object_ }
+             :: inputs))
+      with Fas_linker.Error.Error message ->
+        Error ("native backend: linker: " ^ message))
+
+let link_files ?(inputs = []) ?options ~output m =
+  match generate ~startup:true m with
+  | Error _ as error -> error
+  | Ok object_ -> (
+      try
+        Fas_linker.Static_link.link_input_files ?options ~output
+          (Fas_linker.Input.Object
+             { path = "<native module>"; data = Bytes.to_string object_ }
+          :: inputs);
+        Ok ()
+      with Fas_linker.Error.Error message ->
+        Error ("native backend: linker: " ^ message))

@@ -1,0 +1,599 @@
+(test
+ (name unit)
+ (modules unit)
+ (libraries fas_linker))
+
+(executable
+ (name sysroot_reentry)
+ (modules sysroot_reentry)
+ (libraries fas_linker))
+
+(rule
+ (alias runtest)
+ (deps
+  copy_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:copy_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  static_pie_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s
+  (env_var FAS_MUSL_SYSROOT))
+ (action
+  (run python3 %{dep:static_pie_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  sysroot_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s
+  (env_var FAS_MUSL_SYSROOT))
+ (action
+  (run python3 %{dep:sysroot_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:sysroot_reentry.exe})))
+
+(executable
+ (name publication_reentry)
+ (modules publication_reentry)
+ (libraries fas_linker))
+
+(rule
+ (alias runtest)
+ (deps
+  publication_fault_integration.py
+  publication_faults.c
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:publication_fault_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  registry_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:registry_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  publication_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:publication_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:publication_reentry.exe} %{exe:../../../bin/main.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  synthetic_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:synthetic_integration.py} %{exe:../bin/main.exe}
+   %{exe:reentry.exe} %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  legacy_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run python3 %{dep:legacy_integration.py} %{exe:../bin/main.exe} %{exe:reentry.exe})))
+
+(executable
+ (name zlib_driver)
+ (modules zlib_driver)
+ (libraries fas_linker))
+
+(rule
+ (alias runtest)
+ (deps zlib_integration.py)
+ (action
+  (run python3 %{dep:zlib_integration.py} %{exe:zlib_driver.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  compressed_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:compressed_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  musl_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s
+  (env_var FAS_MUSL_SYSROOT))
+ (action
+  (run
+   python3
+   %{dep:musl_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  driver_options_integration.py
+  shared_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:driver_options_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  discovery_integration.py
+  shared_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:discovery_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe}
+   %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps lto_integration.py integration.py fixtures/start.s fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:lto_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  unique_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:unique_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  metadata_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:metadata_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(executable
+ (name reentry)
+ (modules reentry)
+ (libraries fas_linker))
+
+(executable
+ (name dynamic_reentry)
+ (modules dynamic_reentry)
+ (libraries fas_linker))
+
+(rule
+ (alias runtest)
+ (deps
+  partial_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:partial_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe}
+   %{exe:dynamic_reentry.exe})))
+
+(executable
+ (name object_writer)
+ (modules object_writer)
+ (libraries fas_linker))
+
+(rule
+ (alias runtest)
+ (deps object_integration.py)
+ (action
+  (run
+   python3
+   %{dep:object_integration.py}
+   %{exe:object_writer.exe}
+   %{exe:../bin/main.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  native_integration.py
+  (source_tree ../../../test))
+ (action
+  (run
+   python3
+   %{dep:native_integration.py}
+   %{exe:../../../bin/main.exe}
+   %{exe:../bin/main.exe})))
+
+(rule
+ (alias runtest)
+ (deps integration.py fixtures/start.s fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  archive_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:archive_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  thin_integration.py
+  archive_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:thin_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  layout_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:layout_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  sections_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:sections_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps pic_integration.py integration.py fixtures/start.s fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:pic_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  debug_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:debug_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  unwind_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:unwind_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  exception_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:exception_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  properties_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:properties_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps sdt_integration.py integration.py fixtures/start.s fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:sdt_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  dynamic_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:dynamic_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  shared_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:shared_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:hosted_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  tls_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:tls_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  symver_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:symver_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  ifunc_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:ifunc_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  static_ifunc_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:static_ifunc_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe}
+   %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  tlsdesc_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:tlsdesc_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  script_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:script_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  library_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:library_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe}
+   %{exe:dynamic_reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  hardening_integration.py
+  shared_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:hardening_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  shared_output_integration.py
+  hosted_integration.py
+  integration.py
+  fixtures/start.s
+  fixtures/support.s)
+ (action
+  (run
+   python3
+   %{dep:shared_output_integration.py}
+   %{exe:../bin/main.exe}
+   %{exe:reentry.exe})))

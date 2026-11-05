@@ -14,7 +14,7 @@ src/
                  LLVM backend renders it as LLVM text
     native/      the x86-64 backend
   driver/        the command line, the build driver, and the perf/tune tools
-  linker/        (to come) the linker, its own library `fas_linker`
+  linker/        the linker, its own library `fas_linker`
   cc/            (to come) the C front end
 ```
 

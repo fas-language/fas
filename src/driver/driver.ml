@@ -2791,6 +2791,32 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   let* () = verify_llvm opt path in
                   emit_text config text)
           | Cli.Optimized_llvm -> emit_optimized_llvm ~pgo config program ir redirect
+          | Cli.Obj when config.Cli.native -> (
+              if c_objects <> [] || link_pkgs <> [] then
+                Error
+                  [
+                    Diag.error Span.synthetic
+                      "native object output cannot combine embedded C/assembly or \
+                       package libraries";
+                  ]
+              else
+                match Result.bind (Fir_hook.apply ir) Native_gen.compile_object with
+                | Error message -> Error [ Diag.error Span.synthetic message ]
+                | Ok image -> (
+                    try
+                      Fas_linker.File_io.publish ~output:config.Cli.output
+                        ~permissions:0o644 ~inputs:[ config.Cli.input ] (fun () ->
+                          image);
+                      Ok ""
+                    with Fas_linker.Error.Error message ->
+                      Error [ Diag.error Span.synthetic message ]))
+          | Cli.Asm when config.Cli.native ->
+              Error
+                [
+                  Diag.error Span.synthetic
+                    "native assembly text output is not supported; use -c for an ELF \
+                     object";
+                ]
           | Cli.Asm | Cli.Obj ->
               emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
                 ir c_objects [] redirect
@@ -2809,25 +2835,37 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 else Ok ()
               in
               if config.Cli.native then
-                if config.Cli.link_inputs <> [] || c_objects <> [] || link_pkgs <> []
-                then
+                if c_objects <> [] || link_pkgs <> [] then
                   Error
                     [
                       Diag.error Span.synthetic
-                        "`--backend=native` cannot link C objects or libraries yet";
+                        "`--backend=native` cannot compile embedded C/assembly or \
+                         package libraries yet";
                     ]
                 else
-                  match Result.bind (Fir_hook.apply ir) Native_gen.compile with
-                  | Error message -> Error [ Diag.error Span.synthetic message ]
-                  | Ok image -> (
-                      try
-                        let oc = open_out_bin config.Cli.output in
-                        output_bytes oc image;
-                        close_out oc;
-                        Unix.chmod config.Cli.output 0o755;
-                        Ok ""
-                      with Sys_error message | Failure message ->
-                        Error [ Diag.error Span.synthetic message ])
+                  try
+                    Fas_linker.File_io.check_output ~output:config.Cli.output
+                      ~inputs:[ config.Cli.input ];
+                    let link =
+                      match
+                        Fas_linker.Command_line.parse ~link_only:true
+                          (Cli.native_linker_arguments config.Cli.link_inputs)
+                      with
+                      | Link options -> options
+                      | Help | Version -> assert false
+                    in
+                    match
+                      Result.bind (Fir_hook.apply ir)
+                        (Native_gen.link_files ~inputs:link.inputs
+                           ~options:link.options ~output:config.Cli.output)
+                    with
+                    | Error message -> Error [ Diag.error Span.synthetic message ]
+                    | Ok () -> Ok ""
+                  with Fas_linker.Error.Error message ->
+                    Error
+                      [
+                        Diag.error Span.synthetic ("native backend: linker: " ^ message);
+                      ]
               else
                 let* link_flags =
                   pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
@@ -2865,7 +2903,8 @@ let run_resolved ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ~pgo conf
     with
     | Ok _ as result -> result
     | Error _ as result ->
-        if not (is_non_regular_output config.Cli.output) then remove config.Cli.output;
+        if (not config.Cli.native) && not (is_non_regular_output config.Cli.output) then
+          remove config.Cli.output;
         result
 
 let output_is_directory config =

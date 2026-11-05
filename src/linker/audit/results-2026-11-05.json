@@ -1,0 +1,1537 @@
+{
+  "linker_sha256": "3a473fa4df88743c9def94cd89285b13fd1cb12ca1af95aaefa7239d0f68c7a9",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "compiler": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)",
+  "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "tool_versions": {
+    "fas": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)",
+    "gnu": "GNU ld (GNU Binutils for Ubuntu) 2.46",
+    "lld": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+  },
+  "cases": [
+    {
+      "case": "modern-ctors",
+      "gc": false,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-fas",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-fas"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "modern-ctors",
+      "gc": false,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-gnu",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-gnu"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "modern-ctors",
+      "gc": false,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-lld",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-lld"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "modern-ctors",
+      "gc": true,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-fas-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-fas-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "modern-ctors",
+      "gc": true,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-gnu-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-gnu-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "modern-ctors",
+      "gc": true,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-lld-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/modern-ctors-lld-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": false,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-fas",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-fas"
+        ],
+        "status": 7,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": false,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-gnu",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-gnu"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": false,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-lld",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-lld"
+        ],
+        "status": 7,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": true,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-fas-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-fas-gc"
+        ],
+        "status": 7,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": true,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-gnu-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-gnu-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-ctors",
+      "gc": true,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-lld-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-ctors-lld-gc"
+        ],
+        "status": 7,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": false,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-fas",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-fas"
+        ],
+        "status": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": false,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-gnu",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-gnu"
+        ],
+        "status": 0,
+        "stdout": "main\ndone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": false,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-lld",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-lld"
+        ],
+        "status": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": true,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-fas-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-fas-gc"
+        ],
+        "status": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": true,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-gnu-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-gnu-gc"
+        ],
+        "status": 0,
+        "stdout": "main\ndone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "legacy-dtors",
+      "gc": true,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "-fno-use-init-array",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-lld-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/legacy-dtors-lld-gc"
+        ],
+        "status": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "section-boundaries",
+      "gc": false,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-fas",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 1,
+        "stdout": "",
+        "stderr": "fas-ld: /tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o: undefined symbol __stop_registry\n"
+      },
+      "execute": null
+    },
+    {
+      "case": "section-boundaries",
+      "gc": false,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-gnu",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-gnu"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "section-boundaries",
+      "gc": false,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-lld",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-lld"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "section-boundaries",
+      "gc": true,
+      "tool": "fas",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-fas-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 1,
+        "stdout": "",
+        "stderr": "fas-ld: /tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o: undefined symbol __stop_registry\n"
+      },
+      "execute": null
+    },
+    {
+      "case": "section-boundaries",
+      "gc": true,
+      "tool": "gnu",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-gnu-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-gnu-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "case": "section-boundaries",
+      "gc": true,
+      "tool": "lld",
+      "compile": {
+        "command": [
+          "/usr/bin/clang-22",
+          "-c",
+          "-O2",
+          "-fPIC",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.c",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-pie",
+          "--dynamic-linker",
+          "/lib64/ld-linux-x86-64.so.2",
+          "--gc-sections",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-lld-gc",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o",
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries.o",
+          "/lib/x86_64-linux-gnu/libc.so.6",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/section-boundaries-lld-gc"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ],
+  "predefined_exports": [
+    {
+      "tool": "fas",
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-fas.so",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-library.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-host",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-fas.so"
+        ],
+        "status": 3,
+        "stdout": "export differs from internal address\n",
+        "stderr": ""
+      },
+      "symbols": {
+        "command": [
+          "readelf",
+          "--dyn-syms",
+          "-W",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-fas.so"
+        ],
+        "status": 0,
+        "stdout": "\nSymbol table '.dynsym' contains 3 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000001000    13 FUNC    GLOBAL DEFAULT    1 get_end\n     2: 0000000000004000     0 NOTYPE  GLOBAL DEFAULT  ABS _end\n",
+        "stderr": ""
+      }
+    },
+    {
+      "tool": "gnu",
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-gnu.so",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-library.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-host",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-gnu.so"
+        ],
+        "status": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      },
+      "symbols": {
+        "command": [
+          "readelf",
+          "--dyn-syms",
+          "-W",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-gnu.so"
+        ],
+        "status": 0,
+        "stdout": "\nSymbol table '.dynsym' contains 3 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000001000    13 FUNC    GLOBAL DEFAULT    5 get_end\n     2: 0000000000004000     0 NOTYPE  GLOBAL DEFAULT    9 _end\n",
+        "stderr": ""
+      }
+    },
+    {
+      "tool": "lld",
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-lld.so",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-library.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "execute": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-host",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-lld.so"
+        ],
+        "status": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      },
+      "symbols": {
+        "command": [
+          "readelf",
+          "--dyn-syms",
+          "-W",
+          "/tmp/fas-linker-release-audit-verified-20261105/predefined-lld.so"
+        ],
+        "status": 0,
+        "stdout": "\nSymbol table '.dynsym' contains 3 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 00000000000012c0    13 FUNC    GLOBAL DEFAULT    7 get_end\n     2: 0000000000003000     0 NOTYPE  GLOBAL DEFAULT   10 _end\n",
+        "stderr": ""
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "tool": "fas",
+      "mode": "executable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-fas-executable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o755",
+      "map_permissions": null
+    },
+    {
+      "tool": "fas",
+      "mode": "relocatable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-r",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-fas-relocatable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o644",
+      "map_permissions": null
+    },
+    {
+      "tool": "fas",
+      "mode": "shared",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-fas-shared",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o644",
+      "map_permissions": null
+    },
+    {
+      "tool": "fas",
+      "mode": "map",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/tmp/fas-linker-release-audit-verified-20261105/fas-ld",
+          "-Map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-fas.map",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-fas-map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o755",
+      "map_permissions": "0o644"
+    },
+    {
+      "tool": "gnu",
+      "mode": "executable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-gnu-executable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": null
+    },
+    {
+      "tool": "gnu",
+      "mode": "relocatable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-r",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-gnu-relocatable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o600",
+      "map_permissions": null
+    },
+    {
+      "tool": "gnu",
+      "mode": "shared",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-gnu-shared",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": null
+    },
+    {
+      "tool": "gnu",
+      "mode": "map",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld",
+          "-Map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-gnu.map",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-gnu-map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": "0o600"
+    },
+    {
+      "tool": "lld",
+      "mode": "executable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-lld-executable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": null
+    },
+    {
+      "tool": "lld",
+      "mode": "relocatable",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-r",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-lld-relocatable",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o600",
+      "map_permissions": null
+    },
+    {
+      "tool": "lld",
+      "mode": "shared",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-shared",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-lld-shared",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": null
+    },
+    {
+      "tool": "lld",
+      "mode": "map",
+      "umask": "077",
+      "link": {
+        "command": [
+          "/usr/bin/ld.lld-22",
+          "-Map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-lld.map",
+          "-o",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions-lld-map",
+          "/tmp/fas-linker-release-audit-verified-20261105/permissions.o"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "permissions": "0o700",
+      "map_permissions": "0o600"
+    }
+  ],
+  "input_sha256": {
+    "permissions.o": "f8f03259c7eea277927b737fcc8958f5557762e4b3a148320b0494209cfe0a3c",
+    "permissions.s": "30a3821c246805194f632037db72250dd0f0554695a4c17ff97f2db9f7d18ac2",
+    "predefined-host.c": "cdf4141442e711ece84a8725e68eee43251c079e07bb328425fcca930cc40a84",
+    "predefined-library.o": "738c7cebad62903a38bfa23b49587f02558925a8618a38dc95b89d10e423683f",
+    "predefined-library.c": "dca578e95dc39e7e93479533721b09cf551c480d441db593f80a29946ee077fd",
+    "section-boundaries.o": "8169f8fae9bb44542229100f5f3fcc76894c9982b302ac3062b76dabdb5eb7e4",
+    "section-boundaries.c": "99ef5e2774c54df2ef0139e89762bf7168f9377a4888f46ad324e649153ea96b",
+    "legacy-dtors.o": "c63a037ba4776a58374c065320b3857e26329ee79542819272dbae8b7bf85b15",
+    "legacy-dtors.c": "8f6a655ace1d853abf3f0b68436958abafb58e5a39bf05ee972a60eae15fcd24",
+    "legacy-ctors.o": "6e95abc48844a0a6d4ba5d9cf49713e2ee9f30acd71413a76b63e7d894b91573",
+    "legacy-ctors.c": "3be4d1e23c2af004e98ed04a8c42b039ac6f446c7fe0c1a7d2406bc187efe908",
+    "modern-ctors.o": "1deb1f19045458b99e1bc574bc1a5d635a2e011da97e20f9b7c56f6f67260f49",
+    "modern-ctors.c": "3be4d1e23c2af004e98ed04a8c42b039ac6f446c7fe0c1a7d2406bc187efe908"
+  },
+  "sysroot_sha256": {
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc_nonshared.a": "8fc3f78f6a5cac0cbe80a4fd96a00dcf5269425941fa33a0f2b7d25b96941662",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+    "/lib64/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+    "/lib/x86_64-linux-gnu/libc.so.6": "85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7"
+  }
+}

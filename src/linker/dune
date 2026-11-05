@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(env
+ (fuzz
+  (ocamlopt_flags
+   (:standard -afl-instrument))))
+
+(library
+ (name fas_linker)
+ (libraries unix))

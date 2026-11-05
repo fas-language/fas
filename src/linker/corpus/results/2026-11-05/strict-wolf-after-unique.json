@@ -1,0 +1,88 @@
+{
+  "started": "2026-11-05T13:04:30+0100",
+  "linker_sha256": "424f8c9776b2366ca066204ce4b0b1fcd6267cab9c843901c8c505a5617dd75b",
+  "tests": [
+    {
+      "name": "wolf3d",
+      "status": "passed",
+      "detail": {
+        "objects": 18,
+        "instrumented_runtime": "frames=3 framebuffer=38d3d4bed65dfa55",
+        "oracle": "GNU ld",
+        "scope": "first three E1M1 frames, deterministic harness"
+      }
+    }
+  ],
+  "sources": {
+    "wolf3d": {
+      "path": "/home/glonex/wolf3d/minimal_reference/wolf4sdl",
+      "sha256": {
+        "README.txt": "1e704df12b3826eb7e251ffa05939c37a373afd71ec4ffb5814a41c693f88b66",
+        "audiowl6.h": "039237a5dbc7a2abab0bbf398c550ca8fa3e90b899712e4078b97b513eb7cf1f",
+        "gfxv_wl6.h": "546c32d66abf88315dae8c1f77c6b9c746faeead39f7976ab1ae4f858f57eb8c",
+        "id_ca.c": "28d7edd8a5ae0253285b09fc1c4faed527577077eb5dbb09ea83872c1b57176f",
+        "id_ca.h": "5b89578cbf5c334be81072c9703e905677e59c71230492d5bb167d2712678537",
+        "id_in.c": "1aafcccbb025d60fe4cc3c5941c28f50f77b0191ae939f320ad13496dfbdadbd",
+        "id_in.h": "34dca049bd405f33a5b2c0748e5915da6e1fbf4abb2844155c0fb1663d957ad5",
+        "id_pm.c": "e12ebeecc31984ba18b1a363d33d0ad5d5509c6f9078c56a40672c372777b768",
+        "id_pm.h": "2e82a379264d4cb2367c099e54180608e34aa5f59e6e9637cd1f9e4ac61218b2",
+        "id_sd.c": "1a125a0ef11e915873e8dc479050a446e2cf492ddf17decdcce9b60863a045eb",
+        "id_sd.h": "af5b29b440d515c915bf1983ebccd34ddf30ddcc384bafbd6662df5158fc5264",
+        "id_us.h": "a26a62562d1c0ba0e1ac8f06d0466bf50d02c59686e82ffd2173514f884305d2",
+        "id_us_1.c": "5c292b2dfa55aa95e5986d12b2e4ff3931d2d9b2b3e2c7ff8d648c14337680fa",
+        "id_vl.c": "daf8b2279908c11c1c0f2f15e0a84f791ed70f043778fac42d92ed5828311069",
+        "id_vl.h": "29fee39eb319bcdcfc3a7c6833588f3e2bfa89aec4aa34050b48506997c2d99d",
+        "license-gpl.txt": "31af02b73a7d7fa7c533ec0d32997b09bd5dfc5e87898978b5846d7d5b4eb35b",
+        "license-id.txt": "25166cc269ac0a1220723f2d2250f87960cafb068bccb0ce00a7a53d4f4abc88",
+        "license-mame.txt": "4c3d4d57b2cd575f97e657b482d386c4ebb97b92328fdc6963078a76c0f639d5",
+        "mame/fmopl.c": "5154834c5f28ba1ab5e3016dba44f3072f7a909876ba86d05f09bf27b1a6cad9",
+        "mame/fmopl.h": "aa061ec7588abf9ccabadf70878f6409b7bb5c4063d73018b683a65728e004b1",
+        "wl_act1.c": "21b2f03c66d6cc988ed4bd29aef66eb2888073e50511bbbbb7436bf385fea863",
+        "wl_act2.c": "bc0491a2cc83dff45c2b64a0477e44a2f066cce908d481f67f601910d4b78032",
+        "wl_agent.c": "2e72347b18dd90cb8af3a59e555dfd9d4572f31039943e15dbf2ed17f7f858bf",
+        "wl_def.h": "b56c9f98c9090b9e39125a42da85cf507a2aee773696fa312ea486bb9125a505",
+        "wl_draw.c": "b3d5dd3e473cdcdebe66905f4372c3818c19e995742608634bde861c86dc25a5",
+        "wl_game.c": "f441e963d052a91602913b7719696d382a0a0207033de62303fa42af717c3eb0",
+        "wl_inter.c": "0e1c2479f9dd87e9ba88199a34128866fe9e4fff79b0a528cd2f03e7462d47bf",
+        "wl_main.c": "bec4a14189c0fb11995506264e7a3ca5de5a4d7ec713b5cd7848015bd0d97992",
+        "wl_menu.c": "7357fc4b29b7dc2525d148401f26deaf884187615c1da5b807c90afb06e7b1df",
+        "wl_menu.h": "d316cd37baae6dbb183467db87da8015d2d59bf7bd49aeb4e396d41c429c5b2c",
+        "wl_play.c": "79979e7de5af0bfb5ec61fc790fc08fc900aeb77182fdf3094f448dc13a88075",
+        "wl_state.c": "2d6d8ef2fab93b2bc208501f5e58908e30c261d286675cb38391ce2c31e0bf4b",
+        "wolfpal.inc": "2256410bbb61a7566fe831bcd1373a3ea6595aebfcfca49281e5e17e28c26197"
+      }
+    },
+    "wolf-assets": {
+      "path": "/tmp/fas-corpus-replay-20261105/wolf-assets/source",
+      "sha256": {
+        "audiohed.wl6": "a39ff1b21a8b33fc51317b7afd2b04557d7ac52b0754a8e09c73b5a176a91097",
+        "audiot.wl6": "022b4c80cc6bbd56fba58ff0e280e1c138615b84b05abedbaf579aba1b681634",
+        "gamemaps.wl6": "b268042cdcf1b725fe17997482572f81d4ad485d32a692d29bdf2560d95ae805",
+        "maphead.wl6": "a9637cf2760dbd7ac34a6b1f13cb31c0e76ecc0e282f0f0599210eb392d158c8",
+        "vgadict.wl6": "30dcfc71cbad29c126b20223dd81bf3a722c1288b7357353bc5b10077f870144",
+        "vgagraph.wl6": "0d018e36dc1993071bd8cb4b7e442cafa9e9bd6eb94eaeff5e1d0c7d7940f9cf",
+        "vgahead.wl6": "f76fbe9f3e16794c4fc19d06b4a1dae2645320d5a966b0aea72d4ca3b85059d0",
+        "vswap.wl6": "d4b886fc9b47f848f111d8b015969014ba460e980bed9895e219dff29169bcf9"
+      }
+    }
+  },
+  "limitations": [],
+  "timing_comparison": false,
+  "dependency_policy": {
+    "strict": true,
+    "search_paths": [
+      "/usr/lib/x86_64-linux-gnu"
+    ]
+  },
+  "toolchain_inputs": {
+    "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+    "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+    "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+  }
+}
