@@ -142,20 +142,29 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
     match Hashtbl.find_opt blocks succ with
     | None -> []
     | Some (s : block) ->
-        List.filter_map
-          (function
-            | Phi (_, _, incoming) ->
-                List.find_map
-                  (fun (v, p) -> if p = pred then key_of v else None)
-                  incoming
-            | _ -> None)
-          s.instrs
+        (* phis lead their block *)
+        let rec go acc = function
+          | Phi (_, _, incoming) :: rest ->
+              go
+                (match
+                   List.find_map
+                     (fun (v, p) -> if p = pred then key_of v else None)
+                     incoming
+                 with
+                | Some k -> k :: acc
+                | None -> acc)
+                rest
+          | _ -> List.rev acc
+        in
+        go [] s.instrs
   in
   let phi_defs (b : block) =
-    List.filter_map
-      (function
-        | Phi (id, ty, _) when in_class ty && not (skip id) -> Some id | _ -> None)
-      b.instrs
+    let rec go acc = function
+      | Phi (id, ty, _) :: rest ->
+          go (if in_class ty && not (skip id) then id :: acc else acc) rest
+      | _ -> List.rev acc
+    in
+    go [] b.instrs
   in
   (* Liveness over bitsets of dense value indices. A phi's definition is in
      its block's kill set and never in its gen set, so it never reaches
@@ -210,20 +219,6 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
     List.iter (fun i -> v.(i / 63) <- v.(i / 63) lor (1 lsl (i mod 63))) l;
     v
   in
-  let mem v k =
-    match Hashtbl.find_opt dense k with
-    | Some i -> v.(i / 63) land (1 lsl (i mod 63)) <> 0
-    | None -> false
-  in
-  let iter_set g v =
-    Array.iteri
-      (fun w x ->
-        if x <> 0 then
-          for j = 0 to 62 do
-            if x land (1 lsl j) <> 0 then g key_at.((w * 63) + j)
-          done)
-      v
-  in
   let gen = Hashtbl.create 16 and kill = Hashtbl.create 16 in
   let live_in = Hashtbl.create 16 and live_out = Hashtbl.create 16 in
   List.iter
@@ -271,7 +266,6 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
   (* Live ranges: per block, from the definition (or the block start when
      live in) to the last use (or the block end when live out). A value's
      ranges, merged, form an interval with holes. *)
-  let first = Hashtbl.create 64 and last = Hashtbl.create 64 in
   let ranges = Hashtbl.create 64 in
   (* Spill weights: each use counts 10^depth, where a block's loop depth is
      the number of back edges (to an earlier block in layout order) whose
@@ -302,16 +296,28 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       (w +. Option.value ~default:0. (Hashtbl.find_opt weights k))
   in
   let entry_id = match f.blocks with b :: _ -> b.id | [] -> -1 in
-  List.iter
-    (fun (b : block) ->
-      Hashtbl.reset first;
-      Hashtbl.reset last;
+  (* per dense key: first and last touch in the current block, stamped with
+     the block's index *)
+  let nk = Array.length key_at in
+  let first = Array.make nk 0
+  and last = Array.make nk 0
+  and stamp = Array.make nk (-1) in
+  let ranges_a = Array.make nk [] in
+  let bit v i = v.(i / 63) land (1 lsl (i mod 63)) <> 0 in
+  List.iteri
+    (fun bi (b : block) ->
       let s = Hashtbl.find start_pos b.id and e = Hashtbl.find end_pos b.id in
       let w = block_weight b in
+      let touched = ref [] in
       let touch k p =
         weigh w k;
-        if not (Hashtbl.mem first k) then Hashtbl.replace first k p;
-        Hashtbl.replace last k p
+        let i = Hashtbl.find dense k in
+        if stamp.(i) <> bi then begin
+          stamp.(i) <- bi;
+          first.(i) <- p;
+          touched := i :: !touched
+        end;
+        last.(i) <- p
       in
       List.iter (fun k -> touch k s) (phi_defs b);
       List.iteri
@@ -332,23 +338,31 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
         (fun succ -> List.iter (fun k -> touch k e) (phi_uses b.id succ))
         (terminator_successors b.terminator);
       let inn = Hashtbl.find live_in b.id and out = Hashtbl.find live_out b.id in
-      let keys = Hashtbl.create 16 in
-      Hashtbl.iter (fun k _ -> Hashtbl.replace keys k ()) first;
-      iter_set (fun k -> Hashtbl.replace keys k ()) inn;
-      iter_set (fun k -> Hashtbl.replace keys k ()) out;
-      Hashtbl.iter
-        (fun k () ->
-          let lo =
-            if mem inn k then if b.id = entry_id then 0 else s
-            else Option.value ~default:s (Hashtbl.find_opt first k)
-          in
-          let hi =
-            if mem out k then e else Option.value ~default:lo (Hashtbl.find_opt last k)
-          in
-          Hashtbl.replace ranges k
-            ((lo, hi) :: Option.value ~default:[] (Hashtbl.find_opt ranges k)))
-        keys)
+      let entry_lo = if b.id = entry_id then 0 else s in
+      List.iter
+        (fun i ->
+          let lo = if bit inn i then entry_lo else first.(i) in
+          let hi = if bit out i then e else last.(i) in
+          ranges_a.(i) <- (lo, hi) :: ranges_a.(i))
+        !touched;
+      for wd = 0 to words - 1 do
+        let x = inn.(wd) lor out.(wd) in
+        if x <> 0 then
+          for j = 0 to 62 do
+            if x land (1 lsl j) <> 0 then begin
+              let i = (wd * 63) + j in
+              if stamp.(i) <> bi then begin
+                let lo = if bit inn i then entry_lo else s in
+                let hi = if bit out i then e else lo in
+                ranges_a.(i) <- (lo, hi) :: ranges_a.(i)
+              end
+            end
+          done
+      done)
     f.blocks;
+  Array.iteri
+    (fun i rs -> if rs <> [] then Hashtbl.replace ranges key_at.(i) rs)
+    ranges_a;
   List.iter
     (fun (p : param) ->
       if in_class p.ty && not (Hashtbl.mem ranges (pkey p.name)) then
@@ -360,7 +374,8 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       | r :: rest -> r :: go rest
       | [] -> []
     in
-    go (List.sort compare rs)
+    (* blocks add their ranges in increasing position order, newest first *)
+    go (List.rev rs)
   in
   let intervals =
     Hashtbl.fold
@@ -368,11 +383,23 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
         let rs = merge rs in
         (fst (List.hd rs), k, rs) :: acc)
       ranges []
-    |> List.sort compare
+    |> List.sort (fun (a, k, _) (b, k', _) ->
+        if a <> b then Int.compare a b else Int.compare k k')
   in
   let crosses_at points rs =
-    (* a call at position c clobbers values live across it or used by it *)
-    List.exists (fun (l, h) -> Array.exists (fun c -> l < c && c <= h) points) rs
+    (* a call at position c clobbers values live across it or used by it;
+       [points] is sorted: find the first one after l *)
+    let n = Array.length points in
+    n > 0
+    && List.exists
+         (fun (l, h) ->
+           let lo = ref 0 and hi = ref n in
+           while !lo < !hi do
+             let mid = (!lo + !hi) / 2 in
+             if points.(mid) <= l then lo := mid + 1 else hi := mid
+           done;
+           !lo < n && points.(!lo) <= h)
+         rs
   in
   let crosses_call = crosses_at calls in
   (* Phi webs: a phi and its incoming values like to share a register. *)
@@ -409,8 +436,22 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
          (lo = hi && single_point_ok lo
          && ((b1 = lo && a2 = lo) || (b2 = lo && a1 = lo)))
   in
-  let conflict r1 r2 = List.exists (fun x -> List.exists (ranges_conflict x) r2) r1 in
-  let last_end rs = List.fold_left (fun acc (_, b) -> max acc b) 0 rs in
+  let conflict_any r1 r2 =
+    List.exists (fun x -> List.exists (ranges_conflict x) r2) r1
+  in
+  (* range lists are sorted and disjoint: walk both at once *)
+  let rec conflict r1 r2 =
+    match (r1, r2) with
+    | [], _ | _, [] -> false
+    | ((_, b1) as x) :: t1, ((_, b2) as y) :: t2 ->
+        ranges_conflict x y || if b1 < b2 then conflict t1 r2 else conflict r1 t2
+  in
+  let ends = Hashtbl.create 256 in
+  List.iter
+    (fun (_, k, rs) ->
+      Hashtbl.replace ends k (List.fold_left (fun acc (_, b) -> max acc b) 0 rs))
+    intervals;
+  let end_of k = Hashtbl.find ends k in
   (* spill cost per position: a short interval with a use in a loop is
      costly to spill, a long one used once is cheap *)
   let span rs = List.fold_left (fun acc (a, b) -> acc + b - a + 1) 0 rs in
@@ -443,7 +484,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
       List.iter
         (fun r ->
           Ptbl.replace held r
-            (List.filter (fun (_, _, rs') -> last_end rs' >= start) (Ptbl.find held r)))
+            (List.filter (fun (_, k', _) -> end_of k' >= start) (Ptbl.find held r)))
         all;
       let crossing = crosses_call rs in
       let usable = usable_for rs in
@@ -484,11 +525,11 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
                           (Ptbl.find held r)
                       with
                       | [ ((_, vk, vrs) as victim) ] ->
-                          Some ((weight vk vrs, -last_end vrs), r, vk, victim)
+                          Some ((weight vk vrs, -end_of vk), r, vk, victim)
                       | _ -> None)
                   order
               in
-              let mine = (weight k rs, -last_end rs) in
+              let mine = (weight k rs, -end_of k) in
               match
                 List.sort (fun (a, _, _, _) (b, _, _, _) -> compare a b) candidates
               with
@@ -569,7 +610,7 @@ let allocate_class ~in_class ~callee ~caller ~strings ~reg_name ?(skip = fun _ -
                           let a = find id and b = find k in
                           if a <> b then begin
                             let ra = ranges_of a and rb = ranges_of b in
-                            if not (conflict ra rb) then begin
+                            if not (conflict_any ra rb) then begin
                               Hashtbl.replace out b a;
                               Hashtbl.replace group a (ra @ rb)
                             end

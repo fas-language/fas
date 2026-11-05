@@ -542,6 +542,7 @@ type frame = {
   mutable size : int;
   homes : A.reg Hashtbl.t;  (** values that live in a register *)
   xhomes : int Hashtbl.t;  (** 128-bit vectors that live in an xmm register *)
+  xshared : int Hashtbl.t;  (** spilled vector -> phi-web slot representative *)
   xtmp : int;  (** rbp offset of a 16-byte scratch slot for vector lanes *)
   saved : (A.reg * int) list;  (** callee-saved registers used, and their save slots *)
 }
@@ -550,10 +551,10 @@ let reserve fr bytes align =
   fr.size <- (fr.size + bytes + align - 1) / align * align;
   -fr.size
 
-let build_frame ctx (f : func) =
+let build_frame ?xmm ctx (f : func) =
   let addrs = analyse_addrs ctx f in
   let shared = Hashtbl.create 16 in
-  let xshared = Hashtbl.create 16 in
+  let xshared = match xmm with Some (_, x) -> x | None -> Hashtbl.create 16 in
   let fr =
     {
       addrs;
@@ -566,9 +567,13 @@ let build_frame ctx (f : func) =
           ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
           ~operands:(operands_view addrs) ~slot_of:shared f;
       xhomes =
-        Regalloc.allocate_xmm
-          ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
-          ~operands:(operands_view addrs) ~slot_of:xshared f;
+        (match xmm with
+        | Some (homes, _) -> homes
+        | None ->
+            Regalloc.allocate_xmm
+              ~skip:(fun id -> Hashtbl.mem addrs.skip id || Hashtbl.mem addrs.dead id)
+              ~operands:(operands_view addrs) ~slot_of:xshared f);
+      xshared;
       xtmp = 0;
       saved = [];
     }
@@ -1884,6 +1889,24 @@ let fused_select ctx fr sid c x y tv fv =
 let gen_function ctx (f : func) =
   let a = ctx.a in
   let fr = build_frame ctx f in
+  (* values left in memory that an inner loop uses get a copy before the
+     loop, and allocation runs again *)
+  let f, fr =
+    if not Licm.split_on then (f, fr)
+    else
+      let want = function
+        | Local (id, _) ->
+            not
+              (Hashtbl.mem fr.addrs.skip id || Hashtbl.mem fr.addrs.dead id
+             || Hashtbl.mem fr.homes id)
+        | Param (name, _) -> not (Hashtbl.mem fr.homes (Regalloc.pkey name))
+        | _ -> false
+      in
+      match Licm.split ~want f with
+      | None -> (f, fr)
+      (* the copies are scalar and call nothing: vector homes still hold *)
+      | Some f -> (f, build_frame ~xmm:(fr.xhomes, fr.xshared) ctx f)
+  in
   let blocks = Hashtbl.create 16 in
   List.iter (fun (b : block) -> Hashtbl.replace blocks b.id b) f.blocks;
   let labels = Hashtbl.create 16 in
