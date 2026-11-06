@@ -1,0 +1,79 @@
+"""Retain a new, immutable partial hosted observation and actual report bytes."""
+import datetime
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import zipfile
+
+ROOT = Path(__file__).resolve().parent
+REPO = Path('/home/glonex/fas-experimental-backend/fas-linker-qualification')
+DEST = REPO/'src/linker/corpus/results/2026-11-06-hosted-canonical'
+HEAD = '4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62'
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def main():
+    subprocess.run(['python3', str(ROOT/'assess.py')], check=True)
+    subprocess.run(['python3', str(ROOT/'check-source.py')], check=True)
+    assert not DEST.exists()
+    DEST.mkdir()
+    validation = []
+    for path in sorted(ROOT.glob('*-reports.json')):
+        recorded = json.loads(path.read_bytes())
+        artifact = ROOT/(recorded['name']+'.zip')
+        with artifact.open('rb') as source:
+            actual = hashlib.file_digest(source, 'sha256').hexdigest()
+        assert actual == recorded['sha256']
+        metadata_files = sorted(ROOT.glob('artifacts-*.json'))
+        metadata = [a for p in metadata_files for a in json.loads(p.read_bytes())['artifacts']
+                    if a['id'] == recorded['artifact_id']]
+        assert metadata and all(a['digest'] == 'sha256:'+actual for a in metadata)
+        with zipfile.ZipFile(artifact) as archive:
+            assert archive.testzip() is None
+            names = archive.namelist()
+            assert len(names) == len(set(names))
+            for name, report in recorded['reports'].items():
+                assert json.loads(archive.read(name)) == report
+            linker_hashes = sorted({sha(archive.read(name)) for name in names
+                                    if name.endswith('/tools/fas-ld')})
+        shutil.copy2(path, DEST/path.name)
+        validation.append({k:v for k,v in recorded.items() if k != 'reports'} |
+                          {'retained_linker_sha256': linker_hashes,
+                           'reports_match_zip_members': True,
+                           'github_digest_rechecked': True,
+                           'unique_zip_names': True})
+    for name in ('latest.json', 'assessment.json', 'source-identity.json',
+                 'musl-followup.json', 'musl-canonical.log', 'musl-canonical.py'):
+        shutil.copy2(ROOT/name, DEST/name)
+    for old, new in (('delivered-archive-check/report.json', 'delivered-archives.json'),
+                     ('final-games/report.json', 'games-initial.json'),
+                     ('final-wolf3d/report.json', 'wolf3d-corrected.json'),
+                     ('musl-gcc-replay/report.json', 'musl-gcc-replay.json')):
+        shutil.copy2(ROOT/old, DEST/new)
+    archive = ROOT/'linker-correctness-42272940442-1.zip'
+    with zipfile.ZipFile(archive) as zipped:
+        for old, new in (('_temp/release-source-manifest.json', 'source-manifest.json'),
+                         ('_temp/qualification-summary.json', 'qualification-summary.json'),
+                         ('_temp/release-smoke.json', 'release-smoke.json')):
+            (DEST/new).write_bytes(zipped.read(old))
+    for name in ('check-source.py', 'assess.py', 'retain-checkpoint.py'):
+        shutil.copy2(ROOT/name, DEST/(name+'.txt'))
+    (DEST/'artifact-validation.json').write_text(json.dumps(validation, indent=2)+'\n')
+    observation = {'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                   'head': HEAD, 'status': 'partial',
+                   'completed_artifacts': len(validation),
+                   'pending': ['curl/libpng hosted completion', 'full 14x600-second fuzz selection'],
+                   'preserved_local_setup_error': 'initial Wolf3D asset path did not exist; corrected replay passes',
+                   'cache': str(ROOT),
+                   'scope': 'separate successful hosted correctness/GCC selections and completed popular-C jobs; not production release'}
+    (DEST/'observation.json').write_text(json.dumps(observation, indent=2)+'\n')
+    print(json.dumps(observation, indent=2))
+
+
+if __name__ == '__main__':
+    main()

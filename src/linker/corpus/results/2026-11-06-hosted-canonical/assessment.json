@@ -1,0 +1,238 @@
+{
+  "observed_at": "2026-11-06T19:12:11.059052+00:00",
+  "head": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "status": "pending",
+  "pending": [
+    "popular",
+    "fuzz"
+  ],
+  "failures": [],
+  "results": {
+    "correctness": {
+      "run": 42272940442,
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": {
+        "correctness": "success"
+      },
+      "qualification": {
+        "status": "passed",
+        "failures": [],
+        "python_cases": 272,
+        "python_groups": 45,
+        "skips": [],
+        "regression_log_sha256": "a14f6f871d4664c26a435b6c4859fab41d828eab82faab5c823975beff338051",
+        "reports": {
+          "linker-scale": {
+            "path": "/home/runner/work/_temp/linker-scale/report.json",
+            "sha256": "93dae661c169ba4e0b74090e38139ab6e844ab65f1681c6771ad0e9d757fc12c",
+            "passed": true
+          },
+          "linker-zlib-dynamic": {
+            "path": "/home/runner/work/_temp/linker-zlib-dynamic/report.json",
+            "sha256": "0bdee1a195b3bf9f9172dc1972d54af9c17082b7bbf86a513916bf33821cfcc6",
+            "passed": true
+          },
+          "linker-zlib-static": {
+            "path": "/home/runner/work/_temp/linker-zlib-static/report.json",
+            "sha256": "8b682c8c813c3aa1b8c0f2223f03d9f78c3adf63a5a34396508e80121c4586a6",
+            "passed": true
+          },
+          "linker-zlib-static-pie": {
+            "path": "/home/runner/work/_temp/linker-zlib-static-pie/report.json",
+            "sha256": "c158a1afdabf3e7369c60c0d8654be2cdd199d9563c4850b98c22acde276840c",
+            "passed": true
+          },
+          "linker-musl-zlib": {
+            "path": "/home/runner/work/_temp/linker-musl-zlib/report.json",
+            "sha256": "9ffe5e2320c244f68ee39d4fcd94d16a0e3fe7b5341b547b1d21e697c5e75138",
+            "passed": true
+          },
+          "linker-chibicc-selfhost": {
+            "path": "/home/runner/work/_temp/linker-chibicc-selfhost/report.json",
+            "sha256": "58d14d00115c36afdc458032de1deb21f7a32bc1a8f318805e1cd1a068156e69",
+            "passed": true
+          },
+          "linker-sqlite": {
+            "path": "/home/runner/work/_temp/linker-sqlite/report.json",
+            "sha256": "7c4a413b4d8871e526c8ba9cc2769ad53da3ce88326f8eb412c7e5d7acb467c4",
+            "passed": true
+          },
+          "linker-semantic": {
+            "path": "/home/runner/work/_temp/linker-semantic/report.json",
+            "sha256": "715b705a37bd67cbf21288bc773f352cb2d5c4f1e299abe7d21db1b0126dec5a",
+            "passed": true
+          }
+        },
+        "tool_versions": {
+          "ocamlopt": "5.4.1",
+          "dune": "3.24.2",
+          "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+          "ld": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+          "gdb": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1",
+          "valgrind": "valgrind-3.22.0",
+          "ldd": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39"
+        },
+        "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+        "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+        "packages_sha256": "83721f2ea050cbef727594f58b773082b76958914508a7fc547417af3a649265",
+        "linker_sha256": "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665",
+        "installed_linker_sha256": "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665",
+        "source_manifest_sha256": "2614c37822006e1eed22873ba15032cf37642a9d92848f3cad6bf6625242c3ff",
+        "source_file_count": 1108,
+        "source_files_unchanged": true,
+        "scope": "shared correctness recipe; no hosted-run or performance claim"
+      },
+      "release_smoke": {
+        "status": "passed",
+        "source_rebuild": true,
+        "binary_fixture_run": true,
+        "rebuilt_fixture_run": true,
+        "rebuilt_linker_sha256": "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665",
+        "rebuilt_version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)",
+        "archives": {
+          "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": "1319761c6046b33d14a3c2caa847ee6acf3fbe59930e425ed8ba5f251909d253",
+          "fas-ld-0.7-dev-linux-x86_64.tar.gz": "5f3bffb9bf1c10c0326ea6b34efada123bb35bda61a044d59f2b801789196147"
+        }
+      }
+    },
+    "gcc": {
+      "run": 42272937898,
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": {
+        "gcc-torture": "success"
+      },
+      "qualification": {
+        "source_commit": "5115c7e447fc07457443df874bf57840e8316d5f",
+        "optimizations": [
+          "-O0",
+          "-O2",
+          "-Os"
+        ],
+        "pattern": "*",
+        "gcc_version": "15.2.0",
+        "driver_flags": [
+          "-fno-use-linker-plugin",
+          "-U_FORTIFY_SOURCE"
+        ],
+        "gnu_capability_probe_flags": [
+          "--no-warnings"
+        ],
+        "expected_executions": 4974,
+        "no_trampolines": true,
+        "scope": "official execute.exp and dg directives; native Linux x86-64; LTO excluded",
+        "same_objects": "GNU replaces compiler temporaries with retained Fas-link inputs",
+        "passes": [
+          {
+            "linker": "fas",
+            "exit": 0,
+            "counts": {
+              "PASS": 9948,
+              "UNSUPPORTED": 57
+            },
+            "execution_passes": 4974,
+            "failures": [],
+            "execution_labels_sha256": "0617d90f4bdc47d98e848621cd6628117c1c26542c84c7991e9b98fc6294d5b8",
+            "sum_sha256": "136589c9dbc350ad844a3277538a899d44d218c6304a49a2fa55a858f5200692",
+            "log_sha256": "b9c83229e7d9f19c435ae2bf7ae6a48eb497d9e413edc3b53c7f08a2b5174b14"
+          },
+          {
+            "linker": "gnu",
+            "exit": 0,
+            "counts": {
+              "PASS": 9948,
+              "UNSUPPORTED": 57
+            },
+            "execution_passes": 4974,
+            "failures": [],
+            "execution_labels_sha256": "0617d90f4bdc47d98e848621cd6628117c1c26542c84c7991e9b98fc6294d5b8",
+            "sum_sha256": "3d4802c888062948e8fb042abf4765ff07f7213cdd2f56d381e74b4f421224b2",
+            "log_sha256": "b372764b8301b1b08d832965abc950b5416343e3ad61280419c76df4b5697fde"
+          }
+        ],
+        "runtest_sha256": "c285da648b5514e9e06a506f6b6b229657a8001c8c8506d0e35a2bf0f754ab08",
+        "primary_links": {
+          "fas": 4974,
+          "gnu": 4974
+        },
+        "same_object_keys": 4974,
+        "linker_invocations_sha256": "1b6791888d5167d5e7ce318093fd426886f5891bb6bbc16cdf02043cc62d75e1",
+        "compiler_invocations_sha256": "c7fba47360cce878174f51bcc15255991f9cdad2366263eec2d1b618c3108af9"
+      }
+    },
+    "popular": {
+      "run": 42272944421,
+      "status": "in_progress",
+      "conclusion": null,
+      "jobs": {
+        "popular-c (libarchive, libarchive-3.8.11)": "success",
+        "popular-c (lua, lua-5.1.5)": "success",
+        "popular-c (redis, redis-7.2.8)": "success",
+        "popular-c (curl, curl-8.14.1)": null,
+        "popular-c (bzip2, bzip2-1.0.8)": "success",
+        "popular-c (libpng, libpng-1.6.47)": null
+      }
+    },
+    "fuzz": {
+      "run": 42272946903,
+      "status": "in_progress",
+      "conclusion": null,
+      "jobs": {
+        "fuzz": null
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "artifact_id": 13532397908,
+      "name": "linker-correctness-42272940442-1",
+      "size": 93610408,
+      "sha256": "182bc0ffb98a58f1bb4658ed846ab6985bee8602ff550f09233c62708279ead3",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    {
+      "artifact_id": 13532062943,
+      "name": "linker-gcc-torture-42272937898-1",
+      "size": 14959497,
+      "sha256": "5b71c09b90988d046e9e72959b968585c7667a7c1b8accb17af60bde90203d24",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    {
+      "artifact_id": 13532570568,
+      "name": "linker-popular-bzip2-42272944421-1",
+      "size": 4125710,
+      "sha256": "071b8b8d6fba1f7169d30a5dc4adf371b5405a4efa709b00eca0e54cb8cfe165",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    {
+      "artifact_id": 13532436324,
+      "name": "linker-popular-libarchive-42272944421-1",
+      "size": 105489356,
+      "sha256": "8764420d522d49e8a0a745f41b7e5f6e8186fed867ad1ac8c114998c816b8016",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    {
+      "artifact_id": 13533250300,
+      "name": "linker-popular-lua-42272944421-1",
+      "size": 19181757,
+      "sha256": "f4f59d2b5c19e11771949f0bb481e6f5dcc69351882bdac3215b8124765f9c13",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    {
+      "artifact_id": 13533180571,
+      "name": "linker-popular-redis-42272944421-1",
+      "size": 31702036,
+      "sha256": "488bcb8a9f5e83204b5ecf23cae9d02f41fddcba3f7c917e51647299a0818ca4",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    }
+  ],
+  "scope": "selected hosted correctness/GCC/popular-C/fuzz acceptance; release freeze/publication separate"
+}

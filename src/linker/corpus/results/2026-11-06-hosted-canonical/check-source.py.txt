@@ -1,0 +1,53 @@
+"""Compare the delivered hosted source archive with its exact Git commit."""
+import hashlib
+import io
+import json
+from pathlib import Path
+import subprocess
+import tarfile
+
+ROOT = Path(__file__).resolve().parent
+REPO = Path('/home/glonex/fas-experimental-backend/fas-linker-qualification')
+HEAD = '4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62'
+ARCHIVE = ROOT/'delivered-archive-check/fas-ld-0.7-dev-linux-x86_64-source.tar.gz'
+
+
+def main():
+    tree = subprocess.check_output(['git', 'ls-tree', '-rz', HEAD], cwd=REPO)
+    expected = {}
+    for entry in tree.split(b'\0'):
+        if entry:
+            header, name = entry.split(b'\t', 1)
+            mode, kind, object_id = header.decode().split()
+            assert kind == 'blob', (name, kind)
+            expected[name.decode()] = (mode, object_id)
+    actual = {}
+    with tarfile.open(ARCHIVE, 'r:gz') as archive:
+        prefix = archive.getmembers()[0].name.split('/')[0]+'/'
+        manifest_raw = archive.extractfile(prefix+'.fas-release/source-manifest.json').read()
+        manifest = json.loads(manifest_raw)
+        for member in archive:
+            assert member.isfile() and member.name.startswith(prefix)
+            name = member.name[len(prefix):]
+            if name.startswith('.fas-release/'):
+                continue
+            assert name not in actual
+            data = archive.extractfile(member).read()
+            mode = '100755' if member.mode & 0o111 else '100644'
+            object_id = hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+            actual[name] = (mode, object_id)
+            assert manifest['files'][name] == {
+                'sha256': hashlib.sha256(data).hexdigest(), 'mode': member.mode}
+    assert set(manifest['files']) == set(expected)
+    assert actual == expected, 'delivered source differs from published Git tree'
+    result = {'status': 'passed', 'commit': HEAD, 'files': len(actual),
+              'manifest_sha256': hashlib.sha256(manifest_raw).hexdigest(),
+              'source_archive_sha256': hashlib.sha256(ARCHIVE.read_bytes()).hexdigest(),
+              'all_git_blob_hashes_and_executable_modes_match': True,
+              'scope': 'delivered source identity; not full release acceptance'}
+    (ROOT/'source-identity.json').write_text(json.dumps(result, indent=2)+'\n')
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == '__main__':
+    main()

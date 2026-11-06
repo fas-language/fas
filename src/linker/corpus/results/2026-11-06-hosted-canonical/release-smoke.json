@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "source_rebuild": true,
+  "binary_fixture_run": true,
+  "rebuilt_fixture_run": true,
+  "rebuilt_linker_sha256": "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665",
+  "rebuilt_version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)",
+  "archives": {
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": "1319761c6046b33d14a3c2caa847ee6acf3fbe59930e425ed8ba5f251909d253",
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": "5f3bffb9bf1c10c0326ea6b34efada123bb35bda61a044d59f2b801789196147"
+  }
+}

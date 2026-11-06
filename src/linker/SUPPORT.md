@@ -54,7 +54,11 @@ sysroot. Workstation checks add Ubuntu 26.04.1 and newer GCC/Clang producers.
 The local containers share the workstation kernel. The
 [hosted correctness recipe](corpus/results/2026-11-06-hosted/README.md) also
 passes on Linux `7.0.0-1017-azure` with that Ubuntu/toolchain baseline. Hosted
-GCC/fuzz and broader configurations remain open. Exact versions and selections
+GCC 15.2.0 separately passes the declared 4,974-execution official C selection
+on each of Fas and GNU with identical objects in the
+[repaired-source observation](corpus/results/2026-11-06-hosted-canonical/README.md).
+The complete hosted popular-C/fuzz matrix and broader configurations remain open
+at that observation. Exact versions and selections
 live in individual reports, rather than being inferred from these product names.
 
 The distributed linker's runtime environment is separate from the libc used by

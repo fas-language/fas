@@ -94,6 +94,14 @@ address semantics and adds strict fuzz duration/selection acceptance. Focused
 replays are separate from the still-required complete hosted rerun; the original
 five failures are not relabeled as passing qualification.
 
+The [hosted canonical-address observation](corpus/results/2026-11-06-hosted-canonical/README.md)
+then passes all 4,974 official GCC executions per linker on identical retained
+inputs, hosted correctness with 272 cases and SQLite extraquick, plus source
+rebuilding and downloaded-archive checks. Four repaired-source popular-C jobs
+also pass. Curl/libpng and the full fourteen-target fuzz campaign remain running
+at that observation; final contract freeze and publication remain open. The
+delivered source archive matches all 1,108 files of the published commit exactly.
+
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,
 per the user's revised priority. Malformed-input tests and fuzzing grow

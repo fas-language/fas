@@ -1,0 +1,241 @@
+{
+  "scope": "six exact GCC native objects with isolated musl 1.2.5 startup/runtime; not complete GCC qualification",
+  "linker_sha256": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+  "libc_sha256": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4",
+  "runs": [
+    {
+      "tool": "fas",
+      "object_sha256": "2610d723a9f2ddba82f774bad38ba681c9578b48e6144f712bc4a922db366989",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "1da90541c3da04ee52a3ba54d55faa1590c243f428abba126353a309445edbd8",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "fas",
+      "object_sha256": "dc3bb944277e7fcb37f519fbd3968be7acebf55904666909e121f9a2f22f344f",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "f3788b713d933df4a0b7d45b8a7f4a304840425346fc3b6e50da9d2ce4c31be2",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "fas",
+      "object_sha256": "a63f04bd980049c7fdfc2a013f009aeeb98298fa1262401cec7f07b61a070fd5",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "994a1a023722f91923a6af5793ac5bdcdc83defc95390faec16c91d6c77a8b98",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "fas",
+      "object_sha256": "86f9870b586f6813004a054fb9379330ac44faea1ec12cff5af14065cc760f81",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "4c528efbb50fb6e7e498eee2aef538d55efa10e2a601114a31ed53d14ef0e8d1",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "fas",
+      "object_sha256": "d054048360d27c7cbbcbcb9825b84bd5d187783510d9b7979aefea69e1fcf6ff",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "3d6ae1ceba6580429b3b7311fecd3c39a209d2b868d7e7cae675828f8a2398c3",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "fas",
+      "object_sha256": "d8380cbd2ba61317d41370f69809b637cd72d501678556f7c2f94bac337ead28",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas/",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/fas-e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "025c4ee0ddf3f1661368bb05cd097bc70e668c76e52634a0b50713d4472f57cf",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "2610d723a9f2ddba82f774bad38ba681c9578b48e6144f712bc4a922db366989",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "d0ca949b2882bbd5f72c134d10e2560229be54fea76dfbd24a5f85accd3478a8",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "dc3bb944277e7fcb37f519fbd3968be7acebf55904666909e121f9a2f22f344f",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "0f548dff567a73cb5d72502826c32821bbc9b11e782f8df75d9b1ac12704a3c9",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "a63f04bd980049c7fdfc2a013f009aeeb98298fa1262401cec7f07b61a070fd5",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "43ba75364864e0751132bc6de1606bbe81d5a5d4ce7cf83a44eb5b376bc6ad76",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "86f9870b586f6813004a054fb9379330ac44faea1ec12cff5af14065cc760f81",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "5d6709954bd652119dbac47defecd0511bf39ba47903c50a46b37c6402e2d370",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "d054048360d27c7cbbcbcb9825b84bd5d187783510d9b7979aefea69e1fcf6ff",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "6022fd83972d22308e7aaf6cbce82ececdbe4b37e6ca19e6d8a7b80b591dc00d",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    },
+    {
+      "tool": "gnu",
+      "object_sha256": "d8380cbd2ba61317d41370f69809b637cd72d501678556f7c2f94bac337ead28",
+      "argv": [
+        "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+        "-lm",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/musl-gcc-replay/gnu-e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "de8fdfc79bdeb76ac6ce48644cbb23f4cbcfc9787a43bef7097a97194ac5f86a",
+      "stdout_hex": "",
+      "stderr_hex": ""
+    }
+  ]
+}

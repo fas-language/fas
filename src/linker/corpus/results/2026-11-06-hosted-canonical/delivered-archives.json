@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "scope": "downloaded hosted binary/source archives verified independently; delivered tool links/runs the ELF fixture without tools on PATH",
+  "archives": {
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": {
+      "status": "passed",
+      "kind": "source",
+      "files": 1111,
+      "sha256": "1319761c6046b33d14a3c2caa847ee6acf3fbe59930e425ed8ba5f251909d253"
+    },
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": {
+      "status": "passed",
+      "kind": "binary",
+      "files": 8,
+      "sha256": "5f3bffb9bf1c10c0326ea6b34efada123bb35bda61a044d59f2b801789196147"
+    }
+  },
+  "linker_sha256": "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665",
+  "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)",
+  "link_argv": [
+    "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/delivered-archive-check/fas-ld",
+    "-o",
+    "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/delivered-archive-check/program",
+    "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/delivered-archive-check/start.o",
+    "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/delivered-archive-check/support.o"
+  ],
+  "program_sha256": "27f83210306d3e7b44e8aaab7163c09a1a72044580193bac00c13e76e9f32d01",
+  "execution_exit": 0,
+  "stdout": "fas-ld: objects, pointers, data, BSS: ok\n",
+  "environment": {
+    "PATH": "/nonexistent"
+  }
+}

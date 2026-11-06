@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "commit": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "files": 1108,
+  "manifest_sha256": "2614c37822006e1eed22873ba15032cf37642a9d92848f3cad6bf6625242c3ff",
+  "source_archive_sha256": "1319761c6046b33d14a3c2caa847ee6acf3fbe59930e425ed8ba5f251909d253",
+  "all_git_blob_hashes_and_executable_modes_match": true,
+  "scope": "delivered source identity; not full release acceptance"
+}

@@ -1,5 +1,28 @@
 # Linker implementation work log
 
+### Current checkpoint: hosted canonical-address acceptance
+
+Source `4b3f876` passes complete hosted correctness (272 linker cases in 45 groups,
+no skips, all eight required reports, SQLite extraquick, installation and
+source/binary archive rebuilding). Official GCC 15.2.0 C torture now passes all
+4,974 executions under each linker with identical retained objects and matching
+execution selections. The original five failures remain separately recorded.
+
+Four repaired-source popular-C jobs pass, including real Lua/libarchive regular,
+thin and mixed partial-link matrices. All six available ZIPs are independently
+rehashed against GitHub digests and pass CRC/name/report checks. The delivered
+source archive matches all 1,108 published Git blobs and executable modes; its
+binary links/runs the fixture with no tools on PATH. Additional musl follow-ups
+pass 32 executions. Original Doom/Wolf3D sources pass bounded headless GNU
+framebuffer comparisons. The initial Wolf3D asset-path setup failure is retained
+beside the passing corrected replay.
+
+Evidence: corpus/results/2026-11-06-hosted-canonical/README.md. At that observation,
+curl/libpng and the full 14x600-second fuzz selection remain running. The version
+stays 0.7-dev; compatibility freeze and publication remain open. This checkpoint
+changes evidence/documentation only; performance and additional C++/LTO work
+remain outside the active scope.
+
 ### Current checkpoint: saved corpus harness replay
 
 Qualification exposed a replay-harness bug: under /tmp the copied script's

@@ -1,0 +1,13 @@
+{
+  "observed_at": "2026-11-06T19:12:15.517880+00:00",
+  "head": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "status": "partial",
+  "completed_artifacts": 6,
+  "pending": [
+    "curl/libpng hosted completion",
+    "full 14x600-second fuzz selection"
+  ],
+  "preserved_local_setup_error": "initial Wolf3D asset path did not exist; corrected replay passes",
+  "cache": "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106",
+  "scope": "separate successful hosted correctness/GCC selections and completed popular-C jobs; not production release"
+}

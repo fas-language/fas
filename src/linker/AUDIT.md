@@ -12,6 +12,18 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Hosted repair acceptance — 2026-11-06
+
+The [new hosted observation](corpus/results/2026-11-06-hosted-canonical/README.md)
+passes the complete official GCC selection on the repaired source: 4,974 Fas
+and 4,974 GNU executions, identical retained native inputs and matching test
+selections. Hosted correctness passes 272 linker cases without skips, all eight
+required reports, SQLite extraquick and archive rebuilding. Independent archive
+checks confirm exact published source identity and execution without build tools.
+Four popular-C jobs, 32 additional musl executions and bounded Doom/Wolf3D
+rendering pass. Curl/libpng and the full fuzz campaign remain pending at this
+partial observation. No production release or completed freeze is claimed.
+
 ## Canonical imported function addresses — 2026-11-06
 
 The [canonical-address checkpoint](corpus/results/2026-11-06-canonical/README.md)

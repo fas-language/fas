@@ -1,0 +1,6 @@
+test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.256s
+
+OK

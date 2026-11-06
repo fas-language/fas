@@ -1,0 +1,30 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "4adb6e3e6ff9cfde1949d56809622d9e283fe75ebb8b92269b934e228eb649d3",
+    "artifact-validation.json": "a504831ce7ec3642b7e264d9503a25e707a2cd81d2626667db2a3cb11a5108ee",
+    "assess.py.txt": "256fb677e3386ebfb98f2daf7b32a8d47a27e7ef106fa2f035792478ee67f07a",
+    "assessment.json": "25c6602025bedd16d5b059f504d1046f5bbcca2f33dcecc36e43fbd8242032c0",
+    "check-source.py.txt": "83d7abd7e58c6bc8a142f6d9bd789ad32a5792c4523a1e127f16fdbf87d622ff",
+    "delivered-archives.json": "bf126d04916bc4bd532e075135440223eeec9780bbdba12f5973eb63fd26c005",
+    "games-initial.json": "f199ec947195505a3b466870c265eae7e3d5c5f3d023b9585f5230b3b14081ad",
+    "latest.json": "7b174c1e9353bec2d1bbf77595a069938f443f50e31feea1188c34e213dbe54f",
+    "linker-correctness-42272940442-1-reports.json": "fa8b4431d0c9cda0dbf77d30bcf713ae92c99e94b58c56d0b8b8d1f7d74291f7",
+    "linker-gcc-torture-42272937898-1-reports.json": "1df7da3a55e841c083cc8b976e5eb0a80e96681921f35592c3dc7d4e70249a45",
+    "linker-popular-bzip2-42272944421-1-reports.json": "32966f2eca19a2fea00a526843d3b06477796f7a13a1ed4bb3d9e8bd97cd80a1",
+    "linker-popular-libarchive-42272944421-1-reports.json": "f8f1812e2c561a4c204f60ff772b1768ad610f8623f8799535e4cd04eea08cd7",
+    "linker-popular-lua-42272944421-1-reports.json": "bfed82eb74b8ca31d1dd36ada982c3046364c1772239f34672ccb7d8ebd4edf7",
+    "linker-popular-redis-42272944421-1-reports.json": "9d187d379396c71c1ea7afb3326d49d04e4e743579c6f94b09f155795f0fca9e",
+    "musl-canonical.log": "f1c898a3d59f0774443323d01933e7b329c0be71e31942f5cfdd28ff902dded6",
+    "musl-canonical.py": "31a3bfbb5e39c6c77665842c713df678de9768c9e02876be49c931f2c6beac78",
+    "musl-followup.json": "47326749bb55bf64d5afdf21a46f4dcc24c959fb3519a83f498395cfd841e88e",
+    "musl-gcc-replay.json": "8eb3009a2c1ce7ef92569109e1f705d20d926e7ea4c9c610cab48217fe354071",
+    "observation.json": "a910b0a2df42e9168506443c9884f6b330defc53a8e18bf096a8ace7b0d2a9fb",
+    "qualification-summary.json": "9d2140bf4c34e7d22276c13ba45444ff47b9fee00b4dda7c7aa48e096e41c2c2",
+    "release-smoke.json": "4d964353fdaa52dcc47069eaf6458a6e5f62dc674c35132054457d47d69408da",
+    "retain-checkpoint.py.txt": "94102097b4a2fef27d05e20af97ce974558035c1798f04211dcb927e2b475e1d",
+    "source-identity.json": "afdc87d6457b6c0545de7c94c6e59c3a109203092f1664af72a7e39599d2a42f",
+    "source-manifest.json": "2614c37822006e1eed22873ba15032cf37642a9d92848f3cad6bf6625242c3ff",
+    "wolf3d-corrected.json": "98d03cbf0240bf4277f6783ceecee6dd3c561c4efe36cbd041086e2fb3d05ad3"
+  }
+}

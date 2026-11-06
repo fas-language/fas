@@ -1,0 +1,113 @@
+"""Read retained hosted evidence; never dispatch, cancel or relabel runs."""
+import datetime, hashlib, importlib.util, json
+from pathlib import Path
+import sys, zipfile
+
+ROOT = Path(__file__).resolve().parent
+REPO = Path('/home/glonex/fas-experimental-backend/fas-linker-qualification')
+HEAD = '4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62'
+RUNS = {'correctness': 42272940442, 'gcc': 42272937898,
+        'popular': 42272944421, 'fuzz': 42272946903}
+EXPECTED = {'correctness': {'correctness'}, 'gcc': {'gcc-torture'},
+            'popular': {'popular-c (' + name + ', ' + version + ')' for name, version in
+                        [('lua','lua-5.1.5'), ('bzip2','bzip2-1.0.8'),
+                         ('libpng','libpng-1.6.47'), ('libarchive','libarchive-3.8.11'),
+                         ('curl','curl-8.14.1'), ('redis','redis-7.2.8')]},
+            'fuzz': {'fuzz'}}
+
+
+def load(path):
+    return json.loads(path.read_bytes())
+
+
+def assess():
+    pending, failures, results = [], [], {}
+    for suite, run_id in RUNS.items():
+        run = load(ROOT / f'run-{run_id}.json')
+        jobs = load(ROOT / f'jobs-{run_id}.json')['jobs']
+        active = [j for j in jobs if j['conclusion'] != 'skipped']
+        if run['head_sha'] != HEAD:
+            failures.append(suite + ': source mismatch')
+        if {j['name'] for j in active} != EXPECTED[suite]:
+            failures.append(suite + ': job selection mismatch')
+        if run['status'] != 'completed':
+            pending.append(suite)
+        elif run['conclusion'] != 'success':
+            failures.append(suite + ': hosted run failed')
+        for j in active:
+            if j['status'] == 'completed' and j['conclusion'] != 'success':
+                failures.append(suite + ': failed job ' + j['name'])
+        results[suite] = {'run': run_id, 'status': run['status'],
+                          'conclusion': run['conclusion'],
+                          'jobs': {j['name']: j['conclusion'] for j in active}}
+    artifacts = []
+    for path in sorted(ROOT.glob('*-reports.json')):
+        data = load(path)
+        if not data['github_digest_verified'] or not data['zip_crc_verified']:
+            failures.append('artifact integrity failure: ' + path.name)
+        artifacts.append({k: v for k, v in data.items() if k != 'reports'})
+        for name, report in data['reports'].items():
+            if name.endswith('/qualification-summary.json'):
+                if not (report['status'] == 'passed' and report['python_cases'] == 272
+                        and report['python_groups'] == 45 and not report['skips']
+                        and report['source_files_unchanged']
+                        and len(report['reports']) == 8
+                        and all(r['passed'] for r in report['reports'].values())):
+                    failures.append('correctness report selection failed')
+                results['correctness']['qualification'] = report
+            elif name.endswith('/release-smoke.json'):
+                if not (report['status'] == 'passed' and report['source_rebuild']
+                        and report['binary_fixture_run'] and report['rebuilt_fixture_run']):
+                    failures.append('release archive rebuild/smoke failed')
+                results['correctness']['release_smoke'] = report
+            elif 'gcc_torture' in report:
+                gcc = report['gcc_torture']
+                passes = gcc['passes']
+                if not (gcc['expected_executions'] == 4974 and gcc['same_object_keys'] == 4974
+                        and gcc['primary_links'] == {'fas': 4974, 'gnu': 4974}
+                        and {r['linker'] for r in passes} == {'fas', 'gnu'}
+                        and all(r['exit'] == 0 and r['execution_passes'] == 4974
+                                and not r['failures'] for r in passes)
+                        and len({r['execution_labels_sha256'] for r in passes}) == 1):
+                    failures.append('GCC exact-input/selection qualification failed')
+                results['gcc']['qualification'] = gcc
+            elif 'tests' in report:
+                if not report['tests'] or any(t['status'] != 'passed' for t in report['tests']):
+                    failures.append('corpus report failed: ' + name)
+    # The standalone JSON is byte-checked against the acceptance report in the
+    # retained ZIP. Do not extract or execute arbitrary artifact contents.
+    fuzz_zip = ROOT / f"linker-fuzz-{RUNS['fuzz']}-1.zip"
+    if fuzz_zip.exists():
+        with zipfile.ZipFile(fuzz_zip) as archive:
+            raw = archive.read('linker-fuzz/report.json')
+            recorded = json.loads(archive.read('linker-fuzz/verification.json'))
+        sys.path.insert(0, str(REPO / 'src/linker/fuzz'))
+        from verify import validate
+        from run import MODES
+        verified = validate(json.loads(raw), seconds=600, modes=MODES, head=HEAD)
+        if (verified['status'] != 'passed' or recorded['status'] != 'passed'
+                or recorded['report_sha256'] != hashlib.sha256(raw).hexdigest()):
+            failures.append('retained fuzz acceptance failed')
+        results['fuzz']['qualification'] = verified
+    if not pending:
+        if 'qualification' not in results['correctness'] or 'release_smoke' not in results['correctness']:
+            failures.append('missing correctness/archive acceptance artifact')
+        if 'qualification' not in results['gcc']:
+            failures.append('missing GCC acceptance artifact')
+        if 'qualification' not in results['fuzz']:
+            failures.append('missing fuzz acceptance artifact')
+        if len(artifacts) != 9:
+            failures.append('expected nine selected-job artifacts')
+    result = {'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'head': HEAD, 'status': 'failed' if failures else 'pending' if pending else 'passed',
+              'pending': pending, 'failures': failures, 'results': results,
+              'artifacts': artifacts,
+              'scope': 'selected hosted correctness/GCC/popular-C/fuzz acceptance; release freeze/publication separate'}
+    (ROOT / 'assessment.json').write_text(json.dumps(result, indent=2) + '\n')
+    print(json.dumps({k:v for k,v in result.items() if k not in ('results','artifacts')}, indent=2))
+    return result
+
+
+if __name__ == '__main__':
+    result = assess()
+    raise SystemExit(1 if result['status'] == 'failed' else 0)

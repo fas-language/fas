@@ -1,0 +1,28 @@
+{
+  "scope": "additional final-source musl 1.2.5 follow-up; not complete GCC qualification or IFUNC-on-musl coverage",
+  "head": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "linker_sha256": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+  "canonical_function_matrix": {
+    "executions": 20,
+    "providers": [
+      "FUNC"
+    ],
+    "tools": [
+      "Fas",
+      "GNU",
+      "LLD 22 default imports only"
+    ],
+    "preload": true,
+    "log_sha256": "f1c898a3d59f0774443323d01933e7b329c0be71e31942f5cfdd28ff902dded6",
+    "harness_sha256": "31a3bfbb5e39c6c77665842c713df678de9768c9e02876be49c931f2c6beac78"
+  },
+  "exact_gcc_objects": {
+    "executions": 12,
+    "tools": [
+      "Fas",
+      "GNU"
+    ],
+    "report_sha256": "8eb3009a2c1ce7ef92569109e1f705d20d926e7ea4c9c610cab48217fe354071"
+  },
+  "libc_sha256": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4"
+}

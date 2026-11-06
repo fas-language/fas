@@ -17,7 +17,7 @@ correctness job alone does not complete the production acceptance gates.
 
 The hosted correctness job and [clean local container runner](ci/README.md)
 share one recipe, including verified local binary/source release archives. Its
-final selection guard requires 264 Python regression cases without reported skips
+final selection guard requires 272 Python regression cases without reported skips
 and passing scale/corpus/semantic reports. The musl zlib
 matrix adds GCC/Clang native objects linked by Fas/GNU as PIE, static ET_EXEC
 and static PIE, including upstream tests and all gzip producer/consumer pairs.
@@ -38,7 +38,11 @@ power-loss qualification.
 Weekly and manual runs add fourteen coverage-guided targets at 600 seconds each,
 sequentially at reduced scheduling priority. The fuzz job has a three-hour limit.
 Saved crashes/hangs fail the job and are retained with the target, queues, seeds
-and source snapshot. Correctness artifacts are retained for 14 days; fuzz artifacts
+and source snapshot. Acceptance verifies the requested duration, complete target
+selection, execution/edge statistics and the expected clean source commit.
+Original AFL filenames are preserved inside a tar archive, with separate JSON
+campaign and verification reports. Two-second manual upload smoke tests cannot
+satisfy the ten-minute selection. Correctness artifacts are retained for 14 days; fuzz artifacts
 for 30 days. Retention is not a durable release archive. The workflow uses pinned
 action commits and read-only repository permissions; it publishes no releases.
 
@@ -59,15 +63,22 @@ capability selection fails the gate for investigation.
 Its explicit board capability excludes executable-stack trampolines, matching
 the linker's stack policy. LTO probes are unavailable and no LTO support is
 added. These are native C execution tests, not the complete GCC regression suite.
-Popular-C/GCC artifacts are retained for 14 days. The new jobs have not yet been
-qualified on hosted runners.
+Popular-C/GCC artifacts are retained for 14 days. All six popular-C jobs have
+passing hosted evidence at the [first checkpoint](corpus/results/2026-11-06-hosted/README.md).
+The [canonical-address checkpoint](corpus/results/2026-11-06-canonical/README.md)
+retains the later GCC failure and its focused repair. Complete hosted acceptance
+on the repaired source remains separate from those earlier passes. The
+[repaired-source observation](corpus/results/2026-11-06-hosted-canonical/README.md)
+passes the full declared GCC and correctness selections; two popular-C jobs
+and the full fuzz campaign are still pending at that observation.
 
-This is a workflow definition, not evidence of a completed hosted run. Local
+The workflow definition alone is not evidence of a completed hosted run. Local
 qualification is recorded separately under `audit/`, `scale/results/`,
 `corpus/results/` and `fuzz/results/`. The [fresh local Ubuntu qualification](corpus/results/2026-11-06-clean/README.md)
 passes the shared correctness recipe, including GCC 13/Clang 18, glibc 2.39 and
-isolated musl. Hosted-runner and other-kernel compatibility remain unqualified
-until those environments actually pass. No performance comparison
+isolated musl. The [hosted correctness checkpoint](corpus/results/2026-11-06-hosted/README.md)
+also passes its declared Ubuntu/kernel baseline. Other snapshots, environments
+and the complete GCC/fuzz selection require their own passing records. No performance comparison
 or production-readiness claim follows from adding automation.
 
 Equivalent local commands, from the repository root, with fresh output directories:
