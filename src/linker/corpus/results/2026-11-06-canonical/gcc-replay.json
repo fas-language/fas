@@ -1,0 +1,337 @@
+{
+  "scope": "exact retained GCC object replay in the pinned GCC 15.2.0 image; not the complete corpus",
+  "image": "gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c26630bdacc8d8e7713cf5d8e7289",
+  "crt_sha256": "8cd1a50edd44a4ded5856bf2254dc106401b37c285dcc55a594475438cd6ec1a",
+  "linker_sha256": {
+    "before": "bd6b1acef67021dadb59c44693e63e1245a6f44901144d08385afba538da73af",
+    "fas": "6e1c7e2eaac7bfc4da8b2d8705bfb28a282e4beab25d4d5ea409d21e91aead64"
+  },
+  "runs": [
+    {
+      "tool": "before",
+      "object": "01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+      "object_sha256": "2610d723a9f2ddba82f774bad38ba681c9578b48e6144f712bc4a922db366989",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1"
+      ],
+      "link_exit": 1,
+      "stderr": "fas-ld: /qualification/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o: .text.startup+0xd referencing exit: direct import relocation (compile position-independent code) is unsupported in dynamic output\ncollect2: error: ld returned 1 exit status\n"
+    },
+    {
+      "tool": "before",
+      "object": "0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+      "object_sha256": "dc3bb944277e7fcb37f519fbd3968be7acebf55904666909e121f9a2f22f344f",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2"
+      ],
+      "link_exit": 1,
+      "stderr": "fas-ld: /qualification/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o: .text+0x35 referencing sprintf: direct import relocation (compile position-independent code) is unsupported in dynamic output\ncollect2: error: ld returned 1 exit status\n"
+    },
+    {
+      "tool": "before",
+      "object": "22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+      "object_sha256": "a63f04bd980049c7fdfc2a013f009aeeb98298fa1262401cec7f07b61a070fd5",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "87c4b1b860c1a0623301b4a85fe137c2cc31265832d4bcb75621458250720875"
+    },
+    {
+      "tool": "before",
+      "object": "37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+      "object_sha256": "86f9870b586f6813004a054fb9379330ac44faea1ec12cff5af14065cc760f81",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6"
+      ],
+      "link_exit": 1,
+      "stderr": "fas-ld: /qualification/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o: .text.startup+0x10 referencing exit: direct import relocation (compile position-independent code) is unsupported in dynamic output\ncollect2: error: ld returned 1 exit status\n"
+    },
+    {
+      "tool": "before",
+      "object": "61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+      "object_sha256": "d054048360d27c7cbbcbcb9825b84bd5d187783510d9b7979aefea69e1fcf6ff",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7"
+      ],
+      "link_exit": 1,
+      "stderr": "fas-ld: /qualification/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o: .text.startup+0x2 referencing sprintf: direct import relocation (compile position-independent code) is unsupported in dynamic output\ncollect2: error: ld returned 1 exit status\n"
+    },
+    {
+      "tool": "before",
+      "object": "e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+      "object_sha256": "d8380cbd2ba61317d41370f69809b637cd72d501678556f7c2f94bac337ead28",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-before/",
+        "/qualification/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/before-e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f"
+      ],
+      "link_exit": 1,
+      "stderr": "fas-ld: /qualification/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o: .text+0x53 referencing exit: direct import relocation (compile position-independent code) is unsupported in dynamic output\ncollect2: error: ld returned 1 exit status\n"
+    },
+    {
+      "tool": "fas",
+      "object": "01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+      "object_sha256": "2610d723a9f2ddba82f774bad38ba681c9578b48e6144f712bc4a922db366989",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "acb311e4f8fe6becd0854d4f6912bc988da934a9c08879b248a76da7348ab517"
+    },
+    {
+      "tool": "fas",
+      "object": "0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+      "object_sha256": "dc3bb944277e7fcb37f519fbd3968be7acebf55904666909e121f9a2f22f344f",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "7e34571bffdcd7edd1aa8f5169599b12822c80c6eda0b955d0621c8ad7ccdb05"
+    },
+    {
+      "tool": "fas",
+      "object": "22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+      "object_sha256": "a63f04bd980049c7fdfc2a013f009aeeb98298fa1262401cec7f07b61a070fd5",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "87c4b1b860c1a0623301b4a85fe137c2cc31265832d4bcb75621458250720875"
+    },
+    {
+      "tool": "fas",
+      "object": "37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+      "object_sha256": "86f9870b586f6813004a054fb9379330ac44faea1ec12cff5af14065cc760f81",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "908273e4c6907c2152fe707326bd83908f9332be19df4e193511b713bbaa4891"
+    },
+    {
+      "tool": "fas",
+      "object": "61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+      "object_sha256": "d054048360d27c7cbbcbcb9825b84bd5d187783510d9b7979aefea69e1fcf6ff",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "269b3ca3b174eb41a971ec6a12501ad1476104befeeb85b2ff74525d135b66dc"
+    },
+    {
+      "tool": "fas",
+      "object": "e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+      "object_sha256": "d8380cbd2ba61317d41370f69809b637cd72d501678556f7c2f94bac337ead28",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "-B/qualification/canonical-version/tools-fas/",
+        "/qualification/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/fas-e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "a35d81dee9085af7331895bfa37bc1bf4d20c6580f87a78e29e80d9ede753240"
+    },
+    {
+      "tool": "gnu",
+      "object": "01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+      "object_sha256": "2610d723a9f2ddba82f774bad38ba681c9578b48e6144f712bc4a922db366989",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-01a8d5727cd3c948a5d2f1b1b9df090fa45a9eb7dff3b35dbbfa36e5d40616d1"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "e02b23a2c323d0a2b22bd6a852b8d9e35e5fb4bb0aa1f5235a90edf045b8a08a"
+    },
+    {
+      "tool": "gnu",
+      "object": "0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+      "object_sha256": "dc3bb944277e7fcb37f519fbd3968be7acebf55904666909e121f9a2f22f344f",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-0468ea717c89e6224aa7a5521245fbc9480add60aae46b5d1bd1a577add1a3b2"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "b5ff9d8e462fdfd2664834d22ec7591b363e5b2251e884905a2a6380a06412f5"
+    },
+    {
+      "tool": "gnu",
+      "object": "22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+      "object_sha256": "a63f04bd980049c7fdfc2a013f009aeeb98298fa1262401cec7f07b61a070fd5",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-22b1c4f325e6f4664119e3fbf5363d6642f6afaf1b23b672843c51347d8145b3"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "0ce6c9d5c305d6760369c748dd641c511f0c74a0b9bfc23c799d243efdedccd4"
+    },
+    {
+      "tool": "gnu",
+      "object": "37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+      "object_sha256": "86f9870b586f6813004a054fb9379330ac44faea1ec12cff5af14065cc760f81",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-37c728d1dbb6b53dc5880e9044cd63a22bc24fca907fab5761866e39eb6d7dc6"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "38eb49b473b291c7ff761854932c309b1078620e3c5c1369aae38ac381c4abb5"
+    },
+    {
+      "tool": "gnu",
+      "object": "61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+      "object_sha256": "d054048360d27c7cbbcbcb9825b84bd5d187783510d9b7979aefea69e1fcf6ff",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-61197a7d4bfa89064a895c429344a9a4dc23984505563ad644d66aaf589bcac7"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "8526a344091d7634f1eeff7a77f584b90166c357587f10e66c1eeb528085f203"
+    },
+    {
+      "tool": "gnu",
+      "object": "e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+      "object_sha256": "d8380cbd2ba61317d41370f69809b637cd72d501678556f7c2f94bac337ead28",
+      "argv": [
+        "gcc",
+        "-fno-use-linker-plugin",
+        "-no-pie",
+        "/qualification/gcc-direct-imports/e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f.o",
+        "-lm",
+        "-o",
+        "/qualification/canonical-version/gnu-e0a5d34146d4303e9bcb022510f0d42a7d647ffceee341791e34435db0a6152f"
+      ],
+      "link_exit": 0,
+      "stderr": "",
+      "execution_exit": 0,
+      "output_sha256": "c76fd0ac35494310d649c1c72a3dc9088c79c10c3cfb75fd1d36b18b13df2251"
+    }
+  ]
+}

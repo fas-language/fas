@@ -1,0 +1,125 @@
+{
+  "scope": "bounded 120-second copy-link follow-up; not the complete 600-second hosted selection",
+  "verification": {
+    "status": "passed",
+    "failures": [],
+    "seconds_per_target": 120,
+    "modes": [
+      "copy-link"
+    ],
+    "git_head": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+    "target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396",
+    "targets": {
+      "copy-link": {
+        "run_time": 120,
+        "execs_done": 82626,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1596,
+        "total_edges": 65536,
+        "elapsed_seconds": 120.41554889798863
+      }
+    },
+    "executions": 82626,
+    "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+    "report_sha256": "43fb95dd43bceb0f9472c6963bb44ec6e1bb24c91f40391a3cfa27d71eb60a5e"
+  },
+  "report": {
+    "seconds_per_target": 120,
+    "modes": [
+      "copy-link"
+    ],
+    "imported_corpora": [],
+    "started": "2026-11-06T19:38:02+0100",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+    "target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396",
+    "ocaml": "5.4.1",
+    "git_head": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+    "git_status": " M .github/workflows/linker.yml\n M src/linker/AUDIT.md\n M src/linker/README.md\n M src/linker/ROADMAP.md\n M src/linker/SUPPORT.md\n M src/linker/ci/README.md\n M src/linker/ci/verify.py\n M src/linker/dynamic.ml\n M src/linker/fuzz/README.md\n M src/linker/fuzz/run.py\n M src/linker/fuzz/target.ml\n M src/linker/got.ml\n M src/linker/static_link.ml\n M src/linker/test/dune\n M src/linker/test/dynamic_integration.py\n M src/linker/test/hardening_integration.py\n?? src/linker/fuzz/verify.py\n?? src/linker/test/fuzz_acceptance_integration.py\n",
+    "targets": {
+      "copy-link": {
+        "exit_code": 0,
+        "elapsed_seconds": 120.41554889798863,
+        "command": [
+          "nice",
+          "-n",
+          "10",
+          "afl-fuzz",
+          "-i",
+          "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/seeds/copy-link",
+          "-o",
+          "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/copy-link",
+          "-m",
+          "none",
+          "-t",
+          "2000",
+          "-V",
+          "120",
+          "--",
+          "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/target.exe",
+          "copy-link",
+          "@@"
+        ],
+        "stats": {
+          "start_time": "1793990282",
+          "last_update": "1793990402",
+          "run_time": "120",
+          "fuzzer_pid": "2538199",
+          "cycles_done": "0",
+          "cycles_wo_finds": "0",
+          "time_wo_finds": "27",
+          "fuzz_time": "109",
+          "calibration_time": "2",
+          "cmplog_time": "0",
+          "sync_time": "0",
+          "trim_time": "8",
+          "execs_done": "82626",
+          "execs_per_sec": "688.42",
+          "execs_ps_last_min": "674.47",
+          "corpus_count": "225",
+          "corpus_favored": "136",
+          "corpus_found": "216",
+          "corpus_imported": "0",
+          "corpus_variable": "5",
+          "max_depth": "3",
+          "cur_item": "150",
+          "pending_favs": "134",
+          "pending_total": "222",
+          "stability": "99.50%",
+          "bitmap_cvg": "2.44%",
+          "saved_crashes": "0",
+          "saved_hangs": "0",
+          "total_tmout": "0",
+          "last_find": "1793990402",
+          "last_crash": "0",
+          "last_hang": "0",
+          "execs_since_crash": "82626",
+          "exec_timeout": "2000",
+          "slowest_exec_ms": "0",
+          "peak_rss_mb": "0",
+          "cpu_affinity": "-1",
+          "edges_found": "1596",
+          "total_edges": "65536",
+          "var_byte_count": "8",
+          "havoc_expansion": "0",
+          "auto_dict_entries": "0",
+          "testcache_size": "860800",
+          "testcache_count": "225",
+          "testcache_evict": "0",
+          "afl_banner": "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/target.exe",
+          "afl_version": "++4.33c",
+          "target_mode": "shmem_testcase default",
+          "command_line": "afl-fuzz -i /home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/seeds/copy-link -o /home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/copy-link -m none -t 2000 -V 120 -- /home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-function-fuzz/target.exe copy-link @@"
+        }
+      }
+    },
+    "afl_environment": {
+      "AFL_NO_UI": "1",
+      "AFL_SKIP_CPUFREQ": "1",
+      "AFL_NO_AFFINITY": "1",
+      "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1",
+      "AFL_CRASH_EXITCODE": "2"
+    },
+    "core_pattern": "|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E"
+  }
+}

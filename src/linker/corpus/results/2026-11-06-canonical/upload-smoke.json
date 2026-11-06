@@ -1,0 +1,356 @@
+{
+  "upload-smoke-validation.json": {
+    "run": 42265587493,
+    "head": "1685dad347902e6664271515799ac1b3ea9b19ed",
+    "qualification": false,
+    "scope": "artifact-upload smoke only",
+    "seconds_per_target": 2,
+    "artifact_sha256": "87dc7ae3f1209e2758de4f13de41249073e0bbc05ee6e9e422989863e3bc34f8",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "standalone_report_matches_tar": true,
+    "tar_member_count": 990,
+    "original_colon_queue_filenames": 161,
+    "targets": 14,
+    "execs": 16395,
+    "all_exit_zero": true
+  },
+  "upload-smoke-acceptance-2.json": {
+    "status": "passed",
+    "failures": [],
+    "seconds_per_target": 2,
+    "modes": [
+      "elf",
+      "shared",
+      "archive",
+      "script",
+      "link",
+      "version",
+      "shared-link",
+      "symver-link",
+      "zlib",
+      "metadata-link",
+      "partial-link",
+      "dependency",
+      "static-pie-link",
+      "copy-link"
+    ],
+    "git_head": "1685dad347902e6664271515799ac1b3ea9b19ed",
+    "target_sha256": "b5834bcc0ec30a57a83ac660de4d9b62fb857e98c912d2e6f4cd51bcf59728dd",
+    "targets": {
+      "elf": {
+        "run_time": 2,
+        "execs_done": 1272,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 590,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.434106576999966
+      },
+      "shared": {
+        "run_time": 2,
+        "execs_done": 1288,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 446,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.39025613199999
+      },
+      "archive": {
+        "run_time": 2,
+        "execs_done": 1232,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 515,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.328286401000014
+      },
+      "script": {
+        "run_time": 2,
+        "execs_done": 868,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 177,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.271628299999975
+      },
+      "link": {
+        "run_time": 2,
+        "execs_done": 1247,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1574,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.3143176459999495
+      },
+      "version": {
+        "run_time": 2,
+        "execs_done": 800,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 934,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.242586526000082
+      },
+      "shared-link": {
+        "run_time": 2,
+        "execs_done": 1271,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2270,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.583296856999937
+      },
+      "symver-link": {
+        "run_time": 2,
+        "execs_done": 1300,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2400,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.702217228999984
+      },
+      "zlib": {
+        "run_time": 2,
+        "execs_done": 737,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 152,
+        "total_edges": 8388608,
+        "elapsed_seconds": 5.184474387000023
+      },
+      "metadata-link": {
+        "run_time": 2,
+        "execs_done": 1280,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2457,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.901255033999973
+      },
+      "partial-link": {
+        "run_time": 2,
+        "execs_done": 1288,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1007,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.760622214000023
+      },
+      "dependency": {
+        "run_time": 2,
+        "execs_done": 1263,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 484,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.399458000999971
+      },
+      "static-pie-link": {
+        "run_time": 2,
+        "execs_done": 1272,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2126,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.631308650999927
+      },
+      "copy-link": {
+        "run_time": 2,
+        "execs_done": 1277,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1206,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.681840447000013
+      }
+    },
+    "executions": 16395,
+    "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+    "report_sha256": "13297e7a9f7eb84ba287d23e5584bcc240e6254cf1b9c495ffba3ce38e5a11bf"
+  },
+  "upload-smoke-acceptance-600.json": {
+    "status": "failed",
+    "failures": [
+      "requested duration does not match the acceptance selection",
+      "elf: elapsed time is shorter than the requested duration",
+      "elf: AFL run time is shorter than the requested duration",
+      "shared: elapsed time is shorter than the requested duration",
+      "shared: AFL run time is shorter than the requested duration",
+      "archive: elapsed time is shorter than the requested duration",
+      "archive: AFL run time is shorter than the requested duration",
+      "script: elapsed time is shorter than the requested duration",
+      "script: AFL run time is shorter than the requested duration",
+      "link: elapsed time is shorter than the requested duration",
+      "link: AFL run time is shorter than the requested duration",
+      "version: elapsed time is shorter than the requested duration",
+      "version: AFL run time is shorter than the requested duration",
+      "shared-link: elapsed time is shorter than the requested duration",
+      "shared-link: AFL run time is shorter than the requested duration",
+      "symver-link: elapsed time is shorter than the requested duration",
+      "symver-link: AFL run time is shorter than the requested duration",
+      "zlib: elapsed time is shorter than the requested duration",
+      "zlib: AFL run time is shorter than the requested duration",
+      "metadata-link: elapsed time is shorter than the requested duration",
+      "metadata-link: AFL run time is shorter than the requested duration",
+      "partial-link: elapsed time is shorter than the requested duration",
+      "partial-link: AFL run time is shorter than the requested duration",
+      "dependency: elapsed time is shorter than the requested duration",
+      "dependency: AFL run time is shorter than the requested duration",
+      "static-pie-link: elapsed time is shorter than the requested duration",
+      "static-pie-link: AFL run time is shorter than the requested duration",
+      "copy-link: elapsed time is shorter than the requested duration",
+      "copy-link: AFL run time is shorter than the requested duration"
+    ],
+    "seconds_per_target": 600,
+    "modes": [
+      "elf",
+      "shared",
+      "archive",
+      "script",
+      "link",
+      "version",
+      "shared-link",
+      "symver-link",
+      "zlib",
+      "metadata-link",
+      "partial-link",
+      "dependency",
+      "static-pie-link",
+      "copy-link"
+    ],
+    "git_head": "1685dad347902e6664271515799ac1b3ea9b19ed",
+    "target_sha256": "b5834bcc0ec30a57a83ac660de4d9b62fb857e98c912d2e6f4cd51bcf59728dd",
+    "targets": {
+      "elf": {
+        "run_time": 2,
+        "execs_done": 1272,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 590,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.434106576999966
+      },
+      "shared": {
+        "run_time": 2,
+        "execs_done": 1288,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 446,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.39025613199999
+      },
+      "archive": {
+        "run_time": 2,
+        "execs_done": 1232,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 515,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.328286401000014
+      },
+      "script": {
+        "run_time": 2,
+        "execs_done": 868,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 177,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.271628299999975
+      },
+      "link": {
+        "run_time": 2,
+        "execs_done": 1247,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1574,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.3143176459999495
+      },
+      "version": {
+        "run_time": 2,
+        "execs_done": 800,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 934,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.242586526000082
+      },
+      "shared-link": {
+        "run_time": 2,
+        "execs_done": 1271,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2270,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.583296856999937
+      },
+      "symver-link": {
+        "run_time": 2,
+        "execs_done": 1300,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2400,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.702217228999984
+      },
+      "zlib": {
+        "run_time": 2,
+        "execs_done": 737,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 152,
+        "total_edges": 8388608,
+        "elapsed_seconds": 5.184474387000023
+      },
+      "metadata-link": {
+        "run_time": 2,
+        "execs_done": 1280,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2457,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.901255033999973
+      },
+      "partial-link": {
+        "run_time": 2,
+        "execs_done": 1288,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1007,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.760622214000023
+      },
+      "dependency": {
+        "run_time": 2,
+        "execs_done": 1263,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 484,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.399458000999971
+      },
+      "static-pie-link": {
+        "run_time": 2,
+        "execs_done": 1272,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 2126,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.631308650999927
+      },
+      "copy-link": {
+        "run_time": 2,
+        "execs_done": 1277,
+        "saved_crashes": 0,
+        "saved_hangs": 0,
+        "edges_found": 1206,
+        "total_edges": 8388608,
+        "elapsed_seconds": 4.681840447000013
+      }
+    },
+    "executions": 16395,
+    "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+    "report_sha256": "13297e7a9f7eb84ba287d23e5584bcc240e6254cf1b9c495ffba3ce38e5a11bf"
+  }
+}

@@ -1,0 +1,110 @@
+test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) ... 
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32', tool='fas') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32', tool='lld') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32s', tool='fas') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32s', tool='lld') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32', tool='fas') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32', tool='lld') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32s', tool='fas') ... FAIL
+  test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32s', tool='lld') ... FAIL
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32', tool='fas')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-function32fas'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32', tool='lld')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-function32lld'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32s', tool='fas')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-function32sfas'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='function', form='32s', tool='lld')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-function32slld'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32', tool='fas')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-ifunc32fas'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32', tool='lld')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-ifunc32lld'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32s', tool='fas')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-ifunc32sfas'),): exit 99, expected 42
+
+
+======================================================================
+FAIL: test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) (kind='ifunc', form='32s', tool='lld')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/dynamic_integration.py", line 190, in test_nonpic_imported_function_addresses_are_canonical
+    run(out, expected=42)
+    ~~~^^^^^^^^^^^^^^^^^^
+  File "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/test/integration.py", line 26, in run
+    raise AssertionError(f"{args}: exit {p.returncode}, expected {expected}\n{p.stderr.decode(errors='replace')}")
+AssertionError: (PosixPath('/tmp/fas-linker-tests-51xsclrl/canonical-ifunc32slld'),): exit 99, expected 42
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.306s
+
+FAILED (failures=8)

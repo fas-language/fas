@@ -5,6 +5,12 @@
 
 (rule
  (alias runtest)
+ (deps fuzz_acceptance_integration.py ../fuzz/verify.py ../fuzz/run.py)
+ (action
+  (run python3 %{dep:fuzz_acceptance_integration.py} %{dep:../fuzz/verify.py})))
+
+(rule
+ (alias runtest)
  (deps corpus_harness_integration.py ../corpus/run.py)
  (action
   (run python3 %{dep:corpus_harness_integration.py} %{dep:../corpus/run.py})))

@@ -101,9 +101,14 @@ jobs:
       - name: Coverage-guided campaigns
         env:
           FAS_FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+          FAS_EXPECTED_HEAD: ${{ github.sha }}
         run: |
           opam exec -- python3 src/linker/fuzz/run.py \
             --output "$RUNNER_TEMP/linker-fuzz" --seconds "$FAS_FUZZ_SECONDS"
+          python3 src/linker/fuzz/verify.py \
+            --report "$RUNNER_TEMP/linker-fuzz/report.json" \
+            --seconds "$FAS_FUZZ_SECONDS" --head "$FAS_EXPECTED_HEAD" \
+            --output "$RUNNER_TEMP/linker-fuzz/verification.json"
       - name: Archive original AFL filenames for portable artifact upload
         if: always()
         run: |
@@ -120,6 +125,7 @@ jobs:
           path: |
             ${{ runner.temp }}/linker-fuzz.tar.gz
             ${{ runner.temp }}/linker-fuzz/report.json
+            ${{ runner.temp }}/linker-fuzz/verification.json
 
   popular-c:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'popular-c'))

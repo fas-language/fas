@@ -398,8 +398,15 @@ storage, overlapping exported aliases and mixed explicit/unversioned spellings
 of the same provider definition. Use GOT-based position-independent references
 for those cases. Allocatable non-TLS PROGBITS/NOBITS, alignments up to 2 MiB and
 256 MiB aggregate copied storage are supported within the existing image/output
-limits. Direct imported function addresses requiring unsupported narrow/PC-relative
-relocations still fail. Shared output continues to require position-independent
+limits. Non-PIE dynamic executables support imported FUNC/IFUNC addresses in
+32/32S constants through canonical PLT addresses. Direct calls, PC-relative
+references, writable pointer initializers, GOT references and shared-library
+lookups then use that same address, including preload interposition. Explicit
+and unversioned imports of the same provider version share one canonical symbol;
+distinct provider versions remain independent. Protected functions and narrow
+function-address constants in PIE remain unsupported. Direct PC-relative
+function addresses without a canonical narrow reference still follow the
+existing supported relocation subset. Shared output requires position-independent
 import references and never creates copies.
 Unresolved default-visibility weak imports remain available to LD_PRELOAD through
 dynamic GOT/PLT references. Fixed-output narrow absolute references to absent

@@ -83,7 +83,10 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
   let resolved, kept, property_file = Properties.prepare ?stats ~kept resolved in
   let resolved, kept, build_id_file = Build_id.prepare ~options ~kept resolved in
   let resolved, kept, got =
-    Got.prepare ?stats ~static_ifunc:(options.mode = Static) ~kept resolved
+    Got.prepare ?stats ~static_ifunc:(options.mode = Static)
+      ~canonical_functions:
+        (match options.mode with Dynamic { pie = false; _ } -> true | _ -> false)
+      ~kept resolved
   in
   let resolved, kept, unwind = Unwind.prepare ?stats ~kept ~frames resolved in
   let resolved, kept, static_ifunc =
@@ -335,6 +338,16 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
                 | Got.Local_module -> 1L
                 | Got.Local_offset -> 0L
                 | Got.Descriptor | Got.Descriptor_argument -> 0L
+                | Got.Address
+                  when objects.(source_file).symbols.(symbol).binding <> 0
+                       && Hashtbl.mem got.canonical_imports
+                            (Symver.key resolved.symver
+                               objects.(source_file).symbols.(symbol).name) ->
+                    Int64.of_int
+                      (Option.get
+                         (Option.bind dynamic (fun d ->
+                              Dynamic.canonical_stub ~placements ~resolved d source_file
+                                symbol)))
                 | Got.Address when Got.canonical_ifunc resolved got source_file symbol
                   -> (
                     match
@@ -386,6 +399,14 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
                     else Static_ifunc.stub ~placements static_ifunc file r.symbol
                   in
                   if static_stub <> None then static_stub
+                  else if
+                    symbol.binding <> 0
+                    && (not (Got.relocation r.kind || Got.base_relocation r.kind))
+                    && Hashtbl.mem got.canonical_imports
+                         (Symver.key resolved.symver symbol.name)
+                  then
+                    Option.bind dynamic (fun d ->
+                        Dynamic.canonical_stub ~placements ~resolved d file r.symbol)
                   else if
                     (r.kind = 4 || r.kind = 2) && got.references.(file).(index) >= 0
                   then

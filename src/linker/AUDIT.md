@@ -12,6 +12,23 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Canonical imported function addresses — 2026-11-06
+
+The [canonical-address checkpoint](corpus/results/2026-11-06-canonical/README.md)
+records the next hosted GCC failure after the CRT reader repair. Fas passes
+4,969 of 4,974 executions; GNU passes all 4,974 using the same objects. The five
+Fas failures need non-PIE function-address constants for `sprintf` or `exit`.
+Canonical PLT addresses now preserve pointer identity across code, GOT entries,
+pointer initializers, shared-library boundaries and preload overrides. Mixed
+explicit/default imports of the same provider version share one canonical
+symbol. Protected functions and narrow PIE imports remain explicitly rejected.
+
+Campaign acceptance now requires the requested duration and complete target
+selection, positive execution/edge counts and no untriaged saved findings.
+Negative controls reject missing statistics and a two-second upload smoke
+submitted as ten-minute qualification. The original failed runs remain failed;
+the complete hosted matrix must be repeated on this repaired source.
+
 ## First hosted C checkpoint — 2026-11-06
 
 The [hosted checkpoint](corpus/results/2026-11-06-hosted/README.md) passes all six

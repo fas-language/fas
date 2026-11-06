@@ -255,13 +255,13 @@ let prepare ?stats ~(options : Options.t) ~kept ~(got : Got.t) ~module_base ~cop
       in
       let import ?(copy = false) key =
         let original = key in
-        let key = Symver.key resolved.symver key in
+        let key = Got.import_key resolved got key in
         match
           if (not copy) && Copy_relocation.mem copies key then None
           (* Aliases share a dynamic index, but their visibility can differ.
              A locally bound spelling must not acquire its default version's
              preemptible import merely through canonicalization. *)
-          else Hashtbl.find_opt resolved.imports original
+            else Hashtbl.find_opt resolved.imports original
         with
         | None -> None
         | Some (provider : Resolver.import) ->
@@ -342,7 +342,13 @@ let prepare ?stats ~(options : Options.t) ~kept ~(got : Got.t) ~module_base ~cop
                 in
                 match imported with
                 | Some symbol ->
-                    if r.kind = 4 then begin
+                    let canonical =
+                      Hashtbl.find_opt got.canonical_imports
+                        (Symver.key resolved.symver s.name)
+                    in
+                    if canonical <> None && not (Got.relocation r.kind) then
+                      stub symbol (Option.get canonical)
+                    else if r.kind = 4 then begin
                       let provider = Hashtbl.find resolved.imports s.name in
                       if
                         provider.symbol.kind <> 0 && provider.symbol.kind <> 2
@@ -428,10 +434,16 @@ let prepare ?stats ~(options : Options.t) ~kept ~(got : Got.t) ~module_base ~cop
           in
           match imported with
           | _ when model = Got.Descriptor_argument -> ()
+          | Some _
+            when model = Got.Address
+                 && Hashtbl.mem got.canonical_imports
+                      (Symver.key resolved.symver s.name) ->
+              ()
           | Some symbol ->
               let kind =
                 match model with
                 | Address | Ifunc -> 6
+                | Plt -> 7
                 | Thread_offset -> 18
                 | Module_id -> 16
                 | Dynamic_offset -> 17
@@ -766,8 +778,27 @@ let ifunc_stub ~placements ~resolved t file symbol =
   Option.bind (Got.definition resolved file symbol) (fun key ->
       Option.bind (Hashtbl.find_opt t.ifunc_slots key) (stub ~placements t))
 
+let canonical_stub ~placements ~(resolved : Resolver.t) t file symbol =
+  let s = resolved.objects.(file).symbols.(symbol) in
+  if s.binding = 0 then None
+  else
+    Option.bind
+      (Hashtbl.find_opt t.got.canonical_imports (Symver.key resolved.symver s.name))
+      (stub ~placements t)
+
 let emit ~out ~placements ~sections ~objects ~base ~tls t =
   let p = placement ~placements t in
+  (* An ET_EXEC's non-PIC function addresses use one canonical PLT address.
+     Its call slot uses JUMP_SLOT so the loader skips this undefined dynsym
+     value when resolving the implementation, avoiding a self-referential GOT. *)
+  Array.iter
+    (fun (imported : import) ->
+      Option.iter
+        (fun slot ->
+          let address = Option.get (stub ~placements t slot) in
+          B.set_int out ((p dynsym).offset + (imported.index * 24) + 8) 8 address)
+        (Hashtbl.find_opt t.got.canonical_imports imported.key))
+    t.imports;
   Array.iteri
     (fun n (file, index) ->
       let symbol = objects.(file).E.symbols.(index) in

@@ -12,6 +12,7 @@ import tempfile
 import time
 import struct
 import zlib
+from verify import validate
 
 ROOT = Path(__file__).resolve().parents[3]
 MODES = ('elf', 'shared', 'archive', 'script', 'link', 'version', 'shared-link', 'symver-link', 'zlib', 'metadata-link', 'partial-link', 'dependency', 'static-pie-link', 'copy-link')
@@ -335,9 +336,11 @@ def main():
         if result.returncode or not stats:
             raise SystemExit('AFL failed; inspect ' + str(output / (mode + '.log')))
     print('Report: ' + str(output / 'report.json'), flush=True)
-    if any(int(target['stats'].get(key, '0')) for target in report['targets'].values()
-           for key in ('saved_crashes', 'saved_hangs')):
-        raise SystemExit('Campaign saved findings; replay and triage them before accepting the run')
+    verification = validate(report, seconds=args.seconds, modes=args.modes)
+    verification['report_sha256'] = hashlib.sha256((output / 'report.json').read_bytes()).hexdigest()
+    (output / 'verification.json').write_text(json.dumps(verification, indent=2) + '\n')
+    if verification['status'] != 'passed':
+        raise SystemExit('Campaign acceptance failed: ' + '; '.join(verification['failures']))
 
 
 if __name__ == '__main__':

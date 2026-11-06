@@ -1,0 +1,510 @@
+test_cli_rejects_upload_smoke_as_full_campaign (__main__.FuzzAcceptanceTests.test_cli_rejects_upload_smoke_as_full_campaign) ... ok
+test_complete_selection_and_whole_second_rounding (__main__.FuzzAcceptanceTests.test_complete_selection_and_whole_second_rounding) ... ok
+test_missing_metrics_and_saved_findings_fail_closed (__main__.FuzzAcceptanceTests.test_missing_metrics_and_saved_findings_fail_closed) ... ok
+test_short_interrupted_missing_and_mismatched_selections (__main__.FuzzAcceptanceTests.test_short_interrupted_missing_and_mismatched_selections) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.321s
+
+OK
+test_bad_headers_streams_and_limits_preserve_output (__main__.CompressedTests.test_bad_headers_streams_and_limits_preserve_output) ... ok
+test_dwarf_relocations_and_source_lookup (__main__.CompressedTests.test_dwarf_relocations_and_source_lookup) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.195s
+
+OK
+test_direct_imports_remain_undefined_global_and_keep_loader_identity (__main__.UniqueTests.test_direct_imports_remain_undefined_global_and_keep_loader_identity) ... ok
+test_local_dlopen_identity_and_invalid_unique_undefined_symbol (__main__.UniqueTests.test_local_dlopen_identity_and_invalid_unique_undefined_symbol) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.322s
+
+OK
+test_bitcode_wrapper_and_lazy_archive_diagnostics (__main__.LtoTests.test_bitcode_wrapper_and_lazy_archive_diagnostics) ... ok
+test_real_gcc_slim_fat_and_clang_full_thin_objects (__main__.LtoTests.test_real_gcc_slim_fat_and_clang_full_thin_objects) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.578s
+
+OK
+test_destructor_only_lists_and_section_name_boundaries (__main__.LegacyTests.test_destructor_only_lists_and_section_name_boundaries) ... ok
+test_legacy_partial_output_remains_usable_by_independent_final_linker (__main__.LegacyTests.test_legacy_partial_output_remains_usable_by_independent_final_linker) ... ok
+test_real_compiler_lists_fail_before_gc_and_modern_arrays_still_run (__main__.LegacyTests.test_real_compiler_lists_fail_before_gc_and_modern_arrays_still_run) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.772s
+
+OK
+test_image_limits_fail_atomically_and_gc_can_remove_large_sections (__main__.LayoutTests.test_image_limits_fail_atomically_and_gc_can_remove_large_sections) ... ok
+test_large_nobits_address_space_without_file_materialization (__main__.LayoutTests.test_large_nobits_address_space_without_file_materialization) ... ok
+test_map_archive_common_and_synthetic_provenance (__main__.LayoutTests.test_map_archive_common_and_synthetic_provenance) ... ok
+test_map_errors_preserve_inputs_and_outputs (__main__.LayoutTests.test_map_errors_preserve_inputs_and_outputs) ... ok
+test_maps_match_elf_and_are_deterministic (__main__.LayoutTests.test_maps_match_elf_and_are_deterministic) ... ok
+test_predefined_symbols_are_demanded_and_overridable (__main__.LayoutTests.test_predefined_symbols_are_demanded_and_overridable) ... ok
+test_predefined_symbols_match_load_extents (__main__.LayoutTests.test_predefined_symbols_match_load_extents) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.332s
+
+OK
+test_as_needed_weak_and_position_sensitive_dependencies (__main__.DriverOptionsTests.test_as_needed_weak_and_position_sensitive_dependencies) ... ok
+test_bad_state_emulation_and_unsupported_flags_preserve_output (__main__.DriverOptionsTests.test_bad_state_emulation_and_unsupported_flags_preserve_output) ... ok
+test_explicit_multiple_definitions_keep_first_and_preserve_partial_semantics (__main__.DriverOptionsTests.test_explicit_multiple_definitions_keep_first_and_preserve_partial_semantics) ... ok
+test_shared_driver_interpreter_is_ignored (__main__.DriverOptionsTests.test_shared_driver_interpreter_is_ignored) ... ok
+test_static_dynamic_library_search_and_state_restore (__main__.DriverOptionsTests.test_static_dynamic_library_search_and_state_restore) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.097s
+
+OK
+test_real_musl_compiler_driver_static_and_dynamic (__main__.MuslTests.test_real_musl_compiler_driver_static_and_dynamic) ... ok
+test_shared_library_late_tls_and_dlopen (__main__.MuslTests.test_shared_library_late_tls_and_dlopen) ... ok
+test_startup_threaded_tls_models_and_shutdown (__main__.MuslTests.test_startup_threaded_tls_models_and_shutdown) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.809s
+
+OK
+test_archive_comdat_and_gc_group_retention (__main__.SectionTests.test_archive_comdat_and_gc_group_retention) ... ok
+test_comdat_first_group_wins_as_a_unit (__main__.SectionTests.test_comdat_first_group_wins_as_a_unit) ... ok
+test_gc_drops_dead_cycles_and_errors_only_on_live_references (__main__.SectionTests.test_gc_drops_dead_cycles_and_errors_only_on_live_references) ... ok
+test_gc_follows_canonical_definitions_and_weak_references (__main__.SectionTests.test_gc_follows_canonical_definitions_and_weak_references) ... ok
+test_malformed_groups (__main__.SectionTests.test_malformed_groups) ... ok
+test_merge_identical_sections_and_interior_pointers (__main__.SectionTests.test_merge_identical_sections_and_interior_pointers) ... ok
+test_merge_metadata_validation (__main__.SectionTests.test_merge_metadata_validation) ... ok
+test_merge_relocations_and_writable_contents_remain_distinct (__main__.SectionTests.test_merge_relocations_and_writable_contents_remain_distinct) ... ok
+test_seeded_section_graphs (__main__.SectionTests.test_seeded_section_graphs) ... ok
+test_undefined_roots_extract_and_keep_archive_sections (__main__.SectionTests.test_undefined_roots_extract_and_keep_archive_sections) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.025s
+
+OK
+test_generated_valid_programs_match_oracle_through_all_pipelines (__main__.SemanticTests.test_generated_valid_programs_match_oracle_through_all_pipelines) ... ok
+test_incorrect_python_oracle_is_rejected_after_real_execution (__main__.SemanticTests.test_incorrect_python_oracle_is_rejected_after_real_execution) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 2.686s
+
+OK
+test_got_overflow_and_statistics (__main__.PicTests.test_got_overflow_and_statistics) ... ok
+test_gotpcrel_variants_and_slot_values (__main__.PicTests.test_gotpcrel_variants_and_slot_values) ... ok
+test_pic_compiler_corpus (__main__.PicTests.test_pic_compiler_corpus) ... ok
+test_weak_zero_local_scoping_and_gc (__main__.PicTests.test_weak_zero_local_scoping_and_gc) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.907s
+
+OK
+test_consumed_and_unused_external_members_are_not_overwritten (__main__.ThinTests.test_consumed_and_unused_external_members_are_not_overwritten) ... ok
+test_fifteen_character_member_names (__main__.ThinTests.test_fifteen_character_member_names) ... ok
+test_lazy_missing_and_changed_members_and_index_validation (__main__.ThinTests.test_lazy_missing_and_changed_members_and_index_validation) ... ok
+test_nested_regular_archives_and_flattened_thin_archives (__main__.ThinTests.test_nested_regular_archives_and_flattened_thin_archives) ... ok
+test_nonregular_and_oversized_external_members (__main__.ThinTests.test_nonregular_and_oversized_external_members) ... ok
+test_relative_paths_long_names_and_moved_tree (__main__.ThinTests.test_relative_paths_long_names_and_moved_tree) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 2.258s
+
+OK
+test_bad_descriptors_strings_and_relocation_fields (__main__.SdtTests.test_bad_descriptors_strings_and_relocation_fields) ... ok
+test_probe_notes_partial_interoperability_and_gc (__main__.SdtTests.test_probe_notes_partial_interoperability_and_gc) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.033s
+
+OK
+test_cli_and_nonregular_input (__main__.LinkerTests.test_cli_and_nonregular_input) ... ok
+test_cross_object_execution_and_reference (__main__.LinkerTests.test_cross_object_execution_and_reference) ... ok
+test_custom_entry_and_input_after_double_dash (__main__.LinkerTests.test_custom_entry_and_input_after_double_dash) ... ok
+test_freestanding_c_objects (__main__.LinkerTests.test_freestanding_c_objects) ... ok
+test_invalid_entry_and_output_aliases (__main__.LinkerTests.test_invalid_entry_and_output_aliases) ... ok
+test_library_reentry_and_concurrent_invocations (__main__.LinkerTests.test_library_reentry_and_concurrent_invocations) ... ok
+test_local_symbols_do_not_conflict (__main__.LinkerTests.test_local_symbols_do_not_conflict) ... ok
+test_malformed_objects (__main__.LinkerTests.test_malformed_objects) ... ok
+test_nobits_alignment_and_ignored_file_offset (__main__.LinkerTests.test_nobits_alignment_and_ignored_file_offset) ... ok
+test_output_structure_and_reproducibility (__main__.LinkerTests.test_output_structure_and_reproducibility) ... ok
+test_overlapping_relocations (__main__.LinkerTests.test_overlapping_relocations) ... ok
+test_relocatable_section_addresses_are_not_load_addresses (__main__.LinkerTests.test_relocatable_section_addresses_are_not_load_addresses) ... ok
+test_relocation_overflow_preserves_output (__main__.LinkerTests.test_relocation_overflow_preserves_output) ... ok
+test_relocations_with_null_symbol_and_none (__main__.LinkerTests.test_relocations_with_null_symbol_and_none) ... ok
+test_seeded_valid_object_graphs (__main__.LinkerTests.test_seeded_valid_object_graphs) ... ok
+test_short_version_continues_linking_and_gcc_abi_probe (__main__.LinkerTests.test_short_version_continues_linking_and_gcc_abi_probe) ... ok
+test_sized_undefined_and_unused_declarations (__main__.LinkerTests.test_sized_undefined_and_unused_declarations) ... ok
+test_truncation_and_seeded_mutation_campaign (__main__.LinkerTests.test_truncation_and_seeded_mutation_campaign) ... ok
+test_undefined_duplicate_and_unsupported_semantics (__main__.LinkerTests.test_undefined_duplicate_and_unsupported_semantics) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 3.188s
+
+OK
+zlib differential checks: 3550 passed
+test_build_id_hashes_zeroed_image_deterministically (__main__.MetadataTests.test_build_id_hashes_zeroed_image_deterministically) ... ok
+test_hash_styles_versioned_exports_ifunc_and_tls (__main__.MetadataTests.test_hash_styles_versioned_exports_ifunc_and_tls) ... ok
+test_real_compiler_drivers_default_fixed_shared_and_gc (__main__.MetadataTests.test_real_compiler_drivers_default_fixed_shared_and_gc) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 3.495s
+
+OK
+test_canonical_function_address_rejects_protected_and_pie (__main__.DynamicTests.test_canonical_function_address_rejects_protected_and_pie) ... ok
+test_loader_relative_pointers_got_bss_and_layout_symbols (__main__.DynamicTests.test_loader_relative_pointers_got_bss_and_layout_symbols) ... ok
+test_nonpic_imported_function_addresses_are_canonical (__main__.DynamicTests.test_nonpic_imported_function_addresses_are_canonical) ... ok
+test_pie_compiler_pic_unwind_and_debug (__main__.DynamicTests.test_pie_compiler_pic_unwind_and_debug) ... ok
+test_pie_rejects_textrel_narrow_absolute_and_invalid_interpreter (__main__.DynamicTests.test_pie_rejects_textrel_narrow_absolute_and_invalid_interpreter) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.837s
+
+OK
+test_default_compiler_unwind_and_gc_index (__main__.UnwindTests.test_default_compiler_unwind_and_gc_index) ... ok
+test_empty_unwind_and_dead_first_contribution (__main__.UnwindTests.test_empty_unwind_and_dead_first_contribution) ... ok
+test_gdb_backtrace_without_frame_pointers (__main__.UnwindTests.test_gdb_backtrace_without_frame_pointers) ... ok
+test_malformed_unwind_and_mutations (__main__.UnwindTests.test_malformed_unwind_and_mutations) ... ok
+test_unwind_terminator_and_record_padding (__main__.UnwindTests.test_unwind_terminator_and_record_padding) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.909s
+
+OK
+test_default_gcc_object_and_malformed_notes (__main__.PropertyTests.test_default_gcc_object_and_malformed_notes) ... ok
+test_property_merge_matches_gnu_and_does_not_overclaim (__main__.PropertyTests.test_property_merge_matches_gnu_and_does_not_overclaim) ... ok
+test_repeated_notes_in_one_section_and_empty_descriptor (__main__.PropertyTests.test_repeated_notes_in_one_section_and_empty_descriptor) ... ok
+test_synthetic_common_and_predefined_do_not_clear_properties (__main__.PropertyTests.test_synthetic_common_and_predefined_do_not_clear_properties) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.770s
+
+OK
+test_success_and_failed_commands_retain_output (__main__.CorpusHarnessTests.test_success_and_failed_commands_retain_output) ... ok
+test_timeout_kills_inherited_process_group_and_retains_diagnostics (__main__.CorpusHarnessTests.test_timeout_kills_inherited_process_group_and_retains_diagnostics) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 5.147s
+
+OK
+test_crt_main_arguments_environment_stdio_and_shutdown (__main__.HostedTests.test_crt_main_arguments_environment_stdio_and_shutdown) ... ok
+test_init_fini_fragment_alignment_executes_nop_padding (__main__.HostedTests.test_init_fini_fragment_alignment_executes_nop_padding) ... ok
+test_nonpie_gcc_crt_and_narrow_absent_weak_references (__main__.HostedTests.test_nonpie_gcc_crt_and_narrow_absent_weak_references) ... ok
+test_numeric_priorities_stable_ties_preinit_and_reverse_fini (__main__.HostedTests.test_numeric_priorities_stable_ties_preinit_and_reverse_fini) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.501s
+
+OK
+test_late_descriptors_with_existing_threads_and_large_tls (__main__.TlsdescTests.test_late_descriptors_with_existing_threads_and_large_tls) ... ok
+test_own_executable_descriptors_and_mixed_models (__main__.TlsdescTests.test_own_executable_descriptors_and_mixed_models) ... ok
+test_shared_preemption_local_descriptors_and_imports (__main__.TlsdescTests.test_shared_preemption_local_descriptors_and_imports) ... ok
+test_weak_undefined_and_bad_descriptor_references (__main__.TlsdescTests.test_weak_undefined_and_bad_descriptor_references) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.307s
+
+OK
+test_as_needed_weak_order_and_group_reconsideration (__main__.ScriptTests.test_as_needed_weak_order_and_group_reconsideration) ... ok
+test_malformed_unsupported_cycles_and_seeded_mutations (__main__.ScriptTests.test_malformed_unsupported_cycles_and_seeded_mutations) ... ok
+test_nested_inputs_cannot_be_overwritten_by_executable_or_map (__main__.ScriptTests.test_nested_inputs_cannot_be_overwritten_by_executable_or_map) ... ok
+test_nested_relative_quoted_inputs_library_search_and_groups (__main__.ScriptTests.test_nested_relative_quoted_inputs_library_search_and_groups) ... ok
+test_system_libc_script_startup_tls_and_shutdown (__main__.ScriptTests.test_system_libc_script_startup_tls_and_shutdown) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.531s
+
+OK
+test_default_and_explicit_symbol_versions_and_loader_rejection (__main__.SharedTests.test_default_and_explicit_symbol_versions_and_loader_rejection) ... ok
+test_executable_exports_callbacks_interposition_and_archive_roots (__main__.SharedTests.test_executable_exports_callbacks_interposition_and_archive_roots) ... ok
+test_functions_data_pointers_weak_and_preload (__main__.SharedTests.test_functions_data_pointers_weak_and_preload) ... ok
+test_hidden_weak_gc_and_unsupported_live_imports (__main__.SharedTests.test_hidden_weak_gc_and_unsupported_live_imports) ... ok
+test_library_hash_styles_and_archive_selection (__main__.SharedTests.test_library_hash_styles_and_archive_selection) ... ok
+test_pinned_libc_import_versions (__main__.SharedTests.test_pinned_libc_import_versions) ... ok
+test_shared_metadata_bounds_hashes_versions_and_mutations (__main__.SharedTests.test_shared_metadata_bounds_hashes_versions_and_mutations) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.609s
+
+OK
+test_dlopen_resolvers_and_versioned_exports (__main__.IfuncTests.test_dlopen_resolvers_and_versioned_exports) ... ok
+test_executable_local_hidden_and_global_ifunc (__main__.IfuncTests.test_executable_local_hidden_and_global_ifunc) ... ok
+test_invalid_ifunc_uses_preserve_output (__main__.IfuncTests.test_invalid_ifunc_uses_preserve_output) ... ok
+test_local_resolvers_after_dependency_relocations_and_name_collisions (__main__.IfuncTests.test_local_resolvers_after_dependency_relocations_and_name_collisions) ... ok
+test_shared_preemption_protected_hidden_and_dlsym (__main__.IfuncTests.test_shared_preemption_protected_hidden_and_dlsym) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 2.165s
+
+OK
+test_binding_policy_last_wins_and_atomic_errors (__main__.HardeningTests.test_binding_policy_last_wins_and_atomic_errors) ... ok
+test_ifunc_calls_function_addresses_and_preload (__main__.HardeningTests.test_ifunc_calls_function_addresses_and_preload) ... ok
+test_relro_permissions_mutable_data_tls_and_write_faults (__main__.HardeningTests.test_relro_permissions_mutable_data_tls_and_write_faults) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 2.199s
+
+OK
+test_dso_exports_independent_loaders_hashes_versions_and_gc (__main__.SyntheticTests.test_dso_exports_independent_loaders_hashes_versions_and_gc) ... ok
+test_exported_pie_and_fixed_executable_addresses (__main__.SyntheticTests.test_exported_pie_and_fixed_executable_addresses) ... ok
+test_independent_producer_end_and_real_absolute_semantics (__main__.SyntheticTests.test_independent_producer_end_and_real_absolute_semantics) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.708s
+
+OK
+test_alias_export_policy_matches_lld_exact_and_wildcard_rules (__main__.SymverTests.test_alias_export_policy_matches_lld_exact_and_wildcard_rules) ... ok
+test_default_alias_lazy_archive_extraction_and_removed_original (__main__.SymverTests.test_default_alias_lazy_archive_extraction_and_removed_original) ... ok
+test_default_version_alias_respects_each_reference_visibility (__main__.SymverTests.test_default_version_alias_respects_each_reference_visibility) ... ok
+test_missing_nodes_duplicate_defaults_and_undefined_versioned_symbols (__main__.SymverTests.test_missing_nodes_duplicate_defaults_and_undefined_versioned_symbols) ... ok
+test_nondefault_only_requires_explicit_reference (__main__.SymverTests.test_nondefault_only_requires_explicit_reference) ... ok
+test_old_default_versions_self_references_and_independent_consumers (__main__.SymverTests.test_old_default_versions_self_references_and_independent_consumers) ... ok
+test_versioned_tls_and_ifunc_aliases (__main__.SymverTests.test_versioned_tls_and_ifunc_aliases) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 4.727s
+
+OK
+test_dlopen_tls_with_threads_created_before_module (__main__.SharedOutputTests.test_dlopen_tls_with_threads_created_before_module) ... ok
+test_exports_gc_soname_and_independent_consumers (__main__.SharedOutputTests.test_exports_gc_soname_and_independent_consumers) ... ok
+test_invalid_shared_modes_preserve_output (__main__.SharedOutputTests.test_invalid_shared_modes_preserve_output) ... ok
+test_nonallocatable_plt_relocations_without_runtime_stubs (__main__.SharedOutputTests.test_nonallocatable_plt_relocations_without_runtime_stubs) ... ok
+test_preemption_weak_protected_and_function_pointer_identity (__main__.SharedOutputTests.test_preemption_weak_protected_and_function_pointer_identity) ... ok
+test_shared_tls_general_local_dynamic_and_initial_exec (__main__.SharedOutputTests.test_shared_tls_general_local_dynamic_and_initial_exec) ... ok
+test_unresolved_imports_dependency_and_dlopen_lifecycle (__main__.SharedOutputTests.test_unresolved_imports_dependency_and_dlopen_lifecycle) ... ok
+test_version_definitions_imports_hiding_and_inheritance (__main__.SharedOutputTests.test_version_definitions_imports_hiding_and_inheritance) ... ok
+test_version_script_anonymous_policy_errors_and_alias_protection (__main__.SharedOutputTests.test_version_script_anonymous_policy_errors_and_alias_protection) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 3.984s
+
+OK
+test_addrsig_is_validated_and_consumed (__main__.DebugTests.test_addrsig_is_validated_and_consumed) ... ok
+test_gdb_breakpoints_locals_and_backtrace (__main__.DebugTests.test_gdb_breakpoints_locals_and_backtrace) ... ok
+test_multi_object_dwarf_and_source_addresses (__main__.DebugTests.test_multi_object_dwarf_and_source_addresses) ... ok
+test_valgrind_multi_object_executable_and_shared_library (__main__.DebugTests.test_valgrind_multi_object_executable_and_shared_library) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 8.279s
+
+OK
+linker unit tests: relocation limits, arithmetic, and bounds passed
+test_alignment_nobits_and_empty_sections (__main__.RegistryTests.test_alignment_nobits_and_empty_sections) ... ok
+test_archive_extraction_is_driven_by_real_symbols_not_boundaries (__main__.RegistryTests.test_archive_extraction_is_driven_by_real_symbols_not_boundaries) ... ok
+test_explicit_overrides_do_not_retain_registry_and_absent_weak_is_zero (__main__.RegistryTests.test_explicit_overrides_do_not_retain_registry_and_absent_weak_is_zero) ... ok
+test_invalid_names_tls_and_incompatible_sections_fail_explicitly (__main__.RegistryTests.test_invalid_names_tls_and_incompatible_sections_fail_explicitly) ... ok
+test_multiple_objects_callbacks_and_independent_gc_oracles (__main__.RegistryTests.test_multiple_objects_callbacks_and_independent_gc_oracles) ... ok
+test_partial_links_preserve_unresolved_boundaries_for_final_consumer (__main__.RegistryTests.test_partial_links_preserve_unresolved_boundaries_for_final_consumer) ... ok
+test_private_dso_boundaries_are_not_preempted_or_exported (__main__.RegistryTests.test_private_dso_boundaries_are_not_preempted_or_exported) ... ok
+test_static_comdat_merge_records_and_explicit_undefined_roots (__main__.RegistryTests.test_static_comdat_merge_records_and_explicit_undefined_roots) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 3.803s
+
+OK
+test_dynamic_tls_sysroot_and_exports_reenter_across_domains (__main__.LibraryTests.test_dynamic_tls_sysroot_and_exports_reenter_across_domains) ... ok
+test_shared_versions_tls_and_preemption_reenter_across_domains (__main__.LibraryTests.test_shared_versions_tls_and_preemption_reenter_across_domains) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.792s
+
+OK
+test_imported_tls_and_executable_preemption (__main__.TlsTests.test_imported_tls_and_executable_preemption) ... ok
+test_invalid_tls_use_fails_without_replacing_output (__main__.TlsTests.test_invalid_tls_use_fails_without_replacing_output) ... ok
+test_malformed_tls_symbols_flags_and_array_metadata (__main__.TlsTests.test_malformed_tls_symbols_flags_and_array_metadata) ... ok
+test_models_initialized_zero_alignment_and_thread_isolation (__main__.TlsTests.test_models_initialized_zero_alignment_and_thread_isolation) ... ok
+test_static_tls_with_explicit_thread_pointer_startup (__main__.TlsTests.test_static_tls_with_explicit_thread_pointer_startup) ... ok
+test_tbss_only_and_seeded_mixed_alignment_layouts (__main__.TlsTests.test_tbss_only_and_seeded_mixed_alignment_layouts) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 6.588s
+
+OK
+test_indirect_references_do_not_extract_archives (__main__.DiscoveryTests.test_indirect_references_do_not_extract_archives) ... ok
+test_malformed_dependency_version_requirements_are_bounded (__main__.DiscoveryTests.test_malformed_dependency_version_requirements_are_bounded) ... ok
+test_multi_provider_version_table_layouts_and_overlaps (__main__.DiscoveryTests.test_multi_provider_version_table_layouts_and_overlaps) ... ok
+test_origin_needed_expansion_and_per_referrer_paths (__main__.DiscoveryTests.test_origin_needed_expansion_and_per_referrer_paths) ... ok
+test_strict_cycles_indirect_callbacks_gc_and_bounded_reads (__main__.DiscoveryTests.test_strict_cycles_indirect_callbacks_gc_and_bounded_reads) ... ok
+test_strict_transitive_versions_explicit_scope_and_atomic_failures (__main__.DiscoveryTests.test_strict_transitive_versions_explicit_scope_and_atomic_failures) ... ok
+test_tag_selection_default_last_wins_and_no_path (__main__.DiscoveryTests.test_tag_selection_default_last_wins_and_no_path) ... ok
+test_transitive_runtime_search_inheritance_and_environment_priority (__main__.DiscoveryTests.test_transitive_runtime_search_inheritance_and_environment_priority) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 4.418s
+
+OK
+ELF object writer: checked emission and concurrent in-memory links passed
+ELF object writer: independent GNU ld/readelf interoperability passed
+test_64_bit_archive_index (__main__.ArchiveTests.test_64_bit_archive_index) ... ok
+test_archive_mutation_campaign (__main__.ArchiveTests.test_archive_mutation_campaign) ... ok
+test_common_archive_extraction_policy (__main__.ArchiveTests.test_common_archive_extraction_policy) ... ok
+test_common_validation_and_archive_container_edges (__main__.ArchiveTests.test_common_validation_and_archive_container_edges) ... ok
+test_forward_archive_passes_preserve_weak_selection (__main__.ArchiveTests.test_forward_archive_passes_preserve_weak_selection) ... ok
+test_groups_repeated_archives_and_whole_archive (__main__.ArchiveTests.test_groups_repeated_archives_and_whole_archive) ... ok
+test_lazy_extraction_chain_order_and_unused_members (__main__.ArchiveTests.test_lazy_extraction_chain_order_and_unused_members) ... ok
+test_library_search_and_long_names (__main__.ArchiveTests.test_library_search_and_long_names) ... ok
+test_malformed_archives_and_failure_preservation (__main__.ArchiveTests.test_malformed_archives_and_failure_preservation) ... ok
+test_repeated_reads_preserve_archive_state_and_logical_budgets (__main__.ArchiveTests.test_repeated_reads_preserve_archive_state_and_logical_budgets) ... ok
+test_response_files_quotes_nesting_and_errors (__main__.ArchiveTests.test_response_files_quotes_nesting_and_errors) ... ok
+test_seeded_archive_graphs_and_library_reentry (__main__.ArchiveTests.test_seeded_archive_graphs_and_library_reentry) ... ok
+test_statistics_are_json_and_do_not_change_output (__main__.ArchiveTests.test_statistics_are_json_and_do_not_change_output) ... ok
+test_strong_weak_common_precedence (__main__.ArchiveTests.test_strong_weak_common_precedence) ... ok
+test_unresolved_weak_and_strong_reference_upgrade (__main__.ArchiveTests.test_unresolved_weak_and_strong_reference_upgrade) ... ok
+test_visibility_propagation (__main__.ArchiveTests.test_visibility_propagation) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 11.373s
+
+OK
+test_canonical_definition_overrides_symbol_type_and_weak_references (__main__.StaticIfuncTests.test_canonical_definition_overrides_symbol_type_and_weak_references) ... ok
+test_empty_irel_boundaries_and_bad_entry (__main__.StaticIfuncTests.test_empty_irel_boundaries_and_bad_entry) ... ok
+test_freestanding_startup_canonical_addresses_models_and_partial (__main__.StaticIfuncTests.test_freestanding_startup_canonical_addresses_models_and_partial) ... ok
+test_installed_static_glibc_threads_tls_ifunc_lifecycle_and_memory (__main__.StaticIfuncTests.test_installed_static_glibc_threads_tls_ifunc_lifecycle_and_memory) ... ok
+test_real_static_gcc_and_clang_driver (__main__.StaticIfuncTests.test_real_static_gcc_and_clang_driver) ... ok
+test_repeat_failure_and_concurrent_invocations (__main__.StaticIfuncTests.test_repeat_failure_and_concurrent_invocations) ... ok
+test_unreferenced_ifunc_resolver_is_not_executed (__main__.StaticIfuncTests.test_unreferenced_ifunc_resolver_is_not_executed) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 3.896s
+
+OK
+test_absent_weak_calls_and_explicit_absolute_references (__main__.StaticPieTests.test_absent_weak_calls_and_explicit_absolute_references) ... ok
+test_bootstrap_relaxation_keeps_call_return_addresses_and_registers (__main__.StaticPieTests.test_bootstrap_relaxation_keeps_call_return_addresses_and_registers) ... ok
+test_bootstrap_rewrite_preserves_other_relocations_in_instruction_prefixes (__main__.StaticPieTests.test_bootstrap_rewrite_preserves_other_relocations_in_instruction_prefixes) ... ok
+test_glibc_startup_aslr_relative_pointers_and_lifecycle (__main__.StaticPieTests.test_glibc_startup_aslr_relative_pointers_and_lifecycle) ... ok
+test_glibc_threaded_aligned_tls_and_ifunc_relocation_order (__main__.StaticPieTests.test_glibc_threaded_aligned_tls_and_ifunc_relocation_order) ... ok
+test_musl_crt_self_relocation_threads_and_lifecycle (__main__.StaticPieTests.test_musl_crt_self_relocation_threads_and_lifecycle) ... ok
+test_output_mode_order_and_archive_only_search (__main__.StaticPieTests.test_output_mode_order_and_archive_only_search) ... ok
+test_reentry_and_native_gcc_static_pie_driver (__main__.StaticPieTests.test_reentry_and_native_gcc_static_pie_driver) ... ok
+test_unsupported_inputs_tls_and_incompatible_options_preserve_output (__main__.StaticPieTests.test_unsupported_inputs_tls_and_incompatible_options_preserve_output) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 7.091s
+
+OK
+test_archives_roots_thin_members_and_final_archive_extraction (__main__.PartialTests.test_archives_roots_thin_members_and_final_archive_extraction) ... ok
+test_atomic_failures_permissions_reproducibility_and_api_reentry (__main__.PartialTests.test_atomic_failures_permissions_reproducibility_and_api_reentry) ... ok
+test_comdat_groups_relocations_and_final_gc (__main__.PartialTests.test_comdat_groups_relocations_and_final_gc) ... ok
+test_debug_initialization_tls_addrsig_and_independent_hosted_consumers (__main__.PartialTests.test_debug_initialization_tls_addrsig_and_independent_hosted_consumers) ... ok
+test_empty_and_unselected_archives_emit_reusable_empty_objects (__main__.PartialTests.test_empty_and_unselected_archives_emit_reusable_empty_objects) ... ok
+test_mixed_addrsig_and_absent_tables_preserve_address_identity (__main__.PartialTests.test_mixed_addrsig_and_absent_tables_preserve_address_identity) ... ok
+test_undefined_roots_survive_partial_stages_and_select_later_archives (__main__.PartialTests.test_undefined_roots_survive_partial_stages_and_select_later_archives) ... ok
+test_unresolved_local_absolute_common_and_multistage_links (__main__.PartialTests.test_unresolved_local_absolute_common_and_multistage_links) ... ok
+test_versions_ifunc_and_shared_final_output (__main__.PartialTests.test_versions_ifunc_and_shared_final_output) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 4.665s
+
+OK
+test_input_failures_preserve_outputs_and_allow_library_reentry (__main__.PublicationFaultTests.test_input_failures_preserve_outputs_and_allow_library_reentry) ... ok
+test_input_short_and_interrupted_reads_retry_without_changing_inputs (__main__.PublicationFaultTests.test_input_short_and_interrupted_reads_retry_without_changing_inputs) ... ok
+test_killed_writer_keeps_output_and_leaves_only_private_incomplete_temp (__main__.PublicationFaultTests.test_killed_writer_keeps_output_and_leaves_only_private_incomplete_temp) ... ok
+test_map_and_image_failures_follow_individual_file_atomicity (__main__.PublicationFaultTests.test_map_and_image_failures_follow_individual_file_atomicity) ... ok
+test_real_file_size_limit_preserves_previous_artifact (__main__.PublicationFaultTests.test_real_file_size_limit_preserves_previous_artifact) ... ok
+test_short_and_interrupted_writes_retry_without_corrupting_images (__main__.PublicationFaultTests.test_short_and_interrupted_writes_retry_without_corrupting_images) ... ok
+test_temp_creation_resource_errors_and_name_collision_retry (__main__.PublicationFaultTests.test_temp_creation_resource_errors_and_name_collision_retry) ... ok
+test_write_close_chmod_and_rename_failures_preserve_existing_outputs (__main__.PublicationFaultTests.test_write_close_chmod_and_rename_failures_preserve_existing_outputs) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 2.570s
+
+OK
+test_gc_archives_partial_links_and_deterministic_reentry (__main__.CopyTests.test_gc_archives_partial_links_and_deterministic_reentry) ... ok
+test_gcc_clang_data_alignment_pointer_identity_and_read_only_storage (__main__.CopyTests.test_gcc_clang_data_alignment_pointer_identity_and_read_only_storage) ... ok
+test_protected_alias_and_invalid_storage_are_explicit_failures (__main__.CopyTests.test_protected_alias_and_invalid_storage_are_explicit_failures) ... ok
+test_read_only_copies_become_read_only_after_loader_startup (__main__.CopyTests.test_read_only_copies_become_read_only_after_loader_startup) ... ok
+test_shared_output_still_requires_pic_and_dead_protected_reference_is_ignored (__main__.CopyTests.test_shared_output_still_requires_pic_and_dead_protected_reference_is_ignored) ... ok
+test_versions_and_preloaded_provider (__main__.CopyTests.test_versions_and_preloaded_provider) ... ok
+test_wide_pc_relative_and_fixed_read_only_addresses (__main__.CopyTests.test_wide_pc_relative_and_fixed_read_only_addresses) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 9.871s
+
+OK
+test_directory_and_path_resource_limits (__main__.SysrootTests.test_directory_and_path_resource_limits) ... ok
+test_isolated_glibc_script_and_hosted_startup (__main__.SysrootTests.test_isolated_glibc_script_and_hosted_startup) ... ok
+test_isolated_musl_static_and_dynamic_library_search (__main__.SysrootTests.test_isolated_musl_static_and_dynamic_library_search) ... ok
+test_library_prefixes_global_paths_and_root_selection (__main__.SysrootTests.test_library_prefixes_global_paths_and_root_selection) ... ok
+test_nested_scripts_static_policy_partial_and_as_needed (__main__.SysrootTests.test_nested_scripts_static_policy_partial_and_as_needed) ... ok
+test_repeat_failure_and_concurrent_distinct_roots (__main__.SysrootTests.test_repeat_failure_and_concurrent_distinct_roots) ... ok
+test_rooted_inputs_are_protected_from_output_and_map_aliases (__main__.SysrootTests.test_rooted_inputs_are_protected_from_output_and_map_aliases) ... ok
+test_script_prefixes_inside_outside_and_canonical_boundaries (__main__.SysrootTests.test_script_prefixes_inside_outside_and_canonical_boundaries) ... ok
+test_search_dir_script_scope_cli_precedence_and_nostdlib (__main__.SysrootTests.test_search_dir_script_scope_cli_precedence_and_nostdlib) ... ok
+test_search_directories_from_library_scripts_are_positional (__main__.SysrootTests.test_search_directories_from_library_scripts_are_positional) ... ok
+test_strict_dependency_paths_and_runtime_strings (__main__.SysrootTests.test_strict_dependency_paths_and_runtime_strings) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 6.920s
+
+OK
+test_archive_verifier_rejects_corruption_and_unsafe_members (__main__.ReleaseTests.test_archive_verifier_rejects_corruption_and_unsafe_members) ... ok
+test_failed_or_mismatched_qualification_cannot_create_artifacts (__main__.ReleaseTests.test_failed_or_mismatched_qualification_cannot_create_artifacts) ... ok
+test_reproducible_archives_and_relocated_linker (__main__.ReleaseTests.test_reproducible_archives_and_relocated_linker) ... ok
+test_snapshot_matches_legacy_manifest_and_normalizes_executable_modes (__main__.ReleaseTests.test_snapshot_matches_legacy_manifest_and_normalizes_executable_modes) ... ok
+test_source_content_modes_and_symlinks_are_checked (__main__.ReleaseTests.test_source_content_modes_and_symlinks_are_checked) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 18.610s
+
+OK
+foundation test: ok
+fir: ok
+test_cli_output_and_map_creation_replacement_and_failure_masks (__main__.PublicationTests.test_cli_output_and_map_creation_replacement_and_failure_masks) ... ok
+test_concurrent_publication_does_not_change_process_umask (__main__.PublicationTests.test_concurrent_publication_does_not_change_process_umask) ... ok
+test_native_object_and_executable_use_the_same_creation_policy (__main__.PublicationTests.test_native_object_and_executable_use_the_same_creation_policy) ... ok
+test_null_output_validates_without_replacing_the_device (__main__.PublicationTests.test_null_output_validates_without_replacing_the_device) ... ok
+test_other_special_outputs_still_fail_without_opening (__main__.PublicationTests.test_other_special_outputs_still_fail_without_opening) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.364s
+
+OK
+frontend unit tests: ok
+test_existing_freestanding_fixture_corpus (__main__.NativeTests.test_existing_freestanding_fixture_corpus) ... ok
+test_failures_preserve_outputs_and_source_aliases (__main__.NativeTests.test_failures_preserve_outputs_and_source_aliases) ... ok
+test_fas_object_with_system_c_startup_and_lifecycle (__main__.NativeTests.test_fas_object_with_system_c_startup_and_lifecycle) ... ok
+test_fas_produced_versioned_dso_with_fas_and_c_consumers (__main__.NativeTests.test_fas_produced_versioned_dso_with_fas_and_c_consumers) ... ok
+test_integer_pointer_sysv_boundary_with_gcc (__main__.NativeTests.test_integer_pointer_sysv_boundary_with_gcc) ... ok
+test_object_relocations_and_independent_linkers (__main__.NativeTests.test_object_relocations_and_independent_linkers) ... ok
+test_shared_library_calls_without_external_linker (__main__.NativeTests.test_shared_library_calls_without_external_linker) ... ok
+test_tool_free_separate_objects_and_archive (__main__.NativeTests.test_tool_free_separate_objects_and_archive) ... ok
+test_unsupported_abi_target_and_output_mode (__main__.NativeTests.test_unsupported_abi_target_and_output_mode) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.173s
+
+OK
+test_archive_shared_library_and_search_paths (__main__.HostedNativeTests.test_archive_shared_library_and_search_paths) ... ok
+test_automatic_libc_startup_and_compiler_plans (__main__.HostedNativeTests.test_automatic_libc_startup_and_compiler_plans) ... ok
+test_closed_and_explicit_freestanding_without_tools (__main__.HostedNativeTests.test_closed_and_explicit_freestanding_without_tools) ... ok
+test_constructor_destructor_and_c_source_compilation (__main__.HostedNativeTests.test_constructor_destructor_and_c_source_compilation) ... ok
+test_embedded_assembly (__main__.HostedNativeTests.test_embedded_assembly) ... ok
+test_embedded_c_and_header_import (__main__.HostedNativeTests.test_embedded_c_and_header_import) ... ok
+test_explicit_hosted_and_argc (__main__.HostedNativeTests.test_explicit_hosted_and_argc) ... ok
+test_failure_preserves_outputs_and_original_c_sources (__main__.HostedNativeTests.test_failure_preserves_outputs_and_original_c_sources) ... ok
+test_hosted_pie_static_and_static_pie (__main__.HostedNativeTests.test_hosted_pie_static_and_static_pie) ... ok
+test_invalid_modes_and_output_override (__main__.HostedNativeTests.test_invalid_modes_and_output_override) ... ok
+test_link_plan_never_executes_external_linker (__main__.HostedNativeTests.test_link_plan_never_executes_external_linker) ... ok
+test_musl_compiler_plan (__main__.HostedNativeTests.test_musl_compiler_plan) ... ok
+test_native_object_combines_embedded_c_and_assembly (__main__.HostedNativeTests.test_native_object_combines_embedded_c_and_assembly) ... ok
+test_no_fas_main_c_harness_and_define_flags (__main__.HostedNativeTests.test_no_fas_main_c_harness_and_define_flags) ... ok
+test_package_thread_flags_reach_c_compilation_and_link_plan (__main__.HostedNativeTests.test_package_thread_flags_reach_c_compilation_and_link_plan) ... ok
+test_static_c_adapters_calls_and_callback_addresses (__main__.HostedNativeTests.test_static_c_adapters_calls_and_callback_addresses) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 4.575s
+
+OK
+test_augmentation_bounds_encoding_and_mutations (__main__.ExceptionTests.test_augmentation_bounds_encoding_and_mutations) ... ok
+test_cross_object_cleanup_rethrow_and_partial_links (__main__.ExceptionTests.test_cross_object_cleanup_rethrow_and_partial_links) ... ok
+test_exceptions_cross_shared_boundaries_in_both_directions (__main__.ExceptionTests.test_exceptions_cross_shared_boundaries_in_both_directions) ... ok
+test_late_dlopen_exceptions_thread_destructors_and_reload (__main__.ExceptionTests.test_late_dlopen_exceptions_thread_destructors_and_reload) ... ok
+test_rtti_typeinfo_identity_and_cpp_global_lifecycle_across_dso (__main__.ExceptionTests.test_rtti_typeinfo_identity_and_cpp_global_lifecycle_across_dso) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 23.620s
+
+OK
+regression checks: 2712 passed
+C export declaration matrix: passed
+C export spelling, omission, diagnostics and header pins: passed
+help replay: 313 replayed, 15 template, 66 prose, 27 unmatched (bound 30)
+all regression checks: 3792 passed
+fas: Clang import command: clang-22 -x c -fsyntax-only -Xclang -ast-dump=json -Xclang -skip-function-bodies -Xclang -fdump-record-layouts-complete -H --target=x86_64-unknown-linux-gnu -Xclang -main-file-name -Xclang fas-c-import-eb18d2d3e1f9a5264a7da7cf765a8f3d.c -ffile-prefix-map=/tmp/build_f75e13_dune/fas-c-unit-065f81/fas-c-import-eb18d2d3e1f9a5264a7da7cf765a8f3d.c=fas-c-import-eb18d2d3e1f9a5264a7da7cf765a8f3d.c -fno-builtin -iquote /tmp/build_f75e13_dune /tmp/build_f75e13_dune/fas-c-unit-065f81/fas-c-import-eb18d2d3e1f9a5264a7da7cf765a8f3d.c

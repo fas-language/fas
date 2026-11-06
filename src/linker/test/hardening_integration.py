@@ -39,6 +39,7 @@ class HardeningTests(unittest.TestCase):
 #include <stdint.h>
 #include <stdio.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -62,12 +63,17 @@ static int can_write(void *pointer) {
   pid_t child=fork(); if(child<0) return -1;
   if(child==0) {
     struct rlimit limit={0,0}; setrlimit(RLIMIT_CORE,&limit);
+    /* RLIMIT_CORE does not stop piped core collectors. Keep deliberate
+       permission faults local to this child and verify the actual signal. */
+    if(prctl(PR_SET_DUMPABLE,0L,0L,0L,0L)) _exit(100);
     signal(SIGSEGV,SIG_DFL);
     __asm__ volatile("orb $0,(%0)"::"r"(pointer):"memory");
     _exit(0);
   }
   int status; if(waitpid(child,&status,0)!=child) return -1;
-  return WIFEXITED(status) && WEXITSTATUS(status)==0;
+  if(WIFEXITED(status) && WEXITSTATUS(status)==0) return 1;
+  if(WIFSIGNALED(status) && WTERMSIG(status)==SIGSEGV) return 0;
+  return -1;
 }
 __attribute__((constructor)) static void init(void){datum=42;}
 int main(int argc,char **argv) {

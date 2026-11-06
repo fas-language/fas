@@ -17,7 +17,7 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--expected-python-cases', type=int, default=266)
+    parser.add_argument('--expected-python-cases', type=int, default=272)
     args = parser.parse_args()
     if args.expected_python_cases <= 0:
         parser.error('--expected-python-cases must be positive')

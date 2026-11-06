@@ -5,10 +5,10 @@ open Fas_linker
 let copy_link path data =
   let library = Shared_object.parse ~path data in
   if Array.length library.exports <= 65536 then begin
-    let data_symbols =
+    let symbols =
       Array.to_list library.exports
       |> List.filter (fun (s : Shared_object.symbol) ->
-          s.kind = 1 && s.size >= 0L && s.size <= 1048576L)
+          List.mem s.kind [ 1; 2; 10 ] && s.size >= 0L && s.size <= 1048576L)
       |> List.to_seq |> Seq.take 32 |> Array.of_seq
     in
     let key (s : Shared_object.symbol) =
@@ -16,7 +16,7 @@ let copy_link path data =
       | Some version when not s.default -> s.name ^ "@" ^ version
       | _ -> s.name
     in
-    let code = Bytes.make (4 + (4 * Array.length data_symbols)) '\000' in
+    let code = Bytes.make (4 + (4 * Array.length symbols)) '\000' in
     Bytes.set code 0 '\195';
     let symbol name kind definition : Elf_object.symbol =
       { name; kind; definition; binding = 1; visibility = 0; size = 0L }
@@ -29,18 +29,18 @@ let copy_link path data =
           symbols =
             Array.append
               [| symbol "_start" 2 (Section (0, 0L)) |]
-              (Array.map (fun s -> symbol (key s) 1 Undefined) data_symbols);
+              (Array.map (fun s -> symbol (key s) s.kind Undefined) symbols);
           relocations =
             Array.mapi
-              (fun n _ ->
+              (fun n (s : Shared_object.symbol) ->
                 {
                   Elf_object.section = 0;
                   offset = 4 + (n * 4);
                   symbol = n + 1;
-                  kind = 2;
-                  addend = -4L;
+                  kind = (if s.kind = 1 then 2 else 10);
+                  addend = (if s.kind = 1 then -4L else 0L);
                 })
-              data_symbols;
+              symbols;
         }
       |> Bytes.to_string
     in
@@ -60,7 +60,7 @@ let copy_link path data =
           (fun (s : Shared_object.symbol) ->
             Hashtbl.replace resolved.imports (key s)
               { Resolver.library = Some 0; symbol = s; visibility = 0 })
-          data_symbols;
+          symbols;
         let resolved = { resolved with shared = [| library |] } in
         let kept =
           Array.map
@@ -68,7 +68,9 @@ let copy_link path data =
             resolved.objects
         in
         let resolved, kept, copies = Copy_relocation.prepare ~options ~kept resolved in
-        let resolved, kept, got = Got.prepare ~kept resolved in
+        let resolved, kept, got =
+          Got.prepare ~canonical_functions:(not pie) ~kept resolved
+        in
         ignore (Dynamic.prepare ~options ~kept ~got ~module_base:None ~copies resolved))
       [ false; true ]
   end
@@ -159,8 +161,10 @@ let () =
               (fun options ->
                 ignore
                   (Partial_link.link_inputs ~options [ Input.Object { path; data } ]))
-              [ Options.default;
-                { Options.default with undefined = [ "__fas_fuzz_required_root" ] } ]
+              [
+                Options.default;
+                { Options.default with undefined = [ "__fas_fuzz_required_root" ] };
+              ]
           else
             List.iter
               (fun options ->

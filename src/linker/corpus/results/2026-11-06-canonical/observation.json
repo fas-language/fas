@@ -1,0 +1,192 @@
+{
+  "scope": "canonical function-address repair and bounded-campaign acceptance; not complete hosted qualification",
+  "parent_commit": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+  "host_linker_sha256": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+  "host_root": {
+    "exit": 0,
+    "compiler_checks": 3792,
+    "python_cases": 272,
+    "python_groups": 45,
+    "skips": [],
+    "log_sha256": "4d9c259e01bf3d176428e450067ffad64c8591d0aba96e26f97884571df7b92e"
+  },
+  "canonical_matrix": {
+    "providers": [
+      "FUNC",
+      "IFUNC"
+    ],
+    "constants": [
+      "R_X86_64_32",
+      "R_X86_64_32S"
+    ],
+    "default_import_tools": [
+      "Fas",
+      "GNU",
+      "LLD 22"
+    ],
+    "mixed_import_tools": [
+      "Fas",
+      "GNU"
+    ],
+    "executions": 40,
+    "preload": true,
+    "local_name_collision": true,
+    "absent_weak_function_is_zero": true,
+    "protected_and_pie_rejected": true
+  },
+  "superseded_attempts": {
+    "initial_root": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106/canonical-root-regressions.log",
+      "sha256": "34f3e3911d461bdac1a9e64eae4540c292f9b2ef963bc7dd8d1cfd61054984e9",
+      "failures": "two RELRO intentional-fault child timeouts with piped crash collector; no final-source pass inferred"
+    },
+    "mixed_version_probe": {
+      "path": "mixed-version-before.log",
+      "sha256": "f767241f37b7f4cfd29b294f03cf2e15b46a6d3e2ea55e194323e4077ed9bbcd",
+      "failures": "Fas and LLD 22 return 99 for mismatched function-pointer addresses; GNU succeeds"
+    }
+  },
+  "latest_hosted_observation": {
+    "observed_at": "2026-11-06T18:39:24.397002+00:00",
+    "runs": [
+      {
+        "run": 42265587493,
+        "head_sha": "1685dad347902e6664271515799ac1b3ea9b19ed",
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": [
+          {
+            "name": "fuzz",
+            "id": 128056534147,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          }
+        ]
+      },
+      {
+        "run": 42265583391,
+        "head_sha": "1685dad347902e6664271515799ac1b3ea9b19ed",
+        "event": "push",
+        "status": "completed",
+        "conclusion": "cancelled",
+        "jobs": [
+          {
+            "name": "correctness",
+            "id": 128056513618,
+            "status": "completed",
+            "conclusion": "cancelled",
+            "step": []
+          }
+        ]
+      },
+      {
+        "run": 42266866311,
+        "head_sha": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+        "event": "push",
+        "status": "completed",
+        "conclusion": "cancelled",
+        "jobs": [
+          {
+            "name": "correctness",
+            "id": 128061084806,
+            "status": "completed",
+            "conclusion": "cancelled",
+            "step": []
+          }
+        ]
+      },
+      {
+        "run": 42266897476,
+        "head_sha": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+        "event": "workflow_dispatch",
+        "status": "in_progress",
+        "conclusion": null,
+        "jobs": [
+          {
+            "name": "fuzz",
+            "id": 128061057230,
+            "status": "in_progress",
+            "conclusion": null,
+            "step": [
+              "Coverage-guided campaigns"
+            ]
+          },
+          {
+            "name": "gcc-torture",
+            "id": 128061057618,
+            "status": "completed",
+            "conclusion": "failure",
+            "step": []
+          },
+          {
+            "name": "popular-c (curl, curl-8.14.1)",
+            "id": 128061057739,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "correctness",
+            "id": 128061057761,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "popular-c (bzip2, bzip2-1.0.8)",
+            "id": 128061057812,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "popular-c (redis, redis-7.2.8)",
+            "id": 128061057838,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "popular-c (libarchive, libarchive-3.8.11)",
+            "id": 128061057854,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "popular-c (libpng, libpng-1.6.47)",
+            "id": 128061057935,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          },
+          {
+            "name": "popular-c (lua, lua-5.1.5)",
+            "id": 128061057989,
+            "status": "completed",
+            "conclusion": "success",
+            "step": []
+          }
+        ]
+      }
+    ]
+  },
+  "cache": "/home/glonex/.cache/fas-linker-qualification/hosted-repair-20261106",
+  "remaining": [
+    "complete hosted matrix on repaired source",
+    "retained 600-second-per-target fuzz selection",
+    "compatibility freeze and release publication"
+  ],
+  "bounded_fuzz": {
+    "seconds": 120,
+    "modes": [
+      "copy-link"
+    ],
+    "executions": 82626,
+    "saved_crashes": 0,
+    "saved_hangs": 0,
+    "target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396"
+  }
+}

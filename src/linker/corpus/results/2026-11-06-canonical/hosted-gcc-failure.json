@@ -1,0 +1,84 @@
+{
+  "run": 42266897476,
+  "job": 128061057618,
+  "head": "3f3d9bcbb84cd7e4c62485f3175da2be0bda9361",
+  "artifact": {
+    "artifact_id": 13528422809,
+    "name": "linker-gcc-torture-42266897476-1",
+    "size": 14954368,
+    "sha256": "b1be05aac577271b53ee79c379fd7e39c28a37ce941eb436197b9723b97ee78a",
+    "github_digest_verified": true,
+    "zip_crc_verified": true
+  },
+  "linker_sha256": "340834d902fda5d834779c64d0bd1883853df4a671aff6116b128180cba181bc",
+  "gcc_torture": {
+    "source_commit": "5115c7e447fc07457443df874bf57840e8316d5f",
+    "optimizations": [
+      "-O0",
+      "-O2",
+      "-Os"
+    ],
+    "pattern": "*",
+    "gcc_version": "15.2.0",
+    "driver_flags": [
+      "-fno-use-linker-plugin",
+      "-U_FORTIFY_SOURCE"
+    ],
+    "gnu_capability_probe_flags": [
+      "--no-warnings"
+    ],
+    "expected_executions": 4974,
+    "no_trampolines": true,
+    "scope": "official execute.exp and dg directives; native Linux x86-64; LTO excluded",
+    "same_objects": "GNU replaces compiler temporaries with retained Fas-link inputs",
+    "passes": [
+      {
+        "linker": "fas",
+        "exit": 1,
+        "counts": {
+          "PASS": 9938,
+          "UNSUPPORTED": 57,
+          "FAIL": 5,
+          "UNRESOLVED": 5
+        },
+        "execution_passes": 4969,
+        "failures": [
+          "FAIL: gcc.c-torture/execute/930513-1.c  -O0  (test for excess errors)",
+          "UNRESOLVED: gcc.c-torture/execute/930513-1.c  -O0  compilation failed to produce executable",
+          "FAIL: gcc.c-torture/execute/930513-1.c  -Os  (test for excess errors)",
+          "UNRESOLVED: gcc.c-torture/execute/930513-1.c  -Os  compilation failed to produce executable",
+          "FAIL: gcc.c-torture/execute/pr54937.c  -O0  (test for excess errors)",
+          "UNRESOLVED: gcc.c-torture/execute/pr54937.c  -O0  compilation failed to produce executable",
+          "FAIL: gcc.c-torture/execute/pr54937.c  -O2  (test for excess errors)",
+          "UNRESOLVED: gcc.c-torture/execute/pr54937.c  -O2  compilation failed to produce executable",
+          "FAIL: gcc.c-torture/execute/pr54937.c  -Os  (test for excess errors)",
+          "UNRESOLVED: gcc.c-torture/execute/pr54937.c  -Os  compilation failed to produce executable"
+        ],
+        "execution_labels_sha256": "9ba1370dbc108a89bb91c855ed4caba8b7e20ad2f358d9208a46d6fb76ad6dc2",
+        "sum_sha256": "7f4f30d59b636dd5d9a285e110f34572e99a1b397f890610393324e57df462e1",
+        "log_sha256": "4053365a7cb66da6589831036de49f71396cb01c5535d3d87c8343c1dc2468cd"
+      },
+      {
+        "linker": "gnu",
+        "exit": 0,
+        "counts": {
+          "PASS": 9948,
+          "UNSUPPORTED": 57
+        },
+        "execution_passes": 4974,
+        "failures": [],
+        "execution_labels_sha256": "0617d90f4bdc47d98e848621cd6628117c1c26542c84c7991e9b98fc6294d5b8",
+        "sum_sha256": "86172b0bc46ca10c7fab85f8432345d1b84887186f6a7ff83a66d9766e4ec436",
+        "log_sha256": "93aef661656d7cc18b8b37763a815dd691a7a44b8d6037800c4312255c793984"
+      }
+    ],
+    "runtest_sha256": "c285da648b5514e9e06a506f6b6b229657a8001c8c8506d0e35a2bf0f754ab08",
+    "primary_links": {
+      "fas": 4974,
+      "gnu": 4974
+    },
+    "same_object_keys": 4974,
+    "linker_invocations_sha256": "0100f9faf3d4cc2d80fdee59b67d82c8c0fc6fbf090e064f61b8c65298ec6697",
+    "compiler_invocations_sha256": "28a780e7b02fffaa9533242dd8aa20bd6ec037201ecea7c3be2b704d1d636a68"
+  }
+}

@@ -14,6 +14,7 @@ kernel or build system using it has been qualified.
 | Outputs | Static/dynamic ET_EXEC, loader-backed PIE, documented CRT-relocated static PIE, ET_DYN shared libraries and partial ET_REL |
 | Default invocation | `a.out`, `_start`, static ET_EXEC; no implicit library search directories |
 | Dynamic policy | Eager binding, RELRO enabled, non-executable stack, no writable executable load segment or text relocations |
+| Non-PIC function addresses | Non-PIE imported FUNC/IFUNC 32/32S constants use canonical PLT addresses; protected functions and narrow PIE imports remain rejected |
 | Dynamic metadata defaults | SysV hash, new dtags, no build ID; explicit options select the documented alternatives |
 | Library discovery | Explicit `-L`, sysroot, runpath/rpath and strict-dependency options; not the entire GNU implicit host search policy |
 | Partial links | No implicit `_start` archive extraction; valid inputs with no selected objects emit a reusable empty ET_REL; no input files remains an error |
@@ -88,6 +89,9 @@ input fuzzing checks separate failure properties. Both are required evidence.
 The weekly fuzz selection budgets ten minutes per target; this is a bounded
 campaign, not continuous fuzzing or proof of correctness. Publish actual
 elapsed time, coverage metrics and every finding with its source identity.
+Campaign acceptance checks the requested duration, completed target selection,
+execution and instrumented-edge counts, and saved findings. Upload smoke tests
+cannot satisfy the ten-minute selection.
 
 Source/binary archives must pass integrity checks, source rebuilding and a linked
 program smoke test. Checksums/inventories are not signatures. The complete hosted

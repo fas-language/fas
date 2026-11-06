@@ -1,0 +1,19 @@
+before 01a8d5727cd3 link 1 run None
+before 0468ea717c89 link 1 run None
+before 22b1c4f325e6 link 0 run 0
+before 37c728d1dbb6 link 1 run None
+before 61197a7d4bfa link 1 run None
+before e0a5d34146d4 link 1 run None
+fas 01a8d5727cd3 link 0 run 0
+fas 0468ea717c89 link 0 run 0
+fas 22b1c4f325e6 link 0 run 0
+fas 37c728d1dbb6 link 0 run 0
+fas 61197a7d4bfa link 0 run 0
+fas e0a5d34146d4 link 0 run 0
+gnu 01a8d5727cd3 link 0 run 0
+gnu 0468ea717c89 link 0 run 0
+gnu 22b1c4f325e6 link 0 run 0
+gnu 37c728d1dbb6 link 0 run 0
+gnu 61197a7d4bfa link 0 run 0
+gnu e0a5d34146d4 link 0 run 0
+PASS: six identical objects execute through Fas and GNU; five reproduce the old failure

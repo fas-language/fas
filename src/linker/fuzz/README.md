@@ -8,6 +8,11 @@ python3 src/linker/fuzz/run.py --output /tmp/fas-linker-fuzz --seconds 180
 
 The destination must be new. It preserves the instrumented target, source
 snapshot, generated seeds, AFL logs/queues/crashes/hangs and `report.json`.
+The runner also writes `verification.json` after the selected campaigns finish.
+Acceptance requires exactly the requested targets and duration, successful AFL
+exits, positive execution/edge counts, complete finding statistics and no saved
+crashes or hangs. Elapsed time must meet the requested duration; AFL's integral
+`run_time` may round down by one second. A missing statistic is not a zero.
 Hosted uploads wrap this directory in `linker-fuzz.tar.gz` to retain AFL's colon
 filenames; the report is also uploaded separately. The optional two-second
 manual selection checks artifact delivery only and does not qualify a release.
@@ -45,10 +50,12 @@ The `static-pie-link` target exercises interpreter-free ET_DYN emission with and
 without GC, including bootstrap GOTPCRELX rewrites, relative pointers and IFUNC
 inputs. It does not execute emitted images or exercise a libc self-relocator.
 The `copy-link` target mutates DSO metadata, builds bounded in-memory direct data
-references, and exercises COPY/GOT/dynamic planning for fixed and PIE output. It
-does not publish or execute images. Seeds include aligned BSS, read-only/RELRO
+and function references, and exercises COPY/GOT/dynamic planning for fixed and
+PIE output. Fixed-output function constants also exercise canonical PLT planning.
+It does not publish or execute images. Seeds include aligned BSS, read-only/RELRO
 data, pointer initializers and distinct symbol versions. At most 32 objects of
-1 MiB each are selected, and the DSO export count is capped at 65,536.
+1 MiB each are selected, and the DSO export count is capped at 65,536. Function
+selection includes ordinary and indirect functions within the same bounds.
 Seeds also include personality/LSDA unwind metadata, static IFUNC references,
 SystemTap notes, repeated GNU properties and GNU/LLD multi-provider version tables.
 
@@ -76,6 +83,19 @@ Report execution counts, elapsed time, discovered edges, corpus size and every
 finding. AFL bitmap occupancy is not source/branch coverage. Short campaigns
 cannot substitute for long-running CI fuzzing, semantic differential testing,
 failure injection or large-program compatibility tests.
+
+Independently check a retained report against a full hosted selection:
+
+```sh
+python3 src/linker/fuzz/verify.py --report /path/to/linker-fuzz/report.json \
+  --seconds 600 --head COMMIT_SHA --output /tmp/fuzz-verification.json
+```
+
+Use the actual commit SHA. `--head` also requires a clean recorded working tree.
+Use `--modes` for an explicitly smaller selection. A two-second upload smoke
+passes only a two-second selection and fails the 600-second check. The verifier
+reads JSON without running the target; a passing report check does not validate
+download integrity or independently attest the self-reported measurements.
 
 The [semantic checkpoint](../corpus/results/2026-11-06-semantic/README.md)
 records a repaired symbol-version finding and a later untriaged timeout.
