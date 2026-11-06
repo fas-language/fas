@@ -1,0 +1,108 @@
+{
+  "status": "not-reproduced",
+  "target_sha256": "548daf4e154d649e7d97ceedbd5a2bd2cd2619056718bf851e93fe0a52411626",
+  "findings": [
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/fuzz-thin-fifteen-20261106/archive/default/hangs/id:000000,src:000283,time:408895,execs:317451,op:quick,pos:776,val:+13",
+      "bytes": 5418,
+      "sha256": "922cd31fe811425c416c67742377c51963b11c71ea812b70dac9a38873dde01e",
+      "runs": [
+        {
+          "exit": 0,
+          "stderr": "",
+          "elapsed_seconds": 0.0043353710061637685
+        },
+        {
+          "exit": 0,
+          "stderr": "",
+          "elapsed_seconds": 0.00406212400412187
+        },
+        {
+          "exit": 0,
+          "stderr": "",
+          "elapsed_seconds": 0.003046523008379154
+        },
+        {
+          "exit": 0,
+          "stderr": "",
+          "elapsed_seconds": 0.005689522004104219
+        },
+        {
+          "exit": 0,
+          "stderr": "",
+          "elapsed_seconds": 0.0035049900034209713
+        }
+      ],
+      "normal_cli": {
+        "exit": 1,
+        "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/fuzz-thin-fifteen-20261106/archive/default/hangs/id:000000,src:000283,time:408895,execs:317451,op:quick,pos:776,val:+13(start.o): section link: value 0x60000 exceeds supported limit 8\n",
+        "elapsed_seconds": 0.0055936520075192675
+      }
+    }
+  ],
+  "normal_cli_sha256": "84a1f3ec7f87db3f88928ce7f1ed7d7ba4ac823f7d26efb6210162fd6aff5cd0",
+  "host_snapshot": {
+    "/proc/loadavg": "3.58 5.31 5.26 3/2317 1585155\n",
+    "/proc/pressure/cpu": "some avg10=2.07 avg60=2.00 avg300=2.68 total=2090523794\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+    "/proc/pressure/memory": "some avg10=0.00 avg60=0.01 avg300=0.14 total=42078701\nfull avg10=0.00 avg60=0.01 avg300=0.12 total=33709785\n"
+  },
+  "root_cause": "unknown",
+  "note": "Original campaign remains failed with one saved timeout. Retain this input as a watchlist item; no claim that host scheduling caused it.",
+  "followup": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/archive-timeout-followup-20261106/report.json",
+    "sha256": "794ebac141977f9a9a355f2ba443c39fd5d3d39ed23af277a4c6b437a48eec81",
+    "direct_replays": 1000,
+    "stats": {
+      "start_time": "1793976704",
+      "last_update": "1793977304",
+      "run_time": "600",
+      "fuzzer_pid": "1588708",
+      "cycles_done": "10",
+      "cycles_wo_finds": "0",
+      "time_wo_finds": "65",
+      "fuzz_time": "316",
+      "calibration_time": "2",
+      "cmplog_time": "0",
+      "sync_time": "0",
+      "trim_time": "280",
+      "execs_done": "429568",
+      "execs_per_sec": "715.93",
+      "execs_ps_last_min": "650.86",
+      "corpus_count": "183",
+      "corpus_favored": "97",
+      "corpus_found": "182",
+      "corpus_imported": "0",
+      "corpus_variable": "0",
+      "max_depth": "6",
+      "cur_item": "157",
+      "pending_favs": "0",
+      "pending_total": "13",
+      "stability": "100.00%",
+      "bitmap_cvg": "0.78%",
+      "saved_crashes": "0",
+      "saved_hangs": "0",
+      "total_tmout": "0",
+      "last_find": "1793977298",
+      "last_crash": "0",
+      "last_hang": "0",
+      "execs_since_crash": "429568",
+      "exec_timeout": "2000",
+      "slowest_exec_ms": "0",
+      "peak_rss_mb": "0",
+      "cpu_affinity": "-1",
+      "edges_found": "511",
+      "total_edges": "65536",
+      "var_byte_count": "0",
+      "havoc_expansion": "2",
+      "auto_dict_entries": "0",
+      "testcache_size": "945220",
+      "testcache_count": "183",
+      "testcache_evict": "0",
+      "afl_banner": "/home/glonex/.cache/fas-linker-qualification/fuzz-thin-fifteen-20261106/target.exe",
+      "afl_version": "++4.33c",
+      "target_mode": "shmem_testcase default",
+      "command_line": "afl-fuzz -i /home/glonex/.cache/fas-linker-qualification/archive-timeout-followup-20261106/inputs -o /home/glonex/.cache/fas-linker-qualification/archive-timeout-followup-20261106/campaign -m none -t 2000 -V 600 -- /home/glonex/.cache/fas-linker-qualification/fuzz-thin-fifteen-20261106/target.exe archive @@"
+    },
+    "classification": "not-reproduced"
+  }
+}

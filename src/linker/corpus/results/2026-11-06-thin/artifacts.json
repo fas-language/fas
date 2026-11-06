@@ -1,0 +1,17 @@
+{
+  "archives": {
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/ubuntu24-thin-fifteen-20261106/results/linker-release/fas-ld-0.7-dev-linux-x86_64.tar.gz",
+      "bytes": 1849581,
+      "sha256": "72c9f688cf916d0de7fdd11a2aa8522eaefe4f92dd1626838d2912afd01e4b29"
+    },
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/ubuntu24-thin-fifteen-20261106/results/linker-release/fas-ld-0.7-dev-linux-x86_64-source.tar.gz",
+      "bytes": 3032350,
+      "sha256": "41d68b36ed8b92a63e48a8d5fa8ead1e18960de6ddb57135a78ca63d27ab8389"
+    }
+  },
+  "source_snapshot_changes": [],
+  "host_linker_sha256": "84a1f3ec7f87db3f88928ce7f1ed7d7ba4ac823f7d26efb6210162fd6aff5cd0",
+  "clean_linker_sha256": "c6e5a7a5ed11dcb620ce13606d30b3ac30274fb6817b85d6a42e06d904cb1c4a"
+}

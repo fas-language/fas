@@ -12,6 +12,25 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Real thin archives and timeout triage — 2026-11-06
+
+The [thin-archive checkpoint](corpus/results/2026-11-06-thin/README.md) repairs
+GNU ar's terminal slash on references to members with 15-character basenames.
+Real libarchive inputs exposed this rejection; reduced GNU/LLD comparisons and
+indexed/unindexed, final/partial tests now pass. Lua and libarchive pass regular,
+thin and both mixed partial-link orders with Fas/GNU/LLD final consumers:
+36 links, 276 runtime checks and 473,820 libarchive assertions. A fresh Ubuntu
+Lua rebuild adds GCC 13/LLD 18 coverage.
+
+The host gate passes 3,792 compiler checks and 265 linker cases without skips;
+fresh Ubuntu correctness, SQLite's 1,300-script extraquick suite per linker,
+installation, source rebuilding and reproducible packages pass. All 355 retained
+real-program outputs relink byte-identically with the repaired binary.
+Both the prior shared-output timeout and a new archive timeout fail to reproduce
+on replay and separate 600-second follow-ups. Their causes remain unknown;
+inputs stay on the watchlist and original failed campaigns remain failed.
+Hosted/sustained qualification, final contract review and publication remain open.
+
 ## Partial links and version visibility — 2026-11-06
 
 The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) adds
@@ -26,8 +45,9 @@ skips. Fresh Ubuntu correctness, 3,072 generated-program executions, six-project
 upstream qualification and 355 current-binary byte-equivalent relinks pass. The
 original failing fuzz campaign and interrupted interim repair remain distinct
 from final-source evidence. Eight final-source output campaigns save no crashes
-but one timeout; its triage is still open, so the fuzz acceptance gate is not
-passed. The proposed contract keeps the internal OCaml API source-version-coupled.
+but one timeout; triage was still open at this checkpoint. The later thin-archive
+checkpoint records follow-ups without relabeling this campaign as passing.
+The proposed contract keeps the internal OCaml API source-version-coupled.
 
 ## Operational failures and local archives — 2026-11-06
 

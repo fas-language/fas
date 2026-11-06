@@ -1,0 +1,24 @@
+{
+  "failed_archive_pipeline": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/archive-pipelines-20261106/report.json",
+    "sha256": "76f58eb3f2fe7867255d116ae061990745eb350749f0fab27c373f7a8689920f",
+    "status": "failed",
+    "reason": "GNU thin archive compatibility failure on 15-character member names, repaired in archive.ml"
+  },
+  "interim_pass": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/archive-pipelines-fixed-20261106/report.json",
+    "sha256": "116fce61f15cc0aef1072ea2177a8a6b94d9ca9d900aaacfed54f2b1bb4e62d5",
+    "status": "passed",
+    "note": "superseded by final harness snapshot (unused import removal only)"
+  },
+  "regression_before": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/thin-fifteen-before-20261106.log",
+    "sha256": "c1d14568de7b548f7f80c2aa8d447868478bf0543695b4485a3c8a3bc80ba824",
+    "status": "failed in Fas; GNU and LLD controls passed"
+  },
+  "regression_after": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/thin-fifteen-after-20261106.log",
+    "sha256": "acab9ff34cf4374b188914d369f7b3622dffdbb071ae2eee11ffe8d5b7735928",
+    "status": "all six thin archive cases passed"
+  }
+}

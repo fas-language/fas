@@ -122,6 +122,14 @@ let parse ~path data =
             fail "BSD extended names/indexes are not supported yet"
           else if String.starts_with ~prefix:"/" raw_name then
             let reference = String.sub raw_name 1 (String.length raw_name - 1) in
+            (* GNU ar can preserve the short-name terminator at byte 15 when
+               rewriting a 15-character name as a thin long-name reference.
+               GNU ld and LLD accept the resulting "/0             /". *)
+            let reference =
+              if thin && String.ends_with ~suffix:"/" reference then
+                String.sub reference 0 (String.length reference - 1)
+              else reference
+            in
             let reference =
               match String.index_opt reference ':' with
               | None -> reference

@@ -1,0 +1,221 @@
+{
+  "classification": "not-reproduced",
+  "root_cause": "unknown",
+  "note": "Original failed campaign remains failed. No confirmed linker hang, no claim that scheduling caused it. Retain the input and continue watching for recurrence.",
+  "input_sha256": "dbd8edd78c1e1c93c2b491f3e0c9b45b0bc0d7ade8a80d5e0a8bc755f5f020b9",
+  "original_replay": {
+    "input_sha256": "dbd8edd78c1e1c93c2b491f3e0c9b45b0bc0d7ade8a80d5e0a8bc755f5f020b9",
+    "target_sha256": "716d27cc866aa82ba69b2bd3c377b1122a8f2cdfe212f9e9358f8b0acc7a6c84",
+    "runs": [
+      {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed_seconds": 0.0027180440083611757
+      },
+      {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed_seconds": 0.005263048995402642
+      },
+      {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "elapsed_seconds": 0.005162439003470354
+      }
+    ],
+    "normal_cli_sha256": "74576f508c7524cd8ce57e85d8e1627f1fbb3bd39368c80a8b2de6e35ffb299c",
+    "normal_cli_runs": [
+      {
+        "command": [
+          "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+          "-shared",
+          "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/shared-link/default/hangs/id:000000,src:000508,time:269971,execs:139084,op:havoc,rep:1",
+          "-o",
+          "/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/normal.so"
+        ],
+        "exit": 1,
+        "elapsed_seconds": 0.006002948997775093,
+        "stdout": "",
+        "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/shared-link/default/hangs/id:000000,src:000508,time:269971,execs:139084,op:havoc,rep:1: .debug_info+0x51 referencing symbol #7: R_X86_64_32 overflow: result 0x400000000000\n"
+      },
+      {
+        "command": [
+          "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+          "-shared",
+          "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/shared-link/default/hangs/id:000000,src:000508,time:269971,execs:139084,op:havoc,rep:1",
+          "-o",
+          "/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/normal-gc.so",
+          "--gc-sections"
+        ],
+        "exit": 1,
+        "elapsed_seconds": 0.0057374169991817325,
+        "stdout": "",
+        "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/shared-link/default/hangs/id:000000,src:000508,time:269971,execs:139084,op:havoc,rep:1: .debug_info+0x51 referencing symbol #7: R_X86_64_32 overflow: result 0x400000000000\n"
+      }
+    ],
+    "afl_environment": {
+      "AFL_NO_UI": "1",
+      "AFL_SKIP_CPUFREQ": "1",
+      "AFL_NO_AFFINITY": "1",
+      "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1",
+      "AFL_CRASH_EXITCODE": "2"
+    },
+    "afl_replays": [
+      {
+        "iteration": 0,
+        "exit": 1,
+        "elapsed_seconds": 0.06470030499622226,
+        "stdout": "\u001b[1;93m[!] \u001b[1;97mWARNING: \u001b[0mOld fork server model is used by the target, this still works though.\u001b[0m\n\u001b[1;94m[*] \u001b[0mAcquired new map size for target: 65536 bytes\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mReading from directory '/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs'...\u001b[0m\n\u001b[1;94m[*] \u001b[0mScanning '/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs'...\u001b[0m\n\u001b[?25h\u001b[0m\u001b[1;91m\n[-]  SYSTEM ERROR : \u001b[0mUnable to request new process from fork server (OOM?)\u001b[1;91m\n    Stop location : \u001b[0mafl_fsrv_run_target(), src/afl-forkserver.c:2063\n\u001b[1;91m       OS message : \u001b[0mBad file descriptor\n",
+        "stderr": "",
+        "maps": {}
+      }
+    ],
+    "followup_command": [
+      "nice",
+      "-n",
+      "10",
+      "afl-fuzz",
+      "-i",
+      "/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs",
+      "-o",
+      "/home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/campaign",
+      "-m",
+      "none",
+      "-t",
+      "2000",
+      "-V",
+      "600",
+      "--",
+      "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/target.exe",
+      "shared-link",
+      "@@"
+    ],
+    "followup": {
+      "returncode": 0,
+      "elapsed_seconds": 600.5879107369983,
+      "stats": {
+        "start_time": "1793975574",
+        "last_update": "1793976174",
+        "run_time": "600",
+        "fuzzer_pid": "609118",
+        "cycles_done": "0",
+        "cycles_wo_finds": "0",
+        "time_wo_finds": "33",
+        "fuzz_time": "298",
+        "calibration_time": "8",
+        "cmplog_time": "0",
+        "sync_time": "0",
+        "trim_time": "292",
+        "execs_done": "440771",
+        "execs_per_sec": "734.61",
+        "execs_ps_last_min": "925.65",
+        "corpus_count": "658",
+        "corpus_favored": "248",
+        "corpus_found": "657",
+        "corpus_imported": "0",
+        "corpus_variable": "103",
+        "max_depth": "8",
+        "cur_item": "599",
+        "pending_favs": "47",
+        "pending_total": "428",
+        "stability": "99.52%",
+        "bitmap_cvg": "3.79%",
+        "saved_crashes": "0",
+        "saved_hangs": "0",
+        "total_tmout": "0",
+        "last_find": "1793976173",
+        "last_crash": "0",
+        "last_hang": "0",
+        "execs_since_crash": "440771",
+        "exec_timeout": "2000",
+        "slowest_exec_ms": "0",
+        "peak_rss_mb": "0",
+        "cpu_affinity": "-1",
+        "edges_found": "2486",
+        "total_edges": "65536",
+        "var_byte_count": "12",
+        "havoc_expansion": "0",
+        "auto_dict_entries": "0",
+        "testcache_size": "2827731",
+        "testcache_count": "658",
+        "testcache_evict": "0",
+        "afl_banner": "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/target.exe",
+        "afl_version": "++4.33c",
+        "target_mode": "shmem_testcase default",
+        "command_line": "afl-fuzz -i /home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs -o /home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/campaign -m none -t 2000 -V 600 -- /home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/target.exe shared-link @@"
+      }
+    }
+  },
+  "current_replay": {
+    "cli_sha256": "84a1f3ec7f87db3f88928ce7f1ed7d7ba4ac823f7d26efb6210162fd6aff5cd0",
+    "target_sha256": "548daf4e154d649e7d97ceedbd5a2bd2cd2619056718bf851e93fe0a52411626",
+    "target_source": "/home/glonex/.cache/fas-linker-qualification/fuzz-thin-fifteen-20261106/source",
+    "runs": [
+      {
+        "iteration": 0,
+        "exit": 0,
+        "elapsed_seconds": 0.0035283530014567077
+      },
+      {
+        "iteration": 1,
+        "exit": 0,
+        "elapsed_seconds": 0.003138044005027041
+      },
+      {
+        "iteration": 2,
+        "exit": 0,
+        "elapsed_seconds": 0.0030182790069375187
+      },
+      {
+        "iteration": 3,
+        "exit": 0,
+        "elapsed_seconds": 0.003190845003700815
+      },
+      {
+        "iteration": 4,
+        "exit": 0,
+        "elapsed_seconds": 0.003254034003475681
+      },
+      {
+        "iteration": 5,
+        "exit": 0,
+        "elapsed_seconds": 0.0035022840020246804
+      },
+      {
+        "iteration": 6,
+        "exit": 0,
+        "elapsed_seconds": 0.0037873919936828315
+      },
+      {
+        "iteration": 7,
+        "exit": 0,
+        "elapsed_seconds": 0.003607262988225557
+      },
+      {
+        "iteration": 8,
+        "exit": 0,
+        "elapsed_seconds": 0.003362820003530942
+      },
+      {
+        "iteration": 9,
+        "exit": 0,
+        "elapsed_seconds": 0.0031695939978817478
+      },
+      {
+        "gc": false,
+        "exit": 1,
+        "elapsed_seconds": 0.0031227760046022013,
+        "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs/saved-timeout.o: .debug_info+0x51 referencing symbol #7: R_X86_64_32 overflow: result 0x400000000000\n"
+      },
+      {
+        "gc": true,
+        "exit": 1,
+        "elapsed_seconds": 0.003157982006086968,
+        "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/shared-timeout-triage-20261106/inputs/saved-timeout.o: .debug_info+0x51 referencing symbol #7: R_X86_64_32 overflow: result 0x400000000000\n"
+      }
+    ]
+  }
+}

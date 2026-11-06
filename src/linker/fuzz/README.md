@@ -29,7 +29,8 @@ bounded debug-section decompression independently. No target executes emitted
 programs or fuzzes the system loader. A campaign exits unsuccessfully when AFL
 saves findings; inspect the preserved report even when the runner exits nonzero.
 The `metadata-link` target exercises GNU/both hash styles, SHA-1/MD5 build IDs,
-version aliases and GC. Thin archive containers have seeds, but parser fuzzing
+version aliases and GC. Thin archive containers, including GNU's 15-character
+member-reference form, have seeds, but parser fuzzing
 does not open external members; deterministic integration tests cover that IO.
 The `partial-link` target exercises ET_REL combination, symbol/relocation remaps,
 groups and metadata without executing emitted code, with and without an
@@ -73,10 +74,13 @@ finding. AFL bitmap occupancy is not source/branch coverage. Short campaigns
 cannot substitute for long-running CI fuzzing, semantic differential testing,
 failure injection or large-program compatibility tests.
 
-The [2026-11-06 checkpoint](../corpus/results/2026-11-06-semantic/README.md)
-records a repaired symbol-version finding and a later untriaged timeout. The
-original failing and interrupted campaigns retain their identities; the fuzz
-acceptance gate remains incomplete while that timeout is unresolved.
+The [semantic checkpoint](../corpus/results/2026-11-06-semantic/README.md)
+records a repaired symbol-version finding and a later untriaged timeout.
+The [thin-archive follow-up](../corpus/results/2026-11-06-thin/README.md) triages
+that timeout and a new archive timeout as not reproducible, with retained inputs
+and separate 600-second follow-ups. Their causes remain unknown; keep both on
+the watchlist. Original failing and interrupted campaigns retain their identities.
+Bounded local follow-ups do not complete sustained or hosted qualification.
 
 References: [OCaml fuzzing manual](https://ocaml.org/manual/5.4/afl-fuzz.html),
 [AFL++ environment variables](https://aflplus.plus/docs/env_variables/).

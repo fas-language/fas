@@ -1,0 +1,2158 @@
+{
+  "status": "passed",
+  "scope": "new linker outputs byte-identical to ELF images executed in the retained upstream suite; no new upstream runtime campaign or timing comparison",
+  "runtime_corpus": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106",
+  "runtime_report_sha256": "da50853360dbb484201f22fca9cb49468f71c0a8ae400fa0a01da04784362aa1",
+  "runtime_linker_sha256": "b6a94019a53b79be6bd2d26cf305755622a19c30279471461b7a71a4a1721439",
+  "linker_sha256": "84a1f3ec7f87db3f88928ce7f1ed7d7ba4ac823f7d26efb6210162fd6aff5cd0",
+  "harness_sha256": "cf54b7abb4c8e49999fc419d7cdc7867137b381500961a88db23ee29da040495",
+  "toolchain_inputs_unchanged": true,
+  "full_report": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/popular-thin-fifteen-relink-20261106/report.json",
+    "sha256": "8e58dfb4b84b99b5b9eab3fcecfe71b53513fb1e92aa55e6f76031d4e18cf938"
+  },
+  "projects": {
+    "lua": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/luac",
+        "exit": 0,
+        "expected_sha256": "9998ea8cf306ee57d67563b13703888cb26cac44faca544c5c498f3994a2d241",
+        "output_sha256": "9998ea8cf306ee57d67563b13703888cb26cac44faca544c5c498f3994a2d241"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+        "exit": 0,
+        "expected_sha256": "bf582b096359cc3472d76add4f9fb974aaf272b4abf8c94636f948fffa6c235d",
+        "output_sha256": "bf582b096359cc3472d76add4f9fb974aaf272b4abf8c94636f948fffa6c235d"
+      }
+    ],
+    "bzip2": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/libbz2.so.1.0.8",
+        "exit": 0,
+        "expected_sha256": "f829ff5ac8e041cd5c08318e6f39de6213af82f88c4de07547b44e76663fb45b",
+        "output_sha256": "f829ff5ac8e041cd5c08318e6f39de6213af82f88c4de07547b44e76663fb45b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+        "exit": 0,
+        "expected_sha256": "72c37985ae6712c84c8f2ba6ef20f47ba920180799c9bbe0b95a4c2d651bcb10",
+        "output_sha256": "72c37985ae6712c84c8f2ba6ef20f47ba920180799c9bbe0b95a4c2d651bcb10"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2recover",
+        "exit": 0,
+        "expected_sha256": "bfbee24429872f493d6e4337b3e411a9c650dcadb9928def6c7c5805c01762e5",
+        "output_sha256": "bfbee24429872f493d6e4337b3e411a9c650dcadb9928def6c7c5805c01762e5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2",
+        "exit": 0,
+        "expected_sha256": "9778297c51552b099d625203ad3f357d2a87604bcbcbbb6ad675b95bac72c5c9",
+        "output_sha256": "9778297c51552b099d625203ad3f357d2a87604bcbcbbb6ad675b95bac72c5c9"
+      }
+    ],
+    "libpng": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/png-fix-itxt",
+        "exit": 0,
+        "expected_sha256": "2559a1c5cd2374f8c530428666a19a51f4e5e080cb5e86bd789b6a017ad733ed",
+        "output_sha256": "2559a1c5cd2374f8c530428666a19a51f4e5e080cb5e86bd789b6a017ad733ed"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/libpng16.so.16.47.0",
+        "exit": 0,
+        "expected_sha256": "9f29f135643097eebef4aabef823393babb824691a6f5bcb53e037b9fcf5ea58",
+        "output_sha256": "9f29f135643097eebef4aabef823393babb824691a6f5bcb53e037b9fcf5ea58"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngtest",
+        "exit": 0,
+        "expected_sha256": "d08c92aa273409e4c37c2d8cc48fa3bc03bb8bb4e4585d3b11bcc29369f4c05b",
+        "output_sha256": "d08c92aa273409e4c37c2d8cc48fa3bc03bb8bb4e4585d3b11bcc29369f4c05b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngstest",
+        "exit": 0,
+        "expected_sha256": "e79572c95513cb7e33fcd89007d95b9e6812b3eb051f873cdcd336a2b63eead1",
+        "output_sha256": "e79572c95513cb7e33fcd89007d95b9e6812b3eb051f873cdcd336a2b63eead1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngunknown",
+        "exit": 0,
+        "expected_sha256": "f24835470f7179cab0488366d4193bd282264b2a208c6c85f47049d8226aa02d",
+        "output_sha256": "f24835470f7179cab0488366d4193bd282264b2a208c6c85f47049d8226aa02d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngimage",
+        "exit": 0,
+        "expected_sha256": "002ecd2cfaf96fd06d4657fb541b66c6b18fda6c87149af99136b84526139bc8",
+        "output_sha256": "002ecd2cfaf96fd06d4657fb541b66c6b18fda6c87149af99136b84526139bc8"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngfix",
+        "exit": 0,
+        "expected_sha256": "7c0ca3c421849b88c7bbce40b640720ec433fcbc5880f37500cf7806d4057770",
+        "output_sha256": "7c0ca3c421849b88c7bbce40b640720ec433fcbc5880f37500cf7806d4057770"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngvalid",
+        "exit": 0,
+        "expected_sha256": "c6831f4db2791b0d27e72a7e11913033f939d532be13075c96062a0b4c9532d3",
+        "output_sha256": "c6831f4db2791b0d27e72a7e11913033f939d532be13075c96062a0b4c9532d3"
+      }
+    ],
+    "libarchive": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/libarchive/libarchive.so.13.8.11",
+        "exit": 0,
+        "expected_sha256": "e02fed0acb4da6cbeb8f998bbcd28dd7317180bece819c9723a3988207a5e967",
+        "output_sha256": "e02fed0acb4da6cbeb8f998bbcd28dd7317180bece819c9723a3988207a5e967"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdcat_test",
+        "exit": 0,
+        "expected_sha256": "73b97536ce9fd66e76436e0b73b5e671634ed3f0fe9db942a32569a61a28a05f",
+        "output_sha256": "73b97536ce9fd66e76436e0b73b5e671634ed3f0fe9db942a32569a61a28a05f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdcpio",
+        "exit": 0,
+        "expected_sha256": "4bd5a37ddbadd0a80f19cf4061ff449ed7c8c57f67bd144f75853a846931e8b9",
+        "output_sha256": "4bd5a37ddbadd0a80f19cf4061ff449ed7c8c57f67bd144f75853a846931e8b9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar_test",
+        "exit": 0,
+        "expected_sha256": "aa0136067493a03b17a50e42203307a4204927f6f7de1f5a054b1daafba6768b",
+        "output_sha256": "aa0136067493a03b17a50e42203307a4204927f6f7de1f5a054b1daafba6768b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdunzip",
+        "exit": 0,
+        "expected_sha256": "5a900d10c1c697033363cb1cedda7eec6be3d7ee61b841b708a81c6b7e3753bc",
+        "output_sha256": "5a900d10c1c697033363cb1cedda7eec6be3d7ee61b841b708a81c6b7e3753bc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdcpio_test",
+        "exit": 0,
+        "expected_sha256": "a600d78dd005f8982647f2ff8877872666130c17e0f6c3be1cea6577362e713f",
+        "output_sha256": "a600d78dd005f8982647f2ff8877872666130c17e0f6c3be1cea6577362e713f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdunzip_test",
+        "exit": 0,
+        "expected_sha256": "850b3de7d081afc9cb456d505c77ef4869b1ad48f16ff2421ce34610401d54f9",
+        "output_sha256": "850b3de7d081afc9cb456d505c77ef4869b1ad48f16ff2421ce34610401d54f9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdcat",
+        "exit": 0,
+        "expected_sha256": "fe64f9b578496e903cd3064bdde8e1be91d85f1bf4d3abc6b8cea7cc939618e2",
+        "output_sha256": "fe64f9b578496e903cd3064bdde8e1be91d85f1bf4d3abc6b8cea7cc939618e2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar",
+        "exit": 0,
+        "expected_sha256": "ff7ea4d89504549aa3cb63ed3639eac5bfee4c916eaca7c17ecedec2dc521be4",
+        "output_sha256": "ff7ea4d89504549aa3cb63ed3639eac5bfee4c916eaca7c17ecedec2dc521be4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/libarchive_test",
+        "exit": 0,
+        "expected_sha256": "b5063979b9b7715dd32f56ec27d68c19240649ba964acbddf22daf55d7aea278",
+        "output_sha256": "b5063979b9b7715dd32f56ec27d68c19240649ba964acbddf22daf55d7aea278"
+      }
+    ],
+    "curl": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/lib/libcurl.so.4.8.0",
+        "exit": 0,
+        "expected_sha256": "c8f35d56a182c8d0de13c398bff020ca27d854c61a1f02bb0bb5f4213ee9bc2e",
+        "output_sha256": "c8f35d56a182c8d0de13c398bff020ca27d854c61a1f02bb0bb5f4213ee9bc2e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/src/curl",
+        "exit": 0,
+        "expected_sha256": "37bbe0099f3d3789576e7bf6e3aa80bc880d4dfa7ba08787576f3576a35172fb",
+        "output_sha256": "37bbe0099f3d3789576e7bf6e3aa80bc880d4dfa7ba08787576f3576a35172fb"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/src/curlinfo",
+        "exit": 0,
+        "expected_sha256": "cac8ab40fd77940256b7b06d7b15e0db576b3d2acebe8e346655a85fd43b5798",
+        "output_sha256": "cac8ab40fd77940256b7b06d7b15e0db576b3d2acebe8e346655a85fd43b5798"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/resolve",
+        "exit": 0,
+        "expected_sha256": "5fbe2175b4466f8243b43a7ef4f667dc4b200d6fe9b5ceb75a27291e599c6b58",
+        "output_sha256": "5fbe2175b4466f8243b43a7ef4f667dc4b200d6fe9b5ceb75a27291e599c6b58"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/rtspd",
+        "exit": 0,
+        "expected_sha256": "436017cd46fd13bd8834de20318c89ef07fa9be3f3978d6d79ace031b9393366",
+        "output_sha256": "436017cd46fd13bd8834de20318c89ef07fa9be3f3978d6d79ace031b9393366"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/sockfilt",
+        "exit": 0,
+        "expected_sha256": "6058b3feeb9d66f80c6174842f1a45cef5227403ec47421eddf3b830e0346405",
+        "output_sha256": "6058b3feeb9d66f80c6174842f1a45cef5227403ec47421eddf3b830e0346405"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/sws",
+        "exit": 0,
+        "expected_sha256": "64ef1dec00f8eb6f77d8c3991daa4aee2dbfa2287afd8dedd903784b73edebb0",
+        "output_sha256": "64ef1dec00f8eb6f77d8c3991daa4aee2dbfa2287afd8dedd903784b73edebb0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/tftpd",
+        "exit": 0,
+        "expected_sha256": "e7a2f2293859ef260e41e0f4b280c5a9321afd217aed11d14961f37c6db8f7a1",
+        "output_sha256": "e7a2f2293859ef260e41e0f4b280c5a9321afd217aed11d14961f37c6db8f7a1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/socksd",
+        "exit": 0,
+        "expected_sha256": "a87b6e91b7ba2a30f8c9e3c52cb72cc8f0ac38f7b101bd47a1d0393a9b6397a5",
+        "output_sha256": "a87b6e91b7ba2a30f8c9e3c52cb72cc8f0ac38f7b101bd47a1d0393a9b6397a5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/mqttd",
+        "exit": 0,
+        "expected_sha256": "22d0c83bf0132bdf15051003733337ef394ff13610c6449aaaf12987d8bb8ecf",
+        "output_sha256": "22d0c83bf0132bdf15051003733337ef394ff13610c6449aaaf12987d8bb8ecf"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/libauthretry",
+        "exit": 0,
+        "expected_sha256": "e10a18d341fec69a8b9d5b0fc0fe2a694767461a76dcbf3ca05e8a03fad92be1",
+        "output_sha256": "e10a18d341fec69a8b9d5b0fc0fe2a694767461a76dcbf3ca05e8a03fad92be1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/server/dnsd",
+        "exit": 0,
+        "expected_sha256": "02e5a8d217eac7b8469bfb7fab3d840b003118941e63d2fb7901cab920dec5dc",
+        "output_sha256": "02e5a8d217eac7b8469bfb7fab3d840b003118941e63d2fb7901cab920dec5dc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/libntlmconnect",
+        "exit": 0,
+        "expected_sha256": "27f2ce3a54d03699dbc343812be777312966aabd2e87e7017d632ec547cd70d5",
+        "output_sha256": "27f2ce3a54d03699dbc343812be777312966aabd2e87e7017d632ec547cd70d5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/libprereq",
+        "exit": 0,
+        "expected_sha256": "d35f288045bf0c87dc44e57f7ac86c26dc120bc3000fa30d5332efecc897ff74",
+        "output_sha256": "d35f288045bf0c87dc44e57f7ac86c26dc120bc3000fa30d5332efecc897ff74"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib500",
+        "exit": 0,
+        "expected_sha256": "bb2e907d282522a13526fd4b50ceabde7e5349edc1c6290a0978c6c76bcf22a9",
+        "output_sha256": "bb2e907d282522a13526fd4b50ceabde7e5349edc1c6290a0978c6c76bcf22a9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib501",
+        "exit": 0,
+        "expected_sha256": "700cf825980ba3054bbc93cf85eb41e128fa8ce794b78bfb54532de82b1cd9aa",
+        "output_sha256": "700cf825980ba3054bbc93cf85eb41e128fa8ce794b78bfb54532de82b1cd9aa"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib502",
+        "exit": 0,
+        "expected_sha256": "370c4ea82e6b10dc664bbc1155175782c7baceccf82206983df86197bcef8991",
+        "output_sha256": "370c4ea82e6b10dc664bbc1155175782c7baceccf82206983df86197bcef8991"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib503",
+        "exit": 0,
+        "expected_sha256": "2536d13f4c97151e1bdd7eca714bc75293e65aa67f15227d04fe14815adea853",
+        "output_sha256": "2536d13f4c97151e1bdd7eca714bc75293e65aa67f15227d04fe14815adea853"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib505",
+        "exit": 0,
+        "expected_sha256": "5f507ae0ddb148c651a1b92a984a97f5d6300efa77d02d5ec9d479772e441594",
+        "output_sha256": "5f507ae0ddb148c651a1b92a984a97f5d6300efa77d02d5ec9d479772e441594"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib504",
+        "exit": 0,
+        "expected_sha256": "650e610d1389f78aea89887af39e76171ee8f3a4ba42c4089b59ac0fd43e7d7e",
+        "output_sha256": "650e610d1389f78aea89887af39e76171ee8f3a4ba42c4089b59ac0fd43e7d7e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib506",
+        "exit": 0,
+        "expected_sha256": "ede308f4feb3f8c87766357a87a472ddb6d0621cec1d3fe9226f1404dabbf49a",
+        "output_sha256": "ede308f4feb3f8c87766357a87a472ddb6d0621cec1d3fe9226f1404dabbf49a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib508",
+        "exit": 0,
+        "expected_sha256": "d7ba14eae1f932a77c1653b043d3cefe83c0fea7a75aabc26782be9ce5254221",
+        "output_sha256": "d7ba14eae1f932a77c1653b043d3cefe83c0fea7a75aabc26782be9ce5254221"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib507",
+        "exit": 0,
+        "expected_sha256": "ccaff939a9b55f1d60322b81da15ae930ddd046a34501fda1b9666d1cafe22a9",
+        "output_sha256": "ccaff939a9b55f1d60322b81da15ae930ddd046a34501fda1b9666d1cafe22a9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib509",
+        "exit": 0,
+        "expected_sha256": "8aec16796a8b7dece5b49d80756991d8e2182ba3fdd357da72796d93ba8d26e1",
+        "output_sha256": "8aec16796a8b7dece5b49d80756991d8e2182ba3fdd357da72796d93ba8d26e1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib510",
+        "exit": 0,
+        "expected_sha256": "f6061cc9c6528b7eb5848da8ac9cf1d41a8bcbbd8d09cf2ce8f4ae4dd5581a13",
+        "output_sha256": "f6061cc9c6528b7eb5848da8ac9cf1d41a8bcbbd8d09cf2ce8f4ae4dd5581a13"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib512",
+        "exit": 0,
+        "expected_sha256": "09ce06a5d3fa1818c90bd71d0231b734196445abff8c63300ed358a408faede4",
+        "output_sha256": "09ce06a5d3fa1818c90bd71d0231b734196445abff8c63300ed358a408faede4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib511",
+        "exit": 0,
+        "expected_sha256": "004124ffc0c58b0ec40ccd885fce4de16ce3ae524376e02532bf0dcc2c39ae59",
+        "output_sha256": "004124ffc0c58b0ec40ccd885fce4de16ce3ae524376e02532bf0dcc2c39ae59"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib513",
+        "exit": 0,
+        "expected_sha256": "a47a36bc110c50b58cae9c619ad3d75d24347581f1e1f0aa990a7541202feebe",
+        "output_sha256": "a47a36bc110c50b58cae9c619ad3d75d24347581f1e1f0aa990a7541202feebe"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib514",
+        "exit": 0,
+        "expected_sha256": "dcbbe1019b6a0f601b3578f25aeae86d841bedf54010687e896aae8c41686530",
+        "output_sha256": "dcbbe1019b6a0f601b3578f25aeae86d841bedf54010687e896aae8c41686530"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib515",
+        "exit": 0,
+        "expected_sha256": "cdb31c364e2a179c490e0a593c266c728fa61695905cd15f4c0dc3ae8a8920d0",
+        "output_sha256": "cdb31c364e2a179c490e0a593c266c728fa61695905cd15f4c0dc3ae8a8920d0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib516",
+        "exit": 0,
+        "expected_sha256": "d433a65519cdf0988bd6373d4e18f095af17e98c7b818e945d79765ec7bea03a",
+        "output_sha256": "d433a65519cdf0988bd6373d4e18f095af17e98c7b818e945d79765ec7bea03a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib517",
+        "exit": 0,
+        "expected_sha256": "a270db277d6b3b12473e3834b3d3091083c57e5929b8260b7934be4d9da3cedf",
+        "output_sha256": "a270db277d6b3b12473e3834b3d3091083c57e5929b8260b7934be4d9da3cedf"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib518",
+        "exit": 0,
+        "expected_sha256": "84e0fe413dbb85f4f2306e9deaa45bb3f2ad9d2a19a99a00e906e7d89a156ad0",
+        "output_sha256": "84e0fe413dbb85f4f2306e9deaa45bb3f2ad9d2a19a99a00e906e7d89a156ad0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib519",
+        "exit": 0,
+        "expected_sha256": "22cde30c0bd3e956d751f7dfbff51e49ca47a9e73bac1d8b66efe91b00a14e61",
+        "output_sha256": "22cde30c0bd3e956d751f7dfbff51e49ca47a9e73bac1d8b66efe91b00a14e61"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib520",
+        "exit": 0,
+        "expected_sha256": "29b05d2303b5492c0f152aba6b1f92538efab1733ccdebe83dea442bee5437a3",
+        "output_sha256": "29b05d2303b5492c0f152aba6b1f92538efab1733ccdebe83dea442bee5437a3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib521",
+        "exit": 0,
+        "expected_sha256": "727f3d5d28f3f3929b73d0026bf6bce1e558769e339cec0a337af670f54b9d8f",
+        "output_sha256": "727f3d5d28f3f3929b73d0026bf6bce1e558769e339cec0a337af670f54b9d8f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib523",
+        "exit": 0,
+        "expected_sha256": "d4db886b91e969aed0a2a6631fc8676a5ec64f18643e2aabaf1e6ea072e2bb6b",
+        "output_sha256": "d4db886b91e969aed0a2a6631fc8676a5ec64f18643e2aabaf1e6ea072e2bb6b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib524",
+        "exit": 0,
+        "expected_sha256": "f7a4e70df928d250b308fa5af45c7b16b83b4136d72c9bde8f4b60a36d3148c6",
+        "output_sha256": "f7a4e70df928d250b308fa5af45c7b16b83b4136d72c9bde8f4b60a36d3148c6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib525",
+        "exit": 0,
+        "expected_sha256": "80ff9b09f231391297a12d68b1a89d138590c9b48d9768c4158ca1bd5ab5dc89",
+        "output_sha256": "80ff9b09f231391297a12d68b1a89d138590c9b48d9768c4158ca1bd5ab5dc89"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib526",
+        "exit": 0,
+        "expected_sha256": "d3ef45f46fa4efc95cc21b86ab9407b3bdc3cc9c7f3a095fa98753380f88690c",
+        "output_sha256": "d3ef45f46fa4efc95cc21b86ab9407b3bdc3cc9c7f3a095fa98753380f88690c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib527",
+        "exit": 0,
+        "expected_sha256": "f5b56c3662fd72cf516ce303ce24bc8222913e67b23d794c14883ad31feb27e3",
+        "output_sha256": "f5b56c3662fd72cf516ce303ce24bc8222913e67b23d794c14883ad31feb27e3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib529",
+        "exit": 0,
+        "expected_sha256": "8229f2db786c81cf986379c8392c07668c2712ed3dbade06bb76a4eb95890c1b",
+        "output_sha256": "8229f2db786c81cf986379c8392c07668c2712ed3dbade06bb76a4eb95890c1b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib532",
+        "exit": 0,
+        "expected_sha256": "abd85119be61d5de24a2873529897cd61e1c695075e611d32ed56e72d373e006",
+        "output_sha256": "abd85119be61d5de24a2873529897cd61e1c695075e611d32ed56e72d373e006"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib530",
+        "exit": 0,
+        "expected_sha256": "4aac81cae90e344b2b3f4d931a62bfa087f9457fb51d23aae50bfff2fdf199a5",
+        "output_sha256": "4aac81cae90e344b2b3f4d931a62bfa087f9457fb51d23aae50bfff2fdf199a5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib536",
+        "exit": 0,
+        "expected_sha256": "22972e19dbb300d548b2075baf4cb827a153453f68424dbe00ccd19dc04b27b4",
+        "output_sha256": "22972e19dbb300d548b2075baf4cb827a153453f68424dbe00ccd19dc04b27b4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib533",
+        "exit": 0,
+        "expected_sha256": "8bf4f6edbc189d8764169a0a5e682d5504942a52044494c435d07b2dad2ff396",
+        "output_sha256": "8bf4f6edbc189d8764169a0a5e682d5504942a52044494c435d07b2dad2ff396"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib537",
+        "exit": 0,
+        "expected_sha256": "e8e280eb1e2c728c3810c4d2ca903a73566030c10533ea73bb45f7a5ca1c3577",
+        "output_sha256": "e8e280eb1e2c728c3810c4d2ca903a73566030c10533ea73bb45f7a5ca1c3577"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib539",
+        "exit": 0,
+        "expected_sha256": "89bb667bcd12580a083dc564d60f15c903f63010f5067f003232e27e16f03062",
+        "output_sha256": "89bb667bcd12580a083dc564d60f15c903f63010f5067f003232e27e16f03062"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib541",
+        "exit": 0,
+        "expected_sha256": "8fab475242eb169842c3e89d6c3d2aaa57933516c496e31cd787ca3d60f97e11",
+        "output_sha256": "8fab475242eb169842c3e89d6c3d2aaa57933516c496e31cd787ca3d60f97e11"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib540",
+        "exit": 0,
+        "expected_sha256": "f3fda9f0785176fc27033090a7dbc491490323c205a58ae7e688dedcd1543a5d",
+        "output_sha256": "f3fda9f0785176fc27033090a7dbc491490323c205a58ae7e688dedcd1543a5d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib542",
+        "exit": 0,
+        "expected_sha256": "bb6419b52c4847f748a796410ef1d934c9b637bd416991850f81bc0f1f006826",
+        "output_sha256": "bb6419b52c4847f748a796410ef1d934c9b637bd416991850f81bc0f1f006826"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib543",
+        "exit": 0,
+        "expected_sha256": "40e39da8ec4fadffb408baa1c2c6e85ad77757936077caca3c2db897c4b1028e",
+        "output_sha256": "40e39da8ec4fadffb408baa1c2c6e85ad77757936077caca3c2db897c4b1028e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib544",
+        "exit": 0,
+        "expected_sha256": "3f82b3fb288c5c83072c4992cd9ed06dbedd1bf54d525642a553515042e66a34",
+        "output_sha256": "3f82b3fb288c5c83072c4992cd9ed06dbedd1bf54d525642a553515042e66a34"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib545",
+        "exit": 0,
+        "expected_sha256": "2a787bf469bb178f472f2c73dd4ef1fa8ac3fe59a2ad3ff74d27d46cd393c2be",
+        "output_sha256": "2a787bf469bb178f472f2c73dd4ef1fa8ac3fe59a2ad3ff74d27d46cd393c2be"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib547",
+        "exit": 0,
+        "expected_sha256": "5bf16bc5b073ce39692c43ae815494f49a8aebc3703e13386f1b9dbc5aaa11cc",
+        "output_sha256": "5bf16bc5b073ce39692c43ae815494f49a8aebc3703e13386f1b9dbc5aaa11cc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib548",
+        "exit": 0,
+        "expected_sha256": "6bf8a10d454b17aa3cdeaf55d6f34832991e608dd9b1b10f24a8656381550f3f",
+        "output_sha256": "6bf8a10d454b17aa3cdeaf55d6f34832991e608dd9b1b10f24a8656381550f3f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib549",
+        "exit": 0,
+        "expected_sha256": "7918abd4fd693855c981ea0c724e78890bc18f62558e259a7ae57dc7c8c271e4",
+        "output_sha256": "7918abd4fd693855c981ea0c724e78890bc18f62558e259a7ae57dc7c8c271e4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib552",
+        "exit": 0,
+        "expected_sha256": "333bebb622b5b2dd669b7c2d4a800bddfc23119fc271d9a34df59033e4f494b1",
+        "output_sha256": "333bebb622b5b2dd669b7c2d4a800bddfc23119fc271d9a34df59033e4f494b1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib553",
+        "exit": 0,
+        "expected_sha256": "2805ec217ad0e0fbf1f706ef4f7121d82859e68741058d47da05e1db39afb60f",
+        "output_sha256": "2805ec217ad0e0fbf1f706ef4f7121d82859e68741058d47da05e1db39afb60f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib554",
+        "exit": 0,
+        "expected_sha256": "3c667415b21363706e623276529d42dcb43ffeee2c50cb5c4cd95426f335dd3b",
+        "output_sha256": "3c667415b21363706e623276529d42dcb43ffeee2c50cb5c4cd95426f335dd3b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib555",
+        "exit": 0,
+        "expected_sha256": "67e73363dfbaccc88436b595372a010f6b23ecb42ee785ef5abf154f42d02f9d",
+        "output_sha256": "67e73363dfbaccc88436b595372a010f6b23ecb42ee785ef5abf154f42d02f9d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib556",
+        "exit": 0,
+        "expected_sha256": "00be15d970e1f6967f5c06c71b96f7186d7213330f565f826cc5a7854762633d",
+        "output_sha256": "00be15d970e1f6967f5c06c71b96f7186d7213330f565f826cc5a7854762633d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib557",
+        "exit": 0,
+        "expected_sha256": "8254ebae4876130a4db828d90eeb9082d1abc96671aec5bb6892c8af51863136",
+        "output_sha256": "8254ebae4876130a4db828d90eeb9082d1abc96671aec5bb6892c8af51863136"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib558",
+        "exit": 0,
+        "expected_sha256": "ebba7b0c9382e9f041e552c2701c3298ee572976ada8ca8043a37525a3193018",
+        "output_sha256": "ebba7b0c9382e9f041e552c2701c3298ee572976ada8ca8043a37525a3193018"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib559",
+        "exit": 0,
+        "expected_sha256": "527e78e0ae4c72cfa9b19ed6d221e98250dacf07c8573f8cf524bf09abb1d6fb",
+        "output_sha256": "527e78e0ae4c72cfa9b19ed6d221e98250dacf07c8573f8cf524bf09abb1d6fb"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib560",
+        "exit": 0,
+        "expected_sha256": "f49cedfc78e3b9fcae7535e42a73c11587bb7ca609e778940800d739a2dc3d82",
+        "output_sha256": "f49cedfc78e3b9fcae7535e42a73c11587bb7ca609e778940800d739a2dc3d82"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib562",
+        "exit": 0,
+        "expected_sha256": "9404868d32ceed37bfde28e9b68a300263fff9a258671dcbafa2757eb1914eb6",
+        "output_sha256": "9404868d32ceed37bfde28e9b68a300263fff9a258671dcbafa2757eb1914eb6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib564",
+        "exit": 0,
+        "expected_sha256": "cbd81261bf9d5af42657a8a4c7154451a21ca3a1f8bffd414e42cd0759261ad5",
+        "output_sha256": "cbd81261bf9d5af42657a8a4c7154451a21ca3a1f8bffd414e42cd0759261ad5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib565",
+        "exit": 0,
+        "expected_sha256": "58fa9fb4c8b93e15ab4557a55f9618f49ef6d53373334589371c2e78627c3e1f",
+        "output_sha256": "58fa9fb4c8b93e15ab4557a55f9618f49ef6d53373334589371c2e78627c3e1f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib566",
+        "exit": 0,
+        "expected_sha256": "8454fa9b07dd5c62f9aaaefb154f8a493a6e61103918468dc3ab9d7317b4f02a",
+        "output_sha256": "8454fa9b07dd5c62f9aaaefb154f8a493a6e61103918468dc3ab9d7317b4f02a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib567",
+        "exit": 0,
+        "expected_sha256": "e887e4f4301c26e237e638ce802390f18d6ae21f0ff4b1f94cea501efc66232d",
+        "output_sha256": "e887e4f4301c26e237e638ce802390f18d6ae21f0ff4b1f94cea501efc66232d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib568",
+        "exit": 0,
+        "expected_sha256": "048d59586f1802c5fb4f8e97a0ce18540e18d139c33108e86f9a492e3a56d60d",
+        "output_sha256": "048d59586f1802c5fb4f8e97a0ce18540e18d139c33108e86f9a492e3a56d60d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib569",
+        "exit": 0,
+        "expected_sha256": "7edd656a25779c8d919338ff69a72ff29ea6604cf4d8b20180945967e3159bd3",
+        "output_sha256": "7edd656a25779c8d919338ff69a72ff29ea6604cf4d8b20180945967e3159bd3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib570",
+        "exit": 0,
+        "expected_sha256": "90ddfe56cd8cba8cfdad8fc4082db33c3f43a080ec404fa9bf937e01c1a97659",
+        "output_sha256": "90ddfe56cd8cba8cfdad8fc4082db33c3f43a080ec404fa9bf937e01c1a97659"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib571",
+        "exit": 0,
+        "expected_sha256": "19cb6408a82c6a9922636fc621f9e3a30289f343487ba6ec7a6f562d30dc6c34",
+        "output_sha256": "19cb6408a82c6a9922636fc621f9e3a30289f343487ba6ec7a6f562d30dc6c34"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib572",
+        "exit": 0,
+        "expected_sha256": "2c8cc9d3062ea1be6e8061fc7e90dc976a04803443e8216e3eb24d869f9206ba",
+        "output_sha256": "2c8cc9d3062ea1be6e8061fc7e90dc976a04803443e8216e3eb24d869f9206ba"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib574",
+        "exit": 0,
+        "expected_sha256": "f475b634f3ea6bbbad67c30b9bc04338a08969749585e91dbcd76aa3fef60e98",
+        "output_sha256": "f475b634f3ea6bbbad67c30b9bc04338a08969749585e91dbcd76aa3fef60e98"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib573",
+        "exit": 0,
+        "expected_sha256": "0605e004bc7c66110734c13895c73642c5a210ace7d36fdff961fbb9a86aa1ac",
+        "output_sha256": "0605e004bc7c66110734c13895c73642c5a210ace7d36fdff961fbb9a86aa1ac"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib576",
+        "exit": 0,
+        "expected_sha256": "ede39330076907499c45ebefdf970fe1bee65ddf617617c086a8669e45aaa0dd",
+        "output_sha256": "ede39330076907499c45ebefdf970fe1bee65ddf617617c086a8669e45aaa0dd"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib575",
+        "exit": 0,
+        "expected_sha256": "f743b847661dc2f6cc2a64ce9c6235aac11c4bd2487eda2b6e5feb889c2c8dfe",
+        "output_sha256": "f743b847661dc2f6cc2a64ce9c6235aac11c4bd2487eda2b6e5feb889c2c8dfe"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib578",
+        "exit": 0,
+        "expected_sha256": "d9c3e55c4302af7fef960c435f181d145c1b686b5731e5ba82905c0ae72db205",
+        "output_sha256": "d9c3e55c4302af7fef960c435f181d145c1b686b5731e5ba82905c0ae72db205"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib579",
+        "exit": 0,
+        "expected_sha256": "5b758edd9095c007dfae4121d75e7d219c1b315d439326a16d28fb155ded858d",
+        "output_sha256": "5b758edd9095c007dfae4121d75e7d219c1b315d439326a16d28fb155ded858d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib583",
+        "exit": 0,
+        "expected_sha256": "c3ceda1e2dce7e0ec28812058a7ac023b8967b9603ce7c410d26156d68f6198b",
+        "output_sha256": "c3ceda1e2dce7e0ec28812058a7ac023b8967b9603ce7c410d26156d68f6198b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib582",
+        "exit": 0,
+        "expected_sha256": "9541a91e9040f49cd5c4e00f28f43202617ab0a7686f14dfc98c4a1b8aba1525",
+        "output_sha256": "9541a91e9040f49cd5c4e00f28f43202617ab0a7686f14dfc98c4a1b8aba1525"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib584",
+        "exit": 0,
+        "expected_sha256": "928e1619cb2d51855ff819801890f4b75944cdca86e37546dc44cf0b0d4b929d",
+        "output_sha256": "928e1619cb2d51855ff819801890f4b75944cdca86e37546dc44cf0b0d4b929d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib586",
+        "exit": 0,
+        "expected_sha256": "c4a635ffd76e526844daec9aa3dc259cb2a41b0aa2299e0bb822a8a517d47b1f",
+        "output_sha256": "c4a635ffd76e526844daec9aa3dc259cb2a41b0aa2299e0bb822a8a517d47b1f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib585",
+        "exit": 0,
+        "expected_sha256": "2c996641d521f7cb6b0f9e4b9627d1a513f2d606ae19ed0e215309a428ccb5cd",
+        "output_sha256": "2c996641d521f7cb6b0f9e4b9627d1a513f2d606ae19ed0e215309a428ccb5cd"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib587",
+        "exit": 0,
+        "expected_sha256": "1307dce61d362e9848a73b770679b78458d79615af36789625e9ec0b03b245e3",
+        "output_sha256": "1307dce61d362e9848a73b770679b78458d79615af36789625e9ec0b03b245e3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib589",
+        "exit": 0,
+        "expected_sha256": "a3b2713e6150a56b983822cb74b027f348e4161be48dfbad3276b2df5e1bd37d",
+        "output_sha256": "a3b2713e6150a56b983822cb74b027f348e4161be48dfbad3276b2df5e1bd37d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib590",
+        "exit": 0,
+        "expected_sha256": "0d4d14392bed4a55351b62eebb466b5305d6993cf1502082798e3456dbd5f70a",
+        "output_sha256": "0d4d14392bed4a55351b62eebb466b5305d6993cf1502082798e3456dbd5f70a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib591",
+        "exit": 0,
+        "expected_sha256": "27638e950481793cc158092d24c78dbad2466642d3e81545636000ab199d732a",
+        "output_sha256": "27638e950481793cc158092d24c78dbad2466642d3e81545636000ab199d732a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib597",
+        "exit": 0,
+        "expected_sha256": "9ad1dac6cff6ce16daff3392fef58532864c80c061d710337e124869d21ffbf2",
+        "output_sha256": "9ad1dac6cff6ce16daff3392fef58532864c80c061d710337e124869d21ffbf2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib598",
+        "exit": 0,
+        "expected_sha256": "e12156d8244072e04afa6d89d9a10e83ec13de0b7f41ce38bc69918935455083",
+        "output_sha256": "e12156d8244072e04afa6d89d9a10e83ec13de0b7f41ce38bc69918935455083"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib599",
+        "exit": 0,
+        "expected_sha256": "2b3d82a53870e93579c883c3eb70a6435df871ce8c28fd63a308c62195c59242",
+        "output_sha256": "2b3d82a53870e93579c883c3eb70a6435df871ce8c28fd63a308c62195c59242"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib643",
+        "exit": 0,
+        "expected_sha256": "2f6e8cd7dbf671f84234aa77c1b8b7a188cd448f407676edad726c9f8bfcf20f",
+        "output_sha256": "2f6e8cd7dbf671f84234aa77c1b8b7a188cd448f407676edad726c9f8bfcf20f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib645",
+        "exit": 0,
+        "expected_sha256": "91b692d6bc49db273521a838c890264267197508df4f3bca2b610079d7561579",
+        "output_sha256": "91b692d6bc49db273521a838c890264267197508df4f3bca2b610079d7561579"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib650",
+        "exit": 0,
+        "expected_sha256": "d9a9f31d9e7995dd7a512d13f02841e8e568ca78cd8ae88cee04bb6d9ca1e895",
+        "output_sha256": "d9a9f31d9e7995dd7a512d13f02841e8e568ca78cd8ae88cee04bb6d9ca1e895"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib651",
+        "exit": 0,
+        "expected_sha256": "a95c129c0a6210c3defa03d1d59d37756993ff53694a4d6ae5ed9470801930d4",
+        "output_sha256": "a95c129c0a6210c3defa03d1d59d37756993ff53694a4d6ae5ed9470801930d4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib652",
+        "exit": 0,
+        "expected_sha256": "aa3afac8a62e875e7f3852457a870d430761e7b25304ffa1ace305d1fe27d6c6",
+        "output_sha256": "aa3afac8a62e875e7f3852457a870d430761e7b25304ffa1ace305d1fe27d6c6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib653",
+        "exit": 0,
+        "expected_sha256": "582485f322ca044f6002c16104f8d98f7df5608377d5b0f6ceb6ecd4f553d24c",
+        "output_sha256": "582485f322ca044f6002c16104f8d98f7df5608377d5b0f6ceb6ecd4f553d24c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib654",
+        "exit": 0,
+        "expected_sha256": "6532a666806e0e0ec97adfc712d5a897de0d5ada6f90a65e0cbb1e2d4123f136",
+        "output_sha256": "6532a666806e0e0ec97adfc712d5a897de0d5ada6f90a65e0cbb1e2d4123f136"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib655",
+        "exit": 0,
+        "expected_sha256": "5a352f3562001b0e55540b4333c338bc7c272211a32c8ef6251a9e2557524d6f",
+        "output_sha256": "5a352f3562001b0e55540b4333c338bc7c272211a32c8ef6251a9e2557524d6f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib658",
+        "exit": 0,
+        "expected_sha256": "1d70b0adf7a284c0d53355cff5f18a4c3dc8d6faf61269cd31ffb28939ceb154",
+        "output_sha256": "1d70b0adf7a284c0d53355cff5f18a4c3dc8d6faf61269cd31ffb28939ceb154"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib659",
+        "exit": 0,
+        "expected_sha256": "efceddbdc7db8b25957ab891593960c152434cd908dba0668d559962809ea14f",
+        "output_sha256": "efceddbdc7db8b25957ab891593960c152434cd908dba0668d559962809ea14f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib661",
+        "exit": 0,
+        "expected_sha256": "d11a19b7ee6e0f79a6a682cb8eadac6ccd3fbe6faa8d90af171c04c3f96cfb9b",
+        "output_sha256": "d11a19b7ee6e0f79a6a682cb8eadac6ccd3fbe6faa8d90af171c04c3f96cfb9b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib666",
+        "exit": 0,
+        "expected_sha256": "eeebc389c8175b24f96c0409d5e9e5ab871d373cfc949f570432ae5b190f9d73",
+        "output_sha256": "eeebc389c8175b24f96c0409d5e9e5ab871d373cfc949f570432ae5b190f9d73"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib667",
+        "exit": 0,
+        "expected_sha256": "88e57333dba5cc0ea5a0c329edb0cfaf6527aa846dae0f6849f61fe0666b8b4e",
+        "output_sha256": "88e57333dba5cc0ea5a0c329edb0cfaf6527aa846dae0f6849f61fe0666b8b4e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib668",
+        "exit": 0,
+        "expected_sha256": "7efef123b50912ccdda4f2d96730b83a2d0252c32c5601688af692ae316093b2",
+        "output_sha256": "7efef123b50912ccdda4f2d96730b83a2d0252c32c5601688af692ae316093b2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib670",
+        "exit": 0,
+        "expected_sha256": "e922ca4a397e33c0ceb73e9b4bbbbfd3315bb0e51ca1c707fd923ec5119e029f",
+        "output_sha256": "e922ca4a397e33c0ceb73e9b4bbbbfd3315bb0e51ca1c707fd923ec5119e029f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib671",
+        "exit": 0,
+        "expected_sha256": "28a17f8ba09903938d730b34cafc79e9e167f80ecd909f4bc6ccc3f37763f9d3",
+        "output_sha256": "28a17f8ba09903938d730b34cafc79e9e167f80ecd909f4bc6ccc3f37763f9d3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib672",
+        "exit": 0,
+        "expected_sha256": "23509f23b9bb3faf6ee781c0a31c1599acc92b2946428db3cfe25a9417460526",
+        "output_sha256": "23509f23b9bb3faf6ee781c0a31c1599acc92b2946428db3cfe25a9417460526"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib673",
+        "exit": 0,
+        "expected_sha256": "2a4105dbae90d2184a8bf444fe3b54f5c6f28fb30e82aafbc3d66d665acf6749",
+        "output_sha256": "2a4105dbae90d2184a8bf444fe3b54f5c6f28fb30e82aafbc3d66d665acf6749"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib674",
+        "exit": 0,
+        "expected_sha256": "fa2aed4f5cc99bd2073ce6189de65dc6f1f4deb4ffa0e68d43b4363747b753c5",
+        "output_sha256": "fa2aed4f5cc99bd2073ce6189de65dc6f1f4deb4ffa0e68d43b4363747b753c5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib676",
+        "exit": 0,
+        "expected_sha256": "45ff9ec176100a7508148e8eac842c1b8799634a2d95f27ab615a04b00b91bcb",
+        "output_sha256": "45ff9ec176100a7508148e8eac842c1b8799634a2d95f27ab615a04b00b91bcb"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib677",
+        "exit": 0,
+        "expected_sha256": "94102b5b54d4b83dae03a8ec193ef7b78fd6bfa3f2c29c592848940cf03b3092",
+        "output_sha256": "94102b5b54d4b83dae03a8ec193ef7b78fd6bfa3f2c29c592848940cf03b3092"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib678",
+        "exit": 0,
+        "expected_sha256": "d0d2d649dd1524fb2dd245c1f8cdb84e13554fe0128feee383bd9ba0cac1bebe",
+        "output_sha256": "d0d2d649dd1524fb2dd245c1f8cdb84e13554fe0128feee383bd9ba0cac1bebe"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib694",
+        "exit": 0,
+        "expected_sha256": "d7f4ddc4fd294334ff50862584c59a09bb8f10093e026e7f6f5428e5c07390c9",
+        "output_sha256": "d7f4ddc4fd294334ff50862584c59a09bb8f10093e026e7f6f5428e5c07390c9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib695",
+        "exit": 0,
+        "expected_sha256": "dd2a8e860a82b5f3170456fe71ce27330c4a790ef9d02d6a355427ea3aeaa807",
+        "output_sha256": "dd2a8e860a82b5f3170456fe71ce27330c4a790ef9d02d6a355427ea3aeaa807"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib696",
+        "exit": 0,
+        "expected_sha256": "9bd6abfdfc631ab1b9235427ca3fed67911df22b2c968481767cd04b8bf59c52",
+        "output_sha256": "9bd6abfdfc631ab1b9235427ca3fed67911df22b2c968481767cd04b8bf59c52"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib751",
+        "exit": 0,
+        "expected_sha256": "b83fb2f6a865e6c52b52bd6069acc181f6a8b70bbd00a78f1e19ddfba07e4146",
+        "output_sha256": "b83fb2f6a865e6c52b52bd6069acc181f6a8b70bbd00a78f1e19ddfba07e4146"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1156",
+        "exit": 0,
+        "expected_sha256": "286ff6ed59796e8cbb86af41cc5e65cae9507baf4310436f90e4170279b75c43",
+        "output_sha256": "286ff6ed59796e8cbb86af41cc5e65cae9507baf4310436f90e4170279b75c43"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1301",
+        "exit": 0,
+        "expected_sha256": "d59d36da123690150f5d099d6d926ba5fcdef7cb0435ff63355ab478eb413c09",
+        "output_sha256": "d59d36da123690150f5d099d6d926ba5fcdef7cb0435ff63355ab478eb413c09"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1308",
+        "exit": 0,
+        "expected_sha256": "80150d449f6a66f6b2ed039e9f46cb28d3685c9651058cee5c0c1399cbfaaacc",
+        "output_sha256": "80150d449f6a66f6b2ed039e9f46cb28d3685c9651058cee5c0c1399cbfaaacc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1485",
+        "exit": 0,
+        "expected_sha256": "651ab73d8f40925c6882656b58c5fb831e73faa1f2e1c6cbbecd49487342d2f8",
+        "output_sha256": "651ab73d8f40925c6882656b58c5fb831e73faa1f2e1c6cbbecd49487342d2f8"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1500",
+        "exit": 0,
+        "expected_sha256": "5ea7e352004bb081447effe7c56ad4cad0b5789bc7d6455e593b01b60105c8dd",
+        "output_sha256": "5ea7e352004bb081447effe7c56ad4cad0b5789bc7d6455e593b01b60105c8dd"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1501",
+        "exit": 0,
+        "expected_sha256": "38c7ea7d98b37a7f74efbe0c600e6fa208d07206a5a64d87b4eaeca2226b3900",
+        "output_sha256": "38c7ea7d98b37a7f74efbe0c600e6fa208d07206a5a64d87b4eaeca2226b3900"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1502",
+        "exit": 0,
+        "expected_sha256": "f5a43039a60137766b62e211037f7ec198cb6092f437925aa248a50ee695a769",
+        "output_sha256": "f5a43039a60137766b62e211037f7ec198cb6092f437925aa248a50ee695a769"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1503",
+        "exit": 0,
+        "expected_sha256": "74321769f766036eea3a1a0578f7ed601cd901ef6d7980b1f58d62c285dedbce",
+        "output_sha256": "74321769f766036eea3a1a0578f7ed601cd901ef6d7980b1f58d62c285dedbce"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1504",
+        "exit": 0,
+        "expected_sha256": "9db9e6143b34e2ec558ca32dde4e3f34d7b92c4cf896a48e7fb90e7064ec3d97",
+        "output_sha256": "9db9e6143b34e2ec558ca32dde4e3f34d7b92c4cf896a48e7fb90e7064ec3d97"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1505",
+        "exit": 0,
+        "expected_sha256": "2c79fddce499bd6098cd1b075a0353ab0bf1371ac52463e2d4a0614103970ce8",
+        "output_sha256": "2c79fddce499bd6098cd1b075a0353ab0bf1371ac52463e2d4a0614103970ce8"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1506",
+        "exit": 0,
+        "expected_sha256": "a50e19c194779a552ac08b7a6234f9de9796fa380d570679d667d4b2ddec1b36",
+        "output_sha256": "a50e19c194779a552ac08b7a6234f9de9796fa380d570679d667d4b2ddec1b36"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1507",
+        "exit": 0,
+        "expected_sha256": "c44a75918f5da6b939fce19e48109a0e111e8c7095aab3ddd650195ad8ce5298",
+        "output_sha256": "c44a75918f5da6b939fce19e48109a0e111e8c7095aab3ddd650195ad8ce5298"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1508",
+        "exit": 0,
+        "expected_sha256": "c4c8d398036b41613b7c61ce3d8f02a7bb9762226747fc7d3366c74c6c5587ff",
+        "output_sha256": "c4c8d398036b41613b7c61ce3d8f02a7bb9762226747fc7d3366c74c6c5587ff"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1509",
+        "exit": 0,
+        "expected_sha256": "295e76383ce9934149108532b8f626a3d017d37aaa844095bb5cd663bee353c2",
+        "output_sha256": "295e76383ce9934149108532b8f626a3d017d37aaa844095bb5cd663bee353c2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1510",
+        "exit": 0,
+        "expected_sha256": "9d6b7b28f87f814e9685997a03a6e492200d5c09b7cdd91f61c09fc5cca09013",
+        "output_sha256": "9d6b7b28f87f814e9685997a03a6e492200d5c09b7cdd91f61c09fc5cca09013"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1511",
+        "exit": 0,
+        "expected_sha256": "0f8a46f1f314191b11f4609d414a311f4a9f88a64aa196a2f044e910e552fcb2",
+        "output_sha256": "0f8a46f1f314191b11f4609d414a311f4a9f88a64aa196a2f044e910e552fcb2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1512",
+        "exit": 0,
+        "expected_sha256": "329ca834fca4be9845551256370ec0c409295f4b42def88947cb5ffe35b8ec07",
+        "output_sha256": "329ca834fca4be9845551256370ec0c409295f4b42def88947cb5ffe35b8ec07"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1513",
+        "exit": 0,
+        "expected_sha256": "3ed8ccc069bff9f63029f6e21679876cee364de9575239f94af770315be00b90",
+        "output_sha256": "3ed8ccc069bff9f63029f6e21679876cee364de9575239f94af770315be00b90"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1514",
+        "exit": 0,
+        "expected_sha256": "46b0a0986428d68cf59f13f22752b74db54f15700109eae39955a2ce1eb7aebf",
+        "output_sha256": "46b0a0986428d68cf59f13f22752b74db54f15700109eae39955a2ce1eb7aebf"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1517",
+        "exit": 0,
+        "expected_sha256": "986e24c3f5b6fd2ed9964b1cafc36ab17bd34e49906f696385020cbaf7b162fd",
+        "output_sha256": "986e24c3f5b6fd2ed9964b1cafc36ab17bd34e49906f696385020cbaf7b162fd"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1515",
+        "exit": 0,
+        "expected_sha256": "ad4028f27401ec6ce408e3c6ae39cfecc305c8e48c939bac49aeab27e8e7851b",
+        "output_sha256": "ad4028f27401ec6ce408e3c6ae39cfecc305c8e48c939bac49aeab27e8e7851b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1518",
+        "exit": 0,
+        "expected_sha256": "7d4b8f3e59f74a076cb256992ade378201f4d889872f912a9b59dec68dc0483d",
+        "output_sha256": "7d4b8f3e59f74a076cb256992ade378201f4d889872f912a9b59dec68dc0483d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1520",
+        "exit": 0,
+        "expected_sha256": "12ba79d6cc1aed08cfed8715e136353278e564b9b60c946c724888e48402d00f",
+        "output_sha256": "12ba79d6cc1aed08cfed8715e136353278e564b9b60c946c724888e48402d00f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1522",
+        "exit": 0,
+        "expected_sha256": "c357177881c2e73e3fd5d1051c9ca132053025c88241fcc55e6c0bd7a111d886",
+        "output_sha256": "c357177881c2e73e3fd5d1051c9ca132053025c88241fcc55e6c0bd7a111d886"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1523",
+        "exit": 0,
+        "expected_sha256": "dc345a9030a38b02e6c69aeb3505603cd44f37c3ff6eb1d8fbb58a056f8a2d85",
+        "output_sha256": "dc345a9030a38b02e6c69aeb3505603cd44f37c3ff6eb1d8fbb58a056f8a2d85"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1525",
+        "exit": 0,
+        "expected_sha256": "6b3e2895188d2fee6ea737def77bffccb86792b5041705d092f407ebf90f4f6e",
+        "output_sha256": "6b3e2895188d2fee6ea737def77bffccb86792b5041705d092f407ebf90f4f6e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1526",
+        "exit": 0,
+        "expected_sha256": "d1865920b0c09ddcadd50be401c0b78c3dac17a909c05eca80c2e51ad1b0e767",
+        "output_sha256": "d1865920b0c09ddcadd50be401c0b78c3dac17a909c05eca80c2e51ad1b0e767"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1527",
+        "exit": 0,
+        "expected_sha256": "a31ee10c2958a9dfe09c96b7cd56f0a6a2bd247f1ebdb7066ff24a8bcb2796cb",
+        "output_sha256": "a31ee10c2958a9dfe09c96b7cd56f0a6a2bd247f1ebdb7066ff24a8bcb2796cb"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1528",
+        "exit": 0,
+        "expected_sha256": "ef00cc00b3813b805bdfc54531fb3d0394137fd1d26f61b3036dc19def7fbba9",
+        "output_sha256": "ef00cc00b3813b805bdfc54531fb3d0394137fd1d26f61b3036dc19def7fbba9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1529",
+        "exit": 0,
+        "expected_sha256": "3cdd798e4af47381b31f5603807b5afe8ddc9483a04d964647b75937a472773f",
+        "output_sha256": "3cdd798e4af47381b31f5603807b5afe8ddc9483a04d964647b75937a472773f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1530",
+        "exit": 0,
+        "expected_sha256": "82ae58906154a2b8089d755c9902374b7964c9c7f582e60fdecee7b18515debe",
+        "output_sha256": "82ae58906154a2b8089d755c9902374b7964c9c7f582e60fdecee7b18515debe"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1531",
+        "exit": 0,
+        "expected_sha256": "673df6f6f9359444cb87f7549469e1c1e3593f3b3ef66579aae34bd8a3d9697e",
+        "output_sha256": "673df6f6f9359444cb87f7549469e1c1e3593f3b3ef66579aae34bd8a3d9697e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1532",
+        "exit": 0,
+        "expected_sha256": "b346e1fffb4df7c6292dc6c8f09df2e5a9c6fb38278ca050834366babe770f99",
+        "output_sha256": "b346e1fffb4df7c6292dc6c8f09df2e5a9c6fb38278ca050834366babe770f99"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1521",
+        "exit": 0,
+        "expected_sha256": "17e8a5a0a4975ff5ee5e352f016bba50a356a9443523d6ee249da03b329a162e",
+        "output_sha256": "17e8a5a0a4975ff5ee5e352f016bba50a356a9443523d6ee249da03b329a162e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1533",
+        "exit": 0,
+        "expected_sha256": "afde38b8aa006c6150a6181b57dfe6c1dba008bdf76eac6fa9bebab65f1d6e6c",
+        "output_sha256": "afde38b8aa006c6150a6181b57dfe6c1dba008bdf76eac6fa9bebab65f1d6e6c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1534",
+        "exit": 0,
+        "expected_sha256": "35f2249e75a935b5f596135b455a8a938591cadcf7c7864c8eea9f3e60f99df9",
+        "output_sha256": "35f2249e75a935b5f596135b455a8a938591cadcf7c7864c8eea9f3e60f99df9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1535",
+        "exit": 0,
+        "expected_sha256": "1290d5873f955403c56aa685002307b8bada220f95833352996da10f92de7c0d",
+        "output_sha256": "1290d5873f955403c56aa685002307b8bada220f95833352996da10f92de7c0d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1536",
+        "exit": 0,
+        "expected_sha256": "94fa5a13f13ea31626f47af15a430bf8c13515d9c119932a2f557c2a7b07ec91",
+        "output_sha256": "94fa5a13f13ea31626f47af15a430bf8c13515d9c119932a2f557c2a7b07ec91"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1537",
+        "exit": 0,
+        "expected_sha256": "ba05089cb1028eb1d9c404a99c768ce72eb0b64db11f7c94f2b2597b9990e9e6",
+        "output_sha256": "ba05089cb1028eb1d9c404a99c768ce72eb0b64db11f7c94f2b2597b9990e9e6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1538",
+        "exit": 0,
+        "expected_sha256": "3216797c8a92a67996ea29c72dc258001c9da1c24e50c55ccc714d7999ca8c39",
+        "output_sha256": "3216797c8a92a67996ea29c72dc258001c9da1c24e50c55ccc714d7999ca8c39"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1539",
+        "exit": 0,
+        "expected_sha256": "3ce786eaea3b547adb409aab0cb680cb09ba8742f33fdb38572be9a993b7370e",
+        "output_sha256": "3ce786eaea3b547adb409aab0cb680cb09ba8742f33fdb38572be9a993b7370e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1540",
+        "exit": 0,
+        "expected_sha256": "68ec754e6940e841006769d01cb2bd82e40f10839b1cc64985cbf6ef878bccb8",
+        "output_sha256": "68ec754e6940e841006769d01cb2bd82e40f10839b1cc64985cbf6ef878bccb8"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1541",
+        "exit": 0,
+        "expected_sha256": "bde78c786bcd0922d5d8f192d7e83061a8960dae5d70926ad6ce1a6c2b59962c",
+        "output_sha256": "bde78c786bcd0922d5d8f192d7e83061a8960dae5d70926ad6ce1a6c2b59962c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1542",
+        "exit": 0,
+        "expected_sha256": "17e0460a914b7766dc5aa0601d2abbccc7b4e2e6814f2c0c3abf3a746b4c61f2",
+        "output_sha256": "17e0460a914b7766dc5aa0601d2abbccc7b4e2e6814f2c0c3abf3a746b4c61f2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1543",
+        "exit": 0,
+        "expected_sha256": "5af22b186a02c66f5312e4580966378337a81fe64f641bf6b8fabdb30791ee34",
+        "output_sha256": "5af22b186a02c66f5312e4580966378337a81fe64f641bf6b8fabdb30791ee34"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1545",
+        "exit": 0,
+        "expected_sha256": "83fae1d99e4e9933780808546815721ad63fb84422b4fc6493c1b7ff7efbede5",
+        "output_sha256": "83fae1d99e4e9933780808546815721ad63fb84422b4fc6493c1b7ff7efbede5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1550",
+        "exit": 0,
+        "expected_sha256": "0d8ab774526598dba89c45189798af20e9563a62be0669969b667ae28689be94",
+        "output_sha256": "0d8ab774526598dba89c45189798af20e9563a62be0669969b667ae28689be94"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1551",
+        "exit": 0,
+        "expected_sha256": "5a21701d8ce49cafcdb91b4a30129a8fcd3361c177d5dd17d49836f310ed8d12",
+        "output_sha256": "5a21701d8ce49cafcdb91b4a30129a8fcd3361c177d5dd17d49836f310ed8d12"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1552",
+        "exit": 0,
+        "expected_sha256": "c8a37eaa9f904f2ece4d821e277fe3ad022b022c27d7f1f6a24b15c033392603",
+        "output_sha256": "c8a37eaa9f904f2ece4d821e277fe3ad022b022c27d7f1f6a24b15c033392603"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1553",
+        "exit": 0,
+        "expected_sha256": "f0784026f06568306ab1554c7c448bbc6dee9fd047f9072517925ef7c8aab31d",
+        "output_sha256": "f0784026f06568306ab1554c7c448bbc6dee9fd047f9072517925ef7c8aab31d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1554",
+        "exit": 0,
+        "expected_sha256": "37f06a02a70b4c469fd850b1dfada2eba384b4e7fea25025a4ed6eae144dc0f9",
+        "output_sha256": "37f06a02a70b4c469fd850b1dfada2eba384b4e7fea25025a4ed6eae144dc0f9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1555",
+        "exit": 0,
+        "expected_sha256": "12ef004de981f0ef73a5b3ccf4ed2a18fc8a08bca61d3db5727c3c456f6313ce",
+        "output_sha256": "12ef004de981f0ef73a5b3ccf4ed2a18fc8a08bca61d3db5727c3c456f6313ce"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1556",
+        "exit": 0,
+        "expected_sha256": "7168f1f4c5d2b57eda05b881d879e57ebb0e9cb8f12309c470731fa5b6ea1657",
+        "output_sha256": "7168f1f4c5d2b57eda05b881d879e57ebb0e9cb8f12309c470731fa5b6ea1657"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1557",
+        "exit": 0,
+        "expected_sha256": "18fb584ae3e3b551fb8e495c60fbde614fa1221c22de177039ca2425793f1d8c",
+        "output_sha256": "18fb584ae3e3b551fb8e495c60fbde614fa1221c22de177039ca2425793f1d8c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1558",
+        "exit": 0,
+        "expected_sha256": "da108d9cffa25c89c0ebe408e3ab4c1f0f4fe2991c2c85ba30100965f411e3d5",
+        "output_sha256": "da108d9cffa25c89c0ebe408e3ab4c1f0f4fe2991c2c85ba30100965f411e3d5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1559",
+        "exit": 0,
+        "expected_sha256": "de2c69ca0defc386822f966ec4567d460116d708079cab40d7b240b4bd84c4db",
+        "output_sha256": "de2c69ca0defc386822f966ec4567d460116d708079cab40d7b240b4bd84c4db"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1560",
+        "exit": 0,
+        "expected_sha256": "588b8568988946cda077cbe49c39a77f580e099964fea0ad217ba41565bd7180",
+        "output_sha256": "588b8568988946cda077cbe49c39a77f580e099964fea0ad217ba41565bd7180"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1564",
+        "exit": 0,
+        "expected_sha256": "1109f7ce6dad109a24176d44c3dab25ff2a11c3a8006b27604eb0e5bd8921f58",
+        "output_sha256": "1109f7ce6dad109a24176d44c3dab25ff2a11c3a8006b27604eb0e5bd8921f58"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1565",
+        "exit": 0,
+        "expected_sha256": "6bc040a196988f88d026dce1ffde205012ae7b00b447d81e4199b8c091bae41e",
+        "output_sha256": "6bc040a196988f88d026dce1ffde205012ae7b00b447d81e4199b8c091bae41e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1567",
+        "exit": 0,
+        "expected_sha256": "e8e4fbc89d3c2892fd00c30653c2d1a4068dbb64145ea01b6269118180cf3933",
+        "output_sha256": "e8e4fbc89d3c2892fd00c30653c2d1a4068dbb64145ea01b6269118180cf3933"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1568",
+        "exit": 0,
+        "expected_sha256": "29765506c8b65b159be906c1c060b86c4fea54053642606e44ecd10aa210ad1f",
+        "output_sha256": "29765506c8b65b159be906c1c060b86c4fea54053642606e44ecd10aa210ad1f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1569",
+        "exit": 0,
+        "expected_sha256": "9f984f5fe966ad2527418200d357a15bd73ea5061a118bc5955c0e9942048367",
+        "output_sha256": "9f984f5fe966ad2527418200d357a15bd73ea5061a118bc5955c0e9942048367"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1571",
+        "exit": 0,
+        "expected_sha256": "75fb8c1308a9b6f75c0b80ec2db7cf244511ab82650ff8e3ae7673cf819247ac",
+        "output_sha256": "75fb8c1308a9b6f75c0b80ec2db7cf244511ab82650ff8e3ae7673cf819247ac"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1576",
+        "exit": 0,
+        "expected_sha256": "627fb4ee7f70c865cec0a479b5d5639cba4108b815e81b03416aa4de10c71bba",
+        "output_sha256": "627fb4ee7f70c865cec0a479b5d5639cba4108b815e81b03416aa4de10c71bba"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1578",
+        "exit": 0,
+        "expected_sha256": "627fb4ee7f70c865cec0a479b5d5639cba4108b815e81b03416aa4de10c71bba",
+        "output_sha256": "627fb4ee7f70c865cec0a479b5d5639cba4108b815e81b03416aa4de10c71bba"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1591",
+        "exit": 0,
+        "expected_sha256": "2409c49141a4015fd38b7a516959c409c85a11d187065e8179868a9ab60872e3",
+        "output_sha256": "2409c49141a4015fd38b7a516959c409c85a11d187065e8179868a9ab60872e3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1592",
+        "exit": 0,
+        "expected_sha256": "9fa7b536243394820f1478c35e952171b087b910592da63bc13b10cee473bfc4",
+        "output_sha256": "9fa7b536243394820f1478c35e952171b087b910592da63bc13b10cee473bfc4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1593",
+        "exit": 0,
+        "expected_sha256": "03ccf8a0c21e82ada8ace6dd52babe41dc457c59cd0e6d70acab686fa96a868f",
+        "output_sha256": "03ccf8a0c21e82ada8ace6dd52babe41dc457c59cd0e6d70acab686fa96a868f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1594",
+        "exit": 0,
+        "expected_sha256": "c1040300e0a5bd3777c6ab6ff8d398252250fbe8d73ed01dcde9a698d621d93c",
+        "output_sha256": "c1040300e0a5bd3777c6ab6ff8d398252250fbe8d73ed01dcde9a698d621d93c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1596",
+        "exit": 0,
+        "expected_sha256": "c1040300e0a5bd3777c6ab6ff8d398252250fbe8d73ed01dcde9a698d621d93c",
+        "output_sha256": "c1040300e0a5bd3777c6ab6ff8d398252250fbe8d73ed01dcde9a698d621d93c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1597",
+        "exit": 0,
+        "expected_sha256": "1f7f00ade2dc8462ddcb5922e900aed597aef179d91be8aecbe29b910602c4d9",
+        "output_sha256": "1f7f00ade2dc8462ddcb5922e900aed597aef179d91be8aecbe29b910602c4d9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1598",
+        "exit": 0,
+        "expected_sha256": "758952af4b3e6438f225a200ffa01d4ee33d0e40801db082f34119d8b626bff9",
+        "output_sha256": "758952af4b3e6438f225a200ffa01d4ee33d0e40801db082f34119d8b626bff9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1662",
+        "exit": 0,
+        "expected_sha256": "59b3c96313f67153712f748a160601dd8b2333e8b93d245f2290a075490f2df4",
+        "output_sha256": "59b3c96313f67153712f748a160601dd8b2333e8b93d245f2290a075490f2df4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1900",
+        "exit": 0,
+        "expected_sha256": "62c2c0f6fe09fb8852f3566402589bf252c81f95b0e6fa04840b5222d0fbfd9a",
+        "output_sha256": "62c2c0f6fe09fb8852f3566402589bf252c81f95b0e6fa04840b5222d0fbfd9a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1901",
+        "exit": 0,
+        "expected_sha256": "3a91e757faa296f69ba0b985063972f5e5784bc8546a7f0c61efc4093108a977",
+        "output_sha256": "3a91e757faa296f69ba0b985063972f5e5784bc8546a7f0c61efc4093108a977"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1903",
+        "exit": 0,
+        "expected_sha256": "a08a6a1a619e681cf04b64d691485dc0494355665e65e88911ef292ca6951a96",
+        "output_sha256": "a08a6a1a619e681cf04b64d691485dc0494355665e65e88911ef292ca6951a96"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1905",
+        "exit": 0,
+        "expected_sha256": "e778df788dd99a0c120add9dfb2647d8e1b7e3c442cd36fcd7f015a4e05f0867",
+        "output_sha256": "e778df788dd99a0c120add9dfb2647d8e1b7e3c442cd36fcd7f015a4e05f0867"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1906",
+        "exit": 0,
+        "expected_sha256": "9c83097142d1f6c6878e3ea1fac0752a1ed70c53c91dd94a610c6ac522669072",
+        "output_sha256": "9c83097142d1f6c6878e3ea1fac0752a1ed70c53c91dd94a610c6ac522669072"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1907",
+        "exit": 0,
+        "expected_sha256": "00992d03415d5b82564d8d393103c3b1d00e80937c12c783aba137964cda85ae",
+        "output_sha256": "00992d03415d5b82564d8d393103c3b1d00e80937c12c783aba137964cda85ae"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1908",
+        "exit": 0,
+        "expected_sha256": "d61c4c741c9f523a37ff4c2cf4ee9b14348259b0704499ef7a3f419caee2763c",
+        "output_sha256": "d61c4c741c9f523a37ff4c2cf4ee9b14348259b0704499ef7a3f419caee2763c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1910",
+        "exit": 0,
+        "expected_sha256": "f486bec420bcfc9b5fe58581247c8b84c8386b1a2e2e592926e1f9e06f9c024c",
+        "output_sha256": "f486bec420bcfc9b5fe58581247c8b84c8386b1a2e2e592926e1f9e06f9c024c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1911",
+        "exit": 0,
+        "expected_sha256": "b8c60608ee010d4618e794d9b7e065e85d2a9a71d3e8056bcff0cec702165ebc",
+        "output_sha256": "b8c60608ee010d4618e794d9b7e065e85d2a9a71d3e8056bcff0cec702165ebc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1912",
+        "exit": 0,
+        "expected_sha256": "83210143e2cc77464cef0e2753a04523f638e4ece91e76061f8020509632fb82",
+        "output_sha256": "83210143e2cc77464cef0e2753a04523f638e4ece91e76061f8020509632fb82"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1913",
+        "exit": 0,
+        "expected_sha256": "a3c950734e7dafae5ab9ed04bfbe5d55b92c100c76e0203f6b30cd937bca4bb5",
+        "output_sha256": "a3c950734e7dafae5ab9ed04bfbe5d55b92c100c76e0203f6b30cd937bca4bb5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1916",
+        "exit": 0,
+        "expected_sha256": "1292915f74b0739683069de76be29ab89b2e1293a63e84be884c05e97b2714ed",
+        "output_sha256": "1292915f74b0739683069de76be29ab89b2e1293a63e84be884c05e97b2714ed"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1915",
+        "exit": 0,
+        "expected_sha256": "6db9f7887e351c163f59dcd5620aad3c9188676b5d79db2b0447d82acc1ec88a",
+        "output_sha256": "6db9f7887e351c163f59dcd5620aad3c9188676b5d79db2b0447d82acc1ec88a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1917",
+        "exit": 0,
+        "expected_sha256": "50cfdfa0c5cbbf223335ebb684cc1edbc51113e002beca567335eec7c7ed8c76",
+        "output_sha256": "50cfdfa0c5cbbf223335ebb684cc1edbc51113e002beca567335eec7c7ed8c76"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1918",
+        "exit": 0,
+        "expected_sha256": "2f8986ffd0ff8f19d0f88969dbe32217cc10b14f98da6557b08fbff39361b738",
+        "output_sha256": "2f8986ffd0ff8f19d0f88969dbe32217cc10b14f98da6557b08fbff39361b738"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1919",
+        "exit": 0,
+        "expected_sha256": "fb55c7c81ccf36b22e586df36bbd2a50ebae6652dc85f1fe1a6ec7f685d6ae82",
+        "output_sha256": "fb55c7c81ccf36b22e586df36bbd2a50ebae6652dc85f1fe1a6ec7f685d6ae82"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1933",
+        "exit": 0,
+        "expected_sha256": "48345fee58147868229bceb58f2fce97fcc2b5922eb222b19821626413ff83b0",
+        "output_sha256": "48345fee58147868229bceb58f2fce97fcc2b5922eb222b19821626413ff83b0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1934",
+        "exit": 0,
+        "expected_sha256": "3fb4f72bf58b6056e48db306496b1fbf7e11eb44c4877414a544edd3cb398a90",
+        "output_sha256": "3fb4f72bf58b6056e48db306496b1fbf7e11eb44c4877414a544edd3cb398a90"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1935",
+        "exit": 0,
+        "expected_sha256": "7f5eda564c1cb89e42375fbc6472ab20525d1917ff0f720c9b6f22f24748d21e",
+        "output_sha256": "7f5eda564c1cb89e42375fbc6472ab20525d1917ff0f720c9b6f22f24748d21e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1936",
+        "exit": 0,
+        "expected_sha256": "c109a2aa8aab1173459104d7ccc0253e5be9e8d5200d0da210df287f7655d89d",
+        "output_sha256": "c109a2aa8aab1173459104d7ccc0253e5be9e8d5200d0da210df287f7655d89d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1937",
+        "exit": 0,
+        "expected_sha256": "db87210a08611b1c9502e1099dc318609358736a2599a77bc86ecb6e7904944b",
+        "output_sha256": "db87210a08611b1c9502e1099dc318609358736a2599a77bc86ecb6e7904944b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1938",
+        "exit": 0,
+        "expected_sha256": "8d5f2c8933b96b6ec33f681f6aff145031f359688e4a6a255809c7afc0473588",
+        "output_sha256": "8d5f2c8933b96b6ec33f681f6aff145031f359688e4a6a255809c7afc0473588"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1939",
+        "exit": 0,
+        "expected_sha256": "797c1b1f2673f34b3d24512c49d42bb62e51aec6ab6f2e4ce63266ec6a500f3d",
+        "output_sha256": "797c1b1f2673f34b3d24512c49d42bb62e51aec6ab6f2e4ce63266ec6a500f3d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1940",
+        "exit": 0,
+        "expected_sha256": "52cb1e6e5e7d12e3aebff14e7caed11f10295b41f4e44aa08c40c6d9a75765e4",
+        "output_sha256": "52cb1e6e5e7d12e3aebff14e7caed11f10295b41f4e44aa08c40c6d9a75765e4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1945",
+        "exit": 0,
+        "expected_sha256": "85612e4316537fc74b8b323409c9ed99e78e7e7c7f776496d7eb956725098193",
+        "output_sha256": "85612e4316537fc74b8b323409c9ed99e78e7e7c7f776496d7eb956725098193"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1946",
+        "exit": 0,
+        "expected_sha256": "3aa88b5b40a110162cfdc469129f3f917c8ce4964abc7c3220ec4248948566dc",
+        "output_sha256": "3aa88b5b40a110162cfdc469129f3f917c8ce4964abc7c3220ec4248948566dc"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1947",
+        "exit": 0,
+        "expected_sha256": "222b2a9e3c7cb183465d092a93403752d844dd41bbd9fc554be7ce944f030cb9",
+        "output_sha256": "222b2a9e3c7cb183465d092a93403752d844dd41bbd9fc554be7ce944f030cb9"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1948",
+        "exit": 0,
+        "expected_sha256": "2f7a35a06e4e9821c1f0ab579517a46ca3d436c02282093fc3e927315b01f9b0",
+        "output_sha256": "2f7a35a06e4e9821c1f0ab579517a46ca3d436c02282093fc3e927315b01f9b0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1955",
+        "exit": 0,
+        "expected_sha256": "b55b5934e07d8d4b60c48364519a2bd8dc1d161569a0e2ee77a296cc17c6c7af",
+        "output_sha256": "b55b5934e07d8d4b60c48364519a2bd8dc1d161569a0e2ee77a296cc17c6c7af"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1956",
+        "exit": 0,
+        "expected_sha256": "063312c441cc2ec39db2b5116d3803572eacf775987f51da32d50dd90e24e1d5",
+        "output_sha256": "063312c441cc2ec39db2b5116d3803572eacf775987f51da32d50dd90e24e1d5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1957",
+        "exit": 0,
+        "expected_sha256": "f89e72416a8312c64f0b723aca5ef47a979330ff94ff3045141cb0a09065dde2",
+        "output_sha256": "f89e72416a8312c64f0b723aca5ef47a979330ff94ff3045141cb0a09065dde2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1958",
+        "exit": 0,
+        "expected_sha256": "5b7dc3497a927c260597f9ae5a51f2402af846cd00e551f0d99c1676160a0981",
+        "output_sha256": "5b7dc3497a927c260597f9ae5a51f2402af846cd00e551f0d99c1676160a0981"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1959",
+        "exit": 0,
+        "expected_sha256": "5d0de497c73c0584576651477e35d3743c8fe8e4aa88ff61f0a4e1911697a7b0",
+        "output_sha256": "5d0de497c73c0584576651477e35d3743c8fe8e4aa88ff61f0a4e1911697a7b0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1960",
+        "exit": 0,
+        "expected_sha256": "2aa3d270f7da5df89fd5f678c36434d8883c37af85014eb4526a08d8cb4ff848",
+        "output_sha256": "2aa3d270f7da5df89fd5f678c36434d8883c37af85014eb4526a08d8cb4ff848"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1964",
+        "exit": 0,
+        "expected_sha256": "2f9dac55aba5a8917f9e204d687a9f158245af0232eb4ed43202f6068fb43718",
+        "output_sha256": "2f9dac55aba5a8917f9e204d687a9f158245af0232eb4ed43202f6068fb43718"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1970",
+        "exit": 0,
+        "expected_sha256": "67f19a2c2c6385597f38bb03177dc9cfbb04fa3779476b41ef16bb25feb35160",
+        "output_sha256": "67f19a2c2c6385597f38bb03177dc9cfbb04fa3779476b41ef16bb25feb35160"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1971",
+        "exit": 0,
+        "expected_sha256": "037ea23023f22e3724d7fb44050ada0e65da75ce18f456523ad5673c26255caf",
+        "output_sha256": "037ea23023f22e3724d7fb44050ada0e65da75ce18f456523ad5673c26255caf"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1972",
+        "exit": 0,
+        "expected_sha256": "802d84652b6dce4ddac6bae750e844ef2ac3f6ff346828b77635d917c8244903",
+        "output_sha256": "802d84652b6dce4ddac6bae750e844ef2ac3f6ff346828b77635d917c8244903"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1973",
+        "exit": 0,
+        "expected_sha256": "2ad12d885404103b72cf6f74562b9cfccda55a8cefe88c5a8745786a87faf9a2",
+        "output_sha256": "2ad12d885404103b72cf6f74562b9cfccda55a8cefe88c5a8745786a87faf9a2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1974",
+        "exit": 0,
+        "expected_sha256": "ac78e1da4e76c39d287b999f9405ad46400afee76cb0548e59d536bb4dc58be2",
+        "output_sha256": "ac78e1da4e76c39d287b999f9405ad46400afee76cb0548e59d536bb4dc58be2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1975",
+        "exit": 0,
+        "expected_sha256": "4bf062203f9431478f6be6f76b8fb5d31612edba905da73c4d508a2c7f74d480",
+        "output_sha256": "4bf062203f9431478f6be6f76b8fb5d31612edba905da73c4d508a2c7f74d480"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1977",
+        "exit": 0,
+        "expected_sha256": "7d5b9e675e21effdf2ebf236dbaeca0ff7f40a98eaa9741b86e7222f28ecedf3",
+        "output_sha256": "7d5b9e675e21effdf2ebf236dbaeca0ff7f40a98eaa9741b86e7222f28ecedf3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib1978",
+        "exit": 0,
+        "expected_sha256": "a3fcc91bd14097bb92fa4e11c605c3a35bc0fbeeb008c1296e7ea10351ac0c60",
+        "output_sha256": "a3fcc91bd14097bb92fa4e11c605c3a35bc0fbeeb008c1296e7ea10351ac0c60"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2301",
+        "exit": 0,
+        "expected_sha256": "ed16e305eb773bdb7b7c25aa5c07aba225f7fb83d36e1572442385f3ebab103f",
+        "output_sha256": "ed16e305eb773bdb7b7c25aa5c07aba225f7fb83d36e1572442385f3ebab103f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2302",
+        "exit": 0,
+        "expected_sha256": "209227df38c68d347c4ceb531b81f517a25a6d3b4a89f0b7372523efcb6228fb",
+        "output_sha256": "209227df38c68d347c4ceb531b81f517a25a6d3b4a89f0b7372523efcb6228fb"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2304",
+        "exit": 0,
+        "expected_sha256": "8771bfec016f42d905d41fdd7d5911a33311b45ae5bcc2b7a605becf70e4dcf2",
+        "output_sha256": "8771bfec016f42d905d41fdd7d5911a33311b45ae5bcc2b7a605becf70e4dcf2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2306",
+        "exit": 0,
+        "expected_sha256": "ac45439d5698ac8bb9ad3daa45b3fd8ce98f7f22e766e2ea73919edc5da9b29a",
+        "output_sha256": "ac45439d5698ac8bb9ad3daa45b3fd8ce98f7f22e766e2ea73919edc5da9b29a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2308",
+        "exit": 0,
+        "expected_sha256": "2018564f860e77c8e92cde4ad94b3a35bd0db15bebdefd33aeb15903c22b4d7d",
+        "output_sha256": "2018564f860e77c8e92cde4ad94b3a35bd0db15bebdefd33aeb15903c22b4d7d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2309",
+        "exit": 0,
+        "expected_sha256": "3a25e49ba8bfcb5ebffa5893d0d1625bae3568e36c3713b2c24212d1cb9a9b94",
+        "output_sha256": "3a25e49ba8bfcb5ebffa5893d0d1625bae3568e36c3713b2c24212d1cb9a9b94"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2402",
+        "exit": 0,
+        "expected_sha256": "87ee15cffad424d1f3c6eb7b23dee2896155655a5fcc77e5e7dd5c3a21c9aff6",
+        "output_sha256": "87ee15cffad424d1f3c6eb7b23dee2896155655a5fcc77e5e7dd5c3a21c9aff6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2404",
+        "exit": 0,
+        "expected_sha256": "602dda8d6d595f5a5e964113db03743ec1531b23d6e505886416027d92c3f06b",
+        "output_sha256": "602dda8d6d595f5a5e964113db03743ec1531b23d6e505886416027d92c3f06b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2405",
+        "exit": 0,
+        "expected_sha256": "a360e744fa29364cd96c0ca70a9a408800f7dd2d9e2f9c46c5d6310229b3c397",
+        "output_sha256": "a360e744fa29364cd96c0ca70a9a408800f7dd2d9e2f9c46c5d6310229b3c397"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2502",
+        "exit": 0,
+        "expected_sha256": "e783cb64ede0ef9d3109e1510ba917743ba1e626938a0d89556ddbb02713ea6e",
+        "output_sha256": "e783cb64ede0ef9d3109e1510ba917743ba1e626938a0d89556ddbb02713ea6e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib2700",
+        "exit": 0,
+        "expected_sha256": "525be891fdecf286fa233a7c59db69579dd397f71c2fcfacaab463fba14cc586",
+        "output_sha256": "525be891fdecf286fa233a7c59db69579dd397f71c2fcfacaab463fba14cc586"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3010",
+        "exit": 0,
+        "expected_sha256": "18b742357f899af2b9f193939320d0ec3684c1bd859862d6183ce117970c8f90",
+        "output_sha256": "18b742357f899af2b9f193939320d0ec3684c1bd859862d6183ce117970c8f90"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3025",
+        "exit": 0,
+        "expected_sha256": "14ab86b4769fb6a7c2a9d7f3a5687a31a59265dc08bafefcd983d3a8dd9e4064",
+        "output_sha256": "14ab86b4769fb6a7c2a9d7f3a5687a31a59265dc08bafefcd983d3a8dd9e4064"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3026",
+        "exit": 0,
+        "expected_sha256": "2f03efe6cd1a7d530d65fd625bf15278c5ba9bf7379826fc2171ee100c387db0",
+        "output_sha256": "2f03efe6cd1a7d530d65fd625bf15278c5ba9bf7379826fc2171ee100c387db0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3027",
+        "exit": 0,
+        "expected_sha256": "afccd22d5af9dc036a0b0df19e04eb0e11b4a0e4aff4b26954847ebfac55918e",
+        "output_sha256": "afccd22d5af9dc036a0b0df19e04eb0e11b4a0e4aff4b26954847ebfac55918e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3100",
+        "exit": 0,
+        "expected_sha256": "1fc88b5b6be16270834ffb58f75fe7759057ca4ec66618835a3e3e2ab8fdfdba",
+        "output_sha256": "1fc88b5b6be16270834ffb58f75fe7759057ca4ec66618835a3e3e2ab8fdfdba"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3101",
+        "exit": 0,
+        "expected_sha256": "30a5be64f8db2bab740ccc915ea44ee4c239aff454bfebb95d23ec040ea5de02",
+        "output_sha256": "30a5be64f8db2bab740ccc915ea44ee4c239aff454bfebb95d23ec040ea5de02"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3102",
+        "exit": 0,
+        "expected_sha256": "ba3aa4da4cb2c0b10c53ae8142c1ec2a63246a0d2de8fd4bbe2d2ba96584d435",
+        "output_sha256": "ba3aa4da4cb2c0b10c53ae8142c1ec2a63246a0d2de8fd4bbe2d2ba96584d435"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3103",
+        "exit": 0,
+        "expected_sha256": "4ead11d789ab1c077620331a4a7a66eede6683d74d95912b3e3b1478409ceda2",
+        "output_sha256": "4ead11d789ab1c077620331a4a7a66eede6683d74d95912b3e3b1478409ceda2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3104",
+        "exit": 0,
+        "expected_sha256": "b5a19a0d8f918381c6b823ab7d37b5f98823d41294df895bbbbf85c02e956f3d",
+        "output_sha256": "b5a19a0d8f918381c6b823ab7d37b5f98823d41294df895bbbbf85c02e956f3d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3105",
+        "exit": 0,
+        "expected_sha256": "c9626e2e4180715845f3bfd292892ccb5cba64e27972872cd90fb625ed12eb4d",
+        "output_sha256": "c9626e2e4180715845f3bfd292892ccb5cba64e27972872cd90fb625ed12eb4d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3208",
+        "exit": 0,
+        "expected_sha256": "a223849e7822aad9ff74a58b4f91fb496a7c79bed6c890ea007e9865938c37c3",
+        "output_sha256": "a223849e7822aad9ff74a58b4f91fb496a7c79bed6c890ea007e9865938c37c3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/libtest/lib3207",
+        "exit": 0,
+        "expected_sha256": "887e675054f5adfc844339a393bb9caff9f15bcfd759f9c9a790ef80a2922e7e",
+        "output_sha256": "887e675054f5adfc844339a393bb9caff9f15bcfd759f9c9a790ef80a2922e7e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/h2-pausing",
+        "exit": 0,
+        "expected_sha256": "6eb0f04826d91a4244f26d1fa22a96b09b61a2bae1c0e2fac7a8c24ff697fa09",
+        "output_sha256": "6eb0f04826d91a4244f26d1fa22a96b09b61a2bae1c0e2fac7a8c24ff697fa09"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/h2-serverpush",
+        "exit": 0,
+        "expected_sha256": "5136e89c8ab0ea9fb9632d45e120a4cdb798d9820137227660e1829c489df599",
+        "output_sha256": "5136e89c8ab0ea9fb9632d45e120a4cdb798d9820137227660e1829c489df599"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/h2-upgrade-extreme",
+        "exit": 0,
+        "expected_sha256": "d2b90d070ff2852540fe457043b317b730a3fa2fe9aa3a8f35b3b9c08f00228c",
+        "output_sha256": "d2b90d070ff2852540fe457043b317b730a3fa2fe9aa3a8f35b3b9c08f00228c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/hx-download",
+        "exit": 0,
+        "expected_sha256": "b584950b14fe036e714fd1713570d479583af769378305122a617072b70fff38",
+        "output_sha256": "b584950b14fe036e714fd1713570d479583af769378305122a617072b70fff38"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/hx-upload",
+        "exit": 0,
+        "expected_sha256": "4daa631403697064f4db86910844b04893e8fa6acd799129d20f8c9245db3180",
+        "output_sha256": "4daa631403697064f4db86910844b04893e8fa6acd799129d20f8c9245db3180"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/tls-session-reuse",
+        "exit": 0,
+        "expected_sha256": "1482818e9818e9839a82e598ea20de0c47f8309de61850460035eb2aa9fe9154",
+        "output_sha256": "1482818e9818e9839a82e598ea20de0c47f8309de61850460035eb2aa9fe9154"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/upload-pausing",
+        "exit": 0,
+        "expected_sha256": "7be8c27987fd6dd5d822b15a1112cebb927a8f2f8d6a2de76ef4dbdebcb2c102",
+        "output_sha256": "7be8c27987fd6dd5d822b15a1112cebb927a8f2f8d6a2de76ef4dbdebcb2c102"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/ws-data",
+        "exit": 0,
+        "expected_sha256": "bfaf3778a3d6aa3c635db3505ffa5753a077f0578be6d3e945958d3a625bf982",
+        "output_sha256": "bfaf3778a3d6aa3c635db3505ffa5753a077f0578be6d3e945958d3a625bf982"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/http/clients/ws-pingpong",
+        "exit": 0,
+        "expected_sha256": "bb9ee0d508eb939c40faebc961ea8da1a2993a4fcc5d28990c5f889144bf423f",
+        "output_sha256": "bb9ee0d508eb939c40faebc961ea8da1a2993a4fcc5d28990c5f889144bf423f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/tunit/tool1604",
+        "exit": 0,
+        "expected_sha256": "e5aa28257e2413c3de5f3cb799c4756494838549cb38ac32c0db2daba0b7bd6a",
+        "output_sha256": "e5aa28257e2413c3de5f3cb799c4756494838549cb38ac32c0db2daba0b7bd6a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/tunit/tool1394",
+        "exit": 0,
+        "expected_sha256": "fc19f1ac62529fb04e237270926154a42d36a8adfb69bbd1bb7c87b6c28a5be5",
+        "output_sha256": "fc19f1ac62529fb04e237270926154a42d36a8adfb69bbd1bb7c87b6c28a5be5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/tunit/tool1621",
+        "exit": 0,
+        "expected_sha256": "615c471c16b513045a32a423250bf1ef8f4ac0a346e860e56f2934dc25c24119",
+        "output_sha256": "615c471c16b513045a32a423250bf1ef8f4ac0a346e860e56f2934dc25c24119"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1300",
+        "exit": 0,
+        "expected_sha256": "42cecf6e5a8735f12bb54978759894aae7301b38289169468e60a1758f3ff095",
+        "output_sha256": "42cecf6e5a8735f12bb54978759894aae7301b38289169468e60a1758f3ff095"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1303",
+        "exit": 0,
+        "expected_sha256": "f63edd982e68bea75e0e73ad18d860ae04933f677905b14a81287f345d6fbba1",
+        "output_sha256": "f63edd982e68bea75e0e73ad18d860ae04933f677905b14a81287f345d6fbba1"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1302",
+        "exit": 0,
+        "expected_sha256": "82b703c4c051d6847b3ca2f6206d412b38e759c2519dbda9da50cfb550de569b",
+        "output_sha256": "82b703c4c051d6847b3ca2f6206d412b38e759c2519dbda9da50cfb550de569b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1304",
+        "exit": 0,
+        "expected_sha256": "6fae753075651fcf6b3f324c64d36dcd82a32db39f474090258c645a75cb3d99",
+        "output_sha256": "6fae753075651fcf6b3f324c64d36dcd82a32db39f474090258c645a75cb3d99"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1305",
+        "exit": 0,
+        "expected_sha256": "caeb96ed9f1eca220461cbfbb43a33c2adac2aa26f83c9f8537059a8c4e3257c",
+        "output_sha256": "caeb96ed9f1eca220461cbfbb43a33c2adac2aa26f83c9f8537059a8c4e3257c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1307",
+        "exit": 0,
+        "expected_sha256": "bbdbc6e357923e4a7c6aa630fd799377be0a426059c479428567d8e1c127153b",
+        "output_sha256": "bbdbc6e357923e4a7c6aa630fd799377be0a426059c479428567d8e1c127153b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1309",
+        "exit": 0,
+        "expected_sha256": "448389a3d175fa1db3e34a9d06c0e4c4a2b6aa73fcd05208a308b15a4676eb35",
+        "output_sha256": "448389a3d175fa1db3e34a9d06c0e4c4a2b6aa73fcd05208a308b15a4676eb35"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1330",
+        "exit": 0,
+        "expected_sha256": "2376a8fc1887da2fea780e83a10c73b9c0259fb6999a06c780d3f11933cfdae3",
+        "output_sha256": "2376a8fc1887da2fea780e83a10c73b9c0259fb6999a06c780d3f11933cfdae3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1323",
+        "exit": 0,
+        "expected_sha256": "11c1b9a210631370e7f9ae109df40a886221fa9a0795f697e876d0d85fa0dad5",
+        "output_sha256": "11c1b9a210631370e7f9ae109df40a886221fa9a0795f697e876d0d85fa0dad5"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1395",
+        "exit": 0,
+        "expected_sha256": "97e23f3856de21a64aacbfa0adad6e414039826ab54067454a3e7d155eec0fb7",
+        "output_sha256": "97e23f3856de21a64aacbfa0adad6e414039826ab54067454a3e7d155eec0fb7"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1396",
+        "exit": 0,
+        "expected_sha256": "006c3fc39f826c20504fdaa5ca66425ecbb8ad03c9cbd1ba069d0bdafbef2ad4",
+        "output_sha256": "006c3fc39f826c20504fdaa5ca66425ecbb8ad03c9cbd1ba069d0bdafbef2ad4"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1397",
+        "exit": 0,
+        "expected_sha256": "794e15c666c403e550a4257b3b953317b949e377eaeb805059b8a4e6e8a2a844",
+        "output_sha256": "794e15c666c403e550a4257b3b953317b949e377eaeb805059b8a4e6e8a2a844"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1398",
+        "exit": 0,
+        "expected_sha256": "bff97994bf6631cb940b177618fbfcb1908d84bf2a1281df02e91ffb77fa5dad",
+        "output_sha256": "bff97994bf6631cb940b177618fbfcb1908d84bf2a1281df02e91ffb77fa5dad"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1399",
+        "exit": 0,
+        "expected_sha256": "4652b5dcf1d8ebcb9383dbd7779efd77a081fb8aa01fd09c82b34a5c361ba3c6",
+        "output_sha256": "4652b5dcf1d8ebcb9383dbd7779efd77a081fb8aa01fd09c82b34a5c361ba3c6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1600",
+        "exit": 0,
+        "expected_sha256": "97726f3ef0068f63b35b5b021e2df86f1bb2a9dd0724931f777e43319eae037d",
+        "output_sha256": "97726f3ef0068f63b35b5b021e2df86f1bb2a9dd0724931f777e43319eae037d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1601",
+        "exit": 0,
+        "expected_sha256": "851aff4a162527723b4b246b61b20f5473a9eafbc7dc4c5e5e2771159b8d9d37",
+        "output_sha256": "851aff4a162527723b4b246b61b20f5473a9eafbc7dc4c5e5e2771159b8d9d37"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1602",
+        "exit": 0,
+        "expected_sha256": "9549ca4d3a89a3aee4f47ed7c7874abce7aa8446f84de94942502c7b15f47cec",
+        "output_sha256": "9549ca4d3a89a3aee4f47ed7c7874abce7aa8446f84de94942502c7b15f47cec"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1605",
+        "exit": 0,
+        "expected_sha256": "e6ee1b5872c13cced4671ae046bdfec9ac190a77d0dba10f2c73f281c4095f22",
+        "output_sha256": "e6ee1b5872c13cced4671ae046bdfec9ac190a77d0dba10f2c73f281c4095f22"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1603",
+        "exit": 0,
+        "expected_sha256": "253095eb5895d35b1205f1188d191a1bc2d0f05f1ffcf2700aa895f2376f2589",
+        "output_sha256": "253095eb5895d35b1205f1188d191a1bc2d0f05f1ffcf2700aa895f2376f2589"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1607",
+        "exit": 0,
+        "expected_sha256": "8e857383a7e189e22bf705df5aae04c0996be53c679ff51123bf15b2cd3b053f",
+        "output_sha256": "8e857383a7e189e22bf705df5aae04c0996be53c679ff51123bf15b2cd3b053f"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1606",
+        "exit": 0,
+        "expected_sha256": "03b16f5e2d9116f7096b28454b9bbacf37c46da0a0c81bc886c9156ac28e4909",
+        "output_sha256": "03b16f5e2d9116f7096b28454b9bbacf37c46da0a0c81bc886c9156ac28e4909"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1608",
+        "exit": 0,
+        "expected_sha256": "6b60e9e7bfbbcf97915a663213ede5ea01eeaf7d2a91c97ddccf1b5dd7e9de75",
+        "output_sha256": "6b60e9e7bfbbcf97915a663213ede5ea01eeaf7d2a91c97ddccf1b5dd7e9de75"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1609",
+        "exit": 0,
+        "expected_sha256": "5c8a06688693c1a470f542a38501c4e8e7eb5cd34399961274b132dbb277571a",
+        "output_sha256": "5c8a06688693c1a470f542a38501c4e8e7eb5cd34399961274b132dbb277571a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1610",
+        "exit": 0,
+        "expected_sha256": "fd5bb2466bf89a93f9abda815979eac2481c83c7589d88e9a5c7a5ccf6710296",
+        "output_sha256": "fd5bb2466bf89a93f9abda815979eac2481c83c7589d88e9a5c7a5ccf6710296"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1611",
+        "exit": 0,
+        "expected_sha256": "ef4dc0fac14db4b281c35cfa1dad3684b066d1b8be84e0df2a20e50edce6dc40",
+        "output_sha256": "ef4dc0fac14db4b281c35cfa1dad3684b066d1b8be84e0df2a20e50edce6dc40"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1614",
+        "exit": 0,
+        "expected_sha256": "872d466be5443f0568a2f5897b92baf938de8c1a1a7da58694bb802e2b7e081e",
+        "output_sha256": "872d466be5443f0568a2f5897b92baf938de8c1a1a7da58694bb802e2b7e081e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1612",
+        "exit": 0,
+        "expected_sha256": "5fb5614597eb1c7d096395913da0fc266b5173e85f28614229d1f1d04b0dae3b",
+        "output_sha256": "5fb5614597eb1c7d096395913da0fc266b5173e85f28614229d1f1d04b0dae3b"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1615",
+        "exit": 0,
+        "expected_sha256": "f918e071996fd4a163a04b567e3cb91188f6594e2e25787264e29c69dfa91cce",
+        "output_sha256": "f918e071996fd4a163a04b567e3cb91188f6594e2e25787264e29c69dfa91cce"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1616",
+        "exit": 0,
+        "expected_sha256": "6fbdcbf7d96cba1a9eaf8bb5efa8679c523415e802448a644a4edc7c29085724",
+        "output_sha256": "6fbdcbf7d96cba1a9eaf8bb5efa8679c523415e802448a644a4edc7c29085724"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1620",
+        "exit": 0,
+        "expected_sha256": "b5ed3af4d94803551bcfb3661c0224205ef54c902379210c8f513fe7f4a5e4dd",
+        "output_sha256": "b5ed3af4d94803551bcfb3661c0224205ef54c902379210c8f513fe7f4a5e4dd"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1650",
+        "exit": 0,
+        "expected_sha256": "9dabc12790407df7af491c82e1d27814e6574ab5dfeaf4dfba03ab35901f20a3",
+        "output_sha256": "9dabc12790407df7af491c82e1d27814e6574ab5dfeaf4dfba03ab35901f20a3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1651",
+        "exit": 0,
+        "expected_sha256": "4038efa896205c5097f8942f180293617351b72562564ec52e2c739291b11482",
+        "output_sha256": "4038efa896205c5097f8942f180293617351b72562564ec52e2c739291b11482"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1652",
+        "exit": 0,
+        "expected_sha256": "4f3fc26e25664681309a56310096f4290a3813f410085bea003513e9cca6adb8",
+        "output_sha256": "4f3fc26e25664681309a56310096f4290a3813f410085bea003513e9cca6adb8"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1653",
+        "exit": 0,
+        "expected_sha256": "f217a686a312145cbe75025cafe3a56161436c5fa4c19954d55fc2bd72039cc3",
+        "output_sha256": "f217a686a312145cbe75025cafe3a56161436c5fa4c19954d55fc2bd72039cc3"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1654",
+        "exit": 0,
+        "expected_sha256": "d79bce8e99aded0d7d84f78e3aa151b2ff53f36e988afb79a5d082cc2b00f212",
+        "output_sha256": "d79bce8e99aded0d7d84f78e3aa151b2ff53f36e988afb79a5d082cc2b00f212"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1656",
+        "exit": 0,
+        "expected_sha256": "5dfc8d358bb73ef65289ce9a66ba54f3709672733f37884f005d0469233ede00",
+        "output_sha256": "5dfc8d358bb73ef65289ce9a66ba54f3709672733f37884f005d0469233ede00"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1655",
+        "exit": 0,
+        "expected_sha256": "9404d96f1709d95a7584a82c9b1e1da682d762d2b682f4a69565ebeafb9fe67d",
+        "output_sha256": "9404d96f1709d95a7584a82c9b1e1da682d762d2b682f4a69565ebeafb9fe67d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1657",
+        "exit": 0,
+        "expected_sha256": "ff695b3e99c9e616b3d22efa761a6707ebdffd103452323e19edd21885f57a0d",
+        "output_sha256": "ff695b3e99c9e616b3d22efa761a6707ebdffd103452323e19edd21885f57a0d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1658",
+        "exit": 0,
+        "expected_sha256": "9137eca7cdab648ef3a871a91ce1129706b0f8c3f7381d74346e0fceacc41ad6",
+        "output_sha256": "9137eca7cdab648ef3a871a91ce1129706b0f8c3f7381d74346e0fceacc41ad6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1660",
+        "exit": 0,
+        "expected_sha256": "ac4effb6b5bef0d360876a52b9bbc115fca7903b70ead3a87eb9abbbdbf311d6",
+        "output_sha256": "ac4effb6b5bef0d360876a52b9bbc115fca7903b70ead3a87eb9abbbdbf311d6"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1661",
+        "exit": 0,
+        "expected_sha256": "29649470f3c22ccf3cf309448fcfa10654cd267b62cd3004c53556f23664444c",
+        "output_sha256": "29649470f3c22ccf3cf309448fcfa10654cd267b62cd3004c53556f23664444c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1663",
+        "exit": 0,
+        "expected_sha256": "b6da2253d8c0874ff4ad29877e82b08d509790367d7e05e9bcc51b86dd1156f0",
+        "output_sha256": "b6da2253d8c0874ff4ad29877e82b08d509790367d7e05e9bcc51b86dd1156f0"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1664",
+        "exit": 0,
+        "expected_sha256": "f389cb9fbead18f09472f2b2cedf929e3e871121f92694a4b67f152f6abcf82d",
+        "output_sha256": "f389cb9fbead18f09472f2b2cedf929e3e871121f92694a4b67f152f6abcf82d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1979",
+        "exit": 0,
+        "expected_sha256": "9f40decd1a09c55e0ff8a279117a7269ee0e750ba803abb3db5549e8531d40d7",
+        "output_sha256": "9f40decd1a09c55e0ff8a279117a7269ee0e750ba803abb3db5549e8531d40d7"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit1980",
+        "exit": 0,
+        "expected_sha256": "861f3f9d0761a25e033ec1564695914ff2f4ce5fe14bd14422aee39ba82d6551",
+        "output_sha256": "861f3f9d0761a25e033ec1564695914ff2f4ce5fe14bd14422aee39ba82d6551"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit2600",
+        "exit": 0,
+        "expected_sha256": "0ae972179a61f9e0a565874d58efd965c816822b9f8fac73fdedaf6b1d3673d2",
+        "output_sha256": "0ae972179a61f9e0a565874d58efd965c816822b9f8fac73fdedaf6b1d3673d2"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit2601",
+        "exit": 0,
+        "expected_sha256": "eb9acff7fb6053421164688cf047768b366cc22847d0ad1e809051180a13488d",
+        "output_sha256": "eb9acff7fb6053421164688cf047768b366cc22847d0ad1e809051180a13488d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit2602",
+        "exit": 0,
+        "expected_sha256": "721710df9a35b456c33d8b0e1bc81c4b86928e756e6355884414a3922c877abe",
+        "output_sha256": "721710df9a35b456c33d8b0e1bc81c4b86928e756e6355884414a3922c877abe"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit2603",
+        "exit": 0,
+        "expected_sha256": "a69629200590b03aba36976da904fe0ca80f72fc9235befdb49965936df82e8e",
+        "output_sha256": "a69629200590b03aba36976da904fe0ca80f72fc9235befdb49965936df82e8e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit2604",
+        "exit": 0,
+        "expected_sha256": "028418034877164975afc50d32ea8db36e7ae2e64f75c726a4d9c240c3eee350",
+        "output_sha256": "028418034877164975afc50d32ea8db36e7ae2e64f75c726a4d9c240c3eee350"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit3200",
+        "exit": 0,
+        "expected_sha256": "a2fa1add57aa2c613762c092042292eb748237623c5d28b298ee692ee6c8504c",
+        "output_sha256": "a2fa1add57aa2c613762c092042292eb748237623c5d28b298ee692ee6c8504c"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit3205",
+        "exit": 0,
+        "expected_sha256": "2b18a24a6f8021430adaaef2399877e46487faead5971812cbe705faf9af5b8e",
+        "output_sha256": "2b18a24a6f8021430adaaef2399877e46487faead5971812cbe705faf9af5b8e"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit3211",
+        "exit": 0,
+        "expected_sha256": "604d961f0d150707bd446cd95ef7e4a4590d1d646bd1858d164fcce557041818",
+        "output_sha256": "604d961f0d150707bd446cd95ef7e4a4590d1d646bd1858d164fcce557041818"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit3212",
+        "exit": 0,
+        "expected_sha256": "62382c695314a2db2517ba3f4788abd1c0de6a5c1abde6f49badb2bbb111d263",
+        "output_sha256": "62382c695314a2db2517ba3f4788abd1c0de6a5c1abde6f49badb2bbb111d263"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/tests/unit/unit3213",
+        "exit": 0,
+        "expected_sha256": "7ce164d405da2c60da527327c7fac97f4a824546884d4eda5feb07be72b8efd6",
+        "output_sha256": "7ce164d405da2c60da527327c7fac97f4a824546884d4eda5feb07be72b8efd6"
+      }
+    ],
+    "redis": [
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/redis/source/deps/lua/src/luac",
+        "exit": 0,
+        "expected_sha256": "8927b99505cf0148a75d2850e439cff611f56356b53987c32dd03b6ec25f639d",
+        "output_sha256": "8927b99505cf0148a75d2850e439cff611f56356b53987c32dd03b6ec25f639d"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/redis/source/deps/lua/src/lua",
+        "exit": 0,
+        "expected_sha256": "ab1824610d3b4a74e2cc5ba6fe750ed409d661a8b0f5da16e04a71d837a7b167",
+        "output_sha256": "ab1824610d3b4a74e2cc5ba6fe750ed409d661a8b0f5da16e04a71d837a7b167"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/redis/source/src/redis-server",
+        "exit": 0,
+        "expected_sha256": "92a2059875549db06eccb55b25fd742583fbaa39d84a5a1ce2de7f4e64ee4b2a",
+        "output_sha256": "92a2059875549db06eccb55b25fd742583fbaa39d84a5a1ce2de7f4e64ee4b2a"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/redis/source/src/redis-benchmark",
+        "exit": 0,
+        "expected_sha256": "1607dbe920dfd6c25ed2aec94f62eb05617e20137888676f91789b41c6a885ff",
+        "output_sha256": "1607dbe920dfd6c25ed2aec94f62eb05617e20137888676f91789b41c6a885ff"
+      },
+      {
+        "original_output": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/redis/source/src/redis-cli",
+        "exit": 0,
+        "expected_sha256": "284e17c5822b20d30bc32cea6b4426fd25a5bbac362fb138f5dabab63a210d44",
+        "output_sha256": "284e17c5822b20d30bc32cea6b4426fd25a5bbac362fb138f5dabab63a210d44"
+      }
+    ]
+  }
+}

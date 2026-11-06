@@ -1,0 +1,2036 @@
+{
+  "status": "passed",
+  "timing_comparison": false,
+  "corpus": "/qualification/results/popular",
+  "corpus_report_sha256": "b3ff8f94a605ac14ed881888c4826d07148b50b660fce20c41a2410dcbe62139",
+  "linker_sha256": "c6e5a7a5ed11dcb620ce13606d30b3ac30274fb6817b85d6a42e06d904cb1c4a",
+  "harness_sha256": {
+    "archive_pipeline.py": "4aef6bdf0cc2f447c3bb698a355c1e9f77680dda349187bddce54db06c101443",
+    "run.py": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada"
+  },
+  "consumers": {
+    "fas": {
+      "path": "/qualification/results/archives/tools/fas-ld",
+      "sha256": "c6e5a7a5ed11dcb620ce13606d30b3ac30274fb6817b85d6a42e06d904cb1c4a",
+      "version": "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+    },
+    "gnu": {
+      "path": "/usr/bin/ld",
+      "sha256": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.42\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty."
+    },
+    "lld": {
+      "path": "/usr/bin/ld.lld",
+      "sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+      "version": "Ubuntu LLD 18.1.3 (compatible with GNU linkers)"
+    }
+  },
+  "archives": {
+    "/qualification/results/popular/lua/source/src/liblua.a": {
+      "sha256": "ad10aaddfbe0a70112ded421a2876dfeb28f347a00dd13c6e967830b4d8974db",
+      "members": {
+        "lapi.o": "5a34b8c67bfd994716c9c0a5d1678cdecdfad78162ff1a2949a93c4968124391",
+        "lcode.o": "2600963ee90e758f642cb4f065b96a47aaa91a6c3383b0155d15974d25060a33",
+        "ldebug.o": "34025c2a544ff7df9845d6eb5a53e76ff0774eb793f149d3eb4bc8a90394607c",
+        "ldo.o": "423c4ae7f37f354158c40838c70b034ba54f0fd659cd91c72dc4a8bd2c2cad88",
+        "ldump.o": "3f69a6431e75609fc548307484b7a4675b0966e4bb1501c379bbe401347ab8a4",
+        "lfunc.o": "5288ca305510e364372a762b9239b592ff8668b6c9296583b6a9e1db43007786",
+        "lgc.o": "9acedf83a8979e18a5f859cd364a8cf44aad91c4adf472dc80c4156128277b01",
+        "llex.o": "b6ca989a1d33920725418047227d4aca2347865963d6a51bbe2ab3022fa5ebf1",
+        "lmem.o": "c4c26bf08c7051d2b2df0fe9f9901f75696c45f3833138882406e8a9b5c124ad",
+        "lobject.o": "92a816e0046ed4a0a3bb774d29f9fed5f3e7d1ede38882bd6f8cd32b12288e6d",
+        "lopcodes.o": "182f92c5fa75b18b34fe351835d20ad3979b60bc118e6a9d8b2a5117647ee141",
+        "lparser.o": "56cac2aee67dd68fa20e3755140e6a44b5d76690aa4d9a87e8064dabb236ed69",
+        "lstate.o": "ef968540c7a6e0ce57e03688ab5a3f2b9d30627fb0e761b4d2c91e3d4f47b5d6",
+        "lstring.o": "887eb19b55f0f615c5b151fe94131c6caf99f49fc45f458904eb869f913b9ba6",
+        "ltable.o": "5d0d8db5b0a74fab76d02d0eb15b9469003977b9544ef15961caa07617180ee2",
+        "ltm.o": "2c7c0180bcd4723aaa89e9ade250abf32c4938cfda40b5ebfee2f0587561ae2c",
+        "lundump.o": "a71b17e6d5369db50007ddc88e36993cfd488f8b1385ff8377cc7e8b819e1e5b",
+        "lvm.o": "b606c4c9a6e6ab32d0bc976de53a7dfd94d6957c91acc5943af7a59b9612d811",
+        "lzio.o": "ea736ecc626e5ddfdb462bc2e6e7c02fe6e83f5ffcb2e6076a9f4fff87e27ad9",
+        "lauxlib.o": "3e60b97302d9e1d299b36b34645016d979155cf6fa48cdc4e9a34dc238f72f02",
+        "lbaselib.o": "a579dfff559c2d8663f19f506c616fc29158207d8f15fa91d7cbc7caa14505d2",
+        "ldblib.o": "8a07a9e62234fa89241aac8a594dec955790dca00cef3a98906c494fde2611c2",
+        "liolib.o": "c7b81e33ff859f6319a54d80bc4bf6cc5b60a36b7b2229e11881f1a9ddd51e47",
+        "lmathlib.o": "a1618539d31745cfc9bc9d4844d18b7567f910d6945230c058805abe9b141da2",
+        "loslib.o": "54bd32a1423d3014c8636832f3a46049e22d777202c5723f8dd36348e6e89b00",
+        "ltablib.o": "d4fe07af3133fabc3ef65716fdb5a271fcafa71a386d8de487b7671825fdd1d0",
+        "lstrlib.o": "7d2ec90edcac6729cf3f01a59d2baae24861860fcac6d97e23dd270bfec8f2f5",
+        "loadlib.o": "e4885b6bcb1fb955e15f4c7c88b157f45e1463d692fbe2665634e047ed08ae53",
+        "linit.o": "de98838a5358f10538d6dc1ced2c1930f85f0f8489ec399f313c6637f2283dc1"
+      },
+      "variants": {
+        "regular": "/qualification/results/archives/archives/0/original.a",
+        "thin": "/qualification/results/archives/archives/0/thin.a",
+        "fas-gnu": "/qualification/results/archives/archives/0/fas-gnu.a",
+        "gnu-fas": "/qualification/results/archives/archives/0/gnu-fas.a"
+      },
+      "variant_sha256": {
+        "regular": "ad10aaddfbe0a70112ded421a2876dfeb28f347a00dd13c6e967830b4d8974db",
+        "thin": "31e0d9ea5afe7273ccca5ec7250e1fa77febc94bfbcf635a2b806aa55cee7a61",
+        "fas-gnu": "2509a565de46e9dc2802807afbb515226d8bc7a9d5e297db2017ef34f6d5b9de",
+        "gnu-fas": "b056b6369d601bd56daf7e699c0ea867313102b114ad1f2852bd7aa71a043196"
+      }
+    }
+  },
+  "projects": {
+    "lua": [
+      {
+        "pipeline": "regular",
+        "consumer": "fas",
+        "images": {
+          "luac": "b0f81e28c52daada85c1d053b23156107e613f6584833be3a463ed8e046a0a6d",
+          "lua": "7799d457a82846cc437243a31b4c9a3b0a7c96f2fcb2a1e695aa12169c6d6c7c"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "6345651223e05091a4dbbb456509b117cf9b50a8b92bfab43aaefb9cf1c7500d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "cbafdf4a5b1895e3a1c80016d6dbb8177e1298fb0d2ed102fa3b0fee89e3bb49",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "af0c5394fe92202ba4eae7a69a17589b4dafa4b58ac572d004bb0c26432d9608"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/luac",
+              "-o",
+              "/qualification/results/archives/lua/regular/fas/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/fas/lua",
+              "/qualification/results/archives/lua/regular/fas/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "regular",
+        "consumer": "gnu",
+        "images": {
+          "luac": "7cfbfb43e797c82bac4818675be5ebe2c1f9b912f1b3c017758a53716a8650c4",
+          "lua": "fddff61ca42832cbb20e6942d107f6bf24841dda3d185c54f78dec8a05c95e94"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "024c3cd9ff6430d9ee8e9153d20d701d8a82f8778623726407124a9c03560e28",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "cbafdf4a5b1895e3a1c80016d6dbb8177e1298fb0d2ed102fa3b0fee89e3bb49",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "1879824ef7d9f3fab3d495f52cdff3f21f9f869e87c4306af77551ed5d16336e"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/luac",
+              "-o",
+              "/qualification/results/archives/lua/regular/gnu/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/gnu/lua",
+              "/qualification/results/archives/lua/regular/gnu/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "regular",
+        "consumer": "lld",
+        "images": {
+          "luac": "1a43b5f3ae773d158363995155bb6470fa1afb077de70c8408969500617c9dd7",
+          "lua": "e4ee89ae8becd38618b43fc0c3ac29c09de0bbb9cba323b076e08852da0e78de"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "c4436e540bff765d3a5671f21cabc6dccfbb47db413b03640be4cbd5b704273d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "cbafdf4a5b1895e3a1c80016d6dbb8177e1298fb0d2ed102fa3b0fee89e3bb49",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "81b97dc09f24e275f17aaa1197f8f738726488dbe65c7e1195b84f9c3a43308c"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/luac",
+              "-o",
+              "/qualification/results/archives/lua/regular/lld/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/regular/lld/lua",
+              "/qualification/results/archives/lua/regular/lld/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "thin",
+        "consumer": "fas",
+        "images": {
+          "luac": "b0f81e28c52daada85c1d053b23156107e613f6584833be3a463ed8e046a0a6d",
+          "lua": "7799d457a82846cc437243a31b4c9a3b0a7c96f2fcb2a1e695aa12169c6d6c7c"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "da6e6e645d1d8de33bc38fab9c1b693e2715f5df995352f29e51bea740df958f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "cbafdf4a5b1895e3a1c80016d6dbb8177e1298fb0d2ed102fa3b0fee89e3bb49",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "83ec1cbc825826b123f24b10238a86e7aa749b64b0f699ed293b5c91e66c366f"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/luac",
+              "-o",
+              "/qualification/results/archives/lua/thin/fas/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/fas/lua",
+              "/qualification/results/archives/lua/thin/fas/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "thin",
+        "consumer": "gnu",
+        "images": {
+          "luac": "7cfbfb43e797c82bac4818675be5ebe2c1f9b912f1b3c017758a53716a8650c4",
+          "lua": "fddff61ca42832cbb20e6942d107f6bf24841dda3d185c54f78dec8a05c95e94"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55df208241d629b1a06eea92410b2104ee8f2bbdd346ab2c54c5ce221adf2d43",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "cbafdf4a5b1895e3a1c80016d6dbb8177e1298fb0d2ed102fa3b0fee89e3bb49",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "f97e4693d8dabb10aa252f8e0185adb76789145f99e2566ee8bd3bb3526707b0"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/luac",
+              "-o",
+              "/qualification/results/archives/lua/thin/gnu/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/gnu/lua",
+              "/qualification/results/archives/lua/thin/gnu/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "thin",
+        "consumer": "lld",
+        "images": {
+          "luac": "1a43b5f3ae773d158363995155bb6470fa1afb077de70c8408969500617c9dd7",
+          "lua": "e4ee89ae8becd38618b43fc0c3ac29c09de0bbb9cba323b076e08852da0e78de"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "f286e16300866cfc6b43c4406d4ee28c266e9f18d41a89df18085e86b1ec37c9",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "ba2c4489e0de15195db5d6f539a794b713875cbe34ef3191374027a8d02a59de"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/luac",
+              "-o",
+              "/qualification/results/archives/lua/thin/lld/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/thin/lld/lua",
+              "/qualification/results/archives/lua/thin/lld/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "fas-gnu",
+        "consumer": "fas",
+        "images": {
+          "luac": "836f5483ea28292439595164da5ed497e7bdede4be0ccd5901f947fa1152a85e",
+          "lua": "e3f06610aff61bb1568a6733e3fd202894ef58117a3d414f7ecfefa1387429a8"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "4896206ac8c8b89e4669a1acf23b0ae3fedcd5da048c9357f90cb0bee64fc0c4",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "73c8307074e1a35039c59e6e3e81891dbb9875616aa3027de91ae3402ec1269c"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/luac",
+              "-o",
+              "/qualification/results/archives/lua/fas-gnu/fas/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/fas/lua",
+              "/qualification/results/archives/lua/fas-gnu/fas/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "fas-gnu",
+        "consumer": "gnu",
+        "images": {
+          "luac": "d7e0495b6bcba8cdc30d097000fe9f68bd210f738dc89ab271344ddb6d5b109e",
+          "lua": "53a6719866e6a91804b727b9dbeb6700be46dd47843c2e8577a1fc73cab4db4f"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "9d90b8918b72910f15bf98cdbf7e0f4c01c4a8dda1e02633fcd3c4a5aa2e2515",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "d3ac2b2c76cf81a3b25872518ac7f66a8f5b550f33064eb0f1f90bdab298d501"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/luac",
+              "-o",
+              "/qualification/results/archives/lua/fas-gnu/gnu/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/gnu/lua",
+              "/qualification/results/archives/lua/fas-gnu/gnu/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "fas-gnu",
+        "consumer": "lld",
+        "images": {
+          "luac": "1f33731d25fac737887d4ae4606695e3ccdab180880f2d272dd3baa9e7431ec7",
+          "lua": "d1f26de2954d95cb8a7688eb6bca917d537ca8be72198cd1f2b2a0045037c1cd"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a472babb1c79804fd4f9990c5fe128a9a6f789132fcc9a7298b3e892d4d405b4",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "885abb741e7e574d0a7f1442ff90c6fe91ec84c5ce76a9ba5b5addd2567d173d"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/luac",
+              "-o",
+              "/qualification/results/archives/lua/fas-gnu/lld/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/fas-gnu/lld/lua",
+              "/qualification/results/archives/lua/fas-gnu/lld/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "gnu-fas",
+        "consumer": "fas",
+        "images": {
+          "luac": "836f5483ea28292439595164da5ed497e7bdede4be0ccd5901f947fa1152a85e",
+          "lua": "e3f06610aff61bb1568a6733e3fd202894ef58117a3d414f7ecfefa1387429a8"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "201c98ea7e6c3070085f84e134d9e252e5326ba9f07e49d56fe1da24db6a7045",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "5b58ce16eef5d16c550ed63cba3e51ffd9c93297e554d6b2aa0df92c108d2959"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/luac",
+              "-o",
+              "/qualification/results/archives/lua/gnu-fas/fas/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/fas/lua",
+              "/qualification/results/archives/lua/gnu-fas/fas/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "gnu-fas",
+        "consumer": "gnu",
+        "images": {
+          "luac": "d7e0495b6bcba8cdc30d097000fe9f68bd210f738dc89ab271344ddb6d5b109e",
+          "lua": "53a6719866e6a91804b727b9dbeb6700be46dd47843c2e8577a1fc73cab4db4f"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "750c1d2bfa73a62b444a93d4dc85d7b9e42f70180b714acb167e00df96b14f15",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "398aea941cc2ef040673a2b8ad647cf2bc2eab597b3ce8ae9a5ce31b0cd0b56e"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/luac",
+              "-o",
+              "/qualification/results/archives/lua/gnu-fas/gnu/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/gnu/lua",
+              "/qualification/results/archives/lua/gnu-fas/gnu/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "pipeline": "gnu-fas",
+        "consumer": "lld",
+        "images": {
+          "luac": "1f33731d25fac737887d4ae4606695e3ccdab180880f2d272dd3baa9e7431ec7",
+          "lua": "d1f26de2954d95cb8a7688eb6bca917d537ca8be72198cd1f2b2a0045037c1cd"
+        },
+        "checks": [
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/bisect.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/cf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/echo.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "556a0bb714aa2aba62a918dee354bae0a06b60f0a08c473bb93f65b22414c0bc",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/env.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "2ab5ecfe9987f7bc695ed806cf97d34a73d1dd9c2ec656fabb625a294d3d00a6",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/factorial.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/fib.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "8e8085523b20d27f3062e2b8268bb68133463f24f91fa4512adf7326a3766005",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/fibfor.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/hello.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/printf.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "afc6486754faf24d219c207e653830f6e2ab9ab2eb7423e6cdb852da552f365d",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/readonly.lua"
+            ],
+            "exit": 1,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "c46c8821de84843382780aa2daaf58fbe2c7a620d28080d966479f1304ceac74"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/sieve.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/popular/lua/source/test/table.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/luac",
+              "-o",
+              "/qualification/results/archives/lua/gnu-fas/lld/sort.luac",
+              "/qualification/results/popular/lua/source/test/sort.lua"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "argv": [
+              "/qualification/results/archives/lua/gnu-fas/lld/lua",
+              "/qualification/results/archives/lua/gnu-fas/lld/sort.luac"
+            ],
+            "exit": 0,
+            "assertions": null,
+            "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c",
+            "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "status": "passed"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "qualified_source_changes": [
+    "src/linker/AUDIT.md",
+    "src/linker/README.md",
+    "src/linker/ROADMAP.md",
+    "src/linker/fuzz/README.md"
+  ],
+  "all_changes_markdown": true,
+  "production_tests_harness_workflow_unchanged": true
+}

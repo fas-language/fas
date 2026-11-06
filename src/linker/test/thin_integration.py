@@ -49,6 +49,29 @@ class ThinTests(unittest.TestCase):
             out = self.link('relative-thin-exe', self.simple, moved/library.name, linker=tool)
             run(out, expected=42)
 
+    def test_fifteen_character_member_names(self):
+        # GNU ar retains a terminal slash when replacing a 15-character short
+        # name with a thin long-name reference (for example '/0             /').
+        # This occurs in real libarchive objects such as archive_acl.c.o.
+        directory = self.root/'fifteen-character-members'
+        directory.mkdir()
+        objects = [directory/'start--123456.o', directory/'answer-123456.o']
+        for target, original in zip(objects, (self.simple, self.answer)):
+            self.assertEqual(len(target.name), 15)
+            shutil.copyfile(original, target)
+        for indexed in (True, False):
+            library = self.archive('fifteen-'+str(indexed), *objects, indexed=indexed)
+            for tool in self.tools():
+                with self.subTest(indexed=indexed, tool=tool):
+                    # Explicit _start works for both lazy and whole selection.
+                    options = ('-u', '_start') if indexed else ('--whole-archive',)
+                    run(self.link('fifteen-exe', library, linker=tool,
+                                  options=options), expected=42)
+                    combined = self.link('fifteen-partial.o', library, linker=tool,
+                                         options=('-r', '--whole-archive'))
+                    for final in self.tools():
+                        run(self.link('fifteen-final', combined, linker=final), expected=42)
+
     def test_lazy_missing_and_changed_members_and_index_validation(self):
         absent = self.assemble('thin-absent', '.globl unused\n.data\nunused: .quad 9')
         library = self.archive('thin-lazy', absent, self.answer)

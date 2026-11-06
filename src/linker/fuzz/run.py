@@ -217,6 +217,9 @@ __asm__(".symver new_data,versioned@@FAS_2,remove");
         run('ar', 'rcs', output / 'seeds' / 'archive' / 'indexed', obj, metadata)
         run('ar', 'rcS', output / 'seeds' / 'archive' / 'unindexed', obj)
         run('ar', 'rcsT', output / 'seeds' / 'archive' / 'thin', obj, metadata)
+        fifteen = temp / 'answer-123456.o'
+        shutil.copyfile(obj, fifteen)
+        run('ar', 'rcsT', output / 'seeds' / 'archive' / 'thin-fifteen', fifteen)
         regular = temp / 'nested.a'
         run('ar', 'rcs', regular, obj, metadata)
         run('ar', 'rcsT', output / 'seeds' / 'archive' / 'thin-nested', regular)

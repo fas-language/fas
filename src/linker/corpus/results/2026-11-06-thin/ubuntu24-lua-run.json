@@ -1,0 +1,52 @@
+{
+  "status": "passed",
+  "scope": "fresh Ubuntu 24.04 userspace with GCC13/binutils2.42/LLD18; shared host kernel; pinned Lua rebuild and archive pipelines; no timings",
+  "image": "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+  "container": "fas-lua-archive-94b5284e7e96",
+  "linker_sha256": "c6e5a7a5ed11dcb620ce13606d30b3ac30274fb6817b85d6a42e06d904cb1c4a",
+  "source_archive": {
+    "project": "lua",
+    "source_url": "https://www.lua.org/ftp/lua-5.1.5.tar.gz",
+    "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+    "directory": "lua-5.1.5",
+    "bytes": 221213
+  },
+  "harness_sha256": {
+    "archive_pipeline.py": "4aef6bdf0cc2f447c3bb698a355c1e9f77680dda349187bddce54db06c101443",
+    "run.py": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada",
+    "popular.py": "4fd406f4a1fd7b421ad72675e852ca8d6a066ad4907614463ae0a50c97ef5392"
+  },
+  "commands": [
+    [
+      "docker",
+      "create",
+      "--name",
+      "fas-lua-archive-94b5284e7e96",
+      "--network",
+      "none",
+      "--user",
+      "1000:1000",
+      "--ulimit",
+      "nofile=65536:65536",
+      "--mount",
+      "type=bind,src=/home/glonex/.cache/fas-linker-qualification/ubuntu24-lua-archives-20261106,dst=/qualification",
+      "--env",
+      "HOME=/qualification/home",
+      "--env",
+      "LC_ALL=C.UTF-8",
+      "--workdir",
+      "/qualification/source",
+      "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+      "bash",
+      "-c",
+      "set -e; python3 src/linker/corpus/popular.py --linker /qualification/tools/fas-ld --project lua /qualification/inputs/lua-5.1.5 --output /qualification/results/popular; python3 src/linker/corpus/archive_pipeline.py --linker /qualification/tools/fas-ld --corpus /qualification/results/popular --project lua --lld ld.lld --output /qualification/results/archives"
+    ],
+    [
+      "docker",
+      "start",
+      "--attach",
+      "fas-lua-archive-94b5284e7e96"
+    ]
+  ],
+  "exit": 0
+}

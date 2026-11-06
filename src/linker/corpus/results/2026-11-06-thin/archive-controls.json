@@ -1,0 +1,82 @@
+{
+  "status": "passed",
+  "scope": "actual archive_pipeline.Qualification guard controls using synthetic exit-0 summaries and a copied corpus report; no upstream runtime claims",
+  "controls": [
+    {
+      "name": "valid",
+      "accepted": true,
+      "expected_accepted": true,
+      "detail": [
+        {
+          "argv": [
+            "/home/glonex/.cache/fas-linker-qualification/archive-pipeline-controls-20261106/libarchive_test"
+          ],
+          "exit": 0,
+          "assertions": {
+            "Tests run": 1,
+            "Tests failed": 0,
+            "Assertions checked": 42,
+            "Assertions failed": 0,
+            "Skips reported": 0
+          },
+          "stdout_sha256": "a954eb3f0d3672af4394de4fb6ed7d62a9276b3bd1c723f70aca4b13ba7566d2",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "zero-tests",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "libarchive case failed or skipped: {'Tests run': 0, 'Tests failed': 0, 'Assertions checked': 42, 'Assertions failed': 0, 'Skips reported': 0}"
+    },
+    {
+      "name": "zero-assertions",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "libarchive case failed or skipped: {'Tests run': 1, 'Tests failed': 0, 'Assertions checked': 0, 'Assertions failed': 0, 'Skips reported': 0}"
+    },
+    {
+      "name": "failed-test",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "libarchive case failed or skipped: {'Tests run': 1, 'Tests failed': 1, 'Assertions checked': 42, 'Assertions failed': 0, 'Skips reported': 0}"
+    },
+    {
+      "name": "failed-assertion",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "libarchive case failed or skipped: {'Tests run': 1, 'Tests failed': 0, 'Assertions checked': 42, 'Assertions failed': 1, 'Skips reported': 0}"
+    },
+    {
+      "name": "skip",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "libarchive case failed or skipped: {'Tests run': 1, 'Tests failed': 0, 'Assertions checked': 42, 'Assertions failed': 0, 'Skips reported': 1}"
+    },
+    {
+      "name": "missing-summary",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "missing/ambiguous libarchive summary: Tests run"
+    },
+    {
+      "name": "duplicate-summary",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "missing/ambiguous libarchive summary: Tests run"
+    },
+    {
+      "name": "nonzero-exit",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "/home/glonex/.cache/fas-linker-qualification/archive-pipeline-controls-20261106/libarchive_test: exit 1, expected 0\n"
+    },
+    {
+      "name": "changed-crt",
+      "accepted": false,
+      "expected_accepted": false,
+      "detail": "changed toolchain input: /usr/lib/x86_64-linux-gnu/crt1.o"
+    }
+  ]
+}

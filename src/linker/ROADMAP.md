@@ -67,8 +67,17 @@ visibility. The host gate passes 3,792 compiler checks and 264 linker cases;
 the fresh Ubuntu recipe and 3,072 generated-program executions also pass.
 Six real C projects pass their selected upstream tests, with 355 byte-identical
 relinks using the repaired binary. Fuzzing found the version bug and verified its
-repair, but one later saved shared-output timeout still needs triage. That fuzz
-gate remains incomplete; these results do not complete the production release.
+repair, but a saved shared-output timeout left that checkpoint's fuzz gate
+incomplete; those results do not complete the production release.
+
+The [thin-archive checkpoint](corpus/results/2026-11-06-thin/README.md) adds real
+Lua/libarchive thin and mixed partial-link runtime qualification, exposing and
+repairing GNU's 15-character member-reference form. Host and fresh Ubuntu gates
+pass 265 linker cases; both SQLite extraquick suites and reproducible archives
+pass. The earlier shared-output timeout and a new archive timeout are triaged as
+not reproducible, with retained inputs and separate follow-ups. Their causes
+remain unknown, and original failed campaigns remain failed. Hosted/sustained
+qualification, final contract review and publication are still open.
 
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,

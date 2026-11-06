@@ -114,6 +114,7 @@ Members are read lazily with regular-file and invocation-budget checks. Missing
 unselected members are tolerated, matching the tested GNU ld policy; this differs
 from the installed LLD 22. Nested references into regular archives are supported;
 GNU ar flattens thin-archive inputs. Nested containers must be regular archives.
+GNU's terminal slash in thin references for 15-character member names is accepted.
 Existing external members, including unselected ones, receive output/map alias
 protection. Selected external files count toward the input count/byte limits;
 shared nested containers are read and parsed once per outer archive. The objects
@@ -680,7 +681,14 @@ acceptance and verified binary/source archives with a clean source rebuild.
 The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) adds
 partial-root/empty-archive and version-visibility repairs, passes 264 linker
 cases and 3,072 generated-program executions, and records the six-project C
-replay. One saved timeout remains untriaged; fuzz acceptance is incomplete.
+replay. A saved timeout left fuzz acceptance incomplete at that checkpoint.
+The [thin-archive checkpoint](corpus/results/2026-11-06-thin/README.md) repairs
+GNU's 15-character member-reference form, passes 265 linker cases and qualifies
+real Lua/libarchive thin and mixed partial-link pipelines with three final
+consumers. Fresh Ubuntu correctness, both SQLite extraquick selections and
+reproducible packaging pass. Two saved timeouts are triaged as not reproducible
+and retained on the watchlist; sustained/hosted qualification remains open,
+and original failed campaigns retain their identities.
 
 The [generated semantic runner](semantic/README.md) also checks valid programs
 against an independent Python runtime oracle through archive and mixed

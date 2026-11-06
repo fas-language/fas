@@ -265,6 +265,32 @@ with another consumer of the same snapshot. These are bounded interoperability
 probes, not another complete upstream test run. Lua dynamic C modules and Redis
 modules are not covered by these shared-library probes.
 
+`archive_pipeline.py` reuses a passing Lua/libarchive popular-C snapshot to
+qualify thin archives and mixed partial links with real library members:
+
+```sh
+python3 src/linker/corpus/archive_pipeline.py --corpus /path/to/popular-results \
+  --output /new/external/archive-pipelines --lld ld.lld
+```
+
+Select `--project lua` or `--project libarchive` for a single-project snapshot.
+It verifies retained source/object/archive/CRT hashes, extracts the project
+archives into its own output tree and compares four pipelines: regular archive,
+thin archive, Fas-to-GNU partial stages repackaged as a regular archive, and
+GNU-to-Fas partial stages repackaged as a thin archive. Fas/GNU and optional LLD
+perform final links. Partial stages aggregate whole archives, so the final
+archive's extraction granularity changes; this is a runtime-equivalence check,
+not a byte-equality assertion. Original corpus files are unchanged.
+
+The Lua selection repeats the same 13 examples and bytecode compile/execute
+checks. Libarchive runs eight named read/write cases for tar, zip, cpio and 7zip
+against its retained reference data. Each case must report exactly one executed
+test, positive assertions, zero failures and zero skips, in addition to exit 0.
+This bounded selection is not another complete libarchive CTest run. Reports,
+member hashes/order, all archive variants, intermediates, programs and command
+logs are retained. Weekly/manual popular-C jobs run this after the upstream and
+shared-library checks for these two projects.
+
 ## Official GCC torture execution tests
 
 `torture.py` invokes GCC's unmodified DejaGnu `execute.exp` with its official
