@@ -17640,6 +17640,18 @@ let () =
   semantic_pin "constant-shift-splat-vector-count" const_shift_splat_source 2
     (String.length "const RESULT vec[4,u32] = VALUES << " + 1)
     5 "the shift count `splat(1)` has no vector type" (Some "write `VALUES << 1`");
+  (* bug report 16: a literal that fits a lane is missing a splat, it is
+     not out of range; one that does not fit keeps the range message *)
+  let vector_literal_source = "fn f(a vec[16,u8]) vec[16,u8] { return a + 1 }\n" in
+  semantic_pin "vector-op-scalar-literal" vector_literal_source 1
+    (String.length "fn f(a vec[16,u8]) vec[16,u8] { return a + " + 1)
+    1 "a scalar integer literal is not a `vec[16, u8]`" (Some "write `splat(1)`");
+  semantic_message "vector-op-negative-scalar-literal"
+    "a scalar integer literal is not a `vec[4, i32]`"
+    "fn f(a vec[4,i32]) vec[4,i32] { return a * -3 }\n";
+  semantic_message "vector-op-scalar-literal-out-of-range"
+    "integer literal is out of range for vec[16, u8]: `300`"
+    "fn f(a vec[16,u8]) vec[16,u8] { return a + 300 }\n";
   semantic_message "logical-not-vector-type"
     "operator `!` needs `bool` or a bool vector, got `vec[4, i64]`"
     "fn f(value vec[4,i64]) vec[4,bool] { return !value }\n";

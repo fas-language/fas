@@ -963,6 +963,16 @@ let integer_literal_error span ty ~negative ~text ~magnitude =
         span "integer literals are not floating point literals"
   | Hir.Bool ->
       Diag.error span "integer literal is not a `bool`; write `true` or `false`"
+  | Hir.Vec (_, (Hir.Int _ as element))
+    when (if negative then Sema_numeric.fits_negative_literal
+          else Sema_numeric.fits_literal)
+           element magnitude ->
+      (* the literal fits a lane: what is missing is the splat, not range
+         (scalars never splat implicitly) *)
+      Diag.error
+        ~help:(Printf.sprintf "write `splat(%s)`" text)
+        span
+        (Printf.sprintf "a scalar integer literal is not a `%s`" (diagnostic_ty_name ty))
   | _ ->
       let help =
         if negative && Sema_numeric.is_unsigned ty && magnitude = 1L then

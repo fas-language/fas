@@ -310,6 +310,7 @@ ef be 8
 
 - **Initializers** are positional and list every field and element, or name fields with `{.field = value}` in any order and leave the rest zero, padding included. `{}` means all zero. One brace list cannot mix named and positional entries.
 - **Size expressions** may use constant arithmetic and layout queries, for example `arr[BUFFERSIZE / sizeof[i32], i32]`. A length is a `usize`, like `const N usize = ...`.
+- **Array indexing** `a[i]` with a constant `i` out of range is a compile-time error. A runtime `i` is not checked: an index past the end reads or writes outside the array, as `p[T, i]` does. Compare `i` with `len(a)` where it can be out of range.
 - **Places through an `addr`**: `p[T]`, `p[T, i]` and `p[S].field`. They use alignment 1, are never bounds-checked, and different types may alias the same bytes.
 - **`view v = place`** names existing storage: a local, field, element or raw place.
 - **`view xs = p[T, ..]`** is an element view of unknown length: `xs[i]` is exactly `p[T, i]`, and `&xs[i]` is its address. Use it to name a buffer from C once:
@@ -839,7 +840,7 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 
 ## Known limits
 
-- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
+- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Its only runtime checks are the integer division trap and the vector lane-index trap; array indexing with a runtime index is not checked. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
 - **Platform.** x86-64 Linux, x86-64 Windows with `--os windows` (see "Building for Windows") and 32-bit WebAssembly for WASI with `--os wasi` (see "Building for WebAssembly"), with LLVM 22 tools (`clang-22`, `opt-22`, `llc-22`, `llvm-profdata-22`, or the plain names when they are LLVM 22). Portable builds target baseline x86-64 (SSE2).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
 - **Tuning.** `fas perf --tune` picks one build for the whole program, not per function or loop, and does not optimize across the C boundary (no LTO).
@@ -951,7 +952,7 @@ Tightest first. Binary operators are left-associative. If-expressions have the l
 | 12 | `\|\|` | `bool` only, short-circuit |
 | 13 | `if c { a } else { b }` | lowest precedence |
 
-Integer and float vectors take arithmetic and comparisons lane by lane. Float vector arithmetic also includes unary `-` and compound assignment. Bitwise and shift operators are available only for integer vectors.
+Integer and float vectors take arithmetic and comparisons lane by lane. Float vector arithmetic also includes unary `-` and compound assignment. Bitwise and shift operators are available only for integer vectors. A vector shift count is either a scalar integer, which shifts every lane by the same amount (`v >> s`), or a vector of the value's type, which gives each lane its own count. `v >> splat(s)` is rejected in favour of `v >> s`. Scalars never splat implicitly: `v + 1` is an error, and `v + splat(1)` is what you write.
 
 With no destination type, an if-expression unifies integer branches like mixed integer operands. If `l u16` and `o` and `off` are `u32`, `if c { l } else { o - off }` has type `u32`, and the plain `l` branch is zero-extended. A known destination keeps its existing branch conversions. Constant if-expressions use the same branch types and values. Widen arithmetic operands before the operation when its narrow result could wrap.
 
