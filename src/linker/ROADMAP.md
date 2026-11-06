@@ -101,6 +101,9 @@ rebuilding and downloaded-archive checks. Four repaired-source popular-C jobs
 also pass. Curl/libpng and the full fourteen-target fuzz campaign remain running
 at that observation; final contract freeze and publication remain open. The
 delivered source archive matches all 1,108 files of the published commit exactly.
+The [next observation](corpus/results/2026-11-06-hosted-canonical-followup/README.md)
+adds hosted curl acceptance and 355 byte-identical current-binary relinks;
+libpng setup and the full fuzz selection remain pending.
 
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,

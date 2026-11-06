@@ -1,0 +1,12 @@
+
+int first(void){return 117;}
+int second(void){return 142;}
+__asm__(".symver first,foo@FAS_1");
+__asm__(".symver second,foo@@FAS_2");
+extern int old(void);
+__asm__(".symver old,foo@FAS_1");
+extern int foo(void);
+void *old_address(void){return old;}
+void *new_address(void){return foo;}
+int weakfn(void){return 109;}
+void *weak_address(void){return weakfn;}

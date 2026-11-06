@@ -23,6 +23,17 @@ stays 0.7-dev; compatibility freeze and publication remain open. This checkpoint
 changes evidence/documentation only; performance and additional C++/LTO work
 remain outside the active scope.
 
+The subsequent hosted-canonical-followup record adds curl's passing job:
+1,553 tests OK per linker, both shared-library directions and 510 matching
+configuration features. A separate current-binary replay reproduces all 355
+retained outputs from six upstream projects byte for byte, with input hashes
+verified. Five hosted popular-C jobs now pass; libpng setup and full fuzzing
+remain pending. A bounded background assessor records final acceptance after
+the read-only downloader finishes; it does not resume coding or publish releases.
+Further supplied-weak/multiple-function-version probes pass with Fas/GNU,
+including preload and mixed explicit/default imports. LLD passes the distinct
+version case and retains its previously observed mixed-name identity failure.
+
 ### Current checkpoint: saved corpus harness replay
 
 Qualification exposed a replay-harness bug: under /tmp the copied script's

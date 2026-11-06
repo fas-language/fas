@@ -23,6 +23,9 @@ checks confirm exact published source identity and execution without build tools
 Four popular-C jobs, 32 additional musl executions and bounded Doom/Wolf3D
 rendering pass. Curl/libpng and the full fuzz campaign remain pending at this
 partial observation. No production release or completed freeze is claimed.
+The [subsequent follow-up](corpus/results/2026-11-06-hosted-canonical-followup/README.md)
+also passes hosted curl and reproduces all 355 retained six-project outputs
+byte for byte with the current binary; libpng setup and full fuzzing remain open.
 
 ## Canonical imported function addresses — 2026-11-06
 

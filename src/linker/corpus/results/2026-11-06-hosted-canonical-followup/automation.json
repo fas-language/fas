@@ -1,0 +1,8 @@
+{
+  "cache": "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106",
+  "downloader_pid": 2628908,
+  "final_assessor_pid": 2697820,
+  "output": "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/final-assessment.json",
+  "maximum_wait_seconds": 15000,
+  "scope": "read-only metadata/artifact retention and report assessment; no automatic coding or release publication"
+}

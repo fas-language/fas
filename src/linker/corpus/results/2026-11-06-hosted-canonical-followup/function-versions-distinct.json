@@ -1,0 +1,171 @@
+{
+  "scope": "multiple function versions, mixed default/explicit imports and supplied weak function; standalone probe",
+  "tested_source": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "mixed_explicit_and_default_import_of_new_version": false,
+  "linker_sha256": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+  "calls": [
+    {
+      "argv": [
+        "gcc",
+        "-fPIC",
+        "-shared",
+        "-nostdlib",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/base.c",
+        "-Wl,--version-script=/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/versions.map",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/base.so"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "gcc",
+        "-fPIC",
+        "-shared",
+        "-nostdlib",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/override.c",
+        "-Wl,--version-script=/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/versions.map",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/override.so"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "as",
+        "--64",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/start.s",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/start.o"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/usr/bin/ld",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-gnu"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-gnu"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-gnu",
+        "preload"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/fas-ld",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-fas"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-fas"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-fas",
+        "preload"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/usr/bin/ld.lld-22",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-lld"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-lld"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions-distinct/program-lld",
+        "preload"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "tools": {
+    "gnu": "passed",
+    "fas": "passed",
+    "lld": "passed"
+  },
+  "status": "passed",
+  "files": {
+    "start.o": "231ce89a2e9ef58ea007aefa558f6ca924c6e1f8c7fcd59aa783de2d8d66e0d2",
+    "program-gnu": "15996c8a46a8dd959b3235542f1bd73bb5585f48797507283212995fd85d699d",
+    "versions.map": "7cd23145bb5e6852976a4014d782120c09e91ad5c68c4c46fea8c5049ec68185",
+    "program-lld": "2c6a2610b09acf4cd41c36b4bcc4dcd0ecda791d95e6c3a1b77278d625130b63",
+    "override.c": "02079e2ddf86ed78b38af5e32d57cdcea71cb82b6334e41391d72a826a78c6d3",
+    "override.so": "9b778a4a512fe4e5721a879cb11099f1c97c96230da20f292213e4af9adf569a",
+    "base.c": "b1335189bc3ddceb246eaf36eac69da72a273f248d6ebfbd0b2f6461fe09f7e0",
+    "base.so": "49daee42ca1bd3c5ed1e63054908061e821b41153adf66620aa0bdcc8ad09e84",
+    "fas-ld": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+    "start.s": "f21c77ea2c0fc84c5eceee5724d51c14205feebc85057ac37bb3a781c1301cd5",
+    "program-fas": "8d04730dd9a71418cc98d16cb26280b2326cf1ec13b1a3795347bf4fb0cd1c94"
+  }
+}

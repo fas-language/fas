@@ -1,0 +1,33 @@
+"""Assess retained qualification after the read-only downloader completes."""
+import datetime
+import importlib.util
+import json
+from pathlib import Path
+import time
+
+ROOT = Path(__file__).resolve().parent
+
+
+def main():
+    deadline = time.monotonic()+15000
+    while time.monotonic() < deadline:
+        complete = ROOT/'monitor-complete.json'
+        if complete.exists():
+            state = json.loads(complete.read_bytes())
+            assert state['all_runs_completed'] is True
+            spec = importlib.util.spec_from_file_location('hosted_assessment', ROOT/'assess.py')
+            assessment = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(assessment)
+            result = assessment.assess()
+            result['downloader_completed'] = True
+            (ROOT/'final-assessment.json').write_text(json.dumps(result, indent=2)+'\n')
+            print(json.dumps({k:v for k,v in result.items() if k not in ('results', 'artifacts')}), flush=True)
+            return
+        time.sleep(45)
+    (ROOT/'finalizer-expired.json').write_text(json.dumps({
+        'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'status': 'incomplete', 'reason': 'downloader completion not observed'})+'\n')
+
+
+if __name__ == '__main__':
+    main()

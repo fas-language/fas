@@ -1,0 +1,1 @@
+FAS_1 { global: foo; }; FAS_2 { global: foo; old_address; new_address; weakfn; weak_address; local: *; } FAS_1;

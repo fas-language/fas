@@ -1,0 +1,6 @@
+PASSED lua 2 byte-identical ELF outputs
+PASSED bzip2 4 byte-identical ELF outputs
+PASSED libpng 8 byte-identical ELF outputs
+PASSED libarchive 10 byte-identical ELF outputs
+PASSED curl 326 byte-identical ELF outputs
+PASSED redis 5 byte-identical ELF outputs

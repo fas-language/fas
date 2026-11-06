@@ -1,0 +1,14 @@
+{
+  "artifact_id": 13534595066,
+  "name": "linker-popular-curl-42272944421-1",
+  "size": 332142562,
+  "sha256": "de3d35ce49df3c84f238c06bc7c0fe8904d75127386b49817cb762db1affc90a",
+  "github_digest_verified": true,
+  "zip_crc_verified": true,
+  "github_digest_rechecked": true,
+  "reports_match_zip_members": true,
+  "unique_zip_names": true,
+  "retained_linker_sha256": [
+    "523660c182b87f80165b32b350069ede9b9676cd5ff24419474c49ac4a847665"
+  ]
+}

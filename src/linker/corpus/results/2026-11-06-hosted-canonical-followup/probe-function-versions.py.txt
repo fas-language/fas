@@ -1,0 +1,163 @@
+"""Execute multiple imported function versions and a present weak function."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+MIXED = os.environ.get('FAS_PROBE_MIXED', '1') != '0'
+ROOT = Path(__file__).resolve().parent/('function-versions' if MIXED else 'function-versions-distinct')
+REPO = Path('/home/glonex/fas-experimental-backend/fas-linker-qualification')
+
+
+def main():
+    ROOT.mkdir(exist_ok=False)
+    calls = []
+    def run(args, expected=0, env=None):
+        result = subprocess.run(list(map(str, args)), capture_output=True,
+                                timeout=30, env=env)
+        row = {'argv':list(map(str,args)), 'exit':result.returncode,
+               'expected':expected, 'stdout':result.stdout.decode(errors='replace'),
+               'stderr':result.stderr.decode(errors='replace')}
+        calls.append(row)
+        assert result.returncode == expected, row
+        return row
+    policy = ROOT/'versions.map'
+    policy.write_text('FAS_1 { global: foo; }; FAS_2 { global: foo; old_address; '
+                      'new_address; weakfn; weak_address; local: *; } FAS_1;')
+    provider = '''
+int first(void){return OLD;}
+int second(void){return NEW;}
+__asm__(".symver first,foo@FAS_1");
+__asm__(".symver second,foo@@FAS_2");
+extern int old(void);
+__asm__(".symver old,foo@FAS_1");
+extern int foo(void);
+void *old_address(void){return old;}
+void *new_address(void){return foo;}
+int weakfn(void){return WEAK;}
+void *weak_address(void){return weakfn;}
+'''
+    for name, values in [('base',(17,42,9)), ('override',(117,142,109))]:
+        source = ROOT/(name+'.c')
+        source.write_text(provider.replace('OLD',str(values[0])).replace('NEW',str(values[1]))
+                          .replace('WEAK',str(values[2])))
+        run(['gcc','-fPIC','-shared','-nostdlib',source,
+             '-Wl,--version-script='+str(policy),'-o',ROOT/(name+'.so')])
+    assembly = ROOT/'start.s'
+    assembly.write_text('''
+.text
+.globl _start
+.weak weakfn
+.type weakfn,@function
+.symver old,foo@FAS_1
+.symver explicit_new,foo@FAS_2
+_start:
+mov (%rsp),%r15d
+mov $old,%r12d
+mov $foo,%r13
+mov $weakfn,%r14d
+mov $explicit_new,%rax
+cmp %rax,%r13
+jne failure
+cmp %r12,%r13
+je failure
+cmp old@GOTPCREL(%rip),%r12
+jne failure
+cmp foo@GOTPCREL(%rip),%r13
+jne failure
+cmp explicit_new@GOTPCREL(%rip),%r13
+jne failure
+cmp weakfn@GOTPCREL(%rip),%r14
+jne failure
+cmp old_pointer(%rip),%r12
+jne failure
+cmp new_pointer(%rip),%r13
+jne failure
+cmp explicit_pointer(%rip),%r13
+jne failure
+cmp weak_pointer(%rip),%r14
+jne failure
+call old_address@PLT
+cmp %rax,%r12
+jne failure
+call new_address@PLT
+cmp %rax,%r13
+jne failure
+call weak_address@PLT
+cmp %rax,%r14
+jne failure
+call *%r12
+call normalize
+cmp $17,%eax
+jne failure
+call old@PLT
+call normalize
+cmp $17,%eax
+jne failure
+call *%r13
+call normalize
+cmp $42,%eax
+jne failure
+call explicit_new@PLT
+call normalize
+cmp $42,%eax
+jne failure
+call *%r14
+call normalize
+cmp $9,%eax
+jne failure
+call weakfn@PLT
+call normalize
+cmp $9,%eax
+jne failure
+mov $42,%edi
+jmp finish
+normalize:
+cmp $2,%r15d
+jne normal
+sub $100,%eax
+normal: ret
+failure: mov $99,%edi
+finish: mov $60,%eax; syscall
+.data
+old_pointer: .quad old
+new_pointer: .quad foo
+explicit_pointer: .quad explicit_new
+weak_pointer: .quad weakfn
+.section .note.GNU-stack,"",@progbits
+''')
+    if not MIXED:
+        assembly.write_text(assembly.read_text().replace('.symver explicit_new,foo@FAS_2\n','')
+                            .replace('explicit_new','foo'))
+    run(['as','--64',assembly,'-o',ROOT/'start.o'])
+    linker = ROOT/'fas-ld'
+    shutil.copy2(REPO/'_build/default/src/linker/bin/main.exe',linker)
+    report = {'scope':'multiple function versions, mixed default/explicit imports and supplied weak function; standalone probe',
+              'tested_source':'4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62',
+              'mixed_explicit_and_default_import_of_new_version': MIXED,
+              'linker_sha256':hashlib.sha256(linker.read_bytes()).hexdigest(),
+              'calls':calls, 'tools':{}, 'status':'running'}
+    lld = shutil.which('ld.lld-22') or shutil.which('ld.lld')
+    assert lld, 'independent LLD control unavailable'
+    for tag, tool in [('gnu',shutil.which('ld')),('fas',linker),('lld',lld)]:
+        output = ROOT/('program-'+tag)
+        try:
+            run([tool,'--dynamic-linker=/lib64/ld-linux-x86-64.so.2',
+                 ROOT/'start.o',ROOT/'base.so','-o',output])
+            run([output],expected=42)
+            run([output,'preload'],expected=42,
+                env=dict(os.environ,LD_PRELOAD=str(ROOT/'override.so')))
+            report['tools'][tag]='passed'
+        except AssertionError as error:
+            report['tools'][tag]={'failed':str(error)}
+    report['status']='passed' if all(v=='passed' for v in report['tools'].values()) else 'failed'
+    report['files']={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in ROOT.iterdir() if p.is_file()}
+    (ROOT/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+    print(json.dumps({k:v for k,v in report.items() if k not in ('calls','files')},indent=2))
+
+
+if __name__ == '__main__':
+    main()

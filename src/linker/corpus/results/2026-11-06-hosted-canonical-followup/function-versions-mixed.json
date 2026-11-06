@@ -1,0 +1,162 @@
+{
+  "scope": "multiple function versions, mixed default/explicit imports and supplied weak function; standalone probe",
+  "tested_source": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "linker_sha256": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+  "calls": [
+    {
+      "argv": [
+        "gcc",
+        "-fPIC",
+        "-shared",
+        "-nostdlib",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/base.c",
+        "-Wl,--version-script=/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/versions.map",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/base.so"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "gcc",
+        "-fPIC",
+        "-shared",
+        "-nostdlib",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/override.c",
+        "-Wl,--version-script=/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/versions.map",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/override.so"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "as",
+        "--64",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/start.s",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/start.o"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/usr/bin/ld",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-gnu"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-gnu"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-gnu",
+        "preload"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/fas-ld",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-fas"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-fas"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-fas",
+        "preload"
+      ],
+      "exit": 42,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/usr/bin/ld.lld-22",
+        "--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/start.o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/base.so",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-lld"
+      ],
+      "exit": 0,
+      "expected": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-lld"
+      ],
+      "exit": 99,
+      "expected": 42,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "tools": {
+    "gnu": "passed",
+    "fas": "passed",
+    "lld": {
+      "failed": "{'argv': ['/home/glonex/.cache/fas-linker-qualification/hosted-canonical-20261106/function-versions/program-lld'], 'exit': 99, 'expected': 42, 'stdout': '', 'stderr': ''}"
+    }
+  },
+  "status": "failed",
+  "files": {
+    "start.o": "982c5d3fc6e9d79ae0a0e4e80e17054ca41b5a2389aaf4a93d4c3be76bb4755c",
+    "program-gnu": "7d523863b5ee92ce822b38c745a7c6f90d09c2dbc0e3fb8a4095eb616e2c78f4",
+    "versions.map": "7cd23145bb5e6852976a4014d782120c09e91ad5c68c4c46fea8c5049ec68185",
+    "program-lld": "0c039d7e69b02c9ccae255eb6a0f03b9cab89512c1f3578c40d3e3a79dcc3260",
+    "override.c": "02079e2ddf86ed78b38af5e32d57cdcea71cb82b6334e41391d72a826a78c6d3",
+    "override.so": "9b778a4a512fe4e5721a879cb11099f1c97c96230da20f292213e4af9adf569a",
+    "base.c": "b1335189bc3ddceb246eaf36eac69da72a273f248d6ebfbd0b2f6461fe09f7e0",
+    "base.so": "49daee42ca1bd3c5ed1e63054908061e821b41153adf66620aa0bdcc8ad09e84",
+    "fas-ld": "ccdf827ca1323c6149037bd46d41ee38653ef66e95f220ed52cea6e4ab654182",
+    "start.s": "76d5fbadc410408b8b288ddd3a2252d4c73a6b3858898fe1460678468ab28cc6",
+    "program-fas": "57390b97ff59795f012c304f290ba2e9c48e9f08189f4b255500867e3bc9a64f"
+  }
+}

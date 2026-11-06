@@ -1,0 +1,81 @@
+
+.text
+.globl _start
+.weak weakfn
+.type weakfn,@function
+.symver old,foo@FAS_1
+.symver explicit_new,foo@FAS_2
+_start:
+mov (%rsp),%r15d
+mov $old,%r12d
+mov $foo,%r13
+mov $weakfn,%r14d
+mov $explicit_new,%rax
+cmp %rax,%r13
+jne failure
+cmp %r12,%r13
+je failure
+cmp old@GOTPCREL(%rip),%r12
+jne failure
+cmp foo@GOTPCREL(%rip),%r13
+jne failure
+cmp explicit_new@GOTPCREL(%rip),%r13
+jne failure
+cmp weakfn@GOTPCREL(%rip),%r14
+jne failure
+cmp old_pointer(%rip),%r12
+jne failure
+cmp new_pointer(%rip),%r13
+jne failure
+cmp explicit_pointer(%rip),%r13
+jne failure
+cmp weak_pointer(%rip),%r14
+jne failure
+call old_address@PLT
+cmp %rax,%r12
+jne failure
+call new_address@PLT
+cmp %rax,%r13
+jne failure
+call weak_address@PLT
+cmp %rax,%r14
+jne failure
+call *%r12
+call normalize
+cmp $17,%eax
+jne failure
+call old@PLT
+call normalize
+cmp $17,%eax
+jne failure
+call *%r13
+call normalize
+cmp $42,%eax
+jne failure
+call explicit_new@PLT
+call normalize
+cmp $42,%eax
+jne failure
+call *%r14
+call normalize
+cmp $9,%eax
+jne failure
+call weakfn@PLT
+call normalize
+cmp $9,%eax
+jne failure
+mov $42,%edi
+jmp finish
+normalize:
+cmp $2,%r15d
+jne normal
+sub $100,%eax
+normal: ret
+failure: mov $99,%edi
+finish: mov $60,%eax; syscall
+.data
+old_pointer: .quad old
+new_pointer: .quad foo
+explicit_pointer: .quad explicit_new
+weak_pointer: .quad weakfn
+.section .note.GNU-stack,"",@progbits
