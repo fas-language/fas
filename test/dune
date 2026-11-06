@@ -82,3 +82,11 @@
  (name fir_fuzz)
  (modules fir_fuzz)
  (libraries fas_compiler))
+
+(test
+ (name mir_check_test)
+ (modules mir_check_test)
+ (libraries fas_compiler)
+ (deps
+  (glob_files fas_fir/*.fir)
+  (glob_files fas_fir/c/*.fir)))

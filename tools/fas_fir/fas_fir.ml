@@ -12,6 +12,10 @@
      fas-fir --legalize prog.fir  prints the module after Fir_wide (integers
                                   wider than i64 or of odd widths rewritten
                                   to i64 limbs), verified again
+     fas-fir --mir ...            the same, through the v0.4 machine IR
+                                  (Mir_isel -> Mir_ra -> Mir_check ->
+                                  Mir_emit) instead of Fir_to_ir and
+                                  Native_gen; FAS_MIR_DUMP=1 prints it
 
    "-" reads the module from stdin. Extra .o/.a inputs after the .fir file
    are linked in (executables only). The pipeline is
@@ -25,6 +29,7 @@ let usage () =
     \  -c         build a position-independent ELF object\n\
     \  --check    parse and verify, print the canonical text to stdout\n\
     \  --legalize print the module with wide and odd-width integers in limbs\n\
+    \  --mir      generate code through the machine IR (roadmap v0.4)\n\
     \  INPUT may be - for stdin\n";
   exit 2
 
@@ -43,12 +48,13 @@ let read_all ic =
   Buffer.contents b
 
 let () =
-  let mode = ref Exe and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref Exe and input = ref None and output = ref None and extra = ref [] and mir = ref false in
   let rec args = function
     | [] -> ()
     | "-c" :: rest -> mode := Obj; args rest
     | "--check" :: rest -> mode := Check; args rest
     | "--legalize" :: rest -> mode := Legalize; args rest
+    | "--mir" :: rest -> mir := true; args rest
     | "-o" :: o :: rest -> output := Some o; args rest
     | ("-h" | "--help") :: _ -> usage ()
     | a :: rest when !input = None && (a = "-" || not (String.starts_with ~prefix:"-" a)) ->
@@ -82,6 +88,26 @@ let () =
   | errs -> die "%s: verifier, after Fir_wide (a compiler bug):\n%s" name (String.concat "\n" errs));
   if !mode = Legalize then begin
     print_string (Fir_print.module_to_string m);
+    exit 0
+  end;
+  let write_obj obj =
+    let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
+    Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
+  in
+  let need_main () =
+    if not (Fir.Vec.fold (fun acc (f : Fir.func) -> acc || (f.name = "main" && f.defined)) false m.funcs) then
+      die "%s: no @main to start (use -c for an object)" name
+  in
+  if !mir then begin
+    let result =
+      match !mode with
+      | Obj -> Result.map write_obj (Mir_emit.compile_object m)
+      | Exe | Check | Legalize ->
+          need_main ();
+          let inputs = List.rev_map Fas_linker.Input.file !extra in
+          Mir_emit.link_files ~inputs ~output:(Option.value !output ~default:"a.out") m
+    in
+    (match result with Ok () -> () | Error e -> die "%s" e);
     exit 0
   end;
   (* Fir_to_ir takes the data layout and source names from a "like" module *)

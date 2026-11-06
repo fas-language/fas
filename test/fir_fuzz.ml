@@ -2,7 +2,8 @@
 
    Each seed generates a random Fir module as text. The module is parsed,
    verified, and converted to the old Ir. That Ir is then compiled twice:
-   - by the native backend (Native_gen.compile);
+   - by the native backend (Native_gen.compile, or with -mir the machine IR
+     path Mir_isel/Mir_ra/Mir_check/Mir_emit straight from Fir);
    - by LLVM: Ir.render, then clang -O2.
    Both programs run and must print the same bytes and exit with the same
    status.
@@ -26,6 +27,7 @@ let first = ref 1
 let keep = ref "."
 let cc = ref (Option.value (Sys.getenv_opt "CC") ~default:"clang-22")
 let verbose = ref false
+let mir = ref false
 
 (* ---------- generator ---------- *)
 
@@ -477,7 +479,17 @@ let check_seed tmp seed =
               if lstatus <> 0 then
                 Broken ("clang: " ^ read (Filename.concat tmp "cc.err") ^ " (" ^ save () ^ ")")
               else
-                match (try Native_gen.compile (native_ir ()) with e -> Error (Printexc.to_string e)) with
+                let native () =
+                  if !mir then begin
+                    let m = Fir_parse.parse_module text in
+                    Fir_wide.run m;
+                    match Fir_verify.verify m with
+                    | [] -> Mir_emit.compile m
+                    | errs -> failwith ("verifier after Fir_wide: " ^ String.concat "; " errs)
+                  end
+                  else Native_gen.compile (native_ir ())
+                in
+                match (try native () with e -> Error (Printexc.to_string e)) with
                 | Error msg -> Differ ("native compile: " ^ msg ^ " (" ^ save () ^ ")")
                 | Ok image ->
                     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_binary ] 0o755 nexe in
@@ -507,6 +519,7 @@ let () =
       ("-keep", Arg.Set_string keep, "DIR where failing modules are written");
       ("-cc", Arg.Set_string cc, "CLANG clang used for the LLVM side");
       ("-v", Arg.Set verbose, " print every seed");
+      ("-mir", Arg.Set mir, " compile the native side through the machine IR (Mir_*) instead of Native_gen");
       ("-file", Arg.String (fun f -> file := f; count := 1), "PATH check this .fir module instead of generating");
     ]
     (fun _ -> ())
