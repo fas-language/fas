@@ -164,6 +164,14 @@ Inside the function, **an aggregate is always a `ptr`:**
 - **`agg` result:** the call yields a `ptr` to a temporary that lasts until the caller returns. In the callee, `ret %p` copies the bytes out of `%p`.
 - **The backend does the classification** (SysV eightbytes, registers or stack). A front end never applies target ABI rules itself.
 
+How the native backend classifies an `agg` (x86-64 SysV, the same as clang for the same C struct):
+
+- **Fields** are taken from the `[OFF: T, ...]` list, so the list must name every scalar the C struct holds, with nested structs and arrays flattened (`int a[5]` is five `i32` fields). Padding is simply not listed.
+- **Up to 16 bytes:** each 8-byte half ("eightbyte") is SSE when it holds only `f32`/`f64` fields, otherwise INTEGER. The value goes in one or two registers: INTEGER halves in the next GPRs, SSE halves in the next XMM registers. If not all of its halves fit in the registers that are left, the whole value goes on the stack, and later scalar arguments still use the remaining registers. Results come back in `rax`/`rdx` and `xmm0`/`xmm1` the same way.
+- **Over 16 bytes, or a field that is not naturally aligned:** MEMORY class. An argument is copied onto the stack. A result is written to memory that the caller provides (a hidden first argument in `rdi`, returned again in `rax`).
+- **Not classified:** a vector, `i128` or `f80` field, an `ALIGN` above 8, or an eightbyte with no fields. Between Fir functions in one module such an `agg` still works (it is passed by address). At an external boundary (a `global` or `extern` function) the backend refuses it.
+- **A struct through `...` is not expressible.** Variadic arguments carry no `agg` type, so a `ptr` there is passed as a pointer. Pass the struct's address and have the C side take a pointer.
+
 `zext i8` and `sext i16` change only what the other side may assume about the upper bits. The value itself is still an `i8` or `i16`. For C:
 
 - `_Bool` → `zext i1`
@@ -443,8 +451,8 @@ In Fir this means:
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca with a constant size, load/store (plain, volatile, atomic), ptradd, memcpy/memmove with a constant size, `memset` of zero with a constant size | Variable-size alloca, memcpy, memmove and memset; memset with a nonzero byte | A small loop, or your own `memcpy` function. |
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
-| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions | `agg` parameters/results; more than one result; exported (`global`) functions with i128 signatures | Pass structs by pointer, and return them through a caller-provided pointer. |
-| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; reading a `va_list` that C passed in, and the reverse | `va_arg` of aggregates | Pass structs by pointer. |
+| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary; a struct by value through `...` | Pass such structs by pointer. |
+| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; reading a `va_list` that C passed in, and the reverse | `va_arg` of aggregates; passing an aggregate by value as a variadic argument | Pass structs by pointer. |
 | Control flow | jump br switch ret unreachable trap | `indirect_br`, `blockaddr` | `switch` on a label number. |
 | Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |

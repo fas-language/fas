@@ -49,12 +49,72 @@ let rec suffix (t : ty) =
   | Vec (n, e) -> Printf.sprintf "v%d%s" n (suffix e)
   | t -> unsupported "intrinsic on %s" (ty_to_string t)
 
+(* ---------- aggregates by value: the x86-64 SysV classification ----------
+
+   A Fir [agg] is classified here, where its field types and padding are
+   still known, and becomes one of two reserved named Ir structs that the
+   native backend passes by the SysV rules (see [Native_gen.sysv_agg]):
+   - [fir.sysv.r.CC]: at most 16 bytes, every field at its natural
+     alignment. One I64 (C = 'i', INTEGER) or F64 (C = 'f', SSE) field per
+     eightbyte; an eightbyte holding any integer is INTEGER. Passed in
+     registers when enough of both kinds remain for all of it, else on the
+     stack; returned in rax/rdx and xmm0/xmm1.
+   - [fir.sysv.m.N]: MEMORY class (larger than 16 bytes, or a misaligned
+     field), N the size rounded up to 8. Copied onto the stack; returned
+     through a hidden pointer in rdi.
+   Both are padded to whole eightbytes, so values are copied into padded
+   slots and never read past the front end's own bytes.
+
+   An aggregate this cannot classify (vector, i128 or x87 fields, an empty
+   or overaligned one) keeps the plain [N x i8] form, which the native
+   backend passes by address: fine between functions it compiles, refused
+   at an external boundary. *)
+let sysv_structs : (string, Ir.struct_def) Hashtbl.t = Hashtbl.create 8
+
+let sysv_agg ~size ~align fields =
+  let natural = function
+    | Int (1 | 8) -> Some 1 | Int 16 -> Some 2 | Int 32 | F32 -> Some 4 | Int 64 | Ptr _ | F64 -> Some 8
+    | _ -> None
+  in
+  let sizes = List.map (fun (off, t) -> (off, t, natural t)) fields in
+  if size <= 0 || align > 8 || List.exists (fun (_, _, n) -> n = None) sizes then None
+  else
+    let aligned = List.for_all (fun (off, _, n) -> off mod Option.get n = 0) sizes in
+    if size > 16 || not aligned then begin
+      let n = (size + 7) / 8 * 8 in
+      let name = Printf.sprintf "fir.sysv.m.%d" n in
+      Hashtbl.replace sysv_structs name { Ir.name; fields = [ bytes n ]; tail_padding = 0 };
+      Some (Ir.Struct name, n)
+    end
+    else begin
+      let words = (size + 7) / 8 in
+      (* None = no field yet, Some true = SSE, Some false = INTEGER *)
+      let cls = Array.make words None in
+      List.iter
+        (fun (off, t, _) ->
+          let w = off / 8 in
+          let sse = t = F32 || t = F64 in
+          cls.(w) <- Some (match cls.(w) with None -> sse | Some c -> c && sse))
+        sizes;
+      if Array.exists (( = ) None) cls then None
+      else
+        let letters = Array.to_list (Array.map (fun c -> if c = Some true then "f" else "i") cls) in
+        let name = "fir.sysv.r." ^ String.concat "" letters in
+        let fields = List.map (fun l -> if l = "f" then Ir.F64 else Ir.I64) letters in
+        Hashtbl.replace sysv_structs name { Ir.name; fields; tail_padding = 0 };
+        Some (Ir.Struct name, 8 * words)
+    end
+
+(* The Ir type of an aggregate and its size there (at least [size]) *)
+let agg_ir ~size ~align fields =
+  match sysv_agg ~size ~align fields with Some r -> r | None -> (bytes size, size)
+
 let abi_ir (a : abi) =
   match a with
   | Scalar t -> (ir_ty t, Ir.No_extension)
   | Ext (t, Zx) -> (ir_ty t, Ir.Zero_extension)
   | Ext (t, Sx) -> (ir_ty t, Ir.Sign_extension)
-  | Agg { size; _ } -> (bytes size, Ir.No_extension)
+  | Agg { size; align; fields } -> (fst (agg_ir ~size ~align fields), Ir.No_extension)
 
 type fctx = {
   m : modul;
@@ -172,6 +232,22 @@ let load_agg cx n p =
   let id = fresh cx in
   add cx (Ir.Load (id, bytes n, p, 1));
   Ir.Local (id, bytes n)
+
+(* Loads the [size]-byte aggregate at [p] as a value of its ABI type (see
+   [agg_ir]), first copying it into a padded slot when that type is larger *)
+let load_abi_agg cx ~size ~align fields p =
+  let ty, padded = agg_ir ~size ~align fields in
+  let p =
+    if padded = size then p
+    else begin
+      let s = slot cx padded 8 in
+      add cx (Ir.Store (bytes size, load_agg cx size p, s, 1));
+      s
+    end
+  in
+  let id = fresh cx in
+  add cx (Ir.Load (id, ty, p, 1));
+  Ir.Local (id, ty)
 
 let convert_inst cx (i : inst) =
   let f = cx.f in
@@ -400,7 +476,9 @@ let convert_inst cx (i : inst) =
           (fun k x ->
             if k < nfixed then
               match List.nth sig_.param_abis k with
-              | Agg { size; _ } -> (bytes size, Ir.No_extension, load_agg cx size (v x))
+              | Agg { size; align; fields } ->
+                  let ty, _ = agg_ir ~size ~align fields in
+                  (ty, Ir.No_extension, load_abi_agg cx ~size ~align fields (v x))
               | a ->
                   let t, e = abi_ir a in
                   (t, e, v x)
@@ -414,9 +492,10 @@ let convert_inst cx (i : inst) =
         | Direct name -> Ir.Call (result, ext, ret, name, ir_args)
         | Indirect p -> Ir.Call_indirect (result, ext, ret, v p, ir_args));
       (match (result, sig_.result_abis) with
-      | Some id, [ Agg { size; align; _ } ] ->
-          let s = slot cx size align in
-          add cx (Ir.Store (bytes size, Ir.Local (id, bytes size), s, 1));
+      | Some id, [ Agg { size; align; fields } ] ->
+          let ty, padded = agg_ir ~size ~align fields in
+          let s = slot cx padded (max 8 align) in
+          add cx (Ir.Store (ty, Ir.Local (id, ty), s, 1));
           alias cx (r 0) s
       | Some id, _ -> alias cx (r 0) (Ir.Local (id, ret))
       | None, _ -> ())
@@ -464,8 +543,8 @@ let convert_func (m : modul) ~source (f : func) : Ir.func =
         (fun k (p : Ir.param) ->
           let fv = (block f entry).params.(k) in
           match List.nth param_abis k with
-          | Agg { size; align; _ } ->
-              let s = slot cx size align in
+          | Agg { size; align; fields } ->
+              let s = slot cx (snd (agg_ir ~size ~align fields)) (max 8 align) in
               entry_prefix := Ir.Store (p.ty, Ir.Param (p.name, p.ty), s, 1) :: !entry_prefix;
               alias cx fv s
           | _ -> alias cx fv (Ir.Param (p.name, p.ty)))
@@ -523,7 +602,9 @@ let convert_func (m : modul) ~source (f : func) : Ir.func =
               | Ret [||] -> Ir.Ret None
               | Ret [| x |] -> (
                   match f.sig_.result_abis with
-                  | [ Agg { size; _ } ] -> Ir.Ret (Some (bytes size, load_agg cx size (vv cx x)))
+                  | [ Agg { size; align; fields } ] ->
+                      let ty, _ = agg_ir ~size ~align fields in
+                      Ir.Ret (Some (ty, load_abi_agg cx ~size ~align fields (vv cx x)))
                   | _ -> Ir.Ret (Some (ir_ty (ty_of f x), vv cx x)))
               | Ret _ -> unsupported "multiple return values"
               | Unreachable -> Ir.Unreachable
@@ -580,6 +661,7 @@ let convert_global (g : global) : Ir.global =
    file of each function *)
 let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
   let sources = Hashtbl.create 64 in
+  Hashtbl.reset sysv_structs;
   List.iter (fun (f : Ir.func) -> Hashtbl.replace sources f.name f.source) like.funcs;
   let funcs = ref [] and globals = ref [] in
   Vec.iter
@@ -591,7 +673,7 @@ let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
   let names p = Vec.fold (fun acc f -> if p f then f.name :: acc else acc) [] m.funcs |> List.rev in
   { like with
     Ir.target_triple = m.triple;
-    structs = [];
+    structs = List.of_seq (Hashtbl.to_seq_values sysv_structs);
     globals = List.rev !globals;
     funcs = List.rev !funcs;
     no_inline_functions = names (fun f -> f.fattrs land fa_noinline <> 0);

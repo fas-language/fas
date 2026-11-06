@@ -54,6 +54,65 @@ let bits = function
 
 let is_aggregate = function Struct _ | Array _ -> true | _ -> false
 
+type arg_class = Gpr of int | Xmm of int | Stack of int
+
+let is_float_ty = function F32 | F64 -> true | _ -> false
+
+(* Aggregates by value with the C (SysV) convention: only the reserved
+   structs Fir_to_ir builds, which carry their classification in the name
+   ([Fir_to_ir.sysv_agg]):
+   - [fir.sysv.r.CC], one I64 ('i') or F64 ('f') per eightbyte: each
+     eightbyte takes the next free gpr or xmm when enough of both remain for
+     the whole aggregate, else the whole aggregate goes on the stack;
+     returned in rax, rdx (the 'i's) and xmm0, xmm1 (the 'f's);
+   - [fir.sysv.m.N] (MEMORY), N a multiple of 8: N/8 stack words; returned
+     through a pointer the caller passes in rdi and the callee hands back in
+     rax.
+   Any other aggregate keeps this backend's own convention, a pointer to the
+   bytes in one gpr (local functions only, see [external_abi]). *)
+type sysv = Sreg of bool list  (** per eightbyte, true = SSE *) | Smem of int  (** bytes *)
+
+let sysv_of = function
+  | Struct name when String.starts_with ~prefix:"fir.sysv.r." name ->
+      let cc = String.sub name 11 (String.length name - 11) in
+      Some (Sreg (List.init (String.length cc) (fun k -> cc.[k] = 'f')))
+  | Struct name when String.starts_with ~prefix:"fir.sysv.m." name ->
+      Some (Smem (int_of_string (String.sub name 11 (String.length name - 11))))
+  | _ -> None
+
+let sret_of ty = match sysv_of ty with Some (Smem _) -> true | _ -> false
+
+(* Where each argument of the given types goes: one class per eightbyte
+   (one for a scalar), plus the gprs, xmms and stack words used. [sret]: the
+   hidden result pointer takes rdi first. *)
+let classify_sysv ?(sret = false) tys =
+  let gi = ref (if sret then 1 else 0) and xi = ref 0 and si = ref 0 in
+  let stack n =
+    let base = !si in
+    si := base + n;
+    List.init n (fun k -> Stack (base + k))
+  in
+  let classes =
+    List.map
+      (fun ty ->
+        match sysv_of ty with
+        | Some (Sreg cls) ->
+            let nx = List.length (List.filter Fun.id cls) in
+            let ng = List.length cls - nx in
+            if !gi + ng <= 6 && !xi + nx <= 8 then
+              List.map
+                (fun sse -> if sse then (incr xi; Xmm (!xi - 1)) else (incr gi; Gpr (!gi - 1)))
+                cls
+            else stack (List.length cls)
+        | Some (Smem n) -> stack (n / 8)
+        | None ->
+            if is_float_ty ty && !xi < 8 then (incr xi; [ Xmm (!xi - 1) ])
+            else if (not (is_float_ty ty)) && !gi < 6 then (incr gi; [ Gpr (!gi - 1) ])
+            else stack 1)
+      tys
+  in
+  (classes, !gi, !xi, !si)
+
 let norm_const ty v =
   let w = bits ty in
   if w >= 64 then v else Int64.logand v (Int64.pred (Int64.shift_left 1L w))
@@ -612,6 +671,10 @@ type frame = {
   call_saves : (instr * (int * bool) list) list;
       (** per call: allocation keys in caller-saved registers to store before it, each
           with whether it is reloaded after *)
+  sret : int;  (** rbp offset of the saved hidden result pointer, 0 if none *)
+  areas : (string, int) Ptbl.t;
+      (** register-passed SysV aggregate parameters: rbp offset of the
+          eightbytes the prologue stores them into *)
   va : (int * int * int * int) option;
       (** variadic functions: rbp offset of the 176-byte register save area
           (rdi..r9, then xmm0..7), and the gpr, xmm and stack words the fixed
@@ -776,6 +839,8 @@ let build_frame ?xmm ctx (f : func) =
       xtmp = 0;
       saved = [];
       call_saves = !call_saves;
+      sret = 0;
+      areas = Ptbl.create 2;
       va = None;
       loose =
         (if Sys.getenv_opt "FAS_NATIVE_NOLOOSE" = None then loose_values addrs f
@@ -827,15 +892,20 @@ let build_frame ?xmm ctx (f : func) =
       Regalloc.callee_saved
   in
   let xtmp = if !has_v128 then reserve fr 16 16 else 0 in
-  let va =
-    if not f.variadic then None
-    else
-      (* how the fixed parameters split, as [classify_args] places them *)
-      let nf = List.length (List.filter (fun (p : param) -> p.ty = F32 || p.ty = F64) f.params) in
-      let ng = List.length f.params - nf in
-      Some (reserve fr 176 16, min ng 6, min nf 8, max 0 (ng - 6) + max 0 (nf - 8))
+  let sret_in = sret_of f.ret in
+  let classes, ng, nx, ns =
+    classify_sysv ~sret:sret_in (List.map (fun (p : param) -> p.ty) f.params)
   in
-  let fr = { fr with saved; xtmp; va } in
+  List.iter2
+    (fun (p : param) cls ->
+      match (sysv_of p.ty, cls) with
+      | Some (Sreg _), (Gpr _ | Xmm _) :: _ ->
+          Ptbl.replace fr.areas p.name (reserve fr (8 * List.length cls) 8)
+      | _ -> ())
+    f.params classes;
+  let sret = if sret_in then reserve fr 8 8 else 0 in
+  let va = if f.variadic then Some (reserve fr 176 16, ng, nx, ns) else None in
+  let fr = { fr with saved; xtmp; va; sret } in
   fr.size <- (fr.size + 15) / 16 * 16;
   fr
 
@@ -1362,7 +1432,7 @@ let negate = function
 let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
 
 (* What may cross an object boundary: every scalar, passed by the SysV rules
-   in [classify_args]/[gen_call] and the prologue (integers and pointers in
+   in [classify_sysv]/[gen_call] and the prologue (integers and pointers in
    rdi..r9, floats in xmm0..7, the rest on the stack; narrow integers are
    extended per [ret_extension]/param extension; variadic calls set al).
    Vectors still use this backend's own representation, and aggregates by
@@ -1372,7 +1442,7 @@ let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
 let external_abi (f : func) =
   let scalar = function
     | I1 | I8 | I16 | I32 | I64 | F32 | F64 | Pointer _ -> true
-    | _ -> false
+    | ty -> sysv_of ty <> None
   in
   (f.ret = Void || scalar f.ret) && List.for_all (fun (p : param) -> scalar p.ty) f.params
 
@@ -1415,58 +1485,72 @@ let around_call ctx fr ins body =
    Values are canonical (zero-extended) in our registers; C callers and
    callees only guarantee the low 32 bits of a narrow integer, extended as
    its `signext`/`zeroext` attribute says, so both edges normalize. *)
-type arg_class = Gpr of int | Xmm of int | Stack of int
-
-let is_float_ty = function F32 | F64 -> true | _ -> false
 
 (* The width of a narrow integer; 64 for anything held whole in a register
    (or passed by address) *)
 let narrow_bits = function I1 -> 1 | I8 -> 8 | I16 -> 16 | I32 -> 32 | _ -> 64
 
-(* Where each argument of the given types goes, and how many stack words
-   the call needs. *)
-let classify_args tys =
-  let gi = ref 0 and xi = ref 0 and si = ref 0 in
-  let classes =
-    List.map
-      (fun ty ->
-        if is_float_ty ty && !xi < 8 then (incr xi; Xmm (!xi - 1))
-        else if (not (is_float_ty ty)) && !gi < 6 then (incr gi; Gpr (!gi - 1))
-        else (incr si; Stack (!si - 1)))
-      tys
-  in
-  (classes, !xi, !si)
 
 (* [variadic]: %al must carry an upper bound on the number of vector
    registers used, for the callee's va_start. *)
 let gen_call ctx fr ~variadic result ret_ty target args =
   let a = ctx.a in
-  let classes, nxmm, stack_args =
-    classify_args (List.map (fun (_, _, v) -> value_ty v) args)
+  let sret = sret_of ret_ty in
+  let classes, _, nxmm, stack_args =
+    classify_sysv ~sret (List.map (fun (_, _, v) -> value_ty v) args)
   in
-  let args = List.combine classes args in
+  (* one entry per eightbyte: its class, the argument, and for a SysV
+     aggregate the eightbyte's index (its value is read from memory) *)
+  let pieces =
+    List.concat
+      (List.map2
+         (fun cls ((_, _, v) as arg) ->
+           let agg = sysv_of (value_ty v) <> None in
+           List.mapi (fun j c -> (c, arg, if agg then Some j else None)) cls)
+         classes args)
+  in
+  (* eightbyte [j] of the aggregate [v] into [r]: its address, then a load *)
+  let word r v j =
+    load ctx fr r v;
+    A.load_zx a 8 r (A.Base (r, 8 * j))
+  in
   let pad = if stack_args mod 2 = 1 then 8 else 0 in
   if pad > 0 then A.alu_ri a A.Sub A.Rsp pad;
   (* Stack arguments, last first *)
   List.iter
     (function
-      | Stack _, (_, _, v) ->
+      | Stack _, (_, _, v), Some j ->
+          word A.Rax v j;
+          A.push a A.Rax
+      | Stack _, (_, _, v), None ->
           load ctx fr A.Rax v;
           A.push a A.Rax
       | _ -> ())
-    (List.rev args);
+    (List.rev pieces);
   (* Float arguments go through rax, which is no argument register. *)
   List.iter
-    (function Xmm x, (_, _, v) -> to_xmm ctx fr x v A.Rax | _ -> ())
-    args;
+    (function
+      | Xmm x, (_, _, v), Some j ->
+          word A.Rax v j;
+          A.mov_xr a ~double:true x A.Rax
+      | Xmm x, (_, _, v), None -> to_xmm ctx fr x v A.Rax
+      | _ -> ())
+    pieces;
   List.iter
     (function
-      | Gpr i, (_, ext, v) ->
+      | Gpr i, (_, _, v), Some j -> word arg_regs.(i) v j
+      | Gpr i, (_, ext, v), None ->
           load ctx fr arg_regs.(i) v;
           let b = narrow_bits (value_ty v) in
           if ext = Sign_extension && b < 32 then A.sign_extend a b arg_regs.(i)
       | _ -> ())
-    args;
+    pieces;
+  (* a MEMORY-class result is written straight into its slot *)
+  if sret then begin
+    match result with
+    | Some id -> A.lea a A.Rdi (slot fr id)
+    | None -> unsupported "call with an unused MEMORY-class aggregate result"
+  end;
   if variadic then A.mov_imm a A.Rax (Int64.of_int nxmm);
   (match target with
   | `Direct name -> (
@@ -1488,9 +1572,27 @@ let gen_call ctx fr ~variadic result ret_ty target args =
       A.call_r a A.R11);
   let cleanup = (8 * stack_args) + pad in
   if cleanup > 0 then A.alu_ri a A.Add A.Rsp cleanup;
-  match result with
-  | Some id when is_float_ty ret_ty -> from_xmm ctx fr id ret_ty 0
-  | Some id when ret_ty <> Void -> store_result ctx fr id ret_ty A.Rax
+  match (result, sysv_of ret_ty) with
+  | _, Some (Smem _) -> ()
+  | Some id, Some (Sreg cls) ->
+      (* eightbytes from rax, rdx (INTEGER) and xmm0, xmm1 (SSE) in order *)
+      A.lea a A.Rcx (slot fr id);
+      let gi = ref 0 and xi = ref 0 in
+      List.iteri
+        (fun j sse ->
+          if sse then begin
+            A.mov_rx a ~double:true A.Rsi !xi;
+            incr xi;
+            A.store a 8 (A.Base (A.Rcx, 8 * j)) A.Rsi
+          end
+          else begin
+            A.store a 8 (A.Base (A.Rcx, 8 * j)) (if !gi = 0 then A.Rax else A.Rdx);
+            incr gi
+          end)
+        cls
+  | None, Some (Sreg _) -> ()
+  | Some id, None when is_float_ty ret_ty -> from_xmm ctx fr id ret_ty 0
+  | Some id, None when ret_ty <> Void -> store_result ctx fr id ret_ty A.Rax
   | _ -> ()
 
 let gen_intrinsic ctx fr result ret_ty name args =
@@ -2092,7 +2194,8 @@ let gen_instr ctx fr ins =
             A.mov_imm a A.Rax 0L;
             A.mov_imm a A.Rcx (Int64.of_int (size_of ctx ty));
             A.rep_stosb a
-        | Local _ ->
+        | Local _ | Param _ ->
+            (* an aggregate parameter holds the address of its bytes *)
             load ctx fr A.Rsi v;
             copy_bytes ctx (size_of ctx ty)
         | _ -> unsupported "aggregate store of a constant"
@@ -2499,12 +2602,36 @@ let gen_function ctx (f : func) =
         A.movdqu_store a (A.Base (A.Rbp, save + 48 + (16 * x))) x
       done
   | None -> ());
-  (* Parameters to their slots, canonical (see [classify_args]) *)
-  let classes, _, _ = classify_args (List.map (fun (p : param) -> p.ty) f.params) in
+  (* Parameters to their slots, canonical (see [classify_sysv]). A SysV
+     aggregate's slot holds the address of its bytes: its stack words, or
+     the area its register eightbytes are stored into. *)
+  if fr.sret <> 0 then A.store a 8 (A.Base (A.Rbp, fr.sret)) A.Rdi;
+  let classes, _, _, _ =
+    classify_sysv ~sret:(fr.sret <> 0) (List.map (fun (p : param) -> p.ty) f.params)
+  in
   List.iter2
     (fun (p : param) cls ->
       let dst = A.Base (A.Rbp, Ptbl.find fr.params p.name) in
       let narrow = narrow_bits p.ty in
+      match (sysv_of p.ty, cls) with
+      | Some _, Stack k :: _ ->
+          A.lea a A.Rax (A.Base (A.Rbp, 16 + (8 * k)));
+          A.store a 8 dst A.Rax
+      | Some _, _ ->
+          let area = Ptbl.find fr.areas p.name in
+          List.iteri
+            (fun j c ->
+              let at = A.Base (A.Rbp, area + (8 * j)) in
+              match c with
+              | Gpr i -> A.store a 8 at arg_regs.(i)
+              | Xmm x ->
+                  A.mov_rx a ~double:true A.Rax x;
+                  A.store a 8 at A.Rax
+              | Stack _ -> assert false)
+            cls;
+          A.lea a A.Rax (A.Base (A.Rbp, area));
+          A.store a 8 dst A.Rax
+      | None, [ cls ] -> (
       match cls with
       | Gpr i ->
           A.zero_extend a narrow arg_regs.(i);
@@ -2516,6 +2643,7 @@ let gen_function ctx (f : func) =
           A.load_zx a 8 A.Rax (A.Base (A.Rbp, 16 + (8 * k)));
           A.zero_extend a narrow A.Rax;
           A.store a 8 dst A.Rax)
+      | None, _ -> assert false)
     f.params classes;
   List.iter (fun (r, o) -> A.store a 8 (A.Base (A.Rbp, o)) r) fr.saved;
   List.iter
@@ -2706,6 +2834,37 @@ let gen_function ctx (f : func) =
       emit b.instrs;
       match b.terminator with
       | Ret None -> epilogue ()
+      | Ret (Some (_, v)) when sysv_of (value_ty v) <> None -> (
+          match sysv_of (value_ty v) with
+          | Some (Smem n) ->
+              (* copy into the caller's buffer and hand its address back *)
+              load ctx fr A.Rsi v;
+              A.load_zx a 8 A.Rdi (A.Base (A.Rbp, fr.sret));
+              copy_bytes ctx n;
+              A.load_zx a 8 A.Rax (A.Base (A.Rbp, fr.sret));
+              epilogue ()
+          | Some (Sreg cls) ->
+              (* SSE eightbytes first, through rax, then INTEGER into rax, rdx *)
+              load ctx fr A.Rcx v;
+              let xi = ref 0 in
+              List.iteri
+                (fun j sse ->
+                  if sse then begin
+                    A.load_zx a 8 A.Rax (A.Base (A.Rcx, 8 * j));
+                    A.mov_xr a ~double:true !xi A.Rax;
+                    incr xi
+                  end)
+                cls;
+              let gi = ref 0 in
+              List.iteri
+                (fun j sse ->
+                  if not sse then begin
+                    A.load_zx a 8 (if !gi = 0 then A.Rax else A.Rdx) (A.Base (A.Rcx, 8 * j));
+                    incr gi
+                  end)
+                cls;
+              epilogue ()
+          | None -> assert false)
       | Ret (Some (_, v)) when is_float_ty (value_ty v) ->
           to_xmm ctx fr 0 v A.Rax;
           epilogue ()
