@@ -36,6 +36,10 @@ class DebugTests(unittest.TestCase):
             'int answer(void) { return first()+second_data+second_bss[16]+second_rodata; }\n')
         sources[2].write_text('#include <stdio.h>\nextern int answer(void);\n'
             'int main(void) { int value=answer(); printf("%d\\n",value); return value!=42; }\n')
+        constants = self.assemble('mapping-constants',
+            '.section .rodata.cst4,"aM",@progbits,4\n.balign 4\n.long 42\n'
+            '.section .rodata.str1.1,"aMS",@progbits,1\n.asciz "mapping"\n'
+            '.section .note.GNU-stack,"",@progbits\n')
         for function_sections in (False, True):
             with self.subTest(function_sections=function_sections):
                 objects = []
@@ -47,14 +51,20 @@ class DebugTests(unittest.TestCase):
                 library = self.root / 'libmapping.so'
                 out = self.root / 'debug-mapping'
                 run('gcc', '-B'+str(tools)+'/', '-fno-use-linker-plugin', '-shared',
-                    *objects[:2], '-o', library)
+                    *objects[:2], constants, '-o', library)
                 run('gcc', '-B'+str(tools)+'/', '-fno-use-linker-plugin', objects[2],
-                    library, '-Wl,-rpath,'+str(self.root), '-o', out)
+                    constants, library, '-Wl,-rpath,'+str(self.root), '-o', out)
                 self.assertEqual(run(out).stdout, b'42\n')
                 for image in (out, library):
                     sections = core.elf_sections(image.read_bytes())
                     for name in ('.text', '.data', '.bss', '.rodata'):
                         self.assertEqual(len([s for s in sections if s['name'] == name]), 1)
+                    rodata = [s for s in sections if s['name'].startswith('.rodata')]
+                    self.assertGreaterEqual(len(rodata), 3)
+                    for first, second in zip(rodata, rodata[1:]):
+                        alignment = max(second['align'], 1)
+                        expected = (first['address']+first['size']+alignment-1)//alignment*alignment
+                        self.assertEqual(second['address'], expected)
                     self.assertEqual(run('readelf', '-aW', image).stderr, b'')
                 sections = core.elf_sections(library.read_bytes())
                 symbols = {s['name']: s for s in core.elf_symbols(library.read_bytes())}
@@ -70,7 +80,7 @@ class DebugTests(unittest.TestCase):
                     p = subprocess.run(['valgrind', '--verbose', '--error-exitcode=99',
                         '--leak-check=full', '--read-var-info=yes', '--log-file='+str(report),
                         str(out)], capture_output=True, timeout=30)
-                    log = report.read_text()
+                    log = report.read_text() if report.exists() else p.stderr.decode(errors='replace')
                     self.assertEqual(p.returncode, 0, log)
                     self.assertEqual(p.stdout, b'42\n')
                     self.assertIn('libmapping.so', log)

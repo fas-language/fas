@@ -47,6 +47,7 @@ _start:
   and %r9,%r8
   lea tls_buffer(%rip),%rdi
   lea (%rdi,%r8),%r12
+  mov %r12,(%r12)
   mov 16(%rax),%rsi
   mov 32(%rax),%rcx
   rep movsb

@@ -30,7 +30,11 @@ large_end:
 .quad large_end
 .long large_end-.
 ''')
-        self.assertLess(obj.stat().st_size, 4096)
+        # Older GNU assemblers pad the file to the NOBITS section alignment.
+        # The gigabyte payload itself must still occupy no file bytes.
+        self.assertLess(obj.stat().st_size, 3*1024*1024)
+        nobits = next(s for s in core.elf_sections(obj.read_bytes()) if s['name'] == '.bss.large')
+        self.assertEqual((nobits['kind'], nobits['size']), (8, size))
         for tool in (LINKER, 'ld'):
             with self.subTest(tool=tool):
                 out = self.link('large-nobits-out', self.simple, self.answer, obj, linker=tool)

@@ -45,6 +45,17 @@ class UnwindTests(unittest.TestCase):
         sections = core.elf_sections(data)
         eh = next(s for s in sections if s['name'] == '.eh_frame')
         self.assertEqual(len([s for s in sections if s['name'] == '.eh_frame']), 1)
+        # Both indexed readers and legacy libgcc scanners must stop within the
+        # section. Validate the record stream, including its final zero length.
+        cursor, ending = eh['offset'], eh['offset'] + eh['size']
+        while cursor + 4 <= ending:
+            length = struct.unpack_from('<I', data, cursor)[0]
+            if length == 0:
+                break
+            self.assertLessEqual(cursor + 4 + length, ending)
+            cursor += 4 + length
+        self.assertLess(cursor, ending, 'missing final unwind terminator')
+        self.assertEqual(data[cursor:ending], bytes(ending-cursor))
         header = next(s for s in sections if s['name'] == '.eh_frame_hdr')
         at, address = header['offset'], header['address']
         self.assertEqual(data[at:at+4], bytes((1, 0x1b, 3, 0x3b)))

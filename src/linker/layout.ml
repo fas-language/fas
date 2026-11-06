@@ -41,6 +41,10 @@ let initialization_priority (s : E.section) =
            (String.length s.name - String.length base - 1))
   | _ -> 65535
 
+let readonly_data (s : E.section) =
+  s.kind = 1 && s.flags land 7 = 2
+  && (s.name = ".rodata" || String.starts_with ~prefix:".rodata." s.name)
+
 type placement = { output_index : int; offset : int; address : int }
 type chunk = { file : int; section : E.section; placement : placement }
 
@@ -172,7 +176,11 @@ let make ~base ~relro ~kept ~aliases objects =
             && (if s.flags land 4 <> 0 then 1 else if s.flags land 1 <> 0 then 2 else 0)
                = wanted)
         |> List.stable_sort (fun (_, a) (_, b) ->
-            compare (not (is_relro a)) (not (is_relro b)))
+            (* Older Valgrind aggregates .rodata* ranges only when adjacent.
+               Keep their individual merge/string metadata, but place the
+               ranges together rather than interleaving notes or unwind data. *)
+            compare (not (is_relro a), not (readonly_data a))
+              (not (is_relro b), not (readonly_data b)))
       in
       if sections <> [] then begin
         let alignment =
@@ -243,6 +251,11 @@ let make ~base ~relro ~kept ~aliases objects =
                         ~address:(base + !cursor);
                       cursor := add !cursor member.size)
                     members;
+                  (* normalize strips per-input unwind terminators so they do
+                     not stop readers before later contributions. Legacy
+                     __register_frame_info still scans to a zero length; keep
+                     one final terminator inside the combined output section. *)
+                  if name = ".eh_frame" then cursor := add !cursor 4;
                   ignore
                     (header { s with name } ~offset:beginning
                        ~address:(base + beginning) ~size:(!cursor - beginning)

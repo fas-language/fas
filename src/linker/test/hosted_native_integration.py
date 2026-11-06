@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -123,6 +124,17 @@ HELPER
 fn main() i32 { return embedded_answer() }
 ''')
         out, _ = self.compile("embedded C", source, cc=cc)
+        self.assertEqual(run(out, expected=42).stdout, b"embedded C\n")
+        # Exercise older Clang's missing optional parser flag on every host.
+        wrapper = self.root/'clang without skip-body support'
+        wrapper.write_text('#!'+sys.executable+'\nimport os,sys\n'
+            'if sys.argv[1:]==["-cc1","--help"]:\n'
+            ' print("frontend options without body skipping");sys.exit(0)\n'
+            'if any("skip-function-bodies" in a for a in sys.argv[1:]):\n'
+            ' print("unsupported optional parser flag",file=sys.stderr);sys.exit(1)\n'
+            f'os.execv({cc!r},[{cc!r},*sys.argv[1:]])\n')
+        wrapper.chmod(0o755)
+        out, _ = self.compile("embedded C older frontend", source, cc=str(wrapper))
         self.assertEqual(run(out, expected=42).stdout, b"embedded C\n")
 
     def test_explicit_hosted_and_argc(self):

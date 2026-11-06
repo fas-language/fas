@@ -67,6 +67,26 @@ let find_text text needle start =
   in
   find start
 
+let skip_body_capabilities = Hashtbl.create 4
+
+let skip_body_flags cc =
+  let supported =
+    match Hashtbl.find_opt skip_body_capabilities cc with
+    | Some supported -> supported
+    | None ->
+        (* This is an optional parsing optimization, absent from older Clang.
+           Probe the frontend rather than rejecting otherwise usable imports or
+           retrying real syntax errors with a different command. *)
+        let supported =
+          match Process.run [| cc; "-cc1"; "--help" |] with
+          | Ok (help, _) -> Option.is_some (find_text help "-skip-function-bodies" 0)
+          | Error _ -> false
+        in
+        Hashtbl.replace skip_body_capabilities cc supported;
+        supported
+  in
+  if supported then [ "-Xclang"; "-skip-function-bodies" ] else []
+
 let first_error output =
   String.split_on_char '\n' output
   |> List.find_opt (fun line -> Option.is_some (find_text line "error:" 0))
@@ -876,8 +896,9 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
          "-fsyntax-only";
          "-Xclang";
          "-ast-dump=json";
-         "-Xclang";
-         "-skip-function-bodies";
+       ]
+      @ skip_body_flags cc
+      @ [
          "-Xclang";
          "-ast-dump-filter=" ^ probe_prefix;
        ]
@@ -1288,7 +1309,7 @@ let imported_probe_nodes ~cc ~c_flags ~source ~unit_path ~paths ~definitions
       Array.of_list
         ([ cc; "-S"; "-emit-llvm"; "-o"; "-" ]
         @ common
-        @ [ "-Xclang=-skip-function-bodies"; probe ])
+        @ skip_body_flags cc @ [ probe ])
     in
     match Process.run argv with
     | Error failure -> Error failure.stderr
@@ -1564,8 +1585,9 @@ let import_argv ~cc ~c_flags ~source ~headers unit_path =
        "-fsyntax-only";
        "-Xclang";
        "-ast-dump=json";
-       "-Xclang";
-       "-skip-function-bodies";
+     ]
+    @ skip_body_flags cc
+    @ [
        "-Xclang";
        "-fdump-record-layouts-complete";
        "-H";
