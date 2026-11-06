@@ -1,5 +1,18 @@
 # Clean local correctness qualification
 
+The hosted workflow runs correctness checks on relevant pushes and pull requests;
+the weekly schedule runs the full selection. Manual dispatch defaults to `all`.
+Its `suite` input can also select `correctness`, `popular-c`, `gcc-torture` or
+`fuzz` to repeat one selection without restarting unrelated long-running jobs.
+Concurrency groups include the selection, so separate manual selections coexist:
+
+```sh
+gh workflow run linker.yml --repo fas-language/fas --ref YOUR_BRANCH -f suite=gcc-torture
+```
+
+The GCC job uses its pinned compiler container, with opam sandboxing disabled
+inside that container, and retains inputs/results from a common container path.
+
 The hosted correctness job and the local Docker runner use the same
 [`correctness.sh`](correctness.sh) recipe. It builds isolated musl, forces the
 linker regression suite, runs the full scale selection, glibc zlib in three
