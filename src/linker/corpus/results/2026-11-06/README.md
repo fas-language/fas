@@ -6,6 +6,11 @@ These are local correctness results on Linux x86-64 with the installed GCC,
 Clang and glibc toolchains. They make no speed comparison or production-release
 claim. Sources are pinned releases, not claims about the latest versions.
 
+[The historical musl zlib matrix](musl-zlib.json) also qualifies this binary
+with GCC 15/Clang 21/Clang 22 native objects in three linkage modes, plus a
+saved-harness replay. The subsequent [fresh Ubuntu checkpoint](../2026-11-06-clean/README.md)
+records the repaired core and its separately identified compiler/libc matrices.
+
 | Project | Observed runtime coverage per linker | Result |
 | --- | --- | --- |
 | Lua 5.1.5 | 13 included examples plus bytecode compile/run, including the expected readonly error | Fas/GNU pass |

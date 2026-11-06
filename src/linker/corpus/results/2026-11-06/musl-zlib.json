@@ -1,0 +1,804 @@
+{
+  "date": "2026-11-06",
+  "purpose": "Real zlib consumers with isolated musl; no performance claim",
+  "zlib_source": {
+    "release": "zlib-1.3.1",
+    "source_url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+    "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+    "source": "/tmp/fas-zlib-pinned-20261105/zlib-1.3.1",
+    "commands": []
+  },
+  "musl_source": {
+    "release": "musl-1.2.5",
+    "source_url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+    "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4",
+    "prefix": "/tmp/fas-musl-20261105/sysroot",
+    "source": "/tmp/fas-musl-20261105/musl-1.2.5",
+    "compiler": "gcc",
+    "make_jobs": 2
+  },
+  "workstation_matrix": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106",
+    "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+    "harness_sha256": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada",
+    "musl_harness_sha256": "a760b568a4ca80e607dfdc29871013f7c4442c7102ee02f20cdc87ea11707571",
+    "tests": [
+      {
+        "name": "musl-zlib-0-gcc-15",
+        "status": "passed",
+        "detail": {
+          "compiler": "/usr/bin/gcc-15",
+          "modes": 3,
+          "final_links": 24,
+          "gzip_cross_consumer_runs": 48
+        }
+      },
+      {
+        "name": "musl-zlib-1-clang-21",
+        "status": "passed",
+        "detail": {
+          "compiler": "/usr/bin/clang-21",
+          "modes": 3,
+          "final_links": 24,
+          "gzip_cross_consumer_runs": 48
+        }
+      },
+      {
+        "name": "musl-zlib-2-clang-22",
+        "status": "passed",
+        "detail": {
+          "compiler": "/usr/bin/clang-22",
+          "modes": 3,
+          "final_links": 24,
+          "gzip_cross_consumer_runs": 48
+        }
+      }
+    ],
+    "qualification": [
+      {
+        "compiler": "/usr/bin/gcc-15",
+        "compiler_sha256": "b5f1b773a7c733738352000c92a077dc5852a1a2fc6d836b1e411be1e9ec5f88",
+        "version": "gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+        "object_compile_command": [
+          "/usr/bin/gcc-15",
+          "-specs=/tmp/fas-musl-20261105/sysroot/lib/musl-gcc.specs"
+        ],
+        "configure_compiler": "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "native_input_sha256": {
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-0-gcc-15/source/libz.a": "4632948f5a2691e313ccc05b893f650a66cbffd8092381d32b6e12b629b9305e",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-0-gcc-15/source/example.o": "33e48972721981f7597b4ad9dc46359ef3b8615dba96b19ea86f3589c7e8a85b",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-0-gcc-15/source/minigzip.o": "2f586074e1f9242a00254e0c64fe40210acce27922791e3bacaa5580d651ce8a",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-0-gcc-15/source/example64.o": "33e48972721981f7597b4ad9dc46359ef3b8615dba96b19ea86f3589c7e8a85b",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-0-gcc-15/source/minigzip64.o": "2f586074e1f9242a00254e0c64fe40210acce27922791e3bacaa5580d651ce8a"
+        },
+        "toolchain_inputs": {
+          "/tmp/fas-musl-20261105/sysroot/lib/crt1.o": "7016298230ad9542c8a9088b5567363199805a8709380d48689dc766d3f6ddb9",
+          "/tmp/fas-musl-20261105/sysroot/lib/Scrt1.o": "21720e614105222218df33e291a6e53e90683d5e231a1875eeaa64cead2dcfc3",
+          "/tmp/fas-musl-20261105/sysroot/lib/rcrt1.o": "68f848a0ba62bbdb2bf1a418fd1702dbad061ae26576bcd376246540a436ca6a",
+          "/tmp/fas-musl-20261105/sysroot/lib/crti.o": "7654b30c4033f35bbd5c5bf593d1820912f204955846dafd812a3b5b61dfe151",
+          "/tmp/fas-musl-20261105/sysroot/lib/crtn.o": "29d9438d7deaf604a5774f08400356a23dd6b6ce61845cebda7f401170198cb7",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.a": "066e0e161c5d7be27b555d2ce0b47bcd92849f417db15b22ac7d43f570211019",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.so": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140"
+        },
+        "modes": [
+          {
+            "mode": "pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "eed705a00679f8a262beede255fc7b0a961ac98058aa0912459db01f78f5b18b",
+                  "minigzip": "51ef560616bd2edc4fd24f3128eaf6c6eeecfeb7d7f4dc3acabf2cef9962b4a8",
+                  "example64": "eed705a00679f8a262beede255fc7b0a961ac98058aa0912459db01f78f5b18b",
+                  "minigzip64": "51ef560616bd2edc4fd24f3128eaf6c6eeecfeb7d7f4dc3acabf2cef9962b4a8"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "56a996c33f97bf4a8978b38e1cd72911e2e62cf95bbd4a92eff2d78b2210eac1",
+                  "minigzip": "7fda5075c99e7f262405291c740eb9b943b477f4889b20639e907d88b64e38a9",
+                  "example64": "56a996c33f97bf4a8978b38e1cd72911e2e62cf95bbd4a92eff2d78b2210eac1",
+                  "minigzip64": "7fda5075c99e7f262405291c740eb9b943b477f4889b20639e907d88b64e38a9"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "2e50f8775b40386dc39adad0d6cf30e75a5134bf0dea3a65370f7fa5557c67a8",
+                  "minigzip": "9e010da46c63b27380f07378cf3d69bd670705cc55a2a9472fd09fb3c67b5dec",
+                  "example64": "2e50f8775b40386dc39adad0d6cf30e75a5134bf0dea3a65370f7fa5557c67a8",
+                  "minigzip64": "9e010da46c63b27380f07378cf3d69bd670705cc55a2a9472fd09fb3c67b5dec"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "99655687349a32c0ce71a0d273d589bcc2dda476dee3a3d1cbe24886772a9f3c",
+                  "minigzip": "905596e5cc19869e1bd4c6541ba25b9952da22193ae928c8a17bdf47898eae9a",
+                  "example64": "99655687349a32c0ce71a0d273d589bcc2dda476dee3a3d1cbe24886772a9f3c",
+                  "minigzip64": "905596e5cc19869e1bd4c6541ba25b9952da22193ae928c8a17bdf47898eae9a"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static-pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "a57bb2fe097ff08ab8466d1b65dc38affda2b392240443885dd2fd6dd673c44e",
+                  "minigzip": "bac7bdc256f13a4161f9fe004e42cbb5e80463ab5c0c3faad661b0548eb864ed",
+                  "example64": "a57bb2fe097ff08ab8466d1b65dc38affda2b392240443885dd2fd6dd673c44e",
+                  "minigzip64": "bac7bdc256f13a4161f9fe004e42cbb5e80463ab5c0c3faad661b0548eb864ed"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "ebf3979a5142f5cbb95cdfa2820d45a2bde21bb9f4240a5cf9065a84dadf1daf",
+                  "minigzip": "d2c1de781d514ca3d5c5b65e9d7353056a361bcae5aa69a17f7b86dd0ad53657",
+                  "example64": "ebf3979a5142f5cbb95cdfa2820d45a2bde21bb9f4240a5cf9065a84dadf1daf",
+                  "minigzip64": "d2c1de781d514ca3d5c5b65e9d7353056a361bcae5aa69a17f7b86dd0ad53657"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          }
+        ],
+        "scope": "musl zlib static archive consumers; no zlib DSO or Clang driver-policy claim",
+        "inputs_unchanged": true
+      },
+      {
+        "compiler": "/usr/bin/clang-21",
+        "compiler_sha256": "412bbe8c60571a1eb06f48fde89635033621caeb01a9b4ee76d46711bae8e932",
+        "version": "Ubuntu clang version 21.1.8 (6ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-21/bin\n",
+        "object_compile_command": [
+          "/usr/bin/clang-21",
+          "--target=x86_64-linux-musl",
+          "--sysroot=/tmp/fas-musl-20261105/sysroot"
+        ],
+        "configure_compiler": "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "native_input_sha256": {
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-1-clang-21/source/libz.a": "605a24e354a3597584e2f91e4a64a7989450cc6c90636a6c16c543097bbfda20",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-1-clang-21/source/example.o": "3bc63364d5192e01ca0d8cd9893c52aa26bd2d9e7fddf45957eb53c1eb7d62cb",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-1-clang-21/source/minigzip.o": "9fe4de1766d571b7e5e4ab2cb41cd4773fd8c6c6f54af321250f611655a4b7a1",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-1-clang-21/source/example64.o": "3bc63364d5192e01ca0d8cd9893c52aa26bd2d9e7fddf45957eb53c1eb7d62cb",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-1-clang-21/source/minigzip64.o": "9fe4de1766d571b7e5e4ab2cb41cd4773fd8c6c6f54af321250f611655a4b7a1"
+        },
+        "toolchain_inputs": {
+          "/tmp/fas-musl-20261105/sysroot/lib/crt1.o": "7016298230ad9542c8a9088b5567363199805a8709380d48689dc766d3f6ddb9",
+          "/tmp/fas-musl-20261105/sysroot/lib/Scrt1.o": "21720e614105222218df33e291a6e53e90683d5e231a1875eeaa64cead2dcfc3",
+          "/tmp/fas-musl-20261105/sysroot/lib/rcrt1.o": "68f848a0ba62bbdb2bf1a418fd1702dbad061ae26576bcd376246540a436ca6a",
+          "/tmp/fas-musl-20261105/sysroot/lib/crti.o": "7654b30c4033f35bbd5c5bf593d1820912f204955846dafd812a3b5b61dfe151",
+          "/tmp/fas-musl-20261105/sysroot/lib/crtn.o": "29d9438d7deaf604a5774f08400356a23dd6b6ce61845cebda7f401170198cb7",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.a": "066e0e161c5d7be27b555d2ce0b47bcd92849f417db15b22ac7d43f570211019",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.so": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140"
+        },
+        "modes": [
+          {
+            "mode": "pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "6cfa783730422d5a40310622ac699d55a2c462e1e0475ded0698f71754bae603",
+                  "minigzip": "10d4bd176e810573aedcbe8f800b072540160ca286e3200118b2ed1ebc23ae1f",
+                  "example64": "6cfa783730422d5a40310622ac699d55a2c462e1e0475ded0698f71754bae603",
+                  "minigzip64": "10d4bd176e810573aedcbe8f800b072540160ca286e3200118b2ed1ebc23ae1f"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "617436d60e3727514f04efb2d96ba45565ddaf268de068ec5671b53429d7e0cf",
+                  "minigzip": "e66f42f721a3284826d8c01ad5e45c78121a1c9b5c138f31e0a50f11e500fc83",
+                  "example64": "617436d60e3727514f04efb2d96ba45565ddaf268de068ec5671b53429d7e0cf",
+                  "minigzip64": "e66f42f721a3284826d8c01ad5e45c78121a1c9b5c138f31e0a50f11e500fc83"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "15e2a1f128c420d2048c7c37032a5e3d5756f2f59d27634844ff20abba899268",
+                  "minigzip": "c9b0ff17870bf4226a1d1387e1f862e61359f064f9c72ad17f76a8af332b15cc",
+                  "example64": "15e2a1f128c420d2048c7c37032a5e3d5756f2f59d27634844ff20abba899268",
+                  "minigzip64": "c9b0ff17870bf4226a1d1387e1f862e61359f064f9c72ad17f76a8af332b15cc"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "2bd3bf83f8d2de54e98743ecfc3bf23a8fe95ce58dc7115b636e465f8787d14b",
+                  "minigzip": "f407cbc1aefd5bde99fa1519c9b70610357444f7d58d43d0bc9660530cb67721",
+                  "example64": "2bd3bf83f8d2de54e98743ecfc3bf23a8fe95ce58dc7115b636e465f8787d14b",
+                  "minigzip64": "f407cbc1aefd5bde99fa1519c9b70610357444f7d58d43d0bc9660530cb67721"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static-pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "96f8fd4555e3a9953c44fc9f209b70309bfc76b8f19d2edece68a4a1b99c00c5",
+                  "minigzip": "717b79ce6abbe602144c4201a6b25fd37bcf4bde4c677bc2d9c4e8f2139c5c01",
+                  "example64": "96f8fd4555e3a9953c44fc9f209b70309bfc76b8f19d2edece68a4a1b99c00c5",
+                  "minigzip64": "717b79ce6abbe602144c4201a6b25fd37bcf4bde4c677bc2d9c4e8f2139c5c01"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "e47b5a9e3f8844540c4d570ea9d0e152f7683c108240a5c4d8fbc24580d3fbce",
+                  "minigzip": "903842f7eb390c6cf1d79233be6fde309556cfb6328d44cab024b5f5b3369c39",
+                  "example64": "e47b5a9e3f8844540c4d570ea9d0e152f7683c108240a5c4d8fbc24580d3fbce",
+                  "minigzip64": "903842f7eb390c6cf1d79233be6fde309556cfb6328d44cab024b5f5b3369c39"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          }
+        ],
+        "scope": "musl zlib static archive consumers; no zlib DSO or Clang driver-policy claim",
+        "inputs_unchanged": true
+      },
+      {
+        "compiler": "/usr/bin/clang-22",
+        "compiler_sha256": "9dff149140cff7484c1efd85a5cfe0e3f046edcf71c63b42b5501c4a2ee462ae",
+        "version": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-22/bin\n",
+        "object_compile_command": [
+          "/usr/bin/clang-22",
+          "--target=x86_64-linux-musl",
+          "--sysroot=/tmp/fas-musl-20261105/sysroot"
+        ],
+        "configure_compiler": "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "native_input_sha256": {
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-2-clang-22/source/libz.a": "357116b9721d58ab53ea1d1a8113dc0ae860d4e8d19ce8f79dbce5a35f637293",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-2-clang-22/source/example.o": "e5a7d4053b651c549ead8ccf877e2d5e1f15ea34daf622176a28efe46ec9d56e",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-2-clang-22/source/minigzip.o": "3ee97735fa26a383894592499bffeb298867ae2b9eb3228fae540c3de519fa64",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-2-clang-22/source/example64.o": "e5a7d4053b651c549ead8ccf877e2d5e1f15ea34daf622176a28efe46ec9d56e",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-final-20261106/musl-zlib-2-clang-22/source/minigzip64.o": "3ee97735fa26a383894592499bffeb298867ae2b9eb3228fae540c3de519fa64"
+        },
+        "toolchain_inputs": {
+          "/tmp/fas-musl-20261105/sysroot/lib/crt1.o": "7016298230ad9542c8a9088b5567363199805a8709380d48689dc766d3f6ddb9",
+          "/tmp/fas-musl-20261105/sysroot/lib/Scrt1.o": "21720e614105222218df33e291a6e53e90683d5e231a1875eeaa64cead2dcfc3",
+          "/tmp/fas-musl-20261105/sysroot/lib/rcrt1.o": "68f848a0ba62bbdb2bf1a418fd1702dbad061ae26576bcd376246540a436ca6a",
+          "/tmp/fas-musl-20261105/sysroot/lib/crti.o": "7654b30c4033f35bbd5c5bf593d1820912f204955846dafd812a3b5b61dfe151",
+          "/tmp/fas-musl-20261105/sysroot/lib/crtn.o": "29d9438d7deaf604a5774f08400356a23dd6b6ce61845cebda7f401170198cb7",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.a": "066e0e161c5d7be27b555d2ce0b47bcd92849f417db15b22ac7d43f570211019",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.so": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140"
+        },
+        "modes": [
+          {
+            "mode": "pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "46e855967806201f109753566173459dcdfa0d29e4be4c6e900ebf34cee830f4",
+                  "minigzip": "fcea78c757e57e1a36ecac389d9ebb47fb433e0dcd07edc88e47f5842ef0e03a",
+                  "example64": "46e855967806201f109753566173459dcdfa0d29e4be4c6e900ebf34cee830f4",
+                  "minigzip64": "fcea78c757e57e1a36ecac389d9ebb47fb433e0dcd07edc88e47f5842ef0e03a"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "6976ac89f71aeef1910f3ca216280033b313884dbbfad1df9bb6035876808113",
+                  "minigzip": "2b9377d37297fb0377fe14453a186b783394a1faacfb69ed82f3e5e0e3667779",
+                  "example64": "6976ac89f71aeef1910f3ca216280033b313884dbbfad1df9bb6035876808113",
+                  "minigzip64": "2b9377d37297fb0377fe14453a186b783394a1faacfb69ed82f3e5e0e3667779"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "1ca491e6447e92c1f3ddae915745d93dedd444874ba9f248654700c4c7f79e60",
+                  "minigzip": "c09ab2995157626aefa1316c309b94ab44ce19e4dcec8f683b200a013ae566e7",
+                  "example64": "1ca491e6447e92c1f3ddae915745d93dedd444874ba9f248654700c4c7f79e60",
+                  "minigzip64": "c09ab2995157626aefa1316c309b94ab44ce19e4dcec8f683b200a013ae566e7"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "e766f9f5a1c4182dc3817380b700841a6d01c255a66471ef9a999970e02bf6c6",
+                  "minigzip": "4dc0dddb7fbd830918386281499d78b7036bd4c794b9138f1ff8fcc4d2f1c992",
+                  "example64": "e766f9f5a1c4182dc3817380b700841a6d01c255a66471ef9a999970e02bf6c6",
+                  "minigzip64": "4dc0dddb7fbd830918386281499d78b7036bd4c794b9138f1ff8fcc4d2f1c992"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static-pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "2d68d9e002335ba61240427b6886654061035f4edea31915b6ec7e9f788738ee",
+                  "minigzip": "eea3238a7881e1b060c744b18ae97f80d690ca2b6c868164b89b82cd0303b69e",
+                  "example64": "2d68d9e002335ba61240427b6886654061035f4edea31915b6ec7e9f788738ee",
+                  "minigzip64": "eea3238a7881e1b060c744b18ae97f80d690ca2b6c868164b89b82cd0303b69e"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "58839e7b476be3c772bbce44e04e9d0226b183212838f3fae8d81f2a6156d3be",
+                  "minigzip": "21ca1aaebc359bacf1ceb11065f9c259163e0ea2a95d491017a0db184e1026ac",
+                  "example64": "58839e7b476be3c772bbce44e04e9d0226b183212838f3fae8d81f2a6156d3be",
+                  "minigzip64": "21ca1aaebc359bacf1ceb11065f9c259163e0ea2a95d491017a0db184e1026ac"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          }
+        ],
+        "scope": "musl zlib static archive consumers; no zlib DSO or Clang driver-policy claim",
+        "inputs_unchanged": true
+      }
+    ],
+    "sources": [
+      {
+        "name": "musl-zlib-0-gcc-15",
+        "path": "/tmp/fas-zlib-pinned-20261105/zlib-1.3.1",
+        "files": 253,
+        "manifest_sha256": "ce54f2d7efde141dc0613aba07f808244b5e9c112b198c71f155087d16bf9d2b",
+        "original_sources_unchanged": true
+      },
+      {
+        "name": "musl-zlib-1-clang-21",
+        "path": "/tmp/fas-zlib-pinned-20261105/zlib-1.3.1",
+        "files": 253,
+        "manifest_sha256": "ce54f2d7efde141dc0613aba07f808244b5e9c112b198c71f155087d16bf9d2b",
+        "original_sources_unchanged": true
+      },
+      {
+        "name": "musl-zlib-2-clang-22",
+        "path": "/tmp/fas-zlib-pinned-20261105/zlib-1.3.1",
+        "files": 253,
+        "manifest_sha256": "ce54f2d7efde141dc0613aba07f808244b5e9c112b198c71f155087d16bf9d2b",
+        "original_sources_unchanged": true
+      }
+    ],
+    "evidence": {
+      "report.json": "60b68db56a0b446a890c3ee99931b6b1c8c3680d56a99f78e299f545ca7a1c06",
+      "commands.jsonl": "ce4b944bbc953cb606420e3cb566491706131a26175ef52696b5740f59001b6a"
+    },
+    "limitations": [
+      "Native zlib objects only; configure probes use musl-gcc/GNU.",
+      "No C++/LTO, zlib DSO, static TLS relaxation or cross-kernel qualification."
+    ]
+  },
+  "saved_harness_replay": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106",
+    "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+    "harness_sha256": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada",
+    "musl_harness_sha256": "a760b568a4ca80e607dfdc29871013f7c4442c7102ee02f20cdc87ea11707571",
+    "tests": [
+      {
+        "name": "musl-zlib-0-clang-22",
+        "status": "passed",
+        "detail": {
+          "compiler": "/usr/bin/clang-22",
+          "modes": 3,
+          "final_links": 24,
+          "gzip_cross_consumer_runs": 48
+        }
+      }
+    ],
+    "qualification": [
+      {
+        "compiler": "/usr/bin/clang-22",
+        "compiler_sha256": "9dff149140cff7484c1efd85a5cfe0e3f046edcf71c63b42b5501c4a2ee462ae",
+        "version": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-22/bin\n",
+        "object_compile_command": [
+          "/usr/bin/clang-22",
+          "--target=x86_64-linux-musl",
+          "--sysroot=/tmp/fas-musl-20261105/sysroot"
+        ],
+        "configure_compiler": "/tmp/fas-musl-20261105/sysroot/bin/musl-gcc",
+        "native_input_sha256": {
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106/musl-zlib-0-clang-22/source/libz.a": "d61214276ea462034361710018bd2086656e311e1a782033b81e6924035b6fb8",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106/musl-zlib-0-clang-22/source/example.o": "0c95cfc41c39ca60307842f8eb6ca4f8ad77ef5b1bc76d0fb6cd537c9597f420",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106/musl-zlib-0-clang-22/source/minigzip.o": "5a4c1bf30b7eb5b41bdeb8802861aea30acea6fa4c167787e99443939bcbefb6",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106/musl-zlib-0-clang-22/source/example64.o": "0c95cfc41c39ca60307842f8eb6ca4f8ad77ef5b1bc76d0fb6cd537c9597f420",
+          "/home/glonex/.cache/fas-linker-qualification/musl-zlib-saved-replay-20261106/musl-zlib-0-clang-22/source/minigzip64.o": "5a4c1bf30b7eb5b41bdeb8802861aea30acea6fa4c167787e99443939bcbefb6"
+        },
+        "toolchain_inputs": {
+          "/tmp/fas-musl-20261105/sysroot/lib/crt1.o": "7016298230ad9542c8a9088b5567363199805a8709380d48689dc766d3f6ddb9",
+          "/tmp/fas-musl-20261105/sysroot/lib/Scrt1.o": "21720e614105222218df33e291a6e53e90683d5e231a1875eeaa64cead2dcfc3",
+          "/tmp/fas-musl-20261105/sysroot/lib/rcrt1.o": "68f848a0ba62bbdb2bf1a418fd1702dbad061ae26576bcd376246540a436ca6a",
+          "/tmp/fas-musl-20261105/sysroot/lib/crti.o": "7654b30c4033f35bbd5c5bf593d1820912f204955846dafd812a3b5b61dfe151",
+          "/tmp/fas-musl-20261105/sysroot/lib/crtn.o": "29d9438d7deaf604a5774f08400356a23dd6b6ce61845cebda7f401170198cb7",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.a": "066e0e161c5d7be27b555d2ce0b47bcd92849f417db15b22ac7d43f570211019",
+          "/tmp/fas-musl-20261105/sysroot/lib/libc.so": "66755329251dc976825a3ed3d1b34d42fde1ddc922efdd87f4706ed5874622d4",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+          "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140"
+        },
+        "modes": [
+          {
+            "mode": "pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "4292af4ae40858fdf69317f6bd76f8d5a771d36dd70e16fdb89bf5cf4033b6f0",
+                  "minigzip": "2b7a08d4e5f66351fb1b5697fd804130b172724633afeeeff1de0bb6fe070373",
+                  "example64": "4292af4ae40858fdf69317f6bd76f8d5a771d36dd70e16fdb89bf5cf4033b6f0",
+                  "minigzip64": "2b7a08d4e5f66351fb1b5697fd804130b172724633afeeeff1de0bb6fe070373"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "0669939296202e086b2f18b5cd18671015822b81fe0b61c30e464028e1c3fe78",
+                  "minigzip": "c684ae3fa1e24ef276033b394961bc82592bfebb943f183fecef1aa475753a07",
+                  "example64": "0669939296202e086b2f18b5cd18671015822b81fe0b61c30e464028e1c3fe78",
+                  "minigzip64": "c684ae3fa1e24ef276033b394961bc82592bfebb943f183fecef1aa475753a07"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "cf3d2e5487d8683f14b871769a09ad8fe711b6de1b8aa74b359e648a03aa7886",
+                  "minigzip": "d77a2491eb333679ca22e5ccd282f5907e9d20988b4524512317e85b88873cb8",
+                  "example64": "cf3d2e5487d8683f14b871769a09ad8fe711b6de1b8aa74b359e648a03aa7886",
+                  "minigzip64": "d77a2491eb333679ca22e5ccd282f5907e9d20988b4524512317e85b88873cb8"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "e24a23f755b7a7c9940108ea8a4683ed799d3a25fac7f1dcd3efd67046f7988b",
+                  "minigzip": "345f754029f73df4bd5da476e94706cc8e441aa42cf8d3a4b1662b78b206f7e9",
+                  "example64": "e24a23f755b7a7c9940108ea8a4683ed799d3a25fac7f1dcd3efd67046f7988b",
+                  "minigzip64": "345f754029f73df4bd5da476e94706cc8e441aa42cf8d3a4b1662b78b206f7e9"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          },
+          {
+            "mode": "static-pie",
+            "phases": [
+              {
+                "linker": "fas",
+                "outputs": {
+                  "example": "3df997223f2b733cdf7387c40da70f33f2371f12aa3cf9c1bd4b0ce1809cb8ab",
+                  "minigzip": "5cc63c6e7829e9b3a391f6f9169ef8379590683adb2ee5324249c4ad522a9e0c",
+                  "example64": "3df997223f2b733cdf7387c40da70f33f2371f12aa3cf9c1bd4b0ce1809cb8ab",
+                  "minigzip64": "5cc63c6e7829e9b3a391f6f9169ef8379590683adb2ee5324249c4ad522a9e0c"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              },
+              {
+                "linker": "gnu",
+                "outputs": {
+                  "example": "d3a10a7ebf00af18c451cacdb5d78b4c90c7c95d1fa57ce37a8c171ffcfa6862",
+                  "minigzip": "d45bf080b53621cb77cad68809e14cc4544cbf1e1877fc600c62d70b2e0e0411",
+                  "example64": "d3a10a7ebf00af18c451cacdb5d78b4c90c7c95d1fa57ce37a8c171ffcfa6862",
+                  "minigzip64": "d45bf080b53621cb77cad68809e14cc4544cbf1e1877fc600c62d70b2e0e0411"
+                },
+                "example_stdout_sha256": {
+                  "example": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6",
+                  "example64": "f310cbe7fd9b19e6a39db1d8085481e067f8fed6966519e4c192ae9a868da8c6"
+                },
+                "upstream_stdout_sha256": "7b7c70ca227f503be429e608f0a7edc00d324dbe2a8a424d8fb1a3030cabee68",
+                "upstream_success_markers": [
+                  "*** zlib test OK ***",
+                  "*** zlib 64-bit test OK ***"
+                ]
+              }
+            ],
+            "gzip_cross_consumer_runs": 16,
+            "gzip_sha256": "1854e37ccfd27e920fcee074a22dc393116ea17fc51c718f17dddf57b191c5c6",
+            "passed": true
+          }
+        ],
+        "scope": "musl zlib static archive consumers; no zlib DSO or Clang driver-policy claim",
+        "inputs_unchanged": true
+      }
+    ],
+    "sources": [
+      {
+        "name": "musl-zlib-0-clang-22",
+        "path": "/tmp/fas-zlib-pinned-20261105/zlib-1.3.1",
+        "files": 253,
+        "manifest_sha256": "ce54f2d7efde141dc0613aba07f808244b5e9c112b198c71f155087d16bf9d2b",
+        "original_sources_unchanged": true
+      }
+    ],
+    "evidence": {
+      "report.json": "26ac013e0adb40559e3c255a7b0516c996873b0bae0c6248ef13b56b89f22b48",
+      "commands.jsonl": "58b342e5a6dfe88246e0518cc4c5cb4ceb73d75f8c4c492cc548d63d5e9f363b"
+    },
+    "limitations": [
+      "Native zlib objects only; configure probes use musl-gcc/GNU.",
+      "No C++/LTO, zlib DSO, static TLS relaxation or cross-kernel qualification."
+    ]
+  },
+  "scope": "Workstation GCC15/Clang21/Clang22, 72 final links and 144 gzip cross-consumer executions; additional saved-harness Clang22 replay 24 links/48 cross-consumer executions. Configure probes use musl GCC/GNU; selected compiler emits all payload objects."
+}

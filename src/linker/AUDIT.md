@@ -12,6 +12,33 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Fresh userspace qualification — 2026-11-06
+
+The [clean Ubuntu checkpoint](corpus/results/2026-11-06-clean/README.md) passes
+the complete shared CI correctness recipe with GCC 13/Clang 18, glibc 2.39 and
+musl 1.2.5. It exposed a missing final unwind terminator that crashed legacy
+libgcc static startup and nonadjacent read-only ranges rejected by older
+Valgrind. Both have semantic regressions and independent runtime checks.
+Clang's optional import flag is capability-probed; portable fixtures and clean
+test dependencies are repaired separately.
+
+The workstation full root gate passes 3,792 compiler checks and 250 linker cases
+in 42 groups without skips; the clean userspace passes the same linker case
+selection, all four scale groups, glibc/musl zlib, Chibicc self-host and SQLite
+consumers. Five GCC/Clang compiler versions across the two environments pass
+120 musl zlib final links and 240 gzip cross-consumer executions. Four fresh
+120-second fuzz campaigns execute 338,437 inputs without saved crashes/hangs.
+The selection guard's negative controls and runner timeout cleanup also pass.
+Full source/image/package/artifact provenance and superseded failures are retained.
+Hosted CI and sustained release qualification remain open; this container shares
+the host kernel, and the earlier broad-corpus records retain their original
+binary identities. No performance campaign is added.
+
+An additional SQLite replay on the retained Ubuntu Fas/GNU executables passes
+all 1,300 isolated `extraquick` scripts: 398,247/398,257 assertions and zero
+errors. The single randomized FTS5 assertion-count difference is recorded;
+the selected script names match and executables remain unchanged.
+
 ## Expanded qualification — 2026-11-06
 
 The [local qualification record](corpus/results/2026-11-06/README.md) now covers

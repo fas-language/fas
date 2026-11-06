@@ -1,0 +1,145 @@
+{
+  "started": "2026-11-06T03:22:24+0100",
+  "status": "passed",
+  "scope": "fresh Ubuntu userspace container, shared host kernel; local CI recipe, not hosted CI",
+  "git_head": "8009f6d285853a4cb3ec3091b73634a6f9d0d173",
+  "dockerfile_sha256": "3e69d2422513004a70ad3d4a72352eec2f801c6a5e203f4ebecacac6fc672154",
+  "recipe_sha256": "af50f4c9320e2bc7113e0411e49049982f65db133c7708e592c54be83085987e",
+  "runner_sha256": "515593043279505a1544e39e1f6781fe916d4f34f03ee46e688960524ade187b",
+  "extraquick": false,
+  "commands": [
+    {
+      "argv": [
+        "docker",
+        "build",
+        "--progress=plain",
+        "-t",
+        "fas-linker-qualification:ubuntu24-ocaml5.4.1",
+        "-f",
+        "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/ci/Dockerfile",
+        "/home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/ci"
+      ],
+      "log": "image-build.log",
+      "exit": 0,
+      "log_sha256": "4a1639cbc882d35c5e08eb7db8cdfe10855dad4fd4cf10dadaa79af46f12be82"
+    },
+    {
+      "argv": [
+        "docker",
+        "create",
+        "--name",
+        "fas-linker-clean-00bd35ba0801",
+        "--user",
+        "1000:1000",
+        "--ulimit",
+        "nofile=65536:65536",
+        "--cap-add",
+        "SYS_PTRACE",
+        "--mount",
+        "type=bind,src=/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106,dst=/qualification",
+        "--env",
+        "HOME=/qualification/home",
+        "--env",
+        "RUNNER_TEMP=/qualification/results",
+        "--env",
+        "LC_ALL=C.UTF-8",
+        "--env",
+        "FAS_SQLITE_EXTRAQUICK=0",
+        "--workdir",
+        "/qualification/source",
+        "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+        "bash",
+        "-c",
+        "set -e; cat /etc/os-release; uname -a; ocamlopt -version; dune --version; gcc --version; clang --version; bash src/linker/ci/correctness.sh"
+      ],
+      "log": "container-create.log",
+      "exit": 0,
+      "log_sha256": "49527e6d89d0c54149024b2952d76b8f9c7915e963a241396a51451c81e6f2cf"
+    },
+    {
+      "argv": [
+        "docker",
+        "start",
+        "--attach",
+        "fas-linker-clean-00bd35ba0801"
+      ],
+      "log": "qualification.log",
+      "exit": 0,
+      "log_sha256": "a012db9b34c82d5e6950ca99968820d823bcd582c7c64b2524305b8bb8165475"
+    }
+  ],
+  "timing_comparison": false,
+  "image": {
+    "requested": "fas-linker-qualification:ubuntu24-ocaml5.4.1",
+    "id": "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+    "repo_digests": []
+  },
+  "source_file_count": 980,
+  "source_manifest_sha256": "4ca52119f552f26a7d50959ff05253f4b489eda2722e304af27bdda69d1b92d9",
+  "container_name": "fas-linker-clean-00bd35ba0801",
+  "container_exit": 0,
+  "qualification_summary": {
+    "status": "passed",
+    "failures": [],
+    "python_cases": 250,
+    "python_groups": 42,
+    "skips": [],
+    "regression_log_sha256": "cd8ff2b83a0700166459f36df89c774ba44bdb33a3452740016261beabdc5bb5",
+    "reports": {
+      "linker-scale": {
+        "path": "/qualification/results/linker-scale/report.json",
+        "sha256": "0dc8f9f616cafd42e3ac5bc4d5bd9fea81cb014b0e5074213087831b17896a0e",
+        "passed": true
+      },
+      "linker-zlib-dynamic": {
+        "path": "/qualification/results/linker-zlib-dynamic/report.json",
+        "sha256": "b3a554da9154bc72f407f593b57d0b438c92abf60692adea96bb79317720e4dc",
+        "passed": true
+      },
+      "linker-zlib-static": {
+        "path": "/qualification/results/linker-zlib-static/report.json",
+        "sha256": "309fbfd239ec7582f165c94341c34555e38c0d6aac7db691af95885411f0315e",
+        "passed": true
+      },
+      "linker-zlib-static-pie": {
+        "path": "/qualification/results/linker-zlib-static-pie/report.json",
+        "sha256": "940acb5de9d9064784021a078897fc3aa778f23ae6d448445cfac2d20c37ddf1",
+        "passed": true
+      },
+      "linker-musl-zlib": {
+        "path": "/qualification/results/linker-musl-zlib/report.json",
+        "sha256": "3b14f4c6cfa54a6a9859b9c55d3fa85d2b78f2be3221e733e8d1a2c865fee139",
+        "passed": true
+      },
+      "linker-chibicc-selfhost": {
+        "path": "/qualification/results/linker-chibicc-selfhost/report.json",
+        "sha256": "0607cf46585e8402e1b2aaaa053866101c2dee5e9d21ef754b0dabb54a03196a",
+        "passed": true
+      },
+      "linker-sqlite": {
+        "path": "/qualification/results/linker-sqlite/report.json",
+        "sha256": "98e874c2571ffd7b7fd0ff541d78cff8606d0cbb68af17b172fb3beeea2e167a",
+        "passed": true
+      }
+    },
+    "tool_versions": {
+      "ocamlopt": "5.4.1",
+      "dune": "3.24.2",
+      "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+      "ld": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+      "gdb": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1",
+      "valgrind": "valgrind-3.22.0",
+      "ldd": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39"
+    },
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "packages_sha256": "bf45bab51b120c16d088e4c3a8e4c5e85bb342d360d9af1ec394ef5efe4c8e61",
+    "linker_sha256": "4385e2ddca5ead07737617155cb48bd35f280d27893db9ef3c9aa1732d958918",
+    "installed_linker_sha256": "4385e2ddca5ead07737617155cb48bd35f280d27893db9ef3c9aa1732d958918",
+    "scope": "shared correctness recipe; no hosted-run or performance claim"
+  },
+  "qualification_summary_sha256": "4d3a887f742351b080f37c51bb480d6c4a849b3e9f19c53919da58de28318351",
+  "source_changes": [],
+  "finished": "2026-11-06T03:26:53+0100"
+}

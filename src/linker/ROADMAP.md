@@ -42,6 +42,15 @@ require the full selected GCC execution count. Hosted execution, broader
 compiler/libc configurations, sustained fuzzing and release artifacts remain
 open gates; these local results do not complete v0.7 or v0.8.
 
+The [fresh Ubuntu checkpoint](corpus/results/2026-11-06-clean/README.md) also
+passes the shared correctness recipe on GCC 13/Clang 18 and glibc 2.39, with
+GCC/Clang musl zlib PIE/static/static-PIE consumers. It repairs legacy unwind
+termination and older debug-reader layout compatibility. The current host root
+suite passes 3,792 compiler checks and 250 linker cases; the clean image passes
+all 250 linker cases, scale, zlib, Chibicc, SQLite and installation gates.
+This qualifies another userspace baseline while sharing the host kernel;
+hosted execution, sustained fuzzing and release artifacts remain open.
+
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,
 per the user's revised priority. Malformed-input tests and fuzzing grow

@@ -1,0 +1,60 @@
+{
+  "status": "passed",
+  "scope": "retained original sources, toolchain files, linker snapshots and musl inputs/outputs; no performance comparison",
+  "reports": {
+    "linker-zlib-dynamic": {
+      "original_source_files_verified": 253,
+      "toolchain_files_verified": 9,
+      "musl_native_and_toolchain_observations_verified": 0,
+      "musl_outputs_verified": 0,
+      "linker_snapshot_verified": true,
+      "report_sha256": "b3a554da9154bc72f407f593b57d0b438c92abf60692adea96bb79317720e4dc",
+      "commands_sha256": "40e012bd37f44c3d1ea85b8a5521877249d8fbca2d056ba860845a160c466043"
+    },
+    "linker-zlib-static": {
+      "original_source_files_verified": 253,
+      "toolchain_files_verified": 14,
+      "musl_native_and_toolchain_observations_verified": 0,
+      "musl_outputs_verified": 0,
+      "linker_snapshot_verified": true,
+      "report_sha256": "309fbfd239ec7582f165c94341c34555e38c0d6aac7db691af95885411f0315e",
+      "commands_sha256": "98f600447124afbae6e39e200ce9d94e2b4f5c920c01154bfcb8733ce71a582e"
+    },
+    "linker-zlib-static-pie": {
+      "original_source_files_verified": 253,
+      "toolchain_files_verified": 15,
+      "musl_native_and_toolchain_observations_verified": 0,
+      "musl_outputs_verified": 0,
+      "linker_snapshot_verified": true,
+      "report_sha256": "940acb5de9d9064784021a078897fc3aa778f23ae6d448445cfac2d20c37ddf1",
+      "commands_sha256": "500fe2f6bfbb5410f48ac93a03acc1d8e19209dc94a963d040f8b69ac753d0cf"
+    },
+    "linker-musl-zlib": {
+      "original_source_files_verified": 506,
+      "toolchain_files_verified": 9,
+      "musl_native_and_toolchain_observations_verified": 36,
+      "musl_outputs_verified": 48,
+      "linker_snapshot_verified": true,
+      "report_sha256": "3b14f4c6cfa54a6a9859b9c55d3fa85d2b78f2be3221e733e8d1a2c865fee139",
+      "commands_sha256": "928f8edac0318c72a7cf97b9cd9d4b5641ad459518da80dba097fd925b45a0e3"
+    },
+    "linker-chibicc-selfhost": {
+      "original_source_files_verified": 75,
+      "toolchain_files_verified": 9,
+      "musl_native_and_toolchain_observations_verified": 0,
+      "musl_outputs_verified": 0,
+      "linker_snapshot_verified": true,
+      "report_sha256": "0607cf46585e8402e1b2aaaa053866101c2dee5e9d21ef754b0dabb54a03196a",
+      "commands_sha256": "81ebbdd512e52feb07da65a5ea2e6a698497837184f49c6361262d2a72d11a18"
+    },
+    "linker-sqlite": {
+      "original_source_files_verified": 2290,
+      "toolchain_files_verified": 15,
+      "musl_native_and_toolchain_observations_verified": 0,
+      "musl_outputs_verified": 0,
+      "linker_snapshot_verified": true,
+      "report_sha256": "98e874c2571ffd7b7fd0ff541d78cff8606d0cbb68af17b172fb3beeea2e167a",
+      "commands_sha256": "3978070dd5ec46b31a4b1a97e9239a792ba28bce90117153aa388d4a5690ec5a"
+    }
+  }
+}

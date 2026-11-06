@@ -14,6 +14,28 @@ and records captured output before failing, so build children do not continue
 into another phase. Daemons that deliberately create their own sessions still
 require the upstream harness's cleanup.
 
+## Isolated musl real-library matrix
+
+`musl.py` compiles zlib 1.3.1's archive and four upstream example/gzip objects
+with each requested GCC/Clang compiler against an isolated musl sysroot. Fas
+and GNU link identical native inputs into PIE, static ET_EXEC and static PIE.
+Every phase runs upstream `test`/`test64`; four gzip producers are decoded by
+all four consumers in each mode. ELF checks enforce type, interpreter and
+static-PIE dependency policy, and input hashes must remain unchanged.
+
+```sh
+python3 src/linker/corpus/musl.py --output /tmp/new-musl-zlib \
+  --zlib /path/to/zlib-1.3.1 --musl-sysroot /path/to/musl/sysroot \
+  --cc gcc --cc clang
+```
+
+Upstream configure probes use the installed musl GCC driver and GNU ld; the
+selected compiler builds all payload objects. This qualifies native object and
+musl startup compatibility, including Clang's musl target, rather than Clang
+driver discovery. It does not test a zlib DSO or static TLS relaxation. Pinned
+source fetching and musl installation use `fetch.py` as in the other corpus
+recipes. The [clean container gate](../ci/README.md) includes this matrix.
+
 From `fas`, after a release build:
 
 ```sh

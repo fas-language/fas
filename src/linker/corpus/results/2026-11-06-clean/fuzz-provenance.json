@@ -1,0 +1,9 @@
+{
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/fuzz-clean-fixes-20261106",
+  "report_sha256": "db6b5ed4e85ba44b2ce938c19e4d04d88d7d4cc7ac46ce4e18936c0649c41050",
+  "source_diff_sha256": "eef52aef6640d10571a1961d834df18d77e7add7eafba721ba487e51d0b82611",
+  "target_sha256": "2131452666920f5099d8020bb749a88f539b12723aeb4ae8d32bb1bce5928d3f",
+  "linker_source_matches": true,
+  "executions": 338437,
+  "scope": "Four120-second local campaigns, no saved findings; not sustained fuzzing or proof of semantic correctness"
+}

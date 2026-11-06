@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "purpose": "verifier positive, missing-case and reported-skip controls; original qualification summary unchanged",
+  "controls": [
+    {
+      "name": "positive",
+      "status": "passed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "1000:1000",
+        "--mount",
+        "type=bind,src=/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106,dst=/qualification",
+        "--workdir",
+        "/qualification/source",
+        "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+        "python3",
+        "src/linker/ci/verify.py",
+        "--output",
+        "/qualification/selection-controls/positive",
+        "--expected-python-cases",
+        "250"
+      ],
+      "verifier_exit": 0,
+      "expected_failures": [],
+      "summary_sha256": "e1960c106a18bd1d6bd686750cf5db9e24118b00eb2e4e33feaadbdff6202321",
+      "log_sha256": "e1960c106a18bd1d6bd686750cf5db9e24118b00eb2e4e33feaadbdff6202321"
+    },
+    {
+      "name": "count-negative",
+      "status": "passed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "1000:1000",
+        "--mount",
+        "type=bind,src=/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106,dst=/qualification",
+        "--workdir",
+        "/qualification/source",
+        "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+        "python3",
+        "src/linker/ci/verify.py",
+        "--output",
+        "/qualification/selection-controls/count-negative",
+        "--expected-python-cases",
+        "251"
+      ],
+      "verifier_exit": 1,
+      "expected_failures": [
+        "expected 251 Python cases, observed 250"
+      ],
+      "summary_sha256": "428d3096c25620d1a19aeff8201fd40a789b678d9eb7648fcd1de4f519ff340a",
+      "log_sha256": "428d3096c25620d1a19aeff8201fd40a789b678d9eb7648fcd1de4f519ff340a"
+    },
+    {
+      "name": "skip-negative",
+      "status": "passed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "1000:1000",
+        "--mount",
+        "type=bind,src=/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106,dst=/qualification",
+        "--workdir",
+        "/qualification/source",
+        "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+        "python3",
+        "src/linker/ci/verify.py",
+        "--output",
+        "/qualification/selection-controls/skip-negative",
+        "--expected-python-cases",
+        "250"
+      ],
+      "verifier_exit": 1,
+      "expected_failures": [
+        "regression skips present"
+      ],
+      "summary_sha256": "a02fdbe42dc9291885c769eae1883044a5f51c38027f3ce353a9674738ab8b6c",
+      "log_sha256": "a02fdbe42dc9291885c769eae1883044a5f51c38027f3ce353a9674738ab8b6c"
+    }
+  ]
+}

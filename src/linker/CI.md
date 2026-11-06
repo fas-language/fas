@@ -10,6 +10,12 @@ and a staged executable install/compile/run check. The linker Dune alias include
 native compiler integration tests; this workflow does not replace the separate
 full compiler regression suite.
 
+The hosted correctness job and [clean local container runner](ci/README.md)
+share one recipe. Its final selection guard requires 250 Python regression
+cases without reported skips and passing scale/corpus reports. The musl zlib
+matrix adds GCC/Clang native objects linked by Fas/GNU as PIE, static ET_EXEC
+and static PIE, including upstream tests and all gzip producer/consumer pairs.
+
 SQLite correctness runs build the unmodified 3.54.1 canonical source with
 `configure --all`, then independently link the same objects with GNU ld. Normal
 runs use upstream `main.test`; weekly/manual runs select `extraquick` through
@@ -49,8 +55,10 @@ qualified on hosted runners.
 
 This is a workflow definition, not evidence of a completed hosted run. Local
 qualification is recorded separately under `audit/`, `scale/results/`,
-`corpus/results/` and `fuzz/results/`. Ubuntu/toolchain compatibility remains
-unqualified until the workflow actually passes there. No performance comparison
+`corpus/results/` and `fuzz/results/`. The [fresh local Ubuntu qualification](corpus/results/2026-11-06-clean/README.md)
+passes the shared correctness recipe, including GCC 13/Clang 18, glibc 2.39 and
+isolated musl. Hosted-runner and other-kernel compatibility remain unqualified
+until those environments actually pass. No performance comparison
 or production-readiness claim follows from adding automation.
 
 Equivalent local commands, from the repository root, with fresh output directories:

@@ -1,0 +1,84 @@
+{
+  "status": "passed",
+  "purpose": "Additional isolated upstream SQLite extraquick selection on retained Ubuntu Fas/GNU executables",
+  "base_report_sha256": "98e874c2571ffd7b7fd0ff541d78cff8606d0cbb68af17b172fb3beeea2e167a",
+  "linker_sha256": "4385e2ddca5ead07737617155cb48bd35f280d27893db9ef3c9aa1732d958918",
+  "fixture_sha256": {
+    "fas": {
+      "testfixture": "7d74f02baf6a1f972b3ee7ec4e2f453c1c7f307c8617a40f336706f03bdfc66d",
+      "sqlite3": "6b1da372c609558ae45f75b9d0f474a0e04926df206839083bbdb364eea218ac"
+    },
+    "gnu": {
+      "testfixture": "b361042a9ebb6f83d79664478b32de6c5739528daab1caa2b1a929147949dcb9",
+      "sqlite3": "01c64ea72dda7eebf9e129d43a2786dda298f646df5745d15215e2d119fc1c22"
+    }
+  },
+  "timing_comparison": false,
+  "assertion_count_differences": [
+    {
+      "name": "config=extraquick ext/fts5/test/fts5bigtok.test",
+      "fas": 301,
+      "gnu": 311
+    }
+  ],
+  "selection_environment": "QUICKTEST_OMIT/QUICKTEST_INCLUDE/TEST_FAILURE unset",
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106/extraquick",
+  "container_image": "sha256:aa87b9d35c03f5128095052cb377c52e776275203270eb0d5f76ed86558537b7",
+  "evidence": {
+    "report.json": "d9bf0fbe5eff26e95c3c2ae3b30b200f81534212dd7dd60c4d6a6750a2e445cb",
+    "run.py": "553af0df0ecdf5322cf3b5f1af2df9de32a69f6178977f14d48d69d8aade5e0f",
+    "commands.jsonl": "b5be6f15cdcf5cefcf00b207cc2828bb02fe4fc328b2f5665ddac69ab961df51",
+    "docker.log": "5f2c945203314a7203e0bcdc4c2ac9aff6c0cb74bc5a1552dda5fe95fd159724"
+  },
+  "scope": "Additional full isolated extraquick selection against retained Ubuntu Fas/GNU fixtures and matching CLIs; no rebuilding, performance or full SQLite release qualification claim",
+  "phases": [
+    {
+      "linker": "fas",
+      "command": [
+        "nice",
+        "-n",
+        "10",
+        "/qualification/results/linker-sqlite/sqlite/build/fixture-fas/testfixture",
+        "/qualification/results/linker-sqlite/sqlite/source/test/testrunner.tcl",
+        "--jobs",
+        "2",
+        "extraquick"
+      ],
+      "exit": 0,
+      "errors": 0,
+      "assertions": 398247,
+      "stdout_sha256": "d4646928a4d9256223c2f9a02f7fbbd31d59b3d65987eb4b4e7e9fd7533f90ef",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_log_sha256": "2dc2ca89d6876d377a0c11d0cb6d6c482401a009e59ef6bbf5da7eadf54fd726",
+      "scripts": 1300,
+      "all_jobs_done": true,
+      "selected_files_sha256": "2142a3e47935d447a79bafa8ee7db4ebfc03665d3c7be7c6d5ccbeef8f3cd637",
+      "jobs_result_sha256": "95f17e59277bf3bde1282d590745e9c484825ff08ad9cb4b3d385539932116b7",
+      "database_sha256": "9486c9c192327dca968711c17b603638bb5409fbada4279b289804509886c602"
+    },
+    {
+      "linker": "gnu",
+      "command": [
+        "nice",
+        "-n",
+        "10",
+        "/qualification/results/linker-sqlite/sqlite/build/fixture-gnu/testfixture",
+        "/qualification/results/linker-sqlite/sqlite/source/test/testrunner.tcl",
+        "--jobs",
+        "2",
+        "extraquick"
+      ],
+      "exit": 0,
+      "errors": 0,
+      "assertions": 398257,
+      "stdout_sha256": "87f3779038dbcbfb79c784f00b1d1e3d52c8734c846efde62ec2663d17aafc0d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_log_sha256": "7b3d6aab6d187e1327d7593836a63de7ea8b7858bf9cfb5008f4a31b547a2898",
+      "scripts": 1300,
+      "all_jobs_done": true,
+      "selected_files_sha256": "2142a3e47935d447a79bafa8ee7db4ebfc03665d3c7be7c6d5ccbeef8f3cd637",
+      "jobs_result_sha256": "1d7dc0b69fa010009d50b119146fb433cb6e7dbc09e3a380acd6e17754fbfe07",
+      "database_sha256": "d862565091d88ff65fd867915695ea850918cb67062e67701c94885d31d2d991"
+    }
+  ]
+}

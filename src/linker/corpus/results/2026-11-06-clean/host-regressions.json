@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot nice -n 10 dune runtest --profile release --force",
+  "observed_exit_code": 0,
+  "compiler_checks": 3792,
+  "python_cases": 250,
+  "python_groups": 42,
+  "skips": [],
+  "log": "/home/glonex/.cache/fas-linker-qualification/full-gate-clean-fixes-20261106.log",
+  "log_sha256": "18775af6634412ab691f8fdce95fcf89244f6f0febc236c92ba2084ba96e8ce2",
+  "linker_sha256": "709bac91844b39a6b10e3192d6fd1ebb98608c29b66d4768ed17d4b2e652984e",
+  "versions": {
+    "ocamlopt": "5.4.1",
+    "dune": "3.24.2",
+    "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "clang-21": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+    "clang-22": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)",
+    "ldd": "ldd (Ubuntu GLIBC 2.43-2ubuntu2.4) 2.43"
+  }
+}

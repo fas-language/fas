@@ -658,6 +658,12 @@ Exception tests cover GCC/Clang personality/LSDA records, live metadata GC edges
 cleanup/rethrows and RTTI/lifecycle across independently linked DSOs, plus
 augmentation bounds, unsupported encodings and 256 seeded record mutations.
 
+The [fresh Ubuntu qualification](corpus/results/2026-11-06-clean/README.md)
+records the shared correctness recipe on GCC 13/Clang 18, glibc 2.39 and isolated
+musl, including real zlib/Chibicc/SQLite and installation checks. It also records
+the current workstation regression and musl matrix, the unwind/debug-reader
+repairs it exposed, exact binary identities and remaining release limits.
+
 The seeded mutation tests are regression checks. Coverage-guided campaigns use
 the separate [AFL++ harness](fuzz/README.md); their recorded duration and findings
 must be assessed separately from integration-test results. A short clean campaign
