@@ -1,0 +1,369 @@
+{
+  "scope": "bounded shared-library checks; both producer/consumer directions; no timings",
+  "corpus": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106",
+  "corpus_report_sha256": "da50853360dbb484201f22fca9cb49468f71c0a8ae400fa0a01da04784362aa1",
+  "harness_sha256": "4f336453b62072592d7eef0f6bb946c63b077245bb51a765d0570b60ab6514d1",
+  "projects": [
+    {
+      "name": "bzip2",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/libbz2.so.1.0.8",
+          "gnu_sha256": "5e8de7d4c4106202a80c7326b6769d074953753f4dcd541e1b2377ebecd532d3",
+          "fas_sha256": "f829ff5ac8e041cd5c08318e6f39de6213af82f88c4de07547b44e76663fb45b"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+          "executable_sha256": "41bc1f27967f108b93d6aae3c9cc2171b131a878d15847a1d238581753994cdd",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared"
+              ],
+              "exit": 0,
+              "stdout_sha256": "f15877fb139f0671fe1d7d8573f702c329fe21c5948f34e284124b169d5e06b9",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/bzip2/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/bzip2/gnu-consumer-fas-library.bz2"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000073fc4dfd8000)\n\tlibbz2.so.1.0 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/libbz2.so.1.0 (0x000073fc4dfb0000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x000073fc4dc00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000073fc4dfda000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/fas-outputs/source/bzip2-shared",
+          "executable_sha256": "72c37985ae6712c84c8f2ba6ef20f47ba920180799c9bbe0b95a4c2d651bcb10",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/fas-outputs/source/bzip2-shared"
+              ],
+              "exit": 0,
+              "stdout_sha256": "42152e8335dfe24d7340d50db546b7f32b2dd0da1f217857fce9faa80eba9f6b",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/fas-outputs/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/bzip2/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/fas-outputs/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/bzip2/fas-consumer-gnu-library.bz2"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000070e7e18e4000)\n\tlibbz2.so.1.0 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/libbz2.so.1.0 (0x000070e7e18bc000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x000070e7e1600000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000070e7e18e6000)\n",
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "libpng",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/libpng16.so.16.47.0",
+          "gnu_sha256": "d4c10af7475e4eefd5276f4f0b5e3b74d1f44489a4ed1042e1de1a8abb771c92",
+          "fas_sha256": "9f29f135643097eebef4aabef823393babb824691a6f5bcb53e037b9fcf5ea58"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngtest",
+          "executable_sha256": "aa893ec81634a8df076aac10798393fcfa6eaf05144d5d8fae04ea45ed6bf4e4",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngtest"
+              ],
+              "exit": 0,
+              "stdout_sha256": "c6b136ae2a756eb3d1412193271ee07981480aee87c330f0acd2d6c9854e9130",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/pngtest",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/source/pngtest.png",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libpng/gnu-consumer-fas-library.png"
+              ],
+              "exit": 0,
+              "stdout_sha256": "384d78884aee56baef7a06a4be2674874763a56dd3d547add44134963acd349f",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007a6f02b64000)\n\tlibpng16.so.16 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/libpng16.so.16 (0x00007a6f02b17000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007a6f02800000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007a6f02ac8000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007a6f026da000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007a6f02b66000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/fas-outputs/build/pngtest",
+          "executable_sha256": "d08c92aa273409e4c37c2d8cc48fa3bc03bb8bb4e4585d3b11bcc29369f4c05b",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/fas-outputs/build/pngtest"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2d3c32545f8ae11a26d43e94cb44c46ccdaef941afa825c668e9d1fe1797a4af",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/fas-outputs/build/pngtest",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/source/pngtest.png",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libpng/fas-consumer-gnu-library.png"
+              ],
+              "exit": 0,
+              "stdout_sha256": "384d78884aee56baef7a06a4be2674874763a56dd3d547add44134963acd349f",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000076959c26d000)\n\tlibpng16.so.16 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build/libpng16.so.16 (0x000076959c221000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x000076959c1d2000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x000076959c0ac000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x000076959be00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000076959c26f000)\n",
+          "passed": true
+        }
+      ],
+      "configure_control": {
+        "numeric_boolean_features": 13,
+        "differences": {},
+        "gnu_log_sha256": "a6beb5b72511b433fc4b1eadec4409e63984bdfa2c92d0dc8588cd6000db9f4d"
+      },
+      "passed": true
+    },
+    {
+      "name": "libarchive",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/libarchive/libarchive.so.13.8.11",
+          "gnu_sha256": "807919c5828114a05beef3df19d4626d859899f8ddf23cbecb75829660d224f0",
+          "fas_sha256": "e02fed0acb4da6cbeb8f998bbcd28dd7317180bece819c9723a3988207a5e967"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar",
+          "executable_sha256": "777c33b6a1d3ac7cab371a64495db4358596bd61849acaf4a7d53aa3d75f8348",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar"
+              ],
+              "exit": 0,
+              "stdout_sha256": "1ccb7c496cad595c2e41b081091dab1420c5b6d9a698f0056f0de9f7f6113925",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar",
+                "-czf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar",
+                "-tf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz"
+              ],
+              "exit": 0,
+              "stdout_sha256": "d4e4877bac978b7952f0d544fc52ebff5411d351d129f1f056fa43f11da9af2b",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/bin/bsdtar",
+                "-xOf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007e7b67dd1000)\n\tlibarchive.so.13 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/libarchive/libarchive.so.13 (0x00007e7b67cd9000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007e7b67a00000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007e7b67c8a000)\n\tlibbz2.so.1.0 => /usr/lib/x86_64-linux-gnu/libbz2.so.1.0 (0x00007e7b67c75000)\n\tliblzma.so.5 => /usr/lib/x86_64-linux-gnu/liblzma.so.5 (0x00007e7b67c40000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007e7b6793d000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x00007e7b67200000)\n\tlibxml2.so.16 => /usr/lib/x86_64-linux-gnu/libxml2.so.16 (0x00007e7b6709d000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007e7b67dd3000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007e7b66f77000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+          "executable_sha256": "ff7ea4d89504549aa3cb63ed3639eac5bfee4c916eaca7c17ecedec2dc521be4",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/fas-outputs/build/bin/bsdtar"
+              ],
+              "exit": 0,
+              "stdout_sha256": "411314f69863131d189a75034781bcbf5cb49a12d3bb29c650876bdaadf7d662",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-czf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-tf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz"
+              ],
+              "exit": 0,
+              "stdout_sha256": "d4e4877bac978b7952f0d544fc52ebff5411d351d129f1f056fa43f11da9af2b",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-xOf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-bindings-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007300946d1000)\n\tlibarchive.so.13 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build/libarchive/libarchive.so.13 (0x00007300945db000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x000073009458c000)\n\tlibbz2.so.1.0 => /usr/lib/x86_64-linux-gnu/libbz2.so.1.0 (0x0000730094577000)\n\tliblzma.so.5 => /usr/lib/x86_64-linux-gnu/liblzma.so.5 (0x0000730094542000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x000073009447d000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x0000730093e00000)\n\tlibxml2.so.16 => /usr/lib/x86_64-linux-gnu/libxml2.so.16 (0x0000730093c9d000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x0000730093a00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007300946d3000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007300938da000)\n",
+          "passed": true
+        }
+      ],
+      "configure_control": {
+        "numeric_boolean_features": 469,
+        "differences": {},
+        "gnu_log_sha256": "628660bda1061a3be115dec31c9549974d07c8d2c4e0c9d12b8b60daae25d624"
+      },
+      "passed": true
+    },
+    {
+      "name": "curl",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/lib/libcurl.so.4.8.0",
+          "gnu_sha256": "99e391698aa40f48233edcf7dbbc94b29aa8b8f2d4bdd87af4e3ee4162f6a16c",
+          "fas_sha256": "c8f35d56a182c8d0de13c398bff020ca27d854c61a1f02bb0bb5f4213ee9bc2e"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/src/curl",
+          "executable_sha256": "61c5c9fe1a27699ae1ae2d3fd7bbd43ed4569a2829d08792267e0e5e8ae04356",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/src/curl"
+              ],
+              "exit": 0,
+              "stdout_sha256": "9557f49d36936ae37c7d061a9670614e2f8bffa6a22b01544351a903f0cf0359",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/src/curl",
+                "--noproxy",
+                "*",
+                "--fail",
+                "--silent",
+                "http://127.0.0.1:41151/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000072abe0190000)\n\tlibcurl.so.4 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/lib/libcurl.so.4 (0x000072abe0079000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x000072abdfe00000)\n\tlibssh2.so.1 => /usr/lib/x86_64-linux-gnu/libssh2.so.1 (0x000072abdfdb3000)\n\tlibidn2.so.0 => /usr/lib/x86_64-linux-gnu/libidn2.so.0 (0x000072abe0026000)\n\tlibldap.so.2 => /usr/lib/x86_64-linux-gnu/libldap.so.2 (0x000072abdfd50000)\n\tliblber.so.2 => /usr/lib/x86_64-linux-gnu/liblber.so.2 (0x000072abdfd3f000)\n\tlibssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3 (0x000072abdfc2e000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x000072abdf600000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x000072abdf5e2000)\n\tlibbrotlidec.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x000072abdfc1f000)\n\tlibbrotlicommon.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x000072abdf5bf000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x000072abdf4fc000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000072abe0192000)\n\tlibunistring.so.5 => /usr/lib/x86_64-linux-gnu/libunistring.so.5 (0x000072abdf315000)\n\tlibsasl2.so.2 => /usr/lib/x86_64-linux-gnu/libsasl2.so.2 (0x000072abdf2fa000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/fas-outputs/build/src/curl",
+          "executable_sha256": "37bbe0099f3d3789576e7bf6e3aa80bc880d4dfa7ba08787576f3576a35172fb",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/fas-outputs/build/src/curl"
+              ],
+              "exit": 0,
+              "stdout_sha256": "6f18027dd8525a32c60967e8957fe1362fca7b85d35897124fc4d5b6fa599440",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/fas-outputs/build/src/curl",
+                "--noproxy",
+                "*",
+                "--fail",
+                "--silent",
+                "http://127.0.0.1:34465/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x0000731c9c38d000)\n\tlibcurl.so.4 => /home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build/lib/libcurl.so.4 (0x0000731c9c276000)\n\tlibssh2.so.1 => /usr/lib/x86_64-linux-gnu/libssh2.so.1 (0x0000731c9c1f8000)\n\tlibidn2.so.0 => /usr/lib/x86_64-linux-gnu/libidn2.so.0 (0x0000731c9c1d6000)\n\tlibldap.so.2 => /usr/lib/x86_64-linux-gnu/libldap.so.2 (0x0000731c9c173000)\n\tliblber.so.2 => /usr/lib/x86_64-linux-gnu/liblber.so.2 (0x0000731c9c162000)\n\tlibssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3 (0x0000731c9c04f000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x0000731c9ba00000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x0000731c9c031000)\n\tlibbrotlidec.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x0000731c9c022000)\n\tlibbrotlicommon.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x0000731c9b9dd000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x0000731c9b91a000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x0000731c9b600000)\n\t/lib64/ld-linux-x86-64.so.2 (0x0000731c9c38f000)\n\tlibunistring.so.5 => /usr/lib/x86_64-linux-gnu/libunistring.so.5 (0x0000731c9b419000)\n\tlibsasl2.so.2 => /usr/lib/x86_64-linux-gnu/libsasl2.so.2 (0x0000731c9b8ff000)\n",
+          "passed": true
+        }
+      ],
+      "configure_control": {
+        "numeric_boolean_features": 488,
+        "differences": {},
+        "gnu_log_sha256": "abb46d638106a29cefd2ac8c6e72803a1ac69fadce16a37b0d4f15eaa30b846c"
+      },
+      "passed": true
+    }
+  ]
+}

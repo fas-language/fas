@@ -49,6 +49,9 @@ copies the native executable as `fas-ld`; it does not install an OCaml library A
 
 ## Supported contract
 
+The [compatibility contract candidate](SUPPORT.md) separates declared behavior,
+qualified environments and the remaining freeze gates.
+
 | Area | Current support |
 | --- | --- |
 | Inputs | Regular ELF64 little-endian x86-64 ET_REL objects; System V or Linux ABI version zero; GNU/SysV regular and thin archives, 32/64-bit indexes and GNU long names |
@@ -121,7 +124,11 @@ or applying relocations. Section contributions retain their alignment, COMDAT
 membership and remapped symbol/relocation references. Common symbols remain
 common; undefined symbols, including hidden references and future linker-defined
 layout symbols, remain unresolved. There is no implicit `_start` archive root;
-use `-u` or whole-archive to select members. No selected objects is an error.
+use `-u` or whole-archive to select members. Valid files with no selected objects
+produce an empty reusable ET_REL; an invocation with no input files still fails.
+Explicit unresolved `-u` roots are preserved as strong undefined declarations so
+a later stage can extract their providers, following GNU's preservation policy.
+LLD 22 differs for undeclared forced roots in partial output.
 The output can be partially linked again, archived or consumed by Fas/GNU/LLD.
 Tests cover local-name collisions, weak/common precedence, groups, TLS,
 initialization arrays, compressed debug input, named versions and IFUNCs.
@@ -211,8 +218,7 @@ Test-only Linux syscall interposition covers ENOSPC, partial-write/EIO, failed
 close/chmod/rename, and successful recovery from short writes/EINTR. Input
 short reads/EINTR, EIO/EOF, temporary-creation resource failures/name collisions
 and real file-size limits are also tested, including repeated library recovery
-without descriptor leaks. A killed
-writer may leave a private incomplete `.fas-ld-*.tmp`; later links ignore it.
+without descriptor leaks. A killed writer may leave a private incomplete `.fas-ld-*.tmp`; later links ignore it.
 No cross-file transaction or fsync-based crash durability is promised.
 
 `-o /dev/null` and map output to `/dev/null`, including symlinks to that device,
@@ -539,7 +545,8 @@ gcc -c -O2 -g -ffreestanding -fPIC answer.c -o answer.o
 
 GCC and Clang fixtures no longer need the previous metadata-disabling flags.
 Supply any required freestanding runtime symbols yourself; this does not provide
-general hosted C compatibility or automatic libc/startup integration.
+a freestanding libc or implicit startup integration in direct `fas-ld` calls;
+use the documented hosted driver/CRT paths for hosted C.
 
 Initial resource limits are explicit: 1,024 input files, 128 MiB per file,
 256 MiB combined physical input and decoded debug storage, 512 MiB output, 1 GiB section/BSS layout size, alignment
@@ -670,6 +677,14 @@ repairs it exposed, exact binary identities and remaining release limits.
 The [release archive checkpoint](corpus/results/2026-11-06-release/README.md)
 adds input/resource failure recovery, 259 linker cases, repeated native Sieve
 acceptance and verified binary/source archives with a clean source rebuild.
+The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) adds
+partial-root/empty-archive and version-visibility repairs, passes 264 linker
+cases and 3,072 generated-program executions, and records the six-project C
+replay. One saved timeout remains untriaged; fuzz acceptance is incomplete.
+
+The [generated semantic runner](semantic/README.md) also checks valid programs
+against an independent Python runtime oracle through archive and mixed
+partial-link pipelines, static/static-PIE output and GC policies.
 
 The seeded mutation tests are regression checks. Coverage-guided campaigns use
 the separate [AFL++ harness](fuzz/README.md); their recorded duration and findings

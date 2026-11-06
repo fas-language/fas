@@ -19,6 +19,7 @@ Fas and native C are the release priorities. Existing C++ tests remain useful
 regression coverage; keep that usable interoperability level without expanding
 the C++ scope. Compiler-specific LTO is explicitly out of scope, including future
 roadmap work, per the user's scope decision.
+The [compatibility contract candidate](SUPPORT.md) defines the freeze boundary.
 
 | Version | Deliverable | Acceptance gate |
 | --- | --- | --- |
@@ -31,7 +32,7 @@ roadmap work, per the user's scope decision.
 | **0.7 — in progress** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
 | **0.8 — qualification in progress** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
 | **0.9 — release candidate** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
-| **1.0 — production Linux release** | Stable documented CLI/library and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
+| **1.0 — production Linux release** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
 
 The [2026-11-06 local qualification](corpus/results/2026-11-06/README.md) passes
 seven real C projects with exact-input GNU comparisons, 4,974 official GCC
@@ -59,6 +60,15 @@ linkers pass a linked-program fixture. Independent packaging is byte-identical,
 and real mismatched-qualification/selection controls reject invalid candidates.
 Local packaging is implemented; hosted execution, sustained fuzzing, final
 compatibility/API freeze and publication remain open.
+
+The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) fixes
+empty partial links, forced-root preservation and default-version alias
+visibility. The host gate passes 3,792 compiler checks and 264 linker cases;
+the fresh Ubuntu recipe and 3,072 generated-program executions also pass.
+Six real C projects pass their selected upstream tests, with 355 byte-identical
+relinks using the repaired binary. Fuzzing found the version bug and verified its
+repair, but one later saved shared-output timeout still needs triage. That fuzz
+gate remains incomplete; these results do not complete the production release.
 
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,
@@ -93,7 +103,8 @@ Linux compatibility milestone includes the following before its scope freezes:
   COMDAT groups, alignment and metadata. Multi-stage links, subsequent archive
   extraction, TLS/lifecycle/debug metadata, symbol versions and IFUNCs have
   independent GNU/LLD producer/consumer tests. No partial GC or final-image
-  options; empty archive selections currently fail explicitly.
+  options. Empty archive selections emit reusable ET_REL output; unresolved
+  explicit roots survive partial stages under the documented GNU policy.
 - **Thin archives — implemented, wider qualification ongoing**: lazy external
   members, paths relative to the archive, GNU indexes, nested regular-archive
   members, missing/changed members, bounded reads and publication alias checks

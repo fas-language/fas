@@ -254,10 +254,14 @@ let prepare ?stats ~(options : Options.t) ~kept ~(got : Got.t) ~module_base ~cop
             id
       in
       let import ?(copy = false) key =
+        let original = key in
         let key = Symver.key resolved.symver key in
         match
           if (not copy) && Copy_relocation.mem copies key then None
-          else Hashtbl.find_opt resolved.imports key
+          (* Aliases share a dynamic index, but their visibility can differ.
+             A locally bound spelling must not acquire its default version's
+             preemptible import merely through canonicalization. *)
+          else Hashtbl.find_opt resolved.imports original
         with
         | None -> None
         | Some (provider : Resolver.import) ->

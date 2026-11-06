@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "scope": "real candidate artifact and selection controls; no timing claim",
+  "controls": [
+    {
+      "name": "status",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "linker_sha256",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source_manifest_sha256",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source_files_unchanged",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source-content",
+      "exit": 1,
+      "stderr": "fas-ld package: source changed: LICENSE\n",
+      "no_output": true
+    },
+    {
+      "name": "version-relabel",
+      "exit": 1,
+      "stderr": "fas-ld package: requested version differs from executable version\n",
+      "no_output": true
+    },
+    {
+      "name": "selection-complete",
+      "exit": 0,
+      "status": "passed",
+      "failures": []
+    },
+    {
+      "name": "selection-wrong-count",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "expected 263 Python cases, observed 264"
+      ]
+    },
+    {
+      "name": "selection-reported-skip",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "regression skips present"
+      ]
+    },
+    {
+      "name": "selection-semantic-seed",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "linker-semantic report failed"
+      ]
+    },
+    {
+      "name": "selection-semantic-combination",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "linker-semantic report failed"
+      ]
+    },
+    {
+      "name": "selection-semantic-counter",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "linker-semantic report failed"
+      ]
+    },
+    {
+      "name": "selection-semantic-status",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "linker-semantic report failed"
+      ]
+    }
+  ],
+  "archives_byte_identical": true,
+  "archive_sha256": {
+    "SHA256SUMS": "27e4943df1e858587d19e12d959f73e8bd30993849599914136f6630de1ff81a",
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": "02da276d539ee47b02e3844eaf4738d28e8fdc9fcca2368c94d126204476d15f",
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": "0f3aea43acf908a36a77cac97010e226b07a7262f1ceab61f2e1098ee615bf29"
+  },
+  "qualification_sha256": "3a36286fbb1f48325bfe7afef56ece25a50f1a43bd71a3f2557281286bee32bc",
+  "source_manifest_sha256": "05aadd52237eebef4eb485045bcaca7b94b6b8ad417df7e3d2a00362e916c2f8",
+  "linker_sha256": "2eab1706259c35ee26b606d6587353b78993900d15d5bd408370bfc27ecf41fe"
+}

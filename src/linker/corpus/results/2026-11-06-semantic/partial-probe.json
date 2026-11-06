@@ -1,0 +1,99 @@
+[
+  {
+    "producer": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "label": "none",
+    "exit": 1,
+    "stderr": "fas-ld: partial link: no input objects extracted\n"
+  },
+  {
+    "producer": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "label": "empty",
+    "exit": 1,
+    "stderr": "fas-ld: partial link: no input objects extracted\n"
+  },
+  {
+    "producer": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "label": "unselected",
+    "exit": 1,
+    "stderr": "fas-ld: partial link: no input objects extracted\n"
+  },
+  {
+    "producer": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "label": "root-empty",
+    "exit": 1,
+    "stderr": "fas-ld: partial link: no input objects extracted\n"
+  },
+  {
+    "producer": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "label": "root-object",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 2 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT    1 answer\n"
+  },
+  {
+    "producer": "ld",
+    "label": "none",
+    "exit": 1,
+    "stderr": "/usr/bin/x86_64-linux-gnu-ld.bfd: no input files\n"
+  },
+  {
+    "producer": "ld",
+    "label": "empty",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 1 entry:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n"
+  },
+  {
+    "producer": "ld",
+    "label": "unselected",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 1 entry:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n"
+  },
+  {
+    "producer": "ld",
+    "label": "root-empty",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 2 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND hook\n"
+  },
+  {
+    "producer": "ld",
+    "label": "root-object",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 7 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 .text\n     2: 0000000000000000     0 SECTION LOCAL  DEFAULT    2 .data\n     3: 0000000000000000     0 SECTION LOCAL  DEFAULT    3 .bss\n     4: 0000000000000000     0 SECTION LOCAL  DEFAULT    4 .note.GNU-stack\n     5: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND hook\n     6: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT    1 answer\n"
+  },
+  {
+    "producer": "/usr/bin/ld.lld-22",
+    "label": "none",
+    "exit": 1,
+    "stderr": "ld.lld-22: error: no input files\n"
+  },
+  {
+    "producer": "/usr/bin/ld.lld-22",
+    "label": "empty",
+    "exit": 1,
+    "stderr": "ld.lld-22: error: target emulation unknown: -m or at least one .o file required\n"
+  },
+  {
+    "producer": "/usr/bin/ld.lld-22",
+    "label": "unselected",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 1 entry:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n"
+  },
+  {
+    "producer": "/usr/bin/ld.lld-22",
+    "label": "root-empty",
+    "exit": 1,
+    "stderr": "ld.lld-22: error: target emulation unknown: -m or at least one .o file required\n"
+  },
+  {
+    "producer": "/usr/bin/ld.lld-22",
+    "label": "root-object",
+    "exit": 0,
+    "stderr": "",
+    "symbols": "\nSymbol table '.symtab' contains 5 entries:\n   Num:    Value          Size Type    Bind   Vis      Ndx Name\n     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND \n     1: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 .text\n     2: 0000000000000000     0 SECTION LOCAL  DEFAULT    2 .data\n     3: 0000000000000000     0 SECTION LOCAL  DEFAULT    3 .bss\n     4: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT    1 answer\n"
+  }
+]

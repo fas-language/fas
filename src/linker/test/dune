@@ -625,3 +625,10 @@
  (action
   (run python3 %{dep:release_integration.py} %{dep:../release/package.py}
    %{exe:../bin/main.exe})))
+
+(rule
+ (alias runtest)
+ (deps semantic_integration.py ../semantic/run.py)
+ (action
+  (run python3 %{dep:semantic_integration.py} %{dep:../semantic/run.py}
+   %{exe:../bin/main.exe})))

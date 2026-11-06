@@ -1,0 +1,765 @@
+{
+  "status": "passed",
+  "runtime_linker_sha256": "b6a94019a53b79be6bd2d26cf305755622a19c30279471461b7a71a4a1721439",
+  "relinker_sha256": "74576f508c7524cd8ce57e85d8e1627f1fbb3bd39368c80a8b2de6e35ffb299c",
+  "relink_report_sha256": "d4493051370907fa34c183916d9eebda5aec14203360df395fbf760facd0612c",
+  "relink_scope": "new linker outputs byte-identical to ELF images executed in the retained upstream suite; no new upstream runtime campaign or timing comparison",
+  "relink_projects": {
+    "lua": 2,
+    "bzip2": 4,
+    "libpng": 8,
+    "libarchive": 10,
+    "curl": 326,
+    "redis": 5
+  },
+  "full_report": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/report.json",
+  "full_report_sha256": "da50853360dbb484201f22fca9cb49468f71c0a8ae400fa0a01da04784362aa1",
+  "harness_sha256": "4fd406f4a1fd7b421ad72675e852ca8d6a066ad4907614463ae0a50c97ef5392",
+  "projects": {
+    "lua": {
+      "source": {
+        "project": "lua",
+        "source_url": "https://www.lua.org/ftp/lua-5.1.5.tar.gz",
+        "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+        "directory": "lua-5.1.5",
+        "bytes": 221213
+      },
+      "source_file_count": 102,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "c567709deba95586ea8a93253b923331a6b9af25842bd2b24eaa06ce568980a8",
+      "oracle_output_count": 2,
+      "linker_invocations_sha256": "58436f14911fcaa271de226ad64dc831b59e9990ee86259d285daa9875f95eda",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/bisect.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/cf.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/echo.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "538ef0805f77ed8bd68c9e1a77fdd062f86650a185cc390f7e92b7bfe02ab396"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/env.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "a236bc8839e6dddb5163847dfe0964e14d74a96f7073825e80cc81d864328e45"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/factorial.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/fib.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "49d465173c2b1946a2f790fc43151ad47f086e3b16e8384be0805425162c38d7"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/fibfor.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/hello.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/printf.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "84c09c99b947f38f3504a306682f230bbd3a49825c426ec1e9679a0c34ddf141"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/readonly.lua"
+              ],
+              "exit": 1,
+              "expected_exit": 1,
+              "passed": true,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sieve.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sort.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/table.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/luac",
+                "-o",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/sort-fas.luac",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sort.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/sort-fas.luac"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/bisect.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2674d57c25a3d3d6f27a598bf5302a4ae10ca1e66131543d54a12f7f51f82d58"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/cf.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "335de7cd9db3b12702038e4fc32b5dc38a94403093fe4c5c3cd2161ec722ef07"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/echo.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "538ef0805f77ed8bd68c9e1a77fdd062f86650a185cc390f7e92b7bfe02ab396"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/env.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "a236bc8839e6dddb5163847dfe0964e14d74a96f7073825e80cc81d864328e45"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/factorial.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "a61358d35eb8055bfd357c03f3337d1f2940c31b16d8026b31577f38c1946941"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/fib.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2c4273785a94fa1e33e682ea35507ac34f78f08572b2f68fbc1600515366a622"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/fibfor.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "ff73c710785406ff140a5b53d9234f6c86c903e4407924824eedd7569be63f71"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/hello.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "b66e84eb3be2cc6e1c72035bc81c997eeb5eb72977cdba2ae86a03ef31d19395"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/printf.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "ed300335e61b55a273c4740cc344074f109f3e6228c00c061c5f3c309eb7412c"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/readonly.lua"
+              ],
+              "exit": 1,
+              "expected_exit": 1,
+              "passed": true,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sieve.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "55542ac8f84d3c795ac05ea7dc3e382353c4bdd519d97e178d3f17a7f97fb25f"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sort.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/table.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/luac",
+                "-o",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/sort-gnu.luac",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/test/sort.lua"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/source/src/lua",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/lua/sort-gnu.luac"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "28a954a878f7edcebc8d77c0b47f0d8d33c511916eac0e25e9364545fc73f50c"
+            }
+          ]
+        }
+      ]
+    },
+    "bzip2": {
+      "source": {
+        "project": "bzip2",
+        "source_url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+        "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+        "directory": "bzip2-1.0.8",
+        "bytes": 810029
+      },
+      "source_file_count": 56,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "059c9b13ebd9f3dcacdaeb51099f014093ee19fc75a443ec400865fcbc0e5ef9",
+      "oracle_output_count": 4,
+      "linker_invocations_sha256": "eed68c4b993e78b9bd70e44fcae3fd02cb28aced88e57b8020d12d32a1c5de84",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "make",
+                "test",
+                "CC=/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/toolchain/cc"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "8a7894fce6bebeedd80c09d5c6aa3f66c8f692724f6fbfb143de914f5252f4a5"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-input"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-fas.bz2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-input"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-fas.bz2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "make",
+                "test",
+                "CC=/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/toolchain/cc"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "8a7894fce6bebeedd80c09d5c6aa3f66c8f692724f6fbfb143de914f5252f4a5"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-input"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-gnu.bz2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-input"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072"
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/bzip2/shared-gnu.bz2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9"
+            }
+          ]
+        }
+      ]
+    },
+    "libpng": {
+      "source": {
+        "project": "libpng",
+        "source_url": "https://codeload.github.com/pnggroup/libpng/tar.gz/refs/tags/v1.6.47",
+        "sha256": "631a4c58ea6c10c81f160c4b21fa8495b715d251698ebc2552077e8450f30454",
+        "directory": "libpng-1.6.47",
+        "bytes": 1571845
+      },
+      "source_file_count": 588,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "76d2b5f6b12b37e7d2f835f5b8cab89eefe92829b59f5602c4875daa6d312e9d",
+      "oracle_output_count": 8,
+      "linker_invocations_sha256": "00001ec9f6027ebd8559a14339cc857ee6c6c4ef224fd78933e0612863f9f8ab",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "ctest",
+                "--test-dir",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build",
+                "--output-on-failure",
+                "-j2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "7afadd365e4d7efde428bf942802cf08d652e1a6a367856a25f059af90fd780d"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "ctest",
+                "--test-dir",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libpng/build",
+                "--output-on-failure",
+                "-j2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "c585cdb6eec4b452fbd307862b61ebdf3f04063720862a02c1527b6fe52d77e2"
+            }
+          ]
+        }
+      ]
+    },
+    "libarchive": {
+      "source": {
+        "project": "libarchive",
+        "source_url": "https://codeload.github.com/libarchive/libarchive/tar.gz/refs/tags/v3.8.11",
+        "sha256": "6e9560b2e0659ff688c5efb7717a68bb06b28ef65a69addcd6c424eaf9c319b1",
+        "directory": "libarchive-3.8.11",
+        "bytes": 6845602
+      },
+      "source_file_count": 1580,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "920b61e19aea63686f986973880fe7289595e18d4b9e335e3e8abcd793030e8e",
+      "oracle_output_count": 10,
+      "linker_invocations_sha256": "254f8e54a299979f01d3a6704ff479ab3b33d0e704729fe01c9a06c7acf7165a",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "ctest",
+                "--test-dir",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build",
+                "--output-on-failure",
+                "-j2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "a2b1aa2b0673a87f39fe6abfe49ad705c7313c5554d6ed09c2c1cadf554c2e4e"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "ctest",
+                "--test-dir",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/libarchive/build",
+                "--output-on-failure",
+                "-j2"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "e1c25bbfc0d51fcd358a0151de43b45a6cd78406afcf844519ab78ec333df662"
+            }
+          ]
+        }
+      ]
+    },
+    "curl": {
+      "source": {
+        "project": "curl",
+        "source_url": "https://curl.se/download/curl-8.14.1.tar.xz",
+        "sha256": "f4619a1e2474c4bbfedc88a7c2191209c8334b48fa1f4e53fd584cc12e9120dd",
+        "directory": "curl-8.14.1",
+        "bytes": 2817248
+      },
+      "source_file_count": 4029,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "9ab3057b34d233b8ee74ac89e11c62bbcaf00dc66abfafcaf18ad77068c7e4fc",
+      "oracle_output_count": 326,
+      "linker_invocations_sha256": "619b372511e6cab2647c5c621c7a09ca91cc44e62879e36f9d255cd27e56806b",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "cmake",
+                "--build",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build",
+                "--target",
+                "test-nonflaky"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "77370427804efb7be4c50537ea44a8575232d3970757243a3a7a9d8222d6e42c"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "cmake",
+                "--build",
+                "/home/glonex/.cache/fas-linker-qualification/popular-semantic-fixed-20261106/curl/build",
+                "--target",
+                "test-nonflaky"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "ab5337c459b4c55c56d33c80e93973e182182778130ed249c9288d04ad7f8a55"
+            }
+          ]
+        }
+      ]
+    },
+    "redis": {
+      "source": {
+        "project": "redis",
+        "source_url": "https://codeload.github.com/redis/redis/tar.gz/refs/tags/7.2.8",
+        "sha256": "66edcb676acf0f611e1cd8d69aa294c0256cb1658094c73bad529d1546eb89ac",
+        "directory": "redis-7.2.8",
+        "bytes": 3433914
+      },
+      "source_file_count": 1584,
+      "all_source_files_match_pinned_archive": true,
+      "source_inventory_sha256": "199078e381312ee2fd2e6504ec9c446d7343d8200ab05ec8d7cf9d08e0712166",
+      "oracle_output_count": 5,
+      "linker_invocations_sha256": "7da23aa4488f84ea06840d72f90957eade0fabb5353d8f7ef1650c3fe899ec55",
+      "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+      "upstream": [
+        {
+          "linker": "fas",
+          "checks": [
+            {
+              "argv": [
+                "/home/glonex/miniconda3/bin/tclsh",
+                "tests/test_helper.tcl",
+                "--clients",
+                "2",
+                "--baseport",
+                "23800",
+                "--dont-clean",
+                "--single",
+                "unit/auth",
+                "--single",
+                "unit/protocol",
+                "--single",
+                "unit/keyspace",
+                "--single",
+                "unit/type/string",
+                "--single",
+                "unit/type/list",
+                "--single",
+                "unit/type/set",
+                "--single",
+                "unit/type/zset",
+                "--single",
+                "unit/type/hash",
+                "--single",
+                "unit/other",
+                "--single",
+                "unit/multi",
+                "--single",
+                "unit/scripting",
+                "--single",
+                "unit/dump",
+                "--single",
+                "integration/rdb",
+                "--single",
+                "integration/aof"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "49d0546266993857784fe7b889cdafde8597ee4c5eb536c250460160a265035e"
+            }
+          ]
+        },
+        {
+          "linker": "gnu",
+          "checks": [
+            {
+              "argv": [
+                "/home/glonex/miniconda3/bin/tclsh",
+                "tests/test_helper.tcl",
+                "--clients",
+                "2",
+                "--baseport",
+                "24800",
+                "--dont-clean",
+                "--single",
+                "unit/auth",
+                "--single",
+                "unit/protocol",
+                "--single",
+                "unit/keyspace",
+                "--single",
+                "unit/type/string",
+                "--single",
+                "unit/type/list",
+                "--single",
+                "unit/type/set",
+                "--single",
+                "unit/type/zset",
+                "--single",
+                "unit/type/hash",
+                "--single",
+                "unit/other",
+                "--single",
+                "unit/multi",
+                "--single",
+                "unit/scripting",
+                "--single",
+                "unit/dump",
+                "--single",
+                "integration/rdb",
+                "--single",
+                "integration/aof"
+              ],
+              "exit": 0,
+              "expected_exit": 0,
+              "passed": true,
+              "stdout_sha256": "6c999111f3b5fe90027e8e4f139887a96e99f90126423ec4b4fe274ccced7fc6"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "superseded_setup_failure": {
+    "report": "/home/glonex/.cache/fas-linker-qualification/popular-semantic-20261106/report.json",
+    "sha256": "0058cdc5b45cb3e5cdd648e7a733533d225a4733ec5dc9854f0b00155300ebe6",
+    "reason": "Passed download container directories rather than their extracted project subdirectories; no target builds ran."
+  }
+}

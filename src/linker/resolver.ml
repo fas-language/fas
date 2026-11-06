@@ -736,6 +736,26 @@ let resolve ?stats ?(partial = false) ?(on_input = fun _ -> ())
           (fun (d : resolved) -> (d.file, d.symbol))
           (Hashtbl.find_opt definitions name))
   in
+  (* A default-version definition and its resolution aliases denote the same
+     ELF symbol. Visibility declarations on any spelling restrict the whole
+     family. Gather restrictions first, then distribute them, independently of
+     hash traversal order. Unrelated nondefault versions remain independent. *)
+  Hashtbl.iter
+    (fun alias canonical ->
+      let source = Hashtbl.find definitions alias in
+      let target = Hashtbl.find definitions canonical in
+      if visibility_rank source.visibility > visibility_rank target.visibility then
+        Hashtbl.replace definitions canonical
+          { target with visibility = source.visibility })
+    symver.aliases;
+  Hashtbl.iter
+    (fun alias canonical ->
+      let source = Hashtbl.find definitions canonical in
+      let target = Hashtbl.find definitions alias in
+      if source.visibility <> target.visibility then
+        Hashtbl.replace definitions alias
+          { target with visibility = source.visibility })
+    symver.aliases;
   let shared = Array.of_list (List.rev !shared) in
   let dependencies =
     Shared_dependencies.load ?stats

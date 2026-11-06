@@ -20,6 +20,9 @@ python3 src/linker/corpus/fetch.py sqlite --output "$RUNNER_TEMP/linker-sqlite-s
 dune build --profile release src/linker/bin/main.exe
 FAS_MUSL_SYSROOT="$RUNNER_TEMP/linker-musl/sysroot" \
   dune runtest --profile release --force src/linker 2>&1 | tee "$RUNNER_TEMP/linker-regressions.log"
+semantic_lld="$(command -v ld.lld-22 || command -v ld.lld)"
+python3 src/linker/semantic/run.py --output "$RUNNER_TEMP/linker-semantic" \
+  --cases 8 --lld "$semantic_lld"
 python3 src/linker/scale/run.py _build/default/src/linker/bin/main.exe \
   --output "$RUNNER_TEMP/linker-scale" --profile full
 for mode in dynamic static static-pie; do

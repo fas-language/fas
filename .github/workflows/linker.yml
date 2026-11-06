@@ -53,6 +53,7 @@ jobs:
             ${{ runner.temp }}/linker-install
             ${{ runner.temp }}/install-program
             ${{ runner.temp }}/linker-scale
+            ${{ runner.temp }}/linker-semantic
             ${{ runner.temp }}/linker-zlib-*
             ${{ runner.temp }}/linker-chibicc-*
             ${{ runner.temp }}/linker-sqlite*/report.json

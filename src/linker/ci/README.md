@@ -4,11 +4,12 @@ The hosted correctness job and the local Docker runner use the same
 [`correctness.sh`](correctness.sh) recipe. It builds isolated musl, forces the
 linker regression suite, runs the full scale selection, glibc zlib in three
 linkage modes, GCC/Clang musl zlib in three modes, Chibicc self-host/driver tests,
-SQLite/native Fas consumers and a staged installation. Normal runs select
+SQLite/native Fas consumers, generated valid-program semantic comparisons and
+a staged installation. Normal runs select
 SQLite `main.test`; `--extraquick` selects the weekly upstream suite instead.
-The final verifier requires 259 Python regression cases, no reported skips and
-passing reports from all seven corpus/scale selections. It also verifies the
-source hashes and executable modes captured before the build. A successful
+The final verifier requires 264 Python regression cases, no reported skips and
+passing reports from all eight corpus/scale/semantic selections. It also verifies
+the source hashes and executable modes captured before the build. A successful
 recipe creates and verifies matching [binary/source archives](../release/README.md)
 with checksums in `results/linker-release`, then rebuilds the source archive and
 runs a fixture using both delivered and rebuilt linkers. Update the explicit

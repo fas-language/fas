@@ -155,7 +155,12 @@ let () =
                obj.symbols
         then
           if Sys.argv.(1) = "partial-link" then
-            ignore (Partial_link.link_inputs [ Input.Object { path; data } ])
+            List.iter
+              (fun options ->
+                ignore
+                  (Partial_link.link_inputs ~options [ Input.Object { path; data } ]))
+              [ Options.default;
+                { Options.default with undefined = [ "__fas_fuzz_required_root" ] } ]
           else
             List.iter
               (fun options ->

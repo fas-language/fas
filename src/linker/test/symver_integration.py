@@ -112,6 +112,51 @@ int main(void){return answer();}
             self.rejected(ordinary,'undefined symbol answer',library,
                           options=('-pie','-e','main'))
 
+    def test_default_version_alias_respects_each_reference_visibility(self):
+        provider=self.compile('bound-alias-provider',r'''
+int old_implementation(void){return 35;}
+int implementation(void){return 42;}
+__asm__(".symver old_implementation,answer@FAS_1,remove");
+__asm__(".symver implementation,answer@@FAS_2,remove");
+''')
+        override=self.compile('bound-alias-override','int answer(void){return 7;}')
+        preload=self.link('bound-alias-override.so',override,options=('-shared',))
+        main=self.compile('bound-alias-main',r'''
+#include <stdlib.h>
+int invoke(void);
+int main(int argc,char **argv){return argc==2 && invoke()==atoi(argv[1]) ? 42 : 1;}
+''')
+        lld=shutil.which('ld.lld-22') or shutil.which('ld.lld')
+        tools=(LINKER,'ld',*((lld,) if lld else ()))
+        script=self.root/'bound-alias.map'
+        script.write_text('FAS_1 {}; FAS_2 { global: answer; invoke; local: *; } FAS_1;')
+        for visibility in ('default','internal','hidden','protected'):
+            caller=self.assemble('bound-alias-caller',
+                '.text\n.globl invoke\n.type invoke,@function\n'
+                'invoke: jmp answer@PLT\n'+
+                ('' if visibility=='default' else '.'+visibility+' answer\n')+
+                '.section .note.GNU-stack,"",@progbits\n')
+            for producer in tools:
+                with self.subTest(visibility=visibility,producer=producer):
+                    library=self.link('libboundalias.so',provider,caller,linker=producer,
+                        options=('-shared','-soname','libboundalias.so','--gc-sections',
+                                 '--version-script='+str(script)))
+                    exports=[s for s in core.elf_symbols(library.read_bytes(),kind=11)
+                             if s['name']=='answer']
+                    self.assertEqual(sorted(s['other'] & 3 for s in exports),
+                        [0] if visibility in ('internal','hidden') else
+                        [0,3] if visibility=='protected' else [0,0])
+                    names=run('readelf','--dyn-syms','-W',library).stdout
+                    self.assertIn(b'answer@FAS_1',names)
+                    self.assertEqual(b'answer@@FAS_2' in names,
+                                     visibility not in ('internal','hidden'))
+                    for consumer in tools:
+                        out=self.hosted('bound-alias-main',main,library,linker=consumer,
+                                        extra=('-rpath','$ORIGIN',))
+                        run(out,'42',expected=42)
+                        run('env','LD_PRELOAD='+str(preload),out,
+                            '7' if visibility=='default' else '42',expected=42)
+
     def test_versioned_tls_and_ifunc_aliases(self):
         obj=self.compile('alias-kinds',r'''
 __thread int old_slot=35,new_slot=42;

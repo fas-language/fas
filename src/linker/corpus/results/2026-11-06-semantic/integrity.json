@@ -1,0 +1,29 @@
+{
+  "files": {
+    "README.md": "e164d52746f3b9cc3cf44d46f49d9d9ec21d9d8cca8376a3d0e2e83f0dd8f99c",
+    "build-info.json": "cb3dde96c5b88d46b29125570e9183fb6194dbeb58ec07887ab4c6e7ff18f5ba",
+    "clean-run.json": "21adf231dd712741d6c48a572dfe7088bb853c3dfa43417cce4b05757a3e1996",
+    "corpus-reports.json": "09eb66e5efcbdff612bccf8dfd7e9124ef4145e70520405aea0c0cd6323caa3d",
+    "cross.json": "13e699622b2d531e0b80d63f380775f15221087f80c8d810ec33e1631551cae8",
+    "finding.json": "d24dd482d29e85b96bf496d6ce7df299f32cbaa43d98ff8ead771bc59a9db2ea",
+    "fuzz.json": "55f9e888d6fe3c2c02adb7c6a3a4c6d47c60d02382ad64243dd0c7d3067ea82a",
+    "host-regressions.json": "8cf0ca6d8af42de59d7099dc9a238bcca90ea8a0fe682d7539ecdd63a0c2b682",
+    "partial-probe.json": "c0030a3e065e3b6f7fef52192628296ec9e9d161f5a732c550ad02c83b6723d2",
+    "pending-timeout.json": "577f6991bde3462c70970b7e0d64c216f62d0dd60003a4caa3e0473fb7d17278",
+    "popular-relink.json": "d4493051370907fa34c183916d9eebda5aec14203360df395fbf760facd0612c",
+    "popular.json": "4a8b00d691e3a9b59e92a67efa1c2a83e71284eaa55153d447516524c6acae07",
+    "qualification-summary.json": "3a36286fbb1f48325bfe7afef56ece25a50f1a43bd71a3f2557281286bee32bc",
+    "release-controls.json": "eaa1b41d2a9faad1c0cda4c501a9d8c297ca288871f44f5ff1f32f98fca64e57",
+    "release-smoke.json": "88d148abd93cd0ca5a8729aaac25b742b05dd8ec8ee99880e5301ee44eabacbf",
+    "replay-popular.py": "768ffa96b6612963c2e63b0b02787f064cbf6624565b6468dbb86fedecb6e416",
+    "semantic.json": "ade8b9ad27bc38697030df49333f002dd8e7099fa044f80136544f0251656bcf",
+    "source-manifest.json": "05aadd52237eebef4eb485045bcaca7b94b6b8ad417df7e3d2a00362e916c2f8",
+    "superseded-runs.json": "671ff8a01ea1ca587211a19917e80cd787dd25fef2c3548ec4af371cc7da0f31"
+  },
+  "binary_archives": {
+    "SHA256SUMS": "27e4943df1e858587d19e12d959f73e8bd30993849599914136f6630de1ff81a",
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": "02da276d539ee47b02e3844eaf4738d28e8fdc9fcca2368c94d126204476d15f",
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": "0f3aea43acf908a36a77cac97010e226b07a7262f1ceab61f2e1098ee615bf29"
+  },
+  "note": "Evidence and final documentation follow the captured tested source snapshot; earlier records retain their original identities."
+}

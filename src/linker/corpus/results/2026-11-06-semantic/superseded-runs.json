@@ -1,0 +1,18 @@
+{
+  "reason": "Superseded the interim import-only repair with complete alias-family visibility propagation; interrupted runs are not accepted qualification.",
+  "time": "2026-11-06T14:45:11+0100",
+  "runner_pids": [
+    190621,
+    207549,
+    207631,
+    207678,
+    207716
+  ],
+  "directories": [
+    "/home/glonex/.cache/fas-linker-qualification/fuzz-bindings-aliases-20261106",
+    "/home/glonex/.cache/fas-linker-qualification/fuzz-bindings-copy-partial-20261106",
+    "/home/glonex/.cache/fas-linker-qualification/fuzz-bindings-metadata-20261106",
+    "/home/glonex/.cache/fas-linker-qualification/fuzz-bindings-static-20261106",
+    "/home/glonex/.cache/fas-linker-qualification/ubuntu24-bindings-20261106"
+  ]
+}

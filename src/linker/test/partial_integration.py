@@ -106,7 +106,8 @@ future_hidden: .quad 0
         # There is no implicit _start extraction root in relocatable mode.
         startlib = self.root/'partial-start.a'
         run('ar','rcs',startlib,self.simple,self.answer)
-        self.rejected(startlib,'no input objects',options=('-r',))
+        unselected = self.partial('partial-unselected', startlib)
+        self.assertFalse(any(s['name'] == '_start' for s in core.elf_symbols(unselected.read_bytes())))
         for producer in self.tools():
             merged = self.partial('partial-archive', self.simple,library,tool=producer)
             run(self.link('partial-archive-exe',merged),expected=42)
@@ -116,6 +117,73 @@ future_hidden: .quad 0
         library = self.root/'partial-combined-lib.a'
         run('ar','rcs',library,combined)
         run(self.link('partial-extracted-later',self.simple,library),expected=42)
+
+    def test_empty_and_unselected_archives_emit_reusable_empty_objects(self):
+        empty, unselected, thin = (self.root/name for name in
+                                  ('partial-empty.a', 'partial-unselected.a', 'partial-unselected-thin.a'))
+        run('ar', 'rcs', empty)
+        run('ar', 'rcs', unselected, self.simple, self.answer)
+        run('ar', 'rcsT', thin, self.simple, self.answer)
+        for archive in (empty, unselected, thin):
+            for producer in self.tools():
+                with self.subTest(archive=archive.name, producer=producer):
+                    # Empty archives carry no target hint for LLD. The initial
+                    # Fas target is always x86-64; use explicit emulation for all.
+                    merged = self.partial('partial-empty-output', archive, tool=producer,
+                                          flags=('-m', 'elf_x86_64'))
+                    self.assertFalse(any(s['name'] for s in core.elf_symbols(merged.read_bytes())))
+                    again = self.partial('partial-empty-again', merged)
+                    for consumer in self.tools():
+                        run(self.link('partial-empty-final', again, self.simple, self.answer,
+                                      linker=consumer), expected=42)
+        self.assertIn(b'domain reentry', run(REENTRY, '-r', empty).stdout)
+        out = self.root/'partial-no-input'
+        for flags in ((), ('-u', 'hook'), ('--start-group', '--end-group')):
+            out.write_bytes(b'previous output')
+            p = run(core.LINKER, '-r', '-o', out, *flags, expected=1)
+            self.assertIn(b'no input files', p.stderr)
+            self.assertEqual(out.read_bytes(), b'previous output')
+        original = empty.read_bytes()
+        run(core.LINKER, '-r', '-o', empty, empty, expected=1)
+        self.assertEqual(empty.read_bytes(), original)
+
+    def test_undefined_roots_survive_partial_stages_and_select_later_archives(self):
+        empty = self.root/'partial-roots-empty.a'
+        run('ar', 'rcs', empty)
+        filler = self.assemble('partial-root-filler', '.data\nfiller: .long 7')
+        provider = self.assemble('partial-later-provider',
+            '.text\n.globl hook,zed\nhook: ret\nzed: ret')
+        library = self.root/'partial-later-provider.a'
+        run('ar', 'rcs', library, provider)
+        # GNU retains undeclared -u roots in ET_REL. LLD 22 drops those roots;
+        # this test deliberately qualifies Fas against GNU's preservation policy.
+        for producer in (core.LINKER, 'ld'):
+            for initial in (empty, filler):
+                with self.subTest(producer=producer, initial=initial.name):
+                    merged = self.partial('partial-forced-roots', initial, tool=producer,
+                                          flags=('-u', 'zed', '-u', 'hook', '-u', 'zed'))
+                    symbols = core.elf_symbols(merged.read_bytes())
+                    for name in ('hook', 'zed'):
+                        matches = [s for s in symbols if s['name'] == name]
+                        self.assertEqual(len(matches), 1)
+                        self.assertEqual((matches[0]['section'], matches[0]['info'] >> 4), (0, 1))
+                    second = self.partial('partial-forced-roots-again', merged)
+                    for consumer in self.tools():
+                        out = self.link('partial-forced-roots-final', self.simple, self.answer,
+                                        second, library, linker=consumer)
+                        run(out, expected=42)
+                        names = {s['name']: s for s in core.elf_symbols(out.read_bytes())}
+                        self.assertNotEqual(names['hook']['section'], 0)
+                        self.assertNotEqual(names['zed']['section'], 0)
+        first = self.partial('partial-root-order-one', filler, flags=('-u','hook','-u','zed'))
+        second = self.partial('partial-root-order-two', filler, flags=('-u','zed','-u','hook'))
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        weak = self.assemble('partial-root-weak', '.weak hook\n.data\n.quad hook')
+        upgraded = self.partial('partial-root-upgraded', weak, flags=('-u', 'hook'))
+        hook = next(s for s in core.elf_symbols(upgraded.read_bytes()) if s['name'] == 'hook')
+        self.assertEqual(hook['info'] >> 4, 1)
+        defined = self.partial('partial-root-defined', self.answer, flags=('-u', 'answer'))
+        self.assertEqual(sum(s['name'] == 'answer' for s in core.elf_symbols(defined.read_bytes())), 1)
 
     def test_debug_initialization_tls_addrsig_and_independent_hosted_consumers(self):
         for compiler in ('gcc','clang'):

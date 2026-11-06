@@ -6,13 +6,19 @@ source/build/test files run the linker regressions, an isolated musl 1.2.5 build
 the full large-input runner, zlib 1.3.1 dynamic/static/static-PIE upstream tests,
 checksum-pinned Chibicc self-hosting and both compiler-driver suites,
 SQLite static/shared libraries and GCC/Clang/native-Fas consumers,
+generated valid-program comparisons with Fas/GNU/LLD and mixed partial stages,
 and a staged executable install/compile/run check. The linker Dune alias includes
 native compiler integration tests; this workflow does not replace the separate
 full compiler regression suite.
 
+The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) records a
+passing local shared recipe and a separate unresolved fuzz timeout. A passing
+correctness job alone does not complete the production acceptance gates.
+
 The hosted correctness job and [clean local container runner](ci/README.md)
 share one recipe, including verified local binary/source release archives. Its
-final selection guard requires 259 Python regression cases without reported skips and passing scale/corpus reports. The musl zlib
+final selection guard requires 264 Python regression cases without reported skips
+and passing scale/corpus/semantic reports. The musl zlib
 matrix adds GCC/Clang native objects linked by Fas/GNU as PIE, static ET_EXEC
 and static PIE, including upstream tests and all gzip producer/consumer pairs.
 The [archive checkpoint](corpus/results/2026-11-06-release/README.md) also qualifies

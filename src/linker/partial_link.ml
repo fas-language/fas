@@ -148,6 +148,20 @@ let combine ?stats (resolved : Resolver.t) =
           end)
         o.symbols)
     objects;
+  (* Command-line undefined roots may have no declaration in any selected
+     object. Preserve them in ET_REL so a later link can still extract their
+     providers, following GNU ld's partial-link policy. *)
+  Hashtbl.fold
+    (fun name () names ->
+      let name = Symver.key resolved.symver name in
+      if Hashtbl.mem globals name then names else name :: names)
+    resolved.strong_undefined []
+  |> List.sort_uniq String.compare
+  |> List.iter (fun name ->
+         Hashtbl.add globals name
+           { E.name; binding = 1; kind = 0; visibility = 0; section = 0;
+             value = 0L; size = 0L };
+         order := name :: !order);
   let global_indices = Hashtbl.create ~random:true (Hashtbl.length globals) in
   List.iter
     (fun name ->
@@ -371,11 +385,13 @@ let link_inputs ?stats ?(options = Options.default) ?(on_input = fun _ -> ()) in
     || options.export_dynamic
   then Error.fail "partial link requires relocatable output policy";
   Error.io (fun () ->
+      let saw_file = ref false in
       let resolved =
-        Resolver.resolve ?stats ~partial:true ~on_input ~options ~entry:"_start" inputs
+        Resolver.resolve ?stats ~partial:true ~options ~entry:"_start"
+          ~on_input:(fun path -> saw_file := true; on_input path) inputs
       in
-      if resolved.input_count = 0 then
-        Error.fail "partial link: no input objects extracted";
+      if resolved.input_count = 0 && not !saw_file then
+        Error.fail "partial link: no input files";
       Stats.measure stats "emit_relocatable" (fun () -> combine ?stats resolved))
 
 let link_input_files ?stats ?options ~output inputs =

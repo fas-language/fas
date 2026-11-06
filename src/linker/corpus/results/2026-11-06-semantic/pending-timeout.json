@@ -1,0 +1,8 @@
+{
+  "status": "untriaged",
+  "path": "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/shared-link/default/hangs/id:000000,src:000508,time:269971,execs:139084,op:havoc,rep:1",
+  "sha256": "dbd8edd78c1e1c93c2b491f3e0c9b45b0bc0d7ade8a80d5e0a8bc755f5f020b9",
+  "bytes": 4304,
+  "campaign": "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/report.json",
+  "note": "Saved by the two-second AFL target limit. No claim of a confirmed linker hang or successful replay. This keeps the fuzz acceptance gate incomplete."
+}

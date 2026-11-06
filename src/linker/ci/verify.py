@@ -17,7 +17,7 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--expected-python-cases', type=int, default=259)
+    parser.add_argument('--expected-python-cases', type=int, default=264)
     args = parser.parse_args()
     if args.expected_python_cases <= 0:
         parser.error('--expected-python-cases must be positive')
@@ -44,11 +44,25 @@ def main():
         failures.append('regression skips present')
     for name in ('linker-scale', 'linker-zlib-dynamic', 'linker-zlib-static',
                  'linker-zlib-static-pie', 'linker-musl-zlib',
-                 'linker-chibicc-selfhost', 'linker-sqlite'):
+                 'linker-chibicc-selfhost', 'linker-sqlite', 'linker-semantic'):
         path = root/name/'report.json'
         data = json.loads(path.read_text())
         if name == 'linker-scale':
             passed = data['passed'] == 4 and data['failed'] == 0
+        elif name == 'linker-semantic':
+            required = {(pipeline, mode, tool)
+                        for pipeline in ('direct', 'archive', 'fas-partial', 'gnu-partial')
+                        for mode in ('static', 'static-gc', 'static-pie', 'static-pie-gc')
+                        for tool in ('fas', 'gnu', 'lld')}
+            cases = data['cases']
+            passed = (data['status'] == 'passed' and len(cases) == 8
+                      and {case['seed'] for case in cases} == set(range(0xFA500, 0xFA508))
+                      and data['final_links'] == 384 and data['executions'] == 384
+                      and data['partial_links'] == 32
+                      and all(case['status'] == 'passed' and len(case['runs']) == len(required)
+                              and all(run['status'] == 'passed' for run in case['runs'])
+                              and {(run['pipeline'], run['mode'], run['tool'])
+                                   for run in case['runs']} == required for case in cases))
         else:
             passed = bool(data['tests']) and all(t['status'] == 'passed' for t in data['tests'])
         passed = passed and data['linker_sha256'] == linker_sha

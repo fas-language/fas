@@ -1,0 +1,30 @@
+{
+  "finding": "/home/glonex/.cache/fas-linker-qualification/fuzz-weekly-images-20261106/symver-link/default/crashes/id:000000,sig:06,src:000842,time:379607,execs:351969,op:havoc,rep:1",
+  "finding_sha256": "2bff1dfaa2a6b0ffb5c4416fb8250af2042094783ee7719177369d5da6092f0e",
+  "cause": "Dynamic import planning canonicalized a version alias before testing the original spelling's local binding; the subsequent raw-name provider lookup raised Not_found.",
+  "repair": "Test import eligibility using the original spelling, then canonicalize only the shared dynamic index.",
+  "valid_regression": "test_default_version_alias_respects_each_reference_visibility; independent Fas/GNU/LLD producer/consumer runtime and preload matrix",
+  "replays": [
+    {
+      "label": "before",
+      "target": "/home/glonex/.cache/fas-linker-qualification/fuzz-weekly-images-20261106/target.exe",
+      "target_sha256": "ba48fc2fbcf613af59da890ebc0e1d3deefb4382ef5909d829aeafc8a5d2f05d",
+      "exit": 2,
+      "stderr": "Fatal error: exception Not_found\n"
+    },
+    {
+      "label": "interim import-eligibility repair; superseded by complete family visibility repair",
+      "target": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/fuzz/target.exe",
+      "target_sha256": "686df2a37bcd8bb34d58c650b588d9fb4670285029eac252c9608a2c7fb2d9ef",
+      "exit": 0,
+      "stderr": ""
+    }
+  ],
+  "final_campaign": {
+    "report": "/home/glonex/.cache/fas-linker-qualification/fuzz-family-aliases-20261106/report.json",
+    "target_sha256": "716d27cc866aa82ba69b2bd3c377b1122a8f2cdfe212f9e9358f8b0acc7a6c84",
+    "original_finding_imported": true,
+    "symver_link_saved_crashes": "0",
+    "repair": "Merge visibility across the default-version alias family before planning; preserve original-spelling import eligibility."
+  }
+}

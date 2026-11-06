@@ -12,6 +12,23 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Partial links and version visibility — 2026-11-06
+
+The [semantic checkpoint](corpus/results/2026-11-06-semantic/README.md) adds
+reusable empty ET_REL output and undeclared forced roots across partial stages.
+Longer fuzzing exposed a default-version alias visibility bug that also reproduces
+with ordinary valid objects. Visibility now propagates across that alias family;
+runtime preemption and exported visibility match GNU/LLD, preserving the older
+nondefault version independently.
+
+The current host gate passes 3,792 compiler checks and 264 linker cases without
+skips. Fresh Ubuntu correctness, 3,072 generated-program executions, six-project
+upstream qualification and 355 current-binary byte-equivalent relinks pass. The
+original failing fuzz campaign and interrupted interim repair remain distinct
+from final-source evidence. Eight final-source output campaigns save no crashes
+but one timeout; its triage is still open, so the fuzz acceptance gate is not
+passed. The proposed contract keeps the internal OCaml API source-version-coupled.
+
 ## Operational failures and local archives — 2026-11-06
 
 The [release archive checkpoint](corpus/results/2026-11-06-release/README.md)
@@ -277,7 +294,7 @@ assuming that arbitrary layout scripts are necessary for this use case.
 | Fas native toolchain | Tool-free native objects and links, separate compilation, archives, scalar C interoperability, supplied freestanding fixtures; automatic hosted CRT/libc linking, C sources/objects/libraries, embedded C/assembly/packages and C main harnesses | The combined ABI/driver snapshot passes all four unmodified Sieve sources with native objects linked by Fas/GNU and with direct native driver builds, dynamically and with static glibc. Broaden native applications beyond Sieve and the existing fixtures. Hosted startup discovery currently requires GCC/Clang; a standalone hosted SDK configuration is future work. |
 | Hosted C | GCC/Clang drivers, fixed/PIE/shared output, CRT lifecycle, glibc and isolated musl, threads/TLS, declared executable COPY subset and full Chibicc self-hosting/driver suites | Publish supported compiler/libc/kernel baselines and run them in CI. COPY storage with overlapping aliases, protected/unique data and mixed version spellings requires PIC; arbitrary text relocations remain unsupported. |
 | Static C | Static ET_EXEC glibc/musl and IFUNC startup; declared static PIE with CRT self-relocation, ASLR, lifecycle, threaded/aligned TLS and glibc IFUNC ordering | Wider real static PIE programs and libc versions remain qualification work. Static GD/LD/TLSDESC relaxation is absent and must remain explicit. |
-| Archives and partial links | Regular/thin GNU archives, indexes, groups, weak/common/COMDAT, multi-stage `-r`, independent consumers | Broader build-system acceptance, sustained container/member fuzzing, and declared behavior for empty archive selections. BSD archive support is optional unless a required toolchain emits it. |
+| Archives and partial links | Regular/thin GNU archives, indexes, groups, weak/common/COMDAT, multi-stage `-r`, independent consumers | Broader build-system acceptance, sustained container/member fuzzing, and continued build-system qualification. Empty archive selections now emit reusable ET_REL output; forced undeclared roots survive later stages under GNU policy. BSD archive support is optional unless a required toolchain emits it. |
 | Discovery and scripts | SONAME/DT_NEEDED, RUNPATH/RPATH, explicit sysroot paths, bounded SEARCH_DIR, strict transitive checks, common libc scripts; GNU-compatible indirect archive boundary | Wider GNU default search policy and additional required driver flags. Indirect DSO references intentionally do not extract archive members; use explicit objects/roots or direct DSO references. GCC currently needs `-fno-use-linker-plugin` even for ordinary native links. Decide whether that documented flag is sufficient for v1; ignoring compiler plugins silently is unsuitable. |
 | Debugging and unwinding | DWARF 4/5 readelf/addr2line/GDB fixtures, zlib input, CFI and personality/LSDA pointers | Wider optimized/debug configurations and larger programs. Extended unwind lengths, zstd/legacy compressed debug and output compression remain explicit limits; add only when required by the chosen matrix. |
 | Scale and memory | Checked arithmetic, relocation overflows, roughly 1 GiB sparse NOBITS, 64 MiB file-backed data, 200k symbols/relocations, 65,260 retained payload sections and 1,024 independent files with boundary rejections | Current caps include 1024 input files, 128 MiB per file, 256 MiB aggregate input/decoded debug, 512 MiB output and 1 GiB image. Real large programs, peak memory, further address-space boundaries and resource failures remain unqualified; limits are unchanged. |
@@ -365,8 +382,8 @@ the relevant child processes.
    diagnostics and the declared registry boundary/GC subset, with regressions.
 2. Qualify required native Fas programs and freeze the Fas/C compiler/libc/input
    matrix, including the static PIE and sysroot scope decisions.
-3. Complete representative scale/memory work and measure performance on an idle
-   machine; then implement and qualify parallelism.
-4. Add sustained CI/fuzzing, semantic differential tests, failure injection,
-   packaging and release artifacts. Keep additional C++ expansion and LTO out of
-   these release gates.
+3. Complete representative scale/memory correctness work, sustained CI/fuzzing,
+   semantic differential tests, failure injection, packaging and release artifacts.
+   Keep additional C++ expansion and LTO out of these release gates.
+4. After the supported production baseline is qualified, measure performance on
+   an idle machine; then implement and qualify optimizations and parallelism.
