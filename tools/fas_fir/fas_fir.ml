@@ -91,14 +91,14 @@ let () =
       structs = []; globals = []; funcs = [];
       no_inline_functions = []; inline_functions = [] }
   in
-  let ir =
-    try Fir_to_ir.convert ~like m
+  let ir, symbols =
+    try (Fir_to_ir.convert ~native:true ~like m, Fir_to_ir.symbols m)
     with Fir_to_ir.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg
   in
   let result =
     match !mode with
     | Obj -> (
-        match Native_gen.compile_object ir with
+        match Native_gen.compile_object ~symbols ir with
         | Error e -> Error e
         | Ok obj ->
             let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
@@ -109,6 +109,6 @@ let () =
           die "%s: no @main to start (use -c for an object)" name;
         let output = Option.value !output ~default:"a.out" in
         let inputs = List.rev_map Fas_linker.Input.file !extra in
-        Native_gen.link_files ~inputs ~output ir
+        Native_gen.link_files ~symbols ~inputs ~output ir
   in
   match result with Ok () -> () | Error e -> die "%s" e

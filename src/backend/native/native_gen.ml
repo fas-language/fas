@@ -941,6 +941,11 @@ let pic = ref false
 let got_syms : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 64
 let via_got s = !pic && Stdlib.Hashtbl.mem got_syms s
 
+(* The symbol attributes of the module being generated (see Elf_attrs).
+   A weak function defined here is still called through its symbol: another
+   object's strong definition must win at link time. *)
+let symbols = ref (Elf_attrs.empty ())
+
 (* [r] <- address of [s] + [off] *)
 let sym_addr a r s off =
   if via_got s then begin
@@ -1566,6 +1571,7 @@ let gen_call ctx fr ~variadic result ret_ty target args =
   (match target with
   | `Direct name -> (
       match Ptbl.find_opt ctx.func_labels name with
+      | Some _ when Elf_attrs.weak !symbols name -> A.call_symbol a name
       | Some l -> A.call_label a l
       | None
         when List.exists
@@ -3084,7 +3090,8 @@ let t name f x =
     Printf.eprintf "%-14s %8.2f ms\n%!" name ((Unix.gettimeofday () -. t0) *. 1000.);
     r
 
-let generate ~startup (m : module_) =
+let generate ?symbols:(syms = Elf_attrs.empty ()) ~startup (m : module_) =
+  symbols := syms;
   if timing then begin
     Printf.eprintf "front end      %8.2f ms (cpu)\n%!" (Sys.time () *. 1000.);
     let n = ref 0 and nb = ref 0 and nl = ref 0 in
@@ -3263,6 +3270,7 @@ let generate ~startup (m : module_) =
       A.lea a A.Rsi (A.Base (A.Rsp, 8));
       A.alu_ri a A.And A.Rsp (-16);
       (match Ptbl.find_opt ctx.func_labels "main" with
+      | Some _ when Elf_attrs.weak !symbols "main" -> A.call_symbol a "main"
       | Some label -> A.call_label a label
       | None -> A.call_symbol a "main");
       A.rr a ~w:false [ 0x89 ] ~reg:A.Rax ~rm:A.Rdi;
@@ -3394,8 +3402,22 @@ let generate ~startup (m : module_) =
             Ptbl.replace globals name ()
         | _ -> ())
       m.globals;
+    (* an alias is one more symbol at its target's place *)
+    let defined_syms = func_syms @ rodata.syms @ data.syms @ !bss_syms in
+    let alias_syms =
+      List.map
+        (fun (al : Elf_attrs.alias) ->
+          match List.find_opt (fun (s : Elf64.symbol) -> s.name = al.target) defined_syms with
+          | Some s ->
+              { s with Elf64.name = al.name; offset = s.offset + al.addend;
+                       size = max 0 (s.size - al.addend) }
+          | None -> unsupported "alias `%s`: its target `%s` was not emitted" al.name al.target)
+        syms.aliases
+    in
     let image =
       Native_object.emit ~global:(Ptbl.mem globals)
+        ~binding:(Stdlib.Hashtbl.find_opt syms.binding)
+        ~visibility:(fun n -> Option.value (Stdlib.Hashtbl.find_opt syms.visibility n) ~default:0)
         ~alignments:[| 16; rodata.alignment; data.alignment; !bss_alignment |]
         {
           text;
@@ -3405,7 +3427,7 @@ let generate ~startup (m : module_) =
           data = Buffer.to_bytes data.buf;
           data_relocs = data.relocs;
           bss_size = !bss;
-          symbols = func_syms @ rodata.syms @ data.syms @ !bss_syms;
+          symbols = defined_syms @ alias_syms;
           entry = "_start";
         }
     in
@@ -3415,10 +3437,10 @@ let generate ~startup (m : module_) =
   | Fas_linker.Error.Error message -> Error ("native backend: " ^ message)
   | Invalid_argument message -> Error ("native backend internal error: " ^ message)
 
-let compile_object m = generate ~startup:false m
+let compile_object ?symbols m = generate ?symbols ~startup:false m
 
-let compile ?(inputs = []) m =
-  match generate ~startup:true m with
+let compile ?symbols ?(inputs = []) m =
+  match generate ?symbols ~startup:true m with
   | Error _ as error -> error
   | Ok object_ -> (
       try
@@ -3430,8 +3452,8 @@ let compile ?(inputs = []) m =
       with Fas_linker.Error.Error message ->
         Error ("native backend: linker: " ^ message))
 
-let link_files ?(inputs = []) ?options ~output m =
-  match generate ~startup:true m with
+let link_files ?symbols ?(inputs = []) ?options ~output m =
+  match generate ?symbols ~startup:true m with
   | Error _ as error -> error
   | Ok object_ -> (
       try

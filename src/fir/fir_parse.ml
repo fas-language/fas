@@ -1041,6 +1041,22 @@ let parse_module s =
         | t -> fail lx ("expected an initializer, got " ^ tok_text t));
         add_global m g;
         go ()
+    | Ident "alias" ->
+        (* alias @a [linkage] [visibility] = @target [+ N] *)
+        let aname = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+        let a = { aname; target = ""; addend = 0L; alinkage = Global; avisibility = Default } in
+        let rec attrs () =
+          match next lx with
+          | Ident s when Option.is_some (linkage_of s) -> a.alinkage <- Option.get (linkage_of s); attrs ()
+          | Ident s when Option.is_some (visibility_of s) -> a.avisibility <- Option.get (visibility_of s); attrs ()
+          | P "=" -> ()
+          | t -> fail lx ("unexpected " ^ tok_text t ^ " in alias")
+        in
+        attrs ();
+        let target = match next lx with Sym s -> s | t -> fail lx ("expected the aliased symbol, got " ^ tok_text t) in
+        let addend = match peek lx with P "+" -> ignore (next lx); int64_tok lx | _ -> 0L in
+        ignore (Vec.push m.aliases { a with target; addend });
+        go ()
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
         let sig_ = parse_sig lx in

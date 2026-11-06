@@ -416,6 +416,24 @@ let verify (m : modul) =
   in
   Vec.iter (fun g -> check_name g.gname) m.globals;
   Vec.iter (fun f -> check_name f.name) m.funcs;
+  Vec.iter (fun a -> check_name a.aname) m.aliases;
+  (* an alias names a function or global defined here, never another alias
+     (so there are no cycles); an addend stays inside a global *)
+  Vec.iter
+    (fun a ->
+      let bad why = errs := Printf.sprintf "alias @%s = @%s: %s" a.aname a.target why :: !errs in
+      let fn = Vec.fold (fun acc f -> if f.name = a.target then Some f else acc) None m.funcs in
+      let gl = Vec.fold (fun acc g -> if g.gname = a.target then Some g else acc) None m.globals in
+      match (fn, gl) with
+      | Some f, _ ->
+          if not f.defined then bad "the function is only declared";
+          if a.addend <> 0L then bad "an addend into a function"
+      | None, Some g ->
+          if not g.gdefined then bad "the global is only declared";
+          if Int64.compare a.addend 0L < 0 || Int64.compare a.addend (Int64.of_int g.size) > 0 then
+            bad "the addend is outside the global"
+      | None, None -> bad "not a function or global defined in this module")
+    m.aliases;
   Vec.iter
     (fun g ->
       if g.galign <= 0 || g.galign land (g.galign - 1) <> 0 then

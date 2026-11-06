@@ -87,6 +87,7 @@ strict_aliasing false                      optional (default: true)
 loc 1 "file.c" 12 5                        optional location table: id, file, line, column
 alias_tag 1 "int" 0                        optional TBAA tags: id, name, parent id (0 = root)
 global ...                                 globals
+alias ...                                  symbol aliases
 func ... / declare ...                     functions
 ```
 
@@ -119,13 +120,30 @@ global @errno   size 4  align 4 global thread_local = zero
 global @environ size 8  align 8 global = extern
 ```
 
-- `local` symbols are file-private, like C `static`. `global` symbols are exported. `weak` symbols can be overridden at link time.
+- `local` symbols are file-private, like C `static`. `global` symbols are exported. `weak` symbols can be overridden at link time: a strong definition in another object wins, and every reference, including calls and loads in this module, reaches the winner. So a weak function is never inlined. A weak `extern` global or weak `declare` that nothing defines has address 0 (`ptrtoint` of it is 0), as with C's `__attribute__((weak))` declarations.
+- Visibility is the ELF `st_other` value: `hidden` symbols are not exported from the shared object or executable they end up in, `protected` ones are exported but not preemptible.
 - `readonly` places the global in .rodata.
 - `thread_local` places it in .tdata/.tbss. Its address (`ptr @errno`) is per-thread.
 - **Verifier rules:**
   - the alignment is a power of two;
   - the initializer's byte count equals `size`;
   - no symbol is defined twice.
+
+### Aliases
+
+```
+alias @name LINKAGE [VISIBILITY] = @target [+ N]
+```
+
+A second name for a function or global defined in this module, as C's `__attribute__((alias("target")))`. With `+ N` (globals only, `0 <= N <= size`) it names the address N bytes into the global. Linkage and visibility are the alias's own: `alias @api global = @impl` exports a `local` function under another name, and the target keeps its local symbol. A reference to `@name` (`ptr @name`, `call ... @name(...)`, `reloc @name w8`) is a reference to that symbol, so a `weak` alias another object overrides is overridden for this module's calls too. An alias of a function is called with the target's signature.
+
+```
+alias @memcpy_alias global = @my_memcpy
+alias @second       local  = @pair + 8
+alias @hook         weak hidden = @default_hook
+```
+
+- **Verifier rules:** the target is a function or global *defined* in this module, not an alias (so there are no cycles); a function alias has no addend; an addend stays inside the global; the alias name is defined nowhere else.
 
 ### Functions
 
@@ -468,7 +486,8 @@ In Fir this means:
 | Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5), at an external boundary or through `...` | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers of any width, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5) | Pass such structs by pointer. |
 | Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers; lowered to a `switch`: a block address is a small token, unique in the module, not a code address; equality and `&&a - &&b` offset arithmetic behave as with real addresses) | Comparing a block address with a code or data address (they may coincide numerically) | — |
-| Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
+| Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4`; `section`; `thread_local` (refused, TLS is planned for v0.5) | Use w8; for TLS, a pointer to per-thread storage passed explicitly. |
+| Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.

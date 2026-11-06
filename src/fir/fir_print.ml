@@ -430,6 +430,14 @@ let module_to_string m =
     m.alias_tags;
   Vec.iter (print_global buf) m.globals;
   Vec.iter
+    (fun a ->
+      Buffer.add_string buf
+        (Printf.sprintf "alias %s %s%s = %s%s\n" (symbol a.aname) (linkage_name a.alinkage)
+           (if a.avisibility = Default then "" else " " ^ visibility_name a.avisibility)
+           (symbol a.target)
+           (if a.addend = 0L then "" else " + " ^ Int64.to_string a.addend)))
+    m.aliases;
+  Vec.iter
     (fun f ->
       Buffer.add_char buf '\n';
       print_func buf f)

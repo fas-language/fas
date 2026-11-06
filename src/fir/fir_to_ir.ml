@@ -929,9 +929,61 @@ let convert_global (g : global) : Ir.global =
     { name = g.gname; storage_ty = bytes g.size; size = g.size; bytes = bytes_; pointers;
       readonly = g.readonly; align = g.galign; linkage }
 
+(* ELF attributes the Ir cannot carry (weak, visibility, aliases), for the
+   native backend beside the Ir. `section` and `thread_local` are refused
+   until the native backend emits them (TLS is a v0.5 item). *)
+let stv = function Default -> 0 | Hidden -> 2 | Protected -> 3
+let stb = function Local -> 0 | Global -> 1 | Weak -> 2
+
+let symbols (m : modul) : Elf_attrs.t =
+  let t = Elf_attrs.empty () in
+  let note name linkage vis =
+    Hashtbl.replace t.binding name (stb linkage);
+    if vis <> Default then Hashtbl.replace t.visibility name (stv vis)
+  in
+  Vec.iter (fun f -> note f.name f.linkage f.visibility) m.funcs;
+  Vec.iter
+    (fun g ->
+      if g.section <> None then unsupported "@%s: a global in a named section" g.gname;
+      if g.thread_local then unsupported "@%s: a thread_local global" g.gname;
+      note g.gname g.glinkage g.gvisibility)
+    m.globals;
+  let aliases =
+    Vec.fold
+      (fun acc a ->
+        note a.aname a.alinkage a.avisibility;
+        { Elf_attrs.name = a.aname; target = a.target; addend = Int64.to_int a.addend;
+          binding = stb a.alinkage; visibility = stv a.avisibility }
+        :: acc)
+      [] m.aliases
+  in
+  { t with aliases = List.rev aliases }
+
 (* [like] supplies what Fir does not carry: the data layout and the source
-   file of each function *)
-let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
+   file of each function.
+
+   With [~native:true] the result goes to the native backend together with
+   [symbols m]: weak functions are not inlined (another object may replace
+   them), a function an alias names is kept and given the external ABI, and
+   each function alias is declared so calls through it know the signature.
+   Without it (Ir.render, LLVM) these attributes are refused rather than
+   silently dropped. *)
+let convert ?(native = false) ~(like : Ir.module_) (m : modul) : Ir.module_ =
+  if not native then begin
+    let only_native what = unsupported "%s (only the native path carries it)" what in
+    if Vec.length m.aliases > 0 then only_native "a symbol alias";
+    Vec.iter
+      (fun f ->
+        if f.linkage = Weak then only_native ("weak @" ^ f.name);
+        if f.visibility <> Default then only_native ("the visibility of @" ^ f.name))
+      m.funcs;
+    Vec.iter
+      (fun g ->
+        if g.glinkage = Weak then only_native ("weak @" ^ g.gname);
+        if g.gvisibility <> Default then only_native ("the visibility of @" ^ g.gname);
+        if g.section <> None || g.thread_local then only_native ("section/thread_local @" ^ g.gname))
+      m.globals
+  end;
   let sources = Hashtbl.create 64 in
   Hashtbl.reset sysv_structs;
   Hashtbl.reset block_tokens;
@@ -943,11 +995,27 @@ let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
       funcs := convert_func m ~source f :: !funcs)
     m.funcs;
   Vec.iter (fun g -> globals := convert_global g :: !globals) m.globals;
+  let alias_targets = Hashtbl.create 8 in
+  Vec.iter (fun a -> Hashtbl.replace alias_targets a.target a.aname) m.aliases;
+  let funcs =
+    List.rev_map
+      (fun (f : Ir.func) ->
+        if Hashtbl.mem alias_targets f.name then { f with linkage = Ir.External } else f)
+      !funcs
+  in
+  let alias_decls =
+    Vec.fold
+      (fun acc a ->
+        match List.find_opt (fun (f : Ir.func) -> f.name = a.target) funcs with
+        | Some f -> { f with Ir.name = a.aname; blocks = []; linkage = Ir.External; display = None } :: acc
+        | None -> acc)
+      [] m.aliases
+  in
   let names p = Vec.fold (fun acc f -> if p f then f.name :: acc else acc) [] m.funcs |> List.rev in
   { like with
     Ir.target_triple = m.triple;
     structs = List.of_seq (Hashtbl.to_seq_values sysv_structs);
     globals = List.rev !globals;
-    funcs = List.rev !funcs;
-    no_inline_functions = names (fun f -> f.fattrs land fa_noinline <> 0);
+    funcs = funcs @ List.rev alias_decls;
+    no_inline_functions = names (fun f -> f.fattrs land fa_noinline <> 0 || (f.defined && f.linkage = Weak));
     inline_functions = names (fun f -> f.fattrs land fa_inline <> 0) }

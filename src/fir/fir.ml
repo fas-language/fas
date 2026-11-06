@@ -366,9 +366,21 @@ type global = {
   mutable gdefined : bool;  (** false: external declaration *)
 }
 
+(* A symbol alias: another name for (an address inside) a function or global
+   defined in this module, as C's __attribute__((alias)). [target] is never
+   itself an alias. *)
+type alias = {
+  aname : string;
+  target : string;
+  addend : int64;  (** byte offset into a global target; 0 for a function *)
+  mutable alinkage : linkage;
+  mutable avisibility : visibility;
+}
+
 type modul = {
   funcs : func Vec.t;
   globals : global Vec.t;
+  aliases : alias Vec.t;
   locs : (string * int * int) Vec.t;  (** location id -> file, line, column; 0 = none *)
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
   mutable strict_aliasing : bool;
@@ -393,6 +405,7 @@ let create_module () =
       Vec.create
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
           readonly = false; thread_local = false; size = 0; init = None; gdefined = false };
+    aliases = Vec.create { aname = ""; target = ""; addend = 0L; alinkage = Local; avisibility = Default };
     locs;
     alias_tags;
     strict_aliasing = true;

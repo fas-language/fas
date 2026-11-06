@@ -4,7 +4,11 @@ module O = Fas_linker.Elf_object
 
 let section = function Elf64.Text -> 0 | Rodata -> 1 | Data -> 2 | Bss -> 3
 
-let emit ~global ~alignments (input : Elf64.input) =
+(* [binding name] overrides the binding of a symbol (STB_WEAK for a weak
+   definition or reference, STB_LOCAL for a local one the Ir calls external);
+   [visibility name] is its STV_* value. Both default to the plain behaviour. *)
+let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ~global ~alignments
+    (input : Elf64.input) =
   let definitions = Hashtbl.create ~random:true 64 in
   let symbols = ref [] and count = ref 0 in
   let add (symbol : O.symbol) =
@@ -22,9 +26,12 @@ let emit ~global ~alignments (input : Elf64.input) =
         (add
            {
              name = s.name;
-             binding = (if global s.name then 1 else 0);
+             binding =
+               (match binding s.name with
+               | Some b -> b
+               | None -> if global s.name then 1 else 0);
              kind = (if s.func then 2 else 1);
-             visibility = 0;
+             visibility = visibility s.name;
              definition = O.Section (section s.section, Int64.of_int s.offset);
              size = Int64.of_int s.size;
            }))
@@ -36,9 +43,9 @@ let emit ~global ~alignments (input : Elf64.input) =
         add
           {
             name;
-            binding = 1;
+            binding = (match binding name with Some 2 -> 2 | _ -> 1);
             kind = 0;
-            visibility = 0;
+            visibility = visibility name;
             definition = O.Undefined;
             size = 0L;
           }
