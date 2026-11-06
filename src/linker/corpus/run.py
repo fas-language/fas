@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import struct
 import subprocess
@@ -82,7 +83,24 @@ class Corpus:
 
     def run(self, args, *, cwd=None, env=None, expected=0, timeout=90):
         args = list(map(str, args))
-        result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, timeout=timeout)
+        # Build tools and upstream suites start compilers and local servers.
+        # Killing only their immediate parent on timeout leaves those children
+        # running against a snapshot that later phases may reuse.
+        process = subprocess.Popen(args, cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        expired = None
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+            if not isinstance(error, subprocess.TimeoutExpired):
+                raise
+            expired = subprocess.TimeoutExpired(args, timeout, output=stdout, stderr=stderr)
+        result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
         with (self.root / 'commands.jsonl').open('a') as log:
             log.write(json.dumps({'argv': args, 'cwd': str(cwd) if cwd else None,
                                   'environment_overrides': {k: env[k] for k in
@@ -91,8 +109,11 @@ class Corpus:
                                        'FAS_OPT', 'FAS_LLC', 'FAS_CC', 'FAS_FIR', 'DOOMWADDIR')
                                       if env and k in env},
                                   'status': result.returncode,
+                                  'timed_out': expired is not None,
                                   'stdout': result.stdout.decode(errors='replace'),
                                   'stderr': result.stderr.decode(errors='replace')})+'\n')
+        if expired is not None:
+            raise expired
         if expected is not None and result.returncode != expected:
             raise RuntimeError(f'{shlex.join(args)}: exit {result.returncode}, expected {expected}\n'
                                +result.stderr.decode(errors='replace')[-3000:])

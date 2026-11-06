@@ -3,6 +3,12 @@
  (modules unit)
  (libraries fas_linker))
 
+(rule
+ (alias runtest)
+ (deps corpus_harness_integration.py ../corpus/run.py)
+ (action
+  (run python3 %{dep:corpus_harness_integration.py} %{dep:../corpus/run.py})))
+
 (executable
  (name sysroot_reentry)
  (modules sysroot_reentry)

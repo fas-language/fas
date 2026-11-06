@@ -9,6 +9,10 @@ Each run copies the harness, selected linker and (for Sieve/SQLite) compiler int
 output directory and hashes those snapshots, so rebuilding development
 executables cannot change a running replay. To replay a saved harness from its
 temporary directory, pass explicit `--linker` and `--compiler` snapshot paths.
+Commands run in separate process groups. A timeout kills the inherited group
+and records captured output before failing, so build children do not continue
+into another phase. Daemons that deliberately create their own sessions still
+require the upstream harness's cleanup.
 
 From `fas`, after a release build:
 

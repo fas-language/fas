@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-06",
+  "change": "Corpus commands use isolated sessions and terminate inherited process groups on timeout/interruption. Timeouts retain stdout/stderr/status before failing. Escaped daemon sessions remain upstream cleanup responsibility.",
+  "scope": "Test harness only; no linker runtime or emitted-image changes",
+  "checks": [
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/corpus-process-cleanup-20261106.log",
+      "sha256": "5db23c383a522e1e26d8792caf177e59c27734d61ce47e494f3cc2f3ae5246be",
+      "exit": 0
+    },
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/corpus-process-cleanup-dune-20261106.log",
+      "sha256": "a54d37df9e1d28d0a0190c6d81547f7ce4f89192d7738c9ebbee4730223bb984",
+      "exit": 0
+    }
+  ]
+}
