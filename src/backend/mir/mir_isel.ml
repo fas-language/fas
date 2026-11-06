@@ -40,6 +40,15 @@ type ctx = {
       (** in a variadic function: GPRs and xmm registers taken by named
           parameters, their stack bytes, and the register save area's slot *)
   blk_refs : (string * int, unit) Hashtbl.t;  (** blockaddr targets seen *)
+  frame : (int, int) Hashtbl.t;
+      (** static allocas (entry block, constant size, align <= 16): value ->
+          frame slot. Their address is a constant rbp offset, so every use
+          computes it afresh ([use]) or folds it into the memory operand
+          ([addr_of]) instead of keeping one register busy for the whole
+          function. *)
+  cells : (int, reg * bool) Hashtbl.t;
+      (** promoted allocas ([promotable_allocas]): value -> the virtual
+          register holding the variable itself, and whether it starts at 0 *)
 }
 
 (* the local text symbol at block [b] of function [fn], for blockaddr *)
@@ -152,7 +161,19 @@ let materialize c (k : F.const) =
 let use c v =
   match F.const_of c.fn v with
   | Some k -> materialize c k
-  | None -> vreg c v
+  | None -> (
+      match Hashtbl.find_opt c.frame (F.resolve c.fn v) with
+      | Some s ->
+          let t = fresh c Gpr in
+          emit c (Lea (t, slot_addr s));
+          t
+      | None -> vreg c v)
+
+(* the memory operand for an access through pointer [p] *)
+let addr_of c p =
+  match Hashtbl.find_opt c.frame (F.resolve c.fn p) with
+  | Some s -> slot_addr s
+  | None -> at_reg (use c p)
 
 let def c v r = emit c (Copy (vreg c v, r))
 
@@ -1305,6 +1326,9 @@ let inst c i =
       end
   | Freeze a -> set (copy c (use c a))
   | Conv (op, a) -> set (conv c op (rty ()) a)
+  | Alloca _ when Hashtbl.mem c.cells (F.resolve c.fn (res 0)) ->
+      let cell, zero = Hashtbl.find c.cells (F.resolve c.fn (res 0)) in
+      if zero then emit c (Copy (cell, zero_of c (cls_of_reg c cell)))
   | Alloca (n, align) -> (
       match F.int_value c.fn n with
       | Some k when c.fir_block = F.entry && Int64.compare k 0L >= 0 && Int64.compare k 0x1000_0000L < 0 ->
@@ -1316,6 +1340,7 @@ let inst c i =
           let t = fresh c Gpr in
           emit c (Lea (t, slot_addr s));
           round_up_ptr c t align;
+          if align <= 16 then Hashtbl.replace c.frame (F.resolve c.fn (res 0)) s;
           set t
       | _ ->
           if align > 0x1000 then unsupported "alloca with align %d" align;
@@ -1328,9 +1353,13 @@ let inst c i =
           emit c (Salloc (d, t));
           round_up_ptr c d align;
           set d)
+  | Load (_, p) when Hashtbl.mem c.cells (F.resolve c.fn p) ->
+      set (copy c (fst (Hashtbl.find c.cells (F.resolve c.fn p))))
+  | Store (_, v, p) when Hashtbl.mem c.cells (F.resolve c.fn p) ->
+      emit c (Copy (fst (Hashtbl.find c.cells (F.resolve c.fn p)), use c v))
   | Load (_, p) ->
       let t = rty () in
-      let addr = at_reg (use c p) in
+      let addr = addr_of c p in
       let r = fresh c (cls_of_ty t) in
       if cls_of_ty t = Xmm then emit c (Fload (is_dbl t, r, addr))
       else emit c (Load (mem_size t, false, r, addr));
@@ -1338,7 +1367,7 @@ let inst c i =
   | Store (mem, v, p) ->
       let t = ty c v in
       let size = mem_size t in
-      let rv = use c v and addr = at_reg (use c p) in
+      let rv = use c v and addr = addr_of c p in
       if mem.order = Seq_cst then begin
         let x = if cls_of_ty t = Xmm then to_gpr c (is_dbl t) rv else copy c rv in
         emit c (Xchg (size, addr, x))
@@ -1477,6 +1506,116 @@ let env (m : F.modul) =
   F.Vec.iter (fun (a : F.alias) -> note a.aname true a.alinkage a.avisibility) m.aliases;
   { local_syms; label_funcs; blk_refs = Hashtbl.create 8 }
 
+(* Allocas that can live in a virtual register instead of memory: static
+   (entry block, constant size, align <= 16), and only ever accessed by
+   plain (non-volatile, non-atomic) loads and stores of one scalar type of
+   exactly the alloca's size, with the alloca as the pointer operand. The
+   address is used nowhere else, so nothing else can see the memory, and a
+   load is a copy of the variable, a store a copy into it. Mir does not need
+   SSA (a virtual register may be written many times), so there is nothing
+   more to it: no phis, no dominance. A variable that some path can read
+   before writing it starts at zero, so that every path defines it (reading
+   an uninitialized C local is undefined, so any value is right); the others
+   are not initialized, so their live range starts at their first store and
+   does not cover the whole function. Returns (value, type, needs zero);
+   [select] makes the registers. *)
+let promotable_allocas (fn : F.func) =
+  let cand : (int, F.ty option) Hashtbl.t = Hashtbl.create 16 in
+  let size = Hashtbl.create 16 in
+  let blk = F.Vec.get fn.blocks F.entry in
+  F.Vec.iter
+    (fun i ->
+      let ir = F.inst fn i in
+      match ir.op with
+      | Alloca (n, align) when align <= 16 -> (
+          match F.int_value fn n with
+          | Some k when Int64.compare k 1L >= 0 && Int64.compare k 8L <= 0 ->
+              Hashtbl.replace cand ir.results.(0) None;
+              Hashtbl.replace size ir.results.(0) (Int64.to_int k)
+          | _ -> ())
+      | _ -> ())
+    blk.insts;
+  if Hashtbl.length cand > 0 then begin
+    let r = F.resolve fn in
+    let bad v = Hashtbl.remove cand (r v) in
+    let access p t =
+      let p = r p in
+      match Hashtbl.find_opt cand p with
+      | None -> ()
+      | Some prev ->
+          let scalar = match t with F.Int w -> w <= 64 | F.Ptr _ | F.F32 | F.F64 -> true | _ -> false in
+          if (not scalar) || F.size_of t <> Hashtbl.find size p || (prev <> None && prev <> Some t) then
+            Hashtbl.remove cand p
+          else Hashtbl.replace cand p (Some t)
+    in
+    F.Vec.iter
+      (fun (b : F.block_rec) ->
+        F.Vec.iter
+          (fun i ->
+            let ir = F.inst fn i in
+            match ir.op with
+            | Load (m, p) when (not m.volatile) && m.order = Plain -> access p (F.ty_of fn ir.results.(0))
+            | Store (m, v, p) when (not m.volatile) && m.order = Plain ->
+                bad v;
+                access p (F.ty_of fn v)
+            | Dbg_value _ -> ()
+            | op -> F.iter_op_uses bad op)
+          b.insts;
+        F.iter_term_uses bad b.term)
+      fn.blocks
+  end;
+  let cells = Hashtbl.fold (fun v t acc -> match t with Some t -> (v, t) :: acc | None -> acc) cand [] in
+  if cells = [] then []
+  else begin
+    (* per cell: the blocks that load it before storing it (upward exposed)
+       and the blocks that store it *)
+    let r = F.resolve fn in
+    let ue = Hashtbl.create 16 and defs = Hashtbl.create 16 in
+    let nb = F.Vec.length fn.blocks in
+    let preds = Array.make nb [] in
+    F.Vec.iteri
+      (fun b (blk : F.block_rec) ->
+        List.iter (fun s -> preds.(s) <- b :: preds.(s)) (F.successors blk.term);
+        let seen = Hashtbl.create 8 in
+        F.Vec.iter
+          (fun i ->
+            match (F.inst fn i).op with
+            | Load (_, p) when not (Hashtbl.mem seen (r p)) ->
+                Hashtbl.replace seen (r p) ();
+                Hashtbl.add ue (r p) b
+            | Store (_, _, p) when not (Hashtbl.mem seen (r p)) ->
+                Hashtbl.replace seen (r p) ();
+                Hashtbl.add defs (r p) b
+            | Store (_, _, p) -> Hashtbl.add defs (r p) b
+            | _ -> ())
+          blk.insts)
+      fn.blocks;
+    (* live at the entry: reachable backwards from an upward-exposed load
+       without passing a block that stores it *)
+    let mark = Array.make nb (-1) and stores = Array.make nb (-1) in
+    List.mapi
+      (fun k (v, t) ->
+        List.iter (fun b -> stores.(b) <- k) (Hashtbl.find_all defs v);
+        let stack = ref (Hashtbl.find_all ue v) in
+        List.iter (fun b -> mark.(b) <- k) !stack;
+        let live = ref false in
+        while !stack <> [] && not !live do
+          let b = List.hd !stack in
+          stack := List.tl !stack;
+          if b = F.entry then live := true
+          else
+            List.iter
+              (fun p ->
+                if mark.(p) <> k && stores.(p) <> k then begin
+                  mark.(p) <- k;
+                  stack := p :: !stack
+                end)
+              preds.(b)
+        done;
+        (v, t, !live))
+      cells
+  end
+
 let select ~pic (e : env) (fn : F.func) =
   let mf = Mir.create fn.name in
   for _ = 1 to F.num_blocks fn do
@@ -1484,7 +1623,12 @@ let select ~pic (e : env) (fn : F.func) =
   done;
   let c =
     { fn; mf; pic; local_syms = e.local_syms; label_funcs = e.label_funcs; vals = Hashtbl.create 256;
-      cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs }
+      cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
+      frame = Hashtbl.create 16;
+      cells =
+        (let h = Hashtbl.create 16 in
+         List.iter (fun (v, t, z) -> Hashtbl.replace h v (new_vreg mf (cls_of_ty t), z)) (promotable_allocas fn);
+         h) }
   in
   params c;
   F.Vec.iteri
