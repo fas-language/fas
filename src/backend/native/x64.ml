@@ -797,6 +797,11 @@ let rep_stosb a =
   byte a 0xf3;
   byte a 0xaa
 
+(* Direction flag: set (std) makes string instructions run downwards; the
+   ABI requires it clear (cld) at calls and returns *)
+let std a = byte a 0xfd
+let cld a = byte a 0xfc
+
 (* Absolute 64-bit address of a symbol, as data inside code (unused for now)
    or via [mov r64, imm64] with a relocation. *)
 let mov_symbol_abs a dst symbol addend =

@@ -32,7 +32,7 @@ if command -v "$cc" >/dev/null 2>&1; then
     name=$(basename "$f" .fir)
     n=$((n + 1))
     if ! "$tool" -c "$f" -o "$tmp/c_$name.o" 2>"$tmp/err" \
-      || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" 2>"$tmp/err"; then
+      || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" -lm 2>"$tmp/err"; then
       echo "FAIL c/$name: $(cat "$tmp/err")"; fail=1; continue
     fi
     if ! "$tmp/c_$name" > "$tmp/c_$name.stdout"; then

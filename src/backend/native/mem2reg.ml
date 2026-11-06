@@ -355,6 +355,8 @@ let pure_call name =
        || String.starts_with ~prefix:"llvm.fas.va_" name
        || String.starts_with ~prefix:"llvm.va_" name
        || String.starts_with ~prefix:"llvm.trap" name
+       (* memcpy/memmove/memset write memory (they are void, but say so) *)
+       || String.starts_with ~prefix:"llvm.mem" name
        || String.starts_with ~prefix:"llvm.experimental." name)
 
 let pure = function

@@ -193,6 +193,115 @@ let intrinsic cx v name args =
   call cx (Some v) t name args;
   Hashtbl.replace cx.map v (Ir.Local (v, t))
 
+(* Builders for the expansions below of Fir ops the old Ir has no form for
+   (abs, bswap, overflow checks, the unordered fcmps, ...): each emits one Ir
+   instruction under a fresh id and returns its value. The expansions stay
+   within ops both backends already compile. *)
+let e_bin cx op t a b =
+  let id = fresh cx in
+  add cx (Ir.Bin (id, op, t, a, b));
+  Ir.Local (id, t)
+
+let e_cmp cx c t a b =
+  let id = fresh cx in
+  add cx (Ir.Cmp (id, c, t, a, b));
+  Ir.Local (id, Ir.I1)
+
+let e_sel cx t c a b =
+  let id = fresh cx in
+  add cx (Ir.Select (id, c, a, b));
+  Ir.Local (id, t)
+
+let e_cast cx op st x dt =
+  let id = fresh cx in
+  add cx (Ir.Cast (id, op, st, x, dt));
+  Ir.Local (id, dt)
+
+(* A byte count as the i64 the llvm.mem* intrinsics take *)
+let size_arg cx n =
+  let t = ir_ty (ty_of cx.f n) in
+  let x = vv cx n in
+  (Ir.I64, Ir.No_extension, if t = Ir.I64 then x else e_cast cx "zext" t x Ir.I64)
+
+let e_not cx c = e_bin cx Ir.Xor Ir.I1 c (Ir.Const (Ir.I1, 1L))
+
+(* Width of a scalar integer type; the expansions handle no vectors *)
+let int_width = function
+  | Ir.I1 -> 1 | Ir.I8 -> 8 | Ir.I16 -> 16 | Ir.I32 -> 32 | Ir.I64 -> 64
+  | _ -> unsupported "this operation on a vector or wide integer"
+
+let scalar_float = function
+  | (Ir.F32 | Ir.F64) as t -> t
+  | _ -> unsupported "this operation on a vector"
+
+(* The integer type of a float's bits, its sign bit and the rest *)
+let float_bits = function
+  | Ir.F32 -> (Ir.I32, -2147483648L, 0x7fffffffL)
+  | _ -> (Ir.I64, Int64.min_int, Int64.max_int)
+
+(* High half of the double-width product: trunc ((ext a * ext b) >> w), the
+   same shape Fas lowers `mul_hi` to. LLVM matches it to one mul; the native
+   scalarize pass (mul_high) turns the i128 form back into its
+   llvm.fas.umulh/smulh pseudo-intrinsic, which LLVM itself does not know. *)
+let mul_high cx ~signed t a b =
+  let wide =
+    match t with
+    | Ir.I8 -> Ir.I16 | Ir.I16 -> Ir.I32 | Ir.I32 -> Ir.I64 | Ir.I64 -> Ir.I128
+    | _ -> unsupported "vector or i1 mul-high"
+  in
+  let ext x = e_cast cx (if signed then "sext" else "zext") t x wide in
+  let p = e_bin cx Ir.Mul wide (ext a) (ext b) in
+  let h =
+    e_bin cx (if signed then Ir.Ashr else Ir.Lshr) wide p (Ir.Const (wide, Int64.of_int (int_width t)))
+  in
+  e_cast cx "trunc" wide h t
+
+(* Byte swap of a 16/32/64-bit value: each byte masked out and shifted to
+   its mirrored place *)
+let bswap cx t x =
+  let n = int_width t / 8 in
+  if n < 2 then unsupported "bswap of a width below 16";
+  let c k = Ir.Const (t, Int64.of_int k) in
+  let part k =
+    let b = if k = 0 then x else e_bin cx Ir.Lshr t x (c (8 * k)) in
+    let b = e_bin cx Ir.And t b (c 0xff) in
+    let sh = 8 * (n - 1 - k) in
+    if sh = 0 then b else e_bin cx Ir.Shl t b (c sh)
+  in
+  let acc = ref (part 0) in
+  for k = 1 to n - 1 do
+    acc := e_bin cx Ir.Or t !acc (part k)
+  done;
+  !acc
+
+(* Bit reversal: swap neighbouring bits, pairs and nibbles inside each byte,
+   then reverse the bytes *)
+let bitrev cx t x =
+  let w = int_width t in
+  if w = 1 then x
+  else begin
+    let keep m = if w = 64 then m else Int64.logand m (Int64.sub (Int64.shift_left 1L w) 1L) in
+    let step x sh m =
+      let m = Ir.Const (t, keep m) and sh = Ir.Const (t, Int64.of_int sh) in
+      e_bin cx Ir.Or t
+        (e_bin cx Ir.And t (e_bin cx Ir.Lshr t x sh) m)
+        (e_bin cx Ir.Shl t (e_bin cx Ir.And t x m) sh)
+    in
+    let x = step x 1 0x5555555555555555L in
+    let x = step x 2 0x3333333333333333L in
+    let x = step x 4 0x0f0f0f0f0f0f0f0fL in
+    if w = 8 then x else bswap cx t x
+  end
+
+(* The magnitude of [x] with the sign of [y], through the bits *)
+let copysign cx t x y =
+  let it, sign, mag = float_bits t in
+  let xi = e_cast cx "bitcast" t x it and yi = e_cast cx "bitcast" t y it in
+  let r =
+    e_bin cx Ir.Or it (e_bin cx Ir.And it xi (Ir.Const (it, mag))) (e_bin cx Ir.And it yi (Ir.Const (it, sign)))
+  in
+  e_cast cx "bitcast" it r t
+
 let arg cx x = (ir_ty (ty_of cx.f x), Ir.No_extension, vv cx x)
 
 let icmp_ir : icmp -> Ir.cmp = function
@@ -277,34 +386,9 @@ let convert_inst cx (i : inst) =
       | Or -> bin Ir.Or | Xor -> bin Ir.Xor | Shl -> bin Ir.Shl | Lshr -> bin Ir.Lshr
       | Ashr -> bin Ir.Ashr
       | Smin -> minmax Ir.Slt | Smax -> minmax Ir.Sgt | Umin -> minmax Ir.Ult | Umax -> minmax Ir.Ugt
-      | Umulh | Smulh -> (
-          (* trunc ((ext a * ext b) >> w) in twice the width, the same shape
-             Fas lowers `mul_hi` to. LLVM matches it to one mul; the native
-             scalarize pass (mul_high) turns the i128 form back into its
-             llvm.fas.umulh/smulh pseudo-intrinsic, which LLVM itself does
-             not know. *)
+      | Umulh | Smulh ->
           let t = ir_ty (ty_of f a) in
-          let wide =
-            match t with
-            | Ir.I8 -> Ir.I16 | Ir.I16 -> Ir.I32 | Ir.I32 -> Ir.I64 | Ir.I64 -> Ir.I128
-            | _ -> unsupported "vector or i1 mul-high"
-          in
-          let w = match t with Ir.I8 -> 8L | Ir.I16 -> 16L | Ir.I32 -> 32L | _ -> 64L in
-          let signed = k = Smulh in
-          let ext x =
-            let id = fresh cx in
-            add cx (Ir.Cast (id, (if signed then "sext" else "zext"), t, v x, wide));
-            Ir.Local (id, wide)
-          in
-          let xa = ext a in
-          let xb = ext b in
-          let p = fresh cx in
-          add cx (Ir.Bin (p, Ir.Mul, wide, xa, xb));
-          let h = fresh cx in
-          add cx
-            (Ir.Bin
-               (h, (if signed then Ir.Ashr else Ir.Lshr), wide, Ir.Local (p, wide), Ir.Const (wide, w)));
-          def cx (r 0) (fun id t -> Ir.Cast (id, "trunc", wide, Ir.Local (h, wide), t)))
+          alias cx (r 0) (mul_high cx ~signed:(k = Smulh) t (v a) (v b))
       | Uadd_sat -> intrinsic cx (r 0) ("llvm.uadd.sat." ^ sfx) [ arg cx a; arg cx b ]
       | Sadd_sat -> intrinsic cx (r 0) ("llvm.sadd.sat." ^ sfx) [ arg cx a; arg cx b ]
       | Usub_sat -> intrinsic cx (r 0) ("llvm.usub.sat." ^ sfx) [ arg cx a; arg cx b ]
@@ -316,11 +400,41 @@ let convert_inst cx (i : inst) =
       | Ctz -> intrinsic cx (r 0) ("llvm.cttz." ^ sfx) [ arg cx a; (Ir.I1, Ir.No_extension, zp) ]
       | Clz -> intrinsic cx (r 0) ("llvm.ctlz." ^ sfx) [ arg cx a; (Ir.I1, Ir.No_extension, zp) ]
       | Popcnt -> intrinsic cx (r 0) ("llvm.ctpop." ^ sfx) [ arg cx a ]
-      | k -> unsupported "%s" (Fir_print.iun_name k))
+      | Abs ->
+          (* x < 0 ? 0 - x : x, which gives MIN for MIN (allowed either way) *)
+          let t = ir_ty (ty_of f a) in
+          ignore (int_width t);
+          let x = v a and zero = Ir.Const (t, 0L) in
+          alias cx (r 0) (e_sel cx t (e_cmp cx Ir.Slt t x zero) (e_bin cx Ir.Sub t zero x) x)
+      | Bswap ->
+          let t = ir_ty (ty_of f a) in
+          alias cx (r 0) (bswap cx t (v a))
+      | Bitrev ->
+          let t = ir_ty (ty_of f a) in
+          alias cx (r 0) (bitrev cx t (v a)))
   | Fbin (k, _, a, b) -> (
       let bin op = def cx (r 0) (fun id t -> Ir.Bin (id, op, t, v a, v b)) in
       match k with
       | Fadd -> bin Ir.Fadd | Fsub -> bin Ir.Fsub | Fmul -> bin Ir.Fmul | Fdiv -> bin Ir.Fdiv
+      | Copysign ->
+          let t = scalar_float (ir_ty (ty_of f a)) in
+          alias cx (r 0) (copysign cx t (v a) (v b))
+      | Fmin | Fmax ->
+          (* IEEE minimumNumber/maximumNumber: a NaN operand yields the other
+             one (two NaNs a quiet NaN), and -0 orders below +0. Equal
+             operands have equal bits except for zeros of opposite sign, so
+             OR-ing the bits picks -0 for min and AND-ing picks +0 for max. *)
+          let t = scalar_float (ir_ty (ty_of f a)) in
+          let it, _, _ = float_bits t in
+          let x = v a and y = v b in
+          let lt, gt = if k = Fmin then (Ir.Folt, Ir.Fogt) else (Ir.Fogt, Ir.Folt) in
+          let xi = e_cast cx "bitcast" t x it and yi = e_cast cx "bitcast" t y it in
+          let eq = e_cast cx "bitcast" it (e_bin cx (if k = Fmin then Ir.Or else Ir.And) it xi yi) t in
+          let y_nan = e_sel cx t (e_cmp cx Ir.Fune t y y) (e_bin cx Ir.Fadd t x y) y in
+          let r1 = e_sel cx t (e_cmp cx Ir.Fune t y y) x eq in
+          let r2 = e_sel cx t (e_cmp cx Ir.Fune t x x) y_nan r1 in
+          let r3 = e_sel cx t (e_cmp cx gt t x y) y r2 in
+          alias cx (r 0) (e_sel cx t (e_cmp cx lt t x y) x r3)
       | k -> unsupported "%s" (Fir_print.fbin_name k))
   | Fun (k, _, a) -> (
       let sfx = suffix (ty_of f a) in
@@ -329,13 +443,78 @@ let convert_inst cx (i : inst) =
       | Fneg -> def cx (r 0) (fun id t -> Ir.Fneg (id, t, v a))
       | Fabs -> un "llvm.fabs." | Sqrt -> un "llvm.sqrt." | Floor -> un "llvm.floor."
       | Ceil -> un "llvm.ceil." | Roundeven -> un "llvm.roundeven."
-      | k -> unsupported "%s" (Fir_print.fun_name k))
+      | Ftrunc ->
+          (* below 2^52 (2^23 for f32) in magnitude: through i64 and back,
+             with the sign put back so -0.5 gives -0; anything bigger is
+             integral already, and NaN fails the compare. That path adds +0
+             to quiet a signaling NaN as a real trunc does. *)
+          let t = scalar_float (ir_ty (ty_of f a)) in
+          let it, _, mag = float_bits t in
+          let x = v a in
+          let big = Ir.Const (t, if t = Ir.F64 then 0x4330000000000000L else 0x4b000000L) in
+          let ax = e_cast cx "bitcast" it (e_bin cx Ir.And it (e_cast cx "bitcast" t x it) (Ir.Const (it, mag))) t in
+          let small = e_cmp cx Ir.Folt t ax big in
+          let tr = e_cast cx "sitofp" Ir.I64 (e_cast cx "fptosi" t x Ir.I64) t in
+          let quiet = e_bin cx Ir.Fadd t x (Ir.Const (t, 0L)) in
+          alias cx (r 0) (e_sel cx t small (copysign cx t tr x) quiet))
   | Fma (_, a, b, c) -> intrinsic cx (r 0) ("llvm.fma." ^ suffix (ty_of f a)) [ arg cx a; arg cx b; arg cx c ]
   | Fsh (left, a, b, c) ->
       intrinsic cx (r 0)
         ((if left then "llvm.fshl." else "llvm.fshr.") ^ suffix (ty_of f a))
         [ arg cx a; arg cx b; arg cx c ]
-  | Ovf _ -> unsupported "overflow arithmetic"
+  | Ovf (k, a, b) ->
+      (* the wrapped result, and the overflow flag from the operands:
+         signed add/sub overflow when the result's sign disagrees with both
+         inputs (add) or with a and not b (sub); unsigned add wraps below a,
+         sub when a < b; multiplies compare the high half of the double-width
+         product with what the low half implies *)
+      let t = ir_ty (ty_of f a) in
+      let w = int_width t in
+      if w < 8 then unsupported "overflow arithmetic on i1";
+      let x = v a and y = v b in
+      let zero = Ir.Const (t, 0L) in
+      let neg z = e_cmp cx Ir.Slt t z zero in
+      let res, flag =
+        match k with
+        | Sadd_ovf ->
+            let s = e_bin cx Ir.Add t x y in
+            (s, neg (e_bin cx Ir.And t (e_bin cx Ir.Xor t x s) (e_bin cx Ir.Xor t y s)))
+        | Uadd_ovf ->
+            let s = e_bin cx Ir.Add t x y in
+            (s, e_cmp cx Ir.Ult t s x)
+        | Ssub_ovf ->
+            let s = e_bin cx Ir.Sub t x y in
+            (s, neg (e_bin cx Ir.And t (e_bin cx Ir.Xor t x y) (e_bin cx Ir.Xor t x s)))
+        | Usub_ovf -> (e_bin cx Ir.Sub t x y, e_cmp cx Ir.Ult t x y)
+        | Umul_ovf -> (e_bin cx Ir.Mul t x y, e_cmp cx Ir.Ne t (mul_high cx ~signed:false t x y) zero)
+        | Smul_ovf ->
+            let p = e_bin cx Ir.Mul t x y in
+            let sign = e_bin cx Ir.Ashr t p (Ir.Const (t, Int64.of_int (w - 1))) in
+            (p, e_cmp cx Ir.Ne t (mul_high cx ~signed:true t x y) sign)
+      in
+      alias cx (r 0) res;
+      alias cx (r 1) flag
+  | Fcmp (((Ffalse | Ftrue | Fone | Ford | Fueq | Fugt | Fuge | Fult | Fule | Funo) as k), _, a, b) ->
+      (* the predicates the old Ir lacks, from the six it has: a NaN makes
+         every ordered compare false, so each u* is the negated opposite o* *)
+      let t = scalar_float (ir_ty (ty_of f a)) in
+      let x = v a and y = v b in
+      let c p x y = e_cmp cx p t x y in
+      let one () = e_bin cx Ir.Or Ir.I1 (c Ir.Folt x y) (c Ir.Fogt x y) in
+      let res =
+        match k with
+        | Ffalse -> Ir.Const (Ir.I1, 0L)
+        | Ftrue -> Ir.Const (Ir.I1, 1L)
+        | Fone -> one ()
+        | Fueq -> e_not cx (one ())
+        | Ford -> e_bin cx Ir.And Ir.I1 (c Ir.Foeq x x) (c Ir.Foeq y y)
+        | Funo -> e_bin cx Ir.Or Ir.I1 (c Ir.Fune x x) (c Ir.Fune y y)
+        | Fugt -> e_not cx (c Ir.Fole x y)
+        | Fuge -> e_not cx (c Ir.Folt x y)
+        | Fult -> e_not cx (c Ir.Foge x y)
+        | _ (* Fule *) -> e_not cx (c Ir.Fogt x y)
+      in
+      alias cx (r 0) res
   | Icmp (k, a, b) -> def cx (r 0) (fun id _ -> Ir.Cmp (id, icmp_ir k, ir_ty (ty_of f a), v a, v b))
   | Fcmp (k, _, a, b) -> def cx (r 0) (fun id _ -> Ir.Cmp (id, fcmp_ir k, ir_ty (ty_of f a), v a, v b))
   | Select (c, a, b) -> def cx (r 0) (fun id _ -> Ir.Select (id, v c, v a, v b))
@@ -408,14 +587,19 @@ let convert_inst cx (i : inst) =
           add cx (if vol then Ir.Load_volatile (id, bytes n, v s, 1) else Ir.Load (id, bytes n, v s, 1));
           let x = Ir.Local (id, bytes n) in
           add cx (if vol then Ir.Store_volatile (bytes n, x, v d, 1) else Ir.Store (bytes n, x, v d, 1))
-      | None -> unsupported "variable-size memcpy")
+      | None ->
+          (* rep movsb natively; memmove copies backwards when it must *)
+          let name = match ir.op with Memmove _ -> "llvm.memmove.p0.p0.i64" | _ -> "llvm.memcpy.p0.p0.i64" in
+          call cx None Ir.Void name [ arg cx d; arg cx s; size_arg cx n; (Ir.I1, Ir.No_extension, Ir.Const (Ir.I1, if vol then 1L else 0L)) ])
   | Memset (vol, d, x, n) -> (
       match (const_int cx x, const_int cx n) with
       | Some 0L, Some n ->
           let n = Int64.to_int n in
           let z : Ir.value = Ir.Zero (bytes n) in
           add cx (if vol then Ir.Store_volatile (bytes n, z, v d, 1) else Ir.Store (bytes n, z, v d, 1))
-      | _ -> unsupported "memset other than a constant-size clear")
+      | _ ->
+          call cx None Ir.Void "llvm.memset.p0.i64"
+            [ arg cx d; arg cx x; size_arg cx n; (Ir.I1, Ir.No_extension, Ir.Const (Ir.I1, if vol then 1L else 0L)) ])
   | Rmw (k, m, p, x) ->
       (* back to `__fas_atomic_*` pseudo-calls (Ir.atomic_name) *)
       let op =

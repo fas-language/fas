@@ -1659,6 +1659,41 @@ let gen_intrinsic ctx fr result ret_ty name args =
       store A.Rax
     end
   end
+  else if prefix "llvm.memcpy." || prefix "llvm.memmove." then begin
+    (* (dst, src, n, volatile): rep movsb. The operands go through
+       rax/rdx/rcx first since one may sit in rsi or rdi. memmove copies
+       backwards, from the last byte with the direction flag set, when the
+       destination lies above the source, so an overlapping tail is read
+       before it is overwritten. *)
+    load ctx fr A.Rax (arg 0);
+    load ctx fr A.Rdx (arg 1);
+    load ctx fr A.Rcx (arg 2);
+    A.mov_rr a A.Rdi A.Rax;
+    A.mov_rr a A.Rsi A.Rdx;
+    if prefix "llvm.memmove." then begin
+      let forward = A.new_label a and done_ = A.new_label a in
+      A.alu_rr a A.Cmp A.Rdi A.Rsi;
+      A.jcc a A.Be forward;
+      A.lea a A.Rdi (A.Sib { base = Some A.Rdi; index = A.Rcx; scale = 1; disp = -1; sym = None });
+      A.lea a A.Rsi (A.Sib { base = Some A.Rsi; index = A.Rcx; scale = 1; disp = -1; sym = None });
+      A.std a;
+      A.rep_movsb a;
+      A.cld a;
+      A.jmp a done_;
+      A.place a forward;
+      A.rep_movsb a;
+      A.place a done_
+    end
+    else A.rep_movsb a
+  end
+  else if prefix "llvm.memset." then begin
+    (* (dst, byte, n, volatile): rep stosb stores al *)
+    load ctx fr A.Rdx (arg 0);
+    load ctx fr A.Rax (arg 1);
+    load ctx fr A.Rcx (arg 2);
+    A.mov_rr a A.Rdi A.Rdx;
+    A.rep_stosb a
+  end
   else if prefix "llvm.fas.store_if" then begin
     (* store_if(cond, value, pointer) *)
     let _, _, v = List.nth args 1 in
