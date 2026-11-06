@@ -79,6 +79,12 @@ if key:
     if record is not None and len(inputs)!=len(record['inputs']):
         raise RuntimeError('link input count changed')
 tool={str(c.linker)!r} if phase=='fas' else {shutil.which('ld')!r}
+if phase=='gnu' and not key:
+    # Effective-target probes require empty compiler output. GNU's libc
+    # tmpnam warning otherwise makes the official fileio probe fail despite
+    # successful linking. Suppress link diagnostics only for capability
+    # probes; exit status still reports errors. Actual tests retain warnings.
+    actual=['--no-warnings',*actual]
 result=subprocess.run([tool,*actual])
 row={{'phase':phase,'key':key,'cwd':os.getcwd(),'argv':args,'actual':actual,
      'inputs':inputs,'status':result.returncode}}
@@ -164,6 +170,7 @@ set_board_info gcc,no_trampolines 1
     c.report['gcc_torture'] = detail = {'source_commit': commit,
         'optimizations': args.optimization, 'pattern': args.pattern, 'gcc_version': gcc_version,
         'driver_flags': ['-fno-use-linker-plugin', '-U_FORTIFY_SOURCE'],
+        'gnu_capability_probe_flags': ['--no-warnings'],
         'no_trampolines': args.no_trampolines,
         'scope': 'official execute.exp and dg directives; native Linux x86-64; LTO excluded',
         'same_objects': 'GNU replaces compiler temporaries with retained Fas-link inputs',

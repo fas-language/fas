@@ -264,6 +264,11 @@ injected fortified stdio wrappers: upstream builtin tests define their own
 `__vfprintf_chk`/`__vprintf_chk` and otherwise abort with GNU ld as well.
 This compiler-test setting applies equally to both linkers and is recorded in
 the report; the real-project corpora keep their own compilation policies.
+GNU capability-probe links use `--no-warnings`: its libc `tmpnam` warning
+otherwise makes the official file-I/O probe incorrectly report unavailable.
+Probe failures still propagate through their exit status, and actual torture
+test links retain all diagnostics. The recorded link arguments expose this
+probe-only policy; both phases must still execute identical test selections.
 The GNU phase substitutes the exact retained Fas object/archive inputs and
 verifies their hashes. Official execution labels and native-link selections must
 match between phases; `FAIL`, `XPASS`, `UNRESOLVED`, errors, or an empty execution

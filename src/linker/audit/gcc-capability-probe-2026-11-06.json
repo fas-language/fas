@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-06",
+  "purpose": "official GCC capability-probe baseline correction; no linker behavior change",
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-probe-control-20261106",
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "qualification": {
+    "source_commit": "5115c7e447fc07457443df874bf57840e8316d5f",
+    "optimizations": [
+      "-O0",
+      "-O2",
+      "-Os"
+    ],
+    "pattern": "*printf*.c",
+    "gcc_version": "15.2.0",
+    "driver_flags": [
+      "-fno-use-linker-plugin",
+      "-U_FORTIFY_SOURCE"
+    ],
+    "gnu_capability_probe_flags": [
+      "--no-warnings"
+    ],
+    "no_trampolines": true,
+    "scope": "official execute.exp and dg directives; native Linux x86-64; LTO excluded",
+    "same_objects": "GNU replaces compiler temporaries with retained Fas-link inputs",
+    "passes": [
+      {
+        "linker": "fas",
+        "exit": 0,
+        "counts": {
+          "PASS": 66
+        },
+        "execution_passes": 33,
+        "failures": [],
+        "execution_labels_sha256": "d48bbc938fdea81e62df58daac76c84b838f8db410063f8838969135e3e8919e",
+        "sum_sha256": "b47d51f41aad5798b206c52546454eb7fc0276b0a2599e4610dc8ba20de06c4a",
+        "log_sha256": "6ffb9135b49d6449700e805a8c9aa4b76898a38b35005e7d2e60bcef9d375f54"
+      },
+      {
+        "linker": "gnu",
+        "exit": 0,
+        "counts": {
+          "PASS": 66
+        },
+        "execution_passes": 33,
+        "failures": [],
+        "execution_labels_sha256": "d48bbc938fdea81e62df58daac76c84b838f8db410063f8838969135e3e8919e",
+        "sum_sha256": "d48a6e21e6de96d5016ddd0a9162df82f75310195006ab031b6bf37eefabdef4",
+        "log_sha256": "6cf7add0171b8d88e8940cfd0052c1fb1b521b411c090cfcec77b6b38474163f"
+      }
+    ],
+    "runtest_sha256": "c285da648b5514e9e06a506f6b6b229657a8001c8c8506d0e35a2bf0f754ab08",
+    "primary_links": {
+      "fas": 33,
+      "gnu": 33
+    },
+    "same_object_keys": 33,
+    "linker_invocations_sha256": "758f95fe5043c030b5744b717cf71165114160f00f8ca5a37eb03a2c9326b769",
+    "compiler_invocations_sha256": "2a35ba0986da179104212cec655dc024a60e963a91f33a04c56694e53e64f1bd"
+  },
+  "artifacts": {
+    "report.json": "c0ee807586392698da8c150658666649a6f52ef5f6e06134303b7f004dbca2e3",
+    "commands.jsonl": "58d97541901ffb568e203034a3eb041b884893894cddcf9aa957b637ba86be5f",
+    "torture.py": "d1f1f6b895f681f518f69d311c93bf16dbc7052126ff950e794acd29e233717a"
+  },
+  "explanation": "GNU libc tmpnam warning causes the official no-compiler-messages fileio probe to skip three tests at each optimization. GNU capability-probe links suppress diagnostics while retaining failure status; actual test links retain diagnostics. All 11 printf-family files at O0/O2/Os pass both official phases with matching labels and retained input keys."
+}
