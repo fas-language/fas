@@ -171,6 +171,7 @@ set_board_info gcc,no_trampolines 1
         'optimizations': args.optimization, 'pattern': args.pattern, 'gcc_version': gcc_version,
         'driver_flags': ['-fno-use-linker-plugin', '-U_FORTIFY_SOURCE'],
         'gnu_capability_probe_flags': ['--no-warnings'],
+        'expected_executions': args.expected_executions,
         'no_trampolines': args.no_trampolines,
         'scope': 'official execute.exp and dg directives; native Linux x86-64; LTO excluded',
         'same_objects': 'GNU replaces compiler temporaries with retained Fas-link inputs',
@@ -212,6 +213,9 @@ set_board_info gcc,no_trampolines 1
     c.save()
     assert all(row['execution_passes'] and not row['failures'] and row['exit'] == 0
                for row in detail['passes']), 'official GCC results contain failures; see retained summaries'
+    if args.expected_executions is not None:
+        assert all(row['execution_passes'] == args.expected_executions
+                   for row in detail['passes']), 'official execution count differs from the declared baseline'
     assert detail['same_object_keys'], 'no same-object GNU links'
     assert {row['key'] for row in primary['fas']} == {row['key'] for row in primary['gnu']}, \
         'Fas/GNU native link selections differ'
@@ -231,7 +235,11 @@ def main():
                         help='declare the non-executable-stack subset through GCC board capabilities')
     parser.add_argument('--optimization', action='append', choices=('-O0', '-O1', '-O2', '-O3', '-Os'))
     parser.add_argument('--timeout', type=int, default=7200, help='seconds per official pass')
+    parser.add_argument('--expected-executions', type=int,
+                        help='require this many official execution passes per linker')
     args = parser.parse_args()
+    if args.expected_executions is not None and args.expected_executions < 1:
+        parser.error('--expected-executions must be positive')
     args.optimization = args.optimization or ['-O0', '-O2', '-Os']
     settings = SimpleNamespace(output=args.output, linker=args.linker,
         compiler=base.ROOT/'_build/default/bin/main.exe', sieve=None, sqlite=None,

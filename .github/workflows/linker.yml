@@ -212,7 +212,8 @@ jobs:
       - name: Official C torture execution corpus, native objects without stack trampolines
         run: |
           python3 src/linker/corpus/torture.py --gcc-source "$RUNNER_TEMP/gcc-source/gcc-15.2.0" \
-            --output "$RUNNER_TEMP/gcc-results" --no-trampolines --timeout 6600
+            --output "$RUNNER_TEMP/gcc-results" --no-trampolines --timeout 6600 \
+            --expected-executions 4974
       - name: Retain official summaries, logs, native inputs and wrappers
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

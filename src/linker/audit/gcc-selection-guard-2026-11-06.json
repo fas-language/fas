@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-06",
+  "purpose": "Prevent a changed official capability selection from silently reducing CI execution coverage",
+  "expected_ci_executions_per_linker": 4974,
+  "positive_control": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-selection-control-20261106",
+    "required": 33,
+    "observed_per_linker": [
+      33,
+      33
+    ],
+    "status": "passed"
+  },
+  "negative_control": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-selection-negative-20261106",
+    "required": 4,
+    "observed_per_linker": [
+      3,
+      3
+    ],
+    "expected_status": "failed",
+    "observed_error": "official execution count differs from the declared baseline"
+  },
+  "artifacts": {
+    "/home/glonex/.cache/fas-linker-qualification/gcc-torture-selection-control-20261106/report.json": "19062b417688e6a8a59e2835c1f829e103772d273b1642753c68b2eaf4310eed",
+    "/home/glonex/.cache/fas-linker-qualification/gcc-torture-selection-negative-20261106/report.json": "fb899e56d22fb1ba378cac10983e3a94d1b9211b57cb9ac44bcd334043c87107",
+    "/home/glonex/.cache/fas-linker-qualification/actionlint-expanded-20261106.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "workflow_validation": "Actionlint v1.7.7 passes after adding the expected count; hosted CI not executed"
+}

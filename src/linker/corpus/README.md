@@ -268,7 +268,7 @@ injected fortified stdio wrappers: upstream builtin tests define their own
 `__vfprintf_chk`/`__vprintf_chk` and otherwise abort with GNU ld as well.
 This compiler-test setting applies equally to both linkers and is recorded in
 the report; the real-project corpora keep their own compilation policies.
-GNU capability-probe links use `--no-warnings`: its libc `tmpnam` warning
+GNU capability-probe links use [`--no-warnings`](https://sourceware.org/binutils/docs-2.40/ld/Options.html): its libc `tmpnam` warning
 otherwise makes the official file-I/O probe incorrectly report unavailable.
 Probe failures still propagate through their exit status, and actual torture
 test links retain all diagnostics. The recorded link arguments expose this
@@ -278,6 +278,10 @@ verifies their hashes. Official execution labels and native-link selections must
 match between phases; `FAIL`, `XPASS`, `UNRESOLVED`, errors, or an empty execution
 selection fail qualification. Official `UNSUPPORTED` and `XFAIL` remain visible
 in `gcc-{fas,gnu}.sum` and the report. Full logs and wrappers are preserved.
+`--expected-executions N` additionally freezes a known execution count per
+linker. CI requires 4,974 for this pinned three-optimization baseline so a
+regression in capability detection cannot silently shrink the corpus. A changed
+count requires investigating the official skips before updating that baseline.
 
 `--no-trampolines` explicitly declares the non-executable-stack subset using
 GCC's `gcc,no_trampolines` board capability. The linker currently rejects objects
@@ -286,6 +290,8 @@ pass its normal output policy. Omit the option to expose that compatibility gap;
 no trampoline test is silently rewritten or marked passing. This is C torture
 execution coverage, not all GCC regression suites, optimization variants,
 architectures, C++ tests or language conformance certification.
+The local baseline skips 14 trampoline files and five tests guarded by GCC's
+default-disabled `run_expensive_tests` capability at each optimization.
 
 `--dejagnu-root DIR` can use locally extracted Debian DejaGnu/Expect packages
 without installing system files. The weekly/manual CI job uses an immutable
