@@ -840,7 +840,7 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 
 ## Known limits
 
-- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Its only runtime checks are the integer division trap and the vector lane-index trap; array indexing with a runtime index is not checked. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
+- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
 - **Platform.** x86-64 Linux, x86-64 Windows with `--os windows` (see "Building for Windows") and 32-bit WebAssembly for WASI with `--os wasi` (see "Building for WebAssembly"), with LLVM 22 tools (`clang-22`, `opt-22`, `llc-22`, `llvm-profdata-22`, or the plain names when they are LLVM 22). Portable builds target baseline x86-64 (SSE2).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
 - **Tuning.** `fas perf --tune` picks one build for the whole program, not per function or loop, and does not optimize across the C boundary (no LTO).
