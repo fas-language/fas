@@ -13,6 +13,12 @@ on:
         default: all
         type: choice
         options: [all, correctness, popular-c, gcc-torture, fuzz]
+      fuzz_seconds:
+        description: Seconds per fuzz target (2 is artifact-upload smoke only)
+        required: true
+        default: '600'
+        type: choice
+        options: ['600', '2']
   schedule:
     - cron: '23 3 * * 0'
 
@@ -93,16 +99,27 @@ jobs:
           ocaml-compiler: '5.4.1'
       - run: opam install -y dune.3.24.2
       - name: Coverage-guided campaigns
+        env:
+          FAS_FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
         run: |
           opam exec -- python3 src/linker/fuzz/run.py \
-            --output "$RUNNER_TEMP/linker-fuzz" --seconds 600
+            --output "$RUNNER_TEMP/linker-fuzz" --seconds "$FAS_FUZZ_SECONDS"
+      - name: Archive original AFL filenames for portable artifact upload
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/linker-fuzz" ]; then
+            tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/linker-fuzz.tar.gz" linker-fuzz
+          fi
       - name: Retain target, seeds, queues and findings
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linker-fuzz-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 30
-          path: ${{ runner.temp }}/linker-fuzz
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/linker-fuzz.tar.gz
+            ${{ runner.temp }}/linker-fuzz/report.json
 
   popular-c:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'all' || inputs.suite == 'popular-c'))

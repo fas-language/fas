@@ -10,6 +10,12 @@ Concurrency groups include the selection, so separate manual selections coexist:
 gh workflow run linker.yml --repo fas-language/fas --ref YOUR_BRANCH -f suite=gcc-torture
 ```
 
+Fuzzing defaults to 600 seconds per target. To check artifact delivery after a
+workflow change, select `suite=fuzz` with `fuzz_seconds=2`. This short run is an
+upload smoke check, not release qualification. Full campaigns retain their
+original AFL filenames inside `linker-fuzz.tar.gz`, plus a separate JSON report;
+direct upload rejects the colons in AFL queue/finding names.
+
 The GCC job uses its pinned compiler container, with opam sandboxing disabled
 inside that container, and retains inputs/results from a common container path.
 

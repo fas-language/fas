@@ -8,6 +8,9 @@ python3 src/linker/fuzz/run.py --output /tmp/fas-linker-fuzz --seconds 180
 
 The destination must be new. It preserves the instrumented target, source
 snapshot, generated seeds, AFL logs/queues/crashes/hangs and `report.json`.
+Hosted uploads wrap this directory in `linker-fuzz.tar.gz` to retain AFL's colon
+filenames; the report is also uploaded separately. The optional two-second
+manual selection checks artifact delivery only and does not qualify a release.
 The duration applies to each of fourteen sequential targets; `--modes shared link`
 selects a subset. One worker runs at reduced scheduling priority. This is a
 correctness campaign, not a timing benchmark. Reproduce a finding with:
