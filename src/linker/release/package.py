@@ -193,7 +193,7 @@ def build(args):
             'needed': re.findall(r'\(NEEDED\).*?\[([^\]]+)\]', dependencies),
             'required_glibc_versions': glibc,
             'max_required_glibc_version': glibc[-1] if glibc else None,
-            'scope': 'qualified development candidate; no hosted CI, production or reproducible compiler build claim'}
+            'scope': 'shared correctness qualification; complete release acceptance is recorded separately; no reproducible compiler build claim'}
     metadata = {RESERVED+'/build-info.json': (encode(info), 0o644),
                 RESERVED+'/source-manifest.json': (manifest_bytes, 0o644),
                 RESERVED+'/qualification.json': (qualification_bytes, 0o644)}

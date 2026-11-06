@@ -51,7 +51,7 @@ let usage =
    --version               show version and exit\n"
 
 let print_version () =
-  print_endline "fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)"
+  print_endline "fas-ld 1.0.0 (ELF64 x86-64 Linux)"
 
 let run () =
   match Command_line.parse (Array.to_list Sys.argv |> List.tl) with

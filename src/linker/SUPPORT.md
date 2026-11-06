@@ -1,8 +1,8 @@
-# Linux x86-64 compatibility contract candidate
+# fas-ld 1.0 Linux x86-64 compatibility contract
 
-This describes the intended first production scope. The executable still reports
-`0.7-dev`; the final freeze, complete hosted qualification and release publication
-have not happened. [Recorded acceptance](corpus/results/) identifies exact source/binary
+This freezes the supported scope for the `1.0.0` release candidate. Publication
+requires the final versioned source and delivered archives to pass the release
+gates below. [Recorded acceptance](corpus/results/) identifies exact source/binary
 snapshots. A feature description is not evidence that every compiler, libc,
 kernel or build system using it has been qualified.
 
@@ -28,7 +28,7 @@ archive ordering, symbol precedence, section GC, output alias handling and
 resource bounds. Unlisted GNU flags or arbitrary scripts do not become part of
 the contract merely because a driver could emit them. Unknown options and
 unsupported semantics fail explicitly. `--help` describes the user-facing CLI;
-`--version` prints the actual embedded development identity.
+`--version` prints the actual embedded release identity.
 
 Expected link and I/O failures use exit status 1 with `fas-ld:` diagnostics;
 successful CLI actions use status 0. Diagnostic prose and internal OCaml
@@ -58,8 +58,10 @@ GCC 15.2.0 separately passes the declared 4,974-execution official C selection
 on each of Fas and GNU with identical objects in the
 [repaired-source observation](corpus/results/2026-11-06-hosted-canonical/README.md).
 The [reference-baseline observation](corpus/results/2026-11-06-hosted-baseline/README.md)
-subsequently passes all six hosted popular-C jobs. The full fuzz selection and
-broader configurations remain open at that observation. Exact versions and selections
+subsequently passes all six hosted popular-C jobs. The
+[completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
+also passes all fourteen ten-minute fuzz campaigns. Broader configurations
+remain outside that observation. Exact versions and selections
 live in individual reports, rather than being inferred from these product names.
 
 The distributed linker's runtime environment is separate from the libc used by
@@ -79,9 +81,10 @@ target projects. The implementation remains OCaml/Unix until the Fas port.
 
 ## Freeze and acceptance gates
 
-The supported CLI and compiler integration must be frozen against passing
-regression, generated semantic and real-program selections before a production
-version is published. Internal OCaml modules currently have inferred interfaces
+The supported CLI and compiler integration are frozen in this contract and the
+README's feature/option tables. Regression, generated semantic and real-program
+selections must pass on the final versioned source before publication.
+Internal OCaml modules currently have inferred interfaces
 and are source-version-coupled with the Fas compiler. Their current visibility
 does not promise a separately versioned stable public library API. Any future
 public package needs explicit interfaces and an independent compatibility gate.

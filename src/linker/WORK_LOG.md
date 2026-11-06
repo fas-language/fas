@@ -1,5 +1,18 @@
 # Linker implementation work log
 
+### Current checkpoint: frozen 1.0.0 candidate
+
+Complete implementation qualification passes on 4b3f876: hosted correctness,
+all six popular-C jobs, 4,974 official GCC executions per linker and all fourteen
+600-second fuzz targets (6,406,370 executions; no saved crashes or hangs).
+Evidence: corpus/results/2026-11-06-complete/README.md.
+
+The executable is now versioned 1.0.0 and SUPPORT.md freezes its Linux x86-64
+CLI/compiler contract. Final candidate acceptance, longer timeout follow-ups,
+real-Fas replay and durable publication must pass before the release is called
+complete. Performance remains deferred. Older observations below are unchanged.
+
+
 ### Current checkpoint: hosted canonical-address acceptance
 
 Source `4b3f876` passes complete hosted correctness (272 linker cases in 45 groups,

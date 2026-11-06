@@ -1,8 +1,10 @@
-# fas-ld Linux x86-64 development candidate
+# fas-ld Linux x86-64
 
-This archive contains the fas-ld command-line linker. Its current development
-version does not imply a production release. See `.fas-release/qualification.json`
-for the qualification scope and `help.txt` for the installed CLI.
+This archive contains the fas-ld command-line linker. See
+`.fas-release/qualification.json` for the archive's correctness qualification,
+the accompanying release evidence for complete release acceptance, and
+`help.txt` for the installed CLI. The frozen support contract is in the matching
+source archive at `src/linker/SUPPORT.md`.
 
 Copy `bin/fas-ld` to a directory on PATH or invoke it directly. The linker needs
 no OCaml installation at runtime. It uses the system ELF interpreter and shared

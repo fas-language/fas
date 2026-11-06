@@ -1,5 +1,13 @@
 # Linux x86-64 Fas/C release audit — 2026-11-05
 
+Current release status: the [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
+passes all declared hosted selections. The frozen 1.0.0 candidate now awaits
+final-source acceptance, longer timeout follow-ups and publication. The dated
+observations below retain their original findings and scope. The CLI and
+compiler integration contract is frozen in [SUPPORT.md](SUPPORT.md); internal
+OCaml modules are not a separately stable public API.
+
+
 Scope: review the current implementation, supported contract, tests, corpus,
 performance evidence and release workflow. Fas and ordinary native C objects are
 the release priorities. Existing C++ coverage is useful additional coverage;

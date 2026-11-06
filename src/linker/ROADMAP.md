@@ -19,7 +19,7 @@ Fas and native C are the release priorities. Existing C++ tests remain useful
 regression coverage; keep that usable interoperability level without expanding
 the C++ scope. Compiler-specific LTO is explicitly out of scope, including future
 roadmap work, per the user's scope decision.
-The [compatibility contract candidate](SUPPORT.md) defines the freeze boundary.
+The [frozen compatibility contract](SUPPORT.md) defines the freeze boundary.
 
 | Version | Deliverable | Acceptance gate |
 | --- | --- | --- |
@@ -31,8 +31,8 @@ The [compatibility contract candidate](SUPPORT.md) defines the freeze boundary.
 | **0.6 — implemented declared shared-library subset** | Shared-library output, visibility/preemption, complete declared TLS models and symbol-version behavior, IFUNC where required; RELRO/binding options | Producer/consumer, preemption, GD/LD/IE/TLSDESC, late dlopen, lifecycle, named version aliases, imported/defined IFUNC and loader-enforced RELRO pass. Deliberate limits remain: no TLS relaxation or base-version aliases; alias hiding follows the tested LLD policy. Static IFUNC was added during v0.7 |
 | **0.7 — implemented declared Linux subset** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
 | **0.8 — reference baseline qualified** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
-| **0.9 — qualification in progress** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
-| **1.0 — production Linux release** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
+| **0.9 — implementation qualification complete** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
+| **1.0 — frozen candidate; final acceptance pending** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
 
 The [2026-11-06 local qualification](corpus/results/2026-11-06/README.md) passes
 seven real C projects with exact-input GNU comparisons, 4,974 official GCC
@@ -112,6 +112,14 @@ This implements the declared v0.7 subset and qualifies the v0.8 reference
 baseline. It does not publish those versions or complete v0.9/v1.0. The
 executable remains `0.7-dev`. The full fuzz campaign, final contract freeze and
 production publication remain open; performance remains deferred.
+
+The [completed implementation observation](corpus/results/2026-11-06-complete/README.md)
+subsequently passes the full fourteen-target fuzz selection: 6,406,370 executions,
+600 seconds per target and no saved crashes/hangs. The `1.0.0` candidate now
+freezes the CLI and supported feature matrix. A fresh complete hosted matrix,
+longer final-source timeout follow-ups, real-Fas acceptance and durable release
+publication remain the final gates. Historical pending/failed observations above
+remain records of their original checkpoints.
 
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,

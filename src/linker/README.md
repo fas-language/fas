@@ -1,27 +1,22 @@
 # fas-ld: ELF linker
 
-An independent OCaml library and CLI for Linux x86-64. The declared v0.5
-dynamic-executable subset is implemented, including PIE, versioned imports, TLS,
-explicit CRT/libc startup and minimal input scripts. This is not a production-ready
-general replacement for GNU ld or LLD.
-v0.6 adds shared-library output, preemption, RELRO, TLSDESC, defined IFUNCs and
-multiple named symbol-version aliases. These have independent consumer and loader
-tests; the declared v0.6 subset passes its acceptance checks. v0.7 compatibility
-work is underway, including compressed debug input, static musl/glibc, thin
-archives, relocatable partial linking and focused C++ runtime interoperability.
+fas-ld 1.0.0 is an independent OCaml library and CLI for Linux x86-64 ELF.
+The frozen [support contract](SUPPORT.md) covers native Fas and C linking,
+regular/thin archives, partial links, static/dynamic executables, PIE, shared
+libraries, symbol versions, TLS, IFUNC and the documented libc-script subset.
 It does not invoke an external linker or use LLVM/BFD libraries.
 
-See the [v0.1–v1.0 roadmap](ROADMAP.md) for release scope and acceptance gates.
-The [CI qualification guide](CI.md) describes automated and local reproduction.
-The [release packaging guide](release/README.md) describes qualified local archives.
-The [current release audit](AUDIT.md) records the original findings, subsequent
-fixes and remaining release qualification work. Fas/C are the release priorities;
-C++ stays at the existing usable interoperability level. LTO is out of scope.
+The [roadmap](ROADMAP.md) records implementation and qualification milestones.
+The [CI guide](CI.md) describes reproduction, and the [release guide](release/README.md)
+describes archives, source rebuilding and installation. Existing C++ exceptions,
+RTTI and lifecycle interoperability remain regression-covered. LTO is deliberately
+unsupported. Performance optimization follows correctness qualification.
 
-The [first hosted C checkpoint](corpus/results/2026-11-06-hosted/README.md)
-passes all six popular-C jobs, shared-library boundaries and real archive
-pipelines on GitHub Actions. The corrected correctness recipe, SQLite extraquick
-and archive/source-rebuild checks also pass; GCC and fuzzing remain in progress.
+The [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
+passes hosted correctness, all six popular-C projects, 4,974 official GCC C
+executions per linker and 14 ten-minute fuzz campaigns. The versioned release
+candidate must pass a fresh complete matrix and archive checks before publication.
+See [1.0.0 release notes](release/1.0.0.md) for its scope and release gates.
 
 From the `fas` directory:
 
@@ -54,8 +49,8 @@ copies the native executable as `fas-ld`; it does not install an OCaml library A
 
 ## Supported contract
 
-The [compatibility contract candidate](SUPPORT.md) separates declared behavior,
-qualified environments and the remaining freeze gates.
+The [frozen compatibility contract](SUPPORT.md) defines declared behavior,
+qualified environments and release gates.
 
 | Area | Current support |
 | --- | --- |

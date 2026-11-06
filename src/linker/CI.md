@@ -1,5 +1,11 @@
 # Repeatable Linux qualification
 
+The [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
+passes all declared hosted selections on the repaired implementation, including
+14 ten-minute fuzz campaigns. The frozen 1.0.0 source must independently pass the
+complete matrix and delivered-archive acceptance before publication. Historical
+observations below describe their original checkpoints.
+
 The [linker workflow](../../.github/workflows/linker.yml) defines an Ubuntu 24.04
 x86-64 gate using OCaml 5.4.1 and Dune 3.24.2. Pull requests and pushes affecting
 source/build/test files run the linker regressions, an isolated musl 1.2.5 build,

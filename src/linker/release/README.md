@@ -1,6 +1,6 @@
-# Local release archives
+# Release archives
 
-`package.py` builds matching binary/source development archives, with the exact
+`package.py` builds matching binary/source archives, with the exact
 qualified executable, full selected source tree, license notices, CLI help,
 qualification summary, source manifest and ELF runtime dependency information.
 The shared [correctness recipe](../ci/correctness.sh) captures the source manifest
@@ -37,10 +37,13 @@ covers every payload member's name, size, permissions and SHA-256. `verify`
 reads without extraction or execution and rejects unlisted/changed members,
 duplicate paths, traversal paths, links and unexpected ownership/modes. Inventory
 and checksums detect corruption, not a malicious replacement of both artifact
-and checksum. There is no signing or publication step.
+and checksum. Packaging does not sign or publish the archives. Published releases
+include these archives, `SHA256SUMS`, release notes and separate complete
+qualification evidence under the independent `fas-ld-vVERSION` tag. Linker
+releases do not change the Fas language's latest-release designation.
 
 The executable version is used in both archive names; `--version` can assert it
-but cannot override it. The current executable remains `0.7-dev`. A passing local
+but cannot override it. The frozen executable version is `1.0.0`. A passing local
 qualification is not a production or hosted-CI claim. The JSON qualification
 record is trusted local input, not a signed attestation.
 
