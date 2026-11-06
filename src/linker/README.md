@@ -569,7 +569,14 @@ _build/default/bin/main.exe --backend=native main.fas helper.c -o hosted-program
 _build/default/bin/main.exe --backend=native --hosted main.fas -o hosted-program
 ```
 
-Object output has no generated `_start` and does not require `main`. Executable
+Object output has no generated `_start` and does not require `main`. Native
+`-c` combines embedded C and assembly with the generated Fas object using the
+linker's ET_REL combiner. References to libc or other future inputs remain
+undefined; no CRT or final executable is linked. Duplicate definitions fail
+before replacing the previous output. Package libraries still require a final
+link and are rejected by native object output.
+
+Executable
 output defaults to freestanding for closed Fas programs: it adds argc/argv
 startup and a Linux exit syscall without invoking C tools. C/header/assembly or
 package imports, additional objects/archives/shared libraries, `-l` inputs,
