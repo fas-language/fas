@@ -18,6 +18,11 @@ The [current release audit](AUDIT.md) records the original findings, subsequent
 fixes and remaining release qualification work. Fas/C are the release priorities;
 C++ stays at the existing usable interoperability level. LTO is out of scope.
 
+The [first hosted C checkpoint](corpus/results/2026-11-06-hosted/README.md)
+passes all six popular-C jobs, shared-library boundaries and real archive
+pipelines on GitHub Actions. The corrected correctness recipe, SQLite extraquick
+and archive/source-rebuild checks also pass; GCC and fuzzing remain in progress.
+
 From the `fas` directory:
 
 ```sh

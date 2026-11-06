@@ -1,8 +1,8 @@
 # Linux x86-64 compatibility contract candidate
 
 This describes the intended first production scope. The executable still reports
-`0.7-dev`; the final freeze, hosted qualification and publication have not
-happened. [Recorded acceptance](corpus/results/) identifies exact source/binary
+`0.7-dev`; the final freeze, complete hosted qualification and release publication
+have not happened. [Recorded acceptance](corpus/results/) identifies exact source/binary
 snapshots. A feature description is not evidence that every compiler, libc,
 kernel or build system using it has been qualified.
 
@@ -37,8 +37,10 @@ Identical inputs/options have deterministic output within the documented scope;
 input path strings in metadata/maps remain inputs to that promise.
 
 Output is built completely before publication through an individual-file rename.
-Reported failures preserve the prior artifact; binary/map publication comprises
-two separate renames. A killed writer can leave a private incomplete temporary.
+A failure before a file's rename preserves that file's prior artifact. The map
+is renamed before the binary; a later binary publication failure can leave an
+updated map beside the prior binary. A killed writer can leave a private
+incomplete temporary.
 Crash durability through fsync and a binary/map transaction are not promised.
 The declared input/output limits bound accepted work, not maximum process RSS.
 See the [operational regression evidence](corpus/results/2026-11-06-release/README.md).
@@ -48,9 +50,11 @@ See the [operational regression evidence](corpus/results/2026-11-06-release/READ
 The clean reference userspace is Ubuntu 24.04.5 x86-64, OCaml 5.4.1/Dune 3.24.2,
 GCC 13.3/Clang 18.1.3, binutils 2.42, glibc 2.39 and an isolated musl 1.2.5
 sysroot. Workstation checks add Ubuntu 26.04.1 and newer GCC/Clang producers.
-The containers share the workstation kernel; another-kernel and hosted-runner
-qualification remain open. Exact tool versions and tested selections live in
-individual reports, rather than being inferred from these product names.
+The local containers share the workstation kernel. The
+[hosted correctness recipe](corpus/results/2026-11-06-hosted/README.md) also
+passes on Linux `7.0.0-1017-azure` with that Ubuntu/toolchain baseline. Hosted
+GCC/fuzz and broader configurations remain open. Exact versions and selections
+live in individual reports, rather than being inferred from these product names.
 
 The distributed linker's runtime environment is separate from the libc used by
 programs it links. The native OCaml executable embeds its runtime and needs no
@@ -86,7 +90,7 @@ campaign, not continuous fuzzing or proof of correctness. Publish actual
 elapsed time, coverage metrics and every finding with its source identity.
 
 Source/binary archives must pass integrity checks, source rebuilding and a linked
-program smoke test. Checksums/inventories are not signatures. Hosted CI execution,
-long-running qualification, final contract review and durable publication remain
+program smoke test. Checksums/inventories are not signatures. The complete hosted
+matrix, long-running qualification, final contract review and durable publication remain
 release gates. Performance work remains deferred until correctness qualification;
 a faster-than-LLD result is not a production-readiness gate or current claim.

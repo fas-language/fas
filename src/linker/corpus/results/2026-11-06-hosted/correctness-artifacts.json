@@ -1,0 +1,25 @@
+{
+  "total_count": 1,
+  "artifacts": [
+    {
+      "id": 13522234127,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUyMjIzNDEyNw==",
+      "name": "linker-correctness-42255531115-1",
+      "size_in_bytes": 92703569,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13522234127",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13522234127/zip",
+      "expired": false,
+      "digest": "sha256:e32935e1436017d63b5356984a19de9cb3cc7379900761f6151f184ca7561f29",
+      "created_at": "2026-11-06T16:58:22Z",
+      "updated_at": "2026-11-06T16:58:22Z",
+      "expires_at": "2026-11-20T16:58:12Z",
+      "workflow_run": {
+        "id": 42255531115,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "cabde167466d7b71e91154283fbf1e7e1911153d"
+      }
+    }
+  ]
+}

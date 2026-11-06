@@ -79,6 +79,14 @@ not reproducible, with retained inputs and separate follow-ups. Their causes
 remain unknown, and original failed campaigns remain failed. Hosted/sustained
 qualification, final contract review and publication are still open.
 
+The [first hosted C checkpoint](corpus/results/2026-11-06-hosted/README.md)
+passes six real-project jobs, both shared-library directions for four libraries
+and the Lua/libarchive archive pipelines. Corrected hosted correctness, SQLite
+extraquick and package/source rebuilding also pass. CI setup failures are
+retained, with corrected GCC and original fuzz jobs still running. Branch
+publication is complete; this partial hosted evidence
+does not complete the qualification or production-release milestones.
+
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,
 per the user's revised priority. Malformed-input tests and fuzzing grow

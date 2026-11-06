@@ -1,0 +1,46 @@
+[
+  {
+    "archive": "linker-popular-bzip2-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  },
+  {
+    "archive": "linker-popular-curl-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  },
+  {
+    "archive": "linker-popular-libarchive-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+      "_temp/popular-archive-pipelines/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  },
+  {
+    "archive": "linker-popular-libpng-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  },
+  {
+    "archive": "linker-popular-lua-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+      "_temp/popular-archive-pipelines/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  },
+  {
+    "archive": "linker-popular-redis-42240863721-1.zip",
+    "zip_crc": "passed",
+    "retained_linkers": {
+      "_temp/popular-results/tools/fas-ld": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830"
+    }
+  }
+]

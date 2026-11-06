@@ -1,0 +1,1580 @@
+{
+  "observed_at": "2026-11-06T16:59:17.129217+00:00",
+  "status": "partial",
+  "runs": [
+    {
+      "id": 42240513811,
+      "head_sha": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811",
+      "created_at": "2026-11-06T15:10:12Z",
+      "updated_at": "2026-11-06T15:14:35Z",
+      "jobs": [
+        {
+          "id": 127969251220,
+          "name": "correctness",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-06T15:10:15Z",
+          "completed_at": "2026-11-06T15:14:34Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811/job/127969251220",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:10:15Z",
+              "completed_at": "2026-11-06T15:10:16Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:10:16Z",
+              "completed_at": "2026-11-06T15:10:17Z"
+            },
+            {
+              "name": "Install independent toolchains",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:10:17Z",
+              "completed_at": "2026-11-06T15:10:27Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:10:27Z",
+              "completed_at": "2026-11-06T15:13:51Z"
+            },
+            {
+              "name": "Install build tool",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:13:51Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            },
+            {
+              "name": "Clean correctness recipe, upstream corpora and staged install",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 6,
+              "started_at": "2026-11-06T15:14:32Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            },
+            {
+              "name": "Retain qualification artifacts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:14:32Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13,
+              "started_at": "2026-11-06T15:14:32Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14,
+              "started_at": "2026-11-06T15:14:32Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15,
+              "started_at": "2026-11-06T15:14:32Z",
+              "completed_at": "2026-11-06T15:14:32Z"
+            }
+          ]
+        },
+        {
+          "id": 127969253248,
+          "name": "gcc-torture",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T15:10:13Z",
+          "completed_at": "2026-11-06T15:10:12Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811/job/127969253248",
+          "steps": []
+        },
+        {
+          "id": 127969253524,
+          "name": "popular-c",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T15:10:13Z",
+          "completed_at": "2026-11-06T15:10:12Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811/job/127969253524",
+          "steps": []
+        },
+        {
+          "id": 127969254379,
+          "name": "fuzz",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T15:10:13Z",
+          "completed_at": "2026-11-06T15:10:12Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811/job/127969254379",
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 42240863721,
+      "head_sha": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+      "event": "workflow_dispatch",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721",
+      "created_at": "2026-11-06T15:12:27Z",
+      "updated_at": "2026-11-06T15:18:22Z",
+      "jobs": [
+        {
+          "id": 127970477608,
+          "name": "gcc-torture",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-06T15:12:32Z",
+          "completed_at": "2026-11-06T15:13:05Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970477608",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:12:33Z",
+              "completed_at": "2026-11-06T15:12:34Z"
+            },
+            {
+              "name": "Initialize containers",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:12:34Z",
+              "completed_at": "2026-11-06T15:12:54Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:12:54Z",
+              "completed_at": "2026-11-06T15:12:55Z"
+            },
+            {
+              "name": "Install official test runner and build tools",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:12:55Z",
+              "completed_at": "2026-11-06T15:12:59Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 5,
+              "started_at": "2026-11-06T15:12:59Z",
+              "completed_at": "2026-11-06T15:13:01Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6,
+              "started_at": "2026-11-06T15:13:01Z",
+              "completed_at": "2026-11-06T15:13:01Z"
+            },
+            {
+              "name": "Build linker and fetch official pinned tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7,
+              "started_at": "2026-11-06T15:13:01Z",
+              "completed_at": "2026-11-06T15:13:01Z"
+            },
+            {
+              "name": "Official C torture execution corpus, native objects without stack trampolines",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8,
+              "started_at": "2026-11-06T15:13:01Z",
+              "completed_at": "2026-11-06T15:13:01Z"
+            },
+            {
+              "name": "Retain official summaries, logs, native inputs and wrappers",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-06T15:13:01Z",
+              "completed_at": "2026-11-06T15:13:02Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 16,
+              "started_at": "2026-11-06T15:13:02Z",
+              "completed_at": "2026-11-06T15:13:02Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 17,
+              "started_at": "2026-11-06T15:13:02Z",
+              "completed_at": "2026-11-06T15:13:02Z"
+            },
+            {
+              "name": "Stop containers",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18,
+              "started_at": "2026-11-06T15:13:02Z",
+              "completed_at": "2026-11-06T15:13:02Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:13:02Z",
+              "completed_at": "2026-11-06T15:13:02Z"
+            }
+          ]
+        },
+        {
+          "id": 127970477906,
+          "name": "popular-c (libarchive, libarchive-3.8.11)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:12:30Z",
+          "completed_at": "2026-11-06T15:21:09Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970477906",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:12:31Z",
+              "completed_at": "2026-11-06T15:12:32Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:12:32Z",
+              "completed_at": "2026-11-06T15:12:34Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:12:34Z",
+              "completed_at": "2026-11-06T15:13:17Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:13:17Z",
+              "completed_at": "2026-11-06T15:16:40Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:16:40Z",
+              "completed_at": "2026-11-06T15:17:21Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:17:21Z",
+              "completed_at": "2026-11-06T15:17:23Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:17:23Z",
+              "completed_at": "2026-11-06T15:20:23Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-06T15:20:23Z",
+              "completed_at": "2026-11-06T15:20:48Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-06T15:20:48Z",
+              "completed_at": "2026-11-06T15:20:53Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:20:53Z",
+              "completed_at": "2026-11-06T15:21:05Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:21:05Z",
+              "completed_at": "2026-11-06T15:21:05Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:21:05Z",
+              "completed_at": "2026-11-06T15:21:05Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:21:05Z",
+              "completed_at": "2026-11-06T15:21:06Z"
+            }
+          ]
+        },
+        {
+          "id": 127970477913,
+          "name": "popular-c (lua, lua-5.1.5)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:12:30Z",
+          "completed_at": "2026-11-06T15:19:04Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970477913",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:12:31Z",
+              "completed_at": "2026-11-06T15:12:33Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:12:33Z",
+              "completed_at": "2026-11-06T15:12:34Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:12:34Z",
+              "completed_at": "2026-11-06T15:13:17Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:13:17Z",
+              "completed_at": "2026-11-06T15:17:59Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:17:59Z",
+              "completed_at": "2026-11-06T15:18:49Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:18:49Z",
+              "completed_at": "2026-11-06T15:18:52Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:18:52Z",
+              "completed_at": "2026-11-06T15:18:55Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8,
+              "started_at": "2026-11-06T15:18:55Z",
+              "completed_at": "2026-11-06T15:18:55Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-06T15:18:55Z",
+              "completed_at": "2026-11-06T15:18:57Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:18:57Z",
+              "completed_at": "2026-11-06T15:19:01Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:19:01Z",
+              "completed_at": "2026-11-06T15:19:01Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:19:01Z",
+              "completed_at": "2026-11-06T15:19:02Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:19:02Z",
+              "completed_at": "2026-11-06T15:19:02Z"
+            }
+          ]
+        },
+        {
+          "id": 127970477949,
+          "name": "correctness",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-06T15:16:34Z",
+          "completed_at": "2026-11-06T15:18:19Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970477949",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:16:34Z",
+              "completed_at": "2026-11-06T15:16:36Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:16:36Z",
+              "completed_at": "2026-11-06T15:16:37Z"
+            },
+            {
+              "name": "Install independent toolchains",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:16:37Z",
+              "completed_at": "2026-11-06T15:16:49Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:16:49Z",
+              "completed_at": "2026-11-06T15:17:25Z"
+            },
+            {
+              "name": "Install build tool",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:17:25Z",
+              "completed_at": "2026-11-06T15:18:16Z"
+            },
+            {
+              "name": "Clean correctness recipe, upstream corpora and staged install",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 6,
+              "started_at": "2026-11-06T15:18:16Z",
+              "completed_at": "2026-11-06T15:18:16Z"
+            },
+            {
+              "name": "Retain qualification artifacts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:18:16Z",
+              "completed_at": "2026-11-06T15:18:17Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13,
+              "started_at": "2026-11-06T15:18:17Z",
+              "completed_at": "2026-11-06T15:18:17Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14,
+              "started_at": "2026-11-06T15:18:17Z",
+              "completed_at": "2026-11-06T15:18:17Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15,
+              "started_at": "2026-11-06T15:18:17Z",
+              "completed_at": "2026-11-06T15:18:17Z"
+            }
+          ]
+        },
+        {
+          "id": 127970478039,
+          "name": "popular-c (bzip2, bzip2-1.0.8)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:12:30Z",
+          "completed_at": "2026-11-06T15:16:32Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970478039",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:12:31Z",
+              "completed_at": "2026-11-06T15:12:32Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:12:32Z",
+              "completed_at": "2026-11-06T15:12:33Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:12:33Z",
+              "completed_at": "2026-11-06T15:12:44Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:12:44Z",
+              "completed_at": "2026-11-06T15:15:48Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:15:48Z",
+              "completed_at": "2026-11-06T15:16:23Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:16:23Z",
+              "completed_at": "2026-11-06T15:16:25Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:16:25Z",
+              "completed_at": "2026-11-06T15:16:27Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-06T15:16:27Z",
+              "completed_at": "2026-11-06T15:16:27Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9,
+              "started_at": "2026-11-06T15:16:27Z",
+              "completed_at": "2026-11-06T15:16:27Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:16:27Z",
+              "completed_at": "2026-11-06T15:16:29Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:16:29Z",
+              "completed_at": "2026-11-06T15:16:29Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:16:29Z",
+              "completed_at": "2026-11-06T15:16:29Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:16:29Z",
+              "completed_at": "2026-11-06T15:16:29Z"
+            }
+          ]
+        },
+        {
+          "id": 127970478051,
+          "name": "popular-c (curl, curl-8.14.1)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:13:07Z",
+          "completed_at": "2026-11-06T15:54:10Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970478051",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:13:08Z",
+              "completed_at": "2026-11-06T15:13:09Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:13:09Z",
+              "completed_at": "2026-11-06T15:13:10Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:13:10Z",
+              "completed_at": "2026-11-06T15:13:23Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:13:23Z",
+              "completed_at": "2026-11-06T15:17:37Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:17:37Z",
+              "completed_at": "2026-11-06T15:18:27Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:18:27Z",
+              "completed_at": "2026-11-06T15:18:31Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:18:31Z",
+              "completed_at": "2026-11-06T15:53:13Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-06T15:53:13Z",
+              "completed_at": "2026-11-06T15:53:28Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9,
+              "started_at": "2026-11-06T15:53:28Z",
+              "completed_at": "2026-11-06T15:53:28Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:53:28Z",
+              "completed_at": "2026-11-06T15:54:07Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:54:07Z",
+              "completed_at": "2026-11-06T15:54:07Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:54:07Z",
+              "completed_at": "2026-11-06T15:54:08Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:54:08Z",
+              "completed_at": "2026-11-06T15:54:08Z"
+            }
+          ]
+        },
+        {
+          "id": 127970478118,
+          "name": "fuzz",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-11-06T15:17:34Z",
+          "completed_at": null,
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970478118",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:17:34Z",
+              "completed_at": "2026-11-06T15:17:36Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:17:36Z",
+              "completed_at": "2026-11-06T15:17:37Z"
+            },
+            {
+              "name": "Install fuzz and seed toolchains",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:17:37Z",
+              "completed_at": "2026-11-06T15:17:47Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:17:47Z",
+              "completed_at": "2026-11-06T15:18:16Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:18:16Z",
+              "completed_at": "2026-11-06T15:18:59Z"
+            },
+            {
+              "name": "Coverage-guided campaigns",
+              "status": "in_progress",
+              "conclusion": null,
+              "number": 6,
+              "started_at": "2026-11-06T15:18:59Z",
+              "completed_at": null
+            },
+            {
+              "name": "Retain target, seeds, queues and findings",
+              "status": "pending",
+              "conclusion": null,
+              "number": 7,
+              "started_at": null,
+              "completed_at": null
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "pending",
+              "conclusion": null,
+              "number": 13,
+              "started_at": null,
+              "completed_at": null
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "pending",
+              "conclusion": null,
+              "number": 14,
+              "started_at": null,
+              "completed_at": null
+            }
+          ]
+        },
+        {
+          "id": 127970478175,
+          "name": "popular-c (libpng, libpng-1.6.47)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:14:36Z",
+          "completed_at": "2026-11-06T15:17:32Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970478175",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:14:36Z",
+              "completed_at": "2026-11-06T15:14:37Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:14:37Z",
+              "completed_at": "2026-11-06T15:14:39Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:14:39Z",
+              "completed_at": "2026-11-06T15:14:50Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:14:50Z",
+              "completed_at": "2026-11-06T15:15:22Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:15:22Z",
+              "completed_at": "2026-11-06T15:16:11Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:16:11Z",
+              "completed_at": "2026-11-06T15:16:14Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:16:14Z",
+              "completed_at": "2026-11-06T15:17:27Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-06T15:17:27Z",
+              "completed_at": "2026-11-06T15:17:28Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9,
+              "started_at": "2026-11-06T15:17:28Z",
+              "completed_at": "2026-11-06T15:17:28Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:17:28Z",
+              "completed_at": "2026-11-06T15:17:31Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:17:31Z",
+              "completed_at": "2026-11-06T15:17:31Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:17:31Z",
+              "completed_at": "2026-11-06T15:17:31Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:17:31Z",
+              "completed_at": "2026-11-06T15:17:31Z"
+            }
+          ]
+        },
+        {
+          "id": 127970478348,
+          "name": "popular-c (redis, redis-7.2.8)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T15:18:21Z",
+          "completed_at": "2026-11-06T15:22:34Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721/job/127970478348",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T15:18:22Z",
+              "completed_at": "2026-11-06T15:18:23Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T15:18:23Z",
+              "completed_at": "2026-11-06T15:18:25Z"
+            },
+            {
+              "name": "Install upstream build and test dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T15:18:25Z",
+              "completed_at": "2026-11-06T15:18:39Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T15:18:39Z",
+              "completed_at": "2026-11-06T15:19:09Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T15:19:09Z",
+              "completed_at": "2026-11-06T15:19:55Z"
+            },
+            {
+              "name": "Build linker and fetch pinned source",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T15:19:55Z",
+              "completed_at": "2026-11-06T15:20:05Z"
+            },
+            {
+              "name": "Upstream tests and same-object GNU replay",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T15:20:05Z",
+              "completed_at": "2026-11-06T15:22:26Z"
+            },
+            {
+              "name": "Independent shared-library consumers and GNU configure control",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8,
+              "started_at": "2026-11-06T15:22:26Z",
+              "completed_at": "2026-11-06T15:22:26Z"
+            },
+            {
+              "name": "Thin archives and mixed partial-link runtime qualification",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9,
+              "started_at": "2026-11-06T15:22:26Z",
+              "completed_at": "2026-11-06T15:22:26Z"
+            },
+            {
+              "name": "Retain source pins, binaries, inputs and test logs",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-06T15:22:26Z",
+              "completed_at": "2026-11-06T15:22:31Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-06T15:22:31Z",
+              "completed_at": "2026-11-06T15:22:31Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-06T15:22:31Z",
+              "completed_at": "2026-11-06T15:22:31Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-06T15:22:31Z",
+              "completed_at": "2026-11-06T15:22:31Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 42255515327,
+      "head_sha": "cabde167466d7b71e91154283fbf1e7e1911153d",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42255515327",
+      "created_at": "2026-11-06T16:46:40Z",
+      "updated_at": "2026-11-06T16:47:08Z",
+      "jobs": [
+        {
+          "id": 128021535814,
+          "name": "correctness",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "started_at": "2026-11-06T16:46:42Z",
+          "completed_at": "2026-11-06T16:47:07Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255515327/job/128021535814",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T16:46:43Z",
+              "completed_at": "2026-11-06T16:46:44Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T16:46:44Z",
+              "completed_at": "2026-11-06T16:46:48Z"
+            },
+            {
+              "name": "Install independent toolchains",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T16:46:48Z",
+              "completed_at": "2026-11-06T16:47:03Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 4,
+              "started_at": "2026-11-06T16:47:03Z",
+              "completed_at": "2026-11-06T16:47:05Z"
+            },
+            {
+              "name": "Install build tool",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 5,
+              "started_at": "2026-11-06T16:47:05Z",
+              "completed_at": "2026-11-06T16:47:05Z"
+            },
+            {
+              "name": "Clean correctness recipe, upstream corpora and staged install",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6,
+              "started_at": "2026-11-06T16:47:05Z",
+              "completed_at": "2026-11-06T16:47:05Z"
+            },
+            {
+              "name": "Retain qualification artifacts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T16:47:05Z",
+              "completed_at": "2026-11-06T16:47:05Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13,
+              "started_at": "2026-11-06T16:47:05Z",
+              "completed_at": "2026-11-06T16:47:05Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14,
+              "started_at": "2026-11-06T16:47:05Z",
+              "completed_at": "2026-11-06T16:47:06Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15,
+              "started_at": "2026-11-06T16:47:06Z",
+              "completed_at": "2026-11-06T16:47:06Z"
+            }
+          ]
+        },
+        {
+          "id": 128021537961,
+          "name": "fuzz",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:41Z",
+          "completed_at": "2026-11-06T16:46:40Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255515327/job/128021537961",
+          "steps": []
+        },
+        {
+          "id": 128021538283,
+          "name": "gcc-torture",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:41Z",
+          "completed_at": "2026-11-06T16:46:40Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255515327/job/128021538283",
+          "steps": []
+        },
+        {
+          "id": 128021538330,
+          "name": "popular-c",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:41Z",
+          "completed_at": "2026-11-06T16:46:40Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255515327/job/128021538330",
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 42255525799,
+      "head_sha": "cabde167466d7b71e91154283fbf1e7e1911153d",
+      "event": "workflow_dispatch",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42255525799",
+      "created_at": "2026-11-06T16:46:44Z",
+      "updated_at": "2026-11-06T16:46:48Z",
+      "jobs": [
+        {
+          "id": 128021579408,
+          "name": "gcc-torture",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-11-06T16:46:48Z",
+          "completed_at": null,
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255525799/job/128021579408",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T16:46:49Z",
+              "completed_at": "2026-11-06T16:46:50Z"
+            },
+            {
+              "name": "Initialize containers",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T16:46:50Z",
+              "completed_at": "2026-11-06T16:47:09Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T16:47:09Z",
+              "completed_at": "2026-11-06T16:47:11Z"
+            },
+            {
+              "name": "Install official test runner and build tools",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T16:47:11Z",
+              "completed_at": "2026-11-06T16:47:14Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T16:47:14Z",
+              "completed_at": "2026-11-06T16:52:02Z"
+            },
+            {
+              "name": "Run opam install -y dune.3.24.2",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T16:52:02Z",
+              "completed_at": "2026-11-06T16:52:51Z"
+            },
+            {
+              "name": "Build linker and fetch official pinned tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T16:52:51Z",
+              "completed_at": "2026-11-06T16:53:08Z"
+            },
+            {
+              "name": "Official C torture execution corpus, native objects without stack trampolines",
+              "status": "in_progress",
+              "conclusion": null,
+              "number": 8,
+              "started_at": "2026-11-06T16:53:08Z",
+              "completed_at": null
+            },
+            {
+              "name": "Retain official summaries, logs, native inputs and wrappers",
+              "status": "pending",
+              "conclusion": null,
+              "number": 9,
+              "started_at": null,
+              "completed_at": null
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "pending",
+              "conclusion": null,
+              "number": 16,
+              "started_at": null,
+              "completed_at": null
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "pending",
+              "conclusion": null,
+              "number": 17,
+              "started_at": null,
+              "completed_at": null
+            },
+            {
+              "name": "Stop containers",
+              "status": "pending",
+              "conclusion": null,
+              "number": 18,
+              "started_at": null,
+              "completed_at": null
+            }
+          ]
+        },
+        {
+          "id": 128021580850,
+          "name": "popular-c",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:46Z",
+          "completed_at": "2026-11-06T16:46:45Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255525799/job/128021580850",
+          "steps": []
+        },
+        {
+          "id": 128021581027,
+          "name": "fuzz",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:46Z",
+          "completed_at": "2026-11-06T16:46:45Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255525799/job/128021581027",
+          "steps": []
+        },
+        {
+          "id": 128021581137,
+          "name": "correctness",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:46Z",
+          "completed_at": "2026-11-06T16:46:45Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255525799/job/128021581137",
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 42255531115,
+      "head_sha": "cabde167466d7b71e91154283fbf1e7e1911153d",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42255531115",
+      "created_at": "2026-11-06T16:46:46Z",
+      "updated_at": "2026-11-06T16:58:26Z",
+      "jobs": [
+        {
+          "id": 128021598758,
+          "name": "correctness",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-06T16:46:50Z",
+          "completed_at": "2026-11-06T16:58:26Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255531115/job/128021598758",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-06T16:46:50Z",
+              "completed_at": "2026-11-06T16:46:51Z"
+            },
+            {
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-06T16:46:51Z",
+              "completed_at": "2026-11-06T16:46:53Z"
+            },
+            {
+              "name": "Install independent toolchains",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-06T16:46:53Z",
+              "completed_at": "2026-11-06T16:47:03Z"
+            },
+            {
+              "name": "Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-06T16:47:03Z",
+              "completed_at": "2026-11-06T16:47:54Z"
+            },
+            {
+              "name": "Install build tool",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-06T16:47:54Z",
+              "completed_at": "2026-11-06T16:48:31Z"
+            },
+            {
+              "name": "Clean correctness recipe, upstream corpora and staged install",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-06T16:48:31Z",
+              "completed_at": "2026-11-06T16:58:12Z"
+            },
+            {
+              "name": "Retain qualification artifacts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-06T16:58:12Z",
+              "completed_at": "2026-11-06T16:58:22Z"
+            },
+            {
+              "name": "Post Run ocaml/setup-ocaml@ff66428f72b64472e749b22e0ad4dded4b2ddca6",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13,
+              "started_at": "2026-11-06T16:58:22Z",
+              "completed_at": "2026-11-06T16:58:22Z"
+            },
+            {
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14,
+              "started_at": "2026-11-06T16:58:22Z",
+              "completed_at": "2026-11-06T16:58:23Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15,
+              "started_at": "2026-11-06T16:58:23Z",
+              "completed_at": "2026-11-06T16:58:23Z"
+            }
+          ]
+        },
+        {
+          "id": 128021599705,
+          "name": "popular-c",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:48Z",
+          "completed_at": "2026-11-06T16:46:47Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255531115/job/128021599705",
+          "steps": []
+        },
+        {
+          "id": 128021600325,
+          "name": "fuzz",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:48Z",
+          "completed_at": "2026-11-06T16:46:47Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255531115/job/128021600325",
+          "steps": []
+        },
+        {
+          "id": 128021601023,
+          "name": "gcc-torture",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-06T16:46:48Z",
+          "completed_at": "2026-11-06T16:46:47Z",
+          "html_url": "https://github.com/fas-language/fas/actions/runs/42255531115/job/128021601023",
+          "steps": []
+        }
+      ]
+    }
+  ],
+  "production_base": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+  "ci_repair": "cabde167466d7b71e91154283fbf1e7e1911153d",
+  "repair_changed_files": [
+    ".github/workflows/linker.yml",
+    ".gitignore",
+    "src/linker/ci/README.md"
+  ],
+  "original_failures": [
+    {
+      "run": 42240513811,
+      "job": 127969251220,
+      "cause": "release source snapshot included the local _opam switch and rejected its compiler symlink",
+      "stage": "before linker tests"
+    },
+    {
+      "run": 42240863721,
+      "job": 127970477949,
+      "cause": "same local _opam source snapshot failure",
+      "stage": "before linker tests"
+    },
+    {
+      "run": 42240863721,
+      "job": 127970477608,
+      "cause": "opam setup required missing Bubblewrap in the GCC container",
+      "stage": "before linker tests"
+    }
+  ],
+  "cancelled_duplicate_run": 42255515327,
+  "additional_container_fix": "use one container-absolute root for GCC result generation and artifact collection",
+  "pending_runs": [
+    42240863721,
+    42255525799,
+    42255531115
+  ],
+  "external_evidence_root": "/home/glonex/.cache/fas-linker-qualification/hosted-7e81760-20261106"
+}

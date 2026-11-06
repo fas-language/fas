@@ -12,6 +12,18 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## First hosted C checkpoint — 2026-11-06
+
+The [hosted checkpoint](corpus/results/2026-11-06-hosted/README.md) passes all six
+popular-C jobs on GitHub Actions, including four libraries in both shared-library
+directions and the real Lua/libarchive archive pipelines. All 355 outputs have
+same-input GNU controls. Downloaded artifact hashes match GitHub metadata and
+ZIP CRC checks pass. The corrected correctness run passes 265 linker cases,
+all required corpus reports, SQLite extraquick and source/package rebuilding.
+Correctness and GCC setup failures are retained separately; repaired GCC and
+original fuzz jobs remain running. This is partial hosted qualification, not a
+passing full run or release.
+
 ## Real thin archives and timeout triage — 2026-11-06
 
 The [thin-archive checkpoint](corpus/results/2026-11-06-thin/README.md) repairs

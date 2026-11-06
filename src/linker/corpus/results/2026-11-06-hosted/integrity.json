@@ -1,0 +1,24 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "60ec50f6b6df257a872b59045d0dcdb875c827c2e99fb75988bcdd601c6a9c1c",
+    "artifacts-first.json": "85cea3fa10b4b271a0c2ac764618a43484ce201bb8a016bb22a5c5550ade4926",
+    "checkpoint.json": "e65e42b246ad223ea98bd18c0cf449702b079c8df2e64e3acf0b64073045eb3e",
+    "correctness-artifacts.json": "72837cfb4a65dc130a3f8a551466a50c5bf011dccbd61b396fcfab842fe9d98d",
+    "correctness-observation.json": "c9376f2661138b3a88b8521493fdae1df3425313148f6a95e058622b9e29d8a6",
+    "hosted-source-verification.json": "7f982a51ee08f361a4188b9e1fe24b992d298556be07e2504303c8d5a74ba161",
+    "linker-correctness-42255531115-1-reports.json": "300b029ae23245f2be3d7ae2d09d347acab4d7bdd6a835d1438361a29b06b88c",
+    "linker-popular-bzip2-42240863721-1-reports.json": "0c27156baf9fcf5eec61cc8ad189ddb43ddf7d3d46157e53791f4e9efb277665",
+    "linker-popular-curl-42240863721-1-reports.json": "234abd38fb6cdf95f7899c07a6de994e7dbe294d96af275ff84a8f6e17919ab4",
+    "linker-popular-libarchive-42240863721-1-reports.json": "85781090bd88fa382b0bfe83b46c657c8ea039d38d3630c38dc65b75eba35255",
+    "linker-popular-libpng-42240863721-1-reports.json": "dbe70da81022921ce5aeb1376139881ff7af8d68953466a3a39529ce56042942",
+    "linker-popular-lua-42240863721-1-reports.json": "54bdb0d46437d64d4806a234ff172284a39e180d4b7b38392fa2c0145b890e97",
+    "linker-popular-redis-42240863721-1-reports.json": "e33b6d37cf2e554b59f985ac79db4bfab11fbad20cfa0d50a10ba4658752edd6",
+    "popular-archive-validation.json": "8e0d0b331eb6b281d9133adfc27e3f124432285b693976ac80841628c60c6399",
+    "popular-summary.json": "3e9ec5370b2fdc67b2b9ae4ab11de9e09b183776f0ce46d7140dd1062e2e8c60",
+    "publication.json": "cd7ef5bd37b3e514267b40cc970acf40c6e1d8b9bf64b8653712f1e378a9205f",
+    "qualification-summary.json": "b0df269749293c66f1eeea76cd5f42f79fd6f76b8808fe8bd89d92781251e268",
+    "release-smoke.json": "e64ebc1e0e66eceb362113ac157721cad8c0221d123d3ed90bd47baaa3334834",
+    "release-source-manifest.json": "244074b19b361c517a8e280b899e1b5dc253f61a02a48c781866be1300ad8972"
+  }
+}

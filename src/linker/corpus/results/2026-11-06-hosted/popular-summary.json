@@ -1,0 +1,240 @@
+[
+  {
+    "artifact": "linker-popular-bzip2-42240863721-1",
+    "zip_sha256": "afa44fce8235937d2b1ef848399a4783542b758423b70d2af24539fca3bee96c",
+    "tests": [
+      {
+        "name": "bzip2",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 4,
+    "upstream": [
+      {
+        "project": "bzip2",
+        "linker": "fas",
+        "checks": 5,
+        "all_passed": true
+      },
+      {
+        "project": "bzip2",
+        "linker": "gnu",
+        "checks": 5,
+        "all_passed": true
+      }
+    ],
+    "shared_library_directions": [
+      {
+        "project": "bzip2",
+        "passed": true,
+        "directions": [
+          {
+            "direction": "gnu-consumer-fas-library",
+            "passed": true
+          },
+          {
+            "direction": "fas-consumer-gnu-library",
+            "passed": true
+          }
+        ],
+        "feature_differences": null
+      }
+    ]
+  },
+  {
+    "artifact": "linker-popular-curl-42240863721-1",
+    "zip_sha256": "6f099ad057ce39a69ce33d70880713bf3f3defbdd0e75c2b72f59d759aac6274",
+    "tests": [
+      {
+        "name": "curl",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 326,
+    "upstream": [
+      {
+        "project": "curl",
+        "linker": "fas",
+        "checks": 1,
+        "all_passed": true
+      },
+      {
+        "project": "curl",
+        "linker": "gnu",
+        "checks": 1,
+        "all_passed": true
+      }
+    ],
+    "shared_library_directions": [
+      {
+        "project": "curl",
+        "passed": true,
+        "directions": [
+          {
+            "direction": "gnu-consumer-fas-library",
+            "passed": true
+          },
+          {
+            "direction": "fas-consumer-gnu-library",
+            "passed": true
+          }
+        ],
+        "feature_differences": {}
+      }
+    ]
+  },
+  {
+    "artifact": "linker-popular-libarchive-42240863721-1",
+    "zip_sha256": "a5debe97c65b3b68289e62767c79a9a560293a06424b96941002c290fad89582",
+    "tests": [
+      {
+        "name": "libarchive",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 10,
+    "upstream": [
+      {
+        "project": "libarchive",
+        "linker": "fas",
+        "checks": 1,
+        "all_passed": true
+      },
+      {
+        "project": "libarchive",
+        "linker": "gnu",
+        "checks": 1,
+        "all_passed": true
+      }
+    ],
+    "shared_library_directions": [
+      {
+        "project": "libarchive",
+        "passed": true,
+        "directions": [
+          {
+            "direction": "gnu-consumer-fas-library",
+            "passed": true
+          },
+          {
+            "direction": "fas-consumer-gnu-library",
+            "passed": true
+          }
+        ],
+        "feature_differences": {}
+      }
+    ],
+    "archives": {
+      "status": "passed",
+      "pipelines": 12,
+      "images": 12,
+      "checks": 96,
+      "assertions": 473820
+    }
+  },
+  {
+    "artifact": "linker-popular-libpng-42240863721-1",
+    "zip_sha256": "39b6442bde897aba4a93539cad84a5fd6ca0836b042b25dd0fc73196959c68b6",
+    "tests": [
+      {
+        "name": "libpng",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 8,
+    "upstream": [
+      {
+        "project": "libpng",
+        "linker": "fas",
+        "checks": 1,
+        "all_passed": true
+      },
+      {
+        "project": "libpng",
+        "linker": "gnu",
+        "checks": 1,
+        "all_passed": true
+      }
+    ],
+    "shared_library_directions": [
+      {
+        "project": "libpng",
+        "passed": true,
+        "directions": [
+          {
+            "direction": "gnu-consumer-fas-library",
+            "passed": true
+          },
+          {
+            "direction": "fas-consumer-gnu-library",
+            "passed": true
+          }
+        ],
+        "feature_differences": {}
+      }
+    ]
+  },
+  {
+    "artifact": "linker-popular-lua-42240863721-1",
+    "zip_sha256": "44ec2c954875caf5b8a17895211e9af8803f930ac0557686681f7caefd3191de",
+    "tests": [
+      {
+        "name": "lua",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 2,
+    "upstream": [
+      {
+        "project": "lua",
+        "linker": "fas",
+        "checks": 15,
+        "all_passed": true
+      },
+      {
+        "project": "lua",
+        "linker": "gnu",
+        "checks": 15,
+        "all_passed": true
+      }
+    ],
+    "archives": {
+      "status": "passed",
+      "pipelines": 12,
+      "images": 24,
+      "checks": 180,
+      "assertions": 0
+    }
+  },
+  {
+    "artifact": "linker-popular-redis-42240863721-1",
+    "zip_sha256": "cb50a7c5ef8c9e33f20a2c9c9261315313c046a07c7435f5ba71de539d1ee1dd",
+    "tests": [
+      {
+        "name": "redis",
+        "status": "passed"
+      }
+    ],
+    "linker_sha256": "cd2726a3049a309b10e03b5f8b487c81a18384b52beecfd2167f8370b4c9a830",
+    "oracle_outputs": 5,
+    "upstream": [
+      {
+        "project": "redis",
+        "linker": "fas",
+        "checks": 1,
+        "all_passed": true
+      },
+      {
+        "project": "redis",
+        "linker": "gnu",
+        "checks": 1,
+        "all_passed": true
+      }
+    ]
+  }
+]

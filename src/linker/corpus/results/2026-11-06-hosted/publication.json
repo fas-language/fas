@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-11-06T15:13:21.696228+00:00",
+  "repository": "fas-language/fas",
+  "branch": "refs/heads/linker-qualification-20261105",
+  "head_sha": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+  "runs": [
+    {
+      "id": 42240513811,
+      "head_sha": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+      "event": "push",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42240513811",
+      "created_at": "2026-11-06T15:10:12Z"
+    },
+    {
+      "id": 42240863721,
+      "head_sha": "7e81760b79fd228f221d5f83b8bfe1c3011f57d9",
+      "event": "workflow_dispatch",
+      "status": "queued",
+      "conclusion": null,
+      "html_url": "https://github.com/fas-language/fas/actions/runs/42240863721",
+      "created_at": "2026-11-06T15:12:27Z"
+    }
+  ]
+}
