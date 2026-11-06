@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-06",
+  "trigger": "curl upstream Valgrind tests reject duplicate .text headers; Redis uses -export-dynamic",
+  "changes": [
+    "Combine compatible .text/.text.* and conventional data/BSS contributions into output sections while preserving input placements",
+    "Accept GNU -export-dynamic alias"
+  ],
+  "verification": {
+    "musl_sysroot": "/tmp/fas-musl-20261105/sysroot",
+    "command": "FAS_MUSL_SYSROOT=... dune runtest --profile release src/linker",
+    "logs": [
+      {
+        "path": "/home/glonex/.cache/fas-linker-qualification/section-coalescing-gate-20261106.log",
+        "sha256": "74be057f171be764d382c1b30afeb1c66f933be18653795d98f3dae5e95c5e25",
+        "exit": 1
+      },
+      {
+        "path": "/home/glonex/.cache/fas-linker-qualification/section-coalescing-gate-final-20261106.log",
+        "sha256": "859076a7213788897b6a0246799ef4993407969351eeb746c1ac5f3f0007254a",
+        "exit": 0
+      },
+      {
+        "path": "/home/glonex/.cache/fas-linker-qualification/section-coalescing-gate-debug-final-20261106.log",
+        "sha256": "19ca22394f33a7832ef3fcaf67778fdf903044a44ed51b48e00898d62259706d",
+        "exit": 0
+      }
+    ],
+    "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260"
+  },
+  "note": "First gate exposed an outdated map-test assumption of one output header per input contribution. Updated the test to verify input provenance, sizes, alignment and containment within actual ELF output sections; rerun passed. Real-program reruns retained separately."
+}

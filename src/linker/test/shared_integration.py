@@ -126,6 +126,8 @@ _start: call old_answer
                         self.assertNotIn('unused', exported)
                         self.assertEqual(run('readelf', '-aW', out).stderr, b'')
         for flags, present in ((('--export-dynamic',), True),
+                               (('-export-dynamic',), True),
+                               (('-export-dynamic', '--no-export-dynamic'), False),
                                (('-E', '--no-export-dynamic'), False),
                                (('--no-export-dynamic','-E'), True)):
             out = self.link('exports-exe', start, obj, library,

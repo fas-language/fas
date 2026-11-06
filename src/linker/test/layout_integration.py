@@ -118,12 +118,24 @@ large_end:
         sections = core.elf_sections(data)
         symbols = core.elf_symbols(data)[1:]
         section_rows = [r for r in rows if r[0] == 'section']
-        self.assertEqual(len(section_rows), len(sections) - 4)
-        for row, s in zip(section_rows, sections[1:-3]):
-            self.assertEqual([int(v, 16) for v in row[1:7]],
-                             [s['address'], s['offset'], 0 if s['kind'] == 8 else s['size'],
-                              s['size'], s['align'], s['flags']])
-            self.assertEqual(row[7], s['name'])
+        # Map rows describe input contributions, including empty ones. Several
+        # contributions can now share one conventional output section header.
+        inputs = {(str(path), s['name']): s for path in (self.start, self.support)
+                  for s in core.elf_sections(path.read_bytes()) if s['flags'] & 2}
+        self.assertEqual(len(section_rows), len(inputs))
+        covered = set()
+        for row in section_rows:
+            source = inputs[(row[8], row[7])]
+            address, offset, file_size, size, alignment, flags = [int(v, 16) for v in row[1:7]]
+            self.assertEqual([file_size, size, alignment, flags],
+                [0 if source['kind'] == 8 else source['size'], source['size'], source['align'], source['flags']])
+            name = '.text' if row[7].startswith('.text.') else row[7]
+            target = next(s for s in sections if s['name'] == name and
+                          s['address'] <= address and address+size <= s['address']+s['size'])
+            self.assertEqual(address-target['address'], offset-target['offset'])
+            self.assertEqual(address % alignment, 0)
+            covered.add(target['index'])
+        self.assertEqual(covered, {s['index'] for s in sections[1:-3]})
         symbol_rows = [r for r in rows if r[0] == 'symbol']
         self.assertEqual(len(symbol_rows), len(symbols))
         for row, s in zip(symbol_rows, symbols):
