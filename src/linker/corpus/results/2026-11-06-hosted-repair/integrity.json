@@ -1,0 +1,12 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "53f31e24dabb83a751d0259391c2becda20d5db9065adea3f10ff441c53b54f1",
+    "check.c": "e77df26588d0cda406513fa93e74cef6418340dd6323063bad81e7c97d633708",
+    "check.sh": "2cef41fc3a99e9866576b1f5d81ece7a4bc2ecf7ec1fe5aa0e08b341420bd42c",
+    "gcc-crt.json": "0b62260c9a3b2f1b8462e687c0f51451ebe8473ee4ff76cbdcd1b630e17c993f",
+    "gcc-crt.log": "ec78031e8e56457272684401eaa2fb8cd822122a5dbee250ff918c1fde228077",
+    "host-regressions.log": "4c8035ca872a97b002857e3d7f21b4bef4301f88f4e421caeb88404015d04696",
+    "observation.json": "0b412ba1102942ee400ebb8a34995f305333c257bd76d2cf4cc4a19e0e63ee92"
+  }
+}

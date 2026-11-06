@@ -1,0 +1,70 @@
+{
+  "observed_at": "2026-11-06T18:00:57.960733+00:00",
+  "status": "local-repair-passed-hosted-requalification-required",
+  "base_commit": "1685dad347902e6664271515799ac1b3ea9b19ed",
+  "source_sha256": {
+    "src/linker/elf_reader.ml": "e40285fc364afd0bfcc7da3de0654460928d860dc799587276cc26aff1b82af4",
+    "src/linker/test/integration.py": "a3e78f3ab2986240d8fcf16d7e188fcfd400d5e5419ba9521b72bdc3a1e0493f",
+    "src/linker/ci/verify.py": "563d90405f3c5f9d5add89158f2842c3362aa80424ea43d27e61330f37ddb06a"
+  },
+  "official_gcc": {
+    "run": 42255525799,
+    "job": 128021579408,
+    "conclusion": "failure",
+    "expected_executions_per_linker": 4974,
+    "passes": [
+      {
+        "linker": "fas",
+        "exit": 1,
+        "counts": {
+          "FAIL": 4956,
+          "UNRESOLVED": 4956,
+          "UNSUPPORTED": 75
+        },
+        "execution_passes": 0
+      },
+      {
+        "linker": "gnu",
+        "exit": 1,
+        "counts": {
+          "PASS": 9912,
+          "UNSUPPORTED": 57,
+          "FAIL": 18,
+          "UNRESOLVED": 18
+        },
+        "execution_passes": 4956
+      }
+    ],
+    "artifact": {
+      "artifact_id": 13524221311,
+      "name": "linker-gcc-torture-42255525799-1",
+      "size": 14966580,
+      "sha256": "0da210e9915a519ae28d47245f2e57c4fbd3ca2d87ad07635611c8c31e192211",
+      "github_digest_verified": true,
+      "zip_crc_verified": true
+    },
+    "log_sha256": "cadc974a8595ff56be5a09a151faeacbe9f367d253fa6c391151b3e666a857e5"
+  },
+  "original_fuzz": {
+    "run": 42240863721,
+    "job": 127970478118,
+    "conclusion": "failure",
+    "campaign_step": "success",
+    "artifact_upload": "failed-invalid-colon-in-afl-filename",
+    "retained_detailed_report": false,
+    "log_sha256": "2a2c7433d98358ad21660de331c6642718c639f6ce542e80ac00bf44ba318d89"
+  },
+  "local_root_gate": {
+    "exit": 0,
+    "cases": 266,
+    "groups": 44,
+    "skips": [],
+    "compiler_checks": 3792,
+    "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --profile release --force",
+    "log_sha256": "4c8035ca872a97b002857e3d7f21b4bef4301f88f4e421caeb88404015d04696"
+  },
+  "container_build_source_manifest_sha256": "72420ceda4d73837408cf81e79ee29d98dbe2fab0fccecd905030b84544bdaa1",
+  "upload_smoke_run": 42265587493,
+  "upload_smoke_seconds_per_target": 2,
+  "full_hosted_requalification": "pending"
+}

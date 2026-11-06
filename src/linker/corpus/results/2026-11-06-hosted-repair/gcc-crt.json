@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "image": "gcc:15.2.0@sha256:3ae15afe768b06d0c0fe088d822ba5f8045c26630bdacc8d8e7713cf5d8e7289",
+  "crt_sha256": "8cd1a50edd44a4ded5856bf2254dc106401b37c285dcc55a594475438cd6ec1a",
+  "matches_failed_hosted_crt": true,
+  "gcc": "15.2.0",
+  "glibc": "2.41-12+deb13u3",
+  "modes": [
+    "fixed",
+    "pie",
+    "static",
+    "static-pie"
+  ],
+  "linkers": [
+    "fas",
+    "gnu"
+  ],
+  "executions": 8,
+  "linker_sha256": "bd6b1acef67021dadb59c44693e63e1245a6f44901144d08385afba538da73af",
+  "log_sha256": "ec78031e8e56457272684401eaa2fb8cd822122a5dbee250ff918c1fde228077",
+  "scope": "focused startup/TLS/constructor checks, not the official GCC corpus",
+  "superseded_attempts": [
+    {
+      "log": "gcc-crt-pipefail.log",
+      "cause": "pipefail stopped the initial diagnostic ldd/head pipeline before any linker execution"
+    }
+  ]
+}

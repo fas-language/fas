@@ -280,6 +280,51 @@ class LinkerTests(unittest.TestCase):
         run(LINKER, "-o", self.root, self.simple, self.answer, expected=1)
         self.assertEqual(list(self.root.glob(".fas-ld-*.tmp")), [])
 
+    def test_relocatable_section_addresses_are_not_load_addresses(self):
+        obj = self.assemble('relocatable-addresses', '''
+.text
+.globl _start
+_start:
+.cfi_startproc
+mov value(%rip),%edi
+mov %edi,zero(%rip)
+mov zero(%rip),%edi
+mov $60,%eax
+syscall
+.cfi_endproc
+.data
+.globl value
+value: .long 42
+.bss
+.p2align 2
+zero: .zero 4
+.section .note.ABI-tag,"a",@note
+.p2align 2
+.long 4,16,1
+.asciz "GNU"
+.long 0,3,2,0
+''')
+        data = bytearray(obj.read_bytes())
+        names = {'.text', '.data', '.bss', '.eh_frame', '.note.ABI-tag', '.note.GNU-stack'}
+        for section in elf_sections(data):
+            if section['name'] in names:
+                struct.pack_into('<Q', data, section['header'] + 16, 0x1000 * section['index'])
+        obj.write_bytes(data)
+        tools = [('gnu', shutil.which('ld'))]
+        if shutil.which('ld.lld'):
+            tools.append(('lld', shutil.which('ld.lld')))
+        tools.append(('fas', LINKER))
+        for tag, tool in tools:
+            direct = self.link('address-direct-' + tag, obj, linker=tool)
+            run(direct, expected=42)
+            partial = self.link('address-partial-' + tag, obj, linker=tool, options=('-r',))
+            if tag == 'fas':
+                self.assertTrue(all(s['address'] == 0 for s in elf_sections(partial.read_bytes())))
+            for consumer_tag, consumer in tools:
+                final = self.link('address-final-' + tag + '-' + consumer_tag,
+                                  partial, linker=consumer)
+                run(final, expected=42)
+
     def test_malformed_objects(self):
         original = self.simple.read_bytes()
         sections = elf_sections(original)

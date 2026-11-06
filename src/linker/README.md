@@ -71,6 +71,11 @@ qualified environments and the remaining freeze gates.
 | Diagnostics | Input file, target section/offset and symbol for relocation failures |
 | Publication | Completed temporary file renamed in the destination directory; prior output preserved on failure |
 
+Relocatable input `sh_addr` values do not select load addresses. GNU partial
+links and glibc startup objects can retain nonzero values in these fields;
+symbols and relocations remain section-relative and the output layout assigns
+addresses. Fas partial output writes zero section addresses.
+
 `--version` prints the linker identity and exits. GNU-style `-v` prints it and
 continues a requested link; without inputs it prints the identity and exits.
 

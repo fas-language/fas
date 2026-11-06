@@ -127,8 +127,9 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
         let info = idx "section info" max_int (B.u32 data (at + 44)) in
         let alignment = idx "section alignment" max_alignment (B.u64 data (at + 48)) in
         let entsize = idx "section entry size" max_file_size (B.u64 data (at + 56)) in
-        if B.u64 data (at + 16) <> 0L then
-          fail "section %d: ET_REL section address must be zero" index;
+        (* GNU partial links and glibc CRT objects can retain nonzero sh_addr.
+           ET_REL symbols and relocations remain section-relative; only the
+           output layout assigns load addresses, so do not use this field. *)
         if alignment <> 0 && alignment land (alignment - 1) <> 0 then
           fail "section %d: alignment must be a power of two" index;
         if kind <> 8 then span (Printf.sprintf "section %d" index) offset size;
