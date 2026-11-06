@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-06",
+  "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot nice -n 10 dune runtest --profile release --force src/linker",
+  "exit": 0,
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "log": {
+    "path": "/home/glonex/.cache/fas-linker-qualification/linker-gate-final-20261106.log",
+    "sha256": "0cc73b37689acda9a82c760d84f7f240b277369e33fa1f6ac253d576e55808ac"
+  },
+  "python_cases": 248,
+  "python_groups": 41,
+  "skips": [],
+  "scope": "Forced linker suite including native/hosted driver, Valgrind and isolated musl. Compiler-wide 3782-case suite is earlier evidence, not rerun here.",
+  "additional_harness_gate": {
+    "cases": 2,
+    "groups": 1,
+    "exit": 0,
+    "record": "corpus-process-cleanup-2026-11-06.json"
+  }
+}

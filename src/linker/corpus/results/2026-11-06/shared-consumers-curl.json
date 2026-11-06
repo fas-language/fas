@@ -1,0 +1,92 @@
+{
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/curl-cross-final-20261106",
+  "report_sha256": "5267e8dde876dba5f2ca4bb2fb04b0229c8176472e3824e235bbf749b252a431",
+  "report": {
+    "scope": "bounded shared-library checks; both producer/consumer directions; no timings",
+    "corpus": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106",
+    "corpus_report_sha256": "6fdff909014fc97393c2a869c3b623be07fb9127c5d03df73d310fc713f0fb80",
+    "harness_sha256": "4f336453b62072592d7eef0f6bb946c63b077245bb51a765d0570b60ab6514d1",
+    "projects": [
+      {
+        "name": "curl",
+        "libraries": [
+          {
+            "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/lib/libcurl.so.4.8.0",
+            "gnu_sha256": "a25015548cadc10b198cd96bc8a0fad9619186322a5afb06be32c7f1d0bb481e",
+            "fas_sha256": "9b4913fabb056d90351436b2568ceb14635f8eaf046c35ab94515dc7dc1e9b10"
+          }
+        ],
+        "directions": [
+          {
+            "direction": "gnu-consumer-fas-library",
+            "executable": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/src/curl",
+            "executable_sha256": "213991f3b1b03e3033e6704bc7b66ef4712e790ecea3b77217a4efe21d44ae41",
+            "commands": [
+              {
+                "argv": [
+                  "ldd",
+                  "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/src/curl"
+                ],
+                "exit": 0,
+                "stdout_sha256": "a373136c092e4c47c8814bcfdf9a62eace481e9449ce1e356098c31013f1c29b",
+                "stderr_tail": ""
+              },
+              {
+                "argv": [
+                  "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/src/curl",
+                  "--noproxy",
+                  "*",
+                  "--fail",
+                  "--silent",
+                  "http://127.0.0.1:35065/payload"
+                ],
+                "exit": 0,
+                "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+                "stderr_tail": ""
+              }
+            ],
+            "ldd": "\tlinux-vdso.so.1 (0x00007f6a56f43000)\n\tlibcurl.so.4 => /home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/lib/libcurl.so.4 (0x00007f6a56e2c000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007f6a56a00000)\n\tlibssh2.so.1 => /usr/lib/x86_64-linux-gnu/libssh2.so.1 (0x00007f6a56dae000)\n\tlibidn2.so.0 => /usr/lib/x86_64-linux-gnu/libidn2.so.0 (0x00007f6a56d8c000)\n\tlibldap.so.2 => /usr/lib/x86_64-linux-gnu/libldap.so.2 (0x00007f6a56d29000)\n\tliblber.so.2 => /usr/lib/x86_64-linux-gnu/liblber.so.2 (0x00007f6a56d16000)\n\tlibssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3 (0x00007f6a568ef000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x00007f6a56200000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007f6a56cf8000)\n\tlibbrotlidec.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x00007f6a56ce9000)\n\tlibbrotlicommon.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x00007f6a56cc6000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007f6a5682c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f6a56f45000)\n\tlibunistring.so.5 => /usr/lib/x86_64-linux-gnu/libunistring.so.5 (0x00007f6a56019000)\n\tlibsasl2.so.2 => /usr/lib/x86_64-linux-gnu/libsasl2.so.2 (0x00007f6a56ca9000)\n",
+            "passed": true
+          },
+          {
+            "direction": "fas-consumer-gnu-library",
+            "executable": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/fas-outputs/build/src/curl",
+            "executable_sha256": "9814f86c082b85dc6a09a2ea04bbe7b6053faec23b45ec742a7a42585969fe4e",
+            "commands": [
+              {
+                "argv": [
+                  "ldd",
+                  "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/fas-outputs/build/src/curl"
+                ],
+                "exit": 0,
+                "stdout_sha256": "82abddfc5ed4d3c6d407da02cd0db95f06c623612b7f373bce5bf2d82779b938",
+                "stderr_tail": ""
+              },
+              {
+                "argv": [
+                  "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/fas-outputs/build/src/curl",
+                  "--noproxy",
+                  "*",
+                  "--fail",
+                  "--silent",
+                  "http://127.0.0.1:44215/payload"
+                ],
+                "exit": 0,
+                "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+                "stderr_tail": ""
+              }
+            ],
+            "ldd": "\tlinux-vdso.so.1 (0x00007cbe6d966000)\n\tlibcurl.so.4 => /home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/lib/libcurl.so.4 (0x00007cbe6d84f000)\n\tlibssh2.so.1 => /usr/lib/x86_64-linux-gnu/libssh2.so.1 (0x00007cbe6d7d1000)\n\tlibidn2.so.0 => /usr/lib/x86_64-linux-gnu/libidn2.so.0 (0x00007cbe6d7af000)\n\tlibldap.so.2 => /usr/lib/x86_64-linux-gnu/libldap.so.2 (0x00007cbe6d74c000)\n\tliblber.so.2 => /usr/lib/x86_64-linux-gnu/liblber.so.2 (0x00007cbe6d73b000)\n\tlibssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3 (0x00007cbe6d628000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x00007cbe6d000000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007cbe6cfe2000)\n\tlibbrotlidec.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x00007cbe6cfd3000)\n\tlibbrotlicommon.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x00007cbe6cfb0000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007cbe6ceed000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007cbe6cc00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007cbe6d968000)\n\tlibunistring.so.5 => /usr/lib/x86_64-linux-gnu/libunistring.so.5 (0x00007cbe6ca19000)\n\tlibsasl2.so.2 => /usr/lib/x86_64-linux-gnu/libsasl2.so.2 (0x00007cbe6ced2000)\n",
+            "passed": true
+          }
+        ],
+        "configure_control": {
+          "numeric_boolean_features": 488,
+          "differences": {},
+          "gnu_log_sha256": "43b910d39474c88068d7e41476b59d937872191d84b0403697dca8892af8f7fd"
+        },
+        "passed": true
+      }
+    ]
+  }
+}

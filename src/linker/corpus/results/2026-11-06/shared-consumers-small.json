@@ -1,0 +1,290 @@
+{
+  "scope": "bounded shared-library checks; both producer/consumer directions; no timings",
+  "corpus": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106",
+  "corpus_report_sha256": "7501e2c2c37805d721a385ae3e160e68cb22b607a130ed94e948119d03e71999",
+  "harness_sha256": "649e865739a76987b02e81f479607ac7ca7574a3376fa5718909833e93dd57f6",
+  "projects": [
+    {
+      "name": "bzip2",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/libbz2.so.1.0.8",
+          "gnu_sha256": "971a7aa48349117f7e571f62e7078891ee5fc74662f3e2019da8913d7ec07d44",
+          "fas_sha256": "e42774127b81721655fa07485236e25a0134814815f71ff8d718c6d16ca8f952"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2-shared",
+          "executable_sha256": "b9dce41eaf1da23d4852153af6c86cb1ef11f00271fa65f37d6a08c75fd2e8fb",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2-shared"
+              ],
+              "exit": 0,
+              "stdout_sha256": "d9a257cb65105ac2a207157080f1196e9b9dad8918780e7a950236062bbe8d30",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/bzip2/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/bzip2/gnu-consumer-fas-library.bz2"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000076becbd7a000)\n\tlibbz2.so.1.0 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/libbz2.so.1.0 (0x000076becbd52000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x000076becba00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000076becbd7c000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/fas-outputs/source/bzip2-shared",
+          "executable_sha256": "9b02cf458061b30501d7db088d70c9b4d26e037c0313b6da07185d16eaba7687",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/fas-outputs/source/bzip2-shared"
+              ],
+              "exit": 0,
+              "stdout_sha256": "5c023d9217bbbcc6395dcc8943820ccc4bd1e2333edfdfc8ad562378337a3e1a",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/fas-outputs/source/bzip2-shared",
+                "-c",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/bzip2/payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "70479e20cd0290f7c2408609be1b8e824dd4b0d9ad63ced24e9b2a0812210072",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/fas-outputs/source/bzip2-shared",
+                "-dc",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/bzip2/fas-consumer-gnu-library.bz2"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x000077186953b000)\n\tlibbz2.so.1.0 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/libbz2.so.1.0 (0x0000771869513000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x0000771869200000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000077186953d000)\n",
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "libpng",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16.47.0",
+          "gnu_sha256": "db378db050814df2b18df8ba2ed1a5e9a640ae9b077706e9d503861d8abd0965",
+          "fas_sha256": "0ba7af66cbb9eed8009020fe1e377c6d2c380a2740df0ba3dc8b039c37b15922"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngtest",
+          "executable_sha256": "ec8e2bf7b3d241a1e354b8e42991b677ee0e184d729769c02016ddd540602ed9",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngtest"
+              ],
+              "exit": 0,
+              "stdout_sha256": "39a7ae8f2aad1525cb401224a2bafd17677ddc73841e5dcfca39092d2ea00e8a",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngtest",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/source/pngtest.png",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libpng/gnu-consumer-fas-library.png"
+              ],
+              "exit": 0,
+              "stdout_sha256": "246f279375617156951015f92248fd10d43cdcda4114b591f75679552edfdd09",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007c0e64e7b000)\n\tlibpng16.so.16 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16 (0x00007c0e64e2e000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007c0e64a00000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007c0e64ddf000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007c0e64cb9000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007c0e64e7d000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/fas-outputs/build/pngtest",
+          "executable_sha256": "f7498a6d124bff9b287fc0bb357a7f6b75bb345bb327e09d35e105d155d57c08",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/fas-outputs/build/pngtest"
+              ],
+              "exit": 0,
+              "stdout_sha256": "e5c393b81c9d68535ef202860aec87ad6a95ffc8712d1a8ddb83c064d5dcbdb3",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/fas-outputs/build/pngtest",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/source/pngtest.png",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libpng/fas-consumer-gnu-library.png"
+              ],
+              "exit": 0,
+              "stdout_sha256": "246f279375617156951015f92248fd10d43cdcda4114b591f75679552edfdd09",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007082f3663000)\n\tlibpng16.so.16 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16 (0x00007082f3617000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007082f35c8000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007082f34a2000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007082f3200000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007082f3665000)\n",
+          "passed": true
+        }
+      ],
+      "configure_control": {
+        "numeric_boolean_features": 13,
+        "differences": {},
+        "gnu_log_sha256": "628bfd2f63345ad507fe4d75d5b5d521de5f60788e4d6b8e53f52f1f7a7b4249"
+      },
+      "passed": true
+    },
+    {
+      "name": "libarchive",
+      "libraries": [
+        {
+          "path": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13.8.11",
+          "gnu_sha256": "05ac907d20535b3bd53b4626ac06032a2ed4b1ebbdd40227e426d5ed2ee649f6",
+          "fas_sha256": "1558c95fb0c1845e53b7f582431e83479baa50b093c2ab2004d3142fa25705a5"
+        }
+      ],
+      "directions": [
+        {
+          "direction": "gnu-consumer-fas-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar",
+          "executable_sha256": "1ecee48963ecb506321cfa6d51d1fa5b0a4d7d340810a5a3fc66c14d15b8e382",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar"
+              ],
+              "exit": 0,
+              "stdout_sha256": "6f72c14a7cf2dfc6e635f230f490fa3938c641e26d421824e00bfec0a3ecc550",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar",
+                "-czf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar",
+                "-tf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz"
+              ],
+              "exit": 0,
+              "stdout_sha256": "d4e4877bac978b7952f0d544fc52ebff5411d351d129f1f056fa43f11da9af2b",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar",
+                "-xOf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/gnu-consumer-fas-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x0000725163529000)\n\tlibarchive.so.13 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13 (0x0000725163431000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x0000725163000000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007251633e2000)\n\tlibbz2.so.1.0 => /usr/lib/x86_64-linux-gnu/libbz2.so.1.0 (0x00007251633cd000)\n\tliblzma.so.5 => /usr/lib/x86_64-linux-gnu/liblzma.so.5 (0x0000725163398000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007251632d3000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x0000725162800000)\n\tlibxml2.so.16 => /usr/lib/x86_64-linux-gnu/libxml2.so.16 (0x0000725162e9d000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000072516352b000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007251626da000)\n",
+          "passed": true
+        },
+        {
+          "direction": "fas-consumer-gnu-library",
+          "executable": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+          "executable_sha256": "639cdae4410d55c0237e52ba53d805d21ea55bb8897f3059c027cd7023403ba1",
+          "commands": [
+            {
+              "argv": [
+                "ldd",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/fas-outputs/build/bin/bsdtar"
+              ],
+              "exit": 0,
+              "stdout_sha256": "eda2daca4c7636d5e20e2bf30496db64603b2ef1284778f6370c1afebd51b087",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-czf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-tf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz"
+              ],
+              "exit": 0,
+              "stdout_sha256": "d4e4877bac978b7952f0d544fc52ebff5411d351d129f1f056fa43f11da9af2b",
+              "stderr_tail": ""
+            },
+            {
+              "argv": [
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/fas-outputs/build/bin/bsdtar",
+                "-xOf",
+                "/home/glonex/.cache/fas-linker-qualification/popular-sections-cross-20261106/libarchive/fas-consumer-gnu-library.tar.gz",
+                "payload"
+              ],
+              "exit": 0,
+              "stdout_sha256": "2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9",
+              "stderr_tail": ""
+            }
+          ],
+          "ldd": "\tlinux-vdso.so.1 (0x00007a0ba716c000)\n\tlibarchive.so.13 => /home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13 (0x00007a0ba7076000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007a0ba7027000)\n\tlibbz2.so.1.0 => /usr/lib/x86_64-linux-gnu/libbz2.so.1.0 (0x00007a0ba7012000)\n\tliblzma.so.5 => /usr/lib/x86_64-linux-gnu/liblzma.so.5 (0x00007a0ba6fdd000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007a0ba6f18000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x00007a0ba6800000)\n\tlibxml2.so.16 => /usr/lib/x86_64-linux-gnu/libxml2.so.16 (0x00007a0ba669d000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007a0ba6400000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007a0ba716e000)\n\tlibm.so.6 => /usr/lib/x86_64-linux-gnu/libm.so.6 (0x00007a0ba62da000)\n",
+          "passed": true
+        }
+      ],
+      "configure_control": {
+        "numeric_boolean_features": 469,
+        "differences": {},
+        "gnu_log_sha256": "3f77b9792b060d5b912e2c5ffb892d9139d5a0e705bb408f1ff6f1c6bdc887a1"
+      },
+      "passed": true
+    }
+  ],
+  "report_sha256": "ea9b98be54838ab0f70a6edafd25e0a0ede5bdfdffd669ca1c2125707a170d60"
+}

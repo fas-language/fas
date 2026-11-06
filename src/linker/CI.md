@@ -39,6 +39,8 @@ documented in the [corpus guide](corpus/README.md).
 A separate four-hour GCC torture job uses the pinned official GCC 15.2.0 image,
 matching source commit and DejaGnu's `execute.exp` at `-O0`, `-O2` and `-Os`.
 It compares official executions with Fas/GNU linking identical retained inputs.
+The pinned baseline requires exactly 4,974 execution passes per linker; a changed
+capability selection fails the gate for investigation.
 Its explicit board capability excludes executable-stack trampolines, matching
 the linker's stack policy. LTO probes are unavailable and no LTO support is
 added. These are native C execution tests, not the complete GCC regression suite.

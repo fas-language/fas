@@ -1,0 +1,135 @@
+{
+  "date": "2026-11-06",
+  "purpose": "local real-C correctness; no performance comparison",
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106",
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "projects": [
+    {
+      "name": "lua",
+      "source_pin": {
+        "project": "lua",
+        "source_url": "https://www.lua.org/ftp/lua-5.1.5.tar.gz",
+        "sha256": "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+        "directory": "lua-5.1.5",
+        "bytes": 221213
+      },
+      "source_file_count": 102,
+      "source_manifest_sha256": "c567709deba95586ea8a93253b923331a6b9af25842bd2b24eaa06ce568980a8",
+      "upstream": [
+        {
+          "linker": "fas",
+          "check_processes": 15,
+          "all_expected_results": true
+        },
+        {
+          "linker": "gnu",
+          "check_processes": 15,
+          "all_expected_results": true
+        }
+      ],
+      "gnu_relinked_outputs": 2,
+      "input_trace_sha256": "5ba141f671b55ccabee138e55fb722149d8c501a3e752fe88f6fb384275ed11b"
+    },
+    {
+      "name": "bzip2",
+      "source_pin": {
+        "project": "bzip2",
+        "source_url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+        "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+        "directory": "bzip2-1.0.8",
+        "bytes": 810029
+      },
+      "source_file_count": 56,
+      "source_manifest_sha256": "059c9b13ebd9f3dcacdaeb51099f014093ee19fc75a443ec400865fcbc0e5ef9",
+      "upstream": [
+        {
+          "linker": "fas",
+          "check_processes": 5,
+          "all_expected_results": true
+        },
+        {
+          "linker": "gnu",
+          "check_processes": 5,
+          "all_expected_results": true
+        }
+      ],
+      "gnu_relinked_outputs": 4,
+      "input_trace_sha256": "d1b6794b07c0ea2a997684fc5109d3005b55084baadb55da6f7344e286103294"
+    },
+    {
+      "name": "libpng",
+      "source_pin": {
+        "project": "libpng",
+        "source_url": "https://codeload.github.com/pnggroup/libpng/tar.gz/refs/tags/v1.6.47",
+        "sha256": "631a4c58ea6c10c81f160c4b21fa8495b715d251698ebc2552077e8450f30454",
+        "directory": "libpng-1.6.47",
+        "bytes": 1571845
+      },
+      "source_file_count": 588,
+      "source_manifest_sha256": "76d2b5f6b12b37e7d2f835f5b8cab89eefe92829b59f5602c4875daa6d312e9d",
+      "upstream": [
+        {
+          "linker": "fas",
+          "check_processes": 1,
+          "all_expected_results": true,
+          "ctest_total": 33,
+          "ctest_skipped": 0,
+          "ctest_passed": 33
+        },
+        {
+          "linker": "gnu",
+          "check_processes": 1,
+          "all_expected_results": true,
+          "ctest_total": 33,
+          "ctest_skipped": 0,
+          "ctest_passed": 33
+        }
+      ],
+      "gnu_relinked_outputs": 8,
+      "input_trace_sha256": "7e2b557419e8ad59efd983b3505cbb876891b87f1e45892bb4a84ee34ca02de9"
+    },
+    {
+      "name": "libarchive",
+      "source_pin": {
+        "project": "libarchive",
+        "source_url": "https://codeload.github.com/libarchive/libarchive/tar.gz/refs/tags/v3.8.11",
+        "sha256": "6e9560b2e0659ff688c5efb7717a68bb06b28ef65a69addcd6c424eaf9c319b1",
+        "directory": "libarchive-3.8.11",
+        "bytes": 6845602
+      },
+      "source_file_count": 1580,
+      "source_manifest_sha256": "920b61e19aea63686f986973880fe7289595e18d4b9e335e3e8abcd793030e8e",
+      "upstream": [
+        {
+          "linker": "fas",
+          "check_processes": 1,
+          "all_expected_results": true,
+          "ctest_total": 1137,
+          "ctest_skipped": 133,
+          "ctest_passed": 1004
+        },
+        {
+          "linker": "gnu",
+          "check_processes": 1,
+          "all_expected_results": true,
+          "ctest_total": 1137,
+          "ctest_skipped": 133,
+          "ctest_passed": 1004
+        }
+      ],
+      "gnu_relinked_outputs": 10,
+      "input_trace_sha256": "8e4be18e58fe1733346908afbce204e6f9cc9b412239d0609f0b972aa3a2244f"
+    }
+  ],
+  "evidence": {
+    "report.json": "7501e2c2c37805d721a385ae3e160e68cb22b607a130ed94e948119d03e71999",
+    "commands.jsonl": "f246f779dc4db7f947c4d22c7a72baf56c0d05880b4420fc65f9e3e3d74df2bc"
+  },
+  "limitations": [
+    "Installed glibc and GCC native objects; no compiler/library ecosystem-wide claim",
+    "Lua examples are not the separate Lua release test suite",
+    "libarchive 133 CTest skips retained in each phase",
+    "Local correctness only; no performance measurements or hosted CI result",
+    "CMake configuration-probe temporary objects may be deleted upstream; all GNU-oracle-selected input hashes remain verifiable"
+  ]
+}

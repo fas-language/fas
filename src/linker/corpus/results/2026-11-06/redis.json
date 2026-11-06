@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-06",
+  "purpose": "Redis real-C correctness, no timing comparisons",
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106",
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "source_pin": {
+    "project": "redis",
+    "source_url": "https://codeload.github.com/redis/redis/tar.gz/refs/tags/7.2.8",
+    "sha256": "66edcb676acf0f611e1cd8d69aa294c0256cb1658094c73bad529d1546eb89ac",
+    "directory": "redis-7.2.8",
+    "bytes": 3433914
+  },
+  "source_file_count": 1584,
+  "source_manifest_sha256": "199078e381312ee2fd2e6504ec9c446d7343d8200ab05ec8d7cf9d08e0712166",
+  "upstream": [
+    {
+      "linker": "fas",
+      "checks": [
+        {
+          "exit": 0,
+          "expected_exit": 0,
+          "passed": true,
+          "stdout_sha256": "d22c0228552d508df8b9f48b8864c17108fdf31b4d427709e5631cc44b9630c1",
+          "selected_units": [
+            "unit/auth",
+            "unit/protocol",
+            "unit/keyspace",
+            "unit/type/string",
+            "unit/type/list",
+            "unit/type/set",
+            "unit/type/zset",
+            "unit/type/hash",
+            "unit/other",
+            "unit/multi",
+            "unit/scripting",
+            "unit/dump",
+            "integration/rdb",
+            "integration/aof"
+          ]
+        }
+      ]
+    },
+    {
+      "linker": "gnu",
+      "checks": [
+        {
+          "exit": 0,
+          "expected_exit": 0,
+          "passed": true,
+          "stdout_sha256": "014623e682498ba58db133c6e031e0b491f60205ef289aa872f480e9ac4c49b5",
+          "selected_units": [
+            "unit/auth",
+            "unit/protocol",
+            "unit/keyspace",
+            "unit/type/string",
+            "unit/type/list",
+            "unit/type/set",
+            "unit/type/zset",
+            "unit/type/hash",
+            "unit/other",
+            "unit/multi",
+            "unit/scripting",
+            "unit/dump",
+            "integration/rdb",
+            "integration/aof"
+          ]
+        }
+      ]
+    }
+  ],
+  "gnu_relinked_outputs": 5,
+  "input_trace_sha256": "ff92ad275cf655eac1c8893a064a6dcbe97fe18910a21709249abf2c2e4bbfe0",
+  "harness_sha256": "0df11ff8ba757d4fd5546759ecdf6aa169852f262ed617f15627a7fdf71f4a19",
+  "runtime_scratch": {
+    "runtime_scratch": "/var/tmp/fas-redis-_961f2z0/tests/tmp",
+    "runtime_scratch_retained_at": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/tests/tmp"
+  },
+  "evidence": {
+    "report.json": "6e4d262cbd85920a1c65e24372a14a5db38a538d4f13d2c40ac6992df4d58f80",
+    "commands.jsonl": "57a57a95d5e90cca8a86341de33cef53181515b7c68c76789714f41105614524"
+  },
+  "scope": "14 upstream Tcl units: auth, protocol, keyspace, string/list/set/zset/hash, other, multi, scripting, dump, RDB and AOF; libc allocator, native O2, two clients; exact native-object GNU replay",
+  "limitations": [
+    "No cluster, Sentinel, TLS, large-memory or benchmark coverage",
+    "No Redis modules producer/consumer ABI claim"
+  ]
+}

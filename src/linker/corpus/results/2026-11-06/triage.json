@@ -1,0 +1,81 @@
+{
+  "date": "2026-11-06",
+  "policy": "Keep failures and superseded runs visible; none count as passing qualification. Final results use recorded corrected recipes, without test-source rewrites or new XFAILs.",
+  "runs": [
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/popular-network-final-20261105",
+      "classification": "Linker defects",
+      "explanation": "curl Valgrind rejected duplicate .text output headers; Redis build used unsupported GNU -export-dynamic. Corrected in d1aa050; focused tests and final corpora qualify the fixes.",
+      "artifacts": {
+        "report.json": "426ed450a0daaef0836d949e4cb9303049965a6b8b32b71044d9680997526e43"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/popular-probe-20261105",
+      "classification": "Linker and harness/configuration baseline",
+      "explanation": "GNU -v incorrectly exited before linking (corrected in c0afb14); intentional Lua readonly error was mistaken for failure; bzip2 Makefiles reused non-PIC objects; generic snapshot omitted required libarchive build/cmake modules. Recipes corrected; independent GNU feature controls added.",
+      "artifacts": {
+        "report.json": "4d4cc8be37809229a8196efc35f66430a4b40b820d98e1cb0999576391aa54fa",
+        "interrupted.json": "68cbaab13b0623b92c33b5fac5db9893c027d60951374f17af160bc628bfdc54"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/redis-section-fix-20261106",
+      "classification": "Harness paths/selection",
+      "explanation": "Absolute Unix-socket path exceeded sockaddr_un limits; nonexistent unit/basic requested. Both linkers failed. Use actual unit/keyspace and private short scratch root.",
+      "artifacts": {
+        "report.json": "2344d0b5495f79a4a1de8840102da36edbbe6833994bf5f1271956caf8de9352"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/redis-socket-final-20261106",
+      "classification": "Harness paths",
+      "explanation": "Short socket path lacked tests/tmp/server.* structure required by upstream process-title assertion; both linkers failed. Private root now preserves that structure.",
+      "artifacts": {
+        "report.json": "f6eb6a2198ce8f1f2419a6a8792567c5e94716004244b5bfb5eda441f4dde899"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-sections-O2-20261106",
+      "classification": "Compiler baseline and official feature probe",
+      "explanation": "vfprintf-chk-1 aborts with either linker under distribution-default _FORTIFY_SOURCE. GNU tmpnam warning also caused fileio feature probe to skip three programs. Fortify controls and corrected official printf selection retained; no XFAIL added.",
+      "artifacts": {
+        "report.json": "4121cf8866d8d91fffb1caea8b483848401942aa1f2b754f3af0766eb656753d",
+        "gcc-fas.sum": "85dae4639977f88c9380f0eb059b119f5d6764102ac0b891b937677d0c6c3f7d",
+        "gcc-gnu.sum": "8fffab153b8d7c999385c2b821d772ddaa1f3204d8dd1ff6eeb4cd993d7baaf0",
+        "vfprintf-triage/report.json": "cef14b010ccb79cf2ba172f8ef46df3ddc78ef8ec2094b7f44c7ed343619d19a",
+        "vfprintf-triage/source-controls.json": "6dc1e0527cff89f52129a83018d6f413c7f8aa07f26f397c98f5e2181bf83e71",
+        "vfprintf-triage/gnu-backtrace.log": "e194d3c3fa0ba189341db60b67241b3b9f67bbeb7e9d23ed9ceeb7d22cb2b7fb"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-native-full-20261106",
+      "classification": "Superseded, interrupted",
+      "explanation": "Default fortify Fas pass showed 3 runtime failures; raw GNU phase stopped after independent same-object O2 controls reproduced the compiler baseline. Not a passing full matrix.",
+      "artifacts": {
+        "report.json": "9646ded960971ea435381bec472abc12741cbc02862c86d3a206482f03746854",
+        "interrupted.json": "114d0c290b6db4dd743bf0b432a43dd64032ef0ebe6589c6d2a196d41079bf94",
+        "gcc-fas.sum": "77f5302b0d5ed888d8c854e2420835ec038f91760addbe7280b2af14f3410365"
+      }
+    },
+    {
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-final-20261106",
+      "classification": "Superseded, interrupted",
+      "explanation": "Corrected fortify full run stopped after discovering unequal GNU fileio probe selection. Replaced by gcc-torture-qualified-20261106; incomplete results remain retained.",
+      "artifacts": {
+        "report.json": "edf2c9ff5af54c373d69156f527df888c03c87879626a14edf373f5224d6f701",
+        "interrupted.json": "1f0338bf1d52958d2dc890ba5af400101195f94df0ef60aaf4ec9a4bf39220da"
+      }
+    }
+  ],
+  "fortify_official_controls": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-fortify-controls-20261106",
+    "report_sha256": "53dc135f624972fa22df975410d475f0187243f3f8471e04b042be2eef424ec1",
+    "scope": "three checked stdio tests, O0/O2/Os, both linkers; explicit -U_FORTIFY_SOURCE; all pass"
+  },
+  "fileio_official_controls": {
+    "snapshot": "/home/glonex/.cache/fas-linker-qualification/gcc-torture-probe-control-20261106",
+    "report_sha256": "c0ee807586392698da8c150658666649a6f52ef5f6e06134303b7f004dbca2e3",
+    "scope": "11 printf-family files, O0/O2/Os; 33 official execution passes each linker, identical labels and retained-object keys; GNU probe diagnostics disabled, actual test diagnostics retained"
+  }
+}

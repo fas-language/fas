@@ -1,0 +1,159 @@
+{
+  "date": "2026-11-06",
+  "purpose": "curl upstream native C correctness, no timing comparison",
+  "snapshot": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106",
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "source_pin": {
+    "project": "curl",
+    "source_url": "https://curl.se/download/curl-8.14.1.tar.xz",
+    "sha256": "f4619a1e2474c4bbfedc88a7c2191209c8334b48fa1f4e53fd584cc12e9120dd",
+    "directory": "curl-8.14.1",
+    "bytes": 2817248
+  },
+  "source_file_count": 4029,
+  "source_manifest_sha256": "9ab3057b34d233b8ee74ac89e11c62bbcaf00dc66abfafcaf18ad77068c7e4fc",
+  "upstream": [
+    {
+      "linker": "fas",
+      "checks": [
+        {
+          "argv": [
+            "cmake",
+            "--build",
+            "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build",
+            "--target",
+            "test-nonflaky"
+          ],
+          "exit": 0,
+          "expected_exit": 0,
+          "passed": true,
+          "stdout_sha256": "ba2b5e65bde1b118ccd26b7b18d314ce7832aebe19d60ddae103021b786b49c9",
+          "upstream_summary": [
+            "TESTDONE: 1839 tests were considered during 1551 seconds.",
+            "TESTINFO: 276 tests were skipped due to these restraints:",
+            "TESTINFO: \"curl lacks Debug support\" 93 times (159, 356, 358, 359, 363, 412, 413, 437, 438 and 84 more)",
+            "TESTINFO: \"no stunnel\" 58 times (300, 301, 302, 303, 304, 305, 306, 307, 308 and 49 more)",
+            "TESTINFO: \"failed starting SSH server\" 52 times (582, 583, 600, 601, 602, 603, 604, 605, 606 and 43 more)",
+            "TESTINFO: \"configured as DISABLED\" 14 times (323, 594, 836, 882, 938, 1182, 1184, 1209, 1211 and 5 more)",
+            "TESTINFO: \"disabled by keyword\" 11 times (1139, 1140, 1173, 1177, 1275, 1276, 1477, 1478, 1488 and 2 more)",
+            "TESTINFO: \"curl lacks manual support\" 7 times (1026, 1179, 1461, 1707, 1708, 1709, 1710)",
+            "TESTINFO: \"curl lacks Schannel support\" 6 times (2033, 2070, 2079, 2087, 3023, 3024)",
+            "TESTINFO: \"curl lacks GSS-API support\" 5 times (1282, 2056, 2057, 2077, 2078)",
+            "TESTINFO: \"curl lacks h2c support\" 5 times (1700, 1701, 1702, 1704, 1800)",
+            "TESTINFO: \"curl lacks http/2 support\" 4 times (471, 2402, 2403, 2404)",
+            "TESTINFO: \"curl has IDN support\" 3 times (959, 960, 961)",
+            "TESTINFO: \"curl lacks http/3 support\" 3 times (2500, 2502, 2503)",
+            "TESTINFO: \"curl lacks TrackMemory support\" 3 times (96, 558, 1330)",
+            "TESTINFO: \"curl lacks ECH support\" 2 times (4000, 4001)",
+            "TESTINFO: \"curl lacks PSL support\" 2 times (1136, 1476)",
+            "TESTINFO: \"curl has IPv6 support\" 1 time (1454)",
+            "TESTINFO: \"curl has proxy support\" 1 time (375)",
+            "TESTINFO: \"curl has threaded-resolver support\" 1 time (506)",
+            "TESTINFO: \"curl lacks http/2 server support\" 1 time (2405)",
+            "TESTINFO: \"curl lacks override-dns support\" 1 time (2102)",
+            "TESTINFO: \"curl lacks Unicode support\" 1 time (1703)",
+            "TESTINFO: \"failed starting SMB server\" 1 time (1451)",
+            "TESTINFO: \"test_rlimit problem: \" 1 time (537)",
+            "IGNORED: passed tests: 573 587 1086 1113 1162 1163 1208 1510 1592 2032",
+            "TESTDONE: 1563 tests out of 1563 reported OK: 100%"
+          ],
+          "retained_valgrind_command_logs": [
+            {
+              "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/curl-logs-fas/2/commands.log",
+              "sha256": "1f467a5ac84e0cedd9c697ea723f931569e70c4af4d359c8786914289bfb6d37"
+            },
+            {
+              "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/curl-logs-fas/1/commands.log",
+              "sha256": "b9ba5252067fb2cc7bbe8f6b64b433125fdc116597305c83a69ff8fd2ddfddb0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "linker": "gnu",
+      "checks": [
+        {
+          "argv": [
+            "cmake",
+            "--build",
+            "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build",
+            "--target",
+            "test-nonflaky"
+          ],
+          "exit": 0,
+          "expected_exit": 0,
+          "passed": true,
+          "stdout_sha256": "5eb9ed220f6fc9d025b2e627a5b7a9ee1f206d8aadf8316b3a8ed844686b025a",
+          "upstream_summary": [
+            "TESTDONE: 1839 tests were considered during 1384 seconds.",
+            "TESTINFO: 276 tests were skipped due to these restraints:",
+            "TESTINFO: \"curl lacks Debug support\" 93 times (159, 356, 358, 359, 363, 412, 413, 437, 438 and 84 more)",
+            "TESTINFO: \"no stunnel\" 58 times (300, 301, 302, 303, 304, 305, 306, 307, 308 and 49 more)",
+            "TESTINFO: \"failed starting SSH server\" 52 times (582, 583, 600, 601, 602, 603, 604, 605, 606 and 43 more)",
+            "TESTINFO: \"configured as DISABLED\" 14 times (323, 594, 836, 882, 938, 1182, 1184, 1209, 1211 and 5 more)",
+            "TESTINFO: \"disabled by keyword\" 11 times (1139, 1140, 1173, 1177, 1275, 1276, 1477, 1478, 1488 and 2 more)",
+            "TESTINFO: \"curl lacks manual support\" 7 times (1026, 1179, 1461, 1707, 1708, 1709, 1710)",
+            "TESTINFO: \"curl lacks Schannel support\" 6 times (2033, 2070, 2079, 2087, 3023, 3024)",
+            "TESTINFO: \"curl lacks GSS-API support\" 5 times (1282, 2056, 2057, 2077, 2078)",
+            "TESTINFO: \"curl lacks h2c support\" 5 times (1700, 1701, 1702, 1704, 1800)",
+            "TESTINFO: \"curl lacks http/2 support\" 4 times (471, 2402, 2403, 2404)",
+            "TESTINFO: \"curl has IDN support\" 3 times (959, 960, 961)",
+            "TESTINFO: \"curl lacks http/3 support\" 3 times (2500, 2502, 2503)",
+            "TESTINFO: \"curl lacks TrackMemory support\" 3 times (96, 558, 1330)",
+            "TESTINFO: \"curl lacks ECH support\" 2 times (4000, 4001)",
+            "TESTINFO: \"curl lacks PSL support\" 2 times (1136, 1476)",
+            "TESTINFO: \"curl has IPv6 support\" 1 time (1454)",
+            "TESTINFO: \"curl has proxy support\" 1 time (375)",
+            "TESTINFO: \"curl has threaded-resolver support\" 1 time (506)",
+            "TESTINFO: \"curl lacks http/2 server support\" 1 time (2405)",
+            "TESTINFO: \"curl lacks override-dns support\" 1 time (2102)",
+            "TESTINFO: \"curl lacks Unicode support\" 1 time (1703)",
+            "TESTINFO: \"failed starting SMB server\" 1 time (1451)",
+            "TESTINFO: \"test_rlimit problem: \" 1 time (537)",
+            "IGNORED: passed tests: 573 587 1086 1113 1162 1163 1208 1510 1592 2032",
+            "TESTDONE: 1563 tests out of 1563 reported OK: 100%"
+          ],
+          "retained_valgrind_command_logs": [
+            {
+              "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/curl-logs-gnu/2/commands.log",
+              "sha256": "1f467a5ac84e0cedd9c697ea723f931569e70c4af4d359c8786914289bfb6d37"
+            },
+            {
+              "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/curl-logs-gnu/1/commands.log",
+              "sha256": "491976262d037ec26078f718bc386b86e702d49a5cecedc7134a5ce391fcc1f4"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "gnu_relinked_outputs": 326,
+  "input_trace_sha256": "ed9eeede661926ada917b70f62cc7a4bc690076dbfee523a166a8876eb984b4c",
+  "harnesses": {
+    "harness_sha256": "d54b86ad8257e479fef4e1fc89376a84299864d40a1b1f02c52f15c1e1a7fca6",
+    "harness_snapshot": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/tools/corpus-run.py",
+    "popular_harness_sha256": "034dc11e2514121725e86114dc5297bf43b205f315851286516a7f48939e6004"
+  },
+  "toolchain_inputs": {
+    "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+    "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+    "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+    "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+    "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+  },
+  "test_environment": {
+    "TFLAGS": "-j2",
+    "LC_ALL": "C.UTF-8"
+  },
+  "scope": "Upstream build and declared test selection, GCC native objects, Fas then same-object/archive GNU replay; LTO disabled",
+  "evidence": {
+    "report.json": "6fdff909014fc97393c2a869c3b623be07fb9127c5d03df73d310fc713f0fb80",
+    "commands.jsonl": "780e4d84b8e9784027793da538e1b74b0563681c851620d3bd2b2fda1d88b67a"
+  },
+  "limitations": []
+}

@@ -12,6 +12,29 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Expanded qualification — 2026-11-06
+
+The [local qualification record](corpus/results/2026-11-06/README.md) now covers
+Lua, bzip2, libpng, libarchive, curl, Redis and a fresh SQLite replay through Fas
+and exact-input GNU controls. Both linkers pass 4,974 official GCC C torture
+executions at three optimization levels, with identical execution selections;
+57 upstream unsupported cases per linker remain explicit. Curl passes 1,563
+upstream tests under Valgrind per linker, with 276 skips. Four libraries also
+pass both shared-library producer/consumer directions.
+
+This work repaired duplicate conventional ELF section headers rejected by
+debug readers, GNU driver flag compatibility and native relocatable output
+containing embedded C/assembly. The forced linker gate passes 248 Python cases
+across 41 groups without skips, plus two added process-cleanup harness cases.
+Four large-input groups and seven fresh fuzz campaigns pass; the latter execute
+1,536,207 inputs with no saved crashes or hangs. These bounded local campaigns
+do not replace sustained fuzzing or hosted release qualification.
+
+Source, input, output, harness and toolchain provenance is retained with the
+results, including superseded failures. Hosted CI has not run for this snapshot;
+the updated workflow passes Actionlint locally. v0.7/v0.8 qualification remains
+in progress, and the main performance campaign stays deferred.
+
 ## Subsequent repair status — 2026-11-05
 
 SQLite real-library qualification now builds the canonical 3.54.1 CLI, archive,

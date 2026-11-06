@@ -1,0 +1,436 @@
+{
+  "purpose": "Supplemental local qualification provenance and source/input integrity",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "python": "3.13.9 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 19:16:10) [GCC 11.2.0]",
+  "tools": {
+    "gcc": {
+      "path": "/usr/bin/gcc",
+      "resolved": "/usr/bin/x86_64-linux-gnu-gcc-15",
+      "sha256": "b5f1b773a7c733738352000c92a077dc5852a1a2fc6d836b1e411be1e9ec5f88",
+      "exit": 0,
+      "version": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    "clang": {
+      "path": "/usr/bin/clang",
+      "resolved": "/usr/lib/llvm-21/bin/clang",
+      "sha256": "412bbe8c60571a1eb06f48fde89635033621caeb01a9b4ee76d46711bae8e932",
+      "exit": 0,
+      "version": "Ubuntu clang version 21.1.8 (6ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-21/bin"
+    },
+    "ld": {
+      "path": "/usr/bin/ld",
+      "resolved": "/usr/bin/x86_64-linux-gnu-ld.bfd",
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "exit": 0,
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty."
+    },
+    "as": {
+      "path": "/usr/bin/as",
+      "resolved": "/usr/bin/x86_64-linux-gnu-as",
+      "sha256": "4e5fcaa3cdc160173cb5cfe7aa35dc39d7aa1f06ba8d75b8d923bbae5473991b",
+      "exit": 0,
+      "version": "GNU assembler (GNU Binutils for Ubuntu) 2.46\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or later.\nThis program has absolutely no warranty.\nThis assembler was configured for a target of `x86_64-linux-gnu'."
+    },
+    "ar": {
+      "path": "/usr/bin/ar",
+      "resolved": "/usr/bin/x86_64-linux-gnu-ar",
+      "sha256": "531473816bf553e863df5aab14c8177c72b732cf80c51dcf0fa990a50125041c",
+      "exit": 0,
+      "version": "GNU ar (GNU Binutils for Ubuntu) 2.46\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) any later version.\nThis program has absolutely no warranty."
+    },
+    "readelf": {
+      "path": "/usr/bin/readelf",
+      "resolved": "/usr/bin/x86_64-linux-gnu-readelf",
+      "sha256": "c857339616bbbfa5eba32733e22365048903fbaf6ed2126b897dd138bcb741fc",
+      "exit": 0,
+      "version": "GNU readelf (GNU Binutils for Ubuntu) 2.46\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) any later version.\nThis program has absolutely no warranty."
+    },
+    "valgrind": {
+      "path": "/usr/bin/valgrind",
+      "resolved": "/usr/bin/valgrind",
+      "sha256": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+      "exit": 0,
+      "version": "valgrind-3.26.0"
+    },
+    "cmake": {
+      "path": "/usr/bin/cmake",
+      "resolved": "/usr/bin/cmake",
+      "sha256": "6e1dccda39845415d68eabb934c598998949c99ec4668625d571aee1827b05c7",
+      "exit": 0,
+      "version": "cmake version 4.2.3\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake)."
+    },
+    "make": {
+      "path": "/usr/bin/make",
+      "resolved": "/usr/bin/make",
+      "sha256": "27c9f6d806aee15882b01c2c61848f7aa75caa14bc7b6f608ba422f9e46a7d49",
+      "exit": 0,
+      "version": "GNU Make 4.4.1\nBuilt for x86_64-pc-linux-gnu\nCopyright (C) 1988-2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law."
+    },
+    "perl": {
+      "path": "/usr/bin/perl",
+      "resolved": "/usr/bin/perl",
+      "sha256": "b8946c83070e6aa031495d36a17324d7ae3f29eee658a5ab4cc4fbd47c45520a",
+      "exit": 0,
+      "version": "This is perl 5, version 40, subversion 1 (v5.40.1) built for x86_64-linux-gnu-thread-multi\n(with 59 registered patches, see perl -V for more detail)\n\nCopyright 1987-2025, Larry Wall\n\nPerl may be copied only under the terms of either the Artistic License or the\nGNU General Public License, which may be found in the Perl 5 source kit.\n\nComplete documentation for Perl, including FAQ lists, should be found on\nthis system using \"man perl\" or \"perldoc perl\".  If you have access to the\nInternet, point your browser at https://www.perl.org/, the Perl Home Page."
+    },
+    "ocamlopt": {
+      "path": "/home/glonex/.opam/default/bin/ocamlopt",
+      "resolved": "/home/glonex/.opam/default/bin/ocamlopt.opt",
+      "sha256": "b0d848da55e509eeffa2f23f1eab8384220ffa3c75032e7fa93b49530aff8361",
+      "exit": 0,
+      "version": "5.4.1"
+    },
+    "dune": {
+      "path": "/home/glonex/.opam/default/bin/dune",
+      "resolved": "/home/glonex/.opam/default/bin/dune",
+      "sha256": "2852da2df0300537b9e916739a3c1554eb6a0c7084227fc73a84d09e6c832b3d",
+      "exit": 0,
+      "version": "3.24.2"
+    },
+    "clang-22": {
+      "path": "/usr/bin/clang-22",
+      "resolved": "/usr/lib/llvm-22/bin/clang",
+      "sha256": "9dff149140cff7484c1efd85a5cfe0e3f046edcf71c63b42b5501c4a2ee462ae",
+      "exit": 0,
+      "version": "Ubuntu clang version 22.1.8 (++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-22/bin\n"
+    },
+    "ld.lld-22": {
+      "path": "/usr/bin/ld.lld-22",
+      "resolved": "/usr/lib/llvm-22/bin/lld",
+      "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+      "exit": 0,
+      "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)\n"
+    },
+    "gcc-15": {
+      "path": "/usr/bin/gcc-15",
+      "resolved": "/usr/bin/x86_64-linux-gnu-gcc-15",
+      "sha256": "b5f1b773a7c733738352000c92a077dc5852a1a2fc6d836b1e411be1e9ec5f88",
+      "exit": 0,
+      "version": "gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+    }
+  },
+  "runs": {
+    "popular-sections-small-20261106": {
+      "source_integrity": {
+        "lua": {
+          "files": 102,
+          "mismatches": []
+        },
+        "bzip2": {
+          "files": 56,
+          "mismatches": []
+        },
+        "libpng": {
+          "files": 588,
+          "mismatches": []
+        },
+        "libarchive": {
+          "files": 1580,
+          "mismatches": []
+        }
+      },
+      "input_trace_integrity": {
+        "lua": {
+          "same_object_observations": 15,
+          "mismatches": [],
+          "trace_sha256": "5ba141f671b55ccabee138e55fb722149d8c501a3e752fe88f6fb384275ed11b",
+          "all_trace_cleaned_probe_observations": 0,
+          "note": "Oracle-selected link inputs and both output copies verified; CMake deletes some separate configuration-probe inputs after recording hashes."
+        },
+        "bzip2": {
+          "same_object_observations": 29,
+          "mismatches": [],
+          "trace_sha256": "d1b6794b07c0ea2a997684fc5109d3005b55084baadb55da6f7344e286103294",
+          "all_trace_cleaned_probe_observations": 0,
+          "note": "Oracle-selected link inputs and both output copies verified; CMake deletes some separate configuration-probe inputs after recording hashes."
+        },
+        "libpng": {
+          "same_object_observations": 63,
+          "mismatches": [],
+          "trace_sha256": "7e2b557419e8ad59efd983b3505cbb876891b87f1e45892bb4a84ee34ca02de9",
+          "all_trace_cleaned_probe_observations": 2,
+          "note": "Oracle-selected link inputs and both output copies verified; CMake deletes some separate configuration-probe inputs after recording hashes."
+        },
+        "libarchive": {
+          "same_object_observations": 785,
+          "mismatches": [],
+          "trace_sha256": "8e4be18e58fe1733346908afbce204e6f9cc9b412239d0609f0b972aa3a2244f",
+          "all_trace_cleaned_probe_observations": 241,
+          "note": "Oracle-selected link inputs and both output copies verified; CMake deletes some separate configuration-probe inputs after recording hashes."
+        }
+      }
+    },
+    "redis-corpus-final-20261106": {
+      "source_integrity": {
+        "redis": {
+          "files": 1584,
+          "mismatches": []
+        }
+      },
+      "input_trace_integrity": {
+        "redis": {
+          "same_object_observations": 164,
+          "mismatches": [],
+          "trace_sha256": "ff92ad275cf655eac1c8893a064a6dcbe97fe18910a21709249abf2c2e4bbfe0",
+          "all_trace_cleaned_probe_observations": 0,
+          "note": "Oracle-selected link inputs and both output copies verified; CMake deletes some separate configuration-probe inputs after recording hashes."
+        }
+      }
+    },
+    "curl-section-fix-20261106": {
+      "source_integrity": {
+        "curl": {
+          "files": 4029,
+          "mismatches": [],
+          "checked_after_upstream_and_cross": true
+        }
+      },
+      "input_trace_integrity": {
+        "curl": {
+          "same_object_observations": 3260,
+          "mismatches": [],
+          "trace_sha256": "ed9eeede661926ada917b70f62cc7a4bc690076dbfee523a166a8876eb984b4c",
+          "all_trace_cleaned_probe_observations": 124,
+          "oracle_outputs_verified": 326,
+          "note": "Oracle-selected link inputs and both output copies verified after cross checks; separate CMake configure probes may have been deleted after hashing."
+        }
+      }
+    }
+  },
+  "glibc": "glibc 2.43",
+  "local_workflow_lint": {
+    "tool": "actionlint v1.7.7 from cached Go module",
+    "exit": 0,
+    "workflow_sha256": "9e29e64e0b57a9986fa013d53381bbf1384e9870393fc9b287c81c51224fd9eb",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hosted_ci": "not run"
+  },
+  "runtime_libraries": {
+    "/usr/lib/x86_64-linux-gnu/libm.so.6": {
+      "resolved": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "sha256": "1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8"
+    },
+    "/usr/lib/x86_64-linux-gnu/libc.so.6": "85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7",
+    "/lib64/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+    "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0": {
+      "resolved": "/usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4",
+      "sha256": "7138aeb748f73c150b1d34d67de69139a441910cd7b269076ba3c8b986dea9a7"
+    },
+    "/usr/lib/x86_64-linux-gnu/libz.so.1": "27fa6c6cb94fb5b099ead61758a300dbc392d1dbf307fff6c16a9b8e57fdc9de",
+    "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16": {
+      "resolved": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16.47.0",
+      "sha256": "db378db050814df2b18df8ba2ed1a5e9a640ae9b077706e9d503861d8abd0965"
+    },
+    "/usr/lib/x86_64-linux-gnu/liblzma.so.5": {
+      "resolved": "/usr/lib/x86_64-linux-gnu/liblzma.so.5.8.3",
+      "sha256": "515749273a91ca5e3b273b4025dc2c1f8827f90005baea0ab85ffb594e74f72f"
+    },
+    "/usr/lib/x86_64-linux-gnu/libzstd.so.1": "060eeb79531d435306665fd78329d8a9dd579f95876c5960bb67937825362a80",
+    "/usr/lib/x86_64-linux-gnu/libcrypto.so.3": "5385f0436ac2e284ba8c5fb1488874057c29c04be72dea32add832694f381e28",
+    "/usr/lib/x86_64-linux-gnu/libxml2.so.16": {
+      "resolved": "/usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2",
+      "sha256": "302dfa1295c6f917758243ef0f118f7144026b51a5f5cd1610fba849c968f73b"
+    },
+    "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13": {
+      "resolved": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13.8.11",
+      "sha256": "05ac907d20535b3bd53b4626ac06032a2ed4b1ebbdd40227e426d5ed2ee649f6"
+    },
+    "/usr/lib/x86_64-linux-gnu/libsystemd.so.0": {
+      "resolved": "/usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0",
+      "sha256": "7c8bd89f59b9f96fdb933eb1414f449c2db45fbb078c8d793cc46f9173be7934"
+    },
+    "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/lib/libcurl.so.4": "a25015548cadc10b198cd96bc8a0fad9619186322a5afb06be32c7f1d0bb481e",
+    "/usr/lib/x86_64-linux-gnu/libssh2.so.1": "34287a1e8942e6fdf1c154e8c615a8dab7a69dc6a4e8d76913afb323fdc6fd6f",
+    "/usr/lib/x86_64-linux-gnu/libidn2.so.0": "cdb48484c43a795c3722e286c31eb6238b4b7c3780043895dd9fa6b6041f78da",
+    "/usr/lib/x86_64-linux-gnu/libldap.so.2": "0aa894b6d72690723015f6056bb6730a1cca41a2fac8224ef38cd7880c8e7860",
+    "/usr/lib/x86_64-linux-gnu/liblber.so.2": "e2f9e23d75b37be7bdcdc39d2f74e2355a68f2ccd86e7f6534969ad8b359834b",
+    "/usr/lib/x86_64-linux-gnu/libssl.so.3": "63b47f444efa588e291e9b650a5ba2ab02f856356f2d50f13a2e477db9119e09",
+    "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1": "470ed7f6b9053163b65b83efebc53bb98ca0d7a5a30ead2b545a4e5574da9c91",
+    "/usr/lib/x86_64-linux-gnu/libunistring.so.5": "c762a289c02f716a12549d544a811715126067b9a6377057671d3fad9453a1fc",
+    "/usr/lib/x86_64-linux-gnu/libsasl2.so.2": "25163eb0a23ffe7d4170f9e219886dfdb831bbb1031a2cfac2227284a7f51e02",
+    "/usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1": "7f3acc17bffda6f12f7b022e9386514cfd83e77de67e71218bcbf19ec3577a99"
+  },
+  "runtime_dependency_probes": [
+    {
+      "project": "lua",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/lua/source/src/luac",
+      "exit": 0,
+      "stdout_sha256": "a21b8065c24720215e4e42cfac9519e04ee056bdc21ecfd310f798a25046c9d1"
+    },
+    {
+      "project": "lua",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/lua/source/src/lua",
+      "exit": 0,
+      "stdout_sha256": "3a1fb62beadaced2590d9b4d360c1b8f92e50ebeaaac2d1c4451c185bb7ff090"
+    },
+    {
+      "project": "bzip2",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/libbz2.so.1.0.8",
+      "exit": 0,
+      "stdout_sha256": "d106c8e1927a52ce13bc1f0f5cdbd3d1ea77f1219480d242de867aff0fcd25ff"
+    },
+    {
+      "project": "bzip2",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2-shared",
+      "exit": 0,
+      "stdout_sha256": "00619932501b96b38d13cc5a0022366ef4a4b236d6b4de36781307ddcd62dd69"
+    },
+    {
+      "project": "bzip2",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2recover",
+      "exit": 0,
+      "stdout_sha256": "734ff3fcf56568976e258bfd7a508cba0ad2d5c52769871790aba44815138b5e"
+    },
+    {
+      "project": "bzip2",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/bzip2/source/bzip2",
+      "exit": 0,
+      "stdout_sha256": "cc1b1f51e56080989882195ffe1fb564417c9104753090817ef87a213f965cdd"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/png-fix-itxt",
+      "exit": 0,
+      "stdout_sha256": "297043a51b246505e304eba17472f6ba2330032a92488e35eff5d83b2ed21a98"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/libpng16.so.16.47.0",
+      "exit": 0,
+      "stdout_sha256": "441dae43417b5bbb17e67859f11abd23e7b05cbc79cb009983b00a71f251e923"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngtest",
+      "exit": 0,
+      "stdout_sha256": "30cc743f375e40287d4cbb6187a8e05b5098931022e011a25b5ae70a84fc67b0"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngstest",
+      "exit": 0,
+      "stdout_sha256": "0bc8e45aa10291e3d2f76ded0fdbb2b1baeacba680544c24789458b629484283"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngunknown",
+      "exit": 0,
+      "stdout_sha256": "a05c8e2ab5558abd0fd30e4d5d7e70a5a130efff1f863aebafb7a1d5cf745e72"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngimage",
+      "exit": 0,
+      "stdout_sha256": "ebbc592524e8ab7c1e9c4c38115014edbb3f9c54a1477654f681876aae72c9bf"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngfix",
+      "exit": 0,
+      "stdout_sha256": "ffa2a871f9a2a60fc4febf6be875ccf50a6a25e66c769357d91418994d685021"
+    },
+    {
+      "project": "libpng",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libpng/build/pngvalid",
+      "exit": 0,
+      "stdout_sha256": "7ea784dd44ec8de519ab16b74cb618e35d69011c9d7159310445ac6258dd6cb1"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/libarchive/libarchive.so.13.8.11",
+      "exit": 0,
+      "stdout_sha256": "5adbb4f7a48ebae93a5a26fc0ec4fbc27b8e4938d145dd8aeeccb7884a7c4e1a"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar",
+      "exit": 0,
+      "stdout_sha256": "48e81e33e9525aa1468999803fc9d5e7410c36230bbeb9198c95c3ae09cba538"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdcat_test",
+      "exit": 0,
+      "stdout_sha256": "b896668be024db66a9f9b6bf0b1a0cad2cc23dac0f6635e99564de674cef2ce9"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdcpio",
+      "exit": 0,
+      "stdout_sha256": "8b47d792e15e18e6c7e856259e6a56ea2f487e8d7fae9d6596956bfe88e1c214"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdcpio_test",
+      "exit": 0,
+      "stdout_sha256": "1f7f205c1f02822ee591e8065631e0b9efa0e246edabd283b8b30176bfca68d3"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdtar_test",
+      "exit": 0,
+      "stdout_sha256": "7add435faf8bd1b2f84f5490606d3d1161ea016191a7e7ce2cfe594ac19e466d"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdunzip",
+      "exit": 0,
+      "stdout_sha256": "d5c882ff28df939251fa9a220f0451f4108ed2b0ffa188c0d6fd1ffd2bf641c1"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdunzip_test",
+      "exit": 0,
+      "stdout_sha256": "d8e70430591eb8c5e849faab12970e88f15e7509cc3e1109ae4b5488b49a7ff9"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/bsdcat",
+      "exit": 0,
+      "stdout_sha256": "78f6ba96ae8b302f3e60ddf0a9a0683d09b1f20ceb26478e54dbc5609df56f3f"
+    },
+    {
+      "project": "libarchive",
+      "image": "/home/glonex/.cache/fas-linker-qualification/popular-sections-small-20261106/libarchive/build/bin/libarchive_test",
+      "exit": 0,
+      "stdout_sha256": "9c13f9c6dc6441296cc02e5c3da15bc87b121199da1688e093c639734edc3b58"
+    },
+    {
+      "project": "redis",
+      "image": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/deps/lua/src/luac",
+      "exit": 0,
+      "stdout_sha256": "c91b2dae167c1fa7f45879fbb71e0583ac15b86a4cf186562e7ca27be736e4c6"
+    },
+    {
+      "project": "redis",
+      "image": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/deps/lua/src/lua",
+      "exit": 0,
+      "stdout_sha256": "b703c406f6033b5c99a033dcf768cdf43fc81f3141b6946b006e692f277adbd3"
+    },
+    {
+      "project": "redis",
+      "image": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/src/redis-server",
+      "exit": 0,
+      "stdout_sha256": "67a4284719aac88d1ad39ffea0d363f24df982915bac9ded841e0084887c06a5"
+    },
+    {
+      "project": "redis",
+      "image": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/src/redis-benchmark",
+      "exit": 0,
+      "stdout_sha256": "c2abece70e2e5da8cabbad5654d61b0a092f56a0d4de6b149fd9572828ef6783"
+    },
+    {
+      "project": "redis",
+      "image": "/home/glonex/.cache/fas-linker-qualification/redis-corpus-final-20261106/redis/source/src/redis-cli",
+      "exit": 0,
+      "stdout_sha256": "b6de41093549696b0692112b5ef5c30b289faf55981e348da9c9aa726f4b7204"
+    },
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/src/curl",
+      "exit": 0,
+      "stdout": "\tlinux-vdso.so.1 (0x00007740f654f000)\n\tlibcurl.so.4 => /home/glonex/.cache/fas-linker-qualification/curl-section-fix-20261106/curl/build/lib/libcurl.so.4 (0x00007740f6439000)\n\tlibc.so.6 => /usr/lib/x86_64-linux-gnu/libc.so.6 (0x00007740f6000000)\n\tlibssh2.so.1 => /usr/lib/x86_64-linux-gnu/libssh2.so.1 (0x00007740f63bb000)\n\tlibidn2.so.0 => /usr/lib/x86_64-linux-gnu/libidn2.so.0 (0x00007740f6399000)\n\tlibldap.so.2 => /usr/lib/x86_64-linux-gnu/libldap.so.2 (0x00007740f6336000)\n\tliblber.so.2 => /usr/lib/x86_64-linux-gnu/liblber.so.2 (0x00007740f6323000)\n\tlibssl.so.3 => /usr/lib/x86_64-linux-gnu/libssl.so.3 (0x00007740f5eef000)\n\tlibcrypto.so.3 => /usr/lib/x86_64-linux-gnu/libcrypto.so.3 (0x00007740f5800000)\n\tlibz.so.1 => /usr/lib/x86_64-linux-gnu/libz.so.1 (0x00007740f6305000)\n\tlibbrotlidec.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x00007740f62f6000)\n\tlibzstd.so.1 => /usr/lib/x86_64-linux-gnu/libzstd.so.1 (0x00007740f6233000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007740f6551000)\n\tlibunistring.so.5 => /usr/lib/x86_64-linux-gnu/libunistring.so.5 (0x00007740f5619000)\n\tlibsasl2.so.2 => /usr/lib/x86_64-linux-gnu/libsasl2.so.2 (0x00007740f5ed4000)\n\tlibbrotlicommon.so.1 => /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x00007740f5eb1000)\n",
+      "stderr": ""
+    }
+  ],
+  "runtime_dependency_scope": "Initial ldd closures for recorded GNU oracle outputs, including curl main; bounded cross checks separately record both DSO directions. Not a claim about every optional dlopen dependency."
+}

@@ -56,11 +56,14 @@ copies the native executable as `fas-ld`; it does not install an OCaml library A
 | Symbols | Local, strong and weak globals; section-relative, absolute and global common; NOTYPE, OBJECT, FUNC, SECTION, FILE, COMMON, TLS, GNU_IFUNC; default/protected/hidden/internal visibility |
 | Relocations | RELA: `R_X86_64_NONE`, `64`, `PC32`, `PC64`, `PLT32`, `32`, `32S`, `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTPC64` |
 | Entry | Executables: global `_start` by default, or `-e SYMBOL`, inside executable code; shared libraries: zero |
-| Flags | `-o`/`--output`, `-r`/`--relocatable`, `-e`/`--entry`, `-L`/`-l`, groups/whole-archive, `@FILE`, `-Map`/`--Map`, `--gc-sections`/`--no-gc-sections`, `-u`/`--undefined`, `--stats`, `--`, `--help`, `--version` |
+| Flags | `-o`/`--output`, `-r`/`--relocatable`, `-e`/`--entry`, `-L`/`-l`, groups/whole-archive, `@FILE`, `-Map`/`--Map`, `--gc-sections`/`--no-gc-sections`, `-u`/`--undefined`, `--stats`, `--`, `--help`, `--version`, `-v` |
 | Metadata | LLVM address-significance tables validated/consumed; five GNU x86 bitmask properties merged; DWARF 4/5 compiler fixtures and CFI unwind/index plus personality/LSDA pointer handling |
 | Output permissions | Separate R, RX, and RW load segments, no writable executable sections, non-executable stack |
 | Diagnostics | Input file, target section/offset and symbol for relocation failures |
 | Publication | Completed temporary file renamed in the destination directory; prior output preserved on failure |
+
+`--version` prints the linker identity and exits. GNU-style `-v` prints it and
+continues a requested link; without inputs it prints the identity and exits.
 
 Relocation expressions operate on 64-bit address bit patterns. `32` must
 zero-extend and `32S`/`PC32`/`PLT32` must sign-extend to the computed result.
@@ -381,9 +384,10 @@ Unresolved default-visibility weak imports remain available to LD_PRELOAD throug
 dynamic GOT/PLT references. Fixed-output narrow absolute references to absent
 weak providers bind to zero, as required by the tested non-PIE GCC CRT.
 Regular executable definitions take precedence over DSO definitions. Definitions
-referenced by supplied DSOs are exported and retained by GC; `-E`/
-`--export-dynamic` exports all visible definitions, and `--no-export-dynamic`
-restores the default. DSO references can extract later archive members.
+referenced by supplied DSOs are exported and retained by GC; `-E`,
+`--export-dynamic` and GNU's `-export-dynamic` export all visible definitions,
+and `--no-export-dynamic` restores the default. DSO references can extract later
+archive members.
 
 Init/fini/preinit arrays are combined in numeric priority order, preserving input
 order for ties. `.init`/`.fini` CRT fragments are combined with executable NOP

@@ -33,6 +33,15 @@ roadmap work, per the user's scope decision.
 | **0.9 — release candidate** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
 | **1.0 — production Linux release** | Stable documented CLI/library and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
 
+The [2026-11-06 local qualification](corpus/results/2026-11-06/README.md) passes
+seven real C projects with exact-input GNU comparisons, 4,974 official GCC
+torture executions per linker and four libraries in both shared-library
+directions. A fresh SQLite replay, four large-input groups and seven bounded
+fuzz campaigns also pass. Pinned CI jobs now cover the expanded corpus and
+require the full selected GCC execution count. Hosted execution, broader
+compiler/libc configurations, sustained fuzzing and release artifacts remain
+open gates; these local results do not complete v0.7 or v0.8.
+
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,
 per the user's revised priority. Malformed-input tests and fuzzing grow

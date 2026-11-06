@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-06",
+  "changes": "Native -c combines embedded C and assembly through Fas Partial_link; ET_REL unresolved references remain for final consumers; atomic publication preserves existing outputs on failure",
+  "linker_sha256": "5d4d4afeaaf3ba572d19b78204aa0ba0cca2730358abb450199fc53404775260",
+  "verification": [
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/native-partial-probe-20261106.log",
+      "sha256": "19d1f83c8709fba48d65ae1da73c06efbb095d32c0bf5ec4de8f2b5114f9287e",
+      "exit": 0,
+      "command": "Focused HostedNativeTests.test_native_object_combines_embedded_c_and_assembly"
+    },
+    {
+      "path": "/home/glonex/.cache/fas-linker-qualification/native-partial-gate-20261106.log",
+      "sha256": "e42a4574d637a9a3bec0a9c50cafff602ad1487c800d6c1d908af1be1608e3df",
+      "exit": 0,
+      "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --profile release src/linker (incremental gate; hosted native 16 cases, native integration 9 cases)"
+    }
+  ],
+  "scope": "No package library inclusion in ET_REL; existing explicit rejection retained",
+  "source_sha256": {
+    "bin/main.ml": "fa634c9004c9d164daee05cb72fcf3d238e8badc7c860e08808d2eb821fa5eb0",
+    "src/linker/test/hosted_native_integration.py": "d77cd372c5b244c2e8c4afa3805692c7292a30483ce4da409f24aa36b32e1858"
+  },
+  "compiler_sha256": "47781dd966f79378c9db30e1d7e5f3ce9a1cf84cf52bda3f6608a346cf45e632"
+}
