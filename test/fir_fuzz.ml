@@ -59,7 +59,9 @@ let label g =
   g.next <- g.next + 1;
   Printf.sprintf "^b%d" g.next
 
-let int_tys = [ I 8; I 16; I 32; I 64 ]
+(* i128 has no register in the native backend: Fir_wide splits it into
+   two i64 limbs there, while LLVM (the oracle) keeps it whole *)
+let int_tys = [ I 8; I 16; I 32; I 64; I 128 ]
 let all_tys = int_tys @ [ F32; F64 ]
 
 (* An interesting constant of type [t], as Fir text with its type. *)
@@ -69,7 +71,12 @@ let const g t =
   | I w ->
       let pool = [ 0L; 1L; 2L; 3L; 7L; -1L; -2L; 255L; 256L; 65535L; 0x7fffffffL; 0x80000000L; Int64.max_int; Int64.min_int; 12345L; -77L ] in
       let x = if chance g 0.6 then choose g pool else Random.State.bits64 g.rs in
-      let x = if w = 64 then x else Int64.shift_right (Int64.shift_left x (64 - w)) (64 - w) in
+      if w = 128 && chance g 0.4 then
+        (* both limbs random, or a limb boundary value *)
+        let hi = if chance g 0.5 then Random.State.bits64 g.rs else choose g pool in
+        Printf.sprintf "i128 0x%016Lx%016Lx" hi x
+      else
+      let x = if w >= 64 then x else Int64.shift_right (Int64.shift_left x (64 - w)) (64 - w) in
       Printf.sprintf "i%d %Ld" w x
   | F64 ->
       let x = choose g [ 0.0; -0.0; 1.0; -1.5; 0.1; 3.25; 1e10; -7e-5; 123456.789; 0.5 ] in
@@ -108,7 +115,11 @@ and gen_int_op g w =
   | 10 ->
       (* funnel shifts take the count modulo the width *)
       line g "%s = %s %s %s, %s, %s" r (choose g [ "fshl"; "fshr" ]) t a b (pick g (I w))
-  | 0 | 1 -> line g "%s = %s %s %s, %s" r (choose g [ "add"; "sub"; "mul"; "umulh"; "smulh" ]) t a b
+  | 0 | 1 ->
+      (* no i128 mul-high: the oracle's Ir has no i256 to compute it in
+         (test/fas_fir/c/wide covers it against clang instead) *)
+      let ops = [ "add"; "sub"; "mul" ] @ if w = 128 then [] else [ "umulh"; "smulh" ] in
+      line g "%s = %s %s %s, %s" r (choose g ops) t a b
   | 2 -> line g "%s = %s %s %s, %s" r (choose g [ "and"; "or"; "xor" ]) t a b
   | 3 ->
       let s = fresh g in
@@ -160,7 +171,7 @@ let gen_float_op g t =
       line g "%s = %s %s %s, %s" r (choose g [ "fadd"; "fsub"; "fmul"; "fdiv"; "frem"; "copysign"; "fmin"; "fmax" ]) tt (pick g t) (pick g t)
   | 2 -> line g "%s = %s %s %s" r (choose g [ "fneg"; "fabs"; "sqrt"; "floor"; "ceil"; "roundeven" ]) tt (pick g t)
   | 3 ->
-      let w = (choose g [ 8; 16; 32; 64 ]) in
+      let w = (choose g [ 8; 16; 32; 64; 128 ]) in
       line g "%s = %s %s %s" r (choose g [ "sitofp"; "uitofp" ]) tt (int_of g w)
   | 4 ->
       let other = if t = F32 then F64 else F32 in
@@ -257,7 +268,7 @@ and gen_if g depth =
 (* switch on a small value, every arm merging one value *)
 and gen_switch g depth =
   let t = choose g all_tys in
-  let w = choose g [ 8; 16; 32; 64 ] in
+  let w = choose g [ 8; 16; 32; 64; 128 ] in
   let x = fresh g in
   line g "%s = and i%d %s, i%d 7" x w (int_of g w) w;
   let n = 1 + int g 4 in
@@ -347,7 +358,7 @@ let gen_module seed =
   let g = { rs; buf; next = 0; env = []; mem = "%out"; callees = [] } in
   Buffer.add_string buf "func @main (i32, ptr) -> (i32) global {\n^entry(%argc: i32, %argv: ptr):\n";
   g.env <- [ ("%argc", I 32) ];
-  line g "%%out = alloca ptr i64 8, align 8";
+  line g "%%out = alloca ptr i64 16, align 16";
   List.iter
     (fun s ->
       let args =
@@ -366,7 +377,7 @@ let gen_module seed =
       line g "%s = call %s @%s(%s)" r (sig_text s) s.fname (String.concat ", " args);
       let bits =
         match s.ret with
-        | I 64 -> r
+        | I 64 | I 128 -> r
         | I w ->
             let z = fresh g in
             line g "%s = zext i64 %s" z r;
@@ -392,7 +403,7 @@ let gen_module seed =
       line g "store %s, %%out, align 8" bits;
       let pi = fresh g and w = fresh g in
       line g "%s = ptrtoint i64 %%out" pi;
-      line g "%s = syscall i64 i64 1, i64 1, %s, i64 8" w pi)
+      line g "%s = syscall i64 i64 1, i64 1, %s, i64 %d" w pi (if s.ret = I 128 then 16 else 8))
     sigs;
   line g "ret i32 0";
   Buffer.add_string buf "}\n";
@@ -446,18 +457,27 @@ let check_seed tmp seed =
           match Fir_to_ir.convert ~like m with
           | exception Fir_to_ir.Unsupported msg -> Broken ("fir -> ir: " ^ msg ^ " (" ^ save () ^ ")")
           | ir -> (
+              (* the native backend gets its own copy, legalized *)
+              let native_ir () =
+                let m = Fir_parse.parse_module text in
+                Fir_wide.run m;
+                match Fir_verify.verify m with
+                | [] -> Fir_to_ir.convert ~like m
+                | errs -> failwith ("verifier after Fir_wide: " ^ String.concat "; " errs)
+              in
               let nexe = Filename.concat tmp "n" and lexe = Filename.concat tmp "l" in
               let ll = Filename.concat tmp "m.ll" in
               write ll (Ir.render ir);
+              (* -lm: without SSE4.1, LLVM lowers floor/ceil/... to libm calls *)
               let lstatus =
                 Sys.command
-                  (Printf.sprintf "%s -O2 -w -x ir %s -o %s 2>%s" !cc (Filename.quote ll) (Filename.quote lexe)
+                  (Printf.sprintf "%s -O2 -w -x ir %s -lm -o %s 2>%s" !cc (Filename.quote ll) (Filename.quote lexe)
                      (Filename.quote (Filename.concat tmp "cc.err")))
               in
               if lstatus <> 0 then
                 Broken ("clang: " ^ read (Filename.concat tmp "cc.err") ^ " (" ^ save () ^ ")")
               else
-                match (try Native_gen.compile ir with e -> Error (Printexc.to_string e)) with
+                match (try Native_gen.compile (native_ir ()) with e -> Error (Printexc.to_string e)) with
                 | Error msg -> Differ ("native compile: " ^ msg ^ " (" ^ save () ^ ")")
                 | Ok image ->
                     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_binary ] 0o755 nexe in

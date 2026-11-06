@@ -62,11 +62,15 @@ let rec suffix (t : ty) =
    - [fir.sysv.m.N]: MEMORY class (larger than 16 bytes, or a misaligned
      field), N the size rounded up to 8. Copied onto the stack; returned
      through a hidden pointer in rdi.
+   - [fir.sysv.r16.ii]: 16 bytes, align 16, both eightbytes INTEGER (C's
+     __int128, and Fir_wide's i128 limb pairs). Like [fir.sysv.r.ii], but
+     16-aligned on the stack; for LLVM the struct holds one i128, which LLVM
+     passes that way.
    Both are padded to whole eightbytes, so values are copied into padded
    slots and never read past the front end's own bytes.
 
    An aggregate this cannot classify (vector, i128 or x87 fields, an empty
-   or overaligned one) keeps the plain [N x i8] form, which the native
+   or overaligned one, any other align-16 one) keeps the plain [N x i8] form, which the native
    backend passes by address: fine between functions it compiles, refused
    at an external boundary. *)
 let sysv_structs : (string, Ir.struct_def) Hashtbl.t = Hashtbl.create 8
@@ -93,10 +97,11 @@ let sysv_agg ~size ~align fields =
     | _ -> None
   in
   let sizes = List.map (fun (off, t) -> (off, t, natural t)) fields in
-  if size <= 0 || align > 8 || List.exists (fun (_, _, n) -> n = None) sizes then None
+  if size <= 0 || align > 16 || List.exists (fun (_, _, n) -> n = None) sizes then None
   else
     let aligned = List.for_all (fun (off, _, n) -> off mod Option.get n = 0) sizes in
-    if size > 16 || not aligned then begin
+    if align = 16 && (size <> 16 || not aligned) then None
+    else if size > 16 || not aligned then begin
       let n = (size + 7) / 8 * 8 in
       let name = Printf.sprintf "fir.sysv.m.%d" n in
       Hashtbl.replace sysv_structs name { Ir.name; fields = [ bytes n ]; tail_padding = 0 };
@@ -113,6 +118,15 @@ let sysv_agg ~size ~align fields =
           cls.(w) <- Some (match cls.(w) with None -> sse | Some c -> c && sse))
         sizes;
       if Array.exists (( = ) None) cls then None
+      else if align = 16 then
+        (* two INTEGER eightbytes 16-aligned: __int128's convention, which
+           LLVM gives an i128 *)
+        if cls <> [| Some false; Some false |] then None
+        else begin
+          let name = "fir.sysv.r16.ii" in
+          Hashtbl.replace sysv_structs name { Ir.name; fields = [ Ir.I128 ]; tail_padding = 0 };
+          Some (Ir.Struct name, 16)
+        end
       else
         let letters = Array.to_list (Array.map (fun c -> if c = Some true then "f" else "i") cls) in
         let name = "fir.sysv.r." ^ String.concat "" letters in
@@ -159,14 +173,26 @@ let vv cx (v : value) : Ir.value =
   | Const c -> (
       match c with
       | Cint (_, limbs) ->
-          if Array.length limbs > 1 then begin
-            let lo = limbs.(0) in
-            let sign = if Int64.compare lo 0L < 0 then -1L else 0L in
-            for k = 1 to Array.length limbs - 1 do
-              if limbs.(k) <> sign then unsupported "integer constant wider than 64 bits"
-            done
-          end;
-          Ir.Const (ir_ty t, limb0 limbs)
+          let lo = limb0 limbs in
+          let sign = if Int64.compare lo 0L < 0 then -1L else 0L in
+          let fits = ref true in
+          for k = 1 to Array.length limbs - 1 do
+            if limbs.(k) <> sign then fits := false
+          done;
+          if !fits then Ir.Const (ir_ty t, lo)
+          else if t = Int 128 && Array.length limbs = 2 then begin
+            (* Ir constants are one int64: build (zext hi << 64) | zext lo *)
+            let ins mk =
+              let id = fresh cx in
+              add cx (mk id);
+              Ir.Local (id, Ir.I128)
+            in
+            let half x = ins (fun id -> Ir.Cast (id, "zext", Ir.I64, Ir.Const (Ir.I64, x), Ir.I128)) in
+            let hi = half limbs.(1) and lo = half lo in
+            let hs = ins (fun id -> Ir.Bin (id, Ir.Shl, Ir.I128, hi, Ir.Const (Ir.I128, 64L))) in
+            ins (fun id -> Ir.Bin (id, Ir.Or, Ir.I128, hs, lo))
+          end
+          else unsupported "integer constant wider than 64 bits"
       | Cfloat (_, limbs) -> Ir.Const (ir_ty t, limb0 limbs)
       | Cnull _ -> Ir.Null (ir_ty t)
       | Cpoison _ -> Ir.Undef (ir_ty t)

@@ -67,12 +67,19 @@ let is_float_ty = function F32 | F64 -> true | _ -> false
      returned in rax, rdx (the 'i's) and xmm0, xmm1 (the 'f's);
    - [fir.sysv.m.N] (MEMORY), N a multiple of 8: N/8 stack words; returned
      through a pointer the caller passes in rdi and the callee hands back in
-     rax.
+     rax;
+   - [fir.sysv.r16.ii]: as [fir.sysv.r.ii], but 16-byte aligned (__int128,
+     and the i64 pairs Fir_wide makes of i128): on the stack it starts at an
+     even word, the odd word before it left as a gap; through [...] the
+     overflow area pointer is rounded up to 16 first.
    Any other aggregate keeps this backend's own convention, a pointer to the
    bytes in one gpr (local functions only, see [external_abi]). *)
 type sysv = Sreg of bool list  (** per eightbyte, true = SSE *) | Smem of int  (** bytes *)
 
 let sysv_of = function
+  | Struct name when String.starts_with ~prefix:"fir.sysv.r16." name ->
+      let cc = String.sub name 13 (String.length name - 13) in
+      Some (Sreg (List.init (String.length cc) (fun k -> cc.[k] = 'f')))
   | Struct name when String.starts_with ~prefix:"fir.sysv.r." name ->
       let cc = String.sub name 11 (String.length name - 11) in
       Some (Sreg (List.init (String.length cc) (fun k -> cc.[k] = 'f')))
@@ -82,12 +89,16 @@ let sysv_of = function
 
 let sret_of ty = match sysv_of ty with Some (Smem _) -> true | _ -> false
 
+let sysv_align16 = function Struct name -> String.starts_with ~prefix:"fir.sysv.r16." name | _ -> false
+
 (* Where each argument of the given types goes: one class per eightbyte
-   (one for a scalar), plus the gprs, xmms and stack words used. [sret]: the
-   hidden result pointer takes rdi first. *)
+   (one for a scalar), plus the gprs, xmms and stack words used (gaps before
+   16-aligned arguments included). [sret]: the hidden result pointer takes
+   rdi first. *)
 let classify_sysv ?(sret = false) tys =
   let gi = ref (if sret then 1 else 0) and xi = ref 0 and si = ref 0 in
-  let stack n =
+  let stack ?(align16 = false) n =
+    if align16 && !si mod 2 = 1 then incr si;
     let base = !si in
     si := base + n;
     List.init n (fun k -> Stack (base + k))
@@ -103,7 +114,7 @@ let classify_sysv ?(sret = false) tys =
               List.map
                 (fun sse -> if sse then (incr xi; Xmm (!xi - 1)) else (incr gi; Gpr (!gi - 1)))
                 cls
-            else stack (List.length cls)
+            else stack ~align16:(sysv_align16 ty) (List.length cls)
         | Some (Smem n) -> stack (n / 8)
         | None ->
             if is_float_ty ty && !xi < 8 then (incr xi; [ Xmm (!xi - 1) ])
@@ -1516,17 +1527,17 @@ let gen_call ctx fr ~variadic result ret_ty target args =
   in
   let pad = if stack_args mod 2 = 1 then 8 else 0 in
   if pad > 0 then A.alu_ri a A.Sub A.Rsp pad;
-  (* Stack arguments, last first *)
-  List.iter
-    (function
-      | Stack _, (_, _, v), Some j ->
-          word A.Rax v j;
-          A.push a A.Rax
-      | Stack _, (_, _, v), None ->
-          load ctx fr A.Rax v;
-          A.push a A.Rax
-      | _ -> ())
-    (List.rev pieces);
+  (* Stack arguments, last word first; a gap (before a 16-aligned argument)
+     gets whatever rax holds *)
+  let words = Array.make stack_args None in
+  List.iter (function Stack k, arg, j -> words.(k) <- Some (arg, j) | _ -> ()) pieces;
+  for k = stack_args - 1 downto 0 do
+    (match words.(k) with
+    | Some ((_, _, v), Some j) -> word A.Rax v j
+    | Some ((_, _, v), None) -> load ctx fr A.Rax v
+    | None -> ());
+    A.push a A.Rax
+  done;
   (* Float arguments go through rax, which is no argument register. *)
   List.iter
     (function
@@ -1634,6 +1645,8 @@ let gen_intrinsic ctx fr result ret_ty name args =
        176 - 16*nx); otherwise, and for MEMORY class, from the overflow area,
        rounded up to 8 bytes. Either way its eightbytes are copied to slot. *)
     let cls = String.sub name 20 (String.length name - 20) in
+    let align16 = String.starts_with ~prefix:"r16." cls in
+    let cls = if align16 then "r." ^ String.sub cls 4 (String.length cls - 4) else cls in
     let words, mem =
       if String.starts_with ~prefix:"m." cls then
         (int_of_string (String.sub cls 2 (String.length cls - 2)) / 8, true)
@@ -1668,6 +1681,10 @@ let gen_intrinsic ctx fr result ret_ty name args =
     end;
     A.place a from_stack;
     A.load_zx a 8 A.Rsi (A.Base (A.Rdx, 8));
+    if align16 then begin
+      A.alu_ri a A.Add A.Rsi 15;
+      A.alu_ri a A.And A.Rsi (-16)
+    end;
     A.mov_imm a A.Rcx (Int64.of_int (8 * words));
     A.rep_movsb a;
     A.store a 8 (A.Base (A.Rdx, 8)) A.Rsi;

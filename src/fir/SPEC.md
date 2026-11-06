@@ -48,6 +48,7 @@ ty ::= iN              integer, 1 <= N <= 8388608     (i1 i8 i16 i32 i64 i128 ..
   - f80 takes 16 bytes;
   - ptr takes 8 bytes;
   - `<N x i1>` packs to ceil(N/8) bytes, and other vectors take N × the element size.
+- **Odd widths in memory** (any `iN` whose size above is more than N bits, such as `i7`, `i33` or `i100`): a `store` writes the value zero-extended to the full size, and a `load` ignores the bits above N. A front end must not rely on what a load sees in those bits when something other than a store of the same type wrote them.
 
 ## 3. Values and constants
 
@@ -170,8 +171,15 @@ How the native backend classifies an `agg` (x86-64 SysV, the same as clang for t
 - **Fields** are taken from the `[OFF: T, ...]` list, so the list must name every scalar the C struct holds, with nested structs and arrays flattened (`int a[5]` is five `i32` fields). Padding is simply not listed.
 - **Up to 16 bytes:** each 8-byte half ("eightbyte") is SSE when it holds only `f32`/`f64` fields, otherwise INTEGER. The value goes in one or two registers: INTEGER halves in the next GPRs, SSE halves in the next XMM registers. If not all of its halves fit in the registers that are left, the whole value goes on the stack, and later scalar arguments still use the remaining registers. Results come back in `rax`/`rdx` and `xmm0`/`xmm1` the same way.
 - **Over 16 bytes, or a field that is not naturally aligned:** MEMORY class. An argument is copied onto the stack. A result is written to memory that the caller provides (a hidden first argument in `rdi`, returned again in `rax`).
-- **Not classified:** a vector, `i128` or `f80` field, an `ALIGN` above 8, or an eightbyte with no fields. Between Fir functions in one module such an `agg` still works (it is passed by address). At an external boundary (a `global` or `extern` function) the backend refuses it.
+- **Not classified:** a vector, `i128` or `f80` field, an `ALIGN` above 8 (except the `agg(16, 16, [0: i64, 8: i64])` form of `__int128` below), or an eightbyte with no fields. Between Fir functions in one module such an `agg` still works (it is passed by address). At an external boundary (a `global` or `extern` function) the backend refuses it.
 - **A struct through `...`:** a variadic argument has no ABI in the signature, so the call names it: `call (i32, ...) -> (i64) @f(i32 1, agg(16, 8, [0: i64, 8: f64]) %p)`. The operand is a `ptr` to the bytes, as for any `agg` argument, and it is classified by the rules here. Without the `agg(...)` prefix a `ptr` is passed as a pointer. The prefix is only allowed on variadic arguments (not the fixed ones, whose ABI the signature gives) and only on a `ptr` operand. The callee reads it with `va_arg agg(...)` (§6).
+
+**Integers that are not 1, 8, 16, 32 or 64 bits wide** in a signature (the native backend, x86-64 SysV):
+
+- **Up to 64 bits** (`i7`, `i33`, ...): passed in the next wider of i8/i16/i32/i64, with the bits above N zero. For N up to 32, `sext iN` instead sign-extends from bit N−1 (clang passes signed `_BitInt(N)` that way and the callee relies on it); for N from 33 to 63, `sext` changes nothing, since there the psABI leaves the bits above N unspecified. `zext iN` is the same as plain `iN`. On receipt the bits above N are always ignored. This matches clang's `_BitInt(N)` for N up to 64: unsigned as plain `iN`, signed as `sext iN`.
+- **65 to 128 bits:** as `__int128`, i.e. as `agg(16, 16, [0: i64, 8: i64])`: two GPRs, or 16-byte aligned on the stack; the bits above N are zero. clang's `_BitInt(65..128)` is passed differently (8-byte aligned on the stack); a front end that needs that ABI writes `agg(16, 8, [0: i64, 8: i64])` and passes the value in memory.
+- **Above 128 bits:** MEMORY class, like an `agg` of ceil(N/64) `i64` fields (on the stack as an argument, through sret as a result), the bits above N zero when sent and ignored when received (the psABI leaves them unspecified). This matches clang's `_BitInt(N)` for N > 128.
+- `va_arg` of such an integer reads it as the call passed it (§6).
 
 `zext i8` and `sext i16` change only what the other side may assume about the upper bits. The value itself is still an `i8` or `i16`. For C:
 
@@ -284,7 +292,7 @@ Alignment is a power of two. It is a promise about the address, so writing `alig
 | `%r = call [ATTRS] SIG %fp(args)` | Indirect call through a `ptr`. |
 | `%r = syscall i64 NR, a1, ..., a6` | Linux syscall. **Every operand is an i64**, including NR, so pointers go through `ptrtoint` first. The result is the raw kernel return value; −4095..−1 means −errno. |
 | `va_start P` | Only in a variadic function. Fills the `va_list` at `P` so that it reads this function's unnamed arguments, starting after the fixed ones. |
-| `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer up to `i64`, `ptr`, `f32` or `f64`. It reads one 8-byte argument word and keeps its low `T` bits. |
+| `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer, `ptr`, `f32` or `f64`. Up to 64 bits it reads one 8-byte argument word and keeps its low `T` bits; a wider integer is read as the call passed it (§5: `i65`..`i128` as `__int128`, wider as MEMORY class). |
 | `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P` | Reads the next unnamed argument as a struct by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
 | `dbg_value VAR, V` | Debug info: source variable VAR currently holds V. It has no effect on semantics. |
@@ -448,7 +456,7 @@ In Fir this means:
 
 | Area | Supported natively | Not yet | Workaround |
 |---|---|---|---|
-| Integer types | i1 i8 i16 i32 i64 | i128 and wider, odd widths | Use two i64 values. |
+| Integer types | Every width. Integers other than i1 i8 i16 i32 i64 are split into i64 limbs before code generation (`Fir_wide`; `fas-fir --legalize` shows the result); division, wide conversions to and from float, and shifts use small helper functions that are added to the module | Vectors of odd-width integers; atomic load/store, `atomic_rmw` and `cmpxchg` on integers wider than 64 bits; `atomic_rmw` add/sub/min/max on odd widths up to 64 | Use i64 lanes; guard wide atomics with a lock. |
 | Float types | f32 f64 | f16 f80 | — |
 | Vectors | Loads, stores, lane-wise arithmetic, compares, select, `extract`, `insert`, `shuffle`, `splat`, `reduce or` | Other reductions, `masked_load/store`, `compress`, `expand`; vector constants with non-constant lanes | Scalar loops. |
 | Integer ops | Everything in §6 for scalars, including `bswap`, `bitrev`, `abs` and the `*_ovf` family (expanded into shifts, masks and compares) | Vector `bswap`/`bitrev`/`abs`/`*_ovf`, `*_ovf` on i1, vector/i1 `smulh`/`umulh` | Scalar loops; for i1 overflow, widen to i8. |
@@ -457,8 +465,8 @@ In Fir this means:
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca of any size (constant, or variable with any align), `stacksave`/`stackrestore`, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | — | — |
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
-| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary or through `...` | Pass such structs by pointer. |
-| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 | Pass such structs by pointer. |
+| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5), at an external boundary or through `...` | Pass such structs by pointer. |
+| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers of any width, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5) | Pass such structs by pointer. |
 | Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers; lowered to a `switch`: a block address is a small token, unique in the module, not a code address; equality and `&&a - &&b` offset arithmetic behave as with real addresses) | Comparing a block address with a code or data address (they may coincide numerically) | — |
 | Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
@@ -471,6 +479,7 @@ Each gap that closes moves from the right column to the left, and `test/fas_fir/
 fas-fir INPUT.fir [-o OUT] [OBJECTS...]      build a static executable (default a.out)
 fas-fir -c INPUT.fir [-o OUT.o]              compile to an object file
 fas-fir --check INPUT.fir                    parse + verify, print the canonical text
+fas-fir --legalize INPUT.fir                 also split wide/odd integers (Fir_wide), print the result
 ```
 
 - **Input:** `INPUT` may be `-` to read standard input.
