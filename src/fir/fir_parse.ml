@@ -967,7 +967,14 @@ let parse_piece lx =
         | t -> fail lx ("expected w4 or w8, got " ^ tok_text t)
       in
       Reloc { sym; addend; width }
-  | t -> fail lx ("expected bytes, zeros or reloc, got " ^ tok_text t)
+  | Ident "blockaddr" ->
+      expect lx "(";
+      let fn = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+      expect lx ",";
+      let block = int_tok lx in
+      expect lx ")";
+      Blockref { fn; block }
+  | t -> fail lx ("expected bytes, zeros, reloc or blockaddr, got " ^ tok_text t)
 
 let parse_module s =
   let lx = { s; pos = 0; line = 1; peeked = None } in

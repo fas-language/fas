@@ -71,6 +71,22 @@ let rec suffix (t : ty) =
    at an external boundary. *)
 let sysv_structs : (string, Ir.struct_def) Hashtbl.t = Hashtbl.create 8
 
+(* Block addresses. Neither backend has a real one yet: [blockaddr(@f, b)]
+   becomes a token, a small nonzero integer unique to (@f, b) in the module,
+   cast to a ptr, and [indirect_br] becomes a [switch] over the tokens of its
+   listed targets. Equality, ordering by identity and arithmetic that lands
+   back on a token (C's `&&a - &&b` offset tables) all behave as with real
+   addresses; only the numeric value differs. *)
+let block_tokens : (string * int, int) Hashtbl.t = Hashtbl.create 16
+
+let block_token fn b =
+  match Hashtbl.find_opt block_tokens (fn, b) with
+  | Some t -> t
+  | None ->
+      let t = Hashtbl.length block_tokens + 1 in
+      Hashtbl.replace block_tokens (fn, b) t;
+      t
+
 let sysv_agg ~size ~align fields =
   let natural = function
     | Int (1 | 8) -> Some 1 | Int 16 -> Some 2 | Int 32 | F32 -> Some 4 | Int 64 | Ptr _ | F64 -> Some 8
@@ -168,7 +184,10 @@ let vv cx (v : value) : Ir.value =
           let id = fresh cx in
           add cx (Ir.Gep (id, Ir.I8, Ir.Global (name, Ir.Pointer Ir.I8), [ Ir.Index (Ir.Const (Ir.I64, addend)) ]));
           Ir.Local (id, Ir.Pointer Ir.I8)
-      | Cblockaddr _ -> unsupported "block address")
+      | Cblockaddr (fn, b) ->
+          let id = fresh cx in
+          add cx (Ir.Cast (id, "inttoptr", Ir.I64, Ir.Const (Ir.I64, Int64.of_int (block_token fn b)), Ir.Pointer Ir.I8));
+          Ir.Local (id, Ir.Pointer Ir.I8))
   | Result _ | Param _ -> (
       match Hashtbl.find_opt cx.map v with
       | Some x -> x
@@ -820,7 +839,19 @@ let convert_func (m : modul) ~source (f : func) : Ir.func =
                   | _ -> Ir.Ret (Some (ir_ty (ty_of f x), vv cx x)))
               | Ret _ -> unsupported "multiple return values"
               | Unreachable -> Ir.Unreachable
-              | Indirect_br _ -> unsupported "indirect branch"
+              | Indirect_br (x, bs) ->
+                  (* a switch over the targets' tokens; an address that is
+                     none of them traps *)
+                  let id = fresh cx in
+                  add cx (Ir.Cast (id, "ptrtoint", Ir.Pointer Ir.I8, vv cx x, Ir.I64));
+                  let trap = !next_block in
+                  incr next_block;
+                  extra := { Ir.id = trap; label = "b" ^ string_of_int trap; instrs = [ Ir.Trap ]; terminator = Ir.Unreachable } :: !extra;
+                  let cases =
+                    List.sort_uniq compare (Array.to_list bs)
+                    |> List.map (fun t -> (Int64.of_int (block_token f.name t), edge { dest = t; args = [||] }))
+                  in
+                  Ir.Switch (Ir.I64, Ir.Local (id, Ir.I64), cases, trap)
             in
             (List.rev cx.cur, term))
       in
@@ -861,7 +892,10 @@ let convert_global (g : global) : Ir.global =
             | Reloc { sym; addend; width } ->
                 if width <> 8 then unsupported "relocation of width %d" width;
                 ptrs := (Buffer.length buf, sym, Int64.to_int addend) :: !ptrs;
-                Buffer.add_string buf (String.make 8 '\000'))
+                Buffer.add_string buf (String.make 8 '\000')
+            | Blockref { fn; block } ->
+                (* a block address is a token (see [block_tokens]): plain data *)
+                Buffer.add_int64_le buf (Int64.of_int (block_token fn block)))
           pieces;
         (Some (Buffer.contents buf), List.rev !ptrs)
   in
@@ -874,6 +908,7 @@ let convert_global (g : global) : Ir.global =
 let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
   let sources = Hashtbl.create 64 in
   Hashtbl.reset sysv_structs;
+  Hashtbl.reset block_tokens;
   List.iter (fun (f : Ir.func) -> Hashtbl.replace sources f.name f.source) like.funcs;
   let funcs = ref [] and globals = ref [] in
   Vec.iter

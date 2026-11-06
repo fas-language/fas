@@ -19,8 +19,14 @@ for f in bin/main.exe:fas tools/fas_fir/fas_fir.exe:fas-fir; do
   mv -f "$share/.$dst.tmp" "$share/$dst"
 done
 rm -rf "$share/std"; cp -r "$root/std" "$share/std"
+# fas recognizes a subcommand (run, check, perf, lsp) only as the first
+# argument, so the flag goes after it; lsp has no backend
 cat > "$bin/fas-native" <<W
 #!/bin/sh
+case "\${1:-}" in
+  run|check|perf) sub=\$1; shift; exec "$share/fas" "\$sub" --backend=native "\$@" ;;
+  lsp) exec "$share/fas" "\$@" ;;
+esac
 exec "$share/fas" --backend=native "\$@"
 W
 cat > "$bin/fas-fir" <<W

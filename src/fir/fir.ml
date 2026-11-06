@@ -349,6 +349,9 @@ type init_piece =
   | Bytes of string
   | Zeros of int
   | Reloc of { sym : string; addend : int64; width : int }  (** width 4 or 8 *)
+  | Blockref of { fn : string; block : int }
+      (** 8 bytes: the [blockaddr(@fn, block)] constant, for C's
+          [static void *t[] = {&&a, ...}] *)
 
 type global = {
   gname : string;

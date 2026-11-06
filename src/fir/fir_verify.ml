@@ -391,7 +391,12 @@ let verify_func (f : func) =
               cases
         | Indirect_br (x, bs) ->
             if not (is_ptr (ty x)) then err "%s: indirect_br on %s" where (tys x);
-            Array.iter (fun t -> if t < 0 || t >= nb || t = entry then err "%s: bad indirect target" where) bs
+            Array.iter
+              (fun t ->
+                if t < 0 || t >= nb || t = entry then err "%s: bad indirect target" where
+                else if Array.length (block f t).params > 0 then
+                  err "%s: indirect target ^%d takes parameters" where t)
+              bs
         | Ret vs ->
             let rts = List.map abi_ty f.sig_.result_abis in
             if Array.length vs <> List.length rts then err "%s: returns %d values, signature %d" where (Array.length vs) (List.length rts)
@@ -419,10 +424,32 @@ let verify (m : modul) =
       | Some ps ->
           let n =
             List.fold_left
-              (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width)
+              (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8)
               0 ps
           in
           if n <> g.size then errs := Printf.sprintf "@%s: initializer is %d bytes, size %d" g.gname n g.size :: !errs
+      | None -> ())
+    m.globals;
+  (* blockaddr(@g, b) names a block of a function defined in this module that
+     an indirect_br could enter: not the entry, no parameters *)
+  let funcs = Hashtbl.create 64 in
+  Vec.iter (fun f -> Hashtbl.replace funcs f.name f) m.funcs;
+  let check_blockaddr owner g b =
+    let bad why = errs := Printf.sprintf "@%s: blockaddr(@%s, %d): %s" owner g b why :: !errs in
+    match Hashtbl.find_opt funcs g with
+    | Some gf when gf.defined ->
+        if b < 0 || b >= Vec.length gf.blocks then bad "no such block"
+        else if b = entry then bad "the entry block"
+        else if Array.length (block gf b).params > 0 then bad "the block takes parameters"
+    | _ -> bad "not a function defined in this module"
+  in
+  Vec.iter
+    (fun f -> Hashtbl.iter (fun c _ -> match c with Cblockaddr (g, b) -> check_blockaddr f.name g b | _ -> ()) f.consts)
+    m.funcs;
+  Vec.iter
+    (fun g ->
+      match g.init with
+      | Some ps -> List.iter (function Blockref { fn; block } -> check_blockaddr g.gname fn block | _ -> ()) ps
       | None -> ())
     m.globals;
   let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in

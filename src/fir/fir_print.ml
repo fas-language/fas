@@ -394,6 +394,7 @@ let print_func buf f =
 let piece_text = function
   | Bytes s -> "bytes " ^ quote s
   | Zeros n -> "zeros " ^ string_of_int n
+  | Blockref { fn; block } -> Printf.sprintf "blockaddr(%s, %d)" (symbol fn) block
   | Reloc { sym; addend; width } ->
       Printf.sprintf "reloc %s%s w%d" (symbol sym)
         (if addend = 0L then ""

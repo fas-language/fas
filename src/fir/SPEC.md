@@ -70,7 +70,7 @@ In text, named values are written `%name`. A name is bare `[A-Za-z0-9_.$]+` or q
 | `i64 zero`, `<4 x i32> zero` | All-zero value of any type. |
 | `<2 x i64> [i64 1, i64 2]` | Vector constant. Each lane is a constant. |
 | `ptr @sym`, `ptr @sym+16`, `ptr @sym-8` | Address of a global or function, plus a byte addend. |
-| `ptr blockaddr(@f, 3)` | Address of block 3 of `@f`, for computed goto. |
+| `ptr blockaddr(@f, 3)` | Address of block 3 of `@f`, for computed goto. Blocks are numbered in order of appearance, the entry being 0. `@f` must be defined in this module, and the block must not be the entry or take parameters (verified). |
 
 **A global's address is a typed constant.** Write `load i64 ptr @counter, align 8`, not `load i64 @counter`. A bare `@counter` gives the error "expected a type".
 
@@ -105,6 +105,7 @@ PIECE      ::= bytes "..."                     raw bytes; escapes \"  \\  \xx (t
              | zeros K                         K zero bytes
              | reloc @sym[+-addend] w8         8-byte absolute address of sym+addend
              | reloc @sym[+-addend] w4         4-byte address (not supported natively yet)
+             | blockaddr(@f, N)                8 bytes: the constant ptr blockaddr(@f, N) (§3)
 ```
 
 Examples:
@@ -306,7 +307,7 @@ Every block ends with exactly one terminator.
 | `jump ^b(ARGS)` | Unconditional jump. Write just `^b` when the block takes no arguments. |
 | `br C, ^t(ARGS), ^f(ARGS)[, weight W]` | Conditional branch on an `i1`. W is the probability of the true edge, out of 1000. |
 | `switch V, ^default(ARGS), [K: ^b(ARGS), ...]` | Multi-way branch on an integer value. Keys are written without a type and must be distinct. |
-| `indirect_br P, [^b1, ^b2, ...]` | Computed goto. The list holds every possible target, and those blocks take no parameters. |
+| `indirect_br P, [^b1, ^b2, ...]` | Computed goto. The list holds every possible target, and those blocks take no parameters. `P` must be a `blockaddr` of this function for one of the listed blocks, possibly after arithmetic that lands back on one (`&&a + (&&b - &&a)`); anything else is undefined, and the current backends trap. |
 | `ret` / `ret V` / `ret V1, V2` | Return. The values must match the result list. |
 | `unreachable` | Control never gets here. |
 
@@ -430,6 +431,7 @@ In Fir this means:
   | `?:` | Either `select` when both arms are side-effect free, or branches plus a merge parameter. |
   | `switch` | `switch`. |
   | `goto` and labels | Ordinary blocks. Seal a label's block only when the function ends, or once all gotos to it are known. |
+  | `&&label`, `goto *p` (GNU) | `ptr blockaddr(@f, N)` and `indirect_br %p, [...]` listing every label whose address is taken in the function. A `static void *t[] = {&&a, ...}` is a global initialized with `blockaddr(@f, N)` pieces (§4). Such labels' blocks take no parameters, so keep the variables live across them in `alloca`s. |
   | VLA `T a[n]` | At the start of the VLA's block, `%s = stacksave`; then `%a = alloca ptr %bytes, align A` with `%bytes = n·sizeof(T)`; on every exit from the block (including `break`, `continue`, `goto` out of it), `stackrestore %s`. `alloca(n)` is the same alloca without the pair. `sizeof a` is the `%bytes` value. |
   | `...`, `va_list`, `va_arg` | A variadic signature (`(i32, ...)`). `va_list ap` is a 24-byte `alloca`, `va_start(ap, last)` is `va_start %ap`, and `va_arg(ap, T)` is `va_arg T %ap`, and for a struct `T`, `va_arg agg(...) %ap` (a `ptr` to a copy). A struct passed to a variadic function is written `agg(...) %p` in the call's argument list. A `va_list` parameter is a `ptr`, since C arrays decay to pointers. See §6. |
 
@@ -457,7 +459,7 @@ In Fir this means:
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
 | Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary or through `...` | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 | Pass such structs by pointer. |
-| Control flow | jump br switch ret unreachable trap | `indirect_br`, `blockaddr` | `switch` on a label number. |
+| Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers; lowered to a `switch`: a block address is a small token, unique in the module, not a code address; equality and `&&a - &&b` offset arithmetic behave as with real addresses) | Comparing a block address with a code or data address (they may coincide numerically) | — |
 | Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
 
