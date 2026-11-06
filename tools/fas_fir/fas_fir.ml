@@ -13,9 +13,10 @@
                                   wider than i64 or of odd widths rewritten
                                   to i64 limbs), verified again
      fas-fir --mir ...            the same, through the v0.4 machine IR
-                                  (Mir_isel -> Mir_ra -> Mir_check ->
-                                  Mir_emit) instead of Fir_to_ir and
-                                  Native_gen; FAS_MIR_DUMP=1 prints it
+                                  (Fir_scalarize -> Fir_wide -> Mir_isel ->
+                                  Mir_ra -> Mir_check -> Mir_emit) instead
+                                  of Fir_to_ir and Native_gen;
+                                  FAS_MIR_DUMP=1 prints it
 
    "-" reads the module from stdin. Extra .o/.a inputs after the .fir file
    are linked in (executables only). The pipeline is
@@ -80,6 +81,11 @@ let () =
     print_string (Fir_print.module_to_string m);
     exit 0
   end;
+  (* the machine-IR backend has no vectors: lanes first, so that vectors
+     of wide integers (<2 x i128>) become wide scalars for Fir_wide *)
+  if !mir then (
+    try Fir_scalarize.run m
+    with Fir_scalarize.Unsupported msg -> die "%s: not supported by the mir backend yet: %s" name msg);
   (* the native backend computes in i1..i64 only *)
   (try Fir_wide.run m
    with Fir_wide.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg);

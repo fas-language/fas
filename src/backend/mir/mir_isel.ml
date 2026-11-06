@@ -1270,7 +1270,13 @@ let inst c i =
   | Iun (op, _, a) -> set (iun c op (width (rty ())) a)
   | Fbin (op, _, a, b) -> set (fbin c op (is_dbl (rty ())) a b)
   | Fun (op, _, a) -> set (fun_ c op (is_dbl (rty ())) a)
-  | Fma _ -> unsupported "fma"
+  | Fma (_, a, b, d) -> (
+      (* a call to the correctly rounded helper Mir_runtime.add appended *)
+      match rty () with
+      | (F.F32 | F.F64) as t ->
+          let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false } in
+          call c ~sig_ ~callee:(F.Direct (Mir_runtime.fma_name (t = F.F64))) ~args:[| a; b; d |] ~va_aggs:[] ir.results
+      | _ -> unsupported "vector fma")
   | Fsh (left, a, b, n) -> set (funnel c left (width (rty ())) a b n)
   | Ovf (op, a, b) ->
       let v, o = ovf c op (width (ty c a)) a b in

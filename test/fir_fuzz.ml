@@ -169,6 +169,7 @@ let gen_float_op g t =
   let tt = ty_text t in
   let r = fresh g in
   (match int g 6 with
+  | 0 when int g 4 = 0 -> line g "%s = fma %s %s, %s, %s" r tt (pick g t) (pick g t) (pick g t)
   | 0 | 1 ->
       line g "%s = %s %s %s, %s" r (choose g [ "fadd"; "fsub"; "fmul"; "fdiv"; "frem"; "copysign"; "fmin"; "fmax" ]) tt (pick g t) (pick g t)
   | 2 -> line g "%s = %s %s %s" r (choose g [ "fneg"; "fabs"; "sqrt"; "floor"; "ceil"; "roundeven" ]) tt (pick g t)

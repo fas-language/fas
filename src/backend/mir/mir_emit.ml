@@ -248,6 +248,13 @@ let global_image (g : F.global) =
 let generate ~startup (m : F.modul) =
   try
     let pic = not startup in
+    (* vectors to lanes first: lane-wise fma becomes scalar fma, which
+       the runtime helpers then serve *)
+    Fir_scalarize.run m;
+    Mir_runtime.add m;
+    (match Fir_verify.verify m with
+    | [] -> ()
+    | errs -> invalid_arg ("Fir after scalarization:\n" ^ String.concat "\n" errs));
     let syms = Fir_to_ir.symbols m in
     let env = Mir_isel.env m in
     let a = A.create () in
@@ -372,6 +379,8 @@ let generate ~startup (m : F.modul) =
   with
   | Unsupported msg -> Error ("mir backend: " ^ msg)
   | Fir_to_ir.Unsupported msg -> Error ("mir backend: " ^ msg)
+  | Fir_scalarize.Unsupported msg -> Error ("mir backend: " ^ msg)
+  | Fir_wide.Unsupported msg -> Error ("mir backend: " ^ msg)
   | Mir_ra.Failure msg -> Error ("mir backend internal error (allocator): " ^ msg)
   | Mir_check.Failure msg -> Error ("mir backend internal error (allocation check): " ^ msg)
   | Fas_linker.Error.Error msg -> Error ("mir backend: " ^ msg)

@@ -672,9 +672,13 @@ let parse_op st opname =
       go ();
       let sig_ = parse_sig lx in
       let callee =
-        match next lx with
-        | Sym s -> Direct s
-        | Tlocal n -> Indirect (use_name st n)
+        match peek lx with
+        | Sym s -> ignore (next lx); Direct s
+        | Tlocal n -> ignore (next lx); Indirect (use_name st n)
+        (* an indirect call through a constant pointer prints as a typed
+           constant (`ptr @f`): Fir_of_ir keeps an Ir indirect call whose
+           callee folded to a symbol as such *)
+        | t when starts_ty t -> Indirect (parse_value st)
         | t -> fail lx ("expected a callee, got " ^ tok_text t)
       in
       expect lx "(";

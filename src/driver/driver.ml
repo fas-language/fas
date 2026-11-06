@@ -2742,7 +2742,9 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
             checked
           in
           let native_ir () =
-            Result.bind (Fir_hook.apply ir) (Native_symbols.apply ~redirect)
+            (* redirect first, so the Fir hook (and its FAS_FIR_DUMP) sees
+               the C adapter names the objects define *)
+            Result.bind (Native_symbols.apply ~redirect ir) Fir_hook.apply
           in
           match config.emit with
           | Cli.Header ->

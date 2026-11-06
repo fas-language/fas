@@ -39,14 +39,29 @@ let phys_index = function
   | X i -> 16 + i
   | V _ -> invalid_arg "Mir_check.phys_index"
 
-(* location layout: 0..31 physical registers, 32 + v vreg v's slot *)
-type state = { actual : tag array; virt : tag array (* physical registers only *) }
+(* [regs]: what each physical register holds (0..15 general, 16..31 xmm).
+   A vreg's slot can only ever hold that vreg's current value or garbage,
+   so the slots are one bit per vreg ("v's slot holds v"), not a tag: the
+   per-block state stays small for functions with millions of vregs. *)
+type state = { regs : tag array; slots : Bytes.t; virt : tag array (* physical registers only *) }
 
-let copy_state s = { actual = Array.copy s.actual; virt = Array.copy s.virt }
+let copy_state s = { regs = Array.copy s.regs; slots = Bytes.copy s.slots; virt = Array.copy s.virt }
+
+let slot_get b v = Char.code (Bytes.unsafe_get b (v lsr 3)) land (1 lsl (v land 7)) <> 0
+
+let slot_set b v on =
+  let i = v lsr 3 and m = 1 lsl (v land 7) in
+  let c = Char.code (Bytes.get b i) in
+  Bytes.set b i (Char.unsafe_chr (if on then c lor m else c land lnot m))
 
 let meet a b =
   let m x y = if x = y then x else Unknown in
-  { actual = Array.map2 m a.actual b.actual; virt = Array.map2 m a.virt b.virt }
+  let slots = Bytes.copy a.slots in
+  for i = 0 to Bytes.length slots - 1 do
+    Bytes.unsafe_set slots i
+      (Char.unsafe_chr (Char.code (Bytes.unsafe_get slots i) land Char.code (Bytes.unsafe_get b.slots i)))
+  done;
+  { regs = Array.map2 m a.regs b.regs; slots; virt = Array.map2 m a.virt b.virt }
 
 let run (f : func) (ra : Mir_ra.result) =
   let nv = Dynarray.length f.vcls in
@@ -63,13 +78,13 @@ let run (f : func) (ra : Mir_ra.result) =
   in
   (* the entry: every physical register holds its incoming value *)
   let init =
-    let actual = Array.make (nphys + nv) Unknown and virt = Array.make nphys Unknown in
+    let regs = Array.make nphys Unknown and virt = Array.make nphys Unknown in
     for p = 0 to nphys - 1 do
       let t = fresh () in
-      actual.(p) <- t;
+      regs.(p) <- t;
       virt.(p) <- t
     done;
-    { actual; virt }
+    { regs; slots = Bytes.make ((nv + 7) / 8) '\000'; virt }
   in
   let entry_state = Array.make nb None in
   entry_state.(0) <- Some init;
@@ -86,14 +101,14 @@ let run (f : func) (ra : Mir_ra.result) =
   in
   let step bi s =
     let st = copy_state s in
-    let a = st.actual and vt = st.virt in
+    let a = st.regs and sl = st.slots and vt = st.virt in
     let set_vreg v loc =
       (* a new value of v: every older copy is stale *)
       (* a copy of v can only be in a register or in v's own slot *)
       for i = 0 to nphys - 1 do
         if a.(i) = Vt v then a.(i) <- Unknown
       done;
-      a.(nphys + v) <- Unknown;
+      slot_set sl v false;
       a.(loc) <- Vt v
     in
     List.iteri
@@ -102,12 +117,12 @@ let run (f : func) (ra : Mir_ra.result) =
         | Mir_ra.Reload (v, r) ->
             let s = ra.vslot.(v) in
             if s < 0 then fail bi (Copy (r, V v)) "reload of a vreg without a slot";
-            if a.(nphys + v) <> Vt v then fail bi (Copy (r, V v)) "reload: the slot does not hold %%%d" v;
+            if not (slot_get sl v) then fail bi (Copy (r, V v)) "reload: the slot does not hold %%%d" v;
             if class_of_phys r <> Dynarray.get f.vcls v then fail bi (Copy (r, V v)) "reload into the wrong class";
             a.(phys_index r) <- Vt v
         | Spill (v, r) ->
             if a.(phys_index r) <> Vt v then fail bi (Copy (V v, r)) "spill: the register does not hold %%%d" v;
-            a.(nphys + v) <- Vt v
+            slot_set sl v true
         | Orig (before, after) ->
             (* the substitution *)
             let sub = Hashtbl.create 4 in

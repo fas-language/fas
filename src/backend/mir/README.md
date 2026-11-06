@@ -8,7 +8,8 @@ independent checker verifies every allocation. Optimizations come later
 and must not change this pipeline's structure.
 
 ```
-Fir --Fir_wide--> Fir (integers <= 64 bits)
+Fir --Fir_scalarize--> Fir (no vectors)
+    --Fir_wide--> Fir (integers <= 64 bits)
     --Mir_isel--> Mir (virtual registers)
     --Mir_ra----> allocation --Mir_check--> ok
     --Mir_emit--> X64 encoder, ELF via Native_object
@@ -16,10 +17,12 @@ Fir --Fir_wide--> Fir (integers <= 64 bits)
 
 | File | Role |
 |---|---|
+| `../../fir/fir_scalarize.ml` | Fir → Fir without vectors (see its header). A vector is a set of scalar lanes; one indexed at a run-time lane, or built by `insert`, lives in a fresh stack slot instead, so code size stays linear in the lanes. Vector parameters become their lanes, and vector results come back through hidden pointer parameters. This is the old backend's convention, not the SysV vector ABI. |
 | `mir.ml` | The machine IR: x86-64 instructions over virtual (`V n`) and physical (`G r`, `X i`) registers, frame slots, blocks; `uses_defs`, `clobbers`, `map_regs`, printers. |
 | `mir_isel.ml` | Fir → Mir. One Fir block is one Mir block with the same number; extra blocks (edges, loops, `va_arg` branches) are appended. SysV calls, parameters, returns and `va_*` live here. |
 | `mir_ra.ml` | Spill-everywhere allocation with a block-local cache (see the header comment). |
 | `mir_check.ml` | Verifies an allocation without trusting the allocator: an abstract machine over registers and slots, iterated to a fixpoint. |
+| `mir_runtime.ml` | Appends the correctly rounded `fma` helpers (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
 
 ## Running it
@@ -28,7 +31,7 @@ Fir --Fir_wide--> Fir (integers <= 64 bits)
   `--mir -c` writes an object.
 - `FAS_MIR_DUMP=1` prints the selected and the allocated Mir to stderr.
 - `FAS_FIR_TOOL=<a wrapper running fas-fir --mir> sh test/fas_fir.sh`: the
-  Fir conformance programs (13/13 pass).
+  Fir conformance programs (14/14 pass; `vectors.fir` is `--mir` only).
 - `fir_fuzz.exe -mir`: random modules compared with clang -O2.
 - `test/mir_check_test.ml` (in `dune runtest`): allocates every function of
   the Fir test corpus, checks it, then mutates each allocation (drop a
@@ -65,7 +68,7 @@ code and through an `R_X86_64_64` relocation in data. `indirect_br` is
 
 Each of these is reported as `mir backend: ...`, never miscompiled:
 
-- vectors and `fma`;
+- atomic vector loads and stores, and vectors passed through `...`;
 - named sections and thread-local globals (`Fir_to_ir.symbols` refuses them);
 - aggregates aligned above 16, or with fields other than integers ≤ 64 bits,
   pointers, f32 and f64;
