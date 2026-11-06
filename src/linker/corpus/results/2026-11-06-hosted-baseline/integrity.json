@@ -1,0 +1,12 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "ee637f55309827d5898dfb3a8cb4bf8dda7d4d83b34cb22b1f0c34814f43bd95",
+    "artifact-validation.json": "96001f8cb03e553905f1416c3767efd4e803f2e640b7fedcb881afc08f23adce",
+    "assessment.json": "f5c38dfd983674f6a5932a10bb4f14ca2ce0d1932564a7c08cae1d43c12a782b",
+    "latest.json": "b4dfa1920bcf160d7b1c0fe7f9183d2806c0994bc4bf3dcd95c401c9c2acad2b",
+    "libpng-reports.json": "5ddd6a52e3ae8ee2458e78acb8e60bc3cd46d4dffaaeed72871b5e08265cefc3",
+    "observation.json": "cecdfe5579ae0b1473b21150fa18ca87451cb76f2392af1cb3d35321e68167ad",
+    "popular-artifacts.json": "46098443419e6b1802f8a68b85bc25ad24536ffad5963993abf74c209421f86a"
+  }
+}

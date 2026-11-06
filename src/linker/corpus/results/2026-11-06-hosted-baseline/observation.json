@@ -1,0 +1,14 @@
+{
+  "observed_at": "2026-11-06T19:27:07.285392+00:00",
+  "tested_source": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62",
+  "status": "partial",
+  "complete": [
+    "hosted correctness and archives",
+    "official GCC execution selection",
+    "all six hosted popular-C jobs"
+  ],
+  "pending": [
+    "full repaired-source 14x600-second fuzz selection"
+  ],
+  "scope": "declared functional/corpus baseline acceptance; final freeze and production publication remain separate"
+}

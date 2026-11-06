@@ -57,8 +57,9 @@ passes on Linux `7.0.0-1017-azure` with that Ubuntu/toolchain baseline. Hosted
 GCC 15.2.0 separately passes the declared 4,974-execution official C selection
 on each of Fas and GNU with identical objects in the
 [repaired-source observation](corpus/results/2026-11-06-hosted-canonical/README.md).
-The complete hosted popular-C/fuzz matrix and broader configurations remain open
-at that observation. Exact versions and selections
+The [reference-baseline observation](corpus/results/2026-11-06-hosted-baseline/README.md)
+subsequently passes all six hosted popular-C jobs. The full fuzz selection and
+broader configurations remain open at that observation. Exact versions and selections
 live in individual reports, rather than being inferred from these product names.
 
 The distributed linker's runtime environment is separate from the libc used by

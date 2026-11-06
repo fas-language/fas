@@ -71,6 +71,8 @@ on the repaired source remains separate from those earlier passes. The
 [repaired-source observation](corpus/results/2026-11-06-hosted-canonical/README.md)
 passes the full declared GCC and correctness selections; two popular-C jobs
 and the full fuzz campaign are still pending at that observation.
+The [reference-baseline observation](corpus/results/2026-11-06-hosted-baseline/README.md)
+subsequently passes both remaining popular-C jobs; full fuzzing remains running.
 
 The workflow definition alone is not evidence of a completed hosted run. Local
 qualification is recorded separately under `audit/`, `scale/results/`,

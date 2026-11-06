@@ -1,0 +1,74 @@
+[
+  {
+    "artifact_id": 13532397908,
+    "name": "linker-correctness-42272940442-1",
+    "size": 93610408,
+    "sha256": "182bc0ffb98a58f1bb4658ed846ab6985bee8602ff550f09233c62708279ead3",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13532062943,
+    "name": "linker-gcc-torture-42272937898-1",
+    "size": 14959497,
+    "sha256": "5b71c09b90988d046e9e72959b968585c7667a7c1b8accb17af60bde90203d24",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13532570568,
+    "name": "linker-popular-bzip2-42272944421-1",
+    "size": 4125710,
+    "sha256": "071b8b8d6fba1f7169d30a5dc4adf371b5405a4efa709b00eca0e54cb8cfe165",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13534595066,
+    "name": "linker-popular-curl-42272944421-1",
+    "size": 332142562,
+    "sha256": "de3d35ce49df3c84f238c06bc7c0fe8904d75127386b49817cb762db1affc90a",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13532436324,
+    "name": "linker-popular-libarchive-42272944421-1",
+    "size": 105489356,
+    "sha256": "8764420d522d49e8a0a745f41b7e5f6e8186fed867ad1ac8c114998c816b8016",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13535061031,
+    "name": "linker-popular-libpng-42272944421-1",
+    "size": 10793603,
+    "sha256": "1d74fadba638e99a23cd1f122eabb5eff7684ec7df5c24553286f7ff27a721f0",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13533250300,
+    "name": "linker-popular-lua-42272944421-1",
+    "size": 19181757,
+    "sha256": "f4f59d2b5c19e11771949f0bb481e6f5dcc69351882bdac3215b8124765f9c13",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  },
+  {
+    "artifact_id": 13533180571,
+    "name": "linker-popular-redis-42272944421-1",
+    "size": 31702036,
+    "sha256": "488bcb8a9f5e83204b5ecf23cae9d02f41fddcba3f7c917e51647299a0818ca4",
+    "github_digest_verified": true,
+    "zip_crc_verified": true,
+    "sha256_rechecked": true
+  }
+]

@@ -29,9 +29,9 @@ The [compatibility contract candidate](SUPPORT.md) defines the freeze boundary.
 | **0.4 — implemented freestanding subset** | COMDAT, validated mergeable strings/data with conservative whole-section deduplication, section GC, GOT-based static PIC, GNU properties/LLVM addrsig, DWARF 4/5 and basic CFI unwind/index handling | GCC/Clang fixtures work without metadata-disabling flags; debugger/backtrace (including omitted frame pointers) and GC-root tests pass. Individual string/tail merging remains outside the original v0.4 subset; personality/LSDA pointers were added during v0.7 |
 | **0.5 — implemented dynamic-executable subset** | Dynamically linked executables and PIE: shared-library inputs, eager GOT/PLT, dynamic relocations, required import versions, four traditional TLS code models, init/fini and explicit startup integration; minimal INPUT/GROUP/AS_NEEDED scripts | Hosted GCC/Clang C and Fas objects run against the installed glibc CRT/libc, including startup, shutdown, imported data and per-thread TLS isolation. Broader sysroot compatibility, TLS relaxation/TLSDESC and general scripts remain later gates |
 | **0.6 — implemented declared shared-library subset** | Shared-library output, visibility/preemption, complete declared TLS models and symbol-version behavior, IFUNC where required; RELRO/binding options | Producer/consumer, preemption, GD/LD/IE/TLSDESC, late dlopen, lifecycle, named version aliases, imported/defined IFUNC and loader-enforced RELRO pass. Deliberate limits remain: no TLS relaxation or base-version aliases; alias hiding follows the tested LLD policy. Static IFUNC was added during v0.7 |
-| **0.7 — in progress** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
-| **0.8 — qualification in progress** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
-| **0.9 — release candidate** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
+| **0.7 — implemented declared Linux subset** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
+| **0.8 — reference baseline qualified** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
+| **0.9 — qualification in progress** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
 | **1.0 — production Linux release** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
 
 The [2026-11-06 local qualification](corpus/results/2026-11-06/README.md) passes
@@ -104,6 +104,14 @@ delivered source archive matches all 1,108 files of the published commit exactly
 The [next observation](corpus/results/2026-11-06-hosted-canonical-followup/README.md)
 adds hosted curl acceptance and 355 byte-identical current-binary relinks;
 libpng setup and the full fuzz selection remain pending.
+
+The [complete hosted functional/corpus baseline](corpus/results/2026-11-06-hosted-baseline/README.md)
+then passes the final libpng job, so all six popular-C jobs, hosted correctness
+and the official GCC execution selection pass on the repaired implementation.
+This implements the declared v0.7 subset and qualifies the v0.8 reference
+baseline. It does not publish those versions or complete v0.9/v1.0. The
+executable remains `0.7-dev`. The full fuzz campaign, final contract freeze and
+production publication remain open; performance remains deferred.
 
 Earlier performance work and all recorded measurements remain valid history.
 The main optimization pass is now a later track, after production qualification,

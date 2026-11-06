@@ -26,6 +26,10 @@ partial observation. No production release or completed freeze is claimed.
 The [subsequent follow-up](corpus/results/2026-11-06-hosted-canonical-followup/README.md)
 also passes hosted curl and reproduces all 355 retained six-project outputs
 byte for byte with the current binary; libpng setup and full fuzzing remain open.
+The [reference-baseline observation](corpus/results/2026-11-06-hosted-baseline/README.md)
+then passes libpng as well: all six repaired-source hosted popular-C jobs are
+green. The remaining hosted gate is the full fuzz campaign; contract freeze
+and production publication are still separate work.
 
 ## Canonical imported function addresses — 2026-11-06
 

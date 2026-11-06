@@ -1,0 +1,125 @@
+{
+  "total_count": 6,
+  "artifacts": [
+    {
+      "id": 13535061031,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzNTA2MTAzMQ==",
+      "name": "linker-popular-libpng-42272944421-1",
+      "size_in_bytes": 10793603,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13535061031",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13535061031/zip",
+      "expired": false,
+      "digest": "sha256:1d74fadba638e99a23cd1f122eabb5eff7684ec7df5c24553286f7ff27a721f0",
+      "created_at": "2026-11-06T19:22:24Z",
+      "updated_at": "2026-11-06T19:22:24Z",
+      "expires_at": "2026-11-20T19:22:22Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    },
+    {
+      "id": 13534595066,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzNDU5NTA2Ng==",
+      "name": "linker-popular-curl-42272944421-1",
+      "size_in_bytes": 332142562,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13534595066",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13534595066/zip",
+      "expired": false,
+      "digest": "sha256:de3d35ce49df3c84f238c06bc7c0fe8904d75127386b49817cb762db1affc90a",
+      "created_at": "2026-11-06T19:11:56Z",
+      "updated_at": "2026-11-06T19:11:56Z",
+      "expires_at": "2026-11-20T19:11:26Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    },
+    {
+      "id": 13533250300,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzMzI1MDMwMA==",
+      "name": "linker-popular-lua-42272944421-1",
+      "size_in_bytes": 19181757,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13533250300",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13533250300/zip",
+      "expired": false,
+      "digest": "sha256:f4f59d2b5c19e11771949f0bb481e6f5dcc69351882bdac3215b8124765f9c13",
+      "created_at": "2026-11-06T18:43:25Z",
+      "updated_at": "2026-11-06T18:43:25Z",
+      "expires_at": "2026-11-20T18:43:23Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    },
+    {
+      "id": 13533180571,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzMzE4MDU3MQ==",
+      "name": "linker-popular-redis-42272944421-1",
+      "size_in_bytes": 31702036,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13533180571",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13533180571/zip",
+      "expired": false,
+      "digest": "sha256:488bcb8a9f5e83204b5ecf23cae9d02f41fddcba3f7c917e51647299a0818ca4",
+      "created_at": "2026-11-06T18:45:09Z",
+      "updated_at": "2026-11-06T18:45:09Z",
+      "expires_at": "2026-11-20T18:45:06Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    },
+    {
+      "id": 13532570568,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzMjU3MDU2OA==",
+      "name": "linker-popular-bzip2-42272944421-1",
+      "size_in_bytes": 4125710,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13532570568",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13532570568/zip",
+      "expired": false,
+      "digest": "sha256:071b8b8d6fba1f7169d30a5dc4adf371b5405a4efa709b00eca0e54cb8cfe165",
+      "created_at": "2026-11-06T18:43:22Z",
+      "updated_at": "2026-11-06T18:43:22Z",
+      "expires_at": "2026-11-20T18:43:21Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    },
+    {
+      "id": 13532436324,
+      "node_id": "MDg6QXJ0aWZhY3QxMzUzMjQzNjMyNA==",
+      "name": "linker-popular-libarchive-42272944421-1",
+      "size_in_bytes": 105489356,
+      "url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13532436324",
+      "archive_download_url": "https://api.github.com/repos/fas-language/fas/actions/artifacts/13532436324/zip",
+      "expired": false,
+      "digest": "sha256:8764420d522d49e8a0a745f41b7e5f6e8186fed867ad1ac8c114998c816b8016",
+      "created_at": "2026-11-06T18:47:46Z",
+      "updated_at": "2026-11-06T18:47:46Z",
+      "expires_at": "2026-11-20T18:47:34Z",
+      "workflow_run": {
+        "id": 42272944421,
+        "repository_id": 1334690860,
+        "head_repository_id": 1334690860,
+        "head_branch": "linker-qualification-20261105",
+        "head_sha": "4b3f876f7e51d5f1bdc6128b2c780df1de1e1f62"
+      }
+    }
+  ]
+}

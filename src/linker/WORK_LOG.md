@@ -34,6 +34,14 @@ Further supplied-weak/multiple-function-version probes pass with Fas/GNU,
 including preload and mixed explicit/default imports. LLD passes the distinct
 version case and retains its previously observed mixed-name identity failure.
 
+Libpng subsequently passes all 33 upstream CTest entries per linker, both shared
+directions and 15 matching configuration features. The hosted reference baseline
+now passes correctness, official GCC execution and all six popular-C jobs on
+4b3f876. Evidence: corpus/results/2026-11-06-hosted-baseline/README.md. The roadmap
+marks the declared v0.7 subset implemented and the v0.8 reference baseline
+qualified; no versioned release is published. Full fuzzing, final freeze and
+production publication remain open, and the CLI still reports 0.7-dev.
+
 ### Current checkpoint: saved corpus harness replay
 
 Qualification exposed a replay-harness bug: under /tmp the copied script's
