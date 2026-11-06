@@ -175,6 +175,60 @@ fn main() i32 { return asm_answer() }
         out, _ = self.compile("embedded assembly", source, cc=cc)
         run(out, expected=42)
 
+    def test_native_object_combines_embedded_c_and_assembly(self):
+        cc = shutil.which('clang-22') or shutil.which('clang')
+        if not cc:
+            self.skipTest('Fas embedded C/assembly importer requires Clang')
+        source = self.source('combined native library', '''
+use "C" <<HELPER
+#include <stdio.h>
+extern int fas_twice(int);
+int c_answer(void){puts("combined C");return fas_twice(21);}
+HELPER
+extern "C" {
+  fn fas_twice(value i32) i32 { return value * 2 }
+  fn asm_adjust(value i32) i32
+  fn answer() i32 { return asm_adjust(c_answer()) }
+}
+use "asm" <<ASM
+.text
+.globl asm_adjust
+.type asm_adjust,@function
+asm_adjust: add $0,%edi; mov %edi,%eax; ret
+.size asm_adjust,.-asm_adjust
+.section .note.GNU-stack,"",@progbits
+ASM
+''')
+        obj, _ = self.compile('combined native.o', source, '-c', cc=cc)
+        self.assertIn(b'REL (Relocatable file)', run('readelf', '-hW', obj).stdout)
+        symbols = native.symbols(obj)
+        for name in ('fas_twice', 'c_answer', 'asm_adjust', 'answer'):
+            self.assertNotEqual(symbols[name]['section'], 0)
+        self.assertEqual(symbols['puts']['section'], 0)
+        self.assertNotIn('_start', symbols)
+        self.assertEqual(obj.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(run('readelf', '-aW', obj).stderr, b'')
+        harness = self.source('combined C main',
+            'extern int answer(void); int main(void){return answer();}\n', '.c')
+        gnu = self.root/'combined GNU'
+        run(cc, harness, obj, '-o', gnu)
+        self.assertEqual(run(gnu, expected=42).stdout, b'combined C\n')
+        main = self.source('combined Fas main',
+            'extern "C" { fn answer() i32 }\nfn main() i32 { return answer() }\n')
+        fas, _ = self.compile('combined Fas', main, obj, '--hosted', cc=cc)
+        self.assertEqual(run(fas, expected=42).stdout, b'combined C\n')
+        # A real partial-link failure must preserve the previous object.
+        duplicate = self.source('duplicate embedded symbol', '''
+use "C" <<HELPER
+int collision(void){return 1;}
+HELPER
+extern "C" { fn collision() i32 { return 2 } }
+''')
+        before = obj.read_bytes()
+        _, error = self.compile('combined native.o', duplicate, '-c', cc=cc, expected=1)
+        self.assertIn(b'duplicate', error.stderr)
+        self.assertEqual(obj.read_bytes(), before)
+
     def test_package_thread_flags_reach_c_compilation_and_link_plan(self):
         source = self.source("thread package", '''
 use pkg "thread-test"

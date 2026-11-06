@@ -2798,12 +2798,11 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   emit_text config text)
           | Cli.Optimized_llvm -> emit_optimized_llvm ~pgo config program ir redirect
           | Cli.Obj when config.Cli.native -> (
-              if c_objects <> [] || link_pkgs <> [] then
+              if link_pkgs <> [] then
                 Error
                   [
                     Diag.error Span.synthetic
-                      "native object output cannot combine embedded C/assembly or \
-                       package libraries";
+                      "native object output cannot combine package libraries";
                   ]
               else
                 match Result.bind (native_ir ()) Native_gen.compile_object with
@@ -2811,8 +2810,17 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 | Ok image -> (
                     try
                       Fas_linker.File_io.publish ~output:config.Cli.output
-                        ~permissions:0o644 ~inputs:[ config.Cli.input ] (fun () ->
-                          image);
+                        ~permissions:0o644 ~inputs:(config.Cli.input :: c_objects)
+                        (fun () ->
+                          if c_objects = [] then image
+                          else
+                            Fas_linker.Partial_link.link_inputs
+                              (Fas_linker.Input.Object
+                                 {
+                                   path = config.Cli.input;
+                                   data = Bytes.unsafe_to_string image;
+                                 }
+                              :: List.map Fas_linker.Input.file c_objects));
                       Ok ""
                     with Fas_linker.Error.Error message ->
                       Error [ Diag.error Span.synthetic message ]))
