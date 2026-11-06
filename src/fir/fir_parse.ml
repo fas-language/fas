@@ -693,6 +693,10 @@ let parse_op st opname =
       in
       go ();
       (Syscall (Array.of_list (List.rev !args)), [| t |])
+  | "va_start" -> (Va_start (parse_value st), [||])
+  | "va_arg" ->
+      let t = parse_ty lx in
+      (Va_arg (parse_value st), [| t |])
   | "trap" -> (Trap, [||])
   | "nop" -> (Nop, [||])
   | "dbg_value" ->
@@ -891,9 +895,28 @@ let parse_body lx f =
 
 let parse_linkage_vis_attrs lx =
   let linkage = ref Global and vis = ref Default and attrs = ref 0 and display = ref None in
+  let seen_linkage = ref false in
+  (* the token after the next one, without consuming either *)
+  let peek2 () =
+    let pos = lx.pos and line = lx.line and peeked = lx.peeked in
+    ignore (next lx);
+    let t = peek lx in
+    lx.pos <- pos;
+    lx.line <- line;
+    lx.peeked <- peeked;
+    t
+  in
   let rec go () =
     match peek lx with
-    | Ident s when Option.is_some (linkage_of s) -> ignore (next lx); linkage := Option.get (linkage_of s); go ()
+    (* at most one linkage, and `global @x` is the next top-level global, not
+       this declaration's linkage (a bodiless `declare` has no end marker) *)
+    | Ident s
+      when Option.is_some (linkage_of s) && (not !seen_linkage)
+           && (match peek2 () with Sym _ -> false | _ -> true) ->
+        ignore (next lx);
+        seen_linkage := true;
+        linkage := Option.get (linkage_of s);
+        go ()
     | Ident s when Option.is_some (visibility_of s) -> ignore (next lx); vis := Option.get (visibility_of s); go ()
     | Ident "display" -> ignore (next lx); display := Some (str_tok lx); go ()
     | Ident s -> (

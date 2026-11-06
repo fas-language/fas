@@ -234,6 +234,12 @@ type op =
   | Expand of value * value
   | Call of { sig_ : signature; callee : callee; args : value array; attrs : int }
   | Syscall of value array
+  | Va_start of value
+      (** fills the va_list at the pointer so it reads the variadic arguments of
+          the current (variadic) function; x86-64 SysV va_list: 24 bytes, align 8 *)
+  | Va_arg of value
+      (** reads the next variadic argument through the va_list at the pointer
+          and advances it; the result type says what to read (int, ptr, float) *)
   | Trap
   | Dbg_value of int * value  (** variable id, value *)
 
@@ -510,7 +516,7 @@ let iter_op_uses g = function
       g a;
       g b
   | Iun (_, _, a) | Fun (_, _, a) | Freeze a | Conv (_, a) | Alloca (a, _) | Load (_, a)
-  | Splat a | Reduce (_, a) | Dbg_value (_, a) ->
+  | Splat a | Reduce (_, a) | Dbg_value (_, a) | Va_start a | Va_arg a ->
       g a
   | Fma (_, a, b, c) | Fsh (_, a, b, c) | Select (a, b, c) | Insert (a, b, c)
   | Memcpy (_, a, b, c) | Memmove (_, a, b, c) | Memset (_, a, b, c)
@@ -586,6 +592,8 @@ let map_op_uses g op =
           args = Array.map g c.args;
         }
   | Syscall args -> Syscall (Array.map g args)
+  | Va_start a -> Va_start (g a)
+  | Va_arg a -> Va_arg (g a)
   | Dbg_value (var, a) -> Dbg_value (var, g a)
 
 let map_target g t = { t with args = Array.map g t.args }
@@ -609,7 +617,7 @@ let successors = function
 (* Ops with effects beyond their results: never removed when unused *)
 let has_side_effects = function
   | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Fence _ | Masked_store _
-  | Call _ | Syscall _ | Trap | Dbg_value _ ->
+  | Call _ | Syscall _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ ->
       true
   | Load (m, _) -> m.volatile || m.order <> Plain
   | _ -> false

@@ -326,6 +326,15 @@ let verify_func (f : func) =
                 if nres = 1 && r 0 <> i64 then err "%s: syscall result must be i64" where;
                 if Array.length args < 1 || Array.length args > 7 then err "%s: syscall takes 1 to 7 values" where;
                 Array.iteri (fun k a -> same (Printf.sprintf "syscall argument %d" k) a i64) args
+            | Va_start p ->
+                want 0;
+                if not (is_ptr (ty p)) then err "%s: va_start of %s" where (tys p);
+                if not f.sig_.variadic then err "%s: va_start in a function that is not variadic" where
+            | Va_arg p ->
+                want 1;
+                if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
+                if nres = 1 && not (is_int (r 0) || is_ptr (r 0) || r 0 = F32 || r 0 = F64) || (nres = 1 && is_int (r 0) && int_width (r 0) > 64) then
+                  err "%s: va_arg reads an integer up to i64, a ptr, f32 or f64" where
             | Trap -> want 0
             | Dbg_value _ -> want 0);
             ignore i)

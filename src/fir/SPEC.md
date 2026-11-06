@@ -272,10 +272,19 @@ Alignment is a power of two. It is a promise about the address, so writing `alig
 | `%r = call [ATTRS] SIG @f(args)` | Direct call. When there are no results, drop `%r =`, and when there are several, write `%a, %b = call ...`. |
 | `%r = call [ATTRS] SIG %fp(args)` | Indirect call through a `ptr`. |
 | `%r = syscall i64 NR, a1, ..., a6` | Linux syscall. **Every operand is an i64**, including NR, so pointers go through `ptrtoint` first. The result is the raw kernel return value; −4095..−1 means −errno. |
+| `va_start P` | Only in a variadic function. Fills the `va_list` at `P` so that it reads this function's unnamed arguments, starting after the fixed ones. |
+| `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer up to `i64`, `ptr`, `f32` or `f64`. It reads one 8-byte argument word and keeps its low `T` bits. |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
 | `dbg_value VAR, V` | Debug info: source variable VAR currently holds V. It has no effect on semantics. |
 
 Call ATTRS are any of `noreturn returns_twice nounwind tail`.
+
+**The `va_list`** is the x86-64 SysV one, 24 bytes with align 8, and the front end allocates it:
+- **Layout:** `{ u32 gp_offset; u32 fp_offset; ptr overflow_arg_area; ptr reg_save_area }`. It is the same as C's `va_list`, so a C function can hand its `va_list` to a Fir function (which takes it as a `ptr`) and the reverse.
+- **`va_end`** emits nothing.
+- **`va_copy(d, s)`** is `memcpy D, S, i64 24`.
+- **C's default promotions still apply.** Callers pass `float` as `f64`, and integers narrower than `int` as `i32`, so read them with `va_arg f64` and `va_arg i32`.
+- **Aggregates by value** cannot be read with `va_arg`. Pass them by pointer.
 
 ## 7. Terminators
 
@@ -410,6 +419,7 @@ In Fir this means:
   | `?:` | Either `select` when both arms are side-effect free, or branches plus a merge parameter. |
   | `switch` | `switch`. |
   | `goto` and labels | Ordinary blocks. Seal a label's block only when the function ends, or once all gotos to it are known. |
+  | `...`, `va_list`, `va_arg` | A variadic signature (`(i32, ...)`). `va_list ap` is a 24-byte `alloca`, `va_start(ap, last)` is `va_start %ap`, and `va_arg(ap, T)` is `va_arg T %ap`. A `va_list` parameter is a `ptr`, since C arrays decay to pointers. See §6. |
 
 ### Struct, array and pointer access
 
@@ -433,8 +443,8 @@ In Fir this means:
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca with a constant size, load/store (plain, volatile, atomic), ptradd, memcpy/memmove with a constant size, `memset` of zero with a constant size | Variable-size alloca, memcpy, memmove and memset; memset with a nonzero byte | A small loop, or your own `memcpy` function. |
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
-| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions | `agg` parameters/results; more than one result; exported (`global`) functions with i128 or variadic signatures | Pass structs by pointer, and return them through a caller-provided pointer. |
-| Variadic callees | The function compiles. | **Fir has no `va_start`/`va_arg` yet**, so a variadic function cannot read its extra arguments. | Avoid variadic definitions for now. |
+| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions | `agg` parameters/results; more than one result; exported (`global`) functions with i128 signatures | Pass structs by pointer, and return them through a caller-provided pointer. |
+| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; reading a `va_list` that C passed in, and the reverse | `va_arg` of aggregates | Pass structs by pointer. |
 | Control flow | jump br switch ret unreachable trap | `indirect_br`, `blockaddr` | `switch` on a label number. |
 | Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |

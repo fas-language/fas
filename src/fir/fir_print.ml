@@ -304,6 +304,8 @@ let op_text f nm (ir : inst_rec) =
         (match callee with Direct s -> symbol s | Indirect c -> v c)
         (list args)
   | Syscall args -> Printf.sprintf "syscall %s %s" (rt ()) (list args)
+  | Va_start p -> "va_start " ^ v p
+  | Va_arg p -> Printf.sprintf "va_arg %s %s" (rt ()) (v p)
   | Trap -> "trap"
   | Dbg_value (var, a) -> Printf.sprintf "dbg_value %d, %s" var (v a)
 

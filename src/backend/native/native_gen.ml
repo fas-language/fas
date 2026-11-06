@@ -612,6 +612,10 @@ type frame = {
   call_saves : (instr * (int * bool) list) list;
       (** per call: allocation keys in caller-saved registers to store before it, each
           with whether it is reloaded after *)
+  va : (int * int * int * int) option;
+      (** variadic functions: rbp offset of the 176-byte register save area
+          (rdi..r9, then xmm0..7), and the gpr, xmm and stack words the fixed
+          parameters use, which is where va_arg starts *)
   loose : unit Hashtbl.t;
       (** narrow results whose every use reads only their low bits, so they may skip the
           zero extension to canonical form *)
@@ -772,6 +776,7 @@ let build_frame ?xmm ctx (f : func) =
       xtmp = 0;
       saved = [];
       call_saves = !call_saves;
+      va = None;
       loose =
         (if Sys.getenv_opt "FAS_NATIVE_NOLOOSE" = None then loose_values addrs f
          else Hashtbl.create 1);
@@ -822,7 +827,15 @@ let build_frame ?xmm ctx (f : func) =
       Regalloc.callee_saved
   in
   let xtmp = if !has_v128 then reserve fr 16 16 else 0 in
-  let fr = { fr with saved; xtmp } in
+  let va =
+    if not f.variadic then None
+    else
+      (* how the fixed parameters split, as [classify_args] places them *)
+      let nf = List.length (List.filter (fun (p : param) -> p.ty = F32 || p.ty = F64) f.params) in
+      let ng = List.length f.params - nf in
+      Some (reserve fr 176 16, min ng 6, min nf 8, max 0 (ng - 6) + max 0 (nf - 8))
+  in
+  let fr = { fr with saved; xtmp; va } in
   fr.size <- (fr.size + 15) / 16 * 16;
   fr
 
@@ -1354,7 +1367,8 @@ let arg_regs = [| A.Rdi; A.Rsi; A.Rdx; A.Rcx; A.R8; A.R9 |]
    extended per [ret_extension]/param extension; variadic calls set al).
    Vectors still use this backend's own representation, and aggregates by
    value reach C through clang-built adapters, so neither is exposed.
-   Variadic functions can be called but not defined here. *)
+   Variadic functions may be defined too: their prologue spills the argument
+   registers for va_start/va_arg. *)
 let external_abi (f : func) =
   let scalar = function
     | I1 | I8 | I16 | I32 | I64 | F32 | F64 | Pointer _ -> true
@@ -1494,6 +1508,55 @@ let gen_intrinsic ctx fr result ret_ty name args =
     match result with Some id -> from_xmm ctx fr id ret_ty x | None -> ()
   in
   if prefix "llvm.lifetime." then ()
+  else if prefix "llvm.va_start" then begin
+    (* SysV va_list { u32 gp_offset; u32 fp_offset; ptr overflow_arg_area;
+       ptr reg_save_area }: offsets into the save area past the registers the
+       fixed parameters took; the overflow area past their stack words *)
+    let save, ng, nx, ns =
+      match fr.va with Some v -> v | None -> unsupported "va_start outside a variadic function"
+    in
+    load ctx fr A.Rdx (arg 0);
+    A.mov_imm a A.Rax (Int64.of_int (8 * ng));
+    A.store a 4 (A.Base (A.Rdx, 0)) A.Rax;
+    A.mov_imm a A.Rax (Int64.of_int (48 + (16 * nx)));
+    A.store a 4 (A.Base (A.Rdx, 4)) A.Rax;
+    A.lea a A.Rax (A.Base (A.Rbp, 16 + (8 * ns)));
+    A.store a 8 (A.Base (A.Rdx, 8)) A.Rax;
+    A.lea a A.Rax (A.Base (A.Rbp, save));
+    A.store a 8 (A.Base (A.Rdx, 16)) A.Rax
+  end
+  else if prefix "llvm.fas.va_arg." then begin
+    (* The next argument comes from the register save area while its class's
+       registers last (gp_offset < 48, fp_offset < 176), then from the
+       overflow area, one 8-byte word each *)
+    let float = ret_ty = F32 || ret_ty = F64 in
+    let off_field, limit, step = if float then (4, 176, 16) else (0, 48, 8) in
+    let from_stack = A.new_label a and done_ = A.new_label a in
+    load ctx fr A.Rdx (arg 0);
+    A.load_zx a 4 A.Rcx (A.Base (A.Rdx, off_field));
+    A.alu_ri a A.Cmp A.Rcx limit;
+    A.jcc a A.Ae from_stack;
+    A.lea a A.Rax (A.Base (A.Rcx, step));
+    A.store a 4 (A.Base (A.Rdx, off_field)) A.Rax;
+    A.alu_rm a A.Add A.Rcx (A.Base (A.Rdx, 16));
+    A.jmp a done_;
+    A.place a from_stack;
+    A.load_zx a 8 A.Rcx (A.Base (A.Rdx, 8));
+    A.lea a A.Rax (A.Base (A.Rcx, 8));
+    A.store a 8 (A.Base (A.Rdx, 8)) A.Rax;
+    A.place a done_;
+    (* rcx = the argument's address *)
+    if float then begin
+      A.load_zx a (bits ret_ty / 8) A.Rax (A.Base (A.Rcx, 0));
+      A.mov_xr a ~double:(ret_ty = F64) 0 A.Rax;
+      fstore 0
+    end
+    else begin
+      A.load_zx a (max 1 (bits ret_ty / 8)) A.Rax (A.Base (A.Rcx, 0));
+      if bits ret_ty = 1 then A.alu_ri a A.And A.Rax 1;
+      store A.Rax
+    end
+  end
   else if prefix "llvm.fas.store_if" then begin
     (* store_if(cond, value, pointer) *)
     let _, _, v = List.nth args 1 in
@@ -2427,6 +2490,15 @@ let gen_function ctx (f : func) =
   A.push a A.Rbp;
   A.mov_rr a A.Rbp A.Rsp;
   if fr.size > 0 then A.alu_ri a A.Sub A.Rsp fr.size;
+  (* A variadic function spills every argument register first, so va_arg
+     can find the unnamed ones (SysV register save area layout) *)
+  (match fr.va with
+  | Some (save, _, _, _) ->
+      Array.iteri (fun i r -> A.store a 8 (A.Base (A.Rbp, save + (8 * i))) r) arg_regs;
+      for x = 0 to 7 do
+        A.movdqu_store a (A.Base (A.Rbp, save + 48 + (16 * x))) x
+      done
+  | None -> ());
   (* Parameters to their slots, canonical (see [classify_args]) *)
   let classes, _, _ = classify_args (List.map (fun (p : param) -> p.ty) f.params) in
   List.iter2
@@ -2872,7 +2944,7 @@ let generate ~startup (m : module_) =
     let defined = List.filter (fun (f : func) -> f.blocks <> []) m.funcs in
     List.iter
       (fun (f : func) ->
-        if f.linkage = External && (f.variadic || not (external_abi f)) then
+        if f.linkage = External && not (external_abi f) then
           unsupported "exported function `%s` requires an unsupported external ABI"
             f.name)
       defined;

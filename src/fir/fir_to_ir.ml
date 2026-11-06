@@ -421,6 +421,12 @@ let convert_inst cx (i : inst) =
       | Some id, _ -> alias cx (r 0) (Ir.Local (id, ret))
       | None, _ -> ())
   | Syscall args -> def cx (r 0) (fun id _ -> Ir.Syscall (id, List.map v (Array.to_list args)))
+  | Va_start p -> call cx None Ir.Void "llvm.va_start.p0" [ arg cx p ]
+  | Va_arg p ->
+      (* the suffix names what to read: the native backend expands these
+         inline (llvm.* calls only use rax/rcx/rdx there) *)
+      let suffix = match ty_of cx.f (r 0) with Int n -> "i" ^ string_of_int n | Ptr _ -> "ptr" | F32 -> "f32" | F64 -> "f64" | t -> unsupported "va_arg of %s" (ty_to_string t) in
+      intrinsic cx (r 0) ("llvm.fas.va_arg." ^ suffix) [ arg cx p ]
   | Trap -> add cx Ir.Trap
 
 let convert_func (m : modul) ~source (f : func) : Ir.func =

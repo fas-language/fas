@@ -351,6 +351,9 @@ let pure_call name =
        || String.starts_with ~prefix:"llvm.masked." name
        || String.starts_with ~prefix:"llvm.fas.store_if" name
        || String.starts_with ~prefix:"llvm.fas.load_if" name
+       (* va_start writes the va_list; va_arg reads and advances it *)
+       || String.starts_with ~prefix:"llvm.fas.va_" name
+       || String.starts_with ~prefix:"llvm.va_" name
        || String.starts_with ~prefix:"llvm.trap" name
        || String.starts_with ~prefix:"llvm.experimental." name)
 
