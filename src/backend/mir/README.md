@@ -12,7 +12,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
     --Fir_wide--> Fir (integers <= 64 bits)
     --Mir_isel--> Mir (virtual registers)
     --Mir_ra----> allocation --Mir_check--> ok
-    --Mir_emit--> X64 encoder, ELF via Native_object
+    --Mir_emit--> X64 encoder, .eh_frame (Mir_cfi), ELF via Native_object
 ```
 
 | File | Role |
@@ -24,6 +24,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_check.ml` | Verifies an allocation without trusting the allocator: an abstract machine over registers and slots, iterated to a fixpoint. |
 | `mir_runtime.ml` | Appends the correctly rounded `fma` helpers (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
+| `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
 
 ## Running it
 
@@ -31,7 +32,8 @@ Fir --Fir_scalarize--> Fir (no vectors)
   `--mir -c` writes an object.
 - `FAS_MIR_DUMP=1` prints the selected and the allocated Mir to stderr.
 - `FAS_FIR_TOOL=<a wrapper running fas-fir --mir> sh test/fas_fir.sh`: the
-  Fir conformance programs (14/14 pass; `vectors.fir` is `--mir` only).
+  Fir conformance programs (15/15 pass; `vectors.fir` and `c/unwind.fir`
+  are `--mir` only).
 - `fir_fuzz.exe -mir`: random modules compared with clang -O2.
 - `test/mir_check_test.ml` (in `dune runtest`): allocates every function of
   the Fir test corpus, checks it, then mutates each allocation (drop a
@@ -55,6 +57,20 @@ the block just above the outgoing-argument area, so `Bout` stays at rsp.
 Alignments above 16 over-allocate and round the address up. The epilogue
 restores rsp from rbp, so `stackrestore` and dynamic allocations need no
 bookkeeping.
+
+## Unwind info
+
+Every frame has the shape above, so the CFI is fixed: after `push rbp` the
+CFA is rsp+16 and rbp is saved at CFA-16; after `mov rbp, rsp` the CFA is
+rbp+16 for the rest of the body, whatever rsp does (dynamic allocas); the
+i-th callee-saved push saves its register at CFA-24-8i. Each return is
+bracketed by `remember_state` before its epilogue and `restore_state`
+after the `ret`, with CFA = rsp+8 after `pop rbp`. `_start` has an FDE with
+an undefined return address, where unwinders stop. FDEs point at their code
+with a PC32 relocation against the local symbol `.Lfas.text` (the start of
+`.text`) plus the function's offset, so a weak function that is overridden
+still has the FDE of its own copy. `test/fas_fir/c/unwind.fir` walks the
+stack with the libgcc unwinder from a C callback.
 
 ## Block addresses
 

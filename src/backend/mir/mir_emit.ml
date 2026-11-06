@@ -163,14 +163,23 @@ let ins a fr ~func_label ~out (i : ins) =
   | Mfence -> A.mfence a
   | Ud2 -> A.ud2 a
 
-(* one function: returns its text size *)
+(* one function: returns its text size and its frame events for the
+   .eh_frame (Mir_cfi), at offsets from the function's start *)
 let func a ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
+  let events = ref [] in
+  let event e = events := (A.pos a - start, e) :: !events in
   A.place a (func_label f.name);
   A.push a A.Rbp;
+  event Mir_cfi.Pushed_rbp;
   A.mov_rr a A.Rbp A.Rsp;
-  List.iter (A.push a) ra.saved;
+  event Mir_cfi.Framed;
+  List.iteri
+    (fun i r ->
+      A.push a r;
+      event (Mir_cfi.Saved (r, i)))
+    ra.saved;
   if fr.size > 0 then A.alu_ri a A.Sub A.Rsp fr.size;
   let nb = Array.length ra.items in
   let labels = Array.init nb (fun _ -> A.new_label a) in
@@ -194,14 +203,19 @@ let func a ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
         A.jcc a c labels.(t);
         if e <> next then A.jmp a labels.(e)
     | Ret _ ->
+        event Mir_cfi.Epilogue;
         A.lea a A.Rsp (A.Base (A.Rbp, -8 * fr.nsaved));
         List.iter (A.pop a) (List.rev ra.saved);
         A.pop a A.Rbp;
-        A.ret a
+        event Mir_cfi.Popped_rbp;
+        A.ret a;
+        event Mir_cfi.Returned
     | Halt -> A.ud2 a
     | Jmpr (r, _) -> A.ext_r a ~w:false [ 0xff ] 4 (gr r)
   done;
-  A.pos a - start
+  let size = A.pos a - start in
+  (* a restore_state at the very end describes no code *)
+  (size, List.rev (List.filter (fun (o, e) -> not (e = Mir_cfi.Returned && o = size)) !events))
 
 (* ---------- data ---------- *)
 
@@ -268,6 +282,7 @@ let generate ~startup (m : F.modul) =
           l
     in
     let func_syms = ref [] in
+    let fdes = ref [] in
     (* text offsets of every block, for blockaddr symbols *)
     let block_offsets = Hashtbl.create 256 in
     F.Vec.iter
@@ -280,9 +295,10 @@ let generate ~startup (m : F.modul) =
           Mir_check.run mf ra;
           A.align a 16;
           let offset = A.pos a in
-          let size =
+          let size, events =
             func a ~func_label ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
+          fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
           func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
         end)
       m.funcs;
@@ -301,7 +317,8 @@ let generate ~startup (m : F.modul) =
       A.syscall a;
       A.ud2 a;
       func_syms := { Elf64.name = "_start"; section = Elf64.Text; offset; size = A.pos a - offset; func = true }
-                   :: !func_syms
+                   :: !func_syms;
+      fdes := { Mir_cfi.start = offset; size = A.pos a - offset; events = []; entry = true } :: !fdes
     end;
     let text, text_relocs = A.finish a in
     let rodata = { buf = Buffer.create 256; alignment = 16; relocs = []; syms = [] } in
@@ -350,7 +367,9 @@ let generate ~startup (m : F.modul) =
           Option.iter (List.iter (function F.Blockref { fn; block } -> note_block fn block | _ -> ())) g.init)
       m.globals;
     let blk_syms = List.sort compare (Hashtbl.fold (fun _ s l -> s :: l) blk_syms []) in
-    let defined_syms = List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ blk_syms in
+    (* FDEs point at their code through this local symbol (Mir_cfi) *)
+    let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
+    let defined_syms = text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ blk_syms in
     let alias_syms =
       List.map
         (fun (al : Elf_attrs.alias) ->
@@ -361,6 +380,7 @@ let generate ~startup (m : F.modul) =
     in
     Ok
       (Native_object.emit
+         ~eh_frame:(Mir_cfi.build (List.rev !fdes))
          ~global:(fun n -> n = "_start")
          ~binding:(Hashtbl.find_opt syms.binding)
          ~visibility:(fun n -> Option.value (Hashtbl.find_opt syms.visibility n) ~default:0)

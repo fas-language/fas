@@ -34,6 +34,7 @@ cc=${FAS_CC:-cc}
 if command -v "$cc" >/dev/null 2>&1; then
   for f in "$here"/fas_fir/c/*.fir; do
     name=$(basename "$f" .fir)
+    case " $flags " in *" --mir "*) ;; *) grep -q '^; mir-only' "$f" && continue ;; esac
     n=$((n + 1))
     if ! "$tool" $flags -c "$f" -o "$tmp/c_$name.o" 2>"$tmp/err" \
       || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" -lm 2>"$tmp/err"; then

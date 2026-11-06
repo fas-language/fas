@@ -489,6 +489,7 @@ In Fir this means:
 | Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4`; `section`; `thread_local` (refused, TLS is planned for v0.5) | Use w8; for TLS, a pointer to per-thread storage passed explicitly. |
 | Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
+| Unwind info | The machine-IR backend (`--mir`) writes `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | `.eh_frame` from the default native backend; DWARF debug info | `--mir`. |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.
 

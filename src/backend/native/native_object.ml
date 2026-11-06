@@ -6,8 +6,11 @@ let section = function Elf64.Text -> 0 | Rodata -> 1 | Data -> 2 | Bss -> 3
 
 (* [binding name] overrides the binding of a symbol (STB_WEAK for a weak
    definition or reference, STB_LOCAL for a local one the Ir calls external);
-   [visibility name] is its STV_* value. Both default to the plain behaviour. *)
-let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ~global ~alignments
+   [visibility name] is its STV_* value. Both default to the plain behaviour.
+   [eh_frame] adds an .eh_frame section (call frame information, from the
+   machine-IR backend) with its relocations; it comes last, after
+   .note.GNU-stack, so the other section indices do not move. *)
+let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?eh_frame ~global ~alignments
     (input : Elf64.input) =
   let definitions = Hashtbl.create ~random:true 64 in
   let symbols = ref [] and count = ref 0 in
@@ -73,13 +76,21 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ~global ~alignmen
           relocations :=
             ({ section; offset; symbol; kind; addend } : O.relocation) :: !relocations)
         rs)
-    [ input.text_relocs; input.rodata_relocs; input.data_relocs ];
+    ([ input.text_relocs; input.rodata_relocs; input.data_relocs ]
+    @ (* sections 3 (.bss) and 4 (.note.GNU-stack) have none *)
+    match eh_frame with Some (_, relocs) -> [ []; []; relocs ] | None -> []);
+  let eh_frame_section =
+    match eh_frame with
+    | Some (bytes, _) -> [ { O.name = ".eh_frame"; flags = 2; alignment = 8; contents = O.Data bytes } ]
+    | None -> []
+  in
   O.write
     {
       sections =
+        (fun base extra -> Array.append base (Array.of_list extra))
         [|
           {
-            name = ".text";
+            O.name = ".text";
             flags = 6;
             alignment = alignments.(0);
             contents = O.Data input.text;
@@ -108,7 +119,8 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ~global ~alignmen
             alignment = 1;
             contents = O.Data Bytes.empty;
           };
-        |];
+        |]
+        @@ eh_frame_section;
       symbols = Array.of_list (List.rev !symbols);
       relocations = Array.of_list (List.rev !relocations);
     }
