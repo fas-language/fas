@@ -299,13 +299,17 @@ let op_text f nm (ir : inst_rec) =
   | Masked_store (al, x, p, m) -> Printf.sprintf "masked_store %s, %s, %s, align %d" (v x) (v p) (v m) al
   | Compress (a, m) -> Printf.sprintf "compress %s %s, %s" (rt ()) (v a) (v m)
   | Expand (a, m) -> Printf.sprintf "expand %s %s, %s" (rt ()) (v a) (v m)
-  | Call { sig_; callee; args; attrs } ->
+  | Call { sig_; callee; args; attrs; va_aggs } ->
+      let arg k x =
+        match List.assoc_opt k va_aggs with Some a -> abi_text a ^ " " ^ v x | None -> v x
+      in
       Printf.sprintf "call %s%s %s(%s)" (attrs_text call_attr_names attrs) (sig_text sig_)
         (match callee with Direct s -> symbol s | Indirect c -> v c)
-        (list args)
+        (String.concat ", " (List.mapi arg (Array.to_list args)))
   | Syscall args -> Printf.sprintf "syscall %s %s" (rt ()) (list args)
   | Va_start p -> "va_start " ^ v p
   | Va_arg p -> Printf.sprintf "va_arg %s %s" (rt ()) (v p)
+  | Va_arg_agg (abi, p) -> Printf.sprintf "va_arg %s %s" (abi_text abi) (v p)
   | Stack_save -> "stacksave"
   | Stack_restore p -> "stackrestore " ^ v p
   | Trap -> "trap"

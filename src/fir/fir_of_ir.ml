@@ -327,7 +327,7 @@ let convert_call cx b result ext (ret : Ir.ty) callee args =
   let sig_ = { param_abis; result_abis = results_of_old cx.lc ret ext; variadic = fixed <> None } in
   let argv = Array.of_list (List.map (fun (_, _, v) -> value cx b v) args) in
   let tys = Array.of_list (List.map Fir_verify.abi_ty sig_.result_abis) in
-  let rs = emit ~loc:cx.loc f b (Call { sig_; callee; args = argv; attrs = 0 }) tys in
+  let rs = emit ~loc:cx.loc f b (Call { sig_; callee; args = argv; attrs = 0; va_aggs = [] }) tys in
   match (result, rs) with
   | Some id, [| r |] -> define cx id r
   | None, _ -> ()

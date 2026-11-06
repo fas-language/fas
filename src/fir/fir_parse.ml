@@ -678,12 +678,25 @@ let parse_op st opname =
         | t -> fail lx ("expected a callee, got " ^ tok_text t)
       in
       expect lx "(";
-      let args = parse_values_until st ")" in
+      (* an argument may carry an agg ABI: a struct by value through `...` *)
+      let args = ref [] and va_aggs = ref [] and k = ref 0 in
+      if not (accept lx ")") then begin
+        let rec go () =
+          (match peek lx with
+          | Ident "agg" -> va_aggs := (!k, parse_abi lx) :: !va_aggs
+          | _ -> ());
+          args := parse_value st :: !args;
+          incr k;
+          if accept lx "," then go () else expect lx ")"
+        in
+        go ()
+      end;
+      let args = Array.of_list (List.rev !args) and va_aggs = List.rev !va_aggs in
       let tys =
         Array.of_list
           (List.map (function Scalar t | Ext (t, _) -> t | Agg _ -> ptr) sig_.result_abis)
       in
-      (Call { sig_; callee; args; attrs = !attrs }, tys)
+      (Call { sig_; callee; args; attrs = !attrs; va_aggs }, tys)
   | "syscall" ->
       let t = parse_ty lx in
       let args = ref [] in
@@ -694,9 +707,14 @@ let parse_op st opname =
       go ();
       (Syscall (Array.of_list (List.rev !args)), [| t |])
   | "va_start" -> (Va_start (parse_value st), [||])
-  | "va_arg" ->
-      let t = parse_ty lx in
-      (Va_arg (parse_value st), [| t |])
+  | "va_arg" -> (
+      match peek lx with
+      | Ident "agg" ->
+          let abi = parse_abi lx in
+          (Va_arg_agg (abi, parse_value st), [| ptr |])
+      | _ ->
+          let t = parse_ty lx in
+          (Va_arg (parse_value st), [| t |]))
   | "stacksave" -> (Stack_save, [| ptr |])
   | "stackrestore" -> (Stack_restore (parse_value st), [||])
   | "trap" -> (Trap, [||])

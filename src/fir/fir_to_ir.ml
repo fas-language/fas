@@ -661,20 +661,24 @@ let convert_inst cx (i : inst) =
         ("llvm.experimental.vector.compress." ^ suffix vt)
         [ arg cx x; arg cx mask; (ir_ty vt, Ir.No_extension, (Ir.Zero (ir_ty vt) : Ir.value)) ]
   | Expand _ -> unsupported "expand"
-  | Call { sig_; callee; args; _ } ->
+  | Call { sig_; callee; args; va_aggs; _ } ->
       let nfixed = List.length sig_.param_abis in
       let ir_args =
         List.mapi
           (fun k x ->
-            if k < nfixed then
-              match List.nth sig_.param_abis k with
+            let abi = if k < nfixed then Some (List.nth sig_.param_abis k) else List.assoc_opt k va_aggs in
+            match abi with
+            | None -> arg cx x
+            | Some abi -> (
+              match abi with
+              | Agg { size; align; fields } when k >= nfixed && sysv_agg ~size ~align fields = None ->
+                  unsupported "a struct by value through `...` needs integer, ptr, f32 or f64 fields and align <= 8"
               | Agg { size; align; fields } ->
                   let ty, _ = agg_ir ~size ~align fields in
                   (ty, Ir.No_extension, load_abi_agg cx ~size ~align fields (v x))
               | a ->
                   let t, e = abi_ir a in
-                  (t, e, v x)
-            else arg cx x)
+                  (t, e, v x)))
           (Array.to_list args)
       in
       let ret, ext = match sig_.result_abis with [] -> (Ir.Void, Ir.No_extension) | [ a ] -> abi_ir a | _ -> unsupported "multiple results" in
@@ -698,6 +702,20 @@ let convert_inst cx (i : inst) =
          inline (llvm.* calls only use rax/rcx/rdx there) *)
       let suffix = match ty_of cx.f (r 0) with Int n -> "i" ^ string_of_int n | Ptr _ -> "ptr" | F32 -> "f32" | F64 -> "f64" | t -> unsupported "va_arg of %s" (ty_to_string t) in
       intrinsic cx (r 0) ("llvm.fas.va_arg." ^ suffix) [ arg cx p ]
+  | Va_arg_agg (abi, p) -> (
+      (* `llvm.fas.va_arg_agg.<r.CLASSES | m.N>(ap, slot)` copies the
+         argument's eightbytes into a slot of this instruction (SysV va_arg
+         for aggregates); the result is the slot *)
+      match abi with
+      | Agg { size; align; fields } -> (
+          match sysv_agg ~size ~align fields with
+          | Some (Ir.Struct name, n) ->
+              let s = slot cx n 8 in
+              let cls = String.sub name 9 (String.length name - 9) in
+              call cx None Ir.Void ("llvm.fas.va_arg_agg." ^ cls) [ arg cx p; (Ir.Pointer Ir.I8, Ir.No_extension, s) ];
+              alias cx (r 0) s
+          | _ -> unsupported "va_arg of an aggregate needs integer, ptr, f32 or f64 fields and align <= 8")
+      | _ -> unsupported "va_arg with a non-agg ABI")
   | Stack_save -> intrinsic cx (r 0) "llvm.stacksave.p0" []
   | Stack_restore p -> call cx None Ir.Void "llvm.stackrestore.p0" [ arg cx p ]
   | Trap -> add cx Ir.Trap

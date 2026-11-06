@@ -1627,6 +1627,52 @@ let gen_intrinsic ctx fr result ret_ty name args =
     A.lea a A.Rax (A.Base (A.Rbp, save));
     A.store a 8 (A.Base (A.Rdx, 16)) A.Rax
   end
+  else if prefix "llvm.fas.va_arg_agg." then begin
+    (* va_arg of a struct (SysV 3.5.7): (va_list, slot). A register-class
+       struct comes from the register save area only when all its
+       eightbytes still fit there (gp_offset <= 48 - 8*ng, fp_offset <=
+       176 - 16*nx); otherwise, and for MEMORY class, from the overflow area,
+       rounded up to 8 bytes. Either way its eightbytes are copied to slot. *)
+    let cls = String.sub name 20 (String.length name - 20) in
+    let words, mem =
+      if String.starts_with ~prefix:"m." cls then
+        (int_of_string (String.sub cls 2 (String.length cls - 2)) / 8, true)
+      else (String.length cls - 2, false)
+    in
+    let letters = if mem then "" else String.sub cls 2 words in
+    load ctx fr A.Rdx (arg 0);
+    load ctx fr A.Rdi (arg 1);
+    let from_stack = A.new_label a and done_ = A.new_label a in
+    if not mem then begin
+      let nx = List.length (List.filter (( = ) 'f') (List.of_seq (String.to_seq letters))) in
+      let ng = words - nx in
+      let fits field limit =
+        A.load_zx a 4 A.Rcx (A.Base (A.Rdx, field));
+        A.alu_ri a A.Cmp A.Rcx limit;
+        A.jcc a A.A from_stack
+      in
+      if ng > 0 then fits 0 (48 - (8 * ng));
+      if nx > 0 then fits 4 (176 - (16 * nx));
+      String.iteri
+        (fun j c ->
+          let field, step = if c = 'f' then (4, 16) else (0, 8) in
+          A.load_zx a 4 A.Rcx (A.Base (A.Rdx, field));
+          A.load_zx a 8 A.Rsi (A.Base (A.Rdx, 16));
+          A.load_zx a 8 A.Rax
+            (A.Sib { base = Some A.Rsi; index = A.Rcx; scale = 1; disp = 0; sym = None });
+          A.store a 8 (A.Base (A.Rdi, 8 * j)) A.Rax;
+          A.alu_ri a A.Add A.Rcx step;
+          A.store a 4 (A.Base (A.Rdx, field)) A.Rcx)
+        letters;
+      A.jmp a done_
+    end;
+    A.place a from_stack;
+    A.load_zx a 8 A.Rsi (A.Base (A.Rdx, 8));
+    A.mov_imm a A.Rcx (Int64.of_int (8 * words));
+    A.rep_movsb a;
+    A.store a 8 (A.Base (A.Rdx, 8)) A.Rsi;
+    A.place a done_
+  end
   else if prefix "llvm.fas.va_arg." then begin
     (* The next argument comes from the register save area while its class's
        registers last (gp_offset < 48, fp_offset < 176), then from the

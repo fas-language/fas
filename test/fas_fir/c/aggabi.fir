@@ -1,6 +1,6 @@
 ; SysV struct-by-value: every eightbyte class pairing, MEMORY class with sret,
-; register exhaustion and both call directions. (A struct cannot be passed
-; through `...`: variadic arguments carry no agg type, so %p would go as a ptr.)
+; register exhaustion and both call directions. (Structs through `...` are
+; in vastruct.fir.)
 ; Checked against clang by aggabi.c.
 ;   II  = {long a, b}            INTEGER, INTEGER
 ;   DD  = {double x, y}          SSE, SSE

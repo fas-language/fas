@@ -311,7 +311,14 @@ let verify_func (f : func) =
                   same "vector" a (r 0);
                   same "mask" m (mask_of (r 0))
                 end
-            | Call { sig_; callee; args; attrs = _ } ->
+            | Call { sig_; callee; args; attrs = _; va_aggs } ->
+                let np0 = List.length sig_.param_abis in
+                List.iter
+                  (fun (k, a) ->
+                    (match a with Agg _ -> () | _ -> err "%s: argument %d: only an agg ABI may be written on an argument" where k);
+                    if k < np0 || k >= Array.length args then err "%s: argument %d: an agg ABI is only for variadic arguments" where k
+                    else if not (is_ptr (ty args.(k))) then err "%s: agg argument %d is %s, not ptr" where k (tys args.(k)))
+                  va_aggs;
                 (match callee with Indirect v -> if not (is_ptr (ty v)) then err "%s: indirect callee is %s" where (tys v) | Direct _ -> ());
                 let ps = List.map abi_ty sig_.param_abis in
                 let np = List.length ps in
@@ -341,6 +348,11 @@ let verify_func (f : func) =
             | Stack_restore p ->
                 want 0;
                 if not (is_ptr (ty p)) then err "%s: stackrestore of %s" where (tys p)
+            | Va_arg_agg (a, p) ->
+                want 1;
+                if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
+                (match a with Agg _ -> () | _ -> err "%s: va_arg with an ABI needs agg" where);
+                if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0
             | Dbg_value _ -> want 0);
             ignore i)

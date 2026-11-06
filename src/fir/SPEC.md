@@ -170,7 +170,7 @@ How the native backend classifies an `agg` (x86-64 SysV, the same as clang for t
 - **Up to 16 bytes:** each 8-byte half ("eightbyte") is SSE when it holds only `f32`/`f64` fields, otherwise INTEGER. The value goes in one or two registers: INTEGER halves in the next GPRs, SSE halves in the next XMM registers. If not all of its halves fit in the registers that are left, the whole value goes on the stack, and later scalar arguments still use the remaining registers. Results come back in `rax`/`rdx` and `xmm0`/`xmm1` the same way.
 - **Over 16 bytes, or a field that is not naturally aligned:** MEMORY class. An argument is copied onto the stack. A result is written to memory that the caller provides (a hidden first argument in `rdi`, returned again in `rax`).
 - **Not classified:** a vector, `i128` or `f80` field, an `ALIGN` above 8, or an eightbyte with no fields. Between Fir functions in one module such an `agg` still works (it is passed by address). At an external boundary (a `global` or `extern` function) the backend refuses it.
-- **A struct through `...` is not expressible.** Variadic arguments carry no `agg` type, so a `ptr` there is passed as a pointer. Pass the struct's address and have the C side take a pointer.
+- **A struct through `...`:** a variadic argument has no ABI in the signature, so the call names it: `call (i32, ...) -> (i64) @f(i32 1, agg(16, 8, [0: i64, 8: f64]) %p)`. The operand is a `ptr` to the bytes, as for any `agg` argument, and it is classified by the rules here. Without the `agg(...)` prefix a `ptr` is passed as a pointer. The prefix is only allowed on variadic arguments (not the fixed ones, whose ABI the signature gives) and only on a `ptr` operand. The callee reads it with `va_arg agg(...)` (§6).
 
 `zext i8` and `sext i16` change only what the other side may assume about the upper bits. The value itself is still an `i8` or `i16`. For C:
 
@@ -284,6 +284,7 @@ Alignment is a power of two. It is a promise about the address, so writing `alig
 | `%r = syscall i64 NR, a1, ..., a6` | Linux syscall. **Every operand is an i64**, including NR, so pointers go through `ptrtoint` first. The result is the raw kernel return value; −4095..−1 means −errno. |
 | `va_start P` | Only in a variadic function. Fills the `va_list` at `P` so that it reads this function's unnamed arguments, starting after the fixed ones. |
 | `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer up to `i64`, `ptr`, `f32` or `f64`. It reads one 8-byte argument word and keeps its low `T` bits. |
+| `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P` | Reads the next unnamed argument as a struct by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
 | `dbg_value VAR, V` | Debug info: source variable VAR currently holds V. It has no effect on semantics. |
 
@@ -294,7 +295,7 @@ Call ATTRS are any of `noreturn returns_twice nounwind tail`.
 - **`va_end`** emits nothing.
 - **`va_copy(d, s)`** is `memcpy D, S, i64 24`.
 - **C's default promotions still apply.** Callers pass `float` as `f64`, and integers narrower than `int` as `i32`, so read them with `va_arg f64` and `va_arg i32`.
-- **Aggregates by value** cannot be read with `va_arg`. Pass them by pointer.
+- **Aggregates by value** are passed with an `agg(...)` prefix on the call argument (§5) and read with `va_arg agg(...)`. C's `va_arg(ap, struct S)` is `va_arg agg(...) %ap` with the same `agg` the struct would have as a parameter.
 
 ## 7. Terminators
 
@@ -430,7 +431,7 @@ In Fir this means:
   | `switch` | `switch`. |
   | `goto` and labels | Ordinary blocks. Seal a label's block only when the function ends, or once all gotos to it are known. |
   | VLA `T a[n]` | At the start of the VLA's block, `%s = stacksave`; then `%a = alloca ptr %bytes, align A` with `%bytes = n·sizeof(T)`; on every exit from the block (including `break`, `continue`, `goto` out of it), `stackrestore %s`. `alloca(n)` is the same alloca without the pair. `sizeof a` is the `%bytes` value. |
-  | `...`, `va_list`, `va_arg` | A variadic signature (`(i32, ...)`). `va_list ap` is a 24-byte `alloca`, `va_start(ap, last)` is `va_start %ap`, and `va_arg(ap, T)` is `va_arg T %ap`. A `va_list` parameter is a `ptr`, since C arrays decay to pointers. See §6. |
+  | `...`, `va_list`, `va_arg` | A variadic signature (`(i32, ...)`). `va_list ap` is a 24-byte `alloca`, `va_start(ap, last)` is `va_start %ap`, and `va_arg(ap, T)` is `va_arg T %ap`, and for a struct `T`, `va_arg agg(...) %ap` (a `ptr` to a copy). A struct passed to a variadic function is written `agg(...) %p` in the call's argument list. A `va_list` parameter is a `ptr`, since C arrays decay to pointers. See §6. |
 
 ### Struct, array and pointer access
 
@@ -454,8 +455,8 @@ In Fir this means:
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca of any size (constant, or variable with any align), `stacksave`/`stackrestore`, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | — | — |
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
-| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary; a struct by value through `...` | Pass such structs by pointer. |
-| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; reading a `va_list` that C passed in, and the reverse | `va_arg` of aggregates; passing an aggregate by value as a variadic argument | Pass structs by pointer. |
+| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary or through `...` | Pass such structs by pointer. |
+| Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 | Pass such structs by pointer. |
 | Control flow | jump br switch ret unreachable trap | `indirect_br`, `blockaddr` | `switch` on a label number. |
 | Globals | Every linkage and visibility, `section`, `readonly`, `thread_local`, `extern`, `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4` | Use w8. |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |

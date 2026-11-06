@@ -232,7 +232,16 @@ type op =
   | Masked_store of int * value * value * value  (** align, value, pointer, mask *)
   | Compress of value * value  (** vector, mask *)
   | Expand of value * value
-  | Call of { sig_ : signature; callee : callee; args : value array; attrs : int }
+  | Call of {
+      sig_ : signature;
+      callee : callee;
+      args : value array;
+      attrs : int;
+      va_aggs : (int * abi) list;
+          (** variadic arguments passed as aggregates by value: argument index
+              -> its [Agg] ABI (the argument is a ptr to the bytes). Other
+              variadic arguments are passed as their value types. *)
+    }
   | Syscall of value array
   | Va_start of value
       (** fills the va_list at the pointer so it reads the variadic arguments of
@@ -245,6 +254,10 @@ type op =
           bracket a block holding variable-size allocas (VLAs) with the pair *)
   | Stack_restore of value
       (** frees every alloca made since the [Stack_save] that gave the ptr *)
+  | Va_arg_agg of abi * value
+      (** reads the next variadic argument, an aggregate with this [Agg] ABI,
+          through the va_list at the pointer and advances it. The result is a
+          ptr to a copy, valid until this instruction runs again *)
   | Trap
   | Dbg_value of int * value  (** variable id, value *)
 
@@ -521,7 +534,8 @@ let iter_op_uses g = function
       g a;
       g b
   | Iun (_, _, a) | Fun (_, _, a) | Freeze a | Conv (_, a) | Alloca (a, _) | Load (_, a)
-  | Splat a | Reduce (_, a) | Dbg_value (_, a) | Va_start a | Va_arg a | Stack_restore a ->
+  | Splat a | Reduce (_, a) | Dbg_value (_, a) | Va_start a | Va_arg a | Stack_restore a
+  | Va_arg_agg (_, a) ->
       g a
   | Fma (_, a, b, c) | Fsh (_, a, b, c) | Select (a, b, c) | Insert (a, b, c)
   | Memcpy (_, a, b, c) | Memmove (_, a, b, c) | Memset (_, a, b, c)
@@ -599,6 +613,7 @@ let map_op_uses g op =
   | Syscall args -> Syscall (Array.map g args)
   | Va_start a -> Va_start (g a)
   | Va_arg a -> Va_arg (g a)
+  | Va_arg_agg (abi, a) -> Va_arg_agg (abi, g a)
   | Stack_restore a -> Stack_restore (g a)
   | Dbg_value (var, a) -> Dbg_value (var, g a)
 
@@ -623,7 +638,8 @@ let successors = function
 (* Ops with effects beyond their results: never removed when unused *)
 let has_side_effects = function
   | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Fence _ | Masked_store _
-  | Call _ | Syscall _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Stack_save | Stack_restore _ ->
+  | Call _ | Syscall _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Va_arg_agg _ | Stack_save
+  | Stack_restore _ ->
       true
   | Load (m, _) -> m.volatile || m.order <> Plain
   | _ -> false
