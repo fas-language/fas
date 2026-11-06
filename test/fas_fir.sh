@@ -5,9 +5,7 @@
 # exit code (default 0). FAS_FIR_TOOL names the tool; by default the dune build.
 # test/fas_fir/c/NAME.fir is compiled with -c and linked with NAME.c by a C
 # compiler (FAS_CC, else cc), whose main exits 0 when the two agree; skipped
-# when no C compiler is found. FAS_FIR_FLAGS are passed to every tool run
-# (fas_fir_mir.sh sets --mir). A "; mir-only" line marks a program the
-# Fir_to_ir path cannot compile; it runs only with --mir.
+# when no C compiler is found. FAS_FIR_FLAGS are passed to every tool run.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tool=${FAS_FIR_TOOL:-$here/../_build/default/tools/fas_fir/fas_fir.exe}
@@ -18,7 +16,6 @@ fail=0; n=0
 for f in "$here"/fas_fir/*.fir; do
   name=$(basename "$f" .fir)
   [ "$name" = putnum ] && continue
-  case " $flags " in *" --mir "*) ;; *) grep -q '^; mir-only' "$f" && continue ;; esac
   n=$((n + 1))
   want=$(sed -n 's/^; exit: *\([0-9]*\).*/\1/p' "$f"); want=${want:-0}
   if ! "$tool" $flags "$f" -o "$tmp/$name" "$tmp/putnum.o" 2>"$tmp/err"; then
@@ -34,7 +31,6 @@ cc=${FAS_CC:-cc}
 if command -v "$cc" >/dev/null 2>&1; then
   for f in "$here"/fas_fir/c/*.fir; do
     name=$(basename "$f" .fir)
-    case " $flags " in *" --mir "*) ;; *) grep -q '^; mir-only' "$f" && continue ;; esac
     n=$((n + 1))
     if ! "$tool" $flags -c "$f" -o "$tmp/c_$name.o" 2>"$tmp/err" \
       || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" -lm 2>"$tmp/err"; then

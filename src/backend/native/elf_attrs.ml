@@ -1,7 +1,6 @@
 (* ELF symbol attributes that the old Ir (src/backend/llvm/ir.ml) cannot
    carry: weak binding, visibility and aliases. Fir_to_ir.symbols builds this
-   from a Fir module; Native_gen takes it beside the Ir, so the Ir type (built
-   literally in several places) stays as it is. Names absent from [binding]
+   from a Fir module for Mir_emit. Names absent from [binding]
    get the binding the Ir's linkage implies. *)
 
 type alias = {

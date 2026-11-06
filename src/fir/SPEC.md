@@ -424,7 +424,7 @@ There are two valid ways to produce Fir. You can start with the first and change
 
 - Give every local variable an `alloca` in the entry block, and use `load`/`store` for every read and write.
 - Blocks need no parameters, apart from the entry block's.
-- The native backend promotes the slots to registers itself (mem2reg). This is what Fas does today: run `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native x.fas` and read `out.fir`.
+- The native backend keeps a slot that is only loaded and stored whole, by one scalar type, in a register. This is what Fas does today: run `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native x.fas` and read `out.fir`.
 
 ### B. Direct SSA (Braun et al. 2013, "Simple and Efficient Construction of SSA Form")
 
@@ -474,22 +474,22 @@ In Fir this means:
 
 | Area | Supported natively | Not yet | Workaround |
 |---|---|---|---|
-| Integer types | Every width. Integers other than i1 i8 i16 i32 i64 are split into i64 limbs before code generation (`Fir_wide`; `fas-fir --legalize` shows the result); division, wide conversions to and from float, and shifts use small helper functions that are added to the module | Vectors of odd-width integers; atomic load/store, `atomic_rmw` and `cmpxchg` on integers wider than 64 bits; `atomic_rmw` add/sub/min/max on odd widths up to 64 | Use i64 lanes; guard wide atomics with a lock. |
+| Integer types | Every width. Integers other than i1 i8 i16 i32 i64 are split into i64 limbs before code generation (`Fir_wide`; `fas-fir --legalize` shows the result); division, wide conversions to and from float, and shifts use small helper functions that are added to the module | Atomic load/store, `atomic_rmw` and `cmpxchg` on integers wider than 64 bits; `atomic_rmw` add/sub/min/max on odd widths up to 64 | Use the next natural width; guard wide atomics with a lock. |
 | Float types | f32 f64 | f16 f80 | — |
-| Vectors | Loads, stores, lane-wise arithmetic, compares, select, `extract`, `insert`, `shuffle`, `splat`, `reduce or`. The machine-IR backend (`fas-fir --mir`) compiles every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes first (all reductions, `masked_load/store`, `compress`, `expand`, and each lane-wise operation that is supported on scalars) | With `--mir`: atomic vector loads and stores, vectors through `...`. Otherwise: other reductions, `masked_load/store`, `compress`, `expand`; vector constants with non-constant lanes | Scalar loops. |
-| Integer ops | Everything in §6 for scalars, including `bswap`, `bitrev`, `abs` and the `*_ovf` family (expanded into shifts, masks and compares) | Vector `bswap`/`bitrev`/`abs`/`*_ovf`, `*_ovf` on i1, vector/i1 `smulh`/`umulh` | Scalar loops; for i1 overflow, widen to i8. |
-| Float ops | fadd fsub fmul fdiv fneg fabs sqrt floor ceil roundeven fma; scalar fmin fmax copysign ftrunc (fmin/fmax follow §6: NaN loses, -0 < +0) and frem (exact, as C `fmod`, through x87 `fprem`) | Vector frem fmin fmax copysign ftrunc | Scalar loops. |
-| fcmp | All 16 predicates on scalars | Predicates other than oeq une olt ole ogt oge on vectors | Lane-wise: combine the six basic predicates, e.g. `ult a,b` = `xor (oge a,b), true`. |
+| Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters and results use the lane convention of `fir_scalarize.ml`, not the SysV vector ABI | Atomic vector loads and stores; vectors through `...` or in syscalls; vector `atomic_rmw`/`cmpxchg`; `masked_load/store` of bool vectors | Scalar loops. |
+| Integer ops | Everything in §6, on scalars and vectors, including `bswap`, `bitrev`, `abs`, `smulh`/`umulh` and the `*_ovf` family | — | — |
+| Float ops | Everything in §6, on scalars and vectors: fmin/fmax follow §6 (NaN loses, -0 < +0), `frem` is exact (as C `fmod`, through x87 `fprem`), `fma` is correctly rounded (a software helper: baseline x86-64 has no FMA instruction) | — | — |
+| fcmp | All 16 predicates, on scalars and vectors | — | — |
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca of any size (constant, or variable with any align), `stacksave`/`stackrestore`, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | — | — |
-| Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
-| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5), at an external boundary or through `...` | Pass such structs by pointer. |
+| Atomics | Every `atomic_rmw` operation (min/max/fadd/fsub as a `lock cmpxchg` loop), `cmpxchg`, `fence`, on integers up to 64 bits, `ptr`, `f32` and `f64` | See Integer types and Vectors | — |
+| Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with fields other than integers up to 64 bits, `ptr`, `f32` and `f64` (other than the `__int128` form, §5), or aligned above 16 | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers of any width, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5) | Pass such structs by pointer. |
-| Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers; lowered to a `switch`: a block address is a small token, unique in the module, not a code address; equality and `&&a - &&b` offset arithmetic behave as with real addresses; the machine-IR backend, `fas-fir --mir`, uses real code addresses instead) | Comparing a block address with a code or data address (they may coincide numerically) | — |
+| Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers): a block address is the block's real code address | — | — |
 | Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4`; `section`; `thread_local` (refused, TLS is planned for v0.5) | Use w8; for TLS, a pointer to per-thread storage passed explicitly. |
 | Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
-| Unwind info | The machine-IR backend (`--mir`) writes `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | `.eh_frame` from the default native backend; DWARF debug info | `--mir`. |
+| Unwind info | `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | DWARF debug info | — |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.
 
@@ -518,4 +518,4 @@ Each function holds dense tables (`fir.ml`):
 
 Replace-all-uses is O(1) through `Alias` definitions, which readers resolve and `compact` removes. Use lists, dominators (`fir_dom.ml`) and loops are computed on demand. Nothing is global, so functions can be compiled independently.
 
-`Fir_of_ir` and `Fir_to_ir` convert from and to the older LLVM-shaped `Ir`. Today the native backend still consumes `Ir`, through `Fir_to_ir`, and that path is the source of most limits in §12. They go away when native codegen reads Fir directly.
+`Fir_of_ir` and `Fir_to_ir` convert from and to the older LLVM-shaped `Ir`. The native backend (`src/backend/mir`) reads Fir directly; Fas programs reach it through `Fir_of_ir`. `Fir_to_ir` is only for tests (`FAS_FIR=roundtrip`, and the LLVM side of `fir_fuzz`).

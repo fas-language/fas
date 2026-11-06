@@ -1,8 +1,8 @@
 # Machine IR backend (roadmap v0.4)
 
-A second native x86-64 backend that reads Fir directly through a small
-machine IR. It replaces `backend/native/native_gen.ml` once it covers
-everything that backend does. For now the goal is **correctness only**: the
+The native x86-64 backend: it reads Fir directly and goes through a small
+machine IR. It replaced the old Ir-based backend (`native_gen.ml` and its
+passes, removed). For now the goal is **correctness only**: the
 instruction selection is simple, the allocator is simple, and an
 independent checker verifies every allocation. Optimizations come later
 and must not change this pipeline's structure.
@@ -22,9 +22,10 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_isel.ml` | Fir → Mir. One Fir block is one Mir block with the same number; extra blocks (edges, loops, `va_arg` branches) are appended. SysV calls, parameters, returns and `va_*` live here. Two choices keep the code from being absurdly slow without any optimization pass: a static alloca's address is folded into memory operands (`[rbp-n]`) instead of occupying a register, and a local only ever loaded and stored whole, by one scalar type, lives in a virtual register (`promotable_allocas`; Mir needs no SSA, so this is just a table lookup). |
 | `mir_ra.ml` | Fixed-interval linear scan: one hull interval per virtual register (from per-register liveness), no splitting; spilled registers live in a slot and go through reserved scratch registers (see the header comment). |
 | `mir_check.ml` | Verifies an allocation without trusting the allocator: an abstract machine over registers and slots, iterated to a fixpoint. |
+| `../native/` | What stays of the old backend: the x86-64 encoder (`x64.ml`), ELF writing (`elf64.ml`, `native_object.ml`, `elf_attrs.ml`) and the Fas runtime sources (`native_runtime.ml`, `runtime/`). |
 | `mir_runtime.ml` | Appends the correctly rounded `fma` helpers (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
-| `mir_driver.ml` | The driver's entry (`--backend=native`): converts the old Ir to Fir and compiles it here (`FAS_NATIVE_LEGACY=1`: `Native_gen`, until it is removed). |
+| `mir_driver.ml` | The driver's entry (`--backend=native`): converts the old Ir to Fir and compiles it here. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
 
 ## Running it
@@ -32,19 +33,18 @@ Fir --Fir_scalarize--> Fir (no vectors)
 - `fas --backend=native ...`: every native build (objects, static and
   hosted executables, any `-O` level) goes through this backend via
   `mir_driver.ml` (old Ir -> Fir by `Fir_of_ir`). No optimization: the `-O`
-  level changes nothing here. `bench/native/sieve*.fas` run about 1.8x
-  slower than the old backend at `-O2` (it has mem2reg, constant folding,
-  inlining, LICM, unrolling); code built to be constant-folded, such as
-  `pz3_sys.fas`, about 10x slower. `FAS_NATIVE_LEGACY=1` selects the old backend.
+  level changes nothing here. `bench/native/sieve*.fas` ran about 1.8x
+  slower than the removed old backend at `-O2` (it had mem2reg, constant
+  folding, inlining, LICM, unrolling); code built to be constant-folded,
+  such as `pz3_sys.fas`, about 10x slower.
 - `FAS_MIR_REGS=n` gives the allocator only n registers per class, to make
   small programs spill.
-- `fas-fir --mir file.fir`: compile and link through this backend;
-  `--mir -c` writes an object.
+- `fas-fir file.fir`: compile and link through this backend; `-c` writes
+  an object (`--mir` is still accepted and does nothing).
 - `FAS_MIR_DUMP=1` prints the selected and the allocated Mir to stderr.
-- `FAS_FIR_TOOL=<a wrapper running fas-fir --mir> sh test/fas_fir.sh`: the
-  Fir conformance programs (16/16 pass; `vectors.fir` and `c/unwind.fir`
-  are `--mir` only).
-- `fir_fuzz.exe -mir`: random modules compared with clang -O2.
+- `sh test/fas_fir.sh` (`FAS_FIR_TOOL` names the tool): the Fir
+  conformance programs.
+- `fir_fuzz.exe`: random modules compared with clang -O2.
 - `test/mir_check_test.ml` (in `dune runtest`): allocates every function of
   the Fir test corpus, checks it, then mutates each allocation (drop a
   reload, move an operand to another register) and requires the checker to

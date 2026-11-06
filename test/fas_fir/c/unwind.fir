@@ -5,7 +5,6 @@
 ; site needs the body's rules back after an epilogue (remember/restore
 ; state). Values live across the calls take callee-saved registers, and
 ; @fir_f1 moves rsp with a run-time alloca, which the rbp-based CFA ignores.
-; mir-only: the Fir_to_ir path goes through LLVM, which has its own CFI.
 triple "x86_64-unknown-linux-gnu"
 declare @fir_cb (i64) -> (i64) global
 

@@ -3,8 +3,6 @@
 ; with a scalar condition on homed vectors, shuffle, reductions,
 ; compress/expand, masked memory, a packed bool vector and a vector call.
 ; Expected values are worked out by hand in the comments.
-; mir-only: Fir_to_ir has no masked memory, compress/expand or most
-; reductions (SPEC §12).
 triple "x86_64-unknown-linux-gnu"
 declare @putnum (i64) -> () global
 

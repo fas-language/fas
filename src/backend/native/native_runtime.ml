@@ -2,16 +2,11 @@
 
    Some operations have no baseline x86-64 instruction and, in a freestanding
    program, no libm to call: today that is `fma`. Their implementations live
-   in runtime/*.fas, embedded as strings by runtime/dune. When a module needs
-   one, the source is compiled by the ordinary front end (parse, check,
-   lower, fold) once per process, its functions are renamed into the
-   `__fas_rt_` namespace with internal linkage, and they are appended to the
-   module before the native passes run. They are then promoted, inlined and
-   compiled like user code.
-
-   llvm.fma.f32 / llvm.fma.f64 calls are rewritten to __fas_rt_fma32 /
-   __fas_rt_fma64; vector fma reaches here already split into scalar lanes by
-   Scalarize. *)
+   in runtime/*.fas, embedded as strings by runtime/dune. The source is
+   compiled by the ordinary front end (parse, check, lower, fold) once per
+   process, and its functions are renamed into the `__fas_rt_` namespace with
+   internal linkage. Mir_runtime converts them to Fir and appends them to a
+   module that uses fma. *)
 
 open Ir
 
@@ -63,69 +58,3 @@ let compile_source ~file text : func list =
 
 let fma_funcs =
   lazy (compile_source ~file:"<fas runtime fma.fas>" Native_runtime_source.fma)
-
-(* llvm.fma.<ty> -> runtime function, for the scalar types the helpers cover *)
-let fma_target = function
-  | "llvm.fma.f64" -> Some (prefix ^ "fas_rt_fma64")
-  | "llvm.fma.f32" -> Some (prefix ^ "fas_rt_fma32")
-  | _ -> None
-
-let uses_fma (m : module_) =
-  List.exists
-    (fun (f : func) ->
-      List.exists
-        (fun (b : block) ->
-          List.exists
-            (function
-              | Call (_, _, _, n, _) -> String.starts_with ~prefix:"llvm.fma." n
-              | _ -> false)
-            b.instrs)
-        f.blocks)
-    m.funcs
-
-(* Before Scalarize (which also lowers the runtime's mul_hi): append the
-   runtime functions when any fma, scalar or vector, is used. *)
-let add (m : module_) : module_ =
-  if not (uses_fma m) then m
-  else
-    let runtime =
-      match Lazy.force fma_funcs with
-      | fs -> fs
-      | exception Failed msg -> raise (Scalarize.Unsupported ("runtime: " ^ msg))
-    in
-    let have = Hashtbl.create 64 in
-    List.iter (fun (f : func) -> Hashtbl.replace have f.name ()) m.funcs;
-    (* Declarations the runtime needs (llvm.ctlz...) join unless present *)
-    let extra =
-      List.filter
-        (fun (f : func) ->
-          if Hashtbl.mem have f.name then false
-          else (
-            Hashtbl.replace have f.name ();
-            true))
-        runtime
-    in
-    { m with funcs = m.funcs @ extra }
-
-(* After Scalarize: point the scalar fma calls at the runtime *)
-let rewrite (m : module_) : module_ =
-  let rewrite_block (b : block) =
-    if
-      not
-        (List.exists
-           (function Call (_, _, _, n, _) -> Option.is_some (fma_target n) | _ -> false)
-           b.instrs)
-    then b
-    else
-      {
-        b with
-        instrs =
-          List.map
-            (function
-              | Call (r, e, t, n, args) as i -> (
-                  match fma_target n with Some n' -> Call (r, e, t, n', args) | None -> i)
-              | i -> i)
-            b.instrs;
-      }
-  in
-  { m with funcs = List.map (fun (f : func) -> { f with blocks = List.map rewrite_block f.blocks }) m.funcs }

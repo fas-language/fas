@@ -1,9 +1,9 @@
 (* Fir -> old Ir, the inverse of Fir_of_ir.
 
    This exists for testing only: FAS_FIR=roundtrip sends every module
-   through Ir -> Fir -> verify -> Ir before the old native backend, which
-   checks the forward converter against real programs. It is not tuned for
-   code quality; the old backend's own passes clean most of it up.
+   through Ir -> Fir -> verify -> Ir before the backend, which checks the
+   forward converter against real programs, and fir_fuzz renders its
+   modules for LLVM with it. It is not tuned for code quality.
 
    The main translations:
    - Block parameters become phis. When one terminator sends different
@@ -53,7 +53,7 @@ let rec suffix (t : ty) =
 
    A Fir [agg] is classified here, where its field types and padding are
    still known, and becomes one of two reserved named Ir structs that the
-   native backend passes by the SysV rules (see [Native_gen.sysv_agg]):
+   old native backend passed by the SysV rules (Ir.render reads them too):
    - [fir.sysv.r.CC]: at most 16 bytes, every field at its natural
      alignment. One I64 (C = 'i', INTEGER) or F64 (C = 'f', SSE) field per
      eightbyte; an eightbyte holding any integer is INTEGER. Passed in
@@ -930,7 +930,7 @@ let convert_global (g : global) : Ir.global =
       readonly = g.readonly; align = g.galign; linkage }
 
 (* ELF attributes the Ir cannot carry (weak, visibility, aliases), for the
-   native backend beside the Ir. `section` and `thread_local` are refused
+   native backend (Mir_emit). `section` and `thread_local` are refused
    until the native backend emits them (TLS is a v0.5 item). *)
 let stv = function Default -> 0 | Hidden -> 2 | Protected -> 3
 let stb = function Local -> 0 | Global -> 1 | Weak -> 2
@@ -960,30 +960,23 @@ let symbols (m : modul) : Elf_attrs.t =
   { t with aliases = List.rev aliases }
 
 (* [like] supplies what Fir does not carry: the data layout and the source
-   file of each function.
-
-   With [~native:true] the result goes to the native backend together with
-   [symbols m]: weak functions are not inlined (another object may replace
-   them), a function an alias names is kept and given the external ABI, and
-   each function alias is declared so calls through it know the signature.
-   Without it (Ir.render, LLVM) these attributes are refused rather than
-   silently dropped. *)
-let convert ?(native = false) ~(like : Ir.module_) (m : modul) : Ir.module_ =
-  if not native then begin
-    let only_native what = unsupported "%s (only the native path carries it)" what in
-    if Vec.length m.aliases > 0 then only_native "a symbol alias";
-    Vec.iter
-      (fun f ->
-        if f.linkage = Weak then only_native ("weak @" ^ f.name);
-        if f.visibility <> Default then only_native ("the visibility of @" ^ f.name))
-      m.funcs;
-    Vec.iter
-      (fun g ->
-        if g.glinkage = Weak then only_native ("weak @" ^ g.gname);
-        if g.gvisibility <> Default then only_native ("the visibility of @" ^ g.gname);
-        if g.section <> None || g.thread_local then only_native ("section/thread_local @" ^ g.gname))
-      m.globals
-  end;
+   file of each function. The result goes to Ir.render (LLVM), which has no
+   weak, visibility, alias, section or thread_local, so these are refused
+   rather than silently dropped. (The native backend reads Fir directly.) *)
+let convert ~(like : Ir.module_) (m : modul) : Ir.module_ =
+  let only_native what = unsupported "%s (only the native backend carries it)" what in
+  if Vec.length m.aliases > 0 then only_native "a symbol alias";
+  Vec.iter
+    (fun f ->
+      if f.linkage = Weak then only_native ("weak @" ^ f.name);
+      if f.visibility <> Default then only_native ("the visibility of @" ^ f.name))
+    m.funcs;
+  Vec.iter
+    (fun g ->
+      if g.glinkage = Weak then only_native ("weak @" ^ g.gname);
+      if g.gvisibility <> Default then only_native ("the visibility of @" ^ g.gname);
+      if g.section <> None || g.thread_local then only_native ("section/thread_local @" ^ g.gname))
+    m.globals;
   let sources = Hashtbl.create 64 in
   Hashtbl.reset sysv_structs;
   Hashtbl.reset block_tokens;
@@ -995,27 +988,12 @@ let convert ?(native = false) ~(like : Ir.module_) (m : modul) : Ir.module_ =
       funcs := convert_func m ~source f :: !funcs)
     m.funcs;
   Vec.iter (fun g -> globals := convert_global g :: !globals) m.globals;
-  let alias_targets = Hashtbl.create 8 in
-  Vec.iter (fun a -> Hashtbl.replace alias_targets a.target a.aname) m.aliases;
-  let funcs =
-    List.rev_map
-      (fun (f : Ir.func) ->
-        if Hashtbl.mem alias_targets f.name then { f with linkage = Ir.External } else f)
-      !funcs
-  in
-  let alias_decls =
-    Vec.fold
-      (fun acc a ->
-        match List.find_opt (fun (f : Ir.func) -> f.name = a.target) funcs with
-        | Some f -> { f with Ir.name = a.aname; blocks = []; linkage = Ir.External; display = None } :: acc
-        | None -> acc)
-      [] m.aliases
-  in
+  let funcs = List.rev !funcs in
   let names p = Vec.fold (fun acc f -> if p f then f.name :: acc else acc) [] m.funcs |> List.rev in
   { like with
     Ir.target_triple = m.triple;
     structs = List.of_seq (Hashtbl.to_seq_values sysv_structs);
     globals = List.rev !globals;
-    funcs = funcs @ List.rev alias_decls;
-    no_inline_functions = names (fun f -> f.fattrs land fa_noinline <> 0 || (f.defined && f.linkage = Weak));
+    funcs;
+    no_inline_functions = names (fun f -> f.fattrs land fa_noinline <> 0);
     inline_functions = names (fun f -> f.fattrs land fa_inline <> 0) }

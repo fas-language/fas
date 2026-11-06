@@ -20,7 +20,7 @@ src/
 
 The compiler modules (everything above except `linker/`) form one library,
 `fas_compiler`, with `(include_subdirs unqualified)`. Folders therefore only
-organise files: module names stay flat (`Driver`, `Fir`, `Native_gen`), and
+organise files: module names stay flat (`Driver`, `Fir`, `Mir_emit`), and
 moving a file never needs code changes.
 
 A folder that should be its own library, like `linker/`, needs

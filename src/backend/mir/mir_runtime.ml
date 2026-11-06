@@ -5,8 +5,7 @@
    in backend/native/runtime/fma.fas. Native_runtime compiles that Fas
    source to the old Ir once per process; here it is converted to Fir
    (Fir_of_ir) and its functions, local and named __fas_rt_*, are appended
-   to a module that uses [fma]. Native_runtime stays when native_gen.ml is
-   removed: it only depends on the front end. *)
+   to a module that uses [fma]. *)
 
 module F = Fir
 
