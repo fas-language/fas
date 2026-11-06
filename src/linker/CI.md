@@ -27,6 +27,24 @@ and source snapshot. Correctness artifacts are retained for 14 days; fuzz artifa
 for 30 days. Retention is not a durable release archive. The workflow uses pinned
 action commits and read-only repository permissions; it publishes no releases.
 
+Weekly/manual runs also define six independent popular-C jobs for pinned Lua,
+bzip2, libpng, libarchive, curl and Redis. Each builds through Fas, runs its
+declared upstream tests, then runs GNU-linked outputs from the same native
+objects. The four shared-library corpora add producer/consumer cross-checks;
+CMake corpora compare feature probes against an independent GNU configuration.
+Valgrind stays enabled for curl and is installed for the focused debug-reader
+regression in the normal gate. Project-specific selections and limits are
+documented in the [corpus guide](corpus/README.md).
+
+A separate four-hour GCC torture job uses the pinned official GCC 15.2.0 image,
+matching source commit and DejaGnu's `execute.exp` at `-O0`, `-O2` and `-Os`.
+It compares official executions with Fas/GNU linking identical retained inputs.
+Its explicit board capability excludes executable-stack trampolines, matching
+the linker's stack policy. LTO probes are unavailable and no LTO support is
+added. These are native C execution tests, not the complete GCC regression suite.
+Popular-C/GCC artifacts are retained for 14 days. The new jobs have not yet been
+qualified on hosted runners.
+
 This is a workflow definition, not evidence of a completed hosted run. Local
 qualification is recorded separately under `audit/`, `scale/results/`,
 `corpus/results/` and `fuzz/results/`. Ubuntu/toolchain compatibility remains

@@ -187,3 +187,98 @@ do not combine `--sqlite` with the runner's global linkage/dependency options.
 No timing comparisons are collected. The larger suite creates large databases;
 allow several GiB of free scratch space and prefer disk storage over a small
 `/tmp` tmpfs.
+
+## Six additional C projects
+
+`popular.py` builds pinned Lua 5.1.5, bzip2 1.0.8, libpng 1.6.47,
+libarchive 3.8.11, curl 8.14.1 and Redis 7.2.8 through GCC's real driver
+with Fas selected as `ld`. GCC's LTO plugin is disabled. It runs the declared
+upstream tests, retains compiler temporaries and hashes object/archive inputs,
+then relinks the same inputs with GNU ld and reruns the checks. Every project
+gets a source snapshot, local compiler/linker wrappers, saved Fas outputs and
+complete command logs. The original sources and system toolchain are unchanged.
+Use a new disk-backed output directory with several GiB free:
+
+```sh
+python3 src/linker/corpus/fetch.py libarchive --output "$HOME/.cache/archive-source-new"
+python3 src/linker/corpus/popular.py --output "$HOME/.cache/archive-tests-new" \
+  --project libarchive "$HOME/.cache/archive-source-new/libarchive-3.8.11"
+python3 src/linker/corpus/cross.py --corpus "$HOME/.cache/archive-tests-new" \
+  --project libarchive --output "$HOME/.cache/archive-cross-new"
+```
+
+Repeat `--project NAME SOURCE` to select multiple projects. The fetcher accepts
+all six names and pins release archives with SHA-256. Build/test dependencies
+include GCC, GNU binutils, make, CMake, pkg-config, Python, Perl and Tcl; library
+features depend on installed development packages. The CI recipe declares its
+dependencies explicitly. Installed Valgrind is used automatically by curl's
+upstream harness; it remains enabled. curl uses `LC_ALL=C.UTF-8` because the
+system IDN implementation rejects international hostnames in the ASCII locale.
+Redis uses a private short directory under `/var/tmp` for its Unix sockets; the
+report records that path. Completed test artifacts are moved into the corpus
+`tests/tmp` directory. An interrupted run can retain its recorded scratch path.
+
+The declared selections are:
+
+| Project | Runtime coverage |
+| --- | --- |
+| Lua | 13 included example scripts, including the expected readonly error, plus bytecode compilation/execution; not the separate Lua release test suite |
+| bzip2 | Upstream sample checks and shared/static binary-payload compression/decompression |
+| libpng | Upstream CTest selection with shared and static libraries enabled |
+| libarchive | Upstream CTest selection and shared bsdtar/bsdcpio/bsdcat/bsdunzip builds; optional features follow the configured dependencies |
+| curl | Upstream `test-nonflaky`, two local workers; timing-sensitive/flaky tests are recorded as ignored, unavailable protocols as skipped; no external service required |
+| Redis | Upstream auth, protocol, keyspace, string/list/set/zset/hash, other, multi, scripting, dump, RDB and AOF units; libc allocator and native `-O2`; no cluster, Sentinel, TLS, large-memory or benchmark claim |
+
+`cross.py` requires a passing `popular.py` report. It checks GNU executables
+with Fas DSOs and Fas executables with GNU DSOs for bzip2, libpng, libarchive
+and curl, including `ldd` provenance. For CMake projects it also independently
+configures with GNU and compares numeric/boolean feature availability, catching
+features that a failed Fas probe could silently disable. It temporarily swaps
+only saved corpus DSOs and restores them in `finally`; do not run it concurrently
+with another consumer of the same snapshot. These are bounded interoperability
+probes, not another complete upstream test run. Lua dynamic C modules and Redis
+modules are not covered by these shared-library probes.
+
+## Official GCC torture execution tests
+
+`torture.py` invokes GCC's unmodified DejaGnu `execute.exp` with its official
+`dg` directives and effective-target checks. It does not reinterpret directives
+or treat an arbitrary zero exit as a successful test. Source is pinned to GCC
+15.2.0 commit `5115c7e447fc07457443df874bf57840e8316d5f`; use a matching
+GCC 15.2 compiler, GNU binutils, DejaGnu and Expect:
+
+```sh
+python3 src/linker/corpus/fetch.py gcc-torture --output "$HOME/.cache/gcc-source-new"
+python3 src/linker/corpus/torture.py \
+  --gcc-source "$HOME/.cache/gcc-source-new/gcc-15.2.0" \
+  --output "$HOME/.cache/gcc-tests-new" --no-trampolines
+```
+
+The default matrix is `-O0`, `-O2`, `-Os` across top-level C execution tests.
+`--pattern '200*.c'` selects an official filename glob; repeat
+`--optimization=-O2` with desired optimization levels to bound a run. Each
+compiler invocation disables GCC's linker plugin and effective-target LTO
+probes report LTO unavailable. No LTO objects are accepted or supported.
+The torture wrapper also passes `-U_FORTIFY_SOURCE` to remove distribution-
+injected fortified stdio wrappers: upstream builtin tests define their own
+`__vfprintf_chk`/`__vprintf_chk` and otherwise abort with GNU ld as well.
+This compiler-test setting applies equally to both linkers and is recorded in
+the report; the real-project corpora keep their own compilation policies.
+The GNU phase substitutes the exact retained Fas object/archive inputs and
+verifies their hashes. Official execution labels and native-link selections must
+match between phases; `FAIL`, `XPASS`, `UNRESOLVED`, errors, or an empty execution
+selection fail qualification. Official `UNSUPPORTED` and `XFAIL` remain visible
+in `gcc-{fas,gnu}.sum` and the report. Full logs and wrappers are preserved.
+
+`--no-trampolines` explicitly declares the non-executable-stack subset using
+GCC's `gcc,no_trampolines` board capability. The linker currently rejects objects
+requesting an executable stack, so GNU nested-function trampoline tests cannot
+pass its normal output policy. Omit the option to expose that compatibility gap;
+no trampoline test is silently rewritten or marked passing. This is C torture
+execution coverage, not all GCC regression suites, optimization variants,
+architectures, C++ tests or language conformance certification.
+
+`--dejagnu-root DIR` can use locally extracted Debian DejaGnu/Expect packages
+without installing system files. The weekly/manual CI job uses an immutable
+GCC 15.2.0 container image instead. CI definitions require a hosted run before
+being claimed as verified; local runs do not establish hosted CI success.
