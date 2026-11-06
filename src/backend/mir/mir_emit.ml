@@ -1,6 +1,8 @@
 (* Mir_emit: frame layout, x86-64 encoding and the ELF object for the Mir
    path (roadmap v0.4). Entry points [compile_object] and [link_files] take
-   a Fir module after Fir_wide.
+   any verified Fir module: [generate] scalarizes vectors, adds the runtime
+   helpers and legalizes wide integers itself (each step is a no-op on a
+   module that already went through it, as in fas-fir).
 
    Frame of a function (rbp-based, rsp 16-aligned at calls):
 
@@ -262,13 +264,18 @@ let global_image (g : F.global) =
 let generate ~startup (m : F.modul) =
   try
     let pic = not startup in
+    if m.triple <> Target_layout.x86_64_linux.triple then
+      unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
     (* vectors to lanes first: lane-wise fma becomes scalar fma, which
        the runtime helpers then serve *)
     Fir_scalarize.run m;
     Mir_runtime.add m;
+    (* integers wider than 64 bits (also lanes of scalarized vectors) to
+       i64 limbs: Mir_isel computes in i1..i64 only *)
+    Fir_wide.run m;
     (match Fir_verify.verify m with
     | [] -> ()
-    | errs -> invalid_arg ("Fir after scalarization:\n" ^ String.concat "\n" errs));
+    | errs -> invalid_arg ("Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs));
     let syms = Fir_to_ir.symbols m in
     let env = Mir_isel.env m in
     let a = A.create () in
@@ -397,14 +404,14 @@ let generate ~startup (m : F.modul) =
            entry = "_start";
          })
   with
-  | Unsupported msg -> Error ("mir backend: " ^ msg)
-  | Fir_to_ir.Unsupported msg -> Error ("mir backend: " ^ msg)
-  | Fir_scalarize.Unsupported msg -> Error ("mir backend: " ^ msg)
-  | Fir_wide.Unsupported msg -> Error ("mir backend: " ^ msg)
-  | Mir_ra.Failure msg -> Error ("mir backend internal error (allocator): " ^ msg)
-  | Mir_check.Failure msg -> Error ("mir backend internal error (allocation check): " ^ msg)
-  | Fas_linker.Error.Error msg -> Error ("mir backend: " ^ msg)
-  | Invalid_argument msg -> Error ("mir backend internal error: " ^ msg)
+  | Unsupported msg -> Error ("native backend: " ^ msg)
+  | Fir_to_ir.Unsupported msg -> Error ("native backend: " ^ msg)
+  | Fir_scalarize.Unsupported msg -> Error ("native backend: " ^ msg)
+  | Fir_wide.Unsupported msg -> Error ("native backend: " ^ msg)
+  | Mir_ra.Failure msg -> Error ("native backend internal error (allocator): " ^ msg)
+  | Mir_check.Failure msg -> Error ("native backend internal error (allocation check): " ^ msg)
+  | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)
+  | Invalid_argument msg -> Error ("native backend internal error: " ^ msg)
 
 let compile_object m = generate ~startup:false m
 
@@ -414,9 +421,9 @@ let link_files ?(inputs = []) ?options ~output m =
   | Ok obj -> (
       try
         Fas_linker.Static_link.link_input_files ?options ~output
-          (Fas_linker.Input.Object { path = "<mir module>"; data = Bytes.to_string obj } :: inputs);
+          (Fas_linker.Input.Object { path = "<native module>"; data = Bytes.to_string obj } :: inputs);
         Ok ()
-      with Fas_linker.Error.Error msg -> Error ("mir backend: linker: " ^ msg))
+      with Fas_linker.Error.Error msg -> Error ("native backend: linker: " ^ msg))
 
 (* an executable image in memory *)
 let compile ?(inputs = []) m =
@@ -426,5 +433,5 @@ let compile ?(inputs = []) m =
       try
         Ok
           (Fas_linker.Static_link.link_inputs
-             (Fas_linker.Input.Object { path = "<mir module>"; data = Bytes.to_string obj } :: inputs))
-      with Fas_linker.Error.Error msg -> Error ("mir backend: linker: " ^ msg))
+             (Fas_linker.Input.Object { path = "<native module>"; data = Bytes.to_string obj } :: inputs))
+      with Fas_linker.Error.Error msg -> Error ("native backend: linker: " ^ msg))

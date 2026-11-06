@@ -2807,7 +2807,10 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                       "native object output cannot combine package libraries";
                   ]
               else
-                match Result.bind (native_ir ()) Native_gen.compile_object with
+                match
+                  Result.bind (native_ir ())
+                    (Mir_driver.compile_object ~optimization:config.Cli.optimization)
+                with
                 | Error message -> Error [ Diag.error Span.synthetic message ]
                 | Ok image -> (
                     try
@@ -2922,7 +2925,8 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                     in
                     match
                       Result.bind (native_ir ())
-                        (Native_gen.link_files ~inputs:link.inputs ~options:link.options
+                        (Mir_driver.link_files ~optimization:config.Cli.optimization
+                           ~inputs:link.inputs ~options:link.options
                            ~output:config.Cli.output)
                     with
                     | Error message -> Error [ Diag.error Span.synthetic message ]

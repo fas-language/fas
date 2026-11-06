@@ -85,7 +85,7 @@ let () =
      of wide integers (<2 x i128>) become wide scalars for Fir_wide *)
   if !mir then (
     try Fir_scalarize.run m
-    with Fir_scalarize.Unsupported msg -> die "%s: not supported by the mir backend yet: %s" name msg);
+    with Fir_scalarize.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg);
   (* the native backend computes in i1..i64 only *)
   (try Fir_wide.run m
    with Fir_wide.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg);

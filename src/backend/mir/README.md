@@ -24,10 +24,19 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_check.ml` | Verifies an allocation without trusting the allocator: an abstract machine over registers and slots, iterated to a fixpoint. |
 | `mir_runtime.ml` | Appends the correctly rounded `fma` helpers (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
+| `mir_driver.ml` | The driver's entry (`--backend=native`): picks this backend or `Native_gen` by optimization level, converting the old Ir to Fir. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
 
 ## Running it
 
+- `fas --backend=native -O0 ...`: the driver's native `-O0` builds (objects,
+  static and hosted executables) go through this backend via
+  `mir_driver.ml` (old Ir -> Fir by `Fir_of_ir`). `-O1` and up still use
+  `Native_gen` until this backend generates competitive code: today it is
+  about 9x slower on `bench/native/sieve.fas`. `FAS_NATIVE_MIR=1` forces it
+  at every level, `FAS_NATIVE_LEGACY=1` forces `Native_gen`. With
+  `FAS_NATIVE_MIR=1` the native shadow run (`test/native_shadow.sh`) matches
+  the old backend's: every script passes but pic_link.
 - `fas-fir --mir file.fir`: compile and link through this backend;
   `--mir -c` writes an object.
 - `FAS_MIR_DUMP=1` prints the selected and the allocated Mir to stderr.
@@ -82,7 +91,7 @@ code and through an `R_X86_64_64` relocation in data. `indirect_br` is
 
 ## Not supported yet
 
-Each of these is reported as `mir backend: ...`, never miscompiled:
+Each of these is reported as `native backend: ...`, never miscompiled:
 
 - atomic vector loads and stores, and vectors passed through `...`;
 - named sections and thread-local globals (`Fir_to_ir.symbols` refuses them);
