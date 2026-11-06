@@ -213,7 +213,7 @@ let parse ?(link_only = false) arguments =
           | "lazy" -> Error.fail "lazy binding is not supported"
           | _ -> Error.fail "unsupported -z policy %s" policy);
           options depth collected false rest
-      | (("-E" | "--export-dynamic" | "--no-export-dynamic") as flag) :: rest ->
+      | (("-E" | "-export-dynamic" | "--export-dynamic" | "--no-export-dynamic") as flag) :: rest ->
           export_dynamic := flag <> "--no-export-dynamic";
           options depth collected false rest
       | (("--dynamic-linker" | "-dynamic-linker") as flag) :: rest ->

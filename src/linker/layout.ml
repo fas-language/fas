@@ -18,6 +18,17 @@ let combined_name (s : E.section) =
     match initialization_name s.kind with
     | Some name -> Some name
     | None when Section_registry.eligible s -> Some s.name
+    (* Debuggers and Valgrind expect a single conventional .text/.data/.bss
+       range. Keep input placements separate for relocations and GC, but give
+       compatible contributions one output header. Function sections belong
+       to the same text range; unrelated named sections retain their identity. *)
+    | None when s.kind = 1 && s.flags land 6 = 6
+                && (s.name = ".text" || String.starts_with ~prefix:".text." s.name) ->
+        Some ".text"
+    | None when s.flags land 2 <> 0
+                && List.mem s.kind [ 1; 8 ]
+                && List.mem s.name [ ".data"; ".rodata"; ".bss"; ".sdata"; ".sbss" ] ->
+        Some s.name
     | None when List.mem s.name [ ".init"; ".fini"; ".eh_frame" ] -> Some s.name
     | _ -> None
 
@@ -189,7 +200,9 @@ let make ~base ~relro ~kept ~aliases objects =
              (notably GNU CRT versus Clang). They still form one lifecycle
              array; splitting it lets another array fall inside its bounds. *)
           ( name,
-            if Section_registry.eligible s then Section_registry.signature s
+            if Section_registry.eligible s
+               || List.mem name [ ".text"; ".data"; ".rodata"; ".bss"; ".sdata"; ".sbss" ]
+            then Section_registry.signature s
             else (0, 0, 0) )
         in
         let groups = Hashtbl.create ~random:true 16 in

@@ -19,6 +19,65 @@ class DebugTests(unittest.TestCase):
     link = core.LinkerTests.link
     rejected = core.LinkerTests.rejected
 
+    def test_valgrind_multi_object_executable_and_shared_library(self):
+        if not shutil.which('valgrind'):
+            self.skipTest('Valgrind unavailable; debug-reader acceptance remains unverified')
+        tools = self.root / 'debug-gcc-tools'
+        tools.mkdir(exist_ok=True)
+        (tools / 'ld').symlink_to(LINKER)
+        sources = [self.root / ('mapping-' + name + '.c') for name in ('first', 'second', 'main')]
+        sources[0].write_text('int first_data=19; int first_bss[17];\n'
+            'const int first_rodata=1;\n'
+            'int first(void) { return first_data+first_bss[16]+first_rodata; }\n')
+        sources[1].write_text('__attribute__((aligned(64))) int second_data=20;\n'
+            '__attribute__((aligned(64))) int second_bss[17];\n'
+            'const int second_rodata=2;\n'
+            'extern int first(void);\n'
+            'int answer(void) { return first()+second_data+second_bss[16]+second_rodata; }\n')
+        sources[2].write_text('#include <stdio.h>\nextern int answer(void);\n'
+            'int main(void) { int value=answer(); printf("%d\\n",value); return value!=42; }\n')
+        for function_sections in (False, True):
+            with self.subTest(function_sections=function_sections):
+                objects = []
+                for source in sources:
+                    obj = source.with_suffix('.o')
+                    run('gcc', '-c', '-O0', '-g', '-fPIC',
+                        *(['-ffunction-sections'] if function_sections else []), source, '-o', obj)
+                    objects.append(obj)
+                library = self.root / 'libmapping.so'
+                out = self.root / 'debug-mapping'
+                run('gcc', '-B'+str(tools)+'/', '-fno-use-linker-plugin', '-shared',
+                    *objects[:2], '-o', library)
+                run('gcc', '-B'+str(tools)+'/', '-fno-use-linker-plugin', objects[2],
+                    library, '-Wl,-rpath,'+str(self.root), '-o', out)
+                self.assertEqual(run(out).stdout, b'42\n')
+                for image in (out, library):
+                    sections = core.elf_sections(image.read_bytes())
+                    for name in ('.text', '.data', '.bss', '.rodata'):
+                        self.assertEqual(len([s for s in sections if s['name'] == name]), 1)
+                    self.assertEqual(run('readelf', '-aW', image).stderr, b'')
+                sections = core.elf_sections(library.read_bytes())
+                symbols = {s['name']: s for s in core.elf_symbols(library.read_bytes())}
+                for name in ('second_data', 'second_bss'):
+                    self.assertEqual(symbols[name]['value'] % 64, 0)
+                text = next(s for s in sections if s['name'] == '.text')
+                for name in ('first', 'answer'):
+                    self.assertEqual(symbols[name]['section'], text['index'])
+                    self.assertIn(('mapping-'+('first' if name == 'first' else 'second')+'.c').encode(),
+                        run('addr2line', '-e', library, hex(symbols[name]['value'])).stdout)
+                if shutil.which('valgrind'):
+                    report = self.root / 'mapping-valgrind.log'
+                    p = subprocess.run(['valgrind', '--verbose', '--error-exitcode=99',
+                        '--leak-check=full', '--read-var-info=yes', '--log-file='+str(report),
+                        str(out)], capture_output=True, timeout=30)
+                    log = report.read_text()
+                    self.assertEqual(p.returncode, 0, log)
+                    self.assertEqual(p.stdout, b'42\n')
+                    self.assertIn('libmapping.so', log)
+                    self.assertIn('ERROR SUMMARY: 0 errors', log)
+                    self.assertNotIn('Serious problem when reading debug info', log)
+                    self.assertNotIn("Can't make sense", log)
+
     def build(self, compiler, version, gc=False):
         first = self.root / 'debug-first.c'
         first.write_text('int bias = 40;\nint helper(int value) {\n  return value + bias;\n}\n')
