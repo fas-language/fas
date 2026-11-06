@@ -2165,6 +2165,31 @@ let gen_instr ctx fr ins =
           to_xmm ctx fr 0 v A.Rax;
           A.cvt_ff a ~from_double:(kind = "fptrunc") 0 0;
           from_xmm ctx fr id target 0
+      | "fptosi" | "fptoui" ->
+          (* Plain (non-saturating) float -> integer, truncating toward
+             zero. Out-of-range inputs and NaN give poison, so any result
+             is allowed there. A 64-bit cvtt is exact for every in-range
+             value of a narrower result (signed, or unsigned below 2^32);
+             store_result then keeps the low bits. Only u64 needs more:
+             [2^63, 2^64) converts x - 2^63 and sets bit 63 back. *)
+          let double = from = F64 in
+          to_xmm ctx fr 0 v A.Rax;
+          A.cvt_f2si a ~double A.Rax 0;
+          if kind = "fptoui" && bits target = 64 then begin
+            let fbits x =
+              if double then Int64.bits_of_float x
+              else Int64.logand (Int64.of_int32 (Int32.bits_of_float x)) 0xffff_ffffL
+            in
+            A.mov_imm a A.Rcx (fbits (Float.ldexp 1.0 63));
+            A.mov_xr a ~double 1 A.Rcx;
+            A.mov_xx a 2 0;
+            A.fop_xx a ~double A.Fsub 2 1;
+            A.cvt_f2si a ~double A.Rcx 2;
+            A.bit_ri a `Btc A.Rcx 63;
+            A.ucomi a ~double 0 1;
+            A.cmov a A.Ae A.Rax A.Rcx
+          end;
+          store_result ctx fr id target A.Rax
       | k -> unsupported "cast %s" k)
   | Call (result, _, ret, name, args) when Ir.is_atomic_name name ->
       gen_atomic ctx fr result ret name args

@@ -1,0 +1,3 @@
+(executable
+ (name fas_fir)
+ (libraries fas_compiler))
