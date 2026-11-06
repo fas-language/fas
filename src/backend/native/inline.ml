@@ -117,7 +117,20 @@ let candidates ?(only = fun _ -> true) sizes (m : module_) =
     && f.name <> "main"
     && (not (List.mem f.name m.no_inline_functions))
     && (not (is_aggregate f.ret))
-    && not (List.exists (fun (p : param) -> is_aggregate p.ty) f.params)
+    && (not (List.exists (fun (p : param) -> is_aggregate p.ty) f.params))
+    (* a variable-size alloca lives until return: inlined into a loop of
+       the caller it would grow the stack every iteration *)
+    && not
+         (List.exists
+            (fun (b : block) ->
+              List.exists
+                (function
+                  | Call (_, _, _, n, _) ->
+                      String.starts_with ~prefix:"llvm.fas.alloca." n
+                      || String.starts_with ~prefix:"llvm.stack" n
+                  | _ -> false)
+                b.instrs)
+            f.blocks)
   in
   let own_size (f : func) =
     match Ptbl.find_opt sizes f.name with Some n -> n | None -> size f

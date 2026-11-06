@@ -1,6 +1,6 @@
 # generates test/fas_fir/c/ops.fir: one exported function per op and width
 o=['; generated: every op the native backend gained through expansion (abs, bswap,',
-   '; bitrev, *_ovf, all 16 fcmp predicates, copysign, fmin, fmax, ftrunc) and',
+   '; bitrev, *_ovf, all 16 fcmp predicates, copysign, fmin, fmax, frem, ftrunc) and',
    '; variable-size memcpy/memmove/memset; ops.c checks each against clang',
    'triple "x86_64-unknown-linux-gnu"']
 W={8:1,16:2,32:4,64:8}
@@ -15,7 +15,7 @@ for w in W:
 for t in ['f32','f64']:
     for p in 'false oeq ogt oge olt ole one ord ueq ugt uge ult ule une uno true'.split():
         o.append(f'func @fir_fcmp_{p}_{t} ({t}, {t}) -> (i32) global {{\n^e(%a: {t}, %b: {t}):\n  %c = fcmp {p} i1 %a, %b\n  %z = zext i32 %c\n  ret %z\n}}')
-    for op in ['copysign','fmin','fmax']:
+    for op in ['copysign','fmin','fmax','frem']:
         o.append(f'func @fir_{op}_{t} ({t}, {t}) -> ({t}) global {{\n^e(%a: {t}, %b: {t}):\n  %r = {op} {t} %a, %b\n  ret %r\n}}')
     o.append(f'func @fir_ftrunc_{t} ({t}) -> ({t}) global {{\n^e(%a: {t}):\n  %r = ftrunc {t} %a\n  ret %r\n}}')
 for op in ['memcpy','memmove']:

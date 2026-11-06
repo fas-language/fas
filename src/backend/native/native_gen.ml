@@ -1694,6 +1694,54 @@ let gen_intrinsic ctx fr result ret_ty name args =
     A.mov_rr a A.Rdi A.Rdx;
     A.rep_stosb a
   end
+  else if prefix "llvm.fas.alloca." then begin
+    (* Fir's variable-size alloca: the frame is addressed from rbp and calls
+       push their stack words from the current rsp, so the bytes can come off
+       rsp. The size rounds up to 16 to keep rsp aligned for calls; [leave]
+       frees it all at return, or a stackrestore earlier. *)
+    let align = int_of_string (String.sub name 16 (String.length name - 16)) in
+    load ctx fr A.Rax (arg 0);
+    A.alu_ri a A.Add A.Rax 15;
+    A.alu_ri a A.And A.Rax (-16);
+    A.alu_rr a A.Sub A.Rsp A.Rax;
+    if align > 16 then A.alu_ri a A.And A.Rsp (-align);
+    A.mov_rr a A.Rax A.Rsp;
+    store A.Rax
+  end
+  else if prefix "llvm.fas.frem." then begin
+    (* fmod semantics (the remainder truncated toward zero, the dividend's
+       sign), exact: x87 fprem reduces by at most 2^63 per round and sets C2
+       (bit 10 of the status word) while unfinished. The operands pass
+       through 16 bytes below rsp. *)
+    let double = ret_ty = F64 in
+    let size = if double then 8 else 4 in
+    load ctx fr A.Rax (arg 0);
+    load ctx fr A.Rdx (arg 1);
+    A.alu_ri a A.Sub A.Rsp 16;
+    A.store a size (A.Base (A.Rsp, 0)) A.Rax;
+    A.store a size (A.Base (A.Rsp, 8)) A.Rdx;
+    A.fld a ~double (A.Base (A.Rsp, 8));
+    A.fld a ~double (A.Base (A.Rsp, 0));
+    let again = A.new_label a in
+    A.place a again;
+    A.fprem a;
+    A.fnstsw_ax a;
+    A.bit_ri a `Bt A.Rax 10;
+    A.jcc a A.B again;
+    A.fstp a ~double (A.Base (A.Rsp, 0));
+    A.fpop a;
+    A.load_zx a size A.Rax (A.Base (A.Rsp, 0));
+    A.alu_ri a A.Add A.Rsp 16;
+    store A.Rax
+  end
+  else if prefix "llvm.stacksave" then begin
+    A.mov_rr a A.Rax A.Rsp;
+    store A.Rax
+  end
+  else if prefix "llvm.stackrestore" then begin
+    load ctx fr A.Rax (arg 0);
+    A.mov_rr a A.Rsp A.Rax
+  end
   else if prefix "llvm.fas.store_if" then begin
     (* store_if(cond, value, pointer) *)
     let _, _, v = List.nth args 1 in

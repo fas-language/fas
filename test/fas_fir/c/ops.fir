@@ -1,5 +1,5 @@
 ; generated: every op the native backend gained through expansion (abs, bswap,
-; bitrev, *_ovf, all 16 fcmp predicates, copysign, fmin, fmax, ftrunc) and
+; bitrev, *_ovf, all 16 fcmp predicates, copysign, fmin, fmax, frem, ftrunc) and
 ; variable-size memcpy/memmove/memset; ops.c checks each against clang
 triple "x86_64-unknown-linux-gnu"
 func @fir_abs_i8 (i8) -> (i8) global {
@@ -336,6 +336,11 @@ func @fir_fmax_f32 (f32, f32) -> (f32) global {
   %r = fmax f32 %a, %b
   ret %r
 }
+func @fir_frem_f32 (f32, f32) -> (f32) global {
+^e(%a: f32, %b: f32):
+  %r = frem f32 %a, %b
+  ret %r
+}
 func @fir_ftrunc_f32 (f32) -> (f32) global {
 ^e(%a: f32):
   %r = ftrunc f32 %a
@@ -450,6 +455,11 @@ func @fir_fmin_f64 (f64, f64) -> (f64) global {
 func @fir_fmax_f64 (f64, f64) -> (f64) global {
 ^e(%a: f64, %b: f64):
   %r = fmax f64 %a, %b
+  ret %r
+}
+func @fir_frem_f64 (f64, f64) -> (f64) global {
+^e(%a: f64, %b: f64):
+  %r = frem f64 %a, %b
   ret %r
 }
 func @fir_ftrunc_f64 (f64) -> (f64) global {

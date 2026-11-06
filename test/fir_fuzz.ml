@@ -157,7 +157,7 @@ let gen_float_op g t =
   let r = fresh g in
   (match int g 6 with
   | 0 | 1 ->
-      line g "%s = %s %s %s, %s" r (choose g [ "fadd"; "fsub"; "fmul"; "fdiv" ]) tt (pick g t) (pick g t)
+      line g "%s = %s %s %s, %s" r (choose g [ "fadd"; "fsub"; "fmul"; "fdiv"; "frem"; "copysign"; "fmin"; "fmax" ]) tt (pick g t) (pick g t)
   | 2 -> line g "%s = %s %s %s" r (choose g [ "fneg"; "fabs"; "sqrt"; "floor"; "ceil"; "roundeven" ]) tt (pick g t)
   | 3 ->
       let w = (choose g [ 8; 16; 32; 64 ]) in

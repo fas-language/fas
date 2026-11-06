@@ -335,6 +335,12 @@ let verify_func (f : func) =
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
                 if nres = 1 && not (is_int (r 0) || is_ptr (r 0) || r 0 = F32 || r 0 = F64) || (nres = 1 && is_int (r 0) && int_width (r 0) > 64) then
                   err "%s: va_arg reads an integer up to i64, a ptr, f32 or f64" where
+            | Stack_save ->
+                want 1;
+                if nres = 1 && not (is_ptr (r 0)) then err "%s: stacksave defines a ptr" where
+            | Stack_restore p ->
+                want 0;
+                if not (is_ptr (ty p)) then err "%s: stackrestore of %s" where (tys p)
             | Trap -> want 0
             | Dbg_value _ -> want 0);
             ignore i)

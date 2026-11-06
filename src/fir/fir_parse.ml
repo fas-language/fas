@@ -697,6 +697,8 @@ let parse_op st opname =
   | "va_arg" ->
       let t = parse_ty lx in
       (Va_arg (parse_value st), [| t |])
+  | "stacksave" -> (Stack_save, [| ptr |])
+  | "stackrestore" -> (Stack_restore (parse_value st), [||])
   | "trap" -> (Trap, [||])
   | "nop" -> (Nop, [||])
   | "dbg_value" ->

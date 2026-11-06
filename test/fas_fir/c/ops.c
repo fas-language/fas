@@ -1,4 +1,4 @@
-/* Checks test/fas_fir/c/ops.fir (generated) against clang on edge values; exit 0 when all agree */
+/* Checks test/fas_fir/c/ops.fir (frem against libm fmod, bit for bit) (generated) against clang on edge values; exit 0 when all agree */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -54,7 +54,7 @@ static const int64_t ivals[] = { 0, 1, -1, 2, -2, 3, 7, 100, -100, 127, -128, 12
   int fir_fcmp_ugt_##t(T, T); int fir_fcmp_uge_##t(T, T); int fir_fcmp_ult_##t(T, T);              \
   int fir_fcmp_ule_##t(T, T); int fir_fcmp_une_##t(T, T); int fir_fcmp_uno_##t(T, T);              \
   int fir_fcmp_true_##t(T, T);                                                                     \
-  T fir_copysign_##t(T, T); T fir_fmin_##t(T, T); T fir_fmax_##t(T, T); T fir_ftrunc_##t(T);
+  T fir_copysign_##t(T, T); T fir_frem_##t(T, T); T fir_fmin_##t(T, T); T fir_fmax_##t(T, T); T fir_ftrunc_##t(T);
 FDECL(float, f32) FDECL(double, f64)
 
 static const double fvals[] = { 0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1.5, -2.5, 0.49999999999999994, 3.0, 1e300, -1e300,
@@ -68,7 +68,7 @@ static const double fvals[] = { 0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1.5, -2.5, 0.49
 
 #define SAME(T, U, x, y) (isnan(x) ? isnan(y) : ({ T x_ = (x), y_ = (y); U ux, uy; memcpy(&ux, &x_, sizeof ux); memcpy(&uy, &y_, sizeof uy); ux == uy; }))
 
-#define CHECK_FLOAT(T, U, t, truncf_)                                                                     \
+#define CHECK_FLOAT(T, U, t, truncf_, fmod_)                                                                     \
   for (int i = 0; i < NF; i++) {                                                                          \
     T a = (T)fvals[i];                                                                                    \
     if (!SAME(T, U, fir_ftrunc_##t(a), truncf_(a))) FAIL("ftrunc " #t " %g\n", (double)a);                \
@@ -86,6 +86,7 @@ static const double fvals[] = { 0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1.5, -2.5, 0.49
       for (int k = 0; k < 16; k++)                                                                        \
         if (got[k] != want[k]) FAIL("fcmp #%d " #t " %g %g: %d\n", k, (double)a, (double)b, got[k]);     \
       if (!SAME(T, U, fir_copysign_##t(a, b), copysign(a, b))) FAIL("copysign " #t " %g %g\n", (double)a, (double)b); \
+      if (!SAME(T, U, fir_frem_##t(a, b), fmod_(a, b))) FAIL("frem " #t " %g %g\n", (double)a, (double)b); \
       if (!SAME(T, U, fir_fmin_##t(a, b), REF_MIN(a, b))) FAIL("fmin " #t " %g %g\n", (double)a, (double)b);   \
       if (!SAME(T, U, fir_fmax_##t(a, b), REF_MAX(a, b))) FAIL("fmax " #t " %g %g\n", (double)a, (double)b);   \
     }                                                                                                     \
@@ -103,7 +104,7 @@ int main(void) {
     if ((uint32_t)fir_bswap_i32((int32_t)a) != (uint32_t)bsw((uint32_t)a, 32)) FAIL("bswap32 %llx\n", (unsigned long long)a);
     if ((uint64_t)fir_bswap_i64((int64_t)a) != bsw(a, 64)) FAIL("bswap64 %llx\n", (unsigned long long)a);
   }
-  CHECK_FLOAT(float, uint32_t, f32, truncf) CHECK_FLOAT(double, uint64_t, f64, trunc)
+  CHECK_FLOAT(float, uint32_t, f32, truncf, fmodf) CHECK_FLOAT(double, uint64_t, f64, trunc, fmod)
   /* memory: every small size and offset, overlapping both ways for memmove */
   unsigned char buf[128], ref[128];
   for (int n = 0; n <= 40; n++)

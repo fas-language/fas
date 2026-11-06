@@ -802,6 +802,15 @@ let rep_stosb a =
 let std a = byte a 0xfd
 let cld a = byte a 0xfc
 
+(* x87, for frem only: fprem is the one exact remainder instruction (SSE has
+   none). fld/fstp m32 (d9 /0, /3) or m64 (dd /0, /3); fprem (d9 f8); fnstsw
+   ax (df e0); fstp st(0) pops (dd d8). *)
+let fld a ~double mem = rm a ~w:false [ (if double then 0xdd else 0xd9) ] ~reg:Rax mem
+let fstp a ~double mem = rm a ~w:false [ (if double then 0xdd else 0xd9) ] ~reg:Rbx mem
+let fprem a = byte a 0xd9; byte a 0xf8
+let fnstsw_ax a = byte a 0xdf; byte a 0xe0
+let fpop a = byte a 0xdd; byte a 0xd8
+
 (* Absolute 64-bit address of a symbol, as data inside code (unused for now)
    or via [mov r64, imm64] with a relocation. *)
 let mov_symbol_abs a dst symbol addend =

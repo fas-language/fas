@@ -416,6 +416,11 @@ let convert_inst cx (i : inst) =
       let bin op = def cx (r 0) (fun id t -> Ir.Bin (id, op, t, v a, v b)) in
       match k with
       | Fadd -> bin Ir.Fadd | Fsub -> bin Ir.Fsub | Fmul -> bin Ir.Fmul | Fdiv -> bin Ir.Fdiv
+      | Frem ->
+          (* the old Ir has no frem: `llvm.fas.frem.<f32|f64>`, which Ir.render
+             prints as LLVM's frem and the native backend runs on x87 fprem *)
+          let t = scalar_float (ir_ty (ty_of f a)) in
+          intrinsic cx (r 0) ("llvm.fas.frem." ^ (if t = Ir.F32 then "f32" else "f64")) [ arg cx a; arg cx b ]
       | Copysign ->
           let t = scalar_float (ir_ty (ty_of f a)) in
           alias cx (r 0) (copysign cx t (v a) (v b))
@@ -434,8 +439,7 @@ let convert_inst cx (i : inst) =
           let r1 = e_sel cx t (e_cmp cx Ir.Fune t y y) x eq in
           let r2 = e_sel cx t (e_cmp cx Ir.Fune t x x) y_nan r1 in
           let r3 = e_sel cx t (e_cmp cx gt t x y) y r2 in
-          alias cx (r 0) (e_sel cx t (e_cmp cx lt t x y) x r3)
-      | k -> unsupported "%s" (Fir_print.fbin_name k))
+          alias cx (r 0) (e_sel cx t (e_cmp cx lt t x y) x r3))
   | Fun (k, _, a) -> (
       let sfx = suffix (ty_of f a) in
       let un name = intrinsic cx (r 0) (name ^ sfx) [ arg cx a ] in
@@ -528,7 +532,11 @@ let convert_inst cx (i : inst) =
   | Alloca (n, align) -> (
       match const_int cx n with
       | Some n -> def cx (r 0) (fun id _ -> Ir.Alloca (id, bytes (Int64.to_int n), align))
-      | None -> unsupported "variable-size alloca")
+      | None ->
+          (* a variable size: the pseudo-intrinsic `llvm.fas.alloca.<align>`,
+             which Ir.render prints as LLVM's dynamic alloca and the native
+             backend expands to `sub rsp` *)
+          intrinsic cx (r 0) ("llvm.fas.alloca." ^ string_of_int (max 1 align)) [ size_arg cx n ])
   | Load (m, p) when m.order <> Plain ->
       let t = ir_ty (ty_of f (r 0)) in
       intrinsic cx (r 0) (Ir.atomic_name ~ty:t Ir.A_load (atomic_order m.order))
@@ -690,6 +698,8 @@ let convert_inst cx (i : inst) =
          inline (llvm.* calls only use rax/rcx/rdx there) *)
       let suffix = match ty_of cx.f (r 0) with Int n -> "i" ^ string_of_int n | Ptr _ -> "ptr" | F32 -> "f32" | F64 -> "f64" | t -> unsupported "va_arg of %s" (ty_to_string t) in
       intrinsic cx (r 0) ("llvm.fas.va_arg." ^ suffix) [ arg cx p ]
+  | Stack_save -> intrinsic cx (r 0) "llvm.stacksave.p0" []
+  | Stack_restore p -> call cx None Ir.Void "llvm.stackrestore.p0" [ arg cx p ]
   | Trap -> add cx Ir.Trap
 
 let convert_func (m : modul) ~source (f : func) : Ir.func =

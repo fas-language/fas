@@ -1580,6 +1580,26 @@ let emit_instr variadic_signatures sink = function
       emit_value sink v;
       sink.text " to ";
       emit_ty sink dt
+  | Call (Some i, _, _, n, [ (_, _, size) ])
+    when String.starts_with ~prefix:"llvm.fas.alloca." n ->
+      (* Fir's variable-size alloca (Fir_to_ir): `llvm.fas.alloca.<align>` *)
+      let align = String.sub n 16 (String.length n - 16) in
+      sink.text "  %v";
+      sink.text (string_of_int i);
+      sink.text " = alloca i8, i64 ";
+      emit_value sink size;
+      sink.text (", align " ^ align)
+  | Call (Some i, _, t, n, [ (_, _, x); (_, _, y) ])
+    when String.starts_with ~prefix:"llvm.fas.frem." n ->
+      (* Fir's frem (Fir_to_ir): `llvm.fas.frem.<ty>` *)
+      sink.text "  %v";
+      sink.text (string_of_int i);
+      sink.text " = frem ";
+      emit_ty sink t;
+      sink.text " ";
+      emit_value sink x;
+      sink.text ", ";
+      emit_value sink y
   | Call (result, _, t, n, args) when is_atomic_name n -> (
       let op, order =
         match parse_atomic_name n with

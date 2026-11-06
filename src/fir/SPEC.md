@@ -241,7 +241,9 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 
 | Text | Meaning |
 |---|---|
-| `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`. Put constant-size allocas in the entry block. |
+| `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`, or a variable (`%n`, any integer type, read as unsigned). Put constant-size allocas in the entry block. Memory from an alloca lives until the function returns, or until a `stackrestore` to a point before it. |
+| `%s = stacksave` | The current stack position, as a `ptr` for `stackrestore`. Its value is only good for that. |
+| `stackrestore S` | Frees every alloca made since the `stacksave` that produced S. Use the pair around a scope that holds variable-size allocas (C VLAs), above all inside loops, where otherwise each iteration grows the stack. |
 | `%x = load ty P, MEM` | Load a `ty` from pointer P. |
 | `store V, P, MEM` | Store V at P. No type is written, because V carries it. |
 | `%q = ptradd [inbounds] ptr P, IDX, SCALE, DISP` | Address arithmetic: P + IDX·SCALE + DISP. IDX is an integer value (read as signed; use i64), and SCALE and DISP are literal integers. For a constant offset write `ptradd ptr %p, i64 0, 1, 24`. |
@@ -427,6 +429,7 @@ In Fir this means:
   | `?:` | Either `select` when both arms are side-effect free, or branches plus a merge parameter. |
   | `switch` | `switch`. |
   | `goto` and labels | Ordinary blocks. Seal a label's block only when the function ends, or once all gotos to it are known. |
+  | VLA `T a[n]` | At the start of the VLA's block, `%s = stacksave`; then `%a = alloca ptr %bytes, align A` with `%bytes = n·sizeof(T)`; on every exit from the block (including `break`, `continue`, `goto` out of it), `stackrestore %s`. `alloca(n)` is the same alloca without the pair. `sizeof a` is the `%bytes` value. |
   | `...`, `va_list`, `va_arg` | A variadic signature (`(i32, ...)`). `va_list ap` is a 24-byte `alloca`, `va_start(ap, last)` is `va_start %ap`, and `va_arg(ap, T)` is `va_arg T %ap`. A `va_list` parameter is a `ptr`, since C arrays decay to pointers. See §6. |
 
 ### Struct, array and pointer access
@@ -446,10 +449,10 @@ In Fir this means:
 | Float types | f32 f64 | f16 f80 | — |
 | Vectors | Loads, stores, lane-wise arithmetic, compares, select, `extract`, `insert`, `shuffle`, `splat`, `reduce or` | Other reductions, `masked_load/store`, `compress`, `expand`; vector constants with non-constant lanes | Scalar loops. |
 | Integer ops | Everything in §6 for scalars, including `bswap`, `bitrev`, `abs` and the `*_ovf` family (expanded into shifts, masks and compares) | Vector `bswap`/`bitrev`/`abs`/`*_ovf`, `*_ovf` on i1, vector/i1 `smulh`/`umulh` | Scalar loops; for i1 overflow, widen to i8. |
-| Float ops | fadd fsub fmul fdiv fneg fabs sqrt floor ceil roundeven fma fmin fmax copysign ftrunc (scalar; fmin/fmax follow §6: NaN loses, -0 < +0) | frem; vector fmin fmax copysign ftrunc | frem: call libm `fmod` or loop on `ftrunc`. |
+| Float ops | fadd fsub fmul fdiv fneg fabs sqrt floor ceil roundeven fma; scalar fmin fmax copysign ftrunc (fmin/fmax follow §6: NaN loses, -0 < +0) and frem (exact, as C `fmod`, through x87 `fprem`) | Vector frem fmin fmax copysign ftrunc | Scalar loops. |
 | fcmp | All 16 predicates on scalars | Predicates other than oeq une olt ole ogt oge on vectors | Lane-wise: combine the six basic predicates, e.g. `ult a,b` = `xor (oge a,b), true`. |
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
-| Memory | alloca with a constant size, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | Variable-size alloca | Allocate a fixed upper bound, or use a heap. |
+| Memory | alloca of any size (constant, or variable with any align), `stacksave`/`stackrestore`, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | — | — |
 | Atomics | `atomic_rmw` xchg add sub and or xor, `cmpxchg`, `fence` | rmw min max umin umax fadd fsub | A cmpxchg loop. |
 | Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; exported (`global`) functions with i128 signatures; `agg` with vector, i128 or f80 fields, or align above 8, at an external boundary; a struct by value through `...` | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers, `ptr`, `f32` and `f64` from registers and the stack; reading a `va_list` that C passed in, and the reverse | `va_arg` of aggregates; passing an aggregate by value as a variadic argument | Pass structs by pointer. |
