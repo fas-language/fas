@@ -15,8 +15,9 @@ let read ~max_size path =
           if size > max_size then
             Error.fail "%s: input exceeds %d byte limit or remaining input budget" path
               max_size;
-          try really_input_string channel size
-          with End_of_file -> Error.fail "%s: input was truncated while reading" path))
+          try really_input_string channel size with
+          | End_of_file -> Error.fail "%s: input was truncated while reading" path
+          | Sys_error message -> Error.fail "%s: %s" path message))
 
 (* Compiler configure/driver checks commonly link to /dev/null. Treat the
    canonical null device as an explicit discard request: still build and validate

@@ -2,6 +2,7 @@
 """Require the complete declared correctness selection and record its reports."""
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import platform
@@ -16,7 +17,7 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--expected-python-cases', type=int, default=250)
+    parser.add_argument('--expected-python-cases', type=int, default=259)
     args = parser.parse_args()
     if args.expected_python_cases <= 0:
         parser.error('--expected-python-cases must be positive')
@@ -54,6 +55,17 @@ def main():
         reports[name] = {'path': str(path), 'sha256': sha(path), 'passed': passed}
         if not passed:
             failures.append(name+' report failed')
+    source_manifest = root/'release-source-manifest.json'
+    spec = importlib.util.spec_from_file_location('fas_release', repository/'src/linker/release/package.py')
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    manifest = json.loads(source_manifest.read_bytes())
+    try:
+        release.validate_source(repository, manifest)
+        source_unchanged = True
+    except (OSError, ValueError) as error:
+        source_unchanged = False
+        failures.append(str(error))
     installed_sha = sha(root/'linker-install/usr/bin/fas-ld')
     if installed_sha != linker_sha:
         failures.append('installed linker differs from qualified executable')
@@ -64,6 +76,9 @@ def main():
                'os_release': Path('/etc/os-release').read_text(),
                'packages_sha256': sha(root/'packages.tsv'),
                'linker_sha256': linker_sha, 'installed_linker_sha256': installed_sha,
+               'source_manifest_sha256': sha(source_manifest),
+               'source_file_count': len(manifest['files']),
+               'source_files_unchanged': source_unchanged,
                'scope': 'shared correctness recipe; no hosted-run or performance claim'}
     (root/'qualification-summary.json').write_text(json.dumps(summary, indent=2)+'\n')
     print(json.dumps(summary, indent=2))

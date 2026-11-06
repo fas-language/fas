@@ -13,6 +13,7 @@ It does not invoke an external linker or use LLVM/BFD libraries.
 
 See the [v0.1–v1.0 roadmap](ROADMAP.md) for release scope and acceptance gates.
 The [CI qualification guide](CI.md) describes automated and local reproduction.
+The [release packaging guide](release/README.md) describes qualified local archives.
 The [current release audit](AUDIT.md) records the original findings, subsequent
 fixes and remaining release qualification work. Fas/C are the release priorities;
 C++ stays at the existing usable interoperability level. LTO is out of scope.
@@ -207,7 +208,10 @@ of an existing file. The helper never changes the process-wide `umask`; image
 bytes stay private while being written to the temporary file. Failure before
 rename preserves the existing output and its permissions.
 Test-only Linux syscall interposition covers ENOSPC, partial-write/EIO, failed
-close/chmod/rename, and successful recovery from short writes/EINTR. A killed
+close/chmod/rename, and successful recovery from short writes/EINTR. Input
+short reads/EINTR, EIO/EOF, temporary-creation resource failures/name collisions
+and real file-size limits are also tested, including repeated library recovery
+without descriptor leaks. A killed
 writer may leave a private incomplete `.fas-ld-*.tmp`; later links ignore it.
 No cross-file transaction or fsync-based crash durability is promised.
 
@@ -661,8 +665,11 @@ augmentation bounds, unsupported encodings and 256 seeded record mutations.
 The [fresh Ubuntu qualification](corpus/results/2026-11-06-clean/README.md)
 records the shared correctness recipe on GCC 13/Clang 18, glibc 2.39 and isolated
 musl, including real zlib/Chibicc/SQLite and installation checks. It also records
-the current workstation regression and musl matrix, the unwind/debug-reader
+that workstation regression and musl matrix, the unwind/debug-reader
 repairs it exposed, exact binary identities and remaining release limits.
+The [release archive checkpoint](corpus/results/2026-11-06-release/README.md)
+adds input/resource failure recovery, 259 linker cases, repeated native Sieve
+acceptance and verified binary/source archives with a clean source rebuild.
 
 The seeded mutation tests are regression checks. Coverage-guided campaigns use
 the separate [AFL++ harness](fuzz/README.md); their recorded duration and findings

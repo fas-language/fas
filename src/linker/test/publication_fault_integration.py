@@ -4,12 +4,15 @@ import os
 from pathlib import Path
 import select
 import signal
+import resource
 import subprocess
 import unittest
+import sys
 
 import integration as core
 
 run = core.run
+IO_REENTRY = str(Path(sys.argv.pop(1)).resolve())
 
 
 class PublicationFaultTests(unittest.TestCase):
@@ -80,6 +83,83 @@ class PublicationFaultTests(unittest.TestCase):
                     self.assertEqual(run('readelf', '-aW', out).stderr, b'')
                     if not flags:
                         run(out, expected=42)
+
+    def test_input_short_and_interrupted_reads_retry_without_changing_inputs(self):
+        before = self.simple.read_bytes()
+        for flags in ((), ('-r',), ('-shared',), ('-static-pie',)):
+            reference = self.directory/'reference'
+            run(core.LINKER, *flags, '-o', reference, self.simple, self.answer)
+            for fault in ('read-short', 'read-eintr'):
+                with self.subTest(flags=flags, fault=fault):
+                    out = self.directory/'image'
+                    p = subprocess.run([core.LINKER, *flags, '-o', str(out),
+                        str(self.simple), str(self.answer)], capture_output=True, timeout=20,
+                        env=self.env(fault, FAS_IO_INPUT=str(self.simple)))
+                    self.assertEqual(p.returncode, 0, p.stderr)
+                    self.assertEqual(out.read_bytes(), reference.read_bytes())
+                    self.assertEqual(self.simple.read_bytes(), before)
+
+    def test_input_failures_preserve_outputs_and_allow_library_reentry(self):
+        before = self.simple.read_bytes()
+        for fault in ('read-eio', 'read-eof'):
+            for flags in ((), ('-r',), ('-shared',), ('-static-pie',)):
+                with self.subTest(fault=fault, flags=flags):
+                    out = self.directory/'image'
+                    old = self.seed(out)
+                    p = subprocess.run([core.LINKER, *flags, '-o', str(out),
+                        str(self.simple), str(self.answer)], capture_output=True, timeout=20,
+                        env=self.env(fault, FAS_IO_INPUT=str(self.simple)))
+                    self.assertEqual(p.returncode, 1, p.stderr)
+                    self.assertIn(b'fas-ld:', p.stderr)
+                    self.assertIn(str(self.simple).encode(), p.stderr)
+                    self.assertNotIn(b'Fatal error', p.stderr)
+                    self.unchanged(out, old)
+                    self.assertEqual(list(self.directory.glob('.fas-ld-*.tmp')), [])
+            def limit_descriptors():
+                resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+            p = subprocess.run([IO_REENTRY, str(self.simple), str(self.answer)],
+                capture_output=True, timeout=20, preexec_fn=limit_descriptors,
+                env=self.env(fault, FAS_IO_INPUT=str(self.simple)))
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn(b'256 failures, no descriptor leak', p.stdout)
+        self.assertEqual(self.simple.read_bytes(), before)
+
+    def test_temp_creation_resource_errors_and_name_collision_retry(self):
+        for flags in ((), ('-r',), ('-shared',), ('-static-pie',)):
+            for fault in ('create-emfile', 'create-enospc', 'create-eacces'):
+                for existing in (False, True):
+                    with self.subTest(flags=flags, fault=fault, existing=existing):
+                        out = self.directory/'image'
+                        out.unlink(missing_ok=True)
+                        old = self.seed(out) if existing else None
+                        self.invoke((core.LINKER, *flags, '-o', out,
+                                     self.simple, self.answer), fault)
+                        if existing:
+                            self.unchanged(out, old)
+                        else:
+                            self.assertFalse(out.exists())
+            out = self.directory/'image'
+            self.invoke((core.LINKER, *flags, '-o', out, self.simple, self.answer),
+                        'create-collision', expected=0)
+            if not flags:
+                run(out, expected=42)
+
+    def test_real_file_size_limit_preserves_previous_artifact(self):
+        def limit_size():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+        for flags in ((), ('-r',), ('-shared',), ('-static-pie',)):
+            with self.subTest(flags=flags):
+                out = self.directory/'image'
+                old = self.seed(out)
+                p = subprocess.run([core.LINKER, *flags, '-o', str(out),
+                    str(self.simple), str(self.answer)], capture_output=True,
+                    timeout=20, preexec_fn=limit_size)
+                self.assertEqual(p.returncode, 1, p.stderr)
+                self.assertIn(b'fas-ld:', p.stderr)
+                self.assertNotIn(b'Fatal error', p.stderr)
+                self.unchanged(out, old)
+                self.assertEqual(list(self.directory.glob('.fas-ld-*.tmp')), [])
 
     def test_map_and_image_failures_follow_individual_file_atomicity(self):
         reference = self.directory/'reference'

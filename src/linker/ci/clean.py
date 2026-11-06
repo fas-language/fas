@@ -93,6 +93,7 @@ def main():
                    '--ulimit', 'nofile=65536:65536',
                    '--cap-add', 'SYS_PTRACE', '--mount', f'type=bind,src={output},dst=/qualification',
                    '--env', 'HOME=/qualification/home', '--env', 'RUNNER_TEMP=/qualification/results',
+                   '--env', 'FAS_SOURCE_MANIFEST=/qualification/source-manifest.json',
                    '--env', 'LC_ALL=C.UTF-8', '--env', 'FAS_SQLITE_EXTRAQUICK='+str(int(args.extraquick)),
                    '--workdir', '/qualification/source', report['image']['id'], 'bash', '-c',
                    'set -e; cat /etc/os-release; uname -a; '

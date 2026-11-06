@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "command": "FAS_MUSL_SYSROOT=/tmp/fas-musl-20261105/sysroot dune runtest --profile release --force",
+  "log": "/home/glonex/.cache/fas-linker-qualification/full-gate-release-final-20261106.log",
+  "log_sha256": "3ec5b81917e9c9fc2d20280da60d58954f57c2a63501288678a8047c43352a74",
+  "compiler_checks": 3792,
+  "python_cases": 259,
+  "python_groups": 43,
+  "skips": [],
+  "linker_sha256": "f2ab202781e3dda02a051cbbcf57c33a96ec2c6dc0163164570d265f8ecd1061",
+  "source_sha256": {
+    "src/linker/file_io.ml": "5b2f32da854c3c8f028696314b709bbced175f316cdd7a7925c02584495fe6a0",
+    "src/linker/test/io_fault_reentry.ml": "ed36cab20455768d04c601e66e2463fe077673baa2f95fd5e2e79c7d31c08339",
+    "src/linker/test/publication_fault_integration.py": "0e981c5721959a18bd83c30e54eb4e341e4cdb429c15612dc3072d2b2ecfce3c",
+    "src/linker/test/publication_faults.c": "acab9f7119016b985f3fac5d05ecbd20733ed123f5f6f2b1f947c46b7e25d9b9",
+    "src/linker/test/release_integration.py": "20a12300f4d1ce29bd9fb53e6a5e0ea048e0e6ed869dd93326a29975c108b1cb",
+    "src/linker/release/package.py": "557510d381b1967a57434e8746cc60286677f4e40ccb341b950c945e94bb8617"
+  },
+  "superseded_setup_failure": {
+    "log": "/home/glonex/.cache/fas-linker-qualification/full-gate-release-20261106.log",
+    "log_sha256": "947a204631ee27bd9f4306a4bc7ce5749c53ef7541adc662955858747782c72f",
+    "reason": "Incorrectly supplied the container-only musl sysroot to host tests; its compiler specs use /qualification. Corrected to the host-built /tmp/fas-musl-20261105/sysroot; this is not a linker defect."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "source_files": 1000,
+  "source_changes": [],
+  "qualification_summary_sha256": "fa47530f8aceab918b2e933e1c7d41c2c122e16cecf1d423f3cdf8b55be7cf68",
+  "clean_runner_sha256": "be021e9505d1267b5df60aadf245eef4e20d96321ad1fcf64219fd30af7328bb",
+  "control_script": "/home/glonex/.cache/fas-linker-qualification/ubuntu24-release-20261106/release-controls.py",
+  "control_script_sha256": "242096a980e1fdd4816efccda726659c4c14fcbc18d754065c1c87fc54774bac",
+  "control_log": "/home/glonex/.cache/fas-linker-qualification/release-controls-20261106.log",
+  "control_log_sha256": "372c095b177c93ac04030426cba95948527c24227f20af61fb5f8c7197568baa",
+  "actionlint": {
+    "status": "passed",
+    "log": "/home/glonex/.cache/fas-linker-qualification/actionlint-release-20261106.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "focused_logs": {
+    "/home/glonex/.cache/fas-linker-qualification/io-fault-focused-final-20261106.log": "e5871c932e104c24077fb7b51d44fe7f0012ce80b59c2be32ea89bc8d2fbb60a",
+    "/home/glonex/.cache/fas-linker-qualification/release-focused-final-20261106.log": "620767b61799f8336b3e8ada75989b61ba084bd21d18458213de42debc9a67f0"
+  },
+  "archives": {
+    "SHA256SUMS": {
+      "sha256": "6d53c2bc20330e1b111ae9f4f2e8fff8ebec04f4d62ba37cd2b12bb31b178451",
+      "bytes": 209
+    },
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": {
+      "sha256": "c18370f285da1047629cb1bae61d45637663d8d0a1d6ac94ae70b5b54f02065d",
+      "bytes": 2481749
+    },
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": {
+      "sha256": "1c6b11f4845ccfce568609d5e801bd27f6282f9bb9fdd29dff8e630611a331cd",
+      "bytes": 1846654
+    }
+  },
+  "scope": "Local correctness, archive reproducibility and source rebuild; no new hosted, sustained-fuzz, performance or production claim"
+}

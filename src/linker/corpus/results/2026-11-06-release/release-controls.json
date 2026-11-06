@@ -1,0 +1,73 @@
+{
+  "status": "passed",
+  "scope": "real candidate artifact and selection controls; no timing claim",
+  "controls": [
+    {
+      "name": "status",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "linker_sha256",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source_manifest_sha256",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source_files_unchanged",
+      "exit": 1,
+      "stderr": "fas-ld package: qualification does not match this binary and source snapshot\n",
+      "no_output": true
+    },
+    {
+      "name": "source-content",
+      "exit": 1,
+      "stderr": "fas-ld package: source changed: LICENSE\n",
+      "no_output": true
+    },
+    {
+      "name": "version-relabel",
+      "exit": 1,
+      "stderr": "fas-ld package: requested version differs from executable version\n",
+      "no_output": true
+    },
+    {
+      "name": "selection-complete",
+      "exit": 0,
+      "status": "passed",
+      "failures": []
+    },
+    {
+      "name": "selection-wrong-count",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "expected 258 Python cases, observed 259"
+      ]
+    },
+    {
+      "name": "selection-reported-skip",
+      "exit": 1,
+      "status": "failed",
+      "failures": [
+        "regression skips present"
+      ]
+    }
+  ],
+  "archives_byte_identical": true,
+  "archive_sha256": {
+    "SHA256SUMS": "6d53c2bc20330e1b111ae9f4f2e8fff8ebec04f4d62ba37cd2b12bb31b178451",
+    "fas-ld-0.7-dev-linux-x86_64-source.tar.gz": "c18370f285da1047629cb1bae61d45637663d8d0a1d6ac94ae70b5b54f02065d",
+    "fas-ld-0.7-dev-linux-x86_64.tar.gz": "1c6b11f4845ccfce568609d5e801bd27f6282f9bb9fdd29dff8e630611a331cd"
+  },
+  "qualification_sha256": "fa47530f8aceab918b2e933e1c7d41c2c122e16cecf1d423f3cdf8b55be7cf68",
+  "source_manifest_sha256": "a3c0d3e9b9520df4a5ca94834d13749cf2cc441307093c7384e2685b40534c7a",
+  "linker_sha256": "841be67d2056ed00eb287abdcf73a6277c20bc61789e89788222b85fb86635d6"
+}

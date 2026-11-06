@@ -12,6 +12,24 @@ No implementation changes were made during the original audit. The observations
 below preserve that original evidence; the subsequent repair status is recorded
 separately here. The roadmap distinguishes current status from historical plans.
 
+## Operational failures and local archives — 2026-11-06
+
+The [release archive checkpoint](corpus/results/2026-11-06-release/README.md)
+passes the full workstation root suite (3,792 compiler checks and 259 linker
+cases without skips), the fresh Ubuntu shared recipe and all four original
+native Sieve sources dynamically/statically. Input-read EIO now names its file.
+Short/interrupted reads, early EOF, persistent temporary-creation errors and a
+real file-size limit preserve prior outputs. Repeated failures under a low
+descriptor limit recover without leaking descriptors.
+
+The shared recipe now captures source hashes/modes before building and produces
+verified local binary/source archives only after matching qualification. It
+rebuilds the source archive and runs a linked fixture with both tools. Independent
+packaging produces identical bytes; actual-candidate rejection controls pass.
+Notices, executable help, ELF dependencies and provenance accompany the binary.
+Version remains `0.7-dev`. Hosted CI, longer fuzzing, the final contract freeze
+and publication remain open; local archive tooling is now implemented.
+
 ## Fresh userspace qualification — 2026-11-06
 
 The [clean Ubuntu checkpoint](corpus/results/2026-11-06-clean/README.md) passes
@@ -265,8 +283,8 @@ assuming that arbitrary layout scripts are necessary for this use case.
 | Scale and memory | Checked arithmetic, relocation overflows, roughly 1 GiB sparse NOBITS, 64 MiB file-backed data, 200k symbols/relocations, 65,260 retained payload sections and 1,024 independent files with boundary rejections | Current caps include 1024 input files, 128 MiB per file, 256 MiB aggregate input/decoded debug, 512 MiB output and 1 GiB image. Real large programs, peak memory, further address-space boundaries and resource failures remain unqualified; limits are unchanged. |
 | Speed | Warm-cache real-program/object/archive baselines, 21 samples per workload; invocation-local read reuse gives measured Chibicc gains; untimed SHA-1 and IFUNC reference planning reduces allocation with identical outputs | One worker per Fas link; Fas still trails LLD on the real workloads. Packed storage, archive/index costs, parallel work and cold-cache behavior remain deferred performance work; larger-program correctness remains qualification work. No 2x-LLD result is established. Measurement requires a quiet-PC interval. |
 | Correctness automation | Independent inspectors/loaders, GNU/LLD comparisons, malformed fixtures, short AFL campaigns, reentry and publication failure tests; correctness/weekly fuzz CI defined and validated | Execute and qualify hosted CI and longer fuzzing; broaden generated semantic differential tests, dependency graphs and deterministic queue replay. Fuzz campaigns primarily detect parser exceptions/hangs, not wrong emitted program behavior. |
-| Operational reliability | Atomic individual-file publication, alias protection, bounded regular reads, creation permissions and concurrent regression coverage; test-only Linux interposition verifies ENOSPC, partial-write/EIO, close/chmod/rename failures, short writes/EINTR and a killed writer | Wider filesystem/resource qualification remains. Binary/map publication is not one transaction. A killed writer may leave a private incomplete temporary; later links ignore it. Crash durability via fsync is not currently promised; decide whether v1 needs that guarantee. |
-| Distribution and API | Source-build executable, staged Makefile install as `fas-ld`, wrapped invocation-owned library, repeated/concurrent-call checks; CI installation gate defined | Hosted CI qualification, versioned CLI/library contract and durable release artifacts remain open. The Makefile installs only the executable; no installed OCaml API is promised. Most internal modules are exposed by inferred interfaces; define the supported public surface before promising API stability. |
+| Operational reliability | Atomic individual-file publication, alias protection, bounded regular reads, creation permissions and concurrent regression coverage; test-only Linux interposition verifies ENOSPC, partial-write/EIO, close/chmod/rename failures, short writes/EINTR and a killed writer; input read recovery, descriptor cleanup, temporary-creation failures/collisions and real file-size limits | Wider filesystem/resource qualification remains. Binary/map publication is not one transaction. A killed writer may leave a private incomplete temporary; later links ignore it. Crash durability via fsync is not currently promised; decide whether v1 needs that guarantee. |
+| Distribution and API | Source-build executable, staged Makefile install as `fas-ld`, wrapped invocation-owned library, repeated/concurrent-call checks; qualified local binary/source archives, checksums, dependency/license provenance and source-archive rebuild | Hosted CI qualification, versioned CLI/library contract, signing/publication and durable release hosting remain open. The Makefile installs only the executable; no installed OCaml API is promised. Most internal modules are exposed by inferred interfaces; define the supported public surface before promising API stability. |
 | Future targets and port | Dedicated x86 relocation module, checked ELF structures and separate file IO | ELF/x86 constants and layout policy remain spread across modules; there is no implemented multi-format target dispatch. Establish interfaces when adding another CPU/PE-COFF, with explicit unsupported-target errors throughout. The freestanding Fas port remains a separate track; current OCaml/Unix bootstrap dependencies are intentional. |
 
 Existing corpora have useful but bounded acceptance: Chibicc's stage 1/stage 2

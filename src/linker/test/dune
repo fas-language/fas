@@ -57,6 +57,11 @@
  (modules publication_reentry)
  (libraries fas_linker))
 
+(executable
+ (name io_fault_reentry)
+ (modules io_fault_reentry)
+ (libraries fas_linker))
+
 (rule
  (alias runtest)
  (deps
@@ -67,7 +72,7 @@
   fixtures/support.s)
  (action
   (run python3 %{dep:publication_fault_integration.py} %{exe:../bin/main.exe}
-   %{exe:reentry.exe})))
+   %{exe:reentry.exe} %{exe:io_fault_reentry.exe})))
 
 (rule
  (alias runtest)
@@ -613,3 +618,10 @@
    %{dep:shared_output_integration.py}
    %{exe:../bin/main.exe}
    %{exe:reentry.exe})))
+
+(rule
+ (alias runtest)
+ (deps release_integration.py ../release/package.py ../release/BINARY.md)
+ (action
+  (run python3 %{dep:release_integration.py} %{dep:../release/package.py}
+   %{exe:../bin/main.exe})))

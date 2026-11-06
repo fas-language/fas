@@ -1,0 +1,369 @@
+{
+  "dynamic": {
+    "started": "2026-11-06T13:14:05+0100",
+    "harness_sha256": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada",
+    "harness_snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/tools/corpus-run.py",
+    "linker_sha256": "f2ab202781e3dda02a051cbbcf57c33a96ec2c6dc0163164570d265f8ecd1061",
+    "linker_source": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "linker_snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/tools/fas-ld",
+    "tests": [
+      {
+        "name": "sieve/primes.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "295676cab4545b48801e6190bff8626845da470edebd2e551cffbfac3ee8302c",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes-native-fas",
+              "sha256": "169236daee6bf890873eae44946c4ee917070991334acb694bf2513cc16aaadb",
+              "stdout": "fas_extreme-hybrid;34501;5.000069198;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes-native-gnu",
+              "sha256": "30eb38c6c154adad68b1a4dacafd04175b7187971f43098af25072e864a291bb",
+              "stdout": "fas_extreme-hybrid;35631;5.000032924;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes-native-driver",
+              "sha256": "884bb1d15f08a68ad1ec41bcfd0814827cccfb4f972d7cb733dfc473c31613fd",
+              "stdout": "fas_extreme-hybrid;36108;5.000031139;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_const.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "2e35c715750260df065b6ea975167ed62490e05fe315bb939b027deb4a77f9b4",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_const-native-fas",
+              "sha256": "f586bf96951f9d615fb674644259273ad82e03bc85fa5cb6f63b57a7e908e927",
+              "stdout": "fas_extreme-hybrid;33426;5.000042192;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_const-native-gnu",
+              "sha256": "efee70b03ec654fac740c1b2445917c41fdfa0ee7632a4e3cf65cd9b6a755e8e",
+              "stdout": "fas_extreme-hybrid;34266;5.000000668;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_const-native-driver",
+              "sha256": "3c528330e243adf865029cec2e75d9ae8e913b7bd4862912fd1b0f14f28729e2",
+              "stdout": "fas_extreme-hybrid;26961;5.000009047;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_long_chunks.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "ebfd3b3d9168a1183762eada3f132203426a6dbc1e6006bee0f406e356b1058f",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_long_chunks-native-fas",
+              "sha256": "ff68da9147b969e0bb38b477f528dccb6b19ac966e488f92b0a7bc10b13ce57f",
+              "stdout": "fas_extreme-hybrid;34266;5.000039215;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_long_chunks-native-gnu",
+              "sha256": "a682fb48f5c7e7cd2d71b8cca150b2757282a02186b7a7e052911c3b90ea7424",
+              "stdout": "fas_extreme-hybrid;35208;5.000084283;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_long_chunks-native-driver",
+              "sha256": "2ddd1f0f4c5c63e763a5532adf76807088b8dedacced04e56f79b70c32c967a5",
+              "stdout": "fas_extreme-hybrid;32082;5.000163683;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_zero3.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "7dda99340503a5ff7ec07b6561dd39f73cc48716d0500e0e933efb89569c900d",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_zero3-native-fas",
+              "sha256": "5e07d43cd57069f2c7744425ab839f58c32f4d56deedf244e9a26154c9ad02f4",
+              "stdout": "fas_extreme-hybrid;34759;5.000155780;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_zero3-native-gnu",
+              "sha256": "0c6be9709364bc6fa475e52484eeebb3302a31066eebe785505bc145c923e185",
+              "stdout": "fas_extreme-hybrid;33829;5.000087856;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/sieve/primes_zero3-native-driver",
+              "sha256": "772467373d057b1768349a2403cc9f3fa025a9680857b1083a8e538c1dd2251c",
+              "stdout": "fas_extreme-hybrid;35850;5.000061997;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve",
+        "status": "passed",
+        "detail": {
+          "sources": 4,
+          "backends": [
+            "native"
+          ],
+          "native_driver": true,
+          "oracle": "GNU ld",
+          "timing_comparison": false
+        }
+      }
+    ],
+    "sources": {
+      "sieve": {
+        "path": "/home/glonex/sieve/fas_solution",
+        "sha256": {
+          "README.md": "34a1fed5b1380a849687650c09c1fb5ab122d3e3d10bc05ab60782876f914a3e",
+          "primes": "7f5ede294bfdad8577933e1b3ad12cce0946f6217ae227a00d3323af16856a50",
+          "primes.fas": "173d016ca37142c91bacfa8bb93795dc3f21b46f8d1975dfc7dacfa86de28b7b",
+          "primes_const": "c423a6b0285942d34a75d3d6329a31595b93d11a9da6eb6ec341f6c242b7411e",
+          "primes_const.fas": "328449cb30c3871a3a7fa2f74cb0cddb8bea1ee696c6d21e82c943a4de8f3dda",
+          "primes_long_chunks": "dfa6a2ea5290c1f9895bbcceaa5c3dddd42d5ae2cd1395c123245350f267e089",
+          "primes_long_chunks.fas": "1b26e8666b9a7c0a03a5e462538f20e5f95ddb77bf0e1c695b8a9052e581fc77",
+          "primes_zero3.fas": "c9c7ef240393711a4c727f6153852d3eeae4e1cf9e871fbfe449946a116a5fcd"
+        }
+      }
+    },
+    "limitations": [],
+    "timing_comparison": false,
+    "compiler": {
+      "source": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/bin/main.exe",
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-dynamic-20261106/tools/fas-compiler",
+      "sha256": "91306b9eaea92d789b9d0ae4086ad3292e92889eb4b4fea2404b73ca0063cf12"
+    },
+    "linkage": "dynamic",
+    "dependency_policy": {
+      "strict": false,
+      "search_paths": []
+    },
+    "toolchain_inputs": {
+      "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+      "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+      "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+      "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e"
+    }
+  },
+  "static": {
+    "started": "2026-11-06T13:14:05+0100",
+    "harness_sha256": "1a59b70984d5bfac47a244f76f4a9a4291d0e6829d4908c3fda5e4e1fc06dada",
+    "harness_snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/tools/corpus-run.py",
+    "linker_sha256": "f2ab202781e3dda02a051cbbcf57c33a96ec2c6dc0163164570d265f8ecd1061",
+    "linker_source": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/src/linker/bin/main.exe",
+    "linker_snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/tools/fas-ld",
+    "tests": [
+      {
+        "name": "sieve/primes.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "295676cab4545b48801e6190bff8626845da470edebd2e551cffbfac3ee8302c",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes-native-fas",
+              "sha256": "4bbcf5ef06e7b8684342425754c8480cd51717934e7375ec251e70f0bdfac1d0",
+              "stdout": "fas_extreme-hybrid;34916;5.000105265;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes-native-gnu",
+              "sha256": "a74cba1f68cd2a099a92f681343c17eadb1116705f2deead89da669e6c5fe945",
+              "stdout": "fas_extreme-hybrid;35060;5.000055456;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes-native-driver",
+              "sha256": "c4721355f5c7a3eb57db3de8af66da6356073280a8dfb6cc66a60f288bd2e35a",
+              "stdout": "fas_extreme-hybrid;35733;5.000034284;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_const.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "2e35c715750260df065b6ea975167ed62490e05fe315bb939b027deb4a77f9b4",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_const-native-fas",
+              "sha256": "1b6281ced93c27625da53c0354ff4cf68b8d71dd920cbe47addb2a57650b8268",
+              "stdout": "fas_extreme-hybrid;35823;5.000104980;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_const-native-gnu",
+              "sha256": "9b8d2f57a19a471d06b7b08dafe1951214e504bfdd9f8fe4289a147c7849a8e4",
+              "stdout": "fas_extreme-hybrid;36194;5.000040784;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_const-native-driver",
+              "sha256": "3337810e696687d44e404c2de94ca59050c71b752757ab141c6f3724c1633950",
+              "stdout": "fas_extreme-hybrid;29133;5.000057127;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_long_chunks.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "ebfd3b3d9168a1183762eada3f132203426a6dbc1e6006bee0f406e356b1058f",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_long_chunks-native-fas",
+              "sha256": "ecda90907d8f08efddbcff622dcb7a42d52c3871f0ba8dbb099b3f1ddd4c45f3",
+              "stdout": "fas_extreme-hybrid;35441;5.000023625;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_long_chunks-native-gnu",
+              "sha256": "637a37256edf27d8d1f1bd155ce6bbee365be134342647667043cc9f5b258328",
+              "stdout": "fas_extreme-hybrid;33406;5.000046903;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_long_chunks-native-driver",
+              "sha256": "fb690dc21939bf92bcb12ac9046d61e0a3af58513e2722fcb2eba2d8ce8fcc25",
+              "stdout": "fas_extreme-hybrid;33048;5.000103019;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve/primes_zero3.fas/native",
+        "status": "passed",
+        "detail": {
+          "backend": "native",
+          "object_sha256": "7dda99340503a5ff7ec07b6561dd39f73cc48716d0500e0e933efb89569c900d",
+          "executions": [
+            {
+              "producer": "fas",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_zero3-native-fas",
+              "sha256": "086f172ca5a460c12a84ea377a2c82ccb8a444da3b341f27dd1422978f46bae2",
+              "stdout": "fas_extreme-hybrid;33396;5.000050011;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "gnu",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_zero3-native-gnu",
+              "sha256": "821fcc8fbd4f2a8a02262fc18fcb370d8cb302748a7fe97edd9972e579fbbc5b",
+              "stdout": "fas_extreme-hybrid;36163;5.000009929;1;algorithm=base,faithful=yes,bits=1\n"
+            },
+            {
+              "producer": "native-driver",
+              "path": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/sieve/primes_zero3-native-driver",
+              "sha256": "c1e46d648f748ff8c10ad8d368dad0e068afe03c7a9a9a14c13fab89d209ceab",
+              "stdout": "fas_extreme-hybrid;36526;5.000016081;1;algorithm=base,faithful=yes,bits=1\n"
+            }
+          ],
+          "validation": "unmodified built-in EXPECTED prime-count check",
+          "timing_comparison": false
+        }
+      },
+      {
+        "name": "sieve",
+        "status": "passed",
+        "detail": {
+          "sources": 4,
+          "backends": [
+            "native"
+          ],
+          "native_driver": true,
+          "oracle": "GNU ld",
+          "timing_comparison": false
+        }
+      }
+    ],
+    "sources": {
+      "sieve": {
+        "path": "/home/glonex/sieve/fas_solution",
+        "sha256": {
+          "README.md": "34a1fed5b1380a849687650c09c1fb5ab122d3e3d10bc05ab60782876f914a3e",
+          "primes": "7f5ede294bfdad8577933e1b3ad12cce0946f6217ae227a00d3323af16856a50",
+          "primes.fas": "173d016ca37142c91bacfa8bb93795dc3f21b46f8d1975dfc7dacfa86de28b7b",
+          "primes_const": "c423a6b0285942d34a75d3d6329a31595b93d11a9da6eb6ec341f6c242b7411e",
+          "primes_const.fas": "328449cb30c3871a3a7fa2f74cb0cddb8bea1ee696c6d21e82c943a4de8f3dda",
+          "primes_long_chunks": "dfa6a2ea5290c1f9895bbcceaa5c3dddd42d5ae2cd1395c123245350f267e089",
+          "primes_long_chunks.fas": "1b26e8666b9a7c0a03a5e462538f20e5f95ddb77bf0e1c695b8a9052e581fc77",
+          "primes_zero3.fas": "c9c7ef240393711a4c727f6153852d3eeae4e1cf9e871fbfe449946a116a5fcd"
+        }
+      }
+    },
+    "limitations": [],
+    "timing_comparison": false,
+    "compiler": {
+      "source": "/home/glonex/fas-experimental-backend/fas-linker-qualification/_build/default/bin/main.exe",
+      "snapshot": "/home/glonex/.cache/fas-linker-qualification/sieve-release-static-20261106/tools/fas-compiler",
+      "sha256": "91306b9eaea92d789b9d0ae4086ad3292e92889eb4b4fea2404b73ca0063cf12"
+    },
+    "linkage": "static",
+    "dependency_policy": {
+      "strict": false,
+      "search_paths": []
+    },
+    "toolchain_inputs": {
+      "/usr/lib/x86_64-linux-gnu/crt1.o": "7b5004088b875754a5cd83f92fa7149c95f807c6d4663330828970c4c84e660e",
+      "/usr/lib/x86_64-linux-gnu/Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+      "/usr/lib/x86_64-linux-gnu/crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtbegin.o": "f179b9f114a7421f32f0de4a3e1a25790469047b34a621c5b9af652f14b04014",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+      "/usr/lib/x86_64-linux-gnu/crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a": "d9c2e7a0c0f3dbfc0ff2dec153b0d044cf49d66d64d736b5d1db8ae25ca9c75e",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o": "089358d91a597f00c262502678b0c15fcd0784880f9c90f1c5a06086ea9ce1ac",
+      "/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_eh.a": "050160c9613ecf99b449bb34743fb8b2f4aafb3ae03a38a63e69a6926f956140",
+      "/usr/lib/x86_64-linux-gnu/libc.a": "2a277b999268f100c5f838689704b7432e9b1fdac76bf0cbda83cdbbaecc89e2",
+      "/usr/lib/x86_64-linux-gnu/libm.a": "a3e037975e7fb816d8a1d69f4a8aec71071700539aa2eb8743b805a905179e7a",
+      "/usr/lib/x86_64-linux-gnu/libmvec.a": "85ac05390efeaf0bdf59b1ce61e70d09c8e8c716e30b722127a7a7c8d145c757"
+    }
+  }
+}

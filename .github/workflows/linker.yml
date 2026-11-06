@@ -47,6 +47,9 @@ jobs:
             ${{ runner.temp }}/linker-regressions.log
             ${{ runner.temp }}/qualification-summary.json
             ${{ runner.temp }}/packages.tsv
+            ${{ runner.temp }}/release-source-manifest.json
+            ${{ runner.temp }}/linker-release
+            ${{ runner.temp }}/release-smoke.json
             ${{ runner.temp }}/linker-install
             ${{ runner.temp }}/install-program
             ${{ runner.temp }}/linker-scale

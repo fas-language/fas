@@ -11,10 +11,13 @@ native compiler integration tests; this workflow does not replace the separate
 full compiler regression suite.
 
 The hosted correctness job and [clean local container runner](ci/README.md)
-share one recipe. Its final selection guard requires 250 Python regression
-cases without reported skips and passing scale/corpus reports. The musl zlib
+share one recipe, including verified local binary/source release archives. Its
+final selection guard requires 259 Python regression cases without reported skips and passing scale/corpus reports. The musl zlib
 matrix adds GCC/Clang native objects linked by Fas/GNU as PIE, static ET_EXEC
 and static PIE, including upstream tests and all gzip producer/consumer pairs.
+The [archive checkpoint](corpus/results/2026-11-06-release/README.md) also qualifies
+source-archive rebuilding, delivered/rebuilt executable smoke tests and actual
+candidate reproducibility/rejection controls.
 
 SQLite correctness runs build the unmodified 3.54.1 canonical source with
 `configure --all`, then independently link the same objects with GNU ld. Normal
