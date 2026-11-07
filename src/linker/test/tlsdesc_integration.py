@@ -143,6 +143,43 @@ int main(int argc,char **argv){
                 out = self.hosted('desc-late-main', main, linker=consumer)
                 run(out, library, expected=42)
 
+    def test_nonallocated_tls_got_relocations_are_checked_before_gc_emission(self):
+        # A non-loaded relocation must not create a runtime GOT entry for a
+        # hidden TLS definition whose section was removed by section GC.
+        for relocation in ('TLSGD', 'TLSLD', 'GOTTPOFF', 'GOTPC32_TLSDESC', 'TLSDESC_CALL'):
+            obj = self.assemble('nonalloc-'+relocation, f'''
+.section .tdata,"awT",@progbits
+.globl datum
+.hidden datum
+.type datum,@tls_object
+datum: .long 42
+.size datum,4
+.section .debug_test,"",@progbits
+.long 0
+.reloc 0,R_X86_64_{relocation},datum
+''')
+            for gc in (False, True):
+                with self.subTest(relocation=relocation, gc=gc):
+                    self.rejected(obj, 'TLS GOT/call relocation in non-allocatable section .debug_test',
+                                  options=('-shared', *(['--gc-sections'] if gc else [])))
+        for relocation in ('DTPOFF32', 'DTPOFF64'):
+            obj = self.assemble('debug-'+relocation, f'''
+.section .tdata,"awT",@progbits
+.hidden datum
+.type datum,@tls_object
+datum: .long 42
+.section .debug_test,"",@progbits
+.quad 0
+.reloc 0,R_X86_64_{relocation},datum
+''')
+            for gc in (False, True):
+                with self.subTest(relocation=relocation, gc=gc):
+                    out = self.link('debug-offset.so', obj,
+                                    options=('-shared', *(['--gc-sections'] if gc else [])))
+                    data = out.read_bytes()
+                    debug = next(s for s in core.elf_sections(data) if s['name']=='.debug_test')
+                    self.assertEqual(data[debug['offset']:debug['offset']+debug['size']], bytes(8))
+
     def test_weak_undefined_and_bad_descriptor_references(self):
         obj = self.descriptor_object('desc-weak', r'''
 extern __thread int absent __attribute__((weak));

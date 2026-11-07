@@ -1,0 +1,33 @@
+{
+  "status": "repaired-focused",
+  "observed_at": "2026-11-07T12:19:27.101255+00:00",
+  "original_commit": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+  "original_input_sha256": "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885",
+  "original_target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396",
+  "before": {
+    "exit": 2,
+    "seconds": 0.0031618349894415587,
+    "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\nRaised at Stdlib.invalid_arg in file \"stdlib.ml\", line 30, characters 20-45\nCalled from Stdlib__Option.get in file \"option.ml\" (inlined), line 21, characters 41-69\nCalled from Fas_linker__Dynamic.emit.(fun) in file \"src/linker/dynamic.ml\", line 805, characters 38-83\nCalled from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51\nCalled from Fas_linker__Dynamic.emit in file \"src/linker/dynamic.ml\", lines 802-815, characters 2-15\nCalled from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35\nCalled from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 463-466, characters 2-11\nCalled from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10\nCalled from Dune__exe__Target.(fun) in file \"src/linker/fuzz/target.ml\", line 172, characters 18-84\nCalled from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15\nCalled from Dune__exe__Target in file \"src/linker/fuzz/target.ml\", lines 169-224, characters 12-85\n"
+  },
+  "fixed_target_sha256": "340affe8c7f2a1bd0b5cb0131d7a48ac10e1316c1001588ea2e1bb9bf20cc1aa",
+  "fixed_replays": 1000,
+  "fixed_max_seconds": 0.00840187500580214,
+  "fixed_cli": [
+    {
+      "gc": false,
+      "exit": 1,
+      "seconds": 0.005890594009542838,
+      "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261106/long-fuzz-shared-link-watchlist-awake/shared-link/default/crashes/id:000000,sig:06,src:001193,time:3512011,execs:2813569,op:havoc,rep:2: TLS GOT/call relocation in non-allocatable section .debug_line_str is unsupported\n"
+    },
+    {
+      "gc": true,
+      "exit": 1,
+      "seconds": 0.00334534197463654,
+      "stderr": "fas-ld: /home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261106/long-fuzz-shared-link-watchlist-awake/shared-link/default/crashes/id:000000,sig:06,src:001193,time:3512011,execs:2813569,op:havoc,rep:2: TLS GOT/call relocation in non-allocatable section .debug_line_str is unsupported\n"
+    }
+  ],
+  "root_cause": "non-allocated TLS instruction/GOT relocation creates runtime descriptor while its locally bound TLS definition is discarded by section GC",
+  "repair": "reject non-allocated TLS GOT/call relocations through checked Error.Error; preserve DTPOFF debug offsets",
+  "gnu_control": "minimal input is rejected without GC as relocation in invalid section; GC discards its TLS and succeeds",
+  "scope": "focused regression and exact-input replay only; complete repaired-source release qualification still required"
+}

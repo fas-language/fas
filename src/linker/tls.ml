@@ -94,6 +94,18 @@ let validate ~(options : Options.t) ~kept resolved =
           if r.kind <> 0 && kept.(file).(r.target) then begin
             let tls = symbol resolved file r.symbol in
             if relocation r.kind then begin
+              (* Instruction/GOT TLS references require a loaded section. Debug
+                 relocations do not keep their definitions alive under GC, so
+                 making a runtime descriptor for one can reference a discarded
+                 TLS template. DTPOFF debug offsets remain valid. *)
+              if
+                List.mem r.kind [ 19; 20; 22; 34; 35 ]
+                && o.sections.(r.target).flags land 2 = 0
+              then
+                Error.fail
+                  "%s: TLS GOT/call relocation in non-allocatable section %s is \
+                   unsupported"
+                  o.path o.sections.(r.target).name;
               if r.kind = 20 && not template then
                 Error.fail "%s: TLSLD requires a local TLS template" o.path;
               if

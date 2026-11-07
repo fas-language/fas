@@ -54,6 +54,20 @@ __attribute__((constructor(101))) static void init(void){datum=35;}
         shutil.copyfile(static_tls, output / 'seeds' / 'link' / static_tls.name)
         descriptor = temp / 'tlsdesc.o'
         run('gcc', '-c', '-g', '-O1', '-fPIC', '-mtls-dialect=gnu2', source, '-o', descriptor)
+        nonalloc_source = temp / 'nonalloc-tlsdesc.s'
+        nonalloc_source.write_text('''.section .tdata,"awT",@progbits
+.globl datum
+.hidden datum
+.type datum,@tls_object
+datum: .long 42
+.size datum,4
+.section .debug_test,"",@progbits
+.long 0
+.reloc 0,R_X86_64_GOTPC32_TLSDESC,datum-4
+.section .note.GNU-stack,"",@progbits
+''')
+        nonalloc_descriptor = temp / 'nonalloc-tlsdesc.o'
+        run('as', '--64', nonalloc_source, '-o', nonalloc_descriptor)
         ifunc_source = temp / 'ifunc.c'
         ifunc_source.write_text('''static int implementation(void){return 42;}
 static int (*volatile selected)(void)=implementation;
@@ -127,7 +141,7 @@ _.stapsdt.base: .byte 0
         sdt=temp/'sdt.o'
         run('as','--64',sdt_source,'-o',sdt)
         shutil.copyfile(sdt, output / 'seeds' / 'link' / sdt.name)
-        for seed in (obj, metadata, compressed, static_tls, descriptor, ifunc, aliases, unwind, sdt):
+        for seed in (obj, metadata, compressed, static_tls, descriptor, nonalloc_descriptor, ifunc, aliases, unwind, sdt):
             shutil.copyfile(seed, output / 'seeds' / 'elf' / seed.name)
             shutil.copyfile(seed, output / 'seeds' / 'shared-link' / seed.name)
             shutil.copyfile(seed, output / 'seeds' / 'symver-link' / seed.name)

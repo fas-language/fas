@@ -1,0 +1,26 @@
+{
+  "status": "failed",
+  "failures": [
+    "shared-link: saved findings require replay and triage"
+  ],
+  "seconds_per_target": 3600,
+  "modes": [
+    "shared-link"
+  ],
+  "git_head": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+  "target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396",
+  "targets": {
+    "shared-link": {
+      "run_time": 3600,
+      "execs_done": 2865600,
+      "saved_crashes": 1,
+      "saved_hangs": 0,
+      "edges_found": 3419,
+      "total_edges": 65536,
+      "elapsed_seconds": 3601.182793357002
+    }
+  },
+  "executions": 2865600,
+  "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+  "report_sha256": "b4266315d089bd6bdfdaf83b155284d514ce2a71eedb5060d46b7ca85f78e295"
+}

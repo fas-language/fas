@@ -1,5 +1,21 @@
 # Linker implementation work log
 
+### Current checkpoint: final TLS metadata crash repaired — 2026-11-07
+
+The frozen candidate's final shared-output hour saved a reproducible crash near
+its end. Non-allocated TLS instruction/GOT relocations could create a runtime
+descriptor after section GC discarded its locally bound TLS definition; dynamic
+emission raised `Invalid_argument("option is None")`. The original campaign stays
+failed and the candidate was not published.
+
+TLS validation now diagnoses that unsupported section/relocation combination
+before GOT preparation. DTPOFF debug offsets stay supported. A new regression
+covers five models with/without GC, checked errors and output preservation; all
+five TLS descriptor tests pass. The exact input passes 1,000 repaired-target
+replays and checked CLI rejection. The complete regression selection is now
+273 Python cases in 45 groups. Full repaired-source qualification is required
+before release. Evidence: fuzz/results/2026-11-07-tls-nonalloc/README.md.
+
 ### Current checkpoint: frozen 1.0.0 candidate
 
 Complete implementation qualification passes on 4b3f876: hosted correctness,

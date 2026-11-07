@@ -1,5 +1,10 @@
 # Linux x86-64 Fas/C release audit — 2026-11-05
 
+The [2026-11-07 final-source finding](fuzz/results/2026-11-07-tls-nonalloc/README.md)
+repairs an uncaught TLS descriptor exception exposed by sustained fuzzing.
+Its original campaign remains failed. The candidate is not published; complete
+qualification must pass again on the repaired source.
+
 Current release status: the [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
 passes all declared hosted selections. The frozen 1.0.0 candidate now awaits
 final-source acceptance, longer timeout follow-ups and publication. The dated
