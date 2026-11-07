@@ -45,6 +45,11 @@ Fir --Fir_scalarize--> Fir (no vectors)
 - `sh test/fas_fir.sh` (`FAS_FIR_TOOL` names the tool): the Fir
   conformance programs.
 - `fir_fuzz.exe`: random modules compared with clang -O2.
+- `sh test/native_determinism.sh`: compiles every Fas test program and
+  Fir program twice (the second time from another directory, into another
+  file name, with OCaml's hash tables randomized) and requires
+  byte-identical objects and executables. CI runs it, the checker and the
+  Fir programs (`.github/workflows/native-backend.yml`).
 - `test/mir_check_test.ml` (in `dune runtest`): allocates every function of
   the Fir test corpus, checks it, then mutates each allocation (drop a
   reload, move an operand to another register) and requires the checker to
