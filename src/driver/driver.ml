@@ -2917,8 +2917,24 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                       ~inputs:[ config.Cli.input ];
                     let link =
                       match
+                        (* Native executables are static PIEs by default, like
+                           the LLVM path's links: `_start` applies the
+                           RELATIVE relocations itself. Any output-mode flag
+                           from the user (-no-pie, -static, -shared, -r, ...)
+                           replaces the default. (claude, additive; see relay) *)
+                        let arguments =
+                          Cli.native_linker_arguments config.Cli.link_inputs
+                        in
+                        let mode_flag = function
+                          | "-pie" | "-no-pie" | "-static" | "-static-pie" | "-shared"
+                          | "-r" | "--relocatable" | "--no-dynamic-linker"
+                          | "-dynamic-linker" | "--dynamic-linker" ->
+                              true
+                          | a -> String.starts_with ~prefix:"--dynamic-linker=" a
+                        in
                         Fas_linker.Command_line.parse ~link_only:true
-                          (Cli.native_linker_arguments config.Cli.link_inputs)
+                          (if List.exists mode_flag arguments then arguments
+                           else "-pie" :: "--no-dynamic-linker" :: arguments)
                       with
                       | Link options -> options
                       | Help | Version -> assert false

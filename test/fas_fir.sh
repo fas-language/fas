@@ -6,6 +6,8 @@
 # test/fas_fir/c/NAME.fir is compiled with -c and linked with NAME.c by a C
 # compiler (FAS_CC, else cc), whose main exits 0 when the two agree; skipped
 # when no C compiler is found. FAS_FIR_FLAGS are passed to every tool run.
+# Each executable program is built twice: as a static PIE (the default, whose
+# _start relocates itself) and with --no-pie (a fixed-address executable).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tool=${FAS_FIR_TOOL:-$here/../_build/default/tools/fas_fir/fas_fir.exe}
@@ -14,18 +16,20 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 "$tool" $flags -c "$here/fas_fir/putnum.fir" -o "$tmp/putnum.o"
 fail=0; n=0
 for f in "$here"/fas_fir/*.fir; do
+ for pie in "" --no-pie; do
   name=$(basename "$f" .fir)
   [ "$name" = putnum ] && continue
   n=$((n + 1))
   want=$(sed -n 's/^; exit: *\([0-9]*\).*/\1/p' "$f"); want=${want:-0}
-  if ! "$tool" $flags "$f" -o "$tmp/$name" "$tmp/putnum.o" 2>"$tmp/err"; then
-    echo "FAIL $name: $(cat "$tmp/err")"; fail=1; continue
+  if ! "$tool" $flags $pie "$f" -o "$tmp/$name" "$tmp/putnum.o" 2>"$tmp/err"; then
+    echo "FAIL $name${pie:+ ($pie)}: $(cat "$tmp/err")"; fail=1; continue
   fi
   set +e; "$tmp/$name" > "$tmp/$name.stdout"; rc=$?; set -e
-  if [ "$rc" != "$want" ]; then echo "FAIL $name: exit $rc, expected $want"; fail=1
+  if [ "$rc" != "$want" ]; then echo "FAIL $name${pie:+ ($pie)}: exit $rc, expected $want"; fail=1
   elif ! cmp -s "$tmp/$name.stdout" "$here/fas_fir/$name.out"; then
-    echo "FAIL $name: stdout differs"; diff "$here/fas_fir/$name.out" "$tmp/$name.stdout" | head; fail=1
+    echo "FAIL $name${pie:+ ($pie)}: stdout differs"; diff "$here/fas_fir/$name.out" "$tmp/$name.stdout" | head; fail=1
   fi
+ done
 done
 cc=${FAS_CC:-cc}
 if command -v "$cc" >/dev/null 2>&1; then

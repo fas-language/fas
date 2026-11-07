@@ -321,6 +321,65 @@ let tls_setup a =
   ud2 a;
   place a done_
 
+(* Static PIE (part of _start, before anything reads a pointer from
+   data): no dynamic loader runs, so _start applies the image's
+   R_X86_64_RELATIVE relocations itself, *(bias + offset) = bias + addend,
+   walking DT_RELA/DT_RELASZ in _DYNAMIC. The image is linked at 0, so the
+   bias is the runtime address of __ehdr_start. Any other relocation kind,
+   or DT_REL/DT_RELR tables, stops the program with ud2. Runs before
+   tls_setup, so a .tdata image holding pointers is relocated before it is
+   copied. *)
+let relocate_self a =
+  let open A in
+  let m r d = Base (r, d) in
+  let fail = new_label a and dloop = new_label a and dend = new_label a and next = new_label a in
+  let rloop = new_label a and rdone = new_label a in
+  lea a Rax (Rip ("__ehdr_start", 0));
+  lea a Rcx (Rip ("_DYNAMIC", 0));
+  mov_imm a R8 0L;
+  mov_imm a R9 0L;
+  place a dloop;
+  load_zx a 8 Rdx (m Rcx 0) (* d_tag *);
+  test_rr a Rdx Rdx;
+  jcc a E dend;
+  let not_rela = new_label a and not_relasz = new_label a in
+  alu_ri a Cmp Rdx 7 (* DT_RELA *);
+  jcc a Ne not_rela;
+  load_zx a 8 R8 (m Rcx 8);
+  alu_rr a Add R8 Rax;
+  jmp a next;
+  place a not_rela;
+  alu_ri a Cmp Rdx 8 (* DT_RELASZ *);
+  jcc a Ne not_relasz;
+  load_zx a 8 R9 (m Rcx 8);
+  jmp a next;
+  place a not_relasz;
+  alu_ri a Cmp Rdx 17 (* DT_REL *);
+  jcc a E fail;
+  alu_ri a Cmp Rdx 36 (* DT_RELR *);
+  jcc a E fail;
+  place a next;
+  alu_ri a Add Rcx 16;
+  jmp a dloop;
+  place a dend;
+  place a rloop;
+  test_rr a R9 R9;
+  jcc a E rdone;
+  load_zx a 4 R10 (m R8 8) (* ELF64_R_TYPE(r_info) *);
+  alu_ri a Cmp R10 8 (* R_X86_64_RELATIVE *);
+  jcc a Ne fail;
+  load_zx a 8 R10 (m R8 0);
+  alu_rr a Add R10 Rax;
+  load_zx a 8 R11 (m R8 16);
+  alu_rr a Add R11 Rax;
+  store a 8 (m R10 0) R11;
+  alu_ri a Add R8 24;
+  alu_ri a Sub R9 24;
+  jmp a rloop;
+  place a fail;
+  ud2 a;
+  place a rdone
+
 (* ---------- data ---------- *)
 
 type data_out = {
@@ -363,9 +422,12 @@ let global_image (g : F.global) =
 
 (* ---------- module ---------- *)
 
-let generate ~startup (m : F.modul) =
+(* [startup]: add _start (an executable without libc). [pic]: position-
+   independent code (-c objects, hosted links, PIE executables).
+   [self_relocate]: _start applies the image's own RELATIVE relocations (a
+   static PIE has no dynamic loader to do it). *)
+let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   try
-    let pic = not startup in
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
     (* vectors to lanes first: lane-wise fma becomes scalar fma, which
@@ -418,6 +480,7 @@ let generate ~startup (m : F.modul) =
          then exit(main(argc, argv)) *)
       A.alu_rr a A.Xor A.Rbp A.Rbp;
       A.mov_rr a A.R12 A.Rsp;
+      if self_relocate then relocate_self a;
       tls_setup a;
       A.load_zx a 8 A.Rdi (A.Base (A.R12, 0));
       A.lea a A.Rsi (A.Base (A.R12, 8));
@@ -588,10 +651,13 @@ let generate ~startup (m : F.modul) =
   | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)
   | Invalid_argument msg -> Error ("native backend internal error: " ^ msg)
 
-let compile_object m = generate ~startup:false m
+let compile_object m = generate ~startup:false ~pic:true m
 
+(* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?(inputs = []) ?options ~output m =
-  match generate ~startup:true m with
+  let mode = match options with Some (o : Fas_linker.Options.t) -> o.mode | None -> Static in
+  let pic = mode <> Static in
+  match generate ~startup:true ~pic ~self_relocate:(mode = Static_pie) m with
   | Error _ as e -> e
   | Ok obj -> (
       try
@@ -602,7 +668,7 @@ let link_files ?(inputs = []) ?options ~output m =
 
 (* an executable image in memory *)
 let compile ?(inputs = []) m =
-  match generate ~startup:true m with
+  match generate ~startup:true ~pic:false m with
   | Error _ as e -> e
   | Ok obj -> (
       try

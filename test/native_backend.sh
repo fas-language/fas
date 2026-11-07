@@ -30,6 +30,21 @@ if command -v readelf >/dev/null 2>&1; then
     echo "native executable has an interpreter" >&2; exit 1
   fi
   readelf -s "$NATIVE_TMP/native" | grep -q ' main$'
+  # A static PIE by default; -Wl,-no-pie gives a fixed-address executable
+  # that behaves the same.
+  readelf -h "$NATIVE_TMP/native" | grep -q 'Type: *DYN'
+  if readelf -d "$NATIVE_TMP/native" | grep -q TEXTREL; then
+    echo "native executable has TEXTREL" >&2; exit 1
+  fi
+  "$OCAML_FAS" --backend=native -Wl,-no-pie "$ROOT/test/native_backend.fas" \
+    -o "$NATIVE_TMP/native_nopie"
+  readelf -h "$NATIVE_TMP/native_nopie" | grep -q 'Type: *EXEC'
+  set +e
+  "$NATIVE_TMP/native_nopie" >"$NATIVE_TMP/native_nopie.out"
+  nopie_status=$?
+  set -e
+  test "$nopie_status" = 3
+  cmp "$NATIVE_TMP/llvm.out" "$NATIVE_TMP/native_nopie.out"
 fi
 
 # Scalar floats: the native and LLVM builds print the same bits

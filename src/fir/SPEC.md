@@ -487,9 +487,9 @@ In Fir this means:
 | Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with fields other than integers up to 64 bits, `ptr`, `f32` and `f64` (other than the `__int128` form, §5), or aligned above 16 | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers of any width, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5) | Pass such structs by pointer. |
 | Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers): a block address is the block's real code address | — | — |
-| Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8`; `section "s"` (globals in one section are laid out in order; the linker's `__start_s`/`__stop_s` bound it); `thread_local`, defined or `extern` (initial-exec TLS in `-c` objects and hosted links, local-exec in native executables, whose `_start` sets up the TLS block when there is a PT_TLS segment) | `reloc ... w4`; `thread_local` together with `section`; the address of a `thread_local` in an initializer; `thread_local` in a shared library loaded with `dlopen` (needs general-dynamic TLS, v0.7) | Use w8. |
+| Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8`; `section "s"` (globals in one section are laid out in order; the linker's `__start_s`/`__stop_s` bound it); `thread_local`, defined or `extern` (initial-exec TLS in `-c` objects and hosted links, the same in native PIE executables, local-exec in `-no-pie` ones; a native executable's `_start` sets up the TLS block when there is a PT_TLS segment) | `reloc ... w4`; `thread_local` together with `section`; the address of a `thread_local` in an initializer; `thread_local` in a shared library loaded with `dlopen` (needs general-dynamic TLS, v0.7) | Use w8. |
 | Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
-| Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
+| Startup | `@main` () or (i32, ptr) → i32; static position-independent executable (the default: `_start` applies the R_X86_64_RELATIVE relocations itself, so there is no TEXTREL and no dynamic loader) or fixed-address static executable (`fas -Wl,-no-pie`, `fas-fir --no-pie`); `-c` objects | Shared libraries, libc | Use syscalls. |
 | Unwind info | `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | DWARF debug info | — |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.
@@ -497,7 +497,7 @@ Each gap that closes moves from the right column to the left, and `test/fas_fir/
 ## 13. The `fas-fir` tool
 
 ```
-fas-fir INPUT.fir [-o OUT] [OBJECTS...]      build a static executable (default a.out)
+fas-fir INPUT.fir [-o OUT] [OBJECTS...]      build a static PIE executable (default a.out; --no-pie: fixed address)
 fas-fir -c INPUT.fir [-o OUT.o]              compile to an object file
 fas-fir --check INPUT.fir                    parse + verify, print the canonical text
 fas-fir --legalize INPUT.fir                 also split wide/odd integers (Fir_wide), print the result

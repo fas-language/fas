@@ -105,8 +105,8 @@ offset, which never touches the flags:
 
 ```
 tp  = mov fs:[0]                   ; Tp: fs:0 holds the thread pointer itself
-off = mov [rip + x@GOTTPOFF]       ; Tlsoff, -c objects and hosted links (initial-exec)
-off = mov imm32 x@TPOFF32          ; Tlsoff, native executables (local-exec)
+off = mov [rip + x@GOTTPOFF]       ; Tlsoff, pic code: objects, PIEs (initial-exec)
+off = mov imm32 x@TPOFF32          ; Tlsoff, -no-pie executables (local-exec)
 adr = lea [tp + off]
 ```
 
@@ -116,6 +116,22 @@ mmaps the block plus a 64-byte TCB, copies the `.tdata` image, stores the
 TCB self-pointer and sets fs with `arch_prctl(ARCH_SET_FS)`. Without a
 PT_TLS segment it does nothing. `test/fas_fir/tls.fir` checks that path;
 `test/fas_fir/c/tls.fir` checks initial-exec from several C threads.
+
+## Executables
+
+`fas --backend=native` and `fas-fir` link a static position-independent
+executable by default (ET_DYN, linked at 0, no PT_INTERP), from pic code:
+every symbol is reached RIP-relative or through the GOT, and data pointers
+become R_X86_64_RELATIVE relocations. No dynamic loader runs, so `_start`
+applies them itself before anything else (`relocate_self` in
+`mir_emit.ml`): it finds `_DYNAMIC` and `__ehdr_start` RIP-relative (the
+runtime address of `__ehdr_start` is the load bias), walks DT_RELA and
+DT_RELASZ, and writes `bias + addend` at `bias + offset` for each entry.
+Any other relocation kind, or a DT_REL/DT_RELR table, stops the program
+with `ud2` rather than run it half-relocated. `fas -Wl,-no-pie` (or
+`-Wl,-static`, or any other output-mode flag passed to the linker) and
+`fas-fir --no-pie` give a fixed-address ET_EXEC from non-pic code instead. `test/fas_fir.sh`
+runs every program both ways.
 
 ## Not supported yet
 
