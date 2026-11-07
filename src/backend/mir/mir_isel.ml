@@ -1649,11 +1649,22 @@ let select ~pic (e : env) (fn : F.func) =
          h) }
   in
   params c;
+  (* A Loc marker before the code of each Fir instruction whose location
+     differs from the previous marker in the same Mir block. The markers
+     are there with or without -g, so debug info never changes the code. *)
+  let last = ref (-1, 0) in
+  let mark loc =
+    if loc <> 0 && !last <> (c.cur, loc) then begin
+      emit c (Loc loc);
+      last := (c.cur, loc)
+    end
+  in
   F.Vec.iteri
     (fun b (blk : F.block_rec) ->
       c.cur <- b;
       c.fir_block <- b;
-      F.Vec.iter (inst c) blk.insts;
+      F.Vec.iter (fun i -> mark (F.inst fn i).loc; inst c i) blk.insts;
+      mark blk.term_loc;
       term c blk.term)
     fn.blocks;
   Dynarray.iter (fun (b : block) -> b.code <- List.rev b.code) mf.blocks;

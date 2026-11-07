@@ -166,13 +166,16 @@ let ins a fr ~pic ~func_label ~out (i : ins) =
   | Cmpxchg (n, ad, r) -> A.lock_cmpxchg a n (m ad) (gr r)
   | Mfence -> A.mfence a
   | Ud2 -> A.ud2 a
+  | Loc _ -> ()
 
-(* one function: returns its text size and its frame events for the
-   .eh_frame (Mir_cfi), at offsets from the function's start *)
+(* one function: returns its text size, its frame events for the
+   .eh_frame (Mir_cfi), at offsets from the function's start, and its line
+   rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
+   marker with its location id *)
 let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
-  let events = ref [] in
+  let events = ref [] and rows = ref [] in
   let event e = events := (A.pos a - start, e) :: !events in
   A.place a (func_label f.name);
   A.push a A.Rbp;
@@ -193,6 +196,7 @@ let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
     block_pos b (A.pos a);
     List.iter
       (function
+        | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows
         | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) i
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
         | Reload (v, (X x)) -> A.mov_xm a ~double:true x (slot_mem v)
@@ -219,7 +223,16 @@ let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
   done;
   let size = A.pos a - start in
   (* a restore_state at the very end describes no code *)
-  (size, List.rev (List.filter (fun (o, e) -> not (e = Mir_cfi.Returned && o = size)) !events))
+  (* two markers at one offset (a location with no code of its own): the
+     later one describes the code *)
+  let rows =
+    List.fold_left
+      (fun acc (o, n) -> match acc with (o', _) :: rest when o' = o -> (o, n) :: rest | _ -> (o, n) :: acc)
+      [] (List.rev !rows)
+  in
+  ( size,
+    List.rev (List.filter (fun (o, e) -> not (e = Mir_cfi.Returned && o = size)) !events),
+    List.rev rows )
 
 (* ---------- startup ---------- *)
 
@@ -425,8 +438,9 @@ let global_image (g : F.global) =
 (* [startup]: add _start (an executable without libc). [pic]: position-
    independent code (-c objects, hosted links, PIE executables).
    [self_relocate]: _start applies the image's own RELATIVE relocations (a
-   static PIE has no dynamic loader to do it). *)
-let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
+   static PIE has no dynamic loader to do it). [debug]: add DWARF line
+   tables (Mir_dwarf); the allocated sections are the same either way. *)
+let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
@@ -454,6 +468,7 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
     in
     let func_syms = ref [] in
     let fdes = ref [] in
+    let lines = ref [] in
     (* text offsets of every block, for blockaddr symbols *)
     let block_offsets = Hashtbl.create 256 in
     F.Vec.iter
@@ -466,10 +481,16 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
           Mir_check.run mf ra;
           A.align a 16;
           let offset = A.pos a in
-          let size, events =
+          let size, events, rows =
             func a ~pic ~func_label ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
           fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
+          (* rows without a file name say nothing *)
+          let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
+          lines :=
+            { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
+              size; rows }
+            :: !lines;
           func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
         end)
       m.funcs;
@@ -562,6 +583,32 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
         end)
       m.globals;
     let extra_names = List.rev !extra_order in
+    (* DWARF, after every allocated section; the symbols at the start of
+       .debug_abbrev and .debug_line are the targets of the section-offset
+       relocations in .debug_info *)
+    let debug_sections =
+      if not debug then []
+      else
+        Mir_dwarf.build ~cwd:(Sys.getcwd ()) ~producer:"fas 0.6.3" ~text_symbol:Mir_cfi.text_symbol
+          ~text_size:(Bytes.length text) ~loc:(F.Vec.get m.locs) (List.rev !lines)
+    in
+    let debug_syms =
+      List.concat
+        (List.mapi
+           (fun i (d : Mir_dwarf.section) ->
+             let name =
+               if d.sname = ".debug_abbrev" then Some Mir_dwarf.abbrev_symbol
+               else if d.sname = ".debug_line" then Some Mir_dwarf.line_symbol
+               else None
+             in
+             Option.to_list
+               (Option.map
+                  (fun name ->
+                    { Elf64.name; section = Elf64.Extra (List.length extra_names + i); offset = 0; size = 0;
+                      func = false })
+                  name))
+           debug_sections)
+    in
     let extra_syms =
       List.concat_map
         (fun name ->
@@ -590,6 +637,11 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
             relocs = d.relocs;
           })
         extra_names
+      @ List.map
+          (fun (d : Mir_dwarf.section) ->
+            { Native_object.name = d.sname; flags = 0; alignment = 1; contents = Fas_linker.Elf_object.Data d.bytes;
+              relocs = d.relocs })
+          debug_sections
     in
     (* local symbols for the blocks whose address is taken, in code or data *)
     let blk_syms = Hashtbl.create 8 in
@@ -611,7 +663,7 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
     (* FDEs point at their code through this local symbol (Mir_cfi) *)
     let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
     let defined_syms =
-      text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ blk_syms
+      text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ debug_syms @ blk_syms
     in
     let alias_syms =
       List.map
@@ -651,13 +703,13 @@ let generate ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)
   | Invalid_argument msg -> Error ("native backend internal error: " ^ msg)
 
-let compile_object m = generate ~startup:false ~pic:true m
+let compile_object ?debug m = generate ?debug ~startup:false ~pic:true m
 
 (* a static executable, or a static PIE when [options] ask for one *)
-let link_files ?(inputs = []) ?options ~output m =
+let link_files ?debug ?(inputs = []) ?options ~output m =
   let mode = match options with Some (o : Fas_linker.Options.t) -> o.mode | None -> Static in
   let pic = mode <> Static in
-  match generate ~startup:true ~pic ~self_relocate:(mode = Static_pie) m with
+  match generate ?debug ~startup:true ~pic ~self_relocate:(mode = Static_pie) m with
   | Error _ as e -> e
   | Ok obj -> (
       try

@@ -87,6 +87,7 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
                 (offset, symbol, 4, Int64.sub (Int64.of_int addend) 4L)
             | X64.Abs32s { offset; symbol; addend } ->
                 (offset, symbol, 11, Int64.of_int addend)
+            | X64.Abs32 { offset; symbol; addend } -> (offset, symbol, 10, Int64.of_int addend)
             | X64.Abs64 { offset; symbol; addend } ->
                 (offset, symbol, 1, Int64.of_int addend)
             | X64.Gotpcrel { offset; symbol; addend } ->

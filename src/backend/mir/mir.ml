@@ -110,6 +110,9 @@ type ins =
   | Cmpxchg of int * addr * reg  (** lock cmpxchg [addr], reg (compares with rax) *)
   | Mfence
   | Ud2
+  | Loc of int
+      (** no code: the following instructions come from Fir location N
+          (the line table's rows, see Mir_dwarf) *)
   | Salloc of reg * reg
       (** dynamic alloca: rsp -= size (a multiple of 16); dst = the new
           block, just above the outgoing argument area *)
@@ -192,7 +195,7 @@ let uses_defs = function
   | Syscall args -> (args, [ G Rax ])
   | Rep_movsb -> ([ G Rdi; G Rsi; G Rcx ], [ G Rdi; G Rsi; G Rcx ])
   | Rep_stosb -> ([ G Rdi; G Rax; G Rcx ], [ G Rdi; G Rcx ])
-  | Std | Cld | Mfence | Ud2 -> ([], [])
+  | Std | Cld | Mfence | Ud2 | Loc _ -> ([], [])
   | Xchg (_, a, r) | Xadd (_, a, r) -> (r :: addr_regs a, [ r ])
   | Cmpxchg (_, a, r) -> (G Rax :: r :: addr_regs a, [ G Rax ])
 
@@ -267,7 +270,7 @@ let map_regs g ins =
           rets = List.map g c.rets;
         }
   | Syscall args -> Syscall (List.map g args)
-  | (Rep_movsb | Rep_stosb | Std | Cld | Mfence | Ud2) as i -> i
+  | (Rep_movsb | Rep_stosb | Std | Cld | Mfence | Ud2 | Loc _) as i -> i
   | Salloc (d, n) -> Salloc (g d, g n)
   | Spget d -> Spget (g d)
   | Spset s -> Spset (g s)
@@ -383,6 +386,7 @@ let ins_s i =
   | Cmpxchg (n, m, a) -> p "lock cmpxchg%d %s, %s" n (addr_s m) (r a)
   | Mfence -> "mfence"
   | Ud2 -> "ud2"
+  | Loc n -> Printf.sprintf ".loc %d" n
   | Salloc (a, n) -> p "%s = salloc %s" (r a) (r n)
   | Spget a -> p "%s = rsp" (r a)
   | Spset a -> p "rsp = %s" (r a)

@@ -9,7 +9,7 @@
 #      shows up as a difference.
 # Objects (-c) are compared for every program the backend accepts;
 # executables (static PIE and -no-pie) for the Fir programs and a few Fas
-# ones. A program the backend refuses in run A must be refused in run B too.
+# ones, and -g builds (DWARF line tables) of some. A program the backend refuses in run A must be refused in run B too.
 # Needs no LLVM and no C compiler.
 set -eu
 
@@ -52,6 +52,10 @@ for b in native_backend native_vectors native_floats ir_simple; do
   f=$ROOT/test/$b.fas
   same "$b.fas" "$OCAML_FAS" --backend=native "$f"
   same "$b.fas -no-pie" "$OCAML_FAS" --backend=native -Wl,-no-pie "$f"
+  # the source path is absolute, so the debug info does not depend on the
+  # working directory either (a relative one, like the loc entries of
+  # test/fas_fir/lines.fir, is resolved against it, as gcc and clang do)
+  same "$b.fas -g" "$OCAML_FAS" --backend=native -g "$f"
 done
 for f in "$ROOT"/test/fas_fir/*.fir "$ROOT"/test/fas_fir/c/*.fir; do
   same "${f#"$ROOT"/} -c" "$FAS_FIR_TOOL" -c "$f"

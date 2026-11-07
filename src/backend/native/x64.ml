@@ -106,6 +106,9 @@ type reloc =
   | Abs64 of { offset : int; symbol : string; addend : int }
   | Abs32s of { offset : int; symbol : string; addend : int }
       (** 32-bit absolute, sign-extended by the CPU. *)
+  | Abs32 of { offset : int; symbol : string; addend : int }
+      (** R_X86_64_32, zero-extended: DWARF section offsets (DW_FORM_sec_offset)
+          in .debug_info, never in code. *)
   | Gotpcrel of { offset : int; symbol : string; addend : int }
       (** PC-relative address of the symbol's GOT entry, in a
           `mov r64, [rip + sym@GOTPCREL]` (see [load_got]); same "next byte"

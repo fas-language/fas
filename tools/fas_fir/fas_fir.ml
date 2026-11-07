@@ -22,11 +22,12 @@
 
 let usage () =
   prerr_string
-    "usage: fas-fir [-c | --check | --legalize] INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
+    "usage: fas-fir [-c | --check | --legalize] [-g] [--no-pie] INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
     \  (no flag)  build a static position-independent executable (default output: a.out),\n\
     \             like fas --backend=native\n\
     \  --no-pie   build a static executable at a fixed address instead\n\
     \  -c         build a position-independent ELF object\n\
+    \  -g         add DWARF line tables (from the module's loc entries)\n\
     \  --check    parse and verify, print the canonical text to stdout\n\
     \  --legalize print the module with wide and odd-width integers in limbs\n\
     \  INPUT may be - for stdin\n";
@@ -47,7 +48,7 @@ let read_all ic =
   Buffer.contents b
 
 let () =
-  let mode = ref Exe and pie = ref true and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref Exe and pie = ref true and debug = ref false and input = ref None and output = ref None and extra = ref [] in
   let rec args = function
     | [] -> ()
     | "-c" :: rest -> mode := Obj; args rest
@@ -56,6 +57,7 @@ let () =
     | "--mir" :: rest -> args rest
     | "--pie" :: rest -> pie := true; args rest
     | "--no-pie" :: rest -> pie := false; args rest
+    | "-g" :: rest -> debug := true; args rest
     | "-o" :: o :: rest -> output := Some o; args rest
     | ("-h" | "--help") :: _ -> usage ()
     | a :: rest when !input = None && (a = "-" || not (String.starts_with ~prefix:"-" a)) ->
@@ -107,11 +109,11 @@ let () =
   in
   let result =
     match !mode with
-    | Obj -> Result.map write_obj (Mir_emit.compile_object m)
+    | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug m)
     | Exe | Check | Legalize ->
         need_main ();
         let inputs = List.rev_map Fas_linker.Input.file !extra in
         let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in
-        Mir_emit.link_files ~inputs ?options ~output:(Option.value !output ~default:"a.out") m
+        Mir_emit.link_files ~debug:!debug ~inputs ?options ~output:(Option.value !output ~default:"a.out") m
   in
   match result with Ok () -> () | Error e -> die "%s" e

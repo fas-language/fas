@@ -14,9 +14,9 @@ let to_fir (ir : Ir.module_) =
       | [] -> Ok m
       | errs -> Error ("native backend internal error: Fir from Ir:\n" ^ String.concat "\n" errs))
 
-(* a position-independent ELF object *)
-let compile_object ~optimization:_ ir = Result.bind (to_fir ir) Mir_emit.compile_object
+(* a position-independent ELF object; [debug] (-g) adds DWARF line tables *)
+let compile_object ?debug ~optimization:_ ir = Result.bind (to_fir ir) (Mir_emit.compile_object ?debug)
 
 (* a static executable, Fas startup *)
-let link_files ~optimization:_ ?inputs ?options ~output ir =
-  Result.bind (to_fir ir) (Mir_emit.link_files ?inputs ?options ~output)
+let link_files ?debug ~optimization:_ ?inputs ?options ~output ir =
+  Result.bind (to_fir ir) (Mir_emit.link_files ?debug ?inputs ?options ~output)

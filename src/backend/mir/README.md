@@ -12,7 +12,8 @@ Fir --Fir_scalarize--> Fir (no vectors)
     --Fir_wide--> Fir (integers <= 64 bits)
     --Mir_isel--> Mir (virtual registers)
     --Mir_ra----> allocation --Mir_check--> ok
-    --Mir_emit--> X64 encoder, .eh_frame (Mir_cfi), ELF via Native_object
+    --Mir_emit--> X64 encoder, .eh_frame (Mir_cfi), -g: .debug_* (Mir_dwarf),
+                  ELF via Native_object
 ```
 
 | File | Role |
@@ -27,6 +28,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
 | `mir_driver.ml` | The driver's entry (`--backend=native`): converts the old Ir to Fir and compiles it here. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
+| `mir_dwarf.ml` | `-g`: `.debug_abbrev`, `.debug_info` and `.debug_line` (DWARF 5) from the line rows `Mir_emit.func` records (see "Debug info"). |
 
 ## Running it
 
@@ -48,8 +50,12 @@ Fir --Fir_scalarize--> Fir (no vectors)
 - `sh test/native_determinism.sh`: compiles every Fas test program and
   Fir program twice (the second time from another directory, into another
   file name, with OCaml's hash tables randomized) and requires
-  byte-identical objects and executables. CI runs it, the checker and the
-  Fir programs (`.github/workflows/native-backend.yml`).
+  byte-identical objects and executables.
+- `sh test/native_debug.sh`: `-g` leaves every test program's code alone,
+  and the line tables decode to the expected file:line rows (checked with
+  `llvm-dwarfdump --verify` and gdb too, when installed). CI runs it, the
+  determinism test, the checker and the Fir programs
+  (`.github/workflows/native-backend.yml`).
 - `test/mir_check_test.ml` (in `dune runtest`): allocates every function of
   the Fir test corpus, checks it, then mutates each allocation (drop a
   reload, move an operand to another register) and requires the checker to
@@ -86,6 +92,32 @@ with a PC32 relocation against the local symbol `.Lfas.text` (the start of
 `.text`) plus the function's offset, so a weak function that is overridden
 still has the FDE of its own copy. `test/fas_fir/c/unwind.fir` walks the
 stack with the libgcc unwinder from a C callback.
+
+## Debug info
+
+With `-g` (`fas -g --backend=native`, `fas-fir -g`) the object gets DWARF 5
+line tables, like the LLVM path's line-tables-only debug info. Fir
+locations are always there (the Fas front end and `Fir_of_ir` keep them;
+`Fir_scalarize` and `Fir_wide` copy them to what they emit), so `-g` only
+decides whether they are written out and can never change the code:
+`test/native_debug.sh` checks that every test program's allocated
+sections, relocations and symbols are the same with and without it.
+
+`Mir_isel` puts a `Loc n` pseudo-instruction (no code) before each Fir
+instruction or terminator whose location differs from the last one in the
+block; `Mir_emit.func` records the code offset of each. A location whose
+code is empty (a jump that falls through) is dropped in favour of the next
+one at the same offset. `Mir_dwarf` then writes one compile unit (named
+after the file of the lowest location id, the main source file), one
+subprogram per function (frame base rbp) and one line-program sequence per
+function: its first row is the function's first byte with the first
+location's line, and the row of that location itself is marked
+`prologue_end`, so a breakpoint on a function stops after its frame is
+built. Addresses are R_X86_64_64 relocations against `.Lfas.text`; the
+offsets of `.debug_abbrev` and `.debug_line` in `.debug_info` are
+R_X86_64_32 relocations against local symbols at their starts, so linkers
+can concatenate the sections of several objects. The `fma` runtime helpers
+have no lines.
 
 ## Block addresses
 

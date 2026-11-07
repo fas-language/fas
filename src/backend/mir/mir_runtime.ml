@@ -43,7 +43,14 @@ let add (m : F.modul) =
       (fun (f : F.func) ->
         (* helpers' own declarations (none today) would duplicate the
            module's; only definitions not already there are added *)
-        if f.defined && not (Hashtbl.mem present f.name) then F.add_func m f)
+        if f.defined && not (Hashtbl.mem present f.name) then begin
+          (* their location ids index the helpers' own module: runtime code
+             has no source lines for the program's debug info (like
+             libgcc), so they are cleared *)
+          F.Vec.iter (fun (ir : F.inst_rec) -> ir.loc <- 0) f.insts;
+          F.Vec.iter (fun (b : F.block_rec) -> b.term_loc <- 0) f.blocks;
+          F.add_func m f
+        end)
       (fma_fir ()).funcs;
     (* the Fas front end may use wider integers (i128 for a 64x64 product):
        legalize again; functions already legal are left alone *)

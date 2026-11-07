@@ -47,7 +47,9 @@ let linker_plan ~object_path text =
         "hosted native: expected one GCC/Clang linker command from FAS_CC -###"
 
 let link ~cc ~config ~c_objects ~link_flags ir =
-  let* object_ = Mir_driver.compile_object ~optimization:config.Cli.optimization ir in
+  let* object_ =
+    Mir_driver.compile_object ~debug:config.Cli.debug ~optimization:config.Cli.optimization ir
+  in
   let temporaries = ref [] in
   let temporary () =
     let path = Filename.temp_file "fas-hosted-" ".o" in

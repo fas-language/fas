@@ -2,8 +2,8 @@ name: Native backend
 
 # Checks of the native (MIR) backend that need no LLVM: the allocation
 # checker, the Fir conformance programs (static PIE and -no-pie executables,
-# C interop through the system C compiler) and byte-identical output across
-# runs. The comparisons against LLVM (shadow run, IR fuzzer, difftests) need
+# C interop through the system C compiler), byte-identical output across
+# runs, and the -g line tables. The comparisons against LLVM (shadow run, IR fuzzer, difftests) need
 # LLVM 22 and run locally; see src/backend/mir/README.md.
 
 on:
@@ -45,3 +45,5 @@ jobs:
         run: FAS_CC=clang sh test/fas_fir.sh  # wide.c needs _BitInt (gcc 13 has none)
       - name: Deterministic output
         run: sh test/native_determinism.sh
+      - name: Debug info (-g) changes no code, line tables decode
+        run: sh test/native_debug.sh

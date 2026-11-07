@@ -470,5 +470,18 @@ let verify (m : modul) =
       | Some ps -> List.iter (function Blockref { fn; block } -> check_blockaddr g.gname fn block | _ -> ()) ps
       | None -> ())
     m.globals;
+  (* location ids index this module's table (0 = none): an id from another
+     module's table would name the wrong line, or none *)
+  let nlocs = Vec.length m.locs in
+  Vec.iter
+    (fun f ->
+      if f.defined then begin
+        let bad = ref 0 in
+        Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
+        Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
+        if !bad <> 0 then
+          errs := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !errs
+      end)
+    m.funcs;
   let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in
   List.rev !errs @ List.rev fs

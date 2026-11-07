@@ -57,6 +57,7 @@ let rejects name needle text =
 let sum =
   {|
 triple "x86_64-unknown-linux-gnu"
+loc 1 "sum.fas" 4 3
 global @counter size 8 align 8 local = zero
 global @msg size 5 align 1 local readonly = {bytes "hi\0a", zeros 2}
 global @table size 16 align 8 global = {reloc @counter w8, reloc @msg+2 w8}
