@@ -676,8 +676,8 @@ let parse_op st opname =
         | Sym s -> ignore (next lx); Direct s
         | Tlocal n -> ignore (next lx); Indirect (use_name st n)
         (* an indirect call through a constant pointer prints as a typed
-           constant (`ptr @f`): Fir_of_ir keeps an Ir indirect call whose
-           callee folded to a symbol as such *)
+           constant (`ptr @f`): lowering keeps an indirect call whose callee
+           folded to a symbol as such *)
         | t when starts_ty t -> Indirect (parse_value st)
         | t -> fail lx ("expected a callee, got " ^ tok_text t)
       in

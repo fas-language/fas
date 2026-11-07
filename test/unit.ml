@@ -9,6 +9,45 @@ let contains text needle =
   let rec go i = i + m <= n && (String.sub text i m = needle || go (i + 1)) in
   m = 0 || go 0
 
+(* An expected text kept in test/[name]. With FAS_UNIT_BLESS=<dir> the
+   actual text is written to <dir>/[name] instead (copy it into test/ after
+   reviewing it) *)
+let expected_file name actual =
+  match Sys.getenv_opt "FAS_UNIT_BLESS" with
+  | Some dir ->
+      let channel = open_out_bin (Filename.concat dir name) in
+      output_string channel actual;
+      close_out channel;
+      actual
+  | None ->
+      let channel = open_in_bin name in
+      let text = really_input_string channel (in_channel_length channel) in
+      close_in channel;
+      text
+
+(* Small Fir modules built through Lower_emit, the way lower.ml builds them;
+   [lay] gives named structs' (size, align) *)
+let fir_data_module ?(lay = []) add =
+  let table : Lower_emit.layouts = Hashtbl.create 4 in
+  List.iter (fun (name, l) -> Hashtbl.replace table name l) lay;
+  let mc = Lower_emit.create_module ~triple:(Target_layout.current ()).triple table in
+  add mc;
+  mc.Lower_emit.m
+
+let fir_bytes_global mc name bytes =
+  let g = Lower_emit.base_global name (String.length bytes) 1 in
+  g.Fir.init <- Some [ Fir.Bytes bytes ];
+  Fir.add_global mc.Lower_emit.m g
+
+(* a void function [name] whose body [body fn] must end with a terminator *)
+let fir_void_function mc name body =
+  let fn =
+    Lower_emit.start mc ~name ~linkage:Fir.Global ~params:[] ~ret:Low.Void
+      ~ret_extension:Low.No_extension ~variadic:false ~display:None ~source:None
+  in
+  body fn;
+  match Lower_emit.finish fn with Ok () -> () | Error b -> failwith (Printf.sprintf "b%d open" b)
+
 let () =
   assert (Limits.budget_version_name Limits.default_budget_version = "0.1.5");
   assert (Limits.for_budget_version Limits.V0_15 = Limits.default);
@@ -394,476 +433,54 @@ let () =
   let specialized = expect_ok (Sema.check generic) in
   assert (List.length specialized.Hir.funcs = 2);
   let lowered = expect_ok (Lower.lower specialized) in
-  assert (List.length lowered.Ir.funcs = 2);
-  let ir_module ?(structs = []) ?(globals = []) ?(no_inline_functions = []) funcs =
-    {
-      Ir.target_triple = (Target_layout.current ()).triple;
-      data_layout = (Target_layout.current ()).llvm_data_layout;
-      structs;
-      globals;
-      funcs;
-      no_inline_functions;
-      inline_functions = [];
-    }
-  in
-  let ir_function blocks =
-    {
-      Ir.name = "control_flow";
-      params = [];
-      ret = Ir.Void;
-      ret_extension = Ir.No_extension;
-      blocks;
-      linkage = Ir.Internal;
-      variadic = false;
-      source = None;
-      display = None;
-    }
-  in
-  let ir_block ?(instrs = []) id terminator =
-    { Ir.id; label = "b"; instrs; terminator }
-  in
-  let expect_ir_error fragment module_ =
-    match Ir.validate module_ with
-    | Error message -> assert (contains message fragment)
-    | Ok () -> assert false
-  in
-  let valid_control_flow =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [
-                  Ir.Cast (0, "zext", Ir.I8, Ir.Const (Ir.I8, 255L), Ir.I16);
-                  Ir.Bin (1, Ir.Add, Ir.I16, Ir.Local (0, Ir.I16), Ir.Const (Ir.I16, 1L));
-                ]
-              0
-              (Ir.CondBr (Ir.Const (Ir.I1, 1L), 1, 2));
-            ir_block 1 (Ir.Switch (Ir.I8, Ir.Const (Ir.I8, 0L), [ (0L, 2) ], 3));
-            ir_block 2 (Ir.Br 3);
-            ir_block
-              ~instrs:
-                [
-                  Ir.Phi
-                    ( 2,
-                      Ir.I16,
-                      [ (Ir.Const (Ir.I16, 1L), 1); (Ir.Local (1, Ir.I16), 2) ] );
-                ]
-              3 (Ir.Ret None);
-          ];
-      ]
-  in
-  assert (Ir.validate valid_control_flow = Ok ());
-  let duplicate_block_ids =
-    ir_module [ ir_function [ ir_block 0 (Ir.Ret None); ir_block 0 (Ir.Ret None) ] ]
-  in
-  expect_ir_error "duplicate block id 0" duplicate_block_ids;
-  expect_ir_error "negative block id -1"
-    (ir_module [ ir_function [ ir_block (-1) (Ir.Ret None) ] ]);
-  let missing_branch_successor = ir_module [ ir_function [ ir_block 0 (Ir.Br 1) ] ] in
-  expect_ir_error "block 0 has unknown successor 1" missing_branch_successor;
-  expect_ir_error "entry block 0 has predecessors"
-    (ir_module [ ir_function [ ir_block 0 (Ir.Br 1); ir_block 1 (Ir.Br 0) ] ]);
-  let missing_switch_successor =
-    ir_module
-      [
-        ir_function
-          [ ir_block 0 (Ir.Switch (Ir.I8, Ir.Const (Ir.I8, 0L), [ (0L, 1) ], 0)) ];
-      ]
-  in
-  expect_ir_error "block 0 has unknown successor 1" missing_switch_successor;
-  let duplicate_switch_cases =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0
-              (Ir.Switch (Ir.I8, Ir.Const (Ir.I8, 0L), [ (1L, 1); (1L, 1) ], 2));
-            ir_block 1 (Ir.Ret None);
-            ir_block 2 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "block 0 has duplicate switch case 1" duplicate_switch_cases;
-  let mistyped_operand =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [
-                  Ir.Bin (0, Ir.Add, Ir.I8, Ir.Const (Ir.I16, 1L), Ir.Const (Ir.I8, 2L));
-                ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "operand with the wrong type" mistyped_operand;
-  let malformed_constant =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [
-                  Ir.Bin (0, Ir.And, Ir.I1, Ir.Const (Ir.I1, -1L), Ir.Const (Ir.I1, 1L));
-                ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "integer constant does not fit its type" malformed_constant;
-  let invalid_cast =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:[ Ir.Cast (0, "zext", Ir.I16, Ir.Const (Ir.I16, 1L), Ir.I8) ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "invalid `zext` types" invalid_cast;
-  let duplicate_value_ids =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:[ Ir.Alloca (0, Ir.I8, 1); Ir.Alloca (0, Ir.I16, 2) ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "duplicate value id 0" duplicate_value_ids;
-  let undefined_value =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [ Ir.Bin (0, Ir.Add, Ir.I8, Ir.Local (4, Ir.I8), Ir.Const (Ir.I8, 1L)) ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "uses undefined value 4" undefined_value;
-  let wrong_value_claim =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [ Ir.Alloca (0, Ir.I8, 1); Ir.Load (1, Ir.I8, Ir.Local (0, Ir.I16), 1) ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "value 0 claims the wrong type" wrong_value_claim;
-  let forward_value_use =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block
-              ~instrs:
-                [
-                  Ir.Bin (1, Ir.Add, Ir.I8, Ir.Local (0, Ir.I8), Ir.Const (Ir.I8, 1L));
-                  Ir.Bin (0, Ir.Add, Ir.I8, Ir.Const (Ir.I8, 2L), Ir.Const (Ir.I8, 3L));
-                ]
-              0 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "value 0 does not dominate its use" forward_value_use;
-  let sibling_value_use =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.CondBr (Ir.Const (Ir.I1, 1L), 1, 2));
-            ir_block
-              ~instrs:
-                [
-                  Ir.Bin (0, Ir.Add, Ir.I8, Ir.Const (Ir.I8, 1L), Ir.Const (Ir.I8, 2L));
-                ]
-              1 (Ir.Br 3);
-            ir_block
-              ~instrs:
-                [ Ir.Bin (1, Ir.Add, Ir.I8, Ir.Local (0, Ir.I8), Ir.Const (Ir.I8, 3L)) ]
-              2 (Ir.Br 3);
-            ir_block 3 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "value 0 does not dominate its use" sibling_value_use;
-  let invalid_phi_edge_use =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.CondBr (Ir.Const (Ir.I1, 1L), 1, 2));
-            ir_block
-              ~instrs:
-                [
-                  Ir.Bin (0, Ir.Add, Ir.I8, Ir.Const (Ir.I8, 1L), Ir.Const (Ir.I8, 2L));
-                ]
-              1 (Ir.Br 3);
-            ir_block 2 (Ir.Br 3);
-            ir_block
-              ~instrs:
-                [
-                  Ir.Phi
-                    (1, Ir.I8, [ (Ir.Const (Ir.I8, 0L), 1); (Ir.Local (0, Ir.I8), 2) ]);
-                ]
-              3 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "value 0 does not dominate its use" invalid_phi_edge_use;
-  let incomplete_phi =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.CondBr (Ir.Const (Ir.I1, 1L), 1, 2));
-            ir_block 1 (Ir.Br 3);
-            ir_block 2 (Ir.Br 3);
-            ir_block
-              ~instrs:[ Ir.Phi (0, Ir.I8, [ (Ir.Const (Ir.I8, 1L), 1) ]) ]
-              3 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "phi inputs do not match its predecessors" incomplete_phi;
-  let duplicate_phi_input =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.Br 1);
-            ir_block
-              ~instrs:
-                [
-                  Ir.Phi
-                    (0, Ir.I8, [ (Ir.Const (Ir.I8, 1L), 0); (Ir.Const (Ir.I8, 2L), 0) ]);
-                ]
-              1 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "phi has duplicate incoming block 0" duplicate_phi_input;
-  let misplaced_phi =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.Br 1);
-            ir_block
-              ~instrs:
-                [
-                  Ir.Alloca (0, Ir.I8, 1);
-                  Ir.Phi (1, Ir.I8, [ (Ir.Const (Ir.I8, 1L), 0) ]);
-                ]
-              1 (Ir.Ret None);
-          ];
-      ]
-  in
-  expect_ir_error "phi after a non-phi instruction" misplaced_phi;
-  let call_target =
-    {
-      (ir_function []) with
-      Ir.name = "callee";
-      params = [ { Ir.name = "x"; ty = Ir.I8; extension = Ir.Zero_extension } ];
-      ret = Ir.I16;
-      ret_extension = Ir.Sign_extension;
-      variadic = true;
-    }
-  in
-  let call_caller call =
-    {
-      (ir_function [ ir_block ~instrs:[ call ] 0 (Ir.Ret None) ]) with
-      Ir.name = "caller";
-    }
-  in
-  let valid_call =
-    Ir.Call
-      ( Some 0,
-        Ir.Sign_extension,
-        Ir.I16,
-        "callee",
-        [
-          (Ir.I8, Ir.Zero_extension, Ir.Const (Ir.I8, 7L));
-          (Ir.I64, Ir.No_extension, Ir.Const (Ir.I64, 9L));
-        ] )
-  in
-  assert (Ir.validate (ir_module [ call_target; call_caller valid_call ]) = Ok ());
-  let valid_call_text = Ir.render (ir_module [ call_target; call_caller valid_call ]) in
-  assert (contains valid_call_text "call signext i16 (i8, ...) @callee");
-  let fixed_call_target = { call_target with Ir.variadic = false } in
-  let fixed_call_text =
-    Ir.render
-      (ir_module
-         [
-           fixed_call_target;
-           call_caller
-             (Ir.Call
-                ( Some 0,
-                  Ir.Sign_extension,
-                  Ir.I16,
-                  "callee",
-                  [ (Ir.I8, Ir.Zero_extension, Ir.Const (Ir.I8, 7L)) ] ));
-         ])
-  in
-  assert (contains fixed_call_text "call signext i16 @callee(i8 zeroext 7)");
-  expect_ir_error "duplicate function name `callee`"
-    (ir_module [ call_target; call_target ]);
-  expect_ir_error "call to `missing` has no matching function"
-    (ir_module
-       [ call_caller (Ir.Call (None, Ir.No_extension, Ir.Void, "missing", [])) ]);
-  expect_ir_error "call to `callee` has the wrong return type"
-    (ir_module
-       [
-         call_target;
-         call_caller
-           (Ir.Call
-              ( Some 0,
-                Ir.Sign_extension,
-                Ir.I8,
-                "callee",
-                [ (Ir.I8, Ir.Zero_extension, Ir.Const (Ir.I8, 7L)) ] ));
-       ]);
-  expect_ir_error "call to `callee` has the wrong return extension"
-    (ir_module
-       [
-         call_target;
-         call_caller
-           (Ir.Call
-              ( Some 0,
-                Ir.Zero_extension,
-                Ir.I16,
-                "callee",
-                [ (Ir.I8, Ir.Zero_extension, Ir.Const (Ir.I8, 7L)) ] ));
-       ]);
-  expect_ir_error "call to `callee` argument 0 has the wrong type"
-    (ir_module
-       [
-         call_target;
-         call_caller
-           (Ir.Call
-              ( Some 0,
-                Ir.Sign_extension,
-                Ir.I16,
-                "callee",
-                [ (Ir.I16, Ir.Zero_extension, Ir.Const (Ir.I16, 7L)) ] ));
-       ]);
-  expect_ir_error "call to `callee` argument 0 has the wrong extension"
-    (ir_module
-       [
-         call_target;
-         call_caller
-           (Ir.Call
-              ( Some 0,
-                Ir.Sign_extension,
-                Ir.I16,
-                "callee",
-                [ (Ir.I8, Ir.Sign_extension, Ir.Const (Ir.I8, 7L)) ] ));
-       ]);
-  expect_ir_error "call to `callee` has 0 arguments but requires at least 1"
-    (ir_module
-       [
-         call_target;
-         call_caller (Ir.Call (Some 0, Ir.Sign_extension, Ir.I16, "callee", []));
-       ]);
-  let fixed_target = { call_target with Ir.variadic = false } in
-  expect_ir_error "call to `callee` has 2 arguments but requires exactly 1"
-    (ir_module [ fixed_target; call_caller valid_call ]);
-  let byte_struct = { Ir.name = "Byte"; fields = [ Ir.I8 ]; tail_padding = 0 } in
-  let string_global = Ir.String_global { name = ".str.0"; bytes = "ok" } in
-  let array_global =
-    Ir.Array_global { name = "numbers"; elem_ty = Ir.I8; elems = [ 1L; 2L ]; align = 1 }
-  in
-  let module_reference_user =
-    {
-      (ir_function
-         [
-           ir_block
-             ~instrs:
-               [
-                 Ir.Alloca (0, Ir.Struct "Byte", 1);
-                 Ir.String_ptr (1, 0, 2);
-                 Ir.Global_ptr (2, "numbers", Ir.Array (2, Ir.I8));
-                 Ir.Load
-                   (3, Ir.I8, Ir.Global ("numbers", Ir.Pointer (Ir.Array (2, Ir.I8))), 1);
-               ]
-             0 (Ir.Ret None);
-         ])
-      with
-      Ir.name = "module_reference_user";
-    }
-  in
+  assert (Fir.Vec.length lowered.Fir.funcs = 2);
+  (* lowering and rendering are deterministic *)
   assert (
-    Ir.validate
-      (ir_module ~structs:[ byte_struct ]
-         ~globals:[ string_global; array_global ]
-         [ module_reference_user ])
-    = Ok ());
-  expect_ir_error "duplicate struct name `Byte`"
-    (ir_module ~structs:[ byte_struct; byte_struct ] []);
-  expect_ir_error "struct `Broken` references an unknown struct"
-    (ir_module
-       ~structs:
-         [ { Ir.name = "Broken"; fields = [ Ir.Struct "Missing" ]; tail_padding = 0 } ]
-       []);
-  expect_ir_error "struct `Recursive` has a recursive value layout"
-    (ir_module
-       ~structs:
-         [
-           {
-             Ir.name = "Recursive";
-             fields = [ Ir.Array (1, Ir.Struct "Recursive") ];
-             tail_padding = 0;
-           };
-         ]
-       []);
-  expect_ir_error "duplicate global name `numbers`"
-    (ir_module ~globals:[ array_global; array_global ] []);
-  expect_ir_error "global `numbers` has an element outside its type"
-    (ir_module
-       ~globals:
-         [
-           Ir.Array_global
-             { name = "numbers"; elem_ty = Ir.I1; elems = [ 2L ]; align = 1 };
-         ]
-       []);
-  expect_ir_error "symbol `collision` is both a global and a function"
-    (ir_module
-       ~globals:
-         [
-           Ir.Array_global
-             { name = "collision"; elem_ty = Ir.I8; elems = []; align = 1 };
-         ]
-       [ { (ir_function []) with Ir.name = "collision" } ]);
-  expect_ir_error "string pointer `.str.0` has the wrong length"
-    (ir_module ~globals:[ string_global ] [ call_caller (Ir.String_ptr (0, 0, 3)) ]);
-  expect_ir_error "global pointer `numbers` has the wrong type"
-    (ir_module ~globals:[ array_global ]
-       [ call_caller (Ir.Global_ptr (0, "numbers", Ir.Array (1, Ir.I8))) ]);
-  expect_ir_error "uses unknown global `missing`"
-    (ir_module
-       [ call_caller (Ir.Load (0, Ir.I8, Ir.Global ("missing", Ir.Pointer Ir.I8), 1)) ]);
-  expect_ir_error "global `numbers` claims the wrong type"
-    (ir_module ~globals:[ array_global ]
-       [ call_caller (Ir.Load (0, Ir.I8, Ir.Global ("numbers", Ir.I8), 1)) ]);
-  expect_ir_error "no-inline function `missing` does not exist"
-    (ir_module ~no_inline_functions:[ "missing" ] []);
-  assert (Ir.render lowered = Ir.render lowered);
+    Fir_llvm.render lowered = Fir_llvm.render (expect_ok (Lower.lower specialized)));
+  (* Hand-built Fir modules, made through Lower_emit as lower.ml makes
+     them. (The old Ir's validator tests went with it in v0.6; Fir_verify
+     has its own in fir_test.ml.) *)
+  let fir_mc () =
+    Lower_emit.create_module ~triple:(Target_layout.current ()).triple (Hashtbl.create 1)
+  in
+  let fir_fn ?(params = []) ?(ret = Low.Void) ?source mc name =
+    Lower_emit.start mc ~name ~linkage:Fir.Local ~params ~ret
+      ~ret_extension:Low.No_extension ~variadic:false ~display:None ~source
+  in
+  let fir_finish fn = assert (Lower_emit.finish fn = Ok ()) in
+  let fir_module (mc : Lower_emit.modctx) =
+    assert (Fir_verify.verify mc.m = []);
+    mc.m
+  in
+  let fir_declare ?(params = []) ?(ret = Low.Void) ?(ret_extension = Low.No_extension)
+      ?(variadic = false) mc name =
+    Lower_emit.declare mc ~name ~params ~ret ~ret_extension ~variadic ~display:None;
+    if variadic then Hashtbl.replace mc.Lower_emit.variadic name (List.length params)
+  in
+  (* a function that only returns *)
+  let fir_void mc name =
+    let fn = fir_fn mc name in
+    Lower_emit.ret fn None;
+    fir_finish fn
+  in
+  (* C ABI extensions and variadic calls in the rendered text *)
+  let call_module ~variadic args =
+    let mc = fir_mc () in
+    fir_declare mc "callee" ~params:[ (Low.I8, Low.Zero_extension) ] ~ret:Low.I16
+      ~ret_extension:Low.Sign_extension ~variadic;
+    let fn = fir_fn mc "caller" in
+    Lower_emit.call fn (Some 0) Low.Sign_extension Low.I16 "callee" args;
+    Lower_emit.ret fn None;
+    fir_finish fn;
+    Fir_llvm.render (fir_module mc)
+  in
+  let seven = (Low.I8, Low.Zero_extension, Low.Const (Low.I8, 7L)) in
+  let valid_call_text =
+    call_module ~variadic:true [ seven; (Low.I64, Low.No_extension, Low.Const (Low.I64, 9L)) ]
+  in
+  assert (contains valid_call_text "call signext i16 (i8 zeroext, ...) @callee(i8 zeroext 7, i64 9)");
+  let fixed_call_text = call_module ~variadic:false [ seven ] in
+  assert (contains fixed_call_text "call signext i16 @callee(i8 zeroext 7)");
   let unresolved_template_call =
     {
       Hir.structs = [];
@@ -902,11 +519,8 @@ let () =
   let golden_source = source "fn test() i64 { x i64 = 2\n return x + 3\n }\n" in
   let golden_ast = expect_ok (Parser.parse golden_source) in
   let golden_hir = expect_ok (Sema.check golden_ast) in
-  let golden_ir = Ir.render (expect_ok (Lower.lower golden_hir)) in
-  let channel = open_in "ir_simple.expected" in
-  let expected = really_input_string channel (in_channel_length channel) in
-  close_in channel;
-  assert (golden_ir = expected);
+  let golden_ir = Fir_llvm.render (expect_ok (Lower.lower golden_hir)) in
+  assert (golden_ir = expected_file "ir_simple.expected" golden_ir);
   (match Process.run [| "/bin/printf"; "process-ok" |] with
   | Ok (out, _) -> assert (out = "process-ok")
   | Error _ -> assert false);
@@ -923,16 +537,16 @@ let () =
     let hir = expect_ok (Sema.check parsed) in
     expect_ok (Lower.lower hir)
   in
-  let rendered_text = Ir.render rendered_module in
+  let rendered_text = Fir_llvm.render rendered_module in
   let rendered_bytes = String.length rendered_text in
   assert (contains rendered_text "c\"a\\0A\\09\\5C\\22z\\00\"");
   let expect_render_ok budget =
-    match Ir.render_bounded ~budget rendered_module with
+    match Fir_llvm.render_bounded ~budget rendered_module with
     | Ok text -> assert (text = rendered_text)
     | Error _ -> assert false
   in
   let expect_render_error budget =
-    match Ir.render_bounded ~budget rendered_module with
+    match Fir_llvm.render_bounded ~budget rendered_module with
     | Error message ->
         assert (
           message
@@ -945,49 +559,32 @@ let () =
   expect_render_error 0;
   expect_render_ok rendered_bytes;
   assert (
-    Ir.render_bounded ~budget:rendered_bytes rendered_module
-    = Ir.render_bounded ~budget:rendered_bytes rendered_module);
-  (match Ir.render_bounded ~budget:(-1) rendered_module with
+    Fir_llvm.render_bounded ~budget:rendered_bytes rendered_module
+    = Fir_llvm.render_bounded ~budget:rendered_bytes rendered_module);
+  (match Fir_llvm.render_bounded ~budget:(-1) rendered_module with
   | Error message -> assert (message = "rendered LLVM text budget must not be negative")
   | Ok _ -> assert false);
-  (match Ir.render_bounded ~budget:min_int rendered_module with
+  (match Fir_llvm.render_bounded ~budget:min_int rendered_module with
   | Error message -> assert (message = "rendered LLVM text budget must not be negative")
   | Ok _ -> assert false);
   let multi_block =
-    ir_module
-      [
-        {
-          (ir_function
-             [
-               ir_block 0 (Ir.CondBr (Ir.Const (Ir.I1, 1L), 1, 2));
-               ir_block 1 (Ir.Br 2);
-               ir_block 2 (Ir.Ret (Some (Ir.I32, Ir.Const (Ir.I32, 0L))));
-             ])
-          with
-          Ir.name = "flow";
-          Ir.ret = Ir.I32;
-        };
-      ]
+    let mc = fir_mc () in
+    let fn = fir_fn mc "flow" ~ret:Low.I32 in
+    let b1 = Lower_emit.new_block fn and b2 = Lower_emit.new_block fn in
+    Lower_emit.cond_br fn (Low.Const (Low.I1, 1L)) b1 b2;
+    Lower_emit.enter fn b1 None;
+    Lower_emit.br fn b2;
+    Lower_emit.enter fn b2 None;
+    Lower_emit.ret fn (Some (Low.I32, Low.Const (Low.I32, 0L)));
+    fir_finish fn;
+    fir_module mc
   in
-  assert (Ir.validate multi_block = Ok ());
   let multi_block_expected =
-    "; ModuleID = 'fas'\n\
-     source_filename = \"fas\"\n\
-     target datalayout = \
-     \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n\
-     target triple = \"x86_64-unknown-linux-gnu\"\n\n\
-     define internal i32 @flow() {\n\
-     b0:\n\
-    \  br i1 true, label %b1, label %b2\n\
-     b1:\n\
-    \  br label %b2\n\
-     b2:\n\
-    \  ret i32 0\n\
-     }\n"
+    expected_file "fir_llvm_multi_block.expected" (Fir_llvm.render multi_block)
   in
-  assert (Ir.render multi_block = multi_block_expected);
+  assert (Fir_llvm.render multi_block = multi_block_expected);
   assert (
-    Ir.render_bounded ~budget:(String.length multi_block_expected) multi_block
+    Fir_llvm.render_bounded ~budget:(String.length multi_block_expected) multi_block
     = Ok multi_block_expected);
   let verify_path = Filename.temp_file "fas-render-verify-" ".ll" in
   Fun.protect
@@ -1005,72 +602,29 @@ let () =
             ("opt-22 rejected rendered multi-block LLVM: " ^ failure.Process.stderr));
   let debug_marked = Debug_fixture.module_ ~markers:true in
   let debug_plain = Debug_fixture.module_ ~markers:false in
-  assert (Ir.validate debug_marked = Ok ());
-  assert (Ir.render debug_marked = Ir.render debug_plain);
-  assert (Ir.render ~debug_info:false debug_marked = Ir.render debug_plain);
-  assert (Ir.render_debug debug_marked = Ir.render_debug debug_plain);
-  assert (Ir.count_lowered_nodes debug_marked = Ir.count_lowered_nodes debug_plain);
-  let nodes = Ir.count_lowered_nodes debug_plain in
+  assert (Fir_verify.verify debug_marked = []);
+  assert (Fir_llvm.render debug_marked = Fir_llvm.render debug_plain);
+  assert (Fir_llvm.render ~debug_info:false debug_marked = Fir_llvm.render debug_plain);
+  assert (Fir_limits.count_lowered_nodes debug_marked = Fir_limits.count_lowered_nodes debug_plain);
+  let nodes = Fir_limits.count_lowered_nodes debug_plain in
   let node_budget n = { Limits.default with max_ir_nodes = n } in
-  assert (Ir.check_lowered_nodes ~limits:(node_budget nodes) debug_marked = Ok ());
-  assert (Ir.check_lowered_nodes ~limits:(node_budget nodes) debug_plain = Ok ());
+  assert (Fir_limits.check_lowered_nodes ~limits:(node_budget nodes) debug_marked = Ok ());
+  assert (Fir_limits.check_lowered_nodes ~limits:(node_budget nodes) debug_plain = Ok ());
   assert (
     Result.is_error
-      (Ir.check_lowered_nodes ~limits:(node_budget (nodes - 1)) debug_marked));
+      (Fir_limits.check_lowered_nodes ~limits:(node_budget (nodes - 1)) debug_marked));
   let debug_expected =
-    {|; ModuleID = 'fas'
-source_filename = "fas"
-target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
-target triple = "x86_64-unknown-linux-gnu"
-
-define i32 @main() #0 !dbg !5 {
-b0:
-  %v0 = add i32 1, 2, !dbg !8
-  %v1 = call i32 @helper(i32 %v0), !dbg !9
-  ret i32 %v1, !dbg !10
-}
-define internal i32 @helper(i32 %x) #0 !dbg !6 {
-b0:
-  %v0 = add i32 %x, 1, !dbg !11
-  %v1 = icmp slt i32 %v0, 0, !dbg !12
-  br i1 %v1, label %b1, label %b2, !dbg !12
-b1:
-  br label %b2, !dbg !13
-b2:
-  ret i32 %x, !dbg !14
-}
-define internal void @plain() #0 {
-b0:
-  ret void
-}
-attributes #0 = { "no-builtin-helper" }
-!llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!3, !4}
-!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: "fas 0.6.3", isOptimized: false, runtimeVersion: 0, emissionKind: LineTablesOnly)
-!1 = !DIFile(filename: "main.fas", directory: "/work/app")
-!2 = !DIFile(filename: "util.fas", directory: "/work/lib")
-!3 = !{i32 7, !"Dwarf Version", i32 5}
-!4 = !{i32 2, !"Debug Info Version", i32 3}
-!5 = distinct !DISubprogram(name: "main", scope: !1, file: !1, line: 3, type: !7, scopeLine: 3, spFlags: DISPFlagDefinition, unit: !0)
-!6 = distinct !DISubprogram(name: "helper", scope: !2, file: !2, line: 10, type: !7, scopeLine: 10, spFlags: DISPFlagDefinition, unit: !0)
-!7 = !DISubroutineType(types: !{})
-!8 = !DILocation(line: 3, column: 0, scope: !5)
-!9 = !DILocation(line: 4, column: 5, scope: !5)
-!10 = !DILocation(line: 6, column: 3, scope: !5)
-!11 = !DILocation(line: 11, column: 3, scope: !6)
-!12 = !DILocation(line: 12, column: 3, scope: !6)
-!13 = !DILocation(line: 13, column: 5, scope: !6)
-!14 = !DILocation(line: 14, column: 3, scope: !6)
-|}
+    expected_file "fir_llvm_debug_info.expected"
+      (Fir_llvm.render ~debug_info:true debug_marked)
   in
-  assert (Ir.render ~debug_info:true debug_marked = debug_expected);
-  let debug_counted = String.length (Ir.render debug_marked) in
+  assert (Fir_llvm.render ~debug_info:true debug_marked = debug_expected);
+  let debug_counted = String.length (Fir_llvm.render debug_marked) in
   assert (debug_counted < String.length debug_expected);
   assert (
-    Ir.render_bounded ~debug_info:true ~budget:debug_counted debug_marked
+    Fir_llvm.render_bounded ~debug_info:true ~budget:debug_counted debug_marked
     = Ok debug_expected);
   (match
-     Ir.render_bounded ~debug_info:true ~budget:(debug_counted - 1) debug_marked
+     Fir_llvm.render_bounded ~debug_info:true ~budget:(debug_counted - 1) debug_marked
    with
   | Error message ->
       assert (
@@ -1079,119 +633,64 @@ attributes #0 = { "no-builtin-helper" }
             (debug_counted - 1))
   | Ok _ -> assert false);
   (match
-     Ir.render_bounded ~debug_info:true
+     Fir_llvm.render_bounded ~debug_info:true
        ~redirect:(fun name -> name ^ "_sym")
        ~budget:max_int debug_marked
    with
   | Ok text -> assert (contains text "linkageName: \"helper_sym\"")
   | Error _ -> assert false);
   let relative_module =
-    ir_module
-      [
-        {
-          (ir_function [ ir_block 0 (Ir.Ret None) ]) with
-          Ir.source = Some ("rel/x.fas", 1);
-        };
-      ]
+    let mc = fir_mc () in
+    let fn = fir_fn mc "control_flow" ~source:("rel/x.fas", 1) in
+    Lower_emit.ret fn None;
+    fir_finish fn;
+    fir_module mc
   in
   assert (
     contains
-      (Ir.render ~debug_info:true relative_module)
+      (Fir_llvm.render ~debug_info:true relative_module)
       (Printf.sprintf "!DIFile(filename: \"x.fas\", directory: \"%s/rel\")"
          (Sys.getcwd ())));
-  let marked_phi =
-    ir_module
-      [
-        ir_function
-          [
-            ir_block 0 (Ir.Br 1);
-            ir_block
-              ~instrs:
-                [
-                  Ir.Location (1, 1);
-                  Ir.Phi (0, Ir.I8, [ (Ir.Const (Ir.I8, 1L), 0) ]);
-                  Ir.Location (2, 1);
-                ]
-              1 (Ir.Ret None);
-          ];
-      ]
-  in
-  assert (Ir.validate marked_phi = Ok ());
-  expect_ir_error "block 0 has a negative source location"
-    (ir_module
-       [ ir_function [ ir_block ~instrs:[ Ir.Location (-1, 0) ] 0 (Ir.Ret None) ] ]);
-  expect_ir_error "has a negative source line"
-    (ir_module
-       [
-         {
-           (ir_function [ ir_block 0 (Ir.Ret None) ]) with
-           Ir.source = Some ("a.fas", -1);
-         };
-       ]);
   let wide_module =
-    let params =
-      List.init 100_000 (fun i ->
-          { Ir.name = "p" ^ string_of_int i; ty = Ir.I8; extension = Ir.No_extension })
-    in
-    let args =
-      List.init 100_000 (fun _ -> (Ir.I8, Ir.No_extension, Ir.Const (Ir.I8, 1L)))
-    in
-    ir_module
-      [
-        {
-          (ir_function
-             [
-               ir_block
-                 ~instrs:[ Ir.Call (None, Ir.No_extension, Ir.Void, "wide", args) ]
-                 0 (Ir.Ret None);
-             ])
-          with
-          Ir.name = "caller";
-        };
-        { (ir_function []) with Ir.name = "wide"; Ir.params };
-      ]
+    let mc = fir_mc () in
+    fir_declare mc "wide" ~params:(List.init 100_000 (fun _ -> (Low.I8, Low.No_extension)));
+    let fn = fir_fn mc "caller" in
+    Lower_emit.call fn None Low.No_extension Low.Void "wide"
+      (List.init 100_000 (fun _ -> (Low.I8, Low.No_extension, Low.Const (Low.I8, 1L))));
+    Lower_emit.ret fn None;
+    fir_finish fn;
+    fir_module mc
   in
-  assert (Ir.validate wide_module = Ok ());
-  (match Ir.render_bounded ~budget:1024 wide_module with
+  (match Fir_llvm.render_bounded ~budget:1024 wide_module with
   | Error message ->
       assert (message = "rendered LLVM text exceeds the configured limit of 1024 bytes")
   | Ok _ -> assert false);
-  let wide_text = Ir.render wide_module in
-  (match Ir.render_bounded ~budget:(String.length wide_text) wide_module with
+  let wide_text = Fir_llvm.render wide_module in
+  (match Fir_llvm.render_bounded ~budget:(String.length wide_text) wide_module with
   | Ok text -> assert (text = wide_text)
   | Error _ -> assert false);
   let expect_budget_rejection module_ =
-    match Ir.render_bounded ~budget:256 module_ with
+    match Fir_llvm.render_bounded ~budget:256 module_ with
     | Error message ->
         assert (message = "rendered LLVM text exceeds the configured limit of 256 bytes")
     | Ok _ -> assert false
   in
-  let long_name_module =
-    ir_module [ { (ir_function []) with Ir.name = String.make 1_000_000 'a' } ]
+  let one_function name =
+    let mc = fir_mc () in
+    fir_void mc name;
+    fir_module mc
   in
-  assert (Ir.validate long_name_module = Ok ());
-  expect_budget_rejection long_name_module;
-  let long_struct_module =
-    ir_module
-      ~structs:
-        [ { Ir.name = String.make 1_000_000 's'; fields = []; tail_padding = 0 } ]
-      [ ir_function [ ir_block 0 (Ir.Ret None) ] ]
-  in
-  assert (Ir.validate long_struct_module = Ok ());
-  expect_budget_rejection long_struct_module;
+  expect_budget_rejection (one_function (String.make 1_000_000 'a'));
   let long_plain_global =
-    ir_module
-      ~globals:
-        [ Ir.String_global { name = ".str.0"; bytes = String.make 1_000_000 'A' } ]
-      [ ir_function [ ir_block 0 (Ir.Ret None) ] ]
+    let mc = fir_mc () in
+    Lower_emit.string_global mc 0 (String.make 1_000_000 'A');
+    fir_void mc "control_flow";
+    fir_module mc
   in
-  assert (Ir.validate long_plain_global = Ok ());
   expect_budget_rejection long_plain_global;
-  let quoted_name_module = ir_module [ { (ir_function []) with Ir.name = "a\nb" } ] in
-  assert (Ir.validate quoted_name_module = Ok ());
-  assert (contains (Ir.render quoted_name_module) "@\"a\\nb\"");
-  expect_budget_rejection
-    (ir_module [ { (ir_function []) with Ir.name = String.make 1_000_000 '\n' } ]);
+  (* LLVM's escapes in a quoted name: \0A for a newline *)
+  assert (contains (Fir_llvm.render (one_function "a\nb")) "@\"a\\0Ab\"");
+  expect_budget_rejection (one_function (String.make 1_000_000 '\n'));
   let ast_source text = Source.create ~file:"ast.fas" ~text in
   let ast_expected = "fn f(a i64) i64 {\n  y i64 = a + 1\n  return y\n}\n" in
   let ast_program =
@@ -1734,13 +1233,19 @@ attributes #0 = { "no-builtin-helper" }
   in
   let edge_hir = expect_ok (Sema.check edge_program) in
   let edge_ir = expect_ok (Lower.lower edge_hir) in
-  let edge_llvm = Ir.render edge_ir in
+  let edge_llvm = Fir_llvm.render edge_ir in
   assert (contains edge_llvm "call void @llvm.trap()");
   assert (contains edge_llvm "@llvm.fshl.v4i32");
   assert (contains edge_llvm "declare <4 x i32> @llvm.fshl.v4i32");
   assert (contains edge_llvm "sext i1 true to i64");
-  let edge_debug = Ir.render_debug edge_ir in
-  assert (contains edge_debug "Module {");
+  let edge_debug = Fir_print.module_to_string edge_ir in
+  assert (contains edge_debug "func @rem (i8) -> (i8)");
+  assert (contains edge_debug "trap");
+  (* the Fir text parses back to the same module text *)
+  (match Fir_parse.parse_module edge_debug with
+  | again -> assert (Fir_print.module_to_string again = edge_debug)
+  | exception Fir_parse.Error (line, message) ->
+      failwith (Printf.sprintf "edge Fir text does not parse: %d: %s" line message));
   assert (edge_debug <> edge_llvm);
   let token_limits = { Limits.default with max_tokens = 1 } in
   (match Lexer.lex ~limits:token_limits (source "x /* trailing trivia */ ") with
@@ -1814,16 +1319,18 @@ attributes #0 = { "no-builtin-helper" }
   let pp = expect_ok (Parser.parse (source parity_text)) in
   let ph = expect_ok (Sema.check pp) in
   assert (List.length ph.Hir.strings = 2);
-  let pir = Ir.render (expect_ok (Lower.lower ph)) in
+  let pir = Fir_llvm.render (expect_ok (Lower.lower ph)) in
   List.iter
     (fun needle -> assert (contains pir needle))
     [
       "target datalayout";
-      "%struct.Pair = type";
-      "[2 x i32]";
+      (* Fir's LLVM keeps memory as bytes: Pair is a 16-byte slot, K is
+         8 bytes of data *)
+      "alloca [16 x i8], align 8";
+      "@K = private constant [8 x i8]";
       "...";
       "phi i64";
-      "alloca i64";
+      "alloca [8 x i8], align 8";
     ];
   assert (not (contains pir "noalias"));
   assert (not (contains pir "align 16"));
@@ -1958,198 +1465,123 @@ attributes #0 = { "no-builtin-helper" }
         (Lower.lower
            (expect_ok (Sema.check (expect_ok (Parser.parse (source medium_functions))))))
     in
-    let rendered_before = Ir.render medium_ir in
-    let medium_nodes = Ir.count_lowered_nodes medium_ir in
+    let rendered_before = Fir_llvm.render medium_ir in
+    let medium_nodes = Fir_limits.count_lowered_nodes medium_ir in
     assert (medium_nodes > 8);
     assert (
-      Ir.check_lowered_nodes
+      Fir_limits.check_lowered_nodes
         ~limits:{ Limits.default with max_ir_nodes = medium_nodes }
         medium_ir
       = Ok ());
-    assert (Ir.render medium_ir = rendered_before);
+    assert (Fir_llvm.render medium_ir = rendered_before);
     let per_function_nodes =
       List.map
-        (fun f -> Ir.count_lowered_nodes { medium_ir with Ir.funcs = [ f ] })
-        medium_ir.Ir.funcs
+        Fir_limits.func_nodes
+        (Fir.Vec.to_list medium_ir.Fir.funcs)
     in
     let ir_over = { Limits.default with max_ir_nodes = medium_nodes - 1 } in
     assert (List.for_all (fun n -> n < medium_nodes - 1) per_function_nodes);
     expect_ir_diag
       [ "max_ir_nodes"; string_of_int (medium_nodes - 1); "0.1.5"; "at function `m7`" ]
       (Some "m7")
-      (Ir.check_lowered_nodes ~limits:ir_over medium_ir);
-    let ir_over_first = Ir.check_lowered_nodes ~limits:ir_over medium_ir in
-    let ir_over_second = Ir.check_lowered_nodes ~limits:ir_over medium_ir in
+      (Fir_limits.check_lowered_nodes ~limits:ir_over medium_ir);
+    let ir_over_first = Fir_limits.check_lowered_nodes ~limits:ir_over medium_ir in
+    let ir_over_second = Fir_limits.check_lowered_nodes ~limits:ir_over medium_ir in
     assert (ir_over_first = ir_over_second);
     assert (
-      Ir.check_lowered_nodes
+      Fir_limits.check_lowered_nodes
         ~limits:{ Limits.default with max_ir_nodes = max_int }
         medium_ir
       = Ok ());
     expect_ir_diag
       [ "budget max_ir_nodes must not be negative"; "0.1.5" ]
       None
-      (Ir.check_lowered_nodes
+      (Fir_limits.check_lowered_nodes
          ~limits:{ Limits.default with max_ir_nodes = min_int }
          medium_ir);
     let static_small =
-      ir_module
-        ~globals:
-          [
-            Ir.String_global { name = "s0"; bytes = "ok" };
-            Ir.Array_global
-              { name = "a0"; elem_ty = Ir.I32; elems = [ 1L; 2L; 3L; 4L ]; align = 4 };
-          ]
-        []
+      fir_data_module (fun mc ->
+          fir_bytes_global mc "s0" "ok";
+          Lower_emit.array_global mc ~name:"a0" ~elem_ty:Low.I32 ~elems:[ 1L; 2L; 3L; 4L ]
+            ~align:4)
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 18 }
         static_small
       = Ok ());
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = max_int }
         static_small
       = Ok ());
     expect_ir_diag
       [ "max_static_data_bytes"; "17"; "0.1.5"; "at global `a0`" ]
       (Some "a0")
-      (Ir.check_static_data_bytes
+      (Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 17 }
          static_small);
     expect_ir_diag
       [ "budget max_static_data_bytes must not be negative"; "0.1.5" ]
       None
-      (Ir.check_static_data_bytes
+      (Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = min_int }
          static_small);
     let six = String.make 6 's' in
     let static_cumulative =
-      ir_module
-        ~globals:
-          [
-            Ir.String_global { name = "g0"; bytes = six };
-            Ir.String_global { name = "g1"; bytes = six };
-            Ir.String_global { name = "g2"; bytes = six };
-          ]
-        []
+      fir_data_module (fun mc -> List.iter (fun n -> fir_bytes_global mc n six) [ "g0"; "g1"; "g2" ])
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 18 }
         static_cumulative
       = Ok ());
     expect_ir_diag
       [ "max_static_data_bytes"; "10"; "0.1.5"; "at global `g1`" ]
       (Some "g1")
-      (Ir.check_static_data_bytes
+      (Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 10 }
          static_cumulative);
-    let static_overflow =
-      ir_module
-        ~globals:
-          [
-            Ir.Array_global
-              {
-                name = "huge";
-                elem_ty = Ir.Array (max_int, Ir.Array (max_int, Ir.I8));
-                elems = [ 0L ];
-                align = 1;
-              };
-          ]
-        []
-    in
-    expect_ir_diag
-      [ "max_static_data_bytes"; "0.1.5"; "at global `huge`" ]
-      (Some "huge")
-      (Ir.check_static_data_bytes
-         ~limits:{ Limits.default with max_static_data_bytes = max_int }
-         static_overflow);
-    let static_overflow_pair =
-      ir_module
-        ~globals:
-          [
-            Ir.Array_global
-              {
-                name = "wide";
-                elem_ty = Ir.Array (max_int, Ir.I8);
-                elems = [ 0L; 0L ];
-                align = 1;
-              };
-          ]
-        []
-    in
-    expect_ir_diag
-      [ "max_static_data_bytes"; "0.1.5"; "at global `wide`" ]
-      (Some "wide")
-      (Ir.check_static_data_bytes
-         ~limits:{ Limits.default with max_static_data_bytes = max_int }
-         static_overflow_pair);
+    (* (A global too big for an int is now a lowering error: Fir sizes are
+       ints. The old Ir's overflow tests went with it.) *)
     let static_over_first =
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 17 }
         static_small
     in
     let static_over_second =
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 17 }
         static_small
     in
     assert (static_over_first = static_over_second);
+    (* struct P { i8; [3 x i8]; i32; i16 } + 2 bytes tail padding: 12 bytes;
+       Q { [0 x <8 x i8>]; P; [4 x i8]; i64 }: 24. 2 Ps and a Q are 48. *)
     let static_padded =
-      ir_module
-        ~structs:
-          [
-            {
-              Ir.name = "P";
-              fields = [ Ir.I8; Ir.Array (3, Ir.I8); Ir.I32; Ir.I16 ];
-              tail_padding = 2;
-            };
-            {
-              Ir.name = "Q";
-              fields =
-                [
-                  Ir.Array (0, Ir.Vector (8, Ir.I8));
-                  Ir.Struct "P";
-                  Ir.Array (4, Ir.I8);
-                  Ir.I64;
-                ];
-              tail_padding = 0;
-            };
-          ]
-        ~globals:
-          [
-            Ir.Array_global
-              {
-                name = "padded";
-                elem_ty = Ir.Struct "P";
-                elems = [ 0L; 0L ];
-                align = 4;
-              };
-            Ir.Array_global
-              { name = "nested"; elem_ty = Ir.Struct "Q"; elems = [ 0L ]; align = 8 };
-          ]
-        []
+      fir_data_module ~lay:[ ("P", (12, 4)); ("Q", (24, 8)) ] (fun mc ->
+          Lower_emit.array_global mc ~name:"padded" ~elem_ty:(Low.Struct "P") ~elems:[ 0L; 0L ]
+            ~align:4;
+          Lower_emit.array_global mc ~name:"nested" ~elem_ty:(Low.Struct "Q") ~elems:[ 0L ]
+            ~align:8)
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 48 }
         static_padded
       = Ok ());
     expect_ir_diag
       [ "max_static_data_bytes"; "47"; "0.1.5"; "at global `nested`" ]
       (Some "nested")
-      (Ir.check_static_data_bytes
+      (Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 47 }
          static_padded);
     let static_padded_first =
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 47 }
         static_padded
     in
     let static_padded_second =
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 47 }
         static_padded
     in
@@ -2176,8 +1608,8 @@ attributes #0 = { "no-builtin-helper" }
     in
     assert (List.length exact_two.Hir.funcs = 2);
     assert (
-      Ir.render (expect_ok (Lower.lower exact_two))
-      = Ir.render (expect_ok (Lower.lower (expect_ok (Sema.check two_program)))));
+      Fir_llvm.render (expect_ok (Lower.lower exact_two))
+      = Fir_llvm.render (expect_ok (Lower.lower (expect_ok (Sema.check two_program)))));
     (match
        Sema.check
          ~limits:{ Limits.default with max_type_nodes = 2 }
@@ -2422,31 +1854,18 @@ attributes #0 = { "no-builtin-helper" }
       = Some first_span)
   in
   let run_debug_ir_budget_tests () =
-    let empty = ir_module [] in
-    let expected_empty =
-      Printf.sprintf
-        "Module {\n\
-        \  target_triple = %S;\n\
-        \  data_layout = %S;\n\
-        \  no_inline_functions = [];\n\
-        \  globals = [\n\
-        \  ];\n\
-        \  functions = [\n\
-        \  ];\n\
-         }\n"
-        empty.Ir.target_triple empty.Ir.data_layout
-    in
-    (match Ir.render_debug_bounded ~limits:Limits.default empty with
-    | Ok text -> assert (text = expected_empty)
+    let empty = fir_data_module ignore in
+    (match Fir_limits.render_text ~limits:Limits.default empty with
+    | Ok text -> assert (text = Fir_print.module_to_string empty)
     | Error _ -> assert false);
     let small =
-      ir_module
-        ~globals:[ Ir.String_global { name = "s"; bytes = "abc" } ]
-        [ ir_function [ ir_block 0 (Ir.Ret None) ] ]
+      fir_data_module (fun mc ->
+          fir_bytes_global mc "s" "abc";
+          fir_void_function mc "control_flow" (fun fn -> Lower_emit.ret fn None))
     in
     let full =
       match
-        Ir.render_debug_bounded
+        Fir_limits.render_text
           ~limits:{ Limits.default with max_rendered_ir_bytes = max_int }
           small
       with
@@ -2455,14 +1874,14 @@ attributes #0 = { "no-builtin-helper" }
     in
     let length = String.length full in
     (match
-       Ir.render_debug_bounded
+       Fir_limits.render_text
          ~limits:{ Limits.default with max_rendered_ir_bytes = length }
          small
      with
     | Ok text -> assert (text = full)
     | Error _ -> assert false);
     (match
-       Ir.render_debug_bounded
+       Fir_limits.render_text
          ~limits:{ Limits.default with max_rendered_ir_bytes = length - 1 }
          small
      with
@@ -2473,7 +1892,7 @@ attributes #0 = { "no-builtin-helper" }
         assert (contains message "(profile 0.1.5)")
     | Ok _ -> assert false);
     (match
-       Ir.render_debug_bounded
+       Fir_limits.render_text
          ~limits:{ Limits.default with max_rendered_ir_bytes = min_int }
          small
      with
@@ -2482,7 +1901,7 @@ attributes #0 = { "no-builtin-helper" }
     | Ok _ -> assert false);
     let over =
       match
-        Ir.render_debug_bounded
+        Fir_limits.render_text
           ~limits:{ Limits.default with max_rendered_ir_bytes = length - 1 }
           small
       with
@@ -2490,41 +1909,47 @@ attributes #0 = { "no-builtin-helper" }
       | Ok _ -> assert false
     in
     match
-      Ir.render_debug_bounded
+      Fir_limits.render_text
         ~limits:{ Limits.default with max_rendered_ir_bytes = length - 1 }
         small
     with
     | Error message -> assert (message = over)
     | Ok _ -> assert false
   in
+  (* a function [control_flow] with one alloca of each [slots] type, each in
+     its own block *)
+  let scratch_module slots =
+    fir_data_module (fun mc ->
+        fir_void_function mc "control_flow" (fun fn ->
+            List.iteri
+              (fun i (t, align) ->
+                if i > 0 then (
+                  let b = Lower_emit.new_block fn in
+                  Lower_emit.br fn b;
+                  Lower_emit.enter fn b None);
+                Lower_emit.alloca fn i t align)
+              slots;
+            Lower_emit.ret fn None))
+  in
   let run_scratch_budget_tests () =
-    let one =
-      ir_module
-        [
-          ir_function
-            [
-              ir_block ~instrs:[ Ir.Alloca (0, Ir.I32, 4) ] 0 (Ir.Br 1);
-              ir_block ~instrs:[ Ir.Alloca (1, Ir.I64, 8) ] 1 (Ir.Ret None);
-            ];
-        ]
-    in
+    let one = scratch_module [ (Low.I32, 4); (Low.I64, 8) ] in
     assert (
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 12 }
         one
       = Ok ());
     assert (
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = max_int }
         one
       = Ok ());
     assert (
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 0 }
-        (ir_module [])
+        (fir_data_module ignore)
       = Ok ());
     (match
-       Ir.check_stack_scratch_bytes
+       Fir_limits.check_stack_scratch_bytes
          ~limits:{ Limits.default with max_stack_scratch_bytes = 11 }
          one
      with
@@ -2538,7 +1963,7 @@ attributes #0 = { "no-builtin-helper" }
         assert (contains message "at function `control_flow`")
     | Ok () -> assert false);
     (match
-       Ir.check_stack_scratch_bytes
+       Fir_limits.check_stack_scratch_bytes
          ~limits:{ Limits.default with max_stack_scratch_bytes = min_int }
          one
      with
@@ -2546,36 +1971,15 @@ attributes #0 = { "no-builtin-helper" }
         assert (offender = None);
         assert (contains message "budget max_stack_scratch_bytes must not be negative")
     | Ok () -> assert false);
-    let overflow =
-      ir_module
-        [
-          ir_function
-            [
-              ir_block
-                ~instrs:
-                  [ Ir.Alloca (0, Ir.Array (max_int, Ir.Array (max_int, Ir.I8)), 1) ]
-                0 (Ir.Ret None);
-            ];
-        ]
-    in
-    (match
-       Ir.check_stack_scratch_bytes
-         ~limits:{ Limits.default with max_stack_scratch_bytes = max_int }
-         overflow
-     with
-    | Error (offender, message) ->
-        assert (offender = Some "control_flow");
-        assert (
-          contains message
-            "cumulative alloca scratch bytes exceed budget max_stack_scratch_bytes")
-    | Ok () -> assert false);
+    (* (The old Ir's overflowing [max_int x [max_int x i8]] slot is gone:
+       Lower_emit sizes a slot as an int when it emits the alloca.) *)
     let over_first =
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 11 }
         one
     in
     let over_second =
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 11 }
         one
     in
@@ -2583,19 +1987,15 @@ attributes #0 = { "no-builtin-helper" }
   in
   let run_vector_size_tests () =
     let check_scratch budget slot_ty =
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = budget }
-        (ir_module
-           [
-             ir_function
-               [ ir_block ~instrs:[ Ir.Alloca (0, slot_ty, 1) ] 0 (Ir.Ret None) ];
-           ])
+        (scratch_module [ (slot_ty, 1) ])
     in
-    assert (check_scratch 8 (Ir.Vector (3, Ir.I16)) = Ok ());
-    assert (check_scratch 1 (Ir.Vector (8, Ir.I1)) = Ok ());
-    assert (check_scratch 16 (Ir.Vector (3, Ir.I32)) = Ok ());
-    assert (check_scratch 4 (Ir.Vector (3, Ir.I8)) = Ok ());
-    assert (check_scratch 8 (Ir.Array (2, Ir.Vector (3, Ir.I8))) = Ok ());
+    assert (check_scratch 8 (Low.Vector (3, Low.I16)) = Ok ());
+    assert (check_scratch 1 (Low.Vector (8, Low.I1)) = Ok ());
+    assert (check_scratch 16 (Low.Vector (3, Low.I32)) = Ok ());
+    assert (check_scratch 4 (Low.Vector (3, Low.I8)) = Ok ());
+    assert (check_scratch 8 (Low.Array (2, Low.Vector (3, Low.I8))) = Ok ());
     let over budget slot_ty =
       match check_scratch budget slot_ty with
       | Error (offender, message) ->
@@ -2605,52 +2005,42 @@ attributes #0 = { "no-builtin-helper" }
               "cumulative alloca scratch bytes exceed budget max_stack_scratch_bytes")
       | Ok () -> assert false
     in
-    over 7 (Ir.Vector (3, Ir.I16));
-    over 0 (Ir.Vector (8, Ir.I1));
-    over 15 (Ir.Vector (3, Ir.I32));
-    over 3 (Ir.Vector (3, Ir.I8));
-    over 7 (Ir.Array (2, Ir.Vector (3, Ir.I8)));
+    over 7 (Low.Vector (3, Low.I16));
+    over 0 (Low.Vector (8, Low.I1));
+    over 15 (Low.Vector (3, Low.I32));
+    over 3 (Low.Vector (3, Low.I8));
+    over 7 (Low.Array (2, Low.Vector (3, Low.I8)));
     let vec_global elem_ty =
-      ir_module
-        ~globals:[ Ir.Array_global { name = "vg"; elem_ty; elems = [ 0L ]; align = 4 } ]
-        []
+      fir_data_module (fun mc ->
+          Lower_emit.array_global mc ~name:"vg" ~elem_ty ~elems:[ 0L ] ~align:4)
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 4 }
-        (vec_global (Ir.Vector (3, Ir.I8)))
+        (vec_global (Low.Vector (3, Low.I8)))
       = Ok ());
     (match
-       Ir.check_static_data_bytes
+       Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 3 }
-         (vec_global (Ir.Vector (3, Ir.I8)))
+         (vec_global (Low.Vector (3, Low.I8)))
      with
     | Error (offender, _) -> assert (offender = Some "vg")
     | Ok () -> assert false);
+    (* struct W { [2 x <3 x i8>] }: the front end's layout gives 8 bytes *)
+    let w_size = Lower_emit.size_of (Hashtbl.create 1) (Low.Array (2, Low.Vector (3, Low.I8))) in
+    assert (w_size = 8);
     let wrapped =
-      ir_module
-        ~structs:
-          [
-            {
-              Ir.name = "W";
-              fields = [ Ir.Array (2, Ir.Vector (3, Ir.I8)) ];
-              tail_padding = 0;
-            };
-          ]
-        ~globals:
-          [
-            Ir.Array_global
-              { name = "w"; elem_ty = Ir.Struct "W"; elems = [ 0L ]; align = 4 };
-          ]
-        []
+      fir_data_module ~lay:[ ("W", (w_size, 4)) ] (fun mc ->
+          Lower_emit.array_global mc ~name:"w" ~elem_ty:(Low.Struct "W") ~elems:[ 0L ]
+            ~align:4)
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 8 }
         wrapped
       = Ok ());
     (match
-       Ir.check_static_data_bytes
+       Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 7 }
          wrapped
      with
@@ -2665,12 +2055,12 @@ attributes #0 = { "no-builtin-helper" }
     let source_hir = expect_ok (Sema.check source_program) in
     let source_ir = expect_ok (Lower.lower source_hir) in
     assert (
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 8 }
         source_ir
       = Ok ());
     match
-      Ir.check_stack_scratch_bytes
+      Fir_limits.check_stack_scratch_bytes
         ~limits:{ Limits.default with max_stack_scratch_bytes = 7 }
         source_ir
     with
@@ -2687,27 +2077,33 @@ attributes #0 = { "no-builtin-helper" }
       | Ok (size, _) -> size
       | Error message -> failwith message
     in
-    let assert_pair ir_ty hir_ty =
-      match Ir.static_type_bytes [] [] ir_ty with
+    (* Lower_emit's slot sizes must agree with the front end's layouts *)
+    let static_type_bytes ty =
+      match Lower_emit.size_of (Hashtbl.create 1) ty with
+      | n -> Ok n
+      | exception Lower_emit.Unsupported _ -> Error ()
+    in
+    let assert_pair low_ty hir_ty =
+      match static_type_bytes low_ty with
       | Ok bytes -> assert (bytes = hir_size hir_ty)
       | Error () -> assert false
     in
     let elems =
       [
-        (Ir.I1, Hir.Bool);
-        (Ir.I8, Hir.Int Hir.U8);
-        (Ir.I16, Hir.Int Hir.U16);
-        (Ir.I32, Hir.Int Hir.U32);
-        (Ir.I64, Hir.Int Hir.U64);
+        (Low.I1, Hir.Bool);
+        (Low.I8, Hir.Int Hir.U8);
+        (Low.I16, Hir.Int Hir.U16);
+        (Low.I32, Hir.Int Hir.U32);
+        (Low.I64, Hir.Int Hir.U64);
       ]
     in
-    List.iter (fun (ir_e, hir_e) -> assert_pair ir_e hir_e) elems;
-    assert_pair (Ir.Pointer Ir.I8) Hir.Addr;
+    List.iter (fun (low_e, hir_e) -> assert_pair low_e hir_e) elems;
+    assert_pair (Low.Pointer Low.I8) Hir.Addr;
     List.iter
       (fun lanes ->
         List.iter
-          (fun (ir_e, hir_e) ->
-            assert_pair (Ir.Vector (lanes, ir_e)) (Hir.Vec (lanes, hir_e)))
+          (fun (low_e, hir_e) ->
+            assert_pair (Low.Vector (lanes, low_e)) (Hir.Vec (lanes, hir_e)))
           elems)
       [ 1; 2; 3; 4; 5; 7; 8; 9; 16; 31; 64 ];
     List.iter
@@ -2715,26 +2111,26 @@ attributes #0 = { "no-builtin-helper" }
         List.iter
           (fun lanes ->
             List.iter
-              (fun (ir_e, hir_e) ->
+              (fun (low_e, hir_e) ->
                 assert_pair
-                  (Ir.Array (count, Ir.Vector (lanes, ir_e)))
+                  (Low.Array (count, Low.Vector (lanes, low_e)))
                   (Hir.Array (count, Hir.Vec (lanes, hir_e))))
-              [ (Ir.I1, Hir.Bool); (Ir.I8, Hir.Int Hir.U8); (Ir.I16, Hir.Int Hir.U16) ])
+              [ (Low.I1, Hir.Bool); (Low.I8, Hir.Int Hir.U8); (Low.I16, Hir.Int Hir.U16) ])
           [ 1; 3; 8 ])
       [ 0; 1; 2; 3 ];
-    assert (Ir.static_type_bytes [] [] (Ir.Vector (2, Ir.Array (2, Ir.I8))) = Error ());
+    assert (static_type_bytes (Low.Vector (2, Low.Array (2, Low.I8))) = Error ());
     (match Hir.layout [] (Hir.Vec (2, Hir.Array (2, Hir.Int Hir.U8))) with
     | Error _ -> ()
     | Ok _ -> assert false);
-    assert (Ir.static_type_bytes [] [] (Ir.Vector (2, Ir.Void)) = Error ());
+    assert (static_type_bytes (Low.Vector (2, Low.Void)) = Error ());
     (match Hir.layout [] (Hir.Vec (2, Hir.Void)) with
     | Error _ -> ()
     | Ok _ -> assert false);
-    assert (Ir.static_type_bytes [] [] (Ir.Vector (2, Ir.Struct "s")) = Error ());
+    assert (static_type_bytes (Low.Vector (2, Low.Struct "s")) = Error ());
     (match Hir.layout [] (Hir.Vec (2, Hir.Struct "s")) with
     | Error _ -> ()
     | Ok _ -> assert false);
-    assert (Ir.static_type_bytes [] [] (Ir.Vector (2, Ir.Vector (2, Ir.I8))) = Error ());
+    assert (static_type_bytes (Low.Vector (2, Low.Vector (2, Low.I8))) = Error ());
     match Hir.layout [] (Hir.Vec (2, Hir.Vec (2, Hir.Int Hir.U8))) with
     | Error _ -> ()
     | Ok _ -> assert false
@@ -2881,7 +2277,7 @@ attributes #0 = { "no-builtin-helper" }
     let sd_text = "const A arr[4,u8] = { 1, 2, 3, 4 }\nfn f() void { return }\n" in
     let sd_program = expect_ok (Parser.parse (source sd_text)) in
     (match
-       Ir.check_static_data_bytes
+       Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 3 }
          (expect_ok (Lower.lower (expect_ok (Sema.check sd_program))))
      with
@@ -2910,18 +2306,20 @@ attributes #0 = { "no-builtin-helper" }
     if sd_message <> "object size exceeds budget max_object_size of 2 (profile 0.1.5)"
     then failwith ("staticdata-vs-object: winner drifted: " ^ sd_message);
     let global_data_program =
-      expect_ok (Parser.parse (source "var Zero u32\nvar Initialized u32 = 0\n"))
+      (* an all-zero initializer is zero-fill storage (bss) and costs no
+         static data, so the initialized global holds a 1 *)
+      expect_ok (Parser.parse (source "var Zero u32\nvar Initialized u32 = 1\n"))
     in
     let global_data_ir =
       expect_ok (Sema.check global_data_program) |> Lower.lower |> expect_ok
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 4 }
         global_data_ir
       = Ok ());
     (match
-       Ir.check_static_data_bytes
+       Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 3 }
          global_data_ir
      with
@@ -2940,12 +2338,12 @@ attributes #0 = { "no-builtin-helper" }
       expect_ok (Sema.check address_data_program) |> Lower.lower |> expect_ok
     in
     assert (
-      Ir.check_static_data_bytes
+      Fir_limits.check_static_data_bytes
         ~limits:{ Limits.default with max_static_data_bytes = 16 }
         address_data_ir
       = Ok ());
     (match
-       Ir.check_static_data_bytes
+       Fir_limits.check_static_data_bytes
          ~limits:{ Limits.default with max_static_data_bytes = 15 }
          address_data_ir
      with

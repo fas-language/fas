@@ -1,8 +1,13 @@
-type block_state = {
-  id : int;
-  instrs : Ir.instr Queue.t;
-  term : Ir.terminator option ref;
-}
+(* Lowers checked HIR to Fir (roadmap v0.6: one IR).
+
+   Operands are named with Low's small types (a result id reserved with
+   [fresh], a parameter, a constant...) and each instruction is a call into
+   Lower_emit, which appends Fir to the current block at once. *)
+
+module E = Lower_emit
+
+(* a block of the function being lowered: its Fir block index *)
+type block_state = { id : int }
 
 type loop = {
   label : string option;
@@ -11,23 +16,16 @@ type loop = {
   keep_scopes : int;
 }
 
-type local_slot = { pointer : Ir.value; size : int }
+type local_slot = { pointer : Low.value; size : int }
 
 type state = {
+  fn : E.fn;  (** the Fir function being built *)
   literal_globals : Hir.global list ref;
   mutable next_value : int;
-  mutable next_block : int;
-  blocks : block_state Queue.t;
-  entry : block_state;
-  entry_allocas : Ir.instr Queue.t;
-      (* Stack slots, placed at the very top of the entry block when the function
-         is assembled. Appending them to [entry] instead would put a slot declared
-         after a call behind that call, and inlining the call then turns the slot
-         into a dynamic stack allocation. *)
   mutable current : block_state;
-  env : (int, Ir.value * int) Hashtbl.t;
-  mutable env_scopes : (int * (Ir.value * int) option) list list;
-  ret : Ir.ty;
+  env : (int, Low.value * int) Hashtbl.t;
+  mutable env_scopes : (int * (Low.value * int) option) list list;
+  ret : Low.ty;
   structs : Hir.struct_def list;
   strings : string list;
   functions : Hir.func list;
@@ -57,31 +55,26 @@ let fresh s =
   s.next_value <- n + 1;
   n
 
-let fresh_block s =
-  let n = s.next_block in
-  s.next_block <- n + 1;
-  let b = { id = n; instrs = Queue.create (); term = ref None } in
-  Queue.add b s.blocks;
-  b
+let fresh_block s = { id = E.new_block s.fn }
 
-let emit s i = Queue.add i s.current.instrs
-let emit_entry s i = Queue.add i s.entry_allocas
-
+(* The source position of the code that follows. Stack slots
+   (E.alloca_entry) go at the very top of the entry block instead: appending
+   them where they are declared would put a slot declared after a call behind
+   that call, and inlining the call then turns the slot into a dynamic stack
+   allocation. *)
 let mark s (span : Span.t) =
   if (not (Span.is_synthetic span)) && Some span.Span.file = s.file then (
     s.location <- Some (span.Span.line, span.Span.column);
-    emit s (Ir.Location (span.Span.line, span.Span.column)))
+    E.location s.fn span.Span.line span.Span.column)
 
 let enter s block =
   s.current <- block;
-  Option.iter
-    (fun (line, column) -> Queue.add (Ir.Location (line, column)) block.instrs)
-    s.location
+  E.enter s.fn block.id s.location
 
-let open_block s = !(s.current.term) = None
+let open_block s = E.is_open s.fn s.current.id
 
 let value_ty = function
-  | Ir.Const (t, _)
+  | Low.Const (t, _)
   | Const_vector (t, _)
   | Null t
   | Undef t
@@ -92,9 +85,9 @@ let value_ty = function
       t
 
 let rec ty = function
-  | Hir.Bool -> Ir.I1
-  | Hir.Float Hir.F32 -> Ir.F32
-  | Hir.Float Hir.F64 -> Ir.F64
+  | Hir.Bool -> Low.I1
+  | Hir.Float Hir.F32 -> Low.F32
+  | Hir.Float Hir.F64 -> Low.F64
   | Hir.Int Hir.U8 | Hir.Int Hir.I8 -> I8
   | Hir.Int Hir.U16 | Hir.Int Hir.I16 -> I16
   | Hir.Int Hir.U32 | Hir.Int Hir.I32 -> I32
@@ -105,24 +98,24 @@ let rec ty = function
       | Ok 64 -> I64
       | Ok bits -> invalid_arg (Printf.sprintf "unsupported pointer width: %d" bits)
       | Error message -> invalid_arg message)
-  | Hir.Addr | Hir.Handle _ -> Ir.Pointer Ir.I8
-  | Hir.Vec (n, t) -> Ir.Vector (n, ty t)
-  | Hir.Array (n, t) -> Ir.Array (n, storage_ty t)
-  | Hir.Struct n -> Ir.Struct n
-  | Hir.Opaque n -> Ir.Struct n
-  | Hir.Void -> Ir.Void
+  | Hir.Addr | Hir.Handle _ -> Low.Pointer Low.I8
+  | Hir.Vec (n, t) -> Low.Vector (n, ty t)
+  | Hir.Array (n, t) -> Low.Array (n, storage_ty t)
+  | Hir.Struct n -> Low.Struct n
+  | Hir.Opaque n -> Low.Struct n
+  | Hir.Void -> Low.Void
 
 and storage_ty = function
-  | Hir.Bool -> Ir.I8
-  | Hir.Array (n, t) -> Ir.Array (n, storage_ty t)
-  | Hir.Struct n -> Ir.Struct n
-  | Hir.Opaque n -> Ir.Struct n
+  | Hir.Bool -> Low.I8
+  | Hir.Array (n, t) -> Low.Array (n, storage_ty t)
+  | Hir.Struct n -> Low.Struct n
+  | Hir.Opaque n -> Low.Struct n
   | t -> ty t
 
 let ir_extension = function
-  | Target_layout.C_no_extension -> Ir.No_extension
-  | Target_layout.C_sign_extension -> Ir.Sign_extension
-  | Target_layout.C_zero_extension -> Ir.Zero_extension
+  | Target_layout.C_no_extension -> Low.No_extension
+  | Target_layout.C_sign_extension -> Low.Sign_extension
+  | Target_layout.C_zero_extension -> Low.Zero_extension
 
 let c_extension = function
   | Hir.Bool -> ir_extension (Target_layout.current ()).c_abi_bool_extension
@@ -132,7 +125,7 @@ let c_extension = function
           (match kind with Hir.I8 | I16 | I32 | I64 | Isize -> true | _ -> false)
         (Hir.int_bytes kind * 8)
       |> ir_extension
-  | _ -> Ir.No_extension
+  | _ -> Low.No_extension
 
 let has_c_abi (f : Hir.func) = f.linkage = Hir.External_c
 
@@ -154,24 +147,22 @@ let load_value s value_ty pointer alignment =
   match value_ty with
   | Hir.Bool ->
       let byte_pointer =
-        match Ir.value_ty pointer with
-        | Ir.Pointer Ir.I8 -> pointer
+        match Low.value_ty pointer with
+        | Low.Pointer Low.I8 -> pointer
         | pointer_ty ->
             let id = fresh s in
-            emit s (Ir.Cast (id, "bitcast", pointer_ty, pointer, Ir.Pointer Ir.I8));
-            Ir.Local (id, Ir.Pointer Ir.I8)
+            E.cast s.fn id "bitcast" pointer_ty pointer (Low.Pointer Low.I8);
+            Low.Local (id, Low.Pointer Low.I8)
       in
       let loaded = fresh s in
-      emit s (Ir.Load (loaded, Ir.I8, byte_pointer, alignment));
+      E.load s.fn loaded Low.I8 byte_pointer alignment;
       let normalized = fresh s in
-      emit s
-        (Ir.Cmp
-           (normalized, Ir.Ne, Ir.I8, Ir.Local (loaded, Ir.I8), Ir.Const (Ir.I8, 0L)));
-      Ok (Ir.Local (normalized, Ir.I1))
+      E.cmp s.fn normalized Low.Ne Low.I8 (Low.Local (loaded, Low.I8)) (Low.Const (Low.I8, 0L));
+      Ok (Low.Local (normalized, Low.I1))
   | _ ->
       let loaded = fresh s in
-      emit s (Ir.Load (loaded, ty value_ty, pointer, alignment));
-      Ok (Ir.Local (loaded, ty value_ty))
+      E.load s.fn loaded (ty value_ty) pointer alignment;
+      Ok (Low.Local (loaded, ty value_ty))
 
 let rec place_alignment s expression =
   match expression with
@@ -212,10 +203,10 @@ let target_alignment s target target_ty =
       let* field_alignment = align s target_ty in
       Ok (min (offset_alignment base_alignment offset) field_alignment)
 
-let zero t = Ir.Const (t, 0L)
+let zero t = Low.Const (t, 0L)
 
 let ones span = function
-  | Ir.I1 -> Ok 1L
+  | Low.I1 -> Ok 1L
   | I8 -> Ok 0xffL
   | I16 -> Ok 0xffffL
   | I32 -> Ok 0xffff_ffffL
@@ -232,13 +223,13 @@ let is_float_type = function
   | _ -> false
 
 let cmp_for span t = function
-  | Ast.Eq when is_float_type t -> Ok Ir.Foeq
-  | Ne when is_float_type t -> Ok Ir.Fune
-  | Lt when is_float_type t -> Ok Ir.Folt
-  | Le when is_float_type t -> Ok Ir.Fole
-  | Gt when is_float_type t -> Ok Ir.Fogt
-  | Ge when is_float_type t -> Ok Ir.Foge
-  | Ast.Eq -> Ok Ir.Eq
+  | Ast.Eq when is_float_type t -> Ok Low.Foeq
+  | Ne when is_float_type t -> Ok Low.Fune
+  | Lt when is_float_type t -> Ok Low.Folt
+  | Le when is_float_type t -> Ok Low.Fole
+  | Gt when is_float_type t -> Ok Low.Fogt
+  | Ge when is_float_type t -> Ok Low.Foge
+  | Ast.Eq -> Ok Low.Eq
   | Ne -> Ok Ne
   | Lt -> Ok (if unsigned t then Ult else Slt)
   | Le -> Ok (if unsigned t then Ule else Sle)
@@ -248,11 +239,11 @@ let cmp_for span t = function
       error span "internal error: non-comparison operator reached comparison lowering"
 
 let bin_for span t = function
-  | Ast.Add when is_float_type t -> Ok Ir.Fadd
-  | Sub when is_float_type t -> Ok Ir.Fsub
-  | Mul when is_float_type t -> Ok Ir.Fmul
-  | Div when is_float_type t -> Ok Ir.Fdiv
-  | Ast.Add -> Ok Ir.Add
+  | Ast.Add when is_float_type t -> Ok Low.Fadd
+  | Sub when is_float_type t -> Ok Low.Fsub
+  | Mul when is_float_type t -> Ok Low.Fmul
+  | Div when is_float_type t -> Ok Low.Fdiv
+  | Ast.Add -> Ok Low.Add
   | Sub -> Ok Sub
   | Mul -> Ok Mul
   | Div -> Ok (if unsigned t then Udiv else Sdiv)
@@ -263,7 +254,7 @@ let bin_for span t = function
   | _ -> error span "internal error: non-arithmetic operator reached binary lowering"
 
 let width span = function
-  | Ir.I1 -> Ok 1
+  | Low.I1 -> Ok 1
   | I8 -> Ok 8
   | I16 -> Ok 16
   | I32 -> Ok 32
@@ -278,22 +269,21 @@ let coerce s span v target =
     let* target_width = width span target in
     let id = fresh s in
     let k = if from_width < target_width then "zext" else "trunc" in
-    emit s (Ir.Cast (id, k, from, v, target));
-    Ok (Ir.Local (id, target))
+    E.cast s.fn id k from v target;
+    Ok (Low.Local (id, target))
 
 let splat_scalar s span vector_ty elem_ty value =
   let* value = coerce s span value elem_ty in
   let inserted = fresh s in
-  emit s
-    (Ir.Insert (inserted, vector_ty, Ir.Zero vector_ty, Ir.Const (Ir.I32, 0L), value));
+  E.insert s.fn inserted vector_ty (Low.Zero vector_ty) (Low.Const (Low.I32, 0L)) value;
   let shuffled = fresh s in
-  emit s (Ir.Shuffle_zero (shuffled, vector_ty, Ir.Local (inserted, vector_ty)));
-  Ok (Ir.Local (shuffled, vector_ty))
+  E.shuffle_zero s.fn shuffled vector_ty (Low.Local (inserted, vector_ty));
+  Ok (Low.Local (shuffled, vector_ty))
 
 let shift_amount s span target value =
-  let elem_ty = match target with Ir.Vector (_, t) -> t | t -> t in
+  let elem_ty = match target with Low.Vector (_, t) -> t | t -> t in
   match (target, value_ty value) with
-  | (Ir.Vector (lanes, _) as target_ty), Ir.Vector (count_lanes, count_elem)
+  | (Low.Vector (lanes, _) as target_ty), Low.Vector (count_lanes, count_elem)
     when count_lanes = lanes ->
       let* bits = width span elem_ty in
       let mask = Int64.of_int (bits - 1) in
@@ -305,103 +295,95 @@ let shift_amount s span target value =
           let* target_width = width span elem_ty in
           let id = fresh s in
           let k = if from_width < target_width then "zext" else "trunc" in
-          emit s (Ir.Cast (id, k, from, value, target_ty));
-          Ok (Ir.Local (id, target_ty))
+          E.cast s.fn id k from value target_ty;
+          Ok (Low.Local (id, target_ty))
       in
       let* mask_vec =
-        splat_scalar s span target_ty elem_ty (Ir.Const (elem_ty, mask))
+        splat_scalar s span target_ty elem_ty (Low.Const (elem_ty, mask))
       in
       let id = fresh s in
-      emit s (Ir.Bin (id, Ir.And, target_ty, count, mask_vec));
-      Ok (Ir.Local (id, target_ty))
+      E.bin s.fn id Low.And target_ty count mask_vec;
+      Ok (Low.Local (id, target_ty))
   | _ -> (
       let* value = coerce s span value elem_ty in
       let* bits = width span elem_ty in
       let mask = Int64.of_int (bits - 1) in
       let id = fresh s in
-      emit s (Ir.Bin (id, Ir.And, elem_ty, value, Ir.Const (elem_ty, mask)));
-      let value = Ir.Local (id, elem_ty) in
+      E.bin s.fn id Low.And elem_ty value (Low.Const (elem_ty, mask));
+      let value = Low.Local (id, elem_ty) in
       match target with
-      | Ir.Vector _ -> splat_scalar s span target elem_ty value
+      | Low.Vector _ -> splat_scalar s span target elem_ty value
       | _ -> Ok value)
 
 let rec intrinsic_suffix span = function
-  | Ir.I8 -> Ok "i8"
-  | Ir.I16 -> Ok "i16"
-  | Ir.I32 -> Ok "i32"
-  | Ir.I64 -> Ok "i64"
-  | Ir.Vector (lanes, elem) ->
+  | Low.I8 -> Ok "i8"
+  | Low.I16 -> Ok "i16"
+  | Low.I32 -> Ok "i32"
+  | Low.I64 -> Ok "i64"
+  | Low.Vector (lanes, elem) ->
       let* elem_suffix = intrinsic_suffix span elem in
       Ok (Printf.sprintf "v%d%s" lanes elem_suffix)
   | _ -> error span "internal error: integer intrinsic has a non-integer type"
 
 let rec float_suffix span = function
-  | Ir.F32 -> Ok "f32"
-  | Ir.F64 -> Ok "f64"
-  | Ir.Vector (lanes, elem) ->
+  | Low.F32 -> Ok "f32"
+  | Low.F64 -> Ok "f64"
+  | Low.Vector (lanes, elem) ->
       let* suffix = float_suffix span elem in
       Ok (Printf.sprintf "v%d%s" lanes suffix)
   | _ -> error span "internal error: float intrinsic has a non-float type"
 
 let value_const s t value =
   match t with
-  | Ir.Vector (_, elem) ->
+  | Low.Vector (_, elem) ->
       let inserted = fresh s in
-      emit s
-        (Ir.Insert
-           (inserted, t, Ir.Zero t, Ir.Const (Ir.I32, 0L), Ir.Const (elem, value)));
+      E.insert s.fn inserted t (Low.Zero t) (Low.Const (Low.I32, 0L)) (Low.Const (elem, value));
       let shuffled = fresh s in
-      emit s (Ir.Shuffle_zero (shuffled, t, Ir.Local (inserted, t)));
-      Ir.Local (shuffled, t)
-  | _ -> Ir.Const (t, value)
+      E.shuffle_zero s.fn shuffled t (Low.Local (inserted, t));
+      Low.Local (shuffled, t)
+  | _ -> Low.Const (t, value)
 
 let compare s cmp t lhs rhs =
   let id = fresh s in
-  emit s (Ir.Cmp (id, cmp, t, lhs, rhs));
+  E.cmp s.fn id cmp t lhs rhs;
   match t with
-  | Ir.Vector (lanes, _) -> Ir.Local (id, Ir.Vector (lanes, Ir.I1))
-  | _ -> Ir.Local (id, Ir.I1)
+  | Low.Vector (lanes, _) -> Low.Local (id, Low.Vector (lanes, Low.I1))
+  | _ -> Low.Local (id, Low.I1)
 
 let reduce_any s span value =
   match value_ty value with
-  | Ir.I1 -> Ok value
-  | Ir.Vector (lanes, Ir.I1) as t ->
+  | Low.I1 -> Ok value
+  | Low.Vector (lanes, Low.I1) as t ->
       let id = fresh s in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             Ir.I1,
-             Printf.sprintf "llvm.vector.reduce.or.v%di1" lanes,
-             [ (t, Ir.No_extension, value) ] ));
-      Ok (Ir.Local (id, Ir.I1))
+      E.call s.fn (Some id) Low.No_extension Low.I1 (Printf.sprintf "llvm.vector.reduce.or.v%di1" lanes) [ (t, Low.No_extension, value) ];
+      Ok (Low.Local (id, Low.I1))
   | _ -> error span "internal error: boolean reduction has a non-boolean type"
 
 let condition_ty value =
   match value_ty value with
-  | Ir.I1 as t -> t
-  | Ir.Vector (_, Ir.I1) as t -> t
-  | _ -> Ir.I1
+  | Low.I1 as t -> t
+  | Low.Vector (_, Low.I1) as t -> t
+  | _ -> Low.I1
 
 let combine_conditions s lhs rhs =
   let t = condition_ty lhs in
   let id = fresh s in
-  emit s (Ir.Bin (id, Ir.And, t, lhs, rhs));
-  Ir.Local (id, t)
+  E.bin s.fn id Low.And t lhs rhs;
+  Low.Local (id, t)
 
 let either_condition s lhs rhs =
   let t = condition_ty lhs in
   let id = fresh s in
-  emit s (Ir.Bin (id, Ir.Or, t, lhs, rhs));
-  Ir.Local (id, t)
+  E.bin s.fn id Low.Or t lhs rhs;
+  Low.Local (id, t)
 
 let emit_trap s =
-  emit s Ir.Trap;
-  s.current.term := Some Ir.Unreachable
+  E.trap s.fn;
+  E.unreachable s.fn
 
 let guard_condition s condition =
   let trap = fresh_block s and valid = fresh_block s in
-  s.current.term := Some (Ir.CondBr (condition, trap.id, valid.id));
+  E.cond_br s.fn condition trap.id valid.id;
   enter s trap;
   emit_trap s;
   enter s valid
@@ -417,22 +399,22 @@ let lane_guard s index_expr iv lanes =
   let limit = value_const s ity (Int64.of_int lanes) in
   let condition =
     if signed_type (Hir.expr_ty index_expr) then
-      let below = compare s Ir.Slt ity iv (value_const s ity 0L) in
-      let above = compare s Ir.Sge ity iv limit in
+      let below = compare s Low.Slt ity iv (value_const s ity 0L) in
+      let above = compare s Low.Sge ity iv limit in
       either_condition s below above
-    else compare s Ir.Uge ity iv limit
+    else compare s Low.Uge ity iv limit
   in
   guard_condition s condition
 
 let division_guard s span source_ty binop ir_ty lhs rhs =
-  let zero_condition = compare s Ir.Eq ir_ty rhs (value_const s ir_ty 0L) in
+  let zero_condition = compare s Low.Eq ir_ty rhs (value_const s ir_ty 0L) in
   let* condition =
-    if binop = Ir.Sdiv && signed_type source_ty then
-      let* bits = width span (match ir_ty with Ir.Vector (_, t) -> t | t -> t) in
+    if binop = Low.Sdiv && signed_type source_ty then
+      let* bits = width span (match ir_ty with Low.Vector (_, t) -> t | t -> t) in
       let minimum = Int64.shift_left 1L (bits - 1) in
-      let lhs_minimum = compare s Ir.Eq ir_ty lhs (value_const s ir_ty minimum) in
+      let lhs_minimum = compare s Low.Eq ir_ty lhs (value_const s ir_ty minimum) in
       let rhs_minus_one =
-        compare s Ir.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
+        compare s Low.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
       in
       Ok
         (either_condition s zero_condition
@@ -440,23 +422,21 @@ let division_guard s span source_ty binop ir_ty lhs rhs =
     else Ok zero_condition
   in
   match value_ty condition with
-  | Ir.I1 ->
+  | Low.I1 ->
       guard_condition s condition;
       Ok ()
-  | Ir.Vector (lanes, Ir.I1) ->
+  | Low.Vector (lanes, Low.I1) ->
       let* any_lane = reduce_any s span condition in
       let ordered = fresh_block s and proceed = fresh_block s in
-      s.current.term := Some (Ir.CondBr (any_lane, ordered.id, proceed.id));
+      E.cond_br s.fn any_lane ordered.id proceed.id;
       enter s ordered;
       let rec guard_lane lane =
         if lane >= lanes then Ok ()
         else
           let id = fresh s in
-          emit s
-            (Ir.Extract
-               (id, value_ty condition, condition, Ir.Const (Ir.I64, Int64.of_int lane)));
+          E.extract s.fn id (value_ty condition) condition (Low.Const (Low.I64, Int64.of_int lane));
           let trap = fresh_block s and next = fresh_block s in
-          s.current.term := Some (Ir.CondBr (Ir.Local (id, Ir.I1), trap.id, next.id));
+          E.cond_br s.fn (Low.Local (id, Low.I1)) trap.id next.id;
           enter s trap;
           emit_trap s;
           enter s next;
@@ -473,42 +453,40 @@ let emit_binary s span source_ty op ir_ty lhs rhs =
     let* count = shift_amount s span ir_ty rhs in
     let binop =
       match op with
-      | Ast.Shr -> if unsigned source_ty then Ir.Lshr else Ir.Ashr
-      | _ -> Ir.Shl
+      | Ast.Shr -> if unsigned source_ty then Low.Lshr else Low.Ashr
+      | _ -> Low.Shl
     in
     let result = fresh s in
-    emit s (Ir.Bin (result, binop, ir_ty, lhs, count));
-    Ok (Ir.Local (result, ir_ty)))
+    E.bin s.fn result binop ir_ty lhs count;
+    Ok (Low.Local (result, ir_ty)))
   else
     let* binop = bin_for span source_ty op in
     let division =
-      match binop with Ir.Sdiv | Srem | Udiv | Urem -> true | _ -> false
+      match binop with Low.Sdiv | Srem | Udiv | Urem -> true | _ -> false
     in
     let* () =
       if division then division_guard s span source_ty binop ir_ty lhs rhs else Ok ()
     in
-    if binop = Ir.Srem then (
+    if binop = Low.Srem then (
       let is_minus_one =
-        compare s Ir.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
+        compare s Low.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
       in
       let safe_rhs_id = fresh s in
       let safe_rhs = value_const s ir_ty 1L in
-      emit s (Ir.Select (safe_rhs_id, is_minus_one, safe_rhs, rhs));
+      E.select s.fn safe_rhs_id is_minus_one safe_rhs rhs;
       let raw_id = fresh s in
-      emit s (Ir.Bin (raw_id, binop, ir_ty, lhs, Ir.Local (safe_rhs_id, ir_ty)));
+      E.bin s.fn raw_id binop ir_ty lhs (Low.Local (safe_rhs_id, ir_ty));
       let result_id = fresh s in
-      emit s
-        (Ir.Select
-           (result_id, is_minus_one, value_const s ir_ty 0L, Ir.Local (raw_id, ir_ty)));
-      Ok (Ir.Local (result_id, ir_ty)))
+      E.select s.fn result_id is_minus_one (value_const s ir_ty 0L) (Low.Local (raw_id, ir_ty));
+      Ok (Low.Local (result_id, ir_ty)))
     else
       let result = fresh s in
-      emit s (Ir.Bin (result, binop, ir_ty, lhs, rhs));
-      Ok (Ir.Local (result, ir_ty))
+      E.bin s.fn result binop ir_ty lhs rhs;
+      Ok (Low.Local (result, ir_ty))
 
 let require_bool span v =
   match value_ty v with
-  | Ir.I1 -> Ok v
+  | Low.I1 -> Ok v
   | _ -> error span "internal error: condition lowering received a non-bool value"
 
 let bind_local s binding value alignment =
@@ -560,8 +538,8 @@ let normalize_index_type s index_ty span value =
       else "sext"
     in
     let pointer_int = ty (Hir.Int Hir.Usize) in
-    emit s (Ir.Cast (id, kind, value_ty value, value, pointer_int));
-    Ok (Ir.Local (id, pointer_int))
+    E.cast s.fn id kind (value_ty value) value pointer_int;
+    Ok (Low.Local (id, pointer_int))
 
 let normalize_index s expression value =
   normalize_index_type s (Hir.expr_ty expression) (Hir.expr_span expression) value
@@ -611,12 +589,12 @@ let rec constant_construction structs = function
   | _ -> None
 
 let rec expr s = function
-  | Hir.EInt (v, t, _) -> Ok (Ir.Const (ty t, v))
-  | Hir.EFloat (v, t, _) -> Ok (Ir.Const (ty t, v))
-  | Hir.EBool (v, _) -> Ok (Ir.Const (Ir.I1, if v then 1L else 0L))
+  | Hir.EInt (v, t, _) -> Ok (Low.Const (ty t, v))
+  | Hir.EFloat (v, t, _) -> Ok (Low.Const (ty t, v))
+  | Hir.EBool (v, _) -> Ok (Low.Const (Low.I1, if v then 1L else 0L))
   | Hir.EVector
       (values, (Hir.Vec (lanes, (Hir.Bool | Hir.Int _ | Hir.Float _)) as t), span) ->
-      if List.length values = lanes then Ok (Ir.Const_vector (ty t, values))
+      if List.length values = lanes then Ok (Low.Const_vector (ty t, values))
       else error span "malformed vector constant lane count"
   | Hir.EVector (_, _, span) -> error span "malformed vector constant type"
   | Hir.Vector_lit (elements, (Hir.Vec (lanes, _) as vector_ty), span) ->
@@ -629,20 +607,18 @@ let rec expr s = function
           | element :: rest ->
               let* lane = expr s element in
               let id = fresh s in
-              emit s
-                (Ir.Insert
-                   (id, vector_ir_ty, value, Ir.Const (Ir.I32, Int64.of_int index), lane));
-              lanes_to_value (Ir.Local (id, vector_ir_ty)) (index + 1) rest
+              E.insert s.fn id vector_ir_ty value (Low.Const (Low.I32, Int64.of_int index)) lane;
+              lanes_to_value (Low.Local (id, vector_ir_ty)) (index + 1) rest
         in
-        lanes_to_value (Ir.Zero vector_ir_ty) 0 elements
+        lanes_to_value (Low.Zero vector_ir_ty) 0 elements
   | Hir.Vector_lit (_, _, span) -> error span "malformed vector literal type"
-  | Hir.Null (t, _) -> Ok (Ir.Null (ty t))
+  | Hir.Null (t, _) -> Ok (Low.Null (ty t))
   | Hir.EString (i, _, sp) ->
       if i < 0 || i >= List.length s.strings then error sp "missing interned string"
       else
         let id = fresh s in
-        emit s (Ir.String_ptr (id, i, String.length (List.nth s.strings i)));
-        Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+        E.string_ptr s.fn id i;
+        Ok (Low.Local (id, Low.Pointer Low.I8))
   | Hir.Local (local, sp) -> (
       match Hashtbl.find_opt s.env local.id with
       | None -> error sp ("unknown lowering local `" ^ local.name ^ "`")
@@ -653,41 +629,35 @@ let rec expr s = function
         place_alignment s (Hir.Global (name, global_ty, Span.synthetic))
       in
       load_value s global_ty p alignment
-  | Hir.Function_address (name, _) -> Ok (Ir.Global (name, Ir.Pointer Ir.I8))
+  | Hir.Function_address (name, _) -> Ok (Low.Global (name, Low.Pointer Low.I8))
   | Hir.Unary (op, e, t, span) -> (
       let* v = expr s e in
       let rt = ty t in
       match op with
       | Ast.Neg ->
           let id = fresh s in
-          if is_float_type t then emit s (Ir.Fneg (id, rt, v))
+          if is_float_type t then E.fneg s.fn id rt v
           else
-            emit s
-              (Ir.Bin
-                 ( id,
-                   Sub,
-                   rt,
-                   (match rt with Ir.Vector _ -> Ir.Zero rt | _ -> zero rt),
-                   v ));
-          Ok (Ir.Local (id, rt))
+            E.bin s.fn id Sub rt (match rt with Low.Vector _ -> Low.Zero rt | _ -> zero rt) v;
+          Ok (Low.Local (id, rt))
       | Bit_not ->
           let* mask =
-            ones span (match rt with Ir.Vector (_, elem) -> elem | _ -> rt)
+            ones span (match rt with Low.Vector (_, elem) -> elem | _ -> rt)
           in
           let all_ones = value_const s rt mask in
           let id = fresh s in
-          emit s (Ir.Bin (id, Xor, rt, v, all_ones));
-          Ok (Ir.Local (id, rt))
-      | Not when rt = Ir.I1 ->
+          E.bin s.fn id Xor rt v all_ones;
+          Ok (Low.Local (id, rt))
+      | Not when rt = Low.I1 ->
           let id = fresh s in
-          emit s (Ir.Cmp (id, Ir.Eq, Ir.I1, v, Ir.Const (Ir.I1, 0L)));
-          Ok (Ir.Local (id, Ir.I1))
+          E.cmp s.fn id Low.Eq Low.I1 v (Low.Const (Low.I1, 0L));
+          Ok (Low.Local (id, Low.I1))
       | Not -> (
           match rt with
-          | Ir.Vector (_, Ir.I1) ->
+          | Low.Vector (_, Low.I1) ->
               let id = fresh s in
-              emit s (Ir.Bin (id, Ir.Xor, rt, v, value_const s rt 1L));
-              Ok (Ir.Local (id, rt))
+              E.bin s.fn id Low.Xor rt v (value_const s rt 1L);
+              Ok (Low.Local (id, rt))
           | _ -> error span "internal error: logical not has a non-bool type"))
   | Hir.Binary (((Ast.And | Ast.Or) as op), a, b, _, _) -> lower_short s op a b
   | Hir.Binary (op, a, b, _t, span)
@@ -695,32 +665,26 @@ let rec expr s = function
       let* x = expr s a in
       let* y = expr s b in
       match op with
-      | Ast.Add -> address_step s Ir.Add x y
-      | Ast.Sub -> address_step s Ir.Sub x y
+      | Ast.Add -> address_step s Low.Add x y
+      | Ast.Sub -> address_step s Low.Sub x y
       | Ast.Eq | Ast.Ne | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge ->
           let pointer_int = ty (Hir.Int Hir.Usize) in
           let x_id = fresh s in
-          emit s (Ir.Cast (x_id, "ptrtoint", Ir.Pointer Ir.I8, x, pointer_int));
+          E.cast s.fn x_id "ptrtoint" (Low.Pointer Low.I8) x pointer_int;
           let y_id = fresh s in
-          emit s (Ir.Cast (y_id, "ptrtoint", Ir.Pointer Ir.I8, y, pointer_int));
+          E.cast s.fn y_id "ptrtoint" (Low.Pointer Low.I8) y pointer_int;
           let comparison =
             match op with
-            | Ast.Eq -> Ir.Eq
-            | Ast.Ne -> Ir.Ne
-            | Ast.Lt -> Ir.Ult
-            | Ast.Le -> Ir.Ule
-            | Ast.Gt -> Ir.Ugt
-            | _ -> Ir.Uge
+            | Ast.Eq -> Low.Eq
+            | Ast.Ne -> Low.Ne
+            | Ast.Lt -> Low.Ult
+            | Ast.Le -> Low.Ule
+            | Ast.Gt -> Low.Ugt
+            | _ -> Low.Uge
           in
           let id = fresh s in
-          emit s
-            (Ir.Cmp
-               ( id,
-                 comparison,
-                 pointer_int,
-                 Ir.Local (x_id, pointer_int),
-                 Ir.Local (y_id, pointer_int) ));
-          Ok (Ir.Local (id, Ir.I1))
+          E.cmp s.fn id comparison pointer_int (Low.Local (x_id, pointer_int)) (Low.Local (y_id, pointer_int));
+          Ok (Low.Local (id, Low.I1))
       | _ -> error span "internal error: invalid address binary operation")
   | Hir.Binary (op, a, b, t, span) ->
       let* x = expr s a in
@@ -728,8 +692,8 @@ let rec expr s = function
       if List.mem op [ Ast.Eq; Ne; Lt; Le; Gt; Ge ] then (
         let* comparison = cmp_for span (Hir.expr_ty a) op in
         let id = fresh s in
-        emit s (Ir.Cmp (id, comparison, value_ty x, x, y));
-        Ok (Ir.Local (id, ty t)))
+        E.cmp s.fn id comparison (value_ty x) x y;
+        Ok (Low.Local (id, ty t)))
       else emit_binary s span (Hir.expr_ty a) op (ty t) x y
   | Hir.Call (Hir.User n, args, t, sp) ->
       let* target =
@@ -750,22 +714,22 @@ let rec expr s = function
               | Some f -> (
                   match List.nth_opt f.params index with
                   | Some formal -> c_extension formal.ty
-                  | None -> Ir.No_extension)
-              | None -> Ir.No_extension
+                  | None -> Low.No_extension)
+              | None -> Low.No_extension
             in
             (value_ty v, extension, v))
           vs
       in
       let ret_extension =
-        match c_function with Some _ -> c_extension t | None -> Ir.No_extension
+        match c_function with Some _ -> c_extension t | None -> Low.No_extension
       in
       if t = Hir.Void then (
-        emit s (Ir.Call (None, Ir.No_extension, Ir.Void, n, av));
-        Ok (Ir.Const (Ir.I1, 0L)))
+        E.call s.fn None Low.No_extension Low.Void n av;
+        Ok (Low.Const (Low.I1, 0L)))
       else
         let id = fresh s in
-        emit s (Ir.Call (Some id, ret_extension, ty t, n, av));
-        Ok (Ir.Local (id, ty t))
+        E.call s.fn (Some id) ret_extension (ty t) n av;
+        Ok (Low.Local (id, ty t))
   | Hir.Call (Hir.Builtin b, args, t, span) -> lower_builtin s b args t span
   | Hir.Indirect_call (callee, args, result_ty, _) ->
       let* target = expr s callee in
@@ -777,13 +741,12 @@ let rec expr s = function
       in
       let result_extension = c_extension result_ty in
       if result_ty = Hir.Void then (
-        emit s (Ir.Call_indirect (None, Ir.No_extension, Ir.Void, target, arguments));
-        Ok (Ir.Const (Ir.I1, 0L)))
+        E.call_indirect s.fn None Low.No_extension Low.Void target arguments;
+        Ok (Low.Const (Low.I1, 0L)))
       else
         let id = fresh s in
-        emit s
-          (Ir.Call_indirect (Some id, result_extension, ty result_ty, target, arguments));
-        Ok (Ir.Local (id, ty result_ty))
+        E.call_indirect s.fn (Some id) result_extension (ty result_ty) target arguments;
+        Ok (Low.Local (id, ty result_ty))
   | Hir.Cast (kind, e, t, _) ->
       let* v = expr s e in
       let st = value_ty v and dt = ty t in
@@ -798,9 +761,9 @@ let rec expr s = function
           match kind with
           | Ast.Bitcast -> (
               match (st, dt) with
-              | Ir.Pointer _, Ir.Pointer _ -> ""
-              | Ir.Pointer _, _ -> "ptrtoint"
-              | _, Ir.Pointer _ -> "inttoptr"
+              | Low.Pointer _, Low.Pointer _ -> ""
+              | Low.Pointer _, _ -> "ptrtoint"
+              | _, Low.Pointer _ -> "inttoptr"
               | _ -> "bitcast")
           | Ast.Zext -> "zext"
           | Ast.Sext -> "sext"
@@ -810,16 +773,16 @@ let rec expr s = function
         if k = "" then Ok v
         else
           let id = fresh s in
-          emit s (Ir.Cast (id, k, st, v, dt));
-          Ok (Ir.Local (id, dt))
+          E.cast s.fn id k st v dt;
+          Ok (Low.Local (id, dt))
   | Hir.Raw_select (b, off, t, _) ->
       let* p = raw_address s b off in
       raw_load s t p
   | Hir.Address (e, _, _) ->
       let* p = address s e in
       let id = fresh s in
-      emit s (Ir.Cast (id, "bitcast", Ir.value_ty p, p, Ir.Pointer Ir.I8));
-      Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+      E.cast s.fn id "bitcast" (Low.value_ty p) p (Low.Pointer Low.I8);
+      Ok (Low.Local (id, Low.Pointer Low.I8))
   | Hir.Index (a, i, t, _) -> (
       match Hir.expr_ty a with
       | Hir.Vec (lanes, _) ->
@@ -828,8 +791,8 @@ let rec expr s = function
           let* iv = normalize_index s i iv in
           lane_guard s i iv lanes;
           let id = fresh s in
-          emit s (Ir.Extract (id, value_ty av, av, iv));
-          Ok (Ir.Local (id, ty t))
+          E.extract s.fn id (value_ty av) av iv;
+          Ok (Low.Local (id, ty t))
       | _ ->
           let* p = index_address s a i in
           let* alignment = place_alignment s (Hir.Index (a, i, t, Span.synthetic)) in
@@ -839,43 +802,31 @@ let rec expr s = function
       let* alignment = place_alignment s (Hir.Field (a, "", t, off, Span.synthetic)) in
       load_value s t p alignment
   | Hir.Sizeof (_, n, _) | Hir.Alignof (_, n, _) | Hir.Offsetof (_, _, n, _) ->
-      Ok (Ir.Const (ty (Hir.Int Hir.Usize), Int64.of_int n))
+      Ok (Low.Const (ty (Hir.Int Hir.Usize), Int64.of_int n))
   | Hir.Ternary (c, a, b, t, _) -> lower_ternary s c a b t
   | Hir.Splat (e, t, _) ->
       let* x = expr s e in
       let vt = ty t in
       let i1 = fresh s in
-      emit s (Ir.Insert (i1, vt, Ir.Zero vt, Ir.Const (Ir.I32, 0L), x));
+      E.insert s.fn i1 vt (Low.Zero vt) (Low.Const (Low.I32, 0L)) x;
       let i2 = fresh s in
-      emit s (Ir.Shuffle_zero (i2, vt, Ir.Local (i1, vt)));
-      Ok (Ir.Local (i2, vt))
+      E.shuffle_zero s.fn i2 vt (Low.Local (i1, vt));
+      Ok (Low.Local (i2, vt))
   | Hir.Const_array (n, t, _) ->
       let ptr_id = fresh s in
-      emit s (Ir.Global_ptr (ptr_id, n, storage_ty t));
+      E.global_ptr s.fn ptr_id n;
       let* alignment = place_alignment s (Hir.Const_array (n, t, Span.synthetic)) in
-      load_value s t (Ir.Local (ptr_id, Ir.Pointer (ty t))) alignment
+      load_value s t (Low.Local (ptr_id, Low.Pointer (ty t))) alignment
 
 and address_step s operation pointer offset =
   let pointer_int = ty (Hir.Int Hir.Usize) in
   let pointer_bits = fresh s in
-  emit s (Ir.Cast (pointer_bits, "ptrtoint", Ir.Pointer Ir.I8, pointer, pointer_int));
+  E.cast s.fn pointer_bits "ptrtoint" (Low.Pointer Low.I8) pointer pointer_int;
   let result_bits = fresh s in
-  emit s
-    (Ir.Bin
-       ( result_bits,
-         operation,
-         pointer_int,
-         Ir.Local (pointer_bits, pointer_int),
-         offset ));
+  E.bin s.fn result_bits operation pointer_int (Low.Local (pointer_bits, pointer_int)) offset;
   let result = fresh s in
-  emit s
-    (Ir.Cast
-       ( result,
-         "inttoptr",
-         pointer_int,
-         Ir.Local (result_bits, pointer_int),
-         Ir.Pointer Ir.I8 ));
-  Ok (Ir.Local (result, Ir.Pointer Ir.I8))
+  E.cast s.fn result "inttoptr" pointer_int (Low.Local (result_bits, pointer_int)) (Low.Pointer Low.I8);
+  Ok (Low.Local (result, Low.Pointer Low.I8))
 
 and exprs s xs = Result_list.map (expr s) xs
 
@@ -885,76 +836,52 @@ and lower_builtin s b args t span =
   match (b, vs) with
   | Volatile_load access_ty, [ pointer ] -> volatile_load s span access_ty pointer
   | Atomic (op, order, _), values ->
-      (* Atomics travel through the old Ir as calls to `__fas_atomic_<op>_<order>`
-         (Ir.atomic_name). The LLVM renderer prints the real atomic instruction;
-         native passes see an opaque, memory-clobbering call. *)
-      let op =
-        match op with
-        | Hir.Atomic_load -> Ir.A_load
-        | Hir.Atomic_store -> Ir.A_store
-        | Hir.Atomic_add -> Ir.A_add
-        | Hir.Atomic_sub -> Ir.A_sub
-        | Hir.Atomic_and -> Ir.A_and
-        | Hir.Atomic_or -> Ir.A_or
-        | Hir.Atomic_xor -> Ir.A_xor
-        | Hir.Atomic_xchg -> Ir.A_xchg
-        | Hir.Atomic_cas -> Ir.A_cas
-        | Hir.Atomic_fence -> Ir.A_fence
-      and order =
-        match order with
-        | Hir.Relaxed -> Ir.Relaxed
-        | Hir.Acquire -> Ir.Acquire
-        | Hir.Release -> Ir.Release
-        | Hir.Acq_rel -> Ir.Acq_rel
-        | Hir.Seq_cst -> Ir.Seq_cst
+      (* the accessed type: the stored value's for a store, else the result's *)
+      let access =
+        match (op, values) with
+        | Hir.Atomic_store, [ _; v ] -> Low.value_ty v
+        | _ -> rt
       in
-      let args = List.map (fun v -> (Ir.value_ty v, Ir.No_extension, v)) values in
-      let name =
-        match args with
-        | [] -> Ir.atomic_name op order
-        | (_ :: _ :: _) -> Ir.atomic_name ~ty:(let t, _, _ = List.nth args 1 in t) op order
-        | [ _ ] -> Ir.atomic_name ~ty:rt op order
-      in
-      if rt = Ir.Void then (
-        emit s (Ir.Call (None, Ir.No_extension, Ir.Void, name, args));
-        Ok (Ir.Const (Ir.I1, 0L)))
+      if rt = Low.Void then (
+        E.atomic s.fn None op order access values;
+        Ok (Low.Const (Low.I1, 0L)))
       else
         let id = fresh s in
-        emit s (Ir.Call (Some id, Ir.No_extension, rt, name, args));
-        Ok (Ir.Local (id, rt))
+        E.atomic s.fn (Some id) op order access values;
+        Ok (Low.Local (id, rt))
   | Simd_load (access_ty, kind), values ->
       simd_memory_load s span access_ty kind args values
   | Addr_bits, [ x ] ->
       let id = fresh s in
-      emit s (Ir.Cast (id, "ptrtoint", Ir.value_ty x, x, rt));
-      Ok (Ir.Local (id, rt))
+      E.cast s.fn id "ptrtoint" (Low.value_ty x) x rt;
+      Ok (Low.Local (id, rt))
   | Syscall, values ->
       let* words =
         Result_list.map
           (fun (arg, v) ->
-            match (Hir.expr_ty arg, Ir.value_ty v) with
-            | _, Ir.Pointer _ ->
+            match (Hir.expr_ty arg, Low.value_ty v) with
+            | _, Low.Pointer _ ->
                 let id = fresh s in
-                emit s (Ir.Cast (id, "ptrtoint", Ir.value_ty v, v, Ir.I64));
-                Ok (Ir.Local (id, Ir.I64))
-            | _, Ir.I64 -> Ok v
+                E.cast s.fn id "ptrtoint" (Low.value_ty v) v Low.I64;
+                Ok (Low.Local (id, Low.I64))
+            | _, Low.I64 -> Ok v
             | Hir.Int (Hir.I8 | I16 | I32 | Isize), from ->
                 let id = fresh s in
-                emit s (Ir.Cast (id, "sext", from, v, Ir.I64));
-                Ok (Ir.Local (id, Ir.I64))
+                E.cast s.fn id "sext" from v Low.I64;
+                Ok (Low.Local (id, Low.I64))
             | _, from ->
                 let id = fresh s in
-                emit s (Ir.Cast (id, "zext", from, v, Ir.I64));
-                Ok (Ir.Local (id, Ir.I64)))
+                E.cast s.fn id "zext" from v Low.I64;
+                Ok (Low.Local (id, Low.I64)))
           (List.combine args values)
       in
       let id = fresh s in
-      emit s (Ir.Syscall (id, words));
-      Ok (Ir.Local (id, Ir.I64))
+      E.syscall s.fn id words;
+      Ok (Low.Local (id, Low.I64))
   | Addr_from_bits, [ x ] ->
       let id = fresh s in
-      emit s (Ir.Cast (id, "inttoptr", Ir.value_ty x, x, Ir.Pointer Ir.I8));
-      Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+      E.cast s.fn id "inttoptr" (Low.value_ty x) x (Low.Pointer Low.I8);
+      Ok (Low.Local (id, Low.Pointer Low.I8))
   | Cvt target_ty, [ x ] ->
       let source_ty = Hir.expr_ty (List.hd args) in
       let source_element =
@@ -974,8 +901,8 @@ and lower_builtin s b args t span =
       in
       if opcode <> "" then (
         let id = fresh s in
-        emit s (Ir.Cast (id, opcode, Ir.value_ty x, x, rt));
-        Ok (Ir.Local (id, rt)))
+        E.cast s.fn id opcode (Low.value_ty x) x rt;
+        Ok (Low.Local (id, rt)))
       else
         let destination =
           match target_element with Hir.Int kind -> kind | _ -> Hir.I32
@@ -1000,10 +927,10 @@ and lower_builtin s b args t span =
         in
         let result_suffix =
           match rt with
-          | Ir.Vector (lanes, elem) ->
+          | Low.Vector (lanes, elem) ->
               let elem_name =
                 match elem with
-                | Ir.I8 -> "i8"
+                | Low.I8 -> "i8"
                 | I16 -> "i16"
                 | I32 -> "i32"
                 | I64 -> "i64"
@@ -1013,14 +940,8 @@ and lower_builtin s b args t span =
           | _ -> Printf.sprintf "i%d" width
         in
         let id = fresh s in
-        emit s
-          (Ir.Call
-             ( Some id,
-               Ir.No_extension,
-               rt,
-               Printf.sprintf "llvm.%s.sat.%s.%s" conversion result_suffix format,
-               [ (Ir.value_ty x, Ir.No_extension, x) ] ));
-        Ok (Ir.Local (id, rt))
+        E.call s.fn (Some id) Low.No_extension rt (Printf.sprintf "llvm.%s.sat.%s.%s" conversion result_suffix format) [ (Low.value_ty x, Low.No_extension, x) ];
+        Ok (Low.Local (id, rt))
   | Float_math operation, values ->
       let suffix = float_suffix span rt in
       let* suffix = suffix in
@@ -1039,57 +960,27 @@ and lower_builtin s b args t span =
         else error span "internal error: invalid float builtin arity"
       in
       let id = fresh s in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             rt,
-             name ^ suffix,
-             List.map (fun value -> (rt, Ir.No_extension, value)) values ));
-      Ok (Ir.Local (id, rt))
+      E.call s.fn (Some id) Low.No_extension rt (name ^ suffix) (List.map (fun value -> (rt, Low.No_extension, value)) values);
+      Ok (Low.Local (id, rt))
   | (Handle_addr | Handle_from_addr _), [ x ] -> Ok x
   | (Rotl | Rotr), [ x; n ] ->
       let* n = shift_amount s span rt n in
       let* suffix = intrinsic_suffix span rt in
       let id = fresh s in
       let base = if b = Rotl then "llvm.fshl." else "llvm.fshr." in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             rt,
-             base ^ suffix,
-             [
-               (rt, Ir.No_extension, x);
-               (rt, Ir.No_extension, x);
-               (rt, Ir.No_extension, n);
-             ] ));
-      Ok (Ir.Local (id, rt))
+      E.call s.fn (Some id) Low.No_extension rt (base ^ suffix) [ (rt, Low.No_extension, x); (rt, Low.No_extension, x); (rt, Low.No_extension, n); ];
+      Ok (Low.Local (id, rt))
   | Popcount, [ x ] ->
       let* suffix = intrinsic_suffix span rt in
       let id = fresh s in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             rt,
-             "llvm.ctpop." ^ suffix,
-             [ (rt, Ir.No_extension, x) ] ));
-      Ok (Ir.Local (id, rt))
+      E.call s.fn (Some id) Low.No_extension rt ("llvm.ctpop." ^ suffix) [ (rt, Low.No_extension, x) ];
+      Ok (Low.Local (id, rt))
   | (Ctz | Clz), [ x ] ->
       let* suffix = intrinsic_suffix span rt in
       let id = fresh s in
       let base = if b = Ctz then "llvm.cttz." else "llvm.ctlz." in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             rt,
-             base ^ suffix,
-             [
-               (rt, Ir.No_extension, x); (Ir.I1, Ir.No_extension, Ir.Const (Ir.I1, 0L));
-             ] ));
-      Ok (Ir.Local (id, rt))
+      E.call s.fn (Some id) Low.No_extension rt (base ^ suffix) [ (rt, Low.No_extension, x); (Low.I1, Low.No_extension, Low.Const (Low.I1, 0L)); ];
+      Ok (Low.Local (id, rt))
   | (Add_sat | Sub_sat), [ x; y ] ->
       let* suffix = intrinsic_suffix span rt in
       let* base =
@@ -1121,14 +1012,8 @@ and lower_builtin s b args t span =
                 error span "internal error: invalid saturating builtin")
       in
       let id = fresh s in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             rt,
-             base ^ suffix,
-             [ (rt, Ir.No_extension, x); (rt, Ir.No_extension, y) ] ));
-      Ok (Ir.Local (id, rt))
+      E.call s.fn (Some id) Low.No_extension rt (base ^ suffix) [ (rt, Low.No_extension, x); (rt, Low.No_extension, y) ];
+      Ok (Low.Local (id, rt))
   | Mul_hi, [ x; y ] -> (
       let rec elem_of = function
         | Hir.Int k -> Some k
@@ -1145,93 +1030,86 @@ and lower_builtin s b args t span =
             | Hir.I8 | I16 | I32 | I64 | Isize -> false
           in
           let elem_ty, lanes =
-            match rt with Ir.Vector (n, e) -> (e, n) | e -> (e, 1)
+            match rt with Low.Vector (n, e) -> (e, n) | e -> (e, 1)
           in
           let* elem_bits = width span elem_ty in
           let* wide_elem =
             match elem_bits with
-            | 8 -> Ok Ir.I16
-            | 16 -> Ok Ir.I32
-            | 32 -> Ok Ir.I64
-            | 64 -> Ok Ir.I128
+            | 8 -> Ok Low.I16
+            | 16 -> Ok Low.I32
+            | 32 -> Ok Low.I64
+            | 64 -> Ok Low.I128
             | _ -> error span "internal error: multiply-high operand width"
           in
           let wide =
             match rt with
-            | Ir.Vector (n, _) -> Ir.Vector (n, wide_elem)
+            | Low.Vector (n, _) -> Low.Vector (n, wide_elem)
             | _ -> wide_elem
           in
           let cast_kind = if unsigned then "zext" else "sext" in
           let ex = fresh s in
-          emit s (Ir.Cast (ex, cast_kind, rt, x, wide));
+          E.cast s.fn ex cast_kind rt x wide;
           let ey = fresh s in
-          emit s (Ir.Cast (ey, cast_kind, rt, y, wide));
+          E.cast s.fn ey cast_kind rt y wide;
           let product = fresh s in
-          emit s
-            (Ir.Bin (product, Ir.Mul, wide, Ir.Local (ex, wide), Ir.Local (ey, wide)));
+          E.bin s.fn product Low.Mul wide (Low.Local (ex, wide)) (Low.Local (ey, wide));
           let amount =
             match rt with
-            | Ir.Vector _ ->
-                Ir.Const_vector (wide, List.init lanes (fun _ -> Int64.of_int elem_bits))
-            | _ -> Ir.Const (wide, Int64.of_int elem_bits)
+            | Low.Vector _ ->
+                Low.Const_vector (wide, List.init lanes (fun _ -> Int64.of_int elem_bits))
+            | _ -> Low.Const (wide, Int64.of_int elem_bits)
           in
           let high = fresh s in
-          emit s
-            (Ir.Bin
-               ( high,
-                 (if unsigned then Ir.Lshr else Ir.Ashr),
-                 wide,
-                 Ir.Local (product, wide),
-                 amount ));
+          E.bin s.fn high (if unsigned then Low.Lshr else Low.Ashr) wide (Low.Local (product, wide)) amount;
           let id = fresh s in
-          emit s (Ir.Cast (id, "trunc", wide, Ir.Local (high, wide), rt));
-          Ok (Ir.Local (id, rt)))
+          E.cast s.fn id "trunc" wide (Low.Local (high, wide)) rt;
+          Ok (Low.Local (id, rt)))
   | Select, [ m; y; z ] ->
       let id = fresh s in
-      emit s (Ir.Select (id, m, y, z));
-      Ok (Ir.Local (id, rt))
+      E.select s.fn id m y z;
+      Ok (Low.Local (id, rt))
   | Shuffle, [ a; b; sel ] -> (
       match sel with
-      | Ir.Const_vector (_, values) ->
+      | Low.Const_vector (_, values) ->
           let id = fresh s in
-          let mask = Ir.Const_vector (Ir.Vector (List.length values, Ir.I32), values) in
-          emit s (Ir.Shufflevector (id, rt, a, b, mask));
-          Ok (Ir.Local (id, rt))
+          let mask = Low.Const_vector (Low.Vector (List.length values, Low.I32), values) in
+          E.shufflevector s.fn id rt a b mask;
+          Ok (Low.Local (id, rt))
       | _ -> error span "internal error: shuffle selectors must be constant")
   | Permute, [ v; idx ] ->
       let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let iw = match value_ty idx with Ir.Vector (_, w) -> w | _ -> Ir.I32 in
-      let elem_ty = match rt with Ir.Vector (_, e) -> e | _ -> Ir.I1 in
-      let m = match rt with Ir.Vector (m, _) -> m | _ -> 1 in
+      let iw = match value_ty idx with Low.Vector (_, w) -> w | _ -> Low.I32 in
+      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
+      let m = match rt with Low.Vector (m, _) -> m | _ -> 1 in
       let rec chain j acc =
         if j = m then Ok acc
         else
-          let slot = Ir.Const (Ir.I64, Int64.of_int j) in
+          let slot = Low.Const (Low.I64, Int64.of_int j) in
           let iid = fresh s in
-          emit s (Ir.Extract (iid, value_ty idx, idx, slot));
-          let il = Ir.Local (iid, iw) in
-          let all_indices_fit = match iw with Ir.I8 -> n >= 256 | _ -> false in
+          E.extract s.fn iid (value_ty idx) idx slot;
+          let il = Low.Local (iid, iw) in
+          let all_indices_fit = match iw with Low.I8 -> n >= 256 | _ -> false in
           let vl, sl =
-            if all_indices_fit then (Ir.Const (Ir.I1, 1L), il)
+            if all_indices_fit then (Low.Const (Low.I1, 1L), il)
             else
               let vid = fresh s in
-              emit s (Ir.Cmp (vid, Ir.Ult, iw, il, Ir.Const (iw, Int64.of_int n)));
-              let vl = Ir.Local (vid, Ir.I1) in
+              E.cmp s.fn vid Low.Ult iw il (Low.Const (iw, Int64.of_int n));
+              let vl = Low.Local (vid, Low.I1) in
               let sid = fresh s in
-              emit s (Ir.Select (sid, vl, il, Ir.Const (iw, 0L)));
-              (vl, Ir.Local (sid, iw))
+              E.select s.fn sid vl il (Low.Const (iw, 0L));
+              (vl, Low.Local (sid, iw))
           in
           let eid = fresh s in
-          emit s (Ir.Extract (eid, value_ty v, v, sl));
-          let el = Ir.Local (eid, elem_ty) in
+          E.extract s.fn eid (value_ty v) v sl;
+          let el = Low.Local (eid, elem_ty) in
           let pid = fresh s in
-          emit s (Ir.Select (pid, vl, el, Ir.Zero elem_ty));
-          let pl = Ir.Local (pid, elem_ty) in
+          E.select s.fn pid vl el (Low.Zero elem_ty);
+          let pl = Low.Local (pid, elem_ty) in
           let nid = fresh s in
-          emit s (Ir.Insert (nid, rt, acc, slot, pl));
-          chain (j + 1) (Ir.Local (nid, rt))
+          E.insert s.fn nid rt acc slot pl;
+          chain (j + 1) (Low.Local (nid, rt))
       in
-      chain 0 (Ir.Zero rt)
+      chain 0 (Low.Zero rt)
   | (Reduce_sum | Reduce_min | Reduce_max | Reduce_and | Reduce_or | Reduce_xor), [ v ]
     ->
       let vty = Hir.expr_ty (List.hd args) in
@@ -1243,37 +1121,36 @@ and lower_builtin s b args t span =
       in
       let bin op a b =
         let bid = fresh s in
-        emit s (Ir.Bin (bid, op, rt, a, b));
-        Ok (Ir.Local (bid, rt))
+        E.bin s.fn bid op rt a b;
+        Ok (Low.Local (bid, rt))
       in
       let pick cmp a b =
         let cid = fresh s in
-        emit s (Ir.Cmp (cid, cmp, rt, a, b));
+        E.cmp s.fn cid cmp rt a b;
         let sid = fresh s in
-        emit s (Ir.Select (sid, Ir.Local (cid, Ir.I1), a, b));
-        Ok (Ir.Local (sid, rt))
+        E.select s.fn sid (Low.Local (cid, Low.I1)) a b;
+        Ok (Low.Local (sid, rt))
       in
       let rec chain i acc =
         match acc with
         | None ->
             let eid = fresh s in
-            emit s (Ir.Extract (eid, value_ty v, v, Ir.Const (Ir.I64, Int64.of_int i)));
-            chain (i + 1) (Some (Ir.Local (eid, rt)))
+            E.extract s.fn eid (value_ty v) v (Low.Const (Low.I64, Int64.of_int i));
+            chain (i + 1) (Some (Low.Local (eid, rt)))
         | Some a ->
             if i = lanes then Ok a
             else
               let eid = fresh s in
-              emit s
-                (Ir.Extract (eid, value_ty v, v, Ir.Const (Ir.I64, Int64.of_int i)));
-              let el = Ir.Local (eid, rt) in
+              E.extract s.fn eid (value_ty v) v (Low.Const (Low.I64, Int64.of_int i));
+              let el = Low.Local (eid, rt) in
               let* next =
                 match b with
-                | Reduce_sum -> bin Ir.Add a el
-                | Reduce_and -> bin Ir.And a el
-                | Reduce_or -> bin Ir.Or a el
-                | Reduce_xor -> bin Ir.Xor a el
-                | Reduce_min -> pick (if signed then Ir.Slt else Ir.Ult) a el
-                | Reduce_max -> pick (if signed then Ir.Sgt else Ir.Ugt) a el
+                | Reduce_sum -> bin Low.Add a el
+                | Reduce_and -> bin Low.And a el
+                | Reduce_or -> bin Low.Or a el
+                | Reduce_xor -> bin Low.Xor a el
+                | Reduce_min -> pick (if signed then Low.Slt else Low.Ult) a el
+                | Reduce_max -> pick (if signed then Low.Sgt else Low.Ugt) a el
                 | _ -> error span "internal error: invalid reduction builtin"
               in
               chain (i + 1) (Some next)
@@ -1281,24 +1158,24 @@ and lower_builtin s b args t span =
       chain 0 None
   | Compress, [ v; mk ]
     when (Target_layout.current ()).os = Target_layout.Wasi
-         && match rt with Ir.Vector (n, _) -> n > 1 | _ -> false ->
+         && match rt with Low.Vector (n, _) -> n > 1 | _ -> false ->
       let bits_ty =
         match rt with
-        | Ir.Vector (n, Ir.F32) -> Ir.Vector (n, Ir.I32)
-        | Ir.Vector (n, Ir.F64) -> Ir.Vector (n, Ir.I64)
-        | Ir.Vector (n, Ir.I1) -> Ir.Vector (n, Ir.I8)
+        | Low.Vector (n, Low.F32) -> Low.Vector (n, Low.I32)
+        | Low.Vector (n, Low.F64) -> Low.Vector (n, Low.I64)
+        | Low.Vector (n, Low.I1) -> Low.Vector (n, Low.I8)
         | t -> t
       in
       let convert kind value from target =
         if from = target then value
         else
           let id = fresh s in
-          emit s (Ir.Cast (id, kind, from, value, target));
-          Ir.Local (id, target)
+          E.cast s.fn id kind from value target;
+          Low.Local (id, target)
       in
       let into, back =
         match rt with
-        | Ir.Vector (_, Ir.I1) -> ("zext", "trunc")
+        | Low.Vector (_, Low.I1) -> ("zext", "trunc")
         | _ -> ("bitcast", "bitcast")
       in
       let bitcast value from target =
@@ -1306,90 +1183,80 @@ and lower_builtin s b args t span =
       in
       let* name = intrinsic_suffix span bits_ty in
       let id = fresh s in
-      emit s
-        (Ir.Call
-           ( Some id,
-             Ir.No_extension,
-             bits_ty,
-             "llvm.experimental.vector.compress." ^ name,
-             [
-               (bits_ty, Ir.No_extension, bitcast v rt bits_ty);
-               (value_ty mk, Ir.No_extension, mk);
-               (bits_ty, Ir.No_extension, Ir.Zero bits_ty);
-             ] ));
-      Ok (bitcast (Ir.Local (id, bits_ty)) bits_ty rt)
+      E.call s.fn (Some id) Low.No_extension bits_ty ("llvm.experimental.vector.compress." ^ name) [ (bits_ty, Low.No_extension, bitcast v rt bits_ty); (value_ty mk, Low.No_extension, mk); (bits_ty, Low.No_extension, Low.Zero bits_ty); ];
+      Ok (bitcast (Low.Local (id, bits_ty)) bits_ty rt)
   | Compress, [ v; mk ] ->
       let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let elem_ty = match rt with Ir.Vector (_, e) -> e | _ -> Ir.I1 in
+      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
       let rec chain i acc count =
         if i = n then Ok acc
         else
-          let slot = Ir.Const (Ir.I64, Int64.of_int i) in
+          let slot = Low.Const (Low.I64, Int64.of_int i) in
           let mid = fresh s in
-          emit s (Ir.Extract (mid, value_ty mk, mk, slot));
-          let ml = Ir.Local (mid, Ir.I1) in
+          E.extract s.fn mid (value_ty mk) mk slot;
+          let ml = Low.Local (mid, Low.I1) in
           let vid = fresh s in
-          emit s (Ir.Extract (vid, value_ty v, v, slot));
-          let vl = Ir.Local (vid, elem_ty) in
+          E.extract s.fn vid (value_ty v) v slot;
+          let vl = Low.Local (vid, elem_ty) in
           let cid = fresh s in
-          emit s (Ir.Select (cid, ml, count, Ir.Const (Ir.I64, 0L)));
-          let cl = Ir.Local (cid, Ir.I64) in
+          E.select s.fn cid ml count (Low.Const (Low.I64, 0L));
+          let cl = Low.Local (cid, Low.I64) in
           let iid = fresh s in
-          emit s (Ir.Insert (iid, rt, acc, cl, vl));
-          let il = Ir.Local (iid, rt) in
+          E.insert s.fn iid rt acc cl vl;
+          let il = Low.Local (iid, rt) in
           let aid = fresh s in
-          emit s (Ir.Select (aid, ml, il, acc));
+          E.select s.fn aid ml il acc;
           let n1 = fresh s in
-          emit s (Ir.Bin (n1, Ir.Add, Ir.I64, count, Ir.Const (Ir.I64, 1L)));
+          E.bin s.fn n1 Low.Add Low.I64 count (Low.Const (Low.I64, 1L));
           let nid = fresh s in
-          emit s (Ir.Select (nid, ml, Ir.Local (n1, Ir.I64), count));
-          chain (i + 1) (Ir.Local (aid, rt)) (Ir.Local (nid, Ir.I64))
+          E.select s.fn nid ml (Low.Local (n1, Low.I64)) count;
+          chain (i + 1) (Low.Local (aid, rt)) (Low.Local (nid, Low.I64))
       in
-      chain 0 (Ir.Zero rt) (Ir.Const (Ir.I64, 0L))
+      chain 0 (Low.Zero rt) (Low.Const (Low.I64, 0L))
   | Expand, [ v; mk ] ->
       let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let elem_ty = match rt with Ir.Vector (_, e) -> e | _ -> Ir.I1 in
+      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
       let rec chain d acc count =
         if d = n then Ok acc
         else
           let mid = fresh s in
-          emit s (Ir.Extract (mid, value_ty mk, mk, Ir.Const (Ir.I64, Int64.of_int d)));
-          let ml = Ir.Local (mid, Ir.I1) in
+          E.extract s.fn mid (value_ty mk) mk (Low.Const (Low.I64, Int64.of_int d));
+          let ml = Low.Local (mid, Low.I1) in
           let cid = fresh s in
-          emit s (Ir.Select (cid, ml, count, Ir.Const (Ir.I64, 0L)));
-          let cl = Ir.Local (cid, Ir.I64) in
+          E.select s.fn cid ml count (Low.Const (Low.I64, 0L));
+          let cl = Low.Local (cid, Low.I64) in
           let vid = fresh s in
-          emit s (Ir.Extract (vid, value_ty v, v, cl));
-          let vl = Ir.Local (vid, elem_ty) in
+          E.extract s.fn vid (value_ty v) v cl;
+          let vl = Low.Local (vid, elem_ty) in
           let iid = fresh s in
-          emit s (Ir.Insert (iid, rt, acc, Ir.Const (Ir.I64, Int64.of_int d), vl));
-          let il = Ir.Local (iid, rt) in
+          E.insert s.fn iid rt acc (Low.Const (Low.I64, Int64.of_int d)) vl;
+          let il = Low.Local (iid, rt) in
           let aid = fresh s in
-          emit s (Ir.Select (aid, ml, il, acc));
+          E.select s.fn aid ml il acc;
           let n1 = fresh s in
-          emit s (Ir.Bin (n1, Ir.Add, Ir.I64, count, Ir.Const (Ir.I64, 1L)));
+          E.bin s.fn n1 Low.Add Low.I64 count (Low.Const (Low.I64, 1L));
           let nid = fresh s in
-          emit s (Ir.Select (nid, ml, Ir.Local (n1, Ir.I64), count));
-          chain (d + 1) (Ir.Local (aid, rt)) (Ir.Local (nid, Ir.I64))
+          E.select s.fn nid ml (Low.Local (n1, Low.I64)) count;
+          chain (d + 1) (Low.Local (aid, rt)) (Low.Local (nid, Low.I64))
       in
-      chain 0 (Ir.Zero rt) (Ir.Const (Ir.I64, 0L))
+      chain 0 (Low.Zero rt) (Low.Const (Low.I64, 0L))
   | (Any | All), [ mv ] -> (
       let lanes =
         match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1
       in
-      let op = if b = Any then Ir.Or else Ir.And in
+      let op = if b = Any then Low.Or else Low.And in
       let rec chain i acc =
         if i = lanes then Ok acc
         else
           let lid = fresh s in
-          emit s (Ir.Extract (lid, value_ty mv, mv, Ir.Const (Ir.I64, Int64.of_int i)));
-          let lv = Ir.Local (lid, Ir.I1) in
+          E.extract s.fn lid (value_ty mv) mv (Low.Const (Low.I64, Int64.of_int i));
+          let lv = Low.Local (lid, Low.I1) in
           match acc with
           | None -> chain (i + 1) (Some lv)
           | Some a ->
               let bid = fresh s in
-              emit s (Ir.Bin (bid, op, Ir.I1, a, lv));
-              chain (i + 1) (Some (Ir.Local (bid, Ir.I1)))
+              E.bin s.fn bid op Low.I1 a lv;
+              chain (i + 1) (Some (Low.Local (bid, Low.I1)))
       in
       let* result = chain 0 None in
       match result with
@@ -1401,54 +1268,42 @@ and lower_short s op a b =
   let* lv = expr s a in
   let* lv = require_bool (Hir.expr_span a) lv in
   let pred = s.current.id and rhs = fresh_block s and join = fresh_block s in
-  s.current.term :=
-    Some
-      (Ir.CondBr
-         ( lv,
-           (if op = Ast.And then rhs.id else join.id),
-           if op = Ast.And then join.id else rhs.id ));
+  E.cond_br s.fn lv (if op = Ast.And then rhs.id else join.id) (if op = Ast.And then join.id else rhs.id);
   enter s rhs;
   let* rv = expr s b in
   let* rv = require_bool (Hir.expr_span b) rv in
   let rp = s.current.id in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s join;
   let id = fresh s in
-  emit s
-    (Ir.Phi
-       ( id,
-         Ir.I1,
-         [
-           ((if op = Ast.And then Ir.Const (Ir.I1, 0L) else Ir.Const (Ir.I1, 1L)), pred);
-           (rv, rp);
-         ] ));
-  Ok (Ir.Local (id, Ir.I1))
+  E.phi s.fn id Low.I1 [ ((if op = Ast.And then Low.Const (Low.I1, 0L) else Low.Const (Low.I1, 1L)), pred); (rv, rp); ];
+  Ok (Low.Local (id, Low.I1))
 
 and lower_ternary s c a b t =
   let* cv = expr s c in
   let* cv = require_bool (Hir.expr_span c) cv in
   let tb = fresh_block s and eb = fresh_block s and join = fresh_block s in
-  s.current.term := Some (Ir.CondBr (cv, tb.id, eb.id));
+  E.cond_br s.fn cv tb.id eb.id;
   enter s tb;
   let* tv = expr s a in
   let tp = s.current.id in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s eb;
   let* ev = expr s b in
   let ep = s.current.id in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s join;
   let id = fresh s in
-  emit s (Ir.Phi (id, ty t, [ (tv, tp); (ev, ep) ]));
-  Ok (Ir.Local (id, ty t))
+  E.phi s.fn id (ty t) [ (tv, tp); (ev, ep) ];
+  Ok (Low.Local (id, ty t))
 
 and materialize s e =
   let* v = expr s e in
   let ht = Hir.expr_ty e in
   let* alignment = align s ht in
   let id = fresh s in
-  emit_entry s (Ir.Alloca (id, storage_ty ht, alignment));
-  let p = Ir.Local (id, Ir.Pointer (storage_ty ht)) in
+  E.alloca_entry s.fn id (storage_ty ht) alignment;
+  let p = Low.Local (id, Low.Pointer (storage_ty ht)) in
   let* () = store_value s ht v p alignment in
   Ok p
 
@@ -1456,16 +1311,16 @@ and address s e =
   match e with
   | Hir.Global (name, global_ty, _) ->
       let id = fresh s in
-      emit s (Ir.Global_ptr (id, name, storage_ty global_ty));
-      Ok (Ir.Local (id, Ir.Pointer (storage_ty global_ty)))
+      E.global_ptr s.fn id name;
+      Ok (Low.Local (id, Low.Pointer (storage_ty global_ty)))
   | Hir.Local (local, sp) -> (
       match Hashtbl.find_opt s.env local.id with
       | Some (value, _) -> Ok value
       | None -> error sp ("unknown local `" ^ local.name ^ "`"))
   | Hir.Const_array (n, t, _) ->
       let id = fresh s in
-      emit s (Ir.Global_ptr (id, n, storage_ty t));
-      Ok (Ir.Local (id, Ir.Pointer (storage_ty t)))
+      E.global_ptr s.fn id n;
+      Ok (Low.Local (id, Low.Pointer (storage_ty t)))
   | Hir.Raw_select (b, off, _, _) -> raw_address s b off
   | Hir.Index (a, i, _, _) -> index_address s a i
   | Hir.Field (a, _, _, off, _) -> field_address s a off
@@ -1478,48 +1333,47 @@ and index_address s a i =
       let* iv = expr s i in
       let* iv = normalize_index s i iv in
       let id = fresh s in
-      emit s (Ir.Gep (id, ty (Hir.expr_ty a), p, [ Ir.Zero; Ir.Index iv ]));
-      Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+      E.gep s.fn id (ty (Hir.expr_ty a)) p [ Low.Zero; Low.Index iv ];
+      Ok (Low.Local (id, Low.Pointer Low.I8))
   | _ -> error (Hir.expr_span a) "cannot take index address"
 
 and raw_address s base off =
   let* bv = expr s base in
   let* ov = expr s off in
   let id = fresh s in
-  emit s (Ir.Gep (id, Ir.I8, bv, [ Ir.Index ov ]));
-  Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+  E.gep s.fn id Low.I8 bv [ Low.Index ov ];
+  Ok (Low.Local (id, Low.Pointer Low.I8))
 
 and int_ty_bytes = function
-  | Ir.I1 | Ir.I8 -> 1
-  | Ir.I16 -> 2
-  | Ir.I32 -> 4
-  | Ir.F32 -> 4
-  | Ir.I64 -> 8
-  | Ir.F64 -> 8
-  | Ir.I128 -> 16
+  | Low.I1 | Low.I8 -> 1
+  | Low.I16 -> 2
+  | Low.I32 -> 4
+  | Low.F32 -> 4
+  | Low.I64 -> 8
+  | Low.F64 -> 8
+  | Low.I128 -> 16
   | _ -> 8
 
 and volatile_chunk remaining =
-  if remaining >= 16 then (16, Ir.I128)
-  else if remaining >= 8 then (8, Ir.I64)
-  else if remaining >= 4 then (4, Ir.I32)
-  else if remaining >= 2 then (2, Ir.I16)
-  else (1, Ir.I8)
+  if remaining >= 16 then (16, Low.I128)
+  else if remaining >= 8 then (8, Low.I64)
+  else if remaining >= 4 then (4, Low.I32)
+  else if remaining >= 2 then (2, Low.I16)
+  else (1, Low.I8)
 
 and volatile_offset s pointer offset =
   if offset = 0 then Ok pointer
   else
     let id = fresh s in
-    emit s
-      (Ir.Gep (id, Ir.I8, pointer, [ Ir.Index (Ir.Const (Ir.I64, Int64.of_int offset)) ]));
-    Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+    E.gep s.fn id Low.I8 pointer [ Low.Index (Low.Const (Low.I64, Int64.of_int offset)) ];
+    Ok (Low.Local (id, Low.Pointer Low.I8))
 
 and packed_bool_load s is_volatile lanes pointer =
-  let vector_ty = Ir.Vector (lanes, Ir.I1) in
+  let vector_ty = Low.Vector (lanes, Low.I1) in
   let bytes = (lanes + 7) / 8 in
   let load id ty pointer =
-    if is_volatile then Ir.Load_volatile (id, ty, pointer, 1)
-    else Ir.Load (id, ty, pointer, 1)
+    if is_volatile then E.load_volatile s.fn id ty pointer 1
+    else E.load s.fn id ty pointer 1
   in
   let rec load_chunks byte_offset current =
     if byte_offset = bytes then Ok current
@@ -1528,12 +1382,10 @@ and packed_bool_load s is_volatile lanes pointer =
       let bits = chunk_bytes * 8 in
       let* chunk_pointer = volatile_offset s pointer byte_offset in
       let loaded = fresh s in
-      emit s (load loaded chunk_ty chunk_pointer);
+      load loaded chunk_ty chunk_pointer;
       let unpacked = fresh s in
-      let unpacked_ty = Ir.Vector (bits, Ir.I1) in
-      emit s
-        (Ir.Cast
-           (unpacked, "bitcast", chunk_ty, Ir.Local (loaded, chunk_ty), unpacked_ty));
+      let unpacked_ty = Low.Vector (bits, Low.I1) in
+      E.cast s.fn unpacked "bitcast" chunk_ty (Low.Local (loaded, chunk_ty)) unpacked_ty;
       let first_lane = byte_offset * 8 in
       let count = min (lanes - first_lane) bits in
       let rec insert_lane i result =
@@ -1541,32 +1393,21 @@ and packed_bool_load s is_volatile lanes pointer =
         else
           let lane = first_lane + i in
           let extracted = fresh s in
-          emit s
-            (Ir.Extract
-               ( extracted,
-                 unpacked_ty,
-                 Ir.Local (unpacked, unpacked_ty),
-                 Ir.Const (Ir.I64, Int64.of_int i) ));
+          E.extract s.fn extracted unpacked_ty (Low.Local (unpacked, unpacked_ty)) (Low.Const (Low.I64, Int64.of_int i));
           let inserted = fresh s in
-          emit s
-            (Ir.Insert
-               ( inserted,
-                 vector_ty,
-                 result,
-                 Ir.Const (Ir.I64, Int64.of_int lane),
-                 Ir.Local (extracted, Ir.I1) ));
-          insert_lane (i + 1) (Ir.Local (inserted, vector_ty))
+          E.insert s.fn inserted vector_ty result (Low.Const (Low.I64, Int64.of_int lane)) (Low.Local (extracted, Low.I1));
+          insert_lane (i + 1) (Low.Local (inserted, vector_ty))
       in
       let* result = insert_lane 0 current in
       load_chunks (byte_offset + chunk_bytes) result
   in
-  load_chunks 0 (Ir.Undef vector_ty)
+  load_chunks 0 (Low.Undef vector_ty)
 
 and packed_bool_store s is_volatile lanes value pointer =
   let bytes = (lanes + 7) / 8 in
   let store ty value pointer =
-    if is_volatile then Ir.Store_volatile (ty, value, pointer, 1)
-    else Ir.Store (ty, value, pointer, 1)
+    if is_volatile then E.store_volatile s.fn ty value pointer 1
+    else E.store s.fn ty value pointer 1
   in
   let rec store_chunks byte_offset =
     if byte_offset = bytes then Ok ()
@@ -1576,30 +1417,30 @@ and packed_bool_store s is_volatile lanes value pointer =
       let first_lane = byte_offset * 8 in
       let lane_count = min bits (lanes - first_lane) in
       let mask =
-        Ir.Const_vector
-          ( Ir.Vector (bits, Ir.I32),
+        Low.Const_vector
+          ( Low.Vector (bits, Low.I32),
             List.init bits (fun i ->
                 Int64.of_int (if first_lane + i < lanes then first_lane + i else 0)) )
       in
       let packed = fresh s in
-      let packed_ty = Ir.Vector (bits, Ir.I1) in
-      emit s (Ir.Shufflevector (packed, packed_ty, value, value, mask));
-      let packed_value = Ir.Local (packed, packed_ty) in
+      let packed_ty = Low.Vector (bits, Low.I1) in
+      E.shufflevector s.fn packed packed_ty value value mask;
+      let packed_value = Low.Local (packed, packed_ty) in
       let* packed_value =
         if lane_count = bits then Ok packed_value
         else
           let valid_lanes =
-            Ir.Const_vector
+            Low.Const_vector
               (packed_ty, List.init bits (fun i -> if i < lane_count then 1L else 0L))
           in
           let masked = fresh s in
-          emit s (Ir.Bin (masked, Ir.And, packed_ty, packed_value, valid_lanes));
-          Ok (Ir.Local (masked, packed_ty))
+          E.bin s.fn masked Low.And packed_ty packed_value valid_lanes;
+          Ok (Low.Local (masked, packed_ty))
       in
       let stored = fresh s in
-      emit s (Ir.Cast (stored, "bitcast", packed_ty, packed_value, chunk_ty));
+      E.cast s.fn stored "bitcast" packed_ty packed_value chunk_ty;
       let* chunk_pointer = volatile_offset s pointer byte_offset in
-      emit s (store chunk_ty (Ir.Local (stored, chunk_ty)) chunk_pointer);
+      store chunk_ty (Low.Local (stored, chunk_ty)) chunk_pointer;
       store_chunks (byte_offset + chunk_bytes)
   in
   store_chunks 0
@@ -1608,45 +1449,37 @@ and volatile_load s span access_ty pointer =
   match access_ty with
   | Hir.Bool ->
       let loaded = fresh s in
-      emit s (Ir.Load_volatile (loaded, Ir.I8, pointer, 1));
+      E.load_volatile s.fn loaded Low.I8 pointer 1;
       let normalized = fresh s in
-      emit s
-        (Ir.Cmp
-           (normalized, Ir.Ne, Ir.I8, Ir.Local (loaded, Ir.I8), Ir.Const (Ir.I8, 0L)));
-      Ok (Ir.Local (normalized, Ir.I1))
+      E.cmp s.fn normalized Low.Ne Low.I8 (Low.Local (loaded, Low.I8)) (Low.Const (Low.I8, 0L));
+      Ok (Low.Local (normalized, Low.I1))
   | Hir.Int _ ->
       let loaded = fresh s in
-      emit s (Ir.Load_volatile (loaded, ty access_ty, pointer, 1));
-      Ok (Ir.Local (loaded, ty access_ty))
+      E.load_volatile s.fn loaded (ty access_ty) pointer 1;
+      Ok (Low.Local (loaded, ty access_ty))
   | Hir.Float _ ->
       let loaded = fresh s in
-      emit s (Ir.Load_volatile (loaded, ty access_ty, pointer, 1));
-      Ok (Ir.Local (loaded, ty access_ty))
+      E.load_volatile s.fn loaded (ty access_ty) pointer 1;
+      Ok (Low.Local (loaded, ty access_ty))
   | Hir.Addr | Hir.Handle _ ->
       let loaded = fresh s in
-      emit s (Ir.Load_volatile (loaded, Ir.Pointer Ir.I8, pointer, 1));
-      Ok (Ir.Local (loaded, Ir.Pointer Ir.I8))
+      E.load_volatile s.fn loaded (Low.Pointer Low.I8) pointer 1;
+      Ok (Low.Local (loaded, Low.Pointer Low.I8))
   | Hir.Vec (lanes, Hir.Int kind) ->
       let elem_ty = ty (Hir.Int kind) in
-      let vector_ty = Ir.Vector (lanes, elem_ty) in
+      let vector_ty = Low.Vector (lanes, elem_ty) in
       let elem_bytes = int_ty_bytes elem_ty in
       let rec load_lane i current =
         if i = lanes then Ok current
         else
           let* lane_pointer = volatile_offset s pointer (i * elem_bytes) in
           let loaded = fresh s in
-          emit s (Ir.Load_volatile (loaded, elem_ty, lane_pointer, 1));
+          E.load_volatile s.fn loaded elem_ty lane_pointer 1;
           let inserted = fresh s in
-          emit s
-            (Ir.Insert
-               ( inserted,
-                 vector_ty,
-                 current,
-                 Ir.Const (Ir.I64, Int64.of_int i),
-                 Ir.Local (loaded, elem_ty) ));
-          load_lane (i + 1) (Ir.Local (inserted, vector_ty))
+          E.insert s.fn inserted vector_ty current (Low.Const (Low.I64, Int64.of_int i)) (Low.Local (loaded, elem_ty));
+          load_lane (i + 1) (Low.Local (inserted, vector_ty))
       in
-      load_lane 0 (Ir.Undef vector_ty)
+      load_lane 0 (Low.Undef vector_ty)
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_load s true lanes pointer
   | _ -> error span "internal error: invalid volatile access type"
 
@@ -1654,31 +1487,29 @@ and volatile_store s span access_ty value pointer =
   match access_ty with
   | Hir.Bool ->
       let stored = fresh s in
-      emit s (Ir.Cast (stored, "zext", Ir.I1, value, Ir.I8));
-      emit s (Ir.Store_volatile (Ir.I8, Ir.Local (stored, Ir.I8), pointer, 1));
+      E.cast s.fn stored "zext" Low.I1 value Low.I8;
+      E.store_volatile s.fn Low.I8 (Low.Local (stored, Low.I8)) pointer 1;
       Ok ()
   | Hir.Int _ ->
-      emit s (Ir.Store_volatile (ty access_ty, value, pointer, 1));
+      E.store_volatile s.fn (ty access_ty) value pointer 1;
       Ok ()
   | Hir.Float _ ->
-      emit s (Ir.Store_volatile (ty access_ty, value, pointer, 1));
+      E.store_volatile s.fn (ty access_ty) value pointer 1;
       Ok ()
   | Hir.Addr | Hir.Handle _ ->
-      emit s (Ir.Store_volatile (Ir.Pointer Ir.I8, value, pointer, 1));
+      E.store_volatile s.fn (Low.Pointer Low.I8) value pointer 1;
       Ok ()
   | Hir.Vec (lanes, Hir.Int kind) ->
       let elem_ty = ty (Hir.Int kind) in
       let elem_bytes = int_ty_bytes elem_ty in
-      let vector_ty = Ir.Vector (lanes, elem_ty) in
+      let vector_ty = Low.Vector (lanes, elem_ty) in
       let rec store_lane i =
         if i = lanes then Ok ()
         else
           let extracted = fresh s in
-          emit s
-            (Ir.Extract (extracted, vector_ty, value, Ir.Const (Ir.I64, Int64.of_int i)));
+          E.extract s.fn extracted vector_ty value (Low.Const (Low.I64, Int64.of_int i));
           let* lane_pointer = volatile_offset s pointer (i * elem_bytes) in
-          emit s
-            (Ir.Store_volatile (elem_ty, Ir.Local (extracted, elem_ty), lane_pointer, 1));
+          E.store_volatile s.fn elem_ty (Low.Local (extracted, elem_ty)) lane_pointer 1;
           store_lane (i + 1)
       in
       store_lane 0
@@ -1693,150 +1524,108 @@ and simd_memory_address s span stride base index_ty index_value =
     | None | Some 1 -> offset
     | Some bytes ->
         let id = fresh s in
-        emit s
-          (Ir.Bin
-             ( id,
-               Ir.Mul,
-               pointer_int,
-               offset,
-               Ir.Const (pointer_int, Int64.of_int bytes) ));
-        Ir.Local (id, pointer_int)
+        E.bin s.fn id Low.Mul pointer_int offset (Low.Const (pointer_int, Int64.of_int bytes));
+        Low.Local (id, pointer_int)
   in
   match stride with
   | Some _ ->
       let id = fresh s in
-      emit s (Ir.Gep (id, Ir.I8, base, [ Ir.Index offset ]));
-      Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+      E.gep s.fn id Low.I8 base [ Low.Index offset ];
+      Ok (Low.Local (id, Low.Pointer Low.I8))
   | None ->
       let bits = fresh s in
-      emit s (Ir.Cast (bits, "ptrtoint", Ir.Pointer Ir.I8, base, pointer_int));
+      E.cast s.fn bits "ptrtoint" (Low.Pointer Low.I8) base pointer_int;
       let sum = fresh s in
-      emit s (Ir.Bin (sum, Ir.Add, pointer_int, Ir.Local (bits, pointer_int), offset));
+      E.bin s.fn sum Low.Add pointer_int (Low.Local (bits, pointer_int)) offset;
       let pointer = fresh s in
-      emit s
-        (Ir.Cast
-           ( pointer,
-             "inttoptr",
-             pointer_int,
-             Ir.Local (sum, pointer_int),
-             Ir.Pointer Ir.I8 ));
-      Ok (Ir.Local (pointer, Ir.Pointer Ir.I8))
+      E.cast s.fn pointer "inttoptr" pointer_int (Low.Local (sum, pointer_int)) (Low.Pointer Low.I8);
+      Ok (Low.Local (pointer, Low.Pointer Low.I8))
 
 and simd_memory_load_lane s span access_ty pointer =
   match access_ty with
   | Hir.Bool ->
       let loaded = fresh s in
-      emit s (Ir.Load (loaded, Ir.I8, pointer, 1));
+      E.load s.fn loaded Low.I8 pointer 1;
       let normalized = fresh s in
-      emit s
-        (Ir.Cmp
-           (normalized, Ir.Ne, Ir.I8, Ir.Local (loaded, Ir.I8), Ir.Const (Ir.I8, 0L)));
-      Ok (Ir.Local (normalized, Ir.I1))
+      E.cmp s.fn normalized Low.Ne Low.I8 (Low.Local (loaded, Low.I8)) (Low.Const (Low.I8, 0L));
+      Ok (Low.Local (normalized, Low.I1))
   | Hir.Int _ ->
       let loaded = fresh s in
-      emit s (Ir.Load (loaded, ty access_ty, pointer, 1));
-      Ok (Ir.Local (loaded, ty access_ty))
+      E.load s.fn loaded (ty access_ty) pointer 1;
+      Ok (Low.Local (loaded, ty access_ty))
   | Hir.Float _ ->
       let loaded = fresh s in
-      emit s (Ir.Load (loaded, ty access_ty, pointer, 1));
-      Ok (Ir.Local (loaded, ty access_ty))
+      E.load s.fn loaded (ty access_ty) pointer 1;
+      Ok (Low.Local (loaded, ty access_ty))
   | _ -> error span "internal error: invalid SIMD memory element type"
 
 and simd_memory_store_lane s span access_ty value pointer =
   match access_ty with
   | Hir.Bool ->
       let byte = fresh s in
-      emit s (Ir.Cast (byte, "zext", Ir.I1, value, Ir.I8));
-      emit s (Ir.Store (Ir.I8, Ir.Local (byte, Ir.I8), pointer, 1));
+      E.cast s.fn byte "zext" Low.I1 value Low.I8;
+      E.store s.fn Low.I8 (Low.Local (byte, Low.I8)) pointer 1;
       Ok ()
   | Hir.Int _ ->
-      emit s (Ir.Store (ty access_ty, value, pointer, 1));
+      E.store s.fn (ty access_ty) value pointer 1;
       Ok ()
   | Hir.Float _ ->
-      emit s (Ir.Store (ty access_ty, value, pointer, 1));
+      E.store s.fn (ty access_ty) value pointer 1;
       Ok ()
   | _ -> error span "internal error: invalid SIMD memory element type"
 
 and masked_elem_ty access_ty =
-  match access_ty with Hir.Bool -> Ir.I8 | _ -> ty access_ty
+  match access_ty with Hir.Bool -> Low.I8 | _ -> ty access_ty
 
 and masked_mask_lanes span mask =
   match value_ty mask with
-  | Ir.Vector (lanes, Ir.I1) -> Ok lanes
+  | Low.Vector (lanes, Low.I1) -> Ok lanes
   | _ -> error span "internal error: masked SIMD memory mask is not a bool vector"
 
 and masked_intrinsic span direction memory_ty =
   let* suffix =
     match memory_ty with
-    | Ir.Vector (_, (Ir.F32 | Ir.F64)) -> float_suffix span memory_ty
+    | Low.Vector (_, (Low.F32 | Low.F64)) -> float_suffix span memory_ty
     | _ -> intrinsic_suffix span memory_ty
   in
   Ok (Printf.sprintf "llvm.masked.%s.%s.p0" direction suffix)
 
 and simd_masked_load s span access_ty base mask fallback =
   let* lanes = masked_mask_lanes span mask in
-  let mask_ty = Ir.Vector (lanes, Ir.I1) in
-  let memory_ty = Ir.Vector (lanes, masked_elem_ty access_ty) in
+  let mask_ty = Low.Vector (lanes, Low.I1) in
+  let memory_ty = Low.Vector (lanes, masked_elem_ty access_ty) in
   let* name = masked_intrinsic span "load" memory_ty in
   let passthru =
     match access_ty with
     | Hir.Bool ->
         let id = fresh s in
-        emit s (Ir.Cast (id, "zext", value_ty fallback, fallback, memory_ty));
-        Ir.Local (id, memory_ty)
+        E.cast s.fn id "zext" (value_ty fallback) fallback memory_ty;
+        Low.Local (id, memory_ty)
     | _ -> fallback
   in
   let loaded = fresh s in
-  emit s
-    (Ir.Call
-       ( Some loaded,
-         Ir.No_extension,
-         memory_ty,
-         name,
-         [
-           (Ir.Pointer Ir.I8, Ir.No_extension, base);
-           (Ir.I32, Ir.No_extension, Ir.Const (Ir.I32, 1L));
-           (mask_ty, Ir.No_extension, mask);
-           (memory_ty, Ir.No_extension, passthru);
-         ] ));
+  E.call s.fn (Some loaded) Low.No_extension memory_ty name [ (Low.Pointer Low.I8, Low.No_extension, base); (Low.I32, Low.No_extension, Low.Const (Low.I32, 1L)); (mask_ty, Low.No_extension, mask); (memory_ty, Low.No_extension, passthru); ];
   match access_ty with
   | Hir.Bool ->
       let normalized = fresh s in
-      emit s
-        (Ir.Cmp
-           ( normalized,
-             Ir.Ne,
-             memory_ty,
-             Ir.Local (loaded, memory_ty),
-             Ir.Zero memory_ty ));
-      Ok (Ir.Local (normalized, mask_ty))
-  | _ -> Ok (Ir.Local (loaded, memory_ty))
+      E.cmp s.fn normalized Low.Ne memory_ty (Low.Local (loaded, memory_ty)) (Low.Zero memory_ty);
+      Ok (Low.Local (normalized, mask_ty))
+  | _ -> Ok (Low.Local (loaded, memory_ty))
 
 and simd_masked_store s span access_ty base mask stored =
   let* lanes = masked_mask_lanes span mask in
-  let mask_ty = Ir.Vector (lanes, Ir.I1) in
-  let memory_ty = Ir.Vector (lanes, masked_elem_ty access_ty) in
+  let mask_ty = Low.Vector (lanes, Low.I1) in
+  let memory_ty = Low.Vector (lanes, masked_elem_ty access_ty) in
   let* name = masked_intrinsic span "store" memory_ty in
   let value =
     match access_ty with
     | Hir.Bool ->
         let id = fresh s in
-        emit s (Ir.Cast (id, "zext", value_ty stored, stored, memory_ty));
-        Ir.Local (id, memory_ty)
+        E.cast s.fn id "zext" (value_ty stored) stored memory_ty;
+        Low.Local (id, memory_ty)
     | _ -> stored
   in
-  emit s
-    (Ir.Call
-       ( None,
-         Ir.No_extension,
-         Ir.Void,
-         name,
-         [
-           (memory_ty, Ir.No_extension, value);
-           (Ir.Pointer Ir.I8, Ir.No_extension, base);
-           (Ir.I32, Ir.No_extension, Ir.Const (Ir.I32, 1L));
-           (mask_ty, Ir.No_extension, mask);
-         ] ));
+  E.call s.fn None Low.No_extension Low.Void name [ (memory_ty, Low.No_extension, value); (Low.Pointer Low.I8, Low.No_extension, base); (Low.I32, Low.No_extension, Low.Const (Low.I32, 1L)); (mask_ty, Low.No_extension, mask); ];
   Ok ()
 
 and simd_memory_load s span access_ty kind args values =
@@ -1857,49 +1646,42 @@ and simd_memory_load s span access_ty kind args values =
   | _ -> error span "internal error: invalid SIMD memory load"
 
 and simd_lane_load s span access_ty indices index_ty base mask fallback stride =
-  let lanes = match value_ty mask with Ir.Vector (n, Ir.I1) -> n | _ -> 0 in
-  let result_ty = Ir.Vector (lanes, ty access_ty) in
+  let lanes = match value_ty mask with Low.Vector (n, Low.I1) -> n | _ -> 0 in
+  let result_ty = Low.Vector (lanes, ty access_ty) in
   let rec load_lane lane result =
     if lane = lanes then Ok result
     else
-      let lane_index = Ir.Const (Ir.I64, Int64.of_int lane) in
+      let lane_index = Low.Const (Low.I64, Int64.of_int lane) in
       let mask_id = fresh s in
-      emit s (Ir.Extract (mask_id, value_ty mask, mask, lane_index));
+      E.extract s.fn mask_id (value_ty mask) mask lane_index;
       let fallback_id = fresh s in
-      emit s (Ir.Extract (fallback_id, value_ty fallback, fallback, lane_index));
+      E.extract s.fn fallback_id (value_ty fallback) fallback lane_index;
       let inactive = s.current.id in
       let active = fresh_block s and join = fresh_block s in
-      s.current.term := Some (Ir.CondBr (Ir.Local (mask_id, Ir.I1), active.id, join.id));
+      E.cond_br s.fn (Low.Local (mask_id, Low.I1)) active.id join.id;
       enter s active;
       let index_value =
         match indices with
-        | None -> Ir.Const (ty (Hir.Int Hir.Usize), Int64.of_int lane)
+        | None -> Low.Const (ty (Hir.Int Hir.Usize), Int64.of_int lane)
         | Some vector ->
             let index_id = fresh s in
-            emit s (Ir.Extract (index_id, value_ty vector, vector, lane_index));
-            Ir.Local
+            E.extract s.fn index_id (value_ty vector) vector lane_index;
+            Low.Local
               ( index_id,
-                match value_ty vector with Ir.Vector (_, elem) -> elem | _ -> Ir.I64 )
+                match value_ty vector with Low.Vector (_, elem) -> elem | _ -> Low.I64 )
       in
       let* pointer = simd_memory_address s span stride base index_ty index_value in
       let* loaded = simd_memory_load_lane s span access_ty pointer in
       let active_end = s.current.id in
-      s.current.term := Some (Ir.Br join.id);
+      E.br s.fn join.id;
       enter s join;
       let merged = fresh s in
-      emit s
-        (Ir.Phi
-           ( merged,
-             ty access_ty,
-             [ (loaded, active_end); (Ir.Local (fallback_id, ty access_ty), inactive) ]
-           ));
+      E.phi s.fn merged (ty access_ty) [ (loaded, active_end); (Low.Local (fallback_id, ty access_ty), inactive) ];
       let inserted = fresh s in
-      emit s
-        (Ir.Insert
-           (inserted, result_ty, result, lane_index, Ir.Local (merged, ty access_ty)));
-      load_lane (lane + 1) (Ir.Local (inserted, result_ty))
+      E.insert s.fn inserted result_ty result lane_index (Low.Local (merged, ty access_ty));
+      load_lane (lane + 1) (Low.Local (inserted, result_ty))
   in
-  load_lane 0 (Ir.Zero result_ty)
+  load_lane 0 (Low.Zero result_ty)
 
 and simd_memory_store s span access_ty kind args values =
   match (kind, args, values) with
@@ -1912,33 +1694,32 @@ and simd_memory_store s span access_ty kind args values =
         if kind = Hir.Scatter then Some (int_ty_bytes (ty access_ty)) else None
       in
       let index_ty = Hir.expr_ty index_expr in
-      let lanes = match value_ty mask with Ir.Vector (n, Ir.I1) -> n | _ -> 0 in
+      let lanes = match value_ty mask with Low.Vector (n, Low.I1) -> n | _ -> 0 in
       let rec store_lane lane =
         if lane = lanes then Ok ()
         else
-          let lane_index = Ir.Const (Ir.I64, Int64.of_int lane) in
+          let lane_index = Low.Const (Low.I64, Int64.of_int lane) in
           let mask_id = fresh s in
-          emit s (Ir.Extract (mask_id, value_ty mask, mask, lane_index));
+          E.extract s.fn mask_id (value_ty mask) mask lane_index;
           let active = fresh_block s and join = fresh_block s in
-          s.current.term :=
-            Some (Ir.CondBr (Ir.Local (mask_id, Ir.I1), active.id, join.id));
+          E.cond_br s.fn (Low.Local (mask_id, Low.I1)) active.id join.id;
           enter s active;
           let index_id = fresh s in
-          emit s (Ir.Extract (index_id, value_ty indices, indices, lane_index));
+          E.extract s.fn index_id (value_ty indices) indices lane_index;
           let index_value =
-            Ir.Local
+            Low.Local
               ( index_id,
-                match value_ty indices with Ir.Vector (_, elem) -> elem | _ -> Ir.I64 )
+                match value_ty indices with Low.Vector (_, elem) -> elem | _ -> Low.I64 )
           in
           let* pointer = simd_memory_address s span stride base index_ty index_value in
           let value_id = fresh s in
-          emit s (Ir.Extract (value_id, value_ty stored, stored, lane_index));
+          E.extract s.fn value_id (value_ty stored) stored lane_index;
           let* () =
             simd_memory_store_lane s span access_ty
-              (Ir.Local (value_id, ty access_ty))
+              (Low.Local (value_id, ty access_ty))
               pointer
           in
-          s.current.term := Some (Ir.Br join.id);
+          E.br s.fn join.id;
           enter s join;
           store_lane (lane + 1)
       in
@@ -1949,52 +1730,52 @@ and raw_load s t p =
   match t with
   | Hir.Float _ ->
       let id = fresh s in
-      emit s (Ir.Load (id, ty t, p, 1));
-      Ok (Ir.Local (id, ty t))
+      E.load s.fn id (ty t) p 1;
+      Ok (Low.Local (id, ty t))
   | Hir.Int k ->
       let it = ty (Hir.Int k) in
       let id = fresh s in
-      emit s (Ir.Load (id, it, p, 1));
-      Ok (Ir.Local (id, it))
+      E.load s.fn id it p 1;
+      Ok (Low.Local (id, it))
   | Hir.Bool ->
       let id = fresh s in
-      emit s (Ir.Load (id, Ir.I8, p, 1));
+      E.load s.fn id Low.I8 p 1;
       let cid = fresh s in
-      emit s (Ir.Cmp (cid, Ir.Ne, Ir.I8, Ir.Local (id, Ir.I8), Ir.Const (Ir.I8, 0L)));
-      Ok (Ir.Local (cid, Ir.I1))
+      E.cmp s.fn cid Low.Ne Low.I8 (Low.Local (id, Low.I8)) (Low.Const (Low.I8, 0L));
+      Ok (Low.Local (cid, Low.I1))
   | Hir.Addr | Hir.Handle _ ->
-      let pt = Ir.Pointer Ir.I8 in
+      let pt = Low.Pointer Low.I8 in
       let id = fresh s in
-      emit s (Ir.Load (id, pt, p, 1));
-      Ok (Ir.Local (id, pt))
+      E.load s.fn id pt p 1;
+      Ok (Low.Local (id, pt))
   | Hir.Vec (_, (Hir.Float _ | Hir.Int _)) ->
       (* every lane type is whole bytes: one unaligned vector load *)
       let id = fresh s in
       let vector_ty = ty t in
-      emit s (Ir.Load (id, vector_ty, p, 1));
-      Ok (Ir.Local (id, vector_ty))
+      E.load s.fn id vector_ty p 1;
+      Ok (Low.Local (id, vector_ty))
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_load s false lanes p
   | _ -> error Span.synthetic "internal error: aggregate raw load"
 
 and raw_store s t v p =
   match t with
   | Hir.Float _ ->
-      emit s (Ir.Store (ty t, v, p, 1));
+      E.store s.fn (ty t) v p 1;
       Ok ()
   | Hir.Int k ->
       let it = ty (Hir.Int k) in
-      emit s (Ir.Store (it, v, p, 1));
+      E.store s.fn it v p 1;
       Ok ()
   | Hir.Bool ->
       let zid = fresh s in
-      emit s (Ir.Cast (zid, "zext", Ir.I1, v, Ir.I8));
-      emit s (Ir.Store (Ir.I8, Ir.Local (zid, Ir.I8), p, 1));
+      E.cast s.fn zid "zext" Low.I1 v Low.I8;
+      E.store s.fn Low.I8 (Low.Local (zid, Low.I8)) p 1;
       Ok ()
   | Hir.Addr | Hir.Handle _ ->
-      emit s (Ir.Store (Ir.Pointer Ir.I8, v, p, 1));
+      E.store s.fn (Low.Pointer Low.I8) v p 1;
       Ok ()
   | Hir.Vec (_, (Hir.Float _ | Hir.Int _)) ->
-      emit s (Ir.Store (ty t, v, p, 1));
+      E.store s.fn (ty t) v p 1;
       Ok ()
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_store s false lanes v p
   | _ -> error Span.synthetic "internal error: aggregate raw store"
@@ -2003,12 +1784,12 @@ and store_value s t value pointer alignment =
   match t with
   | Hir.Bool ->
       let byte = fresh s in
-      emit s (Ir.Cast (byte, "zext", Ir.I1, value, Ir.I8));
-      emit s (Ir.Store (Ir.I8, Ir.Local (byte, Ir.I8), pointer, alignment));
+      E.cast s.fn byte "zext" Low.I1 value Low.I8;
+      E.store s.fn Low.I8 (Low.Local (byte, Low.I8)) pointer alignment;
       Ok ()
   | Hir.Vec (lanes, Hir.Bool) when lanes mod 8 <> 0 -> raw_store s t value pointer
   | _ ->
-      emit s (Ir.Store (ty t, value, pointer, alignment));
+      E.store s.fn (ty t) value pointer alignment;
       Ok ()
 
 and field_address s a off =
@@ -2021,14 +1802,13 @@ and field_address s a off =
     else materialize s a
   in
   let id = fresh s in
-  emit s (Ir.Gep (id, Ir.I8, p, [ Ir.Index (Ir.Const (Ir.I64, Int64.of_int off)) ]));
-  Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+  E.gep s.fn id Low.I8 p [ Low.Index (Low.Const (Low.I64, Int64.of_int off)) ];
+  Ok (Low.Local (id, Low.Pointer Low.I8))
 
 let copy_offset s pointer offset =
   let id = fresh s in
-  emit s
-    (Ir.Gep (id, Ir.I8, pointer, [ Ir.Index (Ir.Const (Ir.I64, Int64.of_int offset)) ]));
-  Ok (Ir.Local (id, Ir.Pointer Ir.I8))
+  E.gep s.fn id Low.I8 pointer [ Low.Index (Low.Const (Low.I64, Int64.of_int offset)) ];
+  Ok (Low.Local (id, Low.Pointer Low.I8))
 
 let capped_add left right = if left > 16 - right then 17 else left + right
 
@@ -2113,52 +1893,33 @@ and copy_array_loop s span length stride element_ty destination source =
   and exit = fresh_block s in
   let index = fresh s in
   let next_index = fresh s in
-  s.current.term := Some (Ir.Br head.id);
+  E.br s.fn head.id;
   enter s head;
-  emit s
-    (Ir.Phi
-       ( index,
-         Ir.I64,
-         [
-           (Ir.Const (Ir.I64, 0L), preheader); (Ir.Local (next_index, Ir.I64), latch.id);
-         ] ));
+  E.phi s.fn index Low.I64 [ (Low.Const (Low.I64, 0L), preheader); (Low.Local (next_index, Low.I64), latch.id); ];
   let condition = fresh s in
-  emit s
-    (Ir.Cmp
-       ( condition,
-         Ir.Ult,
-         Ir.I64,
-         Ir.Local (index, Ir.I64),
-         Ir.Const (Ir.I64, Int64.of_int length) ));
-  s.current.term := Some (Ir.CondBr (Ir.Local (condition, Ir.I1), body.id, exit.id));
+  E.cmp s.fn condition Low.Ult Low.I64 (Low.Local (index, Low.I64)) (Low.Const (Low.I64, Int64.of_int length));
+  E.cond_br s.fn (Low.Local (condition, Low.I1)) body.id exit.id;
   enter s body;
   let offset =
-    if stride = 1 then Ir.Local (index, Ir.I64)
+    if stride = 1 then Low.Local (index, Low.I64)
     else
       let scaled = fresh s in
-      emit s
-        (Ir.Bin
-           ( scaled,
-             Ir.Mul,
-             Ir.I64,
-             Ir.Local (index, Ir.I64),
-             Ir.Const (Ir.I64, Int64.of_int stride) ));
-      Ir.Local (scaled, Ir.I64)
+      E.bin s.fn scaled Low.Mul Low.I64 (Low.Local (index, Low.I64)) (Low.Const (Low.I64, Int64.of_int stride));
+      Low.Local (scaled, Low.I64)
   in
   let destination_element = fresh s in
-  emit s (Ir.Gep (destination_element, Ir.I8, destination, [ Ir.Index offset ]));
+  E.gep s.fn destination_element Low.I8 destination [ Low.Index offset ];
   let source_element = fresh s in
-  emit s (Ir.Gep (source_element, Ir.I8, source, [ Ir.Index offset ]));
+  E.gep s.fn source_element Low.I8 source [ Low.Index offset ];
   let* () =
     copy_place s span element_ty
-      (Ir.Local (destination_element, Ir.Pointer Ir.I8))
-      (Ir.Local (source_element, Ir.Pointer Ir.I8))
+      (Low.Local (destination_element, Low.Pointer Low.I8))
+      (Low.Local (source_element, Low.Pointer Low.I8))
   in
-  if open_block s then s.current.term := Some (Ir.Br latch.id);
+  if open_block s then E.br s.fn latch.id;
   enter s latch;
-  emit s
-    (Ir.Bin (next_index, Ir.Add, Ir.I64, Ir.Local (index, Ir.I64), Ir.Const (Ir.I64, 1L)));
-  s.current.term := Some (Ir.Br head.id);
+  E.bin s.fn next_index Low.Add Low.I64 (Low.Local (index, Low.I64)) (Low.Const (Low.I64, 1L));
+  E.br s.fn head.id;
   enter s exit;
   Ok ()
 
@@ -2180,16 +1941,7 @@ and emit_scope_defers s idx =
         (Ok ()) ds
 
 and emit_lifetime s operation slot =
-  emit s
-    (Ir.Call
-       ( None,
-         Ir.No_extension,
-         Ir.Void,
-         "llvm.lifetime." ^ operation ^ ".p0",
-         [
-           (Ir.I64, Ir.No_extension, Ir.Const (Ir.I64, Int64.of_int slot.size));
-           (Ir.value_ty slot.pointer, Ir.No_extension, slot.pointer);
-         ] ));
+  E.call s.fn None Low.No_extension Low.Void ("llvm.lifetime." ^ operation ^ ".p0") [ (Low.I64, Low.No_extension, Low.Const (Low.I64, Int64.of_int slot.size)); (Low.value_ty slot.pointer, Low.No_extension, slot.pointer); ];
   Ok ()
 
 and emit_scope_lifetimes s slots =
@@ -2272,8 +2024,8 @@ and stmt s statement =
   | Hir.Let (local, init, _) -> (
       let* alignment = align s local.ty in
       let id = fresh s in
-      emit_entry s (Ir.Alloca (id, storage_ty local.ty, alignment));
-      let p = Ir.Local (id, Ir.Pointer (storage_ty local.ty)) in
+      E.alloca_entry s.fn id (storage_ty local.ty) alignment;
+      let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
       let* () = register_local_lifetime s local p in
       bind_local s local p alignment;
       match init with
@@ -2284,15 +2036,15 @@ and stmt s statement =
   | Hir.Let_construct (local, construction, _) ->
       let* alignment = align s local.ty in
       let id = fresh s in
-      emit_entry s (Ir.Alloca (id, storage_ty local.ty, alignment));
-      let pointer = Ir.Local (id, Ir.Pointer (storage_ty local.ty)) in
+      E.alloca_entry s.fn id (storage_ty local.ty) alignment;
+      let pointer = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
       let* () = register_local_lifetime s local pointer in
       bind_local s local pointer alignment;
       construct_into ~alignment s pointer construction
   | Hir.View (local, place, span) ->
       let* pointer = address s place in
       let* alignment = place_alignment s place in
-      if match value_ty pointer with Ir.Pointer _ -> true | _ -> false then (
+      if match value_ty pointer with Low.Pointer _ -> true | _ -> false then (
         bind_local s local pointer alignment;
         Ok ())
       else error span "internal error: view address has the wrong type"
@@ -2312,8 +2064,8 @@ and stmt s statement =
         else
           let* alignment = align s copy_ty in
           let scratch_id = fresh s in
-          emit_entry s (Ir.Alloca (scratch_id, storage_ty copy_ty, alignment));
-          let scratch = Ir.Local (scratch_id, Ir.Pointer (storage_ty copy_ty)) in
+          E.alloca_entry s.fn scratch_id (storage_ty copy_ty) alignment;
+          let scratch = Low.Local (scratch_id, Low.Pointer (storage_ty copy_ty)) in
           let* () = copy_place s span copy_ty scratch source_pointer in
           copy_place s span copy_ty destination_pointer scratch
   | Hir.Volatile_store (access_ty, pointer_expr, value_expr, span) ->
@@ -2330,11 +2082,11 @@ and stmt s statement =
           let* p, source_ty, vt, iv, alignment = vector_lane s a i in
           let* x = expr s e in
           let loaded_id = fresh s in
-          emit s (Ir.Load (loaded_id, vt, p, alignment));
-          let loaded = Ir.Local (loaded_id, vt) in
+          E.load s.fn loaded_id vt p alignment;
+          let loaded = Low.Local (loaded_id, vt) in
           let ins = fresh s in
-          emit s (Ir.Insert (ins, vt, loaded, iv, x));
-          store_value s source_ty (Ir.Local (ins, vt)) p alignment
+          E.insert s.fn ins vt loaded iv x;
+          store_value s source_ty (Low.Local (ins, vt)) p alignment
       | Hir.ARaw (b, off, at) ->
           let* p = raw_address s b off in
           let* v = expr s e in
@@ -2351,28 +2103,28 @@ and stmt s statement =
         ->
           let* p, source_ty, vt, iv, alignment = vector_lane s a i in
           let loaded_id = fresh s in
-          emit s (Ir.Load (loaded_id, vt, p, alignment));
-          let loaded = Ir.Local (loaded_id, vt) in
+          E.load s.fn loaded_id vt p alignment;
+          let loaded = Low.Local (loaded_id, vt) in
           let eid = fresh s in
-          emit s (Ir.Extract (eid, vt, loaded, iv));
+          E.extract s.fn eid vt loaded iv;
           let it = ty t in
-          let old = Ir.Local (eid, it) in
+          let old = Low.Local (eid, it) in
           let* rhs = expr s e in
           let* value = emit_binary s span t op it old rhs in
           let latest_id = fresh s in
-          emit s (Ir.Load (latest_id, vt, p, alignment));
-          let latest = Ir.Local (latest_id, vt) in
+          E.load s.fn latest_id vt p alignment;
+          let latest = Low.Local (latest_id, vt) in
           let ins = fresh s in
-          emit s (Ir.Insert (ins, vt, latest, iv, value));
-          store_value s source_ty (Ir.Local (ins, vt)) p alignment
+          E.insert s.fn ins vt latest iv value;
+          store_value s source_ty (Low.Local (ins, vt)) p alignment
       | Hir.ARaw (b, off, at) ->
           let* p = raw_address s b off in
           let* old = raw_load s at p in
           let* rhs = expr s e in
           let* value =
             match (at, op) with
-            | Hir.Addr, Ast.Add -> address_step s Ir.Add old rhs
-            | Hir.Addr, Ast.Sub -> address_step s Ir.Sub old rhs
+            | Hir.Addr, Ast.Add -> address_step s Low.Add old rhs
+            | Hir.Addr, Ast.Sub -> address_step s Low.Sub old rhs
             | _ -> emit_binary s span t op (ty at) old rhs
           in
           raw_store s at value p
@@ -2384,8 +2136,8 @@ and stmt s statement =
           let* rhs = expr s e in
           let* value =
             match (t, op) with
-            | Hir.Addr, Ast.Add -> address_step s Ir.Add old rhs
-            | Hir.Addr, Ast.Sub -> address_step s Ir.Sub old rhs
+            | Hir.Addr, Ast.Add -> address_step s Low.Add old rhs
+            | Hir.Addr, Ast.Sub -> address_step s Low.Sub old rhs
             | _ -> emit_binary s span t op it old rhs
           in
           store_value s t value p alignment)
@@ -2401,7 +2153,7 @@ and stmt s statement =
             Ok (Some (ty (Hir.expr_ty x), y))
       in
       let* () = unwind s 0 in
-      s.current.term := Some (Ir.Ret v);
+      E.ret s.fn v;
       Ok ()
   | Hir.Block (xs, _) -> scoped s xs
   | Hir.If (c, a, b, _) -> lower_if s c a b
@@ -2418,7 +2170,7 @@ and stmt s statement =
       match target_loop s label with
       | Some l ->
           let* () = unwind s l.keep_scopes in
-          s.current.term := Some (Ir.Br l.break_to);
+          E.br s.fn l.break_to;
           Ok ()
       | None -> error sp "break outside loop or switch")
   | Hir.Continue (label, sp) -> (
@@ -2426,7 +2178,7 @@ and stmt s statement =
       | Some l ->
           let* () = unwind s l.keep_scopes in
           mark s sp;
-          s.current.term := Some (Ir.Br l.continue_to);
+          E.br s.fn l.continue_to;
           Ok ()
       | None -> error sp "continue outside loop")
 
@@ -2523,45 +2275,25 @@ and construct_entries ?alignment s destination = function
             let* a =
               match alignment with Some a -> Ok a | None -> align s aggregate_ty
             in
-            store_value s aggregate_ty (Ir.Zero (ty aggregate_ty)) destination a
+            store_value s aggregate_ty (Low.Zero (ty aggregate_ty)) destination a
           else
             let preheader = s.current.id in
             let head = fresh_block s
             and body = fresh_block s
             and exit = fresh_block s in
             let index = fresh s and next = fresh s in
-            s.current.term := Some (Ir.Br head.id);
+            E.br s.fn head.id;
             enter s head;
-            emit s
-              (Ir.Phi
-                 ( index,
-                   Ir.I64,
-                   [
-                     (Ir.Const (Ir.I64, 0L), preheader);
-                     (Ir.Local (next, Ir.I64), body.id);
-                   ] ));
+            E.phi s.fn index Low.I64 [ (Low.Const (Low.I64, 0L), preheader); (Low.Local (next, Low.I64), body.id); ];
             let condition = fresh s in
-            emit s
-              (Ir.Cmp
-                 ( condition,
-                   Ir.Ult,
-                   Ir.I64,
-                   Ir.Local (index, Ir.I64),
-                   Ir.Const (Ir.I64, Int64.of_int size) ));
-            s.current.term :=
-              Some (Ir.CondBr (Ir.Local (condition, Ir.I1), body.id, exit.id));
+            E.cmp s.fn condition Low.Ult Low.I64 (Low.Local (index, Low.I64)) (Low.Const (Low.I64, Int64.of_int size));
+            E.cond_br s.fn (Low.Local (condition, Low.I1)) body.id exit.id;
             enter s body;
             let pointer = fresh s in
-            emit s
-              (Ir.Gep
-                 (pointer, Ir.I8, destination, [ Ir.Index (Ir.Local (index, Ir.I64)) ]));
-            emit s
-              (Ir.Store
-                 (Ir.I8, Ir.Const (Ir.I8, 0L), Ir.Local (pointer, Ir.Pointer Ir.I8), 1));
-            emit s
-              (Ir.Bin
-                 (next, Ir.Add, Ir.I64, Ir.Local (index, Ir.I64), Ir.Const (Ir.I64, 1L)));
-            s.current.term := Some (Ir.Br head.id);
+            E.gep s.fn pointer Low.I8 destination [ Low.Index (Low.Local (index, Low.I64)) ];
+            E.store s.fn Low.I8 (Low.Const (Low.I8, 0L)) (Low.Local (pointer, Low.Pointer Low.I8)) 1;
+            E.bin s.fn next Low.Add Low.I64 (Low.Local (index, Low.I64)) (Low.Const (Low.I64, 1L));
+            E.br s.fn head.id;
             enter s exit;
             Ok ()
       | _ -> error span "internal error: zero initializer requires an array or struct")
@@ -2569,7 +2301,7 @@ and construct_entries ?alignment s destination = function
       if List.length elements <> length then
         error span "internal error: array construction arity"
       else
-        let aggregate_ty = Ir.Array (length, storage_ty element_ty) in
+        let aggregate_ty = Low.Array (length, storage_ty element_ty) in
         let* base_alignment =
           match alignment with
           | Some value -> Ok value
@@ -2585,12 +2317,7 @@ and construct_entries ?alignment s destination = function
           | [] -> Ok ()
           | element :: rest ->
               let pointer_id = fresh s in
-              emit s
-                (Ir.Gep
-                   ( pointer_id,
-                     aggregate_ty,
-                     destination,
-                     [ Ir.Zero; Ir.Index (Ir.Const (Ir.I64, Int64.of_int index)) ] ));
+              E.gep s.fn pointer_id aggregate_ty destination [ Low.Zero; Low.Index (Low.Const (Low.I64, Int64.of_int index)) ];
               let element_alignment =
                 min
                   (offset_alignment base_alignment (index * element_size))
@@ -2598,7 +2325,7 @@ and construct_entries ?alignment s destination = function
               in
               let* () =
                 construct_into ~alignment:element_alignment s
-                  (Ir.Local (pointer_id, Ir.Pointer (storage_ty element_ty)))
+                  (Low.Local (pointer_id, Low.Pointer (storage_ty element_ty)))
                   element
               in
               go (index + 1) rest
@@ -2670,8 +2397,8 @@ and target_address s = function
       | None -> error Span.synthetic ("unknown local `" ^ local.name ^ "`"))
   | Hir.AGlobal (name, global_ty) ->
       let id = fresh s in
-      emit s (Ir.Global_ptr (id, name, storage_ty global_ty));
-      Ok (Ir.Local (id, Ir.Pointer (storage_ty global_ty)))
+      E.global_ptr s.fn id name;
+      Ok (Low.Local (id, Low.Pointer (storage_ty global_ty)))
   | Hir.ARaw (b, off, _) -> raw_address s b off
   | Hir.AIndex (a, i) -> index_address s a i
   | Hir.AField (a, _, off) -> field_address s a off
@@ -2692,19 +2419,19 @@ and lower_if s c a b =
   let* cv = expr s c in
   let* cv = require_bool (Hir.expr_span c) cv in
   let tb = fresh_block s and eb = fresh_block s and join = fresh_block s in
-  s.current.term := Some (Ir.CondBr (cv, tb.id, eb.id));
+  E.cond_br s.fn cv tb.id eb.id;
   enter s tb;
   let* () = scoped s a in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s eb;
   let* () = match b with None -> Ok () | Some xs -> scoped s xs in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s join;
   let falls_through =
     (Hir.block_flow a).falls_through
     || match b with None -> true | Some body -> (Hir.block_flow body).falls_through
   in
-  if not falls_through then s.current.term := Some Ir.Unreachable;
+  if not falls_through then E.unreachable s.fn;
   Ok ()
 
 and target_loop s label =
@@ -2715,16 +2442,16 @@ and target_loop s label =
 and loop_backedge s span target =
   if open_block s then (
     mark s span;
-    s.current.term := Some (Ir.Br target))
+    E.br s.fn target)
 
 and lower_while s label c body span =
   let head = fresh_block s and bb = fresh_block s and exit = fresh_block s in
-  s.current.term := Some (Ir.Br head.id);
+  E.br s.fn head.id;
   enter s head;
   mark s (Hir.expr_span c);
   let* cv = expr s c in
   let* cv = require_bool (Hir.expr_span c) cv in
-  s.current.term := Some (Ir.CondBr (cv, bb.id, exit.id));
+  E.cond_br s.fn cv bb.id exit.id;
   enter s bb;
   s.loops <-
     {
@@ -2739,7 +2466,7 @@ and lower_while s label c body span =
   loop_backedge s span head.id;
   enter s exit;
   if Hir.condition_is_true c && not (Hir.loop_body_has_break label body) then
-    s.current.term := Some Ir.Unreachable;
+    E.unreachable s.fn;
   Ok ()
 
 and lower_for s label init cond step body span =
@@ -2750,18 +2477,18 @@ and lower_for s label init cond step body span =
     and bb = fresh_block s
     and sb = fresh_block s
     and exit = fresh_block s in
-    s.current.term := Some (Ir.Br head.id);
+    E.br s.fn head.id;
     enter s head;
     let* () =
       match cond with
       | None ->
-          s.current.term := Some (Ir.Br bb.id);
+          E.br s.fn bb.id;
           Ok ()
       | Some c ->
           mark s (Hir.expr_span c);
           let* v = expr s c in
           let* condition = require_bool (Hir.expr_span c) v in
-          s.current.term := Some (Ir.CondBr (condition, bb.id, exit.id));
+          E.cond_br s.fn condition bb.id exit.id;
           Ok ()
     in
     enter s bb;
@@ -2775,7 +2502,7 @@ and lower_for s label init cond step body span =
       :: s.loops;
     let* () = scoped s body in
     s.loops <- List.tl s.loops;
-    if open_block s then s.current.term := Some (Ir.Br sb.id);
+    if open_block s then E.br s.fn sb.id;
     enter s sb;
     let* () = match step with None -> Ok () | Some x -> stmt s x in
     loop_backedge s span head.id;
@@ -2786,7 +2513,7 @@ and lower_for s label init cond step body span =
       match cond with None -> true | Some condition -> Hir.condition_is_true condition
     in
     if unconditional && not (Hir.loop_body_has_break label body) then
-      s.current.term := Some Ir.Unreachable;
+      E.unreachable s.fn;
     Ok ()
   in
   pop_scope s;
@@ -2821,21 +2548,21 @@ and lower_switch s e arms default span =
     | _ -> error span "internal error: switch arm/block mismatch"
   in
   let* cases = lower_cases arms blocks in
-  s.current.term := Some (Ir.Switch (value_ty v, v, cases, db.id));
+  E.switch s.fn (value_ty v) v cases db.id;
   let rec each as_ bs =
     match (as_, bs) with
     | [], [] -> Ok ()
     | (_, body) :: at, b :: bt ->
         enter s b;
         let* () = scoped s body in
-        if open_block s then s.current.term := Some (Ir.Br join.id);
+        if open_block s then E.br s.fn join.id;
         each at bt
     | _ -> error span "internal error: switch arm/block mismatch"
   in
   let* () = each arms blocks in
   enter s db;
   let* () = match default with None -> Ok () | Some xs -> scoped s xs in
-  if open_block s then s.current.term := Some (Ir.Br join.id);
+  if open_block s then E.br s.fn join.id;
   enter s join;
   let falls_through =
     let branches = List.map (fun (_, body) -> Hir.block_flow body) arms in
@@ -2846,7 +2573,7 @@ and lower_switch s e arms default span =
     in
     List.exists (fun (flow : Hir.flow_summary) -> flow.falls_through) branches
   in
-  if not falls_through then s.current.term := Some Ir.Unreachable;
+  if not falls_through then E.unreachable s.fn;
   Ok ()
 
 let address_taken_locals ?function_addresses body =
@@ -2949,7 +2676,7 @@ let address_taken_locals ?function_addresses body =
   collect_list body;
   addressed
 
-let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
+let lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
     ~addressed_functions literal_globals structs strings functions f =
   let c_abi = has_c_abi f || Hashtbl.mem addressed_functions f.name in
   let source =
@@ -2962,32 +2689,22 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
       f.Hir.params
   in
   let* () = if f.Hir.ret = Hir.Void then Ok () else layout_ok structs f.Hir.ret in
+  (* (name, type, extension) *)
   let params =
     List.mapi
       (fun index (local : Hir.local) ->
-        ({
-           Ir.name = "a" ^ string_of_int index;
-           ty = ty local.ty;
-           extension = (if c_abi then c_extension local.ty else Ir.No_extension);
-         }
-          : Ir.param))
+        ( "a" ^ string_of_int index,
+          ty local.ty,
+          if c_abi then c_extension local.ty else Low.No_extension ))
       f.Hir.params
   in
-  let ret_extension = if c_abi then c_extension f.ret else Ir.No_extension in
+  let ret_extension = if c_abi then c_extension f.ret else Low.No_extension in
   match f.body with
   | Hir.Declaration ->
-      Ok
-        {
-          Ir.name = f.name;
-          params;
-          ret = ty f.ret;
-          ret_extension;
-          blocks = [];
-          linkage = Ir.External;
-          variadic = f.variadic;
-          source;
-          display = f.display;
-        }
+      E.declare mc ~name:f.name
+        ~params:(List.map (fun (_, t, e) -> (t, e)) params)
+        ~ret:(ty f.ret) ~ret_extension ~variadic:f.variadic ~display:f.display;
+      Ok ()
   | Hir.Statements body ->
       let* () =
         if f.ret <> Hir.Void && (Hir.block_flow body).falls_through then
@@ -2998,18 +2715,21 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
                f.name)
         else Ok ()
       in
-      let entry = { id = 0; instrs = Queue.create (); term = ref None } in
-      let blocks = Queue.create () in
-      Queue.add entry blocks;
+      let linkage =
+        if f.name = "main" then Fir.Global
+        else if f.linkage = Hir.Internal then Fir.Local
+        else Fir.Global
+      in
+      let fn =
+        E.start mc ~name:f.name ~linkage ~params ~ret:(ty f.ret) ~ret_extension
+          ~variadic:f.variadic ~display:f.display ~source
+      in
       let s =
         {
+          fn;
           literal_globals;
           next_value = 0;
-          next_block = 1;
-          blocks;
-          entry;
-          entry_allocas = Queue.create ();
-          current = entry;
+          current = { id = Fir.entry };
           env = Hashtbl.create 32;
           env_scopes = [];
           ret = ty f.ret;
@@ -3031,17 +2751,15 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
       let rec bind_parameters locals parameters =
         match (locals, parameters) with
         | [], [] -> Ok ()
-        | (local : Hir.local) :: local_rest, (parameter : Ir.param) :: parameter_rest ->
+        | (local : Hir.local) :: local_rest, (name, _, _) :: parameter_rest ->
             let* alignment = align s local.ty in
             let id = fresh s in
-            emit s (Ir.Alloca (id, storage_ty local.ty, alignment));
-            let p = Ir.Local (id, Ir.Pointer (storage_ty local.ty)) in
+            E.alloca s.fn id (storage_ty local.ty) alignment;
+            let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
             let* () = register_local_lifetime s local p in
             bind_local s local p alignment;
             let* () =
-              store_value s local.ty
-                (Ir.Param (parameter.name, ty local.ty))
-                p alignment
+              store_value s local.ty (Low.Param (name, ty local.ty)) p alignment
             in
             bind_parameters local_rest parameter_rest
         | _ ->
@@ -3055,8 +2773,8 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
       let* () = if open_block s then emit_current_scope_lifetimes s else Ok () in
       let* () =
         if not (open_block s) then Ok ()
-        else if s.ret = Ir.Void then (
-          s.current.term := Some (Ir.Ret None);
+        else if s.ret = Low.Void then (
+          E.ret s.fn None;
           Ok ())
         else
           error Span.synthetic
@@ -3066,87 +2784,16 @@ let lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
                f.name)
       in
       pop_scope s;
-      let* blocks =
-        Result_list.map
-          (fun b ->
-            match !(b.term) with
-            | None ->
-                error Span.synthetic
-                  (Printf.sprintf
-                     "internal error: function `%s` block %d ended lowering without a \
-                      terminator"
-                     f.name b.id)
-            | Some terminator ->
-                Ok
-                  ({
-                     Ir.id = b.id;
-                     label = "b" ^ string_of_int b.id;
-                     instrs =
-                       (if b.id = s.entry.id then
-                          List.of_seq (Queue.to_seq s.entry_allocas)
-                        else [])
-                       @ List.of_seq (Queue.to_seq b.instrs);
-                     terminator;
-                   }
-                    : Ir.block))
-          (List.of_seq (Queue.to_seq s.blocks))
-      in
-      Ok
-        {
-          Ir.name = f.name;
-          params;
-          ret = ty f.ret;
-          ret_extension;
-          blocks;
-          linkage =
-            (if f.name = "main" then Ir.External
-             else if f.linkage = Hir.Internal then Ir.Internal
-             else External);
-          variadic = f.variadic;
-          source;
-          display = f.display;
-        }
+      match E.finish s.fn with
+      | Ok () -> Ok ()
+      | Error b ->
+          error Span.synthetic
+            (Printf.sprintf
+               "internal error: function `%s` block %d ended lowering without a \
+                terminator"
+               f.name b)
 
-let intrinsic_decls funcs =
-  let calls =
-    List.concat_map
-      (fun (f : Ir.func) ->
-        List.concat_map
-          (fun (b : Ir.block) ->
-            List.filter_map
-              (function
-                | Ir.Call (_, _, ret, name, args)
-                  when String.starts_with ~prefix:"llvm." name || Ir.is_atomic_name name ->
-                    Some (name, ret, List.map (fun (ty, _, _) -> ty) args)
-                | Ir.Trap -> Some ("llvm.trap", Ir.Void, [])
-                | _ -> None)
-              b.instrs)
-          f.blocks)
-      funcs
-  in
-  let unique = Hashtbl.create 16 in
-  List.iter (fun (name, ret, args) -> Hashtbl.replace unique name (ret, args)) calls;
-  Hashtbl.to_seq unique
-  |> Seq.map (fun (name, (ret, args)) ->
-      {
-        Ir.name;
-        params =
-          List.mapi
-            (fun i ty ->
-              { Ir.name = "a" ^ string_of_int i; ty; extension = Ir.No_extension })
-            args;
-        ret;
-        ret_extension = Ir.No_extension;
-        blocks = [];
-        linkage = Ir.External;
-        variadic = false;
-        source = None;
-        display = None;
-      })
-  |> List.of_seq
-  |> List.sort (fun (a : Ir.func) b -> String.compare a.name b.name)
-
-let global_storage structs (global : Hir.global) =
+let global_storage mc structs (global : Hir.global) =
   match Hir.layout structs global.ty with
   | Error message ->
       error Span.synthetic
@@ -3237,23 +2884,14 @@ let global_storage structs (global : Hir.global) =
               write 0 global.ty value;
               Some (Bytes.to_string data)
         in
-        Ok
-          (Ir.Storage_global
-             {
-               name = global.name;
-               storage_ty = storage_ty global.ty;
-               size;
-               bytes;
-               pointers = List.rev !pointers;
-               readonly = global.readonly;
-               align;
-               linkage = global.linkage;
-             })
+        E.storage_global mc ~name:global.name ~size ~bytes ~pointers:(List.rev !pointers)
+          ~readonly:global.readonly ~align ~linkage:global.linkage;
+        Ok ()
       with Failure message | Invalid_argument message ->
         error Span.synthetic
           (Printf.sprintf "internal error: global %s: %s" global.name message))
 
-let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.program)
+let lower_module ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
   let* () =
     match Target_layout.pointer_integer_bits (Target_layout.current ()) with
@@ -3309,21 +2947,9 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
     (fun (global : Hir.global) ->
       Option.iter collect_global_addresses global.init_value)
     p.globals;
-  let literal_globals = ref [] in
-  let* funcs =
-    Result_list.map
-      (fun (f : Hir.func) ->
-        let address_taken =
-          match (sanitize_address, f.Hir.body) with
-          | true, Hir.Statements body -> address_taken_locals body
-          | _ -> Hashtbl.create 0
-        in
-        lower_func ~sanitize_address ~intrinsic_masked_loads ~address_taken
-          ~addressed_functions literal_globals p.Hir.structs p.strings p.funcs f)
-      p.funcs
-  in
-  let* structs =
-    Result_list.map
+  let lay : E.layouts = Hashtbl.create 16 in
+  let* () =
+    Result_list.iter
       (fun (d : Hir.struct_def) ->
         let* () =
           match
@@ -3335,7 +2961,7 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
         let* fields, used, natural_align =
           if d.byte_storage then
             let rec validate used = function
-              | [] -> Ok ([ Ir.Array (d.size, Ir.I8) ], d.size, 1)
+              | [] -> Ok ([ Low.Array (d.size, Low.I8) ], d.size, 1)
               | (field : Hir.field) :: rest ->
                   let* size = field_size field.ty in
                   let* _ = field_align field.ty in
@@ -3352,7 +2978,7 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
             validate 0 d.fields
           else if d.is_union then
             let rec validate natural_align = function
-              | [] -> Ok ([ Ir.Array (d.size, Ir.I8) ], d.size, natural_align)
+              | [] -> Ok ([ Low.Array (d.size, Low.I8) ], d.size, natural_align)
               | (field : Hir.field) :: rest ->
                   let* size = field_size field.ty in
                   let* align = field_align field.ty in
@@ -3384,7 +3010,7 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
                     let field_end = f.offset + size in
                     let padding = f.offset - offset in
                     let out =
-                      if padding > 0 then Ir.Array (padding, Ir.I8) :: out else out
+                      if padding > 0 then Low.Array (padding, Low.I8) :: out else out
                     in
                     go field_end (storage_ty f.ty :: out) (max used field_end)
                       (max natural_align align) rest
@@ -3402,45 +3028,55 @@ let lower ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.
         else
           let fields =
             if d.align > natural_align then
-              Ir.Array (0, Ir.Vector (d.align, Ir.I8)) :: fields
+              Low.Array (0, Low.Vector (d.align, Low.I8)) :: fields
             else fields
           in
-          Ok { Ir.name = d.name; fields; tail_padding = d.size - used })
+          (* the old Ir's struct type: Lower_emit only needs the layout *)
+          let _ = (fields, used) in
+          Ok (Hashtbl.replace lay d.name (d.size, d.align)))
       p.structs
   in
-  let strings =
-    List.mapi
-      (fun i x -> Ir.String_global { name = ".str." ^ string_of_int i; bytes = x })
-      p.strings
+  let mc = E.create_module ~triple:(Target_layout.current ()).triple lay in
+  (* variadic functions: their fixed parameter count, for call signatures *)
+  List.iter
+    (fun (f : Hir.func) ->
+      if f.variadic then Hashtbl.replace mc.variadic f.name (List.length f.params))
+    p.funcs;
+  let literal_globals = ref [] in
+  let* () =
+    Result_list.iter
+      (fun (f : Hir.func) ->
+        let address_taken =
+          match (sanitize_address, f.Hir.body) with
+          | true, Hir.Statements body -> address_taken_locals body
+          | _ -> Hashtbl.create 0
+        in
+        lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
+          ~addressed_functions literal_globals p.Hir.structs p.strings p.funcs f)
+      p.funcs
   in
-  let* arrays =
-    Result_list.map
+  List.iteri (fun i x -> E.string_global mc i x) p.strings;
+  let* () =
+    Result_list.iter
       (fun (a : Hir.const_arr_def) ->
         match a.ty with
         | Hir.Array (_, e) ->
             let* align = field_align e in
-            Ok
-              (Ir.Array_global
-                 { name = a.name; elem_ty = storage_ty e; elems = a.elems; align })
+            E.array_global mc ~name:a.name ~elem_ty:(storage_ty e) ~elems:a.elems ~align;
+            Ok ()
         | _ ->
-            Ok
-              (Ir.Array_global { name = a.name; elem_ty = Ir.I8; elems = []; align = 1 }))
+            E.array_global mc ~name:a.name ~elem_ty:Low.I8 ~elems:[] ~align:1;
+            Ok ())
       p.const_arrays
   in
-  let* storage_globals =
-    Result_list.map (global_storage p.structs) (p.globals @ List.rev !literal_globals)
+  let* () =
+    Result_list.iter (global_storage mc p.structs) (p.globals @ List.rev !literal_globals)
   in
-  let module_ =
-    {
-      Ir.target_triple = (Target_layout.current ()).triple;
-      data_layout = (Target_layout.current ()).llvm_data_layout;
-      structs;
-      globals = strings @ arrays @ storage_globals;
-      funcs = funcs @ intrinsic_decls funcs;
-      no_inline_functions = [];
-      inline_functions = [];
-    }
-  in
-  match Ir.validate module_ with
-  | Ok () -> Ok module_
-  | Error message -> error Span.synthetic ("internal error: " ^ message)
+  match Fir_verify.verify mc.m with
+  | [] -> Ok mc.m
+  | errors -> error Span.synthetic ("internal error: invalid Fir:\n" ^ String.concat "\n" errors)
+
+let lower ?sanitize_address ?intrinsic_masked_loads p =
+  (* a malformed request to Lower_emit is a lowering bug *)
+  try lower_module ?sanitize_address ?intrinsic_masked_loads p
+  with E.Unsupported message -> error Span.synthetic ("internal error: lowering to Fir: " ^ message)

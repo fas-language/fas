@@ -454,7 +454,7 @@ let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modu
     (match Fir_verify.verify m with
     | [] -> ()
     | errs -> invalid_arg ("Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs));
-    let syms = Fir_to_ir.symbols m in
+    let syms = Elf_attrs.of_fir m in
     let env = Mir_isel.env m in
     let a = A.create () in
     let labels = Hashtbl.create 64 in
@@ -695,7 +695,6 @@ let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modu
          })
   with
   | Unsupported msg -> Error ("native backend: " ^ msg)
-  | Fir_to_ir.Unsupported msg -> Error ("native backend: " ^ msg)
   | Fir_scalarize.Unsupported msg -> Error ("native backend: " ^ msg)
   | Fir_wide.Unsupported msg -> Error ("native backend: " ^ msg)
   | Mir_ra.Failure msg -> Error ("native backend internal error (allocator): " ^ msg)

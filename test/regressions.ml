@@ -962,7 +962,25 @@ let lower_of text =
   let hir = expect_ok (Sema.check program) in
   expect_ok (Lower.lower hir)
 
-let llvm_of text = Ir.render (lower_of text)
+(* the blocks (as indexes) of a Fir function's allocas whose size is [size]
+   bytes, or of all of them *)
+let fir_alloca_blocks ?size (m : Fir.modul) name =
+  let f = List.find (fun (f : Fir.func) -> f.name = name) (Fir.Vec.to_list m.funcs) in
+  List.concat_map
+    (fun b ->
+      List.filter_map
+        (fun i ->
+          match (Fir.inst f i).op with
+          | Fir.Alloca (n, _) -> (
+              match (size, Fir.def_of f n) with
+              | None, _ -> Some b
+              | Some k, Fir.Const (Fir.Cint (_, [| k' |])) when k' = Int64.of_int k -> Some b
+              | Some _, _ -> None)
+          | _ -> None)
+        (Fir.Vec.to_list (Fir.block f b).insts))
+    (List.init (Fir.num_blocks f) Fun.id)
+
+let llvm_of text = Fir_llvm.render (lower_of text)
 
 let lower_struct_error name fragment (struct_def : Hir.struct_def) =
   incr checks_run;
@@ -1104,12 +1122,13 @@ let () =
       if not (contains named_constant_explicit_conversions expected) then
         failwith ("named-constant-explicit-conversions: missing `" ^ expected ^ "`"))
     [
+      (* Fir_llvm writes integer constants signed: i8 -1 is the byte 255 *)
       "define internal i32 @signed_value";
-      "sext i8 255 to i32";
+      "sext i8 -1 to i32";
       "define internal i32 @unsigned_value";
-      "zext i8 255 to i32";
+      "zext i8 -1 to i32";
       "define internal i8 @byte_value";
-      "ret i8 255\n";
+      "ret i8 -1\n";
       "ret i32 1\n";
     ];
   semantic_error "constant-zext-must-widen"
@@ -1185,9 +1204,9 @@ let () =
         failwith ("constant-casts: missing `" ^ marker ^ "`"))
     [
       "zext i16 255 to i32";
-      "sext i16 65535 to i32";
+      "sext i16 -1 to i32";
       "zext i8 2 to i32";
-      "sext i8 255 to i32";
+      "sext i8 -1 to i32";
       "zext i1 false to i32";
       "zext i1 true to i32";
       "sext i1 ";
@@ -1227,8 +1246,10 @@ let () =
       \ }\n\
       \ fn flags(value vec[8,bool]) u8 { return bitcast[u8](value) }\n"
   in
-  if List.length (positions integer_vector_bitcasts "bitcast ") <> 5 then
-    failwith "integer-vector-bitcast: expected five mechanical LLVM bitcasts";
+  (* Fir integers carry no sign, so vec[4,i32] -> vec[4,u32] is the same
+     type and needs no instruction: four bitcasts remain *)
+  if List.length (positions integer_vector_bitcasts "bitcast ") <> 4 then
+    failwith "integer-vector-bitcast: expected four mechanical LLVM bitcasts";
   List.iter
     (fun forbidden ->
       if contains integer_vector_bitcasts forbidden then
@@ -1395,9 +1416,9 @@ let () =
         failwith ("vector-constants: missing `" ^ marker ^ "`"))
     [
       "<i16 255, i16 255, i16 255, i16 255>";
-      "<i16 65535, i16 65535, i16 65535, i16 65535>";
-      "<i8 255, i8 255, i8 255, i8 255>";
-      "<i1 1, i1 1, i1 1, i1 1>";
+      "<i16 -1, i16 -1, i16 -1, i16 -1>";
+      "<i8 -1, i8 -1, i8 -1, i8 -1>";
+      "<i1 true, i1 true, i1 true, i1 true>";
       "<i8 1, i8 1, i8 1, i8 1>";
     ];
   semantic_error "named-vector-constant-keeps-type"
@@ -1940,7 +1961,7 @@ let () =
       \ v[N] = 8\n\
       \ return a[N] + zext[i64](v[N]) }\n"
   in
-  if not (contains unsigned_narrow_index "zext i8 255 to i64") then
+  if not (contains unsigned_narrow_index "zext i8 -1 to i64") then
     failwith "aggregate-index-u8: narrow unsigned index was not zero-extended";
   let index_evaluation_order =
     llvm_of
@@ -2560,7 +2581,7 @@ let () =
   in
   if
     contains uninitialized_aggregate_llvm "memset"
-    || contains uninitialized_aggregate_llvm "store %struct.S zeroinitializer"
+    || contains uninitialized_aggregate_llvm "zeroinitializer"
   then failwith "place-init: aggregate declaration emitted implicit initialization";
   semantic_error "defer-does-not-initialize" "use of uninitialized local `x`"
     "fn f() i64 { x i64\n defer { x = 1 }\n return x }\n";
@@ -2996,7 +3017,7 @@ let () =
     List.length (positions multi_switch_llvm "switch i32") <> 1
     || not
          (contains multi_switch_llvm
-            "switch i32 %v1, label %b3 [ i32 1, label %b2 i32 2, label %b2 ]")
+            "label %b3 [i32 1, label %b2 i32 2, label %b2]")
   then failwith "switch-multiple-case-values: expected one switch to a shared arm";
   semantic_error "switch-nonconst-case" "case label must be a compile-time constant"
     "fn f(x i32, y i32) i32 { switch x { case y: return 1 } return 0 }\n";
@@ -3104,7 +3125,8 @@ let () =
     (fun marker ->
       if not (contains nested_struct_initializer_path marker) then
         failwith ("nested-struct-initializer-path: missing `" ^ marker ^ "`"))
-    [ "%struct.S"; "store i32" ];
+    (* Fir memory is bytes: the literal is a 4-byte slot *)
+    [ "alloca [4 x i8], align 4"; "store i32" ];
   let null_contexts =
     llvm_of
       "opaque O\n\
@@ -3246,7 +3268,7 @@ let () =
       "declare zeroext i16 @u16_value(i16 zeroext)";
       "declare signext i16 @i16_value(i16 signext)";
       "call zeroext i1 @b(i1 zeroext true)";
-      "call signext i8 @i8_value(i8 signext 255)";
+      "call signext i8 @i8_value(i8 signext -1)";
     ];
   let c_definition_abi =
     llvm_of
@@ -3355,8 +3377,8 @@ let () =
        sext[i32](B) }\n"
   in
   if
-    (not (contains signed_const_eval "sext i8 254 to i32"))
-    || (not (contains signed_const_eval "sext i8 255 to i32"))
+    (not (contains signed_const_eval "sext i8 -2 to i32"))
+    || (not (contains signed_const_eval "sext i8 -1 to i32"))
     || not (contains signed_const_eval "sext i1 true to i32")
   then failwith "fas-001: signed constant evaluation used masked bit patterns";
   let nested_align =
@@ -3370,12 +3392,13 @@ let () =
        return zext[i32](a[0].i.y)\n\
        }\n"
   in
+  (* Fir has no struct types, so the layout shows in the addresses: Outer
+     is 32 bytes aligned to 16 and Inner starts at byte 16 *)
   if
-    (not
-       (contains nested_align
-          "%struct.Inner = type { [0 x <16 x i8>], i8, i8, [14 x i8] }"))
-    || not
-         (contains nested_align "%struct.Outer = type { i8, [15 x i8], %struct.Inner }")
+    (not (contains nested_align "alloca [64 x i8], align 16"))
+    || (not (contains nested_align "getelementptr [32 x i8], ptr"))
+    || not (contains nested_align "getelementptr i8, ptr %v7, i64 1")
+    || not (contains nested_align "getelementptr i8, ptr %v4, i64 16")
   then failwith "fas-003: nested aligned struct layout lost internal padding";
   semantic_error "fas-003-excessive-alignment"
     "alignment exceeds target maximum of 2147483648"
@@ -3400,7 +3423,10 @@ let () =
       \ return value.right }\n\
        struct Pair { left i64 right i64 }\n"
   in
-  if not (contains forward_struct "%struct.Pair = type { i64, i64 }") then
+  if
+    (not (contains forward_struct "alloca [16 x i8], align 8"))
+    || not (contains forward_struct "getelementptr i8, ptr %v1, i64 8")
+  then
     failwith "forward-struct: declaration was not resolved before function checking";
   let use_file =
     ( "use.fas",
@@ -4128,7 +4154,7 @@ let () =
       in
       if
         not
-          (contains output (Ir.quote_identifier generic_profile_name)
+          (contains output (Fir_llvm.global_name generic_profile_name)
           && contains output "noinline #0 ")
       then failwith "no-inline: generic specialization was not selected");
   let external_profile_path = Filename.temp_file "fas-profile-external-" ".fas" in
@@ -4288,11 +4314,12 @@ let () =
        fn pointer() addr { return &K }\n\
        fn test() u32 { return K[0] }\n"
   in
+  (* Fir data is bytes: {4, 5} as two little-endian u32 *)
   if
     (not
        (contains const_array_address
-          "@K = private unnamed_addr constant [2 x i32] [i32 4, i32 5]"))
-    || not (contains const_array_address "getelementptr [2 x i32], ptr @K")
+          "@K = private constant [8 x i8] c\"\\04\\00\\00\\00\\05\\00\\00\\00\""))
+    || not (contains const_array_address "ret ptr @K")
   then failwith "named-aggregate-constant-address: storage is not static and readonly";
   semantic_error "named-aggregate-constant-view-write" "cannot modify constant"
     "const K arr[2,u32] = {4, 5}\n\
@@ -4407,8 +4434,9 @@ let () =
     || not (contains string_literals "[2 x i8] c\"x\\00\"")
   then failwith "fas-030-string-literals: incorrect literal storage";
   if
-    (not (contains string_literals "[0 x i8] c\"\""))
-    || not (contains string_literals "[1 x i8] c\"\\00\"")
+    (* all-zero data prints as zeroinitializer *)
+    (not (contains string_literals "[0 x i8] zeroinitializer"))
+    || not (contains string_literals "[1 x i8] zeroinitializer")
   then failwith "fas-030-string-literals: incorrect empty literal storage";
   let string_pointer =
     llvm_of
@@ -4474,15 +4502,21 @@ let () =
       (all_characters |> List.map fst |> String.concat ", ")
   in
   semantic_accept "character-literal-all-values" character_bytes;
-  let character_byte_llvm = llvm_of character_bytes in
+  (* the table's bytes, read from the Fir global itself *)
+  let character_byte_fir = lower_of character_bytes in
+  let character_table =
+    List.find_map
+      (fun (g : Fir.global) ->
+        match g.init with
+        | Some [ Fir.Bytes bytes ] when g.gname = "CharacterBytes" -> Some bytes
+        | _ -> None)
+      (Fir.Vec.to_list character_byte_fir.globals)
+  in
   if
-    not
-      (contains character_byte_llvm
-         (Printf.sprintf "[%d x i8] [%s]" (List.length all_characters)
-            (String.concat ", "
-               (List.map
-                  (fun (_, value) -> Printf.sprintf "i8 %d" value)
-                  all_characters))))
+    character_table
+    <> Some
+         (String.init (List.length all_characters) (fun index ->
+              Char.chr (snd (List.nth all_characters index))))
   then failwith "character-literal-values: byte values changed";
   let character_contexts =
     "const CharacterConst i32 = 'a'\n\
@@ -4507,7 +4541,7 @@ let () =
   in
   semantic_accept "character-literal-contexts" character_contexts;
   let negative_character = llvm_of "fn main() i32 { return -'a' }\n" in
-  if not (contains negative_character "ret i32 4294967199\n") then
+  if not (contains negative_character "ret i32 -97\n") then
     failwith "character-literal-unary-minus: expected -97";
   semantic_error "character-literal-i8-overflow"
     "integer literal is out of range for i8"
@@ -4613,7 +4647,8 @@ let () =
     (not (contains zero_bit_counts "zext i8 8 to i64"))
     || (not (contains zero_bit_counts "zext i16 16 to i64"))
     || (not (contains zero_bit_counts "zext i32 32 to i64"))
-    || not (contains zero_bit_counts "add i64 %v11, 64")
+    || (not (contains zero_bit_counts "add i64 %v13, 64"))
+    || not (contains zero_bit_counts "add i64 %v15, 64")
   then failwith "fas-011: zero bit counts did not equal the integer width";
   let runtime_bit_counts =
     llvm_of
@@ -4701,17 +4736,7 @@ let () =
       \ x = cleanup }\n\
       \ return x }\n"
   in
-  let hoist_fn =
-    List.find (fun (func : Ir.func) -> func.name = "hoist") hoisted.Ir.funcs
-  in
-  let alloca_blocks =
-    List.concat_map
-      (fun (block : Ir.block) ->
-        List.filter_map
-          (function Ir.Alloca _ -> Some block.id | _ -> None)
-          block.instrs)
-      hoist_fn.blocks
-  in
+  let alloca_blocks = fir_alloca_blocks hoisted "hoist" in
   if List.length alloca_blocks <> 5 || not (List.for_all (( = ) 0) alloca_blocks) then
     failwith "entry-alloca: lexical local storage escaped the entry block";
 
@@ -4787,7 +4812,7 @@ let () =
   in
   if
     (not (contains signed_narrow_specialization "add i32"))
-    || not (contains signed_narrow_specialization "sext i8 251 to i32")
+    || not (contains signed_narrow_specialization "sext i8 -5 to i32")
   then
     failwith "signed-narrow-specialization: negative i8 constant was not sign-extended";
 
@@ -6076,7 +6101,7 @@ let () =
        fn main() i32 { value Members = {1, 2, 3}\n\
        return value.len + value.i32 + value.true }\n"
   in
-  if not (contains released_unreserved_names "%struct.Members = type") then
+  if not (contains released_unreserved_names "alloca [12 x i8], align 4") then
     failwith "released-unreserved-name: member labels stopped compiling";
   semantic_accept "labeled-break-accept"
     "fn f() i32 { value i32\n\
@@ -6127,7 +6152,8 @@ let () =
     [
       "define internal i32 @value_collision(i32 %a0)";
       "define internal i32 @block_collision(i32 %a0)";
-      "%v0 = alloca i32";
+      (* Fir names parameters %aN and values %vN, so a Fas name can't clash *)
+      "store i32 %a0, ptr";
       "b0:";
     ];
   if
@@ -6429,7 +6455,7 @@ let () =
   | [ { params = [ { ty = Hir.Int Hir.I64; _ } ]; ret = Hir.Int Hir.I64; _ } ] -> ()
   | _ -> failwith "generic-function-substitution: signature was not specialized");
   let generic_function_llvm =
-    Ir.render (expect_ok (Lower.lower generic_function_hir))
+    Fir_llvm.render (expect_ok (Lower.lower generic_function_hir))
   in
   if generic_function_llvm <> llvm_of generic_function_source then
     failwith "generic-function-order: generated output was not deterministic";
@@ -6567,7 +6593,7 @@ let () =
       \ return i }\n\
        fn test() usize { return count[3]() }\n"
   in
-  if not (contains while_parameter_shadow "icmp ult i64 %v1, 3\n") then
+  if not (contains while_parameter_shadow "icmp ult i64 %v3, 3\n") then
     failwith "while-const-argument: while condition did not use the const parameter";
   if contains while_parameter_shadow "99" then
     failwith "while-const-argument: while condition resolved the shadowing global";
@@ -6598,7 +6624,7 @@ let () =
   in
   if not (contains statement_positions "switch i64 2, label") then
     failwith "statement-positions: switch scrutinee did not use the const parameter";
-  if not (contains statement_positions "icmp ult i64 %v3, 2\n") then
+  if not (contains statement_positions "icmp ult i64 %v6, 2\n") then
     failwith "statement-positions: for bound did not use the const parameter";
   if not (contains statement_positions "N=usize:2\"") then
     failwith "statement-positions: specialization key lost const argument identity";
@@ -6676,9 +6702,9 @@ let () =
       "fn f(x u64, m u64, e u64) bool { return x & m == e }\n\
        fn main() i32 { return 0 }\n"
   in
-  if not (contains mixed_bitwise_compare "and i64 %v3, %v4\n") then
+  if not (contains mixed_bitwise_compare "%v9 = and i64 %v7, %v8\n") then
     failwith "ruled-precedence: bitwise operands did not group first";
-  if not (contains mixed_bitwise_compare "icmp eq i64 %v5, %v6\n") then
+  if not (contains mixed_bitwise_compare "icmp eq i64 %v9, %v10\n") then
     failwith "ruled-precedence: comparison did not apply to the bitwise result";
   let ruled_additive_shift =
     llvm_of
@@ -6949,11 +6975,11 @@ let () =
   in
   if
     not
-      (contains switch_no_fallthrough "store i64 2, ptr %v0, align 8\n  br label %b1\n")
+      (contains switch_no_fallthrough "store i64 2, ptr %v1, align 8\n  br label %b1\n")
   then failwith "control: switch case skipped its exit branch";
-  if contains switch_no_fallthrough "store i64 2, ptr %v0, align 8\n  store i64 3" then
+  if contains switch_no_fallthrough "store i64 2, ptr %v1, align 8\n  store i64 3" then
     failwith "control: switch case fell through";
-  if contains switch_no_fallthrough "store i64 3, ptr %v0, align 8\n  store i64 0" then
+  if contains switch_no_fallthrough "store i64 3, ptr %v1, align 8\n  store i64 0" then
     failwith "control: switch case fell through";
   let condition_before_branch =
     llvm_of
@@ -7250,9 +7276,9 @@ let () =
   let agreement_runtime_shape =
     llvm_of "fn g(x u64) bool { return x & 3 == 1 }\nfn main() i32 { return 0 }\n"
   in
-  if not (contains agreement_runtime_shape "and i64 %v1, 3\n") then
+  if not (contains agreement_runtime_shape "%v5 = and i64 %v3, 3\n") then
     failwith "ruled-agreement: runtime bitwise operands did not group first";
-  if not (contains agreement_runtime_shape "icmp eq i64 %v2, 1\n") then
+  if not (contains agreement_runtime_shape "icmp eq i64 %v5, 1\n") then
     failwith "ruled-agreement: runtime comparison did not apply to the bitwise result";
   let bool_bitand_true =
     llvm_of
@@ -7947,7 +7973,11 @@ let () =
     llvm_of
       "const A arr[2, i64] = {B, 0}\nconst B i64 = 1\nfn test() i64 { return A[0] }\n"
   in
-  if not (contains forward_array_scalar "[2 x i64] [i64 1, i64 0]") then
+  if
+    not
+      (contains forward_array_scalar
+         "[16 x i8] c\"\\01\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\"")
+  then
     failwith "forward-array-scalar: order-independent scalar did not resolve into array";
   semantic_error "forward-array-dependency-rejected"
     "expression is not compile-time constant"
@@ -8000,7 +8030,7 @@ let () =
          mixed_generic_hir.Hir.structs)
     <> 1
   then failwith "mixed-generic-struct-use: concrete struct was not materialized";
-  let mixed_generic_llvm = Ir.render (expect_ok (Lower.lower mixed_generic_hir)) in
+  let mixed_generic_llvm = Fir_llvm.render (expect_ok (Lower.lower mixed_generic_hir)) in
   if mixed_generic_llvm <> llvm_of mixed_generic_source then
     failwith "mixed-generic-order: generated output was not deterministic";
   if contains mixed_generic_llvm "@stamp(" || contains mixed_generic_llvm "@wrap(" then
@@ -8240,12 +8270,13 @@ let () =
   if pair_sizes <> [ 8; 16 ] then
     failwith
       "generic-struct-layouts: distinct arguments did not produce distinct layouts";
-  let generic_struct_llvm = Ir.render (expect_ok (Lower.lower generic_struct_hir)) in
+  let generic_struct_llvm = Fir_llvm.render (expect_ok (Lower.lower generic_struct_hir)) in
   if generic_struct_llvm <> llvm_of generic_struct_source then
     failwith "generic-struct-order: generated output was not deterministic";
   if contains generic_struct_llvm "%struct.Box = type" then
     failwith "generic-struct-template: template reached LLVM output";
-  if not (contains generic_struct_llvm "%struct.Box$spec$") then
+  (* Fir has no struct types: Pair[u32, u8] shows as its own 8-byte slot *)
+  if not (contains generic_struct_llvm "alloca [8 x i8], align 4") then
     failwith "generic-struct-lowering: concrete specialization did not reach LLVM";
   let unused_generic_struct =
     expect_ok
@@ -8343,7 +8374,7 @@ let () =
          const_generic_struct_hir.Hir.structs)
   then failwith "const-generic-struct-nesting: outer const value was not forwarded";
   let const_generic_struct_llvm =
-    Ir.render (expect_ok (Lower.lower const_generic_struct_hir))
+    Fir_llvm.render (expect_ok (Lower.lower const_generic_struct_hir))
   in
   if const_generic_struct_llvm <> llvm_of const_generic_struct_source then
     failwith "const-generic-struct-order: generated output was not deterministic";
@@ -8377,10 +8408,12 @@ let () =
        fn test() usize { value Bytes[3]\n\
       \ return sizeof[Bytes[3]] }\n"
   in
-  if not (contains issue33_llvm "%\"struct.Bytes$spec$c7:usize:3\" = type { [3 x i8] }")
-  then failwith "const-generic-struct-llvm-name: specialization name was not quoted";
-  if not (contains issue33_llvm "alloca %\"struct.Bytes$spec$c7:usize:3\"") then
-    failwith "const-generic-struct-llvm-use: local specialization type was not quoted";
+  (* Fir has no named struct types to quote; the specialization's layout
+     still reaches the slot and sizeof *)
+  if not (contains issue33_llvm "alloca [3 x i8], align 1") then
+    failwith "const-generic-struct-llvm-use: local specialization slot is wrong";
+  if not (contains issue33_llvm "ret i64 3\n") then
+    failwith "const-generic-struct-llvm-size: specialization size is wrong";
   semantic_error "const-generic-struct-arity"
     "generic struct `Buffer` expects 2 generic arguments, got 1"
     "struct Buffer[T, N const usize] { data arr[N, T] }\n\
@@ -8439,7 +8472,7 @@ let () =
   then
     failwith "const-generic-struct-global-field: named const did not resolve in a field";
   let global_const_generic_struct_llvm =
-    Ir.render (expect_ok (Lower.lower global_const_generic_struct_hir))
+    Fir_llvm.render (expect_ok (Lower.lower global_const_generic_struct_hir))
   in
   if global_const_generic_struct_llvm <> llvm_of global_const_generic_struct_source then
     failwith "const-generic-struct-global-order: generated output was not deterministic";
@@ -8485,7 +8518,7 @@ let () =
     <> 2
   then failwith "const-generic-struct-type-key: distinct layouts were merged";
   let const_generic_struct_type_argument_llvm =
-    Ir.render (expect_ok (Lower.lower const_generic_struct_type_argument_hir))
+    Fir_llvm.render (expect_ok (Lower.lower const_generic_struct_type_argument_hir))
   in
   if
     const_generic_struct_type_argument_llvm
@@ -8523,7 +8556,7 @@ let () =
     <> 1
   then failwith "nested-const-struct-deferral: expected one concrete outer layout";
   let deferred_nested_struct_llvm =
-    Ir.render (expect_ok (Lower.lower deferred_nested_struct_hir))
+    Fir_llvm.render (expect_ok (Lower.lower deferred_nested_struct_hir))
   in
   if
     contains deferred_nested_struct_llvm "Inner["
@@ -8584,7 +8617,7 @@ let () =
   then
     failwith "const-generic-function-type-nesting: aggregate length was not substituted";
   let const_generic_function_type_llvm =
-    Ir.render (expect_ok (Lower.lower const_generic_function_type_hir))
+    Fir_llvm.render (expect_ok (Lower.lower const_generic_function_type_hir))
   in
   if const_generic_function_type_llvm <> llvm_of const_generic_function_type_source then
     failwith "const-generic-function-type-order: generated output was not deterministic";
@@ -8954,7 +8987,7 @@ let () =
     failwith
       "const-generic-struct-function-signature: applied type was not materialized";
   let const_generic_struct_function_llvm =
-    Ir.render (expect_ok (Lower.lower const_generic_struct_function_hir))
+    Fir_llvm.render (expect_ok (Lower.lower const_generic_struct_function_hir))
   in
   if const_generic_struct_function_llvm <> llvm_of const_generic_struct_function_source
   then
@@ -9026,7 +9059,7 @@ let () =
   in
   if
     (not (contains i8_min_specialization "add i32"))
-    || not (contains i8_min_specialization "sext i8 128 to i32")
+    || not (contains i8_min_specialization "sext i8 -128 to i32")
   then failwith "const-param-i8-min: i8 minimum constant was not sign-extended";
 
   let u8_max_specialization =
@@ -9036,7 +9069,7 @@ let () =
   in
   if
     (not (contains u8_max_specialization "add i32"))
-    || not (contains u8_max_specialization "zext i8 255 to i32")
+    || not (contains u8_max_specialization "zext i8 -1 to i32")
   then failwith "const-param-u8-max: u8 maximum constant was not zero-extended";
 
   semantic_error "const-param-i8-overflow" "integer literal is out of range for i8"
@@ -11197,7 +11230,7 @@ let () =
       "srem <4 x i32>";
       "insertelement <4 x i32> zeroinitializer, i32 6, i32 0\n";
       "insertelement <4 x i1> zeroinitializer, i1 true, i32 0\n";
-      "insertelement <4 x i32> zeroinitializer, i32 2147483648, i32 0\n";
+      "insertelement <4 x i32> zeroinitializer, i32 -2147483648, i32 0\n";
     ];
   if contains defined_construction "poison" || contains defined_construction "undef"
   then failwith "defined-construction: undefined seed in computed values";
@@ -11214,13 +11247,13 @@ let () =
       in
       if not (contains ir needle) then failwith ("sat: " ^ name ^ " drifted"))
     [
-      ("u8-add-high", "u8", "200", "100", "add_sat", "ret i8 255\n");
+      ("u8-add-high", "u8", "200", "100", "add_sat", "ret i8 -1\n");
       ("u8-add-mid", "u8", "1", "2", "add_sat", "ret i8 3\n");
       ("u8-sub-low", "u8", "5", "10", "sub_sat", "ret i8 0\n");
       ("i8-add-high", "i8", "100", "100", "add_sat", "ret i8 127\n");
-      ("i8-add-low", "i8", "-100", "-100", "add_sat", "ret i8 128\n");
+      ("i8-add-low", "i8", "-100", "-100", "add_sat", "ret i8 -128\n");
       ("i8-sub-high", "i8", "127", "-1", "sub_sat", "ret i8 127\n");
-      ("i8-sub-low", "i8", "-128", "1", "sub_sat", "ret i8 128\n");
+      ("i8-sub-low", "i8", "-128", "1", "sub_sat", "ret i8 -128\n");
       ( "i64-add-min",
         "i64",
         "-9223372036854775808",
@@ -11238,10 +11271,10 @@ let () =
       ("u64-sub-under", "u64", "0", "1", "sub_sat", "ret i64 0\n");
       ("isize-sub", "isize", "-2", "1", "sub_sat", "ret i64 -3\n");
       ("i8-sub-degenerate", "i8", "0", "-128", "sub_sat", "ret i8 127\n");
-      ("umulh-u8-high", "u8", "255", "255", "mul_hi", "ret i8 254\n");
+      ("umulh-u8-high", "u8", "255", "255", "mul_hi", "ret i8 -2\n");
       ("umulh-u8-mid", "u8", "2", "3", "mul_hi", "ret i8 0\n");
       ("smulh-i8-high", "i8", "-128", "-128", "mul_hi", "ret i8 64\n");
-      ("smulh-i8-negative", "i8", "-128", "127", "mul_hi", "ret i8 192\n");
+      ("smulh-i8-negative", "i8", "-128", "127", "mul_hi", "ret i8 -64\n");
       ("smulh-i8-one", "i8", "-1", "-1", "mul_hi", "ret i8 0\n");
       ( "umulh-u64-max",
         "u64",
@@ -11262,7 +11295,7 @@ let () =
         "4294967295",
         "4294967295",
         "mul_hi",
-        "ret i32 4294967294\n" );
+        "ret i32 -2\n" );
     ];
   let sat_vec_add =
     llvm_of
@@ -11415,10 +11448,10 @@ let () =
       in
       if not (contains ir needle) then failwith ("mask: " ^ name ^ " drifted"))
     [
-      ("const-not", "!M", "ret <2 x i1> <i1 1, i1 0>\n");
-      ("const-and", "M & N", "ret <2 x i1> <i1 0, i1 0>\n");
-      ("const-or", "M | (A == A)", "ret <2 x i1> <i1 1, i1 1>\n");
-      ("const-xor", "M ^ (A == A)", "ret <2 x i1> <i1 1, i1 0>\n");
+      ("const-not", "!M", "ret <2 x i1> <i1 true, i1 false>\n");
+      ("const-and", "M & N", "ret <2 x i1> <i1 false, i1 false>\n");
+      ("const-or", "M | (A == A)", "ret <2 x i1> <i1 true, i1 true>\n");
+      ("const-xor", "M ^ (A == A)", "ret <2 x i1> <i1 true, i1 false>\n");
     ];
   List.iter
     (fun (name, expr, needle) ->
@@ -11598,17 +11631,17 @@ let () =
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_sum(A)",
         "u8",
-        "ret i8 153\n" );
+        "ret i8 -103\n" );
       ( "and-u8",
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_and(A)",
         "u8",
-        "ret i8 136\n" );
+        "ret i8 -120\n" );
       ( "or-u8",
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_or(A)",
         "u8",
-        "ret i8 255\n" );
+        "ret i8 -1\n" );
       ( "xor-u8",
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_xor(A)",
@@ -11618,17 +11651,17 @@ let () =
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_min(A)",
         "u8",
-        "ret i8 138\n" );
+        "ret i8 -118\n" );
       ( "max-u8",
         "const K u32 = 2348321930\nconst A vec[4,u8] = bitcast[vec[4,u8]](K)\n",
         "reduce_max(A)",
         "u8",
-        "ret i8 248\n" );
+        "ret i8 -8\n" );
       ( "min-i8-signed",
         "const K u32 = 133250186\nconst A vec[4,i8] = bitcast[vec[4,i8]](K)\n",
         "reduce_min(A)",
         "i8",
-        "ret i8 138\n" );
+        "ret i8 -118\n" );
       ( "max-i8-signed",
         "const K u32 = 133250186\nconst A vec[4,i8] = bitcast[vec[4,i8]](K)\n",
         "reduce_max(A)",
@@ -11638,12 +11671,12 @@ let () =
         "const K u32 = 133250186\nconst A vec[4,i8] = bitcast[vec[4,i8]](K)\n",
         "reduce_sum(A)",
         "i8",
-        "ret i8 190\n" );
+        "ret i8 -66\n" );
       ( "one-lane",
         "const K i32 = -5\nconst A vec[1,i32] = bitcast[vec[1,i32]](K)\n",
         "reduce_sum(A)",
         "i32",
-        "ret i32 4294967291\n" );
+        "ret i32 -5\n" );
       ( "min-u32-high",
         "const K u64 = 9223372034707292160\n\
          const A vec[2,u32] = bitcast[vec[2,u32]](K)\n",
@@ -11655,7 +11688,7 @@ let () =
          const A vec[2,u32] = bitcast[vec[2,u32]](K)\n",
         "reduce_max(A)",
         "u32",
-        "ret i32 2147483648\n" );
+        "ret i32 -2147483648\n" );
     ];
   let reduce_runtime =
     llvm_of
@@ -11732,7 +11765,7 @@ let () =
          const M4 vec[4,bool] = V == W5\n",
         "compress(M5, M4)",
         "vec[4,bool]",
-        "ret <4 x i1> <i1 1, i1 0, i1 0, i1 0>\n" );
+        "ret <4 x i1> <i1 true, i1 false, i1 false, i1 false>\n" );
       ( "expand-bool-lanes",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
@@ -11744,7 +11777,7 @@ let () =
          const M4 vec[4,bool] = V == W5\n",
         "expand(M5, M4)",
         "vec[4,bool]",
-        "ret <4 x i1> <i1 1, i1 0, i1 1, i1 0>\n" );
+        "ret <4 x i1> <i1 true, i1 false, i1 true, i1 false>\n" );
     ];
   let compaction_runtime =
     llvm_of
@@ -12022,9 +12055,9 @@ let () =
       in
       if not (contains ir needle) then failwith ("div-edges: " ^ name ^ " drifted"))
     [
-      ("trunc-negative-dividend", "-7 / 3", "i32", "ret i32 4294967294\n");
-      ("trunc-negative-divisor", "7 / -3", "i32", "ret i32 4294967294\n");
-      ("rem-sign-negative", "-7 % 3", "i32", "ret i32 4294967295\n");
+      ("trunc-negative-dividend", "-7 / 3", "i32", "ret i32 -2\n");
+      ("trunc-negative-divisor", "7 / -3", "i32", "ret i32 -2\n");
+      ("rem-sign-negative", "-7 % 3", "i32", "ret i32 -1\n");
       ("rem-sign-positive", "7 % -3", "i32", "ret i32 1\n");
       ("rem-min-minus-one", "-9223372036854775808 % -1", "i64", "ret i64 0\n");
       ("trunc-negative-i64", "-7 / 3", "i64", "ret i64 -2\n");
@@ -12266,7 +12299,7 @@ let () =
        const S vec[2,i32] = E / F\n\
        fn low() i32 { return S[0] }\n"
   in
-  if not (contains constant_division_cross_pairs "<i32 2147483648, i32 4294967292>")
+  if not (contains constant_division_cross_pairs "<i32 -2147483648, i32 -4>")
   then failwith "constant-division-cross-pairs: expected paired lane result";
   let constant_remainder_edges =
     llvm_of
@@ -12290,7 +12323,7 @@ let () =
        fn single() bool { return B }\n"
   in
   if
-    not (contains constant_bool_pack "<i1 0, i1 0, i1 1, i1 1, i1 0, i1 0, i1 1, i1 1>")
+    not (contains constant_bool_pack "<i1 false, i1 false, i1 true, i1 true, i1 false, i1 false, i1 true, i1 true>")
   then failwith "constant-bool-pack: expected packed value bits";
   semantic_error "constant-bitcast-literal-parity"
     "illegal cast for source and destination widths"
@@ -12440,7 +12473,7 @@ let () =
       "zext i1";
       "store i8";
       "@BooleanGlobal = internal global [1 x i8]";
-      "@BooleanArray = private unnamed_addr constant [2 x i8]";
+      "@BooleanArray = private constant [2 x i8]";
       "@.literal.0 = private constant [20 x i8]";
     ];
   let raw_mask_shape = llvm_of "fn f(p addr) vec[3,bool] { return p[vec[3,bool]] }\n" in
@@ -12976,7 +13009,7 @@ let () =
           "@EmptyGlobal = internal global [5 x i8] zeroinitializer"))
     || (not
           (contains empty_aggregate_llvm
-             "@EmptyConst = private unnamed_addr constant [5 x i8] zeroinitializer"))
+             "@EmptyConst = private constant [5 x i8] zeroinitializer"))
     || not (contains empty_aggregate_llvm "store i8 0")
   then failwith "empty aggregate initializers did not zero every storage byte";
   let empty_exported_global_llvm =
@@ -13171,18 +13204,8 @@ let () =
        copy(destination, source)\n\
        return destination[1] }\n"
   in
-  let copy_direct_fn =
-    List.find (fun (func : Ir.func) -> func.name = "f") copy_direct_locals.Ir.funcs
-  in
-  let copy_array_allocas =
-    List.concat_map
-      (fun (block : Ir.block) ->
-        List.filter_map
-          (function
-            | Ir.Alloca (_, Ir.Array (2, Ir.I64), _) -> Some block.id | _ -> None)
-          block.instrs)
-      copy_direct_fn.blocks
-  in
+  (* arr[2,i64]: 16 bytes *)
+  let copy_array_allocas = fir_alloca_blocks ~size:16 copy_direct_locals "f" in
   if
     List.length copy_array_allocas <> 2
     || not (List.for_all (( = ) 0) copy_array_allocas)
@@ -15652,7 +15675,7 @@ let () =
      return r.inner.right + r.values[1] }\n";
   let handle_view_ir text =
     match c_semantic_result record_import_cases text with
-    | Ok program -> Ir.render (Lower.lower program |> expect_ok)
+    | Ok program -> Fir_llvm.render (Lower.lower program |> expect_ok)
     | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
   in
   let handle_view_shorthand =
@@ -15723,7 +15746,7 @@ let () =
          {{&fas_address_nested.inner}}\n\
          var Indexed arr[1,handle[FasSelfRecord]] = {&fas_address_self_array[1]}\n"
     with
-    | Ok program -> Ir.render (expect_ok (Lower.lower program))
+    | Ok program -> Fir_llvm.render (expect_ok (Lower.lower program))
     | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
   in
   if
@@ -15910,7 +15933,7 @@ let () =
          raw addr = handle_addr(value)\n\
          return raw[FasFloatArrayRecord].data[0] }\n"
     with
-    | Ok program -> Ir.render (expect_ok (Lower.lower program))
+    | Ok program -> Fir_llvm.render (expect_ok (Lower.lower program))
     | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
   in
   if not (contains imported_float_llvm "float" && contains imported_float_llvm "double")
@@ -15943,7 +15966,7 @@ let () =
   in
   let function_address_ir =
     match c_semantic_result record_import_cases function_addresses with
-    | Ok program -> Ir.render (expect_ok (Lower.lower program))
+    | Ok program -> Fir_llvm.render (expect_ok (Lower.lower program))
     | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
   in
   if

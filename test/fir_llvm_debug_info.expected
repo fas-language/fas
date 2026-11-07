@@ -1,0 +1,45 @@
+; ModuleID = 'fas'
+source_filename = "fas"
+target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
+target triple = "x86_64-unknown-linux-gnu"
+
+define i32 @main() #0 !dbg !3 {
+b0:
+  %v2 = add i32 1, 2, !dbg !4
+  %v3 = call i32 @helper(i32 %v2), !dbg !5
+  ret i32 %v3, !dbg !6
+}
+define internal i32 @helper(i32 %a0) #0 !dbg !8 {
+b0:
+  %v2 = add i32 %a0, 1, !dbg !9
+  %v4 = icmp slt i32 %v2, 0, !dbg !10
+  br i1 %v4, label %b1, label %b2, !dbg !10
+
+b1:
+  br label %b2, !dbg !11
+
+b2:
+  ret i32 %a0, !dbg !12
+}
+define internal void @plain() #0 {
+b0:
+  ret void
+}
+attributes #0 = { "no-builtin-helper" }
+!llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!13, !14}
+!0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, producer: "fas 0.6.3", isOptimized: false, runtimeVersion: 0, emissionKind: LineTablesOnly)
+!1 = !DIFile(filename: "main.fas", directory: "/work/app")
+!2 = !DISubroutineType(types: !{})
+!3 = distinct !DISubprogram(name: "main", scope: !1, file: !1, line: 3, type: !2, scopeLine: 3, spFlags: DISPFlagDefinition, unit: !0)
+!4 = !DILocation(line: 3, column: 0, scope: !3)
+!5 = !DILocation(line: 4, column: 5, scope: !3)
+!6 = !DILocation(line: 6, column: 3, scope: !3)
+!7 = !DIFile(filename: "util.fas", directory: "/work/lib")
+!8 = distinct !DISubprogram(name: "helper", scope: !7, file: !7, line: 10, type: !2, scopeLine: 10, spFlags: DISPFlagDefinition, unit: !0)
+!9 = !DILocation(line: 11, column: 3, scope: !8)
+!10 = !DILocation(line: 12, column: 3, scope: !8)
+!11 = !DILocation(line: 13, column: 5, scope: !8)
+!12 = !DILocation(line: 14, column: 3, scope: !8)
+!13 = !{i32 7, !"Dwarf Version", i32 5}
+!14 = !{i32 2, !"Debug Info Version", i32 3}

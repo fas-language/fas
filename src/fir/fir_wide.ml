@@ -2,7 +2,7 @@
 
    The native backend computes in i1, i8, i16, i32 and i64. Every other
    integer width (i128 and wider, and odd widths such as i7, i33 or i100:
-   C23's _BitInt(N)) is rewritten here, Fir to Fir, before Fir_to_ir:
+   C23's _BitInt(N)) is rewritten here, Fir to Fir, before MIR selection:
 
    - iN becomes k = ceil(N/64) i64 values ("limbs", least significant
      first). Odd widths below 64 are one limb.

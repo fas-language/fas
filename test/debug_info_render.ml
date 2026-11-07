@@ -1,1 +1,1 @@
-let () = print_string (Ir.render ~debug_info:true (Debug_fixture.module_ ~markers:true))
+let () = print_string (Fir_llvm.render ~debug_info:true (Debug_fixture.module_ ~markers:true))

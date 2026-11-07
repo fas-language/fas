@@ -7,7 +7,7 @@
  (name unit)
  (modules unit)
  (libraries fas_compiler debug_fixture)
- (deps ir_simple.expected))
+ (deps ir_simple.expected fir_llvm_multi_block.expected fir_llvm_debug_info.expected))
 
 (test
  (name regressions)

@@ -8,10 +8,9 @@ src/
                  C header import/export
     lsp/         the Fas language server
   fir/           Fir, the IR every front end emits and every backend reads
-                 (SPEC.md), plus the bridge from the old Ir
+                 (SPEC.md), with its folding, budgets and text form
   backend/
-    llvm/        the old LLVM-shaped Ir (ir.ml) and its folding/JSON; the
-                 LLVM backend renders it as LLVM text
+    llvm/        the LLVM backend: renders Fir as LLVM text (fir_llvm.ml)
     native/      the x86-64 backend
   driver/        the command line, the build driver, and the perf/tune tools
   linker/        the linker, its own library `fas_linker`
@@ -35,6 +34,8 @@ Dependencies should point one way:
 - Everything may use `common`.
 - No front end touches a backend, and no backend touches a front end.
 
-The old `backend/llvm/ir.ml` is the exception for now.
-`fas/lower.ml` still emits it, and `backend/native` still reads it, until
-v0.4 moves the native backend onto Fir.
+Since v0.6 there is one IR: `fas/lower.ml` emits Fir through
+`fas/lower_emit.ml`, and both backends read it. (The old LLVM-shaped
+`ir.ml` and its converters `Fir_of_ir`/`Fir_to_ir` are gone.) The Fas
+runtime helpers in `backend/native` are Fas source that the backend
+compiles through the front end; that is the one remaining exception.

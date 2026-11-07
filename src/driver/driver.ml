@@ -2511,13 +2511,6 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                   ~intrinsic_masked_loads:(config.Cli.target = Cli.Force_native)
                   hir
               in
-              let* ir =
-                match Fir_of_ir.convert ir with
-                | m -> Ok m
-                | exception Fir_of_ir.Unsupported message ->
-                    Error
-                      [ Diag.error Span.synthetic ("internal error: lowering to Fir: " ^ message) ]
-              in
               (* The IR dump (--emit-ir) shows lowering's output; everything
                  compiled is folded first. *)
               (match config.Cli.emit with Cli.Ir -> () | _ -> Fir_fold.run ir);

@@ -1,91 +1,53 @@
+(* A small Fir module with source locations, built through Lower_emit the
+   way lower.ml builds one: [main] calls [helper], which branches; [plain]
+   has no source. With [markers:false] no instruction has a location. *)
+
 let module_ ~markers =
-  let mark line column = if markers then [ Ir.Location (line, column) ] else [] in
-  let block id instrs terminator = { Ir.id; label = "b"; instrs; terminator } in
-  let helper =
-    {
-      Ir.name = "helper";
-      params = [ { Ir.name = "x"; ty = Ir.I32; extension = Ir.No_extension } ];
-      ret = Ir.I32;
-      ret_extension = Ir.No_extension;
-      blocks =
-        [
-          block 0
-            (List.concat
-               [
-                 mark 11 3;
-                 [
-                   Ir.Bin
-                     (0, Ir.Add, Ir.I32, Ir.Param ("x", Ir.I32), Ir.Const (Ir.I32, 1L));
-                 ];
-                 mark 12 3;
-                 [
-                   Ir.Cmp
-                     (1, Ir.Slt, Ir.I32, Ir.Local (0, Ir.I32), Ir.Const (Ir.I32, 0L));
-                 ];
-               ])
-            (Ir.CondBr (Ir.Local (1, Ir.I1), 1, 2));
-          block 1 (mark 13 5) (Ir.Br 2);
-          block 2 (mark 14 3) (Ir.Ret (Some (Ir.I32, Ir.Param ("x", Ir.I32))));
-        ];
-      linkage = Ir.Internal;
-      variadic = false;
-      source = Some ("/work/lib/util.fas", 10);
-      display = None;
-    }
-  in
+  let lay : Lower_emit.layouts = Hashtbl.create 1 in
+  let mc = Lower_emit.create_module ~triple:(Target_layout.current ()).triple lay in
+  let mark fn line column = if markers then Lower_emit.location fn line column in
+  let finish fn = match Lower_emit.finish fn with Ok () -> () | Error b -> failwith (Printf.sprintf "b%d open" b) in
+  let i32 n = Low.Const (Low.I32, n) in
+  (* main: %0 = 1 + 2; %1 = helper(%0); ret %1 *)
   let main =
-    {
-      Ir.name = "main";
-      params = [];
-      ret = Ir.I32;
-      ret_extension = Ir.No_extension;
-      blocks =
-        [
-          block 0
-            (List.concat
-               [
-                 [
-                   Ir.Bin
-                     (0, Ir.Add, Ir.I32, Ir.Const (Ir.I32, 1L), Ir.Const (Ir.I32, 2L));
-                 ];
-                 mark 4 5;
-                 [
-                   Ir.Call
-                     ( Some 1,
-                       Ir.No_extension,
-                       Ir.I32,
-                       "helper",
-                       [ (Ir.I32, Ir.No_extension, Ir.Local (0, Ir.I32)) ] );
-                 ];
-                 mark 6 3;
-               ])
-            (Ir.Ret (Some (Ir.I32, Ir.Local (1, Ir.I32))));
-        ];
-      linkage = Ir.External;
-      variadic = false;
-      source = Some ("/work/app/main.fas", 3);
-      display = None;
-    }
+    Lower_emit.start mc ~name:"main" ~linkage:Fir.Global ~params:[] ~ret:Low.I32
+      ~ret_extension:Low.No_extension ~variadic:false ~display:None
+      ~source:(Some ("/work/app/main.fas", 3))
   in
+  Lower_emit.bin main 0 Low.Add Low.I32 (i32 1L) (i32 2L);
+  mark main 4 5;
+  Lower_emit.call main (Some 1) Low.No_extension Low.I32 "helper"
+    [ (Low.I32, Low.No_extension, Low.Local (0, Low.I32)) ];
+  mark main 6 3;
+  Lower_emit.ret main (Some (Low.I32, Low.Local (1, Low.I32)));
+  finish main;
+  (* helper(x): branches on x + 1 < 0, both ways reach the return *)
+  let helper =
+    Lower_emit.start mc ~name:"helper" ~linkage:Fir.Local
+      ~params:[ ("x", Low.I32, Low.No_extension) ]
+      ~ret:Low.I32 ~ret_extension:Low.No_extension ~variadic:false ~display:None
+      ~source:(Some ("/work/lib/util.fas", 10))
+  in
+  let b1 = Lower_emit.new_block helper and b2 = Lower_emit.new_block helper in
+  let x = Low.Param ("x", Low.I32) in
+  mark helper 11 3;
+  Lower_emit.bin helper 0 Low.Add Low.I32 x (i32 1L);
+  mark helper 12 3;
+  Lower_emit.cmp helper 1 Low.Slt Low.I32 (Low.Local (0, Low.I32)) (i32 0L);
+  Lower_emit.cond_br helper (Low.Local (1, Low.I1)) b1 b2;
+  Lower_emit.enter helper b1 None;
+  mark helper 13 5;
+  Lower_emit.br helper b2;
+  Lower_emit.enter helper b2 None;
+  mark helper 14 3;
+  Lower_emit.ret helper (Some (Low.I32, x));
+  finish helper;
+  (* plain: no source, so its marker has no file *)
   let plain =
-    {
-      Ir.name = "plain";
-      params = [];
-      ret = Ir.Void;
-      ret_extension = Ir.No_extension;
-      blocks = [ block 0 (mark 1 1) (Ir.Ret None) ];
-      linkage = Ir.Internal;
-      variadic = false;
-      source = None;
-      display = None;
-    }
+    Lower_emit.start mc ~name:"plain" ~linkage:Fir.Local ~params:[] ~ret:Low.Void
+      ~ret_extension:Low.No_extension ~variadic:false ~display:None ~source:None
   in
-  {
-    Ir.target_triple = (Target_layout.current ()).triple;
-    data_layout = (Target_layout.current ()).llvm_data_layout;
-    structs = [];
-    globals = [];
-    funcs = [ main; helper; plain ];
-    no_inline_functions = [];
-    inline_functions = [];
-  }
+  mark plain 1 1;
+  Lower_emit.ret plain None;
+  finish plain;
+  mc.m

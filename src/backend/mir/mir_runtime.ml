@@ -3,9 +3,8 @@
    Baseline x86-64 has no FMA instruction and a freestanding program no
    libm, so a scalar [fma] becomes a call to the correctly rounded helpers
    in backend/native/runtime/fma.fas. Native_runtime compiles that Fas
-   source to the old Ir once per process; here it is converted to Fir
-   (Fir_of_ir) and its functions, local and named __fas_rt_*, are appended
-   to a module that uses [fma]. *)
+   source to Fir (a fresh copy per use); its functions, local and named
+   __fas_rt_*, are appended to a module that uses [fma]. *)
 
 module F = Fir
 
@@ -19,20 +18,6 @@ let uses_fma (m : F.modul) =
         F.Vec.iter (fun (ir : F.inst_rec) -> match ir.op with F.Fma _ -> found := true | _ -> ()) fn.insts)
     m.funcs;
   !found
-
-(* a fresh Fir copy each time: Fir functions are mutable records, so modules
-   must not share them *)
-let fma_fir () =
-  Fir_of_ir.convert
-    {
-      Ir.target_triple = "x86_64-unknown-linux-gnu";
-      data_layout = "";
-      structs = [];
-      globals = [];
-      funcs = Lazy.force Native_runtime.fma_funcs;
-      no_inline_functions = [];
-      inline_functions = [];
-    }
 
 (* appends the helpers [m] needs (once) *)
 let add (m : F.modul) =
@@ -51,7 +36,7 @@ let add (m : F.modul) =
           F.Vec.iter (fun (b : F.block_rec) -> b.term_loc <- 0) f.blocks;
           F.add_func m f
         end)
-      (fma_fir ()).funcs;
+      (Native_runtime.fma_module ()).funcs;
     (* the Fas front end may use wider integers (i128 for a 64x64 product):
        legalize again; functions already legal are left alone *)
     Fir_wide.run m

@@ -1,6 +1,6 @@
 # Fir — the Fas intermediate representation
 
-Fir is the IR that front ends emit and backends consume. Today Fas produces it, through `Fir_of_ir`. A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
+Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
@@ -509,7 +509,7 @@ fas-fir --legalize INPUT.fir                 also split wide/odd integers (Fir_w
 - **Input:** `INPUT` may be `-` to read standard input.
 - **Installation:** `tools/fas_fir/install.sh` builds and installs `fas-fir` together with `fas-native`, the Fas compiler with `--backend=native` always on, into `~/.local/bin`. The binaries and `std/` are copied to `~/.local/share/fas-native`. Rerun the script after pulling changes.
 - **Using `std/sys.fas` from Fas:** the syscall stdlib must be reached through a relative `use` path, since absolute paths are rejected. Link the installed copy into your project with `ln -s ~/.local/share/fas-native/std std`, then write `use "std/sys.fas"`.
-- **Seeing what Fas emits:** `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native prog.fas -o prog` writes the Fir of a Fas program. That file compiles again with `fas-fir out.fir`.
+- **Seeing what Fas emits:** `fas --emit-ir prog.fas -o out.fir` (or `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native prog.fas -o prog`) writes the Fir of a Fas program. That file compiles again with `fas-fir out.fir`.
 
 ## 14. In-memory representation (for the OCaml side)
 
@@ -522,4 +522,4 @@ Each function holds dense tables (`fir.ml`):
 
 Replace-all-uses is O(1) through `Alias` definitions, which readers resolve and `compact` removes. Use lists, dominators (`fir_dom.ml`) and loops are computed on demand. Nothing is global, so functions can be compiled independently.
 
-`Fir_of_ir` and `Fir_to_ir` convert from and to the older LLVM-shaped `Ir`. The native backend (`src/backend/mir`) reads Fir directly; Fas programs reach it through `Fir_of_ir`. `Fir_to_ir` is only for tests (`FAS_FIR=roundtrip`, and the LLVM side of `fir_fuzz`).
+Both backends read Fir: the native backend (`src/backend/mir`) and the LLVM backend (`Fir_llvm`, which renders LLVM text). Before v0.6 Fas emitted an older LLVM-shaped `Ir` that `Fir_of_ir` converted; that IR and both converters are deleted. `fas --emit-ir` prints a Fas program's Fir text.
