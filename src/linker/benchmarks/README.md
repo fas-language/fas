@@ -2,8 +2,11 @@
 
 The [mold/reld source review and performance plan](research/2026-11-07-mold-reld.md)
 starts the post-1.0 optimization track. The measurements below are historical
-pre-1.0 checkpoints; the released 1.0 binary needs a fresh baseline before new
-speed claims. Reference repositories are pinned and kept outside the Fas tree.
+pre-1.0 checkpoints. The follow-up [small single-thread investigation](research/2026-11-07-serial-probe.md)
+profiles the delivered 1.0 release on retained inputs and records isolated sort,
+archive-table and SQLite experiments. It is exploratory shared-PC evidence;
+new speed claims still need a controlled before/after baseline. Parallel work
+is deferred. Reference repositories are pinned and kept outside the Fas tree.
 
 ## Quiet-PC measurements after build-ID/IFUNC changes
 
@@ -192,6 +195,10 @@ with optional `args`, `cwd`, `stdin` and expected `exit`. The runner snapshots
 tools/harness/manifest, retains outputs, checks repeated-output determinism and
 rejects changed explicit input bytes. Each corpus needs its own correct runtime
 check; this does not replace compatibility tests.
+
+Use `--tool-arg LLD=--threads=1` for a controlled single-worker comparison;
+per-tool arguments are recorded in the report. CPU medians include user and
+system time. Checks may also declare `stdout_sha256` for exact expected output.
 
 ## Initial static linking baseline
 

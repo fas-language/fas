@@ -1,0 +1,75 @@
+{
+  "wall_seconds": 0.011879921,
+  "cpu_seconds": 0.011888,
+  "phases": {
+    "emit": {
+      "wall_seconds": 0.006515026,
+      "cpu_seconds": 0.006513,
+      "allocated_words": 206131,
+      "promoted_words": 152274
+    },
+    "gc": {
+      "wall_seconds": 3.5048e-05,
+      "cpu_seconds": 3.4e-05,
+      "allocated_words": 804,
+      "promoted_words": 0
+    },
+    "merge": {
+      "wall_seconds": 2.0981e-05,
+      "cpu_seconds": 1.9e-05,
+      "allocated_words": 1266,
+      "promoted_words": 0
+    },
+    "parse": {
+      "wall_seconds": 0.001714706,
+      "cpu_seconds": 0.001679,
+      "allocated_words": 137143,
+      "promoted_words": 0
+    },
+    "read": {
+      "wall_seconds": 0.0011127,
+      "cpu_seconds": 0.001075,
+      "allocated_words": 24228,
+      "promoted_words": 0
+    },
+    "relocate": {
+      "wall_seconds": 0.000534058,
+      "cpu_seconds": 0.000532,
+      "allocated_words": 55919,
+      "promoted_words": 0
+    },
+    "resolve": {
+      "wall_seconds": 0.001068115,
+      "cpu_seconds": 0.001066,
+      "allocated_words": 54231,
+      "promoted_words": 0
+    },
+    "unwind": {
+      "wall_seconds": 2.0027e-05,
+      "cpu_seconds": 1.8e-05,
+      "allocated_words": 1615,
+      "promoted_words": 0
+    },
+    "write": {
+      "wall_seconds": 0.000400066,
+      "cpu_seconds": 0.000397,
+      "allocated_words": 261,
+      "promoted_words": 0
+    }
+  },
+  "counts": {
+    "input_bytes": 168912,
+    "input_files": 33,
+    "objects": 33,
+    "output_bytes": 104040,
+    "relocations": 2049,
+    "symbols": 2083,
+    "unwind_fdes": 0
+  },
+  "gc": {
+    "allocated_words": 481940,
+    "promoted_words": 152274,
+    "minor_collections": 3,
+    "major_collections": 2
+  }
+}

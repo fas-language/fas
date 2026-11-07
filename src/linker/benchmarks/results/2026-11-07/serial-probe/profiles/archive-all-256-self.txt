@@ -1,0 +1,65 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cycles:u'
+# Event count (approx.): 14045733375
+#
+# Overhead  Shared Object                                     Symbol                                               IPC   [IPC Coverage]
+# ........  ................................................  ...................................................  ....................
+#
+    12.51%  fas-ld                                            [.] Stdlib.Hashtbl.find_opt_1400                     -      -            
+    10.68%  fas-ld                                            [.] compare_val                                      -      -            
+     9.00%  fas-ld                                            [.] do_some_marking                                  -      -            
+     7.88%  fas-ld                                            [.] caml_hash                                        -      -            
+     7.69%  fas-ld                                            [.] oldify_one                                       -      -            
+     3.34%  fas-ld                                            [.] pool_sweep                                       -      -            
+     2.92%  libc.so.6                                         [.] __memcmp_avx2_movbe                              -      -            
+     2.57%  fas-ld                                            [.] caml_shared_try_alloc                            -      -            
+     2.43%  fas-ld                                            [.] oldify_mopup                                     -      -            
+     2.16%  fas-ld                                            [.] Stdlib.Hashtbl.insert_bucket_776                 -      -            
+     1.95%  fas-ld                                            [.] caml_hash_mix_string                             -      -            
+     1.54%  fas-ld                                            [.] Stdlib.Hashtbl.find_1381                         -      -            
+     1.38%  fas-ld                                            [.] caml_stw_empty_minor_heap_no_major_slice.isra.0  -      -            
+     1.37%  fas-ld                                            [.] caml_c_call                                      -      -            
+     1.36%  fas-ld                                            [.] caml_string_length                               -      -            
+     1.29%  fas-ld                                            [.] caml_modify                                      -      -            
+     1.18%  fas-ld                                            [.] Stdlib.Hashtbl.add_1354                          -      -            
+     1.10%  fas-ld                                            [.] Stdlib.Hashtbl.do_bucket_800                     -      -            
+     1.03%  fas-ld                                            [.] Fas_linker.Static_link.fun_2324                  -      -            
+     0.73%  fas-ld                                            [.] caml_string_equal                                -      -            
+     0.69%  fas-ld                                            [.] try_update_object_header                         -      -            
+     0.68%  fas-ld                                            [.] Stdlib.List.mem_479                              -      -            
+     0.67%  libc.so.6                                         [.] __memmove_avx_unaligned_erms                     -      -            
+     0.62%  fas-ld                                            [.] Fas_linker.Static_link.fun_1706                  -      -            
+     0.61%  fas-ld                                            [.] Fas_linker.Binary.string_at_616                  -      -            
+     0.55%  fas-ld                                            [.] Fas_linker.Tls.symbol_532                        -      -            
+     0.54%  fas-ld                                            [.] Fas_linker.Static_link.fun_1901                  -      -            
+     0.54%  fas-ld                                            [.] Stdlib.Hashtbl.key_index_1350                    -      -            
+     0.52%  fas-ld                                            [.] Fas_linker.Elf_reader.fun_1497                   -      -            
+     0.49%  fas-ld                                            [.] Stdlib.String.contains_from_525                  -      -            
+     0.48%  fas-ld                                            [.] Fas_linker.Static_link.fun_2609                  -      -            
+     0.47%  fas-ld                                            [.] Stdlib.Array.iteri_381                           -      -            
+     0.46%  [unknown]                                         [k] 0xffffffffa1e00b90                               -      -            
+     0.46%  fas-ld                                            [.] Fas_linker.Static_link.fun_1716                  -      -            
+     0.43%  fas-ld                                            [.] Fas_linker.Static_link.live_1071                 -      -            
+     0.43%  fas-ld                                            [.] Fas_linker.Binary.set_507                        -      -            
+     0.41%  fas-ld                                            [.] Fas_linker.Resolver.fun_2743                     -      -            
+     0.38%  fas-ld                                            [.] Fas_linker.Static_link.get_placement_1065        -      -            
+     0.38%  fas-ld                                            [.] Fas_linker.Static_link.fun_1953                  -      -            
+     0.37%  fas-ld                                            [.] Stdlib.String.index_rec_opt_478                  -      -            
+     0.37%  fas-ld                                            [.] caml_alloc_string                                -      -            
+     0.36%  fas-ld                                            [.] Stdlib.Array.loop_463                            -      -            
+     0.36%  fas-ld                                            [.] Fas_linker.Got.fun_911                           -      -            
+     0.36%  fas-ld                                            [.] caml_darken                                      -      -            
+     0.35%  fas-ld                                            [.] Fas_linker.Elf_reader.fun_1803                   -      -            
+     0.33%  fas-ld                                            [.] Stdlib.List.rev_append_318                       -      -            
+     0.32%  fas-ld                                            [.] Fas_linker.Symver.parse_404                      -      -            
+     0.31%  fas-ld                                            [.] Stdlib.List.iter_373                             -      -            
+     0.30%  fas-ld                                            [.] Fas_linker.Resolver.fun_2400                     -      -            
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

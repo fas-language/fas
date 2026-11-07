@@ -1,0 +1,999 @@
+{
+  "archive-lazy-256": {
+    "sampling_rate": 0.002,
+    "total_samples": 1432,
+    "note": "Sampled allocation stacks, not CPU percentages. Full profile retained in external artifacts.",
+    "top_20_stacks": [
+      {
+        "samples": 381,
+        "estimated_words": 190500,
+        "stack": [
+          "Raised by primitive operation at Stdlib.really_input_string in file \"stdlib.ml\", line 439, characters 10-26",
+          "Called from Fas_linker__File_io.read.(fun) in file \"src/linker/file_io.ml\", line 18, characters 14-46",
+          "Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Resolver.resolve.read_input.(fun) in file \"src/linker/resolver.ml\", line 161, characters 25-52",
+          "Called from Fas_linker__Resolver.resolve.read_input in file \"src/linker/resolver.ml\", lines 150-163, characters 6-19",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 205, characters 19-34",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77"
+        ]
+      },
+      {
+        "samples": 190,
+        "estimated_words": 95000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 207-210, characters 10-74",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 123,
+        "estimated_words": 61500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 209, characters 40-60",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 206-211, characters 8-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 118,
+        "estimated_words": 59000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.replace in file \"hashtbl.ml\", line 596, characters 22-41",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 209, characters 12-60",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 206-211, characters 8-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 103,
+        "estimated_words": 51500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 210, characters 40-73",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 206-211, characters 8-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 98,
+        "estimated_words": 49000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.sub in file \"bytes.ml\", line 68, characters 12-22",
+          "Called from Stdlib__String.sub in file \"string.ml\", line 44, characters 2-23",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 203, characters 19-77",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 98,
+        "estimated_words": 49000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun).integer in file \"src/linker/archive.ml\", line 187, characters 12-84",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 197, characters 28-66",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 90,
+        "estimated_words": 45000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 211, characters 10-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 40,
+        "estimated_words": 20000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.find_opt in file \"hashtbl.ml\", line 564, characters 33-40",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 199, characters 16-56",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 31,
+        "estimated_words": 15500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.resize in file \"hashtbl.ml\", line 150, characters 16-38",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 209, characters 12-60",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 206-211, characters 8-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 26,
+        "estimated_words": 13000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.insert_all_buckets in file \"hashtbl.ml\", line 119, characters 19-41",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 209, characters 12-60",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 206-211, characters 8-39",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 19,
+        "estimated_words": 9500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.find_opt in file \"hashtbl.ml\", line 568, characters 37-44",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 199, characters 16-56",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 7,
+        "estimated_words": 3500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.decimal.(fun) in file \"src/linker/archive.ml\", lines 44-48, characters 6-50",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 68-70, characters 6-43",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 5,
+        "estimated_words": 2500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__String.starts_with.aux in file \"string.ml\", lines 210-213, characters 14-20",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 121, characters 13-54",
+          "Called from Stdlib__Array.map in file \"array.ml\", line 126, characters 21-40",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 117-176, characters 4-10",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 5,
+        "estimated_words": 2500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 167-176, characters 8-9",
+          "Called from Stdlib__Array.map in file \"array.ml\", line 126, characters 21-40",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 117-176, characters 4-10",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 5,
+        "estimated_words": 2500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.find_rec_opt in file \"hashtbl.ml\", line 558, characters 32-41",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 199, characters 16-56",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 4,
+        "estimated_words": 2000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.find_opt in file \"hashtbl.ml\", line 572, characters 41-48",
+          "Called from Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", line 199, characters 16-56",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 3,
+        "estimated_words": 1500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.add in file \"hashtbl.ml\", line 512, characters 19-47",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 565-636, characters 2-21",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 3,
+        "estimated_words": 1500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.sub in file \"bytes.ml\", line 68, characters 12-22",
+          "Called from Stdlib__String.sub in file \"string.ml\", line 44, characters 2-23",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", line 63, characters 7-39",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 3,
+        "estimated_words": 1500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__List.rev_append in file \"list.ml\", line 60, characters 27-36",
+          "Called from Stdlib__List.rev in file \"list.ml\" (inlined), line 62, characters 12-27",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", line 117, characters 4-17",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      }
+    ]
+  },
+  "archive-all-256": {
+    "sampling_rate": 0.002,
+    "total_samples": 9469,
+    "note": "Sampled allocation stacks, not CPU percentages. Full profile retained in external artifacts.",
+    "top_20_stacks": [
+      {
+        "samples": 389,
+        "estimated_words": 194500,
+        "stack": [
+          "Raised by primitive operation at Stdlib.really_input_string in file \"stdlib.ml\", line 439, characters 10-26",
+          "Called from Fas_linker__File_io.read.(fun) in file \"src/linker/file_io.ml\", line 18, characters 14-46",
+          "Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Resolver.resolve.read_input.(fun) in file \"src/linker/resolver.ml\", line 161, characters 25-52",
+          "Called from Fas_linker__Resolver.resolve.read_input in file \"src/linker/resolver.ml\", lines 150-163, characters 6-19",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 205, characters 19-34",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77"
+        ]
+      },
+      {
+        "samples": 363,
+        "estimated_words": 181500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.sub in file \"bytes.ml\", line 68, characters 12-22",
+          "Called from Stdlib__String.sub in file \"string.ml\", line 44, characters 2-23",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", line 237, characters 18-67",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 272,
+        "estimated_words": 136000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 474, characters 12-69",
+          "Called from Stdlib__Array.init in file \"array.ml\", line 56, characters 22-27",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 405-474, characters 8-70",
+          "Called from Fas_linker__Archive.object_.(fun) in file \"src/linker/archive.ml\", line 261, characters 26-67",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", lines 260-261, characters 8-68",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 224,
+        "estimated_words": 112000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun).context in file \"src/linker/static_link.ml\", lines 387-391, characters 28-38",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 216,
+        "estimated_words": 108000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 608, characters 12-84",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Archive.object_.(fun) in file \"src/linker/archive.ml\", line 261, characters 26-67",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", lines 260-261, characters 8-68",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 215,
+        "estimated_words": 107500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.make in file \"bytes.ml\", line 42, characters 10-18",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", line 316, characters 12-34",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 198,
+        "estimated_words": 99000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Resolver.resolve.get in file \"src/linker/resolver.ml\", lines 308-314, characters 10-11",
+          "Called from Fas_linker__Resolver.resolve.extract.(fun) in file \"src/linker/resolver.ml\", line 461, characters 59-69",
+          "Called from Stdlib__List.exists in file \"list.ml\", line 178, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 461, characters 27-85",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 191,
+        "estimated_words": 95500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Archive.parse.(fun) in file \"src/linker/archive.ml\", lines 207-210, characters 10-74",
+          "Called from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35",
+          "Called from Fas_linker__Archive.parse in file \"src/linker/archive.ml\", lines 181-216, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 208, characters 12-76",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 173,
+        "estimated_words": 86500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Got.canonical_ifunc in file \"src/linker/got.ml\", line 47, characters 10-42",
+          "Called from Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 415, characters 40-86",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 150,
+        "estimated_words": 75000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Resolver.resolve.add_object.(fun) in file \"src/linker/resolver.ml\", line 384, characters 18-83",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 478, characters 12-30",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 141,
+        "estimated_words": 70500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.replace in file \"hashtbl.ml\", line 596, characters 22-41",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", lines 264-267, characters 6-23",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      },
+      {
+        "samples": 137,
+        "estimated_words": 68500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.add in file \"hashtbl.ml\", line 512, characters 19-47",
+          "Called from Fas_linker__Resolver.resolve.get in file \"src/linker/resolver.ml\", line 316, characters 8-33",
+          "Called from Fas_linker__Resolver.resolve.extract.(fun) in file \"src/linker/resolver.ml\", line 461, characters 59-69",
+          "Called from Stdlib__List.exists in file \"list.ml\", line 178, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 461, characters 27-85",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 137,
+        "estimated_words": 68500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Hashtbl.add in file \"hashtbl.ml\", line 512, characters 19-47",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 565-636, characters 2-21",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 136,
+        "estimated_words": 68000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", lines 62-63, characters 18-75",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 48-77, characters 2-20",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 131,
+        "estimated_words": 65500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 292, characters 24-39",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 279-297, characters 2-11",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 122,
+        "estimated_words": 61000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.address in file \"src/linker/static_link.ml\", lines 221-223, characters 6-15",
+          "Called from Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 238, characters 25-57",
+          "Called from Stdlib__Array.mapi in file \"array.ml\", line 164, characters 21-43",
+          "Called from Stdlib__Array.mapi in file \"array.ml\", line 164, characters 21-43",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 226-247, characters 4-13",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 121,
+        "estimated_words": 60500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Resolver.resolve.(fun) in file \"src/linker/resolver.ml\", line 610, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 565-636, characters 2-21",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 119,
+        "estimated_words": 59500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.get_int64_le in file \"bytes.ml\" (inlined), line 509, characters 7-23",
+          "Called from Stdlib__String.get_int64_le in file \"string.ml\" (inlined), line 281, characters 23-47",
+          "Called from Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 417, characters 24-43",
+          "Called from Stdlib__Array.init in file \"array.ml\", line 56, characters 22-27",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 405-474, characters 8-70",
+          "Called from Fas_linker__Archive.object_.(fun) in file \"src/linker/archive.ml\", line 261, characters 26-67",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", lines 260-261, characters 8-68",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 117,
+        "estimated_words": 58500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 583, characters 51-83",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Archive.object_.(fun) in file \"src/linker/archive.ml\", line 261, characters 26-67",
+          "Called from Fas_linker__Archive.object_ in file \"src/linker/archive.ml\", lines 260-261, characters 8-68",
+          "Called from Fas_linker__Resolver.resolve.extract in file \"src/linker/resolver.ml\", line 464, characters 12-75",
+          "Called from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", line 551, characters 2-70",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 115,
+        "estimated_words": 57500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__List.rev_append in file \"list.ml\", line 60, characters 27-36",
+          "Called from Stdlib__List.rev in file \"list.ml\" (inlined), line 62, characters 12-27",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", line 298, characters 46-63",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      }
+    ]
+  },
+  "sqlite-cli": {
+    "sampling_rate": 0.002,
+    "total_samples": 46317,
+    "note": "Sampled allocation stacks, not CPU percentages. Full profile retained in external artifacts.",
+    "top_20_stacks": [
+      {
+        "samples": 4063,
+        "estimated_words": 2031500,
+        "stack": [
+          "Raised by primitive operation at Stdlib.(^) in file \"stdlib.ml\", line 214, characters 10-32",
+          "Called from Fas_linker__Unwind.normalize.(fun) in file \"src/linker/unwind.ml\", line 277, characters 39-72",
+          "Called from Stdlib__Array.mapi in file \"array.ml\", line 164, characters 21-43",
+          "Called from Fas_linker__Unwind.normalize in file \"src/linker/unwind.ml\", lines 20-278, characters 4-22",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", line 41, characters 4-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 3559,
+        "estimated_words": 1779500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun).context in file \"src/linker/static_link.ml\", lines 387-391, characters 28-38",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 3392,
+        "estimated_words": 1696000,
+        "stack": [
+          "Raised by primitive operation at Stdlib.really_input_string in file \"stdlib.ml\", line 439, characters 10-26",
+          "Called from Fas_linker__File_io.read.(fun) in file \"src/linker/file_io.ml\", line 18, characters 14-46",
+          "Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Resolver.resolve.read_input.(fun) in file \"src/linker/resolver.ml\", line 161, characters 25-52",
+          "Called from Fas_linker__Resolver.resolve.read_input in file \"src/linker/resolver.ml\", lines 150-163, characters 6-19",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 205, characters 19-34",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12"
+        ]
+      },
+      {
+        "samples": 3034,
+        "estimated_words": 1517000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 608, characters 12-84",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 2300,
+        "estimated_words": 1150000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.make in file \"bytes.ml\", line 42, characters 10-18",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", line 316, characters 12-34",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 1849,
+        "estimated_words": 924500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 457, characters 25-67",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 1792,
+        "estimated_words": 896000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__X86_64.apply_lazy in file \"src/linker/x86_64.ml\", line 37, characters 15-36",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 1745,
+        "estimated_words": 872500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 426, characters 24-84",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 1537,
+        "estimated_words": 768500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.get_int64_le in file \"bytes.ml\" (inlined), line 509, characters 7-23",
+          "Called from Stdlib__String.get_int64_le in file \"string.ml\" (inlined), line 281, characters 23-47",
+          "Called from Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 608, characters 62-82",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 1519,
+        "estimated_words": 759500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 586, characters 14-49",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 1511,
+        "estimated_words": 755500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Array.sort.maxson in file \"array.ml\", line 366, characters 42-52",
+          "Called from Stdlib__Array.sort.bubbledown in file \"array.ml\", line 379, characters 12-22",
+          "Called from Stdlib__Array.sort.bubble in file \"array.ml\", line 383, characters 23-37",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", line 626, characters 6-35",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 1506,
+        "estimated_words": 753000,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Bytes.get_int64_le in file \"bytes.ml\" (inlined), line 509, characters 7-23",
+          "Called from Stdlib__String.get_int64_le in file \"string.ml\" (inlined), line 281, characters 23-47",
+          "Called from Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 589, characters 59-74",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 1503,
+        "estimated_words": 751500,
+        "stack": [
+          "Raised by primitive operation at Stdlib.really_input_string in file \"stdlib.ml\", line 439, characters 10-26",
+          "Called from Fas_linker__File_io.read.(fun) in file \"src/linker/file_io.ml\", line 18, characters 14-46",
+          "Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Resolver.resolve.read_input.(fun) in file \"src/linker/resolver.ml\", line 161, characters 25-52",
+          "Called from Fas_linker__Resolver.resolve.read_input in file \"src/linker/resolver.ml\", lines 150-163, characters 6-19",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 205, characters 19-34",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12"
+        ]
+      },
+      {
+        "samples": 1490,
+        "estimated_words": 745000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 583, characters 51-83",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 1282,
+        "estimated_words": 641000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Got.canonical_ifunc in file \"src/linker/got.ml\", line 47, characters 10-42",
+          "Called from Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 415, characters 40-86",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 910,
+        "estimated_words": 455000,
+        "stack": [
+          "Raised by primitive operation at Stdlib.really_input_string in file \"stdlib.ml\", line 439, characters 10-26",
+          "Called from Fas_linker__File_io.read.(fun) in file \"src/linker/file_io.ml\", line 18, characters 14-46",
+          "Called from Stdlib__Fun.protect in file \"fun.ml\", line 34, characters 8-15",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Resolver.resolve.read_input.(fun) in file \"src/linker/resolver.ml\", line 161, characters 25-52",
+          "Called from Fas_linker__Resolver.resolve.read_input in file \"src/linker/resolver.ml\", lines 150-163, characters 6-19",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 205, characters 19-34",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Fas_linker__Resolver.resolve.prepare.(fun) in file \"src/linker/resolver.ml\", line 282, characters 27-63",
+          "Called from Stdlib__List.map in file \"list.ml\", line 85, characters 15-19"
+        ]
+      },
+      {
+        "samples": 738,
+        "estimated_words": 369000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Got.definition in file \"src/linker/got.ml\", line 39, characters 29-43",
+          "Called from Fas_linker__Got.canonical_ifunc in file \"src/linker/got.ml\", line 48, characters 4-37",
+          "Called from Fas_linker__Static_link.link_objects.(fun) in file \"src/linker/static_link.ml\", line 415, characters 40-86",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 379-460, characters 2-16",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10"
+        ]
+      },
+      {
+        "samples": 642,
+        "estimated_words": 321000,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Elf_reader.parse.(fun) in file \"src/linker/elf_reader.ml\", line 608, characters 12-84",
+          "Called from Stdlib__Array.iter in file \"array.ml\", line 113, characters 31-48",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", lines 577-611, characters 2-12",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 89, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75"
+        ]
+      },
+      {
+        "samples": 565,
+        "estimated_words": 282500,
+        "stack": [
+          "Raised by primitive operation at Fas_linker__Got.prepare.(fun) in file \"src/linker/got.ml\", line 62, characters 32-76",
+          "Called from Stdlib__Array.map in file \"array.ml\", line 126, characters 21-40",
+          "Called from Fas_linker__Got.prepare in file \"src/linker/got.ml\", line 62, characters 4-85",
+          "Called from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 86-89, characters 4-20",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Allocation_profile in file \"/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sampler/allocation_profile.ml\", lines 17-26, characters 2-48"
+        ]
+      },
+      {
+        "samples": 501,
+        "estimated_words": 250500,
+        "stack": [
+          "Raised by primitive operation at Stdlib__Array.copy in file \"array.ml\", line 88, characters 46-62",
+          "Called from Fas_linker__Elf_reader.parse in file \"src/linker/elf_reader.ml\", line 625, characters 17-39",
+          "Called from Fas_linker__Resolver.resolve.prepare in file \"src/linker/resolver.ml\", line 288, characters 14-84",
+          "Called from Stdlib__List.map in file \"list.ml\", line 88, characters 15-19",
+          "Called from Stdlib__List.map in file \"list.ml\", line 90, characters 14-21",
+          "Called from Fas_linker__Resolver.resolve in file \"src/linker/resolver.ml\", lines 298-300, characters 4-12",
+          "Called from Fas_linker__Static_link.build_inputs.(fun) in file \"src/linker/static_link.ml\", line 686, characters 21-77",
+          "Called from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10",
+          "Called from Fas_linker__Static_link.link_input_files.(fun) in file \"src/linker/static_link.ml\", line 721, characters 18-75",
+          "Called from Fas_linker__File_io.publish.(fun) in file \"src/linker/file_io.ml\", line 72, characters 18-31"
+        ]
+      }
+    ]
+  }
+}

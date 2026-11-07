@@ -1,0 +1,62 @@
+{
+  "archive-container-and-index": {
+    "median_cpu_ms": 7.556625,
+    "min_cpu_ms": 7.17375,
+    "max_cpu_ms": 7.771375,
+    "median_allocated_words": 493052
+  },
+  "copy-all-member-bytes": {
+    "median_cpu_ms": 0.559469,
+    "min_cpu_ms": 0.534023,
+    "max_cpu_ms": 0.594383,
+    "median_allocated_words": 170645
+  },
+  "index-generic-256": {
+    "median_cpu_ms": 4.351812,
+    "min_cpu_ms": 4.203125,
+    "max_cpu_ms": 4.572063,
+    "median_allocated_words": 146770
+  },
+  "index-generic-sized": {
+    "median_cpu_ms": 2.567594,
+    "min_cpu_ms": 2.475219,
+    "max_cpu_ms": 2.64725,
+    "median_allocated_words": 131083
+  },
+  "index-string-256": {
+    "median_cpu_ms": 3.585125,
+    "min_cpu_ms": 3.562,
+    "max_cpu_ms": 3.945875,
+    "median_allocated_words": 146770
+  },
+  "index-string-sized": {
+    "median_cpu_ms": 2.400844,
+    "min_cpu_ms": 2.336375,
+    "max_cpu_ms": 2.517594,
+    "median_allocated_words": 131083
+  },
+  "29-ccs2YICw.o:heap-sort": {
+    "median_cpu_ms": 15.4915,
+    "min_cpu_ms": 15.32725,
+    "max_cpu_ms": 15.68275,
+    "median_allocated_words": 258233
+  },
+  "29-ccs2YICw.o:merge-sort": {
+    "median_cpu_ms": 7.31425,
+    "min_cpu_ms": 7.258625,
+    "max_cpu_ms": 7.421125,
+    "median_allocated_words": 241316
+  },
+  "30-ccUsCmSn.o:heap-sort": {
+    "median_cpu_ms": 91.847,
+    "min_cpu_ms": 91.366,
+    "max_cpu_ms": 92.454,
+    "median_allocated_words": 1245583
+  },
+  "30-ccUsCmSn.o:merge-sort": {
+    "median_cpu_ms": 41.3955,
+    "min_cpu_ms": 40.8685,
+    "max_cpu_ms": 41.6585,
+    "median_allocated_words": 1029042
+  }
+}

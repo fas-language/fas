@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-07T18:20:29.018271+01:00",
+  "source_commit": "8754d4c1e00cbcd018103aa71b5ddd394cedc337",
+  "runtime_source_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "ocaml": "5.4.1",
+  "kernel": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "load": [
+    3.93603515625,
+    5.80029296875,
+    5.20849609375
+  ],
+  "environment": {
+    "OCAMLRUNPARAM": null,
+    "OCAML_RUNTIME_EVENTS_START": null,
+    "OCAML_RUNTIME_EVENTS_DIR": null,
+    "LD_PRELOAD": null,
+    "LD_LIBRARY_PATH": null
+  },
+  "tool_versions": {
+    "Fas-release": "fas-ld 1.0.0 (ELF64 x86-64 Linux)",
+    "Fas-local": "fas-ld 1.0.0 (ELF64 x86-64 Linux)",
+    "LLD": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)",
+    "GNU": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+  }
+}

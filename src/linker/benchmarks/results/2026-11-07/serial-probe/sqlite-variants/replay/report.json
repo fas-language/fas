@@ -1,0 +1,1451 @@
+{
+  "started": "2026-11-07T18:19:08+0100",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "cpu": "AMD Ryzen 5 2600 Six-Core Processor",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "load_average_start": [
+    5.55078125,
+    6.544921875,
+    5.36865234375
+  ],
+  "tools": {
+    "Fas-release": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/0/fas-ld",
+      "original": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/delivered-archive-check/fas-ld",
+      "args": [],
+      "sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+      "version": "fas-ld 1.0.0 (ELF64 x86-64 Linux)"
+    },
+    "LLD": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/1/ld.lld-22",
+      "original": "/usr/bin/ld.lld-22",
+      "args": [
+        "--threads=1"
+      ],
+      "sha256": "057e42c6104e20a7358a51fb9abb456d74ba37997331d99183e877539da95982",
+      "version": "Ubuntu LLD 22.1.8 (compatible with GNU linkers)"
+    },
+    "GNU": {
+      "path": "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/2/ld",
+      "original": "/usr/bin/ld",
+      "args": [],
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+    }
+  },
+  "manifest_sha256": "2f29fc00f8095ab980238679b0f524d9c7d4cf3b43717a7019d7a0a4c8961b5b",
+  "harness_sha256": "eb15477ed694b427666ba1cb4d8b4e6f4293a92ab752a43647908ce749d1c97c",
+  "bench_helpers_sha256": "ba167632f8ad21c78866f589f21d712f0002345bde88056257f49eb8f9970fbe",
+  "methodology": "Warm cache; spawn-through-exit wall/CPU; rotated order; explicit per-tool args (otherwise default workers); runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.",
+  "runs": 9,
+  "warmups": 2,
+  "timing_comparison": true,
+  "input_provenance": {
+    "synthetic": "bench.py shape: 64 functions and 64 absolute relocations per object; archive-lazy selects one member, archive-all selects all members",
+    "scope": "single-thread exploratory warm-cache probe, shared PC; output files replaced on each run",
+    "sqlite": "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/report.json",
+    "fas": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/backend-v2-compatibility-final/report.json"
+  },
+  "limitations": [
+    "Explicit argv inputs are hashed; -l/script/transitive closures require the associated corpus/sysroot provenance.",
+    "Single machine and warm cache; no general linker ranking or production qualification."
+  ],
+  "workloads": [
+    {
+      "name": "sqlite-debug-id",
+      "cwd": "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o": "0d8083bb7d2f88e679bea099a87ff94313b62ce3862145b9e61005ed0b2621d7",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o": "4be899f845c1227ff90a88446bf4d40a5fb1e109fb1e2134837448e389f53d40",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdin": "select 6*7;\n",
+        "stdout_contains": "42\n",
+        "exit": 0
+      },
+      "results": {
+        "Fas-release": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/0/fas-ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/0/0",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o"
+          ],
+          "output_sha256": "5c9aef6b63df26eb7f10a0c6e11437a43fbf1f5c01276add6526fe91ac64dfec",
+          "output_bytes": 9077584,
+          "peak_rss_kib": 96556,
+          "samples": [
+            {
+              "wall_ms": 438.0651539995597,
+              "user_ms": 357.76399999999995,
+              "system_ms": 79.94699999999999
+            },
+            {
+              "wall_ms": 431.14510899977176,
+              "user_ms": 355.76599999999996,
+              "system_ms": 74.95
+            },
+            {
+              "wall_ms": 428.4583749995363,
+              "user_ms": 349.006,
+              "system_ms": 79.001
+            },
+            {
+              "wall_ms": 435.11846999899717,
+              "user_ms": 361.486,
+              "system_ms": 73.098
+            },
+            {
+              "wall_ms": 448.4136730006867,
+              "user_ms": 348.873,
+              "system_ms": 85.968
+            },
+            {
+              "wall_ms": 418.2026639991818,
+              "user_ms": 343.87999999999994,
+              "system_ms": 73.974
+            },
+            {
+              "wall_ms": 412.9487150003115,
+              "user_ms": 339.484,
+              "system_ms": 73.104
+            },
+            {
+              "wall_ms": 423.5271670004295,
+              "user_ms": 348.126,
+              "system_ms": 75.027
+            },
+            {
+              "wall_ms": 424.68861999986984,
+              "user_ms": 358.24,
+              "system_ms": 66.044
+            }
+          ],
+          "median_wall_ms": 428.4583749995363,
+          "median_cpu_ms": 428.00699999999995,
+          "min_wall_ms": 412.9487150003115,
+          "max_wall_ms": 448.4136730006867
+        },
+        "LLD": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/1/ld.lld-22",
+            "--threads=1",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/0/1",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o"
+          ],
+          "output_sha256": "92d47cf63b29e20ca3532df21ac801fbb342efde3cbae8e7e7696b0f963cd694",
+          "output_bytes": 8955432,
+          "peak_rss_kib": 98972,
+          "samples": [
+            {
+              "wall_ms": 49.75004799962335,
+              "user_ms": 25.058,
+              "system_ms": 24.055999999999997
+            },
+            {
+              "wall_ms": 57.95875699914177,
+              "user_ms": 33.766999999999996,
+              "system_ms": 23.834999999999997
+            },
+            {
+              "wall_ms": 49.86835199997586,
+              "user_ms": 28.291,
+              "system_ms": 21.218
+            },
+            {
+              "wall_ms": 46.66707800060976,
+              "user_ms": 22.11,
+              "system_ms": 24.119999999999997
+            },
+            {
+              "wall_ms": 60.320246000628686,
+              "user_ms": 29.968999999999998,
+              "system_ms": 29.968999999999998
+            },
+            {
+              "wall_ms": 49.45096499977808,
+              "user_ms": 27.987,
+              "system_ms": 20.99
+            },
+            {
+              "wall_ms": 49.05548799979442,
+              "user_ms": 27.299,
+              "system_ms": 21.232999999999997
+            },
+            {
+              "wall_ms": 49.49411599955056,
+              "user_ms": 28.083999999999996,
+              "system_ms": 21.063
+            },
+            {
+              "wall_ms": 48.697341000661254,
+              "user_ms": 24.134,
+              "system_ms": 24.134
+            }
+          ],
+          "median_wall_ms": 49.49411599955056,
+          "median_cpu_ms": 49.114,
+          "min_wall_ms": 46.66707800060976,
+          "max_wall_ms": 60.320246000628686
+        },
+        "GNU": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/2/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/0/2",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o"
+          ],
+          "output_sha256": "40addb5f59446fc1200f945329ae5a2968df24ce8811430008f4e2ea2dc72872",
+          "output_bytes": 8954280,
+          "peak_rss_kib": 22996,
+          "samples": [
+            {
+              "wall_ms": 81.36571000068216,
+              "user_ms": 46.082,
+              "system_ms": 34.946
+            },
+            {
+              "wall_ms": 81.50948100046662,
+              "user_ms": 50.407999999999994,
+              "system_ms": 30.758999999999997
+            },
+            {
+              "wall_ms": 95.4333099998621,
+              "user_ms": 61.15,
+              "system_ms": 33.891999999999996
+            },
+            {
+              "wall_ms": 82.17680100096914,
+              "user_ms": 58.08899999999999,
+              "system_ms": 23.701
+            },
+            {
+              "wall_ms": 83.55601500079501,
+              "user_ms": 52.373,
+              "system_ms": 30.846999999999998
+            },
+            {
+              "wall_ms": 90.71256700008234,
+              "user_ms": 49.06999999999999,
+              "system_ms": 41.058
+            },
+            {
+              "wall_ms": 82.74397199966188,
+              "user_ms": 56.22,
+              "system_ms": 26.102
+            },
+            {
+              "wall_ms": 78.44720899993263,
+              "user_ms": 52.358999999999995,
+              "system_ms": 25.694
+            },
+            {
+              "wall_ms": 78.70737099983671,
+              "user_ms": 51.227,
+              "system_ms": 27.119999999999997
+            }
+          ],
+          "median_wall_ms": 82.17680100096914,
+          "median_cpu_ms": 81.78999999999999,
+          "min_wall_ms": 78.44720899993263,
+          "max_wall_ms": 95.4333099998621
+        }
+      }
+    },
+    {
+      "name": "sqlite-debug-no-id",
+      "cwd": "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o": "178f90d86c9bf8c3bf0746e288bed4af492c4b65397d54caf386a9b807d8e2c5",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o": "0d8083bb7d2f88e679bea099a87ff94313b62ce3862145b9e61005ed0b2621d7",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o": "4be899f845c1227ff90a88446bf4d40a5fb1e109fb1e2134837448e389f53d40",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o": "b4b7d9001893f0baf4ebfbe12df8d5cf0dd7f69643a5caae04d956d1a443b246",
+        "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdin": "select 6*7;\n",
+        "stdout_contains": "42\n",
+        "exit": 0
+      },
+      "results": {
+        "Fas-release": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/0/fas-ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/1/0",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "0311ce1223eeb07aebabe076fbdd8359d69749fbdb021f29a319ed96b374296f",
+          "output_bytes": 9077496,
+          "peak_rss_kib": 96572,
+          "samples": [
+            {
+              "wall_ms": 385.7064120002178,
+              "user_ms": 248.95299999999997,
+              "system_ms": 73.69
+            },
+            {
+              "wall_ms": 321.4729579995037,
+              "user_ms": 246.994,
+              "system_ms": 73.99799999999999
+            },
+            {
+              "wall_ms": 322.72868899963214,
+              "user_ms": 254.34799999999996,
+              "system_ms": 68.093
+            },
+            {
+              "wall_ms": 343.665026999588,
+              "user_ms": 238.79399999999998,
+              "system_ms": 75.934
+            },
+            {
+              "wall_ms": 340.5544339984772,
+              "user_ms": 265.032,
+              "system_ms": 75.00899999999999
+            },
+            {
+              "wall_ms": 319.3134299999656,
+              "user_ms": 251.68,
+              "system_ms": 67.181
+            },
+            {
+              "wall_ms": 335.15790499950526,
+              "user_ms": 251.531,
+              "system_ms": 83.175
+            },
+            {
+              "wall_ms": 316.68739300039306,
+              "user_ms": 260.31899999999996,
+              "system_ms": 56.068
+            },
+            {
+              "wall_ms": 334.90383599928464,
+              "user_ms": 248.128,
+              "system_ms": 75.038
+            }
+          ],
+          "median_wall_ms": 334.90383599928464,
+          "median_cpu_ms": 322.441,
+          "min_wall_ms": 316.68739300039306,
+          "max_wall_ms": 385.7064120002178
+        },
+        "LLD": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/1/ld.lld-22",
+            "--threads=1",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/1/1",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "ef518e8b730eca8fc13ea4003c90f0448c802488de1f877f7e7f1849b5c09a8e",
+          "output_bytes": 8955280,
+          "peak_rss_kib": 98600,
+          "samples": [
+            {
+              "wall_ms": 112.7481200001057,
+              "user_ms": 28.398,
+              "system_ms": 22.522000000000002
+            },
+            {
+              "wall_ms": 42.76974999993399,
+              "user_ms": 20.666999999999998,
+              "system_ms": 21.651
+            },
+            {
+              "wall_ms": 48.75385900049878,
+              "user_ms": 26.973999999999997,
+              "system_ms": 20.979999999999997
+            },
+            {
+              "wall_ms": 93.72426300069492,
+              "user_ms": 25.294,
+              "system_ms": 26.306
+            },
+            {
+              "wall_ms": 50.44082400127081,
+              "user_ms": 23.927999999999997,
+              "system_ms": 25.921999999999997
+            },
+            {
+              "wall_ms": 47.508397001365665,
+              "user_ms": 24.044,
+              "system_ms": 23.042
+            },
+            {
+              "wall_ms": 46.634877000542474,
+              "user_ms": 23.150999999999996,
+              "system_ms": 23.150999999999996
+            },
+            {
+              "wall_ms": 46.63656100092339,
+              "user_ms": 22.16,
+              "system_ms": 24.173999999999996
+            },
+            {
+              "wall_ms": 47.157123999568284,
+              "user_ms": 27.500999999999998,
+              "system_ms": 19.351999999999997
+            }
+          ],
+          "median_wall_ms": 47.508397001365665,
+          "median_cpu_ms": 47.086,
+          "min_wall_ms": 42.76974999993399,
+          "max_wall_ms": 112.7481200001057
+        },
+        "GNU": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/2/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/1/2",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/link-inputs/link-ger08gr_/47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "502876796a40ec01759feeac19f67a4844a56a6bb69520aca6a8c613e3b042c1",
+          "output_bytes": 8954200,
+          "peak_rss_kib": 23000,
+          "samples": [
+            {
+              "wall_ms": 73.00512499932665,
+              "user_ms": 40.028,
+              "system_ms": 32.52
+            },
+            {
+              "wall_ms": 81.81046999925456,
+              "user_ms": 48.861999999999995,
+              "system_ms": 32.427
+            },
+            {
+              "wall_ms": 89.19924000110768,
+              "user_ms": 49.187999999999995,
+              "system_ms": 39.757999999999996
+            },
+            {
+              "wall_ms": 69.84389600074792,
+              "user_ms": 40.211999999999996,
+              "system_ms": 29.154
+            },
+            {
+              "wall_ms": 72.8176419997908,
+              "user_ms": 40.847,
+              "system_ms": 31.537999999999997
+            },
+            {
+              "wall_ms": 75.37702300032834,
+              "user_ms": 42.137,
+              "system_ms": 32.736999999999995
+            },
+            {
+              "wall_ms": 75.06246999946597,
+              "user_ms": 45.396,
+              "system_ms": 29.255
+            },
+            {
+              "wall_ms": 74.40625099843601,
+              "user_ms": 47.497,
+              "system_ms": 26.662
+            },
+            {
+              "wall_ms": 73.48467099836853,
+              "user_ms": 47.375,
+              "system_ms": 25.74
+            }
+          ],
+          "median_wall_ms": 74.40625099843601,
+          "median_cpu_ms": 74.15899999999999,
+          "min_wall_ms": 69.84389600074792,
+          "max_wall_ms": 89.19924000110768
+        }
+      }
+    },
+    {
+      "name": "sqlite-stripped-id",
+      "cwd": "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o": "7c058a5fefe80ceed2ad13cca19b79b06e66795cca3f73fd9d04ce4d19e5f302",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o": "0424397d6286ee8509c8cba40028e1d31a756ab6d5760f93350eaf5411d49a6e",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o": "4b5828b4f8e2cbcec186f9abb246d9f83436b937b17c95ae1787fa3e3efd23c6",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o": "e699f46c2e158d31c91aff3fa5dceff503b6ba561e5d4fd405b2067eed7ab9bd",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdin": "select 6*7;\n",
+        "stdout_contains": "42\n",
+        "exit": 0
+      },
+      "results": {
+        "Fas-release": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/0/fas-ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/2/0",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o"
+          ],
+          "output_sha256": "6e4774f32118c9aa7b51aab66ca6f6521656b28ff236c266baf7fd25c293e143",
+          "output_bytes": 2319776,
+          "peak_rss_kib": 35792,
+          "samples": [
+            {
+              "wall_ms": 109.23017899949627,
+              "user_ms": 80.92699999999999,
+              "system_ms": 27.975
+            },
+            {
+              "wall_ms": 106.11757199876592,
+              "user_ms": 83.522,
+              "system_ms": 22.137999999999998
+            },
+            {
+              "wall_ms": 104.46950099867536,
+              "user_ms": 76.999,
+              "system_ms": 26.999
+            },
+            {
+              "wall_ms": 119.29463100022986,
+              "user_ms": 78.014,
+              "system_ms": 23.004
+            },
+            {
+              "wall_ms": 114.98469400066824,
+              "user_ms": 85.76199999999999,
+              "system_ms": 28.919999999999998
+            },
+            {
+              "wall_ms": 110.12323500108323,
+              "user_ms": 83.83699999999999,
+              "system_ms": 25.948999999999998
+            },
+            {
+              "wall_ms": 105.4623050004011,
+              "user_ms": 78.10000000000001,
+              "system_ms": 27.034
+            },
+            {
+              "wall_ms": 123.22386000050756,
+              "user_ms": 80.777,
+              "system_ms": 21.939
+            },
+            {
+              "wall_ms": 107.80750300000363,
+              "user_ms": 75.349,
+              "system_ms": 32.148999999999994
+            }
+          ],
+          "median_wall_ms": 109.23017899949627,
+          "median_cpu_ms": 105.66,
+          "min_wall_ms": 104.46950099867536,
+          "max_wall_ms": 123.22386000050756
+        },
+        "LLD": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/1/ld.lld-22",
+            "--threads=1",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/2/1",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o"
+          ],
+          "output_sha256": "be87d959ad42055681cb75e61eefca6d6440b82dfa5cc5a6c2ee7532ef6f7f08",
+          "output_bytes": 2208112,
+          "peak_rss_kib": 78380,
+          "samples": [
+            {
+              "wall_ms": 32.07722300066962,
+              "user_ms": 16.293,
+              "system_ms": 15.274999999999999
+            },
+            {
+              "wall_ms": 31.647451998651377,
+              "user_ms": 11.028,
+              "system_ms": 20.051
+            },
+            {
+              "wall_ms": 28.38636399974348,
+              "user_ms": 9.01,
+              "system_ms": 19.023
+            },
+            {
+              "wall_ms": 30.08382900043216,
+              "user_ms": 15.85,
+              "system_ms": 13.869
+            },
+            {
+              "wall_ms": 32.80554699995264,
+              "user_ms": 14.213,
+              "system_ms": 18.273999999999997
+            },
+            {
+              "wall_ms": 28.954456000064965,
+              "user_ms": 10.222,
+              "system_ms": 18.398999999999997
+            },
+            {
+              "wall_ms": 41.50979099904362,
+              "user_ms": 18.113999999999997,
+              "system_ms": 23.146
+            },
+            {
+              "wall_ms": 29.5828430007532,
+              "user_ms": 16.499,
+              "system_ms": 12.615999999999998
+            },
+            {
+              "wall_ms": 30.407240001295577,
+              "user_ms": 11.032,
+              "system_ms": 19.055
+            }
+          ],
+          "median_wall_ms": 30.407240001295577,
+          "median_cpu_ms": 30.087,
+          "min_wall_ms": 28.38636399974348,
+          "max_wall_ms": 41.50979099904362
+        },
+        "GNU": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/2/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/2/2",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o"
+          ],
+          "output_sha256": "39712ad89b516f62a6b99d60444e10ba4168a2445d52e8b5bec63c2bf51a1e4a",
+          "output_bytes": 2218184,
+          "peak_rss_kib": 14808,
+          "samples": [
+            {
+              "wall_ms": 61.62828600099601,
+              "user_ms": 35.08,
+              "system_ms": 26.058999999999997
+            },
+            {
+              "wall_ms": 41.850794999845675,
+              "user_ms": 23.212,
+              "system_ms": 18.165999999999997
+            },
+            {
+              "wall_ms": 57.85920900052588,
+              "user_ms": 32.2,
+              "system_ms": 25.156
+            },
+            {
+              "wall_ms": 51.06690600041475,
+              "user_ms": 27.391,
+              "system_ms": 23.333
+            },
+            {
+              "wall_ms": 51.336974998775986,
+              "user_ms": 28.381999999999998,
+              "system_ms": 22.633999999999997
+            },
+            {
+              "wall_ms": 59.09723699915048,
+              "user_ms": 31.878999999999998,
+              "system_ms": 26.898
+            },
+            {
+              "wall_ms": 44.43898199860996,
+              "user_ms": 27.413999999999998,
+              "system_ms": 16.735
+            },
+            {
+              "wall_ms": 43.581282001468935,
+              "user_ms": 21.069,
+              "system_ms": 22.072
+            },
+            {
+              "wall_ms": 44.48754300028668,
+              "user_ms": 24.093999999999998,
+              "system_ms": 20.078
+            }
+          ],
+          "median_wall_ms": 51.06690600041475,
+          "median_cpu_ms": 50.724,
+          "min_wall_ms": 41.850794999845675,
+          "max_wall_ms": 61.62828600099601
+        }
+      }
+    },
+    {
+      "name": "sqlite-stripped-no-id",
+      "cwd": "/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build",
+      "explicit_input_sha256": {
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o": "75c40260f996747732aeaac415985947403f7992916bc5d35465e1f9e6c93082",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o": "077ccb6c68db1794da3ee262c4a16a3c6f8e902845dd0829110ad4b7065e5aa3",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o": "7c058a5fefe80ceed2ad13cca19b79b06e66795cca3f73fd9d04ce4d19e5f302",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o": "0424397d6286ee8509c8cba40028e1d31a756ab6d5760f93350eaf5411d49a6e",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o": "4b5828b4f8e2cbcec186f9abb246d9f83436b937b17c95ae1787fa3e3efd23c6",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o": "e699f46c2e158d31c91aff3fa5dceff503b6ba561e5d4fd405b2067eed7ab9bd",
+        "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o": "a2266079f95b84ccc2162ebbf279bcd78858a748aa1882e0bdb912316c76a58f"
+      },
+      "check": {
+        "stdin": "select 6*7;\n",
+        "stdout_contains": "42\n",
+        "exit": 0
+      },
+      "results": {
+        "Fas-release": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/0/fas-ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/3/0",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "6c9698e3b7711879469c556f16576a2b8c29c830476dfc3e064c1389a7806b54",
+          "output_bytes": 2319688,
+          "peak_rss_kib": 35792,
+          "samples": [
+            {
+              "wall_ms": 80.27416999902925,
+              "user_ms": 54.824999999999996,
+              "system_ms": 24.919999999999998
+            },
+            {
+              "wall_ms": 88.94176499961759,
+              "user_ms": 55.766999999999996,
+              "system_ms": 32.863
+            },
+            {
+              "wall_ms": 106.48760100048094,
+              "user_ms": 74.16,
+              "system_ms": 32.069
+            },
+            {
+              "wall_ms": 84.62367200081644,
+              "user_ms": 58.412,
+              "system_ms": 25.741
+            },
+            {
+              "wall_ms": 98.17444600048475,
+              "user_ms": 68.742,
+              "system_ms": 28.891
+            },
+            {
+              "wall_ms": 87.36057900023297,
+              "user_ms": 56.912,
+              "system_ms": 29.953999999999997
+            },
+            {
+              "wall_ms": 88.46679799898993,
+              "user_ms": 60.047,
+              "system_ms": 28.022
+            },
+            {
+              "wall_ms": 106.07317899848567,
+              "user_ms": 53.775999999999996,
+              "system_ms": 25.892
+            },
+            {
+              "wall_ms": 94.41982699900109,
+              "user_ms": 63.687999999999995,
+              "system_ms": 30.326999999999998
+            }
+          ],
+          "median_wall_ms": 88.94176499961759,
+          "median_cpu_ms": 88.06899999999999,
+          "min_wall_ms": 80.27416999902925,
+          "max_wall_ms": 106.48760100048094
+        },
+        "LLD": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/1/ld.lld-22",
+            "--threads=1",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/3/1",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "267f3ce08dfbf137618bdeff841bd32b5a5681ccbc8ab9bf2edddce9c4b01866",
+          "output_bytes": 2207960,
+          "peak_rss_kib": 78504,
+          "samples": [
+            {
+              "wall_ms": 30.37304499957827,
+              "user_ms": 11.333,
+              "system_ms": 18.544999999999998
+            },
+            {
+              "wall_ms": 28.03678500094975,
+              "user_ms": 12.263,
+              "system_ms": 15.328999999999999
+            },
+            {
+              "wall_ms": 29.46427999995649,
+              "user_ms": 11.039,
+              "system_ms": 18.064999999999998
+            },
+            {
+              "wall_ms": 27.765501999965636,
+              "user_ms": 10.738,
+              "system_ms": 16.596
+            },
+            {
+              "wall_ms": 28.87551700041513,
+              "user_ms": 11.772999999999998,
+              "system_ms": 16.677999999999997
+            },
+            {
+              "wall_ms": 34.78370200173231,
+              "user_ms": 15.469,
+              "system_ms": 18.563
+            },
+            {
+              "wall_ms": 39.80124500048987,
+              "user_ms": 21.231999999999996,
+              "system_ms": 18.199
+            },
+            {
+              "wall_ms": 33.14746400064905,
+              "user_ms": 18.82,
+              "system_ms": 13.866999999999999
+            },
+            {
+              "wall_ms": 28.393868000421207,
+              "user_ms": 8.972,
+              "system_ms": 18.941
+            }
+          ],
+          "median_wall_ms": 29.46427999995649,
+          "median_cpu_ms": 29.104,
+          "min_wall_ms": 27.765501999965636,
+          "max_wall_ms": 39.80124500048987
+        },
+        "GNU": {
+          "command": [
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/tools/2/ld",
+            "--build-id",
+            "--eh-frame-hdr",
+            "-m",
+            "elf_x86_64",
+            "--hash-style=gnu",
+            "--as-needed",
+            "-dynamic-linker",
+            "/lib64/ld-linux-x86-64.so.2",
+            "-pie",
+            "-z",
+            "now",
+            "-z",
+            "relro",
+            "-o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/replay/3/2",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/15-15-Scrt1.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/16-16-crti.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/17-17-crtbeginS.o",
+            "-L/home/glonex/.cache/fas-linker-qualification/sqlite-sections-final-20261106/sqlite/build/toolchain",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib",
+            "-L/lib/x86_64-linux-gnu",
+            "-L/lib/../lib",
+            "-L/usr/lib/x86_64-linux-gnu",
+            "-L/usr/lib/../lib",
+            "-L/usr/lib/gcc/x86_64-linux-gnu/15/../../..",
+            "-L/lib",
+            "-L/usr/lib",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/29-29-ccs2YICw.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/30-30-ccUsCmSn.o",
+            "-rpath",
+            "/usr/local/lib",
+            "-lm",
+            "-lz",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "-lc",
+            "-lgcc",
+            "--push-state",
+            "--as-needed",
+            "-lgcc_s",
+            "--pop-state",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/46-46-crtendS.o",
+            "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/sqlite-variants/47-47-crtn.o",
+            "--build-id=none"
+          ],
+          "output_sha256": "d85c0d14948a125ffe1274f230c74f60ebe62d1e75519d7e6e06bdce12b166c7",
+          "output_bytes": 2218104,
+          "peak_rss_kib": 14352,
+          "samples": [
+            {
+              "wall_ms": 41.39308099911432,
+              "user_ms": 25.949999999999996,
+              "system_ms": 14.971
+            },
+            {
+              "wall_ms": 52.23841800034279,
+              "user_ms": 27.218,
+              "system_ms": 24.549999999999997
+            },
+            {
+              "wall_ms": 40.75254199960909,
+              "user_ms": 23.968,
+              "system_ms": 16.326999999999998
+            },
+            {
+              "wall_ms": 43.9986500005034,
+              "user_ms": 31.142999999999997,
+              "system_ms": 12.415
+            },
+            {
+              "wall_ms": 47.67620399979933,
+              "user_ms": 30.903999999999996,
+              "system_ms": 16.316
+            },
+            {
+              "wall_ms": 53.321842999139335,
+              "user_ms": 32.033,
+              "system_ms": 21.020999999999997
+            },
+            {
+              "wall_ms": 51.28251299902331,
+              "user_ms": 27.230999999999998,
+              "system_ms": 23.616
+            },
+            {
+              "wall_ms": 44.49869400013995,
+              "user_ms": 26.058999999999997,
+              "system_ms": 18.040999999999997
+            },
+            {
+              "wall_ms": 48.723941999924136,
+              "user_ms": 28.742,
+              "system_ms": 19.639
+            }
+          ],
+          "median_wall_ms": 47.67620399979933,
+          "median_cpu_ms": 47.22,
+          "min_wall_ms": 40.75254199960909,
+          "max_wall_ms": 53.321842999139335
+        }
+      }
+    }
+  ],
+  "load_average_end": [
+    5.3310546875,
+    6.427734375,
+    5.35498046875
+  ]
+}

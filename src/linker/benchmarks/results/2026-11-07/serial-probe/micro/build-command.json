@@ -1,0 +1,17 @@
+[
+  "ocamlopt",
+  "-g",
+  "-I",
+  "+unix",
+  "-I",
+  "_build/default/src/linker",
+  "-I",
+  "_build/default/src/linker/.fas_linker.objs/byte",
+  "-I",
+  "_build/default/src/linker/.fas_linker.objs/native",
+  "unix.cmxa",
+  "_build/default/src/linker/fas_linker.cmxa",
+  "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/micro/serial_micro.ml",
+  "-o",
+  "/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107/micro/probe"
+]

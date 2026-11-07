@@ -50,6 +50,8 @@ def main():
     parser.add_argument('manifest', type=Path)
     parser.add_argument('--output', required=True, type=Path, help='new artifact directory')
     parser.add_argument('--tool', action='append', required=True, metavar='LABEL=PATH')
+    parser.add_argument('--tool-arg', action='append', default=[], metavar='LABEL=ARG',
+                        help='prepend an explicit per-tool argument, e.g. LLD=--threads=1')
     parser.add_argument('--runs', type=int, default=15)
     parser.add_argument('--warmups', type=int, default=3)
     parser.add_argument('--verify-only', action='store_true', help='check replays without collecting timings')
@@ -71,17 +73,23 @@ def main():
         destination = output/'tools'/str(index)/original.name
         destination.parent.mkdir(parents=True)
         shutil.copy2(original, destination)
-        tools[label] = {'path': str(destination), 'original': str(original),
+        tools[label] = {'path': str(destination), 'original': str(original), 'args': [],
                         'sha256': digest(destination), 'version': version(str(destination))}
+    for selection in args.tool_arg:
+        label, separator, argument = selection.partition('=')
+        if not separator or label not in tools or not argument:
+            parser.error('each tool argument needs a known LABEL=ARG')
+        tools[label]['args'].append(argument)
     cpu = next((line.partition(':')[2].strip()
                 for line in Path('/proc/cpuinfo').read_text().splitlines()
                 if line.startswith('model name')), 'unknown')
     report = {'started': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
               'platform': platform.platform(), 'cpu': cpu,
               'available_cpus': sorted(os.sched_getaffinity(0)),
+              'load_average_start': os.getloadavg(),
               'tools': tools, 'manifest_sha256': digest(args.manifest),
               'harness_sha256': digest(__file__), 'bench_helpers_sha256': digest(output/'bench.py'),
-              'methodology': 'Warm cache; spawn-through-exit wall/CPU; rotated order; default linker workers; runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.',
+              'methodology': 'Warm cache; spawn-through-exit wall/CPU; rotated order; explicit per-tool args (otherwise default workers); runtime checks and separate GNU-time RSS samples outside timed intervals. No cache eviction, affinity or governor changes.',
               'runs': 0 if args.verify_only else args.runs, 'warmups': args.warmups,
               'timing_comparison': not args.verify_only,
               'input_provenance': manifest.get('input_provenance', {}),
@@ -101,7 +109,7 @@ def main():
         for number, (label, tool) in enumerate(tools.items()):
             arguments = list(argv)
             arguments[arguments.index('-o')+1] = str(directory/str(number))
-            commands[label] = [tool['path'], *arguments]
+            commands[label] = [tool['path'], *tool['args'], *arguments]
         original_cwd = Path.cwd()
         try:
             os.chdir(cwd)
@@ -119,6 +127,8 @@ def main():
                     raise RuntimeError(f'{label}: runtime check failed: {result.stderr!r}')
                 if check.get('stdout_contains', '').encode() not in result.stdout:
                     raise RuntimeError(f'{label}: runtime output check failed: {result.stdout!r}')
+                if 'stdout_sha256' in check and hashlib.sha256(result.stdout).hexdigest() != check['stdout_sha256']:
+                    raise RuntimeError(f'{label}: runtime stdout digest differs')
                 baseline[label] = digest(program)
                 if not args.verify_only:
                     for _ in range(args.warmups):
@@ -141,6 +151,7 @@ def main():
                                   'output_bytes': program.stat().st_size,
                                   'peak_rss_kib': memory, 'samples': samples[label],
                                   'median_wall_ms': statistics.median(values) if values else None,
+                                  'median_cpu_ms': statistics.median(sample['user_ms'] + sample['system_ms'] for sample in samples[label]) if values else None,
                                   'min_wall_ms': min(values) if values else None,
                                   'max_wall_ms': max(values) if values else None}
         finally:
@@ -150,6 +161,7 @@ def main():
         report['workloads'].append({'name': workload['name'], 'cwd': str(cwd),
                                     'explicit_input_sha256': inputs_before,
                                     'check': workload['check'], 'results': results})
+        report['load_average_end'] = os.getloadavg()
         (output/'report.json').write_text(json.dumps(report, indent=2)+'\n')
     print('Report: '+str(output/'report.json'))
 
