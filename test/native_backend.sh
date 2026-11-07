@@ -45,6 +45,28 @@ if command -v readelf >/dev/null 2>&1; then
   set -e
   test "$nopie_status" = 3
   cmp "$NATIVE_TMP/llvm.out" "$NATIVE_TMP/native_nopie.out"
+
+  # Hosted (libc through the C compiler's link plan): a PIE with an
+  # interpreter by default, like the LLVM path; -Wl,-no-pie as above.
+  cat >"$NATIVE_TMP/hosted.fas" <<'FAS'
+extern "C" {
+  fn puts(s addr) i32
+}
+
+fn main() i32 {
+  r i32 = puts("hosted ok")
+  return 0
+}
+FAS
+  for mode in "" -Wl,-no-pie; do
+    FAS_CC="$CC" "$OCAML_FAS" --backend=native $mode "$NATIVE_TMP/hosted.fas" \
+      -o "$NATIVE_TMP/hosted"
+    test "$("$NATIVE_TMP/hosted")" = "hosted ok"
+    readelf -l "$NATIVE_TMP/hosted" | grep -q INTERP
+    if [ -z "$mode" ]; then want=DYN; else want=EXEC; fi
+    readelf -h "$NATIVE_TMP/hosted" | grep -q "Type: *$want" \
+      || { echo "hosted native executable${mode:+ ($mode)} is not $want" >&2; exit 1; }
+  done
 fi
 
 # Scalar floats: the native and LLVM builds print the same bits

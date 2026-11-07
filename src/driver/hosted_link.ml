@@ -122,7 +122,11 @@ let link ~cc ~config ~c_objects ~link_flags ir =
           | L.Options.Static_pie -> "-static-pie"
           | Dynamic { pie = true; _ } -> "-pie"
           | _ when List.mem "-static" raw_arguments -> "-static"
-          | _ -> "-no-pie"
+          | _ when List.mem "-no-pie" raw_arguments -> "-no-pie"
+          (* no output-mode flag: a PIE, like the LLVM path's (the C
+             compiler's) default; the native object is pic and C sources
+             are compiled with -fPIC. (claude, additive; see relay) *)
+          | _ -> "-pie"
         in
         let* _, plan =
           run ~keep:config.Cli.keep

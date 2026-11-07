@@ -170,6 +170,14 @@ with `ud2` rather than run it half-relocated. `fas -Wl,-no-pie` (or
 `fas-fir --no-pie` give a fixed-address ET_EXEC from non-pic code instead. `test/fas_fir.sh`
 runs every program both ways.
 
+Hosted executables (the program uses libc, C imports, C sources or link
+inputs) are linked by the Fas linker too: the C compiler is asked only for
+its link plan (`-###`: CRT files, interpreter, search paths) and compiles
+`.c` inputs; no LLVM tool runs. They are dynamic PIEs by default, like the
+LLVM path's (`-Wl,-no-pie` and `-Wl,-static` as usual). Finding the host's
+CRT and libraries without any C compiler is the linker's "compiler-
+independent hosted SDK configuration" (`src/linker/ROADMAP.md`).
+
 ## Not supported yet
 
 Each of these is reported as `native backend: ...`, never miscompiled:
