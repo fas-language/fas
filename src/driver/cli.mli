@@ -1,4 +1,4 @@
-type emit = Ir | Ir_json | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
+type emit = Ir | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
 type diagnostics = Text | Json
 type target = Portable | Force_native
 type native_runtime = Auto | Freestanding | Hosted

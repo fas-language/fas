@@ -1,6 +1,7 @@
 ; agg by value between Fir functions: register and MEMORY classes, results fed
 ; back as arguments, a recursive struct-returning function, and an align-16
 ; agg that SysV classification skips (passed by address between local functions)
+; llvm: skip aggregates by value (C ABI lowering for LLVM, roadmap v0.7)
 triple "x86_64-unknown-linux-gnu"
 declare @putnum (i64) -> () global
 ; {i64 a; f64 d} -> {f64 a*d; i64 a+1}

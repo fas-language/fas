@@ -12,8 +12,8 @@ trap 'rm -rf "$CONSTRUCTION_TMP"' EXIT HUP INT TERM
 "$LLVM_OPT" -passes=verify "$CONSTRUCTION_TMP/construction.ll" -disable-output
 
 pair_ir=$(awk '/^define i32 @fas_construct_explicit\(/,/^}/' "$CONSTRUCTION_TMP/construction.ll")
-pair_allocas=$(printf '%s\n' "$pair_ir" | grep -c 'alloca %struct.Pair' || true)
-if [ "$pair_allocas" -ne 1 ] || printf '%s\n' "$pair_ir" | grep -q 'load %struct.Pair'; then
+pair_allocas=$(printf '%s\n' "$pair_ir" | grep -Ec 'alloca (%struct.Pair|\[8 x i8\])' || true)
+if [ "$pair_allocas" -ne 1 ] || printf '%s\n' "$pair_ir" | grep -Eq 'load (%struct.Pair|\[)'; then
   echo "construction: expected stores directly into one destination" >&2
   exit 1
 fi

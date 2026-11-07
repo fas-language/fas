@@ -14,9 +14,17 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 "$OCAML_FAS" --emit-llvm "$ROOT/test/float_constants.fas" >"$TMP/float_constants.ll"
 "$LLVM_OPT" -passes=verify "$TMP/float_constants.ll" -disable-output
 "$LLVM_AS" "$TMP/float_constants.ll" -o "$TMP/float_constants.bc"
-for constant in 'float 0x36A0000000000000' 'float 0x7FF0000000000000' \
-  'float 0x7FF8000000000000' 'double 0x0000000000000001' \
-  'double 0x7FF0000000000000' 'double 0x7FF8000000000000'; do
+# Fir writes data as bytes: the tables must hold the exact IEEE images
+# (signed zero, subnormals, infinities, quiet NaNs), little-endian.
+for image in \
+  '@FloatValues = private constant [28 x i8] c"\00\00\00\80\01\00\00\00\00\00\80?\FF\FF\7F\00\00\00\80\00\00\00\80\7F\00\00\C0\7F"' \
+  '@ConstFloat64Values = private constant [32 x i8] c"\00\00\00\00\00\00\00\80\01\00\00\00\00\00\00\00\00\00\00\00\00\00\F0\7F\00\00\00\00\00\00\F8\7F"'; do
+  if ! grep -F "$image" "$TMP/float_constants.ll" >/dev/null; then
+    echo "float constants: missing exact data image $image" >&2
+    exit 1
+  fi
+done
+for constant in 'float 0x7FF0000000000000' 'double 0x7FF0000000000000'; do
   if ! grep -F "$constant" "$TMP/float_constants.ll" >/dev/null; then
     echo "float constants: missing exact LLVM constant $constant" >&2
     exit 1

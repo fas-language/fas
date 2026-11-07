@@ -123,7 +123,7 @@ global @environ size 8  align 8 global = extern
 - `local` symbols are file-private, like C `static`. `global` symbols are exported. `weak` symbols can be overridden at link time: a strong definition in another object wins, and every reference, including calls and loads in this module, reaches the winner. So a weak function is never inlined. A weak `extern` global or weak `declare` that nothing defines has address 0 (`ptrtoint` of it is 0), as with C's `__attribute__((weak))` declarations.
 - Visibility is the ELF `st_other` value: `hidden` symbols are not exported from the shared object or executable they end up in, `protected` ones are exported but not preemptible.
 - `readonly` places the global in .rodata.
-- `section "s"` places it in section `s` instead of .data/.rodata/.bss.
+- `section "s"` places it in section `s` instead of .data/.rodata/.bss. Such a global is always emitted, even when nothing in the module refers to it: it may be found through the section alone (a registry between `__start_s` and `__stop_s`).
 - `thread_local` places it in .tdata/.tbss. Its address (`ptr @errno`) is per-thread, so it is not a link-time constant: it cannot appear in an initializer (`reloc`).
 - **Verifier rules:**
   - the alignment is a power of two;
@@ -272,6 +272,7 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 | `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`, or a variable (`%n`, any integer type, read as unsigned). Put constant-size allocas in the entry block. Memory from an alloca lives until the function returns, or until a `stackrestore` to a point before it. |
 | `%s = stacksave` | The current stack position, as a `ptr` for `stackrestore`. Its value is only good for that. |
 | `stackrestore S` | Frees every alloca made since the `stacksave` that produced S. Use the pair around a scope that holds variable-size allocas (C VLAs), above all inside loops, where otherwise each iteration grows the stack. |
+| `lifetime_start N, %p` / `lifetime_end N, %p` | The N bytes of the alloca `%p` start or stop being live: a hint for address sanitizers (Fas emits them under `--sanitize=address`, the LLVM path turns them into `llvm.lifetime.*`). Never changes what the program does; the native backend ignores them. |
 | `%x = load ty P, MEM` | Load a `ty` from pointer P. |
 | `store V, P, MEM` | Store V at P. No type is written, because V carries it. |
 | `%q = ptradd [inbounds] ptr P, IDX, SCALE, DISP` | Address arithmetic: P + IDX·SCALE + DISP. IDX is an integer value (read as signed; use i64), and SCALE and DISP are literal integers. For a constant offset write `ptradd ptr %p, i64 0, 1, 24`. |

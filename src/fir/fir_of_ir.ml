@@ -33,14 +33,19 @@ let rec layout lc (t : Ir.ty) =
   | Ir.I1 | Ir.I8 -> (1, 1)
   | Ir.I16 -> (2, 2)
   | Ir.I32 | Ir.F32 -> (4, 4)
-  | Ir.I64 | Ir.F64 | Ir.Pointer _ -> (8, 8)
+  | Ir.I64 | Ir.F64 -> (8, 8)
+  | Ir.Pointer _ ->
+      (* the target's: 4 on wasm32 *)
+      let n = (Target_layout.current ()).pointer_size in
+      (n, n)
   | Ir.I128 -> (16, 16)
   | Ir.Void -> (0, 1)
   | Ir.Vector (n, e) -> (
       let bits =
         match e with
         | Ir.I1 -> 1 | Ir.I8 -> 8 | Ir.I16 -> 16 | Ir.I32 | Ir.F32 -> 32
-        | Ir.I64 | Ir.F64 | Ir.Pointer _ -> 64 | Ir.I128 -> 128
+        | Ir.I64 | Ir.F64 -> 64 | Ir.I128 -> 128
+        | Ir.Pointer _ -> 8 * (Target_layout.current ()).pointer_size
         | _ -> unsupported "vector of aggregates"
       in
       match Target_layout.vector (Target_layout.current ()) n bits with
@@ -268,7 +273,11 @@ let intrinsic cx b name (ret : Ir.ty) (args : (Ir.ty * Ir.extension * Ir.value) 
   let a k = let _, _, v = List.nth args k in value cx b v in
   let r = if ret = Ir.Void then i1 else rt_ty ret in
   let one op = Some (emit1 cx b op r) in
-  if starts "llvm.lifetime." name then None
+  if starts "llvm.lifetime." name then begin
+    let size = match List.nth args 0 with _, _, Ir.Const (_, n) -> Int64.to_int n | _ -> -1 in
+    if size >= 0 then emit0 cx b (Lifetime (starts "llvm.lifetime.start." name, size, a 1));
+    None
+  end
   else if name = "llvm.trap" then (emit0 cx b Trap; None)
   else if starts "llvm.vector.reduce.or." name then one (Reduce (Red_or, a 0))
   else if starts "llvm.fptosi.sat." name then one (Conv (Fptosi_sat, a 0))
@@ -457,7 +466,7 @@ let convert_instr cx b (ins : Ir.instr) =
   | Ir.Shuffle_zero (id, vt, x) ->
       let n = match vt with Ir.Vector (n, _) -> n | _ -> unsupported "shuffle of a non-vector" in
       let xv = v x in
-      define cx id (emit1 cx b (Shuffle (xv, poison f (ty_of f xv), Array.make n 0)) (rt_ty vt))
+      define cx id (emit1 cx b (Shuffle (xv, zero f (ty_of f xv), Array.make n 0)) (rt_ty vt))
   | Ir.Shufflevector (id, _, x, y, mask) ->
       let lanes =
         match mask with
@@ -488,6 +497,13 @@ let convert_func lc m variadic (old : Ir.func) =
         blocks = Hashtbl.create 16; phis = Hashtbl.create 16; entry_temps = []; loc = 0;
         locs = Hashtbl.create 16; variadic }
     in
+    (* the declaration line (the LLVM path's DISubprogram line), column 0 *)
+    (match old.source with
+    | Some (file, line) ->
+        let l = add_loc m file line 0 in
+        Hashtbl.replace cx.locs (file, line, 0) l;
+        f.decl_loc <- l
+    | None -> ());
     (* blocks first, so branches and phis can refer to any of them; the
        first old block is the entry *)
     List.iter
@@ -634,8 +650,11 @@ let convert (old : Ir.module_) =
   let variadic = Hashtbl.create 8 in
   List.iter (fun (f : Ir.func) -> if f.variadic then Hashtbl.replace variadic f.name (List.length f.params)) old.funcs;
   List.iter (fun g -> add_global m (convert_global lc g)) old.globals;
+  (* intrinsic and atomic calls become ops: their declarations go *)
+  let op_decl (f : Ir.func) = f.blocks = [] && (starts "llvm." f.name || Ir.is_atomic_name f.name) in
   List.iter
     (fun (of_ : Ir.func) ->
+      if not (op_decl of_) then
       let f = convert_func lc m variadic of_ in
       if List.mem of_.name old.no_inline_functions then f.fattrs <- f.fattrs lor fa_noinline;
       if List.mem of_.name old.inline_functions then f.fattrs <- f.fattrs lor fa_inline;

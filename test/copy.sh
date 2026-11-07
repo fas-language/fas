@@ -23,7 +23,7 @@ for source in copy_compile_65536 copy_compile_1048576 copy_compile_struct; do
 done
 
 loop_ir=$(awk '/^define void @fas_copy_loop\(/,/^}/' "$COPY_TMP/copy.ll")
-scratch_count=$(printf '%s\n' "$loop_ir" | grep -c 'alloca \[8 x i32\]' || true)
+scratch_count=$(printf '%s\n' "$loop_ir" | grep -Ec 'alloca \[(8 x i32|32 x i8)\]' || true)
 if [ "$scratch_count" -ne 1 ]; then
   echo "copy: expected one loop scratch alloca, found $scratch_count" >&2
   exit 1
@@ -32,7 +32,7 @@ if ! printf '%s\n' "$loop_ir" | awk '
   /^define / { in_function = 1; next }
   in_function && /^}/ { exit (alloca_count == 1 ? 0 : 1) }
   in_function && /^  br / { branched = 1 }
-  in_function && /alloca \[8 x i32\]/ {
+  in_function && /alloca \[(8 x i32|32 x i8)\]/ {
     if (branched) exit 1
     alloca_count++
   }

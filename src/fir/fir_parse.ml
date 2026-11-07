@@ -721,6 +721,10 @@ let parse_op st opname =
           (Va_arg (parse_value st), [| t |]))
   | "stacksave" -> (Stack_save, [| ptr |])
   | "stackrestore" -> (Stack_restore (parse_value st), [||])
+  | ("lifetime_start" | "lifetime_end") as k ->
+      let n = int_tok lx in
+      expect lx ",";
+      (Lifetime (k = "lifetime_start", n, parse_value st), [||])
   | "trap" -> (Trap, [||])
   | "nop" -> (Nop, [||])
   | "dbg_value" ->
@@ -919,6 +923,7 @@ let parse_body lx f =
 
 let parse_linkage_vis_attrs lx =
   let linkage = ref Global and vis = ref Default and attrs = ref 0 and display = ref None in
+  let decl_loc = ref 0 in
   let seen_linkage = ref false in
   (* the token after the next one, without consuming either *)
   let peek2 () =
@@ -943,6 +948,7 @@ let parse_linkage_vis_attrs lx =
         go ()
     | Ident s when Option.is_some (visibility_of s) -> ignore (next lx); vis := Option.get (visibility_of s); go ()
     | Ident "display" -> ignore (next lx); display := Some (str_tok lx); go ()
+    | Bang "loc" -> ignore (next lx); decl_loc := int_tok lx; go ()
     | Ident s -> (
         match table_find Fir_print.func_attr_names s with
         | Some bit -> ignore (next lx); attrs := !attrs lor bit; go ()
@@ -950,7 +956,7 @@ let parse_linkage_vis_attrs lx =
     | _ -> ()
   in
   go ();
-  (!linkage, !vis, !attrs, !display)
+  (!linkage, !vis, !attrs, !display, !decl_loc)
 
 let parse_piece lx =
   match next lx with
@@ -1064,11 +1070,12 @@ let parse_module s =
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
         let sig_ = parse_sig lx in
-        let linkage, vis, attrs, display = parse_linkage_vis_attrs lx in
+        let linkage, vis, attrs, display, decl_loc = parse_linkage_vis_attrs lx in
         let f = new_func ~linkage ~defined:(kw = "func") name sig_ in
         f.visibility <- vis;
         f.fattrs <- attrs;
         f.display <- display;
+        f.decl_loc <- decl_loc;
         if kw = "func" then parse_body lx f;
         add_func m f;
         go ()

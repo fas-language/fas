@@ -9,6 +9,7 @@
 ;   FFI = {float x, y; int z}    SSE (two floats), INTEGER
 ;   BIG = {long a, b, c}         MEMORY (24 bytes)
 ;   S1  = {int a}                INTEGER, one eightbyte
+; llvm: skip aggregates by value (C ABI lowering for LLVM, roadmap v0.7)
 triple "x86_64-unknown-linux-gnu"
 declare @c_ii (agg(16, 8, [0: i64, 8: i64])) -> (i64) global
 declare @c_mk_ii (i64, i64) -> (agg(16, 8, [0: i64, 8: i64])) global

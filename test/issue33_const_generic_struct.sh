@@ -8,7 +8,8 @@ ISSUE_TMP=$(mktemp -d)
 trap 'rm -rf "$ISSUE_TMP"' EXIT HUP INT TERM
 
 "$OCAML_FAS" --emit-llvm "$ROOT/test/issue33_const_generic_struct.fas" >"$ISSUE_TMP/issue33.ll"
-grep -F '%"struct.Bytes$spec$c7:usize:3" = type { [3 x i8] }' "$ISSUE_TMP/issue33.ll" >/dev/null
+# Fir has no named struct types (roadmap v0.6), so the layout of
+# Bytes[3] is checked by the program's exit status (its size) below.
 "$LLVM_OPT" -passes=verify "$ISSUE_TMP/issue33.ll" -disable-output
 
 "$OCAML_FAS" "$ROOT/test/issue33_const_generic_struct.fas" -o "$ISSUE_TMP/issue33"

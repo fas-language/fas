@@ -1,10 +1,10 @@
 (* Differential IR fuzzer.
 
    Each seed generates a random Fir module as text. The module is parsed,
-   verified, and converted to the old Ir. That Ir is then compiled twice:
-   - by the native backend, straight from Fir (Mir_emit.compile: Mir_isel,
+   verified, then compiled twice:
+   - by the native backend (Fir_wide, then Mir_emit.compile: Mir_isel,
      Mir_ra, Mir_check; -mir is accepted for old command lines);
-   - by LLVM: Ir.render, then clang -O2.
+   - by LLVM: Fir_llvm, then clang -O2.
    Both programs run and must print the same bytes and exit with the same
    status.
 
@@ -15,7 +15,7 @@
    - memory comes from one zeroed stack buffer, indexed with a mask;
    - loops have constant trip counts;
    - calls only go to earlier functions, so there is no recursion.
-   So any difference is a bug in Fir_to_ir, in the native backend, or
+   So any difference is a bug in Fir_llvm, in the native backend, or
    (rarely) in this generator.
 
    Usage: fir_fuzz [-n COUNT] [-seed FIRST] [-keep DIR] [-cc CLANG] [-v] [-file M.fir]
@@ -413,17 +413,6 @@ let gen_module seed =
 
 (* ---------- harness ---------- *)
 
-let like : Ir.module_ =
-  {
-    target_triple = "x86_64-unknown-linux-gnu";
-    data_layout = Target_layout.x86_64_linux.llvm_data_layout;
-    structs = [];
-    globals = [];
-    funcs = [];
-    no_inline_functions = [];
-    inline_functions = [];
-  }
-
 let write path s =
   let oc = open_out_bin path in
   output_string oc s;
@@ -456,12 +445,12 @@ let check_seed tmp seed =
       match Fir_verify.verify m with
       | _ :: _ as errs -> Broken ("verifier: " ^ String.concat "; " errs ^ " (" ^ save () ^ ")")
       | [] -> (
-          match Fir_to_ir.convert ~like m with
-          | exception Fir_to_ir.Unsupported msg -> Broken ("fir -> ir: " ^ msg ^ " (" ^ save () ^ ")")
-          | ir -> (
+          match Fir_llvm.render_bounded ~budget:max_int m with
+          | Error msg -> Broken ("fir -> llvm: " ^ msg ^ " (" ^ save () ^ ")")
+          | Ok llvm_text -> (
               let nexe = Filename.concat tmp "n" and lexe = Filename.concat tmp "l" in
               let ll = Filename.concat tmp "m.ll" in
-              write ll (Ir.render ir);
+              write ll llvm_text;
               (* -lm: without SSE4.1, LLVM lowers floor/ceil/... to libm calls *)
               let lstatus =
                 Sys.command

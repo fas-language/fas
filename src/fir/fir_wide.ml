@@ -927,6 +927,7 @@ let rebuild_func m helpers (f : func) : func =
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;
   g.display <- f.display;
+  g.decl_loc <- f.decl_loc;
   if not f.defined then g
   else begin
     resolve_all f;

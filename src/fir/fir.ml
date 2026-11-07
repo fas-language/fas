@@ -254,6 +254,11 @@ type op =
           bracket a block holding variable-size allocas (VLAs) with the pair *)
   | Stack_restore of value
       (** frees every alloca made since the [Stack_save] that gave the ptr *)
+  | Lifetime of bool * int * value
+      (** [Lifetime (start, size, p)]: the [size] bytes at the alloca [p]
+          start (true) or stop (false) being live. Only a hint for address
+          sanitizers (the Fas front end emits it under --sanitize=address);
+          code generators that do not use it ignore it *)
   | Va_arg_agg of abi * value
       (** reads the next variadic argument, an aggregate with this [Agg] ABI,
           through the va_list at the pointer and advances it. The result is a
@@ -343,6 +348,9 @@ type func = {
   consts : (const, value) Hashtbl.t;
   names : (value, string) Hashtbl.t;  (** optional value names for printing *)
   mutable display : string option;  (** source-level name *)
+  mutable decl_loc : int;
+      (** location of the function's declaration (0 = none): the line of its
+          debug-info subprogram, and where its lines start *)
 }
 
 type init_piece =
@@ -400,7 +408,7 @@ let create_module () =
                          linkage = Local; visibility = Default; fattrs = 0; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
-                         names = Hashtbl.create 1; display = None };
+                         names = Hashtbl.create 1; display = None; decl_loc = 0 };
     globals =
       Vec.create
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
@@ -427,6 +435,7 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     consts = Hashtbl.create 16;
     names = Hashtbl.create 16;
     display = None;
+    decl_loc = 0;
   }
 
 let add_func m f = ignore (Vec.push m.funcs f)
@@ -551,6 +560,7 @@ let iter_op_uses g = function
       g b
   | Iun (_, _, a) | Fun (_, _, a) | Freeze a | Conv (_, a) | Alloca (a, _) | Load (_, a)
   | Splat a | Reduce (_, a) | Dbg_value (_, a) | Va_start a | Va_arg a | Stack_restore a
+  | Lifetime (_, _, a)
   | Va_arg_agg (_, a) ->
       g a
   | Fma (_, a, b, c) | Fsh (_, a, b, c) | Select (a, b, c) | Insert (a, b, c)
@@ -631,6 +641,7 @@ let map_op_uses g op =
   | Va_arg a -> Va_arg (g a)
   | Va_arg_agg (abi, a) -> Va_arg_agg (abi, g a)
   | Stack_restore a -> Stack_restore (g a)
+  | Lifetime (s, n, a) -> Lifetime (s, n, g a)
   | Dbg_value (var, a) -> Dbg_value (var, g a)
 
 let map_target g t = { t with args = Array.map g t.args }
@@ -655,7 +666,7 @@ let successors = function
 let has_side_effects = function
   | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Fence _ | Masked_store _
   | Call _ | Syscall _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Va_arg_agg _ | Stack_save
-  | Stack_restore _ ->
+  | Stack_restore _ | Lifetime _ ->
       true
   | Load (m, _) -> m.volatile || m.order <> Plain
   | _ -> false

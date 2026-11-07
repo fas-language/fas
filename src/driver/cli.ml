@@ -1,4 +1,4 @@
-type emit = Ir | Ir_json | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
+type emit = Ir | Llvm | Optimized_llvm | Asm | Obj | Header | Executable
 type diagnostics = Text | Json
 type target = Portable | Force_native
 type native_runtime = Auto | Freestanding | Hosted
@@ -122,8 +122,7 @@ let usage =
   \  -Wl,ARG,..., -Xlinker ARG  pass arguments to the selected linker\n\
   \  FILE.c, FILE.o, FILE.a, FILE.so  C inputs linked with the program\n\
    debugging:\n\
-  \  --emit-ir     print the compiler's custom IR dump\n\
-  \  --emit-ir-json print the custom IR as JSON\n\
+  \  --emit-ir     print the lowered module as Fir text (src/fir/SPEC.md)\n\
   \  --keep        retain and report intermediate paths and active tool pipeline\n\
   \  -g            emit DWARF line tables (machine code unchanged)\n\
   \  --no-inline NAME  add LLVM noinline to NAME (a generic: every instance; \
@@ -212,7 +211,6 @@ let parse_invocation ~subcommand argv =
     | None, _ | Some _, (Optimized_llvm | Asm | Obj | Executable) -> None
     | Some _, Header -> Some "`--profile` has no effect with `--emit-header`"
     | Some _, Ir -> Some "`--profile` has no effect with `--emit-ir`"
-    | Some _, Ir_json -> Some "`--profile` has no effect with `--emit-ir-json`"
     | Some _, Llvm ->
         Some
           "`--profile` has no effect with `--emit-llvm`; write `--emit-llvm=optimized`"
@@ -324,10 +322,6 @@ let parse_invocation ~subcommand argv =
           other_output := true;
           loop (i + 1) input output Ir keep optimization optimization_explicit debug
             no_inline_function
-      | "--emit-ir-json" ->
-          other_output := true;
-          loop (i + 1) input output Ir_json keep optimization optimization_explicit
-            debug no_inline_function
       | "--emit-llvm" ->
           other_output := true;
           loop (i + 1) input output Llvm keep optimization optimization_explicit debug

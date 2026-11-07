@@ -12,6 +12,12 @@
      fas-fir --legalize prog.fir  prints the module after Fir_wide (integers
                                   wider than i64 or of odd widths rewritten
                                   to i64 limbs), verified again
+     fas-fir --emit-llvm prog.fir prints the module as LLVM IR (Fir_llvm,
+                                  the LLVM path's emitter)
+     fas-fir --llvm ...           builds the executable or object through
+                                  LLVM instead: Fir_llvm, then $FAS_CC
+                                  (default clang) -O2; hosted, so @main is
+                                  called by the C runtime
 
    "-" reads the module from stdin. Extra .o/.a inputs after the .fir file
    are linked in (executables only). The pipeline is the machine-IR backend
@@ -30,10 +36,12 @@ let usage () =
     \  -g         add DWARF line tables (from the module's loc entries)\n\
     \  --check    parse and verify, print the canonical text to stdout\n\
     \  --legalize print the module with wide and odd-width integers in limbs\n\
+    \  --emit-llvm  print the module as LLVM IR\n\
+    \  --llvm     build through LLVM ($FAS_CC, default clang) instead of the native backend\n\
     \  INPUT may be - for stdin\n";
   exit 2
 
-type mode = Exe | Obj | Check | Legalize
+type mode = Exe | Obj | Check | Legalize | Emit_llvm
 
 let die fmt = Printf.ksprintf (fun s -> prerr_endline ("fas-fir: " ^ s); exit 1) fmt
 
@@ -48,12 +56,14 @@ let read_all ic =
   Buffer.contents b
 
 let () =
-  let mode = ref Exe and pie = ref true and debug = ref false and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref Exe and llvm = ref false and pie = ref true and debug = ref false and input = ref None and output = ref None and extra = ref [] in
   let rec args = function
     | [] -> ()
     | "-c" :: rest -> mode := Obj; args rest
     | "--check" :: rest -> mode := Check; args rest
     | "--legalize" :: rest -> mode := Legalize; args rest
+    | "--emit-llvm" :: rest -> mode := Emit_llvm; args rest
+    | "--llvm" :: rest -> llvm := true; args rest
     | "--mir" :: rest -> args rest
     | "--pie" :: rest -> pie := true; args rest
     | "--no-pie" :: rest -> pie := false; args rest
@@ -83,6 +93,40 @@ let () =
     print_string (Fir_print.module_to_string m);
     exit 0
   end;
+  let llvm_text () =
+    match Fir_llvm.render_bounded ~debug_info:!debug ~budget:max_int m with
+    | Ok t -> t
+    | Error e -> die "%s: %s" name e
+  in
+  if !mode = Emit_llvm then begin
+    let t = llvm_text () in
+    (match !output with
+    | Some o -> Out_channel.with_open_bin o (fun oc -> output_string oc t)
+    | None -> print_string t);
+    exit 0
+  end;
+  if !llvm then begin
+    (* through LLVM: the text into a temporary .ll, then the C compiler *)
+    let ll = Filename.temp_file "fas-fir" ".ll" in
+    Out_channel.with_open_bin ll (fun oc -> output_string oc (llvm_text ()));
+    let cc = Option.value (Sys.getenv_opt "FAS_CC") ~default:"clang" in
+    let q = Filename.quote in
+    let cmd =
+      match !mode with
+      | Obj ->
+          let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
+          Printf.sprintf "%s -O2 -w -fPIC %s -c -x ir %s -o %s" (q cc) (if !debug then "-g" else "") (q ll) (q out)
+      | _ ->
+          Printf.sprintf "%s -O2 -w %s %s -x ir %s -x none %s -lm -o %s" (q cc) (if !pie then "-pie" else "-no-pie")
+            (if !debug then "-g" else "") (q ll)
+            (String.concat " " (List.rev_map q !extra))
+            (q (Option.value !output ~default:"a.out"))
+    in
+    let status = Sys.command cmd in
+    Sys.remove ll;
+    if status <> 0 then die "%s: %s failed" name cc;
+    exit 0
+  end;
   (* the machine-IR backend has no vectors: lanes first, so that vectors
      of wide integers (<2 x i128>) become wide scalars for Fir_wide;
      --legalize shows Fir_wide alone *)
@@ -110,7 +154,7 @@ let () =
   let result =
     match !mode with
     | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug m)
-    | Exe | Check | Legalize ->
+    | Exe | Check | Legalize | Emit_llvm ->
         need_main ();
         let inputs = List.rev_map Fas_linker.Input.file !extra in
         let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in

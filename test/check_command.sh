@@ -146,7 +146,7 @@ expect_usage() {
   cmp -s "$WORK/usage-expected" "$WORK/usage-stderr" \
     || fail "fas $* diagnostic changed: $(cat "$WORK/usage-stderr")"
 }
-for flag in -o -c -S --emit-llvm --emit-llvm=optimized --emit-ir --emit-ir-json \
+for flag in -o -c -S --emit-llvm --emit-llvm=optimized --emit-ir \
   --emit-header --emit-asm --emit-obj -lm -l -L "-L$WORK"; do
   expect_usage "fas check checks one Fas file; \`$flag\` is not accepted" \
     check "$flag" "$WORK/good.fas"

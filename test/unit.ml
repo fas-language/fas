@@ -10,13 +10,6 @@ let contains text needle =
   m = 0 || go 0
 
 let () =
-  let escaped_input = "\"\\\000\001\n\127\128\255" in
-  let escaped_expected =
-    "\"" ^ "\\\"" ^ "\\\\" ^ "\\u0000" ^ "\\u0001" ^ "\\u000a" ^ "\\u007f" ^ "\\u0080"
-    ^ "\\u00ff" ^ "\""
-  in
-  assert (Ir_json.str escaped_input = escaped_expected);
-  assert (Ir_json.hex "\000\128\255A" = "\"0080ff41\"");
   assert (Limits.budget_version_name Limits.default_budget_version = "0.1.5");
   assert (Limits.for_budget_version Limits.V0_15 = Limits.default);
   assert (Limits.default.max_tokens = 1_000_000);
@@ -1016,7 +1009,6 @@ let () =
   assert (Ir.render debug_marked = Ir.render debug_plain);
   assert (Ir.render ~debug_info:false debug_marked = Ir.render debug_plain);
   assert (Ir.render_debug debug_marked = Ir.render_debug debug_plain);
-  assert (Ir_json.render debug_marked = Ir_json.render debug_plain);
   assert (Ir.count_lowered_nodes debug_marked = Ir.count_lowered_nodes debug_plain);
   let nodes = Ir.count_lowered_nodes debug_plain in
   let node_budget n = { Limits.default with max_ir_nodes = n } in

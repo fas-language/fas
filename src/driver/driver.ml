@@ -1064,16 +1064,16 @@ let resolve_target config =
 let target_attributes config =
   match (config.Cli.target, config.Cli.target_cpu, config.Cli.target_features) with
   | Cli.Portable, None, None when wasm () ->
-      Some { Ir.target_cpu = "generic"; target_tune = None; target_features = None }
+      Some { Fir_llvm.target_cpu = "generic"; target_tune = None; target_features = None }
   | Cli.Portable, None, None ->
       Some
         {
-          Ir.target_cpu = "x86-64";
+          Fir_llvm.target_cpu = "x86-64";
           target_tune = Some (Option.value config.Cli.tune_cpu ~default:"generic");
           target_features = None;
         }
   | Cli.Force_native, Some cpu, Some features ->
-      Some { Ir.target_cpu = cpu; target_tune = None; target_features = Some features }
+      Some { Fir_llvm.target_cpu = cpu; target_tune = None; target_features = Some features }
   | _ -> None
 
 let host_march config =
@@ -1085,10 +1085,12 @@ let host_march config =
 let c_tuning config =
   match config.Cli.tune_cpu with None -> [] | Some cpu -> [ "-mtune=" ^ cpu ]
 
-let render_ir ?(redirect = Fun.id) ?(sanitize_address = false) ?target ~debug_info ir =
+(* The LLVM text of the lowered Fir module (roadmap v0.6: Fir_llvm replaced
+   the old Ir renderer) *)
+let render_ir ?(sanitize_address = false) ?target ~debug_info m =
   match
-    Ir.render_bounded ~redirect ~sanitize_address ~debug_info ?target
-      ~budget:limits.Limits.max_rendered_ir_bytes ir
+    Fir_llvm.render_bounded ~sanitize_address ~debug_info ?target
+      ~budget:limits.Limits.max_rendered_ir_bytes m
   with
   | Ok text -> Ok text
   | Error message -> Error [ Diag.error Span.synthetic message ]
@@ -1717,10 +1719,10 @@ let optimize_module ?remarks ~pgo config opt ll_path opt_path =
   verify_llvm opt opt_path
 
 let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~pgo
-    config program ir c_objects link_flags redirect =
-  let* () = ir_budget program (Ir.check_static_data_bytes ~limits ir) in
+    config program ir c_objects link_flags =
+  let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
-    render_ir ~redirect
+    render_ir
       ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
       ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
   in
@@ -1798,14 +1800,14 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
                          cc asm_path c_objects link_flags))
               in
               Ok "")
-      | Cli.Ir | Cli.Ir_json | Cli.Llvm | Cli.Optimized_llvm | Cli.Header ->
+      | Cli.Ir | Cli.Llvm | Cli.Optimized_llvm | Cli.Header ->
           invalid_arg "Driver.emit_tools: non-tool emission")
 
 let emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program ir
-    c_objects link_flags redirect =
+    c_objects link_flags =
   try
     emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-      ir c_objects link_flags redirect
+      ir c_objects link_flags
   with
   | Sys_error message ->
       Error [ Diag.error Span.synthetic ("backend I/O failed: " ^ message) ]
@@ -1827,10 +1829,10 @@ let with_fas_module_id text =
     in
     "; ModuleID = 'fas'" ^ rest
 
-let emit_optimized_llvm ~pgo config program ir redirect =
-  let* () = ir_budget program (Ir.check_static_data_bytes ~limits ir) in
+let emit_optimized_llvm ~pgo config program ir =
+  let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
-    render_ir ~redirect
+    render_ir
       ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
       ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
   in
@@ -1851,34 +1853,29 @@ let emit_optimized_llvm ~pgo config program ir redirect =
 
 (* `fn f(...) R @inline { ... }`: every emitted instance of `f` gets LLVM
    `alwaysinline`, unless `--no-inline` names it too. *)
-let apply_inline (program : Ast.program) (ir : Ir.module_) =
+let apply_inline (program : Ast.program) (m : Fir.modul) =
   let marked =
     List.filter_map
       (function Ast.Func { name; inline = true; _ } -> Some name | _ -> None)
       program.Ast.items
   in
-  let inline_functions =
-    List.filter_map
-      (fun (f : Ir.func) ->
-        let base =
-          Option.value (Ast.specialization_template_name f.name) ~default:f.name
-        in
-        if
-          f.blocks <> []
-          && (List.mem f.name marked || List.mem base marked)
-          && not (List.mem f.name ir.Ir.no_inline_functions)
-        then Some f.name
-        else None)
-      ir.Ir.funcs
-  in
-  { ir with Ir.inline_functions }
+  Fir.Vec.iter
+    (fun (f : Fir.func) ->
+      let base = Option.value (Ast.specialization_template_name f.name) ~default:f.name in
+      if
+        f.defined
+        && (List.mem f.name marked || List.mem base marked)
+        && f.fattrs land Fir.fa_noinline = 0
+      then f.fattrs <- f.fattrs lor Fir.fa_inline)
+    m.Fir.funcs
 
-let apply_no_inline config ir =
+let apply_no_inline config (m : Fir.modul) =
+  let funcs = Fir.Vec.to_list m.Fir.funcs in
   let squeeze text =
     String.concat "" (String.split_on_char ' ' text |> List.filter (( <> ) ""))
   in
-  let defined (f : Ir.func) = f.blocks <> [] in
-  let template (f : Ir.func) = Ast.specialization_template_name f.name in
+  let defined (f : Fir.func) = f.defined in
+  let template (f : Fir.func) = Ast.specialization_template_name f.name in
   let resolve name =
     let base =
       match String.index_opt name '[' with
@@ -1888,24 +1885,24 @@ let apply_no_inline config ir =
     let matches =
       if String.contains name '[' then
         List.filter
-          (fun (f : Ir.func) ->
+          (fun (f : Fir.func) ->
             template f = Some base
             && Option.fold ~none:false
                  ~some:(fun display -> squeeze display = squeeze name)
                  f.display)
-          ir.Ir.funcs
+          funcs
       else
         List.filter
-          (fun (f : Ir.func) -> f.name = name || template f = Some name)
-          ir.Ir.funcs
+          (fun (f : Fir.func) -> f.name = name || template f = Some name)
+          funcs
     in
     match (matches, List.filter defined matches) with
     | [], _ ->
         let instances =
           List.filter_map
-            (fun (f : Ir.func) ->
+            (fun (f : Fir.func) ->
               if template f = Some base && defined f then f.display else None)
-            ir.Ir.funcs
+            funcs
         in
         let shown = List.filteri (fun index _ -> index < 4) instances in
         let help =
@@ -1932,9 +1929,9 @@ let apply_no_inline config ir =
               (Printf.sprintf "--no-inline function `%s` is not a normal definition"
                  name);
           ]
-    | _, defined -> Ok (List.map (fun (f : Ir.func) -> f.name) defined)
+    | _, defined -> Ok defined
   in
-  let* names =
+  let* found =
     List.fold_left
       (fun result name ->
         let* acc = result in
@@ -1942,13 +1939,8 @@ let apply_no_inline config ir =
         Ok (acc @ found))
       (Ok []) config.Cli.no_inline_functions
   in
-  let names = List.sort_uniq String.compare names in
-  let names =
-    List.filter_map
-      (fun (f : Ir.func) -> if List.mem f.name names then Some f.name else None)
-      ir.Ir.funcs
-  in
-  Ok { ir with Ir.no_inline_functions = names }
+  List.iter (fun (f : Fir.func) -> f.fattrs <- f.fattrs lor Fir.fa_noinline) found;
+  Ok ()
 
 type imported_c_unit = {
   source : string;
@@ -2105,14 +2097,9 @@ let add_static_adapters units referenced_names ir =
   List.iter
     (fun unit -> List.iter (fun name -> Hashtbl.replace occupied name ()) unit.c_names)
     units;
-  List.iter (fun (func : Ir.func) -> Hashtbl.replace occupied func.name ()) ir.Ir.funcs;
-  List.iter
-    (function
-      | Ir.String_global { name; _ }
-      | Ir.Array_global { name; _ }
-      | Ir.Storage_global { name; _ } ->
-          Hashtbl.replace occupied name ())
-    ir.Ir.globals;
+  Fir.Vec.iter (fun (func : Fir.func) -> Hashtbl.replace occupied func.name ()) ir.Fir.funcs;
+  Fir.Vec.iter (fun (g : Fir.global) -> Hashtbl.replace occupied g.gname ()) ir.Fir.globals;
+  Fir.Vec.iter (fun (a : Fir.alias) -> Hashtbl.replace occupied a.aname ()) ir.Fir.aliases;
   let all_adapters = ref [] in
   let rec collect = function
     | [] -> Ok (List.rev !all_adapters)
@@ -2145,9 +2132,11 @@ let add_static_adapters units referenced_names ir =
         C_import.append_adapters unit.unit_path adapters)
     units;
   let entry =
-    match List.find_opt (fun (f : Ir.func) -> f.name = "main") ir.Ir.funcs with
+    match
+      List.find_opt (fun (f : Fir.func) -> f.name = "main") (Fir.Vec.to_list ir.Fir.funcs)
+    with
     | Some f when wasm () ->
-        [ ("main", if f.params = [] then "__main_void" else "__main_argc_argv") ]
+        [ ("main", if f.sig_.param_abis = [] then "__main_void" else "__main_argc_argv") ]
     | _ -> []
   in
   let redirects =
@@ -2157,14 +2146,24 @@ let add_static_adapters units referenced_names ir =
         adapters
   in
   let redirect name = Option.value ~default:name (List.assoc_opt name redirects) in
-  match Ir.validate ir with
-  | Ok () -> Ok (ir, adapters, redirect)
-  | Error message -> Error [ Diag.error Span.synthetic ("internal error: " ^ message) ]
+  (* both backends see the adapter names (Fir_rename) *)
+  Fir_rename.apply redirect ir;
+  match Fir_verify.verify ir with
+  | [] -> Ok adapters
+  | errors ->
+      Error
+        [ Diag.error Span.synthetic ("internal error: invalid Fir:\n" ^ String.concat "\n" errors) ]
+
+(* Fas's `fn main` (on wasm the C adapters renamed it, see
+   add_static_adapters) *)
+let is_entry (f : Fir.func) =
+  match f.name with "main" | "__main_void" | "__main_argc_argv" -> true | _ -> false
 
 type checked = {
   program : Ast.program;
-  ir : Ir.module_;
-  redirect : string -> string;
+  ir : Fir.modul;
+      (** the lowered module, folded (except for --emit-ir), C adapter names
+          applied; the backends consume it (they rewrite it in place) *)
   adapters : C_import.adapter list;
   c_objects : string list;
   declaration_headers : string list;
@@ -2512,16 +2511,19 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                   ~intrinsic_masked_loads:(config.Cli.target = Cli.Force_native)
                   hir
               in
-              (* The IR dumps show lowering's output; everything compiled is
-                 folded first. *)
-              let ir =
-                match config.Cli.emit with
-                | Cli.Ir | Cli.Ir_json -> ir
-                | _ -> Ir_fold.module_ ir
+              let* ir =
+                match Fir_of_ir.convert ir with
+                | m -> Ok m
+                | exception Fir_of_ir.Unsupported message ->
+                    Error
+                      [ Diag.error Span.synthetic ("internal error: lowering to Fir: " ^ message) ]
               in
-              let* ir = apply_no_inline config ir in
-              let ir = apply_inline program ir in
-              let* ir, adapters, redirect =
+              (* The IR dump (--emit-ir) shows lowering's output; everything
+                 compiled is folded first. *)
+              (match config.Cli.emit with Cli.Ir -> () | _ -> Fir_fold.run ir);
+              let* () = apply_no_inline config ir in
+              apply_inline program ir;
+              let* adapters =
                 add_static_adapters (List.rev !c_units) referenced_names ir
               in
               let imported =
@@ -2546,8 +2548,8 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                   prerr_endline ("fas: kept C bindings: " ^ path));
                 Ok ()
               in
-              let* () = ir_budget program (Ir.check_lowered_nodes ~limits ir) in
-              let* () = ir_budget program (Ir.check_stack_scratch_bytes ~limits ir) in
+              let* () = ir_budget program (Fir_limits.check_lowered_nodes ~limits ir) in
+              let* () = ir_budget program (Fir_limits.check_stack_scratch_bytes ~limits ir) in
               let* c_objects =
                 compile_c_units ~pgo config cc (List.rev !c_units) adapters
                   (C_exports.includes declarations)
@@ -2559,7 +2561,6 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
                    {
                      program;
                      ir;
-                     redirect;
                      adapters;
                      c_objects;
                      declaration_headers;
@@ -2601,7 +2602,7 @@ let check ?overlay ?cache ?index config =
       Fun.protect
         ~finally:(fun () -> if not !kept then release checked)
         (fun () ->
-          match Ir.render_debug_bounded ~limits checked.ir with
+          match Fir_limits.render_text ~limits checked.ir with
           | Ok _ ->
               kept := true;
               Ok checked
@@ -2730,8 +2731,6 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
           let {
             program;
             ir;
-            redirect;
-            adapters;
             c_objects;
             declaration_headers;
             declarations;
@@ -2741,11 +2740,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
           } =
             checked
           in
-          let native_ir () =
-            (* redirect first, so the Fir hook (and its FAS_FIR_DUMP) sees
-               the C adapter names the objects define *)
-            Result.bind (Native_symbols.apply ~redirect ir) Fir_hook.apply
-          in
+          let native_ir () = Fir_hook.apply ir in
           match config.emit with
           | Cli.Header ->
               let output = Option.value ~default:config.Cli.output header_output in
@@ -2767,22 +2762,13 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   declaration_headers
               in
               emit_text config (C_exports.header ~name ~headers declarations)
-          | Cli.Ir_json ->
-              emit_text config
-                (Ir_json.render ~redirect:Fun.id
-                   ~c_adapters:
-                     (List.map
-                        (fun (adapter : C_import.adapter) ->
-                          (adapter.c_name, adapter.symbol))
-                        adapters)
-                   ir)
           | Cli.Ir -> (
-              match Ir.render_debug_bounded ~limits ir with
+              match Fir_limits.render_text ~limits ir with
               | Ok text -> emit_text config text
               | Error message -> Error [ Diag.error Span.synthetic message ])
           | Cli.Llvm ->
               let* text =
-                render_ir ~redirect
+                render_ir
                   ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
                   ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
               in
@@ -2798,7 +2784,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   write_file path text;
                   let* () = verify_llvm opt path in
                   emit_text config text)
-          | Cli.Optimized_llvm -> emit_optimized_llvm ~pgo config program ir redirect
+          | Cli.Optimized_llvm -> emit_optimized_llvm ~pgo config program ir
           | Cli.Obj when config.Cli.native -> (
               if link_pkgs <> [] then
                 Error
@@ -2839,13 +2825,13 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 ]
           | Cli.Asm | Cli.Obj ->
               emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-                ir c_objects [] redirect
+                ir c_objects []
           | Cli.Executable ->
               let* () =
                 if
                   config.Cli.link_inputs = [] && c_objects = [] && link_pkgs = []
                   && not
-                       (List.exists (fun (f : Ir.func) -> f.name = "main") ir.Ir.funcs)
+                       (Fir.Vec.fold (fun found (f : Fir.func) -> found || is_entry f) false ir.Fir.funcs)
                 then
                   Error
                     [
@@ -2869,25 +2855,19 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                               with
                             | Link link -> link.inputs <> []
                             | Help | Version -> assert false)
+                          (* no Fas main, or an imported function or
+                             global: libc's startup and the C library *)
                           || (not
-                                (List.exists
-                                   (fun (f : Ir.func) ->
-                                     f.name = "main" && f.blocks <> [])
-                                   ir.Ir.funcs))
-                          || List.exists
-                               (fun (f : Ir.func) ->
-                                 f.linkage = External && f.blocks = []
-                                 && not
-                                      (String.starts_with ~prefix:"llvm." f.name
-                                      || Ir.is_atomic_name f.name))
-                               ir.Ir.funcs
-                          || List.exists
-                               (function
-                                 | Ir.Storage_global
-                                     { linkage = Ast.Import_c | Import_const_c; _ } ->
-                                     true
-                                 | _ -> false)
-                               ir.Ir.globals)
+                                (Fir.Vec.fold
+                                   (fun found (f : Fir.func) ->
+                                     found || (is_entry f && f.defined))
+                                   false ir.Fir.funcs))
+                          || Fir.Vec.fold
+                               (fun found (f : Fir.func) -> found || not f.defined)
+                               false ir.Fir.funcs
+                          || Fir.Vec.fold
+                               (fun found (g : Fir.global) -> found || not g.gdefined)
+                               false ir.Fir.globals)
                   with Fas_linker.Error.Error message ->
                     Error
                       [
@@ -2959,7 +2939,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
                 in
                 emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-                  ir c_objects link_flags redirect)
+                  ir c_objects link_flags)
 
 let run_unstaged ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache
     ~pgo config =

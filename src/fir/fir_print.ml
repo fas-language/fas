@@ -312,6 +312,7 @@ let op_text f nm (ir : inst_rec) =
   | Va_arg_agg (abi, p) -> Printf.sprintf "va_arg %s %s" (abi_text abi) (v p)
   | Stack_save -> "stacksave"
   | Stack_restore p -> "stackrestore " ^ v p
+  | Lifetime (s, n, p) -> Printf.sprintf "lifetime_%s %d, %s" (if s then "start" else "end") n (v p)
   | Trap -> "trap"
   | Dbg_value (var, a) -> Printf.sprintf "dbg_value %d, %s" var (v a)
 
@@ -345,7 +346,8 @@ let func_header f =
     (symbol f.name) (sig_text f.sig_) (linkage_name f.linkage)
     (if f.visibility = Default then "" else " " ^ visibility_name f.visibility)
     ((if f.fattrs = 0 then "" else " " ^ String.trim (attrs_text func_attr_names f.fattrs))
-    ^ match f.display with Some d -> " display " ^ quote d | None -> "")
+    ^ (match f.display with Some d -> " display " ^ quote d | None -> "")
+    ^ if f.decl_loc <> 0 then Printf.sprintf " !loc %d" f.decl_loc else "")
 
 let print_func buf f =
   let add = Buffer.add_string buf in

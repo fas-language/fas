@@ -26,7 +26,7 @@ run() {
 run "llvm -O0" -O0
 run "llvm -O2" -O2
 run native --backend=native
-FAS_FIR=roundtrip run "native via fir" --backend=native
+FAS_FIR=check run "native, Fir checked" --backend=native
 
 "$OCAML_FAS" --emit-llvm "$D/single.fas" > "$T/single.ll"
 for pattern in \

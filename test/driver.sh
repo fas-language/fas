@@ -134,16 +134,17 @@ temps_empty() {
 "$OCAML_FAS" -h >"$WORK/short-help" 2>"$WORK/stderr"
 cmp "$WORK/help" "$WORK/short-help" >/dev/null || fail "-h differs from --help"
 grep -F -- "--emit-llvm[=optimized]" "$WORK/help" >/dev/null || fail "help omitted the optimized LLVM form"
-for flag in -o --emit-header --emit-ir --emit-ir-json --emit-llvm --emit-asm -S --emit-obj -c --keep \
+for flag in -o --emit-header --emit-ir --emit-llvm --emit-asm -S --emit-obj -c --keep \
   -O0..-O3 -g --no-inline --sanitize=LIST --profile -I -isystem -D -h --help; do
   grep -F -- "$flag" "$WORK/help" >/dev/null || fail "help omitted $flag"
 done
 if grep -F -- "--emit-ast" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ast"; fi
+if grep -F -- "--emit-ir-json" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ir-json"; fi
 for heading in build output "C inputs" debugging environment; do
   grep -Fx -- "$heading:" "$WORK/help" >/dev/null || fail "help omitted $heading heading"
 done
 sed -n '/^debugging:$/,/^environment:$/p' "$WORK/help" >"$WORK/help-debugging"
-for flag in --emit-ir --emit-ir-json --keep -g --no-inline --sanitize=LIST; do
+for flag in --emit-ir --keep -g --no-inline --sanitize=LIST; do
   grep -F -- "  $flag" "$WORK/help-debugging" >/dev/null || fail "help placed $flag outside debugging"
 done
 sed -n '/^environment:$/,$p' "$WORK/help" >"$WORK/help-environment"
@@ -206,12 +207,12 @@ done
 expect_failure "$OCAML_FAS" "$WORK/part-a.fas" "$WORK/part-b.fas"
 grep -Fx 'multiple input files are not supported; use "path.fas" for dependencies' \
   "$WORK/stderr" >/dev/null || fail "multiple input diagnostic changed"
-for mode in -c -S --emit-ir --emit-ir-json --emit-llvm; do
+for mode in -c -S --emit-ir --emit-llvm; do
   expect_failure "$OCAML_FAS" "$WORK/link.fas" "$WORK/helper.c" "$mode"
   grep -Fx 'C inputs and link flags require an executable output' \
     "$WORK/stderr" >/dev/null || fail "$mode accepted C link inputs"
 done
-for mode in -c -S --emit-ir --emit-ir-json --emit-llvm --emit-header; do
+for mode in -c -S --emit-ir --emit-llvm --emit-header; do
   "$OCAML_FAS" "$mode" "$WORK/good.fas" -o /dev/null >"$WORK/stdout" 2>"$WORK/stderr" \
     || fail "$mode could not write to a non-regular output"
   [ ! -s "$WORK/stdout" ] || fail "$mode wrote stdout with an explicit output"
@@ -335,7 +336,7 @@ defer_line=$(grep -n -F "call void @observe" "$WORK/lifetime-address.ll" | tail 
   || fail "local lifetime did not start before use and end after defer"
 "$OCAML_FAS" --emit-ir "$WORK/good.fas" >"$WORK/custom.ir" 2>"$WORK/stderr"
 [ ! -s "$WORK/stderr" ] || fail "custom IR emission wrote diagnostics"
-grep -F "Module {" "$WORK/custom.ir" >/dev/null || fail "custom IR emission omitted module"
+grep -E '^func @main ' "$WORK/custom.ir" >/dev/null || fail "Fir emission omitted main"
 "$OCAML_FAS" --emit-llvm -g "$WORK/good.fas" >"$WORK/debug.ll" 2>"$WORK/stderr"
 grep -F '!DICompileUnit' "$WORK/debug.ll" >/dev/null || fail "-g emitted no compile unit"
 grep -F '!DILocation' "$WORK/debug.ll" >/dev/null || fail "-g emitted no line locations"
@@ -574,14 +575,8 @@ temps_empty
 ir_status=0
 "$OCAML_FAS" --emit-ir "$WORK/bad.fas" >"$WORK/ir-failure-stdout" \
   2>"$WORK/ir-failure-stderr" || ir_status=$?
-json_status=0
-"$OCAML_FAS" --emit-ir-json "$WORK/bad.fas" -o /dev/null \
-  >"$WORK/json-failure-stdout" 2>"$WORK/json-failure-stderr" || json_status=$?
-[ "$ir_status" -eq "$json_status" ] || fail "JSON emission changed rejected-program status"
-cmp "$WORK/ir-failure-stdout" "$WORK/json-failure-stdout" >/dev/null \
-  || fail "rejected JSON emission wrote output"
-cmp "$WORK/ir-failure-stderr" "$WORK/json-failure-stderr" >/dev/null \
-  || fail "JSON emission changed rejected-program diagnostics"
+[ "$ir_status" -ne 0 ] || fail "Fir emission accepted a rejected program"
+[ ! -s "$WORK/ir-failure-stdout" ] || fail "rejected Fir emission wrote output"
 temps_empty
 
 regular_status=0

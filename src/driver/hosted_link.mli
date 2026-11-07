@@ -5,5 +5,5 @@ val link :
   config:Cli.t ->
   c_objects:string list ->
   link_flags:string list ->
-  Ir.module_ ->
+  Fir.modul ->
   (unit, string) result

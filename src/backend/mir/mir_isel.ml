@@ -1426,6 +1426,8 @@ let inst c i =
       emit c (Spget d);
       set d
   | Stack_restore p -> emit c (Spset (use c p))
+  (* no address sanitizer here: lifetime markers are only hints *)
+  | Lifetime _ -> ()
   | Extract _ | Insert _ | Shuffle _ | Splat _ | Reduce _ | Masked_load _ | Masked_store _ | Compress _
   | Expand _ ->
       unsupported "vector operations"
@@ -1576,7 +1578,7 @@ let promotable_allocas (fn : F.func) =
             | Store (m, v, p) when (not m.volatile) && m.order = Plain ->
                 bad v;
                 access p (F.ty_of fn v)
-            | Dbg_value _ -> ()
+            | Dbg_value _ | Lifetime _ -> ()
             | op -> F.iter_op_uses bad op)
           b.insts;
         F.iter_term_uses bad b.term)

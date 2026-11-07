@@ -3656,8 +3656,8 @@ let () =
     [ "--emit-header"; "--profile"; "profile.fasprof"; "profile.fas" ];
   cli_error "profile-emit-ir" "`--profile` has no effect with `--emit-ir`"
     [ "--emit-ir"; "--profile"; "profile.fasprof"; "profile.fas" ];
-  cli_error "profile-emit-ir-json" "`--profile` has no effect with `--emit-ir-json`"
-    [ "--emit-ir-json"; "--profile"; "profile.fasprof"; "profile.fas" ];
+  cli_error "emit-ir-json-removed" "unknown option: --emit-ir-json"
+    [ "--emit-ir-json"; "profile.fas" ];
   cli_error "profile-check" "`--profile` has no effect with `fas check`"
     [ "check"; "--profile"; "profile.fasprof"; "profile.fas" ];
   cli_error "profile-lsp" "`--profile` has no effect with `fas lsp`"
@@ -14670,8 +14670,10 @@ let () =
       | Ok llvm ->
           if contains llvm "%struct.__fsid_t" then
             failwith "unused-record-fsid: `__fsid_t` is emitted without a reference";
-          if not (contains llvm "%struct.pthread_attr_t") then
-            failwith "unused-record-fsid: `pthread_attr_t` is missing from the LLVM"
+          (* Fir's LLVM has no named struct types (pointers are opaque), so
+             the used side is checked through the call it makes *)
+          if not (contains llvm "@pthread_create(") then
+            failwith "unused-record-fsid: `pthread_create` is missing from the LLVM"
       | Error diagnostics ->
           failwith
             ("unused-record-fsid: unexpected rejection: "

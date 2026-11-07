@@ -19,7 +19,7 @@ if grep -E '\b(poison|undef)\b' "$PROBE_TMP/defined.ll" >/dev/null; then
 fi
 
 copy_ir=$(awk '/^define void @lowering_copy_stack\(/,/^}/' "$PROBE_TMP/probes.ll")
-scratch_count=$(printf '%s\n' "$copy_ir" | grep -Fc 'alloca [512 x i64]' || true)
+scratch_count=$(printf '%s\n' "$copy_ir" | grep -Ec 'alloca \[(512 x i64|4096 x i8)\]' || true)
 if [ "$scratch_count" -ne 1 ]; then
   echo "lowering probes: expected one 4 KiB copy scratch alloca, found $scratch_count" >&2
   exit 1
@@ -28,7 +28,7 @@ if ! printf '%s\n' "$copy_ir" | awk '
   /^define / { in_function = 1; next }
   in_function && /^}/ { exit (alloca_count == 1 ? 0 : 1) }
   in_function && /^  br / { branched = 1 }
-  in_function && /alloca \[512 x i64\]/ {
+  in_function && /alloca \[(512 x i64|4096 x i8)\]/ {
     if (branched) exit 1
     alloca_count++
   }

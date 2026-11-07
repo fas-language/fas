@@ -763,6 +763,10 @@ let convert_inst cx (i : inst) =
       | _ -> unsupported "va_arg with a non-agg ABI")
   | Stack_save -> intrinsic cx (r 0) "llvm.stacksave.p0" []
   | Stack_restore p -> call cx None Ir.Void "llvm.stackrestore.p0" [ arg cx p ]
+  | Lifetime (s, n, p) ->
+      call cx None Ir.Void
+        ((if s then "llvm.lifetime.start" else "llvm.lifetime.end") ^ ".p0")
+        [ (Ir.I64, Ir.No_extension, Ir.Const (Ir.I64, Int64.of_int n)); arg cx p ]
   | Trap -> add cx Ir.Trap
 
 let convert_func (m : modul) ~source (f : func) : Ir.func =

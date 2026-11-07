@@ -5,6 +5,7 @@
 ; site needs the body's rules back after an epilogue (remember/restore
 ; state). Values live across the calls take callee-saved registers, and
 ; @fir_f1 moves rsp with a run-time alloca, which the rbp-based CFA ignores.
+; llvm: skip checks the native backend's frames (LLVM inlines @fir_f2)
 triple "x86_64-unknown-linux-gnu"
 declare @fir_cb (i64) -> (i64) global
 

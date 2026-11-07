@@ -4,7 +4,8 @@
 ; - a local read before any store on one path (promoted, starts at 0);
 ; - a local whose address escapes to a call (memory);
 ; - a local accessed by two types (memory);
-; - many short-lived locals in one function, as unrolled code makes them.
+; - many short-lived locals in one function, as unrolled code makes them;
+; - lifetime markers (sanitizer hints) on a promoted local, which keep it promoted.
 ; Prints 5050, 186, 7575, 3, 30, 0, 9, 11, 258, 4950.
 triple "x86_64-unknown-linux-gnu"
 
@@ -30,6 +31,7 @@ func @loops () -> () local {
   %q = alloca ptr i64 8, align 8
   %i = alloca ptr i64 8, align 8
   store i64 0, %sum, align 8
+  lifetime_start 1, %b
   store i8 0, %b, align 1
   store f64 0x0000000000000000, %d, align 8
   store f32 0x00000000, %f, align 4
@@ -73,6 +75,7 @@ func @loops () -> () local {
   %rb = load i8 %b, align 1
   %rb64 = zext i64 %rb
   call (i64) -> () @putnum(%rb64)
+  lifetime_end 1, %b
   %rd = load f64 %d, align 8
   %rdh = fmul f64 %rd, f64 0x3fe0000000000000
   %rdi = fptosi i64 %rdh

@@ -348,6 +348,10 @@ let verify_func (f : func) =
             | Stack_restore p ->
                 want 0;
                 if not (is_ptr (ty p)) then err "%s: stackrestore of %s" where (tys p)
+            | Lifetime (_, n, p) ->
+                want 0;
+                if not (is_ptr (ty p)) then err "%s: lifetime marker on %s" where (tys p);
+                if n < 0 then err "%s: lifetime marker of %d bytes" where n
             | Va_arg_agg (a, p) ->
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
@@ -477,6 +481,7 @@ let verify (m : modul) =
     (fun f ->
       if f.defined then begin
         let bad = ref 0 in
+        if f.decl_loc < 0 || f.decl_loc >= nlocs then bad := f.decl_loc;
         Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
         Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
         if !bad <> 0 then

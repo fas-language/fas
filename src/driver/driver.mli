@@ -15,8 +15,7 @@ val load_program :
 
 type checked = {
   program : Ast.program;
-  ir : Ir.module_;
-  redirect : string -> string;
+  ir : Fir.modul;
   adapters : C_import.adapter list;
   c_objects : string list;
   declaration_headers : string list;
