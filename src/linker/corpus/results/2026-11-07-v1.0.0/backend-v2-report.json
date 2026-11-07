@@ -1,0 +1,1193 @@
+{
+  "status": "passed",
+  "observed_at": "2026-11-07T13:41:31.365266+00:00",
+  "producer_commit": "984de64b821873ff2d26a9d5a5bacc6b6e0c5a9d",
+  "linker_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+  "producer_archive_sha256": "43091c82e3846de9ce82b25a026596ef652784638ba25b1bfaf77dd6c637b804",
+  "test_only_export_patch_sha256": "b71d91f075899efa827171717b404da388b7a1b06516c60e649c826eb82adb9a",
+  "fir_tool_sha256": "2fbfaf5beaac8c95d24ef7b20d75659b4b640ec4feeefc6ae1ad2d528f82297c",
+  "compiler_sha256": "146b5292f7ac2e2a9b9afb3c1c82c2671d90d05bdd49b9628b2807b482391687",
+  "tests": [
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "89ee37d915de1e253a56eeb647f53a958a818aa2bff577a94c3896cbb9a941ac",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "89ee37d915de1e253a56eeb647f53a958a818aa2bff577a94c3896cbb9a941ac",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "b6cb8493cdec71c79d40d1925beb3ab74045d295c102c3943af9c19a9b3c98eb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "89ee37d915de1e253a56eeb647f53a958a818aa2bff577a94c3896cbb9a941ac",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "89ee37d915de1e253a56eeb647f53a958a818aa2bff577a94c3896cbb9a941ac",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/agg.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "b6cb8493cdec71c79d40d1925beb3ab74045d295c102c3943af9c19a9b3c98eb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "de87fa68b5d3a4f36ce3c2dcc902ae1b10317f702156bad3c68086e8209b23af"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9ec81a1d59e5366e5805b0b193f49ea4dd37907e28e29c2b85162d60bca08d2c",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9ec81a1d59e5366e5805b0b193f49ea4dd37907e28e29c2b85162d60bca08d2c",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "2e38bb889a47734145f762f07f69847b5699a7f860eda25ee4a75d5b6812cbca",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9ec81a1d59e5366e5805b0b193f49ea4dd37907e28e29c2b85162d60bca08d2c",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9ec81a1d59e5366e5805b0b193f49ea4dd37907e28e29c2b85162d60bca08d2c",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/conv.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "2e38bb889a47734145f762f07f69847b5699a7f860eda25ee4a75d5b6812cbca",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "b611e3e403680771c8474e7d8a43204af84f8a6b70f005ed9e3b54521d487ed6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9a817f563227bc00e4c619304ee0b36b20b2d26740656c869ea9067249644ab3",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9a817f563227bc00e4c619304ee0b36b20b2d26740656c869ea9067249644ab3",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "d2c661085fd833eae3596a9522bd4bcf17015ddb1e32575ed9c82e1b1713bd8b",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "921ccde69c3e66e57c84a08a4e636b2b22bd4ddb405410c0e4b7405fd0941cdd",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "921ccde69c3e66e57c84a08a4e636b2b22bd4ddb405410c0e4b7405fd0941cdd",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/lines.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "20a68dbe4f95d546db6142d71c309434a11a7dde4522b41a63e5bb2827cb3ea8",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "a68d3e52218f93ea82cafc4070113be2aed785ede1597fba60560401d5c42369",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "a68d3e52218f93ea82cafc4070113be2aed785ede1597fba60560401d5c42369",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "2f2e349d08fb60c71c7f316330de4d52d27eae7a6e61f327a833e9e74287a2c8",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "a68d3e52218f93ea82cafc4070113be2aed785ede1597fba60560401d5c42369",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "a68d3e52218f93ea82cafc4070113be2aed785ede1597fba60560401d5c42369",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/locals.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "2f2e349d08fb60c71c7f316330de4d52d27eae7a6e61f327a833e9e74287a2c8",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "3aaa89b672b5b6b28f0c59edc35bdac4127507fdacd4bfabc3965e3177114539"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9603c041451cf66aa334323bd29711efb55a30f6056967de85cf7866b88d3d60",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9603c041451cf66aa334323bd29711efb55a30f6056967de85cf7866b88d3d60",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "04e2938aaa3bafac181f5c338e76fd635f970ab23b0fe2dffb54e084144b88c9",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9603c041451cf66aa334323bd29711efb55a30f6056967de85cf7866b88d3d60",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9603c041451cf66aa334323bd29711efb55a30f6056967de85cf7866b88d3d60",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/sum_loop.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "04e2938aaa3bafac181f5c338e76fd635f970ab23b0fe2dffb54e084144b88c9",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        },
+        {
+          "linker": "gnu",
+          "exit": 1,
+          "stdout_sha256": "221afd9a687df6127d168e9f2500c8ef646e518835cc6cb9c465fb438032f640"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9df60bab132ebbdd28d9951d888f6ff76cd005724f8858422bbdf63217ff1bcb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9df60bab132ebbdd28d9951d888f6ff76cd005724f8858422bbdf63217ff1bcb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "12fdbeb3491a7efca96f58a9a5f4adf966d3cd5a08ff21b5f07bcd5c30133a41",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9df60bab132ebbdd28d9951d888f6ff76cd005724f8858422bbdf63217ff1bcb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9df60bab132ebbdd28d9951d888f6ff76cd005724f8858422bbdf63217ff1bcb",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/tls.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "12fdbeb3491a7efca96f58a9a5f4adf966d3cd5a08ff21b5f07bcd5c30133a41",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1e7db2f074ccb81c95e4879787a7d141b5cbb294763fb2859b90913f67ec02e6"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9e9ef1282d2abbc94cdff14dc11d80b55043d28361fb10f99e77b3fb6f911e67",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9e9ef1282d2abbc94cdff14dc11d80b55043d28361fb10f99e77b3fb6f911e67",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "12d0be75b996ee18df31160cc7e817c96ff66c116abd34a3d50c2b39dc99794f",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "9e9ef1282d2abbc94cdff14dc11d80b55043d28361fb10f99e77b3fb6f911e67",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "9e9ef1282d2abbc94cdff14dc11d80b55043d28361fb10f99e77b3fb6f911e67",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/varargs.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "12d0be75b996ee18df31160cc7e817c96ff66c116abd34a3d50c2b39dc99794f",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "4e7099681ccb9930291eefd0e35d723154a423458a33d56d3208c01298c7316f"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "7a772152843ae080ed9da5d88a9f968d0bba7633d3ac49de5765611b79146f4a",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "7a772152843ae080ed9da5d88a9f968d0bba7633d3ac49de5765611b79146f4a",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "34a35c5c93b1047baca065779ea9482bbf6af421708163391b0320a04f932000",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "7a772152843ae080ed9da5d88a9f968d0bba7633d3ac49de5765611b79146f4a",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "7a772152843ae080ed9da5d88a9f968d0bba7633d3ac49de5765611b79146f4a",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/vectors.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "34a35c5c93b1047baca065779ea9482bbf6af421708163391b0320a04f932000",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "c7fc443fa9950adffd2f836e3ec4a300110373506f4626f7b9ab61b7a3d6ac37"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": false,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "3344a0cb818fbdf49ca5d4fd46bf3b1217ffd74d5a8f22c43eba398ef0d3d170",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": false,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "3344a0cb818fbdf49ca5d4fd46bf3b1217ffd74d5a8f22c43eba398ef0d3d170",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": false,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "0d246071d2274f641853b31a2d28c0517ec911f5c153b7404fbfa43ea807f722",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "3344a0cb818fbdf49ca5d4fd46bf3b1217ffd74d5a8f22c43eba398ef0d3d170",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "3344a0cb818fbdf49ca5d4fd46bf3b1217ffd74d5a8f22c43eba398ef0d3d170",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/fas_fir/weak.fir",
+      "debug": true,
+      "startup": true,
+      "pie": true,
+      "object_sha256": "0d246071d2274f641853b31a2d28c0517ec911f5c153b7404fbfa43ea807f722",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edb8b610df3127f7fbeb5fcbe2cdae4f1f9d2ebfc6b770fa18e53f2634b7fa5d"
+        }
+      ]
+    },
+    {
+      "source": "test/native_backend.fas",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "4bc4209cb8bb816688b7b53d4e343f64fd80da83aee91fa1e7fea4d7282145ad",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 3,
+          "stdout_sha256": "5354fdf8569f71da52ae2c7da8f2a38b3fa5ac746006bbe1216c42e945933057"
+        },
+        {
+          "linker": "gnu",
+          "exit": 3,
+          "stdout_sha256": "5354fdf8569f71da52ae2c7da8f2a38b3fa5ac746006bbe1216c42e945933057"
+        }
+      ]
+    },
+    {
+      "source": "test/native_backend.fas",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "4bc4209cb8bb816688b7b53d4e343f64fd80da83aee91fa1e7fea4d7282145ad",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 3,
+          "stdout_sha256": "5354fdf8569f71da52ae2c7da8f2a38b3fa5ac746006bbe1216c42e945933057"
+        },
+        {
+          "linker": "gnu",
+          "exit": 3,
+          "stdout_sha256": "5354fdf8569f71da52ae2c7da8f2a38b3fa5ac746006bbe1216c42e945933057"
+        }
+      ]
+    },
+    {
+      "source": "test/native_floats.fas",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "e417f0e407bea6ef36f8f02c89fc7da2413f2ac6aba72e989787c71e6492b0de",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1045a260686dcba9bc41e48c4dbd2c59ca025fed7015ec5047b6d57524020734"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1045a260686dcba9bc41e48c4dbd2c59ca025fed7015ec5047b6d57524020734"
+        }
+      ]
+    },
+    {
+      "source": "test/native_floats.fas",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "e417f0e407bea6ef36f8f02c89fc7da2413f2ac6aba72e989787c71e6492b0de",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "1045a260686dcba9bc41e48c4dbd2c59ca025fed7015ec5047b6d57524020734"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "1045a260686dcba9bc41e48c4dbd2c59ca025fed7015ec5047b6d57524020734"
+        }
+      ]
+    },
+    {
+      "source": "test/native_vectors.fas",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "a9f929fafb02d71160545e10af8f5946610a81bce8821d12f4bf935bc09adb6f",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edf9ec8178dd34bb8d9dd9017a3eb1cbe686a8a664258a80c0e8e2d11b06a47c"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edf9ec8178dd34bb8d9dd9017a3eb1cbe686a8a664258a80c0e8e2d11b06a47c"
+        }
+      ]
+    },
+    {
+      "source": "test/native_vectors.fas",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "a9f929fafb02d71160545e10af8f5946610a81bce8821d12f4bf935bc09adb6f",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "edf9ec8178dd34bb8d9dd9017a3eb1cbe686a8a664258a80c0e8e2d11b06a47c"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "edf9ec8178dd34bb8d9dd9017a3eb1cbe686a8a664258a80c0e8e2d11b06a47c"
+        }
+      ]
+    },
+    {
+      "source": "test/native_vector_calls.fas",
+      "debug": true,
+      "startup": false,
+      "pie": false,
+      "object_sha256": "2643d6778a609c5cf435f3588c17c0d2ac3599c3718c79256762523d5894701b",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "source": "test/native_vector_calls.fas",
+      "debug": true,
+      "startup": false,
+      "pie": true,
+      "object_sha256": "2643d6778a609c5cf435f3588c17c0d2ac3599c3718c79256762523d5894701b",
+      "executions": [
+        {
+          "linker": "fas",
+          "exit": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "linker": "gnu",
+          "exit": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    }
+  ],
+  "executions": 124,
+  "scope": "Latest MIR native objects, DWARF 5, hosted PIE/EXEC and native RELA static-PIE startup; exact objects consumed by delivered frozen CLI and GNU; no change to release source or backend worktree"
+}

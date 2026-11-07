@@ -32,5 +32,7 @@ existing synthetic metadata fixture on the hosted compiler baseline. That guard
 was superseded by the narrower descriptor-definition check; original failed
 local/hosted results remain retained and are not release acceptance.
 
-These focused repairs do not complete release acceptance. The candidate is
-not published; full qualification must run again on the repaired source.
+At this repair checkpoint, the candidate was not published and complete
+qualification remained required. The repaired source subsequently passed
+[final acceptance](../../../corpus/results/2026-11-07-v1.0.0/README.md)
+and was published as fas-ld 1.0.0. Original failed results remain unchanged.

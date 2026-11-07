@@ -1,0 +1,148 @@
+{
+  "status": "passed",
+  "observed_at": "2026-11-07T15:27:33.836243+00:00",
+  "version": "1.0.0",
+  "tag": "fas-ld-v1.0.0",
+  "source_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "url": "https://github.com/fas-language/fas/releases/tag/fas-ld-v1.0.0",
+  "published_at": "2026-11-07T15:27:27Z",
+  "draft": false,
+  "assets": [
+    {
+      "name": "EVIDENCE_SHA256SUMS",
+      "size": 1603,
+      "sha256": "5ff8130d1e809f6916e27165a866b6c152eb35d2988699c7ce084f4561031962",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/EVIDENCE_SHA256SUMS",
+      "id": 721040284
+    },
+    {
+      "name": "RELEASE_NOTES.md",
+      "size": 5162,
+      "sha256": "9e3140795d466175574f673eca6490f88f100d02a620d38ce0e9f0b34166ae2a",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/RELEASE_NOTES.md",
+      "id": 721040281
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 205,
+      "sha256": "f6252acc1a88b79b44006194a15f7701b2e37be8c5ac666391771691d4c3d5cf",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/SHA256SUMS",
+      "id": 721040283
+    },
+    {
+      "name": "fas-ld-1.0.0-evidence.tar.gz",
+      "size": 118301814,
+      "sha256": "650a21b076acf2e6c075425dc5519d2bc5ee215852e79449b149fb87f3fa5915",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/fas-ld-1.0.0-evidence.tar.gz",
+      "id": 721040286
+    },
+    {
+      "name": "fas-ld-1.0.0-linux-x86_64-source.tar.gz",
+      "size": 5747763,
+      "sha256": "1c80f69d9b400da7675261970baacedd9de5f7fe2f2ad2781f6cfea32bdcab39",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/fas-ld-1.0.0-linux-x86_64-source.tar.gz",
+      "id": 721040287
+    },
+    {
+      "name": "fas-ld-1.0.0-linux-x86_64.tar.gz",
+      "size": 1865102,
+      "sha256": "3b7e37a43978b4826e283a8eb14ba7feaecfdc34006d62f2079083939d3540ac",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/fas-ld-1.0.0-linux-x86_64.tar.gz",
+      "id": 721040340
+    },
+    {
+      "name": "fas-ld-1.0.0-qualification.json",
+      "size": 27184,
+      "sha256": "70ba6e6c4a0db98dfce5230fe4dce4158c82b0cfbd7995d356ee7450a3ffa840",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/fas-ld-1.0.0-qualification.json",
+      "id": 721040348
+    },
+    {
+      "name": "linker-correctness-42373970629-1.zip",
+      "size": 95084039,
+      "sha256": "2eee3cf8de7d45436d7e6a68cbaa2edd8bbf10451c5e584cad405e908626496d",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-correctness-42373970629-1.zip",
+      "id": 721040371
+    },
+    {
+      "name": "linker-fuzz-42373970629-1.zip",
+      "size": 8434710,
+      "sha256": "173d40b736b8079758688f580be1f11d9fd38a0c2004ba0142c30abe7b524ff7",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-fuzz-42373970629-1.zip",
+      "id": 721040447
+    },
+    {
+      "name": "linker-gcc-torture-42373970629-1.zip",
+      "size": 14960034,
+      "sha256": "fec68b8f76135e17c7b7f3f7da1a9296a746c049cd9562d5a5a4602b2756ef85",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-gcc-torture-42373970629-1.zip",
+      "id": 721040801
+    },
+    {
+      "name": "linker-popular-bzip2-42373970629-1.zip",
+      "size": 4125735,
+      "sha256": "53825dc8152bcbf6e44e28b9af0262785b6b8a22dec2a2e4ddbdfa5cf7bd24cc",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-bzip2-42373970629-1.zip",
+      "id": 721042627
+    },
+    {
+      "name": "linker-popular-curl-42373970629-1.zip",
+      "size": 332144671,
+      "sha256": "40fcb1fb4a337d522e4a965e58d00266fd6580bfcd81ebe2afebd4f562bcec55",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-curl-42373970629-1.zip",
+      "id": 721042711
+    },
+    {
+      "name": "linker-popular-libarchive-42303222536-1.zip",
+      "size": 41058816,
+      "sha256": "bdf42e6b5a57039ac53539b55d68276863b914658912918a8daa449da869f7e8",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-libarchive-42303222536-1.zip",
+      "id": 721043775
+    },
+    {
+      "name": "linker-popular-libarchive-42373970629-1.zip",
+      "size": 105489121,
+      "sha256": "25bae8b8e4b31e49d8e65a38ec1967ea0802caf7edbd081a9cfda114260e567f",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-libarchive-42373970629-1.zip",
+      "id": 721044650
+    },
+    {
+      "name": "linker-popular-libpng-42373970629-1.zip",
+      "size": 10784963,
+      "sha256": "951b1f0be8faa568a36078fd16ab7766b69ae69445900800ebfd2a9d1fae66c0",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-libpng-42373970629-1.zip",
+      "id": 721055056
+    },
+    {
+      "name": "linker-popular-lua-42373970629-1.zip",
+      "size": 19181792,
+      "sha256": "d681405c889bc915c8c071ad1e9d83e4ac7088c62eb06a876bf57d9e82409b6b",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-lua-42373970629-1.zip",
+      "id": 721058851
+    },
+    {
+      "name": "linker-popular-redis-42373970629-1.zip",
+      "size": 31702496,
+      "sha256": "f56733488aa0eca679b71f4feb89a03e6ce154646865afee24a61c19434d9fe3",
+      "url": "https://github.com/fas-language/fas/releases/download/untagged-30d26e16bdff6d0eb24c/linker-popular-redis-42373970629-1.zip",
+      "id": 721062540
+    }
+  ],
+  "language_latest_before": "v0.6.3",
+  "language_latest_after": "v0.6.3",
+  "published_downloads": [
+    "fas-ld-1.0.0-linux-x86_64-source.tar.gz",
+    "fas-ld-1.0.0-linux-x86_64.tar.gz",
+    "SHA256SUMS",
+    "EVIDENCE_SHA256SUMS",
+    "fas-ld-1.0.0-qualification.json"
+  ],
+  "downloaded_bytes_match_staged_assets": true,
+  "downloaded_archive_integrity_passed": true,
+  "publication_flow": {
+    "draft_id": 437650551,
+    "recovery_script_sha256": "fcb61f1f6f1a5ce7ca25d2553b1bc90081b66b52e51bb3802169085e25496c2b",
+    "initial_error": "Unpublished draft is not addressable by tag through REST; verified numeric release ID used"
+  },
+  "scope": "SHA-256 integrity and source identity; no signature claim"
+}

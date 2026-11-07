@@ -1,0 +1,11 @@
+{
+  "observed_at": "2026-11-07T15:27:18.636Z",
+  "phase": "initial publication helper",
+  "result": {
+    "chunk_id": "f90718",
+    "wall_time_seconds": 0.000021882,
+    "exit_code": 1,
+    "original_token_count": 316,
+    "output": "https://github.com/fas-language/fas/releases/tag/untagged-30d26e16bdff6d0eb24c\nTraceback (most recent call last):\n  File \"/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/publish.py\", line 105, in <module>\n    main()\n    ~~~~^^\n  File \"/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/publish.py\", line 61, in main\n    draft = api('releases/tags/' + TAG)\n  File \"/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/publish.py\", line 15, in api\n    return json.loads(run(['gh', 'api', 'repos/' + REPO + '/' + path]))\n                      ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/publish.py\", line 12, in run\n    return subprocess.run(args, check=True, text=True, capture_output=True).stdout\n           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/glonex/miniconda3/lib/python3.13/subprocess.py\", line 577, in run\n    raise CalledProcessError(retcode, process.args,\n                             output=stdout, stderr=stderr)\nsubprocess.CalledProcessError: Command '['gh', 'api', 'repos/fas-language/fas/releases/tags/fas-ld-v1.0.0']' returned non-zero exit status 1.\n"
+  }
+}

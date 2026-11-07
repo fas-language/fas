@@ -1,6 +1,22 @@
 # Linker implementation work log
 
-### Current checkpoint: final TLS metadata crash repaired — 2026-11-07
+### Current checkpoint: 1.0.0 released — 2026-11-07
+
+All release gates pass on source `3cf2962665405578b7a32a35f25e810e2ff188d5`. The complete hosted matrix passes
+273 cases/45 groups without skips, 4,974 official GCC executions per linker,
+all six popular-C jobs and fourteen 600-second fuzz targets (5,576,675 executions,
+no saved crashes/hangs). The host suite adds 3,792 compiler checks, real native
+Fas adds 24 dynamic/static executions, and bounded Doom/Wolf3D comparisons pass.
+Three final one-hour campaigns add 9,322,450 executions with verified historical
+and repaired-finding seeds and no saved findings. The descriptor-definition/GC
+repair is covered by permanent regressions. All unsuccessful history is retained.
+
+Release `fas-ld-v1.0.0` publishes verified binary/source archives and durable
+evidence without changing the Fas language latest designation. The tag stays
+on the tested source; this documentation-only checkpoint records completed
+acceptance. Evidence: [corpus/results/2026-11-07-v1.0.0/README.md](corpus/results/2026-11-07-v1.0.0/README.md). Performance optimization is next.
+
+### Historical checkpoint: final TLS metadata crash repaired — 2026-11-07
 
 The frozen candidate's final shared-output hour saved a reproducible crash near
 its end. Non-allocated TLS instruction/GOT relocations could create a runtime

@@ -1,0 +1,20 @@
+{
+  "original_candidate": {
+    "commit": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+    "hosted_run": 42303222536,
+    "hosted_status": "passed after unchanged libarchive timestamp-flake rerun",
+    "final_shared_link_hour": "failed with reproducible descriptor crash; not accepted or published",
+    "saved_input_sha256": "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885",
+    "original_libarchive_artifact": "linker-popular-libarchive-42303222536-1.zip",
+    "original_libarchive_artifact_sha256": "bdf42e6b5a57039ac53539b55d68276863b914658912918a8daa449da869f7e8"
+  },
+  "superseded_guard": {
+    "commit": "4778b2ea3264d5b509aa82eba7400c678285f9e8",
+    "hosted_run": 42372084320,
+    "local_status": "failed existing synthetic metadata regression; no skips",
+    "hosted_status": "correctness failed; obsolete remaining work canceled",
+    "local_fuzz": "interrupted, not hour acceptance"
+  },
+  "other_history": "original seed-name mistake, suspend-interrupted campaigns and unknown historical timeout causes retained unchanged under prior/",
+  "retention": "raw records, source snapshots, queues and findings in evidence archive; original failed libarchive ZIP separate asset"
+}

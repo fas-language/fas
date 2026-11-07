@@ -1,0 +1,25 @@
+{
+  "status": "failed",
+  "cause": "Harness incorrectly assumed all FIR cases exit zero; sum_loop.fir explicitly declares exit 1",
+  "gnu_control": {
+    "exit": 1,
+    "stdout": "sum=55\n",
+    "binary_sha256": "019dc0c5707963a972e3c925b1ca0c77655b619c747bd178b4ca52a24043aa52",
+    "argv": [
+      "gcc",
+      "-fno-use-linker-plugin",
+      "-fuse-ld=bfd",
+      "-no-pie",
+      "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/backend-v2-compatibility/sum_loop-d0-s0.o",
+      "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/backend-v2-compatibility/putnum.o",
+      "-o",
+      "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/backend-v2-compatibility/sum_loop-control"
+    ]
+  },
+  "linker_finding": false,
+  "producer_commit": "984de64b821873ff2d26a9d5a5bacc6b6e0c5a9d",
+  "input_sha256": {
+    "sum_loop-d0-s0.o": "9603c041451cf66aa334323bd29711efb55a30f6056967de85cf7866b88d3d60",
+    "putnum.o": "2871085d60b3ba9350c07132e06b7194bcd1b1ce3e270079f62fcf916fa3b883"
+  }
+}

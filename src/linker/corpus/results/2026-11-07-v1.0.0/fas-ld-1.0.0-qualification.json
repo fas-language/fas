@@ -1,0 +1,666 @@
+{
+  "schema": 1,
+  "status": "accepted",
+  "version": "1.0.0",
+  "source_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "run_url": "https://github.com/fas-language/fas/actions/runs/42373970629",
+  "hosted": {
+    "observed_at": "2026-11-07T15:09:56.102005+00:00",
+    "head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+    "status": "passed",
+    "pending": [],
+    "failures": [],
+    "results": {
+      "correctness": {
+        "run": 42373970629,
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": {
+          "correctness": "success"
+        },
+        "qualification": {
+          "status": "passed",
+          "failures": [],
+          "python_cases": 273,
+          "python_groups": 45,
+          "skips": [],
+          "regression_log_sha256": "7b90c6cfefe736c51f10792c3d6203590e51fcb662fdb2fcf1eeecbe63c3696b",
+          "reports": {
+            "linker-scale": {
+              "path": "/home/runner/work/_temp/linker-scale/report.json",
+              "sha256": "f0cdab12f356ff5ecf92d5a548b38050e1b56cb35b4dbee27e9bc918a225623c",
+              "passed": true
+            },
+            "linker-zlib-dynamic": {
+              "path": "/home/runner/work/_temp/linker-zlib-dynamic/report.json",
+              "sha256": "a319ec32f9c897350f7b3eb0159261db9c8b345b015d28881d82e938e9583e35",
+              "passed": true
+            },
+            "linker-zlib-static": {
+              "path": "/home/runner/work/_temp/linker-zlib-static/report.json",
+              "sha256": "9c2c6ec60b5df8730e457e93d769f326677de8c4dcae34de62fd990ad20b0a42",
+              "passed": true
+            },
+            "linker-zlib-static-pie": {
+              "path": "/home/runner/work/_temp/linker-zlib-static-pie/report.json",
+              "sha256": "e3cc278c706f6467e94f28a02d9f82416c56c8ca9eb014b24a10c6e0cfe81667",
+              "passed": true
+            },
+            "linker-musl-zlib": {
+              "path": "/home/runner/work/_temp/linker-musl-zlib/report.json",
+              "sha256": "2e6cbc145646ebd02a77c58a62f24f207a1879c21abe0ff3985fee91043850e5",
+              "passed": true
+            },
+            "linker-chibicc-selfhost": {
+              "path": "/home/runner/work/_temp/linker-chibicc-selfhost/report.json",
+              "sha256": "1e4153ac1478de96b811bf3c57fa49e879fee5513e3508a9ad80085805512cf4",
+              "passed": true
+            },
+            "linker-sqlite": {
+              "path": "/home/runner/work/_temp/linker-sqlite/report.json",
+              "sha256": "1921803397497d42a8d49117e99ceab8ade62e9e4d4aa322c430d6e579834e08",
+              "passed": true
+            },
+            "linker-semantic": {
+              "path": "/home/runner/work/_temp/linker-semantic/report.json",
+              "sha256": "53410c727afc4588aaee78cc003b8a93eb17cf700604183087184f86b87c1e4c",
+              "passed": true
+            }
+          },
+          "tool_versions": {
+            "ocamlopt": "5.4.1",
+            "dune": "3.24.2",
+            "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+            "ld": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+            "gdb": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1",
+            "valgrind": "valgrind-3.22.0",
+            "ldd": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39"
+          },
+          "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+          "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+          "packages_sha256": "83721f2ea050cbef727594f58b773082b76958914508a7fc547417af3a649265",
+          "linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+          "installed_linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+          "source_manifest_sha256": "c0f0ced2e508332608d715bd7b99a7b2ceb31d18d49da0cebdc11d5eb93ca8d4",
+          "source_file_count": 1174,
+          "source_files_unchanged": true,
+          "scope": "shared correctness recipe; no hosted-run or performance claim"
+        },
+        "release_smoke": {
+          "status": "passed",
+          "source_rebuild": true,
+          "binary_fixture_run": true,
+          "rebuilt_fixture_run": true,
+          "rebuilt_linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+          "rebuilt_version": "fas-ld 1.0.0 (ELF64 x86-64 Linux)",
+          "archives": {
+            "fas-ld-1.0.0-linux-x86_64-source.tar.gz": "1c80f69d9b400da7675261970baacedd9de5f7fe2f2ad2781f6cfea32bdcab39",
+            "fas-ld-1.0.0-linux-x86_64.tar.gz": "3b7e37a43978b4826e283a8eb14ba7feaecfdc34006d62f2079083939d3540ac"
+          }
+        }
+      },
+      "gcc": {
+        "run": 42373970629,
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": {
+          "gcc-torture": "success"
+        },
+        "qualification": {
+          "source_commit": "5115c7e447fc07457443df874bf57840e8316d5f",
+          "optimizations": [
+            "-O0",
+            "-O2",
+            "-Os"
+          ],
+          "pattern": "*",
+          "gcc_version": "15.2.0",
+          "driver_flags": [
+            "-fno-use-linker-plugin",
+            "-U_FORTIFY_SOURCE"
+          ],
+          "gnu_capability_probe_flags": [
+            "--no-warnings"
+          ],
+          "expected_executions": 4974,
+          "no_trampolines": true,
+          "scope": "official execute.exp and dg directives; native Linux x86-64; LTO excluded",
+          "same_objects": "GNU replaces compiler temporaries with retained Fas-link inputs",
+          "passes": [
+            {
+              "linker": "fas",
+              "exit": 0,
+              "counts": {
+                "PASS": 9948,
+                "UNSUPPORTED": 57
+              },
+              "execution_passes": 4974,
+              "failures": [],
+              "execution_labels_sha256": "0617d90f4bdc47d98e848621cd6628117c1c26542c84c7991e9b98fc6294d5b8",
+              "sum_sha256": "91e84302c66d84dfaa4ff7ed6e580ad50f6e53d14e64adbc23ac253c73f239f8",
+              "log_sha256": "e42732eadc1935f3dd13d278c5870c6af298ff46e4ba980d8fd726d137c715f8"
+            },
+            {
+              "linker": "gnu",
+              "exit": 0,
+              "counts": {
+                "PASS": 9948,
+                "UNSUPPORTED": 57
+              },
+              "execution_passes": 4974,
+              "failures": [],
+              "execution_labels_sha256": "0617d90f4bdc47d98e848621cd6628117c1c26542c84c7991e9b98fc6294d5b8",
+              "sum_sha256": "2b1520cb84eb511f3665ffd39189104e6e8b915993a84dac4fb09e122dfb3817",
+              "log_sha256": "2c0ada18ef579f67faf0152cdff483672fc3fdfa4ae95fc1a675b577795e3830"
+            }
+          ],
+          "runtest_sha256": "c285da648b5514e9e06a506f6b6b229657a8001c8c8506d0e35a2bf0f754ab08",
+          "primary_links": {
+            "fas": 4974,
+            "gnu": 4974
+          },
+          "same_object_keys": 4974,
+          "linker_invocations_sha256": "dbda6de86165ba0be5397e02ba51b300e6e9d5c18f1c2180e5ee3a74b15491a9",
+          "compiler_invocations_sha256": "b97e8cc8e25bb299191e402f51c13519b9cd8166541fe551a8c91c91e08295bc"
+        }
+      },
+      "popular": {
+        "run": 42373970629,
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": {
+          "popular-c (libarchive, libarchive-3.8.11)": "success",
+          "popular-c (redis, redis-7.2.8)": "success",
+          "popular-c (curl, curl-8.14.1)": "success",
+          "popular-c (libpng, libpng-1.6.47)": "success",
+          "popular-c (lua, lua-5.1.5)": "success",
+          "popular-c (bzip2, bzip2-1.0.8)": "success"
+        }
+      },
+      "fuzz": {
+        "run": 42373970629,
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": {
+          "fuzz": "success"
+        },
+        "qualification": {
+          "status": "passed",
+          "failures": [],
+          "seconds_per_target": 600,
+          "modes": [
+            "elf",
+            "shared",
+            "archive",
+            "script",
+            "link",
+            "version",
+            "shared-link",
+            "symver-link",
+            "zlib",
+            "metadata-link",
+            "partial-link",
+            "dependency",
+            "static-pie-link",
+            "copy-link"
+          ],
+          "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+          "target_sha256": "76d6d8aeadf57a0ca5b707f4997cfb8a0b419b349c38ae1b4f4113bba8d511c0",
+          "targets": {
+            "elf": {
+              "run_time": 600,
+              "execs_done": 405180,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 1016,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.389882897
+            },
+            "shared": {
+              "run_time": 600,
+              "execs_done": 419270,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 751,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.359601011
+            },
+            "archive": {
+              "run_time": 600,
+              "execs_done": 409731,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 941,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.298355334
+            },
+            "script": {
+              "run_time": 600,
+              "execs_done": 378543,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 243,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.25689397
+            },
+            "link": {
+              "run_time": 600,
+              "execs_done": 405830,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 2314,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.2941072029998
+            },
+            "version": {
+              "run_time": 600,
+              "execs_done": 376017,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 998,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.2256813090003
+            },
+            "shared-link": {
+              "run_time": 600,
+              "execs_done": 394969,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 3142,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.6421309039997
+            },
+            "symver-link": {
+              "run_time": 600,
+              "execs_done": 397058,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 3270,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.7229477909996
+            },
+            "zlib": {
+              "run_time": 600,
+              "execs_done": 379659,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 230,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.4033355949996
+            },
+            "metadata-link": {
+              "run_time": 600,
+              "execs_done": 389066,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 3341,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.7935282600001
+            },
+            "partial-link": {
+              "run_time": 600,
+              "execs_done": 399956,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 1481,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.6174523930003
+            },
+            "dependency": {
+              "run_time": 600,
+              "execs_done": 414491,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 781,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.3501661829996
+            },
+            "static-pie-link": {
+              "run_time": 600,
+              "execs_done": 395744,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 2971,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.6178203969994
+            },
+            "copy-link": {
+              "run_time": 600,
+              "execs_done": 411161,
+              "saved_crashes": 0,
+              "saved_hangs": 0,
+              "edges_found": 1647,
+              "total_edges": 8388608,
+              "elapsed_seconds": 602.6160726240005
+            }
+          },
+          "executions": 5576675,
+          "scope": "bounded campaign acceptance; AFL edge counts are not source coverage"
+        }
+      }
+    },
+    "artifacts": [
+      {
+        "artifact_id": 13575725074,
+        "name": "linker-correctness-42373970629-1",
+        "size": 95084039,
+        "sha256": "2eee3cf8de7d45436d7e6a68cbaa2edd8bbf10451c5e584cad405e908626496d",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13579510064,
+        "name": "linker-fuzz-42373970629-1",
+        "size": 8434710,
+        "sha256": "173d40b736b8079758688f580be1f11d9fd38a0c2004ba0142c30abe7b524ff7",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13575950166,
+        "name": "linker-gcc-torture-42373970629-1",
+        "size": 14960034,
+        "sha256": "fec68b8f76135e17c7b7f3f7da1a9296a746c049cd9562d5a5a4602b2756ef85",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13574484918,
+        "name": "linker-popular-bzip2-42373970629-1",
+        "size": 4125735,
+        "sha256": "53825dc8152bcbf6e44e28b9af0262785b6b8a22dec2a2e4ddbdfa5cf7bd24cc",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13576032585,
+        "name": "linker-popular-curl-42373970629-1",
+        "size": 332144671,
+        "sha256": "40fcb1fb4a337d522e4a965e58d00266fd6580bfcd81ebe2afebd4f562bcec55",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13574678331,
+        "name": "linker-popular-libarchive-42373970629-1",
+        "size": 105489121,
+        "sha256": "25bae8b8e4b31e49d8e65a38ec1967ea0802caf7edbd081a9cfda114260e567f",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13574604784,
+        "name": "linker-popular-libpng-42373970629-1",
+        "size": 10784963,
+        "sha256": "951b1f0be8faa568a36078fd16ab7766b69ae69445900800ebfd2a9d1fae66c0",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13574659507,
+        "name": "linker-popular-lua-42373970629-1",
+        "size": 19181792,
+        "sha256": "d681405c889bc915c8c071ad1e9d83e4ac7088c62eb06a876bf57d9e82409b6b",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      },
+      {
+        "artifact_id": 13574868069,
+        "name": "linker-popular-redis-42373970629-1",
+        "size": 31702496,
+        "sha256": "f56733488aa0eca679b71f4feb89a03e6ce154646865afee24a61c19434d9fe3",
+        "github_digest_verified": true,
+        "zip_crc_verified": true
+      }
+    ],
+    "scope": "selected hosted correctness/GCC/popular-C/fuzz acceptance; release freeze/publication separate"
+  },
+  "local_regressions": {
+    "status": "passed",
+    "commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+    "exit": 0,
+    "python_cases": 273,
+    "python_groups": 45,
+    "compiler_checks": 3792,
+    "skips": [],
+    "log_sha256": "8e7be6e4cc8e1a76035fb0b05c7a254f2bd8c4f8e8f41c1a9b62dbc98154bfff",
+    "linker_sha256": "852f44d2bb25367a42ea2207a5c69398dafbcecde87025e508c9494ccb7f2ab5",
+    "scope": "local complete Dune root suite; not the hosted corpus matrix"
+  },
+  "local_programs": {
+    "fas-sieve-dynamic": {
+      "report_sha256": "b2fcaa513d30dd03565127bd8dc1399c946137505a79a151fb0c545755483e8a",
+      "executions": 12
+    },
+    "fas-sieve-static": {
+      "report_sha256": "7d543fbf6270ad31d2a958a88d54716ede8f5405a0526fe393a7459dbe2bc74c",
+      "executions": 12
+    },
+    "games": {
+      "report_sha256": "a81297b2e30223de1e42a094638a9f97ba355905a1bd42976fa612a24aa8b309",
+      "scope": "bounded headless Doom/Wolf3D GNU comparisons"
+    },
+    "backend-v2": {
+      "report_sha256": "2c9e00f309ff5c13a35bd1f072875abab7a92f09d00e36c3992d82270b42fd5e",
+      "executions": 124,
+      "producer_commit": "984de64b821873ff2d26a9d5a5bacc6b6e0c5a9d",
+      "scope": "Latest MIR native objects, DWARF 5, hosted PIE/EXEC and native RELA static-PIE startup; exact objects consumed by delivered frozen CLI and GNU; no change to release source or backend worktree"
+    }
+  },
+  "long_fuzz": {
+    "archive": {
+      "status": "passed",
+      "failures": [],
+      "seconds_per_target": 3600,
+      "modes": [
+        "archive"
+      ],
+      "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+      "target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+      "targets": {
+        "archive": {
+          "run_time": 3600,
+          "execs_done": 3112335,
+          "saved_crashes": 0,
+          "saved_hangs": 0,
+          "edges_found": 1003,
+          "total_edges": 65536,
+          "elapsed_seconds": 3600.3514194460004
+        }
+      },
+      "executions": 3112335,
+      "scope": "bounded campaign acceptance; AFL edge counts are not source coverage"
+    },
+    "shared-link": {
+      "status": "passed",
+      "failures": [],
+      "seconds_per_target": 3600,
+      "modes": [
+        "shared-link"
+      ],
+      "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+      "target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+      "targets": {
+        "shared-link": {
+          "run_time": 3600,
+          "execs_done": 3106700,
+          "saved_crashes": 0,
+          "saved_hangs": 0,
+          "edges_found": 3454,
+          "total_edges": 65536,
+          "elapsed_seconds": 3601.213378840999
+        }
+      },
+      "executions": 3106700,
+      "scope": "bounded campaign acceptance; AFL edge counts are not source coverage"
+    },
+    "copy-link": {
+      "status": "passed",
+      "failures": [],
+      "seconds_per_target": 3600,
+      "modes": [
+        "copy-link"
+      ],
+      "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+      "target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+      "targets": {
+        "copy-link": {
+          "run_time": 3600,
+          "execs_done": 3103415,
+          "saved_crashes": 0,
+          "saved_hangs": 0,
+          "edges_found": 1758,
+          "total_edges": 65536,
+          "elapsed_seconds": 3600.5226364260016
+        }
+      },
+      "executions": 3103415,
+      "scope": "bounded campaign acceptance; AFL edge counts are not source coverage"
+    }
+  },
+  "watchlist": {
+    "report_sha256": "51d059dd804faa3be363c9680847cbe38f46c2dc71b782f2e2dd45eaf5f09925",
+    "replays_per_input": 1000,
+    "input_sha256": {
+      "archive": [
+        "922cd31fe811425c416c67742377c51963b11c71ea812b70dac9a38873dde01e"
+      ],
+      "shared-link": [
+        "dbd8edd78c1e1c93c2b491f3e0c9b45b0bc0d7ade8a80d5e0a8bc755f5f020b9",
+        "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885"
+      ]
+    },
+    "root_causes": {
+      "historical_timeout_inputs": "unknown; original failed campaigns unchanged",
+      "descriptor_crash": "repaired with checked canonical TLS definition/GC validation"
+    },
+    "repair_record": {
+      "status": "repaired-focused",
+      "observed_at": "2026-11-07T12:19:27.101255+00:00",
+      "original_commit": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+      "original_input_sha256": "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885",
+      "original_target_sha256": "1437238e1c8f4d29333ae6f67049e65d8badc49871e04ef89195ca44adb45396",
+      "before": {
+        "exit": 2,
+        "seconds": 0.0031618349894415587,
+        "stderr": "Fatal error: exception Invalid_argument(\"option is None\")\nRaised at Stdlib.invalid_arg in file \"stdlib.ml\", line 30, characters 20-45\nCalled from Stdlib__Option.get in file \"option.ml\" (inlined), line 21, characters 41-69\nCalled from Fas_linker__Dynamic.emit.(fun) in file \"src/linker/dynamic.ml\", line 805, characters 38-83\nCalled from Stdlib__Array.iteri in file \"array.ml\", line 157, characters 31-51\nCalled from Fas_linker__Dynamic.emit in file \"src/linker/dynamic.ml\", lines 802-815, characters 2-15\nCalled from Stdlib__Option.iter in file \"option.ml\" (inlined), line 26, characters 32-35\nCalled from Fas_linker__Static_link.link_objects in file \"src/linker/static_link.ml\", lines 463-466, characters 2-11\nCalled from Fas_linker__Error.io in file \"src/linker/error.ml\", line 6, characters 6-10\nCalled from Dune__exe__Target.(fun) in file \"src/linker/fuzz/target.ml\", line 172, characters 18-84\nCalled from Stdlib__List.iter in file \"list.ml\", line 114, characters 12-15\nCalled from Dune__exe__Target in file \"src/linker/fuzz/target.ml\", lines 169-224, characters 12-85\n"
+      },
+      "fixed_target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+      "fixed_replays": 1000,
+      "fixed_max_seconds": 0.008430412999587134,
+      "fixed_cli": [
+        {
+          "gc": false,
+          "exit": 0,
+          "stderr": ""
+        },
+        {
+          "gc": true,
+          "exit": 1,
+          "stderr": "fas-ld: /home/glonex/fas-experimental-backend/fas-linker-qualification/src/linker/fuzz/results/2026-11-07-tls-nonalloc/finding.input: TLS descriptor references discarded TLS symbol local_tls\n"
+        }
+      ],
+      "root_cause": "non-allocated TLS instruction/GOT relocation creates runtime descriptor while its locally bound TLS definition is discarded by section GC",
+      "repair": "validate locally bound TLS descriptor definition and kept section before dynsym planning; retain existing metadata relocation behavior",
+      "gnu_control": "minimal input is rejected without GC as relocation in invalid section; GC discards its TLS and succeeds",
+      "scope": "focused descriptor repair; prior broad guard superseded after full regression rejected it; complete narrowed-source qualification required"
+    }
+  },
+  "source_identity": {
+    "status": "passed",
+    "commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+    "files": 1174,
+    "manifest_sha256": "c0f0ced2e508332608d715bd7b99a7b2ceb31d18d49da0cebdc11d5eb93ca8d4",
+    "source_archive_sha256": "1c80f69d9b400da7675261970baacedd9de5f7fe2f2ad2781f6cfea32bdcab39",
+    "all_git_blob_hashes_and_executable_modes_match": true,
+    "scope": "delivered source identity; not full release acceptance"
+  },
+  "delivered_execution": {
+    "status": "passed",
+    "version": "fas-ld 1.0.0 (ELF64 x86-64 Linux)",
+    "linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+    "fixture_exit": 42,
+    "PATH": "/nonexistent",
+    "build_info": {
+      "elf_interpreter": [
+        "/lib64/ld-linux-x86-64.so.2"
+      ],
+      "epoch": 0,
+      "linker_sha256": "895d36ae96b63751965608032d0667b7a2f438f50c9e50a48a0b66f1e31b0af1",
+      "max_required_glibc_version": "GLIBC_2.38",
+      "needed": [
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "ocaml_license_sha256": "65f47d3bf5a921011ac7fa30f23d54f9dffbe7683921eeb116d5ce8dc26ff0c1",
+      "qualification_sha256": "cdeef229911361d04245d404e1532b92a295f762f391e50d54e05d6e46ac709d",
+      "required_glibc_versions": [
+        "GLIBC_2.2.5",
+        "GLIBC_2.3",
+        "GLIBC_2.3.2",
+        "GLIBC_2.3.4",
+        "GLIBC_2.4",
+        "GLIBC_2.6",
+        "GLIBC_2.7",
+        "GLIBC_2.9",
+        "GLIBC_2.10",
+        "GLIBC_2.11",
+        "GLIBC_2.14",
+        "GLIBC_2.15",
+        "GLIBC_2.16",
+        "GLIBC_2.17",
+        "GLIBC_2.25",
+        "GLIBC_2.28",
+        "GLIBC_2.29",
+        "GLIBC_2.32",
+        "GLIBC_2.33",
+        "GLIBC_2.34",
+        "GLIBC_2.35",
+        "GLIBC_2.38"
+      ],
+      "schema": 1,
+      "scope": "shared correctness qualification; complete release acceptance is recorded separately; no reproducible compiler build claim",
+      "source_manifest_sha256": "c0f0ced2e508332608d715bd7b99a7b2ceb31d18d49da0cebdc11d5eb93ca8d4",
+      "target": "linux-x86_64",
+      "tool_versions": {
+        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+        "dune": "3.24.2",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gdb": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1",
+        "ld": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+        "ldd": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39",
+        "ocamlopt": "5.4.1",
+        "valgrind": "valgrind-3.22.0"
+      },
+      "version": "1.0.0",
+      "version_output": "fas-ld 1.0.0 (ELF64 x86-64 Linux)"
+    }
+  },
+  "archives": {
+    "fas-ld-1.0.0-linux-x86_64-source.tar.gz": "1c80f69d9b400da7675261970baacedd9de5f7fe2f2ad2781f6cfea32bdcab39",
+    "fas-ld-1.0.0-linux-x86_64.tar.gz": "3b7e37a43978b4826e283a8eb14ba7feaecfdc34006d62f2079083939d3540ac"
+  },
+  "prior_history": {
+    "original_candidate": {
+      "commit": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+      "hosted_run": 42303222536,
+      "hosted_status": "passed after unchanged libarchive timestamp-flake rerun",
+      "final_shared_link_hour": "failed with reproducible descriptor crash; not accepted or published",
+      "saved_input_sha256": "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885",
+      "original_libarchive_artifact": "linker-popular-libarchive-42303222536-1.zip",
+      "original_libarchive_artifact_sha256": "bdf42e6b5a57039ac53539b55d68276863b914658912918a8daa449da869f7e8"
+    },
+    "superseded_guard": {
+      "commit": "4778b2ea3264d5b509aa82eba7400c678285f9e8",
+      "hosted_run": 42372084320,
+      "local_status": "failed existing synthetic metadata regression; no skips",
+      "hosted_status": "correctness failed; obsolete remaining work canceled",
+      "local_fuzz": "interrupted, not hour acceptance"
+    },
+    "other_history": "original seed-name mistake, suspend-interrupted campaigns and unknown historical timeout causes retained unchanged under prior/",
+    "retention": "raw records, source snapshots, queues and findings in evidence archive; original failed libarchive ZIP separate asset"
+  },
+  "scope": "frozen Linux x86-64 contract; bounded published selections; no performance or universal compatibility claim"
+}

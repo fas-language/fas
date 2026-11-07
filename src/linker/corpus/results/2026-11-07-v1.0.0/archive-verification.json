@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "failures": [],
+  "seconds_per_target": 3600,
+  "modes": [
+    "archive"
+  ],
+  "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+  "targets": {
+    "archive": {
+      "run_time": 3600,
+      "execs_done": 3112335,
+      "saved_crashes": 0,
+      "saved_hangs": 0,
+      "edges_found": 1003,
+      "total_edges": 65536,
+      "elapsed_seconds": 3600.3514194460004
+    }
+  },
+  "executions": 3112335,
+  "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+  "report_sha256": "697af3913a1b91c31a15e37f7fd946e8e508b0a5f1697d42611c62bb7c63d3d1"
+}

@@ -1,0 +1,11 @@
+{
+  "source_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "hosted_run": 42373970629,
+  "previous_candidate": "6633f26cccfc6092bb6f810b75cc144c78e2f32f",
+  "previous_evidence": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261106",
+  "new_finding_sha256": "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885",
+  "repair_record": "src/linker/fuzz/results/2026-11-07-tls-nonalloc",
+  "scope": "fresh final qualification after reproducible descriptor-emission crash; prior results remain unchanged",
+  "superseded_guard_commit": "4778b2ea3264d5b509aa82eba7400c678285f9e8",
+  "superseded_guard_evidence": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-tls-gc"
+}

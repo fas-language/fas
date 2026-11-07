@@ -1,10 +1,9 @@
 # fas-ld 1.0 Linux x86-64 compatibility contract
 
-This freezes the supported scope for the `1.0.0` release candidate. Publication
-requires the final versioned source and delivered archives to pass the release
-gates below. [Recorded acceptance](corpus/results/) identifies exact source/binary
-snapshots. A feature description is not evidence that every compiler, libc,
-kernel or build system using it has been qualified.
+This freezes the supported scope for published `1.0.0`. The final source and
+delivered archives pass the gates below; [final acceptance](corpus/results/2026-11-07-v1.0.0/README.md) records
+exact source/binary identities and publication. A feature description is not
+evidence that every compiler, libc, kernel or build system has been qualified.
 
 | Boundary | Declared behavior |
 | --- | --- |
@@ -103,6 +102,6 @@ cannot satisfy the ten-minute selection.
 
 Source/binary archives must pass integrity checks, source rebuilding and a linked
 program smoke test. Checksums/inventories are not signatures. The complete hosted
-matrix, long-running qualification, final contract review and durable publication remain
-release gates. Performance work remains deferred until correctness qualification;
+matrix, long-running qualification, final contract review and durable publication
+are complete for [1.0.0](corpus/results/2026-11-07-v1.0.0/README.md). Performance optimization is now next;
 a faster-than-LLD result is not a production-readiness gate or current claim.

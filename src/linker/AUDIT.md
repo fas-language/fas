@@ -1,17 +1,13 @@
 # Linux x86-64 Fas/C release audit — 2026-11-05
 
-The [2026-11-07 final-source finding](fuzz/results/2026-11-07-tls-nonalloc/README.md)
-repairs an uncaught TLS descriptor exception exposed by sustained fuzzing.
-Its original campaign remains failed. The candidate is not published; complete
-qualification must pass again on the repaired source.
-
-Current release status: the [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
-passes all declared hosted selections. The frozen 1.0.0 candidate now awaits
-final-source acceptance, longer timeout follow-ups and publication. The dated
-observations below retain their original findings and scope. The CLI and
-compiler integration contract is frozen in [SUPPORT.md](SUPPORT.md); internal
-OCaml modules are not a separately stable public API.
-
+Current release status: [1.0.0 final acceptance](corpus/results/2026-11-07-v1.0.0/README.md) passes the complete
+frozen-source hosted matrix, three one-hour campaigns, native Fas programs and
+archive delivery checks. The descriptor finding is repaired with permanent
+regressions; original failed/superseded runs remain retained. The versioned
+release and durable evidence are published. The dated audit observations below
+retain their original scope and findings. The CLI/compiler contract is frozen in
+[SUPPORT.md](SUPPORT.md); inferred internal OCaml modules are not a separately
+stable installed API. Performance optimization is now the next workstream.
 
 Scope: review the current implementation, supported contract, tests, corpus,
 performance evidence and release workflow. Fas and ordinary native C objects are
@@ -368,7 +364,7 @@ multiple objects, archives, alignment, explicit overrides, visibility, partial
 links and absent sections. Add this to C compatibility qualification rather than
 assuming that arbitrary layout scripts are necessary for this use case.
 
-## Coverage and remaining release work
+## Historical coverage and remaining work at the original audit
 
 | Area | Existing evidence | Remaining work / release decision |
 | --- | --- | --- |

@@ -1,10 +1,11 @@
 # Repeatable Linux qualification
 
-The [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
-passes all declared hosted selections on the repaired implementation, including
-14 ten-minute fuzz campaigns. The frozen 1.0.0 source must independently pass the
-complete matrix and delivered-archive acceptance before publication. Historical
-observations below describe their original checkpoints.
+The [final 1.0.0 acceptance](corpus/results/2026-11-07-v1.0.0/README.md) passes all nine hosted jobs on source
+`3cf2962665405578b7a32a35f25e810e2ff188d5`, including fourteen ten-minute fuzz targets and archive/source rebuild
+checks. Three one-hour local campaigns, the complete host suite and real native
+Fas programs also pass. The versioned release and durable evidence are published.
+Historical observations below retain their original outcomes; a passing
+individual job alone does not complete these gates.
 
 The [linker workflow](../../.github/workflows/linker.yml) defines an Ubuntu 24.04
 x86-64 gate using OCaml 5.4.1 and Dune 3.24.2. Pull requests and pushes affecting
@@ -23,7 +24,7 @@ correctness job alone does not complete the production acceptance gates.
 
 The hosted correctness job and [clean local container runner](ci/README.md)
 share one recipe, including verified local binary/source release archives. Its
-final selection guard requires 272 Python regression cases without reported skips
+final selection guard requires 273 Python regression cases without reported skips
 and passing scale/corpus/semantic reports. The musl zlib
 matrix adds GCC/Clang native objects linked by Fas/GNU as PIE, static ET_EXEC
 and static PIE, including upstream tests and all gzip producer/consumer pairs.

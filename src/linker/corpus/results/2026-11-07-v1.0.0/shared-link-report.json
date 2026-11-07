@@ -1,0 +1,108 @@
+{
+  "seconds_per_target": 3600,
+  "modes": [
+    "shared-link"
+  ],
+  "imported_corpora": [
+    {
+      "root": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/watchlist-corpus",
+      "mode": "shared-link",
+      "count": 2,
+      "sha256": [
+        "dbd8edd78c1e1c93c2b491f3e0c9b45b0bc0d7ade8a80d5e0a8bc755f5f020b9",
+        "4acb3a26ee63da2a9d79d4b37ed56a46f7f7a80245ccd31dcdc078f064b0b885"
+      ]
+    }
+  ],
+  "started": "2026-11-07T13:47:28+0100",
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "target_sha256": "95b2fa22466a9973dc68d2ec15c09949898467e02b2b98848bc8a2c6e0c0651d",
+  "ocaml": "5.4.1",
+  "git_head": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "git_status": "",
+  "targets": {
+    "shared-link": {
+      "exit_code": 0,
+      "elapsed_seconds": 3601.213378840999,
+      "command": [
+        "nice",
+        "-n",
+        "10",
+        "afl-fuzz",
+        "-i",
+        "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/seeds/shared-link",
+        "-o",
+        "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/shared-link",
+        "-m",
+        "none",
+        "-t",
+        "2000",
+        "-V",
+        "3600",
+        "--",
+        "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/target.exe",
+        "shared-link",
+        "@@"
+      ],
+      "stats": {
+        "start_time": "1794055649",
+        "last_update": "1794059249",
+        "run_time": "3600",
+        "fuzzer_pid": "844101",
+        "cycles_done": "19",
+        "cycles_wo_finds": "0",
+        "time_wo_finds": "61",
+        "fuzz_time": "2486",
+        "calibration_time": "13",
+        "cmplog_time": "0",
+        "sync_time": "0",
+        "trim_time": "1100",
+        "execs_done": "3106700",
+        "execs_per_sec": "862.97",
+        "execs_ps_last_min": "843.89",
+        "corpus_count": "1209",
+        "corpus_favored": "399",
+        "corpus_found": "1197",
+        "corpus_imported": "0",
+        "corpus_variable": "159",
+        "max_depth": "9",
+        "cur_item": "414",
+        "pending_favs": "0",
+        "pending_total": "8",
+        "stability": "99.31%",
+        "bitmap_cvg": "5.27%",
+        "saved_crashes": "0",
+        "saved_hangs": "0",
+        "total_tmout": "0",
+        "last_find": "1794059198",
+        "last_crash": "0",
+        "last_hang": "0",
+        "execs_since_crash": "3106700",
+        "exec_timeout": "2000",
+        "slowest_exec_ms": "0",
+        "peak_rss_mb": "0",
+        "cpu_affinity": "-1",
+        "edges_found": "3454",
+        "total_edges": "65536",
+        "var_byte_count": "24",
+        "havoc_expansion": "0",
+        "auto_dict_entries": "2",
+        "testcache_size": "3434396",
+        "testcache_count": "1209",
+        "testcache_evict": "0",
+        "afl_banner": "/home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/target.exe",
+        "afl_version": "++4.33c",
+        "target_mode": "shmem_testcase default",
+        "command_line": "afl-fuzz -i /home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/seeds/shared-link -o /home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/shared-link -m none -t 2000 -V 3600 -- /home/glonex/.cache/fas-linker-qualification/release-1.0.0-20261107-final/long-fuzz-shared-link/target.exe shared-link @@"
+      }
+    }
+  },
+  "afl_environment": {
+    "AFL_NO_UI": "1",
+    "AFL_SKIP_CPUFREQ": "1",
+    "AFL_NO_AFFINITY": "1",
+    "AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES": "1",
+    "AFL_CRASH_EXITCODE": "2"
+  },
+  "core_pattern": "|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E"
+}

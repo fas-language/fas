@@ -10,10 +10,10 @@ exports image-relative semantics, preserve creation permissions, implement the
 declared registry subset and reject unsupported legacy lifecycle lists. Release
 qualification remains separate from passing these regression gates.
 
-Current priority (user decision, 2026-11-05): finish the declared Linux Fas/C
-functionality and production qualification before the main performance pass.
-Keep the existing timing evidence as a baseline; do not schedule optimization
-campaigns while compatibility and release gates remain the active work.
+The declared Linux Fas/C functionality and production qualification are complete
+for [published 1.0.0](corpus/results/2026-11-07-v1.0.0/README.md). The main performance pass is now next, following
+the user's decision to finish correctness first. Existing timing evidence remains
+a baseline; new performance comparisons require a suitable quiet-PC interval.
 
 Fas and native C are the release priorities. Existing C++ tests remain useful
 regression coverage; keep that usable interoperability level without expanding
@@ -31,8 +31,15 @@ The [frozen compatibility contract](SUPPORT.md) defines the freeze boundary.
 | **0.6 — implemented declared shared-library subset** | Shared-library output, visibility/preemption, complete declared TLS models and symbol-version behavior, IFUNC where required; RELRO/binding options | Producer/consumer, preemption, GD/LD/IE/TLSDESC, late dlopen, lifecycle, named version aliases, imported/defined IFUNC and loader-enforced RELRO pass. Deliberate limits remain: no TLS relaxation or base-version aliases; alias hiding follows the tested LLD policy. Static IFUNC was added during v0.7 |
 | **0.7 — implemented declared Linux subset** | Broader Linux compatibility: declared glibc/musl sysroots, static libc requirements, needed script features, compiler-driver flag compatibility, larger object/section limits | A published real-program corpus works with independent compilers and loaders; unsupported features remain explicit |
 | **0.8 — reference baseline qualified** | Real-library and build-system acceptance across the declared compiler/libc matrix; native Fas consumers, static/shared libraries and larger programs | Reproducible upstream tests and independent-linker runtime comparisons; successful hosted CI on each published baseline |
-| **0.9 — implementation qualification complete** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage and corpus results, reproducibility and performance reports |
-| **1.0 — frozen candidate; final acceptance pending** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
+| **0.9 — qualification complete** | Compatibility freeze, sustained coverage-guided fuzzing, generated/differential tests, failure injection, large-input CI and packaging | No open release-blocking correctness failures; publish fuzz duration/coverage, corpus and delivery integrity results; retain the historical timing baseline |
+| **1.0 — released** | Stable documented CLI/compiler integration and supported feature matrix, installable releases, diagnostics and operational reliability | Fas/C applications in that matrix build and run reliably; all release gates pass, with known limitations published |
+
+[Final acceptance](corpus/results/2026-11-07-v1.0.0/README.md) completes all gates on the repaired frozen source:
+the hosted matrix, longer campaigns, real native Fas, archive/source rebuilding
+and published delivery. The dated observations below retain the status at their
+original checkpoints.
+
+## Historical qualification checkpoints
 
 The [2026-11-06 local qualification](corpus/results/2026-11-06/README.md) passes
 seven real C projects with exact-input GNU comparisons, 4,974 official GCC
@@ -121,8 +128,10 @@ longer final-source timeout follow-ups, real-Fas acceptance and durable release
 publication remain the final gates. Historical pending/failed observations above
 remain records of their original checkpoints.
 
+## Next: performance optimization
+
 Earlier performance work and all recorded measurements remain valid history.
-The main optimization pass is now a later track, after production qualification,
+The main optimization pass follows completed production qualification,
 per the user's revised priority. Malformed-input tests and fuzzing grow
 continuously; hardening is not postponed until 0.9. Large milestones can have
 several prereleases.
@@ -136,7 +145,7 @@ ELF architecture. Any added ecosystem needs its own compatibility corpus.
 | Audit area | Current status | Remaining scope / reason |
 | --- | --- | --- |
 | Partial linking (`ld -r`) | Implemented ET_REL combination, tested with GNU/LLD producers and consumers | Wider build-system qualification; partial GC and final-image options remain unsupported |
-| Thin archives | GNU external and nested regular-archive members implemented and tested | Sustained fuzzing and wider build-system use |
+| Thin archives | GNU external/nested members, real Lua/libarchive mixed partial pipelines and sustained archive fuzzing pass | Wider build-system configurations are future coverage |
 | C++ interoperability | Exceptions, cleanup/rethrow, RTTI, lifecycle and late-loaded thread destructors pass focused compiler/runtime matrices | Preserve this usable level; ET_REL GNU unique definitions, static C++ and broader ecosystem expansion are outside current scope |
 | Static PIE / static IFUNC | Static ET_EXEC IFUNC plus declared static PIE glibc/musl CRT startup, ASLR, TLS and glibc IFUNC ordering tested | Wider static PIE real-program qualification; no static TLS GD/LD/TLSDESC relaxation |
 | Library discovery | SONAME/DT_NEEDED, RPATH/RUNPATH, strict transitive validation and explicit sysroot/script search; indirect references do not extract archives, matching tested GNU behavior | Full GNU default search policy remains qualification work; supply indirect callbacks as objects or explicit archive roots |
@@ -144,10 +153,11 @@ ELF architecture. Any added ecosystem needs its own compatibility corpus.
 | Linker scripts | Tested libc INPUT/GROUP/AS_NEEDED subset | Arbitrary kernel/bare-metal layouts are outside initial v1.0: they need a layout engine and dedicated startup/target tests |
 | C registries / legacy lifecycle | C identifier boundaries, contiguous PROGBITS/NOBITS layout and conservative live-reference GC retention implemented; nonempty legacy lists explicitly rejected on final links | Registry policy is hidden and image-local; no selectable precise-GC mode. Modern lifecycle arrays remain supported and partial links preserve legacy lists |
 | LTO | Explicit GCC/LLVM diagnostics, including selected archive members | Deliberately unsupported by user decision; no LTO implementation is planned |
-| Large binaries | Object/section bounds, relocation overflows, GC, roughly 1 GiB sparse NOBITS and an opt-in runner for 64 MiB file-backed data/200k symbols and relocations/65k sections tested | Real large programs, peak memory and multicore scale qualification continue in v0.8/v0.9 |
+| Large binaries | Object/section bounds, relocation overflows, GC, roughly 1 GiB sparse NOBITS and an opt-in runner for 64 MiB file-backed data/200k symbols and relocations/65k sections tested | Beyond-cap layouts, further real large programs, peak memory and multicore scaling are future work |
 
-These are tracked work items, with acceptance status below. The v0.7
-Linux compatibility milestone includes the following before its scope freezes:
+The table records current boundaries. Detailed implementation notes below
+retain historical milestone wording; wider configurations outside SUPPORT.md
+are future coverage, not open 1.0 release gates:
 
 - **Partial linking (`-r`) — implemented declared subset**: combine objects into
   ET_REL, preserving relocations, local/global symbol references, common symbols,

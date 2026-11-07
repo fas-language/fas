@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "exit": 0,
+  "python_cases": 273,
+  "python_groups": 45,
+  "compiler_checks": 3792,
+  "skips": [],
+  "log_sha256": "8e7be6e4cc8e1a76035fb0b05c7a254f2bd8c4f8e8f41c1a9b62dbc98154bfff",
+  "linker_sha256": "852f44d2bb25367a42ea2207a5c69398dafbcecde87025e508c9494ccb7f2ab5",
+  "scope": "local complete Dune root suite; not the hosted corpus matrix"
+}

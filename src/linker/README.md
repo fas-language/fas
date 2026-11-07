@@ -12,11 +12,11 @@ describes archives, source rebuilding and installation. Existing C++ exceptions,
 RTTI and lifecycle interoperability remain regression-covered. LTO is deliberately
 unsupported. Performance optimization follows correctness qualification.
 
-The [completed implementation qualification](corpus/results/2026-11-06-complete/README.md)
-passes hosted correctness, all six popular-C projects, 4,974 official GCC C
-executions per linker and 14 ten-minute fuzz campaigns. The versioned release
-candidate must pass a fresh complete matrix and archive checks before publication.
-See [1.0.0 release notes](release/1.0.0.md) for its scope and release gates.
+[fas-ld 1.0.0 is published](https://github.com/fas-language/fas/releases/tag/fas-ld-v1.0.0) after the
+[final acceptance](corpus/results/2026-11-07-v1.0.0/README.md): the complete hosted matrix, 4,974 official GCC
+executions per linker, fourteen ten-minute fuzz targets, three one-hour campaigns,
+native Fas applications and delivered/source archive checks all pass.
+See [release notes](release/1.0.0.md) for installation and supported scope.
 
 From the `fas` directory:
 
@@ -701,8 +701,9 @@ GNU's 15-character member-reference form, passes 265 linker cases and qualifies
 real Lua/libarchive thin and mixed partial-link pipelines with three final
 consumers. Fresh Ubuntu correctness, both SQLite extraquick selections and
 reproducible packaging pass. Two saved timeouts are triaged as not reproducible
-and retained on the watchlist; sustained/hosted qualification remains open,
-and original failed campaigns retain their identities.
+and retained on the watchlist. Sustained/hosted qualification remained open
+at that historical checkpoint; final release acceptance is linked above.
+Original failed campaigns retain their identities.
 
 The [generated semantic runner](semantic/README.md) also checks valid programs
 against an independent Python runtime oracle through archive and mixed
@@ -711,8 +712,8 @@ partial-link pipelines, static/static-PIE output and GC policies.
 The seeded mutation tests are regression checks. Coverage-guided campaigns use
 the separate [AFL++ harness](fuzz/README.md); their recorded duration and findings
 must be assessed separately from integration-test results. A short clean campaign
-does not establish production readiness. Performance scalability remains a later
-acceptance gate.
+does not establish production readiness. Final release campaigns are recorded
+above; performance scalability is now the next workstream.
 
 ## Performance baseline
 
