@@ -8,13 +8,19 @@ descriptor after section GC discarded its locally bound TLS definition; dynamic
 emission raised `Invalid_argument("option is None")`. The original campaign stays
 failed and the candidate was not published.
 
-TLS validation now diagnoses that unsupported section/relocation combination
-before GOT preparation. DTPOFF debug offsets stay supported. A new regression
-covers five models with/without GC, checked errors and output preservation; all
-five TLS descriptor tests pass. The exact input passes 1,000 repaired-target
-replays and checked CLI rejection. The complete regression selection is now
+Dynamic descriptor planning now checks that its canonical locally bound TLS
+definition has a section retained by GC before creating its TLS dynsym. DTPOFF
+debug offsets and existing metadata acceptance stay supported. A new regression
+covers local/hidden/internal definitions, checked errors, output preservation
+and DTPOFF debug tombstones; all five TLS descriptor tests and all nine shared
+output tests pass. The exact input passes 1,000 repaired-target replays, non-GC
+CLI acceptance and checked GC rejection. The complete regression selection is now
 273 Python cases in 45 groups. Full repaired-source qualification is required
 before release. Evidence: fuzz/results/2026-11-07-tls-nonalloc/README.md.
+
+The initial broader TLS guard failed the existing synthetic metadata regression
+on the hosted baseline. That candidate/run remains unsuccessful; its campaigns
+were interrupted and superseded. The narrower check preserves that regression.
 
 ### Current checkpoint: frozen 1.0.0 candidate
 

@@ -215,13 +215,25 @@ let prepare ?stats ~(options : Options.t) ~kept ~(got : Got.t) ~module_base ~cop
       let bound_tls = ref [] and bound_count = ref 0 in
       let bound_definition file symbol =
         let s = resolved.objects.(file).symbols.(symbol) in
-        if s.binding = 0 then (file, symbol)
-        else
-          match Hashtbl.find_opt resolved.definitions s.name with
-          | Some d -> (d.file, d.symbol)
-          | None ->
-              Error.fail "%s: undefined TLS symbol %s" resolved.objects.(file).path
-                s.name
+        let source, index =
+          if s.binding = 0 then (file, symbol)
+          else
+            match Hashtbl.find_opt resolved.definitions s.name with
+            | Some d -> (d.file, d.symbol)
+            | None ->
+                Error.fail "%s: undefined TLS symbol %s" resolved.objects.(file).path
+                  s.name
+        in
+        let definition = resolved.objects.(source).symbols.(index) in
+        if definition.section = 0 || definition.section >= 0xff00 then
+          Error.fail "%s: TLS descriptor requires a section-defined TLS symbol %s"
+            resolved.objects.(file).path s.name;
+        (* Non-allocated metadata does not root definitions under section GC.
+           A local descriptor still needs a real TLS dynsym/template placement. *)
+        if not kept.(source).(definition.section) then
+          Error.fail "%s: TLS descriptor references discarded TLS symbol %s"
+            resolved.objects.(file).path s.name;
+        (source, index)
       in
       Array.iteri
         (fun slot (file, symbol) ->

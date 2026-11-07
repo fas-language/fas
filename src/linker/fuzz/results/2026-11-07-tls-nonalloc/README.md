@@ -11,18 +11,26 @@ then unconditionally accessed the discarded template placement. This raises
 `Invalid_argument("option is None")` on source `6633f26`. The normal CLI also
 reproduces it with `-shared --gc-sections`.
 
-TLS validation now explicitly rejects instruction/GOT TLS relocations in
-non-allocated sections, including TLSGD, TLSLD, GOTTPOFF, GOTPC32_TLSDESC and
-TLSDESC_CALL. DTPOFF debug offsets remain supported. GNU independently rejects
+Dynamic descriptor planning now checks that its canonical locally bound TLS
+symbol has a section definition retained by GC before creating its TLS dynsym.
+A discarded definition raises a checked linker error. Existing metadata relocation
+behavior and DTPOFF debug offsets remain supported. GNU independently rejects
 the minimal input without GC as a relocation in an invalid section; with GC it
-discards the template and succeeds. Fas deliberately diagnoses this unsupported
-input in either mode rather than creating runtime state from non-loaded metadata.
+discards the template and succeeds. Fas accepts the metadata reference when its
+template exists and diagnoses a discarded descriptor definition explicitly.
 
-The regression covers all five relocation models with and without GC, checked
-diagnostics, prior-output/permission preservation and temporary cleanup. All
-existing descriptor runtime tests pass. The original saved input passes 1,000
-replays with the repaired instrumented target and checked CLI rejection in both
-GC modes. `replay.json` records before/after identities and diagnostics.
+The regression covers local, hidden and internal TLS definitions, ordinary
+metadata acceptance, GC diagnostics, prior-output/permission preservation,
+temporary cleanup and DTPOFF debug tombstones. All existing descriptor runtime
+and shared-output metadata tests pass. The saved input passes 1,000 repaired
+target replays, normal CLI acceptance without GC and checked rejection with GC.
+`replay.json` records before/after identities and diagnostics.
+
+An initial broader TLS validation guard rejected instruction/GOT relocations in
+all non-allocated sections. Full regression found this incompatible with an
+existing synthetic metadata fixture on the hosted compiler baseline. That guard
+was superseded by the narrower descriptor-definition check; original failed
+local/hosted results remain retained and are not release acceptance.
 
 These focused repairs do not complete release acceptance. The candidate is
 not published; full qualification must run again on the repaired source.

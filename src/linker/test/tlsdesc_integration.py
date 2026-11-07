@@ -143,25 +143,27 @@ int main(int argc,char **argv){
                 out = self.hosted('desc-late-main', main, linker=consumer)
                 run(out, library, expected=42)
 
-    def test_nonallocated_tls_got_relocations_are_checked_before_gc_emission(self):
+    def test_discarded_local_descriptor_definitions_are_checked_before_emission(self):
         # A non-loaded relocation must not create a runtime GOT entry for a
         # hidden TLS definition whose section was removed by section GC.
-        for relocation in ('TLSGD', 'TLSLD', 'GOTTPOFF', 'GOTPC32_TLSDESC', 'TLSDESC_CALL'):
-            obj = self.assemble('nonalloc-'+relocation, f'''
+        for binding in ('.local datum', '.globl datum\n.hidden datum', '.globl datum\n.internal datum'):
+            obj = self.assemble('nonalloc-desc', f'''
 .section .tdata,"awT",@progbits
-.globl datum
-.hidden datum
+{binding}
 .type datum,@tls_object
 datum: .long 42
 .size datum,4
 .section .debug_test,"",@progbits
 .long 0
-.reloc 0,R_X86_64_{relocation},datum
+.reloc 0,R_X86_64_GOTPC32_TLSDESC,datum-4
 ''')
-            for gc in (False, True):
-                with self.subTest(relocation=relocation, gc=gc):
-                    self.rejected(obj, 'TLS GOT/call relocation in non-allocatable section .debug_test',
-                                  options=('-shared', *(['--gc-sections'] if gc else [])))
+            with self.subTest(binding=binding):
+                # The same metadata input remains accepted when its template
+                # exists; no new blanket section/relocation restriction.
+                out = self.link('nonalloc-template.so', obj, options=('-shared',))
+                self.assertEqual(run('readelf', '-aW', out).stderr, b'')
+                self.rejected(obj, 'TLS descriptor references discarded TLS symbol datum',
+                              options=('-shared', '--gc-sections'))
         for relocation in ('DTPOFF32', 'DTPOFF64'):
             obj = self.assemble('debug-'+relocation, f'''
 .section .tdata,"awT",@progbits

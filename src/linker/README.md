@@ -430,8 +430,9 @@ preemption and per-thread isolation. GNU2 TLSDESC input (`GOTPC32_TLSDESC`/`TLSD
 descriptors with `R_X86_64_TLSDESC`. Local descriptors use local TLS dynsym entries;
 GCC module-base references bind locally. Weak undefined descriptors and late
 loading with existing threads/large TLS templates are tested. There is no TLS
-instruction relaxation or common TLS. TLS GOT/call relocations require allocated
-sections; DTPOFF debug offsets remain supported. Static output supports local-exec,
+instruction relaxation or common TLS. A descriptor referencing a definition
+discarded by section GC fails explicitly; DTPOFF debug tombstones remain supported.
+Static output supports local-exec,
 initial-exec and DTPOFF references; runtime startup must copy/zero PT_TLS and
 install the thread pointer. Both self-contained startup and musl CRT are tested.
 
