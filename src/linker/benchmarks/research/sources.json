@@ -1,0 +1,255 @@
+{
+  "schema": 1,
+  "observed_at": "2026-11-07T15:38:45.599070+00:00",
+  "method": "Source/document review only; no competitor builds, executions or new timings. Files below identify principal sources inspected, not a vendored source inventory. Fas file hashes identify the pre-research documentation checkpoint.",
+  "released_source_commit": "3cf2962665405578b7a32a35f25e810e2ff188d5",
+  "projects": [
+    {
+      "name": "mold",
+      "origin": "https://github.com/rui314/mold.git",
+      "commit": "331ac663668dc0b1f4949403854613b9b1913025",
+      "local_path": "/home/glonex/fas-experimental-backend/linker-research/mold",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "2b8bca75b636be063bd5c6a8482df5802425a5d9fe55622ac9d9b10e00f464fe",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/README.md"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "942fc08972e72aacf9557eb43354b14c9cb871b73fdb8618b5747d7109b3223b",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/Cargo.toml"
+        },
+        {
+          "path": "common/mapped_file.rs",
+          "sha256": "04f4e49c40edcd94371e9a3cba0b81e0b3a21b10c21d6e4c4901bd0e46db2cfe",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/mapped_file.rs"
+        },
+        {
+          "path": "common/output_file.rs",
+          "sha256": "7dcd7a83eaa29090721248e24c581019b1413c5584cad4f323273bd657627d19",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/output_file.rs"
+        },
+        {
+          "path": "common/concurrent_map.rs",
+          "sha256": "8e8fb78ac109cd566441f5eea38d5feadd9b245ad5a12bc38bcf2537c6c3a7cf",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/concurrent_map.rs"
+        },
+        {
+          "path": "common/parallel.rs",
+          "sha256": "ebcfc62abd765ef90e5e9629ec9f758df80996db18910e66ed622bb7c44129e7",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/parallel.rs"
+        },
+        {
+          "path": "common/subprocess.rs",
+          "sha256": "eb0c04023c0a615d002a8a9f58263e960d5567af89cc5741995ed4ad6d26da22",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/subprocess.rs"
+        },
+        {
+          "path": "common/mem.rs",
+          "sha256": "d161a5bd5dba5c0af71a9b217d133309b9aa0e91787a6e71f9ac161cb49ea924",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/mem.rs"
+        },
+        {
+          "path": "common/worker_local.rs",
+          "sha256": "618830d9a49631996eb42a120c38023fae6f76e321b3381cad564aecd49026b4",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/worker_local.rs"
+        },
+        {
+          "path": "common/jobs.rs",
+          "sha256": "b7f1632e8eb17ed2a7b7c023cbcbca4ea7f0e9e395cede319c3d1db373180daf",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/common/jobs.rs"
+        },
+        {
+          "path": "elf/reader.rs",
+          "sha256": "de3bf0630e8fa2282cffba4e0440fe6bcd091635298bb23775d91531b6ed46ec",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/elf/reader.rs"
+        },
+        {
+          "path": "elf/driver.rs",
+          "sha256": "77b7fa36e2fe928485c7beca126103cebb7ff90266b13215df170b4e572bd8da",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/elf/driver.rs"
+        },
+        {
+          "path": "elf/symbol.rs",
+          "sha256": "e965ddb1411b54d17827fb389803758a4309ad01f94b5026c7c46473aef490c4",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/elf/symbol.rs"
+        },
+        {
+          "path": "elf/passes.rs",
+          "sha256": "547d11d09ae0bc3db35769d5e8f3625f0c60c3491cc6807ba3590324ee58fa78",
+          "url": "https://github.com/rui314/mold/blob/331ac663668dc0b1f4949403854613b9b1913025/elf/passes.rs"
+        }
+      ]
+    },
+    {
+      "name": "reld",
+      "origin": "https://github.com/forge-ci/reld.git",
+      "commit": "6ab41368d686c7c2eec570182dd11d7d6ddf1efe",
+      "local_path": "/home/glonex/fas-experimental-backend/linker-research/reld",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "b33e09d221ca68ad1169af4f375d78e3287b3b27971f31a12950698a5e74505b",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/README.md"
+        },
+        {
+          "path": "AGENTS.md",
+          "sha256": "cf5bbbe1fd2ba45b840cb620eab47041b3ad8350f3ad9392d7e8c61871140442",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/AGENTS.md"
+        },
+        {
+          "path": "DESIGN.md",
+          "sha256": "97e2f0f41955c8ce77be49c97319cc048aa924c376f308665f954431a3d3cc67",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/DESIGN.md"
+        },
+        {
+          "path": "docs/plan/09-INCREMENTAL.md",
+          "sha256": "d938493f7639ad2b35b4eb34cb30ecc29c65feff6d66fda18e722ebf1876c573",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/docs/plan/09-INCREMENTAL.md"
+        },
+        {
+          "path": "crates/reld-core/src/lib.rs",
+          "sha256": "4e7c8a1efe5c0b5eb1249faafaa63370ac60980a71da88782f7395dc0a35ff49",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/lib.rs"
+        },
+        {
+          "path": "crates/reld-core/src/input_data.rs",
+          "sha256": "4bf3632885ebbc801b4c51ef62b702f8577f5b56657e61ba5084817020914496",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/input_data.rs"
+        },
+        {
+          "path": "crates/reld-core/src/symbol_db.rs",
+          "sha256": "052d4b84549a594e571c04231b2f49fec1646e3f03179a6d12bfc928f92f6ced",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/symbol_db.rs"
+        },
+        {
+          "path": "crates/reld-core/src/grouping.rs",
+          "sha256": "70a0af36be878f1cf5b7a16defff20c532debe409b5d432799705dfe148adb12",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/grouping.rs"
+        },
+        {
+          "path": "crates/reld-core/src/sharding.rs",
+          "sha256": "d911d3ec346388b55a654f8e61f040e360161cd29d79802ca54f7a7e517c8d3a",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/sharding.rs"
+        },
+        {
+          "path": "crates/reld-core/src/file_writer.rs",
+          "sha256": "d0b399a6ccf8b1234b7b8721bc1edc185828e6d3a487f705717dea23772c8dd0",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/file_writer.rs"
+        },
+        {
+          "path": "crates/reld-core/src/fs.rs",
+          "sha256": "495debcc8dd630fb5647bf4e655d62c93a085b6eaec47f2acf533bb9df1e670a",
+          "url": "https://github.com/forge-ci/reld/blob/6ab41368d686c7c2eec570182dd11d7d6ddf1efe/crates/reld-core/src/fs.rs"
+        }
+      ]
+    },
+    {
+      "name": "fas-ld",
+      "origin": "https://github.com/fas-language/fas",
+      "commit": "eae590cf9056f8ba46437aa112531902fc6b28b7",
+      "local_path": "/home/glonex/fas-experimental-backend/fas-linker-qualification",
+      "files": [
+        {
+          "path": "src/linker/dune",
+          "sha256": "dbc44882c0cc2a0b874d529e50e7361c9b23387b4c82db0891ac9615a28a2e35",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/dune"
+        },
+        {
+          "path": "src/linker/archive.ml",
+          "sha256": "beba716ec5a1305c5d937fbe28928301e3b389153a3c6ea767ec030424a6ea01",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/archive.ml"
+        },
+        {
+          "path": "src/linker/binary.ml",
+          "sha256": "eec5c63fe299e47f377fa04f3a758eed537636b5e58a0de91636f2d3bc46f588",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/binary.ml"
+        },
+        {
+          "path": "src/linker/file_io.ml",
+          "sha256": "5b2f32da854c3c8f028696314b709bbced175f316cdd7a7925c02584495fe6a0",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/file_io.ml"
+        },
+        {
+          "path": "src/linker/stats.ml",
+          "sha256": "a9197058dd00721bc068b79477cd361c4ec27be7a0da87afb72e1544db828b4b",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/stats.ml"
+        },
+        {
+          "path": "src/linker/elf_reader.ml",
+          "sha256": "e40285fc364afd0bfcc7da3de0654460928d860dc799587276cc26aff1b82af4",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/elf_reader.ml"
+        },
+        {
+          "path": "src/linker/resolver.ml",
+          "sha256": "d62a5b2ab074d837c3fb94c4752d540e1275b304773728fbe96587177a1c901e",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/resolver.ml"
+        },
+        {
+          "path": "src/linker/section_gc.ml",
+          "sha256": "5e62bf67d1e83a456287d9de99f6a34f0eaa2b25cd07f01f8de18fe1605b5d09",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/section_gc.ml"
+        },
+        {
+          "path": "src/linker/layout.ml",
+          "sha256": "ee6b28fa1139370bd206f4a1a13f86eb2ce429639cf717db35916271b4acdae2",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/layout.ml"
+        },
+        {
+          "path": "src/linker/static_link.ml",
+          "sha256": "9433480beee804f50876cd2a06b9945fd6994bb3e749b038e85bbdf25f4fa74b",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/static_link.ml"
+        },
+        {
+          "path": "src/linker/static_link.mli",
+          "sha256": "4cbe741b0f4d8c7ff0d71368a482572caecc51507dcbff84bb988f13512b623d",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/static_link.mli"
+        },
+        {
+          "path": "src/linker/benchmarks/README.md",
+          "sha256": "4f63f2a066a2b6584693962f4878a64f4ee07e43b5a57fc634428c742bbc527c",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/README.md"
+        },
+        {
+          "path": "src/linker/benchmarks/replay.py",
+          "sha256": "51fd11205b92bd641faad46053d2e547de23c90f103ffe777c5c75cbcdfebf92",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/replay.py"
+        },
+        {
+          "path": "src/linker/benchmarks/results/2026-11-05/allocation-ifunc-references.json",
+          "sha256": "4e501af1ceda54b6a85bb1e2b2c24f86487bc3ac76b318ece0fbcee612d4c494",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/results/2026-11-05/allocation-ifunc-references.json"
+        },
+        {
+          "path": "src/linker/benchmarks/results/2026-11-05/chibicc-static-glibc-Fas-read-cache-stats.json",
+          "sha256": "2eef27de276d0c60ed38db360e21da19077fff5518c4bec26854d16a51c27b72",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/results/2026-11-05/chibicc-static-glibc-Fas-read-cache-stats.json"
+        },
+        {
+          "path": "src/linker/benchmarks/results/2026-11-05/chibicc-stage1-dynamic-Fas-read-cache-stats.json",
+          "sha256": "19bb06ca7c68b8cd8e3d85d439fb0d0bf327d745f678041cad1971c7e4acbea0",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/results/2026-11-05/chibicc-stage1-dynamic-Fas-read-cache-stats.json"
+        },
+        {
+          "path": "src/linker/benchmarks/results/2026-11-05/hash-ifunc-archive-lazy.json",
+          "sha256": "b27450f67d48d9ab2b7597d72162bfff71b4e06ce64f132763a56cc09e906c28",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/results/2026-11-05/hash-ifunc-archive-lazy.json"
+        },
+        {
+          "path": "src/linker/benchmarks/results/2026-11-05/hash-ifunc-archive-all.json",
+          "sha256": "0adf8ec35e805667717a2ab96a7a0698b9ec725d6521ebb78ca66f2a9eddcf12",
+          "url": "https://github.com/fas-language/fas/blob/eae590cf9056f8ba46437aa112531902fc6b28b7/src/linker/benchmarks/results/2026-11-05/hash-ifunc-archive-all.json"
+        }
+      ]
+    }
+  ],
+  "supplemental_sources": [
+    {
+      "title": "mold: A Massively Parallel Linker",
+      "url": "https://arxiv.org/html/2608.23228v1",
+      "version": "v1, 2026-08-24",
+      "note": "Paper describes the C++ implementation; the pinned repository is Rust. Algorithmic background and evaluation methodology are distinct from current source facts."
+    }
+  ]
+}

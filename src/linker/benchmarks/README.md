@@ -1,5 +1,10 @@
 # Linker performance evidence
 
+The [mold/reld source review and performance plan](research/2026-11-07-mold-reld.md)
+starts the post-1.0 optimization track. The measurements below are historical
+pre-1.0 checkpoints; the released 1.0 binary needs a fresh baseline before new
+speed claims. Reference repositories are pinned and kept outside the Fas tree.
+
 ## Quiet-PC measurements after build-ID/IFUNC changes
 
 The user provided an idle-PC window beginning at 21:17 CET on 2026-11-05;
