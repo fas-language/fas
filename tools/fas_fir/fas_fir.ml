@@ -28,11 +28,13 @@
 
 let usage () =
   prerr_string
-    "usage: fas-fir [-c | --check | --legalize] [-g] [--no-pie] INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
+    "usage: fas-fir [-c [-fPIC] | --check | --legalize] [-g] [--no-pie] INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
     \  (no flag)  build a static position-independent executable (default output: a.out),\n\
     \             like fas --backend=native\n\
     \  --no-pie   build a static executable at a fixed address instead\n\
     \  -c         build a position-independent ELF object\n\
+    \  -fPIC      with -c: an object for a shared library (general-dynamic TLS, which\n\
+    \             dlopen needs; the default, initial-exec, suits executables)\n\
     \  -g         add DWARF line tables (from the module's loc entries)\n\
     \  --check    parse and verify, print the canonical text to stdout\n\
     \  --legalize print the module with wide and odd-width integers in limbs\n\
@@ -56,7 +58,7 @@ let read_all ic =
   Buffer.contents b
 
 let () =
-  let mode = ref Exe and llvm = ref false and pie = ref true and debug = ref false and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref Exe and llvm = ref false and pie = ref true and debug = ref false and fpic = ref false and input = ref None and output = ref None and extra = ref [] in
   let rec args = function
     | [] -> ()
     | "-c" :: rest -> mode := Obj; args rest
@@ -68,6 +70,7 @@ let () =
     | "--pie" :: rest -> pie := true; args rest
     | "--no-pie" :: rest -> pie := false; args rest
     | "-g" :: rest -> debug := true; args rest
+    | "-fPIC" :: rest -> fpic := true; args rest
     | "-o" :: o :: rest -> output := Some o; args rest
     | ("-h" | "--help") :: _ -> usage ()
     | a :: rest when !input = None && (a = "-" || not (String.starts_with ~prefix:"-" a)) ->
@@ -153,7 +156,7 @@ let () =
   in
   let result =
     match !mode with
-    | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug m)
+    | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~tls_gd:!fpic m)
     | Exe | Check | Legalize | Emit_llvm ->
         need_main ();
         let inputs = List.rev_map Fas_linker.Input.file !extra in

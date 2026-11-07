@@ -94,6 +94,8 @@ let ins a fr ~pic ~func_label ~out (i : ins) =
   | Store (n, ad, s) -> A.store a n (m ad) (gr s)
   | Fload (dbl, d, ad) -> A.mov_xm a ~double:dbl (xr d) (m ad)
   | Fstore (dbl, ad, s) -> fstore a dbl (m ad) (xr s)
+  | Xload (d, ad) -> A.movdqu_load a (xr d) (m ad)
+  | Xstore (ad, s) -> A.movdqu_store a (m ad) (xr s)
   | Lea (d, ad) -> A.lea a (gr d) (m ad)
   | Got (d, s) -> A.load_got a (gr d) s
   | Tp d -> A.load_tp a (gr d)
@@ -151,11 +153,36 @@ let ins a fr ~pic ~func_label ~out (i : ins) =
       A.jcc a A.Ne loop;
       A.fstp a ~double:dbl x;
       A.fpop a
+  | X87 x -> (
+      match x with
+      | Fld (M32, ad) -> A.fld a ~double:false (m ad)
+      | Fld (M64, ad) -> A.fld a ~double:true (m ad)
+      | Fld (M80, ad) -> A.fld80 a (m ad)
+      | Fld (I64, ad) -> A.fild64 a (m ad)
+      | Fstp (M32, ad) -> A.fstp a ~double:false (m ad)
+      | Fstp (M64, ad) -> A.fstp a ~double:true (m ad)
+      | Fstp (M80, ad) -> A.fstp80 a (m ad)
+      | Fstp (I64, ad) -> A.fisttp64 a (m ad)
+      | Farith op -> A.farithp a op
+      | Fremloop ->
+          let loop = A.new_label a in
+          A.place a loop;
+          A.fprem a;
+          A.fnstsw_ax a;
+          A.test_ri a A.Rax 0x400;
+          A.jcc a A.Ne loop
+      | Fsqrt87 -> A.fsqrt87 a
+      | Frndint -> A.frndint a
+      | Fucomip -> A.fucomip a
+      | Fpop -> A.fpop a
+      | Fnstcw ad -> A.fnstcw a (m ad)
+      | Fldcw ad -> A.fldcw a (m ad))
   | Call { target; _ } -> (
       match target with
       | Tlabel name -> A.call_label a (func_label name)
       | Tsym name -> A.call_symbol a name
-      | Treg r -> A.call_r a (gr r))
+      | Treg r -> A.call_r a (gr r)
+      | Ttlsgd name -> A.tls_get_addr a name)
   | Syscall _ -> A.syscall a
   | Rep_movsb -> A.rep_movsb a
   | Rep_stosb -> A.rep_stosb a
@@ -165,6 +192,7 @@ let ins a fr ~pic ~func_label ~out (i : ins) =
   | Xadd (n, ad, r) -> A.lock_xadd a n (m ad) (gr r)
   | Cmpxchg (n, ad, r) -> A.lock_cmpxchg a n (m ad) (gr r)
   | Mfence -> A.mfence a
+  | Align_sp n -> A.alu_ri a A.And A.Rsp (- n)
   | Ud2 -> A.ud2 a
   | Loc _ -> ()
 
@@ -436,11 +464,12 @@ let global_image (g : F.global) =
 (* ---------- module ---------- *)
 
 (* [startup]: add _start (an executable without libc). [pic]: position-
-   independent code (-c objects, hosted links, PIE executables).
+   independent code (-c objects, hosted links, PIE executables). [tls_gd]:
+   general-dynamic TLS (see [compile_object]).
    [self_relocate]: _start applies the image's own RELATIVE relocations (a
    static PIE has no dynamic loader to do it). [debug]: add DWARF line
    tables (Mir_dwarf); the allocated sections are the same either way. *)
-let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modul) =
+let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
@@ -474,7 +503,7 @@ let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modu
     F.Vec.iter
       (fun (fn : F.func) ->
         if fn.defined then begin
-          let mf = Mir_isel.select ~pic env fn in
+          let mf = Mir_isel.select ~pic ~tls_gd env fn in
           if dump then prerr_string (Mir.to_string mf);
           let ra = Mir_ra.run mf in
           if dump then prerr_string (Mir_ra.to_string mf ra);
@@ -702,7 +731,11 @@ let generate ?(debug = false) ~startup ~pic ?(self_relocate = false) (m : F.modu
   | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)
   | Invalid_argument msg -> Error ("native backend internal error: " ^ msg)
 
-let compile_object ?debug m = generate ?debug ~startup:false ~pic:true m
+(* [tls_gd]: reach thread-local variables through __tls_get_addr
+   (general-dynamic TLS), for objects that go into a shared library, which
+   dlopen may load after the static TLS block is laid out; otherwise
+   initial-exec. Static links reject general-dynamic relocations. *)
+let compile_object ?debug ?tls_gd m = generate ?debug ?tls_gd ~startup:false ~pic:true m
 
 (* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?debug ?(inputs = []) ?options ~output m =

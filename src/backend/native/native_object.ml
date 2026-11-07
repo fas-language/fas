@@ -96,6 +96,8 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
             | X64.Tpoff32 { offset; symbol; addend } -> (offset, symbol, 23, Int64.of_int addend)
             | X64.Gottpoff { offset; symbol; addend } ->
                 (offset, symbol, 22, Int64.sub (Int64.of_int addend) 4L)
+            | X64.Tlsgd { offset; symbol; addend } ->
+                (offset, symbol, 19, Int64.sub (Int64.of_int addend) 4L)
           in
           let symbol = reference name in
           relocations :=

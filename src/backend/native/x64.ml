@@ -121,6 +121,10 @@ type reloc =
       (** R_X86_64_GOTTPOFF: PC-relative address of the GOT entry holding
           the symbol's thread-pointer offset (initial-exec TLS), in a
           `mov r64, [rip + sym@GOTTPOFF]`; "next byte" convention as [Rel32]. *)
+  | Tlsgd of { offset : int; symbol : string; addend : int }
+      (** R_X86_64_TLSGD: PC-relative address of the symbol's GOT pair
+          (module id, offset) for __tls_get_addr (general-dynamic TLS), in
+          the [lea] of [tls_get_addr]; "next byte" convention as [Rel32]. *)
 
 type t = {
   code : Buffer.t;
@@ -813,6 +817,19 @@ let call_symbol a symbol =
   int32 a 0
 
 let call_r a r = ext_r a ~w:false [ 0xff ] 2 r
+
+(* General-dynamic TLS, the exact 16 bytes of the psABI sequence, padded
+   so a linker can rewrite it in place to initial- or local-exec:
+     66 48 8d 3d <sym@tlsgd>         data16 lea sym@tlsgd(%rip), %rdi
+     66 66 48 e8 <__tls_get_addr>    data16 data16 rex.W call __tls_get_addr@PLT
+   rax = the address of [symbol] in the calling thread. *)
+let tls_get_addr a symbol =
+  List.iter (byte a) [ 0x66; 0x48; 0x8d; 0x3d ];
+  a.relocs <- Tlsgd { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  int32 a 0;
+  List.iter (byte a) [ 0x66; 0x66; 0x48; 0xe8 ];
+  a.relocs <- Call32 { offset = pos a; symbol = "__tls_get_addr"; addend = 0 } :: a.relocs;
+  int32 a 0
 let ret a = byte a 0xc3
 
 let push a r =
@@ -854,6 +871,28 @@ let fstp a ~double mem = rm a ~w:false [ (if double then 0xdd else 0xd9) ] ~reg:
 let fprem a = byte a 0xd9; byte a 0xf8
 let fnstsw_ax a = byte a 0xdf; byte a 0xe0
 let fpop a = byte a 0xdd; byte a 0xd8
+
+(* x87 for f80 (long double), which has no SSE form. The memory forms put
+   the /digit in the ModRM reg field, so the register named there only
+   stands for its number (rcx 1, rbp 5, rdi 7). *)
+let fld80 a mem = rm a ~w:false [ 0xdb ] ~reg:Rbp mem  (* db /5 *)
+let fstp80 a mem = rm a ~w:false [ 0xdb ] ~reg:Rdi mem  (* db /7 *)
+let fild64 a mem = rm a ~w:false [ 0xdf ] ~reg:Rbp mem  (* df /5 *)
+let fisttp64 a mem = rm a ~w:false [ 0xdd ] ~reg:Rcx mem  (* dd /1 (SSE3): always truncates *)
+let fnstcw a mem = rm a ~w:false [ 0xd9 ] ~reg:Rdi mem  (* d9 /7 *)
+let fldcw a mem = rm a ~w:false [ 0xd9 ] ~reg:Rbp mem  (* d9 /5 *)
+
+(* st(1) = st(1) op st(0), then pop, in Intel's naming: faddp de c1,
+   fmulp de c9, fsubp de e9 (st1 - st0), fdivp de f9 (st1 / st0) *)
+let farithp a op =
+  byte a 0xde;
+  byte a (match op with Fadd -> 0xc1 | Fmul -> 0xc9 | Fsub -> 0xe9 | Fdiv -> 0xf9 | _ -> invalid_arg "X64.farithp")
+
+let fsqrt87 a = byte a 0xd9; byte a 0xfa
+let frndint a = byte a 0xd9; byte a 0xfc
+
+(* fucomip st(0), st(1): ZF PF CF as ucomis sets them for st0 vs st1; pops st0 *)
+let fucomip a = byte a 0xdf; byte a 0xe9
 
 (* Absolute 64-bit address of a symbol, as data inside code (unused for now)
    or via [mov r64, imm64] with a relocation. *)

@@ -30,10 +30,15 @@
    - Alias tags, noalias scopes, branch weights and dbg_value are hints and
      are dropped.
 
-   Refused (Unsupported, never miscompiled): aggregates by value (C ABI
-   lowering for LLVM is roadmap v0.7), va_arg of anything but integers up to
-   64 bits, ptr, f32 and f64, 4-byte data relocations, and a blockaddr of an
-   entry block. *)
+   - Aggregates, vectors and wide integers cross calls by the C convention
+     (SPEC §5), lowered here as clang lowers C ("the C calling convention"
+     below); va_arg of those, and of f80 and f16, is spelled out.
+   - Where LLVM 22 cannot select or miscompiles integers wider than 128
+     bits (funnel shifts, saturating and int-to-float conversions), the
+     operation is expanded; odd-width stores write the full size.
+
+   Refused (Unsupported, never miscompiled): several results when one is
+   an agg, 4-byte data relocations, and a blockaddr of an entry block. *)
 
 open Fir
 
@@ -167,6 +172,128 @@ let results_ty what abis =
       (lty t, e)
   | l -> ("{ " ^ String.concat ", " (List.map (fun a -> lty (fst (abi_ty what a))) l) ^ " }", "")
 
+(* ---------- the C calling convention (SPEC §5) ----------
+
+   Aggregates, vectors and integers wider than 128 bits cross calls as C
+   passes them under the SysV psABI, with the classification the native
+   backend uses (Fir_abi), so that both paths agree with C and each other:
+   an agg in registers is one LLVM argument per eightbyte part (i64,
+   double, or <2 x i64> for an SSE + SSEUP pair), an agg in memory a byval
+   pointer, an agg result in memory an sret pointer. Whether an agg still
+   fits the registers left is decided here, as clang does, by counting the
+   registers every earlier argument takes. *)
+
+module A = Fir_abi
+
+type how =
+  | Hplain of ty * string  (** as LLVM passes the type; the extension attribute *)
+  | Hparts of int * int * (int * A.eightbyte) list  (** agg size, align, its parts *)
+  | Hmem of int * int  (** agg size, align: a byval pointer *)
+
+type rhow =
+  | Rplain of ty * string
+  | Rparts of int * int * (int * A.eightbyte) list
+  | Rsret of int * int
+  | Rx87 of int  (** an agg of one f80 (X87, X87UP) or two (COMPLEX_X87): st0, st1 *)
+
+(* An abi as C sees it. A vector is the agg holding just it; an integer of
+   more than 128 bits is its 64-bit limbs (C's _BitInt, in memory); one of
+   65 to 127 bits an i128, zero-extended as the native backend passes it
+   (LLVM would leave the top bits undefined). The second component is
+   [Some t] when the Fir value is a [t] that goes through memory (or, for
+   an i128, is zero-extended and truncated); otherwise an agg's Fir value
+   is its address *)
+let c_abi (a : abi) =
+  match a with
+  | (Scalar (Int n as t) | Ext ((Int n as t), _)) when n > 64 && n < 128 -> (Scalar (Int 128), Some t)
+  | Scalar (Vec _ as t) | Ext ((Vec _ as t), _) -> (A.vec_agg t, Some t)
+  | (Scalar (Int n as t) | Ext ((Int n as t), _)) when n > 128 ->
+      let k = (n + 63) / 64 in
+      (Agg { size = 8 * k; align = 8; fields = List.init k (fun i -> (8 * i, Int 64)) }, Some t)
+  | a -> (a, None)
+
+let ext_text = function Ext (_, Zx) -> " zeroext" | Ext (_, Sx) -> " signext" | _ -> ""
+
+(* registers as the psABI hands them out, left to right *)
+let plan_args ~sret abis =
+  let gp = ref (if sret then 1 else 0) and xp = ref 0 in
+  List.map
+    (fun (a : abi) ->
+      match a with
+      | Scalar t | Ext (t, _) ->
+          (match t with
+          | F80 -> ()
+          | F16 | F32 | F64 | Vec _ -> if !xp < 8 then incr xp
+          | Int n when n > 64 -> if !gp <= 4 then gp := !gp + 2
+          | _ -> if !gp < 6 then incr gp);
+          Hplain (t, ext_text a)
+      | Agg { size; align; fields } -> (
+          match A.classify ~size ~align ~fields with
+          | A.Regs ebs ->
+              let ng, nx = A.count_parts ebs in
+              if !gp + ng <= 6 && !xp + nx <= 8 then begin
+                gp := !gp + ng;
+                xp := !xp + nx;
+                Hparts (size, align, ebs)
+              end
+              else Hmem (size, align)
+          | A.Memory -> Hmem (size, align)))
+    abis
+
+let plan_ret (a : abi) =
+  match a with
+  | Agg { size = 16; fields; _ } when fields <> [] && List.for_all (( = ) (0, F80)) fields -> Rx87 1
+  | Agg { size = 32; fields = [ (0, F80); (16, F80) ]; _ } -> Rx87 2
+  | Scalar t | Ext (t, _) -> Rplain (t, ext_text a)
+  | Agg { size; align; fields } -> (
+      match A.classify ~size ~align ~fields with
+      | A.Memory -> Rsret (size, align)
+      | A.Regs ebs -> Rparts (size, align, ebs))
+
+let part_ty = function A.Eint -> "i64" | A.Esse -> "double" | A.Esse16 -> "<2 x i64>"
+
+(* the LLVM parameters one argument becomes: type, attributes *)
+let lparams = function
+  | Hplain (t, e) -> [ (lty t, e) ]
+  | Hparts (_, _, ps) -> List.map (fun (_, eb) -> (part_ty eb, "")) ps
+  | Hmem (size, align) -> [ ("ptr", Printf.sprintf " byval([%d x i8]) align %d" size (max 8 align)) ]
+
+let sret_attr (size, align) = Printf.sprintf " sret([%d x i8]) align %d" size align
+
+(* A lowered signature: the result's plan (None: no result, or several,
+   which return a literal struct of scalars), the parameters' plans *)
+type lsig = { rplan : (rhow * ty option) option; sret : (int * int) option; hows : (how * ty option) list }
+
+let lower_sig what (result_abis : abi list) (abis : abi list) =
+  let rplan =
+    match result_abis with
+    | [ a ] ->
+        let a, vf = c_abi a in
+        Some (plan_ret a, vf)
+    | l ->
+        List.iter (function Agg _ -> unsupported "%s: an aggregate among several results" what | _ -> ()) l;
+        None
+  in
+  let sret = match rplan with Some (Rsret (s, a), _) -> Some (s, a) | _ -> None in
+  let cabis = List.map c_abi abis in
+  let hows = plan_args ~sret:(sret <> None) (List.map fst cabis) in
+  { rplan; sret; hows = List.map2 (fun h (_, vf) -> (h, vf)) hows cabis }
+
+(* the LLVM return type and its extension attribute *)
+let lret_ty what result_abis (l : lsig) =
+  match l.rplan with
+  | None -> results_ty what result_abis
+  | Some (Rplain (t, e), _) -> (lty t, e)
+  | Some (Rsret _, _) | Some (Rparts (_, _, []), _) -> ("void", "")
+  | Some (Rparts (_, _, [ (_, eb) ]), _) -> (part_ty eb, "")
+  | Some (Rparts (_, _, ps), _) -> ("{ " ^ String.concat ", " (List.map (fun (_, eb) -> part_ty eb) ps) ^ " }", "")
+  | Some (Rx87 1, _) -> ("x86_fp80", "")
+  | Some (Rx87 _, _) -> ("{ x86_fp80, x86_fp80 }", "")
+
+(* all LLVM parameters (type, attributes), the sret pointer first *)
+let lparams_all (l : lsig) =
+  (match l.sret with Some sa -> [ ("ptr", sret_attr sa) ] | None -> []) @ List.concat_map (fun (h, _) -> lparams h) l.hows
+
 (* ---------- output ---------- *)
 
 (* Text in [buf]; [counted] is what the budget sees (debug text is free) *)
@@ -251,6 +378,9 @@ type fcx = {
   d : dbg;
   sp : (int * string) option;  (** this function's subprogram and file *)
   mutable cur : string * int * int;  (** the location of the code being emitted *)
+  allocas : Buffer.t;  (** entry-block slots, written before the body *)
+  mutable nslot : int;
+  fsig : lsig;  (** this function's lowered signature *)
 }
 
 let temp cx =
@@ -340,6 +470,161 @@ let fast_flags fl = flag_text fl [ (f_fast, "fast"); (f_contract, "contract") ]
 let fminmax cx is_min t a b =
   call_intrinsic cx ((if is_min then "llvm.minimumnum." else "llvm.maximumnum.") ^ sfx t) (lty t) [ (t, a); (t, b) ]
 
+(* ---------- calls ---------- *)
+
+(* an entry-block slot named [name] *)
+let named_slot cx name size align =
+  Buffer.add_string cx.allocas (Printf.sprintf "  %s = alloca [%d x i8], align %d\n" name (max 1 size) (max 1 align));
+  name
+
+let slot cx size align =
+  let n = cx.nslot in
+  cx.nslot <- n + 1;
+  named_slot cx ("%s" ^ string_of_int n) size align
+
+let align_up n a = (n + a - 1) / a * a
+
+(* a slot an agg's parts are loaded from or stored to: whole eightbytes,
+   room for the Fir value [vf] when there is one *)
+let parts_slot cx size align vf =
+  let need = match vf with Some t -> max size (size_of t) | None -> size in
+  slot cx (max 16 (align_up need 8)) (max 16 align)
+
+let memcpy cx dst dalign src salign size =
+  if size > 0 then
+    line cx
+      (call_intrinsic cx "llvm.memcpy.p0.p0.i64" "void"
+         [ (ptr, Printf.sprintf "align %d %s" dalign dst); (ptr, Printf.sprintf "align %d %s" (max 1 salign) src);
+           (Int 64, string_of_int size); (Int 1, "false") ])
+
+let gep cx p o =
+  if o = 0 then p
+  else begin
+    let t = temp cx in
+    line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 %d" t p o);
+    t
+  end
+
+(* loads the parts of the agg in [s] (a parts slot): "type value" each *)
+let load_parts cx s ps =
+  List.map
+    (fun (o, eb) ->
+      let t = temp cx in
+      line cx (Printf.sprintf "%s = load %s, ptr %s, align 8" t (part_ty eb) (gep cx s o));
+      part_ty eb ^ " " ^ t)
+    ps
+
+(* the parts slot holding agg [x] (its address, or a vector or wide
+   integer when [vf]) *)
+let fill_parts cx x vf size align =
+  let s = parts_slot cx size align vf in
+  (match vf with
+  | Some _ -> line cx (Printf.sprintf "store %s, ptr %s, align 16" (tv cx x) s)
+  | None -> memcpy cx s 16 (v cx x) align size);
+  s
+
+(* the address of agg [x], storing a vector or wide integer to a slot *)
+let agg_addr cx x vf size align =
+  match vf with
+  | Some t ->
+      let s = slot cx (max size (size_of t)) (max 8 align) in
+      line cx (Printf.sprintf "store %s, ptr %s, align %d" (tv cx x) s (max 8 align));
+      s
+  | None -> v cx x
+
+(* the argument texts of one argument *)
+let arg_texts cx x (how, vf) =
+  match how with
+  | Hplain (t, e) -> (
+      match vf with
+      | Some wt ->
+          let w = temp cx in
+          line cx (Printf.sprintf "%s = zext %s %s to %s" w (lty wt) (v cx x) (lty t));
+          [ lty t ^ e ^ " " ^ w ]
+      | None -> [ lty t ^ e ^ " " ^ v cx x ])
+  | Hmem (size, align) ->
+      [ Printf.sprintf "ptr byval([%d x i8]) align %d %s" size (max 8 align) (agg_addr cx x vf size align) ]
+  | Hparts (size, align, ps) -> if ps = [] then [] else load_parts cx (fill_parts cx x vf size align) ps
+
+(* the Fir value [res] of an agg result stored at [s] *)
+let def_from_slot cx res vf s =
+  match vf with
+  | Some t -> line cx (Printf.sprintf "%s = load %s, ptr %s, align 16" res (lty t) s)
+  | None -> line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 0" res s)
+
+(* va_list fields (psABI 3.5.7): gp_offset, fp_offset, overflow_arg_area,
+   reg_save_area. The overflow area's next value, aligned for [align]:
+   (field address, value address, the field's next value) *)
+let va_overflow cx ap size align =
+  let field = gep cx ap 8 in
+  let ov = temp cx in
+  line cx (Printf.sprintf "%s = load ptr, ptr %s, align 8" ov field);
+  let al =
+    if align <= 8 then ov
+    else begin
+      let up = gep cx ov (align - 1) and al = temp cx in
+      line cx (Printf.sprintf "%s = %s" al (call_intrinsic cx "llvm.ptrmask.p0.i64" "ptr" [ (ptr, up); (Int 64, string_of_int (- align)) ]));
+      al
+    end
+  in
+  (field, ov, al, gep cx al (align_up size 8))
+
+(* va_arg of an agg: its address. In registers when every part fits the
+   registers left, else from the overflow area. Without branches (a Fir
+   block stays one LLVM block, which its successors' phis name): each
+   eightbyte is copied from the register save area or the overflow area,
+   whichever applies, and the va_list fields are updated by selects *)
+let va_arg_agg cx (abi : abi) ap =
+  match abi with
+  | Agg { size; align; fields } -> (
+      match A.classify ~size ~align ~fields with
+      | A.Memory ->
+          let field, _, al, next = va_overflow cx ap size align in
+          line cx (Printf.sprintf "store ptr %s, ptr %s, align 8" next field);
+          al
+      | A.Regs ebs ->
+          let ng, nx = A.count_parts ebs in
+          let gp = temp cx and fp = temp cx and c1 = temp cx and c2 = temp cx and c = temp cx and area = temp cx in
+          let fpf = gep cx ap 4 in
+          line cx (Printf.sprintf "%s = load i32, ptr %s, align 4" gp ap);
+          line cx (Printf.sprintf "%s = load i32, ptr %s, align 4" fp fpf);
+          line cx (Printf.sprintf "%s = icmp ule i32 %s, %d" c1 gp (48 - (8 * ng)));
+          line cx (Printf.sprintf "%s = icmp ule i32 %s, %d" c2 fp (176 - (16 * nx)));
+          line cx (Printf.sprintf "%s = and i1 %s, %s" c c1 c2);
+          line cx (Printf.sprintf "%s = load ptr, ptr %s, align 8" area (gep cx ap 16));
+          let field, ov, al, next = va_overflow cx ap size align in
+          let s = parts_slot cx size align None in
+          let gi = ref 0 and xi = ref 0 in
+          List.iter
+            (fun (o, eb) ->
+              let base, k = if eb = A.Eint then (gp, 8 * !gi) else (fp, 16 * !xi) in
+              if eb = A.Eint then incr gi else incr xi;
+              let off = temp cx in
+              line cx (Printf.sprintf "%s = zext i32 %s to i64" off base);
+              List.iter
+                (fun h ->
+                  let ra = temp cx and ra2 = temp cx and src = temp cx and x = temp cx in
+                  line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 %s" ra area off);
+                  line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 %d" ra2 ra (k + h));
+                  line cx (Printf.sprintf "%s = select i1 %s, ptr %s, ptr %s" src c ra2 (gep cx al (o + h)));
+                  line cx (Printf.sprintf "%s = load i64, ptr %s, align 8" x src);
+                  line cx (Printf.sprintf "store i64 %s, ptr %s, align 8" x (gep cx s (o + h))))
+                (if eb = A.Esse16 then [ 0; 8 ] else [ 0 ]))
+            ebs;
+          let upd v n field =
+            let a = temp cx and b = temp cx in
+            line cx (Printf.sprintf "%s = add i32 %s, %d" a v n);
+            line cx (Printf.sprintf "%s = select i1 %s, i32 %s, i32 %s" b c a v);
+            line cx (Printf.sprintf "store i32 %s, ptr %s, align 4" b field)
+          in
+          if ng > 0 then upd gp (8 * ng) ap;
+          if nx > 0 then upd fp (16 * nx) fpf;
+          let ovn = temp cx in
+          line cx (Printf.sprintf "%s = select i1 %s, ptr %s, ptr %s" ovn c ov next);
+          line cx (Printf.sprintf "store ptr %s, ptr %s, align 8" ovn field);
+          s)
+  | _ -> unsupported "va_arg_agg of a scalar"
+
 let emit_inst cx (ir : inst_rec) =
   let f = cx.f in
   set_loc cx ir.loc;
@@ -425,6 +710,25 @@ let emit_inst cx (ir : inst_rec) =
   | Fma (_, a, b, c) ->
       let t = tyv cx a in
       def (call_intrinsic cx ("llvm.fma." ^ sfx t) (lty t) [ arg cx a; arg cx b; arg cx c ])
+  | Fsh (left, a, b, c) when (match tyv cx a with Int n -> n > 128 | _ -> false) ->
+      (* LLVM cannot select a funnel shift wider than 128 bits: with
+         s = c mod n, fshl is (a << s) | ((b >> 1) >> (n - 1 - s)) and fshr
+         ((a << 1) << (n - 1 - s)) | (b >> s), no shift reaching n *)
+      let t = lty (tyv cx a) and n = int_width (tyv cx a) in
+      let s' = temp cx and k = temp cx and one = temp cx and x = temp cx and y = temp cx in
+      line cx (Printf.sprintf "%s = urem %s, %d" s' (tv cx c) n);
+      line cx (Printf.sprintf "%s = sub %s %d, %s" k t (n - 1) s');
+      if left then begin
+        line cx (Printf.sprintf "%s = lshr %s, 1" one (tv cx b));
+        line cx (Printf.sprintf "%s = shl %s, %s" x (tv cx a) s');
+        line cx (Printf.sprintf "%s = lshr %s %s, %s" y t one k)
+      end
+      else begin
+        line cx (Printf.sprintf "%s = shl %s, 1" one (tv cx a));
+        line cx (Printf.sprintf "%s = shl %s %s, %s" x t one k);
+        line cx (Printf.sprintf "%s = lshr %s, %s" y (tv cx b) s')
+      end;
+      def (Printf.sprintf "or %s %s, %s" t x y)
   | Fsh (left, a, b, c) ->
       let t = tyv cx a in
       def (call_intrinsic cx ((if left then "llvm.fshl." else "llvm.fshr.") ^ sfx t) (lty t) [ arg cx a; arg cx b; arg cx c ])
@@ -445,10 +749,88 @@ let emit_inst cx (ir : inst_rec) =
   | Fcmp (k, fl, a, b) -> def (Printf.sprintf "fcmp%s %s %s, %s" (fast_flags fl) (fcmp_text k) (tv cx a) (v cx b))
   | Select (c, a, b) -> def (Printf.sprintf "select %s, %s, %s" (tv cx c) (tv cx a) (tv cx b))
   | Freeze a -> def ("freeze " ^ tv cx a)
+  | Conv ((Fptosi_sat | Fptoui_sat) as k, a) when (match rty cx ir 0 with Int n -> n > 128 | _ -> false) ->
+      (* LLVM cannot select a saturating conversion to more than 128 bits:
+         the bounds 2^(n-1) (or 2^n) compared in the float type (as +inf
+         when they overflow it), then a plain conversion of what is in range *)
+      let st = tyv cx a and dt = rty cx ir 0 in
+      let n = int_width dt and signed = k = Fptosi_sat in
+      let ft = lty st and it = lty dt in
+      let one = temp cx and hi = temp cx and lo = temp cx and chi = temp cx and clo = temp cx and nan = temp cx in
+      let y = temp cx and r1 = temp cx and r2 = temp cx in
+      line cx (Printf.sprintf "%s = sitofp i32 1 to %s" one ft);
+      line cx
+        (Printf.sprintf "%s = %s" hi
+           (call_intrinsic cx ("llvm.ldexp." ^ sfx st ^ ".i32") ft [ (st, one); (Int 32, string_of_int (if signed then n - 1 else n)) ]));
+      if signed then line cx (Printf.sprintf "%s = fneg %s %s" lo ft hi)
+      else line cx (Printf.sprintf "%s = fsub %s %s, %s" lo ft one one);
+      line cx (Printf.sprintf "%s = fcmp oge %s, %s" chi (tv cx a) hi);
+      (* signed: x <= -2^(n-1), which holds for -inf when that bound
+         overflows the float type *)
+      line cx (Printf.sprintf "%s = fcmp %s %s, %s" clo (if signed then "ole" else "olt") (tv cx a) lo);
+      line cx (Printf.sprintf "%s = fcmp uno %s, %s" nan (tv cx a) (v cx a));
+      line cx (Printf.sprintf "%s = %s %s to %s" y (if signed then "fptosi" else "fptoui") (tv cx a) it);
+      (* the largest value, and the smallest (signed: its complement) *)
+      let maxv = temp cx and minv = temp cx in
+      line cx (Printf.sprintf "%s = lshr %s -1, %d" maxv it (if signed then 1 else 0));
+      line cx (Printf.sprintf "%s = xor %s %s, -1" minv it maxv);
+      line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s %s" r1 chi it maxv it y);
+      line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s %s" r2 clo it (if signed then minv else "0") it r1);
+      def (Printf.sprintf "select i1 %s, %s 0, %s %s" nan it it r2)
   | Conv ((Fptosi_sat | Fptoui_sat) as k, a) ->
       let st = tyv cx a and dt = rty cx ir 0 in
       let name = (if k = Fptosi_sat then "llvm.fptosi.sat." else "llvm.fptoui.sat.") ^ sfx dt ^ "." ^ sfx st in
       def (call_intrinsic cx name (lty dt) [ arg cx a ])
+  | Conv ((Sitofp | Uitofp) as k, a) when (match tyv cx a with Int n -> n > 128 | _ -> false) ->
+      (* LLVM 22 converts integers wider than 128 bits wrongly (an unsigned
+         one with its top bit set as if signed; a magnitude that overflows
+         f32 to garbage). Instead: the magnitude |x|, shifted right by
+         m = max(0, bits(|x|) - 128) with the lost bits kept as a sticky
+         bit, is an i128 that rounds like |x| (128 bits are more than any
+         float's precision + 2); uitofp of it (compiler-rt), times 2^m
+         (overflowing to infinity exactly when |x| rounds to it), negated
+         back. The most negative x is its own negation, right as unsigned *)
+      let at = tyv cx a and ft = lty (rty cx ir 0) in
+      let n = int_width at and it = lty at in
+      let x = v cx a in
+      let t () = temp cx in
+      let ax, neg =
+        if k = Sitofp then begin
+          let neg = t () and mx = t () and ax = t () in
+          line cx (Printf.sprintf "%s = icmp slt %s %s, 0" neg it x);
+          line cx (Printf.sprintf "%s = sub %s 0, %s" mx it x);
+          line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s %s" ax neg it mx it x);
+          (ax, Some neg)
+        end
+        else (x, None)
+      in
+      let lz = t () and bl = t () and big = t () and m0 = t () and m = t () in
+      line cx (Printf.sprintf "%s = %s" lz (call_intrinsic cx ("llvm.ctlz." ^ sfx at) it [ (at, ax); (Int 1, "false") ]));
+      line cx (Printf.sprintf "%s = sub %s %d, %s" bl it n lz);
+      line cx (Printf.sprintf "%s = icmp ugt %s %s, 128" big it bl);
+      line cx (Printf.sprintf "%s = sub %s %s, 128" m0 it bl);
+      line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s 0" m big it m0 it);
+      let sh = t () and one = t () and mask = t () and low = t () and st = t () and stz = t () and y = t () and y128 = t () in
+      line cx (Printf.sprintf "%s = lshr %s %s, %s" sh it ax m);
+      line cx (Printf.sprintf "%s = shl %s 1, %s" one it m);
+      line cx (Printf.sprintf "%s = sub %s %s, 1" mask it one);
+      line cx (Printf.sprintf "%s = and %s %s, %s" low it ax mask);
+      line cx (Printf.sprintf "%s = icmp ne %s %s, 0" st it low);
+      line cx (Printf.sprintf "%s = zext i1 %s to %s" stz st it);
+      line cx (Printf.sprintf "%s = or %s %s, %s" y it sh stz);
+      line cx (Printf.sprintf "%s = trunc %s %s to i128" y128 it y);
+      let f = t () and m32 = t () and g = t () in
+      line cx (Printf.sprintf "%s = uitofp i128 %s to %s" f y128 ft);
+      line cx (Printf.sprintf "%s = trunc %s %s to i32" m32 it m);
+      line cx
+        (Printf.sprintf "%s = %s" g
+           (call_intrinsic cx ("llvm.ldexp." ^ sfx (rty cx ir 0) ^ ".i32") ft [ (rty cx ir 0, f); (Int 32, m32) ]));
+      (match neg with
+      | Some neg ->
+          let ng = t () in
+          line cx (Printf.sprintf "%s = fneg %s %s" ng ft g);
+          def (Printf.sprintf "select i1 %s, %s %s, %s %s" neg ft ng ft g)
+      | None -> def (Printf.sprintf "freeze %s %s" ft g))
   | Conv (k, a) -> def (Printf.sprintf "%s %s to %s" (conv_text k) (tv cx a) (lty (rty cx ir 0)))
   | Alloca (n, al) -> (
       match int_value f n with
@@ -463,11 +845,21 @@ let emit_inst cx (ir : inst_rec) =
           (Printf.sprintf "load atomic%s %s, %s %s%s" (if m.volatile then " volatile" else "") (lty t) (tv cx p)
              (ordering_text m.order) (mem_suffix m))
   | Store (m, x, p) ->
+      (* an odd width is stored zero-extended to its full size (SPEC §2);
+         LLVM would write only its store size and leave the rest *)
+      let xt =
+        match tyv cx x with
+        | Int n when n > 1 && 8 * size_of (Int n) > n ->
+            let t = temp cx and w = 8 * size_of (Int n) in
+            line cx (Printf.sprintf "%s = zext %s to i%d" t (tv cx x) w);
+            Printf.sprintf "i%d %s" w t
+        | _ -> tv cx x
+      in
       if m.order = Plain then
-        line cx (Printf.sprintf "store%s %s, %s%s" (if m.volatile then " volatile" else "") (tv cx x) (tv cx p) (mem_suffix m))
+        line cx (Printf.sprintf "store%s %s, %s%s" (if m.volatile then " volatile" else "") xt (tv cx p) (mem_suffix m))
       else
         line cx
-          (Printf.sprintf "store atomic%s %s, %s %s%s" (if m.volatile then " volatile" else "") (tv cx x) (tv cx p)
+          (Printf.sprintf "store atomic%s %s, %s %s%s" (if m.volatile then " volatile" else "") xt (tv cx p)
              (ordering_text m.order) (mem_suffix m))
   | Ptradd (fl, p, idx, scale, disp) -> (
       let ib = if has fl f_inbounds then " inbounds" else "" in
@@ -525,12 +917,30 @@ let emit_inst cx (ir : inst_rec) =
            (ordering_text m.order) (mem_suffix m))
   | Cmpxchg { mem = m; fail; weak; p; expected; desired } ->
       let t = tyv cx expected in
-      let st = Printf.sprintf "{ %s, i1 }" (lty t) in
+      (* LLVM's cmpxchg takes only integers and pointers: a float compares
+         (and swaps) its bits, as an integer of its width *)
+      let it = match t with F16 -> Some "i16" | F32 -> Some "i32" | F64 -> Some "i64" | _ -> None in
+      let operand x =
+        match it with
+        | None -> tv cx x
+        | Some i ->
+            let b = temp cx in
+            line cx (Printf.sprintf "%s = bitcast %s to %s" b (tv cx x) i);
+            i ^ " " ^ b
+      in
+      let e_op = operand expected in
+      let d_op = operand desired in
+      let st = Printf.sprintf "{ %s, i1 }" (match it with Some i -> i | None -> lty t) in
       let s = temp cx in
       line cx
         (Printf.sprintf "%s = cmpxchg%s%s %s, %s, %s %s %s%s" s (if weak then " weak" else "") (if m.volatile then " volatile" else "")
-           (tv cx p) (tv cx expected) (tv cx desired) (ordering_text m.order) (ordering_text fail) (mem_suffix m));
-      line cx (Printf.sprintf "%s = extractvalue %s %s, 0" (r 0) st s);
+           (tv cx p) e_op d_op (ordering_text m.order) (ordering_text fail) (mem_suffix m));
+      (match it with
+      | None -> line cx (Printf.sprintf "%s = extractvalue %s %s, 0" (r 0) st s)
+      | Some i ->
+          let o = temp cx in
+          line cx (Printf.sprintf "%s = extractvalue %s %s, 0" o st s);
+          line cx (Printf.sprintf "%s = bitcast %s %s to %s" (r 0) i o (lty t)));
       line cx (Printf.sprintf "%s = extractvalue %s %s, 1" (r 1) st s)
   | Fence o -> line cx ("fence " ^ ordering_text o)
   | Extract (x, i) -> def (Printf.sprintf "extractelement %s, %s" (tv cx x) (tv cx i))
@@ -611,43 +1021,84 @@ let emit_inst cx (ir : inst_rec) =
         (call_intrinsic cx ("llvm.masked.expandload." ^ sfx vt) (lty vt)
            [ (ptr, slot); arg cx mask; (vt, "zeroinitializer") ])
   | Call { sig_; callee; args; attrs; va_aggs } ->
-      if va_aggs <> [] then unsupported "a struct by value through `...` (C ABI aggregates for LLVM come with roadmap v0.7)";
       let what = match callee with Direct n -> "call of @" ^ n | Indirect _ -> "indirect call" in
-      let ret, ret_ext = results_ty what sig_.result_abis in
       let nfixed = List.length sig_.param_abis in
-      let arg_text =
-        Array.to_list
-          (Array.mapi
-             (fun k x ->
-               if k < nfixed then
-                 let t, e = abi_ty what (List.nth sig_.param_abis k) in
-                 lty t ^ e ^ " " ^ v cx x
-               else tv cx x)
-             args)
+      let abis =
+        List.mapi
+          (fun k x ->
+            if k < nfixed then List.nth sig_.param_abis k
+            else match List.assoc_opt k va_aggs with Some a -> a | None -> Scalar (tyv cx x))
+          (Array.to_list args)
       in
-      (* a variadic callee's type is spelled out; so is an indirect one's *)
+      let l = lower_sig what sig_.result_abis abis in
+      let ret, ret_ext = lret_ty what sig_.result_abis l in
+      let sret_slot = Option.map (fun (size, align) -> slot cx size (max 8 align)) l.sret in
+      let arg_text =
+        (match (l.sret, sret_slot) with
+        | Some sa, Some p -> [ "ptr" ^ sret_attr sa ^ " " ^ p ]
+        | _ -> [])
+        @ List.concat (List.map2 (fun x h -> arg_texts cx x h) (Array.to_list args) l.hows)
+      in
+      (* a variadic callee's type is spelled out, with the fixed parameters
+         as lowered; so is an indirect one's *)
       let fn_ty =
         if sig_.variadic then
-          Printf.sprintf "%s (%s) " ret
-            (String.concat ", " (List.map (fun a -> let t, e = abi_ty what a in lty t ^ e) sig_.param_abis @ [ "..." ]))
+          let fixed = { l with hows = List.filteri (fun k _ -> k < nfixed) l.hows } in
+          Printf.sprintf "%s (%s) " ret (String.concat ", " (List.map (fun (t, a) -> t ^ a) (lparams_all fixed) @ [ "..." ]))
         else ret ^ " "
       in
       let callee_text = match callee with Direct n -> cx.sym n | Indirect p -> v cx p in
       let fattrs =
         flag_text attrs [ (a_noreturn, "noreturn"); (a_returns_twice, "returns_twice"); (a_nounwind, "nounwind") ]
       in
+      (* a callee handed one of this frame's slots is no tail call *)
+      let tail = has attrs a_tail && l.sret = None && not (List.exists (function Hmem _, _ -> true | _ -> false) l.hows) in
       let text =
-        Printf.sprintf "%scall%s %s%s(%s)%s"
-          (if has attrs a_tail then "tail " else "")
-          ret_ext fn_ty callee_text (String.concat ", " arg_text) fattrs
+        Printf.sprintf "%scall%s %s%s(%s)%s" (if tail then "tail " else "") ret_ext fn_ty callee_text
+          (String.concat ", " arg_text) fattrs
       in
-      (match ir.results with
-      | [||] -> line cx text
-      | [| _ |] -> def text
-      | rs ->
+      (match (l.rplan, ir.results) with
+      | _, [||] -> line cx text
+      | Some (Rplain (t, _), Some wt), _ ->
+          let w = temp cx in
+          line cx (w ^ " = " ^ text);
+          def (Printf.sprintf "trunc %s %s to %s" (lty t) w (lty wt))
+      | None, [| _ |] | Some (Rplain _, _), _ -> def text
+      | None, rs ->
           let s = temp cx in
           line cx (s ^ " = " ^ text);
-          Array.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (r k) ret s k)) rs)
+          Array.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (r k) ret s k)) rs
+      | Some (Rsret _, vf), _ -> line cx text; def_from_slot cx (r 0) vf (Option.get sret_slot)
+      | Some (Rparts (size, align, ps), vf), _ ->
+          let s = parts_slot cx size align vf in
+          (match ps with
+          | [] -> line cx text
+          | [ (o, eb) ] ->
+              let t = temp cx in
+              line cx (t ^ " = " ^ text);
+              line cx (Printf.sprintf "store %s %s, ptr %s, align 8" (part_ty eb) t (gep cx s o))
+          | ps ->
+              let t = temp cx in
+              line cx (t ^ " = " ^ text);
+              List.iteri
+                (fun k (o, eb) ->
+                  let x = temp cx in
+                  line cx (Printf.sprintf "%s = extractvalue %s %s, %d" x ret t k);
+                  line cx (Printf.sprintf "store %s %s, ptr %s, align 8" (part_ty eb) x (gep cx s o)))
+                ps);
+          def_from_slot cx (r 0) vf s
+      | Some (Rx87 n, vf), _ ->
+          let s = slot cx (16 * n) 16 in
+          let t = temp cx in
+          line cx (t ^ " = " ^ text);
+          if n = 1 then line cx (Printf.sprintf "store x86_fp80 %s, ptr %s, align 16" t s)
+          else
+            for k = 0 to n - 1 do
+              let x = temp cx in
+              line cx (Printf.sprintf "%s = extractvalue %s %s, %d" x ret t k);
+              line cx (Printf.sprintf "store x86_fp80 %s, ptr %s, align 16" x (gep cx s (16 * k)))
+            done;
+          def_from_slot cx (r 0) vf s)
   | Syscall args ->
       (* Linux x86-64: number in rax, arguments in rdi rsi rdx r10 r8 r9; the
          kernel clobbers rcx and r11 *)
@@ -662,8 +1113,33 @@ let emit_inst cx (ir : inst_rec) =
       match rty cx ir 0 with
       | (Int w) as t when w <= 64 -> def (Printf.sprintf "va_arg %s, %s" (tv cx p) (lty t))
       | (Ptr _ | F32 | F64) as t -> def (Printf.sprintf "va_arg %s, %s" (tv cx p) (lty t))
-      | t -> unsupported "va_arg of %s on the LLVM path" (ty_to_string t))
-  | Va_arg_agg _ -> unsupported "va_arg of a struct (C ABI aggregates for LLVM come with roadmap v0.7)"
+      | F80 ->
+          (* LLVM's x86-64 va_arg does not take x86_fp80, so spelled out:
+             long double always comes from the overflow area (va_list
+             offset 8), 16-aligned, 16 bytes *)
+          let slot = temp cx and o = temp cx and up = temp cx and al = temp cx and next = temp cx in
+          line cx (Printf.sprintf "%s = getelementptr i8, %s, i64 8" slot (tv cx p));
+          line cx (Printf.sprintf "%s = load ptr, ptr %s, align 8" o slot);
+          line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 15" up o);
+          line cx (Printf.sprintf "%s = %s" al (call_intrinsic cx "llvm.ptrmask.p0.i64" "ptr" [ (Ptr 0, up); (Int 64, "-16") ]));
+          line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 16" next al);
+          line cx (Printf.sprintf "store ptr %s, ptr %s, align 8" next slot);
+          def (Printf.sprintf "load x86_fp80, ptr %s, align 16" al)
+      | F16 ->
+          (* _Float16 takes an SSE slot (or an 8-byte stack slot) like
+             float, with the value in its low 16 bits: read a float there *)
+          let f = temp cx and i = temp cx and h = temp cx in
+          line cx (Printf.sprintf "%s = va_arg %s, float" f (tv cx p));
+          line cx (Printf.sprintf "%s = bitcast float %s to i32" i f);
+          line cx (Printf.sprintf "%s = trunc i32 %s to i16" h i);
+          def (Printf.sprintf "bitcast i16 %s to half" h)
+      | (Vec _ | Int _) as t ->
+          (* as the agg C passes it in: __int128 two INTEGER eightbytes,
+             16-aligned in memory; a vector or a wider integer (§5) *)
+          let abi = match t with Int n when n <= 128 -> Agg { size = 16; align = 16; fields = [ (0, t) ] } | _ -> fst (c_abi (Scalar t)) in
+          let a = va_arg_agg cx abi (v cx p) in
+          def (Printf.sprintf "load %s, ptr %s, align 8" (lty t) a))
+  | Va_arg_agg (abi, p) -> def (Printf.sprintf "getelementptr i8, ptr %s, i64 0" (va_arg_agg cx abi (v cx p)))
   | Stack_save -> def (call_intrinsic cx "llvm.stacksave.p0" "ptr" [])
   | Stack_restore p -> line cx (call_intrinsic cx ("llvm.stackrestore." ^ sfx (tyv cx p)) "void" [ arg cx p ])
   | Lifetime (s, n, p) ->
@@ -735,7 +1211,48 @@ let emit_term cx b (labels : string array) =
         (Printf.sprintf "indirectbr %s, [%s]" (tv cx x)
            (String.concat ", " (Array.to_list (Array.mapi (fun k _ -> lab k) bs))))
   | Ret [||] -> line cx "ret void"
-  | Ret [| x |] -> line cx ("ret " ^ tv cx x)
+  | Ret [| x |] -> (
+      match cx.fsig.rplan with
+      | Some (Rplain (t, _), Some _) ->
+          let w = temp cx in
+          line cx (Printf.sprintf "%s = zext %s to %s" w (tv cx x) (lty t));
+          line cx (Printf.sprintf "ret %s %s" (lty t) w)
+      | None | Some (Rplain _, _) -> line cx ("ret " ^ tv cx x)
+      | Some (Rsret (size, align), vf) ->
+          (match vf with
+          | Some _ -> line cx (Printf.sprintf "store %s, ptr %%sret, align %d" (tv cx x) (max 8 align))
+          | None -> memcpy cx "%sret" (max 1 align) (v cx x) align size);
+          line cx "ret void"
+      | Some (Rparts (size, align, ps), vf) -> (
+          let s = fill_parts cx x vf size align in
+          match load_parts cx s ps with
+          | [] -> line cx "ret void"
+          | [ p ] -> line cx ("ret " ^ p)
+          | parts ->
+              let st = "{ " ^ String.concat ", " (List.map (fun (_, eb) -> part_ty eb) ps) ^ " }" in
+              let acc = ref "poison" in
+              List.iteri
+                (fun k p ->
+                  let t = temp cx in
+                  line cx (Printf.sprintf "%s = insertvalue %s %s, %s, %d" t st !acc p k);
+                  acc := t)
+                parts;
+              line cx (Printf.sprintf "ret %s %s" st !acc))
+      | Some (Rx87 n, _) ->
+          let p = v cx x in
+          let ld k =
+            let t = temp cx in
+            line cx (Printf.sprintf "%s = load x86_fp80, ptr %s, align 16" t (gep cx p (16 * k)));
+            t
+          in
+          if n = 1 then line cx ("ret x86_fp80 " ^ ld 0)
+          else begin
+            let a = ld 0 and b = ld 1 in
+            let t1 = temp cx and t2 = temp cx in
+            line cx (Printf.sprintf "%s = insertvalue { x86_fp80, x86_fp80 } poison, x86_fp80 %s, 0" t1 a);
+            line cx (Printf.sprintf "%s = insertvalue { x86_fp80, x86_fp80 } %s, x86_fp80 %s, 1" t2 t1 b);
+            line cx ("ret { x86_fp80, x86_fp80 } " ^ t2)
+          end)
   | Ret xs ->
       let st = "{ " ^ String.concat ", " (Array.to_list (Array.map (fun x -> lty (tyv cx x)) xs)) ^ " }" in
       let acc = ref "poison" in
@@ -772,6 +1289,9 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
     (m : modul) =
   if budget < 0 then Error "rendered LLVM text budget must not be negative"
   else
+    (* LLVM's atomics take only power-of-two byte-sized integers (and its
+       x86_fp80 ones are not usable): the same rewrite as the native path *)
+    let () = Fir_atomic.run m in
     let o = { buf = Buffer.create 65536; counted = 0; budget } in
     let sym n = global_name (redirect n) in
     let d =
@@ -865,11 +1385,18 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
                  ty init section align)
           end)
         m.globals;
+      (* an alias of a thread-local variable is thread-local itself: without
+         the mark LLVM takes its address as a plain symbol, the same in
+         every thread *)
+      let tls_names = Hashtbl.create 8 in
+      Vec.iter (fun g -> if g.thread_local then Hashtbl.replace tls_names g.gname ()) m.globals;
+      Vec.iter (fun a -> if Hashtbl.mem tls_names a.target then Hashtbl.replace tls_names a.aname ()) m.aliases;
       Vec.iter
         (fun a ->
           let target = if a.addend = 0L then "ptr " ^ sym a.target else Printf.sprintf "ptr getelementptr (i8, ptr %s, i64 %Ld)" (sym a.target) a.addend in
           add o
-            (Printf.sprintf "%s = %s%salias i8, %s\n" (sym a.aname) (linkage_text a.alinkage) (visibility_text a.alinkage a.avisibility) target))
+            (Printf.sprintf "%s = %s%s%salias i8, %s\n" (sym a.aname) (linkage_text a.alinkage) (visibility_text a.alinkage a.avisibility)
+               (if Hashtbl.mem tls_names a.aname then "thread_local " else "") target))
         m.aliases;
       (* a defined global in a named section is part of the program even when
          nothing here names it (a registry walked between __start_s and
@@ -896,11 +1423,12 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
         (fun f ->
           Hashtbl.replace declared f.name ();
           let what = "@" ^ f.name in
-          let ret, ret_ext = results_ty what f.sig_.result_abis in
+          let fsig = lower_sig what f.sig_.result_abis f.sig_.param_abis in
+          let ret, ret_ext = lret_ty what f.sig_.result_abis fsig in
           let ret_ext = if ret_ext = "" then "" else String.sub ret_ext 1 (String.length ret_ext - 1) ^ " " in
           if not f.defined then begin
             begin
-              let params = List.map (fun a -> let t, e = abi_ty what a in lty t ^ e) f.sig_.param_abis in
+              let params = List.map (fun (t, e) -> t ^ e) (lparams_all fsig) in
               let params = if f.sig_.variadic then params @ [ "..." ] else params in
               add o
                 (Printf.sprintf "declare %s%s%s %s(%s)%s%s\n" (if f.linkage = Weak then "extern_weak " else "")
@@ -932,15 +1460,27 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
                     Some (id, file, line)
             in
             let cx =
-              { m; f; o; sym; intrinsics; intrinsic_order; tmp = 0; d; sp = Option.map (fun (id, file, _) -> (id, file)) sp;
-                cur = (match sp with Some (_, file, line) -> (file, line, 0) | None -> ("", 0, 0)) }
+              { m; f; o = { buf = Buffer.create 4096; counted = o.counted; budget = o.budget }; sym; intrinsics;
+                intrinsic_order; tmp = 0; d; sp = Option.map (fun (id, file, _) -> (id, file)) sp;
+                cur = (match sp with Some (_, file, line) -> (file, line, 0) | None -> ("", 0, 0));
+                allocas = Buffer.create 256; nslot = 0; fsig }
             in
+            (* LLVM parameters: %a<k> for a plain one, %a<k>.<j> for the
+               parts of an agg, %a<k>.p for a byval pointer to a vector or
+               wide integer, %sret *)
             let params =
-              List.mapi
-                (fun k a ->
-                  let t, e = abi_ty what a in
-                  Printf.sprintf "%s%s %%a%d" (lty t) e k)
-                f.sig_.param_abis
+              (match fsig.sret with Some sa -> [ "ptr" ^ sret_attr sa ^ " %sret" ] | None -> [])
+              @ List.concat
+                  (List.mapi
+                     (fun k (h, vf) ->
+                       match (h, vf) with
+                       | Hplain (t, e), None -> [ Printf.sprintf "%s%s %%a%d" (lty t) e k ]
+                       | Hplain (t, e), Some _ -> [ Printf.sprintf "%s%s %%a%d.w" (lty t) e k ]
+                       | Hmem _, _ ->
+                           let t, e = List.hd (lparams h) in
+                           [ Printf.sprintf "%s%s %%a%d%s" t e k (if vf = None then "" else ".p") ]
+                       | Hparts (_, _, ps), _ -> List.mapi (fun j (_, eb) -> Printf.sprintf "%s %%a%d.%d" (part_ty eb) k j) ps)
+                     fsig.hows)
             in
             let params = if f.sig_.variadic then params @ [ "..." ] else params in
             add o
@@ -950,11 +1490,36 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
                  (attr_refs ~definition:true));
             Option.iter (fun (id, _, _) -> add_debug o (Printf.sprintf " !dbg !%d" id)) sp;
             add o " {\n";
+            add o (label entry ^ ":\n");
             let incoming, edge_labels, trampolines = plan_edges f in
+            (* the body goes to cx.o, after the entry block's allocas *)
+            let fo = o and o = cx.o in
+            o.counted <- fo.counted;
+            (* agg parameters in registers: stored to a slot, which is their
+               Fir value (or loaded from it as a vector or wide integer) *)
+            List.iteri
+              (fun k (h, vf) ->
+                match (h, vf) with
+                | Hparts (size, align, ps), _ ->
+                    let s =
+                      if vf = None then named_slot cx (Printf.sprintf "%%a%d" k) (max 16 (align_up size 8)) (max 16 align)
+                      else parts_slot cx size align vf
+                    in
+                    List.iteri
+                      (fun j (off, eb) ->
+                        line cx (Printf.sprintf "store %s %%a%d.%d, ptr %s, align 8" (part_ty eb) k j (gep cx s off)))
+                      ps;
+                    Option.iter (fun t -> line cx (Printf.sprintf "%%a%d = load %s, ptr %s, align 16" k (lty t) s)) vf
+                | Hplain (t, _), Some wt -> line cx (Printf.sprintf "%%a%d = trunc %s %%a%d.w to %s" k (lty t) k (lty wt))
+                | Hmem (_, align), Some t -> line cx (Printf.sprintf "%%a%d = load %s, ptr %%a%d.p, align %d" k (lty t) k (max 8 align))
+                | _ -> ())
+              fsig.hows;
             for b = 0 to num_blocks f - 1 do
               let br = block f b in
-              if b > 0 then add o "\n";
-              add o (label b ^ ":\n");
+              if b > 0 then begin
+                add o "\n";
+                add o (label b ^ ":\n")
+              end;
               if b = entry then
                 (* slots of [expand] *)
                 Vec.iter
@@ -983,7 +1548,12 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
                   line cx ("br label %" ^ label dest))
                 trampolines.(b)
             done;
-            add o "}\n"
+            let used = o.counted - fo.counted in
+            add fo (Buffer.contents cx.allocas);
+            fo.counted <- fo.counted + used;
+            if fo.counted > fo.budget then raise Exhausted;
+            Buffer.add_buffer fo.buf o.buf;
+            add fo "}\n"
           end)
         m.funcs;
       (* intrinsics this emitter used, unless the module declares them itself *)

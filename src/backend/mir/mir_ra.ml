@@ -33,7 +33,14 @@
       free, the interval that ends last (this one or one already holding a
       register it could use) goes to the stack for its whole life.
 
-   5. Spilled virtual registers live in an 8-byte frame slot. At each
+   5. Spilled virtual registers live in an 8-byte frame slot, one per
+      virtual register and never shared. A call marked returns_twice
+      (setjmp) depends on that: after a longjmp, a value from before the
+      call is read again from its slot, or from a callee-saved register,
+      which longjmp restores, even when code that ran in between reused
+      the register. A slot shared by intervals that do not overlap in the
+      layout would break it, because the second return is an edge the
+      hull does not see. At each
       instruction that mentions one, it is loaded into a scratch register
       before ("reload") and stored back after a write ("spill"). The scratch
       registers are kept out of the linear scan whenever something spills:

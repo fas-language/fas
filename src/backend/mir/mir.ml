@@ -52,6 +52,31 @@ type target =
   | Tlabel of string  (** a function defined in this object, called directly *)
   | Tsym of string  (** through the symbol (PLT in position-independent code) *)
   | Treg of reg
+  | Ttlsgd of string
+      (** general-dynamic TLS: __tls_get_addr(&sym's GOT pair), as the
+          canonical [lea sym@tlsgd(%rip), %rdi; call __tls_get_addr@PLT]
+          sequence the linker recognizes; the variable's address comes back
+          in rax. An ordinary call otherwise (rdi is clobbered anyway) *)
+
+(* x87 memory operand forms *)
+type x87w = M32 | M64 | M80 | I64  (** f32, f64, f80; I64: fild / fisttp m64 *)
+
+(* One x87 instruction (f80 arithmetic). The x87 register stack is not
+   allocated: each selection rule pushes its operands, computes and pops
+   everything again, so the stack is empty between rules, except that a
+   call leaves an f80 result in st0 for the [Fstp] right after it and [Fld]
+   puts one there just before a return. *)
+type x87 =
+  | Fld of x87w * addr  (** push *)
+  | Fstp of x87w * addr  (** pop into memory *)
+  | Farith of X64.fop  (** st1 = st1 op st0, pop (Fadd Fsub Fmul Fdiv) *)
+  | Fremloop  (** st0 = fmod(st0, st1) by an fprem loop; clobbers rax and the flags *)
+  | Fsqrt87
+  | Frndint  (** in the control word's rounding mode *)
+  | Fucomip  (** flags as ucomis for st0 vs st1, pop *)
+  | Fpop
+  | Fnstcw of addr
+  | Fldcw of addr
 
 type ins =
   | Copy of reg * reg  (** dst, src; same class (64-bit mov or movaps) *)
@@ -60,6 +85,9 @@ type ins =
   | Store of int * addr * reg  (** bytes, address, src *)
   | Fload of bool * reg * addr  (** double?, dst xmm *)
   | Fstore of bool * addr * reg
+  | Xload of reg * addr  (** all 16 bytes of an xmm register (movdqu) *)
+  | Xstore of addr * reg
+  | Align_sp of int  (** rsp rounded down to a multiple of N (> 16), for a call whose stack arguments need it *)
   | Lea of reg * addr
   | Got of reg * string  (** dst = the symbol's GOT entry *)
   | Tp of reg  (** dst = the thread pointer (fs:0) *)
@@ -96,6 +124,7 @@ type ins =
   | Round of bool * reg * reg * int  (** roundsd/ss mode (0 even, 1 floor, 2 ceil, 3 trunc) *)
   | Frem87 of bool * int
       (** x87 fprem loop on frame slot [s]: [s] = fmod([s], [s + 8]); clobbers rax *)
+  | X87 of x87
   | Call of { target : target; args : reg list; rets : reg list }
       (** [args] are the physical registers the call reads (al included for
           variadic calls), [rets] those it defines; every other caller-saved
@@ -167,8 +196,8 @@ let uses_defs = function
   | Movi (d, _) | Got (d, _) | Tp d | Tlsoff (d, _) | Setcc (_, d) | Spget d -> ([], [ d ])
   | Salloc (d, n) -> ([ n ], [ d ])
   | Spset s -> ([ s ], [])
-  | Load (_, _, d, a) | Fload (_, d, a) | Lea (d, a) -> (addr_regs a, [ d ])
-  | Store (_, a, s) | Fstore (_, a, s) -> (s :: addr_regs a, [])
+  | Load (_, _, d, a) | Fload (_, d, a) | Xload (d, a) | Lea (d, a) -> (addr_regs a, [ d ])
+  | Store (_, a, s) | Fstore (_, a, s) | Xstore (a, s) -> (s :: addr_regs a, [])
   | Alu (X64.Cmp, x, y) | Test (x, y) | Ucomi (_, x, y) -> ([ x; y ], [])
   | Alu (_, d, s) | Imul (d, s) | Cmov (_, d, s) | Fop (_, _, d, s) -> ([ d; s ], [ d ])
   | Alui (X64.Cmp, x, _) -> ([ x ], [])
@@ -191,11 +220,13 @@ let uses_defs = function
   | Div (_, s) -> ([ G Rax; G Rdx; s ], [ G Rax; G Rdx ])
   | Cqo -> ([ G Rax ], [ G Rdx ])
   | Frem87 _ -> ([], [])
+  | X87 (Fld (_, a) | Fstp (_, a) | Fnstcw a | Fldcw a) -> (addr_regs a, [])
+  | X87 _ -> ([], [])
   | Call { target; args; rets } -> ((match target with Treg r -> [ r ] | _ -> []) @ args, rets)
   | Syscall args -> (args, [ G Rax ])
   | Rep_movsb -> ([ G Rdi; G Rsi; G Rcx ], [ G Rdi; G Rsi; G Rcx ])
   | Rep_stosb -> ([ G Rdi; G Rax; G Rcx ], [ G Rdi; G Rcx ])
-  | Std | Cld | Mfence | Ud2 | Loc _ -> ([], [])
+  | Std | Cld | Mfence | Ud2 | Loc _ | Align_sp _ -> ([], [])
   | Xchg (_, a, r) | Xadd (_, a, r) -> (r :: addr_regs a, [ r ])
   | Cmpxchg (_, a, r) -> (G Rax :: r :: addr_regs a, [ G Rax ])
 
@@ -206,7 +237,7 @@ let clobbers = function
         (fun r -> not (List.mem r rets))
         (List.map (fun r -> G r) caller_saved @ List.init 16 (fun i -> X i))
   | Syscall _ -> [ G Rcx; G R11 ]
-  | Frem87 _ -> [ G Rax ]
+  | Frem87 _ | X87 Fremloop -> [ G Rax ]
   | _ -> []
 
 let term_uses = function Ret rs -> rs | Jmpr (r, _) -> [ r ] | Jmp _ | Jcc _ | Halt -> []
@@ -229,6 +260,8 @@ let map_regs g ins =
   | Store (n, a, s) -> Store (n, ma a, g s)
   | Fload (dbl, d, a) -> Fload (dbl, g d, ma a)
   | Fstore (dbl, a, s) -> Fstore (dbl, ma a, g s)
+  | Xload (d, a) -> Xload (g d, ma a)
+  | Xstore (a, s) -> Xstore (ma a, g s)
   | Lea (d, a) -> Lea (g d, ma a)
   | Got (d, s) -> Got (g d, s)
   | Tp d -> Tp (g d)
@@ -262,6 +295,11 @@ let map_regs g ins =
   | Cvtff (dbl, d, s) -> Cvtff (dbl, g d, g s)
   | Round (dbl, d, s, m) -> Round (dbl, g d, g s, m)
   | Frem87 _ as i -> i
+  | X87 (Fld (w, a)) -> X87 (Fld (w, ma a))
+  | X87 (Fstp (w, a)) -> X87 (Fstp (w, ma a))
+  | X87 (Fnstcw a) -> X87 (Fnstcw (ma a))
+  | X87 (Fldcw a) -> X87 (Fldcw (ma a))
+  | X87 _ as i -> i
   | Call c ->
       Call
         {
@@ -270,7 +308,7 @@ let map_regs g ins =
           rets = List.map g c.rets;
         }
   | Syscall args -> Syscall (List.map g args)
-  | (Rep_movsb | Rep_stosb | Std | Cld | Mfence | Ud2 | Loc _) as i -> i
+  | (Rep_movsb | Rep_stosb | Std | Cld | Mfence | Ud2 | Loc _ | Align_sp _) as i -> i
   | Salloc (d, n) -> Salloc (g d, g n)
   | Spget d -> Spget (g d)
   | Spset s -> Spset (g s)
@@ -338,6 +376,8 @@ let ins_s i =
   | Store (n, m, a) -> p "store%d %s, %s" n (addr_s m) (r a)
   | Fload (dbl, a, m) -> p "%s = fload%s %s" (r a) (d dbl) (addr_s m)
   | Fstore (dbl, m, a) -> p "fstore%s %s, %s" (d dbl) (addr_s m) (r a)
+  | Xload (a, m) -> p "%s = xload %s" (r a) (addr_s m)
+  | Xstore (m, a) -> p "xstore %s, %s" (addr_s m) (r a)
   | Lea (a, m) -> p "%s = lea %s" (r a) (addr_s m)
   | Got (a, s) -> p "%s = got @%s" (r a) s
   | Tp a -> p "%s = tp" (r a)
@@ -371,9 +411,22 @@ let ins_s i =
   | Cvtff (fd, a, b) -> p "%s = cvt%s2%s %s" (r a) (d fd) (d (not fd)) (r b)
   | Round (dbl, a, b, m) -> p "%s = round%s %s, %d" (r a) (d dbl) (r b) m
   | Frem87 (dbl, s) -> p "frem87%s slot%d" (d dbl) s
+  | X87 x -> (
+      let w = function M32 -> "m32" | M64 -> "m64" | M80 -> "m80" | I64 -> "i64" in
+      match x with
+      | Fld (k, m) -> p "fld %s %s" (w k) (addr_s m)
+      | Fstp (k, m) -> p "fstp %s %s" (w k) (addr_s m)
+      | Farith op -> p "%sp" (fop_s op)
+      | Fremloop -> "fprem loop"
+      | Fsqrt87 -> "fsqrt"
+      | Frndint -> "frndint"
+      | Fucomip -> "fucomip"
+      | Fpop -> "fpop"
+      | Fnstcw m -> p "fnstcw %s" (addr_s m)
+      | Fldcw m -> p "fldcw %s" (addr_s m))
   | Call { target; args; rets } ->
       p "call %s (%s) -> (%s)"
-        (match target with Tlabel s -> s | Tsym s -> "@" ^ s | Treg x -> r x)
+        (match target with Tlabel s -> s | Tsym s -> "@" ^ s | Treg x -> r x | Ttlsgd s -> "tlsgd @" ^ s)
         (String.concat ", " (List.map r args))
         (String.concat ", " (List.map r rets))
   | Syscall args -> p "syscall (%s)" (String.concat ", " (List.map r args))
@@ -385,6 +438,7 @@ let ins_s i =
   | Xadd (n, m, a) -> p "lock xadd%d %s, %s" n (addr_s m) (r a)
   | Cmpxchg (n, m, a) -> p "lock cmpxchg%d %s, %s" n (addr_s m) (r a)
   | Mfence -> "mfence"
+  | Align_sp n -> Printf.sprintf "align_sp %d" n
   | Ud2 -> "ud2"
   | Loc n -> Printf.sprintf ".loc %d" n
   | Salloc (a, n) -> p "%s = salloc %s" (r a) (r n)

@@ -39,7 +39,9 @@ assert_count "$int_load" 'volatile ' 3
 assert_count "$int_store" 'volatile ' 3
 assert_count "$bool_load" 'volatile ' 1
 assert_count "$bool_store" 'volatile ' 1
-if printf '%s\n' "$int_load" "$bool_load" | grep -Eq ' = load (i[0-9]+|<)'; then
+# %sN are the backend's own slots: a vector result crosses the call in its
+# C form (an agg), so it is stored to one and read back as eightbytes
+if printf '%s\n' "$int_load" "$bool_load" | grep -E ' = load (i[0-9]+|<)' | grep -Evq ', ptr %s[0-9]+,'; then
   echo "volatile vectors: a load used a nonvolatile access" >&2
   exit 1
 fi

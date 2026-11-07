@@ -12,14 +12,13 @@
      i / 8, ceil(n/8) bytes; the unused high bits of the last byte are
      stored as 0). A vector load or store is one access per lane (per byte
      for bool vectors). Atomic vector accesses are refused.
-   - The calling convention is the old native backend's (scalarize.ml), so
-     both backends' objects link together: a vector parameter is passed as
-     its lanes, one parameter each; a vector result is returned through a
-     hidden pointer parameter, appended after the fixed parameters (one per
-     vector result, in order), that the callee stores the vector to in the
-     memory layout above. The function returns no value for it. This is
-     not the SysV vector ABI: C code compiled by clang passes vectors in
-     xmm registers, so vector signatures don't cross into C.
+   - The calling convention is C's (SysV, without AVX) for a GNU vector of
+     the same size: a vector parameter, result or variadic argument becomes
+     an [agg] holding just that vector ([vec_agg]), so the value travels in
+     memory here and Mir_isel's classification puts it in registers (a
+     16-byte vector in one xmm register, 8 bytes in one xmm, up to 4 bytes
+     in a GPR, wider ones in memory). [va_arg] of a vector reads such an
+     agg.
    - [extract] and [insert] at a variable index compare the index with each
      lane (an index out of range gives an arbitrary lane: the result is
      poison, SPEC §8). [shuffle], [splat] and [reduce] pick and fold lanes;
@@ -37,6 +36,7 @@
    A [dbg_value] of a vector is dropped. *)
 
 open Fir
+open Fir_abi
 
 exception Unsupported of string
 
@@ -45,22 +45,8 @@ let is_vec = function Vec _ -> true | _ -> false
 
 (* ---------- signatures ---------- *)
 
-(* the ABI slots one source parameter becomes *)
-let param_abis (a : abi) : abi list =
-  match a with
-  | Scalar (Vec (n, t)) -> List.init n (fun _ -> Scalar t)
-  | Ext (Vec (n, t), x) -> List.init n (fun _ -> Ext (t, x))
-  | a -> [ a ]
-
-let vec_result = function Scalar (Vec _) | Ext (Vec _, _) -> true | _ -> false
-
 let sig_of (s : signature) =
-  let hidden = List.filter_map (fun a -> if vec_result a then Some (Scalar ptr) else None) s.result_abis in
-  {
-    s with
-    param_abis = List.concat_map param_abis s.param_abis @ hidden;
-    result_abis = List.filter (fun a -> not (vec_result a)) s.result_abis;
-  }
+  { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis }
 
 let abi_has_vec = function Scalar t | Ext (t, _) -> is_vec t | Agg _ -> false
 let sig_changes (s : signature) = List.exists abi_has_vec s.param_abis || List.exists abi_has_vec s.result_abis
@@ -360,16 +346,29 @@ let copy_inst cx (ir : inst_rec) =
 
 let vec_value cx v = is_vec (src_ty cx v)
 
-(* call arguments by the source signature: vector arguments become their
-   lanes; [hidden] (the result slots) follow the fixed arguments *)
-let call_args cx (s : signature) (args : value array) hidden =
+(* a vector stored to fresh memory of its call size: the pointer *)
+let vec_in_mem cx v =
+  let t = src_ty cx v in
+  let p = slot cx (pow2_ge (vec_bytes t)) in
+  store_vec cx (plain_mem 16) t (get cx v) p;
+  p
+
+(* call arguments: a vector becomes a pointer to it in memory; one through
+   [...] also gets its agg ABI in [va_aggs] *)
+let call_args cx (s : signature) (args : value array) =
   let nfixed = List.length s.param_abis in
-  let fixed = Array.sub args 0 (min nfixed (Array.length args)) in
-  let rest = Array.sub args (Array.length fixed) (Array.length args - Array.length fixed) in
-  let fixed = Array.concat (List.map (get cx) (Array.to_list fixed)) in
-  Array.iter (fun x -> if vec_value cx x then unsupported "a vector passed through ...") rest;
-  let shift = Array.length fixed + List.length hidden - nfixed in
-  (Array.concat [ fixed; Array.of_list hidden; Array.map (get1 cx) rest ], shift)
+  let va = ref [] in
+  let args =
+    Array.mapi
+      (fun k x ->
+        if vec_value cx x then begin
+          if k >= nfixed then va := (k, vec_agg (src_ty cx x)) :: !va;
+          vec_in_mem cx x
+        end
+        else get1 cx x)
+      args
+  in
+  (args, List.rev !va)
 
 let convert_inst cx (i : inst) =
   let ir = inst cx.f i in
@@ -392,22 +391,22 @@ let convert_inst cx (i : inst) =
   match ir.op with
   | Call c ->
       let sig_ = sig_of c.sig_ in
-      (* one entry-block slot per vector result *)
-      let slots =
-        List.filter_map
-          (fun res -> match ty_of cx.f res with Vec _ as t -> Some (res, t, slot cx (size_of t)) | _ -> None)
-          (Array.to_list ir.results)
-      in
-      let args, shift = call_args cx c.sig_ c.args (List.map (fun (_, _, p) -> p) slots) in
-      let va_aggs = List.map (fun (k, a) -> (k + shift, a)) c.va_aggs in
+      let args, va = call_args cx c.sig_ c.args in
+      let va_aggs = c.va_aggs @ va in
       let callee = match c.callee with Indirect p -> Indirect (get1 cx p) | d -> d in
-      let scalars = List.filter (fun res -> not (vec_value cx res)) (Array.to_list ir.results) in
-      let rs =
-        emit ~loc:cx.loc cx.g cx.b (Call { c with sig_; callee; args; va_aggs })
-          (Array.of_list (List.map (ty_of cx.f) scalars))
-      in
-      List.iteri (fun k res -> set cx res [| rs.(k) |]) scalars;
-      List.iter (fun (res, t, p) -> set cx res (load_vec cx (plain_mem 16) t p)) slots
+      (* a vector result comes back as a pointer to it *)
+      let rtys = Array.map (fun res -> if vec_value cx res then ptr else ty_of cx.f res) ir.results in
+      let rs = emit ~loc:cx.loc cx.g cx.b (Call { c with sig_; callee; args; va_aggs }) rtys in
+      Array.iteri
+        (fun k res ->
+          match ty_of cx.f res with
+          | Vec _ as t -> set cx res (load_vec cx (plain_mem 1) t rs.(k))
+          | _ -> set cx res [| rs.(k) |])
+        ir.results
+  | Va_arg p when vec_value cx (r 0) ->
+      let t = rty 0 in
+      let q = e cx (Va_arg_agg (vec_agg t, get1 cx p)) ptr in
+      set cx (r 0) (load_vec cx (plain_mem 1) t q)
   | _ when not any_vec -> copy_inst cx ir
   | Nop -> ()
   | Dbg_value _ -> ()
@@ -523,27 +522,14 @@ let convert_inst cx (i : inst) =
 
 let target_args cx (t : target) = { t with args = Array.concat (List.map (get cx) (Array.to_list t.args)) }
 
-let rebuild_term cx (b : block) hidden =
+let rebuild_term cx (b : block) =
   let br = block cx.f b in
   cx.loc <- br.term_loc;
   let set_term t = Fir.set_term ~loc:br.term_loc cx.g cx.b t in
   match br.term with
   | Ret vs ->
-      (* vector results go to the hidden pointers, in order *)
-      let hidden = ref hidden in
-      let scalars =
-        List.filter_map
-          (fun v ->
-            match src_ty cx v with
-            | Vec _ as t ->
-                let p = List.hd !hidden in
-                hidden := List.tl !hidden;
-                store_vec cx (plain_mem 1) t (get cx v) p;
-                None
-            | _ -> Some (get1 cx v))
-          (Array.to_list vs)
-      in
-      set_term (Ret (Array.of_list scalars))
+      (* a vector result is returned from memory, as an agg *)
+      set_term (Ret (Array.map (fun v -> if vec_value cx v then vec_in_mem cx v else get1 cx v) vs))
   | Jump t -> set_term (Jump (target_args cx t))
   | Br (c, t, f, w) -> set_term (Br (get1 cx c, target_args cx t, target_args cx f, w))
   | Switch (v, d, cases) ->
@@ -581,25 +567,24 @@ let rebuild_func (f : func) : func =
     for b = 0 to nb - 1 do
       ignore (add_block ~name:(block f b).bname g)
     done;
-    (* parameters: lanes for vectors, in every block; then the entry
-       block's hidden result pointers *)
+    (* parameters: lanes for vectors, in every block, except the entry
+       block's vector parameters: a pointer to the vector (an agg),
+       loaded at once *)
     for b = 0 to nb - 1 do
       Array.iter
         (fun p ->
           match ty_of f p with
+          | Vec _ as t when b = entry -> set cx p (load_vec cx (plain_mem 1) t (add_param g b ptr))
           | Vec (n, t) -> set cx p (Array.init n (fun _ -> add_param g b t))
           | t -> set cx p [| add_param g b t |])
         (block f b).params
     done;
-    let hidden =
-      List.filter_map (fun a -> if vec_result a then Some (add_param g entry ptr) else None) f.sig_.result_abis
-    in
     let rpo = Fir_dom.reverse_postorder (Fir_dom.cfg f) in
     Array.iter
       (fun b ->
         cx.b <- b;
         Vec.iter (fun i -> convert_inst cx i) (block f b).insts;
-        rebuild_term cx b hidden)
+        rebuild_term cx b)
       rpo;
     g
   end

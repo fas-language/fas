@@ -9,7 +9,6 @@
 ;   FFI = {float x, y; int z}    SSE (two floats), INTEGER
 ;   BIG = {long a, b, c}         MEMORY (24 bytes)
 ;   S1  = {int a}                INTEGER, one eightbyte
-; llvm: skip aggregates by value (C ABI lowering for LLVM, roadmap v0.7)
 triple "x86_64-unknown-linux-gnu"
 declare @c_ii (agg(16, 8, [0: i64, 8: i64])) -> (i64) global
 declare @c_mk_ii (i64, i64) -> (agg(16, 8, [0: i64, 8: i64])) global
@@ -248,5 +247,83 @@ func @fir_iff (agg(12, 4, [0: i32, 4: f32, 8: f32])) -> (agg(12, 4, [0: i32, 4: 
 func @fir_apply (ptr, agg(16, 8, [0: f64, 8: i64])) -> (agg(16, 8, [0: f64, 8: i64])) global {
 ^e(%fn: ptr, %p: ptr):
   %r = call (agg(16, 8, [0: f64, 8: i64])) -> (agg(16, 8, [0: f64, 8: i64])) %fn(%p)
+  ret %r
+}
+
+; long double in structs (x87 class): {long double, int} is MEMORY;
+; {long double} comes back in st0, _Complex long double in st0/st1
+declare @c_ld_pair (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) global
+declare @c_ld_cplx (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) global
+func @fir_ld_pair (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) global {
+^e(%p: ptr, %k: f80):
+  %x = load f80 %p, align 16
+  %q = ptradd ptr %p, i64 0, 1, 16
+  %i = load i32 %q, align 4
+  %fi = sitofp f80 %i
+  %xk = fmul f80 %x, %k
+  %v = fadd f80 %xk, %fi
+  %r = alloca ptr i64 16, align 16
+  store %v, %r, align 16
+  ret %r
+}
+func @fir_ld_cplx (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) global {
+^e(%a: f80, %b: f80):
+  %re = fadd f80 %a, %b
+  %im = fsub f80 %a, %b
+  %r = alloca ptr i64 32, align 16
+  store %re, %r, align 16
+  %q = ptradd ptr %r, i64 0, 1, 16
+  store %im, %q, align 16
+  ret %r
+}
+; c_ld_pair({a, 7}, b) + re * im of c_ld_cplx(a, b)
+func @fir_call_ld (f80, f80) -> (f80) global {
+^e(%a: f80, %b: f80):
+  %s = alloca ptr i64 32, align 16
+  store %a, %s, align 16
+  %q = ptradd ptr %s, i64 0, 1, 16
+  store i32 7, %q, align 4
+  %pr = call (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) @c_ld_pair(%s, %b)
+  %pv = load f80 %pr, align 16
+  %cr = call (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) @c_ld_cplx(%a, %b)
+  %re = load f80 %cr, align 16
+  %ci = ptradd ptr %cr, i64 0, 1, 16
+  %im = load f80 %ci, align 16
+  %m = fmul f80 %re, %im
+  %r = fadd f80 %pv, %m
+  ret %r
+}
+
+; f16 fields share one SSE eightbyte: {f16, f16, f32} in, {f16, f16} out
+declare @c_hpair (agg(8, 4, [0: f16, 2: f16, 4: f32])) -> (agg(4, 2, [0: f16, 2: f16])) global
+func @fir_call_hpair (f16, f16) -> (f16) global {
+^e(%a: f16, %b: f16):
+  %p = alloca ptr i64 8, align 4
+  store %a, %p, align 4
+  %p2 = ptradd ptr %p, i64 0, 1, 2
+  store %b, %p2, align 2
+  %p4 = ptradd ptr %p, i64 0, 1, 4
+  store f32 0x40000000, %p4, align 4
+  %q = call (agg(8, 4, [0: f16, 2: f16, 4: f32])) -> (agg(4, 2, [0: f16, 2: f16])) @c_hpair(%p)
+  %x = load f16 %q, align 2
+  %q2 = ptradd ptr %q, i64 0, 1, 2
+  %y = load f16 %q2, align 2
+  %xy = fsub f16 %x, %y
+  ret %xy
+}
+func @fir_h_pair (agg(8, 4, [0: f16, 2: f16, 4: f32])) -> (agg(4, 2, [0: f16, 2: f16])) global {
+^e(%p: ptr):
+  %x = load f16 %p, align 4
+  %p2 = ptradd ptr %p, i64 0, 1, 2
+  %y = load f16 %p2, align 2
+  %p4 = ptradd ptr %p, i64 0, 1, 4
+  %f = load f32 %p4, align 4
+  %xf = fpext f32 %x
+  %m = fmul f32 %xf, %f
+  %mh = fptrunc f16 %m
+  %r = alloca ptr i64 4, align 2
+  store %y, %r, align 2
+  %r2 = ptradd ptr %r, i64 0, 1, 2
+  store %mh, %r2, align 2
   ret %r
 }

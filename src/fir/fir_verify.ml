@@ -340,8 +340,8 @@ let verify_func (f : func) =
             | Va_arg p ->
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
-                if nres = 1 && not (is_int (r 0) || is_ptr (r 0) || r 0 = F32 || r 0 = F64) then
-                  err "%s: va_arg reads an integer, a ptr, f32 or f64" where
+                if nres = 1 && not (is_int (r 0) || is_ptr (r 0) || r 0 = F16 || r 0 = F32 || r 0 = F64 || r 0 = F80 || (match r 0 with Vec _ -> true | _ -> false)) then
+                  err "%s: va_arg reads an integer, a ptr, f16, f32, f64, f80 or a vector" where
             | Stack_save ->
                 want 1;
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: stacksave defines a ptr" where

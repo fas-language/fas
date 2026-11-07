@@ -19,6 +19,18 @@ typedef struct { int i; float f, g; } IFF;
 C3 fir_c3(C3); I5 fir_i5(I5); IFF fir_iff(IFF); DI fir_apply(DI (*)(DI), DI);
 static DI twice(DI x) { return (DI){x.d * 2, x.a * 2}; }
 
+typedef struct { long double x; int i; } LDI;
+typedef struct { long double x; } LD1;
+LD1 c_ld_pair(LDI s, long double k) { return (LD1){s.x * k - s.i}; }
+_Complex long double c_ld_cplx(long double a, long double b) { return a * b + (a - b) * 1.0iL; }
+struct hhf { _Float16 x, y; float f; };
+struct hh { _Float16 a, b; };
+struct hh c_hpair(struct hhf p) { struct hh r = { (_Float16)(p.x + p.y), (_Float16)((float)p.x * p.f) }; return r; }
+_Float16 fir_call_hpair(_Float16, _Float16);
+struct hh fir_h_pair(struct hhf);
+LD1 fir_ld_pair(LDI, long double);
+_Complex long double fir_ld_cplx(long double, long double);
+long double fir_call_ld(long double, long double);
 long c_ii(II s) { return s.a * 3 + s.b; }
 II c_mk_ii(long a, long b) { return (II){a, b}; }
 BIG c_mk_big(long n) { return (BIG){n, n + 1, n + 2}; }
@@ -61,6 +73,21 @@ int main(void) {
   for (int k = 0; k < 5; k++) CHECK("i5", i5.a[k], ((int[]){-5, 4, 3, 2, 1})[k]);
   IFF iff = fir_iff((IFF){12, 0.5f, 8.0f}); CHECK("iff.i", iff.i, -12); CHECK("iff.fg", iff.f * 10 + iff.g * 4, 82);
   DI ap = fir_apply(twice, (DI){1.25, -21}); CHECK("apply.d", ap.d * 2, 5); CHECK("apply.a", ap.a, -42);
+  {
+    long double a = 1.0L / 3, b = -2.5L;
+    LD1 p = fir_ld_pair((LDI){a, 5}, b); CHECK("ld_pair", p.x == a * b + 5, 1);
+    _Complex long double c = fir_ld_cplx(a, b);
+    CHECK("ld_cplx", __real__ c == a + b && __imag__ c == a - b, 1);
+    long double re = a * b, im = a - b;
+    CHECK("call_ld", fir_call_ld(a, b) == (a * b - 7) + re * im, 1);
+  }
+  {
+    _Float16 x = (_Float16)1.5f, y = (_Float16)-0.375f;
+    struct hh q = c_hpair((struct hhf){x, y, 2.0f});
+    CHECK("call_hpair", fir_call_hpair(x, y) == (_Float16)(q.a - q.b), 1);
+    struct hh r = fir_h_pair((struct hhf){x, y, 2.5f});
+    CHECK("h_pair", r.a == y && r.b == (_Float16)(1.5f * 2.5f), 1);
+  }
   if (!bad) printf("ok\n");
   return bad;
 }

@@ -5,7 +5,10 @@
 # exit code (default 0). FAS_FIR_TOOL names the tool; by default the dune build.
 # test/fas_fir/c/NAME.fir is compiled with -c and linked with NAME.c by a C
 # compiler (FAS_CC, else cc), whose main exits 0 when the two agree; skipped
-# when no C compiler is found. FAS_FIR_FLAGS are passed to every tool run.
+# when no C compiler is found. A c/NAME.fir with a "; shared: yes" line is
+# built with -c -fPIC into a shared library instead, and NAME.c gets its
+# path as argv[1] (to dlopen it). A "; libs: -lx ..." line adds libraries
+# to the link. FAS_FIR_FLAGS are passed to every tool run.
 # Each executable program is built twice: as a static PIE (the default, whose
 # _start relocates itself) and with --no-pie (a fixed-address executable).
 # FAS_FIR_FLAGS=--llvm runs them all through the LLVM path instead (Fir_llvm,
@@ -43,8 +46,22 @@ if command -v "$cc" >/dev/null 2>&1; then
     name=$(basename "$f" .fir)
     if llvm_skip "$f"; then skipped=$((skipped + 1)); continue; fi
     n=$((n + 1))
+    if grep -q '^; shared: yes' "$f"; then
+      # a shared library (-fPIC) that NAME.c loads with dlopen (argv[1])
+      if ! "$tool" $flags -c -fPIC "$f" -o "$tmp/c_$name.o" 2>"$tmp/err" \
+        || ! "$cc" -shared "$tmp/c_$name.o" -o "$tmp/lib_$name.so" 2>"$tmp/err" \
+        || ! "$cc" -rdynamic "$here/fas_fir/c/$name.c" -o "$tmp/c_$name" -ldl -lpthread 2>"$tmp/err"; then
+        echo "FAIL c/$name: $(cat "$tmp/err")"; fail=1; continue
+      fi
+      if ! "$tmp/c_$name" "$tmp/lib_$name.so" > "$tmp/c_$name.stdout"; then
+        echo "FAIL c/$name: $(cat "$tmp/c_$name.stdout")"; fail=1
+      fi
+      continue
+    fi
+    n=$((n + 1))
+    libs=$(sed -n 's/^; libs: *//p' "$f")
     if ! "$tool" $flags -c "$f" -o "$tmp/c_$name.o" 2>"$tmp/err" \
-      || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" -lm 2>"$tmp/err"; then
+      || ! "$cc" "$here/fas_fir/c/$name.c" "$tmp/c_$name.o" -o "$tmp/c_$name" -lm $libs 2>"$tmp/err"; then
       echo "FAIL c/$name: $(cat "$tmp/err")"; fail=1; continue
     fi
     if ! "$tmp/c_$name" > "$tmp/c_$name.stdout"; then

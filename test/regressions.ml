@@ -3317,7 +3317,8 @@ let () =
     [
       "call i1 @check_struct(ptr";
       "call i1 @check_array(ptr";
-      "call <3 x i32> @pass_vector(<3 x i32>";
+      (* a vec[3,i32] crosses calls as C passes it: one SSE eightbyte pair *)
+      "call <2 x i64> @pass_vector(<2 x i64>";
     ];
   let arity_messages =
     semantic_messages
@@ -7051,7 +7052,8 @@ let () =
     llvm_of
       "fn not2(a vec[2, bool]) vec[2, bool] { return !a }\nfn main() i32 { return 0 }\n"
   in
-  if not (contains mask_negation_admit "define internal <2 x i1> @not2(<2 x i1>") then
+  (* a bool vector crosses calls in its C form: one INTEGER eightbyte *)
+  if not (contains mask_negation_admit "define internal i64 @not2(i64") then
     failwith "control: mask negation not admitted";
   let bitnot_messages =
     semantic_messages
@@ -11446,12 +11448,14 @@ let () =
               fn f() vec[2,bool] { return R }\n"
              expr)
       in
+      (* vector results cross calls in their C form (an agg), so the
+         folded constant shows as the store into the result's slot *)
       if not (contains ir needle) then failwith ("mask: " ^ name ^ " drifted"))
     [
-      ("const-not", "!M", "ret <2 x i1> <i1 true, i1 false>\n");
-      ("const-and", "M & N", "ret <2 x i1> <i1 false, i1 false>\n");
-      ("const-or", "M | (A == A)", "ret <2 x i1> <i1 true, i1 true>\n");
-      ("const-xor", "M ^ (A == A)", "ret <2 x i1> <i1 true, i1 false>\n");
+      ("const-not", "!M", "store <2 x i1> <i1 true, i1 false>, ptr");
+      ("const-and", "M & N", "store <2 x i1> <i1 false, i1 false>, ptr");
+      ("const-or", "M | (A == A)", "store <2 x i1> <i1 true, i1 true>, ptr");
+      ("const-xor", "M ^ (A == A)", "store <2 x i1> <i1 true, i1 false>, ptr");
     ];
   List.iter
     (fun (name, expr, needle) ->
@@ -11473,7 +11477,7 @@ let () =
     [
       ("const-any", "any(M)", "ret i1 true\n");
       ("const-all", "all(M)", "ret i1 false\n");
-      ("const-select", "select(M, A, B)", "ret <2 x i32> <i32 2, i32 2>\n");
+      ("const-select", "select(M, A, B)", "store <2 x i32> <i32 2, i32 2>, ptr");
     ];
   let mask_runtime =
     llvm_of
@@ -11541,12 +11545,12 @@ let () =
       ( "const-same",
         "shuffle(A, B, I)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 3, i8 3, i8 8>\n" );
-      ("const-fewer", "shuffle(A, B, I2)", "vec[2,u8]", "ret <2 x i8> <i8 4, i8 1>\n");
+        "store <4 x i8> <i8 1, i8 3, i8 3, i8 8>, ptr" );
+      ("const-fewer", "shuffle(A, B, I2)", "vec[2,u8]", "store <2 x i8> <i8 4, i8 1>, ptr");
       ( "const-signed-positive",
         "shuffle(A, B, IS)",
         "vec[2,u8]",
-        "ret <2 x i8> <i8 6, i8 4>\n" );
+        "store <2 x i8> <i8 6, i8 4>, ptr" );
     ];
   let shuffle_runtime =
     llvm_of
@@ -11585,7 +11589,7 @@ let () =
          const I vec[4,u8] = bitcast[vec[4,u8]](KI)\n",
         "permute(A, I)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 3, i8 3, i8 0>\n" );
+        "store <4 x i8> <i8 1, i8 3, i8 3, i8 0>, ptr" );
       ( "const-no-truncation",
         "const KA u16 = 513\n\
          const A vec[2,u8] = bitcast[vec[2,u8]](KA)\n\
@@ -11593,7 +11597,7 @@ let () =
          const I vec[2,u16] = bitcast[vec[2,u16]](KI)\n",
         "permute(A, I)",
         "vec[2,u8]",
-        "ret <2 x i8> <i8 0, i8 2>\n" );
+        "store <2 x i8> <i8 0, i8 2>, ptr" );
       ( "const-more-lanes",
         "const KA u16 = 513\n\
          const A vec[2,u8] = bitcast[vec[2,u8]](KA)\n\
@@ -11601,7 +11605,7 @@ let () =
          const I vec[4,u8] = bitcast[vec[4,u8]](KI)\n",
         "permute(A, I)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 0, i8 2, i8 0>\n" );
+        "store <4 x i8> <i8 1, i8 0, i8 2, i8 0>, ptr" );
     ];
   let permute_runtime =
     llvm_of
@@ -11728,7 +11732,7 @@ let () =
          const M vec[4,bool] = V == W\n",
         "compress(V, M)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 3, i8 0, i8 0>\n" );
+        "store <4 x i8> <i8 1, i8 3, i8 0, i8 0>, ptr" );
       ( "expand-int",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
@@ -11737,7 +11741,7 @@ let () =
          const M vec[4,bool] = V == W\n",
         "expand(V, M)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 0, i8 2, i8 0>\n" );
+        "store <4 x i8> <i8 1, i8 0, i8 2, i8 0>, ptr" );
       ( "compress-all-false",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
@@ -11746,14 +11750,14 @@ let () =
          const M vec[4,bool] = V == A\n",
         "compress(V, M)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 0, i8 0, i8 0, i8 0>\n" );
+        "store <4 x i8> <i8 0, i8 0, i8 0, i8 0>, ptr" );
       ( "compress-all-true",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
          const M vec[4,bool] = V == V\n",
         "compress(V, M)",
         "vec[4,u8]",
-        "ret <4 x i8> <i8 1, i8 2, i8 3, i8 4>\n" );
+        "store <4 x i8> <i8 1, i8 2, i8 3, i8 4>, ptr" );
       ( "compress-bool-lanes",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
@@ -11765,7 +11769,7 @@ let () =
          const M4 vec[4,bool] = V == W5\n",
         "compress(M5, M4)",
         "vec[4,bool]",
-        "ret <4 x i1> <i1 true, i1 false, i1 false, i1 false>\n" );
+        "store <4 x i1> <i1 true, i1 false, i1 false, i1 false>, ptr" );
       ( "expand-bool-lanes",
         "const KV u32 = 67305985\n\
          const V vec[4,u8] = bitcast[vec[4,u8]](KV)\n\
@@ -11777,7 +11781,7 @@ let () =
          const M4 vec[4,bool] = V == W5\n",
         "expand(M5, M4)",
         "vec[4,bool]",
-        "ret <4 x i1> <i1 true, i1 false, i1 true, i1 false>\n" );
+        "store <4 x i1> <i1 true, i1 false, i1 true, i1 false>, ptr" );
     ];
   let compaction_runtime =
     llvm_of

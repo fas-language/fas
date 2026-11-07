@@ -24,9 +24,28 @@
    - Division and float conversions of more than one limb call helpers
      written in Fir (Fir_wide_runtime), appended to the module when used.
 
+   f16 (IEEE binary16) is rewritten here too, to its bits in an i16, since
+   x86-64 before AVX-512 FP16 has no half-precision arithmetic:
+
+   - Arithmetic, comparisons and rounding functions convert the operands to
+     f32 (exact), compute there and round the result back. For + - * / and
+     sqrt that is correctly rounded: f32 has 24 bits, at least the
+     2 * 11 + 2 needed so the double rounding never differs; the others
+     (rem, min/max, floor..., compares) are exact in f32 already. neg, abs
+     and copysign are bit operations, so NaN payloads pass untouched.
+   - fma computes in f64 with a round-to-odd sum (__fir_fmah); narrowing
+     conversions from f32, f64 and f80 round once, in integer code
+     (__fir_round_h); integers convert through f32 (every integer below
+     2^24 is exact there, every larger one is infinity in f16 either way).
+   - In memory f16 is its i16. At a signature (parameters, results,
+     variadic arguments) it stays f16, which the backend passes as SysV
+     does: in the low 16 bits of an SSE register (or an 8-byte stack slot).
+     va_arg reads it as an f32 slot and keeps the low 16 bits.
+
    Block ids are kept (blockaddr constants stay valid); blocks added here
-   (switch chains) come after the original ones. Vectors of such integers,
-   atomics wider than one limb and f16/f80 conversions are refused. *)
+   (switch chains) come after the original ones. Vectors of such integers
+   are refused. Atomics on odd and wide integers and on f80 never get here:
+   run first rewrites them (Fir_atomic). *)
 
 open Fir
 
@@ -41,6 +60,7 @@ let is_odd = function Int n -> not (legal_width n) | _ -> false
 
 let rec mentions_odd = function
   | Int n -> not (legal_width n)
+  | F16 -> true
   | Vec (_, t) -> mentions_odd t
   | _ -> false
 
@@ -61,6 +81,7 @@ let abi_of (a : abi) : abi =
         | Ext (_, e) when container n < 64 -> Ext (Int (container n), e)
         | _ -> Scalar (Int (container n))
       else wide_agg n
+  | Scalar F16 -> a
   | Scalar t | Ext (t, _) when mentions_odd t -> unsupported "vector of %s in a signature" (ty_to_string t)
   | a -> a
 
@@ -306,8 +327,8 @@ let shift_var cx ~left (l : value array) amt fill =
   end
 
 (* a * b mod 2^(64k), k = the limb count of both: schoolbook, a row per
-   limb of a *)
-let mul cx a b =
+   limb of a; inline, so about k^2 instructions *)
+let mul_inline cx a b =
   let k = Array.length a in
   let acc = ref (zeros cx k) in
   for i = 0 to k - 1 do
@@ -338,6 +359,25 @@ let mul cx a b =
     acc := if i = 0 then row else add cx !acc row
   done;
   !acc
+
+(* products of more than this many limbs call __fir_mul (a loop) instead
+   of growing as k^2 inline: _BitInt(65535) is 1024 limbs *)
+let mul_inline_limbs = 8
+
+let mul cx a b =
+  let k = Array.length a in
+  if k <= mul_inline_limbs then mul_inline cx a b
+  else begin
+    let limb_ptr cx p i = if i = 0 then p else e cx (Ptradd (0, p, zero64 cx, 1, 8 * i)) ptr in
+    let store l =
+      let p = slot cx (8 * k) 8 in
+      Array.iteri (fun i x -> e0 cx (Store (plain_mem 8, x, limb_ptr cx p i))) l;
+      p
+    in
+    let pa = store a and pb = store b and pr = slot cx (8 * k) 8 in
+    ignore (call_helper cx "__fir_mul" [ ptr; ptr; ptr; i64 ] [] [| pr; pa; pb; c64 cx (Int64.of_int k) |]);
+    Array.init k (fun i -> e cx (Load (plain_mem 8, limb_ptr cx pr i)) i64)
+  end
 
 (* the exact product of two n-bit values, signed or not, as 2k limbs *)
 let mul_full cx ~signed n a b =
@@ -409,6 +449,8 @@ let rec get cx (v : value) : value array =
             match (c, t) with
             | Cint (_, limbs), Int n when not (legal_width n) -> const_limbs cx n limbs
             | (Czero _ | Cpoison _), Int n when not (legal_width n) -> zeros cx (nlimbs n)
+            | Cfloat (_, b), F16 -> [| iconst cx.g (Int 16) b.(0) |]
+            | (Czero _ | Cpoison _), F16 -> [| iconst cx.g (Int 16) 0L |]
             | _, t when mentions_odd t -> unsupported "constant of type %s" (ty_to_string t)
             | Cvec (vt, lanes), _ -> [| const cx.g (Cvec (vt, Array.map (get1 cx) lanes)) t |]
             | c, _ -> [| const cx.g c t |])
@@ -601,14 +643,33 @@ let fsh cx n ~left a b c =
     let t = shift_var cx ~left:false cat s (zero64 cx) in
     mask cx n (Array.sub t 0 kk)
 
+(* ---------- f16 ---------- *)
+
+let i16 = Int 16
+
+(* f16 bits -> f32 (exact) *)
+let h2f cx x = (call_helper cx "__fir_h2f" [ i16 ] [ F32 ] [| x |]).(0)
+
+(* an f32/f64/f80 value -> f16 bits, one rounding *)
+let f_to_h cx t x =
+  let name = match t with F32 -> "__fir_f32toh" | F64 -> "__fir_f64toh" | F80 -> "__fir_f80toh" | t -> unsupported "fptrunc from %s" (ty_to_string t) in
+  (call_helper cx name [ t ] [ i16 ] [| x |]).(0)
+
+let ib16 cx k a b = e cx (Ibin (k, 0, a, b)) i16
+let c16 cx x = iconst cx.g i16 x
+
 (* 2^e as an f64 constant (+inf beyond the range) *)
 let pow2_f64 cx e =
   fconst_bits cx.g F64 [| (if e > 1023 then 0x7ff0000000000000L else Int64.shift_left (Int64.of_int (e + 1023)) 52) |]
 
-let float_to_int cx n kind x =
-  let src = src_ty cx x in
-  let xv = get1 cx x in
-  let x64 = match src with F64 -> xv | F32 -> conv cx Fpext xv F64 | t -> unsupported "conversion from %s" (ty_to_string t) in
+(* 2^e as an f80 constant (+inf beyond the range) *)
+let pow2_f80 cx e = fconst_bits cx.g F80 [| Int64.min_int; Int64.of_int (if e > 16383 then 0x7fff else e + 16383) |]
+
+let float_to_int cx n kind ~src xv =
+  (* f32 widens to f64 (exact); f80 stays itself: f64 would round it *)
+  let ft = match src with F80 -> F80 | _ -> F64 in
+  let x64 = match src with F64 | F80 -> xv | F32 -> conv cx Fpext xv F64 | t -> unsupported "conversion from %s" (ty_to_string t) in
+  let pow2 e = if ft = F80 then pow2_f80 cx e else pow2_f64 cx e in
   let kk = nlimbs n in
   let signed = kind = Fptosi || kind = Fptosi_sat in
   let sat = kind = Fptosi_sat || kind = Fptoui_sat in
@@ -616,7 +677,8 @@ let float_to_int cx n kind x =
     (* through i64; the saturating forms clamp to the n-bit range *)
     let r = conv cx (if sat then (if signed then Fptosi_sat else Fptoui_sat) else (if signed then Fptosi else Fptoui)) x64 i64 in
     let r =
-      if not sat then r
+      (* n = 64 is the i64 conversion itself (and low_mask 64 would be 0) *)
+      if not sat || n = 64 then r
       else if signed then
         let lo = c64 cx (Int64.neg (Int64.shift_left 1L (n - 1))) and hi = c64 cx (low_mask (n - 1)) in
         e cx (Ibin (Smin, 0, e cx (Ibin (Smax, 0, r, lo)) i64, hi)) i64
@@ -625,11 +687,12 @@ let float_to_int cx n kind x =
     mask cx n [| r |]
   end
   else begin
-    let zero_f = fconst_bits cx.g F64 [| 0L |] in
+    let zero_f = fconst_bits cx.g ft (if ft = F80 then [| 0L; 0L |] else [| 0L |]) in
     let negative = e cx (Fcmp (Folt, 0, x64, zero_f)) i1 in
-    let ax = e cx (Fun (Fabs, 0, x64)) F64 in
+    let ax = e cx (Fun (Fabs, 0, x64)) ft in
     let out = slot cx (8 * kk) 8 in
-    ignore (call_helper cx "__fir_f64tou" [ ptr; F64; i64 ] [] [| out; ax; c64 cx (Int64.of_int kk) |]);
+    let helper = if ft = F80 then "__fir_f80tou" else "__fir_f64tou" in
+    ignore (call_helper cx helper [ ptr; ft; i64 ] [] [| out; ax; c64 cx (Int64.of_int kk) |]);
     let mag = load_limbs cx n (plain_mem 8) out in
     let v = if signed then select_l cx negative (mask cx n (neg cx mag)) mag else mag in
     if not sat then v
@@ -637,11 +700,11 @@ let float_to_int cx n kind x =
       let nan = e cx (Fcmp (Funo, 0, x64, x64)) i1 in
       let r =
         if signed then
-          let too_big = e cx (Fcmp (Foge, 0, x64, pow2_f64 cx (n - 1))) i1 in
-          let too_small = e cx (Fcmp (Folt, 0, x64, e cx (Fun (Fneg, 0, pow2_f64 cx (n - 1))) F64)) i1 in
+          let too_big = e cx (Fcmp (Foge, 0, x64, pow2 (n - 1))) i1 in
+          let too_small = e cx (Fcmp (Folt, 0, x64, e cx (Fun (Fneg, 0, pow2 (n - 1))) ft)) i1 in
           select_l cx too_big (smax_limbs cx n) (select_l cx too_small (smin_limbs cx n) v)
         else
-          let too_big = e cx (Fcmp (Foge, 0, x64, pow2_f64 cx n)) i1 in
+          let too_big = e cx (Fcmp (Foge, 0, x64, pow2 n)) i1 in
           let positive = e cx (Fcmp (Fogt, 0, x64, zero_f)) i1 in
           select_l cx too_big (all_ones cx n) (select_l cx positive v (zeros cx kk))
       in
@@ -651,7 +714,7 @@ let float_to_int cx n kind x =
 
 let int_to_float cx n ~signed a ty =
   let kk = nlimbs n in
-  if ty <> F32 && ty <> F64 then unsupported "conversion to %s" (ty_to_string ty);
+  if ty <> F32 && ty <> F64 && ty <> F80 then unsupported "conversion to %s" (ty_to_string ty);
   if kk = 1 then
     let x = if signed then (sx_top cx n a).(0) else a.(0) in
     conv cx (if signed then Sitofp else Uitofp) x ty
@@ -659,7 +722,7 @@ let int_to_float cx n ~signed a ty =
     let negative = if signed then Some (sign cx n a) else None in
     let mag = match negative with Some s -> select_l cx s (mask cx n (neg cx a)) a | None -> a in
     let p = to_agg cx n mag in
-    let name = if ty = F64 then "__fir_utof64" else "__fir_utof32" in
+    let name = match ty with F64 -> "__fir_utof64" | F80 -> "__fir_utof80" | _ -> "__fir_utof32" in
     let f = (call_helper cx name [ ptr; i64 ] [ ty ] [| p; c64 cx (Int64.of_int kk) |]).(0) in
     match negative with Some s -> sel cx s (e cx (Fun (Fneg, 0, f)) ty) f ty | None -> f
   end
@@ -679,6 +742,10 @@ let bitcast_mem cx x dst_ty =
 let convert cx kind x dst =
   let st = src_ty cx x in
   match (kind, st, dst) with
+  | Bitcast, F16, Int 16 | Bitcast, Int 16, F16 -> [| get1 cx x |]
+  | Fpext, F16, F32 -> [| h2f cx (get1 cx x) |]
+  | Fpext, F16, _ -> [| conv cx Fpext (h2f cx (get1 cx x)) dst |]
+  | Fptrunc, _, F16 -> [| f_to_h cx st (get1 cx x) |]
   | Bitcast, _, _ -> bitcast_mem cx x dst
   | (Trunc | Zext | Sext), Int sn, Int dn ->
       let _, l = limbs_of cx x in
@@ -692,7 +759,15 @@ let convert cx kind x dst =
       else mask cx dn ext
   | Ptrtoint, _, Int dn -> mask cx dn (resize [| conv cx Ptrtoint (get1 cx x) i64 |] (nlimbs dn) (zero64 cx))
   | Inttoptr, Int _, _ -> [| conv cx Inttoptr (low64 cx x) dst |]
-  | (Fptosi | Fptoui | Fptosi_sat | Fptoui_sat), _, Int dn -> float_to_int cx dn kind x
+  | (Fptosi | Fptoui | Fptosi_sat | Fptoui_sat), _, Int dn ->
+      (* f16 converts exactly to f32 first *)
+      let src, xv = if st = F16 then (F32, h2f cx (get1 cx x)) else (st, get1 cx x) in
+      let r = float_to_int cx dn kind ~src xv in
+      (* a legal destination (from f16) is one value of its own type *)
+      if legal_width dn && dn < 64 then [| conv cx Trunc r.(0) (Int dn) |] else r
+  | (Sitofp | Uitofp), Int sn, F16 ->
+      let _, a = limbs_of cx x in
+      [| f_to_h cx F32 (int_to_float cx sn ~signed:(kind = Sitofp) a F32) |]
   | (Sitofp | Uitofp), Int sn, _ ->
       let _, a = limbs_of cx x in
       [| int_to_float cx sn ~signed:(kind = Sitofp) a dst |]
@@ -722,6 +797,7 @@ let to_abi cx (abi : abi option) (v : value) =
         let x = match abi with Some (Ext (_, Sx)) when c < 64 -> (sx_top cx n l).(0) | _ -> l.(0) in
         if c < 64 then conv cx Trunc x (Int c) else x
       else to_agg cx n l
+  | F16 -> conv cx Bitcast (get1 cx v) F16
   | t when mentions_odd t -> unsupported "vector of %s in a signature" (ty_to_string t)
   | _ -> get1 cx v
 
@@ -749,6 +825,7 @@ let from_abi cx t (x : value) =
         let c = container n in
         mask cx n [| (if c < 64 then zext64 cx x else x) |]
       else load_limbs cx n (plain_mem 8) x
+  | F16 -> [| conv cx Bitcast x i16 |]
   | _ -> [| x |]
 
 let convert_inst cx (i : inst) =
@@ -773,8 +850,42 @@ let convert_inst cx (i : inst) =
       let tys = Array.of_list (List.map (fun a -> match a with Scalar t | Ext (t, _) -> t | Agg _ -> ptr) sig_.result_abis) in
       let rs = emit ~loc:cx.loc cx.g cx.b (Call { c with sig_; callee; args; va_aggs = c.va_aggs @ va_aggs }) tys in
       Array.iteri (fun k res -> set cx res (from_abi cx (ty_of cx.f res) rs.(k))) ir.results
+  (* f80 fma: a correctly rounded software helper (no x87 instruction) *)
+  | Fma (_, a, b, c) when ty_of cx.f ir.results.(0) = F80 ->
+      set cx (r 0) (call_helper cx "__fir_fma80" [ F80; F80; F80 ] [ F80 ] [| get1 cx a; get1 cx b; get1 cx c |])
   | _ when not any_odd -> copy_inst cx ir
   | Nop | Dbg_value _ -> ()
+  (* f16: see the header *)
+  | Fbin (Copysign, _, a, b) ->
+      let mag = ib16 cx And (get1 cx a) (c16 cx 0x7fffL) and sgn = ib16 cx And (get1 cx b) (c16 cx 0x8000L) in
+      set cx (r 0) [| ib16 cx Or mag sgn |]
+  | Fbin (k, fl, a, b) ->
+      let v = e cx (Fbin (k, fl, h2f cx (get1 cx a), h2f cx (get1 cx b))) F32 in
+      set cx (r 0) [| f_to_h cx F32 v |]
+  | Fun (Fneg, _, a) -> set cx (r 0) [| ib16 cx Xor (get1 cx a) (c16 cx 0x8000L) |]
+  | Fun (Fabs, _, a) -> set cx (r 0) [| ib16 cx And (get1 cx a) (c16 cx 0x7fffL) |]
+  | Fun (k, fl, a) ->
+      let v = e cx (Fun (k, fl, h2f cx (get1 cx a))) F32 in
+      set cx (r 0) [| f_to_h cx F32 v |]
+  | Fcmp (p, fl, a, b) -> set cx (r 0) [| e cx (Fcmp (p, fl, h2f cx (get1 cx a), h2f cx (get1 cx b))) i1 |]
+  | Fma (_, a, b, c) ->
+      set cx (r 0) (call_helper cx "__fir_fmah" [ i16; i16; i16 ] [ i16 ] [| get1 cx a; get1 cx b; get1 cx c |])
+  | Select (c, a, b) when rty 0 = F16 -> set cx (r 0) [| sel cx (get1 cx c) (get1 cx a) (get1 cx b) i16 |]
+  | Freeze a when rty 0 = F16 -> set cx (r 0) [| e cx (Freeze (get1 cx a)) i16 |]
+  | Load (m, p) when rty 0 = F16 -> set cx (r 0) [| e cx (Load (m, get1 cx p)) i16 |]
+  | Store (m, v, p) when src_ty cx v = F16 -> e0 cx (Store (m, get1 cx v, get1 cx p))
+  | Va_arg p when rty 0 = F16 ->
+      (* an SSE slot, as f32: the low 16 bits are the f16 *)
+      let f = e cx (Va_arg (get1 cx p)) F32 in
+      set cx (r 0) [| conv cx Trunc (conv cx Bitcast f (Int 32)) i16 |]
+  | Rmw (Xchg, m, p, v) when src_ty cx v = F16 -> set cx (r 0) [| e cx (Rmw (Xchg, m, get1 cx p, get1 cx v)) i16 |]
+  | Rmw (((Rfadd | Rfsub) as k), _, p, v) when src_ty cx v = F16 ->
+      let sub = c64 cx (if k = Rfsub then 1L else 0L) in
+      set cx (r 0) (call_helper cx "__fir_rmwh" [ ptr; i16; i64 ] [ i16 ] [| get1 cx p; get1 cx v; sub |])
+  | Cmpxchg c when src_ty cx c.expected = F16 ->
+      let rs = emit ~loc:cx.loc cx.g cx.b (Cmpxchg { c with p = get1 cx c.p; expected = get1 cx c.expected; desired = get1 cx c.desired }) [| i16; i1 |] in
+      set cx (r 0) [| rs.(0) |];
+      set cx (r 1) [| rs.(1) |]
   | Ibin (k, _, a, b) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "%s" (ty_to_string t) in
       set cx (r 0) (ibin cx n k (get cx a) (get cx b))
@@ -919,7 +1030,13 @@ let func_needs (f : func) =
      for v = 0 to num_values f - 1 do
        if mentions_odd (ty_of f v) then found := true
      done;
-     Vec.iter (fun (ir : inst_rec) -> match ir.op with Call c when sig_changes c.sig_ -> found := true | _ -> ()) f.insts;
+     Vec.iter
+       (fun (ir : inst_rec) ->
+         match ir.op with
+         | Call c when sig_changes c.sig_ -> found := true
+         | Fma _ when ty_of f ir.results.(0) = F80 -> found := true
+         | _ -> ())
+       f.insts;
      !found)
 
 let rebuild_func m helpers (f : func) : func =
@@ -951,6 +1068,7 @@ let rebuild_func m helpers (f : func) : func =
         (fun p ->
           match ty_of f p with
           | Int n when not (legal_width n) -> set cx p (Array.init (nlimbs n) (fun _ -> add_param g b i64))
+          | F16 -> set cx p [| add_param g b i16 |]
           | t when mentions_odd t -> unsupported "block parameter of type %s" (ty_to_string t)
           | t -> set cx p [| add_param g b t |])
         (block f b).params
@@ -1002,6 +1120,8 @@ let add_helpers (m : modul) helpers =
 (* Rewrites [m] in place. Afterwards no value, signature or memory access
    uses an integer width other than 1, 8, 16, 32 or 64. *)
 let run (m : modul) =
+  (* odd-width, wide and f80 atomics first: on containers or libatomic *)
+  Fir_atomic.run m;
   let helpers = Hashtbl.create 8 in
   let n = Vec.length m.funcs in
   for i = 0 to n - 1 do

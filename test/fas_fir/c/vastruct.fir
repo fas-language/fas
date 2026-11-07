@@ -4,7 +4,6 @@
 ; structs no longer fit the remaining registers and go to the overflow area
 ; whole while later, smaller ones still come from registers. MEMORY class
 ; (24 bytes) always goes through the overflow area. Checked by vastruct.c.
-; llvm: skip va_arg of a struct (C ABI lowering for LLVM, roadmap v0.7)
 triple "x86_64-unknown-linux-gnu"
 declare @c_vr (i32, i32, ...) -> (i64) global
 global @g_ii size 16 align 8 local readonly = {bytes "\e9\03\00\00\00\00\00\00\ea\03\00\00\00\00\00\00"}
