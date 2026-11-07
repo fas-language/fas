@@ -90,12 +90,42 @@ taken block gets a local symbol `.Lfas.blk.<fn>.<n>`, read RIP-relative in
 code and through an `R_X86_64_64` relocation in data. `indirect_br` is
 `jmp r11`.
 
+## Named sections and thread-local storage
+
+A global with `section "s"` goes into its own section `s` (SHF_ALLOC, plus
+SHF_WRITE unless every global in it is read-only; SHT_NOBITS for an
+all-zero `.bss` or `.bss.*`). Globals in one section are laid out in module
+order, so a registry walked between the linker's `__start_s` and
+`__stop_s` sees them in that order.
+
+`thread_local` globals go into `.tdata` (initialized) or `.tbss` (zero),
+with SHF_TLS, and their symbols are STT_TLS (also undefined ones). The
+address of a thread-local is the thread pointer plus the variable's
+offset, which never touches the flags:
+
+```
+tp  = mov fs:[0]                   ; Tp: fs:0 holds the thread pointer itself
+off = mov [rip + x@GOTTPOFF]       ; Tlsoff, -c objects and hosted links (initial-exec)
+off = mov imm32 x@TPOFF32          ; Tlsoff, native executables (local-exec)
+adr = lea [tp + off]
+```
+
+A native executable has no libc to create the TLS block, so `_start` does
+it (`tls_setup` in `mir_emit.ml`): it finds PT_TLS through `__ehdr_start`,
+mmaps the block plus a 64-byte TCB, copies the `.tdata` image, stores the
+TCB self-pointer and sets fs with `arch_prctl(ARCH_SET_FS)`. Without a
+PT_TLS segment it does nothing. `test/fas_fir/tls.fir` checks that path;
+`test/fas_fir/c/tls.fir` checks initial-exec from several C threads.
+
 ## Not supported yet
 
 Each of these is reported as `native backend: ...`, never miscompiled:
 
 - atomic vector loads and stores, and vectors passed through `...`;
-- named sections and thread-local globals (`Fir_to_ir.symbols` refuses them);
+- a `thread_local` global in a named section, the address of a
+  `thread_local` in an initializer, and general-dynamic TLS (an object with
+  thread-locals uses initial-exec, so it cannot go into a library loaded
+  with `dlopen`);
 - aggregates aligned above 16, or with fields other than integers ≤ 64 bits,
   pointers, f32 and f64;
 - 4-byte data relocations.

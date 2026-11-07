@@ -123,7 +123,8 @@ global @environ size 8  align 8 global = extern
 - `local` symbols are file-private, like C `static`. `global` symbols are exported. `weak` symbols can be overridden at link time: a strong definition in another object wins, and every reference, including calls and loads in this module, reaches the winner. So a weak function is never inlined. A weak `extern` global or weak `declare` that nothing defines has address 0 (`ptrtoint` of it is 0), as with C's `__attribute__((weak))` declarations.
 - Visibility is the ELF `st_other` value: `hidden` symbols are not exported from the shared object or executable they end up in, `protected` ones are exported but not preemptible.
 - `readonly` places the global in .rodata.
-- `thread_local` places it in .tdata/.tbss. Its address (`ptr @errno`) is per-thread.
+- `section "s"` places it in section `s` instead of .data/.rodata/.bss.
+- `thread_local` places it in .tdata/.tbss. Its address (`ptr @errno`) is per-thread, so it is not a link-time constant: it cannot appear in an initializer (`reloc`).
 - **Verifier rules:**
   - the alignment is a power of two;
   - the initializer's byte count equals `size`;
@@ -486,7 +487,7 @@ In Fir this means:
 | Calls | Direct and indirect calls; scalar and vector parameters/results with `zext`/`sext`; any number of arguments (stack overflow area); calling variadic functions; `agg` parameters and results with SysV classification, including MEMORY class and sret (§5) | More than one result; `agg` with fields other than integers up to 64 bits, `ptr`, `f32` and `f64` (other than the `__int128` form, §5), or aligned above 16 | Pass such structs by pointer. |
 | Variadic functions | Definitions, local or exported; `va_start`, `va_arg` of integers of any width, `ptr`, `f32` and `f64` from registers and the stack; structs by value through `...` both ways (`agg(...)` call arguments, `va_arg agg(...)`), including MEMORY class and structs that no longer fit the registers left; reading a `va_list` that C passed in, and the reverse | `va_arg` of an `agg` with vector, i128 or f80 fields, or align above 8 (other than the `__int128` form, §5) | Pass such structs by pointer. |
 | Control flow | jump br switch ret unreachable trap; `indirect_br` and `blockaddr` (also in global initializers): a block address is the block's real code address | — | — |
-| Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8` | `reloc ... w4`; `section`; `thread_local` (refused, TLS is planned for v0.5) | Use w8; for TLS, a pointer to per-thread storage passed explicitly. |
+| Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8`; `section "s"` (globals in one section are laid out in order; the linker's `__start_s`/`__stop_s` bound it); `thread_local`, defined or `extern` (initial-exec TLS in `-c` objects and hosted links, local-exec in native executables, whose `_start` sets up the TLS block when there is a PT_TLS segment) | `reloc ... w4`; `thread_local` together with `section`; the address of a `thread_local` in an initializer; `thread_local` in a shared library loaded with `dlopen` (needs general-dynamic TLS, v0.7) | Use w8. |
 | Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
 | Startup | `@main` () or (i32, ptr) → i32; static executable; `-c` objects | Shared libraries, libc | Use syscalls. |
 | Unwind info | `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | DWARF debug info | — |

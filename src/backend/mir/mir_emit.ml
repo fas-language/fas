@@ -76,7 +76,7 @@ let movi a r (k : int64) =
 
 let fstore a dbl m x = A.sse_rm a (A.fprefix dbl) 0x11 ~reg:x m
 
-let ins a fr ~func_label ~out (i : ins) =
+let ins a fr ~pic ~func_label ~out (i : ins) =
   let m = mem fr in
   match i with
   | Salloc (d, n) ->
@@ -96,6 +96,8 @@ let ins a fr ~func_label ~out (i : ins) =
   | Fstore (dbl, ad, s) -> fstore a dbl (m ad) (xr s)
   | Lea (d, ad) -> A.lea a (gr d) (m ad)
   | Got (d, s) -> A.load_got a (gr d) s
+  | Tp d -> A.load_tp a (gr d)
+  | Tlsoff (d, s) -> A.tls_offset a ~pic (gr d) s
   | Alu (op, d, s) -> A.alu_rr a op (gr d) (gr s)
   | Alui (op, d, k) -> A.alu_ri a op (gr d) k
   | Test (x, y) -> A.test_rr a (gr x) (gr y)
@@ -167,7 +169,7 @@ let ins a fr ~func_label ~out (i : ins) =
 
 (* one function: returns its text size and its frame events for the
    .eh_frame (Mir_cfi), at offsets from the function's start *)
-let func a ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
+let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
   let events = ref [] in
@@ -191,7 +193,7 @@ let func a ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
     block_pos b (A.pos a);
     List.iter
       (function
-        | Mir_ra.Orig (_, i) -> ins a fr ~func_label ~out:(out_area f) i
+        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) i
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
         | Reload (v, (X x)) -> A.mov_xm a ~double:true x (slot_mem v)
         | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r
@@ -218,6 +220,106 @@ let func a ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
   let size = A.pos a - start in
   (* a restore_state at the very end describes no code *)
   (size, List.rev (List.filter (fun (o, e) -> not (e = Mir_cfi.Returned && o = size)) !events))
+
+(* ---------- startup ---------- *)
+
+(* Thread-local storage for an executable without libc (part of _start).
+   x86-64 TLS ABI, variant II: the thread pointer (fs base) points at a
+   TCB whose first word is the thread pointer itself, and the TLS block,
+   align_up(p_memsz, p_align) bytes, ends right at the thread pointer
+   (the linker resolves TPOFF32/GOTTPOFF to offsets below it). The block
+   starts with the p_filesz bytes of the .tdata image at p_vaddr; the rest
+   (.tbss) stays zero.
+
+   The PT_TLS program header is found through __ehdr_start (the ELF
+   header, which the linker defines). With no PT_TLS nothing is done. The
+   block and a 64-byte zeroed TCB come from one mmap; a failing mmap or
+   arch_prctl stops the program with ud2. Uses only caller-saved registers
+   and rbx/r13-r15 (_start has no caller); r12 holds the initial rsp. *)
+let tls_setup a =
+  let open A in
+  let loop = new_label a and found = new_label a and fail = new_label a and done_ = new_label a in
+  let m r d = Base (r, d) in
+  lea a Rax (Rip ("__ehdr_start", 0));
+  (* load bias: 0 for ET_EXEC; the header's own address for ET_DYN (PIE) *)
+  mov_imm a R11 0L;
+  load_zx a 2 R10 (m Rax 16);
+  alu_ri a Cmp R10 3;
+  let not_dyn = new_label a in
+  jcc a Ne not_dyn;
+  mov_rr a R11 Rax;
+  place a not_dyn;
+  load_zx a 8 Rcx (m Rax 32) (* e_phoff *);
+  alu_rr a Add Rcx Rax;
+  load_zx a 2 Rdx (m Rax 56) (* e_phnum *);
+  load_zx a 2 R8 (m Rax 54) (* e_phentsize *);
+  place a loop;
+  test_rr a Rdx Rdx;
+  jcc a E done_;
+  load_zx a 4 R9 (m Rcx 0) (* p_type *);
+  alu_ri a Cmp R9 7 (* PT_TLS *);
+  jcc a E found;
+  alu_rr a Add Rcx R8;
+  alu_ri a Sub Rdx 1;
+  jmp a loop;
+  place a found;
+  load_zx a 8 R13 (m Rcx 16) (* p_vaddr *);
+  alu_rr a Add R13 R11;
+  load_zx a 8 R14 (m Rcx 32) (* p_filesz *);
+  load_zx a 8 R15 (m Rcx 40) (* p_memsz *);
+  load_zx a 8 Rbx (m Rcx 48) (* p_align, 0 meaning 1 *);
+  let aligned = new_label a in
+  test_rr a Rbx Rbx;
+  jcc a Ne aligned;
+  mov_imm a Rbx 1L;
+  place a aligned;
+  (* r15 = the block size, align_up(p_memsz, p_align) *)
+  lea a R15 (Sib { base = Some R15; index = Rbx; scale = 1; disp = -1; sym = None });
+  mov_rr a Rax Rbx;
+  neg a Rax;
+  alu_rr a And R15 Rax;
+  (* rbx = the thread pointer's alignment, max(p_align, 64) *)
+  let big = new_label a in
+  alu_ri a Cmp Rbx 64;
+  jcc a Ae big;
+  mov_imm a Rbx 64L;
+  place a big;
+  (* mmap(0, block + alignment + 64, PROT_READ|PROT_WRITE,
+     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) *)
+  lea a Rsi (Sib { base = Some R15; index = Rbx; scale = 1; disp = 64; sym = None });
+  mov_imm a Rdi 0L;
+  mov_imm a Rdx 3L;
+  mov_imm a R10 0x22L;
+  mov_imm a R8 (-1L);
+  mov_imm a R9 0L;
+  mov_imm a Rax 9L;
+  syscall a;
+  alu_ri a Cmp Rax (-4095);
+  jcc a Ae fail;
+  (* thread pointer = align_up(mapping + block, alignment), in r15 after
+     the copy; the block is [tp - block, tp) *)
+  lea a Rax (Sib { base = Some Rax; index = R15; scale = 1; disp = -1; sym = None });
+  alu_rr a Add Rax Rbx;
+  mov_rr a Rcx Rbx;
+  neg a Rcx;
+  alu_rr a And Rax Rcx;
+  mov_rr a Rdi Rax;
+  alu_rr a Sub Rdi R15;
+  mov_rr a R15 Rax;
+  mov_rr a Rsi R13;
+  mov_rr a Rcx R14;
+  rep_movsb a;
+  store a 8 (m R15 0) R15;
+  (* arch_prctl(ARCH_SET_FS, tp) *)
+  mov_imm a Rdi 0x1002L;
+  mov_rr a Rsi R15;
+  mov_imm a Rax 158L;
+  syscall a;
+  test_rr a Rax Rax;
+  jcc a E done_;
+  place a fail;
+  ud2 a;
+  place a done_
 
 (* ---------- data ---------- *)
 
@@ -303,7 +405,7 @@ let generate ~startup (m : F.modul) =
           A.align a 16;
           let offset = A.pos a in
           let size, events =
-            func a ~func_label ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
+            func a ~pic ~func_label ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
           fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
           func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
@@ -312,10 +414,13 @@ let generate ~startup (m : F.modul) =
     if startup then begin
       A.align a 16;
       let offset = A.pos a in
-      (* _start: argc at [rsp], argv after it; exit(main(argc, argv)) *)
+      (* _start: argc at [rsp], argv after it; set up thread-local storage,
+         then exit(main(argc, argv)) *)
       A.alu_rr a A.Xor A.Rbp A.Rbp;
-      A.load_zx a 8 A.Rdi (A.Base (A.Rsp, 0));
-      A.lea a A.Rsi (A.Base (A.Rsp, 8));
+      A.mov_rr a A.R12 A.Rsp;
+      tls_setup a;
+      A.load_zx a 8 A.Rdi (A.Base (A.R12, 0));
+      A.lea a A.Rsi (A.Base (A.R12, 8));
       A.alu_ri a A.And A.Rsp (-16);
       if Hashtbl.mem env.label_funcs "main" then A.call_label a (func_label "main")
       else A.call_symbol a "main";
@@ -331,32 +436,98 @@ let generate ~startup (m : F.modul) =
     let rodata = { buf = Buffer.create 256; alignment = 16; relocs = []; syms = [] } in
     let data = { buf = Buffer.create 256; alignment = 1; relocs = []; syms = [] } in
     let bss = ref 0 and bss_alignment = ref 1 and bss_syms = ref [] in
+    (* named sections and .tdata/.tbss, in order of first use: their data,
+       whether any global in them is writable, whether all are zero *)
+    let extras = Hashtbl.create 8 and extra_order = ref [] in
+    let extra name ~tls =
+      match Hashtbl.find_opt extras name with
+      | Some x -> x
+      | None ->
+          let x = ({ buf = Buffer.create 64; alignment = 1; relocs = []; syms = [] }, ref false, ref true, tls) in
+          Hashtbl.add extras name x;
+          extra_order := name :: !extra_order;
+          x
+    in
+    let extra_index name =
+      let rec find i = function
+        | [] -> assert false
+        | n :: rest -> if n = name then i else find (i + 1) rest
+      in
+      find 0 (List.rev !extra_order)
+    in
     F.Vec.iter
       (fun (g : F.global) ->
         if g.gdefined then begin
           let bytes, pointers = global_image g in
           let align = max 1 g.galign in
           let zero = String.for_all (( = ) '\000') bytes in
-          if zero && pointers = [] && not g.readonly then begin
-            bss_alignment := max !bss_alignment align;
-            bss := Mir_isel.align_up !bss align;
-            bss_syms := { Elf64.name = g.gname; section = Elf64.Bss; offset = !bss; size = g.size; func = false }
-                        :: !bss_syms;
-            bss := !bss + g.size
-          end
-          else
-            (* a pointer in a position-independent object needs a load-time
-               relocation, which read-only pages cannot take *)
-            let d, section =
-              if g.readonly && not (pic && pointers <> []) then (rodata, Elf64.Rodata) else (data, Elf64.Data)
-            in
+          List.iter
+            (fun (_, sym, _) ->
+              if Hashtbl.mem env.tls_syms sym then
+                unsupported "@%s: the address of thread-local @%s in an initializer" g.gname sym)
+            pointers;
+          (* a pointer in a position-independent object needs a load-time
+             relocation, which read-only pages cannot take *)
+          let readonly = g.readonly && not (pic && pointers <> []) in
+          let place d section =
             place_data d section ~name:g.gname ~align ~size:g.size (fun offset ->
                 Buffer.add_string d.buf bytes;
                 List.iter
                   (fun (o, symbol, addend) -> d.relocs <- A.Abs64 { offset = offset + o; symbol; addend } :: d.relocs)
                   pointers)
+          in
+          let named name ~tls =
+            let d, writable, all_zero, _ = extra name ~tls in
+            if not readonly then writable := true;
+            if not (zero && pointers = []) then all_zero := false;
+            (* the index is only known once every section is seen: patched below *)
+            place d (Elf64.Extra (-1))
+          in
+          match (g.section, g.thread_local) with
+          | Some s, true -> unsupported "@%s: a thread_local global in section \"%s\"" g.gname s
+          | Some s, false -> named s ~tls:false
+          | None, true -> named (if zero && pointers = [] then ".tbss" else ".tdata") ~tls:true
+          | None, false ->
+              if zero && pointers = [] && not g.readonly then begin
+                bss_alignment := max !bss_alignment align;
+                bss := Mir_isel.align_up !bss align;
+                bss_syms := { Elf64.name = g.gname; section = Elf64.Bss; offset = !bss; size = g.size; func = false }
+                            :: !bss_syms;
+                bss := !bss + g.size
+              end
+              else place (if readonly then rodata else data) (if readonly then Elf64.Rodata else Elf64.Data)
         end)
       m.globals;
+    let extra_names = List.rev !extra_order in
+    let extra_syms =
+      List.concat_map
+        (fun name ->
+          let d, _, _, _ = Hashtbl.find extras name in
+          let i = extra_index name in
+          List.map (fun (s : Elf64.symbol) -> { s with section = Elf64.Extra i }) d.syms)
+        extra_names
+    in
+    let extra_sections =
+      List.map
+        (fun name ->
+          let d, writable, all_zero, tls = Hashtbl.find extras name in
+          (* SHF_ALLOC, SHF_WRITE unless every global in it is read-only,
+             SHF_TLS for thread-local data. Zero-filled .tbss and .bss*
+             sections take no file space (SHT_NOBITS). *)
+          let nobits =
+            !all_zero && (name = ".tbss" || name = ".bss" || String.starts_with ~prefix:".bss." name)
+          in
+          {
+            Native_object.name;
+            flags = 2 lor (if !writable then 1 else 0) lor if tls then 0x400 else 0;
+            alignment = d.alignment;
+            contents =
+              (if nobits then Fas_linker.Elf_object.Bss (Buffer.length d.buf)
+               else Fas_linker.Elf_object.Data (Buffer.to_bytes d.buf));
+            relocs = d.relocs;
+          })
+        extra_names
+    in
     (* local symbols for the blocks whose address is taken, in code or data *)
     let blk_syms = Hashtbl.create 8 in
     let note_block fn b =
@@ -376,7 +547,9 @@ let generate ~startup (m : F.modul) =
     let blk_syms = List.sort compare (Hashtbl.fold (fun _ s l -> s :: l) blk_syms []) in
     (* FDEs point at their code through this local symbol (Mir_cfi) *)
     let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
-    let defined_syms = text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ blk_syms in
+    let defined_syms =
+      text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ blk_syms
+    in
     let alias_syms =
       List.map
         (fun (al : Elf_attrs.alias) ->
@@ -388,6 +561,8 @@ let generate ~startup (m : F.modul) =
     Ok
       (Native_object.emit
          ~eh_frame:(Mir_cfi.build (List.rev !fdes))
+         ~extra:extra_sections
+         ~tls:(Hashtbl.mem env.tls_syms)
          ~global:(fun n -> n = "_start")
          ~binding:(Hashtbl.find_opt syms.binding)
          ~visibility:(fun n -> Option.value (Hashtbl.find_opt syms.visibility n) ~default:0)

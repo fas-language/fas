@@ -111,6 +111,13 @@ type reloc =
           `mov r64, [rip + sym@GOTPCREL]` (see [load_got]); same "next byte"
           convention as [Rel32]. Position-independent objects reach symbols
           another module may define or interpose through it. *)
+  | Tpoff32 of { offset : int; symbol : string; addend : int }
+      (** R_X86_64_TPOFF32: the symbol's offset from the thread pointer
+          (local-exec TLS), as a sign-extended imm32 (see [tls_offset]). *)
+  | Gottpoff of { offset : int; symbol : string; addend : int }
+      (** R_X86_64_GOTTPOFF: PC-relative address of the GOT entry holding
+          the symbol's thread-pointer offset (initial-exec TLS), in a
+          `mov r64, [rip + sym@GOTTPOFF]`; "next byte" convention as [Rel32]. *)
 
 type t = {
   code : Buffer.t;
@@ -370,6 +377,40 @@ let load_got a dst symbol =
   byte a 0x8b;
   modrm a 0 d 5;
   a.relocs <- Gotpcrel { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  int32 a 0
+
+(* Thread-local storage (x86-64 TLS ABI, variant II): fs:0 holds the
+   thread pointer itself, and a TLS variable lives at a negative offset
+   from it. *)
+
+(* mov dst, fs:[0] *)
+let load_tp a dst =
+  let d = reg_num dst in
+  byte a 0x64;
+  rex a ~w:true ~r:d ~b:0 ();
+  byte a 0x8b;
+  modrm a 0 d 4;
+  byte a 0x25;
+  int32 a 0
+
+(* dst = the thread-pointer offset of [symbol]. Initial-exec ([pic]):
+   `mov dst, [rip + symbol@GOTTPOFF]`, so the object can go into a PIE or
+   a shared library loaded at startup. Local-exec (static executables):
+   `mov dst, imm32` with a TPOFF32 relocation. Neither touches the flags. *)
+let tls_offset a ~pic dst symbol =
+  let d = reg_num dst in
+  if pic then begin
+    rex a ~w:true ~r:d ~b:0 ();
+    byte a 0x8b;
+    modrm a 0 d 5;
+    a.relocs <- Gottpoff { offset = pos a; symbol; addend = 0 } :: a.relocs
+  end
+  else begin
+    rex a ~w:true ~r:0 ~b:d ();
+    byte a 0xc7;
+    modrm a 3 0 d;
+    a.relocs <- Tpoff32 { offset = pos a; symbol; addend = 0 } :: a.relocs
+  end;
   int32 a 0
 
 (* Zero-extend the low [bits] of a register in place. *)

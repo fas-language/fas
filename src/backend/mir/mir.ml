@@ -62,6 +62,10 @@ type ins =
   | Fstore of bool * addr * reg
   | Lea of reg * addr
   | Got of reg * string  (** dst = the symbol's GOT entry *)
+  | Tp of reg  (** dst = the thread pointer (fs:0) *)
+  | Tlsoff of reg * string
+      (** dst = the thread-local symbol's offset from the thread pointer
+          (initial-exec in position-independent code, else local-exec) *)
   | Alu of X64.alu * reg * reg  (** dst op= src, 64-bit; Cmp writes only flags *)
   | Alui of X64.alu * reg * int  (** dst op= imm32 *)
   | Test of reg * reg
@@ -157,7 +161,7 @@ let addr_regs a =
 (* The registers an instruction reads and writes, implicit ones included *)
 let uses_defs = function
   | Copy (d, s) -> ([ s ], [ d ])
-  | Movi (d, _) | Got (d, _) | Setcc (_, d) | Spget d -> ([], [ d ])
+  | Movi (d, _) | Got (d, _) | Tp d | Tlsoff (d, _) | Setcc (_, d) | Spget d -> ([], [ d ])
   | Salloc (d, n) -> ([ n ], [ d ])
   | Spset s -> ([ s ], [])
   | Load (_, _, d, a) | Fload (_, d, a) | Lea (d, a) -> (addr_regs a, [ d ])
@@ -224,6 +228,8 @@ let map_regs g ins =
   | Fstore (dbl, a, s) -> Fstore (dbl, ma a, g s)
   | Lea (d, a) -> Lea (g d, ma a)
   | Got (d, s) -> Got (g d, s)
+  | Tp d -> Tp (g d)
+  | Tlsoff (d, s) -> Tlsoff (g d, s)
   | Alu (op, d, s) -> Alu (op, g d, g s)
   | Alui (op, d, k) -> Alui (op, g d, k)
   | Test (x, y) -> Test (g x, g y)
@@ -331,6 +337,8 @@ let ins_s i =
   | Fstore (dbl, m, a) -> p "fstore%s %s, %s" (d dbl) (addr_s m) (r a)
   | Lea (a, m) -> p "%s = lea %s" (r a) (addr_s m)
   | Got (a, s) -> p "%s = got @%s" (r a) s
+  | Tp a -> p "%s = tp" (r a)
+  | Tlsoff (a, s) -> p "%s = tlsoff @%s" (r a) s
   | Alu (op, a, b) -> p "%s %s, %s" (alu_s op) (r a) (r b)
   | Alui (op, a, k) -> p "%s %s, %d" (alu_s op) (r a) k
   | Test (a, b) -> p "test %s, %s" (r a) (r b)

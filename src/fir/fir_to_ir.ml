@@ -930,8 +930,8 @@ let convert_global (g : global) : Ir.global =
       readonly = g.readonly; align = g.galign; linkage }
 
 (* ELF attributes the Ir cannot carry (weak, visibility, aliases), for the
-   native backend (Mir_emit). `section` and `thread_local` are refused
-   until the native backend emits them (TLS is a v0.5 item). *)
+   native backend (Mir_emit). Mir_emit reads `section` and `thread_local`
+   from the globals itself. *)
 let stv = function Default -> 0 | Hidden -> 2 | Protected -> 3
 let stb = function Local -> 0 | Global -> 1 | Weak -> 2
 
@@ -942,12 +942,7 @@ let symbols (m : modul) : Elf_attrs.t =
     if vis <> Default then Hashtbl.replace t.visibility name (stv vis)
   in
   Vec.iter (fun f -> note f.name f.linkage f.visibility) m.funcs;
-  Vec.iter
-    (fun g ->
-      if g.section <> None then unsupported "@%s: a global in a named section" g.gname;
-      if g.thread_local then unsupported "@%s: a thread_local global" g.gname;
-      note g.gname g.glinkage g.gvisibility)
-    m.globals;
+  Vec.iter (fun g -> note g.gname g.glinkage g.gvisibility) m.globals;
   let aliases =
     Vec.fold
       (fun acc a ->

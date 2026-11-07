@@ -32,6 +32,7 @@ type ctx = {
       (** symbols defined here that no other module can preempt *)
   label_funcs : (string, unit) Hashtbl.t;
       (** functions defined here and called directly (not weak) *)
+  tls_syms : (string, unit) Hashtbl.t;  (** thread-local variables *)
   vals : (int, reg) Hashtbl.t;
   mutable cur : int;  (** the Mir block instructions go to *)
   mutable fir_block : int;
@@ -115,7 +116,8 @@ let fconst c dbl (x : float) =
   fbits c dbl (if dbl then Int64.bits_of_float x else Int64.of_int32 (Int32.bits_of_float x))
 
 (* The address of a symbol plus an addend: through the GOT when another
-   module may define (or interpose) it, else rip-relative. Only lea after
+   module may define (or interpose) it, else rip-relative; a thread-local
+   variable's is the thread pointer plus its offset. Only lea after
    the GOT load, so materializing it never touches the flags. *)
 let sym_addr c name (addend : int64) =
   let t = fresh c Gpr in
@@ -126,7 +128,15 @@ let sym_addr c name (addend : int64) =
         let k = movi c addend in
         emit c (Lea (t, { base = Breg t; index = Some k; scale = 1; disp = 0 }))
   in
-  if c.pic && not (Hashtbl.mem c.local_syms name) then begin
+  if Hashtbl.mem c.tls_syms name then begin
+    (* a thread-local variable: thread pointer + its offset *)
+    let tp = fresh c Gpr and off = fresh c Gpr in
+    emit c (Tp tp);
+    emit c (Tlsoff (off, name));
+    emit c (Lea (t, { base = Breg tp; index = Some off; scale = 1; disp = 0 }));
+    add_addend ()
+  end
+  else if c.pic && not (Hashtbl.mem c.local_syms name) then begin
     emit c (Got (t, name));
     add_addend ()
   end
@@ -1489,6 +1499,7 @@ let term c (t : F.term) =
 type env = {
   local_syms : (string, unit) Hashtbl.t;
   label_funcs : (string, unit) Hashtbl.t;
+  tls_syms : (string, unit) Hashtbl.t;  (** thread_local globals, defined or declared *)
   blk_refs : (string * int, unit) Hashtbl.t;  (** blocks whose address is taken *)
 }
 
@@ -1502,9 +1513,16 @@ let env (m : F.modul) =
       note f.name f.defined f.linkage f.visibility;
       if f.defined && f.linkage <> F.Weak then Hashtbl.replace label_funcs f.name ())
     m.funcs;
-  F.Vec.iter (fun (g : F.global) -> note g.gname g.gdefined g.glinkage g.gvisibility) m.globals;
+  let tls_syms = Hashtbl.create 8 in
+  F.Vec.iter
+    (fun (g : F.global) ->
+      note g.gname g.gdefined g.glinkage g.gvisibility;
+      if g.thread_local then Hashtbl.replace tls_syms g.gname ())
+    m.globals;
   F.Vec.iter (fun (a : F.alias) -> note a.aname true a.alinkage a.avisibility) m.aliases;
-  { local_syms; label_funcs; blk_refs = Hashtbl.create 8 }
+  (* an alias of a thread-local variable is thread-local too *)
+  F.Vec.iter (fun (a : F.alias) -> if Hashtbl.mem tls_syms a.target then Hashtbl.replace tls_syms a.aname ()) m.aliases;
+  { local_syms; label_funcs; tls_syms; blk_refs = Hashtbl.create 8 }
 
 (* Allocas that can live in a virtual register instead of memory: static
    (entry block, constant size, align <= 16), and only ever accessed by
@@ -1622,7 +1640,7 @@ let select ~pic (e : env) (fn : F.func) =
     ignore (new_block mf)
   done;
   let c =
-    { fn; mf; pic; local_syms = e.local_syms; label_funcs = e.label_funcs; vals = Hashtbl.create 256;
+    { fn; mf; pic; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Hashtbl.create 256;
       cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
       frame = Hashtbl.create 16;
       cells =
