@@ -181,8 +181,9 @@ source/build provenance. Full input/tool snapshots and binary CPU profiles are
 retained under
 `/home/glonex/.cache/fas-linker-qualification/serial-probe-20261107`;
 [artifact-index.json](../results/2026-11-07/serial-probe/artifact-index.json)
-records their hashes. Artifacts require those retained paths; they are not a
-portable sysroot bundle.
+records their hashes. Copied flat CPU text reports have trailing spaces removed;
+the external originals retain their recorded hashes. Artifacts require those
+retained paths; they are not a portable sysroot bundle.
 
 Prepare another retained small corpus:
 
