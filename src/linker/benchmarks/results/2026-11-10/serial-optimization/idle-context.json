@@ -1,0 +1,9 @@
+{
+  "user_reported_idle": true,
+  "duration_requested_minutes": 5,
+  "timing_started": "2026-11-10T17:26:54+0100",
+  "timing_completed_before": "2026-11-10T17:29:53.342593+01:00",
+  "other_agent_work": "Read-only source inspection; no builds, correctness runs, profiles or counters during replay",
+  "host_controls": "No affinity/governor/cache/suspend changes",
+  "qualification": "User-declared idle window; resident background services still present; retain samples and load averages, tiny runs remain variable"
+}

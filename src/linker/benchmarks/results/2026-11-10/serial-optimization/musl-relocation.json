@@ -1,0 +1,6 @@
+{
+  "source": "/home/glonex/.cache/fas-linker-qualification/ubuntu24-qualified-20261106/results/linker-musl/sysroot",
+  "destination": "/home/glonex/.cache/fas-linker-qualification/serial-optimization-20261110/musl-sysroot",
+  "text_prefix_replacement": "/qualification/results/linker-musl/sysroot",
+  "loader_symlink": "lib/ld-musl-x86_64.so.1 -> libc.so"
+}

@@ -43,9 +43,12 @@ let definition (resolved : Resolver.t) file symbol =
       (Hashtbl.find_opt resolved.definitions s.name)
 
 let canonical_ifunc resolved t file symbol =
-  Option.fold ~none:false
-    ~some:(Hashtbl.mem t.canonical_ifuncs)
-    (definition resolved file symbol)
+  (* Most links need no canonical IFUNC addresses. In that case, resolving a
+     definition and allocating its key for every absolute relocation is wasted. *)
+  Hashtbl.length t.canonical_ifuncs <> 0
+  && Option.fold ~none:false
+       ~some:(Hashtbl.mem t.canonical_ifuncs)
+       (definition resolved file symbol)
 
 let ifunc (resolved : Resolver.t) file symbol =
   let s = resolved.objects.(file).symbols.(symbol) in

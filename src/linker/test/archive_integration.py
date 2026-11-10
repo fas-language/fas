@@ -281,6 +281,7 @@ class ArchiveTests(unittest.TestCase):
         change("size-huge", obj["header"] + 48, b"9999999999", "decimal")
         change("bad-offset", index["offset"] + 4, struct.pack(">I", obj["offset"]), "member header")
         change("too-many-symbols", index["offset"], struct.pack(">I", 0xffffffff), "limit")
+        change("truncated-index-offsets", index["offset"], struct.pack(">I", 64), "byte range")
         change("unneeded-index-name", index["offset"] + 8, b"wrong!", "undefined symbol answer")
         change("bad-long-name", obj["header"], b"/1".ljust(16), "long member name")
         payload = self.answer.read_bytes().replace(b"answer\0", b"wrong!\0")

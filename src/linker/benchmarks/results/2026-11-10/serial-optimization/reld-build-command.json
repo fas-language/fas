@@ -1,0 +1,14 @@
+[
+  "cargo",
+  "+1.98.1",
+  "build",
+  "--release",
+  "--locked",
+  "-p",
+  "reld",
+  "--bin",
+  "reld",
+  "--no-default-features",
+  "-j",
+  "2"
+]

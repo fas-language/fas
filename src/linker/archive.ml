@@ -177,43 +177,49 @@ let parse ~path data =
   in
   let by_offset = Hashtbl.create ~random:true (Array.length members) in
   Array.iteri (fun i m -> Hashtbl.add by_offset m.header i) members;
-  let index = Hashtbl.create ~random:true 256 in
-  Option.iter
-    (fun (offset, size, width) ->
-      B.span ~context ~length:(offset + size) offset width;
-      let integer at =
-        let value =
-          if width = 4 then
-            Int64.logand (Int64.of_int32 (String.get_int32_be data at)) 0xffff_ffffL
-          else String.get_int64_be data at
+  let index =
+    match !symbols with
+    | None -> Hashtbl.create ~random:true 0
+    | Some (offset, size, width) ->
+        B.span ~context ~length:(offset + size) offset width;
+        let integer at =
+          let value =
+            if width = 4 then
+              Int64.logand (Int64.of_int32 (String.get_int32_be data at)) 0xffff_ffffL
+            else String.get_int64_be data at
+          in
+          B.index ~context ~limit:length value
         in
-        B.index ~context ~limit:length value
-      in
-      let count = integer offset in
-      if count > 1_000_000 then fail "symbol index exceeds 1000000 entry limit";
-      B.span ~context ~length:(offset + size) (offset + width) (count * width);
-      let cursor = ref (offset + width + (count * width)) in
-      for n = 0 to count - 1 do
-        let member_offset = integer (offset + width + (n * width)) in
-        let member =
-          match Hashtbl.find_opt by_offset member_offset with
-          | Some i -> i
-          | None -> fail "symbol index points outside a member header: %d" member_offset
-        in
-        let name = B.string_at ~context data ~offset ~size (!cursor - offset) in
-        if name = "" then fail "empty symbol in archive index";
-        cursor := !cursor + String.length name + 1;
-        List.iter
-          (fun alias ->
-            let previous = Option.value (Hashtbl.find_opt index alias) ~default:[] in
-            Hashtbl.replace index alias (member :: previous);
-            members.(member).exports <- alias :: members.(member).exports)
-          (name :: Symver.aliases name)
-      done;
-      for n = !cursor to offset + size - 1 do
-        if data.[n] <> '\000' then fail "trailing garbage in symbol index"
-      done)
-    !symbols;
+        let count = integer offset in
+        if count > 1_000_000 then fail "symbol index exceeds 1000000 entry limit";
+        B.span ~context ~length:(offset + size) (offset + width) (count * width);
+        (* Avoid repeatedly growing the common index. Validate its count/offset
+           array first, and cap the initial reservation for untrusted counts;
+           larger valid indexes can still grow under the existing entry limit. *)
+        let index = Hashtbl.create ~random:true (min count 65536) in
+        let cursor = ref (offset + width + (count * width)) in
+        for n = 0 to count - 1 do
+          let member_offset = integer (offset + width + (n * width)) in
+          let member =
+            match Hashtbl.find_opt by_offset member_offset with
+            | Some i -> i
+            | None -> fail "symbol index points outside a member header: %d" member_offset
+          in
+          let name = B.string_at ~context data ~offset ~size (!cursor - offset) in
+          if name = "" then fail "empty symbol in archive index";
+          cursor := !cursor + String.length name + 1;
+          List.iter
+            (fun alias ->
+              let previous = Option.value (Hashtbl.find_opt index alias) ~default:[] in
+              Hashtbl.replace index alias (member :: previous);
+              members.(member).exports <- alias :: members.(member).exports)
+            (name :: Symver.aliases name)
+        done;
+        for n = !cursor to offset + size - 1 do
+          if data.[n] <> '\000' then fail "trailing garbage in symbol index"
+        done;
+        index
+  in
   {
     path;
     data;

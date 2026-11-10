@@ -136,6 +136,14 @@ per the user's revised priority. Malformed-input tests and fuzzing grow
 continuously; hardening is not postponed until 0.9. Large milestones can have
 several prereleases.
 
+The active target is matching or beating mold/reld with **one worker per
+linker**. Parallel parsing and other parallel passes are deferred. The
+[first serial batch](benchmarks/research/2026-11-10-serial-optimization.md)
+keeps measured relocation-validation, archive-index, SHA-1 and empty-IFUNC
+improvements. SQLite is faster with identical outputs, but a substantial gap
+remains. The next experiments can change data representation and hot lookup
+structure while preserving the supported behavior and publication guarantees.
+
 Version 0.3 can be useful before general hosted C support. Version 1.0 does not
 claim every GNU ld flag/script, C++ ecosystem, LLVM bitcode LTO, Windows, or every
 ELF architecture. Any added ecosystem needs its own compatibility corpus.

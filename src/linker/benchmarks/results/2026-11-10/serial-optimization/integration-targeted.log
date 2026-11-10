@@ -1,0 +1,25 @@
+test_cli_and_nonregular_input (__main__.LinkerTests.test_cli_and_nonregular_input) ... ok
+test_cross_object_execution_and_reference (__main__.LinkerTests.test_cross_object_execution_and_reference) ... ok
+test_custom_entry_and_input_after_double_dash (__main__.LinkerTests.test_custom_entry_and_input_after_double_dash) ... ok
+test_freestanding_c_objects (__main__.LinkerTests.test_freestanding_c_objects) ... ok
+test_invalid_entry_and_output_aliases (__main__.LinkerTests.test_invalid_entry_and_output_aliases) ... ok
+test_library_reentry_and_concurrent_invocations (__main__.LinkerTests.test_library_reentry_and_concurrent_invocations) ... ok
+test_local_symbols_do_not_conflict (__main__.LinkerTests.test_local_symbols_do_not_conflict) ... ok
+test_malformed_objects (__main__.LinkerTests.test_malformed_objects) ... ok
+test_nobits_alignment_and_ignored_file_offset (__main__.LinkerTests.test_nobits_alignment_and_ignored_file_offset) ... ok
+test_output_structure_and_reproducibility (__main__.LinkerTests.test_output_structure_and_reproducibility) ... ok
+test_overlapping_relocations (__main__.LinkerTests.test_overlapping_relocations) ... ok
+test_relocatable_section_addresses_are_not_load_addresses (__main__.LinkerTests.test_relocatable_section_addresses_are_not_load_addresses) ... ok
+test_relocation_order_independent_output_and_validation (__main__.LinkerTests.test_relocation_order_independent_output_and_validation) ... ok
+test_relocation_overflow_preserves_output (__main__.LinkerTests.test_relocation_overflow_preserves_output) ... ok
+test_relocations_with_null_symbol_and_none (__main__.LinkerTests.test_relocations_with_null_symbol_and_none) ... ok
+test_seeded_valid_object_graphs (__main__.LinkerTests.test_seeded_valid_object_graphs) ... ok
+test_short_version_continues_linking_and_gcc_abi_probe (__main__.LinkerTests.test_short_version_continues_linking_and_gcc_abi_probe) ... ok
+test_sized_undefined_and_unused_declarations (__main__.LinkerTests.test_sized_undefined_and_unused_declarations) ... ok
+test_truncation_and_seeded_mutation_campaign (__main__.LinkerTests.test_truncation_and_seeded_mutation_campaign) ... ok
+test_undefined_duplicate_and_unsupported_semantics (__main__.LinkerTests.test_undefined_duplicate_and_unsupported_semantics) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 2.705s
+
+OK

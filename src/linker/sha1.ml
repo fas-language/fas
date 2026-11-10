@@ -21,14 +21,22 @@ let digest bytes =
   in
   let words = Array.make 80 0 in
   for block = 0 to blocks - 1 do
-    for n = 0 to 15 do
-      let at = (block * 64) + (n * 4) in
-      words.(n) <-
-        (byte at lsl 24)
-        lor (byte (at + 1) lsl 16)
-        lor (byte (at + 2) lsl 8)
-        lor byte (at + 3)
-    done;
+    if block < length / 64 then
+      (* Complete input blocks need neither padding decisions nor four byte
+         loads per word. Only the final one or two blocks use [byte] below. *)
+      for n = 0 to 15 do
+        words.(n) <-
+          Int32.to_int (Bytes.get_int32_be bytes ((block * 64) + (n * 4))) land mask
+      done
+    else
+      for n = 0 to 15 do
+        let at = (block * 64) + (n * 4) in
+        words.(n) <-
+          (byte at lsl 24)
+          lor (byte (at + 1) lsl 16)
+          lor (byte (at + 2) lsl 8)
+          lor byte (at + 3)
+      done;
     for n = 16 to 79 do
       words.(n) <-
         rotate

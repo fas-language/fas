@@ -1,0 +1,21 @@
+test_64_bit_archive_index (__main__.ArchiveTests.test_64_bit_archive_index) ... ok
+test_archive_mutation_campaign (__main__.ArchiveTests.test_archive_mutation_campaign) ... ok
+test_common_archive_extraction_policy (__main__.ArchiveTests.test_common_archive_extraction_policy) ... ok
+test_common_validation_and_archive_container_edges (__main__.ArchiveTests.test_common_validation_and_archive_container_edges) ... ok
+test_forward_archive_passes_preserve_weak_selection (__main__.ArchiveTests.test_forward_archive_passes_preserve_weak_selection) ... ok
+test_groups_repeated_archives_and_whole_archive (__main__.ArchiveTests.test_groups_repeated_archives_and_whole_archive) ... ok
+test_lazy_extraction_chain_order_and_unused_members (__main__.ArchiveTests.test_lazy_extraction_chain_order_and_unused_members) ... ok
+test_library_search_and_long_names (__main__.ArchiveTests.test_library_search_and_long_names) ... ok
+test_malformed_archives_and_failure_preservation (__main__.ArchiveTests.test_malformed_archives_and_failure_preservation) ... ok
+test_repeated_reads_preserve_archive_state_and_logical_budgets (__main__.ArchiveTests.test_repeated_reads_preserve_archive_state_and_logical_budgets) ... ok
+test_response_files_quotes_nesting_and_errors (__main__.ArchiveTests.test_response_files_quotes_nesting_and_errors) ... ok
+test_seeded_archive_graphs_and_library_reentry (__main__.ArchiveTests.test_seeded_archive_graphs_and_library_reentry) ... ok
+test_statistics_are_json_and_do_not_change_output (__main__.ArchiveTests.test_statistics_are_json_and_do_not_change_output) ... ok
+test_strong_weak_common_precedence (__main__.ArchiveTests.test_strong_weak_common_precedence) ... ok
+test_unresolved_weak_and_strong_reference_upgrade (__main__.ArchiveTests.test_unresolved_weak_and_strong_reference_upgrade) ... ok
+test_visibility_propagation (__main__.ArchiveTests.test_visibility_propagation) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 8.108s
+
+OK

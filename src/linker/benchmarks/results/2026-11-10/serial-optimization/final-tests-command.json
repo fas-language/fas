@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "dune",
+    "runtest",
+    "--profile",
+    "release",
+    "-j",
+    "2",
+    "src/linker/test"
+  ],
+  "environment_overrides": {
+    "FAS_MUSL_SYSROOT": "/home/glonex/.cache/fas-linker-qualification/serial-optimization-20261110/musl-sysroot"
+  }
+}

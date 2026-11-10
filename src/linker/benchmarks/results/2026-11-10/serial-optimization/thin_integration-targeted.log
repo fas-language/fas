@@ -1,0 +1,11 @@
+test_consumed_and_unused_external_members_are_not_overwritten (__main__.ThinTests.test_consumed_and_unused_external_members_are_not_overwritten) ... ok
+test_fifteen_character_member_names (__main__.ThinTests.test_fifteen_character_member_names) ... ok
+test_lazy_missing_and_changed_members_and_index_validation (__main__.ThinTests.test_lazy_missing_and_changed_members_and_index_validation) ... ok
+test_nested_regular_archives_and_flattened_thin_archives (__main__.ThinTests.test_nested_regular_archives_and_flattened_thin_archives) ... ok
+test_nonregular_and_oversized_external_members (__main__.ThinTests.test_nonregular_and_oversized_external_members) ... ok
+test_relative_paths_long_names_and_moved_tree (__main__.ThinTests.test_relative_paths_long_names_and_moved_tree) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 1.441s
+
+OK

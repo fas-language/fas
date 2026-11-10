@@ -1,0 +1,28 @@
+{
+  "command": {
+    "argv": [
+      "dune",
+      "runtest",
+      "--profile",
+      "release",
+      "-j",
+      "2",
+      "src/linker/test"
+    ],
+    "environment_overrides": {
+      "FAS_MUSL_SYSROOT": "/home/glonex/.cache/fas-linker-qualification/serial-optimization-20261110/musl-sysroot"
+    }
+  },
+  "returncode": 0,
+  "python_groups": 43,
+  "python_tests": 269,
+  "unit_passed": true,
+  "skipped": false,
+  "failed": false,
+  "production_source_sha256": {
+    "src/linker/elf_reader.ml": "c1b4894dc2bcd82b2ff320761f52f97e65581ecd3379dd4ab0b8f5895dd59164",
+    "src/linker/archive.ml": "2f414ebb9b03f64784528ae2bd298ba62a58a938a711ead78d9b8f0949df7107",
+    "src/linker/got.ml": "cd2d660f1726b477ad0963589b6ed967a4810d6a05d573e774d475c42e7e91c2",
+    "src/linker/sha1.ml": "c26dee3ae140e716c4dd87d4d996b4896868967ae9b621d9523e9e9cebd2e93f"
+  }
+}

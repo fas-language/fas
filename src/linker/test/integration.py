@@ -364,6 +364,8 @@ zero: .zero 4
             ("strtab-end", strtab["offset"] + strtab["size"] - 1, "B", 65, "string table"),
             ("reloc-kind", rela["offset"] + 8, "I", 999, "unsupported x86-64 relocation"),
             ("reloc-symbol", rela["offset"] + 12, "I", 0xFFFFFFFF, "relocation symbol index"),
+            ("reloc-high-type", rela["offset"] + 8, "I", 0x80000000,
+             "unsupported x86-64 relocation 2147483648"),
             ("reloc-offset", rela["offset"], "Q", text["size"] + 1, "relocation offset"),
             ("reloc-width", rela["offset"], "Q", text["size"] - 1, "byte range"),
             ("reloc-target", rela["header"] + 44, "I", len(sections), "target index"),
@@ -386,6 +388,60 @@ zero: .zero 4
         path = self.root / "overlap-patched.o"
         path.write_bytes(data)
         self.rejected(path, "overlapping relocations", self.simple, self.answer)
+
+    def test_relocation_order_independent_output_and_validation(self):
+        obj = self.assemble("relocation-order", ".data\n" +
+                            "\n".join(f".quad answer+{n}" for n in range(64)) +
+                            "\n.section .rodata\n" +
+                            "\n".join(f".quad answer+{n}" for n in range(64)))
+        original = obj.read_bytes()
+        rela = next(s for s in elf_sections(original) if s["kind"] == 4)
+        entries = [original[at:at + 24]
+                   for at in range(rela["offset"], rela["offset"] + rela["size"], 24)]
+        expected = self.link("ordered-relocations", self.simple, self.answer, obj).read_bytes()
+        rng = random.Random(0x50A7)
+        rng.shuffle(entries)
+        data = bytearray(original)
+        data[rela["offset"]:rela["offset"] + rela["size"]] = b"".join(entries)
+        shuffled = self.root / "shuffled-relocations.o"
+        shuffled.write_bytes(data)
+        out = self.link("shuffled-relocations", self.simple, self.answer, shuffled)
+        self.assertEqual(out.read_bytes(), expected)
+        run(out, expected=42)
+        # A collision in an unsorted table must still reject the link and
+        # preserve the previous output, rather than being hidden by sorting.
+        at = rela["offset"]
+        duplicate = struct.unpack_from("<Q", data, at + 24)[0]
+        struct.pack_into("<Q", data, at, duplicate)
+        shuffled.write_bytes(data)
+        self.rejected(shuffled, "overlapping relocations", self.simple, self.answer)
+
+    def test_multiple_relocation_tables_for_same_target(self):
+        values = "\n".join(f".quad answer+{n}" for n in range(16))
+        obj = self.assemble("split-relocations", ".data\n" + values +
+                            "\n.zero 128\n.section .rodata\n" + values)
+        data = bytearray(obj.read_bytes())
+        sections = elf_sections(data)
+        target = next(s for s in sections if s["name"] == ".data")
+        first = next(s for s in sections if s["name"] == ".rela.data")
+        second = next(s for s in sections if s["name"] == ".rela.rodata")
+        struct.pack_into("<I", data, second["header"] + 44, target["index"])
+        for at in range(second["offset"], second["offset"] + second["size"], 24):
+            offset = struct.unpack_from("<Q", data, at)[0]
+            struct.pack_into("<Q", data, at, offset + 128)
+        entries = [data[at:at + 24] for at in
+                   range(first["offset"], first["offset"] + first["size"], 24)]
+        data[first["offset"]:first["offset"] + first["size"]] = b"".join(reversed(entries))
+        obj.write_bytes(data)
+        # Retain our existing sh_info-based target policy for multiple RELA
+        # tables; names do not identify the target in the reader.
+        out = self.link("split-relocations", self.simple, self.answer, obj)
+        image = out.read_bytes()
+        placed = next(s for s in elf_sections(image) if s["name"] == ".data")
+        answer = next(s for s in elf_symbols(image) if s["name"] == "answer")["value"]
+        self.assertEqual(struct.unpack_from("<32Q", image, placed["offset"]),
+                         tuple(answer + n for n in range(16)) * 2)
+        run(out, expected=42)
 
     def test_truncation_and_seeded_mutation_campaign(self):
         original = self.simple.read_bytes()

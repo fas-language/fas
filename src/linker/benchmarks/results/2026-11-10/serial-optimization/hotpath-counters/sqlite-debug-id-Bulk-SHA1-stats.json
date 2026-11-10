@@ -1,0 +1,90 @@
+{
+  "wall_seconds": 0.267401934,
+  "cpu_seconds": 0.267392,
+  "phases": {
+    "emit": {
+      "wall_seconds": 0.168553829,
+      "cpu_seconds": 0.168535,
+      "allocated_words": 10970170,
+      "promoted_words": 253227
+    },
+    "gc": {
+      "wall_seconds": 1.2875e-05,
+      "cpu_seconds": 1.1e-05,
+      "allocated_words": 331,
+      "promoted_words": 0
+    },
+    "merge": {
+      "wall_seconds": 0.002181053,
+      "cpu_seconds": 0.002177,
+      "allocated_words": 39434,
+      "promoted_words": 0
+    },
+    "parse": {
+      "wall_seconds": 0.060670137,
+      "cpu_seconds": 0.060645,
+      "allocated_words": 7346219,
+      "promoted_words": 3146095
+    },
+    "read": {
+      "wall_seconds": 0.025359392,
+      "cpu_seconds": 0.025325,
+      "allocated_words": 3054838,
+      "promoted_words": 80952
+    },
+    "relocate": {
+      "wall_seconds": 0.019374847,
+      "cpu_seconds": 0.019358,
+      "allocated_words": 5801151,
+      "promoted_words": 115853
+    },
+    "resolve": {
+      "wall_seconds": 0.006458044,
+      "cpu_seconds": 0.006457,
+      "allocated_words": 330920,
+      "promoted_words": 121755
+    },
+    "unwind": {
+      "wall_seconds": 0.019598007,
+      "cpu_seconds": 0.019593,
+      "allocated_words": 2292760,
+      "promoted_words": 81040
+    },
+    "write": {
+      "wall_seconds": 0.0055089,
+      "cpu_seconds": 0.005507,
+      "allocated_words": 264,
+      "promoted_words": 0
+    }
+  },
+  "counts": {
+    "archives": 5,
+    "dynamic_exports": 0,
+    "dynamic_imports": 161,
+    "dynamic_relative_relocations": 2628,
+    "extracted_members": 1,
+    "gnu_properties": 2,
+    "got_entries": 138,
+    "indexed_unwind_fdes": 2972,
+    "input_bytes": 34322221,
+    "input_files": 23,
+    "input_read_cache_hits": 5,
+    "linker_scripts": 4,
+    "linker_symbols": 1,
+    "merged_bytes": 117,
+    "merged_sections": 3,
+    "objects": 8,
+    "output_bytes": 9077584,
+    "plt_entries": 120,
+    "relocations": 300773,
+    "shared_libraries": 4,
+    "symbols": 7138,
+    "unwind_fdes": 2972
+  },
+  "gc": {
+    "allocated_words": 21739650,
+    "promoted_words": 3602029,
+    "minor_collections": 78,
+    "major_collections": 12
+  }
+}

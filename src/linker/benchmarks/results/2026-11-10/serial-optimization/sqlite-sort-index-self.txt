@@ -1,0 +1,65 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cycles:u'
+# Event count (approx.): 9200361039
+#
+# Overhead  Shared Object                                     Symbol                                               IPC   [IPC Coverage]
+# ........  ................................................  ...................................................  ....................
+#
+    11.24%  fas-sort-index                                    [.] do_some_marking                                  -      -
+     4.86%  fas-sort-index                                    [.] Fas_linker.Elf_reader.compare_reloc_991          -      -
+     4.83%  fas-sort-index                                    [.] pool_sweep                                       -      -
+     4.81%  fas-sort-index                                    [.] caml_hash                                        -      -
+     4.76%  fas-sort-index                                    [.] caml_modify                                      -      -
+     4.61%  fas-sort-index                                    [.] Stdlib.Array.loop_610                            -      -
+     4.04%  fas-sort-index                                    [.] Fas_linker.Static_link.fun_2324                  -      -
+     4.00%  fas-sort-index                                    [.] compare_val                                      -      -
+     3.33%  fas-sort-index                                    [.] caml_shared_try_alloc                            -      -
+     2.91%  fas-sort-index                                    [.] oldify_one                                       -      -
+     2.36%  fas-sort-index                                    [.] caml_darken                                      -      -
+     2.27%  fas-sort-index                                    [.] caml_hash_mix_string                             -      -
+     2.21%  fas-sort-index                                    [.] Fas_linker.Elf_reader.fun_1803                   -      -
+     2.18%  fas-sort-index                                    [.] caml_apply2                                      -      -
+     1.92%  fas-sort-index                                    [.] caml_c_call                                      -      -
+     1.87%  fas-sort-index                                    [.] mark                                             -      -
+     1.73%  libc.so.6                                         [.] __memmove_avx_unaligned_erms                     -      -
+     1.42%  fas-sort-index                                    [.] Stdlib.Array.isortto_618                         -      -
+     1.38%  fas-sort-index                                    [.] oldify_mopup                                     -      -
+     1.36%  fas-sort-index                                    [.] Stdlib.Array.iteri_381                           -      -
+     1.25%  fas-sort-index                                    [.] Stdlib.List.mem_479                              -      -
+     1.20%  fas-sort-index                                    [.] Fas_linker.X86_64.apply_lazy_358                 -      -
+     1.09%  fas-sort-index                                    [.] Fas_linker.Got.fun_1075                          -      -
+     0.97%  [unknown]                                         [k] 0xffffffffa1e00b90                               -      -
+     0.87%  fas-sort-index                                    [.] Fas_linker.Elf_reader.fun_1853                   -      -
+     0.85%  fas-sort-index                                    [.] Fas_linker.Static_link.fun_1706                  -      -
+     0.84%  fas-sort-index                                    [.] Stdlib.Hashtbl.key_index_1350                    -      -
+     0.83%  fas-sort-index                                    [.] mark_stack_push_block                            -      -
+     0.78%  fas-sort-index                                    [.] Stdlib.Array.iter_344                            -      -
+     0.78%  fas-sort-index                                    [.] Stdlib.Hashtbl.find_opt_1400                     -      -
+     0.77%  fas-sort-index                                    [.] caml_string_equal                                -      -
+     0.75%  fas-sort-index                                    [.] Fas_linker.Tls.symbol_532                        -      -
+     0.74%  fas-sort-index                                    [.] Fas_linker.Elf_reader.relocation_width_357       -      -
+     0.73%  fas-sort-index                                    [.] Fas_linker.Dynamic.fun_1975                      -      -
+     0.72%  fas-sort-index                                    [.] caml_uniform_array_blit                          -      -
+     0.66%  libc.so.6                                         [.] __memcmp_avx2_movbe                              -      -
+     0.65%  fas-sort-index                                    [.] caml_stw_empty_minor_heap_no_major_slice.isra.0  -      -
+     0.65%  fas-sort-index                                    [.] realloc_mark_stack                               -      -
+     0.61%  fas-sort-index                                    [.] Fas_linker.Copy_relocation.fun_1022              -      -
+     0.60%  fas-sort-index                                    [.] Fas_linker.Static_link.get_placement_1065        -      -
+     0.57%  fas-sort-index                                    [.] caml_addrmap_insert_pos                          -      -
+     0.55%  fas-sort-index                                    [.] caml_compare                                     -      -
+     0.53%  fas-sort-index                                    [.] try_update_object_header                         -      -
+     0.52%  fas-sort-index                                    [.] Fas_linker.Unwind.fun_1767                       -      -
+     0.49%  fas-sort-index                                    [.] Fas_linker.Merge_sections.fun_590                -      -
+     0.49%  fas-sort-index                                    [.] Stdlib.Hashtbl.mem_1441                          -      -
+     0.46%  fas-sort-index                                    [.] Fas_linker.Binary.set_507                        -      -
+     0.45%  fas-sort-index                                    [.] Stdlib.Hashtbl.insert_bucket_776                 -      -
+     0.45%  fas-sort-index                                    [.] Fas_linker.Elf_reader.idx_507                    -      -
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

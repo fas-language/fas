@@ -8,6 +8,14 @@ archive-table and SQLite experiments. It is exploratory shared-PC evidence;
 new speed claims still need a controlled before/after baseline. Parallel work
 is deferred. Reference repositories are pinned and kept outside the Fas tree.
 
+The [first serial optimization batch](research/2026-11-10-serial-optimization.md)
+now includes native single-worker mold/reld controls, a user-declared idle-window
+comparison, staged keep/revert experiments and a final shared-PC repeat.
+Per-target relocation validation cuts debug SQLite elapsed time by about 25–34%
+in the idle block, with identical Fas output bytes. The references remain much
+faster on the large input; matching them is an open target. The report separates
+build-ID algorithm differences, final source validation and remaining profiles.
+
 ## Quiet-PC measurements after build-ID/IFUNC changes
 
 The user provided an idle-PC window beginning at 21:17 CET on 2026-11-05;

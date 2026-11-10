@@ -1,0 +1,44 @@
+{
+  "status": "passed",
+  "failures": [],
+  "seconds_per_target": 45,
+  "modes": [
+    "elf",
+    "archive",
+    "link"
+  ],
+  "git_head": "25f6e5be35dc3784124091101df59323031fcda0",
+  "target_sha256": "db1428c39904a7c2acdc292a03064ffc7fa42ae21a9ad4960c3c91142a3f0e0c",
+  "targets": {
+    "elf": {
+      "run_time": 45,
+      "execs_done": 27847,
+      "saved_crashes": 0,
+      "saved_hangs": 0,
+      "edges_found": 827,
+      "total_edges": 65536,
+      "elapsed_seconds": 45.29909581699758
+    },
+    "archive": {
+      "run_time": 45,
+      "execs_done": 27653,
+      "saved_crashes": 0,
+      "saved_hangs": 0,
+      "edges_found": 767,
+      "total_edges": 65536,
+      "elapsed_seconds": 45.25254899499123
+    },
+    "link": {
+      "run_time": 45,
+      "execs_done": 27811,
+      "saved_crashes": 0,
+      "saved_hangs": 0,
+      "edges_found": 1912,
+      "total_edges": 65536,
+      "elapsed_seconds": 45.33424961101264
+    }
+  },
+  "executions": 83311,
+  "scope": "bounded campaign acceptance; AFL edge counts are not source coverage",
+  "report_sha256": "81483306b4681833818112a45941c6c2f107cd5abb685ced8ff68dc20f46c062"
+}

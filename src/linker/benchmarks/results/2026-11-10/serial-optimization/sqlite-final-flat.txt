@@ -1,0 +1,61 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cycles:u'
+# Event count (approx.): 9913781535
+#
+# Overhead  Command          Shared Object                                     Symbol
+# ........  ...............  ................................................  ...................................................
+#
+     9.75%  fas-empty-ifunc  fas-empty-ifunc                                   [.] do_some_marking
+     6.01%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Static_link.fun_2324
+     5.40%  fas-empty-ifunc  fas-empty-ifunc                                   [.] compare_val
+     4.75%  fas-empty-ifunc  fas-empty-ifunc                                   [.] pool_sweep
+     4.70%  fas-empty-ifunc  fas-empty-ifunc                                   [.] oldify_one
+     4.08%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_hash
+     3.76%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.fun_1815
+     3.36%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_shared_try_alloc
+     2.65%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_hash_mix_string
+     2.56%  fas-empty-ifunc  libc.so.6                                         [.] __memmove_avx_unaligned_erms
+     2.52%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_modify
+     2.36%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Stdlib.List.mem_479
+     2.19%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.X86_64.apply_lazy_358
+     2.17%  fas-empty-ifunc  fas-empty-ifunc                                   [.] oldify_mopup
+     1.98%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Got.fun_1076
+     1.92%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_c_call
+     1.88%  fas-empty-ifunc  [unknown]                                         [k] 0xffffffffa1e00b90
+     1.66%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Dynamic.fun_1975
+     1.36%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Static_link.fun_1706
+     1.34%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_string_equal
+     1.34%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Stdlib.Hashtbl.find_opt_1400
+     1.26%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.compare_reloc_991
+     1.16%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.relocation_width_357
+     1.14%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Stdlib.Array.iteri_381
+     0.98%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Tls.symbol_532
+     0.95%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Copy_relocation.fun_1022
+     0.95%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.fun_1895
+     0.92%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Stdlib.Array.iter_344
+     0.91%  fas-empty-ifunc  fas-empty-ifunc                                   [.] try_update_object_header
+     0.90%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Merge_sections.fun_590
+     0.82%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.idx_507
+     0.76%  fas-empty-ifunc  libc.so.6                                         [.] __memcmp_avx2_movbe
+     0.75%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Unwind.fun_1767
+     0.74%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Binary.set_507
+     0.68%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_apply2
+     0.67%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Unwind.fun_1875
+     0.65%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Got.canonical_747
+     0.62%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_darken
+     0.59%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.fun_1893
+     0.59%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Static_link.get_placement_1065
+     0.57%  fas-empty-ifunc  [unknown]                                         [k] 0xffffffffa1e00b93
+     0.57%  fas-empty-ifunc  fas-empty-ifunc                                   [.] caml_stw_empty_minor_heap_no_major_slice.isra.0
+     0.54%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Elf_reader.fun_1903
+     0.53%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Stdlib.Hashtbl.mem_in_bucket_1436
+     0.52%  fas-empty-ifunc  fas-empty-ifunc                                   [.] Fas_linker.Tls.fun_896
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

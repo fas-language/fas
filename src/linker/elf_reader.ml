@@ -609,8 +609,9 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
           incr next
         done)
     sections;
-  (* Toolchains usually emit ordered relocations. Avoid allocation/sorting then;
-     otherwise sort a copy, preserving original order for diagnostics. *)
+  (* Keep emission order intact. Ordered input needs no scratch storage; for
+     unordered input, only targets whose ranges need sorting get copied.
+     One late text relocation must not sort all ordered debug relocations. *)
   let compare_reloc (a : relocation) (b : relocation) =
     let c = compare a.target b.target in
     if c <> 0 then c else compare a.offset b.offset
@@ -619,25 +620,61 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
   for n = 1 to Array.length relocations - 1 do
     if compare_reloc relocations.(n - 1) relocations.(n) > 0 then sorted := false
   done;
-  let ranges =
-    if !sorted then relocations
-    else begin
-      let copy = Array.copy relocations in
-      Array.sort compare_reloc copy;
-      copy
-    end
+  let validate ranges =
+    let previous_target = ref (-1) and previous_end = ref 0 in
+    Array.iter
+      (fun (r : relocation) ->
+        if r.kind <> 0 then begin
+          if r.target = !previous_target && r.offset < !previous_end then
+            fail "section %s+0x%x: overlapping relocations are unsupported"
+              sections.(r.target).name r.offset;
+          previous_target := r.target;
+          previous_end := r.offset + Option.get (relocation_width r.kind)
+        end)
+      ranges
   in
-  let previous_target = ref (-1) and previous_end = ref 0 in
-  Array.iter
-    (fun (r : relocation) ->
-      if r.kind <> 0 then begin
-        if r.target = !previous_target && r.offset < !previous_end then
-          fail "section %s+0x%x: overlapping relocations are unsupported"
-            sections.(r.target).name r.offset;
-        previous_target := r.target;
-        previous_end := r.offset + Option.get (relocation_width r.kind)
-      end)
-    ranges;
+  if !sorted then validate relocations
+  else if Array.exists (fun (r : relocation) -> r.kind = 35) relocations then begin
+    (* TLSDESC_CALL has zero width. Keep the original whole-array ordering for
+       these rare inputs, including its equal-offset marker validation. *)
+    let ranges = Array.copy relocations in
+    Array.sort compare_reloc ranges;
+    validate ranges
+  end
+  else begin
+    let ends = Array.make count 0 and counts = Array.make count 0 in
+    let pending = Array.make count false in
+    Array.iter
+      (fun (r : relocation) ->
+        if r.kind <> 0 then begin
+          counts.(r.target) <- counts.(r.target) + 1;
+          if r.offset < ends.(r.target) then pending.(r.target) <- true;
+          ends.(r.target) <- r.offset + Option.get (relocation_width r.kind)
+        end)
+      relocations;
+    let ranges =
+      Array.mapi
+        (fun target size -> if pending.(target) then Array.make size empty_reloc else [||])
+        counts
+    in
+    Array.fill counts 0 count 0;
+    Array.iter
+      (fun (r : relocation) ->
+        if r.kind <> 0 && pending.(r.target) then begin
+          ranges.(r.target).(counts.(r.target)) <- r;
+          counts.(r.target) <- counts.(r.target) + 1
+        end)
+      relocations;
+    (* Target order preserves the first overlapping-range diagnostic. A target
+       not copied above has already proved its ranges disjoint in input order. *)
+    Array.iter
+      (fun ranges ->
+        if Array.length ranges <> 0 then begin
+          Array.stable_sort compare_reloc ranges;
+          validate ranges
+        end)
+      ranges
+  end;
   { path; data; sections; symbols; relocations; groups }
 
 let read ?(max_size = max_file_size) path =
