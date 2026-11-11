@@ -183,6 +183,18 @@ let plain_mem align = { align; volatile = false; order = Plain; alias = 0; noali
 (* ABI types of call parameters and results (SPEC section 7) *)
 type ext = Zx | Sx
 
+(* One operand of a GNU inline [Asm] (see Fir_asm and SPEC §6) *)
+type asm_operand = {
+  aname : string;  (** the operand's [name] for %[name] in the template; "" = none *)
+  acon : string;  (** its GCC constraint, as written in C: "=&r", "+m", "0", "{rax}", "=@ccz" *)
+  aty : ty;
+      (** the value's type; for a memory-only operand (whose Fir operand
+          is the address), the type of the bytes in memory *)
+}
+
+let asm_volatile = 1
+let asm_intel = 2  (** the template is Intel syntax (-masm=intel), not AT&T *)
+
 type abi =
   | Scalar of ty
   | Ext of ty * ext
@@ -263,6 +275,19 @@ type op =
       (** reads the next variadic argument, an aggregate with this [Agg] ABI,
           through the va_list at the pointer and advances it. The result is a
           ptr to a copy, valid until this instruction runs again *)
+  | Asm of {
+      tmpl : string;  (** GCC template text: %0, %[name], %k1, %%, %=, {att-or-intel} *)
+      aflags : int;  (** asm_volatile, asm_intel *)
+      outs : asm_operand array;
+      ins : asm_operand array;
+      aargs : value array;
+          (** the operands that take a Fir value, in order: each output
+              that reads one (a memory-only output: its address; a "+"
+              output: its old value), then every input *)
+      clobbers : string array;  (** "memory", "cc", register names *)
+    }
+      (** GNU inline assembly; one result per output that is not
+          memory-only, in order *)
   | Trap
   | Dbg_value of int * value  (** variable id, value *)
 
@@ -580,6 +605,7 @@ let iter_op_uses g = function
       (match callee with Indirect v -> g v | Direct _ -> ());
       Array.iter g args
   | Syscall args -> Array.iter g args
+  | Asm { aargs; _ } -> Array.iter g aargs
 
 let iter_term_uses g = function
   | Jump t -> Array.iter g t.args
@@ -637,6 +663,7 @@ let map_op_uses g op =
           args = Array.map g c.args;
         }
   | Syscall args -> Syscall (Array.map g args)
+  | Asm a -> Asm { a with aargs = Array.map g a.aargs }
   | Va_start a -> Va_start (g a)
   | Va_arg a -> Va_arg (g a)
   | Va_arg_agg (abi, a) -> Va_arg_agg (abi, g a)
@@ -665,7 +692,7 @@ let successors = function
 (* Ops with effects beyond their results: never removed when unused *)
 let has_side_effects = function
   | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Fence _ | Masked_store _
-  | Call _ | Syscall _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Va_arg_agg _ | Stack_save
+  | Call _ | Syscall _ | Asm _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Va_arg_agg _ | Stack_save
   | Stack_restore _ | Lifetime _ ->
       true
   | Load (m, _) -> m.volatile || m.order <> Plain

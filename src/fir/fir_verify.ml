@@ -333,6 +333,50 @@ let verify_func (f : func) =
                 if nres = 1 && r 0 <> i64 then err "%s: syscall result must be i64" where;
                 if Array.length args < 1 || Array.length args > 7 then err "%s: syscall takes 1 to 7 values" where;
                 Array.iteri (fun k a -> same (Printf.sprintf "syscall argument %d" k) a i64) args
+            | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> (
+                let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
+                match
+                  Fir_asm.parse ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs) ~ins:(pairs ins)
+                    ~clobbers
+                with
+                | exception Fir_asm.Bad m -> err "%s: %s" where m
+                | st ->
+                    if aflags land lnot (asm_volatile lor asm_intel) <> 0 then err "%s: unknown asm flags" where;
+                    (* results: the outputs that are not memory operands, in order *)
+                    let rtys = ref [] in
+                    Array.iteri
+                      (fun k (o : asm_operand) ->
+                        if Fir_asm.output_is_result st.outs.(k) then rtys := o.aty :: !rtys;
+                        if st.outs.(k).flag <> None && not (is_int o.aty) then
+                          err "%s: asm flag output %d is %s, not an integer" where k (ty_to_string o.aty))
+                      outs;
+                    let rtys = List.rev !rtys in
+                    if List.length rtys <> nres then
+                      err "%s: asm defines %d values, its outputs give %d" where nres (List.length rtys)
+                    else List.iteri (fun k t -> if r k <> t then err "%s: asm result %d type" where k) rtys;
+                    (* values: outputs that take one, then every input *)
+                    let want_args = ref [] in
+                    Array.iteri
+                      (fun k (o : asm_operand) ->
+                        let c = st.outs.(k) in
+                        if Fir_asm.output_takes_arg c then
+                          want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args)
+                      outs;
+                    Array.iteri
+                      (fun k (o : asm_operand) ->
+                        let c = st.ins.(k) in
+                        want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args;
+                        match c.tied with
+                        | Some t when outs.(t).aty <> o.aty ->
+                            err "%s: asm input %d is %s but is tied to output %d of %s" where k
+                              (ty_to_string o.aty) t (ty_to_string outs.(t).aty)
+                        | _ -> ())
+                      ins;
+                    let want_args = List.rev !want_args in
+                    if List.length want_args <> Array.length aargs then
+                      err "%s: asm takes %d values, its operands need %d" where (Array.length aargs)
+                        (List.length want_args)
+                    else List.iteri (fun k t -> same (Printf.sprintf "asm value %d" k) aargs.(k) t) want_args)
             | Va_start p ->
                 want 0;
                 if not (is_ptr (ty p)) then err "%s: va_start of %s" where (tys p);

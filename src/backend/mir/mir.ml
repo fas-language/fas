@@ -78,6 +78,25 @@ type x87 =
   | Fnstcw of addr
   | Fldcw of addr
 
+(* An operand of an inline asm statement, already in its place: every
+   register is physical (instruction selection chose them, see
+   Mir_isel's asm rule) *)
+type asm_opnd =
+  | Areg of reg * int  (** a register and the operand's width in bits (an xmm: 32 or 64) *)
+  | Amem of addr * int  (** a memory operand and its size in bytes *)
+  | Aimm of int64  (** an immediate *)
+  | Asym of string * int64  (** a symbol plus an addend, as an immediate *)
+  | Anone  (** a flag output ("=@cc..."): the template cannot name it *)
+
+type asm = {
+  pieces : Fir_asm.piece list;  (** the template, in the dialect below *)
+  intel : bool;
+  opnds : asm_opnd array;  (** GCC's numbering: outputs, then inputs *)
+  ain : reg list;  (** registers it reads: inputs, read-write outputs, memory addresses *)
+  aout : reg list;  (** registers it writes: outputs *)
+  aclob : reg list;  (** registers it destroys (the clobber list) *)
+}
+
 type ins =
   | Copy of reg * reg  (** dst, src; same class (64-bit mov or movaps) *)
   | Movi of reg * int64  (** a real mov (flags untouched) *)
@@ -147,6 +166,9 @@ type ins =
           block, just above the outgoing argument area *)
   | Spget of reg  (** dst = rsp (stacksave) *)
   | Spset of reg  (** rsp = src (stackrestore) *)
+  | Asm of asm
+      (** GNU inline asm, every register physical; Mir_emit renders the
+          template and assembles it with an external assembler *)
 
 type term =
   | Jmp of int
@@ -229,6 +251,7 @@ let uses_defs = function
   | Std | Cld | Mfence | Ud2 | Loc _ | Align_sp _ -> ([], [])
   | Xchg (_, a, r) | Xadd (_, a, r) -> (r :: addr_regs a, [ r ])
   | Cmpxchg (_, a, r) -> (G Rax :: r :: addr_regs a, [ G Rax ])
+  | Asm a -> (a.ain, a.aout)
 
 (* Physical registers an instruction destroys without defining a value *)
 let clobbers = function
@@ -238,6 +261,7 @@ let clobbers = function
         (List.map (fun r -> G r) caller_saved @ List.init 16 (fun i -> X i))
   | Syscall _ -> [ G Rcx; G R11 ]
   | Frem87 _ | X87 Fremloop -> [ G Rax ]
+  | Asm a -> a.aclob
   | _ -> []
 
 let term_uses = function Ret rs -> rs | Jmpr (r, _) -> [ r ] | Jmp _ | Jcc _ | Halt -> []
@@ -315,6 +339,21 @@ let map_regs g ins =
   | Xchg (n, a, r) -> Xchg (n, ma a, g r)
   | Xadd (n, a, r) -> Xadd (n, ma a, g r)
   | Cmpxchg (n, a, r) -> Cmpxchg (n, ma a, g r)
+  | Asm a ->
+      Asm
+        {
+          a with
+          opnds =
+            Array.map
+              (function
+                | Areg (r, w) -> Areg (g r, w)
+                | Amem (m, n) -> Amem (ma m, n)
+                | o -> o)
+              a.opnds;
+          ain = List.map g a.ain;
+          aout = List.map g a.aout;
+          aclob = List.map g a.aclob;
+        }
 
 let map_term g = function
   | Ret rs -> Ret (List.map g rs)
@@ -444,6 +483,20 @@ let ins_s i =
   | Salloc (a, n) -> p "%s = salloc %s" (r a) (r n)
   | Spget a -> p "%s = rsp" (r a)
   | Spset a -> p "rsp = %s" (r a)
+  | Asm a ->
+      let o = function
+        | Areg (x, w) -> p "%s:%d" (r x) w
+        | Amem (m, n) -> p "%s:%d" (addr_s m) n
+        | Aimm k -> Int64.to_string k
+        | Asym (s, k) -> p "@%s%+Ld" s k
+        | Anone -> "flags"
+      in
+      p "asm%s [%s] reads (%s) writes (%s) clobbers (%s)"
+        (if a.intel then " intel" else "")
+        (String.concat ", " (Array.to_list (Array.map o a.opnds)))
+        (String.concat ", " (List.map r a.ain))
+        (String.concat ", " (List.map r a.aout))
+        (String.concat ", " (List.map r a.aclob))
 
 let term_s = function
   | Jmp b -> Printf.sprintf "jmp b%d" b

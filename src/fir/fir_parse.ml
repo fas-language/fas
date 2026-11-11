@@ -710,6 +710,91 @@ let parse_op st opname =
       in
       go ();
       (Syscall (Array.of_list (List.rev !args)), [| t |])
+  | "asm" ->
+      (* asm [volatile] [intel] "tmpl" out(...) in(...) clobber(...);
+         an operand is [name] "constraint" type, then its value if it
+         takes one *)
+      let aflags = ref 0 in
+      let rec flags () =
+        match peek lx with
+        | Ident "volatile" -> ignore (next lx); aflags := !aflags lor asm_volatile; flags ()
+        | Ident "intel" -> ignore (next lx); aflags := !aflags lor asm_intel; flags ()
+        | _ -> ()
+      in
+      flags ();
+      let tmpl = str_tok lx in
+      (* an empty list may be left out *)
+      let operands kw ~output =
+        let present = match peek lx with Ident k when k = kw -> ignore (next lx); true | _ -> false in
+        if present then expect lx "(";
+        let ops = ref [] and args = ref [] in
+        if present && not (accept lx ")") then begin
+          let rec go () =
+            let aname =
+              if accept lx "[" then begin
+                let nm = match next lx with Ident s -> s | t -> fail lx ("expected a name, got " ^ tok_text t) in
+                expect lx "]";
+                nm
+              end
+              else ""
+            in
+            let acon = str_tok lx in
+            let aty = parse_ty lx in
+            let c =
+              match Fir_asm.constr ~names:[||] ~nouts:(if output then 0 else max_int) ~output acon with
+              | c -> Some c
+              | exception Fir_asm.Bad _ when not output -> None (* a [name] tie: the verifier checks *)
+              | exception Fir_asm.Bad m -> fail lx m
+            in
+            let takes = (not output) || match c with Some c -> Fir_asm.output_takes_arg c | None -> false in
+            (* the value; a bare constant has the operand's type (ptr for a
+               memory operand) *)
+            if takes then begin
+              let x =
+                match peek lx with
+                | Tlocal _ -> parse_value st
+                | t when starts_ty t -> parse_value st
+                | _ ->
+                    parse_const_after_ty st
+                      (match c with Some c when Fir_asm.indirect c -> ptr | _ -> aty)
+              in
+              args := x :: !args
+            end;
+            ops := { aname; acon; aty } :: !ops;
+            if accept lx "," then go () else expect lx ")"
+          in
+          go ()
+        end;
+        (Array.of_list (List.rev !ops), List.rev !args)
+      in
+      let outs, oargs = operands "out" ~output:true in
+      let ins, iargs = operands "in" ~output:false in
+      let clobbers =
+        match peek lx with
+        | Ident "clobber" ->
+            ignore (next lx);
+            expect lx "(";
+            let cs = ref [] in
+            if not (accept lx ")") then begin
+              let rec go () =
+                cs := str_tok lx :: !cs;
+                if accept lx "," then go () else expect lx ")"
+              in
+              go ()
+            end;
+            Array.of_list (List.rev !cs)
+        | _ -> [||]
+      in
+      let tys =
+        Array.of_list
+          (List.filter_map
+             (fun o ->
+               match Fir_asm.constr ~names:[||] ~nouts:0 ~output:true o.acon with
+               | c when Fir_asm.output_is_result c -> Some o.aty
+               | _ -> None)
+             (Array.to_list outs))
+      in
+      (Asm { tmpl; aflags = !aflags; outs; ins; aargs = Array.of_list (oargs @ iargs); clobbers }, tys)
   | "va_start" -> (Va_start (parse_value st), [||])
   | "va_arg" -> (
       match peek lx with

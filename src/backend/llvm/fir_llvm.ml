@@ -625,6 +625,137 @@ let va_arg_agg cx (abi : abi) ap =
           s)
   | _ -> unsupported "va_arg_agg of a scalar"
 
+(* GNU inline asm as an LLVM inline asm call. GCC numbers the operands
+   outputs then inputs, and so does LLVM's constraint list, so %N is $N.
+   A "+" output adds an input after all the others: a direct one tied to
+   the output ("N"), an indirect one the same address again ("*m"). The
+   constraints are rebuilt from what Fir_asm understood, so that LLVM and
+   the native path read them alike. *)
+let emit_asm cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) ~(ins : asm_operand array)
+    ~aargs ~clobbers =
+  let intel = aflags land asm_intel <> 0 in
+  let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
+  let st =
+    try Fir_asm.parse ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
+    with Fir_asm.Bad m -> unsupported "@%s: %s" cx.f.name m
+  in
+  let sort l = List.sort_uniq compare l in
+  (* registers -> LLVM letters *)
+  let reg_letters regs =
+    let g = List.filter (fun r -> not (Fir_asm.is_xmm r)) regs and x = List.filter Fir_asm.is_xmm regs in
+    let gl =
+      match g with
+      | [] -> ""
+      | [ r ] when x = [] -> "{" ^ r ^ "}"
+      | _ when sort g = sort [ "rax"; "rbx"; "rcx"; "rdx" ] -> "q"
+      | _ when sort g = sort [ "rax"; "rbx"; "rcx"; "rdx"; "rsi"; "rdi" ] -> "R"
+      | _ -> "r"
+    in
+    let xl = match x with [] -> "" | [ r ] when g = [] -> "{" ^ r ^ "}" | _ -> "x" in
+    gl ^ xl
+  in
+  let elem_arg t x = Printf.sprintf "ptr elementtype(%s) %s" (lty t) (v cx x) in
+  let plain_arg x = tv cx x in
+  let next = ref 0 in
+  let take () =
+    let x = aargs.(!next) in
+    incr next;
+    x
+  in
+  let cons = ref [] and args = ref [] and extra_cons = ref [] and extra_args = ref [] in
+  let push l x = l := x :: !l in
+  Array.iteri
+    (fun k (o : asm_operand) ->
+      let c = st.outs.(k) in
+      match c.flag with
+      | Some cond -> push cons ("={@cc" ^ cond ^ "}")
+      | None ->
+          if Fir_asm.indirect c then begin
+            let p = take () in
+            push cons "=*m";
+            push args (elem_arg o.aty p);
+            if c.dir = Inout then begin
+              push extra_cons "*m";
+              push extra_args (elem_arg o.aty p)
+            end
+          end
+          else begin
+            push cons ("=" ^ (if c.early then "&" else "") ^ reg_letters c.regs ^ if c.mem then "m" else "");
+            if c.dir = Inout then begin
+              push extra_cons (string_of_int k);
+              push extra_args (plain_arg (take ()))
+            end
+          end)
+    outs;
+  Array.iteri
+    (fun k (o : asm_operand) ->
+      let c = st.ins.(k) in
+      let x = take () in
+      if Fir_asm.indirect c then begin
+        push cons "*m";
+        push args (elem_arg o.aty x)
+      end
+      else
+        match c.tied with
+        | Some t ->
+            push cons (string_of_int t);
+            push args (plain_arg x)
+        | None ->
+            let imm =
+              match const_of cx.f x with
+              | Some (Cint (_, l)) -> (
+                  match c.imm with Some ok when ok l.(0) -> "i" | _ -> "")
+              | Some (Csym _) when c.sym -> "i"
+              | Some (Cnull _) when c.imm <> None -> "i"
+              | _ -> ""
+            in
+            let l = reg_letters c.regs ^ (if c.mem then "m" else "") ^ imm in
+            if l = "" then unsupported "@%s: asm input %d (%S) needs a constant it accepts" cx.f.name k o.acon;
+            push cons l;
+            push args (plain_arg x))
+    ins;
+  let clob =
+    List.concat_map
+      (fun c ->
+        match Fir_asm.clobber c with
+        | Fir_asm.Creg r -> [ "~{" ^ r ^ "}" ]
+        | Cmemory -> [ "~{memory}" ]
+        | Cflags -> []
+        | Cignored -> [ "~{" ^ String.lowercase_ascii c ^ "}" ])
+      (Array.to_list clobbers)
+  in
+  let all_cons =
+    List.rev !cons @ List.rev !extra_cons @ clob @ [ "~{dirflag}"; "~{fpsr}"; "~{flags}" ]
+  in
+  let all_args = List.rev !args @ List.rev !extra_args in
+  (* the template, with LLVM's operand syntax *)
+  let b = Buffer.create 64 in
+  List.iter
+    (function
+      | Fir_asm.Text t -> String.iter (fun ch -> if ch = '$' then Buffer.add_string b "$$" else Buffer.add_char b ch) t
+      | Operand (None, k) -> Buffer.add_string b ("$" ^ string_of_int k)
+      | Operand (Some m, k) -> Buffer.add_string b (Printf.sprintf "${%d:%c}" k m)
+      | Unique -> Buffer.add_string b "${:uid}")
+    st.pieces;
+  let rtys = Array.to_list (Array.map (fun r -> ty_of cx.f r) ir.results) in
+  let ret =
+    match rtys with [] -> "void" | [ t ] -> lty t | l -> "{ " ^ String.concat ", " (List.map lty l) ^ " }"
+  in
+  let side = aflags land asm_volatile <> 0 || Array.length outs = 0 in
+  let call =
+    Printf.sprintf "call %s asm %s%s\"%s\", \"%s\"(%s)" ret
+      (if side then "sideeffect " else "")
+      (if intel then "inteldialect " else "")
+      (escaped (Buffer.contents b)) (escaped (String.concat "," all_cons)) (String.concat ", " all_args)
+  in
+  match rtys with
+  | [] -> line cx call
+  | [ _ ] -> line cx (res ir 0 ^ " = " ^ call)
+  | _ ->
+      let t = temp cx in
+      line cx (t ^ " = " ^ call);
+      List.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (res ir k) ret t k)) rtys
+
 let emit_inst cx (ir : inst_rec) =
   let f = cx.f in
   set_loc cx ir.loc;
@@ -1108,6 +1239,7 @@ let emit_inst cx (ir : inst_rec) =
         (Printf.sprintf "call i64 asm sideeffect \"syscall\", \"={rax},%s,~{rcx},~{r11},~{memory}\"(%s)"
            (String.concat "," used)
            (String.concat ", " (Array.to_list (Array.map (fun x -> "i64 " ^ v cx x) args))))
+  | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> emit_asm cx ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
   | Va_start p -> line cx (call_intrinsic cx ("llvm.va_start." ^ sfx (tyv cx p)) "void" [ arg cx p ])
   | Va_arg p -> (
       match rty cx ir 0 with

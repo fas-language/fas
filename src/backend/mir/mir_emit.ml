@@ -76,7 +76,255 @@ let movi a r (k : int64) =
 
 let fstore a dbl m x = A.sse_rm a (A.fprefix dbl) 0x11 ~reg:x m
 
-let ins a fr ~pic ~func_label ~out (i : ins) =
+(* ---------- inline asm ---------- *)
+
+(* GNU inline asm (Mir.Asm) goes through an external assembler: every
+   statement's template is rendered with its operands in place (registers
+   are physical by now, frame slots have offsets), all statements of the
+   module are assembled in one run, one section .text.fas_asm_N each, and
+   [ins] splices statement N's bytes and relocations into the text.
+
+   The assembler is $FAS_AS (a command line), else `as --64`, else
+   `$FAS_CC -c -x assembler` (cc by default). A snippet may not put bytes in
+   another section, define a global symbol, be aligned to more than 16, or
+   refer to a place in another snippet. *)
+
+(* a snippet: its bytes, its alignment and its relocations, at offsets in
+   the bytes, against an outside symbol or a place in the snippet *)
+type snippet = {
+  code : string;
+  salign : int;
+  srelocs : (int * [ `Sym of string | `Here of int ] * int * int64) list;
+}
+
+let gpr_name width r =
+  let n = A.reg_name r in
+  if A.reg_num r >= 8 then match width with 8 -> n ^ "b" | 16 -> n ^ "w" | 32 -> n ^ "d" | _ -> n
+  else
+    match width with
+    | 32 -> "e" ^ String.sub n 1 2
+    | 16 -> String.sub n 1 2
+    | 8 -> (
+        match r with
+        | A.Rax -> "al"
+        | Rcx -> "cl"
+        | Rdx -> "dl"
+        | Rbx -> "bl"
+        | Rsp -> "spl"
+        | Rbp -> "bpl"
+        | Rsi -> "sil"
+        | Rdi -> "dil"
+        | _ -> n)
+    | _ -> n
+
+let high_byte = function
+  | A.Rax -> "ah"
+  | Rcx -> "ch"
+  | Rdx -> "dh"
+  | Rbx -> "bh"
+  | r -> unsupported "inline asm: %%h of %s, which has no high byte" (A.reg_name r)
+
+let size_suffix bits =
+  match bits with
+  | 8 -> "b"
+  | 16 -> "w"
+  | 32 -> "l"
+  | 64 -> "q"
+  | n -> unsupported "inline asm: %%z of a %d-bit operand" n
+
+let intel_size bytes =
+  match bytes with
+  | 1 -> "BYTE PTR "
+  | 2 -> "WORD PTR "
+  | 4 -> "DWORD PTR "
+  | 8 -> "QWORD PTR "
+  | 10 -> "TBYTE PTR "
+  | 16 -> "XMMWORD PTR "
+  | 32 -> "YMMWORD PTR "
+  | _ -> ""
+
+let sym_off s k = if k = 0L then s else if k > 0L then Printf.sprintf "%s+%Ld" s k else Printf.sprintf "%s%Ld" s k
+
+(* the text of one statement, with %= as [uid] *)
+let render_asm fr uid (x : asm) =
+  let intel = x.intel in
+  let pre = if intel then "" else "%" in
+  let memtext (m : A.mem) extra ~size =
+    if intel then begin
+      let regs, disp, sym =
+        match m with
+        | A.Base (r, d) -> ([ A.reg_name r ], d, None)
+        | Rip (s, d) -> ([ "rip" ], d, Some s)
+        | Sib { base; index; scale; disp; sym } ->
+            (Option.to_list (Option.map A.reg_name base) @ [ Printf.sprintf "%s*%d" (A.reg_name index) scale ], disp, sym)
+      in
+      let disp = disp + extra in
+      let terms = regs @ Option.to_list sym in
+      let d = if disp = 0 then "" else if disp > 0 then Printf.sprintf "+%d" disp else string_of_int disp in
+      (match size with Some n -> intel_size n | None -> "") ^ "[" ^ String.concat "+" terms ^ d ^ "]"
+    end
+    else
+      match m with
+      | A.Base (r, d) -> Printf.sprintf "%d(%%%s)" (d + extra) (A.reg_name r)
+      | Rip (s, d) -> Printf.sprintf "%s(%%rip)" (sym_off s (Int64.of_int (d + extra)))
+      | Sib { base; index; scale; disp; sym } ->
+          let d =
+            match sym with
+            | Some s -> sym_off s (Int64.of_int (disp + extra))
+            | None -> string_of_int (disp + extra)
+          in
+          Printf.sprintf "%s(%s,%%%s,%d)" d
+            (match base with Some b -> "%" ^ A.reg_name b | None -> "")
+            (A.reg_name index) scale
+  in
+  let opnd md k =
+    (match md with
+    | Some c when not (String.contains "bhwkqcnpPzVxtgHa" c) -> unsupported "inline asm: the operand modifier %%%c" c
+    | _ -> ());
+    match (x.opnds.(k), md) with
+    | Anone, _ -> unsupported "inline asm: the template names operand %d, a flag output" k
+    | Areg (G r, _), Some 'a' -> if intel then "[" ^ A.reg_name r ^ "]" else "(%" ^ A.reg_name r ^ ")"
+    | Areg (G r, w), _ ->
+        let w = match md with Some 'b' -> 8 | Some 'w' -> 16 | Some 'k' -> 32 | Some 'q' -> 64 | _ -> w in
+        if md = Some 'z' then size_suffix w
+        else
+          let name = if md = Some 'h' then high_byte r else gpr_name w r in
+          if md = Some 'V' then name else pre ^ name
+    | Areg (X i, _), _ ->
+        let kind = match md with Some 't' -> "ymm" | Some 'g' -> "zmm" | _ -> "xmm" in
+        if md = Some 'z' then unsupported "inline asm: %%z of an xmm register";
+        (if md = Some 'V' then "" else pre) ^ kind ^ string_of_int i
+    | Areg (V _, _), _ -> invalid_arg "Mir_emit: virtual register in inline asm"
+    | Amem (ad, size), _ ->
+        if md = Some 'z' then size_suffix (8 * size)
+        else
+          memtext (mem fr ad)
+            (if md = Some 'H' then 8 else 0)
+            ~size:(if md = Some 'a' || md = Some 'H' then None else Some size)
+    | Aimm k, Some 'n' -> Int64.to_string (Int64.neg k)
+    | Aimm k, Some ('c' | 'p' | 'P' | 'a') -> Int64.to_string k
+    | Aimm k, _ -> (if intel then "" else "$") ^ Int64.to_string k
+    | Asym (s, k), Some ('c' | 'p' | 'P' | 'a') -> sym_off s k
+    | Asym (s, k), _ -> (if intel then "OFFSET " else "$") ^ sym_off s k
+  in
+  let b = Buffer.create 64 in
+  List.iter
+    (function
+      | Fir_asm.Text s -> Buffer.add_string b s
+      | Operand (md, k) -> Buffer.add_string b (opnd md k)
+      | Unique -> Buffer.add_string b (string_of_int uid))
+    x.pieces;
+  Buffer.contents b
+
+(* runs the assembler on [source]: the object's bytes *)
+let run_assembler source =
+  let src = Filename.temp_file "fas-asm-" ".s" and obj = Filename.temp_file "fas-asm-" ".o" in
+  Fun.protect
+    ~finally:(fun () -> List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) [ src; obj ])
+    (fun () ->
+      Out_channel.with_open_bin src (fun oc -> output_string oc source);
+      let words s = List.filter (( <> ) "") (String.split_on_char ' ' s) in
+      let cc () =
+        let cc = match Sys.getenv_opt "FAS_CC" with Some c when String.trim c <> "" -> words c | _ -> [ "cc" ] in
+        cc @ [ "-c"; "-x"; "assembler"; src; "-o"; obj ]
+      in
+      let attempts =
+        match Sys.getenv_opt "FAS_AS" with
+        | Some s when String.trim s <> "" -> [ words s @ [ "-o"; obj; src ] ]
+        | _ -> [ [ "as"; "--64"; "-o"; obj; src ]; cc () ]
+      in
+      let rec go = function
+        | [] -> unsupported "inline asm: no assembler found (set FAS_AS)"
+        | argv :: rest -> (
+            match Process.run (Array.of_list argv) with
+            | Ok _ -> In_channel.with_open_bin obj In_channel.input_all
+            | Error { status = Unix.WEXITED 127; _ } when rest <> [] -> go rest
+            | Error f ->
+                unsupported "inline asm: %s failed:\n%s" (String.concat " " argv) (String.trim (f.stderr ^ f.stdout)))
+      in
+      go attempts)
+
+(* assembles every statement; the snippets in order *)
+let assemble_snippets (texts : (bool * string) list) =
+  let n = List.length texts in
+  let src = Buffer.create 1024 in
+  List.iteri
+    (fun i (intel, text) ->
+      Printf.bprintf src ".section .text.fas_asm_%d,\"ax\",@progbits\n" i;
+      if intel then Buffer.add_string src ".intel_syntax noprefix\n";
+      Buffer.add_string src text;
+      Buffer.add_string src "\n";
+      if intel then Buffer.add_string src ".att_syntax prefix\n")
+    texts;
+  let data = run_assembler (Buffer.contents src) in
+  let module R = Fas_linker.Elf_reader in
+  let o = R.parse ~path:"<inline asm>" data in
+  let sec = Array.make n (-1) in
+  let snippet_of = Hashtbl.create n in
+  Array.iter
+    (fun (s : R.section) ->
+      let p = ".text.fas_asm_" in
+      if String.starts_with ~prefix:p s.name then begin
+        let i = int_of_string (String.sub s.name (String.length p) (String.length s.name - String.length p)) in
+        sec.(i) <- s.index;
+        Hashtbl.replace snippet_of s.index i
+      end
+      else if (s.kind = 1 || s.kind = 8) && s.flags land 2 <> 0 && s.size > 0 then
+        unsupported "inline asm puts bytes in section %s" s.name)
+    o.sections;
+  Array.iter
+    (fun (y : R.symbol) ->
+      if y.binding <> 0 && Hashtbl.mem snippet_of y.section then
+        unsupported "inline asm defines the global symbol %s" y.name)
+    o.symbols;
+  let relocs = Array.make n [] in
+  Array.iter
+    (fun (r : R.relocation) ->
+      match Hashtbl.find_opt snippet_of r.target with
+      | None -> ()
+      | Some i ->
+          if r.kind <> 0 then begin
+            let y = o.symbols.(r.symbol) in
+            let target =
+              if y.section = 0 then `Sym y.name
+              else if y.section = sec.(i) then `Here (Int64.to_int y.value)
+              else unsupported "inline asm refers to %s, outside its own statement" (if y.name = "" then "a section" else y.name)
+            in
+            relocs.(i) <- (r.offset, target, r.kind, r.addend) :: relocs.(i)
+          end)
+    o.relocations;
+  Array.init n (fun i ->
+      if sec.(i) < 0 then { code = ""; salign = 1; srelocs = [] }
+      else
+        let s = o.sections.(sec.(i)) in
+        if s.alignment > 16 then unsupported "inline asm aligned to %d bytes (at most 16)" s.alignment;
+        { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment; srelocs = List.rev relocs.(i) })
+
+(* the snippets of every inline asm statement of [compiled], in the order
+   [func] meets them *)
+let asm_snippets compiled =
+  let texts = ref [] and uid = ref 0 in
+  List.iter
+    (fun (_, mf, (ra : Mir_ra.result)) ->
+      let fr = layout mf (List.length ra.saved) in
+      Array.iter
+        (List.iter (function
+          | Mir_ra.Orig (_, Asm x) ->
+              incr uid;
+              texts := (x.intel, render_asm fr !uid x) :: !texts
+          | _ -> ()))
+        ra.items)
+    compiled;
+  match List.rev !texts with
+  | [] -> fun () -> invalid_arg "Mir_emit: no inline asm snippet left"
+  | l ->
+      let arr = assemble_snippets l and next = ref 0 in
+      fun () ->
+        let s = arr.(!next) in
+        incr next;
+        s
+
+let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   let m = mem fr in
   match i with
   | Salloc (d, n) ->
@@ -195,12 +443,23 @@ let ins a fr ~pic ~func_label ~out (i : ins) =
   | Align_sp n -> A.alu_ri a A.And A.Rsp (- n)
   | Ud2 -> A.ud2 a
   | Loc _ -> ()
+  | Asm _ ->
+      let sn : snippet = snippet () in
+      while A.pos a mod sn.salign <> 0 do A.byte a 0x90 done;
+      let start = A.pos a in
+      A.raw a sn.code
+        (List.map
+           (fun (o, t, kind, addend) ->
+             match t with
+             | `Sym s -> (o, s, kind, Int64.to_int addend)
+             | `Here v -> (o, Mir_cfi.text_symbol, kind, start + v + Int64.to_int addend))
+           sn.srelocs)
 
 (* one function: returns its text size, its frame events for the
    .eh_frame (Mir_cfi), at offsets from the function's start, and its line
    rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
    marker with its location id *)
-let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
+let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) =
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
   let events = ref [] and rows = ref [] in
@@ -225,7 +484,7 @@ let func a ~pic ~func_label ~block_pos (f : func) (ra : Mir_ra.result) =
     List.iter
       (function
         | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows
-        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) i
+        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
         | Reload (v, (X x)) -> A.mov_xm a ~double:true x (slot_mem v)
         | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r
@@ -500,6 +759,9 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     let lines = ref [] in
     (* text offsets of every block, for blockaddr symbols *)
     let block_offsets = Hashtbl.create 256 in
+    (* every function selected and allocated first: inline asm is
+       rendered with final frame offsets and assembled in one run *)
+    let compiled = ref [] in
     F.Vec.iter
       (fun (fn : F.func) ->
         if fn.defined then begin
@@ -508,10 +770,18 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let ra = Mir_ra.run mf in
           if dump then prerr_string (Mir_ra.to_string mf ra);
           Mir_check.run mf ra;
+          compiled := (fn, mf, ra) :: !compiled
+        end)
+      m.funcs;
+    let compiled = List.rev !compiled in
+    let snippet = asm_snippets compiled in
+    List.iter
+      (fun ((fn : F.func), mf, ra) ->
+        begin
           A.align a 16;
           let offset = A.pos a in
           let size, events, rows =
-            func a ~pic ~func_label ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
+            func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
           fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
           (* rows without a file name say nothing *)
@@ -522,7 +792,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
             :: !lines;
           func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
         end)
-      m.funcs;
+      compiled;
     if startup then begin
       A.align a 16;
       let offset = A.pos a in

@@ -125,6 +125,10 @@ type reloc =
       (** R_X86_64_TLSGD: PC-relative address of the symbol's GOT pair
           (module id, offset) for __tls_get_addr (general-dynamic TLS), in
           the [lea] of [tls_get_addr]; "next byte" convention as [Rel32]. *)
+  | Raw of { offset : int; symbol : string; kind : int; addend : int }
+      (** An ELF relocation taken as is (R_X86_64_* [kind], addend
+          unadjusted): code an external assembler made, spliced in by
+          [raw] (inline asm, see Mir_emit). *)
 
 type t = {
   code : Buffer.t;
@@ -204,6 +208,15 @@ let finish a =
   (bytes, List.rev a.relocs)
 
 let label_offset a l = a.labels.(l)
+
+(* Machine code made elsewhere, at the current position, with its
+   relocations at offsets from its start *)
+let raw a (code : string) relocs =
+  let base = pos a in
+  Buffer.add_string a.code code;
+  List.iter
+    (fun (offset, symbol, kind, addend) -> a.relocs <- Raw { offset = base + offset; symbol; kind; addend } :: a.relocs)
+    relocs
 
 (* Prefixes and ModRM *)
 

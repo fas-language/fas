@@ -44,9 +44,13 @@
       instruction that mentions one, it is loaded into a scratch register
       before ("reload") and stored back after a write ("spill"). The scratch
       registers are kept out of the linear scan whenever something spills:
-      r13, r14, r15 and xmm14, xmm15, which instruction selection never
-      names, so they are free at every instruction (an instruction has at
-      most three virtual GPR operands and two xmm ones). If nothing spills,
+      r13, r14, r15 and xmm14, xmm15, which instruction selection names
+      only for inline asm operands and clobbers, so they are free at almost
+      every instruction (an instruction has at most three virtual GPR
+      operands and two xmm ones). Where one is named by the instruction or
+      live across it (an asm input being set up, say), another register
+      free there takes its place: one not blocked at the instruction and
+      not holding a virtual register live across it. If nothing spills,
       the scan runs once with every register.
 
    FAS_MIR_REGS=n (debugging) gives the scan only the first n registers of
@@ -270,15 +274,36 @@ let run (f : func) =
     | _ -> ()
   in
   let items = Array.make nb [] and terms = Array.make nb Halt in
+  (* a register of class [cls] free at position p, other than [avoid]: not
+     blocked there and not holding a virtual register whose interval covers
+     p (the scratch fallback; rare, so a plain search) *)
+  let free_at cls p avoid =
+    let pool = match cls with Gpr -> List.map (fun r -> G r) gpr_pool | Xmm -> List.map (fun i -> X i) xmm_pool in
+    List.find_opt
+      (fun r ->
+        (not (RS.mem r avoid))
+        && (not (is_blocked (pidx r) p p))
+        &&
+        let held = ref false in
+        Array.iteri (fun v a -> if a = Some r && lo.(v) <= p && p <= hi.(v) then held := true) assign;
+        not !held)
+      pool
+  in
   for bi = 0 to nb - 1 do
     let b = Dynarray.get f.blocks bi in
     let out = ref [] in
     let push x = out := x :: !out in
-    Array.iter
-      (fun ins ->
+    let _, plive = phys_liveness b in
+    Array.iteri
+      (fun i ins ->
         let u, d = uses_defs ins in
+        let p = bstart.(bi) + i in
         let scratch = Hashtbl.create 4 in
-        let gs = ref (List.map (fun r -> G r) gpr_scratch) and xs = ref (List.map (fun i -> X i) xmm_scratch) in
+        (* physical registers this instruction names or that live across it *)
+        let taken = ref (RS.union (phys_set (u @ d @ clobbers ins)) (RS.union plive.(i) plive.(i + 1))) in
+        let ok r = not (RS.mem r !taken) in
+        let gs = ref (List.filter ok (List.map (fun r -> G r) gpr_scratch))
+        and xs = ref (List.filter ok (List.map (fun i -> X i) xmm_scratch)) in
         let g = function
           | V v -> (
               match assign.(v) with
@@ -288,12 +313,18 @@ let run (f : func) =
                   | Some r -> r
                   | None ->
                       if not reserved then raise (Failure (Printf.sprintf "%s: %%%d spilled without scratch" f.name v));
-                      let pool = match Dynarray.get f.vcls v with Gpr -> gs | Xmm -> xs in
+                      let cls = Dynarray.get f.vcls v in
+                      let pool = match cls with Gpr -> gs | Xmm -> xs in
                       (match !pool with
                       | r :: rest ->
                           pool := rest;
                           Hashtbl.add scratch v r
-                      | [] -> raise (Failure (Printf.sprintf "%s: out of scratch registers at %s" f.name (ins_s ins))));
+                      | [] -> (
+                          match free_at cls p !taken with
+                          | Some r -> Hashtbl.add scratch v r
+                          | None ->
+                              raise (Failure (Printf.sprintf "%s: out of scratch registers at %s" f.name (ins_s ins)))));
+                      taken := RS.add (Hashtbl.find scratch v) !taken;
                       Hashtbl.find scratch v))
           | r -> r
         in
@@ -301,6 +332,7 @@ let run (f : func) =
         List.iter (fun v -> if assign.(v) = None then push (Reload (v, g (V v)))) uvs;
         let after = map_regs g ins in
         List.iter note_saved (all_regs after);
+        List.iter note_saved (clobbers after);
         push (Orig (ins, after));
         List.iter (fun v -> if assign.(v) = None then push (Spill (v, g (V v)))) dvs;
         List.iter (fun v -> if assign.(v) = None then ignore (slot_of v)) (uvs @ dvs))

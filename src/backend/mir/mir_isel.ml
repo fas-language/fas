@@ -1625,6 +1625,325 @@ let va_arg_agg c (abi : F.abi) p =
 
 (* ---------- instructions and terminators ---------- *)
 
+(* ---------- inline asm ---------- *)
+
+let phys_of_name n =
+  if Fir_asm.is_xmm n then X (int_of_string (String.sub n 3 (String.length n - 3)))
+  else
+    G
+      X64.(
+        match n with
+        | "rax" -> Rax | "rbx" -> Rbx | "rcx" -> Rcx | "rdx" -> Rdx | "rsi" -> Rsi | "rdi" -> Rdi
+        | "r8" -> R8 | "r9" -> R9 | "r10" -> R10 | "r11" -> R11 | "r12" -> R12 | "r13" -> R13
+        | "r14" -> R14 | "r15" -> R15
+        | _ -> invalid_arg ("Mir_isel.phys_of_name " ^ n))
+
+(* the order operands take registers in: caller-saved first, then the
+   callee-saved (the function then saves them), the allocator's scratch
+   registers last *)
+let asm_gprs = [ "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r10"; "r11"; "rbx"; "r12"; "r13"; "r14"; "r15" ]
+let asm_xmms = List.init 16 (fun i -> "xmm" ^ string_of_int i)
+
+let cond_of_cc = function
+  | "a" | "nbe" -> X64.A
+  | "ae" | "nb" | "nc" -> X64.Ae
+  | "b" | "c" | "nae" -> X64.B
+  | "be" | "na" -> X64.Be
+  | "e" | "z" -> X64.E
+  | "ne" | "nz" -> X64.Ne
+  | "g" | "nle" -> X64.G
+  | "ge" | "nl" -> X64.Ge
+  | "l" | "nge" -> X64.L
+  | "le" | "ng" -> X64.Le
+  | "o" -> X64.O
+  | "no" -> X64.No
+  | "p" -> X64.P
+  | "np" -> X64.Np
+  | "s" -> X64.S
+  | "ns" -> X64.Ns
+  | cc -> unsupported "asm flag output @cc%s" cc
+
+(* the sign-extended value of an integer constant of width w *)
+let sext_const w (k : int64) = if w >= 64 then k else Int64.shift_right (Int64.shift_left k (64 - w)) (64 - w)
+
+(* GNU inline asm. Instruction selection puts every operand in its place:
+   registers are chosen here (the allocator never sees an asm operand as a
+   virtual register), inputs are copied into theirs before the [Asm]
+   instruction and outputs copied out after it, flag outputs read by
+   setcc right after it. Memory operands are frame slots (static allocas),
+   rip-relative symbols, or a register holding the address. Outputs and
+   inputs get different registers, except a tied input (its output's), and
+   when registers run out a non-early-clobber output may share an input's
+   (as GCC allows). *)
+let asm cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array) ~(ins : F.asm_operand array) ~aargs
+    ~clobbers =
+  let intel = aflags land F.asm_intel <> 0 in
+  let pairs l = Array.map (fun (o : F.asm_operand) -> (o.aname, o.acon)) l in
+  let st =
+    try Fir_asm.parse ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
+    with Fir_asm.Bad m -> unsupported "%s" m
+  in
+  let nout = Array.length outs and nin = Array.length ins in
+  let n = nout + nin in
+  let con k = if k < nout then st.outs.(k) else st.ins.(k - nout) in
+  let oty k = if k < nout then outs.(k).aty else ins.(k - nout).aty in
+  let ocon k = if k < nout then outs.(k).acon else ins.(k - nout).acon in
+  let is_out k = k < nout in
+  (* each operand's Fir value: a memory operand's address, a read-write
+     output's old value, an input's value *)
+  let value = Array.make n None in
+  (let next = ref 0 in
+   for k = 0 to n - 1 do
+     if k >= nout || Fir_asm.output_takes_arg (con k) then begin
+       value.(k) <- Some aargs.(!next);
+       incr next
+     end
+   done);
+  for k = 0 to n - 1 do
+    if not (Fir_asm.indirect (con k)) then
+      match oty k with
+      | F.Int w when w <= 64 -> ()
+      | F.Ptr _ | F.F32 | F.F64 -> ()
+      | t -> unsupported "asm operand %d of type %s" k (F.ty_to_string t)
+  done;
+  let clob_names = List.filter_map (function Fir_asm.Creg r -> Some r | _ -> None) st.clob in
+  (* registers taken: by outputs (with their early-clobber mark), by inputs
+     (read-write outputs and memory addresses included) *)
+  let out_used = Hashtbl.create 8 and in_used = Hashtbl.create 8 in
+  let loc = Array.make n Anone in
+  let reg_of = Array.make n None in
+  let width_of k =
+    match oty k with
+    | F.Int w -> if w <= 8 then 8 else if w <= 16 then 16 else if w <= 32 then 32 else 64
+    | F.F32 -> 32
+    | _ -> 64
+  in
+  let size_of k = match oty k with F.Int w -> (w + 7) / 8 | t -> F.size_of t in
+  let prefers_xmm k = match oty k with F.F32 | F.F64 -> true | _ -> false in
+  (* the first register in [l] (or of operand k's constraint) that [ok] accepts *)
+  let pick_in l ok = List.find_opt (fun r -> (not (List.mem r clob_names)) && ok r) l in
+  let pick k ok =
+    let order = if prefers_xmm k then asm_xmms @ asm_gprs else asm_gprs @ asm_xmms in
+    pick_in (List.filter (fun r -> List.mem r (con k).regs) order) ok
+  in
+  let place k r =
+    reg_of.(k) <- Some r;
+    loc.(k) <- Areg (phys_of_name r, width_of k);
+    if is_out k then begin
+      Hashtbl.replace out_used r (con k).early;
+      if (con k).dir = Fir_asm.Inout then Hashtbl.replace in_used r ()
+    end
+    else Hashtbl.replace in_used r ()
+  in
+  let early_out r = Hashtbl.find_opt out_used r = Some true in
+  let place_out k =
+    let c = con k in
+    let free r = not (Hashtbl.mem out_used r) in
+    let r =
+      match pick k (fun r -> free r && not (Hashtbl.mem in_used r)) with
+      | Some r -> Some r
+      | None when (not c.early) && c.dir <> Fir_asm.Inout -> pick k free
+      | None -> None
+    in
+    match r with Some r -> place k r | None -> unsupported "asm output %d (%S): no register left" k (ocon k)
+  in
+  (* an input register: not another input's; preferably no output's, at
+     worst a non-early-clobber output's *)
+  let place_in k =
+    let free r = not (Hashtbl.mem in_used r) in
+    let r =
+      match pick k (fun r -> free r && not (Hashtbl.mem out_used r)) with
+      | Some r -> Some r
+      | None -> pick k (fun r -> free r && not (early_out r))
+    in
+    match r with
+    | Some r -> place k r
+    | None -> unsupported "asm input %d (%S): no register left" (k - nout) (ocon k)
+  in
+  (* an input given as an immediate, when its constraint and value allow *)
+  let imm_of k =
+    let c = con k in
+    match value.(k) with
+    | None -> None
+    | Some v -> (
+        match F.const_of cx.fn v with
+        | Some (Cint (t, l)) -> (
+            let x = sext_const (match t with F.Int w -> w | _ -> 64) l.(0) in
+            match c.imm with Some ok when ok x -> Some (Aimm x) | _ -> None)
+        | Some (Czero _ | Cnull _) when c.imm <> None -> Some (Aimm 0L)
+        | Some (Csym (name, add))
+          when c.sym && (not (Hashtbl.mem cx.tls_syms name)) && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
+            Some (Asym (name, add))
+        | _ -> None)
+  in
+  let fixed k = match (con k).regs with [ _ ] -> (con k).tied = None | _ -> false in
+  (* 1. single-register operands (they cannot move), 2. other outputs,
+     3. immediates and other inputs, 4. memory operands *)
+  for k = 0 to n - 1 do
+    let c = con k in
+    if c.flag = None && (not (Fir_asm.indirect c)) && fixed k then
+      if is_out k then begin
+        let r = List.hd c.regs in
+        if Hashtbl.mem out_used r then unsupported "asm outputs share %s" r;
+        if c.early && Hashtbl.mem in_used r then unsupported "asm early-clobber output %d shares %s with an input" k r;
+        place k r
+      end
+      else
+        match imm_of k with
+        | Some i -> loc.(k) <- i
+        | None ->
+            let r = List.hd c.regs in
+            if Hashtbl.mem in_used r then unsupported "asm inputs share %s" r;
+            if early_out r then unsupported "asm input %d shares %s with an early-clobber output" (k - nout) r;
+            place k r
+  done;
+  for k = 0 to nout - 1 do
+    let c = con k in
+    if c.flag = None && (not (Fir_asm.indirect c)) && reg_of.(k) = None then place_out k
+  done;
+  (* tied inputs take their output's register *)
+  for k = nout to n - 1 do
+    match (con k).tied with
+    | Some t -> (
+        match reg_of.(t) with
+        | Some r ->
+            reg_of.(k) <- Some r;
+            loc.(k) <- Areg (phys_of_name r, width_of k)
+        | None -> unsupported "asm input %d is tied to output %d, which has no register" (k - nout) t)
+    | None -> ()
+  done;
+  (* inputs left: an immediate, a register, or a stack copy of the value *)
+  let stack_inputs = ref [] in
+  for k = nout to n - 1 do
+    let c = con k in
+    if c.tied = None && (not (Fir_asm.indirect c)) && reg_of.(k) = None && loc.(k) = Anone then
+      match imm_of k with
+      | Some i -> loc.(k) <- i
+      | None ->
+          if c.regs <> [] then place_in k
+          else if c.mem then begin
+            let s = new_slot cx.mf ~size:8 ~align:8 in
+            loc.(k) <- Amem (slot_addr s, size_of k);
+            stack_inputs := (k, s) :: !stack_inputs
+          end
+          else unsupported "asm input %d (%S) needs a constant it accepts" (k - nout) (ocon k)
+  done;
+  (* memory operands: a frame slot, a rip-relative symbol, or the address
+     in a register *)
+  let addr_regs = ref [] in
+  for k = 0 to n - 1 do
+    let c = con k in
+    if Fir_asm.indirect c then begin
+      let p = Option.get value.(k) in
+      let size = F.size_of (oty k) in
+      match Hashtbl.find_opt cx.frame (F.resolve cx.fn p) with
+      | Some s -> loc.(k) <- Amem (slot_addr s, size)
+      | None -> (
+          match F.const_of cx.fn p with
+          | Some (Csym (name, add))
+            when fits32 add
+                 && (not (Hashtbl.mem cx.tls_syms name))
+                 && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
+              loc.(k) <- Amem ({ (at (Bsym name)) with disp = Int64.to_int add }, size)
+          | _ -> (
+              let free r = (not (Hashtbl.mem in_used r)) && not (Hashtbl.mem out_used r) in
+              let r =
+                match pick_in asm_gprs free with
+                | Some r -> Some r
+                | None -> pick_in asm_gprs (fun r -> (not (Hashtbl.mem in_used r)) && not (early_out r))
+              in
+              match r with
+              | Some r ->
+                  Hashtbl.replace in_used r ();
+                  loc.(k) <- Amem (at_reg (phys_of_name r), size);
+                  addr_regs := (phys_of_name r, p) :: !addr_regs
+              | None -> unsupported "asm memory operand %d: no register left for its address" k))
+    end
+  done;
+  (* the sources, all computed before any physical register is written:
+     materializing one may take a call *)
+  let srcs = ref [] in
+  for k = 0 to n - 1 do
+    let c = con k in
+    let reads = (not (is_out k)) || c.dir = Fir_asm.Inout in
+    if reads && not (Fir_asm.indirect c) then
+      match loc.(k) with
+      | Areg (r, _) -> srcs := (r, use cx (Option.get value.(k)), oty k) :: !srcs
+      | _ -> ()
+  done;
+  let addr_srcs = List.map (fun (r, p) -> (r, use cx p, F.ptr)) !addr_regs in
+  let stack_srcs = List.map (fun (k, s) -> (k, s, use cx (Option.get value.(k)))) !stack_inputs in
+  List.iter
+    (fun (k, s, v) ->
+      match oty k with
+      | F.F32 | F.F64 -> emit cx (Fstore (oty k = F.F64, slot_addr s, v))
+      | _ -> emit cx (Store (8, slot_addr s, v)))
+    stack_srcs;
+  let move_in (r, v, t) =
+    match (r, cls_of_reg cx v) with
+    | G _, Gpr | X _, Xmm -> emit cx (Copy (r, v))
+    | G _, Xmm -> emit cx (Movxg (t <> F.F32, r, v))
+    | X _, Gpr -> emit cx (Movgx (true, r, v))
+    | V _, _ -> assert false
+  in
+  List.iter move_in (List.rev !srcs @ addr_srcs);
+  let dedup l = List.sort_uniq compare l in
+  let ain = dedup (List.map (fun (r, _, _) -> r) (!srcs @ addr_srcs)) in
+  let aout =
+    dedup
+      (List.filter_map
+         (fun k ->
+           let c = con k in
+           if c.flag = None && not (Fir_asm.indirect c) then Option.map phys_of_name reg_of.(k) else None)
+         (List.init nout Fun.id))
+  in
+  emit cx
+    (Asm
+       {
+         pieces = st.pieces;
+         intel;
+         opnds = loc;
+         ain;
+         aout;
+         aclob = dedup (List.map phys_of_name clob_names);
+       });
+  (* flag outputs right away, then the outputs out of their registers *)
+  let flag_vals =
+    List.filter_map
+      (fun k ->
+        match (con k).flag with
+        | Some cc ->
+            let d = fresh cx Gpr in
+            emit cx (Setcc (cond_of_cc cc, d));
+            Some (k, d)
+        | None -> None)
+      (List.init nout Fun.id)
+  in
+  let next = ref 0 in
+  for k = 0 to nout - 1 do
+    let c = con k in
+    if Fir_asm.output_is_result c then begin
+      let res = ir.results.(!next) in
+      incr next;
+      match List.assoc_opt k flag_vals with
+      | Some d -> def cx res d
+      | None -> (
+          let r = phys_of_name (Option.get reg_of.(k)) in
+          let t = oty k in
+          let d = fresh cx (cls_of_ty t) in
+          (match (r, cls_of_ty t) with
+          | G _, Gpr | X _, Xmm -> emit cx (Copy (d, r))
+          | X _, Gpr -> emit cx (Movxg (true, d, r))
+          | G _, Xmm -> emit cx (Movgx (t = F.F64, d, r))
+          | V _, _ -> assert false);
+          (match t with
+          | F.Int w when w < 64 -> norm cx (if w <= 8 && w > 1 then 8 else if w <= 16 && w > 1 then 16 else if w = 1 then 1 else 32) d
+          | _ -> ());
+          def cx res d)
+    end
+  done
+
+
 let inst c i =
   let ir = F.inst c.fn i in
   let res k = ir.results.(k) in
@@ -1785,6 +2104,7 @@ let inst c i =
   | Extract _ | Insert _ | Shuffle _ | Splat _ | Reduce _ | Masked_load _ | Masked_store _ | Compress _
   | Expand _ ->
       unsupported "vector operations"
+  | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> asm c ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
 
 (* parallel copies of an edge's arguments into the target's parameters *)
 let edge c (t : F.target) =

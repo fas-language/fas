@@ -189,4 +189,9 @@ Each of these is reported as `native backend: ...`, never miscompiled:
   with `dlopen`);
 - aggregates aligned above 16, or with fields other than integers ≤ 64 bits,
   pointers, f32 and f64;
-- 4-byte data relocations.
+- 4-byte data relocations;
+- inline asm that puts bytes in another section, defines a global symbol,
+  aligns to more than 16 bytes or refers to a label in another asm
+  statement (each statement is assembled on its own section and spliced
+  into `.text`, see the inline asm part of `mir_emit.ml`); `asm goto` and
+  module-level asm.

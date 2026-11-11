@@ -307,6 +307,37 @@ let op_text f nm (ir : inst_rec) =
         (match callee with Direct s -> symbol s | Indirect c -> v c)
         (String.concat ", " (List.mapi arg (Array.to_list args)))
   | Syscall args -> Printf.sprintf "syscall %s %s" (rt ()) (list args)
+  | Asm { tmpl; aflags; outs; ins; aargs; clobbers } ->
+      let k = ref 0 in
+      let operand ~output o =
+        let takes =
+          (not output)
+          ||
+          match Fir_asm.constr ~names:[||] ~nouts:0 ~output:true o.acon with
+          | c -> Fir_asm.output_takes_arg c
+          | exception Fir_asm.Bad _ -> false
+        in
+        (if o.aname <> "" then "[" ^ o.aname ^ "] " else "")
+        ^ quote o.acon ^ " " ^ ty_to_string o.aty
+        ^
+        if takes && !k < Array.length aargs then begin
+          let x = aargs.(!k) in
+          incr k;
+          " " ^ v x
+        end
+        else ""
+      in
+      let ops kw output l =
+        kw ^ "(" ^ String.concat ", " (List.map (operand ~output) (Array.to_list l)) ^ ")"
+      in
+      let o = ops "out" true outs in
+      let i = ops "in" false ins in
+      Printf.sprintf "asm %s%s%s %s %s%s"
+        (if aflags land asm_volatile <> 0 then "volatile " else "")
+        (if aflags land asm_intel <> 0 then "intel " else "")
+        (quote tmpl) o i
+        (if clobbers = [||] then ""
+         else " clobber(" ^ String.concat ", " (List.map quote (Array.to_list clobbers)) ^ ")")
   | Va_start p -> "va_start " ^ v p
   | Va_arg p -> Printf.sprintf "va_arg %s %s" (rt ()) (v p)
   | Va_arg_agg (abi, p) -> Printf.sprintf "va_arg %s %s" (abi_text abi) (v p)
