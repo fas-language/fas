@@ -193,7 +193,7 @@ Each of these is reported as `native backend: ...`, never miscompiled:
 - inline asm that puts bytes in another section, defines a global symbol,
   aligns to more than 16 bytes or refers to a label in another asm
   statement (each statement is assembled on its own section and spliced
-  into `.text`, see the inline asm part of `mir_emit.ml`); module-level
-  asm. (`asm goto` works: its labels are block symbols and the block ends
+  into `.text`, see the inline asm part of `mir_emit.ml`); module asm
+  with section groups. (`asm goto` works: its labels are block symbols and the block ends
   in an `Asmgoto` terminator whose successors are the fall-through and
   every label.)

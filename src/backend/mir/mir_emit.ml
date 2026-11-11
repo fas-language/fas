@@ -300,6 +300,102 @@ let assemble_snippets (texts : (bool * string) list) =
         if s.alignment > 16 then unsupported "inline asm aligned to %d bytes (at most 16)" s.alignment;
         { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment; srelocs = List.rev relocs.(i) })
 
+(* Top-level asm ([module_asm]): the text is assembled in one run, and every
+   allocated section of the result becomes a section of its own in our
+   object (after the [first] extra ones), with its symbols and relocations.
+   A reference to a section (GNU as turns references to local labels into
+   section plus offset) goes through a local symbol at the section's start.
+   Returns the sections, the symbols they define, and the bindings and
+   visibilities of those symbols *)
+type masm = {
+  msections : Native_object.extra list;
+  msyms : Elf64.symbol list;
+  mbinding : (string, int) Hashtbl.t;
+  mvisibility : (string, int) Hashtbl.t;
+}
+
+let module_asm ~first (texts : string list) =
+  let mbinding = Hashtbl.create 8 and mvisibility = Hashtbl.create 8 in
+  if texts = [] then { msections = []; msyms = []; mbinding; mvisibility }
+  else begin
+    let data = run_assembler (String.concat "\n" texts ^ "\n") in
+    let module R = Fas_linker.Elf_reader in
+    let o = R.parse ~path:"<module asm>" data in
+    if Array.length o.groups > 0 then unsupported "module asm: section groups (COMDAT)";
+    (* the sections kept: allocated ones with contents (PROGBITS, NOBITS,
+       NOTE, INIT/FINI/PREINIT_ARRAY, x86-64 UNWIND) *)
+    let kept = Hashtbl.create 8 and order = ref [] in
+    Array.iter
+      (fun (s : R.section) ->
+        let kinds = [ 1; 7; 8; 14; 15; 16; 0x70000001 ] in
+        if s.flags land 2 <> 0 && List.mem s.kind kinds then begin
+          Hashtbl.replace kept s.index (first + List.length !order);
+          order := s :: !order
+        end)
+      o.sections;
+    let order = List.rev !order in
+    let section_symbol idx = Printf.sprintf ".Lfas.masm.%d" idx in
+    let relocs = Hashtbl.create 8 in
+    Array.iter
+      (fun (r : R.relocation) ->
+        if Hashtbl.mem kept r.target && r.kind <> 0 then begin
+          let y = o.symbols.(r.symbol) in
+          let name =
+            if y.section = 0 then y.name
+            else
+              match Hashtbl.find_opt kept y.section with
+              | Some _ when y.kind = 3 -> section_symbol y.section
+              | Some _ -> y.name
+              | None ->
+                  unsupported "module asm refers to %s, in a section it cannot keep"
+                    (if y.name = "" then "a section" else y.name)
+          in
+          let l = Option.value (Hashtbl.find_opt relocs r.target) ~default:[] in
+          Hashtbl.replace relocs r.target
+            (X64.Raw { offset = r.offset; symbol = name; kind = r.kind; addend = Int64.to_int r.addend } :: l)
+        end)
+      o.relocations;
+    let msections =
+      List.map
+        (fun (s : R.section) ->
+          {
+            Native_object.name = s.name;
+            (* write, alloc, exec and TLS; merge and strings need an entry
+               size, which these sections do not carry *)
+            flags = s.flags land (1 lor 2 lor 4 lor 0x400);
+            alignment = max 1 s.alignment;
+            contents =
+              (if s.kind = 8 then Fas_linker.Elf_object.Bss s.size
+               else Fas_linker.Elf_object.Data (Bytes.of_string (String.sub o.data s.offset s.size)));
+            relocs = List.rev (Option.value (Hashtbl.find_opt relocs s.index) ~default:[]);
+          })
+        order
+    in
+    let msyms = ref [] in
+    List.iter
+      (fun (s : R.section) ->
+        let i = Hashtbl.find kept s.index in
+        msyms := { Elf64.name = section_symbol s.index; section = Elf64.Extra i; offset = 0; size = 0; func = false }
+                 :: !msyms;
+        Hashtbl.replace mbinding (section_symbol s.index) 0)
+      order;
+    Array.iter
+      (fun (y : R.symbol) ->
+        match Hashtbl.find_opt kept y.section with
+        | Some i when y.kind <> 3 && y.kind <> 4 && y.name <> "" ->
+            msyms :=
+              { Elf64.name = y.name; section = Elf64.Extra i; offset = Int64.to_int y.value; size = Int64.to_int y.size;
+                func = y.kind = 2 }
+              :: !msyms;
+            Hashtbl.replace mbinding y.name y.binding;
+            Hashtbl.replace mvisibility y.name y.visibility
+        | None when y.section >= 0xff00 && y.name <> "" ->
+            unsupported "module asm: the absolute or common symbol %s" y.name
+        | _ -> ())
+      o.symbols;
+    { msections; msyms = List.rev !msyms; mbinding; mvisibility }
+  end
+
 (* the snippets of every inline asm statement of [compiled], in the order
    [func] meets them *)
 let asm_snippets compiled =
@@ -942,6 +1038,8 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
               relocs = d.relocs })
           debug_sections
     in
+    let masm = module_asm ~first:(List.length extra_sections) m.module_asm in
+    let extra_sections = extra_sections @ masm.msections in
     (* local symbols for the blocks whose address is taken, in code or data *)
     let blk_syms = Hashtbl.create 8 in
     let note_block fn b =
@@ -963,6 +1061,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
     let defined_syms =
       text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ debug_syms @ blk_syms
+      @ masm.msyms
     in
     let alias_syms =
       List.map
@@ -978,8 +1077,12 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
          ~extra:extra_sections
          ~tls:(Hashtbl.mem env.tls_syms)
          ~global:(fun n -> n = "_start")
-         ~binding:(Hashtbl.find_opt syms.binding)
-         ~visibility:(fun n -> Option.value (Hashtbl.find_opt syms.visibility n) ~default:0)
+         ~binding:(fun n ->
+           match Hashtbl.find_opt masm.mbinding n with Some b -> Some b | None -> Hashtbl.find_opt syms.binding n)
+         ~visibility:(fun n ->
+           match Hashtbl.find_opt masm.mvisibility n with
+           | Some v -> v
+           | None -> Option.value (Hashtbl.find_opt syms.visibility n) ~default:0)
          ~alignments:[| 16; rodata.alignment; data.alignment; !bss_alignment |]
          {
            text;

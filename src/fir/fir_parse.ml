@@ -1103,6 +1103,7 @@ let parse_module s =
     match next lx with
     | Eof -> ()
     | Ident "triple" -> m.triple <- str_tok lx; go ()
+    | Ident "module_asm" -> m.module_asm <- m.module_asm @ [ str_tok lx ]; go ()
     | Ident "strict_aliasing" ->
         (match next lx with
         | Ident "false" -> m.strict_aliasing <- false

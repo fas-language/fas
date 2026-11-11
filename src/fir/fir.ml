@@ -429,6 +429,7 @@ type modul = {
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
   mutable strict_aliasing : bool;
   mutable triple : string;
+  mutable module_asm : string list;  (** top-level asm text (GNU [asm("...")] outside functions), in order *)
 }
 
 let dummy_block = { params = [||]; insts = Vec.create 0; term = Unreachable; term_loc = 0; bname = "" }
@@ -454,6 +455,7 @@ let create_module () =
     alias_tags;
     strict_aliasing = true;
     triple = "x86_64-unknown-linux-gnu";
+    module_asm = [];
   }
 
 let new_func ?(linkage = Global) ?(defined = true) name sig_ =

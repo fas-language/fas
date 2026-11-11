@@ -1490,6 +1490,12 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
       add o "; ModuleID = 'fas'\nsource_filename = \"fas\"\n";
       Option.iter (fun dl -> add o (Printf.sprintf "target datalayout = \"%s\"\n" dl)) data_layout;
       add o (Printf.sprintf "target triple = \"%s\"\n\n" m.triple);
+      (* top-level asm, one LLVM line per text line *)
+      List.iter
+        (fun a ->
+          List.iter (fun l -> add o (Printf.sprintf "module asm \"%s\"\n" (escaped l))) (String.split_on_char '\n' a))
+        m.module_asm;
+      if m.module_asm <> [] then add o "\n";
       (* globals *)
       Vec.iter
         (fun g ->

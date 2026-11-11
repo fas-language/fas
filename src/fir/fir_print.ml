@@ -468,6 +468,7 @@ let module_to_string m =
   let buf = Buffer.create 4096 in
   Buffer.add_string buf (Printf.sprintf "triple %s\n" (quote m.triple));
   if not m.strict_aliasing then Buffer.add_string buf "strict_aliasing false\n";
+  List.iter (fun a -> Buffer.add_string buf (Printf.sprintf "module_asm %s\n" (quote a))) m.module_asm;
   Vec.iteri
     (fun i (file, line, col) ->
       if i > 0 then Buffer.add_string buf (Printf.sprintf "loc %d %s %d %d\n" i (quote file) line col))
