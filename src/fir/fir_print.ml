@@ -367,6 +367,21 @@ let term_text f nm = function
   | Indirect_br (x, bs) ->
       Printf.sprintf "indirect_br %s, [%s]" (value_text f nm x)
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) bs)))
+  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
+      let body = op_text f nm { op = Asm { tmpl; aflags; outs = [||]; ins; aargs; clobbers }; results = [||]; loc = 0 } in
+      (* asm_goto prints no out(): drop it after the template, whose own
+         quotes are escaped, so the first quote-space-out() follows it *)
+      let body = String.sub body 4 (String.length body - 4) in
+      let pat = "\" out() " in
+      let n = String.length pat in
+      let rec find i =
+        if i + n > String.length body then body
+        else if String.sub body i n = pat then String.sub body 0 (i + 2) ^ String.sub body (i + n) (String.length body - i - n)
+        else find (i + 1)
+      in
+      let body = find 0 in
+      Printf.sprintf "asm_goto %s %s [%s]" body (label nm.bnames.(fall))
+        (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) labels)))
   | Ret [||] -> "ret"
   | Ret vs -> "ret " ^ String.concat ", " (Array.to_list (Array.map (value_text f nm) vs))
   | Unreachable -> "unreachable"

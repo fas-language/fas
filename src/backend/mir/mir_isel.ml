@@ -1675,12 +1675,14 @@ let sext_const w (k : int64) = if w >= 64 then k else Int64.shift_right (Int64.s
    inputs get different registers, except a tied input (its output's), and
    when registers run out a non-early-clobber output may share an input's
    (as GCC allows). *)
-let asm cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array) ~(ins : F.asm_operand array) ~aargs
-    ~clobbers =
+(* [labels]: the blocks an asm goto may jump to; the template names them
+   %lN after the operands, as their block symbols *)
+let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array)
+    ~(ins : F.asm_operand array) ~aargs ~clobbers =
   let intel = aflags land F.asm_intel <> 0 in
   let pairs l = Array.map (fun (o : F.asm_operand) -> (o.aname, o.acon)) l in
   let st =
-    try Fir_asm.parse ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
+    try Fir_asm.parse ~labels:(Array.length labels) ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
     with Fir_asm.Bad m -> unsupported "%s" m
   in
   let nout = Array.length outs and nin = Array.length ins in
@@ -1902,7 +1904,16 @@ let asm cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array) ~(ins :
        {
          pieces = st.pieces;
          intel;
-         opnds = loc;
+         opnds =
+           Array.append loc
+             (Array.map
+                (fun b ->
+                  let fn = cx.fn.F.name in
+                  Hashtbl.replace cx.blk_refs (fn, b) ();
+                  let name = block_symbol fn b in
+                  Hashtbl.replace cx.local_syms name ();
+                  Asym (name, 0L))
+                labels);
          ain;
          aout;
          aclob = dedup (List.map phys_of_name clob_names);
@@ -2188,6 +2199,12 @@ let term c (t : F.term) =
         targets;
       emit c (Copy (G R11, use c v));
       set_term c (Jmpr (G R11, Array.to_list targets))
+  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
+      Array.iter
+        (fun b -> if Array.length (F.block c.fn b).params > 0 then unsupported "asm_goto to a block with parameters")
+        (Array.append [| fall |] labels);
+      asm ~labels c { op = F.Nop; results = [||]; loc = 0 } ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers;
+      set_term c (Asmgoto (fall, Array.to_list labels))
 
 (* ---------- entry ---------- *)
 

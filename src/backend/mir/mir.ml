@@ -175,6 +175,9 @@ type term =
   | Jcc of X64.cond * int * int  (** on the flags set at the block's end: taken, else *)
   | Ret of reg list  (** the physical registers holding the results *)
   | Jmpr of reg * int list  (** indirect jump; the possible target blocks *)
+  | Asmgoto of int * int list
+      (** after an asm goto: jump to the first block; the asm itself may jump
+          to the others, by their block symbols *)
   | Halt  (** ud2: control never gets here *)
 
 type block = { mutable code : ins list; mutable term : term }
@@ -264,12 +267,13 @@ let clobbers = function
   | Asm a -> a.aclob
   | _ -> []
 
-let term_uses = function Ret rs -> rs | Jmpr (r, _) -> [ r ] | Jmp _ | Jcc _ | Halt -> []
+let term_uses = function Ret rs -> rs | Jmpr (r, _) -> [ r ] | Jmp _ | Jcc _ | Asmgoto _ | Halt -> []
 
 let successors = function
   | Jmp b -> [ b ]
   | Jcc (_, t, e) -> [ t; e ]
   | Jmpr (_, bs) -> bs
+  | Asmgoto (b, bs) -> b :: bs
   | Ret _ | Halt -> []
 
 (* Rewrites every register of an instruction *)
@@ -503,6 +507,7 @@ let term_s = function
   | Jcc (c, t, e) -> Printf.sprintf "j%s b%d else b%d" (cond_s c) t e
   | Ret rs -> "ret " ^ String.concat ", " (List.map reg_s rs)
   | Jmpr (r, _) -> "jmp " ^ reg_s r
+  | Asmgoto (b, bs) -> Printf.sprintf "jmp b%d (asm goto %s)" b (String.concat ", " (List.map (Printf.sprintf "b%d") bs))
   | Halt -> "halt"
 
 let to_string f =

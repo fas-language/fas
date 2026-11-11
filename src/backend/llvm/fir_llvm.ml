@@ -631,12 +631,15 @@ let va_arg_agg cx (abi : abi) ap =
    the output ("N"), an indirect one the same address again ("*m"). The
    constraints are rebuilt from what Fir_asm understood, so that LLVM and
    the native path read them alike. *)
-let emit_asm cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) ~(ins : asm_operand array)
+(* [goto]: asm goto, a callbr to the fall-through label and the labels the
+   template may jump to (operands "!i", numbered after the inputs) *)
+let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) ~(ins : asm_operand array)
     ~aargs ~clobbers =
   let intel = aflags land asm_intel <> 0 in
   let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
   let st =
-    try Fir_asm.parse ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
+    let labels = match goto with Some (_, l) -> List.length l | None -> 0 in
+    try Fir_asm.parse ~labels ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
     with Fir_asm.Bad m -> unsupported "@%s: %s" cx.f.name m
   in
   let sort l = List.sort_uniq compare l in
@@ -725,7 +728,9 @@ let emit_asm cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) ~(ins 
       (Array.to_list clobbers)
   in
   let all_cons =
-    List.rev !cons @ List.rev !extra_cons @ clob @ [ "~{dirflag}"; "~{fpsr}"; "~{flags}" ]
+    List.rev !cons @ List.rev !extra_cons
+    @ (match goto with Some (_, l) -> List.map (fun _ -> "!i") l | None -> [])
+    @ clob @ [ "~{dirflag}"; "~{fpsr}"; "~{flags}" ]
   in
   let all_args = List.rev !args @ List.rev !extra_args in
   (* the template, with LLVM's operand syntax *)
@@ -743,10 +748,16 @@ let emit_asm cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) ~(ins 
   in
   let side = aflags land asm_volatile <> 0 || Array.length outs = 0 in
   let call =
-    Printf.sprintf "call %s asm %s%s\"%s\", \"%s\"(%s)" ret
+    Printf.sprintf "%s %s asm %s%s\"%s\", \"%s\"(%s)%s"
+      (if goto = None then "call" else "callbr")
+      ret
       (if side then "sideeffect " else "")
       (if intel then "inteldialect " else "")
       (escaped (Buffer.contents b)) (escaped (String.concat "," all_cons)) (String.concat ", " all_args)
+      (match goto with
+      | Some (fall, l) ->
+          Printf.sprintf " to label %%%s [%s]" fall (String.concat ", " (List.map (fun x -> "label %" ^ x) l))
+      | None -> "")
   in
   match rtys with
   | [] -> line cx call
@@ -1288,6 +1299,7 @@ let edges = function
   | Br (_, t, e, _) -> [ t; e ]
   | Switch (_, d, cases) -> d :: Array.to_list (Array.map snd cases)
   | Indirect_br (_, bs) -> Array.to_list (Array.map (fun b -> target b) bs)
+  | Asm_goto { fall; labels; _ } -> target fall :: Array.to_list (Array.map (fun b -> target b) labels)
   | Ret _ | Unreachable -> []
 
 let label b = "b" ^ string_of_int b
@@ -1326,6 +1338,7 @@ let plan_edges f =
   (Array.map List.rev incoming, edge_labels, trampolines)
 
 let emit_term cx b (labels : string array) =
+  let labels_ = labels in
   let br = block cx.f b in
   set_loc cx br.term_loc;
   let lab k = "label %" ^ labels.(k) in
@@ -1342,6 +1355,11 @@ let emit_term cx b (labels : string array) =
       line cx
         (Printf.sprintf "indirectbr %s, [%s]" (tv cx x)
            (String.concat ", " (Array.to_list (Array.mapi (fun k _ -> lab k) bs))))
+  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; labels; _ } ->
+      emit_asm cx
+        ~goto:(labels_.(0), Array.to_list (Array.mapi (fun k _ -> labels_.(k + 1)) labels))
+        { op = Nop; results = [||]; loc = 0 }
+        ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers
   | Ret [||] -> line cx "ret void"
   | Ret [| x |] -> (
       match cx.fsig.rplan with

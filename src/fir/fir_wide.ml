@@ -994,6 +994,7 @@ let rebuild_term cx (b : block) =
   | Jump t -> set_term (Jump (target_args cx t))
   | Br (c, t, f, w) -> set_term (Br (get1 cx c, target_args cx t, target_args cx f, w))
   | Indirect_br (v, bs) -> set_term (Indirect_br (get1 cx v, bs))
+  | Asm_goto g -> set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs })
   | Unreachable -> set_term Unreachable
   | Switch (v, d, cases) when not (odd_value cx v) ->
       set_term (Switch (get1 cx v, target_args cx d, Array.map (fun (key, t) -> (key, target_args cx t)) cases))

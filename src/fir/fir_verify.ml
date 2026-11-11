@@ -336,7 +336,7 @@ let verify_func (f : func) =
             | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> (
                 let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
                 match
-                  Fir_asm.parse ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs) ~ins:(pairs ins)
+                  Fir_asm.parse ~labels:0 ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs) ~ins:(pairs ins)
                     ~clobbers
                 with
                 | exception Fir_asm.Bad m -> err "%s: %s" where m
@@ -445,6 +445,32 @@ let verify_func (f : func) =
                 else if Array.length (block f t).params > 0 then
                   err "%s: indirect target ^%d takes parameters" where t)
               bs
+        | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } -> (
+            (* the fall-through and every label: plain blocks without parameters *)
+            Array.iter
+              (fun t ->
+                if t < 0 || t >= nb || t = entry then err "%s: bad asm_goto target" where
+                else if Array.length (block f t).params > 0 then
+                  err "%s: asm_goto target ^%d takes parameters" where t)
+              (Array.append [| fall |] labels);
+            let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
+            match
+              Fir_asm.parse ~labels:(Array.length labels) ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:[||]
+                ~ins:(pairs ins) ~clobbers
+            with
+            | exception Fir_asm.Bad m -> err "%s: %s" where m
+            | st ->
+                if aflags land lnot (asm_volatile lor asm_intel) <> 0 then err "%s: unknown asm flags" where;
+                if Array.length aargs <> Array.length ins then
+                  err "%s: asm_goto takes %d values, its operands need %d" where (Array.length aargs)
+                    (Array.length ins)
+                else
+                  Array.iteri
+                    (fun k (o : asm_operand) ->
+                      if st.ins.(k).tied <> None then err "%s: asm_goto input %d is tied, with no outputs" where k
+                      else same (Printf.sprintf "asm value %d" k) aargs.(k)
+                          (if Fir_asm.indirect st.ins.(k) then ptr else o.aty))
+                    ins)
         | Ret vs ->
             let rts = List.map abi_ty f.sig_.result_abis in
             if Array.length vs <> List.length rts then err "%s: returns %d values, signature %d" where (Array.length vs) (List.length rts)

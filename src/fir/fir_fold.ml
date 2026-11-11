@@ -107,7 +107,7 @@ let targets = function
   | Jump t -> [ t ]
   | Br (_, t, e, _) -> [ t; e ]
   | Switch (_, d, cases) -> d :: Array.to_list (Array.map snd cases)
-  | Indirect_br _ | Ret _ | Unreachable -> []
+  | Indirect_br _ | Asm_goto _ | Ret _ | Unreachable -> []
 
 let fold_term f = function
   | Br (c, t, e, _) as term -> (
@@ -190,6 +190,8 @@ let fold_func f =
       if live.(b) then List.iter (fun (t : target) -> incoming.(t.dest) <- t.args :: incoming.(t.dest)) (targets (block f b).term);
       match (block f b).term with
       | Indirect_br (_, bs) -> if live.(b) then Array.iter (fun d -> incoming.(d) <- [||] :: incoming.(d)) bs
+      | Asm_goto { fall; labels; _ } ->
+          if live.(b) then Array.iter (fun d -> incoming.(d) <- [||] :: incoming.(d)) (Array.append [| fall |] labels)
       | _ -> ()
     done;
     for b = 0 to num_blocks f - 1 do

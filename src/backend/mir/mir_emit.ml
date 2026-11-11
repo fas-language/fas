@@ -179,7 +179,7 @@ let render_asm fr uid (x : asm) =
   in
   let opnd md k =
     (match md with
-    | Some c when not (String.contains "bhwkqcnpPzVxtgHa" c) -> unsupported "inline asm: the operand modifier %%%c" c
+    | Some c when not (String.contains "bhwkqcnpPzVxtgHal" c) -> unsupported "inline asm: the operand modifier %%%c" c
     | _ -> ());
     match (x.opnds.(k), md) with
     | Anone, _ -> unsupported "inline asm: the template names operand %d, a flag output" k
@@ -204,7 +204,7 @@ let render_asm fr uid (x : asm) =
     | Aimm k, Some 'n' -> Int64.to_string (Int64.neg k)
     | Aimm k, Some ('c' | 'p' | 'P' | 'a') -> Int64.to_string k
     | Aimm k, _ -> (if intel then "" else "$") ^ Int64.to_string k
-    | Asym (s, k), Some ('c' | 'p' | 'P' | 'a') -> sym_off s k
+    | Asym (s, k), Some ('c' | 'p' | 'P' | 'a' | 'l') -> sym_off s k
     | Asym (s, k), _ -> (if intel then "OFFSET " else "$") ^ sym_off s k
   in
   let b = Buffer.create 64 in
@@ -493,7 +493,7 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
       ra.items.(b);
     let next = b + 1 in
     match ra.terms.(b) with
-    | Jmp t -> if t <> next then A.jmp a labels.(t)
+    | Jmp t | Asmgoto (t, _) -> if t <> next then A.jmp a labels.(t)
     | Jcc (c, t, e) ->
         A.jcc a c labels.(t);
         if e <> next then A.jmp a labels.(e)

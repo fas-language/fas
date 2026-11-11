@@ -502,6 +502,84 @@ let parse_target st =
   let args = if accept lx "(" then parse_values_until st ")" else [||] in
   { dest; args }
 
+(* the parts of an asm statement after "asm"/"asm_goto": flags, template,
+   outputs and inputs (an operand is [name] "constraint" type, then its
+   value if it takes one; an empty list may be left out) and clobbers *)
+let asm_parts st =
+  let lx = st.lx in
+  let aflags = ref 0 in
+  let rec flags () =
+    match peek lx with
+    | Ident "volatile" -> ignore (next lx); aflags := !aflags lor asm_volatile; flags ()
+    | Ident "intel" -> ignore (next lx); aflags := !aflags lor asm_intel; flags ()
+    | _ -> ()
+  in
+  flags ();
+  let tmpl = str_tok lx in
+  (* an empty list may be left out *)
+  let operands kw ~output =
+    let present = match peek lx with Ident k when k = kw -> ignore (next lx); true | _ -> false in
+    if present then expect lx "(";
+    let ops = ref [] and args = ref [] in
+    if present && not (accept lx ")") then begin
+      let rec go () =
+        let aname =
+          if accept lx "[" then begin
+            let nm = match next lx with Ident s -> s | t -> fail lx ("expected a name, got " ^ tok_text t) in
+            expect lx "]";
+            nm
+          end
+          else ""
+        in
+        let acon = str_tok lx in
+        let aty = parse_ty lx in
+        let c =
+          match Fir_asm.constr ~names:[||] ~nouts:(if output then 0 else max_int) ~output acon with
+          | c -> Some c
+          | exception Fir_asm.Bad _ when not output -> None (* a [name] tie: the verifier checks *)
+          | exception Fir_asm.Bad m -> fail lx m
+        in
+        let takes = (not output) || match c with Some c -> Fir_asm.output_takes_arg c | None -> false in
+        (* the value; a bare constant has the operand's type (ptr for a
+           memory operand) *)
+        if takes then begin
+          let x =
+            match peek lx with
+            | Tlocal _ -> parse_value st
+            | t when starts_ty t -> parse_value st
+            | _ ->
+                parse_const_after_ty st
+                  (match c with Some c when Fir_asm.indirect c -> ptr | _ -> aty)
+          in
+          args := x :: !args
+        end;
+        ops := { aname; acon; aty } :: !ops;
+        if accept lx "," then go () else expect lx ")"
+      in
+      go ()
+    end;
+    (Array.of_list (List.rev !ops), List.rev !args)
+  in
+  let outs, oargs = operands "out" ~output:true in
+  let ins, iargs = operands "in" ~output:false in
+  let clobbers =
+    match peek lx with
+    | Ident "clobber" ->
+        ignore (next lx);
+        expect lx "(";
+        let cs = ref [] in
+        if not (accept lx ")") then begin
+          let rec go () =
+            cs := str_tok lx :: !cs;
+            if accept lx "," then go () else expect lx ")"
+          in
+          go ()
+        end;
+        Array.of_list (List.rev !cs)
+    | _ -> [||]
+  in
+  (!aflags, tmpl, outs, oargs, ins, iargs, clobbers)
+
 (* Parses the op after "name" (already consumed); returns the op and the
    result types *)
 let parse_op st opname =
@@ -714,77 +792,7 @@ let parse_op st opname =
       (* asm [volatile] [intel] "tmpl" out(...) in(...) clobber(...);
          an operand is [name] "constraint" type, then its value if it
          takes one *)
-      let aflags = ref 0 in
-      let rec flags () =
-        match peek lx with
-        | Ident "volatile" -> ignore (next lx); aflags := !aflags lor asm_volatile; flags ()
-        | Ident "intel" -> ignore (next lx); aflags := !aflags lor asm_intel; flags ()
-        | _ -> ()
-      in
-      flags ();
-      let tmpl = str_tok lx in
-      (* an empty list may be left out *)
-      let operands kw ~output =
-        let present = match peek lx with Ident k when k = kw -> ignore (next lx); true | _ -> false in
-        if present then expect lx "(";
-        let ops = ref [] and args = ref [] in
-        if present && not (accept lx ")") then begin
-          let rec go () =
-            let aname =
-              if accept lx "[" then begin
-                let nm = match next lx with Ident s -> s | t -> fail lx ("expected a name, got " ^ tok_text t) in
-                expect lx "]";
-                nm
-              end
-              else ""
-            in
-            let acon = str_tok lx in
-            let aty = parse_ty lx in
-            let c =
-              match Fir_asm.constr ~names:[||] ~nouts:(if output then 0 else max_int) ~output acon with
-              | c -> Some c
-              | exception Fir_asm.Bad _ when not output -> None (* a [name] tie: the verifier checks *)
-              | exception Fir_asm.Bad m -> fail lx m
-            in
-            let takes = (not output) || match c with Some c -> Fir_asm.output_takes_arg c | None -> false in
-            (* the value; a bare constant has the operand's type (ptr for a
-               memory operand) *)
-            if takes then begin
-              let x =
-                match peek lx with
-                | Tlocal _ -> parse_value st
-                | t when starts_ty t -> parse_value st
-                | _ ->
-                    parse_const_after_ty st
-                      (match c with Some c when Fir_asm.indirect c -> ptr | _ -> aty)
-              in
-              args := x :: !args
-            end;
-            ops := { aname; acon; aty } :: !ops;
-            if accept lx "," then go () else expect lx ")"
-          in
-          go ()
-        end;
-        (Array.of_list (List.rev !ops), List.rev !args)
-      in
-      let outs, oargs = operands "out" ~output:true in
-      let ins, iargs = operands "in" ~output:false in
-      let clobbers =
-        match peek lx with
-        | Ident "clobber" ->
-            ignore (next lx);
-            expect lx "(";
-            let cs = ref [] in
-            if not (accept lx ")") then begin
-              let rec go () =
-                cs := str_tok lx :: !cs;
-                if accept lx "," then go () else expect lx ")"
-              in
-              go ()
-            end;
-            Array.of_list (List.rev !cs)
-        | _ -> [||]
-      in
+      let aflags, tmpl, outs, oargs, ins, iargs, clobbers = asm_parts st in
       let tys =
         Array.of_list
           (List.filter_map
@@ -794,7 +802,7 @@ let parse_op st opname =
                | _ -> None)
              (Array.to_list outs))
       in
-      (Asm { tmpl; aflags = !aflags; outs; ins; aargs = Array.of_list (oargs @ iargs); clobbers }, tys)
+      (Asm { tmpl; aflags; outs; ins; aargs = Array.of_list (oargs @ iargs); clobbers }, tys)
   | "va_start" -> (Va_start (parse_value st), [||])
   | "va_arg" -> (
       match peek lx with
@@ -871,6 +879,22 @@ let parse_term st word =
         go ()
       end;
       Indirect_br (x, Array.of_list (List.rev !bs))
+  | "asm_goto" ->
+      (* asm_goto [volatile] [intel] "tmpl" in(...) clobber(...) ^fall [^l, ...] *)
+      let aflags, tmpl, outs, _, ins, iargs, clobbers = asm_parts st in
+      if outs <> [||] then fail lx "asm_goto has no outputs";
+      let label () = match next lx with Label s -> block_ref st s | t -> fail lx ("expected a label, got " ^ tok_text t) in
+      let fall = label () in
+      expect lx "[";
+      let bs = ref [] in
+      if not (accept lx "]") then begin
+        let rec go () =
+          bs := label () :: !bs;
+          if accept lx "," then go () else expect lx "]"
+        in
+        go ()
+      end;
+      Asm_goto { tmpl; aflags; ins; aargs = Array.of_list iargs; clobbers; fall; labels = Array.of_list (List.rev !bs) }
   | "ret" ->
       (* "ret" alone returns nothing; otherwise a value list follows on the
          same logical statement, which ends at the next label or "}" *)
@@ -885,7 +909,7 @@ let parse_term st word =
   | _ -> fail lx ("unknown terminator " ^ word)
 
 let is_term = function
-  | "jump" | "br" | "switch" | "indirect_br" | "ret" | "unreachable" -> true
+  | "jump" | "br" | "switch" | "indirect_br" | "asm_goto" | "ret" | "unreachable" -> true
   | _ -> false
 
 (* Parses "{ blocks }" into [f] *)
@@ -985,6 +1009,7 @@ let parse_body lx f =
         | Br (c, t, e, w) -> Br (c, rt t, rt e, w)
         | Switch (x, d, cs) -> Switch (x, rt d, Array.map (fun (k, t) -> (k, rt t)) cs)
         | Indirect_br (x, bs) -> Indirect_br (x, Array.map rn bs)
+        | Asm_goto g -> Asm_goto { g with fall = rn g.fall; labels = Array.map rn g.labels }
         | t -> t))
     f.blocks;
   Vec.iteri

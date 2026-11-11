@@ -319,8 +319,9 @@ type stmt = {
 }
 
 (* Parses and checks an asm statement's parts (types are the caller's) *)
-let parse ~intel ~tmpl ~(outs : (string * string) array) ~(ins : (string * string) array) ~clobbers =
+let parse ~labels ~intel ~tmpl ~(outs : (string * string) array) ~(ins : (string * string) array) ~clobbers =
   let names = Array.append (Array.map fst outs) (Array.map fst ins) in
+  let nops = Array.length names in
   let nouts = Array.length outs in
   let oc = Array.map (fun (_, c) -> constr ~names ~nouts ~output:true c) outs in
   let ic = Array.map (fun (_, c) -> constr ~names ~nouts ~output:false c) ins in
@@ -344,4 +345,12 @@ let parse ~intel ~tmpl ~(outs : (string * string) array) ~(ins : (string * strin
       | [ r ] when List.mem (Creg r) clob -> fail "asm operand register %s is also clobbered" r
       | _ -> ())
     (Array.append oc ic);
-  { outs = oc; ins = ic; pieces = template ~names ~intel tmpl; clob }
+  (* asm goto's [labels] come after the operands, named by %lN only *)
+  let pieces = template ~names:(Array.append names (Array.make labels "")) ~intel tmpl in
+  List.iter
+    (function
+      | Operand (Some 'l', k) when k < nops -> fail "asm template: %%l%d names an operand, not a label" k
+      | Operand (m, k) when k >= nops && m <> Some 'l' -> fail "asm template: label %d needs %%l%d" k k
+      | _ -> ())
+    pieces;
+  { outs = oc; ins = ic; pieces; clob }

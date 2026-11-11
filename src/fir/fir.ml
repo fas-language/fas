@@ -298,6 +298,17 @@ type term =
   | Br of value * target * target * int  (** weight of the true edge in 1/1000, -1 = unknown *)
   | Switch of value * target * (int64 array * target) array  (** case keys as limbs *)
   | Indirect_br of value * block array
+  | Asm_goto of {
+      tmpl : string;
+      aflags : int;
+      ins : asm_operand array;
+      aargs : value array;  (** one per input *)
+      clobbers : string array;
+      fall : block;  (** where control goes when the asm falls through *)
+      labels : block array;  (** the blocks the template may jump to: %lN, N = inputs + i *)
+    }
+      (** GNU asm goto without outputs; every target block has no
+          parameters *)
   | Ret of value array
   | Unreachable
 
@@ -618,6 +629,7 @@ let iter_term_uses g = function
       Array.iter g d.args;
       Array.iter (fun (_, t) -> Array.iter g t.args) cases
   | Indirect_br (v, _) -> g v
+  | Asm_goto { aargs; _ } -> Array.iter g aargs
   | Ret vs -> Array.iter g vs
   | Unreachable -> ()
 
@@ -679,6 +691,7 @@ let map_term_uses g = function
   | Switch (v, d, cases) ->
       Switch (g v, map_target g d, Array.map (fun (k, t) -> (k, map_target g t)) cases)
   | Indirect_br (v, bs) -> Indirect_br (g v, bs)
+  | Asm_goto a -> Asm_goto { a with aargs = Array.map g a.aargs }
   | Ret vs -> Ret (Array.map g vs)
   | Unreachable -> Unreachable
 
@@ -687,6 +700,7 @@ let successors = function
   | Br (_, t, e, _) -> [ t.dest; e.dest ]
   | Switch (_, d, cases) -> d.dest :: Array.to_list (Array.map (fun (_, t) -> t.dest) cases)
   | Indirect_br (_, bs) -> Array.to_list bs
+  | Asm_goto { fall; labels; _ } -> fall :: Array.to_list labels
   | Ret _ | Unreachable -> []
 
 (* Ops with effects beyond their results: never removed when unused *)
