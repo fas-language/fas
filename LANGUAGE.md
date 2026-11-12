@@ -63,7 +63,7 @@ hello, fas!
 7. **Assignment is a statement.** No `x++`, no `a = b = c`, no assignment inside a condition.
 8. **Arrays and structs are places, not values.** They are not passed, returned or assigned by value: pass `&x` and use `copy(dst, src)`. Calling a C function that takes or returns a struct by value [still works](#c-structs-by-value).
 9. **`addr` is an untyped byte address.** `p + n` moves `n` bytes, `p[T]` is the `T` at `p`, `p[T, i]` is element `i`. Nothing is bounds-checked.
-10. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error when no NUL remains, so use `c"..."` there. A later integer length parameter, as in `strncmp`, permits a plain string.
+10. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error, even with a length parameter as in `strncmp`; write `c"..."` there.
 11. **Generic calls infer their arguments from parameter types**: `max(x, 1)` infers `T` from `x`, and the literal takes that type. Inference covers `T`, `handle[T]`, `vec[N, T]` and generic structs behind handles. Every generic parameter must be determined by an argument. There is no inference from literals alone or from the result type. Explicit forms such as `max[u32](x, 1)` always work.
 12. **Reading a provably uninitialized local is an error.** `{}` zero-fills an array or struct.
 13. **Not in Fas:** heap, strings, threads (atomics exist; start threads through C), methods, overloading, macros, enums, unions, function types and closures. Function addresses use `addr` and `call_addr`.
@@ -614,7 +614,7 @@ ada #42, 5
 - **Linkage.** Inside `extern "C" { }`, a `fn` without a body imports a C function and one with a body exports it. A `var` without an initializer imports a C global, and one with an initializer exports it. Everything outside is private.
 - **Function pointers** are `addr`. `&f` takes the address of a non-generic Fas function, and `call_addr[R](p, args...)` calls it with the C ABI. Unknown function addresses are accepted without runtime checks.
 - **Variadics** (`printf`) promote small integers and `bool` to `int`, as in C.
-- **C strings.** A plain `"..."` passed to an imported C `char *` parameter is rejected when no NUL byte remains from that address to the end. Use `c"..."`. A later integer length parameter, as in `strncmp`, is allowed. Variadic arguments such as `printf`'s `%s` value are not checked by this rule.
+- **C strings.** A plain `"..."` passed to an imported C `char *` parameter is rejected, at any offset into the literal and even when a later length parameter bounds the read, as in `strncmp`. Use `c"..."`. The check follows the literal through named bindings and `if` expressions. Variadic arguments such as `printf`'s `%s` value are not checked by this rule.
 - **Macro names.** A Fas declaration with the same name as an imported C macro is a duplicate declaration, just like one clashing with an imported function.
 - **`errno`** is a function-like macro, so it is invisible. Write `__errno_location()[i32]`.
 - **Feature-test macros** (`_GNU_SOURCE`, `_FILE_OFFSET_BITS`, ...) must come before any system header: put that C block first, or pass `-D_GNU_SOURCE`. Defining one after a header was read is an error. Function-like macros such as `CPU_SET` need a `static inline` wrapper in a C block.

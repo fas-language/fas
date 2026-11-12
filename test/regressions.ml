@@ -13384,10 +13384,17 @@ let () =
     "fn probe() i32 { return atoi(c\"1\") }\n";
   c_semantic_accept "c-string-embedded-nul" c_strings
     "fn probe() usize { return strlen(\"ab\\0\") }\n";
-  c_semantic_accept "c-string-strncmp-length" c_strings
-    "fn probe() i32 { return strncmp(\"abcd\", c\"x\", 3) }\n";
-  c_semantic_accept "c-string-strndup-length" c_strings
-    "fn probe() addr { return strndup(\"abc\", 2) }\n";
+  (* Removal C2: a later length parameter no longer exempts a plain literal. *)
+  c_semantic_message "c-string-strncmp-length"
+    (c_string_message "\"abcd\"" "strncmp" "__s1")
+    c_strings "fn probe() i32 { return strncmp(\"abcd\", c\"x\", 3) }\n";
+  c_semantic_accept "c-string-strncmp-length-terminated" c_strings
+    "fn probe() i32 { return strncmp(c\"abcd\", c\"x\", 3) }\n";
+  c_semantic_message "c-string-strndup-length"
+    (c_string_message "\"abc\"" "strndup" "__string")
+    c_strings "fn probe() addr { return strndup(\"abc\", 2) }\n";
+  c_semantic_accept "c-string-strndup-length-terminated" c_strings
+    "fn probe() addr { return strndup(c\"abc\", 2) }\n";
   c_semantic_message "c-string-plain-literal-const"
     "expression is not compile-time constant" c_strings "const S addr = \"x\"\n";
   c_semantic_accept "c-string-c-literal-const" c_strings
@@ -13405,6 +13412,10 @@ let () =
     (c_string_message "\"x\"" "puts" "__s")
     c_strings
     "fn probe(flag bool) void { puts(if flag { \"x\" } else { \"y\" })\nreturn }\n";
+  c_semantic_message "c-string-if-expression-one-branch"
+    (c_string_message "\"y\"" "puts" "__s")
+    c_strings
+    "fn probe(flag bool) void { puts(if flag { c\"x\" } else { \"y\" })\nreturn }\n";
   c_semantic_accept "c-string-if-expression-terminated" c_strings
     "fn probe(flag bool) void { puts(if flag { c\"x\" } else { c\"y\" })\nreturn }\n";
   c_semantic_message "c-string-offset"

@@ -627,22 +627,21 @@ let rec unterminated_string_literal c = function
           match
             (unterminated_string_literal c yes, unterminated_string_literal c no)
           with
-          | Some literal, Some _ -> Some literal
-          | _ -> None))
+          | (Some _ as literal), _ | None, (Some _ as literal) -> literal
+          | None, None -> None))
   | value -> (
       match address_fact c value with
-      | Some (Sema_flow.Object_address { identity; offset; _ }) -> (
+      | Some (Sema_flow.Object_address { identity; _ }) -> (
           match String.split_on_char ':' identity with
           | [ "string"; id ] ->
               Option.bind (int_of_string_opt id) (fun id ->
                   match List.nth_opt (List.rev c.string_pool.reversed) id with
-                  | Some bytes
-                    when offset >= 0L
-                         && offset < Int64.of_int (String.length bytes)
-                         && (not (String.ends_with ~suffix:"\000" bytes))
-                         && Option.is_none
-                              (String.index_from_opt bytes (Int64.to_int offset) '\000')
-                    ->
+                  (* Any pointer into a string literal without the c prefix is
+                     rejected, whatever its offset and whatever NUL bytes it holds
+                     (removal C2). The pool shares bytes between literals, so a plain
+                     literal that already ends in a NUL byte is the same object as the
+                     c literal and is accepted. *)
+                  | Some bytes when not (String.ends_with ~suffix:"\000" bytes) ->
                       Some bytes
                   | _ -> None)
           | _ -> None)

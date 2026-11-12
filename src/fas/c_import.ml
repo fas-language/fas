@@ -4412,16 +4412,11 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
               let positions =
                 List.mapi
                   (fun index (parameter, (_, _)) ->
-                    if
-                      parameter_is_plain_char_pointer name index
-                      && not
-                           (List.exists
-                              (fun (later_ty, _) ->
-                                match later_ty with Ast.Int _ -> true | _ -> false)
-                              (List.filteri
-                                 (fun later _ -> later > index)
-                                 parameter_types))
-                    then Some (index + 1, string "name" parameter)
+                    (* Every plain `char *` parameter is a C string position, even when
+                       a later length parameter bounds the read (removal C2): one rule,
+                       write c"..." for every such argument. *)
+                    if parameter_is_plain_char_pointer name index then
+                      Some (index + 1, string "name" parameter)
                     else None)
                   (List.combine parameter_nodes parameter_types)
                 |> List.filter_map Fun.id
