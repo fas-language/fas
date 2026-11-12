@@ -16,8 +16,6 @@ type loop = {
   keep_scopes : int;
 }
 
-type local_slot = { pointer : Low.value; size : int }
-
 type state = {
   fn : E.fn;  (** the Fir function being built *)
   literal_globals : Hir.global list ref;
@@ -31,9 +29,6 @@ type state = {
   functions : Hir.func list;
   addressed_functions : (string, unit) Hashtbl.t;
   mutable defer_scopes : Hir.stmt list list list;
-  mutable scope_slots : local_slot list list;
-  address_taken : (int, unit) Hashtbl.t;
-  sanitize_address : bool;
   intrinsic_masked_loads : bool;
   mutable loops : loop list;
   file : string option;
@@ -498,12 +493,11 @@ let bind_local s binding value alignment =
 
 let push_scope s =
   s.env_scopes <- [] :: s.env_scopes;
-  s.defer_scopes <- [] :: s.defer_scopes;
-  s.scope_slots <- [] :: s.scope_slots
+  s.defer_scopes <- [] :: s.defer_scopes
 
 let pop_scope s =
-  match (s.env_scopes, s.defer_scopes, s.scope_slots) with
-  | scope :: er, _ :: dr, _ :: lr ->
+  match (s.env_scopes, s.defer_scopes) with
+  | scope :: er, _ :: dr ->
       List.iter
         (fun (n, old) ->
           match old with
@@ -511,8 +505,7 @@ let pop_scope s =
           | Some v -> Hashtbl.replace s.env n v)
         scope;
       s.env_scopes <- er;
-      s.defer_scopes <- dr;
-      s.scope_slots <- lr
+      s.defer_scopes <- dr
   | _ -> ()
 
 let find_struct s n = List.find_opt (fun (d : Hir.struct_def) -> d.name = n) s.structs
@@ -1911,43 +1904,6 @@ and emit_scope_defers s idx =
           emit_defer_body s body)
         (Ok ()) ds
 
-and emit_lifetime s operation slot =
-  E.call s.fn None Low.No_extension Low.Void ("llvm.lifetime." ^ operation ^ ".p0") [ (Low.I64, Low.No_extension, Low.Const (Low.I64, Int64.of_int slot.size)); (Low.value_ty slot.pointer, Low.No_extension, slot.pointer); ];
-  Ok ()
-
-and emit_scope_lifetimes s slots =
-  let rec emit_all = function
-    | [] -> Ok ()
-    | slot :: rest ->
-        let* () = emit_lifetime s "end" slot in
-        emit_all rest
-  in
-  emit_all slots
-
-and emit_current_scope_lifetimes s =
-  match s.scope_slots with
-  | slots :: _ -> emit_scope_lifetimes s slots
-  | [] -> error Span.synthetic "internal error: lifetime scope stack is empty"
-
-and register_local_lifetime s local pointer =
-  if (not s.sanitize_address) || not (Hashtbl.mem s.address_taken local.Hir.id) then
-    Ok ()
-  else
-    match Hir.layout s.structs local.ty with
-    | Error message ->
-        error Span.synthetic
-          (Printf.sprintf "internal error: local `%s` has no layout: %s" local.name
-             message)
-    | Ok (size, _) when size = 0 -> Ok ()
-    | Ok (size, _) -> (
-        match s.scope_slots with
-        | slots :: rest ->
-            let slot = { pointer; size } in
-            let* () = emit_lifetime s "start" slot in
-            s.scope_slots <- (slot :: slots) :: rest;
-            Ok ()
-        | [] -> error Span.synthetic "internal error: lifetime scope stack is empty")
-
 and unwind s keep =
   let count = List.length s.defer_scopes - keep in
   let scopes =
@@ -1956,36 +1912,19 @@ and unwind s keep =
     in
     take count s.defer_scopes
   in
-  let lifetimes =
-    let rec take n = function
-      | _ when n <= 0 -> []
-      | [] -> []
-      | scope :: rest -> scope :: take (n - 1) rest
-    in
-    take count s.scope_slots
-  in
-  let rec unwind_scopes scopes lifetimes =
-    match (scopes, lifetimes) with
-    | [], [] -> Ok ()
-    | ds :: scope_rest, slots :: lifetime_rest ->
-        let* () =
-          List.fold_left
-            (fun r body ->
-              let* () = r in
-              emit_defer_body s body)
-            (Ok ()) ds
-        in
-        let* () = emit_scope_lifetimes s slots in
-        unwind_scopes scope_rest lifetime_rest
-    | _ -> error Span.synthetic "internal error: lifetime and defer scope mismatch"
-  in
-  unwind_scopes scopes lifetimes
+  Result_list.iter
+    (fun ds ->
+      List.fold_left
+        (fun r body ->
+          let* () = r in
+          emit_defer_body s body)
+        (Ok ()) ds)
+    scopes
 
 and scoped s xs =
   push_scope s;
   let* () = stmt_list s xs in
   let* () = if open_block s then emit_scope_defers s 0 else Ok () in
-  let* () = if open_block s then emit_current_scope_lifetimes s else Ok () in
   pop_scope s;
   Ok ()
 
@@ -1997,7 +1936,6 @@ and stmt s statement =
       let id = fresh s in
       E.alloca_entry s.fn id (storage_ty local.ty) alignment;
       let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
-      let* () = register_local_lifetime s local p in
       bind_local s local p alignment;
       match init with
       | None -> Ok ()
@@ -2009,7 +1947,6 @@ and stmt s statement =
       let id = fresh s in
       E.alloca_entry s.fn id (storage_ty local.ty) alignment;
       let pointer = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
-      let* () = register_local_lifetime s local pointer in
       bind_local s local pointer alignment;
       construct_into ~alignment s pointer construction
   | Hir.View (local, place, span) ->
@@ -2479,7 +2416,6 @@ and lower_for s label init cond step body span =
     loop_backedge s span head.id;
     enter s exit;
     let* () = if open_block s then emit_scope_defers s 0 else Ok () in
-    let* () = if open_block s then emit_current_scope_lifetimes s else Ok () in
     let unconditional =
       match cond with None -> true | Some condition -> Hir.condition_is_true condition
     in
@@ -2647,7 +2583,7 @@ let address_taken_locals ?function_addresses body =
   collect_list body;
   addressed
 
-let lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
+let lower_func mc ~intrinsic_masked_loads
     ~addressed_functions literal_globals structs strings functions f =
   let c_abi = has_c_abi f || Hashtbl.mem addressed_functions f.name in
   let source =
@@ -2709,9 +2645,6 @@ let lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
           functions;
           addressed_functions;
           defer_scopes = [];
-          scope_slots = [];
-          address_taken;
-          sanitize_address;
           intrinsic_masked_loads;
           loops = [];
           file = Option.map fst source;
@@ -2727,7 +2660,6 @@ let lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
             let id = fresh s in
             E.alloca s.fn id (storage_ty local.ty) alignment;
             let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
-            let* () = register_local_lifetime s local p in
             bind_local s local p alignment;
             let* () =
               store_value s local.ty (Low.Param (name, ty local.ty)) p alignment
@@ -2741,7 +2673,6 @@ let lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
       let* () = bind_parameters f.params params in
       let* () = scoped s body in
       let* () = if open_block s then emit_scope_defers s 0 else Ok () in
-      let* () = if open_block s then emit_current_scope_lifetimes s else Ok () in
       let* () =
         if not (open_block s) then Ok ()
         else if s.ret = Low.Void then (
@@ -2871,7 +2802,7 @@ let global_storage mc structs (global : Hir.global) =
         error Span.synthetic
           (Printf.sprintf "internal error: global %s: %s" global.name message))
 
-let lower_module ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p : Hir.program)
+let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
   let* () =
     match Target_layout.pointer_integer_bits (Target_layout.current ()) with
@@ -3026,12 +2957,7 @@ let lower_module ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p
   let* () =
     Result_list.iter
       (fun (f : Hir.func) ->
-        let address_taken =
-          match (sanitize_address, f.Hir.body) with
-          | true, Hir.Statements body -> address_taken_locals body
-          | _ -> Hashtbl.create 0
-        in
-        lower_func mc ~sanitize_address ~intrinsic_masked_loads ~address_taken
+        lower_func mc ~intrinsic_masked_loads
           ~addressed_functions literal_globals p.Hir.structs p.strings p.funcs f)
       p.funcs
   in
@@ -3056,7 +2982,7 @@ let lower_module ?(sanitize_address = false) ?(intrinsic_masked_loads = true) (p
   | [] -> Ok mc.m
   | errors -> error Span.synthetic ("internal error: invalid Fir:\n" ^ String.concat "\n" errors)
 
-let lower ?sanitize_address ?intrinsic_masked_loads p =
+let lower ?intrinsic_masked_loads p =
   (* a malformed request to Lower_emit is a lowering bug *)
-  try lower_module ?sanitize_address ?intrinsic_masked_loads p
+  try lower_module ?intrinsic_masked_loads p
   with E.Unsupported message -> error Span.synthetic ("internal error: lowering to Fir: " ^ message)

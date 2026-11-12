@@ -1031,9 +1031,9 @@ let host_march config =
 
 (* The LLVM text of the lowered Fir module (roadmap v0.6: Fir_llvm replaced
    the old Ir renderer) *)
-let render_ir ?(sanitize_address = false) ?target ~debug_info m =
+let render_ir ?target ~debug_info m =
   match
-    Fir_llvm.render_bounded ~sanitize_address ~debug_info ?target
+    Fir_llvm.render_bounded ~debug_info ?target
       ~budget:limits.Limits.max_rendered_ir_bytes m
   with
   | Ok text -> Ok text
@@ -1045,19 +1045,11 @@ let opt_pass config =
     | Some value when value <> "" -> value
     | _ -> Printf.sprintf "default<O%d>" (optimization_level config.Cli.optimization)
   in
-  if List.mem "address" config.Cli.sanitizers then "asan," ^ configured else configured
+  configured
 
 let llc_opt level = Printf.sprintf "-O%d" (optimization_level level)
 
-let c_sanitizer_flags config =
-  let sanitizers =
-    List.filter
-      (fun name -> List.mem name config.Cli.sanitizers)
-      [ "address"; "undefined" ]
-  in
-  match sanitizers with
-  | [] -> []
-  | _ -> [ "-fsanitize=" ^ String.concat "," sanitizers ]
+let c_sanitizer_flags = Cli.c_sanitizer_flags
 
 let verify_llvm opt file =
   run_tool
@@ -1115,14 +1107,10 @@ let build_assembly config llc opt_path asm_path =
 let optimize_module config opt ll_path opt_path =
   let* () = verify_llvm opt ll_path in
   let* () =
-    let address_scope_option =
-      if List.mem "address" config.Cli.sanitizers then [ "-asan-use-after-scope" ]
-      else []
-    in
     run_tool opt
       (Array.of_list
          ([ opt; "-passes=" ^ opt_pass config ]
-         @ target_cpu_option config @ address_scope_option
+         @ target_cpu_option config
          @ [ ll_path; "-S"; "-o"; opt_path ]))
   in
   verify_llvm opt opt_path
@@ -1131,7 +1119,6 @@ let emit_tools_unprotected config program ir c_objects link_flags =
   let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
     render_ir
-      ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
       ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
   in
   let ll_path = Filename.temp_file "fas-module-" ".ll" in
@@ -1226,7 +1213,6 @@ let emit_optimized_llvm config program ir =
   let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
     render_ir
-      ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
       ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
   in
   let ll_path = Filename.temp_file "fas-module-" ".ll" in
@@ -1794,7 +1780,6 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
               in
               let* ir =
                 Lower.lower
-                  ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
                   ~intrinsic_masked_loads:(config.Cli.target = Cli.Force_native)
                   hir
               in
@@ -2047,7 +2032,6 @@ let run_unprotected ?header_output config =
           | Cli.Llvm ->
               let* text =
                 render_ir
-                  ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
                   ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
               in
               let opt, _, _ = tools () in

@@ -1435,7 +1435,7 @@ let decl_location m f =
       f.blocks;
     !found
 
-let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info = false) ?target ?data_layout ~budget
+let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layout ~budget
     (m : modul) =
   if budget < 0 then Error "rendered LLVM text budget must not be negative"
   else
@@ -1640,9 +1640,8 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
             in
             let params = if f.sig_.variadic then params @ [ "..." ] else params in
             add o
-              (Printf.sprintf "define %s%s%s%s %s(%s)%s%s%s" (linkage_text f.linkage) (visibility_text f.linkage f.visibility)
+              (Printf.sprintf "define %s%s%s%s %s(%s)%s%s" (linkage_text f.linkage) (visibility_text f.linkage f.visibility)
                  ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:true)
-                 (if sanitize_address then " sanitize_address" else "")
                  (attr_refs ~definition:true));
             Option.iter (fun (id, _, _) -> add_debug o (Printf.sprintf " !dbg !%d" id)) sp;
             add o " {\n";

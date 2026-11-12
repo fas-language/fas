@@ -107,6 +107,7 @@ let link ~cc ~config ~c_objects ~link_flags ir =
                      (cc
                      :: (sysroot @ config.Cli.c_flags @ c_link_flags
                         @ [ "-fPIC"; "-O" ^ string_of_int config.Cli.optimization ]
+                        @ Cli.c_sanitizer_flags config
                         @ (if config.Cli.debug then [ "-g" ] else [])
                         @ [ "-c"; path; "-o"; output ])))
               in

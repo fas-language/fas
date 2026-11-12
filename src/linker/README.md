@@ -602,8 +602,8 @@ static startup. These tests do not establish that every native instruction/data
 pattern is position independent. C `main` harnesses can call exported Fas
 functions without any Fas `main`. Constructors, buffered stdio, destructors,
 package `-pthread`, C source flags and argument passing have driver regressions.
-Native sanitizer options fail explicitly rather than producing uninstrumented
-output.
+`--sanitize=undefined` compiles C sources with clang's trap-mode checks (no
+sanitizer runtime is linked); `--sanitize=address` was removed.
 
 Use `extern "C"` exports
 for symbols that must be visible between objects; ordinary definitions remain

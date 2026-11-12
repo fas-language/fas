@@ -269,7 +269,7 @@ type op =
   | Lifetime of bool * int * value
       (** [Lifetime (start, size, p)]: the [size] bytes at the alloca [p]
           start (true) or stop (false) being live. Only a hint for address
-          sanitizers (the Fas front end emits it under --sanitize=address);
+          sanitizers (the Fas front end no longer emits it; --sanitize=address was removed);
           code generators that do not use it ignore it *)
   | Va_arg_agg of abi * value
       (** reads the next variadic argument, an aggregate with this [Agg] ABI,

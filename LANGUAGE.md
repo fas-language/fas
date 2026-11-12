@@ -1045,7 +1045,7 @@ When every operand of `rotl`, `rotr`, `popcount`, `clz`, `ctz`, `add_sat`, `sub_
 
 Every builtin name in this table, `cvt` and the float builtins included, is reserved: a variable, parameter, field, function or const named `sqrt` or `popcount` is an error (`` `sqrt` is a builtin and cannot be used as a name ``), and so are type names (`u8`, `f32`), literals (`true`, `null`) and `view`, `use` and `var`. A C declaration with such a name is imported but cannot be used from Fas.
 
-**Memory orderings.** The `o` argument of an atomic is `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`, with C11 meanings. A load cannot be `release` or `acq_rel`, a store cannot be `acquire` or `acq_rel`, and a fence cannot be `relaxed`. A failed `atomic_cas` uses the strongest ordering valid for a load: `acquire` for `acq_rel`, `relaxed` for `release`. An atomic access to an address that is not aligned to `sizeof[T]` is undefined. A plain access racing with an atomic or with another plain write is a data race, as in C. The WASI target runs a single thread, so atomics there are ordinary accesses.
+**Memory orderings.** The `o` argument of an atomic is `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`, with C11 meanings. A load cannot be `release` or `acq_rel`, a store cannot be `acquire` or `acq_rel`, and a fence cannot be `relaxed`. A failed `atomic_cas` uses the strongest ordering valid for a load: `acquire` for `acq_rel`, `relaxed` for `release`. An atomic access to an address that is not aligned to `sizeof[T]` is undefined. A plain access racing with an atomic or with another plain write is a data race, as in C.
 
 ### Builtin cost by CPU level
 

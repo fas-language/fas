@@ -41,6 +41,9 @@ type command =
 
 val parse : string array -> (command, string) result
 val oracle : unit -> bool
+
+(* C compiler flags for `--sanitize=undefined`: trap-mode checks, no runtime *)
+val c_sanitizer_flags : t -> string list
 (** [FAS_ORACLE=llvm]: the hidden LLVM test-oracle mode (see cli.ml) *)
 
 val usage : string

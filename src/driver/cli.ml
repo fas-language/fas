@@ -75,6 +75,8 @@ let usage =
   \  -l, -L        link flags (attached or separate)\n\
   \  -Wl,ARG,..., -Xlinker ARG  pass arguments to the built-in linker\n\
   \  FILE.c, FILE.o, FILE.a, FILE.so  C inputs linked with the program\n\
+  \  --sanitize=undefined  C code (C blocks, FILE.c) traps on undefined behavior \
+   (no runtime library)\n\
    debugging:\n\
   \  --emit-ir     print the lowered module as Fir text (src/fir/SPEC.md)\n\
   \  --keep        retain and report intermediate paths\n\
@@ -82,6 +84,15 @@ let usage =
    environment:\n\
   \  FAS_CC        the C compiler for C inputs, C imports and --hosted (default \
    clang-22; without it, clang when it reports LLVM 22)"
+
+(* Removal A6: `--sanitize=undefined` is clang's trap mode, the same checks
+   as the Fir SPEC section 11 table, so no sanitizer runtime is linked. It
+   applies to C code only: Fas arithmetic has no undefined behavior (it
+   wraps, and division by zero traps anyway). *)
+let c_sanitizer_flags config =
+  if List.mem "undefined" config.sanitizers then
+    [ "-fsanitize=undefined"; "-fsanitize-trap=all" ]
+  else []
 
 let default_output os emit input =
   let source_output extension =
@@ -184,10 +195,6 @@ let parse_invocation ~subcommand argv =
            else "--hosted/--freestanding require an executable output")
       else if Option.is_some !runtime && subcommand = Check_subcommand then
         Error "--hosted/--freestanding have no effect with fas check"
-      else if !native && Option.is_some !sanitizers then
-        Error
-          (if oracle then "--sanitize is not supported by --backend=native"
-           else "--sanitize is not supported yet")
       else
             let input = Option.get input in
             let output_explicit = Option.is_some output in
@@ -324,20 +331,17 @@ let parse_invocation ~subcommand argv =
           let names = String.split_on_char ',' value in
           if value = "" then Error "--sanitize requires a non-empty list"
           else
-            let unknown =
-              List.find_opt (fun name -> name <> "address" && name <> "undefined") names
-            in
-            match unknown with
+            match List.find_opt (fun name -> name <> "undefined") names with
+            | Some "address" ->
+                Error
+                  "`--sanitize=address` was removed; it needed LLVM's AddressSanitizer \
+                   runtime"
             | Some name -> Error ("unknown sanitizer `" ^ name ^ "`")
-            | None -> (
-                let names = List.sort_uniq String.compare names in
-                match !sanitizers with
-                | Some previous when previous <> names ->
-                    Error "conflicting --sanitize options"
-                | _ ->
-                    sanitizers := Some names;
-                    loop (i + 1) input output emit keep optimization
-                      optimization_explicit debug))
+            | None ->
+                (* `undefined` is the only sanitizer, so repeats agree *)
+                sanitizers := Some [ "undefined" ];
+                loop (i + 1) input output emit keep optimization optimization_explicit
+                  debug)
       | "-g" ->
           loop (i + 1) input output emit keep optimization optimization_explicit true
       | "--no-inline" ->

@@ -136,7 +136,7 @@ temps_empty() {
 "$OCAML_FAS" -h >"$WORK/short-help" 2>"$WORK/stderr"
 cmp "$WORK/help" "$WORK/short-help" >/dev/null || fail "-h differs from --help"
 for flag in -o --emit-header --emit-ir --emit-obj -c --keep \
-  -O0..-O3 -g -I -isystem -D -h --help; do
+  -O0..-O3 -g -I -isystem -D --sanitize=undefined -h --help; do
   grep -F -- "$flag" "$WORK/help" >/dev/null || fail "help omitted $flag"
 done
 if grep -F -- "--emit-ast" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ast"; fi
@@ -150,7 +150,7 @@ for flag in --emit-ir --keep -g; do
 done
 # help is the public interface: the LLVM oracle (FAS_ORACLE=llvm) is hidden
 for removed in "fas perf" --profile --tune FAS_PROFDATA --emit-llvm --emit-asm --backend \
-  force-native FAS_OPT FAS_LLC --sanitize inline; do
+  force-native FAS_OPT FAS_LLC sanitize=address inline; do
   if grep -F -- "$removed" "$WORK/help" >/dev/null; then fail "help advertises removed $removed"; fi
 done
 sed -n '/^environment:$/,$p' "$WORK/help" >"$WORK/help-environment"
@@ -191,9 +191,13 @@ for name in memory thread foo; do
   expect_failure "$OCAML_FAS" "--sanitize=$name" "$WORK/good.fas"
   grep -Fx -- "unknown sanitizer \`$name\`" "$WORK/stderr" >/dev/null || fail "unknown sanitizer diagnostic changed"
 done
-expect_failure "$OCAML_FAS" --sanitize=address --sanitize=undefined "$WORK/good.fas"
-grep -Fx -- "conflicting --sanitize options" "$WORK/stderr" >/dev/null || fail "conflicting sanitizer diagnostic changed"
-"$OCAML_FAS" --sanitize=address,address --sanitize=address --emit-ir "$WORK/good.fas" \
+# Removal A6: AddressSanitizer is gone, undefined is trap mode
+for spelling in address undefined,address; do
+  expect_failure "$OCAML_FAS" "--sanitize=$spelling" "$WORK/good.fas"
+  grep -Fx -- "\`--sanitize=address\` was removed; it needed LLVM's AddressSanitizer runtime" \
+    "$WORK/stderr" >/dev/null || fail "address sanitizer removal message changed"
+done
+"$OCAML_FAS" --sanitize=undefined,undefined --sanitize=undefined --emit-ir "$WORK/good.fas" \
   >"$WORK/sanitized-custom.ir" 2>"$WORK/stderr"
 [ ! -s "$WORK/stderr" ] || fail "repeated sanitizer names were rejected"
 
@@ -282,18 +286,6 @@ grep -E "^fas: CC command: $FAS_CC [^ ]*fas-module-[^ ]*\\.s $WORK/helper.c -lm 
 asm_path=$(sed -n 's/^fas: CC command: [^ ]* \([^ ]*fas-module-[^ ]*\.s\) .*/\1/p' "$WORK/stderr")
 [ -s "$asm_path" ] || fail "--keep did not retain the exact assembly input"
 
-: >"$TOOL_LOG"
-"$OCAML_FAS" --sanitize=address --keep "$WORK/c-sanitize.fas" -o "$WORK/c-sanitize" \
-  >"$WORK/stdout" 2>"$WORK/stderr"
-grep -E '^cc --target=x86_64-unknown-linux-gnu -fPIC -O2 -Xclang -main-file-name -Xclang fas-c-import-[0-9a-f]{32}\.c -ffile-prefix-map=[^ ]+=fas-c-import-[0-9a-f]{32}\.c -fsanitize=address -c .*\.c -o ' \
-  "$TOOL_LOG" >/dev/null || fail "generated C input was not compiled with ASan"
-grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=address (-lm )?-o ' "$TOOL_LOG" >/dev/null \
-  || fail "generated C program link omitted ASan runtime"
-: >"$TOOL_LOG"
-"$OCAML_FAS" --sanitize=address --keep "$WORK/link.fas" "$WORK/helper.c" -lm \
-  -o "$WORK/address-c-link" >"$WORK/stdout" 2>"$WORK/stderr"
-grep -F -- "-fsanitize=address $WORK/helper.c -lm -o " "$TOOL_LOG" >/dev/null \
-  || fail "C input link omitted ASan runtime"
 "$OCAML_FAS" --emit-llvm "$WORK/good.fas" >"$WORK/no-sanitizer.ll" 2>"$WORK/stderr"
 "$OCAML_FAS" --sanitize=undefined --emit-llvm "$WORK/good.fas" \
   >"$WORK/undefined.ll" 2>"$WORK/stderr"
@@ -302,41 +294,19 @@ cmp "$WORK/no-sanitizer.ll" "$WORK/undefined.ll" >/dev/null \
 : >"$TOOL_LOG"
 "$OCAML_FAS" --sanitize=undefined "$WORK/c-sanitize.fas" -o "$WORK/undefined-c-link" \
   >"$WORK/stdout" 2>"$WORK/stderr"
-grep -E '^cc --target=x86_64-unknown-linux-gnu -fPIC -O2 -Xclang -main-file-name -Xclang fas-c-import-[0-9a-f]{32}\.c -ffile-prefix-map=[^ ]+=fas-c-import-[0-9a-f]{32}\.c -fsanitize=undefined -c .*\.c -o ' \
-  "$TOOL_LOG" >/dev/null || fail "generated C input was not compiled with UBSan"
-grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=undefined (-lm )?-o ' "$TOOL_LOG" >/dev/null \
-  || fail "C program link omitted UBSan runtime"
-: >"$TOOL_LOG"
-"$OCAML_FAS" --sanitize=address,undefined "$WORK/c-sanitize.fas" \
-  -o "$WORK/combined-c-link" >"$WORK/stdout" 2>"$WORK/stderr"
-grep -E '^cc --target=x86_64-unknown-linux-gnu -fPIC -O2 -Xclang -main-file-name -Xclang fas-c-import-[0-9a-f]{32}\.c -ffile-prefix-map=[^ ]+=fas-c-import-[0-9a-f]{32}\.c -fsanitize=address,undefined -c .*\.c -o ' \
-  "$TOOL_LOG" >/dev/null || fail "generated C input omitted a combined sanitizer"
-grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=address,undefined (-lm )?-o ' \
-  "$TOOL_LOG" >/dev/null || fail "C program link omitted a combined sanitizer"
+grep -E '^cc --target=x86_64-unknown-linux-gnu -fPIC -O2 -Xclang -main-file-name -Xclang fas-c-import-[0-9a-f]{32}\.c -ffile-prefix-map=[^ ]+=fas-c-import-[0-9a-f]{32}\.c -fsanitize=undefined -fsanitize-trap=all -c .*\.c -o ' \
+  "$TOOL_LOG" >/dev/null || fail "generated C input was not compiled with trap-mode UBSan"
+grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=undefined -fsanitize-trap=all (-lm )?-o ' "$TOOL_LOG" >/dev/null \
+  || fail "C program link omitted the trap-mode flags"
 
 "$OCAML_FAS" --emit-llvm -O2 "$WORK/good.fas" >"$WORK/raw.ll" 2>"$WORK/stderr"
 [ ! -s "$WORK/stderr" ] || fail "LLVM emission wrote diagnostics"
 grep -F "define i32 @main" "$WORK/raw.ll" >/dev/null || fail "LLVM emission omitted main"
 grep -F "call i32 @helper" "$WORK/raw.ll" >/dev/null || fail "-O2 changed unoptimized LLVM emission"
-"$OCAML_FAS" --sanitize=address --emit-llvm "$WORK/link.fas" >"$WORK/address.ll" 2>"$WORK/stderr"
-grep -F "define i32 @main() sanitize_address #1 {" "$WORK/address.ll" >/dev/null || fail "address sanitizer missed Fas definition"
-grep -F "declare i32 @c_link_probe(i32)" "$WORK/address.ll" >/dev/null || fail "address sanitizer changed external declaration"
-if grep -F "declare i32 @c_link_probe(i32) sanitize_address" "$WORK/address.ll" >/dev/null; then
-  fail "address sanitizer marked external declaration"
-fi
 "$OCAML_FAS" --emit-llvm "$WORK/lifetime-defer.fas" >"$WORK/lifetime-plain.ll" 2>"$WORK/stderr"
-if grep -F "llvm.lifetime." "$WORK/lifetime-plain.ll" >/dev/null; then
-  fail "lifetime markers appeared without address sanitizer"
+if grep -F -e "llvm.lifetime." -e sanitize_address "$WORK/lifetime-plain.ll" >/dev/null; then
+  fail "lifetime markers or sanitize_address appeared without an address sanitizer"
 fi
-"$OCAML_FAS" --sanitize=address --emit-llvm "$WORK/lifetime-defer.fas" \
-  >"$WORK/lifetime-address.ll" 2>"$WORK/stderr"
-start_line=$(grep -n -F "call void @llvm.lifetime.start.p0" "$WORK/lifetime-address.ll" | cut -d: -f1)
-end_line=$(grep -n -F "call void @llvm.lifetime.end.p0" "$WORK/lifetime-address.ll" | cut -d: -f1)
-defer_line=$(grep -n -F "call void @observe" "$WORK/lifetime-address.ll" | tail -n 1 | cut -d: -f1)
-[ -n "$start_line" ] && [ -n "$end_line" ] && [ -n "$defer_line" ] \
-  || fail "address sanitizer omitted a local lifetime marker or deferred call"
-[ "$start_line" -lt "$defer_line" ] && [ "$defer_line" -lt "$end_line" ] \
-  || fail "local lifetime did not start before use and end after defer"
 "$OCAML_FAS" --emit-ir "$WORK/good.fas" >"$WORK/custom.ir" 2>"$WORK/stderr"
 [ ! -s "$WORK/stderr" ] || fail "custom IR emission wrote diagnostics"
 grep -E '^func @main ' "$WORK/custom.ir" >/dev/null || fail "Fir emission omitted main"
@@ -356,12 +326,6 @@ fi
 "$OCAML_FAS" -c "$WORK/good.fas" -o "$WORK/good.o" >"$WORK/stdout" 2>"$WORK/stderr"
 [ -s "$WORK/good.o" ] || fail "-c did not produce an object"
 [ "$(od -An -tx1 -N4 "$WORK/good.o" | tr -d ' \n')" = "7f454c46" ] || fail "-c output is not ELF"
-: >"$TOOL_LOG"
-"$OCAML_FAS" --sanitize=address -c "$WORK/good.fas" -o "$WORK/address.o" >"$WORK/stdout" 2>"$WORK/stderr"
-[ -s "$WORK/address.o" ] || fail "sanitized -c did not produce an object"
-nm -u "$WORK/address.o" >"$WORK/address-symbols"
-grep -F "__asan_" "$WORK/address-symbols" >/dev/null || fail "sanitized object omitted ASan runtime references"
-if grep -F "cc " "$TOOL_LOG" >/dev/null; then fail "sanitized -c linked an executable"; fi
 "$OCAML_FAS" --emit-obj "$WORK/good.fas" -o "$WORK/alias.o" >"$WORK/stdout" 2>"$WORK/stderr"
 [ -s "$WORK/alias.o" ] || fail "--emit-obj did not produce an object"
 cp "$WORK/good.fas" "$WORK/auto.fas"
@@ -395,18 +359,6 @@ grep -F -- "-passes=default<O1>" "$TOOL_LOG" >/dev/null || fail "FAS_OPT_PASSES 
 find "$TMPDIR" -mindepth 1 -delete
 temps_empty
 
-: >"$TOOL_LOG"
-for level in 0 1 2 3; do
-  "$OCAML_FAS" --sanitize=address "-O$level" --keep -S "$WORK/good.fas" \
-    -o "$WORK/address-$level.s" >"$WORK/stdout" 2>"$WORK/stderr"
-  grep -F -- "-passes=asan,default<O$level>" "$TOOL_LOG" >/dev/null || fail "address pass order missing at -O$level"
-  grep -F -- "-asan-use-after-scope" "$TOOL_LOG" >/dev/null || fail "address pass omitted scope instrumentation"
-done
-FAS_OPT_PASSES='default<O1>' "$OCAML_FAS" --sanitize=address --keep -S "$WORK/good.fas" \
-  -o "$WORK/address-custom.s" >"$WORK/stdout" 2>"$WORK/stderr"
-grep -F -- "-passes=asan,default<O1>" "$TOOL_LOG" >/dev/null || fail "address pass omitted with FAS_OPT_PASSES"
-find "$TMPDIR" -mindepth 1 -delete
-temps_empty
 
 (
   unset FAS_OPT FAS_LLC FAS_CC

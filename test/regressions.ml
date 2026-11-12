@@ -3643,12 +3643,12 @@ let () =
   let cli_sanitizers =
     cli_run
       [
-        "--sanitize=undefined,address,address";
-        "--sanitize=address,undefined";
+        "--sanitize=undefined,undefined";
+        "--sanitize=undefined";
         "profile.fas";
       ]
   in
-  assert (cli_sanitizers.Cli.sanitizers = [ "address"; "undefined" ]);
+  assert (cli_sanitizers.Cli.sanitizers = [ "undefined" ]);
   let cli_profile_ordered =
     cli_run [ "-O3"; "-g"; "profile.fas" ]
   in
@@ -3707,8 +3707,15 @@ let () =
     [ "--sanitize="; "profile.fas" ];
   cli_error "sanitize-unknown-name" "unknown sanitizer `memory`"
     [ "--sanitize=memory"; "profile.fas" ];
-  cli_error "sanitize-conflicting-repeat" "conflicting --sanitize options"
-    [ "--sanitize=address"; "--sanitize=undefined"; "profile.fas" ];
+  (* Removal A6: no AddressSanitizer; undefined works on both backends *)
+  cli_error "sanitize-address-removed" "`--sanitize=address` was removed"
+    [ "--sanitize=address"; "profile.fas" ];
+  Unix.putenv "FAS_ORACLE" "";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "FAS_ORACLE" "llvm")
+    (fun () ->
+      let native_undefined = cli_run [ "--sanitize=undefined"; "profile.fas" ] in
+      assert (native_undefined.Cli.native && native_undefined.Cli.sanitizers = [ "undefined" ]));
   cli_error "removed-ast-output" "unknown option: --emit-ast"
     [ "--emit-ast"; "profile.fas" ];
   cli_error "removed-release-option" "unknown option: -release"

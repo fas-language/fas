@@ -281,7 +281,7 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 | `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`, or a variable (`%n`, any integer type, read as unsigned). Put constant-size allocas in the entry block. Memory from an alloca lives until the function returns, or until a `stackrestore` to a point before it. |
 | `%s = stacksave` | The current stack position, as a `ptr` for `stackrestore`. Its value is only good for that. |
 | `stackrestore S` | Frees every alloca made since the `stacksave` that produced S. Use the pair around a scope that holds variable-size allocas (C VLAs), above all inside loops, where otherwise each iteration grows the stack. |
-| `lifetime_start N, %p` / `lifetime_end N, %p` | The N bytes of the alloca `%p` start or stop being live: a hint for address sanitizers (Fas emits them under `--sanitize=address`, the LLVM path turns them into `llvm.lifetime.*`). Never changes what the program does; the native backend ignores them. |
+| `lifetime_start N, %p` / `lifetime_end N, %p` | The N bytes of the alloca `%p` start or stop being live: a hint for address sanitizers (no Fas front end emits them today; the LLVM path turns them into `llvm.lifetime.*`). Never changes what the program does; the native backend ignores them. |
 | `%x = load ty P, MEM` | Load a `ty` from pointer P. |
 | `store V, P, MEM` | Store V at P. No type is written, because V carries it. |
 | `%q = ptradd [inbounds] ptr P, IDX, SCALE, DISP` | Address arithmetic: P + IDX·SCALE + DISP. IDX is an integer value (read as signed; use i64), and SCALE and DISP are literal integers. For a constant offset write `ptradd ptr %p, i64 0, 1, 24`. |

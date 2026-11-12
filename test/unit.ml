@@ -961,12 +961,16 @@ let () =
       (Cli.parse
          [|
            "fas";
-           "--sanitize=address,undefined,address";
-           "--sanitize=undefined,address";
+           "--sanitize=undefined,undefined";
+           "--sanitize=undefined";
            "prog.fas";
          |])
   in
-  assert (cli_sanitizers.Cli.sanitizers = [ "address"; "undefined" ]);
+  assert (cli_sanitizers.Cli.sanitizers = [ "undefined" ]);
+  (* removal A6: trap mode, no runtime *)
+  assert (
+    Cli.c_sanitizer_flags cli_sanitizers
+    = [ "-fsanitize=undefined"; "-fsanitize-trap=all" ]);
   List.iter
     (fun mode ->
       let cli =
@@ -986,12 +990,11 @@ let () =
       ("--sanitize=memory", "unknown sanitizer `memory`");
       ("--sanitize=thread", "unknown sanitizer `thread`");
       ("--sanitize=foo", "unknown sanitizer `foo`");
+      ( "--sanitize=address",
+        "`--sanitize=address` was removed; it needed LLVM's AddressSanitizer runtime" );
+      ( "--sanitize=undefined,address",
+        "`--sanitize=address` was removed; it needed LLVM's AddressSanitizer runtime" );
     ];
-  (match
-     Cli.parse [| "fas"; "--sanitize=address"; "--sanitize=undefined"; "prog.fas" |]
-   with
-  | Error message -> assert (message = "conflicting --sanitize options")
-  | Ok _ -> assert false);
   let cli_c_flags =
     expect_cli
       (Cli.parse
@@ -1093,7 +1096,8 @@ let () =
       assert (contains Cli.usage "-g");
       assert (not (contains Cli.usage "inline"));
       assert (contains Cli.usage "-I DIR, -isystem DIR, -D NAME[=VALUE]");
-      assert (not (contains Cli.usage "--sanitize"))
+      assert (contains Cli.usage "--sanitize=undefined");
+      assert (not (contains Cli.usage "address"))
   | Ok (Cli.Run _)
   | Ok (Cli.Run_program _)
   | Ok (Cli.Check _)
@@ -1149,10 +1153,10 @@ let () =
       ("-debug", "unknown option `-debug`; write `-g`");
       ("--no-inline", "`--no-inline` was removed; Fas has no inliner yet");
     ];
-  (match Cli.parse [| "fas"; "check"; "-O3"; "--sanitize=address"; "one.fas" |] with
+  (match Cli.parse [| "fas"; "check"; "-O3"; "--sanitize=undefined"; "one.fas" |] with
   | Ok (Cli.Check config) ->
       assert (config.Cli.emit = Cli.Ir && config.Cli.optimization = 3);
-      assert (config.Cli.sanitizers = [ "address" ] && config.Cli.diagnostics = Cli.Text)
+      assert (config.Cli.sanitizers = [ "undefined" ] && config.Cli.diagnostics = Cli.Text)
   | Ok _ | Error _ -> assert false);
   (match Cli.parse [| "fas"; "check"; "--diagnostics=json"; "one.fas" |] with
   | Ok (Cli.Check config) -> assert (config.Cli.diagnostics = Cli.Json)

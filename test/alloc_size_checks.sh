@@ -23,10 +23,5 @@ for level in 0 2; do
     "$ROOT/test/alloc_size_checks_oracle.c" -o "$TMP/oracle.O$level"
   timeout 30 "$TMP/fas.O$level" || fail "Fas O$level behavior failed"
   timeout 30 "$TMP/oracle.O$level" || fail "C O$level oracle failed"
-  "$OCAML_FAS" --sanitize=address -O"$level" -o "$TMP/fas.asan.O$level" \
-    "$ROOT/test/alloc_size_checks.fas"
-  (ulimit -Sv unlimited; ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0 \
-    timeout 30 "$TMP/fas.asan.O$level") \
-    || fail "Fas address-sanitized O$level behavior failed"
 done
-echo "alloc_size_checks: malloc, calloc and realloc match C at O0/O2; LLVM and ASan: ok"
+echo "alloc_size_checks: malloc, calloc and realloc match C at O0/O2; LLVM: ok"
