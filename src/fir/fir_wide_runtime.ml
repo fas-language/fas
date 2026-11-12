@@ -243,22 +243,42 @@ func @__fir_wide_top (ptr, i64, ptr) -> (i64) local {
 }
 |}
 
-(* Unsigned [k]-limb number -> f64 / f32, round to nearest even: the top
-   bits convert (one rounding), then a power-of-two scale (exact; past the
-   exponent range the result is +inf, as the true value is too) *)
+(* The [k]-limb magnitude a with the sign sg (0 or 1) -> f64 / f32,
+   rounded in the current mode: the top bits, halved with the sticky bit
+   kept when bit 63 is set (63 bits still leave guard bits below any
+   float's precision), get
+   the sign and convert (one rounding, in the direction the sign asks
+   for), then a power-of-two scale (exact, or the one overflow). Past the exponent range the value is scaled twice by
+   the largest power of two, which overflows as the true value does: +inf
+   or the largest finite value by the mode, raising overflow. *)
 let utof64 =
   {|
-func @__fir_utof64 (ptr, i64) -> (f64) local {
-^e(%a: ptr, %k: i64):
+func @__fir_utof64 (ptr, i64, i64) -> (f64) local {
+^e(%a: ptr, %k: i64, %sg: i64):
   %eo = alloca ptr i64 8, align 8
   %m = call (ptr, i64, ptr) -> (i64) @__fir_wide_top(%a, %k, %eo)
-  %e = load i64 %eo, align 8
-  %f = uitofp f64 %m
+  %e0 = load i64 %eo, align 8
+  %m1 = lshr i64 %m, i64 1
+  %lb = and i64 %m, i64 1
+  %mo = or i64 %m1, %lb
+  %top = icmp slt i1 %m, i64 0
+  %mh = select i64 %top, %mo, %m
+  %topw = zext i64 %top
+  %e = add i64 %e0, %topw
+  %neg = icmp ne i1 %sg, i64 0
+  %mn = sub i64 i64 0, %mh
+  %ms = select i64 %neg, %mn, %mh
+  %f = sitofp f64 %ms
   %big = icmp ugt i1 %e, i64 1023
+  br %big, ^big, ^ok
+^big:
+  %o1 = fmul f64 %f, f64 0x7fe0000000000000
+  %o2 = fmul f64 %o1, f64 0x7fe0000000000000
+  ret %o2
+^ok:
   %be = add i64 %e, i64 1023
   %bits = shl i64 %be, i64 52
-  %bits2 = select i64 %big, i64 0x7ff0000000000000, %bits
-  %scale = bitcast f64 %bits2
+  %scale = bitcast f64 %bits
   %r = fmul f64 %f, %scale
   ret %r
 }
@@ -266,17 +286,32 @@ func @__fir_utof64 (ptr, i64) -> (f64) local {
 
 let utof32 =
   {|
-func @__fir_utof32 (ptr, i64) -> (f32) local {
-^e(%a: ptr, %k: i64):
+func @__fir_utof32 (ptr, i64, i64) -> (f32) local {
+^e(%a: ptr, %k: i64, %sg: i64):
   %eo = alloca ptr i64 8, align 8
   %m = call (ptr, i64, ptr) -> (i64) @__fir_wide_top(%a, %k, %eo)
-  %e = load i64 %eo, align 8
-  %f = uitofp f32 %m
+  %e0 = load i64 %eo, align 8
+  %m1 = lshr i64 %m, i64 1
+  %lb = and i64 %m, i64 1
+  %mo = or i64 %m1, %lb
+  %top = icmp slt i1 %m, i64 0
+  %mh = select i64 %top, %mo, %m
+  %topw = zext i64 %top
+  %e = add i64 %e0, %topw
+  %neg = icmp ne i1 %sg, i64 0
+  %mn = sub i64 i64 0, %mh
+  %ms = select i64 %neg, %mn, %mh
+  %f = sitofp f32 %ms
   %big = icmp ugt i1 %e, i64 127
+  br %big, ^big, ^ok
+^big:
+  %o1 = fmul f32 %f, f32 0x7f000000
+  %o2 = fmul f32 %o1, f32 0x7f000000
+  ret %o2
+^ok:
   %be = add i64 %e, i64 127
   %bits = shl i64 %be, i64 23
-  %bits2 = select i64 %big, i64 0x7f800000, %bits
-  %bits32 = trunc i32 %bits2
+  %bits32 = trunc i32 %bits
   %scale = bitcast f32 %bits32
   %r = fmul f32 %f, %scale
   ret %r
@@ -392,14 +427,15 @@ func @__fir_wide_top2 (ptr, i64, ptr, ptr) -> (i64) local {
 }
 |}
 
-(* Unsigned [k]-limb number -> f80, round to nearest even: T + G * 2^-64
-   is one rounding of exact operands (G's bit 63 is the round bit, the rest
+(* The [k]-limb magnitude a with the sign sg -> f80, rounded in the current
+   mode: -+(T + G * 2^-64) is one rounding of exact operands (G's bit 63 is the round bit, the rest
    with the sticky bit decide ties), then the exact scale by 2^e built from
-   its bits (+inf past the exponent range) *)
+   its bits (past the exponent range, twice the largest power of two:
+   an overflow in the current mode, as for f64) *)
 let utof80 =
   {|
-func @__fir_utof80 (ptr, i64) -> (f80) local {
-^e(%a: ptr, %k: i64):
+func @__fir_utof80 (ptr, i64, i64) -> (f80) local {
+^e(%a: ptr, %k: i64, %sg: i64):
   %eo = alloca ptr i64 8, align 8
   %go = alloca ptr i64 8, align 8
   %sc = alloca ptr i64 16, align 16
@@ -408,17 +444,27 @@ func @__fir_utof80 (ptr, i64) -> (f80) local {
   %g = load i64 %go, align 8
   %ft = uitofp f80 %t
   %fg = uitofp f80 %g
-  %fg2 = fmul f80 %fg, f80 0x3fbf8000000000000000
-  %f = fadd f80 %ft, %fg2
+  %fg1 = fmul f80 %fg, f80 0x3fbf8000000000000000
+  %neg = icmp ne i1 %sg, i64 0
+  %ftn = fneg f80 %ft
+  %fgn = fneg f80 %fg1
+  %ft2 = select f80 %neg, %ftn, %ft
+  %fg2 = select f80 %neg, %fgn, %fg1
+  %f = fadd f80 %ft2, %fg2
   %big = icmp sgt i1 %e, i64 16383
   %be = add i64 %e, i64 16383
-  %be2 = select i64 %big, i64 32767, %be
+  %be2 = select i64 %big, i64 32766, %be
   %be16 = trunc i16 %be2
   store i64 0x8000000000000000, %sc, align 16
   %sc8 = ptradd ptr %sc, i64 0, 1, 8
   store %be16, %sc8, align 8
   %scale = load f80 %sc, align 16
   %r = fmul f80 %f, %scale
+  br %big, ^big, ^ok
+^big:
+  %r2 = fmul f80 %r, %scale
+  ret %r2
+^ok:
   ret %r
 }
 |}
@@ -468,11 +514,32 @@ func @__fir_f80tou (ptr, f80, i64) -> () local {
 }
 |}
 
+(* raises invalid when bad is set, for an out-of-range float -> integer
+   conversion: converting a NaN does it (kept through a volatile store) *)
+let fpinvalid =
+  {|
+func @__fir_fpinvalid (i1) -> () local {
+^e(%bad: i1):
+  %sl = alloca ptr i64 8, align 8
+  br %bad, ^r, ^x
+^r:
+  %b = zext i64 %bad
+  %nb = or i64 %b, i64 0x7ff8000000000000
+  %nf = bitcast f64 %nb
+  %c = fptosi i64 %nf
+  store %c, %sl, align 8 volatile
+  jump ^x
+^x:
+  ret
+}
+|}
+
 (* ---------- f16 (IEEE binary16), held as its i16 bits ---------- *)
 
 (* f16 -> f32, exact: normal numbers rebias the exponent, subnormals are
    m * 2^-24 (an exact product), infinities and NaNs keep their payload
-   (the quiet bit lands on the f32 quiet bit) *)
+   (the quiet bit lands on the f32 quiet bit; adding the f32 to itself
+   quiets a signalling NaN and raises invalid, as the conversion must) *)
 let h2f =
   {|
 func @__fir_h2f (i16) -> (f32) local {
@@ -484,12 +551,18 @@ func @__fir_h2f (i16) -> (f32) local {
   %ex = and i32 %e1, i32 31
   %m = and i32 %x, i32 0x3ff
   %m13 = shl i32 %m, i32 13
+  %isspec = icmp eq i1 %ex, i32 31
+  br %isspec, ^spec, ^num
+^spec:
+  %sp0 = or i32 %m13, i32 0x7f800000
+  %sp1 = or i32 %sp0, %s
+  %spf = bitcast f32 %sp1
+  %spq = fadd f32 %spf, %spf
+  ret %spq
+^num:
   %eb = add i32 %ex, i32 112
   %ebs = shl i32 %eb, i32 23
-  %nb = or i32 %ebs, %m13
-  %special = or i32 %m13, i32 0x7f800000
-  %isspec = icmp eq i1 %ex, i32 31
-  %b1 = select i32 %isspec, %special, %nb
+  %b1 = or i32 %ebs, %m13
   %mf = uitofp f32 %m
   %sub = fmul f32 %mf, f32 0x33800000
   %subb = bitcast i32 %sub
@@ -501,12 +574,20 @@ func @__fir_h2f (i16) -> (f32) local {
 }
 |}
 
-(* sign (0 or 1) and the finite value mant * 2^e0 -> f16 bits, rounded to
-   nearest even once: overflow gives infinity, tiny values subnormals or
-   zero. The value is normalized to m * 2^(e - 63) with bit 63 of m set;
-   the kept bits are m >> shift (53 for normal results, more below), the
-   rest decide the rounding. A carry out of the significand bumps the
-   exponent through the addition (up to infinity). *)
+(* sign (0 or 1) and the finite value mant * 2^e0 -> f16 bits, rounded once
+   in the current rounding mode, raising the IEEE flags as an f16 operation
+   would. The value is normalized to m * 2^(e - 63) with bit 63 of m set;
+   the kept bits q are m >> shift (53 for normal results, more below), the
+   rest class the remainder against half an ulp (zero, below, half, above),
+   and __fir_rnd rounds q plus that class in the hardware's mode, so the
+   directed modes and inexact come from the CPU itself. A carry out of the
+   significand bumps the exponent through the addition (up to infinity).
+   Beyond the range the value acts as the largest significand plus more
+   than half an ulp at the top exponent: infinity, or the largest finite
+   value when the mode rounds towards zero; overflow is raised either way.
+   Underflow is raised for an inexact tiny result, tininess detected after
+   rounding as x86 does: below 2^-15, or below 2^-14 after rounding to 11
+   bits with an unbounded exponent. *)
 let round_h =
   {|
 func @__fir_round_h (i64, i64, i64) -> (i16) local {
@@ -524,11 +605,15 @@ func @__fir_round_h (i64, i64, i64) -> (i16) local {
   %e = sub i64 %e63, %z
   %eb = add i64 %e, i64 15
   %inf = icmp sge i1 %eb, i64 31
-  br %inf, ^inf, ^fin
-^inf:
-  %ib = or i64 %sbit, i64 0x7c00
-  %is = trunc i16 %ib
-  ret %is
+  br %inf, ^big, ^fin
+^big:
+  %qb = call (i64, i64, i64) -> (i64) @__fir_rnd(%sign, i64 2047, i64 3)
+  %bb = add i64 %qb, i64 0x7400
+  %fo = call (i64) -> (i64) @__fir_fpraise(i64 0x7e70000000000000)
+  %bb1 = or i64 %bb, %fo
+  %bbs = or i64 %bb1, %sbit
+  %bh = trunc i16 %bbs
+  ret %bh
 ^fin:
   %normal = icmp sge i1 %eb, i64 1
   %sub_sh = sub i64 i64 54, %eb
@@ -546,25 +631,90 @@ func @__fir_round_h (i64, i64, i64) -> (i16) local {
   %rem = select i64 %all, %m1, %r0
   %sh1 = sub i64 %sh, i64 1
   %half = shl i64 i64 1, %sh1
+  %inexact = icmp ne i1 %rem, i64 0
   %gt = icmp ugt i1 %rem, %half
   %eq = icmp eq i1 %rem, %half
-  %odd = trunc i1 %q
-  %tie = and i1 %eq, %odd
-  %up = or i1 %gt, %tie
-  %upw = zext i64 %up
-  %qr = add i64 %q, %upw
+  %c1 = zext i64 %inexact
+  %c2 = select i64 %eq, i64 2, %c1
+  %cls = select i64 %gt, i64 3, %c2
+  %qr = call (i64, i64, i64) -> (i64) @__fir_rnd(%sign, %q, %cls)
   %em1 = sub i64 %eb, i64 1
   %base0 = shl i64 %em1, i64 10
   %base = select i64 %normal, %base0, i64 0
   %bits = add i64 %base, %qr
   %bs = or i64 %bits, %sbit
   %r = trunc i16 %bs
+  %ovf = icmp uge i1 %bits, i64 0x7c00
+  br %ovf, ^ovf, ^chk
+^ovf:
+  %fo2 = call (i64) -> (i64) @__fir_fpraise(i64 0x7e70000000000000)
+  %ob = or i64 %bs, %fo2
+  %obh = trunc i16 %ob
+  ret %obh
+^chk:
+  %sub = xor i1 %normal, i1 1
+  %maybe = and i1 %sub, %inexact
+  br %maybe, ^tiny, ^done
+^done:
   ret %r
+^tiny:
+  %below0 = icmp slt i1 %eb, i64 0
+  %q2 = lshr i64 %m, i64 53
+  %r2 = and i64 %m, i64 0x1fffffffffffff
+  %g2 = icmp ugt i1 %r2, i64 0x10000000000000
+  %e2 = icmp eq i1 %r2, i64 0x10000000000000
+  %n2 = icmp ne i1 %r2, i64 0
+  %d1 = zext i64 %n2
+  %d2 = select i64 %e2, i64 2, %d1
+  %cls2 = select i64 %g2, i64 3, %d2
+  %rq2 = call (i64, i64, i64) -> (i64) @__fir_rnd(%sign, %q2, %cls2)
+  %below1 = icmp ult i1 %rq2, i64 2048
+  %tiny = or i1 %below0, %below1
+  br %tiny, ^uf, ^done
+^uf:
+  %fu = call (i64) -> (i64) @__fir_fpraise(i64 0x1a70000000000000)
+  %ub = or i64 %bs, %fu
+  %ubh = trunc i16 %ub
+  ret %ubh
+}
+
+; the magnitude q + cls/4 (q < 2^52, cls in 0..3) with the sign (0 or 1),
+; rounded to an integer by the hardware in the current rounding mode
+; (raising inexact when cls <> 0): adding and subtracting 2^52 with the
+; value's sign leaves no fraction bits; the magnitude of the result
+func @__fir_rnd (i64, i64, i64) -> (i64) local {
+^e(%sign: i64, %q: i64, %cls: i64):
+  %qf = uitofp f64 %q
+  %cf = uitofp f64 %cls
+  %fr = fmul f64 %cf, f64 0x3fd0000000000000
+  %v = fadd f64 %qf, %fr
+  %neg = icmp ne i1 %sign, i64 0
+  %nv = fneg f64 %v
+  %r = select f64 %neg, %nv, %v
+  %mg = select f64 %neg, f64 0xc330000000000000, f64 0x4330000000000000
+  %t = fadd f64 %r, %mg
+  %u = fsub f64 %t, %mg
+  %a = fabs f64 %u
+  %res = fptoui i64 %a
+  ret %res
+}
+
+; raises the flags of x * x for the f64 with bits b (overflow and inexact
+; for 2^1000, underflow and inexact for 2^-600); returns 0, through a use
+; of the product that keeps it alive
+func @__fir_fpraise (i64) -> (i64) local {
+^e(%b: i64):
+  %x = bitcast f64 %b
+  %p = fmul f64 %x, %x
+  %u = fcmp uno i1 %p, %p
+  %w = zext i64 %u
+  ret %w
 }
 |}
 
 (* f32 / f64 / f80 -> f16, one rounding: the fields go to __fir_round_h;
-   infinities stay, NaNs become quiet NaNs keeping the top payload bits *)
+   infinities stay, NaNs become quiet NaNs keeping the top payload bits
+   (x + x quiets a signalling NaN first, raising invalid) *)
 let f32toh =
   {|
 func @__fir_f32toh (f32) -> (i16) local {
@@ -579,8 +729,12 @@ func @__fir_f32toh (f32) -> (i16) local {
   br %special, ^nan_inf, ^finite
 ^nan_inf:
   %sb = shl i64 %sign, i64 15
-  %pay = lshr i64 %fr, i64 13
-  %isnan = icmp ne i1 %fr, i64 0
+  %xq = fadd f32 %x, %x
+  %bq32 = bitcast i32 %xq
+  %bq = zext i64 %bq32
+  %frq = and i64 %bq, i64 0x7fffff
+  %pay = lshr i64 %frq, i64 13
+  %isnan = icmp ne i1 %frq, i64 0
   %nanb = or i64 %pay, i64 0x7e00
   %v = select i64 %isnan, %nanb, i64 0x7c00
   %r = or i64 %v, %sb
@@ -610,8 +764,11 @@ func @__fir_f64toh (f64) -> (i16) local {
   br %special, ^nan_inf, ^finite
 ^nan_inf:
   %sb = shl i64 %sign, i64 15
-  %pay = lshr i64 %fr, i64 42
-  %isnan = icmp ne i1 %fr, i64 0
+  %xq = fadd f64 %x, %x
+  %bq = bitcast i64 %xq
+  %frq = and i64 %bq, i64 0xfffffffffffff
+  %pay = lshr i64 %frq, i64 42
+  %isnan = icmp ne i1 %frq, i64 0
   %nanb = or i64 %pay, i64 0x7e00
   %v = select i64 %isnan, %nanb, i64 0x7c00
   %r = or i64 %v, %sb
@@ -646,9 +803,12 @@ func @__fir_f80toh (f80) -> (i16) local {
   br %special, ^nan_inf, ^finite
 ^nan_inf:
   %sb = shl i64 %sign, i64 15
-  %fr = shl i64 %mant, i64 1
+  %xq = fadd f80 %x, %x
+  store %xq, %sc, align 16
+  %mq = load i64 %sc, align 16
+  %fr = shl i64 %mq, i64 1
   %isnan = icmp ne i1 %fr, i64 0
-  %p0 = lshr i64 %mant, i64 53
+  %p0 = lshr i64 %mq, i64 53
   %pay = and i64 %p0, i64 0x3ff
   %nanb = or i64 %pay, i64 0x7e00
   %v = select i64 %isnan, %nanb, i64 0x7c00
@@ -664,11 +824,14 @@ func @__fir_f80toh (f80) -> (i16) local {
 }
 |}
 
-(* fma on f16, correctly rounded: in f64 the product of two f16 values is
-   exact, and the sum's rounding error is exact too (TwoSum). Rounding the
-   sum to odd (when inexact and even, step one ulp towards the error) keeps
-   the information the single final rounding to f16 needs: 53 bits are far
-   more than f16's 11 + 2. *)
+(* fma on f16, correctly rounded in the current mode: in f64 the product
+   p of two f16 values is exact (at most 22 significant bits, exponents
+   within [-48, 32]). When the bits of p and c span at most 53 places the
+   f64 sum is exact too and rounds once to f16; zeros, infinities and NaNs
+   also go through the f64 sum, which is exact or special for them.
+   Otherwise one operand L lies entirely below the other's lowest set bit:
+   then L + S rounds as L moved by a tiny amount towards S, which is L's
+   significand shifted up with 1 added or subtracted at the bottom. *)
 let fmah =
   {|
 func @__fir_fmah (i16, i16, i16) -> (i16) local {
@@ -680,27 +843,47 @@ func @__fir_fmah (i16, i16, i16) -> (i16) local {
   %bd = fpext f64 %bf
   %cd = fpext f64 %cf
   %p = fmul f64 %ad, %bd
+  %pb = bitcast i64 %p
+  %cb = bitcast i64 %cd
+  %ep1 = lshr i64 %pb, i64 52
+  %ep = and i64 %ep1, i64 0x7ff
+  %ec1 = lshr i64 %cb, i64 52
+  %ec = and i64 %ec1, i64 0x7ff
+  %pz = icmp eq i1 %ep, i64 0
+  %cz = icmp eq i1 %ec, i64 0
+  %pi = icmp eq i1 %ep, i64 0x7ff
+  %ci = icmp eq i1 %ec, i64 0x7ff
+  %o1 = or i1 %pz, %cz
+  %o2 = or i1 %pi, %ci
+  %special = or i1 %o1, %o2
+  %lp = sub i64 %ep, i64 21
+  %lc = sub i64 %ec, i64 10
+  %hi = umax i64 %ep, %ec
+  %lo = smin i64 %lp, %lc
+  %span = sub i64 %hi, %lo
+  %fits = icmp sle i1 %span, i64 51
+  %exact = or i1 %special, %fits
+  br %exact, ^sum, ^far
+^sum:
   %s = fadd f64 %p, %cd
-  %bb = fsub f64 %s, %p
-  %t1 = fsub f64 %s, %bb
-  %t2 = fsub f64 %p, %t1
-  %t3 = fsub f64 %cd, %bb
-  %err = fadd f64 %t2, %t3
-  %inexact = fcmp one i1 %err, f64 0
-  %sb = bitcast i64 %s
-  %low = trunc i1 %sb
-  %even = xor i1 %low, i1 1
-  %adj = and i1 %inexact, %even
-  %errneg = fcmp olt i1 %err, f64 0
-  %sneg = fcmp olt i1 %s, f64 0
-  %same = xor i1 %errneg, %sneg
-  %away = xor i1 %same, i1 1
-  %step = select i64 %away, i64 1, i64 -1
-  %sb1 = add i64 %sb, %step
-  %sb2 = select i64 %adj, %sb1, %sb
-  %so = bitcast f64 %sb2
-  %h = call (f64) -> (i16) @__fir_f64toh(%so)
+  %h = call (f64) -> (i16) @__fir_f64toh(%s)
   ret %h
+^far:
+  %pbig = icmp ugt i1 %ep, %ec
+  %lb = select i64 %pbig, %pb, %cb
+  %sb = select i64 %pbig, %cb, %pb
+  %el = select i64 %pbig, %ep, %ec
+  %sl = lshr i64 %lb, i64 63
+  %ss = lshr i64 %sb, i64 63
+  %fr = and i64 %lb, i64 0xfffffffffffff
+  %ml = or i64 %fr, i64 0x10000000000000
+  %m10 = shl i64 %ml, i64 10
+  %same = icmp eq i1 %sl, %ss
+  %d = select i64 %same, i64 1, i64 -1
+  %mt = add i64 %m10, %d
+  %e0 = sub i64 %el, i64 1085
+  %h2 = call (i64, i64, i64) -> (i16) @__fir_round_h(%sl, %mt, %e0)
+  ret %h2
 }
 |}
 
@@ -763,7 +946,10 @@ func @__fir_place3 (ptr, i64, i64, i64, i64) -> () local {
 }
 |}
 
-(* fma on f80, correctly rounded (round to nearest even), as musl's fma
+(* fma on f80, correctly rounded in the current rounding mode with the IEEE
+   flags (as __fir_round_h: __fir_rnd rounds the low bit plus the rest class
+   in the hardware, overflow comes from multiplying +-2^16383 by 2^16383,
+   underflow with tininess after rounding), as musl's fma
    but with 64-bit significands: x = mx * 2^ex with mx in [2^63, 2^64)
    after normalizing subnormals, likewise y and z. The product P = mx * my
    (128 bits, exact) and mz go into one 192-bit window R * 2^W:
@@ -934,7 +1120,9 @@ func @__fir_fma80 (f80, f80, f80) -> (f80) local {
   %iszero = icmp eq i1 %oall, i64 0
   br %iszero, ^exactzero, ^round
 ^exactzero:
-  ret f80 0x0
+  ; +0, or -0 when rounding down, as z - z gives
+  %zz = fsub f80 %z, %z
+  ret %zz
 ^round:
   ; L: the index of the top bit of R
   %c2 = clz i64 %r2
@@ -958,19 +1146,21 @@ func @__fir_fma80 (f80, f80, f80) -> (f80) local {
   %tp = ptradd ptr %bc, i64 0, 1, 24
   %t = load i64 %tp, align 8
   %below = call (ptr) -> (i64) @__fir_low3(%bc)
+  ; the rest class against half an ulp (zero, below, half, above); the
+  ; hardware rounds the low bit plus that class in the current mode (the
+  ; low bit keeps the parity for ties), the bits above it are unchanged
   %guard = lshr i64 %t, i64 63
   %t1 = shl i64 %t, i64 1
   %rest = or i64 %t1, %below
   %restnz = icmp ne i1 %rest, i64 0
-  %mlow = and i64 %m, i64 1
-  %modd = icmp ne i1 %mlow, i64 0
-  %gset = icmp ne i1 %guard, i64 0
-  %tie = or i1 %restnz, %modd
-  %up = and i1 %gset, %tie
-  %upw = zext i64 %up
-  %m1 = add i64 %m, %upw
-  %wrap0 = icmp eq i1 %m1, i64 0
-  %wrap = and i1 %up, %wrap0
+  %restw = zext i64 %restnz
+  %g2 = shl i64 %guard, i64 1
+  %cls = or i64 %g2, %restw
+  %mb = and i64 %m, i64 1
+  %mev = sub i64 %m, %mb
+  %rr = call (i64, i64, i64) -> (i64) @__fir_rnd(%sg, %mb, %cls)
+  %m1 = add i64 %mev, %rr
+  %wrap = icmp ult i1 %m1, %mev
   %m2 = select i64 %wrap, i64 0x8000000000000000, %m1
   %wrapw = zext i64 %wrap
   %k1 = add i64 %k, %wrapw
@@ -979,15 +1169,60 @@ func @__fir_fma80 (f80, f80, f80) -> (f80) local {
   %top = icmp slt i1 %m2, i64 0
   %bq = add i64 %q, i64 16446
   %bexp = select i64 %top, %bq, i64 0
-  %ovf = icmp sge i1 %bexp, i64 0x7fff
-  %bexp2 = select i64 %ovf, i64 0x7fff, %bexp
-  %m3 = select i64 %ovf, i64 0x8000000000000000, %m2
   %sgs = shl i64 %sg, i64 15
-  %hw = or i64 %bexp2, %sgs
+  %ovf = icmp sge i1 %bexp, i64 0x7fff
+  br %ovf, ^ovf, ^fin
+^ovf:
+  ; +-2^16383 * 2^16383: infinity or the largest finite value as the mode
+  ; says, raising overflow and inexact
+  %hs = or i64 %sgs, i64 0x7ffe
+  %hs16 = trunc i16 %hs
+  store i64 0x8000000000000000, %sl, align 16
+  store %hs16, %sx8, align 8
+  %hg = load f80 %sl, align 16
+  %hga = fabs f80 %hg
+  %ho = fmul f80 %hg, %hga
+  ret %ho
+^fin:
+  %hw = or i64 %bexp, %sgs
   %hw16 = trunc i16 %hw
-  store %m3, %sl, align 16
+  store %m2, %sl, align 16
   store %hw16, %sx8, align 8
   %res = load f80 %sl, align 16
+  ; underflow: an inexact result below the normal range, tininess after
+  ; rounding (x86): only a value just below 2^-16382 that rounds up to it
+  ; at 64 bits with an unbounded exponent is not tiny
+  %subr = icmp slt i1 %kn, %ksub0
+  %inx = icmp ne i1 %cls, i64 0
+  %maybe = and i1 %subr, %inx
+  br %maybe, ^tiny, ^done
+^done:
+  ret %res
+^tiny:
+  %ksub1 = sub i64 %ksub0, i64 1
+  %edge = icmp eq i1 %kn, %ksub1
+  %mall = icmp eq i1 %m, i64 0x7fffffffffffffff
+  %gs = icmp ne i1 %guard, i64 0
+  %eg1 = and i1 %edge, %mall
+  %eg2 = and i1 %eg1, %gs
+  br %eg2, ^edge, ^uf
+^edge:
+  %hb = lshr i64 %t, i64 62
+  %hb1 = and i64 %hb, i64 1
+  %t2 = shl i64 %t, i64 2
+  %low2 = or i64 %t2, %below
+  %low2nz = icmp ne i1 %low2, i64 0
+  %low2w = zext i64 %low2nz
+  %hb2 = shl i64 %hb1, i64 1
+  %cls2 = or i64 %hb2, %low2w
+  %r64 = call (i64, i64, i64) -> (i64) @__fir_rnd(%sg, i64 1, %cls2)
+  %nt = icmp eq i1 %r64, i64 2
+  br %nt, ^done, ^uf
+^uf:
+  %fu = call (i64) -> (i64) @__fir_fpraise(i64 0x1a70000000000000)
+  %fz = icmp eq i1 %fu, i64 0
+  br %fz, ^done, ^uf2
+^uf2:
   ret %res
 }
 
@@ -1029,13 +1264,14 @@ let all =
     ("__fir_wide_top2", (wide_top2, []));
     ("__fir_utof80", (utof80, [ "__fir_wide_top2" ]));
     ("__fir_f80tou", (f80tou, []));
+    ("__fir_fpinvalid", (fpinvalid, []));
     ("__fir_h2f", (h2f, []));
     ("__fir_round_h", (round_h, []));
     ("__fir_f32toh", (f32toh, [ "__fir_round_h" ]));
     ("__fir_f64toh", (f64toh, [ "__fir_round_h" ]));
     ("__fir_f80toh", (f80toh, [ "__fir_round_h" ]));
-    ("__fir_fmah", (fmah, [ "__fir_h2f"; "__fir_f64toh" ]));
+    ("__fir_fmah", (fmah, [ "__fir_h2f"; "__fir_f64toh"; "__fir_round_h" ]));
     ("__fir_rmwh", (rmwh, [ "__fir_h2f"; "__fir_f32toh" ]));
     ("__fir_place3", (place3, []));
-    ("__fir_fma80", (fma80, [ "__fir_place3" ]));
+    ("__fir_fma80", (fma80, [ "__fir_place3"; "__fir_round_h" ]));
   ]

@@ -695,7 +695,21 @@ let float_to_int cx n kind ~src xv =
     ignore (call_helper cx helper [ ptr; ft; i64 ] [] [| out; ax; c64 cx (Int64.of_int kk) |]);
     let mag = load_limbs cx n (plain_mem 8) out in
     let v = if signed then select_l cx negative (mask cx n (neg cx mag)) mag else mag in
-    if not sat then v
+    if not sat then begin
+      (* out of range (or NaN): the value is unspecified, but Annex F wants
+         invalid raised, as the hardware does for the narrow conversions.
+         The ordered comparisons are false for NaN and raise nothing. *)
+      let lo_ok, hi_ok =
+        if signed then
+          (e cx (Fcmp (Foge, 0, x64, e cx (Fun (Fneg, 0, pow2 (n - 1))) ft)) i1, e cx (Fcmp (Folt, 0, x64, pow2 (n - 1))) i1)
+        else
+          let m1 = fconst_bits cx.g ft (if ft = F80 then [| Int64.min_int; 0xbfffL |] else [| 0xbff0000000000000L |]) in
+          (e cx (Fcmp (Fogt, 0, x64, m1)) i1, e cx (Fcmp (Folt, 0, x64, pow2 n)) i1)
+      in
+      let bad = not1 cx (and1 cx lo_ok hi_ok) in
+      ignore (call_helper cx "__fir_fpinvalid" [ i1 ] [] [| bad |]);
+      v
+    end
     else begin
       let nan = e cx (Fcmp (Funo, 0, x64, x64)) i1 in
       let r =
@@ -719,12 +733,14 @@ let int_to_float cx n ~signed a ty =
     let x = if signed then (sx_top cx n a).(0) else a.(0) in
     conv cx (if signed then Sitofp else Uitofp) x ty
   else begin
+    (* the helper rounds the magnitude in the sign's direction (rounding
+       then negating would turn upward rounding into downward) *)
     let negative = if signed then Some (sign cx n a) else None in
     let mag = match negative with Some s -> select_l cx s (mask cx n (neg cx a)) a | None -> a in
+    let sg = match negative with Some s -> conv cx Zext s i64 | None -> c64 cx 0L in
     let p = to_agg cx n mag in
     let name = match ty with F64 -> "__fir_utof64" | F80 -> "__fir_utof80" | _ -> "__fir_utof32" in
-    let f = (call_helper cx name [ ptr; i64 ] [ ty ] [| p; c64 cx (Int64.of_int kk) |]).(0) in
-    match negative with Some s -> sel cx s (e cx (Fun (Fneg, 0, f)) ty) f ty | None -> f
+    (call_helper cx name [ ptr; i64; i64 ] [ ty ] [| p; c64 cx (Int64.of_int kk); sg |]).(0)
   end
 
 (* a bitcast with an odd integer on one side: through a stack slot *)

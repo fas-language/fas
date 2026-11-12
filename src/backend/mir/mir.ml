@@ -59,7 +59,7 @@ type target =
           in rax. An ordinary call otherwise (rdi is clobbered anyway) *)
 
 (* x87 memory operand forms *)
-type x87w = M32 | M64 | M80 | I64  (** f32, f64, f80; I64: fild / fisttp m64 *)
+type x87w = M32 | M64 | M80 | I64  (** f32, f64, f80; I64: fild / fistp m64 (fistp rounds by the control word) *)
 
 (* One x87 instruction (f80 arithmetic). The x87 register stack is not
    allocated: each selection rule pushes its operands, computes and pops

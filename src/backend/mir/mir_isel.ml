@@ -617,19 +617,28 @@ let fcmp c p a b =
 
 (* f -> u64 for f in [0, 2^64): values from 2^63 up are reduced by 2^63
    and get the top bit back *)
+(* float -> u64 for values in [0, 2^64): one truncating signed conversion
+   of x - b, with b = 2^63 when x >= 2^63 (exact) and 0 otherwise, then the
+   top bit put back. Only that one conversion touches the floating-point
+   flags, so they are those of converting x itself: no inexact for an
+   integral value, invalid out of range or for NaN (FENV_ACCESS). *)
 let fptou64 c dbl ra =
   let k = fconst c dbl 9223372036854775808.0 in
-  let r1 = fresh c Gpr in
-  emit c (Cvttsi (dbl, r1, ra));
-  let t = copy c ra in
-  emit c (Fop (Fsub, dbl, t, k));
-  let r2 = fresh c Gpr in
-  emit c (Cvttsi (dbl, r2, t));
-  let m = movi c Int64.min_int in
-  emit c (Alu (Xor, r2, m));
   emit c (Ucomi (dbl, ra, k));
-  emit c (Cmov (Ae, r1, r2));
-  r1
+  let big = setcc c X64.Ae in
+  let sb = copy c big in
+  emit c (Neg sb);
+  let kb = movi c (if dbl then 0x43e0000000000000L else 0x5f000000L) in
+  emit c (Alu (And, sb, kb));
+  let s = fresh c Xmm in
+  emit c (Movgx (dbl, s, sb));
+  let t = copy c ra in
+  emit c (Fop (Fsub, dbl, t, s));
+  let r = fresh c Gpr in
+  emit c (Cvttsi (dbl, r, t));
+  emit c (Shifti (Shl, big, 63));
+  emit c (Alu (Xor, r, big));
+  r
 
 let conv c (op : F.conv) rt a =
   let st = ty c a in
@@ -930,30 +939,39 @@ let fun80 c v (op : F.fun_) a =
   | Ftrunc -> with_rounding c 3 (fun () -> unary Frndint)
   | Roundeven -> with_rounding c 0 (fun () -> unary Frndint)
 
-(* the truncated i64 conversion of the f80 at [x] (MIN when out of range or NaN) *)
+(* the truncated i64 conversion of the f80 at [x] (MIN when out of range or
+   NaN): fistp under a truncating control word (fisttp would need SSE3) *)
 let fisttp80 c x =
   let s = new_slot c.mf ~size:8 ~align:8 in
   fld80 c x;
-  x87 c (Fstp (I64, slot_addr s));
+  with_rounding c 3 (fun () -> x87 c (Fstp (I64, slot_addr s)));
   let r = fresh c Gpr in
   emit c (Load (8, false, r, slot_addr s));
   r
 
-(* f80 -> u64 for values in [0, 2^64), as [fptou64] *)
+(* f80 -> u64 for values in [0, 2^64), as [fptou64]: x - b (exact), b the
+   f80 2^63 or 0 built in a slot, one truncating conversion *)
 let fptou64_80 c x =
   let k = pow2_80 c 63 in
-  let r1 = fisttp80 c x in
+  ucomi80 c x k;
+  let big = setcc c X64.Ae in
+  let b = new_slot c.mf ~size:16 ~align:16 in
+  let m = copy c big in
+  emit c (Shifti (Shl, m, 63));
+  emit c (Store (8, slot_addr b, m));
+  let e = copy c big in
+  emit c (Neg e);
+  emit c (Alui (And, e, 0x403e));
+  emit c (Store (8, slot_addr ~disp:8 b, e));
   let d = new_slot c.mf ~size:16 ~align:16 in
   fld80 c x;
-  fld80 c k;
+  fld80 c (slot_addr b);
   x87 c (Farith Fsub);
   x87 c (Fstp (M80, slot_addr d));
-  let r2 = fisttp80 c (slot_addr d) in
-  let m = movi c Int64.min_int in
-  emit c (Alu (Xor, r2, m));
-  ucomi80 c x k;
-  emit c (Cmov (Ae, r1, r2));
-  r1
+  let r = fisttp80 c (slot_addr d) in
+  emit c (Shifti (Shl, big, 63));
+  emit c (Alu (Xor, r, big));
+  r
 
 (* conversions with an f80 on either side; [v] is the result *)
 let conv80 c v (op : F.conv) rt a =

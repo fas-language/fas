@@ -3,13 +3,17 @@
 // Baseline x86-64 (SSE2) has no FMA instruction and a freestanding program
 // has no libm, so the native backend compiles `fma` to calls to these
 // functions. They are compiled once to Fir (native_runtime.ml embeds the text)
-// and added to a module only when it uses `fma`. Rounding is
-// round-to-nearest-even; floating-point exception flags are not modelled.
+// and added to a module only when it uses `fma`. They round in the current
+// rounding mode and raise the IEEE flags as one operation would
+// (FENV_ACCESS): every rounding is done by the hardware.
 //
 // fma64 follows musl's fma.c: unpack both operands to integers, form the exact
 // 106-bit product, align and add the third operand with a sticky bit, keep the
-// top 63 bits (bit 0 sticky) and let one int->double conversion do the only
-// rounding. Subnormal results are rounded by hand instead.
+// top 63 bits (bit 0 sticky) and let one signed int->double conversion do the
+// only rounding (with the result's sign, so directed modes round the right
+// way), then scale by multiplications (exact, or the one overflow). Results
+// below the normal range keep only the bits the subnormal can hold, so the
+// final scaling rounds once instead.
 
 // Significand of a finite nonzero x scaled to [2^53, 2^54).
 fn unpack_m(x f64) u64 {
@@ -38,12 +42,47 @@ fn unpack_e(x f64) i32 {
 
 const ZEROINFNAN i32 = 0x7ff - 1076
 
-extern "C" {
-fn fas_rt_fma64(x f64, y f64, z f64) f64 {
+const P2M189 u64 = 0x3420000000000000         // 2^-189
+const JUST_BELOW_1 u64 = 0x3feffffff0000000   // 1 - 2^-25
+
+// 2^k for -1022 <= k <= 1023
+fn pow2(k i32) f64 {
+  return bitcast[f64](zext[u64](bitcast[u32](k + 1023)) << 52)
+}
+
+// x * 2^n as musl's scalbn: multiplications by powers of two, exact unless
+// the result overflows or is below the normal range; then the last one
+// rounds (in the current mode, raising the flags). n is at least -1200.
+fn scale2(x f64, n i32) f64 {
+  y f64 = x
+  k i32 = n
+  if k > 1023 {
+    y = y * pow2(1023)
+    k = k - 1023
+    if k > 1023 {
+      y = y * pow2(1023)
+      k = k - 1023
+      if k > 1023 {
+        k = 1023
+      }
+    }
+  } else if k < -1022 {
+    y = y * pow2(-969)          // 2^-1022 * 2^53: still exact
+    k = k + 969
+  }
+  return y * pow2(k)
+}
+
+// fma of f64 operands. With odd set the operands are f32 values and the
+// result is the exact value rounded to odd at 53 bits (truncated, with bit
+// 0 set when bits were lost): converting that to f32 rounds as the exact
+// value would, in every mode (Boldo and Melquiond), flags included.
+fn fma_core(x f64, y f64, z f64, odd bool) f64 {
   ex i32 = unpack_e(x)
   ey i32 = unpack_e(y)
   ez i32 = unpack_e(z)
   // A NaN z goes through the addition too, which quiets a signaling NaN.
+  // (For f32 operands x * y is exact, and so is the sum here.)
   if ex >= ZEROINFNAN || ey >= ZEROINFNAN || z != z {
     return x * y + z
   }
@@ -133,58 +172,83 @@ fn fas_rt_fma64(x f64, y f64, z f64) f64 {
       d = bitcast[i32](trunc[u32](n)) - 1
     }
   } else {
-    return x * y + z          // exact zero: +0 in round-to-nearest
+    // An exact zero: x * y is exact (it is -z), and the sum gives the
+    // zero's sign by the rounding mode.
+    return x * y + z
   }
   e = e - d
   // value = rhi * 2^e with rhi in [2^62, 2^63)
-  sign u64 = if negative { 0x8000000000000000 } else { 0 }
+  if e < -1200 {
+    e = -1200                 // far below half the smallest subnormal either way
+  }
+  if odd {
+    // round to odd at 53 bits; f32 magnitudes keep this in the normal range
+    q u64 = (rhi >> 10) | zext[u64](rhi & 0x3ff != 0)
+    qi i64 = bitcast[i64](q)
+    if negative {
+      qi = 0 - qi
+    }
+    return scale2(cvt[f64](qi), e + 10)
+  }
   if e < -1084 {
-    // Subnormal (or rounds up to the smallest normal): round at 2^-1074.
-    k i32 = -1074 - e
-    if k >= 64 {
-      return bitcast[f64](sign)
+    // Below the normal range before rounding: the subnormal holds fewer
+    // than 53 of the bits.
+    if e == -1085 {
+      // 52 bits held: one less than the conversion keeps
+      i i64 = bitcast[i64](rhi)
+      if negative {
+        i = 0 - i
+      }
+      r f64 = cvt[f64](i)
+      c f64 = pow2(63)
+      if negative {
+        c = 0.0 - c
+      }
+      if r == c {
+        // Rounded up to the smallest normal: underflow is raised or not
+        // as the CPU detects tininess, imitated on the f32 just below
+        // FLT_MIN (2^-126 - 2^-151), which rounds the same way.
+        tf f64 = r * bitcast[f64](P2M189)      // r * 2^-189
+        fm f32 = cvt[f32](tf * bitcast[f64](JUST_BELOW_1))
+        return cvt[f64](fm) * pow2(-896)
+      }
+      if rhi << 53 != 0 {
+        // inexact: an extra top bit makes the conversion round at the
+        // subnormal's last bit, then it is taken off again (exactly)
+        i = bitcast[i64]((rhi >> 1) | (rhi & 1) | 0x4000000000000000)
+        if negative {
+          i = 0 - i
+        }
+        r = cvt[f64](i)
+        r = 2.0 * r - c
+        // the result is tiny and inexact: raise underflow (the scaling
+        // below is exact and would not)
+        tiny f64 = r * pow2(-1022)
+        r = r + (tiny * tiny) * (r - r)
+      }
+      return scale2(r, e)
     }
-    s u64 = zext[u64](bitcast[u32](k))
-    q u64 = rhi >> s
-    rem u64 = rhi & ((1 << s) - 1)
-    half u64 = 1 << (s - 1)
-    if rem > half || (rem == half && q & 1 != 0) {
-      q = q + 1
-    }
-    return bitcast[f64](q | sign)
+    // at most 51 bits held: keep 53 with bit 0 sticky, the conversion is
+    // exact and the scaling rounds once
+    rhi = ((rhi >> 10) | zext[u64](rhi & 0x3ff != 0)) << 10
   }
   i i64 = bitcast[i64](rhi)
-  r f64 = cvt[f64](i)                    // the one rounding, to 53 bits
-  bits u64 = bitcast[u64](r)
-  field i64 = bitcast[i64]((bits >> 52) & 0x7ff) + sext[i64](e)
-  if field >= 0x7ff {
-    return bitcast[f64](0x7ff0000000000000 | sign)
+  if negative {
+    i = 0 - i
   }
-  return bitcast[f64]((bits & 0xfffffffffffff) | (bitcast[u64](field) << 52) | sign)
+  return scale2(cvt[f64](i), e)
+}
+
+extern "C" {
+fn fas_rt_fma64(x f64, y f64, z f64) f64 {
+  return fma_core(x, y, z, false)
 }
 }
 
-// f32: the product is exact in f64. Round the sum to odd at 53 bits, then
-// to nearest at 24: with at least two extra bits, round-to-odd followed by
-// round-to-nearest rounds once (Boldo and Melquiond).
+// f32: the operands convert exactly; the exact result rounded to odd at 53
+// bits then rounds once to f32.
 extern "C" {
 fn fas_rt_fma32(x f32, y f32, z f32) f32 {
-  p f64 = cvt[f64](x) * cvt[f64](y)
-  w f64 = cvt[f64](z)
-  s f64 = p + w
-  bits u64 = bitcast[u64](s)
-  if (bits >> 52) & 0x7ff != 0x7ff && bits & 1 == 0 {
-    // TwoSum: err is the exact rounding error of p + w.
-    bb f64 = s - p
-    err f64 = (p - (s - bb)) + (w - bb)
-    if err != 0.0 {
-      if (err > 0.0) == (s > 0.0) {
-        bits = bits + 1
-      } else {
-        bits = bits - 1
-      }
-    }
-  }
-  return cvt[f32](bitcast[f64](bits))
+  return cvt[f32](fma_core(cvt[f64](x), cvt[f64](y), cvt[f64](z), true))
 }
 }

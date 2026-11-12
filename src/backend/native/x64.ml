@@ -892,6 +892,7 @@ let fld80 a mem = rm a ~w:false [ 0xdb ] ~reg:Rbp mem  (* db /5 *)
 let fstp80 a mem = rm a ~w:false [ 0xdb ] ~reg:Rdi mem  (* db /7 *)
 let fild64 a mem = rm a ~w:false [ 0xdf ] ~reg:Rbp mem  (* df /5 *)
 let fisttp64 a mem = rm a ~w:false [ 0xdd ] ~reg:Rcx mem  (* dd /1 (SSE3): always truncates *)
+let fistp64 a mem = rm a ~w:false [ 0xdf ] ~reg:Rdi mem  (* df /7: rounds by the control word *)
 let fnstcw a mem = rm a ~w:false [ 0xd9 ] ~reg:Rdi mem  (* d9 /7 *)
 let fldcw a mem = rm a ~w:false [ 0xd9 ] ~reg:Rbp mem  (* d9 /5 *)
 

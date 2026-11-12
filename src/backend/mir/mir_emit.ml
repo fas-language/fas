@@ -506,7 +506,7 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
       | Fstp (M32, ad) -> A.fstp a ~double:false (m ad)
       | Fstp (M64, ad) -> A.fstp a ~double:true (m ad)
       | Fstp (M80, ad) -> A.fstp80 a (m ad)
-      | Fstp (I64, ad) -> A.fisttp64 a (m ad)
+      | Fstp (I64, ad) -> A.fistp64 a (m ad)
       | Farith op -> A.farithp a op
       | Fremloop ->
           let loop = A.new_label a in
