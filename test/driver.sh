@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 set -eu
 export DEBUGINFOD_URLS=
 
@@ -133,9 +135,8 @@ temps_empty() {
 [ ! -s "$WORK/stderr" ] || fail "help wrote to stderr"
 "$OCAML_FAS" -h >"$WORK/short-help" 2>"$WORK/stderr"
 cmp "$WORK/help" "$WORK/short-help" >/dev/null || fail "-h differs from --help"
-grep -F -- "--emit-llvm[=optimized]" "$WORK/help" >/dev/null || fail "help omitted the optimized LLVM form"
-for flag in -o --emit-header --emit-ir --emit-llvm --emit-asm -S --emit-obj -c --keep \
-  -O0..-O3 -g --no-inline --sanitize=LIST -I -isystem -D -h --help; do
+for flag in -o --emit-header --emit-ir --emit-obj -c --keep \
+  -O0..-O3 -g --no-inline -I -isystem -D -h --help; do
   grep -F -- "$flag" "$WORK/help" >/dev/null || fail "help omitted $flag"
 done
 if grep -F -- "--emit-ast" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ast"; fi
@@ -144,14 +145,16 @@ for heading in build output "C inputs" debugging environment; do
   grep -Fx -- "$heading:" "$WORK/help" >/dev/null || fail "help omitted $heading heading"
 done
 sed -n '/^debugging:$/,/^environment:$/p' "$WORK/help" >"$WORK/help-debugging"
-for flag in --emit-ir --keep -g --no-inline --sanitize=LIST; do
+for flag in --emit-ir --keep -g --no-inline; do
   grep -F -- "  $flag" "$WORK/help-debugging" >/dev/null || fail "help placed $flag outside debugging"
 done
-for removed in "fas perf" --profile --tune FAS_PROFDATA; do
+# help is the public interface: the LLVM oracle (FAS_ORACLE=llvm) is hidden
+for removed in "fas perf" --profile --tune FAS_PROFDATA --emit-llvm --emit-asm --backend \
+  force-native FAS_OPT FAS_LLC --sanitize; do
   if grep -F -- "$removed" "$WORK/help" >/dev/null; then fail "help advertises removed $removed"; fi
 done
 sed -n '/^environment:$/,$p' "$WORK/help" >"$WORK/help-environment"
-for name in FAS_OPT FAS_LLC FAS_CC FAS_OPT_PASSES; do
+for name in FAS_CC; do
   grep -F -- "$name" "$WORK/help-environment" >/dev/null || fail "help omitted $name"
 done
 if grep -E -- 'LLVM_OPT|LLVM_LLC|(^|[^A-Za-z_])CC([^A-Za-z_]|$)' "$WORK/help-environment" >/dev/null; then
@@ -160,6 +163,9 @@ fi
 "$OCAML_FAS" --version >"$WORK/version" 2>"$WORK/stderr" || fail "--version failed"
 [ ! -s "$WORK/stderr" ] || fail "--version wrote stderr"
 [ "$(wc -l <"$WORK/version")" -eq 4 ] || fail "--version line count changed"
+FAS_ORACLE= "$OCAML_FAS" --version >"$WORK/public-version" 2>"$WORK/stderr" || fail "public --version failed"
+[ "$(wc -l <"$WORK/public-version")" -eq 2 ] || fail "public --version lists more than fas and cc"
+grep -F -- "cc: $WORK/cc-wrap (" "$WORK/public-version" >/dev/null || fail "public --version omitted the C compiler"
 head -n 1 "$WORK/version" | grep -E '^fas 0\.6\.3 \(([0-9a-f]+|unknown)\)$' >/dev/null \
   || fail "--version first line changed"
 grep -F -- "opt: $WORK/opt-wrap (" "$WORK/version" >/dev/null || fail "--version omitted the opt in use"

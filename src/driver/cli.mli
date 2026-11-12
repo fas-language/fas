@@ -22,7 +22,7 @@ type t = {
   os : Target_layout.os;
   target_features : string option;
   all_errors : bool;
-  native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
+  native : bool;  (** built-in x86-64 code generator; false only under the LLVM oracle *)
   native_runtime : native_runtime;
 }
 
@@ -41,5 +41,8 @@ type command =
   | Version
 
 val parse : string array -> (command, string) result
+val oracle : unit -> bool
+(** [FAS_ORACLE=llvm]: the hidden LLVM test-oracle mode (see cli.ml) *)
+
 val usage : string
 val native_linker_arguments : string list -> string list

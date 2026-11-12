@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # Native shadow run: every test/*.sh script, once as written (LLVM) and once
 # with the native backend generating the Fas code (test/native_shadow/shim.py
 # explains how). A script that passes with LLVM must pass in the shadow run.

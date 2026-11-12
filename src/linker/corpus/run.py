@@ -290,7 +290,7 @@ os.execv({gcc!r},[{gcc!r},{'-B'+str(wrappers)+'/'!r},'-fno-use-linker-plugin',*s
                 ('static', ['-Wl,-static'], [build/'libsqlite3.a']),
                 ('static-pie', ['-Wl,-static-pie'], [build/'libsqlite3.a'])):
             program = build/('fas-native-'+mode)
-            self.run([self.compiler, '--backend=native', self.sqlite_fixtures['sqlite_consumer.fas'],
+            self.run([self.compiler, self.sqlite_fixtures['sqlite_consumer.fas'],
                       *flags, *library, '-lm', '-ldl', '-o', program],
                      env=dict(os.environ, FAS_CC=gcc, FAS_FIR='',
                               FAS_OPT='/nonexistent/opt', FAS_LLC='/nonexistent/llc'), timeout=120)
@@ -567,7 +567,8 @@ os.execv({gcc!r},[{gcc!r},{'-B'+str(tools)+'/'!r},'-fno-use-linker-plugin','-fPI
             for backend in backends:
                 def check(path=path, backend=backend):
                     flags = ['--backend=native'] if backend == 'native' else []
-                    env = dict(os.environ, FAS_FIR='')
+                    # both backends: the LLVM one exists only as the hidden oracle
+                    env = dict(os.environ, FAS_FIR='', FAS_ORACLE='llvm')
                     if backend == 'native':
                         # A real native build must not fall back to opt/llc.
                         env.update(FAS_OPT='/nonexistent/opt', FAS_LLC='/nonexistent/llc')

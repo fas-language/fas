@@ -1,3 +1,7 @@
+(* These tests run against the hidden LLVM test oracle (removal A3); the
+   native-default CLI is checked in regressions.ml with the variable unset. *)
+let () = Unix.putenv "FAS_ORACLE" "llvm"
+
 let source text = Source.create ~file:"test.fas" ~text
 
 let expect_ok = function
@@ -1086,14 +1090,14 @@ let () =
         = "unknown --target value `bogus`; accepted values are `portable` and \
            `force-native`")
   | Ok _ -> assert false);
-  assert (contains Cli.usage "--target=force-native");
-  assert (contains Cli.usage "--target=portable");
+  (* removal A3: --target is oracle-only now, so help no longer lists it *)
+  assert (not (contains Cli.usage "--target="));
   (match Cli.parse [| "fas"; "--help" |] with
   | Ok Cli.Help ->
       assert (contains Cli.usage "-g");
       assert (contains Cli.usage "--no-inline");
       assert (contains Cli.usage "-I DIR, -isystem DIR, -D NAME[=VALUE]");
-      assert (contains Cli.usage "--sanitize=LIST")
+      assert (not (contains Cli.usage "--sanitize"))
   | Ok (Cli.Run _)
   | Ok (Cli.Run_program _)
   | Ok (Cli.Check _)

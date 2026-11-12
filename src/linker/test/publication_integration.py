@@ -58,7 +58,7 @@ class PublicationTests(unittest.TestCase):
         for mask in (0o027, 0o077):
             for flags, permissions in ((('-c',), 0o644), ((), 0o755)):
                 out = self.root / ('native-' + str(mask) + ('-object' if flags else '-exe'))
-                self.masked(mask, COMPILER, '--backend=native', *flags, source, '-o', out)
+                self.masked(mask, COMPILER, *flags, source, '-o', out)
                 self.assertEqual(out.stat().st_mode & 0o777, permissions & ~mask)
 
     def test_concurrent_publication_does_not_change_process_umask(self):

@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # Native -g (DWARF line tables, src/backend/mir/mir_dwarf.ml):
 #   1. -g never changes the program: every test/*.fas object built with -g
 #      has the same allocated sections (bytes and relocations) and symbols

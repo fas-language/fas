@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # OS-conditional `use linux "file.fas"`, selected by --os (linux only today).
 set -eu
 

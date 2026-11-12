@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 set -eu
 export DEBUGINFOD_URLS=
 
@@ -168,7 +170,7 @@ expect_usage "fas run builds and runs an executable; \`-o\` is not accepted" \
   run -o "$WORK/out" "$WORK/good.fas"
 
 "$OCAML_FAS" --help >"$WORK/help" 2>"$WORK/stderr" || fail "--help failed"
-grep -Fx '  check FILE    check without building (no LLVM, no linking)' "$WORK/help" \
+grep -Fx '  check FILE    check without building (no code generation, no linking)' "$WORK/help" \
   >/dev/null || fail "help omitted the check command"
 grep -F -- 'fas check file.fas [options]' "$WORK/help" >/dev/null \
   || fail "help omitted the check synopsis"

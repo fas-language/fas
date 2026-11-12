@@ -642,12 +642,10 @@ let version_lines () =
     let found = Option.value ~default:"not found" (tool_version path) in
     Printf.sprintf "%s: %s (%s)" label path found
   in
-  [
-    Printf.sprintf "fas %s (%s)" version Build_commit.commit;
-    tool_line "opt" opt;
-    tool_line "llc" llc;
-    tool_line "cc" cc;
-  ]
+  let fas = Printf.sprintf "fas %s (%s)" version Build_commit.commit in
+  (* opt and llc are only used by the hidden LLVM oracle (Cli.oracle) *)
+  if Cli.oracle () then [ fas; tool_line "opt" opt; tool_line "llc" llc; tool_line "cc" cc ]
+  else [ fas; tool_line "cc" cc ]
 
 let status_name = function
   | Unix.WEXITED code -> Printf.sprintf "exit %d" code

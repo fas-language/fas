@@ -1,3 +1,7 @@
+(* These tests run against the hidden LLVM test oracle (removal A3); the
+   native-default CLI is checked in regressions.ml with the variable unset. *)
+let () = Unix.putenv "FAS_ORACLE" "llvm"
+
 let source text = Source.create ~file:"regression.fas" ~text
 let checks_run = ref 0
 
@@ -3663,6 +3667,33 @@ let () =
     [ "--emit-llvm=bogus"; "profile.fas" ];
   cli_error "removed-debug-option" "unknown option `-debug`; write `-g`"
     [ "-debug"; "profile.fas" ];
+  (* Removal A3: without the hidden FAS_ORACLE=llvm switch, the built-in
+     backend is the default and the LLVM-only flags are rejected. *)
+  Unix.putenv "FAS_ORACLE" "";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "FAS_ORACLE" "llvm")
+    (fun () ->
+      let native_default = cli_run [ "profile.fas" ] in
+      assert native_default.Cli.native;
+      assert ((cli_run [ "-c"; "profile.fas" ]).Cli.native);
+      assert ((cli_run [ "-O3"; "profile.fas" ]).Cli.native);
+      assert ((cli_run [ "--target=portable"; "profile.fas" ]).Cli.target = Cli.Portable);
+      cli_error "emit-llvm-removed" "`--emit-llvm` was removed" [ "--emit-llvm"; "profile.fas" ];
+      cli_error "emit-llvm-optimized-removed" "`--emit-llvm` was removed"
+        [ "--emit-llvm=optimized"; "profile.fas" ];
+      cli_error "backend-llvm-removed" "`--backend=` was removed"
+        [ "--backend=llvm"; "profile.fas" ];
+      cli_error "backend-native-removed" "`--backend=` was removed"
+        [ "--backend=native"; "profile.fas" ];
+      cli_error "force-native-removed" "`--target=force-native` was removed"
+        [ "--target=force-native"; "profile.fas" ];
+      cli_error "emit-asm-native" "assembly text output is not supported" [ "-S"; "profile.fas" ];
+      cli_error "emit-asm-long-native" "assembly text output is not supported"
+        [ "--emit-asm"; "profile.fas" ];
+      List.iter
+        (fun removed -> assert (not (contains Cli.usage removed)))
+        [ "--emit-llvm"; "--backend"; "force-native"; "FAS_OPT"; "FAS_LLC"; "--emit-asm"; "opt and llc" ];
+      assert (List.length (Driver.version_lines ()) = 2));
   cli_error "removed-no-inline-option"
     "unknown option `-no-inline`; write `--no-inline`"
     [ "-no-inline"; "helper"; "profile.fas" ];

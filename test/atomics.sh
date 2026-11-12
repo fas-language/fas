@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # Atomic builtins (atomic_load/store/add/sub/and/or/xor/xchg/cas, atomic_fence):
 # - single-thread semantics through LLVM at -O0/-O2, the native backend, and
 #   the native backend after a Fir round trip;

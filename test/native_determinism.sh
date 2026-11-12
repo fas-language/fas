@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # The native backend's output must be byte-identical across runs (roadmap:
 # deterministic output, the baseline for the rewrite in Fas). Every Fas test
 # program and every Fir conformance program is compiled twice:

@@ -26,13 +26,13 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `../native/` | What stays of the old backend: the x86-64 encoder (`x64.ml`), ELF writing (`elf64.ml`, `native_object.ml`, `elf_attrs.ml`) and the Fas runtime sources (`native_runtime.ml`, `runtime/`). |
 | `mir_runtime.ml` | Appends the `fma` helpers, correctly rounded in the current rounding mode with the IEEE flags (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
-| `mir_driver.ml` | The driver's entry (`--backend=native`): compiles the Fir module the front end lowered. |
+| `mir_driver.ml` | The driver's entry (every build; the LLVM path is only the hidden `FAS_ORACLE=llvm` test oracle): compiles the Fir module the front end lowered. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
 | `mir_dwarf.ml` | `-g`: `.debug_abbrev`, `.debug_info` and `.debug_line` (DWARF 5) from the line rows `Mir_emit.func` records (see "Debug info"). |
 
 ## Running it
 
-- `fas --backend=native ...`: every native build (objects, static and
+- `fas ...`: every build (objects, static and
   hosted executables, any `-O` level) goes through this backend via
   `mir_driver.ml` (Fas lowers straight to Fir). No optimization: the `-O`
   level changes nothing here. `bench/native/sieve*.fas` ran about 1.8x
@@ -95,7 +95,7 @@ stack with the libgcc unwinder from a C callback.
 
 ## Debug info
 
-With `-g` (`fas -g --backend=native`, `fas-fir -g`) the object gets DWARF 5
+With `-g` (`fas -g`, `fas-fir -g`) the object gets DWARF 5
 line tables, like the LLVM path's line-tables-only debug info. Fir
 locations are always there (the Fas front end writes them;
 `Fir_scalarize` and `Fir_wide` copy them to what they emit), so `-g` only
@@ -156,7 +156,7 @@ PT_TLS segment it does nothing. `test/fas_fir/tls.fir` checks that path;
 
 ## Executables
 
-`fas --backend=native` and `fas-fir` link a static position-independent
+`fas` and `fas-fir` link a static position-independent
 executable by default (ET_DYN, linked at 0, no PT_INTERP), from pic code:
 every symbol is reached RIP-relative or through the GOT, and data pointers
 become R_X86_64_RELATIVE relocations. No dynamic loader runs, so `_start`

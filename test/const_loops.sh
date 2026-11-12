@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 set -eu
 export DEBUGINFOD_URLS=
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

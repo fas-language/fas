@@ -1,6 +1,6 @@
 # Fas
 
-Fas is a small native language for hot loops, crypto, SIMD and explicit systems code. It compiles to LLVM IR and links through Clang, and C is its ecosystem: you `use` C headers and call C directly, with no bindings to write.
+Fas is a small native language for hot loops, crypto, SIMD and explicit systems code. It compiles to x86-64 machine code with its own backend and linker, and C is its ecosystem: you `use` C headers and call C directly, with no bindings to write.
 
 It has wrapping fixed-width integers, IEEE `f32`/`f64` and SIMD vectors such as `vec[8, u32]`, with no heap and no hidden allocation, copies or runtime. Memory is an untyped `addr` with the type on each access (`p[u32, i]`), no implicit narrowing or sign changes. It builds for x86-64 Linux.
 
@@ -50,7 +50,7 @@ $ seq 1 1000000 | fas run wcl.fas
 
 **Prebuilt.** [Releases](https://github.com/fas-language/fas/releases) has the compiler for x86-64 Linux. Put `fas` on your `PATH`.
 
-- **Linux:** `fas-<version>-linux-x86_64.tar.gz`, a static binary for any x86-64 Linux. Fas needs **LLVM 22** to build programs: `clang-22`, `opt-22` and `llc-22` (or the plain names when they are LLVM 22). On Debian and Ubuntu, [apt.llvm.org](https://apt.llvm.org) has them: `wget https://apt.llvm.org/llvm.sh && sudo bash llvm.sh 22`.
+- **Linux:** `fas-<version>-linux-x86_64.tar.gz`, a static binary for any x86-64 Linux. Pure Fas programs need nothing else. Programs that use C headers or C sources also need **clang 22** (`clang-22`, or `clang` when it is LLVM 22). On Debian and Ubuntu, [apt.llvm.org](https://apt.llvm.org) has them: `wget https://apt.llvm.org/llvm.sh && sudo bash llvm.sh 22`.
 
 **From source.** You need OCaml 5 and dune:
 
@@ -69,7 +69,7 @@ fas run hello.fas -- args              # build and run
 fas check hello.fas                    # check only
 ```
 
-`FAS_CC`, `FAS_OPT` and `FAS_LLC` pick other tools. Builds are portable baseline x86-64 by default, and `--target=force-native` uses every instruction of your CPU.
+`FAS_CC` picks another C compiler. Builds target baseline x86-64 and run on any x86-64 CPU.
 
 ## Learn
 

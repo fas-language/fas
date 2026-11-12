@@ -561,12 +561,12 @@ assembler or external linker:
 
 ```sh
 dune build --profile release bin/main.exe
-_build/default/bin/main.exe --backend=native -c library.fas -o library.o
-_build/default/bin/main.exe --backend=native --freestanding main.fas library.o -o program
+_build/default/bin/main.exe -c library.fas -o library.o
+_build/default/bin/main.exe --freestanding main.fas library.o -o program
 # C inputs select the C runtime automatically; Fas still performs the final link.
-_build/default/bin/main.exe --backend=native main.fas helper.c -o hosted-program
+_build/default/bin/main.exe main.fas helper.c -o hosted-program
 # Explicitly request C startup even for a closed Fas program.
-_build/default/bin/main.exe --backend=native --hosted main.fas -o hosted-program
+_build/default/bin/main.exe --hosted main.fas -o hosted-program
 ```
 
 Object output has no generated `_start` and does not require `main`. Native

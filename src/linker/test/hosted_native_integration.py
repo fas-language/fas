@@ -39,7 +39,7 @@ class HostedNativeTests(unittest.TestCase):
 
     def compile(self, name, source, *args, cc=None, expected=0, env=None):
         output = self.root / name
-        result = run(COMPILER, "--backend=native", source, *args, "-o", output,
+        result = run(COMPILER, source, *args, "-o", output,
                      expected=expected, env=env or self.env(cc))
         return output, result
 
@@ -306,7 +306,7 @@ fn main(argc i32, argv addr) i32 {
         run(out, expected=42)
         library = self.source("free library", 'extern "C" { fn answer() i32 { return 42 } }\n')
         obj = self.root / "free library.o"
-        run(COMPILER, "--backend=native", "-c", library, "-o", obj, env=env)
+        run(COMPILER, "-c", library, "-o", obj, env=env)
         source = self.source("free caller", '''
 extern "C" { fn answer() i32 }
 fn main() i32 { return answer() }
@@ -353,7 +353,7 @@ fn main() i32 { return fas_missing_symbol() }
         alias = self.root / "C source alias"
         os.link(c, alias)
         before = c.read_bytes()
-        result = run(COMPILER, "--backend=native", library, c, "-o", alias,
+        result = run(COMPILER, library, c, "-o", alias,
                      expected=1, env=self.env())
         self.assertIn(b"overwrite input", result.stderr)
         self.assertEqual(c.read_bytes(), before)
@@ -365,8 +365,8 @@ fn main() i32 { return fas_missing_symbol() }
             with self.subTest(args=args):
                 self.compile("invalid modes", source, *args, expected=2)
         self.compile("invalid modes", source, "--hosted", "-Wl,-o,unexpected", expected=1)
-        result = run(COMPILER, source, "--hosted", expected=2, env=self.env())
-        self.assertIn(b"--backend=native executable", result.stderr)
+        result = run(COMPILER, source, "--hosted", "-c", expected=2, env=self.env())
+        self.assertIn(b"require an executable output", result.stderr)
         bad_cc = self.root / "invalid plan cc"
         bad_cc.write_text("#!/bin/sh\necho no-link-command >&2\n")
         bad_cc.chmod(0o755)

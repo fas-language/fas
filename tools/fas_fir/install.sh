@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the compiler and fas-fir from this checkout and installs them as
-#   ~/.local/bin/fas-native   (fas with --backend=native always on)
+#   ~/.local/bin/fas-native   (this checkout's fas; the native backend is the default)
 #   ~/.local/bin/fas-fir      (Fir text -> native object / executable)
 # The binaries are copied to ~/.local/share/fas-native so a later rebuild or
 # a cleaned build dir never breaks the installed tools. Rerun to update.
@@ -19,15 +19,11 @@ for f in bin/main.exe:fas tools/fas_fir/fas_fir.exe:fas-fir; do
   mv -f "$share/.$dst.tmp" "$share/$dst"
 done
 rm -rf "$share/std"; cp -r "$root/std" "$share/std"
-# fas recognizes a subcommand (run, check, perf, lsp) only as the first
-# argument, so the flag goes after it; lsp has no backend
+# the built-in backend is the only one since removal A3, so this is a plain
+# alias kept for existing scripts
 cat > "$bin/fas-native" <<W
 #!/bin/sh
-case "\${1:-}" in
-  run|check|perf) sub=\$1; shift; exec "$share/fas" "\$sub" --backend=native "\$@" ;;
-  lsp) exec "$share/fas" "\$@" ;;
-esac
-exec "$share/fas" --backend=native "\$@"
+exec "$share/fas" "\$@"
 W
 cat > "$bin/fas-fir" <<W
 #!/bin/sh

@@ -1,11 +1,11 @@
 # Fas
 
-Fas is a small native language for hot loops, crypto, SIMD and explicit systems code. It is not a general-purpose language: there is no heap or string type, and C is the ecosystem, so you `use` C headers and call them directly. Scalar `f32` and `f64` follow IEEE arithmetic, integer arithmetic wraps, lossless widening is implicit, and the compiler adds no allocation, copies or runtime of its own. It emits LLVM IR and links through Clang.
+Fas is a small native language for hot loops, crypto, SIMD and explicit systems code. It is not a general-purpose language: there is no heap or string type, and C is the ecosystem, so you `use` C headers and call them directly. Scalar `f32` and `f64` follow IEEE arithmetic, integer arithmetic wraps, lossless widening is implicit, and the compiler adds no allocation, copies or runtime of its own. It compiles to x86-64 machine code with its own backend and linker.
 
-Every example below is a complete program that compiles and prints exactly the output shown. Fas targets x86-64 Linux with LLVM 22. The [cheat sheet](#cheat-sheet) at the end lists every form, type, operator and builtin.
+Every example below is a complete program that compiles and prints exactly the output shown. Fas targets x86-64 Linux. The [cheat sheet](#cheat-sheet) at the end lists every form, type, operator and builtin.
 
 ```sh
-fas hello.fas -o hello && ./hello       # FAS_CC, FAS_OPT, FAS_LLC pick clang-22, opt-22, llc-22
+fas hello.fas -o hello && ./hello       # no other tools needed unless the program uses C
 fas run hello.fas                       # build, run, delete; program arguments go after --
 ```
 
@@ -71,7 +71,7 @@ hello, fas!
 **Why there is no typed pointer.** Fas has no `T *` and no `ptr[T]` or `addr[T]`, and this is deliberate. In Fas the type sits on each access (`p[u32, i]`), not on the address.
 
 - **A pointee type is a claim that goes stale.** `uint32_t *p` says "a `u32` lives here" for every later use, even after the memory is reused or read as something else. A type on the access is true where it is written.
-- **It would give LLVM facts nobody proved.** In C the pointee type implies alignment (`*p` on a `uint32_t *` assumes 4 bytes) and strict aliasing (an `int *` and a `float *` never overlap). Fas never emits alignment, aliasing or `inbounds` facts the source did not prove. So a raw access may be unaligned, and accesses of different types may overlap.
+- **It would give the optimizer facts nobody proved.** In C the pointee type implies alignment (`*p` on a `uint32_t *` assumes 4 bytes) and strict aliasing (an `int *` and a `float *` never overlap). Fas never emits alignment, aliasing or `inbounds` facts the source did not prove. So a raw access may be unaligned, and accesses of different types may overlap.
 - **One memory model instead of two.** Without typed pointers there is no `const` pointee, no dereference operator or `.*` chains, no arithmetic scaled by element size next to byte arithmetic, and no pointer casts just to read memory as another type. Address arithmetic is always in bytes.
 - **`handle[T]` is not a typed pointer.** It is the one typed address form. It names an `opaque` object, a C record or a specialized generic struct, and it has no arithmetic. It exists to stop mixing up `FILE` and `DIR`, not to describe memory. An `addr[T]` would grow back into `ptr[T]`, so it is rejected.
 
@@ -835,10 +835,10 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 ## Known limits
 
 - **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
-- **Platform.** x86-64 Linux, with LLVM 22 tools (`clang-22`, `opt-22`, `llc-22`, or the plain names when they are LLVM 22). Portable builds target baseline x86-64 (SSE2).
+- **Platform.** x86-64 Linux. Builds target baseline x86-64 (SSE2) and run on any x86-64 CPU. Programs that use C (headers, `.c` inputs, libraries) also need `clang-22` (see `FAS_CC` below).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
 - **Huge sources.** One expression with tens of thousands of operators, or a function with tens of thousands of locals, compiles slowly (seconds). Ordinary programs are not affected.
-- **Command line.** Options go before the subcommand word: `fas run -O0 file.fas`, not `fas -O0 run file.fas`.
+- **Command line.** Options go after the subcommand word: `fas run -g file.fas`, not `fas -g run file.fas`.
 
 ## Cheat sheet
 
@@ -1050,22 +1050,7 @@ Every builtin name in this table, `cvt` and the float builtins included, is rese
 
 ### Builtin cost by CPU level
 
-Every builtin has the same result on every CPU, but some compile to very different code. The default build targets baseline x86-64 (SSE2). LLVM then expands the builtins below into lane-by-lane scalar code where the CPU lacks a matching instruction. The compiler gives no warning; the disassembly (`-S`) shows it. Instruction counts for one call on `vec[8, u32]` or `vec[16, u8]` (clang/LLVM 22, `-O2`):
-
-| Builtin | x86-64 | x86-64-v2 (SSE4.2) | x86-64-v3 (AVX2) |
-|---|---|---|---|
-| `permute` u8×16 | 145 | 9 (`pshufb`) | 8 |
-| `permute` u32×8 | 83 | 63 | 9 (`vpermd`) |
-| `popcount` u64 | 21 | 3 (`popcnt`) | 3 |
-| `clz` u32×8 | 80 | 49 | 23 |
-| `reduce_max` u32×8 | 30 | 9 | 8 |
-| `<<` by a lane vector, u32×8 | 31 | 19 | 7 |
-| `*` u64×4 | 27 | 27 | 13 |
-| `compress` / `expand` u32×8 | 140 / 125 | 140 / 111 | 117 / 98 |
-| `gather` / `scatter` u32×8 | 86 / 76 | 69 / 59 | 77 / 67 |
-| `masked_load` / `masked_store` u32×8 | 72 / 62 | 61 / 51 | 68 / 58 |
-
-`compress`, `expand`, gathers, scatters and masked memory stay lane-by-lane at every level here: use them where the data dependence needs them, not in the innermost loop when a `select` or a plain load does the job. `shuffle` with constant lanes, `add_sat`, `reduce_sum`, `ctz` and `mul_hi` on u64 cost a few instructions everywhere.
+Every builtin has the same result on every CPU. Builds target baseline x86-64 (SSE2), and today Fas's own backend compiles every vector operation lane by lane: a `vec[8, u32]` add is eight scalar adds. Vector code is correct everywhere but not yet faster than the equivalent scalar loop. `objdump -d` shows the generated code.
 
 ### C to Fas
 
@@ -1087,32 +1072,26 @@ Every builtin has the same result on every CPU, but some compile to very differe
 ### Compiler
 
 ```sh
-fas main.fas -o app             # executable (default -O2)
-fas -O0 main.fas -o app         # -O0..-O3 (default -O2)
-fas -g main.fas -o app          # DWARF line tables for gdb/perf; same machine code
-fas --no-inline hot main.fas -o app # keep one function out of line (any -O); repeatable
-fas --no-inline dense main.fas -o app      # a generic: every instance; 'dense[3]' just one
+fas main.fas -o app             # executable
+fas -g main.fas -o app          # DWARF debug info for gdb/perf; same machine code
 fas run main.fas util.c -- a b  # build to a temp file, run with args a b, delete; exit code passes through
 fas -c lib.fas -o lib.o         # object, no main required
 fas --emit-header lib.fas -o lib.h
-fas -S main.fas -o main.s       # assembly
-fas --emit-llvm main.fas        # verified, unoptimized LLVM IR
-fas --emit-llvm=optimized main.fas # the IR after opt, exactly what llc compiles
-fas check main.fas              # errors only: no LLVM, no linking (add --diagnostics=json for tools)
+fas --emit-ir main.fas          # the lowered module as Fir text
+fas check main.fas              # errors only: no code generation, no linking (add --diagnostics=json for tools)
 fas check --all-errors main.fas # every error in function bodies at once, not just the first
-fas --version                   # fas version and commit, plus the opt, llc and C compiler in use
-fas --target=force-native main.fas -o app # this CPU's instructions everywhere (C inputs too); may not run elsewhere
-fas --keep main.fas -o app      # keep temp files, print tools and paths
+fas --version                   # fas version and commit, plus the C compiler in use
+fas --keep main.fas -o app      # keep temp files and print their paths
 fas main.fas util.c -lz -o app  # C sources and link flags (executables only)
 ```
 
 `--all-errors` (any command) keeps checking after an error: every function body is checked and each failing statement is reported, so leaving out all casts gives the full list of places that need one in a single run. Errors outside function bodies (parsing, types, signatures, constants) still stop at the first. Without the flag only the first error is printed.
 
-`--target=portable` (the default) builds for baseline x86-64. `--target=force-native` builds the whole program for the CPU you compile on: faster in most loops, slower in some, and the result may crash with an illegal instruction on an older CPU.
+`-O0`..`-O3` are accepted for compatibility with C build scripts and ignored: every build is the same. There is no assembly text output; read an object (`fas -c`) or executable with `objdump -d`.
 
 To find hot code, build with `-g` and run the system `perf` (`perf record ./app; perf report`): the line tables map samples back to Fas lines.
 
-Tools come only from `FAS_CC`, `FAS_OPT` and `FAS_LLC` (defaults `clang-22`, `opt-22`, `llc-22`). When a suffixed tool is not on `PATH`, `fas` uses the plain name (`clang`, `opt`, `llc`) if its `--version` reports LLVM 22, as on Arch or Fedora. `--keep` prints which ones it picked. A `CC` set in your shell does not change what `fas` uses. `FAS_OPT_PASSES` replaces opt's pipeline.
+Fas generates and links code itself. The C compiler comes only from `FAS_CC` (default `clang-22`) and is used for C headers, `.c` inputs and `--hosted` executables. When `clang-22` is not on `PATH`, `fas` uses `clang` if its `--version` reports LLVM 22, as on Arch or Fedora. A `CC` set in your shell does not change what `fas` uses.
 
 ### Editors
 

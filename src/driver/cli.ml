@@ -22,7 +22,7 @@ type t = {
   os : Target_layout.os;
   target_features : string option;
   all_errors : bool;
-  native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
+  native : bool;  (** built-in x86-64 code generator; false only under the LLVM oracle *)
   native_runtime : native_runtime;
 }
 
@@ -42,53 +42,49 @@ type command =
 
 type subcommand = Build | Run_subcommand | Check_subcommand
 
+(* [FAS_ORACLE=llvm] is the hidden switch that keeps the LLVM pipeline as the
+   test oracle: it restores --backend=, --emit-llvm, --target=force-native,
+   FAS_OPT/FAS_LLC/FAS_OPT_PASSES and LLVM as the default backend, exactly as
+   before removal A3. It is not part of the user interface and is not in help. *)
+let oracle () = Sys.getenv_opt "FAS_ORACLE" = Some "llvm"
+
 let usage =
   "usage: fas [options] file.fas [C inputs and link flags]\n\
   \       fas run file.fas [options] [-- program arguments]\n\
   \       fas check file.fas [options]\n\
    commands:\n\
   \  run FILE      build to a temporary executable, run it, delete it\n\
-  \  check FILE    check without building (no LLVM, no linking)\n\
+  \  check FILE    check without building (no code generation, no linking)\n\
   \  lsp           language server over stdio (for editors)\n\
    build:\n\
-  \  -O0..-O3      set opt and llc optimization levels (default -O2)\n\
-  \  --target=portable  baseline x86-64, runs on any x86-64 CPU (default)\n\
-  \  --target=force-native  use this CPU's instructions everywhere, without prediction \
-   (normal compile time; can be slower than portable in places)\n\
+  \  -O0..-O3      accepted for compatibility and ignored; every build is the same\n\
   \  --os linux    operating system to build for (the only one today)\n\
    output:\n\
-  \  -o PATH       output path (default a.out, \
-   INPUT.o with -c, INPUT.s with -S)\n\
+  \  -o PATH       output path (default a.out, INPUT.o with -c)\n\
   \  --emit-header write an ABI-checked C header (stdout without -o)\n\
-  \  --emit-llvm[=optimized]  print LLVM IR before (default) or after opt, verified\n\
-  \  --emit-asm, -S emit assembly\n\
-  \  --emit-obj, -c emit object\n\
+  \  --emit-obj, -c emit an ELF object\n\
   \  --diagnostics=text|json  print diagnostics as text (default) or one JSON line\n\
   \  --all-errors  report every error in function bodies instead of stopping at the \
    first\n\
-  \  --backend=llvm|native  use LLVM (default) or the built-in Linux x86-64 \
-   generator/linker; native -c emits ELF objects (experimental)\n\
-  \  --hosted     native executable with system C startup and libraries (FAS_CC)\n\
-  \  --freestanding  native executable with Fas startup and no C tools\n\
+  \  --hosted     executable with system C startup and libraries (FAS_CC)\n\
+  \  --freestanding  executable with Fas startup and no C tools\n\
   \               default: hosted for C inputs/imports, freestanding otherwise\n\
-  \  --version     print the fas version and the opt, llc and C compiler in use\n\
+  \  --version     print the fas version and the C compiler in use\n\
   \  -h, --help    show this help\n\
    C inputs:\n\
   \  -I DIR, -isystem DIR, -D NAME[=VALUE] (attached or separate)\n\
   \  -l, -L        link flags (attached or separate)\n\
-  \  -Wl,ARG,..., -Xlinker ARG  pass arguments to the selected linker\n\
+  \  -Wl,ARG,..., -Xlinker ARG  pass arguments to the built-in linker\n\
   \  FILE.c, FILE.o, FILE.a, FILE.so  C inputs linked with the program\n\
    debugging:\n\
   \  --emit-ir     print the lowered module as Fir text (src/fir/SPEC.md)\n\
-  \  --keep        retain and report intermediate paths and active tool pipeline\n\
-  \  -g            emit DWARF line tables (machine code unchanged)\n\
-  \  --no-inline NAME  add LLVM noinline to NAME (a generic: every instance; \
-   NAME[ARGS]: one; repeatable)\n\
-  \  --sanitize=LIST instrument with address and/or undefined behavior sanitizers\n\
+  \  --keep        retain and report intermediate paths\n\
+  \  -g            emit DWARF debug info (machine code unchanged)\n\
+  \  --no-inline NAME  accepted and ignored (a generic: every instance; NAME[ARGS]: \
+   one; repeatable)\n\
    environment:\n\
-  \  FAS_OPT, FAS_LLC, FAS_CC select opt, llc and the C compiler (defaults: opt-22, \
-   llc-22, clang-22; without those, opt, llc, clang when they report LLVM 22)\n\
-  \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)"
+  \  FAS_CC        the C compiler for C inputs, C imports and --hosted (default \
+   clang-22; without it, clang when it reports LLVM 22)"
 
 let default_output os emit input =
   let source_output extension =
@@ -115,7 +111,13 @@ let native_linker_arguments arguments =
 let target_of_value value =
   match value with
   | "portable" -> Ok Portable
-  | "force-native" -> Ok Force_native
+  | "force-native" when oracle () -> Ok Force_native
+  | "force-native" ->
+      Error
+        "`--target=force-native` was removed; Fas builds baseline x86-64 code that \
+         runs on any x86-64 CPU"
+  | _ when not (oracle ()) ->
+      Error ("unknown --target value `" ^ value ^ "`; the accepted value is `portable`")
   | _ ->
       Error
         ("unknown --target value `" ^ value
@@ -149,7 +151,8 @@ let parse_invocation ~subcommand argv =
   let target_explicit = ref false in
   let os = ref Target_layout.host_os in
   let all_errors = ref false in
-  let native = ref false in
+  let oracle = oracle () in
+  let native = ref (not oracle) in
   let runtime = ref None in
   let add_link_inputs values =
     link_inputs_rev := List.rev_append values !link_inputs_rev
@@ -180,11 +183,15 @@ let parse_invocation ~subcommand argv =
       else if !link_inputs_rev <> [] && emit <> Executable then
         Error "C inputs and link flags require an executable output"
       else if Option.is_some !runtime && ((not !native) || emit <> Executable) then
-        Error "--hosted/--freestanding require a --backend=native executable"
+        Error
+          (if oracle then "--hosted/--freestanding require a --backend=native executable"
+           else "--hosted/--freestanding require an executable output")
       else if Option.is_some !runtime && subcommand = Check_subcommand then
         Error "--hosted/--freestanding have no effect with fas check"
       else if !native && Option.is_some !sanitizers then
-        Error "--sanitize is not supported by --backend=native"
+        Error
+          (if oracle then "--sanitize is not supported by --backend=native"
+           else "--sanitize is not supported yet")
       else
             let input = Option.get input in
             let output_explicit = Option.is_some output in
@@ -243,6 +250,18 @@ let parse_invocation ~subcommand argv =
           other_output := true;
           loop (i + 1) input output Ir keep optimization optimization_explicit debug
             no_inline_function
+      | flag
+        when (not oracle)
+             && (flag = "--emit-llvm" || String.starts_with ~prefix:"--emit-llvm=" flag) ->
+          Error
+            "`--emit-llvm` was removed; Fas no longer uses LLVM (`--emit-ir` prints the \
+             Fir module)"
+      | flag when (not oracle) && String.starts_with ~prefix:"--backend=" flag ->
+          Error "`--backend=` was removed; the built-in backend is the only one"
+      | ("--emit-asm" | "-S") when not oracle ->
+          Error
+            "assembly text output is not supported; use -c for an ELF object (and \
+             `objdump -d` to read it)"
       | "--emit-llvm" ->
           other_output := true;
           loop (i + 1) input output Llvm keep optimization optimization_explicit debug

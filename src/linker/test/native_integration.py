@@ -59,7 +59,7 @@ class NativeTests(unittest.TestCase):
 
     def compile(self, name, source, *inputs, object=False, extra=(), env=None):
         output = self.root / name
-        run(COMPILER, "--backend=native", *(("-c",) if object else ("--freestanding",)), source,
+        run(COMPILER, *(("-c",) if object else ("--freestanding",)), source,
             *inputs, *extra, "-o", output, env=self.no_tools if env is None else env)
         return output
 
@@ -88,7 +88,7 @@ fn main() i32 { return helper() }
         run("ar", "rcs", archive, libobj)
         run(self.compile("separate-archive", bootstrap, mainobj, archive), expected=42)
         run(self.compile("separate-search", bootstrap, mainobj, extra=("-L", self.root, "-lseparate")), expected=42)
-        result = run(COMPILER, "--backend=native", "--freestanding", bootstrap, archive, mainobj,
+        result = run(COMPILER, "--freestanding", bootstrap, archive, mainobj,
                      "-o", self.root / "wrong-order", expected=1, env=self.no_tools)
         self.assertIn(b"undefined symbol answer", result.stderr)
         run(self.compile("separate-group", bootstrap,
@@ -101,7 +101,7 @@ fn main() i32 { return helper() }
         for flags, diagnostic, status in ((("-Wl,",), b"nonempty", 2),
                                   (("-Xlinker",), b"requires an argument", 2),
                                   (("-Wl,--output,elsewhere",), b"not accepted", 1)):
-            result = run(COMPILER, "--backend=native", bootstrap, *flags,
+            result = run(COMPILER, bootstrap, *flags,
                          expected=status, env=self.no_tools)
             self.assertIn(diagnostic, result.stderr)
 
@@ -268,17 +268,17 @@ int check_initialization(void){return initialized+35;}
         # Every scalar, floats included, crosses object boundaries by SysV
         # (vectors and aggregates are refused earlier, by the front end).
         float_export = self.source("float-export", 'extern "C" { fn f(x f64) f64 { return x } }\n')
-        run(COMPILER, "--backend=native", "-c", float_export, "-o", self.root / "float.o",
+        run(COMPILER, "-c", float_export, "-o", self.root / "float.o",
             env=self.no_tools)
         self.assertTrue((self.root / "float.o").exists())
         basic = self.source("target", "fn main() i32 { return 0 }\n")
         for os_name in ("windows", "wasi"):
-            result = run(COMPILER, "--backend=native", "--os=" + os_name, basic,
+            result = run(COMPILER, "--os=" + os_name, basic,
                          "-o", self.root / "wrong-target", env=self.no_tools, expected=2)
             self.assertIn(b"no longer supported", result.stderr)
-        result = run(COMPILER, "--backend=native", "-S", basic, "-o", self.root / "native.s",
-                     env=self.no_tools, expected=1)
-        self.assertIn(b"native assembly text output is not supported", result.stderr)
+        result = run(COMPILER, "-S", basic, "-o", self.root / "native.s",
+                     env=self.no_tools, expected=2)
+        self.assertIn(b"assembly text output is not supported", result.stderr)
 
     def test_failures_preserve_outputs_and_source_aliases(self):
         source = self.source("missing-function", 'extern "C" { fn missing() i32 }\nfn main() i32 { return missing() }\n')
@@ -286,7 +286,7 @@ int check_initialization(void){return initialized+35;}
         sentinel = b"previous executable\0\xff"
         out.write_bytes(sentinel)
         out.chmod(0o640)
-        run(COMPILER, "--backend=native", source, "-o", out, env=self.no_tools, expected=1)
+        run(COMPILER, source, "-o", out, env=self.no_tools, expected=1)
         self.assertEqual(out.read_bytes(), sentinel)
         self.assertEqual(out.stat().st_mode & 0o777, 0o640)
         basic = self.source("alias-source", "fn main() i32 { return 0 }\n")
@@ -294,7 +294,7 @@ int check_initialization(void){return initialized+35;}
         alias = self.root / "source-alias"
         os.link(basic, alias)
         for flags in ((), ("-c",)):
-            result = run(COMPILER, "--backend=native", *flags, basic, "-o", alias,
+            result = run(COMPILER, *flags, basic, "-o", alias,
                          env=self.no_tools, expected=1)
             self.assertIn(b"overwrite input", result.stderr)
             self.assertEqual(basic.read_bytes(), before)

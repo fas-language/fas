@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # Native backend <-> C across object boundaries: SysV scalar arguments and
 # results (ints, narrow ints, f32, f64, stack arguments) in both directions,
 # linked by the Fas linker without libc.

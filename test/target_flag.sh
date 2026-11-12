@@ -1,9 +1,12 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CC=${CC:-clang-22}
 LLVM_OPT=${LLVM_OPT:-opt-22}
+LLVM_LLC=${LLVM_LLC:-llc-22}
 OCAML_FAS=${OCAML_FAS:-$ROOT/_build/default/bin/main.exe}
 FIXTURES=$ROOT/test/target_flag
 TARGET_TMP=$(mktemp -d)

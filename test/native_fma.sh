@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 # Software fma of the native runtime vs libm: the runtime source compiled by
 # both backends, linked to a C driver.
 set -eu

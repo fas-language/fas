@@ -1,4 +1,6 @@
 #!/bin/sh
+# This script uses the hidden LLVM test oracle (removal A3, Cli.oracle).
+export FAS_ORACLE=llvm
 set -eu
 
 ulimit -Sv 4194304
@@ -63,13 +65,13 @@ for level in -O0 -O2; do
   build plain "$level" --keep hello.fas -o hello >"$TMP/plain.out" 2>&1 \
     || { cat "$TMP/plain.out" >&2; fail "unsuffixed LLVM 22 tools were not used at $level"; }
   test "$("$TMP/hello")" = "tools ok" || fail "unsuffixed tools built a wrong program"
-  grep -F 'FAS_OPT=opt FAS_LLC=llc FAS_CC=clang ' "$TMP/plain.out" >/dev/null \
+  grep -F 'FAS_OPT=opt FAS_LLC=llc FAS_CC=clang;' "$TMP/plain.out" >/dev/null \
     || fail "unsuffixed tools were not reported at $level"
 done
 
 build both --keep hello.fas -o hello >"$TMP/both.out" 2>&1 \
   || fail "suffixed opt-22 next to an old opt failed"
-grep -F 'FAS_OPT=opt-22 FAS_LLC=llc FAS_CC=clang ' "$TMP/both.out" >/dev/null \
+grep -F 'FAS_OPT=opt-22 FAS_LLC=llc FAS_CC=clang;' "$TMP/both.out" >/dev/null \
   || fail "suffixed tool did not win over the unsuffixed one"
 
 if build old hello.fas -o hello >"$TMP/old.out" 2>&1; then

@@ -573,7 +573,7 @@ fas-fir --legalize INPUT.fir                 also split wide/odd integers (Fir_w
 ```
 
 - **Input:** `INPUT` may be `-` to read standard input.
-- **Installation:** `tools/fas_fir/install.sh` builds and installs `fas-fir` together with `fas-native`, the Fas compiler with `--backend=native` always on, into `~/.local/bin`. The binaries and `std/` are copied to `~/.local/share/fas-native`. Rerun the script after pulling changes.
+- **Installation:** `tools/fas_fir/install.sh` builds and installs `fas-fir` together with `fas-native`, an alias of the Fas compiler (the native backend is the default), into `~/.local/bin`. The binaries and `std/` are copied to `~/.local/share/fas-native`. Rerun the script after pulling changes.
 - **Using `std/sys.fas` from Fas:** the syscall stdlib must be reached through a relative `use` path, since absolute paths are rejected. Link the installed copy into your project with `ln -s ~/.local/share/fas-native/std std`, then write `use "std/sys.fas"`.
 - **Seeing what Fas emits:** `fas --emit-ir prog.fas -o out.fir` (or `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native prog.fas -o prog`) writes the Fir of a Fas program. That file compiles again with `fas-fir out.fir`.
 
