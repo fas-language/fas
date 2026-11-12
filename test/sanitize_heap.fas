@@ -1,7 +1,0 @@
-extern "C" { fn alloc_bytes(size usize) addr }
-fn write(p addr, index usize) void { p[u8, index] = 68 }
-fn main() i32 {
-  p addr = alloc_bytes(1)
-  write(p, 1)
-  return 0
-}

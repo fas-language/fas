@@ -1,7 +1,0 @@
-fn hold(p addr) addr { return p }
-fn read_value(p addr) i32 { return p[i32, 0] }
-fn make() addr {
-  value i32 = 5
-  return hold(&value)
-}
-fn main() i32 { return read_value(make()) - 5 }

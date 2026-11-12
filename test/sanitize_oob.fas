@@ -1,6 +1,0 @@
-fn write(p addr, index i32) void { p[i32, index] = 19 }
-fn main() i32 {
-  values arr[2, i32] = {0, 0}
-  write(&values[0], 2)
-  return 0
-}

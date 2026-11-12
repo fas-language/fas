@@ -2771,6 +2771,15 @@ let global_storage mc structs (global : Hir.global) =
         (Printf.sprintf "internal error: global %s has no layout: %s" global.name
            message)
   | Ok (size, align) -> (
+      (* x86-64 psABI 3.1.2: an array variable of 16 bytes or more is at
+         least 16-aligned, and C code (clang) relies on it for `extern`
+         arrays; UBSan's alignment check traps on an exported Fas array
+         that only had its element alignment. *)
+      let align =
+        match global.ty with
+        | Hir.Array _ when size >= 16 -> max align 16
+        | _ -> align
+      in
       let data = Bytes.make size (Char.chr 0) in
       let pointers = ref [] in
       let object_size ty = fst (Result.get_ok (Hir.layout structs ty)) in

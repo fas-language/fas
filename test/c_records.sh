@@ -26,6 +26,16 @@ for level in 0 2; do
     || fail "C O$level oracle failed"
   cmp -s "$TMP/fas.O$level.out" "$TMP/oracle.out" \
     || fail "Fas and C record results differ at O$level"
+  # x86-64 psABI: array variables of 16+ bytes are 16-aligned; C code
+  # (and clang's UBSan alignment check) assumes it for these externs.
+  for sym in fas_exported_records fas_link_table; do
+    addr=$(nm "$TMP/fas.O$level" | awk -v s="$sym" '$3 == s { print $1 }')
+    [ -n "$addr" ] || fail "missing $sym at O$level"
+    case "$addr" in
+      *0) ;;
+      *) fail "$sym is not 16-aligned at O$level ($addr)" ;;
+    esac
+  done
 done
 "$OCAML_FAS" --emit-header -o "$TMP/fas_records.h" \
   "$ROOT/test/c_records.fas"
