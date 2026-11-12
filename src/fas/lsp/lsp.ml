@@ -166,7 +166,6 @@ let config_for state key : Cli.t =
     keep = false;
     optimization = 2;
     debug = false;
-    no_inline_functions = [];
     sanitizers = [];
     link_inputs = [];
     c_flags = state.options.lsp_c_flags;

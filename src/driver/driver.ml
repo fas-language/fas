@@ -1244,97 +1244,6 @@ let emit_optimized_llvm config program ir =
       in
       emit_text config (with_fas_module_id text))
 
-(* `fn f(...) R @inline { ... }`: every emitted instance of `f` gets LLVM
-   `alwaysinline`, unless `--no-inline` names it too. *)
-let apply_inline (program : Ast.program) (m : Fir.modul) =
-  let marked =
-    List.filter_map
-      (function Ast.Func { name; inline = true; _ } -> Some name | _ -> None)
-      program.Ast.items
-  in
-  Fir.Vec.iter
-    (fun (f : Fir.func) ->
-      let base = Option.value (Ast.specialization_template_name f.name) ~default:f.name in
-      if
-        f.defined
-        && (List.mem f.name marked || List.mem base marked)
-        && f.fattrs land Fir.fa_noinline = 0
-      then f.fattrs <- f.fattrs lor Fir.fa_inline)
-    m.Fir.funcs
-
-let apply_no_inline config (m : Fir.modul) =
-  let funcs = Fir.Vec.to_list m.Fir.funcs in
-  let squeeze text =
-    String.concat "" (String.split_on_char ' ' text |> List.filter (( <> ) ""))
-  in
-  let defined (f : Fir.func) = f.defined in
-  let template (f : Fir.func) = Ast.specialization_template_name f.name in
-  let resolve name =
-    let base =
-      match String.index_opt name '[' with
-      | Some index -> String.sub name 0 index
-      | None -> name
-    in
-    let matches =
-      if String.contains name '[' then
-        List.filter
-          (fun (f : Fir.func) ->
-            template f = Some base
-            && Option.fold ~none:false
-                 ~some:(fun display -> squeeze display = squeeze name)
-                 f.display)
-          funcs
-      else
-        List.filter
-          (fun (f : Fir.func) -> f.name = name || template f = Some name)
-          funcs
-    in
-    match (matches, List.filter defined matches) with
-    | [], _ ->
-        let instances =
-          List.filter_map
-            (fun (f : Fir.func) ->
-              if template f = Some base && defined f then f.display else None)
-            funcs
-        in
-        let shown = List.filteri (fun index _ -> index < 4) instances in
-        let help =
-          if instances = [] then None
-          else
-            Some
-              (Printf.sprintf "emitted instances: %s%s"
-                 (String.concat ", " (List.map (Printf.sprintf "`%s`") shown))
-                 (if List.length instances > 4 then ", ..." else ""))
-        in
-        Error
-          [
-            {
-              (Diag.error Span.synthetic
-                 (Printf.sprintf "--no-inline function `%s` was not emitted" name))
-              with
-              help;
-            };
-          ]
-    | _, [] ->
-        Error
-          [
-            Diag.error Span.synthetic
-              (Printf.sprintf "--no-inline function `%s` is not a normal definition"
-                 name);
-          ]
-    | _, defined -> Ok defined
-  in
-  let* found =
-    List.fold_left
-      (fun result name ->
-        let* acc = result in
-        let* found = resolve name in
-        Ok (acc @ found))
-      (Ok []) config.Cli.no_inline_functions
-  in
-  List.iter (fun (f : Fir.func) -> f.fattrs <- f.fattrs lor Fir.fa_noinline) found;
-  Ok ()
-
 type imported_c_unit = {
   source : string;
   stable_name : string;
@@ -1892,8 +1801,6 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
               (* The IR dump (--emit-ir) shows lowering's output; everything
                  compiled is folded first. *)
               (match config.Cli.emit with Cli.Ir -> () | _ -> Fir_fold.run ir);
-              let* () = apply_no_inline config ir in
-              apply_inline program ir;
               let* adapters =
                 add_static_adapters (List.rev !c_units) referenced_names ir
               in

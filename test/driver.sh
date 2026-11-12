@@ -136,7 +136,7 @@ temps_empty() {
 "$OCAML_FAS" -h >"$WORK/short-help" 2>"$WORK/stderr"
 cmp "$WORK/help" "$WORK/short-help" >/dev/null || fail "-h differs from --help"
 for flag in -o --emit-header --emit-ir --emit-obj -c --keep \
-  -O0..-O3 -g --no-inline -I -isystem -D -h --help; do
+  -O0..-O3 -g -I -isystem -D -h --help; do
   grep -F -- "$flag" "$WORK/help" >/dev/null || fail "help omitted $flag"
 done
 if grep -F -- "--emit-ast" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ast"; fi
@@ -145,12 +145,12 @@ for heading in build output "C inputs" debugging environment; do
   grep -Fx -- "$heading:" "$WORK/help" >/dev/null || fail "help omitted $heading heading"
 done
 sed -n '/^debugging:$/,/^environment:$/p' "$WORK/help" >"$WORK/help-debugging"
-for flag in --emit-ir --keep -g --no-inline; do
+for flag in --emit-ir --keep -g; do
   grep -F -- "  $flag" "$WORK/help-debugging" >/dev/null || fail "help placed $flag outside debugging"
 done
 # help is the public interface: the LLVM oracle (FAS_ORACLE=llvm) is hidden
 for removed in "fas perf" --profile --tune FAS_PROFDATA --emit-llvm --emit-asm --backend \
-  force-native FAS_OPT FAS_LLC --sanitize; do
+  force-native FAS_OPT FAS_LLC --sanitize inline; do
   if grep -F -- "$removed" "$WORK/help" >/dev/null; then fail "help advertises removed $removed"; fi
 done
 sed -n '/^environment:$/,$p' "$WORK/help" >"$WORK/help-environment"
@@ -428,59 +428,14 @@ grep -F "tools FAS_OPT=$WORK/opt-wrap FAS_LLC=$WORK/llc-wrap FAS_CC=$WORK/cc-wra
 find "$TMPDIR" -mindepth 1 -delete
 temps_empty
 
-"$OCAML_FAS" --emit-llvm -g --no-inline helper "$WORK/good.fas" >"$WORK/noinline.ll" 2>"$WORK/stderr"
-grep -F "@helper() noinline #0 " "$WORK/noinline.ll" >/dev/null || fail "--no-inline missed selected function"
-if grep -F "@main() noinline #0 " "$WORK/noinline.ll" >/dev/null; then fail "--no-inline marked main"; fi
-"$OCAML_FAS" --emit-llvm -O2 --no-inline helper "$WORK/good.fas" >"$WORK/noinline-o2.ll" 2>"$WORK/stderr"
-grep -F "@helper() noinline #0 #1 {" "$WORK/noinline-o2.ll" >/dev/null || fail "--no-inline without -g missed selected function"
-if grep -F "@main() noinline" "$WORK/noinline-o2.ll" >/dev/null; then fail "--no-inline without -g marked main"; fi
-cat >"$WORK/noinline.fas" <<'FAS'
-fn helper() i32 { return 7 }
-fn main() i32 { return helper() + 3 }
-FAS
-"$OCAML_FAS" -O2 "$WORK/noinline.fas" -o "$WORK/plain-exit" >"$WORK/stdout" 2>"$WORK/stderr" || fail "plain build failed"
-"$OCAML_FAS" -O2 --no-inline helper "$WORK/noinline.fas" -o "$WORK/noinline-exit" >"$WORK/stdout" 2>"$WORK/stderr" \
-  || fail "--no-inline without -g failed to build"
-[ ! -s "$WORK/stdout" ] || fail "--no-inline build wrote stdout"
-status=0
-"$WORK/plain-exit" || status=$?
-[ "$status" -eq 10 ] || fail "plain executable exit code changed"
-status=0
-"$WORK/noinline-exit" || status=$?
-[ "$status" -eq 10 ] || fail "--no-inline executable exit code changed"
-cat >"$WORK/noinline-generic.fas" <<'FAS'
-fn leaf[S const usize](x usize) usize { return x * S + 1 }
-fn pick[S const usize, C const usize](x usize, s usize) usize {
-    if C > 1 {
-        if s < S + C { return pick[S, C / 2](x, s) }
-        return pick[S + C, C / 2](x, s)
-    }
-    return leaf[S](x)
-}
-fn main() i32 { return trunc[i32](pick[3, 8](2, 7)) }
-FAS
-for flags in "-O0" "-O2" "-O2 -g"; do
-  "$OCAML_FAS" --emit-llvm $flags --no-inline leaf "$WORK/noinline-generic.fas" >"$WORK/noinline-generic.ll" 2>"$WORK/stderr" \
-    || fail "--no-inline on a generic failed ($flags)"
-  [ "$(grep -c '^define internal i64 @"leaf\$spec\$.*) noinline' "$WORK/noinline-generic.ll")" -eq 8 ] \
-    || fail "--no-inline leaf missed instances ($flags)"
-  [ "$(grep -c '^define.* noinline' "$WORK/noinline-generic.ll")" -eq 8 ] || fail "--no-inline leaf marked others ($flags)"
-done
-"$OCAML_FAS" --emit-llvm --no-inline 'leaf[7]' --no-inline 'pick[3, 8]' "$WORK/noinline-generic.fas" >"$WORK/noinline-generic.ll" 2>"$WORK/stderr" \
-  || fail "--no-inline on instances failed"
-[ "$(grep -c '^define.* noinline' "$WORK/noinline-generic.ll")" -eq 2 ] || fail "--no-inline instances marked a wrong count"
-grep -F '@"leaf$spec$4:1:S=usize:7"(' "$WORK/noinline-generic.ll" | grep -F ' noinline' >/dev/null || fail "--no-inline leaf[7] missed"
-grep -F '@"pick$spec$4:1:S=usize:3;1:C=usize:8"(' "$WORK/noinline-generic.ll" | grep -F ' noinline' >/dev/null \
-  || fail "--no-inline pick[3, 8] missed"
-"$OCAML_FAS" -O2 --no-inline leaf "$WORK/noinline-generic.fas" -o "$WORK/noinline-generic" >"$WORK/stdout" 2>"$WORK/stderr" \
-  || fail "--no-inline leaf failed to build"
-status=0
-"$WORK/noinline-generic" || status=$?
-[ "$status" -eq 15 ] || fail "--no-inline leaf changed the exit code"
-expect_failure "$OCAML_FAS" --emit-llvm --no-inline 'leaf[4]' "$WORK/noinline-generic.fas"
-grep -Fx 'error: --no-inline function `leaf[4]` was not emitted' "$WORK/stderr" >/dev/null || fail "--no-inline missing instance error"
-grep -Fx 'help: emitted instances: `leaf[3]`, `leaf[5]`, `leaf[7]`, `leaf[9]`, ...' "$WORK/stderr" >/dev/null \
-  || fail "--no-inline missing instance help"
+# Removal A5: no inliner yet, so neither --no-inline nor @inline exists
+expect_failure "$OCAML_FAS" --no-inline helper "$WORK/good.fas"
+grep -Fx '`--no-inline` was removed; Fas has no inliner yet' "$WORK/stderr" >/dev/null \
+  || fail "--no-inline removal message changed"
+printf 'fn helper() i32 @inline { return 7 }\nfn main() i32 { return helper() }\n' >"$WORK/inline.fas"
+expect_failure "$OCAML_FAS" check "$WORK/inline.fas"
+grep -F '`@inline` was removed; Fas has no inliner yet' "$WORK/stderr" >/dev/null \
+  || fail "@inline removal message changed"
 expect_failure "$OCAML_FAS" --emit-llvm=bogus "$WORK/good.fas"
 grep -F 'unknown --emit-llvm value `bogus`; accepted value is `optimized`' "$WORK/stderr" >/dev/null \
   || fail "--emit-llvm value error unclear"

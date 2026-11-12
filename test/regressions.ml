@@ -3640,8 +3640,6 @@ let () =
       "noalias";
       "noundef align";
     ];
-  let cli_profile = cli_run [ "-g"; "--no-inline"; "helper"; "profile.fas" ] in
-  assert (cli_profile.Cli.no_inline_functions = [ "helper" ]);
   let cli_sanitizers =
     cli_run
       [
@@ -3652,15 +3650,18 @@ let () =
   in
   assert (cli_sanitizers.Cli.sanitizers = [ "address"; "undefined" ]);
   let cli_profile_ordered =
-    cli_run [ "-O3"; "-g"; "--no-inline"; "helper"; "profile.fas" ]
+    cli_run [ "-O3"; "-g"; "profile.fas" ]
   in
   assert (cli_profile_ordered.Cli.optimization = 3);
-  cli_error "no-inline-missing-name" "requires a function name" [ "-g"; "--no-inline" ];
-  cli_error "no-inline-flag-name" "requires a function name"
-    [ "-g"; "--no-inline"; "-O3"; "profile.fas" ];
-  let cli_no_inline_without_g = cli_run [ "--no-inline"; "helper"; "profile.fas" ] in
-  assert (cli_no_inline_without_g.Cli.no_inline_functions = [ "helper" ]);
-  assert (cli_no_inline_without_g.Cli.optimization = 2);
+  (* Removal A5: no inliner, so neither the attribute nor the flag exists. *)
+  cli_error "no-inline-removed" "`--no-inline` was removed; Fas has no inliner yet"
+    [ "-g"; "--no-inline"; "helper"; "profile.fas" ];
+  cli_error "no-inline-removed-bare" "`--no-inline` was removed" [ "--no-inline" ];
+  parse_error_message "inline-attribute-removed" "`@inline` was removed; Fas has no inliner yet"
+    "fn f() i64 @inline { return 7 }\n";
+  parse_error_message "inline-attribute-removed-extern" "`@inline` was removed"
+    "extern \"C\" { fn f() i64 @inline }\n";
+  assert ((cli_run [ "profile.fas" ]).Cli.optimization = 2);
   assert (
     (cli_run [ "--emit-llvm=optimized"; "profile.fas" ]).Cli.emit = Cli.Optimized_llvm);
   cli_error "emit-llvm-unknown-value" "accepted value is `optimized`"
@@ -3694,12 +3695,8 @@ let () =
         (fun removed -> assert (not (contains Cli.usage removed)))
         [ "--emit-llvm"; "--backend"; "force-native"; "FAS_OPT"; "FAS_LLC"; "--emit-asm"; "opt and llc" ];
       assert (List.length (Driver.version_lines ()) = 2));
-  cli_error "removed-no-inline-option"
-    "unknown option `-no-inline`; write `--no-inline`"
+  cli_error "removed-no-inline-option" "unknown option: -no-inline"
     [ "-no-inline"; "helper"; "profile.fas" ];
-  assert (
-    (cli_run [ "-g"; "--no-inline"; "helper"; "--no-inline"; "other"; "profile.fas" ])
-      .Cli.no_inline_functions = [ "helper"; "other" ]);
   cli_error "profile-removed" "`--profile` was removed"
     [ "--profile"; "profile.fasprof"; "profile.fas" ];
   cli_error "perf-removed" "`fas perf` was removed"
@@ -3721,100 +3718,6 @@ let () =
   cli_error "link-input-needs-executable"
     "C inputs and link flags require an executable output"
     [ "--emit-llvm"; "profile.fas"; "helper.c" ];
-  let profile_path = Filename.temp_file "fas-profile-" ".fas" in
-  Fun.protect
-    ~finally:(fun () -> Sys.remove profile_path)
-    (fun () ->
-      let channel = open_out_bin profile_path in
-      output_string channel
-        "fn helper() i64 { return 3 }\n\
-         fn other() i64 { return 4 }\n\
-         fn test() i64 { return helper() }\n";
-      close_out channel;
-      let config =
-        cli_run [ "-g"; "-O3"; "--emit-llvm"; "--no-inline"; "helper"; profile_path ]
-      in
-      assert (config.Cli.optimization = 3);
-      let profile_ir =
-        match Driver.run config with
-        | Ok output -> output
-        | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
-      in
-      if not (contains profile_ir "@helper() noinline #0 ") then
-        failwith "no-inline: selected function missing LLVM attribute";
-      if contains profile_ir "@other() noinline #0 " then
-        failwith "no-inline: attribute leaked to another function";
-      let missing_config =
-        cli_run [ "-g"; "--emit-llvm"; "--no-inline"; "missing"; profile_path ]
-      in
-      match Driver.run missing_config with
-      | Error diagnostics ->
-          let rendered = Diag.render_all ~source:None diagnostics in
-          if not (contains rendered "function `missing` was not emitted") then
-            failwith "no-inline: missing function diagnostic changed"
-      | Ok _ -> failwith "no-inline: missing function was accepted");
-  let generic_profile_source =
-    "fn check_case() i64 { return identity[i64](7) }\n\
-     fn identity[T](value T) T { return value }\n"
-  in
-  let generic_profile_hir =
-    expect_ok (Parser.parse (source generic_profile_source)) |> Sema.check |> expect_ok
-  in
-  let generic_profile_name =
-    match
-      List.find_opt
-        (fun (func : Hir.func) -> contains func.name "identity$spec$")
-        generic_profile_hir.Hir.funcs
-    with
-    | Some func -> func.name
-    | None -> failwith "no-inline: generic specialization was not emitted"
-  in
-  let generic_profile_path = Filename.temp_file "fas-profile-generic-" ".fas" in
-  Fun.protect
-    ~finally:(fun () -> Sys.remove generic_profile_path)
-    (fun () ->
-      let channel = open_out_bin generic_profile_path in
-      output_string channel generic_profile_source;
-      close_out channel;
-      let config =
-        cli_run
-          [
-            "-g";
-            "-O3";
-            "--emit-llvm";
-            "--no-inline";
-            generic_profile_name;
-            generic_profile_path;
-          ]
-      in
-      let output =
-        match Driver.run config with
-        | Ok output -> output
-        | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics)
-      in
-      if
-        not
-          (contains output (Fir_llvm.global_name generic_profile_name)
-          && contains output "noinline #0 ")
-      then failwith "no-inline: generic specialization was not selected");
-  let external_profile_path = Filename.temp_file "fas-profile-external-" ".fas" in
-  Fun.protect
-    ~finally:(fun () -> Sys.remove external_profile_path)
-    (fun () ->
-      let channel = open_out_bin external_profile_path in
-      output_string channel
-        "extern \"C\" { fn external() i64 }\nfn test() i64 { return 0 }\n";
-      close_out channel;
-      let config =
-        cli_run
-          [ "-g"; "--emit-llvm"; "--no-inline"; "external"; external_profile_path ]
-      in
-      match Driver.run config with
-      | Error diagnostics ->
-          let rendered = Diag.render_all ~source:None diagnostics in
-          if not (contains rendered "not a normal definition") then
-            failwith "no-inline: external declaration diagnostic changed"
-      | Ok _ -> failwith "no-inline: external declaration was accepted");
   let display_source_path = Filename.temp_file "fas-display-" ".fas" in
   Fun.protect
     ~finally:(fun () -> Sys.remove display_source_path)

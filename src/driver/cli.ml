@@ -11,7 +11,6 @@ type t = {
   keep : bool;
   optimization : int;
   debug : bool;
-  no_inline_functions : string list;
   sanitizers : string list;
   link_inputs : string list;
   c_flags : string list;
@@ -80,8 +79,6 @@ let usage =
   \  --emit-ir     print the lowered module as Fir text (src/fir/SPEC.md)\n\
   \  --keep        retain and report intermediate paths\n\
   \  -g            emit DWARF debug info (machine code unchanged)\n\
-  \  --no-inline NAME  accepted and ignored (a generic: every instance; NAME[ARGS]: \
-   one; repeatable)\n\
    environment:\n\
   \  FAS_CC        the C compiler for C inputs, C imports and --hosted (default \
    clang-22; without it, clang when it reports LLVM 22)"
@@ -174,8 +171,7 @@ let parse_invocation ~subcommand argv =
         || String.starts_with ~prefix:"-Wl," flag
         || flag = "-Xlinker" || passthrough_file flag
   in
-  let rec loop i input output emit keep optimization optimization_explicit debug
-      no_inline_function =
+  let rec loop i input output emit keep optimization optimization_explicit debug =
     if i >= n then
       if Option.is_none input then Error "no input files"
       else if !header_selected && !other_output then
@@ -209,7 +205,6 @@ let parse_invocation ~subcommand argv =
                 keep;
                 optimization;
                 debug;
-                no_inline_functions = List.rev no_inline_function;
                 sanitizers = Option.value ~default:[] !sanitizers;
                 link_inputs = List.rev !link_inputs_rev;
                 c_flags = List.rev !c_flags_rev;
@@ -241,15 +236,13 @@ let parse_invocation ~subcommand argv =
           else
             loop (i + 2) input
               (Some argv.(i + 1))
-              emit keep optimization optimization_explicit debug no_inline_function
+              emit keep optimization optimization_explicit debug
       | "--emit-header" ->
           header_selected := true;
           loop (i + 1) input output Header keep optimization optimization_explicit debug
-            no_inline_function
       | "--emit-ir" ->
           other_output := true;
           loop (i + 1) input output Ir keep optimization optimization_explicit debug
-            no_inline_function
       | flag
         when (not oracle)
              && (flag = "--emit-llvm" || String.starts_with ~prefix:"--emit-llvm=" flag) ->
@@ -265,11 +258,10 @@ let parse_invocation ~subcommand argv =
       | "--emit-llvm" ->
           other_output := true;
           loop (i + 1) input output Llvm keep optimization optimization_explicit debug
-            no_inline_function
       | "--emit-llvm=optimized" ->
           other_output := true;
           loop (i + 1) input output Optimized_llvm keep optimization
-            optimization_explicit debug no_inline_function
+            optimization_explicit debug
       | flag when String.starts_with ~prefix:"--emit-llvm=" flag ->
           let value = String.sub flag 12 (String.length flag - 12) in
           Error
@@ -277,22 +269,20 @@ let parse_invocation ~subcommand argv =
       | "--emit-asm" | "-S" ->
           other_output := true;
           loop (i + 1) input output Asm keep optimization optimization_explicit debug
-            no_inline_function
       | "--emit-obj" | "-c" ->
           other_output := true;
           loop (i + 1) input output Obj keep optimization optimization_explicit debug
-            no_inline_function
       | flag when String.starts_with ~prefix:"--diagnostics=" flag -> (
           let value = String.sub flag 14 (String.length flag - 14) in
           match value with
           | "text" ->
               diagnostics := Text;
               loop (i + 1) input output emit keep optimization optimization_explicit
-                debug no_inline_function
+                debug
           | "json" ->
               diagnostics := Json;
               loop (i + 1) input output emit keep optimization optimization_explicit
-                debug no_inline_function
+                debug
           | _ ->
               Error
                 ("unknown --diagnostics value `" ^ value
@@ -303,7 +293,6 @@ let parse_invocation ~subcommand argv =
             target := selected;
             target_explicit := true;
             loop (i + 1) input output emit keep optimization optimization_explicit debug
-              no_inline_function
           in
           match target_of_value value with
           | Ok selected -> select selected
@@ -313,27 +302,22 @@ let parse_invocation ~subcommand argv =
           | Ok (selected, next) ->
               os := selected;
               loop next input output emit keep optimization optimization_explicit debug
-                no_inline_function
           | Error message -> Error message)
       | "--keep" ->
           loop (i + 1) input output emit true optimization optimization_explicit debug
-            no_inline_function
       | "--all-errors" ->
           all_errors := true;
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | "--backend=native" | "--backend=llvm" ->
           native := argv.(i) = "--backend=native";
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | ("--hosted" | "--freestanding") as flag ->
           let selected = if flag = "--hosted" then Hosted else Freestanding in
           if Option.is_some !runtime && !runtime <> Some selected then
             Error "--hosted and --freestanding cannot be combined"
           else (
             runtime := Some selected;
-            loop (i + 1) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+            loop (i + 1) input output emit keep optimization optimization_explicit debug)
       | "--profile" -> Error "`--profile` was removed (Fas has no profile-guided builds)"
       | flag when String.starts_with ~prefix:"--sanitize=" flag -> (
           let value = String.sub flag 11 (String.length flag - 11) in
@@ -353,64 +337,48 @@ let parse_invocation ~subcommand argv =
                 | _ ->
                     sanitizers := Some names;
                     loop (i + 1) input output emit keep optimization
-                      optimization_explicit debug no_inline_function))
+                      optimization_explicit debug))
       | "-g" ->
           loop (i + 1) input output emit keep optimization optimization_explicit true
-            no_inline_function
       | "--no-inline" ->
-          if i + 1 >= n then Error "--no-inline requires a function name"
-          else
-            let name = argv.(i + 1) in
-            if name = "" || name.[0] = '-' then
-              Error "--no-inline requires a function name"
-            else
-              loop (i + 2) input output emit keep optimization optimization_explicit
-                debug (name :: no_inline_function)
+          Error "`--no-inline` was removed; Fas has no inliner yet"
       | ("-l" | "-L") as flag ->
           if i + 1 >= n || argv.(i + 1) = "" then Error (flag ^ " requires an argument")
           else (
             add_link_inputs [ flag; argv.(i + 1) ];
-            loop (i + 2) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+            loop (i + 2) input output emit keep optimization optimization_explicit debug)
       | "-Xlinker" ->
           if i + 1 >= n || argv.(i + 1) = "" then Error "-Xlinker requires an argument"
           else (
             add_link_inputs [ "-Xlinker"; argv.(i + 1) ];
-            loop (i + 2) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+            loop (i + 2) input output emit keep optimization optimization_explicit debug)
       | flag when String.starts_with ~prefix:"-Wl," flag ->
           let arguments = String.sub flag 4 (String.length flag - 4) in
           if List.exists (( = ) "") (String.split_on_char ',' arguments) then
             Error "-Wl, requires nonempty comma-separated linker arguments"
           else (
             add_link_inputs [ flag ];
-            loop (i + 1) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+            loop (i + 1) input output emit keep optimization optimization_explicit debug)
       | ("-I" | "-isystem" | "-D") as flag ->
           if i + 1 >= n || argv.(i + 1) = "" then Error (flag ^ " requires an argument")
           else (
             add_c_flags [ flag; argv.(i + 1) ];
-            loop (i + 2) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+            loop (i + 2) input output emit keep optimization optimization_explicit debug)
       | flag
         when (String.length flag > 2 && String.sub flag 0 2 = "-l")
              || (String.length flag > 2 && String.sub flag 0 2 = "-L") ->
           add_link_inputs [ flag ];
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | flag when String.starts_with ~prefix:"-isystem" flag && String.length flag > 8
         ->
           add_c_flags [ flag ];
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | flag when String.starts_with ~prefix:"-I" flag && String.length flag > 2 ->
           add_c_flags [ flag ];
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | flag when String.starts_with ~prefix:"-D" flag && String.length flag > 2 ->
           add_c_flags [ flag ];
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | flag
         when String.length flag = 3
              && flag.[0] = '-'
@@ -419,20 +387,18 @@ let parse_invocation ~subcommand argv =
              && flag.[2] <= '3' ->
           loop (i + 1) input output emit keep
             (Char.code flag.[2] - Char.code '0')
-            true debug no_inline_function
+            true debug
       | "-debug" -> Error "unknown option `-debug`; write `-g`"
-      | "-no-inline" -> Error "unknown option `-no-inline`; write `--no-inline`"
       | flag when String.length flag > 0 && flag.[0] = '-' ->
           Error ("unknown option: " ^ flag)
       | file when passthrough_file file ->
           add_link_inputs [ file ];
           loop (i + 1) input output emit keep optimization optimization_explicit debug
-            no_inline_function
       | file -> (
           match input with
           | None ->
               loop (i + 1) (Some file) output emit keep optimization
-                optimization_explicit debug no_inline_function
+                optimization_explicit debug
           | Some _ ->
               Error
                 "multiple input files are not supported; use \"path.fas\" for \
@@ -442,7 +408,7 @@ let parse_invocation ~subcommand argv =
     (if subcommand = Build then 1 else 2)
     None None
     (if subcommand = Check_subcommand then Ir else Executable)
-    false 2 false false []
+    false 2 false false
 
 let parse_lsp argv =
   let n = Array.length argv in

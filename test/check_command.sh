@@ -130,7 +130,7 @@ env TMPDIR="$CTMP" "$OCAML_FAS" check "$WORK/cok.fas" >"$WORK/stdout" 2>"$WORK/s
 [ ! -s "$WORK/stdout" ] && [ ! -s "$WORK/stderr" ] || fail "C import check printed output"
 [ -z "$(find "$CTMP" -mindepth 1 -print -quit)" ] || fail "check left temporary files"
 
-"$OCAML_FAS" check -O0 -g -I "$WORK" -isystem "$WORK" -D FLAG=1 --no-inline main \
+"$OCAML_FAS" check -O0 -g -I "$WORK" -isystem "$WORK" -D FLAG=1 \
   --sanitize=address "$WORK/good.fas" >"$WORK/stdout" 2>"$WORK/stderr" \
   || fail "check rejected an accepted option"
 [ ! -s "$WORK/stdout" ] && [ ! -s "$WORK/stderr" ] || fail "accepted options printed output"

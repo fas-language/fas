@@ -333,8 +333,7 @@ fn main() i32 {
 ```text
 4 16
 ```
-- **`@align(N)`** raises a struct's alignment.
-- **`@inline`** after a function's result type (`fn add(a u64, b u64) u64 @inline {`) inlines every call to it, at any `-O`. On a generic it applies to every instance. `--no-inline` overrides it. These are the only two annotations.
+- **`@align(N)`** raises a struct's alignment. It is the only annotation. (`@inline` and `--no-inline` were removed: Fas has no inliner yet. They come back with the optimizer.)
 - **`opaque Name`** declares a type you only hold as `handle[Name]`, a typed address with no arithmetic. It is mostly for C types like `FILE`.
 
 ## Generics

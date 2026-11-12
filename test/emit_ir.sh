@@ -127,12 +127,5 @@ emit_one "$ROOT/test/ir_json.fas" >"$EMIT_IR_TMP/repeat.fir"
 cmp "$EMIT_IR_TMP/out.fir" "$EMIT_IR_TMP/repeat.fir"
 "$OCAML_FAS" --emit-ir "$ROOT/test/ir_json.fas" -o "$EMIT_IR_TMP/file.fir"
 cmp "$EMIT_IR_TMP/out.fir" "$EMIT_IR_TMP/file.fir"
-# --no-inline marks the function; -g changes nothing in the dump
-"$OCAML_FAS" -g --no-inline pick --emit-ir "$ROOT/test/ir_json.fas" >"$EMIT_IR_TMP/noinline.fir"
-grep -E '^func @pick .* noinline' "$EMIT_IR_TMP/noinline.fir" >/dev/null || {
-  echo "emit-ir: --no-inline pick did not mark @pick noinline" >&2
-  exit 1
-}
-"$FAS_FIR_TOOL" --check "$EMIT_IR_TMP/noinline.fir" >/dev/null
 
 echo "emit-ir: $count compilable source files gave valid Fir; $skipped were rejected"

@@ -1042,10 +1042,6 @@ let () =
   assert (debug.debug && debug.optimization = 2);
   let debug_ordered = expect_cli (Cli.parse [| "fas"; "-O3"; "-g"; "root.fas" |]) in
   assert (debug_ordered.debug && debug_ordered.optimization = 3);
-  let no_inline =
-    expect_cli (Cli.parse [| "fas"; "-g"; "--no-inline"; "helper"; "root.fas" |])
-  in
-  assert (no_inline.no_inline_functions = [ "helper" ]);
   List.iter
     (fun mode ->
       List.iter
@@ -1095,7 +1091,7 @@ let () =
   (match Cli.parse [| "fas"; "--help" |] with
   | Ok Cli.Help ->
       assert (contains Cli.usage "-g");
-      assert (contains Cli.usage "--no-inline");
+      assert (not (contains Cli.usage "inline"));
       assert (contains Cli.usage "-I DIR, -isystem DIR, -D NAME[=VALUE]");
       assert (not (contains Cli.usage "--sanitize"))
   | Ok (Cli.Run _)
@@ -1151,7 +1147,7 @@ let () =
       | Ok _ -> assert false)
     [
       ("-debug", "unknown option `-debug`; write `-g`");
-      ("-no-inline", "unknown option `-no-inline`; write `--no-inline`");
+      ("--no-inline", "`--no-inline` was removed; Fas has no inliner yet");
     ];
   (match Cli.parse [| "fas"; "check"; "-O3"; "--sanitize=address"; "one.fas" |] with
   | Ok (Cli.Check config) ->

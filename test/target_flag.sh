@@ -109,7 +109,7 @@ fi
 grep -qF -- '--target=force-native: cannot determine the host CPU (/bin/false failed (exit 1))' \
   "$TARGET_TMP/probe.err" || fail "host CPU probe failure message changed"
 
-"$OCAML_FAS" --target=portable --no-inline spread --emit-llvm "$FIXTURES/radix_scatter.fas" \
+"$OCAML_FAS" --target=portable --emit-llvm "$FIXTURES/radix_scatter.fas" \
   >"$TARGET_TMP/radix.ll"
 "$LLVM_OPT" -passes=verify "$TARGET_TMP/radix.ll" -disable-output
 "$LLVM_OPT" -S "-passes=default<O2>" "$TARGET_TMP/radix.ll" -o "$TARGET_TMP/radix.O2.ll"
@@ -121,10 +121,10 @@ awk '
   /^--- / { name = ""; fn = "" }
   /^Name: / { name = $2 }
   /^Function: / { fn = $2 }
-  /UnrollCount: / { if (name == "PartialUnrolled" && fn == "spread") found = 1 }
+  /UnrollCount: / { if (name == "PartialUnrolled") found = 1 }
   END { exit (found ? 0 : 1) }
 ' "$TARGET_TMP/radix.yaml" \
-  || fail "portable radix scatter loop in spread was not partially unrolled"
+  || fail "portable radix scatter loop was not partially unrolled"
 
 cat >"$TARGET_TMP/opt-wrap.sh" <<EOF
 #!/bin/sh

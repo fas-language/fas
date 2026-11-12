@@ -11,7 +11,6 @@ type t = {
   keep : bool;
   optimization : int;
   debug : bool;
-  no_inline_functions : string list;
   sanitizers : string list;
   link_inputs : string list;
   c_flags : string list;

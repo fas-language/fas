@@ -167,7 +167,7 @@ fn arrays(x u64, n usize) void {
 
 // Inlining: several returns, a callee alloca with a runtime index, a call
 // in a loop body, nested inline calls and a void callee
-fn pick(a u64, b u64, c usize) u64 @inline {
+fn pick(a u64, b u64, c usize) u64 {
   t arr[4, u64] = {}
   t[c & 3] = a
   if a > b { return t[c & 3] - b }
@@ -175,9 +175,9 @@ fn pick(a u64, b u64, c usize) u64 @inline {
   return b * 3
 }
 
-fn twice(x u64) u64 @inline { return pick(x, 10, 1) + pick(x, 20, 2) }
+fn twice(x u64) u64 { return pick(x, 10, 1) + pick(x, 20, 2) }
 
-fn bump_inl(p addr, k usize) void @inline {
+fn bump_inl(p addr, k usize) void {
   if k == 0 { return }
   p[u64, 0] += k
 }

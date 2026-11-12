@@ -4603,7 +4603,6 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                        span;
                        extent = span;
                        body_span = span;
-                       inline = false;
                      })
             | _ -> None
           in
