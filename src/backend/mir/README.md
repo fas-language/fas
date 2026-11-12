@@ -24,7 +24,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_ra.ml` | Fixed-interval linear scan: one hull interval per virtual register (from per-register liveness), no splitting; spilled registers live in a slot and go through reserved scratch registers (see the header comment). |
 | `mir_check.ml` | Verifies an allocation without trusting the allocator: an abstract machine over registers and slots, iterated to a fixpoint. |
 | `../native/` | What stays of the old backend: the x86-64 encoder (`x64.ml`), ELF writing (`elf64.ml`, `native_object.ml`, `elf_attrs.ml`) and the Fas runtime sources (`native_runtime.ml`, `runtime/`). |
-| `mir_runtime.ml` | Appends the correctly rounded `fma` helpers (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
+| `mir_runtime.ml` | Appends the `fma` helpers, correctly rounded in the current rounding mode with the IEEE flags (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
 | `mir_driver.ml` | The driver's entry (`--backend=native`): compiles the Fir module the front end lowered. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |

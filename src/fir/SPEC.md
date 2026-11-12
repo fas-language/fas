@@ -254,6 +254,8 @@ Flags are written right after the opcode: `add nsw i32 %a, %b`. The verifier rej
 
 All of these allow the flags `contract` (may be fused into an FMA) and `fast`.
 
+**The floating-point environment (native backend).** Every float operation and every conversion between floats and integers, of any width, rounds in the current dynamic rounding mode (C `fesetround`) and raises the IEEE exception flags the operation itself raises, as C with `#pragma STDC FENV_ACCESS ON` and Annex F expects: inexact, overflow, underflow (for an inexact tiny result, tininess detected after rounding, as x86 does), invalid (also for a signaling NaN operand) and divide-by-zero. This holds for the software paths too: `f16` arithmetic and conversions, `fma` at every width, and the `Fir_wide` integer conversions. `floor ceil ftrunc roundeven` ignore the mode and raise no inexact (as C's functions; invalid only for a signaling NaN). An out-of-range `fptosi`/`fptoui` raises invalid (its result is still poison, §8). Not guaranteed: an operation whose result is unused may be removed, so a front end that needs the flags of a computation keeps its result alive (a `volatile` store, for example). The LLVM path (`--llvm`) gives none of this yet: it emits ordinary (not strictfp) operations, which LLVM may fold, move or lower with other flags.
+
 ### Comparison, selection, conversion
 
 | Text | Meaning |
@@ -509,6 +511,8 @@ The backends add no checks of their own beyond the division trap and the vector 
 
 ## 12. Native backend support status
 
+The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3, SSSE3, SSE4, POPCNT, LZCNT, BMI, FMA or AVX), so it runs on any x86-64 CPU.
+
 **Everything in §2–§7 parses and verifies, but the native backend compiles only a subset.** `fas-fir` reports the rest as `not supported by the native backend yet: ...` or `native backend: ...`. Each gap below has a workaround that needs only supported features.
 
 | Area | Supported natively | Not yet | Workaround |
@@ -517,7 +521,7 @@ The backends add no checks of their own beyond the division trap and the vector 
 | Float types | f16 (C `_Float16`: computed as f32 and rounded once per operation, `fma` exact, every comparison and conversion; held as 16-bit integers by `Fir_wide`), f32 f64 f80 (x87 extended precision, C `long double`: every op, comparison and conversion, also wide integers to and from f80, and atomics through libatomic) | — | — |
 | Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters, results and variadic arguments follow the SysV ABI for C vectors (§5) | Atomic vector loads and stores; vectors in syscalls; vector `atomic_rmw`/`cmpxchg`; `masked_load/store` of bool vectors | Scalar loops. |
 | Integer ops | Everything in §6, on scalars and vectors, including `bswap`, `bitrev`, `abs`, `smulh`/`umulh` and the `*_ovf` family | — | — |
-| Float ops | Everything in §6, on scalars and vectors: fmin/fmax follow §6 (NaN loses, -0 < +0), `frem` is exact (as C `fmod`, through x87 `fprem`), `fma` is correctly rounded (software helpers: baseline x86-64 has no FMA instruction, and x87 none for f80) | — | — |
+| Float ops | Everything in §6, on scalars and vectors: fmin/fmax follow §6 (NaN loses, -0 < +0), `frem` is exact (as C `fmod`, through x87 `fprem`), `fma` is correctly rounded (software helpers: baseline x86-64 has no FMA instruction, and x87 none for f80), `floor ceil ftrunc roundeven` through integer helpers (no SSE4.1 `roundsd`); every op honors the rounding mode and raises the IEEE flags (§6) | — | — |
 | fcmp | All 16 predicates, on scalars and vectors | — | — |
 | Conversions | All, including plain and `_sat` fptosi/fptoui | — | — |
 | Memory | alloca of any size (constant, or variable with any align), `stacksave`/`stackrestore`, load/store (plain, volatile, atomic), ptradd, memcpy/memmove/memset of any size (constant or variable) and any byte, overlap-safe memmove | — | — |
