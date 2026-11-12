@@ -505,9 +505,33 @@ The backends add no checks of their own beyond the division trap and the vector 
 | bool / enum | load of a `_Bool` or of an enum with a fixed range | `icmp ugt %b, 1` (or outside the enum's range) traps. |
 | vla-bound | `T a[n]` | `icmp sle %n, 0` traps, before the `alloca`. |
 | unreachable, return | `__builtin_unreachable()`, falling off a non-void function | `trap` + `unreachable` in place of a bare `unreachable`. |
-| builtin | `__builtin_clz(0)`, `__builtin_ctz(0)` | `icmp eq %x, 0` traps before `ctlz` / `cttz`. |
+| builtin | `__builtin_clz(0)`, `__builtin_ctz(0)` | `icmp eq %x, 0` traps before `clz` / `ctz`. |
 
 `trap` is `ud2`, so a checked program dies by `SIGILL`, as clang's do.
+
+### C23 features
+
+Each C23 feature that needs code generation maps to Fir as follows. The test that runs the mapping is named in the last column (`test/fas_fir/c/`).
+
+| C23 | Fir | Test |
+|---|---|---|
+| `_BitInt(N)`, `unsigned _BitInt(N)` | `iN`, any N up to 2^23 - 1, all integer ops (`Fir_wide` splits the wide ones). ABI as §5: up to 128 bits like `__int128`, wider in memory. | `wide`, `huge` |
+| `ckd_add`, `ckd_sub`, `ckd_mul` (`<stdckdint.h>`), mixed operand and result types | Extend both operands to an integer one bit wider than the widest of the three types' ranges needs (`i129` covers every standard type), do the op, `trunc` to the result type, extend back and `icmp eq` with the wide value; the overflow flag is the negation. Same-type signed cases may use `sadd_ovf` & co. instead. | `c23` |
+| `<stdbit.h>` (`stdc_leading_zeros`, `_ones`, `trailing_*`, `first_*`, `count_*`, `has_single_bit`, `bit_width`, `bit_floor`, `bit_ceil`) | `clz`, `ctz`, `popcnt` (without `zero_poison`, so 0 gives the width), `xor` with all ones for the `_ones` forms, `shl` for `bit_floor`/`bit_ceil`. | `c23` |
+| `#pragma STDC FENV_ACCESS ON`, `<fenv.h>` | Nothing: every float op and conversion honours the dynamic rounding mode and raises the flags (§6). Call glibc's `fesetround`, `fetestexcept` & co. | `fenv` |
+| `#pragma STDC FENV_ROUND dir` | Save the mode with `fegetround`, `fesetround(dir)` at the start of the block, restore on every exit from it (as the VLA `stacksave`/`stackrestore` pair). | `fenv` (the ops in each mode) |
+| `_Float16` | `f16` (software arithmetic, SSE ABI). | `f16` |
+| `long double` | `f80` (x87). | `f80` |
+| `_Complex` | Pairs of scalars in memory; ABI as `agg` (§5). | `aggabi` |
+| `[[unsequenced]]`, `[[reproducible]]`, `[[noreturn]]`, `unreachable()` | Attributes need nothing; `unreachable()` is `unreachable` (or `trap` first, see above). | `ubtrap` |
+| VLAs (mandatory again for VM types) | `alloca` of a variable size between `stacksave`/`stackrestore`. | `vla` |
+| `thread_local` | `global ... thread_local`. | `tls`, `tlsgd` |
+| `<stdatomic.h>`, `_Atomic` | Atomic `load`/`store` orderings, `atomic_rmw`, `cmpxchg`, `fence`, at any size (`Fir_atomic`: odd widths as a `cmpxchg` loop, over 64 bits and `f80` through libatomic, as C). | `atomwide` |
+| `memset_explicit` | `memset volatile`. | |
+| `alignas`, `alignof` | The `align` of `alloca`, `global`, `load`/`store`; layouts are the front end's. | `aggabi`, `vecabi` |
+| `constexpr`, `typeof`, `auto`, `nullptr`, `#embed`, `static_assert` | Front-end only. `#embed` becomes `bytes` in a global initializer. | |
+
+Not supported: `_Float128`, `_Float32x`/`_Float64x` beyond `f80`, and the decimal floats (`_Decimal32/64/128`). They are optional in C23, and Fir has no `f128` or decimal type yet.
 
 ## 12. Native backend support status
 
