@@ -32,7 +32,7 @@ let view_source_type = function
 let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     ~generic_const_argument ?eval_context ?(eval_globals = []) ?(array_lengths = [])
     ?(c_aliases = []) ?(c_unsupported = []) ?(c_nonnull_parameters = [])
-    ?(c_string_parameters = []) ?(c_record_calls = []) ?(c_alloc_size_parameters = [])
+    ?(c_string_parameters = []) ?(c_alloc_size_parameters = [])
     ?(eager_functions = false) ?recovered ~top_level_bindings ~limits ~type_node_account
     specializations program =
   let eval_structs, eval_named_types, eval_consts, eval_arrays =
@@ -716,9 +716,6 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       c_unsupported;
       c_nonnull_parameters;
       c_string_parameters;
-      c_record_calls;
-      record_result_call = false;
-      record_call_checked = false;
       c_alloc_size_parameters;
       signatures = validation_signatures;
       external_c_functions =

@@ -544,7 +544,6 @@ let c_replay_run ((file, imported) : string * C_import.mapped) text =
           ~c_nonnull_parameters:imported.nonnull_parameters
           ~c_records:imported.record_types
           ~c_string_parameters:imported.c_string_parameters
-          ~c_record_calls:imported.record_calls
           ~c_alloc_size_parameters:imported.alloc_size_parameters program
       with
       | Ok _ -> []
@@ -564,7 +563,6 @@ let c_semantic_result ((source, imported) : string * C_import.mapped) text =
     Sema.check ~c_aliases:imported.aliases ~c_unsupported:imported.unsupported
       ~c_nonnull_parameters:imported.nonnull_parameters ~c_records:imported.record_types
       ~c_string_parameters:imported.c_string_parameters
-      ~c_record_calls:imported.record_calls
       ~c_alloc_size_parameters:imported.alloc_size_parameters program
   in
   match run () with
@@ -2265,21 +2263,13 @@ let () =
   let array_vararg_rendered = semantic_render array_vararg in
   if array_vararg_rendered <> array_vararg_expected then
     failwith ("variadic-array-help: unexpected diagnostic: " ^ array_vararg_rendered);
-  let record_vararg =
+  (* removal B1: a struct goes through C varargs with its agg ABI *)
+  semantic_accept "variadic-record-by-value"
     "struct Item { value i32 }\n\
      extern \"C\" { fn consume(marker i32, ...) void }\n\
      fn pass() void { item Item = {1}\n\
      consume(1, item)\n\
-     return }\n"
-  in
-  let record_vararg_expected =
-    expected_diagnostic_without_help ~line_number:4 "consume(1, item)" 12 4
-      "aggregate `Item` cannot be passed through C varargs"
-  in
-  let record_vararg_rendered = semantic_render record_vararg in
-  if record_vararg_rendered <> record_vararg_expected then
-    failwith
-      ("variadic-record-no-help: unexpected diagnostic: " ^ record_vararg_rendered);
+     return }\n";
   let array_expression_vararg =
     "extern \"C\" { fn consume(marker i32, ...) void }\n\
      fn pass() void { items arr[2,arr[2,u8]] = {{0,0},{0,0}}\n\
@@ -3197,28 +3187,26 @@ let () =
   semantic_error "unreached-defer-does-not-consume-break"
     "function `spin` returning `i32` may reach the end without `return`"
     "fn spin() i32 { while true { break\n defer { while true { } } } }\n";
-  semantic_error "extern-c-struct-parameter"
-    "C functions that take or return struct `S` by value cannot be imported"
+  (* removal B1: C functions declared or imported here take and return
+     structs by value; Fas definitions still cannot *)
+  semantic_accept "extern-c-struct-parameter"
     "struct S { x i64 }\nextern \"C\" { fn take(value S) void }\n";
   semantic_error "extern-c-array-parameter"
     "aggregate parameter `value` of type `arr[2,i64]` cannot be passed by value; \
      declare `value` as `addr`"
     "extern \"C\" { fn take(value arr[2,i64]) void }\n";
-  semantic_error "extern-c-struct-return"
-    "C functions that take or return struct `S` by value cannot be imported"
+  semantic_accept "extern-c-struct-return"
     "struct S { x i64 }\nextern \"C\" { fn make() S }\n";
-  let extern_c_struct_parameter =
-    "struct Widget { data u8 }\nextern \"C\" { fn receive(item Widget) void }\n"
-  in
-  semantic_pin "extern-c-struct-parameter-import-diagnostic" extern_c_struct_parameter 2
-    (String.length "extern \"C\" { fn receive(item " + 1)
-    6 "C functions that take or return struct `Widget` by value cannot be imported" None;
-  let extern_c_struct_result =
-    "struct Packet { data u8 }\nextern \"C\" { fn produce() Packet }\n"
-  in
-  semantic_pin "extern-c-struct-result-import-diagnostic" extern_c_struct_result 2
-    (String.length "extern \"C\" { fn produce() " + 1)
-    6 "C functions that take or return struct `Packet` by value cannot be imported" None;
+  semantic_accept "extern-c-struct-result-uses"
+    "struct S { x i64 }\n\
+     extern \"C\" { fn make() S\n fn take(value S) i64\n fn log(n i32, ...) void }\n\
+     struct Holder { inner S }\n\
+     fn run() i64 { h Holder = {{0}}\n\
+     h.inner = make()\n\
+     local S = make()\n\
+     log(1, make())\n\
+     address addr = &take\n\
+     return take(make()) + take(local) + h.inner.x }\n";
   semantic_error "extern-c-vector-parameter"
     "cannot use `vec[4, i32]` by value; use a pointer"
     "extern \"C\" { fn take(value vec[4,i32]) void }\n";
@@ -14621,9 +14609,10 @@ let () =
   unsupported "fas_int128_value" "`__int128` has no Fas type" "fas_int128_value(1)";
   unsupported "fas_uint128_value" "`__int128` has no Fas type" "fas_uint128_value(1)";
   unsupported "fas_bitint_value" "`_BitInt` has no Fas type" "fas_bitint_value(1)";
-  unsupported "fas_variadic_by_value"
-    "variadic functions with struct and union values are not supported"
-    "fas_variadic_by_value(0)";
+  c_semantic_accept "c-record-value-variadic" c_matrix
+    "fn probe() i32 {\n\
+     v FasByValue = {3}\n\
+     return fas_variadic_by_value(v, v, 1) }\n";
   c_semantic_accept "c-record-value-declaration" c_matrix
     "fn probe() i32 {\n\
      v FasByValue = {3}\n\
@@ -14645,42 +14634,28 @@ let () =
      fas_direct_record_array[1] = fas_struct_by_value(fas_direct_record_array[0])\n\
      return xs[1].field + p.left.field }\n";
   c_semantic_message "c-record-value-literal-argument"
-    "argument 1 of `fas_struct_by_value` passes `FasByValue` by value; pass a \
-     variable, field or array element of type `FasByValue`"
+    "array, struct, or vector initializer needs a destination type"
     c_matrix
     "fn probe() i32 {\nr FasByValue = fas_struct_by_value({3})\nreturn r.field }\n";
-  c_semantic_message "c-record-value-call-argument"
-    "argument 1 of `fas_struct_by_value` passes `FasByValue` by value; pass a \
-     variable, field or array element of type `FasByValue`"
-    c_matrix
+  c_semantic_accept "c-record-value-call-argument" c_matrix
     "fn probe() i32 {\n\
      v FasByValue = {3}\n\
      r FasByValue = fas_struct_by_value(fas_struct_by_value(v))\n\
      return r.field }\n";
   c_semantic_message "c-record-value-wrong-argument"
-    "argument 1 of `fas_struct_by_value` passes `FasByValue` by value; pass a \
-     variable, field or array element of type `FasByValue`, got `FasUnionByValue`"
+    "argument 1 of `fas_struct_by_value` is `FasUnionByValue`, expected `FasByValue`"
     c_matrix
     "fn probe() i32 {\n\
      u FasUnionByValue\n\
      u.integer = 1\n\
      r FasByValue = fas_struct_by_value(u)\n\
      return r.field }\n";
-  c_semantic_message "c-record-value-discarded-result"
-    "C function `fas_struct_by_value` returns `FasByValue` by value; use the result \
-     only as `x FasByValue = fas_struct_by_value(...)` or `place = \
-     fas_struct_by_value(...)`"
-    c_matrix
+  c_semantic_accept "c-record-value-discarded-result" c_matrix
     "fn probe() i32 {\nv FasByValue = {3}\nfas_struct_by_value(v)\nreturn 0 }\n";
-  c_semantic_message "c-record-value-field-of-result"
-    "C function `fas_struct_by_value` returns `FasByValue` by value; use the result \
-     only as `x FasByValue = fas_struct_by_value(...)` or `place = \
-     fas_struct_by_value(...)`"
-    c_matrix
+  c_semantic_accept "c-record-value-field-of-result" c_matrix
     "fn probe() i32 {\nv FasByValue = {3}\nreturn fas_struct_by_value(v).field }\n";
   c_semantic_message "c-record-value-wrong-destination"
-    "C function `fas_struct_by_value` returns `FasByValue`, but the destination is \
-     `FasUnionByValue`"
+    "value for `u` is `FasByValue`, expected `FasUnionByValue`"
     c_matrix
     "fn probe() i32 {\n\
      v FasByValue = {3}\n\
@@ -14707,20 +14682,14 @@ let () =
     "fn probe() i32 {\np FasPoint = fas_point_named(1, \"ab\")\nreturn p.x }\n";
   c_semantic_accept "c-record-value-result-c-string-literal" c_record_value_calls
     "fn probe() i32 {\np FasPoint = fas_point_named(1, c\"ab\")\nreturn p.x }\n";
-  c_semantic_message "c-record-value-shadowed-declaration"
-    "the declaration of `v` cannot use `v` in the arguments of `fas_struct_by_value`; \
-     give the result another name"
-    c_matrix
+  c_semantic_accept "c-record-value-shadowed-declaration" c_matrix
     "fn probe() i32 {\n\
      v FasByValue = {3}\n\
      if true {\n\
      v FasByValue = fas_struct_by_value(v)\n\
      return v.field }\n\
      return 0 }\n";
-  c_semantic_message "c-record-value-address"
-    "C function `fas_struct_by_value` passes a struct or union by value; Fas calls it \
-     through an adapter and cannot take its address"
-    c_matrix "fn probe() i32 {\np addr = &fas_struct_by_value\nreturn 0 }\n";
+  c_semantic_accept "c-record-value-address" c_matrix "fn probe() i32 {\np addr = &fas_struct_by_value\nreturn 0 }\n";
   unsupported "fas_bitfield_global" "bit-fields are not supported"
     "fas_bitfield_global = null";
   c_semantic_accept "c-import-array-global" c_matrix
@@ -15382,8 +15351,7 @@ let () =
           align=4 {word u32 @0, bytes arr[8, u8] @0, nested FasContainerNested @0}")
   then failwith "container union manifest omitted its layout or fields";
   c_semantic_message "c-import-union-by-value-parameter"
-    "argument 1 of `fas_union_by_value` passes `FasUnionRecord` by value; pass a \
-     variable, field or array element of type `FasUnionRecord`"
+    "null requires an addr or handle context"
     record_import_cases "fn probe() i32 { return fas_union_by_value(null) }\n";
   c_semantic_accept "c-record-value-union-argument" record_import_cases
     "fn probe() i32 {\nu FasUnionRecord\nu.value = 2\nreturn fas_union_by_value(u) }\n";

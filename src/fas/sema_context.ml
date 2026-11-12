@@ -62,9 +62,6 @@ type context = {
   external_c_functions : string list;
   c_nonnull_parameters : (string * int list) list;
   c_string_parameters : (string * (int * string option) list) list;
-  c_record_calls : (string * (int list * bool)) list;
-  mutable record_result_call : bool;
-  mutable record_call_checked : bool;
   c_alloc_size_parameters : (string * int list list) list;
   c_unsupported : (string * string) list;
   signatures : (string * signature) list;
@@ -114,7 +111,6 @@ let filter_context_names visible context =
     external_c_functions = List.filter visible context.external_c_functions;
     c_nonnull_parameters = filter_pairs context.c_nonnull_parameters;
     c_string_parameters = filter_pairs context.c_string_parameters;
-    c_record_calls = filter_pairs context.c_record_calls;
     c_alloc_size_parameters = filter_pairs context.c_alloc_size_parameters;
     c_unsupported = filter_pairs context.c_unsupported;
     signatures = filter_pairs context.signatures;

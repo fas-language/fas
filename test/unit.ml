@@ -1560,7 +1560,7 @@ let () =
     (* struct P { i8; [3 x i8]; i32; i16 } + 2 bytes tail padding: 12 bytes;
        Q { [0 x <8 x i8>]; P; [4 x i8]; i64 }: 24. 2 Ps and a Q are 48. *)
     let static_padded =
-      fir_data_module ~lay:[ ("P", (12, 4)); ("Q", (24, 8)) ] (fun mc ->
+      fir_data_module ~lay:[ ("P", (12, 4, [])); ("Q", (24, 8, [])) ] (fun mc ->
           Lower_emit.array_global mc ~name:"padded" ~elem_ty:(Low.Struct "P") ~elems:[ 0L; 0L ]
             ~align:4;
           Lower_emit.array_global mc ~name:"nested" ~elem_ty:(Low.Struct "Q") ~elems:[ 0L ]
@@ -2032,7 +2032,7 @@ let () =
     let w_size = Lower_emit.size_of (Hashtbl.create 1) (Low.Array (2, Low.Vector (3, Low.I8))) in
     assert (w_size = 8);
     let wrapped =
-      fir_data_module ~lay:[ ("W", (w_size, 4)) ] (fun mc ->
+      fir_data_module ~lay:[ ("W", (w_size, 4, [])) ] (fun mc ->
           Lower_emit.array_global mc ~name:"w" ~elem_ty:(Low.Struct "W") ~elems:[ 0L ]
             ~align:4)
     in

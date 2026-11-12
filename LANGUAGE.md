@@ -695,7 +695,7 @@ Package zlibb was not found
 
 ### C structs by value
 
-Many C APIs pass small structs by value: raylib's `ClearBackground(Color)`, `GetMousePosition()` returning `Vector2`. Fas calls them through a hidden C adapter that clang compiles, so the C calling convention is always clang's own. On the Fas side the struct stays a place:
+Many C APIs pass small structs by value: raylib's `ClearBackground(Color)`, `GetMousePosition()` returning `Vector2`. Fas calls them directly with the System V calling convention: the backend classifies each struct or union from its C layout, as a C compiler does. On the Fas side the struct stays a place:
 
 ```fas
 use "C" <stdio.h>
@@ -710,20 +710,20 @@ fn main() i32 {
     bg Color = {245, 245, 245, 255}
     show(bg)                          // argument: a variable, field or array element
     a Vector2 = {1.0, 2.0}
-    sum Vector2 = add(a, a)           // result: only in a declaration ...
-    sum = add(sum, a)                 // ... or an assignment to a place
+    sum Vector2 = add(a, a)           // result: a declaration ...
+    sum = add(add(sum, a), a)         // ... an assignment, or another call's argument
     printf(c"%g %g\n", cvt[f64](sum.x), cvt[f64](sum.y))
     return 0
 }
 ```
 ```text
 245 245 245 255
-3 6
+4 8
 ```
 
-- A by-value argument must be a variable, field or array element of exactly that struct type. A literal such as `show({1, 2, 3, 4})` or a nested call is an error: declare a local first.
-- A struct result is used only as `x S = f(...)` or `place = f(...)`. A discarded call or `f(...).x` is an error naming both forms. A declaration cannot pass its own name: `v S = f(v)` is an error. Use a new name, or assign `v = f(v)` to an existing `v`.
-- This works for header and C-block functions, `static` or not, structs and unions, packed or aligned. Variadic functions with struct arguments stay unsupported. `&f` of such a function is an error, because Fas calls the adapter, not `f`.
+- A by-value argument is a variable, field, array element or another C call's struct result, of exactly that struct type. A literal such as `show({1, 2, 3, 4})` has no destination type and is an error: declare a local first.
+- A struct result can initialize a declaration, be assigned to any place (`p.pos = f(...)`, `xs[i] = f(...)`), be passed to another C function, be read as `f(...).x`, or be discarded.
+- This works for header and C-block functions, `static` or not, structs and unions, packed or aligned, and for the variadic arguments of variadic functions. `&f` is the address of `f` itself. Only a `static` C function is reached through a small generated C wrapper, because it has no symbol to call.
 - Fas functions still never take or return structs by value. This is only for calling C.
 
 ### Assembly

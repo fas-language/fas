@@ -19,17 +19,27 @@ ulimit -c 0 || true
 "$LLVM_OPT" -passes='default<O2>' -verify-each "$TMP/program.ll" -S \
   -o "$TMP/program-o2.ll"
 "$LLVM_OPT" -passes=verify "$TMP/program-o2.ll" -disable-output
-if grep -E 'byval|sret' "$TMP/program.ll" >/dev/null; then
-  echo 'c_record_values: Fas IR passes records by value' >&2
+# Fas calls C by-value functions directly through Fir's agg ABI (removal
+# B1): no adapters, so the LLVM rendering has the byval/sret forms
+grep -E 'byval|sret' "$TMP/program.ll" >/dev/null || {
+  echo 'c_record_values: no byval/sret in the LLVM rendering' >&2
+  exit 1
+}
+if "$OCAML_FAS" --emit-ir "$ROOT/test/c_record_values.fas" \
+  | grep -E '^declare @__fas_c_adapter_' | grep -v '_rv_static ' >/dev/null; then
+  echo 'c_record_values: an extern by-value function got a C adapter' >&2
   exit 1
 fi
-for level in 0 2; do
-  "$OCAML_FAS" -O"$level" -c "$ROOT/test/c_record_values.fas" \
-    -o "$TMP/program-$level.o"
-  "$CC" -std=c11 -Wall -Wextra -Werror -O"$level" -I"$ROOT/test" \
-    "$ROOT/test/c_record_values.c" "$ROOT/test/c_record_values_driver.c" \
-    "$TMP/program-$level.o" -o "$TMP/program-$level"
-  "$TMP/program-$level" >"$TMP/actual-$level"
-  diff -u "$TMP/expected" "$TMP/actual-$level"
+for oracle in "" llvm; do
+  for level in 0 2; do
+    FAS_ORACLE=$oracle "$OCAML_FAS" -O"$level" -c "$ROOT/test/c_record_values.fas" \
+      -o "$TMP/program-$level.o"
+    "$CC" -std=c11 -Wall -Wextra -Werror -O"$level" -I"$ROOT/test" \
+      "$ROOT/test/c_record_values.c" "$ROOT/test/c_record_values_driver.c" \
+      "$TMP/program-$level.o" -o "$TMP/program-$level"
+    "$TMP/program-$level" >"$TMP/actual-$level"
+    diff -u "$TMP/expected" "$TMP/actual-$level"
+  done
 done
-echo 'c_record_values: C struct and union arguments and results O0/O2: ok'
+echo 'c_record_values: C struct and union arguments and results (fixed, variadic,'
+echo '  nested results, field targets, function addresses) native and LLVM O0/O2: ok'

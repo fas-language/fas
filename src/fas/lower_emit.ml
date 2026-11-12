@@ -30,8 +30,11 @@ open Fir
 
 (* ---------- layouts ---------- *)
 
-(* struct name -> (size, align), from the front end's layouts *)
-type layouts = (string, int * int) Hashtbl.t
+(* struct name -> (size, align, agg fields), from the front end's layouts.
+   The fields are the struct's flattened scalar leaves (offset, Fir type),
+   which Fir_abi classifies when the struct crosses a C call by value; they
+   are [] above 16 bytes, where the struct is MEMORY class anyway *)
+type layouts = (string, int * int * (int * Fir.ty) list) Hashtbl.t
 
 let rec layout (lay : layouts) (t : Low.ty) =
   match t with
@@ -62,7 +65,7 @@ let rec layout (lay : layouts) (t : Low.ty) =
   | Low.Struct name -> (
       match Hashtbl.find_opt lay name with
       | None -> unsupported "unknown struct %s" name
-      | Some sa -> sa)
+      | Some (size, align, _) -> (size, align))
 
 let size_of lay t = fst (layout lay t)
 let is_aggregate = function Low.Struct _ | Low.Array _ -> true | _ -> false
@@ -86,7 +89,13 @@ let rec fir_ty (t : Low.ty) =
 let abi lay (t : Low.ty) (e : Low.extension) =
   if is_aggregate t then
     let size, align = layout lay t in
-    Agg { size; align; fields = [] }
+    let fields =
+      match t with
+      | Low.Struct name -> (
+          match Hashtbl.find_opt lay name with Some (_, _, fields) -> fields | None -> [])
+      | _ -> []
+    in
+    Agg { size; align; fields }
   else
     match e with
     | Low.No_extension -> Scalar (fir_ty t)
@@ -473,8 +482,15 @@ let emit_call fn result ext (ret : Low.ty) callee args =
   let param_abis = List.filteri (fun k _ -> k < nfixed) (List.map (fun (t, e, _) -> abi lay t e) args) in
   let sig_ = { param_abis; result_abis = result_abis lay ret ext; variadic = fixed <> None } in
   let argv = Array.of_list (List.map (fun (_, _, v) -> value fn v) args) in
+  (* a struct through `...` names its agg ABI on the call (SPEC §5) *)
+  let va_aggs =
+    List.concat
+      (List.mapi
+         (fun k (t, e, _) -> if k >= nfixed && is_aggregate t then [ (k, abi lay t e) ] else [])
+         args)
+  in
   let tys = Array.of_list (List.map Fir_verify.abi_ty sig_.result_abis) in
-  let rs = emit ~loc:fn.loc fn.f fn.cur (Call { sig_; callee; args = argv; attrs = 0; va_aggs = [] }) tys in
+  let rs = emit ~loc:fn.loc fn.f fn.cur (Call { sig_; callee; args = argv; attrs = 0; va_aggs }) tys in
   match (result, rs) with
   | Some id, [| r |] -> define fn id r
   | None, _ -> ()

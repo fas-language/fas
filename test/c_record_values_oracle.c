@@ -33,5 +33,20 @@ int32_t fas_record_probe(void) {
   printf("make %.9g %.9g\n", made.x, made.y);
   RvD2 s = rv_static(d, made);
   printf("static %.17g %.17g\n", s.x, s.y);
+  RvNested nested = {{1.5f, 2.5f}, 9};
+  RvNested n2 = rv_nested(nested);
+  printf("nested %.9g %.9g %d\n", n2.inner.x, n2.inner.y, n2.n);
+  RvArr ar = {{1, 2, 3}};
+  RvArr ar2 = rv_arr(ar);
+  printf("arr %d %d %d\n", ar2.s[0], ar2.s[1], ar2.s[2]);
+  printf("va %lld\n", (long long)rv_va(4, mixed, d, big, small, p));
+  RvBig chained = rv_big(rv_big(big, 2), 3);
+  printf("chain %lld %lld %lld %.17g\n", (long long)chained.a, (long long)chained.b,
+         (long long)chained.c, chained.d);
+  nested.inner = rv_make();
+  printf("field %.9g %.9g\n", nested.inner.x, nested.inner.y);
+  printf("apply %.17g\n", rv_apply((void *)&rv_d2));
+  rv_big(big, 5);
+  printf("member %.17g %lld\n", rv_big(big, 4).d, (long long)rv_make().y);
   return 0;
 }

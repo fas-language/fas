@@ -2944,9 +2944,32 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
           in
           (* the old Ir's struct type: Lower_emit only needs the layout *)
           let _ = (fields, used) in
-          Ok (Hashtbl.replace lay d.name (d.size, d.align)))
+          Ok (Hashtbl.replace lay d.name (d.size, d.align, [])))
       p.structs
   in
+  (* the agg fields of each struct of at most 16 bytes: its scalar leaves,
+     so that a C call passing it by value classifies it as clang does
+     (removal B1). Union members overlap; Fir_abi merges their classes *)
+  let rec leaves offset (t : Hir.ty) =
+    match t with
+    | Hir.Struct name -> (
+        match List.find_opt (fun (d : Hir.struct_def) -> d.name = name) p.structs with
+        | Some d ->
+            List.concat_map
+              (fun (field : Hir.field) -> leaves (offset + field.offset) field.ty)
+              d.fields
+        | None -> [])
+    | Hir.Array (n, element) -> (
+        match Hir.layout p.structs element with
+        | Ok (size, _) -> List.concat (List.init n (fun i -> leaves (offset + (i * size)) element))
+        | Error _ -> [])
+    | Hir.Void | Hir.Opaque _ -> []
+    | t -> [ (offset, E.fir_ty (storage_ty t)) ]
+  in
+  Hashtbl.filter_map_inplace
+    (fun name (size, align, _) ->
+      Some (size, align, if size <= 16 then leaves 0 (Hir.Struct name) else []))
+    lay;
   let mc = E.create_module ~triple:(Target_layout.current ()).triple lay in
   (* variadic functions: their fixed parameter count, for call signatures *)
   List.iter

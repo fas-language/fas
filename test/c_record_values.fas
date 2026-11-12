@@ -39,6 +39,21 @@ fn fas_record_probe() i32 {
     printf(c"make %.9g %.9g\n", cvt[f64](made.x), cvt[f64](made.y))
     s RvD2 = rv_static(d, made)
     printf(c"static %.17g %.17g\n", s.x, s.y)
+    nested RvNested = {{1.5, 2.5}, 9}
+    n2 RvNested = rv_nested(nested)
+    printf(c"nested %.9g %.9g %d\n", cvt[f64](n2.inner.x), cvt[f64](n2.inner.y), n2.n)
+    ar RvArr = {{1, 2, 3}}
+    ar2 RvArr = rv_arr(ar)
+    printf(c"arr %d %d %d\n", sext[i32](ar2.s[0]), sext[i32](ar2.s[1]),
+        sext[i32](ar2.s[2]))
+    printf(c"va %lld\n", rv_va(4, mixed, d, big, small, p))
+    chained RvBig = rv_big(rv_big(big, 2), 3)
+    printf(c"chain %lld %lld %lld %.17g\n", chained.a, chained.b, chained.c, chained.d)
+    nested.inner = rv_make()
+    printf(c"field %.9g %.9g\n", cvt[f64](nested.inner.x), cvt[f64](nested.inner.y))
+    printf(c"apply %.17g\n", rv_apply(&rv_d2))
+    rv_big(big, 5)
+    printf(c"member %.17g %lld\n", rv_big(big, 4).d, cvt[i64](rv_make().y))
     return 0
 }
 }

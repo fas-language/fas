@@ -18,8 +18,6 @@ type static_function = {
   variadic : bool;
   void_result : bool;
   return_function_pointer : bool;
-  record_parameters : int list;
-  record_result : bool;
   signature : string;
   span : Span.t;
 }
@@ -2259,7 +2257,6 @@ type mapped = {
   alloc_size_parameters : (string * int list list) list;
   parameter_names : (string * string option list) list;
   static_functions : static_function list;
-  record_calls : (string * (int list * bool)) list;
   records : (string * string * string option) list;
   record_types : (string * string * string option) list;
   incomplete_arrays : (string * Ast.ty) list;
@@ -2293,39 +2290,24 @@ let make_adapter ~occupied source (static : static_function) =
       if List.mem symbol occupied then choose (suffix + 1) else symbol
     in
     let symbol = choose 0 in
-    let by_value i = List.mem i static.record_parameters in
+    (* structs and unions by value pass straight through: the adapter is C
+       and Fas calls it with the agg ABI (removal B1) *)
     let params =
       List.mapi
-        (fun i ty ->
-          let name = "fas_arg" ^ string_of_int i in
-          if by_value i then ty ^ " *" ^ name else c_named_type ty name)
+        (fun i ty -> c_named_type ty ("fas_arg" ^ string_of_int i))
         static.parameter_types
     in
     let call_args =
-      List.mapi
-        (fun i _ -> (if by_value i then "*" else "") ^ "fas_arg" ^ string_of_int i)
-        static.parameter_types
-    in
-    let unqualified ty =
-      if String.starts_with ~prefix:"const " ty then
-        String.sub ty 6 (String.length ty - 6)
-      else ty
-    in
-    let params =
-      if static.record_result then
-        (unqualified static.return_type ^ " *fas_result") :: params
-      else params
+      List.mapi (fun i _ -> "fas_arg" ^ string_of_int i) static.parameter_types
     in
     let params = if params = [] then "void" else String.concat ", " params in
     let call = static.name ^ "(" ^ String.concat ", " call_args ^ ")" in
     let body =
-      if static.record_result then "*fas_result = " ^ call ^ ";"
-      else if static.void_result then call ^ ";"
+      if static.void_result then call ^ ";"
       else "return " ^ call ^ ";"
     in
     let return_type, return_typedef =
-      if static.record_result then ("void", "")
-      else if static.return_function_pointer then
+      if static.return_function_pointer then
         let alias = symbol ^ "_result" in
         (alias, "typedef " ^ c_named_type static.return_type alias ^ ";\n")
       else (static.return_type, "")
@@ -3363,7 +3345,6 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
   and c_string_parameters = Hashtbl.create 32
   and incomplete_arrays = Hashtbl.create 16
   and static_functions = Hashtbl.create 32
-  and record_calls = Hashtbl.create 16
   and header_parameter_names = Hashtbl.create 64
   and enum_owners = Hashtbl.create 64
   and items = ref [] in
@@ -4211,18 +4192,10 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                       let variadic =
                         get "variadic" tree = Some (C_import_json.Bool true)
                       in
-                      let by_value = function Ast.Named_type _ -> true | _ -> false in
+                      (* variadic functions may take and return structs and unions
+                         by value: the call passes them with the agg ABI (removal B1) *)
                       Result.bind (parse_parameters [] parameter_nodes)
-                        (fun parameters ->
-                          if
-                            variadic
-                            && (by_value result
-                               || List.exists (fun (ty, _) -> by_value ty) parameters)
-                          then
-                            Error
-                              "variadic functions with struct and union values are not \
-                               supported"
-                          else Ok (result, parameters, variadic))))
+                        (fun parameters -> Ok (result, parameters, variadic))))
         | _ -> Error "function declaration has no structural function type")
   in
   Hashtbl.iter
@@ -4506,22 +4479,8 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
             then Some "Clang builtin function"
             else match signature with Ok _ -> None | Error reason -> Some reason
           in
-          let record_parameters, record_result =
-            match signature with
-            | Ok (params, ret) ->
-                ( List.concat
-                    (List.mapi
-                       (fun index (_, ty) ->
-                         match ty with Ast.Named_type _ -> [ index ] | _ -> [])
-                       params),
-                  match ret with Ast.Named_type _ -> true | _ -> false )
-            | Error _ -> ([], false)
-          in
-          let by_value = record_parameters <> [] || record_result in
-          if by_value then
-            Hashtbl.replace record_calls name (record_parameters, record_result);
           (match
-             (is_static || by_value, signature, c_type_name node, type_tree node)
+             (is_static, signature, c_type_name node, type_tree node)
            with
           | true, Ok (_, ret), Some c_signature, Some function_tree -> (
               match String.index_opt c_signature '(' with
@@ -4554,8 +4513,6 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                       return_function_pointer =
                         Option.fold ~none:false ~some:(function_pointer_type [])
                           result_type;
-                      record_parameters;
-                      record_result;
                       signature = signature_name;
                       span;
                     }
@@ -4564,29 +4521,17 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
           let item =
             match (signature, reason) with
             | Ok (params, ret), None ->
-                let handle = function
-                  | Ast.Named_type _ as ty -> Ast.Handle ty
-                  | ty -> ty
-                in
                 let params =
                   List.mapi
                     (fun index (_, ty) ->
                       ({
                          Ast.name = "arg" ^ string_of_int index;
-                         ty = handle ty;
+                         ty;
                          ty_span = span;
                          span;
                        }
                         : Ast.param))
                     params
-                in
-                let params, ret =
-                  if record_result then
-                    ( ({ Ast.name = "result"; ty = Ast.Handle ret; ty_span = span; span }
-                        : Ast.param)
-                      :: params,
-                      Ast.Void )
-                  else (params, ret)
                 in
                 Some
                   (Ast.Func
@@ -4788,9 +4733,6 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
     static_functions =
       Hashtbl.fold (fun _ static acc -> static :: acc) static_functions []
       |> List.sort (fun a b -> String.compare a.name b.name);
-    record_calls =
-      Hashtbl.fold (fun name call acc -> (name, call) :: acc) record_calls []
-      |> List.sort compare;
   }
 
 let merge_imports mappings =
@@ -4886,10 +4828,6 @@ let merge_imports mappings =
       |> List.sort compare;
     static_functions =
       List.concat_map (fun mapping -> mapping.static_functions) mappings;
-    record_calls =
-      List.concat_map (fun mapping -> mapping.record_calls) mappings
-      |> List.filter (fun (name, _) -> not (bad name))
-      |> List.sort_uniq compare;
   }
 
 let canonical_type aliases ty =

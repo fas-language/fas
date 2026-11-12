@@ -1679,7 +1679,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
                 ~nonnull:imported.nonnull_parameters
                 ~strings:imported.c_string_parameters
                 ~alloc:imported.alloc_size_parameters
-                ~parameter_names:imported.parameter_names ~records:imported.record_calls)
+                ~parameter_names:imported.parameter_names)
             index;
           let program = { Ast.items = program.items @ imported.items } in
           let* () = ast_budget (Ast.check_expanded_nodes ~limits program) in
@@ -1690,7 +1690,6 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
                 ~c_aliases:imported.aliases ~c_unsupported:imported.unsupported
                 ~c_nonnull_parameters:imported.nonnull_parameters
                 ~c_string_parameters:imported.c_string_parameters
-                ~c_record_calls:imported.record_calls
                 ~c_alloc_size_parameters:imported.alloc_size_parameters
                 ~c_records:imported.record_types ~specializations program
             with

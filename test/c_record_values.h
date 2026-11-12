@@ -20,6 +20,15 @@ RvAligned rv_aligned(int32_t k, RvAligned v);
 int64_t rv_sum(RvSmall a, RvMixed b, RvF2 c, RvD2 d, RvBig e, RvPacked f);
 RvF2 rv_make(void);
 
+/* nested records, arrays in records, variadic record arguments and the
+   address of a by-value function (removal B1 lifted these) */
+typedef struct { RvF2 inner; int32_t n; } RvNested;
+typedef struct { int16_t s[3]; } RvArr;
+RvNested rv_nested(RvNested v);
+RvArr rv_arr(RvArr v);
+int64_t rv_va(int32_t n, ...);
+double rv_apply(void *fn);
+
 static inline RvD2 rv_static(RvD2 v, RvF2 w) {
   RvD2 out = {v.y + w.x, v.x - w.y};
   return out;

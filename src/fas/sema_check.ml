@@ -20,6 +20,13 @@ let index_type_error label expression ty =
     (Printf.sprintf "%s must be an integer, got `%s`" label
        (Sema_types.diagnostic_ty_name ty))
 
+(* a C function's struct or union result (removal B1): an aggregate value
+   that may initialize or be assigned to a place, unlike other aggregate
+   values, which need `copy` *)
+let c_struct_result = function
+  | Hir.Call (Hir.User _, _, Hir.Struct _, _) -> true
+  | _ -> false
+
 let visible_value_names c =
   Sema_flow.local_names c.flow
   @ List.filter_map
@@ -2483,13 +2490,6 @@ and check_expr_inner ?destination (c : context) expected expression =
           c.generic_structs
       then error s (Printf.sprintf "generic function `%s` has no single address" name)
       else Ok (Hir.Function_address (name, s))
-  | Ast.Addr_of (Ast.Ident (name, _), s)
-    when Option.is_none (lookup_local name c) && List.mem_assoc name c.c_record_calls ->
-      error s
-        (Printf.sprintf
-           "C function `%s` passes a struct or union by value; Fas calls it through an \
-            adapter and cannot take its address"
-           name)
   | Ast.Addr_of (e, s) -> (
       let* place = check_place c e in
       (match (place.root, place.path) with
@@ -2955,7 +2955,7 @@ and check_initializer ?(constant = false) ?destination c expected expression =
                     in
                     if
                       (match initialized with
-                        | `Value _ -> true
+                        | `Value value -> not (c_struct_result value)
                         | `Aggregate _ -> false)
                       && aggregate_value_type entry_ty && aggregate_value_type actual
                     then
@@ -3419,86 +3419,6 @@ and check_call c expected fn args s =
   index_call c fn result;
   result
 
-and check_record_call c expected name span args s =
-  let positions, has_result = List.assoc name c.c_record_calls in
-  let result_call = c.record_result_call in
-  c.record_result_call <- false;
-  let params =
-    Option.fold ~none:[]
-      ~some:(fun signature -> signature.params)
-      (List.assoc_opt name c.signatures)
-  in
-  let record_at index =
-    match List.nth_opt params index with
-    | Some (_, Hir.Handle record) -> Some record
-    | _ -> None
-  in
-  let place_expression = function
-    | Ast.Ident _ | Ast.Field _ | Ast.Arrow_field _ | Ast.Select _ | Ast.Generic_args _
-    | Ast.Parenthesized _ ->
-        true
-    | _ -> false
-  in
-  let check_place_type index argument describe =
-    match record_at index with
-    | None -> error span ("internal error: no record parameter for `" ^ name ^ "`")
-    | Some record ->
-        let* place = check_place c argument in
-        let actual = Hir.expr_ty place.expr in
-        if actual = Hir.Struct record then Ok ()
-        else describe record (Sema_types.diagnostic_ty_name actual)
-  in
-  let* () =
-    if has_result && not result_call then
-      error s
-        (Printf.sprintf
-           "C function `%s` returns `%s` by value; use the result only as `x %s = \
-            %s(...)` or `place = %s(...)`"
-           name
-           (Option.value ~default:"?" (record_at 0))
-           (Option.value ~default:"?" (record_at 0))
-           name name)
-    else Ok ()
-  in
-  let offset = if has_result then 1 else 0 in
-  let rec rewrite index acc = function
-    | [] -> Ok (List.rev acc)
-    | argument :: rest when has_result && index = 0 ->
-        let* () =
-          check_place_type 0 argument (fun record actual ->
-              error (Ast.expr_span argument)
-                (Printf.sprintf
-                   "C function `%s` returns `%s`, but the destination is `%s`" name
-                   record actual))
-        in
-        rewrite 1 (Ast.Addr_of (argument, Ast.expr_span argument) :: acc) rest
-    | argument :: rest when List.mem (index - offset) positions ->
-        let argument_span = Ast.expr_span argument in
-        let place_message record =
-          Printf.sprintf
-            "argument %d of `%s` passes `%s` by value; pass a variable, field or array \
-             element of type `%s`"
-            (index - offset + 1)
-            name record record
-        in
-        let* () =
-          if place_expression argument then
-            check_place_type index argument (fun record actual ->
-                error argument_span
-                  (place_message record ^ Printf.sprintf ", got `%s`" actual))
-          else
-            error argument_span
-              (place_message (Option.value ~default:"?" (record_at index)))
-        in
-        rewrite (index + 1) (Ast.Addr_of (argument, argument_span) :: acc) rest
-    | argument :: rest -> rewrite (index + 1) (argument :: acc) rest
-  in
-  let* args = rewrite 0 [] args in
-  c.record_call_checked <- true;
-  let result = check_call_inner c expected (Ast.Ident (name, span)) args s in
-  c.record_call_checked <- false;
-  result
-
 and check_call_inner c expected fn args s =
   match fn with
   | Ast.Generic_args (Ast.Ident ("call_addr", _), generic_args, application_span) -> (
@@ -3530,11 +3450,6 @@ and check_call_inner c expected fn args s =
               Sema_flow.forget_all_values c.flow;
               Sema_flow.forget_all_masks c.flow;
               Ok (Hir.Indirect_call (checked_callee, checked_args, result_ty, s)))
-  | Ast.Ident (name, span)
-    when Option.is_none (lookup_local name c)
-         && (not c.record_call_checked)
-         && List.mem_assoc name c.c_record_calls ->
-      check_record_call c expected name span args s
   | Ast.Ident (name, span)
     when Option.is_none (lookup_local name c)
          && (not (Names.builtin_name name))
@@ -3814,13 +3729,6 @@ and check_call_inner c expected fn args s =
         in
         Ok (Hir.EInt (Int64.of_int n, Hir.Int Hir.Usize, s))
   | Ast.Ident (name, _) -> (
-      let hidden =
-        match (c.record_call_checked, List.assoc_opt name c.c_record_calls) with
-        | true, Some (_, true) -> 1
-        | _ -> 0
-      in
-      c.record_call_checked <- false;
-      let visible items = List.filteri (fun index _ -> index >= hidden) items in
       let builtin =
         match Names.value_operation name with
         | Some Names.Rotl -> Some Hir.Rotl
@@ -4299,8 +4207,8 @@ and check_call_inner c expected fn args s =
                   then
                     error s
                       (function_arity_message name
-                         (List.length sig_.params - hidden)
-                         (List.length args - hidden))
+                         (List.length sig_.params)
+                         (List.length args))
                   else
                     let policy = if sig_.variadic then Promote_variadic else Reject in
                     let* xs = check_actuals ~callee:name c policy s sig_.params args in
@@ -4308,8 +4216,8 @@ and check_call_inner c expected fn args s =
                       match List.assoc_opt name c.c_string_parameters with
                       | None -> Ok ()
                       | Some parameters ->
-                          check_c_string_arguments c name parameters (visible xs)
-                            (visible args)
+                          check_c_string_arguments c name parameters xs
+                            args
                     in
                     let* () =
                       match
@@ -4322,8 +4230,8 @@ and check_call_inner c expected fn args s =
                           Result_list.iter
                             (fun index ->
                               match
-                                ( List.nth_opt (visible xs) (index - 1),
-                                  List.nth_opt (visible args) (index - 1) )
+                                ( List.nth_opt xs (index - 1),
+                                  List.nth_opt args (index - 1) )
                               with
                               | Some value, Some argument
                                 when address_fact c value
@@ -4335,8 +4243,8 @@ and check_call_inner c expected fn args s =
                               | _ -> Ok ())
                             indices
                     in
-                    remember_alloc_size_object c name (visible args)
-                      (visible sig_.params) s;
+                    remember_alloc_size_object c name args
+                      sig_.params s;
                     Ok (Hir.Call (Hir.User name, xs, sig_.ret, s)))))
   | _ -> error s "call target must be a function name"
 
@@ -4448,6 +4356,11 @@ and check_actuals ?callee c policy span formals actuals =
                     | Hir.Addr | Hir.Handle _ -> true
                     | _ -> false
                   then Ok (variadic_promote value)
+                  else if (match Hir.expr_ty value with Hir.Struct _ -> true | _ -> false)
+                  then
+                    (* a struct or union through C varargs: the call passes
+                       it with its agg ABI, as C does (removal B1) *)
+                    Ok value
                   else
                     let help =
                       match (expression, Hir.expr_ty value) with
@@ -4470,7 +4383,10 @@ and check_actuals ?callee c policy span formals actuals =
     | (_, expected) :: formal_rest, expression :: actual_rest ->
         let* value = check_expr c (Some expected) expression in
         let* () =
-          if aggregate_value_type (Hir.expr_ty value) then
+          if
+            aggregate_value_type (Hir.expr_ty value)
+            && (match expected with Hir.Struct _ -> false | _ -> true)
+          then
             let name, help =
               match expression with
               | Ast.Ident (name, _) ->
@@ -5013,68 +4929,13 @@ let check_copy c args span =
 
 let stmt_terminates = Ast.stmt_terminates
 
-let record_result_callee c callee =
-  Option.is_none (lookup_local callee c)
-  &&
-  match List.assoc_opt callee c.c_record_calls with
-  | Some (_, result) -> result
-  | None -> false
-
-let record_target = function
-  | Ast.Target_ident (name, span) -> Ast.Ident (name, span)
-  | Ast.Target_field (base, field, span) -> Ast.Field (base, field, span)
-  | Ast.Target_select (base, args) -> Ast.Select (base, args, Ast.expr_span base)
-
 let rec check_block (c : context) stmts =
   push c;
-  let pending = ref None in
   let rec go acc = function
     | [] ->
         let out = List.rev acc in
         let* () = Sema_flow.finish_block_scope c.flow in
         Ok out
-    | (Ast.Let
-         {
-           name;
-           init = Some (Ast.Call ((Ast.Ident (callee, _) as fn), args, call_span));
-           span;
-           _;
-         } as declaration)
-      :: rest
-      when record_result_callee c callee ->
-        let* () =
-          match List.find_opt (expression_mentions_name name) args with
-          | Some argument ->
-              error (Ast.expr_span argument)
-                (Printf.sprintf
-                   "the declaration of `%s` cannot use `%s` in the arguments of `%s`; \
-                    give the result another name"
-                   name name callee)
-          | None -> Ok ()
-        in
-        let declaration =
-          match declaration with
-          | Ast.Let fields -> Ast.Let { fields with init = None }
-          | other -> other
-        in
-        let call =
-          Ast.Expr_stmt
-            (Ast.Call (fn, Ast.Ident (name, span) :: args, call_span), span, span)
-        in
-        pending := Some call;
-        go acc (declaration :: call :: rest)
-    | Ast.Assign
-        (target, Ast.Call ((Ast.Ident (callee, _) as fn), args, call_span), assign_span)
-      :: rest
-      when record_result_callee c callee ->
-        let call =
-          Ast.Expr_stmt
-            ( Ast.Call (fn, record_target target :: args, call_span),
-              assign_span,
-              assign_span )
-        in
-        pending := Some call;
-        go acc (call :: rest)
     | s :: rest -> (
         let before = Sema_flow.snapshot c.flow in
         let saved =
@@ -5083,10 +4944,7 @@ let rec check_block (c : context) stmts =
               (Sema_flow.checkpoint c.flow, c.expression_depth, c.handle_view_expansion)
           else None
         in
-        c.record_result_call <-
-          Option.fold ~none:false ~some:(fun call -> call == s) !pending;
         let checked = check_stmt c s in
-        c.record_result_call <- false;
         match (checked, saved) with
         | Ok x, _ ->
             Sema_flow.finish_statement c.flow ~before ~terminates:(stmt_terminates s);
@@ -5155,7 +5013,9 @@ and check_stmt (c : context) = function
                 | `Aggregate (ty, _, _, _) -> ty
               in
               if
-                (match initialized with `Value _ -> true | `Aggregate _ -> false)
+                (match initialized with
+                  | `Value value -> not (c_struct_result value)
+                  | `Aggregate _ -> false)
                 && aggregate_value_type t && aggregate_value_type actual
               then
                 error (Ast.expr_span e)
@@ -5315,7 +5175,11 @@ and check_stmt (c : context) = function
       in
       let* v = check_expr c (Some expected) e in
       let* () =
-        if aggregate_value_type expected && aggregate_value_type (Hir.expr_ty v) then
+        if
+          aggregate_value_type expected
+          && aggregate_value_type (Hir.expr_ty v)
+          && not (c_struct_result v)
+        then
           error span
             (if match expected with Hir.Array _ -> true | _ -> false then
                "aggregate assignment is not supported for an array; use `copy(dst, \
@@ -5586,7 +5450,8 @@ and check_stmt (c : context) = function
       Ok (Hir.Simd_store (access_ty, kind, checked, span))
   | Ast.Expr_stmt (e, s, finish) ->
       let* x = check_expr c None e in
-      if aggregate_value_type (Hir.expr_ty x) then
+      (* a C call's struct or union result may be discarded, as in C (removal B1) *)
+      if aggregate_value_type (Hir.expr_ty x) && not (c_struct_result x) then
         error s "aggregate values cannot be used by value; use `copy(dst, src)`"
       else if statement_call e then Ok (Hir.Expr (x, s))
       else

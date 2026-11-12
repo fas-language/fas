@@ -81,7 +81,7 @@ grep -F 'opt-22' "$TMP/old.out" >/dev/null || fail "missing tool error did not n
 
 (
   cd "$TMP"
-  PATH="$TMP/old" FAS_OPT="$OPT" "$OCAML_FAS" hello.fas -o hello
+  env -u FAS_CC -u FAS_LLC PATH="$TMP/old" FAS_OPT="$OPT" "$OCAML_FAS" hello.fas -o hello
 ) || fail "FAS_OPT did not override the PATH lookup"
 
 echo 'tool_names: unsuffixed LLVM 22 tools, suffixed preference, version check and overrides: ok'

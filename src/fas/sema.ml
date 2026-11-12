@@ -107,11 +107,6 @@ let extern_c_aggregate_result_error span ty_name handle_name =
         destination as an `addr`%s parameter"
        ty_name handle_suffix)
 
-let extern_c_struct_value_error span name =
-  error span
-    (Printf.sprintf
-       "C functions that take or return struct `%s` by value cannot be imported" name)
-
 let always_aggregate_type named_types generic_params ty =
   let generic_type_names =
     List.filter_map
@@ -157,7 +152,10 @@ let validate_extern_c_signature ~named_types ~ret_source ~bodyless span params c
         if extern_c_value_type ty then validate_params param_rest converted_rest
         else if aggregate_value_type ty then
           match (bodyless, ty) with
-          | true, Hir.Struct name -> extern_c_struct_value_error param.ty_span name
+          (* a C function declared or imported here takes structs and unions
+             by value through Fir's agg ABI (removal B1); Fas functions
+             themselves never do *)
+          | true, Hir.Struct _ -> validate_params param_rest converted_rest
           | _ ->
               extern_c_aggregate_parameter_error param.ty_span param.name
                 (diagnostic_source_ty_name param.ty)
@@ -173,7 +171,7 @@ let validate_extern_c_signature ~named_types ~ret_source ~bodyless span params c
   if ret = Hir.Void || extern_c_value_type ret then Ok ()
   else if aggregate_value_type ret then
     match (bodyless, ret) with
-    | true, Hir.Struct name -> extern_c_struct_value_error span name
+    | true, Hir.Struct _ -> Ok ()
     | _ ->
         extern_c_aggregate_result_error span
           (Sema_types.diagnostic_ty_name ret)
@@ -184,7 +182,7 @@ let validate_extern_c_signature ~named_types ~ret_source ~bodyless span params c
          (Hir.ty_name ret))
 
 let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported = [])
-    ?(c_nonnull_parameters = []) ?(c_string_parameters = []) ?(c_record_calls = [])
+    ?(c_nonnull_parameters = []) ?(c_string_parameters = [])
     ?(c_alloc_size_parameters = []) ?(c_records = []) ?(all_errors = false)
     ?specializations ?index program =
   let global_names =
@@ -432,7 +430,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       ~array_lengths:(Sema_static_env.source_array_lengths program.Ast.items)
       ~eval_context:(base_structs, named_types, early_consts, [])
       ~c_aliases ~c_unsupported ~c_nonnull_parameters ~c_alloc_size_parameters
-      ~c_string_parameters ~c_record_calls ~top_level_bindings ?recovered ~limits
+      ~c_string_parameters ~top_level_bindings ?recovered ~limits
       ~type_node_account specializations program
   in
   let* named_types = collect_named_types String_set.empty [] program.Ast.items in
@@ -629,7 +627,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       ~array_lengths:(Sema_static_env.source_array_lengths program.Ast.items)
       ~eval_context:(structs, named_types, consts_ordered, arrays_ordered)
       ~eval_globals ~c_aliases ~c_unsupported ~c_nonnull_parameters
-      ~c_alloc_size_parameters ~c_string_parameters ~c_record_calls
+      ~c_alloc_size_parameters ~c_string_parameters
       ~eager_functions:true ~top_level_bindings ?recovered ~limits ~type_node_account
       specializations program
   in
@@ -661,9 +659,6 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       c_unsupported;
       c_nonnull_parameters;
       c_string_parameters;
-      c_record_calls;
-      record_result_call = false;
-      record_call_checked = false;
       c_alloc_size_parameters;
       signatures = [];
       external_c_functions =
@@ -815,9 +810,6 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       c_unsupported;
       c_nonnull_parameters;
       c_string_parameters;
-      c_record_calls;
-      record_result_call = false;
-      record_call_checked = false;
       c_alloc_size_parameters;
       signatures = sigs_ordered;
       external_c_functions =
@@ -1177,11 +1169,11 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       : Hir.program)
 
 let check ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters ?c_string_parameters
-    ?c_record_calls ?c_alloc_size_parameters ?c_records ?all_errors ?specializations
+    ?c_alloc_size_parameters ?c_records ?all_errors ?specializations
     ?index program =
   let run () =
     check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
-      ?c_string_parameters ?c_record_calls ?c_alloc_size_parameters ?c_records
+      ?c_string_parameters ?c_alloc_size_parameters ?c_records
       ?all_errors ?specializations ?index program
   in
   match index with

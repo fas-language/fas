@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include "c_record_values.h"
 
 RvSmall rv_small(int32_t k, RvSmall v) {
@@ -42,4 +43,31 @@ int64_t rv_sum(RvSmall a, RvMixed b, RvF2 c, RvD2 d, RvBig e, RvPacked f) {
 RvF2 rv_make(void) {
   RvF2 out = {0.25f, -8.5f};
   return out;
+}
+RvNested rv_nested(RvNested v) {
+  RvNested out = {{v.inner.y * 2.0f, v.inner.x - 1.0f}, v.n * 7};
+  return out;
+}
+RvArr rv_arr(RvArr v) {
+  RvArr out = {{(int16_t)(v.s[2] * 10), (int16_t)(v.s[0] - 4), (int16_t)(v.s[1] + 300)}};
+  return out;
+}
+/* reads RvMixed, RvD2, RvBig, RvSmall, RvPacked in that order */
+int64_t rv_va(int32_t n, ...) {
+  va_list ap;
+  va_start(ap, n);
+  RvMixed m = va_arg(ap, RvMixed);
+  RvD2 d = va_arg(ap, RvD2);
+  RvBig b = va_arg(ap, RvBig);
+  RvSmall s = va_arg(ap, RvSmall);
+  RvPacked p = va_arg(ap, RvPacked);
+  va_end(ap);
+  return n * 1000 + m.i + (int64_t)(m.d * 8) + (int64_t)(d.x * 4) + (int64_t)d.y +
+         b.a + b.b + b.c + (int64_t)b.d + s.a + s.b + s.c + p.c + p.i;
+}
+double rv_apply(void *fn) {
+  RvD2 (*f)(RvD2, RvD2, RvD2, RvD2, RvD2) = (RvD2 (*)(RvD2, RvD2, RvD2, RvD2, RvD2))fn;
+  RvD2 one = {1.0, 1.0};
+  RvD2 r = f(one, one, one, one, one);
+  return r.x * 100 + r.y;
 }

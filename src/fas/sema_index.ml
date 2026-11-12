@@ -62,7 +62,6 @@ type t = {
   c_aliases : (string, string) Hashtbl.t;
   c_params : (string, string list) Hashtbl.t;
   c_names : (string, string option list) Hashtbl.t;
-  c_record_calls : (string, int list * bool) Hashtbl.t;
   c_nonnull : (string, int list) Hashtbl.t;
   c_strings : (string, int list) Hashtbl.t;
   c_alloc : (string, int list list) Hashtbl.t;
@@ -108,7 +107,6 @@ let create () =
     c_aliases = Hashtbl.create 16;
     c_params = Hashtbl.create 64;
     c_names = Hashtbl.create 64;
-    c_record_calls = Hashtbl.create 16;
     c_nonnull = Hashtbl.create 16;
     c_strings = Hashtbl.create 16;
     c_alloc = Hashtbl.create 16;
@@ -201,10 +199,8 @@ let set_c_enum_owners index owners =
 let is_enumerator index (declaration : declaration) =
   declaration.kind = Const && Hashtbl.mem index.enum_owners declaration.name
 
-let set_c_import index ~unsupported ~aliases ~nonnull ~strings ~alloc ~parameter_names
-    ~records =
+let set_c_import index ~unsupported ~aliases ~nonnull ~strings ~alloc ~parameter_names =
   index.c_imported <- true;
-  List.iter (fun (name, call) -> Hashtbl.replace index.c_record_calls name call) records;
   List.iter
     (fun (name, names) -> Hashtbl.replace index.c_names name names)
     parameter_names;
@@ -347,24 +343,6 @@ let c_display_params index name params =
       | None -> parameter)
     params
 
-let c_record_shape index name params ret =
-  match Hashtbl.find_opt index.c_record_calls name with
-  | None -> (params, ret)
-  | Some (positions, has_result) ->
-      let unwrap = function Ast.Handle inner -> inner | ty -> ty in
-      let params, ret =
-        match (has_result, params) with
-        | true, (result : Ast.param) :: rest -> (rest, unwrap result.ty)
-        | _ -> (params, ret)
-      in
-      ( List.mapi
-          (fun position (parameter : Ast.param) ->
-            if List.mem position positions then
-              { parameter with Ast.ty = unwrap parameter.ty }
-            else parameter)
-          params,
-        ret )
-
 let signature_text name ~linkage ~generic_params ~params ~variadic ~ret =
   let keyword =
     match linkage with Ast.Internal -> "fn " | Ast.External_c -> "extern fn "
@@ -471,7 +449,6 @@ let declare_program index ~c_aliases (program : Ast.program) =
           let c_origin = origin name in
           let shown_params, ret =
             if Option.is_some c_origin then
-              let params, ret = c_record_shape index name params ret in
               (c_display_params index name params, ret)
             else (params, ret)
           in

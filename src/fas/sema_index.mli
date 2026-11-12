@@ -61,7 +61,6 @@ val set_c_import :
   strings:(string * (int * string option) list) list ->
   alloc:(string * int list list) list ->
   parameter_names:(string * string option list) list ->
-  records:(string * (int list * bool)) list ->
   unit
 
 val has_c_import : t -> bool
