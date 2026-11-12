@@ -180,8 +180,6 @@ let declarations ?(reserved = []) ?specializations records (program : program) =
   in
   let rec base = function
     | Bool -> "bool"
-    | Int Usize -> "size_t"
-    | Int Isize -> "ptrdiff_t"
     | Int kind ->
         let name = ty_name (Int kind) in
         (if name.[0] = 'u' then "uint" else "int")

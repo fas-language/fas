@@ -273,8 +273,6 @@ let src_int = function
   | I16 -> I16
   | I32 -> I32
   | I64 -> I64
-  | Usize -> Usize
-  | Isize -> Isize
 
 let vec_cap_error length (element : Hir.ty) =
   if length > 256 then Some "vector lane count exceeds the portable cap of 256"
@@ -285,7 +283,7 @@ let vec_cap_error length (element : Hir.ty) =
       | Hir.Int (Hir.U8 | Hir.I8) -> Some 8
       | Hir.Int (Hir.U16 | Hir.I16) -> Some 16
       | Hir.Int (Hir.U32 | Hir.I32) -> Some 32
-      | Hir.Int (Hir.U64 | Hir.I64 | Hir.Usize | Hir.Isize) -> Some 64
+      | Hir.Int (Hir.U64 | Hir.I64) -> Some 64
       | Hir.Float Hir.F32 -> Some 32
       | Hir.Float Hir.F64 -> Some 64
       | Hir.Addr | Hir.Handle _ -> Some 64
@@ -526,7 +524,7 @@ let aggregate_length_value kind span ty value =
       error span (Printf.sprintf "%s length `%Ld` is too large" kind value)
     else Ok (Int64.to_int value)
 
-let aggregate_length_expected _ = Some (Hir.Int Hir.Usize)
+let aggregate_length_expected _ = Some (Hir.Int Hir.U64)
 
 let remap_length_cycle span = function
   | Error [ diagnostic ]
@@ -614,23 +612,12 @@ let float_literal_type_error ty span =
     (Printf.sprintf "floating point literal cannot be used as `%s`"
        (diagnostic_ty_name ty))
 
-let equal_range_integers actual expected =
-  actual <> expected
-  &&
-  match (actual, expected) with
-  | Hir.Int (Hir.U64 | Hir.Usize), Hir.Int (Hir.U64 | Hir.Usize)
-  | Hir.Int (Hir.I64 | Hir.Isize), Hir.Int (Hir.I64 | Hir.Isize) ->
-      true
-  | _ -> false
-
 let implicit_integer_widen actual expected =
   match (actual, expected) with
   | Hir.Int _, Hir.Int _ ->
       let actual_bits = Option.get (Sema_numeric.integer_value_bit_width actual) in
       let expected_bits = Option.get (Sema_numeric.integer_value_bit_width expected) in
-      if expected_bits = actual_bits && equal_range_integers actual expected then
-        Some Ast.Bitcast
-      else if expected_bits <= actual_bits then None
+      if expected_bits <= actual_bits then None
       else if Sema_numeric.is_unsigned actual then Some Ast.Zext
       else if not (Sema_numeric.is_unsigned expected) then Some Ast.Sext
       else None
@@ -647,10 +634,7 @@ let common_integer_type left right =
   if Hir.ty_equal left right then Some left
   else
     match (implicit_integer_widen left right, implicit_integer_widen right left) with
-    | Some _, Some _ -> (
-        match right with
-        | Hir.Int (Hir.Usize | Hir.Isize) -> Some right
-        | _ -> Some left)
+    | Some _, Some _ -> Some left
     | Some _, _ -> Some right
     | _, Some _ -> Some left
     | _ -> None
@@ -733,15 +717,12 @@ let ast_int_kind = function
   | Hir.I16 -> Ast.I16
   | Hir.I32 -> Ast.I32
   | Hir.I64 -> Ast.I64
-  | Hir.Usize -> Ast.Usize
-  | Hir.Isize -> Ast.Isize
 
 let signed_counterpart = function
   | Hir.U8 | Hir.I8 -> Hir.I8
   | Hir.U16 | Hir.I16 -> Hir.I16
   | Hir.U32 | Hir.I32 -> Hir.I32
   | Hir.U64 | Hir.I64 -> Hir.I64
-  | Hir.Usize | Hir.Isize -> Hir.Isize
 
 let arithmetic_binop = function
   | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div | Ast.Rem | Ast.Shl | Ast.Shr | Ast.Bit_and
@@ -773,8 +754,8 @@ let ternary_branches = function
   | _ -> (None, None)
 
 let ast_int_unsigned = function
-  | Ast.U8 | Ast.U16 | Ast.U32 | Ast.U64 | Ast.Usize -> true
-  | Ast.I8 | Ast.I16 | Ast.I32 | Ast.I64 | Ast.Isize -> false
+  | Ast.U8 | Ast.U16 | Ast.U32 | Ast.U64 -> true
+  | Ast.I8 | Ast.I16 | Ast.I32 | Ast.I64 -> false
 
 let type_extension ~default = function
   | Hir.Int kind | Hir.Vec (_, Hir.Int kind) ->
@@ -846,8 +827,7 @@ let rec widened_arithmetic ?leaf_type ~unsigned (extension, target) checked expr
 let convert_expected_kind ?expression actual expected =
   match expression with
   | Some expression
-    when narrow_value_result actual expression
-         && not (equal_range_integers actual expected) ->
+    when narrow_value_result actual expression ->
       None
   | _ -> implicit_numeric_widen actual expected
 
@@ -1008,15 +988,6 @@ let integer_literal_vector_argument_error name expression expected =
 let integer_maximum ty =
   Sema_numeric.literal_limit ~negative:false ty |> Sema_numeric.unsigned_int64_to_string
 
-let same_width_integer_pair source destination =
-  match (source, destination) with
-  | Hir.Int Hir.Usize, Hir.Int Hir.U64
-  | Hir.Int Hir.U64, Hir.Int Hir.Usize
-  | Hir.Int Hir.Isize, Hir.Int Hir.I64
-  | Hir.Int Hir.I64, Hir.Int Hir.Isize ->
-      true
-  | _ -> false
-
 let same_width_scalar_pair source destination =
   match
     ( Sema_numeric.integer_value_bit_width source,
@@ -1044,8 +1015,8 @@ let cast_error ?expression kind source destination span =
     match (kind, source, destination) with
     | Ast.Float_widen, Hir.Float Hir.F32, Hir.Float Hir.F64 ->
         "the conversion is implicit for plain `f32` values"
-    | _, Hir.Addr, Hir.Int Hir.Usize -> "address-to-integer conversion uses `addr_bits`"
-    | _, Hir.Int Hir.Usize, Hir.Addr ->
+    | _, Hir.Addr, Hir.Int Hir.U64 -> "address-to-integer conversion uses `addr_bits`"
+    | _, Hir.Int Hir.U64, Hir.Addr ->
         "integer-to-address conversion uses `addr_from_bits`"
     | Ast.Bitcast, _, _ -> (
         match
@@ -1068,13 +1039,6 @@ let cast_error ?expression kind source destination span =
         "the source and destination must be integer types"
     | (Ast.Zext | Ast.Sext | Ast.Trunc), _, _ when Hir.ty_equal source destination ->
         Printf.sprintf "the value already has type `%s`" (diagnostic_ty_name source)
-    | (Ast.Zext | Ast.Sext | Ast.Trunc), _, _
-      when same_width_integer_pair source destination ->
-        Printf.sprintf
-          "`%s` and `%s` have the same width and convert implicitly; no conversion is \
-           needed"
-          (diagnostic_ty_name source)
-          (diagnostic_ty_name destination)
     | (Ast.Zext | Ast.Sext | Ast.Trunc), Hir.Int _, Hir.Int _
       when same_width_scalar_pair source destination ->
         "the source and destination have the same width; use `bitcast`"
@@ -1092,9 +1056,9 @@ let cast_error ?expression kind source destination span =
   in
   let help =
     match (kind, source, destination, expression) with
-    | _, Hir.Addr, Hir.Int Hir.Usize, Some (Ast.Ident (variable, _)) ->
+    | _, Hir.Addr, Hir.Int Hir.U64, Some (Ast.Ident (variable, _)) ->
         Some (Printf.sprintf "write `addr_bits(%s)`" variable)
-    | _, Hir.Int Hir.Usize, Hir.Addr, Some (Ast.Ident (variable, _)) ->
+    | _, Hir.Int Hir.U64, Hir.Addr, Some (Ast.Ident (variable, _)) ->
         Some (Printf.sprintf "write `addr_from_bits(%s)`" variable)
     | Ast.Trunc, Hir.Int _, Hir.Int _, Some (Ast.Ident (variable, _))
       when Option.get (Sema_numeric.integer_value_bit_width destination)
@@ -1111,9 +1075,6 @@ let cast_error ?expression kind source destination span =
           (Printf.sprintf "write `trunc[%s](%s)`"
              (diagnostic_ty_name destination)
              variable)
-    | (Ast.Zext | Ast.Sext | Ast.Trunc), _, _, Some expression
-      when same_width_integer_pair source destination ->
-        Some (Printf.sprintf "write `%s`" (Ast.expr_name expression))
     | (Ast.Zext | Ast.Sext | Ast.Trunc), Hir.Int _, Hir.Int _, Some expression
       when same_width_scalar_pair source destination
            && not (Hir.ty_equal source destination) ->
@@ -1402,7 +1363,7 @@ let ensure_expected ?(context = "value") ?expression ?checked_expression ?leaf_t
       | _, Hir.Int _, Hir.Bool -> Some (Printf.sprintf "write `%s != 0`" operand)
       | _, Hir.Int _, Hir.Addr ->
           let cast =
-            if actual = Hir.Int Hir.Usize then operand
+            if actual = Hir.Int Hir.U64 then operand
             else if source_bits = Some 64 then
               Printf.sprintf "bitcast[usize](%s)" operand
             else
@@ -1414,7 +1375,7 @@ let ensure_expected ?(context = "value") ?expression ?checked_expression ?leaf_t
           Some (Printf.sprintf "write `addr_from_bits(%s)`" cast)
       | _, Hir.Addr, Hir.Int _ ->
           Some
-            (if expected = Hir.Int Hir.Usize then
+            (if expected = Hir.Int Hir.U64 then
                Printf.sprintf "write `addr_bits(%s)`" operand
              else
                Printf.sprintf "write `%s[%s](addr_bits(%s))`"
@@ -1499,7 +1460,6 @@ let unify_if_branches ?leaf_type ?left_checked ?right_checked left_expression le
       and right_widen = implicit_numeric_widen right_type result_type in
       if
         Option.is_some left_widen
-        && (not (equal_range_integers left_type result_type))
         && narrow_value_result left_type left_expression
       then
         Error
@@ -1507,7 +1467,6 @@ let unify_if_branches ?leaf_type ?left_checked ?right_checked left_expression le
              (left_type = Hir.Float Hir.F32))
       else if
         Option.is_some right_widen
-        && (not (equal_range_integers right_type result_type))
         && narrow_value_result right_type right_expression
       then
         Error

@@ -109,7 +109,7 @@ fn main() i32 {
 bdf81b81 fffffbff 31 23
 ```
 
-Smaller integers widen on their own when nothing can be lost. `u64` and `usize` are interchangeable, as are `i64` and `isize`. Signedness changes are always explicit:
+Smaller integers widen on their own when nothing can be lost. `usize` is another name for `u64`, and `isize` for `i64`. Signedness changes are always explicit:
 
 ```fas
 use "C" <stdio.h>
@@ -119,9 +119,9 @@ fn main(argc i32, argv addr) i32 {
         printf(c"%s\n", argv[addr, i])
     }
     n usize = zext[usize](argc)                 // i32 -> usize: explicit, the sign could change
-    total u64 = n * 8                           // usize -> u64: no conversion needed
+    total u64 = n * 8                           // usize is u64: no conversion
     delta i64 = -3
-    back isize = delta                          // i64 -> isize: also free
+    back isize = delta                          // isize is i64
     as_bits usize = bitcast[usize](delta)       // signed -> unsigned: explicit
     printf(c"%llu %zd %zx\n", total, back, as_bits)
     return 0
@@ -914,7 +914,7 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `u32` `i32` | 4 | 4 | untyped integer literals default to `i32` |
 | `f32` | 4 | 4 | IEEE binary32 scalar |
 | `u64` `i64` | 8 | 8 | |
-| `usize` `isize` | 8 | 8 | sizes, counts and indices |
+| `usize` `isize` | 8 | 8 | other names for `u64` and `i64`, used for sizes, counts and indices |
 | `f64` | 8 | 8 | IEEE binary64 scalar |
 | `addr` | 8 | 8 | untyped byte address or `null` |
 | `handle[T]` | 8 | 8 | address of an `opaque`, C record, or specialized generic struct `T`, with no arithmetic |
@@ -954,9 +954,7 @@ With no destination type, an if-expression unifies integer branches like mixed i
 |---|---|
 | `uN` → wider `uM` or `iM`, `M > N` | implicit, zero-filled |
 | `iN` → wider `iM`, `M > N` | implicit, sign-filled |
-| `u32` → `usize` or `isize`, `i32` → `isize` | implicit |
 | same-width signedness change | `bitcast[u32](x)` |
-| `u64` ↔ `usize`, `i64` ↔ `isize` | nothing: write `x`. `zext`/`sext`/`trunc` between them is an error |
 | `cvt[T]` of a `T` value | nothing: write `x`. The `cvt` is an error |
 | wider → narrower, low bits | `trunc[u8](x)` |
 | other integer width change | explicit `zext`, `sext` or `trunc` as appropriate |
@@ -971,7 +969,7 @@ With no destination type, an if-expression unifies integer branches like mixed i
 | `addr` ↔ `usize` | `addr_bits(p)`, `addr_from_bits(n)` |
 | `addr` ↔ `handle[T]` | `handle_from_addr[T](p)`, `handle_addr(h)` |
 
-On 64-bit targets `u64` and `usize` convert to each other implicitly in both directions, and so do `i64` and `isize`. Mixed operands take `usize` or `isize`. Signedness changes stay explicit. `bool`, vectors, `addr` and `handle[T]` never widen implicitly. Mixed integer operands widen the narrower value when one type holds the other (`u32 < i64` compares as `i64`), while `u32` with `i32` and `u64` with `i64` have no common type. An untyped literal takes the type of the other operand or branch (`w < 1` and `if c { 1 } else { w }` are `u32` for `w u32`). With nothing to take a type from, it is `i32`.
+`usize` and `isize` are the same types as `u64` and `i64`; diagnostics name them `u64` and `i64`, and exported C headers declare them `uint64_t` and `int64_t`. Signedness changes stay explicit. `bool`, vectors, `addr` and `handle[T]` never widen implicitly. Mixed integer operands widen the narrower value when one type holds the other (`u32 < i64` compares as `i64`), while `u32` with `i32` and `u64` with `i64` have no common type. An untyped literal takes the type of the other operand or branch (`w < 1` and `if c { 1 } else { w }` are `u32` for `w u32`). With nothing to take a type from, it is `i32`.
 
 **Widen before the arithmetic, not after.** A result that may wrap never widens implicitly: with `a u16` and `b u16`, `x u32 = a * b` is rejected because the product may already have wrapped in `u16`. Write `x u32 = zext[u32](a) * b`. This applies to `+`, `-`, `*`, `<<`, `~`, unary minus and signed `/` and `%`, wherever the result meets a wider type: a destination, a mixed-width operand (`w + zext[u32](b) * 3`) or a comparison (`x == zext[u64](a) + 1`). Results that cannot wrap widen like plain values: `&`, `|`, `^`, `>>` and unsigned `/` and `%`, so `x u32 = (a >> 4) & 0xf` needs no conversion. When the compiler rejects a narrow result, its `help:` shows a version that compiles. `zext`, `sext` and `trunc` need a strict width change and work lane by lane on vectors, and `bitcast` needs the same total bits.
 

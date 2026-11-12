@@ -3,7 +3,6 @@ let int_bits = function
   | U16 | I16 -> 16
   | U32 | I32 -> 32
   | U64 | I64 -> 64
-  | Usize | Isize -> (Target_layout.current ()).pointer_size * 8
 
 let integer_value_bit_width = function
   | Hir.Bool -> Some 1
@@ -17,7 +16,7 @@ let integer_value_bit_width = function
 let is_int = function Hir.Int _ -> true | _ -> false
 
 let is_unsigned = function
-  | Hir.Int (Hir.U8 | U16 | U32 | U64 | Usize) -> true
+  | Hir.Int (Hir.U8 | U16 | U32 | U64) -> true
   | _ -> false
 
 let is_scalar = function Hir.Bool | Hir.Int _ | Hir.Float _ -> true | _ -> false
@@ -205,7 +204,7 @@ let literal_limit ~negative = function
   | Hir.Int k ->
       let bits = int_bits k in
       let signed =
-        match k with Hir.I8 | I16 | I32 | I64 | Isize -> true | _ -> false
+        match k with Hir.I8 | I16 | I32 | I64 -> true | _ -> false
       in
       if signed then
         if negative then Int64.shift_left 1L (bits - 1)

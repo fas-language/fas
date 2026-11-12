@@ -225,8 +225,6 @@ let int_types =
     (32, true, Ast.I32, Hir.I32);
     (64, false, Ast.U64, Hir.U64);
     (64, true, Ast.I64, Hir.I64);
-    (64, false, Ast.Usize, Hir.Usize);
-    (64, true, Ast.Isize, Hir.Isize);
   ]
 
 let unary_case f32 raw =

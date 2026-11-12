@@ -1,6 +1,7 @@
 module Hashtbl = C_import_json.Hashtbl
 
-type int_kind = U8 | U16 | U32 | I8 | I16 | I32 | I64 | U64 | Usize | Isize
+(* usize and isize are spellings of u64 and i64 (removal B2) *)
+type int_kind = U8 | U16 | U32 | I8 | I16 | I32 | I64 | U64
 type float_kind = F32 | F64
 
 type ty =
@@ -230,8 +231,6 @@ let rec ty_name = function
   | Int I16 -> "i16"
   | Int I32 -> "i32"
   | Int I64 -> "i64"
-  | Int Usize -> "usize"
-  | Int Isize -> "isize"
   | Float F32 -> "f32"
   | Float F64 -> "f64"
   | Addr -> "addr"
@@ -264,7 +263,7 @@ let expr_ty = function
   | EBool _ -> Bool
   | Null (t, _) -> t
   | EString _ -> Addr
-  | Sizeof _ | Alignof _ | Offsetof _ -> Int Usize
+  | Sizeof _ | Alignof _ | Offsetof _ -> Int U64
 
 let expr_span = function
   | EInt (_, _, s)
@@ -450,18 +449,17 @@ let add_size left right =
     Error "aggregate size overflows"
   else Ok (left + right)
 
-let int_bytes ?(target = Target_layout.current ()) = function
+let int_bytes = function
   | U8 | I8 -> 1
   | U16 | I16 -> 2
   | U32 | I32 -> 4
   | U64 | I64 -> 8
-  | Usize | Isize -> target.Target_layout.pointer_size
 
-let int_layout target k = Target_layout.integer target (int_bytes ~target k * 8)
+let int_layout target k = Target_layout.integer target (int_bytes k * 8)
 
 let scalar_bits target = function
   | Bool -> Ok 1
-  | Int k -> Ok (int_bytes ~target k * 8)
+  | Int k -> Ok (int_bytes k * 8)
   | Float F32 -> Ok 32
   | Float F64 -> Ok 64
   | Addr | Handle _ -> Ok (target.Target_layout.pointer_size * 8)

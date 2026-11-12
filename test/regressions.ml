@@ -638,7 +638,7 @@ let semantic_diagnostics text =
   let run () =
     let program = expect_ok (Parser.parse src) in
     match Sema.check program with
-    | Ok _ -> failwith "expected semantic rejection"
+    | Ok _ -> failwith ("expected semantic rejection:\n" ^ text)
     | Error diagnostics -> diagnostics
   in
   let first = run () in
@@ -1062,23 +1062,7 @@ let () =
   expect_layout "layout-v2i64" (16, 16) (Hir.Vec (2, Hir.Int Hir.I64));
   expect_layout "layout-array-v3i32" (32, 16)
     (Hir.Array (2, Hir.Vec (3, Hir.Int Hir.I32)));
-  if Hir.ty_equal (Hir.Int Hir.Usize) (Hir.Int Hir.U64) then
-    failwith "usize-identity: usize collapsed into u64";
-  if Hir.ty_equal (Hir.Int Hir.Isize) (Hir.Int Hir.I64) then
-    failwith "isize-identity: isize collapsed into i64";
-  let target32 =
-    { (Target_layout.current ()) with pointer_size = 4; pointer_align = 4 }
-  in
-  (match Hir.layout ~target:target32 [] (Hir.Int Hir.Usize) with
-  | Ok (4, 4) -> ()
-  | Ok (size, align) ->
-      failwith (Printf.sprintf "usize-layout: expected (4, 4), got (%d, %d)" size align)
-  | Error message -> failwith ("usize-layout: " ^ message));
-  (match Hir.layout ~target:target32 [] (Hir.Int Hir.Isize) with
-  | Ok (4, 4) -> ()
-  | Ok (size, align) ->
-      failwith (Printf.sprintf "isize-layout: expected (4, 4), got (%d, %d)" size align)
-  | Error message -> failwith ("isize-layout: " ^ message));
+  (* usize and isize are spellings of u64 and i64 (removal B2) *)
   semantic_accept "usize-return-from-u64"
     "fn convert(value u64) usize { return value }\n";
   semantic_accept "u64-return-from-usize"
@@ -1675,8 +1659,8 @@ let () =
       "fn id[N const usize](value usize) usize { return value + N }\n\
        fn test() usize { return id[3](4) }\n"
   in
-  if not (contains usize_specialization "N=usize:3\"") then
-    failwith "usize-specialization: specialization key lost usize identity";
+  if not (contains usize_specialization "N=u64:3\"") then
+    failwith "usize-specialization: specialization key lost the u64 parameter";
   let target_width_type_hir =
     expect_ok
       (Parser.parse
@@ -1692,20 +1676,9 @@ let () =
       (fun (func : Hir.func) -> contains func.name "$spec$")
       target_width_type_hir.Hir.funcs
   in
-  if List.length target_width_specs <> 2 then
-    failwith "target-width-instantiation: usize/u64 instantiations were merged";
-  if
-    not
-      (List.exists
-         (fun (func : Hir.func) -> String.ends_with ~suffix:"usize" func.name)
-         target_width_specs)
-  then failwith "target-width-instantiation: specialization key lost usize identity";
-  if
-    not
-      (List.exists
-         (fun (func : Hir.func) -> String.ends_with ~suffix:"u64" func.name)
-         target_width_specs)
-  then failwith "target-width-instantiation: specialization key lost u64 identity";
+  (* usize is u64 and isize is i64 (removal B2): one instantiation *)
+  if List.length target_width_specs <> 1 then
+    failwith "target-width-instantiation: usize/u64 instantiations were not merged";
   ignore (Lower.lower target_width_type_hir |> expect_ok);
   let signed_target_width_hir =
     expect_ok
@@ -1722,20 +1695,9 @@ let () =
       (fun (func : Hir.func) -> contains func.name "$spec$")
       signed_target_width_hir.Hir.funcs
   in
-  if List.length signed_target_width_specs <> 2 then
-    failwith "target-width-instantiation: isize/i64 instantiations were merged";
-  if
-    not
-      (List.exists
-         (fun (func : Hir.func) -> String.ends_with ~suffix:"isize" func.name)
-         signed_target_width_specs)
-  then failwith "target-width-instantiation: specialization key lost isize identity";
-  if
-    not
-      (List.exists
-         (fun (func : Hir.func) -> String.ends_with ~suffix:"i64" func.name)
-         signed_target_width_specs)
-  then failwith "target-width-instantiation: specialization key lost i64 identity";
+  (* usize is u64 and isize is i64 (removal B2): one instantiation *)
+  if List.length signed_target_width_specs <> 1 then
+    failwith "target-width-instantiation: isize/i64 instantiations were not merged";
   ignore (Lower.lower signed_target_width_hir |> expect_ok);
   let uninitialized_field_write =
     llvm_of "struct S { x i64 }\nfn test() i64 { p S\n p.x = 1\n return 0 }\n"
@@ -2455,8 +2417,8 @@ let () =
        fn main() i32 { return bitcast[i32](trunc[u32](pick[0, 4](3))) }\n"
   in
   if
-    contains pruned_dispatch "C=usize:0"
-    || not (contains pruned_dispatch "N=usize:3;1:C=usize:1")
+    contains pruned_dispatch "C=u64:0"
+    || not (contains pruned_dispatch "N=u64:3;1:C=u64:1")
   then failwith "pruned-return-no-dead-instances";
   all_errors_pin "all-errors-casts"
     "fn f(a u64, b u32) u8 {\n\
@@ -4131,7 +4093,7 @@ let () =
       "fn literal_size[N const usize]() usize { return N }\n\
        fn test() usize { return literal_size[len(\"abc\")]() }\n"
   in
-  if not (contains literal_const_specialization "N=usize:3\"") then
+  if not (contains literal_const_specialization "N=u64:3\"") then
     failwith "fas-031-len: literal length was not accepted as a const argument";
   let array_length =
     llvm_of
@@ -5283,7 +5245,7 @@ let () =
     "fn bad(x i32) i32 { switch x { case 2.0 + 1.0: { return 1 } default: { return 0 } \
      } }\n";
   semantic_message "float-array-length"
-    "floating point literal cannot be used as `usize`" "var values arr[2.0, i32]\n";
+    "floating point literal cannot be used as `u64`" "var values arr[2.0, i32]\n";
   semantic_message "float-shift-count"
     "right operand of `<<` has type `f32`, expected an integer"
     "fn bad(x i32, n f32) i32 { return x << n }\n";
@@ -5831,10 +5793,10 @@ let () =
     failwith "specialization-order: generated output was not deterministic";
   let markers =
     [
-      "define internal i64 @\"left$spec$4:1:N=usize:1\"()";
-      "define internal i64 @\"right$spec$5:1:N=usize:2\"()";
-      "define internal i64 @\"leaf$spec$4:1:N=usize:11\"()";
-      "define internal i64 @\"leaf$spec$4:1:N=usize:22\"()";
+      "define internal i64 @\"left$spec$4:1:N=u64:1\"()";
+      "define internal i64 @\"right$spec$5:1:N=u64:2\"()";
+      "define internal i64 @\"leaf$spec$4:1:N=u64:11\"()";
+      "define internal i64 @\"leaf$spec$4:1:N=u64:22\"()";
     ]
   in
   let marker_positions =
@@ -5917,7 +5879,7 @@ let () =
        generic_params =
          [
            Ast.Type_param { name = "T"; _ };
-           Ast.Const_param { name = "N"; ty = Ast.Int Ast.Usize; _ };
+           Ast.Const_param { name = "N"; ty = Ast.Int Ast.U64; _ };
          ];
        fields = [ { ty = Ast.Array ({ text = "N"; _ }, Ast.Named_type ("T", _)); _ } ];
        _;
@@ -5927,7 +5889,7 @@ let () =
        generic_params =
          [
            Ast.Type_param { name = "T"; _ };
-           Ast.Const_param { name = "N"; ty = Ast.Int Ast.Usize; _ };
+           Ast.Const_param { name = "N"; ty = Ast.Int Ast.U64; _ };
            Ast.Type_param { name = "U"; _ };
          ];
        params = [ { ty = Ast.Named_type ("T", _); _ } ];
@@ -5939,8 +5901,8 @@ let () =
   | _ -> failwith "type-generic-declarations: parameter kinds or order were lost");
   let rendered_generic_declarations = Ast.render_program generic_declarations in
   if
-    (not (contains rendered_generic_declarations "struct Buffer[T, N const usize]"))
-    || not (contains rendered_generic_declarations "fn choose[T, N const usize, U]")
+    (not (contains rendered_generic_declarations "struct Buffer[T, N const u64]"))
+    || not (contains rendered_generic_declarations "fn choose[T, N const u64, U]")
   then failwith "type-generic-declarations: AST rendering lost generic parameters";
   let applied_type_syntax =
     expect_ok
@@ -6164,7 +6126,7 @@ let () =
     failwith "statement-positions: switch scrutinee did not use the const parameter";
   if not (contains statement_positions "icmp ult i64 %v6, 2\n") then
     failwith "statement-positions: for bound did not use the const parameter";
-  if not (contains statement_positions "N=usize:2\"") then
+  if not (contains statement_positions "N=u64:2\"") then
     failwith "statement-positions: specialization key lost const argument identity";
   if contains statement_positions "99" then
     failwith "statement-positions: a statement position resolved the shadowing global";
@@ -6218,7 +6180,7 @@ let () =
   in
   if not (contains expr_statement_shadow "add i64 2, 1\n") then
     failwith "expr-stmt-const-argument: expr statement did not use the const parameter";
-  if not (contains expr_statement_shadow "N=usize:2\"") then
+  if not (contains expr_statement_shadow "N=u64:2\"") then
     failwith "expr-stmt-const-argument: specialization key lost const argument identity";
   if contains expr_statement_shadow "99" then
     failwith "expr-stmt-const-argument: expr statement resolved the shadowing global";
@@ -6230,7 +6192,7 @@ let () =
       \ return N }\n\
        fn test() usize { return f[2]() }\n"
   in
-  if not (contains expr_statement_call "M=usize:2\"") then
+  if not (contains expr_statement_call "M=u64:2\"") then
     failwith
       "expr-stmt-call-const-argument: nested call did not use the const parameter";
   if contains expr_statement_call "99" then
@@ -7436,14 +7398,14 @@ let () =
       if
         List.length
           (List.filter
-             (fun (func : Hir.func) -> String.ends_with ~suffix:"N=usize:3" func.name)
+             (fun (func : Hir.func) -> String.ends_with ~suffix:"N=u64:3" func.name)
              hir.Hir.funcs)
         <> 1
       then failwith "cross-file-generic-reuse: duplicate add[3] specialization";
       if
         List.length
           (List.filter
-             (fun (func : Hir.func) -> String.ends_with ~suffix:"N=usize:4" func.name)
+             (fun (func : Hir.func) -> String.ends_with ~suffix:"N=u64:4" func.name)
              hir.Hir.funcs)
         <> 1
       then failwith "cross-file-generic-reuse: missing add[4] specialization";
@@ -7961,11 +7923,11 @@ let () =
     "struct Buffer[T, N const usize] { data arr[N, T] }\n\
      fn test(value Buffer[u8, u16]) i64 { return 0 }\n";
   semantic_error "const-generic-struct-argument-type"
-    "cannot use `usize` as `u8`: values above 255 would be lost"
+    "cannot use `u64` as `u8`: values above 255 would be lost"
     "struct Buffer[T, N const u8] { data arr[N, T] }\n\
      fn test(value Buffer[u8, sizeof[u8]]) i64 { return 0 }\n";
   semantic_message "const-generic-struct-negative-length"
-    "cannot use `isize` as `usize`: negative values change meaning"
+    "cannot use `i64` as `u64`: negative values change meaning"
     "struct Buffer[T, N const isize] { data arr[N, T] }\n\
      fn test(value Buffer[u8, -1]) i64 { return 0 }\n";
 
@@ -8151,7 +8113,7 @@ let () =
       (List.exists
          (fun (func : Hir.func) ->
            contains func.name "aggregate_metrics$spec$"
-           && func.params = [] && func.ret = Hir.Int Hir.Usize)
+           && func.params = [] && func.ret = Hir.Int Hir.U64)
          function_specializations)
   then
     failwith "const-generic-function-type-nesting: aggregate length was not substituted";
@@ -8172,7 +8134,7 @@ let () =
      declare `value` as `addr`; callers pass its address with `&`"
     "fn identity[N const usize](value arr[N, u8]) arr[N, u8] { return value }\n";
   semantic_message "const-generic-function-negative-length"
-    "cannot use `isize` as `usize`: negative values change meaning"
+    "cannot use `i64` as `u64`: negative values change meaning"
     "fn size[N const isize]() usize { return sizeof[arr[N,u8]] }\n\
      fn test() usize { return size[-2]() }\n";
   semantic_message "const-generic-function-machine-length"
@@ -8193,9 +8155,9 @@ let () =
        (String.index sizeof_negative_array_source '\n' + 1)
        'N'
     - String.index sizeof_negative_array_source '\n')
-    1 "cannot use `isize` as `usize`: negative values change meaning"
+    1 "cannot use `i64` as `u64`: negative values change meaning"
     (Some
-       "reinterpret the bits with `bitcast[usize](N)`, or widen with `sext`/`zext` \
+       "reinterpret the bits with `bitcast[u64](N)`, or widen with `sext`/`zext` \
         first if that is what you mean");
   let const_array_len_generic_llvm =
     llvm_of
@@ -9403,10 +9365,10 @@ let () =
     "const S u8 = 7\n\
      const SLOT_IF_FORM usize = sizeof[arr[if S > 3 { S } else { 300 }, u8]]\n";
   semantic_message "array-size-slot-narrow-arithmetic"
-    "`K + 1` is computed in `u8` and may wrap before it reaches `usize`"
+    "`K + 1` is computed in `u8` and may wrap before it reaches `u64`"
     "const K u8 = 255\nfn bad() void { values arr[K + 1, u8] = {}; return }\n";
   semantic_message "vector-size-slot-narrow-arithmetic"
-    "`K + 1` is computed in `u8` and may wrap before it reaches `usize`"
+    "`K + 1` is computed in `u8` and may wrap before it reaches `u64`"
     "const K u8 = 255\nfn bad() void { values vec[K + 1, u8] = splat(0); return }\n";
   semantic_accept "array-size-slot-explicit-widening-twin"
     "const K u8 = 255\n\
@@ -9907,7 +9869,7 @@ let () =
   let widening_addr_to_int_source = "fn f(value addr) usize { return value }\n" in
   semantic_pin "widening-address-to-integer-is-explicit" widening_addr_to_int_source 1
     (String.length "fn f(value addr) usize { return " + 1)
-    5 "cannot return `addr` as `usize`: addresses convert to integers with `addr_bits`"
+    5 "cannot return `addr` as `u64`: addresses convert to integers with `addr_bits`"
     (Some "write `addr_bits(value)`");
   conversion_help_twin "address-to-usize-help-compiles" widening_addr_to_int_source
     "value" "addr_bits(value)" "write `addr_bits(value)`";
@@ -9998,24 +9960,23 @@ let () =
     "fn f(flag bool, a u64, b usize) u64 { return if flag { a } else { b } }\n";
   semantic_pin "machine-integer-u64-to-isize-diagnostic"
     "fn f(a u64) isize { return a }\n" 1 28 1
-    "cannot return `u64` as `isize`: values above 9223372036854775807 change meaning"
-    (Some "write `bitcast[isize](a)`");
+    "cannot return `u64` as `i64`: values above 9223372036854775807 change meaning"
+    (Some "write `bitcast[i64](a)`");
   semantic_pin "machine-integer-i64-to-usize-diagnostic"
     "fn f(a i64) usize { return a }\n" 1 28 1
-    "cannot return `i64` as `usize`: negative values change meaning"
+    "cannot return `i64` as `u64`: negative values change meaning"
     (Some
-       "reinterpret the bits with `bitcast[usize](a)`, or widen with `sext`/`zext` \
+       "reinterpret the bits with `bitcast[u64](a)`, or widen with `sext`/`zext` \
         first if that is what you mean");
   semantic_pin "machine-integer-usize-to-u32-diagnostic"
     "fn f(a usize) u32 { return a }\n" 1 28 1
-    "cannot return `usize` as `u32`: values above 4294967295 would be lost"
+    "cannot return `u64` as `u32`: values above 4294967295 would be lost"
     (Some "keep the low bits with `trunc[u32](a)`");
   semantic_pin "machine-integer-mixed-sum-to-isize-diagnostic"
     "fn mixed_is(a u64, b usize) isize { return a + b }\n" 1 44 5
-    "cannot return `usize` as `isize`: values above 9223372036854775807 change meaning"
-    (Some "write `bitcast[isize](a + b)`");
-  semantic_error "machine-integer-generic-u64-usize-conflict"
-    "cannot infer `T` for `gen`: `a` is `u64`, `b` is `usize`"
+    "cannot return `u64` as `i64`: values above 9223372036854775807 change meaning"
+    (Some "write `bitcast[i64](a + b)`");
+  semantic_accept "machine-integer-generic-u64-usize-same-type"
     "fn gen[T](a T, b T) T { return a }\n\
      fn f(a u64, b usize) usize { return gen(a, b) }\n";
   let widening_c_import_source =
@@ -11893,7 +11854,7 @@ let () =
      integer offset"
     "fn f(a addr, b addr) addr { return a - b }\n";
   semantic_error "raw-select-int-addr-sub"
-    "address arithmetic for `-` has operands `usize` and `addr`; expected a scalar \
+    "address arithmetic for `-` has operands `u64` and `addr`; expected a scalar \
      integer offset"
     "fn f(n usize, p addr) usize { return n - p }\n";
   semantic_error "raw-select-handle-select" "cannot select through a handle"
@@ -12993,11 +12954,11 @@ let () =
      constant"
     "var G i32\nconst P bool = &G == &G\n";
   semantic_message "address-constants-integer-conversion"
-    "global initializer must be a constant expression for `P`; `zext[usize](&G)` is \
+    "global initializer must be a constant expression for `P`; `zext[u64](&G)` is \
      not constant"
     "var G i32\nconst P usize = zext[usize](&G)\n";
   semantic_message "address-constants-bitcast"
-    "global initializer must be a constant expression for `P`; `bitcast[usize](&G)` is \
+    "global initializer must be a constant expression for `P`; `bitcast[u64](&G)` is \
      not constant"
     "var G i32\nconst P usize = bitcast[usize](&G)\n";
   semantic_message "address-constants-array-length"
@@ -13557,9 +13518,9 @@ let () =
     c_stdlib
     "fn probe() void { p addr = malloc(16)\nview xs = p[u32, ..]\nxs[4] = 1\nreturn }\n";
   c_semantic_pin "narrow-arithmetic-malloc-size-help"
-    "widen an operand first: `zext[usize](nres) * 140 + 16`" c_stdlib
+    "widen an operand first: `zext[u64](nres) * 140 + 16`" c_stdlib
     "fn probe(nres u32) addr { return malloc(nres * 140 + 16) }\n" 1 41 15
-    "`nres * 140 + 16` is computed in `u32` and may wrap before it reaches `usize`";
+    "`nres * 140 + 16` is computed in `u32` and may wrap before it reaches `u64`";
   c_semantic_accept "narrow-arithmetic-malloc-size-help-compiles" c_stdlib
     "fn probe(nres u32) addr { return malloc(zext[usize](nres) * 140 + 16) }\n";
   c_semantic_message "alloc-size-calloc-past-end"
@@ -14291,16 +14252,16 @@ let () =
                (Ast.type_name actual))
       | None -> failwith ("C machine typedef was not imported: " ^ name))
     [
-      ("size_t", Ast.Usize);
-      ("uintptr_t", Ast.Usize);
-      ("ssize_t", Ast.Isize);
-      ("ptrdiff_t", Ast.Isize);
-      ("intptr_t", Ast.Isize);
-      ("fas_size_alias", Ast.Usize);
-      ("fas_uintptr_alias", Ast.Usize);
-      ("fas_ssize_alias", Ast.Isize);
-      ("fas_ptrdiff_alias", Ast.Isize);
-      ("fas_intptr_alias", Ast.Isize);
+      ("size_t", Ast.U64);
+      ("uintptr_t", Ast.U64);
+      ("ssize_t", Ast.I64);
+      ("ptrdiff_t", Ast.I64);
+      ("intptr_t", Ast.I64);
+      ("fas_size_alias", Ast.U64);
+      ("fas_uintptr_alias", Ast.U64);
+      ("fas_ssize_alias", Ast.I64);
+      ("fas_ptrdiff_alias", Ast.I64);
+      ("fas_intptr_alias", Ast.I64);
     ];
   c_semantic_accept "c-import-size-functions" c_sizes
     "fn length() usize { return strlen(c\"fas\") }\n\
@@ -15633,11 +15594,11 @@ let () =
                (Hir.ty_name expected_ty) expected_bits (Hir.ty_name ty) bits)
       | None -> failwith ("C macro was not imported: " ^ name))
     [
-      ("SIZE_T_MACRO", Hir.Int Hir.Usize, 4L);
-      ("PTRDIFF_MACRO", Hir.Int Hir.Isize, -5L);
-      ("UINTPTR_MACRO", Hir.Int Hir.Usize, 7L);
-      ("INTPTR_MACRO", Hir.Int Hir.Isize, -6L);
-      ("CUSTOM_SIZE_MACRO", Hir.Int Hir.Usize, 4L);
+      ("SIZE_T_MACRO", Hir.Int Hir.U64, 4L);
+      ("PTRDIFF_MACRO", Hir.Int Hir.I64, -5L);
+      ("UINTPTR_MACRO", Hir.Int Hir.U64, 7L);
+      ("INTPTR_MACRO", Hir.Int Hir.I64, -6L);
+      ("CUSTOM_SIZE_MACRO", Hir.Int Hir.U64, 4L);
       ("SIZE_MAX", Hir.Int Hir.U64, -1L);
       ("INT64_MAX", Hir.Int Hir.I64, Int64.max_int);
     ];
@@ -16076,7 +16037,7 @@ let () =
   semantic_accept "size-expression-negative-explicit-twin"
     "const POS isize = 1\nvar A arr[bitcast[usize](POS) + 1, u8]\n";
   semantic_message "size-expression-negative"
-    "cannot use `isize` as `usize`: negative values change meaning"
+    "cannot use `i64` as `u64`: negative values change meaning"
     "const NEG isize = -1\nvar A arr[NEG + 0, u8]\n";
   semantic_accept "size-expression-too-large-twin"
     "const SMALL usize = 3\nvar A arr[SMALL + 1, u8]\n";
@@ -16150,7 +16111,7 @@ let () =
      static_assert(offsetof(struct Outer, data) == 24, \"Outer.data offset\");\n\
      extern int8_t a;\n\
      extern struct Outer state;\n\
-     int32_t z(void * p, struct Token * t, size_t n, ptrdiff_t s, bool b);\n"
+     int32_t z(void * p, struct Token * t, uint64_t n, int64_t s, bool b);\n"
   in
   if actual <> expected then failwith ("c-export-matrix:\n" ^ actual);
   assert (headers = [] && errors = []);
@@ -16170,8 +16131,8 @@ let () =
       ("u32", "uint32_t");
       ("i64", "int64_t");
       ("u64", "uint64_t");
-      ("isize", "ptrdiff_t");
-      ("usize", "size_t");
+      ("isize", "int64_t");
+      ("usize", "uint64_t");
       ("bool", "bool");
       ("addr", "void *");
     ]
@@ -16278,11 +16239,10 @@ let () =
        #define FAS_SCALARS_H\n\
        #include <stdbool.h>\n\
        #include <stdint.h>\n\
-       #include <stddef.h>\n\
        #ifdef __cplusplus\n\
        extern \"C\" {\n\
        #endif\n\
-       extern size_t count;\n\
+       extern uint64_t count;\n\
        int32_t echo(int32_t x);\n\
        extern bool flag;\n\
        #ifdef __cplusplus\n\
@@ -18697,7 +18657,7 @@ let () =
   semantic_pin "bitcast-address-to-integer" address_to_integer 1
     (String.length "fn bits(pointer addr) usize { return " + 1)
     7
-    "illegal `bitcast` from `addr` to `usize`: address-to-integer conversion uses \
+    "illegal `bitcast` from `addr` to `u64`: address-to-integer conversion uses \
      `addr_bits`"
     (Some "write `addr_bits(pointer)`");
   semantic_accept "bitcast-address-to-integer-twin"
@@ -18708,7 +18668,7 @@ let () =
   semantic_pin "bitcast-integer-to-address" integer_to_address 1
     (String.length "fn pointer(bits usize) addr { return " + 1)
     7
-    "illegal `bitcast` from `usize` to `addr`: integer-to-address conversion uses \
+    "illegal `bitcast` from `u64` to `addr`: integer-to-address conversion uses \
      `addr_from_bits`"
     (Some "write `addr_from_bits(bits)`");
   semantic_accept "bitcast-integer-to-address-twin"
@@ -18729,12 +18689,13 @@ let () =
   semantic_pin "zext-usize-u64-help" usize_zext_u64 1
     (String.length "fn widen(value usize) u64 { return " + 1)
     4
-    "illegal `zext` from `usize` to `u64`: `usize` and `u64` have the same width and \
-     convert implicitly; no conversion is needed"
-    (Some "write `value`");
+    "illegal `zext` from `u64` to `u64`: the value already has type `u64`" None;
   semantic_accept "zext-usize-u64-applied"
     "fn widen(value usize) u64 { return value }\n";
+  (* usize and isize are u64 and i64 (removal B2): converting between the two
+     spellings is converting a value to its own type *)
   let same_width_pin name kind source destination =
+    let canonical = function "usize" -> "u64" | "isize" -> "i64" | t -> t in
     let prefix = Printf.sprintf "fn widen(value %s) %s { return " source destination in
     semantic_pin name
       (prefix ^ Printf.sprintf "%s[%s](value) }\n" kind destination)
@@ -18742,10 +18703,9 @@ let () =
       (String.length prefix + 1)
       (String.length kind)
       (Printf.sprintf
-         "illegal `%s` from `%s` to `%s`: `%s` and `%s` have the same width and \
-          convert implicitly; no conversion is needed"
-         kind source destination source destination)
-      (Some "write `value`");
+         "illegal `%s` from `%s` to `%s`: the value already has type `%s`" kind
+         (canonical source) (canonical destination) (canonical destination))
+      None;
     semantic_accept (name ^ "-applied")
       (Printf.sprintf "fn widen(value %s) %s { return value }\n" source destination)
   in
@@ -18758,18 +18718,18 @@ let () =
     "fn widen(value i64) usize { return zext[usize](value) }\n" 1
     (String.length "fn widen(value i64) usize { return " + 1)
     4
-    "illegal `zext` from `i64` to `usize`: the source and destination have the same \
+    "illegal `zext` from `i64` to `u64`: the source and destination have the same \
      width; use `bitcast`"
-    (Some "write `bitcast[usize](value)`");
+    (Some "write `bitcast[u64](value)`");
   semantic_accept "zext-i64-usize-mixed-sign-applied"
     "fn widen(value i64) usize { return bitcast[usize](value) }\n";
   semantic_pin "trunc-u64-isize-mixed-sign"
     "fn narrow(value u64) isize { return trunc[isize](value) }\n" 1
     (String.length "fn narrow(value u64) isize { return " + 1)
     5
-    "illegal `trunc` from `u64` to `isize`: the source and destination have the same \
+    "illegal `trunc` from `u64` to `i64`: the source and destination have the same \
      width; use `bitcast`"
-    (Some "write `bitcast[isize](value)`");
+    (Some "write `bitcast[i64](value)`");
   semantic_accept "trunc-u64-isize-mixed-sign-applied"
     "fn narrow(value u64) isize { return bitcast[isize](value) }\n";
   semantic_pin "zext-i32-u32-mixed-sign"
@@ -18796,23 +18756,21 @@ let () =
   semantic_pin "zext-usize-u64-expression-help" same_width_expression 1
     (String.length "fn widen(a usize, b usize) u64 { return " + 1)
     4
-    "illegal `zext` from `usize` to `u64`: `usize` and `u64` have the same width and \
-     convert implicitly; no conversion is needed"
-    (Some "write `a + b`");
+    "illegal `zext` from `u64` to `u64`: the value already has type `u64`" None;
   semantic_accept "zext-usize-u64-expression-applied"
     "fn widen(a usize, b usize) u64 { return a + b }\n";
   let zext_address = "fn bits(pointer addr) usize { return zext[usize](pointer) }\n" in
   semantic_pin "zext-address-help" zext_address 1
     (String.length "fn bits(pointer addr) usize { return " + 1)
     4
-    "illegal `zext` from `addr` to `usize`: address-to-integer conversion uses \
+    "illegal `zext` from `addr` to `u64`: address-to-integer conversion uses \
      `addr_bits`"
     (Some "write `addr_bits(pointer)`");
   let trunc_address = "fn pointer(bits usize) addr { return trunc[addr](bits) }\n" in
   semantic_pin "trunc-address-help" trunc_address 1
     (String.length "fn pointer(bits usize) addr { return " + 1)
     5
-    "illegal `trunc` from `usize` to `addr`: integer-to-address conversion uses \
+    "illegal `trunc` from `u64` to `addr`: integer-to-address conversion uses \
      `addr_from_bits`"
     (Some "write `addr_from_bits(bits)`");
   let void_cast = "fn invalid(value i32) void { return zext[void](value) }\n" in

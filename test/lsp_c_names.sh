@@ -562,19 +562,19 @@ def pins_good(s, main, cn_h):
     local = {cn_h}
     expect_c_hover(
         s, main, GOOD_MAIN, "strlen(c", 1,
-        "extern fn strlen(__s addr) usize",
+        "extern fn strlen(__s addr) u64",
         ["nonnull: __s; C string: __s"],
         r"^extern .*[ *]strlen \(", system_string, "strlen",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "malloc(8)", 0,
-        "extern fn malloc(__size usize) addr",
+        "extern fn malloc(__size u64) addr",
         ["alloc_size: __size"],
         r"^extern .*[ *]malloc \(", system_stdlib, "malloc",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "memcpy(raw", 0,
-        "extern fn memcpy(__dest addr, __src addr, __n usize) addr",
+        "extern fn memcpy(__dest addr, __src addr, __n u64) addr",
         ["nonnull: __dest, __src"],
         r"^extern .*[ *]memcpy \(", system_string, "memcpy",
     )

@@ -2832,7 +2832,7 @@ let () =
   expect "type"
     [
       "main.fas:5:17-22 [] u32 8";
-      "main.fas:6:17-18 [] usize 2";
+      "main.fas:6:17-18 [] u64 2";
       "main.fas:6:27-28 [] u8 7";
       "main.fas:6:30-31 [] u8 9";
       "main.fas:8:26-27 [] i32 -";
@@ -2874,9 +2874,9 @@ let () =
       "main.fas:24:24-46 [] i32 -";
       "main.fas:24:36-39 [] probe_box -";
       "main.fas:24:36-45 [] i32 -";
-      "main.fas:25:18-26 [] usize -";
-      "main.fas:25:18-42 [] usize -";
-      "main.fas:25:39-42 [] usize 4";
+      "main.fas:25:18-26 [] u64 -";
+      "main.fas:25:18-42 [] u64 -";
+      "main.fas:25:39-42 [] u64 4";
       "main.fas:26:10-11 [] Point -";
       "main.fas:26:10-13 [] i32 -";
       "shapes.fas:1:19-20 [] u32 4";
@@ -2892,7 +2892,7 @@ let () =
       "shapes.fas:15:48-53 [2] u32 -";
       "shapes.fas:15:48-57 [2] u32 -";
       "shapes.fas:15:56-57 [2] u32 2";
-      "shapes.fas:21:19-27 [] usize 4";
+      "shapes.fas:21:19-27 [] u64 4";
     ]
     (List.map
        (fun (t : Sema_index.expression_type) ->

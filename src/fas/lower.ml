@@ -87,12 +87,6 @@ let rec ty = function
   | Hir.Int Hir.U16 | Hir.Int Hir.I16 -> I16
   | Hir.Int Hir.U32 | Hir.Int Hir.I32 -> I32
   | Hir.Int Hir.U64 | Hir.Int Hir.I64 -> I64
-  | Hir.Int Hir.Usize | Hir.Int Hir.Isize -> (
-      match Target_layout.pointer_integer_bits (Target_layout.current ()) with
-      | Ok 32 -> I32
-      | Ok 64 -> I64
-      | Ok bits -> invalid_arg (Printf.sprintf "unsupported pointer width: %d" bits)
-      | Error message -> invalid_arg message)
   | Hir.Addr | Hir.Handle _ -> Low.Pointer Low.I8
   | Hir.Vec (n, t) -> Low.Vector (n, ty t)
   | Hir.Array (n, t) -> Low.Array (n, storage_ty t)
@@ -117,7 +111,7 @@ let c_extension = function
   | Hir.Int kind ->
       Target_layout.c_integer_extension (Target_layout.current ())
         ~signed:
-          (match kind with Hir.I8 | I16 | I32 | I64 | Isize -> true | _ -> false)
+          (match kind with Hir.I8 | I16 | I32 | I64 -> true | _ -> false)
         (Hir.int_bytes kind * 8)
       |> ir_extension
   | _ -> Low.No_extension
@@ -209,8 +203,8 @@ let ones span = function
   | _ -> error span "internal error: bitwise complement has a non-integer type"
 
 let unsigned = function
-  | Hir.Int (Hir.U8 | U16 | U32 | U64 | Usize) -> true
-  | Hir.Vec (_, Hir.Int (Hir.U8 | U16 | U32 | U64 | Usize)) -> true
+  | Hir.Int (Hir.U8 | U16 | U32 | U64) -> true
+  | Hir.Vec (_, Hir.Int (Hir.U8 | U16 | U32 | U64)) -> true
   | _ -> false
 
 let is_float_type = function
@@ -384,8 +378,8 @@ let guard_condition s condition =
   enter s valid
 
 let signed_type = function
-  | Hir.Int (Hir.I8 | I16 | I32 | I64 | Isize)
-  | Hir.Vec (_, Hir.Int (Hir.I8 | I16 | I32 | I64 | Isize)) ->
+  | Hir.Int (Hir.I8 | I16 | I32 | I64)
+  | Hir.Vec (_, Hir.Int (Hir.I8 | I16 | I32 | I64)) ->
       true
   | _ -> false
 
@@ -516,7 +510,6 @@ let normalize_index_type s index_ty span value =
     | Hir.Int (Hir.U16 | Hir.I16) -> Ok 16
     | Hir.Int (Hir.U32 | Hir.I32) -> Ok 32
     | Hir.Int (Hir.U64 | Hir.I64) -> Ok 64
-    | Hir.Int (Hir.Usize | Hir.Isize) -> Ok ((Target_layout.current ()).pointer_size * 8)
     | _ -> error span "internal error: index lowering received a non-integer value"
   in
   let t = match index_ty with Hir.Vec (_, element) -> element | _ -> index_ty in
@@ -530,7 +523,7 @@ let normalize_index_type s index_ty span value =
       else if unsigned t then "zext"
       else "sext"
     in
-    let pointer_int = ty (Hir.Int Hir.Usize) in
+    let pointer_int = ty (Hir.Int Hir.U64) in
     E.cast s.fn id kind (value_ty value) value pointer_int;
     Ok (Low.Local (id, pointer_int))
 
@@ -661,7 +654,7 @@ let rec expr s = function
       | Ast.Add -> address_step s Low.Add x y
       | Ast.Sub -> address_step s Low.Sub x y
       | Ast.Eq | Ast.Ne | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge ->
-          let pointer_int = ty (Hir.Int Hir.Usize) in
+          let pointer_int = ty (Hir.Int Hir.U64) in
           let x_id = fresh s in
           E.cast s.fn x_id "ptrtoint" (Low.Pointer Low.I8) x pointer_int;
           let y_id = fresh s in
@@ -795,7 +788,7 @@ let rec expr s = function
       let* alignment = place_alignment s (Hir.Field (a, "", t, off, Span.synthetic)) in
       load_value s t p alignment
   | Hir.Sizeof (_, n, _) | Hir.Alignof (_, n, _) | Hir.Offsetof (_, _, n, _) ->
-      Ok (Low.Const (ty (Hir.Int Hir.Usize), Int64.of_int n))
+      Ok (Low.Const (ty (Hir.Int Hir.U64), Int64.of_int n))
   | Hir.Ternary (c, a, b, t, _) -> lower_ternary s c a b t
   | Hir.Splat (e, t, _) ->
       let* x = expr s e in
@@ -812,7 +805,7 @@ let rec expr s = function
       load_value s t (Low.Local (ptr_id, Low.Pointer (ty t))) alignment
 
 and address_step s operation pointer offset =
-  let pointer_int = ty (Hir.Int Hir.Usize) in
+  let pointer_int = ty (Hir.Int Hir.U64) in
   let pointer_bits = fresh s in
   E.cast s.fn pointer_bits "ptrtoint" (Low.Pointer Low.I8) pointer pointer_int;
   let result_bits = fresh s in
@@ -858,7 +851,7 @@ and lower_builtin s b args t span =
                 E.cast s.fn id "ptrtoint" (Low.value_ty v) v Low.I64;
                 Ok (Low.Local (id, Low.I64))
             | _, Low.I64 -> Ok v
-            | Hir.Int (Hir.I8 | I16 | I32 | Isize), from ->
+            | Hir.Int (Hir.I8 | I16 | I32), from ->
                 let id = fresh s in
                 E.cast s.fn id "sext" from v Low.I64;
                 Ok (Low.Local (id, Low.I64))
@@ -885,7 +878,7 @@ and lower_builtin s b args t span =
       in
       let opcode =
         match (source_element, target_element) with
-        | Hir.Int (Hir.I8 | I16 | I32 | I64 | Isize), Hir.Float _ -> "sitofp"
+        | Hir.Int (Hir.I8 | I16 | I32 | I64), Hir.Float _ -> "sitofp"
         | Hir.Int _, Hir.Float _ -> "uitofp"
         | Hir.Float Hir.F32, Hir.Float Hir.F64 -> "fpext"
         | Hir.Float Hir.F64, Hir.Float Hir.F32 -> "fptrunc"
@@ -906,11 +899,10 @@ and lower_builtin s b args t span =
           | U16 | I16 -> 16
           | U32 | I32 -> 32
           | U64 | I64 -> 64
-          | Usize | Isize -> (Target_layout.current ()).pointer_size * 8
         in
         let conversion =
           match destination with
-          | Hir.I8 | I16 | I32 | I64 | Isize -> "fptosi"
+          | Hir.I8 | I16 | I32 | I64 -> "fptosi"
           | _ -> "fptoui"
         in
         let format =
@@ -988,8 +980,8 @@ and lower_builtin s b args t span =
         | Some k -> (
             let unsigned =
               match k with
-              | Hir.U8 | U16 | U32 | U64 | Usize -> true
-              | Hir.I8 | I16 | I32 | I64 | Isize -> false
+              | Hir.U8 | U16 | U32 | U64 -> true
+              | Hir.I8 | I16 | I32 | I64 -> false
             in
             match (b, unsigned) with
             | Add_sat, true -> Ok "llvm.uadd.sat."
@@ -1019,8 +1011,8 @@ and lower_builtin s b args t span =
       | Some k ->
           let unsigned =
             match k with
-            | Hir.U8 | U16 | U32 | U64 | Usize -> true
-            | Hir.I8 | I16 | I32 | I64 | Isize -> false
+            | Hir.U8 | U16 | U32 | U64 -> true
+            | Hir.I8 | I16 | I32 | I64 -> false
           in
           let elem_ty, lanes =
             match rt with Low.Vector (n, e) -> (e, n) | e -> (e, 1)
@@ -1109,7 +1101,7 @@ and lower_builtin s b args t span =
       let lanes = match vty with Hir.Vec (n, _) -> n | _ -> 1 in
       let signed =
         match vty with
-        | Hir.Vec (_, Hir.Int (Hir.I8 | I16 | I32 | I64 | Isize)) -> true
+        | Hir.Vec (_, Hir.Int (Hir.I8 | I16 | I32 | I64)) -> true
         | _ -> false
       in
       let bin op a b =
@@ -1482,7 +1474,7 @@ and volatile_store s span access_ty value pointer =
 
 and simd_memory_address s span stride base index_ty index_value =
   let* offset = normalize_index_type s index_ty span index_value in
-  let pointer_int = ty (Hir.Int Hir.Usize) in
+  let pointer_int = ty (Hir.Int Hir.U64) in
   let offset =
     match stride with
     | None | Some 1 -> offset
@@ -1597,7 +1589,7 @@ and simd_memory_load s span access_ty kind args values =
   | Hir.Masked, [ _; _; _ ], [ base; mask; fallback ] when s.intrinsic_masked_loads ->
       simd_masked_load s span access_ty base mask fallback
   | Hir.Masked, [ _; _; _ ], [ base; mask; fallback ] ->
-      simd_lane_load s span access_ty None (Hir.Int Hir.Usize) base mask fallback
+      simd_lane_load s span access_ty None (Hir.Int Hir.U64) base mask fallback
         (Some (int_ty_bytes (ty access_ty)))
   | ( (Hir.Gather | Hir.Gather_bytes),
       [ _; index_expr; _; _ ],
@@ -1626,7 +1618,7 @@ and simd_lane_load s span access_ty indices index_ty base mask fallback stride =
       enter s active;
       let index_value =
         match indices with
-        | None -> Low.Const (ty (Hir.Int Hir.Usize), Int64.of_int lane)
+        | None -> Low.Const (ty (Hir.Int Hir.U64), Int64.of_int lane)
         | Some vector ->
             let index_id = fresh s in
             E.extract s.fn index_id (value_ty vector) vector lane_index;

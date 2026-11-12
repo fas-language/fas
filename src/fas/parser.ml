@@ -451,8 +451,8 @@ module P = struct
         | "i16" -> Ok (Ast.Int Ast.I16)
         | "i32" -> Ok (Ast.Int Ast.I32)
         | "i64" -> Ok (Ast.Int Ast.I64)
-        | "usize" -> Ok (Ast.Int Ast.Usize)
-        | "isize" -> Ok (Ast.Int Ast.Isize)
+        | "usize" -> Ok (Ast.Int Ast.U64)
+        | "isize" -> Ok (Ast.Int Ast.I64)
         | _ -> assert false)
     | Token.Ident "char" when (peek_n p 1).kind = Token.Star ->
         let first = (peek p).span and last = (peek_n p 1).span in

@@ -2122,8 +2122,8 @@ let type_result ?(allow_arrays = false) ~alias_name ~alias_type_node ~resolve_al
           | None -> Error "typedef has no canonical type")
       | Some "PredefinedSugarType" -> (
           match Option.bind (get "type" node) (string "qualType") with
-          | Some "__size_t" -> Ok (Ast.Int Ast.Usize)
-          | Some "__ptrdiff_t" -> Ok (Ast.Int Ast.Isize)
+          | Some "__size_t" -> Ok (Ast.Int Ast.U64)
+          | Some "__ptrdiff_t" -> Ok (Ast.Int Ast.I64)
           | _ ->
               Option.fold ~none:(Error "unsupported C type") ~some:(resolve seen)
                 (child_type node))
@@ -2697,7 +2697,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
     | Ast.Int (Ast.I8 | Ast.U8) -> Some 8
     | Ast.Int (Ast.I16 | Ast.U16) -> Some 16
     | Ast.Int (Ast.I32 | Ast.U32) -> Some 32
-    | Ast.Int (Ast.I64 | Ast.U64 | Ast.Isize | Ast.Usize) -> Some 64
+    | Ast.Int (Ast.I64 | Ast.U64) -> Some 64
     | _ -> None
   in
   let enum_constant_type node =
@@ -2972,8 +2972,8 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
     Option.bind (Hashtbl.find_opt alias_nodes_by_id id) type_node
   in
   let machine_integer_type = function
-    | "size_t" | "uintptr_t" -> Some (Ast.Int Ast.Usize)
-    | "ssize_t" | "ptrdiff_t" | "intptr_t" -> Some (Ast.Int Ast.Isize)
+    | "size_t" | "uintptr_t" -> Some (Ast.Int Ast.U64)
+    | "ssize_t" | "ptrdiff_t" | "intptr_t" -> Some (Ast.Int Ast.I64)
     | _ -> None
   in
   let rec alias name =
@@ -3889,8 +3889,6 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
       | Ast.Int I16 -> Some (Hir.Int Hir.I16)
       | Ast.Int I32 -> Some (Hir.Int Hir.I32)
       | Ast.Int I64 -> Some (Hir.Int Hir.I64)
-      | Ast.Int Usize -> Some (Hir.Int Hir.Usize)
-      | Ast.Int Isize -> Some (Hir.Int Hir.Isize)
       | Ast.Float Ast.F32 -> Some (Hir.Float Hir.F32)
       | Ast.Float Ast.F64 -> Some (Hir.Float Hir.F64)
       | Ast.Addr -> Some Hir.Addr
@@ -4268,7 +4266,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
               let machine_alias_ty =
                 Option.bind (string "macroTypeAliasName" node) (fun alias_name ->
                     match alias alias_name with
-                    | Ok (Ast.Int (Ast.Usize | Ast.Isize) as ty) -> Some ty
+                    | Ok (Ast.Int (Ast.U64 | Ast.I64) as ty) -> Some ty
                     | _ -> None)
               in
               let ty =

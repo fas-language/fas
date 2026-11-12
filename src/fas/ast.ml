@@ -12,7 +12,8 @@ and ty =
   | Applied_type of string * Span.t * generic_arg list * Span.t
   | Void
 
-and int_kind = U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 | Usize | Isize
+(* usize and isize are spellings of u64 and i64: one 64-bit target (removal B2) *)
+and int_kind = U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64
 and float_kind = F32 | F64
 
 and generic_arg =
@@ -334,8 +335,6 @@ let rec type_name = function
   | Int I16 -> "i16"
   | Int I32 -> "i32"
   | Int I64 -> "i64"
-  | Int Usize -> "usize"
-  | Int Isize -> "isize"
   | Float F32 -> "f32"
   | Float F64 -> "f64"
   | Addr -> "addr"
@@ -511,8 +510,6 @@ let render_program program =
     | Int I16 -> text "i16"
     | Int I32 -> text "i32"
     | Int I64 -> text "i64"
-    | Int Usize -> text "usize"
-    | Int Isize -> text "isize"
     | Float F32 -> text "f32"
     | Float F64 -> text "f64"
     | Addr -> text "addr"

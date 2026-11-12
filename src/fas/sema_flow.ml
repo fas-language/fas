@@ -586,7 +586,7 @@ let merge_initialized_maps flow left right =
 
 let fact_compare ty left right =
   match ty with
-  | Hir.Int (Hir.U8 | U16 | U32 | U64 | Usize) -> Int64.unsigned_compare left right
+  | Hir.Int (Hir.U8 | U16 | U32 | U64) -> Int64.unsigned_compare left right
   | _ -> Int64.compare left right
 
 let find_binding flow id =

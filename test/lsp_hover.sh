@@ -266,7 +266,7 @@ BODY_T = FENCE + "body arr[3, u16] at offset 8\n```"
 POINTER_FIELD_T = FENCE + "pointer addr at offset 16\n```"
 IDENTITY_SIG = FENCE + "fn identity[T](value T) T\n```"
 EMIT_SIG = FENCE + "extern fn emit_line(fmt addr, ...) i32\n```"
-LANES_SIG = FENCE + "fn lanes[T, N const usize](value T) usize\n```"
+LANES_SIG = FENCE + "fn lanes[T, N const u64](value T) u64\n```"
 PICK_SIG = FENCE + "fn pick[A, B](first A, second B) B\n```"
 MAIN_SIG = FENCE + "fn main() i32\n```"
 IDENTITY_U8 = IDENTITY_SIG + "\n\nT = u8"
@@ -276,10 +276,10 @@ LANES_U32 = LANES_SIG + "\n\nT = u32, N = 4"
 PICK_U8 = PICK_SIG + "\n\nA = u8, B = u32"
 POINT_LOCAL_T = FENCE + "point Point\n```"
 TINY_T = FENCE + "tiny u8\n```"
-WIDTH_T = FENCE + "width usize\n```"
+WIDTH_T = FENCE + "width u64\n```"
 CHOSEN_T = FENCE + "chosen u32\n```"
 BOX_LOCAL_T = FENCE + "box Box[i32]\n```"
-COUNT_T = FENCE + "count usize\n```"
+COUNT_T = FENCE + "count u64\n```"
 SMALL_LOCAL_T = FENCE + "small i32\n```"
 LOCAL_USE_T = FENCE + "local i32\n```"
 VIEW_T = FENCE + "view first u8\n```"
@@ -288,7 +288,7 @@ U32_LIT_T = FENCE + "u32\n```"
 I32_LIT_T = FENCE + "i32\n```"
 VALUE_BODY_T = FENCE + "value T\n```\n\nT = u8\n\nT = i32"
 TYPE_IDENTITY_T = FENCE + "T\n```\n\nT = u8\n\nT = i32"
-N_LANES_T = FENCE + "N usize\n```\n\nN = 16\n\nN = 4"
+N_LANES_T = FENCE + "N u64\n```\n\nN = 16\n\nN = 4"
 LEFT_T = FENCE + "left T\n```\n\nT = u8\n\nT = u32"
 HELD_T = FENCE + "held T\n```\n\nT = u8\n\nT = u32"
 SUM_EXPR_T = FENCE + "u8 | u32\n```"
@@ -355,7 +355,7 @@ TABLE_T = FENCE + "TABLE arr[2, u8]\n```\n\n2 elements"
 OPAQUE_T = FENCE + "opaque Ctx\n```\n\nno layout"
 TAGGED_T = (
     FENCE
-    + "struct Tagged[N const usize]\n```\n\ntag u8\n\nwide u64\n\ndata arr[N, u8]"
+    + "struct Tagged[N const u64]\n```\n\ntag u8\n\nwide u64\n\ndata arr[N, u8]"
     + "\n\n```text\nTagged[3]: size 24, align 8\ntag   u8          at offset 0\nwide  u64         at offset 8\ndata  arr[3, u8]  at offset 16\n```"
     + "\n\n```text\nTagged[10]: size 32, align 8\ntag   u8           at offset 0\nwide  u64          at offset 8\ndata  arr[10, u8]  at offset 16\n```"
 )
@@ -367,7 +367,7 @@ TAGGED_DATA_T = (
 )
 BLEND_T = (
     FENCE
-    + "struct Blend[T, N const usize]\n```\n\nhead T\n\ntail arr[N, u8]"
+    + "struct Blend[T, N const u64]\n```\n\nhead T\n\ntail arr[N, u8]"
     + "\n\n```text\nBlend[u32, 3]: size 8, align 4\nhead  u32         at offset 0\ntail  arr[3, u8]  at offset 4\n```"
 )
 CPAD_T = (
@@ -832,7 +832,7 @@ def run_hover():
     expect(
         strlen is not None
         and strlen.startswith(
-            "```fas\nextern fn strlen(__s addr) usize\n```\n\nnonnull: __s; C string: __s\n\n```c\nextern size_t strlen"
+            "```fas\nextern fn strlen(__s addr) u64\n```\n\nnonnull: __s; C string: __s\n\n```c\nextern size_t strlen"
         )
         and re.search(r"\n\n[^\n]+:[0-9]+$", strlen) is not None,
         "imported C name hover for strlen: %r" % (strlen,),

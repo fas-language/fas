@@ -768,8 +768,6 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Hir.Int Hir.I16 -> Ast.Int Ast.I16
     | Hir.Int Hir.I32 -> Ast.Int Ast.I32
     | Hir.Int Hir.I64 -> Ast.Int Ast.I64
-    | Hir.Int Hir.Usize -> Ast.Int Ast.Usize
-    | Hir.Int Hir.Isize -> Ast.Int Ast.Isize
     | Hir.Float Hir.F32 -> Ast.Float Ast.F32
     | Hir.Float Hir.F64 -> Ast.Float Ast.F64
     | Hir.Addr -> Ast.Addr

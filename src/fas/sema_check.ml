@@ -110,7 +110,7 @@ let literal_expression_truth = function
 
 let fact_order ty =
   match ty with
-  | Hir.Int (Hir.U8 | U16 | U32 | U64 | Usize) -> Int64.unsigned_compare
+  | Hir.Int (Hir.U8 | U16 | U32 | U64) -> Int64.unsigned_compare
   | _ -> Int64.compare
 
 let fact_bounds ty =
@@ -1435,7 +1435,7 @@ let operand_type_hint c operation expected left right =
   let expected = if is_if_operand left || is_if_operand right then None else expected in
   match operation with
   | Ast.Add | Ast.Sub -> (
-      match expected with Some Hir.Addr -> Some (Hir.Int Hir.Usize) | e -> e)
+      match expected with Some Hir.Addr -> Some (Hir.Int Hir.U64) | e -> e)
   | Ast.Mul | Ast.Div | Ast.Rem | Ast.Bit_and | Ast.Bit_or | Ast.Bit_xor -> expected
   | Ast.Eq | Ast.Ne | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge -> (
       match expected with
@@ -1451,7 +1451,7 @@ let contextual_peer_type c operation peer operand =
   else
     match (peer, unresolved_shape_of c operand, operation) with
     | Hir.Addr, Some Unresolved_null, (Ast.Eq | Ast.Ne) -> Some Hir.Addr
-    | Hir.Addr, _, _ -> Some (Hir.Int Hir.Usize)
+    | Hir.Addr, _, _ -> Some (Hir.Int Hir.U64)
     | Hir.Handle _, Some Unresolved_int, _ -> None
     | peer, _, _ -> Some peer
 
@@ -1519,7 +1519,7 @@ let rec view_source_span expression =
 let normalize_offset_expr structs span (e : Hir.expr) =
   match Hir.expr_ty e with
   | Hir.Int k ->
-      let* usize_size, _ = layout_diag span structs (Hir.Int Hir.Usize) in
+      let* usize_size, _ = layout_diag span structs (Hir.Int Hir.U64) in
       let target_bits = usize_size * 8 in
       let bits =
         match k with
@@ -1527,18 +1527,17 @@ let normalize_offset_expr structs span (e : Hir.expr) =
         | Hir.U16 | Hir.I16 -> 16
         | Hir.U32 | Hir.I32 -> 32
         | Hir.U64 | Hir.I64 -> 64
-        | Hir.Usize | Hir.Isize -> target_bits
       in
       let signed =
         match k with
-        | Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize -> true
+        | Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 -> true
         | _ -> false
       in
       if bits = target_bits then Ok e
       else if bits < target_bits then
         Ok
-          (Hir.Cast ((if signed then Ast.Sext else Ast.Zext), e, Hir.Int Hir.Usize, span))
-      else Ok (Hir.Cast (Ast.Trunc, e, Hir.Int Hir.Usize, span))
+          (Hir.Cast ((if signed then Ast.Sext else Ast.Zext), e, Hir.Int Hir.U64, span))
+      else Ok (Hir.Cast (Ast.Trunc, e, Hir.Int Hir.U64, span))
   | _ -> error span "offset must be an integer"
 
 let query_layout_in_context (c : context) span ty =
@@ -1836,8 +1835,8 @@ let rec check_place_inner (c : context) expr =
                         Hir.Binary
                           ( Ast.Add,
                             off,
-                            Hir.EInt (Int64.of_int f.offset, Hir.Int Hir.Usize, s),
-                            Hir.Int Hir.Usize,
+                            Hir.EInt (Int64.of_int f.offset, Hir.Int Hir.U64, s),
+                            Hir.Int Hir.U64,
                             s ),
                         f.ty,
                         s );
@@ -1913,7 +1912,7 @@ and check_place (c : context) expr =
 
 and raw_offset_expr c s access_ty index_payload =
   match index_payload with
-  | None -> Ok (Hir.EInt (0L, Hir.Int Hir.Usize, s))
+  | None -> Ok (Hir.EInt (0L, Hir.Int Hir.U64, s))
   | Some payload ->
       let* i = select_value_arg s payload in
       let* idx = check_expr c None i in
@@ -1926,8 +1925,8 @@ and raw_offset_expr c s access_ty index_payload =
           (Hir.Binary
              ( Ast.Mul,
                norm,
-               Hir.EInt (Int64.of_int size, Hir.Int Hir.Usize, s),
-               Hir.Int Hir.Usize,
+               Hir.EInt (Int64.of_int size, Hir.Int Hir.U64, s),
+               Hir.Int Hir.U64,
                s ))
 
 and check_expr ?destination ?(allow_widen = true) (c : context) expected expression =
@@ -2080,7 +2079,7 @@ and check_expr_inner ?destination (c : context) expected expression =
       let t = Option.value ~default:(Hir.Int Hir.I32) expected in
       let allowed =
         match t with
-        | Hir.Int ((Hir.I8 | I16 | I32 | I64 | Isize) as k) ->
+        | Hir.Int ((Hir.I8 | I16 | I32 | I64) as k) ->
             let b = int_bits k in
             (b = 64 && v = Int64.min_int) || (b < 64 && v = Int64.shift_left 1L (b - 1))
         | _ -> false
@@ -3727,7 +3726,7 @@ and check_call_inner c expected fn args s =
               | Hir.Array (n, _) -> Ok n
               | _ -> error s "len requires a fixed array or string literal")
         in
-        Ok (Hir.EInt (Int64.of_int n, Hir.Int Hir.Usize, s))
+        Ok (Hir.EInt (Int64.of_int n, Hir.Int Hir.U64, s))
   | Ast.Ident (name, _) -> (
       let builtin =
         match Names.value_operation name with
@@ -3966,7 +3965,7 @@ and check_call_inner c expected fn args s =
                               if
                                 match sel_elem with
                                 | Hir.Int
-                                    (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize)
+                                    (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64)
                                   ->
                                     true
                                 | _ -> false
@@ -3985,7 +3984,7 @@ and check_call_inner c expected fn args s =
                            | Some value -> (
                                match sel_elem with
                                | Hir.Int
-                                   (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize) ->
+                                   (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64) ->
                                    Int64.to_string (sign_extend_value sel_elem value)
                                | _ -> Printf.sprintf "%Lu" value)
                            | None -> "?")
@@ -4046,7 +4045,7 @@ and check_call_inner c expected fn args s =
               in
               let ok_indices =
                 match Hir.expr_ty b2 with
-                | Hir.Vec (_, Hir.Int (Hir.U8 | Hir.U16 | Hir.U32 | Hir.U64 | Hir.Usize))
+                | Hir.Vec (_, Hir.Int (Hir.U8 | Hir.U16 | Hir.U32 | Hir.U64))
                   ->
                     true
                 | _ -> false
@@ -4068,7 +4067,7 @@ and check_call_inner c expected fn args s =
             else
               let* a = check_expr c None (List.hd args) in
               match Hir.expr_ty a with
-              | Hir.Addr -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Int Hir.Usize, s))
+              | Hir.Addr -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Int Hir.U64, s))
               | _ -> error s "addr_bits argument must be an addr")
         | Hir.Syscall ->
             let count = List.length args in
@@ -4092,9 +4091,9 @@ and check_call_inner c expected fn args s =
             if List.length args <> 1 then
               error s (Printf.sprintf "builtin `%s` expects one argument" name)
             else
-              let* a = check_expr c (Some (Hir.Int Hir.Usize)) (List.hd args) in
+              let* a = check_expr c (Some (Hir.Int Hir.U64)) (List.hd args) in
               match Hir.expr_ty a with
-              | Hir.Int Hir.Usize -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Addr, s))
+              | Hir.Int Hir.U64 -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Addr, s))
               | _ -> error s "addr_from_bits argument must be a usize")
         | Hir.Handle_addr -> (
             if List.length args <> 1 then

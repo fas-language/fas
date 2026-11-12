@@ -16,7 +16,7 @@ let lookup name table = List.find_opt (fun (entry, _, _) -> entry = name) table
 let shuffle_indices_in_range lane_ty n values =
   let signed =
     match lane_ty with
-    | Hir.Int (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize) -> true
+    | Hir.Int (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64) -> true
     | _ -> false
   in
   List.for_all
@@ -89,7 +89,7 @@ let operand_type_hint operation expected left right =
   else
     match operation with
     | Ast.Add | Ast.Sub -> (
-        match expected with Some Hir.Addr -> Some (Hir.Int Hir.Usize) | e -> e)
+        match expected with Some Hir.Addr -> Some (Hir.Int Hir.U64) | e -> e)
     | Ast.Mul | Ast.Div | Ast.Rem | Ast.Bit_and | Ast.Bit_or | Ast.Bit_xor -> expected
     | Ast.Eq | Ast.Ne | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge -> (
         match expected with
@@ -105,7 +105,7 @@ let contextual_peer_type operation peer operand =
   else
     match (peer, unresolved_shape_of operand, operation) with
     | Hir.Addr, Some Unresolved_null, (Ast.Eq | Ast.Ne) -> Some Hir.Addr
-    | Hir.Addr, _, _ -> Some (Hir.Int Hir.Usize)
+    | Hir.Addr, _, _ -> Some (Hir.Int Hir.U64)
     | Hir.Handle _, Some Unresolved_int, _ -> None
     | peer, _, _ -> Some peer
 
@@ -278,8 +278,6 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
     | I16 -> I16
     | I32 -> I32
     | I64 -> I64
-    | Usize -> Usize
-    | Isize -> Isize
   in
   let templates =
     List.filter_map
@@ -701,7 +699,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
       let t = Option.value ~default:(Hir.Int Hir.I32) expected in
       let allowed =
         match t with
-        | Hir.Int ((Hir.I8 | I16 | I32 | I64 | Isize) as k) ->
+        | Hir.Int ((Hir.I8 | I16 | I32 | I64) as k) ->
             let b = int_bits k in
             (b = 64 && v = Int64.min_int) || (b < 64 && v = Int64.shift_left 1L (b - 1))
         | _ -> false
@@ -1172,10 +1170,10 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
   | Ast.Call (Ast.Ident ("len", _), [ Ast.String_lit (cstr, v, _) ], s) ->
       if cstr && String.contains v '\000' then
         error s "C string literal cannot contain embedded NUL"
-      else Ok (Hir.Int Hir.Usize, Int64.of_int (String.length v))
+      else Ok (Hir.Int Hir.U64, Int64.of_int (String.length v))
   | Ast.Call (Ast.Ident ("len", _), [ Ast.Ident (name, _) ], s) -> (
       match lookup name arrays with
-      | Some (_, Hir.Array (n, _), _) -> Ok (Hir.Int Hir.Usize, Int64.of_int n)
+      | Some (_, Hir.Array (n, _), _) -> Ok (Hir.Int Hir.U64, Int64.of_int n)
       | _ -> (
           match List.assoc_opt name array_lengths with
           | None -> error s "len requires a fixed array or string literal"
@@ -1194,7 +1192,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
                 active_array_length_queries := previous;
                 let result = remap_length_cycle length.span result in
                 let* ty, bits = result in
-                if is_int ty then Ok (Hir.Int Hir.Usize, bits)
+                if is_int ty then Ok (Hir.Int Hir.U64, bits)
                 else error s "len requires a fixed array or string literal"))
   | Ast.Call (Ast.Ident (name, _), [ arg ], _s) when name = "any" || name = "all" -> (
       match
@@ -1229,7 +1227,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
           let ty = Hir.Int kind in
           let signed =
             match kind with
-            | Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize -> true
+            | Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 -> true
             | _ -> false
           in
           let result =
@@ -1438,7 +1436,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
           (Sema_types.opaque_source_span named_types [] source_type)
       in
       let* n, _ = layout_diag type_span layout_structs t in
-      Ok (Hir.Int Hir.Usize, Int64.of_int n)
+      Ok (Hir.Int Hir.U64, Int64.of_int n)
   | Ast.Alignof (source_type, s) ->
       let evaluate values expression expected =
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
@@ -1453,7 +1451,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
           (Sema_types.opaque_source_span named_types [] source_type)
       in
       let* _, n = layout_diag type_span layout_structs t in
-      Ok (Hir.Int Hir.Usize, Int64.of_int n)
+      Ok (Hir.Int Hir.U64, Int64.of_int n)
   | Ast.Offsetof (source_ty, n, field_span, s) -> (
       let evaluate values expression expected =
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
@@ -1472,7 +1470,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
                 (fun index ->
                   Sema_index.refer_field index field_span (layout_source sn) n)
                 !index;
-              Ok (Hir.Int Hir.Usize, Int64.of_int f.offset)
+              Ok (Hir.Int Hir.U64, Int64.of_int f.offset)
           | None ->
               error s
                 (Sema_types.missing_field_message ~record_name:(Ast.type_name source_ty)
@@ -1655,7 +1653,7 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
             let* left_ty, left_values =
               evaluate
                 (match right_ty with
-                | Hir.Addr -> Some (Hir.Int Hir.Usize)
+                | Hir.Addr -> Some (Hir.Int Hir.U64)
                 | t -> Some t)
                 left
             in
@@ -1665,7 +1663,7 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
             let* right_ty, right_values =
               evaluate
                 (match left_ty with
-                | Hir.Addr -> Some (Hir.Int Hir.Usize)
+                | Hir.Addr -> Some (Hir.Int Hir.U64)
                 | t -> Some t)
                 right
             in
@@ -1936,7 +1934,7 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
       let* idx_ty, idx_values = evaluate None idx in
       let* () =
         match idx_ty with
-        | Hir.Vec (_, Hir.Int (Hir.U8 | Hir.U16 | Hir.U32 | Hir.U64 | Hir.Usize)) ->
+        | Hir.Vec (_, Hir.Int (Hir.U8 | Hir.U16 | Hir.U32 | Hir.U64)) ->
             Ok ()
         | _ -> error span "permute indices must be an unsigned integer vector"
       in
@@ -1996,7 +1994,7 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
         else
           let signed =
             match sel_elem with
-            | Hir.Int (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64 | Hir.Isize) -> true
+            | Hir.Int (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64) -> true
             | _ -> false
           in
           let bad =
