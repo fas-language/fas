@@ -114,4 +114,6 @@
     "expand" "masked_load" "masked_store" "gather" "gather_bytes" "scatter"
     "scatter_bytes" "copy" "call_addr" "volatile_load" "volatile_store"
     "addr_bits" "addr_from_bits" "handle_addr" "handle_from_addr" "syscall" "sqrt"
+    "atomic_load" "atomic_store" "atomic_xchg" "atomic_cas" "atomic_add"
+    "atomic_sub" "atomic_and" "atomic_or" "atomic_xor" "atomic_fence"
     "fma" "floor" "ceil" "round" "abs" "cvt"))
