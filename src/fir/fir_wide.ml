@@ -665,6 +665,12 @@ let pow2_f64 cx e =
 (* 2^e as an f80 constant (+inf beyond the range) *)
 let pow2_f80 cx e = fconst_bits cx.g F80 [| Int64.min_int; Int64.of_int (if e > 16383 then 0x7fff else e + 16383) |]
 
+(* floor & co. of x : t (f32, f64 or f80) through __fir_rint* *)
+let rint cx (k : fun_) t x =
+  let md = match k with Roundeven -> 0L | Floor -> 1L | Ceil -> 2L | _ -> 3L in
+  let name = match t with F32 -> "__fir_rint32" | F64 -> "__fir_rint64" | _ -> "__fir_rint80" in
+  (call_helper cx name [ t; i64 ] [ t ] [| x; c64 cx md |]).(0)
+
 let float_to_int cx n kind ~src xv =
   (* f32 widens to f64 (exact); f80 stays itself: f64 would round it *)
   let ft = match src with F80 -> F80 | _ -> F64 in
@@ -869,6 +875,10 @@ let convert_inst cx (i : inst) =
   (* f80 fma: a correctly rounded software helper (no x87 instruction) *)
   | Fma (_, a, b, c) when ty_of cx.f ir.results.(0) = F80 ->
       set cx (r 0) (call_helper cx "__fir_fma80" [ F80; F80; F80 ] [ F80 ] [| get1 cx a; get1 cx b; get1 cx c |])
+  (* floor/ceil/ftrunc/roundeven: integer helpers (no SSE4.1 roundsd, no
+     inexact from x87 frndint) *)
+  | Fun (((Floor | Ceil | Ftrunc | Roundeven) as k), _, a) when (match rty 0 with F32 | F64 | F80 -> true | _ -> false) ->
+      set cx (r 0) [| rint cx k (rty 0) (get1 cx a) |]
   | _ when not any_odd -> copy_inst cx ir
   | Nop | Dbg_value _ -> ()
   (* f16: see the header *)
@@ -880,6 +890,9 @@ let convert_inst cx (i : inst) =
       set cx (r 0) [| f_to_h cx F32 v |]
   | Fun (Fneg, _, a) -> set cx (r 0) [| ib16 cx Xor (get1 cx a) (c16 cx 0x8000L) |]
   | Fun (Fabs, _, a) -> set cx (r 0) [| ib16 cx And (get1 cx a) (c16 cx 0x7fffL) |]
+  | Fun (((Floor | Ceil | Ftrunc | Roundeven) as k), _, a) ->
+      (* integral after rounding, so the f32 result converts back exactly *)
+      set cx (r 0) [| f_to_h cx F32 (rint cx k F32 (h2f cx (get1 cx a))) |]
   | Fun (k, fl, a) ->
       let v = e cx (Fun (k, fl, h2f cx (get1 cx a))) F32 in
       set cx (r 0) [| f_to_h cx F32 v |]
@@ -1052,6 +1065,7 @@ let func_needs (f : func) =
          match ir.op with
          | Call c when sig_changes c.sig_ -> found := true
          | Fma _ when ty_of f ir.results.(0) = F80 -> found := true
+         | Fun ((Floor | Ceil | Ftrunc | Roundeven), _, _) -> found := true
          | _ -> ())
        f.insts;
      !found)
@@ -1123,12 +1137,13 @@ let add_helpers (m : modul) helpers =
   Hashtbl.iter (fun n () -> need n) helpers;
   let present = Hashtbl.create 64 in
   Vec.iter (fun (f : func) -> Hashtbl.replace present f.name ()) m.funcs;
-  let text =
-    String.concat "\n"
-      (List.filter_map
-         (fun (n, (t, _)) -> if Hashtbl.mem want n && not (Hashtbl.mem present n) then Some t else None)
-         Fir_wide_runtime.all)
+  (* several names may share one text (__fir_rint32/64/80): each text once *)
+  let texts =
+    List.filter_map
+      (fun (n, (t, _)) -> if Hashtbl.mem want n && not (Hashtbl.mem present n) then Some t else None)
+      Fir_wide_runtime.all
   in
+  let text = String.concat "\n" (List.fold_left (fun acc t -> if List.memq t acc then acc else acc @ [ t ]) [] texts) in
   if text <> "" then begin
     let rt = Fir_parse.parse_module ("triple \"x86_64-unknown-linux-gnu\"\n" ^ text) in
     Vec.iter (fun f -> add_func m f) rt.funcs

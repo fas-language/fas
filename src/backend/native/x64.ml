@@ -685,17 +685,6 @@ let logic_xx a ~double op (dst : xmm) (src : xmm) =
 let mov_xx a (dst : xmm) (src : xmm) =
   if dst <> src then sse_rr a 0 0x28 ~reg:dst ~rm:src
 
-(* roundsd/roundss dst, src, mode (SSE4.1): 0 nearest-even, 1 floor, 2 ceil,
-   3 truncate; bit 3 suppresses the inexact exception. *)
-let round_xx a ~double (dst : xmm) (src : xmm) mode =
-  byte a 0x66;
-  rex a ~w:false ~r:dst ~b:src ();
-  byte a 0x0f;
-  byte a 0x3a;
-  byte a (if double then 0x0b else 0x0a);
-  modrm a 3 dst src;
-  byte a (mode lor 8)
-
 (* SSE2 packed integers on 128-bit values, for vectors that stay vectors.
    Lane widths are 8, 16, 32 or 64 bits. *)
 
@@ -903,7 +892,6 @@ let farithp a op =
   byte a (match op with Fadd -> 0xc1 | Fmul -> 0xc9 | Fsub -> 0xe9 | Fdiv -> 0xf9 | _ -> invalid_arg "X64.farithp")
 
 let fsqrt87 a = byte a 0xd9; byte a 0xfa
-let frndint a = byte a 0xd9; byte a 0xfc
 
 (* fucomip st(0), st(1): ZF PF CF as ucomis sets them for st0 vs st1; pops st0 *)
 let fucomip a = byte a 0xdf; byte a 0xe9

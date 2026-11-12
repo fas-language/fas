@@ -72,7 +72,6 @@ type x87 =
   | Farith of X64.fop  (** st1 = st1 op st0, pop (Fadd Fsub Fmul Fdiv) *)
   | Fremloop  (** st0 = fmod(st0, st1) by an fprem loop; clobbers rax and the flags *)
   | Fsqrt87
-  | Frndint  (** in the control word's rounding mode *)
   | Fucomip  (** flags as ucomis for st0 vs st1, pop *)
   | Fpop
   | Fnstcw of addr
@@ -131,7 +130,6 @@ type ins =
   | Cmov of X64.cond * reg * reg  (** if cond then dst = src *)
   | Bsf of reg * reg  (** dst undefined when src is 0 *)
   | Bsr of reg * reg
-  | Popcnt of reg * reg
   | Fop of X64.fop * bool * reg * reg  (** dst op= src (scalar, double?) *)
   | Fsqrt of bool * reg * reg  (** dst = sqrt src *)
   | Ucomi of bool * reg * reg
@@ -140,7 +138,6 @@ type ins =
   | Cvtsi of bool * reg * reg  (** xmm dst = float of a signed 64-bit GPR *)
   | Cvttsi of bool * reg * reg  (** GPR dst = truncating signed 64-bit conversion *)
   | Cvtff of bool * reg * reg  (** from double?, dst, src *)
-  | Round of bool * reg * reg * int  (** roundsd/ss mode (0 even, 1 floor, 2 ceil, 3 trunc) *)
   | Frem87 of bool * int
       (** x87 fprem loop on frame slot [s]: [s] = fmod([s], [s + 8]); clobbers rax *)
   | X87 of x87
@@ -232,14 +229,12 @@ let uses_defs = function
   | Ext (_, _, d, s)
   | Bsf (d, s)
   | Bsr (d, s)
-  | Popcnt (d, s)
   | Fsqrt (_, d, s)
   | Movgx (_, d, s)
   | Movxg (_, d, s)
   | Cvtsi (_, d, s)
   | Cvttsi (_, d, s)
-  | Cvtff (_, d, s)
-  | Round (_, d, s, _) ->
+  | Cvtff (_, d, s) ->
       ([ s ], [ d ])
   | Mul1 (_, s) -> ([ G Rax; s ], [ G Rax; G Rdx ])
   | Div (_, s) -> ([ G Rax; G Rdx; s ], [ G Rax; G Rdx ])
@@ -312,7 +307,6 @@ let map_regs g ins =
   | Cmov (c, d, s) -> Cmov (c, g d, g s)
   | Bsf (d, s) -> Bsf (g d, g s)
   | Bsr (d, s) -> Bsr (g d, g s)
-  | Popcnt (d, s) -> Popcnt (g d, g s)
   | Fop (op, dbl, d, s) -> Fop (op, dbl, g d, g s)
   | Fsqrt (dbl, d, s) -> Fsqrt (dbl, g d, g s)
   | Ucomi (dbl, x, y) -> Ucomi (dbl, g x, g y)
@@ -321,7 +315,6 @@ let map_regs g ins =
   | Cvtsi (dbl, d, s) -> Cvtsi (dbl, g d, g s)
   | Cvttsi (dbl, d, s) -> Cvttsi (dbl, g d, g s)
   | Cvtff (dbl, d, s) -> Cvtff (dbl, g d, g s)
-  | Round (dbl, d, s, m) -> Round (dbl, g d, g s, m)
   | Frem87 _ as i -> i
   | X87 (Fld (w, a)) -> X87 (Fld (w, ma a))
   | X87 (Fstp (w, a)) -> X87 (Fstp (w, ma a))
@@ -443,7 +436,6 @@ let ins_s i =
   | Cmov (c, a, b) -> p "cmov%s %s, %s" (cond_s c) (r a) (r b)
   | Bsf (a, b) -> p "%s = bsf %s" (r a) (r b)
   | Bsr (a, b) -> p "%s = bsr %s" (r a) (r b)
-  | Popcnt (a, b) -> p "%s = popcnt %s" (r a) (r b)
   | Fop (op, dbl, a, b) -> p "%s%s %s, %s" (fop_s op) (d dbl) (r a) (r b)
   | Fsqrt (dbl, a, b) -> p "%s = sqrt%s %s" (r a) (d dbl) (r b)
   | Ucomi (dbl, a, b) -> p "ucomi%s %s, %s" (d dbl) (r a) (r b)
@@ -452,7 +444,6 @@ let ins_s i =
   | Cvtsi (dbl, a, b) -> p "%s = cvtsi2%s %s" (r a) (d dbl) (r b)
   | Cvttsi (dbl, a, b) -> p "%s = cvtt%s2si %s" (r a) (d dbl) (r b)
   | Cvtff (fd, a, b) -> p "%s = cvt%s2%s %s" (r a) (d fd) (d (not fd)) (r b)
-  | Round (dbl, a, b, m) -> p "%s = round%s %s, %d" (r a) (d dbl) (r b) m
   | Frem87 (dbl, s) -> p "frem87%s slot%d" (d dbl) s
   | X87 x -> (
       let w = function M32 -> "m32" | M64 -> "m64" | M80 -> "m80" | I64 -> "i64" in
@@ -462,7 +453,6 @@ let ins_s i =
       | Farith op -> p "%sp" (fop_s op)
       | Fremloop -> "fprem loop"
       | Fsqrt87 -> "fsqrt"
-      | Frndint -> "frndint"
       | Fucomip -> "fucomip"
       | Fpop -> "fpop"
       | Fnstcw m -> p "fnstcw %s" (addr_s m)

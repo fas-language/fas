@@ -911,6 +911,165 @@ func @__fir_rmwh (ptr, i16, i64) -> (i16) local {
 }
 |}
 
+(* ---------- floor / ceil / trunc / roundeven ---------- *)
+
+(* x rounded to an integral value by mode md (0 to nearest even, 1 floor,
+   2 ceil, 3 trunc), on the bits: baseline x86-64 has no roundsd (SSE4.1),
+   and C's floor & co. raise no inexact and ignore the rounding mode, which
+   x87 frndint would not. With f fraction bits (|x| >= 1), the integral
+   part t is x with them cleared, and one unit 2^f in the bits is added
+   when the mode rounds away from it (the carry may bump the exponent);
+   |x| < 1 rounds to +-0 or +-1. Infinities stay, NaNs come back quiet
+   through x + x (invalid for a signaling one), as roundsd. *)
+let rint =
+  {|
+func @__fir_rint64 (f64, i64) -> (f64) local {
+^e(%x: f64, %md: i64):
+  %b = bitcast i64 %x
+  %ex = lshr i64 %b, i64 52
+  %e = and i64 %ex, i64 0x7ff
+  %neg = icmp slt i1 %b, i64 0
+  %big = icmp uge i1 %e, i64 1075
+  br %big, ^big, ^small
+^big:
+  %nan = icmp eq i1 %e, i64 0x7ff
+  br %nan, ^nan, ^id
+^nan:
+  %q = fadd f64 %x, %x
+  ret %q
+^id:
+  ret %x
+^small:
+  %lt1 = icmp ult i1 %e, i64 1023
+  br %lt1, ^tiny, ^frac
+^tiny:
+  %sb = and i64 %b, i64 0x8000000000000000
+  %mag = and i64 %b, i64 0x7fffffffffffffff
+  %tnz = icmp ne i1 %mag, i64 0
+  %tgt = icmp ugt i1 %mag, i64 0x3fe0000000000000
+  jump ^fin(%sb, i64 0x3ff0000000000000, %tnz, %tgt)
+^frac:
+  %f = sub i64 i64 1075, %e
+  %unit = shl i64 i64 1, %f
+  %mask = sub i64 %unit, i64 1
+  %fr = and i64 %b, %mask
+  %nm = xor i64 %mask, i64 -1
+  %t = and i64 %b, %nm
+  %half = lshr i64 %unit, i64 1
+  %fnz = icmp ne i1 %fr, i64 0
+  %above = icmp ugt i1 %fr, %half
+  %tie = icmp eq i1 %fr, %half
+  %tu = and i64 %t, %unit
+  %odd = icmp ne i1 %tu, i64 0
+  %todd = and i1 %tie, %odd
+  %fgt = or i1 %above, %todd
+  jump ^fin(%t, %unit, %fnz, %fgt)
+^fin(%base: i64, %u: i64, %nz: i1, %gt: i1):
+  %pos = xor i1 %neg, i1 1
+  %dn = and i1 %neg, %nz
+  %up = and i1 %pos, %nz
+  %m0 = icmp eq i1 %md, i64 0
+  %m1 = icmp eq i1 %md, i64 1
+  %m2 = icmp eq i1 %md, i64 2
+  %i2 = and i1 %m2, %up
+  %i1 = and i1 %m1, %dn
+  %i0 = and i1 %m0, %gt
+  %i12 = or i1 %i1, %i2
+  %inc = or i1 %i0, %i12
+  %add = select i64 %inc, %u, i64 0
+  %r = add i64 %base, %add
+  %rf = bitcast f64 %r
+  ret %rf
+}
+
+; f32 through f64: both conversions are exact for integral values (and an
+; sNaN is quieted with invalid on the way in)
+func @__fir_rint32 (f32, i64) -> (f32) local {
+^e(%x: f32, %md: i64):
+  %d = fpext f64 %x
+  %r = call (f64, i64) -> (f64) @__fir_rint64(%d, %md)
+  %t = fptrunc f32 %r
+  ret %t
+}
+
+; f80: the same on the explicit 64-bit significand m; f fraction bits for
+; exponents below 2^63, and a carry out of m renormalizes to 2^63 with the
+; exponent bumped
+func @__fir_rint80 (f80, i64) -> (f80) local {
+^e(%x: f80, %md: i64):
+  %sl = alloca ptr i64 16, align 16
+  store %x, %sl, align 16
+  %s8 = ptradd ptr %sl, i64 0, 1, 8
+  %m = load i64 %sl, align 16
+  %h16 = load i16 %s8, align 8
+  %h = zext i64 %h16
+  %e = and i64 %h, i64 0x7fff
+  %sw = and i64 %h, i64 0x8000
+  %neg = icmp ne i1 %sw, i64 0
+  %big = icmp uge i1 %e, i64 16446
+  br %big, ^big, ^small
+^big:
+  %nan = icmp eq i1 %e, i64 0x7fff
+  br %nan, ^nan, ^id
+^nan:
+  %q = fadd f80 %x, %x
+  ret %q
+^id:
+  ret %x
+^small:
+  %lt1 = icmp ult i1 %e, i64 16383
+  br %lt1, ^tiny, ^frac
+^tiny:
+  %tnz = icmp ne i1 %m, i64 0
+  %e382 = icmp eq i1 %e, i64 16382
+  %nh = icmp ne i1 %m, i64 0x8000000000000000
+  %tgt = and i1 %e382, %nh
+  jump ^fin(i64 0, i64 0, i64 0x8000000000000000, i64 16383, %tnz, %tgt)
+^frac:
+  %f = sub i64 i64 16446, %e
+  %unit = shl i64 i64 1, %f
+  %mask = sub i64 %unit, i64 1
+  %fr = and i64 %m, %mask
+  %nm = xor i64 %mask, i64 -1
+  %t = and i64 %m, %nm
+  %half = lshr i64 %unit, i64 1
+  %fnz = icmp ne i1 %fr, i64 0
+  %above = icmp ugt i1 %fr, %half
+  %tie = icmp eq i1 %fr, %half
+  %tu = and i64 %t, %unit
+  %odd = icmp ne i1 %tu, i64 0
+  %todd = and i1 %tie, %odd
+  %fgt = or i1 %above, %todd
+  %tsum = add i64 %t, %unit
+  %wrap = icmp ult i1 %tsum, %t
+  %tm = select i64 %wrap, i64 0x8000000000000000, %tsum
+  %we = zext i64 %wrap
+  %te = add i64 %e, %we
+  jump ^fin(%t, %e, %tm, %te, %fnz, %fgt)
+^fin(%m0: i64, %e0: i64, %mi: i64, %ei: i64, %nz: i1, %gt: i1):
+  ; (m0, e0) the value rounded towards zero, (mi, ei) one unit further out
+  %pos = xor i1 %neg, i1 1
+  %dn = and i1 %neg, %nz
+  %up = and i1 %pos, %nz
+  %k0 = icmp eq i1 %md, i64 0
+  %k1 = icmp eq i1 %md, i64 1
+  %k2 = icmp eq i1 %md, i64 2
+  %i2 = and i1 %k2, %up
+  %i1 = and i1 %k1, %dn
+  %i0 = and i1 %k0, %gt
+  %i12 = or i1 %i1, %i2
+  %inc = or i1 %i0, %i12
+  %mr = select i64 %inc, %mi, %m0
+  %er = select i64 %inc, %ei, %e0
+  %hr = or i64 %er, %sw
+  %hr16 = trunc i16 %hr
+  store %mr, %sl, align 16
+  store %hr16, %s8, align 8
+  %res = load f80 %sl, align 16
+  ret %res
+}
+|}
+
 (* ---------- f80 fma ---------- *)
 
 (* The 192-bit integer l2:l1:l0 times 2^(pos - 256), into the 12 limbs at
@@ -1274,4 +1433,7 @@ let all =
     ("__fir_rmwh", (rmwh, [ "__fir_h2f"; "__fir_f32toh" ]));
     ("__fir_place3", (place3, []));
     ("__fir_fma80", (fma80, [ "__fir_place3"; "__fir_round_h" ]));
+    ("__fir_rint64", (rint, []));
+    ("__fir_rint32", (rint, []));
+    ("__fir_rint80", (rint, []));
   ]

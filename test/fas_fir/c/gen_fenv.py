@@ -14,7 +14,9 @@
 #     allowed), out of range raises exactly invalid (value unspecified).
 # The tail checks three-operand fma at f32/f64/f80 on random and edge
 # operands (overflow, underflow, cancellation, the tininess boundary
-# just below 2^-16382) against the C library's fmaf/fma/fmal.
+# just below 2^-16382) against the C library's fmaf/fma/fmal, and floor,
+# ceil, trunc and roundeven at f16/f32/f64/f80 on random bit patterns
+# (NaNs, infinities, subnormals, ties, carries into the exponent).
 ops = [
  ('div32','f32','f32',['%r = fdiv f32 %a, %b'],'float','float','a/b'),
  ('div64','f64','f64',['%r = fdiv f64 %a, %b'],'double','double','a/b'),
@@ -216,7 +218,41 @@ static void t_fma3(void) {
     CHECK(float, 4, c_fmaf, fir_fma32, fx, fy, fz);
   }
 }
+#define RINT(T, n, cf, ff, x) CHECK(T, n, cf, ff, x, 0, 0)
+#define RINTS(T, n, sfx, x) do { \\
+  RINT(T, n, c_floor##sfx, fir_floor##sfx, x); RINT(T, n, c_ceil##sfx, fir_ceil##sfx, x); \\
+  RINT(T, n, c_trunc##sfx, fir_trunc##sfx, x); RINT(T, n, c_roundeven##sfx, fir_roundeven##sfx, x); } while (0)
+/* an integral-ish random value: an exponent around the fraction boundary,
+   or anywhere, with a significand of random bits or a run of ones */
+static void t_rint(void) {
+  for (int i = 0; i < 30000; i++) {
+    unsigned long long m = sig();
+    unsigned long long e = rnd() % 3 ? 0x3ff - 3 + rnd() % 60 : rnd() % 0x800;
+    unsigned long long b = (rnd() & 1) << 63 | e << 52 | (m >> 12);
+    double d; memcpy(&d, &b, 8);
+    RINTS(double, 8, 64, d);
+    unsigned int e32 = rnd() % 3 ? 0x7f - 3 + rnd() % 30 : rnd() % 0x100;
+    unsigned int b32 = (unsigned)(rnd() & 1) << 31 | e32 << 23 | (unsigned)(m >> 41);
+    float f; memcpy(&f, &b32, 4);
+    RINTS(float, 4, 32, f);
+    int e80 = rnd() % 3 ? 0x3fff - 3 + rnd() % 70 : rnd() % 0x8000;
+    long double l = mk80(e80 ? m | 1ULL << 63 : m >> 1, e80, rnd() & 1);
+    RINTS(long double, 10, 80, l);
+    unsigned short h16 = (rnd() & 0xffff);
+    if (rnd() % 2) h16 = (h16 & 0x83ff) | (unsigned short)((15 - 2 + rnd() % 14) << 10);
+    _Float16 h; memcpy(&h, &h16, 2);
+    RINTS(_Float16, 2, 16, h);
+  }
+}
 int main(void) {''']
+rint_c = []
+for t, sfx, ct, cfn in [('f16','16','_Float16',None), ('f32','32','float','f'), ('f64','64','double',''), ('f80','80','long double','l')]:
+    for op, fop in [('floor','floor'), ('ceil','ceil'), ('trunc','ftrunc'), ('roundeven','roundeven')]:
+        fir.append(f'func @fir_{op}{sfx} ({t}, {t}, {t}) -> ({t}) global noinline {{\n^e(%a: {t}, %b: {t}, %c: {t}):\n  %r = {fop} {t} %a\n  ret %r\n}}')
+        ref = f'(_Float16)__builtin_{op}f((float)x)' if cfn is None else f'__builtin_{op}{cfn}(x)'
+        rint_c.append(f'{ct} fir_{op}{sfx}({ct}, {ct}, {ct});')
+        rint_c.append(f'__attribute__((noinline)) static {ct} c_{op}{sfx}({ct} x, {ct} y, {ct} z) {{ (void)y; (void)z; return {ref}; }}')
+main[0] = main[0].replace('#define RINT(T', '\n'.join(rint_c) + '\n#define RINT(T', 1)
 for t, n in [('f32','fma32'), ('f64','fma64x'), ('f80','fma80x')]:
     fir.append(f'func @fir_{n} ({t}, {t}, {t}) -> ({t}) global noinline {{\n^e(%a: {t}, %b: {t}, %c: {t}):\n  %r = fma {t} %a, %b, %c\n  ret %r\n}}')
 for name,ta,tr,body,ca,cr,expr in ops:
@@ -225,6 +261,6 @@ for name,ta,tr,body,ca,cr,expr in ops:
             main.append(f'  t_{name}({a}, {b});')
 for a in vals['d']:
     main.append(f'  t_fp64ui128({a});')
-main.append('  t_fma3();\n  if (fails) printf("fails=%d\\n", fails);\n  return fails != 0;\n}')
+main.append('  t_rint();\n  t_fma3();\n  if (fails) printf("fails=%d\\n", fails);\n  return fails != 0;\n}')
 open('test/fas_fir/c/fenv.fir','w').write('\n'.join(fir)+'\n')
 open('test/fas_fir/c/fenv.c','w').write('\n'.join(c+main)+'\n')

@@ -566,6 +566,64 @@ static void t_fma3(void) {
     CHECK(float, 4, c_fmaf, fir_fma32, fx, fy, fz);
   }
 }
+_Float16 fir_floor16(_Float16, _Float16, _Float16);
+__attribute__((noinline)) static _Float16 c_floor16(_Float16 x, _Float16 y, _Float16 z) { (void)y; (void)z; return (_Float16)__builtin_floorf((float)x); }
+_Float16 fir_ceil16(_Float16, _Float16, _Float16);
+__attribute__((noinline)) static _Float16 c_ceil16(_Float16 x, _Float16 y, _Float16 z) { (void)y; (void)z; return (_Float16)__builtin_ceilf((float)x); }
+_Float16 fir_trunc16(_Float16, _Float16, _Float16);
+__attribute__((noinline)) static _Float16 c_trunc16(_Float16 x, _Float16 y, _Float16 z) { (void)y; (void)z; return (_Float16)__builtin_truncf((float)x); }
+_Float16 fir_roundeven16(_Float16, _Float16, _Float16);
+__attribute__((noinline)) static _Float16 c_roundeven16(_Float16 x, _Float16 y, _Float16 z) { (void)y; (void)z; return (_Float16)__builtin_roundevenf((float)x); }
+float fir_floor32(float, float, float);
+__attribute__((noinline)) static float c_floor32(float x, float y, float z) { (void)y; (void)z; return __builtin_floorf(x); }
+float fir_ceil32(float, float, float);
+__attribute__((noinline)) static float c_ceil32(float x, float y, float z) { (void)y; (void)z; return __builtin_ceilf(x); }
+float fir_trunc32(float, float, float);
+__attribute__((noinline)) static float c_trunc32(float x, float y, float z) { (void)y; (void)z; return __builtin_truncf(x); }
+float fir_roundeven32(float, float, float);
+__attribute__((noinline)) static float c_roundeven32(float x, float y, float z) { (void)y; (void)z; return __builtin_roundevenf(x); }
+double fir_floor64(double, double, double);
+__attribute__((noinline)) static double c_floor64(double x, double y, double z) { (void)y; (void)z; return __builtin_floor(x); }
+double fir_ceil64(double, double, double);
+__attribute__((noinline)) static double c_ceil64(double x, double y, double z) { (void)y; (void)z; return __builtin_ceil(x); }
+double fir_trunc64(double, double, double);
+__attribute__((noinline)) static double c_trunc64(double x, double y, double z) { (void)y; (void)z; return __builtin_trunc(x); }
+double fir_roundeven64(double, double, double);
+__attribute__((noinline)) static double c_roundeven64(double x, double y, double z) { (void)y; (void)z; return __builtin_roundeven(x); }
+long double fir_floor80(long double, long double, long double);
+__attribute__((noinline)) static long double c_floor80(long double x, long double y, long double z) { (void)y; (void)z; return __builtin_floorl(x); }
+long double fir_ceil80(long double, long double, long double);
+__attribute__((noinline)) static long double c_ceil80(long double x, long double y, long double z) { (void)y; (void)z; return __builtin_ceill(x); }
+long double fir_trunc80(long double, long double, long double);
+__attribute__((noinline)) static long double c_trunc80(long double x, long double y, long double z) { (void)y; (void)z; return __builtin_truncl(x); }
+long double fir_roundeven80(long double, long double, long double);
+__attribute__((noinline)) static long double c_roundeven80(long double x, long double y, long double z) { (void)y; (void)z; return __builtin_roundevenl(x); }
+#define RINT(T, n, cf, ff, x) CHECK(T, n, cf, ff, x, 0, 0)
+#define RINTS(T, n, sfx, x) do { \
+  RINT(T, n, c_floor##sfx, fir_floor##sfx, x); RINT(T, n, c_ceil##sfx, fir_ceil##sfx, x); \
+  RINT(T, n, c_trunc##sfx, fir_trunc##sfx, x); RINT(T, n, c_roundeven##sfx, fir_roundeven##sfx, x); } while (0)
+/* an integral-ish random value: an exponent around the fraction boundary,
+   or anywhere, with a significand of random bits or a run of ones */
+static void t_rint(void) {
+  for (int i = 0; i < 30000; i++) {
+    unsigned long long m = sig();
+    unsigned long long e = rnd() % 3 ? 0x3ff - 3 + rnd() % 60 : rnd() % 0x800;
+    unsigned long long b = (rnd() & 1) << 63 | e << 52 | (m >> 12);
+    double d; memcpy(&d, &b, 8);
+    RINTS(double, 8, 64, d);
+    unsigned int e32 = rnd() % 3 ? 0x7f - 3 + rnd() % 30 : rnd() % 0x100;
+    unsigned int b32 = (unsigned)(rnd() & 1) << 31 | e32 << 23 | (unsigned)(m >> 41);
+    float f; memcpy(&f, &b32, 4);
+    RINTS(float, 4, 32, f);
+    int e80 = rnd() % 3 ? 0x3fff - 3 + rnd() % 70 : rnd() % 0x8000;
+    long double l = mk80(e80 ? m | 1ULL << 63 : m >> 1, e80, rnd() & 1);
+    RINTS(long double, 10, 80, l);
+    unsigned short h16 = (rnd() & 0xffff);
+    if (rnd() % 2) h16 = (h16 & 0x83ff) | (unsigned short)((15 - 2 + rnd() % 14) << 10);
+    _Float16 h; memcpy(&h, &h16, 2);
+    RINTS(_Float16, 2, 16, h);
+  }
+}
 int main(void) {
   t_div32(1.0f, 1.0f);
   t_div32(1.0f, 3.0f);
@@ -1527,6 +1585,7 @@ int main(void) {
   t_fp64ui128(0x1.8p+100);
   t_fp64ui128(0x1.0000000000001p+65);
   t_fp64ui128(-0.5);
+  t_rint();
   t_fma3();
   if (fails) printf("fails=%d\n", fails);
   return fails != 0;

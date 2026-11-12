@@ -405,9 +405,30 @@ let iun c (op : F.iun) w a =
   let ra = use c a in
   match op with
   | Popcnt ->
-      let t = fresh c Gpr in
-      emit c (Popcnt (t, ra));
-      t
+      (* SWAR bit count (popcnt is not baseline x86-64): 2-, 4- and 8-bit
+         field sums, then the byte sums gathered in the top byte by a
+         multiply *)
+      let k55 = movi c 0x5555555555555555L
+      and k33 = movi c 0x3333333333333333L
+      and k0f = movi c 0x0f0f0f0f0f0f0f0fL
+      and k01 = movi c 0x0101010101010101L in
+      let x = copy c ra in
+      let t = copy c x in
+      emit c (Shifti (Shr, t, 1));
+      emit c (Alu (And, t, k55));
+      emit c (Alu (Sub, x, t));
+      let t = copy c x in
+      emit c (Shifti (Shr, t, 2));
+      emit c (Alu (And, t, k33));
+      emit c (Alu (And, x, k33));
+      emit c (Alu (Add, x, t));
+      let t = copy c x in
+      emit c (Shifti (Shr, t, 4));
+      emit c (Alu (Add, x, t));
+      emit c (Alu (And, x, k0f));
+      emit c (Imul (x, k01));
+      emit c (Shifti (Shr, x, 56));
+      x
   | Bswap ->
       let t = copy c ra in
       if w >= 16 then begin
@@ -560,11 +581,6 @@ let fun_ c (op : F.fun_) dbl a =
     emit c (Alu (alu, g, m));
     to_xmm c dbl g
   in
-  let round mode =
-    let t = fresh c Xmm in
-    emit c (Round (dbl, t, ra, mode));
-    t
-  in
   match op with
   | Fneg -> bits Xor (sign_bit dbl)
   | Fabs -> bits And (mag_mask dbl)
@@ -572,10 +588,7 @@ let fun_ c (op : F.fun_) dbl a =
       let t = fresh c Xmm in
       emit c (Fsqrt (dbl, t, ra));
       t
-  | Floor -> round 1
-  | Ceil -> round 2
-  | Ftrunc -> round 3
-  | Roundeven -> round 0
+  | Floor | Ceil | Ftrunc | Roundeven -> invalid_arg "Mir_isel: floor & co. are lowered by Fir_wide"
 
 (* ucomi sets ZF PF CF all to 1 when unordered; [ucomi x y] emits the
    compare (ucomis for f32/f64, fucomip for f80) *)
@@ -934,10 +947,7 @@ let fun80 c v (op : F.fun_) a =
       if op = Fneg then emit c (Alui (Xor, h, 0x8000)) else emit c (Alui (And, h, 0x7fff));
       set_hi16 c v h
   | Sqrt -> unary Fsqrt87
-  | Floor -> with_rounding c 1 (fun () -> unary Frndint)
-  | Ceil -> with_rounding c 2 (fun () -> unary Frndint)
-  | Ftrunc -> with_rounding c 3 (fun () -> unary Frndint)
-  | Roundeven -> with_rounding c 0 (fun () -> unary Frndint)
+  | Floor | Ceil | Ftrunc | Roundeven -> invalid_arg "Mir_isel: floor & co. are lowered by Fir_wide"
 
 (* the truncated i64 conversion of the f80 at [x] (MIN when out of range or
    NaN): fistp under a truncating control word (fisttp would need SSE3) *)

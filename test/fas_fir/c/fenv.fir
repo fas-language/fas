@@ -158,6 +158,86 @@ func @fir_fp64ui128 (f64) -> (i128) global noinline {
   %r = fptoui i128 %a
   ret %r
 }
+func @fir_floor16 (f16, f16, f16) -> (f16) global noinline {
+^e(%a: f16, %b: f16, %c: f16):
+  %r = floor f16 %a
+  ret %r
+}
+func @fir_ceil16 (f16, f16, f16) -> (f16) global noinline {
+^e(%a: f16, %b: f16, %c: f16):
+  %r = ceil f16 %a
+  ret %r
+}
+func @fir_trunc16 (f16, f16, f16) -> (f16) global noinline {
+^e(%a: f16, %b: f16, %c: f16):
+  %r = ftrunc f16 %a
+  ret %r
+}
+func @fir_roundeven16 (f16, f16, f16) -> (f16) global noinline {
+^e(%a: f16, %b: f16, %c: f16):
+  %r = roundeven f16 %a
+  ret %r
+}
+func @fir_floor32 (f32, f32, f32) -> (f32) global noinline {
+^e(%a: f32, %b: f32, %c: f32):
+  %r = floor f32 %a
+  ret %r
+}
+func @fir_ceil32 (f32, f32, f32) -> (f32) global noinline {
+^e(%a: f32, %b: f32, %c: f32):
+  %r = ceil f32 %a
+  ret %r
+}
+func @fir_trunc32 (f32, f32, f32) -> (f32) global noinline {
+^e(%a: f32, %b: f32, %c: f32):
+  %r = ftrunc f32 %a
+  ret %r
+}
+func @fir_roundeven32 (f32, f32, f32) -> (f32) global noinline {
+^e(%a: f32, %b: f32, %c: f32):
+  %r = roundeven f32 %a
+  ret %r
+}
+func @fir_floor64 (f64, f64, f64) -> (f64) global noinline {
+^e(%a: f64, %b: f64, %c: f64):
+  %r = floor f64 %a
+  ret %r
+}
+func @fir_ceil64 (f64, f64, f64) -> (f64) global noinline {
+^e(%a: f64, %b: f64, %c: f64):
+  %r = ceil f64 %a
+  ret %r
+}
+func @fir_trunc64 (f64, f64, f64) -> (f64) global noinline {
+^e(%a: f64, %b: f64, %c: f64):
+  %r = ftrunc f64 %a
+  ret %r
+}
+func @fir_roundeven64 (f64, f64, f64) -> (f64) global noinline {
+^e(%a: f64, %b: f64, %c: f64):
+  %r = roundeven f64 %a
+  ret %r
+}
+func @fir_floor80 (f80, f80, f80) -> (f80) global noinline {
+^e(%a: f80, %b: f80, %c: f80):
+  %r = floor f80 %a
+  ret %r
+}
+func @fir_ceil80 (f80, f80, f80) -> (f80) global noinline {
+^e(%a: f80, %b: f80, %c: f80):
+  %r = ceil f80 %a
+  ret %r
+}
+func @fir_trunc80 (f80, f80, f80) -> (f80) global noinline {
+^e(%a: f80, %b: f80, %c: f80):
+  %r = ftrunc f80 %a
+  ret %r
+}
+func @fir_roundeven80 (f80, f80, f80) -> (f80) global noinline {
+^e(%a: f80, %b: f80, %c: f80):
+  %r = roundeven f80 %a
+  ret %r
+}
 func @fir_fma32 (f32, f32, f32) -> (f32) global noinline {
 ^e(%a: f32, %b: f32, %c: f32):
   %r = fma f32 %a, %b, %c

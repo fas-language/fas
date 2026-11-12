@@ -473,9 +473,6 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   | Cmov (c, d, s) -> A.cmov a c (gr d) (gr s)
   | Bsf (d, s) -> A.rr a [ 0x0f; 0xbc ] ~reg:(gr d) ~rm:(gr s)
   | Bsr (d, s) -> A.rr a [ 0x0f; 0xbd ] ~reg:(gr d) ~rm:(gr s)
-  | Popcnt (d, s) ->
-      A.byte a 0xf3;
-      A.rr a [ 0x0f; 0xb8 ] ~reg:(gr d) ~rm:(gr s)
   | Fop (op, dbl, d, s) -> A.fop_xx a ~double:dbl op (xr d) (xr s)
   | Fsqrt (dbl, d, s) -> A.fop_xx a ~double:dbl A.Fsqrt (xr d) (xr s)
   | Ucomi (dbl, x, y) -> A.ucomi a ~double:dbl (xr x) (xr y)
@@ -484,7 +481,6 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   | Cvtsi (dbl, d, s) -> A.cvt_si2f a ~double:dbl (xr d) (gr s)
   | Cvttsi (dbl, d, s) -> A.cvt_f2si a ~double:dbl (gr d) (xr s)
   | Cvtff (from_double, d, s) -> A.cvt_ff a ~from_double (xr d) (xr s)
-  | Round (dbl, d, s, mode) -> A.round_xx a ~double:dbl (xr d) (xr s) mode
   | Frem87 (dbl, s) ->
       let x = m (at (Bslot s)) and y = m { (at (Bslot s)) with disp = 8 } in
       A.fld a ~double:dbl y;
@@ -516,7 +512,6 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
           A.test_ri a A.Rax 0x400;
           A.jcc a A.Ne loop
       | Fsqrt87 -> A.fsqrt87 a
-      | Frndint -> A.frndint a
       | Fucomip -> A.fucomip a
       | Fpop -> A.fpop a
       | Fnstcw ad -> A.fnstcw a (m ad)
