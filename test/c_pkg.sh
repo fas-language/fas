@@ -536,21 +536,6 @@ expect_lines "value.fas:1:9: error: \`$C_PKG_TMP/vanish-pkg-config\` not found; 
 run_diag 0 "$OCAML_FAS" -o "$C_PKG_TMP/smoke-keep" smoke.fas --keep
 expect_lines "fas: pkg-config: $C_PKG_TMP/fake-pkg-config --libs \"smoke\" -> -L$SMOKE_LIB -lsmoke -pthread -Wl,-rpath,$SMOKE_LIB"
 
-cat >"$C_PKG_TMP/log-perf" <<'SH'
-#!/bin/sh
-printf '%s\n' "$1" >>"$PERF_LOG"
-exit 1
-SH
-chmod +x "$C_PKG_TMP/log-perf"
-PERF_LOG=$C_PKG_TMP/perf.log
-export PERF_LOG
-: >"$PERF_LOG"
-: >"$FAKE_LIBS_LOG"
-run_diag 1 env FAS_PERF="$C_PKG_TMP/log-perf" "$OCAML_FAS" perf smoke.fas
-expect_lines 'fas perf: no run: perf recorded no cycle samples (exit status 1)'
-grep -Fxq -- record "$PERF_LOG" || fail "fas perf did not run the perf recorder"
-[ "$(cat "$FAKE_LIBS_LOG")" = smoke ] || fail "fas perf did not run --libs once for the executable"
-
 PC_DIR=$C_PKG_TMP/pc
 mkdir -p "$PC_DIR"
 cat >"$PC_DIR/fassmoke.pc" <<PC

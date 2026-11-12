@@ -135,7 +135,7 @@ temps_empty() {
 cmp "$WORK/help" "$WORK/short-help" >/dev/null || fail "-h differs from --help"
 grep -F -- "--emit-llvm[=optimized]" "$WORK/help" >/dev/null || fail "help omitted the optimized LLVM form"
 for flag in -o --emit-header --emit-ir --emit-llvm --emit-asm -S --emit-obj -c --keep \
-  -O0..-O3 -g --no-inline --sanitize=LIST --profile -I -isystem -D -h --help; do
+  -O0..-O3 -g --no-inline --sanitize=LIST -I -isystem -D -h --help; do
   grep -F -- "$flag" "$WORK/help" >/dev/null || fail "help omitted $flag"
 done
 if grep -F -- "--emit-ast" "$WORK/help" >/dev/null; then fail "help advertises removed --emit-ast"; fi
@@ -147,8 +147,11 @@ sed -n '/^debugging:$/,/^environment:$/p' "$WORK/help" >"$WORK/help-debugging"
 for flag in --emit-ir --keep -g --no-inline --sanitize=LIST; do
   grep -F -- "  $flag" "$WORK/help-debugging" >/dev/null || fail "help placed $flag outside debugging"
 done
+for removed in "fas perf" --profile --tune FAS_PROFDATA; do
+  if grep -F -- "$removed" "$WORK/help" >/dev/null; then fail "help advertises removed $removed"; fi
+done
 sed -n '/^environment:$/,$p' "$WORK/help" >"$WORK/help-environment"
-for name in FAS_OPT FAS_LLC FAS_CC FAS_PROFDATA FAS_OPT_PASSES; do
+for name in FAS_OPT FAS_LLC FAS_CC FAS_OPT_PASSES; do
   grep -F -- "$name" "$WORK/help-environment" >/dev/null || fail "help omitted $name"
 done
 if grep -E -- 'LLVM_OPT|LLVM_LLC|(^|[^A-Za-z_])CC([^A-Za-z_]|$)' "$WORK/help-environment" >/dev/null; then
@@ -156,7 +159,7 @@ if grep -E -- 'LLVM_OPT|LLVM_LLC|(^|[^A-Za-z_])CC([^A-Za-z_]|$)' "$WORK/help-env
 fi
 "$OCAML_FAS" --version >"$WORK/version" 2>"$WORK/stderr" || fail "--version failed"
 [ ! -s "$WORK/stderr" ] || fail "--version wrote stderr"
-[ "$(wc -l <"$WORK/version")" -eq 9 ] || fail "--version line count changed"
+[ "$(wc -l <"$WORK/version")" -eq 4 ] || fail "--version line count changed"
 head -n 1 "$WORK/version" | grep -E '^fas 0\.6\.3 \(([0-9a-f]+|unknown)\)$' >/dev/null \
   || fail "--version first line changed"
 grep -F -- "opt: $WORK/opt-wrap (" "$WORK/version" >/dev/null || fail "--version omitted the opt in use"
@@ -170,12 +173,6 @@ if grep -F -- "not found" "$WORK/version" >/dev/null; then fail "--version could
 grep -E '^opt: [^ ]*/opt-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default opt"
 grep -E '^llc: [^ ]*/llc-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default llc"
 grep -E '^cc: [^ ]*/clang-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default C compiler"
-grep -E '^perf: [^ ]+ \(' "$WORK/default-version" >/dev/null || fail "--version omitted the perf tool"
-grep -E '^profdata: [^ ]*/llvm-profdata-22 \(' "$WORK/default-version" >/dev/null \
-  || fail "--version omitted the default profdata"
-grep -E '^objdump: [^ ]*/llvm-objdump-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default objdump"
-grep -E '^symbolizer: [^ ]*/llvm-symbolizer-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default symbolizer"
-grep -E '^mca: [^ ]*/llvm-mca-22 \(' "$WORK/default-version" >/dev/null || fail "--version omitted the default mca"
 expect_failure "$OCAML_FAS" --version "$WORK/good.fas"
 grep -Fx -- "--version cannot be combined with other arguments" "$WORK/stderr" >/dev/null \
   || fail "--version with a file was not rejected"
@@ -411,7 +408,7 @@ temps_empty
     "$OCAML_FAS" --keep "$WORK/good.fas" -o "$WORK/default-tools"
 ) >"$WORK/stdout" 2>"$WORK/stderr" || fail "generic tool names affected a default build"
 [ ! -s "$WORK/stdout" ] || fail "default build wrote stdout"
-grep -F "tools FAS_OPT=opt-22 FAS_LLC=llc-22 FAS_CC=clang-22 FAS_PROFDATA=llvm-profdata-22;" "$WORK/stderr" >/dev/null \
+grep -F "tools FAS_OPT=opt-22 FAS_LLC=llc-22 FAS_CC=clang-22;" "$WORK/stderr" >/dev/null \
   || fail "default tools were not selected without FAS_* names"
 "$WORK/default-tools" || fail "default build with generic tool names did not run"
 find "$TMPDIR" -mindepth 1 -delete
@@ -420,7 +417,7 @@ temps_empty
   CC=/nonexistent LLVM_OPT=/nonexistent LLVM_LLC=/nonexistent \
     "$OCAML_FAS" --keep "$WORK/good.fas" -o "$WORK/selected-tools"
 ) >"$WORK/stdout" 2>"$WORK/stderr" || fail "generic tool names affected FAS_* selection"
-grep -F "tools FAS_OPT=$WORK/opt-wrap FAS_LLC=$WORK/llc-wrap FAS_CC=$WORK/cc-wrap FAS_PROFDATA=llvm-profdata-22;" "$WORK/stderr" >/dev/null \
+grep -F "tools FAS_OPT=$WORK/opt-wrap FAS_LLC=$WORK/llc-wrap FAS_CC=$WORK/cc-wrap;" "$WORK/stderr" >/dev/null \
   || fail "FAS_* tools were not selected over generic names"
 find "$TMPDIR" -mindepth 1 -delete
 temps_empty

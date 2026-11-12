@@ -33,20 +33,8 @@ type adapter = {
   signature : string;
 }
 
-let quoted_include path =
-  if Sys.win32 then "#include \"" ^ path ^ "\"\n"
-  else Printf.sprintf "#include %S\n" path
-
-let quoted_include_path line =
-  if Sys.win32 then
-    let prefix = "#include \"" in
-    if not (String.starts_with ~prefix line) then raise (Scanf.Scan_failure line)
-    else
-      let start = String.length prefix in
-      match String.index_from_opt line start '"' with
-      | Some stop -> String.sub line start (stop - start)
-      | None -> raise (Scanf.Scan_failure line)
-  else Scanf.sscanf line "#include %S" Fun.id
+let quoted_include path = Printf.sprintf "#include %S\n" path
+let quoted_include_path line = Scanf.sscanf line "#include %S" Fun.id
 
 let include_line source fragment_path = function
   | { spelling = Ast.C_quoted path; _ } ->
@@ -169,17 +157,7 @@ let compilation_error ?source ?(headers = []) ?(prefix = "C compilation failed")
         (fallback, notes)
     | None -> (fallback, [])
   in
-  let help =
-    match (missing_header, (Target_layout.current ()).os) with
-    | true, Target_layout.Windows ->
-        Some
-          "building for Windows needs a MinGW C toolchain: put llvm-mingw's bin \
-           directory on PATH or set FAS_CC"
-    | true, Target_layout.Wasi ->
-        Some "building for WASI needs wasi-sdk: set WASI_SDK_PATH or FAS_CC"
-    | _ -> None
-  in
-  Diag.error ~notes ?help span
+  Diag.error ~notes span
     (if missing_header then message
      else if message = "" then prefix
      else prefix ^ ": " ^ message)
@@ -541,8 +519,7 @@ let builtin_info_of_name = function
       Some (Floating 0)
   | _ -> None
 
-let unnamed_file file =
-  if Sys.win32 then String.map (function '\\' -> '/' | c -> c) file else file
+let unnamed_file file = file
 
 let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     ?referenced_names ~probe_all_declarations ~macro_candidates declarations =
@@ -1449,11 +1426,6 @@ let feature_test_macros =
 let trace_entries trace =
   String.split_on_char '\n' trace
   |> List.filter_map (fun line ->
-      let line =
-        if Sys.win32 && String.ends_with ~suffix:"\r" line then
-          String.sub line 0 (String.length line - 1)
-        else line
-      in
       let depth = ref 0 in
       while !depth < String.length line && line.[!depth] = '.' do
         incr depth

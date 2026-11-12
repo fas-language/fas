@@ -680,14 +680,18 @@ module P = struct
           | Token.Ident ("linux" | "windows" | "wasi") -> true
           | _ -> false
         then begin
-          (* `use linux|windows|wasi "file.fas"`: a Fas file that is part of
-             the program only when building for that OS. The driver skips it
-             for the others, so it is never read there. *)
-          let os =
+          (* `use linux "file.fas"`: a Fas file that is part of the program
+             only when building for that OS. The driver skips it for the
+             others, so it is never read there. Linux is the only target
+             today; the form stays as the hook for future ones. *)
+          let os_span = span p in
+          let* os =
             match (peek p).kind with
-            | Token.Ident "linux" -> Target_layout.Linux
-            | Token.Ident "windows" -> Target_layout.Windows
-            | _ -> Target_layout.Wasi
+            | Token.Ident "linux" -> Ok Target_layout.Linux
+            | Token.Ident name ->
+                error os_span
+                  (Printf.sprintf "`%s` is no longer a supported OS; Fas targets `linux` only" name)
+            | _ -> error os_span "expected an OS name"
           in
           ignore (bump p);
           let path_span = span p in

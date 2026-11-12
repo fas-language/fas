@@ -108,17 +108,7 @@ let percent_decode text =
   in
   go 0
 
-let has_drive path at =
-  String.length path > at + 1
-  && path.[at + 1] = ':'
-  && match path.[at] with 'A' .. 'Z' | 'a' .. 'z' -> true | _ -> false
-
-let host_path path =
-  if Sys.win32 && path.[0] = '/' && has_drive path 1 then
-    String.map
-      (function '/' -> '\\' | c -> c)
-      (String.sub path 1 (String.length path - 1))
-  else path
+let host_path path = path
 
 let uri_to_path uri =
   let prefix = "file://" in
@@ -131,16 +121,6 @@ let uri_to_path uri =
 let path_to_uri path =
   let buffer = Buffer.create (String.length path + 8) in
   Buffer.add_string buffer "file://";
-  let path =
-    if Sys.win32 then
-      let path = String.map (function '\\' -> '/' | c -> c) path in
-      if has_drive path 0 then (
-        Buffer.add_char buffer '/';
-        Buffer.add_string buffer (String.sub path 0 2);
-        String.sub path 2 (String.length path - 2))
-      else path
-    else path
-  in
   String.iter
     (fun c ->
       match c with
@@ -192,16 +172,11 @@ let config_for state key : Cli.t =
     c_flags = state.options.lsp_c_flags;
     diagnostics = Cli.Text;
     target_cpu = None;
-    tune_cpu = None;
     target = state.options.lsp_target;
     target_features = None;
-    profile = None;
     all_errors = false;
     native = false;
     native_runtime = Cli.Auto;
-    align_loops = None;
-    align_functions = None;
-    tune_options = [];
   }
 
 let lsp_message (diag : Diag.t) =

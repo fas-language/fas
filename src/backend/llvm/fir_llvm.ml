@@ -1474,7 +1474,7 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
           else
             List.find_map
               (fun (t : Target_layout.t) -> if t.triple = m.triple then Some t.llvm_data_layout else None)
-              Target_layout.[ x86_64_linux; x86_64_windows; wasm32_wasi ]
+              Target_layout.[ x86_64_linux ]
     in
     (* a data relocation as wide as the target's pointers is a [ptr] *)
     let pointer_size =
@@ -1484,7 +1484,7 @@ let render_bounded ?(redirect = Fun.id) ?(sanitize_address = false) ?(debug_info
         Option.value ~default:8
           (List.find_map
              (fun (t : Target_layout.t) -> if t.triple = m.triple then Some t.pointer_size else None)
-             Target_layout.[ x86_64_linux; x86_64_windows; wasm32_wasi ])
+             Target_layout.[ x86_64_linux ])
     in
     try
       add o "; ModuleID = 'fas'\nsource_filename = \"fas\"\n";

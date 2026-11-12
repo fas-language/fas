@@ -17,33 +17,13 @@ type t = {
   c_flags : string list;
   diagnostics : diagnostics;
   target_cpu : string option;
-  tune_cpu : string option;
   target : target;
   target_explicit : bool;
   os : Target_layout.os;
   target_features : string option;
-  profile : string option;
   all_errors : bool;
   native : bool;  (** [--backend=native]: built-in x86-64 code generator *)
   native_runtime : native_runtime;
-  align_loops : int option;
-  align_functions : int option;
-  tune_options : string list;
-}
-
-type perf_mode = Measure | Tune of string option
-
-type perf_options = {
-  top : int option;
-  static : bool;
-  json : bool;
-  asm : (string * int) option;
-  copy : int option;
-  compare : string option;
-  mode : perf_mode;
-  no_arena : bool;
-  yes : bool;
-  check_with : string list option;
 }
 
 type lsp_options = {
@@ -56,51 +36,28 @@ type command =
   | Run of t
   | Run_program of t * string list
   | Check of t
-  | Perf of t * perf_options * string list
   | Lsp of lsp_options
   | Help
   | Version
 
-type subcommand = Build | Run_subcommand | Check_subcommand | Perf_subcommand
-
-let default_perf =
-  {
-    top = None;
-    static = false;
-    json = false;
-    asm = None;
-    copy = None;
-    compare = None;
-    mode = Measure;
-    no_arena = false;
-    yes = false;
-    check_with = None;
-  }
+type subcommand = Build | Run_subcommand | Check_subcommand
 
 let usage =
   "usage: fas [options] file.fas [C inputs and link flags]\n\
   \       fas run file.fas [options] [-- program arguments]\n\
   \       fas check file.fas [options]\n\
-  \       fas perf file.fas [options] [--top N] [--static] [--compare FILE] [-- \
-   program arguments]\n\
-  \       fas perf --tune file.fas [build options] [-o PROFILE] [--no-arena] [--yes] \
-   [-- program arguments] [--check-with -- second arguments]\n\
    commands:\n\
   \  run FILE      build to a temporary executable, run it, delete it\n\
   \  check FILE    check without building (no LLVM, no linking)\n\
-  \  perf FILE     profile: hot loops by Fas line (needs perf)\n\
-  \  perf --tune FILE  measure builds of FILE on this machine, keep the fastest \
-   correct one in a profile for --profile\n\
   \  lsp           language server over stdio (for editors)\n\
    build:\n\
   \  -O0..-O3      set opt and llc optimization levels (default -O2)\n\
   \  --target=portable  baseline x86-64, runs on any x86-64 CPU (default)\n\
   \  --target=force-native  use this CPU's instructions everywhere, without prediction \
    (normal compile time; can be slower than portable in places)\n\
-  \  --os linux|windows|wasi  operating system to build for (default: the one fas runs \
-   on; wasi: a wasm32 WASI program)\n\
+  \  --os linux    operating system to build for (the only one today)\n\
    output:\n\
-  \  -o PATH       output path (default a.out, a.exe for Windows, a.wasm for WASI, \
+  \  -o PATH       output path (default a.out, \
    INPUT.o with -c, INPUT.s with -S)\n\
   \  --emit-header write an ABI-checked C header (stdout without -o)\n\
   \  --emit-llvm[=optimized]  print LLVM IR before (default) or after opt, verified\n\
@@ -127,17 +84,11 @@ let usage =
   \  -g            emit DWARF line tables (machine code unchanged)\n\
   \  --no-inline NAME  add LLVM noinline to NAME (a generic: every instance; \
    NAME[ARGS]: one; repeatable)\n\
-  \  --profile FILE  optimize with a fas profile file (from fas perf --tune; format: \
-   fas profile 1, 2 or 3)\n\
   \  --sanitize=LIST instrument with address and/or undefined behavior sanitizers\n\
    environment:\n\
-  \  FAS_OPT, FAS_LLC, FAS_CC, FAS_PROFDATA select opt, llc, the C compiler and \
-   llvm-profdata (defaults: opt-22, llc-22, clang-22, llvm-profdata-22; without those, \
-   opt, llc, clang, llvm-profdata when they report LLVM 22)\n\
-  \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)\n\
-  \  WASI_SDK_PATH  wasi-sdk used as the C compiler for --os wasi (default \
-   /opt/wasi-sdk)\n\
-  \  FAS_WASMTIME  runner for fas run --os wasi (default: wasmtime)"
+  \  FAS_OPT, FAS_LLC, FAS_CC select opt, llc and the C compiler (defaults: opt-22, \
+   llc-22, clang-22; without those, opt, llc, clang when they report LLVM 22)\n\
+  \  FAS_OPT_PASSES overrides opt's pipeline (default: default<Olevel>)"
 
 let default_output os emit input =
   let source_output extension =
@@ -147,8 +98,6 @@ let default_output os emit input =
   | Asm, _ -> source_output ".s"
   | Obj, _ -> source_output ".o"
   | _, Target_layout.Linux -> "a.out"
-  | _, Target_layout.Windows -> "a.exe"
-  | _, Target_layout.Wasi -> "a.wasm"
 
 (* External C drivers interpret these wrappers themselves. The built-in linker
    receives their payloads in the original order, without shell tokenization. *)
@@ -175,12 +124,9 @@ let target_of_value value =
 let os_of_value value =
   match value with
   | "linux" -> Ok Target_layout.Linux
-  | "windows" -> Ok Target_layout.Windows
-  | "wasi" -> Ok Target_layout.Wasi
-  | _ ->
-      Error
-        ("unknown --os value `" ^ value
-       ^ "`; accepted values are `linux`, `windows` and `wasi`")
+  | "windows" | "wasi" ->
+      Error ("`--os " ^ value ^ "` is no longer supported; Fas targets `linux` only")
+  | _ -> Error ("unknown --os value `" ^ value ^ "`; the accepted value is `linux`")
 
 let os_argument argv i =
   let flag = argv.(i) in
@@ -202,19 +148,9 @@ let parse_invocation ~subcommand argv =
   let target = ref Portable in
   let target_explicit = ref false in
   let os = ref Target_layout.host_os in
-  let profile = ref None in
   let all_errors = ref false in
   let native = ref false in
   let runtime = ref None in
-  let profile_conflict emit =
-    match (!profile, emit) with
-    | None, _ | Some _, (Optimized_llvm | Asm | Obj | Executable) -> None
-    | Some _, Header -> Some "`--profile` has no effect with `--emit-header`"
-    | Some _, Ir -> Some "`--profile` has no effect with `--emit-ir`"
-    | Some _, Llvm ->
-        Some
-          "`--profile` has no effect with `--emit-llvm`; write `--emit-llvm=optimized`"
-  in
   let add_link_inputs values =
     link_inputs_rev := List.rev_append values !link_inputs_rev
   in
@@ -225,7 +161,7 @@ let parse_invocation ~subcommand argv =
   let rejected flag =
     match subcommand with
     | Build -> false
-    | Run_subcommand | Perf_subcommand ->
+    | Run_subcommand ->
         List.mem flag [ "-o"; "-c"; "-S" ] || String.starts_with ~prefix:"--emit-" flag
     | Check_subcommand ->
         List.mem flag [ "-o"; "-c"; "-S"; "-l"; "-L" ]
@@ -250,13 +186,6 @@ let parse_invocation ~subcommand argv =
       else if !native && Option.is_some !sanitizers then
         Error "--sanitize is not supported by --backend=native"
       else
-        match profile_conflict emit with
-        | Some message -> Error message
-        | None when !os = Target_layout.Wasi && Option.is_some !sanitizers ->
-            Error "sanitizers are not available for WASI builds (`--os=wasi`)"
-        | None when !os = Target_layout.Wasi && Option.is_some !profile ->
-            Error "`--profile` is not available for WASI builds (`--os=wasi`)"
-        | None ->
             let input = Option.get input in
             let output_explicit = Option.is_some output in
             let output =
@@ -279,18 +208,13 @@ let parse_invocation ~subcommand argv =
                 c_flags = List.rev !c_flags_rev;
                 diagnostics = !diagnostics;
                 target_cpu = None;
-                tune_cpu = None;
                 target = !target;
                 target_explicit = !target_explicit;
                 os = !os;
                 target_features = None;
-                profile = !profile;
                 all_errors = !all_errors;
                 native = !native;
                 native_runtime = Option.value ~default:Auto !runtime;
-                align_loops = None;
-                align_functions = None;
-                tune_options = [];
               }
             in
             Ok (if subcommand = Check_subcommand then Check config else Run config)
@@ -302,9 +226,6 @@ let parse_invocation ~subcommand argv =
             (match subcommand with
             | Check_subcommand ->
                 "fas check checks one Fas file; `" ^ flag ^ "` is not accepted"
-            | Perf_subcommand ->
-                "fas perf builds and profiles an executable; `" ^ flag
-                ^ "` is not accepted"
             | Build | Run_subcommand ->
                 "fas run builds and runs an executable; `" ^ flag ^ "` is not accepted")
       | "-o" ->
@@ -394,16 +315,7 @@ let parse_invocation ~subcommand argv =
             runtime := Some selected;
             loop (i + 1) input output emit keep optimization optimization_explicit debug
               no_inline_function)
-      | "--profile" ->
-          if subcommand = Check_subcommand then
-            Error "`--profile` has no effect with `fas check`"
-          else if i + 1 >= n || argv.(i + 1) = "" || argv.(i + 1).[0] = '-' then
-            Error "--profile requires a profile file"
-          else if Option.is_some !profile then Error "duplicate --profile option"
-          else (
-            profile := Some argv.(i + 1);
-            loop (i + 2) input output emit keep optimization optimization_explicit debug
-              no_inline_function)
+      | "--profile" -> Error "`--profile` was removed (Fas has no profile-guided builds)"
       | flag when String.starts_with ~prefix:"--sanitize=" flag -> (
           let value = String.sub flag 11 (String.length flag - 11) in
           let names = String.split_on_char ',' value in
@@ -513,120 +425,6 @@ let parse_invocation ~subcommand argv =
     (if subcommand = Check_subcommand then Ir else Executable)
     false 2 false false []
 
-let split_perf_options ~argv_has_separator argv =
-  let n = Array.length argv in
-  let tuning = Array.exists (String.equal "--tune") argv in
-  let rec scan i kept options =
-    if i >= n then Ok (Array.of_list (List.rev kept), options)
-    else
-      let with_value error update =
-        if i + 1 >= n then Error error
-        else
-          match update argv.(i + 1) with
-          | Some options -> scan (i + 2) kept options
-          | None -> Error error
-      in
-      match argv.(i) with
-      | "--tune" ->
-          let mode =
-            match options.mode with Measure -> Tune None | Tune _ as mode -> mode
-          in
-          scan (i + 1) kept { options with mode }
-      | "-o" when tuning -> (
-          if i + 1 >= n then Error "-o requires an output path"
-          else if argv.(i + 1) = "-" then Error "-o - is not supported"
-          else
-            match options.mode with
-            | Tune (Some _) -> Error "duplicate -o option"
-            | Measure | Tune None ->
-                scan (i + 2) kept { options with mode = Tune (Some argv.(i + 1)) })
-      | "--no-arena" -> scan (i + 1) kept { options with no_arena = true }
-      | "--yes" -> scan (i + 1) kept { options with yes = true }
-      | "--check-with" ->
-          if i + 1 = n && argv_has_separator then
-            scan (i + 1) kept { options with check_with = Some [] }
-          else
-            Error
-              "`--check-with` must be followed by `--` and the second input's arguments"
-      | "--static" -> scan (i + 1) kept { options with static = true }
-      | "--json" -> scan (i + 1) kept { options with json = true }
-      | "--compare" ->
-          with_value "--compare requires a file" (fun path ->
-              Some { options with compare = Some path })
-      | "--top" ->
-          with_value "--top requires a number from 1 to 50" (fun text ->
-              match int_of_string_opt text with
-              | Some top when top >= 1 && top <= 50 ->
-                  Some { options with top = Some top }
-              | _ -> None)
-      | "--asm" ->
-          with_value "--asm requires FILE:LINE or FILE:LINE@N" (fun text ->
-              let at =
-                Option.value (String.rindex_opt text '@') ~default:(String.length text)
-              in
-              let copy =
-                if at = String.length text then Some None
-                else
-                  match
-                    int_of_string_opt
-                      (String.sub text (at + 1) (String.length text - at - 1))
-                  with
-                  | Some n when n >= 1 -> Some (Some n)
-                  | _ -> None
-              in
-              let place = String.sub text 0 at in
-              match (String.rindex_opt place ':', copy) with
-              | Some colon, Some copy -> (
-                  let line =
-                    String.sub place (colon + 1) (String.length place - colon - 1)
-                  in
-                  match int_of_string_opt line with
-                  | Some line when colon > 0 && line > 0 ->
-                      Some
-                        {
-                          options with
-                          asm = Some (String.sub place 0 colon, line);
-                          copy;
-                        }
-                  | _ -> None)
-              | _ -> None)
-      | flag -> scan (i + 1) (flag :: kept) options
-  in
-  scan 0 [] default_perf
-
-let perf_command config options args =
-  match options.mode with
-  | Tune _ -> (
-      let rejected flag = Error ("`--tune` cannot be combined with `" ^ flag ^ "`") in
-      if options.static then rejected "--static"
-      else if options.json then rejected "--json"
-      else if Option.is_some options.compare then rejected "--compare"
-      else if Option.is_some options.top then rejected "--top"
-      else if Option.is_some options.asm then rejected "--asm"
-      else if Option.is_some config.profile then rejected "--profile"
-      else
-        let rec split before = function
-          | "--check-with" :: "--" :: after -> Some (List.rev before, after)
-          | arg :: rest -> split (arg :: before) rest
-          | [] -> None
-        in
-        match (options.check_with, split [] args) with
-        | Some _, _ -> Ok (Perf (config, { options with check_with = Some args }, []))
-        | None, Some (args, second) ->
-            Ok (Perf (config, { options with check_with = Some second }, args))
-        | None, None -> Ok (Perf (config, options, args)))
-  | Measure ->
-      if options.no_arena then Error "`--no-arena` needs `--tune`"
-      else if options.yes then Error "`--yes` needs `--tune`"
-      else if Option.is_some options.check_with then
-        Error "`--check-with` needs `--tune`"
-      else if options.json && Option.is_some options.asm then
-        Error "fas perf: --json and --asm cannot be combined"
-      else if options.static && args <> [] then
-        Error
-          "fas perf --static does not run the program; `--` arguments are not accepted"
-      else Ok (Perf (config, options, args))
-
 let parse_lsp argv =
   let n = Array.length argv in
   let c_flags_rev = ref []
@@ -639,7 +437,6 @@ let parse_lsp argv =
     else
       match argv.(i) with
       | "--help" | "-h" -> Ok Help
-      | "--profile" -> Error "`--profile` has no effect with `fas lsp`"
       | ("-I" | "-isystem" | "-D") as flag ->
           if i + 1 >= n || argv.(i + 1) = "" then Error (flag ^ " requires an argument")
           else (
@@ -678,11 +475,12 @@ let parse_lsp argv =
 let parse argv =
   let n = Array.length argv in
   if n > 1 && String.equal argv.(1) "lsp" then parse_lsp argv
+  else if n > 1 && String.equal argv.(1) "perf" then
+    Error "`fas perf` was removed; use the system `perf` on a `-g` build"
   else
     let subcommand =
       if n > 1 && String.equal argv.(1) "run" then Run_subcommand
       else if n > 1 && String.equal argv.(1) "check" then Check_subcommand
-      else if n > 1 && String.equal argv.(1) "perf" then Perf_subcommand
       else Build
     in
     let rec find i = if i >= n || String.equal argv.(i) "--" then i else find (i + 1) in
@@ -700,17 +498,6 @@ let parse argv =
         | [] -> []
       in
       let build_argv = Array.sub argv 0 sep in
-      let invocation =
-        if subcommand = Perf_subcommand then
-          split_perf_options ~argv_has_separator:(sep < n) build_argv
-        else Ok (build_argv, default_perf)
-      in
-      match invocation with
-      | Error _ as error -> error
-      | Ok (build_argv, options) -> (
-          match parse_invocation ~subcommand build_argv with
-          | Ok (Run config) when subcommand = Run_subcommand ->
-              Ok (Run_program (config, args))
-          | Ok (Run config) when subcommand = Perf_subcommand ->
-              perf_command config options args
-          | result -> result)
+      match parse_invocation ~subcommand build_argv with
+      | Ok (Run config) when subcommand = Run_subcommand -> Ok (Run_program (config, args))
+      | result -> result

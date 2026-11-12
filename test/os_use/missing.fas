@@ -1,4 +1,4 @@
-// A file for another OS is never read: it may not even exist.
+// A file for a dropped OS is rejected at its name, before it is read.
 use wasi "no_such_file.fas"
 
 fn main() i32 {

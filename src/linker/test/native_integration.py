@@ -274,8 +274,8 @@ int check_initialization(void){return initialized+35;}
         basic = self.source("target", "fn main() i32 { return 0 }\n")
         for os_name in ("windows", "wasi"):
             result = run(COMPILER, "--backend=native", "--os=" + os_name, basic,
-                         "-o", self.root / "wrong-target", env=self.no_tools, expected=1)
-            self.assertIn(b"Linux x86-64", result.stderr)
+                         "-o", self.root / "wrong-target", env=self.no_tools, expected=2)
+            self.assertIn(b"no longer supported", result.stderr)
         result = run(COMPILER, "--backend=native", "-S", basic, "-o", self.root / "native.s",
                      env=self.no_tools, expected=1)
         self.assertIn(b"native assembly text output is not supported", result.stderr)

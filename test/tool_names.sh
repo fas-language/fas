@@ -54,7 +54,7 @@ build() {
   shift
   (
     cd "$TMP"
-    env -u FAS_CC -u FAS_OPT -u FAS_LLC -u FAS_PROFDATA PATH="$TMP/$dir" TMPDIR="$TMP" \
+    env -u FAS_CC -u FAS_OPT -u FAS_LLC PATH="$TMP/$dir" TMPDIR="$TMP" \
       "$OCAML_FAS" "$@"
   )
 }

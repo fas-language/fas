@@ -2,7 +2,7 @@
 
 Fas is a small native language for hot loops, crypto, SIMD and explicit systems code. It is not a general-purpose language: there is no heap or string type, and C is the ecosystem, so you `use` C headers and call them directly. Scalar `f32` and `f64` follow IEEE arithmetic, integer arithmetic wraps, lossless widening is implicit, and the compiler adds no allocation, copies or runtime of its own. It emits LLVM IR and links through Clang.
 
-Every example below is a complete program that compiles and prints exactly the output shown. Fas targets x86-64 Linux, x86-64 Windows and WebAssembly (WASI) with LLVM 22. The [cheat sheet](#cheat-sheet) at the end lists every form, type, operator and builtin.
+Every example below is a complete program that compiles and prints exactly the output shown. Fas targets x86-64 Linux with LLVM 22. The [cheat sheet](#cheat-sheet) at the end lists every form, type, operator and builtin.
 
 ```sh
 fas hello.fas -o hello && ./hello       # FAS_CC, FAS_OPT, FAS_LLC pick clang-22, opt-22, llc-22
@@ -729,7 +729,7 @@ fn main() i32 {
 
 ### Assembly
 
-An assembly unit is linked in, but it declares nothing to Fas. Declare its symbols in `extern "C"`. The example is x86-64 Linux only: it takes its arguments in `rdi`, `rsi` and `edx` as System V does, while Windows passes them in `rcx`, `rdx` and `r8`.
+An assembly unit is linked in, but it declares nothing to Fas. Declare its symbols in `extern "C"`. It takes its arguments in `rdi`, `rsi` and `edx`, as System V passes them.
 
 ```fas
 use "C" <stdio.h>
@@ -828,22 +828,15 @@ fn main() i32 {
 
 `use "path.fas"` is relative to the file that contains it. The whole `use` closure shares one namespace: there are no modules, qualifiers or visibility. Give the compiler only the root file.
 
-`use linux "path.fas"`, `use windows "path.fas"` and `use wasi "path.fas"` make a file part of the program only when building for that OS (`--os`, default: the OS fas runs on). The files for other OSes are never read, so each OS file can define the same functions its own way:
-
-<!-- skip -->
-```fas
-use linux "sys_linux.fas"     // defines fn write_out(p addr, n usize) via syscall
-use windows "sys_windows.fas" // the same function via the C runtime
-```
+`use linux "path.fas"` makes a file part of the program only when building for that OS (`--os`, default and only value today: `linux`). It is the hook for OS-specific code once Fas has more targets: the files for other OSes are never read, so each OS file can define the same functions its own way.
 
 Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS file.
 
 ## Known limits
 
 - **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
-- **Platform.** x86-64 Linux, x86-64 Windows with `--os windows` (see "Building for Windows") and 32-bit WebAssembly for WASI with `--os wasi` (see "Building for WebAssembly"), with LLVM 22 tools (`clang-22`, `opt-22`, `llc-22`, `llvm-profdata-22`, or the plain names when they are LLVM 22). Portable builds target baseline x86-64 (SSE2).
+- **Platform.** x86-64 Linux, with LLVM 22 tools (`clang-22`, `opt-22`, `llc-22`, or the plain names when they are LLVM 22). Portable builds target baseline x86-64 (SSE2).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
-- **Tuning.** `fas perf --tune` picks one build for the whole program, not per function or loop, and does not optimize across the C boundary (no LTO).
 - **Huge sources.** One expression with tens of thousands of operators, or a function with tens of thousands of locals, compiles slowly (seconds). Ordinary programs are not affected.
 - **Command line.** Options go before the subcommand word: `fas run -O0 file.fas`, not `fas -O0 run file.fas`.
 
@@ -855,7 +848,7 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 ```fas
 // top level
 use "util.fas"                          // another Fas file, relative to this one
-use linux "sys_linux.fas"               // only when building for --os linux (also windows, wasi)
+use linux "sys_linux.fas"               // only when building for --os linux
 use "C" <stdio.h>                       // C header from the system path
 use "C" "lib.h"                         // C header relative to this file
 // C source, up to a line holding only the tag; nothing may follow <<C
@@ -922,9 +915,9 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `u32` `i32` | 4 | 4 | untyped integer literals default to `i32` |
 | `f32` | 4 | 4 | IEEE binary32 scalar |
 | `u64` `i64` | 8 | 8 | |
-| `usize` `isize` | 8 | 8 | sizes, counts and indices, 4 bytes on WASI |
+| `usize` `isize` | 8 | 8 | sizes, counts and indices |
 | `f64` | 8 | 8 | IEEE binary64 scalar |
-| `addr` | 8 | 8 | untyped byte address or `null`, 4 bytes on WASI |
+| `addr` | 8 | 8 | untyped byte address or `null` |
 | `handle[T]` | 8 | 8 | address of an `opaque`, C record, or specialized generic struct `T`, with no arithmetic |
 | `arr[N, T]` | N × stride(T) | align(T) | `len(a)` is N |
 | `vec[N, T]` | N × size(T), rounded up to a power of two | = size | integer lanes, at most 256 lanes and 2048 bits. `vec[3, u32]` is 16 bytes |
@@ -1057,7 +1050,7 @@ Every builtin name in this table, `cvt` and the float builtins included, is rese
 
 ### Builtin cost by CPU level
 
-Every builtin has the same result on every CPU, but some compile to very different code. The default build targets baseline x86-64 (SSE2). LLVM then expands the builtins below into lane-by-lane scalar code where the CPU lacks a matching instruction. The compiler gives no warning, but `fas perf` shows it as a high `instr/iter` and, from its native build, a `native:` estimate. Instruction counts for one call on `vec[8, u32]` or `vec[16, u8]` (clang/LLVM 22, `-O2`):
+Every builtin has the same result on every CPU, but some compile to very different code. The default build targets baseline x86-64 (SSE2). LLVM then expands the builtins below into lane-by-lane scalar code where the CPU lacks a matching instruction. The compiler gives no warning; the disassembly (`-S`) shows it. Instruction counts for one call on `vec[8, u32]` or `vec[16, u8]` (clang/LLVM 22, `-O2`):
 
 | Builtin | x86-64 | x86-64-v2 (SSE4.2) | x86-64-v3 (AVX2) |
 |---|---|---|---|
@@ -1078,7 +1071,7 @@ Every builtin has the same result on every CPU, but some compile to very differe
 
 | C | Fas |
 |---|---|
-| `int`, `char`, `long`, `double`, `uint8_t`, `size_t`, `ssize_t`, `_Bool` | `i32`, `i8`, `i64` (`i32` on Windows and WASI), `f64`, `u8`, `usize`, `isize`, `bool` |
+| `int`, `char`, `long`, `double`, `uint8_t`, `size_t`, `ssize_t`, `_Bool` | `i32`, `i8`, `i64`, `f64`, `u8`, `usize`, `isize`, `bool` |
 | enum constants, `#define N 16` | integer constants with C's type |
 | `#define SCALE 0.5f`, `FLT_MAX`, `M_PI` | `f32` (`f`/`F` suffix) or `f64` constants. Only a single literal, optionally `-` and parentheses |
 | `void *`, `char *`, `int *`, function pointers | `addr` |
@@ -1109,78 +1102,17 @@ fas check main.fas              # errors only: no LLVM, no linking (add --diagno
 fas check --all-errors main.fas # every error in function bodies at once, not just the first
 fas --version                   # fas version and commit, plus the opt, llc and C compiler in use
 fas --target=force-native main.fas -o app # this CPU's instructions everywhere (C inputs too); may not run elsewhere
-fas --os windows main.fas -o app.exe # a Windows program (needs llvm-mingw, see below)
-fas --os wasi main.fas             # a WebAssembly program, a.wasm (needs wasi-sdk, see below)
-fas perf main.fas -- args       # run under perf: hot loops by Fas line, with LLVM's facts per loop
-fas perf --static main.fas      # facts and llvm-mca estimates only, no run
-fas perf --json main.fas > a.json; fas perf --compare a.json main.fas # what changed since a.json
-fas perf --tune main.fas -- args # measure builds on this machine, keep the fastest correct one in main.fasprof
-fas --profile main.fasprof main.fas -o app # build what the profile chose
 fas --keep main.fas -o app      # keep temp files, print tools and paths
 fas main.fas util.c -lz -o app  # C sources and link flags (executables only)
 ```
 
 `--all-errors` (any command) keeps checking after an error: every function body is checked and each failing statement is reported, so leaving out all casts gives the full list of places that need one in a single run. Errors outside function bodies (parsing, types, signatures, constants) still stop at the first. Without the flag only the first error is printed.
 
-`--target=portable` (the default) builds for baseline x86-64. `--target=force-native` builds the whole program for the CPU you compile on: faster in most loops, slower in some, and the result may crash with an illegal instruction on an older CPU. The `native:` fact in `fas perf` shows, per loop, what the native build would do, so you can decide before switching.
+`--target=portable` (the default) builds for baseline x86-64. `--target=force-native` builds the whole program for the CPU you compile on: faster in most loops, slower in some, and the result may crash with an illegal instruction on an older CPU.
 
-**Building for Windows.** `--os windows` builds a 64-bit Windows program (MinGW, `x86_64-w64-windows-gnu`), and `--os linux` builds for Linux. Without the flag `fas` builds for the system it runs on. The C side needs [llvm-mingw](https://github.com/mingw-w64/llvm-mingw) (LLVM 22): on Linux put its `bin` directory on `PATH` (fas then uses `x86_64-w64-mingw32-clang`) or set `FAS_CC`. On Windows use its `clang` with `opt` and `llc` from the official LLVM 22 release. Test from Linux with Wine:
+To find hot code, build with `-g` and run the system `perf` (`perf record ./app; perf report`): the line tables map samples back to Fas lines.
 
-```sh
-PATH=$HOME/llvm-mingw/bin:$PATH fas --os windows main.fas   # writes a.exe
-wine a.exe
-```
-
-Windows C differs in a few places: `long` and `unsigned long` are 32-bit (`i32`/`u32`, while `long long` stays `i64`), `wchar_t` is 16-bit, and the default output is `a.exe`. Fas code itself is unchanged, and `usize` is still 64-bit. `fas perf` (and `--tune`) measure Linux builds only and refuse `--os windows`.
-
-**Building for WebAssembly.** `--os wasi` builds a 32-bit WebAssembly program for WASI (`wasm32-unknown-wasip1`) that runs in [wasmtime](https://wasmtime.dev) and other WASI runtimes. The C side needs [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) (its libc and `clang`): fas uses `$WASI_SDK_PATH/bin/clang`, by default `/opt/wasi-sdk/bin/clang`, or `FAS_CC` when set. `opt-22` and `llc-22` are the usual LLVM 22 tools. `fas run --os wasi` runs the program with `wasmtime` (or `FAS_WASMTIME`), with the current directory readable.
-
-```sh
-WASI_SDK_PATH=$HOME/wasi-sdk fas --os wasi main.fas        # writes a.wasm
-wasmtime run --dir=. a.wasm args
-WASI_SDK_PATH=$HOME/wasi-sdk fas run --os wasi main.fas -- args
-```
-
-What changes on WebAssembly:
-
-- `usize`, `isize` and pointers are 32-bit, so code written for 64-bit may need different casts: `trunc[u32](n)` with `n usize` is an error there (write `bitcast[u32](n)`, or keep the value `usize`), and a `usize` constant above 4294967295 does not fit. C `long` and `unsigned long` are 32-bit too (`i32`/`u32`), while `long long` stays `i64`.
-- Vectors work everywhere, but the default build (`--target=portable`) splits them into scalar code, because not every runtime has WebAssembly SIMD. `--target=force-native` turns on SIMD (`simd128`, also for C inputs): faster, and needs a runtime with SIMD (wasmtime, current browsers and Node have it). At `-O0` without SIMD, a wide vector with branches inside it (a lane computed with `/` or `%`) can exceed the runtime's limit on local variables (wasmtime: "too many locals"). Keep the default `-O2` or use `--target=force-native`.
-- The stack is 8 MiB, as on Linux. Running past it traps with an out-of-bounds memory access.
-- Only what WASI offers exists in C: `stdio.h`, files under directories the runtime grants (`--dir`), clocks, `stdlib.h`. There are no threads, signals or sockets.
-- The default output is `a.wasm`. `fas perf`, `--tune`, `--profile` and sanitizers measure or instrument Linux builds only and refuse `--os wasi`.
-
-`fas perf` prints one row per hot loop (or per function without loops) with its share of run time, then the loop's facts: whether LLVM vectorized it (and why not), instructions, loads and stores, spills and an llvm-mca cycle estimate per iteration, calls that stayed out of line and why, and a `native:` estimate:
-
-```text
-sum.fas:4     for i usize = 0; i < n; i += 1 {         sum
-      vectorized x4 interleave 2   native: vectorized x8 interleave 4, loop shape differs
-      in sum (copy 1): 9 instr/iter (8 elements)   loads 2 stores 0 /iter   2.4 cycles/iter
-```
-
-`--json` prints the same data for your own tools, and `--compare OLD.json` adds a `change:` line under each loop that changed (`not vectorized → x4 interleave 2   cycles/iter 5.0 → 1.9`). `perf` comes from your distribution (`linux-tools`). Without permission to run it, `fas perf` prints the static report and says why.
-
-**Profiles.** `fas perf --tune main.fas -- args` finds the fastest build of your program for this machine and writes the choice to `main.fasprof`, and `fas --profile main.fasprof main.fas -o app` (also `fas run` and `fas perf`) builds it.
-
-- It tries the default build, a build optimized by counts from a training run (PGO), the portable instruction set scheduled for this CPU (`mtune`), `--target=force-native`, and combinations of these. Every candidate must print exactly what the default build prints (stdout, stderr, exit status), or tuning stops.
-- Candidates run many times, interleaved, pinned to one quiet CPU, at several code alignments and heap placements. A build is kept only if it is faster at every placement by more than the measured noise, confirmed by a fresh round. Otherwise the profile keeps the default build.
-- On the kept build it then tries compiler settings one at a time (larger unroll budgets, `-O3`, more inlining, vector interleave, maximum vector bandwidth) and code alignment, keeping each only when it is clearly faster again.
-
-The last lines say what happened:
-
-```text
-fas perf: kept the profile (pgo 1.124×, band 1.3%; second input 1.118×, band 1.5%)
-fas perf: kept the profile (native-pgo 1.484×, band 4.8%, options unroll=600)
-fas perf: kept the default build (best native 0.981×, band 1.2%) (measured on one input)
-```
-
-- `args` should be a representative run that takes about a second or less: tuning runs the program a few hundred times, and the start says how long that will take. The program's output must not change between runs (no timings, addresses or random seeds in it). If it does, tuning keeps the default build and says so.
-- `--check-with -- args2` adds a second workload: every build must reproduce its output too, and a choice that is slower there is not kept.
-- In a terminal, tuning asks before it starts and offers to use `sudo` to keep the rest of the machine off the measuring CPU. It lists every change it makes as root and undoes them when it ends (also on Ctrl-C). `--yes` skips both questions and never uses sudo, and so does a run without a terminal.
-- A kept native build says `tuned for MODEL; the binary may not run on other CPUs`, and building with that profile on another CPU model, or with `--target=portable`, is an error. Keep such profiles per machine. The others work anywhere (an `mtune` build keeps the portable instruction set).
-- `--no-arena` measures with your normal allocator instead of the measuring one (needed only if the program behaves differently under it, which tuning tells you).
-- The file is text: check it in next to the source like a lockfile. The same source and profile give the same binary. A stale profile is fine: functions you changed just get no counts. Re-tune when the hot code changes a lot.
-
-Tools come only from `FAS_CC`, `FAS_OPT`, `FAS_LLC` and `FAS_PROFDATA` (defaults `clang-22`, `opt-22`, `llc-22`, `llvm-profdata-22`). When a suffixed tool is not on `PATH`, `fas` uses the plain name (`clang`, `opt`, `llc`, `llvm-profdata`) if its `--version` reports LLVM 22, as on Arch or Fedora. `--keep` prints which ones it picked. A `CC` set in your shell does not change what `fas` uses. `FAS_OPT_PASSES` replaces opt's pipeline.
+Tools come only from `FAS_CC`, `FAS_OPT` and `FAS_LLC` (defaults `clang-22`, `opt-22`, `llc-22`). When a suffixed tool is not on `PATH`, `fas` uses the plain name (`clang`, `opt`, `llc`) if its `--version` reports LLVM 22, as on Arch or Fedora. `--keep` prints which ones it picked. A `CC` set in your shell does not change what `fas` uses. `FAS_OPT_PASSES` replaces opt's pipeline.
 
 ### Editors
 

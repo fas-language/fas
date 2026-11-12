@@ -1156,35 +1156,6 @@ and lower_builtin s b args t span =
               chain (i + 1) (Some next)
       in
       chain 0 None
-  | Compress, [ v; mk ]
-    when (Target_layout.current ()).os = Target_layout.Wasi
-         && match rt with Low.Vector (n, _) -> n > 1 | _ -> false ->
-      let bits_ty =
-        match rt with
-        | Low.Vector (n, Low.F32) -> Low.Vector (n, Low.I32)
-        | Low.Vector (n, Low.F64) -> Low.Vector (n, Low.I64)
-        | Low.Vector (n, Low.I1) -> Low.Vector (n, Low.I8)
-        | t -> t
-      in
-      let convert kind value from target =
-        if from = target then value
-        else
-          let id = fresh s in
-          E.cast s.fn id kind from value target;
-          Low.Local (id, target)
-      in
-      let into, back =
-        match rt with
-        | Low.Vector (_, Low.I1) -> ("zext", "trunc")
-        | _ -> ("bitcast", "bitcast")
-      in
-      let bitcast value from target =
-        convert (if from = rt then into else back) value from target
-      in
-      let* name = intrinsic_suffix span bits_ty in
-      let id = fresh s in
-      E.call s.fn (Some id) Low.No_extension bits_ty ("llvm.experimental.vector.compress." ^ name) [ (bits_ty, Low.No_extension, bitcast v rt bits_ty); (value_ty mk, Low.No_extension, mk); (bits_ty, Low.No_extension, Low.Zero bits_ty); ];
-      Ok (bitcast (Low.Local (id, bits_ty)) bits_ty rt)
   | Compress, [ v; mk ] ->
       let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
       let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in

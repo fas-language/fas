@@ -1,2 +1,0 @@
-// selected by --os windows
-fn os_id() i32 { return 22 }

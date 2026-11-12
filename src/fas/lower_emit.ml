@@ -40,7 +40,7 @@ let rec layout (lay : layouts) (t : Low.ty) =
   | Low.I32 | Low.F32 -> (4, 4)
   | Low.I64 | Low.F64 -> (8, 8)
   | Low.Pointer _ ->
-      (* the target's: 4 on wasm32 *)
+      (* the target's pointer size *)
       let n = (Target_layout.current ()).pointer_size in
       (n, n)
   | Low.I128 -> (16, 16)

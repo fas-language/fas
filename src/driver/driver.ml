@@ -28,15 +28,7 @@ let path_error_detail path message =
   | None -> message
 
 let normalize_absolute path =
-  let root, separator, path =
-    if Sys.win32 && String.length path >= 2 && path.[1] = ':' then
-      ( String.sub path 0 2 ^ "\\",
-        "\\",
-        String.map
-          (function '\\' -> '/' | c -> c)
-          (String.sub path 2 (String.length path - 2)) )
-    else ("/", "/", path)
-  in
+  let root, separator, path = ("/", "/", path) in
   let parts = String.split_on_char '/' path in
   let parts =
     List.fold_left
@@ -76,7 +68,6 @@ let use_path_error path =
 let display_dependency_path importer dependency =
   let directory = Filename.dirname importer in
   if directory = "." then dependency
-  else if Sys.win32 then directory ^ "/" ^ dependency
   else Filename.concat directory dependency
 
 let use_target importer_display importer_canonical dependency =
@@ -568,16 +559,13 @@ let find_executable name =
       not (Sys.is_directory path)
     with Unix.Unix_error _ | Sys_error _ -> false
   in
-  let names =
-    if Sys.win32 && not (Filename.check_suffix name ".exe") then [ name ^ ".exe"; name ]
-    else [ name ]
-  in
-  if String.contains name '/' || (Sys.win32 && String.contains name '\\') then
+  let names = [ name ] in
+  if String.contains name '/' then
     List.find_opt is_executable names
   else
     let directories =
       String.split_on_char
-        (if Sys.win32 then ';' else ':')
+        ':'
         (Option.value ~default:"" (Sys.getenv_opt "PATH"))
     in
     let candidates =
@@ -627,36 +615,12 @@ let tool name default =
           Hashtbl.replace resolved_tools default resolved;
           resolved)
 
-let mingw_cc = "x86_64-w64-mingw32-clang"
-
-let c_compiler () =
-  match (Target_layout.current ()).os with
-  | Target_layout.Windows
-    when (not Sys.win32)
-         && (match Sys.getenv_opt "FAS_CC" with
-           | Some value -> value = ""
-           | None -> true)
-         && Option.is_some (find_executable mingw_cc) ->
-      mingw_cc
-  | Target_layout.Wasi when Option.is_none (Sys.getenv_opt "FAS_CC") ->
-      let sdk =
-        match Sys.getenv_opt "WASI_SDK_PATH" with
-        | Some path when path <> "" -> path
-        | _ -> "/opt/wasi-sdk"
-      in
-      Filename.concat (Filename.concat sdk "bin") "clang"
-  | _ -> tool "FAS_CC" "clang-22"
+let c_compiler () = tool "FAS_CC" "clang-22"
 
 let tools () = (tool "FAS_OPT" "opt-22", tool "FAS_LLC" "llc-22", c_compiler ())
 
-let c_target_flags () =
-  match (Target_layout.current ()).os with
-  | Target_layout.Linux -> []
-  | Target_layout.Windows | Target_layout.Wasi ->
-      [ "--target=" ^ (Target_layout.current ()).triple ]
+let c_target_flags () = match (Target_layout.current ()).os with Target_layout.Linux -> []
 
-let wasm () = (Target_layout.current ()).os = Target_layout.Wasi
-let profdata () = tool "FAS_PROFDATA" "llvm-profdata-22"
 
 let first_non_empty_line text =
   String.split_on_char '\n' text
@@ -683,11 +647,6 @@ let version_lines () =
     tool_line "opt" opt;
     tool_line "llc" llc;
     tool_line "cc" cc;
-    tool_line "profdata" (profdata ());
-    tool_line "perf" (tool "FAS_PERF" "perf");
-    tool_line "objdump" (tool "FAS_OBJDUMP" "llvm-objdump-22");
-    tool_line "symbolizer" (tool "FAS_SYMBOLIZER" "llvm-symbolizer-22");
-    tool_line "mca" (tool "FAS_MCA" "llvm-mca-22");
   ]
 
 let status_name = function
@@ -1043,13 +1002,6 @@ let host_cpu =
 let resolve_target config =
   match config.Cli.target with
   | Cli.Portable -> Ok config
-  | Cli.Force_native when wasm () ->
-      Ok
-        {
-          config with
-          Cli.target_cpu = Some "generic";
-          target_features = Some "+simd128";
-        }
   | Cli.Force_native -> (
       match Lazy.force host_cpu with
       | Ok (cpu, features) ->
@@ -1063,13 +1015,11 @@ let resolve_target config =
 
 let target_attributes config =
   match (config.Cli.target, config.Cli.target_cpu, config.Cli.target_features) with
-  | Cli.Portable, None, None when wasm () ->
-      Some { Fir_llvm.target_cpu = "generic"; target_tune = None; target_features = None }
   | Cli.Portable, None, None ->
       Some
         {
           Fir_llvm.target_cpu = "x86-64";
-          target_tune = Some (Option.value config.Cli.tune_cpu ~default:"generic");
+          target_tune = Some "generic";
           target_features = None;
         }
   | Cli.Force_native, Some cpu, Some features ->
@@ -1078,12 +1028,8 @@ let target_attributes config =
 
 let host_march config =
   match config.Cli.target with
-  | Cli.Force_native when wasm () -> [ "-msimd128" ]
   | Cli.Force_native -> [ "-march=native" ]
   | Cli.Portable -> []
-
-let c_tuning config =
-  match config.Cli.tune_cpu with None -> [] | Some cpu -> [ "-mtune=" ^ cpu ]
 
 (* The LLVM text of the lowered Fir module (roadmap v0.6: Fir_llvm replaced
    the old Ir renderer) *)
@@ -1095,60 +1041,11 @@ let render_ir ?(sanitize_address = false) ?target ~debug_info m =
   | Ok text -> Ok text
   | Error message -> Error [ Diag.error Span.synthetic message ]
 
-let unroll_values = [ 600; 1200; 2400; 4800 ]
-let unroll_name value = "unroll=" ^ string_of_int value
-
-let tune_option_kinds =
-  [
-    ("unroll", List.map unroll_name unroll_values);
-    ("O3", [ "O3" ]);
-    ("inline", [ "inline=1000" ]);
-    ("interleave", [ "interleave=4" ]);
-    ("max-bandwidth", [ "max-bandwidth" ]);
-  ]
-
-let tune_option_names = List.concat_map snd tune_option_kinds
-
-let option_kind name =
-  List.find_map
-    (fun (kind, names) -> if List.mem name names then Some kind else None)
-    tune_option_kinds
-
-let is_unroll_name name = option_kind name = Some "unroll"
-
-let option_value name =
-  match String.index_opt name '=' with
-  | Some index -> String.sub name (index + 1) (String.length name - index - 1)
-  | None -> ""
-
-let tune_opt_flag name =
-  match option_kind name with
-  | Some "unroll" -> [ "-unroll-threshold=" ^ option_value name ]
-  | Some "inline" -> [ "-inline-threshold=" ^ option_value name ]
-  | Some "interleave" -> [ "-force-vector-interleave=" ^ option_value name ]
-  | Some "max-bandwidth" -> [ "-vectorizer-maximize-bandwidth" ]
-  | Some _ | None -> []
-
-let tune_opt_flags config =
-  if optimization_level config.Cli.optimization > 0 then
-    List.concat_map
-      (fun name ->
-        if List.mem name config.Cli.tune_options then tune_opt_flag name else [])
-      tune_option_names
-  else []
-
-let tune_enabled config name =
-  optimization_level config.Cli.optimization > 0
-  && List.mem name config.Cli.tune_options
-
-let effective_level config =
-  if tune_enabled config "O3" then 3 else config.Cli.optimization
-
 let opt_pass config =
   let configured =
     match Sys.getenv_opt "FAS_OPT_PASSES" with
     | Some value when value <> "" -> value
-    | _ -> Printf.sprintf "default<O%d>" (optimization_level (effective_level config))
+    | _ -> Printf.sprintf "default<O%d>" (optimization_level config.Cli.optimization)
   in
   if List.mem "address" config.Cli.sanitizers then "asan," ^ configured else configured
 
@@ -1169,477 +1066,14 @@ let verify_llvm opt file =
     ("LLVM verification with " ^ opt)
     [| opt; "-passes=verify"; file; "-disable-output" |]
 
-let pass_report config = opt_pass config
-
-type profile = { indexed_path : string; temp_paths : string list }
-type pgo = Instrument | Use of profile
-type choice = Default | Pgo | Native | Native_pgo | Mtune | Mtune_pgo
-
-type profile_header = {
-  choice : choice;
-  align_loops : int option;
-  align_functions : int option;
-  options : string list;
-  cpu : string;
-  counts : string;
-}
-
-let profile_format = "fas profile 3"
-let profile_error message = Error [ Diag.error Span.synthetic message ]
-
-let choice_name = function
-  | Default -> "default"
-  | Pgo -> "pgo"
-  | Native -> "native"
-  | Native_pgo -> "native-pgo"
-  | Mtune -> "mtune"
-  | Mtune_pgo -> "mtune-pgo"
-
-let choice_of_name = function
-  | "default" -> Some Default
-  | "pgo" -> Some Pgo
-  | "native" -> Some Native
-  | "native-pgo" -> Some Native_pgo
-  | "mtune" -> Some Mtune
-  | "mtune-pgo" -> Some Mtune_pgo
-  | _ -> None
-
-let align_loops_name = function None -> "def" | Some n -> string_of_int n
-
-let align_loops_of_name = function
-  | "def" -> Some None
-  | "32" -> Some (Some 32)
-  | "64" -> Some (Some 64)
-  | _ -> None
-
-let header_value prefix line =
-  if String.starts_with ~prefix line then
-    Some
-      (String.sub line (String.length prefix)
-         (String.length line - String.length prefix))
-  else None
-
-let profile_cpu line = Option.value (header_value "cpu " line) ~default:line
-
-let align_functions_of_name = function
-  | "def" -> Some None
-  | "64" -> Some (Some 64)
-  | _ -> None
-
-let profile_line_error path number expected =
-  profile_error
-    (Printf.sprintf "profile `%s` line %d must be `%s`" path number expected)
-
-let profile_choice path line =
-  match Option.bind line (header_value "choice ") with
-  | None ->
-      profile_line_error path 5 "choice default|pgo|native|native-pgo|mtune|mtune-pgo"
-  | Some value -> (
-      match choice_of_name value with
-      | Some choice -> Ok choice
-      | None ->
-          profile_error
-            (Printf.sprintf
-               "profile `%s` has an unknown choice `%s`; expected default, pgo, \
-                native, native-pgo, mtune or mtune-pgo"
-               path value))
-
-let profile_align_loops path line =
-  match Option.bind line (header_value "align-loops ") with
-  | None -> profile_line_error path 6 "align-loops def|32|64"
-  | Some value -> (
-      match align_loops_of_name value with
-      | Some align_loops -> Ok align_loops
-      | None ->
-          profile_error
-            (Printf.sprintf
-               "profile `%s` has an unknown align-loops value `%s`; expected def, 32 \
-                or 64"
-               path value))
-
-let profile_align_functions path line =
-  match Option.bind line (header_value "align-functions ") with
-  | None -> profile_line_error path 7 "align-functions def|64"
-  | Some value -> (
-      match align_functions_of_name value with
-      | Some align_functions -> Ok align_functions
-      | None ->
-          profile_error
-            (Printf.sprintf
-               "profile `%s` has an unknown align-functions value `%s`; expected def \
-                or 64"
-               path value))
-
-let or_list = function
-  | [] -> ""
-  | [ only ] -> only
-  | names ->
-      let reversed = List.rev names in
-      String.concat ", " (List.rev (List.tl reversed)) ^ " or " ^ List.hd reversed
-
-let kind_repeat seen name =
-  Option.bind (option_kind name) (fun kind ->
-      if List.exists (fun other -> option_kind other = Some kind) seen then Some kind
-      else None)
-
-let profile_options path line =
-  let expected =
-    "options "
-    ^ String.concat " " (List.map (fun name -> "[" ^ name ^ "]") tune_option_names)
-  in
-  let names =
-    match line with
-    | Some "options" -> Some []
-    | _ ->
-        Option.bind line (header_value "options ")
-        |> Option.map (fun value ->
-            List.filter (fun name -> name <> "") (String.split_on_char ' ' value))
-  in
-  match names with
-  | None -> profile_line_error path 8 expected
-  | Some names ->
-      let rec check seen = function
-        | [] -> Ok (List.rev seen)
-        | name :: _ when not (List.mem name tune_option_names) ->
-            profile_error
-              (Printf.sprintf "profile `%s` has an unknown option `%s`; expected %s"
-                 path name (or_list tune_option_names))
-        | name :: _ when List.mem name seen ->
-            profile_error
-              (Printf.sprintf "profile `%s` repeats the option `%s`" path name)
-        | name :: rest -> (
-            match kind_repeat seen name with
-            | Some kind ->
-                profile_error
-                  (Printf.sprintf "profile `%s` has two %s values" path kind)
-            | None -> check (name :: seen) rest)
-      in
-      check [] names
-
-let profile_measured path number line =
-  match Option.bind line (header_value "measured ") with
-  | Some _ -> Ok ()
-  | None ->
-      profile_line_error path number
-        "measured RATIO band BAND rounds R placements K metric M"
-
-let profile_lines text =
-  String.split_on_char '\n' text
-  |> List.map (fun line ->
-      let length = String.length line in
-      if length > 0 && line.[length - 1] = '\r' then String.sub line 0 (length - 1)
-      else line)
-
-let normalize_header line =
-  String.map (fun c -> if c = '\t' then ' ' else c) line
-  |> String.split_on_char ' '
-  |> List.filter (fun word -> word <> "")
-  |> String.concat " "
-
-let profile_cpu_line path line =
-  match Option.bind line (header_value "cpu ") with
-  | Some cpu -> Ok cpu
-  | None -> profile_line_error path 4 "cpu NAME"
-
-let profile_header path text =
-  let lines = profile_lines text in
-  let header number = Option.map normalize_header (List.nth_opt lines (number - 1)) in
-  let no_counts () =
-    profile_error (Printf.sprintf "profile `%s` has no `counts` section" path)
-  in
-  let counts_section ?(positional = true) number =
-    match header number with
-    | Some "counts" ->
-        Ok (String.concat "\n" (List.filteri (fun index _ -> index >= number) lines))
-    | (Some _ | None) when positional -> profile_line_error path number "counts"
-    | Some _ | None -> no_counts ()
-  in
-  match header 1 with
-  | Some "fas profile 1" when header 5 = Some "counts" ->
-      let* counts = counts_section ~positional:false 5 in
-      Ok
-        {
-          choice = Pgo;
-          align_loops = None;
-          align_functions = None;
-          options = [];
-          cpu = profile_cpu (Option.value (header 4) ~default:"");
-          counts;
-        }
-  | Some "fas profile 1" -> no_counts ()
-  | Some "fas profile 2" ->
-      let* cpu = profile_cpu_line path (header 4) in
-      let* choice = profile_choice path (header 5) in
-      let* align_loops = profile_align_loops path (header 6) in
-      let* () = profile_measured path 7 (header 7) in
-      let* counts = counts_section 8 in
-      Ok { choice; align_loops; align_functions = None; options = []; cpu; counts }
-  | Some "fas profile 3" ->
-      let* cpu = profile_cpu_line path (header 4) in
-      let* choice = profile_choice path (header 5) in
-      let* align_loops = profile_align_loops path (header 6) in
-      let* align_functions = profile_align_functions path (header 7) in
-      let* options = profile_options path (header 8) in
-      let* () = profile_measured path 9 (header 9) in
-      let* counts = counts_section 10 in
-      Ok { choice; align_loops; align_functions; options; cpu; counts }
-  | _ ->
-      profile_error
-        (Printf.sprintf
-           "`%s` is not a fas profile (expected `fas profile 1`, `fas profile 2` or \
-            `fas profile 3` on line 1)"
-           path)
-
-let without_prefix prefix line = Option.value (header_value prefix line) ~default:line
-
-let missing_profdata tool_path =
-  profile_error
-    (Printf.sprintf "profile merge needs llvm-profdata (FAS_PROFDATA is `%s`)" tool_path)
-
-let profile_io f =
-  try f ()
-  with Sys_error message ->
-    Error [ Diag.error Span.synthetic ("backend I/O failed: " ^ message) ]
-
-let merge_profile path counts temps =
-  let text_path = Filename.temp_file "fas-profile-" ".proftext" in
-  temps := text_path :: !temps;
-  let indexed_path = Filename.temp_file "fas-profile-" ".profdata" in
-  temps := indexed_path :: !temps;
-  write_file text_path counts;
-  let tool_path = profdata () in
-  match Process.run [| tool_path; "merge"; "-o"; indexed_path; text_path |] with
-  | Ok _ -> Ok indexed_path
-  | Error failure when failure.Process.status = Unix.WEXITED 127 ->
-      missing_profdata tool_path
-  | Error failure ->
-      let reason =
-        match first_non_empty_line failure.Process.stderr with
-        | Some line ->
-            line |> without_prefix "warning: " |> without_prefix "error: "
-            |> without_prefix (text_path ^ ": ")
-        | None -> status_name failure.Process.status
-      in
-      profile_error (Printf.sprintf "profile `%s` has invalid counts: %s" path reason)
-
-let contains_text needle haystack =
-  let needle_length = String.length needle and length = String.length haystack in
-  let rec from index =
-    index + needle_length <= length
-    && (String.sub haystack index needle_length = needle || from (index + 1))
-  in
-  from 0
-
-let check_clang () =
-  let _, _, cc = tools () in
-  let rejected () =
-    Error
-      [
-        Diag.error Span.synthetic
-          (Printf.sprintf
-             "`fas perf --tune` needs Clang as the C compiler; FAS_CC is `%s`" cc);
-      ]
-  in
-  match Process.run [| cc; "--version" |] with
-  | Ok (stdout, stderr) when contains_text "clang" (stdout ^ stderr) -> Ok ()
-  | Ok _ | Error _ -> rejected ()
-
-let tool_output_lines path =
-  match Process.run [| path; "--version" |] with
-  | Ok (stdout, _) -> List.map String.trim (String.split_on_char '\n' stdout)
-  | Error _ -> []
-
-let llc_host_cpu () =
-  let _, llc, _ = tools () in
-  let host_prefix = "Host CPU:" in
-  tool_output_lines llc
-  |> List.find_map (fun line ->
-      if String.starts_with ~prefix:host_prefix line then
-        let rest = String.length host_prefix in
-        Some (String.trim (String.sub line rest (String.length line - rest)))
-      else None)
-  |> Option.value ~default:"unknown"
-
-let tune_header () =
-  let opt, _, _ = tools () in
-  let llvm =
-    tool_output_lines opt
-    |> List.find_opt (contains_text "LLVM version")
-    |> Option.value ~default:"unknown"
-  in
-  [ profile_format; "fas " ^ version; "llvm " ^ llvm; "cpu " ^ llc_host_cpu () ]
-
-let count_profile_functions text =
-  String.split_on_char '\n' text
-  |> List.filter (String.starts_with ~prefix:"# Func Hash:")
-  |> List.length
-
-let write_atomically path text =
-  let temp = Filename.temp_file ~temp_dir:(Filename.dirname path) "fas-tune-" ".tmp" in
-  try
-    write_file temp text;
-    Unix.chmod temp 0o644;
-    Sys.rename temp path
-  with (Sys_error _ | Unix.Unix_error _) as error ->
-    remove temp;
-    raise error
-
-let io_error message =
-  Error [ Diag.error Span.synthetic ("backend I/O failed: " ^ message) ]
-
-let merge_profraw ~scratch ~profraw =
-  let merged = Filename.concat scratch "merged.proftext" in
-  let tool_path = profdata () in
-  let argv = Array.of_list ([ tool_path; "merge"; "--text"; "-o"; merged ] @ profraw) in
-  match Process.run argv with
-  | Error failure when failure.Process.status = Unix.WEXITED 127 ->
-      missing_profdata tool_path
-  | Error failure -> Error [ tool_error ("profile merge with " ^ tool_path) failure ]
-  | Ok _ -> (
-      match read_file merged with
-      | Error message -> io_error message
-      | Ok text -> Ok text)
-
-let write_profile_file output text =
-  try Ok (write_atomically output text) with
-  | Sys_error message -> io_error message
-  | Unix.Unix_error (code, _, _) -> io_error (Unix.error_message code)
-
-let with_profile config f =
-  match config.Cli.profile with
-  | None -> f config None
-  | Some path ->
-      let temps = ref [] in
-      let cleanup () = if not config.Cli.keep then List.iter remove !temps in
-      Fun.protect ~finally:cleanup (fun () ->
-          let* text =
-            read_file path
-            |> Result.map_error (fun _ ->
-                [
-                  Diag.error Span.synthetic
-                    (Printf.sprintf "cannot read profile `%s`" path);
-                ])
-          in
-          let* header = profile_header path text in
-          let native = header.choice = Native || header.choice = Native_pgo in
-          let mtune = header.choice = Mtune || header.choice = Mtune_pgo in
-          let pgo_choice =
-            header.choice = Pgo || header.choice = Native_pgo
-            || header.choice = Mtune_pgo
-          in
-          let* () =
-            if native && config.Cli.target_explicit && config.Cli.target = Cli.Portable
-            then
-              profile_error
-                (Printf.sprintf
-                   "profile `%s` has the native choice `%s`; it cannot build with \
-                    `--target=portable`"
-                   path (choice_name header.choice))
-            else Ok ()
-          in
-          let* () =
-            if pgo_choice && String.trim header.counts = "" then
-              profile_error
-                (Printf.sprintf "profile `%s` has no counts for a pgo choice" path)
-            else Ok ()
-          in
-          let* () =
-            if native && header.cpu <> llc_host_cpu () then
-              profile_error
-                (Printf.sprintf
-                   "profile `%s` was tuned for the CPU `%s`; this machine is `%s` (a \
-                    native choice runs only on the CPU it was measured on)"
-                   path header.cpu (llc_host_cpu ()))
-            else Ok ()
-          in
-          let config =
-            {
-              config with
-              Cli.align_loops = header.align_loops;
-              Cli.align_functions = header.align_functions;
-              Cli.tune_options = header.options;
-              tune_cpu = (if mtune then Some header.cpu else config.Cli.tune_cpu);
-              target = (if native then Cli.Force_native else config.Cli.target);
-            }
-          in
-          match header.choice with
-          | Default | Native | Mtune -> f config None
-          | Pgo | Native_pgo | Mtune_pgo ->
-              let* indexed_path =
-                profile_io (fun () -> merge_profile path header.counts temps)
-              in
-              f config (Some (Use { indexed_path; temp_paths = !temps })))
-
-let pgo_opt_flags config pgo =
-  match pgo with
-  | Some Instrument -> [ "--pgo-kind=pgo-instr-gen-pipeline" ]
-  | Some (Use p) when optimization_level config.Cli.optimization > 0 ->
-      [ "--pgo-kind=pgo-instr-use-pipeline"; "--profile-file=" ^ p.indexed_path ]
-  | _ -> []
-
-let pgo_c_flags config pgo =
-  match pgo with
-  | Some Instrument -> [ "-fprofile-generate" ]
-  | Some (Use p) when optimization_level config.Cli.optimization > 0 ->
-      [
-        "-fprofile-use=" ^ p.indexed_path;
-        "-Wno-profile-instr-out-of-date";
-        "-Wno-profile-instr-unprofiled";
-        "-Wno-profile-instr-missing";
-      ]
-  | _ -> []
-
-let pgo_unit_name_flags pgo unit_path =
-  match pgo with
-  | None -> []
-  | Some _ ->
-      let depth =
-        String.fold_left (fun n c -> if c = '/' then n + 1 else n) 0 unit_path
-      in
-      [ "-mllvm"; "-static-func-strip-dirname-prefix=" ^ string_of_int depth ]
-
-let report_kept config pgo paths opt llc cc =
+let report_kept config paths opt llc cc =
   if config.Cli.keep then (
-    let temps =
-      match pgo with Some (Use p) -> p.temp_paths | Some Instrument | None -> []
-    in
-    prerr_endline ("fas: kept intermediates: " ^ String.concat ", " (paths @ temps));
-    let tune_flags =
-      match tune_opt_flags config with
-      | [] -> ""
-      | flags -> "; opt flags " ^ String.concat " " flags
-    in
+    prerr_endline ("fas: kept intermediates: " ^ String.concat ", " paths);
     prerr_endline
       (Printf.sprintf
-         "fas: tools FAS_OPT=%s FAS_LLC=%s FAS_CC=%s FAS_PROFDATA=%s; opt passes=%s%s; \
-          verify before and after opt; llc %s"
-         opt llc cc (profdata ()) (pass_report config) tune_flags
-         (llc_opt (effective_level config))))
-
-let with_debug_c_inputs ~enabled ~pgo_flags config cc f =
-  if not (enabled || pgo_flags <> []) then f config.Cli.link_inputs
-  else
-    let objects = ref [] in
-    let cleanup () = if not config.Cli.keep then List.iter remove !objects in
-    Fun.protect ~finally:cleanup (fun () ->
-        let rec compile acc = function
-          | [] -> f (List.rev acc)
-          | path :: rest when Filename.check_suffix path ".c" ->
-              let object_path = Filename.temp_file "fas-c-link-" ".o" in
-              objects := object_path :: !objects;
-              let debug = if enabled then [ "-g" ] else [] in
-              let* () =
-                run_tool cc
-                  (Array.of_list
-                     ([ cc ] @ c_target_flags () @ debug
-                     @ [ "-c"; path; "-o"; object_path ]
-                     @ host_march config @ c_tuning config @ config.Cli.c_flags
-                     @ c_sanitizer_flags config @ pgo_flags))
-              in
-              compile (object_path :: acc) rest
-          | path :: rest -> compile (path :: acc) rest
-        in
-        compile [] config.Cli.link_inputs)
+         "fas: tools FAS_OPT=%s FAS_LLC=%s FAS_CC=%s; opt passes=%s; verify before and \
+          after opt; llc %s"
+         opt llc cc (opt_pass config) (llc_opt config.Cli.optimization)))
 
 let executable_command config cc asm_path c_objects link_flags =
   let math_library = if List.mem "-lm" config.Cli.link_inputs then [] else [ "-lm" ] in
@@ -1648,53 +1082,31 @@ let executable_command config cc asm_path c_objects link_flags =
       (cc :: asm_path
       :: (c_target_flags () @ c_objects @ host_march config @ config.Cli.c_flags
         @ c_sanitizer_flags config @ config.Cli.link_inputs @ link_flags @ math_library
-         @ (if wasm () then [ "-Wl,-z,stack-size=8388608" ] else [])
          @ [ "-o"; config.Cli.output ]))
   in
   if config.Cli.keep then
     prerr_endline ("fas: CC command: " ^ String.concat " " (Array.to_list argv));
   argv
 
-let remark_option = function
-  | Some path -> [ "-pass-remarks-output=" ^ path ]
-  | None -> []
-
 let target_cpu_option config =
   match (config.Cli.target, config.Cli.target_cpu) with
   | _, Some cpu -> [ "-mcpu=" ^ cpu ]
-  | Cli.Portable, None when wasm () -> [ "-mcpu=generic" ]
   | Cli.Portable, None -> [ "-mcpu=x86-64" ]
   | Cli.Force_native, None -> []
 
-let log2_bytes n =
-  let rec go k = if 1 lsl k >= n then k else go (k + 1) in
-  go 0
-
-let align_functions_option config =
-  match config.Cli.align_functions with
-  | Some n when optimization_level config.Cli.optimization > 0 ->
-      [ "-align-all-functions=" ^ string_of_int (log2_bytes n) ]
-  | _ -> []
-
-let run_llc ?llc_remarks config llc ~filetype ~input ~output =
+let run_llc config llc ~filetype ~input ~output =
   run_tool llc
     (Array.of_list
        ([
           llc;
-          llc_opt (effective_level config);
-          (if wasm () then "-relocation-model=static" else "-relocation-model=pic");
+          llc_opt config.Cli.optimization;
+          "-relocation-model=pic";
           "-filetype=" ^ filetype;
         ]
-       @ (match config.Cli.align_loops with
-         | Some n -> [ "-align-loops=" ^ string_of_int n ]
-         | None -> [])
-       @ align_functions_option config @ target_cpu_option config
-       @ remark_option llc_remarks @ [ input; "-o"; output ]))
+       @ target_cpu_option config @ [ input; "-o"; output ]))
 
-let build_assembly ?llc_remarks config llc opt_path asm_path =
-  let* () =
-    run_llc ?llc_remarks config llc ~filetype:"asm" ~input:opt_path ~output:asm_path
-  in
+let build_assembly config llc opt_path asm_path =
+  let* () = run_llc config llc ~filetype:"asm" ~input:opt_path ~output:asm_path in
   let* generated =
     read_file asm_path
     |> Result.map_error (fun message ->
@@ -1702,7 +1114,7 @@ let build_assembly ?llc_remarks config llc opt_path asm_path =
   in
   Ok generated
 
-let optimize_module ?remarks ~pgo config opt ll_path opt_path =
+let optimize_module config opt ll_path opt_path =
   let* () = verify_llvm opt ll_path in
   let* () =
     let address_scope_option =
@@ -1712,21 +1124,18 @@ let optimize_module ?remarks ~pgo config opt ll_path opt_path =
     run_tool opt
       (Array.of_list
          ([ opt; "-passes=" ^ opt_pass config ]
-         @ tune_opt_flags config @ target_cpu_option config @ remark_option remarks
-         @ address_scope_option @ pgo_opt_flags config pgo
+         @ target_cpu_option config @ address_scope_option
          @ [ ll_path; "-S"; "-o"; opt_path ]))
   in
   verify_llvm opt opt_path
 
-let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~pgo
-    config program ir c_objects link_flags =
+let emit_tools_unprotected config program ir c_objects link_flags =
   let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
     render_ir
       ~sanitize_address:(List.mem "address" config.Cli.sanitizers)
       ~debug_info:config.Cli.debug ?target:(target_attributes config) ir
   in
-  Option.iter (fun report -> report ll_text) llvm_text;
   let ll_path = Filename.temp_file "fas-module-" ".ll" in
   let opt_path = Filename.temp_file "fas-opt-" ".ll" in
   let asm_path = Filename.temp_file "fas-module-" ".s" in
@@ -1736,11 +1145,11 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
   Fun.protect ~finally:cleanup (fun () ->
       write_file ll_path ll_text;
       let opt, llc, cc = tools () in
-      report_kept config pgo [ ll_path; opt_path; asm_path ] opt llc cc;
-      let* () = optimize_module ?remarks ~pgo config opt ll_path opt_path in
+      report_kept config [ ll_path; opt_path; asm_path ] opt llc cc;
+      let* () = optimize_module config opt ll_path opt_path in
       match config.emit with
       | Cli.Asm ->
-          let* assembly = build_assembly ?llc_remarks config llc opt_path asm_path in
+          let* assembly = build_assembly config llc opt_path asm_path in
           with_staged_output config (fun output ->
               try
                 write_file output assembly;
@@ -1755,8 +1164,7 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
           with_staged_output config (fun output ->
               let* () =
                 if c_objects = [] then
-                  run_llc ?llc_remarks config llc ~filetype:"obj" ~input:opt_path
-                    ~output
+                  run_llc config llc ~filetype:"obj" ~input:opt_path ~output
                 else
                   let fas_object = Filename.temp_file "fas-object-" ".o" in
                   let cleanup_object () =
@@ -1766,13 +1174,12 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
                       if config.Cli.keep then
                         prerr_endline ("fas: kept Fas object: " ^ fas_object);
                       let* () =
-                        run_llc ?llc_remarks config llc ~filetype:"obj" ~input:opt_path
+                        run_llc config llc ~filetype:"obj" ~input:opt_path
                           ~output:fas_object
                       in
                       let argv =
                         Array.of_list
                           ((cc :: c_target_flags ())
-                          @ (if wasm () then [ "-nostdlib" ] else [])
                           @ ("-r" :: fas_object :: c_objects)
                           @ [ "-o"; output ])
                       in
@@ -1783,31 +1190,19 @@ let emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?(c_debug = false) ~
               in
               Ok "")
       | Cli.Executable ->
-          let* _ = build_assembly ?llc_remarks config llc opt_path asm_path in
-          let link_flags =
-            match pgo with
-            | Some Instrument -> "-fprofile-generate" :: link_flags
-            | _ -> link_flags
-          in
+          let* _ = build_assembly config llc opt_path asm_path in
           with_staged_output config (fun output ->
-              let output_config = { config with Cli.output } in
               let* () =
-                with_debug_c_inputs ~enabled:c_debug ~pgo_flags:(pgo_c_flags config pgo)
-                  output_config cc (fun link_inputs ->
-                    run_tool cc
-                      (executable_command
-                         { output_config with Cli.link_inputs }
-                         cc asm_path c_objects link_flags))
+                run_tool cc
+                  (executable_command { config with Cli.output } cc asm_path c_objects
+                     link_flags)
               in
               Ok "")
       | Cli.Ir | Cli.Llvm | Cli.Optimized_llvm | Cli.Header ->
           invalid_arg "Driver.emit_tools: non-tool emission")
 
-let emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program ir
-    c_objects link_flags =
-  try
-    emit_tools_unprotected ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-      ir c_objects link_flags
+let emit_tools config program ir c_objects link_flags =
+  try emit_tools_unprotected config program ir c_objects link_flags
   with
   | Sys_error message ->
       Error [ Diag.error Span.synthetic ("backend I/O failed: " ^ message) ]
@@ -1829,7 +1224,7 @@ let with_fas_module_id text =
     in
     "; ModuleID = 'fas'" ^ rest
 
-let emit_optimized_llvm ~pgo config program ir =
+let emit_optimized_llvm config program ir =
   let* () = ir_budget program (Fir_limits.check_static_data_bytes ~limits ir) in
   let* ll_text =
     render_ir
@@ -1842,8 +1237,8 @@ let emit_optimized_llvm ~pgo config program ir =
   Fun.protect ~finally:cleanup (fun () ->
       write_file ll_path ll_text;
       let opt, llc, cc = tools () in
-      report_kept config pgo [ ll_path; opt_path ] opt llc cc;
-      let* () = optimize_module ~pgo config opt ll_path opt_path in
+      report_kept config [ ll_path; opt_path ] opt llc cc;
+      let* () = optimize_module config opt ll_path opt_path in
       let* text =
         read_file opt_path
         |> Result.map_error (fun message ->
@@ -1954,7 +1349,7 @@ type imported_c_unit = {
   c_flags : string list;
 }
 
-let compile_c_units ~pgo config cc units adapters standard_headers declaration_headers
+let compile_c_units config cc units adapters standard_headers declaration_headers
     declarations artifacts =
   let rec compile acc = function
     | [] -> Ok (List.rev acc)
@@ -2036,19 +1431,15 @@ let compile_c_units ~pgo config cc units adapters standard_headers declaration_h
               ([
                  cc;
                  "--target=" ^ (Target_layout.current ()).triple;
-                 (if wasm () then "-fno-PIC" else "-fPIC");
-                 llc_opt (effective_level config);
+                 "-fPIC";
+                 llc_opt config.Cli.optimization;
                ]
-              @ host_march config @ c_tuning config @ unit.c_flags
+              @ host_march config @ unit.c_flags
               @ (if Option.is_none unit.assembly then
                    C_import.reproducible_flags unit.stable_name unit.unit_path
                  else [])
               @ (if Option.is_none unit.assembly && config.Cli.emit <> Cli.Header then
                    c_sanitizer_flags config
-                 else [])
-              @ (if Option.is_none unit.assembly then pgo_c_flags config pgo else [])
-              @ (if Option.is_none unit.assembly then
-                   pgo_unit_name_flags pgo unit.unit_path
                  else [])
               @ (if Option.is_some unit.assembly then
                    [ "-iquote"; Filename.dirname unit.source ]
@@ -2131,17 +1522,8 @@ let add_static_adapters units referenced_names ir =
       if adapters <> [] && Option.is_none unit.assembly then
         C_import.append_adapters unit.unit_path adapters)
     units;
-  let entry =
-    match
-      List.find_opt (fun (f : Fir.func) -> f.name = "main") (Fir.Vec.to_list ir.Fir.funcs)
-    with
-    | Some f when wasm () ->
-        [ ("main", if f.sig_.param_abis = [] then "__main_void" else "__main_argc_argv") ]
-    | _ -> []
-  in
   let redirects =
-    entry
-    @ List.map
+    List.map
         (fun (adapter : C_import.adapter) -> (adapter.c_name, adapter.symbol))
         adapters
   in
@@ -2154,10 +1536,8 @@ let add_static_adapters units referenced_names ir =
       Error
         [ Diag.error Span.synthetic ("internal error: invalid Fir:\n" ^ String.concat "\n" errors) ]
 
-(* Fas's `fn main` (on wasm the C adapters renamed it, see
-   add_static_adapters) *)
-let is_entry (f : Fir.func) =
-  match f.name with "main" | "__main_void" | "__main_argc_argv" -> true | _ -> false
+(* Fas's `fn main` *)
+let is_entry (f : Fir.func) = f.name = "main"
 
 type checked = {
   program : Ast.program;
@@ -2204,7 +1584,7 @@ let manifest_origin line =
 
 let load_program ?overlay ~limits root = load_program_with ?overlay ~limits root
 
-let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config =
+let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
   let c_artifacts = ref [] in
   let succeeded = ref false in
   Fun.protect
@@ -2544,7 +1924,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) ?pgo config 
               let* () = ir_budget program (Fir_limits.check_lowered_nodes ~limits ir) in
               let* () = ir_budget program (Fir_limits.check_stack_scratch_bytes ~limits ir) in
               let* c_objects =
-                compile_c_units ~pgo config cc (List.rev !c_units) adapters
+                compile_c_units config cc (List.rev !c_units) adapters
                   (C_exports.includes declarations)
                   declaration_headers declarations c_artifacts
               in
@@ -2713,9 +2093,9 @@ let recover ?overlay ?cache config =
   in
   attempt 0 []
 
-let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
-    ?(link_cache = new_link_cache ()) ~pgo config =
-  match complete (analyze_resolved ?pgo config) with
+let run_unprotected ?header_output config =
+  let link_cache = new_link_cache () in
+  match complete (analyze_resolved config) with
   | Error diagnostics -> Error diagnostics
   | Ok checked ->
       Fun.protect
@@ -2777,7 +2157,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                   write_file path text;
                   let* () = verify_llvm opt path in
                   emit_text config text)
-          | Cli.Optimized_llvm -> emit_optimized_llvm ~pgo config program ir
+          | Cli.Optimized_llvm -> emit_optimized_llvm config program ir
           | Cli.Obj when config.Cli.native -> (
               if link_pkgs <> [] then
                 Error
@@ -2817,8 +2197,7 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                      object";
                 ]
           | Cli.Asm | Cli.Obj ->
-              emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-                ir c_objects []
+              emit_tools config program ir c_objects []
           | Cli.Executable ->
               let* () =
                 if
@@ -2931,14 +2310,10 @@ let run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug
                 let* link_flags =
                   pkg_link_flags ~keep:config.Cli.keep ~cache:link_cache link_pkgs
                 in
-                emit_tools ?remarks ?llc_remarks ?llvm_text ?c_debug ~pgo config program
-                  ir c_objects link_flags)
+                emit_tools config program ir c_objects link_flags)
 
-let run_unstaged ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache
-    ~pgo config =
-  try
-    run_unprotected ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache
-      ~pgo config
+let run_unstaged ?header_output config =
+  try run_unprotected ?header_output config
   with
   | Sys_error message ->
       Error [ Diag.error Span.synthetic ("backend I/O failed: " ^ message) ]
@@ -2953,15 +2328,12 @@ let run_unstaged ?header_output ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_
 let same_as_input config =
   canonical_path config.Cli.input = canonical_path config.Cli.output
 
-let run_resolved ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ~pgo config =
-  if not config.Cli.output_explicit then
-    run_unstaged ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ~pgo config
+let run_resolved config =
+  if not config.Cli.output_explicit then run_unstaged config
   else if same_as_input config then
     Error [ Diag.error Span.synthetic "output path must differ from the input file" ]
   else
-    match
-      run_unstaged ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ~pgo config
-    with
+    match run_unstaged config with
     | Ok _ as result -> result
     | Error _ as result ->
         if (not config.Cli.native) && not (is_non_regular_output config.Cli.output) then
@@ -2973,8 +2345,7 @@ let output_is_directory config =
   && Sys.file_exists config.Cli.output
   && Sys.is_directory config.Cli.output
 
-let run ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ?(instrument = false)
-    config =
+let run config =
   if output_is_directory config then
     Error
       [
@@ -2982,9 +2353,5 @@ let run ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ?(instrument = fal
           (Printf.sprintf "output path `%s` is a directory" config.Cli.output);
       ]
   else
-    let with_pgo f =
-      if instrument then f config (Some Instrument) else with_profile config f
-    in
-    with_pgo (fun config pgo ->
-        let* config = resolve_target config in
-        run_resolved ?remarks ?llc_remarks ?llvm_text ?c_debug ?link_cache ~pgo config)
+    let* config = resolve_target config in
+    run_resolved config
