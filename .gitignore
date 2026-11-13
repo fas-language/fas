@@ -12,3 +12,4 @@ _build/
 *.s
 *.out
 .DS_Store
+/fas-static/
