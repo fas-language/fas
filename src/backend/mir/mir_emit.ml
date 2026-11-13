@@ -14,7 +14,8 @@
                     aligned to its alignment (at most 16)
      rsp            outgoing stack arguments ([Bout])
 
-   Every function is checked by Mir_check before it is encoded. *)
+   Every function is checked by Mir_check before it is encoded (by
+   Mir_icheck, when FAS_RA_IMPORT supplies its allocation). *)
 
 open Mir
 module A = X64
@@ -572,6 +573,11 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
   let nb = Array.length ra.items in
   let labels = Array.init nb (fun _ -> A.new_label a) in
   let slot_mem v = mem fr (at (Bslot ra.vslot.(v))) in
+  (* an xmm register to or from a frame slot: all 16 bytes when the slot
+     has them (a vector), else the low 8 *)
+  let wide_slot s = fst (Dynarray.get f.slots s) >= 16 in
+  let xld x m s = if wide_slot s then A.movdqu_load a x m else A.mov_xm a ~double:true x m in
+  let xst m s x = if wide_slot s then A.movdqu_store a m x else fstore a true m x in
   (* the text offset where the code of each Mir_ra position ends (an
      instruction with its spills, or a block's terminator) *)
   let pend = Dynarray.create () in
@@ -584,10 +590,18 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
         | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows; ended ()
         | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i; ended ()
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
-        | Reload (v, (X x)) -> A.mov_xm a ~double:true x (slot_mem v)
+        | Reload (v, (X x)) -> xld x (slot_mem v) ra.vslot.(v)
         | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
-        | Spill (v, (X x)) -> fstore a true (slot_mem v) x; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
-        | Reload (_, V _) | Spill (_, V _) -> invalid_arg "Mir_emit: virtual register after allocation")
+        | Spill (v, (X x)) -> xst (slot_mem v) ra.vslot.(v) x; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
+        | Move (d, r) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet (Copy (d, r))
+        | Ld (s, G r) -> A.load_zx a 8 r (mem fr (at (Bslot s)))
+        | Ld (s, X x) -> xld x (mem fr (at (Bslot s))) s
+        | St (s, G r) -> A.store a 8 (mem fr (at (Bslot s))) r
+        | St (s, X x) -> xst (mem fr (at (Bslot s))) s x
+        | Remat (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i
+        | Elided _ -> ()
+        | Reload (_, V _) | Spill (_, V _) | Ld (_, V _) | St (_, V _) ->
+            invalid_arg "Mir_emit: virtual register after allocation")
       ra.items.(b);
     let next = b + 1 in
     (match ra.terms.(b) with
@@ -895,9 +909,21 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let mf = Mir_isel.select ~pic ~tls_gd env fn in
           if dump then prerr_string (Mir.to_string mf);
           Mir_export.add_func mf;
-          let ra = Mir_ra.run mf in
-          if dump then prerr_string (Mir_ra.to_string mf ra);
-          Mir_check.run mf ra;
+          let ra =
+            match Mir_import.find mf with
+            | [] ->
+                let ra = Mir_ra.run mf in
+                if dump then prerr_string (Mir_ra.to_string mf ra);
+                Mir_check.run mf ra;
+                ra
+            | cands ->
+                (* FAS_RA_IMPORT: an allocation from the lab, checked by
+                   Mir_icheck instead of Mir_check *)
+                let ra, slots = Mir_import.run mf cands in
+                if dump then prerr_string (Mir_ra.to_string mf ra);
+                Mir_icheck.run mf ra ~slots;
+                ra
+          in
           compiled := (fn, mf, ra) :: !compiled
         end)
       m.funcs;
@@ -1146,6 +1172,8 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
   | Fir_wide.Unsupported msg -> Error ("native backend: " ^ msg)
   | Mir_ra.Failure msg -> Error ("native backend internal error (allocator): " ^ msg)
   | Mir_check.Failure msg -> Error ("native backend internal error (allocation check): " ^ msg)
+  | Mir_import.Failure msg -> Error ("FAS_RA_IMPORT: " ^ msg)
+  | Mir_icheck.Failure msg -> Error ("FAS_RA_IMPORT: the imported allocation is wrong: " ^ msg)
   | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)
   | Invalid_argument msg -> Error ("native backend internal error: " ^ msg)
 

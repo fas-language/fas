@@ -363,6 +363,81 @@ let map_regs g ins =
           aclob = List.map g a.aclob;
         }
 
+(* An instruction whose one written register is in a field of its own,
+   apart from every field it reads, with that register replaced *)
+(* The virtual registers that hold all 16 bytes of an xmm register (a SIMD
+   vector, not a scalar f32/f64): those an [Xload] writes or an [Xstore]
+   reads, and every one a [Copy] connects to them. A spilled one needs a
+   16-byte slot, moved with movdqu. *)
+let wide_vregs f =
+  let nv = Dynarray.length f.vcls in
+  let w = Array.make nv false in
+  let copies = ref [] in
+  Dynarray.iter
+    (fun b ->
+      List.iter
+        (function
+          | Xload (V v, _) | Xstore (_, V v) -> w.(v) <- true
+          | Copy (V d, V s) -> copies := (d, s) :: !copies
+          | _ -> ())
+        b.code)
+    f.blocks;
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter
+      (fun (d, s) ->
+        if w.(d) <> w.(s) then begin
+          w.(d) <- true;
+          w.(s) <- true;
+          changed := true
+        end)
+      !copies
+  done;
+  w
+
+let with_def ins r =
+  match ins with
+  | Copy (_, s) -> Some (Copy (r, s))
+  | Movi (_, k) -> Some (Movi (r, k))
+  | Got (_, s) -> Some (Got (r, s))
+  | Tp _ -> Some (Tp r)
+  | Tlsoff (_, s) -> Some (Tlsoff (r, s))
+  | Setcc (c, _) -> Some (Setcc (c, r))
+  | Spget _ -> Some (Spget r)
+  | Salloc (_, n) -> Some (Salloc (r, n))
+  | Load (n, sx, _, a) -> Some (Load (n, sx, r, a))
+  | Fload (dbl, _, a) -> Some (Fload (dbl, r, a))
+  | Xload (_, a) -> Some (Xload (r, a))
+  | Lea (_, a) -> Some (Lea (r, a))
+  | Ext (b, sx, _, x) -> Some (Ext (b, sx, r, x))
+  | Bsf (_, s) -> Some (Bsf (r, s))
+  | Bsr (_, s) -> Some (Bsr (r, s))
+  | Fsqrt (dbl, _, s) -> Some (Fsqrt (dbl, r, s))
+  | Movgx (dbl, _, s) -> Some (Movgx (dbl, r, s))
+  | Movxg (dbl, _, s) -> Some (Movxg (dbl, r, s))
+  | Cvtsi (dbl, _, s) -> Some (Cvtsi (dbl, r, s))
+  | Cvttsi (dbl, _, s) -> Some (Cvttsi (dbl, r, s))
+  | Cvtff (dbl, _, s) -> Some (Cvtff (dbl, r, s))
+  | _ -> None
+
+(* Rewrites the registers of an instruction with one map [u] for those it
+   reads and one [d] for those it writes (an SSA allocation may put the
+   value a register reads and the value it writes in different places).
+   A register only written takes [d]; one read takes [u], except in the
+   field that writes it. Where one field is read and written (two-address
+   forms, [Xchg], the implicit registers of [Div]...) the maps must agree,
+   else None. *)
+let map_regs_ud ~u ~d ins =
+  let us, ds = uses_defs ins in
+  let g r = if List.mem r us then u r else d r in
+  let both = List.filter (fun r -> List.mem r us) ds in
+  if List.for_all (fun r -> u r = d r) both then Some (map_regs g ins)
+  else
+    match ds with
+    | [ r ] -> with_def (map_regs g ins) (d r)
+    | _ -> None
+
 let map_term g = function
   | Ret rs -> Ret (List.map g rs)
   | Jmpr (r, bs) -> Jmpr (g r, bs)

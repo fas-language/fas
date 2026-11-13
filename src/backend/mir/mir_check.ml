@@ -167,7 +167,8 @@ let run (f : func) (ra : Mir_ra.result) =
               (fun p ->
                 a.(phys_index p) <- Unknown;
                 vt.(phys_index p) <- Unknown)
-              (clobbers before))
+              (clobbers before)
+        | Move _ | Ld _ | St _ | Remat _ | Elided _ -> fail bi Ud2 "an imported allocation's item (Mir_icheck checks those)")
       ra.items.(bi);
     (* the terminator *)
     List.iter

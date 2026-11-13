@@ -33,7 +33,8 @@
       free, the interval that ends last (this one or one already holding a
       register it could use) goes to the stack for its whole life.
 
-   5. Spilled virtual registers live in an 8-byte frame slot, one per
+   5. Spilled virtual registers live in an 8-byte frame slot (16 bytes for
+      one holding a SIMD vector, see Mir.wide_vregs), one per
       virtual register and never shared. A call marked returns_twice
       (setjmp) depends on that: after a longjmp, a value from before the
       call is read again from its slot, or from a callee-saved register,
@@ -62,6 +63,14 @@ type item =
   | Orig of ins * ins  (** the instruction before and after allocation *)
   | Reload of int * reg  (** vreg n's slot -> register *)
   | Spill of int * reg  (** register -> vreg n's slot *)
+  (* the rest only in an allocation imported with FAS_RA_IMPORT (Mir_import) *)
+  | Move of reg * reg  (** dst <- src, register to register (same class) *)
+  | Ld of int * reg  (** frame slot -> register *)
+  | St of int * reg  (** register -> frame slot *)
+  | Remat of (int * int) * ins
+      (** recomputes a constant value: the instruction at (block, index in its
+          code) with its destination allocated *)
+  | Elided of ins  (** a Mir copy that emits no code: the allocation moved its value *)
 
 type result = {
   items : item list array;  (** per block, program order *)
@@ -269,8 +278,9 @@ let run (f : func) =
   in
   (* 5. rewrite *)
   let vslot = Array.make nv (-1) in
+  let wide = wide_vregs f in
   let slot_of v =
-    if vslot.(v) < 0 then vslot.(v) <- new_slot f ~size:8 ~align:8;
+    if vslot.(v) < 0 then vslot.(v) <- (if wide.(v) then new_slot f ~size:16 ~align:16 else new_slot f ~size:8 ~align:8);
     vslot.(v)
   in
   let saved = ref [] in
@@ -351,6 +361,11 @@ let item_s = function
   | Orig (_, a) -> "  " ^ ins_s a
   | Reload (v, r) -> Printf.sprintf "  %s = reload %%%d" (reg_s r) v
   | Spill (v, r) -> Printf.sprintf "  spill %%%d, %s" v (reg_s r)
+  | Move (d, r) -> Printf.sprintf "  %s = move %s" (reg_s d) (reg_s r)
+  | Ld (s, r) -> Printf.sprintf "  %s = load slot %d" (reg_s r) s
+  | St (s, r) -> Printf.sprintf "  store slot %d, %s" s (reg_s r)
+  | Remat ((b, k), i) -> Printf.sprintf "  %s  ; remat of b%d.%d" (ins_s i) b k
+  | Elided i -> Printf.sprintf "  ; %s (no code)" (ins_s i)
 
 let to_string (f : func) (r : result) =
   let b = Buffer.create 1024 in

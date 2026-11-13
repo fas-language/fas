@@ -157,7 +157,14 @@ type con = Creg | Cfixed of int | Creuse of int
 
 type opnd = { use : bool; mutable v : int; con : con; early : bool; mem : bool }
 
-type xins = { op : string; attrs : string list; opnds : opnd array; clob : int list; undef : bool }
+type xins = {
+  op : string;
+  attrs : string list;
+  opnds : opnd array;
+  clob : int list;
+  undef : bool;
+  src : int;  (** index of the Mir instruction in its block, [Loc]s not counted; -1 for a pseudo *)
+}
 
 type xterm =
   | Tjump of int * int array  (** target, arguments *)
@@ -177,7 +184,22 @@ let fnv h s =
   String.iter (fun c -> h := Int64.mul (Int64.logxor !h (Int64.of_int (Char.code c))) fnv_prime) s;
   !h
 
-let func_text (f : func) =
+(* what Mir_import needs to map an allocation back onto the Mir *)
+type entry = { ix : int;  (** printed index *) x : xins; nums : int array  (** each operand's printed value *) }
+
+type prob = {
+  text : string;  (** the function, as FORMAT.md prints it *)
+  hash : int64;
+  ninsts : int;
+  nb0 : int;  (** the Mir's blocks; ids from [nb0] on are split edges *)
+  reach : bool array;  (** per block, split ones included *)
+  terms : term array;  (** each block's Mir terminator, with the split edges *)
+  entries : entry list array;  (** each exported block's printed instructions, terminator excluded *)
+  term_ix : int array;  (** each exported block's terminator index (-1: not exported) *)
+  term_nums : int array array;  (** values read by the terminator (ret, jmpr), in operand order *)
+}
+
+let problem (f : func) =
   let nv = Dynarray.length f.vcls in
   let nvar = nv + 32 in
   let var_of = function V n -> n | r -> nv + pidx r in
@@ -419,7 +441,18 @@ let func_text (f : func) =
   (* renaming *)
   let vcls = Dynarray.create () in
   let isundef = Dynarray.create () in
+  (* values that need all 16 bytes of an xmm register (SIMD vectors): see
+     Mir.wide_vregs; printed with class [v] *)
+  let wvr = wide_vregs f in
+  let vwide = Dynarray.create () in
+  let wide_reg = function V n -> wvr.(n) | _ -> false in
+  let full_asm i r =
+    match i with
+    | Asm a -> Array.exists (function Areg ((X _ as r'), w) -> w > 64 && r' = r | _ -> false) a.opnds
+    | _ -> false
+  in
   let fresh x =
+    Dynarray.add_last vwide (x < nv && wvr.(x));
     Dynarray.add_last vcls (var_cls x);
     Dynarray.add_last isundef false;
     Dynarray.length vcls - 1
@@ -445,7 +478,7 @@ let func_text (f : func) =
         let u = fresh x in
         Dynarray.set isundef u true;
         emit
-          { op = "undef"; attrs = []; clob = []; undef = true;
+          { op = "undef"; attrs = []; clob = []; undef = true; src = -1;
             opnds = [| { use = false; v = u; con = Creg; early = false; mem = false } |] };
         set x u;
         u
@@ -454,7 +487,7 @@ let func_text (f : func) =
     bparams.(b) <- Array.of_list (List.map (fun x -> let v = fresh x in set x v; v) params.(b));
     if b = 0 && entry_args <> [] then
       emit
-        { op = "args"; attrs = []; clob = []; undef = false;
+        { op = "args"; attrs = []; clob = []; undef = false; src = -1;
           opnds =
             Array.of_list
               (List.map
@@ -464,15 +497,24 @@ let func_text (f : func) =
                    { use = false; v; con = Cfixed p; early = false; mem = false })
                  entry_args) };
     let con r = match r with V _ -> Creg | _ -> Cfixed (pidx r) in
-    Array.iter
-      (fun i ->
+    Array.iteri
+      (fun src i ->
         match i with
-        | Copy (d, s) -> set (var_of d) (read (var_of s))
+        | Copy (d, s) ->
+            let v = read (var_of s) in
+            if wide_reg d || wide_reg s then Dynarray.set vwide v true;
+            set (var_of d) v
         | _ ->
             let u, d = uses_defs i in
             let uops =
               List.mapi (fun k r -> { use = true; v = read (var_of r); con = con r; early = true; mem = (match r with V _ -> mem_ok i k | _ -> false) }) u
             in
+            let uops_v = Array.of_list (List.map (fun o -> o.v) uops) in
+            List.iteri
+              (fun k r ->
+                if wide_reg r || full_asm i r || (match i with Xstore _ -> k = 0 | _ -> false) then
+                  Dynarray.set vwide uops_v.(k) true)
+              u;
             let ain = match i with Asm a -> List.map (fun r -> pidx r) a.ain | _ -> [] in
             let dops =
               List.mapi
@@ -488,6 +530,11 @@ let func_text (f : func) =
                   (x, { use = false; v; con = c; early; mem = false }))
                 d
             in
+            List.iteri
+              (fun k (r, (_, o)) ->
+                if wide_reg r || full_asm i r || (match i with Xload _ -> k = 0 | _ -> false) then
+                  Dynarray.set vwide o.v true)
+              (List.combine d dops);
             List.iter (fun (x, o) -> set x o.v) dops;
             let clob = List.sort_uniq compare (List.map pidx (clobbers i)) in
             (* clobbered registers hold nothing afterwards *)
@@ -500,7 +547,7 @@ let func_text (f : func) =
               @ (match i with Call { rtwice; _ } -> "call" :: (if rtwice then [ "returns_twice" ] else []) | _ -> [])
             in
             emit
-              { op = opname i; attrs; clob; undef = false;
+              { op = opname i; attrs; clob; undef = false; src;
                 opnds = Array.of_list (uops @ List.map snd dops) })
       code.(b);
     let args s = Array.of_list (List.map read params.(s)) in
@@ -605,6 +652,30 @@ let func_text (f : func) =
     (fun s ->
       List.iter (fun (_, a) -> Array.iteri (fun k v -> if not removed.(bparams.(s).(k)) then used.(find v) <- true) a) pinned_args.(s))
     rpo;
+  (* wide values: a block parameter and its arguments share locations, so
+     one wide makes all wide *)
+  let wide = Array.make nval false in
+  Dynarray.iteri (fun v w -> if w then wide.(find v) <- true) vwide;
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Array.iter
+      (fun b ->
+        Array.iteri
+          (fun k p ->
+            if not removed.(p) then
+              List.iter
+                (fun a ->
+                  let v = find a.(k) in
+                  if wide.(v) <> wide.(p) then begin
+                    wide.(v) <- true;
+                    wide.(p) <- true;
+                    changed := true
+                  end)
+                incoming.(b))
+          bparams.(b))
+      rpo
+  done;
   (* 5. loops and frequencies *)
   let depth = Array.make nb 0 in
   let headers = Dynarray.create () in
@@ -656,13 +727,14 @@ let func_text (f : func) =
     if vnum.(v) < 0 then begin
       vnum.(v) <- !nout;
       incr nout;
-      Buffer.add_char classes (match Dynarray.get vcls v with Gpr -> 'g' | Xmm -> 'x')
+      Buffer.add_char classes (match Dynarray.get vcls v with Gpr -> 'g' | Xmm -> if wide.(v) then 'v' else 'x')
     end;
     vnum.(v)
   in
   let body = Buffer.create 4096 in
   let pf fmt = Printf.bprintf body fmt in
   let ninst = ref 0 in
+  let entries = Array.make nb [] and term_ix = Array.make nb (-1) and term_nums = Array.make nb [||] in
   let opnd_s o =
     Printf.sprintf "%s:%%%d:%s:%s%s" (if o.use then "u" else "d") (num o.v) (reg_str o.con) (if o.early then "e" else "l")
       (if o.mem then ":mem" else "")
@@ -690,6 +762,7 @@ let func_text (f : func) =
       List.iter
         (fun i ->
           if not (i.undef && not used.(find i.opnds.(0).v)) then begin
+            entries.(b) <- { ix = !ninst; x = i; nums = Array.map (fun o -> num o.v) i.opnds } :: entries.(b);
             pf "  %d %s" !ninst i.op;
             List.iter (fun a -> pf " %s" a) i.attrs;
             Array.iter (fun o -> pf " %s" (opnd_s o)) i.opnds;
@@ -698,6 +771,12 @@ let func_text (f : func) =
             incr ninst
           end)
         bcode.(b);
+      entries.(b) <- List.rev entries.(b);
+      term_ix.(b) <- !ninst;
+      (match bterm.(b) with
+      | Tret ops -> term_nums.(b) <- Array.map (fun o -> num o.v) ops
+      | Tjmpr (o, _) -> term_nums.(b) <- [| num o.v |]
+      | _ -> ());
       pf "  %d " !ninst;
       incr ninst;
       (match bterm.(b) with
@@ -712,8 +791,13 @@ let func_text (f : func) =
   (* the hash covers every line between "func" and "end", newlines included *)
   let body = Printf.sprintf "class %s\n%s" (Buffer.contents classes) (Buffer.contents body) in
   let hash = fnv fnv_basis body in
-  Printf.sprintf "func %s vregs %d blocks %d insts %d hash %016Lx\n%send\n" f.name !nout (List.length order) !ninst hash
-    body
+  let text =
+    Printf.sprintf "func %s vregs %d blocks %d insts %d hash %016Lx\n%send\n" f.name !nout (List.length order) !ninst
+      hash body
+  in
+  { text; hash; ninsts = !ninst; nb0; reach; terms = term; entries; term_ix; term_nums }
+
+let func_text f = (problem f).text
 
 (* ---------- the file ---------- *)
 

@@ -69,7 +69,7 @@ let () =
                               if after' <> after then
                                 mutate b (List.mapi (fun j x -> if j = k then Mir_ra.Orig (before, after') else x) its)
                             end
-                        | Spill _ -> ())
+                        | Spill _ | Move _ | Ld _ | St _ | Remat _ | Elided _ -> ())
                       its)
                   ra.items)
         m.funcs)
