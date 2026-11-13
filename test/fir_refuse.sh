@@ -39,6 +39,8 @@ case_ asm_link.fir 's/global @counter size 8 align 8/global @counter size 429496
   '@counter: a global of 4294967296 bytes'
 case_ c/symbols.fir 's/global @wkeep size 8 align 8/global @wkeep size 8 align 4294967296/' -c \
   '@wkeep: aligned to 4294967296'
+case_ asm_goto.fir 's/i64/i24/g' -c \
+  'asm_goto on a wide or odd-width integer'
 for c in $(sed -n 's/^global @\([a-z_]*\) size 8 align 8 .*= zero$/\1/p' "$here/fas_fir/sum_loop.fir" | head -n 1); do
   # a 1 GiB zero global is fine (.bss), and fast: its bytes are never built
   sed "s/^global @$c size 8 /global @$c size 1073741824 /" "$here/fas_fir/sum_loop.fir" > "$tmp/big.fir"

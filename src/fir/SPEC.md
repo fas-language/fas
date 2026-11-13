@@ -593,15 +593,24 @@ Each gap that closes moves from the right column to the left, and `test/fas_fir/
 
 ## 13. The `fas-fir` tool
 
+The command line is stable from v0.8: options keep their meaning, and new ones are only added. `fas-fir --help` prints this summary.
+
 ```
-fas-fir INPUT.fir [-o OUT] [OBJECTS...]      build a static PIE executable (default a.out; --no-pie: fixed address;
-                                             -g, also with -c: DWARF line tables from the loc table)
-fas-fir -c INPUT.fir [-o OUT.o]              compile to an object file
-fas-fir --check INPUT.fir                    parse + verify, print the canonical text
-fas-fir --legalize INPUT.fir                 also split wide/odd integers (Fir_wide), print the result
+fas-fir INPUT.fir [-o OUT] [OBJECTS...]      build a static PIE executable (default a.out); .o and .a OBJECTS are linked in
+        --no-pie                             a static executable at a fixed address instead (--pie: the default)
+fas-fir -c [-fPIC] INPUT.fir [-o OUT.o]      compile to an ELF object (default: INPUT with .o); -fPIC uses
+                                             general-dynamic TLS, for an object that goes into a shared library
+        -g                                   with either: DWARF from the loc table (lines, variables, unwind)
+fas-fir --check INPUT.fir [-o OUT]           parse + verify, print the canonical text
+fas-fir --legalize INPUT.fir [-o OUT]        also split wide/odd integers (Fir_wide), print the result
+fas-fir --emit-llvm INPUT.fir [-o OUT]       print the module as LLVM IR
+fas-fir --llvm ...                           build (executable or -c) through LLVM ($FAS_CC, default clang)
+fas-fir --help | -h | --version
 ```
 
-- **Input:** `INPUT` may be `-` to read standard input.
+- **Output:** `--check`, `--legalize` and `--emit-llvm` print to standard output unless `-o` is given. The modes (`-c`, `--check`, `--legalize`, `--emit-llvm`) exclude each other, and `-o` may appear once.
+- **Exit status:** 0 success; 1 the input was refused, with one or more lines starting `fas-fir: ` on standard error (a parse error names `FILE:LINE:`, a verifier error the function and block, a native backend limit the construct, §12); 2 a usage error (an unknown option, a missing argument, options that do not go together), also with a `fas-fir: ` message; 3 an internal error (`fas-fir: internal error: ...`), which is a bug in fas-fir to report. No input makes fas-fir end with an uncaught exception or a signal: `test/fir_refuse.sh` fuzzes for that and `test/fas_fir_cli.sh` checks every option.
+- **Input:** `INPUT` may be `-` to read standard input. `--mir` is still accepted, for old scripts, and changes nothing (the native backend is the only non-LLVM path).
 - **Installation:** `tools/fas_fir/install.sh` builds and installs `fas-fir` together with `fas-native`, an alias of the Fas compiler (the native backend is the default), into `~/.local/bin`. The binaries and `std/` are copied to `~/.local/share/fas-native`. Rerun the script after pulling changes.
 - **Using `std/sys.fas` from Fas:** the syscall stdlib must be reached through a relative `use` path, since absolute paths are rejected. Link the installed copy into your project with `ln -s ~/.local/share/fas-native/std std`, then write `use "std/sys.fas"`.
 - **Seeing what Fas emits:** `fas --emit-ir prog.fas -o out.fir` (or `FAS_FIR=check FAS_FIR_DUMP=out.fir fas-native prog.fas -o prog`) writes the Fir of a Fas program. That file compiles again with `fas-fir out.fir`.

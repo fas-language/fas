@@ -1023,6 +1023,10 @@ let rebuild_term cx (b : block) =
   | Jump t -> set_term (Jump (target_args cx t))
   | Br (c, t, f, w) -> set_term (Br (get1 cx c, target_args cx t, target_args cx f, w))
   | Indirect_br (v, bs) -> set_term (Indirect_br (get1 cx v, bs))
+  | Asm_goto g when Array.exists (odd_value cx) g.aargs ->
+      (* like the asm op (rebuild_op's fallback): an operand's type is part
+         of its constraint, so a limb split cannot stand in for it *)
+      unsupported "asm_goto on a wide or odd-width integer"
   | Asm_goto g -> set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs })
   | Unreachable -> set_term Unreachable
   | Switch (v, d, cases) when not (odd_value cx v) ->
