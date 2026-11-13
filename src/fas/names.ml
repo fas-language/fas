@@ -168,6 +168,8 @@ let operations =
     ("scatter_bytes", Reserved);
     ("copy", Reserved);
     ("call_addr", Reserved);
+    ("errno_err", Reserved);
+    ("err_name", Reserved);
     ("volatile_load", Reserved);
     ("volatile_store", Reserved);
     ("atomic_load", Reserved);

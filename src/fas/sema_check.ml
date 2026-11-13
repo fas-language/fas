@@ -13,6 +13,8 @@ let literal_condition_truth = function Hir.EBool (value, _) -> Some value | _ ->
 let rec statement_call = function
   | Ast.Call _ -> true
   | Ast.Parenthesized (e, _) -> statement_call e
+  (* `try f()` and `f() catch DEFAULT` stand alone like the call *)
+  | Ast.Try (e, _) | Ast.Catch (e, Ast.Catch_value _, _) -> statement_call e
   | _ -> false
 
 let index_type_error label expression ty =
@@ -2398,6 +2400,39 @@ and check_expr_inner ?destination (c : context) expected expression =
                    (Option.get (value_fact c a)).low (Option.get divisor_fact).low)
             else Ok (Hir.Binary (op, a, b, result_ty, s)))
   | Ast.Call (fn, args, s) -> check_call c expected fn args s
+  | Ast.Try (call, s) ->
+      if Sema_flow.in_defer c.flow then
+        error s "`try` is not allowed inside defer or errdefer"
+      else if not c.fn_fails then
+        Error
+          [
+            Diag.error
+              ~help:"mark the function `fails`, or handle the error here with `catch`"
+              s "`try` passes the error up, so it needs a `fails` function";
+          ]
+      else
+        let* inner = check_handled_call c expected "try" call in
+        Ok (Hir.Try (inner, Hir.expr_ty inner, s))
+  | Ast.Catch (call, Ast.Catch_value value, s) ->
+      let* inner = check_handled_call c expected "catch" call in
+      let ty = Hir.expr_ty inner in
+      if ty = Hir.Void then
+        error (Ast.expr_span value)
+          "the call has no result, so `catch` has no value to use; write `catch { ... }`"
+      else
+        let* checked = check_expr c (Some ty) value in
+        let* () =
+          ensure_expected ~checked_expression:checked ~context:"catch value"
+            ~expression:value (Hir.expr_ty checked) ty (Ast.expr_span value)
+        in
+        Ok (Hir.Catch_value (inner, checked, ty, s))
+  | Ast.Catch (_, Ast.Catch_block _, s) ->
+      Error
+        [
+          Diag.error ~help:"use `catch VALUE` inside an expression" s
+            "a `catch` block must be a whole statement, a declaration's value or an \
+             assignment's value";
+        ]
   | Ast.Generic_args (Ast.Ident ("call_addr", _), _, s) ->
       error s "call_addr is a builtin and has no address"
   | Ast.Handle_from_addr (t, e, s) -> (
@@ -3413,15 +3448,88 @@ and check_float_math c expected operation name args s =
         Ok (Hir.Call (Hir.Builtin (Hir.Float_math builtin), checked, operand_ty, s))
 
 and check_call c expected fn args s =
+  (* a call to a `fails` function is the operand of `try` or `catch`, which
+     names it in `handled_call`; see check_handled_call *)
+  let handled = c.handled_call = Some s in
+  if handled then c.handled_call <- None;
+  let fails = callee_fails c fn in
+  let* () =
+    if fails && not handled then
+      Error
+        [
+          Diag.error ~help:"handle it with `try` or `catch`" s
+            (Printf.sprintf "`%s` can fail and the error is not handled"
+               (Ast.expr_name fn));
+        ]
+    else if handled && not fails then
+      error s
+        (Printf.sprintf
+           "`%s` does not fail; `try` and `catch` need a call to a `fails` function"
+           (Ast.expr_name fn))
+    else Ok ()
+  in
   let result = check_call_inner c expected fn args s in
   index_call c fn result;
   result
 
+and callee_fails c fn =
+  let template_fails name =
+    match List.assoc_opt name c.templates with
+    | Some (Ast.Func { fails; _ }) -> fails
+    | _ -> false
+  in
+  match fn with
+  | Ast.Ident (name, _) when Option.is_none (lookup_local name c) -> (
+      match List.assoc_opt name c.signatures with
+      | Some (signature : Sema_context.signature) -> signature.fails
+      | None -> template_fails name)
+  | Ast.Generic_args (Ast.Ident ("call_addr", _), arguments, _) ->
+      List.exists (function Ast.Name_arg ("fails", _) -> true | _ -> false) arguments
+  | Ast.Generic_args (Ast.Ident (name, _), _, _) when Option.is_none (lookup_local name c)
+    ->
+      template_fails name
+  | Ast.Parenthesized (fn, _) -> callee_fails c fn
+  | _ -> false
+
+(* the operand of `try` or `catch`: a call to a `fails` function, checked
+   with its value type *)
+and check_handled_call c expected keyword call =
+  let rec strip = function Ast.Parenthesized (e, _) -> strip e | e -> e in
+  match strip call with
+  | Ast.Call (_, _, call_span) as call ->
+      let previous = c.handled_call in
+      c.handled_call <- Some call_span;
+      let result = check_expr c expected call in
+      c.handled_call <- previous;
+      result
+  | other ->
+      error (Ast.expr_span other)
+        (Printf.sprintf "`%s` needs a call to a `fails` function" keyword)
+
 and check_call_inner c expected fn args s =
   match fn with
+  | Ast.Ident ("errno_err", _) when Option.is_none (lookup_local "errno_err" c) ->
+      if args <> [] then error s "builtin `errno_err` takes no arguments"
+      else Ok (Hir.Call (Hir.Builtin Hir.Errno_err, [], Hir.Err, s))
+  | Ast.Ident ("err_name", _) when Option.is_none (lookup_local "err_name" c) -> (
+      match args with
+      | [ value ] ->
+          let* checked = check_expr c (Some Hir.Err) value in
+          if Hir.expr_ty checked <> Hir.Err then
+            error (Ast.expr_span value)
+              (Printf.sprintf "`err_name` needs an `error`, got `%s`"
+                 (Sema_types.diagnostic_ty_name (Hir.expr_ty checked)))
+          else Ok (Hir.Call (Hir.Builtin Hir.Err_name, [ checked ], Hir.Addr, s))
+      | _ -> error s "builtin `err_name` expects one argument")
   | Ast.Generic_args (Ast.Ident ("call_addr", _), generic_args, application_span) -> (
+      let generic_args =
+        List.filter
+          (function Ast.Name_arg ("fails", _) -> false | _ -> true)
+          generic_args
+      in
       let* result_ty =
         match generic_args with
+        | [] when callee_fails c fn -> Ok Hir.Void
         | [ Ast.Type_arg source ] -> source_ty_in_context c application_span source
         | [ Ast.Name_arg (name, name_span) ] ->
             source_ty_in_context c name_span (Ast.Named_type (name, name_span))
@@ -4632,6 +4740,10 @@ let rec expression_mentions_name name = function
   | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_mentions_name name value
+  | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
+      expression_mentions_name name call
+  | Ast.Catch (call, Ast.Catch_value value, _) ->
+      expression_mentions_name name call || expression_mentions_name name value
 
 let () = expression_mentions_name_ref := expression_mentions_name
 
@@ -4674,6 +4786,11 @@ let rec expression_takes_name_address name = function
   | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_takes_name_address name value
+  | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
+      expression_takes_name_address name call
+  | Ast.Catch (call, Ast.Catch_value value, _) ->
+      expression_takes_name_address name call
+      || expression_takes_name_address name value
 
 let target_takes_name_address name = function
   | Ast.Target_ident _ -> false
@@ -4727,6 +4844,16 @@ let rec statement_changes_name name = function
            ~some:(List.exists (statement_changes_name name))
            default
   | Ast.Break _ | Ast.Continue _ -> false
+  | Ast.Fail (value, _) -> expression_takes_name_address name value
+  | Ast.Errdefer (_, body, _) -> List.exists (statement_changes_name name) body
+  | Ast.Catch_stmt { target; call; body; _ } -> (
+      expression_takes_name_address name call
+      || List.exists (statement_changes_name name) body
+      ||
+      match target with
+      | Ast.Catch_assign (Ast.Target_ident (found, _)) -> found = name
+      | Ast.Catch_assign target -> target_takes_name_address name target
+      | Ast.Catch_let _ | Ast.Catch_discard -> false)
 
 let stable_loop_operand body = function
   | Hir.EInt _ -> true
@@ -4926,6 +5053,7 @@ let check_copy c args span =
     Ok (Hir.Copy (destination.expr, source.expr, destination_ty, scratch_free, span))
 
 let stmt_terminates = Ast.stmt_terminates
+let catch_counter = ref 0
 
 let rec check_block (c : context) stmts =
   push c;
@@ -4942,11 +5070,15 @@ let rec check_block (c : context) stmts =
               (Sema_flow.checkpoint c.flow, c.expression_depth, c.handle_view_expansion)
           else None
         in
-        let checked = check_stmt c s in
+        let checked =
+          match s with
+          | Ast.Catch_stmt _ -> check_catch_stmt c s
+          | _ -> Result.map (fun x -> [ x ]) (check_stmt c s)
+        in
         match (checked, saved) with
-        | Ok x, _ ->
+        | Ok xs, _ ->
             Sema_flow.finish_statement c.flow ~before ~terminates:(stmt_terminates s);
-            go (x :: acc) rest
+            go (List.rev_append xs acc) rest
         | Error diagnostics, Some (checkpoint, depth, expansion)
           when List.for_all Sema_flow.recoverable diagnostics ->
             Sema_flow.record c.flow diagnostics;
@@ -4960,6 +5092,111 @@ let rec check_block (c : context) stmts =
         | Error diagnostics, _ -> Error diagnostics)
   in
   go [] stmts
+
+(* `[target =] CALL catch [e] { BODY }` (see "Fas error handling"):
+     err#N error                         // the call's error, 0 on success
+     tmp#N T = <call, error into err#N>  // the value
+     if bitcast[u32](err#N) != 0 { e error = err#N; BODY }
+     target = tmp#N                      // a declaration or an assignment
+   The '#' names cannot be written in source. BODY must leave unless the call
+   has no result. *)
+and check_catch_stmt c = function
+  | Ast.Catch_stmt { target; call; binding; body; span } ->
+      let* expected =
+        match target with
+        | Ast.Catch_let { ty; ty_span; _ } ->
+            let* t = source_ty_in_context c ty_span ty in
+            Ok (Some t)
+        | Ast.Catch_assign target -> (
+            match check_target c target with
+            | Ok checked -> Ok (target_ty c checked.target)
+            | Error _ -> Ok None)
+        | Ast.Catch_discard -> Ok None
+      in
+      let* inner = check_handled_call c expected "catch" call in
+      let ty = Hir.expr_ty inner in
+      let* () =
+        match target with
+        | Ast.Catch_discard -> Ok ()
+        | _ when ty = Hir.Void ->
+            error (Ast.expr_span call) "the call has no result to store"
+        | _ -> Ok ()
+      in
+      incr catch_counter;
+      let n = string_of_int !catch_counter in
+      let err_name = "err#" ^ n and tmp_name = "tmp#" ^ n in
+      let* err_local = add_local err_name Hir.Err c span in
+      let first = Hir.Let (err_local, None, span) in
+      let* value_stmt =
+        if ty = Hir.Void then Ok (Hir.Expr (Hir.Capture (inner, err_local, ty, span), span))
+        else
+          let* tmp_local = add_local tmp_name ty c span in
+          mark_init tmp_local c;
+          Ok (Hir.Let (tmp_local, Some (Hir.Capture (inner, err_local, ty, span)), span))
+      in
+      mark_init err_local c;
+      let handler_body =
+        (match binding with
+        | Some (name, name_span) ->
+            [
+              Ast.Let
+                {
+                  name;
+                  ty = Ast.Named_type ("error", name_span);
+                  ty_span = name_span;
+                  init = Some (Ast.Ident (err_name, name_span));
+                  span = name_span;
+                };
+            ]
+        | None -> [])
+        @ body
+      in
+      let condition =
+        Ast.Binary
+          ( Ast.Ne,
+            Ast.Cast (Ast.Bitcast, Ast.Int Ast.U32, Ast.Ident (err_name, span), span),
+            Ast.Int_lit ("0", span),
+            span )
+      in
+      let* handler = check_stmt c (Ast.If (condition, handler_body, None, span)) in
+      let* () =
+        match handler with
+        | Hir.If (_, yes, _, _) when ty <> Hir.Void && (Hir.block_flow yes).falls_through
+          ->
+            Error
+              [
+                Diag.error
+                  ~help:
+                    "leave with `return`, `fail`, `break` or `continue`, or use `catch \
+                     VALUE` to substitute a value"
+                  span "this `catch` block can fall through, but the call's value is used";
+              ]
+        | _ -> Ok ()
+      in
+      (* the handler left or did nothing: the flow continues as after the call *)
+      Sema_flow.set_falls_through c.flow true;
+      let* rest =
+        match target with
+        | Ast.Catch_discard -> Ok []
+        | Ast.Catch_let { name; ty = source; ty_span } ->
+            let* x =
+              check_stmt c
+                (Ast.Let
+                   {
+                     name;
+                     ty = source;
+                     ty_span;
+                     init = Some (Ast.Ident (tmp_name, span));
+                     span;
+                   })
+            in
+            Ok [ x ]
+        | Ast.Catch_assign target ->
+            let* x = check_stmt c (Ast.Assign (target, Ast.Ident (tmp_name, span), span)) in
+            Ok [ x ]
+      in
+      Ok ([ first; value_stmt; handler ] @ rest)
+  | statement -> Result.map (fun x -> [ x ]) (check_stmt c statement)
 
 and recover_stmt c s =
   Sema_flow.forget_facts c.flow;
@@ -5673,10 +5910,13 @@ and check_stmt (c : context) = function
   | Ast.Switch (e, arms, d, s) ->
       let* te = check_expr c None e in
       let et = Hir.expr_ty te in
-      if not (is_int et || et = Hir.Bool) then
+      if not (is_int et || et = Hir.Bool || et = Hir.Err) then
         error s
-          (Printf.sprintf "switch value must be an integer or bool, got `%s`"
+          (Printf.sprintf "switch value must be an integer, bool or error, got `%s`"
              (Sema_types.diagnostic_ty_name et))
+      else if et = Hir.Err && d = None then
+        error s
+          "a switch on an error needs a `default` arm: the set of errors is open"
       else
         let before = Sema_flow.snapshot c.flow
         and seen = ref Int64_map.empty
@@ -5868,6 +6108,58 @@ and check_stmt (c : context) = function
   | Ast.Continue (target, s) ->
       let* () = Sema_flow.record_continue c.flow target s in
       Ok (Hir.Continue (Option.map fst target, s))
+  | Ast.Catch_stmt { span; _ } as statement ->
+      let* xs = check_catch_stmt c statement in
+      Ok (Hir.Block (xs, span))
+  | Ast.Fail (e, s) ->
+      if Sema_flow.in_defer c.flow then
+        error s "`fail` is not allowed inside defer or errdefer"
+      else if not c.fn_fails then
+        Error
+          [
+            Diag.error ~help:"mark the function `fails`" s
+              "`fail` needs a `fails` function";
+          ]
+      else
+        let* v = check_expr c (Some Hir.Err) e in
+        let* () =
+          ensure_expected ~checked_expression:v ~context:"fail" ~expression:e
+            (Hir.expr_ty v) Hir.Err (Ast.expr_span e)
+        in
+        let* () =
+          if Sema_flow.falls_through c.flow then validate_exit_defers c 0 else Ok ()
+        in
+        Sema_flow.invalidate_induction_on_return c.flow;
+        Ok (Hir.Fail (v, s))
+  | Ast.Errdefer (binding, xs, s) ->
+      if not c.fn_fails then
+        Error
+          [
+            Diag.error ~help:"mark the function `fails`, or use `defer`" s
+              "`errdefer` needs a `fails` function";
+          ]
+      else
+        let* capture = Sema_flow.begin_defer c.flow s in
+        push c;
+        let checked =
+          let* local =
+            match binding with
+            | None -> Ok None
+            | Some (name, name_span) ->
+                let* () = ensure_new_local name c name_span in
+                let* local = add_local name Hir.Err c name_span in
+                mark_init local c;
+                Ok (Some local)
+          in
+          let* body = check_block c xs in
+          Ok (local, body)
+        in
+        pop c;
+        let* local, body =
+          Sema_flow.finish_defer ~errdefer:true c.flow capture checked
+            ~falls_through:(fun _ -> true)
+        in
+        Ok (Hir.Errdefer (local, body, s))
   | Ast.Defer (xs, s) ->
       let* capture = Sema_flow.begin_defer c.flow s in
       let checked = check_block c xs in

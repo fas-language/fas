@@ -16,6 +16,12 @@ type loop = {
   keep_scopes : int;
 }
 
+(* A deferred body of a scope: [defer] runs on every exit, [errdefer] only
+   on an exit by failing, with the error stored in its binding's slot *)
+type defer_entry =
+  | Always of Hir.stmt list
+  | On_error of (Low.value * int) option * Hir.stmt list
+
 type state = {
   fn : E.fn;  (** the Fir function being built *)
   literal_globals : Hir.global list ref;
@@ -28,7 +34,10 @@ type state = {
   strings : string list;
   functions : Hir.func list;
   addressed_functions : (string, unit) Hashtbl.t;
-  mutable defer_scopes : Hir.stmt list list list;
+  mutable defer_scopes : defer_entry list list;
+  fails : Hir.ty option;
+      (** Some result type when the function is [fails]: [ret] is then its
+          fails ABI type *)
   intrinsic_masked_loads : bool;
   mutable loops : loop list;
   file : string option;
@@ -93,6 +102,7 @@ let rec ty = function
   | Hir.Struct n -> Low.Struct n
   | Hir.Opaque n -> Low.Struct n
   | Hir.Void -> Low.Void
+  | Hir.Err -> Low.I32
 
 and storage_ty = function
   | Hir.Bool -> Low.I8
@@ -117,6 +127,76 @@ let c_extension = function
   | _ -> Low.No_extension
 
 let has_c_abi (f : Hir.func) = f.linkage = Hir.External_c
+
+(* ---------- the fails ABI ---------- *)
+
+(* A [fails] function with a result returns C's
+   [struct { _Alignas(8) T value; uint32_t err; }]: the value at 0, the
+   error at 8, 16 bytes in two eightbytes (rax/xmm0 and edx/eax). One
+   synthetic struct per storage type; a [fails] function with no result
+   returns the error alone, as an i32. *)
+let fails_key t =
+  match storage_ty t with
+  | Low.I8 -> Some ("i8", Hir.Int Hir.U8)
+  | Low.I16 -> Some ("i16", Hir.Int Hir.U16)
+  | Low.I32 -> Some ("i32", Hir.Int Hir.U32)
+  | Low.I64 -> Some ("i64", Hir.Int Hir.U64)
+  | Low.F32 -> Some ("f32", Hir.Float Hir.F32)
+  | Low.F64 -> Some ("f64", Hir.Float Hir.F64)
+  | Low.Pointer _ -> Some ("ptr", Hir.Addr)
+  | _ -> None
+
+let fails_struct_name t =
+  match fails_key t with
+  | Some (k, _) -> "fails." ^ k
+  | None -> "fails.unsupported"
+
+let fails_struct_defs : Hir.struct_def list =
+  List.filter_map
+    (fun t ->
+      match fails_key t with
+      | None -> None
+      | Some (k, field_ty) ->
+          Some
+            {
+              Hir.name = "fails." ^ k;
+              fields =
+                [
+                  { Hir.name = "value"; ty = field_ty; offset = 0; unsupported_reason = None };
+                  { Hir.name = "err"; ty = Hir.Int Hir.U32; offset = 8; unsupported_reason = None };
+                ];
+              size = 16;
+              align = 8;
+              is_union = false;
+              byte_storage = false;
+            })
+    [ Hir.Int Hir.U8; Hir.Int Hir.U16; Hir.Int Hir.U32; Hir.Int Hir.U64;
+      Hir.Float Hir.F32; Hir.Float Hir.F64; Hir.Addr ]
+
+(* the Low result type of a function that is [fails] or not *)
+let result_ty ~fails ret =
+  if not fails then ty ret
+  else if ret = Hir.Void then Low.I32
+  else Low.Struct (fails_struct_name ret)
+
+(* set while lowering a module: whether [err_name] is used (so
+   [fas.err_name] is generated), and whether the user's [main] fails (so it
+   is lowered as [fas.main] behind a generated [main]) *)
+let err_name_used = ref false
+let errno_used = ref false
+let unexpected_code = ref 0L
+let main_fails = ref false
+let link_name n = if n = "main" && !main_fails then "fas.main" else n
+
+(* declares C function [name] unless the module already has it; called
+   after every function is lowered *)
+let ensure_declared (mc : E.modctx) name ~params ~ret =
+  let present =
+    List.exists (fun (f : Fir.func) -> f.Fir.name = name) (Fir.Vec.to_list mc.E.m.Fir.funcs)
+  in
+  if not present then
+    E.declare mc ~name ~params ~ret ~ret_extension:Low.No_extension ~variadic:false
+      ~display:None
 
 let align s t =
   match Hir.layout s.structs t with
@@ -521,6 +601,7 @@ let rec dtype s (t : Hir.ty) =
         match t with
         | Hir.Void -> 0
         | Hir.Bool -> base "bool" Fir.Dboolean 1
+        | Hir.Err -> base "error" Fir.Dunsigned 4
         | Hir.Int k ->
             let name = Hir.ty_name t in
             let enc, size =
@@ -633,6 +714,12 @@ let rec constant_construction structs = function
       else None
   | _ -> None
 
+(* Leaves the function with error [err] (never zero there): runs the
+   active defers and errdefers, innermost first, then returns the error. Set
+   below, with the statements: [try] is an expression. *)
+let fail_exit : (state -> Low.value -> (unit, Diag.t list) result) ref =
+  ref (fun _ _ -> Error [ Diag.error Span.synthetic "internal error: fail_exit unset" ])
+
 let rec expr s = function
   | Hir.EInt (v, t, _) -> Ok (Low.Const (ty t, v))
   | Hir.EFloat (v, t, _) -> Ok (Low.Const (ty t, v))
@@ -740,58 +827,46 @@ let rec expr s = function
         E.cmp s.fn id comparison (value_ty x) x y;
         Ok (Low.Local (id, ty t)))
       else emit_binary s span (Hir.expr_ty a) op (ty t) x y
-  | Hir.Call (Hir.User n, args, t, sp) ->
-      let* target =
-        match List.find_opt (fun (f : Hir.func) -> f.name = n) s.functions with
-        | Some target -> Ok target
-        | None -> error sp ("unknown function `" ^ n ^ "` reached lowering")
-      in
-      let* vs = exprs s args in
-      let c_function =
-        if has_c_abi target || Hashtbl.mem s.addressed_functions n then Some target
-        else None
-      in
-      let av =
-        List.mapi
-          (fun index v ->
-            let extension =
-              match c_function with
-              | Some f -> (
-                  match List.nth_opt f.params index with
-                  | Some formal -> c_extension formal.ty
-                  | None -> Low.No_extension)
-              | None -> Low.No_extension
-            in
-            (value_ty v, extension, v))
-          vs
-      in
-      let ret_extension =
-        match c_function with Some _ -> c_extension t | None -> Low.No_extension
-      in
-      if t = Hir.Void then (
-        E.call s.fn None Low.No_extension Low.Void n av;
-        Ok (Low.Const (Low.I1, 0L)))
-      else
-        let id = fresh s in
-        E.call s.fn (Some id) ret_extension (ty t) n av;
-        Ok (Low.Local (id, ty t))
+  | (Hir.Call (Hir.User _, _, t, _) | Hir.Indirect_call (_, _, t, _)) as call ->
+      let* v = raw_call s ~fails:false call in
+      Ok (if t = Hir.Void then Low.Const (Low.I1, 0L) else v)
   | Hir.Call (Hir.Builtin b, args, t, span) -> lower_builtin s b args t span
-  | Hir.Indirect_call (callee, args, result_ty, _) ->
-      let* target = expr s callee in
-      let* values = exprs s args in
-      let arguments =
-        List.map2
-          (fun arg value -> (value_ty value, c_extension (Hir.expr_ty arg), value))
-          args values
-      in
-      let result_extension = c_extension result_ty in
-      if result_ty = Hir.Void then (
-        E.call_indirect s.fn None Low.No_extension Low.Void target arguments;
-        Ok (Low.Const (Low.I1, 0L)))
-      else
-        let id = fresh s in
-        E.call_indirect s.fn (Some id) result_extension (ty result_ty) target arguments;
-        Ok (Low.Local (id, ty result_ty))
+  | Hir.Try (call, t, _) ->
+      let* raw = raw_call s ~fails:true call in
+      let* err = fails_error s t raw in
+      let bad = fresh_block s and ok = fresh_block s in
+      let c = fresh s in
+      E.cmp s.fn c Low.Ne Low.I32 err (zero Low.I32);
+      E.cond_br s.fn (Low.Local (c, Low.I1)) bad.id ok.id;
+      enter s bad;
+      let* () = !fail_exit s err in
+      enter s ok;
+      fails_value s t raw
+  | Hir.Catch_value (call, fallback, t, _) ->
+      let* raw = raw_call s ~fails:true call in
+      let* err = fails_error s t raw in
+      let* v = fails_value s t raw in
+      let handler = fresh_block s and join = fresh_block s in
+      let c = fresh s in
+      E.cmp s.fn c Low.Ne Low.I32 err (zero Low.I32);
+      let vp = s.current.id in
+      E.cond_br s.fn (Low.Local (c, Low.I1)) handler.id join.id;
+      enter s handler;
+      let* d = expr s fallback in
+      let dp = s.current.id in
+      if open_block s then E.br s.fn join.id;
+      enter s join;
+      let id = fresh s in
+      E.phi s.fn id (ty t) [ (v, vp); (d, dp) ];
+      Ok (Low.Local (id, ty t))
+  | Hir.Capture (call, local, t, span) -> (
+      let* raw = raw_call s ~fails:true call in
+      let* err = fails_error s t raw in
+      match Hashtbl.find_opt s.env local.id with
+      | None -> error span ("unknown local `" ^ local.name ^ "`")
+      | Some (p, alignment) ->
+          let* () = store_value s Hir.Err err p alignment in
+          if t = Hir.Void then Ok (Low.Const (Low.I1, 0L)) else fails_value s t raw)
   | Hir.Cast (kind, e, t, _) ->
       let* v = expr s e in
       let st = value_ty v and dt = ty t in
@@ -875,6 +950,119 @@ and address_step s operation pointer offset =
 
 and exprs s xs = Result_list.map (expr s) xs
 
+(* A call, direct or through an address. [fails]: the callee is [fails],
+   so the result is its fails ABI value: the i32 error for no result, else a
+   pointer to the 16-byte (value, error) struct. Void without [fails] gives
+   a dummy. *)
+and raw_call s ~fails call =
+  match call with
+  | Hir.Call (Hir.User n, args, t, sp) ->
+      let* target =
+        match List.find_opt (fun (f : Hir.func) -> f.name = n) s.functions with
+        | Some target -> Ok target
+        | None -> error sp ("unknown function `" ^ n ^ "` reached lowering")
+      in
+      let* () =
+        if target.fails = fails then Ok ()
+        else error sp ("internal error: `" ^ n ^ "` reached lowering with a mismatched `fails`")
+      in
+      let* vs = exprs s args in
+      let c_function =
+        if has_c_abi target || Hashtbl.mem s.addressed_functions n then Some target
+        else None
+      in
+      let av =
+        List.mapi
+          (fun index v ->
+            let extension =
+              match c_function with
+              | Some f -> (
+                  match List.nth_opt f.params index with
+                  | Some formal -> c_extension formal.ty
+                  | None -> Low.No_extension)
+              | None -> Low.No_extension
+            in
+            (value_ty v, extension, v))
+          vs
+      in
+      let ret_extension =
+        match c_function with
+        | Some _ when not fails -> c_extension t
+        | _ -> Low.No_extension
+      in
+      let rt = result_ty ~fails t in
+      if rt = Low.Void then (
+        E.call s.fn None Low.No_extension Low.Void (link_name n) av;
+        Ok (Low.Const (Low.I1, 0L)))
+      else
+        let id = fresh s in
+        E.call s.fn (Some id) ret_extension rt (link_name n) av;
+        Ok (if fails then raw_result id rt else Low.Local (id, rt))
+  | Hir.Indirect_call (callee, args, t, _) ->
+      let* target = expr s callee in
+      let* values = exprs s args in
+      let arguments =
+        List.map2
+          (fun arg value -> (value_ty value, c_extension (Hir.expr_ty arg), value))
+          args values
+      in
+      let result_extension = if fails then Low.No_extension else c_extension t in
+      let rt = result_ty ~fails t in
+      if rt = Low.Void then (
+        E.call_indirect s.fn None Low.No_extension Low.Void target arguments;
+        Ok (Low.Const (Low.I1, 0L)))
+      else
+        let id = fresh s in
+        E.call_indirect s.fn (Some id) result_extension rt target arguments;
+        Ok (if fails then raw_result id rt else Low.Local (id, rt))
+  | e -> error (Hir.expr_span e) "internal error: `try` or `catch` of a non-call"
+
+and raw_result id rt =
+  match rt with
+  | Low.Struct _ -> Low.Local (id, Low.Pointer rt)
+  | _ -> Low.Local (id, rt)
+
+(* the error of a fails call's raw result, for result type [t] *)
+and fails_error s t raw =
+  if t = Hir.Void then Ok raw
+  else
+    let p = fresh s in
+    E.gep s.fn p Low.I8 raw [ Low.Index (Low.Const (Low.I64, 8L)) ];
+    let id = fresh s in
+    E.load s.fn id Low.I32 (Low.Local (p, Low.Pointer Low.I8)) 8;
+    Ok (Low.Local (id, Low.I32))
+
+and fails_value s t raw =
+  if t = Hir.Void then Ok (Low.Const (Low.I1, 0L)) else load_value s t raw 8
+
+and fail_return s err =
+  match s.fails with
+  | None -> error Span.synthetic "internal error: failing exit of a function that does not fail"
+  | Some Hir.Void ->
+      E.ret s.fn (Some (Low.I32, err));
+      Ok ()
+  | Some t ->
+      let zero_value =
+        match t with
+        | Hir.Bool -> Low.Const (Low.I1, 0L)
+        | Hir.Addr | Hir.Handle _ -> Low.Null (ty t)
+        | _ -> Low.Const (ty t, 0L)
+      in
+      fails_result s t zero_value err
+
+(* returns the (value, error) struct of a fails function's result *)
+and fails_result s t v err =
+  let rt = Low.Struct (fails_struct_name t) in
+  let slot = fresh s in
+  E.alloca_entry s.fn slot rt 8;
+  let p = Low.Local (slot, Low.Pointer rt) in
+  let* () = store_value s t v p 8 in
+  let ep = fresh s in
+  E.gep s.fn ep Low.I8 p [ Low.Index (Low.Const (Low.I64, 8L)) ];
+  E.store s.fn Low.I32 err (Low.Local (ep, Low.Pointer Low.I8)) 8;
+  E.ret s.fn (Some (rt, p));
+  Ok ()
+
 and lower_builtin s b args t span =
   let* vs = exprs s args in
   let rt = ty t in
@@ -900,6 +1088,26 @@ and lower_builtin s b args t span =
       let id = fresh s in
       E.cast s.fn id "ptrtoint" (Low.value_ty x) x rt;
       Ok (Low.Local (id, rt))
+  | Errno_err, [] ->
+      (* errno, or Unexpected when C set none: never the zero error *)
+      errno_used := true;
+      let p = fresh s in
+      E.call s.fn (Some p) Low.No_extension (Low.Pointer Low.I8) "__errno_location" [];
+      let v = fresh s in
+      E.load s.fn v Low.I32 (Low.Local (p, Low.Pointer Low.I8)) 4;
+      let c = fresh s in
+      E.cmp s.fn c Low.Eq Low.I32 (Low.Local (v, Low.I32)) (zero Low.I32);
+      let id = fresh s in
+      E.select s.fn id (Low.Local (c, Low.I1))
+        (Low.Const (Low.I32, !unexpected_code))
+        (Low.Local (v, Low.I32));
+      Ok (Low.Local (id, Low.I32))
+  | Err_name, [ e ] ->
+      err_name_used := true;
+      let id = fresh s in
+      E.call s.fn (Some id) Low.No_extension (Low.Pointer Low.I8) "fas.err_name"
+        [ (Low.I32, Low.No_extension, e) ];
+      Ok (Low.Local (id, Low.Pointer Low.I8))
   | Syscall, values ->
       let* words =
         Result_list.map
@@ -1051,7 +1259,8 @@ and lower_builtin s b args t span =
                 | Shuffle | Permute | Reduce_sum | Reduce_min | Reduce_max | Reduce_and
                 | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
-                | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _ ),
+                | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _
+                | Errno_err | Err_name ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -1945,17 +2154,30 @@ let rec emit_defer_body s body =
       if open_block s then stmt s st else Ok ())
     (Ok ()) body
 
+(* a scope's deferred bodies, innermost first; [err]: the exit fails with
+   this error, so errdefers run too *)
+and emit_defer_entries ?err s ds =
+  List.fold_left
+    (fun r entry ->
+      let* () = r in
+      match (entry, err) with
+      | Always body, _ -> emit_defer_body s body
+      | On_error _, None -> Ok ()
+      | On_error (binding, body), Some e ->
+          let* () =
+            match binding with
+            | Some (p, alignment) when open_block s -> store_value s Hir.Err e p alignment
+            | _ -> Ok ()
+          in
+          emit_defer_body s body)
+    (Ok ()) ds
+
 and emit_scope_defers s idx =
   match List.nth_opt s.defer_scopes idx with
   | None -> Ok ()
-  | Some ds ->
-      List.fold_left
-        (fun r body ->
-          let* () = r in
-          emit_defer_body s body)
-        (Ok ()) ds
+  | Some ds -> emit_defer_entries s ds
 
-and unwind s keep =
+and unwind ?err s keep =
   let count = List.length s.defer_scopes - keep in
   let scopes =
     let rec take n xs =
@@ -1963,14 +2185,7 @@ and unwind s keep =
     in
     take count s.defer_scopes
   in
-  Result_list.iter
-    (fun ds ->
-      List.fold_left
-        (fun r body ->
-          let* () = r in
-          emit_defer_body s body)
-        (Ok ()) ds)
-    scopes
+  Result_list.iter (emit_defer_entries ?err s) scopes
 
 and scoped ?lexical s xs =
   push_scope ?lexical s;
@@ -2105,7 +2320,7 @@ and stmt s statement =
   | Hir.Expr (e, _) ->
       let* _ = expr s e in
       Ok ()
-  | Hir.Return (e, _) ->
+  | Hir.Return (e, _) -> (
       let* v =
         match e with
         | None -> Ok None
@@ -2114,14 +2329,50 @@ and stmt s statement =
             Ok (Some (ty (Hir.expr_ty x), y))
       in
       let* () = unwind s 0 in
-      E.ret s.fn v;
-      Ok ()
+      if not (open_block s) then Ok ()
+      else
+        match (s.fails, v) with
+        | None, _ ->
+            E.ret s.fn v;
+            Ok ()
+        | Some Hir.Void, _ ->
+            E.ret s.fn (Some (Low.I32, zero Low.I32));
+            Ok ()
+        | Some t, Some (_, y) -> fails_result s t y (zero Low.I32)
+        | Some _, None ->
+            error Span.synthetic "internal error: fails function returned no value")
+  | Hir.Fail (e, span) ->
+      let* v = expr s e in
+      let c = fresh s in
+      E.cmp s.fn c Low.Eq Low.I32 v (zero Low.I32);
+      ignore span;
+      guard_condition s (Low.Local (c, Low.I1));
+      let* () = unwind ~err:v s 0 in
+      if open_block s then fail_return s v else Ok ()
+  | Hir.Errdefer (binding, xs, _) -> (
+      let* slot =
+        match binding with
+        | None -> Ok None
+        | Some local ->
+            let* alignment = align s local.ty in
+            let id = fresh s in
+            E.alloca_entry s.fn id (storage_ty local.ty) alignment;
+            let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
+            bind_local s local p alignment;
+            debug_var s local (E.value s.fn p);
+            Ok (Some (p, alignment))
+      in
+      match s.defer_scopes with
+      | ds :: rest ->
+          s.defer_scopes <- (On_error (slot, xs) :: ds) :: rest;
+          Ok ()
+      | [] -> error Span.synthetic "errdefer outside scope")
   | Hir.Block (xs, _) -> scoped s xs
   | Hir.If (c, a, b, _) -> lower_if s c a b
   | Hir.Defer (xs, _) -> (
       match s.defer_scopes with
       | ds :: rest ->
-          s.defer_scopes <- (xs :: ds) :: rest;
+          s.defer_scopes <- (Always xs :: ds) :: rest;
           Ok ()
       | [] -> error Span.synthetic "defer outside scope")
   | Hir.While (label, c, b, sp) -> lower_while s label c b sp
@@ -2536,6 +2787,12 @@ and lower_switch s e arms default span =
   if not falls_through then E.unreachable s.fn;
   Ok ()
 
+let () =
+  fail_exit :=
+    fun s err ->
+      let* () = unwind ~err s 0 in
+      if open_block s then fail_return s err else Ok ()
+
 let address_taken_locals ?function_addresses body =
   let views = Hashtbl.create 16 in
   let addressed = Hashtbl.create 16 in
@@ -2569,6 +2826,10 @@ let address_taken_locals ?function_addresses body =
     | Hir.Indirect_call (callee, args, _, _) ->
         collect_expr callee;
         List.iter collect_expr args
+    | Hir.Try (call, _, _) | Hir.Capture (call, _, _, _) -> collect_expr call
+    | Hir.Catch_value (call, fallback, _, _) ->
+        collect_expr call;
+        collect_expr fallback
     | Hir.Field (base, _, _, _, _) -> collect_expr base
     | Hir.Ternary (condition, yes, no, _, _) ->
         collect_expr condition;
@@ -2609,6 +2870,8 @@ let address_taken_locals ?function_addresses body =
         collect_target target;
         collect_expr value
     | Hir.Return (value, _) -> Option.iter collect_expr value
+    | Hir.Fail (value, _) -> collect_expr value
+    | Hir.Errdefer (_, body, _) -> collect_list body
     | Hir.If (condition, yes, no, _) ->
         collect_expr condition;
         collect_list yes;
@@ -2658,12 +2921,15 @@ let lower_func mc ~intrinsic_masked_loads
           if c_abi then c_extension local.ty else Low.No_extension ))
       f.Hir.params
   in
-  let ret_extension = if c_abi then c_extension f.ret else Low.No_extension in
+  let ret_extension =
+    if c_abi && not f.fails then c_extension f.ret else Low.No_extension
+  in
+  let ret_ty = result_ty ~fails:f.fails f.ret in
   match f.body with
   | Hir.Declaration ->
-      E.declare mc ~name:f.name
+      E.declare mc ~name:(link_name f.name)
         ~params:(List.map (fun (_, t, e) -> (t, e)) params)
-        ~ret:(ty f.ret) ~ret_extension ~variadic:f.variadic ~display:f.display;
+        ~ret:ret_ty ~ret_extension ~variadic:f.variadic ~display:f.display;
       Ok ()
   | Hir.Statements body ->
       let* () =
@@ -2676,12 +2942,13 @@ let lower_func mc ~intrinsic_masked_loads
         else Ok ()
       in
       let linkage =
-        if f.name = "main" then Fir.Global
+        if f.name = "main" && f.fails then Fir.Local
+        else if f.name = "main" then Fir.Global
         else if f.linkage = Hir.Internal then Fir.Local
         else Fir.Global
       in
       let fn =
-        E.start mc ~name:f.name ~linkage ~params ~ret:(ty f.ret) ~ret_extension
+        E.start mc ~name:(link_name f.name) ~linkage ~params ~ret:ret_ty ~ret_extension
           ~variadic:f.variadic ~display:f.display ~source
       in
       let s =
@@ -2692,7 +2959,8 @@ let lower_func mc ~intrinsic_masked_loads
           current = { id = Fir.entry };
           env = Hashtbl.create 32;
           env_scopes = [];
-          ret = ty f.ret;
+          ret = ret_ty;
+          fails = (if f.fails then Some f.ret else None);
           structs;
           strings;
           functions;
@@ -2731,6 +2999,9 @@ let lower_func mc ~intrinsic_masked_loads
         if not (open_block s) then Ok ()
         else if s.ret = Low.Void then (
           E.ret s.fn None;
+          Ok ())
+        else if s.fails = Some Hir.Void then (
+          E.ret s.fn (Some (Low.I32, zero Low.I32));
           Ok ())
         else
           error Span.synthetic
@@ -2856,8 +3127,155 @@ let global_storage mc structs (global : Hir.global) =
         error Span.synthetic
           (Printf.sprintf "internal error: global %s: %s" global.name message))
 
+(* a state for a function the compiler generates (no source, no locals) *)
+let synthetic_state fn ~ret structs =
+  {
+    fn;
+    literal_globals = ref [];
+    next_value = 0;
+    current = { id = Fir.entry };
+    env = Hashtbl.create 1;
+    env_scopes = [];
+    ret;
+    fails = None;
+    structs;
+    strings = [];
+    functions = [];
+    addressed_functions = Hashtbl.create 1;
+    defer_scopes = [];
+    intrinsic_masked_loads = true;
+    loops = [];
+    file = None;
+    location = None;
+  }
+
+let ptr_ty = Low.Pointer Low.I8
+
+(* [fas.err_name(code i32) addr]: a declared error's name, "errno N" for a
+   Linux errno without one, else "unknown error". [string] interns a C
+   string and gives its index. *)
+let generate_err_name mc structs (errors : (string * int64) list) string =
+  let fn =
+    E.start mc ~name:"fas.err_name" ~linkage:Fir.Local
+      ~params:[ ("a0", Low.I32, Low.No_extension) ]
+      ~ret:ptr_ty ~ret_extension:Low.No_extension ~variadic:false ~display:None
+      ~source:None
+  in
+  let s = synthetic_state fn ~ret:ptr_ty structs in
+  let declared = List.map snd errors in
+  let errno_names =
+    List.filter_map
+      (fun n ->
+        let code = Int64.of_int n in
+        if List.mem code declared then None
+        else Some (Printf.sprintf "errno %d" n, code))
+      (List.init 133 (fun k -> k + 1))
+  in
+  let entries = List.sort Stdlib.compare (List.map (fun (n, c) -> (c, n)) (errors @ errno_names)) in
+  let named name =
+    let b = fresh_block s in
+    (b, string name)
+  in
+  let arms = List.map (fun (code, name) -> (code, named name)) entries in
+  let default = named "unknown error" in
+  E.switch s.fn Low.I32 (Low.Param ("a0", Low.I32))
+    (List.map (fun (code, (b, _)) -> (code, b.id)) arms)
+    (fst default).id;
+  List.iter
+    (fun (b, index) ->
+      enter s b;
+      let id = fresh s in
+      E.string_ptr s.fn id index;
+      E.ret s.fn (Some (ptr_ty, Low.Local (id, ptr_ty))))
+    (List.map snd arms @ [ default ]);
+  match E.finish s.fn with
+  | Ok () -> Ok ()
+  | Error b -> error Span.synthetic (Printf.sprintf "internal error: fas.err_name block %d" b)
+
+(* The C [main] of a program whose [main] fails: calls the user's [main]
+   (lowered as [fas.main]); on an error, writes its name and a newline to
+   stderr (write(2), no libc) and exits with status 1. *)
+let generate_main_wrapper mc structs (user : Hir.func) string =
+  let params =
+    List.mapi (fun k (l : Hir.local) -> ("a" ^ string_of_int k, ty l.ty, Low.No_extension)) user.params
+  in
+  let fn =
+    E.start mc ~name:"main" ~linkage:Fir.Global ~params ~ret:Low.I32
+      ~ret_extension:Low.No_extension ~variadic:false ~display:None ~source:None
+  in
+  let s = synthetic_state fn ~ret:Low.I32 structs in
+  let rt = result_ty ~fails:true user.ret in
+  let id = fresh s in
+  E.call s.fn (Some id) Low.No_extension rt "fas.main"
+    (List.map (fun (n, t, e) -> (t, e, Low.Param (n, t))) params);
+  let raw = raw_result id rt in
+  let* err = fails_error s user.ret raw in
+  let bad = fresh_block s and ok = fresh_block s in
+  let c = fresh s in
+  E.cmp s.fn c Low.Ne Low.I32 err (zero Low.I32);
+  E.cond_br s.fn (Low.Local (c, Low.I1)) bad.id ok.id;
+  enter s ok;
+  let* v =
+    if user.ret = Hir.Void then Ok (zero Low.I32) else fails_value s user.ret raw
+  in
+  E.ret s.fn (Some (Low.I32, v));
+  enter s bad;
+  let name = fresh s in
+  E.call s.fn (Some name) Low.No_extension ptr_ty "fas.err_name"
+    [ (Low.I32, Low.No_extension, err) ];
+  let name = Low.Local (name, ptr_ty) in
+  (* its length *)
+  let counter = fresh s in
+  E.alloca_entry s.fn counter Low.I64 8;
+  let counter = Low.Local (counter, Low.Pointer Low.I64) in
+  E.store s.fn Low.I64 (zero Low.I64) counter 8;
+  let head = fresh_block s and step = fresh_block s and counted = fresh_block s in
+  E.br s.fn head.id;
+  enter s head;
+  let n = fresh s in
+  E.load s.fn n Low.I64 counter 8;
+  let at = fresh s in
+  E.gep s.fn at Low.I8 name [ Low.Index (Low.Local (n, Low.I64)) ];
+  let byte = fresh s in
+  E.load s.fn byte Low.I8 (Low.Local (at, ptr_ty)) 1;
+  let more = fresh s in
+  E.cmp s.fn more Low.Ne Low.I8 (Low.Local (byte, Low.I8)) (zero Low.I8);
+  E.cond_br s.fn (Low.Local (more, Low.I1)) step.id counted.id;
+  enter s step;
+  let next = fresh s in
+  E.bin s.fn next Low.Add Low.I64 (Low.Local (n, Low.I64)) (Low.Const (Low.I64, 1L));
+  E.store s.fn Low.I64 (Low.Local (next, Low.I64)) counter 8;
+  E.br s.fn head.id;
+  enter s counted;
+  let write p length =
+    let word = fresh s in
+    E.cast s.fn word "ptrtoint" ptr_ty p Low.I64;
+    let r = fresh s in
+    E.syscall s.fn r
+      [ Low.Const (Low.I64, 1L); Low.Const (Low.I64, 2L); Low.Local (word, Low.I64); length ]
+  in
+  write name (Low.Local (n, Low.I64));
+  let newline = fresh s in
+  E.string_ptr s.fn newline (string "\n");
+  write (Low.Local (newline, ptr_ty)) (Low.Const (Low.I64, 1L));
+  E.ret s.fn (Some (Low.I32, Low.Const (Low.I32, 1L)));
+  match E.finish s.fn with
+  | Ok () -> Ok ()
+  | Error b -> error Span.synthetic (Printf.sprintf "internal error: generated main block %d" b)
+
 let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
+  let p = { p with Hir.structs = p.Hir.structs @ fails_struct_defs } in
+  let user_main =
+    List.find_opt
+      (fun (f : Hir.func) -> f.name = "main" && f.fails && f.body <> Hir.Declaration)
+      p.funcs
+  in
+  main_fails := user_main <> None;
+  err_name_used := user_main <> None;
+  errno_used := false;
+  unexpected_code :=
+    (match List.assoc_opt "Unexpected" p.errors with Some c -> c | None -> 0L);
   let* () =
     match Target_layout.pointer_integer_bits (Target_layout.current ()) with
     | Ok 32 | Ok 64 -> Ok ()
@@ -3038,7 +3456,24 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
           ~addressed_functions literal_globals p.Hir.structs p.strings p.funcs f)
       p.funcs
   in
-  List.iteri (fun i x -> E.string_global mc i x) p.strings;
+  (* strings of the generated functions follow the program's *)
+  let extra = ref [] in
+  let string text =
+    let index = List.length p.strings + List.length !extra in
+    extra := (text ^ "\000") :: !extra;
+    index
+  in
+  let* () =
+    match user_main with
+    | Some user -> generate_main_wrapper mc p.structs user string
+    | None -> Ok ()
+  in
+  let* () =
+    if !err_name_used then generate_err_name mc p.structs p.errors string else Ok ()
+  in
+  if !errno_used then
+    ensure_declared mc "__errno_location" ~params:[] ~ret:ptr_ty;
+  List.iteri (fun i x -> E.string_global mc i x) (p.strings @ List.rev !extra);
   let* () =
     Result_list.iter
       (fun (a : Hir.const_arr_def) ->

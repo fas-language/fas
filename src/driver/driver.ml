@@ -252,6 +252,7 @@ let item_extent = function
   | Ast.Global { extent; _ }
   | Ast.Struct { extent; _ }
   | Ast.Opaque { extent; _ }
+  | Ast.Error_decl { extent; _ }
   | Ast.Func { extent; _ } ->
       extent
 
@@ -1498,15 +1499,16 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
           in
           let referenced_names = Ast.unresolved_names referenced_program in
           let declared_names =
-            List.filter_map
+            List.concat_map
               (function
                 | Ast.Const { name; _ }
                 | Ast.Global { name; _ }
                 | Ast.Struct { name; _ }
                 | Ast.Opaque { name; _ }
                 | Ast.Func { name; _ } ->
-                    Some name
-                | Ast.Use _ | Ast.Pkg _ -> None)
+                    [ name ]
+                | Ast.Error_decl { names; _ } -> List.map (fun (n, _, _) -> n) names
+                | Ast.Use _ | Ast.Pkg _ -> [])
               program.Ast.items
           in
           let macro_names =

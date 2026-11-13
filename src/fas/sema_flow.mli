@@ -88,6 +88,7 @@ val falls_through : t -> bool
 val set_falls_through : t -> bool -> unit
 val finish_block_scope : t -> (unit, Diag.t list) result
 val finish_statement : t -> before:snapshot -> terminates:bool -> unit
+val in_defer : t -> bool
 val validate_return : t -> Span.t -> (unit, Diag.t list) result
 val check_loop_label : t -> string * Span.t -> (unit, Diag.t list) result
 
@@ -120,6 +121,7 @@ val induction_grid : t -> int -> (int64 * int64) option
 val begin_defer : t -> Span.t -> (defer_capture, Diag.t list) result
 
 val finish_defer :
+  ?errdefer:bool ->
   t ->
   defer_capture ->
   ('a, Diag.t list) result ->

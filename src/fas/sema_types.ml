@@ -319,6 +319,7 @@ let rec source_ty named_types = function
           | None -> Ok (Hir.Vec (n, element)))
       | result -> result)
   | Ast.Named_type ("void", _) -> Ok Hir.Void
+  | Ast.Named_type ("error", _) -> Ok Hir.Err
   | Ast.Named_type (name, _) when Option.is_some (Names.type_misuse_message name) ->
       Error (Option.get (Names.type_misuse_message name))
   | Ast.Named_type (name, _) -> (
@@ -921,7 +922,7 @@ let cast_name = function
 let cast_integer_value = function
   | Hir.Int _ | Hir.Vec (_, Hir.Int _) -> true
   | Hir.Bool | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Array _ | Hir.Struct _
-  | Hir.Opaque _ | Hir.Void | Hir.Vec _ ->
+  | Hir.Opaque _ | Hir.Void | Hir.Vec _ | Hir.Err ->
       false
 
 let integer_literal_value = function
@@ -1808,7 +1809,7 @@ let binary_result_type ?left_expression ?right_expression ?left_checked ?right_c
           match left with
           | Hir.Vec (lanes, (Hir.Bool | Hir.Int _ | Hir.Float _)) ->
               Ok (Hir.Vec (lanes, Hir.Bool))
-          | Hir.Addr | Hir.Handle _ -> Ok Hir.Bool
+          | Hir.Addr | Hir.Handle _ | Hir.Err -> Ok Hir.Bool
           | _ when Sema_numeric.is_scalar left -> Ok Hir.Bool
           | _ ->
               error (result_span left_expression)

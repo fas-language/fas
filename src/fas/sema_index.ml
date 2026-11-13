@@ -235,6 +235,8 @@ let rec statement_children = function
   | Ast.If (_, yes, no, _) -> yes @ Option.value ~default:[] no
   | Ast.While (_, _, body, _)
   | Ast.Defer (body, _)
+  | Ast.Errdefer (_, body, _)
+  | Ast.Catch_stmt { body; _ }
   | Ast.Block (body, _)
   | Ast.Const_for { body; _ }
   | Ast.Const_copy { body; _ } ->
@@ -244,7 +246,7 @@ let rec statement_children = function
   | Ast.Switch (_, cases, default, _) ->
       List.concat_map snd cases @ Option.value ~default:[] default
   | Ast.Let _ | Ast.View _ | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _
-  | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ ->
+  | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ ->
       []
 
 and statement_expressions = function
@@ -258,7 +260,13 @@ and statement_expressions = function
   | Ast.Switch (subject, cases, _, _) -> subject :: List.concat_map fst cases
   | Ast.Expr_stmt (value, _, _) -> [ value ]
   | Ast.Const_for { low; high; _ } -> [ low; high ]
-  | Ast.Break _ | Ast.Continue _ | Ast.Defer _ | Ast.Block _ | Ast.Const_copy _ -> []
+  | Ast.Fail (value, _) -> [ value ]
+  | Ast.Catch_stmt { target = Ast.Catch_assign target; call; _ } ->
+      target_expressions target @ [ call ]
+  | Ast.Catch_stmt { call; _ } -> [ call ]
+  | Ast.Break _ | Ast.Continue _ | Ast.Defer _ | Ast.Errdefer _ | Ast.Block _
+  | Ast.Const_copy _ ->
+      []
 
 and target_expressions = function
   | Ast.Target_ident _ -> []
@@ -293,6 +301,8 @@ let expression_children = function
   | Ast.Generic_args (callee, _, _) | Ast.Select (callee, _, _) -> [ callee ]
   | Ast.Ternary (a, b, c, _) -> [ a; b; c ]
   | Ast.Array_lit (elements, _) -> elements
+  | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) -> [ call ]
+  | Ast.Catch (call, Ast.Catch_value value, _) -> [ call; value ]
 
 let expression_types_of = function
   | Ast.Cast (_, ty, _, _)
@@ -402,11 +412,17 @@ let declare_program index ~c_aliases (program : Ast.program) =
             match ty with Ast.Array _ | Ast.Vec _ -> Const_array | _ -> Const
           in
           Hashtbl.replace index.storage_consts name (ty, value);
-          top ?c_origin:(origin name) name kind name_span extent
+          (* the predeclared error `Unexpected` has no source and no C origin:
+             it is a builtin, not a declaration of this program *)
+          let c_origin = origin name in
+          if not (Span.is_synthetic name_span && c_origin = None) then
+            top ?c_origin name kind name_span extent
       | Ast.Global { name; name_span; extent; _ } ->
           top ?c_origin:(origin name) name Global name_span extent
       | Ast.Opaque { name; name_span; extent; _ } ->
           top ?c_origin:(origin name) name Opaque name_span extent
+      | Ast.Error_decl { names; extent; _ } ->
+          List.iter (fun (name, name_span, _) -> top name Const name_span extent) names
       | Ast.Struct
           { name; name_span; generic_params; fields; is_union; extent; align; _ } ->
           let c_origin = origin name in
@@ -576,6 +592,10 @@ let reference_program index ~instantiated (program : Ast.program) =
       | Ast.Const { ty = const_ty; value; _ } ->
           ty None [] const_ty;
           static_expression None [] value
+      | Ast.Error_decl { names; _ } ->
+          List.iter
+            (fun (_, _, pinned) -> Option.iter (static_expression None []) pinned)
+            names
       | Ast.Global { ty = global_ty; init; _ } ->
           ty None [] global_ty;
           Option.iter (static_expression None []) init

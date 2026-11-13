@@ -27,6 +27,7 @@ hello, fas!
 - [Values](#values)
 - [Floating point](#floating-point)
 - [Functions and control flow](#functions-and-control-flow)
+- [Errors](#errors)
 - [Structs, arrays and memory](#structs-arrays-and-memory)
 - [Generics](#generics)
   - [Const loops](#const-loops)
@@ -264,6 +265,66 @@ fn main() i32 {
     return 1
 }
 ```
+
+## Errors
+
+A function that can fail says so with `fails`, and every caller must handle the failure. Nothing is hidden: no exceptions, no unwinding, no allocation. An error travels in a register next to the result.
+
+- `error Empty, BadDigit` declares errors. An error name is a top-level constant of type `error`. Declaring the same name in two files means the same error, so two libraries can both declare `NotFound`.
+- `error` is a 4-byte type. An error can be stored, passed, compared with `==` and `!=`, and used in `switch`, which needs a `default` arm because the set of errors is open. There is no arithmetic on errors; `bitcast` converts between `error` and `u32`/`i32` (for logs and files).
+- An error's code is computed from its name, so it is the same in every build and program. `error NotFound = 2` pins an errno code (1-4095) instead. Two errors with the same code are a compile error.
+- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr` or `handle[T]`. A struct result goes through an out pointer, as usual.
+- `fail E` leaves the function with error `E`, running `defer` and `errdefer` blocks. `return` never carries an error. `fail` with the zero error (only reachable through `bitcast` or `{}`) traps.
+- A call to a `fails` function must be followed by `try` or `catch`; anything else is a compile error.
+  - `try f(x)` passes an error up to the caller. It works only in a `fails` function and binds tighter than operators: `try f(x) + 1` is `(try f(x)) + 1`.
+  - `f(x) catch 0` uses `0` when the call fails.
+  - `f(x) catch { ... }` and `f(x) catch e { ... }` (which binds the error) run a block on failure. The block produces no value: it must leave with `return`, `fail`, `break` or `continue`, unless the call has no result.
+  - `call_addr[T fails](p, args...)` and `call_addr[fails](p, args...)` call a `fails` function through its address.
+- `errdefer { ... }` and `errdefer e { ... }` run only when the function exits by failing (`fail`, or `try` passing an error up), together with `defer` blocks in reverse order. `fail`, `try` and `return` are not allowed inside `defer` and `errdefer`.
+- `main` may be `fails`. An error that escapes `main` prints its name to stderr and exits with status 1.
+- `errno_err()` is the current C `errno` as an error, or the predeclared `Unexpected` if errno is 0. `err_name(e)` is the error's name as a C string: `"errno N"` for an undeclared errno code, `"unknown error"` for any other undeclared code.
+
+```fas
+use "C" <stdio.h>
+
+error Empty, BadDigit, Overflow
+
+fn parse_u32(s addr) u32 fails {
+    if s[u8, 0] == 0 { fail Empty }
+    n u64 = 0
+    for i usize = 0; s[u8, i] != 0; i += 1 {
+        c u8 = s[u8, i]
+        if c < 48 || c > 57 { fail BadDigit }
+        n = n * 10 + zext[u64](c - 48)
+        if n > 4294967295 { fail Overflow }
+    }
+    return trunc[u32](n)
+}
+
+fn sum(a addr, b addr) u32 fails {
+    errdefer e { printf(c"sum failed: %s\n", err_name(e)) }
+    return try parse_u32(a) + try parse_u32(b)
+}
+
+fn main() i32 {
+    printf(c"%u\n", parse_u32(c"12x") catch 0)
+    t u32 = sum(c"40", c"2") catch 0
+    printf(c"%u\n", t)
+    u u32 = sum(c"40", c"") catch e {
+        if e == Empty { printf(c"empty\n") }
+        return 1
+    }
+    return 0
+}
+```
+```text
+0
+42
+sum failed: Empty
+empty
+```
+
+**With C.** A C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result), so C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. Exporting a `fails` function from an `extern "C"` block is not supported yet.
 
 ## Structs, arrays and memory
 
@@ -869,6 +930,9 @@ opaque FILE                             // held only as handle[FILE]
 
 fn f(a u32, p addr) u32 { return a }
 fn g() void { }
+error Empty, NotFound = 2               // errors; a pin is an errno code
+fn h(s addr) u32 fails { fail Empty }   // returns u32 or an error
+fn k() fails { }                        // no result, or an error
 fn max[T](a T, b T) T { return if a > b { a } else { b } }
 fn sum[T, N const usize](xs addr) T { ... }
 
@@ -901,6 +965,7 @@ switch x {
 }
 outer: while c { continue outer }
 break  break outer  continue  continue outer  return  return x  defer { }
+n = try h(s)  n = h(s) catch 0  h(s) catch e { fail e }  fail Empty  errdefer e { }
 max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 ```
 
@@ -923,6 +988,7 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `vec[N, bool]` | ⌈N/8⌉ bytes, rounded up to a power of two | = size | packed bits, lane 0 is the low bit |
 | `struct` | C layout | max field | `@align(N)` raises it |
 | `void` | | | result type only |
+| `error` | 4 | 4 | an error code; `==`, `!=`, `switch` with `default`, `bitcast` to `u32`/`i32` |
 
 ### Operators
 
@@ -1014,6 +1080,9 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `addr_bits(p)` `addr_from_bits(n)` | `usize`, `addr` | |
 | | `handle_addr(h)` `handle_from_addr[T](p)` | `addr`, `handle[T]` | |
 | | `call_addr[R](p, args...)` | `R` or `void` | indirect call through `addr`, using the C ABI |
+| | `call_addr[R fails](p, args...)` `call_addr[fails](p, args...)` | `R` or `void` | indirect call of a `fails` function; needs `try` or `catch` |
+| **Errors** | `errno_err()` | `error` | C `errno` as an error, `Unexpected` if it is 0 |
+| | `err_name(e)` | `addr` | C string: the name, `"errno N"`, or `"unknown error"` |
 | **Atomics** | `atomic_load[T, o](p)` | `T` | `T` is an integer or `addr`; `p` must be aligned to `sizeof[T]` |
 | | `atomic_store[T, o](p, x)` | statement | |
 | | `atomic_add[T, o](p, x)` `atomic_sub` `atomic_and` `atomic_or` `atomic_xor` | `T`, the old value | integers only, and add/sub wrap |

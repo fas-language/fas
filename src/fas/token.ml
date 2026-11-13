@@ -22,6 +22,12 @@ type kind =
   | Kw_switch
   | Kw_case
   | Kw_default
+  | Kw_error
+  | Kw_fails
+  | Kw_fail
+  | Kw_try
+  | Kw_catch
+  | Kw_errdefer
   | Lparen
   | Rparen
   | Lbrace
@@ -94,6 +100,12 @@ let show = function
   | Kw_switch -> "`switch`"
   | Kw_case -> "`case`"
   | Kw_default -> "`default`"
+  | Kw_error -> "`error`"
+  | Kw_fails -> "`fails`"
+  | Kw_fail -> "`fail`"
+  | Kw_try -> "`try`"
+  | Kw_catch -> "`catch`"
+  | Kw_errdefer -> "`errdefer`"
   | Lparen -> "`(`"
   | Rparen -> "`)`"
   | Lbrace -> "`{`"
@@ -161,4 +173,10 @@ let c_header_component = function
   | Kw_switch -> Some "switch"
   | Kw_case -> Some "case"
   | Kw_default -> Some "default"
+  | Kw_error -> Some "error"
+  | Kw_fails -> Some "fails"
+  | Kw_fail -> Some "fail"
+  | Kw_try -> Some "try"
+  | Kw_catch -> Some "catch"
+  | Kw_errdefer -> Some "errdefer"
   | _ -> None

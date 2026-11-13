@@ -51,6 +51,21 @@ and expr =
   | Array_lit of expr list * Span.t
   | Designated_field of string * Span.t * expr * Span.t
   | Designated_index of expr * expr * Span.t
+  (* errors: `try CALL` and `CALL catch ...`; the span covers the whole form *)
+  | Try of expr * Span.t
+  | Catch of expr * catch_handler * Span.t
+
+(* `catch VALUE` substitutes a value. A `catch [e] { }` block is only valid as a
+   whole statement, a declaration's value or an assignment's value: the parser
+   turns those into [Catch_stmt]; anywhere else sema refuses it. *)
+and catch_handler =
+  | Catch_value of expr
+  | Catch_block of (string * Span.t) option * stmt list
+
+and catch_target =
+  | Catch_let of { name : string; ty : ty; ty_span : Span.t }
+  | Catch_assign of assign_target
+  | Catch_discard
 
 and unop = Neg | Not | Bit_not
 
@@ -113,6 +128,16 @@ and stmt =
       ty : ty;
       value : int64;
       note : string;
+      body : stmt list;
+      span : Span.t;
+    }
+  | Fail of expr * Span.t
+  | Errdefer of (string * Span.t) option * stmt list * Span.t
+  (* `[x T =] CALL catch [e] { BODY }` and `x = CALL catch [e] { BODY }` *)
+  | Catch_stmt of {
+      target : catch_target;
+      call : expr;
+      binding : (string * Span.t) option;
       body : stmt list;
       span : Span.t;
     }
@@ -188,12 +213,19 @@ and item =
       extent : Span.t;
     }
   | Opaque of { name : string; name_span : Span.t; span : Span.t; extent : Span.t }
+  (* `error A, B = 2`: each name with its span and an optional pinned code *)
+  | Error_decl of {
+      names : (string * Span.t * expr option) list;
+      span : Span.t;
+      extent : Span.t;
+    }
   | Func of {
       name : string;
       name_span : Span.t;
       ret_span : Span.t;
       params : param list;
       ret : ty;
+      fails : bool;
       body : body;
       linkage : linkage;
       variadic : bool;
@@ -213,6 +245,7 @@ let with_extent extent = function
   | Global g -> Global { g with extent }
   | Struct s -> Struct { s with extent }
   | Opaque o -> Opaque { o with extent }
+  | Error_decl e -> Error_decl { e with extent }
   | Func f -> Func { f with extent }
   | (Use _ | Pkg _) as item -> item
 
@@ -237,7 +270,9 @@ let stored_expr_span = function
   | Ternary (_, _, _, s)
   | Array_lit (_, s)
   | Designated_field (_, _, _, s)
-  | Designated_index (_, _, s) ->
+  | Designated_index (_, _, s)
+  | Try (_, s)
+  | Catch (_, _, s) ->
       s
   | C_dereference (_, _, s) | C_dot_star (_, s) -> s
   | Unary _ | Binary _ | Parenthesized _ | Arrow_field _ | Field _ -> assert false
@@ -306,7 +341,10 @@ let stmt_span = function
   | For (_, _, _, _, _, span)
   | Switch (_, _, _, span)
   | Const_for { span; _ }
-  | Const_copy { span; _ } ->
+  | Const_copy { span; _ }
+  | Fail (_, span)
+  | Errdefer (_, _, span)
+  | Catch_stmt { span; _ } ->
       span
 
 let string_literal_name c value =
@@ -461,6 +499,13 @@ and expr_name = function
   | Designated_field (name, _, value, _) -> "." ^ name ^ " = " ^ expr_name value
   | Designated_index (index, value, _) ->
       "[" ^ expr_name index ^ "] = " ^ expr_name value
+  | Try (call, _) -> "try " ^ expr_name call
+  | Catch (call, Catch_value value, _) ->
+      expr_name call ^ " catch " ^ expr_name value
+  | Catch (call, Catch_block (binding, _), _) ->
+      expr_name call ^ " catch "
+      ^ Option.fold ~none:"" ~some:(fun (name, _) -> name ^ " ") binding
+      ^ "{ ... }"
 
 let aggregate_length expression span = { expression; text = expr_name expression; span }
 
@@ -474,6 +519,7 @@ let item_span = function
   | Global { span; _ }
   | Struct { span; _ }
   | Opaque { span; _ }
+  | Error_decl { span; _ }
   | Func { span; _ } ->
       span
 
@@ -694,6 +740,22 @@ let render_program program =
         emit_expr index;
         text "] = ";
         emit_expr value
+    | Try (call, _) ->
+        text "try ";
+        emit_expr call
+    | Catch (call, Catch_value value, _) ->
+        emit_expr call;
+        text " catch ";
+        emit_expr value
+    | Catch (call, Catch_block (binding, _), _) ->
+        emit_expr call;
+        text " catch ";
+        Option.iter
+          (fun (name, _) ->
+            add_name name;
+            text " ")
+          binding;
+        text "{ ... }"
   and emit_stmt indent s =
     match s with
     | Let { name; ty; init; _ } -> (
@@ -828,6 +890,48 @@ let render_program program =
         text "switch ";
         emit_expr e;
         text " { ... }"
+    | Fail (e, _) ->
+        text indent;
+        text "fail ";
+        emit_expr e
+    | Errdefer (binding, xs, _) ->
+        text indent;
+        text "errdefer ";
+        Option.iter
+          (fun (name, _) ->
+            add_name name;
+            text " ")
+          binding;
+        text "{";
+        emit_lines (indent ^ "  ") xs;
+        text "\n";
+        text indent;
+        text "}"
+    | Catch_stmt { target; call; binding; body; _ } ->
+        text indent;
+        (match target with
+        | Catch_let { name; ty; _ } ->
+            add_name name;
+            text " ";
+            emit_ty ty;
+            text " = "
+        | Catch_assign (Target_ident (name, _)) ->
+            add_name name;
+            text " = "
+        | Catch_assign _ -> text "<target> = "
+        | Catch_discard -> ());
+        emit_expr call;
+        text " catch ";
+        Option.iter
+          (fun (name, _) ->
+            add_name name;
+            text " ")
+          binding;
+        text "{";
+        emit_lines (indent ^ "  ") body;
+        text "\n";
+        text indent;
+        text "}"
   and emit_lines indent xs =
     List.iter
       (fun s ->
@@ -918,7 +1022,18 @@ let render_program program =
     | Opaque { name; _ } ->
         text "opaque ";
         add_name name
-    | Func { name; generic_params; params; ret; body; linkage; _ } ->
+    | Error_decl { names; _ } ->
+        text "error ";
+        emit_comma_list
+          (fun (name, _, pinned) ->
+            add_name name;
+            Option.iter
+              (fun value ->
+                text " = ";
+                emit_expr value)
+              pinned)
+          names
+    | Func { name; generic_params; params; ret; fails; body; linkage; _ } ->
         text (match linkage with Internal -> "fn " | External_c -> "extern fn ");
         add_name name;
         emit_generic_params generic_params;
@@ -931,6 +1046,7 @@ let render_program program =
           params;
         text ") ";
         emit_ty ret;
+        if fails then text " fails";
         emit_body body
   in
   List.iteri
@@ -1017,7 +1133,14 @@ let expanded_walker ~identifiers ~limit =
       | Designated_field (_, _, value, _) -> go_expr value
       | Designated_index (index, value, _) ->
           go_expr index;
-          go_expr value)
+          go_expr value
+      | Try (call, _) | Catch (call, Catch_block (_, []), _) -> go_expr call
+      | Catch (call, Catch_value value, _) ->
+          go_expr call;
+          go_expr value
+      | Catch (call, Catch_block (_, body), _) ->
+          go_expr call;
+          go_stmts body)
   and go_target = function
     | Target_ident (name, span) ->
         identifiers := name :: !identifiers;
@@ -1070,7 +1193,16 @@ let expanded_walker ~identifiers ~limit =
               List.iter go_expr es;
               go_stmts xs)
             arms;
-          Option.iter go_stmts default)
+          Option.iter go_stmts default
+      | Fail (e, _) -> go_expr e
+      | Errdefer (_, xs, _) -> go_stmts xs
+      | Catch_stmt { target; call; body; span; _ } ->
+          (match target with
+          | Catch_let { ty; _ } -> go_ty span ty
+          | Catch_assign t -> go_target t
+          | Catch_discard -> ());
+          go_expr call;
+          go_stmts body)
   and go_field (f : field) =
     if !failed = None then (
       count f.span;
@@ -1101,6 +1233,8 @@ let expanded_walker ~identifiers ~limit =
           List.iter go_generic_param generic_params;
           List.iter go_field fields
       | Opaque _ -> ()
+      | Error_decl { names; _ } ->
+          List.iter (fun (_, _, pinned) -> Option.iter go_expr pinned) names
       | Func { name; linkage; params; ret; body; generic_params; span; _ } -> (
           if linkage <> Internal then identifiers := name :: !identifiers;
           List.iter go_generic_param generic_params;
@@ -1198,7 +1332,7 @@ let item_span_by_name program name =
         (specialization_template_name name)
 
 let rec stmt_terminates = function
-  | Return _ | Break _ | Continue _ -> true
+  | Return _ | Break _ | Continue _ | Fail _ -> true
   | Block (body, _) -> block_terminates body
   | If (_, then_body, Some else_body, _) ->
       block_terminates then_body && block_terminates else_body
@@ -1219,12 +1353,14 @@ and copy_jump ~select = function
   | (Break (None, _) | Continue (None, _)) as statement -> select statement
   | If (_, yes, no, _) ->
       copy_jumps ~select yes @ Option.fold ~none:[] ~some:(copy_jumps ~select) no
-  | Block (body, _) | Defer (body, _) -> copy_jumps ~select body
+  | Block (body, _) | Defer (body, _) | Errdefer (_, body, _) | Catch_stmt { body; _ }
+    ->
+      copy_jumps ~select body
   | Switch (_, arms, default, _) ->
       List.concat_map (fun (_, body) -> copy_jumps ~select body) arms
       @ Option.fold ~none:[] ~some:(copy_jumps ~select) default
   | Let _ | View _ | Assign _ | Compound_assign _ | Return _ | Expr_stmt _ | Break _
-  | Continue _ | While _ | For _ | Const_for _ | Const_copy _ ->
+  | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ ->
       []
 
 let copy_breaks body =
@@ -1246,6 +1382,9 @@ and continue_to_break label = function
           span )
   | Block (body, span) -> Block (continues_to_breaks label body, span)
   | Defer (body, span) -> Defer (continues_to_breaks label body, span)
+  | Errdefer (binding, body, span) ->
+      Errdefer (binding, continues_to_breaks label body, span)
+  | Catch_stmt c -> Catch_stmt { c with body = continues_to_breaks label c.body }
   | Switch (value, arms, default, span) ->
       Switch
         ( value,
@@ -1253,5 +1392,6 @@ and continue_to_break label = function
           Option.map (continues_to_breaks label) default,
           span )
   | ( Let _ | View _ | Assign _ | Compound_assign _ | Return _ | Expr_stmt _ | Break _
-    | Continue _ | While _ | For _ | Const_for _ | Const_copy _ ) as statement ->
+    | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ ) as statement
+    ->
       statement

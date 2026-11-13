@@ -1,0 +1,111 @@
+================================================================================
+Error declarations
+================================================================================
+
+error Empty, BadDigit
+error NotFound = 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (error_declaration
+    (error_name
+      name: (identifier))
+    (error_name
+      name: (identifier)))
+  (error_declaration
+    (error_name
+      name: (identifier)
+      code: (integer))))
+
+================================================================================
+Fails functions, try and catch
+================================================================================
+
+fn parse(s addr) u32 fails {
+  errdefer e { log(e) }
+  if s == null { fail Empty }
+  n u32 = try next(s) + 1
+  m u32 = next(s) catch 0
+  next(s) catch e { return 0 }
+  return n
+}
+fn close() fails { }
+fn sw(e error) i32 { return call_addr[i32 fails](p) catch 0 }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      name: (identifier)
+      type: (address_type))
+    result: (primitive_type)
+    body: (block
+      (errdefer_statement
+        error: (identifier)
+        (block
+          (call_expression
+            function: (identifier)
+            arguments: (argument_list
+              (identifier)))))
+      (if_statement
+        condition: (binary_expression
+          left: (identifier)
+          right: (null))
+        (block
+          (fail_statement
+            error: (identifier))))
+      (declaration
+        name: (identifier)
+        type: (primitive_type)
+        value: (binary_expression
+          left: (try_expression
+            call: (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (identifier))))
+          right: (integer)))
+      (declaration
+        name: (identifier)
+        type: (primitive_type)
+        value: (catch_expression
+          call: (call_expression
+            function: (identifier)
+            arguments: (argument_list
+              (identifier)))
+          value: (integer)))
+      (catch_expression
+        call: (call_expression
+          function: (identifier)
+          arguments: (argument_list
+            (identifier)))
+        error: (identifier)
+        handler: (block
+          (return_statement
+            (integer))))
+      (return_statement
+        (identifier))))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      name: (identifier)
+      type: (error_type))
+    result: (primitive_type)
+    body: (block
+      (return_statement
+        (catch_expression
+          call: (call_expression
+            function: (index_expression
+              value: (identifier)
+              arguments: (bracket_arguments
+                (fails_argument
+                  type: (primitive_type))))
+            arguments: (argument_list
+              (identifier)))
+          value: (integer))))))

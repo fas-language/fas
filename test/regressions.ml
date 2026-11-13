@@ -336,6 +336,8 @@ let replay_nodes index (program : Ast.program) =
       | Generic_args (operand, arguments, _) | Select (operand, arguments, _) ->
           expr operand :: List.concat_map generic arguments
       | Array_lit (values, _) -> List.map expr values
+      | Try (call, _) | Catch (call, Catch_block _, _) -> [ expr call ]
+      | Catch (call, Catch_value fallback, _) -> [ expr call; expr fallback ]
     in
     let extent = List.fold_left replay_join own inner in
     spans := extent :: !spans;
@@ -368,7 +370,11 @@ let replay_nodes index (program : Ast.program) =
         run low;
         run high;
         List.iter stmt body
-    | Expr_stmt (operand, _, _) -> run operand
+    | Expr_stmt (operand, _, _) | Fail (operand, _) -> run operand
+    | Errdefer (_, body, _) -> List.iter stmt body
+    | Catch_stmt { call; body; _ } ->
+        run call;
+        List.iter stmt body
     | For (_, initial, condition, step, body, _) ->
         Option.iter stmt initial;
         Option.iter run condition;
@@ -994,6 +1000,7 @@ let lower_struct_error name fragment (struct_def : Hir.struct_def) =
         globals = [];
         funcs = [];
         strings = [];
+        errors = [];
       }
   with
   | Ok _ -> failwith (name ^ ": malformed struct lowered without error")
@@ -1022,9 +1029,11 @@ let lower_function_error name fragment params body =
               variadic = false;
               span = Span.synthetic;
               display = None;
+              fails = false;
             };
           ];
         strings = [];
+        errors = [];
       }
   with
   | Ok _ -> failwith (name ^ ": malformed HIR lowered without error")
@@ -2994,7 +3003,7 @@ let () =
   semantic_accept "switch-constant-case-range-twin"
     "const VALUE u8 = 200 + 55\n\
      fn f(x u8) i32 { switch x { case VALUE: return 1 } return 0 }\n";
-  semantic_error "switch-vec-scrutinee" "switch value must be an integer or bool"
+  semantic_error "switch-vec-scrutinee" "switch value must be an integer, bool or error"
     "fn f(v vec[2,i32]) i32 { switch v { case 1: return 1 } return 0 }\n";
   semantic_error "switch-bool-exhaustive-still-needs-return"
     "function `f` returning `i32` may reach the end without `return`"
@@ -5236,7 +5245,7 @@ let () =
     "const parameter type must be a scalar integer or bool"
     "fn bad[N const f32]() i32 { return 0 }\n";
   semantic_message "float-switch-scrutinee"
-    "switch value must be an integer or bool, got `f32`"
+    "switch value must be an integer, bool or error, got `f32`"
     "fn bad(x f32) i32 { switch x { case 1: { return 1 } default: { return 0 } } }\n";
   semantic_message "float-switch-case" "floating point literal cannot be used as `i32`"
     "fn bad(x i32) i32 { switch x { case 1.0: { return 1 } default: { return 0 } } }\n";
@@ -8608,6 +8617,7 @@ let () =
          globals = [];
          funcs = [];
          strings = [];
+         errors = [];
        }
    with
   | Ok _ -> failwith "layout-invariant: malformed struct lowered without error"
@@ -8683,8 +8693,10 @@ let () =
                variadic = false;
                span = Span.synthetic;
                display = None;
+               fails = false;
              };
            ];
+           errors = [];
        }
    with
   | Ok _ -> failwith "layout-invariant: opaque parameter lowered without error"
@@ -8711,8 +8723,10 @@ let () =
                variadic = false;
                span = Span.synthetic;
                display = None;
+               fails = false;
              };
            ];
+           errors = [];
        }
    with
   | Ok _ -> failwith "lower-fallthrough: malformed non-void HIR lowered"
@@ -8755,8 +8769,10 @@ let () =
                variadic = false;
                span = Span.synthetic;
                display = None;
+               fails = false;
              };
            ];
+           errors = [];
        }
    with
   | Ok _ -> failwith "lower-switch-case: malformed HIR lowered"
@@ -8839,6 +8855,7 @@ let () =
          globals = [];
          strings = [];
          funcs = [];
+         errors = [];
        }
    with
   | Ok _ -> failwith "layout-invariant: malformed const array lowered without error"

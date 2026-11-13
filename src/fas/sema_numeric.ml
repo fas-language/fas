@@ -71,6 +71,8 @@ let cast_legal kind from target =
           int_bits kind = 32
       | Hir.Float Hir.F64, Hir.Int kind | Hir.Int kind, Hir.Float Hir.F64 ->
           int_bits kind = 64
+      (* an error is its 32-bit code (extension; see "Fas error handling") *)
+      | Hir.Err, Hir.Int kind | Hir.Int kind, Hir.Err -> int_bits kind = 32
       | _ -> (
           match (bit_width from, bit_width target) with
           | Some source_width, Some destination_width ->
@@ -198,6 +200,7 @@ let mask_value ty value =
       let bits = int_bits k in
       if bits = 64 then value
       else Int64.logand value (Int64.sub (Int64.shift_left 1L bits) 1L)
+  | Hir.Err -> Int64.logand value 0xFFFF_FFFFL
   | _ -> value
 
 let literal_limit ~negative = function

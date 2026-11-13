@@ -23,6 +23,12 @@ let keyword = function
   | "switch" -> Kw_switch
   | "case" -> Kw_case
   | "default" -> Kw_default
+  | "error" -> Kw_error
+  | "fails" -> Kw_fails
+  | "fail" -> Kw_fail
+  | "try" -> Kw_try
+  | "catch" -> Kw_catch
+  | "errdefer" -> Kw_errdefer
   | name -> Ident name
 
 let is_keyword name = match keyword name with Token.Ident _ -> false | _ -> true

@@ -56,7 +56,7 @@ let validate_function_params generic_params params =
   validate [] params
 
 let extern_c_value_type = function
-  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ -> true
+  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
   | Hir.Void | Hir.Array _ | Hir.Vec _ | Hir.Struct _ | Hir.Opaque _ -> false
 
 let aggregate_value_type = function Hir.Array _ | Hir.Struct _ -> true | _ -> false
@@ -181,10 +181,128 @@ let validate_extern_c_signature ~named_types ~ret_source ~bodyless span params c
       (Printf.sprintf "extern \"C\" cannot return `%s` by value; use an output pointer"
          (Hir.ty_name ret))
 
+(* `error A, B = 2` declarations (see "Fas error handling"). Each name becomes
+   a constant of type `error` holding its code: FNV-1a-32 of the name with the
+   top bit set, or a pinned errno code in 1-4095. The same name declared twice
+   is the same error; `Unexpected` is predeclared. Returns the program with the
+   declarations replaced by constants, and the (name, code) table. *)
+let error_code_of_name name =
+  let h = ref 0x811c9dc5l in
+  String.iter
+    (fun ch ->
+      h := Int32.logxor !h (Int32.of_int (Char.code ch));
+      h := Int32.mul !h 0x01000193l)
+    name;
+  Int64.logor (Int64.logand (Int64.of_int32 !h) 0xFFFF_FFFFL) 0x8000_0000L
+
+let desugar_errors (program : Ast.program) =
+  let declared = Hashtbl.create 16 in
+  let order = ref [] in
+  let* () =
+    Result_list.iter
+      (function
+        | Ast.Error_decl { names; _ } ->
+            Result_list.iter
+              (fun (name, span, pin) ->
+                let* code =
+                  match pin with
+                  | None -> Ok (error_code_of_name name)
+                  | Some (Ast.Int_lit (raw, lit_span)) -> (
+                      match Sema_numeric.parse_integer raw with
+                      | Ok v when v >= 1L && v <= 4095L -> Ok v
+                      | Ok _ ->
+                          error lit_span
+                            "a pinned error code must be an errno code in 1-4095"
+                      | Error message -> error lit_span message)
+                  | Some value ->
+                      error (Ast.expr_span value)
+                        "a pinned error code must be an integer literal in 1-4095"
+                in
+                match Hashtbl.find_opt declared name with
+                | Some (previous, first_span) when previous <> code ->
+                    Error
+                      [
+                        Diag.error
+                          ~notes:[ "first declared at " ^ Span.to_string first_span ]
+                          span
+                          (Printf.sprintf "error `%s` is declared with different codes"
+                             name);
+                      ]
+                | Some _ -> Ok ()
+                | None ->
+                    Hashtbl.replace declared name (code, span);
+                    order := name :: !order;
+                    Ok ())
+              names
+        | _ -> Ok ())
+      program.Ast.items
+  in
+  let predeclared =
+    if Hashtbl.mem declared "Unexpected" then []
+    else (
+      Hashtbl.replace declared "Unexpected"
+        (error_code_of_name "Unexpected", Span.synthetic);
+      [ "Unexpected" ])
+  in
+  let names = predeclared @ List.rev !order in
+  let by_code = Hashtbl.create 16 in
+  let* () =
+    Result_list.iter
+      (fun name ->
+        let code, span = Hashtbl.find declared name in
+        match Hashtbl.find_opt by_code code with
+        | Some other ->
+            error span
+              (Printf.sprintf "errors `%s` and `%s` have the same code; rename one"
+                 other name)
+        | None ->
+            Hashtbl.replace by_code code name;
+            Ok ())
+      names
+  in
+  let const_item name =
+    let code, span = Hashtbl.find declared name in
+    Ast.Const
+      {
+        name;
+        name_span = span;
+        ty_span = span;
+        ty = Ast.Named_type ("error", span);
+        value =
+          Ast.Cast
+            ( Ast.Bitcast,
+              Ast.Named_type ("error", span),
+              Ast.Int_lit (Int64.to_string code, span),
+              span );
+        span;
+        extent = span;
+      }
+  in
+  let emitted = Hashtbl.create 16 in
+  let items =
+    List.concat_map
+      (function
+        | Ast.Error_decl { names; _ } ->
+            List.filter_map
+              (fun (name, _, _) ->
+                if Hashtbl.mem emitted name then None
+                else (
+                  Hashtbl.replace emitted name ();
+                  Some (const_item name)))
+              names
+        | item -> [ item ])
+      program.Ast.items
+  in
+  let items = List.map const_item predeclared @ items in
+  Ok
+    ( { Ast.items },
+      List.map (fun name -> (name, fst (Hashtbl.find declared name))) names )
+
 let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported = [])
     ?(c_nonnull_parameters = []) ?(c_string_parameters = [])
     ?(c_alloc_size_parameters = []) ?(c_records = []) ?(all_errors = false)
     ?specializations ?index program =
+  let* program, program_errors = desugar_errors program in
   let global_names =
     List.filter_map
       (function Ast.Global { name; _ } -> Some name | _ -> None)
@@ -203,7 +321,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     Option.value specializations ~default:(Sema_specialization.create ())
   in
   let declaration = function
-    | Ast.Use _ | Ast.Pkg _ -> None
+    | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ -> None
     | Ast.Opaque { name; span; _ } -> Some (name, Top_type, span)
     | Ast.Struct { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Const { name; name_span; _ } -> Some (name, Top_const, name_span)
@@ -678,6 +796,8 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       unresolved_shapes_unique = false;
       string_pool = program_strings;
       ret_ty = Hir.Void;
+      fn_fails = false;
+      handled_call = None;
       limits;
       index = None;
     }
@@ -762,7 +882,29 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 in
                 let* rt = source_return ret_span ret in
                 let* () =
-                  if name = "main" then validate_entry_signature span ps rt else Ok ()
+                  if name = "main" then
+                    validate_entry_signature span ps
+                      (if func.fails && rt = Hir.Void then Hir.Int Hir.I32 else rt)
+                  else Ok ()
+                in
+                let* () =
+                  if not func.fails then Ok ()
+                  else if linkage = Ast.External_c then
+                    error span
+                      "a C function is never `fails`; wrap the call and use \
+                       `errno_err()`"
+                  else
+                    match rt with
+                    | Hir.Void | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr
+                    | Hir.Handle _ | Hir.Err ->
+                        Ok ()
+                    | _ ->
+                        error ret_span
+                          (Printf.sprintf
+                             "a `fails` function cannot return `%s`; return a \
+                              scalar, an address, a handle or an error, or fill an \
+                              out pointer"
+                             (Hir.ty_name rt))
                 in
                 let* () =
                   (if linkage = Ast.External_c then
@@ -773,7 +915,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                        (specialization_trace specializations Function_specialization
                           name)
                 in
-                sigs := (name, { params = ps; ret = rt; variadic }) :: !sigs;
+                sigs := (name, { params = ps; ret = rt; variadic; fails = func.fails }) :: !sigs;
                 Ok ()
         | _ -> Ok ())
       (Ok ()) program.items
@@ -792,7 +934,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     | Ast.External_c -> Hir.External_c
     | Ast.Internal -> Hir.Internal
   in
-  let make_context ~extra_consts ~spec_depth ~spec_trace ~ret_ty =
+  let make_context ~extra_consts ~spec_depth ~spec_trace ~ret_ty ~fn_fails =
     {
       structs;
       generic_structs = program.Ast.items;
@@ -829,6 +971,8 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       unresolved_shapes_unique = false;
       string_pool = program_strings;
       ret_ty;
+      fn_fails;
+      handled_call = None;
       limits;
       index;
     }
@@ -850,6 +994,8 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
         loop_labels_in_block yes @ Option.fold ~none:[] ~some:loop_labels_in_block no
     | Ast.Defer (body, _)
     | Ast.Block (body, _)
+    | Ast.Errdefer (_, body, _)
+    | Ast.Catch_stmt { body; _ }
     | Ast.Const_for { body; _ }
     | Ast.Const_copy { body; _ } ->
         loop_labels_in_block body
@@ -857,7 +1003,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
         List.concat_map (fun (_, body) -> loop_labels_in_block body) cases
         @ Option.fold ~none:[] ~some:loop_labels_in_block default
     | Ast.Let _ | Ast.View _ | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _
-    | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ ->
+    | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ ->
         []
   in
   let display_name name =
@@ -865,9 +1011,11 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       Function_specialization name
   in
   let check_function_body ~name ~diagnostic_name ~description ~span ~diagnostic_span
-      ~params ~param_spans ~ret ~stmts ~linkage ~variadic ~extra_consts ~spec_depth
-      ~spec_trace ~require_return =
-    let context = make_context ~extra_consts ~spec_depth ~spec_trace ~ret_ty:ret in
+      ~params ~param_spans ~ret ~fails ~stmts ~linkage ~variadic ~extra_consts
+      ~spec_depth ~spec_trace ~require_return =
+    let context =
+      make_context ~extra_consts ~spec_depth ~spec_trace ~ret_ty:ret ~fn_fails:fails
+    in
     Option.iter
       (fun index ->
         let template, instance =
@@ -910,6 +1058,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
          Hir.name;
          params;
          ret;
+         fails;
          body = Hir.Statements body;
          linkage;
          variadic;
@@ -956,6 +1105,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                    Hir.name;
                    params = hir_params params;
                    ret;
+                   fails = func.fails;
                    body = Hir.Declaration;
                    linkage;
                    variadic;
@@ -968,7 +1118,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 ~diagnostic_span:name_span ~params
                 ~param_spans:
                   (List.map (fun (param : Ast.param) -> param.span) func.params)
-                ~ret ~stmts ~linkage ~variadic ~extra_consts:[] ~spec_depth
+                ~ret ~fails:func.fails ~stmts ~linkage ~variadic ~extra_consts:[] ~spec_depth
                 ~spec_trace:trace ~require_return:true
         in
         let* func = result |> trace_result specializations trace in
@@ -1039,7 +1189,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 ~diagnostic_span:func.name_span ~params
                 ~param_spans:
                   (List.map (fun (param : Ast.param) -> param.span) source_params)
-                ~ret ~stmts ~linkage:(hir_linkage linkage) ~variadic
+                ~ret ~fails:func.fails ~stmts ~linkage:(hir_linkage linkage) ~variadic
                 ~extra_consts:values ~spec_depth:(sp.depth + 1) ~spec_trace:sp.trace
                 ~require_return:true
             in
@@ -1165,6 +1315,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
        globals;
        funcs = List.rev !funcs;
        strings = List.rev program_strings.reversed;
+       errors = program_errors;
      }
       : Hir.program)
 

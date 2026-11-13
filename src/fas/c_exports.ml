@@ -187,6 +187,7 @@ let declarations ?(reserved = []) ?specializations records (program : program) =
         ^ "_t"
     | Float Hir.F32 -> "float"
     | Float Hir.F64 -> "double"
+    | Err -> "uint32_t"
     | Void -> "void"
     | Addr -> "void *"
     | Handle name -> (

@@ -1,0 +1,126 @@
+use "C" <stdio.h>
+
+error Empty, BadDigit, Overflow
+error NotFound = 2
+
+fn parse_u32(s addr) u32 fails {
+    if s[u8, 0] == 0 { fail Empty }
+    n u64 = 0
+    i u64 = 0
+    while s[u8, i] != 0 {
+        c u8 = s[u8, i]
+        if c < 48 || c > 57 { fail BadDigit }
+        n = n * 10 + zext[u64](c - 48)
+        if n > 4294967295 { fail Overflow }
+        i = i + 1
+    }
+    return trunc[u32](n)
+}
+
+var g i32 = 0
+
+fn closes(x i32) fails {
+    defer { g = g + 1 }
+    errdefer e { g = g + 100; printf(c"errdefer %s\n", err_name(e)) }
+    if x < 0 { fail BadDigit }
+}
+
+fn twice(s addr) u32 fails {
+    errdefer { printf(c"twice errdefer\n") }
+    n u32 = try parse_u32(s)
+    return n * 2
+}
+
+fn half(x f64) f64 fails {
+    if x < 0.0 { fail Overflow }
+    return x / 2.0
+}
+
+fn flag(x i32) bool fails {
+    if x == 0 { fail Empty }
+    return x > 0
+}
+
+fn ptr(x i32) addr fails {
+    if x == 0 { fail NotFound }
+    return c"ok"
+}
+
+fn small(x i32) u8 fails {
+    if x == 0 { fail Empty }
+    return 200
+}
+
+fn wide(x i32) i64 fails {
+    if x == 0 { fail Empty }
+    return -5000000000
+}
+
+fn in_loop() i32 fails {
+    total i32 = 0
+    i i32 = 0
+    while i < 5 {
+        defer { total = total + 1000 }
+        errdefer { printf(c"loop errdefer %d\n", i) }
+        if i == 3 { try closes(-1) }
+        i = i + 1
+    }
+    return total
+}
+
+fn indirect(p addr) i32 {
+    v u32 = call_addr[u32 fails](p, c"77") catch 0
+    w u32 = call_addr[u32 fails](p, c"z") catch 9
+    return bitcast[i32](v + w)
+}
+
+fn sw(e error) i32 {
+    switch e {
+        case Empty: return 1
+        case BadDigit: return 2
+        default: return 3
+    }
+}
+
+fn run_loop() void {
+    r i32 = in_loop() catch e { printf(c"in_loop %s g %d\n", err_name(e), g); return }
+    printf(c"unreachable %d\n", r)
+}
+
+fn open_missing() handle[FILE] fails {
+    f handle[FILE] = fopen(c"/dev/null/x", c"r")
+    if f == null { fail errno_err() }
+    return f
+}
+
+fn names() void {
+    printf(c"unknown %s\n", err_name(bitcast[error](0x7fff0000)))
+    f handle[FILE] = open_missing() catch e { printf(c"open %s\n", err_name(e)); return }
+    printf(c"opened\n")
+}
+
+fn main() i32 {
+    names()
+    e error = BadDigit
+    if e == BadDigit && e != Empty && Overflow != e { printf(c"compare ok\n") }
+    a u32 = parse_u32(c"123") catch 7
+    b u32 = parse_u32(c"12x") catch 7
+    printf(c"%u %u\n", a, b)
+    closes(1) catch e { printf(c"no\n") }
+    closes(-1) catch e { printf(c"closes failed: %s\n", err_name(e)) }
+    closes(-1) catch { printf(c"closes failed again\n") }
+    printf(c"g %d\n", g)
+    t u32 = twice(c"21") catch 0
+    printf(c"twice %u\n", t)
+    t = twice(c"99999999999") catch 5
+    printf(c"twice %u\n", t)
+    run_loop()
+    printf(c"indirect %d\n", indirect(&parse_u32))
+    printf(c"sw %d %d %d %d\n", sw(Empty), sw(BadDigit), sw(Overflow), sw(errno_err()))
+    printf(c"half %g %g\n", half(5.0) catch 1.5, half(-1.0) catch 1.5)
+    printf(c"flag %d %d\n", flag(3) catch false, flag(0) catch true)
+    printf(c"ptr %s %s\n", ptr(1) catch c"no", ptr(0) catch c"fallback")
+    printf(c"small %u %u wide %ld %ld\n", small(1) catch 1, small(0) catch 1, wide(1) catch 0, wide(0) catch 7)
+    q addr = ptr(0) catch e { printf(c"name %s code %u\n", err_name(e), bitcast[u32](e)); return 10 }
+    return 0
+}

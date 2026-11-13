@@ -15,7 +15,12 @@ type checked_target = {
   through_view : bool;
 }
 
-type signature = { params : (string * Hir.ty) list; ret : Hir.ty; variadic : bool }
+type signature = {
+  params : (string * Hir.ty) list;
+  ret : Hir.ty;
+  variadic : bool;
+  fails : bool;
+}
 type trailing_args = Reject | Promote_variadic
 type top_level_kind = Top_type | Top_function | Top_const | Top_global
 
@@ -77,6 +82,11 @@ type context = {
   mutable unresolved_shapes_unique : bool;
   string_pool : string_pool;
   ret_ty : Hir.ty;
+  (* the function being checked is `fails`: `try` and `fail` are allowed *)
+  fn_fails : bool;
+  (* the span of the call that the enclosing `try` or `catch` handles; a call
+     to a `fails` function whose span is not this one is refused *)
+  mutable handled_call : Span.t option;
   limits : Limits.t;
   index : Sema_index.t option;
 }
@@ -206,6 +216,13 @@ let rec count_expanded_expr_type_nodes expr cap total =
     | Ast.Designated_index (index, value, _) ->
         count_expanded_expr_type_nodes value cap
           (count_expanded_expr_type_nodes index cap total)
+    | Ast.Try (call, _) -> count_expanded_expr_type_nodes call cap total
+    | Ast.Catch (call, Ast.Catch_value value, _) ->
+        count_expanded_expr_type_nodes value cap
+          (count_expanded_expr_type_nodes call cap total)
+    | Ast.Catch (call, Ast.Catch_block (_, body), _) ->
+        count_expanded_stmts_type_nodes body cap
+          (count_expanded_expr_type_nodes call cap total)
 
 and count_expanded_arg_type_nodes argument cap total =
   if total >= cap then cap
@@ -283,6 +300,17 @@ and count_expanded_stmt_type_nodes stmt cap total =
         match default with
         | Some statements -> count_expanded_stmts_type_nodes statements cap total
         | None -> total)
+    | Ast.Fail (value, _) -> count_expanded_expr_type_nodes value cap total
+    | Ast.Errdefer (_, body, _) -> count_expanded_stmts_type_nodes body cap total
+    | Ast.Catch_stmt { target; call; body; _ } ->
+        let total =
+          match target with
+          | Ast.Catch_let { ty; _ } -> count_expanded_type_nodes ty cap total
+          | Ast.Catch_assign target -> count_expanded_target_type_nodes target cap total
+          | Ast.Catch_discard -> total
+        in
+        count_expanded_stmts_type_nodes body cap
+          (count_expanded_expr_type_nodes call cap total)
 
 and count_expanded_stmts_type_nodes statements cap total =
   List.fold_left
@@ -339,6 +367,13 @@ and count_expanded_item_type_nodes item cap total =
              total fields)
           generic_params
     | Ast.Opaque _ -> total
+    | Ast.Error_decl { names; _ } ->
+        List.fold_left
+          (fun total (_, _, pinned) ->
+            Option.fold ~none:total
+              ~some:(fun value -> count_expanded_expr_type_nodes value cap total)
+              pinned)
+          total names
     | Ast.Func { params; ret; body; generic_params; _ } ->
         let total =
           List.fold_left

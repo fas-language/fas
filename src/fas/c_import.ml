@@ -4534,6 +4534,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                        ret_span = span;
                        params;
                        ret;
+                       fails = false;
                        body = Ast.Declaration;
                        linkage = Ast.External_c;
                        variadic;

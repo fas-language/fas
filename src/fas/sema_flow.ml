@@ -843,6 +843,8 @@ let finish_statement flow ~before ~terminates =
     restore flow { before with initialized = flow.initialized }
   else if terminates then flow.falls_through <- false
 
+let in_defer flow = flow.in_defer
+
 let validate_return flow span =
   if flow.in_defer then error span "return is not allowed inside defer" else Ok ()
 
@@ -1014,7 +1016,11 @@ let begin_defer flow span =
     flow.falls_through <- true;
     Ok capture
 
-let finish_defer flow capture checked ~falls_through:body_falls_through =
+(* an errdefer runs only on failing exits, which leave the function: its
+   effects never reach code after its scope, so only its requirements are kept,
+   and it never stops a scope exit from falling through *)
+let finish_defer ?(errdefer = false) flow capture checked
+    ~falls_through:body_falls_through =
   let after = snapshot flow in
   let requirements = Option.value ~default:[] flow.collecting_defer |> List.rev in
   flow.in_defer <- false;
@@ -1041,13 +1047,22 @@ let finish_defer flow capture checked ~falls_through:body_falls_through =
      match flow.defer_scopes with
      | scope :: rest ->
          flow.defer_scopes <-
-           ({
-              requirements;
-              effects;
-              value_effects;
-              address_effects;
-              falls_through = body_falls_through body;
-            }
+           ((if errdefer then
+              {
+                requirements;
+                effects = [];
+                value_effects = [];
+                address_effects = [];
+                falls_through = true;
+              }
+            else
+              {
+                requirements;
+                effects;
+                value_effects;
+                address_effects;
+                falls_through = body_falls_through body;
+              })
            :: scope)
            :: rest
      | [] -> ());

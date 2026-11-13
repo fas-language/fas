@@ -24,6 +24,7 @@ const keywords = [
   'fn', 'return', 'if', 'else', 'while', 'break', 'continue', 'const', 'var',
   'struct', 'opaque', 'extern', 'defer', 'use', 'for', 'switch', 'case',
   'default', 'view', 'addr', 'handle', 'arr', 'vec', 'true', 'false', 'null',
+  'error', 'fails', 'fail', 'try', 'catch', 'errdefer',
   ...primitive_types,
 ];
 
@@ -122,11 +123,14 @@ module.exports = grammar({
         $.opaque_declaration,
         $.extern_declaration,
         $.function_declaration,
+        $.error_declaration,
       ),
 
     use_declaration: ($) =>
       seq(
         'use',
+        // `use linux "f.fas"`: only when building for that OS
+        optional(field('os', $.identifier)),
         field('path', $.string),
         optional(
           choice(
@@ -184,6 +188,15 @@ module.exports = grammar({
 
     opaque_declaration: ($) => seq('opaque', field('name', $.identifier)),
 
+    // error Empty, BadDigit, NotFound = 2
+    error_declaration: ($) => seq('error', commaSeparated($.error_name)),
+
+    error_name: ($) =>
+      seq(
+        field('name', $.identifier),
+        optional(seq('=', field('code', $.integer))),
+      ),
+
     extern_declaration: ($) =>
       seq(
         'extern',
@@ -205,7 +218,10 @@ module.exports = grammar({
         field('name', $.identifier),
         optional($.generic_params),
         field('parameters', $.parameter_list),
-        field('result', $._type),
+        choice(
+          seq(field('result', $._type), optional(field('fails', 'fails'))),
+          field('fails', 'fails'),
+        ),
         optional(field('body', $.block)),
       ),
 
@@ -237,6 +253,7 @@ module.exports = grammar({
         $.return_statement,
         $.break_statement,
         $.continue_statement,
+        $.fail_statement,
         $._expr,
       ),
 
@@ -248,6 +265,7 @@ module.exports = grammar({
         $.const_for_statement,
         $.switch_statement,
         $.defer_statement,
+        $.errdefer_statement,
         $.block,
         $.labeled_statement,
       ),
@@ -284,6 +302,11 @@ module.exports = grammar({
       seq('continue', optional(field('label', $.identifier))),
 
     defer_statement: ($) => seq('defer', $.block),
+
+    errdefer_statement: ($) =>
+      seq('errdefer', optional(field('error', $.identifier)), $.block),
+
+    fail_statement: ($) => seq('fail', field('error', $._expression)),
 
     labeled_statement: ($) =>
       seq(
@@ -393,6 +416,7 @@ module.exports = grammar({
     _unary: ($) =>
       choice(
         $.unary_expression,
+        $.try_expression,
         $.c_dereference,
         $.c_pointer_cast,
         $._postfix,
@@ -406,6 +430,10 @@ module.exports = grammar({
           field('operand', $._unary),
         ),
       ),
+
+    // binds tighter than every operator: `try f() + 1` adds to the value
+    try_expression: ($) =>
+      prec(PREC.unary, seq('try', field('call', $._postfix))),
 
     c_dereference: ($) =>
       prec(
@@ -436,6 +464,7 @@ module.exports = grammar({
     _postfix: ($) =>
       choice(
         $.call_expression,
+        $.catch_expression,
         $.index_expression,
         $.field_expression,
         $.dereference_field,
@@ -446,6 +475,21 @@ module.exports = grammar({
       prec.left(
         PREC.postfix,
         seq(field('function', $._postfix), field('arguments', $.argument_list)),
+      ),
+
+    // `f() catch 0`: the default value takes the whole expression to its
+    // right; `f() catch { }` and `f() catch e { }` run a block
+    catch_expression: ($) =>
+      prec.right(
+        -1,
+        seq(
+          field('call', $._postfix),
+          'catch',
+          choice(
+            seq(optional(field('error', $.identifier)), field('handler', $.block)),
+            field('value', $._expression),
+          ),
+        ),
       ),
 
     index_expression: ($) =>
@@ -493,7 +537,10 @@ module.exports = grammar({
     bracket_arguments: ($) => delimited($._bracket_argument, '[', ']'),
 
     _bracket_argument: ($) =>
-      choice($.range_argument, $._type, $._expression),
+      choice($.range_argument, $.fails_argument, $._type, $._expression),
+
+    // call_addr[T fails] and call_addr[fails]
+    fails_argument: ($) => seq(optional(field('type', $._type)), 'fails'),
 
     range_argument: (_) => seq('.', '.'),
 
@@ -501,6 +548,7 @@ module.exports = grammar({
       choice(
         $.primitive_type,
         $.address_type,
+        $.error_type,
         $.handle_type,
         $.array_type,
         $.vector_type,
@@ -510,6 +558,8 @@ module.exports = grammar({
     primitive_type: (_) => choice(...primitive_types),
 
     address_type: (_) => 'addr',
+
+    error_type: (_) => 'error',
 
     handle_type: ($) => seq('handle', '[', $._type, ']'),
 

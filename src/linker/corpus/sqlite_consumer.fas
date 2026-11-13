@@ -1,6 +1,6 @@
 extern "C" {
     fn sqlite3_open(filename addr, database addr) i32
-    fn sqlite3_exec(database addr, sql addr, callback addr, context addr, error addr) i32
+    fn sqlite3_exec(database addr, sql addr, callback addr, context addr, error_message addr) i32
     fn sqlite3_prepare_v2(database addr, sql addr, length i32, statement addr, tail addr) i32
     fn sqlite3_step(statement addr) i32
     fn sqlite3_column_int(statement addr, column i32) i32

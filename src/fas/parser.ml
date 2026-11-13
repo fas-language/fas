@@ -225,7 +225,8 @@ module P = struct
       | Token.Kw_break | Token.Kw_continue | Token.Kw_const | Token.Kw_var
       | Token.Kw_struct | Token.Kw_opaque | Token.Kw_extern | Token.Kw_defer
       | Token.Kw_use | Token.Kw_for | Token.Kw_switch | Token.Kw_case | Token.Kw_default
-        ) as kind ->
+      | Token.Kw_error | Token.Kw_fails | Token.Kw_fail | Token.Kw_try | Token.Kw_catch
+      | Token.Kw_errdefer ) as kind ->
         let shown = Token.show kind in
         Ok (String.sub shown 1 (String.length shown - 2), token.span)
     | kind ->
@@ -279,6 +280,11 @@ module P = struct
   let bind r f = match r with Error e -> Error e | Ok x -> f x
   let ( let* ) = bind
   let span p = (peek p).Token.span
+
+  let join_spans (first : Span.t) (last : Span.t) =
+    Span.make ~file:first.Span.file ~start_offset:first.Span.start_offset
+      ~end_offset:(max first.Span.end_offset last.Span.end_offset)
+      ~line:first.Span.line ~column:first.Span.column
 
   let extent p (start : Span.t) =
     let rec last i =
@@ -375,6 +381,9 @@ module P = struct
 
   and ty_inner p =
     match (peek p).kind with
+    | Token.Kw_error ->
+        let token = bump p in
+        Ok (Ast.Named_type ("error", token.span))
     | Token.Ident "bool" ->
         ignore (bump p);
         Ok Ast.Bool
@@ -518,16 +527,33 @@ module P = struct
     let* () = expected p Token.Lbracket in
     delimited p (fun () ->
         let rec go acc =
-          let* arg = generic_arg p in
-          if eat p Token.Comma then go (arg :: acc)
+          (* `call_addr[T fails]` and `call_addr[fails]` (no result): `fails`
+             is a keyword, so the argument it adds cannot be written any other
+             way *)
+          let* acc =
+            if at p Token.Kw_fails then Ok acc
+            else
+              let* arg = generic_arg p in
+              Ok (arg :: acc)
+          in
+          let acc =
+            if at p Token.Kw_fails then
+              let token = bump p in
+              Ast.Name_arg ("fails", token.span) :: acc
+            else acc
+          in
+          if eat p Token.Comma then go acc
           else
             let* () = expected p Token.Rbracket in
-            Ok (List.rev (arg :: acc))
+            Ok (List.rev acc)
         in
         go [])
 
   and generic_arg p =
     match ((peek p).kind, (peek_n p 1).kind) with
+    | Token.Kw_error, _ ->
+        let* t = ty p in
+        Ok (Ast.Type_arg t)
     | Token.Ident ("true" | "false"), _ ->
         let* e = expr p in
         Ok (Ast.Const_arg e)
@@ -571,7 +597,7 @@ module P = struct
 
   and starts_type p =
     match ((peek p).kind, (peek_n p 1).kind) with
-    | Token.Ident _, Token.Ident _ -> true
+    | Token.Ident _, (Token.Ident _ | Token.Kw_error) -> true
     | _ -> false
 
   and starts_struct_literal p =
@@ -726,6 +752,27 @@ module P = struct
         let start = span p in
         let* x = const_item p in
         Ok [ Ast.with_extent (extent p start) x ]
+    | Token.Kw_error ->
+        let start = span p in
+        ignore (bump p);
+        let rec names acc =
+          let name_span = span p in
+          let* name = ident p in
+          let* pinned =
+            if eat p Token.Assign then
+              let* value = expr p in
+              Ok (Some value)
+            else Ok None
+          in
+          let acc = (name, name_span, pinned) :: acc in
+          if eat p Token.Comma then (
+            skip_newlines p;
+            names acc)
+          else Ok (List.rev acc)
+        in
+        let* names = names [] in
+        let* () = end_stmt p in
+        Ok [ Ast.Error_decl { names; span = start; extent = extent p start } ]
     | Token.Kw_var ->
         let start = span p in
         let* x = global_item p Ast.Internal_global in
@@ -1001,9 +1048,11 @@ module P = struct
     let* ret =
       if at p Token.Lbrace then
         error (span p) "function result type is required before the body"
+      else if at p Token.Kw_fails then Ok Ast.Void
       else ty p
     in
-    Ok (ps, ret, variadic, ret_span)
+    let fails = eat p Token.Kw_fails in
+    Ok (ps, ret, variadic, ret_span, fails)
 
   and extern_block p =
     let s = span p in
@@ -1067,7 +1116,7 @@ module P = struct
       else Ok ()
     in
     let* generic_params = generic_params p in
-    let* ps, ret, var, ret_span = signature p allow_variadic in
+    let* ps, ret, var, ret_span, fails = signature p allow_variadic in
     let* () =
       if at p Token.At then
         let at_span = span p in
@@ -1109,6 +1158,7 @@ module P = struct
                  ret_span;
                  params = ps;
                  ret;
+                 fails;
                  body = Ast.Statements body;
                  linkage = Ast.External_c;
                  variadic = false;
@@ -1127,6 +1177,7 @@ module P = struct
                ret_span;
                params = ps;
                ret;
+               fails;
                body = Ast.Declaration;
                linkage = Ast.External_c;
                variadic = var;
@@ -1147,6 +1198,7 @@ module P = struct
              ret_span;
              params = ps;
              ret;
+             fails;
              body = Ast.Statements body;
              linkage = Ast.Internal;
              variadic = var;
@@ -1335,6 +1387,28 @@ module P = struct
         ignore (bump p);
         let* b = block p in
         Ok (Ast.Defer (b, s))
+    | Token.Kw_errdefer ->
+        let s = span p in
+        ignore (bump p);
+        let* binding =
+          match (peek p).kind with
+          | Token.Ident name ->
+              let name_span = span p in
+              ignore (bump p);
+              Ok (Some (name, name_span))
+          | _ -> Ok None
+        in
+        let* b = block p in
+        Ok (Ast.Errdefer (binding, b, s))
+    | Token.Kw_fail ->
+        let s = span p in
+        ignore (bump p);
+        if at p Token.Newline || at p Token.Semi || at p Token.Rbrace || at p Token.Eof
+        then error s "`fail` needs an error, e.g. `fail NotFound`"
+        else
+          let* e = expr p in
+          let* () = end_stmt p in
+          Ok (Ast.Fail (e, s))
     | Token.Lbrace ->
         let s = span p in
         let* b = block p in
@@ -1402,7 +1476,18 @@ module P = struct
       else Ok None
     in
     let* () = finish_statement p consume_end in
-    Ok (Ast.Let { name; ty; ty_span; init; span = s })
+    match init with
+    | Some (Ast.Catch (call, Ast.Catch_block (binding, body), _)) ->
+        Ok
+          (Ast.Catch_stmt
+             {
+               target = Ast.Catch_let { name; ty; ty_span };
+               call;
+               binding;
+               body;
+               span = s;
+             })
+    | _ -> Ok (Ast.Let { name; ty; ty_span; init; span = s })
 
   and declaration p = declaration_with_end p true
 
@@ -1438,7 +1523,12 @@ module P = struct
           else
             let* t = target lhs in
             let* () = finish_statement p consume_end in
-            Ok (Ast.Assign (t, rhs, s))
+            match rhs with
+            | Ast.Catch (call, Ast.Catch_block (binding, body), _) ->
+                Ok
+                  (Ast.Catch_stmt
+                     { target = Ast.Catch_assign t; call; binding; body; span = s })
+            | _ -> Ok (Ast.Assign (t, rhs, s))
         else
           let last = p.tokens.(max 0 (p.pos - 1)) in
           let finish =
@@ -1447,7 +1537,12 @@ module P = struct
               ~column:s.Span.column
           in
           let* () = finish_statement p consume_end in
-          Ok (Ast.Expr_stmt (lhs, s, finish))
+          match lhs with
+          | Ast.Catch (call, Ast.Catch_block (binding, body), _) ->
+              Ok
+                (Ast.Catch_stmt
+                   { target = Ast.Catch_discard; call; binding; body; span = s })
+          | _ -> Ok (Ast.Expr_stmt (lhs, s, finish))
 
   and assignment_or_expr p = assignment_or_expr_with_end p true
 
@@ -1778,6 +1873,14 @@ module P = struct
             ignore (bump p);
             let* e = unary p in
             Ok (Ast.Unary (Ast.Bit_not, e, s)))
+    | Token.Kw_try ->
+        let s = span p in
+        within_nesting p s "unary nesting exceeds the configured limit" (fun () ->
+            ignore (bump p);
+            (* binds tighter than every operator: `try f() + 1` adds to the value *)
+            let* e = postfix p in
+            let finish = p.tokens.(p.pos - 1).Token.span in
+            Ok (Ast.Try (e, join_spans s finish)))
     | _ -> postfix p
 
   and postfix p =
@@ -1860,6 +1963,31 @@ module P = struct
           else
             let* n, field_span = field_ident p in
             go (Ast.Field (e, n, field_span))
+      | Token.Kw_catch ->
+          let catch_span = span p in
+          ignore (bump p);
+          let start = Ast.expr_span e in
+          let finished () =
+            join_spans start p.tokens.(p.pos - 1).Token.span
+          in
+          let before_block = p.block_expression_depth = Some p.depth in
+          let block_handler binding =
+            let* body = block p in
+            Ok (Ast.Catch (e, Ast.Catch_block (binding, body), finished ()))
+          in
+          (match ((peek p).kind, (peek_n p 1).kind) with
+          | Token.Lbrace, _ when not before_block -> block_handler None
+          | Token.Ident name, Token.Lbrace when not before_block ->
+              let name_span = span p in
+              ignore (bump p);
+              block_handler (Some (name, name_span))
+          | (Token.Newline | Token.Eof | Token.Rparen | Token.Rbrace), _ ->
+              error catch_span
+                "`catch` needs a default value or a block, e.g. `f() catch 0`"
+          | _ ->
+              (* the default value takes the whole expression to its right *)
+              let* value = expr p in
+              Ok (Ast.Catch (e, Ast.Catch_value value, finished ())))
       | _ -> Ok e
     in
     go first
@@ -2092,7 +2220,7 @@ module P = struct
         Error [ Diag.error (span p) ("expected an expression, found " ^ Token.show t) ]
 end
 
-let item_keywords = [ "const"; "var"; "struct"; "opaque"; "extern"; "fn"; "use" ]
+let item_keywords = [ "const"; "var"; "struct"; "opaque"; "extern"; "fn"; "use"; "error" ]
 
 let item_starts text =
   let n = String.length text in

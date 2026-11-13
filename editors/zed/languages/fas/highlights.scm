@@ -34,6 +34,12 @@
   "case"
   "default"
   "view"
+  "error"
+  "fails"
+  "fail"
+  "try"
+  "catch"
+  "errdefer"
 ] @keyword
 
 [
@@ -44,6 +50,7 @@
 
 (address_type) @type.builtin
 (primitive_type) @type.builtin
+(error_type) @type.builtin
 
 [
   "+"
@@ -112,7 +119,7 @@
     "add_sat" "sub_sat" "mul_hi" "reduce_sum" "reduce_min" "reduce_max"
     "reduce_and" "reduce_or" "reduce_xor" "shuffle" "permute" "compress"
     "expand" "masked_load" "masked_store" "gather" "gather_bytes" "scatter"
-    "scatter_bytes" "copy" "call_addr" "volatile_load" "volatile_store"
+    "scatter_bytes" "copy" "call_addr" "errno_err" "err_name" "volatile_load" "volatile_store"
     "addr_bits" "addr_from_bits" "handle_addr" "handle_from_addr" "syscall" "sqrt"
     "atomic_load" "atomic_store" "atomic_xchg" "atomic_cas" "atomic_add"
     "atomic_sub" "atomic_and" "atomic_or" "atomic_xor" "atomic_fence"

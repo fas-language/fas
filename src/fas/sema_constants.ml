@@ -1086,8 +1086,14 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
   | Ast.Cast (k, dst, e, s) ->
       let* dt = source_ty_with_values named_types consts s dst in
       let scalar_source () =
+        (* an error code literal (the desugared `error` declarations) is a u32 *)
+        let source_expected =
+          match (dt, e) with
+          | Hir.Err, Ast.Int_lit _ -> Some (Hir.Int Hir.U32)
+          | _ -> None
+        in
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
-          ~globals ?resolve consts ~check_only ~validate_dead None e
+          ~globals ?resolve consts ~check_only ~validate_dead source_expected e
       in
       let* st, v, reshaped =
         match scalar_source () with
@@ -1111,6 +1117,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
         if
           ((st = Hir.Bool || is_int st) && (dt = Hir.Bool || is_int dt))
           || (k = Ast.Bitcast && (is_float st || is_float dt))
+          || (k = Ast.Bitcast && (st = Hir.Err || dt = Hir.Err))
           || (k = Ast.Float_widen && is_float st && is_float dt)
           || reshaped
         then Ok ()
@@ -2218,7 +2225,7 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
 let resolve_scalar_declarations ?(globals = []) ?(array_lengths = [])
     ?(generic_structs = []) ~structs ~named_types ~resolve_type ~strict items =
   let scalar_constant_type = function
-    | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ -> true
+    | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
     | _ -> false
   in
   let declarations =

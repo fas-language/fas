@@ -1,0 +1,52 @@
+use "C" "errors_abi.h"
+
+error NotFound = 2
+
+fn f_i32(x i32) i32 fails { if x < 0 { fail NotFound } return x * 2 }
+fn f_u8(x i32) u8 fails { if x < 0 { fail NotFound } return trunc[u8](x) + 200 }
+fn f_i64(x i32) i64 fails { if x < 0 { fail NotFound } return sext[i64](x) * -3000000000 }
+fn f_f64(x i32) f64 fails { if x < 0 { fail NotFound } return 1.25 }
+fn f_ptr(x i32) addr fails { if x < 0 { fail NotFound } return c"fas" }
+fn f_bool(x i32) bool fails { if x < 0 { fail NotFound } return x > 5 }
+fn f_void(x i32) fails { if x < 0 { fail NotFound } }
+fn f_f32(x i32) f32 fails { if x < 0 { fail NotFound } return 2.5 }
+
+var fns arr[8, addr] = { &f_i32, &f_u8, &f_i64, &f_f64, &f_ptr, &f_bool, &f_void, &f_f32 }
+
+fn ck_i32() i32 {
+    if (call_addr[i32 fails](c_fns[0], 21) catch 0) != 42 { return 1 }
+    v i32 = call_addr[i32 fails](c_fns[0], -1) catch e {
+        if bitcast[u32](e) != 0x80001234 { return 2 }
+        return 0
+    }
+    return 3
+}
+fn ck_rest() i32 {
+    bad i32 = 0
+    if (call_addr[u8 fails](c_fns[1], 7) catch 0) != 207 { bad |= 1 }
+    if (call_addr[u8 fails](c_fns[1], -1) catch 1) != 1 { bad |= 2 }
+    if (call_addr[i16 fails](c_fns[2], 9) catch 0) != -9 { bad |= 4 }
+    if (call_addr[i64 fails](c_fns[3], 2) catch 0) != -6000000000 { bad |= 8 }
+    if (call_addr[i64 fails](c_fns[3], -2) catch 5) != 5 { bad |= 16 }
+    p addr = call_addr[addr fails](c_fns[4], 1) catch null
+    if p == null || p[u8, 0] != 99 { bad |= 32 }
+    if (call_addr[f64 fails](c_fns[5], 2) catch 0.0) != 2.25 { bad |= 64 }
+    if (call_addr[f32 fails](c_fns[6], 2) catch 0.0) != 2.5 { bad |= 128 }
+    if !(call_addr[bool fails](c_fns[7], 9) catch false) { bad |= 256 }
+    if (call_addr[bool fails](c_fns[7], -9) catch true) != true { bad |= 512 }
+    call_addr[fails](c_fns[8], 1) catch { bad |= 1024 }
+    call_addr[fails](c_fns[8], -1) catch e {
+        if bitcast[u32](e) != 12 { bad |= 2048 }
+    }
+    return bad
+}
+
+extern "C" {
+fn main() i32 {
+    r i32 = c_drive(&fns)
+    a i32 = ck_i32()
+    b i32 = ck_rest()
+    printf(c"c_drive %d ck_i32 %d ck_rest %d\n", r, a, b)
+    return r | a | b
+}
+}

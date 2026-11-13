@@ -101,7 +101,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   let validation_signatures =
     List.filter_map
       (function
-        | Ast.Func { name; generic_params = []; params; ret; variadic; span; _ } -> (
+        | Ast.Func
+            { name; generic_params = []; params; ret; variadic; span; fails = func_fails; _ }
+          -> (
             let result =
               let* params =
                 Result_list.map
@@ -117,7 +119,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                 source_ty_with_values ~globals:global_names eval_named_types eval_consts
                   span ret
               in
-              Ok (name, { params; ret; variadic })
+              Ok (name, { params; ret; variadic; fails = func_fails })
             in
             match result with Ok signature -> Some signature | Error _ -> None)
         | _ -> None)
@@ -270,6 +272,10 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Designated_field (_, _, value, _) -> expression_mentions names value
     | Ast.Designated_index (index, value, _) ->
         expression_mentions names index || expression_mentions names value
+    | Ast.Try (expression, _) -> expression_mentions names expression
+    | Ast.Catch (call, Ast.Catch_value value, _) ->
+        expression_mentions names call || expression_mentions names value
+    | Ast.Catch (call, Ast.Catch_block _, _) -> expression_mentions names call
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
       ->
         false
@@ -294,7 +300,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Named_type (name, type_span)
       when Option.is_some (Names.type_misuse_message name) ->
         error type_span (Option.get (Names.type_misuse_message name))
-    | Ast.Named_type ("void", _) -> Ok ()
+    | Ast.Named_type (("void" | "error"), _) -> Ok ()
     | Ast.Named_type (name, type_span) when String_set.mem name !local_values ->
         error type_span (Printf.sprintf "`%s` is a value, not a type" name)
     | Ast.Named_type (name, type_span) -> (
@@ -414,7 +420,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
            || name = "cvt"
            || List.mem name simd_memory_names ->
         Result_list.iter
-          (validate_generic_argument_names value_names type_names span)
+          (function
+            | Ast.Name_arg ("fails", _) when name = "call_addr" -> Ok ()
+            | argument -> validate_generic_argument_names value_names type_names span argument)
           arguments
     | Ast.Generic_args (Ast.Ident (name, name_span), _, _)
       when Option.is_some (Names.takes_no_type_arguments_message name) ->
@@ -495,6 +503,13 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Designated_index (index, value, _) ->
         let* () = validate_expression_names value_names type_names index in
         validate_expression_names value_names type_names value
+    | Ast.Try (expression, _) -> validate_expression_names value_names type_names expression
+    | Ast.Catch (call, handler, _) -> (
+        let* () = validate_expression_names value_names type_names call in
+        match handler with
+        | Ast.Catch_value value -> validate_expression_names value_names type_names value
+        (* a catch block inside an expression is refused by the checker *)
+        | Ast.Catch_block _ -> Ok ())
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
       ->
         Ok ()
@@ -635,6 +650,42 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             type_names body
         in
         Ok (value_names, scope_names)
+    | Ast.Fail (expression, _) ->
+        let* () = validate_expression_names value_names type_names expression in
+        Ok (value_names, scope_names)
+    | Ast.Errdefer (binding, body, _) ->
+        let names, scope =
+          match binding with
+          | Some (name, _) -> (String_set.add name value_names, String_set.singleton name)
+          | None -> (value_names, String_set.empty)
+        in
+        let* () = validate_statement_block_names ~scope_names:scope names type_names body in
+        Ok (value_names, scope_names)
+    | Ast.Catch_stmt { target; call; binding; body; span } ->
+        let* () = validate_expression_names value_names type_names call in
+        let names, scope =
+          match binding with
+          | Some (name, _) -> (String_set.add name value_names, String_set.singleton name)
+          | None -> (value_names, String_set.empty)
+        in
+        let* () = validate_statement_block_names ~scope_names:scope names type_names body in
+        (match target with
+        | Ast.Catch_let { name; ty; ty_span } ->
+            if String_set.mem name scope_names then
+              error span (Printf.sprintf "duplicate local `%s`" name)
+            else
+              let* () =
+                Diag.local_type_error ~span ~ty_span name
+                  (validate_type_names value_names type_names span ty)
+                |> Sema_types.declaration_type_error ~declaration:"locals"
+                     ~variable:name ty
+              in
+              let* () = validate_binding_name span name in
+              Ok (String_set.add name value_names, String_set.add name scope_names)
+        | Ast.Catch_assign target ->
+            let* () = validate_target_names value_names type_names target in
+            Ok (value_names, scope_names)
+        | Ast.Catch_discard -> Ok (value_names, scope_names))
     | Ast.Break _ | Ast.Continue _ -> Ok (value_names, scope_names)
   and validate_statement_block_names ?(scope_names = String_set.empty) value_names
       type_names = function
@@ -696,8 +747,33 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             body
         in
         Ok scope_names
+    | Ast.Errdefer (binding, body, _) ->
+        let* () =
+          validate_statement_block_duplicates
+            ~scope_names:
+              (match binding with
+              | Some (name, _) -> String_set.singleton name
+              | None -> String_set.empty)
+            body
+        in
+        Ok scope_names
+    | Ast.Catch_stmt { target; binding; body; span; _ } -> (
+        let* () =
+          validate_statement_block_duplicates
+            ~scope_names:
+              (match binding with
+              | Some (name, _) -> String_set.singleton name
+              | None -> String_set.empty)
+            body
+        in
+        match target with
+        | Ast.Catch_let { name; _ } ->
+            if String_set.mem name scope_names then
+              error span (Printf.sprintf "duplicate local `%s`" name)
+            else Ok (String_set.add name scope_names)
+        | Ast.Catch_assign _ | Ast.Catch_discard -> Ok scope_names)
     | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _ | Ast.Expr_stmt _
-    | Ast.Break _ | Ast.Continue _ ->
+    | Ast.Break _ | Ast.Continue _ | Ast.Fail _ ->
         Ok scope_names
   and validate_statement_block_duplicates ?(scope_names = String_set.empty) = function
     | [] -> Ok ()
@@ -735,6 +811,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       unresolved_shapes_unique = false;
       string_pool = create_string_pool limits;
       ret_ty;
+      fn_fails = true;
+      handled_call = None;
       limits;
       index = None;
     }
@@ -790,6 +868,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         | None -> Ast.Named_type (name, span))
     | Hir.Opaque name -> Ast.Named_type (name, span)
     | Hir.Void -> Ast.Void
+    | Hir.Err -> Ast.Named_type ("error", span)
   in
   let rec substitute_field_type substitutions = function
     | Ast.Named_type (parameter, _) as ty ->
@@ -1234,6 +1313,10 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Designated_field (_, _, value, _) -> has_generic_arguments value
     | Ast.Designated_index (index, value, _) ->
         has_generic_arguments index || has_generic_arguments value
+    | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
+        has_generic_arguments call
+    | Ast.Catch (call, Ast.Catch_value value, _) ->
+        has_generic_arguments call || has_generic_arguments value
     | Ast.Ident _ | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _
     | Ast.String_lit _ ->
         false
@@ -1636,9 +1719,20 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       | Ast.Designated_index (index, value, _) ->
           let* () = validate_non_dependent_expression c dependent None index in
           validate_non_dependent_expression c dependent expected value
+      (* only the call's arguments: the call alone would be an unhandled
+         call to a `fails` function *)
+      | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
+          validate_non_dependent_call_arguments c dependent call
+      | Ast.Catch (call, Ast.Catch_value value, _) ->
+          let* () = validate_non_dependent_call_arguments c dependent call in
+          validate_non_dependent_expression c dependent expected value
       | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ | Ast.Ident _ | Ast.Int_lit _
       | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _ ->
           Ok ()
+  and validate_non_dependent_call_arguments c dependent = function
+    | Ast.Call (_, arguments, _) ->
+        Result_list.iter (validate_non_dependent_expression c dependent None) arguments
+    | expression -> validate_non_dependent_expression c dependent None expression
   in
   let validate_non_dependent_condition c dependent label expression =
     if expression_mentions dependent expression then
@@ -1950,6 +2044,38 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         in
         Ok dependent
     | Ast.Break _ | Ast.Continue _ | Ast.Const_for _ | Ast.Const_copy _ -> Ok dependent
+    | Ast.Fail (value, _) ->
+        let* () = validate_non_dependent_expression c dependent (Some Hir.Err) value in
+        Ok dependent
+    | Ast.Errdefer (binding, body, span) ->
+        let* () = validate_error_handler c dependent expected_return binding body span in
+        Ok dependent
+    | Ast.Catch_stmt { target; call; binding; body; span } -> (
+        let* () = validate_non_dependent_call_arguments c dependent call in
+        let* () = validate_error_handler c dependent expected_return binding body span in
+        match target with
+        | Ast.Catch_let { name; ty = source_ty; _ } ->
+            (* checked in full when the function is specialized *)
+            dependent_local_types :=
+              (name, source_ty) :: List.remove_assoc name !dependent_local_types;
+            set_inference_type name (Some source_ty);
+            Ok (name :: dependent)
+        | Ast.Catch_assign _ | Ast.Catch_discard -> Ok dependent)
+  and validate_error_handler c dependent expected_return binding body span =
+    push c;
+    let result =
+      let* () =
+        match binding with
+        | None -> Ok ()
+        | Some (name, _) ->
+            let* local = add_local name Hir.Err c span in
+            mark_init local c;
+            Ok ()
+      in
+      validate_non_dependent_block c dependent expected_return body
+    in
+    pop c;
+    result
   in
   let validate_generic_legality ~span ~ret ~params ~generic_params statements =
     let generic_value_names =
@@ -2047,7 +2173,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         in
         let* ty = resolve_ty ~values ~defer_const_structs substitutions depth span ty in
         Ok (Ast.Vec (length, ty))
-    | Ast.Named_type ("void", type_span) -> Ok (Ast.Named_type ("void", type_span))
+    | Ast.Named_type ((("void" | "error") as name), type_span) -> Ok (Ast.Named_type (name, type_span))
     | Ast.Named_type (name, type_span)
       when Option.is_some (Names.type_misuse_message name) ->
         error type_span (Option.get (Names.type_misuse_message name))
@@ -2417,6 +2543,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           match
             if is_shadowed_argument argument then argument else bind_argument argument
           with
+          | Ast.Name_arg ("fails", _) as fails when name = "call_addr" -> Ok fails
           | Ast.Type_arg ty | Ast.Type_or_index ty ->
               let* ty =
                 resolve_ty ~values ~defer_const_structs substitutions depth span ty
@@ -2803,6 +2930,42 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         let* index = resolve index in
         let* value = resolve value in
         Ok (Ast.Designated_index (index, value, span))
+    | Ast.Try (call, span) ->
+        let* call = resolve_expr ~values ~defer_const_structs substitutions depth call in
+        Ok (Ast.Try (call, span))
+    | Ast.Catch (call, handler, span) ->
+        let* call = resolve_expr ~values ~defer_const_structs substitutions depth call in
+        let* handler =
+          match handler with
+          | Ast.Catch_value value ->
+              let* value =
+                resolve_expr ~values ~defer_const_structs substitutions depth value
+              in
+              Ok (Ast.Catch_value value)
+          | Ast.Catch_block (binding, body) ->
+              let* body =
+                resolve_error_handler ~values ~defer_const_structs substitutions depth
+                  binding body
+              in
+              Ok (Ast.Catch_block (binding, body))
+        in
+        Ok (Ast.Catch (call, handler, span))
+  and resolve_error_handler ?(values = []) ?(defer_const_structs = false) substitutions
+      depth binding body =
+    let names =
+      match binding with
+      | Some (name, _) -> String_set.add name !local_values
+      | None -> !local_values
+    in
+    with_local_values names (fun () ->
+        (match binding with
+        | Some (name, _) ->
+            shadowed_constants := String_set.add name !shadowed_constants;
+            set_inference_type name (Some (Ast.Named_type ("error", Span.synthetic)))
+        | None -> ());
+        resolve_statements
+          (resolve_stmt ~values ~defer_const_structs substitutions depth)
+          body)
   and resolve_target ?(values = []) ?(defer_const_structs = false) substitutions depth =
     function
     | Ast.Target_ident _ as target -> Ok target
@@ -3175,9 +3338,53 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                 Ok (Some body)
           in
           Ok (Ast.Switch (expression, cases, default, span))
+      | Ast.Fail (expression, span) ->
+          let* expression =
+            resolve_expr ~values ~defer_const_structs substitutions depth expression
+          in
+          Ok (Ast.Fail (expression, span))
+      | Ast.Errdefer (binding, body, span) ->
+          let* body =
+            resolve_error_handler ~values ~defer_const_structs substitutions depth
+              binding body
+          in
+          Ok (Ast.Errdefer (binding, body, span))
+      | Ast.Catch_stmt { target; call; binding; body; span } ->
+          let* call =
+            resolve_expr ~values ~defer_const_structs substitutions depth call
+          in
+          let saved_shadowed = !shadowed_constants in
+          let* body =
+            resolve_error_handler ~values ~defer_const_structs substitutions depth
+              binding body
+          in
+          shadowed_constants := saved_shadowed;
+          let* target =
+            match target with
+            | Ast.Catch_let { name; ty; ty_span } ->
+                let* ty =
+                  Diag.local_type_error ~span ~ty_span name
+                    (resolve_ty ~values ~defer_const_structs substitutions depth
+                       ty_span ty)
+                  |> Sema_types.declaration_type_error ~declaration:"locals"
+                       ~variable:name ty
+                in
+                local_values := String_set.add name !local_values;
+                shadowed_constants := String_set.add name !shadowed_constants;
+                set_inference_type name (Some ty);
+                Ok (Ast.Catch_let { name; ty; ty_span })
+            | Ast.Catch_assign target ->
+                let* target =
+                  resolve_target ~values ~defer_const_structs substitutions depth
+                    target
+                in
+                Ok (Ast.Catch_assign target)
+            | Ast.Catch_discard -> Ok Ast.Catch_discard
+          in
+          Ok (Ast.Catch_stmt { target; call; binding; body; span })
     in
     (match statement with
-    | Ast.Let _ | Ast.View _ -> ()
+    | Ast.Let _ | Ast.View _ | Ast.Catch_stmt { target = Ast.Catch_let _; _ } -> ()
     | _ ->
         local_values := previous;
         shadowed_constants := previous_shadowed_constants);
@@ -3284,7 +3491,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                  }))
     | _ -> error Span.synthetic "internal error: function specialization is malformed"
   and resolve_item = function
-    | (Ast.Use _ | Ast.Pkg _) as item -> Ok item
+    | (Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _) as item -> Ok item
     | Ast.Struct { generic_params = _ :: _; _ } as item -> Ok item
     | Ast.Struct ({ fields; _ } as item) ->
         let* fields =

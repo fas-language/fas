@@ -15,6 +15,8 @@ type ty =
   | Struct of string
   | Opaque of string
   | Void
+  (* `error`: a 32-bit code, 0 = no error (see "Fas error handling") *)
+  | Err
 
 type field = {
   name : string;
@@ -43,7 +45,7 @@ let zero_integer_array_values { zero_ty } =
   | Array (length, (Bool | Int _ | Float _)) -> Some (List.init length (fun _ -> 0L))
   | _ -> None
 
-type func_sig = { params : (string * ty) list; ret : ty; variadic : bool }
+type func_sig = { params : (string * ty) list; ret : ty; variadic : bool; fails : bool }
 type local = { name : string; ty : ty; id : int }
 type linkage = Internal | External_c
 type simd_load_kind = Masked | Gather | Gather_bytes
@@ -105,6 +107,8 @@ type builtin =
   | Handle_from_addr of string
   | Volatile_load of ty
   | Simd_load of ty * simd_load_kind
+  | Errno_err
+  | Err_name
 
 type call_target = User of string | Builtin of builtin
 
@@ -134,6 +138,13 @@ type expr =
   | Splat of expr * ty * Span.t
   | Ternary of expr * expr * expr * ty * Span.t
   | Const_array of string * ty * Span.t
+  (* errors. The inner expression is the call to a `fails` function
+     (Call (User _) or Indirect_call) typed with its value type; the ty is the
+     value type too. Capture stores the error in the local (0 on success) and
+     gives the value. *)
+  | Try of expr * ty * Span.t
+  | Catch_value of expr * expr * ty * Span.t
+  | Capture of expr * local * ty * Span.t
 
 type construction =
   | Init_value of expr
@@ -167,6 +178,9 @@ type stmt =
   | Defer of stmt list * Span.t
   | Expr of expr * Span.t
   | Block of stmt list * Span.t
+  | Fail of expr * Span.t
+  (* runs only on failing exits of the function, with the error bound *)
+  | Errdefer of local option * stmt list * Span.t
 
 type func_body = Declaration | Statements of stmt list
 
@@ -174,6 +188,7 @@ type func = {
   name : string;
   params : local list;
   ret : ty;
+  fails : bool;
   body : func_body;
   linkage : linkage;
   variadic : bool;
@@ -207,11 +222,13 @@ type program = {
   globals : global list;
   funcs : func list;
   strings : string list;
+  (* every declared error of the program and its code *)
+  errors : (string * int64) list;
 }
 
 let rec ty_equal a b =
   match (a, b) with
-  | Bool, Bool | Void, Void -> true
+  | Bool, Bool | Void, Void | Err, Err -> true
   | Int a, Int b -> a = b
   | Float a, Float b -> a = b
   | Addr, Addr -> true
@@ -238,6 +255,7 @@ let rec ty_name = function
   | Array (n, t) -> Printf.sprintf "arr[%d, %s]" n (ty_name t)
   | Vec (n, t) -> Printf.sprintf "vec[%d, %s]" n (ty_name t)
   | Struct n | Opaque n -> n
+  | Err -> "error"
 
 let expr_ty = function
   | EInt (_, t, _)
@@ -255,7 +273,10 @@ let expr_ty = function
   | Address (_, t, _)
   | Splat (_, t, _)
   | Ternary (_, _, _, t, _)
-  | Const_array (_, t, _) ->
+  | Const_array (_, t, _)
+  | Try (_, t, _)
+  | Catch_value (_, _, t, _)
+  | Capture (_, _, t, _) ->
       t
   | Local (local, _) -> local.ty
   | Global (_, ty, _) -> ty
@@ -290,7 +311,10 @@ let expr_span = function
   | Offsetof (_, _, _, s)
   | Splat (_, _, s)
   | Ternary (_, _, _, _, s)
-  | Const_array (_, _, s) ->
+  | Const_array (_, _, s)
+  | Try (_, _, s)
+  | Catch_value (_, _, _, s)
+  | Capture (_, _, _, s) ->
       s
 
 let stmt_span = function
@@ -311,7 +335,9 @@ let stmt_span = function
   | Continue (_, s)
   | Defer (_, s)
   | Expr (_, s)
-  | Block (_, s) ->
+  | Block (_, s)
+  | Fail (_, s)
+  | Errdefer (_, _, s) ->
       s
 
 type flow_summary = {
@@ -373,7 +399,7 @@ let cleanup_flow cleanup exits =
 let condition_is_true = function EBool (true, _) -> true | _ -> false
 
 let rec stmt_flow = function
-  | Return _ -> { flowing with falls_through = false; returns = true }
+  | Return _ | Fail _ -> { flowing with falls_through = false; returns = true }
   | Break (None, _) -> { flowing with falls_through = false; breaks = true }
   | Break (Some label, _) ->
       { flowing with falls_through = false; labeled_breaks = [ label ] }
@@ -408,14 +434,15 @@ let rec stmt_flow = function
         | Some expression -> condition_is_true expression
       in
       sequence_flow prefix (loop_flow label unconditional iteration)
-  | Defer (body, _) -> cleanup_flow (block_flow body) flowing
+  | Defer (body, _) | Errdefer (_, body, _) -> cleanup_flow (block_flow body) flowing
   | Let _ | Let_construct _ | View _ | Copy _ | Volatile_store _ | Simd_store _
   | Assign _ | Compound_assign _ | Expr _ ->
       flowing
 
 and block_flow = function
   | [] -> flowing
-  | Defer (body, _) :: rest -> cleanup_flow (block_flow body) (block_flow rest)
+  | (Defer (body, _) | Errdefer (_, body, _)) :: rest ->
+      cleanup_flow (block_flow body) (block_flow rest)
   | statement :: rest -> sequence_flow (stmt_flow statement) (block_flow rest)
 
 and loop_flow label unconditional body =
@@ -463,12 +490,14 @@ let scalar_bits target = function
   | Float F32 -> Ok 32
   | Float F64 -> Ok 64
   | Addr | Handle _ -> Ok (target.Target_layout.pointer_size * 8)
+  | Err -> Error "vector element type must be `bool` or an integer type"
   | _ -> Error "vector element type must be `bool` or an integer type"
 
 let layout ?(target = Target_layout.current ()) structs ty =
   let rec go visiting = function
     | Bool -> Target_layout.integer target 1
     | Int k -> int_layout target k
+    | Err -> int_layout target U32
     | Float F32 -> Target_layout.float target 32
     | Float F64 -> Target_layout.float target 64
     | Addr | Handle _ -> Target_layout.pointer target
@@ -681,6 +710,7 @@ let compute_struct_cached ?overflow_field cache name =
   and field_layout visiting = function
     | Bool -> Target_layout.integer target 1
     | Int k -> int_layout target k
+    | Err -> int_layout target U32
     | Float F32 -> Target_layout.float target 32
     | Float F64 -> Target_layout.float target 64
     | Addr | Handle _ -> Target_layout.pointer target
