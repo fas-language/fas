@@ -3003,8 +3003,34 @@ let () =
   semantic_accept "switch-constant-case-range-twin"
     "const VALUE u8 = 200 + 55\n\
      fn f(x u8) i32 { switch x { case VALUE: return 1 } return 0 }\n";
-  semantic_error "switch-vec-scrutinee" "switch value must be an integer, bool or error"
+  semantic_error "switch-vec-scrutinee" "switch value must be an integer, bool, enum or error"
     "fn f(v vec[2,i32]) i32 { switch v { case 1: return 1 } return 0 }\n";
+  (* user report 0.6.3: a generic body's pre-check gave brace-list entries no
+     field type, so `null` next to a const generic parameter had no context *)
+  semantic_accept "const-generic-brace-null"
+    "value struct R { p addr, n u32 }\n\
+     struct S { p addr, n u32, k u32 }\n\
+     fn mk[A const u32](x u32) R { return {null, x + A} }\n\
+     fn mkd[A const u32](x u32) R { return {.n = x + A, .p = null} }\n\
+     fn mks[A const u32](x u32) u32 {\n\
+       s S = {null, x + A, A}\n\
+       t S = {.k = A, .p = null}\n\
+       a arr[2, addr] = {null, null}\n\
+       b arr[A, addr] = {null, null}\n\
+       if a[0] == null && b[1] == null && s.p == null && t.p == null { return s.n + t.k }\n\
+       return 0 }\n\
+     fn main() i32 { r R = mk[4](3); d R = mkd[5](1); n u32 = mks[2](1); return 0 }\n";
+  semantic_error "const-generic-brace-null-still-typed"
+    "null requires an addr or handle context"
+    "value struct R { n u32, p addr }\n\
+     fn mk[A const u32](x u32) R { return {null, x + A} }\n\
+     fn main() i32 { r R = mk[4](3); return 0 }\n";
+  (* `len` reads only the type: an uninitialized array place is fine *)
+  semantic_accept "len-uninitialized-array"
+    "struct B { buf arr[4, u8] }\n\
+     fn f() u64 { digits arr[8, u8]; b B; return len(digits) + len(b.buf) }\n";
+  semantic_error "len-does-not-initialize" "use of uninitialized local `digits`"
+    "fn f() u8 { digits arr[8, u8]; n u64 = len(digits); return digits[0] }\n";
   semantic_error "switch-bool-exhaustive-still-needs-return"
     "function `f` returning `i32` may reach the end without `return`"
     "fn f(x bool) i32 { switch x { case true: return 1; case false: return 2 } }\n";
@@ -5245,7 +5271,7 @@ let () =
     "const parameter type must be a scalar integer or bool"
     "fn bad[N const f32]() i32 { return 0 }\n";
   semantic_message "float-switch-scrutinee"
-    "switch value must be an integer, bool or error, got `f32`"
+    "switch value must be an integer, bool, enum or error, got `f32`"
     "fn bad(x f32) i32 { switch x { case 1: { return 1 } default: { return 0 } } }\n";
   semantic_message "float-switch-case" "floating point literal cannot be used as `i32`"
     "fn bad(x i32) i32 { switch x { case 1.0: { return 1 } default: { return 0 } } }\n";

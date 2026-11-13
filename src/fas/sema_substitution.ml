@@ -93,7 +93,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   let named_type_names =
     List.filter_map
       (function
-        | Ast.Opaque { name; _ } | Ast.Struct { name; _ } -> Some name | _ -> None)
+        | Ast.Opaque { name; _ } | Ast.Struct { name; _ } | Ast.Enum { name; _ } -> Some name | _ -> None)
       program.Ast.items
     @ List.map fst c_aliases @ List.map fst c_unsupported
     |> String_set.of_list
@@ -417,7 +417,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           arguments
     | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
-           || name = "cvt"
+           || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         Result_list.iter
           (function
@@ -869,6 +869,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Hir.Opaque name -> Ast.Named_type (name, span)
     | Hir.Void -> Ast.Void
     | Hir.Err -> Ast.Named_type ("error", span)
+    | Hir.Enum (name, _) -> Ast.Named_type (name, span)
   in
   let rec substitute_field_type substitutions = function
     | Ast.Named_type (parameter, _) as ty ->
@@ -1462,6 +1463,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
               | Error _ -> None
             in
             match operand with
+            (* `x == null` with a dependent `x`: the peer's type is unknown
+               here, so `null` is only checked by the instantiation *)
+            | Ast.Null _ | Ast.Parenthesized (Ast.Null _, _) -> Some Hir.Addr
             | Ast.Splat _
             | Ast.Call (Ast.Ident ("splat", _), _, _)
             | Ast.Parenthesized (Ast.Splat _, _)
@@ -1713,12 +1717,77 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           let* () = validate_non_dependent_expression c dependent expected yes in
           validate_non_dependent_expression c dependent expected no
       | Ast.Array_lit (values, _) ->
-          Result_list.iter (validate_non_dependent_expression c dependent None) values
+          (* each entry gets the type it initializes (a struct field, an
+             array element), so context-typed entries such as `null` check
+             the same way they do outside a generic body *)
+          let struct_fields =
+            match expected with
+            | Some (Hir.Struct name) -> (
+                match
+                  List.find_opt (fun (s : Hir.struct_def) -> s.name = name) c.structs
+                with
+                | Some (s : Hir.struct_def) when not s.is_union -> Some s.fields
+                | _ -> None)
+            | _ -> None
+          in
+          let field_type name =
+            Option.bind struct_fields (fun fields ->
+                List.find_opt (fun (f : Hir.field) -> f.name = name) fields
+                |> Option.map (fun (f : Hir.field) -> f.ty))
+          in
+          let entry_type position = function
+            | Ast.Designated_field (name, _, _, _) -> field_type name
+            | Ast.Designated_index _ -> (
+                match expected with Some (Hir.Array (_, t)) -> Some t | _ -> None)
+            | _ -> (
+                match expected with
+                | Some (Hir.Array (_, t)) -> Some t
+                | _ ->
+                    (* positional entries map to fields only before any
+                       designator *)
+                    if
+                      List.exists
+                        (function
+                          | Ast.Designated_field _ | Ast.Designated_index _ -> true
+                          | _ -> false)
+                        (List.filteri (fun i _ -> i < position) values)
+                    then None
+                    else
+                      Option.bind struct_fields (fun fields ->
+                          List.nth_opt fields position
+                          |> Option.map (fun (f : Hir.field) -> f.ty)))
+          in
+          Result_list.iter
+            (fun (position, value) ->
+              let expected = entry_type position value in
+              let inner =
+                match value with
+                | Ast.Designated_field (_, _, inner, _) | Ast.Designated_index (_, inner, _) ->
+                    inner
+                | _ -> value
+              in
+              match (expected, inner) with
+              (* a nested brace list for a plain struct or an array is only
+                 checked by the instantiation's initializer check *)
+              | Some ((Hir.Struct _ | Hir.Array _) as t), Ast.Array_lit _
+                when (not (Hir.is_value_struct t))
+                     && not (expression_mentions dependent inner) ->
+                  Ok ()
+              | _ -> (
+              match value with
+              | Ast.Designated_field (_, _, inner, _) ->
+                  validate_non_dependent_expression c dependent expected inner
+              | Ast.Designated_index (index, inner, _) ->
+                  let* () = validate_non_dependent_expression c dependent None index in
+                  validate_non_dependent_expression c dependent expected inner
+              | _ -> validate_non_dependent_expression c dependent expected value))
+            (List.mapi (fun i v -> (i, v)) values)
+      (* outside a brace list (not reached from the case above) *)
       | Ast.Designated_field (_, _, value, _) ->
-          validate_non_dependent_expression c dependent expected value
+          validate_non_dependent_expression c dependent None value
       | Ast.Designated_index (index, value, _) ->
           let* () = validate_non_dependent_expression c dependent None index in
-          validate_non_dependent_expression c dependent expected value
+          validate_non_dependent_expression c dependent None value
       (* only the call's arguments: the call alone would be an unhandled
          call to a `fails` function *)
       | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
@@ -2537,7 +2606,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Generic_args (Ast.Ident ("atomic_fence", _), _, _) as e -> Ok e
     | Ast.Generic_args (Ast.Ident (name, ident_span), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
-           || name = "cvt"
+           || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         let resolve_argument argument =
           match
@@ -3491,7 +3560,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                  }))
     | _ -> error Span.synthetic "internal error: function specialization is malformed"
   and resolve_item = function
-    | (Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _) as item -> Ok item
+    | (Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ | Ast.Enum _) as item -> Ok item
     | Ast.Struct { generic_params = _ :: _; _ } as item -> Ok item
     | Ast.Struct ({ fields; _ } as item) ->
         let* fields =

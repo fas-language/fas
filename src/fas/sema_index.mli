@@ -9,6 +9,7 @@ type kind =
   | Struct
   | Union
   | Opaque
+  | Enum
   | Field
   | Type_parameter
   | Const_parameter

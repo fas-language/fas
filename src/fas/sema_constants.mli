@@ -69,3 +69,13 @@ val query_layout :
 
 val float_binary_bits : Hir.ty -> Ast.binop -> int64 -> int64 -> int64
 val float_comparison_bits : Hir.ty -> Ast.binop -> int64 -> int64 -> int64
+
+(* enum builtins, shared with sema_check *)
+val enum_type_argument :
+  (Span.t -> Ast.ty -> (Hir.ty, Diag.t list) result) ->
+  string -> Ast.generic_arg list -> Span.t -> (string * Hir.int_kind, Diag.t list) result
+
+val enum_operand_type :
+  string -> Hir.int_kind -> Hir.ty -> Span.t -> (unit, Diag.t list) result
+
+val enum_member_of : string -> int64 -> string option

@@ -1,0 +1,97 @@
+// Fas enums: declaration, members, comparisons, exhaustive switch, the
+// enum builtins, and enums in structs, value structs, arrays, generics and
+// fails results. Run by test/enums.sh on both backends.
+extern "C" { fn printf(fmt addr, ...) i32 }
+
+enum Tok u8 {
+    Eof
+    Ident
+    Plus = 10
+    Minus
+}
+
+enum Sig i16 { Neg = -3, Zero = 0, Pos = 3 }
+
+// sparse values: membership is one comparison per member
+enum Sparse u32 { A = 1, B = 4, C = 9 }
+
+// values past i64: kept unsigned
+enum Big u64 { Small = 1, Huge = 0xFFFFFFFFFFFFFFF0 }
+
+enum Small i8 { Lo = -128, Hi = 127 }
+
+error Bad
+
+struct Node {
+    kind Tok
+    sig Sig
+}
+
+value struct Pair {
+    a Tok
+    b Sig
+}
+
+const COUNT u32 = enum_count[Tok]
+const PLUS u8 = enum_value(Tok.Plus)
+const MINUS Tok = enum_from[Tok](11)
+var table arr[4, Tok]
+
+fn prec(t Tok) i32 {
+    switch t {
+        case Tok.Plus, Tok.Minus: return 10
+        case Tok.Eof: return -1
+        case Tok.Ident: return 0
+    }
+    return 99
+}
+
+fn sparse_rank(s Sparse) i32 {
+    switch s {
+        case Sparse.C: return 3
+        default: return 0
+    }
+}
+
+fn flip(p Pair) Pair {
+    return {Tok.Ident, p.b}
+}
+
+fn same[T](a T, b T) bool { return a == b }
+
+fn parse(n u8) Tok fails {
+    if !enum_is[Tok](n) { fail Bad }
+    return enum_from[Tok](n)
+}
+
+fn main() i32 {
+    t Tok = Tok.Minus
+    printf(c"prec %d %d %d\n", prec(Tok.Plus), prec(t), prec(Tok.Eof))
+    printf(c"value %d %d %d %d\n", enum_value(t), COUNT, PLUS, enum_value(MINUS))
+    n u8 = 11
+    u Tok = enum_from[Tok](n)
+    printf(c"name %s %s\n", enum_name(u), enum_name(Tok.Eof))
+    printf(c"is %d %d %d\n", enum_is[Tok](n), enum_is[Tok](2), enum_is[Tok](n - 1))
+    s Sig = Sig.Neg
+    printf(c"sig %d %s %d %d\n", enum_value(s), enum_name(s), s < Sig.Pos, s >= Sig.Zero)
+    m i16 = -3
+    printf(c"sig_is %d %d\n", enum_is[Sig](m), enum_is[Sig](m + 1))
+    k u32 = 4
+    printf(c"sparse %d %d %d %s\n", enum_is[Sparse](k), enum_is[Sparse](k + 1),
+        sparse_rank(enum_from[Sparse](k + 5)), enum_name(enum_from[Sparse](k)))
+    h u64 = 0xFFFFFFFFFFFFFFF0
+    printf(c"big %d %s %d\n", enum_is[Big](h), enum_name(enum_from[Big](h)), enum_is[Big](h + 1))
+    lo i8 = -128
+    printf(c"small %s %d\n", enum_name(enum_from[Small](lo)), enum_is[Small](lo + 1))
+    node Node = {Tok.Plus, Sig.Pos}
+    printf(c"node %s %s\n", enum_name(node.kind), enum_name(node.sig))
+    q Pair = {Tok.Eof, Sig.Zero}
+    p Pair = flip(q)
+    printf(c"pair %s %s\n", enum_name(p.a), enum_name(p.b))
+    table[2] = Tok.Plus
+    printf(c"table %s %d %d\n", enum_name(table[2]), same(Tok.Plus, table[2]), table[0] == Tok.Eof)
+    a Tok = parse(10) catch Tok.Eof
+    b Tok = parse(3) catch Tok.Eof
+    printf(c"fails %s %s\n", enum_name(a), enum_name(b))
+    return 0
+}

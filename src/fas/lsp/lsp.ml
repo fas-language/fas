@@ -1021,6 +1021,7 @@ let symbol_kind kind =
     | Parameter | Local | View | Global -> 13
     | Const | Const_array -> 14
     | Struct | Union | Opaque | Type_alias -> 23
+    | Enum -> 10
     | Field -> 8
     | Type_parameter | Const_parameter -> 26)
 

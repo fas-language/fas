@@ -366,7 +366,7 @@ and count_expanded_item_type_nodes item cap total =
                count_expanded_type_nodes field.ty cap total)
              total fields)
           generic_params
-    | Ast.Opaque _ -> total
+    | Ast.Opaque _ | Ast.Enum _ -> total
     | Ast.Error_decl { names; _ } ->
         List.fold_left
           (fun total (_, _, pinned) ->

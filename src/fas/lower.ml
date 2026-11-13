@@ -103,6 +103,8 @@ let rec ty = function
   | Hir.Opaque n -> Low.Struct n
   | Hir.Void -> Low.Void
   | Hir.Err -> Low.I32
+  (* erased before lowering (Hir_enum_erase) *)
+  | Hir.Enum (_, k) -> ty (Hir.Int k)
 
 and storage_ty = function
   | Hir.Bool -> Low.I8
@@ -220,6 +222,10 @@ let result_ty ~fails ret =
    [fas.err_name] is generated), and whether the user's [main] fails (so it
    is lowered as [fas.main] behind a generated [main]) *)
 let err_name_used = ref false
+
+(* the enums whose [enum_name] is used: [fas.enum_name.E] is generated for
+   each *)
+let enum_names_used : string list ref = ref []
 let errno_used = ref false
 let unexpected_code = ref 0L
 let main_fails = ref false
@@ -494,6 +500,24 @@ let guard_condition s condition =
   emit_trap s;
   enter s valid
 
+(* whether integer [v] is a value of [enum]: a range check when the member
+   values are contiguous, else one comparison per member *)
+let enum_membership s enum v =
+  let d = Option.get (Hir.enum_def enum) in
+  let t = value_ty v in
+  let values = List.sort_uniq Int64.compare (List.map snd d.Hir.members) in
+  let count = List.length values in
+  let lo = List.hd values and hi = List.nth values (count - 1) in
+  if Int64.sub hi lo = Int64.of_int (count - 1) then (
+    (* (v - lo) <=u (hi - lo), at the enum's width *)
+    let offset = fresh s in
+    E.bin s.fn offset Low.Sub t v (Low.Const (t, lo));
+    compare s Low.Ule t (Low.Local (offset, t)) (Low.Const (t, Int64.sub hi lo)))
+  else
+    match List.map (fun m -> compare s Low.Eq t v (Low.Const (t, m))) values with
+    | first :: rest -> List.fold_left (either_condition s) first rest
+    | [] -> Low.Const (Low.I1, 0L)
+
 let signed_type = function
   | Hir.Int (Hir.I8 | I16 | I32 | I64)
   | Hir.Vec (_, Hir.Int (Hir.I8 | I16 | I32 | I64)) ->
@@ -639,6 +663,7 @@ let rec dtype s (t : Hir.ty) =
         | Hir.Void -> 0
         | Hir.Bool -> base "bool" Fir.Dboolean 1
         | Hir.Err -> base "error" Fir.Dunsigned 4
+        | Hir.Enum (_, k) -> dtype s (Hir.Int k)
         | Hir.Int k ->
             let name = Hir.ty_name t in
             let enc, size =
@@ -1171,6 +1196,27 @@ and lower_builtin s b args t span =
         (Low.Const (Low.I32, !unexpected_code))
         (Low.Local (v, Low.I32));
       Ok (Low.Local (id, Low.I32))
+  | Enum_value, [ e ] -> Ok e
+  | Enum_from enum, [ e ] ->
+      (* a value that is no member traps *)
+      let member = enum_membership s enum e in
+      let id = fresh s in
+      E.bin s.fn id Low.Xor Low.I1 member (Low.Const (Low.I1, 1L));
+      guard_condition s (Low.Local (id, Low.I1));
+      Ok e
+  | Enum_is enum, [ e ] -> Ok (enum_membership s enum e)
+  | Enum_name enum, [ e ] ->
+      if not (List.mem enum !enum_names_used) then
+        enum_names_used := enum :: !enum_names_used;
+      let id = fresh s in
+      E.call s.fn (Some id) Low.No_extension (Low.Pointer Low.I8) ("fas.enum_name." ^ enum)
+        [ (Low.value_ty e, Low.No_extension, e) ];
+      Ok (Low.Local (id, Low.Pointer Low.I8))
+  | Trap, [] ->
+      (* the code after a trap is unreachable but still needs a block *)
+      emit_trap s;
+      enter s (fresh_block s);
+      Ok (Low.Const (Low.I1, 0L))
   | Err_name, [ e ] ->
       err_name_used := true;
       let id = fresh s in
@@ -1329,7 +1375,8 @@ and lower_builtin s b args t span =
                 | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
                 | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _
-                | Errno_err | Err_name ),
+                | Errno_err | Err_name | Enum_value | Enum_from _ | Enum_is _
+                | Enum_name _ | Trap ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -3295,6 +3342,37 @@ let generate_err_name mc structs (errors : (string * int64) list) string =
   | Ok () -> Ok ()
   | Error b -> error Span.synthetic (Printf.sprintf "internal error: fas.err_name block %d" b)
 
+(* [fas.enum_name.E(v) addr]: the name of the member of enum [E] whose
+   value is [v]; a value that is no member traps, as a switch does *)
+let generate_enum_name mc structs enum string =
+  let d = Option.get (Hir.enum_def enum) in
+  let t = ty (Hir.Int d.Hir.enum_kind) in
+  let name = "fas.enum_name." ^ enum in
+  let fn =
+    E.start mc ~name ~linkage:Fir.Local
+      ~params:[ ("a0", t, Low.No_extension) ]
+      ~ret:ptr_ty ~ret_extension:Low.No_extension ~variadic:false ~display:None
+      ~source:None
+  in
+  let s = synthetic_state fn ~ret:ptr_ty structs in
+  let arms = List.map (fun (member, v) -> (v, fresh_block s, string member)) d.Hir.members in
+  let default = fresh_block s in
+  E.switch s.fn t (Low.Param ("a0", t))
+    (List.map (fun (v, (b : block_state), _) -> (v, b.id)) arms)
+    default.id;
+  List.iter
+    (fun (_, b, index) ->
+      enter s b;
+      let id = fresh s in
+      E.string_ptr s.fn id index;
+      E.ret s.fn (Some (ptr_ty, Low.Local (id, ptr_ty))))
+    arms;
+  enter s default;
+  emit_trap s;
+  match E.finish s.fn with
+  | Ok () -> Ok ()
+  | Error b -> error Span.synthetic (Printf.sprintf "internal error: %s block %d" name b)
+
 (* The C [main] of a program whose [main] fails: calls the user's [main]
    (lowered as [fas.main]); on an error, writes its name and a newline to
    stderr (write(2), no libc) and exits with status 1. *)
@@ -3368,6 +3446,9 @@ let generate_main_wrapper mc structs (user : Hir.func) string =
 
 let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
+  (* enums are their integer types from here on *)
+  let p = Hir_enum_erase.program p in
+  enum_names_used := [];
   let p = { p with Hir.structs = p.Hir.structs @ fails_struct_defs p.Hir.structs } in
   let user_main =
     List.find_opt
@@ -3573,6 +3654,11 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
   in
   let* () =
     if !err_name_used then generate_err_name mc p.structs p.errors string else Ok ()
+  in
+  let* () =
+    Result_list.iter
+      (fun enum -> generate_enum_name mc p.structs enum string)
+      (List.rev !enum_names_used)
   in
   if !errno_used then
     ensure_declared mc "__errno_location" ~params:[] ~ret:ptr_ty;

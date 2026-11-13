@@ -188,6 +188,26 @@ let declarations ?(reserved = []) ?specializations records (program : program) =
     | Float Hir.F32 -> "float"
     | Float Hir.F64 -> "double"
     | Err -> "uint32_t"
+    | Enum (name, kind) ->
+        (* an integer typedef plus one `#define E_m value` per member *)
+        if not (Hashtbl.mem seen ("enum:" ^ name)) then (
+          Hashtbl.add seen ("enum:" ^ name) ();
+          add (Printf.sprintf "typedef %s %s;\n" (base (Int kind)) name);
+          let unsigned = match kind with U8 | U16 | U32 | U64 -> true | _ -> false in
+          let literal v =
+            if unsigned then Printf.sprintf "%LuU" v
+            else if v = Int64.min_int then "(-9223372036854775807LL - 1)"
+            else if v < 0L then Printf.sprintf "(%Ld)" v
+            else Int64.to_string v
+          in
+          match enum_def name with
+          | Some d ->
+              List.iter
+                (fun (member, v) ->
+                  add (Printf.sprintf "#define %s_%s ((%s)%s)\n" name member name (literal v)))
+                d.members
+          | None -> ());
+        name
     | Void -> "void"
     | Addr -> "void *"
     | Handle name -> (

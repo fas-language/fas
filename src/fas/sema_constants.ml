@@ -558,6 +558,39 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
 
 let index : Sema_index.t option ref = ref None
 
+(* the enum named by `builtin[E]`'s type argument; [resolve span ty] resolves
+   a source type *)
+let enum_type_argument resolve builtin generic_args span =
+  let* t =
+    match generic_args with
+    | [ (Ast.Type_arg ty | Ast.Type_or_index ty) ] -> resolve span ty
+    | [ Ast.Name_arg (name, name_span) ] -> resolve name_span (Ast.Named_type (name, name_span))
+    | _ ->
+        error span (Printf.sprintf "`%s` needs one enum type: `%s[Tok]`" builtin builtin)
+  in
+  match t with
+  | Hir.Enum (enum, kind) -> Ok (enum, kind)
+  | other ->
+      error span
+        (Printf.sprintf "`%s` needs an enum type, got `%s`" builtin
+           (Sema_types.diagnostic_ty_name other))
+
+let enum_operand_type builtin kind actual span =
+  if Hir.ty_equal actual (Hir.Int kind) then Ok ()
+  else
+    error span
+      (Printf.sprintf "`%s` needs a `%s` (the enum's integer type), got `%s`" builtin
+         (Hir.ty_name (Hir.Int kind))
+         (Sema_types.diagnostic_ty_name actual))
+
+(* the member of [enum] whose value is [v] (compared at the enum's width) *)
+let enum_member_of enum v =
+  let d = Option.get (Hir.enum_def enum) in
+  let width = Hir.Int d.Hir.enum_kind in
+  List.find_map
+    (fun (member, mv) -> if mask_value width mv = mask_value width v then Some member else None)
+    d.Hir.members
+
 let rec const_expr ?(structs = []) ?(named_types = []) ?(generic_structs = [])
     ?(arrays = []) ?(array_lengths = []) ?(globals = []) ?resolve consts expected
     ?(check_only = false) ?(validate_dead = true) ?(allow_widen = true) expression =
@@ -1136,6 +1169,52 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
           | _ -> v
       in
       Ok (dt, mask_value dt result)
+  (* enums: `enum_from[E](n)` (a constant n must be a member's value),
+     `enum_is[E](n)`, `enum_value(e)`, `enum_count[E]` *)
+  | Ast.Call
+      ( Ast.Generic_args
+          (Ast.Ident ((("enum_from" | "enum_is") as builtin), _), generic_args, target_span),
+        [ value ],
+        call_span ) ->
+      let* enum, kind =
+        enum_type_argument
+          (source_ty_with_values named_types consts)
+          builtin generic_args target_span
+      in
+      let* vt, v =
+        const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
+          ~globals ?resolve consts (Some (Hir.Int kind)) ~check_only ~validate_dead value
+      in
+      let* () = enum_operand_type builtin kind vt (Ast.expr_span value) in
+      let member = enum_member_of enum v in
+      if builtin = "enum_is" then Ok (Hir.Bool, if member <> None then 1L else 0L)
+      else if member <> None then Ok (Hir.Enum (enum, kind), mask_value (Hir.Int kind) v)
+      else
+        error call_span
+          (Printf.sprintf "%s is not a value of enum `%s`"
+             (Int64.to_string (sign_extend_value (Hir.Int kind) v))
+             enum)
+  | Ast.Call (Ast.Ident ("enum_value", _), [ value ], _) -> (
+      let* vt, v =
+        const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
+          ~globals ?resolve consts None ~check_only ~validate_dead value
+      in
+      match vt with
+      | Hir.Enum (_, kind) -> Ok (Hir.Int kind, v)
+      | other ->
+          error (Ast.expr_span value)
+            (Printf.sprintf "`enum_value` needs an enum, got `%s`"
+               (Sema_types.diagnostic_ty_name other)))
+  | Ast.Generic_args (Ast.Ident ("enum_count", _), generic_args, span) ->
+      let* enum, _ =
+        enum_type_argument
+          (source_ty_with_values named_types consts)
+          "enum_count" generic_args span
+      in
+      let count = Int64.of_int (List.length (Option.get (Hir.enum_def enum)).Hir.members) in
+      let ty = match expected with Some (Hir.Int _ as t) -> t | _ -> Hir.Int Hir.U64 in
+      if fits_literal ty count then Ok (ty, count)
+      else error span (Printf.sprintf "enum_count[%s] does not fit `%s`" enum (ty_name ty))
   | Ast.Call
       ( Ast.Generic_args (Ast.Ident ("cvt", _), generic_args, target_span),
         [ value ],

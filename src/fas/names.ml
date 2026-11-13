@@ -170,6 +170,11 @@ let operations =
     ("call_addr", Reserved);
     ("errno_err", Reserved);
     ("err_name", Reserved);
+    ("enum_value", Reserved);
+    ("enum_from", Reserved);
+    ("enum_is", Reserved);
+    ("enum_count", Reserved);
+    ("enum_name", Reserved);
     ("volatile_load", Reserved);
     ("volatile_store", Reserved);
     ("atomic_load", Reserved);
@@ -269,6 +274,9 @@ let missing_type_arguments_message name =
   | "gather_bytes" -> needs "a type argument" "gather_bytes[T](p, off, m, fallback)"
   | "scatter_bytes" -> needs "a type argument" "scatter_bytes[T](p, off, m, values)"
   | "call_addr" -> needs "a result type" "call_addr[R](p, args...)"
+  | "enum_from" -> needs "an enum type" "enum_from[E](n)"
+  | "enum_is" -> needs "an enum type" "enum_is[E](n)"
+  | "enum_count" -> needs "an enum type" "enum_count[E]"
   | _ -> None
 
 let takes_no_type_arguments_message name =

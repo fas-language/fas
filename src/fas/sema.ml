@@ -57,7 +57,8 @@ let validate_function_params generic_params params =
 
 (* a value struct passes like a small C struct (SysV), so C sees it too *)
 let extern_c_value_type = function
-  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
+  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err | Hir.Enum _ ->
+      true
   | Hir.Struct _ as ty -> Hir.is_value_struct ty
   | Hir.Void | Hir.Array _ | Hir.Vec _ | Hir.Opaque _ -> false
 
@@ -319,7 +320,9 @@ let validate_value_structs specializations items (structs : Hir.struct_def list)
          Struct_specialization name)
   in
   let field_ok = function
-    | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
+    | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err | Hir.Enum _
+      ->
+        true
     | Hir.Struct _ as ty -> Hir.is_value_struct ty
     | Hir.Array _ | Hir.Vec _ | Hir.Opaque _ | Hir.Void -> false
   in
@@ -372,6 +375,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     ?(c_alloc_size_parameters = []) ?(c_records = []) ?(all_errors = false)
     ?specializations ?index program =
   let* program, program_errors = desugar_errors program in
+  let* program = Sema_enums.desugar program in
   (* the value struct registry: declared ones now, specializations as
      monomorphization makes them *)
   Stdlib.Hashtbl.reset Hir.value_structs;
@@ -401,6 +405,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   let declaration = function
     | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ -> None
     | Ast.Opaque { name; span; _ } -> Some (name, Top_type, span)
+    | Ast.Enum { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Struct { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Const { name; name_span; _ } -> Some (name, Top_const, name_span)
     | Ast.Global { name; span; _ } -> Some (name, Top_global, span)
@@ -975,7 +980,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                   else
                     match rt with
                     | Hir.Void | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr
-                    | Hir.Handle _ | Hir.Err ->
+                    | Hir.Handle _ | Hir.Err | Hir.Enum _ ->
                         Ok ()
                     | Hir.Struct _ when Hir.is_value_struct rt -> Ok ()
                     | _ ->

@@ -124,6 +124,7 @@ module.exports = grammar({
         $.extern_declaration,
         $.function_declaration,
         $.error_declaration,
+        $.enum_declaration,
       ),
 
     use_declaration: ($) =>
@@ -189,6 +190,24 @@ module.exports = grammar({
       seq(field('name', $.identifier), field('type', $._type)),
 
     opaque_declaration: ($) => seq('opaque', field('name', $.identifier)),
+
+    // enum Tok u8 { Eof, Ident, Plus = 10 }: `enum` is a keyword only here
+    enum_declaration: ($) =>
+      seq(
+        'enum',
+        field('name', $.identifier),
+        field('type', $._type),
+        '{',
+        repeat(choice('\n', ',')),
+        repeat(seq($.enum_member, repeat(choice('\n', ',')))),
+        '}',
+      ),
+
+    enum_member: ($) =>
+      seq(
+        field('name', $.identifier),
+        optional(seq('=', field('value', $._expression))),
+      ),
 
     // error Empty, BadDigit, NotFound = 2
     error_declaration: ($) => seq('error', commaSeparated($.error_name)),

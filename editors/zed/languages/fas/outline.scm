@@ -6,6 +6,10 @@
   "struct" @context
   name: (identifier) @name) @item
 
+(enum_declaration
+  "enum" @context
+  name: (identifier) @name) @item
+
 (opaque_declaration
   "opaque" @context
   name: (identifier) @name) @item

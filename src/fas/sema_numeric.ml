@@ -201,6 +201,10 @@ let mask_value ty value =
       if bits = 64 then value
       else Int64.logand value (Int64.sub (Int64.shift_left 1L bits) 1L)
   | Hir.Err -> Int64.logand value 0xFFFF_FFFFL
+  | Hir.Enum (_, k) ->
+      let bits = int_bits k in
+      if bits = 64 then value
+      else Int64.logand value (Int64.sub (Int64.shift_left 1L bits) 1L)
   | _ -> value
 
 let literal_limit ~negative = function

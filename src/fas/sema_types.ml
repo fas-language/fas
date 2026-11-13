@@ -322,6 +322,8 @@ let rec source_ty named_types = function
   | Ast.Named_type ("error", _) -> Ok Hir.Err
   | Ast.Named_type (name, _) when Option.is_some (Names.type_misuse_message name) ->
       Error (Option.get (Names.type_misuse_message name))
+  | Ast.Named_type (name, _) when Stdlib.Hashtbl.mem Hir.enums name ->
+      Ok (Hir.Enum (name, (Option.get (Hir.enum_def name)).Hir.enum_kind))
   | Ast.Named_type (name, _) -> (
       match List.assoc_opt name named_types with
       | Some Struct_name -> Ok (Hir.Struct name)
@@ -922,7 +924,7 @@ let cast_name = function
 let cast_integer_value = function
   | Hir.Int _ | Hir.Vec (_, Hir.Int _) -> true
   | Hir.Bool | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Array _ | Hir.Struct _
-  | Hir.Opaque _ | Hir.Void | Hir.Vec _ | Hir.Err ->
+  | Hir.Opaque _ | Hir.Void | Hir.Vec _ | Hir.Err | Hir.Enum _ ->
       false
 
 let integer_literal_value = function
@@ -954,6 +956,18 @@ let integer_literal_error span ty ~negative ~text ~magnitude =
         ~help:(Printf.sprintf "write `splat(%s)`" text)
         span
         (Printf.sprintf "a scalar integer literal is not a `%s`" (diagnostic_ty_name ty))
+  | Hir.Enum (enum, _) ->
+      let member =
+        match Hir.enum_def enum with
+        | Some { Hir.members = (m, _) :: _; _ } -> m
+        | _ -> "Member"
+      in
+      Diag.error
+        ~help:
+          (Printf.sprintf "write a member such as `%s.%s`, or `enum_from[%s](%s)`" enum
+             member enum text)
+        span
+        (Printf.sprintf "an integer literal is not a `%s`" enum)
   | _ ->
       let help =
         if negative && Sema_numeric.is_unsigned ty && magnitude = 1L then
@@ -1809,7 +1823,7 @@ let binary_result_type ?left_expression ?right_expression ?left_checked ?right_c
           match left with
           | Hir.Vec (lanes, (Hir.Bool | Hir.Int _ | Hir.Float _)) ->
               Ok (Hir.Vec (lanes, Hir.Bool))
-          | Hir.Addr | Hir.Handle _ | Hir.Err -> Ok Hir.Bool
+          | Hir.Addr | Hir.Handle _ | Hir.Err | Hir.Enum _ -> Ok Hir.Bool
           | _ when Sema_numeric.is_scalar left -> Ok Hir.Bool
           | _ ->
               error (result_span left_expression)
@@ -1818,6 +1832,7 @@ let binary_result_type ?left_expression ?right_expression ?left_checked ?right_c
                    (diagnostic_ty_name left)))
       | Ast.Lt | Ast.Le | Ast.Gt | Ast.Ge -> (
           if Sema_numeric.is_int left || Sema_numeric.is_float left || left = Hir.Addr
+             || (match left with Hir.Enum _ -> true | _ -> false)
           then Ok Hir.Bool
           else
             match left with

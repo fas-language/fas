@@ -253,6 +253,7 @@ let item_extent = function
   | Ast.Struct { extent; _ }
   | Ast.Opaque { extent; _ }
   | Ast.Error_decl { extent; _ }
+  | Ast.Enum { extent; _ }
   | Ast.Func { extent; _ } ->
       extent
 
@@ -1508,6 +1509,8 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
                 | Ast.Func { name; _ } ->
                     [ name ]
                 | Ast.Error_decl { names; _ } -> List.map (fun (n, _, _) -> n) names
+                | Ast.Enum { name; members; _ } ->
+                    name :: List.map (fun (m, _, _) -> name ^ "." ^ m) members
                 | Ast.Use _ | Ast.Pkg _ -> [])
               program.Ast.items
           in

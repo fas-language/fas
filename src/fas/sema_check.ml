@@ -2442,6 +2442,19 @@ and check_expr_inner ?destination (c : context) expected expression =
         ]
   | Ast.Generic_args (Ast.Ident ("call_addr", _), _, s) ->
       error s "call_addr is a builtin and has no address"
+  | Ast.Generic_args (Ast.Ident ("enum_count", _), generic_args, s)
+    when Option.is_none (lookup_local "enum_count" c) ->
+      let* enum, _ =
+        Sema_constants.enum_type_argument (source_ty_in_context c) "enum_count"
+          generic_args s
+      in
+      let count = Int64.of_int (List.length (Option.get (Hir.enum_def enum)).Hir.members) in
+      let ty = match expected with Some (Hir.Int _ as t) -> t | _ -> Hir.Int Hir.U64 in
+      if Sema_numeric.fits_literal ty count then Ok (Hir.EInt (count, ty, s))
+      else
+        error s
+          (Printf.sprintf "enum_count[%s] does not fit `%s`" enum
+             (Sema_types.diagnostic_ty_name ty))
   | Ast.Handle_from_addr (t, e, s) -> (
       let* opaque_name =
         handle_target c.named_types t
@@ -3550,6 +3563,67 @@ and check_call_inner c expected fn args s =
                  (Sema_types.diagnostic_ty_name (Hir.expr_ty checked)))
           else Ok (Hir.Call (Hir.Builtin Hir.Err_name, [ checked ], Hir.Addr, s))
       | _ -> error s "builtin `err_name` expects one argument")
+  | Ast.Ident ("enum_value", _) when Option.is_none (lookup_local "enum_value" c) -> (
+      match args with
+      | [ value ] -> (
+          let* checked = check_expr c None value in
+          match Hir.expr_ty checked with
+          | Hir.Enum (_, kind) -> (
+              match checked with
+              | Hir.EInt (v, _, _) -> Ok (Hir.EInt (v, Hir.Int kind, s))
+              | _ ->
+                  Ok (Hir.Call (Hir.Builtin Hir.Enum_value, [ checked ], Hir.Int kind, s)))
+          | other ->
+              error (Ast.expr_span value)
+                (Printf.sprintf "`enum_value` needs an enum, got `%s`"
+                   (Sema_types.diagnostic_ty_name other)))
+      | _ -> error s "builtin `enum_value` expects one argument")
+  | Ast.Ident ("enum_name", _) when Option.is_none (lookup_local "enum_name" c) -> (
+      match args with
+      | [ value ] -> (
+          let* checked = check_expr c None value in
+          match Hir.expr_ty checked with
+          | Hir.Enum (enum, _) ->
+              Ok (Hir.Call (Hir.Builtin (Hir.Enum_name enum), [ checked ], Hir.Addr, s))
+          | other ->
+              error (Ast.expr_span value)
+                (Printf.sprintf "`enum_name` needs an enum, got `%s`"
+                   (Sema_types.diagnostic_ty_name other)))
+      | _ -> error s "builtin `enum_name` expects one argument")
+  | Ast.Generic_args
+      (Ast.Ident ((("enum_from" | "enum_is") as builtin), _), generic_args, application_span)
+    when Option.is_none (lookup_local builtin c) -> (
+      let* enum, kind =
+        Sema_constants.enum_type_argument (source_ty_in_context c) builtin generic_args
+          application_span
+      in
+      match args with
+      | [ value ] -> (
+          let* checked = check_expr c (Some (Hir.Int kind)) value in
+          let* () =
+            Sema_constants.enum_operand_type builtin kind (Hir.expr_ty checked)
+              (Ast.expr_span value)
+          in
+          match checked with
+          | Hir.EInt (v, _, _) -> (
+              (* a constant operand is checked now *)
+              let member = Sema_constants.enum_member_of enum v in
+              if builtin = "enum_is" then Ok (Hir.EBool (member <> None, s))
+              else
+                match member with
+                | Some _ -> Ok (Hir.EInt (v, Hir.Enum (enum, kind), s))
+                | None ->
+                    error s
+                      (Printf.sprintf "%s is not a value of enum `%s`"
+                         (Int64.to_string v) enum))
+          | _ ->
+              if builtin = "enum_is" then
+                Ok (Hir.Call (Hir.Builtin (Hir.Enum_is enum), [ checked ], Hir.Bool, s))
+              else
+                Ok
+                  (Hir.Call
+                     (Hir.Builtin (Hir.Enum_from enum), [ checked ], Hir.Enum (enum, kind), s)))
+      | _ -> error s (Printf.sprintf "builtin `%s` expects one argument" builtin))
   | Ast.Generic_args (Ast.Ident ("call_addr", _), generic_args, application_span) -> (
       let generic_args =
         List.filter
@@ -3858,10 +3932,30 @@ and check_call_inner c expected fn args s =
                 error s "C string literal cannot contain embedded NUL"
               else Ok (String.length value)
           | _ -> (
-              let* value = check_expr c None argument in
-              match Hir.expr_ty value with
-              | Hir.Array (n, _) -> Ok n
-              | _ -> error s "len requires a fixed array or string literal")
+              (* `len` only needs the type, so a place (`digits`, `s.buf`)
+                 may still be uninitialized: look it up as a place, which
+                 does not read it, before falling back to a value *)
+              let place_length =
+                match argument with
+                | Ast.Ident _ | Ast.Field _ | Ast.Arrow_field _ | Ast.Select _ -> (
+                    let before = Sema_flow.snapshot c.flow in
+                    let place = check_place c argument in
+                    Sema_flow.restore c.flow before;
+                    match place with
+                    | Ok place -> (
+                        match Hir.expr_ty place.expr with
+                        | Hir.Array (n, _) -> Some n
+                        | _ -> None)
+                    | Error _ -> None)
+                | _ -> None
+              in
+              match place_length with
+              | Some n -> Ok n
+              | None -> (
+                  let* value = check_expr c None argument in
+                  match Hir.expr_ty value with
+                  | Hir.Array (n, _) -> Ok n
+                  | _ -> error s "len requires a fixed array or string literal"))
         in
         Ok (Hir.EInt (Int64.of_int n, Hir.Int Hir.U64, s))
   | Ast.Ident (name, _) -> (
@@ -5942,9 +6036,11 @@ and check_stmt (c : context) = function
   | Ast.Switch (e, arms, d, s) ->
       let* te = check_expr c None e in
       let et = Hir.expr_ty te in
-      if not (is_int et || et = Hir.Bool || et = Hir.Err) then
+      let enum_switch = match et with Hir.Enum (enum, _) -> Some enum | _ -> None in
+      if not (is_int et || et = Hir.Bool || et = Hir.Err || enum_switch <> None) then
         error s
-          (Printf.sprintf "switch value must be an integer, bool or error, got `%s`"
+          (Printf.sprintf
+             "switch value must be an integer, bool, enum or error, got `%s`"
              (Sema_types.diagnostic_ty_name et))
       else if et = Hir.Err && d = None then
         error s
@@ -5983,6 +6079,12 @@ and check_stmt (c : context) = function
           | _ -> true
         in
         let case_value_text source value =
+          match source with
+          | Hir.Enum (enum, _) -> (
+              match Sema_constants.enum_member_of enum value with
+              | Some member -> enum ^ "." ^ member
+              | None -> Int64.to_string value)
+          | _ ->
           if Sema_numeric.is_unsigned source then
             Sema_numeric.unsigned_int64_to_string value
           else Int64.to_string (Sema_numeric.sign_extend_value source value)
@@ -6099,8 +6201,35 @@ and check_stmt (c : context) = function
         let* ta = result in
         Sema_flow.restore c.flow before;
         Sema_flow.set_falls_through c.flow before_falls;
+        (* a switch on an enum without `default` names every member; a value
+           that is no member (only from memory C wrote) traps *)
+        let* () =
+          match (enum_switch, d) with
+          | Some enum, None -> (
+              let members = (Option.get (Hir.enum_def enum)).Hir.members in
+              let missing =
+                List.filter
+                  (fun (_, v) -> not (Int64_map.mem (mask_value et v) !seen))
+                  members
+              in
+              match missing with
+              | [] -> Ok ()
+              | _ ->
+                  Error
+                    [
+                      Diag.error ~help:"add the missing cases, or a `default` arm" s
+                        (Printf.sprintf "switch on enum `%s` does not handle %s" enum
+                           (String.concat ", "
+                              (List.map (fun (m, _) -> "`" ^ enum ^ "." ^ m ^ "`") missing)));
+                    ])
+          | _ -> Ok ()
+        in
         let* td =
           match d with
+          | None when enum_switch <> None ->
+              Ok
+                (Some
+                   [ Hir.Expr (Hir.Call (Hir.Builtin Hir.Trap, [], Hir.Void, s), s) ])
           | None -> Ok None
           | Some x ->
               let* y = check_block c x in
@@ -6112,6 +6241,7 @@ and check_stmt (c : context) = function
               Ok (Some y)
         in
         (match d with
+        | None when enum_switch <> None -> ()
         | None ->
             branch_states := before :: !branch_states;
             branch_falls := true :: !branch_falls

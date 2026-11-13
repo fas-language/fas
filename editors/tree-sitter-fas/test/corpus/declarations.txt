@@ -262,3 +262,48 @@ fn f(value Span) Span {
     body: (block
       (return_statement
         (identifier)))))
+
+================================================================================
+enum declarations
+================================================================================
+enum Tok u8 {
+  Eof
+  Plus = 10, Minus
+}
+enum Sig i16 { Neg = -3 }
+fn f(enum i32) Tok {
+  return Tok.Plus
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    (identifier)
+    (primitive_type)
+    (enum_member
+      (identifier))
+    (enum_member
+      (identifier)
+      (integer))
+    (enum_member
+      (identifier)))
+  (enum_declaration
+    (identifier)
+    (primitive_type)
+    (enum_member
+      (identifier)
+      (unary_expression
+        (integer))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (identifier)
+      (primitive_type))
+    (named_type
+      (type_identifier))
+    (block
+      (return_statement
+        (field_expression
+          (identifier)
+          (identifier))))))

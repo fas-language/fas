@@ -141,6 +141,9 @@ let ensure_new_local name flow span =
   let* () =
     if Names.reserved_binding_name name then
       error span (Names.reserved_binding_message name)
+    else if Stdlib.Hashtbl.mem Hir.enums name then
+      (* `E.m` must always name the member *)
+      error span (Printf.sprintf "`%s` is an enum and cannot be used as a local name" name)
     else Ok ()
   in
   let scope =

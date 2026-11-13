@@ -17,6 +17,8 @@ type ty =
   | Void
   (* `error`: a 32-bit code, 0 = no error (see "Fas error handling") *)
   | Err
+  (* `enum Name K`: its own type, stored as the integer type K *)
+  | Enum of string * int_kind
 
 type field = {
   name : string;
@@ -40,6 +42,15 @@ type struct_def = {
 let value_structs : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
 
 let is_value_struct = function Struct name -> Stdlib.Hashtbl.mem value_structs name | _ -> false
+
+(* the program's enums: the underlying integer type and the members in
+   declaration order with their values. Reset and filled by each
+   [Sema.check] before any type is resolved *)
+type enum_def = { enum_kind : int_kind; members : (string * int64) list }
+
+let enums : (string, enum_def) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+let enum_def name = Stdlib.Hashtbl.find_opt enums name
+let is_enum = function Enum _ -> true | _ -> false
 
 type const_def = { name : string; ty : ty; bits : int64 }
 type const_arr_def = { name : string; ty : ty; elems : int64 list }
@@ -116,6 +127,15 @@ type builtin =
   | Simd_load of ty * simd_load_kind
   | Errno_err
   | Err_name
+  (* enums: `enum_from[E](n)` traps unless n is a member's value;
+     `enum_is[E](n)` tests that; `enum_name(e)` is the member's name as a C
+     string (traps on a non-member). [Trap] ends the program (an exhaustive
+     enum `switch` that matched no arm) *)
+  | Enum_value
+  | Enum_from of string
+  | Enum_is of string
+  | Enum_name of string
+  | Trap
 
 type call_target = User of string | Builtin of builtin
 
@@ -240,6 +260,7 @@ type program = {
 let rec ty_equal a b =
   match (a, b) with
   | Bool, Bool | Void, Void | Err, Err -> true
+  | Enum (a, _), Enum (b, _) -> a = b
   | Int a, Int b -> a = b
   | Float a, Float b -> a = b
   | Addr, Addr -> true
@@ -265,7 +286,7 @@ let rec ty_name = function
   | Handle name -> "handle[" ^ name ^ "]"
   | Array (n, t) -> Printf.sprintf "arr[%d, %s]" n (ty_name t)
   | Vec (n, t) -> Printf.sprintf "vec[%d, %s]" n (ty_name t)
-  | Struct n | Opaque n -> n
+  | Struct n | Opaque n | Enum (n, _) -> n
   | Err -> "error"
 
 let expr_ty = function
@@ -508,7 +529,7 @@ let scalar_bits target = function
 let layout ?(target = Target_layout.current ()) structs ty =
   let rec go visiting = function
     | Bool -> Target_layout.integer target 1
-    | Int k -> int_layout target k
+    | Int k | Enum (_, k) -> int_layout target k
     | Err -> int_layout target U32
     | Float F32 -> Target_layout.float target 32
     | Float F64 -> Target_layout.float target 64
@@ -721,7 +742,7 @@ let compute_struct_cached ?overflow_field cache name =
               else each 0 1 [] fields)
   and field_layout visiting = function
     | Bool -> Target_layout.integer target 1
-    | Int k -> int_layout target k
+    | Int k | Enum (_, k) -> int_layout target k
     | Err -> int_layout target U32
     | Float F32 -> Target_layout.float target 32
     | Float F64 -> Target_layout.float target 64

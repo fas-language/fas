@@ -215,6 +215,17 @@ and item =
       extent : Span.t;
     }
   | Opaque of { name : string; name_span : Span.t; span : Span.t; extent : Span.t }
+  (* `enum Name K { A  B = 5 }`: each member with its span and optional
+     value (an integer literal) *)
+  | Enum of {
+      name : string;
+      name_span : Span.t;
+      repr : ty;
+      repr_span : Span.t;
+      members : (string * Span.t * expr option) list;
+      span : Span.t;
+      extent : Span.t;
+    }
   (* `error A, B = 2`: each name with its span and an optional pinned code *)
   | Error_decl of {
       names : (string * Span.t * expr option) list;
@@ -248,6 +259,7 @@ let with_extent extent = function
   | Struct s -> Struct { s with extent }
   | Opaque o -> Opaque { o with extent }
   | Error_decl e -> Error_decl { e with extent }
+  | Enum e -> Enum { e with extent }
   | Func f -> Func { f with extent }
   | (Use _ | Pkg _) as item -> item
 
@@ -522,6 +534,7 @@ let item_span = function
   | Struct { span; _ }
   | Opaque { span; _ }
   | Error_decl { span; _ }
+  | Enum { span; _ }
   | Func { span; _ } ->
       span
 
@@ -1035,6 +1048,24 @@ let render_program program =
                 emit_expr value)
               pinned)
           names
+    | Enum { name; repr; members; _ } ->
+        text "enum ";
+        add_name name;
+        text " ";
+        emit_ty repr;
+        text " {\n";
+        List.iteri
+          (fun i (member, _, value) ->
+            if i > 0 then text "\n";
+            text "  ";
+            add_name member;
+            Option.iter
+              (fun value ->
+                text " = ";
+                emit_expr value)
+              value)
+          members;
+        text "\n}"
     | Func { name; generic_params; params; ret; fails; body; linkage; _ } ->
         text (match linkage with Internal -> "fn " | External_c -> "extern fn ");
         add_name name;
@@ -1237,6 +1268,9 @@ let expanded_walker ~identifiers ~limit =
       | Opaque _ -> ()
       | Error_decl { names; _ } ->
           List.iter (fun (_, _, pinned) -> Option.iter go_expr pinned) names
+      | Enum { members; repr; span; _ } ->
+          go_ty span repr;
+          List.iter (fun (_, _, value) -> Option.iter go_expr value) members
       | Func { name; linkage; params; ret; body; generic_params; span; _ } -> (
           if linkage <> Internal then identifiers := name :: !identifiers;
           List.iter go_generic_param generic_params;

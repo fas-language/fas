@@ -28,6 +28,7 @@ hello, fas!
 - [Floating point](#floating-point)
 - [Functions and control flow](#functions-and-control-flow)
 - [Errors](#errors)
+- [Enums](#enums)
 - [Structs, arrays and memory](#structs-arrays-and-memory)
   - [Value structs](#value-structs)
 - [Generics](#generics)
@@ -274,7 +275,7 @@ A function that can fail says so with `fails`, and every caller must handle the 
 - `error Empty, BadDigit` declares errors. An error name is a top-level constant of type `error`. Declaring the same name in two files means the same error, so two libraries can both declare `NotFound`.
 - `error` is a 4-byte type. An error can be stored, passed, compared with `==` and `!=`, and used in `switch`, which needs a `default` arm because the set of errors is open. There is no arithmetic on errors; `bitcast` converts between `error` and `u32`/`i32` (for logs and files).
 - An error's code is computed from its name, so it is the same in every build and program. `error NotFound = 2` pins an errno code (1-4095) instead. Two errors with the same code are a compile error.
-- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr`, `handle[T]`, `error` or a [value struct](#value-structs). Any other struct result goes through an out pointer, as usual.
+- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr`, `handle[T]`, `error`, an [enum](#enums) or a [value struct](#value-structs). Any other struct result goes through an out pointer, as usual.
 - `fail E` leaves the function with error `E`, running `defer` and `errdefer` blocks. `return` never carries an error. `fail` with the zero error (only reachable through `bitcast` or `{}`) traps.
 - A call to a `fails` function must be followed by `try` or `catch`; anything else is a compile error.
   - `try f(x)` passes an error up to the caller. It works only in a `fails` function and binds tighter than operators: `try f(x) + 1` is `(try f(x)) + 1`.
@@ -326,6 +327,54 @@ empty
 ```
 
 **With C.** A C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result), so C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. Exporting a `fails` function from an `extern "C"` block is not supported yet.
+
+## Enums
+
+An enum is a closed set of named integer values with its own type.
+
+- `enum Tok u8 { Eof, Ident, Plus = 10, Minus }` declares one. The integer type after the name is required; it is the enum's size, alignment and ABI. Members are separated by `,` or newlines.
+- Values count from 0. `Plus = 10` sets one, and the members after it continue from there (`Minus` is 11). A value is an integer literal, negative for a signed type. Two members with the same value, or a value that does not fit the type, are compile errors.
+- A member is always written with its enum: `Tok.Plus`. A member is a constant of type `Tok`, so it works in `const` initializers and `case` labels.
+- An enum is its own type: no implicit conversion to or from integers, and no arithmetic. `==`, `!=`, `<`, `<=`, `>` and `>=` compare two values of the same enum by their integer values.
+- `switch` on an enum without `default` must name every member; a value that is not a member (only possible through memory written as raw bytes, for instance by C) traps. With `default`, any subset of members is fine.
+- `enum_value(t)` is the integer (`u8` for `Tok`). `enum_from[Tok](n)` is the member whose value is `n`, which must have the enum's integer type; a constant `n` that is not a member's value is a compile error, and a runtime one traps. `enum_is[Tok](n)` tests membership without trapping. `enum_count[Tok]` is the number of members, a constant. `enum_name(t)` is the member's name as a C string, and a value that is not a member traps; the name table is emitted only when `enum_name` is used.
+- Enums can be fields, value-struct fields, array elements, parameters, results (also of `fails` functions), generic arguments, globals and constants. They cannot be vector lanes. A local named like an enum is an error, so `Tok.Plus` always means the member.
+- `enum` is a keyword only at the start of a top-level item, before a name; elsewhere it is an ordinary name.
+
+```fas
+use "C" <stdio.h>
+
+enum Tok u8 {
+    Eof
+    Ident
+    Plus = 10
+    Minus
+}
+
+fn prec(t Tok) i32 {
+    switch t {
+        case Tok.Plus, Tok.Minus: return 10
+        case Tok.Eof, Tok.Ident: return 0
+    }
+    return 0
+}
+
+fn main() i32 {
+    t Tok = Tok.Minus
+    printf(c"%s %d %d\n", enum_name(t), enum_value(t), prec(t))
+    n u8 = 3
+    if !enum_is[Tok](n) { printf(c"%d is no Tok\n", n) }
+    printf(c"%d members\n", enum_count[Tok])
+    return 0
+}
+```
+```text
+Minus 11 10
+3 is no Tok
+4 members
+```
+
+**With C.** An enum crosses the C boundary as its integer type. An exported header declares `typedef uint8_t Tok;` and one `#define Tok_Plus ((Tok)10U)` per member. A C `enum` imported through a header stays an integer type in Fas.
 
 ## Structs, arrays and memory
 
@@ -949,7 +998,7 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 
 ## Known limits
 
-- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap and the vector lane-index trap. A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
+- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap, the vector lane-index trap and the enum traps (`enum_from`, `enum_name` and a `switch` without `default` on a value that is no member). A trap is `ud2`, so buffered `printf` output not yet flushed is lost.
 - **Platform.** x86-64 Linux. Builds target baseline x86-64 (SSE2) and run on any x86-64 CPU. Programs that use C (headers, `.c` inputs, libraries) also need `clang-22` (see `FAS_CC` below).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
 - **Huge sources.** One expression with tens of thousands of operators, or a function with tens of thousands of locals, compiles slowly (seconds). Ordinary programs are not affected.
@@ -989,6 +1038,7 @@ fn g() void { }
 error Empty, NotFound = 2               // errors; a pin is an errno code
 fn h(s addr) u32 fails { fail Empty }   // returns u32 or an error
 fn k() fails { }                        // no result, or an error
+enum Tok u8 { Eof, Ident, Plus = 10 }   // its own type; members are Tok.Plus
 fn max[T](a T, b T) T { return if a > b { a } else { b } }
 fn sum[T, N const usize](xs addr) T { ... }
 
@@ -1045,6 +1095,7 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `struct` | C layout | max field | `@align(N)` raises it |
 | `void` | | | result type only |
 | `error` | 4 | 4 | an error code; `==`, `!=`, `switch` with `default`, `bitcast` to `u32`/`i32` |
+| `enum E T` | as `T` | as `T` | its own type; comparisons, exhaustive `switch`, `enum_value`/`enum_from` to convert |
 
 ### Operators
 
@@ -1139,6 +1190,11 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `call_addr[R fails](p, args...)` `call_addr[fails](p, args...)` | `R` or `void` | indirect call of a `fails` function; needs `try` or `catch` |
 | **Errors** | `errno_err()` | `error` | C `errno` as an error, `Unexpected` if it is 0 |
 | | `err_name(e)` | `addr` | C string: the name, `"errno N"`, or `"unknown error"` |
+| **Enums** | `enum_value(t)` | the enum's integer type | |
+| | `enum_from[E](n)` | `E` | `n` has `E`'s integer type; a non-member traps (a constant one is a compile error) |
+| | `enum_is[E](n)` | `bool` | whether `n` is a member's value |
+| | `enum_count[E]` | integer constant | number of members, `u64` unless the context gives an integer type |
+| | `enum_name(t)` | `addr` | C string: the member's name; a non-member traps |
 | **Atomics** | `atomic_load[T, o](p)` | `T` | `T` is an integer or `addr`; `p` must be aligned to `sizeof[T]` |
 | | `atomic_store[T, o](p, x)` | statement | |
 | | `atomic_add[T, o](p, x)` `atomic_sub` `atomic_and` `atomic_or` `atomic_xor` | `T`, the old value | integers only, and add/sub wrap |

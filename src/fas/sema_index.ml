@@ -9,6 +9,7 @@ type kind =
   | Struct
   | Union
   | Opaque
+  | Enum
   | Field
   | Type_parameter
   | Const_parameter
@@ -147,6 +148,7 @@ let kind_name = function
   | Struct -> "struct"
   | Union -> "union"
   | Opaque -> "opaque"
+  | Enum -> "enum"
   | Field -> "field"
   | Type_parameter -> "type parameter"
   | Const_parameter -> "const parameter"
@@ -423,6 +425,12 @@ let declare_program index ~c_aliases (program : Ast.program) =
           top ?c_origin:(origin name) name Opaque name_span extent
       | Ast.Error_decl { names; extent; _ } ->
           List.iter (fun (name, name_span, _) -> top name Const name_span extent) names
+      | Ast.Enum { name; name_span; members; extent; _ } ->
+          top name Enum name_span extent;
+          List.iter
+            (fun (member, member_span, _) ->
+              top (name ^ "." ^ member) Const member_span extent)
+            members
       | Ast.Struct
           { name; name_span; generic_params; fields; is_union; extent; align; _ } ->
           let c_origin = origin name in
@@ -596,6 +604,10 @@ let reference_program index ~instantiated (program : Ast.program) =
           List.iter
             (fun (_, _, pinned) -> Option.iter (static_expression None []) pinned)
             names
+      | Ast.Enum { members; _ } ->
+          List.iter
+            (fun (_, _, value) -> Option.iter (static_expression None []) value)
+            members
       | Ast.Global { ty = global_ty; init; _ } ->
           ty None [] global_ty;
           Option.iter (static_expression None []) init
@@ -1073,6 +1085,7 @@ let describe index ?use (declaration : declaration) =
         (fun (ty, count) -> ("const " ^ name ^ " " ^ ty, [ elements_text count ]))
         (Hashtbl.find_opt index.array_decls name)
   | Opaque -> Some ("opaque " ^ name, [ "no layout" ])
+  | Enum -> Some ("enum " ^ name, [])
   | Union ->
       Option.map
         (fun header ->

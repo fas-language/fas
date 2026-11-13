@@ -557,7 +557,7 @@ module P = struct
     | Token.Ident ("true" | "false"), _ ->
         let* e = expr p in
         Ok (Ast.Const_arg e)
-    | Token.Ident ("sizeof" | "alignof" | "offsetof"), Token.Lbracket ->
+    | Token.Ident ("sizeof" | "alignof" | "offsetof" | "enum_count"), Token.Lbracket ->
         let* e = expr p in
         Ok (Ast.Const_arg e)
     | Token.Ident _, Token.Lbracket when generic_application_is_call p ->
@@ -789,6 +789,12 @@ module P = struct
         ignore (bump p);
         let* x = struct_item ~is_value:true p in
         Ok [ Ast.with_extent (extent p start) x ]
+    (* `enum` is a keyword only at the start of an item, before the name *)
+    | Token.Ident "enum" when (match (peek_n p 1).kind with Token.Ident _ -> true | _ -> false)
+      ->
+        let start = span p in
+        let* x = enum_item p in
+        Ok [ Ast.with_extent (extent p start) x ]
     | Token.Kw_opaque ->
         let start = span p in
         let* x = opaque_item p in
@@ -887,6 +893,51 @@ module P = struct
     let* () = end_stmt p in
     Ok
       (Ast.Global { name; name_span; ty_span; ty; init; linkage; span = s; extent = s })
+
+  and enum_item p =
+    let s = span p in
+    ignore (bump p);
+    let name_span = span p in
+    let* name = ident p in
+    let repr_span = span p in
+    let* repr =
+      if at p Token.Lbrace then
+        Error
+          [
+            Diag.error
+              ~help:(Printf.sprintf "write `enum %s u8 {`" name)
+              repr_span "an enum needs its underlying integer type";
+          ]
+      else ty p
+    in
+    let* () = expected p Token.Lbrace in
+    skip_newlines p;
+    let rec members acc =
+      if at p Token.Rbrace then Ok (List.rev acc)
+      else
+        let member_span = span p in
+        let* member = ident p in
+        let* value =
+          if eat p Token.Assign then
+            let* value = expr p in
+            Ok (Some value)
+          else Ok None
+        in
+        ignore (eat p Token.Comma);
+        let* () =
+          if at p Token.Rbrace || at p Token.Newline then Ok ()
+          else if (match (peek p).kind with Token.Ident _ -> true | _ -> false) then Ok ()
+          else
+            error (span p)
+              ("expected a member, a newline or `}` in an enum, found " ^ Token.show (peek p).kind)
+        in
+        skip_newlines p;
+        members ((member, member_span, value) :: acc)
+    in
+    let* members = members [] in
+    let* () = expected p Token.Rbrace in
+    let* () = end_stmt p in
+    Ok (Ast.Enum { name; name_span; repr; repr_span; members; span = s; extent = s })
 
   and struct_item ?(is_value = false) p =
     let s = span p in
@@ -1922,7 +1973,10 @@ module P = struct
               ~column:base.Span.column
           in
           go (Ast.Call (e, xs, call_span))
-      | Token.Lbracket when brackets_before_call () ->
+      | Token.Lbracket
+        when brackets_before_call ()
+             || (match e with Ast.Ident ("enum_count", _) -> true | _ -> false) ->
+          (* `enum_count[E]` is a type application without a call *)
           let s = span p in
           let* arguments = generic_args p in
           go (Ast.Generic_args (e, arguments, s))
