@@ -12,7 +12,7 @@ version = "0.7.0"
 
 [grammars.fas]
 repository = "https://github.com/fas-language/fas"
-rev = "b83c24fc2b6e3d383224d41543b72cc5cd0028d2"
+rev = "fe8ff4671359af596797375c7103ff9c0c643fbd"
 path = "editors/tree-sitter-fas"
 
 [language_servers.fas]
