@@ -1,0 +1,103 @@
+// value structs across the C boundary, both ways: they pass and return
+// like the same C structs (SysV), and a fails result is C's
+// struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }
+use "C" "value_structs_abi.h"
+
+error NotFound = 2
+
+value struct VPt { x i32, y i32 }
+value struct VSpan { p addr, n usize }
+value struct VV2 { x f64, y f64 }
+value struct VMix { a f32, b i32, c f64 }
+value struct VF2 { a f32, b f32 }
+value struct VTiny { a u8, b bool, c u16 }
+value struct VBox { p VPt, tag u8 }
+
+// the C side's functions, declared with the Fas twins of its structs
+extern "C" {
+fn c_pt(a VPt, k i32) VPt
+fn c_span(a VSpan, b VSpan, c VSpan, d VSpan) VSpan
+fn c_v2(a VV2, k f64) VV2
+fn c_mix(m VMix) VMix
+fn c_f2(a VF2) VF2
+fn c_tiny(t VTiny) VTiny
+fn c_box(b VBox) VBox
+}
+
+extern "C" {
+fn fas_pt(a VPt, b VPt) VPt { return {a.x + b.x, a.y + b.y} }
+fn fas_span(a VSpan, b VSpan, c VSpan, d VSpan) VSpan {
+    return {d.p, a.n + b.n + c.n + d.n}
+}
+fn fas_v2(a VV2) VV2 { return {a.y, a.x} }
+fn fas_mix(m VMix) VMix { return {m.a * 2.0, m.b + 1, m.c / 2.0} }
+fn fas_f2(a VF2) VF2 { return {a.b, a.a} }
+fn fas_tiny(t VTiny) VTiny { return {t.a + 1, !t.b, t.c * 2} }
+fn fas_box(b VBox) VBox { return {{b.p.y, b.p.x}, b.tag + 1} }
+}
+
+fn fas_fpt(x i32) VPt fails {
+    if x < 0 { fail NotFound }
+    return {x, x * 10}
+}
+fn fas_fspan(x i32) VSpan fails {
+    if x < 0 { fail NotFound }
+    return {c"fas", zext[usize](x)}
+}
+fn fas_ff2(x i32) VF2 fails {
+    if x < 0 { fail NotFound }
+    return {cvt[f32](x) + 0.5, cvt[f32](x) - 0.5}
+}
+
+var fails_fns arr[3, addr] = { &fas_fpt, &fas_fspan, &fas_ff2 }
+
+fn ck_fail() i32 {
+    r VPt = call_addr[VPt fails](c_fns[0], -6) catch e {
+        if bitcast[u32](e) != 0x80004321 { return 1 }
+        return 0
+    }
+    return 2
+}
+
+// Fas -> C, the C functions' results checked here
+fn ck() i32 {
+    bad i32 = 0
+    p VPt = c_pt({3, -4}, 5)
+    if p.x != 15 || p.y != -20 { bad |= 1 }
+    s VSpan = c_span({null, 1}, {null, 2}, {null, 3}, {c"xyz", 4})
+    if s.n != 10 || s.p[u8, 0] != 120 { bad |= 2 }
+    v VV2 = c_v2({1.0, 2.0}, 3.0)
+    if v.x != 6.0 || v.y != 3.0 { bad |= 4 }
+    m VMix = c_mix({1.5, 7, 9.0})
+    if m.a != 3.0 || m.b != 8 || m.c != 4.5 { bad |= 8 }
+    f VF2 = c_f2({1.25, 2.75})
+    if f.a != 2.75 || f.b != 1.25 { bad |= 16 }
+    t VTiny = c_tiny({5, true, 300})
+    if t.a != 6 || t.b || t.c != 600 { bad |= 32 }
+    b VBox = c_box({{3, 4}, 9})
+    if b.p.x != 4 || b.p.y != 3 || b.tag != 10 { bad |= 64 }
+    d VPt = {7, 7}
+    q VPt = call_addr[VPt fails](c_fns[0], 6) catch d
+    if q.x != 6 || q.y != -6 { bad |= 128 }
+    if ck_fail() != 0 { bad |= 256 }
+    r VPt = call_addr[VPt fails](c_fns[0], -6) catch d
+    if r.x != 7 { bad |= 512 }
+    ds VSpan = {}
+    w VSpan = call_addr[VSpan fails](c_fns[1], 4) catch ds
+    if w.n != 4 || w.p[u8, 0] != 115 { bad |= 1024 }
+    df VF2 = {}
+    g VF2 = call_addr[VF2 fails](c_fns[2], -1) catch df
+    if g.a != 0.0 { bad |= 2048 }
+    h VF2 = call_addr[VF2 fails](c_fns[2], 3) catch df
+    if h.a != 3.5 || h.b != 2.5 { bad |= 4096 }
+    return bad
+}
+
+extern "C" {
+fn main() i32 {
+    r i32 = c_drive(&fails_fns)
+    k i32 = ck()
+    printf(c"c_drive %d ck %d\n", r, k)
+    return r | k
+}
+}

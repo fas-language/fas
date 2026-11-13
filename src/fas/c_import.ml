@@ -4072,6 +4072,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                   align;
                   size = Option.map (fun layout -> layout.size) c_layout;
                   is_union;
+                  is_value = false;
                   span;
                   extent = span;
                 },

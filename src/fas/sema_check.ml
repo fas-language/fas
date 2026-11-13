@@ -1098,8 +1098,15 @@ let intern_string c span s =
         Hashtbl.add pool.index s id;
         Ok id
 
+(* names the locals of value struct brace lists *)
+let construct_counter = ref 0
+
 let with_dead_check c dead check = Sema_flow.with_dead_check c.flow dead check
-let aggregate_value_type = function Hir.Array _ | Hir.Struct _ -> true | _ -> false
+(* arrays and structs other than value structs: these are not values *)
+let aggregate_value_type = function
+  | Hir.Array _ -> true
+  | Hir.Struct _ as ty -> not (Hir.is_value_struct ty)
+  | _ -> false
 
 let imported_record_type c name =
   List.exists
@@ -2470,6 +2477,8 @@ and check_expr_inner ?destination (c : context) expected expression =
       let* place = check_place c (Ast.Select (a, args, s)) in
       let* () =
         match place.expr with
+        | Hir.Raw_select (_, _, (Hir.Struct _ as t), _) when Hir.is_value_struct t ->
+            Ok ()
         | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _), _) ->
             error s "raw access cannot load an array or struct value"
         | _ -> Ok ()
@@ -2744,6 +2753,26 @@ and check_expr_inner ?destination (c : context) expected expression =
         Ok
           (Hir.Ternary
              (tq, widen a ta left_widen, widen b tb right_widen, result_type, s))
+  | Ast.Array_lit (_, s) as literal
+    when match expected with Some t -> Hir.is_value_struct t | None -> false -> (
+      (* a brace list as a value struct value (`return {a, b}`, an argument):
+         built in a fresh local *)
+      let t = Option.get expected in
+      let* initialized = check_initializer c t literal in
+      match initialized with
+      | `Aggregate (ty, entries, construction_span, zero_padding) ->
+          incr construct_counter;
+          let* local =
+            add_local ("value#" ^ string_of_int !construct_counter) ty c s
+          in
+          mark_init local c;
+          index_type c s ty None;
+          Ok
+            (Hir.Construct
+               ( local,
+                 aggregate_construction ~zero_padding ty entries construction_span,
+                 s ))
+      | `Value value -> Ok value)
   | Ast.Array_lit (entries, s) -> (
       match expected with
       | Some (Hir.Vec (lanes, element) as literal_type) -> (
@@ -3530,7 +3559,8 @@ and check_call_inner c expected fn args s =
       let* result_ty =
         match generic_args with
         | [] when callee_fails c fn -> Ok Hir.Void
-        | [ Ast.Type_arg source ] -> source_ty_in_context c application_span source
+        | [ (Ast.Type_arg source | Ast.Type_or_index source) ] ->
+            source_ty_in_context c application_span source
         | [ Ast.Name_arg (name, name_span) ] ->
             source_ty_in_context c name_span (Ast.Named_type (name, name_span))
         | _ -> error application_span "call_addr needs a result type: call_addr[R](...)"
@@ -4583,7 +4613,8 @@ and check_target_inner (c : context) = function
       let x = place.expr in
       let access = view_access_of_expr c x in
       match x with
-      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _), _) ->
+      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _)
+        when not (Hir.is_value_struct t) ->
           error (Ast.expr_span a) "raw access cannot store an array or struct value"
       | Hir.Raw_select (base, off, t, _) ->
           let* () = check_place_access c (Ast.expr_span a) ~write:true x in
@@ -4617,7 +4648,8 @@ and check_target_inner (c : context) = function
       let x = place.expr in
       let access = view_access_of_expr c x in
       match x with
-      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _), _) ->
+      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _)
+        when not (Hir.is_value_struct t) ->
           error (Ast.expr_span a) "raw access cannot store an array or struct value"
       | Hir.Raw_select (base, off, t, _) ->
           let* () = check_place_access c (Ast.expr_span a) ~write:true x in

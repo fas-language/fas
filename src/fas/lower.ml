@@ -131,10 +131,12 @@ let has_c_abi (f : Hir.func) = f.linkage = Hir.External_c
 (* ---------- the fails ABI ---------- *)
 
 (* A [fails] function with a result returns C's
-   [struct { _Alignas(8) T value; uint32_t err; }]: the value at 0, the
-   error at 8, 16 bytes in two eightbytes (rax/xmm0 and edx/eax). One
-   synthetic struct per storage type; a [fails] function with no result
-   returns the error alone, as an i32. *)
+   [struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }]: the value
+   at 0, the error at the next multiple of 8. For a scalar that is 16 bytes
+   in two eightbytes (rax/xmm0 and edx/eax); so is a value struct of at
+   most 8 bytes, while a bigger one (24 bytes) goes through memory. One
+   synthetic struct per scalar storage type and per value struct; a
+   [fails] function with no result returns the error alone, as an i32. *)
 let fails_key t =
   match storage_ty t with
   | Low.I8 -> Some ("i8", Hir.Int Hir.U8)
@@ -147,12 +149,47 @@ let fails_key t =
   | _ -> None
 
 let fails_struct_name t =
-  match fails_key t with
-  | Some (k, _) -> "fails." ^ k
-  | None -> "fails.unsupported"
+  match t with
+  | Hir.Struct name -> "fails.struct." ^ name
+  | _ -> (
+      match fails_key t with
+      | Some (k, _) -> "fails." ^ k
+      | None -> "fails.unsupported")
 
-let fails_struct_defs : Hir.struct_def list =
-  List.filter_map
+(* where the error sits in the fails result of [t] *)
+let fails_err_offset structs t =
+  match t with
+  | Hir.Struct _ -> (
+      match Hir.layout structs t with
+      | Ok (size, _) -> (size + 7) / 8 * 8
+      | Error _ -> 8)
+  | _ -> 8
+
+let fails_struct_defs (structs : Hir.struct_def list) : Hir.struct_def list =
+  let value_struct_defs =
+    List.filter_map
+      (fun (d : Hir.struct_def) ->
+        let t = Hir.Struct d.name in
+        if not (Hir.is_value_struct t) then None
+        else
+          let offset = fails_err_offset structs t in
+          Some
+            {
+              Hir.name = fails_struct_name t;
+              fields =
+                [
+                  { Hir.name = "value"; ty = t; offset = 0; unsupported_reason = None };
+                  { Hir.name = "err"; ty = Hir.Int Hir.U32; offset; unsupported_reason = None };
+                ];
+              size = offset + 8;
+              align = 8;
+              is_union = false;
+              byte_storage = false;
+            })
+      structs
+  in
+  value_struct_defs
+  @ List.filter_map
     (fun t ->
       match fails_key t with
       | None -> None
@@ -170,8 +207,8 @@ let fails_struct_defs : Hir.struct_def list =
               is_union = false;
               byte_storage = false;
             })
-    [ Hir.Int Hir.U8; Hir.Int Hir.U16; Hir.Int Hir.U32; Hir.Int Hir.U64;
-      Hir.Float Hir.F32; Hir.Float Hir.F64; Hir.Addr ]
+      [ Hir.Int Hir.U8; Hir.Int Hir.U16; Hir.Int Hir.U32; Hir.Int Hir.U64;
+        Hir.Float Hir.F32; Hir.Float Hir.F64; Hir.Addr ]
 
 (* the Low result type of a function that is [fails] or not *)
 let result_ty ~fails ret =
@@ -720,6 +757,9 @@ let rec constant_construction structs = function
 let fail_exit : (state -> Low.value -> (unit, Diag.t list) result) ref =
   ref (fun _ _ -> Error [ Diag.error Span.synthetic "internal error: fail_exit unset" ])
 
+(* [construct_into], defined with the statements below, for [Hir.Construct] *)
+let construct_hook = ref (fun _ _ _ _ -> Error [])
+
 let rec expr s = function
   | Hir.EInt (v, t, _) -> Ok (Low.Const (ty t, v))
   | Hir.EFloat (v, t, _) -> Ok (Low.Const (ty t, v))
@@ -846,6 +886,8 @@ let rec expr s = function
       let* raw = raw_call s ~fails:true call in
       let* err = fails_error s t raw in
       let* v = fails_value s t raw in
+      let* slot = join_slot s t in
+      let* () = fill_join_slot s t slot v in
       let handler = fresh_block s and join = fresh_block s in
       let c = fresh s in
       E.cmp s.fn c Low.Ne Low.I32 err (zero Low.I32);
@@ -853,12 +895,20 @@ let rec expr s = function
       E.cond_br s.fn (Low.Local (c, Low.I1)) handler.id join.id;
       enter s handler;
       let* d = expr s fallback in
+      let* () = fill_join_slot s t slot d in
       let dp = s.current.id in
       if open_block s then E.br s.fn join.id;
       enter s join;
+      join_value s t slot [ (v, vp); (d, dp) ]
+  | Hir.Construct (local, construction, _) ->
+      (* a brace list as a value struct value: built in its own slot *)
+      let* alignment = align s local.ty in
       let id = fresh s in
-      E.phi s.fn id (ty t) [ (v, vp); (d, dp) ];
-      Ok (Low.Local (id, ty t))
+      E.alloca_entry s.fn id (storage_ty local.ty) alignment;
+      let pointer = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
+      bind_local s local pointer alignment;
+      let* () = !construct_hook alignment s pointer construction in
+      load_value s local.ty pointer alignment
   | Hir.Capture (call, local, t, span) -> (
       let* raw = raw_call s ~fails:true call in
       let* err = fails_error s t raw in
@@ -1027,7 +1077,8 @@ and fails_error s t raw =
   if t = Hir.Void then Ok raw
   else
     let p = fresh s in
-    E.gep s.fn p Low.I8 raw [ Low.Index (Low.Const (Low.I64, 8L)) ];
+    let offset = Int64.of_int (fails_err_offset s.structs t) in
+    E.gep s.fn p Low.I8 raw [ Low.Index (Low.Const (Low.I64, offset)) ];
     let id = fresh s in
     E.load s.fn id Low.I32 (Low.Local (p, Low.Pointer Low.I8)) 8;
     Ok (Low.Local (id, Low.I32))
@@ -1040,6 +1091,20 @@ and fail_return s err =
   | None -> error Span.synthetic "internal error: failing exit of a function that does not fail"
   | Some Hir.Void ->
       E.ret s.fn (Some (Low.I32, err));
+      Ok ()
+  | Some (Hir.Struct _ as t) ->
+      (* a zeroed result with the error stored over it *)
+      let rt = Low.Struct (fails_struct_name t) in
+      let slot = fresh s in
+      E.alloca_entry s.fn slot rt 8;
+      let p = Low.Local (slot, Low.Pointer rt) in
+      let fails_t = Hir.Struct (fails_struct_name t) in
+      let* () =
+        !construct_hook 8 s p
+          (Hir.Init_zero (Hir.zero_initializer fails_t, true, Span.synthetic))
+      in
+      fails_store_err s t p err;
+      E.ret s.fn (Some (rt, p));
       Ok ()
   | Some t ->
       let zero_value =
@@ -1057,11 +1122,15 @@ and fails_result s t v err =
   E.alloca_entry s.fn slot rt 8;
   let p = Low.Local (slot, Low.Pointer rt) in
   let* () = store_value s t v p 8 in
-  let ep = fresh s in
-  E.gep s.fn ep Low.I8 p [ Low.Index (Low.Const (Low.I64, 8L)) ];
-  E.store s.fn Low.I32 err (Low.Local (ep, Low.Pointer Low.I8)) 8;
+  fails_store_err s t p err;
   E.ret s.fn (Some (rt, p));
   Ok ()
+
+and fails_store_err s t p err =
+  let ep = fresh s in
+  let offset = Int64.of_int (fails_err_offset s.structs t) in
+  E.gep s.fn ep Low.I8 p [ Low.Index (Low.Const (Low.I64, offset)) ];
+  E.store s.fn Low.I32 err (Low.Local (ep, Low.Pointer Low.I8)) 8
 
 and lower_builtin s b args t span =
   let* vs = exprs s args in
@@ -1506,20 +1575,46 @@ and lower_short s op a b =
 and lower_ternary s c a b t =
   let* cv = expr s c in
   let* cv = require_bool (Hir.expr_span c) cv in
+  let* slot = join_slot s t in
   let tb = fresh_block s and eb = fresh_block s and join = fresh_block s in
   E.cond_br s.fn cv tb.id eb.id;
   enter s tb;
   let* tv = expr s a in
+  let* () = fill_join_slot s t slot tv in
   let tp = s.current.id in
   if open_block s then E.br s.fn join.id;
   enter s eb;
   let* ev = expr s b in
+  let* () = fill_join_slot s t slot ev in
   let ep = s.current.id in
   if open_block s then E.br s.fn join.id;
   enter s join;
-  let id = fresh s in
-  E.phi s.fn id (ty t) [ (tv, tp); (ev, ep) ];
-  Ok (Low.Local (id, ty t))
+  join_value s t slot [ (tv, tp); (ev, ep) ]
+
+(* Two control paths that meet with a value: a phi, or for a value struct
+   (Fir has no aggregate phis) a slot that each path fills before it
+   jumps, loaded at the join. *)
+and join_slot s t =
+  match ty t with
+  | Low.Struct _ as low ->
+      let* alignment = align s t in
+      let slot = fresh s in
+      E.alloca_entry s.fn slot low alignment;
+      Ok (Some (Low.Local (slot, Low.Pointer low), alignment))
+  | _ -> Ok None
+
+and fill_join_slot s t slot v =
+  match slot with
+  | Some (p, alignment) when open_block s -> store_value s t v p alignment
+  | _ -> Ok ()
+
+and join_value s t slot incoming =
+  match slot with
+  | Some (p, alignment) -> load_value s t p alignment
+  | None ->
+      let id = fresh s in
+      E.phi s.fn id (ty t) incoming;
+      Ok (Low.Local (id, ty t))
 
 and materialize s e =
   let* v = expr s e in
@@ -1952,7 +2047,7 @@ and simd_memory_store s span access_ty kind args values =
 
 and raw_load s t p =
   match t with
-  | Hir.Float _ ->
+  | Hir.Float _ | Hir.Err ->
       let id = fresh s in
       E.load s.fn id (ty t) p 1;
       Ok (Low.Local (id, ty t))
@@ -1979,11 +2074,13 @@ and raw_load s t p =
       E.load s.fn id vector_ty p 1;
       Ok (Low.Local (id, vector_ty))
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_load s false lanes p
+  (* `p[S]` of a value struct: an unaligned copy *)
+  | Hir.Struct _ -> load_value s t p 1
   | _ -> error Span.synthetic "internal error: aggregate raw load"
 
 and raw_store s t v p =
   match t with
-  | Hir.Float _ ->
+  | Hir.Float _ | Hir.Err ->
       E.store s.fn (ty t) v p 1;
       Ok ()
   | Hir.Int k ->
@@ -2002,6 +2099,7 @@ and raw_store s t v p =
       E.store s.fn (ty t) v p 1;
       Ok ()
   | Hir.Vec (lanes, Hir.Bool) -> packed_bool_store s false lanes v p
+  | Hir.Struct _ -> store_value s t v p 1
   | _ -> error Span.synthetic "internal error: aggregate raw store"
 
 and store_value s t value pointer alignment =
@@ -2054,7 +2152,7 @@ let rec copy_leaf_count structs = function
             0 definition.fields)
   | Hir.Array (length, element_ty) ->
       capped_mul length (copy_leaf_count structs element_ty)
-  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Vec _ -> 1
+  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Vec _ | Hir.Err -> 1
   | _ -> 17
 
 let rec copy_place s span ty destination source =
@@ -2104,7 +2202,7 @@ let rec copy_place s span ty destination source =
             elements (index + 1)
         in
         elements 0
-  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Vec _ ->
+  | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Vec _ | Hir.Err ->
       let* value = raw_load s ty source in
       raw_store s ty value destination
   | _ -> error span "internal error: invalid leaf type in aggregate copy"
@@ -2787,6 +2885,11 @@ and lower_switch s e arms default span =
   if not falls_through then E.unreachable s.fn;
   Ok ()
 
+
+let () =
+  construct_hook := fun alignment s pointer construction ->
+    construct_into ~alignment s pointer construction
+
 let () =
   fail_exit :=
     fun s err ->
@@ -2827,6 +2930,7 @@ let address_taken_locals ?function_addresses body =
         collect_expr callee;
         List.iter collect_expr args
     | Hir.Try (call, _, _) | Hir.Capture (call, _, _, _) -> collect_expr call
+    | Hir.Construct (_, construction, _) -> collect_construction construction
     | Hir.Catch_value (call, fallback, _, _) ->
         collect_expr call;
         collect_expr fallback
@@ -2841,8 +2945,7 @@ let address_taken_locals ?function_addresses body =
     | Hir.EString _ | Hir.Local _ | Hir.Global _ | Hir.Sizeof _ | Hir.Alignof _
     | Hir.Offsetof _ | Hir.Const_array _ ->
         ()
-  in
-  let rec collect_construction = function
+  and collect_construction = function
     | Hir.Init_value value -> collect_expr value
     | Hir.Init_zero _ -> ()
     | Hir.Init_aggregate (_, _, entries, _) -> List.iter collect_construction entries
@@ -3265,7 +3368,7 @@ let generate_main_wrapper mc structs (user : Hir.func) string =
 
 let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
     =
-  let p = { p with Hir.structs = p.Hir.structs @ fails_struct_defs } in
+  let p = { p with Hir.structs = p.Hir.structs @ fails_struct_defs p.Hir.structs } in
   let user_main =
     List.find_opt
       (fun (f : Hir.func) -> f.name = "main" && f.fails && f.body <> Hir.Declaration)

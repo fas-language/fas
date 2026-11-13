@@ -55,11 +55,18 @@ let validate_function_params generic_params params =
   in
   validate [] params
 
+(* a value struct passes like a small C struct (SysV), so C sees it too *)
 let extern_c_value_type = function
   | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
-  | Hir.Void | Hir.Array _ | Hir.Vec _ | Hir.Struct _ | Hir.Opaque _ -> false
+  | Hir.Struct _ as ty -> Hir.is_value_struct ty
+  | Hir.Void | Hir.Array _ | Hir.Vec _ | Hir.Opaque _ -> false
 
-let aggregate_value_type = function Hir.Array _ | Hir.Struct _ -> true | _ -> false
+(* the types a Fas function may not take or return: arrays and structs other
+   than value structs *)
+let aggregate_value_type = function
+  | Hir.Array _ -> true
+  | Hir.Struct _ as ty -> not (Hir.is_value_struct ty)
+  | _ -> false
 let diagnostic_source_ty_name ty = Ast.type_name ty
 
 let aggregate_parameter_error span name ty_name =
@@ -118,11 +125,14 @@ let always_aggregate_type named_types generic_params ty =
     | Ast.Named_type (name, _) when List.mem name generic_type_names -> false
     | Ast.Named_type (name, _) -> (
         match List.assoc_opt name named_types with
-        | Some Struct_name | Some (C_record_name (_, None)) -> true
+        | Some Struct_name -> not (Stdlib.Hashtbl.mem Hir.value_structs name)
+        | Some (C_record_name (_, None)) -> true
         | Some (Alias_name ty) -> is_aggregate ty
         | _ -> false)
     | Ast.Applied_type (name, _, _, _) ->
+        (* generic value struct templates are in the registry by name *)
         List.assoc_opt name named_types = Some Generic_struct_name
+        && not (Stdlib.Hashtbl.mem Hir.value_structs name)
     | _ -> false
   in
   is_aggregate ty
@@ -298,11 +308,79 @@ let desugar_errors (program : Ast.program) =
     ( { Ast.items },
       List.map (fun name -> (name, fst (Hashtbl.find declared name))) names )
 
+(* A `value struct` holds only scalars, bools, addrs, handles, errors and
+   other value structs, and fits in 16 bytes, so it travels in at most two
+   registers like a small C struct. *)
+let validate_value_structs specializations items (structs : Hir.struct_def list) =
+  (* a specialization is named as written: `W[arr[4, i64]]` *)
+  let shown name =
+    Option.value ~default:name
+      (Sema_specialization.specialization_application_name specializations
+         Struct_specialization name)
+  in
+  let field_ok = function
+    | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err -> true
+    | Hir.Struct _ as ty -> Hir.is_value_struct ty
+    | Hir.Array _ | Hir.Vec _ | Hir.Opaque _ | Hir.Void -> false
+  in
+  let check = function
+    | Ast.Struct { name; name_span; is_value = true; generic_params = []; fields; _ } -> (
+        match List.find_opt (fun (d : Hir.struct_def) -> d.name = name) structs with
+        | None -> Ok ()
+        | Some def ->
+            let bad =
+              List.find_opt (fun (f : Hir.field) -> not (field_ok f.ty)) def.fields
+            in
+            (match bad with
+            | Some f ->
+                let span =
+                  match
+                    List.find_opt (fun (a : Ast.field) -> a.name = f.name) fields
+                  with
+                  | Some a -> a.ty_span
+                  | None -> name_span
+                in
+                Error
+                  [
+                    Diag.error
+                      ~help:
+                        "a value struct holds scalars, bools, addrs, handles, \
+                         errors and other value structs"
+                      span
+                      (Printf.sprintf
+                         "field `%s` of value struct `%s` has type `%s`" f.name
+                         (shown name) (Hir.ty_name f.ty));
+                  ]
+            | None when def.size > 16 ->
+                Error
+                  [
+                    Diag.error
+                      ~help:"use a plain `struct` and pass its address"
+                      name_span
+                      (Printf.sprintf
+                         "value struct `%s` is %d bytes; a value struct is at \
+                          most 16"
+                         (shown name) def.size);
+                  ]
+            | None -> Ok ()))
+    | _ -> Ok ()
+  in
+  Result_list.iter check items
+
 let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported = [])
     ?(c_nonnull_parameters = []) ?(c_string_parameters = [])
     ?(c_alloc_size_parameters = []) ?(c_records = []) ?(all_errors = false)
     ?specializations ?index program =
   let* program, program_errors = desugar_errors program in
+  (* the value struct registry: declared ones now, specializations as
+     monomorphization makes them *)
+  Stdlib.Hashtbl.reset Hir.value_structs;
+  List.iter
+    (function
+      | Ast.Struct { name; is_value = true; _ } ->
+          Stdlib.Hashtbl.replace Hir.value_structs name ()
+      | _ -> ())
+    program.Ast.items;
   let global_names =
     List.filter_map
       (function Ast.Global { name; _ } -> Some name | _ -> None)
@@ -753,6 +831,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   let named_types = add_c_records (add_c_types named_types) in
   let* structs_src = collect_structs named_types [] program.Ast.items in
   let* structs = build structs_src in
+  let* () = validate_value_structs specializations program.Ast.items structs in
   let validate_object span t = Sema_limits.validate_object limits structs span t in
   let source_obj span t =
     let* t = source_ty_diag named_types span t in
@@ -898,12 +977,13 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                     | Hir.Void | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr
                     | Hir.Handle _ | Hir.Err ->
                         Ok ()
+                    | Hir.Struct _ when Hir.is_value_struct rt -> Ok ()
                     | _ ->
                         error ret_span
                           (Printf.sprintf
                              "a `fails` function cannot return `%s`; return a \
-                              scalar, an address, a handle or an error, or fill an \
-                              out pointer"
+                              scalar, an address, a handle, an error or a value \
+                              struct, or fill an out pointer"
                              (Hir.ty_name rt))
                 in
                 let* () =

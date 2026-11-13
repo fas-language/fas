@@ -563,7 +563,8 @@ module P = struct
     | Token.Ident _, Token.Lbracket when generic_application_is_call p ->
         let* e = expr p in
         Ok (Ast.Const_arg e)
-    | Token.Ident name, (Token.Comma | Token.Rbracket)
+    (* `call_addr[S fails]`: a named result type before `fails` *)
+    | Token.Ident name, (Token.Comma | Token.Rbracket | Token.Kw_fails)
       when not (Names.parser_type_name name) ->
         let s = span p in
         ignore (bump p);
@@ -574,7 +575,8 @@ module P = struct
     | Token.Ident _, Token.Lbracket ->
         let previous = p.pos in
         let* t = ty_unchecked p in
-        if at p Token.Comma || at p Token.Rbracket then Ok (Ast.Type_or_index t)
+        if at p Token.Comma || at p Token.Rbracket || at p Token.Kw_fails then
+          Ok (Ast.Type_or_index t)
         else (
           p.pos <- previous;
           let* e = expr p in
@@ -781,6 +783,12 @@ module P = struct
         let start = span p in
         let* x = struct_item p in
         Ok [ Ast.with_extent (extent p start) x ]
+    (* `value` is a keyword only right before `struct` *)
+    | Token.Ident "value" when (peek_n p 1).kind = Token.Kw_struct ->
+        let start = span p in
+        ignore (bump p);
+        let* x = struct_item ~is_value:true p in
+        Ok [ Ast.with_extent (extent p start) x ]
     | Token.Kw_opaque ->
         let start = span p in
         let* x = opaque_item p in
@@ -880,7 +888,7 @@ module P = struct
     Ok
       (Ast.Global { name; name_span; ty_span; ty; init; linkage; span = s; extent = s })
 
-  and struct_item p =
+  and struct_item ?(is_value = false) p =
     let s = span p in
     let* () = expected p Token.Kw_struct in
     let name_span = span p in
@@ -958,6 +966,7 @@ module P = struct
            align;
            size = None;
            is_union = false;
+           is_value;
            span = s;
            extent = s;
          })

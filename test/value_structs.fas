@@ -1,0 +1,113 @@
+// value structs: passed, returned and assigned by value (see LANGUAGE.md)
+extern "C" { fn printf(fmt addr, ...) i32 }
+
+error Neg
+
+value struct Pt { x i32, y i32 }
+value struct Span { p addr, n usize }
+value struct Pair[T] { a T, b T }
+value struct Box { p Pt, tag u8 }
+value struct Res { code error, ok bool }
+value struct Big { a i64, b i64 }
+opaque File
+value struct Owned { f handle[File], n u32 }
+struct Holder { pt Pt, n i32 }
+
+var origin Pt = {7, 8}
+
+fn mk(x i32, y i32) Pt {
+    r Pt = {x, y}
+    return r
+}
+fn add(a Pt, b Pt) Pt { return {a.x + b.x, a.y + b.y} }
+fn swap[T](p Pair[T]) Pair[T] { return {p.b, p.a} }
+fn boxed(t u8) Box { return {.p = {3, 4}, .tag = t} }
+fn pick(c bool, a Pt, b Pt) Pt { return if c { a } else { b } }
+fn span_of(s addr, n usize) Span { return {s, n} }
+
+fn pt(x i32) Pt fails {
+    if x < 0 { fail Neg }
+    return {x, x * 2}
+}
+fn big(n i64) Big fails {
+    if n < 0 { fail Neg }
+    return {n, n + 1}
+}
+fn via(x i32) Pt fails {
+    p Pt = try pt(x)
+    p.y += 1
+    return p
+}
+fn big_sum(n i64) i64 fails {
+    b Big = try big(n)
+    return b.a + b.b
+}
+
+fn main() i32 {
+    a Pt = mk(1, 2)
+    b Pt = add(a, {.x = 10, .y = 20})
+    c Pt = b
+    c.x = 100
+    b = add(b, c)
+    printf(c"add %d %d %d %d %d %d\n", a.x, a.y, b.x, b.y, c.x, c.y)
+
+    q Pair[i64] = swap[i64]({1, 2})
+    r Pair[f64] = swap[f64]({0.5, 1.5})
+    printf(c"pair %ld %ld %.1f %.1f\n", q.a, q.b, r.a, r.b)
+
+    bx Box = boxed(9)
+    printf(c"box %d %d %d\n", bx.p.x, bx.p.y, bx.tag)
+
+    h Holder = {}
+    h.pt = bx.p
+    h.n = 5
+    printf(c"holder %d %d %d\n", h.pt.x, h.pt.y, h.n)
+
+    xs arr[3, Pt] = {}
+    xs[1] = origin
+    xs[2] = add(xs[1], xs[1])
+    printf(c"arr %d %d %d %d\n", xs[1].x, xs[1].y, xs[2].x, xs[2].y)
+
+    buf arr[24, u8] = {}
+    (&buf + 4)[Pt] = {11, 12}
+    raw Pt = (&buf + 4)[Pt]
+    printf(c"raw %d %d\n", raw.x, raw.y)
+
+    origin = {.y = 1}
+    z Pt = {}
+    printf(c"zero %d %d %d %d\n", origin.x, origin.y, z.x, z.y)
+
+    printf(c"pick %d %d\n", pick(true, a, b).x, pick(false, a, b).x)
+    t Pt = if a.x > 0 { a } else { {0, 0} }
+    printf(c"if %d\n", t.y)
+
+    s Span = span_of(c"hello", 5)
+    printf(c"span %.*s\n", trunc[i32](s.n), s.p)
+
+    rs Res = {Neg, false}
+    printf(c"res %s %d\n", err_name(rs.code), rs.ok)
+
+    o Owned = {.n = 3}
+    printf(c"owned %d %d\n", o.f == null, o.n)
+
+    d Pt = {9, 9}
+    ok Pt = via(4) catch d
+    bad Pt = via(-1) catch d
+    printf(c"fails %d %d %d %d\n", ok.x, ok.y, bad.x, bad.y)
+    sum i64 = big_sum(20) catch -1
+    none i64 = big_sum(-1) catch -1
+    printf(c"big %ld %ld\n", sum, none)
+
+    i i32 = 0
+    acc Pt = {}
+    while i < 4 {
+        acc = add(acc, {i, 1})
+        i += 1
+    }
+    printf(c"loop %d %d\n", acc.x, acc.y)
+
+    f addr = &add
+    ind Pt = call_addr[Pt](f, a, a)
+    printf(c"indirect %d %d\n", ind.x, ind.y)
+    return 0
+}

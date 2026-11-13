@@ -209,6 +209,8 @@ and item =
       align : int option;
       size : int option;
       is_union : bool;
+      (* `value struct`: passed, returned and assigned by value *)
+      is_value : bool;
       span : Span.t;
       extent : Span.t;
     }

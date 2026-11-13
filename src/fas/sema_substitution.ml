@@ -3614,7 +3614,17 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           with_current_trace specialization.trace (fun () ->
               match template with
               | Ast.Struct
-                  { name_span; fields; align; size; span; generic_params; is_union; _ }
+                  {
+                    name_span;
+                    fields;
+                    align;
+                    size;
+                    span;
+                    generic_params;
+                    is_union;
+                    is_value;
+                    _;
+                  }
                 ->
                   let* fields =
                     with_generic_type_names (type_param_names generic_params) (fun () ->
@@ -3637,6 +3647,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                         align;
                         size;
                         is_union;
+                        is_value;
                         span;
                         extent = span;
                       }
@@ -3647,6 +3658,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                       ~where:(Printf.sprintf "struct specialization `%s`" name)
                       generated_item
                   in
+                  if is_value then Stdlib.Hashtbl.replace Hir.value_structs name ();
                   generated := generated_item :: !generated;
                   Ok ()
               | _ ->

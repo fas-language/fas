@@ -215,3 +215,50 @@ fn nothing() void {}
     parameters: (parameter_list)
     result: (primitive_type)
     body: (block)))
+
+================================================================================
+value struct declarations
+================================================================================
+value struct Span { p addr, n usize }
+value struct Pair[T] { a T, b T }
+fn f(value Span) Span {
+  return value
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    name: (identifier)
+    (struct_body
+      (field_declaration
+        name: (identifier)
+        type: (address_type))
+      (field_declaration
+        name: (identifier)
+        type: (primitive_type))))
+  (struct_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        name: (identifier)))
+    (struct_body
+      (field_declaration
+        name: (identifier)
+        type: (named_type
+          name: (type_identifier)))
+      (field_declaration
+        name: (identifier)
+        type: (named_type
+          name: (type_identifier)))))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      name: (identifier)
+      type: (named_type
+        name: (type_identifier)))
+    result: (named_type
+      name: (type_identifier))
+    body: (block
+      (return_statement
+        (identifier)))))

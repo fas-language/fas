@@ -29,6 +29,7 @@ hello, fas!
 - [Functions and control flow](#functions-and-control-flow)
 - [Errors](#errors)
 - [Structs, arrays and memory](#structs-arrays-and-memory)
+  - [Value structs](#value-structs)
 - [Generics](#generics)
   - [Const loops](#const-loops)
 - [Globals and constants](#globals-and-constants)
@@ -62,7 +63,7 @@ hello, fas!
 5. **Integer arithmetic wraps.** Division by zero and `MIN / -1` trap. Shift counts are taken modulo the bit width.
 6. **`&`, `^` and `|` bind tighter than comparisons**, unlike C: `x & 1 != 0` means `(x & 1) != 0`.
 7. **Assignment is a statement.** No `x++`, no `a = b = c`, no assignment inside a condition.
-8. **Arrays and structs are places, not values.** They are not passed, returned or assigned by value: pass `&x` and use `copy(dst, src)`. Calling a C function that takes or returns a struct by value [still works](#c-structs-by-value).
+8. **Arrays and structs are places, not values.** They are not passed, returned or assigned by value: pass `&x` and use `copy(dst, src)`. A small [`value struct`](#value-structs) is the exception, and calling a C function that takes or returns a struct by value [still works](#c-structs-by-value).
 9. **`addr` is an untyped byte address.** `p + n` moves `n` bytes, `p[T]` is the `T` at `p`, `p[T, i]` is element `i`. Nothing is bounds-checked.
 10. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error, even with a length parameter as in `strncmp`; write `c"..."` there.
 11. **Generic calls infer their arguments from parameter types**: `max(x, 1)` infers `T` from `x`, and the literal takes that type. Inference covers `T`, `handle[T]`, `vec[N, T]` and generic structs behind handles. Every generic parameter must be determined by an argument. There is no inference from literals alone or from the result type. Explicit forms such as `max[u32](x, 1)` always work.
@@ -273,7 +274,7 @@ A function that can fail says so with `fails`, and every caller must handle the 
 - `error Empty, BadDigit` declares errors. An error name is a top-level constant of type `error`. Declaring the same name in two files means the same error, so two libraries can both declare `NotFound`.
 - `error` is a 4-byte type. An error can be stored, passed, compared with `==` and `!=`, and used in `switch`, which needs a `default` arm because the set of errors is open. There is no arithmetic on errors; `bitcast` converts between `error` and `u32`/`i32` (for logs and files).
 - An error's code is computed from its name, so it is the same in every build and program. `error NotFound = 2` pins an errno code (1-4095) instead. Two errors with the same code are a compile error.
-- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr` or `handle[T]`. A struct result goes through an out pointer, as usual.
+- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr`, `handle[T]`, `error` or a [value struct](#value-structs). Any other struct result goes through an out pointer, as usual.
 - `fail E` leaves the function with error `E`, running `defer` and `errdefer` blocks. `return` never carries an error. `fail` with the zero error (only reachable through `bitcast` or `{}`) traps.
 - A call to a `fails` function must be followed by `try` or `catch`; anything else is a compile error.
   - `try f(x)` passes an error up to the caller. It works only in a `fails` function and binds tighter than operators: `try f(x) + 1` is `(try f(x)) + 1`.
@@ -396,6 +397,60 @@ fn main() i32 {
 ```
 - **`@align(N)`** raises a struct's alignment. It is the only annotation. (`@inline` and `--no-inline` were removed: Fas has no inliner yet. They come back with the optimizer.)
 - **`opaque Name`** declares a type you only hold as `handle[Name]`, a typed address with no arithmetic. It is mostly for C types like `FILE`.
+
+### Value structs
+
+A `value struct` is a small struct that is a value: it is passed, returned and assigned like an integer, and travels in registers.
+
+```fas
+use "C" <stdio.h>
+
+error Empty
+
+value struct Span { p addr, n usize }       // at most 16 bytes, travels in registers
+value struct Pair[T] { a T, b T }
+
+fn span_of(s addr) Span {
+    n usize = 0
+    while s[u8, n] != 0 { n += 1 }
+    return {s, n}                           // a brace list where the type is known
+}
+
+fn first_word(s Span) Span fails {
+    if s.n == 0 { fail Empty }
+    n usize = 0
+    while n < s.n && s.p[u8, n] != 32 { n += 1 }
+    return {.p = s.p, .n = n}
+}
+
+fn swap[T](p Pair[T]) Pair[T] { return {p.b, p.a} }
+
+fn main() i32 {
+    line Span = span_of(c"hello value structs")
+    word Span = first_word(line) catch line
+    printf(c"%.*s %zu\n", trunc[i32](word.n), word.p, line.n)
+    head Span = word                        // assignment copies the value
+    head.n = 2
+    printf(c"%.*s %zu\n", trunc[i32](head.n), head.p, word.n)
+    p Pair[i32] = swap[i32]({1, 2})
+    printf(c"%d %d\n", p.a, p.b)
+    return 0
+}
+```
+```text
+hello 19
+he 5
+2 1
+```
+
+- **Fields** are scalars, `bool`, `addr`, `handle[T]`, `error` and other value structs, with C layout, at most 16 bytes in all. No arrays or vectors. A generic value struct checks each specialization: `Pair[arr[4, i64]]` is an error.
+- **Everything a struct does**: `{...}` initializers, reading and writing fields, `&v`, `p[S]` and `p[S].field`, fields of plain structs and array elements.
+- **What a value adds**: parameters, results, `x = y`, `p[S] = v` and `v = p[S]`.
+- **A brace list needs a known type**: a declaration, `return`, an argument of a non-generic parameter, or an assignment. `f({1, 2})` works; a generic `swap({1, 2})` cannot infer `T` from it, so write `swap[i32]({1, 2})`. After `catch`, `{` starts a block, so a fallback is a named value: `f() catch dflt`.
+- **No `==`**, since padding has no value: compare the fields.
+- **`fails`** works with a value struct result, and `try`/`catch` as with any other.
+- **C sees a value struct as the same C struct**, passed and returned by the System V rules, so `extern "C"` functions may take and return them. A `fails` result is C's `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }`: the error sits at the next multiple of 8 after the value, so a value struct of up to 8 bytes still comes back in two registers, and a bigger one comes back through memory, as C does.
+- `value` is a keyword only right before `struct`; it is still a valid name.
 
 ## Generics
 
@@ -785,7 +840,7 @@ fn main() i32 {
 - A by-value argument is a variable, field, array element or another C call's struct result, of exactly that struct type. A literal such as `show({1, 2, 3, 4})` has no destination type and is an error: declare a local first.
 - A struct result can initialize a declaration, be assigned to any place (`p.pos = f(...)`, `xs[i] = f(...)`), be passed to another C function, be read as `f(...).x`, or be discarded.
 - This works for header and C-block functions, `static` or not, structs and unions, packed or aligned, and for the variadic arguments of variadic functions. `&f` is the address of `f` itself. Only a `static` C function is reached through a small generated C wrapper, because it has no symbol to call.
-- Fas functions still never take or return structs by value. This is only for calling C.
+- Fas functions take and return only [value structs](#value-structs) by value. Other structs go by address.
 
 ### Assembly
 
@@ -924,6 +979,7 @@ var count u32                           // mutable global, zero-filled
 var seed u32 = 7
 
 struct P { x i32, y i32 }               // fields separated by `,` or newlines
+value struct V { x f32, y f32 }         // a value: passed, returned, assigned
 struct Line @align(64) { bytes arr[64, u8] }
 struct Ring[N const usize] { head usize, items arr[N, u32] }
 opaque FILE                             // held only as handle[FILE]

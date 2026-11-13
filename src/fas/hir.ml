@@ -34,6 +34,13 @@ type struct_def = {
   byte_storage : bool;
 }
 
+(* the names of the program's `value struct`s, specializations included:
+   values of these types are passed, returned and assigned by value. Reset
+   by each [Sema.check] *)
+let value_structs : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+let is_value_struct = function Struct name -> Stdlib.Hashtbl.mem value_structs name | _ -> false
+
 type const_def = { name : string; ty : ty; bits : int64 }
 type const_arr_def = { name : string; ty : ty; elems : int64 list }
 type zero_initializer = { zero_ty : ty }
@@ -145,8 +152,12 @@ type expr =
   | Try of expr * ty * Span.t
   | Catch_value of expr * expr * ty * Span.t
   | Capture of expr * local * ty * Span.t
+  (* a brace list where a value struct is expected (an argument, `return`,
+     an assignment): it is built in the fresh local, whose value is the
+     result *)
+  | Construct of local * construction * Span.t
 
-type construction =
+and construction =
   | Init_value of expr
   | Init_zero of zero_initializer * bool * Span.t
   | Init_omitted of zero_initializer * Span.t
@@ -278,7 +289,7 @@ let expr_ty = function
   | Catch_value (_, _, t, _)
   | Capture (_, _, t, _) ->
       t
-  | Local (local, _) -> local.ty
+  | Local (local, _) | Construct (local, _, _) -> local.ty
   | Global (_, ty, _) -> ty
   | Function_address _ -> Addr
   | EBool _ -> Bool
@@ -314,7 +325,8 @@ let expr_span = function
   | Const_array (_, _, s)
   | Try (_, _, s)
   | Catch_value (_, _, _, s)
-  | Capture (_, _, _, s) ->
+  | Capture (_, _, _, s)
+  | Construct (_, _, s) ->
       s
 
 let stmt_span = function

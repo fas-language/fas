@@ -163,8 +163,10 @@ module.exports = grammar({
         optional(seq('=', NL, field('value', $._expression))),
       ),
 
+    // `value struct`: `value` is a keyword only here
     struct_declaration: ($) =>
       seq(
+        optional('value'),
         'struct',
         field('name', $.identifier),
         optional($.generic_params),
