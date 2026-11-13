@@ -402,6 +402,15 @@ let print_func buf f =
   else begin
     add " {\n";
     let nm = assign_names f in
+    List.iter
+      (fun d ->
+        add (Printf.sprintf "  var %s %d" (quote d.vname) d.vty);
+        if d.vscope <> 0 then add (Printf.sprintf " scope %d" d.vscope);
+        if d.varg <> 0 then add (Printf.sprintf " arg %d" d.varg);
+        if d.vloc <> 0 then add (Printf.sprintf " !loc %d" d.vloc);
+        (match d.home with Some v -> add (" at " ^ value_text f nm (resolve f v)) | None -> ());
+        add "\n")
+      f.vars;
     Vec.iteri
       (fun k (b : block_rec) ->
         add (label nm.bnames.(k));
@@ -464,6 +473,28 @@ let print_global buf g =
           | None -> "zero"
           | Some ps -> "{" ^ String.concat ", " (List.map piece_text ps) ^ "}"))
 
+let encoding_names =
+  [ (Dsigned, "signed"); (Dunsigned, "unsigned"); (Dboolean, "boolean"); (Dfloat, "float");
+    (Dsigned_char, "signed_char"); (Dunsigned_char, "unsigned_char") ]
+
+let dtype_text = function
+  | Dvoid -> "void"
+  | Dbase { name; enc; size } -> Printf.sprintf "base %s %s %d" (quote name) (List.assoc enc encoding_names) size
+  | Dpointer t -> Printf.sprintf "pointer %d" t
+  | Dstruct { name; union; size; members } ->
+      Printf.sprintf "%s %s %s" (if union then "union" else "struct") (quote name)
+        (match size with
+        | None -> "declared"
+        | Some n ->
+            Printf.sprintf "size %d {%s}" n
+              (String.concat ", " (List.map (fun (m, t, o) -> Printf.sprintf "%s %d %d" (quote m) t o) members)))
+  | Darray (t, n) -> Printf.sprintf "array %d count %d" t n
+  | Dvector (t, n) -> Printf.sprintf "vector %d count %d" t n
+  | Dtypedef (name, t) -> Printf.sprintf "typedef %s %d" (quote name) t
+  | Denum { name; base; enumerators } ->
+      Printf.sprintf "enum %s %d {%s}" (quote name) base
+        (String.concat ", " (List.map (fun (e, v) -> Printf.sprintf "%s %Ld" (quote e) v) enumerators))
+
 let module_to_string m =
   let buf = Buffer.create 4096 in
   Buffer.add_string buf (Printf.sprintf "triple %s\n" (quote m.triple));
@@ -471,8 +502,16 @@ let module_to_string m =
   List.iter (fun a -> Buffer.add_string buf (Printf.sprintf "module_asm %s\n" (quote a))) m.module_asm;
   Vec.iteri
     (fun i (file, line, col) ->
-      if i > 0 then Buffer.add_string buf (Printf.sprintf "loc %d %s %d %d\n" i (quote file) line col))
+      if i > 0 then begin
+        Buffer.add_string buf (Printf.sprintf "loc %d %s %d %d" i (quote file) line col);
+        (match loc_scope m i with 0 -> () | sc -> Buffer.add_string buf (Printf.sprintf " !scope %d" sc));
+        Buffer.add_char buf '\n'
+      end)
     m.locs;
+  Vec.iteri
+    (fun i parent -> if i > 0 then Buffer.add_string buf (Printf.sprintf "scope %d parent %d\n" i parent))
+    m.scopes;
+  Vec.iteri (fun i t -> if i > 0 then Buffer.add_string buf (Printf.sprintf "dtype %d %s\n" i (dtype_text t))) m.dtypes;
   Vec.iteri
     (fun i (name, parent) ->
       if i > 0 then Buffer.add_string buf (Printf.sprintf "alias_tag %d %s %d\n" i (quote name) parent))

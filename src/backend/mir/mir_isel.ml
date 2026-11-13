@@ -2410,4 +2410,19 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
       term c blk.term)
     fn.blocks;
   Dynarray.iter (fun (b : block) -> b.code <- List.rev b.code) mf.blocks;
+  (* the homes of the source variables (debug info; read nothing else) *)
+  mf.homes <-
+    List.concat
+      (List.mapi
+         (fun i (d : F.dvar) ->
+           match d.home with
+           | None -> []
+           | Some v -> (
+               let v = F.resolve fn v in
+               match (Hashtbl.find_opt c.frame v, Hashtbl.find_opt c.cells v, Hashtbl.find_opt c.vals v) with
+               | Some s, _, _ -> [ (i, Hslot s) ]
+               | _, Some (V r, _), _ -> [ (i, Hcell r) ]
+               | _, _, Some (V r) -> [ (i, Hptr r) ]
+               | _ -> []))
+         fn.vars);
   mf

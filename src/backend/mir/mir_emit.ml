@@ -549,7 +549,8 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
 (* one function: returns its text size, its frame events for the
    .eh_frame (Mir_cfi), at offsets from the function's start, and its line
    rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
-   marker with its location id *)
+   marker with its location id, and where its source variables live
+   (Mir_dwarf.vloc, by Fir variable index) *)
 let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) =
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
@@ -569,21 +570,25 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
   let nb = Array.length ra.items in
   let labels = Array.init nb (fun _ -> A.new_label a) in
   let slot_mem v = mem fr (at (Bslot ra.vslot.(v))) in
+  (* the text offset where the code of each Mir_ra position ends (an
+     instruction with its spills, or a block's terminator) *)
+  let pend = Dynarray.create () in
+  let ended () = Dynarray.add_last pend (A.pos a) in
   for b = 0 to nb - 1 do
     A.place a labels.(b);
     block_pos b (A.pos a);
     List.iter
       (function
-        | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows
-        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i
+        | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows; ended ()
+        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i; ended ()
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
         | Reload (v, (X x)) -> A.mov_xm a ~double:true x (slot_mem v)
-        | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r
-        | Spill (v, (X x)) -> fstore a true (slot_mem v) x
+        | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
+        | Spill (v, (X x)) -> fstore a true (slot_mem v) x; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
         | Reload (_, V _) | Spill (_, V _) -> invalid_arg "Mir_emit: virtual register after allocation")
       ra.items.(b);
     let next = b + 1 in
-    match ra.terms.(b) with
+    (match ra.terms.(b) with
     | Jmp t | Asmgoto (t, _) -> if t <> next then A.jmp a labels.(t)
     | Jcc (c, t, e) ->
         A.jcc a c labels.(t);
@@ -597,7 +602,8 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
         A.ret a;
         event Mir_cfi.Returned
     | Halt -> A.ud2 a
-    | Jmpr (r, _) -> A.ext_r a ~w:false [ 0xff ] 4 (gr r)
+    | Jmpr (r, _) -> A.ext_r a ~w:false [ 0xff ] 4 (gr r));
+    ended ()
   done;
   let size = A.pos a - start in
   (* a restore_state at the very end describes no code *)
@@ -608,9 +614,37 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
       (fun acc (o, n) -> match acc with (o', _) :: rest when o' = o -> (o, n) :: rest | _ -> (o, n) :: acc)
       [] (List.rev !rows)
   in
+  (* variables: a frame slot is the variable's for the whole function, and
+     so is a spill slot (never shared, written after every definition); a
+     register holds its virtual register over the interval, from the end
+     of its first position to the end of its last *)
+  let dreg = function G r -> Mir_cfi.dwarf_reg r | X x -> 17 + x | V _ -> invalid_arg "Mir_emit: vreg" in
+  let in_reg v op =
+    match ra.assign.(v) with
+    | Some r when ra.hi.(v) >= 0 ->
+        let s = Dynarray.get pend ra.lo.(v) and e = Dynarray.get pend ra.hi.(v) in
+        if s < e then Some (Mir_dwarf.Ranges [ (s, e, op (dreg r)) ]) else None
+    | _ -> None
+  in
+  let vlocs =
+    List.filter_map
+      (fun (i, h) ->
+        let l =
+          match h with
+          | Hslot s -> Some (Mir_dwarf.Expr (Mir_dwarf.op_fbreg (-fr.slot_off.(s))))
+          | Hcell v when ra.vslot.(v) >= 0 -> Some (Mir_dwarf.Expr (Mir_dwarf.op_fbreg (-fr.slot_off.(ra.vslot.(v)))))
+          | Hcell v -> in_reg v Mir_dwarf.op_reg
+          | Hptr v when ra.vslot.(v) >= 0 ->
+              Some (Mir_dwarf.Expr (Mir_dwarf.op_fbreg (-fr.slot_off.(ra.vslot.(v))) ^ Mir_dwarf.op_deref))
+          | Hptr v -> in_reg v (fun r -> Mir_dwarf.op_breg r 0)
+        in
+        Option.map (fun l -> (i, l)) l)
+      f.homes
+  in
   ( size,
     List.rev (List.filter (fun (o, e) -> not (e = Mir_cfi.Returned && o = size)) !events),
-    List.rev rows )
+    List.rev rows,
+    vlocs )
 
 (* ---------- startup ---------- *)
 
@@ -871,7 +905,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
         begin
           A.align a 16;
           let offset = A.pos a in
-          let size, events, rows =
+          let size, events, rows, vlocs =
             func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
           fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
@@ -879,7 +913,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
           lines :=
             { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
-              size; rows }
+              size; rows; vars = fn.vars; vlocs }
             :: !lines;
           func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
         end)
@@ -980,17 +1014,16 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
       if not debug then []
       else
         Mir_dwarf.build ~cwd:(Sys.getcwd ()) ~producer:"fas 0.6.3" ~text_symbol:Mir_cfi.text_symbol
-          ~text_size:(Bytes.length text) ~loc:(F.Vec.get m.locs) (List.rev !lines)
+          ~text_size:(Bytes.length text) ~loc:(F.Vec.get m.locs)
+          ~dtypes:(Array.init (F.Vec.length m.dtypes) (F.Vec.get m.dtypes))
+          ~scopes:(Array.init (F.Vec.length m.scopes) (F.Vec.get m.scopes))
+          ~loc_scope:(F.loc_scope m) (List.rev !lines)
     in
     let debug_syms =
       List.concat
         (List.mapi
            (fun i (d : Mir_dwarf.section) ->
-             let name =
-               if d.sname = ".debug_abbrev" then Some Mir_dwarf.abbrev_symbol
-               else if d.sname = ".debug_line" then Some Mir_dwarf.line_symbol
-               else None
-             in
+             let name = d.ssym in
              Option.to_list
                (Option.map
                   (fun name ->

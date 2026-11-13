@@ -91,6 +91,9 @@ loc 1 "a.fas" 3 7
 alias_tag 1 "int" 0
 
 func @ops (i32, f64, ptr, <4 x i32>, i128) -> (i32) local noinline cold display "ops" {
+  var "a" 0 arg 1
+  var "s" 0 at %p
+  var "t" 0
 ^0(%a: i32, %f: f64, %p: ptr, %v: <4 x i32>, %w: i128):
   %1 = sub nsw i32 %a, i32 -5
   %2 = sdiv exact i32 %1, i32 3
@@ -160,8 +163,42 @@ func @fwd (i1) -> (i64) global {
 }
 |}
 
+(* debug variables (roadmap v0.8): types, lexical scopes, variables *)
+let debugvars =
+  {|
+triple "x86_64-unknown-linux-gnu"
+loc 1 "v.fas" 1 1
+loc 2 "v.fas" 2 3 !scope 1
+loc 3 "v.fas" 3 5 !scope 2
+scope 1 parent 0
+scope 2 parent 1
+dtype 1 base "i64" signed 8
+dtype 2 pointer 1
+dtype 3 struct "P" size 16 {"x" 1 0, "y" 1 8}
+dtype 4 union "U" declared
+dtype 5 array 1 count 4
+dtype 6 vector 1 count 2
+dtype 7 typedef "word" 1
+dtype 8 enum "E" 1 {"A" 0, "B" -1}
+dtype 9 base "bool" boolean 1
+
+func @f (i64) -> (i64) global {
+  var "n" 1 arg 1 !loc 1 at %n.addr
+  var "x" 1 scope 1 !loc 2 at %x
+  var "x" 3 scope 2 !loc 3
+  var "w" 7 scope 2
+^entry(%n: i64):
+  %n.addr = alloca ptr i64 8, align 8
+  store %n, %n.addr, align 8
+  %x = alloca ptr i64 8, align 8 !loc 2
+  store %n, %x, align 8 !loc 2
+  ret %n !loc 3
+}
+|}
+
 let () =
   roundtrip "sum" sum;
+  roundtrip "debugvars" debugvars;
   roundtrip "everything" everything;
   roundtrip "forward" forward;
   rejects "dominance" "does not dominate"
@@ -207,6 +244,66 @@ func @bad (ptr) -> (i8) global {
 ^entry(%p: ptr):
   %b = load i8 %p, align 1 release
   ret %b
+}
+|};
+  rejects "var type" "type 9 out of range"
+    {|
+func @bad () -> () global {
+  var "x" 9
+^entry:
+  ret
+}
+|};
+  rejects "var home" "home must be a pointer"
+    {|
+func @bad (i64) -> () global {
+  var "x" 0 at %a
+^entry(%a: i64):
+  ret
+}
+|};
+  rejects "var arg" "arg 2 out of range"
+    {|
+func @bad (i64) -> () global {
+  var "x" 0 arg 2
+^entry(%a: i64):
+  ret
+}
+|};
+  rejects "dtype member" "member type 7 out of range"
+    {|
+dtype 1 struct "S" size 8 {"a" 7 0}
+|};
+  rejects "scope owner" "scope 1 is used by both"
+    {|
+loc 1 "a" 1 1 !scope 1
+scope 1 parent 0
+func @a () -> () global {
+^entry:
+  ret !loc 1
+}
+func @b () -> () global {
+  var "x" 0 scope 1
+^entry:
+  ret
+}
+|};
+  rejects "dbg_value range" "dbg_value of variable 2, the function has 1"
+    {|
+func @bad (i64) -> () global {
+  var "x" 0
+^entry(%a: i64):
+  dbg_value 2, %a
+  ret
+}
+|};
+  rejects "dbg_value home" "which lives in memory"
+    {|
+func @bad (ptr) -> () global {
+  var "x" 0 at %p
+^entry(%p: ptr):
+  dbg_value 1, %p
+  ret
 }
 |};
   (* constants are interned per function *)

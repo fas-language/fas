@@ -402,7 +402,15 @@ let verify_func (f : func) =
                 (match a with Agg _ -> () | _ -> err "%s: va_arg with an ABI needs agg" where);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0
-            | Dbg_value _ -> want 0);
+            | Dbg_value (var, _) -> (
+                want 0;
+                (* VAR is the 1-based index of a [var] without a home *)
+                match List.nth_opt f.vars (var - 1) with
+                | _ when var < 1 -> err "%s: dbg_value of variable %d" where var
+                | None -> err "%s: dbg_value of variable %d, the function has %d" where var (List.length f.vars)
+                | Some { home = Some _; vname; _ } ->
+                    err "%s: dbg_value of variable %d (%s), which lives in memory (at)" where var vname
+                | Some _ -> ()));
             ignore i)
           br.insts;
         let where = Printf.sprintf "^%d terminator" b in
@@ -557,6 +565,87 @@ let verify (m : modul) =
         if !bad <> 0 then
           errs := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !errs
       end)
+    m.funcs;
+  (* debug information (roadmap v0.8): every id in range; a scope belongs to
+     one function (the function whose locations or variables name it or a
+     scope inside it) *)
+  let ntypes = Vec.length m.dtypes and nscopes = Vec.length m.scopes in
+  let type_ok t = t >= 0 && t < ntypes in
+  Vec.iteri
+    (fun i t ->
+      let bad what = errs := Printf.sprintf "dtype %d: %s" i what :: !errs in
+      let ref_ok what t = if not (type_ok t) then bad (Printf.sprintf "%s type %d out of range" what t) in
+      match t with
+      | Dvoid -> if i <> 0 then bad "void is only type 0"
+      | Dbase { size; name; _ } ->
+          if size <= 0 then bad "base type size must be positive";
+          if name = "" then bad "base type needs a name"
+      | Dpointer t -> ref_ok "pointee" t
+      | Dstruct { size; members; _ } ->
+          (match size with Some n when n < 0 -> bad "negative size" | _ -> ());
+          List.iter
+            (fun (_, t, o) ->
+              ref_ok "member" t;
+              if t = 0 then bad "a member cannot be void";
+              if o < 0 then bad "negative member offset")
+            members
+      | Darray (t, n) | Dvector (t, n) ->
+          ref_ok "element" t;
+          if t = 0 then bad "an element cannot be void";
+          if n < 0 then bad "negative count"
+      | Dtypedef (_, t) -> ref_ok "aliased" t
+      | Denum { base; _ } -> ref_ok "underlying" base)
+    m.dtypes;
+  Hashtbl.iter
+    (fun l sc ->
+      if l <= 0 || l >= nlocs then errs := Printf.sprintf "loc %d: no such location" l :: !errs;
+      if sc <= 0 || sc >= nscopes then errs := Printf.sprintf "loc %d: scope %d out of range" l sc :: !errs)
+    m.loc_scopes;
+  let owner = Array.make (max 1 nscopes) "" in
+  let claim fname sc =
+    let rec up sc =
+      if sc > 0 && sc < nscopes then begin
+        if owner.(sc) = "" then owner.(sc) <- fname
+        else if owner.(sc) <> fname then
+          errs := Printf.sprintf "scope %d is used by both @%s and @%s" sc owner.(sc) fname :: !errs;
+        up (Vec.get m.scopes sc)
+      end
+    in
+    up sc
+  in
+  Vec.iter
+    (fun f ->
+      if f.defined then begin
+        let seen = Hashtbl.create 8 in
+        let note l = if l > 0 && l < nlocs && not (Hashtbl.mem seen l) then begin
+            Hashtbl.replace seen l ();
+            claim f.name (loc_scope m l)
+          end
+        in
+        Vec.iter (fun (ir : inst_rec) -> note ir.loc) f.insts;
+        Vec.iter (fun (b : block_rec) -> note b.term_loc) f.blocks;
+        List.iter
+          (fun d ->
+            let bad what = errs := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !errs in
+            if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
+            if d.vscope < 0 || d.vscope >= nscopes then bad (Printf.sprintf "scope %d out of range" d.vscope)
+            else claim f.name d.vscope;
+            if d.vloc < 0 || d.vloc >= nlocs then bad (Printf.sprintf "location %d out of range" d.vloc);
+            if d.varg < 0 || d.varg > List.length f.sig_.param_abis then
+              bad (Printf.sprintf "arg %d out of range" d.varg);
+            match d.home with
+            | None -> ()
+            | Some v ->
+                let v = resolve f v in
+                if v < 0 || v >= num_values f then bad "home is not a value"
+                else (
+                  match (def_of f v, ty_of f v) with
+                  | Unset, _ -> bad "home is not defined"
+                  | _, Ptr _ -> ()
+                  | _, t -> bad ("home must be a pointer, not " ^ ty_to_string t)))
+          f.vars
+      end
+      else if f.vars <> [] then errs := Printf.sprintf "@%s: a declaration has no variables" f.name :: !errs)
     m.funcs;
   let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in
   List.rev !errs @ List.rev fs

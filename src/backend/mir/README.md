@@ -28,7 +28,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
 | `mir_driver.ml` | The driver's entry (every build; the LLVM path is only the hidden `FAS_ORACLE=llvm` test oracle): compiles the Fir module the front end lowered. |
 | `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
-| `mir_dwarf.ml` | `-g`: `.debug_abbrev`, `.debug_info` and `.debug_line` (DWARF 5) from the line rows `Mir_emit.func` records (see "Debug info"). |
+| `mir_dwarf.ml` | `-g`: `.debug_abbrev`, `.debug_info`, `.debug_line` and, when needed, `.debug_loclists` and `.debug_rnglists` (DWARF 5), from the line rows and variable locations `Mir_emit.func` records (see "Debug info"). |
 
 ## Running it
 
@@ -118,6 +118,24 @@ offsets of `.debug_abbrev` and `.debug_line` in `.debug_info` are
 R_X86_64_32 relocations against local symbols at their starts, so linkers
 can concatenate the sections of several objects. The `fma` runtime helpers
 have no lines.
+
+Variables (roadmap v0.8). A Fir `var ... at %slot` names the alloca that
+holds a source variable; `Mir_isel` records where that alloca ended up
+(`Mir.homes`): a frame slot (`Hslot`), a promoted cell's virtual register
+(`Hcell`), or a register holding the address (`Hptr`: over-aligned and
+dynamic allocas). `Mir_emit.func` notes where each allocator position's
+code ends and turns homes into locations. A slot is `DW_OP_fbreg` for the
+whole function, and so is a spilled cell's spill slot (never shared, written
+after every definition). A cell in a register is a one-entry location list
+over its interval, from the end of its first position to the end of its
+last: the allocator gives the register to nothing else there, and nothing
+clobbers it. A variable whose value nothing reads has no interval and
+shows as optimized out. The types come from the module's `dtype` table.
+Lexical blocks come from the scopes of the line rows' locations: a row's
+code belongs to its scope and to every scope around it, a block with
+several pieces gets `.debug_rnglists`, and a scope without code is left
+out (its variables move to the enclosing one). None of this reads anything
+the code depends on, so `-g` still never changes the code.
 
 ## Block addresses
 

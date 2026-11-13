@@ -85,7 +85,9 @@ A module is, in order:
 triple "x86_64-unknown-linux-gnu"          required, first
 strict_aliasing false                      optional (default: true)
 module_asm "TEXT"                          optional top-level asm (GNU asm("...") outside functions), any number
-loc 1 "file.c" 12 5                        optional location table: id, file, line, column
+loc 1 "file.c" 12 5 [!scope S]             optional location table: id, file, line, column, lexical scope
+scope 1 parent 0                           optional lexical scopes (debug info): id, enclosing scope (0 = the function)
+dtype 1 base "int" signed 4                optional debug types: id, description (see "Debug information")
 alias_tag 1 "int" 0                        optional TBAA tags: id, name, parent id (0 = root)
 global ...                                 globals
 alias ...                                  symbol aliases
@@ -153,6 +155,7 @@ alias @hook         weak hidden = @default_hook
 
 ```
 func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src name"] {
+  var "x" T [scope S] [arg K] [!loc L] [at %slot]      optional source variables (debug info), before the blocks
 ^entry(%a: T, ...):
   ...instructions...
   TERMINATOR
@@ -170,6 +173,26 @@ ATTRS ::= any of: inline noinline cold noreturn
 - **Labels** are written `^name`. A block with no parameters is written `^name:`, and one with parameters `^name(%x: i64, %y: ptr):`.
 - **Any instruction or terminator may end with `!loc N`**, where N is an id from the `loc` table.
 - **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block. Unreachable blocks are not checked.
+
+### Debug information
+
+Source variables and their types are module metadata that only `-g` reads. Nothing in them is an instruction, so they never change the code; a front end may emit them always and let `-g` decide.
+
+- **`dtype N DESC`** describes a source type. Ids are consecutive from 1; id 0 is `void`. A `DESC` refers to other types by id, in any order (a struct may point to itself):
+
+  | `DESC` | Meaning |
+  |---|---|
+  | `base "NAME" ENC SIZE` | A scalar of `SIZE` bytes. `ENC` is `signed`, `unsigned`, `boolean`, `float`, `signed_char` or `unsigned_char`. |
+  | `pointer T` | A pointer to type `T` (`pointer 0` is `void *`). |
+  | `struct "NAME" size N {"F" T OFF, ...}` | A struct of `N` bytes; each member has a name, a type and a byte offset. `union` instead of `struct` for a union. |
+  | `struct "NAME" declared` | A struct (or `union`) whose layout is not known here. |
+  | `array T count N` | `N` elements of `T`. |
+  | `vector T count N` | A SIMD vector of `N` elements of `T`. |
+  | `typedef "NAME" T` | Another name for `T`. |
+  | `enum "NAME" BASE {"A" 0, ...}` | An enumeration with underlying type `BASE`. |
+
+- **`scope N parent P`** declares a lexical block. Ids are consecutive from 1 and `P` is smaller than `N` (0 is the function itself). A `loc` names its innermost scope with `!scope S`; the code at that location belongs to that block. All the locations and variables that name a scope, or a scope inside it, must belong to one function. A scope with no code is dropped and its variables move to the enclosing one.
+- **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. Passes that rewrite functions keep each variable and its home.
 
 ## 5. Signatures and the ABI
 
@@ -325,7 +348,7 @@ Alignment is a power of two. It is a promise about the address, so writing `alig
 | `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P` | Reads the next unnamed argument as a struct by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
 | `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). x87, MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
-| `dbg_value VAR, V` | Debug info: source variable VAR currently holds V. It has no effect on semantics. |
+| `dbg_value VAR, V` | Debug info: the function's VAR-th `var` (1-based, one without `at`) currently holds V. It has no effect on semantics. |
 
 Call ATTRS are any of `noreturn returns_twice nounwind tail`.
 
@@ -558,7 +581,7 @@ The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3
 | Startup | `@main` () or (i32, ptr) → i32; static position-independent executable (the default: `_start` applies the R_X86_64_RELATIVE relocations itself, so there is no TEXTREL and no dynamic loader) or fixed-address static executable (`fas -Wl,-no-pie`, `fas-fir --no-pie`); `-c` objects | Shared libraries, libc | Use syscalls. |
 | Inline asm | `asm` (§6) with every constraint, modifier and clobber listed there. Operands are placed in registers, immediates, frame slots or RIP-relative globals. The templates of a module are rendered once allocation is done and assembled in one run of an external GNU assembler (`$FAS_AS`, else `as --64`, else `$FAS_CC -c -x assembler`), and the machine code is spliced into `.text` with its relocations (calls to and addresses of any symbol, local labels, `%=`). AT&T and Intel syntax. `asm_goto` too: `%lN` is the label block's symbol, and the block is placed as a jump target (`test/fas_fir/c/asm.fir`, `test/fas_fir/asm_link.fir`, `test/fas_fir/asm_goto.fir`). `module_asm` (§4): assembled in one run of the same assembler; every allocated section of the result (code, data, .bss, TLS, notes, init/fini arrays, .eh_frame from CFI directives) becomes a section of the object with its symbols, bindings, visibilities and relocations (`test/fas_fir/module_asm.fir`) | `module_asm` with section groups (COMDAT), absolute or common symbols; a statement that puts bytes in another section, defines a global symbol, aligns above 16, or refers to a label in another statement | Separate `.s` file. |
 | Unwind info | `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | — | — |
-| Debug info | `-g` (`fas -g`, `fas-fir -g`): DWARF 5 line tables from the `loc` table and `!loc` (every file and line, with columns), and one subprogram per function with its source name, linkage name, declaration line and address range, so debuggers set breakpoints at file:line and backtraces show functions and lines (`test/native_debug.sh`). `-g` never changes the code | Variables and types (`dbg_value`, roadmap v0.8); inlined-call records | — |
+| Debug info | `-g` (`fas -g`, `fas-fir -g`): DWARF 5 line tables from the `loc` table and `!loc` (every file and line, with columns), and one subprogram per function with its source name, linkage name, declaration line and address range, so debuggers set breakpoints at file:line and backtraces show functions and lines; source variables (`var ... at %slot`) with their types and lexical blocks, in frame slots, registers (location lists) or behind a pointer, so debuggers print them (`test/native_debug.sh`, `test/fas_fir/vars.fir`). `-g` never changes the code | Variables tracked by `dbg_value` (shown as optimized out); inlined-call records | — |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.
 
@@ -585,6 +608,8 @@ Each function holds dense tables (`fir.ml`):
 - instructions (op + result values);
 - blocks (parameters, instruction ids, terminator);
 - interned constants.
+
+Debug metadata sits next to the code: the module holds `dtypes`, `scopes` (each scope's parent) and `loc_scopes` (location → scope), and each function a `vars` list whose `home` is the slot value.
 
 Replace-all-uses is O(1) through `Alias` definitions, which readers resolve and `compact` removes. Use lists, dominators (`fir_dom.ml`) and loops are computed on demand. Nothing is global, so functions can be compiled independently.
 

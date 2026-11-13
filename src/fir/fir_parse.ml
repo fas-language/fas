@@ -924,6 +924,20 @@ let parse_body lx f =
   let rec blocks () =
     match next lx with
     | P "}" -> ()
+    | Ident "var" when !order = [] ->
+        (* var "name" TYPE [scope S] [arg K] [!loc L] [at %v] *)
+        let vname = str_tok lx in
+        let vty = int_tok lx in
+        let vscope = if accept_ident lx "scope" then int_tok lx else 0 in
+        let varg = if accept_ident lx "arg" then int_tok lx else 0 in
+        let vloc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+        let home =
+          if accept_ident lx "at" then
+            match next lx with Tlocal n -> Some (use_name st n) | t -> fail lx ("expected a value, got " ^ tok_text t)
+          else None
+        in
+        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home } ];
+        blocks ()
     | Label name ->
         if Hashtbl.mem st.bdefined name then fail lx ("block ^" ^ name ^ " defined twice");
         Hashtbl.replace st.bdefined name ();
@@ -1096,6 +1110,72 @@ let parse_piece lx =
       Blockref { fn; block }
   | t -> fail lx ("expected bytes, zeros, reloc or blockaddr, got " ^ tok_text t)
 
+(* the body of "dtype N ..." after the id; type ids are checked by the verifier *)
+let parse_dtype lx =
+  let members () =
+    expect lx "{";
+    let ms = ref [] in
+    if not (accept lx "}") then begin
+      let rec go () =
+        let n = str_tok lx in
+        let t = int_tok lx in
+        let o = int_tok lx in
+        ms := (n, t, o) :: !ms;
+        if accept lx "," then go () else expect lx "}"
+      in
+      go ()
+    end;
+    List.rev !ms
+  in
+  match next lx with
+  | Ident "base" ->
+      let name = str_tok lx in
+      let enc =
+        match next lx with
+        | Ident w -> (
+            match List.find_opt (fun (_, n) -> n = w) Fir_print.encoding_names with
+            | Some (e, _) -> e
+            | None -> fail lx ("unknown base type encoding " ^ w))
+        | t -> fail lx ("expected a base type encoding, got " ^ tok_text t)
+      in
+      Dbase { name; enc; size = int_tok lx }
+  | Ident "pointer" -> Dpointer (int_tok lx)
+  | Ident (("struct" | "union") as kw) ->
+      let name = str_tok lx in
+      let union = kw = "union" in
+      if accept_ident lx "declared" then Dstruct { name; union; size = None; members = [] }
+      else begin
+        expect_ident lx "size";
+        let size = int_tok lx in
+        Dstruct { name; union; size = Some size; members = members () }
+      end
+  | Ident "array" ->
+      let t = int_tok lx in
+      expect_ident lx "count";
+      Darray (t, int_tok lx)
+  | Ident "vector" ->
+      let t = int_tok lx in
+      expect_ident lx "count";
+      Dvector (t, int_tok lx)
+  | Ident "typedef" ->
+      let name = str_tok lx in
+      Dtypedef (name, int_tok lx)
+  | Ident "enum" ->
+      let name = str_tok lx in
+      let base = int_tok lx in
+      expect lx "{";
+      let es = ref [] in
+      if not (accept lx "}") then begin
+        let rec go () =
+          let n = str_tok lx in
+          es := (n, int64_tok lx) :: !es;
+          if accept lx "," then go () else expect lx "}"
+        in
+        go ()
+      end;
+      Denum { name; base; enumerators = List.rev !es }
+  | t -> fail lx ("expected a debug type, got " ^ tok_text t)
+
 let parse_module s =
   let lx = { s; pos = 0; line = 1; peeked = None } in
   let m = create_module () in
@@ -1116,7 +1196,22 @@ let parse_module s =
         let line = int_tok lx in
         let col = int_tok lx in
         if i <> Vec.length m.locs then fail lx "location ids must be consecutive from 1";
-        ignore (add_loc m file line col);
+        (* "!scope", not "scope": a [scope N parent P] line may follow *)
+        let scope = if (match peek lx with Bang "scope" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+        ignore (add_loc ~scope m file line col);
+        go ()
+    | Ident "scope" ->
+        let i = int_tok lx in
+        expect_ident lx "parent";
+        let parent = int_tok lx in
+        if i <> Vec.length m.scopes then fail lx "scope ids must be consecutive from 1";
+        if parent < 0 || parent >= i then fail lx "a scope's parent must be 0 or an earlier scope";
+        ignore (add_scope m ~parent);
+        go ()
+    | Ident "dtype" ->
+        let i = int_tok lx in
+        if i <> Vec.length m.dtypes then fail lx "debug type ids must be consecutive from 1";
+        ignore (add_dtype m (parse_dtype lx));
         go ()
     | Ident "alias_tag" ->
         let i = int_tok lx in

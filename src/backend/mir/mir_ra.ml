@@ -68,6 +68,11 @@ type result = {
   terms : term array;
   vslot : int array;  (** each spilled vreg's frame slot (-1: in a register, or never used) *)
   saved : X64.reg list;  (** callee-saved registers the function writes *)
+  assign : reg option array;  (** each vreg's register (None: spilled, or never used) *)
+  lo : int array;
+  hi : int array;
+      (** each vreg's interval: positions (see 1.; every instruction, and
+          each block's terminator) where the register holds it *)
 }
 
 exception Failure of string
@@ -340,7 +345,7 @@ let run (f : func) =
     items.(bi) <- List.rev !out;
     terms.(bi) <- b.term
   done;
-  { items; terms; vslot; saved = List.rev !saved }
+  { items; terms; vslot; saved = List.rev !saved; assign; lo; hi }
 
 let item_s = function
   | Orig (_, a) -> "  " ^ ins_s a

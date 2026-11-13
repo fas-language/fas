@@ -180,16 +180,24 @@ type term =
 type block = { mutable code : ins list; mutable term : term }
 (** [code] is in program order *)
 
+(* where a source variable (a Fir [var] with [at %slot], roadmap v0.8)
+   lives, for the debug info; it never affects the code *)
+type home =
+  | Hslot of int  (** in a frame slot (a static alloca) *)
+  | Hcell of int  (** a promoted alloca: the variable is this virtual register *)
+  | Hptr of int  (** at the address this virtual register holds *)
+
 type func = {
   name : string;
   vcls : rc Dynarray.t;  (** class of each virtual register *)
   blocks : block Dynarray.t;  (** block 0 is the entry *)
   slots : (int * int) Dynarray.t;  (** frame slots: size, alignment *)
   mutable out_size : int;  (** bytes of outgoing stack arguments needed *)
+  mutable homes : (int * home) list;  (** Fir variable index (0-based) -> its home *)
 }
 
 let create name =
-  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0 }
+  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = [] }
 
 let new_vreg f cls =
   Dynarray.add_last f.vcls cls;

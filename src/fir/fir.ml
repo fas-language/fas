@@ -370,6 +370,19 @@ let fa_noinline = 2
 let fa_cold = 4
 let fa_noreturn = 8
 
+(* Debug variables (roadmap v0.8, SPEC §4 "Debug information"). They are
+   metadata, not instructions: no instruction refers to them, so they can
+   never change the code. [home] is the variable's memory, normally its
+   alloca; None (or a home a pass deleted) means "optimized out". *)
+type dvar = {
+  vname : string;
+  vty : int;  (** debug type id (0 = void, i.e. unknown) *)
+  vscope : int;  (** lexical scope id (0 = the function's top level) *)
+  vloc : int;  (** declaration location id (0 = none) *)
+  varg : int;  (** 1-based parameter number; 0 for a local *)
+  mutable home : value option;
+}
+
 type func = {
   name : string;
   sig_ : signature;
@@ -387,6 +400,7 @@ type func = {
   mutable decl_loc : int;
       (** location of the function's declaration (0 = none): the line of its
           debug-info subprogram, and where its lines start *)
+  mutable vars : dvar list;  (** debug variables, in declaration order *)
 }
 
 type init_piece =
@@ -421,12 +435,33 @@ type alias = {
   mutable avisibility : visibility;
 }
 
+(* Debug types (roadmap v0.8). Id 0 is void; ids index [modul.dtypes]. Ids may
+   refer forward (a struct member to a later struct), so recursive types
+   need no special form. *)
+type dencoding = Dsigned | Dunsigned | Dboolean | Dfloat | Dsigned_char | Dunsigned_char
+
+type dtype =
+  | Dvoid
+  | Dbase of { name : string; enc : dencoding; size : int }
+  | Dpointer of int  (** pointee (0 = void) *)
+  | Dstruct of { name : string; union : bool; size : int option; members : (string * int * int) list }
+      (** members: name, type, byte offset; size None = only declared *)
+  | Darray of int * int  (** element, count *)
+  | Dvector of int * int  (** element, lanes *)
+  | Dtypedef of string * int
+  | Denum of { name : string; base : int; enumerators : (string * int64) list }
+
 type modul = {
   funcs : func Vec.t;
   globals : global Vec.t;
   aliases : alias Vec.t;
   locs : (string * int * int) Vec.t;  (** location id -> file, line, column; 0 = none *)
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
+  dtypes : dtype Vec.t;  (** debug type id -> type; 0 = void *)
+  scopes : int Vec.t;
+      (** lexical scope id -> parent scope (0 = the function's top level, the
+          scope of a location that names none); a parent's id is smaller *)
+  loc_scopes : (int, int) Hashtbl.t;  (** location id -> its scope, when not 0 *)
   mutable strict_aliasing : bool;
   mutable triple : string;
   mutable module_asm : string list;  (** top-level asm text (GNU [asm("...")] outside functions), in order *)
@@ -445,7 +480,7 @@ let create_module () =
                          linkage = Local; visibility = Default; fattrs = 0; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
-                         names = Hashtbl.create 1; display = None; decl_loc = 0 };
+                         names = Hashtbl.create 1; display = None; decl_loc = 0; vars = [] };
     globals =
       Vec.create
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
@@ -453,6 +488,9 @@ let create_module () =
     aliases = Vec.create { aname = ""; target = ""; addend = 0L; alinkage = Local; avisibility = Default };
     locs;
     alias_tags;
+    dtypes = (let t = Vec.create Dvoid in ignore (Vec.push t Dvoid); t);
+    scopes = (let t = Vec.create 0 in ignore (Vec.push t 0); t);
+    loc_scopes = Hashtbl.create 1;
     strict_aliasing = true;
     triple = "x86_64-unknown-linux-gnu";
     module_asm = [];
@@ -474,13 +512,20 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     names = Hashtbl.create 16;
     display = None;
     decl_loc = 0;
+    vars = [];
   }
 
 let add_func m f = ignore (Vec.push m.funcs f)
 let add_global m g = ignore (Vec.push m.globals g)
 
-let add_loc m file line col =
-  Vec.push m.locs (file, line, col)
+let add_loc ?(scope = 0) m file line col =
+  let i = Vec.push m.locs (file, line, col) in
+  if scope <> 0 then Hashtbl.replace m.loc_scopes i scope;
+  i
+
+let loc_scope m l = Option.value ~default:0 (Hashtbl.find_opt m.loc_scopes l)
+let add_dtype m t = Vec.push m.dtypes t
+let add_scope m ~parent = Vec.push m.scopes parent
 
 (* ---------- values ---------- *)
 

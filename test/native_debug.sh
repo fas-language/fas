@@ -10,7 +10,9 @@ export FAS_ORACLE=llvm
 #      (two files, a location only on a fall-through jump) and a Fas program
 #      decode (readelf --debug-dump=decodedline) to the expected file:line
 #      rows, and the compile unit is named after the main file;
-#   3. llvm-dwarfdump --verify accepts them, and gdb stops at file:line,
+#   3. llvm-dwarfdump --verify accepts them, gdb stops at file:line and
+#      prints the variables of test/fas_fir/vars.fir (in frame slots, in
+#      registers, spilled, behind a pointer, shadowed in a lexical block),
 #      when those tools are installed (optional).
 # Needs binutils (readelf, objdump, objcopy, nm); no LLVM, no C compiler.
 set -eu
@@ -77,6 +79,9 @@ for pie in "" --no-pie; do
   "$FAS_FIR_TOOL" $pie "$ROOT/test/fas_fir/lines.fir" "$DBG_TMP/putnum.o" -o "$DBG_TMP/lines"
   "$FAS_FIR_TOOL" -g $pie "$ROOT/test/fas_fir/lines.fir" "$DBG_TMP/putnum.o" -o "$DBG_TMP/lines.g"
   same_exe "lines.fir${pie:+ $pie}" "$DBG_TMP/lines" "$DBG_TMP/lines.g"
+  "$FAS_FIR_TOOL" $pie "$ROOT/test/fas_fir/vars.fir" "$DBG_TMP/putnum.o" -o "$DBG_TMP/vars"
+  "$FAS_FIR_TOOL" -g $pie "$ROOT/test/fas_fir/vars.fir" "$DBG_TMP/putnum.o" -o "$DBG_TMP/vars.g"
+  same_exe "vars.fir${pie:+ $pie}" "$DBG_TMP/vars" "$DBG_TMP/vars.g"
 done
 for pie in "" -Wl,-no-pie; do
   "$OCAML_FAS" --backend=native $pie "$ROOT/test/native_backend.fas" -o "$DBG_TMP/nb"
@@ -102,14 +107,24 @@ readelf --debug-dump=decodedline "$DBG_TMP/nb.g" | grep -q '^native_backend\.fas
 
 # 3. optional tools
 if command -v llvm-dwarfdump >/dev/null 2>&1; then
-  for x in lines.g nb.g; do
+  for x in lines.g vars.g nb.g; do
     llvm-dwarfdump --verify "$DBG_TMP/$x" >/dev/null 2>&1 || bad "$x: llvm-dwarfdump --verify fails"
   done
 fi
 if command -v gdb >/dev/null 2>&1; then
   out=$(cd "$DBG_TMP" && gdb -nx -q -batch -ex 'break lines.c:10' -ex run -ex bt ./lines.g 2>&1 || true)
   echo "$out" | grep -q '^#0  main () at .*lines\.c:10' || bad "gdb: no stop at lines.c:10 in main: $out"
+  # variables (vars.fir): the second stop at vars.c:7, inner block first;
+  # also with every promoted local spilled (FAS_MIR_REGS)
+  for regs in "" 3; do
+    FAS_MIR_REGS=$regs "$FAS_FIR_TOOL" -g "$ROOT/test/fas_fir/vars.fir" "$DBG_TMP/putnum.o" -o "$DBG_TMP/vars.r"
+    out=$(cd "$DBG_TMP" && gdb -nx -q -batch -ex 'break vars.c:7' -ex run -ex continue -ex 'info locals' \
+      -ex 'info args' -ex 'print *ppt' ./vars.r 2>&1 || true)
+    got=$(echo "$out" | grep -E '^(x|i|sum|pt|w|n|\$1) = ' | grep -v '^ppt' | tr '\n' ';')
+    want='x = 30;i = 2;sum = 3;x = 100;pt = {x = 3, y = 4};w = 7;n = 3;$1 = {x = 3, y = 4};'
+    [ "$got" = "$want" ] || bad "gdb variables${regs:+ (FAS_MIR_REGS=$regs)}: got $got, expected $want"
+  done
 fi
 
-[ $fail = 0 ] && echo "native debug: $objects objects and 4 executables unchanged by -g, line tables ok"
+[ $fail = 0 ] && echo "native debug: $objects objects and 6 executables unchanged by -g, line tables ok"
 exit $fail

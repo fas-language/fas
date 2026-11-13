@@ -587,6 +587,15 @@ let rebuild_func (f : func) : func =
         Vec.iter (fun i -> convert_inst cx i) (block f b).insts;
         rebuild_term cx b)
       rpo;
+    (* debug variables keep their homes (an alloca is one pointer) *)
+    g.vars <-
+      List.map
+        (fun d ->
+          { d with
+            home =
+              Option.bind d.home (fun v ->
+                  match Hashtbl.find_opt cx.map (resolve f v) with Some [| w |] -> Some w | _ -> None) })
+        f.vars;
     g
   end
 
