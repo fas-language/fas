@@ -164,9 +164,10 @@ let constr ~names ~nouts ~output s =
     | '0' .. '9' ->
         let st = !i - 1 in
         while !i < n && s.[!i] >= '0' && s.[!i] <= '9' do incr i done;
-        let k = int_of_string (String.sub s st (!i - st)) in
+        (* an out-of-range number (too many digits) is no operand either *)
+        let k = Option.value (int_of_string_opt (String.sub s st (!i - st))) ~default:max_int in
         if output then fail "asm output constraint %S cannot be a matching constraint" s;
-        if k >= nouts then fail "asm matching constraint %S names operand %d, which is not an output" s k;
+        if k >= nouts then fail "asm matching constraint %S does not name an output" s;
         tied := Some k
     | '[' ->
         let st = !i in
@@ -279,8 +280,9 @@ let template ~names ~intel tmpl =
             if !i = st then
               fail "asm template: '%%%s' is not followed by an operand"
                 (match modifier with Some m -> String.make 1 m | None -> "");
-            let k = int_of_string (String.sub tmpl st (!i - st)) in
-            if k >= nops then fail "asm template refers to operand %d of %d" k nops;
+            let digits = String.sub tmpl st (!i - st) in
+            let k = Option.value (int_of_string_opt digits) ~default:max_int in
+            if k >= nops then fail "asm template refers to operand %s of %d" digits nops;
             Operand (modifier, k)
           end
         in

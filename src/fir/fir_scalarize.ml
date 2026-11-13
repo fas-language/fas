@@ -551,7 +551,21 @@ let func_needs (f : func) =
      Vec.iter (fun (ir : inst_rec) -> match ir.op with Call c when sig_changes c.sig_ -> found := true | _ -> ()) f.insts;
      !found)
 
+(* every lane becomes its own value, so the lane count is bounded: 4096
+   lanes is a 4 KiB vector of bytes, far above any SIMD register *)
+let max_lanes = 4096
+
+let check_lanes (f : func) =
+  let check t =
+    match t with
+    | Vec (n, _) when n > max_lanes -> unsupported "@%s: a vector of %d lanes (at most %d)" f.name n max_lanes
+    | _ -> ()
+  in
+  List.iter (function Scalar t | Ext (t, _) -> check t | Agg _ -> ()) (f.sig_.param_abis @ f.sig_.result_abis);
+  if f.defined then for v = 0 to num_values f - 1 do check (ty_of f v) done
+
 let rebuild_func (f : func) : func =
+  check_lanes f;
   let g = new_func ~linkage:f.linkage ~defined:f.defined f.name (sig_of f.sig_) in
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;

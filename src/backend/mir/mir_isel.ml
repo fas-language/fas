@@ -1194,6 +1194,14 @@ let rmw c (op : F.rmw) t p v =
 (* the SysV classification is shared with the LLVM path: Fir_abi *)
 open Fir_abi
 
+(* a struct passed or returned by value is copied with 32-bit displacements
+   and stack adjustments: 256 MiB keeps every offset in range, like a
+   static alloca (see [Alloca]) *)
+let classify ~size ~align ~fields =
+  if size > 0x1000_0000 then unsupported "a struct of %d bytes passed or returned by value (at most 256 MiB)" size;
+  if align > 0x1000 then unsupported "a struct aligned to %d passed or returned by value (at most 4096)" align;
+  classify ~size ~align ~fields
+
 type loc = Lreg of reg | Lstack of int
 
 type plan =

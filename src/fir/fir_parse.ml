@@ -274,8 +274,10 @@ let rec parse_ty lx =
       | _ -> fail lx ("bad type " ^ s))
   | P "<" ->
       let n = int_tok lx in
+      if n < 1 then fail lx (Printf.sprintf "a vector of %d lanes" n);
       expect_ident lx "x";
       let t = parse_ty lx in
+      (match t with Vec _ -> fail lx "a vector of vectors" | _ -> ());
       expect lx ">";
       Vec (n, t)
   | t -> fail lx ("expected a type, got " ^ tok_text t)

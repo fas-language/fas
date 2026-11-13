@@ -7,6 +7,21 @@ open Fir
 
 let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ -> ptr
 
+(* an agg ABI describes a C struct: a size, a power-of-two alignment, and
+   scalar fields that lie inside it *)
+let abi_problem = function
+  | Scalar _ | Ext _ -> None
+  | Agg { size; align; fields } ->
+      if size < 0 then Some (Printf.sprintf "agg of %d bytes" size)
+      else if align <= 0 || align land (align - 1) <> 0 then Some (Printf.sprintf "agg alignment %d is not a power of two" align)
+      else
+        List.find_map
+          (fun (o, t) ->
+            if o < 0 || o > size - size_of t then
+              Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+            else None)
+          fields
+
 let verify_func (f : func) =
   let errors = ref [] in
   let nerr = ref 0 in
@@ -312,6 +327,9 @@ let verify_func (f : func) =
                   same "mask" m (mask_of (r 0))
                 end
             | Call { sig_; callee; args; attrs = _; va_aggs } ->
+                List.iter
+                  (fun a -> Option.iter (err "%s: %s" where) (abi_problem a))
+                  (sig_.param_abis @ sig_.result_abis @ List.map snd va_aggs);
                 let np0 = List.length sig_.param_abis in
                 List.iter
                   (fun (k, a) ->
@@ -400,6 +418,7 @@ let verify_func (f : func) =
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
                 (match a with Agg _ -> () | _ -> err "%s: va_arg with an ABI needs agg" where);
+                Option.iter (err "%s: %s" where) (abi_problem a);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0
             | Dbg_value (var, _) -> (
@@ -520,6 +539,11 @@ let verify (m : modul) =
     (fun g ->
       if g.galign <= 0 || g.galign land (g.galign - 1) <> 0 then
         errs := Printf.sprintf "@%s: alignment %d is not a power of two" g.gname g.galign :: !errs;
+      if g.size < 0 then errs := Printf.sprintf "@%s: size %d" g.gname g.size :: !errs;
+      (match g.init with
+      | Some ps when List.exists (function Zeros k -> k < 0 | _ -> false) ps ->
+          errs := Printf.sprintf "@%s: a negative zeros piece" g.gname :: !errs
+      | _ -> ());
       match g.init with
       | Some ps ->
           let n =
@@ -646,6 +670,27 @@ let verify (m : modul) =
           f.vars
       end
       else if f.vars <> [] then errs := Printf.sprintf "@%s: a declaration has no variables" f.name :: !errs)
+    m.funcs;
+  Vec.iter
+    (fun f ->
+      List.iter
+        (fun a -> Option.iter (fun p -> errs := Printf.sprintf "@%s: signature: %s" f.name p :: !errs) (abi_problem a))
+        (f.sig_.param_abis @ f.sig_.result_abis);
+      (* a vector constant has one lane per lane of its type, each of the
+         element type *)
+      Hashtbl.iter
+        (fun c v ->
+          match c with
+          | Cvec (t, lanes) ->
+              let bad why = errs := Printf.sprintf "@%s: vector constant %s: %s" f.name (ty_to_string t) why :: !errs in
+              (match t with
+              | Vec (n, e) ->
+                  if Array.length lanes <> n then bad (Printf.sprintf "%d lanes given" (Array.length lanes))
+                  else if Array.exists (fun l -> ty_of f l <> e) lanes then bad "a lane of another type"
+              | _ -> bad "not a vector type");
+              if ty_of f v <> t then bad "defines a value of another type"
+          | _ -> ())
+        f.consts)
     m.funcs;
   let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in
   List.rev !errs @ List.rev fs

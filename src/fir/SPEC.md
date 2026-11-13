@@ -37,7 +37,7 @@ Contents:
 ty ::= iN              integer, 1 <= N <= 8388608     (i1 i8 i16 i32 i64 i128 ...)
      | f16 | f32 | f64 | f80
      | ptr | ptr(K)    opaque pointer, address space K (0 if omitted)
-     | <N x T>         vector of N lanes; T is an integer, float or pointer type
+     | <N x T>         vector of N >= 1 lanes; T is an integer, float or pointer type
 ```
 
 - There is no `void` type. A function with no results has the result list `()`.
@@ -203,6 +203,8 @@ ABI ::= T                        scalar or vector, passed as C passes it
       | agg(SIZE, ALIGN, [OFF: T, OFF: T, ...])
                                  aggregate by value, with its flattened scalar layout
 ```
+
+The verifier checks that SIZE is at least 0, that ALIGN is a power of two, and that every field lies inside the SIZE bytes.
 
 Inside the function, **an aggregate is always a `ptr`:**
 
@@ -584,6 +586,10 @@ The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3
 | Debug info | `-g` (`fas -g`, `fas-fir -g`): DWARF 5 line tables from the `loc` table and `!loc` (every file and line, with columns), and one subprogram per function with its source name, linkage name, declaration line and address range, so debuggers set breakpoints at file:line and backtraces show functions and lines; source variables (`var ... at %slot`) with their types and lexical blocks, in frame slots, registers (location lists) or behind a pointer, so debuggers print them (`test/native_debug.sh`, `test/fas_fir/vars.fir`). `-g` never changes the code | Variables tracked by `dbg_value` (shown as optimized out); inlined-call records | — |
 
 Each gap that closes moves from the right column to the left, and `test/fas_fir/` gains a program for it.
+
+**Size limits.** The native backend uses the x86-64 small code model, in which code reaches data and frame slots through 32-bit displacements. So it refuses, with a `native backend: ...` message, a global larger than 2 GiB - 1 or aligned to more than 2 MiB; a stack frame larger than 1.75 GiB (constant allocas each up to 256 MiB go in the frame, and larger or variable ones are allocated at run time); a struct passed or returned by value (`agg`) larger than 256 MiB or aligned to more than 4096; an alloca aligned to more than 4096; and a vector of more than 4096 lanes (`Fir_scalarize` gives every lane its own value). A zero-initialized global goes to `.bss` without its bytes being built, so large ones compile quickly. The linker reports any remaining relocation overflow, for instance a `.bss` larger than 2 GiB in total.
+
+**Refusals, never crashes.** `fas-fir` gives every input one of three outcomes: success (exit 0), a refusal with a `fas-fir: ...` message (exit 1: a parse error with its line, the verifier's list, or a native backend limit), or a usage message (exit 2). An uncaught exception or a `native backend internal error` is a bug. `test/fir_refuse.sh` checks this: known cases, plus `test/fir_refuse.py`, which mutates every `.fir` file in the tests and runs the results through `fas-fir`.
 
 ## 13. The `fas-fir` tool
 

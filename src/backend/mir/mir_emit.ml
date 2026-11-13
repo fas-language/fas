@@ -45,6 +45,8 @@ let layout (f : func) nsaved =
         !off)
   in
   let total = Mir_isel.align_up (!off + out_area f) 16 in
+  (* frame offsets are 32-bit displacements off rbp *)
+  if total > 0x7000_0000 then unsupported "@%s: a stack frame of %d bytes (at most 1.75 GiB)" f.name total;
   { slot_off; nsaved; size = total - (8 * nsaved) }
 
 let mem fr (m : addr) =
@@ -966,9 +968,22 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     F.Vec.iter
       (fun (g : F.global) ->
         if g.gdefined then begin
-          let bytes, pointers = global_image g in
+          (* symbol offsets and rip-relative references are 32-bit *)
+          if g.size > 0x7fff_ffff then
+            unsupported "@%s: a global of %d bytes (at most 2 GiB - 1, the small code model)" g.gname g.size;
+          (* the padding before an aligned global is written out; 2 MiB is
+             a huge page *)
+          if g.galign > 0x20_0000 then unsupported "@%s: aligned to %d (at most 2 MiB)" g.gname g.galign;
+          (* an all-zero global is not materialized: a large one goes to
+             .bss without its bytes ever being built *)
+          let zero =
+            match g.init with
+            | None -> true
+            | Some ps -> List.for_all (function F.Bytes s -> String.for_all (( = ) '\000') s | Zeros _ -> true | _ -> false) ps
+          in
+          let image = lazy (global_image g) in
+          let pointers = if zero then [] else snd (Lazy.force image) in
           let align = max 1 g.galign in
-          let zero = String.for_all (( = ) '\000') bytes in
           List.iter
             (fun (_, sym, _) ->
               if Hashtbl.mem env.tls_syms sym then
@@ -979,7 +994,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let readonly = g.readonly && not (pic && pointers <> []) in
           let place d section =
             place_data d section ~name:g.gname ~align ~size:g.size (fun offset ->
-                Buffer.add_string d.buf bytes;
+                Buffer.add_string d.buf (fst (Lazy.force image));
                 List.iter
                   (fun (o, symbol, addend) -> d.relocs <- A.Abs64 { offset = offset + o; symbol; addend } :: d.relocs)
                   pointers)
