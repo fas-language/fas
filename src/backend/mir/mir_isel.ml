@@ -137,7 +137,7 @@ let sym_addr c name (addend : int64) =
   in
   if Hashtbl.mem c.tls_syms name && c.tls_gd then begin
     (* general-dynamic: the address comes from __tls_get_addr, a call *)
-    emit c (Call { target = Ttlsgd name; args = []; rets = [ G Rax ] });
+    emit c (Call { target = Ttlsgd name; args = []; rets = [ G Rax ]; rtwice = false });
     emit c (Copy (t, G Rax));
     add_addend ()
   end
@@ -1364,7 +1364,7 @@ let aligned_mem c size align =
   end;
   p
 
-let call c ~(sig_ : F.signature) ~callee ~args ~va_aggs results =
+let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   let nfixed = List.length sig_.param_abis in
   let abis =
     List.mapi
@@ -1423,7 +1423,7 @@ let call c ~(sig_ : F.signature) ~callee ~args ~va_aggs results =
     end
     else arg_regs
   in
-  emit c (Call { target; args = arg_regs; rets = ret_regs rp });
+  emit c (Call { target; args = arg_regs; rets = ret_regs rp; rtwice = attrs land F.a_returns_twice <> 0 });
   match (rp, results) with
   | Rnone, _ -> ()
   | Rx87 (false, 1), [| v |] -> pop80 c v
@@ -2009,7 +2009,7 @@ let inst c i =
       match rty () with
       | (F.F32 | F.F64) as t ->
           let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false } in
-          call c ~sig_ ~callee:(F.Direct (Mir_runtime.fma_name (t = F.F64))) ~args:[| a; b; d |] ~va_aggs:[] ir.results
+          call c ~sig_ ~callee:(F.Direct (Mir_runtime.fma_name (t = F.F64))) ~args:[| a; b; d |] ~attrs:0 ~va_aggs:[] ir.results
       | t -> unsupported "fma of %s" (F.ty_to_string t))
   | Fsh (left, a, b, n) -> set (funnel c left (width (rty ())) a b n)
   | Ovf (op, a, b) ->
@@ -2129,7 +2129,7 @@ let inst c i =
       def c (res 0) (copy c (G Rax));
       def c (res 1) ok
   | Fence o -> if o = Seq_cst then emit c Mfence
-  | Call { sig_; callee; args; va_aggs; _ } -> call c ~sig_ ~callee ~args ~va_aggs ir.results
+  | Call { sig_; callee; args; attrs; va_aggs } -> call c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
   | Syscall args ->
       let regs = [| G Rax; G Rdi; G Rsi; G Rdx; G R10; G R8; G R9 |] in
       if Array.length args > 7 then unsupported "syscall with %d operands" (Array.length args);

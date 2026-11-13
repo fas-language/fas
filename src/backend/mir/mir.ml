@@ -141,10 +141,12 @@ type ins =
   | Frem87 of bool * int
       (** x87 fprem loop on frame slot [s]: [s] = fmod([s], [s + 8]); clobbers rax *)
   | X87 of x87
-  | Call of { target : target; args : reg list; rets : reg list }
+  | Call of { target : target; args : reg list; rets : reg list; rtwice : bool }
       (** [args] are the physical registers the call reads (al included for
           variadic calls), [rets] those it defines; every other caller-saved
-          register is clobbered *)
+          register is clobbered. [rtwice]: the Fir call is returns_twice
+          (setjmp); only the allocator export reads it, Mir_ra handles such
+          calls by never sharing slots *)
   | Syscall of reg list  (** reads rax and the argument registers, defines rax *)
   | Rep_movsb  (** rdi, rsi, rcx *)
   | Rep_stosb  (** rdi, al, rcx *)
@@ -250,7 +252,7 @@ let uses_defs = function
   | Frem87 _ -> ([], [])
   | X87 (Fld (_, a) | Fstp (_, a) | Fnstcw a | Fldcw a) -> (addr_regs a, [])
   | X87 _ -> ([], [])
-  | Call { target; args; rets } -> ((match target with Treg r -> [ r ] | _ -> []) @ args, rets)
+  | Call { target; args; rets; _ } -> ((match target with Treg r -> [ r ] | _ -> []) @ args, rets)
   | Syscall args -> (args, [ G Rax ])
   | Rep_movsb -> ([ G Rdi; G Rsi; G Rcx ], [ G Rdi; G Rsi; G Rcx ])
   | Rep_stosb -> ([ G Rdi; G Rax; G Rcx ], [ G Rdi; G Rcx ])
@@ -332,6 +334,7 @@ let map_regs g ins =
   | Call c ->
       Call
         {
+          c with
           target = (match c.target with Treg r -> Treg (g r) | t -> t);
           args = List.map g c.args;
           rets = List.map g c.rets;
@@ -465,8 +468,9 @@ let ins_s i =
       | Fpop -> "fpop"
       | Fnstcw m -> p "fnstcw %s" (addr_s m)
       | Fldcw m -> p "fldcw %s" (addr_s m))
-  | Call { target; args; rets } ->
-      p "call %s (%s) -> (%s)"
+  | Call { target; args; rets; rtwice } ->
+      p "call%s %s (%s) -> (%s)"
+        (if rtwice then " returns_twice" else "")
         (match target with Tlabel s -> s | Tsym s -> "@" ^ s | Treg x -> r x | Ttlsgd s -> "tlsgd @" ^ s)
         (String.concat ", " (List.map r args))
         (String.concat ", " (List.map r rets))

@@ -894,6 +894,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
         if fn.defined then begin
           let mf = Mir_isel.select ~pic ~tls_gd env fn in
           if dump then prerr_string (Mir.to_string mf);
+          Mir_export.add_func mf;
           let ra = Mir_ra.run mf in
           if dump then prerr_string (Mir_ra.to_string mf ra);
           Mir_check.run mf ra;
@@ -901,6 +902,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
         end)
       m.funcs;
     let compiled = List.rev !compiled in
+    Mir_export.flush m;
     let snippet = asm_snippets compiled in
     List.iter
       (fun ((fn : F.func), mf, ra) ->
