@@ -41,7 +41,9 @@ alloc_view() {
 objects=0
 for f in "$ROOT"/test/*.fas; do
   b=$(basename "$f" .fas)
-  if ! "$OCAML_FAS" --backend=native -c "$f" -o "$DBG_TMP/$b.o" >/dev/null 2>&1; then
+  if ! "$OCAML_FAS" --backend=native -c "$f" -o "$DBG_TMP/$b.o" >/dev/null 2>"$DBG_TMP/err"; then
+    # a refusal is fine (some files need flags or headers); a crash is not
+    if grep -q 'internal error' "$DBG_TMP/err"; then bad "$b.fas: $(head -3 "$DBG_TMP/err")"; fi
     if "$OCAML_FAS" --backend=native -g -c "$f" -o "$DBG_TMP/$b.g.o" >/dev/null 2>&1; then
       bad "$b.fas: refused without -g, accepted with"
     fi
@@ -124,7 +126,46 @@ if command -v gdb >/dev/null 2>&1; then
     want='x = 30;i = 2;sum = 3;x = 100;pt = {x = 3, y = 4};w = 7;n = 3;$1 = {x = 3, y = 4};'
     [ "$got" = "$want" ] || bad "gdb variables${regs:+ (FAS_MIR_REGS=$regs)}: got $got, expected $want"
   done
+  # variables of a Fas program: parameters, a struct, an array, a loop
+  # variable, and a block's `sum` shadowing the function's
+  cat >"$DBG_TMP/fv.fas" <<'FAS'
+struct point {
+    x i32
+    y i32
+}
+
+fn work(n i64) i64 {
+    sum i64 = 0
+    pt point
+    pt.x = 3
+    pt.y = 4
+    buf arr[4, i32]
+    buf[0] = 7
+    for i i64 = 0; i < n; i += 1 {
+        sq i64 = i * i
+        sum += sq
+    }
+    if sum > 1 {
+        sum i64 = 99
+        sum += 1
+    }
+    return sum + sext[i64](pt.x) + sext[i64](buf[0])
+}
+
+fn main(argc i32, argv addr) i32 {
+    return trunc[i32](work(3))
+}
+FAS
+  for o in -O0 -O2; do
+    "$OCAML_FAS" --backend=native -g $o "$DBG_TMP/fv.fas" -o "$DBG_TMP/fv"
+    out=$(cd "$DBG_TMP" && gdb -nx -q -batch -ex 'break fv.fas:15' -ex run -ex continue -ex 'info locals' \
+      -ex 'info args' -ex 'delete 1' -ex 'break fv.fas:19' -ex continue -ex 'info locals' -ex 'ptype pt' ./fv 2>&1 || true)
+    got=$(echo "$out" | grep -E '^(sq|i|sum|pt|buf|n|type) = |^    i32 ' | tr '\n' ';')
+    want='sq = 1;i = 1;sum = 0;pt = {x = 3, y = 4};buf = {7, 0, 0, 0};n = 3;'
+    want="$want"'sum = 99;sum = 5;pt = {x = 3, y = 4};buf = {7, 0, 0, 0};type = struct point {;    i32 x;;    i32 y;;'
+    [ "$got" = "$want" ] || bad "gdb Fas variables ($o): got $got, expected $want"
+  done
 fi
 
-[ $fail = 0 ] && echo "native debug: $objects objects and 6 executables unchanged by -g, line tables ok"
+[ $fail = 0 ] && echo "native debug: $objects objects and 6 executables unchanged by -g, Fas and Fir variables in gdb, line tables ok"
 exit $fail

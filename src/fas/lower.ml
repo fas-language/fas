@@ -485,11 +485,15 @@ let bind_local s binding value alignment =
   | [] -> ());
   Hashtbl.replace s.env binding.id (value, alignment)
 
-let push_scope s =
+(* [lexical]: the scope is a debug-info lexical block; the function's own
+   scopes (its parameters' and its body's) are not *)
+let push_scope ?(lexical = true) s =
+  if lexical then E.push_lexical s.fn;
   s.env_scopes <- [] :: s.env_scopes;
   s.defer_scopes <- [] :: s.defer_scopes
 
-let pop_scope s =
+let pop_scope ?(lexical = true) s =
+  if lexical then E.pop_lexical s.fn;
   match (s.env_scopes, s.defer_scopes) with
   | scope :: er, _ :: dr ->
       List.iter
@@ -501,6 +505,61 @@ let pop_scope s =
       s.env_scopes <- er;
       s.defer_scopes <- dr
   | _ -> ()
+
+(* ---------- debug types (roadmap v0.8) ---------- *)
+
+(* The debug type of a Fas type, made once per module. A struct's id is
+   claimed before its members are made, so its members may refer back to it. *)
+let rec dtype s (t : Hir.ty) =
+  let mc = s.fn.E.mc in
+  match Hashtbl.find_opt mc.E.dtypes t with
+  | Some id -> id
+  | None ->
+      let m = mc.E.m in
+      let base name enc size = Fir.add_dtype m (Fir.Dbase { name; enc; size }) in
+      let id =
+        match t with
+        | Hir.Void -> 0
+        | Hir.Bool -> base "bool" Fir.Dboolean 1
+        | Hir.Int k ->
+            let name = Hir.ty_name t in
+            let enc, size =
+              match k with
+              | Hir.U8 -> (Fir.Dunsigned, 1) | Hir.U16 -> (Fir.Dunsigned, 2)
+              | Hir.U32 -> (Fir.Dunsigned, 4) | Hir.U64 -> (Fir.Dunsigned, 8)
+              | Hir.I8 -> (Fir.Dsigned, 1) | Hir.I16 -> (Fir.Dsigned, 2)
+              | Hir.I32 -> (Fir.Dsigned, 4) | Hir.I64 -> (Fir.Dsigned, 8)
+            in
+            base name enc size
+        | Hir.Float Hir.F32 -> base "f32" Fir.Dfloat 4
+        | Hir.Float Hir.F64 -> base "f64" Fir.Dfloat 8
+        | Hir.Addr -> Fir.add_dtype m (Fir.Dtypedef ("addr", Fir.add_dtype m (Fir.Dpointer 0)))
+        | Hir.Handle _ -> Fir.add_dtype m (Fir.Dtypedef (Hir.ty_name t, Fir.add_dtype m (Fir.Dpointer 0)))
+        | Hir.Array (n, e) -> let e = dtype s e in Fir.add_dtype m (Fir.Darray (e, n))
+        | Hir.Vec (n, e) -> let e = dtype s e in Fir.add_dtype m (Fir.Dvector (e, n))
+        | Hir.Opaque name -> Fir.add_dtype m (Fir.Dstruct { name; union = false; size = None; members = [] })
+        | Hir.Struct name -> (
+            match List.find_opt (fun (d : Hir.struct_def) -> d.name = name) s.structs with
+            | None -> Fir.add_dtype m (Fir.Dstruct { name; union = false; size = None; members = [] })
+            | Some d ->
+                let id = Fir.add_dtype m Fir.Dvoid in
+                Hashtbl.replace mc.E.dtypes t id;
+                let members =
+                  List.filter_map
+                    (fun (fd : Hir.field) ->
+                      if fd.unsupported_reason <> None then None else Some (fd.name, dtype s fd.ty, fd.offset))
+                    d.fields
+                in
+                Fir.Vec.set m.Fir.dtypes id
+                  (Fir.Dstruct { name; union = d.is_union; size = Some d.size; members });
+                id)
+      in
+      Hashtbl.replace mc.E.dtypes t id;
+      id
+
+(* A named variable in its stack slot [home], for the debugger *)
+let debug_var ?(arg = 0) s (local : Hir.local) home =
+  E.var s.fn ~name:local.name ~ty:(dtype s local.ty) ~arg home
 
 let find_struct s n = List.find_opt (fun (d : Hir.struct_def) -> d.name = n) s.structs
 
@@ -1913,11 +1972,11 @@ and unwind s keep =
         (Ok ()) ds)
     scopes
 
-and scoped s xs =
-  push_scope s;
+and scoped ?lexical s xs =
+  push_scope ?lexical s;
   let* () = stmt_list s xs in
   let* () = if open_block s then emit_scope_defers s 0 else Ok () in
-  pop_scope s;
+  pop_scope ?lexical s;
   Ok ()
 
 and stmt s statement =
@@ -1929,6 +1988,7 @@ and stmt s statement =
       E.alloca_entry s.fn id (storage_ty local.ty) alignment;
       let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
       bind_local s local p alignment;
+      debug_var s local (E.value s.fn p);
       match init with
       | None -> Ok ()
       | Some e ->
@@ -1940,6 +2000,7 @@ and stmt s statement =
       E.alloca_entry s.fn id (storage_ty local.ty) alignment;
       let pointer = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
       bind_local s local pointer alignment;
+      debug_var s local (E.value s.fn pointer);
       construct_into ~alignment s pointer construction
   | Hir.View (local, place, span) ->
       let* pointer = address s place in
@@ -2643,8 +2704,8 @@ let lower_func mc ~intrinsic_masked_loads
           location = None;
         }
       in
-      push_scope s;
-      let rec bind_parameters locals parameters =
+      push_scope ~lexical:false s;
+      let rec bind_parameters k locals parameters =
         match (locals, parameters) with
         | [], [] -> Ok ()
         | (local : Hir.local) :: local_rest, (name, _, _) :: parameter_rest ->
@@ -2653,17 +2714,18 @@ let lower_func mc ~intrinsic_masked_loads
             E.alloca s.fn id (storage_ty local.ty) alignment;
             let p = Low.Local (id, Low.Pointer (storage_ty local.ty)) in
             bind_local s local p alignment;
+            debug_var ~arg:k s local (E.value s.fn p);
             let* () =
               store_value s local.ty (Low.Param (name, ty local.ty)) p alignment
             in
-            bind_parameters local_rest parameter_rest
+            bind_parameters (k + 1) local_rest parameter_rest
         | _ ->
             error Span.synthetic
               (Printf.sprintf "internal error: function `%s` parameter handoff mismatch"
                  f.name)
       in
-      let* () = bind_parameters f.params params in
-      let* () = scoped s body in
+      let* () = bind_parameters 1 f.params params in
+      let* () = scoped ~lexical:false s body in
       let* () = if open_block s then emit_scope_defers s 0 else Ok () in
       let* () =
         if not (open_block s) then Ok ()
@@ -2677,7 +2739,7 @@ let lower_func mc ~intrinsic_masked_loads
                 terminator"
                f.name)
       in
-      pop_scope s;
+      pop_scope ~lexical:false s;
       match E.finish s.fn with
       | Ok () -> Ok ()
       | Error b ->

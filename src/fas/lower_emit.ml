@@ -110,20 +110,21 @@ type modctx = {
   m : modul;
   lay : layouts;
   variadic : (string, int) Hashtbl.t;  (** variadic function -> fixed parameter count *)
-  locs : (string * int * int, int) Hashtbl.t;
+  locs : (string * int * int * int, int) Hashtbl.t;  (** file, line, column, scope *)
+  dtypes : (Hir.ty, int) Hashtbl.t;  (** debug type of each Fas type made so far *)
 }
 
 let create_module ~triple lay =
   let m = create_module () in
   m.triple <- triple;
-  { m; lay; variadic = Hashtbl.create 8; locs = Hashtbl.create 64 }
+  { m; lay; variadic = Hashtbl.create 8; locs = Hashtbl.create 64; dtypes = Hashtbl.create 16 }
 
-let loc_id mc file line col =
-  let key = (file, line, col) in
+let loc_id ?(scope = 0) mc file line col =
+  let key = (file, line, col, scope) in
   match Hashtbl.find_opt mc.locs key with
   | Some l -> l
   | None ->
-      let l = add_loc mc.m file line col in
+      let l = add_loc ~scope mc.m file line col in
       Hashtbl.replace mc.locs key l;
       l
 
@@ -162,6 +163,10 @@ type fn = {
   mutable loc : int;
   last_loc : (block, int) Hashtbl.t;
       (** each block's location at its end: its terminator's (set by [finish]) *)
+  mutable lex : int ref list;
+      (** the open lexical blocks, innermost first: each one's Fir scope, or 0
+          while it has no variables (see [materialize]) *)
+  mutable vars : dvar list;  (** debug variables (reversed) *)
 }
 
 (* Starts a function with a body. [params] are (name, type, extension); the
@@ -177,7 +182,7 @@ let start mc ~name ~linkage ~params ~ret ~ret_extension ~variadic ~display ~sour
       mc; f; file = Option.map fst source;
       locals = Hashtbl.create 64; defined = Hashtbl.create 64; params = Hashtbl.create 8;
       phis = Hashtbl.create 16; closed = Hashtbl.create 16; entry_temps = []; entry_allocas = [];
-      cur = entry; loc = 0; last_loc = Hashtbl.create 16;
+      cur = entry; loc = 0; last_loc = Hashtbl.create 16; lex = []; vars = [];
     }
   in
   (* the declaration line (the LLVM path's DISubprogram line), column 0 *)
@@ -192,6 +197,26 @@ let start mc ~name ~linkage ~params ~ret ~ret_extension ~variadic ~display ~sour
     params sig_.param_abis;
   fn
 
+(* ---------- debug variables (roadmap v0.8) ---------- *)
+
+(* Lexical scopes are made lazily: a Fas block becomes a Fir scope only when
+   a variable is declared in it, and only from that point on, so code before
+   the declaration still sees the outer variable it shadows. *)
+let push_lexical fn = fn.lex <- ref 0 :: fn.lex
+let pop_lexical fn = match fn.lex with _ :: rest -> fn.lex <- rest | [] -> ()
+
+let rec current_scope_of = function [] -> 0 | r :: rest -> if !r <> 0 then !r else current_scope_of rest
+let current_scope fn = current_scope_of fn.lex
+
+(* Makes the innermost open block a scope, inside the nearest enclosing
+   block that already is one (blocks without variables are skipped) *)
+let materialize fn =
+  match fn.lex with
+  | [] -> 0
+  | r :: rest ->
+      if !r = 0 then r := add_scope fn.mc.m ~parent:(current_scope_of rest);
+      !r
+
 let new_block fn = add_block fn.f ~name:("b" ^ string_of_int (num_blocks fn.f))
 
 (* Makes [b] current. [location] is the source position its code continues
@@ -200,13 +225,28 @@ let enter fn b location =
   fn.cur <- b;
   fn.loc <-
     (match (location, fn.file) with
-    | Some (line, col), Some file -> loc_id fn.mc file line col
+    | Some (line, col), Some file -> loc_id ~scope:(current_scope fn) fn.mc file line col
     | _ -> 0);
   Hashtbl.replace fn.last_loc b fn.loc
 
 let location fn line col =
-  fn.loc <- (match fn.file with Some file -> loc_id fn.mc file line col | None -> 0);
+  fn.loc <-
+    (match fn.file with Some file -> loc_id ~scope:(current_scope fn) fn.mc file line col | None -> 0);
   Hashtbl.replace fn.last_loc fn.cur fn.loc
+
+(* A debug variable living in [home] (its stack slot), declared at the
+   current location. Its block becomes a scope here, and the code from here
+   on is in it. *)
+let var fn ~name ~ty ~arg home =
+  let before = current_scope fn in
+  let vscope = materialize fn in
+  if vscope <> before && fn.loc <> 0 then begin
+    let file, line, col = Vec.get fn.mc.m.locs fn.loc in
+    fn.loc <- loc_id ~scope:vscope fn.mc file line col;
+    Hashtbl.replace fn.last_loc fn.cur fn.loc
+  end;
+  fn.vars <- { vname = name; vty = ty; vscope; vloc = fn.loc; varg = arg; home = Some home } :: fn.vars
+
 let is_open fn b = not (Hashtbl.mem fn.closed b)
 
 let define fn id v =
@@ -713,6 +753,7 @@ let finish fn =
         (fun id _ -> if not (Hashtbl.mem fn.defined id) then unsupported "use of undefined %%v%d" id)
         fn.locals;
       resolve_all f;
+      f.vars <- List.rev fn.vars;
       add_func fn.mc.m f;
       Ok ()
 

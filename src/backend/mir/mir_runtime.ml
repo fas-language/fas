@@ -31,9 +31,11 @@ let add (m : F.modul) =
         if f.defined && not (Hashtbl.mem present f.name) then begin
           (* their location ids index the helpers' own module: runtime code
              has no source lines for the program's debug info (like
-             libgcc), so they are cleared *)
+             libgcc), so they are cleared, and so are its variables (their
+             types, scopes and locations are the helpers' module's too) *)
           F.Vec.iter (fun (ir : F.inst_rec) -> ir.loc <- 0) f.insts;
           F.Vec.iter (fun (b : F.block_rec) -> b.term_loc <- 0) f.blocks;
+          f.vars <- [];
           F.add_func m f
         end)
       (Native_runtime.fma_module ()).funcs;
