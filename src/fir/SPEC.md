@@ -193,6 +193,7 @@ Source variables and their types are module metadata that only `-g` reads. Nothi
 
 - **`scope N parent P`** declares a lexical block. Ids are consecutive from 1 and `P` is smaller than `N` (0 is the function itself). A `loc` names its innermost scope with `!scope S`; the code at that location belongs to that block. All the locations and variables that name a scope, or a scope inside it, must belong to one function. A scope with no code is dropped and its variables move to the enclosing one.
 - **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. Passes that rewrite functions keep each variable and its home.
+- **No name in the debug information may contain a NUL byte** (`\00`): not a `loc` file name, a `dtype` name, member or enumerator, a `var` name, or a function's `display` name. DWARF ends these strings with a NUL, so the verifier refuses them.
 
 ## 5. Signatures and the ABI
 

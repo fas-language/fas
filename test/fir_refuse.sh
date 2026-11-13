@@ -41,6 +41,12 @@ case_ c/symbols.fir 's/global @wkeep size 8 align 8/global @wkeep size 8 align 4
   '@wkeep: aligned to 4294967296'
 case_ asm_goto.fir 's/i64/i24/g' -c \
   'asm_goto on a wide or odd-width integer'
+case_ vars.fir 's/loc 1 "vars.c"/loc 1 "va\\00rs.c"/' -c \
+  'loc 1: file name "va\000rs.c" has a NUL byte'
+case_ vars.fir 's/dtype 1 base "long"/dtype 1 base "lo\\00ng"/' '-c -g' \
+  'dtype 1: name "lo\000ng" has a NUL byte'
+case_ vars.fir 's/var "sum"/var "s\\00um"/' '-c -g' \
+  '@work: var "s\000um" has a NUL byte'
 for c in $(sed -n 's/^global @\([a-z_]*\) size 8 align 8 .*= zero$/\1/p' "$here/fas_fir/sum_loop.fir" | head -n 1); do
   # a 1 GiB zero global is fine (.bss), and fast: its bytes are never built
   sed "s/^global @$c size 8 /global @$c size 1073741824 /" "$here/fas_fir/sum_loop.fir" > "$tmp/big.fir"

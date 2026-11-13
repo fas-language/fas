@@ -620,6 +620,28 @@ let verify (m : modul) =
       | Dtypedef (_, t) -> ref_ok "aliased" t
       | Denum { base; _ } -> ref_ok "underlying" base)
     m.dtypes;
+  (* DWARF strings are NUL-terminated (DW_FORM_string, the line table's
+     file names), so a name with a NUL byte in it cannot be written *)
+  let nul what s = if String.contains s '\000' then errs := Printf.sprintf "%s %S has a NUL byte" what s :: !errs in
+  Vec.iteri (fun i (file, _, _) -> if i > 0 then nul (Printf.sprintf "loc %d: file name" i) file) m.locs;
+  Vec.iteri
+    (fun i t ->
+      let nul what = nul (Printf.sprintf "dtype %d: %s" i what) in
+      match t with
+      | Dbase { name; _ } | Dtypedef (name, _) -> nul "name" name
+      | Dstruct { name; members; _ } ->
+          nul "name" name;
+          List.iter (fun (m, _, _) -> nul "member" m) members
+      | Denum { name; enumerators; _ } ->
+          nul "name" name;
+          List.iter (fun (e, _) -> nul "enumerator" e) enumerators
+      | Dvoid | Dpointer _ | Darray _ | Dvector _ -> ())
+    m.dtypes;
+  Vec.iter
+    (fun f ->
+      Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;
+      List.iter (fun d -> nul (Printf.sprintf "@%s: var" f.name) d.vname) f.vars)
+    m.funcs;
   Hashtbl.iter
     (fun l sc ->
       if l <= 0 || l >= nlocs then errs := Printf.sprintf "loc %d: no such location" l :: !errs;
