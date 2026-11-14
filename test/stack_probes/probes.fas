@@ -1,0 +1,64 @@
+// Stack probes (test/native_stack_probes.sh). A thread runs on a 64 KiB
+// stack this program maps itself: [2 MiB read-write][guard page][stack].
+// The memory below the guard is mapped on purpose, so a frame that steps
+// over the guard lands somewhere writable and nothing faults. With probes
+// every page on the way down is touched, so `frame` and `vla` must die
+// with SIGSEGV on the guard; `small` (frames of a few pages, the unrolled
+// probe path, small VLAs, and a call aligning rsp to 4 KiB) must run
+// normally.
+use "C" <pthread.h>
+use "C" <sys/mman.h>
+use "C" <stdio.h>
+use "C" <string.h>
+
+var mode i32 = 0
+
+// a 1 MiB frame (the probe loop); only the lowest word is written, so
+// without probes the only access is far below the guard
+fn big() i64 {
+    buf arr[131072, u64]
+    buf[0] = 5
+    return bitcast[i64](buf[0])
+}
+
+// 20000 bytes: four unrolled page probes and the remainder
+fn mid() i64 {
+    buf arr[2500, u64]
+    buf[0] = 3
+    buf[2499] = 4
+    return bitcast[i64](buf[0] + buf[2499])
+}
+
+extern "C" {
+    fn vla(n i64) i64
+    fn aligned() i64
+    fn worker(arg addr) addr {
+        r i64 = 0
+        if mode == 1 { r = big() }
+        if mode == 2 { r = vla(1048576) }
+        if mode == 3 { r = mid() + vla(1024) + vla(9000) + aligned() }
+        printf(c"survived %lld\n", r)
+        return null
+    }
+}
+
+fn main(argc i32, argv addr) i32 {
+    if argc != 2 { return 2 }
+    m addr = argv[addr, 1]
+    if strcmp(m, c"frame") == 0 { mode = 1 }
+    if strcmp(m, c"vla") == 0 { mode = 2 }
+    if strcmp(m, c"small") == 0 { mode = 3 }
+    if mode == 0 { return 2 }
+    low usize = 2097152
+    stack usize = 65536
+    base addr = mmap(null, low + 4096 + stack, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+    if addr_bits(base) == 0xffffffffffffffff { return 3 }
+    if mprotect(base + low, 4096, PROT_NONE) != 0 { return 4 }
+    attr pthread_attr_t = {}
+    pthread_attr_init(&attr)
+    pthread_attr_setstack(&attr, base + low + 4096, stack)
+    t pthread_t = 0
+    if pthread_create(&t, &attr, &worker, null) != 0 { return 5 }
+    pthread_join(t, null)
+    return 0
+}

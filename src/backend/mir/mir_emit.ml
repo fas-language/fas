@@ -423,13 +423,76 @@ let asm_snippets compiled =
         incr next;
         s
 
+(* Stack probes (the -fstack-clash-protection rule): rsp never drops more
+   than a page below the lowest address already touched, so growing into
+   the guard page always faults there instead of jumping over it into
+   whatever is mapped below. *)
+let page = 4096
+
+(* or qword [rsp], 0: touches the page rsp points into, changes nothing *)
+let probe a = A.alu_mi a A.Or 8 (A.Base (A.Rsp, 0)) 0
+
+(* the prologue's rsp drop, after the pushes (which touched [rsp]). A frame
+   under half a page is left unprobed: whatever the function touches next
+   (a call's return address, a slot) is still within a page of the last
+   push. Larger frames probe every page and the final rsp. r11 is free at
+   entry (r10 carries the static chain). *)
+let probed_frame a size =
+  if size < page / 2 then (if size > 0 then A.alu_ri a A.Sub A.Rsp size)
+  else begin
+    let pages = size / page and rem = size mod page in
+    if pages <= 4 then
+      for _ = 1 to pages do
+        A.alu_ri a A.Sub A.Rsp page;
+        probe a
+      done
+    else begin
+      (* lea r11, [rsp - pages*4096]; L: sub rsp,4096; or [rsp],0; cmp rsp,r11; jne L *)
+      A.lea a A.R11 (A.Base (A.Rsp, - (pages * page)));
+      let l = A.new_label a in
+      A.place a l;
+      A.alu_ri a A.Sub A.Rsp page;
+      probe a;
+      A.alu_rr a A.Cmp A.Rsp A.R11;
+      A.jcc a A.Ne l
+    end;
+    if rem > 0 then begin
+      A.alu_ri a A.Sub A.Rsp rem;
+      probe a
+    end
+  end
+
 let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   let m = mem fr in
   match i with
   | Salloc (d, n) ->
       (* rsp drops by n (a multiple of 16); the block starts above the
          outgoing-argument area, which moves down with rsp *)
-      A.alu_rr a A.Sub A.Rsp (gr n);
+      (* probed: touch [rsp], compute the target, then step down a page
+         at a time touching each one, and finally the target itself.
+           or [rsp],0; d = rsp - n
+         L: sub rsp,4096; cmp rsp,d; jb Last; or [rsp],0; jmp L
+         Last: mov rsp,d; or [rsp],0
+         n is only read, unless it is d itself (then neg; add rsp) *)
+      probe a;
+      if d = n then begin
+        A.neg a (gr d);
+        A.alu_rr a A.Add (gr d) A.Rsp
+      end
+      else begin
+        A.mov_rr a (gr d) A.Rsp;
+        A.alu_rr a A.Sub (gr d) (gr n)
+      end;
+      let step = A.new_label a and last = A.new_label a in
+      A.place a step;
+      A.alu_ri a A.Sub A.Rsp page;
+      A.alu_rr a A.Cmp A.Rsp (gr d);
+      A.jcc a A.B last;
+      probe a;
+      A.jmp a step;
+      A.place a last;
+      A.mov_rr a A.Rsp (gr d);
+      probe a;
       A.lea a (gr d) (A.Base (A.Rsp, out))
   | Spget d -> A.mov_rr a (gr d) A.Rsp
   | Spset r -> A.mov_rr a A.Rsp (gr r)
@@ -534,7 +597,13 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   | Xadd (n, ad, r) -> A.lock_xadd a n (m ad) (gr r)
   | Cmpxchg (n, ad, r) -> A.lock_cmpxchg a n (m ad) (gr r)
   | Mfence -> A.mfence a
-  | Align_sp n -> A.alu_ri a A.And A.Rsp (- n)
+  | Align_sp n ->
+      (* the drop is under n bytes, and n is at most a page (a by-value
+         agg aligned above 4096 is refused), so touching both ends never
+         skips a page *)
+      probe a;
+      A.alu_ri a A.And A.Rsp (- n);
+      probe a
   | Ud2 -> A.ud2 a
   | Loc _ -> ()
   | Asm _ ->
@@ -569,7 +638,7 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
       A.push a r;
       event (Mir_cfi.Saved (r, i)))
     ra.saved;
-  if fr.size > 0 then A.alu_ri a A.Sub A.Rsp fr.size;
+  probed_frame a fr.size;
   let nb = Array.length ra.items in
   let labels = Array.init nb (fun _ -> A.new_label a) in
   let slot_mem v = mem fr (at (Bslot ra.vslot.(v))) in
