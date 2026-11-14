@@ -14,7 +14,8 @@ and `llc`). The shims work as follows:
 - `cc` / `llc` asked to compile or link a .ll that carries the marker use
   the native object instead of compiling the IR. A request for assembly
   (`-S`, `-filetype=asm`) still goes to the real tool.
-- `fas x.fas -o exe` (or `-c`) builds with `--backend=native` added.
+- `fas x.fas -o exe` (or `-c`) builds with `--backend=native` added (only
+  under FAS_ORACLE=llvm; without it the build is native already).
 - When the native backend refuses a module, the shim falls back to the
   plain LLVM behaviour, so diagnostics and exit codes are unchanged. Every
   decision is appended to $FAS_SHADOW_LOG so the runner can tell "native
@@ -110,6 +111,13 @@ def strip_output(args):
     return out, rest
 
 
+def native_flag():
+    # `--backend=native` exists only under the LLVM oracle; a script that
+    # drops FAS_ORACLE (`env -u FAS_ORACLE fas ...`) already builds natively,
+    # and the flag would be refused there
+    return ["--backend=native"] if os.environ.get("FAS_ORACLE") == "llvm" else []
+
+
 def fas_main(args):
     real = env("FAS_SHADOW_REAL_FAS")
     emit = [a for a in args if a == "--emit-llvm" or a.startswith("--emit-llvm=")]
@@ -121,7 +129,7 @@ def fas_main(args):
     if other_emit or subcommand or not fas_inputs(args) or not native_eligible(args):
         passthrough([real] + args)
     # executable or object build: try native first
-    r = run([real, "--backend=native"] + args, capture_output=True)
+    r = run([real] + native_flag() + args, capture_output=True)
     if r.returncode == 0:
         log("native-build", " ".join(args))
         sys.stdout.buffer.write(r.stdout)
@@ -155,7 +163,7 @@ def fas_emit_llvm(real, args, emit_flag):
     elif not os.path.exists(obj):
         nargs = [a for a in rest if a != emit_flag]
         tmp = obj + f".{os.getpid()}.tmp"
-        n = run([real, "--backend=native", "-c"] + nargs + ["-o", tmp], capture_output=True)
+        n = run([real] + native_flag() + ["-c"] + nargs + ["-o", tmp], capture_output=True)
         if n.returncode != 0:
             log("native-refused-emit", first_error(n.stderr) + " :: " + " ".join(args))
             write_ir(out, ir)

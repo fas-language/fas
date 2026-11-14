@@ -484,6 +484,8 @@ run_case mixed "$mixed_expected" mixed.fas
 
 : >"$FAKE_LIBS_LOG"
 run_diag 0 "$OCAML_FAS" -c -o "$C_PKG_TMP/smoke.o" smoke.fas
+# the public native backend too (it refused `use pkg` with -c before)
+run_diag 0 env -u FAS_ORACLE "$OCAML_FAS" -c -o "$C_PKG_TMP/smoke-native.o" smoke.fas
 run_diag 0 "$OCAML_FAS" --emit-llvm smoke.fas
 run_diag 0 "$OCAML_FAS" --emit-header -o "$C_PKG_TMP/emitted.h" smoke.fas
 run_diag 0 "$OCAML_FAS" check smoke.fas

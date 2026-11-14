@@ -2052,13 +2052,9 @@ let run_unprotected ?header_output config =
                   emit_text config text)
           | Cli.Optimized_llvm -> emit_optimized_llvm config program ir
           | Cli.Obj when config.Cli.native -> (
-              if link_pkgs <> [] then
-                Error
-                  [
-                    Diag.error Span.synthetic
-                      "native object output cannot combine package libraries";
-                  ]
-              else
+              (* an object takes no link flags: a package's libraries are
+                 for whoever links it (as on the LLVM path), while its
+                 cflags already reached the C import *)
                 match
                   Result.bind (native_ir ())
                     (Mir_driver.compile_object ~debug:config.Cli.debug
