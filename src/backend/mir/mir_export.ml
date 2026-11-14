@@ -71,10 +71,6 @@ let mem_ok ins k =
   | _ -> false
 
 (* the use that may swap with use 0 *)
-let commutes = function
-  | Alu ((X64.Add | And | Or | Xor), _, _) | Imul _ | Fop ((X64.Fadd | Fmul), _, _, _) -> true
-  | _ -> false
-
 let reads_flags = function Setcc _ | Cmov _ -> true | _ -> false
 
 (* conservative: whatever might change the flags *)

@@ -153,14 +153,14 @@ let find (f : func) = match Lazy.force file with None -> [] | Some t -> Hashtbl.
 let run (f : func) (cands : alloc list) =
   let p =
     try Mir_export.problem f
-    with Mir_export.Skip why -> fail "%s: FAS_RA_IMPORT: the exporter cannot express it (%s)" f.name why
+    with Mir_export.Skip why -> fail "%s: the exporter cannot express it (%s)" f.name why
   in
   let a =
     match List.find_opt (fun a -> a.hash = p.hash && a.insts = p.ninsts) cands with
     | Some a -> a
-    | None -> fail "%s: FAS_RA_IMPORT: no allocation for this problem (hash %016Lx, %d instructions)" f.name p.hash p.ninsts
+    | None -> fail "%s: no allocation for this problem (hash %016Lx, %d instructions)" f.name p.hash p.ninsts
   in
-  let fail fmt = Printf.ksprintf (fun s -> fail "%s: FAS_RA_IMPORT: %s" f.name s) fmt in
+  let fail fmt = Printf.ksprintf (fun s -> fail "%s: %s" f.name s) fmt in
   let nb = Array.length p.reach and nb0 = p.nb0 in
   let slots =
     Array.init a.nslots (fun n ->
@@ -254,6 +254,9 @@ let run (f : func) (cands : alloc list) =
     let look tbl = function V v -> Hashtbl.find tbl v | p -> p in
     match map_regs_ud ~u:(look umap) ~d:(look dmap) o with
     | Some n -> n
+    | None when commutes o && (match o with Alu (_, d, s) | Imul (d, s) | Fop (_, _, d, s) -> look dmap d = look umap s | _ -> false) ->
+        (* comm=1: the result in the second input's register *)
+        swap_comm (map_regs (look umap) o)
     | None -> fail "instruction %d: a register both read and written gets two locations" e.ix
     | exception Not_found -> fail "instruction %d: an operand without a location" e.ix
   in

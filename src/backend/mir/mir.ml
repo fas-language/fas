@@ -438,6 +438,19 @@ let map_regs_ud ~u ~d ins =
     | [ r ] -> with_def (map_regs g ins) (d r)
     | _ -> None
 
+(* An x86 two-address instruction whose two inputs may trade places: the
+   allocation may put the result in the second input's register, and the
+   instruction then runs with its operands swapped ([swap_comm]). *)
+let commutes = function
+  | Alu ((X64.Add | And | Or | Xor), _, _) | Imul _ | Fop ((X64.Fadd | Fmul), _, _, _) -> true
+  | _ -> false
+
+let swap_comm = function
+  | Alu (op, d, s) -> Alu (op, s, d)
+  | Imul (d, s) -> Imul (s, d)
+  | Fop (op, dbl, d, s) -> Fop (op, dbl, s, d)
+  | i -> i
+
 let map_term g = function
   | Ret rs -> Ret (List.map g rs)
   | Jmpr (r, bs) -> Jmpr (g r, bs)

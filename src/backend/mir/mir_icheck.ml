@@ -33,7 +33,10 @@
         the variable the Mir reads there; each register it writes then
         holds the new value alone, and the value leaves every other
         location (an older run of the same definition, in a loop, is
-        stale); clobbered registers hold nothing;
+        stale); clobbered registers hold nothing; a commutative one
+        ([Mir.commutes]) may instead run with its inputs swapped
+        ([Mir.swap_comm]), its first register then holding the second
+        input and its second the first;
       - [Move], [Ld], [St] copy the set; a [St] of an xmm register into an
         8-byte slot keeps the low half of each value, which serves every
         reader but those of all 16 bytes ([Xstore], a 128-bit asm
@@ -45,8 +48,11 @@
       Across an edge p -> t, a location holding the value of variable x at
       the end of p holds x's value at the start of t (the same id, or the
       merge m(t, x)); a variable undefined at the end of p imposes nothing.
-      Block entry states are the intersection over the predecessors,
-      iterated to a fixpoint. The function's entry acts as one more
+      A merge every predecessor enters with one same value is that value
+      (trivial-phi removal; computed to a fixpoint in step 2). Block entry
+      states are the intersection over the predecessors (a full value on
+      one and its low half on another leave the low half), iterated to a
+      fixpoint. The function's entry acts as one more
       predecessor of block 0.
 
    4. Also: a callee-saved register written anywhere is in [saved]; rsp
@@ -259,22 +265,50 @@ let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =
   in
   let entry_value x = if x >= nv then Some (x - nv) else None in
   let ventry = Array.make nb [||] and vexit = Array.make nb (Hashtbl.create 1) in
-  Array.iter
-    (fun b ->
-      let single = if b = 0 then preds.(0) = [] else List.length preds.(b) = 1 in
-      ventry.(b) <-
-        Array.map
-          (fun x ->
-            ( x,
-              if not single then Some (merge_id b x)
-              else if b = 0 then entry_value x
-              else Hashtbl.find_opt vexit.(List.hd preds.(b)) x ))
-          livein.(b);
-      let virt = Hashtbl.create 64 in
-      Array.iter (fun (x, v) -> Option.iter (Hashtbl.replace virt x) v) ventry.(b);
-      vstep b virt (fun _ _ _ -> ());
-      vexit.(b) <- virt)
-    rpo;
+  (* a merge every path enters with the same value (or with none) is that
+     value, as in SSA construction's trivial-phi removal: a constant
+     rematerialized past a merge then holds what the reader expects *)
+  let res = Hashtbl.create 16 in
+  let rec resolve i = match Hashtbl.find_opt res i with Some j -> resolve j | None -> i in
+  let multi b = if b = 0 then preds.(0) <> [] else List.length preds.(b) > 1 in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Array.iter
+      (fun b ->
+        ventry.(b) <-
+          Array.map
+            (fun x ->
+              ( x,
+                if multi b then Some (resolve (merge_id b x))
+                else if b = 0 then entry_value x
+                else Hashtbl.find_opt vexit.(List.hd preds.(b)) x ))
+            livein.(b);
+        let virt = Hashtbl.create 64 in
+        Array.iter (fun (x, v) -> Option.iter (Hashtbl.replace virt x) v) ventry.(b);
+        vstep b virt (fun _ _ _ -> ());
+        vexit.(b) <- virt)
+      rpo;
+    Array.iter
+      (fun b ->
+        if multi b then
+          Array.iter
+            (fun x ->
+              let m = merge_id b x in
+              if resolve m = m then begin
+                let ins =
+                  List.map (fun p -> Hashtbl.find_opt vexit.(p) x) preds.(b)
+                  @ if b = 0 then [ entry_value x ] else []
+                in
+                match List.sort_uniq compare (List.filter_map (Option.map resolve) ins |> List.filter (( <> ) m)) with
+                | [ v ] ->
+                    Hashtbl.replace res m v;
+                    changed := true
+                | _ -> ()
+              end)
+            livein.(b))
+      rpo
+  done;
   (* 3. the actual machine *)
   let init = Array.init nloc (fun l -> if l < nphys then IS.singleton l else IS.empty) in
   (* the state at the start of t, from a state at the end of p (or of the
@@ -346,6 +380,20 @@ let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =
             let us, ds = uses_defs o and us', ds' = uses_defs n in
             if List.length us <> List.length us' || List.length ds <> List.length ds' then
               failb b "%s: allocated as %s" (ins_s o) (ins_s n);
+            (* a commutative instruction may run with its inputs swapped
+               (the result in the second input's register): then the
+               first register must hold the second input and vice versa *)
+            let holds r r' =
+              match Hashtbl.find_opt virt (var_of r) with
+              | Some i -> let l = loc_of b r' in IS.mem i st.(l) || IS.mem (low i) st.(l)
+              | None -> true
+            in
+            let swapped, us =
+              match (us, us') with
+              | [ x; y ], [ x'; y' ] when commutes o && x <> y && (not (holds x x' && holds y y')) && holds y x' && holds x y' ->
+                  (true, [ y; x ])
+              | _ -> (false, us)
+            in
             let umap = Hashtbl.create 4 and dmap = Hashtbl.create 4 in
             let bind tbl r r' =
               match r with
@@ -361,10 +409,19 @@ let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =
             List.iter2 (bind dmap) ds ds';
             let look tbl = function V v -> Hashtbl.find tbl v | p -> p in
             let differs () = failb b "%s: allocated form differs: %s" (ins_s o) (ins_s n) in
-            (match map_regs_ud ~u:(look umap) ~d:(look dmap) o with
-            | Some n' when n' = n -> ()
-            | _ -> differs ()
-            | exception Not_found -> differs ());
+            (if swapped then
+               match o with
+               | Alu (_, d, s) | Imul (d, s) | Fop (_, _, d, s) -> (
+                   match swap_comm (map_regs (look umap) o) with
+                   | n' when n' = n && look dmap d = look umap s -> ()
+                   | _ -> differs ()
+                   | exception Not_found -> differs ())
+               | _ -> differs ()
+             else
+               match map_regs_ud ~u:(look umap) ~d:(look dmap) o with
+               | Some n' when n' = n -> ()
+               | _ -> differs ()
+               | exception Not_found -> differs ());
             if clobbers o <> clobbers n then failb b "%s: clobbers changed" (ins_s o);
             let full = match o with
               | Xstore (_, s) -> [ s ]
@@ -418,6 +475,13 @@ let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =
       (term_uses ra.terms.(b));
     (st, virt)
   in
+  (* what a location holds on both paths: a value's full id on one and
+     its low half on the other leaves the low half *)
+  let meet a b =
+    let lows s = IS.union s (IS.map low (IS.filter (fun i -> i >= 0) s)) in
+    let r = IS.inter (lows a) (lows b) in
+    IS.filter (fun i -> i >= 0 || not (IS.mem (low i) r)) r
+  in
   let entry_state = Array.make nb None in
   entry_state.(0) <- Some (relabel init entry_value 0);
   let changed = ref true in
@@ -432,7 +496,7 @@ let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =
             List.iter
               (fun t ->
                 let ns = relabel out (Hashtbl.find_opt virt) t in
-                let ns = match entry_state.(t) with None -> ns | Some old -> Array.map2 IS.inter old ns in
+                let ns = match entry_state.(t) with None -> ns | Some old -> Array.map2 meet old ns in
                 if match entry_state.(t) with None -> true | Some old -> not (Array.for_all2 IS.equal old ns) then begin
                   entry_state.(t) <- Some ns;
                   changed := true
