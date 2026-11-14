@@ -417,11 +417,12 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           arguments
     | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
+           || name = "syscall"
            || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         Result_list.iter
           (function
-            | Ast.Name_arg ("fails", _) when name = "call_addr" -> Ok ()
+            | Ast.Name_arg ("fails", _) when name = "call_addr" || name = "syscall" -> Ok ()
             | argument -> validate_generic_argument_names value_names type_names span argument)
           arguments
     | Ast.Generic_args (Ast.Ident (name, name_span), _, _)
@@ -2606,13 +2607,15 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Generic_args (Ast.Ident ("atomic_fence", _), _, _) as e -> Ok e
     | Ast.Generic_args (Ast.Ident (name, ident_span), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
+           || name = "syscall"
            || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         let resolve_argument argument =
           match
             if is_shadowed_argument argument then argument else bind_argument argument
           with
-          | Ast.Name_arg ("fails", _) as fails when name = "call_addr" -> Ok fails
+          | Ast.Name_arg ("fails", _) as fails when name = "call_addr" || name = "syscall" ->
+              Ok fails
           | Ast.Type_arg ty | Ast.Type_or_index ty ->
               let* ty =
                 resolve_ty ~values ~defer_const_structs substitutions depth span ty

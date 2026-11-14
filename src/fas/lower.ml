@@ -1090,6 +1090,40 @@ and raw_call s ~fails call =
         let id = fresh s in
         E.call_indirect s.fn (Some id) result_extension rt target arguments;
         Ok (if fails then raw_result id rt else Low.Local (id, rt))
+  | Hir.Call (Hir.Builtin Hir.Syscall, args, t, sp) when fails ->
+      (* `syscall[T fails]`: the kernel's rule, as libc's: a raw result r in
+         -4095..-1 (unsigned r >= -4095) is error -r, anything else is the
+         value. Built as the `fails.<key>` aggregate a fails call returns, so
+         `try` and `catch` read it the same way. *)
+      let* r = lower_builtin s Hir.Syscall args (Hir.Int Hir.I64) sp in
+      let failed = fresh s in
+      E.cmp s.fn failed Low.Uge Low.I64 r (Low.Const (Low.I64, -4095L));
+      let negated = fresh s in
+      E.bin s.fn negated Low.Sub Low.I64 (Low.Const (Low.I64, 0L)) r;
+      let code = fresh s in
+      E.cast s.fn code "trunc" Low.I64 (Low.Local (negated, Low.I64)) Low.I32;
+      let err = fresh s in
+      E.select s.fn err (Low.Local (failed, Low.I1)) (Low.Local (code, Low.I32))
+        (Low.Const (Low.I32, 0L));
+      let* value =
+        match t with
+        | Hir.Addr ->
+            let id = fresh s in
+            E.cast s.fn id "inttoptr" Low.I64 r (Low.Pointer Low.I8);
+            Ok (Low.Local (id, Low.Pointer Low.I8))
+        | Hir.Int (Hir.I64 | Hir.U64) -> Ok r
+        | _ -> error sp "internal error: syscall[T fails] with a result that is not 8 bytes"
+      in
+      let rt = Low.Struct (fails_struct_name t) in
+      let slot = fresh s in
+      E.alloca_entry s.fn slot rt 8;
+      let p = Low.Local (slot, Low.Pointer rt) in
+      let* () = store_value s t value p 8 in
+      let at = fresh s in
+      let offset = Int64.of_int (fails_err_offset s.structs t) in
+      E.gep s.fn at Low.I8 p [ Low.Index (Low.Const (Low.I64, offset)) ];
+      E.store s.fn Low.I32 (Low.Local (err, Low.I32)) (Low.Local (at, Low.Pointer Low.I8)) 8;
+      Ok p
   | e -> error (Hir.expr_span e) "internal error: `try` or `catch` of a non-call"
 
 and raw_result id rt =

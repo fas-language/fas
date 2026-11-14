@@ -1,0 +1,81 @@
+// `syscall[T fails](...)`: a raw result in -4095..-1 is the error (its
+// negation, an errno code); anything else is success, the bits of T.
+// T is i64 (also `syscall[fails]`), u64/usize or addr.
+use "C" <stdio.h>
+
+error NotFound = 2
+error BadFd = 9
+error NoSys = 38
+
+// mmap a page, write through it, unmap it: addr result and void-like use
+fn page_roundtrip() u64 fails {
+    p addr = try syscall[addr fails](9, 0, 4096, 3, 34, -1, 0)
+    p[u64, 0] = 4242
+    v u64 = p[u64, 0]
+    try syscall[fails](11, p, 4096)
+    return v
+}
+
+fn open_missing() i32 fails {
+    // openat(AT_FDCWD, ...): narrowing stays visible
+    return trunc[i32](try syscall[fails](257, -100, c"/nonexistent/fas/syscall", 0))
+}
+
+fn report_open() i32 {
+    fd i32 = open_missing() catch e {
+        printf(c"open %s code %u\n", err_name(e), bitcast[u32](e))
+        if e != NotFound { return 1 }
+        return 0
+    }
+    return fd
+}
+
+// close(-1): EBADF
+fn report_close() i32 {
+    syscall[fails](3, -1) catch e {
+        printf(c"close %s\n", err_name(e))
+        return 0
+    }
+    return 1
+}
+
+// an unknown syscall number: ENOSYS
+fn report_nosys() i32 {
+    r u64 = syscall[u64 fails](100000) catch 77
+    printf(c"nosys default %llu\n", r)
+    syscall[i64 fails](100000) catch e {
+        if e == NoSys { printf(c"nosys %s\n", err_name(e)) }
+        return 0
+    }
+    return 1
+}
+
+// the substituted path: T comes from a generic argument
+fn raw_write[T](fd i32, text addr, n usize) T fails {
+    return try syscall[T fails](1, fd, text, n)
+}
+
+fn main() i32 fails {
+    n u64 = try syscall[u64 fails](1, 1, c"hello\n", 6)
+    printf(c"wrote %llu\n", n)
+
+    m usize = try raw_write[usize](1, c"generic\n", 8)
+    printf(c"generic %llu\n", m)
+
+    pid i64 = try syscall[i64 fails](39)
+    printf(c"pid positive %d\n", zext[i32](pid > 0))
+
+    printf(c"page %llu\n", try page_roundtrip())
+
+    fd i32 = open_missing() catch -1
+    printf(c"open default %d\n", fd)
+    if report_open() != 0 { return 1 }
+    if report_close() != 0 { return 1 }
+    if report_nosys() != 0 { return 1 }
+
+    // a failing write: the error goes up through main
+    printf(c"before\n")
+    fflush(null)
+    try syscall[fails](1, -1, c"x", 1)
+    return 0
+}

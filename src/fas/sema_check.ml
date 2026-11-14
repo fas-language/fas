@@ -3527,6 +3527,9 @@ and callee_fails c fn =
       | None -> template_fails name)
   | Ast.Generic_args (Ast.Ident ("call_addr", _), arguments, _) ->
       List.exists (function Ast.Name_arg ("fails", _) -> true | _ -> false) arguments
+  | Ast.Generic_args (Ast.Ident ("syscall", _), arguments, _)
+    when Option.is_none (lookup_local "syscall" c) ->
+      List.exists (function Ast.Name_arg ("fails", _) -> true | _ -> false) arguments
   | Ast.Generic_args (Ast.Ident (name, _), _, _) when Option.is_none (lookup_local name c)
     ->
       template_fails name
@@ -3660,6 +3663,48 @@ and check_call_inner c expected fn args s =
               Sema_flow.forget_all_values c.flow;
               Sema_flow.forget_all_masks c.flow;
               Ok (Hir.Indirect_call (checked_callee, checked_args, result_ty, s)))
+  (* `syscall[T fails](...)` and `syscall[fails](...)` (T = i64): a raw
+     result in -4095..-1 is the error, its negation an errno code; anything
+     else is success, the bits of T. T is an 8-byte type, so the result is
+     never narrowed implicitly. Plain `syscall` stays the raw i64. *)
+  | Ast.Generic_args (Ast.Ident ("syscall", name_span), generic_args, application_span)
+    when Option.is_none (lookup_local "syscall" c) ->
+      let fails =
+        List.exists (function Ast.Name_arg ("fails", _) -> true | _ -> false) generic_args
+      in
+      let generic_args =
+        List.filter (function Ast.Name_arg ("fails", _) -> false | _ -> true) generic_args
+      in
+      if not fails then
+        error application_span
+          "`syscall` takes type arguments only with `fails`: syscall[T fails](...)"
+      else
+        let* result_ty =
+          match generic_args with
+          | [] -> Ok (Hir.Int Hir.I64)
+          | [ (Ast.Type_arg source | Ast.Type_or_index source) ] ->
+              source_ty_in_context c application_span source
+          | [ Ast.Name_arg (name, name_span) ] ->
+              source_ty_in_context c name_span (Ast.Named_type (name, name_span))
+          | _ -> error application_span "syscall[T fails] takes one result type"
+        in
+        (match result_ty with
+        | Hir.Int (Hir.I64 | Hir.U64) | Hir.Addr ->
+            let* checked = check_call_inner c None (Ast.Ident ("syscall", name_span)) args s in
+            (match checked with
+            | Hir.Call (b, checked_args, _, call_span) ->
+                Ok (Hir.Call (b, checked_args, result_ty, call_span))
+            | other -> Ok other)
+        | other ->
+            let hint =
+              match other with
+              | Hir.Int _ ->
+                  "; narrow the result explicitly, e.g. trunc[i32](try syscall[fails](...))"
+              | _ -> ""
+            in
+            error application_span
+              (Printf.sprintf "syscall result must be `i64`, `u64` or `addr`, got `%s`%s"
+                 (Sema_types.diagnostic_ty_name other) hint))
   | Ast.Ident (name, span)
     when Option.is_none (lookup_local name c)
          && (not (Names.builtin_name name))

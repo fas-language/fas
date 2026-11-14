@@ -274,16 +274,17 @@ A function that can fail says so with `fails`, and every caller must handle the 
 
 - `error Empty, BadDigit` declares errors. An error name is a top-level constant of type `error`. Declaring the same name in two files means the same error, so two libraries can both declare `NotFound`.
 - `error` is a 4-byte type. An error can be stored, passed, compared with `==` and `!=`, and used in `switch`, which needs a `default` arm because the set of errors is open. There is no arithmetic on errors; `bitcast` converts between `error` and `u32`/`i32` (for logs and files).
-- An error's code is computed from its name, so it is the same in every build and program. `error NotFound = 2` pins an errno code (1-4095) instead. Two errors with the same code are a compile error.
-- `fn f() T fails` returns `T` or an error; `fn f() fails` returns nothing or an error. `T` is a scalar, `addr`, `handle[T]`, `error`, an [enum](#enums) or a [value struct](#value-structs). Any other struct result goes through an out pointer, as usual.
+- An error's code is computed from its name, so it is the same in every build and program: the 32-bit FNV-1a hash of the name's bytes (offset basis `0x811c9dc5`, prime `0x01000193`) with the top bit set (`| 0x8000_0000`), so it never collides with an errno code. `error NotFound = 2` pins an errno code (1-4095) instead. Two errors with the same code are a compile error.
+- `fn f() T fails` returns `T` or an error; `fn f() fails` and `fn f() void fails` (the same thing) return nothing or an error. `T` is a scalar, `addr`, `handle[T]`, `error`, an [enum](#enums) or a [value struct](#value-structs). Any other struct result goes through an out pointer, as usual.
 - `fail E` leaves the function with error `E`, running `defer` and `errdefer` blocks. `return` never carries an error. `fail` with the zero error (only reachable through `bitcast` or `{}`) traps.
 - A call to a `fails` function must be followed by `try` or `catch`; anything else is a compile error.
   - `try f(x)` passes an error up to the caller. It works only in a `fails` function and binds tighter than operators: `try f(x) + 1` is `(try f(x)) + 1`.
-  - `f(x) catch 0` uses `0` when the call fails.
+  - `f(x) catch 0` uses `0` when the call fails. The fallback is the whole expression to the right of `catch`, while the left side is only the call: `a + f(x) catch 1 + 2` is `a + (f(x) catch (1 + 2))`. Parenthesize to stop the fallback early: `(f(x) catch 1) * 10`.
   - `f(x) catch { ... }` and `f(x) catch e { ... }` (which binds the error) run a block on failure. The block produces no value: it must leave with `return`, `fail`, `break` or `continue`, unless the call has no result.
   - `call_addr[T fails](p, args...)` and `call_addr[fails](p, args...)` call a `fails` function through its address.
-- `errdefer { ... }` and `errdefer e { ... }` run only when the function exits by failing (`fail`, or `try` passing an error up), together with `defer` blocks in reverse order. `fail`, `try` and `return` are not allowed inside `defer` and `errdefer`.
-- `main` may be `fails`. An error that escapes `main` prints its name to stderr and exits with status 1.
+  - `syscall[T fails](n, args...)` and `syscall[fails](n, args...)` (`T` = `i64`) make a Linux system call that fails the way the kernel reports it: a raw result in -4095..-1 is the error whose code is its negation (an errno code, so `error NotFound = 2` matches `ENOENT`); anything else, negative or not, is success and comes back as the bits of `T`. `T` is `i64`, `u64`/`usize` or `addr`, never narrower, so `trunc[i32](try syscall[fails](257, ...))` keeps the narrowing visible. `EINTR` is an error like any other, never retried behind your back. Plain `syscall` stays the raw `i64`, for the few calls whose success values can fall in -4095..-1 (such as `fcntl(F_GETOWN)` for a process group).
+- `errdefer { ... }` and `errdefer e { ... }` run only when the function exits by failing (`fail`, or `try` passing an error up), together with `defer` blocks in reverse order. Like `defer`, an `errdefer` is block-scoped: it covers failures from its registration to the end of its enclosing block, so one inside an `if` body no longer runs once that body has finished. `fail`, `try` and `return` are not allowed inside `defer` and `errdefer`.
+- `main` may be `fails`. An error that escapes `main` writes `err_name(e)` and a newline straight to file descriptor 2 (one `write`, no C stdio), then `main` returns 1. That is an ordinary return from `main`, so C's exit still runs: `atexit` handlers run and stdio buffers are flushed, after the error line has been written.
 - `errno_err()` is the current C `errno` as an error, or the predeclared `Unexpected` if errno is 0. `err_name(e)` is the error's name as a C string: `"errno N"` for an undeclared errno code, `"unknown error"` for any other undeclared code.
 
 ```fas
@@ -326,7 +327,7 @@ sum failed: Empty
 empty
 ```
 
-**With C.** A C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result), so C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. Exporting a `fails` function from an `extern "C"` block is not supported yet.
+**With C.** A C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result). The error sits at offset 8 or the next multiple of 8 after the value, so a result of up to 8 bytes (a scalar, `addr`, or a value struct of at most 8 bytes) comes back in two registers, and a value struct over 8 bytes comes back through memory, as C returns that struct. C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. Exporting a `fails` function from an `extern "C"` block is not supported yet.
 
 ## Enums
 
@@ -1202,6 +1203,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `atomic_cas[T, o](p, expected, desired)` | `T`, the old value | stores `desired` only when the old value equals `expected`, so success is `old == expected` |
 | | `atomic_fence[o]()` | statement | |
 | **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
+| | `syscall[T fails](n, args...)` `syscall[fails](n, args...)` | `T` (`i64`, `u64`, `addr`) | as `syscall`, but a result in -4095..-1 is the errno error; needs `try` or `catch` |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |
 | | `select(m, yes, no)` | type of `yes` | lane `i` comes from `yes[i]` when `m[i]` is true, otherwise `no[i]`. Both sides are evaluated |
 | | `any(m)` `all(m)` | `bool` | |

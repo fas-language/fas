@@ -72,6 +72,28 @@ EOF
 cmp "$ERR_TMP/errors-native.out" "$ERR_TMP/errors.want" ||
   fail "errors.fas printed the wrong output"
 
+# syscall[T fails]: every T, try and catch, a generic T, and an error
+# escaping main (exit 1, BadFd on stderr).
+run syscall_fails 1 syscall_fails.fas
+cat >"$ERR_TMP/syscall_fails.want" <<'EOF'
+hello
+generic
+wrote 6
+generic 8
+pid positive 1
+page 4242
+open default -1
+open NotFound code 2
+close BadFd
+nosys default 77
+nosys NoSys
+before
+EOF
+cmp "$ERR_TMP/syscall_fails-native.out" "$ERR_TMP/syscall_fails.want" ||
+  fail "syscall_fails.fas printed the wrong output"
+grep -q -x BadFd "$ERR_TMP/syscall_fails-native.err" ||
+  fail "syscall_fails.fas: the escaping error was not reported"
+
 # The fails result ABI, checked from both sides against clang.
 run errors_abi 0 errors_abi.fas errors_abi.c
 
@@ -183,6 +205,23 @@ reject extern_c 'a C function is never `fails`' \
 fn main() i32 { return 0 }'
 reject bitcast_width 'illegal `bitcast` from `error` to `u64`' \
   'fn main() i32 { x u64 = bitcast[u64](A)
+ return 0 }'
+
+# syscall[T fails]: only on a fails form, only 8-byte results, always handled
+reject syscall_plain_try '`syscall` does not fail' \
+  'fn main() i32 fails { x i64 = try syscall(39)
+ return 0 }'
+reject syscall_unhandled '`syscall[fails]` can fail and the error is not handled' \
+  'fn main() i32 { x i64 = syscall[fails](39)
+ return 0 }'
+reject syscall_narrow 'syscall result must be `i64`, `u64` or `addr`, got `i32`; narrow' \
+  'fn main() i32 fails { x i32 = try syscall[i32 fails](39)
+ return 0 }'
+reject syscall_float 'syscall result must be `i64`, `u64` or `addr`, got `f64`' \
+  'fn main() i32 fails { x f64 = try syscall[f64 fails](39)
+ return 0 }'
+reject syscall_no_fails '`syscall` takes type arguments only with `fails`' \
+  'fn main() i32 { x u64 = syscall[u64](39)
  return 0 }'
 
 # Redeclaring an error with the same name is the same error (modules
