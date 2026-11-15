@@ -140,7 +140,7 @@ def generate_fas(include_main=True):
             "    return 0",
         ]
     )
-    source = ["opaque Token", "extern \"C\" {", *imports, *exports, "}", ""]
+    source = ["struct Token {}", "extern \"C\" {", *imports, *exports, "}", ""]
     if include_main:
         source.extend(["fn main() i32 {", *checks, "}", ""])
     return "\n".join(source)

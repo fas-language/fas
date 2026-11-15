@@ -6,7 +6,8 @@ let error span message = Error [ Diag.error span message ]
 let rec object_type (structs : Hir.struct_def list) = function
   | Hir.Void -> Error "void is not an object type"
   | Hir.Opaque name ->
-      Error ("opaque type `" ^ name ^ "` can only be held as `handle[" ^ name ^ "]`")
+      Error
+        ("incomplete C type `" ^ name ^ "` can only be held as `handle[" ^ name ^ "]`")
   | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr | Hir.Handle _ | Hir.Err | Hir.Enum _
     ->
       Ok ()
@@ -63,7 +64,7 @@ let validate_object ?opaque_span ?vector_element_span limits structs span ty =
     object_type structs ty
     |> Result.map_error (fun message ->
         let primary =
-          if String.starts_with ~prefix:"opaque type " message then
+          if String.starts_with ~prefix:"incomplete C type " message then
             Option.value ~default:span opaque_span
           else if String.starts_with ~prefix:"vector element type" message then
             Option.value ~default:span vector_element_span

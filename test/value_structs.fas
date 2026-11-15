@@ -9,7 +9,7 @@ value struct Pair[T] { a T, b T }
 value struct Box { p Pt, tag u8 }
 value struct Res { code error, ok bool }
 value struct Big { a i64, b i64 }
-opaque File
+struct File {}
 value struct Owned { f handle[File], n u32 }
 struct Holder { pt Pt, n i32 }
 

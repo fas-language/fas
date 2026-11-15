@@ -305,8 +305,8 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
     | Ast.Handle ty -> (
         let* ty = resolve_type type_bindings const_bindings at ty in
         match ty with
-        | Hir.Opaque name -> Ok (Hir.Handle name)
-        | _ -> add_error "handle type argument must be an opaque type")
+        | Hir.Opaque name | Hir.Struct name -> Ok (Hir.Handle name)
+        | _ -> add_error "handle type argument must be a struct")
     | Ast.Array (length, ty) ->
         let* length = resolve_length "array" type_bindings const_bindings length in
         let* ty = resolve_type type_bindings const_bindings at ty in

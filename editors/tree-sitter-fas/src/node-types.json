@@ -4316,22 +4316,6 @@
     "fields": {}
   },
   {
-    "type": "opaque_declaration",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "parameter_list",
     "named": true,
     "fields": {
@@ -4658,10 +4642,6 @@
         },
         {
           "type": "global_declaration",
-          "named": true
-        },
-        {
-          "type": "opaque_declaration",
           "named": true
         },
         {
@@ -5708,10 +5688,6 @@
   },
   {
     "type": "null",
-    "named": false
-  },
-  {
-    "type": "opaque",
     "named": false
   },
   {

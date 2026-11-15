@@ -21,7 +21,7 @@ int run_events(void *data) {
     return fas_read();
 }
 C
-opaque NativeToken
+struct NativeToken {}
 struct Nested { x i16, flag bool }
 struct State @align(32) {
     nested Nested

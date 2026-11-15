@@ -1043,7 +1043,9 @@ let render_program program =
           fields;
         text "\n}"
     | Opaque { name; _ } ->
-        text "opaque ";
+        (* only C import makes this item (an incomplete C type); Fas has no
+           syntax for it, so it renders as a comment *)
+        text "// incomplete C type ";
         add_name name
     | Error_decl { names; _ } ->
         text "error ";

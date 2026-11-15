@@ -132,9 +132,9 @@ struct Empty {}
     (struct_body)))
 
 ================================================================================
-opaque and extern blocks
+empty struct and extern blocks
 ================================================================================
-opaque Token
+struct Token {}
 extern "C" {
   var screens arr[5, addr] = {}
   fn puts(text addr) i32
@@ -144,8 +144,9 @@ extern "C" {
 --------------------------------------------------------------------------------
 
 (source_file
-  (opaque_declaration
-    name: (identifier))
+  (struct_declaration
+    name: (identifier)
+    (struct_body))
   (extern_declaration
     abi: (string)
     (global_declaration

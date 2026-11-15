@@ -231,7 +231,7 @@ module P = struct
     | Token.Ident name -> Ok (name, token.span)
     | ( Token.Kw_fn | Token.Kw_return | Token.Kw_if | Token.Kw_else | Token.Kw_while
       | Token.Kw_break | Token.Kw_continue | Token.Kw_const | Token.Kw_var
-      | Token.Kw_struct | Token.Kw_opaque | Token.Kw_extern | Token.Kw_defer
+      | Token.Kw_struct | Token.Kw_extern | Token.Kw_defer
       | Token.Kw_use | Token.Kw_for | Token.Kw_switch | Token.Kw_case | Token.Kw_default
       | Token.Kw_error | Token.Kw_fails | Token.Kw_fail | Token.Kw_try | Token.Kw_catch
       | Token.Kw_errdefer ) as kind ->
@@ -348,7 +348,7 @@ module P = struct
           | _ ->
               Printf.sprintf
                 "C type `%s*` is not a Fas type; use `addr`, or `handle[T]` when `T` \
-                 is an `opaque` type"
+                 is a struct"
                 word
         in
         Some (error primary message)
@@ -852,10 +852,21 @@ module P = struct
         let start = span p in
         let* x = enum_item p in
         Ok [ Ast.with_extent (extent p start) x ]
-    | Token.Kw_opaque ->
-        let start = span p in
-        let* x = opaque_item p in
-        Ok [ Ast.with_extent (extent p start) x ]
+    (* `opaque Name` was removed in v0.2: any struct can be held as
+       `handle[S]`, and C's incomplete types import as such *)
+    | Token.Ident "opaque" when (match (peek_n p 1).kind with Token.Ident _ -> true | _ -> false)
+      ->
+        let name = match (peek_n p 1).kind with Token.Ident name -> name | _ -> "" in
+        Error
+          [
+            Diag.error
+              ~help:
+                (Printf.sprintf
+                   "declare `struct %s {}` and hold it as `handle[%s]`; a C type is \
+                    `handle[c.%s]` through its `use \"C\"` alias"
+                   name name name)
+              (span p) "`opaque` types were removed; `handle[T]` takes any struct";
+          ]
     | Token.Kw_extern -> extern_block p
     | Token.Kw_fn ->
         let start = span p in
@@ -1078,14 +1089,6 @@ module P = struct
            span = s;
            extent = s;
          })
-
-  and opaque_item p =
-    let s = span p in
-    let* () = expected p Token.Kw_opaque in
-    let name_span = span p in
-    let* name = ident p in
-    let* () = end_stmt p in
-    Ok (Ast.Opaque { name; name_span; span = s; extent = s })
 
   and generic_params p =
     if not (at p Token.Lbracket) then Ok []
@@ -2340,7 +2343,7 @@ module P = struct
         Error [ Diag.error (span p) ("expected an expression, found " ^ Token.show t) ]
 end
 
-let item_keywords = [ "const"; "var"; "struct"; "opaque"; "extern"; "fn"; "use"; "error" ]
+let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error" ]
 
 let item_starts text =
   let n = String.length text in

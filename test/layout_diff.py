@@ -121,7 +121,7 @@ def generate():
             }
         )
 
-    fas = ['use "C" "layout_attributes.h" as c', "opaque Opaque"]
+    fas = ['use "C" "layout_attributes.h" as c', "struct Opaque {}"]
     for st in structs:
         annotation = f" @align({st['align']})" if st["align"] is not None else ""
         fas.append(f"struct {st['fas']}{annotation} {{")

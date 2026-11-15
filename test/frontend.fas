@@ -2,7 +2,7 @@ struct Pair {
   left i64
   right i64
 }
-opaque Ctx
+struct Ctx {}
 const K u64 = 0x2a
 extern "C" {
   fn printf(fmt addr, ...) i32

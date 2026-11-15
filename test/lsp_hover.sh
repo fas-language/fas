@@ -104,7 +104,7 @@ HOVER = [
     "struct Box[T] { value T }",
     "struct Tagged[N const usize] { tag u8 wide u64 data arr[N, u8] }",
     "struct Blend[T, N const usize] { head T tail arr[N, u8] }",
-    "opaque Ctx",
+    "struct Ctx {}",
     "",
     "fn identity[T](value T) T {",
     "    return value",
@@ -352,7 +352,7 @@ WORD_T_FORMAT = (
 )
 GLYPHS_T = FENCE + "const GLYPHS arr[3, i32]\n```\n\n3 elements"
 TABLE_T = FENCE + "TABLE arr[2, u8]\n```\n\n2 elements"
-OPAQUE_T = FENCE + "opaque Ctx\n```\n\nno layout"
+CTX_T = FENCE + "struct Ctx\n```\n\n```text\nsize 0, align 1\n```"
 TAGGED_T = (
     FENCE
     + "struct Tagged[N const u64]\n```\n\ntag u8\n\nwide u64\n\ndata arr[N, u8]"
@@ -475,8 +475,8 @@ PINS = [
     ("len(GLYPHS", 4, GLYPHS_T),
     ("var TABLE", 4, TABLE_T),
     ("TABLE[1", 0, TABLE_T),
-    ("opaque Ctx", 7, OPAQUE_T),
-    ("Ctx]) usize", 0, OPAQUE_T),
+    ("struct Ctx {}", 7, CTX_T),
+    ("Ctx]) usize", 0, CTX_T),
     ("struct Tagged", 7, TAGGED_T),
     ("small_tag Tagged", 10, TAGGED_T),
     ("big_tag Tagged", 8, TAGGED_T),

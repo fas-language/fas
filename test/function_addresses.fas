@@ -21,7 +21,7 @@ struct Object { state addr
 id i32
 ticks i32
 total i32 }
-opaque Token
+struct Token {}
 
 fn think0(object addr) void {
   object[Object].ticks += 1

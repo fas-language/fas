@@ -14,7 +14,6 @@ type kind =
   | Kw_const
   | Kw_var
   | Kw_struct
-  | Kw_opaque
   | Kw_extern
   | Kw_defer
   | Kw_use
@@ -92,7 +91,6 @@ let show = function
   | Kw_const -> "`const`"
   | Kw_var -> "`var`"
   | Kw_struct -> "`struct`"
-  | Kw_opaque -> "`opaque`"
   | Kw_extern -> "`extern`"
   | Kw_defer -> "`defer`"
   | Kw_use -> "`use`"
@@ -165,7 +163,6 @@ let c_header_component = function
   | Kw_const -> Some "const"
   | Kw_var -> Some "var"
   | Kw_struct -> Some "struct"
-  | Kw_opaque -> Some "opaque"
   | Kw_extern -> Some "extern"
   | Kw_defer -> Some "defer"
   | Kw_use -> Some "use"

@@ -119,7 +119,7 @@ asm_write:
 .size asm_write, .-asm_write
 .section .note.GNU-stack,"",@progbits
 ASSEMBLY
-opaque Token
+struct Token {}
 
 
 

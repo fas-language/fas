@@ -57,10 +57,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "opaque_declaration"
-        },
-        {
-          "type": "SYMBOL",
           "name": "extern_declaration"
         },
         {
@@ -501,23 +497,6 @@
           "content": {
             "type": "SYMBOL",
             "name": "_type"
-          }
-        }
-      ]
-    },
-    "opaque_declaration": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "opaque"
-        },
-        {
-          "type": "FIELD",
-          "name": "name",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
           }
         }
       ]
@@ -4136,10 +4115,6 @@
               {
                 "type": "STRING",
                 "value": "struct"
-              },
-              {
-                "type": "STRING",
-                "value": "opaque"
               },
               {
                 "type": "STRING",

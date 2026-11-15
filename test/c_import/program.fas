@@ -3,7 +3,7 @@ use "C" <string.h> as c
 use "C" <stdlib.h> as c
 use "C" "runtime.h" as c
 
-opaque Scratch
+struct Scratch {}
 
 fn main() i32 {
   if c.strlen(c"fas") != 3 { return 1 }

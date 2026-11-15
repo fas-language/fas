@@ -15,7 +15,6 @@ let keyword = function
   | "const" -> Kw_const
   | "var" -> Kw_var
   | "struct" -> Kw_struct
-  | "opaque" -> Kw_opaque
   | "extern" -> Kw_extern
   | "defer" -> Kw_defer
   | "use" -> Kw_use

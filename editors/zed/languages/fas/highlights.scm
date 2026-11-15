@@ -27,7 +27,6 @@
   "const"
   "var"
   "struct"
-  "opaque"
   "extern"
   "defer"
   "use"
@@ -100,7 +99,6 @@
 (struct_declaration name: (identifier) @type)
 (enum_declaration name: (identifier) @type)
 (enum_member name: (identifier) @constant)
-(opaque_declaration name: (identifier) @type)
 (named_type name: (type_identifier) @type)
 (generic_param name: (identifier) @type)
 (const_declaration name: (identifier) @constant)

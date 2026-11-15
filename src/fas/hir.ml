@@ -542,7 +542,7 @@ let layout ?(target = Target_layout.current ()) structs ty =
         let* bits = scalar_bits target t in
         Target_layout.vector target n bits
     | Void -> Error "void has no object layout"
-    | Opaque n -> Error ("opaque type `" ^ n ^ "` has no layout")
+    | Opaque n -> Error ("incomplete C type `" ^ n ^ "` has no layout")
     | Struct n -> (
         if List.mem n visiting then
           Error (Printf.sprintf "recursive by-value struct `%s`" n)
@@ -748,7 +748,7 @@ let compute_struct_cached ?overflow_field cache name =
     | Float F64 -> Target_layout.float target 64
     | Addr | Handle _ -> Target_layout.pointer target
     | Void -> Error "void has no object layout"
-    | Opaque n -> Error (Printf.sprintf "opaque type `%s` has no layout" n)
+    | Opaque n -> Error (Printf.sprintf "incomplete C type `%s` has no layout" n)
     | Struct n ->
         let* _, s, a = calc visiting n in
         Ok (s, a)

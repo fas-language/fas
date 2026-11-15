@@ -102,7 +102,7 @@ export REAL_FAS FIXTURE_LOG
 
 for component in \
   c_import c_records c_array_globals record_literals simd_value_builtins vector_literals \
-  literal_aggregates record_attributes opaque_types generic_layout c_interop \
+  literal_aggregates record_attributes handle_types generic_layout c_interop \
   defer_unwinding lexical_scopes generic_type_slots c_import_types packed_layouts; do
   printf 'sanitize: running %s\n' "$component"
   OCAML_FAS="$SANITIZE_TMP/fas-wrapper" sh "$ROOT/test/$component.sh"

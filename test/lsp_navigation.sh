@@ -110,7 +110,7 @@ MAIN = [
 OUTLINE = [
     "const LIMIT i32 = 4",
     "var GLOBAL i32 = 5",
-    "opaque Handle",
+    "struct Handle {}",
     "struct Box[T] { value T }",
     "fn compute(count i32) i32 {",
     "    local i32 = count + LIMIT + GLOBAL",
@@ -522,7 +522,7 @@ def run_navigation():
     expected_symbols = [
         node("LIMIT", 14, (0, 0, 0, 19), (0, 6, 0, 11)),
         node("GLOBAL", 13, (1, 0, 1, 18), (1, 4, 1, 10)),
-        node("Handle", 23, (2, 0, 2, 13), (2, 7, 2, 13)),
+        node("Handle", 23, (2, 0, 2, 16), (2, 7, 2, 13)),
         node("Box", 23, (3, 0, 3, 25), (3, 7, 3, 10), [node("value", 8, (3, 16, 3, 21), (3, 16, 3, 21))]),
         node(
             "compute",
@@ -547,7 +547,7 @@ def run_navigation():
     shifted_outline = [
         node("LIMIT", 14, (0, 0, 0, 19), (0, 6, 0, 11)),
         node("GLOBAL", 13, (1, 0, 1, 18), (1, 4, 1, 10)),
-        node("Handle", 23, (3, 0, 3, 13), (3, 7, 3, 13)),
+        node("Handle", 23, (3, 0, 3, 16), (3, 7, 3, 13)),
         node("Box", 23, (4, 0, 4, 25), (4, 7, 4, 10), [node("value", 8, (4, 16, 4, 21), (4, 16, 4, 21))]),
         node(
             "compute",

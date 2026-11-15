@@ -1872,6 +1872,57 @@ let rec check_place_inner (c : context) expr =
                         | None -> None);
                     }
               | None -> missing_field_error ~base:a c s n (Hir.Struct sn))
+          | Hir.Handle sn -> (
+              (* `h.field` is the field of the struct `h` points at: a raw
+                 access at the field offset through `handle_addr(h)`, so it is
+                 a place like `p[S].field` (and, like it, not null-checked) *)
+              let* () =
+                match (base.root, base.path) with
+                | Some binding, Some path -> require_place_state binding path c s
+                | _ -> Ok ()
+              in
+              let known =
+                List.exists (fun (d : Hir.struct_def) -> d.name = sn) c.structs
+              in
+              match field_info c.structs sn n with
+              | Some { unsupported_reason = Some reason; _ } -> error s reason
+              | Some f ->
+                  index_field c sn n s;
+                  let pointer =
+                    Hir.Call (Hir.Builtin Hir.Handle_addr, [ base.expr ], Hir.Addr, s)
+                  in
+                  Ok
+                    {
+                      expr =
+                        Hir.Raw_select
+                          (pointer, Hir.EInt (Int64.of_int f.offset, Hir.Int Hir.U64, s), f.ty, s);
+                      root = base.root;
+                      path = base.path;
+                    }
+              | None when known -> missing_field_error ~base:a c s n (Hir.Struct sn)
+              | None -> (
+                  let record_reason =
+                    List.find_map
+                      (function
+                        | _, Sema_types.C_record_name (record, Some reason)
+                          when record = sn ->
+                            Some reason
+                        | _ -> None)
+                      c.named_types
+                  in
+                  match record_reason with
+                  | Some reason ->
+                      error s
+                        (Printf.sprintf
+                           "C declaration `%s` is not supported: %s; `handle[%s]` can \
+                            only be passed and stored"
+                           sn reason sn)
+                  | None ->
+                      error s
+                        (Printf.sprintf
+                           "`%s` is an incomplete C type (declared but not defined), so \
+                            it has no fields; `handle[%s]` can only be passed and stored"
+                           sn sn)))
           | actual -> missing_field_error ~base:a c (Ast.expr_span a) n actual))
   | Ast.Arrow_field (base, field, operator_span, _) -> (
       let* value = check_expr c None base in
@@ -2456,7 +2507,7 @@ and check_expr_inner ?destination (c : context) expected expression =
           (Printf.sprintf "enum_count[%s] does not fit `%s`" enum
              (Sema_types.diagnostic_ty_name ty))
   | Ast.Handle_from_addr (t, e, s) -> (
-      let* opaque_name =
+      let* target_name =
         handle_target c.named_types t
         |> Result.map_error (fun message -> [ Diag.error s message ])
       in
@@ -2466,16 +2517,16 @@ and check_expr_inner ?destination (c : context) expected expression =
             (Printf.sprintf
                "write `null` directly where a `handle[%s]` is expected; \
                 `handle_from_addr[%s](null)` is not needed"
-               opaque_name opaque_name)
+               target_name target_name)
       | _ -> (
           let* a = check_expr c None e in
           match Hir.expr_ty a with
           | Hir.Addr ->
               Ok
                 (Hir.Call
-                   ( Hir.Builtin (Hir.Handle_from_addr opaque_name),
+                   ( Hir.Builtin (Hir.Handle_from_addr target_name),
                      [ a ],
-                     Hir.Handle opaque_name,
+                     Hir.Handle target_name,
                      s ))
           | _ -> error s "handle_from_addr argument must be an addr"))
   | Ast.Generic_args (_fn, _, s) ->
@@ -3337,7 +3388,7 @@ and check_simd_memory_args c name access_ty args span =
       | _ ->
           error (Ast.expr_span index_arg) (name ^ " indices must be an integer vector")
 
-and check_handle_from_addr c name opaque_name args s =
+and check_handle_from_addr c name target_name args s =
   if List.length args <> 1 then
     error s (Printf.sprintf "builtin `%s` expects one argument" name)
   else
@@ -3347,16 +3398,16 @@ and check_handle_from_addr c name opaque_name args s =
           (Printf.sprintf
              "write `null` directly where a `handle[%s]` is expected; \
               `handle_from_addr[%s](null)` is not needed"
-             opaque_name opaque_name)
+             target_name target_name)
     | arg -> (
         let* a = check_expr c (Some Hir.Addr) arg in
         match Hir.expr_ty a with
         | Hir.Addr ->
             Ok
               (Hir.Call
-                 ( Hir.Builtin (Hir.Handle_from_addr opaque_name),
+                 ( Hir.Builtin (Hir.Handle_from_addr target_name),
                    [ a ],
-                   Hir.Handle opaque_name,
+                   Hir.Handle target_name,
                    s ))
         | _ -> error s "handle_from_addr argument must be an addr")
 
@@ -3786,17 +3837,17 @@ and check_call_inner c expected fn args s =
     when name = "handle_from_addr" -> (
       match generic_args with
       | [ Ast.Type_arg type_arg ] ->
-          let* opaque_name =
+          let* target_name =
             handle_target c.named_types type_arg
             |> Result.map_error (fun message -> [ Diag.error application_span message ])
           in
-          check_handle_from_addr c name opaque_name args s
+          check_handle_from_addr c name target_name args s
       | [ Ast.Name_arg (type_name, name_span) ] ->
-          let* opaque_name =
+          let* target_name =
             handle_target c.named_types (Ast.Named_type (type_name, name_span))
             |> Result.map_error (fun message -> [ Diag.error name_span message ])
           in
-          check_handle_from_addr c name opaque_name args s
+          check_handle_from_addr c name target_name args s
       | _ -> error s (Printf.sprintf "builtin `%s` expects a type argument" name))
   | Ast.Generic_args (Ast.Ident ("copy", _), _, _) ->
       error s "copy is statement-only and takes no type arguments"
@@ -4381,7 +4432,7 @@ and check_call_inner c expected fn args s =
               | _ -> error s "handle_addr argument must be a handle")
         | Hir.Handle_from_addr "" ->
             error s (Printf.sprintf "builtin `%s` expects a type argument" name)
-        | Hir.Handle_from_addr opaque_name -> (
+        | Hir.Handle_from_addr target_name -> (
             if List.length args <> 1 then
               error s (Printf.sprintf "builtin `%s` expects one argument" name)
             else
@@ -4390,9 +4441,9 @@ and check_call_inner c expected fn args s =
               | Hir.Addr ->
                   Ok
                     (Hir.Call
-                       ( Hir.Builtin (Hir.Handle_from_addr opaque_name),
+                       ( Hir.Builtin (Hir.Handle_from_addr target_name),
                          [ a ],
-                         Hir.Handle opaque_name,
+                         Hir.Handle target_name,
                          s ))
               | _ -> error s "handle_from_addr argument must be an addr")
         | _ ->

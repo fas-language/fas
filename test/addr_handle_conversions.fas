@@ -6,7 +6,7 @@ extern "C" {
   fn c_nonnull_handle() handle[O]
 }
 
-opaque O
+struct O {}
 
 fn round_addr(n usize) usize {
   return addr_bits(addr_from_bits(n))

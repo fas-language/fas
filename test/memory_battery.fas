@@ -1,5 +1,5 @@
 struct Empty { }
-opaque Token
+struct Token {}
 struct Resources { pointer addr token handle[Token] }
 
 extern "C" {

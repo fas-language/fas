@@ -4112,8 +4112,8 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
               ^ "}" )
         | None ->
             ( Ast.Opaque { name; name_span = span; span; extent = span },
-              if blocked then "opaque " ^ name ^ " (const fields are not supported)"
-              else "opaque " ^ name )
+              if blocked then "struct " ^ name ^ " (const fields are not supported)"
+              else "struct " ^ name ^ " (no layout)" )
       in
       let reason = if blocked then Some "const fields are not supported" else reason in
       add_item name spelling signature (Some item)
@@ -4133,7 +4133,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
             let item = Ast.Opaque { name; name_span = span; span; extent = span } in
             add_item name
               (declaration_spelling node name)
-              ("opaque " ^ name) (Some item) (origin node) [] None ())
+              ("struct " ^ name ^ " (incomplete)") (Some item) (origin node) [] None ())
     records;
   let function_type node =
     match type_tree node with

@@ -419,12 +419,12 @@ let () =
   (match Sema.check bad with
   | Ok _ -> assert false
   | Error diagnostics -> assert (diagnostics <> []));
-  let opaque =
+  let handle_index =
     expect_ok
       (Parser.parse
-         (source "opaque Ctx\nfn bad(p handle[Ctx]) i64 { return p[u64] }\n"))
+         (source "struct Ctx {}\nfn bad(p handle[Ctx]) i64 { return p[u64] }\n"))
   in
-  (match Sema.check opaque with
+  (match Sema.check handle_index with
   | Ok _ -> assert false
   | Error diagnostics -> assert (diagnostics <> []));
   let generic =
@@ -1400,7 +1400,7 @@ let () =
     expect_diag [ "max_ast_nodes"; "0.1.5" ]
       (Parser.parse
          ~limits:{ Limits.default with max_ast_nodes = 0 }
-         (source "opaque Q\n"));
+         (source "struct Q {}\n"));
     let many_functions =
       String.concat ""
         (List.init 12 (fun i -> Printf.sprintf "fn f%d() i64 { return %d }\n" i i))

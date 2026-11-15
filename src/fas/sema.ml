@@ -712,7 +712,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
             | Some stop -> Some (String.sub message start (stop - start))
             | None -> None
         in
-        match extract "opaque type `" with
+        match extract "incomplete C type `" with
         | Some _ as name -> name
         | None -> extract "recursive by-value struct `"
       in
@@ -742,8 +742,8 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
           Diag.error field.span message
       | Some field ->
           let opaque_name =
-            if String.starts_with ~prefix:"opaque type `" message then
-              let start = String.length "opaque type `" in
+            if String.starts_with ~prefix:"incomplete C type `" message then
+              let start = String.length "incomplete C type `" in
               Option.map
                 (fun stop -> String.sub message start (stop - start))
                 (String.index_from_opt message start '`')

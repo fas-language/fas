@@ -6,7 +6,7 @@ struct Second {
   value u64
 }
 
-opaque Handle
+struct Handle {}
 
 fn accept_read_only(value addr) bool {
   return value != addr_from_bits(0)

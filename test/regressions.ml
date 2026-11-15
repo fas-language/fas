@@ -1300,9 +1300,9 @@ let () =
   semantic_error "integer-vector-trunc-must-narrow"
     "illegal cast for source and destination widths"
     "fn f(value vec[4,u8]) vec[4,u16] { return trunc[vec[4,u16]](value) }\n";
-  semantic_error "integer-vector-bitcast-opaque"
+  semantic_error "integer-vector-bitcast-struct"
     "illegal cast for source and destination widths"
-    "opaque Handle\nfn f(value i64) void { return bitcast[Handle](value) }\n";
+    "struct Handle {}\nfn f(value i64) void { return bitcast[Handle](value) }\n";
   semantic_error "integer-vector-bitcast-void"
     "illegal cast for source and destination widths"
     "fn f(value i64) void { return bitcast[void](value) }\n";
@@ -2194,7 +2194,7 @@ let () =
          "return }";
        ]);
   semantic_accept "variadic-address-handle-arguments"
-    "opaque Token\n\
+    "struct Token {}\n\
      extern \"C\" { fn consume(marker u64, ...) u64 }\n\
      fn pass(pointer addr, token handle[Token]) u64 { return consume(1, pointer, \
      token) }\n";
@@ -3034,18 +3034,17 @@ let () =
   semantic_error "switch-bool-exhaustive-still-needs-return"
     "function `f` returning `i32` may reach the end without `return`"
     "fn f(x bool) i32 { switch x { case true: return 1; case false: return 2 } }\n";
-  semantic_error "addr-handle-nonopaque-target"
-    "handle type argument must be an opaque type"
+  semantic_accept "addr-handle-fas-struct-target"
     "struct S { x u8 }\n\
      fn f(p addr) addr { return handle_addr(handle_from_addr[S](p)) }\n";
-  semantic_error "addr-handle-nonopaque-wrapper"
-    "handle type argument must be an opaque type"
-    "opaque O\nfn f(p addr) addr { return handle_from_addr[handle[O]](p) }\n";
+  semantic_error "addr-handle-nonstruct-wrapper"
+    "handle type argument must be a struct"
+    "struct O {}\nfn f(p addr) addr { return handle_from_addr[handle[O]](p) }\n";
   semantic_error "addr-handle-wrong-arg" "handle_from_addr argument must be an addr"
-    "opaque O\n\
+    "struct O {}\n\
      fn f(n usize) usize { return addr_bits(handle_addr(handle_from_addr[O](n))) }\n";
   let handle_null_source =
-    "opaque F\nfn f() handle[F] { return handle_from_addr[F](null) }\n"
+    "struct F {}\nfn f() handle[F] { return handle_from_addr[F](null) }\n"
   in
   let handle_null_offset = List.hd (positions handle_null_source "null") in
   (match semantic_diagnostics handle_null_source with
@@ -3059,11 +3058,11 @@ let () =
         || span.start_offset <> handle_null_offset
         || span.end_offset <> handle_null_offset + 4
         || span.line <> 2
-        || span.column <> handle_null_offset - String.length "opaque F\n" + 1
+        || span.column <> handle_null_offset - String.length "struct F {}\n" + 1
       then failwith "handle-from-addr-null: exact message or null span changed"
   | _ -> failwith "handle-from-addr-null: expected one diagnostic");
   semantic_accept "handle-null-local-initializer"
-    "opaque F\nfn f() bool { h handle[F] = null\n return h == null }\n";
+    "struct F {}\nfn f() bool { h handle[F] = null\n return h == null }\n";
   semantic_error "addr-bits-wrong-arg" "addr_bits argument must be an addr"
     "fn f(n u32) usize { return addr_bits(n) }\n";
   semantic_accept "addr-from-bits-widening-arg"
@@ -3071,7 +3070,7 @@ let () =
   semantic_error "handle-addr-wrong-arg" "handle_addr argument must be a handle"
     "fn f(p addr) addr { return handle_addr(p) }\n";
   semantic_accept "handle-roundtrip-local-address-return"
-    "opaque Token\n\
+    "struct Token {}\n\
      fn leak() addr {\n\
      x u32 = 58\n\
      h handle[Token] = handle_from_addr[Token](&x)\n\
@@ -3080,7 +3079,7 @@ let () =
     "`handle_from_addr` needs a type argument: `handle_from_addr[T](p)`"
     "fn f(p addr) addr { return handle_from_addr(p) }\n";
   semantic_error "addr-const-context" "expression is not compile-time constant"
-    "opaque O\nconst X addr = handle_from_addr[O](addr_from_bits(0))\n";
+    "struct O {}\nconst X addr = handle_from_addr[O](addr_from_bits(0))\n";
   let addr_equality_path = llvm_of "fn f(a addr, b addr) bool { return a == b }\n" in
   List.iter
     (fun marker ->
@@ -3119,7 +3118,7 @@ let () =
     [ "alloca [4 x i8], align 4"; "store i32" ];
   let null_contexts =
     llvm_of
-      "opaque O\n\
+      "struct O {}\n\
        const null_addr addr = null\n\
        const null_handle handle[O] = null\n\
        const addr_is_null bool = null_addr == null\n\
@@ -3142,15 +3141,15 @@ let () =
         failwith ("null-contexts: missing `" ^ marker ^ "`"))
     [ "ret ptr null"; "icmp eq ptr"; "ret i1 true" ];
   semantic_error "handle-order-reject" "ordered comparison `<` needs an integer"
-    "opaque O\nfn f(a handle[O], b handle[O]) bool { return a < b }\n";
+    "struct O {}\nfn f(a handle[O], b handle[O]) bool { return a < b }\n";
   semantic_error "handle-arithmetic-reject"
     "operator `+` needs integer or integer vector operands"
-    "opaque O\nfn f(a handle[O], b handle[O]) handle[O] { return a + b }\n";
+    "struct O {}\nfn f(a handle[O], b handle[O]) handle[O] { return a + b }\n";
   semantic_error "cross-handle-equality-reject"
     "operands of `==` have different types: `handle[O]` and `handle[P]`"
-    "opaque O\nopaque P\nfn f(a handle[O], b handle[P]) bool { return a == b }\n";
+    "struct O {}\nstruct P {}\nfn f(a handle[O], b handle[P]) bool { return a == b }\n";
   semantic_error "handle-null-unconstrained" "null requires an addr or handle context"
-    "opaque O\nfn f() bool { return null == null }\n";
+    "struct O {}\nfn f() bool { return null == null }\n";
   semantic_error "addr-index-reject" "raw access on `addr` needs an element type"
     "fn f(p addr) u8 { return p[0] }\n";
   parse_error_message "removed-typed-pointer"
@@ -3172,10 +3171,10 @@ let () =
   semantic_error "addr-bitcast-to-reject"
     "illegal cast for source and destination widths"
     "fn f(n usize) addr { return bitcast[addr](n) }\n";
-  semantic_error "handle-field-reject" "no field `x` on `handle[O]`"
-    "opaque O\nfn f(h handle[O]) usize { return h.x }\n";
+  semantic_error "handle-field-missing" "record `O` has no field `x`"
+    "struct O {}\nfn f(h handle[O]) usize { return h.x }\n";
   semantic_error "handle-index-reject" "cannot select through a handle"
-    "opaque O\nfn f(h handle[O]) u8 { return h[0] }\n";
+    "struct O {}\nfn f(h handle[O]) u8 { return h[0] }\n";
   semantic_error "comparison-chaining-reject" "comparisons cannot be chained"
     "fn f(a i32, b i32, c i32) bool { return a < b < c }\n";
   semantic_error "conditional-defer-divergence"
@@ -3211,9 +3210,6 @@ let () =
     "aggregate result `arr[2,i64]` cannot be returned by value; return `void` and take \
      the destination as an `addr` parameter"
     "extern \"C\" { fn make() arr[2,i64] }\n";
-  semantic_error "extern-c-opaque-parameter"
-    "opaque type `Handle` can only be held as `handle[Handle]`"
-    "opaque Handle\nextern \"C\" { fn take(value Handle) void }\n";
   semantic_error "extern-c-definition-fallthrough"
     "function `value` returning `i64` may reach the end without `return`"
     "extern \"C\" { fn value() i64 { } }\n";
@@ -3392,12 +3388,12 @@ let () =
   semantic_error "fas-003-excessive-alignment"
     "alignment exceeds target maximum of 2147483648"
     "struct S @align(4294967296) { x u8 }\n";
-  semantic_error "fas-009-duplicate-opaque" "duplicate type `x`"
-    "opaque x\nopaque x\nfn main() i32 { return 0 }\n";
+  semantic_error "fas-009-duplicate-empty-struct" "duplicate type `x`"
+    "struct x {}\nstruct x {}\nfn main() i32 { return 0 }\n";
   let neutral_named_type =
     expect_ok
       (Parser.parse
-         (source "fn check_case(value handle[Handle]) i64 { return 0 }\nopaque Handle\n"))
+         (source "fn check_case(value handle[Handle]) i64 { return 0 }\nstruct Handle {}\n"))
   in
   (match neutral_named_type.Ast.items with
   | Ast.Func { params = [ { ty = Ast.Handle (Ast.Named_type ("Handle", _)); _ } ]; _ }
@@ -3405,7 +3401,7 @@ let () =
       ()
   | _ -> failwith "named-type-neutral-ast: parser classified a declaration name");
   ignore
-    (lower_of "fn check_case(value handle[Handle]) i64 { return 0 }\nopaque Handle\n");
+    (lower_of "fn check_case(value handle[Handle]) i64 { return 0 }\nstruct Handle {}\n");
   let forward_struct =
     llvm_of
       "fn make() i64 { value Pair = {7, 9}\n\
@@ -3421,15 +3417,15 @@ let () =
     ( "use.fas",
       "fn read(object handle[Handle]) i64 { value Pair = {11}\n return value.x }\n" )
   in
-  let declarations_file = ("types.fas", "opaque Handle\nstruct Pair { x i64 }\n") in
+  let declarations_file = ("types.fas", "struct Handle {}\nstruct Pair { x i64 }\n") in
   List.iter
     (fun files -> ignore (expect_ok (check_files files) |> Lower.lower |> expect_ok))
     [ [ use_file; declarations_file ]; [ declarations_file; use_file ] ];
   semantic_error "unknown-named-type" "unknown type `Missing`"
     "fn check_case(value handle[Missing]) i64 { return 0 }\n";
-  parse_message "compound-literal-opaque"
+  parse_message "compound-literal-struct"
     "Fas has no compound literals; declare a typed local or `const`"
-    "opaque Handle\nfn check_case() i64 { (Handle){}\n return 0 }\n";
+    "struct Handle {}\nfn check_case() i64 { (Handle){}\n return 0 }\n";
   ignore
     (lower_of
        "fn preserve(value handle[Handle]) handle[Handle] { local handle[Handle] = value\n\
@@ -3437,56 +3433,61 @@ let () =
         fn read_only(value handle[Handle]) addr { return handle_addr(value) }\n\
         fn pointer_size() usize { return sizeof[handle[Handle]] }\n\
         fn pointer_align() usize { return alignof[addr] }\n\
-        opaque Handle\n");
-  semantic_error "opaque-local-by-value"
-    "opaque type `Handle` can only be held as `handle[Handle]`"
-    "opaque Handle\nfn check_case() void { value Handle }\n";
-  let opaque_struct_field = "opaque Handle\nstruct Wrapper { value Handle }\n" in
-  semantic_pin "opaque-struct-field-by-value" opaque_struct_field 2
+        struct Handle {}\n");
+  (* the types with no layout are now only C's incomplete types (`opaque`
+     was removed in v0.2): they can only be held as `handle[T]` *)
+  let incomplete = c_import_container "incomplete-handle" "struct Handle;\n" in
+  let incomplete_pin name text column message help =
+    match c_semantic_result incomplete text with
+    | Error [ diagnostic ]
+      when diagnostic.Diag.primary.Span.line = 1
+           && diagnostic.primary.Span.column = column
+           && diagnostic.primary.Span.end_offset - diagnostic.primary.Span.start_offset
+              = 6
+           && diagnostic.message = message
+           && diagnostic.help = help ->
+        ()
+    | Error diagnostics ->
+        failwith
+          (name ^ ": unexpected diagnostic: "
+          ^ Diag.render_all ~source:(Some (source text)) diagnostics)
+    | Ok _ -> failwith (name ^ ": expected rejection")
+  in
+  let held_only = "incomplete C type `Handle` can only be held as `handle[Handle]`" in
+  let no_layout = "incomplete C type `Handle` has no layout" in
+  let bracket_column line = String.index_from line (String.index line '[' + 1) 'H' + 1 in
+  c_semantic_error "extern-c-incomplete-parameter" held_only incomplete
+    "extern \"C\" { fn take(value Handle) void }\n";
+  c_semantic_error "incomplete-local-by-value" held_only incomplete
+    "fn check_case() void { value Handle }\n";
+  incomplete_pin "incomplete-struct-field-by-value" "struct Wrapper { value Handle }\n"
     (String.length "struct Wrapper { value " + 1)
-    6 "opaque type `Handle` has no layout" (Some "write `handle[Handle]`");
-  semantic_accept "opaque-struct-field-handle-twin"
-    "opaque Handle\nstruct Wrapper { value handle[Handle] }\n";
-  let opaque_array = "opaque Handle\nfn check_case() void { values arr[2,Handle] }\n" in
-  let opaque_array_line = "fn check_case() void { values arr[2,Handle] }" in
-  semantic_pin "opaque-array-by-value" opaque_array 2
-    (String.index_from opaque_array_line (String.index opaque_array_line '[' + 1) 'H'
-    + 1)
-    6 "opaque type `Handle` can only be held as `handle[Handle]`" None;
-  let opaque_vector =
-    "opaque Handle\nfn check_case() void { values vec[2,Handle] }\n"
-  in
-  let opaque_vector_line = "fn check_case() void { values vec[2,Handle] }" in
-  semantic_pin "opaque-vector-by-value" opaque_vector 2
-    (String.index_from opaque_vector_line (String.index opaque_vector_line '[' + 1) 'H'
-    + 1)
-    6 "vector element type must be `bool` or an integer type" None;
-  semantic_error "opaque-parameter-by-value"
-    "opaque type `Handle` can only be held as `handle[Handle]`"
-    "opaque Handle\nfn check_case(value Handle) void { return }\n";
-  semantic_error "opaque-return-by-value"
-    "opaque type `Handle` can only be held as `handle[Handle]`"
-    "opaque Handle\nfn check_case() Handle { }\n";
-  let opaque_sizeof =
-    "opaque Handle\nfn check_case() usize { return sizeof[Handle] }\n"
-  in
-  let opaque_sizeof_line = "fn check_case() usize { return sizeof[Handle] }" in
-  semantic_pin "opaque-sizeof" opaque_sizeof 2
-    (String.index_from opaque_sizeof_line (String.index opaque_sizeof_line '[' + 1) 'H'
-    + 1)
-    6 "opaque type `Handle` has no layout" (Some "write `handle[Handle]`");
-  let opaque_alignof =
-    "opaque Handle\nfn check_case() usize { return alignof[Handle] }\n"
-  in
-  let opaque_alignof_line = "fn check_case() usize { return alignof[Handle] }" in
-  semantic_pin "opaque-alignof" opaque_alignof 2
-    (String.index_from opaque_alignof_line
-       (String.index opaque_alignof_line '[' + 1)
-       'H'
-    + 1)
-    6 "opaque type `Handle` has no layout" (Some "write `handle[Handle]`");
-  semantic_error "opaque-implicit-erasure" "is `handle[Handle]`, expected `addr`"
-    "opaque Handle\nfn check_case(value handle[Handle]) addr { return value }\n";
+    no_layout (Some "write `handle[Handle]`");
+  c_semantic_accept "incomplete-struct-field-handle-twin" incomplete
+    "struct Wrapper { value handle[Handle] }\n";
+  let line = "fn check_case() void { values arr[2,Handle] }" in
+  incomplete_pin "incomplete-array-by-value" (line ^ "\n") (bracket_column line) held_only None;
+  let line = "fn check_case() void { values vec[2,Handle] }" in
+  incomplete_pin "incomplete-vector-by-value" (line ^ "\n") (bracket_column line)
+    "vector element type must be `bool` or an integer type" None;
+  c_semantic_error "incomplete-parameter-by-value" held_only incomplete
+    "fn check_case(value Handle) void { return }\n";
+  c_semantic_error "incomplete-return-by-value" held_only incomplete
+    "fn check_case() Handle { }\n";
+  let line = "fn check_case() usize { return sizeof[Handle] }" in
+  incomplete_pin "incomplete-sizeof" (line ^ "\n") (bracket_column line) no_layout
+    (Some "write `handle[Handle]`");
+  let line = "fn check_case() usize { return alignof[Handle] }" in
+  incomplete_pin "incomplete-alignof" (line ^ "\n") (bracket_column line) no_layout
+    (Some "write `handle[Handle]`");
+  c_semantic_message "incomplete-handle-field"
+    "`Handle` is an incomplete C type (declared but not defined), so it has no \
+     fields; `handle[Handle]` can only be passed and stored"
+    incomplete "fn f(h handle[Handle]) i32 { return h.x }\n";
+  c_semantic_error "incomplete-bitcast" "illegal `bitcast` from `i64` to `Handle`"
+    incomplete "fn f(value i64) void { return bitcast[Handle](value) }\n";
+  semantic_error "handle-implicit-erasure" "is `handle[Handle]`, expected `addr`"
+    "struct Handle {}\nfn check_case(value handle[Handle]) addr { return value }\n";
   ignore
     (lower_of
        "fn accept(value addr) void { return }\n\
@@ -4207,15 +4208,15 @@ let () =
   semantic_error "function-type-collision" "duplicate declaration `F`"
     "fn F() i64 { return 3 }\nstruct F { value i64 }\n";
   semantic_error "type-const-collision" "duplicate declaration `F`"
-    "opaque F\nconst F i64 = 1\n";
+    "struct F {}\nconst F i64 = 1\n";
   semantic_error "const-type-collision" "duplicate declaration `F`"
-    "const F i64 = 1\nopaque F\n";
+    "const F i64 = 1\nstruct F {}\n";
   semantic_error "constant-used-as-function" "constant, not a function"
     "const F i64 = 1\nfn check_case() i64 { return F() }\n";
   semantic_error "function-used-as-value" "function, not a value"
     "fn F() i64 { return 1 }\nfn check_case() i64 { return F }\n";
   semantic_error "type-used-as-value" "type, not a value"
-    "opaque F\nfn check_case() i64 { return F }\n";
+    "struct F {}\nfn check_case() i64 { return F }\n";
   semantic_error "const-env-duplicate-const" "duplicate const `A`"
     "const A arr[2, i64] = {1, 2}\nconst A i64 = 1\n";
   semantic_error "const-env-array-length-mismatch" "array of 2 elements, got 3"
@@ -8309,7 +8310,7 @@ let () =
      }\n\
      fn main() i32 { return choose[1]() }\n";
   semantic_error "unselected-specialization-type-as-value" "type, not a value"
-    "opaque Item\n\
+    "struct Item {}\n\
      fn choose[N const i32]() i32 {\n\
     \ if N == 1 { return 7 } else { return Item }\n\
      }\n\
@@ -9008,11 +9009,11 @@ let () =
   if semantic_render raw_source <> raw_expected then
     failwith ("raw-access-diagnostic: " ^ semantic_render raw_source);
   let raw_unknown_source =
-    "opaque memblock_t; fn f(p addr) i32 { x i32 = p[memblock_s, 0]; return 0 }\n"
+    "struct memblock_t {}; fn f(p addr) i32 { x i32 = p[memblock_s, 0]; return 0 }\n"
   in
   let raw_unknown_line = String.trim raw_unknown_source in
   let raw_unknown_column =
-    String.length "opaque memblock_t; fn f(p addr) i32 { x i32 = p[" + 1
+    String.length "struct memblock_t {}; fn f(p addr) i32 { x i32 = p[" + 1
   in
   let raw_unknown_expected =
     expected_diagnostic raw_unknown_line raw_unknown_column (String.length "memblock_s")
@@ -9032,12 +9033,12 @@ let () =
   if semantic_render raw_no_match_source <> raw_no_match_expected then
     failwith ("raw-unknown-type-without-help: " ^ semantic_render raw_no_match_source);
   let raw_ambiguous_source =
-    "opaque memblock_t; opaque memblock_u; fn f(p addr) i32 { x i32 = p[memblock_s, \
+    "struct memblock_t {}; struct memblock_u {}; fn f(p addr) i32 { x i32 = p[memblock_s, \
      0]; return 0 }\n"
   in
   let raw_ambiguous_line = String.trim raw_ambiguous_source in
   let raw_ambiguous_column =
-    String.length "opaque memblock_t; opaque memblock_u; fn f(p addr) i32 { x i32 = p["
+    String.length "struct memblock_t {}; struct memblock_u {}; fn f(p addr) i32 { x i32 = p["
     + 1
   in
   let raw_ambiguous_expected =
@@ -9080,7 +9081,7 @@ let () =
   if semantic_render raw_expression_source <> raw_expression_expected then
     failwith ("raw-expression-index-help: " ^ semantic_render raw_expression_source);
   let ordinary_unknown_type_source =
-    "opaque memblock_t; fn f(x handle[memblock_s]) void { return }\n"
+    "struct memblock_t {}; fn f(x handle[memblock_s]) void { return }\n"
   in
   let ordinary_unknown_diagnostic =
     match semantic_diagnostics ordinary_unknown_type_source with
@@ -9094,7 +9095,7 @@ let () =
     ordinary_unknown_diagnostic.Diag.message <> "unknown type `memblock_s`"
     || ordinary_unknown_diagnostic.Diag.help <> Some "did you mean `memblock_t`?"
   then failwith "ordinary-unknown-type-diagnostic: missing exact similar-name help";
-  ignore (llvm_of "opaque memblock_t; fn f(x handle[memblock_t]) void { return }\n");
+  ignore (llvm_of "struct memblock_t {}; fn f(x handle[memblock_t]) void { return }\n");
   ignore
     (llvm_of
        "struct memblock_t { prev u8 }; fn f(base addr) u8 { return base[memblock_t, \
@@ -9973,15 +9974,15 @@ let () =
   semantic_accept "widening-address-explicit-twin"
     "fn f(value addr) usize { return addr_bits(value) }\n";
   let widening_handle_source =
-    "opaque Left\n\
-     opaque Right\n\
+    "struct Left {}\n\
+     struct Right {}\n\
      fn f(value handle[Left]) handle[Right] { return value }\n"
   in
   semantic_pin "widening-handle-identity-is-explicit" widening_handle_source 3
     (String.length "fn f(value handle[Left]) handle[Right] { return " + 1)
     5 "return value is `handle[Left]`, expected `handle[Right]`" None;
   semantic_accept "widening-handle-identity-twin"
-    "opaque Left\nfn f(value handle[Left]) handle[Left] { return value }\n";
+    "struct Left {}\nfn f(value handle[Left]) handle[Left] { return value }\n";
   semantic_accept "widening-usize-compound-u32"
     "fn f(pos usize, size u32) usize { pos += size; return pos }\n";
   semantic_accept "widening-plain-value-not-arithmetic"
@@ -10307,10 +10308,11 @@ let () =
   semantic_pin "void-field-layout-caret" "struct Holder { value void }\n" 1
     (String.length "struct Holder { value " + 1)
     4 "field `value` cannot have type `void`" None;
-  semantic_pin "opaque-field-layout-caret"
-    "opaque Token\nstruct Holder { value Token }\n" 2
+  let incomplete_token = c_import_container "incomplete-token" "struct Token;\n" in
+  c_semantic_pin "incomplete-field-layout-caret" "write `handle[Token]`" incomplete_token
+    "struct Holder { value Token }\n" 1
     (String.length "struct Holder { value " + 1)
-    5 "opaque type `Token` has no layout" (Some "write `handle[Token]`");
+    5 "incomplete C type `Token` has no layout";
   semantic_pin "recursive-field-layout-caret" "struct Node { next Node }\n" 1
     (String.length "struct Node { next " + 1)
     4 "recursive by-value struct `Node`" None;
@@ -10323,7 +10325,7 @@ let () =
     (String.length "struct Cache { owner " + 1)
     6 "unknown type `Memroy`" (Some "did you mean `Memory`?");
   semantic_pin "unknown-type-handle-caret"
-    "opaque Token\n\
+    "struct Token {}\n\
      struct Memory { value u8 }\n\
      fn read(value handle[Memroy]) void { return }\n"
     3
@@ -10391,10 +10393,9 @@ let () =
     1 "expression is not compile-time constant" None;
   semantic_accept "constant-brace-list-struct-storage"
     "struct Entry { value u8 }\nconst ITEM Entry = {7}\nfn main() i32 { return 0 }\n";
-  let global_opaque_type = "opaque Token\nvar ITEM Token\n" in
-  semantic_pin "global-opaque-type-caret" global_opaque_type 2
-    (String.length "var ITEM " + 1)
-    5 "opaque type `Token` can only be held as `handle[Token]`" None;
+  c_semantic_message "global-incomplete-type"
+    "incomplete C type `Token` can only be held as `handle[Token]`" incomplete_token
+    "var ITEM Token\n";
   let global_array_length = "var ITEMS arr[18446744073709551615,u8]\n" in
   semantic_pin "global-array-length-caret" global_array_length 1
     (String.length "var ITEMS arr[" + 1)
@@ -11918,7 +11919,7 @@ let () =
      integer offset"
     "fn f(n usize, p addr) usize { return n - p }\n";
   semantic_error "raw-select-handle-select" "cannot select through a handle"
-    "opaque O\nfn f(h handle[O]) u8 { return h[u8] }\n";
+    "struct O {}\nfn f(h handle[O]) u8 { return h[u8] }\n";
   semantic_error "raw-select-aggregate-load"
     "raw access cannot load an array or struct value"
     "struct S { a u8 }\nfn f(p addr) void { value S = p[S]\nreturn }\n";
@@ -11959,14 +11960,14 @@ let () =
     "struct S { value i32 }\nfn f() usize { return offsetof[S, missing] }\n";
   semantic_message "unknown-field-constant-offsetof" "record `S` has no field `missing`"
     "struct S { value i32 }\nconst Offset usize = offsetof[S, missing]\n";
-  let handle_field_source = "opaque O\nfn f(h handle[O]) usize { return h.x }\n" in
+  let handle_field_source = "struct O {}\nfn f(h handle[O]) usize { return h.x }\n" in
   let handle_field_line = "fn f(h handle[O]) usize { return h.x }" in
   let handle_field_expected =
-    expected_diagnostic_without_help ~line_number:2 handle_field_line 34 1
-      "no field `x` on `handle[O]`"
+    expected_diagnostic_without_help ~line_number:2 handle_field_line 36 1
+      "record `O` has no field `x`"
   in
   if semantic_render handle_field_source <> handle_field_expected then
-    failwith "handle-field-reject: receiver diagnostic span or message changed";
+    failwith "handle-field-missing: field diagnostic span or message changed";
   let unknown_field_source =
     "struct Pair { x i32 }\nfn main() i32 {\n p Pair = { 1 }\n return p.missing\n}\n"
   in
@@ -12060,7 +12061,7 @@ let () =
     [ "zext i16"; "ptrtoint ptr"; "sub i64"; "inttoptr i64" ];
   let volatile_shapes =
     llvm_of
-      "opaque Token\n\
+      "struct Token {}\n\
        fn load_bool(p addr) bool { return volatile_load[bool](p) }\n\
        fn load_integer(p addr) u32 { return volatile_load[u32](p) }\n\
        fn load_address(p addr) addr { return volatile_load[addr](p) }\n\
@@ -12814,7 +12815,7 @@ let () =
      masked_load[vec[2,u32]](p, m, v) }\n";
   semantic_error "simd-memory-handle-element"
     "`gather` needs an integer or bool element type, got `handle[Token]`"
-    "opaque Token\n\
+    "struct Token {}\n\
      fn f(p addr, i vec[2,i8], m vec[2,bool], v vec[2,u32]) vec[2,u32] { return \
      gather[handle[Token]](p, i, m, v) }\n";
   semantic_error "simd-memory-mask-type" "masked_load mask must be a bool vector"
@@ -12913,7 +12914,7 @@ let () =
   semantic_accept "global-inner-shadow"
     "var Value i32 = 7\nfn local() i32 { Value i32 = 11\n return Value }\n";
   semantic_accept "global-handle-type"
-    "opaque Token\n\
+    "struct Token {}\n\
      var Current handle[Token] = null\n\
      fn current_token() handle[Token] { return Current }\n";
   let cross_file_global =
@@ -12955,7 +12956,7 @@ let () =
   semantic_accept "address-constants-imported-target"
     "extern \"C\" { var Imported i32 }\nvar P addr = &Imported\n";
   semantic_accept "address-constants-handle-slot"
-    "opaque Token\nvar G i32\nvar P handle[Token] = handle_from_addr[Token](&G)\n";
+    "struct Token {}\nvar G i32\nvar P handle[Token] = handle_from_addr[Token](&G)\n";
   semantic_accept "address-constants-null-table"
     "const P arr[1,addr] = {null}\nfn f() addr { return P[0] }\n";
   semantic_accept "address-constants-nested-struct-table"
@@ -13161,7 +13162,7 @@ let () =
     "fn f() void { Local i32 = 1\nreturn }\nvar P addr = &Local\n";
   semantic_message "address-constants-handle-ordinary-string"
     "address constants require a C string literal"
-    "opaque Token\nvar P handle[Token] = handle_from_addr[Token](\"x\")\n";
+    "struct Token {}\nvar P handle[Token] = handle_from_addr[Token](\"x\")\n";
   semantic_message "address-constants-readonly-table" "cannot modify constant `P`"
     "var G i32\nconst P arr[1,addr] = {&G}\nfn f() void { P[0] = null\nreturn }\n";
   let relocatable =
@@ -13198,9 +13199,6 @@ let () =
   semantic_message "constant-global-record-initializer-arity"
     "record `Pair` has 1 field, got 2"
     "struct Pair { x i32 }\nconst Item Pair = {1, 2}\n";
-  semantic_message "global-opaque-object"
-    "opaque type `Token` can only be held as `handle[Token]`"
-    "opaque Token\nvar Value Token\n";
   parse_message "global-local-var"
     "`var` declares globals; locals are declared as `name Type = value`"
     "fn run() void { var Value i32\nreturn }\n";
@@ -13762,10 +13760,10 @@ let () =
        (String.split_on_char '\n' lazy_long_double_manifest)
    with
   | Some line
-    when contains line "opaque FasLazyLongDouble"
+    when contains line "struct FasLazyLongDouble (no layout)"
          && contains line "unsupported=floating-point types are not supported" ->
       ()
-  | _ -> failwith "lazy long-double record was not preserved as an opaque manifest type");
+  | _ -> failwith "lazy long-double record was not preserved as a no-layout manifest type");
   let restrict_manifest =
     C_import.manifest_text c_matrix_imported
     |> String.split_on_char '\n'
@@ -15272,9 +15270,10 @@ let () =
   in
   if handle_view_shorthand <> handle_view_explicit then
     failwith "c-import-view-through-handle: LLVM differs from explicit handle_addr view";
-  c_semantic_message "c-import-view-through-opaque-handle"
-    "cannot view `Token` through a handle: its layout is unknown" record_import_cases
-    "opaque Token\nfn probe(value handle[Token]) void { view r = value\n return }\n";
+  c_semantic_message "c-import-view-through-incomplete-handle"
+    "cannot view `Token` through a handle: its layout is unknown"
+    (c_import_container "view-incomplete" "struct Token;\n")
+    "fn probe(value handle[Token]) void { view r = value\n return }\n";
   c_semantic_message "c-import-view-through-null-handle" "access through null address"
     record_import_cases
     "fn probe() i32 { value handle[FasNestedRecord] = null\n\
@@ -15555,8 +15554,7 @@ let () =
     || contains function_address_ir "getelementptr (i8, ptr @fas_callback_result"
     || contains function_address_ir "dso_local"
   then failwith "C function addresses did not lower to plain function relocations";
-  semantic_error "addr-handle-c-record-native-still-rejected"
-    "handle type argument must be an opaque type"
+  semantic_accept "addr-handle-native-struct"
     "struct NativeRecord { value i32 }\n\
      fn f(pointer addr) handle[NativeRecord] {\n\
      return handle_from_addr[NativeRecord](pointer) }\n";
@@ -16162,7 +16160,7 @@ let () =
     expect_ok
       (Sema.check
          (parse_file "exports.fas"
-            "opaque Token\n\
+            "struct Token {}\n\
              struct Inner { x u16 }\n\
              struct Outer @align(16) { inner Inner, lanes vec[3,u8], mask vec[8,bool], \
              ptr handle[Token], data arr[2,arr[3,i32]] }\n\
@@ -16390,8 +16388,8 @@ let () =
     expect_ok
       (Sema.check
          (parse_file "handles.fas"
-            "opaque Tag\n\
-             opaque Alias\n\
+            "struct Tag {}\n\
+             struct Alias {}\n\
              extern \"C\" { fn get(x handle[Tag], y handle[Alias]) handle[Alias] { \
              return y } }\n"))
   in
@@ -17449,7 +17447,7 @@ let () =
         ];
       if ty = "arr[4,u32]" then
         semantic_message ("generic-slot-handle-" ^ ty)
-          "handle type argument must be an opaque type"
+          "handle type argument must be a struct"
           (body ("h handle[" ^ ty ^ "] = handle_from_addr[" ^ ty ^ "](p)"));
       List.iter
         (fun name ->
@@ -17628,8 +17626,8 @@ let () =
         "locals are declared as `name Type = value`; `mut` is not a Fas keyword" generic;
       pin "char *s = 0" "char *" "C type `char*` is not a Fas type; use `addr`" generic;
       pin "int *p = 0" "int *"
-        "C type `int*` is not a Fas type; use `addr`, or `handle[T]` when `T` is an \
-         `opaque` type"
+        "C type `int*` is not a Fas type; use `addr`, or `handle[T]` when `T` is a \
+         struct"
         generic;
       pin "void *v = 0" "void *" "C type `void*` is not a Fas type; use `addr`" generic;
       pin "int (*fp)(int) = 0" "int"
@@ -17686,7 +17684,7 @@ let () =
       "scatter_bytes";
     ];
   semantic_message "vector-handle-type-slot"
-    "handle type argument must be an opaque type"
+    "handle type argument must be a struct"
     "fn f(p addr) void { h handle[vec[4,u32]] = handle_from_addr[vec[4,u32]](p)\n\
      return }";
   List.iter
@@ -18544,7 +18542,7 @@ let () =
   semantic_accept "typed-pointer-index-mul-twin"
     "fn f(p addr) u32 {\n    n u32 = p[u32] * 2\n    return n\n}\n";
   semantic_accept "typed-pointer-handle-twin"
-    "opaque FILE\nfn f(h handle[FILE]) u32 { return 0 }\n";
+    "struct FILE {}\nfn f(h handle[FILE]) u32 { return 0 }\n";
   semantic_accept "typed-pointer-addr-twin" "fn f(p addr) u32 { return 0 }\n";
   let arrow_record =
     "struct Pair { x i32 }\nfn read() i32 { value Pair = {1}\n return value->x }\n"
@@ -18879,7 +18877,7 @@ let () =
 
 let () =
   semantic_accept "generic-inference-plain-and-handle-type"
-    "opaque O\n\
+    "struct O {}\n\
      fn pass[T](value T) T { return value }\n\
      fn keep[T](value handle[T]) handle[T] { return value }\n\
      fn run(value handle[O]) handle[O] { return keep(value) }\n\

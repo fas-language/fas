@@ -1,0 +1,78 @@
+fn preserve(value handle[First]) handle[First] {
+  local handle[First] = value
+  return local
+}
+
+fn make_addr(value handle[First]) addr {
+  return handle_addr(value)
+}
+
+fn recover(value addr) handle[First] {
+  return handle_from_addr[First](value)
+}
+
+fn pointer_layout() usize {
+  return sizeof[addr] + alignof[addr]
+}
+
+fn main() i32 {
+  base addr = addr_from_bits(0)
+  first handle[First] = handle_from_addr[First](base)
+  same handle[First] = preserve(first)
+  back addr = make_addr(same)
+  if addr_bits(back) != 0 { return 1 }
+  round_trip handle[First] = recover(back)
+  if addr_bits(handle_addr(round_trip)) != 0 { return 2 }
+  if pointer_layout() != 16 { return 3 }
+  return fields()
+}
+
+// `handle[S]` takes any struct, and `h.field` is a place in the struct the
+// handle points at: reads, writes, compound assignment, nested fields, array
+// elements, `&h.field`, generic structs, and a struct that holds a handle to
+// its own type (a linked list)
+struct Node {
+  value i32
+  pair Pair
+  next handle[Node]
+  data arr[3, u16]
+}
+struct Pair { a u8, b i64 }
+struct Box[T] { item T }
+
+fn sum(list handle[Node]) i32 {
+  total i32 = 0
+  n handle[Node] = list
+  while n != null {
+    total += n.value + zext[i32](n.pair.a) + zext[i32](n.data[2])
+    n = n.next
+  }
+  return total
+}
+
+fn fields() i32 {
+  a Node = {}
+  b Node = {}
+  a.value = 1
+  ha handle[Node] = handle_from_addr[Node](&a)
+  hb handle[Node] = handle_from_addr[Node](&b)
+  ha.next = hb
+  hb.value = 10
+  hb.pair.a = 5
+  hb.pair.b = -7
+  hb.data[2] = 100
+  hb.next = null
+  p addr = &hb.pair
+  if p[Pair].b != -7 { return 11 }
+  if sum(ha) != 116 { return 12 }
+  if a.next != hb || b.value != 10 { return 13 }
+  bx Box[u32] = {}
+  hbx handle[Box[u32]] = handle_from_addr[Box[u32]](&bx)
+  hbx.item = 9
+  if bx.item != 9 { return 14 }
+  hbx.item += 1
+  if hbx.item != 10 { return 15 }
+  return 0
+}
+
+struct First {}

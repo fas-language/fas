@@ -147,7 +147,7 @@ let kind_name = function
   | Const_array -> "const array"
   | Struct -> "struct"
   | Union -> "union"
-  | Opaque -> "opaque"
+  | Opaque -> "incomplete struct"
   | Enum -> "enum"
   | Field -> "field"
   | Type_parameter -> "type parameter"
@@ -1084,7 +1084,7 @@ let describe index ?use (declaration : declaration) =
       Option.map
         (fun (ty, count) -> ("const " ^ name ^ " " ^ ty, [ elements_text count ]))
         (Hashtbl.find_opt index.array_decls name)
-  | Opaque -> Some ("opaque " ^ name, [ "no layout" ])
+  | Opaque -> Some ("struct " ^ name, [ "incomplete C type, no layout" ])
   | Enum -> Some ("enum " ^ name, [])
   | Union ->
       Option.map

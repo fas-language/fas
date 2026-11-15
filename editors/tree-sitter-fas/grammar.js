@@ -22,7 +22,7 @@ const primitive_types = [
 
 const keywords = [
   'fn', 'return', 'if', 'else', 'while', 'break', 'continue', 'const', 'var',
-  'struct', 'opaque', 'extern', 'defer', 'use', 'for', 'switch', 'case',
+  'struct', 'extern', 'defer', 'use', 'for', 'switch', 'case',
   'default', 'view', 'addr', 'handle', 'arr', 'vec', 'true', 'false', 'null',
   'error', 'fails', 'fail', 'try', 'catch', 'errdefer',
   ...primitive_types,
@@ -120,7 +120,6 @@ module.exports = grammar({
         $.const_declaration,
         $.global_declaration,
         $.struct_declaration,
-        $.opaque_declaration,
         $.extern_declaration,
         $.function_declaration,
         $.error_declaration,
@@ -192,7 +191,6 @@ module.exports = grammar({
     field_declaration: ($) =>
       seq(field('name', $.identifier), field('type', $._type)),
 
-    opaque_declaration: ($) => seq('opaque', field('name', $.identifier)),
 
     // enum Tok u8 { Eof, Ident, Plus = 10 }: `enum` is a keyword only here
     enum_declaration: ($) =>

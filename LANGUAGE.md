@@ -79,7 +79,7 @@ hello, fas!
 - **A pointee type is a claim that goes stale.** `uint32_t *p` says "a `u32` lives here" for every later use, even after the memory is reused or read as something else. A type on the access is true where it is written.
 - **It would give the optimizer facts nobody proved.** In C the pointee type implies alignment (`*p` on a `uint32_t *` assumes 4 bytes) and strict aliasing (an `int *` and a `float *` never overlap). Fas never emits alignment, aliasing or `inbounds` facts the source did not prove. So a raw access may be unaligned, and accesses of different types may overlap.
 - **One memory model instead of two.** Without typed pointers there is no `const` pointee, no dereference operator or `.*` chains, no arithmetic scaled by element size next to byte arithmetic, and no pointer casts just to read memory as another type. Address arithmetic is always in bytes.
-- **`handle[T]` is not a typed pointer.** It is the one typed address form. It names an `opaque` object, a C record or a specialized generic struct, and it has no arithmetic. It exists to stop mixing up `FILE` and `DIR`, not to describe memory. An `addr[T]` would grow back into `ptr[T]`, so it is rejected.
+- **`handle[T]` is not a typed pointer.** It is the one typed address form. It names a struct: a Fas struct, a specialized generic struct or a C record. It has no arithmetic. It exists to stop mixing up `FILE` and `DIR`, not to describe memory. An `addr[T]` would grow back into `ptr[T]`, so it is rejected.
 
 Use `view r = p[Box]` to name a typed place once and reuse it.
 
@@ -449,7 +449,36 @@ fn main() i32 {
 4 16
 ```
 - **`@align(N)`** raises a struct's alignment. It is the only annotation. (`@inline` and `--no-inline` were removed: Fas has no inliner yet. They come back with the optimizer.)
-- **`opaque Name`** declares a type you only hold as `handle[Name]`, a typed address with no arithmetic. It is mostly for C types like `FILE`.
+- **`handle[S]`** is the address of a struct `S`, typed, with no arithmetic: any Fas struct, a specialized generic struct, or a C record such as `handle[c.FILE]`. `h.field` reads and writes a field through it, the same place as `p[S].field` through an `addr`. `handle_from_addr[S](p)` makes one and `handle_addr(h)` gives the `addr` back. A handle may be `null`, and `h.field` does not check for it. A struct may hold handles to its own type:
+
+```fas
+use "C" <stdio.h> as c
+
+struct Node { value i32, next handle[Node] }
+
+fn sum(list handle[Node]) i32 {
+    total i32 = 0
+    h handle[Node] = list
+    while h != null {
+        total += h.value                        // a field through the handle
+        h = h.next
+    }
+    return total
+}
+
+fn main() i32 {
+    last Node = {30, null}
+    first Node = {12, handle_from_addr[Node](&last)}
+    head handle[Node] = handle_from_addr[Node](&first)
+    head.value += 100                           // `h.field` is a place
+    c.printf(c"%d\n", sum(head))
+    return 0
+}
+```
+```text
+142
+```
+- **Incomplete C types.** A C struct that is declared but never defined (`struct S;`), or a record Fas cannot lay out, has no fields or size. You can only hold it as `handle[c.S]`, pass it and store it. A Fas struct you only ever pass by handle can be empty: `struct Token {}`.
 
 ### Value structs
 
@@ -1065,7 +1094,7 @@ struct P { x i32, y i32 }               // fields separated by `,` or newlines
 value struct V { x f32, y f32 }         // a value: passed, returned, assigned
 struct Line @align(64) { bytes arr[64, u8] }
 struct Ring[N const usize] { head usize, items arr[N, u32] }
-opaque FILE                             // held only as handle[FILE]
+struct Token {}                         // empty; often held as handle[Token]
 
 fn f(a u32, p addr) u32 { return a }
 fn g() void { }
@@ -1122,7 +1151,7 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `usize` `isize` | 8 | 8 | other names for `u64` and `i64`, used for sizes, counts and indices |
 | `f64` | 8 | 8 | IEEE binary64 scalar |
 | `addr` | 8 | 8 | untyped byte address or `null` |
-| `handle[T]` | 8 | 8 | address of an `opaque`, C record, or specialized generic struct `T`, with no arithmetic |
+| `handle[T]` | 8 | 8 | address of a struct `T` (Fas, specialized generic, or C record), with no arithmetic; `h.field` is a place |
 | `arr[N, T]` | N × stride(T) | align(T) | `len(a)` is N |
 | `vec[N, T]` | N × size(T), rounded up to a power of two | = size | integer lanes, at most 256 lanes and 2048 bits. `vec[3, u32]` is 16 bytes |
 | `vec[N, bool]` | ⌈N/8⌉ bytes, rounded up to a power of two | = size | packed bits, lane 0 is the low bit |
@@ -1274,7 +1303,7 @@ Every builtin has the same result on every CPU. Builds target baseline x86-64 (S
 | enum constants, `#define N 16` | integer constants with C's type |
 | `#define SCALE 0.5f`, `FLT_MAX`, `M_PI` | `f32` (`f`/`F` suffix) or `f64` constants. Only a single literal, optionally `-` and parentheses |
 | `void *`, `char *`, `int *`, function pointers | `addr` |
-| `struct S *` (complete or opaque `S`) | `handle[c.S]`, and `&s` of an imported struct converts |
+| `struct S *` (complete or incomplete `S`) | `handle[c.S]`, and `&s` of an imported struct converts |
 | complete structs and unions | Fas record types `c.S`: fields, `{}`, `sizeof`, globals, arrays |
 | C `float`, `double` parameters, results, globals, typedefs | `f32`, `f64` |
 | `float`, `double` record or union fields | `f32`, `f64`, with ordinary field access |

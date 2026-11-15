@@ -340,21 +340,21 @@ let rec source_ty named_types = function
   | Ast.Applied_type _ ->
       Error "internal error: generic type application reached ordinary type checking"
 
+(* `handle[S]` names any struct: a Fas struct (also a specialized generic
+   one), a C record (also one whose layout Fas cannot use) or an incomplete
+   C type. *)
 and handle_target named_types = function
   | Ast.Named_type (name, _) -> (
       match List.assoc_opt name named_types with
-      | Some Struct_name when String.contains name '$' -> Ok name
+      | Some Struct_name -> Ok name
       | Some (C_record_name (record, _)) -> Ok record
-      | _ -> (
-          match source_ty named_types (Ast.Named_type (name, Span.synthetic)) with
-          | Ok (Hir.Opaque name) -> Ok name
-          | Ok _ -> Error "handle type argument must be an opaque type"
-          | Error message -> Error message))
-  | ty -> (
-      match source_ty named_types ty with
-      | Ok (Hir.Opaque name) -> Ok name
-      | Ok _ -> Error "handle type argument must be an opaque type"
-      | Error message -> Error message)
+      | _ -> handle_target_of (source_ty named_types (Ast.Named_type (name, Span.synthetic))))
+  | ty -> handle_target_of (source_ty named_types ty)
+
+and handle_target_of = function
+  | Ok (Hir.Opaque name | Hir.Struct name) -> Ok name
+  | Ok _ -> Error "handle type argument must be a struct"
+  | Error message -> Error message
 
 and source_aggregate named_types kind make raw element =
   match int_of_string_opt raw with
