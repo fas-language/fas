@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as libc <<C
 extern void dump_i64(long value);
 extern void dump_u64(unsigned long value);
 C
@@ -27,34 +27,34 @@ fn shr_div_u64(a u32) u64 { y u64 = (a / 3) >> 1; return y }
 extern "C" {
 fn fas_run() i32 {
     for i usize = 0; i < len(U16S); i += 1 {
-        dump_i64(sext[i64](shr_u16(U16S[i])))
-        dump_i64(zext[i64](mask_u16(U16S[i])))
+        libc.dump_i64(sext[i64](shr_u16(U16S[i])))
+        libc.dump_i64(zext[i64](mask_u16(U16S[i])))
     }
     for i usize = 0; i < len(U8S); i += 1 {
-        dump_i64(sext[i64](and_u8(U8S[i])))
-        dump_i64(zext[i64](rem_u8(U8S[i])))
+        libc.dump_i64(sext[i64](and_u8(U8S[i])))
+        libc.dump_i64(zext[i64](rem_u8(U8S[i])))
     }
     for i usize = 0; i < len(U32S); i += 1 {
-        dump_u64(div_u32(U32S[i]))
-        dump_u64(shr_div_u64(U32S[i]))
+        libc.dump_u64(div_u32(U32S[i]))
+        libc.dump_u64(shr_div_u64(U32S[i]))
     }
     for i usize = 0; i < len(I16S); i += 1 {
-        dump_i64(sext[i64](shr_i16(I16S[i])))
+        libc.dump_i64(sext[i64](shr_i16(I16S[i])))
     }
     for i usize = 0; i < len(I16S); i += 1 {
         for j usize = 0; j < len(I16T); j += 1 {
-            dump_i64(sext[i64](and_i16(I16S[i], I16T[j])))
+            libc.dump_i64(sext[i64](and_i16(I16S[i], I16T[j])))
         }
     }
     for i usize = 0; i < len(U8S); i += 1 {
         for j usize = 0; j < len(W32); j += 1 {
-            dump_i64(sext[i64](eq_masked(U8S[i], W32[j])))
+            libc.dump_i64(sext[i64](eq_masked(U8S[i], W32[j])))
         }
     }
     for i usize = 0; i < len(U16S); i += 1 {
         for j usize = 0; j < len(W32); j += 1 {
-            dump_i64(zext[i64](or_div_u32(U16S[i], W32[j])))
-            dump_u64(or_div_u64(U16S[i], W32[j]))
+            libc.dump_i64(zext[i64](or_div_u32(U16S[i], W32[j])))
+            libc.dump_u64(or_div_u64(U16S[i], W32[j]))
         }
     }
     return 0

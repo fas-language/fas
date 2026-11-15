@@ -135,8 +135,20 @@ let signature mc ~params ~ret ~ret_extension ~variadic =
     variadic;
   }
 
+(* Symbols. A C entity's internal name is `c.NAME` and its symbol NAME. A Fas
+   top-level name is local to the program, so when it equals a C symbol of
+   the module (a Fas `read` next to `c.read`) the Fas one becomes `fas.NAME`;
+   [Lower.lower_module] fills [fas_renames]. *)
+let fas_renames : (string, string) Hashtbl.t = Hashtbl.create 8
+
+let link_symbol name =
+  if Names.is_c_name name then Names.c_link_symbol name
+  else Option.value ~default:name (Hashtbl.find_opt fas_renames name)
+
 (* A function without a body (an external one) *)
 let declare mc ~name ~params ~ret ~ret_extension ~variadic ~display =
+  (* a C entity's internal name is `c.NAME`; its symbol is NAME *)
+  let name = link_symbol name in
   let f =
     new_func ~linkage:Global ~defined:false name (signature mc ~params ~ret ~ret_extension ~variadic)
   in
@@ -172,6 +184,7 @@ type fn = {
 (* Starts a function with a body. [params] are (name, type, extension); the
    entry block is block 0 and current. *)
 let start mc ~name ~linkage ~params ~ret ~ret_extension ~variadic ~display ~source =
+  let name = link_symbol name in
   let sig_ =
     signature mc ~params:(List.map (fun (_, t, e) -> (t, e)) params) ~ret ~ret_extension ~variadic
   in
@@ -289,7 +302,7 @@ let value fn (v : Low.value) =
       match Hashtbl.find_opt fn.params name with
       | Some p -> p
       | None -> unsupported "unknown parameter %s" name)
-  | Low.Global (name, _) -> sym f name
+  | Low.Global (name, _) -> sym f (link_symbol name)
   | Low.Null t -> null f (fir_ty t)
   | Low.Undef t when is_aggregate t ->
       let size, align = layout fn.mc.lay t in
@@ -543,7 +556,7 @@ let call fn result ext ret name args =
     | Some r, Some id -> define fn id r
     | None, Some _ -> unsupported "%s has no result" name
     | _ -> ()
-  else emit_call fn result ext ret (Direct name) args
+  else emit_call fn result ext ret (Direct (link_symbol name)) args
 
 let call_indirect fn result ext ret callee args =
   let c = value fn callee in
@@ -651,7 +664,7 @@ let shufflevector fn id _t x y (mask : Low.value) =
 
 (* the address of string literal [index] (global .str.<index>) *)
 let string_ptr fn id index = define fn id (sym fn.f (".str." ^ string_of_int index))
-let global_ptr fn id name = define fn id (sym fn.f name)
+let global_ptr fn id name = define fn id (sym fn.f (link_symbol name))
 let trap fn = emit0 fn Trap
 
 let syscall fn id args =
@@ -782,6 +795,8 @@ let array_global mc ~name ~elem_ty ~elems ~align =
 (* A global variable: [bytes] is its initial image (None = zero) and
    [pointers] the (offset, symbol, addend) addresses stored in it *)
 let storage_global mc ~name ~size ~bytes ~pointers ~readonly ~align ~(linkage : Ast.global_linkage) =
+  let name = link_symbol name in
+  let pointers = List.map (fun (off, sym, addend) -> (off, link_symbol sym, addend)) pointers in
   let g = base_global name size align in
   g.readonly <- readonly;
   (match linkage with

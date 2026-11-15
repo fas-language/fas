@@ -3484,6 +3484,28 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
   let p = Hir_enum_erase.program p in
   enum_names_used := [];
   let p = { p with Hir.structs = p.Hir.structs @ fails_struct_defs p.Hir.structs } in
+  (* a Fas name that equals a C symbol of the program gets its own symbol *)
+  Hashtbl.reset E.fas_renames;
+  let c_symbols = Hashtbl.create 64 in
+  List.iter
+    (fun (f : Hir.func) ->
+      if f.linkage = Hir.External_c then
+        Hashtbl.replace c_symbols (Names.c_link_symbol f.name) ())
+    p.funcs;
+  List.iter
+    (fun (g : Hir.global) ->
+      if g.linkage <> Ast.Internal_global then
+        Hashtbl.replace c_symbols (Names.c_link_symbol g.name) ())
+    p.globals;
+  let rename name =
+    if Hashtbl.mem c_symbols name then Hashtbl.replace E.fas_renames name ("fas." ^ name)
+  in
+  List.iter
+    (fun (f : Hir.func) -> if f.linkage = Hir.Internal && f.name <> "main" then rename f.name)
+    p.funcs;
+  List.iter
+    (fun (g : Hir.global) -> if g.linkage = Ast.Internal_global then rename g.name)
+    p.globals;
   let user_main =
     List.find_opt
       (fun (f : Hir.func) -> f.name = "main" && f.fails && f.body <> Hir.Declaration)
@@ -3661,10 +3683,13 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
       Some (size, align, if size <= 16 then leaves 0 (Hir.Struct name) else []))
     lay;
   let mc = E.create_module ~triple:(Target_layout.current ()).triple lay in
-  (* variadic functions: their fixed parameter count, for call signatures *)
+  (* variadic functions: their fixed parameter count, for call signatures;
+     keyed by link symbol, the name a direct call carries (`c.printf` calls
+     `printf`) *)
   List.iter
     (fun (f : Hir.func) ->
-      if f.variadic then Hashtbl.replace mc.variadic f.name (List.length f.params))
+      if f.variadic then
+        Hashtbl.replace mc.variadic (E.link_symbol f.name) (List.length f.params))
     p.funcs;
   let literal_globals = ref [] in
   let* () =

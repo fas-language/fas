@@ -1,48 +1,48 @@
-use "C" "c_import/c_records.h"
+use "C" "c_import/c_records.h" as c
 
-const fas_constant_table arr[2,FasAddressEntry] = {
+const fas_constant_table arr[2,c.FasAddressEntry] = {
   {c"alpha", &fas_constant_target, 77},
   {c"omega", &fas_constant_target, 88}
 }
 
 extern "C" {
-  var fas_link_table arr[3,FasLinkRecord] = {
+  var fas_link_table arr[3,c.FasLinkRecord] = {
     {10, &fas_link_table[1]},
     {20, &fas_link_table[2]},
     {30, &fas_link_table[0]}
   }
   var fas_constant_target i32 = 1234
-  var fas_exported_records arr[2,FasRecord] = {
+  var fas_exported_records arr[2,c.FasRecord] = {
     {1, 20, {30, 40}},
     {2, 50, {60, 70}}
   }
   var fas_completed_values arr[3,i32] = {4, 5, 6}
 
-  fn fas_write_record(record handle[FasRecord]) void {
+  fn fas_write_record(record handle[c.FasRecord]) void {
     raw addr = handle_addr(record)
-    raw[FasRecord].kind = 7
-    raw[FasRecord].value = 777
-    raw[FasRecord].lanes[0] = 8
-    raw[FasRecord].lanes[1] = 9
+    raw[c.FasRecord].kind = 7
+    raw[c.FasRecord].value = 777
+    raw[c.FasRecord].lanes[0] = 8
+    raw[c.FasRecord].lanes[1] = 9
     return
   }
 
   fn fas_read_c_filled() i32 {
-    record FasRecord = {0, 0, {0, 0}}
-    h handle[FasRecord] = handle_from_addr[FasRecord](&record)
-    c_fill_record(h)
+    record c.FasRecord = {0, 0, {0, 0}}
+    h handle[c.FasRecord] = handle_from_addr[c.FasRecord](&record)
+    c.c_fill_record(h)
     raw addr = handle_addr(h)
-    return zext[i32](raw[FasRecord].kind) + raw[FasRecord].value + raw[FasRecord].lanes[0] + raw[FasRecord].lanes[1]
+    return zext[i32](raw[c.FasRecord].kind) + raw[c.FasRecord].value + raw[c.FasRecord].lanes[0] + raw[c.FasRecord].lanes[1]
   }
 
   fn fas_pass_local_to_c() i32 {
-    record FasRecord = {3, 1001, {4, 5}}
-    return c_check_record(handle_from_addr[FasRecord](&record))
+    record c.FasRecord = {3, 1001, {4, 5}}
+    return c.c_check_record(handle_from_addr[c.FasRecord](&record))
   }
 
   fn fas_check_table() i32 {
-    return c_check_table(
-      handle_from_addr[FasAddressEntry](&fas_constant_table[0]))
+    return c.c_check_table(
+      handle_from_addr[c.FasAddressEntry](&fas_constant_table[0]))
   }
 
   fn fas_read_exported_records() i32 {
@@ -57,11 +57,11 @@ extern "C" {
     if fas_read_c_filled() != 1426 { return 1 }
     if fas_pass_local_to_c() != 0 { return 2 }
     if fas_check_table() != 0 { return 3 }
-    if c_check_link_table() != 0 { return 7 }
-    if c_check_and_mutate_exports() != 0 { return 4 }
+    if c.c_check_link_table() != 0 { return 7 }
+    if c.c_check_and_mutate_exports() != 0 { return 4 }
     if fas_read_exported_records() != 120 { return 5 }
     if fas_read_completed_values() != 51 { return 6 }
-    printf(c"%d %d %d %d %d %d\n", fas_read_c_filled(),
+    c.printf(c"%d %d %d %d %d %d\n", fas_read_c_filled(),
       fas_pass_local_to_c(), fas_check_table(), fas_read_exported_records(),
       fas_read_completed_values(), fas_exported_records[1].value)
     return 0

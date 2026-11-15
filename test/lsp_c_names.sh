@@ -133,25 +133,25 @@ int cn_sum(struct CnPoint point);
 
 GOOD_MAIN = "\n".join(
     [
-        'use "C" <string.h>',
-        'use "C" <stdlib.h>',
-        'use "C" <stdio.h>',
-        'use "C" "cn.h"',
+        'use "C" <string.h> as c',
+        'use "C" <stdlib.h> as c',
+        'use "C" <stdio.h> as c',
+        'use "C" "cn.h" as c',
         "fn main() i32 {",
-        '  count usize = strlen(c"abc")',
-        "  raw addr = malloc(8)",
-        '  copied addr = memcpy(raw, c"abc", 4)',
-        "  point CnPoint = {.x = 1, .y = 2}",
-        "  limit i32 = CN_LIMIT",
-        "  total i32 = cn_add(point.x, point.y)",
-        "  mixed i32 = cn_mixed(1, 2, 3)",
-        '  shown i32 = cn_fmt(c"%d")',
-        "  unnamed i32 = cn_none(1, 2)",
-        "  keyed i32 = cn_kw(3)",
-        '  printed i32 = printf(c"x")',
-        "  scaled CnPoint",
-        '  scaled = cn_scale(point, 2, c"s")',
-        "  summed i32 = cn_sum(scaled)",
+        '  count usize = c.strlen(c"abc")',
+        "  raw addr = c.malloc(8)",
+        '  copied addr = c.memcpy(raw, c"abc", 4)',
+        "  point c.CnPoint = {.x = 1, .y = 2}",
+        "  limit i32 = c.CN_LIMIT",
+        "  total i32 = c.cn_add(point.x, point.y)",
+        "  mixed i32 = c.cn_mixed(1, 2, 3)",
+        '  shown i32 = c.cn_fmt(c"%d")',
+        "  unnamed i32 = c.cn_none(1, 2)",
+        "  keyed i32 = c.cn_kw(3)",
+        '  printed i32 = c.printf(c"x")',
+        "  scaled c.CnPoint",
+        '  scaled = c.cn_scale(point, 2, c"s")',
+        "  summed i32 = c.cn_sum(scaled)",
         "  return 0",
         "}",
     ]
@@ -166,16 +166,16 @@ long double cn_wide(long double value);
 
 BAD_BROKEN = "\n".join(
     [
-        'use "C" "bad.h"',
+        'use "C" "bad.h" as c',
         "fn main() i32 {",
-        "  ok i32 = cn_ok(1)",
-        "  wide i32 = cn_wide(1)",
+        "  ok i32 = c.cn_ok(1)",
+        "  wide i32 = c.cn_wide(1)",
         "  return 0",
         "}",
     ]
 ) + "\n"
 
-BAD_FIXED = BAD_BROKEN.replace("wide i32 = cn_wide(1)", "wide i32 = cn_ok(2)")
+BAD_FIXED = BAD_BROKEN.replace("wide i32 = c.cn_wide(1)", "wide i32 = c.cn_ok(2)")
 
 BAD_SHIFTED = "\n" + BAD_BROKEN
 
@@ -534,7 +534,7 @@ def check_names_reason(bad):
     )
     text = output.stdout + output.stderr
     expect(
-        "C declaration `cn_wide` is not supported: %s" % UNSUPPORTED_REASON in text,
+        "C declaration `c.cn_wide` is not supported: %s" % UNSUPPORTED_REASON in text,
         "fas check does not report the cn_wide reason: %r" % (text,),
     )
 
@@ -546,11 +546,11 @@ def expect_unsupported(s, path, source, anchor, offset, reason, header_path, pat
     expect(header == header_path, "%s: header %r, expected %r" % (label, header, header_path))
     line = find_line(header_path, pattern)
     expect(number == line, "%s: header line %d, grep found %d" % (label, number, line))
-    expected = "C declaration `cn_wide` is not supported: %s\n\n%s:%d" % (reason, header_path, line)
+    expected = "C declaration `c.cn_wide` is not supported: %s\n\n%s:%d" % (reason, header_path, line)
     expect(value == expected, "%s: got %r, expected %r" % (label, value, expected))
     position_line, character = position_of(source, anchor, offset)
     expect(
-        result["range"] == rng(position_line, character, position_line, character + len("cn_wide")),
+        result["range"] == rng(position_line, character, position_line, character + len("c.cn_wide")),
         "%s: range %r" % (label, result["range"]),
     )
 
@@ -562,25 +562,25 @@ def pins_good(s, main, cn_h):
     local = {cn_h}
     expect_c_hover(
         s, main, GOOD_MAIN, "strlen(c", 1,
-        "extern fn strlen(__s addr) u64",
+        "extern fn c.strlen(__s addr) u64",
         ["nonnull: __s; C string: __s"],
         r"^extern .*[ *]strlen \(", system_string, "strlen",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "malloc(8)", 0,
-        "extern fn malloc(__size u64) addr",
+        "extern fn c.malloc(__size u64) addr",
         ["alloc_size: __size"],
         r"^extern .*[ *]malloc \(", system_stdlib, "malloc",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "memcpy(raw", 0,
-        "extern fn memcpy(__dest addr, __src addr, __n u64) addr",
+        "extern fn c.memcpy(__dest addr, __src addr, __n u64) addr",
         ["nonnull: __dest, __src"],
         r"^extern .*[ *]memcpy \(", system_string, "memcpy",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "CnPoint =", 0,
-        "struct CnPoint @align(4)",
+        "struct c.CnPoint @align(4)",
         ["```text\nsize 8, align 4\nx  i32  at offset 0\ny  i32  at offset 4\n```"],
         r"^struct CnPoint \{", local, "struct CnPoint",
     )
@@ -592,55 +592,55 @@ def pins_good(s, main, cn_h):
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_add(point", 0,
-        "extern fn cn_add(a i32, b i32) i32",
+        "extern fn c.cn_add(a i32, b i32) i32",
         [],
         r"^int cn_add\(", local, "cn_add",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_mixed(1", 0,
-        "extern fn cn_mixed(first i32, arg1 i32, third i32) i32",
+        "extern fn c.cn_mixed(first i32, arg1 i32, third i32) i32",
         [],
         r"^int cn_mixed\(", local, "cn_mixed",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_fmt(c", 0,
-        "extern fn cn_fmt(format addr, ...) i32",
+        "extern fn c.cn_fmt(format addr, ...) i32",
         ["C string: format"],
         r"^int cn_fmt\(", local, "cn_fmt",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_none(1", 0,
-        "extern fn cn_none(arg0 i32, arg1 i32) i32",
+        "extern fn c.cn_none(arg0 i32, arg1 i32) i32",
         [],
         r"^int cn_none\(", local, "cn_none",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_kw(3", 0,
-        "extern fn cn_kw(view i32) i32",
+        "extern fn c.cn_kw(view i32) i32",
         [],
         r"^int cn_kw\(", local, "cn_kw",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_scale(point", 0,
-        "extern fn cn_scale(point CnPoint, arg1 i32, name addr) CnPoint",
+        "extern fn c.cn_scale(point c.CnPoint, arg1 i32, name addr) c.CnPoint",
         ["nonnull: name; C string: name"],
         r"^CnPoint cn_scale\(", local, "cn_scale",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "cn_sum(scaled", 0,
-        "extern fn cn_sum(point CnPoint) i32",
+        "extern fn c.cn_sum(point c.CnPoint) i32",
         [],
         r"^int cn_sum\(", local, "cn_sum",
     )
     expect_c_hover(
         s, main, GOOD_MAIN, "printf(c", 0,
-        "extern fn printf(__format addr, ...) i32",
+        "extern fn c.printf(__format addr, ...) i32",
         ["C string: __format"],
         r"^extern .*[ *]printf \(", system_stdio, "printf",
     )
     expect_value(
         s, main, GOOD_MAIN, "CN_LIMIT", 0,
-        "```fas\nconst CN_LIMIT i32 = 42\n```\n\n```c\n#define CN_LIMIT 42\n```\n\n%s:3" % cn_h,
+        "```fas\nconst c.CN_LIMIT i32 = 42\n```\n\n```c\n#define CN_LIMIT 42\n```\n\n%s:3" % cn_h,
         "macro CN_LIMIT",
     )
     expect(
@@ -690,7 +690,7 @@ def run_c_names():
     did_open(s, bad, BAD_BROKEN, 1)
     expect(published(s.settle(), bad) != [], "broken bad.fas has no diagnostics")
     expect_unsupported(
-        s, bad, BAD_BROKEN, "cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
+        s, bad, BAD_BROKEN, "c.cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
         r"^long double cn_wide\(", "unsupported cn_wide",
     )
 
@@ -698,7 +698,7 @@ def run_c_names():
     expect(published(s.settle(), bad) == [], "fixed bad.fas has diagnostics")
     expect_c_hover(
         s, bad, BAD_FIXED, "cn_ok(1", 0,
-        "extern fn cn_ok(value i32) i32",
+        "extern fn c.cn_ok(value i32) i32",
         [],
         r"^int cn_ok\(", {bad_h}, "cn_ok",
     )
@@ -706,12 +706,12 @@ def run_c_names():
     did_change(s, bad, BAD_BROKEN, 3)
     expect(published(s.settle(), bad) != [], "restored cn_wide line has no diagnostics")
     expect_unsupported(
-        s, bad, BAD_BROKEN, "cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
+        s, bad, BAD_BROKEN, "c.cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
         r"^long double cn_wide\(", "unsupported cn_wide in changed region",
     )
     expect_c_hover(
         s, bad, BAD_BROKEN, "cn_ok(1", 0,
-        "extern fn cn_ok(value i32) i32",
+        "extern fn c.cn_ok(value i32) i32",
         [],
         r"^int cn_ok\(", {bad_h}, "cn_ok from snapshot",
     )
@@ -719,7 +719,7 @@ def run_c_names():
     did_change(s, bad, BAD_SHIFTED, 4)
     expect(published(s.settle(), bad) != [], "shifted bad.fas has no diagnostics")
     expect_unsupported(
-        s, bad, BAD_SHIFTED, "cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
+        s, bad, BAD_SHIFTED, "c.cn_wide(1", 0, UNSUPPORTED_REASON, bad_h,
         r"^long double cn_wide\(", "unsupported cn_wide after line insert",
     )
     expect_value(s, other, OTHER, "cn_wide(1", 0, None, "outside the closure after bad root")
@@ -743,7 +743,7 @@ PKG_BROKEN_HOVER = (
 
 
 def pkg_source(modules):
-    return 'use pkg "%s"\nuse "C" <pkg_hover.h>\n\nfn main() i32 {\n    return 0\n}\n' % modules
+    return 'use pkg "%s"\nuse "C" <pkg_hover.h> as c\n\nfn main() i32 {\n    return 0\n}\n' % modules
 
 
 def pkg_calls():
@@ -796,20 +796,20 @@ MO_HEADER_B = """#define MO_TWO 2
 
 MO_MAIN = "\n".join(
     [
-        'use "C" <stdio.h>',
-        'use "C" "mo_a.h"',
-        'use "C" "mo_b.h"',
-        'use "C" <<MO_BLK',
+        'use "C" <stdio.h> as c',
+        'use "C" "mo_a.h" as c',
+        'use "C" "mo_b.h" as c',
+        'use "C" as c <<MO_BLK',
         "#define MO_BLOCK 11",
         "static int mo_block(void) { return MO_BLOCK; }",
         "MO_BLK",
         "",
         "fn main() i32 {",
-        "  first i32 = MO_ONE",
-        "  mid i32 = MO_MID",
-        "  second i32 = MO_TWO",
-        "  eof i32 = EOF",
-        "  blk i32 = MO_BLOCK",
+        "  first i32 = c.MO_ONE",
+        "  mid i32 = c.MO_MID",
+        "  second i32 = c.MO_TWO",
+        "  eof i32 = c.EOF",
+        "  blk i32 = c.MO_BLOCK",
         "  return 0",
         "}",
     ]
@@ -818,10 +818,10 @@ MO_MAIN = "\n".join(
 FLAG_MAIN = "\n".join(
     [
         'use pkg "good"',
-        'use "C" "mo_a.h"',
+        'use "C" "mo_a.h" as c',
         "",
         "fn main() i32 {",
-        "  flag i32 = LSP_PKG",
+        "  flag i32 = c.LSP_PKG",
         "  return 0",
         "}",
     ]
@@ -839,9 +839,11 @@ def expect_macro(s, path, source, anchor, fas, define, header, line, label):
         read_text(header).split("\n")[line - 1] == define,
         "%s: %s line %d is not %r" % (label, header, line, define),
     )
-    expect_value(s, path, source, anchor, 2, macro_text(fas, define, header, line), label)
+    expect_value(s, path, source, anchor, 4, macro_text(fas, define, header, line), label)
+    # the alias word of `c.NAME` hovers the same C entity
+    expect_value(s, path, source, anchor, 2, macro_text(fas, define, header, line), label + " (alias)")
     expect(
-        s.result("textDocument/definition", at(path, source, anchor, 2)) == loc(header, line - 1, 8, 8),
+        s.result("textDocument/definition", at(path, source, anchor, 4)) == loc(header, line - 1, 8, 8),
         "%s: definition" % label,
     )
 
@@ -862,19 +864,19 @@ def run_macro_origins():
     expect(published(s.settle(), main) == [], "macro main has diagnostics")
 
     expect_macro(
-        s, main, MO_MAIN, "= MO_ONE", "const MO_ONE i32 = 1", "#define MO_ONE 1",
+        s, main, MO_MAIN, "= c.MO_ONE", "const c.MO_ONE i32 = 1", "#define MO_ONE 1",
         header_a, 1, "macro MO_ONE",
     )
     expect_macro(
-        s, main, MO_MAIN, "= MO_MID", "const MO_MID i32 = 4", "#define MO_MID 4",
+        s, main, MO_MAIN, "= c.MO_MID", "const c.MO_MID i32 = 4", "#define MO_MID 4",
         header_b, 3, "macro MO_MID after undef",
     )
     expect_macro(
-        s, main, MO_MAIN, "= MO_TWO", "const MO_TWO i32 = 2", "#define MO_TWO 2",
+        s, main, MO_MAIN, "= c.MO_TWO", "const c.MO_TWO i32 = 2", "#define MO_TWO 2",
         header_b, 1, "macro MO_TWO",
     )
     expect_macro(
-        s, main, MO_MAIN, "= MO_BLOCK", "const MO_BLOCK i32 = 11", "#define MO_BLOCK 11",
+        s, main, MO_MAIN, "= c.MO_BLOCK", "const c.MO_BLOCK i32 = 11", "#define MO_BLOCK 11",
         main, 5, "macro MO_BLOCK in C block",
     )
 
@@ -887,7 +889,7 @@ def run_macro_origins():
     ]
     if eof_lines:
         expect_macro(
-            s, main, MO_MAIN, "= EOF", "const EOF i32 = -1", "#define EOF (-1)",
+            s, main, MO_MAIN, "= c.EOF", "const c.EOF i32 = -1", "#define EOF (-1)",
             stdio[0], eof_lines[0], "macro EOF",
         )
     else:
@@ -895,9 +897,9 @@ def run_macro_origins():
 
     did_open(s, flag, FLAG_MAIN, 1)
     s.settle()
-    expect_value(s, flag, FLAG_MAIN, "= LSP_PKG", 2, None, "command-line macro hover")
+    expect_value(s, flag, FLAG_MAIN, "= c.LSP_PKG", 4, None, "command-line macro hover")
     expect(
-        s.result("textDocument/definition", at(flag, FLAG_MAIN, "= LSP_PKG", 2)) is None,
+        s.result("textDocument/definition", at(flag, FLAG_MAIN, "= c.LSP_PKG", 4)) is None,
         "command-line macro definition is not null",
     )
 

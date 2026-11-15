@@ -30,7 +30,7 @@ elif kind == "structs":
 else:
     declarations = [f"enum e{i} {{ E{i}a, E{i}b }};" for i in range(count)]
 (directory / "h.h").write_text("\n".join(declarations) + "\n")
-(directory / "main.fas").write_text('use "C" "h.h"\nfn main() i32 { return 0 }\n')
+(directory / "main.fas").write_text('use "C" "h.h" as c\nfn main() i32 { return 0 }\n')
 PY
     best=
     run=0
@@ -85,7 +85,7 @@ else
   fi
 
   cat >"$TMP/sdl_main.fas" <<'FAS'
-use "C" <SDL.h>
+use "C" <SDL.h> as c
 fn main() i32 { return 0 }
 FAS
   printf '#include <SDL.h>\n' >"$TMP/sdl_syntax.c"

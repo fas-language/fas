@@ -1,22 +1,22 @@
-use "C" <stdio.h>
-use "C" <stdlib.h>
-use "C" <string.h>
-use "C" <time.h>
-use "C" "c_interop_address.h"
-use "C" <<ADDRESS
+use "C" <stdio.h> as c
+use "C" <stdlib.h> as c
+use "C" <string.h> as c
+use "C" <time.h> as c
+use "C" "c_interop_address.h" as c
+use "C" as c <<ADDRESS
 int fas_interop_call_int(int (*function)(int), int value) {
   return function(value);
 }
 ADDRESS
-use "C" <<STAT
+use "C" as c <<STAT
 #include <sys/stat.h>
 typedef struct stat stat_t;
 STAT
 
 var fas_interop_values arr[5, i32] = {9, 1, 7, 2, 4}
 const fas_interop_function_table arr[2, addr] = {
-  &fas_interop_static_helper,
-  &fas_interop_address_only
+  &c.fas_interop_static_helper,
+  &c.fas_interop_address_only
 }
 
 extern "C" {
@@ -24,55 +24,55 @@ extern "C" {
     return left[i32] - right[i32]
   }
   fn fas_interop_exit() void {
-    puts(c"exit")
+    c.puts(c"exit")
     return
   }
 }
 
 fn main() i32 {
-  if fas_interop_static_helper(1) != 2 { return 16 }
-  if fas_interop_call_int(&fas_interop_static_helper, 41) != 42 { return 17 }
-  if fas_interop_call_int(fas_interop_function_table[0], 8) != 9 { return 18 }
-  if fas_interop_call_int(fas_interop_function_table[1], 9) != 18 { return 19 }
-  if fas_interop_raw_apply(fas_interop_raw_get(), 5) != 16 { return 20 }
-  if fas_interop_raw_apply(fas_interop_raw_global, 5) != 16 { return 21 }
-  if fas_interop_raw_array(&fas_interop_values[0]) != 7 { return 22 }
+  if c.fas_interop_static_helper(1) != 2 { return 16 }
+  if c.fas_interop_call_int(&c.fas_interop_static_helper, 41) != 42 { return 17 }
+  if c.fas_interop_call_int(fas_interop_function_table[0], 8) != 9 { return 18 }
+  if c.fas_interop_call_int(fas_interop_function_table[1], 9) != 18 { return 19 }
+  if c.fas_interop_raw_apply(c.fas_interop_raw_get(), 5) != 16 { return 20 }
+  if c.fas_interop_raw_apply(c.fas_interop_raw_global, 5) != 16 { return 21 }
+  if c.fas_interop_raw_array(&fas_interop_values[0]) != 7 { return 22 }
 
   path addr = c"interop.bin"
-  size usize = strlen(c"fas")
-  memory addr = malloc(size)
+  size usize = c.strlen(c"fas")
+  memory addr = c.malloc(size)
   if memory == null { return 1 }
-  free(memory)
+  c.free(memory)
 
-  file handle[FILE] = fopen(path, c"wb")
+  file handle[c.FILE] = c.fopen(path, c"wb")
   if file == null { return 2 }
-  if fwrite(c"12345678", 1, strlen(c"12345678"), file) != 8 { return 3 }
-  if fclose(file) != 0 { return 4 }
+  if c.fwrite(c"12345678", 1, c.strlen(c"12345678"), file) != 8 { return 3 }
+  if c.fclose(file) != 0 { return 4 }
 
-  stat_result stat_t
-  if stat(path, &stat_result) != 0 { return 5 }
+  stat_result c.stat_t
+  if c.stat(path, &stat_result) != 0 { return 5 }
   if stat_result.st_size != 8 { return 6 }
 
-  clock_result timespec = {0, 0}
-  if clock_gettime(1, &clock_result) != 0 { return 7 }
+  clock_result c.timespec = {0, 0}
+  if c.clock_gettime(1, &clock_result) != 0 { return 7 }
   if clock_result.tv_sec < 0 { return 8 }
 
-  file = fopen(path, c"rb")
+  file = c.fopen(path, c"rb")
   if file == null { return 9 }
-  if fseek(file, 0, SEEK_END) != 0 { return 10 }
-  end_position i64 = ftell(file)
+  if c.fseek(file, 0, c.SEEK_END) != 0 { return 10 }
+  end_position i64 = c.ftell(file)
   if end_position != 8 { return 11 }
-  if getc(file) != EOF { return 12 }
-  if fclose(file) != 0 { return 13 }
+  if c.getc(file) != c.EOF { return 12 }
+  if c.fclose(file) != 0 { return 13 }
 
-  qsort(&fas_interop_values[0], 5, sizeof[i32], &fas_interop_compare)
+  c.qsort(&fas_interop_values[0], 5, sizeof[i32], &fas_interop_compare)
   if fas_interop_values[0] != 1 { return 14 }
   if fas_interop_values[1] != 2 { return 14 }
   if fas_interop_values[2] != 4 { return 14 }
   if fas_interop_values[3] != 7 { return 14 }
   if fas_interop_values[4] != 9 { return 14 }
-  if atexit(&fas_interop_exit) != 0 { return 15 }
-  puts(c"interop: ok")
-  puts(c"main")
+  if c.atexit(&fas_interop_exit) != 0 { return 15 }
+  c.puts(c"interop: ok")
+  c.puts(c"main")
   return 0
 }

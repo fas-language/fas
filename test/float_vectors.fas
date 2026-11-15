@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as libc <<C
 #include <stdint.h>
 uint32_t float_vectors_expect32(uint32_t op, uint32_t a, uint32_t b, uint32_t c);
 uint64_t float_vectors_expect64(uint32_t op, uint64_t a, uint64_t b, uint64_t c);
@@ -55,32 +55,32 @@ fn check32[N const usize](ap addr, bp addr, cp addr, ip addr, pp addr) i32 {
   expanded vec[N,f32] = expand(a, movement_mask)
   j usize = 0
   while j < N {
-    if bitcast[u32](add[j]) != float_vectors_expect32(0, ab[j], bb[j], cb[j]) { return 1 }
-    if bitcast[u32](sub[j]) != float_vectors_expect32(1, ab[j], bb[j], cb[j]) { return 2 }
-    if bitcast[u32](mul[j]) != float_vectors_expect32(2, ab[j], bb[j], cb[j]) { return 3 }
-    if bitcast[u32](div[j]) != float_vectors_expect32(3, ab[j], bb[j], cb[j]) { return 4 }
-    if bitcast[u32](neg[j]) != float_vectors_expect32(4, ab[j], bb[j], cb[j]) { return 5 }
-    if bitcast[u32](root[j]) != float_vectors_expect32(5, ab[j], bb[j], cb[j]) { return 6 }
-    if bitcast[u32](down[j]) != float_vectors_expect32(6, ab[j], bb[j], cb[j]) { return 7 }
-    if bitcast[u32](up[j]) != float_vectors_expect32(7, ab[j], bb[j], cb[j]) { return 8 }
-    if bitcast[u32](near[j]) != float_vectors_expect32(8, ab[j], bb[j], cb[j]) { return 9 }
-    if bitcast[u32](mag[j]) != float_vectors_expect32(9, ab[j], bb[j], cb[j]) { return 10 }
-    if bitcast[u32](fused[j]) != float_vectors_expect32(10, ab[j], bb[j], cb[j]) { return 11 }
-    if eq[j] != (float_vectors_expect32(11, ab[j], bb[j], cb[j]) != 0) { return 12 }
-    if ne[j] != (float_vectors_expect32(12, ab[j], bb[j], cb[j]) != 0) { return 13 }
-    if lt[j] != (float_vectors_expect32(13, ab[j], bb[j], cb[j]) != 0) { return 14 }
-    if le[j] != (float_vectors_expect32(14, ab[j], bb[j], cb[j]) != 0) { return 15 }
-    if gt[j] != (float_vectors_expect32(15, ab[j], bb[j], cb[j]) != 0) { return 16 }
-    if ge[j] != (float_vectors_expect32(16, ab[j], bb[j], cb[j]) != 0) { return 17 }
-    if bitcast[u32](choose[j]) != float_vectors_expect32(17, ab[j], bb[j], cb[j]) { return 18 }
+    if bitcast[u32](add[j]) != libc.float_vectors_expect32(0, ab[j], bb[j], cb[j]) { return 1 }
+    if bitcast[u32](sub[j]) != libc.float_vectors_expect32(1, ab[j], bb[j], cb[j]) { return 2 }
+    if bitcast[u32](mul[j]) != libc.float_vectors_expect32(2, ab[j], bb[j], cb[j]) { return 3 }
+    if bitcast[u32](div[j]) != libc.float_vectors_expect32(3, ab[j], bb[j], cb[j]) { return 4 }
+    if bitcast[u32](neg[j]) != libc.float_vectors_expect32(4, ab[j], bb[j], cb[j]) { return 5 }
+    if bitcast[u32](root[j]) != libc.float_vectors_expect32(5, ab[j], bb[j], cb[j]) { return 6 }
+    if bitcast[u32](down[j]) != libc.float_vectors_expect32(6, ab[j], bb[j], cb[j]) { return 7 }
+    if bitcast[u32](up[j]) != libc.float_vectors_expect32(7, ab[j], bb[j], cb[j]) { return 8 }
+    if bitcast[u32](near[j]) != libc.float_vectors_expect32(8, ab[j], bb[j], cb[j]) { return 9 }
+    if bitcast[u32](mag[j]) != libc.float_vectors_expect32(9, ab[j], bb[j], cb[j]) { return 10 }
+    if bitcast[u32](fused[j]) != libc.float_vectors_expect32(10, ab[j], bb[j], cb[j]) { return 11 }
+    if eq[j] != (libc.float_vectors_expect32(11, ab[j], bb[j], cb[j]) != 0) { return 12 }
+    if ne[j] != (libc.float_vectors_expect32(12, ab[j], bb[j], cb[j]) != 0) { return 13 }
+    if lt[j] != (libc.float_vectors_expect32(13, ab[j], bb[j], cb[j]) != 0) { return 14 }
+    if le[j] != (libc.float_vectors_expect32(14, ab[j], bb[j], cb[j]) != 0) { return 15 }
+    if gt[j] != (libc.float_vectors_expect32(15, ab[j], bb[j], cb[j]) != 0) { return 16 }
+    if ge[j] != (libc.float_vectors_expect32(16, ab[j], bb[j], cb[j]) != 0) { return 17 }
+    if bitcast[u32](choose[j]) != libc.float_vectors_expect32(17, ab[j], bb[j], cb[j]) { return 18 }
     if bitcast[u32](broadcast[j]) != ab[0] { return 19 }
-    if bitcast[u32](converted[j]) != float_vectors_expect32(18, bitcast[u32](ai[j]), 0, 0) { return 20 }
-    if bitcast[u32](saturated[j]) != float_vectors_expect32(19, ab[j], 0, 0) { return 21 }
-    if bitcast[u64](widened[j]) != float_vectors_expect64(20, ab[j], 0, 0) { return 22 }
-    if bitcast[u32](narrowed[j]) != float_vectors_narrow64(bitcast[u64](widened[j])) { return 23 }
+    if bitcast[u32](converted[j]) != libc.float_vectors_expect32(18, bitcast[u32](ai[j]), 0, 0) { return 20 }
+    if bitcast[u32](saturated[j]) != libc.float_vectors_expect32(19, ab[j], 0, 0) { return 21 }
+    if bitcast[u64](widened[j]) != libc.float_vectors_expect64(20, ab[j], 0, 0) { return 22 }
+    if bitcast[u32](narrowed[j]) != libc.float_vectors_narrow64(bitcast[u64](widened[j])) { return 23 }
     if bits[j] != ab[j] { return 24 }
     if bitcast[u32](restored[j]) != ab[j] { return 25 }
-    if bitcast[u32](compound[j]) != float_vectors_expect32(0, ab[j], bb[j], cb[j]) { return 26 }
+    if bitcast[u32](compound[j]) != libc.float_vectors_expect32(0, ab[j], bb[j], cb[j]) { return 26 }
     if bitcast[u32](permuted[j]) != bitcast[u32](a[pi[j]]) { return 27 }
     if bitcast[u32](compacted[j]) != ab[j] { return 28 }
     if bitcast[u32](expanded[j]) != ab[j] { return 29 }
@@ -127,31 +127,31 @@ fn check64[N const usize](ap addr, bp addr, cp addr, ip addr, pp addr) i32 {
   compound += b
   j usize = 0
   while j < N {
-    if bitcast[u64](add[j]) != float_vectors_expect64(0, ab[j], bb[j], cb[j]) { return 1 }
-    if bitcast[u64](sub[j]) != float_vectors_expect64(1, ab[j], bb[j], cb[j]) { return 2 }
-    if bitcast[u64](mul[j]) != float_vectors_expect64(2, ab[j], bb[j], cb[j]) { return 3 }
-    if bitcast[u64](div[j]) != float_vectors_expect64(3, ab[j], bb[j], cb[j]) { return 4 }
-    if bitcast[u64](neg[j]) != float_vectors_expect64(4, ab[j], bb[j], cb[j]) { return 5 }
-    if bitcast[u64](root[j]) != float_vectors_expect64(5, ab[j], bb[j], cb[j]) { return 6 }
-    if bitcast[u64](down[j]) != float_vectors_expect64(6, ab[j], bb[j], cb[j]) { return 7 }
-    if bitcast[u64](up[j]) != float_vectors_expect64(7, ab[j], bb[j], cb[j]) { return 8 }
-    if bitcast[u64](near[j]) != float_vectors_expect64(8, ab[j], bb[j], cb[j]) { return 9 }
-    if bitcast[u64](mag[j]) != float_vectors_expect64(9, ab[j], bb[j], cb[j]) { return 10 }
-    if bitcast[u64](fused[j]) != float_vectors_expect64(10, ab[j], bb[j], cb[j]) { return 11 }
-    if eq[j] != (float_vectors_expect64(11, ab[j], bb[j], cb[j]) != 0) { return 12 }
-    if ne[j] != (float_vectors_expect64(12, ab[j], bb[j], cb[j]) != 0) { return 13 }
-    if lt[j] != (float_vectors_expect64(13, ab[j], bb[j], cb[j]) != 0) { return 14 }
-    if le[j] != (float_vectors_expect64(14, ab[j], bb[j], cb[j]) != 0) { return 15 }
-    if gt[j] != (float_vectors_expect64(15, ab[j], bb[j], cb[j]) != 0) { return 16 }
-    if ge[j] != (float_vectors_expect64(16, ab[j], bb[j], cb[j]) != 0) { return 17 }
-    if bitcast[u64](choose[j]) != float_vectors_expect64(17, ab[j], bb[j], cb[j]) { return 18 }
-    if bitcast[u64](converted[j]) != float_vectors_expect64(18, ai[j], 0, 0) { return 19 }
-    if bitcast[u64](saturated[j]) != float_vectors_expect64(19, ab[j], 0, 0) { return 20 }
-    if bitcast[u32](narrowed[j]) != float_vectors_narrow64(ab[j]) { return 21 }
-    if bitcast[u64](widened[j]) != float_vectors_expect64(20, bitcast[u32](narrowed[j]), 0, 0) { return 22 }
+    if bitcast[u64](add[j]) != libc.float_vectors_expect64(0, ab[j], bb[j], cb[j]) { return 1 }
+    if bitcast[u64](sub[j]) != libc.float_vectors_expect64(1, ab[j], bb[j], cb[j]) { return 2 }
+    if bitcast[u64](mul[j]) != libc.float_vectors_expect64(2, ab[j], bb[j], cb[j]) { return 3 }
+    if bitcast[u64](div[j]) != libc.float_vectors_expect64(3, ab[j], bb[j], cb[j]) { return 4 }
+    if bitcast[u64](neg[j]) != libc.float_vectors_expect64(4, ab[j], bb[j], cb[j]) { return 5 }
+    if bitcast[u64](root[j]) != libc.float_vectors_expect64(5, ab[j], bb[j], cb[j]) { return 6 }
+    if bitcast[u64](down[j]) != libc.float_vectors_expect64(6, ab[j], bb[j], cb[j]) { return 7 }
+    if bitcast[u64](up[j]) != libc.float_vectors_expect64(7, ab[j], bb[j], cb[j]) { return 8 }
+    if bitcast[u64](near[j]) != libc.float_vectors_expect64(8, ab[j], bb[j], cb[j]) { return 9 }
+    if bitcast[u64](mag[j]) != libc.float_vectors_expect64(9, ab[j], bb[j], cb[j]) { return 10 }
+    if bitcast[u64](fused[j]) != libc.float_vectors_expect64(10, ab[j], bb[j], cb[j]) { return 11 }
+    if eq[j] != (libc.float_vectors_expect64(11, ab[j], bb[j], cb[j]) != 0) { return 12 }
+    if ne[j] != (libc.float_vectors_expect64(12, ab[j], bb[j], cb[j]) != 0) { return 13 }
+    if lt[j] != (libc.float_vectors_expect64(13, ab[j], bb[j], cb[j]) != 0) { return 14 }
+    if le[j] != (libc.float_vectors_expect64(14, ab[j], bb[j], cb[j]) != 0) { return 15 }
+    if gt[j] != (libc.float_vectors_expect64(15, ab[j], bb[j], cb[j]) != 0) { return 16 }
+    if ge[j] != (libc.float_vectors_expect64(16, ab[j], bb[j], cb[j]) != 0) { return 17 }
+    if bitcast[u64](choose[j]) != libc.float_vectors_expect64(17, ab[j], bb[j], cb[j]) { return 18 }
+    if bitcast[u64](converted[j]) != libc.float_vectors_expect64(18, ai[j], 0, 0) { return 19 }
+    if bitcast[u64](saturated[j]) != libc.float_vectors_expect64(19, ab[j], 0, 0) { return 20 }
+    if bitcast[u32](narrowed[j]) != libc.float_vectors_narrow64(ab[j]) { return 21 }
+    if bitcast[u64](widened[j]) != libc.float_vectors_expect64(20, bitcast[u32](narrowed[j]), 0, 0) { return 22 }
     if bits[j] != ab[j] { return 23 }
     if bitcast[u64](restored[j]) != ab[j] { return 24 }
-    if bitcast[u64](compound[j]) != float_vectors_expect64(0, ab[j], bb[j], cb[j]) { return 25 }
+    if bitcast[u64](compound[j]) != libc.float_vectors_expect64(0, ab[j], bb[j], cb[j]) { return 25 }
     j += 1
   }
   return 0
@@ -247,7 +247,7 @@ fn check_construction() i32 {
   runtime_root vec[4,f32] = sqrt(FV32)
   runtime_bits vec[4,u32] = bitcast[vec[4,u32]](runtime_root)
   if !all(const_bits == runtime_bits) { return 2 }
-  if bitcast[u32](FG32[2]) != float_vectors_expect32(0, 0x40400000, 0x3f800000, 0) { return 3 }
+  if bitcast[u32](FG32[2]) != libc.float_vectors_expect32(0, 0x40400000, 0x3f800000, 0) { return 3 }
   return 0
 }
 

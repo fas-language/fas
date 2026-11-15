@@ -47,7 +47,7 @@ CAP_SECONDS = 5.0
 servers = []
 
 LIB_BROKEN = [
-    'use "C" <does_not_exist.h>',
+    'use "C" <does_not_exist.h> as c',
     "",
     "struct Shape { width i32 height i32 }",
     "",
@@ -761,7 +761,7 @@ def run_use_line():
 
 
 RAW_GOOD = [
-    'use "C" <<END',
+    'use "C" as c <<END',
     "struct point { int x; int y; };",
     "int c_twice(int value) { return value * 2; }",
     "END",
@@ -1301,7 +1301,7 @@ KEEP_I32_GOOD = [
 KEEP_I32_BROKEN = delete_closing_brace(KEEP_I32_GOOD)
 
 KEEP_RAW_GOOD = [
-    'use "C" <<C',
+    'use "C" as c <<C',
     "#if 0",
     "fn x() {",
     "struct y {",
@@ -1313,7 +1313,7 @@ KEEP_RAW_GOOD = [
     "const LIMIT i32 = 4",
     "",
     "fn first() i32 {",
-    "    return c_twice(LIMIT)",
+    "    return c.c_twice(LIMIT)",
     "}",
     "",
     "fn middle() i32 {",

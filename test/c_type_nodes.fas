@@ -1,32 +1,32 @@
-use "C" "c_type_nodes.h"
-use "C" <stdio.h>
+use "C" "c_type_nodes.h" as c
+use "C" <stdio.h> as c
 
 extern "C" {
   var node_incomplete arr[3, i32] = {41, 47, 53}
 
   fn main() i32 {
-    if node_integer != 4242 || !node_bool { return 1 }
-    if node_enum != NODE_ENUM_VALUE { return 2 }
-    if node_packed != trunc[u8](NODE_PACKED_VALUE) { return 3 }
-    if node_wide != NODE_WIDE_VALUE { return 4 }
-    if node_pointer_value(node_pointer) != 23 { return 5 }
-    if node_function_value(node_function, 5) != 8 { return 6 }
-    if node_function_array[0] == null || node_function_array[1] == null { return 7 }
-    if node_function_array_value(1, 5) != 22 { return 8 }
-    if node_array[1] != 23 || node_incomplete[1] != 47 { return 9 }
-    if node_row_pointer_value(node_row_pointer) != 43 { return 10 }
-    if node_record.first != 59 || node_record.second != 61 { return 11 }
-    if node_union.number != 67 { return 12 }
-    if sizeof[NodeFloatStorageAlias] != 12 { return 13 }
-    if node_float_storage.before != 73 || node_float_storage.after != 79 { return 14 }
-    if node_qualified_value(node_qualified) != 71 { return 15 }
-    printf(c"%d\n", bitcast[i32](node_integer) + zext[i32](node_bool) + node_enum +
-      zext[i32](node_packed) + trunc[i32](node_wide) +
-      node_pointer_value(node_pointer) + node_function_value(node_function, 5) +
-      node_function_array_value(1, 5) + node_array[1] + node_incomplete[1] +
-      node_row_pointer_value(node_row_pointer) + node_record.first +
-      node_record.second + node_union.number + node_float_storage.before +
-      node_float_storage.after + node_qualified_value(node_qualified))
+    if c.node_integer != 4242 || !c.node_bool { return 1 }
+    if c.node_enum != c.NODE_ENUM_VALUE { return 2 }
+    if c.node_packed != trunc[u8](c.NODE_PACKED_VALUE) { return 3 }
+    if c.node_wide != c.NODE_WIDE_VALUE { return 4 }
+    if c.node_pointer_value(c.node_pointer) != 23 { return 5 }
+    if c.node_function_value(c.node_function, 5) != 8 { return 6 }
+    if c.node_function_array[0] == null || c.node_function_array[1] == null { return 7 }
+    if c.node_function_array_value(1, 5) != 22 { return 8 }
+    if c.node_array[1] != 23 || node_incomplete[1] != 47 { return 9 }
+    if c.node_row_pointer_value(c.node_row_pointer) != 43 { return 10 }
+    if c.node_record.first != 59 || c.node_record.second != 61 { return 11 }
+    if c.node_union.number != 67 { return 12 }
+    if sizeof[c.NodeFloatStorageAlias] != 12 { return 13 }
+    if c.node_float_storage.before != 73 || c.node_float_storage.after != 79 { return 14 }
+    if c.node_qualified_value(c.node_qualified) != 71 { return 15 }
+    c.printf(c"%d\n", bitcast[i32](c.node_integer) + zext[i32](c.node_bool) + c.node_enum +
+      zext[i32](c.node_packed) + trunc[i32](c.node_wide) +
+      c.node_pointer_value(c.node_pointer) + c.node_function_value(c.node_function, 5) +
+      c.node_function_array_value(1, 5) + c.node_array[1] + node_incomplete[1] +
+      c.node_row_pointer_value(c.node_row_pointer) + c.node_record.first +
+      c.node_record.second + c.node_union.number + c.node_float_storage.before +
+      c.node_float_storage.after + c.node_qualified_value(c.node_qualified))
     return 0
   }
 }

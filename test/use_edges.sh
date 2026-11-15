@@ -188,8 +188,8 @@ cat >"$USE_EDGES_TMP/paths/library.h" <<'C'
 typedef unsigned long imported_size;
 C
 cat >"$USE_EDGES_TMP/paths/c-import.fas" <<'FAS'
-use "C" <stddef.h>
-use "C" "library.h"
+use "C" <stddef.h> as c
+use "C" "library.h" as c
 fn main() i32 { return 0 }
 FAS
 TMPDIR="$USE_EDGES_TMP" "$OCAML_FAS" --emit-ir "$USE_EDGES_TMP/paths/c-import.fas" \
@@ -207,21 +207,24 @@ grep -F '#include <stddef.h>' "$c_import_unit" >/dev/null \
 grep -F "#include \"$USE_EDGES_TMP/paths/library.h\"" "$c_import_unit" >/dev/null \
   || fail "quoted header was not resolved from the Fas source directory"
 cp "$ROOT/test/c_import/matrix.h" "$USE_EDGES_TMP/paths/matrix.h"
+# one header imported by two files is one C entity in both
 cat >"$USE_EDGES_TMP/paths/left.fas" <<'FAS'
-use "C" "matrix.h"
+use "C" "matrix.h" as c
+fn left_echo(x i32) i32 { return c.fas_i32_echo(x) }
 FAS
 cat >"$USE_EDGES_TMP/paths/right.fas" <<'FAS'
-use "C" "matrix.h"
+use "C" "matrix.h" as m
+fn right_echo(x i32) i32 { return m.fas_i32_echo(x) }
 FAS
 cat >"$USE_EDGES_TMP/paths/repeated-import.fas" <<'FAS'
 use "left.fas"
 use "right.fas"
-fn main() i32 { return fas_i32_echo(7) }
+fn main() i32 { return left_echo(7) - right_echo(7) }
 FAS
 "$OCAML_FAS" --emit-ir "$USE_EDGES_TMP/paths/repeated-import.fas" \
   >"$USE_EDGES_TMP/repeated-import.ll"
 cat >"$USE_EDGES_TMP/paths/manifest.fas" <<'FAS'
-use "C" "matrix.h"
+use "C" "matrix.h" as c
 fn main() i32 { return 0 }
 FAS
 TMPDIR="$USE_EDGES_TMP" "$OCAML_FAS" --keep --emit-ir \
@@ -247,7 +250,7 @@ bindings_again=$(sed -n 's/^fas: kept C bindings: //p' "$USE_EDGES_TMP/manifest-
 cmp -s "$USE_EDGES_TMP/manifest-first.txt" "$bindings_again" \
   || fail "bindings manifest changed between identical runs"
 cat >"$USE_EDGES_TMP/paths/missing-import.fas" <<'FAS'
-use "C" "absent.h"
+use "C" "absent.h" as c
 FAS
 expect_failure "$OCAML_FAS" --emit-ir "$USE_EDGES_TMP/paths/missing-import.fas"
 grep -F "$USE_EDGES_TMP/paths/missing-import.fas:1:9: error: C header \`absent.h\` not found" \

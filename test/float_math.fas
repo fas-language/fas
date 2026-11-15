@@ -1,4 +1,4 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as libc
 
 const EDGE32 arr[24, u32] = {
   0x00000000, 0x80000000, 0x00000001, 0x80000001,
@@ -89,7 +89,7 @@ fn next64(state u64) u64 {
 
 fn show32(bits u32) void {
   value f32 = bitcast[f32](bits)
-  printf(c"32 %08x %08x %08x %08x %08x %08x\n", bits,
+  libc.printf(c"32 %08x %08x %08x %08x %08x %08x\n", bits,
     bitcast[u32](sqrt(value)), bitcast[u32](floor(value)),
     bitcast[u32](ceil(value)), bitcast[u32](round(value)),
     bitcast[u32](abs(value)))
@@ -97,7 +97,7 @@ fn show32(bits u32) void {
 
 fn show64(bits u64) void {
   value f64 = bitcast[f64](bits)
-  printf(c"64 %016lx %016lx %016lx %016lx %016lx %016lx\n", bits,
+  libc.printf(c"64 %016lx %016lx %016lx %016lx %016lx %016lx\n", bits,
     bitcast[u64](sqrt(value)), bitcast[u64](floor(value)),
     bitcast[u64](ceil(value)), bitcast[u64](round(value)),
     bitcast[u64](abs(value)))
@@ -107,7 +107,7 @@ fn show_fma32(a_bits u32, b_bits u32, c_bits u32) void {
   a f32 = bitcast[f32](a_bits)
   b f32 = bitcast[f32](b_bits)
   c f32 = bitcast[f32](c_bits)
-  printf(c"fma32 %08x %08x %08x %08x\n", a_bits, b_bits, c_bits,
+  libc.printf(c"fma32 %08x %08x %08x %08x\n", a_bits, b_bits, c_bits,
     bitcast[u32](fma(a, b, c)))
 }
 
@@ -115,7 +115,7 @@ fn show_fma64(a_bits u64, b_bits u64, c_bits u64) void {
   a f64 = bitcast[f64](a_bits)
   b f64 = bitcast[f64](b_bits)
   c f64 = bitcast[f64](c_bits)
-  printf(c"fma64 %016lx %016lx %016lx %016lx\n", a_bits, b_bits, c_bits,
+  libc.printf(c"fma64 %016lx %016lx %016lx %016lx\n", a_bits, b_bits, c_bits,
     bitcast[u64](fma(a, b, c)))
 }
 
@@ -126,7 +126,7 @@ fn splat_fma[N const usize](a vec[N, f32]) vec[N, f32] {
 fn show_splat_fma() void {
   runtime vec[4, f32] = fma(SPLAT_INPUT, SPLAT_INPUT, splat(1.0))
   generic_value vec[4, f32] = splat_fma[4](SPLAT_INPUT)
-  printf(c"splat %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"splat %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](SPLAT_FMA[0]), bitcast[u32](SPLAT_FMA[1]),
     bitcast[u32](SPLAT_FMA[2]), bitcast[u32](SPLAT_FMA[3]),
     bitcast[u32](runtime[0]), bitcast[u32](runtime[1]),
@@ -139,7 +139,7 @@ fn show_peer(b bool) void {
   a f32 = PEER_A
   left f32 = if b { a } else { 0.1 }
   right f32 = if b { 0.1 } else { a }
-  printf(c"peer %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"peer %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](a + 0.1), bitcast[u32](0.1 + a),
     bitcast[u32](a - 0.1), bitcast[u32](0.1 - a),
     bitcast[u32](a * -1.5), bitcast[u32](-1.5 * a),
@@ -150,7 +150,7 @@ fn show_peer(b bool) void {
     zext[u32](a <= 0.1), zext[u32](0.1 <= a),
     zext[u32](a > 0.1), zext[u32](0.1 > a),
     zext[u32](a >= 0.1), zext[u32](0.1 >= a))
-  printf(c"peer_if %08x %08x\n", bitcast[u32](left), bitcast[u32](right))
+  libc.printf(c"peer_if %08x %08x\n", bitcast[u32](left), bitcast[u32](right))
 }
 
 fn show_float_shapes(b bool) void {
@@ -163,25 +163,25 @@ fn show_float_shapes(b bool) void {
   fused4 f32 = fma(a, a, if b { 0.5 } else { 1.0 })
   neg vec[4, f32] = -splat(2.0) * SPLAT_INPUT
   neg_fma vec[4, f32] = fma(SPLAT_INPUT, SPLAT_INPUT, -splat(0.5))
-  printf(c"shape_runtime %08x %08x %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"shape_runtime %08x %08x %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](fused1), bitcast[u32](fused2), bitcast[u32](fused3),
     bitcast[u32](fused4), bitcast[u32](left_chain), bitcast[u32](right_chain),
     bitcast[u32](neg[0]), bitcast[u32](neg_fma[0]))
 }
 
 fn main() i32 {
-  printf(c"const32 %08x %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"const32 %08x %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](ROOT32), bitcast[u32](FUSED32), bitcast[u32](FLOOR32),
     bitcast[u32](CEIL32), bitcast[u32](ROUND32),
     bitcast[u32](ROUND_NEGATIVE_HALF32), bitcast[u32](ABS_NAN32))
-  printf(c"const64 %016lx %016lx %016lx %016lx %016lx %016lx\n",
+  libc.printf(c"const64 %016lx %016lx %016lx %016lx %016lx %016lx\n",
     bitcast[u64](ROOT64), bitcast[u64](FUSED64), bitcast[u64](FLOOR64),
     bitcast[u64](CEIL64), bitcast[u64](ROUND64), bitcast[u64](ABS_NAN64))
-  printf(c"shape_const %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"shape_const %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](FMA_SHAPE_NEG), bitcast[u32](FMA_SHAPE_NEG_FIRST),
     bitcast[u32](FMA_SHAPE_PRODUCT), bitcast[u32](FMA_SHAPE_IF),
     bitcast[u32](NEG_SPLAT[0]), bitcast[u32](NEG_SPLAT_FMA[0]))
-  printf(c"peer_const %08x %08x %08x %08x %08x %08x %08x %08x\n",
+  libc.printf(c"peer_const %08x %08x %08x %08x %08x %08x %08x %08x\n",
     bitcast[u32](PEER_ADD_LEFT), bitcast[u32](PEER_ADD_RIGHT),
     bitcast[u32](PEER_SUB_LEFT), bitcast[u32](PEER_SUB_RIGHT),
     bitcast[u32](PEER_MUL_LEFT), bitcast[u32](PEER_MUL_RIGHT),

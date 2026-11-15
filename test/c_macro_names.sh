@@ -20,45 +20,45 @@ cat >"$TMP/macros.h" <<'C'
 #define SAME_F 2.5
 C
 
+# C namespaces: a macro is `c.NAME`, so a Fas name of the same spelling
+# (in the importing file or in a file that imports it) is a different
+# entity, and both keep their values
 cat >"$TMP/same-int.fas" <<'FAS'
-use "C" "macros.h"
+use "C" "macros.h" as c
 const SAME_I i32 = 1
-fn main() i32 { return SAME_I }
+fn main() i32 { return SAME_I + c.SAME_I - 8 }
 FAS
 cat >"$TMP/same-float.fas" <<'FAS'
-use "C" "macros.h"
+use "C" "macros.h" as c
 fn SAME_F() f64 { return 1.0 }
-fn main() i32 { return 0 }
+fn main() i32 { return cvt[i32](SAME_F() + c.SAME_F) - 3 }
 FAS
 cat >"$TMP/lib.fas" <<'FAS'
-use "C" "macros.h"
+use "C" "macros.h" as c
+fn lib_same_i() i32 { return c.SAME_I }
 FAS
 cat >"$TMP/cross-int.fas" <<'FAS'
 use "lib.fas"
 const SAME_I i32 = 1
-fn main() i32 { return SAME_I }
+fn main() i32 { return SAME_I + lib_same_i() - 8 }
 FAS
 cat >"$TMP/cross-float.fas" <<'FAS'
 use "lib.fas"
 fn SAME_F() f64 { return 1.0 }
-fn main() i32 { return 0 }
+fn main() i32 { return cvt[i32](SAME_F()) + lib_same_i() - 8 }
 FAS
 
 for source in same-int same-float cross-int cross-float; do
-  if "$OCAML_FAS" --emit-llvm "$TMP/$source.fas" -o "$TMP/$source.ll" \
-    >"$TMP/$source.out" 2>&1; then
-    fail "$source macro conflict was accepted"
-  fi
-  grep -F 'duplicate declaration' "$TMP/$source.out" >/dev/null \
-    || fail "$source did not report a duplicate declaration"
-  test ! -e "$TMP/$source.ll" || fail "$source created output after rejection"
+  "$OCAML_FAS" -O0 "$TMP/$source.fas" -o "$TMP/$source" >"$TMP/$source.out" 2>&1 \
+    || fail "$source: Fas name and C macro should coexist: $(cat "$TMP/$source.out")"
+  timeout 30 "$TMP/$source" || fail "$source: a Fas name or a C macro changed value"
 done
 
 cat >"$TMP/accepted.fas" <<'FAS'
-use "C" "macros.h"
+use "C" "macros.h" as c
 fn main() i32 {
-  integer i32 = SAME_I
-  floating f64 = SAME_F
+  integer i32 = c.SAME_I
+  floating f64 = c.SAME_F
   return integer - 7
 }
 FAS
@@ -72,15 +72,15 @@ typedef struct { short Other; } td;
 #define Other 3
 C
 cat >"$TMP/fields.fas" <<'FAS'
-use "C" <stdio.h>
-use "C" "fields.h"
+use "C" <stdio.h> as c
+use "C" "fields.h" as c
 fn main() i32 {
-  v vt = {}
-  t td = {}
+  v c.vt = {}
+  t c.td = {}
   v.SetPort = 5
   v.Other = 6
   t.Other = -2
-  printf(c"%d %ld %d %d %zu %zu\n", v.SetPort, v.Other, t.Other, Other, sizeof[vt], sizeof[td])
+  c.printf(c"%d %ld %d %d %zu %zu\n", v.SetPort, v.Other, t.Other, c.Other, sizeof[c.vt], sizeof[c.td])
   return 0
 }
 FAS
@@ -117,18 +117,18 @@ struct many { int f0, f1, f2, f3, f4, f5, f6, f7, f8, f9; };
 #define BAD undeclared_name
 C
 cat >"$TMP/broken.fas" <<'FAS'
-use "C" "broken.h"
+use "C" "broken.h" as c
 fn main() i32 {
-  m many = {}
-  m.f3 = GOOD
-  return m.f3 - BAD
+  m c.many = {}
+  m.f3 = c.GOOD
+  return m.f3 - c.BAD
 }
 FAS
 if "$OCAML_FAS" --emit-llvm "$TMP/broken.fas" -o "$TMP/broken.ll" \
   >"$TMP/broken.out" 2>&1; then
   fail "unusable macro next to fields named like macros was accepted"
 fi
-grep -F 'unknown name `BAD`' "$TMP/broken.out" >/dev/null \
+grep -F 'unknown name `c.BAD`' "$TMP/broken.out" >/dev/null \
   || fail "unusable macro next to fields named like macros was not reported as unknown"
 
 cat >"$TMP/no-header.fas" <<'FAS'
@@ -145,4 +145,4 @@ TOOL_LOG="$TMP/cc.log" REAL_CC="$CC" CC="$TMP/cc-wrap" \
   "$OCAML_FAS" --emit-llvm "$TMP/no-header.fas" >"$TMP/no-header.ll"
 test ! -s "$TMP/cc.log" || fail "no-header program ran extra C preprocessing"
 
-echo 'c_macro_names: declaration conflicts, accepted macros, fields named like macros, and no-header imports: ok'
+echo 'c_macro_names: Fas names next to C macros, accepted macros, fields named like macros, and no-header imports: ok'

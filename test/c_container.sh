@@ -38,10 +38,10 @@ expect_failure() {
 
 mkdir "$CONTAINER_TMP/deps"
 cat >"$CONTAINER_TMP/deps/first.fas" <<'FAS'
-use "C" <<FIRST
+use "C" as c <<FIRST
 #define FIRST_VALUE 17
 FIRST
-use "C" <<SECOND
+use "C" as c <<SECOND
 #include <stdio.h>
 int fragment_value(void) { return FIRST_VALUE; }
 int c_calls_fas(void) {
@@ -53,15 +53,23 @@ static int fas_unused_static_helper(void) { return 99; }
 int fas_container_global = 13;
 void fas_report_result(int value) { printf("%d\n", value); }
 SECOND
+// C namespaces: a file sees only the C it imports, so this file hands its
+// container's C to program.fas through Fas functions
+fn first_fragment_value() i32 { return c.fragment_value() }
+fn first_c_calls_fas() i32 { return c.c_calls_fas() }
+fn first_static_value(value i32) i32 { return c.fas_static_value(value) }
+fn first_container_global() i32 { return c.fas_container_global }
+fn first_report_result(value i32) void { c.fas_report_result(value) }
 FAS
 cat >"$CONTAINER_TMP/deps/second.fas" <<'FAS'
-use "C" <<OTHER
+use "C" as c <<OTHER
 #ifdef FIRST_VALUE
 #error macro escaped across Fas translation units
 #endif
 #define SECOND_VALUE 23
 int other_value(void) { return SECOND_VALUE; }
 OTHER
+fn second_other_value() i32 { return c.other_value() }
 FAS
 cat >"$CONTAINER_TMP/program.fas" <<'FAS'
 use "deps/first.fas"
@@ -71,11 +79,11 @@ extern "C" {
   fn fas_exported_value() i32 { return 10 }
 }
 fn main() i32 {
-  result i32 = fragment_value() + other_value()
-  result += c_calls_fas()
-  result += fas_static_value(1)
-  result += fas_container_global
-  fas_report_result(result)
+  result i32 = first_fragment_value() + second_other_value()
+  result += first_c_calls_fas()
+  result += first_static_value(1)
+  result += first_container_global()
+  first_report_result(result)
   if result != 66 { return 1 }
   return 0
 }
@@ -129,11 +137,11 @@ grep -E ' [BD] fas_container_global$' "$CONTAINER_TMP/container.nm" >/dev/null \
   || fail "container-defined C global was absent from object"
 
 cat >"$CONTAINER_TMP/object.fas" <<'FAS'
-use "C" <<END
+use "C" as c <<END
 int container_value(void) { return 11; }
 END
 extern "C" {
-  fn fas_container_value() i32 { return container_value() + 31 }
+  fn fas_container_value() i32 { return c.container_value() + 31 }
 }
 FAS
 cat >"$CONTAINER_TMP/oracle.c" <<'C'
@@ -165,8 +173,8 @@ cat >"$CONTAINER_TMP/include/quoted.h" <<'C'
 int relative_header_value(double value);
 C
 cat >"$CONTAINER_TMP/preprocessor.fas" <<'FAS'
-use "C" "quoted.h"
-use "C" <<END
+use "C" "quoted.h" as c
+use "C" as c <<END
 #include <fas_config.h>
 #include <fas_system.h>
 int container_value(void) {
@@ -178,7 +186,7 @@ extern "C" {
   fn linked_c_value() i32
 }
 fn main() i32 {
-  return container_value() + linked_c_value() + relative_header_value() - 101
+  return c.container_value() + linked_c_value() + c.relative_header_value() - 101
 }
 FAS
 cat >"$CONTAINER_TMP/link-input.c" <<'C'
@@ -199,7 +207,7 @@ grep -F -- "-I $CONTAINER_TMP/include -isystem$CONTAINER_TMP/system -D CONTAINER
   || fail "Clang commands omitted ordered preprocessor flags"
 
 cat >"$CONTAINER_TMP/header-only.fas" <<'FAS'
-use "C" <stdint.h>
+use "C" <stdint.h> as c
 fn main() i32 { return 0 }
 FAS
 "$OCAML_FAS" --keep -g "$CONTAINER_TMP/header-only.fas" \
@@ -214,12 +222,12 @@ cleanup_kept "$CONTAINER_TMP/stderr"
 
 mkdir "$CONTAINER_TMP/duplicate"
 cat >"$CONTAINER_TMP/duplicate/first.fas" <<'FAS'
-use "C" <<END
+use "C" as c <<END
 int duplicate(void) { return 1; }
 END
 FAS
 cat >"$CONTAINER_TMP/duplicate/second.fas" <<'FAS'
-use "C" <<END
+use "C" as c <<END
 int duplicate(void) { return 2; }
 END
 FAS
@@ -239,7 +247,7 @@ grep -F "multiple definition of" "$CONTAINER_TMP/stderr" \
 [ -s "$CONTAINER_TMP/program.ir" ] || fail "--emit-ir omitted Fas IR"
 
 cat >"$CONTAINER_TMP/broken.fas" <<'FAS'
-use "C" <<END
+use "C" as c <<END
 int broken(void) { return missing_name; }
 END
 fn main() i32 { return 0 }
@@ -253,7 +261,7 @@ for mode in -S --emit-llvm --emit-ir; do
 done
 
 cat >"$CONTAINER_TMP/unbalanced.fas" <<'FAS'
-use "C" <<IF
+use "C" as c <<IF
 #if 1
 int unbalanced(void) { return 1; }
 IF
@@ -266,7 +274,7 @@ grep -F "unterminated conditional directive" "$CONTAINER_TMP/stderr" >/dev/null 
   || fail "unbalanced #if omitted Clang's diagnostic"
 
 cat >"$CONTAINER_TMP/syntax-error.fas" <<'FAS'
-use "C" <<ERR
+use "C" as c <<ERR
 int broken(void) { return (1 + ; }
 ERR
 fn main() i32 { return 0 }
@@ -281,7 +289,7 @@ cat >"$CONTAINER_TMP/broken.h" <<'C'
 extern int broken = ;
 C
 cat >"$CONTAINER_TMP/header-error.fas" <<'FAS'
-use "C" "broken.h"
+use "C" "broken.h" as c
 fn main() i32 { return 0 }
 FAS
 expect_failure "$OCAML_FAS" --emit-llvm "$CONTAINER_TMP/header-error.fas"

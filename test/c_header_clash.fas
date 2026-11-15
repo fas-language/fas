@@ -1,4 +1,4 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn remove(x u64) u64 {
     return x + 1

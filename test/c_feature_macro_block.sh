@@ -18,8 +18,8 @@ fail() {
 }
 
 cat >"$TMP/late.fas" <<'FAS'
-use "C" <stdio.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" as c <<C
 #define _GNU_SOURCE
 #include <pthread.h>
 #include <sched.h>
@@ -37,23 +37,23 @@ grep -F 'help: remove this line and pass `-D_GNU_SOURCE` on the command line, or
 ! grep -F "ModuleID" "$TMP/late.out" >/dev/null || fail "rejected program produced LLVM"
 
 cat >"$TMP/affinity.fas" <<'FAS'
-use "C" <stdio.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" as c <<C
 #include <pthread.h>
 #include <sched.h>
 static inline void cpu_only(cpu_set_t *s, int cpu) { CPU_ZERO(s); CPU_SET(cpu, s); }
 static inline int only_cpu(cpu_set_t *s, int cpu) { return CPU_COUNT(s) == 1 && CPU_ISSET(cpu, s); }
 C
 fn main() i32 {
-  set cpu_set_t = {}
-  cpu_only(&set, 0)
-  r i32 = pthread_setaffinity_np(pthread_self(), sizeof[cpu_set_t], &set)
+  set c.cpu_set_t = {}
+  c.cpu_only(&set, 0)
+  r i32 = c.pthread_setaffinity_np(c.pthread_self(), sizeof[c.cpu_set_t], &set)
   if r != 0 { return 1 }
-  got cpu_set_t = {}
-  g i32 = pthread_getaffinity_np(pthread_self(), sizeof[cpu_set_t], &got)
+  got c.cpu_set_t = {}
+  g i32 = c.pthread_getaffinity_np(c.pthread_self(), sizeof[c.cpu_set_t], &got)
   if g != 0 { return 2 }
-  if only_cpu(&got, 0) == 0 { return 3 }
-  if sched_getcpu() != 0 { return 4 }
+  if c.only_cpu(&got, 0) == 0 { return 3 }
+  if c.sched_getcpu() != 0 { return 4 }
   return 0
 }
 FAS
@@ -61,7 +61,7 @@ if "$OCAML_FAS" --emit-llvm "$TMP/affinity.fas" >"$TMP/no-flag.out" 2>&1; then
   fail "affinity probe compiled without -D_GNU_SOURCE"
 fi
 {
-  printf '%s\n' 'use "C" <stdio.h>' 'use "C" <<C' '#define _GNU_SOURCE'
+  printf '%s\n' 'use "C" <stdio.h> as c' 'use "C" as c <<C' '#define _GNU_SOURCE'
   sed -n '3,$p' "$TMP/affinity.fas"
 } >"$TMP/keep.fas"
 for case in affinity keep; do

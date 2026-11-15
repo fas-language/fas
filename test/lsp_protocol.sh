@@ -506,7 +506,7 @@ def c_cache():
     folder = os.path.join(work, "c-cache")
 
     stdio = os.path.join(folder, "stdio.fas")
-    base = 'use "C" <stdio.h>\nfn main() i32 { return 0 }\n'
+    base = 'use "C" <stdio.h> as c\nfn main() i32 { return 0 }\n'
     write_file(stdio, base)
     did_open(c, stdio, base, 1)
     expect_published(c.settle(), stdio, [], "stdio import opens cleanly")
@@ -522,7 +522,7 @@ def c_cache():
     header = os.path.join(folder, "local.h")
     write_file(header, "int add(int a, int b);\n")
     local = os.path.join(folder, "local.fas")
-    local_text = 'use "C" "local.h"\nfn main() i32 { return 0 }\n'
+    local_text = 'use "C" "local.h" as c\nfn main() i32 { return 0 }\n'
     write_file(local, local_text)
     before = len(header_dumps())
     did_open(c, local, local_text, 1)

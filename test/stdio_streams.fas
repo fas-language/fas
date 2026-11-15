@@ -1,12 +1,12 @@
-use "C" <stdio.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" as c <<C
 int counter = 37;
 #define counter counter
 #define ANSWER 42
 C
 fn main() i32 {
-  if counter != 37 || ANSWER != 42 { return 1 }
-  if fprintf(stderr, c"error:%d\n", counter) < 0 { return 2 }
-  if fputs(c"output\n", stdout) < 0 { return 3 }
+  if c.counter != 37 || c.ANSWER != 42 { return 1 }
+  if c.fprintf(c.stderr, c"error:%d\n", c.counter) < 0 { return 2 }
+  if c.fputs(c"output\n", c.stdout) < 0 { return 3 }
   return 0
 }

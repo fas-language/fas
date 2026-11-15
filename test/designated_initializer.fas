@@ -1,4 +1,4 @@
-use "C" "c_import/designated.h"
+use "C" "c_import/designated.h" as c
 
 struct Inner {
     first u8
@@ -53,15 +53,15 @@ fn main() i32 {
         .prefix = 3,
         .inner = {.third = 7, .first = 5}
     }
-    if c_check_outer(&local, 0) != 0 { return 1 }
-    if c_check_outer(&global_value, 1) != 0 { return 2 }
-    if c_check_outer(&constant_value, 2) != 0 { return 3 }
-    if c_check_outer(&exported_value, 3) != 0 { return 4 }
+    if c.c_check_outer(&local, 0) != 0 { return 1 }
+    if c.c_check_outer(&global_value, 1) != 0 { return 2 }
+    if c.c_check_outer(&constant_value, 2) != 0 { return 3 }
+    if c.c_check_outer(&exported_value, 3) != 0 { return 4 }
     envelope Envelope = {.outer = {.items = {{.third = 89}, {}}}, .marker = 97}
-    if c_check_envelope(&envelope) != 0 { return 5 }
+    if c.c_check_envelope(&envelope) != 0 { return 5 }
     large Large = {.tag = 107, .values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}}
     if large.values[16] != 17 || large.tag != 107 { return 6 }
-    imported FasImported = {.tail = 101, .tag = 103}
-    if c_check_imported(&imported) != 0 { return 7 }
+    imported c.FasImported = {.tail = 101, .tag = 103}
+    if c.c_check_imported(&imported) != 0 { return 7 }
     return 0
 }

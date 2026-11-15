@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 struct FasNestedPayload {
   unsigned char prefix;
   unsigned int value;
@@ -16,6 +16,6 @@ unsigned int fas_nested_expected(void) { return fas_nested_holder.event.payload.
 C
 
 fn main() i32 {
-  if fas_nested_holder.event.payload.value != fas_nested_expected() { return 1 }
+  if c.fas_nested_holder.event.payload.value != c.fas_nested_expected() { return 1 }
   return 0
 }

@@ -309,3 +309,15 @@ let atomic_names =
     "atomic_xor"; "atomic_xchg"; "atomic_cas"; "atomic_fence" ]
 
 let atomic_orderings = [ "relaxed"; "acquire"; "release"; "acq_rel"; "seq_cst" ]
+
+(* C namespaces: the internal name of an imported C entity is `c.NAME`
+   (C_import.namespace). Fas names never contain a dot. *)
+let c_prefix = "c."
+
+let is_c_name name = String.starts_with ~prefix:c_prefix name
+
+(* the link symbol of a C entity: its C name *)
+let c_link_symbol name =
+  if is_c_name name then
+    String.sub name (String.length c_prefix) (String.length name - String.length c_prefix)
+  else name

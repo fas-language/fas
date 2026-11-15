@@ -1,15 +1,15 @@
-use "C" <<C
+use "C" as c <<C
 typedef struct { int id; union { int x; unsigned y; }; } user_t;
 typedef union { unsigned word; unsigned char bytes[4]; } word_t;
 user_t users[2] = {{11, {17}}, {23, {29}}};
 static int check(user_t *u, word_t *w) { return u->id == 31 && u->x == 37 && w->word == 41; }
 C
 fn main() i32 {
-  u user_t = {31, 37, 37}
-  w word_t = {41}
-  if check(&u, &w) != 1 { return 1 }
-  if users[0].id != 11 || users[1].x != 29 { return 2 }
-  users[1].id = 43
-  if users[1].id != 43 { return 3 }
+  u c.user_t = {31, 37, 37}
+  w c.word_t = {41}
+  if c.check(&u, &w) != 1 { return 1 }
+  if c.users[0].id != 11 || c.users[1].x != 29 { return 2 }
+  c.users[1].id = 43
+  if c.users[1].id != 43 { return 3 }
   return 0
 }

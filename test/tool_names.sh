@@ -44,9 +44,9 @@ chmod +x "$TMP/old/opt"
 cp "$TMP/old/opt" "$TMP/both/opt"
 
 cat >"$TMP/hello.fas" <<'FAS'
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 fn main() i32 {
-  printf(c"tools ok\n")
+  c.printf(c"tools ok\n")
   return 0
 }
 FAS

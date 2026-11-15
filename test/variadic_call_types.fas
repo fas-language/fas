@@ -1,17 +1,17 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 extern "C" {
   fn fas_clear_rax() i32
-  fn fas_stdout() handle[_IO_FILE]
+  fn fas_stdout() handle[c._IO_FILE]
   fn fas_expected_sum(n i32) i32
   fn sum(n i32, ...) i32
 }
 
 fn main() i32 {
-  if printf(c"%.1f", 1.5) != 3 { return 1 }
-  if fprintf(fas_stdout(), c"%.1f", 2.5) != 3 { return 2 }
+  if c.printf(c"%.1f", 1.5) != 3 { return 1 }
+  if c.fprintf(fas_stdout(), c"%.1f", 2.5) != 3 { return 2 }
   buffer arr[16,i8] = {}
-  if snprintf(&buffer[0], 16, c"%.1f", 3.5) != 3 { return 3 }
+  if c.snprintf(&buffer[0], 16, c"%.1f", 3.5) != 3 { return 3 }
   if buffer[0] != 51 || buffer[1] != 46 || buffer[2] != 53 { return 4 }
   if fas_clear_rax() != 0 { return 5 }
   if sum(1, 1.5, 1) != fas_expected_sum(1) { return 6 }

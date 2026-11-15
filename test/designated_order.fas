@@ -1,4 +1,4 @@
-use "C" "c_import/designated_order.h"
+use "C" "c_import/designated_order.h" as c
 
 struct Record {
     a i32
@@ -23,20 +23,20 @@ struct ArrayRecord {
 
 fn main() i32 {
     expected arr[5, i32] = {1, 2, 3, 4, 5}
-    clear_order()
-    record Record = {.c = order_event(1), .a = order_event(2), .b = order_event(3)}
-    if order_matches(&expected[0], 3) != 0 { return 1 }
+    c.clear_order()
+    record Record = {.c = c.order_event(1), .a = c.order_event(2), .b = c.order_event(3)}
+    if c.order_matches(&expected[0], 3) != 0 { return 1 }
     if record.a != 2 || record.b != 3 || record.c != 1 { return 2 }
-    clear_order()
-    nested Nested = {.q = {.y = order_event(1), .x = order_event(2)}, .p = order_event(3)}
-    if order_matches(&expected[0], 3) != 0 { return 3 }
+    c.clear_order()
+    nested Nested = {.q = {.y = c.order_event(1), .x = c.order_event(2)}, .p = c.order_event(3)}
+    if c.order_matches(&expected[0], 3) != 0 { return 3 }
     if nested.q.x != 2 || nested.q.y != 1 || nested.p != 3 { return 4 }
-    clear_order()
+    c.clear_order()
     array_value ArrayRecord = {
-        .tail = order_event(1),
-        .items = {{.y = order_event(2), .x = order_event(3)}, {.x = order_event(4), .y = order_event(5)}}
+        .tail = c.order_event(1),
+        .items = {{.y = c.order_event(2), .x = c.order_event(3)}, {.x = c.order_event(4), .y = c.order_event(5)}}
     }
-    if order_matches(&expected[0], 5) != 0 { return 5 }
+    if c.order_matches(&expected[0], 5) != 0 { return 5 }
     if array_value.tail != 1 || array_value.items[0].x != 3 || array_value.items[0].y != 2 { return 6 }
     if array_value.items[1].x != 4 || array_value.items[1].y != 5 { return 7 }
     return 0

@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as libc <<C
 static unsigned oracle(unsigned lane, int op) {
   unsigned v = lane + 1;
   if (op == 0) return v + 37;
@@ -26,10 +26,10 @@ fn main() i32 {
   if !all(equal) || !all(reverse) { return 1 }
   i u32 = 0
   while i < 4 {
-    if a[i] != oracle(i, 0) || A[i] != oracle(i, 0) { return 2 }
-    if b[i] != oracle(i, 1) || B[i] != oracle(i, 1) { return 3 }
-    if c[i] != oracle(i, 2) || C[i] != oracle(i, 2) { return 4 }
-    if d[i] != oracle(i, 3) || D[i] != oracle(i, 3) { return 5 }
+    if a[i] != libc.oracle(i, 0) || A[i] != libc.oracle(i, 0) { return 2 }
+    if b[i] != libc.oracle(i, 1) || B[i] != libc.oracle(i, 1) { return 3 }
+    if c[i] != libc.oracle(i, 2) || C[i] != libc.oracle(i, 2) { return 4 }
+    if d[i] != libc.oracle(i, 3) || D[i] != libc.oracle(i, 3) { return 5 }
     i += 1
   }
   return 0

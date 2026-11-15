@@ -1,7 +1,7 @@
-use "C" <<C
+use "C" as c <<C
 static inline int fas_json_address_target(int value) { return value + 1; }
 C
 
-const fas_json_address addr = &fas_json_address_target
+const fas_json_address addr = &c.fas_json_address_target
 
 fn main() i32 { return 0 }

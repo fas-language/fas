@@ -1,4 +1,4 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as libc
 
 error Empty, BadDigit, Overflow
 error NotFound = 2
@@ -21,12 +21,12 @@ var g i32 = 0
 
 fn closes(x i32) fails {
     defer { g = g + 1 }
-    errdefer e { g = g + 100; printf(c"errdefer %s\n", err_name(e)) }
+    errdefer e { g = g + 100; libc.printf(c"errdefer %s\n", err_name(e)) }
     if x < 0 { fail BadDigit }
 }
 
 fn twice(s addr) u32 fails {
-    errdefer { printf(c"twice errdefer\n") }
+    errdefer { libc.printf(c"twice errdefer\n") }
     n u32 = try parse_u32(s)
     return n * 2
 }
@@ -61,7 +61,7 @@ fn in_loop() i32 fails {
     i i32 = 0
     while i < 5 {
         defer { total = total + 1000 }
-        errdefer { printf(c"loop errdefer %d\n", i) }
+        errdefer { libc.printf(c"loop errdefer %d\n", i) }
         if i == 3 { try closes(-1) }
         i = i + 1
     }
@@ -83,44 +83,44 @@ fn sw(e error) i32 {
 }
 
 fn run_loop() void {
-    r i32 = in_loop() catch e { printf(c"in_loop %s g %d\n", err_name(e), g); return }
-    printf(c"unreachable %d\n", r)
+    r i32 = in_loop() catch e { libc.printf(c"in_loop %s g %d\n", err_name(e), g); return }
+    libc.printf(c"unreachable %d\n", r)
 }
 
-fn open_missing() handle[FILE] fails {
-    f handle[FILE] = fopen(c"/dev/null/x", c"r")
+fn open_missing() handle[libc.FILE] fails {
+    f handle[libc.FILE] = libc.fopen(c"/dev/null/x", c"r")
     if f == null { fail errno_err() }
     return f
 }
 
 fn names() void {
-    printf(c"unknown %s\n", err_name(bitcast[error](0x7fff0000)))
-    f handle[FILE] = open_missing() catch e { printf(c"open %s\n", err_name(e)); return }
-    printf(c"opened\n")
+    libc.printf(c"unknown %s\n", err_name(bitcast[error](0x7fff0000)))
+    f handle[libc.FILE] = open_missing() catch e { libc.printf(c"open %s\n", err_name(e)); return }
+    libc.printf(c"opened\n")
 }
 
 fn main() i32 {
     names()
     e error = BadDigit
-    if e == BadDigit && e != Empty && Overflow != e { printf(c"compare ok\n") }
+    if e == BadDigit && e != Empty && Overflow != e { libc.printf(c"compare ok\n") }
     a u32 = parse_u32(c"123") catch 7
     b u32 = parse_u32(c"12x") catch 7
-    printf(c"%u %u\n", a, b)
-    closes(1) catch e { printf(c"no\n") }
-    closes(-1) catch e { printf(c"closes failed: %s\n", err_name(e)) }
-    closes(-1) catch { printf(c"closes failed again\n") }
-    printf(c"g %d\n", g)
+    libc.printf(c"%u %u\n", a, b)
+    closes(1) catch e { libc.printf(c"no\n") }
+    closes(-1) catch e { libc.printf(c"closes failed: %s\n", err_name(e)) }
+    closes(-1) catch { libc.printf(c"closes failed again\n") }
+    libc.printf(c"g %d\n", g)
     t u32 = twice(c"21") catch 0
-    printf(c"twice %u\n", t)
+    libc.printf(c"twice %u\n", t)
     t = twice(c"99999999999") catch 5
-    printf(c"twice %u\n", t)
+    libc.printf(c"twice %u\n", t)
     run_loop()
-    printf(c"indirect %d\n", indirect(&parse_u32))
-    printf(c"sw %d %d %d %d\n", sw(Empty), sw(BadDigit), sw(Overflow), sw(errno_err()))
-    printf(c"half %g %g\n", half(5.0) catch 1.5, half(-1.0) catch 1.5)
-    printf(c"flag %d %d\n", flag(3) catch false, flag(0) catch true)
-    printf(c"ptr %s %s\n", ptr(1) catch c"no", ptr(0) catch c"fallback")
-    printf(c"small %u %u wide %ld %ld\n", small(1) catch 1, small(0) catch 1, wide(1) catch 0, wide(0) catch 7)
-    q addr = ptr(0) catch e { printf(c"name %s code %u\n", err_name(e), bitcast[u32](e)); return 10 }
+    libc.printf(c"indirect %d\n", indirect(&parse_u32))
+    libc.printf(c"sw %d %d %d %d\n", sw(Empty), sw(BadDigit), sw(Overflow), sw(errno_err()))
+    libc.printf(c"half %g %g\n", half(5.0) catch 1.5, half(-1.0) catch 1.5)
+    libc.printf(c"flag %d %d\n", flag(3) catch false, flag(0) catch true)
+    libc.printf(c"ptr %s %s\n", ptr(1) catch c"no", ptr(0) catch c"fallback")
+    libc.printf(c"small %u %u wide %ld %ld\n", small(1) catch 1, small(0) catch 1, wide(1) catch 0, wide(0) catch 7)
+    q addr = ptr(0) catch e { libc.printf(c"name %s code %u\n", err_name(e), bitcast[u32](e)); return 10 }
     return 0
 }

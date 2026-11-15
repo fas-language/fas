@@ -1,4 +1,4 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 var buf arr[256, u32] = {}
 
@@ -23,7 +23,7 @@ fn permute_lanes() i32 {
     moved vec[16,u8] = permute(raw, pidx)
     for k usize = 0; k < 16; k += 1 {
         lane u32 = zext[u32](moved[k])
-        printed i32 = printf(c"%u\n", lane)
+        printed i32 = c.printf(c"%u\n", lane)
         if printed <= 0 { return 1 }
     }
     return 0
@@ -31,7 +31,7 @@ fn permute_lanes() i32 {
 
 fn main() i32 {
     if fill(256) != 0 { return 3 }
-    printed i32 = printf(c"sum %lu\n", total(256))
+    printed i32 = c.printf(c"sum %lu\n", total(256))
     if printed <= 0 { return 1 }
     if permute_lanes() != 0 { return 2 }
     return 0

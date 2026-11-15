@@ -1,16 +1,16 @@
-use "C" "c_import/record_attributes.h"
+use "C" "c_import/record_attributes.h" as c
 
 extern "C" {
   fn main() i32 {
-    if sizeof[FasPackedTrailing] != fas_packed_size() { return 1 }
-    if alignof[FasPackedTrailing] != fas_packed_align() { return 2 }
-    if offsetof[FasPackedTrailing, value] != fas_packed_value_offset() { return 3 }
-    if sizeof[FasAlignedTrailing] != fas_aligned_size() { return 4 }
-    if alignof[FasAlignedTrailing] != fas_aligned_align() { return 5 }
-    if offsetof[FasAlignedTrailing, value] != fas_aligned_value_offset() { return 6 }
-    if sizeof[FasAlignedTypedef] != fas_typedef_size() { return 7 }
-    if alignof[FasAlignedTypedef] != fas_typedef_align() { return 8 }
-    if offsetof[FasAlignedTypedef, bytes] != fas_typedef_bytes_offset() { return 9 }
+    if sizeof[c.FasPackedTrailing] != c.fas_packed_size() { return 1 }
+    if alignof[c.FasPackedTrailing] != c.fas_packed_align() { return 2 }
+    if offsetof[c.FasPackedTrailing, value] != c.fas_packed_value_offset() { return 3 }
+    if sizeof[c.FasAlignedTrailing] != c.fas_aligned_size() { return 4 }
+    if alignof[c.FasAlignedTrailing] != c.fas_aligned_align() { return 5 }
+    if offsetof[c.FasAlignedTrailing, value] != c.fas_aligned_value_offset() { return 6 }
+    if sizeof[c.FasAlignedTypedef] != c.fas_typedef_size() { return 7 }
+    if alignof[c.FasAlignedTypedef] != c.fas_typedef_align() { return 8 }
+    if offsetof[c.FasAlignedTypedef, bytes] != c.fas_typedef_bytes_offset() { return 9 }
     return 0
   }
 }

@@ -1,8 +1,8 @@
-use "C" <stdlib.h>
-use "C" <string.h>
-use "C" <stdio.h>
-use "C" <zlib.h>
-use "C" <<ZLIB
+use "C" <stdlib.h> as c
+use "C" <string.h> as c
+use "C" <stdio.h> as c
+use "C" <zlib.h> as c
+use "C" as c <<ZLIB
 #include <zlib.h>
 static inline int fas_deflate_init(z_streamp stream, int level) {
   return deflateInit(stream, level);
@@ -17,20 +17,20 @@ static inline int fas_compress_buffer(Bytef *dest, uLongf *dest_len,
 ZLIB
 
 fn main() i32 {
-  input_len usize = strlen(c"fas zlib")
-  input addr = malloc(input_len)
-  compressed addr = malloc(128)
-  restored addr = malloc(128)
+  input_len usize = c.strlen(c"fas zlib")
+  input addr = c.malloc(input_len)
+  compressed addr = c.malloc(128)
+  restored addr = c.malloc(128)
   if input == null || compressed == null || restored == null { return 1 }
-  memcpy(input, c"fas zlib", input_len)
+  c.memcpy(input, c"fas zlib", input_len)
 
   compressed_len u64 = 128
-  if fas_compress_buffer(compressed, &compressed_len, input, bitcast[u64](input_len)) != Z_OK {
+  if c.fas_compress_buffer(compressed, &compressed_len, input, bitcast[u64](input_len)) != c.Z_OK {
     return 2
   }
   if compressed_len == 0 { return 3 }
 
-  deflater z_stream = {null, 0, 0, null, 0, 0, null, null, null, null, null, 0, 0, 0}
+  deflater c.z_stream = {null, 0, 0, null, 0, 0, null, null, null, null, null, 0, 0, 0}
   deflater.zalloc = null
   deflater.zfree = null
   deflater.opaque = null
@@ -38,12 +38,12 @@ fn main() i32 {
   deflater.avail_in = trunc[u32](input_len)
   deflater.next_out = compressed
   deflater.avail_out = 128
-  if fas_deflate_init(&deflater, 6) != Z_OK { return 4 }
-  if deflate(&deflater, Z_FINISH) != Z_STREAM_END { return 5 }
+  if c.fas_deflate_init(&deflater, 6) != c.Z_OK { return 4 }
+  if c.deflate(&deflater, c.Z_FINISH) != c.Z_STREAM_END { return 5 }
   deflated_len u64 = deflater.total_out
-  if deflateEnd(&deflater) != Z_OK { return 6 }
+  if c.deflateEnd(&deflater) != c.Z_OK { return 6 }
 
-  inflater z_stream = {null, 0, 0, null, 0, 0, null, null, null, null, null, 0, 0, 0}
+  inflater c.z_stream = {null, 0, 0, null, 0, 0, null, null, null, null, null, 0, 0, 0}
   inflater.zalloc = null
   inflater.zfree = null
   inflater.opaque = null
@@ -51,16 +51,16 @@ fn main() i32 {
   inflater.avail_in = trunc[u32](deflated_len)
   inflater.next_out = restored
   inflater.avail_out = 128
-  if fas_inflate_init(&inflater) != Z_OK { return 7 }
-  if inflate(&inflater, Z_FINISH) != Z_STREAM_END { return 8 }
+  if c.fas_inflate_init(&inflater) != c.Z_OK { return 7 }
+  if c.inflate(&inflater, c.Z_FINISH) != c.Z_STREAM_END { return 8 }
   restored_len u64 = inflater.total_out
-  if inflateEnd(&inflater) != Z_OK { return 9 }
+  if c.inflateEnd(&inflater) != c.Z_OK { return 9 }
   if restored_len != bitcast[u64](input_len) { return 10 }
-  if memcmp(input, restored, input_len) != 0 { return 11 }
+  if c.memcmp(input, restored, input_len) != 0 { return 11 }
 
-  free(restored)
-  free(compressed)
-  free(input)
-  puts(c"zlib: ok")
+  c.free(restored)
+  c.free(compressed)
+  c.free(input)
+  c.puts(c"zlib: ok")
   return 0
 }

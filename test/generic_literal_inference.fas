@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as libc <<C
 #include <stdint.h>
 static int64_t oracle_add(void) { int64_t a = 1, b = 2; return a + b; }
 static int64_t oracle_complement(void) { return (int64_t)~(uint64_t)0; }

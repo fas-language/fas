@@ -5119,3 +5119,64 @@ let manifest_text imported =
     |> List.sort compare
   in
   if lines = [] then "" else String.concat "\n" lines ^ "\n"
+
+(* C namespaces (Fas v2 decisions, "C namespaces"). Every imported C entity
+   gets the internal name `c.NAME`: Fas names never contain a dot, so a Fas
+   `read` and C's `read` no longer meet. Source files reach these names only
+   through their own alias (C_names rewrites `alias.NAME`). The link symbol
+   is the C name again: Names.c_link_symbol strips the prefix. Runs after
+   [reconcile_source], so the names it confirmed (C declarations that a Fas
+   `extern` item provides) are already gone from [imported.items]. *)
+let namespace (imported : mapped) =
+  let declared = Stdlib.Hashtbl.create 256 in
+  let declare name = if name <> "" then Stdlib.Hashtbl.replace declared name () in
+  List.iter (fun item -> declare (item_name item)) imported.items;
+  List.iter (fun (name, _) -> declare name) imported.aliases;
+  List.iter (fun (name, _) -> declare name) imported.unsupported;
+  List.iter (fun (name, _, _) -> declare name) imported.record_types;
+  List.iter (fun (name, _, _) -> declare name) imported.records;
+  List.iter (fun (name, _) -> declare name) imported.incomplete_arrays;
+  List.iter (fun (name, _) -> declare name) imported.enum_owners;
+  let rn name = if Stdlib.Hashtbl.mem declared name then Names.c_prefix ^ name else name in
+  let mapper =
+    {
+      Ast.identity_mapper with
+      on_expr =
+        (function Ast.Ident (name, span) -> Some (Ast.Ident (rn name, span)) | _ -> None);
+      on_ty =
+        (function
+        | Ast.Named_type (name, span) -> Some (Ast.Named_type (rn name, span)) | _ -> None);
+      on_arg =
+        (function
+        | Ast.Name_arg (name, span) -> Some (Ast.Name_arg (rn name, span)) | _ -> None);
+      on_item_name = rn;
+    }
+  in
+  let ty = Ast.map_ty mapper in
+  let keyed table = List.map (fun (name, value) -> (rn name, value)) table in
+  {
+    imported with
+    items = List.map (Ast.map_item mapper) imported.items;
+    aliases = List.map (fun (name, t) -> (rn name, ty t)) imported.aliases;
+    unsupported = keyed imported.unsupported;
+    manifest =
+      List.map
+        (fun line ->
+          match String.index_opt line '\t' with
+          | Some stop ->
+              rn (String.sub line 0 stop)
+              ^ String.sub line stop (String.length line - stop)
+          | None -> line)
+        imported.manifest;
+    nonnull_parameters = keyed imported.nonnull_parameters;
+    c_string_parameters = keyed imported.c_string_parameters;
+    alloc_size_parameters = keyed imported.alloc_size_parameters;
+    parameter_names = keyed imported.parameter_names;
+    (* the second field is the C spelling (`struct stat`): kept *)
+    records = List.map (fun (a, b, c) -> (rn a, b, c)) imported.records;
+    record_types = List.map (fun (a, b, c) -> (rn a, rn b, c)) imported.record_types;
+    incomplete_arrays = List.map (fun (name, t) -> (rn name, ty t)) imported.incomplete_arrays;
+    container_names = List.map rn imported.container_names;
+    enum_owners =
+      List.map (fun (name, owner) -> (rn name, Option.map rn owner)) imported.enum_owners;
+  }

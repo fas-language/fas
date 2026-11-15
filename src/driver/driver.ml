@@ -454,7 +454,11 @@ let load_program_with ?(overlay = fun _ -> None) ?recovery ?(edits = []) ~limits
         List.concat_map
           (fun (_, program) ->
             List.filter
-              (function Ast.Use _ | Ast.Pkg _ -> false | _ -> true)
+              (function
+                (* C aliases stay for C_names.resolve, which drops them *)
+                | Ast.Use { alias = Some _; _ } -> true
+                | Ast.Use _ | Ast.Pkg _ -> false
+                | _ -> true)
               program.Ast.items)
           files
       in
@@ -1491,14 +1495,28 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
       | Error diagnostics -> Error diagnostics
       | Ok (program, chains, c_imports, assembly_imports) -> (
           let _, _, cc = tools () in
+          (* C namespaces: `alias.NAME` becomes the internal `c.NAME` *)
+          let* program, c_refs = C_names.resolve program in
           let imported = ref [] in
           let c_units = ref [] in
-          let referenced_program =
+          let referenced_program, referenced_refs =
             match recovery with
-            | Some recovery -> { Ast.items = recovery.original_items }
-            | None -> program
+            | Some recovery -> (
+                match C_names.resolve { Ast.items = recovery.original_items } with
+                | Ok (resolved, refs) -> (resolved, refs)
+                | Error _ -> ({ Ast.items = recovery.original_items }, c_refs))
+            | None -> (program, c_refs)
           in
-          let referenced_names = Ast.unresolved_names referenced_program in
+          (* the C names to import: those used through an alias, plus bare
+             unresolved names (for Fas `extern` items and for the hint on a
+             bare C name) *)
+          let referenced_names =
+            List.sort_uniq String.compare
+              (C_names.referenced referenced_refs
+              @ List.filter
+                  (fun name -> not (Names.is_c_name name))
+                  (Ast.unresolved_names referenced_program))
+          in
           let declared_names =
             List.concat_map
               (function
@@ -1662,14 +1680,70 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
                 Ok ())
               assembly_imports
           in
+          (* Fas items with C linkage meet the C declarations of the same name *)
+          let fas_c_items =
+            List.filter
+              (function
+                | Ast.Func { linkage = Ast.External_c; _ }
+                | Ast.Global
+                    { linkage = Ast.Export_c | Ast.Import_c | Ast.Import_const_c; _ } ->
+                    true
+                | _ -> false)
+              program.items
+            (* the C side is compared before it gets its `c.` names *)
+            |> List.map C_names.plain_c_names
+          in
+          let merged = C_import.merge_imports (List.rev !imported) in
           let* imported =
-            C_import.merge_imports (List.rev !imported)
-            |> C_import.reconcile_source
-                 ~container_mismatch_to_clang:(config.Cli.emit <> Cli.Header)
-                 program.items
+            C_import.reconcile_source
+              ~container_mismatch_to_clang:(config.Cli.emit <> Cli.Header)
+              fas_c_items merged
           in
           let imported =
             C_import.prune_unreferenced_records ~referenced_names imported
+          in
+          (* `c.NAME` where a Fas `extern` item provides the C declaration *)
+          let provided =
+            List.filter_map
+              (fun item ->
+                let name = C_import.item_name item in
+                if
+                  List.exists (fun i -> C_import.item_name i = name) merged.items
+                  && not (List.exists (fun i -> C_import.item_name i = name) imported.items)
+                then Some name
+                else None)
+              fas_c_items
+          in
+          let imported = C_import.namespace imported in
+          (if Sys.getenv_opt "FAS_MIGRATE_C" = Some "1" then
+             let c_names = Hashtbl.create 64 in
+             let add name =
+               if Names.is_c_name name then
+                 Hashtbl.replace c_names (Names.c_link_symbol name) ()
+             in
+             List.iter (fun item -> add (C_import.item_name item)) imported.items;
+             List.iter (fun (name, _) -> add name) imported.aliases;
+             List.iter (fun (name, _) -> add name) imported.unsupported;
+             List.iter (fun (name, _, _) -> add name) imported.record_types;
+             List.iter
+               (fun ((span : Span.t), name) ->
+                 Printf.eprintf "FAS-MIGRATE\t%s\t%d\t%d\t%s\n" span.file
+                   span.start_offset span.end_offset name)
+               (C_names.migration_edits ~c_names program));
+          let program = C_names.use_provided ~provided program in
+          let* () =
+            let units = !c_units in
+            let visible file =
+              match List.filter (fun (u : imported_c_unit) -> u.source = file) units with
+              | [] -> None
+              | units -> Some (List.concat_map (fun (u : imported_c_unit) -> u.c_names) units)
+            in
+            let known name =
+              List.exists (fun (u : imported_c_unit) -> List.mem name u.c_names) units
+            in
+            match C_names.check_visibility ~visible ~known c_refs with
+            | [] -> Ok ()
+            | diagnostics -> Error diagnostics
           in
           Option.iter
             (fun index ->

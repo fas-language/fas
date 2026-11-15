@@ -1,19 +1,19 @@
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn show_i32(v i32) i32 {
-    return printf(c"%d\n", v)
+    return c.printf(c"%d\n", v)
 }
 
 fn show_u32(v u32) i32 {
-    return printf(c"%u\n", v)
+    return c.printf(c"%u\n", v)
 }
 
 fn show_i64(v i64) i32 {
-    return printf(c"%ld\n", v)
+    return c.printf(c"%ld\n", v)
 }
 
 fn show_u64(v u64) i32 {
-    return printf(c"%lu\n", v)
+    return c.printf(c"%lu\n", v)
 }
 
 fn c1(s i16, t i16) u32 {

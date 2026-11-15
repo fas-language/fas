@@ -1,5 +1,5 @@
-use "C" <export_nested_headers_z_types.h>
-use "C" <export_nested_headers_a_nested.h>
+use "C" <export_nested_headers_z_types.h> as c
+use "C" <export_nested_headers_a_nested.h> as c
 extern "C" {
-  fn accept_nested(value handle[ARecord]) i32 { return 1 }
+  fn accept_nested(value handle[c.ARecord]) i32 { return 1 }
 }

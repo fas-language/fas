@@ -1,7 +1,7 @@
 ================================================================================
 raw C block
 ================================================================================
-use "C" <<C
+use "C" as c <<C
 static unsigned oracle(unsigned lane) { return lane + 1; }
 C
 
@@ -10,6 +10,7 @@ C
 (source_file
   (use_declaration
     path: (string)
+    alias: (identifier)
     (raw_c_open)
     (raw_c_body)))
 
@@ -32,7 +33,7 @@ ASSEMBLY
 ================================================================================
 raw block with tag containing digits
 ================================================================================
-use "C" <<_RAW2
+use "C" as c <<_RAW2
 int x = 1;
 _RAW2
 fn after() void {}
@@ -42,6 +43,7 @@ fn after() void {}
 (source_file
   (use_declaration
     path: (string)
+    alias: (identifier)
     (raw_c_open)
     (raw_c_body))
   (function_declaration
@@ -53,7 +55,7 @@ fn after() void {}
 ================================================================================
 raw block whose body mentions the tag inside a line
 ================================================================================
-use "C" <<END
+use "C" as c <<END
 const char *text = "END is not a terminator here";
 END
 
@@ -62,5 +64,6 @@ END
 (source_file
   (use_declaration
     path: (string)
+    alias: (identifier)
     (raw_c_open)
     (raw_c_body)))

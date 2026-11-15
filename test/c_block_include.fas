@@ -1,10 +1,10 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdio.h>
 #define C_BLOCK_INCLUDE_IMPLEMENTATION
 #include "c_block_include.h"
 C
 
 fn main() i32 {
-    printf(c"%d %d\n", cbi_count(c"{\"a\":{\"b\":[1,{}]}}", 123), cbi_count(c"[[]]", 91))
+    c.printf(c"%d %d\n", c.cbi_count(c"{\"a\":{\"b\":[1,{}]}}", 123), c.cbi_count(c"[[]]", 91))
     return 0
 }

@@ -22,6 +22,9 @@ func @twice (<4 x i32>) -> (<4 x i32>) local {
 
 func @main (i32, ptr) -> (i32) global {
 ^e(%argc: i32, %argv: ptr):
+  ; constant allocas live in the entry block (SPEC 0.1)
+  %buf = alloca ptr i64 16, align 16
+  %bb = alloca ptr i64 1, align 1
   ; homed vectors: run without arguments, argc = 1
   %h = insert <4 x i32> <4 x i32> zero, i32 5, %argc   ; [0, 5, 0, 0]
   %h2 = insert <4 x i32> %h, i32 9, i32 3              ; [0, 5, 0, 9]
@@ -83,7 +86,6 @@ func @main (i32, ptr) -> (i32) global {
   %x13 = extract i32 %x1, i32 3
   call (i32) -> () @p32(%x13)                          ; 13
   ; masked memory
-  %buf = alloca ptr i64 16, align 16
   store <4 x i32> [i32 1, i32 2, i32 3, i32 4], %buf, align 16
   masked_store %v, %buf, <4 x i1> [i1 0, i1 1, i1 0, i1 1], align 4
   %mem = load <4 x i32> %buf, align 16                 ; [1, 13, 3, 33]
@@ -94,7 +96,6 @@ func @main (i32, ptr) -> (i32) global {
   %mls = reduce add i32 %ml
   call (i32) -> () @p32(%mls)                          ; 48
   ; a bool vector in memory is bit-packed: [0, 1, 1, 1] is 0b1110
-  %bb = alloca ptr i64 1, align 1
   store %m, %bb, align 1
   %byte = load i8 %bb, align 1
   %low = and i8 %byte, i8 15

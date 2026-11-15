@@ -1,4 +1,4 @@
-use "C" "bool_memory.h"
+use "C" "bool_memory.h" as c
 
 struct NativeBool { value bool }
 struct BoolPair { first bool second bool }
@@ -8,7 +8,7 @@ const ConstantFlags arr[2,bool] = {true, false}
 var ConstantPair BoolPair = {true, false}
 
 extern "C" {
-  fn bool_memory_paths(raw addr, foreign handle[ForeignBool], output addr, volatile_output addr, passed bool) u32 {
+  fn bool_memory_paths(raw addr, foreign handle[c.ForeignBool], output addr, volatile_output addr, passed bool) u32 {
     local bool = false
     (&local)[u8] = 2
     items arr[2,bool] = {false, false}
@@ -26,14 +26,14 @@ extern "C" {
     if raw[bool] && !(!raw[bool]) && raw[bool] == true && zext[u8](raw[bool]) == 1 { score += 1 }
     if raw[bool, 0] && !(!raw[bool, 0]) && raw[bool, 0] == true && zext[u8](raw[bool, 0]) == 1 { score += 1 }
     if viewed && !(!viewed) && viewed == true && zext[u8](viewed) == 1 { score += 1 }
-    if foreign_raw[ForeignBool].value && !(!foreign_raw[ForeignBool].value) && foreign_raw[ForeignBool].value == true && zext[u8](foreign_raw[ForeignBool].value) == 1 { score += 1 }
+    if foreign_raw[c.ForeignBool].value && !(!foreign_raw[c.ForeignBool].value) && foreign_raw[c.ForeignBool].value == true && zext[u8](foreign_raw[c.ForeignBool].value) == 1 { score += 1 }
 
     local = true
     items[1] = true
     native.value = true
     GlobalBool = true
     viewed = true
-    foreign_raw[ForeignBool].value = true
+    foreign_raw[c.ForeignBool].value = true
     output[u8, 0] = (&local)[u8]
     output[u8, 1] = (&passed)[u8]
     output[u8, 2] = (&items[1])[u8]

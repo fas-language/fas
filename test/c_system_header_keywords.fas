@@ -1,2 +1,2 @@
-use "C" <net/if.h>
+use "C" <net/if.h> as c
 fn main() i32 { return 0 }

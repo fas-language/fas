@@ -1,27 +1,27 @@
-use "C" "packed_layouts.h"
+use "C" "packed_layouts.h" as c
 
 extern "C" {
   fn packed_layouts() u32 {
-    value FasDeepMin
-    h handle[FasDeepMin] = handle_from_addr[FasDeepMin](&value)
-    fas_seed_deep(h)
+    value c.FasDeepMin
+    h handle[c.FasDeepMin] = handle_from_addr[c.FasDeepMin](&value)
+    c.fas_seed_deep(h)
     failures u32 = 0
-    if sizeof[FasDeepMin] != fas_c_deep_size() { failures += 1 }
-    if alignof[FasDeepMin] != fas_c_deep_align() { failures += 2 }
-    if offsetof[FasDeepMin, x] != fas_c_deep_x_offset() { failures += 4 }
+    if sizeof[c.FasDeepMin] != c.fas_c_deep_size() { failures += 1 }
+    if alignof[c.FasDeepMin] != c.fas_c_deep_align() { failures += 2 }
+    if offsetof[c.FasDeepMin, x] != c.fas_c_deep_x_offset() { failures += 4 }
     raw addr = handle_addr(h)
-    if raw[FasDeepMin].x != fas_read_deep_x(h) { failures += 8 }
-    raw[FasDeepMin].x = 1985229328
-    if fas_read_deep_x(h) != 1985229328 { failures += 16 }
-    if fas_enum_values[0] != 0 || fas_c_enum_sum() != 510 { failures += 32 }
-    fas_enum_values[0] = 99
-    if fas_c_enum_sum() != 609 { failures += 64 }
-    if sizeof[FasPackedStorage] != fas_c_packed_size() { failures += 128 }
-    if alignof[FasPackedStorage] != fas_c_packed_align() { failures += 256 }
-    if offsetof[FasPackedStorage, word] != fas_c_packed_word_offset() { failures += 512 }
-    if fas_packed_storage.word != 305419896 { failures += 2048 }
-    fas_packed_storage.word = 123456789
-    if fas_packed_storage.word != 123456789 { failures += 4096 }
+    if raw[c.FasDeepMin].x != c.fas_read_deep_x(h) { failures += 8 }
+    raw[c.FasDeepMin].x = 1985229328
+    if c.fas_read_deep_x(h) != 1985229328 { failures += 16 }
+    if c.fas_enum_values[0] != 0 || c.fas_c_enum_sum() != 510 { failures += 32 }
+    c.fas_enum_values[0] = 99
+    if c.fas_c_enum_sum() != 609 { failures += 64 }
+    if sizeof[c.FasPackedStorage] != c.fas_c_packed_size() { failures += 128 }
+    if alignof[c.FasPackedStorage] != c.fas_c_packed_align() { failures += 256 }
+    if offsetof[c.FasPackedStorage, word] != c.fas_c_packed_word_offset() { failures += 512 }
+    if c.fas_packed_storage.word != 305419896 { failures += 2048 }
+    c.fas_packed_storage.word = 123456789
+    if c.fas_packed_storage.word != 123456789 { failures += 4096 }
     return failures
   }
 }

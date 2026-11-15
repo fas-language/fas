@@ -1,5 +1,5 @@
-use "C" "c_unions.h"
-use "C" <<UNION_IMPL
+use "C" "c_unions.h" as c
+use "C" as c <<UNION_IMPL
 #include <stdio.h>
 
 void fas_union_fill(union FasImportedUnion *value) {
@@ -48,29 +48,29 @@ UNION_IMPL
 
 extern "C" { var screens arr[5,addr] = {} }
 
-const fas_union_table arr[2, FasImportedUnion] = {
+const fas_union_table arr[2, c.FasImportedUnion] = {
   {0x11223344}, {0x55667788}
 }
 
 fn main() i32 {
-  value FasImportedUnion = {0}
-  fas_union_fill(&value)
-  fas_union_report(value.word, value.bytes[7])
+  value c.FasImportedUnion = {0}
+  c.fas_union_fill(&value)
+  c.fas_union_report(value.word, value.bytes[7])
   value.word = 0x76543210
-  fas_union_read_after_write(&value)
-  fas_union_check_table(&fas_union_table[0])
-  anon FasAnonymousImportedRecord
-  fas_union_fill_anonymous(&anon)
-  fas_union_report_anonymous(anon.word, zext[u32](anon.bytes[3]))
+  c.fas_union_read_after_write(&value)
+  c.fas_union_check_table(&fas_union_table[0])
+  anon c.FasAnonymousImportedRecord
+  c.fas_union_fill_anonymous(&anon)
+  c.fas_union_report_anonymous(anon.word, zext[u32](anon.bytes[3]))
   anon.bytes[0] = 170
   anon.bytes[3] = 187
-  fas_union_report_anonymous(anon.word, zext[u32](anon.bytes[3]))
-  fas_union_check_zero_global()
+  c.fas_union_report_anonymous(anon.word, zext[u32](anon.bytes[3]))
+  c.fas_union_check_zero_global()
   scratch arr[16,u8]
   scratch[3] = 11
   chars arr[5,u8] = {}
-  fas_union_check_zero_local(&chars[0])
-  zero_union FasImportedUnion = {}
-  fas_union_check_zero_union(&zero_union)
+  c.fas_union_check_zero_local(&chars[0])
+  zero_union c.FasImportedUnion = {}
+  c.fas_union_check_zero_union(&zero_union)
   return 0
 }

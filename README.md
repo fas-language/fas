@@ -6,11 +6,11 @@ It has wrapping fixed-width integers, IEEE `f32`/`f64` and SIMD vectors such as 
 
 <!-- skip -->
 ```fas
-use "C" <stdio.h>
-use "C" <unistd.h>
+use "C" <stdio.h> as c
+use "C" <unistd.h> as c
 
-fn count(p addr, n usize, c u8) usize {
-    needle vec[32, u8] = splat(c)
+fn count(p addr, n usize, byte u8) usize {
+    needle vec[32, u8] = splat(byte)
     one vec[32, u8] = splat(1)
     total usize = 0
     i usize = 0
@@ -20,7 +20,7 @@ fn count(p addr, n usize, c u8) usize {
         i += 32
     }
     while i < n {
-        if p[u8, i] == c { total += 1 }
+        if p[u8, i] == byte { total += 1 }
         i += 1
     }
     return total
@@ -31,12 +31,12 @@ const SIZE u32 = 65536
 fn main() i32 {
     buf arr[SIZE, u8] = {}
     lines usize = 0
-    n isize = read(0, &buf, SIZE)
+    n isize = c.read(0, &buf, SIZE)
     while n > 0 {
         lines += count(&buf, bitcast[usize](n), '\n')
-        n = read(0, &buf, SIZE)
+        n = c.read(0, &buf, SIZE)
     }
-    printf(c"%zu lines\n", lines)
+    c.printf(c"%zu lines\n", lines)
     return 0
 }
 ```

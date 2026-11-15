@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdio.h>
 C
 
@@ -88,7 +88,7 @@ fn main() i32 {
         i32
     ](result)
     linked i32 = if sfx[1].link == &sfx[0] { 1 } else { 0 }
-    printf(c"%d %d %d %d\n", checked, values[2], weaponinfo[1].atkstate, linked)
+    c.printf(c"%d %d %d %d\n", checked, values[2], weaponinfo[1].atkstate, linked)
     return 0
 }
 }

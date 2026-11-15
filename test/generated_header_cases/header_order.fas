@@ -1,16 +1,16 @@
-use "C" <<CONFIG
+use "C" as c <<CONFIG
 #define FAS_FEATURE 1
 CONFIG
-use "C" "feature.h"
-use "C" <<MAIN
+use "C" "feature.h" as c
+use "C" as c <<MAIN
 int main(void) {
   return exported_feature.value == 7 && fas_read_configured() == 41 ? 0 : 1;
 }
 MAIN
 
 extern "C" {
-  var exported_feature FeatureRecord = {7}
+  var exported_feature c.FeatureRecord = {7}
   fn fas_read_configured() i32 {
-    return configured_value()
+    return c.configured_value()
   }
 }

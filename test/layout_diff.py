@@ -121,7 +121,7 @@ def generate():
             }
         )
 
-    fas = ['use "C" "layout_attributes.h"', "opaque Opaque"]
+    fas = ['use "C" "layout_attributes.h" as c', "opaque Opaque"]
     for st in structs:
         annotation = f" @align({st['align']})" if st["align"] is not None else ""
         fas.append(f"struct {st['fas']}{annotation} {{")
@@ -164,8 +164,9 @@ def generate():
         ("typedef_align", "AlignedTypedef", "_Alignof(AlignedTypedef)"),
         ("typedef_bytes_offset", "AlignedTypedef", "offsetof(AlignedTypedef, bytes)"),
     ]
-    for query, ty, _ in attribute_queries:
+    for query, c_ty, _ in attribute_queries:
         name = f"fas_attribute_{query}"
+        ty = f"c.{c_ty}"
         if query.endswith("size"):
             fas.append(f"    fn {name}() usize {{ return sizeof[{ty}] }}")
         elif query.endswith("align"):

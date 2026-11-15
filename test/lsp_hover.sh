@@ -79,10 +79,10 @@ TIMEOUT = 60
 servers = []
 
 HOVER = [
-    'use "C" <string.h>',
-    'use "C" "mixed.h"',
-    'use "C" "layouts.h"',
-    'use "C" "colors.h"',
+    'use "C" <string.h> as c',
+    'use "C" "mixed.h" as c',
+    'use "C" "layouts.h" as c',
+    'use "C" "colors.h" as c',
     "",
     "const LIMIT i32 = 4",
     "const MASK u32 = 4294967295",
@@ -159,16 +159,16 @@ HOVER = [
     "    small_tag Tagged[3]",
     "    big_tag Tagged[10]",
     "    blend Blend[u32, 3]",
-    "    padded CPad = {}",
-    "    nested CNest = {}",
-    "    filled CArr = {}",
-    "    narrow CPacked = {}",
-    "    aligned_c CAligned = {}",
-    "    mixed FasMixed = {0}",
+    "    padded c.CPad = {}",
+    "    nested c.CNest = {}",
+    "    filled c.CArr = {}",
+    "    narrow c.CPacked = {}",
+    "    aligned_c c.CAligned = {}",
+    "    mixed c.FasMixed = {0}",
     "    mixed_word u32 = mixed.word",
-    '    count usize = strlen(c"abc")',
+    '    count usize = c.strlen(c"abc")',
     '    logged i32 = emit_line(c"abc")',
-    "    palette i32 = RED + GREEN + BLUE + LOW + HIGH",
+    "    palette i32 = c.RED + c.GREEN + c.BLUE + c.LOW + c.HIGH",
     "    return small + box.value + point.y + LIMIT",
     "}",
 ]
@@ -339,7 +339,7 @@ struct CAligned {
 MIXED_C ="```c\nunion FasMixed {\nuint32_t word;\nuint16_t pair[3];\nuint8_t bytes[5];\n}\n```"
 UNION_T_FORMAT = (
     FENCE
-    + "union FasMixed @align(4)\n```\n\n```text\nsize 8, align 4\nword   u32          at offset 0\npair   arr[3, u16]  at offset 0\nbytes  arr[5, u8]   at offset 0\n```"
+    + "union c.FasMixed @align(4)\n```\n\n```text\nsize 8, align 4\nword   u32          at offset 0\npair   arr[3, u16]  at offset 0\nbytes  arr[5, u8]   at offset 0\n```"
     + "\n\n"
     + MIXED_C
     + "\n\n%s:%d"
@@ -372,37 +372,37 @@ BLEND_T = (
 )
 CPAD_T = (
     FENCE
-    + "struct CPad @align(4)\n```\n\n```text\nsize 12, align 4\na  u8   at offset 0\nb  u32  at offset 4\nc  u8   at offset 8\n```"
+    + "struct c.CPad @align(4)\n```\n\n```text\nsize 12, align 4\na  u8   at offset 0\nb  u32  at offset 4\nc  u8   at offset 8\n```"
     + "\n\n```c\nstruct CPad {\nuint8_t a;\nuint32_t b;\nuint8_t c;\n}\n```\n\n%s:%d"
 )
 CNEST_T = (
     FENCE
-    + "struct CNest @align(8)\n```\n\n```text\nsize 16, align 8\ninner  CInner  at offset 0\ntag    u8      at offset 4\nbig    u64     at offset 8\n```"
+    + "struct c.CNest @align(8)\n```\n\n```text\nsize 16, align 8\ninner  c.CInner  at offset 0\ntag    u8        at offset 4\nbig    u64       at offset 8\n```"
     + "\n\n```c\nstruct CNest {\nstruct CInner inner;\nuint8_t tag;\nuint64_t big;\n}\n```\n\n%s:%d"
 )
 CARR_T = (
     FENCE
-    + "struct CArr @align(2)\n```\n\n```text\nsize 8, align 2\nbytes  arr[5, u8]  at offset 0\nw      u16         at offset 6\n```"
+    + "struct c.CArr @align(2)\n```\n\n```text\nsize 8, align 2\nbytes  arr[5, u8]  at offset 0\nw      u16         at offset 6\n```"
     + "\n\n```c\nstruct CArr {\nuint8_t bytes[5];\nuint16_t w;\n}\n```\n\n%s:%d"
 )
 CPACKED_T = (
     FENCE
-    + "struct CPacked @align(1)\n```\n\n```text\nsize 5, align 1\na  u8   at offset 0\nb  u32  at offset 1\n```"
+    + "struct c.CPacked @align(1)\n```\n\n```text\nsize 5, align 1\na  u8   at offset 0\nb  u32  at offset 1\n```"
     + "\n\n```c\nstruct CPacked {\nuint8_t a;\nuint32_t b;\n}\n```\n\n%s:%d"
 )
 CALIGNED_T = (
     FENCE
-    + "struct CAligned @align(8)\n```\n\n```text\nsize 8, align 8\na  u8  at offset 0\n```"
+    + "struct c.CAligned @align(8)\n```\n\n```text\nsize 8, align 8\na  u8  at offset 0\n```"
     + "\n\n```c\nstruct CAligned {\nuint8_t a;\n}\n```\n\n%s:%d"
 )
 COLORS_HEADER = """enum color { RED, GREEN = 5, BLUE };
 typedef enum { LOW, HIGH } level;
 """
-ENUM_RED_T = FENCE + "const RED i32 = 0\n```\n\nfrom enum color\n\n%s:1"
-ENUM_GREEN_T = FENCE + "const GREEN i32 = 5\n```\n\nfrom enum color\n\n%s:1"
-ENUM_BLUE_T = FENCE + "const BLUE i32 = 6\n```\n\nfrom enum color\n\n%s:1"
-ANON_LOW_T = FENCE + "const LOW i32 = 0\n```\n\nfrom anonymous enum\n\n%s:2"
-ANON_HIGH_T = FENCE + "const HIGH i32 = 1\n```\n\nfrom anonymous enum\n\n%s:2"
+ENUM_RED_T = FENCE + "const c.RED i32 = 0\n```\n\nfrom enum c.color\n\n%s:1"
+ENUM_GREEN_T = FENCE + "const c.GREEN i32 = 5\n```\n\nfrom enum c.color\n\n%s:1"
+ENUM_BLUE_T = FENCE + "const c.BLUE i32 = 6\n```\n\nfrom enum c.color\n\n%s:1"
+ANON_LOW_T = FENCE + "const c.LOW i32 = 0\n```\n\nfrom anonymous enum\n\n%s:2"
+ANON_HIGH_T = FENCE + "const c.HIGH i32 = 1\n```\n\nfrom anonymous enum\n\n%s:2"
 ORIGIN_T = (
     FENCE
     + "const ORIGIN Point\n```\n\n```text\nsize 8, align 4\nx  i32  at offset 0\ny  i32  at offset 4\n```"
@@ -814,25 +814,26 @@ def run_hover():
     union_text = UNION_T_FORMAT % (mixed_h, MIXED_LINE)
     word_text = WORD_T_FORMAT % (mixed_h, MIXED_WORD_LINE)
     for anchor, offset, expected in PINS + [
-        ("FasMixed = {0}", 0, union_text),
+        ("c.FasMixed = {0}", 2, union_text),
+        ("c.FasMixed = {0}", 0, union_text),
         ("mixed.word", 6, word_text),
-        ("padded CPad", 7, CPAD_T % (layouts_h, 3)),
-        ("nested CNest", 7, CNEST_T % (layouts_h, 14)),
-        ("filled CArr", 7, CARR_T % (layouts_h, 20)),
-        ("narrow CPacked", 7, CPACKED_T % (layouts_h, 25)),
-        ("aligned_c CAligned", 10, CALIGNED_T % (layouts_h, 30)),
-        ("RED + GREEN", 0, ENUM_RED_T % colors_h),
-        ("GREEN + BLUE", 0, ENUM_GREEN_T % colors_h),
-        ("BLUE + LOW", 0, ENUM_BLUE_T % colors_h),
-        ("+ LOW + HIGH", 2, ANON_LOW_T % colors_h),
-        ("LOW + HIGH", 6, ANON_HIGH_T % colors_h),
+        ("padded c.CPad", 9, CPAD_T % (layouts_h, 3)),
+        ("nested c.CNest", 9, CNEST_T % (layouts_h, 14)),
+        ("filled c.CArr", 9, CARR_T % (layouts_h, 20)),
+        ("narrow c.CPacked", 9, CPACKED_T % (layouts_h, 25)),
+        ("aligned_c c.CAligned", 12, CALIGNED_T % (layouts_h, 30)),
+        ("c.RED + c.GREEN", 2, ENUM_RED_T % colors_h),
+        ("c.GREEN + c.BLUE", 2, ENUM_GREEN_T % colors_h),
+        ("c.BLUE + c.LOW", 2, ENUM_BLUE_T % colors_h),
+        ("+ c.LOW + c.HIGH", 4, ANON_LOW_T % colors_h),
+        ("c.LOW + c.HIGH", 10, ANON_HIGH_T % colors_h),
     ]:
         expect_hover(s, main, text, anchor, offset, expected, "open")
     strlen = hover_text(s.result("textDocument/hover", at(main, text, "strlen(c", 1)))
     expect(
         strlen is not None
         and strlen.startswith(
-            "```fas\nextern fn strlen(__s addr) u64\n```\n\nnonnull: __s; C string: __s\n\n```c\nextern size_t strlen"
+            "```fas\nextern fn c.strlen(__s addr) u64\n```\n\nnonnull: __s; C string: __s\n\n```c\nextern size_t strlen"
         )
         and re.search(r"\n\n[^\n]+:[0-9]+$", strlen) is not None,
         "imported C name hover for strlen: %r" % (strlen,),

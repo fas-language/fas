@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 static unsigned oracle(unsigned i) { return (i + 1u) * 3u; }
 static int inspect(const unsigned char *p) { return p[0] == 65 && p[1] == 0; }
 C
@@ -8,16 +8,16 @@ p addr
 a arr[3,u32] }
 var G arr[3,u32] = {7,8,9}
 fn main() i32 {
-  a arr[4,S] = {{true,{1+2,2*3,9,12},c"A",{7,8,9}}, {true,{3,6,9,12},&G[1+1],{7,8,9}}, {true,{3,6,9,12},&inspect,{7,8,9}}, {true,{3,6,9,12},null,{7,8,9}}}
+  a arr[4,S] = {{true,{1+2,2*3,9,12},c"A",{7,8,9}}, {true,{3,6,9,12},&G[1+1],{7,8,9}}, {true,{3,6,9,12},&c.inspect,{7,8,9}}, {true,{3,6,9,12},null,{7,8,9}}}
   i usize = 0
   while i < 4 {
     if !a[i].b || a[i].a[2] != 9 { return 1 }
     j u32 = 0
-    while j < 4 { if a[i].v[j] != oracle(j) { return 2 }
+    while j < 4 { if a[i].v[j] != c.oracle(j) { return 2 }
       j += 1 }
     i += 1
   }
-  if inspect(a[0].p) != 1 || a[1].p[u32] != 9 || a[2].p != &inspect || a[3].p != null { return 3 }
+  if c.inspect(a[0].p) != 1 || a[1].p[u32] != 9 || a[2].p != &c.inspect || a[3].p != null { return 3 }
   flags arr[20,vec[4,bool]] = {{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)},{true,false,trunc[bool](3),trunc[bool](2)}}
   if !flags[19][0] || flags[19][1] || !flags[19][2] || flags[19][3] { return 7 }
   k u32 = 41

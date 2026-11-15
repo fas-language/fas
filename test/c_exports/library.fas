@@ -1,6 +1,6 @@
 use "dependency.fas"
-use "C" "types.h"
-use "C" <<C
+use "C" "types.h" as c
+use "C" as c <<C
 #include <stdlib.h>
 static int compare_for_qsort(const void *a, const void *b) {
     return fas_compare((void *)a, (void *)b);
@@ -39,8 +39,8 @@ var state State = {{3,true},splat(2),splat(true),null,null,{{1,2,3},{4,5,6}}}
 var table_address addr = &table
 var nested_address addr = &state.nested
 var text addr = c"fas"
-var tagged handle[ExportTag] = null
-var alias handle[ExportAlias] = null
+var tagged handle[c.ExportTag] = null
+var alias handle[c.ExportAlias] = null
 fn fas_compare(a addr, b addr) i32 {
     x i32 = a[i32,0]
     y i32 = b[i32,0]
@@ -54,8 +54,8 @@ fn fas_event(value i32, data addr) void {
 fn fas_read() i32 {
     return scalar + table[0] + state.data[1][2] + zext[i32](state.vector[2])
 }
-fn fas_inline(x i32) i32 { return export_inline(x) }
-fn fas_tag(x handle[ExportTag]) handle[ExportTag] { return x }
-fn fas_alias(x handle[ExportAlias]) handle[ExportAlias] { return x }
+fn fas_inline(x i32) i32 { return c.export_inline(x) }
+fn fas_tag(x handle[c.ExportTag]) handle[c.ExportTag] { return x }
+fn fas_alias(x handle[c.ExportAlias]) handle[c.ExportAlias] { return x }
 fn fas_bool(x bool) bool { return !x }
 }

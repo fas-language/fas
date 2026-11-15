@@ -1,59 +1,59 @@
-use "C" "c_record_values.h"
-use "C" <<C
+use "C" "c_record_values.h" as c
+use "C" as c <<C
 #include <stdio.h>
 C
 
 extern "C" {
 fn fas_record_probe() i32 {
-    small RvSmall = {3, -7, 100000}
-    small2 RvSmall = rv_small(5, small)
-    printf(c"small %d %d %d\n", sext[i32](small2.a), sext[i32](small2.b), small2.c)
-    mixed RvMixed = {41, 1.5, 0.125}
-    mixed2 RvMixed = rv_mixed(mixed, 3.0)
-    printf(c"mixed %d %.9g %.17g\n", mixed2.i, cvt[f64](mixed2.f), mixed2.d)
-    f2 arr[2, RvF2] = {{1.0, 2.0}, {0.5, -3.0}}
-    f2[0] = rv_f2(f2[0], 1.5, f2[1])
-    printf(c"f2 %.9g %.9g\n", cvt[f64](f2[0].x), cvt[f64](f2[0].y))
-    d RvD2 = {1.0, 2.0}
-    e RvD2 = {0.5, 0.25}
-    f RvD2 = {3.0, 7.0}
-    g RvD2 = {-1.0, 4.0}
-    h RvD2 = {2.0, -6.0}
-    d2 RvD2 = rv_d2(d, e, f, g, h)
-    printf(c"d2 %.17g %.17g\n", d2.x, d2.y)
-    big RvBig = {1, 2, 3, 9.0}
-    big = rv_big(big, 11)
-    printf(c"big %lld %lld %lld %.17g\n", big.a, big.b, big.c, big.d)
-    u RvUnion
+    small c.RvSmall = {3, -7, 100000}
+    small2 c.RvSmall = c.rv_small(5, small)
+    c.printf(c"small %d %d %d\n", sext[i32](small2.a), sext[i32](small2.b), small2.c)
+    mixed c.RvMixed = {41, 1.5, 0.125}
+    mixed2 c.RvMixed = c.rv_mixed(mixed, 3.0)
+    c.printf(c"mixed %d %.9g %.17g\n", mixed2.i, cvt[f64](mixed2.f), mixed2.d)
+    f2 arr[2, c.RvF2] = {{1.0, 2.0}, {0.5, -3.0}}
+    f2[0] = c.rv_f2(f2[0], 1.5, f2[1])
+    c.printf(c"f2 %.9g %.9g\n", cvt[f64](f2[0].x), cvt[f64](f2[0].y))
+    d c.RvD2 = {1.0, 2.0}
+    e c.RvD2 = {0.5, 0.25}
+    f c.RvD2 = {3.0, 7.0}
+    g c.RvD2 = {-1.0, 4.0}
+    h c.RvD2 = {2.0, -6.0}
+    d2 c.RvD2 = c.rv_d2(d, e, f, g, h)
+    c.printf(c"d2 %.17g %.17g\n", d2.x, d2.y)
+    big c.RvBig = {1, 2, 3, 9.0}
+    big = c.rv_big(big, 11)
+    c.printf(c"big %lld %lld %lld %.17g\n", big.a, big.b, big.c, big.d)
+    u c.RvUnion
     u.i = 0x1234
-    u2 RvUnion = rv_union(u)
-    printf(c"union %lld\n", u2.i)
-    p RvPacked = {7, -9}
-    p2 RvPacked = rv_packed(p)
-    printf(c"packed %d %d\n", sext[i32](p2.c), p2.i)
-    a RvAligned = {6}
-    a2 RvAligned = rv_aligned(4, a)
-    printf(c"aligned %d\n", a2.x)
-    printf(c"sum %lld\n", rv_sum(small, mixed, f2[1], d, big, p))
-    made RvF2 = rv_make()
-    printf(c"make %.9g %.9g\n", cvt[f64](made.x), cvt[f64](made.y))
-    s RvD2 = rv_static(d, made)
-    printf(c"static %.17g %.17g\n", s.x, s.y)
-    nested RvNested = {{1.5, 2.5}, 9}
-    n2 RvNested = rv_nested(nested)
-    printf(c"nested %.9g %.9g %d\n", cvt[f64](n2.inner.x), cvt[f64](n2.inner.y), n2.n)
-    ar RvArr = {{1, 2, 3}}
-    ar2 RvArr = rv_arr(ar)
-    printf(c"arr %d %d %d\n", sext[i32](ar2.s[0]), sext[i32](ar2.s[1]),
+    u2 c.RvUnion = c.rv_union(u)
+    c.printf(c"union %lld\n", u2.i)
+    p c.RvPacked = {7, -9}
+    p2 c.RvPacked = c.rv_packed(p)
+    c.printf(c"packed %d %d\n", sext[i32](p2.c), p2.i)
+    a c.RvAligned = {6}
+    a2 c.RvAligned = c.rv_aligned(4, a)
+    c.printf(c"aligned %d\n", a2.x)
+    c.printf(c"sum %lld\n", c.rv_sum(small, mixed, f2[1], d, big, p))
+    made c.RvF2 = c.rv_make()
+    c.printf(c"make %.9g %.9g\n", cvt[f64](made.x), cvt[f64](made.y))
+    s c.RvD2 = c.rv_static(d, made)
+    c.printf(c"static %.17g %.17g\n", s.x, s.y)
+    nested c.RvNested = {{1.5, 2.5}, 9}
+    n2 c.RvNested = c.rv_nested(nested)
+    c.printf(c"nested %.9g %.9g %d\n", cvt[f64](n2.inner.x), cvt[f64](n2.inner.y), n2.n)
+    ar c.RvArr = {{1, 2, 3}}
+    ar2 c.RvArr = c.rv_arr(ar)
+    c.printf(c"arr %d %d %d\n", sext[i32](ar2.s[0]), sext[i32](ar2.s[1]),
         sext[i32](ar2.s[2]))
-    printf(c"va %lld\n", rv_va(4, mixed, d, big, small, p))
-    chained RvBig = rv_big(rv_big(big, 2), 3)
-    printf(c"chain %lld %lld %lld %.17g\n", chained.a, chained.b, chained.c, chained.d)
-    nested.inner = rv_make()
-    printf(c"field %.9g %.9g\n", cvt[f64](nested.inner.x), cvt[f64](nested.inner.y))
-    printf(c"apply %.17g\n", rv_apply(&rv_d2))
-    rv_big(big, 5)
-    printf(c"member %.17g %lld\n", rv_big(big, 4).d, cvt[i64](rv_make().y))
+    c.printf(c"va %lld\n", c.rv_va(4, mixed, d, big, small, p))
+    chained c.RvBig = c.rv_big(c.rv_big(big, 2), 3)
+    c.printf(c"chain %lld %lld %lld %.17g\n", chained.a, chained.b, chained.c, chained.d)
+    nested.inner = c.rv_make()
+    c.printf(c"field %.9g %.9g\n", cvt[f64](nested.inner.x), cvt[f64](nested.inner.y))
+    c.printf(c"apply %.17g\n", c.rv_apply(&c.rv_d2))
+    c.rv_big(big, 5)
+    c.printf(c"member %.17g %lld\n", c.rv_big(big, 4).d, cvt[i64](c.rv_make().y))
     return 0
 }
 }

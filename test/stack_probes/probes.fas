@@ -6,10 +6,10 @@
 // with SIGSEGV on the guard; `small` (frames of a few pages, the unrolled
 // probe path, small VLAs, and a call aligning rsp to 4 KiB) must run
 // normally.
-use "C" <pthread.h>
-use "C" <sys/mman.h>
-use "C" <stdio.h>
-use "C" <string.h>
+use "C" <pthread.h> as c
+use "C" <sys/mman.h> as c
+use "C" <stdio.h> as c
+use "C" <string.h> as c
 
 var mode i32 = 0
 
@@ -37,7 +37,7 @@ extern "C" {
         if mode == 1 { r = big() }
         if mode == 2 { r = vla(1048576) }
         if mode == 3 { r = mid() + vla(1024) + vla(9000) + aligned() }
-        printf(c"survived %lld\n", r)
+        c.printf(c"survived %lld\n", r)
         return null
     }
 }
@@ -45,20 +45,20 @@ extern "C" {
 fn main(argc i32, argv addr) i32 {
     if argc != 2 { return 2 }
     m addr = argv[addr, 1]
-    if strcmp(m, c"frame") == 0 { mode = 1 }
-    if strcmp(m, c"vla") == 0 { mode = 2 }
-    if strcmp(m, c"small") == 0 { mode = 3 }
+    if c.strcmp(m, c"frame") == 0 { mode = 1 }
+    if c.strcmp(m, c"vla") == 0 { mode = 2 }
+    if c.strcmp(m, c"small") == 0 { mode = 3 }
     if mode == 0 { return 2 }
     low usize = 2097152
     stack usize = 65536
-    base addr = mmap(null, low + 4096 + stack, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+    base addr = c.mmap(null, low + 4096 + stack, c.PROT_READ | c.PROT_WRITE, c.MAP_PRIVATE | c.MAP_ANONYMOUS, -1, 0)
     if addr_bits(base) == 0xffffffffffffffff { return 3 }
-    if mprotect(base + low, 4096, PROT_NONE) != 0 { return 4 }
-    attr pthread_attr_t = {}
-    pthread_attr_init(&attr)
-    pthread_attr_setstack(&attr, base + low + 4096, stack)
-    t pthread_t = 0
-    if pthread_create(&t, &attr, &worker, null) != 0 { return 5 }
-    pthread_join(t, null)
+    if c.mprotect(base + low, 4096, c.PROT_NONE) != 0 { return 4 }
+    attr c.pthread_attr_t = {}
+    c.pthread_attr_init(&attr)
+    c.pthread_attr_setstack(&attr, base + low + 4096, stack)
+    t c.pthread_t = 0
+    if c.pthread_create(&t, &attr, &worker, null) != 0 { return 5 }
+    c.pthread_join(t, null)
     return 0
 }

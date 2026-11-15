@@ -1,28 +1,31 @@
 ================================================================================
 use headers and file paths
 ================================================================================
-use "C" <stdio.h>
-use "C" "bool_memory.h"
-use "C" "c_unions.h"
+use "C" <stdio.h> as c
+use "C" "bool_memory.h" as c
+use "C" "c_unions.h" as m
 
 --------------------------------------------------------------------------------
 
 (source_file
   (use_declaration
     path: (string)
-    (system_header))
+    (system_header)
+    alias: (identifier))
   (use_declaration
     path: (string)
-    (string))
+    (string)
+    alias: (identifier))
   (use_declaration
     path: (string)
-    (string)))
+    (string)
+    alias: (identifier)))
 
 ================================================================================
 use pkg declarations
 ================================================================================
 use pkg "sdl2"
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 use pkg "zlib libpng"
 
 --------------------------------------------------------------------------------
@@ -32,7 +35,8 @@ use pkg "zlib libpng"
     modules: (string))
   (use_declaration
     path: (string)
-    (system_header))
+    (system_header)
+    alias: (identifier))
   (pkg_declaration
     modules: (string)))
 
@@ -44,6 +48,7 @@ const MASK u64 = 0xFF_FF
 var counter i64 = 0
 var table arr[3, u8] = {1, 2, 3}
 var pending handle[Token]
+var stream handle[c.FILE]
 struct Pair { left u32  right u32 }
 struct Ring[N const usize] {
   head u32
@@ -82,6 +87,12 @@ struct Empty {}
     name: (identifier)
     type: (handle_type
       (named_type
+        name: (type_identifier))))
+  (global_declaration
+    name: (identifier)
+    type: (handle_type
+      (named_type
+        scope: (identifier)
         name: (type_identifier))))
   (struct_declaration
     name: (identifier)

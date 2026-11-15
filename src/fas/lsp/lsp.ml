@@ -720,12 +720,49 @@ let gap_of_declaration state snapshot key text source (d : Sema_index.declaratio
   | Some gap -> Some gap
   | None -> gap_of_span d.Sema_index.name_span
 
+let is_word_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
+
+let word_bounds text offset =
+  let length = String.length text in
+  let offset = min offset length in
+  let rec back i = if i > 0 && is_word_char text.[i - 1] then back (i - 1) else i in
+  let rec forward i =
+    if i < length && is_word_char text.[i] then forward (i + 1) else i
+  in
+  (back offset, forward offset)
+
+(* the aliases of this file's `use "C" ... as alias` lines; [] when the text
+   does not parse *)
+let c_aliases_of key text =
+  match Parser.parse ~limits:Limits.default (Source.create ~file:key ~text) with
+  | Error _ -> []
+  | Ok program ->
+      List.filter_map
+        (function Ast.Use { alias = Some (name, _); _ } -> Some name | _ -> None)
+        program.Ast.items
+
+(* the alias word of `alias.NAME` stands for the C entity NAME: move a point
+   on it to NAME, where the reference's span starts *)
+let past_c_alias key current line character =
+  let offset = Lsp_position.offset_of_position current (line, character) in
+  let first, last = word_bounds current offset in
+  if
+    first < last
+    && last + 1 < String.length current
+    && current.[last] = '.'
+    && is_word_char current.[last + 1]
+    && List.mem (String.sub current first (last - first)) (c_aliases_of key current)
+  then snd (Lsp_position.position_of_offset current (last + 1))
+  else character
+
 let resolve state uri line character =
   match key_of_uri uri with
   | None -> None
   | Some key -> (
       match (snapshot_for state key, current_text state key) with
       | Some snapshot, Some current -> (
+          let character = past_c_alias key current line character in
           match locate snapshot key current line character with
           | None -> None
           | Some offset when in_gap snapshot key offset -> (
@@ -761,9 +798,6 @@ let target (snapshot : snapshot) key offset =
   match List.find_opt contains spans with
   | Some (_, declaration) -> Some declaration
   | None -> Option.map snd (List.find_opt ends_at spans)
-
-let is_word_char c =
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
 
 let line_start text line =
   let length = String.length text in
@@ -899,6 +933,12 @@ let c_macro_text text start =
   |> List.filter (fun word -> word <> "" && word <> "\\")
   |> String.concat " "
 
+(* how the header spells a declaration: imported C names are `c.NAME` inside
+   Fas (Names.c_prefix), plain `NAME` in the C text *)
+let c_spelling (declaration : Sema_index.declaration) =
+  let name = declaration.Sema_index.name in
+  if Names.is_c_name name then Names.c_link_symbol name else name
+
 let c_parts ~enumerator (declaration : Sema_index.declaration) =
   match declaration.Sema_index.c_origin with
   | None | Some ("<unknown>", _) -> []
@@ -910,7 +950,7 @@ let c_parts ~enumerator (declaration : Sema_index.declaration) =
         | None -> []
         | Some _ when enumerator -> []
         | Some text -> (
-            match c_define_column text line declaration.Sema_index.name with
+            match c_define_column text line (c_spelling declaration) with
             | Some _ ->
                 [ "```c\n" ^ c_macro_text text (line_start text line) ^ "\n```" ]
             | None ->
@@ -934,8 +974,7 @@ let c_declaration_location (declaration : Sema_index.declaration) header origin 
   let line = c_line_of declaration text origin in
   let column =
     Option.value ~default:0
-      (Option.bind text (fun text ->
-           c_define_column text line declaration.Sema_index.name))
+      (Option.bind text (fun text -> c_define_column text line (c_spelling declaration)))
   in
   c_location header line column
 
@@ -1260,15 +1299,6 @@ let expression_type (snapshot : snapshot) key offset =
 let hover_markdown (header, facts) extra =
   String.concat "\n\n" ((("```fas\n" ^ header ^ "\n```") :: facts) @ extra)
 
-let word_bounds text offset =
-  let length = String.length text in
-  let offset = min offset length in
-  let rec back i = if i > 0 && is_word_char text.[i - 1] then back (i - 1) else i in
-  let rec forward i =
-    if i < length && is_word_char text.[i] then forward (i + 1) else i
-  in
-  (back offset, forward offset)
-
 let unsupported_hover state params =
   let uri, line, character = request_point params in
   match key_of_uri uri with
@@ -1281,42 +1311,70 @@ let unsupported_hover state params =
             word_bounds current
               (Lsp_position.offset_of_position current (line, character))
           in
-          if first >= last then None
-          else
-            let name = String.sub current first (last - first) in
-            match
-              Option.bind
-                (Hashtbl.find_opt state.c_roots (route_of state key))
-                (fun index ->
-                  Option.map
-                    (fun reason -> (index, reason))
-                    (List.assoc_opt name (Sema_index.c_unsupported index)))
-            with
-            | None -> None
-            | Some (index, reason) ->
-                let origin =
-                  match Sema_index.c_origin_named index name with
-                  | Some (header, row) -> [ Printf.sprintf "%s:%d" header row ]
-                  | None -> []
-                in
-                let value =
-                  String.concat "\n\n"
-                    (Printf.sprintf "C declaration `%s` is not supported: %s" name
-                       reason
-                    :: origin)
-                in
-                Some
-                  (Json.Obj
-                     [
-                       ( "contents",
-                         Json.Obj
-                           [ ("kind", Json.Str "markdown"); ("value", Json.Str value) ]
-                       );
-                       ( "range",
-                         range_json
-                           (Lsp_position.position_of_offset current first)
-                           (Lsp_position.position_of_offset current last) );
-                     ])))
+          (* imported C names are written `alias.NAME` (one of this file's
+             `use "C" ... as alias`); the cursor may be on either word, and
+             the hover covers both *)
+          let aliases = c_aliases_of key current in
+          let word a b = String.sub current a (b - a) in
+          let length = String.length current in
+          let qualified =
+            if first >= last then None
+            else if
+              first >= 2
+              && current.[first - 1] = '.'
+              && is_word_char current.[first - 2]
+            then
+              let qualifier, _ = word_bounds current (first - 1) in
+              Some (qualifier, word qualifier (first - 1), first, last)
+            else if
+              last + 1 < length
+              && current.[last] = '.'
+              && is_word_char current.[last + 1]
+            then
+              let _, member_last = word_bounds current (last + 1) in
+              Some (first, word first last, last + 1, member_last)
+            else None
+          in
+          match qualified with
+          | Some (start, qualifier, member_first, member_last)
+            when List.mem qualifier aliases && member_first < member_last -> (
+              let first = start and last = member_last in
+              let name = Names.c_prefix ^ word member_first member_last in
+              match
+                Option.bind
+                  (Hashtbl.find_opt state.c_roots (route_of state key))
+                  (fun index ->
+                    Option.map
+                      (fun reason -> (index, reason))
+                      (List.assoc_opt name (Sema_index.c_unsupported index)))
+              with
+              | None -> None
+              | Some (index, reason) ->
+                  let origin =
+                    match Sema_index.c_origin_named index name with
+                    | Some (header, row) -> [ Printf.sprintf "%s:%d" header row ]
+                    | None -> []
+                  in
+                  let value =
+                    String.concat "\n\n"
+                      (Printf.sprintf "C declaration `%s` is not supported: %s" name
+                         reason
+                      :: origin)
+                  in
+                  Some
+                    (Json.Obj
+                       [
+                         ( "contents",
+                           Json.Obj
+                             [
+                               ("kind", Json.Str "markdown"); ("value", Json.Str value);
+                             ] );
+                         ( "range",
+                           range_json
+                             (Lsp_position.position_of_offset current first)
+                             (Lsp_position.position_of_offset current last) );
+                       ]))
+          | _ -> None))
 
 let pkg_strings text offset =
   let length = String.length text in

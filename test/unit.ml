@@ -2659,26 +2659,26 @@ let () =
      const GAP usize = offsetof[Point, y]\n";
   write "main.fas"
     "use \"shapes.fas\"\n\
-     use \"C\" \"probe.h\"\n\
-     use \"C\" \"extra.h\"\n\n\
+     use \"C\" \"probe.h\" as c\n\
+     use \"C\" \"extra.h\" as c\n\n\
      var total u32 = LIMIT\n\
      const TABLE arr[2, u8] = {7, 9}\n\n\
      fn helper() i32 { return 0 }\n\n\
      fn main() i32 {\n\
     \  point Point = {. x = 1, .y = 2}\n\
     \  view p = point\n\
-    \  p.x = probe_add(p.y, PROBE_WIDTH)\n\
+    \  p.x = c.probe_add(p.y, c.PROBE_WIDTH)\n\
     \  small u8 = 3\n\
     \  wide u32 = 5\n\
     \  pair Pair [u8] = {small, twice(small)}\n\
-    \  word probe_word = twice[u32](wide)\n\
+    \  word c.probe_word = twice[u32](wide)\n\
     \  total = scaled[2](word) + SCALE\n\
     \  view q = pair\n\
     \  q.left = TABLE[1]\n\
     \  where addr = &helper\n\
-    \  box probe_box = {probe_count}\n\
+    \  box c.probe_box = {c.probe_count}\n\
     \  box.count = 2\n\
-    \  doubled extra_word = extra_twice(box.count)\n\
+    \  doubled c.extra_word = c.extra_twice(box.count)\n\
     \  offset usize = offsetof[Point, x] + GAP\n\
     \  return p.x\n\
      }\n";
@@ -2714,18 +2714,18 @@ let () =
       "global total main.fas:5:5-10 [main.fas:5:1-22] - -";
       "const array TABLE main.fas:6:7-12 [main.fas:6:1-32] - -";
       "function helper main.fas:8:4-10 [main.fas:8:1-29] - -";
-      "function main main.fas:10:4-8 [main.fas:10:1-455] - -";
-      "local point main.fas:11:3-8 [main.fas:10:1-455] main -";
-      "view p main.fas:12:8-9 [main.fas:10:1-455] main -";
-      "local small main.fas:14:3-8 [main.fas:10:1-455] main -";
-      "local wide main.fas:15:3-7 [main.fas:10:1-455] main -";
-      "local pair main.fas:16:3-7 [main.fas:10:1-455] main -";
-      "local word main.fas:17:3-7 [main.fas:10:1-455] main -";
-      "view q main.fas:19:8-9 [main.fas:10:1-455] main -";
-      "local where main.fas:21:3-8 [main.fas:10:1-455] main -";
-      "local box main.fas:22:3-6 [main.fas:10:1-455] main -";
-      "local doubled main.fas:24:3-10 [main.fas:10:1-455] main -";
-      "local offset main.fas:25:3-9 [main.fas:10:1-455] main -";
+      "function main main.fas:10:4-8 [main.fas:10:1-469] - -";
+      "local point main.fas:11:3-8 [main.fas:10:1-469] main -";
+      "view p main.fas:12:8-9 [main.fas:10:1-469] main -";
+      "local small main.fas:14:3-8 [main.fas:10:1-469] main -";
+      "local wide main.fas:15:3-7 [main.fas:10:1-469] main -";
+      "local pair main.fas:16:3-7 [main.fas:10:1-469] main -";
+      "local word main.fas:17:3-7 [main.fas:10:1-469] main -";
+      "view q main.fas:19:8-9 [main.fas:10:1-469] main -";
+      "local where main.fas:21:3-8 [main.fas:10:1-469] main -";
+      "local box main.fas:22:3-6 [main.fas:10:1-469] main -";
+      "local doubled main.fas:24:3-10 [main.fas:10:1-469] main -";
+      "local offset main.fas:25:3-9 [main.fas:10:1-469] main -";
       "const SCALE shapes.fas:1:7-12 [shapes.fas:1:1-20] - -";
       "const LIMIT shapes.fas:2:7-12 [shapes.fas:2:1-28] - -";
       "struct Point shapes.fas:4:8-13 [shapes.fas:4:1-33] - -";
@@ -2746,14 +2746,14 @@ let () =
       "parameter value shapes.fas:16:14-19 [shapes.fas:16:1-59] unused -";
       "local copy shapes.fas:17:3-7 [shapes.fas:16:1-59] unused -";
       "const GAP shapes.fas:21:7-10 [shapes.fas:21:1-37] - -";
-      "const PROBE_WIDTH <generated>:1:1-1 [<generated>:1:1-1] - probe.h:3";
-      "field count <generated>:1:1-1 [<generated>:1:1-1] probe_box probe.h:5";
-      "function extra_twice <generated>:1:1-1 [<generated>:1:1-1] - extra.h:3";
-      "type alias extra_word <generated>:1:1-1 [<generated>:1:1-1] - extra.h:2";
-      "function probe_add <generated>:1:1-1 [<generated>:1:1-1] - probe.h:6";
-      "struct probe_box <generated>:1:1-1 [<generated>:1:1-1] - probe.h:5";
-      "global probe_count <generated>:1:1-1 [<generated>:1:1-1] - probe.h:7";
-      "type alias probe_word <generated>:1:1-1 [<generated>:1:1-1] - probe.h:4";
+      "const c.PROBE_WIDTH <generated>:1:1-1 [<generated>:1:1-1] - probe.h:3";
+      "function c.extra_twice <generated>:1:1-1 [<generated>:1:1-1] - extra.h:3";
+      "type alias c.extra_word <generated>:1:1-1 [<generated>:1:1-1] - extra.h:2";
+      "function c.probe_add <generated>:1:1-1 [<generated>:1:1-1] - probe.h:6";
+      "struct c.probe_box <generated>:1:1-1 [<generated>:1:1-1] - probe.h:5";
+      "global c.probe_count <generated>:1:1-1 [<generated>:1:1-1] - probe.h:7";
+      "type alias c.probe_word <generated>:1:1-1 [<generated>:1:1-1] - probe.h:4";
+      "field count <generated>:1:1-1 [<generated>:1:1-1] c.probe_box probe.h:5";
     ]
     (List.map declaration (Sema_index.declarations index));
   expect "reference"
@@ -2762,68 +2762,51 @@ let () =
       "main.fas:11:9-14 -> struct Point shapes.fas:4:8-13 [shapes.fas:4:1-33] - -";
       "main.fas:11:20-21 -> field x shapes.fas:5:3-4 [shapes.fas:4:1-33] Point -";
       "main.fas:11:28-29 -> field y shapes.fas:6:3-4 [shapes.fas:4:1-33] Point -";
-      "main.fas:12:12-17 -> local point main.fas:11:3-8 [main.fas:10:1-455] main -";
-      "main.fas:13:3-4 -> view p main.fas:12:8-9 [main.fas:10:1-455] main -";
+      "main.fas:12:12-17 -> local point main.fas:11:3-8 [main.fas:10:1-469] main -";
+      "main.fas:13:3-4 -> view p main.fas:12:8-9 [main.fas:10:1-469] main -";
       "main.fas:13:5-6 -> field x shapes.fas:5:3-4 [shapes.fas:4:1-33] Point -";
-      "main.fas:13:9-18 -> function probe_add <generated>:1:1-1 [<generated>:1:1-1] - \
-       probe.h:6";
-      "main.fas:13:19-20 -> view p main.fas:12:8-9 [main.fas:10:1-455] main -";
-      "main.fas:13:21-22 -> field y shapes.fas:6:3-4 [shapes.fas:4:1-33] Point -";
-      "main.fas:13:24-35 -> const PROBE_WIDTH <generated>:1:1-1 [<generated>:1:1-1] - \
-       probe.h:3";
+      "main.fas:13:11-20 -> function c.probe_add <generated>:1:1-1 [<generated>:1:1-1] - probe.h:6";
+      "main.fas:13:21-22 -> view p main.fas:12:8-9 [main.fas:10:1-469] main -";
+      "main.fas:13:23-24 -> field y shapes.fas:6:3-4 [shapes.fas:4:1-33] Point -";
+      "main.fas:13:28-39 -> const c.PROBE_WIDTH <generated>:1:1-1 [<generated>:1:1-1] - probe.h:3";
       "main.fas:16:8-12 -> struct Pair shapes.fas:9:8-12 [shapes.fas:9:1-38] - -";
-      "main.fas:16:21-26 -> local small main.fas:14:3-8 [main.fas:10:1-455] main -";
+      "main.fas:16:21-26 -> local small main.fas:14:3-8 [main.fas:10:1-469] main -";
       "main.fas:16:28-33 -> function twice shapes.fas:14:4-9 [shapes.fas:14:1-48] - -";
-      "main.fas:16:34-39 -> local small main.fas:14:3-8 [main.fas:10:1-455] main -";
-      "main.fas:17:8-18 -> type alias probe_word <generated>:1:1-1 [<generated>:1:1-1] \
-       - probe.h:4";
-      "main.fas:17:21-26 -> function twice shapes.fas:14:4-9 [shapes.fas:14:1-48] - -";
-      "main.fas:17:32-36 -> local wide main.fas:15:3-7 [main.fas:10:1-455] main -";
+      "main.fas:16:34-39 -> local small main.fas:14:3-8 [main.fas:10:1-469] main -";
+      "main.fas:17:10-20 -> type alias c.probe_word <generated>:1:1-1 [<generated>:1:1-1] - probe.h:4";
+      "main.fas:17:23-28 -> function twice shapes.fas:14:4-9 [shapes.fas:14:1-48] - -";
+      "main.fas:17:34-38 -> local wide main.fas:15:3-7 [main.fas:10:1-469] main -";
       "main.fas:18:3-8 -> global total main.fas:5:5-10 [main.fas:5:1-22] - -";
       "main.fas:18:11-17 -> function scaled shapes.fas:15:4-10 [shapes.fas:15:1-59] - -";
-      "main.fas:18:21-25 -> local word main.fas:17:3-7 [main.fas:10:1-455] main -";
+      "main.fas:18:21-25 -> local word main.fas:17:3-7 [main.fas:10:1-469] main -";
       "main.fas:18:29-34 -> const SCALE shapes.fas:1:7-12 [shapes.fas:1:1-20] - -";
-      "main.fas:19:12-16 -> local pair main.fas:16:3-7 [main.fas:10:1-455] main -";
-      "main.fas:20:3-4 -> view q main.fas:19:8-9 [main.fas:10:1-455] main -";
+      "main.fas:19:12-16 -> local pair main.fas:16:3-7 [main.fas:10:1-469] main -";
+      "main.fas:20:3-4 -> view q main.fas:19:8-9 [main.fas:10:1-469] main -";
       "main.fas:20:5-9 -> field left shapes.fas:10:3-7 [shapes.fas:9:1-38] Pair -";
       "main.fas:20:12-17 -> const array TABLE main.fas:6:7-12 [main.fas:6:1-32] - -";
       "main.fas:21:17-23 -> function helper main.fas:8:4-10 [main.fas:8:1-29] - -";
-      "main.fas:22:7-16 -> struct probe_box <generated>:1:1-1 [<generated>:1:1-1] - \
-       probe.h:5";
-      "main.fas:22:20-31 -> global probe_count <generated>:1:1-1 [<generated>:1:1-1] - \
-       probe.h:7";
-      "main.fas:23:3-6 -> local box main.fas:22:3-6 [main.fas:10:1-455] main -";
-      "main.fas:23:7-12 -> field count <generated>:1:1-1 [<generated>:1:1-1] probe_box \
-       probe.h:5";
-      "main.fas:24:11-21 -> type alias extra_word <generated>:1:1-1 \
-       [<generated>:1:1-1] - extra.h:2";
-      "main.fas:24:24-35 -> function extra_twice <generated>:1:1-1 [<generated>:1:1-1] \
-       - extra.h:3";
-      "main.fas:24:36-39 -> local box main.fas:22:3-6 [main.fas:10:1-455] main -";
-      "main.fas:24:40-45 -> field count <generated>:1:1-1 [<generated>:1:1-1] \
-       probe_box probe.h:5";
+      "main.fas:22:9-18 -> struct c.probe_box <generated>:1:1-1 [<generated>:1:1-1] - probe.h:5";
+      "main.fas:22:24-35 -> global c.probe_count <generated>:1:1-1 [<generated>:1:1-1] - probe.h:7";
+      "main.fas:23:3-6 -> local box main.fas:22:3-6 [main.fas:10:1-469] main -";
+      "main.fas:23:7-12 -> field count <generated>:1:1-1 [<generated>:1:1-1] c.probe_box probe.h:5";
+      "main.fas:24:13-23 -> type alias c.extra_word <generated>:1:1-1 [<generated>:1:1-1] - extra.h:2";
+      "main.fas:24:28-39 -> function c.extra_twice <generated>:1:1-1 [<generated>:1:1-1] - extra.h:3";
+      "main.fas:24:40-43 -> local box main.fas:22:3-6 [main.fas:10:1-469] main -";
+      "main.fas:24:44-49 -> field count <generated>:1:1-1 [<generated>:1:1-1] c.probe_box probe.h:5";
       "main.fas:25:27-32 -> struct Point shapes.fas:4:8-13 [shapes.fas:4:1-33] - -";
       "main.fas:25:34-35 -> field x shapes.fas:5:3-4 [shapes.fas:4:1-33] Point -";
       "main.fas:25:39-42 -> const GAP shapes.fas:21:7-10 [shapes.fas:21:1-37] - -";
-      "main.fas:26:10-11 -> view p main.fas:12:8-9 [main.fas:10:1-455] main -";
+      "main.fas:26:10-11 -> view p main.fas:12:8-9 [main.fas:10:1-469] main -";
       "main.fas:26:12-13 -> field x shapes.fas:5:3-4 [shapes.fas:4:1-33] Point -";
       "shapes.fas:2:19-24 -> const SCALE shapes.fas:1:7-12 [shapes.fas:1:1-20] - -";
-      "shapes.fas:10:8-9 -> type parameter T shapes.fas:9:13-14 [shapes.fas:9:1-38] \
-       Pair -";
-      "shapes.fas:11:9-10 -> type parameter T shapes.fas:9:13-14 [shapes.fas:9:1-38] \
-       Pair -";
-      "shapes.fas:14:19-20 -> type parameter T shapes.fas:14:10-11 \
-       [shapes.fas:14:1-48] twice -";
-      "shapes.fas:14:22-23 -> type parameter T shapes.fas:14:10-11 \
-       [shapes.fas:14:1-48] twice -";
-      "shapes.fas:14:33-38 -> parameter value shapes.fas:14:13-18 [shapes.fas:14:1-48] \
-       twice -";
-      "shapes.fas:14:41-46 -> parameter value shapes.fas:14:13-18 [shapes.fas:14:1-48] \
-       twice -";
-      "shapes.fas:15:48-53 -> parameter value shapes.fas:15:24-29 [shapes.fas:15:1-59] \
-       scaled -";
-      "shapes.fas:15:56-57 -> const parameter N shapes.fas:15:11-12 \
-       [shapes.fas:15:1-59] scaled -";
+      "shapes.fas:10:8-9 -> type parameter T shapes.fas:9:13-14 [shapes.fas:9:1-38] Pair -";
+      "shapes.fas:11:9-10 -> type parameter T shapes.fas:9:13-14 [shapes.fas:9:1-38] Pair -";
+      "shapes.fas:14:19-20 -> type parameter T shapes.fas:14:10-11 [shapes.fas:14:1-48] twice -";
+      "shapes.fas:14:22-23 -> type parameter T shapes.fas:14:10-11 [shapes.fas:14:1-48] twice -";
+      "shapes.fas:14:33-38 -> parameter value shapes.fas:14:13-18 [shapes.fas:14:1-48] twice -";
+      "shapes.fas:14:41-46 -> parameter value shapes.fas:14:13-18 [shapes.fas:14:1-48] twice -";
+      "shapes.fas:15:48-53 -> parameter value shapes.fas:15:24-29 [shapes.fas:15:1-59] scaled -";
+      "shapes.fas:15:56-57 -> const parameter N shapes.fas:15:11-12 [shapes.fas:15:1-59] scaled -";
       "shapes.fas:21:28-33 -> struct Point shapes.fas:4:8-13 [shapes.fas:4:1-33] - -";
       "shapes.fas:21:35-36 -> field y shapes.fas:6:3-4 [shapes.fas:4:1-33] Point -";
     ]
@@ -2844,18 +2827,18 @@ let () =
       "main.fas:12:12-17 [] Point -";
       "main.fas:13:3-4 [] Point -";
       "main.fas:13:3-6 [] i32 -";
-      "main.fas:13:9-36 [] i32 -";
-      "main.fas:13:19-20 [] Point -";
-      "main.fas:13:19-22 [] i32 -";
-      "main.fas:13:24-35 [] i32 3";
+      "main.fas:13:9-40 [] i32 -";
+      "main.fas:13:21-22 [] Point -";
+      "main.fas:13:21-24 [] i32 -";
+      "main.fas:13:28-39 [] i32 3";
       "main.fas:14:14-15 [] u8 -";
       "main.fas:15:14-15 [] u32 -";
       "main.fas:16:20-21 [] Pair[u8] -";
       "main.fas:16:21-26 [] u8 -";
       "main.fas:16:28-40 [] u8 -";
       "main.fas:16:34-39 [] u8 -";
-      "main.fas:17:21-37 [] u32 -";
-      "main.fas:17:32-36 [] u32 -";
+      "main.fas:17:23-39 [] u32 -";
+      "main.fas:17:34-38 [] u32 -";
       "main.fas:18:11-26 [] u32 -";
       "main.fas:18:11-34 [] u32 -";
       "main.fas:18:18-19 [] u32 2";
@@ -2868,14 +2851,14 @@ let () =
       "main.fas:20:12-20 [] u8 -";
       "main.fas:20:18-19 [] i32 -";
       "main.fas:21:16-17 [] addr -";
-      "main.fas:22:19-20 [] probe_box -";
-      "main.fas:22:20-31 [] i32 -";
-      "main.fas:23:3-6 [] probe_box -";
+      "main.fas:22:21-22 [] c.probe_box -";
+      "main.fas:22:24-35 [] i32 -";
+      "main.fas:23:3-6 [] c.probe_box -";
       "main.fas:23:3-12 [] i32 -";
       "main.fas:23:15-16 [] i32 -";
-      "main.fas:24:24-46 [] i32 -";
-      "main.fas:24:36-39 [] probe_box -";
-      "main.fas:24:36-45 [] i32 -";
+      "main.fas:24:26-50 [] i32 -";
+      "main.fas:24:40-43 [] c.probe_box -";
+      "main.fas:24:40-49 [] i32 -";
       "main.fas:25:18-26 [] u64 -";
       "main.fas:25:18-42 [] u64 -";
       "main.fas:25:39-42 [] u64 4";
@@ -2906,7 +2889,7 @@ let () =
   expect "generic call"
     [
       "main.fas:16:28-33 [] u8 false";
-      "main.fas:17:21-26 [] u32 true";
+      "main.fas:17:23-28 [] u32 true";
       "main.fas:18:11-17 [] 2 true";
     ]
     (List.map

@@ -1,7 +1,7 @@
 // value structs across the C boundary, both ways: they pass and return
 // like the same C structs (SysV), and a fails result is C's
 // struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }
-use "C" "value_structs_abi.h"
+use "C" "value_structs_abi.h" as libc
 
 error NotFound = 2
 
@@ -52,7 +52,7 @@ fn fas_ff2(x i32) VF2 fails {
 var fails_fns arr[3, addr] = { &fas_fpt, &fas_fspan, &fas_ff2 }
 
 fn ck_fail() i32 {
-    r VPt = call_addr[VPt fails](c_fns[0], -6) catch e {
+    r VPt = call_addr[VPt fails](libc.c_fns[0], -6) catch e {
         if bitcast[u32](e) != 0x80004321 { return 1 }
         return 0
     }
@@ -77,27 +77,27 @@ fn ck() i32 {
     b VBox = c_box({{3, 4}, 9})
     if b.p.x != 4 || b.p.y != 3 || b.tag != 10 { bad |= 64 }
     d VPt = {7, 7}
-    q VPt = call_addr[VPt fails](c_fns[0], 6) catch d
+    q VPt = call_addr[VPt fails](libc.c_fns[0], 6) catch d
     if q.x != 6 || q.y != -6 { bad |= 128 }
     if ck_fail() != 0 { bad |= 256 }
-    r VPt = call_addr[VPt fails](c_fns[0], -6) catch d
+    r VPt = call_addr[VPt fails](libc.c_fns[0], -6) catch d
     if r.x != 7 { bad |= 512 }
     ds VSpan = {}
-    w VSpan = call_addr[VSpan fails](c_fns[1], 4) catch ds
+    w VSpan = call_addr[VSpan fails](libc.c_fns[1], 4) catch ds
     if w.n != 4 || w.p[u8, 0] != 115 { bad |= 1024 }
     df VF2 = {}
-    g VF2 = call_addr[VF2 fails](c_fns[2], -1) catch df
+    g VF2 = call_addr[VF2 fails](libc.c_fns[2], -1) catch df
     if g.a != 0.0 { bad |= 2048 }
-    h VF2 = call_addr[VF2 fails](c_fns[2], 3) catch df
+    h VF2 = call_addr[VF2 fails](libc.c_fns[2], 3) catch df
     if h.a != 3.5 || h.b != 2.5 { bad |= 4096 }
     return bad
 }
 
 extern "C" {
 fn main() i32 {
-    r i32 = c_drive(&fails_fns)
+    r i32 = libc.c_drive(&fails_fns)
     k i32 = ck()
-    printf(c"c_drive %d ck %d\n", r, k)
+    libc.printf(c"c_drive %d ck %d\n", r, k)
     return r | k
 }
 }

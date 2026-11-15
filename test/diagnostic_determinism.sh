@@ -43,7 +43,7 @@ cat >"$WORK/failure.h" <<'EOF'
 #error fas diagnostic determinism
 EOF
 cat >"$WORK/forced_import.fas" <<EOF
-use "C" "$WORK/failure.h"
+use "C" "$WORK/failure.h" as c
 fn main() void {}
 EOF
 set +e

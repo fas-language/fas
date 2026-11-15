@@ -35,8 +35,8 @@ for level in 0 2; do
 done
 
 cat >"$C_IMPORT_TMP/lazy.fas" <<'FAS'
-use "C" <string.h>
-fn main() i32 { return if strlen(c"") > 0 { 1 } else { 0 } }
+use "C" <string.h> as c
+fn main() i32 { return if c.strlen(c"") > 0 { 1 } else { 0 } }
 FAS
 REAL_CC=$(command -v "$CC")
 cat >"$C_IMPORT_TMP/count-clang" <<'SH'

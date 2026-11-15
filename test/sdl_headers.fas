@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <SDL2/SDL.h>
 #include <stdio.h>
 
@@ -64,48 +64,48 @@ fn checksum(pixels addr, pitch i32) u64 {
 }
 
 fn main() i32 {
-    if SDL_Init(SDL_INIT_VIDEO) != 0 { return 1 }
-    window handle[SDL_Window] = SDL_CreateWindow(c"fas-sdl-fire", 0x1fff0000, 0x1fff0000, 320, 200, 0)
+    if c.SDL_Init(c.SDL_INIT_VIDEO) != 0 { return 1 }
+    window handle[c.SDL_Window] = c.SDL_CreateWindow(c"fas-sdl-fire", 0x1fff0000, 0x1fff0000, 320, 200, 0)
     if window == null {
-        SDL_Quit()
+        c.SDL_Quit()
         return 2
     }
-    surface handle[SDL_Surface] = SDL_CreateRGBSurface(0, 320, 200, 32, 0, 0, 0, 0)
+    surface handle[c.SDL_Surface] = c.SDL_CreateRGBSurface(0, 320, 200, 32, 0, 0, 0, 0)
     if surface == null {
-        SDL_DestroyWindow(window)
-        SDL_Quit()
+        c.SDL_DestroyWindow(window)
+        c.SDL_Quit()
         return 3
     }
-    rect SDL_Rect = {0, 0, 320, 200}
-    if SDL_FillRect(surface, handle_from_addr[SDL_Rect](&rect), 0) != 0 {
-        SDL_FreeSurface(surface)
-        SDL_DestroyWindow(window)
-        SDL_Quit()
+    rect c.SDL_Rect = {0, 0, 320, 200}
+    if c.SDL_FillRect(surface, handle_from_addr[c.SDL_Rect](&rect), 0) != 0 {
+        c.SDL_FreeSurface(surface)
+        c.SDL_DestroyWindow(window)
+        c.SDL_Quit()
         return 4
     }
-    if handle_addr(surface)[SDL_Surface].w != 320 || handle_addr(surface)[SDL_Surface].h != 200 || handle_addr(surface)[SDL_Surface].pitch < 320 * 4 {
-        SDL_FreeSurface(surface)
-        SDL_DestroyWindow(window)
-        SDL_Quit()
+    if handle_addr(surface)[c.SDL_Surface].w != 320 || handle_addr(surface)[c.SDL_Surface].h != 200 || handle_addr(surface)[c.SDL_Surface].pitch < 320 * 4 {
+        c.SDL_FreeSurface(surface)
+        c.SDL_DestroyWindow(window)
+        c.SDL_Quit()
         return 5
     }
-    pixels addr = handle_addr(surface)[SDL_Surface].pixels
-    pitch i32 = handle_addr(surface)[SDL_Surface].pitch
+    pixels addr = handle_addr(surface)[c.SDL_Surface].pixels
+    pitch i32 = handle_addr(surface)[c.SDL_Surface].pitch
     render_fire(pixels, pitch)
-    pushed i32 = fas_push_user_events(19)
+    pushed i32 = c.fas_push_user_events(19)
     if pushed != 19 {
-        SDL_FreeSurface(surface)
-        SDL_DestroyWindow(window)
-        SDL_Quit()
+        c.SDL_FreeSurface(surface)
+        c.SDL_DestroyWindow(window)
+        c.SDL_Quit()
         return 6
     }
-    events i32 = fas_count_user_events()
-    printf(c"%llu %d %d %d %d\n", checksum(pixels, pitch), events,
-        handle_addr(surface)[SDL_Surface].w,
-        handle_addr(surface)[SDL_Surface].h, pitch)
-    SDL_FreeSurface(surface)
-    SDL_DestroyWindow(window)
-    SDL_Quit()
+    events i32 = c.fas_count_user_events()
+    c.printf(c"%llu %d %d %d %d\n", checksum(pixels, pitch), events,
+        handle_addr(surface)[c.SDL_Surface].w,
+        handle_addr(surface)[c.SDL_Surface].h, pitch)
+    c.SDL_FreeSurface(surface)
+    c.SDL_DestroyWindow(window)
+    c.SDL_Quit()
     return 0
 }
 }

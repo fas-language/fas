@@ -1,28 +1,28 @@
-use "C" "c_import/enum_types.h"
-use "C" <stdio.h>
+use "C" "c_import/enum_types.h" as c
+use "C" <stdio.h> as c
 
-const constant_tab arr[2,i32] = { S_X, S_Y }
+const constant_tab arr[2,i32] = { c.S_X, c.S_Y }
 
 extern "C" {
-  var tab arr[1,info_t] = { {am_b, S_Y} }
+  var tab arr[1,c.info_t] = { {c.am_b, c.S_Y} }
 
   fn main() i32 {
-    if tab[0].ammo != am_b || tab[0].st != S_Y { return 1 }
-    if constant_tab[0] != S_X || constant_tab[1] != S_Y { return 2 }
-    if c_enum_roundtrip(S_Y) != S_Y { return 3 }
-    if c_packed_roundtrip(trunc[u8](PACKED_MAX)) != trunc[u8](PACKED_MAX) { return 4 }
-    if c_wide_roundtrip(WIDE_NEG) != WIDE_NEG { return 5 }
-    if c_wide_roundtrip(WIDE_LARGE) != WIDE_LARGE { return 6 }
-    if c_unsigned_roundtrip(UNSIGNED_MAX) != UNSIGNED_MAX { return 7 }
-    if c_tagged_enum_roundtrip(FAS_TAGGED_LAST) != FAS_TAGGED_LAST { return 8 }
-    if c_earlier_enum_roundtrip(FAS_EARLIER_LAST) != FAS_EARLIER_LAST { return 9 }
-    printf(c"%d %d %d %d %u %d %ld %ld %u %d %d\n",
+    if tab[0].ammo != c.am_b || tab[0].st != c.S_Y { return 1 }
+    if constant_tab[0] != c.S_X || constant_tab[1] != c.S_Y { return 2 }
+    if c.c_enum_roundtrip(c.S_Y) != c.S_Y { return 3 }
+    if c.c_packed_roundtrip(trunc[u8](c.PACKED_MAX)) != trunc[u8](c.PACKED_MAX) { return 4 }
+    if c.c_wide_roundtrip(c.WIDE_NEG) != c.WIDE_NEG { return 5 }
+    if c.c_wide_roundtrip(c.WIDE_LARGE) != c.WIDE_LARGE { return 6 }
+    if c.c_unsigned_roundtrip(c.UNSIGNED_MAX) != c.UNSIGNED_MAX { return 7 }
+    if c.c_tagged_enum_roundtrip(c.FAS_TAGGED_LAST) != c.FAS_TAGGED_LAST { return 8 }
+    if c.c_earlier_enum_roundtrip(c.FAS_EARLIER_LAST) != c.FAS_EARLIER_LAST { return 9 }
+    c.printf(c"%d %d %d %d %u %d %ld %ld %u %d %d\n",
       tab[0].ammo, tab[0].st, constant_tab[0], constant_tab[1],
-      zext[u32](c_packed_roundtrip(trunc[u8](PACKED_MAX))),
-      c_enum_roundtrip(S_Y), c_wide_roundtrip(WIDE_NEG),
-      c_wide_roundtrip(WIDE_LARGE), c_unsigned_roundtrip(UNSIGNED_MAX),
-      c_tagged_enum_roundtrip(FAS_TAGGED_LAST),
-      c_earlier_enum_roundtrip(FAS_EARLIER_LAST))
+      zext[u32](c.c_packed_roundtrip(trunc[u8](c.PACKED_MAX))),
+      c.c_enum_roundtrip(c.S_Y), c.c_wide_roundtrip(c.WIDE_NEG),
+      c.c_wide_roundtrip(c.WIDE_LARGE), c.c_unsigned_roundtrip(c.UNSIGNED_MAX),
+      c.c_tagged_enum_roundtrip(c.FAS_TAGGED_LAST),
+      c.c_earlier_enum_roundtrip(c.FAS_EARLIER_LAST))
     return 0
   }
 }

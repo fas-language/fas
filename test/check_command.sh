@@ -69,8 +69,8 @@ FAS
 cat >"$WORK/msg.fas" <<'FAS'
 fn main() i32 { return "café \"q\" \\ x" }
 FAS
-printf 'use "C" <<C\nint caf\303\251(void) { return ; }\nC\nfn main() i32 { return 0 }\n' >"$WORK/cuni.fas"
-printf 'use "C" <<C\nint answer(void) { return 42; }\nC\nfn main() i32 { return 0 }\n' >"$WORK/cok.fas"
+printf 'use "C" as c <<C\nint caf\303\251(void) { return ; }\nC\nfn main() i32 { return 0 }\n' >"$WORK/cuni.fas"
+printf 'use "C" as c <<C\nint answer(void) { return 42; }\nC\nfn main() i32 { return 0 }\n' >"$WORK/cok.fas"
 cp "$WORK/bad.fas" "$WORK/caf$ACCENT.fas"
 
 echo "check_command: check and --emit-ir agree on every test/*.fas file"

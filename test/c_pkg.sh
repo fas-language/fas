@@ -219,19 +219,19 @@ ar rcs "$SMOKE_LIB/libsmoke.a" "$SMOKE/smoke.o" || fail "smoke archive was not b
 
 cat >"$PROG/value.fas" <<'FAS'
 use pkg "good"
-use "C" <pkgonly.h>
-fn main() i32 { return PKG_VALUE }
+use "C" <pkgonly.h> as c
+fn main() i32 { return c.PKG_VALUE }
 FAS
 cat >"$PROG/pkg-below.fas" <<'FAS'
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 use pkg "good"
-fn main() i32 { return PKG_VALUE }
+fn main() i32 { return c.PKG_VALUE }
 FAS
 cat >"$PROG/two-headers.fas" <<'FAS'
 use pkg "good"
-use "C" <pkgonly.h>
-use "C" "local.h"
-fn main() i32 { return PKG_VALUE + LOCAL_VALUE }
+use "C" <pkgonly.h> as c
+use "C" "local.h" as c
+fn main() i32 { return c.PKG_VALUE + c.LOCAL_VALUE }
 FAS
 cat >"$PROG/only-pkg.fas" <<'FAS'
 use pkg "good"
@@ -242,59 +242,59 @@ use pkg "nope"
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/plain.fas" <<'FAS'
-use "C" <pkgonly.h>
-fn main() i32 { return PKG_VALUE }
+use "C" <pkgonly.h> as c
+fn main() i32 { return c.PKG_VALUE }
 FAS
 cat >"$PROG/order.fas" <<'FAS'
 use pkg "good"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 use pkg "second"
-use "C" <second.h>
-fn main() i32 { return PKG_VALUE + SECOND_VALUE }
+use "C" <second.h> as c
+fn main() i32 { return c.PKG_VALUE + c.SECOND_VALUE }
 FAS
 cat >"$PROG/quoted.fas" <<'FAS'
 use pkg "good"
-use "C" "local.h"
-fn main() i32 { return LOCAL_VALUE }
+use "C" "local.h" as c
+fn main() i32 { return c.LOCAL_VALUE }
 FAS
 cat >"$PROG/sdl3.fas" <<'FAS'
 use pkg "sdl3"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/nope.fas" <<'FAS'
 use pkg "nope"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/sdl.fas" <<'FAS'
 use pkg "sdl"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/zlib.fas" <<'FAS'
 use pkg "zlib"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/zlibb.fas" <<'FAS'
 use pkg "zlibb"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/weird.fas" <<'FAS'
 use pkg "weird"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/missing.fas" <<'FAS'
 use pkg "good"
-use "C" <missing.h>
+use "C" <missing.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/bare.fas" <<'FAS'
 use pkg "bare"
-use "C" <missing.h>
+use "C" <missing.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/inline.fas" <<'FAS'
@@ -404,22 +404,22 @@ expect_lines "fas: pkg-config: $C_PKG_TMP/fake-pkg-config --cflags \"good\" -> -
 
 cat >"$PROG/smoke.fas" <<'FAS'
 use pkg "smoke"
-use "C" <smoke.h>
-fn main() i32 { return smoke_value() }
+use "C" <smoke.h> as c
+fn main() i32 { return c.smoke_value() }
 FAS
 cat >"$PROG/mixed.fas" <<'FAS'
 use pkg "good"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 use pkg "smoke"
-use "C" <smoke.h>
-fn main() i32 { return PKG_VALUE + smoke_value() }
+use "C" <smoke.h> as c
+fn main() i32 { return c.PKG_VALUE + c.smoke_value() }
 FAS
 cat >"$PROG/dedupe.fas" <<'FAS'
 use pkg "smoke"
 use pkg "sep"
 use pkg "smoke"
-use "C" <smoke.h>
-fn main() i32 { return smoke_value() }
+use "C" <smoke.h> as c
+fn main() i32 { return c.smoke_value() }
 FAS
 cat >"$PROG/dep-pkg.fas" <<'FAS'
 use pkg "smoke"
@@ -428,23 +428,23 @@ FAS
 cat >"$PROG/two-files.fas" <<'FAS'
 use "dep-pkg.fas"
 use pkg "smoke"
-use "C" <smoke.h>
-fn main() i32 { return smoke_value() + dep_value() }
+use "C" <smoke.h> as c
+fn main() i32 { return c.smoke_value() + dep_value() }
 FAS
 cat >"$PROG/linkbad.fas" <<'FAS'
 use pkg "linkbad"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/sdl5.fas" <<'FAS'
 use pkg "sdl5"
-use "C" <pkgonly.h>
+use "C" <pkgonly.h> as c
 fn main() i32 { return 0 }
 FAS
 cat >"$PROG/pc-smoke.fas" <<'FAS'
 use pkg "fassmoke"
-use "C" <smoke.h>
-fn main() i32 { return smoke_value() }
+use "C" <smoke.h> as c
+fn main() i32 { return c.smoke_value() }
 FAS
 cat >"$PROG/oracle_smoke.c" <<'C'
 #include <stdio.h>
@@ -562,7 +562,7 @@ fi
 if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists sdl; then
   cat >"$PROG/system-sdl.fas" <<'FAS'
 use pkg "sdl"
-use "C" <SDL.h>
+use "C" <SDL.h> as c
 fn main() i32 { return 0 }
 FAS
   run_diag 0 env FAS_PKG_CONFIG=pkg-config "$OCAML_FAS" check system-sdl.fas

@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as libc <<C
 #include <stdint.h>
 static uint32_t oracle_max(uint32_t a, uint32_t b) { return a > b ? a : b; }
 static uint32_t oracle_sum(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return a + b + c + d; }

@@ -1,6 +1,6 @@
-use "C" <string.h>
+use "C" <string.h> as c
 
-fn imported_length() usize { return strlen(c"abc") }
+fn imported_length() usize { return c.strlen(c"abc") }
 
 fn main() i32 {
   if imported_length() != 3 { return 1 }

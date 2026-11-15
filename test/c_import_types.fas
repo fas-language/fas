@@ -1,26 +1,26 @@
-use "C" "c_import_types.h"
+use "C" "c_import_types.h" as c
 extern "C" {
   var imported_incomplete arr[3, i32] = {1, 2, 3}
 }
 fn main() i32 {
-  if imported_word_value != 42 { return 1 }
-  if imported_read_stdcall_data() != 42 { return 2 }
-  if imported_callback_value(imported_callbacks[0], 40) != 41 { return 3 }
-  if imported_callback_value(imported_callbacks[1], 40) != 42 { return 4 }
-  if imported_float_pointer(null) != null { return 5 }
-  if imported_row_value(imported_row_pointer) != 17 { return 6 }
+  if c.imported_word_value != 42 { return 1 }
+  if c.imported_read_stdcall_data() != 42 { return 2 }
+  if c.imported_callback_value(c.imported_callbacks[0], 40) != 41 { return 3 }
+  if c.imported_callback_value(c.imported_callbacks[1], 40) != 42 { return 4 }
+  if c.imported_float_pointer(null) != null { return 5 }
+  if c.imported_row_value(c.imported_row_pointer) != 17 { return 6 }
   if imported_incomplete[1] != 2 { return 7 }
   imported_incomplete[0] = 9
-  if imported_incomplete_sum() != 14 { return 8 }
-  if sizeof[MemberAlignedRecord] != 16 { return 9 }
-  if alignof[MemberAlignedRecord] != 16 { return 10 }
-  aligned MemberAlignedRecord
+  if c.imported_incomplete_sum() != 14 { return 8 }
+  if sizeof[c.MemberAlignedRecord] != 16 { return 9 }
+  if alignof[c.MemberAlignedRecord] != 16 { return 10 }
+  aligned c.MemberAlignedRecord
   aligned.value = 11
   if aligned.value != 11 { return 11 }
-  if sizeof[ImportedFloatRecord] != 64 { return 12 }
-  if alignof[ImportedFloatRecord] != 16 { return 13 }
-  if imported_float_record.before != 13 { return 14 }
-  imported_float_record.after = 42
-  if imported_float_record.after != 42 { return 15 }
+  if sizeof[c.ImportedFloatRecord] != 64 { return 12 }
+  if alignof[c.ImportedFloatRecord] != 16 { return 13 }
+  if c.imported_float_record.before != 13 { return 14 }
+  c.imported_float_record.after = 42
+  if c.imported_float_record.after != 42 { return 15 }
   return 0
 }

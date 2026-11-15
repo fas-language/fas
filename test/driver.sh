@@ -67,7 +67,7 @@ int c_link_probe(int value) {
 }
 C
 cat >"$WORK/c-sanitize.fas" <<'FAS'
-use "C" <<SANITIZE_C
+use "C" as c <<SANITIZE_C
 int fas_sanitize_c(void) { return 5; }
 SANITIZE_C
 extern "C" { fn fas_sanitize_c() i32 }
@@ -243,8 +243,8 @@ grep -F -- "cc " "$TOOL_LOG" >/dev/null || fail "CC override was ignored"
 temps_empty
 
 cat >"$WORK/c-import.fas" <<FAS
-use "C" "$ROOT/test/c_import/macros.h"
-fn main() i32 { return FAS_MACRO_ALIAS - 41 }
+use "C" "$ROOT/test/c_import/macros.h" as c
+fn main() i32 { return c.FAS_MACRO_ALIAS - 41 }
 FAS
 cat >"$WORK/import-cc" <<'SH'
 #!/bin/sh

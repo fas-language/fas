@@ -63,7 +63,7 @@ for level in 0 2; do
     done
 done
 cat >"$EXPORT_TMP/incompatible.fas" <<'FAS'
-use "C" <<C
+use "C" as c <<C
 long exported(int x);
 C
 extern "C" { fn exported(x i32) i32 { return x } }

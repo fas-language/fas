@@ -135,12 +135,15 @@ module.exports = grammar({
         field('path', $.string),
         optional(
           choice(
-            $.system_header,
-            $.string,
-            seq($.raw_c_open, '\n', $.raw_c_body),
+            // `use "C" <stdio.h> as c`: C names are then written `c.name`
+            seq(choice($.system_header, $.string), optional($._c_alias)),
+            // `use "C" as c <<C`: the alias goes before the tag
+            seq(optional($._c_alias), $.raw_c_open, '\n', $.raw_c_body),
           ),
         ),
       ),
+
+    _c_alias: ($) => seq('as', field('alias', $.identifier)),
 
     pkg_declaration: ($) => seq('use', 'pkg', field('modules', $.string)),
 
@@ -592,6 +595,8 @@ module.exports = grammar({
 
     named_type: ($) =>
       seq(
+        // `c.FILE`: a C type through the file's C alias
+        optional(seq(field('scope', $.identifier), '.')),
         field('name', alias($.identifier, $.type_identifier)),
         optional($.bracket_arguments),
       ),

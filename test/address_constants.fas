@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 extern int Imported;
 extern char names[4][8];
 extern int inspect_tables(void *, void *, void *);
@@ -10,7 +10,7 @@ child addr
 parent addr }
 const Sprnames arr[3,addr] = {c"TROO", c"SARG", c"PLAY"}
 const Menu arr[2,Entry] = {{c"root", &Menu[1], &Menu}, {c"leaf", null, &Menu[0]}}
-const Slots arr[4,addr] = {&Target, &Target.head, &Target.body[1+0], &Imported}
+const Slots arr[4,addr] = {&Target, &Target.head, &Target.body[1+0], &c.Imported}
 var Target Record = {5, {7,11,13}}
 var A addr = &B
 var B addr = &A
@@ -21,11 +21,11 @@ if Sprnames[2][u8,3] != 'Y' { return 2 }
 if Menu[0].child != &Menu[1] { return 3 }
 if Menu[1].parent != &Menu[0] { return 4 }
 if A != &B || B != &A { return 5 }
-if inspect_tables(&Slots, &Menu, &Sprnames) != 0 { return 6 }
+if c.inspect_tables(&Slots, &Menu, &Sprnames) != 0 { return 6 }
 if Target.head != 101 || Target.body[0] != 103 || Target.body[1] != 107 { return 7 }
-if Imported != 109 { return 8 }
-if names[2][3] != 'Z' { return 9 }
-names[1][4] = 'Q'
+if c.Imported != 109 { return 8 }
+if c.names[2][3] != 'Z' { return 9 }
+c.names[1][4] = 'Q'
 if Slots[2][i32] != 107 { return 10 }
 return 0
 }

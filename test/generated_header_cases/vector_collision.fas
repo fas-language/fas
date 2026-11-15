@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 int main(void) {
   return collision.value == 3 && holder.lanes[1] == 2 ? 0 : 1;
 }

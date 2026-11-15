@@ -142,14 +142,14 @@ opaque Token
 
 
 
-use "C" <<ADD3_CALLER
+use "C" as libc <<ADD3_CALLER
 extern int add3(int, int, int);
 static int fas_container_add3(void) { return add3(1, 2, 3) != 6; }
 ADD3_CALLER
 
 extern "C" {
     fn fas_verify_assembly() i32 {
-        if fas_container_add3() != 0 { return 16 }
+        if libc.fas_container_add3() != 0 { return 16 }
         if asm_echo_bool(false) || !asm_echo_bool(true) { return 1 }
         if asm_echo_u8(0) != 0 || asm_echo_u8(255) != 255 || asm_echo_u8(trunc[u8](-1)) != 255 { return 2 }
         if asm_echo_i8(-128) != -128 || asm_echo_i8(127) != 127 || asm_echo_i8(-1) != -1 { return 3 }

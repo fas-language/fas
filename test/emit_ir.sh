@@ -24,30 +24,30 @@ emit_one() {
 
 mkdir "$EMIT_IR_TMP/collisions"
 cat >"$EMIT_IR_TMP/collisions/duplicate_adapters.fas" <<'EOF'
-use "C" <<A
+use "C" as c <<A
 static inline int oracle(int x) { return x + 1; }
 A
-use "C" <<B
+use "C" as c <<B
 static inline int oracle(int x) { return x + 2; }
 B
-fn main() i32 { return oracle(1) }
+fn main() i32 { return c.oracle(1) }
 EOF
 cat >"$EMIT_IR_TMP/collisions/function_name.fas" <<'EOF'
-use "C" <<C
+use "C" as c <<C
 static inline int oracle(int x) { return x + 1; }
 C
 fn oracle(x i32) i32 { return x }
-fn main() i32 { return oracle(1) }
+fn main() i32 { return c.oracle(1) + oracle(1) - 3 }
 EOF
 cat >"$EMIT_IR_TMP/collisions/global_name.fas" <<'EOF'
-use "C" <<C
+use "C" as c <<C
 static inline int oracle(int x) { return x + 1; }
 C
 var oracle i32 = 3
-fn main() i32 { return oracle }
+fn main() i32 { return c.oracle(1) + oracle - 5 }
 EOF
 cat >"$EMIT_IR_TMP/collisions/extern_name.fas" <<'EOF'
-use "C" <<C
+use "C" as c <<C
 static inline int oracle(int x) { return x + 1; }
 C
 extern "C" { fn oracle(x i32) i32 { return x } }
@@ -55,19 +55,21 @@ fn main() i32 { return oracle(1) }
 EOF
 mkdir "$EMIT_IR_TMP/collisions/dependencies"
 cat >"$EMIT_IR_TMP/collisions/dependencies/a.fas" <<'EOF'
-use "C" <<C
+use "C" as c <<C
 static inline int oracle(int x) { return x + 1; }
 C
+fn a_oracle(x i32) i32 { return c.oracle(x) }
 EOF
 cat >"$EMIT_IR_TMP/collisions/dependencies/b.fas" <<'EOF'
-use "C" <<C
+use "C" as c <<C
 static inline int oracle(int x) { return x + 2; }
 C
+fn b_oracle(x i32) i32 { return c.oracle(x) }
 EOF
 cat >"$EMIT_IR_TMP/collisions/dependencies/root.fas" <<'EOF'
 use "a.fas"
 use "b.fas"
-fn main() i32 { return oracle(1) }
+fn main() i32 { return a_oracle(1) + b_oracle(1) - 5 }
 EOF
 
 expect_rejection() {
@@ -87,14 +89,35 @@ expect_rejection() {
 
 expect_rejection "$EMIT_IR_TMP/collisions/duplicate_adapters.fas" \
   "C compilation failed: redefinition of 'oracle'"
-expect_rejection "$EMIT_IR_TMP/collisions/function_name.fas" \
-  'duplicate declaration `oracle`'
-expect_rejection "$EMIT_IR_TMP/collisions/global_name.fas" \
-  'duplicate declaration `oracle`'
 expect_rejection "$EMIT_IR_TMP/collisions/extern_name.fas" \
   "C compilation failed: static declaration of 'oracle' follows non-static declaration"
+
+# C namespaces: a Fas name and a C name of the same spelling coexist; each
+# program verifies as Fir and runs to exit 0
+expect_coexistence() {
+  source=$1
+  "$OCAML_FAS" --emit-ir "$source" >"$EMIT_IR_TMP/coexist.fir" \
+    2>"$EMIT_IR_TMP/stderr" || {
+    cat "$EMIT_IR_TMP/stderr" >&2
+    echo "emit-ir: same-spelled names were rejected: $source" >&2
+    exit 1
+  }
+  "$FAS_FIR_TOOL" --check "$EMIT_IR_TMP/coexist.fir" >/dev/null || {
+    echo "emit-ir: the dump of $source does not parse or verify" >&2
+    exit 1
+  }
+  "$OCAML_FAS" "$source" -o "$EMIT_IR_TMP/coexist" || exit 1
+  "$EMIT_IR_TMP/coexist" || {
+    echo "emit-ir: $source called the wrong \`oracle\`" >&2
+    exit 1
+  }
+}
+expect_coexistence "$EMIT_IR_TMP/collisions/function_name.fas"
+expect_coexistence "$EMIT_IR_TMP/collisions/global_name.fas"
+# imported C names are program-wide (one C entity, one name), so two files
+# whose C defines one name differently still conflict
 expect_rejection "$EMIT_IR_TMP/collisions/dependencies/root.fas" \
-  'C declaration `oracle` is not supported: conflicting C declarations'
+  'C declaration `c.oracle` is not supported: conflicting C declarations'
 
 count=0
 skipped=0

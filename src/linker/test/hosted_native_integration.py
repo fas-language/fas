@@ -116,11 +116,11 @@ int library_answer(void){return 42;}
         if not cc:
             self.skipTest("Fas C header importer requires Clang")
         source = self.source("embedded C", '''
-use "C" <stdio.h>
-use "C" <<HELPER
+use "C" <stdio.h> as c
+use "C" as c <<HELPER
 int embedded_answer(void){puts("embedded C");return 42;}
 HELPER
-fn main() i32 { return embedded_answer() }
+fn main() i32 { return c.embedded_answer() }
 ''')
         out, _ = self.compile("embedded C", source, cc=cc)
         self.assertEqual(run(out, expected=42).stdout, b"embedded C\n")
@@ -137,18 +137,18 @@ fn main() i32 { return embedded_answer() }
         helper = 'static int local_answer(int value){return value+1;}\n'
         header = self.source("static helper", helper, ".h")
         callback = '''
-use "C" <<CALLBACK
+use "C" as c <<CALLBACK
 int invoke(int (*callback)(int),int value){return callback(value);}
 CALLBACK
-const saved_callback addr = &local_answer
+const saved_callback addr = &c.local_answer
 fn main() i32 {
-    if local_answer(0) != 1 { return 1 }
-    if invoke(&local_answer, 40) != 41 { return 2 }
-    return invoke(saved_callback, 41)
+    if c.local_answer(0) != 1 { return 1 }
+    if c.invoke(&c.local_answer, 40) != 41 { return 2 }
+    return c.invoke(saved_callback, 41)
 }
 '''
-        for mode, imports in (("container", 'use "C" <<HELPER\n'+helper+'HELPER\n'),
-                              ("header", 'use "C" "'+str(header)+'"\n')):
+        for mode, imports in (("container", 'use "C" as c <<HELPER\n'+helper+'HELPER\n'),
+                              ("header", 'use "C" "'+str(header)+'" as c\n')):
             source = self.source("static adapter "+mode, imports+callback)
             for fir in ("", "roundtrip"):
                 with self.subTest(mode=mode, fir=fir):
@@ -180,7 +180,7 @@ fn main() i32 { return asm_answer() }
         if not cc:
             self.skipTest('Fas embedded C/assembly importer requires Clang')
         source = self.source('combined native library', '''
-use "C" <<HELPER
+use "C" as c <<HELPER
 #include <stdio.h>
 extern int fas_twice(int);
 int c_answer(void){puts("combined C");return fas_twice(21);}
@@ -188,7 +188,7 @@ HELPER
 extern "C" {
   fn fas_twice(value i32) i32 { return value * 2 }
   fn asm_adjust(value i32) i32
-  fn answer() i32 { return asm_adjust(c_answer()) }
+  fn answer() i32 { return asm_adjust(c.c_answer()) }
 }
 use "asm" <<ASM
 .text
@@ -219,7 +219,7 @@ ASM
         self.assertEqual(run(fas, expected=42).stdout, b'combined C\n')
         # A real partial-link failure must preserve the previous object.
         duplicate = self.source('duplicate embedded symbol', '''
-use "C" <<HELPER
+use "C" as c <<HELPER
 int collision(void){return 1;}
 HELPER
 extern "C" { fn collision() i32 { return 2 } }

@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 static float oracle_parameter(void) {
   float values[4] = {2.0f, 3.0f, 4.0f, 5.0f};
   float scale[4] = {1.0f, 2.0f, 3.0f, 4.0f};

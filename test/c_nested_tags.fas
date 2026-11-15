@@ -1,5 +1,5 @@
-use "C" "c_nested_tags.h"
-use "C" <<NESTED_IMPL
+use "C" "c_nested_tags.h" as c
+use "C" as c <<NESTED_IMPL
 #include <stdio.h>
 
 void fas_nested_report_sizes(size_t outer, size_t outer_tag, size_t deep,
@@ -53,38 +53,38 @@ void fas_nested_report_holder(const struct NestedHolder *value) {
 NESTED_IMPL
 
 fn main() i32 {
-  fas_nested_report_sizes(sizeof[NestedOuter], offsetof[NestedOuter, tag],
-    sizeof[NestedDeep], offsetof[NestedDeep, d], sizeof[NestedUnion],
-    sizeof[NestedAnon], offsetof[NestedAnon, after], sizeof[NestedHolder],
-    sizeof[NestedInner], sizeof[NestedLeaf], sizeof[NestedInAnon],
-    sizeof[NestedFwd])
-  outer NestedOuter = {}
-  fas_nested_fill_outer(&outer)
-  fas_nested_report_outer(&outer)
+  c.fas_nested_report_sizes(sizeof[c.NestedOuter], offsetof[c.NestedOuter, tag],
+    sizeof[c.NestedDeep], offsetof[c.NestedDeep, d], sizeof[c.NestedUnion],
+    sizeof[c.NestedAnon], offsetof[c.NestedAnon, after], sizeof[c.NestedHolder],
+    sizeof[c.NestedInner], sizeof[c.NestedLeaf], sizeof[c.NestedInAnon],
+    sizeof[c.NestedFwd])
+  outer c.NestedOuter = {}
+  c.fas_nested_fill_outer(&outer)
+  c.fas_nested_report_outer(&outer)
   outer.pos.x = outer.pos.x + 2
   outer.tag = outer.tag + sext[i32](outer.pos.y)
-  fas_nested_report_outer(&outer)
-  deep NestedDeep = {}
-  fas_nested_fill_deep(&deep)
-  fas_nested_report_deep(&deep)
+  c.fas_nested_report_outer(&outer)
+  deep c.NestedDeep = {}
+  c.fas_nested_fill_deep(&deep)
+  c.fas_nested_report_deep(&deep)
   deep.mid.leaf.b = deep.mid.leaf.b + 1
-  fas_nested_report_deep(&deep)
-  word NestedUnion = {}
+  c.fas_nested_report_deep(&deep)
+  word c.NestedUnion = {}
   word.word = 0x0005FFFE
-  fas_nested_report_union(&word)
+  c.fas_nested_report_union(&word)
   word.pair.b = -1
-  fas_nested_report_union(&word)
-  anon NestedAnon = {}
+  c.fas_nested_report_union(&word)
+  anon c.NestedAnon = {}
   anon.parts.lo = 0x11223344
   anon.parts.hi = 0x55667788
   anon.after = 42
-  fas_nested_report_anon(&anon)
+  c.fas_nested_report_anon(&anon)
   anon.parts.hi = 1
-  fas_nested_report_anon(&anon)
-  holder NestedHolder = {}
-  fas_nested_fill_holder(&holder)
-  fas_nested_report_holder(&holder)
+  c.fas_nested_report_anon(&anon)
+  holder c.NestedHolder = {}
+  c.fas_nested_fill_holder(&holder)
+  c.fas_nested_report_holder(&holder)
   holder.body.v = holder.body.v * 3
-  fas_nested_report_holder(&holder)
+  c.fas_nested_report_holder(&holder)
   return 0
 }

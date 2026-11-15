@@ -1,7 +1,7 @@
-use "C" "initializer_alignment.h"
+use "C" "initializer_alignment.h" as c
 fn initialize(integer i64, decimal f64, fraction f32) void {
-  packed FasPackedInit = {1, integer, decimal, fraction}
-  ordinary FasOrdinaryInit = {1, integer, decimal, fraction}
+  packed c.FasPackedInit = {1, integer, decimal, fraction}
+  ordinary c.FasOrdinaryInit = {1, integer, decimal, fraction}
 }
 fn main() i32 {
   initialize(11, 2.5, 3.5)

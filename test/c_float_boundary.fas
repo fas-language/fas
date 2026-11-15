@@ -1,5 +1,5 @@
-use "C" "c_float_boundary.h"
-use "C" <<C
+use "C" "c_float_boundary.h" as c
+use "C" as c <<C
 #include <stdio.h>
 C
 
@@ -18,19 +18,19 @@ fn fas_mixed(
     return result
 }
 fn fas_import_probe() i32 {
-    narrow f32 = c_float_echo(1.25)
-    wide f64 = c_double_echo(2.5)
+    narrow f32 = c.c_float_echo(1.25)
+    wide f64 = c.c_double_echo(2.5)
     if narrow != 1.75 { return 1 }
     if wide != 5.0 { return 2 }
-    c_global_f32 = narrow
-    c_global_f64 = wide
-    c_float_state.narrow = narrow
-    c_float_state.wide = wide
-    if c_float_state.narrow != narrow { return 3 }
-    if c_float_state.wide != wide { return 4 }
-    printf(c"%.17g %a\n", wide, wide)
-    mixed f64 = c_mixed(1, 2, 3, 4, 5, 6, 7, 0.5, 1.25, 2.5, 3.75, 4.5, 5.25, 6.125, 7.0625, 8.03125)
-    printf(c"%.17g %a\n", mixed, mixed)
+    c.c_global_f32 = narrow
+    c.c_global_f64 = wide
+    c.c_float_state.narrow = narrow
+    c.c_float_state.wide = wide
+    if c.c_float_state.narrow != narrow { return 3 }
+    if c.c_float_state.wide != wide { return 4 }
+    c.printf(c"%.17g %a\n", wide, wide)
+    mixed f64 = c.c_mixed(1, 2, 3, 4, 5, 6, 7, 0.5, 1.25, 2.5, 3.75, 4.5, 5.25, 6.125, 7.0625, 8.03125)
+    c.printf(c"%.17g %a\n", mixed, mixed)
     return 0
 }
 }

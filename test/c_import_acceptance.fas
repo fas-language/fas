@@ -1,4 +1,4 @@
-use "C" "c_import/pointer_enum_macro_types.h"
+use "C" "c_import/pointer_enum_macro_types.h" as c
 
 fn accept_usize(value usize) i32 { return 0 }
 fn accept_isize(value isize) i32 { return 0 }
@@ -7,35 +7,35 @@ fn accept_i32(value i32) i32 { return 0 }
 fn accept_i64(value i64) i32 { return 0 }
 
 fn main() i32 {
-  if pointer_record_value(&pointer_record) != 17 { return 1 }
-  if pointer_union_value(&pointer_union) != 23 { return 2 }
-  if anonymous_pointer_is_null(null) == 0 { return 3 }
-  if pointer_collision_value(pointer_collision_pointer) != 31 { return 4 }
-  if incomplete_pointer() != null { return 5 }
-  if anonymous_pointer_fields.pointer != null { return 6 }
-  if anonymous_pointer_fields.pointers[0] != null { return 7 }
-  if anonymous_pointer_fields.union_pointer != null { return 8 }
-  if anonymous_pointer_fields_size() != sizeof[AnonymousPointerFields] { return 9 }
-  if anonymous_pointer_tail_offset() != offsetof[AnonymousPointerFields, tail] { return 10 }
-  if accept_i32(anonymous_enum_global) != 0 { return 12 }
-  if anonymous_enum_global != 42 { return 13 }
-  if sizeof[AnonymousEnumFieldRecord] != 2 * sizeof[i32] { return 14 }
-  if anonymous_enum_field.kind != AnonymousFieldHigh { return 15 }
-  if anonymous_enum_field_oracle() == 0 { return 16 }
-  if offsetof[OffsetFloatStorage, values] != offset_float_values() { return 17 }
-  if offsetof[OffsetFloatStorage, tail] != offset_float_tail() { return 18 }
-  if accept_usize(SIZE_T_MACRO) != 0 { return 19 }
-  if accept_isize(PTRDIFF_MACRO) != 0 { return 20 }
-  if accept_usize(UINTPTR_MACRO) != 0 { return 21 }
-  if accept_isize(INTPTR_MACRO) != 0 { return 22 }
-  if accept_usize(CUSTOM_SIZE_MACRO) != 0 { return 23 }
-  if accept_u64(SIZE_MAX) != 0 { return 24 }
-  if accept_i64(INT64_MAX) != 0 { return 25 }
-  if SIZE_T_MACRO != 4 { return 26 }
-  if PTRDIFF_MACRO != -5 { return 27 }
-  if UINTPTR_MACRO != 7 { return 28 }
-  if INTPTR_MACRO != -6 { return 29 }
-  if CUSTOM_SIZE_MACRO != 4 { return 30 }
-  if anonymous_enum_global != 42 { return 31 }
+  if c.pointer_record_value(&c.pointer_record) != 17 { return 1 }
+  if c.pointer_union_value(&c.pointer_union) != 23 { return 2 }
+  if c.anonymous_pointer_is_null(null) == 0 { return 3 }
+  if c.pointer_collision_value(c.pointer_collision_pointer) != 31 { return 4 }
+  if c.incomplete_pointer() != null { return 5 }
+  if c.anonymous_pointer_fields.pointer != null { return 6 }
+  if c.anonymous_pointer_fields.pointers[0] != null { return 7 }
+  if c.anonymous_pointer_fields.union_pointer != null { return 8 }
+  if c.anonymous_pointer_fields_size() != sizeof[c.AnonymousPointerFields] { return 9 }
+  if c.anonymous_pointer_tail_offset() != offsetof[c.AnonymousPointerFields, tail] { return 10 }
+  if accept_i32(c.anonymous_enum_global) != 0 { return 12 }
+  if c.anonymous_enum_global != 42 { return 13 }
+  if sizeof[c.AnonymousEnumFieldRecord] != 2 * sizeof[i32] { return 14 }
+  if c.anonymous_enum_field.kind != c.AnonymousFieldHigh { return 15 }
+  if c.anonymous_enum_field_oracle() == 0 { return 16 }
+  if offsetof[c.OffsetFloatStorage, values] != c.offset_float_values() { return 17 }
+  if offsetof[c.OffsetFloatStorage, tail] != c.offset_float_tail() { return 18 }
+  if accept_usize(c.SIZE_T_MACRO) != 0 { return 19 }
+  if accept_isize(c.PTRDIFF_MACRO) != 0 { return 20 }
+  if accept_usize(c.UINTPTR_MACRO) != 0 { return 21 }
+  if accept_isize(c.INTPTR_MACRO) != 0 { return 22 }
+  if accept_usize(c.CUSTOM_SIZE_MACRO) != 0 { return 23 }
+  if accept_u64(c.SIZE_MAX) != 0 { return 24 }
+  if accept_i64(c.INT64_MAX) != 0 { return 25 }
+  if c.SIZE_T_MACRO != 4 { return 26 }
+  if c.PTRDIFF_MACRO != -5 { return 27 }
+  if c.UINTPTR_MACRO != 7 { return 28 }
+  if c.INTPTR_MACRO != -6 { return 29 }
+  if c.CUSTOM_SIZE_MACRO != 4 { return 30 }
+  if c.anonymous_enum_global != 42 { return 31 }
   return 0
 }

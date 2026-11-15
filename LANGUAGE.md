@@ -10,10 +10,10 @@ fas run hello.fas                       # build, run, delete; program arguments 
 ```
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn main() i32 {
-    printf(c"hello, %s!\n", c"fas")
+    c.printf(c"hello, %s!\n", c"fas")
     return 0
 }
 ```
@@ -36,6 +36,7 @@ hello, fas!
 - [Globals and constants](#globals-and-constants)
 - [SIMD](#simd)
 - [Talking to C](#talking-to-c)
+  - [C names](#c-names)
   - [Headers next to your file](#headers-next-to-your-file)
   - [Libraries with pkg-config](#libraries-with-pkg-config)
   - [C structs by value](#c-structs-by-value)
@@ -85,7 +86,7 @@ Use `view r = p[Box]` to name a typed place once and reuse it.
 ## Values
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn fnv1a(s addr) u32 {                          // 32-bit FNV-1a hash of a C string
     h u32 = 0x811C9DC5
@@ -104,8 +105,8 @@ fn main() i32 {
     big u64 = 1 << 40                           // the literal 1 is u64 here
     mask u16 = 0b1010_0000 | 0xF                // also 0o17
     ok bool = a > 100 && 'A' == 65              // 'A' is the integer 65
-    printf(c"%u %u %x %llu %x %d\n", b, wide, bits, big, mask, ok)
-    printf(c"%08x %x %u %u\n", fnv1a(c"fas"), rotl(bits, 8), popcount(bits), clz(wide))
+    c.printf(c"%u %u %x %llu %x %d\n", b, wide, bits, big, mask, ok)
+    c.printf(c"%08x %x %u %u\n", fnv1a(c"fas"), rotl(bits, 8), popcount(bits), clz(wide))
     return 0
 }
 ```
@@ -117,18 +118,18 @@ bdf81b81 fffffbff 31 23
 Smaller integers widen on their own when nothing can be lost. `usize` is another name for `u64`, and `isize` for `i64`. Signedness changes are always explicit:
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn main(argc i32, argv addr) i32 {
     for i i32 = 1; i < argc; i += 1 {           // argv[addr, i] takes any integer index
-        printf(c"%s\n", argv[addr, i])
+        c.printf(c"%s\n", argv[addr, i])
     }
     n usize = zext[usize](argc)                 // i32 -> usize: explicit, the sign could change
     total u64 = n * 8                           // usize is u64: no conversion
     delta i64 = -3
     back isize = delta                          // isize is i64
     as_bits usize = bitcast[usize](delta)       // signed -> unsigned: explicit
-    printf(c"%llu %zd %zx\n", total, back, as_bits)
+    c.printf(c"%llu %zd %zx\n", total, back, as_bits)
     return 0
 }
 ```
@@ -149,13 +150,13 @@ The supported operations are `+`, `-`, `*`, `/`, unary `-`, comparisons and the 
 `vec[N, f32]` and `vec[N, f64]` support lane-wise arithmetic, comparisons, unary `-`, the float builtins above, `select`, `splat`, lane indexing, constants and memory access, plus the data-movement builtins (`shuffle`, `permute`, `compress`, `expand`, masked loads and stores, gathers and scatters). `cvt` converts between integer and float vectors of the same lane count with the scalar rules, and equal-size vectors can be `bitcast`. Float reductions, `%`, bitwise operations and shifts are rejected, and float vectors never widen implicitly.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn main() i32 {
     single f32 = 0.1
     sum f32 = single + 0.2
     wide f64 = single
-    printf(c"%08x %016llx\n", bitcast[u32](sum), bitcast[u64](wide))
+    c.printf(c"%08x %016llx\n", bitcast[u32](sum), bitcast[u64](wide))
     return 0
 }
 ```
@@ -168,7 +169,7 @@ C `float` and `double` map to `f32` and `f64` everywhere: functions, globals, ty
 ## Functions and control flow
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn collatz(n u64) u32 {
     steps u32 = 0
@@ -179,8 +180,8 @@ fn collatz(n u64) u32 {
     return steps
 }
 
-fn digit(c u8) u32 {
-    switch c {                                  // several constants per case, no fallthrough
+fn digit(ch u8) u32 {
+    switch ch {                                 // several constants per case, no fallthrough
         case 'I', 'i': return 1
         case 'V': return 5
         case 'X': return 10
@@ -204,17 +205,17 @@ fn roman(s addr) u32 {
 }
 
 fn main() i32 {
-    printf(c"%u %u\n", collatz(27), roman(c"CXLIV"))
+    c.printf(c"%u %u\n", collatz(27), roman(c"CXLIV"))
     values: for i i32 = 0; i < 100; i += 7 {
         if i == 14 { continue values }
         if i > 30 { break values }
-        printf(c"%d ", i)
+        c.printf(c"%d ", i)
     }
-    printf(c"\n")
+    c.printf(c"\n")
     {
-        defer { printf(c"registered first, runs last\n") }
-        defer { printf(c"runs first\n") }
-        printf(c"body\n")
+        defer { c.printf(c"registered first, runs last\n") }
+        defer { c.printf(c"runs first\n") }
+        c.printf(c"body\n")
     }
     return 0
 }
@@ -232,7 +233,7 @@ registered first, runs last
 - **Function addresses.** `&f` is the `addr` of any non-generic function, usable at runtime and in constant tables. `call_addr[R](p, args...)` calls through it with the C ABI, where `R` is the result type. A call through an address the compiler can prove wrong (null, not a function, wrong signature) is an error. Any other address is trusted.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn twice(x i32) i32 { return 2 * x }
 fn negate(x i32) i32 { return -x }
@@ -241,9 +242,9 @@ const OPS arr[2, addr] = {&twice, &negate}     // a dispatch table
 
 fn main() i32 {
     for i usize = 0; i < len(OPS); i += 1 {
-        printf(c"%d ", call_addr[i32](OPS[i], 21))
+        c.printf(c"%d ", call_addr[i32](OPS[i], 21))
     }
-    printf(c"\n")
+    c.printf(c"\n")
     return 0
 }
 ```
@@ -290,7 +291,7 @@ A function that can fail says so with `fails`, and every caller must handle the 
 - `errno_err()` is the current C `errno` as an error, or the predeclared `Unexpected` if errno is 0. `err_name(e)` is the error's name as a C string: `"errno N"` for an undeclared errno code, `"unknown error"` for any other undeclared code.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 error Empty, BadDigit, Overflow
 
@@ -298,25 +299,25 @@ fn parse_u32(s addr) u32 fails {
     if s[u8, 0] == 0 { fail Empty }
     n u64 = 0
     for i usize = 0; s[u8, i] != 0; i += 1 {
-        c u8 = s[u8, i]
-        if c < 48 || c > 57 { fail BadDigit }
-        n = n * 10 + zext[u64](c - 48)
+        ch u8 = s[u8, i]
+        if ch < 48 || ch > 57 { fail BadDigit }
+        n = n * 10 + zext[u64](ch - 48)
         if n > 4294967295 { fail Overflow }
     }
     return trunc[u32](n)
 }
 
 fn sum(a addr, b addr) u32 fails {
-    errdefer e { printf(c"sum failed: %s\n", err_name(e)) }
+    errdefer e { c.printf(c"sum failed: %s\n", err_name(e)) }
     return try parse_u32(a) + try parse_u32(b)
 }
 
 fn main() i32 {
-    printf(c"%u\n", parse_u32(c"12x") catch 0)
+    c.printf(c"%u\n", parse_u32(c"12x") catch 0)
     t u32 = sum(c"40", c"2") catch 0
-    printf(c"%u\n", t)
+    c.printf(c"%u\n", t)
     u u32 = sum(c"40", c"") catch e {
-        if e == Empty { printf(c"empty\n") }
+        if e == Empty { c.printf(c"empty\n") }
         return 1
     }
     return 0
@@ -345,7 +346,7 @@ An enum is a closed set of named integer values with its own type.
 - `enum` is a keyword only at the start of a top-level item, before a name; elsewhere it is an ordinary name.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 enum Tok u8 {
     Eof
@@ -364,10 +365,10 @@ fn prec(t Tok) i32 {
 
 fn main() i32 {
     t Tok = Tok.Minus
-    printf(c"%s %d %d\n", enum_name(t), enum_value(t), prec(t))
+    c.printf(c"%s %d %d\n", enum_name(t), enum_value(t), prec(t))
     n u8 = 3
-    if !enum_is[Tok](n) { printf(c"%d is no Tok\n", n) }
-    printf(c"%d members\n", enum_count[Tok])
+    if !enum_is[Tok](n) { c.printf(c"%d is no Tok\n", n) }
+    c.printf(c"%d members\n", enum_count[Tok])
     return 0
 }
 ```
@@ -382,7 +383,7 @@ Minus 11 10
 ## Structs, arrays and memory
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 const BUFFERSIZE usize = 1024
 
@@ -404,14 +405,14 @@ fn main() i32 {
     other Box = {}                              // every byte zero
     copy(other, box)                            // whole-place copy
     other.corners[1].x = 11
-    printf(c"%d %d %s\n", area(&box), area(&other), &other.name)
-    printf(c"%zu %zu %zu\n", sizeof[Box], alignof[Box], offsetof[Box, name])
+    c.printf(c"%d %d %s\n", area(&box), area(&other), &other.name)
+    c.printf(c"%zu %zu %zu\n", sizeof[Box], alignof[Box], offsetof[Box, name])
 
     bytes arr[8, u8] = {1, 2, 3, 4, 5, 6, 7, 8}
     p addr = &bytes
-    printf(c"%x %x %x\n", p[u32], p[u32, 1], (p + 2)[u16])   // little-endian
+    c.printf(c"%x %x %x\n", p[u32], p[u32, 1], (p + 2)[u16])   // little-endian
     p[u16, 3] = 0xBEEF                          // stores work the same way
-    printf(c"%x %x %zu\n", bytes[6], bytes[7], len(bytes))
+    c.printf(c"%x %x %zu\n", bytes[6], bytes[7], len(bytes))
     return 0
 }
 ```
@@ -430,17 +431,17 @@ ef be 8
 - **`view xs = p[T, ..]`** is an element view of unknown length: `xs[i]` is exactly `p[T, i]`, and `&xs[i]` is its address. Use it to name a buffer from C once:
 
 ```fas
-use "C" <stdio.h>
-use "C" <stdlib.h>
+use "C" <stdio.h> as c
+use "C" <stdlib.h> as c
 
 fn main() i32 {
     n usize = 5
-    buf addr = malloc(n * sizeof[u32])
+    buf addr = c.malloc(n * sizeof[u32])
     if buf == null { return 1 }
-    defer { free(buf) }
+    defer { c.free(buf) }
     view squares = buf[u32, ..]                 // no length, no bounds check
     for i usize = 0; i < n; i += 1 { squares[i] = trunc[u32](i * i) }
-    printf(c"%u %u\n", squares[2], squares[4])
+    c.printf(c"%u %u\n", squares[2], squares[4])
     return 0
 }
 ```
@@ -455,7 +456,7 @@ fn main() i32 {
 A `value struct` is a small struct that is a value: it is passed, returned and assigned like an integer, and travels in registers.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 error Empty
 
@@ -480,12 +481,12 @@ fn swap[T](p Pair[T]) Pair[T] { return {p.b, p.a} }
 fn main() i32 {
     line Span = span_of(c"hello value structs")
     word Span = first_word(line) catch line
-    printf(c"%.*s %zu\n", trunc[i32](word.n), word.p, line.n)
+    c.printf(c"%.*s %zu\n", trunc[i32](word.n), word.p, line.n)
     head Span = word                        // assignment copies the value
     head.n = 2
-    printf(c"%.*s %zu\n", trunc[i32](head.n), head.p, word.n)
+    c.printf(c"%.*s %zu\n", trunc[i32](head.n), head.p, word.n)
     p Pair[i32] = swap[i32]({1, 2})
-    printf(c"%d %d\n", p.a, p.b)
+    c.printf(c"%d %d\n", p.a, p.b)
     return 0
 }
 ```
@@ -507,7 +508,7 @@ he 5
 ## Generics
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 struct Ring[N const usize] {
     head usize
@@ -542,8 +543,8 @@ fn main() i32 {
         push[4](&r, x)
     }
     newest usize = (r.head + r.count - 1) % 4
-    printf(c"oldest %u, newest %u, %zu bytes\n", r.items[r.head], r.items[newest], sizeof[Ring[4]])
-    printf(c"%d %u %u\n", max[i32](-3, 2), max[u8](200, 7), double[true](21))
+    c.printf(c"oldest %u, newest %u, %zu bytes\n", r.items[r.head], r.items[newest], sizeof[Ring[4]])
+    c.printf(c"%d %u %u\n", max[i32](-3, 2), max[u8](200, 7), double[true](21))
     return 0
 }
 ```
@@ -559,7 +560,7 @@ Type parameters are `[T]`, const parameters `[N const usize]` (any integer type,
 `for const i T in A..B { ... }` writes the body out once for each value `A`, `A + 1`, ... `B - 1`, as straight-line code: there is no runtime loop, and in each copy `i` is a constant. Use it where you would otherwise copy a block by hand or write a recursive generic: unrolled kernels, per-lane or per-shift code, a dispatch over const instances.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn spin[R const u32](x u32) u32 {
     return (x << R) | (x >> (32 - R))
@@ -592,9 +593,9 @@ fn main() i32 {
     for const i usize in 0..3 {
         if i == 0 { continue }                  // skips the rest of this copy
         widths arr[i, u8] = {}                  // `i` sizes an array
-        printf(c"copy %zu: %zu bytes\n", i, len(widths))
+        c.printf(c"copy %zu: %zu bytes\n", i, len(widths))
     }
-    printf(c"%08x %llu %llu\n", mix(1), sum[4](&xs), shift_by(5, 2))
+    c.printf(c"%08x %llu %llu\n", mix(1), sum[4](&xs), shift_by(5, 2))
     return 0
 }
 ```
@@ -629,7 +630,7 @@ This is the replacement for unroll hints: if you want a loop unrolled, write it 
 ## Globals and constants
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 struct Item { name addr, price u32 }
 
@@ -651,9 +652,9 @@ fn order(i usize) u32 {
 
 fn main() i32 {
     for i usize = 0; i < len(MENU); i += 1 {
-        printf(c"%-5s %u\n", MENU[i].name, order(i))
+        c.printf(c"%-5s %u\n", MENU[i].name, order(i))
     }
-    printf(c"%u orders, last %u\n", orders, history[2])
+    c.printf(c"%u orders, last %u\n", orders, history[2])
     return 0
 }
 ```
@@ -672,8 +673,8 @@ soup  15
 ## SIMD
 
 ```fas
-use "C" <stdio.h>
-use "C" <string.h>
+use "C" <stdio.h> as c
+use "C" <string.h> as c
 
 const LANES vec[16, u8] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 
@@ -705,19 +706,19 @@ fn main() i32 {
     big vec[4, bool] = w > splat(30)
     r vec[4, u32] = shuffle(w, w, {3, 2, 1, 0})
     k vec[4, u32] = compress(w, big)
-    printf(c"w %u %u %u %u, reversed %u %u %u %u, compressed %u %u %u %u\n",
+    c.printf(c"w %u %u %u %u, reversed %u %u %u %u, compressed %u %u %u %u\n",
         w[0], w[1], w[2], w[3], r[0], r[1], r[2], r[3], k[0], k[1], k[2], k[3])
-    printf(c"sum %u, max %u, any %d, all %d, sat %u\n",
+    c.printf(c"sum %u, max %u, any %d, all %d, sat %u\n",
         reduce_sum(w), reduce_max(w), any(big), all(big), add_sat(w, splat(0xFFFFFFF0))[0])
 
     text arr[32, u8] = {}
-    strcpy(&text, c"hello, vector world")
-    upper(&text, strlen(&text))
+    c.strcpy(&text, c"hello, vector world")
+    upper(&text, c.strlen(&text))
     data arr[20, u32] = {}
     for i usize = 0; i < 20; i += 1 {
         data[i] = trunc[u32](i * 7)
     }
-    printf(c"%s, %u above 50\n", &text, count_above(&data, 20, 50))
+    c.printf(c"%s, %u above 50\n", &text, count_above(&data, 20, 50))
     return 0
 }
 ```
@@ -734,13 +735,13 @@ HELLO, VECTOR WORLD, 12 above 50
 
 ## Talking to C
 
-C headers, integer and float macros, structs and `static inline` functions are imported directly. A `use "C" <<TAG` block embeds C source that is compiled with your program.
+C headers, integer and float macros, structs and `static inline` functions are imported directly. A `use "C" as c <<TAG` block embeds C source that is compiled with your program. Every C name is written through the file's alias: `c.printf`, `c.user`, `c.NAME_MAX_LEN`.
 
 ```fas
-use "C" <stdio.h>
-use "C" <stdlib.h>
-use "C" <string.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" <stdlib.h> as c
+use "C" <string.h> as c
+use "C" as c <<C
 #define NAME_MAX_LEN 16
 struct user { int id; char name[NAME_MAX_LEN]; };
 C
@@ -755,21 +756,21 @@ extern "C" {
 }
 
 fn main() i32 {
-    u user = {}                                 // a C struct is an ordinary Fas struct
+    u c.user = {}                               // a C struct is an ordinary Fas struct
     u.id = 42
-    strncpy(&u.name, c"ada", zext[usize](NAME_MAX_LEN - 1))
-    printf(c"%s #%d, %d\n", &u.name, u.id, call_addr[i32](&add, 2, 3))
+    c.strncpy(&u.name, c"ada", zext[usize](c.NAME_MAX_LEN - 1))
+    c.printf(c"%s #%d, %d\n", &u.name, u.id, call_addr[i32](&add, 2, 3))
 
     nums arr[5, i32] = {5, -2, 9, 0, 3}
-    qsort(&nums, len(nums), sizeof[i32], &compare)   // &f of an exported function
-    printf(c"%d %d %d\n", nums[0], nums[2], nums[4])
+    c.qsort(&nums, len(nums), sizeof[i32], &compare) // &f of an exported function
+    c.printf(c"%d %d %d\n", nums[0], nums[2], nums[4])
 
-    buf addr = malloc(32)
+    buf addr = c.malloc(32)
     if buf == null { return 1 }
-    defer { free(buf) }
-    memset(buf, '.', 31)
+    defer { c.free(buf) }
+    c.memset(buf, '.', 31)
     buf[u8, 31] = 0
-    printf(c"%zu\n", strlen(buf))
+    c.printf(c"%zu\n", c.strlen(buf))
     return 0
 }
 ```
@@ -783,10 +784,39 @@ ada #42, 5
 - **Function pointers** are `addr`. `&f` takes the address of a non-generic Fas function, and `call_addr[R](p, args...)` calls it with the C ABI. Unknown function addresses are accepted without runtime checks.
 - **Variadics** (`printf`) promote small integers and `bool` to `int`, as in C.
 - **C strings.** A plain `"..."` passed to an imported C `char *` parameter is rejected, at any offset into the literal and even when a later length parameter bounds the read, as in `strncmp`. Use `c"..."`. The check follows the literal through named bindings and `if` expressions. Variadic arguments such as `printf`'s `%s` value are not checked by this rule.
-- **Macro names.** A Fas declaration with the same name as an imported C macro is a duplicate declaration, just like one clashing with an imported function.
 - **`errno`** is a function-like macro, so it is invisible. Write `__errno_location()[i32]`.
 - **Feature-test macros** (`_GNU_SOURCE`, `_FILE_OFFSET_BITS`, ...) must come before any system header: put that C block first, or pass `-D_GNU_SOURCE`. Defining one after a header was read is an error. Function-like macros such as `CPU_SET` need a `static inline` wrapper in a C block.
 - Importing a declaration Fas can't represent is fine, but using it is an error that names it and the reason. The [type mapping](#c-to-fas) is in the cheat sheet.
+
+### C names
+
+Every `use "C"` names an alias, and the file reaches its C only through it:
+
+<!-- skip -->
+```fas
+use "C" <stdio.h> as c
+use "C" <unistd.h> as c                 // several headers may share one alias
+// a C block: the alias goes before <<TAG, and nothing may follow the tag
+use "C" as c <<C
+static inline int twice(int x) { return 2 * x; }
+C
+
+fn read(fd i32) i32 { return fd }       // a Fas name: no clash with c.read
+
+fn main() i32 {
+    n isize = c.read(0, null, 0)        // the C function
+    eof i32 = c.EOF                     // macros, enumerators and types too: c.FILE
+    return read(c.twice(eof))           // the Fas function
+}
+```
+
+- **The alias is mandatory**, on headers and C blocks alike. A C name is always `alias.name`, a Fas name never has a dot, so Fas and C names never collide: a Fas `read`, `remove` or `stdin` sits next to `c.read`, `c.remove` and `c.stdin`.
+- **Everything the header declares is visible**, after preprocessing and with its own includes: functions, globals, types, struct tags, enumerators and object-like macros.
+- **One C entity is the same under any alias.** All the C of one file is one scope: its headers and blocks merge, and clashes inside it follow C's rules.
+- **Aliases belong to their file.** A file sees only the C it imports itself; to share C with other files, wrap it in a Fas function, or import the header there too. An alias may not have the name of a Fas top-level name, and a local or parameter may not reuse it.
+- **A C name is one name for the whole program.** Two files that import different C under the same name (two `static` functions `oracle`, or two values of one macro) are an error.
+- Messages and editor hovers always spell C names `c.name`, whatever the file's alias.
+- A bare C name is an error with a hint: ``unknown function `printf` `` with ``help: did you mean `c.printf`?``
 
 ### Headers next to your file
 
@@ -808,14 +838,14 @@ int json_depth(const char *text) {
 ```
 
 ```fas
-use "C" <stdio.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" as c <<C
 #define JSON_IMPLEMENTATION
 #include "json.h"
 C
 
 fn main() i32 {
-    printf(c"%d\n", json_depth(c"{\"a\": [1, {\"b\": 2}]}"))
+    c.printf(c"%d\n", c.json_depth(c"{\"a\": [1, {\"b\": 2}]}"))
     return 0
 }
 ```
@@ -823,7 +853,7 @@ fn main() i32 {
 3
 ```
 
-Do this in one file of the program only, or the library's functions are defined twice. Other files use `use "C" "json.h"`.
+Do this in one file of the program only, or the library's functions are defined twice. Other files use `use "C" "json.h" as c`.
 
 ### Libraries with pkg-config
 
@@ -831,12 +861,12 @@ A library installed with a `.pc` file (most of them: SDL, zlib, GTK, libpng) is 
 
 ```fas
 use pkg "zlib"
-use "C" <zlib.h>
-use "C" <stdio.h>
+use "C" <zlib.h> as c
+use "C" <stdio.h> as c
 
 fn main() i32 {
     text arr[5, u8] = {'h', 'e', 'l', 'l', 'o'}
-    printf(c"%lu\n", crc32(0, &text, 5))
+    c.printf(c"%lu\n", c.crc32(0, &text, 5))
     return 0
 }
 ```
@@ -854,7 +884,7 @@ fn main() i32 {
 <!-- error -->
 ```fas
 use pkg "zlibb"
-use "C" <zlib.h>
+use "C" <zlib.h> as c
 fn main() i32 { return 0 }
 ```
 ```text
@@ -866,8 +896,8 @@ Package zlibb was not found
 Many C APIs pass small structs by value: raylib's `ClearBackground(Color)`, `GetMousePosition()` returning `Vector2`. Fas calls them directly with the System V calling convention: the backend classifies each struct or union from its C layout, as a C compiler does. On the Fas side the struct stays a place:
 
 ```fas
-use "C" <stdio.h>
-use "C" <<C
+use "C" <stdio.h> as c
+use "C" as c <<C
 typedef struct { unsigned char r, g, b, a; } Color;
 typedef struct { float x, y; } Vector2;
 static void show(Color c) { printf("%d %d %d %d\n", c.r, c.g, c.b, c.a); }
@@ -875,12 +905,12 @@ static Vector2 add(Vector2 a, Vector2 b) { Vector2 v = {a.x + b.x, a.y + b.y}; r
 C
 
 fn main() i32 {
-    bg Color = {245, 245, 245, 255}
-    show(bg)                          // argument: a variable, field or array element
-    a Vector2 = {1.0, 2.0}
-    sum Vector2 = add(a, a)           // result: a declaration ...
-    sum = add(add(sum, a), a)         // ... an assignment, or another call's argument
-    printf(c"%g %g\n", cvt[f64](sum.x), cvt[f64](sum.y))
+    bg c.Color = {245, 245, 245, 255}
+    c.show(bg)                        // argument: a variable, field or array element
+    a c.Vector2 = {1.0, 2.0}
+    sum c.Vector2 = c.add(a, a)       // result: a declaration ...
+    sum = c.add(c.add(sum, a), a)     // ... an assignment, or another call's argument
+    c.printf(c"%g %g\n", cvt[f64](sum.x), cvt[f64](sum.y))
     return 0
 }
 ```
@@ -899,7 +929,7 @@ fn main() i32 {
 An assembly unit is linked in, but it declares nothing to Fas. Declare its symbols in `extern "C"`. It takes its arguments in `rdi`, `rsi` and `edx`, as System V passes them.
 
 ```fas
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 use "asm" <<S
     .text
     .globl add3
@@ -910,11 +940,11 @@ add3:
 S
 
 extern "C" {
-    fn add3(a i32, b i32, c i32) i32
+    fn add3(a i32, b i32, d i32) i32
 }
 
 fn main() i32 {
-    printf(c"%d\n", add3(1, 2, 3))
+    c.printf(c"%d\n", add3(1, 2, 3))
     return 0
 }
 ```
@@ -978,12 +1008,12 @@ fn dot(a addr, b addr) i32 {
 <!-- file: app.fas -->
 ```fas
 use "geom/vec2.fas"
-use "C" <stdio.h>
+use "C" <stdio.h> as c
 
 fn main() i32 {
     a Vec2 = {2, 3}
     b Vec2 = {4, 5}
-    printf(c"%d\n", dot(&a, &b))
+    c.printf(c"%d\n", dot(&a, &b))
     return 0
 }
 ```
@@ -1017,10 +1047,10 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 // top level
 use "util.fas"                          // another Fas file, relative to this one
 use linux "sys_linux.fas"               // only when building for --os linux
-use "C" <stdio.h>                       // C header from the system path
-use "C" "lib.h"                         // C header relative to this file
+use "C" <stdio.h> as c                  // C header from the system path; names are c.printf, ...
+use "C" "lib.h" as c                    // C header relative to this file, same alias
 // C source, up to a line holding only the tag; nothing may follow <<C
-use "C" <<C
+use "C" as c <<C
 static inline int twice(int x) { return 2 * x; }
 C
 use "asm" "start.S"                     // assembly unit; also use "asm" <<TAG
@@ -1239,12 +1269,13 @@ Every builtin has the same result on every CPU. Builds target baseline x86-64 (S
 
 | C | Fas |
 |---|---|
+| any declared name `x` of a `use "C" ... as c` | `c.x` ([C names](#c-names)) |
 | `int`, `char`, `long`, `double`, `uint8_t`, `size_t`, `ssize_t`, `_Bool` | `i32`, `i8`, `i64`, `f64`, `u8`, `usize`, `isize`, `bool` |
 | enum constants, `#define N 16` | integer constants with C's type |
 | `#define SCALE 0.5f`, `FLT_MAX`, `M_PI` | `f32` (`f`/`F` suffix) or `f64` constants. Only a single literal, optionally `-` and parentheses |
 | `void *`, `char *`, `int *`, function pointers | `addr` |
-| `struct S *` (complete or opaque `S`) | `handle[S]`, and `&s` of an imported struct converts |
-| complete structs and unions | Fas record types: fields, `{}`, `sizeof`, globals, arrays |
+| `struct S *` (complete or opaque `S`) | `handle[c.S]`, and `&s` of an imported struct converts |
+| complete structs and unions | Fas record types `c.S`: fields, `{}`, `sizeof`, globals, arrays |
 | C `float`, `double` parameters, results, globals, typedefs | `f32`, `f64` |
 | `float`, `double` record or union fields | `f32`, `f64`, with ordinary field access |
 | `extern T x;` | a global place |

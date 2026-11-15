@@ -4372,21 +4372,21 @@ let () =
   | messages ->
       failwith ("use-c-rejection: unexpected diagnostics " ^ String.concat "; " messages));
   incr checks_run;
-  (match (parse_file "quoted-use.fas" "use \"C\" \"local.h\"\n").Ast.items with
-  | [ Ast.Use { path = "C"; c_header = Some (Ast.C_quoted "local.h"); _ } ] -> ()
+  (match (parse_file "quoted-use.fas" "use \"C\" \"local.h\" as c\n").Ast.items with
+  | [ Ast.Use { path = "C"; c_header = Some (Ast.C_quoted "local.h"); alias = Some ("c", _); _ } ] -> ()
   | _ -> failwith "use-c-quoted: parser did not preserve the quoted header");
   incr checks_run;
-  (match (parse_file "angle-use.fas" "use \"C\" <system.h>\n").Ast.items with
-  | [ Ast.Use { path = "C"; c_header = Some (Ast.C_system "system.h"); _ } ] -> ()
+  (match (parse_file "angle-use.fas" "use \"C\" <system.h> as c\n").Ast.items with
+  | [ Ast.Use { path = "C"; c_header = Some (Ast.C_system "system.h"); alias = Some ("c", _); _ } ] -> ()
   | _ -> failwith "use-c-angle: parser did not preserve the system header");
   incr checks_run;
-  (match (parse_file "keyword-angle-use.fas" "use \"C\" <net/if.h>\n").Ast.items with
+  (match (parse_file "keyword-angle-use.fas" "use \"C\" <net/if.h> as c\n").Ast.items with
   | [ Ast.Use { path = "C"; c_header = Some (Ast.C_system "net/if.h"); _ } ] -> ()
   | _ -> failwith "use-c-keyword-angle: parser did not preserve the system header");
   incr checks_run;
   (match
      (parse_file "pkg-line-before-header.fas"
-        "use pkg \"sdl2 >= 2.26\"\nuse \"C\" <system.h>\n")
+        "use pkg \"sdl2 >= 2.26\"\nuse \"C\" <system.h> as c\n")
        .Ast.items
    with
   | [
@@ -4397,7 +4397,7 @@ let () =
   | _ -> failwith "use-pkg-before-header: parser did not keep the pkg line and header");
   incr checks_run;
   (match
-     (parse_file "pkg-line-after-header.fas" "use \"C\" \"local.h\"\nuse pkg \"sdl2\"\n")
+     (parse_file "pkg-line-after-header.fas" "use \"C\" \"local.h\" as c\nuse pkg \"sdl2\"\n")
        .Ast.items
    with
   | [
@@ -4409,7 +4409,7 @@ let () =
   incr checks_run;
   (match
      (parse_file "pkg-line-container.fas"
-        "use pkg \"sdl2\"\nuse \"C\" <<END\nint pkg_fragment;\nEND\n")
+        "use pkg \"sdl2\"\nuse \"C\" as c <<END\nint pkg_fragment;\nEND\n")
        .Ast.items
    with
   | [
@@ -4455,7 +4455,7 @@ let () =
      check_files
        [
          ( "pkg-identifier-after-c.fas",
-           "use \"C\" <stdio.h>\n\
+           "use \"C\" <stdio.h> as c\n\
             fn pkg() i32 { return 1 }\n\
             fn main() i32 { return pkg() }\n" );
        ]
@@ -4481,17 +4481,17 @@ let () =
             (List.map (fun (diagnostic : Diag.t) -> diagnostic.message) diagnostics)));
   let raw_container =
     parse_file "raw-container.fas"
-      "  use \"C\" <<END\n/* } { */\nconst char *s = \"# Fas text\";\nEND\n"
+      "  use \"C\" as c <<END\n/* } { */\nconst char *s = \"# Fas text\";\nEND\n"
   in
   (match raw_container.Ast.items with
-  | [ Ast.Use { c_header = Some (Ast.C_fragment fragment); span; _ } ]
+  | [ Ast.Use { c_header = Some (Ast.C_fragment fragment); span; alias = Some ("c", _); _ } ]
     when fragment.tag = "END"
          && fragment.text = "/* } { */\nconst char *s = \"# Fas text\";\n"
          && span.Span.line = 1 ->
       ()
   | _ -> failwith "use-c-container: raw text or source line was not preserved");
   let raw_crlf =
-    parse_file "raw-container-crlf.fas" "use \"C\" <<E\r\nint raw_fragment;\r\nE"
+    parse_file "raw-container-crlf.fas" "use \"C\" as c <<E\r\nint raw_fragment;\r\nE"
   in
   (match raw_crlf.Ast.items with
   | [ Ast.Use { c_header = Some (Ast.C_fragment fragment); span; _ } ]
@@ -4499,16 +4499,33 @@ let () =
       ()
   | _ -> failwith "use-c-container-crlf: CRLF or EOF terminator was not accepted");
   parse_message "use-c-container-missing-terminator"
-    "C container is missing terminator `END`" "use \"C\" <<END\nint value;\n";
+    "C container is missing terminator `END`" "use \"C\" as c <<END\nint value;\n";
   parse_message "use-c-container-invalid-tag"
-    "C container tag must be an ASCII identifier" "use \"C\" <<9END\n9END\n";
+    "C container tag must be an ASCII identifier" "use \"C\" as c <<9END\n9END\n";
   parse_message "use-c-container-trailing-opener-text"
-    "trailing text after C container tag" "use \"C\" <<END trailing\nEND\n";
+    "trailing text after C container tag" "use \"C\" as c <<END trailing\nEND\n";
   parse_message "use-c-container-nested" "C container must be at top level"
-    "fn main() i32 {\nuse \"C\" <<END\nint value;\nEND\nreturn 0 }\n";
+    "fn main() i32 {\nuse \"C\" as c <<END\nint value;\nEND\nreturn 0 }\n";
   parse_message "use-c-container-terminator-trailing-space"
-    "C container is missing terminator `END`" "use \"C\" <<END\nint value;\nEND \n";
-  (match parse_messages "fn use() i32 { return 0 }\n" with
+    "C container is missing terminator `END`" "use \"C\" as c <<END\nint value;\nEND \n";
+    (* C namespaces: the alias is mandatory and comes after the header, or
+     before the container tag *)
+  parse_message "use-c-needs-alias"
+    "`use \"C\"` needs an alias: `use \"C\" <header.h> as c`; C names are then written \
+     `c.name`"
+    "use \"C\" <stdio.h>\n";
+  parse_message "use-c-container-needs-alias"
+    "`use \"C\"` needs an alias: `use \"C\" as c <<END`; C names are then written \
+     `c.name`"
+    "use \"C\" <<END\nint value;\nEND\n";
+  parse_message "use-c-header-alias-first"
+    "the alias of a C header comes after the header: `use \"C\" <header.h> as c`"
+    "use \"C\" as c <stdio.h>\n";
+  (match (parse_file "use-c-other-alias.fas" "use \"C\" <stdio.h> as libc\n").Ast.items with
+  | [ Ast.Use { alias = Some ("libc", _); _ } ] -> ()
+  | _ -> failwith "use-c-other-alias: parser did not keep the alias");
+  incr checks_run;
+(match parse_messages "fn use() i32 { return 0 }\n" with
   | [ message ] when message = "expected identifier, found `use`" -> ()
   | messages ->
       failwith
@@ -12664,19 +12681,19 @@ let () =
   let designated_import = c_import_fixture "designated.h" in
   c_semantic_pin "designated-c-unknown-near-field" "did you mean `value`?"
     designated_import
-    "use \"C\" \"designated.h\"\n\
+    "use \"C\" \"designated.h\" as c\n\
      fn f() void { imported FasImported = {.valu = 1}\n\
      return }\n"
     2
     (String.index "fn f() void { imported FasImported = {.valu = 1}" '.' + 1)
     1 "record `FasImported` has no field `valu`";
   c_semantic_accept "designated-c-unknown-near-field-twin" designated_import
-    "use \"C\" \"designated.h\"\n\
+    "use \"C\" \"designated.h\" as c\n\
      fn f() u32 { imported FasImported = {.value = 1}\n\
      return imported.value }\n";
   c_semantic_pin "designated-field-on-union"
     "initialize the union with one positional value" designated_import
-    "use \"C\" \"designated.h\"\n\
+    "use \"C\" \"designated.h\" as c\n\
      fn f() void { choice FasChoice = {.value = 1}\n\
      return }\n"
     2
@@ -13865,12 +13882,12 @@ let () =
       close_out header_channel;
       let container_source =
         Printf.sprintf
-          "use \"C\" <stddef.h>\n\
-           use \"C\" <<FIRST\n\
+          "use \"C\" <stddef.h> as c\n\
+           use \"C\" as c <<FIRST\n\
            #define FAS_CONTAINER_MACRO 40\n\
            FIRST\n\
-           use \"C\" <limits.h>\n\
-           use \"C\" <<SECOND\n\
+           use \"C\" <limits.h> as c\n\
+           use \"C\" as c <<SECOND\n\
            #include \"%s\"\n\
            int fas_fragment_value(void) { return FAS_CONTAINER_MACRO + CHAR_BIT + \
            FAS_CONTAINER_LOCAL; }\n\
@@ -14066,7 +14083,7 @@ let () =
   then failwith "repeated C imports did not merge to one typedef binding";
   let matching =
     parse_file c_matrix_source
-      "use \"C\" \"matrix.h\"\nextern \"C\" { fn fas_i32_echo(value i32) i32 }\n"
+      "use \"C\" \"matrix.h\" as c\nextern \"C\" { fn fas_i32_echo(value i32) i32 }\n"
   in
   let matching_import =
     expect_ok (C_import.reconcile_source matching.items c_matrix_imported)
@@ -14085,7 +14102,7 @@ let () =
   | Error diagnostics -> failwith (Diag.render_all ~source:None diagnostics));
   let mismatching =
     parse_file c_matrix_source
-      "use \"C\" \"matrix.h\"\nextern \"C\" { fn fas_i32_echo(value u32) i32 }\n"
+      "use \"C\" \"matrix.h\" as c\nextern \"C\" { fn fas_i32_echo(value u32) i32 }\n"
   in
   incr checks_run;
   (match C_import.reconcile_source mismatching.items c_matrix_imported with
@@ -14147,7 +14164,7 @@ let () =
     source_lines
       [
         "fn main() i32 {";
-        "    st i32 = pthread_create(null, null, null, null)";
+        "    st i32 = c.pthread_create(null, null, null, null)";
         "    return st";
         "}";
       ]
@@ -14155,11 +14172,11 @@ let () =
   let split_pthread_mutex_root =
     source_lines
       [
-        "fn main() i32 {"; "    st i32 = pthread_mutex_lock(null)"; "    return st"; "}";
+        "fn main() i32 {"; "    st i32 = c.pthread_mutex_lock(null)"; "    return st"; "}";
       ]
   in
   let split_union_root =
-    source_lines [ "fn main() i32 {"; "    v_ptr(1)"; "    return 0"; "}" ]
+    source_lines [ "fn main() i32 {"; "    c.v_ptr(1)"; "    return 0"; "}" ]
   in
   let split_union_a_header =
     source_lines
@@ -14176,7 +14193,7 @@ let () =
   let split_conflict_b_header = source_lines [ "typedef struct { long x; } T;" ] in
   let split_conflict_root =
     source_lines
-      [ "fn take(value T) i32 {"; "    return 0"; "}"; "fn main() i32 { return 0 }" ]
+      [ "fn take(value c.T) i32 {"; "    return 0"; "}"; "fn main() i32 { return 0 }" ]
   in
   let split_with_include include_line root =
     source_lines [ include_line; "use \"split_mini.fas\"" ] ^ root
@@ -14192,11 +14209,11 @@ let () =
   let split_unused_record_root =
     source_lines
       [
-        "use \"C\" <pthread.h>";
+        "use \"C\" <pthread.h> as c";
         "use \"split_mini.fas\"";
         "fn main() i32 {";
-        "    first pthread_t";
-        "    st i32 = pthread_create(&first, null, &split_worker, null)";
+        "    first c.pthread_t";
+        "    st i32 = c.pthread_create(&first, null, &split_worker, null)";
         "    return st";
         "}";
       ]
@@ -14204,7 +14221,7 @@ let () =
   let split_unused_record_mini =
     source_lines
       [
-        "use \"C\" <sys/types.h>";
+        "use \"C\" <sys/types.h> as c";
         "var calls i32 = 0";
         "extern \"C\" {";
         "  fn split_worker(arg addr) addr {";
@@ -14224,24 +14241,49 @@ let () =
         [ "split_root.fas"; "split_mini.fas"; "split_a.h"; "split_b.h" ];
       try Unix.rmdir split_directory with Unix.Unix_error _ -> ())
     (fun () ->
-      split_expect_nonnull "split-pthread-create-root-first" "pthread_create"
+      split_expect_nonnull "split-pthread-create-root-first" "c.pthread_create"
         (split_run ~a_header:"" ~b_header:""
-           (split_with_include "use \"C\" <pthread.h>" split_pthread_create_root)
-           (source_lines [ "use \"C\" <sys/types.h>" ]));
-      split_expect_nonnull "split-pthread-create-mini-first" "pthread_create"
+           (split_with_include "use \"C\" <pthread.h> as c" split_pthread_create_root)
+           (source_lines [ "use \"C\" <sys/types.h> as c" ]));
+      (* a file sees only the C its own headers declare: `pthread_create`
+         comes from the other file's <pthread.h> *)
+      (match
+         split_run ~a_header:"" ~b_header:""
+           (split_with_include "use \"C\" <sys/types.h> as c" split_pthread_create_root)
+           (source_lines [ "use \"C\" <pthread.h> as c" ])
+       with
+      | Error diagnostics
+        when List.exists
+               (fun (diagnostic : Diag.t) ->
+                 diagnostic.message
+                 = "C name `pthread_create` is not declared by this file's C headers; \
+                    another file imports it, so add its header here")
+               diagnostics ->
+          ()
+      | Error diagnostics ->
+          failwith
+            ("split-c-name-other-file: unexpected rejection: "
+            ^ Diag.render_all ~source:None diagnostics)
+      | Ok _ -> failwith "split-c-name-other-file: a C name of another file was accepted");
+      split_expect_nonnull "split-pthread-mutex-lock" "c.pthread_mutex_lock"
         (split_run ~a_header:"" ~b_header:""
-           (split_with_include "use \"C\" <sys/types.h>" split_pthread_create_root)
-           (source_lines [ "use \"C\" <pthread.h>" ]));
-      split_expect_nonnull "split-pthread-mutex-lock" "pthread_mutex_lock"
-        (split_run ~a_header:"" ~b_header:""
-           (split_with_include "use \"C\" <pthread.h>" split_pthread_mutex_root)
-           (source_lines [ "use \"C\" <sys/types.h>" ]));
+           (split_with_include "use \"C\" <pthread.h> as c" split_pthread_mutex_root)
+           (source_lines [ "use \"C\" <sys/types.h> as c" ]));
       split_expect_anonymous "split-anonymous-typedef"
-        (split_with_include "use \"C\" \"split_a.h\"" split_union_root)
-        (source_lines [ "use \"C\" \"split_b.h\"" ]);
+        (split_with_include "use \"C\" \"split_a.h\" as c" split_union_root)
+        (source_lines [ "use \"C\" \"split_b.h\" as c" ]);
       split_expect_anonymous "split-anonymous-typedef-reversed"
-        (split_with_include "use \"C\" \"split_b.h\"" split_union_root)
-        (source_lines [ "use \"C\" \"split_a.h\"" ]);
+        (split_with_include "use \"C\" \"split_b.h\" as c"
+           (source_lines
+              [
+                "fn take(value handle[c.V]) i32 { return 0 }";
+                "fn main() i32 { return 0 }";
+              ]))
+        (source_lines
+           [
+             "use \"C\" \"split_a.h\" as c";
+             "fn call_v() handle[c.V] { return c.v_ptr(1) }";
+           ]);
       (match
          split_run ~a_header:"" ~b_header:"" split_unused_record_root
            split_unused_record_mini
@@ -14258,12 +14300,12 @@ let () =
             ("unused-record-fsid: unexpected rejection: "
             ^ Diag.render_all ~source:None diagnostics));
       let conflict_message =
-        "C declaration `T` is not supported: conflicting C declarations"
+        "C declaration `c.T` is not supported: conflicting C declarations"
       in
       match
         split_run ~a_header:split_conflict_a_header ~b_header:split_conflict_b_header
-          (split_with_include "use \"C\" \"split_a.h\"" split_conflict_root)
-          (source_lines [ "use \"C\" \"split_b.h\"" ])
+          (split_with_include "use \"C\" \"split_a.h\" as c" split_conflict_root)
+          (source_lines [ "use \"C\" \"split_b.h\" as c" ])
       with
       | Error diagnostics
         when List.exists
@@ -16426,7 +16468,7 @@ let () =
              take the destination as an `addr` parameter" );
         ];
       write root
-        "use \"C\" <<C\n\
+        "use \"C\" as c <<C\n\
          int access_item(void) { return item.value[0]; }\n\
          C\n\
          struct B[N const usize] { value arr[N,u8] }\n\
@@ -16444,14 +16486,14 @@ let () =
       in
       assert (contains non_generic_header "extern struct B4 item;\n");
       write root
-        "use \"C\" <<C\n\
+        "use \"C\" as c <<C\n\
          int exported(int x);\n\
          int invoke(void) { return exported(2); }\n\
          C\n\
          extern \"C\" { fn exported(x i32) i32 { return x } }\n";
       ignore (expect_ok (Driver.run (cli_run [ "--emit-header"; root ])));
       write root
-        "use \"C\" <<C\n\
+        "use \"C\" as c <<C\n\
          long exported(int x);\n\
          C\n\
          extern \"C\" { fn exported(x i32) i32 { return x } }\n";
@@ -16464,7 +16506,7 @@ let () =
             && d.primary.line = 4 && d.primary.file = root)
       | _ -> failwith "c-export-incompatible-prototype: expected signature rejection");
       write root
-        "use \"C\" <<C\n\
+        "use \"C\" as c <<C\n\
          void *missing(void) { return &bad; }\n\
          C\n\
          extern \"C\" { var bad arr[0,u8] = {} }\n";
@@ -16476,17 +16518,17 @@ let () =
       | _ -> failwith "c-export-omitted-container: expected mapped Clang rejection");
       List.iter
         (fun (source, expected) ->
-          write root ("use \"C\" <<C\nint sentinel(void) { return 1; }\nC\n" ^ source);
+          write root ("use \"C\" as c <<C\nint sentinel(void) { return 1; }\nC\n" ^ source);
           ignore (expect_ok (Driver.run (cli_run [ "--emit-ir"; root ])));
           match Driver.run (cli_run [ "--emit-header"; root ]) with
           | Error [ d ] -> assert (d.Diag.message = expected)
           | _ -> failwith "c-export-third-run: expected exact rejection")
         [
-          ( "use \"C\" <<T\n\
+          ( "use \"C\" as c <<T\n\
              typedef struct { int x; } Alias;\n\
              T\n\
-             extern \"C\" { fn echo(x handle[Alias]) handle[Alias] { return x } }\n",
-            "export `echo` has no C declaration: `Alias` is declared only in a C \
+             extern \"C\" { fn echo(x handle[c.Alias]) handle[c.Alias] { return x } }\n",
+            "export `echo` has no C declaration: `c.Alias` is declared only in a C \
              container" );
           ( "extern \"C\" { fn unsigned(new i32) i32 { return new } }\n",
             "export `unsigned` has no C declaration: `unsigned` is a reserved C or C++ \
@@ -16508,10 +16550,10 @@ let () =
       let header = expect_ok (Driver.run (cli_run [ "--emit-header"; root ])) in
       assert (contains header "int32_t echo(int32_t , int32_t );\n");
       write root
-        "use \"C\" <<C\n\
+        "use \"C\" as c <<C\n\
          struct Tag;\n\
          C\n\
-         extern \"C\" { fn echo(x handle[Tag]) handle[Tag] { return x } }\n";
+         extern \"C\" { fn echo(x handle[c.Tag]) handle[c.Tag] { return x } }\n";
       let header = expect_ok (Driver.run (cli_run [ "--emit-header"; root ])) in
       assert (contains header "struct Tag * echo(struct Tag * x);\n");
       write h
@@ -16522,10 +16564,10 @@ let () =
          #endif\n";
       let exports =
         "extern \"C\" {\n\
-         fn exported(x handle[Alias], y handle[Tag]) handle[Alias] { return x }\n\
+         fn exported(x handle[c.Alias], y handle[c.Tag]) handle[c.Alias] { return x }\n\
          }\n"
       in
-      write root (Printf.sprintf "use \"C\" %S\n%s" (Filename.basename h) exports);
+      write root (Printf.sprintf "use \"C\" %S as c\n%s" (Filename.basename h) exports);
       ignore (expect_ok (Driver.run (cli_run [ "--emit-header"; "-o"; out; root ])));
       let header = read out in
       assert (contains header (Printf.sprintf "#include %S\n" (Filename.basename h)));
@@ -16536,7 +16578,7 @@ let () =
           ~prefix:("#ifndef FAS_" ^ C_exports.guard (Filename.basename out) ^ "_H\n")
           header);
       write angle (read h);
-      write root (Printf.sprintf "use \"C\" <%s>\n%s" "types.h" exports);
+      write root (Printf.sprintf "use \"C\" <%s> as c\n%s" "types.h" exports);
       let header =
         expect_ok (Driver.run (cli_run [ "--emit-header"; "-I"; dir; root ]))
       in
@@ -16544,11 +16586,11 @@ let () =
       write inner "typedef struct { int x; } NestedAlias;\n";
       write angle "#include \"inner.h\"\n";
       write root
-        "use \"C\" <types.h>\n\
-         use \"C\" <<C\n\
+        "use \"C\" <types.h> as c\n\
+         use \"C\" as c <<C\n\
          NestedAlias *wrapper(NestedAlias *x) { return echo(x); }\n\
          C\n\
-         extern \"C\" { fn echo(x handle[NestedAlias]) handle[NestedAlias] { return x \
+         extern \"C\" { fn echo(x handle[c.NestedAlias]) handle[c.NestedAlias] { return x \
          } }\n";
       let nested =
         expect_ok (Driver.run (cli_run [ "--emit-header"; "-I"; dir; root ]))
@@ -16563,9 +16605,9 @@ let () =
          typedef struct fas_z_record { int value; } ZRecord;\n\
          #endif\n";
       write root
-        "use \"C\" <inner.h>\n\
-         use \"C\" <types.h>\n\
-         extern \"C\" { fn accept_nested(value handle[ARecord]) i32 { return 1 } }\n";
+        "use \"C\" <inner.h> as c\n\
+         use \"C\" <types.h> as c\n\
+         extern \"C\" { fn accept_nested(value handle[c.ARecord]) i32 { return 1 } }\n";
       let ordered =
         expect_ok (Driver.run (cli_run [ "--emit-header"; "-I"; dir; root ]))
       in
@@ -18677,7 +18719,7 @@ let () =
     "invalid digit in binary integer literal \"0b102\"";
   ignore (llvm_of "fn samples() void { values arr[3,u16]\n return }\n");
   ignore (llvm_of "fn count_bytes() usize { return sizeof[i32] }\n");
-  ignore (llvm_of "use \"C\" \"stdint.h\"\nfn f() void { return }\n");
+  ignore (llvm_of "use \"C\" \"stdint.h\" as c\nfn f() void { return }\n");
   ignore (llvm_of "fn sum(left u16, right u16) u16 { return left + right }\n");
   ignore (llvm_of "extern \"C\" { fn puts(text addr) i32 }\nfn f() void { return }\n");
   ignore (llvm_of "extern \"C\" { var count i32 }\nfn f() void { return }\n");

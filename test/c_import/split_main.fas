@@ -1,12 +1,12 @@
-use "C" <pthread.h>
-use "C" <stdlib.h>
+use "C" <pthread.h> as c
+use "C" <stdlib.h> as c
 use "split_worker.fas"
 fn main() i32 {
-  first pthread_t
-  second pthread_t
-  if pthread_create(&first, null, &split_worker, null) != 0 { abort() }
-  if pthread_join(first, null) != 0 { abort() }
-  if pthread_create(&second, null, &split_worker, null) != 0 { abort() }
-  if pthread_join(second, null) != 0 { abort() }
+  first c.pthread_t
+  second c.pthread_t
+  if c.pthread_create(&first, null, &split_worker, null) != 0 { c.abort() }
+  if c.pthread_join(first, null) != 0 { c.abort() }
+  if c.pthread_create(&second, null, &split_worker, null) != 0 { c.abort() }
+  if c.pthread_join(second, null) != 0 { c.abort() }
   return split_calls()
 }

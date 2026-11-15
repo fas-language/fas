@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -115,13 +115,13 @@ fn main() i32 {
   calls += call_addr[i32](Callback_table[0], 8)
   calls += call_addr[i32](relay(&one_arg), 9)
   calls += call_addr[i32](get_callback(), 11)
-  calls += call_addr[i32](&fas_c_invoke_i32, &fas_callback_i32, 6)
-  calls += call_addr[i32](fas_callback_box.callback, 5)
-  calls += call_addr[i32](&fas_inline_adapter, 8)
+  calls += call_addr[i32](&c.fas_c_invoke_i32, &fas_callback_i32, 6)
+  calls += call_addr[i32](c.fas_callback_box.callback, 5)
+  calls += call_addr[i32](&c.fas_inline_adapter, 8)
   calls += call_addr[i32](Callback_table[1], 1, 2, 3)
   calls += call_addr[i32](&recursive, 5)
-  calls += call_addr[i32](&fas_c_invoke_i8, &fas_callback_i8, trunc[i8](249))
-  calls += zext[i32](call_addr[bool](&fas_c_invoke_bool, &fas_callback_bool, false))
+  calls += call_addr[i32](&c.fas_c_invoke_i8, &fas_callback_i8, trunc[i8](249))
+  calls += zext[i32](call_addr[bool](&c.fas_c_invoke_bool, &fas_callback_bool, false))
   calls += sext[i32](call_addr[i8](&fas_export_i8, trunc[i8](40)))
   ordered i32 = call_addr[i32](order_callee(), order_first(), order_second())
   if evaluation_order != 123 || ordered != 5 { return 10 }
@@ -161,6 +161,6 @@ fn main() i32 {
   if call_addr[bool](echo_bool_pointer, false) != false { return 7 }
   if echo_i8(trunc[i8](249)) != trunc[i8](249) { return 8 }
   if echo_bool(true) != true { return 9 }
-  fas_print_result(objects[0].total, objects[1].total, objects[2].total, calls, score)
+  c.fas_print_result(objects[0].total, objects[1].total, objects[2].total, calls, score)
   return 0
 }

@@ -432,6 +432,17 @@ type outcome = Same | Differ of string | Broken of string
 
 let file = ref ""
 
+(* The generator's random CFGs can leave blocks no path reaches; SPEC 0.1
+   requires every block reachable, so they are dropped as the front end
+   does. *)
+let parse_module text =
+  let m = Fir_parse.parse_module text in
+  Fir.Vec.iter
+    (fun (f : Fir.func) ->
+      if f.defined && not (Fir.blocks_pinned m f) then ignore (Fir.remove_unreachable_blocks f))
+    m.funcs;
+  m
+
 let check_seed tmp seed =
   let text = if !file <> "" then read !file else gen_module seed in
   let save () =
@@ -439,7 +450,7 @@ let check_seed tmp seed =
     write path text;
     path
   in
-  match Fir_parse.parse_module text with
+  match parse_module text with
   | exception Fir_parse.Error (l, msg) -> Broken (Printf.sprintf "parse line %d: %s (%s)" l msg (save ()))
   | m -> (
       match Fir_verify.verify m with
@@ -462,7 +473,7 @@ let check_seed tmp seed =
               else
                 (* the native backend gets its own copy, legalized *)
                 let native () =
-                  let m = Fir_parse.parse_module text in
+                  let m = parse_module text in
                   Fir_wide.run m;
                   match Fir_verify.verify m with
                   | [] -> Mir_emit.compile m

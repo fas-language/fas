@@ -1,4 +1,4 @@
-use "C" <<UB_C
+use "C" as c <<UB_C
 #include <limits.h>
 int fas_signed_overflow(void) {
   volatile int value = INT_MAX;

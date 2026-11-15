@@ -1,4 +1,4 @@
-use "C" "generic_layout_oracle.h"
+use "C" "generic_layout_oracle.h" as c
 
 struct Sized[T, N const usize] { data arr[N, T] }
 fn take[N const usize]() usize { return N }
@@ -23,33 +23,33 @@ fn body_layout_box_payload_offset[T, N const usize]() usize {
 }
 
 fn main() i32 {
-  if body_box_size[u8]() != oracle_body_box_size_u8() { return 11 }
-  if body_box_size[u64]() != oracle_body_box_size_u64() { return 12 }
-  if body_box_align[u8]() != oracle_body_box_align_u8() { return 13 }
-  if body_box_align[u64]() != oracle_body_box_align_u64() { return 14 }
-  if body_box_value_offset[u8]() != oracle_body_box_value_offset_u8() { return 15 }
-  if body_box_value_offset[u64]() != oracle_body_box_value_offset_u64() { return 16 }
-  if body_box_array_size[u8]() != oracle_body_box_array_size_u8() { return 17 }
-  if body_box_array_size[u64]() != oracle_body_box_array_size_u64() { return 18 }
-  if body_nested_box_size[u8]() != oracle_body_nested_box_size_u8() { return 19 }
-  if body_nested_box_size[u64]() != oracle_body_nested_box_size_u64() { return 20 }
-  if body_layout_box_size[u8, 2]() != oracle_body_layout_box_size_u8_2() { return 21 }
-  if body_layout_box_size[u64, 2]() != oracle_body_layout_box_size_u64_2() { return 22 }
-  if body_layout_box_payload_offset[u8, 2]() != oracle_body_layout_box_payload_offset_u8_2() {
+  if body_box_size[u8]() != c.oracle_body_box_size_u8() { return 11 }
+  if body_box_size[u64]() != c.oracle_body_box_size_u64() { return 12 }
+  if body_box_align[u8]() != c.oracle_body_box_align_u8() { return 13 }
+  if body_box_align[u64]() != c.oracle_body_box_align_u64() { return 14 }
+  if body_box_value_offset[u8]() != c.oracle_body_box_value_offset_u8() { return 15 }
+  if body_box_value_offset[u64]() != c.oracle_body_box_value_offset_u64() { return 16 }
+  if body_box_array_size[u8]() != c.oracle_body_box_array_size_u8() { return 17 }
+  if body_box_array_size[u64]() != c.oracle_body_box_array_size_u64() { return 18 }
+  if body_nested_box_size[u8]() != c.oracle_body_nested_box_size_u8() { return 19 }
+  if body_nested_box_size[u64]() != c.oracle_body_nested_box_size_u64() { return 20 }
+  if body_layout_box_size[u8, 2]() != c.oracle_body_layout_box_size_u8_2() { return 21 }
+  if body_layout_box_size[u64, 2]() != c.oracle_body_layout_box_size_u64_2() { return 22 }
+  if body_layout_box_payload_offset[u8, 2]() != c.oracle_body_layout_box_payload_offset_u8_2() {
     return 23
   }
-  if body_layout_box_payload_offset[u64, 2]() != oracle_body_layout_box_payload_offset_u64_2() {
+  if body_layout_box_payload_offset[u64, 2]() != c.oracle_body_layout_box_payload_offset_u64_2() {
     return 24
   }
-  if take[sizeof[Sized[u8, 2]]]() != oracle_size_u8_2() { return 1 }
-  if sizeof[Sized[u16, 2]] != oracle_size_u16_2() { return 2 }
-  if sizeof[Holder] != oracle_holder_size() { return 3 }
-  if sizeof[LayoutBox[u16, 2]] != oracle_layout_box_size() { return 4 }
-  if alignof[LayoutBox[u64, 2]] != oracle_layout_box_align() { return 5 }
-  if offsetof[LayoutBox[u16, 2], payload] != oracle_payload_offset() { return 6 }
-  if sizeof[LayoutBox[LayoutBox[u16, 1], 2]] != oracle_nested_size() { return 7 }
-  if sizeof[Envelope[u16, 2]] != oracle_envelope_size() { return 8 }
-  if offsetof[Envelope[u16, 2], box] != oracle_envelope_box_offset() { return 9 }
-  if offsetof[Envelope[u16, 2], tail] != oracle_envelope_tail_offset() { return 10 }
+  if take[sizeof[Sized[u8, 2]]]() != c.oracle_size_u8_2() { return 1 }
+  if sizeof[Sized[u16, 2]] != c.oracle_size_u16_2() { return 2 }
+  if sizeof[Holder] != c.oracle_holder_size() { return 3 }
+  if sizeof[LayoutBox[u16, 2]] != c.oracle_layout_box_size() { return 4 }
+  if alignof[LayoutBox[u64, 2]] != c.oracle_layout_box_align() { return 5 }
+  if offsetof[LayoutBox[u16, 2], payload] != c.oracle_payload_offset() { return 6 }
+  if sizeof[LayoutBox[LayoutBox[u16, 1], 2]] != c.oracle_nested_size() { return 7 }
+  if sizeof[Envelope[u16, 2]] != c.oracle_envelope_size() { return 8 }
+  if offsetof[Envelope[u16, 2], box] != c.oracle_envelope_box_offset() { return 9 }
+  if offsetof[Envelope[u16, 2], tail] != c.oracle_envelope_tail_offset() { return 10 }
   return 0
 }

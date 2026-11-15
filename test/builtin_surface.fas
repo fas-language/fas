@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 static unsigned oracle(unsigned lane, unsigned op) {
   unsigned x = lane + 1u;
   if (op == 0) return (x << 1) | (x >> 31);
@@ -27,11 +27,11 @@ fn main() i32 {
   loaded vec[4,u32] = volatile_load[vec[4,u32]](p)
   i u32 = 0
   while i < 4 {
-    if l[i] != oracle(i,0) || L[i] != oracle(i,0) { return 1 }
-    if r[i] != oracle(i,1) || R[i] != oracle(i,1) { return 2 }
-    if s[i] != oracle(i,2) || S[i] != oracle(i,2) { return 3 }
-    if loaded[i] != oracle(i,3) { return 4 }
-    if h[i] != oracle(i,4) || H[i] != oracle(i,4) { return 5 }
+    if l[i] != c.oracle(i,0) || L[i] != c.oracle(i,0) { return 1 }
+    if r[i] != c.oracle(i,1) || R[i] != c.oracle(i,1) { return 2 }
+    if s[i] != c.oracle(i,2) || S[i] != c.oracle(i,2) { return 3 }
+    if loaded[i] != c.oracle(i,3) { return 4 }
+    if h[i] != c.oracle(i,4) || H[i] != c.oracle(i,4) { return 5 }
     i += 1
   }
   return 0

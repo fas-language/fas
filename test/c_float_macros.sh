@@ -109,10 +109,10 @@ if not accepted:
     raise SystemExit("no floating macros were classified")
 
 fas = [
-    'use "C" <<C\n#define _GNU_SOURCE\n#include <float.h>\n#include <math.h>\n#include <stdio.h>\nC\n',
-    f'use "C" "{fixture}"\n',
-    "const FAS_FLOAT_CONST f32 = FLT_EPSILON + FLT_TRUE_MIN\n",
-    "const FAS_FLOAT_VECTOR vec[4, f32] = {FLT_TRUE_MIN, FLT_EPSILON, M_PIf, M_Ef}\n",
+    'use "C" as c <<C\n#define _GNU_SOURCE\n#include <float.h>\n#include <math.h>\n#include <stdio.h>\nC\n',
+    f'use "C" "{fixture}" as c\n',
+    "const FAS_FLOAT_CONST f32 = c.FLT_EPSILON + c.FLT_TRUE_MIN\n",
+    "const FAS_FLOAT_VECTOR vec[4, f32] = {c.FLT_TRUE_MIN, c.FLT_EPSILON, c.M_PIf, c.M_Ef}\n",
     "fn main() i32 {\n",
 ]
 oracle = [
@@ -126,20 +126,20 @@ oracle = [
 ]
 for name, kind in accepted:
     if kind == "f32":
-        fas.append(f'  printf(c"{name}:%08x\\n", bitcast[u32]({name}))\n')
+        fas.append(f'  c.printf(c"{name}:%08x\\n", bitcast[u32](c.{name}))\n')
         oracle.append(f'  printf("{name}:%08x\\n", (unsigned)f32bits({name}));\n')
     else:
-        fas.append(f'  printf(c"{name}:%016llx\\n", bitcast[u64]({name}))\n')
+        fas.append(f'  c.printf(c"{name}:%016llx\\n", bitcast[u64](c.{name}))\n')
         oracle.append(f'  printf("{name}:%016llx\\n", (unsigned long long)f64bits({name}));\n')
 fas.extend(
     [
-        '  printf(c"CONST:%08x\\n", bitcast[u32](FAS_FLOAT_CONST))\n',
-        '  printf(c"VECTOR0:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[0]))\n',
-        '  printf(c"VECTOR1:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[1]))\n',
-        '  printf(c"VECTOR2:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[2]))\n',
-        '  printf(c"VECTOR3:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[3]))\n',
-        '  printf(c"CVT:%016llx\\n", bitcast[u64](cvt[f64](FLT_EPSILON)))\n',
-        '  if M_PI > M_E { printf(c"COMPARE:1\\n") } else { printf(c"COMPARE:0\\n") }\n',
+        '  c.printf(c"CONST:%08x\\n", bitcast[u32](FAS_FLOAT_CONST))\n',
+        '  c.printf(c"VECTOR0:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[0]))\n',
+        '  c.printf(c"VECTOR1:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[1]))\n',
+        '  c.printf(c"VECTOR2:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[2]))\n',
+        '  c.printf(c"VECTOR3:%08x\\n", bitcast[u32](FAS_FLOAT_VECTOR[3]))\n',
+        '  c.printf(c"CVT:%016llx\\n", bitcast[u64](cvt[f64](c.FLT_EPSILON)))\n',
+        '  if c.M_PI > c.M_E { c.printf(c"COMPARE:1\\n") } else { c.printf(c"COMPARE:0\\n") }\n',
         "  return 0\n}\n",
     ]
 )

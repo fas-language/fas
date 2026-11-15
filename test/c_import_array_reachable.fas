@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 typedef struct {
   unsigned char prefix;
   unsigned int value;
@@ -9,6 +9,6 @@ unsigned int fas_array_only_expected(void) { return fas_array_only_values[1].val
 C
 
 fn main() i32 {
-  if fas_array_only_values[1].value != fas_array_only_expected() { return 1 }
+  if c.fas_array_only_values[1].value != c.fas_array_only_expected() { return 1 }
   return 0
 }

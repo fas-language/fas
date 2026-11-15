@@ -79,7 +79,7 @@ TIMEOUT = 60
 servers = []
 
 MAIN = [
-    'use "C" <string.h>',
+    'use "C" <string.h> as c',
     'use "lib.fas"',
     "",
     "const LIMIT i32 = 4",
@@ -101,7 +101,7 @@ MAIN = [
     "fn main() i32 {",
     "    point Point = {.x = 1, .y = 2}",
     "    local i32 = point.x + GLOBAL + LIMIT + TABLE[0]",
-    '    text usize = strlen(c"abc")',
+    '    text usize = c.strlen(c"abc")',
     "    box Box[i32] = {7}",
     "    return identity[i32](local) + helper() + box.value + point.y",
     "}",
@@ -385,10 +385,10 @@ def definitions(s, path, source):
 C_HEADER = "int nav_add(int left, int right);\n"
 
 C_USER = [
-    'use "C" "nav_c.h"',
+    'use "C" "nav_c.h" as c',
     "fn main() i32 {",
-    "    total i32 = nav_add(1, 2)",
-    "    return total + nav_add(total, 3)",
+    "    total i32 = c.nav_add(1, 2)",
+    "    return total + c.nav_add(total, 3)",
     "}",
 ]
 
@@ -411,9 +411,10 @@ def c_header_navigation(s, folder):
         "references on the C use line are not null",
     )
     declared = loc(header, 0, 0, 0)
-    uses = [loc(user, 2, 16, 23), loc(user, 3, 19, 26)]
-    for anchor in ("nav_add(1", "nav_add(total"):
-        call = at(user, user_text, anchor, 0)
+    uses = [loc(user, 2, 18, 25), loc(user, 3, 21, 28)]
+    # the name of `c.nav_add` and its alias word `c` lead to the same C entity
+    for anchor, offset in (("c.nav_add(1", 2), ("c.nav_add(total", 2), ("c.nav_add(1", 0)):
+        call = at(user, user_text, anchor, offset)
         got = s.result("textDocument/definition", call)
         expect(got == declared, "C definition %r: got %r, expected %r" % (anchor, got, declared))
         got = s.result("textDocument/references", with_context(call, True))
@@ -590,7 +591,7 @@ def run_navigation():
     expect(outline_request() == expected_symbols, "outline after the fix: got %r" % (outline_request(),))
 
     broken_a = list(MAIN)
-    broken_a[22] = '    text usize = strlen(c"abc"'
+    broken_a[22] = '    text usize = c.strlen(c"abc"'
     text_a = join_lines(broken_a)
     did_change(s, main, text_a, 2)
     diagnostics_a = published(s.settle(), main)

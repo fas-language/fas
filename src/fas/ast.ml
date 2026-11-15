@@ -178,6 +178,8 @@ and item =
   | Use of {
       path : string;
       c_header : c_header option;
+      (* `use "C" ... as NAME`: the file-local alias of the C scope *)
+      alias : (string * Span.t) option;
       os : Target_layout.os option;
       span : Span.t;
     }
@@ -971,7 +973,10 @@ let render_program program =
         text "use pkg \"";
         add_escaped modules;
         text "\""
-    | Use { path; c_header; os; _ } -> (
+    | Use { path; c_header; alias; os; _ } -> (
+        let as_alias () =
+          Option.iter (fun (name, _) -> text (" as " ^ name)) alias
+        in
         match c_header with
         | None ->
             text "use ";
@@ -982,17 +987,20 @@ let render_program program =
             add_escaped path;
             text "\""
         | Some (C_quoted header) ->
-            text "use \"C\"";
+            text ("use \"" ^ path ^ "\"");
             text " \"";
             add_escaped header;
-            text "\""
+            text "\"";
+            as_alias ()
         | Some (C_system header) ->
-            text "use \"C\"";
+            text ("use \"" ^ path ^ "\"");
             text " <";
             text header;
-            text ">"
+            text ">";
+            as_alias ()
         | Some (C_fragment fragment) ->
-            text "use \"C\"";
+            text ("use \"" ^ path ^ "\"");
+            as_alias ();
             text
               (Printf.sprintf " <<%s\n%s\n%s" fragment.tag fragment.text fragment.tag))
     | Const { name; ty; value; _ } ->
@@ -1335,6 +1343,173 @@ let check_expanded_nodes ~limits program =
                  (profile %s)"
                 limits.Limits.max_ast_nodes
                 (Limits.budget_profile_name limits)))
+
+(* A rewriting walk over the AST. Each hook sees a node before its children:
+   [Some x] replaces the node (its children are not visited), [None] keeps it
+   and visits its children. [name] renames declared item names. Used by the C
+   namespace pass (C_names). *)
+type mapper = {
+  on_expr : expr -> expr option;
+  on_ty : ty -> ty option;
+  on_arg : generic_arg -> generic_arg option;
+  on_target : assign_target -> assign_target option;
+  on_item_name : string -> string;
+}
+
+let identity_mapper =
+  {
+    on_expr = (fun _ -> None);
+    on_ty = (fun _ -> None);
+    on_arg = (fun _ -> None);
+    on_target = (fun _ -> None);
+    on_item_name = Fun.id;
+  }
+
+let rec map_ty m ty =
+  match m.on_ty ty with
+  | Some ty -> ty
+  | None -> (
+      match ty with
+      | Bool | Int _ | Float _ | Addr | Void | Named_type _ -> ty
+      | Handle inner -> Handle (map_ty m inner)
+      | Array (length, inner) -> Array (map_length m length, map_ty m inner)
+      | Vec (length, inner) -> Vec (map_length m length, map_ty m inner)
+      | Applied_type (name, span, args, args_span) ->
+          Applied_type (name, span, List.map (map_arg m) args, args_span))
+
+and map_length m length = { length with expression = map_expr m length.expression }
+
+and map_arg m arg =
+  match m.on_arg arg with
+  | Some arg -> arg
+  | None -> (
+      match arg with
+      | Type_arg ty -> Type_arg (map_ty m ty)
+      | Type_or_index ty -> Type_or_index (map_ty m ty)
+      | Const_arg e -> Const_arg (map_expr m e)
+      | Name_arg _ -> arg)
+
+and map_expr m e =
+  match m.on_expr e with
+  | Some e -> e
+  | None -> (
+      let ex = map_expr m in
+      match e with
+      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Ident _ -> e
+      | Unary (op, x, s) -> Unary (op, ex x, s)
+      | C_dereference (x, n, s) -> C_dereference (ex x, n, s)
+      | C_dot_star (x, s) -> C_dot_star (ex x, s)
+      | Parenthesized (x, s) -> Parenthesized (ex x, s)
+      | Binary (op, l, r, s) -> Binary (op, ex l, ex r, s)
+      | Call (f, xs, s) -> Call (ex f, List.map ex xs, s)
+      | Generic_args (f, args, s) -> Generic_args (ex f, List.map (map_arg m) args, s)
+      | Cast (k, ty, x, s) -> Cast (k, map_ty m ty, ex x, s)
+      | Select (a, args, s) -> Select (ex a, List.map (map_arg m) args, s)
+      | Field (a, n, s) -> Field (ex a, n, s)
+      | Arrow_field (a, n, s1, s2) -> Arrow_field (ex a, n, s1, s2)
+      | Addr_of (x, s) -> Addr_of (ex x, s)
+      | Handle_from_addr (ty, x, s) -> Handle_from_addr (map_ty m ty, ex x, s)
+      | Sizeof (ty, s) -> Sizeof (map_ty m ty, s)
+      | Sizeof_value (x, s) -> Sizeof_value (ex x, s)
+      | Alignof (ty, s) -> Alignof (map_ty m ty, s)
+      | Offsetof (ty, n, s1, s2) -> Offsetof (map_ty m ty, n, s1, s2)
+      | Splat (x, s) -> Splat (ex x, s)
+      | Ternary (c, a, b, s) -> Ternary (ex c, ex a, ex b, s)
+      | Array_lit (xs, s) -> Array_lit (List.map ex xs, s)
+      | Designated_field (n, ns, v, s) -> Designated_field (n, ns, ex v, s)
+      | Designated_index (i, v, s) -> Designated_index (ex i, ex v, s)
+      | Try (x, s) -> Try (ex x, s)
+      | Catch (x, Catch_value v, s) -> Catch (ex x, Catch_value (ex v), s)
+      | Catch (x, Catch_block (b, body), s) ->
+          Catch (ex x, Catch_block (b, List.map (map_stmt m) body), s))
+
+and map_target m target =
+  match m.on_target target with
+  | Some target -> target
+  | None -> (
+  match target with
+  | Target_ident _ as t -> t
+  | Target_select (a, args) -> Target_select (map_expr m a, List.map (map_arg m) args)
+  | Target_field (a, n, s) -> Target_field (map_expr m a, n, s))
+
+and map_stmt m st =
+  let ex = map_expr m and sts = List.map (map_stmt m) in
+  match st with
+  | Let l -> Let { l with ty = map_ty m l.ty; init = Option.map ex l.init }
+  | View v -> View { v with place = ex v.place }
+  | Assign (t, e, s) -> Assign (map_target m t, ex e, s)
+  | Compound_assign (t, op, e, s1, s2) -> Compound_assign (map_target m t, op, ex e, s1, s2)
+  | Return (e, s) -> Return (Option.map ex e, s)
+  | If (c, a, b, s) -> If (ex c, sts a, Option.map sts b, s)
+  | While (l, c, body, s) -> While (l, ex c, sts body, s)
+  | Break _ | Continue _ -> st
+  | Defer (body, s) -> Defer (sts body, s)
+  | Expr_stmt (e, s1, s2) -> Expr_stmt (ex e, s1, s2)
+  | Block (body, s) -> Block (sts body, s)
+  | For (l, i, c, step, body, s) ->
+      For (l, Option.map (map_stmt m) i, Option.map ex c, Option.map (map_stmt m) step, sts body, s)
+  | Switch (scr, arms, default, s) ->
+      Switch
+        ( ex scr,
+          List.map (fun (es, body) -> (List.map ex es, sts body)) arms,
+          Option.map sts default,
+          s )
+  | Const_for c ->
+      Const_for { c with ty = map_ty m c.ty; low = ex c.low; high = ex c.high; body = sts c.body }
+  | Const_copy c -> Const_copy { c with ty = map_ty m c.ty; body = sts c.body }
+  | Fail (e, s) -> Fail (ex e, s)
+  | Errdefer (b, body, s) -> Errdefer (b, sts body, s)
+  | Catch_stmt c ->
+      let target =
+        match c.target with
+        | Catch_let l -> Catch_let { l with ty = map_ty m l.ty }
+        | Catch_assign t -> Catch_assign (map_target m t)
+        | Catch_discard -> Catch_discard
+      in
+      Catch_stmt { c with target; call = ex c.call; body = sts c.body }
+
+let map_generic_param m = function
+  | Type_param _ as p -> p
+  | Const_param c -> Const_param { c with ty = map_ty m c.ty }
+
+let map_item m item =
+  let ty = map_ty m and ex = map_expr m and nm = m.on_item_name in
+  match item with
+  | Use _ | Pkg _ -> item
+  | Const c -> Const { c with name = nm c.name; ty = ty c.ty; value = ex c.value }
+  | Global g -> Global { g with name = nm g.name; ty = ty g.ty; init = Option.map ex g.init }
+  | Struct s ->
+      Struct
+        {
+          s with
+          name = nm s.name;
+          generic_params = List.map (map_generic_param m) s.generic_params;
+          fields = List.map (fun (f : field) -> { f with ty = ty f.ty }) s.fields;
+        }
+  | Opaque o -> Opaque { o with name = nm o.name }
+  | Enum e ->
+      Enum
+        {
+          e with
+          name = nm e.name;
+          repr = ty e.repr;
+          members = List.map (fun (n, s, v) -> (n, s, Option.map ex v)) e.members;
+        }
+  | Error_decl e ->
+      Error_decl { e with names = List.map (fun (n, s, v) -> (n, s, Option.map ex v)) e.names }
+  | Func f ->
+      Func
+        {
+          f with
+          name = nm f.name;
+          params = List.map (fun (p : param) -> { p with ty = ty p.ty }) f.params;
+          ret = ty f.ret;
+          generic_params = List.map (map_generic_param m) f.generic_params;
+          body =
+            (match f.body with
+            | Declaration -> Declaration
+            | Statements body -> Statements (List.map (map_stmt m) body));
+        }
 
 let specialization_name_delimiter = "$spec$"
 

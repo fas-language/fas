@@ -110,7 +110,7 @@ FAS_NATIVE_NOSIMD=1 "$OCAML_FAS" --backend=native "$ROOT/test/native_vector_call
 "$NATIVE_TMP/vcalls_lanes"
 
 # C imports select hosted startup; explicit freestanding keeps libc unresolved.
-printf 'use "C" <stdio.h>\nfn main() i32 {\n  puts(c"hi")\n  return 0\n}\n' \
+printf 'use "C" <stdio.h> as c\nfn main() i32 {\n  c.puts(c"hi")\n  return 0\n}\n' \
   >"$NATIVE_TMP/unsupported.fas"
 FAS_CC="$CC" "$OCAML_FAS" --backend=native "$NATIVE_TMP/unsupported.fas" \
   -o "$NATIVE_TMP/hosted"

@@ -12,6 +12,7 @@
 (raw_c_open) @keyword
 (raw_c_body) @embedded
 (pkg_declaration "pkg" @keyword)
+(use_declaration "as" @keyword)
 (struct_declaration "value" @keyword)
 (enum_declaration "enum" @keyword)
 (const_for_statement "in" @keyword)

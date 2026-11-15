@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdint.h>
 static int oracle_u8_above_max(uint8_t value) {
   uint16_t widened = value;

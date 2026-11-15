@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdint.h>
 static uint64_t oracle_box(uint64_t m, uint64_t x) { return m + x; }
 static uint64_t oracle_generic(uint64_t m, uint64_t x) { return m + x + 3; }

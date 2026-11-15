@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdint.h>
 static int fas_input(int id) {
   static const int values[] = {250, 10, 3, 10, 200, 4, 13, 2, 12, 3, 13, 19, 255, 1, 1, 0};
@@ -97,68 +97,68 @@ const ALL1 bool = all(MASK1)
 const ANY_OFF1 bool = any(MASK_OFF1)
 const ALL_OFF1 bool = all(MASK_OFF1)
 fn check1() i32 {
-  add_a vec[1,u8] = splat(trunc[u8](fas_input(0)))
-  add_b vec[1,u8] = splat(trunc[u8](fas_input(1)))
-  sub_a vec[1,u8] = splat(trunc[u8](fas_input(2)))
-  sub_b vec[1,u8] = splat(trunc[u8](fas_input(3)))
-  mul_a vec[1,u8] = splat(trunc[u8](fas_input(4)))
-  mul_b vec[1,u8] = splat(trunc[u8](fas_input(5)))
-  rot_a vec[1,u8] = splat(trunc[u8](fas_input(6)))
-  ctz_a vec[1,u8] = splat(trunc[u8](fas_input(8)))
-  red_a vec[1,u8] = splat(trunc[u8](fas_input(9)))
-  route_a vec[1,u8] = splat(trunc[u8](fas_input(10)))
-  route_b vec[1,u8] = splat(trunc[u8](fas_input(11)))
-  perm_index vec[1,u8] = splat(trunc[u8](fas_input(12)))
-  mask vec[1,bool] = splat(fas_input(14) != 0)
-  mask_off vec[1,bool] = splat(fas_input(15) != 0)
+  add_a vec[1,u8] = splat(trunc[u8](c.fas_input(0)))
+  add_b vec[1,u8] = splat(trunc[u8](c.fas_input(1)))
+  sub_a vec[1,u8] = splat(trunc[u8](c.fas_input(2)))
+  sub_b vec[1,u8] = splat(trunc[u8](c.fas_input(3)))
+  mul_a vec[1,u8] = splat(trunc[u8](c.fas_input(4)))
+  mul_b vec[1,u8] = splat(trunc[u8](c.fas_input(5)))
+  rot_a vec[1,u8] = splat(trunc[u8](c.fas_input(6)))
+  ctz_a vec[1,u8] = splat(trunc[u8](c.fas_input(8)))
+  red_a vec[1,u8] = splat(trunc[u8](c.fas_input(9)))
+  route_a vec[1,u8] = splat(trunc[u8](c.fas_input(10)))
+  route_b vec[1,u8] = splat(trunc[u8](c.fas_input(11)))
+  perm_index vec[1,u8] = splat(trunc[u8](c.fas_input(12)))
+  mask vec[1,bool] = splat(c.fas_input(14) != 0)
+  mask_off vec[1,bool] = splat(c.fas_input(15) != 0)
   runtime_add vec[1,u8] = add_sat(add_a, add_b)
-  if !all(ADD1 == splat(trunc[u8](fas_expect(0, 1, fas_input(0), fas_input(1), fas_input(0))))) || !all(runtime_add == splat(trunc[u8](fas_expect(0, 1, fas_input(0), fas_input(1), fas_input(0))))) { return 1 }
+  if !all(ADD1 == splat(trunc[u8](c.fas_expect(0, 1, c.fas_input(0), c.fas_input(1), c.fas_input(0))))) || !all(runtime_add == splat(trunc[u8](c.fas_expect(0, 1, c.fas_input(0), c.fas_input(1), c.fas_input(0))))) { return 1 }
   runtime_sub vec[1,u8] = sub_sat(sub_a, sub_b)
-  if !all(SUB1 == splat(trunc[u8](fas_expect(1, 1, fas_input(2), fas_input(3), fas_input(0))))) || !all(runtime_sub == splat(trunc[u8](fas_expect(1, 1, fas_input(2), fas_input(3), fas_input(0))))) { return 2 }
+  if !all(SUB1 == splat(trunc[u8](c.fas_expect(1, 1, c.fas_input(2), c.fas_input(3), c.fas_input(0))))) || !all(runtime_sub == splat(trunc[u8](c.fas_expect(1, 1, c.fas_input(2), c.fas_input(3), c.fas_input(0))))) { return 2 }
   runtime_mul vec[1,u8] = mul_hi(mul_a, mul_b)
-  if !all(MUL1 == splat(trunc[u8](fas_expect(2, 1, fas_input(4), fas_input(5), fas_input(0))))) || !all(runtime_mul == splat(trunc[u8](fas_expect(2, 1, fas_input(4), fas_input(5), fas_input(0))))) { return 3 }
+  if !all(MUL1 == splat(trunc[u8](c.fas_expect(2, 1, c.fas_input(4), c.fas_input(5), c.fas_input(0))))) || !all(runtime_mul == splat(trunc[u8](c.fas_expect(2, 1, c.fas_input(4), c.fas_input(5), c.fas_input(0))))) { return 3 }
   runtime_rotl vec[1,u8] = rotl(rot_a, 2)
-  if !all(ROTL1 == splat(trunc[u8](fas_expect(3, 1, fas_input(6), fas_input(7), fas_input(0))))) || !all(runtime_rotl == splat(trunc[u8](fas_expect(3, 1, fas_input(6), fas_input(7), fas_input(0))))) { return 4 }
+  if !all(ROTL1 == splat(trunc[u8](c.fas_expect(3, 1, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) || !all(runtime_rotl == splat(trunc[u8](c.fas_expect(3, 1, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) { return 4 }
   runtime_rotr vec[1,u8] = rotr(rot_a, 2)
-  if !all(ROTR1 == splat(trunc[u8](fas_expect(4, 1, fas_input(6), fas_input(7), fas_input(0))))) || !all(runtime_rotr == splat(trunc[u8](fas_expect(4, 1, fas_input(6), fas_input(7), fas_input(0))))) { return 5 }
+  if !all(ROTR1 == splat(trunc[u8](c.fas_expect(4, 1, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) || !all(runtime_rotr == splat(trunc[u8](c.fas_expect(4, 1, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) { return 5 }
   runtime_popcount vec[1,u8] = popcount(rot_a)
-  if !all(POPCOUNT1 == splat(trunc[u8](fas_expect(5, 1, fas_input(6), fas_input(0), fas_input(0))))) || !all(runtime_popcount == splat(trunc[u8](fas_expect(5, 1, fas_input(6), fas_input(0), fas_input(0))))) { return 6 }
+  if !all(POPCOUNT1 == splat(trunc[u8](c.fas_expect(5, 1, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) || !all(runtime_popcount == splat(trunc[u8](c.fas_expect(5, 1, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) { return 6 }
   runtime_clz vec[1,u8] = clz(rot_a)
-  if !all(CLZ1 == splat(trunc[u8](fas_expect(6, 1, fas_input(6), fas_input(0), fas_input(0))))) || !all(runtime_clz == splat(trunc[u8](fas_expect(6, 1, fas_input(6), fas_input(0), fas_input(0))))) { return 7 }
+  if !all(CLZ1 == splat(trunc[u8](c.fas_expect(6, 1, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) || !all(runtime_clz == splat(trunc[u8](c.fas_expect(6, 1, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) { return 7 }
   runtime_ctz vec[1,u8] = ctz(ctz_a)
-  if !all(CTZ1 == splat(trunc[u8](fas_expect(7, 1, fas_input(8), fas_input(0), fas_input(0))))) || !all(runtime_ctz == splat(trunc[u8](fas_expect(7, 1, fas_input(8), fas_input(0), fas_input(0))))) { return 8 }
+  if !all(CTZ1 == splat(trunc[u8](c.fas_expect(7, 1, c.fas_input(8), c.fas_input(0), c.fas_input(0))))) || !all(runtime_ctz == splat(trunc[u8](c.fas_expect(7, 1, c.fas_input(8), c.fas_input(0), c.fas_input(0))))) { return 8 }
   runtime_select vec[1,u8] = select(mask, route_a, route_b)
-  if !all(SELECT1 == splat(trunc[u8](fas_expect(18, 1, fas_input(10), fas_input(14), fas_input(11))))) || !all(runtime_select == splat(trunc[u8](fas_expect(18, 1, fas_input(10), fas_input(14), fas_input(11))))) { return 9 }
+  if !all(SELECT1 == splat(trunc[u8](c.fas_expect(18, 1, c.fas_input(10), c.fas_input(14), c.fas_input(11))))) || !all(runtime_select == splat(trunc[u8](c.fas_expect(18, 1, c.fas_input(10), c.fas_input(14), c.fas_input(11))))) { return 9 }
   runtime_select_off vec[1,u8] = select(mask_off, route_a, route_b)
-  if !all(SELECT_OFF1 == splat(trunc[u8](fas_expect(18, 1, fas_input(10), fas_input(15), fas_input(11))))) || !all(runtime_select_off == splat(trunc[u8](fas_expect(18, 1, fas_input(10), fas_input(15), fas_input(11))))) { return 10 }
+  if !all(SELECT_OFF1 == splat(trunc[u8](c.fas_expect(18, 1, c.fas_input(10), c.fas_input(15), c.fas_input(11))))) || !all(runtime_select_off == splat(trunc[u8](c.fas_expect(18, 1, c.fas_input(10), c.fas_input(15), c.fas_input(11))))) { return 10 }
   runtime_compress vec[1,u8] = compress(route_a, mask)
-  if !all(COMPRESS1 == splat(trunc[u8](fas_expect(16, 1, fas_input(10), fas_input(14), fas_input(0))))) || !all(runtime_compress == splat(trunc[u8](fas_expect(16, 1, fas_input(10), fas_input(14), fas_input(0))))) { return 11 }
+  if !all(COMPRESS1 == splat(trunc[u8](c.fas_expect(16, 1, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) || !all(runtime_compress == splat(trunc[u8](c.fas_expect(16, 1, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) { return 11 }
   runtime_compress_off vec[1,u8] = compress(route_a, mask_off)
-  if !all(COMPRESS_OFF1 == splat(trunc[u8](fas_expect(16, 1, fas_input(10), fas_input(15), fas_input(0))))) || !all(runtime_compress_off == splat(trunc[u8](fas_expect(16, 1, fas_input(10), fas_input(15), fas_input(0))))) { return 12 }
+  if !all(COMPRESS_OFF1 == splat(trunc[u8](c.fas_expect(16, 1, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) || !all(runtime_compress_off == splat(trunc[u8](c.fas_expect(16, 1, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) { return 12 }
   runtime_expand vec[1,u8] = expand(route_a, mask)
-  if !all(EXPAND1 == splat(trunc[u8](fas_expect(17, 1, fas_input(10), fas_input(14), fas_input(0))))) || !all(runtime_expand == splat(trunc[u8](fas_expect(17, 1, fas_input(10), fas_input(14), fas_input(0))))) { return 13 }
+  if !all(EXPAND1 == splat(trunc[u8](c.fas_expect(17, 1, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) || !all(runtime_expand == splat(trunc[u8](c.fas_expect(17, 1, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) { return 13 }
   runtime_expand_off vec[1,u8] = expand(route_a, mask_off)
-  if !all(EXPAND_OFF1 == splat(trunc[u8](fas_expect(17, 1, fas_input(10), fas_input(15), fas_input(0))))) || !all(runtime_expand_off == splat(trunc[u8](fas_expect(17, 1, fas_input(10), fas_input(15), fas_input(0))))) { return 14 }
+  if !all(EXPAND_OFF1 == splat(trunc[u8](c.fas_expect(17, 1, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) || !all(runtime_expand_off == splat(trunc[u8](c.fas_expect(17, 1, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) { return 14 }
   runtime_reduce_sum u8 = reduce_sum(red_a)
-  if RED_SUM1 != trunc[u8](fas_expect(8, 1, fas_input(9), 0, 0)) || runtime_reduce_sum != trunc[u8](fas_expect(8, 1, fas_input(9), 0, 0)) { return 15 }
+  if RED_SUM1 != trunc[u8](c.fas_expect(8, 1, c.fas_input(9), 0, 0)) || runtime_reduce_sum != trunc[u8](c.fas_expect(8, 1, c.fas_input(9), 0, 0)) { return 15 }
   runtime_reduce_min u8 = reduce_min(red_a)
-  if RED_MIN1 != trunc[u8](fas_expect(9, 1, fas_input(9), 0, 0)) || runtime_reduce_min != trunc[u8](fas_expect(9, 1, fas_input(9), 0, 0)) { return 16 }
+  if RED_MIN1 != trunc[u8](c.fas_expect(9, 1, c.fas_input(9), 0, 0)) || runtime_reduce_min != trunc[u8](c.fas_expect(9, 1, c.fas_input(9), 0, 0)) { return 16 }
   runtime_reduce_max u8 = reduce_max(red_a)
-  if RED_MAX1 != trunc[u8](fas_expect(10, 1, fas_input(9), 0, 0)) || runtime_reduce_max != trunc[u8](fas_expect(10, 1, fas_input(9), 0, 0)) { return 17 }
+  if RED_MAX1 != trunc[u8](c.fas_expect(10, 1, c.fas_input(9), 0, 0)) || runtime_reduce_max != trunc[u8](c.fas_expect(10, 1, c.fas_input(9), 0, 0)) { return 17 }
   runtime_reduce_and u8 = reduce_and(red_a)
-  if RED_AND1 != trunc[u8](fas_expect(11, 1, fas_input(9), 0, 0)) || runtime_reduce_and != trunc[u8](fas_expect(11, 1, fas_input(9), 0, 0)) { return 18 }
+  if RED_AND1 != trunc[u8](c.fas_expect(11, 1, c.fas_input(9), 0, 0)) || runtime_reduce_and != trunc[u8](c.fas_expect(11, 1, c.fas_input(9), 0, 0)) { return 18 }
   runtime_reduce_or u8 = reduce_or(red_a)
-  if RED_OR1 != trunc[u8](fas_expect(12, 1, fas_input(9), 0, 0)) || runtime_reduce_or != trunc[u8](fas_expect(12, 1, fas_input(9), 0, 0)) { return 19 }
+  if RED_OR1 != trunc[u8](c.fas_expect(12, 1, c.fas_input(9), 0, 0)) || runtime_reduce_or != trunc[u8](c.fas_expect(12, 1, c.fas_input(9), 0, 0)) { return 19 }
   runtime_reduce_xor u8 = reduce_xor(red_a)
-  if RED_XOR1 != trunc[u8](fas_expect(13, 1, fas_input(9), 0, 0)) || runtime_reduce_xor != trunc[u8](fas_expect(13, 1, fas_input(9), 0, 0)) { return 20 }
+  if RED_XOR1 != trunc[u8](c.fas_expect(13, 1, c.fas_input(9), 0, 0)) || runtime_reduce_xor != trunc[u8](c.fas_expect(13, 1, c.fas_input(9), 0, 0)) { return 20 }
   runtime_permute vec[1,u8] = permute(route_a, perm_index)
-  if !all(PERM1 == splat(trunc[u8](fas_expect(14, 1, fas_input(10), fas_input(12), fas_input(0))))) || !all(runtime_permute == splat(trunc[u8](fas_expect(14, 1, fas_input(10), fas_input(12), fas_input(0))))) { return 21 }
+  if !all(PERM1 == splat(trunc[u8](c.fas_expect(14, 1, c.fas_input(10), c.fas_input(12), c.fas_input(0))))) || !all(runtime_permute == splat(trunc[u8](c.fas_expect(14, 1, c.fas_input(10), c.fas_input(12), c.fas_input(0))))) { return 21 }
   runtime_shuffle vec[1,u8] = shuffle(route_a, route_b, SHUFFLE_INDEX1)
-  if !all(SHUFFLE1 == splat(trunc[u8](fas_expect(15, 1, fas_input(10), fas_input(11), fas_input(13))))) || !all(runtime_shuffle == splat(trunc[u8](fas_expect(15, 1, fas_input(10), fas_input(11), fas_input(13))))) { return 22 }
-  if ANY1 != (fas_expect(19, 1, 0, fas_input(14), 0) != 0) || any(mask) != (fas_expect(19, 1, 0, fas_input(14), 0) != 0) { return 23 }
-  if ALL1 != (fas_expect(20, 1, 0, fas_input(14), 0) != 0) || all(mask) != (fas_expect(20, 1, 0, fas_input(14), 0) != 0) { return 24 }
-  if ANY_OFF1 != (fas_expect(19, 1, 0, fas_input(15), 0) != 0) || any(mask_off) != (fas_expect(19, 1, 0, fas_input(15), 0) != 0) { return 25 }
-  if ALL_OFF1 != (fas_expect(20, 1, 0, fas_input(15), 0) != 0) || all(mask_off) != (fas_expect(20, 1, 0, fas_input(15), 0) != 0) { return 26 }
+  if !all(SHUFFLE1 == splat(trunc[u8](c.fas_expect(15, 1, c.fas_input(10), c.fas_input(11), c.fas_input(13))))) || !all(runtime_shuffle == splat(trunc[u8](c.fas_expect(15, 1, c.fas_input(10), c.fas_input(11), c.fas_input(13))))) { return 22 }
+  if ANY1 != (c.fas_expect(19, 1, 0, c.fas_input(14), 0) != 0) || any(mask) != (c.fas_expect(19, 1, 0, c.fas_input(14), 0) != 0) { return 23 }
+  if ALL1 != (c.fas_expect(20, 1, 0, c.fas_input(14), 0) != 0) || all(mask) != (c.fas_expect(20, 1, 0, c.fas_input(14), 0) != 0) { return 24 }
+  if ANY_OFF1 != (c.fas_expect(19, 1, 0, c.fas_input(15), 0) != 0) || any(mask_off) != (c.fas_expect(19, 1, 0, c.fas_input(15), 0) != 0) { return 25 }
+  if ALL_OFF1 != (c.fas_expect(20, 1, 0, c.fas_input(15), 0) != 0) || all(mask_off) != (c.fas_expect(20, 1, 0, c.fas_input(15), 0) != 0) { return 26 }
   return 0
 }
 const ADD_A256 vec[256,u8] = splat(250)
@@ -205,75 +205,75 @@ const ALL256 bool = all(MASK256)
 const ANY_OFF256 bool = any(MASK_OFF256)
 const ALL_OFF256 bool = all(MASK_OFF256)
 fn check256() i32 {
-  add_a vec[256,u8] = splat(trunc[u8](fas_input(0)))
-  add_b vec[256,u8] = splat(trunc[u8](fas_input(1)))
-  sub_a vec[256,u8] = splat(trunc[u8](fas_input(2)))
-  sub_b vec[256,u8] = splat(trunc[u8](fas_input(3)))
-  mul_a vec[256,u8] = splat(trunc[u8](fas_input(4)))
-  mul_b vec[256,u8] = splat(trunc[u8](fas_input(5)))
-  rot_a vec[256,u8] = splat(trunc[u8](fas_input(6)))
-  ctz_a vec[256,u8] = splat(trunc[u8](fas_input(8)))
-  red_a vec[256,u8] = splat(trunc[u8](fas_input(9)))
-  route_a vec[256,u8] = splat(trunc[u8](fas_input(10)))
-  route_b vec[256,u8] = splat(trunc[u8](fas_input(11)))
-  perm_index vec[256,u8] = splat(trunc[u8](fas_input(12)))
-  mask vec[256,bool] = splat(fas_input(14) != 0)
-  mask_off vec[256,bool] = splat(fas_input(15) != 0)
-  perm_index_one vec[1,u8] = splat(trunc[u8](fas_input(12)))
+  add_a vec[256,u8] = splat(trunc[u8](c.fas_input(0)))
+  add_b vec[256,u8] = splat(trunc[u8](c.fas_input(1)))
+  sub_a vec[256,u8] = splat(trunc[u8](c.fas_input(2)))
+  sub_b vec[256,u8] = splat(trunc[u8](c.fas_input(3)))
+  mul_a vec[256,u8] = splat(trunc[u8](c.fas_input(4)))
+  mul_b vec[256,u8] = splat(trunc[u8](c.fas_input(5)))
+  rot_a vec[256,u8] = splat(trunc[u8](c.fas_input(6)))
+  ctz_a vec[256,u8] = splat(trunc[u8](c.fas_input(8)))
+  red_a vec[256,u8] = splat(trunc[u8](c.fas_input(9)))
+  route_a vec[256,u8] = splat(trunc[u8](c.fas_input(10)))
+  route_b vec[256,u8] = splat(trunc[u8](c.fas_input(11)))
+  perm_index vec[256,u8] = splat(trunc[u8](c.fas_input(12)))
+  mask vec[256,bool] = splat(c.fas_input(14) != 0)
+  mask_off vec[256,bool] = splat(c.fas_input(15) != 0)
+  perm_index_one vec[1,u8] = splat(trunc[u8](c.fas_input(12)))
   runtime_add vec[256,u8] = add_sat(add_a, add_b)
-  if !all(ADD256 == splat(trunc[u8](fas_expect(0, 256, fas_input(0), fas_input(1), fas_input(0))))) || !all(runtime_add == splat(trunc[u8](fas_expect(0, 256, fas_input(0), fas_input(1), fas_input(0))))) { return 1 }
+  if !all(ADD256 == splat(trunc[u8](c.fas_expect(0, 256, c.fas_input(0), c.fas_input(1), c.fas_input(0))))) || !all(runtime_add == splat(trunc[u8](c.fas_expect(0, 256, c.fas_input(0), c.fas_input(1), c.fas_input(0))))) { return 1 }
   runtime_sub vec[256,u8] = sub_sat(sub_a, sub_b)
-  if !all(SUB256 == splat(trunc[u8](fas_expect(1, 256, fas_input(2), fas_input(3), fas_input(0))))) || !all(runtime_sub == splat(trunc[u8](fas_expect(1, 256, fas_input(2), fas_input(3), fas_input(0))))) { return 2 }
+  if !all(SUB256 == splat(trunc[u8](c.fas_expect(1, 256, c.fas_input(2), c.fas_input(3), c.fas_input(0))))) || !all(runtime_sub == splat(trunc[u8](c.fas_expect(1, 256, c.fas_input(2), c.fas_input(3), c.fas_input(0))))) { return 2 }
   runtime_mul vec[256,u8] = mul_hi(mul_a, mul_b)
-  if !all(MUL256 == splat(trunc[u8](fas_expect(2, 256, fas_input(4), fas_input(5), fas_input(0))))) || !all(runtime_mul == splat(trunc[u8](fas_expect(2, 256, fas_input(4), fas_input(5), fas_input(0))))) { return 3 }
+  if !all(MUL256 == splat(trunc[u8](c.fas_expect(2, 256, c.fas_input(4), c.fas_input(5), c.fas_input(0))))) || !all(runtime_mul == splat(trunc[u8](c.fas_expect(2, 256, c.fas_input(4), c.fas_input(5), c.fas_input(0))))) { return 3 }
   runtime_rotl vec[256,u8] = rotl(rot_a, 2)
-  if !all(ROTL256 == splat(trunc[u8](fas_expect(3, 256, fas_input(6), fas_input(7), fas_input(0))))) || !all(runtime_rotl == splat(trunc[u8](fas_expect(3, 256, fas_input(6), fas_input(7), fas_input(0))))) { return 4 }
+  if !all(ROTL256 == splat(trunc[u8](c.fas_expect(3, 256, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) || !all(runtime_rotl == splat(trunc[u8](c.fas_expect(3, 256, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) { return 4 }
   runtime_rotr vec[256,u8] = rotr(rot_a, 2)
-  if !all(ROTR256 == splat(trunc[u8](fas_expect(4, 256, fas_input(6), fas_input(7), fas_input(0))))) || !all(runtime_rotr == splat(trunc[u8](fas_expect(4, 256, fas_input(6), fas_input(7), fas_input(0))))) { return 5 }
+  if !all(ROTR256 == splat(trunc[u8](c.fas_expect(4, 256, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) || !all(runtime_rotr == splat(trunc[u8](c.fas_expect(4, 256, c.fas_input(6), c.fas_input(7), c.fas_input(0))))) { return 5 }
   runtime_popcount vec[256,u8] = popcount(rot_a)
-  if !all(POPCOUNT256 == splat(trunc[u8](fas_expect(5, 256, fas_input(6), fas_input(0), fas_input(0))))) || !all(runtime_popcount == splat(trunc[u8](fas_expect(5, 256, fas_input(6), fas_input(0), fas_input(0))))) { return 6 }
+  if !all(POPCOUNT256 == splat(trunc[u8](c.fas_expect(5, 256, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) || !all(runtime_popcount == splat(trunc[u8](c.fas_expect(5, 256, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) { return 6 }
   runtime_clz vec[256,u8] = clz(rot_a)
-  if !all(CLZ256 == splat(trunc[u8](fas_expect(6, 256, fas_input(6), fas_input(0), fas_input(0))))) || !all(runtime_clz == splat(trunc[u8](fas_expect(6, 256, fas_input(6), fas_input(0), fas_input(0))))) { return 7 }
+  if !all(CLZ256 == splat(trunc[u8](c.fas_expect(6, 256, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) || !all(runtime_clz == splat(trunc[u8](c.fas_expect(6, 256, c.fas_input(6), c.fas_input(0), c.fas_input(0))))) { return 7 }
   runtime_ctz vec[256,u8] = ctz(ctz_a)
-  if !all(CTZ256 == splat(trunc[u8](fas_expect(7, 256, fas_input(8), fas_input(0), fas_input(0))))) || !all(runtime_ctz == splat(trunc[u8](fas_expect(7, 256, fas_input(8), fas_input(0), fas_input(0))))) { return 8 }
+  if !all(CTZ256 == splat(trunc[u8](c.fas_expect(7, 256, c.fas_input(8), c.fas_input(0), c.fas_input(0))))) || !all(runtime_ctz == splat(trunc[u8](c.fas_expect(7, 256, c.fas_input(8), c.fas_input(0), c.fas_input(0))))) { return 8 }
   runtime_select vec[256,u8] = select(mask, route_a, route_b)
-  if !all(SELECT256 == splat(trunc[u8](fas_expect(18, 256, fas_input(10), fas_input(14), fas_input(11))))) || !all(runtime_select == splat(trunc[u8](fas_expect(18, 256, fas_input(10), fas_input(14), fas_input(11))))) { return 9 }
+  if !all(SELECT256 == splat(trunc[u8](c.fas_expect(18, 256, c.fas_input(10), c.fas_input(14), c.fas_input(11))))) || !all(runtime_select == splat(trunc[u8](c.fas_expect(18, 256, c.fas_input(10), c.fas_input(14), c.fas_input(11))))) { return 9 }
   runtime_select_off vec[256,u8] = select(mask_off, route_a, route_b)
-  if !all(SELECT_OFF256 == splat(trunc[u8](fas_expect(18, 256, fas_input(10), fas_input(15), fas_input(11))))) || !all(runtime_select_off == splat(trunc[u8](fas_expect(18, 256, fas_input(10), fas_input(15), fas_input(11))))) { return 10 }
+  if !all(SELECT_OFF256 == splat(trunc[u8](c.fas_expect(18, 256, c.fas_input(10), c.fas_input(15), c.fas_input(11))))) || !all(runtime_select_off == splat(trunc[u8](c.fas_expect(18, 256, c.fas_input(10), c.fas_input(15), c.fas_input(11))))) { return 10 }
   runtime_compress vec[256,u8] = compress(route_a, mask)
-  if !all(COMPRESS256 == splat(trunc[u8](fas_expect(16, 256, fas_input(10), fas_input(14), fas_input(0))))) || !all(runtime_compress == splat(trunc[u8](fas_expect(16, 256, fas_input(10), fas_input(14), fas_input(0))))) { return 11 }
+  if !all(COMPRESS256 == splat(trunc[u8](c.fas_expect(16, 256, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) || !all(runtime_compress == splat(trunc[u8](c.fas_expect(16, 256, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) { return 11 }
   runtime_compress_off vec[256,u8] = compress(route_a, mask_off)
-  if !all(COMPRESS_OFF256 == splat(trunc[u8](fas_expect(16, 256, fas_input(10), fas_input(15), fas_input(0))))) || !all(runtime_compress_off == splat(trunc[u8](fas_expect(16, 256, fas_input(10), fas_input(15), fas_input(0))))) { return 12 }
+  if !all(COMPRESS_OFF256 == splat(trunc[u8](c.fas_expect(16, 256, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) || !all(runtime_compress_off == splat(trunc[u8](c.fas_expect(16, 256, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) { return 12 }
   runtime_expand vec[256,u8] = expand(route_a, mask)
-  if !all(EXPAND256 == splat(trunc[u8](fas_expect(17, 256, fas_input(10), fas_input(14), fas_input(0))))) || !all(runtime_expand == splat(trunc[u8](fas_expect(17, 256, fas_input(10), fas_input(14), fas_input(0))))) { return 13 }
+  if !all(EXPAND256 == splat(trunc[u8](c.fas_expect(17, 256, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) || !all(runtime_expand == splat(trunc[u8](c.fas_expect(17, 256, c.fas_input(10), c.fas_input(14), c.fas_input(0))))) { return 13 }
   runtime_expand_off vec[256,u8] = expand(route_a, mask_off)
-  if !all(EXPAND_OFF256 == splat(trunc[u8](fas_expect(17, 256, fas_input(10), fas_input(15), fas_input(0))))) || !all(runtime_expand_off == splat(trunc[u8](fas_expect(17, 256, fas_input(10), fas_input(15), fas_input(0))))) { return 14 }
+  if !all(EXPAND_OFF256 == splat(trunc[u8](c.fas_expect(17, 256, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) || !all(runtime_expand_off == splat(trunc[u8](c.fas_expect(17, 256, c.fas_input(10), c.fas_input(15), c.fas_input(0))))) { return 14 }
   runtime_reduce_sum u8 = reduce_sum(red_a)
-  if RED_SUM256 != trunc[u8](fas_expect(8, 256, fas_input(9), 0, 0)) || runtime_reduce_sum != trunc[u8](fas_expect(8, 256, fas_input(9), 0, 0)) { return 15 }
+  if RED_SUM256 != trunc[u8](c.fas_expect(8, 256, c.fas_input(9), 0, 0)) || runtime_reduce_sum != trunc[u8](c.fas_expect(8, 256, c.fas_input(9), 0, 0)) { return 15 }
   runtime_reduce_min u8 = reduce_min(red_a)
-  if RED_MIN256 != trunc[u8](fas_expect(9, 256, fas_input(9), 0, 0)) || runtime_reduce_min != trunc[u8](fas_expect(9, 256, fas_input(9), 0, 0)) { return 16 }
+  if RED_MIN256 != trunc[u8](c.fas_expect(9, 256, c.fas_input(9), 0, 0)) || runtime_reduce_min != trunc[u8](c.fas_expect(9, 256, c.fas_input(9), 0, 0)) { return 16 }
   runtime_reduce_max u8 = reduce_max(red_a)
-  if RED_MAX256 != trunc[u8](fas_expect(10, 256, fas_input(9), 0, 0)) || runtime_reduce_max != trunc[u8](fas_expect(10, 256, fas_input(9), 0, 0)) { return 17 }
+  if RED_MAX256 != trunc[u8](c.fas_expect(10, 256, c.fas_input(9), 0, 0)) || runtime_reduce_max != trunc[u8](c.fas_expect(10, 256, c.fas_input(9), 0, 0)) { return 17 }
   runtime_reduce_and u8 = reduce_and(red_a)
-  if RED_AND256 != trunc[u8](fas_expect(11, 256, fas_input(9), 0, 0)) || runtime_reduce_and != trunc[u8](fas_expect(11, 256, fas_input(9), 0, 0)) { return 18 }
+  if RED_AND256 != trunc[u8](c.fas_expect(11, 256, c.fas_input(9), 0, 0)) || runtime_reduce_and != trunc[u8](c.fas_expect(11, 256, c.fas_input(9), 0, 0)) { return 18 }
   runtime_reduce_or u8 = reduce_or(red_a)
-  if RED_OR256 != trunc[u8](fas_expect(12, 256, fas_input(9), 0, 0)) || runtime_reduce_or != trunc[u8](fas_expect(12, 256, fas_input(9), 0, 0)) { return 19 }
+  if RED_OR256 != trunc[u8](c.fas_expect(12, 256, c.fas_input(9), 0, 0)) || runtime_reduce_or != trunc[u8](c.fas_expect(12, 256, c.fas_input(9), 0, 0)) { return 19 }
   runtime_reduce_xor u8 = reduce_xor(red_a)
-  if RED_XOR256 != trunc[u8](fas_expect(13, 256, fas_input(9), 0, 0)) || runtime_reduce_xor != trunc[u8](fas_expect(13, 256, fas_input(9), 0, 0)) { return 20 }
+  if RED_XOR256 != trunc[u8](c.fas_expect(13, 256, c.fas_input(9), 0, 0)) || runtime_reduce_xor != trunc[u8](c.fas_expect(13, 256, c.fas_input(9), 0, 0)) { return 20 }
   runtime_permute vec[256,u8] = permute(route_a, perm_index)
-  if !all(PERM256 == splat(trunc[u8](fas_expect(14, 256, fas_input(10), fas_input(12), fas_input(0))))) || !all(runtime_permute == splat(trunc[u8](fas_expect(14, 256, fas_input(10), fas_input(12), fas_input(0))))) { return 21 }
+  if !all(PERM256 == splat(trunc[u8](c.fas_expect(14, 256, c.fas_input(10), c.fas_input(12), c.fas_input(0))))) || !all(runtime_permute == splat(trunc[u8](c.fas_expect(14, 256, c.fas_input(10), c.fas_input(12), c.fas_input(0))))) { return 21 }
   runtime_shuffle vec[256,u8] = shuffle(route_a, route_b, SHUFFLE_INDEX256)
-  if !all(SHUFFLE256 == splat(trunc[u8](fas_expect(15, 256, fas_input(10), fas_input(11), fas_input(12))))) || !all(runtime_shuffle == splat(trunc[u8](fas_expect(15, 256, fas_input(10), fas_input(11), fas_input(12))))) { return 22 }
+  if !all(SHUFFLE256 == splat(trunc[u8](c.fas_expect(15, 256, c.fas_input(10), c.fas_input(11), c.fas_input(12))))) || !all(runtime_shuffle == splat(trunc[u8](c.fas_expect(15, 256, c.fas_input(10), c.fas_input(11), c.fas_input(12))))) { return 22 }
   runtime_permute_one vec[1,u8] = permute(route_a, perm_index_one)
-  if !all(PERM_ONE == splat(trunc[u8](fas_expect(14, 256, fas_input(10), fas_input(12), 0)))) || !all(runtime_permute_one == splat(trunc[u8](fas_expect(14, 256, fas_input(10), fas_input(12), 0)))) { return 27 }
+  if !all(PERM_ONE == splat(trunc[u8](c.fas_expect(14, 256, c.fas_input(10), c.fas_input(12), 0)))) || !all(runtime_permute_one == splat(trunc[u8](c.fas_expect(14, 256, c.fas_input(10), c.fas_input(12), 0)))) { return 27 }
   signed_a vec[1,i64] = {-1}
   signed_b vec[1,i64] = {2}
   signed_mul vec[1,i64] = mul_hi(signed_a, signed_b)
-  if SIGNED_MUL[0] != fas_expect_mulhi_i64(-1, 2) || signed_mul[0] != fas_expect_mulhi_i64(-1, 2) { return 28 }
-  if ANY256 != (fas_expect(19, 256, 0, fas_input(14), 0) != 0) || any(mask) != (fas_expect(19, 256, 0, fas_input(14), 0) != 0) { return 23 }
-  if ALL256 != (fas_expect(20, 256, 0, fas_input(14), 0) != 0) || all(mask) != (fas_expect(20, 256, 0, fas_input(14), 0) != 0) { return 24 }
-  if ANY_OFF256 != (fas_expect(19, 256, 0, fas_input(15), 0) != 0) || any(mask_off) != (fas_expect(19, 256, 0, fas_input(15), 0) != 0) { return 25 }
-  if ALL_OFF256 != (fas_expect(20, 256, 0, fas_input(15), 0) != 0) || all(mask_off) != (fas_expect(20, 256, 0, fas_input(15), 0) != 0) { return 26 }
+  if SIGNED_MUL[0] != c.fas_expect_mulhi_i64(-1, 2) || signed_mul[0] != c.fas_expect_mulhi_i64(-1, 2) { return 28 }
+  if ANY256 != (c.fas_expect(19, 256, 0, c.fas_input(14), 0) != 0) || any(mask) != (c.fas_expect(19, 256, 0, c.fas_input(14), 0) != 0) { return 23 }
+  if ALL256 != (c.fas_expect(20, 256, 0, c.fas_input(14), 0) != 0) || all(mask) != (c.fas_expect(20, 256, 0, c.fas_input(14), 0) != 0) { return 24 }
+  if ANY_OFF256 != (c.fas_expect(19, 256, 0, c.fas_input(15), 0) != 0) || any(mask_off) != (c.fas_expect(19, 256, 0, c.fas_input(15), 0) != 0) { return 25 }
+  if ALL_OFF256 != (c.fas_expect(20, 256, 0, c.fas_input(15), 0) != 0) || all(mask_off) != (c.fas_expect(20, 256, 0, c.fas_input(15), 0) != 0) { return 26 }
   return 0
 }
 const SIGNED_MUL_A vec[1,i64] = {-1}

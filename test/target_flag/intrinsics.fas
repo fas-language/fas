@@ -1,14 +1,14 @@
-use "C" <stdio.h>
-use "C" "intrinsics.h"
+use "C" <stdio.h> as c
+use "C" "intrinsics.h" as c
 
 fn bit_count(x u64) u64 {
     return popcount(x)
 }
 
 fn main() i32 {
-    total u64 = bit_count(fas_opaque(0x9E3779B97F4A7C15))
-    value u64 = fas_bzhi(0xABCDEF0123456789, 8)
-    printed i32 = printf(c"%lu %lu\n", total, value)
+    total u64 = bit_count(c.fas_opaque(0x9E3779B97F4A7C15))
+    value u64 = c.fas_bzhi(0xABCDEF0123456789, 8)
+    printed i32 = c.printf(c"%lu %lu\n", total, value)
     if printed <= 0 { return 1 }
     return 0
 }

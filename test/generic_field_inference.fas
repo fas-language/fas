@@ -1,4 +1,4 @@
-use "C" <<C
+use "C" as c <<C
 #include <stdint.h>
 static uint16_t oracle_global_value(void) { return UINT16_C(13); }
 static uint16_t oracle_global_element(void) { return UINT16_C(17); }
@@ -60,7 +60,7 @@ fn main() i32 {
   if id(gg.w[index]) != oracle_global_element() { return 6 }
   gg.v = 29
   if raw_field(&gg) != oracle_raw_field() { return 7 }
-  if id(KG.v) != oracle_constant_field() { return 10 }
+  if id(c.KG.v) != oracle_constant_field() { return 10 }
   zero u64 = 0
   if trunc[i32](outer(zero) >> 4) != oracle_nested_u8_result() { return 8 }
   zero_signed i8 = 0

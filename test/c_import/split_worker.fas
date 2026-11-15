@@ -1,4 +1,4 @@
-use "C" <sys/types.h>
+use "C" <sys/types.h> as c
 var calls i32 = 0
 extern "C" {
   fn split_worker(arg addr) addr {

@@ -4287,6 +4287,16 @@
             "named": true
           }
         ]
+      },
+      "scope": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -5010,6 +5020,16 @@
     "type": "use_declaration",
     "named": true,
     "fields": {
+      "alias": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
       "os": {
         "multiple": false,
         "required": false,
@@ -5543,6 +5563,10 @@
   },
   {
     "type": "arr",
+    "named": false
+  },
+  {
+    "type": "as",
     "named": false
   },
   {

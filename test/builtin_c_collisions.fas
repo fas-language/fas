@@ -1,6 +1,6 @@
-use "C" <math.h>
-use "C" <stdlib.h>
-use "C" <sys/select.h>
+use "C" <math.h> as c
+use "C" <stdlib.h> as c
+use "C" <sys/select.h> as c
 
 extern "C" {
   fn fas_oracle_sqrt() u64

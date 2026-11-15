@@ -1,27 +1,27 @@
-use "C" <stdlib.h>
+use "C" <stdlib.h> as c
 
 extern "C" {
   fn main() i32 {
-    p addr = malloc(16)
+    p addr = c.malloc(16)
     if p == null { return 1 }
     p[u32, 3] = 0x12345678
     if p[u32, 3] != 0x12345678 { return 2 }
-    free(p)
+    c.free(p)
 
-    q addr = calloc(4, 4)
+    q addr = c.calloc(4, 4)
     if q == null { return 3 }
     q[u32, 0] = 11
     q[u32, 3] = 29
     if q[u32, 0] != 11 || q[u32, 3] != 29 { return 4 }
-    free(q)
+    c.free(q)
 
-    r addr = malloc(16)
+    r addr = c.malloc(16)
     if r == null { return 5 }
-    r = realloc(r, 32)
+    r = c.realloc(r, 32)
     if r == null { return 6 }
     r[u32, 7] = 71
     if r[u32, 7] != 71 { return 7 }
-    free(r)
+    c.free(r)
     return 0
   }
 }

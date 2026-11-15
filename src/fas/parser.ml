@@ -65,6 +65,14 @@ let extract_containers source =
     if width = 0 then None
     else
       let j = skip_while stop blank (j + width) in
+      (* `use "C" as h <<TAG`: the alias comes before the tag *)
+      let j =
+        if width = 3 && j + 3 <= stop && String.sub text j 2 = "as" && blank text.[j + 2]
+        then
+          let k = skip_while stop blank (j + 2) in
+          skip_while stop blank (skip_while stop ident_char k)
+        else j
+      in
       if j + 2 > stop || String.sub text j 2 <> "<<" then None
       else
         let tag_start = j + 2 in
@@ -471,6 +479,18 @@ module P = struct
             ~column:first.Span.column
         in
         error primary "C type `char*` is not a Fas type; use `addr`"
+    (* `c.FILE`: a C type through the file's C alias. C_names checks the
+       alias and turns it into the internal C name. *)
+    | Token.Ident s
+      when (peek_n p 1).kind = Token.Dot
+           && (match (peek_n p 2).kind with Token.Ident _ -> true | _ -> false) ->
+        let first = bump p in
+        ignore (bump p);
+        let last = bump p in
+        let name = match last.kind with Token.Ident n -> n | _ -> assert false in
+        Ok
+          (Ast.Named_type
+             (s ^ "." ^ name, { first.span with Span.end_offset = last.span.Span.end_offset }))
     | Token.Ident s ->
         let token = bump p in
         if at p Token.Lbracket then
@@ -730,7 +750,7 @@ module P = struct
                inside that file"
           else
             let* () = end_stmt p in
-            Ok [ Ast.Use { path; c_header = None; os = Some os; span = path_span } ]
+            Ok [ Ast.Use { path; c_header = None; alias = None; os = Some os; span = path_span } ]
         end
         else
           let path_span = span p in
@@ -738,18 +758,55 @@ module P = struct
           if path = "C" && (peek p).kind = Token.Ident "pkg" then
             error (span p) "`pkg` goes on its own line: `use pkg \"MODULES\"`"
           else if path = "C" || path = "asm" then
+            (* `as NAME`: the file's alias for the C scope. It comes after a
+               header (`use "C" <x.h> as c`) and before a container tag
+               (`use "C" as c <<TAG`). It is mandatory on `use "C"`. *)
+            let alias_clause () =
+              if (peek p).kind = Token.Ident "as" then (
+                ignore (bump p);
+                let alias_span = span p in
+                let* name = ident p in
+                Ok (Some (name, alias_span)))
+              else Ok None
+            in
+            let* early = if path = "C" then alias_clause () else Ok None in
             let header_start = span p in
             let* header = c_header p s in
+            let* late = if path = "C" && early = None then alias_clause () else Ok None in
+            let alias = if early <> None then early else late in
+            let* () =
+              match (path, alias, header) with
+              | "asm", _, _ -> Ok ()
+              | _, None, Ast.C_fragment f ->
+                  error s
+                    (Printf.sprintf
+                       "`use \"C\"` needs an alias: `use \"C\" as c <<%s`; C names are \
+                        then written `c.name`"
+                       f.Ast.tag)
+              | _, None, _ ->
+                  error header_start
+                    "`use \"C\"` needs an alias: `use \"C\" <header.h> as c`; C names \
+                     are then written `c.name`"
+              | _, Some (_, alias_span), (Ast.C_quoted _ | Ast.C_system _) when early <> None
+                ->
+                  error alias_span
+                    "the alias of a C header comes after the header: `use \"C\" <header.h> \
+                     as c`"
+              | _, Some (_, alias_span), Ast.C_fragment _ when late <> None ->
+                  error alias_span
+                    "the alias of a C container comes before the tag: `use \"C\" as c <<TAG`"
+              | _ -> Ok ()
+            in
             let* () = end_stmt p in
             let span =
               match header with
               | Ast.C_quoted _ | Ast.C_system _ -> header_start
               | Ast.C_fragment _ -> s
             in
-            Ok [ Ast.Use { path; c_header = Some header; os = None; span } ]
+            Ok [ Ast.Use { path; c_header = Some header; alias; os = None; span } ]
           else
             let* () = end_stmt p in
-            Ok [ Ast.Use { path; c_header = None; os = None; span = path_span } ]
+            Ok [ Ast.Use { path; c_header = None; alias = None; os = None; span = path_span } ]
     | Token.Kw_const ->
         let start = span p in
         let* x = const_item p in

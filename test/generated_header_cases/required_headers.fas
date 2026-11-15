@@ -1,6 +1,6 @@
-use "C" "z_base.h"
-use "C" "a_derived.h"
-use "C" <<MAIN
+use "C" "z_base.h" as c
+use "C" "a_derived.h" as c
+use "C" as c <<MAIN
 int main(void) {
   return exported_base.value == 3 && exported_derived.base.value == 4
       && exported_derived.extra == 5 ? 0 : 1;
@@ -8,6 +8,6 @@ int main(void) {
 MAIN
 
 extern "C" {
-  var exported_base Base = {3}
-  var exported_derived Derived = {{4},5}
+  var exported_base c.Base = {3}
+  var exported_derived c.Derived = {{4},5}
 }

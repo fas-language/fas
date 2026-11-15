@@ -100,7 +100,7 @@ MAIN_TEXT = join_lines(
 SDL_TEXT = join_lines(
     [
         'use pkg "fake"',
-        'use "C" <fake.h>',
+        'use "C" <fake.h> as c',
         'use "core.fas"',
         "",
         "fn spin(turns i32) i32 {",
@@ -108,12 +108,12 @@ SDL_TEXT = join_lines(
         "}",
         "",
         "fn rebuild(scale i32) i32 {",
-        "    return scale * FAKE_LIMIT",
+        "    return scale * c.FAKE_LIMIT",
         "}",
         "",
         "fn main() i32 {",
-        "    rect Rect = {.width = FAKE_LIMIT, .height = ORIGIN_X + 2}",
-        "    drawn i32 = fake_draw(rect.width, rect.height)",
+        "    rect Rect = {.width = c.FAKE_LIMIT, .height = ORIGIN_X + 2}",
+        "    drawn i32 = c.fake_draw(rect.width, rect.height)",
         "    kept i32 = keep(drawn)",
         "    turned i32 = spin(kept)",
         "    return game_init() + rect_area(rect.width, rect.height) + rebuild(turned)",
@@ -153,7 +153,7 @@ FAKE_TEXT = join_lines(
     ]
 )
 
-RET_SCALE = "    return scale * FAKE_LIMIT"
+RET_SCALE = "    return scale * c.FAKE_LIMIT"
 BURST = "    scratch i32 = ("
 
 
@@ -174,8 +174,8 @@ HEADER_CUT = SDL_TEXT.replace('use pkg "fake"\n', 'use pkg "fake\n', 1)
 HOVER_RECT = "```fas\nstruct Rect\n```\n\n```text\nsize 8, align 4\nwidth   i32  at offset 0\nheight  i32  at offset 4\n```"
 HOVER_KEEP = "```fas\nfn keep[T](value T) T\n```\n\nT = i32"
 HOVER_GAME = "```fas\nfn game_init() i32\n```"
-HOVER_FAKE = "```fas\nextern fn fake_draw(surface i32, x i32) i32\n```\n\n```c\nint fake_draw(int surface, int x);\n```\n\n@INCLUDE@/fake.h:6"
-HOVER_LIMIT = "```fas\nconst FAKE_LIMIT i32 = 16\n```\n\n```c\n#define FAKE_LIMIT 16\n```\n\n@INCLUDE@/fake.h:4"
+HOVER_FAKE = "```fas\nextern fn c.fake_draw(surface i32, x i32) i32\n```\n\n```c\nint fake_draw(int surface, int x);\n```\n\n@INCLUDE@/fake.h:6"
+HOVER_LIMIT = "```fas\nconst c.FAKE_LIMIT i32 = 16\n```\n\n```c\n#define FAKE_LIMIT 16\n```\n\n@INCLUDE@/fake.h:4"
 HOVER_AREA = "```fas\nfn rect_area(width i32, height i32) i32\n```"
 HOVER_PKG = "```sh\npkg-config --cflags \"fake\"\n```\n\n```text\n-I@INCLUDE@\n```"
 

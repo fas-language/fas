@@ -1,28 +1,28 @@
-use "C" <stdio.h>
-use "C" <string.h>
-use "C" <stdlib.h>
-use "C" "runtime.h"
+use "C" <stdio.h> as c
+use "C" <string.h> as c
+use "C" <stdlib.h> as c
+use "C" "runtime.h" as c
 
 opaque Scratch
 
 fn main() i32 {
-  if strlen(c"fas") != 3 { return 1 }
-  if memcmp(c"abc", c"abc", 3) != 0 { return 2 }
-  printed i32 = printf(c"c-import:%d:%lu\n", -7, 42)
+  if c.strlen(c"fas") != 3 { return 1 }
+  if c.memcmp(c"abc", c"abc", 3) != 0 { return 2 }
+  printed i32 = c.printf(c"c-import:%d:%lu\n", -7, 42)
   if printed <= 0 { return 3 }
-  if runtime_enum_echo(RUNTIME_KIND) != RUNTIME_KIND { return 4 }
-  runtime_global += 2
-  if runtime_global != 5 { return 5 }
-  if runtime_global_increment(3) != 8 { return 6 }
+  if c.runtime_enum_echo(c.RUNTIME_KIND) != c.RUNTIME_KIND { return 4 }
+  c.runtime_global += 2
+  if c.runtime_global != 5 { return 5 }
+  if c.runtime_global_increment(3) != 8 { return 6 }
   slot addr = null
-  runtime_pointer_out(&slot)
+  c.runtime_pointer_out(&slot)
   if slot[i32] != 41 { return 7 }
-  object handle[RuntimeOpaque] = runtime_opaque_value()
-  if runtime_opaque_roundtrip(object) != object { return 8 }
-  memory handle[Scratch] = handle_from_addr[Scratch](malloc(32))
+  object handle[c.RuntimeOpaque] = c.runtime_opaque_value()
+  if c.runtime_opaque_roundtrip(object) != object { return 8 }
+  memory handle[Scratch] = handle_from_addr[Scratch](c.malloc(32))
   if memory == null { return 9 }
   handle_addr(memory)[u8] = 173
   if handle_addr(memory)[u8] != 173 { return 10 }
-  free(handle_addr(memory))
+  c.free(handle_addr(memory))
   return 0
 }
