@@ -319,3 +319,46 @@ fn f(enum i32) Tok {
         (field_expression
           (identifier)
           (identifier))))))
+
+================================================================================
+function generic parameters
+================================================================================
+fn sort[T, LESS fn(T, T) bool](n usize) void { }
+fn run[G fn(i32) i32 fails, H fn(u8)]() void { }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (generic_params
+      (generic_param
+        (identifier))
+      (generic_param
+        (identifier)
+        (function_signature
+          (named_type
+            (type_identifier))
+          (named_type
+            (type_identifier))
+          (primitive_type))))
+    (parameter_list
+      (identifier)
+      (primitive_type))
+    (primitive_type)
+    (block))
+  (function_declaration
+    (identifier)
+    (generic_params
+      (generic_param
+        (identifier)
+        (function_signature
+          (primitive_type)
+          (primitive_type)))
+      (generic_param
+        (identifier)
+        (function_signature
+          (primitive_type))))
+    (parameter_list)
+    (primitive_type)
+    (block)))

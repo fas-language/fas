@@ -13,6 +13,7 @@ type kind =
   | Field
   | Type_parameter
   | Const_parameter
+  | Fn_parameter
   | Type_alias
 
 type declaration = {

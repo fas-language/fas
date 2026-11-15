@@ -16,7 +16,8 @@ let validate_generic_params named_types params =
   let* () =
     Result_list.iter
       (function
-        | Ast.Type_param { name; span } -> validate_binding_name span name
+        | Ast.Type_param { name; span } | Ast.Fn_param { name; span; _ } ->
+            validate_binding_name span name
         | Ast.Const_param cp ->
             let* () = validate_binding_name cp.span cp.name in
             let* t = source_ty_diag named_types cp.ty_span cp.ty in
@@ -26,8 +27,9 @@ let validate_generic_params named_types params =
   in
   let rec dup seen = function
     | [] -> Ok ()
-    | Ast.Type_param { name; span } :: rest | Ast.Const_param { name; span; _ } :: rest
-      ->
+    | Ast.Type_param { name; span } :: rest
+    | Ast.Const_param { name; span; _ } :: rest
+    | Ast.Fn_param { name; span; _ } :: rest ->
         if List.mem name seen then
           error span (Printf.sprintf "duplicate generic parameter `%s`" name)
         else dup (name :: seen) rest
@@ -37,7 +39,10 @@ let validate_generic_params named_types params =
 let validate_function_params generic_params params =
   let generic_names =
     List.map
-      (function Ast.Type_param { name; _ } | Ast.Const_param { name; _ } -> name)
+      (function
+        | Ast.Type_param { name; _ } | Ast.Const_param { name; _ } | Ast.Fn_param { name; _ }
+          ->
+            name)
       generic_params
   in
   let rec validate seen = function
@@ -380,6 +385,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     ?specializations ?index program =
   let* program, program_errors = desugar_errors program in
   let* program = Sema_enums.desugar program in
+  let* program = Sema_fn_generics.desugar program in
   (* the value struct registry: declared ones now, specializations as
      monomorphization makes them *)
   Stdlib.Hashtbl.reset Hir.value_structs;

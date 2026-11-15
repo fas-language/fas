@@ -13,6 +13,11 @@ module String_set = Set.Make (String)
 let error span message = Error [ Diag.error span message ]
 let ( let* ) r f = match r with Error e -> Error e | Ok x -> f x
 
+(* Sema_fn_generics removes function generic parameters (D1) before this
+   pass runs *)
+let fn_param_removed () =
+  invalid_arg "internal error: function generic parameter after Sema_fn_generics"
+
 let resolve_statements resolve statements =
   let rec go acc = function
     | [] -> Ok (List.rev acc)
@@ -186,7 +191,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   in
   let type_param_names generic_params =
     List.filter_map
-      (function Ast.Type_param { name; _ } -> Some name | Ast.Const_param _ -> None)
+      (function
+        | Ast.Type_param { name; _ } -> Some name
+        | Ast.Const_param _ | Ast.Fn_param _ -> None)
       generic_params
   in
   let with_generic_type_names names f =
@@ -373,6 +380,12 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             match Names.value_misuse_message name with
             | Some message -> error span message
             | None -> error span (Printf.sprintf "unknown name `%s`" name)))
+    (* `&f`: a function's address *)
+    | Ast.Addr_of (Ast.Ident (name, _), _)
+      when match nearest_kind value_names type_names name with
+           | Some (`Function _) -> true
+           | _ -> false ->
+        Ok ()
     | Ast.Unary (_, expression, _)
     | Ast.C_dereference (expression, _, _)
     | Ast.C_dot_star (expression, _)
@@ -417,12 +430,14 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           arguments
     | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
-           || name = "syscall"
+           || name = "syscall" || Names.is_fn_check name
            || name = "cvt" || name = "checked_trunc" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         Result_list.iter
           (function
-            | Ast.Name_arg ("fails", _) when name = "call_addr" || name = "syscall" -> Ok ()
+            | Ast.Name_arg ("fails", _)
+              when name = "call_addr" || name = "syscall" || Names.is_fn_check name ->
+                Ok ()
             | argument -> validate_generic_argument_names value_names type_names span argument)
           arguments
     | Ast.Generic_args (Ast.Ident (name, name_span), _, _)
@@ -469,7 +484,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                     | Ast.Type_param _, _ ->
                         error application_span "expected a type argument"
                     | Ast.Const_param _, _ ->
-                        error application_span "expected a const argument")
+                        error application_span "expected a const argument"
+                    | Ast.Fn_param _, _ -> fn_param_removed ())
                   (List.combine generic_params arguments)
           | Some _ -> error span (Printf.sprintf "`%s` is not a function" name)
         in
@@ -833,7 +849,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                     Ast.Type_arg (List.assoc name substitutions)
                 | Ast.Const_param { name; _ } ->
                     let _, _, value = List.find (fun (n, _, _) -> n = name) values in
-                    Ast.Const_arg (Ast.Int_lit (Int64.to_string value, span)))
+                    Ast.Const_arg (Ast.Int_lit (Int64.to_string value, span))
+                | Ast.Fn_param _ -> fn_param_removed ())
               item.generic_params )
     | _ -> None
   in
@@ -1053,7 +1070,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   in
   let infer_generic_arguments name generic_params params arguments span =
     let type_params = type_param_names generic_params in
-    let const_params = const_params generic_params |> List.map (fun p -> p.Ast.name) in
+    let const_params = const_params generic_params |> List.map (fun (p : Ast.const_param) -> p.name) in
     let inferred_types = ref [] and inferred_consts = ref [] and origins = ref [] in
     let direct_type_parameter _ =
       List.for_all
@@ -1269,6 +1286,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                 (Ast.Const_arg (Ast.Int_lit (Int64.to_string value, span)) :: acc)
                 rest
           | None -> Error [ missing parameter ])
+      | Ast.Fn_param _ :: _ -> fn_param_removed ()
     in
     make_args [] generic_params
   in
@@ -2179,7 +2197,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
               let* binding = add_local name ty context span in
               mark_init binding context;
               set_inference_type name (Some source_ty);
-              Ok ())
+              Ok ()
+          | Ast.Fn_param _ -> fn_param_removed ())
         generic_params
     in
     let rec add_parameters dependent = function
@@ -2607,14 +2626,15 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Generic_args (Ast.Ident ("atomic_fence", _), _, _) as e -> Ok e
     | Ast.Generic_args (Ast.Ident (name, ident_span), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
-           || name = "syscall"
+           || name = "syscall" || Names.is_fn_check name
            || name = "cvt" || name = "checked_trunc" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         let resolve_argument argument =
           match
             if is_shadowed_argument argument then argument else bind_argument argument
           with
-          | Ast.Name_arg ("fails", _) as fails when name = "call_addr" || name = "syscall" ->
+          | Ast.Name_arg ("fails", _) as fails
+            when name = "call_addr" || name = "syscall" || Names.is_fn_check name ->
               Ok fails
           | Ast.Type_arg ty | Ast.Type_or_index ty ->
               let* ty =
@@ -2720,7 +2740,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                     let rec eval acc params arguments =
                       match (params, arguments) with
                       | [], [] -> Ok (List.rev acc)
-                      | parameter :: params, argument :: arguments ->
+                      | (parameter : Ast.const_param) :: params, argument :: arguments ->
                           let* expression = generic_const_argument span argument in
                           let* const_ty =
                             source_ty_diag eval_named_types parameter.Ast.span
@@ -3504,7 +3524,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                         resolve_ty ~values ~defer_const_structs substitutions depth
                           parameter.span parameter.ty
                       in
-                      Ok (Some (Ast.Const_param { parameter with ty })))
+                      Ok (Some (Ast.Const_param { parameter with ty }))
+                  | Ast.Fn_param _ -> fn_param_removed ())
                 generic_params
             in
             let generic_params = List.filter_map Fun.id generic_params in
@@ -3512,7 +3533,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
               (function
                 | Ast.Const_param parameter ->
                     set_inference_type parameter.name (Some parameter.ty)
-                | Ast.Type_param _ -> ())
+                | Ast.Type_param _ | Ast.Fn_param _ -> ())
               generic_params;
             let* body =
               match body with
@@ -3620,7 +3641,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                   let* ty =
                     resolve_ty ~defer_const_structs [] 0 parameter.span parameter.ty
                   in
-                  Ok (Ast.Const_param { parameter with ty }))
+                  Ok (Ast.Const_param { parameter with ty })
+              | Ast.Fn_param _ -> fn_param_removed ())
             generic_params
         in
         set_inference_params params;

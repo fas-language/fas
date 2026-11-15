@@ -12007,8 +12007,36 @@ let () =
     "fn f(n i64) void { for i i32 in 0..n { } }\n";
   semantic_message "range-loop-redeclared" "duplicate local `i`"
     "fn f() void { for i i32 in 0..3 { i i32 = 4 } }\n";
-  semantic_message "range-loop-missing-dots" "expected `..`"
+  parse_message "range-loop-missing-dots" "expected `..`, found `{`"
     "fn f() void { for i i32 in 3 { } }\n";
+  semantic_accept "fn-generic-forms"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn sq(x i32) i32 { return x * x }\nfn ap[F fn(i32) i32](x i32) i32 { return twice[F](x) }\nfn f() i32 { return twice[inc](1) + ap[sq](2) + twice[twice[inc]](0) }\n";
+  semantic_accept "fn-generic-addr"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn g[F fn(i32) i32]() addr { return &F }\nfn f() addr { return g[inc]() }\n";
+  semantic_accept "fn-generic-fails"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nerror E\nfn h(x i32) i32 fails { return x }\nfn r[G fn(i32) i32 fails](x i32) i32 fails { return try G(x) }\nfn f() i32 { return r[h](1) catch 0 }\n";
+  semantic_accept "fn-generic-struct-infer"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nstruct M[K, H fn(K) u64] { k K }\nfn hk(k i32) u64 { return 1 }\nfn get[K, H fn(K) u64](m handle[M[K, H]]) u64 { return H(m.k) }\nfn f(m handle[M[i32, hk]]) u64 { return get(m) }\n";
+  semantic_message "fn-generic-mismatch" "`g` does not match function parameter `F`: it is `fn(i64) i32`, `F` needs `fn(i32) i32`"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn g(x i64) i32 { return 1 }\nfn f() i32 { return twice[g](1) }\n";
+  semantic_message "fn-generic-fails-mismatch" "`g` does not match function parameter `F`: it is `fn(i32) i32 fails`, `F` needs `fn(i32) i32`"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nerror E\nfn g(x i32) i32 fails { return x }\nfn f() i32 { return twice[g](1) }\n";
+  semantic_message "fn-generic-not-function" "a function argument names a function: `f`, `f[T]` or a C function"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn f() i32 { return twice[3](1) }\n";
+  semantic_message "fn-generic-type-argument" "a function argument names a function: `f`, `f[T]` or a C function"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn f() i32 { return twice[i32](1) }\n";
+  semantic_message "fn-generic-arity" "generic function `twice` expects 1 generic argument, got 2"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn f() i32 { return twice[inc, inc](1) }\n";
+  semantic_message "fn-generic-bare" "function `twice` needs its generic arguments, function arguments included"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn f() addr { return &twice }\n";
+  semantic_message "fn-generic-no-infer" "cannot infer the function argument `F` of `twice` from its arguments' declared types"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn f() i32 { return twice(1) }\n";
+  semantic_message "fn-generic-as-value" "function parameter `F` must be called (`F(...)`), have its address taken (`&F`) or be passed as a generic argument"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn b[F fn(i32) i32]() i32 {\nx i32 = F\nreturn x\n}\nfn f() i32 { return b[inc]() }\n";
+  semantic_message "fn-generic-as-type" "function parameter `F` is not a type"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nfn b[F fn(i32) i32]() i32 {\nx F = 1\nreturn x\n}\nfn f() i32 { return b[inc]() }\n";
+  semantic_message "fn-generic-unhandled-fails" "`h` can fail and the error is not handled"
+    "fn twice[F fn(i32) i32](x i32) i32 { return F(F(x)) }\nfn inc(x i32) i32 { return x + 1 }\nerror E\nfn h(x i32) i32 fails { return x }\nfn r[G fn(i32) i32 fails](x i32) i32 { return G(x) }\nfn f() i32 { return r[h](1) }\n";
   semantic_accept "assert-forms"
     "fn f(x i32) i32 {\nassert(x > 0)\nassert(x < 9, \"small\")\nreturn x\n}\n";
   semantic_accept "unreachable-ends-function"

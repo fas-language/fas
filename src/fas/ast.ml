@@ -163,9 +163,21 @@ and field = {
 and param = { name : string; ty : ty; ty_span : Span.t; span : Span.t }
 and const_param = { name : string; ty : ty; ty_span : Span.t; span : Span.t }
 
+(* `LESS fn(T, T) bool`: a function generic parameter (D1). Its argument is
+   a function named at the call site; Sema_fn_generics removes these before
+   any other pass sees the program. *)
+and fn_param = {
+  name : string;
+  params : ty list;
+  ret : ty;
+  fails : bool;
+  span : Span.t;
+}
+
 and generic_param =
   | Type_param of { name : string; span : Span.t }
   | Const_param of const_param
+  | Fn_param of fn_param
 
 and body = Declaration | Statements of stmt list
 and linkage = Internal | External_c
@@ -402,6 +414,12 @@ let rec type_name = function
       name ^ "[" ^ String.concat ", " (List.map generic_arg_name args) ^ "]"
   | Void -> "void"
 
+(* `fn(T, T) bool fails`: the written type of a function generic parameter *)
+and fn_param_type_name (f : fn_param) =
+  "fn(" ^ String.concat ", " (List.map type_name f.params) ^ ")"
+  ^ (if f.ret = Void then "" else " " ^ type_name f.ret)
+  ^ if f.fails then " fails" else ""
+
 and generic_arg_name = function
   | Type_arg t | Type_or_index t -> type_name t
   | Const_arg e -> expr_name e
@@ -611,6 +629,15 @@ let render_program program =
         add_name name;
         text " const ";
         emit_ty ty
+    | Fn_param { name; params; ret; fails; _ } ->
+        add_name name;
+        text " fn(";
+        emit_comma_list emit_ty params;
+        text ")";
+        if ret <> Void then (
+          text " ";
+          emit_ty ret);
+        if fails then text " fails"
   and emit_generic_params = function
     | [] -> ()
     | params ->
@@ -1261,6 +1288,9 @@ let expanded_walker ~identifiers ~limit =
     | Const_param { ty; span; _ } ->
         count span;
         go_ty span ty
+    | Fn_param { params; ret; span; _ } ->
+        count span;
+        List.iter (go_ty span) (ret :: params)
   and go_item item =
     if !failed = None then (
       let at = item_span item in
@@ -1475,6 +1505,8 @@ and map_stmt m st =
 let map_generic_param m = function
   | Type_param _ as p -> p
   | Const_param c -> Const_param { c with ty = map_ty m c.ty }
+  | Fn_param f ->
+      Fn_param { f with params = List.map (map_ty m) f.params; ret = map_ty m f.ret }
 
 let map_item m item =
   let ty = map_ty m and ex = map_expr m and nm = m.on_item_name in

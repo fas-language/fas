@@ -34,6 +34,7 @@ hello, fas!
 - [Structs, arrays and memory](#structs-arrays-and-memory)
   - [Value structs](#value-structs)
 - [Generics](#generics)
+  - [Function arguments](#function-arguments)
   - [Const loops](#const-loops)
 - [Globals and constants](#globals-and-constants)
 - [SIMD](#simd)
@@ -627,6 +628,73 @@ oldest 3, newest 6, 32 bytes
 
 Type parameters are `[T]`, const parameters `[N const usize]` (any integer type, or `bool`). Each distinct argument list is compiled once. An `if` whose condition is decided by the const parameters keeps only the selected branch in that specialization. If the kept branch always returns (or breaks or continues), the statements after it are dropped from that specialization too, so `double[true]` never compiles `return x * 2`, and recursive dispatch such as `if C == 1 { return leaf[N](x) }` creates no instances for the dropped calls.
 
+### Function arguments
+
+A generic parameter can also be a function: `LESS fn(T, T) bool` takes a function with that signature as a compile-time argument. Each distinct argument list is compiled once, with the function called directly, so there is no function pointer and nothing to box.
+
+```fas
+use "C" <stdio.h> as c
+
+value struct Player { score i32, id i32 }
+struct Buf[T] { items arr[4, T] }
+
+fn by_score(a Player, b Player) bool { return a.score < b.score }
+fn greater[T](a T, b T) bool { return a > b }
+
+fn sort[T, LESS fn(T, T) bool](xs handle[Buf[T]], n usize) void {
+    for i usize in 1..n {
+        j usize = i
+        while j > 0 && LESS(xs.items[j], xs.items[j - 1]) {
+            t T = xs.items[j]
+            xs.items[j] = xs.items[j - 1]
+            xs.items[j - 1] = t
+            j -= 1
+        }
+    }
+}
+
+// a struct may take functions too; calls read them from the handle's type
+struct Counter[K, KEY fn(K) usize] { counts arr[8, u32] }
+fn bump[K, KEY fn(K) usize](m handle[Counter[K, KEY]], k K) void {
+    m.counts[KEY(k) % 8] += 1
+}
+fn low_bits(x u32) usize { return zext[usize](x & 7) }
+
+fn main() i32 {
+    ps Buf[Player] = {}
+    for i usize in 0..3 {
+        ps.items[i].id = trunc[i32](i) + 1
+        ps.items[i].score = trunc[i32](((i + 2) % 3) * 10)   // 30 10 20 below
+    }
+    sort[Player, by_score](handle_from_addr[Buf[Player]](&ps), 3)
+    c.printf(c"%d %d %d\n", ps.items[0].id, ps.items[1].id, ps.items[2].id)
+
+    ns Buf[u32] = {}
+    ns.items[0] = 4
+    ns.items[1] = 9
+    sort[u32, greater[u32]](handle_from_addr[Buf[u32]](&ns), 2)
+    c.printf(c"%u %u\n", ns.items[0], ns.items[1])
+
+    k Counter[u32, low_bits] = {}
+    kh handle[Counter[u32, low_bits]] = handle_from_addr[Counter[u32, low_bits]](&k)
+    bump(kh, 3)
+    bump(kh, 11)
+    c.printf(c"%u\n", k.counts[3])
+    return 0
+}
+```
+```text
+2 3 1
+9 4
+2
+```
+
+- The signature is written in the parameter: `F fn(A, B) R`, `F fn(A)` for no result, `F fn(A) R fails` for a `fails` function. `fn(...)` is not a type; it appears only in generic parameter lists.
+- The argument names a function: a Fas function (`by_score`), a specialised generic (`greater[u32]`), a function parameter of the enclosing generic (`twice[F](x)`), or a non-variadic C function (`c.toupper`). Its parameter types, result and `fails` must match the signature exactly, and the error says both: ``by_name` does not match function parameter `LESS`: it is `fn(i64, i64) bool`, `LESS` needs `fn(i32, i32) bool``.
+- In the body, `LESS(a, b)` is a direct call (`try`/`catch` as usual when the signature `fails`), `&LESS` is the function's address, and `LESS` can be passed on as a generic argument. Anything else, such as using `LESS` as a value or a type, is an error.
+- A call without generic arguments infers the function arguments from the declared types of its arguments, such as a `handle[Counter[u32, low_bits]]` local, then infers the type parameters as usual. When they cannot be read from there, write them out.
+- A function with function parameters must be given its arguments (or be inferred) before it is used: a bare `sort` or `&sort` is an error.
+
 ### Const loops
 
 `for const i T in A..B { ... }` writes the body out once for each value `A`, `A + 1`, ... `B - 1`, as straight-line code: there is no runtime loop, and in each copy `i` is a constant. Use it where you would otherwise copy a block by hand or write a recursive generic: unrolled kernels, per-lane or per-shift code, a dispatch over const instances.
@@ -1147,6 +1215,7 @@ fn k() fails { }                        // no result, or an error
 enum Tok u8 { Eof, Ident, Plus = 10 }   // its own type; members are Tok.Plus
 fn max[T](a T, b T) T { return if a > b { a } else { b } }
 fn sum[T, N const usize](xs addr) T { ... }
+fn sort[T, LESS fn(T, T) bool](xs handle[Buf[T]]) void { ... }   // sort[i32, less[i32]](h)
 
 extern "C" {
     fn puts(s addr) i32                 // no body: import

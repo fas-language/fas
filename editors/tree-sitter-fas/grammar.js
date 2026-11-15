@@ -252,7 +252,23 @@ module.exports = grammar({
     generic_param: ($) =>
       seq(
         field('name', $.identifier),
-        optional(seq('const', field('type', $._type))),
+        optional(
+          choice(
+            seq('const', field('type', $._type)),
+            field('signature', $.function_signature),
+          ),
+        ),
+      ),
+
+    // `LESS fn(T, T) bool fails`: a function generic parameter
+    function_signature: ($) =>
+      prec.right(
+        seq(
+          'fn',
+          delimited($._type, '(', ')'),
+          optional(field('result', $._type)),
+          optional(field('fails', 'fails')),
+        ),
       ),
 
     parameter_list: ($) => delimited($._parameter, '(', ')'),

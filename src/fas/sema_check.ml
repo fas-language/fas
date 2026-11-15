@@ -4716,6 +4716,64 @@ and check_indirect_actuals c actuals =
   in
   check 1 [] actuals
 
+(* `f` given for `NAME fn(P1, ...) R [fails]`: the signatures must be equal *)
+and check_fn_argument c parameter types target span =
+  let fails = List.exists (function Ast.Name_arg ("fails", _) -> true | _ -> false) types in
+  let* types =
+    Result_list.map
+      (function
+        | Ast.Type_arg t | Ast.Type_or_index t -> source_ty_in_context c span t
+        | Ast.Name_arg (n, s) -> source_ty_in_context c s (Ast.Named_type (n, s))
+        | Ast.Const_arg e -> error (Ast.expr_span e) "internal error: function check")
+      (List.filter (function Ast.Name_arg ("fails", _) -> false | _ -> true) types)
+  in
+  let ret, params = match types with r :: p -> (r, p) | [] -> (Hir.Void, []) in
+  let text params ret fails =
+    "fn("
+    ^ String.concat ", " (List.map Sema_types.diagnostic_ty_name params)
+    ^ ")"
+    ^ (if ret = Hir.Void then "" else " " ^ Sema_types.diagnostic_ty_name ret)
+    ^ if fails then " fails" else ""
+  in
+  let shown = Ast.expr_name (match target with Ast.Addr_of (e, _) -> e | e -> e) in
+  let not_function () =
+    error span
+      (Printf.sprintf "`%s` given for function parameter `%s` is not a function" shown
+         parameter)
+  in
+  let* address =
+    match target with
+    | Ast.Addr_of (Ast.Ident (name, s), _)
+      when Option.is_none (lookup_local name c) && List.mem_assoc name c.signatures ->
+        (* specialised generics (`less[i32]`) are not top-level bindings *)
+        Ok (Hir.Function_address (name, s))
+    | _ -> check_expr c None target
+  in
+  match address with
+  | Hir.Function_address (name, _) -> (
+      match List.assoc_opt name c.signatures with
+      | None -> not_function ()
+      | Some (sig_ : Sema_context.signature) ->
+          let actual = List.map snd sig_.params in
+          if sig_.variadic then
+            error span
+              (Printf.sprintf
+                 "variadic C function `%s` cannot be given for function parameter `%s`"
+                 shown parameter)
+          else if
+            List.length actual = List.length params
+            && List.for_all2 Hir.ty_equal actual params
+            && Hir.ty_equal sig_.ret ret && sig_.fails = fails
+          then Ok (Hir.Block ([], span))
+          else
+            error span
+              (Printf.sprintf
+                 "`%s` does not match function parameter `%s`: it is `%s`, `%s` needs `%s`"
+                 shown parameter
+                 (text actual sig_.ret sig_.fails)
+                 parameter (text params ret fails)))
+  | _ -> not_function ()
+
 and check_indirect_target c fact arguments result_ty span =
   let signature name (sig_ : Sema_context.signature) =
     Printf.sprintf "%s(%s) %s" name
@@ -5941,6 +5999,14 @@ and check_stmt (c : context) = function
         Ok (Hir.Compound_assign (target, op, v, et, span)))
   | Ast.Expr_stmt (Ast.Call (Ast.Ident ("copy", _), args, call_span), _, _) ->
       check_copy c args call_span
+  (* the hidden signature check of a function generic argument (D1,
+     Sema_fn_generics) *)
+  | Ast.Expr_stmt
+      ( Ast.Call (Ast.Generic_args (Ast.Ident (name, _), types, _), [ target ], span),
+        _,
+        _ )
+    when Names.is_fn_check name ->
+      check_fn_argument c (Option.get (Names.fn_check_parameter name)) types target span
   | Ast.Expr_stmt
       (Ast.Call (Ast.Generic_args (Ast.Ident ("copy", _), _, _), _, call_span), _, _) ->
       error call_span "copy takes no type arguments"

@@ -13,6 +13,7 @@ type kind =
   | Field
   | Type_parameter
   | Const_parameter
+  | Fn_parameter
   | Type_alias
 
 type declaration = {
@@ -152,6 +153,7 @@ let kind_name = function
   | Field -> "field"
   | Type_parameter -> "type parameter"
   | Const_parameter -> "const parameter"
+  | Fn_parameter -> "function parameter"
   | Type_alias -> "type alias"
 
 let by_span compare_rest left right =
@@ -337,13 +339,17 @@ let generic_text parameters =
           (List.map
              (function
                | Ast.Type_param { name; _ } -> name
-               | Ast.Const_param { name; ty; _ } -> name ^ " const " ^ Ast.type_name ty)
+               | Ast.Const_param { name; ty; _ } -> name ^ " const " ^ Ast.type_name ty
+               | Ast.Fn_param f -> f.name ^ " " ^ Ast.fn_param_type_name f)
              parameters)
       ^ "]"
 
 let generic_param_names parameters =
   List.map
-    (function Ast.Type_param { name; _ } | Ast.Const_param { name; _ } -> name)
+    (function
+      | Ast.Type_param { name; _ } | Ast.Const_param { name; _ } | Ast.Fn_param { name; _ }
+        ->
+          name)
     parameters
 
 let c_display_params index name params =
@@ -397,6 +403,9 @@ let declare_program index ~c_aliases (program : Ast.program) =
           | Ast.Const_param { name; span; ty; _ } ->
               Hashtbl.replace index.const_types (owner, name) (Ast.type_name ty);
               (name, Const_parameter, span)
+          | Ast.Fn_param ({ name; span; _ } as f) ->
+              Hashtbl.replace index.const_types (owner, name) (Ast.fn_param_type_name f);
+              (name, Fn_parameter, span)
         in
         let declaration = add ~container:owner name kind span item_span in
         Hashtbl.replace index.generics (owner, name) declaration)
@@ -623,6 +632,8 @@ let reference_program index ~instantiated (program : Ast.program) =
             List.iter
               (function
                 | Ast.Const_param { ty = param_ty; _ } -> ty owner [] param_ty
+                | Ast.Fn_param { params; ret; _ } ->
+                    List.iter (ty owner []) (ret :: params)
                 | Ast.Type_param _ -> ())
               generic_params;
             List.iter (fun (parameter : Ast.param) -> ty owner [] parameter.ty) params;
@@ -1113,7 +1124,7 @@ let describe index ?use (declaration : declaration) =
       Option.map
         (fun owner -> (name, parameter_facts index owner name))
         (generic_owner ())
-  | Const_parameter -> (
+  | Const_parameter | Fn_parameter -> (
       match (declaration.container, generic_owner ()) with
       | Some owner, Some _ ->
           Option.map

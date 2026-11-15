@@ -336,6 +336,10 @@ and count_expanded_generic_param_type_nodes parameter cap total =
     match parameter with
     | Ast.Type_param _ -> total
     | Ast.Const_param { ty; _ } -> count_expanded_type_nodes ty cap total
+    | Ast.Fn_param { params; ret; _ } ->
+        List.fold_left
+          (fun total ty -> count_expanded_type_nodes ty cap total)
+          total (ret :: params)
 
 and count_expanded_body_type_nodes body cap total =
   match body with
@@ -437,17 +441,17 @@ let validate_binding_name span name =
 
 let const_params generic_params =
   List.filter_map
-    (function Ast.Const_param cp -> Some cp | Ast.Type_param _ -> None)
+    (function Ast.Const_param cp -> Some cp | Ast.Type_param _ | Ast.Fn_param _ -> None)
     generic_params
 
 let has_type_params generic_params =
   List.exists
-    (function Ast.Type_param _ -> true | Ast.Const_param _ -> false)
+    (function Ast.Type_param _ -> true | Ast.Const_param _ | Ast.Fn_param _ -> false)
     generic_params
 
 let has_const_params generic_params =
   List.exists
-    (function Ast.Const_param _ -> true | Ast.Type_param _ -> false)
+    (function Ast.Const_param _ -> true | Ast.Type_param _ | Ast.Fn_param _ -> false)
     generic_params
 
 let ty_name = Hir.ty_name

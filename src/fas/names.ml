@@ -332,3 +332,20 @@ let c_link_symbol name =
   if is_c_name name then
     String.sub name (String.length c_prefix) (String.length name - String.length c_prefix)
   else name
+
+(* The hidden signature check of a function generic argument (D1):
+   `.fn_check NAME[R, P1, ..., fails](&f)`, made by Sema_fn_generics and
+   resolved by sema_check. NAME is the parameter, for messages. No Fas name
+   starts with a dot. *)
+let fn_check_prefix = ".fn_check "
+
+let fn_check_name parameter = fn_check_prefix ^ parameter
+
+let fn_check_parameter name =
+  if String.starts_with ~prefix:fn_check_prefix name then
+    Some
+      (String.sub name (String.length fn_check_prefix)
+         (String.length name - String.length fn_check_prefix))
+  else None
+
+let is_fn_check name = Option.is_some (fn_check_parameter name)

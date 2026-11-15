@@ -1103,6 +1103,7 @@ module P = struct
                 let ty_span = span p in
                 let* t = ty p in
                 Ok (Ast.Const_param { Ast.name = n; ty = t; ty_span; span = s })
+              else if eat p Token.Kw_fn then fn_param p n s
               else Ok (Ast.Type_param { name = n; span = s })
             in
             if eat p Token.Comma then go (next :: acc)
@@ -1111,6 +1112,30 @@ module P = struct
               Ok (List.rev (next :: acc))
           in
           go [])
+
+  (* `LESS fn(T, T) bool fails` (D1): the parameter types, then an optional
+     result type and `fails` *)
+  and fn_param p name s =
+    let* () = expected p Token.Lparen in
+    let* params =
+      delimited p (fun () ->
+          let rec go acc =
+            if eat p Token.Rparen then Ok (List.rev acc)
+            else
+              let* t = ty p in
+              if eat p Token.Comma then go (t :: acc)
+              else
+                let* () = expected p Token.Rparen in
+                Ok (List.rev (t :: acc))
+          in
+          go [])
+    in
+    let* ret =
+      if at p Token.Comma || at p Token.Rbracket || at p Token.Kw_fails then Ok Ast.Void
+      else ty p
+    in
+    let fails = eat p Token.Kw_fails in
+    Ok (Ast.Fn_param { Ast.name; params; ret; fails; span = s })
 
   and signature p allow_variadic =
     let* () = expected p Token.Lparen in

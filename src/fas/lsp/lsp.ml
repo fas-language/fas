@@ -1062,7 +1062,7 @@ let symbol_kind kind =
     | Struct | Union | Opaque | Type_alias -> 23
     | Enum -> 10
     | Field -> 8
-    | Type_parameter | Const_parameter -> 26)
+    | Type_parameter | Const_parameter | Fn_parameter -> 26)
 
 let span_range positions (span : Span.t) =
   range_json

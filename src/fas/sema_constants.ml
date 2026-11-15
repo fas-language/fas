@@ -462,7 +462,9 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
                          ^
                          match lookup name const_bindings with
                          | Some (_, _, value) -> Int64.to_string value
-                         | None -> "?"))
+                         | None -> "?")
+                     (* removed by Sema_fn_generics before constants *)
+                     | Ast.Fn_param { name; _ } -> name ^ "=?")
                    params)
           in
           match Hashtbl.find_opt instances key with
