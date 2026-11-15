@@ -300,7 +300,8 @@ and count_expanded_stmt_type_nodes stmt cap total =
         match default with
         | Some statements -> count_expanded_stmts_type_nodes statements cap total
         | None -> total)
-    | Ast.Fail (value, _) -> count_expanded_expr_type_nodes value cap total
+    | Ast.Fail (value, _) | Ast.Const_assert_stmt { cond = value; _ } ->
+        count_expanded_expr_type_nodes value cap total
     | Ast.Errdefer (_, body, _) -> count_expanded_stmts_type_nodes body cap total
     | Ast.Catch_stmt { target; call; body; _ } ->
         let total =
@@ -351,6 +352,7 @@ and count_expanded_item_type_nodes item cap total =
   else
     match item with
     | Ast.Use _ | Ast.Pkg _ -> total
+    | Ast.Const_assert { cond; _ } -> count_expanded_expr_type_nodes cond cap total
     | Ast.Const { ty; value; _ } ->
         count_expanded_expr_type_nodes value cap
           (count_expanded_type_nodes ty cap total)

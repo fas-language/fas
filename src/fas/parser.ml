@@ -807,6 +807,9 @@ module P = struct
           else
             let* () = end_stmt p in
             Ok [ Ast.Use { path; c_header = None; alias = None; os = None; span = path_span } ]
+    | Token.Kw_const when (peek_n p 1).kind = Token.Ident "assert" ->
+        let* cond, message, span = const_assert_parts p in
+        Ok [ Ast.Const_assert { cond; message; span } ]
     | Token.Kw_const ->
         let start = span p in
         let* x = const_item p in
@@ -1374,8 +1377,37 @@ module P = struct
       in
       go [])
 
+  (* `const assert(cond)` / `const assert(cond, "message")`, at top level or
+     as a statement; the caller has checked the `const assert` prefix *)
+  and const_assert_parts p =
+    let start = span p in
+    ignore (bump p);
+    ignore (bump p);
+    let* () = expected p Token.Lparen in
+    skip_newlines p;
+    let* cond = expr p in
+    skip_newlines p;
+    let* message =
+      if eat p Token.Comma then (
+        skip_newlines p;
+        match (peek p).kind with
+        | Token.String text ->
+            ignore (bump p);
+            skip_newlines p;
+            Ok (Some text)
+        | _ -> error (span p) "a const assert message must be a string literal")
+      else Ok None
+    in
+    let* () = expected p Token.Rparen in
+    let whole = extent p start in
+    let* () = end_stmt p in
+    Ok (cond, message, whole)
+
   and stmt p =
     match (peek p).kind with
+    | Token.Kw_const when (peek_n p 1).kind = Token.Ident "assert" ->
+        let* cond, message, span = const_assert_parts p in
+        Ok (Ast.Const_assert_stmt { cond; message; span })
     | Token.Kw_use when (peek_n p 1).kind = Token.String "asm" ->
         Error [ Diag.error (span p) "assembly unit must be at top level" ]
     | Token.Kw_use when List.mem_assoc (span p).Span.start_offset p.c_containers ->

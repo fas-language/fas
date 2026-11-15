@@ -90,3 +90,12 @@
  (deps
   (glob_files fas_fir/*.fir)
   (glob_files fas_fir/c/*.fir)))
+
+; The Fir interpreter against the expected output of test/fas_fir.
+(test
+ (name fir_interp_test)
+ (modules fir_interp_test)
+ (libraries fas_compiler)
+ (deps
+  (glob_files fas_fir/*.fir)
+  (glob_files fas_fir/*.out)))

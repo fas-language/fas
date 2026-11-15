@@ -708,6 +708,7 @@ let desugar (program : Ast.program) =
             ctx.scope <- saved;
             Ast.Const_copy { c with ty; body }
         | Ast.Fail (e, s) -> Ast.Fail (ex e, s)
+        | Ast.Const_assert_stmt c -> Ast.Const_assert_stmt { c with cond = ex c.cond }
         | Ast.Errdefer (binding, body, s) ->
             let saved = ctx.scope in
             Option.iter (fun (b, _) -> declare ctx b Ast.Void) binding;
@@ -782,6 +783,7 @@ let desugar (program : Ast.program) =
         | Ast.Const c ->
             let ctx = top () in
             Ast.Const { c with ty = rw_ty ctx c.ty; value = rw_expr ctx c.value }
+        | Ast.Const_assert c -> Ast.Const_assert { c with cond = rw_expr (top ()) c.cond }
         | Ast.Global g ->
             let ctx = top () in
             Ast.Global

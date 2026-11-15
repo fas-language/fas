@@ -5257,7 +5257,7 @@ let rec statement_changes_name name = function
       || Option.fold ~none:false
            ~some:(List.exists (statement_changes_name name))
            default
-  | Ast.Break _ | Ast.Continue _ -> false
+  | Ast.Break _ | Ast.Continue _ | Ast.Const_assert_stmt _ -> false
   | Ast.Fail (value, _) -> expression_takes_name_address name value
   | Ast.Errdefer (_, body, _) -> List.exists (statement_changes_name name) body
   | Ast.Catch_stmt { target; call; body; _ } -> (
@@ -5468,6 +5468,40 @@ let check_copy c args span =
 
 let stmt_terminates = Ast.stmt_terminates
 let catch_counter = ref 0
+
+(* `const assert` (LANGUAGE.md "Compile-time assertions"): the condition folds at
+   compile time; inside a generic body this runs once per specialisation, and the
+   caller's trace names the instantiation. When folding fails, the condition is
+   type-checked as an ordinary expression first so a type error or unknown name
+   is reported as itself; only a well-typed condition that does not fold gets the
+   "not a compile-time constant" error. *)
+let check_const_assert (c : context) cond message span =
+  match
+    Sema_constants.check_const_assert ~consts:c.consts
+      ~array_lengths:(static_array_lengths c.top_level_bindings c.globals)
+      ~structs:c.structs ~named_types:c.named_types ~generic_structs:c.generic_structs
+      ~globals:(List.map (fun (name, _, _) -> name) c.globals)
+      ~arrays:c.arrays cond message span
+  with
+  | Sema_constants.Assert_holds -> Ok ()
+  | Sema_constants.Assert_fails diagnostics -> Error diagnostics
+  | Sema_constants.Assert_not_constant _ -> (
+      match check_expr c (Some Hir.Bool) cond with
+      | Error diagnostics -> Error diagnostics
+      | Ok checked ->
+          let* () =
+            ensure_expected ~checked_expression:checked ~context:"const assert"
+              ~expression:cond (Hir.expr_ty checked) Hir.Bool (Ast.expr_span cond)
+          in
+          Error
+            [
+              Diag.error
+                ~help:
+                  "a const assert condition may use literals, constants, generic \
+                   parameters and compile-time builtins; at top level it may also \
+                   call functions"
+                (Ast.expr_span cond) "const assert condition is not a compile-time constant";
+            ])
 
 let rec check_block (c : context) stmts =
   push c;
@@ -6587,6 +6621,9 @@ and check_stmt (c : context) = function
   | Ast.Catch_stmt { span; _ } as statement ->
       let* xs = check_catch_stmt c statement in
       Ok (Hir.Block (xs, span))
+  | Ast.Const_assert_stmt { cond; message; span } ->
+      let* () = check_const_assert c cond message span in
+      Ok (Hir.Block ([], span))
   | Ast.Fail (e, s) ->
       if Sema_flow.in_defer c.flow then
         error s "`fail` is not allowed inside defer or errdefer"

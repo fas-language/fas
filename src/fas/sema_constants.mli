@@ -79,3 +79,23 @@ val enum_operand_type :
   string -> Hir.int_kind -> Hir.ty -> Span.t -> (unit, Diag.t list) result
 
 val enum_member_of : string -> int64 -> string option
+
+type const_assert_outcome =
+  | Assert_holds
+  | Assert_fails of Diag.t list  (** false, or not a bool *)
+  | Assert_not_constant of Diag.t list  (** the evaluator could not fold it *)
+
+(** [check_const_assert ~consts cond message span] folds a `const assert`
+    condition; a false condition's diagnostic carries [message]. *)
+val check_const_assert :
+  ?structs:Hir.struct_def list ->
+  ?named_types:Sema_types.named_types ->
+  ?generic_structs:Ast.item list ->
+  ?arrays:(string * Hir.ty * int64 list) list ->
+  ?array_lengths:(string * Ast.aggregate_length) list ->
+  ?globals:string list ->
+  consts:Sema_types.const_values ->
+  Ast.expr ->
+  string option ->
+  Span.t ->
+  const_assert_outcome

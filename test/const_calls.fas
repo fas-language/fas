@@ -1,0 +1,61 @@
+// constants from calls (LANGUAGE.md "Constants from calls"): top-level
+// constants and const asserts whose initializer calls Fas functions are
+// evaluated at compile time; main returns 0 when every value is right. The
+// failing cases live in test/const_calls.sh.
+enum Color u8 { Red, Green, Blue }
+
+fn fib(n i32) i32 {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+fn square[T](x T) T { return x * x }
+fn pick(n i32) Color {
+    if n > 1 { return Color.Blue }
+    return Color.Green
+}
+fn half(x f64) f64 { return x / 2.0 }
+fn table_sum() u32 {
+    t arr[4, u32] = {}
+    for i usize in 0..4 { t[i] = trunc[u32](i) * 3 }
+    s u32 = 0
+    for i usize in 0..4 { s += t[i] }
+    return s
+}
+
+const F10 i32 = fib(10)
+const SQ i64 = square[i64](-7) * -1
+const BIG u64 = square[u64](4294967295)
+const C Color = pick(2)
+const H f64 = half(-3.0)
+const T u32 = table_sum()
+const DEP i32 = fib(F10 / 11)
+const LEN usize = zext[usize](table_sum())
+const assert(fib(7) == 13, "fib")
+
+fn main() i32 {
+    if F10 != 55 { return 1 }
+    if SQ != -49 { return 2 }
+    if BIG != 18446744065119617025 { return 3 }
+    if C != Color.Blue { return 4 }
+    if H != -1.5 { return 5 }
+    if T != 18 { return 6 }
+    if DEP != 5 { return 7 }
+    buf arr[LEN, u8] = {}
+    if sizeof[arr[LEN, u8]] != 18 { return 8 }
+    // BASE is resolved first: G's function uses it
+    if G != 42 { return 9 }
+    if THIRD != 1.0 / 3.0 { return 10 }
+    b Box[NB] = {}
+    if sizeof[Box[NB]] != 5 { return 11 }
+    return 0
+}
+
+fn g() i32 { return BASE * 2 }
+const G i32 = g()
+fn base() i32 { return 21 }
+const BASE i32 = base()
+fn third() f32 { return 1.0 / 3.0 }
+const THIRD f32 = third()
+struct Box[N const usize] { v arr[N, u8] }
+fn n() usize { return 5 }
+const NB usize = n()

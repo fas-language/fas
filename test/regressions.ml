@@ -371,6 +371,7 @@ let replay_nodes index (program : Ast.program) =
         run high;
         List.iter stmt body
     | Expr_stmt (operand, _, _) | Fail (operand, _) -> run operand
+    | Const_assert_stmt { cond; _ } -> run cond
     | Errdefer (_, body, _) -> List.iter stmt body
     | Catch_stmt { call; body; _ } ->
         run call;

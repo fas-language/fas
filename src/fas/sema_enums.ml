@@ -235,6 +235,7 @@ and stmt = function
         { c with ty = ty c.ty; low = expr c.low; high = expr c.high; body = stmts c.body }
   | Ast.Const_copy c -> Ast.Const_copy { c with ty = ty c.ty; body = stmts c.body }
   | Ast.Fail (e, s) -> Ast.Fail (expr e, s)
+  | Ast.Const_assert_stmt c -> Ast.Const_assert_stmt { c with cond = expr c.cond }
   | Ast.Errdefer (binding, body, s) -> Ast.Errdefer (binding, stmts body, s)
   | Ast.Catch_stmt c ->
       let target =
@@ -250,6 +251,7 @@ and stmts body = List.map stmt body
 let item = function
   | (Ast.Use _ | Ast.Pkg _ | Ast.Opaque _ | Ast.Enum _) as i -> i
   | Ast.Const c -> Ast.Const { c with ty = ty c.ty; value = expr c.value }
+  | Ast.Const_assert c -> Ast.Const_assert { c with cond = expr c.cond }
   | Ast.Global g -> Ast.Global { g with ty = ty g.ty; init = Option.map expr g.init }
   | Ast.Struct s ->
       Ast.Struct

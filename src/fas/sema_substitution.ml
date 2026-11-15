@@ -667,7 +667,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             type_names body
         in
         Ok (value_names, scope_names)
-    | Ast.Fail (expression, _) ->
+    | Ast.Fail (expression, _) | Ast.Const_assert_stmt { cond = expression; _ } ->
         let* () = validate_expression_names value_names type_names expression in
         Ok (value_names, scope_names)
     | Ast.Errdefer (binding, body, _) ->
@@ -790,7 +790,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             else Ok (String_set.add name scope_names)
         | Ast.Catch_assign _ | Ast.Catch_discard -> Ok scope_names)
     | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _ | Ast.Expr_stmt _
-    | Ast.Break _ | Ast.Continue _ | Ast.Fail _ ->
+    | Ast.Break _ | Ast.Continue _ | Ast.Fail _ | Ast.Const_assert_stmt _ ->
         Ok scope_names
   and validate_statement_block_duplicates ?(scope_names = String_set.empty) = function
     | [] -> Ok ()
@@ -2132,6 +2132,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         in
         Ok dependent
     | Ast.Break _ | Ast.Continue _ | Ast.Const_for _ | Ast.Const_copy _ -> Ok dependent
+    (* checked per specialization, where it may depend on the parameters *)
+    | Ast.Const_assert_stmt _ -> Ok dependent
     | Ast.Fail (value, _) ->
         let* () = validate_non_dependent_expression c dependent (Some Hir.Err) value in
         Ok dependent
@@ -3435,6 +3437,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             resolve_expr ~values ~defer_const_structs substitutions depth expression
           in
           Ok (Ast.Fail (expression, span))
+      | Ast.Const_assert_stmt c ->
+          let* cond = resolve_expr ~values ~defer_const_structs substitutions depth c.cond in
+          Ok (Ast.Const_assert_stmt { c with cond })
       | Ast.Errdefer (binding, body, span) ->
           let* body =
             resolve_error_handler ~values ~defer_const_structs substitutions depth
@@ -3606,6 +3611,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           with_preserved_layout_queries (fun () -> resolve_expr [] 0 value)
         in
         Ok (Ast.Const { item with ty; value })
+    | Ast.Const_assert c ->
+        let* cond = with_preserved_layout_queries (fun () -> resolve_expr [] 0 c.cond) in
+        Ok (Ast.Const_assert { c with cond })
     | Ast.Global ({ ty; init; ty_span; _ } as item) ->
         let* ty = resolve_ty ~values:eval_consts [] 0 ty_span ty in
         let* init =

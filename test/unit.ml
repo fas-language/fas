@@ -1357,6 +1357,18 @@ let () =
           assert (actual = offender);
           List.iter (fun needle -> assert (contains message needle)) needles
     in
+    (* `const assert` renders back to source that parses to the same tree *)
+    let const_assert_text =
+      "const assert(1 == 1, \"top\")\nfn f() i32 {\n const assert(true)\n return 0\n}\n"
+    in
+    let const_assert_rendered =
+      Ast.render_program (expect_ok (Parser.parse (source const_assert_text)))
+    in
+    assert (contains const_assert_rendered "const assert(");
+    assert (contains const_assert_rendered "\"top\"");
+    assert (
+      Ast.render_program (expect_ok (Parser.parse (source const_assert_rendered)))
+      = const_assert_rendered);
     let ast_unit_text = "fn f(a i64) i64 { x i64 = a + 1\n return x }\n" in
     let ast_program = expect_ok (Parser.parse (source ast_unit_text)) in
     let ast_nodes = Ast.count_expanded_nodes ast_program in

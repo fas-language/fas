@@ -134,6 +134,9 @@ and stmt =
       span : Span.t;
     }
   | Fail of expr * Span.t
+  (* `const assert(cond)` / `const assert(cond, "message")` (D2): checked at
+     compile time, once per specialization of a generic body *)
+  | Const_assert_stmt of { cond : expr; message : string option; span : Span.t }
   | Errdefer of (string * Span.t) option * stmt list * Span.t
   (* `[x T =] CALL catch [e] { BODY }` and `x = CALL catch [e] { BODY }` *)
   | Catch_stmt of {
@@ -198,6 +201,8 @@ and item =
       span : Span.t;
     }
   | Pkg of { pkg : pkg; span : Span.t }
+  (* a top-level `const assert(cond[, "message"])` (D2) *)
+  | Const_assert of { cond : expr; message : string option; span : Span.t }
   | Const of {
       name : string;
       name_span : Span.t;
@@ -277,7 +282,7 @@ let with_extent extent = function
   | Error_decl e -> Error_decl { e with extent }
   | Enum e -> Enum { e with extent }
   | Func f -> Func { f with extent }
-  | (Use _ | Pkg _) as item -> item
+  | (Use _ | Pkg _ | Const_assert _) as item -> item
 
 let stored_expr_span = function
   | Int_lit (_, s)
@@ -374,6 +379,7 @@ let stmt_span = function
   | Const_copy { span; _ }
   | Fail (_, span)
   | Errdefer (_, _, span)
+  | Const_assert_stmt { span; _ }
   | Catch_stmt { span; _ } ->
       span
 
@@ -551,6 +557,7 @@ let int_aggregate_length length span =
 let item_span = function
   | Use { span; _ }
   | Pkg { span; _ }
+  | Const_assert { span; _ }
   | Const { span; _ }
   | Global { span; _ }
   | Struct { span; _ }
@@ -940,6 +947,9 @@ let render_program program =
         text indent;
         text "fail ";
         emit_expr e
+    | Const_assert_stmt { cond; message; _ } ->
+        text indent;
+        emit_const_assert cond message
     | Errdefer (binding, xs, _) ->
         text indent;
         text "errdefer ";
@@ -978,6 +988,16 @@ let render_program program =
         text "\n";
         text indent;
         text "}"
+  and emit_const_assert cond message =
+    text "const assert(";
+    emit_expr cond;
+    Option.iter
+      (fun m ->
+        text ", \"";
+        add_escaped m;
+        text "\"")
+      message;
+    text ")"
   and emit_lines indent xs =
     List.iter
       (fun s ->
@@ -1032,6 +1052,7 @@ let render_program program =
             as_alias ();
             text
               (Printf.sprintf " <<%s\n%s\n%s" fragment.tag fragment.text fragment.tag))
+    | Const_assert { cond; message; _ } -> emit_const_assert cond message
     | Const { name; ty; value; _ } ->
         text "const ";
         add_name name;
@@ -1266,7 +1287,7 @@ let expanded_walker ~identifiers ~limit =
               go_stmts xs)
             arms;
           Option.iter go_stmts default
-      | Fail (e, _) -> go_expr e
+      | Fail (e, _) | Const_assert_stmt { cond = e; _ } -> go_expr e
       | Errdefer (_, xs, _) -> go_stmts xs
       | Catch_stmt { target; call; body; span; _ } ->
           (match target with
@@ -1297,6 +1318,7 @@ let expanded_walker ~identifiers ~limit =
       count at;
       match item with
       | Use _ | Pkg _ -> ()
+      | Const_assert { cond; _ } -> go_expr cond
       | Const { ty; value; span; _ } ->
           go_ty span ty;
           go_expr value
@@ -1492,6 +1514,7 @@ and map_stmt m st =
       Const_for { c with ty = map_ty m c.ty; low = ex c.low; high = ex c.high; body = sts c.body }
   | Const_copy c -> Const_copy { c with ty = map_ty m c.ty; body = sts c.body }
   | Fail (e, s) -> Fail (ex e, s)
+  | Const_assert_stmt c -> Const_assert_stmt { c with cond = ex c.cond }
   | Errdefer (b, body, s) -> Errdefer (b, sts body, s)
   | Catch_stmt c ->
       let target =
@@ -1512,6 +1535,7 @@ let map_item m item =
   let ty = map_ty m and ex = map_expr m and nm = m.on_item_name in
   match item with
   | Use _ | Pkg _ -> item
+  | Const_assert c -> Const_assert { c with cond = ex c.cond }
   | Const c -> Const { c with name = nm c.name; ty = ty c.ty; value = ex c.value }
   | Global g -> Global { g with name = nm g.name; ty = ty g.ty; init = Option.map ex g.init }
   | Struct s ->
@@ -1609,7 +1633,7 @@ and copy_jump ~select = function
       List.concat_map (fun (_, body) -> copy_jumps ~select body) arms
       @ Option.fold ~none:[] ~some:(copy_jumps ~select) default
   | Let _ | View _ | Assign _ | Compound_assign _ | Return _ | Expr_stmt _ | Break _
-  | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ ->
+  | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ | Const_assert_stmt _ ->
       []
 
 let copy_breaks body =
@@ -1641,6 +1665,6 @@ and continue_to_break label = function
           Option.map (continues_to_breaks label) default,
           span )
   | ( Let _ | View _ | Assign _ | Compound_assign _ | Return _ | Expr_stmt _ | Break _
-    | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ ) as statement
+    | Continue _ | While _ | For _ | Const_for _ | Const_copy _ | Fail _ | Const_assert_stmt _ ) as statement
     ->
       statement

@@ -247,7 +247,7 @@ let new_recovery () =
   }
 
 let item_extent = function
-  | Ast.Use { span; _ } | Ast.Pkg { span; _ } -> span
+  | Ast.Use { span; _ } | Ast.Pkg { span; _ } | Ast.Const_assert { span; _ } -> span
   | Ast.Const { extent; _ }
   | Ast.Global { extent; _ }
   | Ast.Struct { extent; _ }
@@ -1529,7 +1529,7 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
                 | Ast.Error_decl { names; _ } -> List.map (fun (n, _, _) -> n) names
                 | Ast.Enum { name; members; _ } ->
                     name :: List.map (fun (m, _, _) -> name ^ "." ^ m) members
-                | Ast.Use _ | Ast.Pkg _ -> [])
+                | Ast.Use _ | Ast.Pkg _ | Ast.Const_assert _ -> [])
               program.Ast.items
           in
           let macro_names =
@@ -1762,6 +1762,24 @@ let analyze_resolved ?overlay ?cache ?index ?recovery ?(edits = []) config =
             index;
           let program = { Ast.items = program.items @ imported.items } in
           let* () = ast_budget (Ast.check_expanded_nodes ~limits program) in
+          (* v0.4 constants from calls: evaluate them in the Fir interpreter
+             and leave literals (Sema_const_calls); the reduced programs it
+             checks share this program's C import context *)
+          let* program =
+            match
+              Sema_const_calls.resolve
+                ~sema:(fun program specializations ->
+                  Sema.check ~limits ~c_aliases:imported.aliases
+                    ~c_unsupported:imported.unsupported
+                    ~c_nonnull_parameters:imported.nonnull_parameters
+                    ~c_string_parameters:imported.c_string_parameters
+                    ~c_alloc_size_parameters:imported.alloc_size_parameters
+                    ~c_records:imported.record_types ~specializations program)
+                program
+            with
+            | Ok program -> Ok program
+            | Error diagnostics -> Error (add_include_chains chains diagnostics)
+          in
           let specializations = Sema_specialization.create () in
           let* hir =
             match

@@ -2411,3 +2411,36 @@ let resolve_scalar_declarations ?(globals = []) ?(array_lengths = [])
             | Error _ as failure -> failure))
   in
   collect declarations
+
+type const_assert_outcome =
+  | Assert_holds
+  | Assert_fails of Diag.t list
+  | Assert_not_constant of Diag.t list
+
+(* `const assert(cond)` / `const assert(cond, "msg")`: [cond] must fold to a
+   bool here; false is a compile error carrying the message. A condition the
+   evaluator cannot fold yields the evaluator's own diagnostics; the caller
+   decides how to report it (see Sema_check.check_const_assert). *)
+let check_const_assert ?(structs = []) ?(named_types = []) ?(generic_structs = [])
+    ?(arrays = []) ?(array_lengths = []) ?(globals = []) ~consts cond message span =
+  match
+    const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths ~globals
+      consts (Some Hir.Bool) cond
+  with
+  | Ok (Hir.Bool, 0L) ->
+      Assert_fails
+        [
+          Diag.error span
+            (match message with
+            | Some text -> "const assert failed: " ^ text
+            | None -> "const assert failed");
+        ]
+  | Ok (Hir.Bool, _) -> Assert_holds
+  | Ok (ty, _) ->
+      Assert_fails
+        [
+          Diag.error (Ast.expr_span cond)
+            (Printf.sprintf "const assert needs a bool condition, found %s"
+               (Hir.ty_name ty));
+        ]
+  | Error diagnostics -> Assert_not_constant diagnostics

@@ -250,7 +250,7 @@ let rec statement_children = function
   | Ast.Switch (_, cases, default, _) ->
       List.concat_map snd cases @ Option.value ~default:[] default
   | Ast.Let _ | Ast.View _ | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _
-  | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ ->
+  | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ | Ast.Const_assert_stmt _ ->
       []
 
 and statement_expressions = function
@@ -264,7 +264,7 @@ and statement_expressions = function
   | Ast.Switch (subject, cases, _, _) -> subject :: List.concat_map fst cases
   | Ast.Expr_stmt (value, _, _) -> [ value ]
   | Ast.Const_for { low; high; _ } -> [ low; high ]
-  | Ast.Fail (value, _) -> [ value ]
+  | Ast.Fail (value, _) | Ast.Const_assert_stmt { cond = value; _ } -> [ value ]
   | Ast.Catch_stmt { target = Ast.Catch_assign target; call; _ } ->
       target_expressions target @ [ call ]
   | Ast.Catch_stmt { call; _ } -> [ call ]
@@ -417,7 +417,7 @@ let declare_program index ~c_aliases (program : Ast.program) =
   in
   List.iter
     (function
-      | Ast.Use _ | Ast.Pkg _ -> ()
+      | Ast.Use _ | Ast.Pkg _ | Ast.Const_assert _ -> ()
       | Ast.Const { name; name_span; ty; value; extent; _ } ->
           let kind =
             match ty with Ast.Array _ | Ast.Vec _ -> Const_array | _ -> Const
@@ -608,6 +608,7 @@ let reference_program index ~instantiated (program : Ast.program) =
   List.iter
     (function
       | Ast.Use _ | Ast.Pkg _ -> ()
+      | Ast.Const_assert { cond; _ } -> static_expression None [] cond
       | Ast.Const { ty = const_ty; value; _ } ->
           ty None [] const_ty;
           static_expression None [] value

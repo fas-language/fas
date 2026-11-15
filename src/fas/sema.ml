@@ -413,7 +413,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     Option.value specializations ~default:(Sema_specialization.create ())
   in
   let declaration = function
-    | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ -> None
+    | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ | Ast.Const_assert _ -> None
     | Ast.Opaque { name; span; _ } -> Some (name, Top_type, span)
     | Ast.Enum { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Struct { name; name_span; _ } -> Some (name, Top_type, name_span)
@@ -1098,7 +1098,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
         List.concat_map (fun (_, body) -> loop_labels_in_block body) cases
         @ Option.fold ~none:[] ~some:loop_labels_in_block default
     | Ast.Let _ | Ast.View _ | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _
-    | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ ->
+    | Ast.Break _ | Ast.Continue _ | Ast.Expr_stmt _ | Ast.Fail _ | Ast.Const_assert_stmt _ ->
         []
   in
   let display_name name =
@@ -1219,6 +1219,13 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
         let* func = result |> trace_result specializations trace in
         add_func func;
         Ok ()
+    | Ast.Const_assert { cond; message; span } ->
+        (* a top-level `const assert` folds against the program's constants *)
+        let c =
+          make_context ~extra_consts:[] ~spec_depth:0 ~spec_trace:[] ~ret_ty:Hir.Void
+            ~fn_fails:false
+        in
+        Sema_check.check_const_assert c cond message span
     | _ -> Ok ()
   in
   let collected =

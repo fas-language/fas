@@ -47,7 +47,7 @@ let top_level_names items =
       | Ast.Func { name; name_span; _ } ->
           [ (name, name_span) ]
       | Ast.Error_decl { names; _ } -> List.map (fun (n, s, _) -> (n, s)) names
-      | Ast.Use _ | Ast.Pkg _ -> [])
+      | Ast.Use _ | Ast.Pkg _ | Ast.Const_assert _ -> [])
     items
 
 (* names a function body binds: parameters, `let`, `view`, `for const`,
@@ -81,7 +81,7 @@ and bound_in_stmt acc = function
       in
       bound_in_stmts (Option.fold ~none:acc ~some:(fun b -> b :: acc) binding) body
   | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _ | Ast.Break _ | Ast.Continue _
-  | Ast.Expr_stmt _ | Ast.Fail _ ->
+  | Ast.Expr_stmt _ | Ast.Fail _ | Ast.Const_assert_stmt _ ->
       acc
 
 let bound_in_item = function

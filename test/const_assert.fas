@@ -1,0 +1,37 @@
+// `const assert` (LANGUAGE.md "Compile-time assertions"): every assertion here
+// holds, at top level, as a statement, and in each specialisation of a generic;
+// main returns 0. The failing cases live in test/const_assert.sh.
+const N usize = 8
+const assert(N > 4, "N too small")
+const assert(sizeof[u64] == 8)
+const assert(N * 2 == 16 && alignof[u32] == 4)
+
+struct Arr[T, M const usize] { v arr[M, T] }
+
+fn first[T, M const usize](a handle[Arr[T, M]]) T {
+    const assert(M > 0, "empty array")
+    const assert(sizeof[Arr[T, M]] == M * sizeof[T])
+    return a.v[0]
+}
+
+// an assertion in a branch the const parameter drops is not checked there
+fn pick[K const usize]() usize {
+    if K > 0 {
+        const assert(K > 0)
+        return K
+    }
+    return 100
+}
+
+fn main() i32 {
+    const assert(N == 8)
+    a Arr[i32, 3] = {}
+    a.v[0] = 7
+    b Arr[u8, 1] = {}
+    b.v[0] = 9
+    got usize = pick[3]() + pick[0]()
+    if got != 103 { return 1 }
+    if first[i32, 3](handle_from_addr[Arr[i32, 3]](&a)) != 7 { return 2 }
+    if first[u8, 1](handle_from_addr[Arr[u8, 1]](&b)) != 9 { return 3 }
+    return 0
+}

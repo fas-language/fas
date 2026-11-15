@@ -487,7 +487,24 @@ let check_seed tmp seed =
                     close_out oc;
                     let ls, lo = run lexe (Filename.concat tmp "l.out") in
                     let ns, no = run nexe (Filename.concat tmp "n.out") in
-                    if ls = ns && lo = no then Same
+                    (* the interpreter is the third side: it must agree with
+                       LLVM too (Sys.command's status is the exit code) *)
+                    let interp =
+                      match Fir_interp.run_program ~step_limit:50_000_000 [ parse_module text ] with
+                      | r -> Ok (r.status, r.stdout)
+                      | exception Fir_interp.Error msg -> Error ("interpreter: " ^ msg)
+                      | exception e -> Error ("interpreter: " ^ Printexc.to_string e)
+                    in
+                    let interp_differs =
+                      match interp with
+                      | Ok (is, io) when is = ls && io = lo -> None
+                      | Ok (is, io) -> Some (Printf.sprintf "interpreter status %d, stdout %S" is io)
+                      | Error msg -> Some msg
+                    in
+                    if ls = ns && lo = no && interp_differs = None then Same
+                    else if ls = ns && lo = no then
+                      Differ (Printf.sprintf "llvm and native agree (status %d), %s (%s)" ls
+                                (Option.get interp_differs) (save ()))
                     else begin
                       (* keep both programs next to the module, for disassembly *)
                       let base = Filename.concat !keep (Printf.sprintf "fir_fuzz_%d" seed) in

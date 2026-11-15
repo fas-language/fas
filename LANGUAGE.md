@@ -315,6 +315,24 @@ fn main() i32 {
 }
 ```
 
+### Compile-time assertions
+
+`const assert(cond)` and `const assert(cond, "message")` check a `bool` at compile time, at top level or as a statement. The condition may use literals, constants, const and type generic parameters, and the layout queries `sizeof`, `alignof` and `offsetof`; at top level it may also call functions (see "Constants from calls"). A condition that does not fold to a constant is an error, never a runtime check. A false condition is the compile error `const assert failed: message`. The message must be a string literal.
+
+Inside a generic body the assertion is checked once per specialisation, and the error names the failing one (``note: while instantiating `first[i32, 0]` ``). In a branch that a const parameter drops from a specialisation (see "Generics") it is not checked for that specialisation.
+
+```fas
+const N usize = 8
+const assert(N > 4, "N too small")
+
+struct Arr[T, M const usize] { v arr[M, T] }
+
+fn first[T, M const usize](a handle[Arr[T, M]]) T {
+    const assert(M > 0, "empty array")
+    return a.v[0]
+}
+```
+
 ## Errors
 
 A function that can fail says so with `fails`, and every caller must handle the failure. Nothing is hidden: no exceptions, no unwinding, no allocation. An error travels in a register next to the result.
@@ -809,6 +827,31 @@ soup  15
 - An `addr` slot in a constant table may hold `c"..."`, a plain `"..."` (its bytes, no terminator: `const KW Bytes = {"if", len("if")}`), `null`, `&GLOBAL`, `&GLOBAL.field`, `&GLOBAL[k]`, or `&f` for any non-generic Fas function. A constant `addr` reads like any other: `P[u8, i]`. String bytes are read-only, and a write through them faults.
 - A `const` of struct type, an array of structs or nested arrays (`const GRID arr[2, arr[3, i32]] = {{1, 2, 3}, {4, 5, 6}}`) is read-only static data, whether or not it holds addresses. Index and read it at run time. `len` works in constants, but another constant's initializer cannot read its slots.
 - Globals are private to the program unless declared inside `extern "C" { }`.
+
+### Constants from calls
+
+A top-level scalar constant may call Fas functions: the compiler runs the call while compiling and stores the result like a literal. Its value can then size arrays, be a generic argument and appear in `const assert`, like any constant. A top-level `const assert` may call functions the same way.
+
+```fas
+fn fib(n i32) i32 {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+const F10 i32 = fib(10)                  // 55, computed while compiling
+const LEN usize = zext[usize](F10) * 2
+const assert(fib(7) == 13)
+
+fn main() i32 {
+    buf arr[LEN, u8] = {}
+    return F10 - 55
+}
+```
+
+- The type must be an integer, `bool`, float or enum; the called code may use locals, loops, arrays, structs, generics, recursion and other constants.
+- Each of these is a compile error at the constant: calling a C function, a system call, reading or writing a `var` global, a failed `assert` (the error quotes its message), a trap such as dividing by zero, a result that is NaN or infinite, and running for more than 10,000,000 steps. A `fails` call must be caught, as anywhere.
+- Constants may call functions that use other such constants; a constant whose functions use the constant itself is an error.
+- A `const assert` inside a function body cannot call functions yet.
 
 ## SIMD
 
@@ -1382,6 +1425,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `atomic_fence[o]()` | statement | |
 | **Checks** | `assert(cond)` `assert(cond, "msg")` | statement | always checked: a false `cond` writes `file:line: assertion failed: msg` to stderr and traps |
 | | `unreachable()` | statement | writes `file:line: reached unreachable()` and traps; may end a function |
+| | `const assert(cond)` `const assert(cond, "msg")` | statement or top-level item | checked at compile time: a false `cond` is the compile error `const assert failed: msg` |
 | **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
 | | `syscall[T fails](n, args...)` `syscall[fails](n, args...)` | `T` (`i64`, `u64`, `addr`) | as `syscall`, but a result in -4095..-1 is the errno error; needs `try` or `catch` |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |
