@@ -2,6 +2,8 @@
 
 Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
+**Version: Fir 0.1** (2026-11-15). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
+
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
 Contents:
@@ -20,6 +22,7 @@ Contents:
 12. Native backend support status
 13. The `fas-fir` tool
 14. In-memory representation (for the OCaml side)
+15. Designed syntax (not implemented yet)
 
 ---
 
@@ -29,7 +32,10 @@ Contents:
 - **Block parameters instead of phis.** A block lists typed parameters, and each edge into the block passes arguments for them. The entry block's parameters are the function's parameters.
 - **No aggregate values.** Structs and arrays exist only in memory: `alloca`, globals, `ptradd`, `load`, `store`. The front end computes layouts (sizes, alignments and field offsets). Calls are the one place aggregates appear, as ABI descriptions (§5).
 - **Integers have no signedness.** Each operation decides how to read the bits: `sdiv`/`udiv`, `slt`/`ult`, and so on.
-- **Target-neutral by design.** Only the triple names the target, and the current backend only supports `x86_64-unknown-linux-gnu`.
+- **Target-neutral in form, 64-bit little-endian in fact.** Only the triple names the target, and the current backend only supports `x86_64-unknown-linux-gnu`. Every front end in this project assumes a 64-bit little-endian target with 8-byte pointers, and that will not change. On a target whose division does not trap, a backend adds the check and the `trap` itself (§6).
+- **One function at a time.** No backend step needs another function's body to compile a function correctly; summaries of other functions (which registers a call clobbers, say) may be used when they are available. The output never depends on the order in which functions are compiled or on thread scheduling.
+- **No unwinding, ever.** Fir has no exceptions, `invoke` or landing pads. A call either returns, or never comes back to its frame (`noreturn`, `exit`, `longjmp`). Errors are ordinary values.
+- **Any control flow graph.** Critical edges and irreducible loops are legal, and there is no loop metadata.
 
 ## 2. Types
 
@@ -75,7 +81,7 @@ In text, named values are written `%name`. A name is bare `[A-Za-z0-9_.$]+` or q
 
 **A global's address is a typed constant.** Write `load i64 ptr @counter, align 8`, not `load i64 @counter`. A bare `@counter` gives the error "expected a type".
 
-Value ids are local to a function. The same constant written twice is the same value.
+Value ids are local to a function. Integer constants are interned by type and bits: the same constant written twice, in any spelling (`i8 -1` and `i8 0xff`), is the same value, and `--check` prints one canonical spelling.
 
 ## 4. Modules, globals, functions
 
@@ -127,7 +133,7 @@ global @environ size 8  align 8 global = extern
 
 - `local` symbols are file-private, like C `static`. `global` symbols are exported. `weak` symbols can be overridden at link time: a strong definition in another object wins, and every reference, including calls and loads in this module, reaches the winner. So a weak function is never inlined. A weak `extern` global or weak `declare` that nothing defines has address 0 (`ptrtoint` of it is 0), as with C's `__attribute__((weak))` declarations.
 - Visibility is the ELF `st_other` value: `hidden` symbols are not exported from the shared object or executable they end up in, `protected` ones are exported but not preemptible.
-- `readonly` places the global in .rodata.
+- `readonly` places the global in .rodata. Writing to a `readonly` global is undefined behaviour (natively it faults). Loads from it may be repeated or moved freely, since nothing changes it.
 - `section "s"` places it in section `s` instead of .data/.rodata/.bss. Such a global is always emitted, even when nothing in the module refers to it: it may be found through the section alone (a registry between `__start_s` and `__stop_s`).
 - `thread_local` places it in .tdata/.tbss. Its address (`ptr @errno`) is per-thread, so it is not a link-time constant: it cannot appear in an initializer (`reloc`).
 - **Verifier rules:**
@@ -172,7 +178,10 @@ ATTRS ::= any of: inline noinline cold noreturn
 - **Each block is a label, then zero or more instructions, then exactly one terminator.**
 - **Labels** are written `^name`. A block with no parameters is written `^name:`, and one with parameters `^name(%x: i64, %y: ptr):`.
 - **Any instruction or terminator may end with `!loc N`**, where N is an id from the `loc` table.
-- **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block. Unreachable blocks are not checked.
+- **Every block is reachable from the entry block** along terminator edges (`indirect_br` lists and `asm_goto` labels count). The verifier refuses a block that no path reaches, so a front end drops the code after a `return` and the join block of an `if` or `match` whose arms all return. A label whose address is taken (`blockaddr`) must also be reached, through an `indirect_br` that lists it.
+- **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block.
+- **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
+- **`blockaddr` pins blocks.** A function whose blocks appear in a `blockaddr` keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations.
 
 ### Debug information
 
@@ -192,7 +201,7 @@ Source variables and their types are module metadata that only `-g` reads. Nothi
   | `enum "NAME" BASE {"A" 0, ...}` | An enumeration with underlying type `BASE`. |
 
 - **`scope N parent P`** declares a lexical block. Ids are consecutive from 1 and `P` is smaller than `N` (0 is the function itself). A `loc` names its innermost scope with `!scope S`; the code at that location belongs to that block. All the locations and variables that name a scope, or a scope inside it, must belong to one function. A scope with no code is dropped and its variables move to the enclosing one.
-- **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. Passes that rewrite functions keep each variable and its home.
+- **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. A `dbg_value` holds from that point along every path until the next `dbg_value` of the same variable. Where paths with different values meet, the variable is unknown (shown as optimized out) unless a `dbg_value` names the joining block's parameter. Passes that rewrite functions keep each variable and its home.
 - **No name in the debug information may contain a NUL byte** (`\00`): not a `loc` file name, a `dtype` name, member or enumerator, a `var` name, or a function's `display` name. DWARF ends these strings with a NUL, so the verifier refuses them.
 
 ## 5. Signatures and the ABI
@@ -253,7 +262,7 @@ Text form: `%r = OPCODE [FLAGS] RESULT_TYPE operands...`. An instruction with no
 | Text | Meaning | Flags |
 |---|---|---|
 | `add sub mul ty a, b` | Wrapping arithmetic. | `nsw nuw`: overflow makes the result poison |
-| `udiv sdiv urem srem ty a, b` | Division. Dividing by 0 is UB, and so is `sdiv/srem MIN, -1`. | `exact` (udiv/sdiv): a nonzero remainder makes the result poison |
+| `udiv sdiv urem srem ty a, b` | Division, truncating toward zero; a remainder has the sign of the dividend. Dividing by 0 is UB, and so is `sdiv/srem MIN, -1`, unless the instruction has the `trap` flag (*designed*, §15), which makes both trap. | `exact` (udiv/sdiv): a nonzero remainder makes the result poison |
 | `shl lshr ashr ty a, b` | Shifts. A shift amount ≥ the width gives poison. | `nsw nuw` (shl), `exact` (lshr, ashr) |
 | `and or xor ty a, b` | Bitwise operations. | `disjoint` (or): the operands share no set bits |
 | `smin smax umin umax ty a, b` | Minimum and maximum. | |
@@ -280,7 +289,18 @@ Flags are written right after the opcode: `add nsw i32 %a, %b`. The verifier rej
 
 All of these allow the flags `contract` (may be fused into an FMA) and `fast`.
 
-**The floating-point environment (native backend).** Every float operation and every conversion between floats and integers, of any width, rounds in the current dynamic rounding mode (C `fesetround`) and raises the IEEE exception flags the operation itself raises, as C with `#pragma STDC FENV_ACCESS ON` and Annex F expects: inexact, overflow, underflow (for an inexact tiny result, tininess detected after rounding, as x86 does), invalid (also for a signaling NaN operand) and divide-by-zero. This holds for the software paths too: `f16` arithmetic and conversions, `fma` at every width, and the `Fir_wide` integer conversions. `floor ceil ftrunc roundeven` ignore the mode and raise no inexact (as C's functions; invalid only for a signaling NaN). An out-of-range `fptosi`/`fptoui` raises invalid (its result is still poison, §8). Not guaranteed: an operation whose result is unused may be removed, so a front end that needs the flags of a computation keeps its result alive (a `volatile` store, for example). The LLVM path (`--llvm`) gives none of this yet: it emits ordinary (not strictfp) operations, which LLVM may fold, move or lower with other flags.
+**The floating-point environment.** By default a function runs in the default environment: every operation rounds to nearest, ties to even, with one rounding per operation, and the IEEE exception flags are not observable. A backend may therefore fold, merge, move or delete float operations, as long as each result is the one that environment gives. It may not:
+- contract `a*b+c` into one rounding, unless the instructions carry `contract` or `fast` (Fas never emits either);
+- flush subnormal inputs or results to zero;
+- ignore the sign of zero: `x + 0.0` is not `x` (for `x = -0.0`), while `x + -0.0` is.
+
+Changing the rounding mode underneath such a function is not undefined behaviour: each operation then rounds in the current mode or to nearest, and which one is unspecified. Floating-point traps (unmasked exceptions) are not supported.
+
+A function marked `fenv` (*designed*, §15; C's `#pragma STDC FENV_ACCESS ON`) sees the dynamic environment instead. Every float operation and every conversion between floats and integers, of any width, rounds in the current dynamic rounding mode (C `fesetround`) and raises the IEEE exception flags the operation itself raises, as C with Annex F expects: inexact, overflow, underflow (for an inexact tiny result, tininess detected after rounding, as x86 does), invalid (also for a signaling NaN operand) and divide-by-zero. `floor ceil ftrunc roundeven` ignore the mode and raise no inexact (as C's functions; invalid only for a signaling NaN). An out-of-range `fptosi`/`fptoui` raises invalid (its result is still poison, §8). An operation whose result is unused may still be removed, so a front end that needs the flags of a computation keeps its result alive (a `volatile` store, for example). A function is never inlined into another with a different `fenv` marking, in either direction.
+
+**NaNs.** A NaN computed by an operation has an unspecified payload and sign. `fneg`, `fabs` and `copysign` are exact bit operations, as are loads, stores, `select`, `bitcast` and block arguments: they keep a NaN's bits.
+
+**What the backends do today.** The native backend gives every function the `fenv` behaviour, which the default allows. That includes the software paths: `f16` arithmetic and conversions, `fma` at every width, and the `Fir_wide` integer conversions. The LLVM path (`--llvm`) emits ordinary (not strictfp) operations, which matches the default but not `fenv`.
 
 ### Comparison, selection, conversion
 
@@ -304,13 +324,13 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 
 | Text | Meaning |
 |---|---|
-| `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`, or a variable (`%n`, any integer type, read as unsigned). Put constant-size allocas in the entry block. Memory from an alloca lives until the function returns, or until a `stackrestore` to a point before it. |
+| `%p = alloca ptr SIZE, align A` | Stack memory of `SIZE` bytes, where SIZE is an integer value such as `i64 16`, or a variable (`%n`, any integer type, read as unsigned). A constant-size alloca must be in the entry block (verified); only a variable-size one may appear elsewhere. Memory from an alloca lives until the function returns, or until a `stackrestore` to a point before it. Its bytes start out fixed but arbitrary (§8). |
 | `%s = stacksave` | The current stack position, as a `ptr` for `stackrestore`. Its value is only good for that. |
 | `stackrestore S` | Frees every alloca made since the `stacksave` that produced S. Use the pair around a scope that holds variable-size allocas (C VLAs), above all inside loops, where otherwise each iteration grows the stack. |
 | `lifetime_start N, %p` / `lifetime_end N, %p` | The N bytes of the alloca `%p` start or stop being live: a hint for address sanitizers (no Fas front end emits them today; the LLVM path turns them into `llvm.lifetime.*`). Never changes what the program does; the native backend ignores them. |
 | `%x = load ty P, MEM` | Load a `ty` from pointer P. |
 | `store V, P, MEM` | Store V at P. No type is written, because V carries it. |
-| `%q = ptradd [inbounds] ptr P, IDX, SCALE, DISP` | Address arithmetic: P + IDX·SCALE + DISP. IDX is an integer value (read as signed; use i64), and SCALE and DISP are literal integers. For a constant offset write `ptradd ptr %p, i64 0, 1, 24`. |
+| `%q = ptradd [inbounds] ptr P, IDX, SCALE, DISP` | Address arithmetic: P + IDX·SCALE + DISP, wrapping at 2^64. IDX is an integer value (read as signed; use i64), and SCALE and DISP are literal integers. For a constant offset write `ptradd ptr %p, i64 0, 1, 24`. `inbounds` promises only that P + IDX·SCALE + DISP, computed exactly, stays inside 0..2^64−1 (no wrap); if it does not, the result is poison. It says nothing about which object the result points into. |
 | `memcpy [volatile] D, S, N` | Copy N bytes; the regions must not overlap. N is an integer value. |
 | `memmove [volatile] D, S, N` | Copy N bytes; the regions may overlap. |
 | `memset [volatile] D, BYTE, N` | Fill N bytes. BYTE is an `i8`. |
@@ -320,11 +340,11 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 
 `MEM` is written as `align A [volatile] [ORDERING] [!alias N] [!noalias [N, ...]]`:
 
-- `ORDERING` is one of `relaxed acquire release acq_rel seq_cst`. When it is omitted, the access is plain and not atomic.
+- `ORDERING` is one of `relaxed acquire release acq_rel seq_cst`, with C11's meaning. There is no `consume` (use `acquire`) and no `unordered` (a plain access already never tears, §8). When it is omitted, the access is plain and not atomic.
 - A load can't have `release` or `acq_rel`, and a store can't have `acquire` or `acq_rel`.
 - `!alias N` refers to an `alias_tag` (type-based aliasing). `!noalias` lists scopes; C `restrict` maps here. Both are optional hints, and you can leave them out.
 
-Alignment is a power of two. It is a promise about the address, so writing `align 1` is always safe.
+Alignment is a power of two. It is a promise about the address: an access whose address is not a multiple of its `align` is undefined behaviour, so writing `align 1` is always safe. An atomic access with a small enough `align` may still land on an address that is not a multiple of its size. It is then performed, but it is atomic only if the hardware makes it so (on x86-64 a split lock may be very slow, or fault when the kernel enables split-lock detection); it is not undefined behaviour.
 
 ### Vectors
 
@@ -351,11 +371,11 @@ Alignment is a power of two. It is a promise about the address, so writing `alig
 | `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P` | Reads the next unnamed argument as a struct by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
 | `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). x87, MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
-| `dbg_value VAR, V` | Debug info: the function's VAR-th `var` (1-based, one without `at`) currently holds V. It has no effect on semantics. |
+| `dbg_value VAR, V` | Debug info: the function's VAR-th `var` (1-based, one without `at`) holds V from here on (§4, "Debug information"). It has no effect on semantics. |
 
 Call ATTRS are any of `noreturn returns_twice nounwind tail`.
 
-`returns_twice` marks a call to a function that can return more than once, such as `setjmp` (call glibc's `_setjmp`, which does not save the signal mask, or `__sigsetjmp`) or `vfork`. When it returns again, every value the function computed before the call still holds what it held at the call, whatever ran in between. Memory gets no such guarantee: as in C, a function-local object written between the call and the `longjmp` must be accessed with `volatile` loads and stores, or its contents are undefined afterwards (the backends may keep a local that does not escape in a register).
+`returns_twice` marks a call to a function that can return more than once, such as `setjmp` (call glibc's `_setjmp`, which does not save the signal mask, or `__sigsetjmp`) or `vfork`. When it returns again, every value the function computed before the call still holds what it held at the call, whatever ran in between. Memory gets no such guarantee: as in C, a function-local object written between the call and the `longjmp` must be accessed with `volatile` loads and stores, or what it holds afterwards is unspecified: the value at the call or a later one (the backends may keep a local that does not escape in a register).
 
 **The `va_list`** is the x86-64 SysV one, 24 bytes with align 8, and the front end allocates it:
 - **Layout:** `{ u32 gp_offset; u32 fp_offset; ptr overflow_arg_area; ptr reg_save_area }`. It is the same as C's `va_list`, so a C function can hand its `va_list` to a Fir function (which takes it as a `ptr`) and the reverse.
@@ -380,26 +400,68 @@ Every block ends with exactly one terminator.
 
 Block arguments must match the target's parameters in number and type. No branch may target the entry block.
 
-## 8. Undefined behaviour and poison
+## 8. Undefined behaviour, poison and memory
 
-- **Poison** is the only undefined value. Any operation with a poison operand produces poison, with two exceptions:
+Unflagged Fir is fully defined apart from the memory errors and the division cases listed at the end. The rules for passes in this section are part of the contract: a backend or optimizer that breaks one is wrong, even when the program can't tell in most runs.
+
+### Poison
+
+- **Poison** is the only undefined value. There is no `undef`. Any operation with a poison operand produces poison, with two exceptions:
   - `select` on its unchosen arm;
   - `freeze`.
-- **Turning poison into UB:** the following are undefined behaviour:
-  - branching on poison;
-  - using poison as an address;
-  - dividing by poison;
-  - storing poison and later reading it as anything other than poison.
 - **These produce poison:**
-  - violating a flag (`nsw`, `nuw`, `exact`, `disjoint`, `zero_poison`, `poison_min`);
+  - violating a flag (`nsw`, `nuw`, `exact`, `disjoint`, `zero_poison`, `poison_min`, `inbounds`);
   - a shift amount at or above the width;
-  - converting an out-of-range float with plain `fptosi`/`fptoui`.
-- **These are UB directly:**
-  - dividing by zero, or `sdiv MIN, -1`;
-  - loading or storing through an invalid or misaligned pointer;
-  - a data race on a non-atomic access;
-  - reaching `unreachable`.
-- **Mapping C's UB:** C's signed overflow becomes `add nsw`, which is allowed but not required. Unsigned arithmetic uses plain `add`. If you don't want to rely on UB, never set the flags: unflagged Fir is fully defined apart from division and memory errors.
+  - converting an out-of-range float with plain `fptosi`/`fptoui`;
+  - a `-1` entry in a `shuffle` mask (that lane);
+  - violating any future value hint (a range, non-null or dereferenceable mark): hints give poison, never undefined behaviour.
+- **Poison in memory is per byte.** Storing poison makes exactly the bytes stored poison. A load that reads any poison byte gives poison. Only an explicit store of a poison value puts poison in memory.
+- **Turning poison into UB:** the following are undefined behaviour:
+  - branching on poison (`br`, `switch`, `indirect_br`);
+  - using poison as an address or a call target;
+  - dividing by poison.
+
+### Memory
+
+- **Fresh memory holds fixed bytes.** The bytes of a new alloca, of struct padding, and of memory that comes from outside Fir (`mmap`, a C allocator) are arbitrary but fixed: every read of such a byte returns the same value until the next store to it. They are never poison and reading them is never undefined behaviour. So two loads of it may be merged, and an optimizer may pick any value for it, zero included, as long as it picks one.
+- **A pointer is an address.** `ptrtoint` and `inttoptr` are free and lossless, pointer bytes in memory are integers, and two pointers that compare equal can be used for each other. Memory has no types: reading bytes as another type than the one stored reinterprets the bits (§2). Without `!alias` tags no access is assumed apart from another because of its type.
+- **The one aliasing rule: non-escaped objects.** An alloca, or a `local` global, *escapes* when its address, or a `ptradd` of it, is stored to memory, passed to a call (`syscall` and `asm` included), returned, converted by `ptrtoint`, or used in a block argument, `select` or comparison whose result escapes. Accessing an object that has not escaped through a pointer that does not derive from its address is undefined behaviour. So a backend may keep such an object in registers, and assume that calls and stores through unrelated pointers leave it alone.
+- **Data races are defined.** Two accesses race when they touch the same byte from different threads, at least one writes, at least one is not atomic, and no atomic ordering puts one before the other. A race is not undefined behaviour:
+  - a racing plain load returns, for each byte, a value that some store wrote there (or the fresh byte); never poison;
+  - an aligned plain load or store of a scalar of 8 bytes or less (an integer, float or `ptr`) never tears: it sees or writes the whole value at once. Wider scalars, vectors, `memcpy` and misaligned accesses may mix bytes from different stores;
+  - plain accesses give no ordering: only atomics and `fence` order memory between threads (C11's model).
+- **Misaligned access:** an access whose address breaks its `align` promise is undefined behaviour (§6). A misaligned atomic is the exception described in §6.
+- **Writing a `readonly` global** is undefined behaviour.
+
+**Rules for passes.** Each follows from the race rule above and holds for every pass, all of Fir, C front ends included:
+
+- Never invent a store: no store on a path that had none, no speculated store, no store widened over neighbouring bytes (write back only the bytes the program writes).
+- Each load in the program reads memory at most once. Two loads of the same location may be merged, and a load may be hoisted out of a loop that is sure to run it. A load is never *rematerialised*: once its value is in a register, it is not loaded again from mutable memory to save a register. A load from a `readonly` global is exempt.
+- Never speculate a load: do not move a load onto a path that did not execute it, unless it reads a non-escaped object or a `readonly` global.
+- Never split an aligned plain access of a scalar of 8 bytes or less into smaller ones.
+- A loop that busy-waits on memory another thread writes must use an atomic load; a plain load in it may be hoisted out of the loop.
+
+Store-to-load forwarding, merging equal loads, removing dead stores to non-escaped objects, and keeping a location in a register across a loop that already stores to it on every iteration are all allowed.
+
+### Control and the stack
+
+- **Infinite loops are defined.** There is no forward-progress assumption: a loop without side effects may be deleted only once its trip count is proven finite.
+- **No unwinding** (§1). Nothing in Fir unwinds a frame, so no instruction has an exceptional edge.
+- **Running out of stack is an implementation limit, not undefined behaviour.** The program faults on the guard page. How much stack a function uses is not part of the contract: a backend may inline and so grow frames.
+- **`trap` and trapping division** end the program with a hardware exception; which signal is unspecified (`ud2` gives `SIGILL`, a division trap `SIGFPE`).
+
+### Undefined behaviour, the complete list
+
+- dividing by zero, or `sdiv`/`srem` of MIN by -1, without the `trap` flag;
+- branching on, dividing by, or using as an address or call target, a poison value;
+- loading or storing through an address that holds no live object, or that breaks the access's `align` promise;
+- accessing a non-escaped object through a pointer not derived from it;
+- writing a `readonly` global, or the bytes of an `agg` parameter (§5);
+- calling a function with a signature other than the one it is defined with (beyond the variadic part);
+- reaching `unreachable`;
+- breaking a promise in a function or `declare` attribute (`noreturn`, and the designed `memory(...)` and `willreturn`, §15).
+
+**Mapping C's UB:** C's signed overflow becomes `add nsw`, which is allowed but not required. Unsigned arithmetic uses plain `add`. If you don't want to rely on UB, never set the flags.
 
 ## 9. Text format reference
 
@@ -544,8 +606,8 @@ Each C23 feature that needs code generation maps to Fir as follows. The test tha
 | `_BitInt(N)`, `unsigned _BitInt(N)` | `iN`, any N up to 2^23 - 1, all integer ops (`Fir_wide` splits the wide ones). ABI as §5: up to 128 bits like `__int128`, wider in memory. | `wide`, `huge` |
 | `ckd_add`, `ckd_sub`, `ckd_mul` (`<stdckdint.h>`), mixed operand and result types | Extend both operands to an integer one bit wider than the widest of the three types' ranges needs (`i129` covers every standard type), do the op, `trunc` to the result type, extend back and `icmp eq` with the wide value; the overflow flag is the negation. Same-type signed cases may use `sadd_ovf` & co. instead. | `c23` |
 | `<stdbit.h>` (`stdc_leading_zeros`, `_ones`, `trailing_*`, `first_*`, `count_*`, `has_single_bit`, `bit_width`, `bit_floor`, `bit_ceil`) | `clz`, `ctz`, `popcnt` (without `zero_poison`, so 0 gives the width), `xor` with all ones for the `_ones` forms, `shl` for `bit_floor`/`bit_ceil`. | `c23` |
-| `#pragma STDC FENV_ACCESS ON`, `<fenv.h>` | Nothing: every float op and conversion honours the dynamic rounding mode and raises the flags (§6). Call glibc's `fesetround`, `fetestexcept` & co. | `fenv` |
-| `#pragma STDC FENV_ROUND dir` | Save the mode with `fegetround`, `fesetround(dir)` at the start of the block, restore on every exit from it (as the VLA `stacksave`/`stackrestore` pair). | `fenv` (the ops in each mode) |
+| `#pragma STDC FENV_ACCESS ON`, `<fenv.h>` | Mark every function compiled under the pragma `fenv` (§6; *designed*: until the parser takes it, the native backend gives every function this behaviour). Call glibc's `fesetround`, `fetestexcept` & co. | `fenv` |
+| `#pragma STDC FENV_ROUND dir` | In an `fenv` function: save the mode with `fegetround`, `fesetround(dir)` at the start of the block, restore on every exit from it (as the VLA `stacksave`/`stackrestore` pair). | `fenv` (the ops in each mode) |
 | `_Float16` | `f16` (software arithmetic, SSE ABI). | `f16` |
 | `long double` | `f80` (x87). | `f80` |
 | `_Complex` | Pairs of scalars in memory; ABI as `agg` (§5). | `aggabi` |
@@ -627,6 +689,21 @@ Each function holds dense tables (`fir.ml`):
 
 Debug metadata sits next to the code: the module holds `dtypes`, `scopes` (each scope's parent) and `loc_scopes` (location → scope), and each function a `vars` list whose `home` is the slot value.
 
-Replace-all-uses is O(1) through `Alias` definitions, which readers resolve and `compact` removes. Use lists, dominators (`fir_dom.ml`) and loops are computed on demand. Nothing is global, so functions can be compiled independently.
+Replace-all-uses is O(1) through `Alias` definitions, which readers resolve and `compact` removes. Use lists, dominators (`fir_dom.ml`) and loops are computed on demand. Nothing is global, so functions can be compiled independently. Blocks are numbered densely; `Fir.remove_unreachable_blocks` renumbers them after a pass disconnects some (never in a function whose blocks a `blockaddr` pins).
+
+This layout is the OCaml compiler's, not part of the contract. The self-hosted compiler keeps Fir in memory in its own form (dense 32-bit ids, interned constants, enum opcodes with flag bit sets, flat operand arrays, edges as objects that carry their arguments, a forwarding table for replace-all-uses, no use lists unless a pass builds them) and hands it from the front end to the backend without going through text. The text format is for tools, tests and other front ends; nothing in this file requires a compiler to print and parse it.
 
 Both backends read Fir: the native backend (`src/backend/mir`) and the LLVM backend (`Fir_llvm`, which renders LLVM text). Both follow the C calling convention of §5 with one classifier (`Fir_abi`): the LLVM backend passes an agg in registers as one LLVM argument per eightbyte, an agg in memory as a `byval` pointer and an agg result in memory through `sret`, and it reads `va_arg` of an agg, a vector or an `i128` from the `va_list` itself. It also spells out what LLVM 22 cannot do or gets wrong: funnel shifts, saturating float conversions and integer-to-float conversions on integers wider than 128 bits, and the zero-extension of odd-width stores (§2). Before v0.6 Fas emitted an older LLVM-shaped `Ir` that `Fir_of_ir` converted; that IR and both converters are deleted. `fas --emit-ir` prints a Fas program's Fir text.
+
+## 15. Designed syntax (not implemented yet)
+
+These forms are fixed now so that front ends and passes can plan for them. Until the parser accepts one, using it is a parse error. The roadmap version that implements each is in brackets.
+
+| Form | Meaning |
+|---|---|
+| `func @f ... fenv` [v0.5] | A function attribute, next to `inline noinline cold noreturn`: the function sees the dynamic float environment (§6). Never inlined into a function with a different marking, nor the reverse. |
+| `udiv trap ty a, b` (also `sdiv urem srem`) [v0.3] | Division that traps on a zero divisor, and for `sdiv`/`srem` on MIN / -1, exactly where the instruction stands. Such a division is never deleted when its result is unused, and never hoisted or speculated onto a path that did not run it. Merging two equal ones is fine. A pass that proves the divisor safe may drop the flag; folding a division by a constant zero leaves a `trap` in its place. Fas emits every division this way. |
+| `switch V, ^d(ARGS), [K: ^b(ARGS), ...], weights [Wd, W1, ...]` [v0.6] | Edge weights for a `switch`: one non-negative integer per edge, default first, then the cases in order, read relative to their sum. With `br ..., weight W` and the `cold` attribute, this is all the profile information Fir carries. |
+| `declare @f SIG LINKAGE [memory(none\|read\|argmem)] [willreturn]` [v0.6] | Promises about a function defined elsewhere, so that a call to it need not be a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). |
+| `memcpy D, S, N, align A` (also `memmove`, `memset`) [later] | Both addresses are multiples of A, as the `align` of a load or store promises. Optional; the default is 1. |
+| `scope N parent P inlined "NAME" [linkage "SYM"] decl L call C` [before the optimizer] | An inlined copy of a function, for the debugger (DWARF `DW_TAG_inlined_subroutine`). `NAME` and `SYM` are the callee's source and symbol names, `L` the `loc` of its declaration, and `C` the `loc` of the call that was inlined. Code whose `loc` names scope N, or a scope inside it, belongs to that copy; the callee's variables become `var` lines with `scope N` (and `arg K` for its parameters). Copies of one callee share `SYM`. A front end never writes these; the inliner does. |

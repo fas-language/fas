@@ -81,6 +81,12 @@ let verify_func (f : func) =
     let c = Fir_dom.cfg f in
     let d = Fir_dom.dominators c in
     if c.pred_start.(1) - c.pred_start.(0) > 0 then err "the entry block has predecessors";
+    (* SPEC §4: every block is reachable from the entry along terminator
+       edges (indirect_br lists and asm_goto labels included), so no later
+       pass has to handle code that cannot run *)
+    for b = 0 to c.nblocks - 1 do
+      if not (Fir_dom.reachable d b) then err "^%d is not reachable from the entry block" b
+    done;
     (* a use of value [v] in block [b] at position [pos] (max_int = terminator) *)
     let check_use where b pos v =
       if v < 0 || v >= nv then err "%s: value id %d out of range" where v
@@ -227,6 +233,11 @@ let verify_func (f : func) =
                 end
             | Alloca (n, al) ->
                 want 1;
+                (* SPEC §6: a constant-size alloca lives in the entry block;
+                   only a variable-size one (a C VLA) may appear elsewhere *)
+                (match def_of f (resolve f n) with
+                | Const _ when b <> entry -> err "%s: a constant-size alloca must be in the entry block" where
+                | _ -> ());
                 if not (is_int (ty n)) then err "%s: alloca size is %s" where (tys n);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: alloca must produce a pointer" where;
                 if al <= 0 || al land (al - 1) <> 0 then err "%s: alignment %d is not a power of two" where al

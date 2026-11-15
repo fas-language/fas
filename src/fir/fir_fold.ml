@@ -236,4 +236,15 @@ let fold_func f =
   drop_params f;
   drop_nops f
 
-let run (m : modul) = Vec.iter (fun f -> if f.defined then fold_func f) m.funcs
+(* Folding empties the blocks it disconnects; they are then removed, since
+   SPEC §4 requires every block to be reachable. Fas never takes block
+   addresses, but a function whose blocks are pinned by a [blockaddr] is left
+   alone all the same. *)
+let run (m : modul) =
+  Vec.iter
+    (fun f ->
+      if f.defined && not (blocks_pinned m f) then begin
+        fold_func f;
+        ignore (remove_unreachable_blocks f)
+      end)
+    m.funcs

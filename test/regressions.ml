@@ -2981,7 +2981,7 @@ let () =
     List.length (positions multi_switch_llvm "switch i32") <> 1
     || not
          (contains multi_switch_llvm
-            "label %b3 [i32 1, label %b2 i32 2, label %b2]")
+            "label %b2 [i32 1, label %b1 i32 2, label %b1]")
   then failwith "switch-multiple-case-values: expected one switch to a shared arm";
   semantic_error "switch-nonconst-case" "case label must be a compile-time constant"
     "fn f(x i32, y i32) i32 { switch x { case y: return 1 } return 0 }\n";

@@ -766,6 +766,65 @@ let resolve_all f =
   Vec.iter (fun (ir : inst_rec) -> ir.op <- map_op_uses r ir.op) f.insts;
   Vec.iter (fun (b : block_rec) -> b.term <- map_term_uses r b.term) f.blocks
 
+(* True when a [blockaddr] names one of [f]'s blocks: in its own constants,
+   another function's, or a global initializer. Such a function's blocks are
+   pinned (SPEC §4): their numbers are part of the program. *)
+let blocks_pinned (m : modul) (f : func) =
+  Vec.fold
+    (fun acc (g : func) ->
+      acc || Hashtbl.fold (fun c _ acc -> acc || match c with Cblockaddr (fn, _) -> fn = f.name | _ -> false) g.consts false)
+    false m.funcs
+  || Vec.fold
+       (fun acc (g : global) ->
+         acc
+         || match g.init with
+            | Some pieces -> List.exists (function Blockref { fn; _ } -> fn = f.name | _ -> false) pieces
+            | None -> false)
+       false m.globals
+
+(* Removes the blocks that no path from the entry reaches (SPEC §4 requires
+   every block to be reachable) and renumbers the rest in their order. The
+   parameters of a removed block become [Unset]; nothing reachable can use
+   them, since a reachable use needs a dominating definition. The caller
+   makes sure no [blockaddr] names [f]'s blocks ([blocks_pinned]). Returns
+   whether anything was removed. *)
+let remove_unreachable_blocks f =
+  let n = Vec.length f.blocks in
+  let seen = Array.make n false in
+  let rec visit b =
+    if not seen.(b) then begin
+      seen.(b) <- true;
+      List.iter visit (successors (Vec.get f.blocks b).term)
+    end
+  in
+  if n > 0 then visit 0;
+  if Array.for_all Fun.id seen then false
+  else begin
+    let renum = Array.make n (-1) and next = ref 0 in
+    Array.iteri (fun b live -> if live then (renum.(b) <- !next; incr next)) seen;
+    let old = Vec.to_array f.blocks in
+    Vec.clear f.blocks;
+    Array.iteri
+      (fun b (br : block_rec) ->
+        if seen.(b) then ignore (Vec.push f.blocks br)
+        else Array.iter (fun p -> Vec.set f.defs p Unset) br.params)
+      old;
+    let t (x : target) = { x with dest = renum.(x.dest) } in
+    Vec.iteri
+      (fun b (br : block_rec) ->
+        Array.iteri (fun k p -> Vec.set f.defs p (Param (b, k))) br.params;
+        br.term <-
+          (match br.term with
+          | Jump x -> Jump (t x)
+          | Br (c, x, y, w) -> Br (c, t x, t y, w)
+          | Switch (v, d, cases) -> Switch (v, t d, Array.map (fun (k, x) -> (k, t x)) cases)
+          | Indirect_br (v, bs) -> Indirect_br (v, Array.map (fun b -> renum.(b)) bs)
+          | Asm_goto a -> Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
+          | (Ret _ | Unreachable) as term -> term))
+      f.blocks;
+    true
+  end
+
 (* Removes [Nop]s from blocks *)
 let drop_nops f =
   Vec.iter

@@ -3713,6 +3713,10 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
   let* () =
     Result_list.iter (global_storage mc p.structs) (p.globals @ List.rev !literal_globals)
   in
+  (* bug #24: lowering may leave join blocks no path reaches (a `match`
+     whose arms all return); SPEC §4 requires every block to be reachable.
+     Fas never takes block addresses, so no block number is pinned. *)
+  Fir.Vec.iter (fun (f : Fir.func) -> if f.defined then ignore (Fir.remove_unreachable_blocks f)) mc.m.funcs;
   match Fir_verify.verify mc.m with
   | [] -> Ok mc.m
   | errors -> error Span.synthetic ("internal error: invalid Fir:\n" ^ String.concat "\n" errors)
