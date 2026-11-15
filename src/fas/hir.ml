@@ -93,6 +93,8 @@ type atomic_op =
 
 type atomic_ordering = Relaxed | Acquire | Release | Acq_rel | Seq_cst
 
+type checked = Checked_add | Checked_sub | Checked_mul | Checked_trunc
+
 type builtin =
   | Atomic of atomic_op * atomic_ordering * ty
   | Rotl
@@ -141,6 +143,10 @@ type builtin =
      (an interned string of [length] bytes) to stderr, then trap. `assert`
      and `unreachable()` (cond `false`) *)
   | Assert
+  (* `fails` builtins: the exact result, or the error `Overflow` when it does
+     not fit the call's type. [a; b] for add/sub/mul, [x] for trunc (the
+     call's type is the target) *)
+  | Checked of checked
 
 type call_target = User of string | Builtin of builtin
 

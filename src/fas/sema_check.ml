@@ -3575,6 +3575,10 @@ and callee_fails c fn =
     | _ -> false
   in
   match fn with
+  | Ast.Ident ((("checked_add" | "checked_sub" | "checked_mul" | "checked_trunc") as name), _)
+  | Ast.Generic_args (Ast.Ident (("checked_trunc" as name), _), _, _)
+    when Option.is_none (lookup_local name c) ->
+      true
   | Ast.Ident (name, _) when Option.is_none (lookup_local name c) -> (
       match List.assoc_opt name c.signatures with
       | Some (signature : Sema_context.signature) -> signature.fails
@@ -3607,6 +3611,67 @@ and check_handled_call c expected keyword call =
 
 and check_call_inner c expected fn args s =
   match fn with
+  (* `checked_add(a, b)`, `checked_sub`, `checked_mul`: one integer type,
+     failing with `Overflow` when the exact result does not fit it. Untyped
+     literal operands take the type from context, as for `add_sat` *)
+  | Ast.Ident ((("checked_add" | "checked_sub" | "checked_mul") as name), _)
+    when Option.is_none (lookup_local name c) -> (
+      match args with
+      | [ x; y ] -> (
+          let expected =
+            match expected with Some (Hir.Int _) -> expected | _ -> None
+          in
+          let* a, b = check_same_operands ?expected c x y in
+          let op =
+            match name with
+            | "checked_add" -> Hir.Checked_add
+            | "checked_sub" -> Hir.Checked_sub
+            | _ -> Hir.Checked_mul
+          in
+          match (Hir.expr_ty a, Hir.expr_ty b) with
+          | (Hir.Int _ as t), t' when t = t' ->
+              Ok (Hir.Call (Hir.Builtin (Hir.Checked op), [ a; b ], t, s))
+          | (Hir.Int _ as t), t' ->
+              error (Ast.expr_span y)
+                (Printf.sprintf "argument 2 of `%s` is `%s`, expected `%s`" name
+                   (Sema_types.diagnostic_ty_name t')
+                   (Sema_types.diagnostic_ty_name t))
+          | t, _ ->
+              error (Ast.expr_span x)
+                (Printf.sprintf "`%s` needs an integer, got `%s`" name
+                   (Sema_types.diagnostic_ty_name t)))
+      | _ -> error s (Printf.sprintf "builtin `%s` expects two arguments" name))
+  (* `checked_trunc[T](x)`: the integer x as the integer type T, failing with
+     `Overflow` when its value is out of T's range (any two integer types:
+     narrowing, a change of sign, or widening, which always fits unless a
+     negative value goes to an unsigned type) *)
+  | Ast.Generic_args (Ast.Ident ("checked_trunc", _), generic_args, application_span)
+    when Option.is_none (lookup_local "checked_trunc" c) -> (
+      let* target =
+        match generic_args with
+        | [ (Ast.Type_arg source | Ast.Type_or_index source) ] ->
+            source_ty_in_context c application_span source
+        | [ Ast.Name_arg (name, name_span) ] ->
+            source_ty_in_context c name_span (Ast.Named_type (name, name_span))
+        | _ -> error application_span "checked_trunc takes one type: checked_trunc[T](x)"
+      in
+      match (target, args) with
+      | Hir.Int _, [ x ] -> (
+          let* a = check_expr c None x in
+          match Hir.expr_ty a with
+          | Hir.Int _ ->
+              Ok (Hir.Call (Hir.Builtin (Hir.Checked Hir.Checked_trunc), [ a ], target, s))
+          | t ->
+              error (Ast.expr_span x)
+                (Printf.sprintf "`checked_trunc` needs an integer, got `%s`"
+                   (Sema_types.diagnostic_ty_name t)))
+      | Hir.Int _, _ -> error s "builtin `checked_trunc` expects one argument"
+      | t, _ ->
+          error application_span
+            (Printf.sprintf "`checked_trunc` needs an integer type, got `%s`"
+               (Sema_types.diagnostic_ty_name t)))
+  | Ast.Ident ("checked_trunc", _) when Option.is_none (lookup_local "checked_trunc" c) ->
+      error s "builtin `checked_trunc` needs a type: checked_trunc[T](x)"
   | Ast.Ident ("errno_err", _) when Option.is_none (lookup_local "errno_err" c) ->
       if args <> [] then error s "builtin `errno_err` takes no arguments"
       else Ok (Hir.Call (Hir.Builtin Hir.Errno_err, [], Hir.Err, s))

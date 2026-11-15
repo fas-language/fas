@@ -2162,7 +2162,7 @@ let () =
     let hir = expect_ok (Sema.check source_program) in
     assert (
       List.map (fun (c : Hir.const_def) -> c.Hir.name) hir.Hir.consts
-      = [ "Unexpected"; "a"; "b"; "c"; "d"; "w0"; "w1"; "l0"; "l1" ]);
+      = [ "Unexpected"; "Overflow"; "a"; "b"; "c"; "d"; "w0"; "w1"; "l0"; "l1" ]);
     assert (
       List.map (fun (c : Hir.const_arr_def) -> c.Hir.name) hir.Hir.const_arrays
       = [ "g0"; "g1" ])

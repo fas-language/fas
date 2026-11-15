@@ -174,6 +174,10 @@ let operations =
     ("scatter_bytes", Reserved);
     ("copy", Reserved);
     ("call_addr", Reserved);
+    ("checked_add", Reserved);
+    ("checked_sub", Reserved);
+    ("checked_mul", Reserved);
+    ("checked_trunc", Reserved);
     ("errno_err", Reserved);
     ("err_name", Reserved);
     ("enum_value", Reserved);
@@ -260,6 +264,7 @@ let missing_type_arguments_message name =
   match name with
   | "zext" | "sext" | "trunc" | "bitcast" -> needs "a target type" (name ^ "[T](x)")
   | "cvt" -> needs "a target type" "cvt[T](x)"
+  | "checked_trunc" -> needs "a target type" "checked_trunc[T](x)"
   | "sizeof" -> needs "a type argument" "sizeof[T]"
   | "alignof" -> needs "a type argument" "alignof[T]"
   | "offsetof" -> needs "a type argument" "offsetof[T, field]"

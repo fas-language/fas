@@ -307,23 +307,23 @@ A function that can fail says so with `fails`, and every caller must handle the 
   - `syscall[T fails](n, args...)` and `syscall[fails](n, args...)` (`T` = `i64`) make a Linux system call that fails the way the kernel reports it: a raw result in -4095..-1 is the error whose code is its negation (an errno code, so `error NotFound = 2` matches `ENOENT`); anything else, negative or not, is success and comes back as the bits of `T`. `T` is `i64`, `u64`/`usize` or `addr`, never narrower, so `trunc[i32](try syscall[fails](257, ...))` keeps the narrowing visible. `EINTR` is an error like any other, never retried behind your back. Plain `syscall` stays the raw `i64`, for the few calls whose success values can fall in -4095..-1 (such as `fcntl(F_GETOWN)` for a process group).
 - `errdefer { ... }` and `errdefer e { ... }` run only when the function exits by failing (`fail`, or `try` passing an error up), together with `defer` blocks in reverse order. Like `defer`, an `errdefer` is block-scoped: it covers failures from its registration to the end of its enclosing block, so one inside an `if` body no longer runs once that body has finished. `fail`, `try` and `return` are not allowed inside `defer` and `errdefer`.
 - `main` may be `fails`. An error that escapes `main` writes `err_name(e)` and a newline straight to file descriptor 2 (one `write`, no C stdio), then `main` returns 1. That is an ordinary return from `main`, so C's exit still runs: `atexit` handlers run and stdio buffers are flushed, after the error line has been written.
+- Integer arithmetic wraps. `checked_add(a, b)`, `checked_sub(a, b)` and `checked_mul(a, b)` are `fails` builtins that give the exact result or fail with the predeclared error `Overflow` when it does not fit the operands' type: `n = try checked_mul(n, 10)`. `checked_trunc[T](x)` converts the integer `x` to the integer type `T` the same way, failing when the value is out of `T`'s range (too big, or negative for an unsigned `T`); it works between any two integer types. Untyped literal operands take the type from context, as for `add_sat`.
 - `errno_err()` is the current C `errno` as an error, or the predeclared `Unexpected` if errno is 0. `err_name(e)` is the error's name as a C string: `"errno N"` for an undeclared errno code, `"unknown error"` for any other undeclared code.
 
 ```fas
 use "C" <stdio.h> as c
 
-error Empty, BadDigit, Overflow
+error Empty, BadDigit
 
 fn parse_u32(s addr) u32 fails {
     if s[u8, 0] == 0 { fail Empty }
-    n u64 = 0
+    n u32 = 0
     for i usize = 0; s[u8, i] != 0; i += 1 {
         ch u8 = s[u8, i]
         if ch < 48 || ch > 57 { fail BadDigit }
-        n = n * 10 + zext[u64](ch - 48)
-        if n > 4294967295 { fail Overflow }
+        n = try checked_add(try checked_mul(n, 10), zext[u32](ch - 48))
     }
-    return trunc[u32](n)
+    return n
 }
 
 fn sum(a addr, b addr) u32 fails {
@@ -1264,6 +1264,8 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `bswap(x)` | type of `x` | reverses the byte order of a 16-, 32- or 64-bit integer, lane-wise; a big-endian load is `bswap(p[u32])` |
 | **Arithmetic** | `add_sat(a, b)` `sub_sat(a, b)` | type of `a` | clamp to the type's range, lane-wise |
 | | `mul_hi(a, b)` | type of `a` | high half of the double-width product, lane-wise |
+| | `checked_add(a, b)` `checked_sub` `checked_mul` | type of `a`, `fails` | the exact result, or the error `Overflow` when it does not fit; scalar integers, needs `try` or `catch` |
+| | `checked_trunc[T](x)` | `T`, `fails` | integer `x` as integer `T`, or `Overflow` when its value is out of `T`'s range |
 | **Memory** | `copy(dst, src)` | statement | arrays or structs of one type, overlap is safe |
 | | `volatile_load[T](p)` | `T` | scalar, `addr`, handle or vector |
 | | `volatile_store[T](p, x)` | statement | never merged or removed |

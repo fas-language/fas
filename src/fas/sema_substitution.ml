@@ -418,7 +418,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Generic_args (Ast.Ident (name, _), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
            || name = "syscall"
-           || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
+           || name = "cvt" || name = "checked_trunc" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         Result_list.iter
           (function
@@ -2608,7 +2608,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Generic_args (Ast.Ident (name, ident_span), arguments, span)
       when name = "volatile_load" || name = "volatile_store" || name = "call_addr"
            || name = "syscall"
-           || name = "cvt" || name = "enum_from" || name = "enum_is" || name = "enum_count"
+           || name = "cvt" || name = "checked_trunc" || name = "enum_from" || name = "enum_is" || name = "enum_count"
            || List.mem name simd_memory_names ->
         let resolve_argument argument =
           match

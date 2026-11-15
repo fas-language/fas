@@ -228,6 +228,7 @@ let err_name_used = ref false
 let enum_names_used : string list ref = ref []
 let errno_used = ref false
 let unexpected_code = ref 0L
+let overflow_code = ref 0L
 let main_fails = ref false
 let link_name n = if n = "main" && !main_fails then "fas.main" else n
 
@@ -1054,17 +1055,98 @@ and raw_call s ~fails call =
         | Hir.Int (Hir.I64 | Hir.U64) -> Ok r
         | _ -> error sp "internal error: syscall[T fails] with a result that is not 8 bytes"
       in
-      let rt = Low.Struct (fails_struct_name t) in
-      let slot = fresh s in
-      E.alloca_entry s.fn slot rt 8;
-      let p = Low.Local (slot, Low.Pointer rt) in
-      let* () = store_value s t value p 8 in
-      let at = fresh s in
-      let offset = Int64.of_int (fails_err_offset s.structs t) in
-      E.gep s.fn at Low.I8 p [ Low.Index (Low.Const (Low.I64, offset)) ];
-      E.store s.fn Low.I32 (Low.Local (err, Low.I32)) (Low.Local (at, Low.Pointer Low.I8)) 8;
-      Ok p
+      fails_aggregate s t value (Low.Local (err, Low.I32))
+  | Hir.Call (Hir.Builtin (Hir.Checked op), args, t, sp) when fails ->
+      let* values = exprs s args in
+      let rt = ty t in
+      let signed_kind = function
+        | Hir.Int (Hir.I8 | Hir.I16 | Hir.I32 | Hir.I64) -> true
+        | _ -> false
+      in
+      let signed = signed_kind t in
+      let* value, overflow =
+        match (op, values) with
+        | (Hir.Checked_add | Hir.Checked_sub | Hir.Checked_mul), [ x; y ] ->
+            (* the wrapped value, and Fir's overflow flag for the kind *)
+            let bin, kind =
+              match op with
+              | Hir.Checked_add -> (Low.Add, "add")
+              | Hir.Checked_sub -> (Low.Sub, "sub")
+              | _ -> (Low.Mul, "mul")
+            in
+            let* suffix = intrinsic_suffix sp rt in
+            let v = fresh s in
+            E.bin s.fn v bin rt x y;
+            let o = fresh s in
+            E.call s.fn (Some o) Low.No_extension Low.I1
+              (Printf.sprintf "llvm.fas.ovf.%s%s.%s" (if signed then "s" else "u") kind suffix)
+              [ (rt, Low.No_extension, x); (rt, Low.No_extension, y) ];
+            Ok (Low.Local (v, rt), Low.Local (o, Low.I1))
+        | Hir.Checked_trunc, [ x ] ->
+            (* fits when converting back gives x again and, between signed
+               and unsigned, the value is not negative on either side *)
+            let source = Hir.expr_ty (List.hd args) in
+            let st = ty source in
+            let from_signed = signed_kind source in
+            let bits = function
+              | Low.I8 -> 8 | Low.I16 -> 16 | Low.I32 -> 32 | _ -> 64
+            in
+            let convert v from_ty to_ty sign_extend =
+              if bits from_ty = bits to_ty then v
+              else
+                let id = fresh s in
+                let kind =
+                  if bits from_ty > bits to_ty then "trunc"
+                  else if sign_extend then "sext"
+                  else "zext"
+                in
+                E.cast s.fn id kind from_ty v to_ty;
+                Low.Local (id, to_ty)
+            in
+            let r = convert x st rt from_signed in
+            let back = convert r rt st signed in
+            let differs = fresh s in
+            E.cmp s.fn differs Low.Ne st back x;
+            let negative v t =
+              let id = fresh s in
+              E.cmp s.fn id Low.Slt t v (Low.Const (t, 0L));
+              Low.Local (id, Low.I1)
+            in
+            let sign_lost =
+              match (from_signed, signed) with
+              | true, false -> Some (negative x st)
+              | false, true -> Some (negative r rt)
+              | _ -> None
+            in
+            let overflow =
+              match sign_lost with
+              | None -> Low.Local (differs, Low.I1)
+              | Some lost ->
+                  let id = fresh s in
+                  E.bin s.fn id Low.Or Low.I1 (Low.Local (differs, Low.I1)) lost;
+                  Low.Local (id, Low.I1)
+            in
+            Ok (r, overflow)
+        | _ -> error sp "internal error: checked builtin arity"
+      in
+      let err = fresh s in
+      E.select s.fn err overflow (Low.Const (Low.I32, !overflow_code)) (Low.Const (Low.I32, 0L));
+      fails_aggregate s t value (Low.Local (err, Low.I32))
   | e -> error (Hir.expr_span e) "internal error: `try` or `catch` of a non-call"
+
+(* the `fails.<key>` aggregate a fails call returns: [value] of type [t]
+   and the i32 error [err] (0 for success) *)
+and fails_aggregate s t value err =
+  let rt = Low.Struct (fails_struct_name t) in
+  let slot = fresh s in
+  E.alloca_entry s.fn slot rt 8;
+  let p = Low.Local (slot, Low.Pointer rt) in
+  let* () = store_value s t value p 8 in
+  let at = fresh s in
+  let offset = Int64.of_int (fails_err_offset s.structs t) in
+  E.gep s.fn at Low.I8 p [ Low.Index (Low.Const (Low.I64, offset)) ];
+  E.store s.fn Low.I32 err (Low.Local (at, Low.Pointer Low.I8)) 8;
+  Ok p
 
 and raw_result id rt =
   match rt with
@@ -1368,7 +1450,7 @@ and lower_builtin s b args t span =
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
                 | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _
                 | Errno_err | Err_name | Enum_value | Enum_from _ | Enum_is _
-                | Enum_name _ | Trap | Assert ),
+                | Enum_name _ | Trap | Assert | Checked _ ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -3479,6 +3561,8 @@ let lower_module ?(intrinsic_masked_loads = true) (p : Hir.program)
   errno_used := false;
   unexpected_code :=
     (match List.assoc_opt "Unexpected" p.errors with Some c -> c | None -> 0L);
+  overflow_code :=
+    (match List.assoc_opt "Overflow" p.errors with Some c -> c | None -> 0L);
   let* () =
     match Target_layout.pointer_integer_bits (Target_layout.current ()) with
     | Ok 32 | Ok 64 -> Ok ()

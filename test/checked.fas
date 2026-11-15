@@ -1,0 +1,65 @@
+// checked_add/sub/mul and checked_trunc (LANGUAGE.md "Errors"): main returns
+// the number of wrong results, 0 when all agree; run by test/checked.sh
+// each returns the checked result, or a marker (1 or 9) when it overflows
+fn au8(a u8, b u8) u8 { return checked_add(a, b) catch 1 }
+fn ai8(a i8, b i8) i8 { return checked_add(a, b) catch 1 }
+fn su32(a u32, b u32) u32 { return checked_sub(a, b) catch 9 }
+fn si64(a i64, b i64) i64 { return checked_sub(a, b) catch 9 }
+fn mi16(a i16, b i16) i16 { return checked_mul(a, b) catch 1 }
+fn mu64(a u64, b u64) u64 { return checked_mul(a, b) catch 1 }
+fn mi64(a i64, b i64) i64 { return checked_mul(a, b) catch 1 }
+fn t_i32_u8(x i32) u8 { return checked_trunc[u8](x) catch 1 }
+fn t_u8_i8(x u8) i8 { return checked_trunc[i8](x) catch 1 }
+fn t_u16_i8(x u16) i8 { return checked_trunc[i8](x) catch 1 }
+fn t_i64_i8(x i64) i8 { return checked_trunc[i8](x) catch 1 }
+fn t_i8_u64(x i8) u64 { return checked_trunc[u64](x) catch 1 }
+fn t_u64_i64(x u64) i64 { return checked_trunc[i64](x) catch 1 }
+fn t_u32_i64(x u32) i64 { return checked_trunc[i64](x) catch 1 }
+fn t_i32_u32(x i32) u32 { return checked_trunc[u32](x) catch 1 }
+fn t_i16_i16(x i16) i16 { return checked_trunc[i16](x) catch 1 }
+
+fn add8(a u8, b u8) u8 fails { return try checked_add(a, b) }
+fn is_overflow() bool {
+    add8(255, 1) catch e { return e == Overflow }
+    return false
+}
+
+fn main() i32 {
+    bad i32 = 0
+    if au8(200, 55) != 255 { bad += 1 }
+    if au8(200, 56) != 1 { bad += 1 }
+    if ai8(-100, -28) != -128 { bad += 1 }
+    if ai8(-100, -29) != 1 { bad += 1 }
+    if ai8(100, 28) != 1 { bad += 1 }
+    if su32(3, 4) != 9 { bad += 1 }
+    if su32(4, 4) != 0 { bad += 1 }
+    if si64(-9223372036854775807, 1) == 9 { bad += 1 }
+    if si64(-9223372036854775807, 2) != 9 { bad += 1 }
+    if mi16(-256, 128) != -32768 { bad += 1 }
+    if mi16(256, 128) != 1 { bad += 1 }
+    if mu64(4294967296, 4294967295) != 18446744069414584320 { bad += 1 }
+    if mu64(4294967296, 4294967296) != 1 { bad += 1 }
+    if mi64(-1, -9223372036854775807 - 1) != 1 { bad += 1 }
+    if mi64(-3, 3074457345618258602) != -9223372036854775806 { bad += 1 }
+    lit u8 = checked_add(250, 5) catch 1
+    if lit != 255 { bad += 1 }
+    if t_i32_u8(255) != 255 { bad += 1 }
+    if t_i32_u8(256) != 1 { bad += 1 }
+    if t_i32_u8(-1) != 1 { bad += 1 }
+    if t_u8_i8(200) != 1 { bad += 1 }
+    if t_u8_i8(127) != 127 { bad += 1 }
+    if t_u16_i8(127) != 127 { bad += 1 }
+    if t_u16_i8(65408) != 1 { bad += 1 }
+    if t_i64_i8(-128) != -128 { bad += 1 }
+    if t_i64_i8(-129) != 1 { bad += 1 }
+    if t_i8_u64(-1) != 1 { bad += 1 }
+    if t_i8_u64(5) != 5 { bad += 1 }
+    if t_u64_i64(9223372036854775808) != 1 { bad += 1 }
+    if t_u64_i64(9223372036854775807) != 9223372036854775807 { bad += 1 }
+    if t_u32_i64(4294967295) != 4294967295 { bad += 1 }
+    if t_i32_u32(-7) != 1 { bad += 1 }
+    if t_i32_u32(7) != 7 { bad += 1 }
+    if t_i16_i16(-5) != -5 { bad += 1 }
+    if !is_overflow() { bad += 1 }
+    return bad
+}

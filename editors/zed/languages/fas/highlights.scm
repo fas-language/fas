@@ -118,7 +118,7 @@
   (#any-of? @function.builtin
     "zext" "sext" "trunc" "bitcast" "sizeof" "alignof" "offsetof" "len"
     "splat" "rotl" "rotr" "popcount" "bswap" "assert" "unreachable" "clz" "ctz" "select" "any" "all"
-    "add_sat" "sub_sat" "mul_hi" "reduce_sum" "reduce_min" "reduce_max"
+    "add_sat" "sub_sat" "mul_hi" "checked_add" "checked_sub" "checked_mul" "checked_trunc" "reduce_sum" "reduce_min" "reduce_max"
     "reduce_and" "reduce_or" "reduce_xor" "shuffle" "permute" "compress"
     "expand" "masked_load" "masked_store" "gather" "gather_bytes" "scatter"
     "scatter_bytes" "copy" "call_addr" "errno_err" "err_name" "enum_value" "enum_from" "enum_is" "enum_count" "enum_name" "volatile_load" "volatile_store"

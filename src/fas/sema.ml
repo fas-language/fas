@@ -195,7 +195,7 @@ let validate_extern_c_signature ~named_types ~ret_source ~bodyless span params c
 (* `error A, B = 2` declarations (see "Fas error handling"). Each name becomes
    a constant of type `error` holding its code: FNV-1a-32 of the name with the
    top bit set, or a pinned errno code in 1-4095. The same name declared twice
-   is the same error; `Unexpected` is predeclared. Returns the program with the
+   is the same error; `Unexpected` and `Overflow` are predeclared. Returns the program with the
    declarations replaced by constants, and the (name, code) table. *)
 let error_code_of_name name =
   let h = ref 0x811c9dc5l in
@@ -248,12 +248,16 @@ let desugar_errors (program : Ast.program) =
         | _ -> Ok ())
       program.Ast.items
   in
+  (* `Unexpected` (errno_err with no errno) and `Overflow` (the checked_*
+     builtins) *)
   let predeclared =
-    if Hashtbl.mem declared "Unexpected" then []
-    else (
-      Hashtbl.replace declared "Unexpected"
-        (error_code_of_name "Unexpected", Span.synthetic);
-      [ "Unexpected" ])
+    List.filter_map
+      (fun name ->
+        if Hashtbl.mem declared name then None
+        else (
+          Hashtbl.replace declared name (error_code_of_name name, Span.synthetic);
+          Some name))
+      [ "Unexpected"; "Overflow" ]
   in
   let names = predeclared @ List.rev !order in
   let by_code = Hashtbl.create 16 in

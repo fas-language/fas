@@ -511,6 +511,19 @@ let intrinsic fn name (ret : Low.ty) (args : (Low.ty * Low.extension * Low.value
   else if starts "llvm.sadd.sat." name then one (Ibin (Sadd_sat, 0, a 0, a 1))
   else if starts "llvm.usub.sat." name then one (Ibin (Usub_sat, 0, a 0, a 1))
   else if starts "llvm.ssub.sat." name then one (Ibin (Ssub_sat, 0, a 0, a 1))
+  else if starts "llvm.fas.ovf." name then begin
+    (* llvm.fas.ovf.<kind>.<type>: the overflow flag of Fir's checked
+       arithmetic (checked_add/sub/mul); the wrapped value is computed apart *)
+    let kind = List.nth (String.split_on_char '.' name) 3 in
+    let k =
+      match kind with
+      | "sadd" -> Sadd_ovf | "uadd" -> Uadd_ovf | "ssub" -> Ssub_ovf
+      | "usub" -> Usub_ovf | "smul" -> Smul_ovf | "umul" -> Umul_ovf
+      | _ -> unsupported "%s" name
+    in
+    let x = a 0 in
+    Some (emit fn.f fn.cur ~loc:fn.loc (Ovf (k, x, a 1)) [| ty_of fn.f x; i1 |]).(1)
+  end
   else if name = "llvm.fas.umulh" then one (Ibin (Umulh, 0, a 0, a 1))
   else if name = "llvm.fas.smulh" then one (Ibin (Smulh, 0, a 0, a 1))
   else if starts "llvm.experimental.vector.compress." name then begin

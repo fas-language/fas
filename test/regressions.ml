@@ -11961,6 +11961,28 @@ let () =
     "fn f(x u32) u32 { return bswap(x, x) }\n";
   semantic_message "bswap-reserved" "`bswap` is a builtin and cannot be used as a name"
     "fn f() i32 { bswap i32 = 1\nreturn bswap }\n";
+  semantic_accept "checked-forms"
+    "fn f(a u8, b u8) u8 fails { return try checked_add(a, b) }\n\
+     fn g(a i64) u16 { return checked_trunc[u16](a) catch 0 }\n\
+     fn h(a i32) bool { checked_mul(a, a) catch e { return e == Overflow }\nreturn false }\n";
+  semantic_accept "checked-overflow-redeclared"
+    "error Overflow\nfn f(a u8) u8 { return checked_sub(a, 1) catch 0 }\n";
+  semantic_message "checked-unhandled" "`checked_add` can fail and the error is not handled"
+    "fn f(a u8, b u8) u8 { return checked_add(a, b) }\n";
+  semantic_message "checked-mixed" "argument 2 of `checked_add` is `u16`, expected `u8`"
+    "fn f(a u8, b u16) u8 { return checked_add(a, b) catch 0 }\n";
+  semantic_message "checked-float" "`checked_mul` needs an integer, got `f32`"
+    "fn f(a f32, b f32) f32 { return checked_mul(a, b) catch 0 }\n";
+  semantic_message "checked-arity" "builtin `checked_sub` expects two arguments"
+    "fn f(a i32) i32 { return checked_sub(a) catch 0 }\n";
+  semantic_message "checked-trunc-no-type" "builtin `checked_trunc` needs a type: checked_trunc[T](x)"
+    "fn f(a i32) u8 { return checked_trunc(a) catch 0 }\n";
+  semantic_message "checked-trunc-float-source" "`checked_trunc` needs an integer, got `f32`"
+    "fn f(a f32) u8 { return checked_trunc[u8](a) catch 0 }\n";
+  semantic_message "checked-trunc-float-target" "`checked_trunc` needs an integer type, got `f32`"
+    "fn f(a i32) f32 { return checked_trunc[f32](a) catch 0 }\n";
+  semantic_message "checked-reserved" "`checked_add` is a builtin and cannot be used as a name"
+    "fn f() i32 { checked_add i32 = 1\nreturn checked_add }\n";
   semantic_accept "assert-forms"
     "fn f(x i32) i32 {\nassert(x > 0)\nassert(x < 9, \"small\")\nreturn x\n}\n";
   semantic_accept "unreachable-ends-function"
