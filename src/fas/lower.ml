@@ -462,26 +462,11 @@ let compare s cmp t lhs rhs =
   | Low.Vector (lanes, _) -> Low.Local (id, Low.Vector (lanes, Low.I1))
   | _ -> Low.Local (id, Low.I1)
 
-let reduce_any s span value =
-  match value_ty value with
-  | Low.I1 -> Ok value
-  | Low.Vector (lanes, Low.I1) as t ->
-      let id = fresh s in
-      E.call s.fn (Some id) Low.No_extension Low.I1 (Printf.sprintf "llvm.vector.reduce.or.v%di1" lanes) [ (t, Low.No_extension, value) ];
-      Ok (Low.Local (id, Low.I1))
-  | _ -> error span "internal error: boolean reduction has a non-boolean type"
-
 let condition_ty value =
   match value_ty value with
   | Low.I1 as t -> t
   | Low.Vector (_, Low.I1) as t -> t
   | _ -> Low.I1
-
-let combine_conditions s lhs rhs =
-  let t = condition_ty lhs in
-  let id = fresh s in
-  E.bin s.fn id Low.And t lhs rhs;
-  Low.Local (id, t)
 
 let either_condition s lhs rhs =
   let t = condition_ty lhs in
@@ -536,48 +521,6 @@ let lane_guard s index_expr iv lanes =
   in
   guard_condition s condition
 
-let division_guard s span source_ty binop ir_ty lhs rhs =
-  let zero_condition = compare s Low.Eq ir_ty rhs (value_const s ir_ty 0L) in
-  let* condition =
-    if binop = Low.Sdiv && signed_type source_ty then
-      let* bits = width span (match ir_ty with Low.Vector (_, t) -> t | t -> t) in
-      let minimum = Int64.shift_left 1L (bits - 1) in
-      let lhs_minimum = compare s Low.Eq ir_ty lhs (value_const s ir_ty minimum) in
-      let rhs_minus_one =
-        compare s Low.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
-      in
-      Ok
-        (either_condition s zero_condition
-           (combine_conditions s lhs_minimum rhs_minus_one))
-    else Ok zero_condition
-  in
-  match value_ty condition with
-  | Low.I1 ->
-      guard_condition s condition;
-      Ok ()
-  | Low.Vector (lanes, Low.I1) ->
-      let* any_lane = reduce_any s span condition in
-      let ordered = fresh_block s and proceed = fresh_block s in
-      E.cond_br s.fn any_lane ordered.id proceed.id;
-      enter s ordered;
-      let rec guard_lane lane =
-        if lane >= lanes then Ok ()
-        else
-          let id = fresh s in
-          E.extract s.fn id (value_ty condition) condition (Low.Const (Low.I64, Int64.of_int lane));
-          let trap = fresh_block s and next = fresh_block s in
-          E.cond_br s.fn (Low.Local (id, Low.I1)) trap.id next.id;
-          enter s trap;
-          emit_trap s;
-          enter s next;
-          guard_lane (lane + 1)
-      in
-      let* () = guard_lane 0 in
-      emit_trap s;
-      enter s proceed;
-      Ok ()
-  | _ -> error span "internal error: division guard has a non-boolean condition"
-
 let emit_binary s span source_ty op ir_ty lhs rhs =
   if op = Ast.Shl || op = Ast.Shr then (
     let* count = shift_amount s span ir_ty rhs in
@@ -591,12 +534,9 @@ let emit_binary s span source_ty op ir_ty lhs rhs =
     Ok (Low.Local (result, ir_ty)))
   else
     let* binop = bin_for span source_ty op in
-    let division =
-      match binop with Low.Sdiv | Srem | Udiv | Urem -> true | _ -> false
-    in
-    let* () =
-      if division then division_guard s span source_ty binop ir_ty lhs rhs else Ok ()
-    in
+    (* a division traps on a zero divisor and on MIN / -1 through its Fir
+       `trap` flag (Lower_emit.bin); `MIN % -1` is 0 in Fas, so a -1
+       divisor of srem becomes 1 *)
     if binop = Low.Srem then (
       let is_minus_one =
         compare s Low.Eq ir_ty rhs (value_const s ir_ty Int64.minus_one)
@@ -1246,6 +1186,19 @@ and lower_builtin s b args t span =
       E.call s.fn (Some id) Low.No_extension (Low.Pointer Low.I8) ("fas.enum_name." ^ enum)
         [ (Low.value_ty e, Low.No_extension, e) ];
       Ok (Low.Local (id, Low.Pointer Low.I8))
+  | Assert, [ cond; message; length ] ->
+      (* D3: `write(2, message, length)` (Linux x86-64: syscall 1), then trap *)
+      let failed = fresh_block s and holds = fresh_block s in
+      E.cond_br s.fn cond holds.id failed.id;
+      enter s failed;
+      let bits = fresh s in
+      E.cast s.fn bits "ptrtoint" (Low.value_ty message) message Low.I64;
+      let written = fresh s in
+      E.syscall s.fn written
+        [ Low.Const (Low.I64, 1L); Low.Const (Low.I64, 2L); Low.Local (bits, Low.I64); length ];
+      emit_trap s;
+      enter s holds;
+      Ok (Low.Const (Low.I1, 0L))
   | Trap, [] ->
       (* the code after a trap is unreachable but still needs a block *)
       emit_trap s;
@@ -1415,7 +1368,7 @@ and lower_builtin s b args t span =
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
                 | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _
                 | Errno_err | Err_name | Enum_value | Enum_from _ | Enum_is _
-                | Enum_name _ | Trap ),
+                | Enum_name _ | Trap | Assert ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -3191,6 +3144,11 @@ let lower_func mc ~intrinsic_masked_loads
           Ok ())
         else if s.fails = Some Hir.Void then (
           E.ret s.fn (Some (Low.I32, zero Low.I32));
+          Ok ())
+        else if not (Hir.block_flow body).falls_through then (
+          (* the body ends in `unreachable()`: the open block is the dead
+             one lowering starts after the trap *)
+          E.unreachable s.fn;
           Ok ())
         else
           error Span.synthetic

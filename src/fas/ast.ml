@@ -1546,6 +1546,8 @@ let item_span_by_name program name =
 
 let rec stmt_terminates = function
   | Return _ | Break _ | Continue _ | Fail _ -> true
+  (* `unreachable()` never falls through (D3); the name is reserved *)
+  | Expr_stmt (Call (Ident ("unreachable", _), [], _), _, _) -> true
   | Block (body, _) -> block_terminates body
   | If (_, then_body, Some else_body, _) ->
       block_terminates then_body && block_terminates else_body

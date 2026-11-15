@@ -10791,7 +10791,8 @@ let () =
       "srem <4 x i32>";
       "insertelement <4 x i32> zeroinitializer, i32 6, i32 0\n";
       "insertelement <4 x i1> zeroinitializer, i1 true, i32 0\n";
-      "insertelement <4 x i32> zeroinitializer, i32 -2147483648, i32 0\n";
+      (* the MIN of the sdiv trap check (Fir_trapdiv) *)
+      "insertelement <4 x i32> zeroinitializer, i32 -2147483648, i64 0\n";
     ];
   if contains defined_construction "poison" || contains defined_construction "undef"
   then failwith "defined-construction: undefined seed in computed values";
@@ -11666,21 +11667,8 @@ let () =
   then
     failwith
       "lane-paired-division-guard: overflow pairing must collapse to one reduction";
-  let scan_indices =
-    List.map
-      (fun offset ->
-        let rec line_end index =
-          if lane_paired_division_guard.[index] = '\n' then index
-          else line_end (index + 1)
-        in
-        lane_paired_division_guard.[line_end
-                                      (offset + String.length "extractelement <2 x i1> ")
-                                    - 1])
-      (positions lane_paired_division_guard "extractelement <2 x i1> ")
-  in
-  if scan_indices <> [ '0'; '1' ] then
-    failwith
-      "lane-paired-division-guard: trap checks must scan lanes in scalar element order";
+  (* any lane traps the same way, so there is no per-lane scan (A6:
+     Fir_trapdiv checks the whole vector at once) *)
   let bool_one_lane_bitcasts =
     llvm_of
       "fn to_bool(mask vec[1,bool]) bool { return bitcast[bool](mask) }\n\
@@ -11973,6 +11961,22 @@ let () =
     "fn f(x u32) u32 { return bswap(x, x) }\n";
   semantic_message "bswap-reserved" "`bswap` is a builtin and cannot be used as a name"
     "fn f() i32 { bswap i32 = 1\nreturn bswap }\n";
+  semantic_accept "assert-forms"
+    "fn f(x i32) i32 {\nassert(x > 0)\nassert(x < 9, \"small\")\nreturn x\n}\n";
+  semantic_accept "unreachable-ends-function"
+    "fn f(x i32) i32 {\nif x == 1 { return 2 }\nunreachable()\n}\n";
+  semantic_message "assert-message-literal" "the message of `assert` must be a string literal"
+    "fn f(x i32, m addr) void { assert(x > 0, m) }\n";
+  semantic_message "assert-arity" "builtin `assert` expects a condition and an optional message"
+    "fn f() void { assert() }\n";
+  semantic_message "assert-bool" "`assert` needs a `bool` condition"
+    "fn f(x i32) void { assert(x) }\n";
+  semantic_message "unreachable-arity" "builtin `unreachable` takes no arguments"
+    "fn f() void { unreachable(1) }\n";
+  semantic_message "assert-reserved" "`assert` is a builtin and cannot be used as a name"
+    "fn f() i32 { assert i32 = 1\nreturn assert }\n";
+  semantic_message "unreachable-reserved" "`unreachable` is a builtin and cannot be used as a name"
+    "fn f() i32 { unreachable i32 = 1\nreturn unreachable }\n";
   let handle_field_source = "struct O {}\nfn f(h handle[O]) usize { return h.x }\n" in
   let handle_field_line = "fn f(h handle[O]) usize { return h.x }" in
   let handle_field_expected =
@@ -16563,7 +16567,7 @@ let () =
              identifier" );
         ];
       write root
-        "extern \"C\" { fn echo(new i32, assert i32) i32 { return new + assert } }\n";
+        "extern \"C\" { fn echo(new i32, NULL i32) i32 { return new + NULL } }\n";
       let header = expect_ok (Driver.run (cli_run [ "--emit-header"; root ])) in
       assert (contains header "int32_t echo(int32_t , int32_t );\n");
       write root

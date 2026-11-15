@@ -1442,6 +1442,9 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
     (* LLVM's atomics take only power-of-two byte-sized integers (and its
        x86_fp80 ones are not usable): the same rewrite as the native path *)
     let () = Fir_atomic.run m in
+    (* LLVM's division by zero is UB: every trapping division becomes a
+       check and a `trap` *)
+    let () = Fir_trapdiv.run ~hw:false m in
     let o = { buf = Buffer.create 65536; counted = 0; budget } in
     let sym n = global_name (redirect n) in
     let d =

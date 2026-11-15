@@ -942,6 +942,10 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
+    (* trapping divisions the 64-bit div/idiv does not trap on by itself
+       become a check and a `trap`, before scalarization and limbs drop
+       the flag *)
+    Fir_trapdiv.run ~hw:true m;
     (* vectors to lanes first: lane-wise fma becomes scalar fma, which
        the runtime helpers then serve *)
     Fir_scalarize.run m;

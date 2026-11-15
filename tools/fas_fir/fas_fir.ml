@@ -173,6 +173,10 @@ let main () =
     if status <> 0 then die "%s: %s failed" name cc;
     exit 0
   end;
+  (* trapping divisions the hardware does not trap on become a check and a
+     `trap` first: scalarization and limbs drop the flag (Mir_emit.generate
+     does the same) *)
+  Fir_trapdiv.run ~hw:true m;
   (* the machine-IR backend has no vectors: lanes first, so that vectors
      of wide integers (<2 x i128>) become wide scalars for Fir_wide;
      --legalize shows Fir_wide alone *)

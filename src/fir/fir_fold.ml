@@ -2,14 +2,14 @@
    roadmap v0.6; same scope, not an optimizer).
 
    Lowering emits const-generic and `for const` arithmetic as instructions on
-   constants (`udiv i64 -1, 3`, `and i8 0, 7`, `zext i64 0`), with a trap
-   check on every constant divisor. This pass folds scalar integer
+   constants (`udiv trap i64 -1, 3`, `and i8 0, 7`, `zext i64 0`); every
+   division carries the `trap` flag. This pass folds scalar integer
    arithmetic (up to 64 bits), comparisons, integer casts, selects, and block
    parameters that receive one value, then turns branches and switches on
    constants into jumps and empties the blocks that become unreachable. It
    never folds an operation whose result would be a trap or poison (division
-   by zero, MIN / -1, out-of-range shift counts): those stay for the run-time
-   check that guards them. A folded instruction becomes an alias of its
+   by zero, MIN / -1, out-of-range shift counts): those stay, and trap when
+   they run. A folded instruction becomes an alias of its
    value (Fir.replace_all_uses) and is removed. *)
 
 open Fir

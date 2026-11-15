@@ -27,6 +27,7 @@ hello, fas!
 - [Values](#values)
 - [Floating point](#floating-point)
 - [Functions and control flow](#functions-and-control-flow)
+  - [Assertions](#assertions)
 - [Errors](#errors)
 - [Enums](#enums)
 - [Structs, arrays and memory](#structs-arrays-and-memory)
@@ -268,6 +269,24 @@ fn main() i32 {
     inside(total, 0, 10)
     if inside(total, 0, 10) { return total - 6 }
     return 1
+}
+```
+
+### Assertions
+
+`assert(cond)` and `assert(cond, "message")` check a `bool` that must hold; `unreachable()` marks a point the program must never reach. They are always checked, at every optimization level: a failure writes `file:line: assertion failed: message` (or `reached unreachable()`) to stderr and traps. The message must be a string literal. A function may end in `unreachable()` instead of a `return`.
+
+```fas
+fn digit(c u8) u8 {
+    if c >= '0' && c <= '9' { return c - '0' }
+    if c >= 'a' && c <= 'f' { return c - 'a' + 10 }
+    unreachable()
+}
+
+fn main() i32 {
+    d u8 = digit('c')
+    assert(d == 12, "hex digit")
+    return 0
 }
 ```
 
@@ -1265,6 +1284,8 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `atomic_xchg[T, o](p, x)` | `T`, the old value | |
 | | `atomic_cas[T, o](p, expected, desired)` | `T`, the old value | stores `desired` only when the old value equals `expected`, so success is `old == expected` |
 | | `atomic_fence[o]()` | statement | |
+| **Checks** | `assert(cond)` `assert(cond, "msg")` | statement | always checked: a false `cond` writes `file:line: assertion failed: msg` to stderr and traps |
+| | `unreachable()` | statement | writes `file:line: reached unreachable()` and traps; may end a function |
 | **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
 | | `syscall[T fails](n, args...)` `syscall[fails](n, args...)` | `T` (`i64`, `u64`, `addr`) | as `syscall`, but a result in -4095..-1 is the errno error; needs `try` or `catch` |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |

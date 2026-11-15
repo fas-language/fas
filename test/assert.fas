@@ -1,0 +1,15 @@
+// assert and unreachable (LANGUAGE.md "Assertions"): test/assert.sh runs this
+// with 0..4 extra arguments and checks the exit, the trap and the stderr line
+fn pick(n i32) i32 {
+    if n == 1 { return 10 }
+    if n == 2 { return 20 }
+    unreachable()
+}
+
+fn main(argc i32, argv addr) i32 {
+    assert(argc > 0)
+    assert(argc < 5, "too many arguments")
+    if argc == 3 { assert(argc == 1) }
+    if argc == 4 { return pick(3) }
+    return pick(argc) - 10
+}

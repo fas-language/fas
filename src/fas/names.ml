@@ -14,6 +14,8 @@ type value_operation =
   | Rotr
   | Popcount
   | Bswap
+  | Assert
+  | Unreachable
   | Ctz
   | Clz
   | Add_sat
@@ -144,6 +146,8 @@ let operations =
     ("rotr", Value Rotr);
     ("popcount", Value Popcount);
     ("bswap", Value Bswap);
+    ("assert", Value Assert);
+    ("unreachable", Value Unreachable);
     ("clz", Value Clz);
     ("ctz", Value Ctz);
     ("select", Value Select);

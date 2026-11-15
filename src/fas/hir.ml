@@ -137,6 +137,10 @@ type builtin =
   | Enum_is of string
   | Enum_name of string
   | Trap
+  (* [cond; message; length]: when cond is false, `write` the message
+     (an interned string of [length] bytes) to stderr, then trap. `assert`
+     and `unreachable()` (cond `false`) *)
+  | Assert
 
 type call_target = User of string | Builtin of builtin
 
@@ -441,6 +445,9 @@ let rec stmt_flow = function
   | Continue (Some label, _) ->
       { flowing with falls_through = false; labeled_continues = [ label ] }
   | Block (body, _) -> block_flow body
+  (* `unreachable()` (D3) never falls through *)
+  | Expr (Call (Builtin Assert, EBool (false, _) :: _, _, _), _) ->
+      { flowing with falls_through = false }
   | If (_, then_body, else_body, _) ->
       choose_flow (block_flow then_body)
         (match else_body with None -> flowing | Some body -> block_flow body)

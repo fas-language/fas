@@ -262,7 +262,7 @@ Text form: `%r = OPCODE [FLAGS] RESULT_TYPE operands...`. An instruction with no
 | Text | Meaning | Flags |
 |---|---|---|
 | `add sub mul ty a, b` | Wrapping arithmetic. | `nsw nuw`: overflow makes the result poison |
-| `udiv sdiv urem srem ty a, b` | Division, truncating toward zero; a remainder has the sign of the dividend. Dividing by 0 is UB, and so is `sdiv/srem MIN, -1`, unless the instruction has the `trap` flag (*designed*, §15), which makes both trap. | `exact` (udiv/sdiv): a nonzero remainder makes the result poison |
+| `udiv sdiv urem srem ty a, b` | Division, truncating toward zero; a remainder has the sign of the dividend. Dividing by 0 is UB, and so is `sdiv/srem MIN, -1`, unless the instruction has the `trap` flag, which makes both trap. | `exact` (udiv/sdiv): a nonzero remainder makes the result poison. `trap` (all four): the cases above trap exactly where the instruction stands (below the table) |
 | `shl lshr ashr ty a, b` | Shifts. A shift amount ≥ the width gives poison. | `nsw nuw` (shl), `exact` (lshr, ashr) |
 | `and or xor ty a, b` | Bitwise operations. | `disjoint` (or): the operands share no set bits |
 | `smin smax umin umax ty a, b` | Minimum and maximum. | |
@@ -276,6 +276,15 @@ Text form: `%r = OPCODE [FLAGS] RESULT_TYPE operands...`. An instruction with no
 | `%v, %o = sadd_ovf (ty, i1) a, b` | Arithmetic with overflow check: the wrapped value plus an `i1` overflow flag. Also `uadd_ovf ssub_ovf usub_ovf smul_ovf umul_ovf`. | |
 
 Flags are written right after the opcode: `add nsw i32 %a, %b`. The verifier rejects flags that don't apply to an instruction.
+
+**Trapping division.** `sdiv trap i32 %a, %b` traps on a zero divisor, and for `sdiv`/`srem` on MIN / -1 (any lane, for a vector), exactly where it stands (§8). Rules for passes:
+
+- It is never deleted when its result is unused.
+- It is never hoisted or speculated onto a path that did not run it. Merging two equal ones is fine.
+- A pass that proves the divisor safe may drop the flag.
+- Folding a division by a constant 0 leaves a `trap` in its place.
+
+How the trap happens is the backend's business. Where the machine division does not trap by itself, the backend adds a compare, a branch and a `trap` (`Fir_trapdiv`). The native x86-64 backend leaves divisions of 64-bit operands, and unsigned ones up to 64 bits, to `div`/`idiv`'s #DE and checks the rest. LLVM checks every one. Fas emits every division with the flag.
 
 ### Float arithmetic (scalar or vector of floats)
 
@@ -702,7 +711,6 @@ These forms are fixed now so that front ends and passes can plan for them. Until
 | Form | Meaning |
 |---|---|
 | `func @f ... fenv` [v0.5] | A function attribute, next to `inline noinline cold noreturn`: the function sees the dynamic float environment (§6). Never inlined into a function with a different marking, nor the reverse. |
-| `udiv trap ty a, b` (also `sdiv urem srem`) [v0.3] | Division that traps on a zero divisor, and for `sdiv`/`srem` on MIN / -1, exactly where the instruction stands. Such a division is never deleted when its result is unused, and never hoisted or speculated onto a path that did not run it. Merging two equal ones is fine. A pass that proves the divisor safe may drop the flag; folding a division by a constant zero leaves a `trap` in its place. Fas emits every division this way. |
 | `switch V, ^d(ARGS), [K: ^b(ARGS), ...], weights [Wd, W1, ...]` [v0.6] | Edge weights for a `switch`: one non-negative integer per edge, default first, then the cases in order, read relative to their sum. With `br ..., weight W` and the `cold` attribute, this is all the profile information Fir carries. |
 | `declare @f SIG LINKAGE [memory(none\|read\|argmem)] [willreturn]` [v0.6] | Promises about a function defined elsewhere, so that a call to it need not be a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). |
 | `memcpy D, S, N, align A` (also `memmove`, `memset`) [later] | Both addresses are multiples of A, as the `align` of a load or store promises. Optional; the default is 1. |

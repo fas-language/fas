@@ -334,10 +334,13 @@ let starts p s = String.length s >= String.length p && String.sub s 0 (String.le
 let bin fn id (op : Low.binop) t x y =
   let x = value fn x and y = value fn y and r = fir_ty t in
   let i k = Ibin (k, 0, x, y) and fl k = Fbin (k, 0, x, y) in
+  (* every Fas division traps on a zero divisor and on MIN / -1 (A6); the
+     backend adds the checks the target does not do (Fir_trapdiv) *)
+  let d k = Ibin (k, f_trap, x, y) in
   let op =
     match op with
-    | Low.Add -> i Add | Low.Sub -> i Sub | Low.Mul -> i Mul | Low.Sdiv -> i Sdiv
-    | Low.Srem -> i Srem | Low.Udiv -> i Udiv | Low.Urem -> i Urem | Low.And -> i And
+    | Low.Add -> i Add | Low.Sub -> i Sub | Low.Mul -> i Mul | Low.Sdiv -> d Sdiv
+    | Low.Srem -> d Srem | Low.Udiv -> d Udiv | Low.Urem -> d Urem | Low.And -> i And
     | Low.Or -> i Or | Low.Xor -> i Xor | Low.Shl -> i Shl | Low.Lshr -> i Lshr
     | Low.Ashr -> i Ashr | Low.Fadd -> fl Fadd | Low.Fsub -> fl Fsub | Low.Fmul -> fl Fmul
     | Low.Fdiv -> fl Fdiv

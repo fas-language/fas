@@ -134,7 +134,9 @@ let verify_func (f : func) =
                 only_flags fl
                   (match k with
                   | Add | Sub | Mul | Shl -> f_nsw lor f_nuw
-                  | Udiv | Sdiv | Lshr | Ashr -> f_exact
+                  | Udiv | Sdiv -> f_exact lor f_trap
+                  | Urem | Srem -> f_trap
+                  | Lshr | Ashr -> f_exact
                   | Or -> f_disjoint
                   | _ -> 0)
             | Iun (k, fl, a) ->

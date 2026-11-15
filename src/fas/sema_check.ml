@@ -4064,6 +4064,7 @@ and check_call_inner c expected fn args s =
         | Some Names.Rotr -> Some Rotr
         | Some Names.Popcount -> Some Popcount
         | Some Names.Bswap -> Some Bswap
+        | Some (Names.Assert | Names.Unreachable) -> Some Hir.Assert
         | Some Names.Ctz -> Some Ctz
         | Some Names.Clz -> Some Clz
         | Some Names.Add_sat -> Some Hir.Add_sat
@@ -4114,6 +4115,43 @@ and check_call_inner c expected fn args s =
               if valid_operand then
                 Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.expr_ty a, s))
               else error s "builtin argument must be an integer or an integer vector"
+        | Hir.Assert ->
+            (* D3: always checked; the failure path writes `file:line:` and
+               the message to stderr (fd 2) and traps *)
+            let where = Printf.sprintf "%s:%d: " s.Span.file s.Span.line in
+            let fail text =
+              let text = where ^ text ^ "\n" in
+              let* id = intern_string c s text in
+              Ok
+                ( Hir.EString (id, false, s),
+                  Hir.EInt (Int64.of_int (String.length text), Hir.Int Hir.U64, s) )
+            in
+            let call cond (text, length) =
+              Ok (Hir.Call (Hir.Builtin Hir.Assert, [ cond; text; length ], Hir.Void, s))
+            in
+            if name = "unreachable" then
+              if args <> [] then error s "builtin `unreachable` takes no arguments"
+              else
+                let* message = fail "reached unreachable()" in
+                call (Hir.EBool (false, s)) message
+            else
+              let* message =
+                match args with
+                | [ _ ] -> Ok None
+                | [ _; Ast.String_lit (_, text, _) ] -> Ok (Some text)
+                | [ _; _ ] -> error s "the message of `assert` must be a string literal"
+                | _ -> error s "builtin `assert` expects a condition and an optional message"
+              in
+              let* cond = check_expr c (Some Hir.Bool) (List.hd args) in
+              if Hir.expr_ty cond <> Hir.Bool then error s "`assert` needs a `bool` condition"
+              else
+                let* message =
+                  fail
+                    (match message with
+                    | None -> "assertion failed"
+                    | Some text -> "assertion failed: " ^ text)
+                in
+                call cond message
         | Hir.Bswap ->
             (* byte order reversal: 16-, 32- and 64-bit integers or integer
                vectors, lane by lane; a byte has no order to reverse *)

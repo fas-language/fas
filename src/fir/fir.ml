@@ -171,6 +171,11 @@ let f_zero_poison = 32
 let f_contract = 64
 let f_fast = 128
 let f_poison_min = 256
+
+(* udiv/sdiv/urem/srem: a zero divisor, and MIN / -1 for the signed ones,
+   trap exactly where the instruction stands (SPEC §6); Fir_trapdiv turns
+   what the target does not trap on by itself into a check and a `trap` *)
+let f_trap = 512
 let has flags f = flags land f <> 0
 
 (* Memory access attributes. [alias] is 0 for "no information", otherwise an

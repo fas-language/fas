@@ -69,7 +69,7 @@ let reduce_name = function
 let flag_names =
   [ (f_nsw, "nsw"); (f_nuw, "nuw"); (f_exact, "exact"); (f_disjoint, "disjoint");
     (f_inbounds, "inbounds"); (f_zero_poison, "zero_poison"); (f_contract, "contract");
-    (f_fast, "fast"); (f_poison_min, "poison_min") ]
+    (f_fast, "fast"); (f_poison_min, "poison_min"); (f_trap, "trap") ]
 
 let call_attr_names =
   [ (a_noreturn, "noreturn"); (a_returns_twice, "returns_twice"); (a_nounwind, "nounwind");
