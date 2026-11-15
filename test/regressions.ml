@@ -11960,6 +11960,19 @@ let () =
     "struct S { value i32 }\nfn f() usize { return offsetof[S, missing] }\n";
   semantic_message "unknown-field-constant-offsetof" "record `S` has no field `missing`"
     "struct S { value i32 }\nconst Offset usize = offsetof[S, missing]\n";
+  semantic_message "bswap-byte" "`bswap` needs a 16-, 32- or 64-bit integer, not `u8`"
+    "fn f(x u8) u8 { return bswap(x) }\n";
+  semantic_message "bswap-byte-vector"
+    "`bswap` needs a 16-, 32- or 64-bit integer, not `vec[4, i8]`"
+    "fn f(v vec[4, i8]) vec[4, i8] { return bswap(v) }\n";
+  semantic_message "bswap-byte-constant" "`bswap` needs a 16-, 32- or 64-bit integer, not `u8`"
+    "const K u8 = bswap(1)\n";
+  semantic_message "bswap-float" "builtin argument must be an integer or an integer vector"
+    "fn f(x f32) f32 { return bswap(x) }\n";
+  semantic_message "bswap-arity" "builtin `bswap` expects one argument"
+    "fn f(x u32) u32 { return bswap(x, x) }\n";
+  semantic_message "bswap-reserved" "`bswap` is a builtin and cannot be used as a name"
+    "fn f() i32 { bswap i32 = 1\nreturn bswap }\n";
   let handle_field_source = "struct O {}\nfn f(h handle[O]) usize { return h.x }\n" in
   let handle_field_line = "fn f(h handle[O]) usize { return h.x }" in
   let handle_field_expected =

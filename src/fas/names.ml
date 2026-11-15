@@ -13,6 +13,7 @@ type value_operation =
   | Rotl
   | Rotr
   | Popcount
+  | Bswap
   | Ctz
   | Clz
   | Add_sat
@@ -142,6 +143,7 @@ let operations =
     ("rotl", Value Rotl);
     ("rotr", Value Rotr);
     ("popcount", Value Popcount);
+    ("bswap", Value Bswap);
     ("clz", Value Clz);
     ("ctz", Value Ctz);
     ("select", Value Select);

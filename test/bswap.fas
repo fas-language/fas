@@ -1,0 +1,34 @@
+// bswap: byte-order reversal of 16-, 32- and 64-bit integers, lane by lane
+// on vectors. Constants fold at compile time; run-time values go through
+// `id` so they are not folded. main returns the number of the first wrong
+// check, 0 when all agree.
+
+const K16 u16 = bswap(0x1234)
+const KI16 i16 = bswap(-2)
+const KI32 i32 = bswap(0x80)
+const K64 u64 = bswap(0x0102030405060708)
+const V0 vec[2, u32] = {0x11223344, 0xAABBCCDD}
+const KV vec[2, u32] = bswap(V0)
+const W0 vec[4, i16] = {0x0102, -2, 0x7f00, 0}
+const KW vec[4, i16] = bswap(W0)
+
+fn id[T](x T) T { return x }
+
+fn main() i32 {
+    if K16 != 0x3412 || bswap(id[u16](0x1234)) != 0x3412 { return 1 }
+    if KI16 != -257 || bswap(id[i16](-2)) != -257 { return 2 }
+    if KI32 != -2147483648 || bswap(id[i32](0x80)) != -2147483648 { return 3 }
+    if K64 != 0x0807060504030201 || bswap(id[u64](0x0102030405060708)) != 0x0807060504030201 { return 4 }
+    want vec[2, u32] = {0x44332211, 0xDDCCBBAA}
+    if !all(KV == want) || !all(bswap(id[vec[2, u32]](V0)) == want) { return 5 }
+    wide vec[4, i16] = {0x0201, -257, 0x007f, 0}
+    if !all(KW == wide) || !all(bswap(id[vec[4, i16]](W0)) == wide) { return 6 }
+    // a big-endian load is bswap of a plain load
+    buf arr[8, u8] = {1, 2, 3, 4, 5, 6, 7, 8}
+    if bswap((&buf)[u32]) != 0x01020304 { return 7 }
+    if bswap((&buf)[u64]) != 0x0102030405060708 { return 8 }
+    // bswap twice is the identity
+    x u64 = id[u64](0xDEADBEEFCAFEF00D)
+    if bswap(bswap(x)) != x { return 9 }
+    return 0
+}

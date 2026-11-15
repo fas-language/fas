@@ -1460,6 +1460,14 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
                     (Int64.shift_left x (bits - k))
           in
           Ok (t, mask_value t v)
+      | "bswap", [ (t, x) ] -> (
+          match t with
+          | Hir.Int (Hir.U8 | Hir.I8) ->
+              error s
+                (Printf.sprintf "`bswap` needs a 16-, 32- or 64-bit integer, not `%s`"
+                   (Hir.ty_name t))
+          | Hir.Int k -> Ok (t, mask_value t (bswap_bits (int_bits k) x))
+          | _ -> error s "builtin argument must be an integer or an integer vector")
       | "popcount", [ (t, x) ] ->
           if is_int t then Ok (t, Int64.of_int (popcount64 x))
           else error s "builtin argument must be an integer or an integer vector"
@@ -1956,16 +1964,21 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
       then Ok (Hir.Vec (source_lanes, target_element), List.map convert values)
       else error call_span "invalid constant cvt conversion"
   | Ast.Call (Ast.Ident (name, _), [ value ], span)
-    when List.mem name [ "popcount"; "clz"; "ctz" ] ->
+    when List.mem name [ "popcount"; "clz"; "ctz"; "bswap" ] ->
       let* ty, values = evaluate expected value in
       let* kind =
         match lane_type ty with
+        | Some (Hir.Int (Hir.U8 | Hir.I8)) when name = "bswap" ->
+            error span
+              (Printf.sprintf "`bswap` needs a 16-, 32- or 64-bit integer, not `%s`"
+                 (Hir.ty_name ty))
         | Some (Hir.Int k) -> Ok k
         | _ -> error span "builtin argument must be an integer or an integer vector"
       in
       let apply value =
         match name with
         | "popcount" -> Int64.of_int (popcount64 value)
+        | "bswap" -> bswap_bits (int_bits kind) value
         | "ctz" ->
             if value = 0L then Int64.of_int (int_bits kind)
             else Int64.of_int (trailing64 value)

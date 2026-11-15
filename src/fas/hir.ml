@@ -98,6 +98,7 @@ type builtin =
   | Rotl
   | Rotr
   | Popcount
+  | Bswap
   | Ctz
   | Clz
   | Add_sat

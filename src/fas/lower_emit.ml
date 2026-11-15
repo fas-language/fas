@@ -493,6 +493,7 @@ let intrinsic fn name (ret : Low.ty) (args : (Low.ty * Low.extension * Low.value
   else if starts "llvm.fshl." name then one (Fsh (true, a 0, a 1, a 2))
   else if starts "llvm.fshr." name then one (Fsh (false, a 0, a 1, a 2))
   else if starts "llvm.ctpop." name then one (Iun (Popcnt, 0, a 0))
+  else if starts "llvm.bswap." name then one (Iun (Bswap, 0, a 0))
   else if starts "llvm.cttz." name || starts "llvm.ctlz." name then begin
     let _, _, zp = List.nth args 1 in
     let fl =

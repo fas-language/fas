@@ -16,6 +16,7 @@ val fits_literal : Hir.ty -> int64 -> bool
 val fits_negative_literal : Hir.ty -> int64 -> bool
 val sign_extend_bits : Hir.ty -> int64 -> int64
 val sign_extend_value : Hir.ty -> int64 -> int64
+val bswap_bits : int -> int64 -> int64
 val popcount64 : int64 -> int
 val trailing64 : int64 -> int
 val leading64 : int64 -> int

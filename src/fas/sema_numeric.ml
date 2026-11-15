@@ -248,6 +248,16 @@ let sign_extend_bits ty value =
 let sign_extend_value ty value =
   if is_int ty && not (is_unsigned ty) then sign_extend_bits ty value else value
 
+(* reverse the bytes of the low [bits] bits of x (bits a multiple of 8) *)
+let bswap_bits bits x =
+  let rec go i acc =
+    if i = bits / 8 then acc
+    else
+      let byte = Int64.logand (Int64.shift_right_logical x (8 * i)) 0xFFL in
+      go (i + 1) (Int64.logor acc (Int64.shift_left byte (bits - 8 - (8 * i))))
+  in
+  go 0 0L
+
 let popcount64 x =
   let rec go n v = if v = 0L then n else go (n + 1) (Int64.logand v (Int64.sub v 1L)) in
   go 0 x

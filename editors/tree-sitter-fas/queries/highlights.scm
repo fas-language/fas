@@ -118,7 +118,7 @@
 ((identifier) @function.builtin
   (#any-of? @function.builtin
     "zext" "sext" "trunc" "bitcast" "sizeof" "alignof" "offsetof" "len"
-    "splat" "rotl" "rotr" "popcount" "clz" "ctz" "select" "any" "all"
+    "splat" "rotl" "rotr" "popcount" "bswap" "clz" "ctz" "select" "any" "all"
     "add_sat" "sub_sat" "mul_hi" "reduce_sum" "reduce_min" "reduce_max"
     "reduce_and" "reduce_or" "reduce_xor" "shuffle" "permute" "compress"
     "expand" "masked_load" "masked_store" "gather" "gather_bytes" "scatter"

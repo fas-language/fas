@@ -1376,6 +1376,11 @@ and lower_builtin s b args t span =
       let id = fresh s in
       E.call s.fn (Some id) Low.No_extension rt ("llvm.ctpop." ^ suffix) [ (rt, Low.No_extension, x) ];
       Ok (Low.Local (id, rt))
+  | Bswap, [ x ] ->
+      let* suffix = intrinsic_suffix span rt in
+      let id = fresh s in
+      E.call s.fn (Some id) Low.No_extension rt ("llvm.bswap." ^ suffix) [ (rt, Low.No_extension, x) ];
+      Ok (Low.Local (id, rt))
   | (Ctz | Clz), [ x ] ->
       let* suffix = intrinsic_suffix span rt in
       let id = fresh s in
@@ -1404,7 +1409,7 @@ and lower_builtin s b args t span =
             | Add_sat, false -> Ok "llvm.sadd.sat."
             | Sub_sat, true -> Ok "llvm.usub.sat."
             | Sub_sat, false -> Ok "llvm.ssub.sat."
-            | ( ( Rotl | Rotr | Popcount | Ctz | Clz | Mul_hi | Any | All | Select
+            | ( ( Rotl | Rotr | Popcount | Bswap | Ctz | Clz | Mul_hi | Any | All | Select
                 | Shuffle | Permute | Reduce_sum | Reduce_min | Reduce_max | Reduce_and
                 | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr

@@ -1242,6 +1242,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `len(a)` | `usize` | array element count, or string literal bytes without the terminator |
 | **Bits** | `rotl(x, k)` `rotr(x, k)` | type of `x` | `k` any integer, taken modulo the width |
 | | `popcount(x)` `clz(x)` `ctz(x)` | type of `x` | lane-wise, and `clz(0)` and `ctz(0)` give the width |
+| | `bswap(x)` | type of `x` | reverses the byte order of a 16-, 32- or 64-bit integer, lane-wise; a big-endian load is `bswap(p[u32])` |
 | **Arithmetic** | `add_sat(a, b)` `sub_sat(a, b)` | type of `a` | clamp to the type's range, lane-wise |
 | | `mul_hi(a, b)` | type of `a` | high half of the double-width product, lane-wise |
 | **Memory** | `copy(dst, src)` | statement | arrays or structs of one type, overlap is safe |
@@ -1284,7 +1285,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 
 In the masked, gather and scatter forms, `T` is the lane type, every vector has the same `N`, inactive lanes touch no memory, and bool lanes take one byte each.
 
-When every operand of `rotl`, `rotr`, `popcount`, `clz`, `ctz`, `add_sat`, `sub_sat` or `mul_hi` is an untyped literal, the literals take the destination type: `x u32 = rotl(0x80000001, 1)` is `3`, and `s u8 = add_sat(250, 10)` saturates at `255`. A typed operand still decides the type, and with no destination the literals are `i32`.
+When every operand of `rotl`, `rotr`, `popcount`, `bswap`, `clz`, `ctz`, `add_sat`, `sub_sat` or `mul_hi` is an untyped literal, the literals take the destination type: `x u32 = rotl(0x80000001, 1)` is `3`, and `s u8 = add_sat(250, 10)` saturates at `255`. A typed operand still decides the type, and with no destination the literals are `i32`.
 
 Every builtin name in this table, `cvt` and the float builtins included, is reserved: a variable, parameter, field, function or const named `sqrt` or `popcount` is an error (`` `sqrt` is a builtin and cannot be used as a name ``), and so are type names (`u8`, `f32`), literals (`true`, `null`) and `view`, `use` and `var`. A C declaration with such a name is imported but cannot be used from Fas.
 

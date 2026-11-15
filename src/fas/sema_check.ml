@@ -4060,6 +4060,7 @@ and check_call_inner c expected fn args s =
         | Some Names.Rotl -> Some Hir.Rotl
         | Some Names.Rotr -> Some Rotr
         | Some Names.Popcount -> Some Popcount
+        | Some Names.Bswap -> Some Bswap
         | Some Names.Ctz -> Some Ctz
         | Some Names.Clz -> Some Clz
         | Some Names.Add_sat -> Some Hir.Add_sat
@@ -4110,6 +4111,20 @@ and check_call_inner c expected fn args s =
               if valid_operand then
                 Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.expr_ty a, s))
               else error s "builtin argument must be an integer or an integer vector"
+        | Hir.Bswap ->
+            (* byte order reversal: 16-, 32- and 64-bit integers or integer
+               vectors, lane by lane; a byte has no order to reverse *)
+            if List.length args <> 1 then error s "builtin `bswap` expects one argument"
+            else
+              let* a = check_expr c (literal_context (List.hd args)) (List.hd args) in
+              let lane = match Hir.expr_ty a with Hir.Vec (_, t) -> t | t -> t in
+              (match lane with
+              | Hir.Int (Hir.U8 | Hir.I8) ->
+                  error s
+                    (Printf.sprintf "`bswap` needs a 16-, 32- or 64-bit integer, not `%s`"
+                       (Hir.ty_name (Hir.expr_ty a)))
+              | Hir.Int _ -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.expr_ty a, s))
+              | _ -> error s "builtin argument must be an integer or an integer vector")
         | Hir.Add_sat | Hir.Sub_sat | Hir.Mul_hi ->
             if List.length args <> 2 then
               error s (Printf.sprintf "builtin `%s` expects two arguments" name)
