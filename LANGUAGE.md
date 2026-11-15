@@ -68,7 +68,7 @@ hello, fas!
 8. **Evaluation is strictly left to right**, where C leaves the order unspecified. Operands, call arguments and brace entries are evaluated in the order written. An assignment computes the place's address first (base, then index), then the value, then stores, and `x op= e` reads `x` before it evaluates `e`. `&&` and `||` short-circuit.
 9. **Arrays and structs are places, not values.** They are not passed, returned or assigned by value: pass `&x` and use `copy(dst, src)`. A small [`value struct`](#value-structs) is the exception, and calling a C function that takes or returns a struct by value [still works](#c-structs-by-value).
 10. **`addr` is an untyped byte address.** `p + n` moves `n` bytes, `p[T]` is the `T` at `p`, `p[T, i]` is element `i`. Nothing is bounds-checked.
-11. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error, even with a length parameter as in `strncmp`; write `c"..."` there.
+11. **Strings are addresses.** `c"..."` is NUL-terminated. A plain `"..."` passed to an imported C `char *` parameter is an error, even with a length parameter as in `strncmp`; write `c"..."` there. The check follows locals and `if` expressions, but not constants or struct fields.
 12. **Generic calls infer their arguments from parameter types**: `max(x, 1)` infers `T` from `x`, and the literal takes that type. Inference covers `T`, `handle[T]`, `vec[N, T]` and generic structs behind handles. Every generic parameter must be determined by an argument. There is no inference from literals alone or from the result type. Explicit forms such as `max[u32](x, 1)` always work.
 13. **Reading a provably uninitialized local is an error.** `{}` zero-fills an array or struct. Nothing is zeroed for you otherwise, but memory the compiler cannot check (a buffer behind an `addr`, padding) holds arbitrary fixed bytes: reading it gives the same value each time and is never undefined behaviour.
 14. **Not in Fas:** heap, strings, threads (atomics exist; start threads through C), methods, overloading, macros, unions, function types and closures. Function addresses use `addr` and `call_addr`.
@@ -695,7 +695,7 @@ soup  15
 ```
 
 - Top-level initializers are compile-time values, emitted as data: no code runs before `main`.
-- An `addr` slot in a constant table may hold `c"..."`, `null`, `&GLOBAL`, `&GLOBAL.field`, `&GLOBAL[k]`, or `&f` for any non-generic Fas function.
+- An `addr` slot in a constant table may hold `c"..."`, a plain `"..."` (its bytes, no terminator: `const KW Bytes = {"if", len("if")}`), `null`, `&GLOBAL`, `&GLOBAL.field`, `&GLOBAL[k]`, or `&f` for any non-generic Fas function. A constant `addr` reads like any other: `P[u8, i]`. String bytes are read-only, and a write through them faults.
 - A `const` of struct type, an array of structs or nested arrays (`const GRID arr[2, arr[3, i32]] = {{1, 2, 3}, {4, 5, 6}}`) is read-only static data, whether or not it holds addresses. Index and read it at run time. `len` works in constants, but another constant's initializer cannot read its slots.
 - Globals are private to the program unless declared inside `extern "C" { }`.
 

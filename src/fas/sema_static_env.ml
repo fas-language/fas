@@ -1,7 +1,7 @@
 open Sema_types
 
 let rec symbolic_expression names = function
-  | Ast.Addr_of _ | Ast.String_lit (true, _, _) -> true
+  | Ast.Addr_of _ | Ast.String_lit _ -> true
   | Ast.Ident (name, _) -> List.mem name names
   | Ast.Designated_field _ | Ast.Designated_index _ -> true
   | Ast.Array_lit (items, _) -> List.exists (symbolic_expression names) items
@@ -129,20 +129,6 @@ let declarations ~source_obj names items =
 let address_value c ty expression =
   let error span message = Error [ Diag.error span message ] in
   let ( let* ) x f = match x with Ok v -> f v | Error _ as e -> e in
-  let c_string_error span =
-    let help =
-      match expression with
-      | Ast.String_lit (false, text, _)
-        when String.for_all
-               (fun character ->
-                 let code = Char.code character in
-                 code >= 32 && code <= 126 && character <> '"' && character <> '\\')
-               text ->
-          Some (Printf.sprintf "write `c\"%s\"`" text)
-      | _ -> None
-    in
-    Error [ Diag.error ?help span "address constants require a C string literal" ]
-  in
   let rec address_constant_read = function
     | Ast.Ident (name, span) -> (
         match
@@ -235,16 +221,10 @@ let address_value c ty expression =
   in
   let rec address = function
     | Hir.Null _ -> Ok Hir.Global_null
-    | Hir.EString (id, _, span) ->
-        let rec c_literal = function
-          | Ast.String_lit (true, _, _) -> true
-          | Ast.Handle_from_addr (_, value, _) | Ast.Call (_, [ value ], _) ->
-              c_literal value
-          | _ -> false
-        in
-        if c_literal expression then
-          Ok (Hir.Global_address (".str." ^ string_of_int id, 0))
-        else c_string_error span
+    | Hir.EString (id, _, _) ->
+        (* a plain or C string literal: its pooled bytes (D12: `const KW
+           Bytes = {"if", len("if")}` is valid) *)
+        Ok (Hir.Global_address (".str." ^ string_of_int id, 0))
     | Hir.Address _ ->
         let rec target = function
           | Ast.Addr_of (base, _) -> place base
@@ -301,11 +281,6 @@ let address_value c ty expression =
                 error (Hir.expr_span value)
                   "address constants can only be stored in `addr` or `handle[T]` slots")
         )
-  in
-  let* () =
-    match expression with
-    | Ast.String_lit (false, _, span) -> c_string_error span
-    | _ -> Ok ()
   in
   let record_handle_address =
     match (ty, expression) with

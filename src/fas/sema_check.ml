@@ -1619,7 +1619,10 @@ let rec check_place_inner (c : context) expr =
               match lookup_top_level n c.top_level_bindings with
               | Some { declaration_kind = Top_const; _ } -> (
                   match lookup_global n c.globals with
-                  | Some (_, ((Hir.Array _ | Hir.Struct _) as ty), _) ->
+                  (* a static constant: aggregates, and address constants
+                     (`P[u8, i]` reads through a constant `addr`) *)
+                  | Some (_, ((Hir.Array _ | Hir.Struct _ | Hir.Addr | Hir.Handle _) as ty), _)
+                    ->
                       Ok { expr = Hir.Global (n, ty, s); root = None; path = None }
                   | _ -> error s (Printf.sprintf "constant `%s` cannot be addressed" n))
               | Some { declaration_kind = Top_type; _ } ->

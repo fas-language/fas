@@ -13166,15 +13166,19 @@ let () =
   semantic_message "address-constants-vector-constant-target"
     "cannot take the address of this expression"
     "const G vec[2,i32] = splat(1)\nvar P addr = &G\n";
-  let ordinary_address_string = "var P addr = \"x\"\n" in
-  semantic_pin "address-constants-ordinary-string" ordinary_address_string 1
-    (String.index ordinary_address_string '"' + 1)
-    3 "address constants require a C string literal" (Some "write `c\"x\"`");
+  (* D12: a plain literal is a valid address constant (its pooled bytes) *)
+  semantic_accept "address-constants-ordinary-string" "var P addr = \"x\"\n";
+  semantic_accept "address-constants-ordinary-string-const" "const P addr = \"x\"\n";
+  semantic_accept "address-constants-bytes-literal"
+    "struct Bytes { p addr, n usize }\nconst KW Bytes = {\"if\", len(\"if\")}\n\
+     const KWS arr[2, Bytes] = {{\"if\", len(\"if\")}, {\"while\", len(\"while\")}}\n";
   semantic_accept "address-constants-ordinary-string-twin" "var P addr = c\"x\"\n";
+  (* a constant `addr` is readable through `P[T, i]` *)
+  semantic_accept "address-constants-indexed-read"
+    "const P addr = \"abc\"\nfn f() u8 { return P[u8, 1] }\n";
   semantic_message "address-constants-local-target" "unknown name `Local`"
     "fn f() void { Local i32 = 1\nreturn }\nvar P addr = &Local\n";
-  semantic_message "address-constants-handle-ordinary-string"
-    "address constants require a C string literal"
+  semantic_accept "address-constants-handle-ordinary-string"
     "struct Token {}\nvar P handle[Token] = handle_from_addr[Token](\"x\")\n";
   semantic_message "address-constants-readonly-table" "cannot modify constant `P`"
     "var G i32\nconst P arr[1,addr] = {&G}\nfn f() void { P[0] = null\nreturn }\n";
@@ -13466,8 +13470,10 @@ let () =
     c_strings "fn probe() addr { return strndup(\"abc\", 2) }\n";
   c_semantic_accept "c-string-strndup-length-terminated" c_strings
     "fn probe() addr { return strndup(c\"abc\", 2) }\n";
-  c_semantic_message "c-string-plain-literal-const"
-    "expression is not compile-time constant" c_strings "const S addr = \"x\"\n";
+  (* D12: a plain literal is a valid address constant (its bytes, no
+     terminator); the C2 check is flow-based and does not follow constants *)
+  c_semantic_accept "c-string-plain-literal-const" c_strings
+    "const S addr = \"x\"\n";
   c_semantic_accept "c-string-c-literal-const" c_strings
     "const S addr = c\"x\"\nfn probe() void { puts(S)\nreturn }\n";
   c_semantic_accept "c-string-memcpy-void-pointer" c_strings

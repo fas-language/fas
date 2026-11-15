@@ -1,0 +1,27 @@
+// D12: a plain string literal is a valid address constant, so a keyword
+// table is `{"if", len("if")}`. The bytes are the literal's, without a
+// terminator. main returns the number of the first wrong check.
+
+value struct Bytes { p addr, n usize }
+
+const KW Bytes = {"if", len("if")}
+const KWS arr[3, Bytes] = {{"if", len("if")}, {"while", len("while")}, {"return", len("return")}}
+const P addr = "abc"
+var G addr = "xyz"
+
+fn same(b Bytes, text addr, n usize) bool {
+    if b.n != n { return false }
+    for i usize = 0; i < n; i += 1 {
+        if b.p[u8, i] != text[u8, i] { return false }
+    }
+    return true
+}
+
+fn main() i32 {
+    if !same(KW, c"if", 2) { return 1 }
+    if !same(KWS[1], c"while", 5) { return 2 }
+    if !same(KWS[2], c"return", 6) { return 3 }
+    if P[u8, 0] != 'a' || P[u8, 2] != 'c' { return 4 }
+    if G[u8, 1] != 'y' { return 5 }
+    return 0
+}
