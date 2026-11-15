@@ -1,0 +1,36 @@
+binary 123
+args 123
+index-assign 12
+index-compound 12
+raw-assign 123
+raw-compound 123
+field-assign 12
+brace 12
+brace-named 12
+logic 1234
+ternary 12
+divmod 1234
+shift 12
+index-both 123
+read-before-call 101
+compound-global 101
+index-before-value 7 0
+compound-index 10 0
+local-arg 4001
+compound-local 5
+field-read 2
+short-circuit 0
+arg-then-later 2103
+assign-self 110
+rotl 12
+add_sat 12
+mul_hi 12
+checked_add 12
+casts 12
+call_addr 12
+try-args 1212
+catch-operand 12
+vec-brace 1234
+select 123
+assert 12
+bswap-popcount 12

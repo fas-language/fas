@@ -285,6 +285,7 @@ module.exports = grammar({
         $.while_statement,
         $.for_statement,
         $.const_for_statement,
+        $.range_for_statement,
         $.switch_statement,
         $.defer_statement,
         $.errdefer_statement,
@@ -334,7 +335,7 @@ module.exports = grammar({
       seq(
         field('label', $.identifier),
         ':',
-        choice($.while_statement, $.for_statement),
+        choice($.while_statement, $.for_statement, $.range_for_statement),
       ),
 
     if_statement: ($) =>
@@ -363,6 +364,18 @@ module.exports = grammar({
       seq(
         'for',
         'const',
+        field('name', $.identifier),
+        field('type', $._type),
+        'in',
+        field('low', $._expr),
+        '..',
+        field('high', $._expr),
+        $.block,
+      ),
+
+    range_for_statement: ($) =>
+      seq(
+        'for',
         field('name', $.identifier),
         field('type', $._type),
         'in',

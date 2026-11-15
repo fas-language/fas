@@ -390,3 +390,54 @@ fn value() u32 { return 1 + 2 }
         (binary_expression
           left: (integer)
           right: (integer))))))
+
+================================================================================================================================
+range loops
+================================================================================================================================
+fn total(n u32) u32 {
+  s u32 = 0
+  rows: for i u32 in 0..n + 1 {
+    for j i8 in -3..3 { continue rows }
+    s += i
+  }
+  return s
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (identifier)
+      (primitive_type))
+    (primitive_type)
+    (block
+      (declaration
+        (identifier)
+        (primitive_type)
+        (integer))
+      (labeled_statement
+        (identifier)
+        (range_for_statement
+          (identifier)
+          (primitive_type)
+          (integer)
+          (binary_expression
+            (identifier)
+            (integer))
+          (block
+            (range_for_statement
+              (identifier)
+              (primitive_type)
+              (unary_expression
+                (integer))
+              (integer)
+              (block
+                (continue_statement
+                  (identifier))))
+            (assignment
+              (identifier)
+              (identifier)))))
+      (return_statement
+        (identifier)))))

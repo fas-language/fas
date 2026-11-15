@@ -15,6 +15,7 @@
 (struct_declaration "value" @keyword)
 (enum_declaration "enum" @keyword)
 (const_for_statement "in" @keyword)
+(range_for_statement "in" @keyword)
 
 [
   "fn"

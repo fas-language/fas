@@ -1,0 +1,159 @@
+// evaluation order (LANGUAGE.md "Evaluation order"): every probe logs the
+// order its side effects ran in; test/eval_order.sh compares the output with
+// test/eval_order.expected on the native backend and LLVM at O0 and O2
+use "C" <stdio.h> as c
+
+
+var log u64 = 0
+fn t(k u64, v i32) i32 {
+    log = log * 10 + k
+    return v
+}
+fn u(k u64, v usize) usize {
+    log = log * 10 + k
+    return v
+}
+fn three(a i32, b i32, c2 i32) i32 { return a + b + c2 }
+struct P { x i32, y i32 }
+var xs arr[4, i32] = {0, 0, 0, 0}
+var parr arr[2, P] = {{0, 0}, {0, 0}}
+fn pa(k u64) addr {
+    log = log * 10 + k
+    return &xs
+}
+
+fn show(name addr) void {
+    c.printf(c"%s %llu\n", name, log)
+    log = 0
+}
+
+fn part1() i32 {
+    x i32 = t(1, 1) + t(2, 2) * t(3, 3)
+    show(c"binary")
+    x = three(t(1, 1), t(2, 2), t(3, 3))
+    show(c"args")
+    xs[u(1, 1)] = t(2, 5)
+    show(c"index-assign")
+    xs[u(1, 1)] += t(2, 5)
+    show(c"index-compound")
+    pa(1)[i32, u(2, 0)] = t(3, 1)
+    show(c"raw-assign")
+    pa(1)[i32, u(2, 0)] += t(3, 1)
+    show(c"raw-compound")
+    parr[u(1, 1)].y = t(2, 3)
+    show(c"field-assign")
+    p P = {t(1, 1), t(2, 2)}
+    show(c"brace")
+    q P = {.y = t(1, 1), .x = t(2, 2)}
+    show(c"brace-named")
+    b bool = t(1, 1) < t(2, 2) && t(3, 1) == t(4, 1)
+    show(c"logic")
+    x = if t(1, 1) > 0 { t(2, 2) } else { t(3, 3) }
+    show(c"ternary")
+    x = t(1, 8) / t(2, 2) - t(3, 1) % t(4, 1)
+    show(c"divmod")
+    x = t(1, 1) << t(2, 2)
+    show(c"shift")
+    xs[u(1, 1)] = xs[u(2, 2)] + t(3, 3)
+    show(c"index-both")
+    return x + p.x + q.x + (if b { 0 } else { 1 })
+}
+
+var g i32 = 1
+var k usize = 0
+fn setg(v i32) i32 {
+    g = v
+    return 100
+}
+fn setk(v usize) i32 {
+    k = v
+    return 7
+}
+fn side(p addr) i32 {
+    p[i32, 0] = 50
+    return 1
+}
+fn pick(a i32, b i32) i32 { return a * 1000 + b }
+
+fn part2() i32 {
+    for i usize in 0..4 { xs[i] = 0 }
+    g = 1
+    r i32 = g + setg(5)            // 101: g read before the call
+    c.printf(c"read-before-call %d\n", r)
+    g = 1
+    g += setg(5)                   // old g (1) + 100 = 101
+    c.printf(c"compound-global %d\n", g)
+    k = 0
+    xs[k] = setk(2)                // stores into xs[0]
+    c.printf(c"index-before-value %d %d\n", xs[0], xs[2])
+    k = 0
+    xs[0] = 3
+    xs[k] += setk(1)               // xs[0] = 3 + 7
+    c.printf(c"compound-index %d %d\n", xs[0], xs[1])
+    l i32 = 4
+    m i32 = pick(l, side(&l))      // 4001: l read before side
+    c.printf(c"local-arg %d\n", m)
+    l = 4
+    l += side(&l)                  // 4 + 1
+    c.printf(c"compound-local %d\n", l)
+    p P = {1, 2}
+    n i32 = p.x + side(&p)        // 1 + 1
+    c.printf(c"field-read %d\n", n)
+    g = 0
+    b bool = false && setg(9) > 0
+    b2 bool = true || setg(9) > 0
+    c.printf(c"short-circuit %d\n", g)
+    g = 2
+    q i32 = pick(g, setg(3)) + g    // 2100 + 3
+    c.printf(c"arg-then-later %d\n", q)
+    g = 1
+    g = g * 10 + setg(4)            // 1*10 + 100
+    c.printf(c"assign-self %d\n", g)
+    return if b || !b2 { 1 } else { 0 }
+}
+
+fn tu(k u64, v u32) u32 {
+    log = log * 10 + k
+    return v
+}
+fn tuf(k u64, v u32) u32 fails {
+    log = log * 10 + k
+    return v
+}
+fn twice(x u32) u32 { return 2 * x }
+fn sel(a u32, b u32) u32 fails { return try tuf(1, a) + try tuf(2, b) }
+
+fn part3() i32 {
+    s u32 = 0
+    s = rotl(tu(1, 1), tu(2, 2))
+    show(c"rotl")
+    s = add_sat(tu(1, 1), tu(2, 2))
+    show(c"add_sat")
+    s = mul_hi(tu(1, 1), tu(2, 2))
+    show(c"mul_hi")
+    s = checked_add(tu(1, 1), tu(2, 2)) catch 0
+    show(c"checked_add")
+    s = zext[u32](trunc[u8](tu(1, 1))) + tu(2, 2)
+    show(c"casts")
+    s = call_addr[u32](&twice, tu(1, 1)) + tu(2, 2)
+    show(c"call_addr")
+    s = sel(tu(1, 1), tu(2, 2)) catch 0
+    show(c"try-args")
+    s = (tuf(1, 1) catch tu(9, 0)) + tu(2, 2)
+    show(c"catch-operand")
+    v vec[4, u32] = {tu(1, 1), tu(2, 2), tu(3, 3), tu(4, 4)}
+    show(c"vec-brace")
+    m vec[4, bool] = v > splat(tu(1, 2))
+    z vec[4, u32] = {0, 0, 0, 0}
+    w vec[4, u32] = select(m, z + splat(tu(2, 0)), z + splat(tu(3, 1)))
+    show(c"select")
+    assert(tu(1, 1) < tu(2, 2), "ok")
+    show(c"assert")
+    s = bswap(tu(1, 1)) ^ popcount(tu(2, 2))
+    show(c"bswap-popcount")
+    return bitcast[i32](s + reduce_sum(w)) - bitcast[i32](s + reduce_sum(w))
+}
+
+fn main() i32 {
+    return part1() * 0 + part2() + part3()
+}

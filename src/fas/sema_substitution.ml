@@ -536,7 +536,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Target_field (base, _, _) ->
         validate_expression_names value_names type_names base
   and validate_statement_names value_names type_names scope_names = function
-    | Ast.Let { name; ty; ty_span; init; span } ->
+    | Ast.Let { name; ty; ty_span; init; span; _ } ->
         if String_set.mem name scope_names then
           error span (Printf.sprintf "duplicate local `%s`" name)
         else
@@ -3079,7 +3079,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     let previous_shadowed_constants = !shadowed_constants in
     let result =
       match statement with
-      | Ast.Let { name; ty; ty_span; init; span } ->
+      | Ast.Let { name; ty; ty_span; init; readonly; span } ->
           let* ty =
             Diag.local_type_error ~span ~ty_span name
               (resolve_ty ~values ~defer_const_structs substitutions depth ty_span ty)
@@ -3098,7 +3098,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           local_values := String_set.add name !local_values;
           shadowed_constants := String_set.add name !shadowed_constants;
           set_inference_type name (Some ty);
-          Ok (Ast.Let { name; ty; ty_span; init; span })
+          Ok (Ast.Let { name; ty; ty_span; init; readonly; span })
       | Ast.View { name; name_span; place; span } ->
           let* place =
             resolve_expr ~values ~defer_const_structs substitutions depth place

@@ -27,6 +27,7 @@ hello, fas!
 - [Values](#values)
 - [Floating point](#floating-point)
 - [Functions and control flow](#functions-and-control-flow)
+  - [Range loops](#range-loops)
   - [Assertions](#assertions)
 - [Errors](#errors)
 - [Enums](#enums)
@@ -242,7 +243,7 @@ fn negate(x i32) i32 { return -x }
 const OPS arr[2, addr] = {&twice, &negate}     // a dispatch table
 
 fn main() i32 {
-    for i usize = 0; i < len(OPS); i += 1 {
+    for i usize in 0..len(OPS) {
         c.printf(c"%d ", call_addr[i32](OPS[i], 21))
     }
     c.printf(c"\n")
@@ -271,6 +272,29 @@ fn main() i32 {
     return 1
 }
 ```
+
+### Range loops
+
+`for i T in A..B { ... }` runs the body for `i` = `A`, `A + 1`, ... `B - 1`. `T` must be an integer type and both bounds must fit it.
+
+```fas
+use "C" <stdio.h> as c
+
+fn main() i32 {
+    for i u8 in 250..255 { c.printf(c"%u ", zext[u32](i)) }
+    for i i32 in 3..3 { c.printf(c"never ") }
+    c.printf(c"\n")
+    return 0
+}
+```
+```text
+250 251 252 253 254 
+```
+
+- The range is half-open. When `A >= B` the body never runs. A loop up to the type's maximum, such as `250..255` for `u8`, never overflows.
+- `A` and `B` are evaluated once, in that order, before the first iteration. Changing the variables they came from inside the body does not change the range.
+- `i` is a new local in each iteration and cannot be assigned, also not through a view. Use a C-style `for` to step by other amounts or to change the counter.
+- `break`, `continue` and labels work as in any loop. `continue` moves on to the next value.
 
 ### Assertions
 
@@ -1079,7 +1103,7 @@ Only Fas files can be conditional. Put OS-specific `use "C"` lines inside the OS
 
 ## Known limits
 
-- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap, the vector lane-index trap and the enum traps (`enum_from`, `enum_name` and a `switch` without `default` on a value that is no member). A trap ends the program with a hardware exception, and which signal it raises is unspecified (today `SIGFPE` for division, `SIGILL` otherwise). Buffered `printf` output not yet flushed is lost.
+- **Checks.** The compiler rejects only what is provably wrong. When it can't tell, it accepts. Fas does not insert runtime checks the programmer can write themselves, so array indexing with a runtime index is unchecked by design (compare with `len(a)` where needed). Its only runtime checks are the integer division trap, the vector lane-index trap, the enum traps (`enum_from`, `enum_name` and a `switch` without `default` on a value that is no member) and the ones you write: `assert`, `unreachable()` and the `checked_*` builtins. A trap ends the program with a hardware exception, and which signal it raises is unspecified (today `SIGFPE` for division, `SIGILL` otherwise). Buffered `printf` output not yet flushed is lost.
 - **Stack.** Running out of stack always faults on a guard page; it never silently corrupts memory. How much stack a function uses is not specified, so deep recursion has no portable limit.
 - **Platform.** x86-64 Linux. Builds target baseline x86-64 (SSE2) and run on any x86-64 CPU. Programs that use C (headers, `.c` inputs, libraries) also need `clang-22` (see `FAS_CC` below).
 - **C.** Variadic C functions cannot take or return structs or unions by value, and the address of a function that does (`&f`) cannot be taken. Records with bit-fields, flexible array members, `long double` or `_Complex` fields, or a named field of an unnamed struct type, import only as `handle[T]` (pointers work, fields and values do not), and the error says which part is the cause.
@@ -1145,6 +1169,7 @@ copy(a, b)                              // whole-place copy of an array or struc
 if c { } else if d { } else { }
 while c { }
 for i usize = 0; i < n; i += 1 { }
+for i usize in 0..n { }                   // range loop: i = 0, 1, ... n - 1
 for const i u32 in 0..4 { }               // one straight-line copy per value
 switch x {
     case 1, 3: f(x, null)

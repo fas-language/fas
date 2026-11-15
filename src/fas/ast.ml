@@ -97,6 +97,8 @@ and stmt =
       ty : ty;
       ty_span : Span.t;
       init : expr option;
+      (* the variable of a range loop `for i T in a..b`: cannot be assigned *)
+      readonly : bool;
       span : Span.t;
     }
   | View of { name : string; name_span : Span.t; place : expr; span : Span.t }

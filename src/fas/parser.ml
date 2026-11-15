@@ -1607,7 +1607,7 @@ module P = struct
                body;
                span = s;
              })
-    | _ -> Ok (Ast.Let { name; ty; ty_span; init; span = s })
+    | _ -> Ok (Ast.Let { name; ty; ty_span; init; readonly = false; span = s })
 
   and declaration p = declaration_with_end p true
 
@@ -1704,6 +1704,7 @@ module P = struct
           let* high = expr_before_block p in
           let* body = block p in
           Ok (Ast.Const_for { name; name_span; ty; ty_span; low; high; body; span = s }))
+    else if range_for_header p then range_for p label s
     else if (peek_n p 1).kind = Token.Lparen then
       error (peek_n p 2).span
         "C `for (;;)` syntax has parentheses; Fas writes `for ; ;` with an optional \
@@ -1734,6 +1735,64 @@ module P = struct
       in
       let* body = block p in
       Ok (Ast.For (label, init, cond, step, body, s))
+
+  (* `for NAME T in ...`: a range loop. The tokens after `for` are a name and
+     a type followed by `in`; a C-style loop has `=` or `;` there instead. *)
+  and range_for_header p =
+    match ((peek_n p 1).kind, (peek_n p 2).kind) with
+    | Token.Ident _, Token.Ident _ ->
+        let before = p.pos in
+        ignore (bump p);
+        ignore (bump p);
+        let header = match ty p with Ok _ -> at p (Token.Ident "in") | Error _ -> false in
+        p.pos <- before;
+        header
+    | _ -> false
+
+  (* `for i T in a..b { body }` is
+       { .range.i T = a; .end.i T = b
+         for ; .range.i < .end.i; .range.i += 1 { i T = .range.i (read-only); body } }
+     The bounds are evaluated once, left to right. The loop is half-open, so the
+     counter never steps past `b` and cannot overflow; `a >= b` runs no
+     iterations. The hidden names contain dots, which Fas names cannot. *)
+  and range_for p label s =
+    ignore (bump p);
+    let name_span = span p in
+    let* name = ident p in
+    let ty_span = span p in
+    let* ty = ty p in
+    ignore (bump p);
+    let* low = expr p in
+    let* () = expected p Token.Dot_dot in
+    let* high = expr_before_block p in
+    let* body = block p in
+    let counter = ".range." ^ name and limit = ".end." ^ name in
+    let local name init readonly span =
+      Ast.Let { name; ty; ty_span; init = Some init; readonly; span }
+    in
+    let counter_ref = Ast.Ident (counter, name_span) in
+    let condition =
+      Ast.Binary (Ast.Lt, counter_ref, Ast.Ident (limit, Ast.expr_span high), name_span)
+    in
+    let step =
+      Ast.Compound_assign
+        (Ast.Target_ident (counter, name_span), Ast.Add, Ast.Int_lit ("1", name_span),
+         name_span, name_span)
+    in
+    Ok
+      (Ast.Block
+         ( [
+             local counter low false (Ast.expr_span low);
+             local limit high false (Ast.expr_span high);
+             Ast.For
+               ( label,
+                 None,
+                 Some condition,
+                 Some step,
+                 local name counter_ref true name_span :: body,
+                 s );
+           ],
+           s ))
 
   and switch_stmt p =
     let s = span p in

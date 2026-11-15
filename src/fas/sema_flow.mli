@@ -35,6 +35,10 @@ val view_access : t -> binding -> view_access
 val view_readonly_name : t -> binding -> string option
 val is_view : t -> binding -> bool
 val raw_view_type : t -> binding -> Hir.ty option
+
+(* range loop variables (`for i T in a..b`) cannot be assigned *)
+val mark_readonly_local : t -> binding -> unit
+val readonly_local : t -> binding -> bool
 val bind_raw_view : t -> binding -> Hir.ty -> view_access -> string option -> unit
 
 val bind_view :

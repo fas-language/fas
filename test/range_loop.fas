@@ -1,0 +1,107 @@
+// range loops `for i T in a..b` (LANGUAGE.md "Range loops"): main returns
+// the number of wrong results, 0 when all agree; run by test/range_loop.sh
+
+var calls i32 = 0
+fn counted(x u8) u8 {
+    calls += 1
+    return x
+}
+
+fn sum(a i32, b i32) i32 {
+    s i32 = 0
+    for i i32 in a..b { s += i }
+    return s
+}
+
+// the bounds are evaluated once, before the first iteration
+fn bounds_once() bool {
+    calls = 0
+    n i32 = 0
+    for i u8 in counted(0)..counted(10) { n += 1 }
+    return n == 10 && calls == 2
+}
+
+// changing the variables a bound came from does not move the bound
+fn bound_is_a_copy() i32 {
+    hi i32 = 5
+    n i32 = 0
+    for i i32 in 0..hi {
+        hi = 100
+        n += 1
+    }
+    return n
+}
+
+// up to the type's maximum: the counter never steps past `b`
+fn to_max() i32 {
+    n i32 = 0
+    last u8 = 0
+    for i u8 in 250..255 {
+        n += 1
+        last = i
+    }
+    if last != 254 { return -1 }
+    return n
+}
+
+fn signed_range() i64 {
+    s i64 = 0
+    for k i64 in -3..3 { s += k * k }
+    return s
+}
+
+fn skip_odd() i32 {
+    s i32 = 0
+    for i i32 in 0..10 {
+        if i % 2 == 1 { continue }
+        s += i
+    }
+    return s
+}
+
+fn first_square_over(limit u32) u32 {
+    found u32 = 0
+    for i u32 in 0..100 {
+        if i * i > limit {
+            found = i
+            break
+        }
+    }
+    return found
+}
+
+fn pairs() i32 {
+    n i32 = 0
+    outer: for i i32 in 0..5 {
+        for j i32 in 0..5 {
+            if j > i { continue outer }
+            if i == 4 { break outer }
+            n += 1
+        }
+    }
+    return n
+}
+
+// the variable may shadow an outer one and is fresh in each loop
+fn shadow() i32 {
+    i i32 = 7
+    for i i32 in 0..3 { }
+    for i i32 in 0..2 { }
+    return i
+}
+
+fn main() i32 {
+    bad i32 = 0
+    if sum(0, 10) != 45 { bad += 1 }
+    if sum(5, 5) != 0 { bad += 1 }
+    if sum(5, 2) != 0 { bad += 1 }
+    if !bounds_once() { bad += 1 }
+    if bound_is_a_copy() != 5 { bad += 1 }
+    if to_max() != 5 { bad += 1 }
+    if signed_range() != 19 { bad += 1 }
+    if skip_odd() != 20 { bad += 1 }
+    if first_square_over(50) != 8 { bad += 1 }
+    if pairs() != 10 { bad += 1 }
+    if shadow() != 7 { bad += 1 }
+    return bad
+}

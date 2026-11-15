@@ -4888,6 +4888,19 @@ and check_target_inner (c : context) = function
                 | None -> (None, None)
               in
               let* () =
+                let readonly_root =
+                  List.find_opt
+                    (Sema_flow.readonly_local c.flow)
+                    (b :: Option.to_list root)
+                in
+                match readonly_root with
+                | Some r ->
+                    error span
+                      (Printf.sprintf "cannot assign range loop variable `%s`%s" r.name
+                         (if r.id = b.id then "" else " (through view `" ^ n ^ "`)"))
+                | None -> Ok ()
+              in
+              let* () =
                 if is_view c.flow b then
                   check_place_access c span ~write:true (Hir.Local (b, span))
                 else Ok ()
@@ -5488,6 +5501,7 @@ and check_catch_stmt c = function
                   ty = Ast.Named_type ("error", name_span);
                   ty_span = name_span;
                   init = Some (Ast.Ident (err_name, name_span));
+                  readonly = false;
                   span = name_span;
                 };
             ]
@@ -5530,6 +5544,7 @@ and check_catch_stmt c = function
                      ty = source;
                      ty_span;
                      init = Some (Ast.Ident (tmp_name, span));
+                     readonly = false;
                      span;
                    })
             in
@@ -5570,9 +5585,24 @@ and placeholder = function
   | _ -> None
 
 and check_stmt (c : context) = function
-  | Ast.Let { name; ty; ty_span; init; span } -> (
+  | Ast.Let { name; ty; ty_span; init; readonly; span } -> (
       let* () = ensure_new_local name c span in
       let* t = source_ty_in_context c ty_span ty in
+      let* () =
+        (* the parser's range loop desugar (`for i T in a..b`) declares the hidden
+           counter `.range.i` first, so its type is checked before the loop condition *)
+        let range_prefix = ".range." in
+        if String.starts_with ~prefix:range_prefix name && not (Sema_numeric.is_int t)
+        then
+          let shown =
+            String.sub name (String.length range_prefix)
+              (String.length name - String.length range_prefix)
+          in
+          error ty_span
+            (Printf.sprintf "range loop variable `%s` needs an integer type, got `%s`"
+               shown (Hir.ty_name t))
+        else Ok ()
+      in
       let* _ =
         Sema_limits.validate_object
           ?opaque_span:(Sema_types.opaque_source_span c.named_types [] ty)
@@ -5612,6 +5642,7 @@ and check_stmt (c : context) = function
             Ok (Some initialized)
       in
       let* binding = add_local name t c span in
+      if readonly then Sema_flow.mark_readonly_local c.flow binding;
       index_local c binding span;
       (match (init, x) with
       | Some e, Some (`Aggregate (ty, _, _, _)) ->

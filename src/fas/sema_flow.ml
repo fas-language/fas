@@ -71,6 +71,8 @@ type t = {
   view_accesses : (int, view_access) Hashtbl.t;
   view_readonly_names : (int, string) Hashtbl.t;
   raw_view_types : (int, Hir.ty) Hashtbl.t;
+  (* binding ids of range loop variables, which cannot be assigned *)
+  readonly_locals : (int, unit) Hashtbl.t;
   mutable initialized : init_state State_map.t;
   mutable values : value_state;
   mutable addresses : address_state;
@@ -104,6 +106,7 @@ let create ?(recover = false) ~initial_scope structs =
     view_accesses = Hashtbl.create 16;
     view_readonly_names = Hashtbl.create 16;
     raw_view_types = Hashtbl.create 16;
+    readonly_locals = Hashtbl.create 4;
     initialized = State_map.empty;
     values = State_map.empty;
     addresses = State_map.empty;
@@ -168,6 +171,11 @@ let view_origin flow binding =
   match Hashtbl.find_opt flow.view_origins binding.id with
   | Some origin -> origin
   | None -> Some (binding, Exact [])
+
+let mark_readonly_local flow (binding : binding) =
+  Hashtbl.replace flow.readonly_locals binding.id ()
+
+let readonly_local flow (binding : binding) = Hashtbl.mem flow.readonly_locals binding.id
 
 let view_access flow binding =
   Option.value ~default:Mutable_access (Hashtbl.find_opt flow.view_accesses binding.id)

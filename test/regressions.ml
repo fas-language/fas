@@ -11983,6 +11983,32 @@ let () =
     "fn f(a i32) f32 { return checked_trunc[f32](a) catch 0 }\n";
   semantic_message "checked-reserved" "`checked_add` is a builtin and cannot be used as a name"
     "fn f() i32 { checked_add i32 = 1\nreturn checked_add }\n";
+  semantic_accept "range-loop-forms"
+    "fn f(n u32) u32 {\ns u32 = 0\nfor i u32 in 0..n { s += i }\nl: for j i8 in -3..3 { if j == 0 { continue l }\nbreak l }\nreturn s\n}\n";
+  semantic_accept "range-loop-generic"
+    "fn f[T](n T) T {\ns T = 0\nfor i T in 0..n { s += i }\nreturn s\n}\nfn g() u8 { return f[u8](4) }\n";
+  semantic_accept "range-loop-shadows"
+    "fn f() i32 {\ni i32 = 7\nfor i i32 in 0..3 { }\nreturn i\n}\n";
+  semantic_accept "c-style-for-still-parses"
+    "fn f() i32 {\ns i32 = 0\nfor i i32 = 0; i < 3; i += 1 { s += i }\nreturn s\n}\n";
+  semantic_message "range-loop-assign" "cannot assign range loop variable `i`"
+    "fn f() void { for i i32 in 0..3 { i = 2 } }\n";
+  semantic_message "range-loop-compound-assign" "cannot assign range loop variable `i`"
+    "fn f() void { for i i32 in 0..3 { i += 1 } }\n";
+  semantic_message "range-loop-assign-view" "cannot assign range loop variable `i` (through view `v`)"
+    "fn f() void { for i i32 in 0..3 {\nview v = i\nv = 1\n} }\n";
+  semantic_message "range-loop-catch-assign" "cannot assign range loop variable `i`"
+    "fn g() i32 fails { return 1 }\nfn f() void { for i i32 in 0..3 { i = g() catch 0 } }\n";
+  semantic_message "range-loop-float" "range loop variable `i` needs an integer type, got `f64`"
+    "fn f() void { for i f64 in 0.0..2.0 { } }\n";
+  semantic_message "range-loop-bool" "range loop variable `i` needs an integer type, got `bool`"
+    "fn f() void { for i bool in false..true { } }\n";
+  semantic_message "range-loop-bound-type" "cannot assign `i64` to `i32`: values outside -2147483648..2147483647 would be lost"
+    "fn f(n i64) void { for i i32 in 0..n { } }\n";
+  semantic_message "range-loop-redeclared" "duplicate local `i`"
+    "fn f() void { for i i32 in 0..3 { i i32 = 4 } }\n";
+  semantic_message "range-loop-missing-dots" "expected `..`"
+    "fn f() void { for i i32 in 3 { } }\n";
   semantic_accept "assert-forms"
     "fn f(x i32) i32 {\nassert(x > 0)\nassert(x < 9, \"small\")\nreturn x\n}\n";
   semantic_accept "unreachable-ends-function"

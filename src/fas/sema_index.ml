@@ -498,7 +498,9 @@ let declare_program index ~c_aliases (program : Ast.program) =
               List.iter
                 (iter_statement
                    (function
-                     | Ast.Let { name = local_name; span; ty = local_ty; _ } ->
+                     (* hidden range loop locals (`.range.i`) are not user names *)
+                     | Ast.Let { name = local_name; span; ty = local_ty; _ }
+                       when not (String.starts_with ~prefix:"." local_name) ->
                          local name extent local_name Local span;
                          Hashtbl.replace index.source_types span
                            (Ast.type_name local_ty)
