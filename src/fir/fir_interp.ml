@@ -1735,17 +1735,26 @@ and exec st fr i =
       check_align a m.align;
       let t = vty v in
       let old = read_value st t a in
-      write_value st t a [| rmw_value op t old.(0) (get1 st fr v) |];
+      (* lane-wise on a vector *)
+      write_value st t a (Array.map2 (rmw_value op (elem t)) old (g v));
       set 0 old
   | Cmpxchg { mem; p; expected; desired; _ } ->
       let a = ptr_of (get1 st fr p) in
       check_align a mem.align;
       let t = vty desired in
       let old = read_value st t a in
+      (* the whole value, bit for bit (every lane of a vector) *)
       let ok =
-        match (old.(0), get1 st fr expected) with
-        | Bits x, Bits y -> Some (W.equal x y)
-        | _ -> None
+        let x = g expected in
+        let acc = ref (Some true) in
+        Array.iteri
+          (fun k o ->
+            acc :=
+              match (!acc, o, x.(k)) with
+              | Some b, Bits o, Bits x -> Some (b && W.equal o x)
+              | _ -> None)
+          old;
+        !acc
       in
       (match ok with Some true -> write_value st t a (g desired) | _ -> ());
       set 0 old;

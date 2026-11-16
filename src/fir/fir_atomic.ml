@@ -20,6 +20,10 @@
      The copies are zeroed first: libatomic compares whole objects, so
      padding (f80's six bytes, the top of an i100) is kept zero, as clang
      clears it.
+   - Vectors (also before Fir_scalarize, which calls this): one of 1, 2, 4
+     or 8 bytes without pointer lanes works on the integer of its bytes
+     (see [how_of]); any other through libatomic on its bytes, as above.
+     The arithmetic is lane-wise, cmpxchg compares bit for bit.
 
    The block holding a rewritten loop is split: the instructions after the
    access and the terminator move to a new block, the old results become
@@ -31,12 +35,21 @@ let legal = function 8 | 16 | 32 | 64 -> true | _ -> false
 
 (* how an atomic access of [ty] is done: on an integer container of
    [bits], or by libatomic on an object of [bytes] *)
-type how = Native | Narrow of int | Lib of int
+type how = Native | Narrow of int | Lib of int | Image of int
 
+(* A vector of 1, 2, 4 or 8 bytes (without pointer lanes) is an [Image]:
+   the access works on the integer of its bytes, bitcast to and from the
+   vector (a bool vector's bits above its lanes zero, as for an odd-width
+   integer); and/or/xor/xchg are bitwise there, the other operations a
+   lane-wise compare-and-swap loop. Any other vector goes through
+   libatomic on its bytes, like a wide integer. *)
 let how_of = function
   | Int n when n <= 64 && not (legal n) -> Narrow (8 * size_of (Int n))
   | Int n when n > 64 -> Lib (size_of (Int n))
   | F80 -> Lib 16
+  | Vec (_, Ptr _) as t -> Lib (size_of t)
+  | Vec _ as t when legal (8 * size_of t) -> Image (8 * size_of t)
+  | Vec _ as t -> Lib (size_of t)
   | _ -> Native
 
 (* C11's memory_order numbering, what libatomic takes *)
@@ -96,7 +109,8 @@ let copy_of cx bytes v =
 
 (* the new value of an rmw from the old one *)
 let rmw_value cx k ty old v =
-  let pick c = e cx (Select (e cx (Icmp (c, old, v)) i1, old, v)) ty in
+  let cond = match ty with Vec (n, _) -> Vec (n, Int 1) | _ -> i1 in
+  let pick c = e cx (Select (e cx (Icmp (c, old, v)) cond, old, v)) ty in
   match k with
   | Xchg -> v
   | Radd -> e cx (Ibin (Add, 0, old, v)) ty
@@ -115,6 +129,17 @@ let rmw_value cx k ty old v =
    the loop leaves to *)
 let loop_blocks cx = (add_block cx.f, add_block cx.f)
 
+(* the integer image of a vector [v] of type [ty] on [c] bits, and back *)
+let to_image cx ty c v =
+  match ty with
+  | Vec (n, Int 1) when n < c -> e cx (Conv (Zext, e cx (Conv (Bitcast, v)) (Int n))) (Int c)
+  | _ -> e cx (Conv (Bitcast, v)) (Int c)
+
+let of_image cx ty c x =
+  match ty with
+  | Vec (n, Int 1) when n < c -> e cx (Conv (Bitcast, e cx (Conv (Trunc, x)) (Int n))) ty
+  | _ -> e cx (Conv (Bitcast, x)) ty
+
 (* Rewrites [ir] at the end of block cx.cur (its later instructions are
    already detached); returns false when it needs nothing *)
 let rewrite cx (ir : inst_rec) =
@@ -128,6 +153,9 @@ let rewrite cx (ir : inst_rec) =
       | Narrow c ->
           set 0 (e cx (Conv (Trunc, e cx (Load (m, p)) (Int c))) (ty_of (r 0)));
           true
+      | Image c ->
+          set 0 (of_image cx (ty_of (r 0)) c (e cx (Load (m, p)) (Int c)));
+          true
       | Lib bytes ->
           let tmp = slot cx bytes in
           ignore (call cx "__atomic_load" [| c64 cx bytes; p; tmp; c32 cx (order_num m.order) |]);
@@ -139,6 +167,9 @@ let rewrite cx (ir : inst_rec) =
       | Narrow c ->
           e0 cx (Store (m, e cx (Conv (Zext, v)) (Int c), p));
           true
+      | Image c ->
+          e0 cx (Store (m, to_image cx (ty_of v) c v, p));
+          true
       | Lib bytes ->
           let tmp = copy_of cx bytes v in
           ignore (call cx "__atomic_store" [| c64 cx bytes; p; tmp; c32 cx (order_num m.order) |]);
@@ -147,20 +178,27 @@ let rewrite cx (ir : inst_rec) =
       let ty = ty_of v in
       match how_of ty with
       | Native -> false
-      | Narrow c when (match k with Xchg | Rand | Ror | Rxor -> true | _ -> false) ->
+      | (Narrow c | Image c) when (match k with Xchg | Rand | Ror | Rxor -> true | _ -> false) ->
           (* zero above N in, zero above N out *)
-          let old = e cx (Rmw (k, m, p, e cx (Conv (Zext, v)) (Int c))) (Int c) in
-          set 0 (e cx (Conv (Trunc, old)) ty);
+          let into, out_of =
+            match how_of ty with
+            | Image _ -> (to_image cx ty c, of_image cx ty c)
+            | _ -> ((fun v -> e cx (Conv (Zext, v)) (Int c)), fun x -> e cx (Conv (Trunc, x)) ty)
+          in
+          let old = e cx (Rmw (k, m, p, into v)) (Int c) in
+          set 0 (out_of old);
           true
-      | Narrow c ->
+      | Narrow c | Image c ->
+          let image = match how_of ty with Image _ -> true | _ -> false in
           let ct = Int c in
           let init = e cx (Load ({ m with order = Relaxed }, p)) ct in
           let loop, out = loop_blocks cx in
           let old_c = add_param cx.f loop ct in
           set_term ~loc:cx.loc cx.f cx.cur (Jump (target ~args:[| init |] loop));
           cx.cur <- loop;
-          let old = e cx (Conv (Trunc, old_c)) ty in
-          let nw = e cx (Conv (Zext, rmw_value cx k ty old v)) ct in
+          let old = if image then of_image cx ty c old_c else e cx (Conv (Trunc, old_c)) ty in
+          let nv = rmw_value cx k ty old v in
+          let nw = if image then to_image cx ty c nv else e cx (Conv (Zext, nv)) ct in
           let rs =
             emit ~loc:cx.loc cx.f cx.cur
               (Cmpxchg { mem = m; fail = fail_of m.order; weak = false; p; expected = old_c; desired = nw })
@@ -204,6 +242,15 @@ let rewrite cx (ir : inst_rec) =
           let z v = e cx (Conv (Zext, v)) ct in
           let rs = emit ~loc:cx.loc cx.f cx.cur (Cmpxchg { c with expected = z c.expected; desired = z c.desired }) [| ct; i1 |] in
           set 0 (e cx (Conv (Trunc, rs.(0))) ty);
+          set 1 rs.(1);
+          true
+      | Image bits ->
+          (* compares the whole vector bit for bit *)
+          let z = to_image cx ty bits in
+          let rs =
+            emit ~loc:cx.loc cx.f cx.cur (Cmpxchg { c with expected = z c.expected; desired = z c.desired }) [| Int bits; i1 |]
+          in
+          set 0 (of_image cx ty bits rs.(0));
           set 1 rs.(1);
           true
       | Lib bytes ->

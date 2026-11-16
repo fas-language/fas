@@ -31,9 +31,9 @@
      result through a stack slot.
 
    Block ids are kept (blockaddr constants stay valid); added blocks come
-   after the original ones. Refused: vectors through [...] (variadic
-   arguments and va_arg), in syscalls, atomic_rmw and cmpxchg on vectors.
-   A [dbg_value] of a vector is dropped. *)
+   after the original ones. Atomic accesses of vectors are rewritten by
+   Fir_atomic first (run calls it). Refused: vectors of more lanes than
+   [max_lanes]. A [dbg_value] of a vector is dropped. *)
 
 open Fir
 open Fir_abi
@@ -670,6 +670,9 @@ let rebuild_func (f : func) : func =
 (* Rewrites [m] in place. Afterwards no value, signature or memory access
    has a vector type. *)
 let run (m : modul) =
+  (* atomic accesses of vectors become ones of integers or libatomic
+     calls first, so none is left here (check_mem) *)
+  Fir_atomic.run m;
   for i = 0 to Vec.length m.funcs - 1 do
     let f = Vec.get m.funcs i in
     if func_needs f then Vec.set m.funcs i (rebuild_func f)

@@ -273,8 +273,9 @@ let verify_func (f : func) =
                 if nres = 1 then begin
                   same "operand" x (r 0);
                   let fl = (k = Rfadd || k = Rfsub) in
-                  if fl && not (is_float (r 0)) then err "%s: float atomic on %s" where (ty_to_string (r 0));
-                  if (not fl) && k <> Xchg && not (is_int (r 0)) then err "%s: integer atomic on %s" where (ty_to_string (r 0))
+                  (* lane-wise on a vector *)
+                  if fl && not (is_float (elem (r 0))) then err "%s: float atomic on %s" where (ty_to_string (r 0));
+                  if (not fl) && k <> Xchg && not (is_int (elem (r 0))) then err "%s: integer atomic on %s" where (ty_to_string (r 0))
                 end
             | Cmpxchg { mem; fail; p; expected; desired; _ } ->
                 want 2;

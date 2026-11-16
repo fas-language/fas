@@ -345,8 +345,8 @@ For every conversion the type written is the **result** type: `%w = sext i64 %b`
 | `memcpy [volatile] D, S, N` | Copy N bytes; the regions must not overlap. N is an integer value. |
 | `memmove [volatile] D, S, N` | Copy N bytes; the regions may overlap. |
 | `memset [volatile] D, BYTE, N` | Fill N bytes. BYTE is an `i8`. |
-| `%old = atomic_rmw OP ty P, V, MEM` | Atomic read-modify-write, with `OP ∈ xchg add sub and or xor min max umin umax fadd fsub`. MEM must include an ordering. |
-| `%old, %ok = cmpxchg [weak] (ty, i1) P, EXPECTED, DESIRED, MEM, fail ORD` | Compare and swap: yields the old value and a success flag. |
+| `%old = atomic_rmw OP ty P, V, MEM` | Atomic read-modify-write, with `OP ∈ xchg add sub and or xor min max umin umax fadd fsub`. MEM must include an ordering. On a vector the operation is lane-wise, and the whole vector is one atomic object. |
+| `%old, %ok = cmpxchg [weak] (ty, i1) P, EXPECTED, DESIRED, MEM, fail ORD` | Compare and swap: yields the old value and a success flag. The comparison is bit for bit, over every lane of a vector (so `-0.0` and `0.0` differ, a NaN equals itself). |
 | `fence ORD` | ORD is acquire or stronger. |
 
 `MEM` is written as `align A [volatile] [ORDERING] [!alias N] [!noalias [N, ...]]`:
@@ -625,7 +625,7 @@ Each C23 feature that needs code generation maps to Fir as follows. The test tha
 | `[[unsequenced]]`, `[[reproducible]]`, `[[noreturn]]`, `unreachable()` | Attributes need nothing; `unreachable()` is `unreachable` (or `trap` first, see above). | `ubtrap` |
 | VLAs (mandatory again for VM types) | `alloca` of a variable size between `stacksave`/`stackrestore`. | `vla` |
 | `thread_local` | `global ... thread_local`. | `tls`, `tlsgd` |
-| `<stdatomic.h>`, `_Atomic` | Atomic `load`/`store` orderings, `atomic_rmw`, `cmpxchg`, `fence`, at any size (`Fir_atomic`: odd widths as a `cmpxchg` loop, over 64 bits and `f80` through libatomic, as C). | `atomwide` |
+| `<stdatomic.h>`, `_Atomic` | Atomic `load`/`store` orderings, `atomic_rmw`, `cmpxchg`, `fence`, at any size (`Fir_atomic`: odd widths as a `cmpxchg` loop, over 64 bits and `f80` through libatomic, as C), and on vectors (one of 1, 2, 4 or 8 bytes on the integer of its bytes, any other through libatomic on its bytes). | `atomwide`, `atomvec` |
 | `memset_explicit` | `memset volatile`. | |
 | `alignas`, `alignof` | The `align` of `alloca`, `global`, `load`/`store`; layouts are the front end's. | `aggabi`, `vecabi` |
 | `constexpr`, `typeof`, `auto`, `nullptr`, `#embed`, `static_assert` | Front-end only. `#embed` becomes `bytes` in a global initializer. | |
@@ -642,7 +642,7 @@ The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3
 |---|---|---|---|
 | Integer types | Every width. Integers other than i1 i8 i16 i32 i64 are split into i64 limbs before code generation (`Fir_wide`; `fas-fir --legalize` shows the result); division, wide conversions to and from float, and shifts use small helper functions that are added to the module. Atomics of every width (`Fir_atomic`, also on the LLVM path): odd widths up to 64 bits on their i8..i64 container, with add/sub/min/max as a `cmpxchg` loop; wider than 64 bits through libatomic (below) | — | — |
 | Float types | f16 (C `_Float16`: computed as f32 and rounded once per operation, `fma` exact, every comparison and conversion; held as 16-bit integers by `Fir_wide`), f32 f64 f80 (x87 extended precision, C `long double`: every op, comparison and conversion, also wide integers to and from f80, and atomics through libatomic) | — | — |
-| Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters, results and variadic arguments follow the SysV ABI for C vectors (§5) | Atomic vector loads and stores; vector `atomic_rmw`/`cmpxchg` | Scalar loops. |
+| Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters, results and variadic arguments follow the SysV ABI for C vectors (§5). Atomic accesses of vectors are rewritten first by `Fir_atomic`: a vector of 1, 2, 4 or 8 bytes (without pointer lanes) on the integer of its bytes, the lane-wise arithmetic as a `cmpxchg` loop; any other through libatomic on its bytes | — | — |
 | Integer ops | Everything in §6, on scalars and vectors, including `bswap`, `bitrev`, `abs`, `smulh`/`umulh` and the `*_ovf` family | — | — |
 | Float ops | Everything in §6, on scalars and vectors: fmin/fmax follow §6 (NaN loses, -0 < +0), `frem` is exact (as C `fmod`, through x87 `fprem`), `fma` is correctly rounded (software helpers: baseline x86-64 has no FMA instruction, and x87 none for f80), `floor ceil ftrunc roundeven` through integer helpers (no SSE4.1 `roundsd`); every op honors the rounding mode and raises the IEEE flags (§6) | — | — |
 | fcmp | All 16 predicates, on scalars and vectors | — | — |
