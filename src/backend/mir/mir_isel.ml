@@ -2209,7 +2209,7 @@ let term c (t : F.term) =
           let bt = edge_block c tt and be = edge_block c te in
           emit c (Test (rv, rv));
           set_term c (Jcc (Ne, bt, be)))
-  | Switch (v, default, cases) ->
+  | Switch (v, default, cases, _) ->
       let rv = use c v in
       let w = width (ty c v) in
       Array.iter

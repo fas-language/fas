@@ -1029,14 +1029,15 @@ let rebuild_term cx (b : block) =
       unsupported "asm_goto on a wide or odd-width integer"
   | Asm_goto g -> set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs })
   | Unreachable -> set_term Unreachable
-  | Switch (v, d, cases) when not (odd_value cx v) ->
-      set_term (Switch (get1 cx v, target_args cx d, Array.map (fun (key, t) -> (key, target_args cx t)) cases))
-  | Switch (v, d, cases) ->
+  | Switch (v, d, cases, w) when not (odd_value cx v) ->
+      set_term (Switch (get1 cx v, target_args cx d, Array.map (fun (key, t) -> (key, target_args cx t)) cases, w))
+  | Switch (v, d, cases, w) ->
       let n = match src_ty cx v with Int n -> n | _ -> assert false in
       let x = get cx v in
       let d = target_args cx d in
       let cases = Array.map (fun (key, t) -> (key, target_args cx t)) cases in
-      if nlimbs n = 1 then set_term (Switch (x.(0), d, Array.map (fun (key, t) -> ([| key.(0) |], t)) cases))
+      if nlimbs n = 1 then set_term (Switch (x.(0), d, Array.map (fun (key, t) -> ([| key.(0) |], t)) cases, w))
+      (* the weights are hints: the compare chain drops them *)
       else begin
         (* a chain of compares, one new block per case after the first *)
         let nc = Array.length cases in

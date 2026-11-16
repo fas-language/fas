@@ -865,7 +865,21 @@ let parse_term st word =
       end;
       let cases = Array.of_list (List.rev !cases) in
       st.pending_keys <- Some (Array.map fst cases);
-      Switch (x, d, Array.map (fun (_, t) -> ([||], t)) cases)
+      (* optional edge weights: default first, then the cases *)
+      let w =
+        if accept lx "," then begin
+          expect_ident lx "weights";
+          expect lx "[";
+          let ws = ref [ int_tok lx ] in
+          while accept lx "," do
+            ws := int_tok lx :: !ws
+          done;
+          expect lx "]";
+          Array.of_list (List.rev !ws)
+        end
+        else [||]
+      in
+      Switch (x, d, Array.map (fun (_, t) -> ([||], t)) cases, w)
   | "indirect_br" ->
       let x = parse_value st in
       expect lx ",";
@@ -1023,7 +1037,7 @@ let parse_body lx f =
         (match br.term with
         | Jump t -> Jump (rt t)
         | Br (c, t, e, w) -> Br (c, rt t, rt e, w)
-        | Switch (x, d, cs) -> Switch (x, rt d, Array.map (fun (k, t) -> (k, rt t)) cs)
+        | Switch (x, d, cs, w) -> Switch (x, rt d, Array.map (fun (k, t) -> (k, rt t)) cs, w)
         | Indirect_br (x, bs) -> Indirect_br (x, Array.map rn bs)
         | Asm_goto g -> Asm_goto { g with fall = rn g.fall; labels = Array.map rn g.labels }
         | t -> t))
@@ -1038,10 +1052,10 @@ let parse_body lx f =
     (fun (b, raw) ->
       let br = block f (rn b) in
       match br.term with
-      | Switch (x, d, cs) ->
+      | Switch (x, d, cs, ws) ->
           let w = int_width (ty_of f x) in
           if w = 0 then fail lx "switch on a non-integer";
-          br.term <- Switch (x, d, Array.mapi (fun k (_, t) -> (limbs_of_text lx w raw.(k), t)) cs)
+          br.term <- Switch (x, d, Array.mapi (fun k (_, t) -> (limbs_of_text lx w raw.(k), t)) cs, ws)
       | _ -> ())
     !switch_fixups
 

@@ -106,13 +106,13 @@ let evaluate f (ir : inst_rec) =
 let targets = function
   | Jump t -> [ t ]
   | Br (_, t, e, _) -> [ t; e ]
-  | Switch (_, d, cases) -> d :: Array.to_list (Array.map snd cases)
+  | Switch (_, d, cases, _) -> d :: Array.to_list (Array.map snd cases)
   | Indirect_br _ | Asm_goto _ | Ret _ | Unreachable -> []
 
 let fold_term f = function
   | Br (c, t, e, _) as term -> (
       match int_const f c with Some (_, x) -> Jump (if x <> 0L then t else e) | None -> term)
-  | Switch (v, d, cases) as term -> (
+  | Switch (v, d, cases, _) as term -> (
       match int_const f v with
       | Some (w, x) -> (
           match Array.find_opt (fun ((k : int64 array), _) -> mask w k.(0) = x) cases with
@@ -159,7 +159,7 @@ let drop_params f =
           (match br.term with
           | Jump t -> Jump (target t)
           | Br (c, t, e, w) -> Br (c, target t, target e, w)
-          | Switch (x, d, cases) -> Switch (x, target d, Array.map (fun (k, t) -> (k, target t)) cases)
+          | Switch (x, d, cases, w) -> Switch (x, target d, Array.map (fun (k, t) -> (k, target t)) cases, w)
           | t -> t))
       f.blocks
   end

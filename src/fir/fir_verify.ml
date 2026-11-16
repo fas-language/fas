@@ -465,8 +465,11 @@ let verify_func (f : func) =
             check_target t;
             check_target e;
             if w > 1000 then err "%s: weight above 1000" where
-        | Switch (x, dflt, cases) ->
+        | Switch (x, dflt, cases, ws) ->
             check_target dflt;
+            if ws <> [||] && Array.length ws <> Array.length cases + 1 then
+              err "%s: switch has %d weights for %d edges" where (Array.length ws) (Array.length cases + 1);
+            if Array.exists (fun w -> w < 0) ws then err "%s: negative switch weight" where;
             let w = int_width (ty x) in
             if not (is_int (ty x)) then err "%s: switch on %s" where (tys x);
             let seen = Hashtbl.create (Array.length cases) in

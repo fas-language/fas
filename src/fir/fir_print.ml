@@ -359,11 +359,13 @@ let term_text f nm = function
   | Br (c, t, e, w) ->
       Printf.sprintf "br %s, %s, %s%s" (value_text f nm c) (target_text f nm t) (target_text f nm e)
         (if w >= 0 then Printf.sprintf ", weight %d" w else "")
-  | Switch (x, d, cases) ->
+  | Switch (x, d, cases, w) ->
       let ty = ty_of f (resolve f x) in
-      Printf.sprintf "switch %s, %s, [%s]" (value_text f nm x) (target_text f nm d)
+      Printf.sprintf "switch %s, %s, [%s]%s" (value_text f nm x) (target_text f nm d)
         (String.concat ", "
            (Array.to_list (Array.map (fun (k, t) -> int_text ty k ^ ": " ^ target_text f nm t) cases)))
+        (if w = [||] then ""
+         else ", weights [" ^ String.concat ", " (Array.to_list (Array.map string_of_int w)) ^ "]")
   | Indirect_br (x, bs) ->
       Printf.sprintf "indirect_br %s, [%s]" (value_text f nm x)
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) bs)))

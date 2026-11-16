@@ -1511,7 +1511,7 @@ let emit_inst cx (ir : inst_rec) =
 let edges = function
   | Jump t -> [ t ]
   | Br (_, t, e, _) -> [ t; e ]
-  | Switch (_, d, cases) -> d :: Array.to_list (Array.map snd cases)
+  | Switch (_, d, cases, _) -> d :: Array.to_list (Array.map snd cases)
   | Indirect_br (_, bs) -> Array.to_list (Array.map (fun b -> target b) bs)
   | Asm_goto { fall; labels; _ } -> target fall :: Array.to_list (Array.map (fun b -> target b) labels)
   | Ret _ | Unreachable -> []
@@ -1559,7 +1559,7 @@ let emit_term cx b (labels : string array) =
   match br.term with
   | Jump _ -> line cx ("br " ^ lab 0)
   | Br (c, _, _, _) -> line cx (Printf.sprintf "br %s, %s, %s" (tv cx c) (lab 0) (lab 1))
-  | Switch (x, _, cases) ->
+  | Switch (x, _, cases, _) ->
       let t = tyv cx x in
       let case k (keys, _) = Printf.sprintf "%s %s, %s" (lty t) (int_text (int_width t) keys) (lab (k + 1)) in
       line cx

@@ -1511,7 +1511,7 @@ and run_block st caller fr b : v array =
   match br.term with
   | Jump t -> goto t
   | Br (c, t, e, _) -> if (branch_value c).(0) <> 0L then goto t else goto e
-  | Switch (v, d, cases) ->
+  | Switch (v, d, cases, _) ->
       let x = branch_value v in
       let w = int_width (ty_of f v) in
       let rec find k =

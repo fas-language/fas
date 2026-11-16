@@ -301,7 +301,9 @@ type target = { dest : block; args : value array }
 type term =
   | Jump of target
   | Br of value * target * target * int  (** weight of the true edge in 1/1000, -1 = unknown *)
-  | Switch of value * target * (int64 array * target) array  (** case keys as limbs *)
+  | Switch of value * target * (int64 array * target) array * int array
+      (** case keys as limbs; edge weights (default first, then the cases),
+          [||] = unknown *)
   | Indirect_br of value * block array
   | Asm_goto of {
       tmpl : string;
@@ -682,7 +684,7 @@ let iter_term_uses g = function
       g c;
       Array.iter g t.args;
       Array.iter g e.args
-  | Switch (v, d, cases) ->
+  | Switch (v, d, cases, _) ->
       g v;
       Array.iter g d.args;
       Array.iter (fun (_, t) -> Array.iter g t.args) cases
@@ -746,8 +748,8 @@ let map_target g t = { t with args = Array.map g t.args }
 let map_term_uses g = function
   | Jump t -> Jump (map_target g t)
   | Br (c, t, e, w) -> Br (g c, map_target g t, map_target g e, w)
-  | Switch (v, d, cases) ->
-      Switch (g v, map_target g d, Array.map (fun (k, t) -> (k, map_target g t)) cases)
+  | Switch (v, d, cases, w) ->
+      Switch (g v, map_target g d, Array.map (fun (k, t) -> (k, map_target g t)) cases, w)
   | Indirect_br (v, bs) -> Indirect_br (g v, bs)
   | Asm_goto a -> Asm_goto { a with aargs = Array.map g a.aargs }
   | Ret vs -> Ret (Array.map g vs)
@@ -756,7 +758,7 @@ let map_term_uses g = function
 let successors = function
   | Jump t -> [ t.dest ]
   | Br (_, t, e, _) -> [ t.dest; e.dest ]
-  | Switch (_, d, cases) -> d.dest :: Array.to_list (Array.map (fun (_, t) -> t.dest) cases)
+  | Switch (_, d, cases, _) -> d.dest :: Array.to_list (Array.map (fun (_, t) -> t.dest) cases)
   | Indirect_br (_, bs) -> Array.to_list bs
   | Asm_goto { fall; labels; _ } -> fall :: Array.to_list labels
   | Ret _ | Unreachable -> []
@@ -828,7 +830,7 @@ let remove_unreachable_blocks f =
           (match br.term with
           | Jump x -> Jump (t x)
           | Br (c, x, y, w) -> Br (c, t x, t y, w)
-          | Switch (v, d, cases) -> Switch (v, t d, Array.map (fun (k, x) -> (k, t x)) cases)
+          | Switch (v, d, cases, w) -> Switch (v, t d, Array.map (fun (k, x) -> (k, t x)) cases, w)
           | Indirect_br (v, bs) -> Indirect_br (v, Array.map (fun b -> renum.(b)) bs)
           | Asm_goto a -> Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
           | (Ret _ | Unreachable) as term -> term))

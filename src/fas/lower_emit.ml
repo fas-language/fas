@@ -722,7 +722,7 @@ let switch fn t x (cases : (int64 * block) list) default =
       cases
   in
   let x = value fn x in
-  set_term fn (Switch (x, target default, Array.of_list cases))
+  set_term fn (Switch (x, target default, Array.of_list cases, [||]))
 
 let unreachable fn = set_term fn Unreachable
 
@@ -763,7 +763,7 @@ let finish fn =
           (match br.term with
           | Jump t -> Jump (target t)
           | Br (c, t, e, w) -> Br (c, target t, target e, w)
-          | Switch (x, d, cases) -> Switch (x, target d, Array.map (fun (k, t) -> (k, target t)) cases)
+          | Switch (x, d, cases, w) -> Switch (x, target d, Array.map (fun (k, t) -> (k, target t)) cases, w)
           | t -> t);
         fn.cur <- saved
       done;
