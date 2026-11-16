@@ -5,21 +5,37 @@
 
 open Fir
 
-let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ -> ptr
+let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr
 
-(* an agg ABI describes a C struct: a size, a power-of-two alignment, and
-   scalar fields that lie inside it *)
-let abi_problem = function
+(* an agg ABI describes a C struct or union: a size, a power-of-two
+   alignment, and scalar fields and nested aggs that lie inside it *)
+let rec abi_problem = function
   | Scalar _ | Ext _ -> None
+  | Cplx (F16 | F32 | F64 | F80) -> None
+  | Cplx t -> Some (Printf.sprintf "complex %s: a complex is of f16, f32, f64 or f80" (ty_to_string t))
   | Agg { size; align; fields } ->
       if size < 0 then Some (Printf.sprintf "agg of %d bytes" size)
       else if align <= 0 || align land (align - 1) <> 0 then Some (Printf.sprintf "agg alignment %d is not a power of two" align)
       else
         List.find_map
-          (fun (o, t) ->
-            if o < 0 || o > size - size_of t then
-              Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
-            else None)
+          (fun (o, f) ->
+            match f with
+            | Leaf t ->
+                if o < 0 || o > size - size_of t then
+                  Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                else None
+            | Sub (Agg { size = s; _ } as a) ->
+                if o < 0 || o > size - s then
+                  Some (Printf.sprintf "nested agg of %d bytes at offset %d is outside its %d bytes" s o size)
+                else abi_problem a
+            | Sub (Scalar _ | Ext _ | Cplx _) -> Some "a nested agg field is not an agg"
+            | Complex t -> (
+                match t with
+                | F16 | F32 | F64 | F80 ->
+                    if o < 0 || o > size - (2 * size_of t) then
+                      Some (Printf.sprintf "agg field complex %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                    else None
+                | _ -> Some (Printf.sprintf "complex %s: a complex field is of f16, f32, f64 or f80" (ty_to_string t))))
           fields
 
 let verify_func (f : func) =
@@ -368,7 +384,7 @@ let verify_func (f : func) =
                 let np0 = List.length sig_.param_abis in
                 List.iter
                   (fun (k, a) ->
-                    (match a with Agg _ -> () | _ -> err "%s: argument %d: only an agg ABI may be written on an argument" where k);
+                    (match a with Agg _ | Cplx _ -> () | _ -> err "%s: argument %d: only an agg or complex ABI may be written on an argument" where k);
                     if k < np0 || k >= Array.length args then err "%s: argument %d: an agg ABI is only for variadic arguments" where k
                     else if not (is_ptr (ty args.(k))) then err "%s: agg argument %d is %s, not ptr" where k (tys args.(k)))
                   va_aggs;
@@ -452,7 +468,7 @@ let verify_func (f : func) =
             | Va_arg_agg (a, p) ->
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
-                (match a with Agg _ -> () | _ -> err "%s: va_arg with an ABI needs agg" where);
+                (match a with Agg _ | Cplx _ -> () | _ -> err "%s: va_arg with an ABI needs agg or complex" where);
                 Option.iter (err "%s: %s" where) (abi_problem a);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0

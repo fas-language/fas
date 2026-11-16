@@ -71,7 +71,7 @@ let container n = 8 * size_of (Int n)
 
 let wide_agg n =
   let k = nlimbs n in
-  Agg { size = 8 * k; align = (if k = 2 then 16 else 8); fields = List.init k (fun i -> (8 * i, i64)) }
+  Agg { size = 8 * k; align = (if k = 2 then 16 else 8); fields = List.init k (fun i -> (8 * i, Leaf i64)) }
 
 let abi_of (a : abi) : abi =
   match a with
@@ -869,7 +869,7 @@ let convert_inst cx (i : inst) =
       let sig_ = sig_of c.sig_ in
       let args, va_aggs = call_args cx c.sig_ c.args in
       let callee = match c.callee with Indirect p -> Indirect (get1 cx p) | d -> d in
-      let tys = Array.of_list (List.map (fun a -> match a with Scalar t | Ext (t, _) -> t | Agg _ -> ptr) sig_.result_abis) in
+      let tys = Array.of_list (List.map (fun a -> match a with Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr) sig_.result_abis) in
       let rs = emit ~loc:cx.loc cx.g cx.b (Call { c with sig_; callee; args; va_aggs = c.va_aggs @ va_aggs }) tys in
       Array.iteri (fun k res -> set cx res (from_abi cx (ty_of cx.f res) rs.(k))) ir.results
   (* f80 fma: a correctly rounded software helper (no x87 instruction) *)
@@ -1106,7 +1106,7 @@ let rebuild_func m helpers (f : func) : func =
     let entry_vals =
       List.map2
         (fun (a : abi) p ->
-          let t = match a with Scalar t | Ext (t, _) -> t | Agg _ -> ptr in
+          let t = match a with Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr in
           (p, add_param g entry t))
         (sig_of f.sig_).param_abis
         (Array.to_list (block f entry).params)
@@ -1125,7 +1125,7 @@ let rebuild_func m helpers (f : func) : func =
     List.iter2
       (fun (a : abi) (p, np) ->
         match a with
-        | Agg _ -> set cx p [| np |]
+        | Agg _ | Cplx _ -> set cx p [| np |]
         | _ -> set cx p (from_abi cx (ty_of f p) np))
       f.sig_.param_abis entry_vals;
     (* blocks in reverse postorder, so definitions come before uses;
@@ -1184,6 +1184,11 @@ let run (m : modul) =
   let n = Vec.length m.funcs in
   for i = 0 to n - 1 do
     let f = Vec.get m.funcs i in
-    if func_needs f then Vec.set m.funcs i (rebuild_func m helpers f)
+    if func_needs f then begin
+      let g = rebuild_func m helpers f in
+      (* limb loops split the entry block (Fir.hoist_const_allocas) *)
+      hoist_const_allocas g;
+      Vec.set m.funcs i g
+    end
   done;
   if Hashtbl.length helpers > 0 then add_helpers m helpers

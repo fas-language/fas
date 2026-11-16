@@ -251,9 +251,11 @@ func @fir_apply (ptr, agg(16, 8, [0: f64, 8: i64])) -> (agg(16, 8, [0: f64, 8: i
 }
 
 ; long double in structs (x87 class): {long double, int} is MEMORY;
-; {long double} comes back in st0, _Complex long double in st0/st1
+; {long double} comes back in st0, _Complex long double (the `complex f80`
+; ABI) in st0/st1, but a struct holding one is 32 bytes: memory both ways
+; (abi_fuzz seed 5376: it was returned in st0/st1)
 declare @c_ld_pair (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) global
-declare @c_ld_cplx (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) global
+declare @c_ld_cplx (f80, f80) -> (complex f80) global
 func @fir_ld_pair (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) global {
 ^e(%p: ptr, %k: f80):
   %x = load f80 %p, align 16
@@ -266,7 +268,7 @@ func @fir_ld_pair (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80]
   store %v, %r, align 16
   ret %r
 }
-func @fir_ld_cplx (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) global {
+func @fir_ld_cplx (f80, f80) -> (complex f80) global {
 ^e(%a: f80, %b: f80):
   %re = fadd f80 %a, %b
   %im = fsub f80 %a, %b
@@ -274,6 +276,27 @@ func @fir_ld_cplx (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) global {
   store %re, %r, align 16
   %q = ptradd ptr %r, i64 0, 1, 16
   store %im, %q, align 16
+  ret %r
+}
+declare @c_ldc (f80, f80) -> (agg(32, 16, [0: complex f80])) global
+func @fir_ldc (f80, f80) -> (agg(32, 16, [0: complex f80])) global {
+^e(%a: f80, %b: f80):
+  %re = fmul f80 %a, %b
+  %im = fadd f80 %a, %b
+  %r = alloca ptr i64 32, align 16
+  store %re, %r, align 16
+  %q = ptradd ptr %r, i64 0, 1, 16
+  store %im, %q, align 16
+  ret %r
+}
+; re - im of c_ldc(a, b)
+func @fir_call_ldc (f80, f80) -> (f80) global {
+^e(%a: f80, %b: f80):
+  %cr = call (f80, f80) -> (agg(32, 16, [0: complex f80])) @c_ldc(%a, %b)
+  %re = load f80 %cr, align 16
+  %ci = ptradd ptr %cr, i64 0, 1, 16
+  %im = load f80 %ci, align 16
+  %r = fsub f80 %re, %im
   ret %r
 }
 ; c_ld_pair({a, 7}, b) + re * im of c_ld_cplx(a, b)
@@ -285,7 +308,7 @@ func @fir_call_ld (f80, f80) -> (f80) global {
   store i32 7, %q, align 4
   %pr = call (agg(32, 16, [0: f80, 16: i32]), f80) -> (agg(16, 16, [0: f80])) @c_ld_pair(%s, %b)
   %pv = load f80 %pr, align 16
-  %cr = call (f80, f80) -> (agg(32, 16, [0: f80, 16: f80])) @c_ld_cplx(%a, %b)
+  %cr = call (f80, f80) -> (complex f80) @c_ld_cplx(%a, %b)
   %re = load f80 %cr, align 16
   %ci = ptradd ptr %cr, i64 0, 1, 16
   %im = load f80 %ci, align 16
@@ -325,5 +348,63 @@ func @fir_h_pair (agg(8, 4, [0: f16, 2: f16, 4: f32])) -> (agg(4, 2, [0: f16, 2:
   store %y, %r, align 2
   %r2 = ptradd ptr %r, i64 0, 1, 2
   store %mh, %r2, align 2
+  ret %r
+}
+
+; unions holding a long double, as nested aggs (SPEC §5): UN = { int;
+; __int128; union { long double; long } } is MEMORY (its inner union is
+; INTEGER, X87UP on its own: MEMORY), UF = the same members in one union is
+; INTEGER, INTEGER. Each callee returns pre*7 + lo*3 + hi*5 + post*11.
+declare @c_un (i64, agg(16, 16, [0: i32, 0: i128, 0: agg(16, 16, [0: f80, 0: i64])]), i64) -> (i64) global
+declare @c_uf (i64, agg(16, 16, [0: i32, 0: i128, 0: f80, 0: i64]), i64) -> (i64) global
+
+func @un_mix (i64, ptr, i64) -> (i64) {
+^e(%pre: i64, %p: ptr, %post: i64):
+  %lo = load i64 %p, align 8
+  %q = ptradd ptr %p, i64 0, 1, 8
+  %hi = load i64 %q, align 8
+  %a = mul i64 %pre, i64 7
+  %b = mul i64 %lo, i64 3
+  %c = mul i64 %hi, i64 5
+  %d = mul i64 %post, i64 11
+  %s1 = add i64 %a, %b
+  %s2 = add i64 %s1, %c
+  %s3 = add i64 %s2, %d
+  ret %s3
+}
+func @fir_un (i64, agg(16, 16, [0: i32, 0: i128, 0: agg(16, 16, [0: f80, 0: i64])]), i64) -> (i64) global {
+^e(%pre: i64, %p: ptr, %post: i64):
+  %r = call (i64, ptr, i64) -> (i64) @un_mix(%pre, %p, %post)
+  ret %r
+}
+func @fir_uf (i64, agg(16, 16, [0: i32, 0: i128, 0: f80, 0: i64]), i64) -> (i64) global {
+^e(%pre: i64, %p: ptr, %post: i64):
+  %r = call (i64, ptr, i64) -> (i64) @un_mix(%pre, %p, %post)
+  ret %r
+}
+func @fir_calls_un (i64, i64) -> (i64) global {
+^e(%lo: i64, %hi: i64):
+  %p = alloca ptr i64 16, align 16
+  store %lo, %p, align 16
+  %q = ptradd ptr %p, i64 0, 1, 8
+  store %hi, %q, align 8
+  %a = call (i64, agg(16, 16, [0: i32, 0: i128, 0: agg(16, 16, [0: f80, 0: i64])]), i64) -> (i64) @c_un(i64 1, %p, i64 2)
+  %b = call (i64, agg(16, 16, [0: i32, 0: i128, 0: f80, 0: i64]), i64) -> (i64) @c_uf(i64 3, %p, i64 4)
+  %a2 = mul i64 %a, i64 1000003
+  %r = add i64 %a2, %b
+  ret %r
+}
+
+; a struct of two long doubles is not a _Complex long double: 32 bytes,
+; MEMORY both ways (sret result, stack argument)
+func @fir_ll (agg(32, 16, [0: f80, 16: f80])) -> (agg(32, 16, [0: f80, 16: f80])) global {
+^e(%p: ptr):
+  %a = load f80 %p, align 16
+  %q = ptradd ptr %p, i64 0, 1, 16
+  %b = load f80 %q, align 16
+  %r = alloca ptr i64 32, align 16
+  store %b, %r, align 16
+  %rq = ptradd ptr %r, i64 0, 1, 16
+  store %a, %rq, align 16
   ret %r
 }

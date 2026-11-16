@@ -277,6 +277,13 @@ func @h_bits (f16) -> (i16) global {
   %r = bitcast i16 %a
   ret %r
 }
+; zero-extended in Fir: an f16 argument's upper xmm bits are not part of it
+func @h_bits64 (f16) -> (i64) global {
+^e(%a: f16):
+  %b = bitcast i16 %a
+  %r = zext i64 %b
+  ret %r
+}
 func @h_of_bits (i16) -> (f16) global {
 ^e(%a: i16):
   %r = bitcast f16 %a

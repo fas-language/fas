@@ -2042,14 +2042,34 @@ and raw_offset_expr c s access_ty index_payload =
 
 and check_expr ?destination ?(allow_widen = true) (c : context) expected expression =
   let previous_depth = c.expression_depth in
-  if previous_depth = 0 then c.unresolved_shapes_unique <- false;
-  if previous_depth = 0 && unresolved_shape_cache_worthwhile expression then (
-    let shapes, unique = build_unresolved_shapes expression in
-    c.unresolved_shapes <- shapes;
-    c.unresolved_shapes_unique <- unique);
+  if previous_depth = 0 then begin
+    c.unresolved_shapes_unique <- false;
+    c.unresolved_shapes_built <- false
+  end;
+  (* The shape cache is built for the outermost long operator chain, at
+     any depth: a chain inside a call argument or an index needs it as much
+     as a top-level one. Below the top level it covers only this subtree
+     and is dropped when the subtree is done. *)
+  let saved =
+    if (not c.unresolved_shapes_built) && unresolved_shape_cache_worthwhile expression then begin
+      let saved = (c.unresolved_shapes, c.unresolved_shapes_unique) in
+      let shapes, unique = build_unresolved_shapes expression in
+      c.unresolved_shapes <- shapes;
+      c.unresolved_shapes_unique <- unique;
+      c.unresolved_shapes_built <- true;
+      Some saved
+    end
+    else None
+  in
   c.expression_depth <- previous_depth + 1;
   let result = check_expr_inner ?destination c expected expression in
   c.expression_depth <- previous_depth;
+  (match saved with
+  | Some (shapes, unique) when previous_depth > 0 ->
+      c.unresolved_shapes <- shapes;
+      c.unresolved_shapes_unique <- unique;
+      c.unresolved_shapes_built <- false
+  | _ -> ());
   index_expression c expression result;
   let result =
     match (allow_widen, expected, result) with

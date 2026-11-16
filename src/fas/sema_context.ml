@@ -80,6 +80,10 @@ type context = {
   mutable expression_depth : int;
   mutable unresolved_shapes : unresolved_shape_cache;
   mutable unresolved_shapes_unique : bool;
+  (* a shape cache was built for an enclosing expression (unique or not):
+     its subexpressions must not build their own, or a long chain takes
+     O(n^2) *)
+  mutable unresolved_shapes_built : bool;
   string_pool : string_pool;
   ret_ty : Hir.ty;
   (* the function being checked is `fails`: `try` and `fail` are allowed *)

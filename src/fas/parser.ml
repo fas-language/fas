@@ -196,6 +196,25 @@ module P = struct
     in
     find p.pos n
 
+  (* A cursor for long lookahead scans: [peek_from p i] is the token at or
+     after index [i] that [peek_n] would see, and the index just past it.
+     [peek_n p k] walks from the current position each time, so a scan that
+     asks for offsets 1, 2, ..., n took O(n^2) (an index of 100k tokens);
+     a scan carries the index instead. *)
+  let peek_from p i =
+    let last = Array.length p.tokens - 1 in
+    let rec go i =
+      if i >= last then (p.tokens.(last), last)
+      else if p.delimited_depth > 0 && p.tokens.(i).Token.kind = Token.Newline then go (i + 1)
+      else (p.tokens.(i), i + 1)
+    in
+    go i
+
+  (* the cursor just past the token at offset 0 ([peek p]) *)
+  let cursor_after_peek p =
+    skip_delimited_newlines p;
+    snd (peek_from p p.pos)
+
   let bump p =
     let t = peek p in
     if p.pos < Array.length p.tokens - 1 then p.pos <- p.pos + 1;
@@ -613,16 +632,17 @@ module P = struct
         Ok (Ast.Const_arg e)
 
   and generic_application_is_call p =
-    let rec scan offset depth =
-      match (peek_n p offset).kind with
-      | Token.Lbracket -> scan (offset + 1) (depth + 1)
-      | Token.Rbracket when depth = 1 -> (peek_n p (offset + 1)).kind = Token.Lparen
-      | Token.Rbracket when depth > 1 -> scan (offset + 1) (depth - 1)
-      | Token.Newline when depth > 0 -> scan (offset + 1) depth
+    let rec scan i depth =
+      let token, next = peek_from p i in
+      match token.Token.kind with
+      | Token.Lbracket -> scan next (depth + 1)
+      | Token.Rbracket when depth = 1 -> (fst (peek_from p next)).Token.kind = Token.Lparen
+      | Token.Rbracket when depth > 1 -> scan next (depth - 1)
+      | Token.Newline when depth > 0 -> scan next depth
       | Token.Eof | Token.Newline -> false
-      | _ -> scan (offset + 1) depth
+      | _ -> scan next depth
     in
-    scan 1 0
+    scan (cursor_after_peek p) 0
 
   and starts_type p =
     match ((peek p).kind, (peek_n p 1).kind) with
@@ -630,17 +650,18 @@ module P = struct
     | _ -> false
 
   and starts_struct_literal p =
-    let rec scan offset brackets =
-      match (peek_n p offset).kind with
-      | Token.Lbracket -> scan (offset + 1) (brackets + 1)
-      | Token.Rbracket when brackets > 0 -> scan (offset + 1) (brackets - 1)
-      | Token.Rparen when brackets = 0 -> (peek_n p (offset + 1)).kind = Token.Lbrace
-      | Token.Newline -> scan (offset + 1) brackets
+    let rec scan i brackets =
+      let token, next = peek_from p i in
+      match token.Token.kind with
+      | Token.Lbracket -> scan next (brackets + 1)
+      | Token.Rbracket when brackets > 0 -> scan next (brackets - 1)
+      | Token.Rparen when brackets = 0 -> (fst (peek_from p next)).Token.kind = Token.Lbrace
+      | Token.Newline -> scan next brackets
       | Token.Eof -> false
-      | _ -> scan (offset + 1) brackets
+      | _ -> scan next brackets
     in
     p.block_expression_depth <> Some p.depth
-    && match (peek_n p 1).kind with Token.Ident _ -> scan 1 0 | _ -> false
+    && match (peek_n p 1).kind with Token.Ident _ -> scan (cursor_after_peek p) 0 | _ -> false
 
   and compound_op = function
     | Token.Plus_eq -> Some Ast.Add
@@ -2140,16 +2161,19 @@ module P = struct
   and postfix p =
     let* first = primary p in
     let brackets_before_call () =
-      let rec scan offset depth =
-        match (peek_n p offset).kind with
-        | Token.Lbracket -> scan (offset + 1) (depth + 1)
-        | Token.Rbracket when depth = 1 -> (peek_n p (offset + 1)).kind = Token.Lparen
-        | Token.Rbracket when depth > 1 -> scan (offset + 1) (depth - 1)
-        | Token.Newline when depth > 0 -> scan (offset + 1) depth
+      (* a cursor, not peek_n offsets: see [peek_from] *)
+      let rec scan i depth =
+        let token, next = peek_from p i in
+        match token.Token.kind with
+        | Token.Lbracket -> scan next (depth + 1)
+        | Token.Rbracket when depth = 1 -> (fst (peek_from p next)).Token.kind = Token.Lparen
+        | Token.Rbracket when depth > 1 -> scan next (depth - 1)
+        | Token.Newline when depth > 0 -> scan next depth
         | Token.Eof | Token.Newline -> false
-        | _ -> scan (offset + 1) depth
+        | _ -> scan next depth
       in
-      scan 0 0
+      skip_delimited_newlines p;
+      scan p.pos 0
     in
     let rec go e =
       match (peek p).kind with

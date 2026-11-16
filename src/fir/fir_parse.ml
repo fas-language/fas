@@ -288,11 +288,17 @@ let starts_ty = function
   | P "<" -> true
   | _ -> false
 
-let parse_abi lx =
+let rec parse_abi lx =
   match peek lx with
   | Ident "zext" -> ignore (next lx); Ext (parse_ty lx, Zx)
   | Ident "sext" -> ignore (next lx); Ext (parse_ty lx, Sx)
-  | Ident "agg" ->
+  | Ident "agg" -> parse_agg lx
+  (* a C _Complex T by value, as an argument or a result *)
+  | Ident "complex" -> ignore (next lx); Cplx (parse_ty lx)
+  | _ -> Scalar (parse_ty lx)
+
+(* agg(SIZE, ALIGN, [OFF: T or agg(...), ...]) *)
+and parse_agg lx =
       ignore (next lx);
       expect lx "(";
       let size = int_tok lx in
@@ -305,7 +311,14 @@ let parse_abi lx =
         let rec go () =
           let o = int_tok lx in
           expect lx ":";
-          let t = parse_ty lx in
+          let t =
+            match peek lx with
+            | Ident "agg" -> Sub (parse_agg lx)
+            | Ident "complex" ->
+                ignore (next lx);
+                Complex (parse_ty lx)
+            | _ -> Leaf (parse_ty lx)
+          in
           fields := (o, t) :: !fields;
           if accept lx "," then go () else expect lx "]"
         in
@@ -313,7 +326,6 @@ let parse_abi lx =
       end;
       expect lx ")";
       Agg { size; align; fields = List.rev !fields }
-  | _ -> Scalar (parse_ty lx)
 
 let parse_sig lx =
   expect lx "(";
@@ -780,7 +792,7 @@ let parse_op st opname =
       if not (accept lx ")") then begin
         let rec go () =
           (match peek lx with
-          | Ident "agg" -> va_aggs := (!k, parse_abi lx) :: !va_aggs
+          | Ident ("agg" | "complex") -> va_aggs := (!k, parse_abi lx) :: !va_aggs
           | _ -> ());
           args := parse_value st :: !args;
           incr k;
@@ -791,7 +803,7 @@ let parse_op st opname =
       let args = Array.of_list (List.rev !args) and va_aggs = List.rev !va_aggs in
       let tys =
         Array.of_list
-          (List.map (function Scalar t | Ext (t, _) -> t | Agg _ -> ptr) sig_.result_abis)
+          (List.map (function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr) sig_.result_abis)
       in
       (Call { sig_; callee; args; attrs = !attrs; va_aggs }, tys)
   | "syscall" ->
@@ -821,7 +833,7 @@ let parse_op st opname =
   | "va_start" -> (Va_start (parse_value st), [||])
   | "va_arg" -> (
       match peek lx with
-      | Ident "agg" ->
+      | Ident ("agg" | "complex") ->
           let abi = parse_abi lx in
           (Va_arg_agg (abi, parse_value st), [| ptr |])
       | _ ->

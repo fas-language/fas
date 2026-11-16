@@ -923,6 +923,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       expression_depth = 0;
       unresolved_shapes = Hashtbl.create 0;
       unresolved_shapes_unique = false;
+      unresolved_shapes_built = false;
       string_pool = program_strings;
       ret_ty = Hir.Void;
       fn_fails = false;
@@ -1099,6 +1100,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       expression_depth = 0;
       unresolved_shapes = Hashtbl.create 0;
       unresolved_shapes_unique = false;
+      unresolved_shapes_built = false;
       string_pool = program_strings;
       ret_ty;
       fn_fails;

@@ -772,6 +772,14 @@ let conv c (op : F.conv) rt a =
       match (cls_of_ty st, cls_of_ty rt) with
       | Gpr, Gpr | Xmm, Xmm -> copy c ra
       | Gpr, Xmm -> to_xmm c (is_dbl rt) ra
+      | Xmm, Gpr when st = F.F16 ->
+          (* movd moves 32 bits, and an f16's upper 16 are not part of the
+             value (an f16 argument's are whatever the caller left in its
+             xmm register): the i16 is zero-extended like any integer *)
+          let g = to_gpr c false ra in
+          let r = fresh c Gpr in
+          emit c (Ext (16, false, r, g));
+          r
       | Xmm, Gpr -> to_gpr c (is_dbl st) ra)
 
 (* ---------- memory ---------- *)
@@ -893,6 +901,25 @@ let pick80 c v a b pick =
   let r = copy c pa in
   pick r pa pb;
   copy80 c ~src:(at_reg r) v
+
+(* f80 [v] = the value at [a] when [rc] is nonzero, else the one at [b]:
+   both are loaded and the significands and sign/exponent words are picked
+   by cmov, so no address depends on the condition, which may be secret
+   (SPEC §8: every select is a cmov, f80 ones included; picking the address
+   and loading through it, as pick80 does, is a secret address) *)
+let select80 c v rc a b =
+  let load n a =
+    let r = fresh c Gpr in
+    emit c (Load (n, false, r, a));
+    r
+  in
+  let lo = load 8 a and hi = load 2 (with_disp a 8) in
+  let lo' = load 8 b and hi' = load 2 (with_disp b 8) in
+  emit c (Test (rc, rc));
+  emit c (Cmov (E, lo, lo'));
+  emit c (Cmov (E, hi, hi'));
+  emit c (Store (8, dst80 c v, lo));
+  emit c (Store (2, with_disp (dst80 c v) 8, hi))
 
 let fbin80 c v (op : F.fbin) a b =
   let xa = addr80 c a and xb = addr80 c b in
@@ -1223,7 +1250,9 @@ let plan_args ~sret abis =
   let plans =
     List.map
       (fun (abi : F.abi) ->
-        match abi with
+        (* a complex argument is passed as its agg (COMPLEX_X87: memory) *)
+        match (match abi with Cplx t -> F.agg_of_complex t | a -> a) with
+        | Cplx _ -> assert false
         | Scalar F.F80 -> Pmem80 (stack 16 16)
         | Scalar t | Ext (t, _) -> (
             let ext = match abi with Ext (_, e) -> Some e | _ -> None in
@@ -1276,12 +1305,16 @@ type ret_plan =
       (** two or more results (Fir_abi.multi_results): each result's part,
           and the hidden block's size and alignment *)
 
-let plan_ret (abis : F.abi list) =
+let rec plan_ret (abis : F.abi list) =
   match abis with
   | [] -> Rnone
   | [ Scalar F.F80 ] -> Rx87 (false, 1)
-  | [ Agg { size = 16; fields; _ } ] when fields <> [] && List.for_all (( = ) (0, F.F80)) fields -> Rx87 (true, 1)
-  | [ Agg { size = 32; fields = [ (0, F.F80); (16, F.F80) ]; _ } ] -> Rx87 (true, 2)
+  (* a C _Complex long double (COMPLEX_X87) comes back in st0/st1; a
+     struct holding one is an agg over 16 bytes: memory *)
+  | [ Cplx F.F80 ] -> Rx87 (true, 2)
+  | [ Cplx t ] -> plan_ret [ F.agg_of_complex t ]
+  | [ Agg { size; fields; _ } ] when Fir_abi.x87_result ~size ~fields <> None ->
+      Rx87 (true, Option.get (Fir_abi.x87_result ~size ~fields))
   | [ (Scalar t | Ext (t, _)) ] -> Rscalar t
   | [ Agg { size; align; fields } ] -> (
       match classify ~size ~align ~fields with
@@ -1318,7 +1351,7 @@ let ret_regs = function
 let hidden_ptr = function Rsret _ | Rmulti (_, Some _) -> true | _ -> false
 
 (* the type a scalar result has inside the function *)
-let abi_ty = function F.Scalar t | F.Ext (t, _) -> t | F.Agg _ -> F.Ptr 0
+let abi_ty = function F.Scalar t | F.Ext (t, _) -> t | F.Agg _ | F.Cplx _ -> F.Ptr 0
 
 (* stores the registers of an agg's parts into a fresh slot *)
 let spill_eightbytes c size l =
@@ -1381,7 +1414,7 @@ let aligned_mem c size align =
 (* [v] := the result of abi [a] stored at [ad] (in a block of several
    results): an agg is its address *)
 let mem_result_in c (a : F.abi) ad v =
-  match a with
+  match F.agg_view a with
   | F.Agg _ ->
       let p = fresh c Gpr in
       emit c (Lea (p, ad));
@@ -1405,7 +1438,7 @@ let mem_result_in c (a : F.abi) ad v =
 
 (* stores [v], a result of abi [a], at [ad] in the block of several results *)
 let mem_result_out c (a : F.abi) v ad =
-  match a with
+  match F.agg_view a with
   | F.Agg { size; _ } -> copy_bytes c ~src:(at_reg (use c v)) ~dst:ad size
   | _ -> (
       match abi_ty a with
@@ -1429,7 +1462,7 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   c.mf.out_size <- max c.mf.out_size stack;
   (* an argument in memory aligned above 16 needs rsp aligned so at the
      call (the outgoing area starts at rsp) *)
-  let out_align = List.fold_left (fun m (a : F.abi) -> match a with Agg { align; _ } -> max m align | _ -> m) 16 abis in
+  let out_align = List.fold_left (fun m (a : F.abi) -> match F.agg_view a with Agg { align; _ } -> max m align | _ -> m) 16 abis in
   if out_align > 16 then emit c (Align_sp out_align);
   let target =
     match callee with
@@ -1710,7 +1743,7 @@ let va_arg c t p =
 
 let va_arg_agg c (abi : F.abi) p =
   let size, align, fields =
-    match abi with Agg { size; align; fields } -> (size, align, fields) | _ -> unsupported "va_arg_agg of a scalar"
+    match F.agg_view abi with Agg { size; align; fields } -> (size, align, fields) | _ -> unsupported "va_arg_agg of a scalar"
   in
   let rp = use c p in
   let res = fresh c Gpr in
@@ -2119,10 +2152,7 @@ let inst c i =
   | Fcmp (p, _, a, b) when is80 (ty c a) -> set (fcmp_with c p (ucomi80 c) (addr80 c a) (addr80 c b))
   | Fcmp (p, _, a, b) -> set (fcmp c p a b)
   | Select (cnd, x, y) when is80 (rty ()) ->
-      let rc = use c cnd in
-      pick80 c (res 0) (addr80 c x) (addr80 c y) (fun r _ pb ->
-          emit c (Test (rc, rc));
-          emit c (Cmov (E, r, pb)))
+      select80 c (res 0) (use c cnd) (addr80 c x) (addr80 c y)
   | (Freeze a | Mark (_, a)) when is80 (rty ()) -> copy80 c ~src:(addr80 c a) (res 0)
   | Conv (op, a) when is80 (rty ()) || is80 (ty c a) -> conv80 c (res 0) op (rty ()) a
   | Load (m, p) when is80 (rty ()) ->

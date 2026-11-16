@@ -121,7 +121,9 @@ let run_func ~hw (f : func) =
           let rest = Array.sub insts (j + 1) (Array.length insts - j - 1) in
           Array.iter (fun i -> ignore (Vec.push (block f cur).insts i)) rest;
           set_term ~loc:term_loc f cur term
-    done
+    done;
+    (* a split entry block moved its later allocas (Fir.hoist_const_allocas) *)
+    hoist_const_allocas f
   end
 
 let run ~hw (m : modul) = Vec.iter (run_func ~hw) m.funcs

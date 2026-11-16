@@ -33,7 +33,24 @@ type unresolved_shape =
   | Unresolved_vector
   | Unresolved_null
 
+(* Constant folding asks for the shape of every operand of every operator,
+   so on a chain `1 + 1 + ... + 1` the uncached walk was O(n^2). Operator
+   results are remembered by the node's span; a hit counts only for the
+   same node (physical identity), so two nodes with one span never mix. *)
+let shape_memo : (Span.t, Ast.expr * unresolved_shape option) Hashtbl.t = Hashtbl.create 64
+
 let rec unresolved_shape_of expression =
+  match expression with
+  | Ast.Binary (_, _, _, span) | Ast.Ternary (_, _, _, span) -> (
+      match Hashtbl.find_opt shape_memo span with
+      | Some (node, shape) when node == expression -> shape
+      | _ ->
+          let shape = unresolved_shape_walk expression in
+          Hashtbl.replace shape_memo span (expression, shape);
+          shape)
+  | _ -> unresolved_shape_walk expression
+
+and unresolved_shape_walk expression =
   let combined left right =
     match (unresolved_shape_of left, unresolved_shape_of right) with
     | Some left_shape, Some right_shape when left_shape = right_shape -> Some left_shape

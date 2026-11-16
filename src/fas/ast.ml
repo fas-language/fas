@@ -341,14 +341,32 @@ let rec expr_span = function
         ~column:base_span.Span.column
   | expression -> stored_expr_span expression
 
+(* The start of a binary or field expression is that of its leftmost
+   operand, and the end of a binary that of its rightmost: a walk down the
+   spine. Diagnostics and checks ask for the span of every node of a long
+   chain (`1 + 1 + ... + 1`, `a.b.c...`), so each walk is memoized by the
+   node's own span, checked against the operand it walked (physically), so
+   that a rewritten tree misses the cache rather than reading a stale span.
+   Without this a chain of n operators takes O(n^2). *)
+and start_memo : (Span.t, expr * Span.t) Hashtbl.t = Hashtbl.create 64
+and end_memo : (Span.t, expr * Span.t) Hashtbl.t = Hashtbl.create 64
+
+and memo_span table key operand walk =
+  match Hashtbl.find_opt table key with
+  | Some (cached, span) when cached == operand -> span
+  | _ ->
+      let span = walk operand in
+      Hashtbl.replace table key (operand, span);
+      span
+
 and expr_start_span = function
-  | Binary (_, left, _, _) -> expr_start_span left
+  | Binary (_, left, _, s) -> memo_span start_memo s left expr_start_span
   | Parenthesized (_, span) -> span
-  | Arrow_field (base, _, _, _) | Field (base, _, _) -> expr_start_span base
+  | Arrow_field (base, _, _, s) | Field (base, _, s) -> memo_span start_memo s base expr_start_span
   | expression -> expr_span expression
 
 and expr_end_span = function
-  | Binary (_, _, right, _) -> expr_end_span right
+  | Binary (_, _, right, s) -> memo_span end_memo s right expr_end_span
   | Parenthesized (_, span) -> span
   | Arrow_field (_, _, _, field_span) | Field (_, _, field_span) -> field_span
   | expression -> expr_span expression

@@ -232,14 +232,18 @@ let mem_text m =
     add ("!noalias [" ^ String.concat ", " (List.map string_of_int m.noalias) ^ "]");
   String.concat " " (List.rev !parts)
 
-let abi_text = function
+let rec abi_text = function
   | Scalar t -> ty_to_string t
   | Ext (t, Zx) -> "zext " ^ ty_to_string t
   | Ext (t, Sx) -> "sext " ^ ty_to_string t
+  | Cplx t -> "complex " ^ ty_to_string t
   | Agg { size; align; fields } ->
-      Printf.sprintf "agg(%d, %d, [%s])" size align
-        (String.concat ", "
-           (List.map (fun (o, t) -> Printf.sprintf "%d: %s" o (ty_to_string t)) fields))
+  Printf.sprintf "agg(%d, %d, [%s])" size align
+    (String.concat ", "
+       (List.map
+          (fun (o, f) ->
+            Printf.sprintf "%d: %s" o (match f with Leaf t -> ty_to_string t | Sub s -> abi_text s | Complex t -> "complex " ^ ty_to_string t))
+          fields))
 
 let sig_text s =
   let ps = List.map abi_text s.param_abis @ if s.variadic then [ "..." ] else [] in

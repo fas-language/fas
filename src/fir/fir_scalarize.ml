@@ -48,7 +48,7 @@ let is_vec = function Vec _ -> true | _ -> false
 let sig_of (s : signature) =
   { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis }
 
-let abi_has_vec = function Scalar t | Ext (t, _) -> is_vec t | Agg _ -> false
+let abi_has_vec = function Scalar t | Ext (t, _) -> is_vec t | Agg _ | Cplx _ -> false
 let sig_changes (s : signature) = List.exists abi_has_vec s.param_abis || List.exists abi_has_vec s.result_abis
 
 (* ---------- context ---------- *)
@@ -639,7 +639,7 @@ let check_lanes (f : func) =
     | Vec (n, _) when n > max_lanes -> unsupported "@%s: a vector of %d lanes (at most %d)" f.name n max_lanes
     | _ -> ()
   in
-  List.iter (function Scalar t | Ext (t, _) -> check t | Agg _ -> ()) (f.sig_.param_abis @ f.sig_.result_abis);
+  List.iter (function Scalar t | Ext (t, _) -> check t | Agg _ | Cplx _ -> ()) (f.sig_.param_abis @ f.sig_.result_abis);
   if f.defined then for v = 0 to num_values f - 1 do check (ty_of f v) done
 
 let rebuild_func (f : func) : func =
@@ -699,5 +699,10 @@ let run (m : modul) =
   Fir_atomic.run m;
   for i = 0 to Vec.length m.funcs - 1 do
     let f = Vec.get m.funcs i in
-    if func_needs f then Vec.set m.funcs i (rebuild_func f)
+    if func_needs f then begin
+      let g = rebuild_func f in
+      (* lane loops split the entry block (Fir.hoist_const_allocas) *)
+      hoist_const_allocas g;
+      Vec.set m.funcs i g
+    end
   done

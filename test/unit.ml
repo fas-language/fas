@@ -72,7 +72,7 @@ let () =
   assert (Target_layout.pointer_integer_bits (Target_layout.current ()) = Ok 64);
   assert (
     Sema_types.source_ty [] (Ast.Applied_type ("G", Span.synthetic, [], Span.synthetic))
-    = Error "internal error: generic type application reached ordinary type checking");
+    = Error "unknown generic struct `G`");
   assert (
     Target_layout.pointer_integer_bits
       { (Target_layout.current ()) with pointer_size = 4; pointer_align = 4 }
@@ -482,7 +482,9 @@ let () =
   let valid_call_text =
     call_module ~variadic:true [ seven; (Low.I64, Low.No_extension, Low.Const (Low.I64, 9L)) ]
   in
-  assert (contains valid_call_text "call signext i16 (i8 zeroext, ...) @callee(i8 zeroext 7, i64 9)");
+  (* the function type carries types only: LLVM refuses attributes such as
+     byval or sret there, and the arguments carry them *)
+  assert (contains valid_call_text "call signext i16 (i8, ...) @callee(i8 zeroext 7, i64 9)");
   let fixed_call_text = call_module ~variadic:false [ seven ] in
   assert (contains fixed_call_text "call signext i16 @callee(i8 zeroext 7)");
   let unresolved_template_call =

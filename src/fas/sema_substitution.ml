@@ -826,6 +826,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       expression_depth = 0;
       unresolved_shapes = Hashtbl.create 0;
       unresolved_shapes_unique = false;
+      unresolved_shapes_built = false;
       string_pool = create_string_pool limits;
       ret_ty;
       fn_fails = true;

@@ -22,7 +22,7 @@ H h_sitofp_i8(signed char), h_uitofp_i16(unsigned short);
 H h_sitofp_i128(__int128 *), h_uitofp_i128(unsigned __int128 *);
 float h_to_f32(H); double h_to_f64(H); LD h_to_f80(H);
 H h_from_f32(float), h_from_f64(double), h_from_f80(LD);
-short h_bits(H); H h_of_bits(short);
+short h_bits(H); H h_of_bits(short); uint64_t h_bits64(H);
 H h_select(int, H, H), h_scale(H *, long, H);
 H h_many(H, H, H, H, H, H, H, H, H, H, int, float, H);
 H h_calls_c(H, H), h_vsum(int, ...);
@@ -212,6 +212,16 @@ int main(void) {
     check("cas.no.cell", 0, 0, cell, (H)-7);
     checki("cas.yes", 0, h_cas(&cell, (H)-7, (H)2.25f), 1);
     check("cas.yes.cell", 0, 0, cell, (H)2.25f);
+  }
+  {
+    /* h_bits64 called as if it took a float: xmm0 holds the f16's bits in
+       its low 16 and garbage above, which the callee must not see */
+    uint64_t (*as_float)(float) = (uint64_t (*)(float))(void (*)(void))h_bits64;
+    uint32_t w = 0xdead3c00u; /* (H)1.0 below 0xdead */
+    float f;
+    memcpy(&f, &w, 4);
+    uint64_t got = as_float(f);
+    if (got != 0x3c00) { printf("bits64: got %llx, want 3c00\n", (unsigned long long)got); bad = 1; }
   }
   if (!bad) printf("f16 ok\n");
   return bad;

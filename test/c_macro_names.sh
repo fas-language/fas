@@ -54,6 +54,23 @@ for source in same-int same-float cross-int cross-float; do
   timeout 30 "$TMP/$source" || fail "$source: a Fas name or a C macro changed value"
 done
 
+# a C variable shadowed by an empty macro of the same name: the importer's
+# type probe for the variable expanded the macro and failed (fas_refuse
+# seed 11 input 9778, an internal error)
+cat >"$TMP/shadowed.fas" <<'FAS'
+use "C" as c <<C
+int counter = 37;
+#define counter
+C
+fn main() i32 {
+  if c.counter != 37 { return 1 }
+  return 0
+}
+FAS
+"$OCAML_FAS" -O0 "$TMP/shadowed.fas" -o "$TMP/shadowed" >"$TMP/shadowed.out" 2>&1 \
+  || fail "shadowed: a variable behind a same-named macro: $(cat "$TMP/shadowed.out")"
+timeout 30 "$TMP/shadowed" || fail "shadowed: the variable lost its value"
+
 cat >"$TMP/accepted.fas" <<'FAS'
 use "C" "macros.h" as c
 fn main() i32 {

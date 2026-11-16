@@ -23,6 +23,10 @@ typedef struct { long double x; int i; } LDI;
 typedef struct { long double x; } LD1;
 LD1 c_ld_pair(LDI s, long double k) { return (LD1){s.x * k - s.i}; }
 _Complex long double c_ld_cplx(long double a, long double b) { return a * b + (a - b) * 1.0iL; }
+typedef struct { _Complex long double z; } LDC;
+LDC c_ldc(long double a, long double b) { LDC r = { __builtin_complex(a - b, a * b) }; return r; }
+LDC fir_ldc(long double, long double);
+long double fir_call_ldc(long double, long double);
 struct hhf { _Float16 x, y; float f; };
 struct hh { _Float16 a, b; };
 struct hh c_hpair(struct hhf p) { struct hh r = { (_Float16)(p.x + p.y), (_Float16)((float)p.x * p.f) }; return r; }
@@ -51,6 +55,18 @@ static long expect_calls_c(void) {
   long s = r1; s = s * 1000003 + r2; s = s * 1000003 + r3; s = s * 1000003 + r4;
   return s * 1000003 + r5;
 }
+/* unions holding a long double (SPEC §5 nested aggs): UN's inner union is
+   MEMORY by itself (an X87UP merged with INTEGER), so UN is MEMORY; UF has
+   the same members in one union and is INTEGER, INTEGER (gcc and clang) */
+union UN { int a; __int128 b; union { long double c; long d; } u; };
+union UF { int a; __int128 b; long double c; long d; };
+static long un_mix(long pre, __int128 b, long post) { return pre * 7 + (long)b * 3 + (long)(b >> 64) * 5 + post * 11; }
+long c_un(long pre, union UN x, long post) { return un_mix(pre, x.b, post); }
+long c_uf(long pre, union UF x, long post) { return un_mix(pre, x.b, post); }
+long fir_un(long, union UN, long); long fir_uf(long, union UF, long);
+long fir_calls_un(long lo, long hi);
+struct LL { long double a, b; };
+struct LL fir_ll(struct LL);
 static int bad = 0;
 #define CHECK(name, got, want) do { if ((got) != (want)) { printf("%s: got %ld want %ld\n", name, (long)(got), (long)(want)); bad = 1; } } while (0)
 int main(void) {
@@ -78,6 +94,9 @@ int main(void) {
     LD1 p = fir_ld_pair((LDI){a, 5}, b); CHECK("ld_pair", p.x == a * b + 5, 1);
     _Complex long double c = fir_ld_cplx(a, b);
     CHECK("ld_cplx", __real__ c == a + b && __imag__ c == a - b, 1);
+    LDC s = fir_ldc(a, b);
+    CHECK("ldc", __real__ s.z == a * b && __imag__ s.z == a + b, 1);
+    CHECK("call_ldc", fir_call_ldc(a, b) == (a - b) - a * b, 1);
     long double re = a * b, im = a - b;
     CHECK("call_ld", fir_call_ld(a, b) == (a * b - 7) + re * im, 1);
   }
@@ -87,6 +106,15 @@ int main(void) {
     CHECK("call_hpair", fir_call_hpair(x, y) == (_Float16)(q.a - q.b), 1);
     struct hh r = fir_h_pair((struct hhf){x, y, 2.5f});
     CHECK("h_pair", r.a == y && r.b == (_Float16)(1.5f * 2.5f), 1);
+  }
+  {
+    __int128 b = ((__int128)0x123456789 << 64) | 0xabcdef;
+    union UN n; n.b = b; union UF f; f.b = b;
+    CHECK("un", fir_un(2, n, 3), un_mix(2, b, 3));
+    CHECK("uf", fir_uf(4, f, 5), un_mix(4, b, 5));
+    struct LL ll = fir_ll((struct LL){1.25L, -3.5L});
+    CHECK("ll", ll.a == -3.5L && ll.b == 1.25L, 1);
+    CHECK("calls_un", fir_calls_un(0xabcdef, 0x123456789), un_mix(1, b, 2) * 1000003 + un_mix(3, b, 4));
   }
   if (!bad) printf("ok\n");
   return bad;

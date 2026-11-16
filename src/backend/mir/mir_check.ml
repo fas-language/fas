@@ -39,32 +39,101 @@ let phys_index = function
   | X i -> 16 + i
   | V _ -> invalid_arg "Mir_check.phys_index"
 
+(* Sets of vregs as little-endian Patricia trees (Okasaki and Gill). A
+   tree is canonical, so structural equality is set equality, and [inter]
+   returns a physically shared subtree wherever its arguments share one:
+   the meet of two states that came from one ancestor and differ in a few
+   vregs builds only the paths to those vregs. Depth is bounded by the
+   bits of an int. *)
+module Iset = struct
+  type t = Empty | Leaf of int | Branch of int * int * t * t (* prefix, branching bit, bit clear, bit set *)
+
+  let empty = Empty
+  let zero k m = k land m = 0
+  let matches k p m = k land (m - 1) = p
+
+  let join p0 t0 p1 t1 =
+    let x = p0 lxor p1 in
+    let m = x land -x in
+    let p = p0 land (m - 1) in
+    if zero p0 m then Branch (p, m, t0, t1) else Branch (p, m, t1, t0)
+
+  let branch p m t0 t1 = match (t0, t1) with Empty, t | t, Empty -> t | _ -> Branch (p, m, t0, t1)
+
+  let rec mem k = function
+    | Empty -> false
+    | Leaf j -> j = k
+    | Branch (p, m, t0, t1) -> matches k p m && mem k (if zero k m then t0 else t1)
+
+  let rec add k t =
+    match t with
+    | Empty -> Leaf k
+    | Leaf j -> if j = k then t else join k (Leaf k) j t
+    | Branch (p, m, t0, t1) ->
+        if matches k p m then
+          if zero k m then
+            let t0' = add k t0 in
+            if t0' == t0 then t else Branch (p, m, t0', t1)
+          else
+            let t1' = add k t1 in
+            if t1' == t1 then t else Branch (p, m, t0, t1')
+        else join k (Leaf k) p t
+
+  let rec remove k t =
+    match t with
+    | Empty -> t
+    | Leaf j -> if j = k then Empty else t
+    | Branch (p, m, t0, t1) ->
+        if not (matches k p m) then t
+        else if zero k m then
+          let t0' = remove k t0 in
+          if t0' == t0 then t else branch p m t0' t1
+        else
+          let t1' = remove k t1 in
+          if t1' == t1 then t else branch p m t0 t1'
+
+  let rec inter s t =
+    if s == t then s
+    else
+      match (s, t) with
+      | Empty, _ | _, Empty -> Empty
+      | Leaf k, _ -> if mem k t then s else Empty
+      | _, Leaf k -> if mem k s then t else Empty
+      | Branch (p, m, s0, s1), Branch (q, n, t0, t1) ->
+          if m = n && p = q then
+            let r0 = inter s0 t0 and r1 = inter s1 t1 in
+            if r0 == s0 && r1 == s1 then s else branch p m r0 r1
+          else if m < n && matches q p m then inter (if zero q m then s0 else s1) t
+          else if n < m && matches p q n then inter s (if zero p n then t0 else t1)
+          else Empty
+
+  let rec equal s t =
+    s == t
+    ||
+    match (s, t) with
+    | Leaf a, Leaf b -> a = b
+    | Branch (p, m, s0, s1), Branch (q, n, t0, t1) -> p = q && m = n && equal s0 t0 && equal s1 t1
+    | _ -> false
+end
+
 (* [regs]: what each physical register holds (0..15 general, 16..31 xmm).
    A vreg's slot can only ever hold that vreg's current value or garbage,
-   so the slots are one bit per vreg ("v's slot holds v"), not a tag: the
-   per-block state stays small for functions with millions of vregs. *)
-type state = { regs : tag array; slots : Bytes.t; virt : tag array (* physical registers only *) }
+   so the slots are a set of vregs ("v's slot holds v"), not a tag. The set
+   is persistent: it holds only spilled vregs and shares its structure
+   between blocks, so a function with 100k blocks and a million vregs does
+   not keep a dense bitmap per block (that was O(blocks x vregs) memory). *)
+type state = { regs : tag array; slots : Iset.t; virt : tag array (* physical registers only *) }
 
-let copy_state s = { regs = Array.copy s.regs; slots = Bytes.copy s.slots; virt = Array.copy s.virt }
-
-let slot_get b v = Char.code (Bytes.unsafe_get b (v lsr 3)) land (1 lsl (v land 7)) <> 0
-
-let slot_set b v on =
-  let i = v lsr 3 and m = 1 lsl (v land 7) in
-  let c = Char.code (Bytes.get b i) in
-  Bytes.set b i (Char.unsafe_chr (if on then c lor m else c land lnot m))
+let copy_state s = { regs = Array.copy s.regs; slots = s.slots; virt = Array.copy s.virt }
 
 let meet a b =
   let m x y = if x = y then x else Unknown in
-  let slots = Bytes.copy a.slots in
-  for i = 0 to Bytes.length slots - 1 do
-    Bytes.unsafe_set slots i
-      (Char.unsafe_chr (Char.code (Bytes.unsafe_get slots i) land Char.code (Bytes.unsafe_get b.slots i)))
-  done;
+  let slots = Iset.inter a.slots b.slots in
   { regs = Array.map2 m a.regs b.regs; slots; virt = Array.map2 m a.virt b.virt }
 
+let state_equal a b = a.regs = b.regs && a.virt = b.virt && Iset.equal a.slots b.slots
+
 let run (f : func) (ra : Mir_ra.result) =
-  let nv = Dynarray.length f.vcls in
   let nb = Array.length ra.items in
   let fail bi ins fmt =
     Printf.ksprintf
@@ -84,7 +153,7 @@ let run (f : func) (ra : Mir_ra.result) =
       regs.(p) <- t;
       virt.(p) <- t
     done;
-    { regs; slots = Bytes.make ((nv + 7) / 8) '\000'; virt }
+    { regs; slots = Iset.empty; virt }
   in
   let entry_state = Array.make nb None in
   entry_state.(0) <- Some init;
@@ -101,14 +170,14 @@ let run (f : func) (ra : Mir_ra.result) =
   in
   let step bi s =
     let st = copy_state s in
-    let a = st.regs and sl = st.slots and vt = st.virt in
+    let a = st.regs and sl = ref st.slots and vt = st.virt in
     let set_vreg v loc =
       (* a new value of v: every older copy is stale *)
       (* a copy of v can only be in a register or in v's own slot *)
       for i = 0 to nphys - 1 do
         if a.(i) = Vt v then a.(i) <- Unknown
       done;
-      slot_set sl v false;
+      sl := Iset.remove v !sl;
       a.(loc) <- Vt v
     in
     List.iteri
@@ -117,12 +186,12 @@ let run (f : func) (ra : Mir_ra.result) =
         | Mir_ra.Reload (v, r) ->
             let s = ra.vslot.(v) in
             if s < 0 then fail bi (Copy (r, V v)) "reload of a vreg without a slot";
-            if not (slot_get sl v) then fail bi (Copy (r, V v)) "reload: the slot does not hold %%%d" v;
+            if not (Iset.mem v !sl) then fail bi (Copy (r, V v)) "reload: the slot does not hold %%%d" v;
             if class_of_phys r <> Dynarray.get f.vcls v then fail bi (Copy (r, V v)) "reload into the wrong class";
             a.(phys_index r) <- Vt v
         | Spill (v, r) ->
             if a.(phys_index r) <> Vt v then fail bi (Copy (V v, r)) "spill: the register does not hold %%%d" v;
-            slot_set sl v true
+            sl := Iset.add v !sl
         | Orig (before, after) ->
             (* the substitution *)
             let sub = Hashtbl.create 4 in
@@ -177,25 +246,58 @@ let run (f : func) (ra : Mir_ra.result) =
         if vt.(i) = Unknown || a.(i) <> vt.(i) then
           raise (Failure (Printf.sprintf "%s: block %d: %s does not hold the returned value" f.name bi (reg_s p))))
       (term_uses ra.terms.(bi));
-    st
+    { st with slots = !sl }
   in
-  (* fixpoint over the blocks in order *)
+  (* fixpoint over the blocks in reverse postorder, visiting only blocks
+     whose entry state changed. Block indices are not in flow order (split
+     edges come last), and a sweep in index order moved a state one hop per
+     round: O(blocks^2) steps on a long chain. In reverse postorder a sweep
+     covers every forward edge, so the sweeps are bounded by the loop
+     nesting. The order is computed without recursion (100k+ blocks). *)
+  let rpo =
+    let seen = Array.make nb false and po = Dynarray.create () in
+    let stack = Stack.create () in
+    if nb > 0 then begin
+      seen.(0) <- true;
+      Stack.push (0, successors ra.terms.(0)) stack
+    end;
+    while not (Stack.is_empty stack) do
+      let b, rest = Stack.pop stack in
+      match rest with
+      | [] -> Dynarray.add_last po b
+      | s :: rest ->
+          Stack.push (b, rest) stack;
+          if not seen.(s) then begin
+            seen.(s) <- true;
+            Stack.push (s, successors ra.terms.(s)) stack
+          end
+    done;
+    Array.of_list (List.rev (Dynarray.to_list po))
+  in
+  let pending = Array.make nb false in
+  if nb > 0 then pending.(0) <- true;
   let changed = ref true in
   while !changed do
     changed := false;
-    for bi = 0 to nb - 1 do
-      match entry_state.(bi) with
-      | None -> ()
-      | Some s ->
-          let out = step bi s in
-          List.iter
-            (fun succ ->
-              let ns = match entry_state.(succ) with None -> out | Some old -> meet old out in
-              let ns = if succ = 0 then meet ns init else ns in
-              if entry_state.(succ) <> Some ns then begin
-                entry_state.(succ) <- Some ns;
-                changed := true
-              end)
-            (successors ra.terms.(bi))
-    done
+    Array.iter
+      (fun bi ->
+        if pending.(bi) then begin
+          pending.(bi) <- false;
+          match entry_state.(bi) with
+          | None -> ()
+          | Some s ->
+              let out = step bi s in
+              List.iter
+                (fun succ ->
+                  let ns = match entry_state.(succ) with None -> out | Some old -> meet old out in
+                  let ns = if succ = 0 then meet ns init else ns in
+                  let same = match entry_state.(succ) with Some old -> state_equal old ns | None -> false in
+                  if not same then begin
+                    entry_state.(succ) <- Some ns;
+                    pending.(succ) <- true;
+                    changed := true
+                  end)
+                (successors ra.terms.(bi))
+        end)
+      rpo
   done

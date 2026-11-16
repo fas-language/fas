@@ -31,10 +31,11 @@ open Fir
 (* ---------- layouts ---------- *)
 
 (* struct name -> (size, align, agg fields), from the front end's layouts.
-   The fields are the struct's flattened scalar leaves (offset, Fir type),
+   The fields are the struct's scalar leaves (offset, Fir field), with
+   nested structs and unions as nested aggs (SPEC §5),
    which Fir_abi classifies when the struct crosses a C call by value; they
    are [] above 16 bytes, where the struct is MEMORY class anyway *)
-type layouts = (string, int * int * (int * Fir.ty) list) Hashtbl.t
+type layouts = (string, int * int * (int * Fir.field) list) Hashtbl.t
 
 let rec layout (lay : layouts) (t : Low.ty) =
   match t with

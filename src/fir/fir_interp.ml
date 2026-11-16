@@ -1354,12 +1354,12 @@ let vararg_slot = function
 
 (* ---------- calls ---------- *)
 
-let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ -> ptr
+let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr
 
 let sig_matches (a : signature) (b : signature) =
   let same x y =
     abi_ty x = abi_ty y
-    && match (x, y) with Agg p, Agg q -> p.size = q.size | _ -> true
+    && match (agg_view x, agg_view y) with Agg p, Agg q -> p.size = q.size | _ -> true
   in
   List.length a.param_abis = List.length b.param_abis
   && List.for_all2 same a.param_abis b.param_abis
@@ -1420,7 +1420,7 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
                  (fun k x ->
                    if k < fixed then None
                    else
-                     match List.assoc_opt k va_aggs with
+                     match Option.map agg_view (List.assoc_opt k va_aggs) with
                      | Some (Agg { size; align; _ }) -> Some (`Agg (size, align), x)
                      | _ -> Some (`Ty (arg_ty caller sig_ k x), x))
                  args)
@@ -1454,7 +1454,7 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
         (fun k abi ->
           let x = args.(k) in
           let x =
-            match abi with
+            match agg_view abi with
             | Agg { size; _ } ->
                 (* the callee reads its own copy and must not write it *)
                 let o =
@@ -1535,7 +1535,7 @@ and run_block st caller fr b : v array =
       (* an aggregate result is copied out before this frame goes away *)
       List.iteri
         (fun k abi ->
-          match (abi, caller) with
+          match (agg_view abi, caller) with
           | Agg { size; _ }, Some owner ->
               let o =
                 copy_bytes st owner
@@ -1997,7 +1997,7 @@ and exec st fr i =
       let at = va_next st (ptr_of (get1 st fr p)) (`Ty t) in
       set 0 (read_value st t at)
   | Va_arg_agg (abi, p) -> (
-      match abi with
+      match agg_view abi with
       | Agg { size; align; _ } ->
           let at = va_next st (ptr_of (get1 st fr p)) (`Agg (size, align)) in
           let o = copy_bytes st fr at size ~writable:true ~what:"a va_arg aggregate" in

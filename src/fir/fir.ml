@@ -203,7 +203,43 @@ let asm_intel = 2  (** the template is Intel syntax (-masm=intel), not AT&T *)
 type abi =
   | Scalar of ty
   | Ext of ty * ext
-  | Agg of { size : int; align : int; fields : (int * ty) list }
+  | Agg of { size : int; align : int; fields : (int * field) list }
+      (** an aggregate by value (SPEC §5): its fields are scalars and
+          nested aggregates (a C struct or union member, or an array
+          element, whose own classification can make the whole MEMORY),
+          at offsets from its start *)
+  | Cplx of ty
+      (** a C _Complex T by value (T = f16, f32, f64, f80): two T's, as
+          [Agg] of its [complex T] field (see [agg_of_complex]) everywhere
+          but one place: a [complex f80] result comes back in st0/st1, where
+          a struct holding one (an [Agg]) is returned in memory *)
+
+(* a nested aggregate's abi is always an Agg. [Complex t] is a C _Complex
+   of the float type t: two t's, the real part at the field's offset and
+   the imaginary part [size_of t] bytes later (16 for f80); it differs from
+   a pair of t's only for f80, whose complex is the psABI's COMPLEX_X87
+   class (SPEC §5) *)
+and field = Leaf of ty | Sub of abi | Complex of ty
+
+(* scalar fields, nested ones included, at offsets from the agg's start *)
+let rec leaves_of_fields fields =
+  List.concat_map
+    (fun (o, f) ->
+      match f with
+      | Leaf t -> [ (o, t) ]
+      | Sub (Agg { fields; _ }) -> List.map (fun (o', t) -> (o + o', t)) (leaves_of_fields fields)
+      | Sub (Scalar t | Ext (t, _)) -> [ (o, t) ]
+      | Complex t | Sub (Cplx t) -> [ (o, t); (o + size_of t, t) ])
+    fields
+
+(* the agg a C _Complex T is laid out as *)
+let agg_of_complex t =
+  let n = size_of t in
+  Agg { size = 2 * n; align = n; fields = [ (0, Complex t) ] }
+
+(* an abi as the agg it is laid out as, where a C _Complex is one: only
+   the classification of a result tells [Cplx] from [Agg] *)
+let agg_view = function Cplx t -> agg_of_complex t | a -> a
 
 type signature = { param_abis : abi list; result_abis : abi list; variadic : bool }
 type callee = Direct of string | Indirect of value
@@ -829,6 +865,33 @@ let blocks_pinned (m : modul) (f : func) =
             | Some pieces -> List.exists (function Blockref { fn; _ } -> fn = f.name | _ -> false) pieces
             | None -> false)
        false m.globals
+
+(* A pass that splits a block moves the instructions after the split
+   point to a new block. In the entry block those may include
+   constant-size allocas, which SPEC §6 keeps in the entry block (they
+   are frame slots, made once per call). This moves every constant-size
+   alloca found outside the entry block back to the end of the entry
+   block. It is only correct when each one came from the entry block,
+   which holds when the input verified: the verifier rejects any other.
+   The entry block dominates every block, and the size is a constant, so
+   every use is still dominated. *)
+let hoist_const_allocas f =
+  if f.defined && Vec.length f.blocks > 1 then begin
+    let entry_b = Vec.get f.blocks 0 in
+    for b = 1 to Vec.length f.blocks - 1 do
+      let br = Vec.get f.blocks b in
+      let const_alloca i =
+        match (Vec.get f.insts i).op with
+        | Alloca (n, _) -> ( match def_of f (resolve f n) with Const _ -> true | _ -> false)
+        | _ -> false
+      in
+      let moved, kept = List.partition const_alloca (Vec.to_list br.insts) in
+      if moved <> [] then begin
+        br.insts <- Vec.of_list 0 kept;
+        List.iter (fun i -> ignore (Vec.push entry_b.insts i)) moved
+      end
+    done
+  end
 
 (* Removes the blocks that no path from the entry reaches (SPEC §4 requires
    every block to be reachable) and renumbers the rest in their order. The

@@ -102,7 +102,7 @@ let declare cx name =
 let call cx name args =
   declare cx name;
   let sig_ = List.assoc name libatomic in
-  let tys = Array.of_list (List.map (function Scalar t | Ext (t, _) -> t | Agg _ -> ptr) sig_.result_abis) in
+  let tys = Array.of_list (List.map (function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr) sig_.result_abis) in
   emit ~loc:cx.loc cx.f cx.cur (Call { sig_; callee = Direct name; args; attrs = a_nounwind; va_aggs = [] }) tys
 
 (* a zeroed stack object of [bytes], 16-aligned *)
@@ -361,7 +361,9 @@ let run_func m (f : func) =
           let rest = Array.sub insts (j + 1) (Array.length insts - j - 1) in
           Array.iter (fun i -> ignore (Vec.push (block f cx.cur).insts i)) rest;
           set_term ~loc:term_loc f cx.cur term)
-    done
+    done;
+    (* a split entry block moved its later allocas (Fir.hoist_const_allocas) *)
+    hoist_const_allocas f
   end
 
 let run (m : modul) =

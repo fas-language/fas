@@ -83,6 +83,13 @@
  (modules fir_fuzz)
  (libraries fas_compiler))
 
+; ABI fuzzer: random C signatures called Fir <-> C both ways. Not run by
+; `dune runtest` (it needs gcc and clang); see test/abi_fuzz.sh.
+(executable
+ (name abi_fuzz)
+ (modules abi_fuzz)
+ (libraries fas_compiler unix))
+
 (test
  (name mir_check_test)
  (modules mir_check_test)

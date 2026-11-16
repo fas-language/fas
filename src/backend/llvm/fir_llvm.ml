@@ -164,7 +164,7 @@ let abi_ty what = function
   | Scalar t -> (t, "")
   | Ext (t, Zx) -> (t, " zeroext")
   | Ext (t, Sx) -> (t, " signext")
-  | Agg _ -> unsupported "%s: an aggregate by value (C ABI aggregates for LLVM come with roadmap v0.7)" what
+  | Agg _ | Cplx _ -> unsupported "%s: an aggregate by value (C ABI aggregates for LLVM come with roadmap v0.7)" what
 
 (* The LLVM return type of a result list *)
 let results_ty what abis =
@@ -212,7 +212,7 @@ let c_abi (a : abi) =
   | Scalar (Vec _ as t) | Ext ((Vec _ as t), _) -> (A.vec_agg t, Some t)
   | (Scalar (Int n as t) | Ext ((Int n as t), _)) when n > 128 ->
       let k = (n + 63) / 64 in
-      (Agg { size = 8 * k; align = 8; fields = List.init k (fun i -> (8 * i, Int 64)) }, Some t)
+      (Agg { size = 8 * k; align = 8; fields = List.init k (fun i -> (8 * i, Leaf (Int 64))) }, Some t)
   | a -> (a, None)
 
 let ext_text = function Ext (_, Zx) -> " zeroext" | Ext (_, Sx) -> " signext" | _ -> ""
@@ -222,7 +222,9 @@ let plan_args ~sret abis =
   let gp = ref (if sret then 1 else 0) and xp = ref 0 in
   List.map
     (fun (a : abi) ->
-      match a with
+      (* a complex argument is passed as its agg (COMPLEX_X87: memory) *)
+      match (match a with Cplx t -> agg_of_complex t | a -> a) with
+      | Cplx _ -> assert false
       | Scalar t | Ext (t, _) ->
           (match t with
           | F80 -> ()
@@ -243,10 +245,13 @@ let plan_args ~sret abis =
           | A.Memory -> Hmem (size, align)))
     abis
 
-let plan_ret (a : abi) =
+let rec plan_ret (a : abi) =
   match a with
-  | Agg { size = 16; fields; _ } when fields <> [] && List.for_all (( = ) (0, F80)) fields -> Rx87 1
-  | Agg { size = 32; fields = [ (0, F80); (16, F80) ]; _ } -> Rx87 2
+  (* a C _Complex long double (COMPLEX_X87) comes back in st0/st1; a
+     struct holding one is an agg over 16 bytes: memory *)
+  | Cplx F80 -> Rx87 2
+  | Cplx t -> plan_ret (agg_of_complex t)
+  | Agg { size; fields; _ } when A.x87_result ~size ~fields <> None -> Rx87 (Option.get (A.x87_result ~size ~fields))
   | Scalar t | Ext (t, _) -> Rplain (t, ext_text a)
   | Agg { size; align; fields } -> (
       match A.classify ~size ~align ~fields with
@@ -299,7 +304,7 @@ let lower_sig what (result_abis : abi list) (abis : abi list) =
 
 (* the LLVM type of a result of several in a register: an Ext widened to
    i64 *)
-let multi_reg_ty (a : abi) = match a with Ext _ -> "i64" | Scalar t -> lty t | Agg _ -> assert false
+let multi_reg_ty (a : abi) = match a with Ext _ -> "i64" | Scalar t -> lty t | Agg _ | Cplx _ -> assert false
 
 (* the results of several that are in registers, in order *)
 let multi_regs (l : lsig) =
@@ -633,7 +638,7 @@ let va_overflow cx ap size align =
    eightbyte is copied from the register save area or the overflow area,
    whichever applies, and the va_list fields are updated by selects *)
 let va_arg_agg cx (abi : abi) ap =
-  match abi with
+  match agg_view abi with
   | Agg { size; align; fields } -> (
       match A.classify ~size ~align ~fields with
       | A.Memory ->
@@ -1492,11 +1497,13 @@ let emit_inst cx (ir : inst_rec) =
         @ List.concat (List.map2 (fun x h -> arg_texts cx x h) (Array.to_list args) l.hows)
       in
       (* a variadic callee's type is spelled out, with the fixed parameters
-         as lowered; so is an indirect one's *)
+         as lowered; so is an indirect one's. A function type holds types
+         only: LLVM refuses parameter attributes there (byval, signext,
+         sret), which the arguments carry instead *)
       let fn_ty =
         if sig_.variadic then
           let fixed = { l with hows = List.filteri (fun k _ -> k < nfixed) l.hows } in
-          Printf.sprintf "%s (%s) " ret (String.concat ", " (List.map (fun (t, a) -> t ^ a) (lparams_all fixed) @ [ "..." ]))
+          Printf.sprintf "%s (%s) " ret (String.concat ", " (List.map fst (lparams_all fixed) @ [ "..." ]))
         else ret ^ " "
       in
       let callee_text = match callee with Direct n -> cx.sym n | Indirect p -> v cx p in
@@ -1537,7 +1544,7 @@ let emit_inst cx (ir : inst_rec) =
                   let p, ba = Option.get block_slot in
                   let q = gep cx p o in
                   match (a, vf) with
-                  | Agg _, None -> line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 0" res q)
+                  | (Agg _ | Cplx _), None -> line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 0" res q)
                   | _, Some ft | (Scalar ft | Ext (ft, _)), None ->
                       line cx (Printf.sprintf "%s = load %s, ptr %s, align %d" res (lty ft) q (block_align ba o))))
             (Option.get l.multi)
@@ -1615,7 +1622,7 @@ let emit_inst cx (ir : inst_rec) =
       | (Vec _ | Int _) as t ->
           (* as the agg C passes it in: __int128 two INTEGER eightbytes,
              16-aligned in memory; a vector or a wider integer (§5) *)
-          let abi = match t with Int n when n <= 128 -> Agg { size = 16; align = 16; fields = [ (0, t) ] } | _ -> fst (c_abi (Scalar t)) in
+          let abi = match t with Int n when n <= 128 -> Agg { size = 16; align = 16; fields = [ (0, Leaf t) ] } | _ -> fst (c_abi (Scalar t)) in
           let a = va_arg_agg cx abi (v cx p) in
           def (Printf.sprintf "load %s, ptr %s, align 8" (lty t) a))
   | Va_arg_agg (abi, p) -> def (Printf.sprintf "getelementptr i8, ptr %s, i64 0" (va_arg_agg cx abi (v cx p)))
@@ -1746,7 +1753,7 @@ let emit_term cx b (labels : string array) =
         List.concat
           (List.mapi
              (fun k (a, part, vf) ->
-               let x = xs.(k) in
+               let x = xs.(k) and a = agg_view a in
                match part with
                | A.Mmem o -> (
                    let q = gep cx "%mblk" o in

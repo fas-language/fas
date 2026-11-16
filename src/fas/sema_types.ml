@@ -375,8 +375,15 @@ let rec source_ty named_types = function
       | Some (Unsupported_name (entity, reason)) ->
           Error (Printf.sprintf "C declaration `%s` is not supported: %s" entity reason)
       | None -> Error (Printf.sprintf "unknown type `%s`" name))
-  | Ast.Applied_type _ ->
-      Error "internal error: generic type application reached ordinary type checking"
+  (* specialization replaces every application of a generic struct; what
+     is left names something else (a value in an index position, as in
+     `p[x[4, u8]]`, or a type without parameters) *)
+  | Ast.Applied_type (name, _, _, _) -> (
+      match List.assoc_opt name named_types with
+      | Some Generic_struct_name ->
+          Error "internal error: generic type application reached ordinary type checking"
+      | Some _ -> Error (Printf.sprintf "`%s` takes no type arguments" name)
+      | None -> Error (Printf.sprintf "unknown generic struct `%s`" name))
 
 (* the secrecy a declared type gives its storage: `secret[T]` is secret,
    an array of secrets has secret elements. Structs are public as a whole

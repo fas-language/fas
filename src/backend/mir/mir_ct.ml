@@ -166,9 +166,13 @@ let run (f : func) (ra : Mir_ra.result) =
             bad after "float operand" u
         | Call { target = Treg r; _ } -> bad after "call target" [ r ]
         | Syscall _ -> bad after "syscall argument" u
-        | Rep_movsb | Rep_stosb ->
+        | Rep_movsb ->
             bad after "pointer or count of a rep string instruction"
               X64.[ G Rdi; G Rsi; G Rcx ]
+        (* stosb reads no rsi (whatever it holds), and al is the stored
+           byte, which may be secret like any stored value *)
+        | Rep_stosb ->
+            bad after "pointer or count of a rep string instruction" X64.[ G Rdi; G Rcx ]
         | Salloc (_, n) -> bad after "dynamic stack size" [ n ]
         | Spset r -> bad after "stack pointer" [ r ]
         | Asm a -> bad after "inline asm input" a.ain

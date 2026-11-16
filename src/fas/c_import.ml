@@ -715,7 +715,13 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
   List.iter
     (fun node ->
       let c_name = Option.value ~default:"" (name node) in
-      if not (is_builtin_function node) then add_probe (Some ("decl:" ^ c_name)) c_name)
+      (* a macro may share the declaration's name (`int counter;` then
+         `#define counter`): the probe must name the declaration, so the
+         macro is hidden around it *)
+      if not (is_builtin_function node) then
+        add_probe
+          ~names:(if c_name = "" then [] else [ c_name ])
+          (Some ("decl:" ^ c_name)) c_name)
     top_declarations;
   List.iter
     (fun node ->
