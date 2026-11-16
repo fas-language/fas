@@ -6225,6 +6225,22 @@ let () =
      fn main() i32 { Ring i32 = 7\n\
     \ item Ring[4] = {9}\n\
     \ return item.value }\n";
+  (* fas_refuse find: `G[...]` raw-access type arguments with a local
+     shadowing the generic struct reached ordinary type checking *)
+  List.iteri
+    (fun i body ->
+      semantic_error
+        (Printf.sprintf "generic-struct-local-raw-shadow-%d" i)
+        "`Ring` is a value, not a type"
+        ("struct Ring[N const usize] { head u32 }\n\
+          fn main() i32 { p addr = null\n\
+         \ Ring arr[5,u32] = {}\n " ^ body ^ "\n return 0 }\n"))
+    [
+      "x u32 = p[Ring[4], 0].head";
+      "view v = p[Ring[4], 0]";
+      "p[Ring[4], 1].head = 1";
+      "x usize = sizeof[Ring[4]]";
+    ];
   let expr_statement_shadow =
     llvm_of
       "const N usize = 99\n\

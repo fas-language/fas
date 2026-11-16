@@ -18,7 +18,7 @@
 #   lanes    4096-lane vector arithmetic and reductions
 #   nesting  Fas source nested 100 deep (must run) and 10k, 100k deep
 #            (must run or be refused cleanly): parentheses, blocks,
-#            ifs, `1 + 1 + ...` chains
+#            ifs, `1 + 1 + ...` chains, `argv + 1 + ...` address chains
 #
 # Times go to stdout; STRESS_RATIO overrides the ratio, STRESS_KEEP keeps
 # the generated files in that directory.
@@ -140,7 +140,7 @@ def lanes(n):
 
 # ---------- Fas nesting: (source, expected exit code) ----------
 
-NEST_KINDS = ["parens", "blocks", "ifs", "chain", "argchain", "indexchain"]
+NEST_KINDS = ["parens", "blocks", "ifs", "chain", "argchain", "indexchain", "addrchain"]
 
 
 def nesting(kind, n):
@@ -158,6 +158,9 @@ def nesting(kind, n):
         # an index chain in a generic call argument: the parser's lookahead
         # for `g[...](` and constant folding were each O(n^2) on it
         "indexchain": "y = pick(g[" + "0 + " * (n - 1) + "0], 0, true) + 8",
+        # an address offset chain: sema's address facts re-walked the chain
+        # below at every level, O(n^2) (a fas_refuse timeout)
+        "addrchain": "q addr = argv + " + "1 + " * (n - 1) + "1\n    y = if q == argv { 0 } else { 8 }",
     }[kind]
     src = ("var g arr[2,i32]\n\nfn pick[T](a T, b T, choose bool) T {\n    return if choose { a } else { b }\n}\n\n"
            f"fn id(v i32) i32 {{\n    return v\n}}\n\nfn main(argc i32, argv addr) i32 {{\n    x i32 = argc\n    y i32 = 0\n    {body}\n    return y\n}}\n")

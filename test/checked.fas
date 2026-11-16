@@ -19,6 +19,14 @@ fn t_i32_u32(x i32) u32 { return checked_trunc[u32](x) catch 1 }
 fn t_i16_i16(x i16) i16 { return checked_trunc[i16](x) catch 1 }
 
 fn add8(a u8, b u8) u8 fails { return try checked_add(a, b) }
+// a u8 result taken where an i16 is expected: the call keeps its type
+// under try/catch and the whole result is widened (fas_refuse find: the
+// widening went between catch and its call, an internal error)
+fn w_catch(x i16) i16 { return checked_trunc[u8](x) catch 1 }
+fn w_try(a u8) i16 fails {
+    y i16 = try add8(a, 200)
+    return y + 1
+}
 fn is_overflow() bool {
     add8(255, 1) catch e { return e == Overflow }
     return false
@@ -61,5 +69,9 @@ fn main() i32 {
     if t_i32_u32(7) != 7 { bad += 1 }
     if t_i16_i16(-5) != -5 { bad += 1 }
     if !is_overflow() { bad += 1 }
+    if w_catch(300) != 1 || w_catch(255) != 255 || w_catch(-1) != 1 { bad += 1 }
+    w1 i16 = w_try(55) catch 9
+    w2 i16 = w_try(56) catch 9
+    if w1 != 256 || w2 != 9 { bad += 1 }
     return bad
 }

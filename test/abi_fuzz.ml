@@ -230,7 +230,15 @@ let rec gen_member depth ~packed =
         | _ -> false
       in
       let m = gen_member (depth - 1) ~packed in
-      Arr ((if cf16 m then Cplx F32 else m), 1 + int 4)
+      let m = if cf16 m then Cplx F32 else m in
+      (* an array of a packed struct whose size breaks a member's natural
+         alignment puts that member misaligned in the later elements: clang
+         (and Fir, and the psABI's "unaligned fields") make the whole agg
+         MEMORY, gcc does not, as it checks alignment only inside the
+         packed struct. One element keeps every member aligned *)
+      let s, _ = size_align m in
+      let misaligned = List.exists (fun (o, e, _) -> (s + o) mod sc_align e <> 0) (leaves ~all:true m "" 0) in
+      Arr (m, if misaligned then 1 else 1 + int 4)
   | 3 when not packed ->
       let n, e = choose vecs in
       Vec (n, e)

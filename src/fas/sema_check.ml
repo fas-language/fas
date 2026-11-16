@@ -440,6 +440,11 @@ let rec address_fact c = function
   | Hir.Binary (((Ast.Add | Ast.Sub) as op), left, right, Hir.Addr, _) -> (
       match (address_fact c left, exact_address_offset c right) with
       | Some address, Some offset -> shift_address op address offset
+      | _ when not (is_int (Hir.expr_ty left)) ->
+          (* an address on the left has no exact offset; walking it here
+             again made each level re-scan the chain below (quadratic on
+             `p + a + b + ...`, a fas_refuse timeout) *)
+          None
       | _ -> (
           match (op, exact_address_offset c left, address_fact c right) with
           | Ast.Add, Some offset, Some address -> shift_address Ast.Add address offset
@@ -1035,6 +1040,9 @@ let rec source_ty_in_context c span = function
       error (Sema_types.source_type_span span element) Sema_types.secret_vector_error
   | Ast.Named_type (name, type_span) when Option.is_some (lookup_local name c) ->
       error type_span (Printf.sprintf "`%s` is a value, not a type" name)
+  (* a local hiding a generic struct: the specializer left `G[...]` alone *)
+  | Ast.Applied_type (name, type_span, _, _) when Option.is_some (lookup_local name c) ->
+      error type_span (Printf.sprintf "`%s` is a value, not a type" name)
   | Ast.Named_type (name, type_span) -> (
       match lookup_top_level name c.top_level_bindings with
       | Some { declaration_kind = Top_const; _ } ->
@@ -1518,6 +1526,16 @@ let select_type_arg_secret named_types span payload =
   let* t = Sema_types.with_secret (fun () -> select_type_arg named_types span payload) in
   Ok (t, secrecy)
 
+(* the same in a function body: a local hiding a generic struct `G` makes
+   `G[...]` an index of that local, which the specializer leaves alone, so
+   it is no type here *)
+let select_type_arg_secret_in c span payload =
+  match payload with
+  | Ast.Type_or_index (Ast.Applied_type (name, type_span, _, _))
+    when Option.is_some (lookup_local name c) ->
+      error type_span (Printf.sprintf "`%s` is a value, not a type" name)
+  | _ -> select_type_arg_secret c.named_types span payload
+
 let select_type_payload_span fallback = function
   | Ast.Type_arg (Ast.Named_type ("void", span))
   | Ast.Type_or_index (Ast.Named_type ("void", span)) ->
@@ -1721,6 +1739,16 @@ let rec check_place_inner (c : context) expr =
                   Sema_types.raw_access_needs_type_error ~index:(Ast.expr_name index) a
                     s;
                 ]
+          (* `p[G[4]]` where a local `G` hides the generic struct `G`: the
+             specializer leaves it alone (it indexes the local), so it is a
+             value index here, as `p[x]` is *)
+          | Hir.Addr, [ Ast.Type_or_index (Ast.Applied_type (name, _, _, _) as ty) ]
+            when Option.is_some (lookup_local name c) ->
+              Error
+                [
+                  Sema_types.raw_access_needs_type_error ~allow_help:false
+                    ~index:(Ast.expr_name (Ast.index_expression ty)) a s;
+                ]
           | Hir.Addr, [ Ast.Name_arg (name, _) ]
             when Option.is_some (lookup_local name c)
                  ||
@@ -1831,7 +1859,7 @@ let rec check_place_inner (c : context) expr =
                 | Some binding, Some path -> require_place_state binding path c s
                 | _ -> Ok ()
               in
-              let* t, secrecy = select_type_arg_secret c.named_types s type_payload in
+              let* t, secrecy = select_type_arg_secret_in c s type_payload in
               let* () =
                 match t with
                 | Hir.Void ->
@@ -1853,7 +1881,7 @@ let rec check_place_inner (c : context) expr =
                 | Some binding, Some path -> require_place_state binding path c s
                 | _ -> Ok ()
               in
-              let* t, secrecy = select_type_arg_secret c.named_types s type_payload in
+              let* t, secrecy = select_type_arg_secret_in c s type_payload in
               let* () =
                 match t with
                 | Hir.Void ->
@@ -3693,7 +3721,9 @@ and check_handled_call c expected keyword call =
   | Ast.Call (_, _, call_span) as call ->
       let previous = c.handled_call in
       c.handled_call <- Some call_span;
-      let result = check_expr c expected call in
+      (* no widening here: `try`/`catch` wraps the call itself, and a wider
+         expected type widens the whole `f() catch v` (check_expr on it) *)
+      let result = check_expr ~allow_widen:false c expected call in
       c.handled_call <- previous;
       result
   | other ->
@@ -5951,7 +5981,7 @@ and check_stmt (c : context) = function
       match place with
       | Ast.Select (base, [ type_payload; Ast.Name_arg ("..", _) ], select_span) ->
           let* element, secrecy =
-            select_type_arg_secret c.named_types select_span type_payload
+            select_type_arg_secret_in c select_span type_payload
           in
           let* () =
             if element = Hir.Void then
