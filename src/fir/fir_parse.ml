@@ -643,6 +643,9 @@ let parse_op st opname =
   | "freeze" ->
       let t = parse_ty lx in
       (Freeze (v ()), [| t |])
+  | ("secret" | "declassify") as k ->
+      let t = parse_ty lx in
+      (Mark ((if k = "secret" then Secret else Declassify), v ()), [| t |])
   | "alloca" ->
       let t = parse_ty lx in
       let n = v () in

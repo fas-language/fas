@@ -1000,6 +1000,9 @@ let emit_inst cx (ir : inst_rec) =
   | Fcmp (k, fl, a, b) -> def (Printf.sprintf "fcmp%s %s %s, %s" (fast_flags fl) (fcmp_text k) (tv cx a) (v cx b))
   | Select (c, a, b) -> def (Printf.sprintf "select %s, %s, %s" (tv cx c) (tv cx a) (tv cx b))
   | Freeze a -> def ("freeze " ^ tv cx a)
+  (* a constant-time mark: the value unchanged (LLVM has no taint marks;
+     the LLVM path makes no constant-time promise) *)
+  | Mark (_, a) -> def (Printf.sprintf "bitcast %s to %s" (tv cx a) (lty (tyv cx a)))
   | Conv ((Fptosi_sat | Fptoui_sat) as k, a) when (match rty cx ir 0 with Int n -> n > 128 | _ -> false) ->
       (* LLVM cannot select a saturating conversion to more than 128 bits:
          the bounds 2^(n-1) (or 2^n) compared in the float type (as +inf

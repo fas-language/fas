@@ -2026,7 +2026,7 @@ let inst c i =
       pick80 c (res 0) (addr80 c x) (addr80 c y) (fun r _ pb ->
           emit c (Test (rc, rc));
           emit c (Cmov (E, r, pb)))
-  | Freeze a when is80 (rty ()) -> copy80 c ~src:(addr80 c a) (res 0)
+  | (Freeze a | Mark (_, a)) when is80 (rty ()) -> copy80 c ~src:(addr80 c a) (res 0)
   | Conv (op, a) when is80 (rty ()) || is80 (ty c a) -> conv80 c (res 0) op (rty ()) a
   | Load (m, p) when is80 (rty ()) ->
       if m.order <> Plain then unsupported "atomic f80 load";
@@ -2055,6 +2055,9 @@ let inst c i =
         set r
       end
   | Freeze a -> set (copy c (use c a))
+  (* a constant-time mark is a copy here; the taint check reads it before
+     isel *)
+  | Mark (_, a) -> set (copy c (use c a))
   | Conv (op, a) -> set (conv c op (rty ()) a)
   | Alloca _ when Hashtbl.mem c.cells (F.resolve c.fn (res 0)) ->
       let cell, zero = Hashtbl.find c.cells (F.resolve c.fn (res 0)) in

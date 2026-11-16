@@ -214,6 +214,9 @@ let a_returns_twice = 2
 let a_nounwind = 4
 let a_tail = 8
 
+(* constant-time marks (SPEC §8): [Secret] starts taint, [Declassify] ends it *)
+type mark = Secret | Declassify
+
 type op =
   | Nop  (** removed instruction, dropped by [compact] *)
   | Ibin of ibin * int * value * value
@@ -227,6 +230,9 @@ type op =
   | Fcmp of fcmp * int * value * value
   | Select of value * value * value
   | Freeze of value
+  | Mark of mark * value
+      (** the operand unchanged, marked as a secret (taint source) or
+          declassified (SPEC §8, constant time) *)
   | Conv of conv * value  (** result type is the instruction's *)
   | Alloca of value * int  (** size in bytes, alignment *)
   | Load of mem * value
@@ -663,7 +669,7 @@ let iter_op_uses g = function
   | Shuffle (a, b, _) ->
       g a;
       g b
-  | Iun (_, _, a) | Fun (_, _, a) | Freeze a | Conv (_, a) | Alloca (a, _) | Load (_, a)
+  | Iun (_, _, a) | Fun (_, _, a) | Freeze a | Mark (_, a) | Conv (_, a) | Alloca (a, _) | Load (_, a)
   | Splat a | Reduce (_, a) | Dbg_value (_, a) | Va_start a | Va_arg a | Stack_restore a
   | Lifetime (_, _, a)
   | Va_arg_agg (_, a) ->
@@ -717,6 +723,7 @@ let map_op_uses g op =
   | Fcmp (k, fl, a, b) -> Fcmp (k, fl, g a, g b)
   | Select (a, b, c) -> Select (g a, g b, g c)
   | Freeze a -> Freeze (g a)
+  | Mark (k, a) -> Mark (k, g a)
   | Conv (k, a) -> Conv (k, g a)
   | Alloca (a, al) -> Alloca (g a, al)
   | Load (m, p) -> Load (m, g p)

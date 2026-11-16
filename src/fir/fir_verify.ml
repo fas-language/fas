@@ -209,7 +209,7 @@ let verify_func (f : func) =
                   same "true arm" a (r 0);
                   same "false arm" x (r 0)
                 end
-            | Freeze a ->
+            | Freeze a | Mark (_, a) ->
                 want 1;
                 if nres = 1 then same "operand" a (r 0)
             | Conv (k, a) ->

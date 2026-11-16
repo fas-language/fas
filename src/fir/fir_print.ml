@@ -272,6 +272,7 @@ let op_text f nm (ir : inst_rec) =
       Printf.sprintf "fcmp %s %s%s %s, %s" (fcmp_name k) (flags_text fl) (rt ()) (v a) (v b)
   | Select (c, a, b) -> Printf.sprintf "select %s %s, %s, %s" (rt ()) (v c) (v a) (v b)
   | Freeze a -> Printf.sprintf "freeze %s %s" (rt ()) (v a)
+  | Mark (k, a) -> Printf.sprintf "%s %s %s" (match k with Secret -> "secret" | Declassify -> "declassify") (rt ()) (v a)
   | Conv (k, a) -> Printf.sprintf "%s %s %s" (conv_name k) (rt ()) (v a)
   | Alloca (n, al) -> Printf.sprintf "alloca %s %s, align %d" (rt ()) (v n) al
   | Load (m, p) -> Printf.sprintf "load %s %s, %s" (rt ()) (v p) (mem_text m)

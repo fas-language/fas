@@ -11,6 +11,7 @@ let skip =
     ("asm_link", "inline assembly");
     ("module_asm", "module-level assembly");
     ("unwind", "unwinding needs the native unwinder");
+    ("secret80", "f80 arithmetic");
   ]
 
 let dir = "fas_fir"

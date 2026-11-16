@@ -323,6 +323,7 @@ A function marked `fenv` (§15; C's `#pragma STDC FENV_ACCESS ON`) sees the dyna
 | `fcmp PRED i1 a, b` | Float compare, with `PRED ∈ oeq ogt oge olt ole one ord ueq ugt uge ult ule une uno true false`. In an `o*` predicate a NaN makes the result false, and in a `u*` predicate it makes the result true. Flag `fast` is allowed. |
 | `select ty c, a, b` | `c ? a : b`. `c` is `i1`, or for vectors `<N x i1>` per lane. |
 | `freeze ty a` | `a` if it isn't poison, otherwise some fixed arbitrary value. |
+| `secret ty a` | `a` unchanged (poison stays poison), marked secret: a taint source for the constant-time rules (§8). `declassify ty a` is `a` unchanged and public again. Any type but `agg`. |
 | `trunc zext sext ty a` | Integer width changes: trunc must narrow, zext and sext must widen. |
 | `fptrunc fpext ty a` | Float width changes. |
 | `fptosi fptoui ty a` | Float to integer, truncating toward zero. An out-of-range input or NaN gives poison. This matches C casts. |
@@ -463,6 +464,16 @@ Store-to-load forwarding, merging equal loads, removing dead stores to non-escap
 - **No unwinding** (§1). Nothing in Fir unwinds a frame, so no instruction has an exceptional edge.
 - **Running out of stack is an implementation limit, not undefined behaviour.** The program faults on the guard page. How much stack a function uses is not part of the contract: a backend may inline and so grow frames.
 - **`trap` and trapping division** end the program with a hardware exception; which signal is unspecified (`ud2` gives `SIGILL`, a division trap `SIGFPE`).
+
+### Constant time (secret values)
+
+- **Marks.** `secret` makes its result *tainted*; `declassify` makes its result untainted. Neither changes the value. Taint flows into the result of every other instruction with a tainted operand, into a block parameter from a tainted argument, and through memory (bytes stored from a tainted value are tainted until overwritten).
+- **Rules for tainted values**, which every transform and backend must keep and never introduce:
+  - no branch on one: `br`, `switch`, `indirect_br`, and no `select` turned into a branch;
+  - no address computed from one: no load, store, table lookup or jump table indexed by it;
+  - no `udiv`, `sdiv`, `urem` or `srem` with one as either operand, and no strength reduction that adds a branch or a lookup;
+  - no call target taken from one.
+- **Status:** the marks exist from Fir 0.3 and change nothing in code generation. The check that refuses a program breaking these rules, and zeroization of secrets, come with the constant-time work (roadmap v0.7). Until then, the rules bind transforms only. The native backend already selects every `select` as a `cmov`, f80 and float ones included.
 
 ### Undefined behaviour, the complete list
 

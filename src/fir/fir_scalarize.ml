@@ -505,6 +505,9 @@ let convert_inst cx (i : inst) =
   | Freeze a ->
       let x = get cx a in
       lanes1 (fun i t -> e cx (Freeze x.(i)) t)
+  | Mark (k, a) ->
+      let x = get cx a in
+      lanes1 (fun i t -> e cx (Mark (k, x.(i))) t)
   | Conv (Bitcast, a) -> (
       let st = src_ty cx a and dt = rty 0 in
       match (st, dt) with

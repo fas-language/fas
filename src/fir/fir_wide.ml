@@ -901,6 +901,7 @@ let convert_inst cx (i : inst) =
       set cx (r 0) (call_helper cx "__fir_fmah" [ i16; i16; i16 ] [ i16 ] [| get1 cx a; get1 cx b; get1 cx c |])
   | Select (c, a, b) when rty 0 = F16 -> set cx (r 0) [| sel cx (get1 cx c) (get1 cx a) (get1 cx b) i16 |]
   | Freeze a when rty 0 = F16 -> set cx (r 0) [| e cx (Freeze (get1 cx a)) i16 |]
+  | Mark (k, a) when rty 0 = F16 -> set cx (r 0) [| e cx (Mark (k, get1 cx a)) i16 |]
   | Load (m, p) when rty 0 = F16 -> set cx (r 0) [| e cx (Load (m, get1 cx p)) i16 |]
   | Store (m, v, p) when src_ty cx v = F16 -> e0 cx (Store (m, get1 cx v, get1 cx p))
   | Va_arg p when rty 0 = F16 ->
@@ -948,6 +949,7 @@ let convert_inst cx (i : inst) =
       set cx (r 0) [| c |]
   | Select (c, a, b) -> set cx (r 0) (select_l cx (get1 cx c) (get cx a) (get cx b))
   | Freeze a -> set cx (r 0) (Array.map (fun x -> e cx (Freeze x) i64) (get cx a))
+  | Mark (k, a) -> set cx (r 0) (Array.map (fun x -> e cx (Mark (k, x)) i64) (get cx a))
   | Conv (k, a) -> set cx (r 0) (convert cx k a (rty 0))
   | Load (m, p) -> (
       match rty 0 with

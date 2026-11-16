@@ -1650,6 +1650,8 @@ and exec st fr i =
              match lane cv i with
              | Poison -> Poison
              | Bits c -> if c.(0) <> 0L then lane x i else lane y i))
+  (* a constant-time mark changes nothing, poison included *)
+  | Mark (_, a) -> set 0 (g a)
   | Freeze a ->
       let t = elem (rty 0) in
       set 0
