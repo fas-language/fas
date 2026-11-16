@@ -298,6 +298,7 @@ let member_const enum kind (member, span) v =
             [ literal ],
             span );
       span;
+      fill = None;
       extent = span;
     }
 

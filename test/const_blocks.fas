@@ -1,0 +1,104 @@
+// `const { }` blocks (LANGUAGE.md "Constants from calls"): each block fills its
+// constant at compile time; main checks every value and returns 0. The
+// failing cases live in test/const_blocks.sh.
+
+// a CRC-32 table, the motivating case
+const CRC arr[256, u32] = const {
+    for i usize in 0..256 {
+        c u32 = trunc[u32](i)
+        for k usize in 0..8 {
+            c = (c >> 1) ^ (0xEDB88320 & (0 - (c & 1)))
+        }
+        CRC[i] = c
+    }
+}
+
+// a block reads the entries it filled already
+const FIB arr[10, u64] = const {
+    FIB[1] = 1
+    for i usize in 2..10 {
+        FIB[i] = FIB[i - 1] + FIB[i - 2]
+    }
+}
+
+// a scalar works too; it starts at zero
+const SUM u32 = const {
+    for i u32 in 0..5 { SUM += i }
+}
+
+struct Pt { x i32, y i16, ok bool, f f64 }
+
+const PTS arr[3, Pt] = const {
+    for i usize in 0..3 {
+        PTS[i].x = bitcast[i32](trunc[u32](i)) - 1
+        PTS[i].y = 7
+        PTS[i].ok = i == 1
+        PTS[i].f = 0.5
+    }
+}
+
+enum Color u8 { Red  Green  Blue }
+
+struct Pair[T] { a T, b T }
+
+fn sq(x u32) u32 { return x * x }
+
+// functions the block calls may read the constant (they see it read-only)
+fn first_row(i usize) u32 { return GRID[0][i] }
+
+const GRID arr[2, arr[3, u32]] = const {
+    for i usize in 0..6 { GRID[i / 3][i % 3] = sq(trunc[u32](i)) }
+    GRID[1][0] += first_row(2)
+}
+
+const LANES vec[4, u32] = const {
+    LANES[0] = 1
+    LANES[3] = 9
+}
+
+const COLORS arr[3, Color] = const {
+    COLORS[0] = Color.Blue
+    COLORS[1] = Color.Red
+    COLORS[2] = Color.Green
+}
+
+const PAIRS arr[2, Pair[i64]] = const {
+    PAIRS[0].a = -5
+    PAIRS[1].b = 0 - 9223372036854775807 - 1
+}
+
+const F32S arr[2, f32] = const {
+    F32S[0] = 1.0 / 3.0
+    F32S[1] = -0.0
+}
+
+// a constant computed by a call may use a filled table
+fn crc_byte(b u8) u32 { return CRC[zext[usize](b)] }
+const CRC_A u32 = crc_byte(97)
+const assert(CRC_A == 0x3AB551CE)
+
+// NaNs and infinities in a block keep their bits
+const ODD arr[2, f64] = const {
+    ODD[0] = 1.0 / 0.0
+    payload u64 = 0x7FF8_0000_0000_00AB
+    ODD[1] = bitcast[f64](payload)
+}
+
+fn main() i32 {
+    if bitcast[u64](ODD[0]) != 0x7FF0000000000000 { return 90 }
+    if bitcast[u64](ODD[1]) != 0x7FF80000000000AB { return 91 }
+    if CRC[1] != 0x77073096 { return 1 }
+    if CRC[255] != 0x2D02EF8D { return 2 }
+    if FIB[9] != 34 { return 3 }
+    if SUM != 10 { return 4 }
+    if PTS[0].x != -1 || PTS[2].x != 1 || PTS[1].y != 7 { return 5 }
+    if !PTS[1].ok || PTS[0].ok { return 6 }
+    if PTS[2].f != 0.5 { return 7 }
+    if GRID[1][2] != 25 || GRID[0][1] != 1 || GRID[1][0] != 13 { return 8 }
+    if LANES[3] != 9 || LANES[1] != 0 { return 9 }
+    if COLORS[0] != Color.Blue || COLORS[2] != Color.Green { return 10 }
+    if PAIRS[0].a != -5 || PAIRS[1].b >= 0 { return 11 }
+    if F32S[0] != 1.0 / 3.0 { return 12 }
+    if bitcast[u32](F32S[1]) != 0x80000000 { return 13 }
+    return 0
+}

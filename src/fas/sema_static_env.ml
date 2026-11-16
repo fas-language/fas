@@ -95,7 +95,7 @@ let ordinary_program names (program : Ast.program) =
 let storage_items names items =
   List.filter_map
     (function
-      | Ast.Const { name; ty_span; ty; value; span; name_span; extent }
+      | Ast.Const { name; ty_span; ty; value; span; name_span; extent; _ }
         when List.mem name names ->
           Some
             (Ast.Global

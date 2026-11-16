@@ -32,8 +32,19 @@ const DEP i32 = fib(F10 / 11)
 const LEN usize = zext[usize](table_sum())
 const assert(fib(7) == 13, "fib")
 
+// NaN and infinity results keep their exact bits
+fn inf() f64 { return 1.0 / 0.0 }
+const INF f64 = inf()
+fn nan_bits() f32 { return bitcast[f32](bitcast[u32](0x7FC0_1234)) }
+const NAN32 f32 = nan_bits()
+fn neg_inf() f32 { return -1.0 / 0.0 }
+const NINF f32 = neg_inf()
+
 fn main() i32 {
     if F10 != 55 { return 1 }
+    if bitcast[u64](INF) != 0x7FF0000000000000 { return 40 }
+    if bitcast[u32](NAN32) != 0x7FC01234 { return 41 }
+    if bitcast[u32](NINF) != 0xFF800000 { return 42 }
     if SQ != -49 { return 2 }
     if BIG != 18446744065119617025 { return 3 }
     if C != Color.Blue { return 4 }

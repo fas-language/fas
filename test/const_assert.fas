@@ -23,6 +23,17 @@ fn pick[K const usize]() usize {
     return 100
 }
 
+// so does a branch a type parameter drops: each specialisation keeps only the
+// branch whose types fit (`return x` is a u32 → u64 mismatch for T = u32)
+fn widen[T](x T) u64 {
+    if sizeof[T] == 8 {
+        const assert(sizeof[T] == 8)
+        return x
+    } else {
+        return zext[u64](x)
+    }
+}
+
 fn main() i32 {
     const assert(N == 8)
     a Arr[i32, 3] = {}
@@ -32,6 +43,7 @@ fn main() i32 {
     got usize = pick[3]() + pick[0]()
     if got != 103 { return 1 }
     if first[i32, 3](handle_from_addr[Arr[i32, 3]](&a)) != 7 { return 2 }
+    if widen[u32](7) + widen[u64](9) != 16 { return 4 }
     if first[u8, 1](handle_from_addr[Arr[u8, 1]](&b)) != 9 { return 3 }
     return 0
 }

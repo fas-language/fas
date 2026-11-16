@@ -1369,6 +1369,15 @@ let () =
     assert (
       Ast.render_program (expect_ok (Parser.parse (source const_assert_rendered)))
       = const_assert_rendered);
+    (* so does a `const { }` block, and its body is walked for names *)
+    let const_block_text = "const T arr[2, u8] = const {\n x u8 = K\n}\n" in
+    let const_block_program = expect_ok (Parser.parse (source const_block_text)) in
+    let const_block_rendered = Ast.render_program const_block_program in
+    assert (contains const_block_rendered "= const {");
+    assert (
+      Ast.render_program (expect_ok (Parser.parse (source const_block_rendered)))
+      = const_block_rendered);
+    assert (List.mem "K" (Ast.used_names const_block_program));
     let ast_unit_text = "fn f(a i64) i64 { x i64 = a + 1\n return x }\n" in
     let ast_program = expect_ok (Parser.parse (source ast_unit_text)) in
     let ast_nodes = Ast.count_expanded_nodes ast_program in

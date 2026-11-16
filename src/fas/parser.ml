@@ -925,16 +925,27 @@ module P = struct
         let* ty = ty p in
         let* () = expected p Token.Assign in
         skip_newlines p;
-        let* value =
+        (* `const { BODY }` (D2): [value] is an empty placeholder at the
+           `const` keyword until Sema_const_calls replaces it *)
+        let* value, fill =
           if at p Token.Lbrace then
             let value_span = span p in
             let* () = expected p Token.Lbrace in
             let* xs = literal_elements p in
-            Ok (Ast.Array_lit (xs, value_span))
-          else expr p
+            Ok (Ast.Array_lit (xs, value_span), None)
+          else if at p Token.Kw_const && (peek_n p 1).kind = Token.Lbrace then
+            let value_span = span p in
+            ignore (bump p);
+            let* body = block p in
+            Ok (Ast.Array_lit ([], value_span), Some body)
+          else
+            let* value = expr p in
+            Ok (value, None)
         in
         let* () = end_stmt p in
-        Ok (Ast.Const { name; name_span; ty_span; ty; value; span = s; extent = s })
+        Ok
+          (Ast.Const
+             { name; name_span; ty_span; ty; value; fill; span = s; extent = s })
 
   and global_item p linkage =
     let s = span p in

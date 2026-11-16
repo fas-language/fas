@@ -16,7 +16,14 @@
    `assert`, a trap, a C call, a system call, touching a `var` and running out
    of steps are compile errors at the constant. The rest of the program then
    sees only literals, so every later phase is unchanged. Programs with no
-   such constant skip all of this. *)
+   such constant skip all of this.
+
+   A `const NAME T = const { BODY }` fill runs the same way, with two changes:
+   the reduced program declares `var NAME T` (zeroed) instead of the constant,
+   and the function is `fn __fas_const_NAME() void { BODY }`. The interpreter
+   lets that one global be read and written, and its bytes after the run
+   become an aggregate literal of type T. BODY may use NAME (directly or
+   through the functions it calls) to read entries it filled already. *)
 
 module String_set = Set.Make (String)
 
@@ -78,15 +85,12 @@ let always_kept = function
   | Ast.Struct _ | Ast.Opaque _ | Ast.Enum _ -> true
   | Ast.Const _ | Ast.Global _ | Ast.Func _ | Ast.Const_assert _ -> false
 
-(* the literal for a value the interpreter returned, by the constant's type *)
-let literal_of_value span (ty : Hir.ty) (value : Fir_interp.v array) =
-  let bits =
-    match value with
-    | [| [| Fir_interp.Bits limbs |] |] when Array.length limbs > 0 -> Ok limbs.(0)
-    | [| [| Fir_interp.Poison |] |] ->
-        Error "the initializer produces an undefined (poison) value"
-    | _ -> Error "the initializer does not produce a single scalar value"
-  in
+(* the literal for a scalar's bits, by its type; [None] for a type a scalar
+   constant cannot have *)
+(* [nonfinite kind bits] spells a NaN or an infinity, which has no float
+   literal: the caller declares the bits as an integer constant and returns
+   `bitcast[f..](that constant)`, so every payload bit survives *)
+let literal_of_scalar ~nonfinite span (ty : Hir.ty) bits =
   let integer kind bits =
     let width = Sema_numeric.int_bits kind in
     let signed = not (Sema_numeric.is_unsigned (Hir.Int kind)) in
@@ -108,47 +112,212 @@ let literal_of_value span (ty : Hir.ty) (value : Fir_interp.v array) =
         Ast.Unary (Ast.Neg, Ast.Int_lit (Int64.to_string (Int64.neg value), span), span)
     else Ast.Int_lit (Sema_numeric.unsigned_int64_to_string value, span)
   in
-  Result.bind bits (fun bits ->
-      match ty with
-      | Hir.Bool -> Ok (Ast.Bool_lit (Int64.logand bits 1L <> 0L, span))
-      | Hir.Int kind -> Ok (integer kind bits)
-      | Hir.Enum (enum, kind) -> (
-          let width = Sema_numeric.int_bits kind in
-          let member_bits =
-            if width = 64 then bits
-            else Int64.logand bits (Int64.pred (Int64.shift_left 1L width))
-          in
-          match Sema_constants.enum_member_of enum member_bits with
-          | Some member -> Ok (Ast.Field (Ast.Ident (enum, span), member, span))
-          | None ->
-              Error
-                (Printf.sprintf
-                   "the initializer produces %Ld, which is no member of `%s`"
-                   member_bits enum))
-      | Hir.Float kind ->
-          let value =
-            match kind with
-            | Hir.F64 -> Int64.float_of_bits bits
-            | Hir.F32 -> Int32.float_of_bits (Int64.to_int32 bits)
-          in
-          if Float.is_nan value || Float.abs value = Float.infinity then
-            Error
-              "the initializer produces an infinity or NaN, which a constant cannot \
-               hold yet"
-          else
-            (* "%h" is exact; the sign is a separate negation so -0.0 keeps it *)
-            let magnitude =
-              Ast.Float_lit (Printf.sprintf "%h" (Float.abs value), span)
-            in
-            Ok
-              (if Float.sign_bit value then Ast.Unary (Ast.Neg, magnitude, span)
-               else magnitude)
-      | _ ->
+  match ty with
+  | Hir.Bool -> Some (Ok (Ast.Bool_lit (Int64.logand bits 1L <> 0L, span)))
+  | Hir.Int kind -> Some (Ok (integer kind bits))
+  | Hir.Enum (enum, kind) ->
+      Some
+        (let width = Sema_numeric.int_bits kind in
+         let member_bits =
+           if width = 64 then bits
+           else Int64.logand bits (Int64.pred (Int64.shift_left 1L width))
+         in
+         match Sema_constants.enum_member_of enum member_bits with
+         | Some member -> Ok (Ast.Field (Ast.Ident (enum, span), member, span))
+         | None ->
+             Error
+               (Printf.sprintf "it produces %Ld, which is no member of `%s`" member_bits
+                  enum))
+  | Hir.Float kind ->
+      Some
+        (let value =
+           match kind with
+           | Hir.F64 -> Int64.float_of_bits bits
+           | Hir.F32 -> Int32.float_of_bits (Int64.to_int32 bits)
+         in
+         if Float.is_nan value || Float.abs value = Float.infinity then
+           Ok (nonfinite kind bits)
+         else
+           (* "%h" is exact; the sign is a separate negation so -0.0 keeps it *)
+           let magnitude =
+             Ast.Float_lit (Printf.sprintf "%h" (Float.abs value), span)
+           in
+           Ok
+             (if Float.sign_bit value then Ast.Unary (Ast.Neg, magnitude, span)
+              else magnitude))
+  | _ -> None
+
+(* the literal for a value the interpreter returned, by the constant's type *)
+let literal_of_value ~nonfinite span (ty : Hir.ty) (value : Fir_interp.v array) =
+  match value with
+  | [| [| Fir_interp.Bits limbs |] |] when Array.length limbs > 0 -> (
+      match literal_of_scalar ~nonfinite span ty limbs.(0) with
+      | Some result -> result
+      | None ->
           Error
             (Printf.sprintf
                "a constant computed by a call must have an integer, bool, float or \
                 enum type, not `%s`"
                (Hir.ty_name ty)))
+  | [| [| Fir_interp.Poison |] |] -> Error "it produces an undefined (poison) value"
+  | _ -> Error "it does not produce a single scalar value"
+
+(* the literal for the bytes of a filled aggregate (little-endian), by its
+   type: arrays and vectors as `{e0, e1, ...}`, structs as their fields in
+   order. Addresses other than null and error values cannot be data. *)
+let literal_of_bytes ~nonfinite span (structs : Hir.struct_def list) (ty : Hir.ty)
+    (bytes : int option array) =
+  let ( let* ) = Result.bind in
+  let pointer_size = (Target_layout.current ()).pointer_size in
+  let rec size_of = function
+    | Hir.Bool | Hir.Int (Hir.U8 | Hir.I8) -> Ok 1
+    | Hir.Int (Hir.U16 | Hir.I16) -> Ok 2
+    | Hir.Int (Hir.U32 | Hir.I32) | Hir.Float Hir.F32 | Hir.Err -> Ok 4
+    | Hir.Int (Hir.U64 | Hir.I64) | Hir.Float Hir.F64 -> Ok 8
+    | Hir.Enum (_, kind) -> size_of (Hir.Int kind)
+    | Hir.Addr | Hir.Handle _ -> Ok pointer_size
+    | Hir.Array (n, e) | Hir.Vec (n, e) ->
+        let* size = size_of e in
+        Ok (n * size)
+    | Hir.Struct name -> (
+        match List.find_opt (fun (d : Hir.struct_def) -> d.name = name) structs with
+        | Some d -> Ok d.size
+        | None -> Error (Printf.sprintf "its type `%s` has no known layout" name))
+    | (Hir.Opaque _ | Hir.Void) as ty ->
+        Error (Printf.sprintf "`%s` cannot be constant data" (Hir.ty_name ty))
+  in
+  let scalar ty off size =
+    let rec bits k acc =
+      if k < 0 then Ok acc
+      else
+        match bytes.(off + k) with
+        | None ->
+            Error
+              (Printf.sprintf
+                 "the block leaves byte %d undefined (it stored a poison value)"
+                 (off + k))
+        | Some b -> bits (k - 1) (Int64.logor (Int64.shift_left acc 8) (Int64.of_int b))
+    in
+    let* value = bits (size - 1) 0L in
+    match ty with
+    | Hir.Addr | Hir.Handle _ ->
+        if value = 0L then Ok (Ast.Null span)
+        else
+          Error
+            (Printf.sprintf
+               "byte %d holds an address, which compile-time data cannot hold" off)
+    | Hir.Err -> Error "an `error` value cannot be compile-time data yet"
+    | _ -> (
+        match literal_of_scalar ~nonfinite span ty value with
+        | Some result ->
+            Result.map_error
+              (fun message -> Printf.sprintf "at byte %d %s" off message)
+              result
+        | None -> Error (Printf.sprintf "`%s` cannot be constant data" (Hir.ty_name ty))
+        )
+  in
+  let rec go ty off =
+    match ty with
+    | Hir.Vec (_, Hir.Bool) -> Error "a `vec` of `bool` cannot be filled yet"
+    | Hir.Array (n, e) | Hir.Vec (n, e) ->
+        let* size = size_of e in
+        let rec elements k acc =
+          if k < 0 then Ok acc
+          else
+            let* element = go e (off + (k * size)) in
+            elements (k - 1) (element :: acc)
+        in
+        let* xs = elements (n - 1) [] in
+        Ok (Ast.Array_lit (xs, span))
+    | Hir.Struct name -> (
+        match List.find_opt (fun (d : Hir.struct_def) -> d.name = name) structs with
+        | Some { is_union = true; _ } | Some { byte_storage = true; _ } ->
+            Error
+              (Printf.sprintf "`%s` is a C union or record, which cannot be filled yet"
+                 name)
+        | Some d ->
+            let* fields =
+              List.fold_right
+                (fun (f : Hir.field) acc ->
+                  let* acc = acc in
+                  let* value = go f.ty (off + f.offset) in
+                  Ok (value :: acc))
+                d.fields (Ok [])
+            in
+            Ok (Ast.Array_lit (fields, span))
+        | None -> Error (Printf.sprintf "its type `%s` has no known layout" name))
+    | ty ->
+        let* size = size_of ty in
+        scalar ty off size
+  in
+  go ty 0
+
+(* the first `return` in a `const { }` body: the block is not a function *)
+let rec find_return statements =
+  let in_expression expression =
+    let found = ref None in
+    let mapper =
+      {
+        Ast.identity_mapper with
+        on_expr =
+          (function
+          | Ast.Catch (_, Ast.Catch_block (_, body), _) ->
+              if !found = None then found := find_return body;
+              None
+          | _ -> None);
+      }
+    in
+    ignore (Ast.map_expr mapper expression);
+    !found
+  in
+  let in_statement statement =
+    let nested =
+      match statement with
+      | Ast.Return (_, span) -> Some span
+      | Ast.If (_, yes, no, _) -> (
+          match find_return yes with
+          | Some span -> Some span
+          | None -> Option.bind no find_return)
+      | Ast.While (_, _, body, _)
+      | Ast.Defer (body, _)
+      | Ast.Block (body, _)
+      | Ast.Const_for { body; _ }
+      | Ast.Const_copy { body; _ }
+      | Ast.Errdefer (_, body, _)
+      | Ast.Catch_stmt { body; _ } ->
+          find_return body
+      | Ast.For (_, init, _, step, body, _) ->
+          List.find_map
+            (fun x -> x)
+            [
+              Option.bind init (fun s -> find_return [ s ]);
+              Option.bind step (fun s -> find_return [ s ]);
+              find_return body;
+            ]
+      | Ast.Switch (_, cases, default, _) -> (
+          match List.find_map (fun (_, body) -> find_return body) cases with
+          | Some span -> Some span
+          | None -> Option.bind default find_return)
+      | _ -> None
+    in
+    match nested with
+    | Some span -> Some span
+    | None ->
+        (* `catch { }` blocks inside the statement's expressions *)
+        let expressions = ref [] in
+        let mapper =
+          {
+            Ast.identity_mapper with
+            on_expr =
+              (fun e ->
+                expressions := e :: !expressions;
+                Some e);
+          }
+        in
+        ignore (Ast.map_stmt mapper statement);
+        List.find_map in_expression !expressions
+  in
+  List.find_map in_statement statements
 
 let trap_text = function
   | Fir_interp.Trap_div -> "divides by zero or overflows a division"
@@ -160,12 +329,12 @@ let resolve ~sema (program : Ast.program) =
   let ( let* ) = Result.bind in
   let functions = fas_functions program.items in
   let is_call_const = function
+    | Ast.Const { fill = Some _; _ } -> true
     | Ast.Const { value; _ } -> calls_fas_function functions value
     | Ast.Const_assert { cond; _ } -> calls_fas_function functions cond
     | _ -> false
   in
-  if String_set.is_empty functions || not (List.exists is_call_const program.items) then
-    Ok program
+  if not (List.exists is_call_const program.items) then Ok program
   else
     let pending =
       List.fold_left
@@ -178,6 +347,26 @@ let resolve ~sema (program : Ast.program) =
     let pending = ref pending in
     (* current items: resolved constants are replaced in place *)
     let items = ref program.items in
+    (* NaN and infinity results: `const __fas_const_bits_N uNN = 0x...`,
+       added to the program, and `bitcast[fNN](__fas_const_bits_N)` *)
+    let bits_counter = ref 0 in
+    let nonfinite span kind bits =
+      incr bits_counter;
+      let name = Printf.sprintf "%sbits_%d" synthetic_prefix !bits_counter in
+      let int_ty, float_ty, bits =
+        match kind with
+        | Hir.F64 -> (Ast.Int Ast.U64, Ast.Float Ast.F64, bits)
+        | Hir.F32 -> (Ast.Int Ast.U32, Ast.Float Ast.F32, Int64.logand bits 0xFFFF_FFFFL)
+      in
+      items :=
+        !items
+        @ [
+            Ast.const_item name span int_ty
+              (Ast.Int_lit (Printf.sprintf "0x%LX" bits, span))
+              span;
+          ];
+      Ast.Cast (Ast.Bitcast, float_ty, Ast.Ident (name, span), span)
+    in
     let named () =
       List.fold_left
         (fun table item ->
@@ -197,8 +386,13 @@ let resolve ~sema (program : Ast.program) =
       in
       go String_set.empty seeds
     in
-    let evaluate ~what ~name ~ty ~ty_span ~value ~span =
+    let evaluate ?fill ~what ~name ~ty ~ty_span ~value ~span () =
       let synthetic = synthetic_prefix ^ name in
+      let ret, body =
+        match fill with
+        | Some body -> (Ast.Void, body)
+        | None -> (ty, [ Ast.Return (Some value, span) ])
+      in
       let func =
         Ast.Func
           {
@@ -206,9 +400,9 @@ let resolve ~sema (program : Ast.program) =
             name_span = span;
             ret_span = ty_span;
             params = [];
-            ret = ty;
+            ret;
             fails = false;
-            body = Ast.Statements [ Ast.Return (Some value, span) ];
+            body = Ast.Statements body;
             linkage = Ast.Internal;
             variadic = false;
             generic_params = [];
@@ -224,9 +418,28 @@ let resolve ~sema (program : Ast.program) =
             always_kept item
             ||
             match item_name item with
+            | Some n when fill <> None && n = name -> false
             | Some name -> String_set.mem name reached
             | None -> false)
           !items
+      in
+      (* a fill writes `var NAME T`, which starts zeroed *)
+      let kept =
+        match fill with
+        | None -> kept
+        | Some _ ->
+            Ast.Global
+              {
+                name;
+                name_span = span;
+                ty_span;
+                ty;
+                init = None;
+                linkage = Ast.Internal_global;
+                span;
+                extent = span;
+              }
+            :: kept
       in
       let note = Printf.sprintf "while evaluating %s at compile time" what in
       let with_note diagnostics =
@@ -237,35 +450,90 @@ let resolve ~sema (program : Ast.program) =
       let fail message =
         Error [ Diag.error (Ast.expr_span value) (what ^ " " ^ message) ]
       in
-      match sema { Ast.items = kept @ [ func ] } (Sema_specialization.create ()) with
-      | Error diagnostics -> Error (with_note diagnostics)
-      | Ok (hir : Hir.program) -> (
-          match List.find_opt (fun (f : Hir.func) -> f.name = synthetic) hir.funcs with
-          | None -> fail "cannot be evaluated: its function was not compiled"
-          | Some f -> (
-              match Lower.lower hir with
-              | Error diagnostics -> Error (with_note diagnostics)
-              | Ok modul -> (
-                  match Fir_interp.eval_const [ modul ] synthetic with
-                  | Fir_interp.Const_value values -> (
-                      match literal_of_value span f.ret values with
-                      | Ok literal -> Ok literal
-                      | Error message -> fail ("cannot be a constant: " ^ message))
-                  | Fir_interp.Const_trapped (kind, stderr) ->
-                      let stderr = String.trim stderr in
-                      if stderr <> "" then fail ("fails at compile time: " ^ stderr)
-                      else
-                        fail ("fails at compile time: its evaluation " ^ trap_text kind)
-                  | Fir_interp.Const_error message ->
-                      fail
-                        ("cannot be evaluated at compile time: its evaluation "
-                       ^ message))))
+      let returns = Option.bind fill find_return in
+      match returns with
+      | Some at ->
+          Error
+            [
+              Diag.error at
+                (Printf.sprintf
+                   "a `const { }` block cannot `return`; the block of `%s` ends at its \
+                    closing brace"
+                   name);
+            ]
+      | None -> (
+          match
+            sema { Ast.items = kept @ [ func ] } (Sema_specialization.create ())
+          with
+          | Error diagnostics -> Error (with_note diagnostics)
+          | Ok (hir : Hir.program) -> (
+              match
+                List.find_opt (fun (f : Hir.func) -> f.name = synthetic) hir.funcs
+              with
+              | None -> fail "cannot be evaluated: its function was not compiled"
+              | Some f -> (
+                  match Lower.lower hir with
+                  | Error diagnostics -> Error (with_note diagnostics)
+                  | Ok modul when fill <> None -> (
+                      let global_ty =
+                        List.find_map
+                          (fun (g : Hir.global) ->
+                            if g.name = name then Some g.ty else None)
+                          hir.globals
+                      in
+                      match global_ty with
+                      | None -> fail "cannot be evaluated: its storage was not compiled"
+                      | Some global_ty -> (
+                          match Fir_interp.eval_fill [ modul ] ~fill:name synthetic with
+                          | Fir_interp.Fill_bytes bytes -> (
+                              match
+                                literal_of_bytes ~nonfinite:(nonfinite span) span
+                                  hir.structs global_ty bytes
+                              with
+                              | Ok literal -> Ok literal
+                              | Error message ->
+                                  fail ("cannot be compile-time data: " ^ message))
+                          | Fir_interp.Fill_failed
+                              (Fir_interp.Const_trapped (kind, stderr)) ->
+                              let stderr = String.trim stderr in
+                              if stderr <> "" then
+                                fail ("fails at compile time: " ^ stderr)
+                              else
+                                fail
+                                  ("fails at compile time: its evaluation "
+                                 ^ trap_text kind)
+                          | Fir_interp.Fill_failed (Fir_interp.Const_error message) ->
+                              fail
+                                ("cannot be evaluated at compile time: its evaluation "
+                               ^ message)
+                          | Fir_interp.Fill_failed (Fir_interp.Const_value _) ->
+                              fail "cannot be evaluated: the fill returned a value"))
+                  | Ok modul -> (
+                      match Fir_interp.eval_const [ modul ] synthetic with
+                      | Fir_interp.Const_value values -> (
+                          match
+                            literal_of_value ~nonfinite:(nonfinite span) span f.ret
+                              values
+                          with
+                          | Ok literal -> Ok literal
+                          | Error message -> fail ("cannot be a constant: " ^ message))
+                      | Fir_interp.Const_trapped (kind, stderr) ->
+                          let stderr = String.trim stderr in
+                          if stderr <> "" then fail ("fails at compile time: " ^ stderr)
+                          else
+                            fail
+                              ("fails at compile time: its evaluation " ^ trap_text kind)
+                      | Fir_interp.Const_error message ->
+                          fail
+                            ("cannot be evaluated at compile time: its evaluation "
+                           ^ message)))))
     in
     let replace name literal =
       items :=
         List.map
           (function
-            | Ast.Const c when c.name = name -> Ast.Const { c with value = literal }
+            | Ast.Const c when c.name = name ->
+                Ast.Const { c with value = literal; fill = None }
             | item -> item)
           !items;
       pending := String_set.remove name !pending
@@ -280,7 +548,7 @@ let resolve ~sema (program : Ast.program) =
             (function Ast.Const { name = n; _ } -> n = name | _ -> false)
             !items
         with
-        | Some (Ast.Const { ty; ty_span; value; span; name_span; _ }) ->
+        | Some (Ast.Const { ty; ty_span; value; fill; span; name_span; _ } as item) ->
             if List.mem name visiting then
               Error
                 [
@@ -292,12 +560,18 @@ let resolve ~sema (program : Ast.program) =
                 ]
             else
               let reached =
-                reach
-                  (Ast.used_names
-                     {
-                       Ast.items =
-                         [ Ast.Const_assert { cond = value; message = None; span } ];
-                     })
+                match fill with
+                | Some _ ->
+                    (* a fill may use its own name: it reads what it filled *)
+                    String_set.remove name
+                      (reach (Ast.used_names { Ast.items = [ item ] }))
+                | None ->
+                    reach
+                      (Ast.used_names
+                         {
+                           Ast.items =
+                             [ Ast.Const_assert { cond = value; message = None; span } ];
+                         })
               in
               let* () =
                 String_set.fold
@@ -318,9 +592,9 @@ let resolve ~sema (program : Ast.program) =
                   reached (Ok ())
               in
               let* literal =
-                evaluate
+                evaluate ?fill
                   ~what:(Printf.sprintf "constant `%s`" name)
-                  ~name ~ty ~ty_span ~value ~span
+                  ~name ~ty ~ty_span ~value ~span ()
               in
               replace name literal;
               Ok ()
@@ -348,7 +622,7 @@ let resolve ~sema (program : Ast.program) =
               let* literal =
                 evaluate ~what:"this const assert"
                   ~name:(Printf.sprintf "assert_%d" !counter)
-                  ~ty:Ast.Bool ~ty_span:span ~value:cond ~span
+                  ~ty:Ast.Bool ~ty_span:span ~value:cond ~span ()
               in
               Ok (Ast.Const_assert { cond = literal; message; span } :: acc)
           | item -> Ok (item :: acc))

@@ -25,7 +25,7 @@ let collect ?(global_names = []) ?(array_lengths = []) ?(generic_structs = [])
     | result -> result
   in
   let eval_const_item = function
-    | Ast.Const { name; name_span; ty_span; ty; value; span; extent = _ } ->
+    | Ast.Const { name; name_span; ty_span; ty; value; span; extent = _; fill = _ } ->
         if String_set.mem name !consts_names then Ok ()
         else if String_set.mem name !arrays_names then
           error name_span (Printf.sprintf "duplicate const `%s`" name)

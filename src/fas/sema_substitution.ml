@@ -3175,8 +3175,11 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
               (fun (name, _, _) -> not (String_set.mem name !shadowed_constants))
               (values @ eval_consts)
           in
+          (* type parameters count too: `if sizeof[T] == 4` folds per
+             specialisation and its dead branch is pruned (user, 2026-11-15) *)
           let specialization_names =
             List.map (fun (name, _, _) -> name) specialization_values
+            @ List.map fst substitutions
           in
           let known_condition =
             if not (expression_mentions specialization_names unresolved_condition) then

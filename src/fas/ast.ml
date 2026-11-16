@@ -209,6 +209,11 @@ and item =
       ty_span : Span.t;
       ty : ty;
       value : expr;
+      (* `const NAME T = const { BODY }` (D2): BODY fills NAME, a zeroed
+         writable T while it runs; Sema_const_calls runs it and replaces
+         [value] with the result before any other check. Sema refuses a
+         constant whose fill is still here. *)
+      fill : stmt list option;
       span : Span.t;
       extent : Span.t;
     }
@@ -272,7 +277,8 @@ and item =
 type program = { items : item list }
 
 let const_item name name_span ty value span =
-  Const { name; name_span; ty_span = name_span; ty; value; span; extent = span }
+  Const
+    { name; name_span; ty_span = name_span; ty; value; fill = None; span; extent = span }
 
 let with_extent extent = function
   | Const c -> Const { c with extent }
@@ -1053,13 +1059,17 @@ let render_program program =
             text
               (Printf.sprintf " <<%s\n%s\n%s" fragment.tag fragment.text fragment.tag))
     | Const_assert { cond; message; _ } -> emit_const_assert cond message
-    | Const { name; ty; value; _ } ->
+    | Const { name; ty; value; fill; _ } -> (
         text "const ";
         add_name name;
         text " ";
         emit_ty ty;
         text " = ";
-        emit_expr value
+        match fill with
+        | Some xs ->
+            text "const";
+            emit_body (Statements xs)
+        | None -> emit_expr value)
     | Global { name; ty; init; linkage; _ } ->
         (match linkage with
         | Internal_global -> text "var "
@@ -1319,9 +1329,10 @@ let expanded_walker ~identifiers ~limit =
       match item with
       | Use _ | Pkg _ -> ()
       | Const_assert { cond; _ } -> go_expr cond
-      | Const { ty; value; span; _ } ->
+      | Const { ty; value; fill; span; _ } ->
           go_ty span ty;
-          go_expr value
+          go_expr value;
+          Option.iter go_stmts fill
       | Global { name; linkage; ty; init; span; _ } ->
           if linkage <> Internal_global then identifiers := name :: !identifiers;
           go_ty span ty;
@@ -1536,7 +1547,15 @@ let map_item m item =
   match item with
   | Use _ | Pkg _ -> item
   | Const_assert c -> Const_assert { c with cond = ex c.cond }
-  | Const c -> Const { c with name = nm c.name; ty = ty c.ty; value = ex c.value }
+  | Const c ->
+      Const
+        {
+          c with
+          name = nm c.name;
+          ty = ty c.ty;
+          value = ex c.value;
+          fill = Option.map (List.map (map_stmt m)) c.fill;
+        }
   | Global g -> Global { g with name = nm g.name; ty = ty g.ty; init = Option.map ex g.init }
   | Struct s ->
       Struct

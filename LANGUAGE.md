@@ -319,7 +319,7 @@ fn main() i32 {
 
 `const assert(cond)` and `const assert(cond, "message")` check a `bool` at compile time, at top level or as a statement. The condition may use literals, constants, const and type generic parameters, and the layout queries `sizeof`, `alignof` and `offsetof`; at top level it may also call functions (see "Constants from calls"). A condition that does not fold to a constant is an error, never a runtime check. A false condition is the compile error `const assert failed: message`. The message must be a string literal.
 
-Inside a generic body the assertion is checked once per specialisation, and the error names the failing one (``note: while instantiating `first[i32, 0]` ``). In a branch that a const parameter drops from a specialisation (see "Generics") it is not checked for that specialisation.
+Inside a generic body the assertion is checked once per specialisation, and the error names the failing one (``note: while instantiating `first[i32, 0]` ``). In a branch that a generic parameter drops from a specialisation (see "Generics") it is not checked for that specialisation.
 
 ```fas
 const N usize = 8
@@ -644,7 +644,7 @@ oldest 3, newest 6, 32 bytes
 2 200 42
 ```
 
-Type parameters are `[T]`, const parameters `[N const usize]` (any integer type, or `bool`). Each distinct argument list is compiled once. An `if` whose condition is decided by the const parameters keeps only the selected branch in that specialization. If the kept branch always returns (or breaks or continues), the statements after it are dropped from that specialization too, so `double[true]` never compiles `return x * 2`, and recursive dispatch such as `if C == 1 { return leaf[N](x) }` creates no instances for the dropped calls.
+Type parameters are `[T]`, const parameters `[N const usize]` (any integer type, or `bool`). Each distinct argument list is compiled once. An `if` whose condition is decided by the generic parameters (const parameters, or type parameters as in `if sizeof[T] == 8`) keeps only the selected branch in that specialization; the dropped branch is not type-checked for it. If the kept branch always returns (or breaks or continues), the statements after it are dropped from that specialization too, so `double[true]` never compiles `return x * 2`, and recursive dispatch such as `if C == 1 { return leaf[N](x) }` creates no instances for the dropped calls.
 
 ### Function arguments
 
@@ -849,9 +849,30 @@ fn main() i32 {
 ```
 
 - The type must be an integer, `bool`, float or enum; the called code may use locals, loops, arrays, structs, generics, recursion and other constants.
-- Each of these is a compile error at the constant: calling a C function, a system call, reading or writing a `var` global, a failed `assert` (the error quotes its message), a trap such as dividing by zero, a result that is NaN or infinite, and running for more than 10,000,000 steps. A `fails` call must be caught, as anywhere.
+- Each of these is a compile error at the constant: calling a C function, a system call, reading or writing a `var` global, a failed `assert` (the error quotes its message), a trap such as dividing by zero, and running for more than 10,000,000 steps. A `fails` call must be caught, as anywhere.
 - Constants may call functions that use other such constants; a constant whose functions use the constant itself is an error.
 - A `const assert` inside a function body cannot call functions yet.
+
+### Constant blocks
+
+`const NAME T = const { ... }` fills a top-level constant of any type by running a block while compiling. Inside the block `NAME` is a writable `T` that starts zeroed; after the block it is read-only data like any other constant.
+
+```fas
+const CRC arr[256, u32] = const {
+    for i usize in 0..256 {
+        c u32 = trunc[u32](i)
+        for k usize in 0..8 {
+            c = (c >> 1) ^ (0xEDB88320 & (0 - (c & 1)))
+        }
+        CRC[i] = c
+    }
+}
+```
+
+- The block follows the rules of "Constants from calls": it may call Fas functions, and the same things are compile errors. The block can also read the entries it has already filled (`FIB[i] = FIB[i - 1] + FIB[i - 2]`).
+- Only the block itself writes `NAME`. The functions it calls belong to the program, where `NAME` is a constant: they may read it but not assign it.
+- The block cannot `return`; it ends at its closing brace.
+- The result may hold integers, `bool`, floats, enums and null addresses, in arrays, vectors and structs. A non-null address, an `error` value, a `vec` of `bool`, and a C union or C record are compile errors. NaNs and infinities keep their exact bits, NaN payload included.
 
 ## SIMD
 

@@ -2063,8 +2063,60 @@ let eval_const ?(step_limit = default_step_limit) (ms : modul list) name =
     run_function st name [||]
   with
   | Returned _ when !wrote ->
-      Const_error "makes a system call (number 1), which compile-time evaluation cannot do"
+      Const_error
+        "makes a system call (number 1), which compile-time evaluation cannot do"
   | Returned values -> Const_value values
   | Trapped kind -> Const_trapped (kind, Buffer.contents err)
   | Exited _ -> Const_error "exits the program"
   | exception Error message -> Const_error message
+
+(* the outcome of a `const { }` fill (Fas D2): the bytes of the filled global,
+   None marking a poison byte, or why the evaluation failed *)
+type fill_result = Fill_bytes of int option array | Fill_failed of const_result
+
+(* Runs the argument-less function [name] as [eval_const] does, except that
+   the global [fill] (of the first module) may be read and written although it
+   is writable; every other `var` global stays refused. Returns that global's
+   bytes when the function returns. *)
+let eval_fill ?(step_limit = default_step_limit) (ms : modul list) ~fill name =
+  let err = Buffer.create 64 and wrote = ref false in
+  let syscall st (a : int64 array) =
+    let arg k = if k < Array.length a then a.(k) else 0L in
+    match (a.(0), arg 1) with
+    | 1L, 2L ->
+        let len = Int64.to_int (arg 3) in
+        Buffer.add_string err (read_string st (arg 2) len);
+        wrote := true;
+        Int64.of_int len
+    | _ -> refuse_syscall st a
+  in
+  let cfg = { const_config with step_limit; syscall } in
+  match
+    let st = create cfg ms in
+    let target =
+      match lookup st 0 fill with
+      | Obj o ->
+          (* the same bytes, no longer counted as a `var` *)
+          let o' = { o with var_global = false } in
+          st.objs <- Amap.add o.base o' st.objs;
+          if Hashtbl.mem st.locals_tbl (0, fill) then
+            Hashtbl.replace st.locals_tbl (0, fill) (Obj o')
+          else Hashtbl.replace st.globals_tbl fill (Obj o');
+          o'
+      | _ -> error "fills `%s`, which is not a plain global" fill
+    in
+    (run_function st name [||], target)
+  with
+  | Returned _, _ when !wrote ->
+      Fill_failed
+        (Const_error
+           "makes a system call (number 1), which compile-time evaluation cannot do")
+  | Returned _, o ->
+      Fill_bytes
+        (Array.init o.osize (fun k ->
+             match o.pois with
+             | Some p when Bytes.get p k <> '\000' -> None
+             | _ -> Some (Char.code (Bytes.get o.data k))))
+  | Trapped kind, _ -> Fill_failed (Const_trapped (kind, Buffer.contents err))
+  | Exited _, _ -> Fill_failed (Const_error "exits the program")
+  | exception Error message -> Fill_failed (Const_error message)

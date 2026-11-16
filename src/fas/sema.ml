@@ -295,6 +295,7 @@ let desugar_errors (program : Ast.program) =
               Ast.Int_lit (Int64.to_string code, span),
               span );
         span;
+        fill = None;
         extent = span;
       }
   in
@@ -1424,6 +1425,23 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
 let check ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters ?c_string_parameters
     ?c_alloc_size_parameters ?c_records ?all_errors ?specializations
     ?index program =
+  (* a `const { }` fill is run by Sema_const_calls first; one still here was
+     never evaluated, and checking its placeholder would make a zero table *)
+  let unevaluated =
+    List.filter_map
+      (function
+        | Ast.Const { name; fill = Some _; value; _ } ->
+            Some
+              (Diag.error (Ast.expr_span value)
+                 (Printf.sprintf
+                    "the `const { }` block of `%s` was not evaluated (internal: run \
+                     Sema_const_calls.resolve before Sema.check)"
+                    name))
+        | _ -> None)
+      program.Ast.items
+  in
+  if unevaluated <> [] then Error unevaluated
+  else
   let run () =
     check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
       ?c_string_parameters ?c_alloc_size_parameters ?c_records
