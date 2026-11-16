@@ -739,6 +739,10 @@ let parse_op st opname =
       let t = parse_ty lx in
       let a, m = two () in
       ((if opname = "compress" then Compress (a, m) else Expand (a, m)), [| t |])
+  | "permute" ->
+      let t = parse_ty lx in
+      let a, i = two () in
+      (Permute (a, i), [| t |])
   | "call" ->
       let attrs = ref 0 in
       let rec go () =

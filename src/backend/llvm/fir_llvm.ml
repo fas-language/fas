@@ -1363,6 +1363,42 @@ let emit_inst cx (ir : inst_rec) =
            ("llvm.masked.store." ^ sfx (tyv cx x) ^ "." ^ sfx (tyv cx p))
            "void"
            [ arg cx x; arg cx p; (Int 32, string_of_int al); arg cx mask ])
+  | Permute (x, idx) ->
+      (* an extract chain: lane k is x[idx[k]], zero when idx[k] >= n
+         (unsigned); the index is clamped first, as extractelement past
+         the end is poison *)
+      let n, et = match tyv cx x with Vec (n, t) -> (n, t) | _ -> assert false in
+      let k, w = match tyv cx idx with Vec (k, Int w) -> (k, w) | _ -> assert false in
+      let rt = rty cx ir 0 in
+      let it = lty (Int w) and elt = lty et in
+      let zero = match et with Ptr _ -> "null" | _ -> "zeroinitializer" in
+      let acc = ref "poison" in
+      for j = 0 to k - 1 do
+        let ij = temp cx in
+        line cx (Printf.sprintf "%s = extractelement %s, i64 %d" ij (tv cx idx) j);
+        let lane =
+          if w < 62 && n >= 1 lsl w then begin
+            let l = temp cx in
+            line cx (Printf.sprintf "%s = extractelement %s, %s %s" l (tv cx x) it ij);
+            l
+          end
+          else begin
+            let ok = temp cx and safe = temp cx and l = temp cx and z = temp cx in
+            line cx (Printf.sprintf "%s = icmp ult %s %s, %d" ok it ij n);
+            line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s 0" safe ok it ij it);
+            line cx (Printf.sprintf "%s = extractelement %s, %s %s" l (tv cx x) it safe);
+            line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s %s" z ok elt l elt zero);
+            z
+          end
+        in
+        let ins = Printf.sprintf "insertelement %s %s, %s %s, i64 %d" (lty rt) !acc elt lane j in
+        if j = k - 1 then def ins
+        else begin
+          let t = temp cx in
+          line cx (t ^ " = " ^ ins);
+          acc := t
+        end
+      done
   | Compress (x, mask) ->
       let vt = tyv cx x in
       def

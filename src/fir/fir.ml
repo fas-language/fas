@@ -248,6 +248,7 @@ type op =
   | Masked_load of int * value * value * value  (** align, pointer, mask, passthru *)
   | Masked_store of int * value * value * value  (** align, value, pointer, mask *)
   | Compress of value * value  (** vector, mask *)
+  | Permute of value * value  (** vector, lane indices *)
   | Expand of value * value
   | Call of {
       sig_ : signature;
@@ -658,7 +659,7 @@ let target ?(args = [||]) dest = { dest; args }
 let iter_op_uses g = function
   | Nop | Trap | Fence _ | Stack_save -> ()
   | Ibin (_, _, a, b) | Fbin (_, _, a, b) | Ovf (_, a, b) | Icmp (_, a, b) | Fcmp (_, _, a, b)
-  | Extract (a, b) | Compress (a, b) | Expand (a, b) | Store (_, a, b) | Rmw (_, _, a, b)
+  | Extract (a, b) | Compress (a, b) | Expand (a, b) | Permute (a, b) | Store (_, a, b) | Rmw (_, _, a, b)
   | Shuffle (a, b, _) ->
       g a;
       g b
@@ -735,6 +736,7 @@ let map_op_uses g op =
   | Masked_store (al, a, b, c) -> Masked_store (al, g a, g b, g c)
   | Compress (a, b) -> Compress (g a, g b)
   | Expand (a, b) -> Expand (g a, g b)
+  | Permute (a, b) -> Permute (g a, g b)
   | Call c ->
       Call
         {

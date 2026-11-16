@@ -1892,6 +1892,23 @@ and exec st fr i =
                   [| x.(i) |]
             | Bits _ -> ())
           m
+  | Permute (v, idx) ->
+      (* lane k is V[IDX[k]]; an index past the last lane gives zero, a
+         poison index a poison lane *)
+      let x = g v in
+      let t = elem (rty 0) in
+      let zero =
+        Bits (Array.make (match t with F80 -> 2 | _ -> limbs_for (lane_width t)) 0L)
+      in
+      set 0
+        (Array.map
+           (function
+             | Poison -> Poison
+             | Bits b -> (
+                 match W.to_int_opt b with
+                 | Some k when k < Array.length x -> x.(k)
+                 | _ -> zero))
+           (g idx))
   | Compress (v, mask) | Expand (v, mask) ->
       let x = g v and m = g mask in
       let t = elem (rty 0) in

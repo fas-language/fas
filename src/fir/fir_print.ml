@@ -300,6 +300,7 @@ let op_text f nm (ir : inst_rec) =
   | Masked_store (al, x, p, m) -> Printf.sprintf "masked_store %s, %s, %s, align %d" (v x) (v p) (v m) al
   | Compress (a, m) -> Printf.sprintf "compress %s %s, %s" (rt ()) (v a) (v m)
   | Expand (a, m) -> Printf.sprintf "expand %s %s, %s" (rt ()) (v a) (v m)
+  | Permute (a, i) -> Printf.sprintf "permute %s %s, %s" (rt ()) (v a) (v i)
   | Call { sig_; callee; args; attrs; va_aggs } ->
       let arg k x =
         match List.assoc_opt k va_aggs with Some a -> abi_text a ^ " " ^ v x | None -> v x

@@ -339,6 +339,15 @@ let verify_func (f : func) =
                 want 0;
                 if not (is_ptr (ty p)) then err "%s: masked_store to %s" where (tys p);
                 same "mask" m (mask_of (ty x))
+            | Permute (a, i) ->
+                want 1;
+                if nres = 1 then begin
+                  match (ty a, ty i, r 0) with
+                  | Vec (_, t), Vec (k, Int _), Vec (k', t') when k = k' && t = t' -> ()
+                  | _ ->
+                      err "%s: permute of %s by %s cannot give %s (lane k is V[IDX[k]])" where (tys a) (tys i)
+                        (ty_to_string (r 0))
+                end
             | Compress (a, m) | Expand (a, m) ->
                 want 1;
                 if nres = 1 then begin

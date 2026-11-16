@@ -70,6 +70,10 @@ case_ c/promises.fir 's/memory(read)$/memory(write)/' -c \
   'unknown memory(write): expected none, read or argmem'
 case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& willreturn/' -c \
   'promises about a declared function'
+case_ permute.fir 's/permute <6 x i32> %v, %x5/permute <4 x i32> %v, %x5/' -c \
+  'permute of <4 x i32> by <6 x i32> cannot give <4 x i32>'
+case_ permute.fir 's/permute <2 x i32> %v, %s1/permute <2 x i64> %v, %s1/' -c \
+  'permute of <4 x i32> by <2 x i8> cannot give <2 x i64>'
 for c in $(sed -n 's/^global @\([a-z_]*\) size 8 align 8 .*= zero$/\1/p' "$here/fas_fir/sum_loop.fir" | head -n 1); do
   # a 1 GiB zero global is fine (.bss), and fast: its bytes are never built
   sed "s/^global @$c size 8 /global @$c size 1073741824 /" "$here/fas_fir/sum_loop.fir" > "$tmp/big.fir"

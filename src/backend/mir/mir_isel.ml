@@ -2149,7 +2149,7 @@ let inst c i =
   (* no address sanitizer here: lifetime markers are only hints *)
   | Lifetime _ -> ()
   | Extract _ | Insert _ | Shuffle _ | Splat _ | Reduce _ | Masked_load _ | Masked_store _ | Compress _
-  | Expand _ ->
+  | Expand _ | Permute _ ->
       unsupported "vector operations"
   | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> asm c ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
 

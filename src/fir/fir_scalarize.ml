@@ -562,6 +562,27 @@ let convert_inst cx (i : inst) =
       let t = elem (src_ty cx v) in
       if t = i1 then masked_store_bool cx (get cx v) (get1 cx p) (get cx m)
       else masked_store cx align t (get cx v) (get1 cx p) (get cx m)
+  | Permute (v, idx) ->
+      (* each lane loaded from the vector's slot; an index past the last
+         lane (unsigned, in the index type) gives zero *)
+      let n, t = match src_ty cx v with Vec (n, t) -> (n, t) | _ -> assert false in
+      let w = match src_ty cx idx with Vec (_, Int w) -> w | _ -> assert false in
+      let p = home cx v in
+      let il = get cx idx in
+      set cx (r 0)
+        (Array.map
+           (fun x ->
+             (* no index of w bits reaches n: every one is in range *)
+             let inb = if w < 62 && n >= 1 lsl w then None else Some (e cx (Icmp (Ult, x, iconst cx.g (Int w) (Int64.of_int n))) i1) in
+             let x64 =
+               if w = 64 then x else e cx (Conv ((if w < 64 then Zext else Trunc), x)) i64
+             in
+             match inb with
+             | None -> slot_load cx t p (stride t) x64
+             | Some ok ->
+                 let l = slot_load cx t p (stride t) (e cx (Select (ok, x64, c64 cx 0L)) i64) in
+                 e cx (Select (ok, l, zero_of cx t)) t)
+           il)
   | Compress (v, m) ->
       let _, t = shape () in
       set cx (r 0) (compress cx t (get cx v) (get cx m))
