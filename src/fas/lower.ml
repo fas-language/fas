@@ -1527,39 +1527,10 @@ and lower_builtin s b args t span =
           Ok (Low.Local (id, rt))
       | _ -> error span "internal error: shuffle selectors must be constant")
   | Permute, [ v; idx ] ->
-      let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let iw = match value_ty idx with Low.Vector (_, w) -> w | _ -> Low.I32 in
-      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
-      let m = match rt with Low.Vector (m, _) -> m | _ -> 1 in
-      let rec chain j acc =
-        if j = m then Ok acc
-        else
-          let slot = Low.Const (Low.I64, Int64.of_int j) in
-          let iid = fresh s in
-          E.extract s.fn iid (value_ty idx) idx slot;
-          let il = Low.Local (iid, iw) in
-          let all_indices_fit = match iw with Low.I8 -> n >= 256 | _ -> false in
-          let vl, sl =
-            if all_indices_fit then (Low.Const (Low.I1, 1L), il)
-            else
-              let vid = fresh s in
-              E.cmp s.fn vid Low.Ult iw il (Low.Const (iw, Int64.of_int n));
-              let vl = Low.Local (vid, Low.I1) in
-              let sid = fresh s in
-              E.select s.fn sid vl il (Low.Const (iw, 0L));
-              (vl, Low.Local (sid, iw))
-          in
-          let eid = fresh s in
-          E.extract s.fn eid (value_ty v) v sl;
-          let el = Low.Local (eid, elem_ty) in
-          let pid = fresh s in
-          E.select s.fn pid vl el (Low.Zero elem_ty);
-          let pl = Low.Local (pid, elem_ty) in
-          let nid = fresh s in
-          E.insert s.fn nid rt acc slot pl;
-          chain (j + 1) (Low.Local (nid, rt))
-      in
-      chain 0 (Low.Zero rt)
+      (* one Fir permute: lane k is v[idx[k]], 0 when idx[k] >= N *)
+      let id = fresh s in
+      E.permute s.fn id rt v idx;
+      Ok (Low.Local (id, rt))
   | (Reduce_sum | Reduce_min | Reduce_max | Reduce_and | Reduce_or | Reduce_xor), [ v ]
     ->
       let vty = Hir.expr_ty (List.hd args) in
@@ -1607,60 +1578,15 @@ and lower_builtin s b args t span =
       in
       chain 0 None
   | Compress, [ v; mk ] ->
-      let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
-      let rec chain i acc count =
-        if i = n then Ok acc
-        else
-          let slot = Low.Const (Low.I64, Int64.of_int i) in
-          let mid = fresh s in
-          E.extract s.fn mid (value_ty mk) mk slot;
-          let ml = Low.Local (mid, Low.I1) in
-          let vid = fresh s in
-          E.extract s.fn vid (value_ty v) v slot;
-          let vl = Low.Local (vid, elem_ty) in
-          let cid = fresh s in
-          E.select s.fn cid ml count (Low.Const (Low.I64, 0L));
-          let cl = Low.Local (cid, Low.I64) in
-          let iid = fresh s in
-          E.insert s.fn iid rt acc cl vl;
-          let il = Low.Local (iid, rt) in
-          let aid = fresh s in
-          E.select s.fn aid ml il acc;
-          let n1 = fresh s in
-          E.bin s.fn n1 Low.Add Low.I64 count (Low.Const (Low.I64, 1L));
-          let nid = fresh s in
-          E.select s.fn nid ml (Low.Local (n1, Low.I64)) count;
-          chain (i + 1) (Low.Local (aid, rt)) (Low.Local (nid, Low.I64))
-      in
-      chain 0 (Low.Zero rt) (Low.Const (Low.I64, 0L))
+      (* one Fir compress: the selected lanes packed to the front, the rest 0 *)
+      let id = fresh s in
+      E.compress s.fn id rt v mk;
+      Ok (Low.Local (id, rt))
   | Expand, [ v; mk ] ->
-      let n = match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1 in
-      let elem_ty = match rt with Low.Vector (_, e) -> e | _ -> Low.I1 in
-      let rec chain d acc count =
-        if d = n then Ok acc
-        else
-          let mid = fresh s in
-          E.extract s.fn mid (value_ty mk) mk (Low.Const (Low.I64, Int64.of_int d));
-          let ml = Low.Local (mid, Low.I1) in
-          let cid = fresh s in
-          E.select s.fn cid ml count (Low.Const (Low.I64, 0L));
-          let cl = Low.Local (cid, Low.I64) in
-          let vid = fresh s in
-          E.extract s.fn vid (value_ty v) v cl;
-          let vl = Low.Local (vid, elem_ty) in
-          let iid = fresh s in
-          E.insert s.fn iid rt acc (Low.Const (Low.I64, Int64.of_int d)) vl;
-          let il = Low.Local (iid, rt) in
-          let aid = fresh s in
-          E.select s.fn aid ml il acc;
-          let n1 = fresh s in
-          E.bin s.fn n1 Low.Add Low.I64 count (Low.Const (Low.I64, 1L));
-          let nid = fresh s in
-          E.select s.fn nid ml (Low.Local (n1, Low.I64)) count;
-          chain (d + 1) (Low.Local (aid, rt)) (Low.Local (nid, Low.I64))
-      in
-      chain 0 (Low.Zero rt) (Low.Const (Low.I64, 0L))
+      (* one Fir expand: the front lanes spread to the selected lanes, the rest 0 *)
+      let id = fresh s in
+      E.expand s.fn id rt v mk;
+      Ok (Low.Local (id, rt))
   | (Any | All), [ mv ] -> (
       let lanes =
         match Hir.expr_ty (List.hd args) with Hir.Vec (n, _) -> n | _ -> 1

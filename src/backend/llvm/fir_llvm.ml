@@ -1372,7 +1372,7 @@ let emit_inst cx (ir : inst_rec) =
       let rt = rty cx ir 0 in
       let it = lty (Int w) and elt = lty et in
       let zero = match et with Ptr _ -> "null" | _ -> "zeroinitializer" in
-      let acc = ref "poison" in
+      let acc = ref "zeroinitializer" in
       for j = 0 to k - 1 do
         let ij = temp cx in
         line cx (Printf.sprintf "%s = extractelement %s, i64 %d" ij (tv cx idx) j);
@@ -1399,19 +1399,36 @@ let emit_inst cx (ir : inst_rec) =
           acc := t
         end
       done
-  | Compress (x, mask) ->
+  | Compress (x, mask) | Expand (x, mask) ->
+      (* a select chain over the lanes, with the count of selected lanes
+         so far: compress puts x[i] at lane count, expand puts x[count] at
+         lane d. llvm.experimental.vector.compress and
+         llvm.masked.expandload crash LLVM 22 on some vector types *)
+      let comp = match ir.op with Compress _ -> true | _ -> false in
       let vt = tyv cx x in
-      def
-        (call_intrinsic cx ("llvm.experimental.vector.compress." ^ sfx vt) (lty vt)
-           [ arg cx x; arg cx mask; (vt, "zeroinitializer") ])
-  | Expand (x, mask) ->
-      (* through the entry-block slot %s<inst> (see [expand_slots]) *)
-      let vt = tyv cx x in
-      let slot = "%x" ^ string_of_int ir.results.(0) in
-      line cx (Printf.sprintf "store %s, ptr %s, align 1" (tv cx x) slot);
-      def
-        (call_intrinsic cx ("llvm.masked.expandload." ^ sfx vt) (lty vt)
-           [ (ptr, slot); arg cx mask; (vt, "zeroinitializer") ])
+      let n, et = match vt with Vec (n, t) -> (n, t) | _ -> assert false in
+      let vty = lty vt and elt = lty et in
+      let acc = ref "zeroinitializer" and count = ref "0" in
+      for i = 0 to n - 1 do
+        let m = temp cx and c = temp cx and l = temp cx and ins = temp cx in
+        line cx (Printf.sprintf "%s = extractelement %s, i64 %d" m (tv cx mask) i);
+        line cx (Printf.sprintf "%s = select i1 %s, i64 %s, i64 0" c m !count);
+        line cx
+          (Printf.sprintf "%s = extractelement %s, i64 %s" l (tv cx x) (if comp then string_of_int i else c));
+        line cx
+          (Printf.sprintf "%s = insertelement %s %s, %s %s, i64 %s" ins vty !acc elt l
+             (if comp then c else string_of_int i));
+        let sel = Printf.sprintf "select i1 %s, %s %s, %s %s" m vty ins vty !acc in
+        if i = n - 1 then def sel
+        else begin
+          let a = temp cx and c1 = temp cx and nc = temp cx in
+          line cx (a ^ " = " ^ sel);
+          line cx (Printf.sprintf "%s = add i64 %s, 1" c1 !count);
+          line cx (Printf.sprintf "%s = select i1 %s, i64 %s, i64 %s" nc m c1 !count);
+          acc := a;
+          count := nc
+        end
+      done
   | Call { sig_; callee; args; attrs; va_aggs } ->
       let what = match callee with Direct n -> "call of @" ^ n | Indirect _ -> "indirect call" in
       let nfixed = List.length sig_.param_abis in
@@ -1944,16 +1961,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                 add o "\n";
                 add o (label b ^ ":\n")
               end;
-              if b = entry then
-                (* slots of [expand] *)
-                Vec.iter
-                  (fun (ir : inst_rec) ->
-                    match ir.op with
-                    | Expand (x, _) ->
-                        add o (Printf.sprintf "  %%x%d = alloca [%d x i8], align 16\n" ir.results.(0) (size_of (tyv cx x)))
-                    | _ -> ())
-                  f.insts
-              else
+              if b <> entry then
                 Array.iteri
                   (fun k p ->
                     let t = lty (ty_of f p) in

@@ -663,6 +663,24 @@ let insert fn id vt x l e =
   let e = value fn e in
   define fn id (emit1 fn (Insert (x, e, value fn l)) (fir_ty vt))
 
+(* Fir's data-movement ops, one instruction each (SPEC §8): [compress]
+   and [expand] by an i1 mask, [permute] by an index vector of any length
+   (zero lanes for indices past the end) *)
+let compress fn id vt x m =
+  let x = value fn x in
+  let m = value fn m in
+  define fn id (emit1 fn (Compress (x, m)) (fir_ty vt))
+
+let expand fn id vt x m =
+  let x = value fn x in
+  let m = value fn m in
+  define fn id (emit1 fn (Expand (x, m)) (fir_ty vt))
+
+let permute fn id vt x idx =
+  let x = value fn x in
+  let idx = value fn idx in
+  define fn id (emit1 fn (Permute (x, idx)) (fir_ty vt))
+
 (* lane 0 of [x] in every lane of a [vt] *)
 let shuffle_zero fn id vt x =
   let n = match vt with Low.Vector (n, _) -> n | _ -> unsupported "shuffle of a non-vector" in
