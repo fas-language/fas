@@ -993,10 +993,13 @@ let create cfg (ms : modul list) =
                             Bytes.blit_string s 0 o.data !pos (String.length s);
                             pos := !pos + String.length s
                         | Zeros k -> pos := !pos + k
-                        | Reloc { sym; addend; width } ->
-                            put_addr
-                              (Int64.add (sym_addr (lookup st mi sym)) addend)
-                              width
+                        | Reloc { sym; addend; width; pcrel } ->
+                            let a = Int64.add (sym_addr (lookup st mi sym)) addend in
+                            (* pcrel: relative to these bytes' own address *)
+                            let here =
+                              Int64.add (sym_addr s) (Int64.of_int (!pos - start))
+                            in
+                            put_addr (if pcrel then Int64.sub a here else a) width
                         | Blockref { fn; block } -> put_addr (blockaddr st fn block) 8)
                       pieces)
             | _ -> ())

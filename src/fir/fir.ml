@@ -415,7 +415,9 @@ type func = {
 type init_piece =
   | Bytes of string
   | Zeros of int
-  | Reloc of { sym : string; addend : int64; width : int }  (** width 4 or 8 *)
+  | Reloc of { sym : string; addend : int64; width : int; pcrel : bool }
+      (** width 8: the absolute address sym+addend; with [pcrel] (width 4
+          only), sym+addend minus the address of these bytes *)
   | Blockref of { fn : string; block : int }
       (** 8 bytes: the [blockaddr(@fn, block)] constant, for C's
           [static void *t[] = {&&a, ...}] *)

@@ -1096,13 +1096,14 @@ let parse_piece lx =
         | Num n when n.[0] = '-' -> int64_tok lx
         | _ -> 0L
       in
+      let pcrel = match peek lx with Ident "pcrel" -> ignore (next lx); true | _ -> false in
       let width =
         match next lx with
         | Ident "w4" -> 4
         | Ident "w8" -> 8
         | t -> fail lx ("expected w4 or w8, got " ^ tok_text t)
       in
-      Reloc { sym; addend; width }
+      Reloc { sym; addend; width; pcrel }
   | Ident "blockaddr" ->
       expect lx "(";
       let fn = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in

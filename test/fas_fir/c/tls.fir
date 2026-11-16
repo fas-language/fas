@@ -10,6 +10,11 @@ alias @fir_tls_alias global = @fir_tls
 ; defined in C: `__thread long c_tls = 100;`
 global @c_tls size 8 align 8 global thread_local = extern
 
+; thread_local in named sections (SPEC §4): a TLS template section with
+; bytes and one with zeros only
+global @fir_sec_tls size 8 align 8 global thread_local section ".tdata.fir_sec" = {bytes "\03\00\00\00\00\00\00\00"}
+global @fir_sec_zero size 16 align 16 global thread_local section ".tbss.fir_sec" = zero
+
 ; C walks the registry between __start_fir_reg and __stop_fir_reg
 global @fir_reg_a size 8 align 8 global section "fir_reg" = {bytes "\01\00\00\00\00\00\00\00"}
 global @fir_reg_b size 8 align 8 local section "fir_reg" readonly = {bytes "\02\00\00\00\00\00\00\00"}
@@ -38,5 +43,18 @@ func @fir_add_c (i64) -> (i64) global {
   %w2 = add i64 %w, %old
   store %w2, ptr @c_tls, align 8
   store i64 0, %s, align 8
+  ret %w2
+}
+
+; fir_sec_tls += fir_sec_zero[1] + by; fir_sec_zero[1] = by; returns fir_sec_tls
+func @fir_sec_bump (i64) -> (i64) global {
+^e(%by: i64):
+  %z = ptradd ptr ptr @fir_sec_zero, i64 0, 1, 8
+  %old = load i64 %z, align 8
+  %v = load i64 ptr @fir_sec_tls, align 8
+  %w = add i64 %v, %old
+  %w2 = add i64 %w, %by
+  store %w2, ptr @fir_sec_tls, align 8
+  store %by, %z, align 8
   ret %w2
 }

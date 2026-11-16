@@ -452,11 +452,12 @@ let piece_text = function
   | Bytes s -> "bytes " ^ quote s
   | Zeros n -> "zeros " ^ string_of_int n
   | Blockref { fn; block } -> Printf.sprintf "blockaddr(%s, %d)" (symbol fn) block
-  | Reloc { sym; addend; width } ->
-      Printf.sprintf "reloc %s%s w%d" (symbol sym)
+  | Reloc { sym; addend; width; pcrel } ->
+      Printf.sprintf "reloc %s%s%s w%d" (symbol sym)
         (if addend = 0L then ""
          else if Int64.compare addend 0L < 0 then Int64.to_string addend
          else "+" ^ Int64.to_string addend)
+        (if pcrel then " pcrel" else "")
         width
 
 let print_global buf g =

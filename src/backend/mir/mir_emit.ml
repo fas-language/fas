@@ -918,12 +918,16 @@ let global_image (g : F.global) =
         (function
           | F.Bytes s -> Buffer.add_string b s
           | Zeros n -> Buffer.add_string b (String.make n '\000')
-          | Reloc { sym; addend; width = 8 } ->
-              relocs := (Buffer.length b, sym, Int64.to_int addend) :: !relocs;
+          | Reloc { sym; addend; width = 8; pcrel = false } ->
+              relocs := (Buffer.length b, sym, Int64.to_int addend, false) :: !relocs;
               Buffer.add_string b (String.make 8 '\000')
+          | Reloc { sym; addend; width = 4; pcrel = true } ->
+              (* R_X86_64_PC32: resolved at link time, no load-time relocation *)
+              relocs := (Buffer.length b, sym, Int64.to_int addend, true) :: !relocs;
+              Buffer.add_string b (String.make 4 '\000')
           | Reloc { width; _ } -> unsupported "@%s: a %d-byte relocation" g.gname width
           | Blockref { fn; block } ->
-              relocs := (Buffer.length b, Mir_isel.block_symbol fn block, 0) :: !relocs;
+              relocs := (Buffer.length b, Mir_isel.block_symbol fn block, 0, false) :: !relocs;
               Buffer.add_string b (String.make 8 '\000'))
         pieces);
   if Buffer.length b > g.size then unsupported "@%s: initializer larger than the global" g.gname;
@@ -1086,18 +1090,22 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let pointers = if zero then [] else snd (Lazy.force image) in
           let align = max 1 g.galign in
           List.iter
-            (fun (_, sym, _) ->
+            (fun (_, sym, _, _) ->
               if Hashtbl.mem env.tls_syms sym then
                 unsupported "@%s: the address of thread-local @%s in an initializer" g.gname sym)
             pointers;
           (* a pointer in a position-independent object needs a load-time
              relocation, which read-only pages cannot take *)
-          let readonly = g.readonly && not (pic && pointers <> []) in
+          let readonly = g.readonly && not (pic && List.exists (fun (_, _, _, pcrel) -> not pcrel) pointers) in
           let place d section =
             place_data d section ~name:g.gname ~align ~size:g.size (fun offset ->
                 Buffer.add_string d.buf (fst (Lazy.force image));
                 List.iter
-                  (fun (o, symbol, addend) -> d.relocs <- A.Abs64 { offset = offset + o; symbol; addend } :: d.relocs)
+                  (fun (o, symbol, addend, pcrel) ->
+                    d.relocs <-
+                      (if pcrel then A.Raw { offset = offset + o; symbol; kind = 2; addend }
+                       else A.Abs64 { offset = offset + o; symbol; addend })
+                      :: d.relocs)
                   pointers)
           in
           let named name ~tls =
@@ -1108,8 +1116,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
             place d (Elf64.Extra (-1))
           in
           match (g.section, g.thread_local) with
-          | Some s, true -> unsupported "@%s: a thread_local global in section \"%s\"" g.gname s
-          | Some s, false -> named s ~tls:false
+          | Some s, tls -> named s ~tls
           | None, true -> named (if zero && pointers = [] then ".tbss" else ".tdata") ~tls:true
           | None, false ->
               if zero && pointers = [] && not g.readonly then begin
@@ -1164,7 +1171,9 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
              SHF_TLS for thread-local data. Zero-filled .tbss and .bss*
              sections take no file space (SHT_NOBITS). *)
           let nobits =
-            !all_zero && (name = ".tbss" || name = ".bss" || String.starts_with ~prefix:".bss." name)
+            !all_zero
+            && (name = ".tbss" || name = ".bss" || String.starts_with ~prefix:".bss." name
+               || (tls && String.starts_with ~prefix:".tbss." name))
           in
           {
             Native_object.name;

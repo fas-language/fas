@@ -2,11 +2,15 @@
 ; (no libc: _start sets up the TLS block from PT_TLS). Prints the
 ; initialized and zeroed thread-local values before and after stores, the
 ; 64-byte alignment of a thread-local, a registry summed between the
-; linker's __start_/__stop_ symbols, and data in named .rodata/.bss
-; sections. (c/tls.fir checks TLS across threads, against C.)
+; linker's __start_/__stop_ symbols, data in named .rodata/.bss
+; sections, and thread-locals in named sections. (c/tls.fir checks TLS across threads, against C.)
 triple "x86_64-unknown-linux-gnu"
 
 declare @putnum (i64) -> () global
+
+; thread_local in named sections: bytes, then zeros (a NOBITS .tbss.*)
+global @sec_tls size 8 align 8 local thread_local section ".tdata.mine" = {bytes "\2a\00\00\00\00\00\00\00"}
+global @sec_zero size 8 align 8 local thread_local section ".tbss.mine" = zero
 
 ; .tdata
 global @counter size 8 align 8 global thread_local = {bytes "\05\00\00\00\00\00\00\00"}
@@ -88,5 +92,13 @@ func @main (i32, ptr) -> (i32) global {
   store i64 9, %zbp, align 8
   %b1 = load i64 %zbp, align 8
   call (i64) -> () @putnum(%b1)
+  %ns0 = load i64 ptr @sec_tls, align 8
+  %nz0 = load i64 ptr @sec_zero, align 8
+  %ns1 = add i64 %ns0, %nz0
+  call (i64) -> () @putnum(%ns1)
+  store i64 5, ptr @sec_zero, align 8
+  %nz1 = load i64 ptr @sec_zero, align 8
+  %ns2 = add i64 %ns0, %nz1
+  call (i64) -> () @putnum(%ns2)
   ret i32 0
 }

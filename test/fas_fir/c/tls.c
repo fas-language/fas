@@ -1,14 +1,16 @@
 /* Checks test/fas_fir/c/tls.fir from four threads and the main thread:
    each sees its own fir_tls (starting at 7) and c_tls (starting at 100),
-   and the same addresses as C does; exit 0 when all agree */
+   and the same addresses as C does, also for the thread-locals in named
+   sections; exit 0 when all agree */
 #include <pthread.h>
 #include <stdio.h>
 __thread long c_tls = 100;
-extern __thread long fir_tls, fir_tls_alias;
+extern __thread long fir_tls, fir_tls_alias, fir_sec_tls, fir_sec_zero[2];
 extern long __start_fir_reg[], __stop_fir_reg[];
 long fir_bump(long);
 long *fir_addr(void);
 long fir_add_c(long);
+long fir_sec_bump(long);
 static int bad;
 #define CHECK(e, want) do { long g_ = (long)(e); if (g_ != (long)(want)) { \
     printf("thread %ld: %s = %ld, expected %ld\n", k, #e, g_, (long)(want)); bad = 1; } } while (0)
@@ -22,6 +24,11 @@ static void *run(void *arg) {
   CHECK(fir_addr(), &fir_tls);
   CHECK(fir_add_c(k * 10), 100 + k * 10);
   CHECK(c_tls, 100 + k * 10);
+  CHECK(fir_sec_tls, 3);
+  CHECK(fir_sec_zero[1], 0);
+  CHECK(fir_sec_bump(k), 3 + k);
+  CHECK(fir_sec_bump(5), 3 + 2 * k + 5);
+  CHECK(fir_sec_zero[1], 5);
   return 0;
 }
 int main(void) {

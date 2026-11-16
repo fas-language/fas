@@ -1682,10 +1682,20 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
               | Some pieces ->
                   let len = List.fold_left (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8) 0 pieces in
                   let pieces = if len < g.size then pieces @ [ Zeros (g.size - len) ] else pieces in
-                  let piece = function
+                  let at = ref 0 in
+                  let piece p =
+                    let here = !at in
+                    (at := here + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8);
+                    match p with
                     | Bytes s -> (Printf.sprintf "[%d x i8]" (String.length s), "c\"" ^ escaped s ^ "\"")
                     | Zeros k -> (Printf.sprintf "[%d x i8]" k, "zeroinitializer")
-                    | Reloc { sym = s; addend; width } when width = pointer_size ->
+                    | Reloc { sym = s; addend; width = 4; pcrel = true } ->
+                        (* the target minus the address of these bytes: one R_X86_64_PC32 *)
+                        let addr p off = Printf.sprintf "i64 ptrtoint (ptr getelementptr (i8, ptr %s, i64 %d) to i64)" p off in
+                        ( "i32",
+                          Printf.sprintf "trunc (i64 sub (%s, %s) to i32)" (addr (sym s) (Int64.to_int addend))
+                            (addr (sym g.gname) here) )
+                    | Reloc { sym = s; addend; width; pcrel = false } when width = pointer_size ->
                         ("ptr", if addend = 0L then sym s else Printf.sprintf "getelementptr (i8, ptr %s, i64 %Ld)" (sym s) addend)
                     | Reloc { width; _ } -> unsupported "@%s: a %d-byte data relocation on the LLVM path" g.gname width
                     | Blockref { block = 0; _ } -> unsupported "@%s: blockaddr of an entry block" g.gname

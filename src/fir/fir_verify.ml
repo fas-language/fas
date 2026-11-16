@@ -557,6 +557,19 @@ let verify (m : modul) =
       | Some ps when List.exists (function Zeros k -> k < 0 | _ -> false) ps ->
           errs := Printf.sprintf "@%s: a negative zeros piece" g.gname :: !errs
       | _ -> ());
+      (* a 4-byte address fits only in a fixed-address image, so w4 is
+         PC-relative and w8 absolute (SPEC §4) *)
+      (match g.init with
+      | Some ps ->
+          List.iter
+            (function
+              | Reloc { sym; width = 4; pcrel = false; _ } ->
+                  errs := Printf.sprintf "@%s: reloc @%s w4 must be pcrel (a 4-byte absolute address is not supported)" g.gname sym :: !errs
+              | Reloc { sym; width = 8; pcrel = true; _ } ->
+                  errs := Printf.sprintf "@%s: reloc @%s pcrel must be w4" g.gname sym :: !errs
+              | _ -> ())
+            ps
+      | None -> ());
       match g.init with
       | Some ps ->
           let n =
@@ -565,6 +578,38 @@ let verify (m : modul) =
               0 ps
           in
           if n <> g.size then errs := Printf.sprintf "@%s: initializer is %d bytes, size %d" g.gname n g.size :: !errs
+      | None -> ())
+    m.globals;
+  (* a section holds thread-local data (a TLS template, SHF_TLS) or
+     ordinary data, never both *)
+  let sections = Hashtbl.create 16 in
+  Vec.iter
+    (fun g ->
+      match g.section with
+      | Some s when g.gdefined -> (
+          match Hashtbl.find_opt sections s with
+          | Some (other, tls) when tls <> g.thread_local ->
+              errs :=
+                Printf.sprintf "@%s: section \"%s\" mixes thread_local and other globals (@%s)" g.gname s other :: !errs
+          | Some _ -> ()
+          | None -> Hashtbl.replace sections s (g.gname, g.thread_local))
+      | _ -> ())
+    m.globals;
+  (* a thread_local's address is per thread, not a link-time constant, so
+     no initializer may name it, directly or through an alias (SPEC §4) *)
+  let tls = Hashtbl.create 16 in
+  Vec.iter (fun g -> if g.thread_local then Hashtbl.replace tls g.gname ()) m.globals;
+  Vec.iter (fun a -> if Hashtbl.mem tls a.target then Hashtbl.replace tls a.aname ()) m.aliases;
+  Vec.iter
+    (fun g ->
+      match g.init with
+      | Some ps ->
+          List.iter
+            (function
+              | Reloc { sym; _ } when Hashtbl.mem tls sym ->
+                  errs := Printf.sprintf "@%s: reloc of thread_local @%s (its address is per thread)" g.gname sym :: !errs
+              | _ -> ())
+            ps
       | None -> ())
     m.globals;
   (* blockaddr(@g, b) names a block of a function defined in this module that

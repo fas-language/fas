@@ -52,6 +52,14 @@ case_ sum_loop.fir 's/br %done, ^exit, ^body/br %done, ^exit, ^exit/' -c \
   '@sum: ^2 is not reachable from the entry block'
 case_ sum_loop.fir 's/^  %acc2 = add i64 %acc, %i$/  %t = alloca ptr i64 8, align 8\n  %acc2 = add i64 %acc, %i/' -c \
   'a constant-size alloca must be in the entry block'
+case_ tls.fir 's/readonly = {bytes "\\07\\00\\00\\00\\00\\00\\00\\00"}/readonly = {reloc @counter w8}/' -c \
+  '@ro: reloc of thread_local @counter (its address is per thread)'
+case_ pcrel.fir 's/reloc @a pcrel w4/reloc @a w4/' -c \
+  '@tab: reloc @a w4 must be pcrel'
+case_ pcrel.fir 's/zeros 4, reloc @c pcrel w4/reloc @c pcrel w8/' -c \
+  '@tab: reloc @c pcrel must be w4'
+case_ tls.fir 's/section ".tbss.mine"/section ".rodata.mine"/' -c \
+  'mixes thread_local and other globals'
 for c in $(sed -n 's/^global @\([a-z_]*\) size 8 align 8 .*= zero$/\1/p' "$here/fas_fir/sum_loop.fir" | head -n 1); do
   # a 1 GiB zero global is fine (.bss), and fast: its bytes are never built
   sed "s/^global @$c size 8 /global @$c size 1073741824 /" "$here/fas_fir/sum_loop.fir" > "$tmp/big.fir"

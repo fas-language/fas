@@ -839,7 +839,7 @@ let storage_global mc ~name ~size ~bytes ~pointers ~readonly ~align ~(linkage : 
         List.iter
           (fun (off, sym, addend) ->
             bytes_until off;
-            pieces := Reloc { sym; addend = Int64.of_int addend; width } :: !pieces;
+            pieces := Reloc { sym; addend = Int64.of_int addend; width; pcrel = false } :: !pieces;
             cursor := off + width)
           (List.sort compare pointers);
         bytes_until size;
