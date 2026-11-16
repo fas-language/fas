@@ -1413,6 +1413,13 @@ let rec builtin_literal_operand = function
   | Ast.Array_lit (entries, _) -> List.for_all builtin_literal_operand entries
   | _ -> false
 
+let bitcast_literal_ty c kind target expression =
+  Sema_types.bitcast_literal_ty kind target expression ~shape:(fun expression ->
+      match unresolved_shape_of c expression with
+      | Some Unresolved_int -> `Int
+      | Some Unresolved_float -> `Float
+      | _ -> `Other)
+
 let unresolved_float_operand c expression =
   match unresolved_shape_of c expression with
   | Some (Unresolved_float | Unresolved_vector) -> true
@@ -2536,7 +2543,29 @@ and check_expr_inner ?destination (c : context) expected expression =
       error s "generic specialization is not available in this context"
   | Ast.Cast (k, t, e, s) ->
       let* t = source_ty_in_context c s t in
-      let* x = check_expr c None e in
+      let* x =
+        match bitcast_literal_ty c k t e with
+        | None -> check_expr c None e
+        | Some literal_ty ->
+            (* an untyped literal takes the same-size type the bitcast
+               implies, so `bitcast[f64](0x7FF0000000000000)` reads all 64
+               bits instead of defaulting to i32 *)
+            check_expr c (Some literal_ty) e
+            |> Result.map_error
+                 (List.map (fun (d : Diag.t) ->
+                      {
+                        d with
+                        notes =
+                          d.notes
+                          @ [
+                              Printf.sprintf
+                                "in `bitcast[%s]` an untyped literal is a %s, so it \
+                                 must fit in %d bits"
+                                (Hir.ty_name t) (Hir.ty_name literal_ty)
+                                (Sema_types.bitcast_literal_bits literal_ty);
+                            ];
+                      }))
+      in
       let from = Hir.expr_ty x in
       if cast_legal k from t then Ok (Hir.Cast (k, x, t, s))
       else Error [ Sema_types.cast_error ~expression:e k from t s ]
@@ -5469,6 +5498,32 @@ let check_copy c args span =
 let stmt_terminates = Ast.stmt_terminates
 let catch_counter = ref 0
 
+(* A statement-level `const assert` whose condition calls Fas functions is
+   evaluated in the Fir interpreter, once per specialisation, while the body is
+   checked. Sema.check installs [call_assert_env] (the program being checked
+   and a way to re-run Sema on reduced programs) and Sema_const_calls installs
+   [evaluate_call_assert]; it is a forward reference because Sema_const_calls
+   runs Sema itself. Without either, such a condition is "not a compile-time
+   constant", as before. *)
+type call_assert_env = {
+  program : Ast.program;
+  sema :
+    Ast.program -> Sema_specialization.t -> (Hir.program, Diag.t list) result;
+}
+
+let call_assert_env : call_assert_env option ref = ref None
+
+let evaluate_call_assert :
+    (call_assert_env ->
+    trace:Sema_specialization.instantiation_frame list ->
+    Ast.expr ->
+    string option ->
+    Span.t ->
+    (unit, Diag.t list) result)
+    option
+    ref =
+  ref None
+
 (* `const assert` (LANGUAGE.md "Compile-time assertions"): the condition folds at
    compile time; inside a generic body this runs once per specialisation, and the
    caller's trace names the instantiation. When folding fails, the condition is
@@ -5493,13 +5548,31 @@ let check_const_assert (c : context) cond message span =
             ensure_expected ~checked_expression:checked ~context:"const assert"
               ~expression:cond (Hir.expr_ty checked) Hir.Bool (Ast.expr_span cond)
           in
+          let locals =
+            List.filter
+              (fun name -> Option.is_some (lookup_local name c))
+              (Ast.used_names
+                 { Ast.items = [ Ast.Const_assert { cond; message; span } ] })
+          in
+          match (locals, !call_assert_env, !evaluate_call_assert) with
+          | local :: _, _, _ ->
+              Error
+                [
+                  Diag.error (Ast.expr_span cond)
+                    (Printf.sprintf
+                       "const assert condition uses the local `%s`, which has no \
+                        compile-time value"
+                       local);
+                ]
+          | [], Some env, Some evaluate ->
+              evaluate env ~trace:c.spec_trace cond message span
+          | _ ->
           Error
             [
               Diag.error
                 ~help:
                   "a const assert condition may use literals, constants, generic \
-                   parameters and compile-time builtins; at top level it may also \
-                   call functions"
+                   parameters, compile-time builtins and calls of Fas functions"
                 (Ast.expr_span cond) "const assert condition is not a compile-time constant";
             ])
 

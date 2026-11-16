@@ -3185,13 +3185,39 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             if not (expression_mentions specialization_names unresolved_condition) then
               None
             else
+              (* a specialised struct (`Pair$spec...`) is not laid out yet;
+                 the folder lays out its source application `Pair[i64]` *)
+              let rec source_ty = function
+                | Ast.Named_type (name, span) as ty -> (
+                    match specialized_args name span with
+                    | Some (template, arguments) ->
+                        Ast.Applied_type
+                          (template, span, List.map source_arg arguments, span)
+                    | None -> ty)
+                | Ast.Handle ty -> Ast.Handle (source_ty ty)
+                | Ast.Array (length, ty) -> Ast.Array (length, source_ty ty)
+                | Ast.Vec (length, ty) -> Ast.Vec (length, source_ty ty)
+                | Ast.Applied_type (name, span, arguments, arguments_span) ->
+                    Ast.Applied_type
+                      (name, span, List.map source_arg arguments, arguments_span)
+                | ty -> ty
+              and source_arg = function
+                | Ast.Type_arg ty -> Ast.Type_arg (source_ty ty)
+                | Ast.Type_or_index ty -> Ast.Type_or_index (source_ty ty)
+                | argument -> argument
+              in
+              let source_condition =
+                Ast.map_expr
+                  { Ast.identity_mapper with on_ty = (fun ty -> Some (source_ty ty)) }
+                  condition
+              in
               match
                 const_expr ~structs:eval_structs ~named_types:eval_named_types
                   ~generic_structs ~globals:global_names
                   ~array_lengths:
                     (array_lengths
                     @ static_array_lengths top_level_bindings eval_globals)
-                  ~arrays:eval_arrays constant_environment None condition
+                  ~arrays:eval_arrays constant_environment None source_condition
               with
               | Ok (_, value) -> Some (value <> 0L)
               | Error _ -> None

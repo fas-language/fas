@@ -1125,7 +1125,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
         let source_expected =
           match (dt, e) with
           | Hir.Err, Ast.Int_lit _ -> Some (Hir.Int Hir.U32)
-          | _ -> None
+          | _ -> bitcast_literal_ty k dt e
         in
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
           ~globals ?resolve consts ~check_only ~validate_dead source_expected e
@@ -2269,14 +2269,23 @@ and vector_const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_struct
   | Ast.Cast (kind, destination, value, span) ->
       let* destination = source_ty_with_values named_types consts span destination in
       let* source, values =
-        match evaluate None value with
-        | Ok result -> Ok result
-        | Error _ ->
+        match bitcast_literal_ty kind destination value with
+        | Some literal_ty ->
+            (* an untyped literal takes the bitcast's size, as at run time *)
             let* source, value =
               const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
-                ~globals ?resolve consts None ~check_only value
+                ~globals ?resolve consts (Some literal_ty) ~check_only value
             in
             Ok (source, [ value ])
+        | None -> (
+            match evaluate None value with
+            | Ok result -> Ok result
+            | Error _ ->
+                let* source, value =
+                  const_expr ~structs ~named_types ~generic_structs ~arrays
+                    ~array_lengths ~globals ?resolve consts None ~check_only value
+                in
+                Ok (source, [ value ]))
       in
       let* () =
         if cast_legal kind source destination then Ok ()

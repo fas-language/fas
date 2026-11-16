@@ -163,3 +163,16 @@ val binary_result_type :
   (Hir.ty, Diag.t list) result
 
 val variadic_promote : Hir.expr -> Hir.expr
+
+val bitcast_literal_ty :
+  ?shape:(Ast.expr -> [ `Int | `Float | `Other ]) ->
+  Ast.cast_kind ->
+  Hir.ty ->
+  Ast.expr ->
+  Hir.ty option
+(** LANGUAGE.md "Conversions": the type an untyped literal operand of [bitcast[target]]
+    takes (the integer or float of the target's size), or [None] when the usual literal
+    rules apply. [shape] classifies the operand; the default walks it. *)
+
+val bitcast_literal_bits : Hir.ty -> int
+(** Bits of a bitcast target (scalars and int/float vectors), 0 otherwise. *)

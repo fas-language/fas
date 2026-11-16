@@ -387,6 +387,12 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   let* program, program_errors = desugar_errors program in
   let* program = Sema_enums.desugar program in
   let* program = Sema_fn_generics.desugar program in
+  (* statement-level `const assert`s with calls rebuild their condition from
+     the program Sema checks, so it is the desugared one *)
+  Sema_check.call_assert_env :=
+    Option.map
+      (fun (env : Sema_check.call_assert_env) -> { env with program })
+      !Sema_check.call_assert_env;
   (* the value struct registry: declared ones now, specializations as
      monomorphization makes them *)
   Stdlib.Hashtbl.reset Hir.value_structs;
@@ -1443,9 +1449,22 @@ let check ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters ?c_string_para
   if unevaluated <> [] then Error unevaluated
   else
   let run () =
-    check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
-      ?c_string_parameters ?c_alloc_size_parameters ?c_records
-      ?all_errors ?specializations ?index program
+    (* statement-level `const assert`s with calls re-run Sema on reduced
+       programs with this check's C import context (Sema_check.call_assert_env) *)
+    let rec with_env program f =
+      let saved = !Sema_check.call_assert_env in
+      Sema_check.call_assert_env := Some { Sema_check.program; sema = reduced };
+      Fun.protect ~finally:(fun () -> Sema_check.call_assert_env := saved) f
+    and reduced program specializations =
+      with_env program (fun () ->
+          check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
+            ?c_string_parameters ?c_alloc_size_parameters ?c_records ~specializations
+            program)
+    in
+    with_env program (fun () ->
+        check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
+          ?c_string_parameters ?c_alloc_size_parameters ?c_records
+          ?all_errors ?specializations ?index program)
   in
   match index with
   | None -> run ()

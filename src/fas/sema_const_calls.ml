@@ -252,8 +252,10 @@ let literal_of_bytes ~nonfinite span (structs : Hir.struct_def list) (ty : Hir.t
   in
   go ty 0
 
-(* the first `return` in a `const { }` body: the block is not a function *)
-let rec find_return statements =
+(* the first statement in [statements] (nested bodies and `catch { }` blocks
+   included) for which [found] answers *)
+let rec find_statement found statements =
+  let search = find_statement found in
   let in_expression expression =
     let found = ref None in
     let mapper =
@@ -262,7 +264,7 @@ let rec find_return statements =
         on_expr =
           (function
           | Ast.Catch (_, Ast.Catch_block (_, body), _) ->
-              if !found = None then found := find_return body;
+              if !found = None then found := search body;
               None
           | _ -> None);
       }
@@ -272,32 +274,31 @@ let rec find_return statements =
   in
   let in_statement statement =
     let nested =
-      match statement with
-      | Ast.Return (_, span) -> Some span
-      | Ast.If (_, yes, no, _) -> (
-          match find_return yes with
-          | Some span -> Some span
-          | None -> Option.bind no find_return)
-      | Ast.While (_, _, body, _)
-      | Ast.Defer (body, _)
-      | Ast.Block (body, _)
-      | Ast.Const_for { body; _ }
-      | Ast.Const_copy { body; _ }
-      | Ast.Errdefer (_, body, _)
-      | Ast.Catch_stmt { body; _ } ->
-          find_return body
-      | Ast.For (_, init, _, step, body, _) ->
+      match (found statement, statement) with
+      | Some result, _ -> Some result
+      | None, Ast.Return _ -> None
+      | None, Ast.If (_, yes, no, _) -> (
+          match search yes with Some span -> Some span | None -> Option.bind no search)
+      | None, Ast.While (_, _, body, _)
+      | None, Ast.Defer (body, _)
+      | None, Ast.Block (body, _)
+      | None, Ast.Const_for { body; _ }
+      | None, Ast.Const_copy { body; _ }
+      | None, Ast.Errdefer (_, body, _)
+      | None, Ast.Catch_stmt { body; _ } ->
+          search body
+      | None, Ast.For (_, init, _, step, body, _) ->
           List.find_map
             (fun x -> x)
             [
-              Option.bind init (fun s -> find_return [ s ]);
-              Option.bind step (fun s -> find_return [ s ]);
-              find_return body;
+              Option.bind init (fun s -> search [ s ]);
+              Option.bind step (fun s -> search [ s ]);
+              search body;
             ]
-      | Ast.Switch (_, cases, default, _) -> (
-          match List.find_map (fun (_, body) -> find_return body) cases with
+      | None, Ast.Switch (_, cases, default, _) -> (
+          match List.find_map (fun (_, body) -> search body) cases with
           | Some span -> Some span
-          | None -> Option.bind default find_return)
+          | None -> Option.bind default search)
       | _ -> None
     in
     match nested with
@@ -318,6 +319,10 @@ let rec find_return statements =
         List.find_map in_expression !expressions
   in
   List.find_map in_statement statements
+
+(* the first `return` in a `const { }` body: the block is not a function *)
+let find_return =
+  find_statement (function Ast.Return (_, span) -> Some span | _ -> None)
 
 let trap_text = function
   | Fir_interp.Trap_div -> "divides by zero or overflows a division"
@@ -629,3 +634,226 @@ let resolve ~sema (program : Ast.program) =
         (Ok []) !items
     in
     Ok { Ast.items = List.rev resolved }
+
+(* statement-level `const assert` with calls (Sema_check.evaluate_call_assert).
+   In a plain function the condition, as checked, becomes a top-level
+   `const assert` of the program and is resolved like one. In a generic
+   function the checked condition names internal specialisations, so the
+   source condition is wrapped instead:
+     fn __fas_const_assert_N[<the function's generic parameters>]() bool {
+       return <condition> }
+     const assert(__fas_const_assert_N[<this instantiation's arguments>]())
+   with the arguments rebuilt from the instantiation frame (the one the
+   "while instantiating" note prints). An assertion reached again while it is
+   being evaluated (its function is reachable from its own condition) is a
+   cycle. *)
+let in_progress : Span.t list ref = ref []
+let wrapper_counter = ref 0
+
+let within (outer : Span.t) (inner : Span.t) =
+  outer.file = inner.file
+  && outer.start_offset <= inner.start_offset
+  && inner.end_offset <= outer.end_offset
+
+(* a generic argument as source: a decimal or hex literal, or a name *)
+let expr_of_text span text =
+  let numeric =
+    text <> ""
+    && String.for_all
+         (function
+           | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' | 'X' | '_' -> true | _ -> false)
+         text
+    && match text.[0] with '0' .. '9' -> true | _ -> false
+  in
+  let identifier =
+    text <> ""
+    && String.for_all
+         (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false)
+         text
+  in
+  if numeric then Ok (Ast.Int_lit (text, span))
+  else if identifier then Ok (Ast.Ident (text, span))
+  else Error (Printf.sprintf "the generic argument `%s`" text)
+
+let const_value_expr span (ty : Hir.ty) value =
+  match ty with
+  | Hir.Bool -> Ast.Bool_lit (value <> 0L, span)
+  | _ ->
+      let text = Sema_specialization.render_diagnostic_const ty value in
+      if String.length text > 1 && text.[0] = '-' then
+        Ast.Unary
+          (Ast.Neg, Ast.Int_lit (String.sub text 1 (String.length text - 1), span), span)
+      else Ast.Int_lit (text, span)
+
+let rec ast_ty_of_diagnostic span (ty : Sema_specialization.diagnostic_type) =
+  let ( let* ) = Result.bind in
+  match ty with
+  | Diagnostic_bool -> Ok Ast.Bool
+  | Diagnostic_void -> Ok Ast.Void
+  | Diagnostic_int kind -> Ok (Ast.Int kind)
+  | Diagnostic_float kind -> Ok (Ast.Float kind)
+  | Diagnostic_addr -> Ok Ast.Addr
+  | Diagnostic_handle ty ->
+      let* ty = ast_ty_of_diagnostic span ty in
+      Ok (Ast.Handle ty)
+  | Diagnostic_array (length, ty) ->
+      let* length = expr_of_text span length in
+      let* ty = ast_ty_of_diagnostic span ty in
+      Ok (Ast.Array (Ast.aggregate_length length span, ty))
+  | Diagnostic_vec (length, ty) ->
+      let* length = expr_of_text span length in
+      let* ty = ast_ty_of_diagnostic span ty in
+      Ok (Ast.Vec (Ast.aggregate_length length span, ty))
+  | Diagnostic_named name -> Ok (Ast.Named_type (name, span))
+  | Diagnostic_applied (name, arguments) ->
+      let* arguments = Result_list.map (ast_arg_of_diagnostic span) arguments in
+      Ok (Ast.Applied_type (name, span, arguments, span))
+  | Diagnostic_ptr _ | Diagnostic_const_ptr _ -> Error "a C pointer type argument"
+
+and ast_arg_of_diagnostic span (argument : Sema_specialization.diagnostic_argument) =
+  let ( let* ) = Result.bind in
+  match argument with
+  | Diagnostic_type_argument ty ->
+      let* ty = ast_ty_of_diagnostic span ty in
+      Ok (Ast.Type_arg ty)
+  | Diagnostic_const_argument (ty, value) ->
+      Ok (Ast.Const_arg (const_value_expr span ty value))
+  | Diagnostic_source_const_argument text ->
+      let* value = expr_of_text span text in
+      Ok (Ast.Const_arg value)
+
+(* the hoisted condition for the assertion at [span], or why it cannot be
+   built *)
+let hoisted_condition (program : Ast.program) ~trace cond span =
+  let ( let* ) = Result.bind in
+  (* the generic function being instantiated, by the instantiation frame's
+     name: instances made for function generic arguments share source spans.
+     Without a frame the function is not generic and the checked condition
+     is already source. *)
+  let enclosing =
+    match Sema_specialization.current_instantiation_frame trace with
+    | None -> Ok None
+    | Some frame -> (
+        match
+          List.find_map
+            (function
+              | Ast.Func
+                  ({ generic_params = _ :: _; body = Ast.Statements body; _ } as func)
+                when func.name = frame.template_name && within func.extent span ->
+                  Some (Ast.Func func, func.name, func.generic_params, body)
+              | _ -> None)
+            program.items
+        with
+        | Some found -> Ok (Some found)
+        | None -> Error "the enclosing generic function (internal)")
+  in
+  let* enclosing = enclosing in
+  match enclosing with
+  | None -> Ok ([], cond)
+  | Some (func_item, func_name, generic_params, body) ->
+      let* () =
+        if List.exists (function Ast.Fn_param _ -> true | _ -> false) generic_params
+        then Error "a function generic parameter (`fn(...)`) of the enclosing function"
+        else Ok ()
+      in
+      let* source_cond =
+        match
+          find_statement
+            (function
+              | Ast.Const_assert_stmt { cond; span = at; _ } when at = span -> Some cond
+              | _ -> None)
+            body
+        with
+        | Some cond -> Ok cond
+        | None -> Error "the assertion's source (internal)"
+      in
+      let* frame =
+        match Sema_specialization.current_instantiation_frame trace with
+        | Some frame when frame.template_name = func_name -> Ok frame
+        | _ -> Error "the instantiation of the enclosing function (internal)"
+      in
+      let* arguments =
+        if List.length frame.arguments <> List.length generic_params then
+          Error "the instantiation's arguments (internal)"
+        else Result_list.map (ast_arg_of_diagnostic span) frame.arguments
+      in
+      incr wrapper_counter;
+      let name = Printf.sprintf "%sassert_fn_%d" synthetic_prefix !wrapper_counter in
+      let wrapper =
+        match func_item with
+        | Ast.Func func ->
+            Ast.Func
+              {
+                func with
+                name;
+                params = [];
+                ret = Ast.Bool;
+                fails = false;
+                linkage = Ast.Internal;
+                variadic = false;
+                body = Ast.Statements [ Ast.Return (Some source_cond, span) ];
+              }
+        | item -> item
+      in
+      Ok
+        ( [ wrapper ],
+          Ast.Call (Ast.Generic_args (Ast.Ident (name, span), arguments, span), [], span)
+        )
+
+let () =
+  Sema_check.evaluate_call_assert :=
+    Some
+      (fun (env : Sema_check.call_assert_env) ~trace cond message span ->
+        if List.mem span !in_progress then
+          Error
+            [
+              Diag.error span
+                "this const assert calls a function that contains it; it cannot be \
+                 evaluated at compile time";
+            ]
+        else (
+          in_progress := span :: !in_progress;
+          Fun.protect
+            ~finally:(fun () -> in_progress := List.tl !in_progress)
+            (fun () ->
+              match hoisted_condition env.program ~trace cond span with
+              | Error what ->
+                  Error
+                    [
+                      Diag.error span
+                        (Printf.sprintf
+                           "this const assert calls functions, but %s cannot be \
+                            rebuilt for compile-time evaluation"
+                           what);
+                    ]
+              | Ok (extra, cond) -> (
+                  let item = Ast.Const_assert { cond; message; span } in
+                  let program =
+                    {
+                      Ast.items =
+                        List.filter
+                          (function Ast.Const_assert _ -> false | _ -> true)
+                          env.program.items
+                        @ extra @ [ item ];
+                    }
+                  in
+                  match resolve ~sema:env.sema program with
+                  | Error diagnostics -> Error diagnostics
+                  | Ok resolved -> (
+                      match List.rev resolved.items with
+                      | Ast.Const_assert { cond = Ast.Bool_lit (true, _); _ } :: _ ->
+                          Ok ()
+                      | Ast.Const_assert { cond = Ast.Bool_lit (false, _); _ } :: _ ->
+                          Error
+                            [
+                              Diag.error span
+                                (match message with
+                                | Some text -> "const assert failed: " ^ text
+                                | None -> "const assert failed");
+                            ]
+                      | _ ->
+                          Error
+                            [
+                              Diag.error span
+                                "internal: a const assert with calls was not evaluated";
+                            ])))))

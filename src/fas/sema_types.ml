@@ -1908,3 +1908,61 @@ let variadic_promote expression =
   | Hir.Int (Hir.I8 | Hir.I16) ->
       Hir.Cast (Ast.Sext, expression, Hir.Int Hir.I32, Hir.expr_span expression)
   | _ -> expression
+
+(* LANGUAGE.md "Conversions": an untyped literal operand of `bitcast[T]` takes
+   the type of T's size: an integer literal is unsigned (signed when it is
+   negated), a float literal is the float of that size. Other operands, and
+   sizes with no scalar type, keep the usual rules. [shape] classifies the
+   operand (the checker passes its cached classifier). *)
+let rec bitcast_literal_bits = function
+  | Hir.Int (Hir.U8 | Hir.I8) -> 8
+  | Hir.Int (Hir.U16 | Hir.I16) -> 16
+  | Hir.Int (Hir.U32 | Hir.I32) | Hir.Float Hir.F32 -> 32
+  | Hir.Int (Hir.U64 | Hir.I64) | Hir.Float Hir.F64 -> 64
+  | Hir.Vec (lanes, ((Hir.Int _ | Hir.Float _) as lane)) ->
+      lanes * bitcast_literal_bits lane
+  | _ -> 0
+
+let rec literal_shape = function
+  | Ast.Parenthesized (expression, _) -> literal_shape expression
+  | Ast.Int_lit _ -> `Int
+  | Ast.Float_lit _ -> `Float
+  | Ast.Unary (Ast.Neg, operand, _) -> literal_shape operand
+  | Ast.Unary (Ast.Bit_not, operand, _) -> (
+      match literal_shape operand with `Int -> `Int | _ -> `Other)
+  | Ast.Binary
+      ( ( Ast.Add | Ast.Sub | Ast.Mul | Ast.Div | Ast.Rem | Ast.Bit_and | Ast.Bit_or
+        | Ast.Bit_xor | Ast.Shl | Ast.Shr ),
+        left,
+        right,
+        _ ) -> (
+      match (literal_shape left, literal_shape right) with
+      | `Int, `Int -> `Int
+      | `Float, `Float -> `Float
+      | _ -> `Other)
+  | _ -> `Other
+
+let rec negated_literal = function
+  | Ast.Parenthesized (expression, _) -> negated_literal expression
+  | Ast.Unary (Ast.Neg, _, _) -> true
+  | _ -> false
+
+let bitcast_literal_ty ?(shape = literal_shape) kind (target : Hir.ty) expression =
+  if kind <> Ast.Bitcast then None
+  else
+    let bits = bitcast_literal_bits target in
+    match shape expression with
+    | `Int -> (
+        let negative = negated_literal expression in
+        match bits with
+        | 8 -> Some (Hir.Int (if negative then Hir.I8 else Hir.U8))
+        | 16 -> Some (Hir.Int (if negative then Hir.I16 else Hir.U16))
+        | 32 -> Some (Hir.Int (if negative then Hir.I32 else Hir.U32))
+        | 64 -> Some (Hir.Int (if negative then Hir.I64 else Hir.U64))
+        | _ -> None)
+    | `Float -> (
+        match bits with
+        | 32 -> Some (Hir.Float Hir.F32)
+        | 64 -> Some (Hir.Float Hir.F64)
+        | _ -> None)
+    | `Other -> None

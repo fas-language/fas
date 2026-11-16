@@ -317,7 +317,7 @@ fn main() i32 {
 
 ### Compile-time assertions
 
-`const assert(cond)` and `const assert(cond, "message")` check a `bool` at compile time, at top level or as a statement. The condition may use literals, constants, const and type generic parameters, and the layout queries `sizeof`, `alignof` and `offsetof`; at top level it may also call functions (see "Constants from calls"). A condition that does not fold to a constant is an error, never a runtime check. A false condition is the compile error `const assert failed: message`. The message must be a string literal.
+`const assert(cond)` and `const assert(cond, "message")` check a `bool` at compile time, at top level or as a statement. The condition may use literals, constants, const and type generic parameters, and the layout queries `sizeof`, `alignof` and `offsetof`. It may also call Fas functions, which run while compiling under the rules of "Constants from calls"; inside a function body the condition cannot use locals, and a function whose own assertion calls back into it is an error. A condition that does not fold to a constant is an error, never a runtime check. A false condition is the compile error `const assert failed: message`. The message must be a string literal.
 
 Inside a generic body the assertion is checked once per specialisation, and the error names the failing one (``note: while instantiating `first[i32, 0]` ``). In a branch that a generic parameter drops from a specialisation (see "Generics") it is not checked for that specialisation.
 
@@ -851,7 +851,7 @@ fn main() i32 {
 - The type must be an integer, `bool`, float or enum; the called code may use locals, loops, arrays, structs, generics, recursion and other constants.
 - Each of these is a compile error at the constant: calling a C function, a system call, reading or writing a `var` global, a failed `assert` (the error quotes its message), a trap such as dividing by zero, and running for more than 10,000,000 steps. A `fails` call must be caught, as anywhere.
 - Constants may call functions that use other such constants; a constant whose functions use the constant itself is an error.
-- A `const assert` inside a function body cannot call functions yet.
+- A `const assert` may call functions too, at top level or inside a function body; inside a generic body the calls run once per specialisation (see "Compile-time assertions").
 
 ### Constant blocks
 
@@ -1382,7 +1382,7 @@ With no destination type, an if-expression unifies integer branches like mixed i
 | `addr` ↔ `usize` | `addr_bits(p)`, `addr_from_bits(n)` |
 | `addr` ↔ `handle[T]` | `handle_from_addr[T](p)`, `handle_addr(h)` |
 
-`usize` and `isize` are the same types as `u64` and `i64`; diagnostics name them `u64` and `i64`, and exported C headers declare them `uint64_t` and `int64_t`. Signedness changes stay explicit. `bool`, vectors, `addr` and `handle[T]` never widen implicitly. Mixed integer operands widen the narrower value when one type holds the other (`u32 < i64` compares as `i64`), while `u32` with `i32` and `u64` with `i64` have no common type. An untyped literal takes the type of the other operand or branch (`w < 1` and `if c { 1 } else { w }` are `u32` for `w u32`). With nothing to take a type from, it is `i32`.
+`usize` and `isize` are the same types as `u64` and `i64`; diagnostics name them `u64` and `i64`, and exported C headers declare them `uint64_t` and `int64_t`. Signedness changes stay explicit. `bool`, vectors, `addr` and `handle[T]` never widen implicitly. Mixed integer operands widen the narrower value when one type holds the other (`u32 < i64` compares as `i64`), while `u32` with `i32` and `u64` with `i64` have no common type. An untyped literal takes the type of the other operand or branch (`w < 1` and `if c { 1 } else { w }` are `u32` for `w u32`). With nothing to take a type from, it is `i32`. Inside `bitcast[T](...)` an untyped literal takes T's size: an integer literal is the unsigned integer of that size, or the signed one when it is negated, and a float literal is the float of that size. So `bitcast[f64](0x7FF0000000000000)` is infinity, `bitcast[f32](-1)` has all bits set, `bitcast[u64](1.0)` is `0x3FF0000000000000`, and `bitcast[vec[8, u8]](0x0807060504030201)` fills eight lanes. A literal that does not fit that size is an error. Targets of a size with no integer or float type (such as `vec[4, u32]`) keep the usual rule.
 
 **Widen before the arithmetic, not after.** A result that may wrap never widens implicitly: with `a u16` and `b u16`, `x u32 = a * b` is rejected because the product may already have wrapped in `u16`. Write `x u32 = zext[u32](a) * b`. This applies to `+`, `-`, `*`, `<<`, `~`, unary minus and signed `/` and `%`, wherever the result meets a wider type: a destination, a mixed-width operand (`w + zext[u32](b) * 3`) or a comparison (`x == zext[u64](a) + 1`). Results that cannot wrap widen like plain values: `&`, `|`, `^`, `>>` and unsigned `/` and `%`, so `x u32 = (a >> 4) & 0xf` needs no conversion. When the compiler rejects a narrow result, its `help:` shows a version that compiles. `zext`, `sext` and `trunc` need a strict width change and work lane by lane on vectors, and `bitcast` needs the same total bits.
 

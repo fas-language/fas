@@ -17282,10 +17282,13 @@ let () =
     "const V vec[4,u8] = bitcast[vec[4,u8]](0x00010203)\n\
      const W vec[2,u16] = bitcast[vec[2,u16]](-1)\n\
      fn f() u8 { return bitcast[vec[4,u8]](0x00010203)[0] + V[1] }\n";
-  semantic_message "bitcast-literal-equal-bits"
-    "illegal `bitcast` from integer literal `1` to `u64`: the source is 32 bits and \
-     the destination is 64 bits"
-    "fn f() u64 { return bitcast[u64](1) }\n";
+  (* an untyped literal takes the integer of the destination's size (v0.5) *)
+  semantic_accept "bitcast-literal-destination-size"
+    "const A f64 = bitcast[f64](0x7FF0000000000000)\n\
+     fn f() u64 { return bitcast[u64](1) }\n";
+  semantic_note "bitcast-literal-too-wide"
+    "untyped literal is a u32, so it must fit in 32 bits"
+    "fn f() f32 { return bitcast[f32](0x100000000) }\n";
   semantic_message "zext-literal-source"
     "illegal `zext` from integer literal `256` to `u8`: the destination must be a \
      wider integer type"

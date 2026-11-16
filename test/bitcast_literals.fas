@@ -1,0 +1,28 @@
+// untyped literals inside bitcast take the target's size (LANGUAGE.md "Conversions")
+const CINF f64 = bitcast[f64](0x7FF0000000000000)
+const CNEG f32 = bitcast[f32](-1)
+const CONE u64 = bitcast[u64](1.0)
+const CV vec[8, u8] = bitcast[vec[8, u8]](0x0807060504030201)
+const CW vec[2, u16] = bitcast[vec[2, u16]](-1)
+fn main() i32 {
+    a f64 = bitcast[f64](0x7FF0000000000000)
+    if bitcast[u64](a) != 0x7FF0000000000000 || bitcast[u64](CINF) != 0x7FF0000000000000 { return 1 }
+    b f32 = bitcast[f32](-1)
+    if bitcast[u32](b) != 0xFFFFFFFF || bitcast[u32](CNEG) != 0xFFFFFFFF { return 2 }
+    c i64 = bitcast[i64](0xFFFFFFFFFFFFFFFF)
+    if c != -1 { return 3 }
+    d u64 = bitcast[u64](1.0)
+    if d != 0x3FF0000000000000 || CONE != 0x3FF0000000000000 { return 4 }
+    e u32 = bitcast[u32](-(1))
+    if e != 0xFFFFFFFF { return 5 }
+    f u16 = bitcast[u16](-32768)
+    if f != 0x8000 { return 6 }
+    g u32 = bitcast[u32](1.5)
+    if g != 0x3FC00000 { return 7 }
+    v vec[8, u8] = bitcast[vec[8, u8]](0x0807060504030201)
+    if v[0] != 1 || v[7] != 8 || CV[0] != 1 || CV[7] != 8 { return 8 }
+    if CW[0] != 0xFFFF || CW[1] != 0xFFFF { return 9 }
+    h f64 = bitcast[f64](0x7FF0 << 48)
+    if bitcast[u64](h) != 0x7FF0000000000000 { return 10 }
+    return 0
+}

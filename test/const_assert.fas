@@ -34,8 +34,30 @@ fn widen[T](x T) u64 {
     }
 }
 
+// statement-level assertions may call functions: evaluated in the
+// interpreter, once per specialisation (a dropped branch is not evaluated)
+fn fib(n u32) u32 {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+fn twice[T]() usize { return 2 * sizeof[T] }
+fn lanes[T, L const usize]() usize { return L * sizeof[T] }
+struct Pair[T] { a T b T }
+fn wide[T, K const usize]() usize {
+    const assert(twice[T]() <= 32, "too wide")
+    const assert(lanes[T, K]() == K * sizeof[T])
+    if sizeof[T] > 8 {
+        return K
+    } else {
+        const assert(twice[T]() <= 16)
+        return 0
+    }
+}
+
 fn main() i32 {
     const assert(N == 8)
+    const assert(fib(10) == 55, "fib")
+    if wide[u32, 2]() + wide[Pair[i64], 3]() != 3 { return 5 }
     a Arr[i32, 3] = {}
     a.v[0] = 7
     b Arr[u8, 1] = {}
