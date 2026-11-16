@@ -26,7 +26,7 @@ case_() {
 }
 # a value where a generic struct is applied, in a memory access type
 case_ copy_compile_1048576.fas 's/copy(dst\[arr\[/copy(dst[src[/' \
-  'unknown generic struct `src`'
+  'raw access on `addr` needs an element type'
 # 2. the fuzzer
 if command -v python3 > /dev/null 2>&1; then
   # crashing inputs would vanish with $tmp: keep them in FAS_REFUSE_KEEP

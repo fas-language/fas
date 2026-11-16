@@ -11,7 +11,13 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr channel)
     (fun () -> really_input_string channel (in_channel_length channel))
 
-let run_to_file argv output_path =
+(* the stderr text of a [run_to_file ~max_bytes] failure *)
+let output_limit_message limit =
+  Printf.sprintf "the output is over %d MiB, the limit for it" (limit / (1024 * 1024))
+
+let output_limit_exceeded failure = failure.status = Unix.WSIGNALED Sys.sigxfsz
+
+let run_to_file ?max_bytes argv output_path =
   if Array.length argv = 0 then
     Error
       {
@@ -34,20 +40,85 @@ let run_to_file argv output_path =
           let err_fd =
             Unix.openfile err_path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
           in
-          let pid =
-            try Unix.create_process argv.(0) argv Unix.stdin out_fd err_fd
-            with exn ->
+          match max_bytes with
+          | None -> (
+              let pid =
+                try Unix.create_process argv.(0) argv Unix.stdin out_fd err_fd
+                with exn ->
+                  Unix.close out_fd;
+                  Unix.close err_fd;
+                  raise exn
+              in
               Unix.close out_fd;
               Unix.close err_fd;
-              raise exn
-          in
-          Unix.close out_fd;
-          Unix.close err_fd;
-          let _, status = Unix.waitpid [] pid in
-          let stderr = read_file err_path in
-          match status with
-          | Unix.WEXITED 0 -> Ok stderr
-          | _ -> Error { argv; status; stdout = ""; stderr }
+              let _, status = Unix.waitpid [] pid in
+              let stderr = read_file err_path in
+              match status with
+              | Unix.WEXITED 0 -> Ok stderr
+              | _ -> Error { argv; status; stdout = ""; stderr })
+          | Some limit -> (
+              (* stdout goes through a pipe so the bytes can be counted: past
+                 [limit] the child is killed and the file is truncated, so a
+                 runaway output (clang's JSON AST of a deeply nested
+                 expression grows quadratically) cannot fill the disk *)
+              let read_fd, write_fd =
+                try Unix.pipe ~cloexec:true ()
+                with exn ->
+                  Unix.close out_fd;
+                  Unix.close err_fd;
+                  raise exn
+              in
+              let pid =
+                try Unix.create_process argv.(0) argv Unix.stdin write_fd err_fd
+                with exn ->
+                  List.iter Unix.close [ read_fd; write_fd; out_fd; err_fd ];
+                  raise exn
+              in
+              Unix.close write_fd;
+              Unix.close err_fd;
+              let buffer = Bytes.create 65536 in
+              let rec restart f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> restart f in
+              let rec write_all offset length =
+                if length > 0 then
+                  let n = restart (fun () -> Unix.write out_fd buffer offset length) in
+                  write_all (offset + n) (length - n)
+              in
+              let rec copy total =
+                let n = restart (fun () -> Unix.read read_fd buffer 0 (Bytes.length buffer)) in
+                if n = 0 then false
+                else if total + n > limit then true
+                else (
+                  write_all 0 n;
+                  copy (total + n))
+              in
+              let exceeded =
+                Fun.protect
+                  ~finally:(fun () ->
+                    Unix.close read_fd;
+                    Unix.close out_fd)
+                  (fun () ->
+                    try copy 0
+                    with exn ->
+                      (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+                      ignore (restart (fun () -> Unix.waitpid [] pid));
+                      raise exn)
+              in
+              if exceeded then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+              let _, status = restart (fun () -> Unix.waitpid [] pid) in
+              let stderr = read_file err_path in
+              if exceeded then (
+                (try Unix.truncate output_path 0 with Unix.Unix_error _ -> ());
+                Error
+                  {
+                    argv;
+                    status = Unix.WSIGNALED Sys.sigxfsz;
+                    stdout = "";
+                    stderr = output_limit_message limit;
+                  })
+              else
+                match status with
+                | Unix.WEXITED 0 -> Ok stderr
+                | _ -> Error { argv; status; stdout = ""; stderr })
         with
         | Unix.Unix_error (code, operation, argument) ->
             Error

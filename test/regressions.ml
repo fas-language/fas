@@ -6241,6 +6241,18 @@ let () =
       "p[Ring[4], 1].head = 1";
       "x usize = sizeof[Ring[4]]";
     ];
+  (* fas_refuse find: `p[arr[4,void]]` (no index) never sized its element
+     type, and `copy` took it to lowering *)
+  List.iteri
+    (fun i body ->
+      semantic_error
+        (Printf.sprintf "raw-access-void-element-%d" i)
+        "void has no object layout"
+        ("fn f(p addr, q addr) void {\n " ^ body ^ "\n}\nfn main() i32 { return 0 }\n"))
+    [
+      "copy(p[arr[4,void]], q[arr[4,void]])";
+      "x u8 = p[arr[4,void]][1]";
+    ];
   let expr_statement_shadow =
     llvm_of
       "const N usize = 99\n\

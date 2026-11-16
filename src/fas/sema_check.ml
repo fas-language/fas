@@ -1866,7 +1866,14 @@ let rec check_place_inner (c : context) expr =
                     error
                       (select_type_payload_span s type_payload)
                       "raw access on `void` needs an element type"
-                | _ -> Ok ()
+                | _ -> (
+                    (* with no index nothing below sizes `t`; an element
+                       type without a layout (`arr[4,void]`) reached
+                       lowering through `copy` (a fas_refuse find) *)
+                    match Hir.layout c.structs t with
+                    | Ok _ -> Ok ()
+                    | Error message ->
+                        error (select_type_payload_span s type_payload) message)
               in
               let* offset = raw_offset_expr c s t None in
               Ok

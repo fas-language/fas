@@ -2973,3 +2973,27 @@ let () =
   assert (Build_limit.get_soft () = before);
   (try Build_limit.with_cap (fun () -> failwith "probe") with Failure _ -> ());
   assert (Build_limit.get_soft () = before)
+
+(* run_to_file ~max_bytes: under the limit the output is kept; past it the
+   program is killed and the file emptied (the C import's AST dump of a
+   deeply nested expression once filled gigabytes of /tmp) *)
+let () =
+  let path = Filename.temp_file "fas-unit-limit-" ".out" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      (match Process.run_to_file ~max_bytes:16 [| "/bin/printf"; "small" |] path with
+      | Ok _ ->
+          let channel = open_in_bin path in
+          let text = really_input_string channel (in_channel_length channel) in
+          close_in channel;
+          assert (text = "small")
+      | Error _ -> assert false);
+      (* `yes` never stops by itself *)
+      (match Process.run_to_file ~max_bytes:(1 lsl 20) [| "/usr/bin/yes" |] path with
+      | Ok _ -> assert false
+      | Error failure -> assert (Process.output_limit_exceeded failure));
+      assert ((Unix.stat path).Unix.st_size = 0);
+      match Process.run_to_file ~max_bytes:16 [| "/bin/false" |] path with
+      | Error failure -> assert (not (Process.output_limit_exceeded failure))
+      | Ok _ -> assert false)

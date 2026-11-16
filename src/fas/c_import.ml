@@ -519,6 +519,21 @@ let builtin_info_of_name = function
 
 let unnamed_file file = file
 
+(* the most JSON a clang AST dump may write: real headers take a few MiB
+   (fifteen common system headers: 9 MiB), while the dump of a deeply nested
+   expression grows with the square of its depth (each level indents its
+   lines), and a 10k-term macro filled gigabytes of /tmp (a fas_refuse find) *)
+let max_ast_bytes = 512 * 1024 * 1024
+
+let ast_too_large_prefix = "the C import is too large to read: "
+
+let ast_too_large (_ : Process.failure) =
+  Printf.sprintf
+    "%sclang's AST output for it is over %d MiB; a declaration or macro may be \
+     nested too deeply"
+    ast_too_large_prefix
+    (max_ast_bytes / (1024 * 1024))
+
 let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     ?referenced_names ~probe_all_declarations ~macro_candidates declarations =
   let field key node = C_import_json.field key node in
@@ -867,7 +882,7 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
   let failure =
     if not should_run then None
     else
-      match Process.run_to_file ast_argv ast_path with
+      match Process.run_to_file ~max_bytes:max_ast_bytes ast_argv ast_path with
       | Ok _ -> None
       | Error failure -> Some failure
   in
@@ -890,7 +905,8 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     errors;
   let structured_failure =
     Option.bind failure (fun (failure : Process.failure) ->
-        if errors <> [] && List.for_all macro_error errors then None
+        if Process.output_limit_exceeded failure then Some (ast_too_large failure)
+        else if errors <> [] && List.for_all macro_error errors then None
         else Some failure.stderr)
   in
   match structured_failure with
@@ -1650,7 +1666,7 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
           headers
         |> List.combine (List.rev !fragment_paths)
       in
-      let run = Process.run_to_file argv json_path in
+      let run = Process.run_to_file ~max_bytes:max_ast_bytes argv json_path in
       Option.iter
         (fun output ->
           match run with
@@ -1658,6 +1674,8 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
           | Error _ -> ())
         trace_out;
       match run with
+      | Error failure when Process.output_limit_exceeded failure ->
+          Error [ Diag.error (List.hd headers).span (ast_too_large failure) ]
       | Error failure ->
           Error
             [
@@ -1721,6 +1739,11 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
             in
             let map_error stage = function
               | Ok value -> Ok value
+              (* an input too large to import is the program's limit, not
+                 an internal error *)
+              | Error message when String.starts_with ~prefix:ast_too_large_prefix message
+                ->
+                  Error ("", message)
               | Error message -> Error (stage, message)
             in
             let ( let* ) result next =
