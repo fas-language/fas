@@ -1225,12 +1225,19 @@ and lower_builtin s b args t span =
         | Hir.Atomic_store, [ _; v ] -> Low.value_ty v
         | _ -> rt
       in
+      (* only `&place` proves an alignment; any other `addr` may be
+         misaligned, which is not UB for an atomic (A5) *)
+      let* align =
+        match args with
+        | Hir.Address (place, _, _) :: _ -> place_alignment s place
+        | _ -> Ok 1
+      in
       if rt = Low.Void then (
-        E.atomic s.fn None op order access values;
+        E.atomic ~align s.fn None op order access values;
         Ok (Low.Const (Low.I1, 0L)))
       else
         let id = fresh s in
-        E.atomic s.fn (Some id) op order access values;
+        E.atomic ~align s.fn (Some id) op order access values;
         Ok (Low.Local (id, rt))
   | Simd_load (access_ty, kind), values ->
       simd_memory_load s span access_ty kind args values

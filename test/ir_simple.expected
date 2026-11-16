@@ -7,7 +7,8 @@ define internal i64 @test() {
 b0:
   %v1 = alloca [8 x i8], align 8
   store i64 2, ptr %v1, align 8
-  %v3 = load i64, ptr %v1, align 8
+  %t0 = load i64, ptr %v1, align 8
+  %v3 = freeze i64 %t0
   %v5 = add i64 %v3, 3
   ret i64 %v5
 }

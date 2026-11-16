@@ -582,7 +582,8 @@ let call_indirect fn result ext ret callee args =
 (* An atomic access of [ty] (the loaded, stored or exchanged type; Void for
    a fence). [values] are (p), (p, v) or (p, expected, desired); the result
    is the old value. *)
-let atomic fn result (op : Hir.atomic_op) (order : Hir.atomic_ordering) (ty : Low.ty) values =
+let atomic ?(align = max_int) fn result (op : Hir.atomic_op) (order : Hir.atomic_ordering)
+    (ty : Low.ty) values =
   let fo : ordering =
     match order with
     | Hir.Relaxed -> Relaxed
@@ -592,7 +593,9 @@ let atomic fn result (op : Hir.atomic_op) (order : Hir.atomic_ordering) (ty : Lo
     | Hir.Seq_cst -> Seq_cst
   in
   let a i = value fn (List.nth values i) in
-  let am = { (mem (size_of fn.mc.lay ty)) with order = fo } in
+  (* [align] is what the address is known to have (A5: `align` is a
+     promise, so an `addr` from anywhere is 1); natural at most *)
+  let am = { (mem (min align (size_of fn.mc.lay ty))) with order = fo } in
   let def r = match result with Some id -> define fn id r | None -> () in
   match op with
   | Hir.Atomic_fence -> emit0 fn (Fence fo)

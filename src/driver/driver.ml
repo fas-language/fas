@@ -1073,6 +1073,11 @@ let report_kept config paths opt llc cc =
 
 let executable_command config cc asm_path c_objects link_flags =
   let math_library = if List.mem "-lm" config.Cli.link_inputs then [] else [ "-lm" ] in
+  (* LLVM lowers an atomic it cannot prove aligned (Fas atomics through an
+     `addr` are `align 1`, A5) to libatomic calls *)
+  let math_library =
+    math_library @ [ "-Wl,--push-state,--as-needed"; "-latomic"; "-Wl,--pop-state" ]
+  in
   let argv =
     Array.of_list
       (cc :: asm_path

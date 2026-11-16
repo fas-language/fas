@@ -77,7 +77,7 @@ let call_attr_names =
 
 let func_attr_names =
   [ (fa_inline, "inline"); (fa_noinline, "noinline"); (fa_cold, "cold");
-    (fa_noreturn, "noreturn") ]
+    (fa_noreturn, "noreturn"); (fa_fenv, "fenv") ]
 
 let linkage_name = function Local -> "local" | Global -> "global" | Weak -> "weak"
 

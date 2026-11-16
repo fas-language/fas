@@ -31,14 +31,16 @@ run native --backend=native
 FAS_FIR=check run "native, Fir checked" --backend=native
 
 "$OCAML_FAS" --emit-llvm "$D/single.fas" > "$T/single.ll"
+# every atomic here goes through an `addr` local, so A5 makes it align 1
+# (only `&place` as the argument proves an alignment: no_ub_audit.sh)
 for pattern in \
-  'store atomic i64 10, ptr %v[0-9]* release, align 8' \
-  'atomicrmw add ptr %v[0-9]*, i64 5 seq_cst, align 8' \
-  'load atomic i16, ptr %v[0-9]* seq_cst, align 2' \
-  'cmpxchg ptr %v[0-9]*, i32 13, i32 99 acq_rel acquire, align 4' \
-  'atomicrmw or ptr %v[0-9]*, i32 8 monotonic, align 4' \
+  'store atomic i64 10, ptr %v[0-9]* release, align 1' \
+  'atomicrmw add ptr %v[0-9]*, i64 5 seq_cst, align 1' \
+  'load atomic i16, ptr %v[0-9]* seq_cst, align 1' \
+  'cmpxchg ptr %v[0-9]*, i32 13, i32 99 acq_rel acquire, align 1' \
+  'atomicrmw or ptr %v[0-9]*, i32 8 monotonic, align 1' \
   'fence acq_rel' \
-  'atomicrmw xchg ptr %v[0-9]*, ptr %v[0-9]* seq_cst, align 8'; do
+  'atomicrmw xchg ptr %v[0-9]*, ptr %v[0-9]* seq_cst, align 1'; do
   if ! grep -q "$pattern" "$T/single.ll"; then
     echo "atomics: LLVM text lacks: $pattern"
     exit 1
@@ -48,7 +50,8 @@ done
 "$CC" -O2 -c "$D/threads.c" -o "$T/driver.o"
 for backend in llvm native; do
   "$OCAML_FAS" --backend=$backend -c "$D/threads.fas" -o "$T/threads.o"
-  "$CC" "$T/driver.o" "$T/threads.o" -pthread -o "$T/threads"
+  # an LLVM object calls libatomic for the atomics it cannot prove aligned (A5)
+  "$CC" "$T/driver.o" "$T/threads.o" -pthread -Wl,--as-needed -latomic -o "$T/threads"
   if ! "$T/threads"; then
     echo "atomics: $backend: threaded driver failed"
     exit 1

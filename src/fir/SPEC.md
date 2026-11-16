@@ -2,7 +2,7 @@
 
 Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
-**Version: Fir 0.1** (2026-11-15). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
+**Version: Fir 0.2** (2026-11-16: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
 
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
@@ -171,7 +171,7 @@ func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src n
 
 declare @name (ABI, ...) -> (ABI, ...) LINKAGE        a function defined elsewhere
 
-ATTRS ::= any of: inline noinline cold noreturn
+ATTRS ::= any of: inline noinline cold noreturn fenv
 ```
 
 - **The first block is the entry block.** Its parameters must match the signature's parameter types, where an `agg` parameter is a `ptr` (§5). Nothing may branch to the entry block, so if you need a loop header at the top, add a second block.
@@ -181,6 +181,7 @@ ATTRS ::= any of: inline noinline cold noreturn
 - **Every block is reachable from the entry block** along terminator edges (`indirect_br` lists and `asm_goto` labels count). The verifier refuses a block that no path reaches, so a front end drops the code after a `return` and the join block of an `if` or `match` whose arms all return. A label whose address is taken (`blockaddr`) must also be reached, through an `indirect_br` that lists it.
 - **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block.
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
+- **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
 - **`blockaddr` pins blocks.** A function whose blocks appear in a `blockaddr` keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations.
 
 ### Debug information
@@ -305,11 +306,11 @@ All of these allow the flags `contract` (may be fused into an FMA) and `fast`.
 
 Changing the rounding mode underneath such a function is not undefined behaviour: each operation then rounds in the current mode or to nearest, and which one is unspecified. Floating-point traps (unmasked exceptions) are not supported.
 
-A function marked `fenv` (*designed*, §15; C's `#pragma STDC FENV_ACCESS ON`) sees the dynamic environment instead. Every float operation and every conversion between floats and integers, of any width, rounds in the current dynamic rounding mode (C `fesetround`) and raises the IEEE exception flags the operation itself raises, as C with Annex F expects: inexact, overflow, underflow (for an inexact tiny result, tininess detected after rounding, as x86 does), invalid (also for a signaling NaN operand) and divide-by-zero. `floor ceil ftrunc roundeven` ignore the mode and raise no inexact (as C's functions; invalid only for a signaling NaN). An out-of-range `fptosi`/`fptoui` raises invalid (its result is still poison, §8). An operation whose result is unused may still be removed, so a front end that needs the flags of a computation keeps its result alive (a `volatile` store, for example). A function is never inlined into another with a different `fenv` marking, in either direction.
+A function marked `fenv` (§15; C's `#pragma STDC FENV_ACCESS ON`) sees the dynamic environment instead. Every float operation and every conversion between floats and integers, of any width, rounds in the current dynamic rounding mode (C `fesetround`) and raises the IEEE exception flags the operation itself raises, as C with Annex F expects: inexact, overflow, underflow (for an inexact tiny result, tininess detected after rounding, as x86 does), invalid (also for a signaling NaN operand) and divide-by-zero. `floor ceil ftrunc roundeven` ignore the mode and raise no inexact (as C's functions; invalid only for a signaling NaN). An out-of-range `fptosi`/`fptoui` raises invalid (its result is still poison, §8). An operation whose result is unused may still be removed, so a front end that needs the flags of a computation keeps its result alive (a `volatile` store, for example). A function is never inlined into another with a different `fenv` marking, in either direction.
 
 **NaNs.** A NaN computed by an operation has an unspecified payload and sign. `fneg`, `fabs` and `copysign` are exact bit operations, as are loads, stores, `select`, `bitcast` and block arguments: they keep a NaN's bits.
 
-**What the backends do today.** The native backend gives every function the `fenv` behaviour, which the default allows. That includes the software paths: `f16` arithmetic and conversions, `fma` at every width, and the `Fir_wide` integer conversions. The LLVM path (`--llvm`) emits ordinary (not strictfp) operations, which matches the default but not `fenv`.
+**What the backends do today.** The native backend gives every function the `fenv` behaviour, which the default allows. That includes the software paths: `f16` arithmetic and conversions, `fma` at every width, and the `Fir_wide` integer conversions. The LLVM path (`--llvm`) emits ordinary operations in a default function and, in an `fenv` one, a `strictfp` function whose float operations, conversions and comparisons are LLVM's constrained intrinsics (dynamic rounding, strict exceptions; comparisons quiet, as native `ucomis`), with its own Annex F expansion for conversions to integers wider than 64 bits; it refuses (unsupported) the saturating conversions, conversions to integers over 128 bits and the ordered `fadd` reduction in an `fenv` function.
 
 ### Comparison, selection, conversion
 
@@ -615,7 +616,7 @@ Each C23 feature that needs code generation maps to Fir as follows. The test tha
 | `_BitInt(N)`, `unsigned _BitInt(N)` | `iN`, any N up to 2^23 - 1, all integer ops (`Fir_wide` splits the wide ones). ABI as §5: up to 128 bits like `__int128`, wider in memory. | `wide`, `huge` |
 | `ckd_add`, `ckd_sub`, `ckd_mul` (`<stdckdint.h>`), mixed operand and result types | Extend both operands to an integer one bit wider than the widest of the three types' ranges needs (`i129` covers every standard type), do the op, `trunc` to the result type, extend back and `icmp eq` with the wide value; the overflow flag is the negation. Same-type signed cases may use `sadd_ovf` & co. instead. | `c23` |
 | `<stdbit.h>` (`stdc_leading_zeros`, `_ones`, `trailing_*`, `first_*`, `count_*`, `has_single_bit`, `bit_width`, `bit_floor`, `bit_ceil`) | `clz`, `ctz`, `popcnt` (without `zero_poison`, so 0 gives the width), `xor` with all ones for the `_ones` forms, `shl` for `bit_floor`/`bit_ceil`. | `c23` |
-| `#pragma STDC FENV_ACCESS ON`, `<fenv.h>` | Mark every function compiled under the pragma `fenv` (§6; *designed*: until the parser takes it, the native backend gives every function this behaviour). Call glibc's `fesetround`, `fetestexcept` & co. | `fenv` |
+| `#pragma STDC FENV_ACCESS ON`, `<fenv.h>` | Mark every function compiled under the pragma `fenv` (§6; the native backend gives every function this behaviour anyway). Call glibc's `fesetround`, `fetestexcept` & co. | `fenv` |
 | `#pragma STDC FENV_ROUND dir` | In an `fenv` function: save the mode with `fegetround`, `fesetround(dir)` at the start of the block, restore on every exit from it (as the VLA `stacksave`/`stackrestore` pair). | `fenv` (the ops in each mode) |
 | `_Float16` | `f16` (software arithmetic, SSE ABI). | `f16` |
 | `long double` | `f80` (x87). | `f80` |
@@ -710,7 +711,6 @@ These forms are fixed now so that front ends and passes can plan for them. Until
 
 | Form | Meaning |
 |---|---|
-| `func @f ... fenv` [v0.5] | A function attribute, next to `inline noinline cold noreturn`: the function sees the dynamic float environment (§6). Never inlined into a function with a different marking, nor the reverse. |
 | `switch V, ^d(ARGS), [K: ^b(ARGS), ...], weights [Wd, W1, ...]` [v0.6] | Edge weights for a `switch`: one non-negative integer per edge, default first, then the cases in order, read relative to their sum. With `br ..., weight W` and the `cold` attribute, this is all the profile information Fir carries. |
 | `declare @f SIG LINKAGE [memory(none\|read\|argmem)] [willreturn]` [v0.6] | Promises about a function defined elsewhere, so that a call to it need not be a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). |
 | `memcpy D, S, N, align A` (also `memmove`, `memset`) [later] | Both addresses are multiples of A, as the `align` of a load or store promises. Optional; the default is 1. |

@@ -279,9 +279,9 @@ temps_empty
   >"$WORK/stdout" 2>"$WORK/stderr"
 [ ! -s "$WORK/stdout" ] || fail "C link wrote to stdout"
 "$WORK/link" || fail "Fas C and libm link failed"
-grep -E "^cc [^ ]*fas-module-[^ ]*\\.s $WORK/helper.c -lm -o $WORK/\\.fas-output-[^ ]+\\.tmp$" \
+grep -E "^cc [^ ]*fas-module-[^ ]*\\.s $WORK/helper.c -lm -Wl,--push-state,--as-needed -latomic -Wl,--pop-state -o $WORK/\\.fas-output-[^ ]+\\.tmp$" \
   "$TOOL_LOG" >/dev/null || fail "tool log omitted the exact CC argument order"
-grep -E "^fas: CC command: $FAS_CC [^ ]*fas-module-[^ ]*\\.s $WORK/helper.c -lm -o $WORK/\\.fas-output-[^ ]+\\.tmp$" \
+grep -E "^fas: CC command: $FAS_CC [^ ]*fas-module-[^ ]*\\.s $WORK/helper.c -lm -Wl,--push-state,--as-needed -latomic -Wl,--pop-state -o $WORK/\\.fas-output-[^ ]+\\.tmp$" \
   "$WORK/stderr" >/dev/null || fail "debug log omitted the exact CC command"
 asm_path=$(sed -n 's/^fas: CC command: [^ ]* \([^ ]*fas-module-[^ ]*\.s\) .*/\1/p' "$WORK/stderr")
 [ -s "$asm_path" ] || fail "--keep did not retain the exact assembly input"
@@ -296,7 +296,7 @@ cmp "$WORK/no-sanitizer.ll" "$WORK/undefined.ll" >/dev/null \
   >"$WORK/stdout" 2>"$WORK/stderr"
 grep -E '^cc --target=x86_64-unknown-linux-gnu -fPIC -O2 -Xclang -main-file-name -Xclang fas-c-import-[0-9a-f]{32}\.c -ffile-prefix-map=[^ ]+=fas-c-import-[0-9a-f]{32}\.c -fsanitize=undefined -fsanitize-trap=all -c .*\.c -o ' \
   "$TOOL_LOG" >/dev/null || fail "generated C input was not compiled with trap-mode UBSan"
-grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=undefined -fsanitize-trap=all (-lm )?-o ' "$TOOL_LOG" >/dev/null \
+grep -E '^cc [^ ]*fas-module-[^ ]*\.s .* -fsanitize=undefined -fsanitize-trap=all (-lm )?-Wl,--push-state,--as-needed -latomic -Wl,--pop-state -o ' "$TOOL_LOG" >/dev/null \
   || fail "C program link omitted the trap-mode flags"
 
 "$OCAML_FAS" --emit-llvm -O2 "$WORK/good.fas" >"$WORK/raw.ll" 2>"$WORK/stderr"

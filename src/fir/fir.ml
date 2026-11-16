@@ -375,6 +375,10 @@ let fa_noinline = 2
 let fa_cold = 4
 let fa_noreturn = 8
 
+(* the function sees the dynamic float environment (SPEC §6, C's
+   FENV_ACCESS ON); never inlined across a different marking *)
+let fa_fenv = 16
+
 (* Debug variables (roadmap v0.8, SPEC §4 "Debug information"). They are
    metadata, not instructions: no instruction refers to them, so they can
    never change the code. [home] is the variable's memory, normally its

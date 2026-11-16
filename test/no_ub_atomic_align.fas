@@ -1,0 +1,13 @@
+// A5: an atomic through an `addr` is `align 1` (only `&place` proves an
+// alignment); misaligned atomics happen. Checked by no_ub_audit.sh.
+var G arr[16, u8] = {}
+var C u64 = 0
+fn main() i32 {
+    p addr = &G
+    a u64 = atomic_load[u64, relaxed](p + 1)
+    atomic_store[u32, release](p + 3, 7)
+    b u64 = atomic_add[u64, seq_cst](p, 1)
+    d u64 = atomic_add[u64, seq_cst](&C, 1)
+    e u64 = atomic_cas[u64, seq_cst](&C, 1, 2)
+    return bitcast[i32](trunc[u32](a + b + d + e))
+}

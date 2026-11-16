@@ -29,6 +29,8 @@
    - [syscall] is inline asm (Linux x86-64 registers, as the old renderer).
    - Alias tags, noalias scopes, branch weights and dbg_value are hints and
      are dropped.
+   - Every load and masked load is followed by `freeze` (SPEC: reading
+     fresh memory gives fixed bytes, never undef).
 
    - Aggregates, vectors and wide integers cross calls by the C convention
      (SPEC §5), lowered here as clang lowers C ("the C calling convention"
@@ -388,10 +390,17 @@ let temp cx =
   cx.tmp <- n + 1;
   "%t" ^ string_of_int n
 
-(* One instruction line, with its !dbg *)
+let is_call text =
+  let starts p s = String.length s >= String.length p && String.sub s 0 (String.length p) = p in
+  let rest = match String.index_opt text '=' with Some i when text.[0] = '%' -> String.trim (String.sub text (i + 1) (String.length text - i - 1)) | _ -> text in
+  starts "call " rest || starts "tail call " rest || starts "musttail call " rest || starts "notail call " rest
+
+(* One instruction line, with its !dbg. In an `fenv` (strictfp) function
+   every call is strictfp too, as LLVM requires. *)
 let line cx text =
   add cx.o "  ";
   add cx.o text;
+  if has cx.f.fattrs fa_fenv && is_call text then add cx.o " strictfp";
   (match cx.sp with
   | Some (sp, sp_file) ->
       let file, l, c = cx.cur in
@@ -469,6 +478,18 @@ let fast_flags fl = flag_text fl [ (f_fast, "fast"); (f_contract, "contract") ]
 (* min/max of two floats by IEEE minimumNumber / maximumNumber *)
 let fminmax cx is_min t a b =
   call_intrinsic cx ((if is_min then "llvm.minimumnum." else "llvm.maximumnum.") ^ sfx t) (lty t) [ (t, a); (t, b) ]
+
+(* In an `fenv` function (SPEC §6): LLVM's constrained intrinsics, in the
+   dynamic rounding mode with strict exceptions. [rounds] says whether the
+   operation takes a rounding-mode argument. *)
+let strict cx = has cx.f.fattrs fa_fenv
+
+let constrained cx ?(rounds = true) name ret (args : (ty * string) list) =
+  let md = (if rounds then [ "metadata !\"round.dynamic\"" ] else []) @ [ "metadata !\"fpexcept.strict\"" ] in
+  let full = "llvm.experimental.constrained." ^ name in
+  intrinsic cx full ret (List.map (fun (t, _) -> lty t) args @ List.map (fun _ -> "metadata") md);
+  Printf.sprintf "call %s @%s(%s)" ret full
+    (String.concat ", " (List.map (fun (t, s) -> lty t ^ " " ^ s) args @ md))
 
 (* ---------- calls ---------- *)
 
@@ -772,6 +793,22 @@ let emit_inst cx (ir : inst_rec) =
   set_loc cx ir.loc;
   let r k = res ir k in
   let def text = line cx (r 0 ^ " = " ^ text) in
+  (* in an `fenv` function, what has no constrained form is refused *)
+  (if strict cx then
+     match ir.op with
+     | Conv ((Fptosi_sat | Fptoui_sat), _) -> unsupported "a saturating conversion in an fenv function"
+     | Conv ((Fptosi | Fptoui), _) when (match rty cx ir 0 with Int n | Vec (_, Int n) -> n > 128 | _ -> false) ->
+         unsupported "a conversion to an integer over 128 bits in an fenv function"
+     | Reduce (Red_fadd_ordered, _) -> unsupported "an ordered fadd reduction in an fenv function"
+     | _ -> ());
+  (* a read of memory (A2): fresh memory holds fixed bytes, while LLVM
+     reads uninitialized memory as undef, so the value is frozen; poison
+     stored in memory becomes some value, a valid refinement *)
+  let def_read t text =
+    let x = temp cx in
+    line cx (x ^ " = " ^ text);
+    def (Printf.sprintf "freeze %s %s" (lty t) x)
+  in
   match ir.op with
   | Nop | Dbg_value _ -> ()
   | Ibin (k, fl, a, b) -> (
@@ -828,7 +865,10 @@ let emit_inst cx (ir : inst_rec) =
       | Abs -> def (call_intrinsic cx ("llvm.abs." ^ s) lt [ arg cx a; bit (has fl f_poison_min) ]))
   | Fbin (k, fl, a, b) -> (
       let t = tyv cx a in
-      let plain name = def (Printf.sprintf "%s%s %s, %s" name (fast_flags fl) (tv cx a) (v cx b)) in
+      let plain name =
+        if strict cx then def (constrained cx (name ^ "." ^ sfx t) (lty t) [ arg cx a; arg cx b ])
+        else def (Printf.sprintf "%s%s %s, %s" name (fast_flags fl) (tv cx a) (v cx b))
+      in
       match k with
       | Fadd -> plain "fadd"
       | Fsub -> plain "fsub"
@@ -840,7 +880,13 @@ let emit_inst cx (ir : inst_rec) =
       | Copysign -> def (call_intrinsic cx ("llvm.copysign." ^ sfx t) (lty t) [ arg cx a; arg cx b ]))
   | Fun (k, fl, a) -> (
       let t = tyv cx a in
-      let intr name = def (call_intrinsic cx (name ^ "." ^ sfx t) (lty t) [ arg cx a ]) in
+      let intr name =
+        if strict cx && name <> "llvm.fabs" then
+          (* sqrt rounds; floor ceil trunc roundeven only raise *)
+          let short = String.sub name 5 (String.length name - 5) in
+          def (constrained cx ~rounds:(name = "llvm.sqrt") (short ^ "." ^ sfx t) (lty t) [ arg cx a ])
+        else def (call_intrinsic cx (name ^ "." ^ sfx t) (lty t) [ arg cx a ])
+      in
       match k with
       | Fneg -> def (Printf.sprintf "fneg%s %s" (fast_flags fl) (tv cx a))
       | Fabs -> intr "llvm.fabs"
@@ -851,7 +897,8 @@ let emit_inst cx (ir : inst_rec) =
       | Roundeven -> intr "llvm.roundeven")
   | Fma (_, a, b, c) ->
       let t = tyv cx a in
-      def (call_intrinsic cx ("llvm.fma." ^ sfx t) (lty t) [ arg cx a; arg cx b; arg cx c ])
+      if strict cx then def (constrained cx ("fma." ^ sfx t) (lty t) [ arg cx a; arg cx b; arg cx c ])
+      else def (call_intrinsic cx ("llvm.fma." ^ sfx t) (lty t) [ arg cx a; arg cx b; arg cx c ])
   | Fsh (left, a, b, c) when (match tyv cx a with Int n -> n > 128 | _ -> false) ->
       (* LLVM cannot select a funnel shift wider than 128 bits: with
          s = c mod n, fshl is (a << s) | ((b >> 1) >> (n - 1 - s)) and fshr
@@ -888,6 +935,15 @@ let emit_inst cx (ir : inst_rec) =
       line cx (Printf.sprintf "%s = extractvalue %s %s, 0" (r 0) st s);
       line cx (Printf.sprintf "%s = extractvalue %s %s, 1" (r 1) st s)
   | Icmp (k, a, b) -> def (Printf.sprintf "icmp %s %s, %s" (icmp_text k) (tv cx a) (v cx b))
+  | Fcmp (k, _, a, b) when strict cx ->
+      (* quiet, as the native ucomis: invalid only for a signaling NaN *)
+      let t = tyv cx a in
+      let rt = match t with Vec (n, _) -> Printf.sprintf "<%d x i1>" n | _ -> "i1" in
+      let name = "llvm.experimental.constrained.fcmp." ^ sfx t in
+      intrinsic cx name rt [ lty t; lty t; "metadata"; "metadata" ];
+      def
+        (Printf.sprintf "call %s @%s(%s, %s, metadata !\"%s\", metadata !\"fpexcept.strict\")" rt name (tv cx a)
+           (tv cx b) (fcmp_text k))
   | Fcmp (k, fl, a, b) -> def (Printf.sprintf "fcmp%s %s %s, %s" (fast_flags fl) (fcmp_text k) (tv cx a) (v cx b))
   | Select (c, a, b) -> def (Printf.sprintf "select %s, %s, %s" (tv cx c) (tv cx a) (tv cx b))
   | Freeze a -> def ("freeze " ^ tv cx a)
@@ -927,13 +983,17 @@ let emit_inst cx (ir : inst_rec) =
       (* LLVM 22 converts integers wider than 128 bits wrongly (an unsigned
          one with its top bit set as if signed; a magnitude that overflows
          f32 to garbage). Instead: the magnitude |x|, shifted right by
-         m = max(0, bits(|x|) - 128) with the lost bits kept as a sticky
-         bit, is an i128 that rounds like |x| (128 bits are more than any
-         float's precision + 2); uitofp of it (compiler-rt), times 2^m
-         (overflowing to infinity exactly when |x| rounds to it), negated
-         back. The most negative x is its own negation, right as unsigned *)
-      let at = tyv cx a and ft = lty (rty cx ir 0) in
+         m = max(0, bits(|x|) - w) with the lost bits kept as a sticky bit
+         (w = 128 unsigned, 127 signed), is an i128 y that rounds like |x|
+         (w bits are more than any float's precision + 2). The one rounding
+         is of y (unsigned) or of +-y (signed, so a directed mode rounds
+         the right way), then times 2^m, exact or overflowing to the value
+         the mode gives. The most negative x is its own negation, right as
+         unsigned *)
+      let at = tyv cx a and rt = rty cx ir 0 in
+      let ft = lty rt in
       let n = int_width at and it = lty at in
+      let w = if k = Sitofp then 127 else 128 in
       let x = v cx a in
       let t () = temp cx in
       let ax, neg =
@@ -949,8 +1009,8 @@ let emit_inst cx (ir : inst_rec) =
       let lz = t () and bl = t () and big = t () and m0 = t () and m = t () in
       line cx (Printf.sprintf "%s = %s" lz (call_intrinsic cx ("llvm.ctlz." ^ sfx at) it [ (at, ax); (Int 1, "false") ]));
       line cx (Printf.sprintf "%s = sub %s %d, %s" bl it n lz);
-      line cx (Printf.sprintf "%s = icmp ugt %s %s, 128" big it bl);
-      line cx (Printf.sprintf "%s = sub %s %s, 128" m0 it bl);
+      line cx (Printf.sprintf "%s = icmp ugt %s %s, %d" big it bl w);
+      line cx (Printf.sprintf "%s = sub %s %s, %d" m0 it bl w);
       line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s 0" m big it m0 it);
       let sh = t () and one = t () and mask = t () and low = t () and st = t () and stz = t () and y = t () and y128 = t () in
       line cx (Printf.sprintf "%s = lshr %s %s, %s" sh it ax m);
@@ -961,18 +1021,119 @@ let emit_inst cx (ir : inst_rec) =
       line cx (Printf.sprintf "%s = zext i1 %s to %s" stz st it);
       line cx (Printf.sprintf "%s = or %s %s, %s" y it sh stz);
       line cx (Printf.sprintf "%s = trunc %s %s to i128" y128 it y);
-      let f = t () and m32 = t () and g = t () in
-      line cx (Printf.sprintf "%s = uitofp i128 %s to %s" f y128 ft);
+      let sy =
+        match neg with
+        | None -> y128
+        | Some neg ->
+            let ny = t () and sy = t () in
+            line cx (Printf.sprintf "%s = sub i128 0, %s" ny y128);
+            line cx (Printf.sprintf "%s = select i1 %s, i128 %s, i128 %s" sy neg ny y128);
+            sy
+      in
+      let op = if k = Sitofp then "sitofp" else "uitofp" in
+      let f = t () and m32 = t () in
+      (* in an fenv function both steps are constrained *)
+      if strict cx then line cx (Printf.sprintf "%s = %s" f (constrained cx (op ^ "." ^ sfx rt ^ ".i128") ft [ (Int 128, sy) ]))
+      else line cx (Printf.sprintf "%s = %s i128 %s to %s" f op sy ft);
       line cx (Printf.sprintf "%s = trunc %s %s to i32" m32 it m);
+      def
+        (if strict cx then constrained cx ("ldexp." ^ sfx rt ^ ".i32") ft [ (rt, f); (Int 32, m32) ]
+         else call_intrinsic cx ("llvm.ldexp." ^ sfx rt ^ ".i32") ft [ (rt, f); (Int 32, m32) ])
+  | Conv (((Fptosi | Fptoui) as k), a)
+    when strict cx && (match (tyv cx a, rty cx ir 0) with (F32 | F64 | F80), Int n -> n > 64 && n <= 128 | _ -> false) ->
+      (* fenv: compiler-rt's wide conversions raise a spurious inexact and
+         no invalid (Annex F wants invalid out of range, inexact only when
+         a fraction is dropped), and LLVM's own strict 64-bit unsigned
+         one is not Annex F out of range either. |a| < 2^63 (unsigned:
+         -1 < a < 2^64) goes through the constrained 64-bit conversion,
+         exact in range; the rest of the range are integers (2^63 > every
+         mantissa's fraction), assembled from their bits; out of range
+         (or NaN), a signed conversion of a NaN raises invalid alone *)
+      let st = tyv cx a and dt = rty cx ir 0 in
+      let n = int_width dt and signed = k = Fptosi in
+      let ft = lty st and x = v cx a in
+      let t () = temp cx in
+      (* +-2^e as a constant of the source type *)
+      let pow2 neg e =
+        match st with
+        | F32 -> float_text F32 [| Int64.logor (if neg then 0x80000000L else 0L) (Int64.shift_left (Int64.of_int (127 + e)) 23) |]
+        | F64 -> float_text F64 [| Int64.logor (if neg then Int64.min_int else 0L) (Int64.shift_left (Int64.of_int (1023 + e)) 52) |]
+        | _ -> float_text F80 [| Int64.min_int; Int64.of_int ((if neg then 0x8000 else 0) lor (16383 + e)) |]
+      in
+      let quiet pred c =
+        let r = t () in
+        let name = "llvm.experimental.constrained.fcmp." ^ sfx st in
+        intrinsic cx name "i1" [ ft; ft; "metadata"; "metadata" ];
+        line cx
+          (Printf.sprintf "%s = call i1 @%s(%s %s, %s %s, metadata !\"%s\", metadata !\"fpexcept.strict\")" r name ft x
+             ft c pred);
+        r
+      in
+      let both a b = let r = t () in line cx (Printf.sprintf "%s = and i1 %s, %s" r a b); r in
+      let notb a = let r = t () in line cx (Printf.sprintf "%s = xor i1 %s, true" r a); r in
+      let inr =
+        if signed then both (quiet "oge" (pow2 true (n - 1))) (quiet "olt" (pow2 false (n - 1)))
+        else both (quiet "ogt" (pow2 true 0)) (quiet "olt" (pow2 false n))
+      in
+      let small =
+        if signed then both (quiet "ogt" (pow2 true 63)) (quiet "olt" (pow2 false 63)) else quiet "olt" (pow2 false 64)
+      in
+      let narrow = both small inr in
+      let nan = match st with F80 -> "0xK7FFFC000000000000000" | _ -> "0x7FF8000000000000" in
+      let nopnd = t () and junk = t () in
+      line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s 0.0" nopnd (notb inr) ft nan ft);
       line cx
-        (Printf.sprintf "%s = %s" g
-           (call_intrinsic cx ("llvm.ldexp." ^ sfx (rty cx ir 0) ^ ".i32") ft [ (rty cx ir 0, f); (Int 32, m32) ]));
-      (match neg with
-      | Some neg ->
-          let ng = t () in
-          line cx (Printf.sprintf "%s = fneg %s %s" ng ft g);
-          def (Printf.sprintf "select i1 %s, %s %s, %s %s" neg ft ng ft g)
-      | None -> def (Printf.sprintf "freeze %s %s" ft g))
+        (Printf.sprintf "%s = %s" junk (constrained cx ~rounds:false ("fptosi.i64." ^ sfx st) "i64" [ (st, nopnd) ]));
+      (* the 64-bit conversion sees a only where it decides the result *)
+      let opnd = t () and y64 = t () and yn = t () in
+      line cx (Printf.sprintf "%s = select i1 %s, %s %s, %s 0.0" opnd narrow ft x ft);
+      line cx
+        (Printf.sprintf "%s = %s" y64
+           (constrained cx ~rounds:false ((if signed then "fptosi" else "fptoui") ^ ".i64." ^ sfx st) "i64" [ (st, opnd) ]));
+      line cx (Printf.sprintf "%s = %s i64 %s to i128" yn (if signed then "sext" else "zext") y64);
+      (* the integer |a| * 2^e: mantissa (with its integer bit) shifted *)
+      (* width, exponent field position and size, fraction bits, the
+         mantissa mask (f80: with its explicit integer bit), the implicit
+         integer bit *)
+      let bw, epos, ebits, frac, mmask, implicit =
+        match st with
+        | F32 -> (32, 23, 8, 23, "8388607", "8388608")
+        | F64 -> (64, 52, 11, 52, "4503599627370495", "4503599627370496")
+        | _ -> (80, 64, 15, 63, "18446744073709551615", "0")
+      in
+      let bt = Printf.sprintf "i%d" bw in
+      let bits = t () and mant = t () and mant1 = t () and ex = t () and ex1 = t () and sh = t () and sh7 = t () in
+      let m128 = t () and mag = t () in
+      line cx (Printf.sprintf "%s = bitcast %s %s to %s" bits ft x bt);
+      line cx (Printf.sprintf "%s = and %s %s, %s" mant bt bits mmask);
+      line cx (Printf.sprintf "%s = or %s %s, %s" mant1 bt mant implicit);
+      line cx (Printf.sprintf "%s = lshr %s %s, %d" ex bt bits epos);
+      line cx (Printf.sprintf "%s = and %s %s, %d" ex1 bt ex ((1 lsl ebits) - 1));
+      line cx (Printf.sprintf "%s = sub %s %s, %d" sh bt ex1 (((1 lsl (ebits - 1)) - 1) + frac));
+      line cx (Printf.sprintf "%s = and %s %s, 127" sh7 bt sh);
+      line cx (Printf.sprintf "%s = zext %s %s to i128" m128 bt mant1);
+      let sh128 = t () in
+      line cx (Printf.sprintf "%s = zext %s %s to i128" sh128 bt sh7);
+      line cx (Printf.sprintf "%s = shl i128 %s, %s" mag m128 sh128);
+      let wide =
+        if signed then begin
+          let neg = t () and nm = t () and r = t () in
+          line cx (Printf.sprintf "%s = icmp slt %s %s, 0" neg bt bits);
+          line cx (Printf.sprintf "%s = sub i128 0, %s" nm mag);
+          line cx (Printf.sprintf "%s = select i1 %s, i128 %s, i128 %s" r neg nm mag);
+          r
+        end
+        else mag
+      in
+      let r = t () in
+      line cx (Printf.sprintf "%s = select i1 %s, i128 %s, i128 %s" r narrow yn wide);
+      if n = 128 then def (Printf.sprintf "freeze i128 %s" r) else def (Printf.sprintf "trunc i128 %s to %s" r (lty dt))
+  | Conv (((Fptrunc | Fpext | Fptosi | Fptoui | Sitofp | Uitofp) as k), a) when strict cx ->
+      (* an int <-> float conversion rounds (sitofp, uitofp, fptrunc) or
+         only raises (fpext, fptosi, fptoui truncate) *)
+      let dt = rty cx ir 0 in
+      let rounds = match k with Fptrunc | Sitofp | Uitofp -> true | _ -> false in
+      def (constrained cx ~rounds (conv_text k ^ "." ^ sfx dt ^ "." ^ sfx (tyv cx a)) (lty dt) [ arg cx a ])
   | Conv (k, a) -> def (Printf.sprintf "%s %s to %s" (conv_text k) (tv cx a) (lty (rty cx ir 0)))
   | Alloca (n, al) -> (
       match int_value f n with
@@ -981,9 +1142,9 @@ let emit_inst cx (ir : inst_rec) =
   | Load (m, p) ->
       let t = rty cx ir 0 in
       if m.order = Plain then
-        def (Printf.sprintf "load%s %s, %s%s" (if m.volatile then " volatile" else "") (lty t) (tv cx p) (mem_suffix m))
+        def_read t (Printf.sprintf "load%s %s, %s%s" (if m.volatile then " volatile" else "") (lty t) (tv cx p) (mem_suffix m))
       else
-        def
+        def_read t
           (Printf.sprintf "load atomic%s %s, %s %s%s" (if m.volatile then " volatile" else "") (lty t) (tv cx p)
              (ordering_text m.order) (mem_suffix m))
   | Store (m, x, p) ->
@@ -1138,7 +1299,7 @@ let emit_inst cx (ir : inst_rec) =
           if n = 1 then def (Printf.sprintf "freeze %s %s" (lty et) !acc) else def !acc)
   | Masked_load (al, p, mask, pass) ->
       let vt = rty cx ir 0 in
-      def
+      def_read vt
         (call_intrinsic cx
            ("llvm.masked.load." ^ sfx vt ^ "." ^ sfx (tyv cx p))
            (lty vt)
@@ -1575,6 +1736,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
          else if definition && has f.fattrs fa_inline then " alwaysinline"
          else "")
         ^ (if has f.fattrs fa_cold then " cold" else "")
+        ^ (if definition && has f.fattrs fa_fenv then " strictfp" else "")
         ^ if has f.fattrs fa_noreturn then " noreturn" else ""
       in
       let declared = Hashtbl.create 64 in

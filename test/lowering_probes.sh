@@ -59,14 +59,18 @@ done
 
 "$LLVM_LLC" -O2 "$PROBE_TMP/probes.O2.ll" -o "$PROBE_TMP/probes.O2.s"
 load_asm=$(awk '/^lowering_load32_le:/{in_function=1} in_function {print} in_function && /^\.Lfunc_end0:/{exit}' "$PROBE_TMP/probes.O2.s")
-load_count=$(printf '%s\n' "$load_asm" | grep -Ec 'movl[[:space:]]+\(%rdi\), %eax' || true)
-if [ "$load_count" -ne 1 ]; then
-  echo "lowering probes: byte assembly no longer uses one safe 32-bit load" >&2
+# Every load is frozen (A2: fresh memory holds fixed bytes, never undef),
+# which keeps LLVM from merging the four byte loads into one; what must
+# hold is that nothing reads wider than the four bytes asked for
+wide=$(printf '%s\n' "$load_asm" | grep -Ec 'movq[[:space:]]+-?[0-9]*\(%rdi\)' || true)
+bytes=$(printf '%s\n' "$load_asm" | grep -Ec '(movzbl|movb)[[:space:]]+[0-9]*\(%rdi\)|movl[[:space:]]+\(%rdi\)' || true)
+if [ "$wide" -ne 0 ] || [ "$bytes" -lt 1 ] || [ "$bytes" -gt 4 ]; then
+  echo "lowering probes: byte assembly reads other than its four bytes" >&2
   exit 1
 fi
 
 div_ir=$(awk '/^define i64 @lowering_div_invariant\(/,/^}/' "$PROBE_TMP/probes.O2.ll")
-guard_line=$(printf '%s\n' "$div_ir" | grep -n 'icmp eq i32 %a2, 0' | head -n 1 | cut -d: -f1)
+guard_line=$(printf '%s\n' "$div_ir" | grep -En 'icmp eq i32 %(a2|v[0-9]+), 0' | head -n 1 | cut -d: -f1)
 loop_line=$(printf '%s\n' "$div_ir" | grep -n 'phi i64' | head -n 1 | cut -d: -f1)
 if [ -z "$guard_line" ] || [ -z "$loop_line" ] || [ "$guard_line" -ge "$loop_line" ]; then
   echo "lowering probes: invariant division guard is not before the loop recurrence" >&2
