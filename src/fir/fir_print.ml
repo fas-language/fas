@@ -289,6 +289,8 @@ let op_text f nm (ir : inst_rec) =
   | Cmpxchg c ->
       Printf.sprintf "cmpxchg %s%s %s, %s, %s, %s, fail %s" (if c.weak then "weak " else "") (rt ())
         (v c.p) (v c.expected) (v c.desired) (mem_text c.mem) (ordering_name c.fail)
+  | Cmpxchg2 c ->
+      Printf.sprintf "cmpxchg2 %s, %s, %s, %s, %s, %s" (v c.p) (v c.elo) (v c.ehi) (v c.dlo) (v c.dhi) (mem_text c.mem)
   | Fence o -> "fence " ^ ordering_name o
   | Extract (a, i) -> Printf.sprintf "extract %s %s, %s" (rt ()) (v a) (v i)
   | Insert (a, x, i) -> Printf.sprintf "insert %s %s, %s, %s" (rt ()) (v a) (v x) (v i)

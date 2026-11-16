@@ -245,6 +245,11 @@ type op =
   | Memset of bool * value * value * value  (** volatile, dst, byte (i8), size *)
   | Rmw of rmw * mem * value * value  (** pointer, operand *)
   | Cmpxchg of { mem : mem; fail : ordering; weak : bool; p : value; expected : value; desired : value }
+  | Cmpxchg2 of { mem : mem; p : value; elo : value; ehi : value; dlo : value; dhi : value }
+      (** a strong compare-exchange of the 16 bytes at [p] (align 16), each
+          side given as two i64 halves (low first); results old low, old
+          high, success. The legalized form of a 16-byte cmpxchg: only
+          Fir_wide writes it (front ends write cmpxchg i128) *)
   | Fence of ordering
   | Extract of value * value
   | Insert of value * value * value  (** vector, element, index *)
@@ -687,6 +692,12 @@ let iter_op_uses g = function
       g p;
       g expected;
       g desired
+  | Cmpxchg2 { p; elo; ehi; dlo; dhi; _ } ->
+      g p;
+      g elo;
+      g ehi;
+      g dlo;
+      g dhi
   | Call { callee; args; _ } ->
       (match callee with Indirect v -> g v | Direct _ -> ());
       Array.iter g args
@@ -734,6 +745,7 @@ let map_op_uses g op =
   | Memset (vol, a, b, c) -> Memset (vol, g a, g b, g c)
   | Rmw (k, m, p, v) -> Rmw (k, m, g p, g v)
   | Cmpxchg c -> Cmpxchg { c with p = g c.p; expected = g c.expected; desired = g c.desired }
+  | Cmpxchg2 c -> Cmpxchg2 { c with p = g c.p; elo = g c.elo; ehi = g c.ehi; dlo = g c.dlo; dhi = g c.dhi }
   | Extract (a, b) -> Extract (g a, g b)
   | Insert (a, b, c) -> Insert (g a, g b, g c)
   | Shuffle (a, b, m) -> Shuffle (g a, g b, m)
@@ -782,7 +794,7 @@ let successors = function
 
 (* Ops with effects beyond their results: never removed when unused *)
 let has_side_effects = function
-  | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Fence _ | Masked_store _
+  | Store _ | Memcpy _ | Memmove _ | Memset _ | Rmw _ | Cmpxchg _ | Cmpxchg2 _ | Fence _ | Masked_store _
   | Call _ | Syscall _ | Asm _ | Trap | Dbg_value _ | Va_start _ | Va_arg _ | Va_arg_agg _ | Stack_save
   | Stack_restore _ | Lifetime _ ->
       true

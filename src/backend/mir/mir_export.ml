@@ -139,6 +139,7 @@ let opname ins =
   | Xchg _ -> "xchg"
   | Xadd _ -> "xadd"
   | Cmpxchg _ -> "cmpxchg"
+  | Cmpxchg16b _ -> "cmpxchg16b"
   | Mfence -> "mfence"
   | Ud2 -> "ud2"
   | Loc _ -> "loc"

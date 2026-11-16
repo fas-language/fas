@@ -2228,6 +2228,19 @@ let inst c i =
       let ok = setcc c E in
       def c (res 0) (copy c (G Rax));
       def c (res 1) ok
+  | Cmpxchg2 { p; elo; ehi; dlo; dhi; _ } ->
+      (* lock cmpxchg16b: rdx:rax expected, rcx:rbx desired; a full
+         barrier, so every ordering holds *)
+      let rp = use c p and a = use c elo and b = use c ehi and d0 = use c dlo and d1 = use c dhi in
+      emit c (Copy (G Rax, a));
+      emit c (Copy (G Rdx, b));
+      emit c (Copy (G Rbx, d0));
+      emit c (Copy (G Rcx, d1));
+      emit c (Cmpxchg16b (at_reg rp));
+      let ok = setcc c E in
+      def c (res 0) (copy c (G Rax));
+      def c (res 1) (copy c (G Rdx));
+      def c (res 2) ok
   | Fence o -> if o = Seq_cst then emit c Mfence
   | Call { sig_; callee; args; attrs; va_aggs } -> call c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
   | Syscall args ->

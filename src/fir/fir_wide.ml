@@ -993,6 +993,16 @@ let convert_inst cx (i : inst) =
           let old = if container n < 64 then zext64 cx rs.(0) else rs.(0) in
           set cx (r 0) (mask cx n [| old |]);
           set cx (r 1) [| rs.(1) |]
+      | Int 128 when c.mem.align >= 16 ->
+          (* Fir_atomic leaves only this one: lock cmpxchg16b *)
+          let e2 = get cx c.expected and d2 = get cx c.desired in
+          let rs =
+            emit ~loc:cx.loc cx.g cx.b
+              (Cmpxchg2 { mem = c.mem; p = get1 cx c.p; elo = e2.(0); ehi = e2.(1); dlo = d2.(0); dhi = d2.(1) })
+              [| i64; i64; i1 |]
+          in
+          set cx (r 0) [| rs.(0); rs.(1) |];
+          set cx (r 1) [| rs.(2) |]
       | t -> unsupported "cmpxchg on %s" (ty_to_string t))
   | Va_arg p -> (
       match rty 0 with

@@ -9,7 +9,17 @@
      access of the container; add/sub/min/max/umin/umax a compare-and-swap
      loop (the old value is the container's, so bits above N that some
      other writer left set cannot make the loop spin).
-   - Wider than 64 bits, and f80: libatomic's generic entry points
+   - 16 bytes at a 16-aligned address (i65..i128, a 16-byte vector without
+     pointer lanes): every access becomes a 128-bit cmpxchg, which both
+     backends do inline as lock cmpxchg16b (the CPU needs CMPXCHG16B,
+     x86-64-v2; Fir_wide gives the native backend a cmpxchg2, the LLVM path
+     sets +cx16). A load is cmpxchg(0, 0) (so it writes: the memory must be
+     writable, as clang -mcx16 and libatomic need too), a store, xchg or
+     arithmetic a compare-and-swap loop whose first guess is 0. A narrower
+     integer works on the i128 container (bits above N zero), a vector on
+     its 128-bit image. libatomic does 16-byte objects the same way on such
+     CPUs, so this code and C code using libatomic stay atomic together.
+   - Otherwise wider than 64 bits, and f80: libatomic's generic entry points
      (__atomic_load, __atomic_store, __atomic_exchange,
      __atomic_compare_exchange) on a stack copy, the arithmetic as a
      compare-exchange loop. clang does the same for _Atomic __int128,
@@ -35,7 +45,7 @@ let legal = function 8 | 16 | 32 | 64 -> true | _ -> false
 
 (* how an atomic access of [ty] is done: on an integer container of
    [bits], or by libatomic on an object of [bytes] *)
-type how = Native | Narrow of int | Lib of int | Image of int
+type how = Native | Narrow of int | Lib of int | Image of int | Cas16
 
 (* A vector of 1, 2, 4 or 8 bytes (without pointer lanes) is an [Image]:
    the access works on the integer of its bytes, bitcast to and from the
@@ -43,7 +53,9 @@ type how = Native | Narrow of int | Lib of int | Image of int
    integer); and/or/xor/xchg are bitwise there, the other operations a
    lane-wise compare-and-swap loop. Any other vector goes through
    libatomic on its bytes, like a wide integer. *)
-let how_of = function
+let how_of ~align = function
+  | Int n when n > 64 && n <= 128 && align >= 16 -> Cas16
+  | Vec (_, t) as v when size_of v = 16 && align >= 16 && (match t with Ptr _ -> false | _ -> true) -> Cas16
   | Int n when n <= 64 && not (legal n) -> Narrow (8 * size_of (Int n))
   | Int n when n > 64 -> Lib (size_of (Int n))
   | F80 -> Lib 16
@@ -140,6 +152,40 @@ let of_image cx ty c x =
   | Vec (n, Int 1) when n < c -> e cx (Conv (Bitcast, e cx (Conv (Trunc, x)) (Int n))) ty
   | _ -> e cx (Conv (Bitcast, x)) ty
 
+(* Cas16: a value of [ty] as the i128 a 16-byte cmpxchg works on, and back *)
+let into16 cx ty v =
+  match ty with
+  | Int 128 -> v
+  | Int _ -> e cx (Conv (Zext, v)) (Int 128)
+  | _ -> to_image cx ty 128 v
+
+let out16 cx ty x =
+  match ty with
+  | Int 128 -> x
+  | Int _ -> e cx (Conv (Trunc, x)) ty
+  | _ -> of_image cx ty 128 x
+
+(* a strong 128-bit compare-exchange: (old, ok) *)
+let cas16 cx mem fail p expected desired =
+  let rs =
+    emit ~loc:cx.loc cx.f cx.cur (Cmpxchg { mem; fail; weak = false; p; expected; desired }) [| Int 128; i1 |]
+  in
+  (rs.(0), rs.(1))
+
+(* the old value of an rmw [k] of [v] (of [ty]) at [p], as a loop of 128-bit
+   compare-exchanges whose first guess is 0 (no separate read) *)
+let rmw16 cx k (m : mem) ty p v =
+  let loop, out = loop_blocks cx in
+  set_term ~loc:cx.loc cx.f cx.cur (Jump (target ~args:[| iconst cx.f (Int 128) 0L |] loop));
+  cx.cur <- loop;
+  let guess = add_param cx.f loop (Int 128) in
+  let old = out16 cx ty guess in
+  let nw = into16 cx ty (rmw_value cx k ty old v) in
+  let seen, ok = cas16 cx m (fail_of m.order) p guess nw in
+  set_term ~loc:cx.loc cx.f cx.cur (Br (ok, target out, target ~args:[| seen |] loop, -1));
+  cx.cur <- out;
+  old
+
 (* Rewrites [ir] at the end of block cx.cur (its later instructions are
    already detached); returns false when it needs nothing *)
 let rewrite cx (ir : inst_rec) =
@@ -148,8 +194,13 @@ let rewrite cx (ir : inst_rec) =
   let ty_of v = ty_of cx.f v in
   match ir.op with
   | Load (m, p) when m.order <> Plain -> (
-      match how_of (ty_of (r 0)) with
+      match how_of ~align:m.align (ty_of (r 0)) with
       | Native -> false
+      | Cas16 ->
+          let z = iconst cx.f (Int 128) 0L in
+          let old, _ = cas16 cx m m.order p z z in
+          set 0 (out16 cx (ty_of (r 0)) old);
+          true
       | Narrow c ->
           set 0 (e cx (Conv (Trunc, e cx (Load (m, p)) (Int c))) (ty_of (r 0)));
           true
@@ -162,8 +213,11 @@ let rewrite cx (ir : inst_rec) =
           set 0 (e cx (Load (plain_mem 16, tmp)) (ty_of (r 0)));
           true)
   | Store (m, v, p) when m.order <> Plain -> (
-      match how_of (ty_of v) with
+      match how_of ~align:m.align (ty_of v) with
       | Native -> false
+      | Cas16 ->
+          ignore (rmw16 cx Xchg m (ty_of v) p v);
+          true
       | Narrow c ->
           e0 cx (Store (m, e cx (Conv (Zext, v)) (Int c), p));
           true
@@ -176,12 +230,15 @@ let rewrite cx (ir : inst_rec) =
           true)
   | Rmw (k, m, p, v) -> (
       let ty = ty_of v in
-      match how_of ty with
+      match how_of ~align:m.align ty with
       | Native -> false
+      | Cas16 ->
+          set 0 (rmw16 cx k m ty p v);
+          true
       | (Narrow c | Image c) when (match k with Xchg | Rand | Ror | Rxor -> true | _ -> false) ->
           (* zero above N in, zero above N out *)
           let into, out_of =
-            match how_of ty with
+            match how_of ~align:m.align ty with
             | Image _ -> (to_image cx ty c, of_image cx ty c)
             | _ -> ((fun v -> e cx (Conv (Zext, v)) (Int c)), fun x -> e cx (Conv (Trunc, x)) ty)
           in
@@ -189,7 +246,7 @@ let rewrite cx (ir : inst_rec) =
           set 0 (out_of old);
           true
       | Narrow c | Image c ->
-          let image = match how_of ty with Image _ -> true | _ -> false in
+          let image = match how_of ~align:m.align ty with Image _ -> true | _ -> false in
           let ct = Int c in
           let init = e cx (Load ({ m with order = Relaxed }, p)) ct in
           let loop, out = loop_blocks cx in
@@ -235,8 +292,13 @@ let rewrite cx (ir : inst_rec) =
           true)
   | Cmpxchg c -> (
       let ty = ty_of c.expected in
-      match how_of ty with
+      match how_of ~align:c.mem.align ty with
       | Native -> false
+      | Cas16 ->
+          let old, ok = cas16 cx c.mem c.fail c.p (into16 cx ty c.expected) (into16 cx ty c.desired) in
+          set 0 (out16 cx ty old);
+          set 1 ok;
+          true
       | Narrow bits ->
           let ct = Int bits in
           let z v = e cx (Conv (Zext, v)) ct in
@@ -267,12 +329,14 @@ let rewrite cx (ir : inst_rec) =
   | _ -> false
 
 let needs_rewrite f (ir : inst_rec) =
-  let t v = how_of (ty_of f v) <> Native in
+  let t (m : mem) v = how_of ~align:m.align (ty_of f v) <> Native in
   match ir.op with
-  | Load (m, _) -> m.order <> Plain && t ir.results.(0)
-  | Store (m, v, _) -> m.order <> Plain && t v
-  | Rmw (_, _, _, v) -> t v
-  | Cmpxchg c -> t c.expected
+  | Load (m, _) -> m.order <> Plain && t m ir.results.(0)
+  | Store (m, v, _) -> m.order <> Plain && t m v
+  | Rmw (_, m, _, v) -> t m v
+  (* the 128-bit cmpxchg Cas16 leaves is itself what the backends take *)
+  | Cmpxchg c -> (
+      match ty_of f c.expected with Int 128 when c.mem.align >= 16 -> false | _ -> t c.mem c.expected)
   | _ -> false
 
 let run_func m (f : func) =

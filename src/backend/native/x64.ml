@@ -380,6 +380,11 @@ let lock_xadd a size mem src = sized_rm a ~lock:true size [ 0x0f; 0xc0 ] [ 0x0f;
 let lock_cmpxchg a size mem src =
   sized_rm a ~lock:true size [ 0x0f; 0xb0 ] [ 0x0f; 0xb1 ] ~reg:src mem
 
+(* lock cmpxchg16b m128: F0 REX.W 0F C7 /1 *)
+let lock_cmpxchg16b a mem =
+  byte a 0xf0;
+  rm a [ 0x0f; 0xc7 ] ~reg:Rcx mem
+
 let mfence a =
   byte a 0x0f;
   byte a 0xae;

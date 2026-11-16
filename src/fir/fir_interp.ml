@@ -1761,6 +1761,26 @@ and exec st fr i =
       (match ok with Some true -> write_value st t a (g desired) | _ -> ());
       set 0 old;
       set 1 [| (match ok with Some b -> bool_lane b | None -> Poison) |]
+  | Cmpxchg2 { mem; p; elo; ehi; dlo; dhi } ->
+      let a = ptr_of (get1 st fr p) in
+      check_align a mem.align;
+      let ah = Int64.add a 8L and t = Int 64 in
+      let ol = read_value st t a and oh = read_value st t ah in
+      let eq o x =
+        match (o.(0), x.(0)) with Bits o, Bits x -> Some (W.equal o x) | _ -> None
+      in
+      let ok =
+        match (eq ol (g elo), eq oh (g ehi)) with
+        | Some a, Some b -> Some (a && b)
+        | _ -> None
+      in
+      if ok = Some true then begin
+        write_value st t a (g dlo);
+        write_value st t ah (g dhi)
+      end;
+      set 0 ol;
+      set 1 oh;
+      set 2 [| (match ok with Some b -> bool_lane b | None -> Poison) |]
   | Extract (v, idx) ->
       let x = g v in
       set 0

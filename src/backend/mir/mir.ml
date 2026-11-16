@@ -155,6 +155,9 @@ type ins =
   | Xchg of int * addr * reg  (** bytes; reg <-> memory (implicitly locked) *)
   | Xadd of int * addr * reg  (** lock xadd *)
   | Cmpxchg of int * addr * reg  (** lock cmpxchg [addr], reg (compares with rax) *)
+  | Cmpxchg16b of addr
+      (** lock cmpxchg16b [addr]: compares rdx:rax with the 16 bytes there,
+          stores rcx:rbx if equal, else loads them into rdx:rax; ZF = equal *)
   | Mfence
   | Ud2
   | Loc of int
@@ -259,6 +262,7 @@ let uses_defs = function
   | Std | Cld | Mfence | Ud2 | Loc _ | Align_sp _ -> ([], [])
   | Xchg (_, a, r) | Xadd (_, a, r) -> (r :: addr_regs a, [ r ])
   | Cmpxchg (_, a, r) -> (G Rax :: r :: addr_regs a, [ G Rax ])
+  | Cmpxchg16b a -> (G Rax :: G Rdx :: G Rbx :: G Rcx :: addr_regs a, [ G Rax; G Rdx ])
   | Asm a -> (a.ain, a.aout)
 
 (* Physical registers an instruction destroys without defining a value *)
@@ -347,6 +351,7 @@ let map_regs g ins =
   | Xchg (n, a, r) -> Xchg (n, ma a, g r)
   | Xadd (n, a, r) -> Xadd (n, ma a, g r)
   | Cmpxchg (n, a, r) -> Cmpxchg (n, ma a, g r)
+  | Cmpxchg16b a -> Cmpxchg16b (ma a)
   | Asm a ->
       Asm
         {
@@ -570,6 +575,7 @@ let ins_s i =
   | Xchg (n, m, a) -> p "xchg%d %s, %s" n (addr_s m) (r a)
   | Xadd (n, m, a) -> p "lock xadd%d %s, %s" n (addr_s m) (r a)
   | Cmpxchg (n, m, a) -> p "lock cmpxchg%d %s, %s" n (addr_s m) (r a)
+  | Cmpxchg16b m -> p "lock cmpxchg16b %s" (addr_s m)
   | Mfence -> "mfence"
   | Align_sp n -> Printf.sprintf "align_sp %d" n
   | Ud2 -> "ud2"

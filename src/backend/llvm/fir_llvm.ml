@@ -1311,6 +1311,7 @@ let emit_inst cx (ir : inst_rec) =
       def
         (Printf.sprintf "atomicrmw%s %s %s, %s %s%s" (if m.volatile then " volatile" else "") (rmw_text k) (tv cx p) (tv cx x)
            (ordering_text m.order) (mem_suffix m))
+  | Cmpxchg2 _ -> unsupported "cmpxchg2 (the native backend's legalized form; write cmpxchg i128)"
   | Cmpxchg { mem = m; fail; weak; p; expected; desired } ->
       let t = tyv cx expected in
       (* LLVM's cmpxchg takes only integers and pointers: a float compares
@@ -1823,6 +1824,27 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
     (* LLVM's division by zero is UB: every trapping division becomes a
        check and a `trap` *)
     let () = Fir_trapdiv.run ~hw:false m in
+    (* a 16-byte cmpxchg (all Fir_atomic leaves of a 16-aligned 16-byte
+       atomic) is inline lock cmpxchg16b, as on the native path: the
+       definitions get +cx16 (without it LLVM calls libatomic) *)
+    let target =
+      let cas16 = ref false in
+      Vec.iter
+        (fun (f : func) ->
+          if f.defined then
+            for i = 0 to Vec.length f.insts - 1 do
+              match (Vec.get f.insts i).op with
+              | Cmpxchg { expected; _ } when ty_of f expected = Int 128 -> cas16 := true
+              | _ -> ()
+            done)
+        m.funcs;
+      if not !cas16 then target
+      else
+        match target with
+        | Some g ->
+            Some { g with target_features = Some (match g.target_features with Some t -> t ^ ",+cx16" | None -> "+cx16") }
+        | None -> Some { target_cpu = "x86-64"; target_tune = None; target_features = Some "+cx16" }
+    in
     let o = { buf = Buffer.create 65536; counted = 0; budget } in
     let sym n = global_name (redirect n) in
     let d =

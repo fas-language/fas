@@ -596,6 +596,7 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
   | Xchg (n, ad, r) -> A.xchg_mr a n (m ad) (gr r)
   | Xadd (n, ad, r) -> A.lock_xadd a n (m ad) (gr r)
   | Cmpxchg (n, ad, r) -> A.lock_cmpxchg a n (m ad) (gr r)
+  | Cmpxchg16b ad -> A.lock_cmpxchg16b a (m ad)
   | Mfence -> A.mfence a
   | Align_sp n ->
       (* the drop is under n bytes, and n is at most a page (a by-value

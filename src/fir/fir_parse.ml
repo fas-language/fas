@@ -694,6 +694,12 @@ let parse_op st opname =
       expect_ident lx "fail";
       let fail_o = match next lx with Ident s -> parse_ordering lx s | t -> fail lx ("bad ordering " ^ tok_text t) in
       (Cmpxchg { mem; fail = fail_o; weak; p; expected; desired }, ts)
+  | "cmpxchg2" ->
+      let p, elo, ehi = three () in
+      comma ();
+      let dlo, dhi = two () in
+      comma ();
+      (Cmpxchg2 { mem = parse_mem lx; p; elo; ehi; dlo; dhi }, [| Int 64; Int 64; Int 1 |])
   | "fence" -> (
       match next lx with
       | Ident s -> (Fence (parse_ordering lx s), [||])
@@ -1013,7 +1019,7 @@ let parse_body lx f =
               let op, tys = parse_op st opname in
               if tys <> [||] then
                 (match op with
-                | Call _ | Syscall _ | Rmw _ | Cmpxchg _ -> ()
+                | Call _ | Syscall _ | Rmw _ | Cmpxchg _ | Cmpxchg2 _ -> ()
                 | _ -> fail lx (opname ^ " defines a value that is not named"));
               let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
               ignore (emit ~loc f b op tys);

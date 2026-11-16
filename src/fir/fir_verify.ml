@@ -292,6 +292,13 @@ let verify_func (f : func) =
                   same "desired" desired (r 0);
                   if r 1 <> i1 then err "%s: cmpxchg flag must be i1" where
                 end
+            | Cmpxchg2 { mem; p; elo; ehi; dlo; dhi } ->
+                want 3;
+                if not (is_ptr (ty p)) then err "%s: cmpxchg2 on %s" where (tys p);
+                if mem.order = Plain then err "%s: cmpxchg2 needs an ordering" where;
+                if mem.align < 16 then err "%s: cmpxchg2 needs align 16" where;
+                List.iter (fun (what, x) -> same what x (Int 64)) [ ("low expected", elo); ("high expected", ehi); ("low desired", dlo); ("high desired", dhi) ];
+                if nres = 3 && (r 0 <> Int 64 || r 1 <> Int 64 || r 2 <> i1) then err "%s: cmpxchg2 defines i64, i64, i1" where
             | Fence o ->
                 want 0;
                 if o = Plain || o = Relaxed then err "%s: fence needs acquire or stronger" where
