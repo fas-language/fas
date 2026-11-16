@@ -2,7 +2,7 @@
 
 Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
-**Version: Fir 0.2** (2026-11-16: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
+**Version: Fir 0.3** (2026-11-16: `memory(...)` and `willreturn` on declarations, `switch` weights; 0.2: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
 
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
@@ -170,9 +170,10 @@ func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src n
   ...
 }
 
-declare @name (ABI, ...) -> (ABI, ...) LINKAGE        a function defined elsewhere
+declare @name (ABI, ...) -> (ABI, ...) LINKAGE [ATTRS] [PROMISES]   a function defined elsewhere
 
 ATTRS ::= any of: inline noinline cold noreturn fenv
+PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (declarations only)
 ```
 
 - **The first block is the entry block.** Its parameters must match the signature's parameter types, where an `agg` parameter is a `ptr` (§5). Nothing may branch to the entry block, so if you need a loop header at the top, add a second block.
@@ -183,6 +184,7 @@ ATTRS ::= any of: inline noinline cold noreturn fenv
 - **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block.
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
 - **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
+- **Promises on a declaration** let a call to a function defined elsewhere be less than a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. At most one `memory(...)`. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). They are refused on a `func`, whose body says what it does. A backend may ignore them (the native backend does today); the LLVM path passes them on as `memory(none)`, `memory(read)`, `memory(argmem: readwrite)` and `willreturn`.
 - **`blockaddr` pins blocks.** A function whose blocks appear in a `blockaddr` keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations.
 
 ### Debug information
@@ -470,7 +472,7 @@ Store-to-load forwarding, merging equal loads, removing dead stores to non-escap
 - writing a `readonly` global, or the bytes of an `agg` parameter (§5);
 - calling a function with a signature other than the one it is defined with (beyond the variadic part);
 - reaching `unreachable`;
-- breaking a promise in a function or `declare` attribute (`noreturn`, and the designed `memory(...)` and `willreturn`, §15).
+- breaking a promise in a function or `declare` attribute (`noreturn`, `memory(...)`, `willreturn`, §4).
 
 **Mapping C's UB:** C's signed overflow becomes `add nsw`, which is allowed but not required. Unsigned arithmetic uses plain `add`. If you don't want to rely on UB, never set the flags.
 
@@ -712,6 +714,5 @@ These forms are fixed now so that front ends and passes can plan for them. Until
 
 | Form | Meaning |
 |---|---|
-| `declare @f SIG LINKAGE [memory(none\|read\|argmem)] [willreturn]` [v0.6] | Promises about a function defined elsewhere, so that a call to it need not be a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). |
 | `memcpy D, S, N, align A` (also `memmove`, `memset`) [later] | Both addresses are multiples of A, as the `align` of a load or store promises. Optional; the default is 1. |
 | `scope N parent P inlined "NAME" [linkage "SYM"] decl L call C` [before the optimizer] | An inlined copy of a function, for the debugger (DWARF `DW_TAG_inlined_subroutine`). `NAME` and `SYM` are the callee's source and symbol names, `L` the `loc` of its declaration, and `C` the `loc` of the call that was inlined. Code whose `loc` names scope N, or a scope inside it, belongs to that copy; the callee's variables become `var` lines with `scope N` (and `arg K` for its parameters). Copies of one callee share `SYM`. A front end never writes these; the inliner does. |

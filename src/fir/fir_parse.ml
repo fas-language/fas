@@ -1089,6 +1089,15 @@ let parse_linkage_vis_attrs lx =
     | Ident s when Option.is_some (visibility_of s) -> ignore (next lx); vis := Option.get (visibility_of s); go ()
     | Ident "display" -> ignore (next lx); display := Some (str_tok lx); go ()
     | Bang "loc" -> ignore (next lx); decl_loc := int_tok lx; go ()
+    | Ident "memory" ->
+        ignore (next lx);
+        expect lx "(";
+        let k = match next lx with Ident k -> k | t -> fail lx ("expected none, read or argmem, got " ^ tok_text t) in
+        expect lx ")";
+        (match table_find Fir_print.func_attr_names ("memory(" ^ k ^ ")") with
+        | Some bit -> attrs := !attrs lor bit
+        | None -> fail lx ("unknown memory(" ^ k ^ "): expected none, read or argmem"));
+        go ()
     | Ident s -> (
         match table_find Fir_print.func_attr_names s with
         | Some bit -> ignore (next lx); attrs := !attrs lor bit; go ()

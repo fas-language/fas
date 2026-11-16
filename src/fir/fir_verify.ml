@@ -32,7 +32,12 @@ let verify_func (f : func) =
         if !nerr <= 50 then errors := Printf.sprintf "@%s: %s" f.name s :: !errors)
       fmt
   in
-  if not f.defined then []
+  let promises = f.fattrs land (fa_memory lor fa_willreturn) in
+  let nmem = List.length (List.filter (fun b -> f.fattrs land b <> 0) [ fa_mem_none; fa_mem_read; fa_mem_argmem ]) in
+  if f.defined && promises <> 0 then
+    [ Printf.sprintf "@%s: memory(...) and willreturn are promises about a declared function" f.name ]
+  else if nmem > 1 then [ Printf.sprintf "@%s: more than one memory(...)" f.name ]
+  else if not f.defined then []
   else if num_blocks f = 0 then [ Printf.sprintf "@%s: no blocks" f.name ]
   else begin
     let nv = num_values f in

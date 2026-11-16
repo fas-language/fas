@@ -381,6 +381,14 @@ let fa_noreturn = 8
    FENV_ACCESS ON); never inlined across a different marking *)
 let fa_fenv = 16
 
+(* promises about a declared function (SPEC §5 "Declarations"):
+   memory(none), memory(read), memory(argmem) (at most one), willreturn *)
+let fa_mem_none = 32
+let fa_mem_read = 64
+let fa_mem_argmem = 128
+let fa_willreturn = 256
+let fa_memory = fa_mem_none lor fa_mem_read lor fa_mem_argmem
+
 (* Debug variables (roadmap v0.8, SPEC §4 "Debug information"). They are
    metadata, not instructions: no instruction refers to them, so they can
    never change the code. [home] is the variable's memory, normally its

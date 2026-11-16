@@ -64,6 +64,12 @@ case_ switch.fir 's/weights \[1, 50, 30, 0\]/weights [1, 50, 30]/' -c \
   'switch has 3 weights for 4 edges'
 case_ switch.fir 's/weights \[1, 50, 30, 0\]/weights [1, -50, 30, 0]/' -c \
   'negative switch weight'
+case_ c/promises.fir 's/memory(read)$/memory(read) memory(none)/' -c \
+  'more than one memory(...)'
+case_ c/promises.fir 's/memory(read)$/memory(write)/' -c \
+  'unknown memory(write): expected none, read or argmem'
+case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& willreturn/' -c \
+  'promises about a declared function'
 for c in $(sed -n 's/^global @\([a-z_]*\) size 8 align 8 .*= zero$/\1/p' "$here/fas_fir/sum_loop.fir" | head -n 1); do
   # a 1 GiB zero global is fine (.bss), and fast: its bytes are never built
   sed "s/^global @$c size 8 /global @$c size 1073741824 /" "$here/fas_fir/sum_loop.fir" > "$tmp/big.fir"

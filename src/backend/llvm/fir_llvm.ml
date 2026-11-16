@@ -1800,7 +1800,12 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
          else "")
         ^ (if has f.fattrs fa_cold then " cold" else "")
         ^ (if definition && has f.fattrs fa_fenv then " strictfp" else "")
-        ^ if has f.fattrs fa_noreturn then " noreturn" else ""
+        ^ (if has f.fattrs fa_noreturn then " noreturn" else "")
+        ^ (if has f.fattrs fa_mem_none then " memory(none)"
+           else if has f.fattrs fa_mem_read then " memory(read)"
+           else if has f.fattrs fa_mem_argmem then " memory(argmem: readwrite)"
+           else "")
+        ^ if has f.fattrs fa_willreturn then " willreturn" else ""
       in
       let declared = Hashtbl.create 64 in
       Vec.iter
