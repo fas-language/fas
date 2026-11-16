@@ -1805,33 +1805,84 @@ and exec st fr i =
       let base = ptr_of (get1 st fr p) in
       let t = elem (rty 0) in
       let m = g mask and pv = g pass in
+      let sel i =
+        match m.(i) with
+        | Poison -> error "masked_load with a poison mask lane"
+        | Bits b -> b.(0) <> 0L
+      in
       if t = i1 then
-        error "masked_load of a bool vector is not supported by the interpreter";
-      set 0
-        (Array.init (n ()) (fun i ->
-             match m.(i) with
-             | Poison -> error "masked_load with a poison mask lane"
-             | Bits b when b.(0) <> 0L ->
-                 let a = Int64.add base (Int64.of_int (i * size_of t)) in
-                 if i = 0 then check_align a align;
-                 (read_value st t a).(0)
-             | Bits _ -> lane pv i))
+        (* bit packed: lane i is bit i mod 8 of byte i / 8, and only the
+           bytes holding a selected lane are read *)
+        set 0
+          (Array.init (n ()) (fun i ->
+               if not (sel i) then lane pv i
+               else
+                 match
+                   (read_value st i8 (Int64.add base (Int64.of_int (i / 8)))).(0)
+                 with
+                 | Poison -> Poison
+                 | Bits b ->
+                     Bits
+                       [| Int64.logand (Int64.shift_right_logical b.(0) (i mod 8)) 1L |]))
+      else
+        set 0
+          (Array.init (n ()) (fun i ->
+               match m.(i) with
+               | Poison -> error "masked_load with a poison mask lane"
+               | Bits b when b.(0) <> 0L ->
+                   let a = Int64.add base (Int64.of_int (i * size_of t)) in
+                   if i = 0 then check_align a align;
+                   (read_value st t a).(0)
+               | Bits _ -> lane pv i))
   | Masked_store (_, v, p, mask) ->
       let base = ptr_of (get1 st fr p) in
       let t = elem (vty v) in
       let x = g v and m = g mask in
-      if t = i1 then
-        error "masked_store of a bool vector is not supported by the interpreter";
-      Array.iteri
-        (fun i ml ->
-          match ml with
+      if t = i1 then begin
+        (* a read-modify-write of each byte holding a selected lane *)
+        let sel i =
+          match m.(i) with
           | Poison -> error "masked_store with a poison mask lane"
-          | Bits b when b.(0) <> 0L ->
-              write_value st t
-                (Int64.add base (Int64.of_int (i * size_of t)))
-                [| x.(i) |]
-          | Bits _ -> ())
-        m
+          | Bits b -> b.(0) <> 0L
+        in
+        for j = 0 to ((Array.length m + 7) / 8) - 1 do
+          let lanes =
+            List.init (min 8 (Array.length m - (8 * j))) (fun k -> (8 * j) + k)
+          in
+          if List.exists sel lanes then begin
+            let a = Int64.add base (Int64.of_int j) in
+            let nw =
+              List.fold_left
+                (fun acc i ->
+                  match (acc, x.(i)) with
+                  | Poison, _ -> Poison
+                  | _, _ when not (sel i) -> acc
+                  | _, Poison -> Poison
+                  | Bits o, Bits b ->
+                      let bit = Int64.shift_left 1L (i mod 8) in
+                      let o = Int64.logand o.(0) (Int64.lognot bit) in
+                      Bits
+                        [|
+                          (if Int64.logand b.(0) 1L <> 0L then Int64.logor o bit else o);
+                        |])
+                (read_value st i8 a).(0)
+                lanes
+            in
+            write_value st i8 a [| nw |]
+          end
+        done
+      end
+      else
+        Array.iteri
+          (fun i ml ->
+            match ml with
+            | Poison -> error "masked_store with a poison mask lane"
+            | Bits b when b.(0) <> 0L ->
+                write_value st t
+                  (Int64.add base (Int64.of_int (i * size_of t)))
+                  [| x.(i) |]
+            | Bits _ -> ())
+          m
   | Compress (v, mask) | Expand (v, mask) ->
       let x = g v and m = g mask in
       let t = elem (rty 0) in

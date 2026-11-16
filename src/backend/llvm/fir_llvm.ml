@@ -809,8 +809,61 @@ let emit_inst cx (ir : inst_rec) =
     line cx (x ^ " = " ^ text);
     def (Printf.sprintf "freeze %s %s" (lty t) x)
   in
+  (* a bool vector is bit packed in Fir memory (lane k: bit k mod 8 of
+     byte k / 8), where LLVM's masked intrinsics on <N x i1> are not: its
+     masked accesses go through the bytes holding a selected lane, with
+     <8B x i1> <-> <B x i8> bitcasts (lane 0 is the low bit) *)
+  let bool_bytes mask n =
+    let b = (n + 7) / 8 in
+    let pad = temp cx and bm = temp cx and anyb = temp cx in
+    let idx = String.concat ", " (List.init (8 * b) (fun k -> Printf.sprintf "i32 %d" (min k n))) in
+    line cx (Printf.sprintf "%s = shufflevector <%d x i1> %s, <%d x i1> zeroinitializer, <%d x i32> <%s>" pad n mask n (8 * b) idx);
+    line cx (Printf.sprintf "%s = bitcast <%d x i1> %s to <%d x i8>" bm (8 * b) pad b);
+    line cx (Printf.sprintf "%s = icmp ne <%d x i8> %s, zeroinitializer" anyb b bm);
+    (b, pad, anyb)
+  in
+  let bool_read p al b anyb =
+    let x = temp cx and y = temp cx in
+    line cx
+      (x ^ " = "
+      ^ call_intrinsic cx
+          ("llvm.masked.load.v" ^ string_of_int b ^ "i8." ^ sfx (tyv cx p))
+          (Printf.sprintf "<%d x i8>" b)
+          [ arg cx p; (Int 32, string_of_int al); (Vec (b, Int 1), anyb); (Vec (b, Int 8), "zeroinitializer") ]);
+    line cx (Printf.sprintf "%s = freeze <%d x i8> %s" y b x);
+    y
+  in
+  let bool_vec = function Vec (_, Int 1) -> true | _ -> false in
   match ir.op with
   | Nop | Dbg_value _ -> ()
+  | Masked_load (al, p, mask, pass) when bool_vec (rty cx ir 0) ->
+      let n = match rty cx ir 0 with Vec (n, _) -> n | _ -> assert false in
+      let b, _, anyb = bool_bytes (v cx mask) n in
+      let bytes = bool_read p al b anyb in
+      let bits = temp cx and lanes = temp cx in
+      line cx (Printf.sprintf "%s = bitcast <%d x i8> %s to <%d x i1>" bits b bytes (8 * b));
+      line cx
+        (Printf.sprintf "%s = shufflevector <%d x i1> %s, <%d x i1> poison, <%d x i32> <%s>" lanes (8 * b) bits (8 * b) n
+           (String.concat ", " (List.init n (Printf.sprintf "i32 %d"))));
+      def (Printf.sprintf "select <%d x i1> %s, <%d x i1> %s, %s" n (v cx mask) n lanes (tv cx pass))
+  | Masked_store (al, x, p, mask) when bool_vec (tyv cx x) ->
+      (* read, merge the selected bits, write back: the same bytes *)
+      let n = match tyv cx x with Vec (n, _) -> n | _ -> assert false in
+      let b, pad, anyb = bool_bytes (v cx mask) n in
+      let old = bool_read p al b anyb in
+      let oldbits = temp cx and xpad = temp cx and nbits = temp cx and nbytes = temp cx in
+      line cx (Printf.sprintf "%s = bitcast <%d x i8> %s to <%d x i1>" oldbits b old (8 * b));
+      line cx
+        (Printf.sprintf "%s = shufflevector <%d x i1> %s, <%d x i1> zeroinitializer, <%d x i32> <%s>" xpad n (v cx x) n
+           (8 * b)
+           (String.concat ", " (List.init (8 * b) (fun k -> Printf.sprintf "i32 %d" (min k n)))));
+      line cx (Printf.sprintf "%s = select <%d x i1> %s, <%d x i1> %s, <%d x i1> %s" nbits (8 * b) pad (8 * b) xpad (8 * b) oldbits);
+      line cx (Printf.sprintf "%s = bitcast <%d x i1> %s to <%d x i8>" nbytes (8 * b) nbits b);
+      line cx
+        (call_intrinsic cx
+           ("llvm.masked.store.v" ^ string_of_int b ^ "i8." ^ sfx (tyv cx p))
+           "void"
+           [ (Vec (b, Int 8), nbytes); arg cx p; (Int 32, string_of_int al); (Vec (b, Int 1), anyb) ])
   | Ibin (k, fl, a, b) -> (
       let t = tyv cx a in
       let plain name flags = def (Printf.sprintf "%s%s %s, %s" name flags (tv cx a) (v cx b)) in

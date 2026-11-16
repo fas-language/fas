@@ -366,8 +366,8 @@ Alignment is a power of two. It is a promise about the address: an access whose 
 | `shuffle <M x T> A, B, [k0, k1, ...]` | Lanes picked from the concatenation A‖B. A mask entry of `-1` gives a poison lane. |
 | `splat <N x T> X` | Broadcast X to every lane. |
 | `reduce OP T V` | Horizontal reduction, with `OP ∈ add mul and or xor smin smax umin umax fmin fmax fadd_ordered`. |
-| `masked_load ty P, MASK, PASSTHRU, align A` | Load only the lanes whose mask bit is set. |
-| `masked_store V, P, MASK, align A` | Store only the lanes whose mask bit is set. |
+| `masked_load ty P, MASK, PASSTHRU, align A` | Load only the lanes whose mask bit is set. For a bool vector (bit packed, §2) this reads just the bytes holding a selected lane. |
+| `masked_store V, P, MASK, align A` | Store only the lanes whose mask bit is set. For a bool vector this is a read-modify-write of each byte holding a selected lane: the other bits are written back as read, so it is not atomic with respect to another thread storing to those bits (as for C bit-fields); bytes with no selected lane are not accessed. |
 | `compress ty V, MASK` | Pack the selected lanes into the low lanes and zero the rest. `expand ty V, MASK` is the inverse. |
 
 ### Calls and system
@@ -642,7 +642,7 @@ The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3
 |---|---|---|---|
 | Integer types | Every width. Integers other than i1 i8 i16 i32 i64 are split into i64 limbs before code generation (`Fir_wide`; `fas-fir --legalize` shows the result); division, wide conversions to and from float, and shifts use small helper functions that are added to the module. Atomics of every width (`Fir_atomic`, also on the LLVM path): odd widths up to 64 bits on their i8..i64 container, with add/sub/min/max as a `cmpxchg` loop; wider than 64 bits through libatomic (below) | — | — |
 | Float types | f16 (C `_Float16`: computed as f32 and rounded once per operation, `fma` exact, every comparison and conversion; held as 16-bit integers by `Fir_wide`), f32 f64 f80 (x87 extended precision, C `long double`: every op, comparison and conversion, also wide integers to and from f80, and atomics through libatomic) | — | — |
-| Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters, results and variadic arguments follow the SysV ABI for C vectors (§5) | Atomic vector loads and stores; vector `atomic_rmw`/`cmpxchg`; `masked_load/store` of bool vectors | Scalar loops. |
+| Vectors | Every vector operation: `Fir_scalarize` rewrites vectors into scalar lanes before code generation, so each lane-wise operation supported on scalars is supported on vectors, as are all reductions, `shuffle`, `extract`/`insert` at any index, `masked_load/store`, `compress`, `expand` and shape-changing `bitcast`. Vector parameters, results and variadic arguments follow the SysV ABI for C vectors (§5) | Atomic vector loads and stores; vector `atomic_rmw`/`cmpxchg` | Scalar loops. |
 | Integer ops | Everything in §6, on scalars and vectors, including `bswap`, `bitrev`, `abs`, `smulh`/`umulh` and the `*_ovf` family | — | — |
 | Float ops | Everything in §6, on scalars and vectors: fmin/fmax follow §6 (NaN loses, -0 < +0), `frem` is exact (as C `fmod`, through x87 `fprem`), `fma` is correctly rounded (software helpers: baseline x86-64 has no FMA instruction, and x87 none for f80), `floor ceil ftrunc roundeven` through integer helpers (no SSE4.1 `roundsd`); every op honors the rounding mode and raises the IEEE flags (§6) | — | — |
 | fcmp | All 16 predicates, on scalars and vectors | — | — |

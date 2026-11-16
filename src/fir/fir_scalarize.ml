@@ -329,6 +329,60 @@ let masked_store cx align t (v : value array) p (mask : value array) =
       cx.b <- cont)
     mask
 
+(* bool vectors are bit packed in memory (lane k is bit k mod 8 of byte
+   k / 8, SPEC §2), so their masked accesses work on whole bytes, and touch
+   only the bytes that hold a selected lane (A1: no access is invented).
+   [f j lanes any] for byte j, its lanes and whether any of them is set. *)
+let bool_bytes cx (mask : value array) f =
+  let n = Array.length mask in
+  for j = 0 to ((n + 7) / 8) - 1 do
+    let lanes = List.init (min 8 (n - (8 * j))) (fun b -> (8 * j) + b) in
+    let any =
+      List.fold_left (fun acc k -> e cx (Ibin (Or, 0, acc, mask.(k))) i1) mask.(List.hd lanes) (List.tl lanes)
+    in
+    f j lanes any
+  done
+
+(* a selected lane takes its bit of the byte, read only when some lane of
+   that byte is selected *)
+let masked_load_bool cx p (mask : value array) (pass : value array) =
+  let out = Array.copy pass in
+  bool_bytes cx mask (fun j lanes any ->
+      let ld = add_block cx.g and join = add_block cx.g in
+      let byte = add_param cx.g join i8 in
+      set_term ~loc:cx.loc cx.g cx.b (Br (any, target ld, target ~args:[| iconst cx.g i8 0L |] join, -1));
+      cx.b <- ld;
+      let y = e cx (Load (plain_mem 1, at cx p j)) i8 in
+      set_term ~loc:cx.loc cx.g cx.b (Jump (target ~args:[| y |] join));
+      cx.b <- join;
+      List.iter
+        (fun k ->
+          let bit = e cx (Ibin (Lshr, 0, byte, iconst cx.g i8 (Int64.of_int (k mod 8)))) i8 in
+          out.(k) <- e cx (Select (mask.(k), e cx (Conv (Trunc, bit)) i1, pass.(k))) i1)
+        lanes);
+  out
+
+(* a read-modify-write of each byte holding a selected lane: the selected
+   bits change, the others are written back as read. Not atomic: a store
+   another thread makes to the other bits of such a byte meanwhile may be
+   lost (SPEC §6) *)
+let masked_store_bool cx (v : value array) p (mask : value array) =
+  bool_bytes cx mask (fun j lanes any ->
+      let st = add_block cx.g and cont = add_block cx.g in
+      set_term ~loc:cx.loc cx.g cx.b (Br (any, target st, target cont, -1));
+      cx.b <- st;
+      let q = at cx p j in
+      let old = e cx (Load (plain_mem 1, q)) i8 in
+      let place x k = e cx (Ibin (Shl, 0, e cx (Conv (Zext, x)) i8, iconst cx.g i8 (Int64.of_int (k mod 8)))) i8 in
+      let fold g = List.fold_left (fun acc k -> e cx (Ibin (Or, 0, acc, g k)) i8) (iconst cx.g i8 0L) lanes in
+      let sel = fold (fun k -> place mask.(k) k) in
+      let bits = fold (fun k -> place v.(k) k) in
+      let keep = e cx (Ibin (And, 0, old, e cx (Ibin (Xor, 0, sel, iconst cx.g i8 (-1L))) i8)) i8 in
+      let nw = e cx (Ibin (Or, 0, keep, e cx (Ibin (And, 0, bits, sel)) i8)) i8 in
+      e0 cx (Store (plain_mem 1, nw, q));
+      set_term ~loc:cx.loc cx.g cx.b (Jump (target cont));
+      cx.b <- cont)
+
 (* a bitcast that changes the shape: through memory *)
 let bitcast_mem cx x dst =
   let st = src_ty cx x in
@@ -502,12 +556,12 @@ let convert_inst cx (i : inst) =
   | Reduce (k, a) -> set cx (r 0) [| reduce cx k (rty 0) (get cx a) |]
   | Masked_load (align, p, m, pt) ->
       let _, t = shape () in
-      if t = i1 then unsupported "masked_load of a bool vector";
-      set cx (r 0) (masked_load cx align t (get1 cx p) (get cx m) (get cx pt))
+      if t = i1 then set cx (r 0) (masked_load_bool cx (get1 cx p) (get cx m) (get cx pt))
+      else set cx (r 0) (masked_load cx align t (get1 cx p) (get cx m) (get cx pt))
   | Masked_store (align, v, p, m) ->
       let t = elem (src_ty cx v) in
-      if t = i1 then unsupported "masked_store of a bool vector";
-      masked_store cx align t (get cx v) (get1 cx p) (get cx m)
+      if t = i1 then masked_store_bool cx (get cx v) (get1 cx p) (get cx m)
+      else masked_store cx align t (get cx v) (get1 cx p) (get cx m)
   | Compress (v, m) ->
       let _, t = shape () in
       set cx (r 0) (compress cx t (get cx v) (get cx m))
