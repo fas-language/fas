@@ -25,7 +25,9 @@
      entry-block slot and llvm.masked.expandload.
    - Overflow arithmetic and cmpxchg give an LLVM struct; their two Fir
      results are its fields. A function or call with several results
-     returns a literal struct.
+     returns a literal struct of those that go in registers, the rest in
+     the block behind a hidden `ptr noalias` first parameter (SPEC §5,
+     Fir_abi.multi_results; not sret, whose pointer comes back in rax).
    - [syscall] is inline asm (Linux x86-64 registers, as the old renderer).
    - Alias tags, noalias scopes, branch weights and dbg_value are hints and
      are dropped.
@@ -39,8 +41,7 @@
      bits (funnel shifts, saturating and int-to-float conversions), the
      operation is expanded; odd-width stores write the full size.
 
-   Refused (Unsupported, never miscompiled): several results when one is
-   an agg, 4-byte data relocations, and a blockaddr of an entry block. *)
+   Refused (Unsupported, never miscompiled): 4-byte data relocations, and a blockaddr of an entry block. *)
 
 open Fir
 
@@ -264,7 +265,15 @@ let sret_attr (size, align) = Printf.sprintf " sret([%d x i8]) align %d" size al
 
 (* A lowered signature: the result's plan (None: no result, or several,
    which return a literal struct of scalars), the parameters' plans *)
-type lsig = { rplan : (rhow * ty option) option; sret : (int * int) option; hows : (how * ty option) list }
+type lsig = {
+  rplan : (rhow * ty option) option;
+  sret : (int * int) option;
+  hows : (how * ty option) list;
+  multi : (abi * A.mpart * ty option) list option;
+      (** several results (Fir_abi.multi_results): each one's C abi, part
+          and Fir value type as in [rplan] *)
+  block : (int * int) option;  (** their block's size and alignment *)
+}
 
 let lower_sig what (result_abis : abi list) (abis : abi list) =
   let rplan =
@@ -272,18 +281,44 @@ let lower_sig what (result_abis : abi list) (abis : abi list) =
     | [ a ] ->
         let a, vf = c_abi a in
         Some (plan_ret a, vf)
-    | l ->
-        List.iter (function Agg _ -> unsupported "%s: an aggregate among several results" what | _ -> ()) l;
-        None
+    | _ -> None
+  in
+  ignore what;
+  let multi, block =
+    match result_abis with
+    | _ :: _ :: _ ->
+        let cr = List.map c_abi result_abis in
+        let parts, block = A.multi_results (List.map fst cr) in
+        (Some (List.map2 (fun (a, vf) p -> (a, p, vf)) cr parts), block)
+    | _ -> (None, None)
   in
   let sret = match rplan with Some (Rsret (s, a), _) -> Some (s, a) | _ -> None in
   let cabis = List.map c_abi abis in
-  let hows = plan_args ~sret:(sret <> None) (List.map fst cabis) in
-  { rplan; sret; hows = List.map2 (fun h (_, vf) -> (h, vf)) hows cabis }
+  let hows = plan_args ~sret:(sret <> None || block <> None) (List.map fst cabis) in
+  { rplan; sret; hows = List.map2 (fun h (_, vf) -> (h, vf)) hows cabis; multi; block }
+
+(* the LLVM type of a result of several in a register: an Ext widened to
+   i64 *)
+let multi_reg_ty (a : abi) = match a with Ext _ -> "i64" | Scalar t -> lty t | Agg _ -> assert false
+
+(* the results of several that are in registers, in order *)
+let multi_regs (l : lsig) =
+  match l.multi with
+  | None -> []
+  | Some m -> List.filter (function _, A.Mmem _, _ -> false | _ -> true) m
+
+let multi_ret_ty (l : lsig) =
+  match multi_regs l with
+  | [] -> "void"
+  | rs -> "{ " ^ String.concat ", " (List.map (fun (a, _, _) -> multi_reg_ty a) rs) ^ " }"
+
+(* the alignment of offset [o] in a block aligned to [ba] *)
+let block_align ba o = if o = 0 then ba else min ba (o land -o)
 
 (* the LLVM return type and its extension attribute *)
 let lret_ty what result_abis (l : lsig) =
   match l.rplan with
+  | None when l.multi <> None -> (multi_ret_ty l, "")
   | None -> results_ty what result_abis
   | Some (Rplain (t, e), _) -> (lty t, e)
   | Some (Rsret _, _) | Some (Rparts (_, _, []), _) -> ("void", "")
@@ -294,7 +329,9 @@ let lret_ty what result_abis (l : lsig) =
 
 (* all LLVM parameters (type, attributes), the sret pointer first *)
 let lparams_all (l : lsig) =
-  (match l.sret with Some sa -> [ ("ptr", sret_attr sa) ] | None -> []) @ List.concat_map (fun (h, _) -> lparams h) l.hows
+  (match l.sret with Some sa -> [ ("ptr", sret_attr sa) ] | None -> [])
+  @ (match l.block with Some _ -> [ ("ptr", " noalias") ] | None -> [])
+  @ List.concat_map (fun (h, _) -> lparams h) l.hows
 
 (* ---------- output ---------- *)
 
@@ -1445,10 +1482,12 @@ let emit_inst cx (ir : inst_rec) =
       let l = lower_sig what sig_.result_abis abis in
       let ret, ret_ext = lret_ty what sig_.result_abis l in
       let sret_slot = Option.map (fun (size, align) -> slot cx size (max 8 align)) l.sret in
+      let block_slot = Option.map (fun (size, align) -> (slot cx size (max 8 align), max 8 align)) l.block in
       let arg_text =
         (match (l.sret, sret_slot) with
         | Some sa, Some p -> [ "ptr" ^ sret_attr sa ^ " " ^ p ]
         | _ -> [])
+        @ (match block_slot with Some (p, _) -> [ "ptr noalias " ^ p ] | None -> [])
         @ List.concat (List.map2 (fun x h -> arg_texts cx x h) (Array.to_list args) l.hows)
       in
       (* a variadic callee's type is spelled out, with the fixed parameters
@@ -1464,7 +1503,7 @@ let emit_inst cx (ir : inst_rec) =
         flag_text attrs [ (a_noreturn, "noreturn"); (a_returns_twice, "returns_twice"); (a_nounwind, "nounwind") ]
       in
       (* a callee handed one of this frame's slots is no tail call *)
-      let tail = has attrs a_tail && l.sret = None && not (List.exists (function Hmem _, _ -> true | _ -> false) l.hows) in
+      let tail = has attrs a_tail && l.sret = None && l.block = None && not (List.exists (function Hmem _, _ -> true | _ -> false) l.hows) in
       let text =
         Printf.sprintf "%scall%s %s%s(%s)%s" (if tail then "tail " else "") ret_ext fn_ty callee_text
           (String.concat ", " arg_text) fattrs
@@ -1475,6 +1514,32 @@ let emit_inst cx (ir : inst_rec) =
           let w = temp cx in
           line cx (w ^ " = " ^ text);
           def (Printf.sprintf "trunc %s %s to %s" (lty t) w (lty wt))
+      | None, rs when l.multi <> None ->
+          let regs = multi_regs l in
+          let t = temp cx in
+          if regs = [] then line cx text else line cx (t ^ " = " ^ text);
+          let st = multi_ret_ty l in
+          let j = ref 0 in
+          List.iteri
+            (fun k (a, part, vf) ->
+              let res = r k in
+              ignore rs;
+              match part with
+              | A.Mgpr _ | A.Mxmm _ -> (
+                  let x = temp cx in
+                  line cx (Printf.sprintf "%s = extractvalue %s %s, %d" x st t !j);
+                  incr j;
+                  match a with
+                  | Ext (ft, _) -> line cx (Printf.sprintf "%s = trunc i64 %s to %s" res x (lty ft))
+                  | _ -> line cx (Printf.sprintf "%s = bitcast %s %s to %s" res (multi_reg_ty a) x (multi_reg_ty a)))
+              | A.Mmem o -> (
+                  let p, ba = Option.get block_slot in
+                  let q = gep cx p o in
+                  match (a, vf) with
+                  | Agg _, None -> line cx (Printf.sprintf "%s = getelementptr i8, ptr %s, i64 0" res q)
+                  | _, Some ft | (Scalar ft | Ext (ft, _)), None ->
+                      line cx (Printf.sprintf "%s = load %s, ptr %s, align %d" res (lty ft) q (block_align ba o))))
+            (Option.get l.multi)
       | None, [| _ |] | Some (Rplain _, _), _ -> def text
       | None, rs ->
           let s = temp cx in
@@ -1673,6 +1738,49 @@ let emit_term cx b (labels : string array) =
             line cx (Printf.sprintf "%s = insertvalue { x86_fp80, x86_fp80 } %s, x86_fp80 %s, 1" t2 t1 b);
             line cx ("ret { x86_fp80, x86_fp80 } " ^ t2)
           end)
+  | Ret xs when cx.fsig.multi <> None ->
+      let l = cx.fsig in
+      let ba = match l.block with Some (_, a) -> max 8 a | None -> 8 in
+      let parts =
+        List.concat
+          (List.mapi
+             (fun k (a, part, vf) ->
+               let x = xs.(k) in
+               match part with
+               | A.Mmem o -> (
+                   let q = gep cx "%mblk" o in
+                   (match (a, vf) with
+                   | Agg { size; align; _ }, None -> memcpy cx q (block_align ba o) (v cx x) align size
+                   | (Agg { size; _ } | Scalar (Int (_ as size))), Some (Int n) when n < 8 * (match a with Agg _ -> size | _ -> size / 8) ->
+                       (* a wide integer is stored zero-extended to its limbs *)
+                       let bits = match a with Agg _ -> 8 * size | _ -> size in
+                       let w = temp cx in
+                       line cx (Printf.sprintf "%s = zext %s to i%d" w (tv cx x) bits);
+                       line cx (Printf.sprintf "store i%d %s, ptr %s, align %d" bits w q (block_align ba o))
+                   | _ -> line cx (Printf.sprintf "store %s, ptr %s, align %d" (tv cx x) q (block_align ba o)));
+                   [])
+               | _ -> (
+                   match a with
+                   | Ext (ft, e) ->
+                       let w = temp cx in
+                       line cx
+                         (Printf.sprintf "%s = %s %s %s to i64" w (if e = Sx then "sext" else "zext") (lty ft) (v cx x));
+                       [ "i64 " ^ w ]
+                   | _ -> [ tv cx x ]))
+             (Option.get l.multi))
+      in
+      if parts = [] then line cx "ret void"
+      else begin
+        let st = multi_ret_ty l in
+        let acc = ref "poison" in
+        List.iteri
+          (fun k p ->
+            let t = temp cx in
+            line cx (Printf.sprintf "%s = insertvalue %s %s, %s, %d" t st !acc p k);
+            acc := t)
+          parts;
+        line cx (Printf.sprintf "ret %s %s" st !acc)
+      end
   | Ret xs ->
       let st = "{ " ^ String.concat ", " (Array.to_list (Array.map (fun x -> lty (tyv cx x)) xs)) ^ " }" in
       let acc = ref "poison" in
@@ -1915,6 +2023,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                wide integer, %sret *)
             let params =
               (match fsig.sret with Some sa -> [ "ptr" ^ sret_attr sa ^ " %sret" ] | None -> [])
+              @ (match fsig.block with Some _ -> [ "ptr noalias %mblk" ] | None -> [])
               @ List.concat
                   (List.mapi
                      (fun k (h, vf) ->

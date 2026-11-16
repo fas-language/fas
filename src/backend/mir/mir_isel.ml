@@ -1272,6 +1272,9 @@ type ret_plan =
   | Rx87 of bool * int
       (** in st0 (and st1): an agg?, how many f80s. An f80, an agg that is
           one f80 (X87, X87UP) or two (COMPLEX_X87: real in st0) *)
+  | Rmulti of (F.abi * mpart) list * (int * int) option
+      (** two or more results (Fir_abi.multi_results): each result's part,
+          and the hidden block's size and alignment *)
 
 let plan_ret (abis : F.abi list) =
   match abis with
@@ -1297,7 +1300,9 @@ let plan_ret (abis : F.abi list) =
                       incr xi;
                       (o, eb, X (!xi - 1)))
                 ebs ))
-  | _ -> unsupported "several results"
+  | _ :: _ :: _ ->
+      let parts, block = multi_results abis in
+      Rmulti (List.combine abis parts, block)
 
 let ret_regs = function
   | Rnone -> []
@@ -1305,6 +1310,15 @@ let ret_regs = function
   | Rregs (_, l) -> List.map (fun (_, _, r) -> r) l
   | Rsret _ -> [ G Rax ]
   | Rx87 _ -> []
+  | Rmulti (l, _) ->
+      List.filter_map (function _, Mgpr k -> Some (G (if k = 0 then Rax else Rdx)) | _, Mxmm k -> Some (X k) | _, Mmem _ -> None) l
+
+(* true when the call passes a hidden pointer in rdi: sret or the block of
+   several results *)
+let hidden_ptr = function Rsret _ | Rmulti (_, Some _) -> true | _ -> false
+
+(* the type a scalar result has inside the function *)
+let abi_ty = function F.Scalar t | F.Ext (t, _) -> t | F.Agg _ -> F.Ptr 0
 
 (* stores the registers of an agg's parts into a fresh slot *)
 let spill_eightbytes c size l =
@@ -1364,6 +1378,42 @@ let aligned_mem c size align =
   end;
   p
 
+(* [v] := the result of abi [a] stored at [ad] (in a block of several
+   results): an agg is its address *)
+let mem_result_in c (a : F.abi) ad v =
+  match a with
+  | F.Agg _ ->
+      let p = fresh c Gpr in
+      emit c (Lea (p, ad));
+      def c v p
+  | _ -> (
+      match abi_ty a with
+      | F.F80 -> copy80 c ~src:ad v
+      | F.F16 ->
+          let g = fresh c Gpr in
+          emit c (Load (2, false, g, ad));
+          def c v (to_xmm c false g)
+      | (F.F32 | F.F64) as t ->
+          let r = fresh c Xmm in
+          emit c (Fload (is_dbl t, r, ad));
+          def c v r
+      | t ->
+          let r = fresh c Gpr in
+          emit c (Load (mem_size t, false, r, ad));
+          norm c (width t) r;
+          def c v r)
+
+(* stores [v], a result of abi [a], at [ad] in the block of several results *)
+let mem_result_out c (a : F.abi) v ad =
+  match a with
+  | F.Agg { size; _ } -> copy_bytes c ~src:(at_reg (use c v)) ~dst:ad size
+  | _ -> (
+      match abi_ty a with
+      | F.F80 -> copy_bytes c ~src:(addr80 c v) ~dst:ad 10
+      | F.F16 -> emit c (Store (2, ad, to_gpr c false (use c v)))
+      | (F.F32 | F.F64) as t -> emit c (Fstore (is_dbl t, ad, use c v))
+      | t -> emit c (Store (mem_size t, ad, use c v)))
+
 let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   let nfixed = List.length sig_.param_abis in
   let abis =
@@ -1374,7 +1424,7 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
       (Array.to_list args)
   in
   let rp = plan_ret sig_.result_abis in
-  let sret = match rp with Rsret _ -> true | _ -> false in
+  let sret = hidden_ptr rp in
   let plans, stack, nx = plan_args ~sret abis in
   c.mf.out_size <- max c.mf.out_size stack;
   (* an argument in memory aligned above 16 needs rsp aligned so at the
@@ -1408,6 +1458,10 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   let sret_slot =
     match rp with
     | Rsret (size, align) ->
+        let p = aligned_mem c size align in
+        pending := Mreg (G Rdi, p) :: !pending;
+        Some p
+    | Rmulti (_, Some (size, align)) ->
         let p = aligned_mem c size align in
         pending := Mreg (G Rdi, p) :: !pending;
         Some p
@@ -1448,12 +1502,34 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
       end
   | Rregs (size, l), [| v |] -> def c v (spill_eightbytes c size l)
   | Rsret _, [| v |] -> def c v (copy c (Option.get sret_slot))
+  | Rmulti (l, _), vs when List.length l = Array.length vs ->
+      (* the registers first, before anything else can reuse them *)
+      let regs =
+        List.mapi
+          (fun i (a, part) ->
+            match part with
+            | Mgpr k ->
+                let r = copy c (G (if k = 0 then Rax else Rdx)) in
+                norm c (width (abi_ty a)) r;
+                Some r
+            | Mxmm k -> Some (copy c (X k))
+            | Mmem _ -> ignore i; None)
+          l
+      in
+      List.iteri
+        (fun i ((a, part), r) ->
+          let v = vs.(i) in
+          match (part, r) with
+          | _, Some r -> def c v r
+          | Mmem o, None -> mem_result_in c a { (at_reg (Option.get sret_slot)) with disp = o } v
+          | _ -> assert false)
+        (List.combine l regs)
   | _ -> unsupported "call result count"
 
 let params c =
   let sig_ = c.fn.sig_ in
   let rp = plan_ret sig_.result_abis in
-  let sret = match rp with Rsret _ -> true | _ -> false in
+  let sret = hidden_ptr rp in
   if sret then c.sret <- Some (copy c (G Rdi));
   let plans, stack, _ = plan_args ~sret sig_.param_abis in
   if sig_.variadic then begin
@@ -1537,6 +1613,27 @@ let ret c vals =
       copy_bytes c ~src:(at_reg (use c p)) ~dst:(at_reg dst) size;
       emit c (Copy (G Rax, dst));
       set_term c (Ret [ G Rax ])
+  | Rmulti (l, _), vs when List.length l = Array.length vs ->
+      (* the block first, then the register moves (the block pointer is not
+         returned) *)
+      let moves =
+        List.concat
+          (List.mapi
+             (fun i (a, part) ->
+               let v = vs.(i) in
+               match part with
+               | Mmem o ->
+                   mem_result_out c a v { (at_reg (Option.get c.sret)) with disp = o };
+                   []
+               | Mgpr k ->
+                   let r = use c v in
+                   let r = match a with F.Ext (t, Sx) -> sx c (width t) r | _ -> r in
+                   [ Mreg (G (if k = 0 then Rax else Rdx), r) ]
+               | Mxmm k -> [ Mreg (X k, use c v) ])
+             l)
+      in
+      emit_moves c moves;
+      set_term c (Ret (List.map move_dst moves))
   | _ -> unsupported "return value count"
 
 (* r := r rounded up to [align] when that is more than the 16 the stack gives *)

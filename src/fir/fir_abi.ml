@@ -108,3 +108,46 @@ let classify ~size ~align:_ ~fields =
 let count_parts l =
   List.fold_left (fun (g, x) (_, eb) -> if eb = Eint then (g + 1, x) else (g, x + 1)) (0, 0) l
 
+
+(* ---------- several results (Fir's own convention, SPEC §5) ----------
+
+   A signature with two or more results returns them in order: an integer
+   of up to 64 bits or a pointer in the next of rax, rdx; an f32 or f64 in
+   the next of xmm0, xmm1; every other result (f16, f80, an agg, which
+   includes vectors and wide integers), and any result once its registers
+   are used up, in a block the caller provides. The block's address is a
+   hidden first argument (rdi, like sret) and is not returned; each result
+   in it sits at the next offset aligned to its alignment, as a C struct of
+   those results would. One result keeps the C rules above. *)
+
+type mpart = Mgpr of int  (** rax, rdx *) | Mxmm of int  (** xmm0, xmm1 *) | Mmem of int  (** offset *)
+
+(* the part of each result, and the block's size and alignment if any *)
+let multi_results (abis : abi list) =
+  let g = ref 0 and x = ref 0 and off = ref 0 and al = ref 1 and mem = ref false in
+  let in_mem size align =
+    mem := true;
+    al := max !al align;
+    let o = (!off + align - 1) / align * align in
+    off := o + size;
+    Mmem o
+  in
+  let parts =
+    List.map
+      (fun (a : abi) ->
+        match a with
+        | (Scalar (Int n) | Ext (Int n, _)) when n <= 64 && !g < 2 ->
+            incr g;
+            Mgpr (!g - 1)
+        | Scalar (Ptr _) when !g < 2 ->
+            incr g;
+            Mgpr (!g - 1)
+        | Scalar (F32 | F64) when !x < 2 ->
+            incr x;
+            Mxmm (!x - 1)
+        | Scalar F80 -> in_mem 16 16
+        | Scalar t | Ext (t, _) -> in_mem (size_of t) (size_of t)
+        | Agg { size; align; _ } -> in_mem size (max 1 align))
+      abis
+  in
+  (parts, if !mem then Some ((!off + !al - 1) / !al * !al, !al) else None)

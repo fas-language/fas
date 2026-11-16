@@ -47,6 +47,8 @@ Fir --Fir_scalarize--> Fir (no vectors)
 - `sh test/fas_fir.sh` (`FAS_FIR_TOOL` names the tool): the Fir
   conformance programs.
 - `fir_fuzz.exe`: random modules compared with clang -O2.
+- `sh test/fir_multi.sh`: several results (SPEC §5) with caller and callee
+  built by different backends, in all four pairings (needs LLVM 22).
 - `sh test/native_determinism.sh`: compiles every Fas test program and
   Fir program twice (the second time from another directory, into another
   file name, with OCaml's hash tables randomized) and requires
