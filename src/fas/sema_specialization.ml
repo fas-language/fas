@@ -15,6 +15,7 @@ type diagnostic_type =
   | Diagnostic_const_ptr of diagnostic_type
   | Diagnostic_addr
   | Diagnostic_handle of diagnostic_type
+  | Diagnostic_secret of diagnostic_type
   | Diagnostic_array of string * diagnostic_type
   | Diagnostic_vec of string * diagnostic_type
   | Diagnostic_named of string
@@ -132,6 +133,7 @@ let rec diagnostic_type_of_ast specializations = function
   | Ast.Float kind -> Diagnostic_float kind
   | Ast.Addr -> Diagnostic_addr
   | Ast.Handle ty -> Diagnostic_handle (diagnostic_type_of_ast specializations ty)
+  | Ast.Secret ty -> Diagnostic_secret (diagnostic_type_of_ast specializations ty)
   | Ast.Array (length, ty) ->
       Diagnostic_array (length.Ast.text, diagnostic_type_of_ast specializations ty)
   | Ast.Vec (length, ty) ->
@@ -176,6 +178,7 @@ let rec render_diagnostic_type = function
   | Diagnostic_const_ptr ty -> "ptr[const " ^ render_diagnostic_type ty ^ "]"
   | Diagnostic_addr -> "addr"
   | Diagnostic_handle ty -> "handle[" ^ render_diagnostic_type ty ^ "]"
+  | Diagnostic_secret ty -> "secret[" ^ render_diagnostic_type ty ^ "]"
   | Diagnostic_array (length, ty) ->
       "arr[" ^ length ^ ", " ^ render_diagnostic_type ty ^ "]"
   | Diagnostic_vec (length, ty) ->
@@ -377,6 +380,9 @@ let rec specialization_type_key = function
   | Ast.Handle ty ->
       let key = specialization_type_key ty in
       "handle" ^ string_of_int (String.length key) ^ "_" ^ key
+  | Ast.Secret ty ->
+      let key = specialization_type_key ty in
+      "secret" ^ string_of_int (String.length key) ^ "_" ^ key
   | Ast.Array (length, ty) ->
       let length =
         try string_of_int (int_of_string length.text) with Failure _ -> length.text

@@ -6,6 +6,9 @@ and ty =
   | Float of float_kind
   | Addr
   | Handle of ty
+  (* `secret[T]`: a constant-time value ("Fas v2 decisions.md", constant
+     time). Sema checks it as T and enforces the secrecy rules separately *)
+  | Secret of ty
   | Array of aggregate_length * ty
   | Vec of aggregate_length * ty
   | Named_type of string * Span.t
@@ -419,6 +422,7 @@ let rec type_name = function
   | Float F64 -> "f64"
   | Addr -> "addr"
   | Handle t -> "handle[" ^ type_name t ^ "]"
+  | Secret t -> "secret[" ^ type_name t ^ "]"
   | Array (n, t) -> "arr[" ^ n.text ^ ", " ^ type_name t ^ "]"
   | Vec (n, t) -> "vec[" ^ n.text ^ ", " ^ type_name t ^ "]"
   | Named_type (s, _) -> s
@@ -611,6 +615,10 @@ let render_program program =
     | Addr -> text "addr"
     | Handle inner ->
         text "handle[";
+        emit_ty inner;
+        text "]"
+    | Secret inner ->
+        text "secret[";
         emit_ty inner;
         text "]"
     | Array (n, inner) ->
@@ -1175,7 +1183,7 @@ let expanded_walker ~identifiers ~limit =
       | Named_type (name, _) ->
           identifiers := name :: !identifiers;
           count at
-      | Handle inner ->
+      | Handle inner | Secret inner ->
           count at;
           go_ty at inner
       | Array (length, inner) | Vec (length, inner) ->
@@ -1439,6 +1447,7 @@ let rec map_ty m ty =
       match ty with
       | Bool | Int _ | Float _ | Addr | Void | Named_type _ -> ty
       | Handle inner -> Handle (map_ty m inner)
+      | Secret inner -> Secret (map_ty m inner)
       | Array (length, inner) -> Array (map_length m length, map_ty m inner)
       | Vec (length, inner) -> Vec (map_length m length, map_ty m inner)
       | Applied_type (name, span, args, args_span) ->

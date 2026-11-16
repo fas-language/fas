@@ -4830,6 +4830,7 @@ let canonical_type aliases ty =
     | Ast.Named_type (name, _) as ty ->
         Option.value ~default:ty (List.assoc_opt name aliases)
     | Ast.Handle inner -> Ast.Handle (canonical inner)
+    | Ast.Secret inner -> Ast.Secret (canonical inner)
     | Ast.Array (length, inner) -> Ast.Array (length, canonical inner)
     | Ast.Vec (length, inner) -> Ast.Vec (length, canonical inner)
     | ty -> ty

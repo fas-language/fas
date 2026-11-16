@@ -302,6 +302,8 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
     | Ast.Float Ast.F32 -> Ok (Hir.Float Hir.F32)
     | Ast.Float Ast.F64 -> Ok (Hir.Float Hir.F64)
     | Ast.Addr -> Ok Hir.Addr
+    (* layout and constant contexts: a secret is laid out as its type *)
+    | Ast.Secret ty -> resolve_type type_bindings const_bindings at ty
     | Ast.Handle ty -> (
         let* ty = resolve_type type_bindings const_bindings at ty in
         match ty with

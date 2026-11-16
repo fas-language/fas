@@ -29,6 +29,24 @@ let report (config : Cli.t) diagnostics =
               diagnostics))
   | Cli.Json -> prerr_endline (Diag.render_json diagnostics)
 
+(* exit status for failed diagnostics: 3 when the compiler itself is at
+   fault (an internal error, a native backend check such as the
+   machine-code constant-time check included), else 1 *)
+let failure_status diagnostics =
+  let mentions needle (d : Diag.t) =
+    let n = String.length needle and m = String.length d.Diag.message in
+    let rec go i =
+      i + n <= m && (String.sub d.Diag.message i n = needle || go (i + 1))
+    in
+    go 0
+  in
+  if
+    List.exists
+      (fun d -> d.Diag.severity = Diag.Error && mentions "internal error" d)
+      diagnostics
+  then 3
+  else 1
+
 let run_program (config : Cli.t) args =
   let suffix = match config.Cli.os with Target_layout.Linux -> "" in
   match Filename.temp_file "fas-run-" suffix with
@@ -44,7 +62,7 @@ let run_program (config : Cli.t) args =
           with
           | Error diagnostics ->
               report config diagnostics;
-              1
+              failure_status diagnostics
           | Ok _ -> (
               let name =
                 Option.value ~default:config.input
@@ -74,7 +92,7 @@ let () =
       | Ok output -> print_string output
       | Error diagnostics ->
           report config diagnostics;
-          exit 1)
+          exit (failure_status diagnostics))
   | Ok (Cli.Check config) -> (
       match Driver.check config with
       | Ok checked ->
@@ -83,7 +101,7 @@ let () =
           exit 0
       | Error diagnostics ->
           report config diagnostics;
-          exit 1)
+          exit (failure_status diagnostics))
   | Ok (Cli.Lsp options) -> exit (Lsp.run options)
   | Ok (Cli.Run_program (config, args)) -> exit (run_program config args)
   | Error message ->

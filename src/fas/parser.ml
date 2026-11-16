@@ -430,6 +430,13 @@ module P = struct
             let* t = ty p in
             let* () = expected p Token.Rbracket in
             Ok (Ast.Handle t))
+    | Token.Ident name when Names.type_constructor name = Some Names.Secret ->
+        ignore (bump p);
+        let* () = expected p Token.Lbracket in
+        delimited p (fun () ->
+            let* t = ty p in
+            let* () = expected p Token.Rbracket in
+            Ok (Ast.Secret t))
     | Token.Ident name when Names.type_constructor name = Some Names.Array ->
         ignore (bump p);
         let* () = expected p Token.Lbracket in

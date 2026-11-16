@@ -396,6 +396,9 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   (* the value struct registry: declared ones now, specializations as
      monomorphization makes them *)
   Stdlib.Hashtbl.reset Hir.value_structs;
+  Stdlib.Hashtbl.reset Hir.secret_fields;
+  Stdlib.Hashtbl.reset Hir.secret_results;
+  Stdlib.Hashtbl.reset Hir.secret_funcs;
   List.iter
     (function
       | Ast.Struct { name; is_value = true; _ } ->
@@ -675,9 +678,21 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 if String_set.mem f.name seen then
                   error f.span (Printf.sprintf "duplicate field `%s`" f.name)
                 else
-                  let* ty = source_ty_diag named_types f.ty_span f.ty in
+                  let* ty =
+                    Sema_types.with_secret (fun () ->
+                        source_ty_diag named_types f.ty_span f.ty)
+                  in
+                  let secrecy = Sema_types.secrecy_of named_types f.ty in
+                  if secrecy <> Hir.Public && List.mem name union_names then
+                    error f.ty_span
+                      "a union can't have a secret field: another field would read \
+                       its bytes as public"
+                  else begin
+                  if secrecy <> Hir.Public then
+                    Stdlib.Hashtbl.replace Hir.secret_fields (name, f.name) secrecy;
                   collect_fields (String_set.add f.name seen) ((f.name, ty) :: out)
                     fields
+                  end
           in
           collect_fields String_set.empty [] fields
         in
@@ -693,7 +708,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   let build structs_src =
     let rec mentions_type target = function
       | Ast.Named_type (name, _) -> name = target
-      | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> mentions_type target ty
+      | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> mentions_type target ty
       | Ast.Applied_type (_, _, arguments, _) ->
           List.exists
             (function
@@ -704,7 +719,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     in
     let rec contains_void = function
       | Ast.Void -> true
-      | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> contains_void ty
+      | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> contains_void ty
       | _ -> false
     in
     let layout_error_field ?overflow_field message =
@@ -859,9 +874,22 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     let* t = source_ty_diag named_types span t in
     validate_object span t
   in
+  (* parameters and results may be `secret[T]`; [param_secrets] and
+     [record_result] keep the secrecy beside the resolved types *)
   let source_return span t =
-    let* t = source_ty_diag named_types span t in
+    let* t = Sema_types.with_secret (fun () -> source_ty_diag named_types span t) in
     if t = Hir.Void then Ok t else validate_object span t
+  in
+  let source_param span t =
+    Sema_types.with_secret (fun () -> source_obj span t)
+  in
+  let param_secrets (params : Ast.param list) =
+    List.map (fun (param : Ast.param) -> Sema_types.secrecy_of named_types param.ty) params
+  in
+  let record_result name ret =
+    match Sema_types.secrecy_of named_types ret with
+    | Hir.Public -> ()
+    | secrecy -> Stdlib.Hashtbl.replace Hir.secret_results name secrecy
   in
   let program_strings = create_string_pool limits in
   let* storage_declarations =
@@ -913,7 +941,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       (Sema_static_env.storage_items symbolic_names program.items)
   in
   let source_params =
-    map_params (fun (param : Ast.param) -> source_obj param.ty_span param.ty)
+    map_params (fun (param : Ast.param) -> source_param param.ty_span param.ty)
   in
   let sigs = ref [] and declared_functions = ref String_set.empty in
   let validate_entry_signature span params ret =
@@ -978,7 +1006,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
               else
                 let* ps =
                   map_params
-                    (fun (param : Ast.param) -> source_obj param.ty_span param.ty)
+                    (fun (param : Ast.param) -> source_param param.ty_span param.ty)
                     params
                 in
                 let* rt = source_return ret_span ret in
@@ -1079,8 +1107,10 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       index;
     }
   in
-  let hir_params params =
-    List.mapi (fun id (name, ty) -> ({ Hir.name; ty; id } : Hir.local)) params
+  let hir_params secrets params =
+    List.mapi
+      (fun id ((name, ty), secret) -> ({ Hir.name; ty; id; secret } : Hir.local))
+      (List.combine params secrets)
   in
   let own_loop_label = function
     | None -> []
@@ -1113,8 +1143,8 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       Function_specialization name
   in
   let check_function_body ~name ~diagnostic_name ~description ~span ~diagnostic_span
-      ~params ~param_spans ~ret ~fails ~stmts ~linkage ~variadic ~extra_consts
-      ~spec_depth ~spec_trace ~require_return =
+      ~params ~param_secrets ~param_spans ~ret ~fails ~stmts ~linkage ~variadic
+      ~extra_consts ~spec_depth ~spec_trace ~require_return =
     let context =
       make_context ~extra_consts ~spec_depth ~spec_trace ~ret_ty:ret ~fn_fails:fails
     in
@@ -1133,12 +1163,12 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     Sema_flow.set_loop_labels context.flow (loop_labels_in_block stmts);
     let* params =
       Result_list.map
-        (fun ((param_name, param_ty), param_span) ->
-          let* binding = add_local param_name param_ty context span in
+        (fun (((param_name, param_ty), secret), param_span) ->
+          let* binding = add_local ~secret param_name param_ty context span in
           index_local context binding param_span;
           mark_init binding context;
           Ok binding)
-        (List.combine params param_spans)
+        (List.combine (List.combine params param_secrets) param_spans)
     in
     let body = Sema_check.check_block context stmts in
     Option.iter Sema_index.leave_body index;
@@ -1191,6 +1221,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
         let description = if trace = [] then "function" else "specialized function" in
         let result =
           let* ret = source_return ret_span ret in
+          record_result name func.ret;
           let* params = source_params params in
           let linkage = hir_linkage linkage in
           match body with
@@ -1205,7 +1236,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
               Ok
                 ({
                    Hir.name;
-                   params = hir_params params;
+                   params = hir_params (param_secrets func.params) params;
                    ret;
                    fails = func.fails;
                    body = Hir.Declaration;
@@ -1218,6 +1249,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
           | Ast.Statements stmts ->
               check_function_body ~name ~diagnostic_name ~description ~span
                 ~diagnostic_span:name_span ~params
+                ~param_secrets:(param_secrets func.params)
                 ~param_spans:
                   (List.map (fun (param : Ast.param) -> param.span) func.params)
                 ~ret ~fails:func.fails ~stmts ~linkage ~variadic ~extra_consts:[] ~spec_depth
@@ -1271,7 +1303,11 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
             } ->
             let result =
               let source_params = params in
-              let* ret = source_ty_with_values named_types values func.ret_span ret in
+              let* ret =
+                Sema_types.with_secret (fun () ->
+                    source_ty_with_values named_types values func.ret_span ret)
+              in
+              record_result sp.name func.ret;
               let* ret =
                 if ret = Hir.Void then Ok ret else validate_object func.ret_span ret
               in
@@ -1279,8 +1315,9 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 Result_list.map
                   (fun (parameter : Ast.param) ->
                     let* ty =
-                      source_ty_with_values named_types values parameter.ty_span
-                        parameter.ty
+                      Sema_types.with_secret (fun () ->
+                          source_ty_with_values named_types values parameter.ty_span
+                            parameter.ty)
                     in
                     let* ty = validate_object parameter.ty_span ty in
                     Ok (parameter.name, ty))
@@ -1296,6 +1333,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                      sp.name)
                 ~description:"specialized function" ~span
                 ~diagnostic_span:func.name_span ~params
+                ~param_secrets:(param_secrets source_params)
                 ~param_spans:
                   (List.map (fun (param : Ast.param) -> param.span) source_params)
                 ~ret ~fails:func.fails ~stmts ~linkage:(hir_linkage linkage) ~variadic
@@ -1416,17 +1454,20 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       Sema_index.finish index
         ~render:(Sema_specialization.source_facing_text specializations))
     index;
-  Ok
-    ({
-       Hir.structs;
-       consts = hconsts;
-       const_arrays = harrays;
-       globals;
-       funcs = List.rev !funcs;
-       strings = List.rev program_strings.reversed;
-       errors = program_errors;
-     }
-      : Hir.program)
+  let hir_program : Hir.program =
+    {
+      Hir.structs;
+      consts = hconsts;
+      const_arrays = harrays;
+      globals;
+      funcs = List.rev !funcs;
+      strings = List.rev program_strings.reversed;
+      errors = program_errors;
+    }
+  in
+  (* the constant-time rules, on the finished program *)
+  let* () = Sema_secret.check hir_program in
+  Ok hir_program
 
 let check ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters ?c_string_parameters
     ?c_alloc_size_parameters ?c_records ?all_errors ?specializations
@@ -1456,6 +1497,8 @@ let check ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters ?c_string_para
       Sema_check.call_assert_env := Some { Sema_check.program; sema = reduced };
       Fun.protect ~finally:(fun () -> Sema_check.call_assert_env := saved) f
     and reduced program specializations =
+      let restore = Hir.save_tables () in
+      Fun.protect ~finally:restore @@ fun () ->
       with_env program (fun () ->
           check_program ?limits ?c_aliases ?c_unsupported ?c_nonnull_parameters
             ?c_string_parameters ?c_alloc_size_parameters ?c_records ~specializations

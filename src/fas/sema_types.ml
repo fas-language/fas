@@ -294,7 +294,45 @@ let vec_cap_error length (element : Hir.ty) =
         Some "vector size exceeds the portable cap of 2048 bits"
     | _ -> None
 
+(* `secret[T]` resolves to T: secrecy is not part of Hir types, it is kept
+   beside them (Hir.secrecy) and enforced by Sema_secret. It is accepted
+   only where that bookkeeping exists: the declared type of a local,
+   parameter, result or struct field, a memory access type and layout
+   queries. Those sites resolve under [with_secret]; anywhere else it is an
+   error, so a secret is never dropped silently *)
+let secret_allowed = ref false
+
+let with_secret f =
+  let previous = !secret_allowed in
+  secret_allowed := true;
+  Fun.protect ~finally:(fun () -> secret_allowed := previous) f
+
+let secret_place_error =
+  "`secret[...]` is allowed only in the type of a local, parameter, result, struct \
+   field, array element or memory access"
+
+let secret_kind_error = "`secret[T]` needs an integer or `bool` type, or a vector of them"
+
+let secret_vector_error =
+  "a vector is secret as a whole: write `secret[vec[N, T]]`, not `vec[N, secret[T]]`"
+
+(* `secret[T]` resolved by [resolve] (T's own resolution): the place must
+   allow it and T must be an integer, `bool` or a vector of them.
+   `secret[secret[T]]` (from `secret[T]` with T = secret[u32]) is `secret[T]` *)
+let resolve_secret resolve inner =
+  let rec strip = function Ast.Secret t -> strip t | t -> t in
+  if not !secret_allowed then Error secret_place_error
+  else
+    match resolve (strip inner) with
+    | Ok ((Hir.Bool | Hir.Int _ | Hir.Vec (_, (Hir.Int _ | Hir.Bool))) as t) -> Ok t
+    | Ok _ -> Error secret_kind_error
+    | Error _ as e -> e
+
+let is_secret_type = function Ast.Secret _ -> true | _ -> false
+
 let rec source_ty named_types = function
+  | Ast.Secret ty -> resolve_secret (source_ty named_types) ty
+  | Ast.Vec (_, element) when is_secret_type element -> Error secret_vector_error
   | Ast.Bool -> Ok Hir.Bool
   | Ast.Void -> Ok Hir.Void
   | Ast.Int kind -> Ok (Hir.Int (src_int kind))
@@ -340,6 +378,23 @@ let rec source_ty named_types = function
   | Ast.Applied_type _ ->
       Error "internal error: generic type application reached ordinary type checking"
 
+(* the secrecy a declared type gives its storage: `secret[T]` is secret,
+   an array of secrets has secret elements. Structs are public as a whole
+   (their fields carry their own secrecy) *)
+and secrecy_of named_types = function
+  | Ast.Secret _ -> Hir.Secret
+  | Ast.Array (_, element) -> (
+      match secrecy_of named_types element with
+      | Hir.Public -> Hir.Public
+      | secrecy -> Hir.Elements secrecy)
+  | Ast.Named_type (name, _) -> (
+      match List.assoc_opt name named_types with
+      | Some (Alias_name ty) -> secrecy_of named_types ty
+      | _ -> Hir.Public)
+  | Ast.Bool | Ast.Void | Ast.Int _ | Ast.Float _ | Ast.Addr | Ast.Handle _ | Ast.Vec _
+  | Ast.Applied_type _ ->
+      Hir.Public
+
 (* `handle[S]` names any struct: a Fas struct (also a specialized generic
    one), a C record (also one whose layout Fas cannot use) or an incomplete
    C type. *)
@@ -369,7 +424,7 @@ and source_aggregate named_types kind make raw element =
 
 let rec named_type_span name = function
   | Ast.Named_type (candidate, span) when candidate = name -> Some span
-  | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> named_type_span name ty
+  | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> named_type_span name ty
   | Ast.Applied_type (_, _, arguments, _) ->
       List.find_map
         (function
@@ -381,7 +436,7 @@ let rec named_type_span name = function
 let rec misused_type_span = function
   | Ast.Named_type (name, span) when Option.is_some (Names.type_misuse_message name) ->
       Some (name, span)
-  | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> misused_type_span ty
+  | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> misused_type_span ty
   | Ast.Applied_type (_, _, arguments, _) ->
       List.find_map
         (function
@@ -391,7 +446,7 @@ let rec misused_type_span = function
 
 let rec source_type_span_opt = function
   | Ast.Named_type (_, span) | Ast.Applied_type (_, _, _, span) -> Some span
-  | Ast.Handle ty -> source_type_span_opt ty
+  | Ast.Handle ty | Ast.Secret ty -> source_type_span_opt ty
   | Ast.Array (length, ty) | Ast.Vec (length, ty) -> (
       match source_type_span_opt ty with
       | Some _ as span -> span
@@ -421,7 +476,7 @@ let rec opaque_source_span named_types seen = function
 let rec vector_element_source_span fallback = function
   | Ast.Vec (_, (Ast.Vec _ as inner)) -> vector_element_source_span fallback inner
   | Ast.Vec (_, inner) -> Some (source_type_span fallback inner)
-  | Ast.Array (_, inner) | Ast.Handle inner -> vector_element_source_span fallback inner
+  | Ast.Array (_, inner) | Ast.Handle inner | Ast.Secret inner -> vector_element_source_span fallback inner
   | Ast.Applied_type (_, _, arguments, _) ->
       List.find_map
         (function
@@ -454,7 +509,7 @@ let source_ty_diag named_types span ty =
                     match int_of_string_opt length.text with
                     | Some value when value >= 0 -> bad_length_span element
                     | Some _ | None -> Some length.span)
-                | Ast.Handle inner -> bad_length_span inner
+                | Ast.Handle inner | Ast.Secret inner -> bad_length_span inner
                 | Ast.Applied_type (_, _, arguments, _) ->
                     List.find_map
                       (function
@@ -491,7 +546,7 @@ let rec declared_c_type_span name = function
         | _ -> "N"
       in
       Some (span, Some length)
-  | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> declared_c_type_span name ty
+  | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) -> declared_c_type_span name ty
   | _ -> None
 
 let declaration_type_error ~declaration ~variable ty result =
@@ -547,6 +602,24 @@ let resolve_aggregate_length ?(globals = []) ?(kind = "array") values span lengt
       Result.map string_of_int (aggregate_length_value kind span ty value)
 
 let rec source_ty_with_values ?(globals = []) named_types values span = function
+  | Ast.Secret inner ->
+      let resolved = ref None in
+      let result =
+        resolve_secret
+          (fun inner ->
+            match source_ty_with_values ~globals named_types values span inner with
+            | Ok t -> Ok t
+            | Error diagnostics ->
+                resolved := Some diagnostics;
+                Error "")
+          inner
+      in
+      (match (result, !resolved) with
+      | Ok t, _ -> Ok t
+      | Error _, Some diagnostics -> Error diagnostics
+      | Error message, None -> error (source_type_span span inner) message)
+  | Ast.Vec (_, element) when is_secret_type element ->
+      error (source_type_span span element) secret_vector_error
   | Ast.Array (length_info, ty) -> (
       let* length =
         resolve_aggregate_length ~kind:"array" ~globals values length_info.span

@@ -557,8 +557,8 @@ let desugar (program : Ast.program) =
         in
         let rec go p a =
           match (p, a) with
-          | Ast.Handle p, Ast.Handle a -> go p a
-          | Ast.Handle p, a -> go p a
+          | Ast.Handle p, Ast.Handle a | Ast.Secret p, Ast.Secret a -> go p a
+          | Ast.Handle p, a | Ast.Secret p, a -> go p a
           | Ast.Array (_, p), Ast.Array (_, a) | Ast.Vec (_, p), Ast.Vec (_, a) ->
               go p a
           | ( Ast.Applied_type (n, _, pargs, _),

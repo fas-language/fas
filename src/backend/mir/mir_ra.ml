@@ -229,6 +229,12 @@ let run (f : func) =
     done;
     List.stable_sort (fun a b -> compare lo.(a) lo.(b)) !l
   in
+  (* a function that handles secrets uses no callee-saved register: a
+     callee would push one holding a secret below this function's frame,
+     where its zeroizing epilogue does not reach. Its scratch registers are
+     then caller-saved ones *)
+  let gpr_pool = if f.zeroize then List.filter (fun r -> not (List.mem r callee_saved)) gpr_pool else gpr_pool in
+  let gpr_scratch = if f.zeroize then X64.[ R9; R8; Rdi ] else gpr_scratch in
   let scan ~reserve =
     let take n l = match debug_limit with Some k -> List.filteri (fun i _ -> i < min k n) l | None -> l in
     let gp = List.filter (fun r -> not (reserve && List.mem r gpr_scratch)) gpr_pool in
@@ -293,7 +299,11 @@ let run (f : func) =
      blocked there and not holding a virtual register whose interval covers
      p (the scratch fallback; rare, so a plain search) *)
   let free_at cls p avoid =
-    let pool = match cls with Gpr -> List.map (fun r -> G r) gpr_pool | Xmm -> List.map (fun i -> X i) xmm_pool in
+    (* a zeroizing function falls back to a callee-saved scratch register
+       only where every caller-saved one is taken; it clears it after the
+       instruction (below) *)
+    let gpr_all = if f.zeroize then gpr_pool @ callee_saved else gpr_pool in
+    let pool = match cls with Gpr -> List.map (fun r -> G r) gpr_all | Xmm -> List.map (fun i -> X i) xmm_pool in
     List.find_opt
       (fun r ->
         (not (RS.mem r avoid))
@@ -350,6 +360,16 @@ let run (f : func) =
         List.iter note_saved (clobbers after);
         push (Orig (ins, after));
         List.iter (fun v -> if assign.(v) = None then push (Spill (v, g (V v)))) dvs;
+        (* a zeroizing function clears a callee-saved scratch register
+           right after its use: a later callee would save it below this
+           frame. mov keeps the flags *)
+        if f.zeroize then
+          Hashtbl.iter
+            (fun _ r ->
+              match r with
+              | G g when List.mem g callee_saved -> push (Orig (Movi (r, 0L), Movi (r, 0L)))
+              | _ -> ())
+            scratch;
         List.iter (fun v -> if assign.(v) = None then ignore (slot_of v)) (uvs @ dvs))
       codes.(bi);
     items.(bi) <- List.rev !out;

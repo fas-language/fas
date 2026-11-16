@@ -726,7 +726,32 @@ let fail_exit : (state -> Low.value -> (unit, Diag.t list) result) ref =
 (* [construct_into], defined with the statements below, for [Hir.Construct] *)
 let construct_hook = ref (fun _ _ _ _ -> Error [])
 
-let rec expr s = function
+(* constant time (Fir SPEC §8): a value read from a secret source (a secret
+   local or parameter, a secret field, element or typed access, a call with
+   a secret result) is marked `secret`; Fir and the machine-code taint check
+   follow it from there. Sema_secret has checked the rules *)
+let secret_source (e : Hir.expr) =
+  (match Hir.expr_ty e with
+  | Hir.Int _ | Hir.Bool | Hir.Vec (_, (Hir.Int _ | Hir.Bool)) -> true
+  | _ -> false)
+  &&
+  match e with
+  | Hir.Local _ | Hir.Raw_select _ | Hir.Field _ | Hir.Index _ ->
+      Hir.place_secrecy e <> Hir.Public
+  | Hir.Call (Hir.User name, _, _, _) -> Stdlib.Hashtbl.mem Hir.secret_results name
+  | _ -> false
+
+let rec expr s e =
+  let* v = expr_value s e in
+  if secret_source e then begin
+    let t = Low.value_ty v in
+    let id = fresh s in
+    E.mark s.fn id Fir.Secret t v;
+    Ok (Low.Local (id, t))
+  end
+  else Ok v
+
+and expr_value s = function
   | Hir.EInt (v, t, _) -> Ok (Low.Const (ty t, v))
   | Hir.EFloat (v, t, _) -> Ok (Low.Const (ty t, v))
   | Hir.EBool (v, _) -> Ok (Low.Const (Low.I1, if v then 1L else 0L))
@@ -911,7 +936,7 @@ let rec expr s = function
           let id = fresh s in
           E.cast s.fn id k st v dt;
           Ok (Low.Local (id, dt))
-  | Hir.Raw_select (b, off, t, _) ->
+  | Hir.Raw_select (b, off, t, _, _) ->
       let* p = raw_address s b off in
       raw_load s t p
   | Hir.Address (e, _, _) ->
@@ -1288,6 +1313,13 @@ and lower_builtin s b args t span =
       emit_trap s;
       enter s holds;
       Ok (Low.Const (Low.I1, 0L))
+  | Declassify, [ x ] ->
+      let id = fresh s in
+      E.mark s.fn id Fir.Declassify rt x;
+      Ok (Low.Local (id, rt))
+  | Wipe, [ p; n ] ->
+      E.wipe s.fn p n;
+      Ok (Low.Const (Low.I1, 0L))
   | Trap, [] ->
       (* the code after a trap is unreachable but still needs a block *)
       emit_trap s;
@@ -1457,7 +1489,7 @@ and lower_builtin s b args t span =
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
                 | Handle_from_addr _ | Volatile_load _ | Simd_load _ | Atomic _
                 | Errno_err | Err_name | Enum_value | Enum_from _ | Enum_is _
-                | Enum_name _ | Trap | Assert | Checked _ ),
+                | Enum_name _ | Trap | Assert | Checked _ | Declassify | Wipe ),
                 _ ) ->
                 error span "internal error: invalid saturating builtin")
       in
@@ -1694,7 +1726,7 @@ and address s e =
       let id = fresh s in
       E.global_ptr s.fn id n;
       Ok (Low.Local (id, Low.Pointer (storage_ty t)))
-  | Hir.Raw_select (b, off, _, _) -> raw_address s b off
+  | Hir.Raw_select (b, off, _, _, _) -> raw_address s b off
   | Hir.Index (a, i, _, _) -> index_address s a i
   | Hir.Field (a, _, _, off, _) -> field_address s a off
   | _ -> materialize s e
@@ -2415,7 +2447,7 @@ and stmt s statement =
           let ins = fresh s in
           E.insert s.fn ins vt loaded iv x;
           store_value s source_ty (Low.Local (ins, vt)) p alignment
-      | Hir.ARaw (b, off, at) ->
+      | Hir.ARaw (b, off, at, _) ->
           let* p = raw_address s b off in
           let* v = expr s e in
           raw_store s at v p
@@ -2445,7 +2477,7 @@ and stmt s statement =
           let ins = fresh s in
           E.insert s.fn ins vt latest iv value;
           store_value s source_ty (Low.Local (ins, vt)) p alignment
-      | Hir.ARaw (b, off, at) ->
+      | Hir.ARaw (b, off, at, _) ->
           let* p = raw_address s b off in
           let* old = raw_load s at p in
           let* rhs = expr s e in
@@ -2763,7 +2795,7 @@ and target_address s = function
       let id = fresh s in
       E.global_ptr s.fn id name;
       Ok (Low.Local (id, Low.Pointer (storage_ty global_ty)))
-  | Hir.ARaw (b, off, _) -> raw_address s b off
+  | Hir.ARaw (b, off, _, _) -> raw_address s b off
   | Hir.AIndex (a, i) -> index_address s a i
   | Hir.AField (a, _, off) -> field_address s a off
 
@@ -2962,7 +2994,7 @@ let address_taken_locals ?function_addresses body =
     | Hir.Local (local, _) -> Some (resolve_view local.id)
     | Hir.Field (base, _, _, _, _)
     | Hir.Index (base, _, _, _)
-    | Hir.Raw_select (base, _, _, _) ->
+    | Hir.Raw_select (base, _, _, _, _) ->
         root_local base
     | _ -> None
   in
@@ -2976,7 +3008,7 @@ let address_taken_locals ?function_addresses body =
         collect_expr value
     | Hir.Binary (_, left, right, _, _)
     | Hir.Index (left, right, _, _)
-    | Hir.Raw_select (left, right, _, _) ->
+    | Hir.Raw_select (left, right, _, _, _) ->
         collect_expr left;
         collect_expr right
     | Hir.Call (_, args, _, _) -> List.iter collect_expr args
@@ -3005,7 +3037,7 @@ let address_taken_locals ?function_addresses body =
     | Hir.Init_aggregate (_, _, entries, _) -> List.iter collect_construction entries
     | Hir.Init_omitted _ -> ()
   and collect_target = function
-    | Hir.ARaw (base, offset, _) | Hir.AIndex (base, offset) ->
+    | Hir.ARaw (base, offset, _, _) | Hir.AIndex (base, offset) ->
         collect_expr base;
         collect_expr offset
     | Hir.AField (base, _, _) -> collect_expr base
@@ -3108,6 +3140,9 @@ let lower_func mc ~intrinsic_masked_loads
         E.start mc ~name:(link_name f.name) ~linkage ~params ~ret:ret_ty ~ret_extension
           ~variadic:f.variadic ~display:f.display ~source
       in
+      (* zeroization at return (Fir SPEC §8) *)
+      if Stdlib.Hashtbl.mem Hir.secret_funcs f.name then
+        fn.f.fattrs <- fn.f.fattrs lor Fir.fa_secret;
       let s =
         {
           fn;

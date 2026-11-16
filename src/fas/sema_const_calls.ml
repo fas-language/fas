@@ -696,6 +696,9 @@ let rec ast_ty_of_diagnostic span (ty : Sema_specialization.diagnostic_type) =
   | Diagnostic_handle ty ->
       let* ty = ast_ty_of_diagnostic span ty in
       Ok (Ast.Handle ty)
+  | Diagnostic_secret ty ->
+      let* ty = ast_ty_of_diagnostic span ty in
+      Ok (Ast.Secret ty)
   | Diagnostic_array (length, ty) ->
       let* length = expr_of_text span length in
       let* ty = ast_ty_of_diagnostic span ty in

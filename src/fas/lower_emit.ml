@@ -653,6 +653,13 @@ let select fn id c x y =
   let y = value fn y in
   define fn id (emit1 fn (Select (c, x, y)) (fir_ty t))
 
+(* constant-time marks (Fir SPEC §8): [x] unchanged, made secret or public *)
+let mark fn id (kind : mark) t x = define fn id (emit1 fn (Mark (kind, value fn x)) (fir_ty t))
+
+(* `wipe(p, n)`: a volatile memset, which no transform removes *)
+let wipe fn p n =
+  emit0 fn (Memset (true, value fn p, iconst fn.f i8 0L, value fn n))
+
 let extract fn id vt x l =
   let e = match vt with Low.Vector (_, e) -> fir_ty e | _ -> unsupported "extract from a non-vector" in
   let x = value fn x in

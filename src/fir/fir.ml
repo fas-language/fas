@@ -393,6 +393,12 @@ let fa_noreturn = 8
    FENV_ACCESS ON); never inlined across a different marking *)
 let fa_fenv = 16
 
+(* the function handles secrets (SPEC §8 "Zeroization"): the native backend
+   leaves no secret it put in its frame or the caller-saved registers at
+   return. Instruction selection also sets it for any function with a
+   `secret` mark *)
+let fa_secret = 512
+
 (* promises about a declared function (SPEC §5 "Declarations"):
    memory(none), memory(read), memory(argmem) (at most one), willreturn *)
 let fa_mem_none = 32

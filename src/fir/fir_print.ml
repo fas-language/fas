@@ -78,7 +78,8 @@ let call_attr_names =
 let func_attr_names =
   [ (fa_inline, "inline"); (fa_noinline, "noinline"); (fa_cold, "cold");
     (fa_noreturn, "noreturn"); (fa_fenv, "fenv"); (fa_mem_none, "memory(none)");
-    (fa_mem_read, "memory(read)"); (fa_mem_argmem, "memory(argmem)"); (fa_willreturn, "willreturn") ]
+    (fa_mem_read, "memory(read)"); (fa_mem_argmem, "memory(argmem)"); (fa_willreturn, "willreturn");
+    (fa_secret, "secret") ]
 
 let linkage_name = function Local -> "local" | Global -> "global" | Weak -> "weak"
 

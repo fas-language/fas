@@ -619,6 +619,30 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
              | `Here v -> (o, Mir_cfi.text_symbol, kind, start + v + Int64.to_int addend))
            sn.srelocs)
 
+(* Zeroization at return (Fir SPEC §8), before the epilogue proper: zero
+   every byte from the red zone below rsp (128 bytes) up to the saved
+   registers, which covers the frame (slots, spills, outgoing arguments),
+   then every caller-saved register except the results. The loop's length
+   is the frame's size, never data. r10 and r11 are free here (never
+   results); the flags end up set from the loop's compare.
+     lea r11, [rsp - 128]; lea r10, [rbp - 8*nsaved]
+   L: mov qword [r11], 0; add r11, 8; cmp r11, r10; jb L *)
+let zeroize a fr results =
+  A.lea a A.R11 (A.Base (A.Rsp, -128));
+  A.lea a A.R10 (A.Base (A.Rbp, -8 * fr.nsaved));
+  let l = A.new_label a in
+  A.place a l;
+  A.mov_mi a 8 (A.Base (A.R11, 0)) 0;
+  A.alu_ri a A.Add A.R11 8;
+  A.alu_rr a A.Cmp A.R11 A.R10;
+  A.jcc a A.B l;
+  List.iter
+    (fun r -> if not (List.mem (G r) results) then A.alu_rr a A.Xor r r)
+    Mir.caller_saved;
+  for x = 0 to 15 do
+    if not (List.mem (X x) results) then A.logic_xx a ~double:false `Xor x x
+  done
+
 (* one function: returns its text size, its frame events for the
    .eh_frame (Mir_cfi), at offsets from the function's start, and its line
    rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
@@ -679,8 +703,9 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
     | Jcc (c, t, e) ->
         A.jcc a c labels.(t);
         if e <> next then A.jmp a labels.(e)
-    | Ret _ ->
+    | Ret results ->
         event Mir_cfi.Epilogue;
+        if f.zeroize then zeroize a fr results;
         A.lea a A.Rsp (A.Base (A.Rbp, -8 * fr.nsaved));
         List.iter (A.pop a) (List.rev ra.saved);
         A.pop a A.Rbp;
@@ -961,6 +986,9 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     (match Fir_verify.verify m with
     | [] -> ()
     | errs -> invalid_arg ("Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs));
+    (* constant time: no legalization branched on a secret or made it an
+       address (SPEC §8) *)
+    Fir_ct.check m;
     let syms = Elf_attrs.of_fir m in
     let env = Mir_isel.env m in
     let a = A.create () in
@@ -993,6 +1021,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
                 let ra = Mir_ra.run mf in
                 if dump then prerr_string (Mir_ra.to_string mf ra);
                 Mir_check.run mf ra;
+                Mir_ct.run mf ra;
                 ra
             | cands ->
                 (* FAS_RA_IMPORT: an allocation from the lab, checked by
@@ -1000,6 +1029,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
                 let ra, slots = Mir_import.run mf cands in
                 if dump then prerr_string (Mir_ra.to_string mf ra);
                 Mir_icheck.run mf ra ~slots;
+                Mir_ct.run mf ra;
                 ra
           in
           compiled := (fn, mf, ra) :: !compiled
@@ -1255,6 +1285,8 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
   | Fir_wide.Unsupported msg -> Error ("native backend: " ^ msg)
   | Mir_ra.Failure msg -> Error ("native backend internal error (allocator): " ^ msg)
   | Mir_check.Failure msg -> Error ("native backend internal error (allocation check): " ^ msg)
+  | Mir_ct.Failure msg -> Error ("native backend internal error (constant-time violation in machine code:\n" ^ msg ^ ")")
+  | Fir_ct.Failure msg -> Error ("native backend: " ^ msg)
   | Mir_import.Failure msg -> Error ("FAS_RA_IMPORT: " ^ msg)
   | Mir_icheck.Failure msg -> Error ("FAS_RA_IMPORT: the imported allocation is wrong: " ^ msg)
   | Fas_linker.Error.Error msg -> Error ("native backend: " ^ msg)

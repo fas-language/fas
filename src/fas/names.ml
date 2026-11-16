@@ -39,9 +39,13 @@ type value_operation =
   | Addr_from_bits
   | Handle_addr
   | Handle_from_addr
+  (* constant time: `declassify(x)` makes a secret public, `wipe(p, n)`
+     zeroes n bytes and is never removed *)
+  | Declassify
+  | Wipe
 
 type float_math = Sqrt | Fma | Floor | Ceil | Round | Abs
-type type_constructor = Array | Vector | Address | Handle
+type type_constructor = Array | Vector | Address | Handle | Secret
 type literal = True | False | Null
 
 let scalar_type_names =
@@ -60,7 +64,7 @@ let scalar_type_names =
     "isize";
   ]
 
-let primitive_type_names = scalar_type_names @ [ "addr"; "handle"; "arr"; "vec" ]
+let primitive_type_names = scalar_type_names @ [ "addr"; "handle"; "secret"; "arr"; "vec" ]
 let literal_names = [ "true"; "false"; "null" ]
 let reserved_float_names = [ "sqrt"; "fma"; "floor"; "ceil"; "round"; "abs"; "cvt" ]
 let reserved_float_type_names = [ "f32"; "f64" ]
@@ -68,7 +72,7 @@ let reserved_float_type_names = [ "f32"; "f64" ]
 let parser_type_name name =
   List.mem name scalar_type_names
   || List.mem name reserved_float_type_names
-  || List.mem name [ "ptr"; "addr"; "handle"; "arr"; "vec" ]
+  || List.mem name [ "ptr"; "addr"; "handle"; "secret"; "arr"; "vec" ]
 
 let c_type_words =
   [ "char"; "int"; "short"; "long"; "unsigned"; "signed"; "float"; "double" ]
@@ -115,6 +119,7 @@ let c_type_equivalent name =
 let type_constructor = function
   | "addr" -> Some Address
   | "handle" -> Some Handle
+  | "secret" -> Some Secret
   | "arr" -> Some Array
   | "vec" -> Some Vector
   | _ -> None
@@ -151,6 +156,8 @@ let operations =
     ("clz", Value Clz);
     ("ctz", Value Ctz);
     ("select", Value Select);
+    ("declassify", Value Declassify);
+    ("wipe", Value Wipe);
     ("any", Value Any);
     ("all", Value All);
     ("add_sat", Value Add_sat);

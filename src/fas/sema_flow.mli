@@ -1,4 +1,4 @@
-type binding = Hir.local = { name : string; ty : Hir.ty; id : int }
+type binding = Hir.local = { name : string; ty : Hir.ty; id : int; secret : Hir.secrecy }
 type selector = Field of string | Element of int
 type init_state = Uninit | Full | Unknown | Partial of (selector * init_state) list
 type value_fact = { low : int64; high : int64; induction : int option }
@@ -29,7 +29,8 @@ val create : ?recover:bool -> initial_scope:bool -> Hir.struct_def list -> t
 val lookup_local : string -> t -> binding option
 val local_names : t -> string list
 val ensure_new_local : string -> t -> Span.t -> (unit, Diag.t list) result
-val add_local : string -> Hir.ty -> t -> Span.t -> (binding, Diag.t list) result
+val add_local :
+  ?secret:Hir.secrecy -> string -> Hir.ty -> t -> Span.t -> (binding, Diag.t list) result
 val view_origin : t -> binding -> (binding * place_path) option
 val view_access : t -> binding -> view_access
 val view_readonly_name : t -> binding -> string option

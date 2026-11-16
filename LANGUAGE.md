@@ -38,6 +38,7 @@ hello, fas!
   - [Const loops](#const-loops)
 - [Globals and constants](#globals-and-constants)
 - [SIMD](#simd)
+- [Secrets](#secrets)
 - [Talking to C](#talking-to-c)
   - [C names](#c-names)
   - [Headers next to your file](#headers-next-to-your-file)
@@ -937,6 +938,57 @@ HELLO, VECTOR WORLD, 12 above 50
 - **Masks** combine with `& | ^ !`. `select`, `any`, `all` and `popcount(bitcast[u8](mask))` consume them.
 - **Memory**: `p[vec[N, T]]` loads and stores exactly `N × sizeof(T)` bytes at alignment 1. The masked, gather and scatter forms are in the [builtin table](#builtins).
 
+## Secrets
+
+```fas
+use "C" <stdio.h> as c
+
+struct Key {
+    k arr[4, secret[u32]]          // secret elements; `n` stays public
+    n u32
+}
+
+fn mix(a secret[u32], b u32) secret[u32] {
+    x secret[u32] = a ^ b          // public b becomes secret implicitly
+    return rotl(x, 3) + 1
+}
+
+fn ct_eq(a secret[u32], b secret[u32]) secret[bool] {
+    return a == b                  // a comparison of secrets is a secret
+}
+
+fn main() i32 {
+    k Key = {}
+    k.k[0] = mix(5, 7)
+    same secret[bool] = ct_eq(k.k[0], 17)
+    k.k[1] = select(same, 100, 200)     // no branch: both sides, then a cmov
+    buf arr[16, u8] = {}
+    wipe(&buf, 16)                      // zeroed, never optimized away
+    c.printf(c"%u\n", declassify(k.k[1]))
+    return 0
+}
+```
+```text
+100
+```
+
+- **`secret[T]`** marks an integer, `bool` or integer/bool vector as secret: its value must not decide timing. Locals, parameters, results, struct fields and array elements may be secret (`arr[4, secret[u32]]`, `secret[vec[4, u32]]`). Globals, `addr`, floats, structs as a whole and C declarations never are. A typed access reads or writes a secret with `p[secret[u32], i]`.
+- **Flow.** A public value becomes secret implicitly. A secret becomes public only through `declassify(x)`. Every result with a secret operand is secret, comparisons included (`secret[bool]`).
+- **Allowed on secrets:** `+ - *`, `& | ^ ~ !`, shifts and rotates (secret counts too), comparisons, `zext sext trunc bitcast`, `bswap`, `mul_hi`, `add_sat sub_sat` and `select`. `select(c, a, b)` with a `bool` `c` picks between two scalars (integers, `bool`s, floats or addresses) with no branch, so it is how constant-time code chooses.
+- **Errors**, each naming the rule:
+  - a secret condition: `if`, `while`, `for`, `switch`, an if-expression, `&&`, `||`, `assert`;
+  - a secret index, offset or address;
+  - `/` and `%`, and checked arithmetic, on a secret;
+  - a secret converted to a float or an address;
+  - `popcount clz ctz`, lane indexing, `shuffle permute compress expand`, reductions, `any all`, and the masked, gather and scatter forms: none has a constant-time lowering yet;
+  - a secret passed to C (an `extern "C"` declaration cannot have a secret parameter or result), to `syscall`, to an atomic or volatile access;
+  - a secret stored into a public local, global, field, element or typed access, or passed to a public parameter. An indirect call's parameters and result are public, so a function with a secret result cannot have its address taken.
+- **Generics.** `T = secret[u32]` checks the body for that type, and errors name the instantiation (`in id[secret[u32]]: ...`). An inferred type argument is public: write `f[secret[u32]](x)` to pass a secret.
+- **Secrecy lives in values and typed accesses, not in memory.** `p[u32, i]` reads a public value whatever was stored there; `p[secret[u32], i]` reads a secret.
+- **`wipe(p, n)`** zeroes `n` bytes at `p` with stores no transform removes. Use it for copies of secrets the program makes itself, such as key buffers.
+- **The backend.** The native backend computes secrets with no branch, no secret-dependent address and no division, and checks this on every build: a violation is a compiler bug, never accepted.
+- **Zeroization at return.** When a function that handles a secret (a secret parameter, local, result or store) returns, no stack byte it used (its frame and the 128-byte red zone below it) and no register except its results holds a secret it put there. Its callees zero their own. Not covered: a value the function stores to memory it does not own (use `wipe`) and the bytes of `alloca` regions. The LLVM test oracle makes no constant-time promise. Out of scope: the CPU's own data-independent-timing mode (the operating system's job), speculative execution (Spectre) and traps.
+
 ## Talking to C
 
 C headers, integer and float macros, structs and `static inline` functions are imported directly. A `use "C" as c <<TAG` block embeds C source that is compiled with your program. Every C name is written through the file's alias: `c.printf`, `c.user`, `c.NAME_MAX_LEN`.
@@ -1333,6 +1385,7 @@ max(a, 1)  sum[u64, 8](&xs)             // inferred and explicit generic calls
 | `vec[N, T]` | N × size(T), rounded up to a power of two | = size | integer lanes, at most 256 lanes and 2048 bits. `vec[3, u32]` is 16 bytes |
 | `vec[N, bool]` | ⌈N/8⌉ bytes, rounded up to a power of two | = size | packed bits, lane 0 is the low bit |
 | `struct` | C layout | max field | `@align(N)` raises it |
+| `secret[T]` | as `T` | as `T` | `T` an integer, `bool` or integer/bool vector whose value must not decide timing; see [Secrets](#secrets) |
 | `void` | | | result type only |
 | `error` | 4 | 4 | an error code; `==`, `!=`, `switch` with `default`, `bitcast` to `u32`/`i32` |
 | `enum E T` | as `T` | as `T` | its own type; comparisons, exhaustive `switch`, `enum_value`/`enum_from` to convert |
@@ -1449,6 +1502,9 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `const assert(cond)` `const assert(cond, "msg")` | statement or top-level item | checked at compile time: a false `cond` is the compile error `const assert failed: msg` |
 | **System** | `syscall(n, args...)` | `i64` | Linux x86-64 only: kernel call `n` with up to six integer or `addr` arguments; returns the raw result, `-errno` on failure |
 | | `syscall[T fails](n, args...)` `syscall[fails](n, args...)` | `T` (`i64`, `u64`, `addr`) | as `syscall`, but a result in -4095..-1 is the errno error; needs `try` or `catch` |
+| **Secrets** | `declassify(x)` | type of `x`, public | the value unchanged, made public; see [Secrets](#secrets) |
+| | `select(c, yes, no)` | type of `yes` | `c` a `bool`, `yes` and `no` scalars of one type: `yes` when `c`, else `no`, both evaluated and no branch |
+| | `wipe(p, n)` | statement | zeroes `n` bytes at `p`; never merged or removed |
 | **SIMD values** | `splat(x)` | `vec[N, T]` | every lane `x`, with the type from context |
 | | `select(m, yes, no)` | type of `yes` | lane `i` comes from `yes[i]` when `m[i]` is true, otherwise `no[i]`. Both sides are evaluated |
 | | `any(m)` `all(m)` | `bool` | |
@@ -1510,6 +1566,8 @@ fas --version                   # fas version and commit, plus the C compiler in
 fas --keep main.fas -o app      # keep temp files and print their paths
 fas main.fas util.c -lz -o app  # C sources and link flags (executables only)
 ```
+
+Exit status: 0 success, 1 errors in the program, 2 a usage error, 3 an internal compiler error (a bug in Fas; the message says so). `fas run` passes the program's own status through once it builds.
 
 `--all-errors` (any command) keeps checking after an error: every function body is checked and each failing statement is reported, so leaving out all casts gives the full list of places that need one in a single run. Errors outside function bodies (parsing, types, signatures, constants) still stop at the first. Without the flag only the first error is printed.
 

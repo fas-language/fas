@@ -20,6 +20,24 @@ type ty =
   (* `enum Name K`: its own type, stored as the integer type K *)
   | Enum of string * int_kind
 
+(* constant time (`secret[T]`, "Fas v2 decisions"): secrecy is not part of
+   [ty]; it is kept beside the declared type. [Elements s] is an array whose
+   elements have secrecy [s]. A struct is never secret as a whole: its
+   fields are, see [secret_fields] *)
+type secrecy = Public | Secret | Elements of secrecy
+
+(* the secret fields of the program's structs, specializations included,
+   and the functions whose result is secret. Reset and filled by each
+   [Sema.check] *)
+let secret_fields : (string * string, secrecy) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+let secret_results : (string, secrecy) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+let field_secrecy struct_name field =
+  Option.value ~default:Public (Stdlib.Hashtbl.find_opt secret_fields (struct_name, field))
+
+let element_secrecy = function Elements s -> s | s -> s
+
 type field = {
   name : string;
   ty : ty;
@@ -40,6 +58,30 @@ type struct_def = {
    values of these types are passed, returned and assigned by value. Reset
    by each [Sema.check] *)
 let value_structs : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+(* the functions that handle secrets (Sema_secret): a secret parameter,
+   result, local, value or store, or a local whose struct has secret
+   fields. Lowering gives them Fir's `secret` attribute, which makes the
+   native backend zeroize their frame and registers at return *)
+let secret_funcs : (string, unit) Stdlib.Hashtbl.t = Stdlib.Hashtbl.create 16
+
+(* a nested [Sema.check] (a `const assert` re-checking a reduced program)
+   resets the tables above; [save_tables ()] gives the function restoring
+   the outer check's *)
+let save_tables () =
+  let restore table saved =
+    Stdlib.Hashtbl.reset table;
+    Stdlib.Hashtbl.iter (Stdlib.Hashtbl.replace table) saved
+  in
+  let values = Stdlib.Hashtbl.copy value_structs in
+  let fields = Stdlib.Hashtbl.copy secret_fields in
+  let results = Stdlib.Hashtbl.copy secret_results in
+  let funcs = Stdlib.Hashtbl.copy secret_funcs in
+  fun () ->
+    restore secret_funcs funcs;
+    restore value_structs values;
+    restore secret_fields fields;
+    restore secret_results results
 
 let is_value_struct = function Struct name -> Stdlib.Hashtbl.mem value_structs name | _ -> false
 
@@ -64,7 +106,7 @@ let zero_integer_array_values { zero_ty } =
   | _ -> None
 
 type func_sig = { params : (string * ty) list; ret : ty; variadic : bool; fails : bool }
-type local = { name : string; ty : ty; id : int }
+type local = { name : string; ty : ty; id : int; secret : secrecy }
 type linkage = Internal | External_c
 type simd_load_kind = Masked | Gather | Gather_bytes
 type simd_store_kind = Masked_store | Scatter | Scatter_bytes
@@ -147,6 +189,10 @@ type builtin =
      not fit the call's type. [a; b] for add/sub/mul, [x] for trunc (the
      call's type is the target) *)
   | Checked of checked
+  (* constant time: [x] unchanged and public (`declassify(x)`); [p; n]
+     zeroes n bytes at p with stores no transform removes (`wipe(p, n)`) *)
+  | Declassify
+  | Wipe
 
 type call_target = User of string | Builtin of builtin
 
@@ -167,7 +213,8 @@ type expr =
   | Cast of Ast.cast_kind * expr * ty * Span.t
   | Index of expr * expr * ty * Span.t
   | Field of expr * string * ty * int * Span.t
-  | Raw_select of expr * expr * ty * Span.t
+  (* `p[T, i]`: the T at base + offset, of the access type's secrecy *)
+  | Raw_select of expr * expr * ty * secrecy * Span.t
   | Address of expr * ty * Span.t
   | Function_address of string * Span.t
   | Sizeof of ty * int * Span.t
@@ -197,7 +244,7 @@ and construction =
 type assign_target =
   | ALocal of local
   | AGlobal of string * ty
-  | ARaw of expr * expr * ty
+  | ARaw of expr * expr * ty * secrecy
   | AIndex of expr * expr
   | AField of expr * string * int
 
@@ -312,7 +359,7 @@ let expr_ty = function
   | Cast (_, _, t, _)
   | Index (_, _, t, _)
   | Field (_, _, t, _, _)
-  | Raw_select (_, _, t, _)
+  | Raw_select (_, _, t, _, _)
   | Address (_, t, _)
   | Splat (_, t, _)
   | Ternary (_, _, _, t, _)
@@ -328,6 +375,23 @@ let expr_ty = function
   | Null (t, _) -> t
   | EString _ -> Addr
   | Sizeof _ | Alignof _ | Offsetof _ -> Int U64
+
+(* the secrecy of the storage a place names: a local, a raw access, an
+   element or a field. Anything else is not storage and gives [Public];
+   the value secrecy of computed expressions is Sema_secret's *)
+let rec place_secrecy = function
+  (* an `addr` local is public; a raw view's [Elements] is its pointees' *)
+  | Local ({ ty = Addr; _ }, _) -> Public
+  | Local (local, _) | Construct (local, _, _) -> local.secret
+  | Raw_select (_, _, _, secrecy, _) -> secrecy
+  | Index (base, _, _, _) -> (
+      match expr_ty base with
+      | Array _ -> element_secrecy (place_secrecy base)
+      | Vec _ -> place_secrecy base
+      | _ -> Public)
+  | Field (base, field, _, _, _) -> (
+      match expr_ty base with Struct name -> field_secrecy name field | _ -> Public)
+  | _ -> Public
 
 let expr_span = function
   | EInt (_, _, s)
@@ -346,7 +410,7 @@ let expr_span = function
   | Cast (_, _, _, s)
   | Index (_, _, _, s)
   | Field (_, _, _, _, s)
-  | Raw_select (_, _, _, s)
+  | Raw_select (_, _, _, _, s)
   | Address (_, _, s)
   | Function_address (_, s)
   | Sizeof (_, _, s)

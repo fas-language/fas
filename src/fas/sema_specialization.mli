@@ -15,6 +15,7 @@ type diagnostic_type =
   | Diagnostic_const_ptr of diagnostic_type
   | Diagnostic_addr
   | Diagnostic_handle of diagnostic_type
+  | Diagnostic_secret of diagnostic_type
   | Diagnostic_array of string * diagnostic_type
   | Diagnostic_vec of string * diagnostic_type
   | Diagnostic_named of string

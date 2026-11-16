@@ -172,7 +172,7 @@ func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src n
 
 declare @name (ABI, ...) -> (ABI, ...) LINKAGE [ATTRS] [PROMISES]   a function defined elsewhere
 
-ATTRS ::= any of: inline noinline cold noreturn fenv
+ATTRS ::= any of: inline noinline cold noreturn fenv secret
 PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (declarations only)
 ```
 
@@ -476,13 +476,17 @@ Store-to-load forwarding, merging equal loads, removing dead stores to non-escap
 
 ### Constant time (secret values)
 
-- **Marks.** `secret` makes its result *tainted*; `declassify` makes its result untainted. Neither changes the value. Taint flows into the result of every other instruction with a tainted operand, into a block parameter from a tainted argument, and through memory (bytes stored from a tainted value are tainted until overwritten).
+- **Marks.** `secret` makes its result *tainted*; `declassify` makes its result untainted. Neither changes the value. Taint flows into the result of every other instruction with a tainted operand and into a block parameter from a tainted argument. It does not flow through memory or calls: a `load`'s result and a call's results are untainted, so a front end marks each value it reads from a secret place (`secret` after the `load`) and each secret call result. Storing a tainted value is allowed; its address must not be tainted.
 - **Rules for tainted values**, which every transform and backend must keep and never introduce:
   - no branch on one: `br`, `switch`, `indirect_br`, and no `select` turned into a branch;
   - no address computed from one: no load, store, table lookup or jump table indexed by it;
   - no `udiv`, `sdiv`, `urem` or `srem` with one as either operand, and no strength reduction that adds a branch or a lookup;
-  - no call target taken from one.
-- **Status:** the marks exist from Fir 0.3 and change nothing in code generation. The check that refuses a program breaking these rules, and zeroization of secrets, come with the constant-time work (roadmap v0.7). Until then, the rules bind transforms only. The native backend already selects every `select` as a `cmov`, f80 and float ones included.
+  - no call target taken from one;
+  - no float operation or conversion to or from a float, no `ctz`, `clz`, `popcnt` or `bitrev`, no lane index, no reduction, `compress`, `expand`, `permute` or masked form, no `syscall`, atomic or inline-assembly operand: none has a constant-time lowering yet.
+
+  Allowed: integer arithmetic, logic, shifts and funnel shifts, the overflow forms (`adc`/`sbb` chains), `icmp`, `select` (also on a tainted condition), `trunc zext sext bitcast`, `bswap`, `abs`, `splat`, `shuffle`, stores of the value, and arguments of direct calls.
+- **Check.** The native backend checks these rules on every module after legalization, just before instruction selection (Fir_ct), and refuses a module that breaks them (`fas-fir` exits 1: the marks are input). The Fas front end checks the source rules first (LANGUAGE.md "Secrets"), so for Fas a violation here is a compiler bug. The marks are copies in code generation, and the native backend selects every `select` as a `cmov`, f80 and float ones included. The LLVM path makes no constant-time promise.
+- **Zeroization.** A function *handles secrets* when it has the `secret` attribute or contains a `secret` mark; the Fas front end sets the attribute on every function that touches a secret. When such a function returns, no byte of its stack frame or of the 128 bytes below the stack pointer, and no register other than its results, holds a value it computed: the native backend keeps no value in a callee-saved register (a callee would save one below this frame, out of reach; a callee-saved scratch register, used only where every caller-saved one is taken, is cleared right after its instruction), and its epilogue stores zero over the red zone and the frame up to the saved registers and clears every caller-saved general and vector register that is not a result. The loop's length is the frame's size. A callee zeroes its own frame. Not covered: memory outside the frame (a front end uses a volatile `memset`, as Fas `wipe` does), dynamic `alloca` regions, and the LLVM path. A transform that inlines a `secret` function into another gives that function the attribute.
 
 ### Undefined behaviour, the complete list
 

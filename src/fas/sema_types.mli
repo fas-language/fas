@@ -10,6 +10,16 @@ type named_types = (string * named_type_kind) list
 type const_values = (string * Hir.ty * int64) list
 
 val source_ty : named_types -> Ast.ty -> (Hir.ty, string) result
+
+(* [with_secret f] runs [f] with `secret[T]` accepted (resolving to T);
+   outside it `secret[T]` is an error. Declaration sites that record the
+   secrecy (from [secrecy_of]) use it *)
+val with_secret : (unit -> 'a) -> 'a
+
+val secrecy_of : named_types -> Ast.ty -> Hir.secrecy
+val resolve_secret : (Ast.ty -> (Hir.ty, string) result) -> Ast.ty -> (Hir.ty, string) result
+val is_secret_type : Ast.ty -> bool
+val secret_vector_error : string
 val handle_target : named_types -> Ast.ty -> (string, string) result
 val source_ty_diag : named_types -> Span.t -> Ast.ty -> (Hir.ty, Diag.t list) result
 

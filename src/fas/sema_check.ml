@@ -593,7 +593,7 @@ and object_address c expression =
               (Sema_flow.Object_address
                  { base with offset = Int64.add base.offset index })
         | _ -> None)
-    | Hir.Raw_select (base, offset, _, _) -> (
+    | Hir.Raw_select (base, offset, _, _, _) -> (
         match (address_fact c base, exact_address_offset c offset) with
         | Some address, Some offset -> shift_address Ast.Add address offset
         | _ -> None)
@@ -1014,6 +1014,25 @@ let expression_mentions_name_ref : (string -> Ast.expr -> bool) ref =
   ref (fun _ _ -> false)
 
 let rec source_ty_in_context c span = function
+  | Ast.Secret inner -> (
+      let failed = ref None in
+      match
+        Sema_types.resolve_secret
+          (fun inner ->
+            match source_ty_in_context c span inner with
+            | Ok t -> Ok t
+            | Error diagnostics ->
+                failed := Some diagnostics;
+                Error "")
+          inner
+      with
+      | Ok t -> Ok t
+      | Error message -> (
+          match !failed with
+          | Some diagnostics -> Error diagnostics
+          | None -> error (Sema_types.source_type_span span inner) message))
+  | Ast.Vec (_, element) when Sema_types.is_secret_type element ->
+      error (Sema_types.source_type_span span element) Sema_types.secret_vector_error
   | Ast.Named_type (name, type_span) when Option.is_some (lookup_local name c) ->
       error type_span (Printf.sprintf "`%s` is a value, not a type" name)
   | Ast.Named_type (name, type_span) -> (
@@ -1147,7 +1166,7 @@ let rec rooted_in_string_literal = function
 
 let rec rooted_in_readonly_storage c = function
   | Hir.EString _ -> true
-  | Hir.Raw_select (a, _, _, _) | Hir.Index (a, _, _, _) | Hir.Field (a, _, _, _, _) ->
+  | Hir.Raw_select (a, _, _, _, _) | Hir.Index (a, _, _, _) | Hir.Field (a, _, _, _, _) ->
       rooted_in_string_literal a || rooted_in_readonly_storage c a
   | Hir.Address (a, _, _) | Hir.Cast (_, a, _, _) ->
       rooted_in_string_literal a || rooted_in_constant c a
@@ -1160,7 +1179,7 @@ let rec inherited_view_access c = function
   | Hir.Local (binding, _) -> view_access c.flow binding
   | Hir.Index (base, _, _, _)
   | Hir.Field (base, _, _, _, _)
-  | Hir.Raw_select (base, _, _, _)
+  | Hir.Raw_select (base, _, _, _, _)
   | Hir.Address (base, _, _)
   | Hir.Cast (_, base, _, _) ->
       inherited_view_access c base
@@ -1258,7 +1277,7 @@ let rec expression_uses_view c = function
       is_view c.flow binding || Option.is_some (Sema_flow.raw_view_type c.flow binding)
   | Hir.Index (base, _, _, _)
   | Hir.Field (base, _, _, _, _)
-  | Hir.Raw_select (base, _, _, _)
+  | Hir.Raw_select (base, _, _, _, _)
   | Hir.Address (base, _, _)
   | Hir.Cast (_, base, _, _) ->
       expression_uses_view c base
@@ -1487,6 +1506,18 @@ let select_type_arg named_types span payload =
       source_ty_diag named_types name_span (Ast.Named_type (name, name_span))
   | Ast.Const_arg e -> error (Ast.expr_span e) "raw access requires a type argument"
 
+(* the access type with its secrecy: `p[secret[u32], i]` reads a secret *)
+let select_type_arg_secret named_types span payload =
+  let secrecy =
+    match payload with
+    | Ast.Type_arg t | Ast.Type_or_index t -> Sema_types.secrecy_of named_types t
+    | Ast.Name_arg (name, name_span) ->
+        Sema_types.secrecy_of named_types (Ast.Named_type (name, name_span))
+    | Ast.Const_arg _ -> Hir.Public
+  in
+  let* t = Sema_types.with_secret (fun () -> select_type_arg named_types span payload) in
+  Ok (t, secrecy)
+
 let select_type_payload_span fallback = function
   | Ast.Type_arg (Ast.Named_type ("void", span))
   | Ast.Type_or_index (Ast.Named_type ("void", span)) ->
@@ -1661,7 +1692,12 @@ let rec check_place_inner (c : context) expr =
               Ok
                 {
                   expr =
-                    Hir.Raw_select (Hir.Local (binding, name_span), offset, element, s);
+                    Hir.Raw_select
+                      ( Hir.Local (binding, name_span),
+                        offset,
+                        element,
+                        Hir.element_secrecy binding.secret,
+                        s );
                   root = None;
                   path = None;
                 }
@@ -1795,7 +1831,7 @@ let rec check_place_inner (c : context) expr =
                 | Some binding, Some path -> require_place_state binding path c s
                 | _ -> Ok ()
               in
-              let* t = select_type_arg c.named_types s type_payload in
+              let* t, secrecy = select_type_arg_secret c.named_types s type_payload in
               let* () =
                 match t with
                 | Hir.Void ->
@@ -1807,7 +1843,7 @@ let rec check_place_inner (c : context) expr =
               let* offset = raw_offset_expr c s t None in
               Ok
                 {
-                  expr = Hir.Raw_select (base.expr, offset, t, s);
+                  expr = Hir.Raw_select (base.expr, offset, t, secrecy, s);
                   root = base.root;
                   path = base.path;
                 }
@@ -1817,7 +1853,7 @@ let rec check_place_inner (c : context) expr =
                 | Some binding, Some path -> require_place_state binding path c s
                 | _ -> Ok ()
               in
-              let* t = select_type_arg c.named_types s type_payload in
+              let* t, secrecy = select_type_arg_secret c.named_types s type_payload in
               let* () =
                 match t with
                 | Hir.Void ->
@@ -1829,7 +1865,7 @@ let rec check_place_inner (c : context) expr =
               let* offset = raw_offset_expr c s t (Some index_payload) in
               Ok
                 {
-                  expr = Hir.Raw_select (base.expr, offset, t, s);
+                  expr = Hir.Raw_select (base.expr, offset, t, secrecy, s);
                   root = base.root;
                   path = base.path;
                 }
@@ -1840,7 +1876,8 @@ let rec check_place_inner (c : context) expr =
   | Ast.Field (a, n, s) -> (
       let* base = check_place c a in
       match base.expr with
-      | Hir.Raw_select (baddr, off, Hir.Struct sn, _) -> (
+      | Hir.Raw_select (baddr, off, Hir.Struct sn, _, _) -> (
+          (* `p[S].f`: the field's own secrecy *)
           match field_info c.structs sn n with
           | Some { unsupported_reason = Some reason; _ } -> error s reason
           | Some f ->
@@ -1857,12 +1894,13 @@ let rec check_place_inner (c : context) expr =
                             Hir.Int Hir.U64,
                             s ),
                         f.ty,
+                        Hir.field_secrecy sn n,
                         s );
                   root = base.root;
                   path = base.path;
                 }
           | None -> missing_field_error ~base:a c s n (Hir.Struct sn))
-      | Hir.Raw_select (_, _, access_ty, _) ->
+      | Hir.Raw_select (_, _, access_ty, _, _) ->
           missing_field_error ~base:a c (Ast.expr_span a) n access_ty
       | _ -> (
           match Hir.expr_ty base.expr with
@@ -1905,7 +1943,11 @@ let rec check_place_inner (c : context) expr =
                     {
                       expr =
                         Hir.Raw_select
-                          (pointer, Hir.EInt (Int64.of_int f.offset, Hir.Int Hir.U64, s), f.ty, s);
+                          ( pointer,
+                            Hir.EInt (Int64.of_int f.offset, Hir.Int Hir.U64, s),
+                            f.ty,
+                            Hir.field_secrecy sn n,
+                            s );
                       root = base.root;
                       path = base.path;
                     }
@@ -2573,9 +2615,9 @@ and check_expr_inner ?destination (c : context) expected expression =
       let* place = check_place c (Ast.Select (a, args, s)) in
       let* () =
         match place.expr with
-        | Hir.Raw_select (_, _, (Hir.Struct _ as t), _) when Hir.is_value_struct t ->
+        | Hir.Raw_select (_, _, (Hir.Struct _ as t), _, _) when Hir.is_value_struct t ->
             Ok ()
-        | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _), _) ->
+        | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _), _, _) ->
             error s "raw access cannot load an array or struct value"
         | _ -> Ok ()
       in
@@ -4182,6 +4224,8 @@ and check_call_inner c expected fn args s =
         | Some Names.Addr_from_bits -> Some Hir.Addr_from_bits
         | Some Names.Handle_addr -> Some Hir.Handle_addr
         | Some Names.Handle_from_addr -> Some (Hir.Handle_from_addr "")
+        | Some Names.Declassify -> Some Hir.Declassify
+        | Some Names.Wipe -> Some Hir.Wipe
         | Some Names.Len | None -> None
       in
       let check_builtin b =
@@ -4363,6 +4407,31 @@ and check_call_inner c expected fn args s =
                 match Hir.expr_ty m with Hir.Vec (n, Hir.Bool) -> Some n | _ -> None
               in
               match mask_lanes with
+              (* `select(c, a, b)` with a `bool` c: a when c, else b, both
+                 evaluated and no branch (a cmov); the branch-free choice
+                 constant-time code needs *)
+              | None
+                when Hir.expr_ty m = Hir.Bool
+                     && match Hir.expr_ty y with Hir.Vec _ -> false | _ -> true -> (
+                  if Hir.expr_ty y <> Hir.expr_ty z then
+                    error
+                      (Ast.expr_span (List.nth args 2))
+                      (Printf.sprintf
+                         "argument 3 of `select` is `%s`, expected the type of \
+                          argument 2 (`%s`)"
+                         (Sema_types.diagnostic_ty_name (Hir.expr_ty z))
+                         (Sema_types.diagnostic_ty_name (Hir.expr_ty y)))
+                  else
+                    match Hir.expr_ty y with
+                    | Hir.Int _ | Hir.Bool | Hir.Float _ | Hir.Addr | Hir.Enum _ ->
+                        Ok (Hir.Call (Hir.Builtin b, [ m; y; z ], Hir.expr_ty y, s))
+                    | actual ->
+                        error
+                          (Ast.expr_span (List.nth args 1))
+                          (Printf.sprintf
+                             "a `bool` `select` chooses between integers, `bool`s, \
+                              floats or addresses, not `%s`"
+                             (Sema_types.diagnostic_ty_name actual)))
               | None ->
                   error
                     (Ast.expr_span (List.nth args 0))
@@ -4580,6 +4649,29 @@ and check_call_inner c expected fn args s =
               match Hir.expr_ty a with
               | Hir.Handle _ -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.Addr, s))
               | _ -> error s "handle_addr argument must be a handle")
+        | Hir.Declassify -> (
+            if List.length args <> 1 then error s "builtin `declassify` expects one argument"
+            else
+              let* a = check_expr c expected (List.hd args) in
+              match Hir.expr_ty a with
+              | Hir.Bool | Hir.Int _ | Hir.Vec (_, (Hir.Int _ | Hir.Bool)) ->
+                  Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.expr_ty a, s))
+              | actual ->
+                  error (Ast.expr_span (List.hd args))
+                    (Printf.sprintf
+                       "`declassify` needs an integer, `bool` or a vector of them, got `%s`"
+                       (Sema_types.diagnostic_ty_name actual)))
+        | Hir.Wipe -> (
+            match args with
+            | [ p; n ] ->
+                let* p = check_expr c (Some Hir.Addr) p in
+                let* n = check_expr c (Some (Hir.Int Hir.U64)) n in
+                if Hir.expr_ty p <> Hir.Addr then
+                  error (Hir.expr_span p) "argument 1 of `wipe` must be an `addr`"
+                else if Hir.expr_ty n <> Hir.Int Hir.U64 then
+                  error (Hir.expr_span n) "argument 2 of `wipe` must be a `usize` byte count"
+                else Ok (Hir.Call (Hir.Builtin b, [ p; n ], Hir.Void, s))
+            | _ -> error s "builtin `wipe` expects an address and a byte count")
         | Hir.Handle_from_addr "" ->
             error s (Printf.sprintf "builtin `%s` expects a type argument" name)
         | Hir.Handle_from_addr target_name -> (
@@ -5024,17 +5116,17 @@ and check_target_inner (c : context) = function
       let x = place.expr in
       let access = view_access_of_expr c x in
       match x with
-      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _)
+      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _, _)
         when not (Hir.is_value_struct t) ->
           error (Ast.expr_span a) "raw access cannot store an array or struct value"
-      | Hir.Raw_select (base, off, t, _) ->
+      | Hir.Raw_select (base, off, t, secrecy, _) ->
           let* () = check_place_access c (Ast.expr_span a) ~write:true x in
           if access <> Mutable_access then
             readonly_write_error ~source_expression:a c (Ast.expr_span a) x
           else
             Ok
               {
-                target = Hir.ARaw (base, off, t);
+                target = Hir.ARaw (base, off, t, secrecy);
                 root = None;
                 path = None;
                 through_view = expression_uses_view c x;
@@ -5059,16 +5151,16 @@ and check_target_inner (c : context) = function
       let x = place.expr in
       let access = view_access_of_expr c x in
       match x with
-      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _)
+      | Hir.Raw_select (_, _, (Hir.Struct _ | Hir.Array _ as t), _, _)
         when not (Hir.is_value_struct t) ->
           error (Ast.expr_span a) "raw access cannot store an array or struct value"
-      | Hir.Raw_select (base, off, t, _) ->
+      | Hir.Raw_select (base, off, t, secrecy, _) ->
           let* () = check_place_access c (Ast.expr_span a) ~write:true x in
           if access <> Mutable_access then readonly_write_error c (Ast.expr_span a) x
           else
             Ok
               {
-                target = Hir.ARaw (base, off, t);
+                target = Hir.ARaw (base, off, t, secrecy);
                 root = None;
                 path = None;
                 through_view = expression_uses_view c x;
@@ -5097,7 +5189,7 @@ and check_target_inner (c : context) = function
 let target_ty c = function
   | Hir.ALocal binding -> Some binding.ty
   | Hir.AGlobal (_, ty) -> Some ty
-  | Hir.ARaw (_, _, t) -> Some t
+  | Hir.ARaw (_, _, t, _) -> Some t
   | Hir.AIndex (expression, _) -> (
       match Hir.expr_ty expression with
       | Hir.Array (_, t) | Hir.Vec (_, t) -> Some t
@@ -5729,13 +5821,15 @@ and recover_stmt c s =
     (Ast.stmt_names s);
   match s with
   | Ast.Let { name; ty; ty_span; span; _ } -> (
-      match source_ty_in_context c ty_span ty with
+      match Sema_types.with_secret (fun () -> source_ty_in_context c ty_span ty) with
       | Error _ -> false
       | Ok t -> (
           match ensure_new_local name c span with
           | Error _ -> true
           | Ok () -> (
-              match add_local name t c span with
+              match
+                add_local ~secret:(Sema_types.secrecy_of c.named_types ty) name t c span
+              with
               | Ok binding ->
                   mark_init binding c;
                   true
@@ -5752,7 +5846,9 @@ and placeholder = function
 and check_stmt (c : context) = function
   | Ast.Let { name; ty; ty_span; init; readonly; span } -> (
       let* () = ensure_new_local name c span in
-      let* t = source_ty_in_context c ty_span ty in
+      (* a local may be `secret[T]` (or an array of secrets) *)
+      let* t = Sema_types.with_secret (fun () -> source_ty_in_context c ty_span ty) in
+      let secret = Sema_types.secrecy_of c.named_types ty in
       let* () =
         (* the parser's range loop desugar (`for i T in a..b`) declares the hidden
            counter `.range.i` first, so its type is checked before the loop condition *)
@@ -5806,7 +5902,7 @@ and check_stmt (c : context) = function
             in
             Ok (Some initialized)
       in
-      let* binding = add_local name t c span in
+      let* binding = add_local ~secret name t c span in
       if readonly then Sema_flow.mark_readonly_local c.flow binding;
       index_local c binding span;
       (match (init, x) with
@@ -5834,7 +5930,9 @@ and check_stmt (c : context) = function
       let* () = ensure_new_local name c span in
       match place with
       | Ast.Select (base, [ type_payload; Ast.Name_arg ("..", _) ], select_span) ->
-          let* element = select_type_arg c.named_types select_span type_payload in
+          let* element, secrecy =
+            select_type_arg_secret c.named_types select_span type_payload
+          in
           let* () =
             if element = Hir.Void then
               error
@@ -5849,7 +5947,12 @@ and check_stmt (c : context) = function
             let address = address_fact c pointer in
             let access = view_access_of_expr c pointer in
             let readonly_name = readonly_storage_name c pointer in
-            let* binding = add_local name Hir.Addr c span in
+            (* the view's pointer is public; [Elements] records its
+               elements' secrecy for `xs[i]` *)
+            let secret =
+              match secrecy with Hir.Public -> Hir.Public | s -> Hir.Elements s
+            in
+            let* binding = add_local ~secret name Hir.Addr c span in
             index_local c binding name_span;
             mark_init binding c;
             Sema_flow.set_address c.flow binding address;
@@ -5898,7 +6001,11 @@ and check_stmt (c : context) = function
                      source_kind)
             in
             let* () = check_place_access c span ~write:false place_info.expr in
-            let* binding = add_local name (Hir.expr_ty place_info.expr) c span in
+            let* binding =
+              add_local
+                ~secret:(Hir.place_secrecy place_info.expr)
+                name (Hir.expr_ty place_info.expr) c span
+            in
             index_local c binding name_span;
             let readonly_name = readonly_storage_name c place_info.expr in
             let root, path =

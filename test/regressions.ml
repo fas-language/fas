@@ -8731,7 +8731,7 @@ let () =
            [
              {
                Hir.name = "f";
-               params = [ { Hir.name = "x"; ty = Hir.Opaque "X"; id = 0 } ];
+               params = [ { Hir.name = "x"; ty = Hir.Opaque "X"; id = 0; secret = Hir.Public } ];
                ret = Hir.Void;
                body = Hir.Statements [];
                linkage = Hir.Internal;
@@ -8829,7 +8829,7 @@ let () =
              "internal error: non-constant switch case")
       then failwith "lower-switch-case: unexpected diagnostic");
 
-  let malformed_compound_local = { Hir.name = "x"; ty = Hir.Int Hir.I8; id = 0 } in
+  let malformed_compound_local = { Hir.name = "x"; ty = Hir.Int Hir.I8; id = 0; secret = Hir.Public } in
   lower_function_error "lower-compound-operator"
     "internal error: non-arithmetic operator reached binary lowering"
     [ malformed_compound_local ]
@@ -8910,7 +8910,7 @@ let () =
 
   lower_function_error "layout-invariant-local" "internal error: type `X` has no layout"
     []
-    [ Hir.Let ({ Hir.name = "x"; ty = Hir.Opaque "X"; id = 0 }, None, Span.synthetic) ];
+    [ Hir.Let ({ Hir.name = "x"; ty = Hir.Opaque "X"; id = 0; secret = Hir.Public }, None, Span.synthetic) ];
   (match
      Sema.check
        (expect_ok

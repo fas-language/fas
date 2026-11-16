@@ -199,6 +199,7 @@ and length (l : Ast.aggregate_length) = { l with expression = expr l.expression 
 
 and ty = function
   | Ast.Handle t -> Ast.Handle (ty t)
+  | Ast.Secret t -> Ast.Secret (ty t)
   | Ast.Array (l, t) -> Ast.Array (length l, ty t)
   | Ast.Vec (l, t) -> Ast.Vec (length l, ty t)
   | Ast.Applied_type (n, s1, args, s2) -> Ast.Applied_type (n, s1, List.map generic_arg args, s2)

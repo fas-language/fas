@@ -91,6 +91,26 @@
   (glob_files fas_fir/*.fir)
   (glob_files fas_fir/c/*.fir)))
 
+; Mir_ct (the machine-code constant-time check) against the real backend's
+; code and injected leaks.
+(test
+ (name mir_ct_test)
+ (modules mir_ct_test)
+ (libraries fas_compiler unix)
+ (deps
+  (glob_files fas_fir/*.fir)))
+
+; The same with the allocator held to 4 registers (spills and reloads).
+(rule
+ (alias runtest)
+ (deps
+  (glob_files fas_fir/*.fir))
+ (action
+  (setenv
+   FAS_MIR_REGS
+   4
+   (run %{exe:mir_ct_test.exe}))))
+
 ; The Fir interpreter against the expected output of test/fas_fir.
 (test
  (name fir_interp_test)

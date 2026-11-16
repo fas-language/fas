@@ -2152,9 +2152,13 @@ let inst c i =
         set r
       end
   | Freeze a -> set (copy c (use c a))
-  (* a constant-time mark is a copy here; the taint check reads it before
-     isel *)
-  | Mark (_, a) -> set (copy c (use c a))
+  (* a constant-time mark is a copy here, into a fresh vreg that Mir_ct
+     takes as the taint's source (secret) or sink (declassify); Fir_ct has
+     checked the Fir before isel *)
+  | Mark (k, a) ->
+      let r = copy c (use c a) in
+      (match r with V n -> Hashtbl.replace c.mf.marks n (k = F.Secret) | _ -> ());
+      set r
   | Conv (op, a) -> set (conv c op (rty ()) a)
   | Alloca _ when Hashtbl.mem c.cells (F.resolve c.fn (res 0)) ->
       let cell, zero = Hashtbl.find c.cells (F.resolve c.fn (res 0)) in
@@ -2546,4 +2550,5 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
                | _, _, Some (V r) -> [ (i, Hptr r) ]
                | _ -> []))
          fn.vars);
+  mf.zeroize <- F.has fn.fattrs F.fa_secret || Hashtbl.length mf.marks > 0;
   mf

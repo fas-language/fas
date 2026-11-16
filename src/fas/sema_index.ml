@@ -562,7 +562,7 @@ let reference_program index ~instantiated (program : Ast.program) =
     | Ast.Array (length, element) | Ast.Vec (length, element) ->
         static_expression owner shadowed length.Ast.expression;
         ty owner shadowed element
-    | Ast.Handle element -> ty owner shadowed element
+    | Ast.Handle element | Ast.Secret element -> ty owner shadowed element
     | Ast.Bool | Ast.Int _ | Ast.Float _ | Ast.Addr | Ast.Void -> ()
   and argument owner shadowed = function
     | Ast.Type_arg t | Ast.Type_or_index t -> ty owner shadowed t

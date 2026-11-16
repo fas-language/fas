@@ -1,6 +1,6 @@
 module State_map = Map.Make (Int)
 
-type binding = Hir.local = { name : string; ty : Hir.ty; id : int }
+type binding = Hir.local = { name : string; ty : Hir.ty; id : int; secret : Hir.secrecy }
 type selector = Field of string | Element of int
 type init_state = Uninit | Full | Unknown | Partial of (selector * init_state) list
 type value_fact = { low : int64; high : int64; induction : int option }
@@ -155,14 +155,14 @@ let ensure_new_local name flow span =
   if Hashtbl.mem scope name then error span (Printf.sprintf "duplicate local `%s`" name)
   else Ok ()
 
-let add_local name ty flow span =
+let add_local ?(secret = Hir.Public) name ty flow span =
   let scope =
     match !(flow.locals) with scope :: _ -> scope | [] -> Hashtbl.create 8
   in
   let* () = ensure_new_local name flow span in
   let id = flow.next_binding_id in
   flow.next_binding_id <- id + 1;
-  let binding : binding = { ty; id; name } in
+  let binding : binding = { ty; id; name; secret } in
   Hashtbl.replace scope name binding;
   if !(flow.locals) = [] then flow.locals := [ scope ];
   Ok binding

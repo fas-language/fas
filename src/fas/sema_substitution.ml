@@ -234,7 +234,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   let rec type_mentions names = function
     | Ast.Array (length, ty) | Ast.Vec (length, ty) ->
         expression_mentions names length.Ast.expression || type_mentions names ty
-    | Ast.Handle ty -> type_mentions names ty
+    | Ast.Handle ty | Ast.Secret ty -> type_mentions names ty
     | Ast.Applied_type (_, _, arguments, _) ->
         List.exists (generic_argument_mentions names) arguments
     | Ast.Named_type (name, _) -> List.mem name names
@@ -298,7 +298,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | None -> Ok ()
   in
   let rec validate_type_names value_names type_names span = function
-    | Ast.Handle ty -> validate_type_names value_names type_names span ty
+    | Ast.Handle ty | Ast.Secret ty -> validate_type_names value_names type_names span ty
     | Ast.Addr -> Ok ()
     | Ast.Array (length, ty) ->
         validate_aggregate_length_names value_names type_names span "array" length ty
@@ -893,6 +893,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Named_type (parameter, _) as ty ->
         Option.value ~default:ty (List.assoc_opt parameter substitutions)
     | Ast.Handle ty -> Ast.Handle (substitute_field_type substitutions ty)
+    | Ast.Secret ty -> Ast.Secret (substitute_field_type substitutions ty)
     | Ast.Array (length, ty) ->
         Ast.Array (length, substitute_field_type substitutions ty)
     | Ast.Vec (length, ty) -> Ast.Vec (length, substitute_field_type substitutions ty)
@@ -986,7 +987,10 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | _ -> None
   in
   let view_place_type place = view_source_type (source_place_type place) in
+  (* inference and template legality only need types: `secret[T]` resolves
+     to T here, and every instance is then checked with its secrecy *)
   let inference_context span =
+    Sema_types.with_secret @@ fun () ->
     let inferred_globals =
       List.filter_map
         (function
@@ -1076,7 +1080,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       List.for_all
         (fun (param : Ast.param) ->
           match param.ty with
-          | Ast.Handle _ | Ast.Array _ | Ast.Vec _ | Ast.Applied_type _ -> false
+          | Ast.Handle _ | Ast.Secret _ | Ast.Array _ | Ast.Vec _ | Ast.Applied_type _ -> false
           | _ -> true)
         params
     in
@@ -1156,7 +1160,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       match (pattern, actual) with
       | Ast.Named_type (n, _), actual when List.mem n type_params ->
           bind_type n actual argument
-      | Ast.Handle p, Ast.Handle a -> match_type argument p a
+      | Ast.Handle p, Ast.Handle a | Ast.Secret p, Ast.Secret a -> match_type argument p a
+      (* `secret[T]` takes a public argument too: T is its type *)
+      | Ast.Secret p, a -> match_type argument p a
       | Ast.Vec (length, p), Ast.Vec (actual_length, a) ->
           let* () =
             match (length.expression, int_value actual_length) with
@@ -1292,7 +1298,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   in
   let rec has_generic_type = function
     | Ast.Applied_type _ -> true
-    | Ast.Array (_, ty) | Ast.Vec (_, ty) | Ast.Handle ty -> has_generic_type ty
+    | Ast.Array (_, ty) | Ast.Vec (_, ty) | Ast.Handle ty | Ast.Secret ty -> has_generic_type ty
     | _ -> false
   in
   let rec has_generic_arguments = function
@@ -1347,6 +1353,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Addr -> Ast.Addr
     | Ast.Handle ty ->
         Ast.Handle
+          (substitute_validation_type type_substitutions const_substitutions ty)
+    | Ast.Secret ty ->
+        Ast.Secret
           (substitute_validation_type type_substitutions const_substitutions ty)
     | Ast.Array (length, ty) ->
         Ast.Array
@@ -2168,6 +2177,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     result
   in
   let validate_generic_legality ~span ~ret ~params ~generic_params statements =
+    Sema_types.with_secret @@ fun () ->
     let generic_value_names =
       List.map
         (fun (parameter : Ast.const_param) -> parameter.name)
@@ -2235,7 +2245,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
   in
   let rec has_unresolved_application = function
     | Ast.Applied_type _ -> true
-    | Ast.Handle ty | Ast.Array (_, ty) | Ast.Vec (_, ty) ->
+    | Ast.Handle ty | Ast.Secret ty | Ast.Array (_, ty) | Ast.Vec (_, ty) ->
         has_unresolved_application ty
     | Ast.Bool | Ast.Void | Ast.Int _ | Ast.Float _ | Ast.Named_type _ | Ast.Addr ->
         false
@@ -2250,6 +2260,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Handle ty ->
         let* ty = resolve_ty ~values ~defer_const_structs substitutions depth span ty in
         Ok (Ast.Handle ty)
+    | Ast.Secret ty ->
+        let* ty = resolve_ty ~values ~defer_const_structs substitutions depth span ty in
+        Ok (Ast.Secret ty)
     | Ast.Array (length_info, ty) ->
         let* length =
           resolve_length "array" length_info ~values ~defer_const_structs substitutions
@@ -2509,6 +2522,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       | Ast.Handle ty ->
           let* ty = resolve_layout_parts span ty in
           Ok (Ast.Handle ty)
+      | Ast.Secret ty ->
+          let* ty = resolve_layout_parts span ty in
+          Ok (Ast.Secret ty)
       | (Ast.Array (length, ty) | Ast.Vec (length, ty)) as aggregate ->
           let* expression =
             resolve_expr ~values ~defer_const_structs substitutions depth
@@ -3195,6 +3211,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                           (template, span, List.map source_arg arguments, span)
                     | None -> ty)
                 | Ast.Handle ty -> Ast.Handle (source_ty ty)
+                | Ast.Secret ty -> Ast.Secret (source_ty ty)
                 | Ast.Array (length, ty) -> Ast.Array (length, source_ty ty)
                 | Ast.Vec (length, ty) -> Ast.Vec (length, source_ty ty)
                 | Ast.Applied_type (name, span, arguments, arguments_span) ->

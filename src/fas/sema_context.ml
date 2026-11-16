@@ -147,7 +147,7 @@ let rec count_expanded_type_nodes ty cap total =
     match ty with
     | Ast.Bool | Ast.Void | Ast.Int _ | Ast.Float _ | Ast.Named_type _ | Ast.Addr ->
         total
-    | Ast.Handle element | Ast.Array (_, element) | Ast.Vec (_, element) ->
+    | Ast.Handle element | Ast.Secret element | Ast.Array (_, element) | Ast.Vec (_, element) ->
         count_expanded_type_nodes element cap total
     | Ast.Applied_type (_, _, arguments, _) ->
         List.fold_left
@@ -462,7 +462,7 @@ let lookup name table = List.find_opt (fun (n, _, _) -> n = name) table
 let lookup_sig name c = List.assoc_opt name c.signatures
 let lookup_local name c = Sema_flow.lookup_local name c.flow
 let ensure_new_local name c span = Sema_flow.ensure_new_local name c.flow span
-let add_local name ty c span = Sema_flow.add_local name ty c.flow span
+let add_local ?secret name ty c span = Sema_flow.add_local ?secret name ty c.flow span
 let push c = Sema_flow.push c.flow
 let pop c = Sema_flow.pop c.flow
 let set_state c binding path state = Sema_flow.set_state c.flow binding path state

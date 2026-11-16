@@ -199,10 +199,18 @@ type func = {
   slots : (int * int) Dynarray.t;  (** frame slots: size, alignment *)
   mutable out_size : int;  (** bytes of outgoing stack arguments needed *)
   mutable homes : (int * home) list;  (** Fir variable index (0-based) -> its home *)
+  marks : (int, bool) Hashtbl.t;
+      (** constant-time marks: vreg -> true when it is a Fir [secret] mark's
+          result, false for [declassify] (Mir_ct) *)
+  mutable zeroize : bool;
+      (** the function handles secrets (Fir's [secret] attribute, or a
+          [secret] mark): it uses no callee-saved register, and its
+          epilogue zeroes its frame, the red zone and the caller-saved
+          registers other than the results (Mir_ra, Mir_emit) *)
 }
 
 let create name =
-  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = [] }
+  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = []; marks = Hashtbl.create 1; zeroize = false }
 
 let new_vreg f cls =
   Dynarray.add_last f.vcls cls;

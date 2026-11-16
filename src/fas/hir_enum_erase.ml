@@ -45,7 +45,7 @@ let rec expr = function
   | Cast (k, e, t, s) -> Cast (k, expr e, ty t, s)
   | Index (a, i, t, s) -> Index (expr a, expr i, ty t, s)
   | Field (e, name, t, offset, s) -> Field (expr e, name, ty t, offset, s)
-  | Raw_select (p, o, t, s) -> Raw_select (expr p, expr o, ty t, s)
+  | Raw_select (p, o, t, secrecy, s) -> Raw_select (expr p, expr o, ty t, secrecy, s)
   | Address (e, t, s) -> Address (expr e, ty t, s)
   | Function_address _ as e -> e
   | Sizeof (t, n, s) -> Sizeof (ty t, n, s)
@@ -68,7 +68,7 @@ and construction = function
 let assign_target = function
   | ALocal l -> ALocal (local l)
   | AGlobal (name, t) -> AGlobal (name, ty t)
-  | ARaw (p, o, t) -> ARaw (expr p, expr o, ty t)
+  | ARaw (p, o, t, secrecy) -> ARaw (expr p, expr o, ty t, secrecy)
   | AIndex (a, i) -> AIndex (expr a, expr i)
   | AField (e, name, offset) -> AField (expr e, name, offset)
 
