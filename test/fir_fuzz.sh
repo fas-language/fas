@@ -17,6 +17,7 @@ export CC
 COUNT=${FIR_FUZZ_COUNT:-200}
 SEED=${FIR_FUZZ_SEED:-1}
 KEEP=${FIR_FUZZ_KEEP:-$(mktemp -d)}
+mkdir -p "$KEEP"
 
 status=0
 for f in "$ROOT"/test/fir_fuzz/*.fir; do

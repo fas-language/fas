@@ -215,6 +215,15 @@ let vecs =
 
 let cplx = [ F16; F32; F64; F80 ]
 
+(* whether [t] holds a scalar for which [p] holds *)
+let rec holds p t =
+  match t with
+  | Arr (t, _) -> holds p t
+  | Struct (_, ms, _) | Union (_, ms) -> List.exists (holds p) ms
+  | t -> p t
+
+let is_f16 = function Sc F16 | Cplx F16 -> true | _ -> false
+
 let rec gen_member depth ~packed =
   match int 10 with
   | 0 | 1 when depth > 0 -> gen_agg (depth - 1) ~packed
@@ -231,6 +240,12 @@ let rec gen_member depth ~packed =
       in
       let m = gen_member (depth - 1) ~packed in
       let m = if cf16 m then Cplx F32 else m in
+      (* gcc 15 also drops the later elements of an array of structs
+         holding a _Float16 when an element crosses into the second
+         eightbyte (struct {int z; short y; struct {short a; _Float16 b;}
+         p[2];} passes p[1] as zeros, gcc on both sides): such an element
+         type gets one element (a scalar _Float16 array is fine) *)
+      let agg_f16 = (match m with Struct _ | Union _ -> true | _ -> false) && holds is_f16 m in
       (* an array of a packed struct whose size breaks a member's natural
          alignment puts that member misaligned in the later elements: clang
          (and Fir, and the psABI's "unaligned fields") make the whole agg
@@ -238,7 +253,7 @@ let rec gen_member depth ~packed =
          packed struct. One element keeps every member aligned *)
       let s, _ = size_align m in
       let misaligned = List.exists (fun (o, e, _) -> (s + o) mod sc_align e <> 0) (leaves ~all:true m "" 0) in
-      Arr (m, if misaligned then 1 else 1 + int 4)
+      Arr (m, if misaligned || agg_f16 then 1 else 1 + int 4)
   | 3 when not packed ->
       let n, e = choose vecs in
       Vec (n, e)
@@ -255,7 +270,18 @@ and gen_agg depth ~packed =
   else
     let packed = packed || chance 0.08 in
     let attr = if packed then Packed else if chance 0.08 then Aligned (choose [ 16; 32 ]) else Plain in
-    Struct (id, List.init (1 + int 5) (fun _ -> gen_member depth ~packed), attr)
+    let ms = List.init (1 + int 5) (fun _ -> gen_member depth ~packed) in
+    (* gcc 15 gives the padding-only second eightbyte of an aligned(16)
+       struct holding a _Complex _Float16 an xmm register ({unsigned short
+       a; _Complex _Float16 c;} aligned(16) shifts the next double to
+       xmm1); clang, Fir and gcc itself for the same struct with two
+       _Float16 fields give it none, as the psABI's NO_CLASS says *)
+    let attr =
+      match attr with
+      | Aligned _ when List.exists (holds (fun t -> t = Cplx F16)) ms -> Plain
+      | attr -> attr
+    in
+    Struct (id, ms, attr)
 
 let gen_param () =
   match int 10 with

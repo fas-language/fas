@@ -155,7 +155,18 @@ let having g p = List.filter (fun (_, t) -> p t) g.env
    so its bits are never observed *)
 let canon g t v =
   match t with
-  | F16 | F32 | F64 | F80 ->
+  | F80 ->
+      (* an f80 loaded from bits that are not a canonical encoding (a
+         pseudo-denormal: exponent 0 with the integer bit set) holds its
+         value in an unspecified encoding (SPEC §6): x87 keeps the bits,
+         LLVM's constant folding rewrites them. A multiply by 1 encodes it
+         canonically on both and keeps -0 *)
+      let m = fresh g and u = fresh g and c = fresh g in
+      line g "%s = fmul f80 %s, f80 0x3fff8000000000000000" m v;
+      line g "%s = fcmp une i1 %s, %s" u m m;
+      line g "%s = select f80 %s, %s, %s" c u (qnan F80) m;
+      c
+  | F16 | F32 | F64 ->
       let u = fresh g and c = fresh g in
       line g "%s = fcmp une i1 %s, %s" u v v;
       line g "%s = select %s %s, %s, %s" c (ty_text t) u (qnan t) v;
