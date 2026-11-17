@@ -731,22 +731,22 @@ let common_numeric_type left right =
        else left)
   else None
 
-let rec narrow_arithmetic_result ~unsigned = function
-  | Ast.Parenthesized (expression, _) -> narrow_arithmetic_result ~unsigned expression
-  | Ast.Select (expression, [ _ ], _) -> narrow_arithmetic_result ~unsigned expression
+(* one step of [narrow_arithmetic_result], recursing through [self] *)
+let narrow_arithmetic_step ~unsigned self = function
+  | Ast.Parenthesized (expression, _) -> self expression
+  | Ast.Select (expression, [ _ ], _) -> self expression
   | Ast.Unary ((Ast.Neg | Ast.Bit_not), _, _) -> true
   | Ast.Binary ((Ast.Add | Ast.Sub | Ast.Mul | Ast.Shl), _, _, _) -> true
   | Ast.Binary ((Ast.Div | Ast.Rem), left, right, _) ->
-      (not unsigned)
-      || narrow_arithmetic_result ~unsigned left
-      || narrow_arithmetic_result ~unsigned right
-  | Ast.Binary (Ast.Shr, left, _, _) -> narrow_arithmetic_result ~unsigned left
+      (not unsigned) || self left || self right
+  | Ast.Binary (Ast.Shr, left, _, _) -> self left
   | Ast.Binary ((Ast.Bit_and | Ast.Bit_or | Ast.Bit_xor), left, right, _) ->
-      narrow_arithmetic_result ~unsigned left
-      || narrow_arithmetic_result ~unsigned right
-  | Ast.Ternary (_, yes, no, _) ->
-      narrow_arithmetic_result ~unsigned yes || narrow_arithmetic_result ~unsigned no
+      self left || self right
+  | Ast.Ternary (_, yes, no, _) -> self yes || self no
   | _ -> false
+
+let rec narrow_arithmetic_result ~unsigned expression =
+  narrow_arithmetic_step ~unsigned (narrow_arithmetic_result ~unsigned) expression
 
 let rec narrow_float_result expression =
   match expression with
@@ -771,21 +771,45 @@ let rec float_literal_expression = function
       float_literal_expression expression
   | _ -> false
 
-let rec integer_literal_expression = function
+(* whether an expression is built from integer literals only, one step,
+   recursing through [self] *)
+let integer_literal_step self = function
   | Ast.Int_lit _ -> true
   | Ast.Parenthesized (expression, _)
   | Ast.Unary ((Ast.Neg | Ast.Bit_not), expression, _) ->
-      integer_literal_expression expression
+      self expression
   | Ast.Binary
       ( ( Ast.Add | Ast.Sub | Ast.Mul | Ast.Div | Ast.Rem | Ast.Bit_and | Ast.Bit_or
         | Ast.Bit_xor | Ast.Shl | Ast.Shr ),
         left,
         right,
         _ ) ->
-      integer_literal_expression left && integer_literal_expression right
-  | Ast.Ternary (_, yes, no, _) ->
-      integer_literal_expression yes && integer_literal_expression no
+      self left && self right
+  | Ast.Ternary (_, yes, no, _) -> self yes && self no
   | _ -> false
+
+(* answers about AST nodes, by node identity, for one walk over an
+   expression: a walk that asks at every node about the subtree below
+   would otherwise take time quadratic in a left-deep chain like
+   `a / 1 + 1 + ... + 1` (a fas_refuse find) *)
+module Expr_memo = Hashtbl.Make (struct
+  type t = Ast.expr
+
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+let memoized step =
+  let table = Expr_memo.create 16 in
+  let rec answer expression =
+    match Expr_memo.find_opt table expression with
+    | Some known -> known
+    | None ->
+        let known = step answer expression in
+        Expr_memo.add table expression known;
+        known
+  in
+  answer
 
 let rec unparenthesized = function
   | Ast.Parenthesized (expression, _) -> unparenthesized expression
@@ -861,51 +885,55 @@ let leaf_extension ?leaf_type ~default expression checked =
 
 let extension_text = function Ast.Zext -> "zext" | _ -> "sext"
 
-let rec widened_arithmetic ?leaf_type ~unsigned (extension, target) checked expression =
-  let checked = implicit_source checked expression in
-  let widen = widened_arithmetic ?leaf_type ~unsigned (extension, target) in
-  let widen_or_keep child_checked child =
-    if narrow_arithmetic_result ~unsigned child then widen child_checked child
-    else Some (unparenthesized child)
-  in
-  match expression with
-  | Ast.Parenthesized (inner, _) -> widen checked inner
-  | Ast.Binary (((Ast.Shl | Ast.Shr) as op), left, right, span) ->
-      let left_checked, _ = binary_operands op checked in
-      Option.map
-        (fun left -> Ast.Binary (op, left, unparenthesized right, span))
-        (widen left_checked left)
-  | Ast.Binary (op, left, right, span) when arithmetic_binop op ->
-      let left_checked, right_checked = binary_operands op checked in
-      if integer_literal_expression left && not (integer_literal_expression right) then
+let widened_arithmetic ?leaf_type ~unsigned (extension, target) checked expression =
+  let narrow = memoized (narrow_arithmetic_step ~unsigned)
+  and literal = memoized integer_literal_step in
+  let rec widen checked expression =
+    let checked = implicit_source checked expression in
+    let widen_or_keep child_checked child =
+      if narrow child then widen child_checked child
+      else Some (unparenthesized child)
+    in
+    match expression with
+    | Ast.Parenthesized (inner, _) -> widen checked inner
+    | Ast.Binary (((Ast.Shl | Ast.Shr) as op), left, right, span) ->
+        let left_checked, _ = binary_operands op checked in
         Option.map
-          (fun right -> Ast.Binary (op, unparenthesized left, right, span))
-          (widen right_checked right)
-      else
-        Option.bind (widen left_checked left) (fun left ->
-            Option.map
-              (fun right -> Ast.Binary (op, left, right, span))
-              (widen_or_keep right_checked right))
-  | Ast.Unary (((Ast.Neg | Ast.Bit_not) as op), value, span) ->
-      Option.map
-        (fun value -> Ast.Unary (op, value, span))
-        (widen (unary_operand op checked) value)
-  | Ast.Ternary (condition, yes, no, span)
-    when narrow_arithmetic_result ~unsigned expression -> (
-      let yes_checked, no_checked = ternary_branches checked in
-      match (widen yes_checked yes, widen no_checked no) with
-      | Some yes, Some no -> Some (Ast.Ternary (condition, yes, no, span))
-      | _ -> None)
-  | _ ->
-      if narrow_arithmetic_result ~unsigned expression then None
-      else if integer_literal_expression expression then Some expression
-      else
-        Some
-          (Ast.Cast
-             ( leaf_extension ?leaf_type ~default:extension expression checked,
-               target,
-               expression,
-               Ast.expr_span expression ))
+          (fun left -> Ast.Binary (op, left, unparenthesized right, span))
+          (widen left_checked left)
+    | Ast.Binary (op, left, right, span) when arithmetic_binop op ->
+        let left_checked, right_checked = binary_operands op checked in
+        if literal left && not (literal right) then
+          Option.map
+            (fun right -> Ast.Binary (op, unparenthesized left, right, span))
+            (widen right_checked right)
+        else
+          Option.bind (widen left_checked left) (fun left ->
+              Option.map
+                (fun right -> Ast.Binary (op, left, right, span))
+                (widen_or_keep right_checked right))
+    | Ast.Unary (((Ast.Neg | Ast.Bit_not) as op), value, span) ->
+        Option.map
+          (fun value -> Ast.Unary (op, value, span))
+          (widen (unary_operand op checked) value)
+    | Ast.Ternary (condition, yes, no, span)
+      when narrow expression -> (
+        let yes_checked, no_checked = ternary_branches checked in
+        match (widen yes_checked yes, widen no_checked no) with
+        | Some yes, Some no -> Some (Ast.Ternary (condition, yes, no, span))
+        | _ -> None)
+    | _ ->
+        if narrow expression then None
+        else if literal expression then Some expression
+        else
+          Some
+            (Ast.Cast
+               ( leaf_extension ?leaf_type ~default:extension expression checked,
+                 target,
+                 expression,
+                 Ast.expr_span expression ))
+  in
+  widen checked expression
 
 let convert_expected_kind ?expression actual expected =
   match expression with

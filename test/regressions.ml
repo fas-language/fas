@@ -20143,6 +20143,71 @@ let () =
   semantic_accept "literal-bitcast-negative-one"
     "fn f() u32 { return bitcast[u32](-1) }\n"
 
+(* fas_refuse finds (campaign 9) *)
+let () =
+  (* a 100k-term chain computed in u32 and widened to u64: the error names
+     the chain, and naming it built the text with `^`, quadratic in its
+     length (this took over a minute; now about 3 s) *)
+  let terms = 100_000 in
+  let chain = Buffer.create (terms * 4) in
+  Buffer.add_string chain "a / 1";
+  for _ = 2 to terms do
+    Buffer.add_string chain " + 1"
+  done;
+  let started = Unix.gettimeofday () in
+  semantic_error "long-widened-chain" "may wrap before it reaches `u64`"
+    ("fn f(a u32) u64 { y u64 = (" ^ Buffer.contents chain
+   ^ ")\n return y }\nfn main() i32 { return 0 }\n");
+  let elapsed = Unix.gettimeofday () -. started in
+  if elapsed > 30.0 then
+    failwith (Printf.sprintf "long-widened-chain: checking took %.1f s" elapsed);
+  let root = Filename.temp_file "fas-c-refuse-" ".fas" in
+  let write text =
+    let ch = open_out_bin root in
+    output_string ch text;
+    close_out ch
+  in
+  let messages () =
+    match Driver.run (cli_run [ "--emit-ir"; root ]) with
+    | Ok _ -> []
+    | Error diagnostics -> List.map (fun d -> d.Diag.message) diagnostics
+  in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove root)
+    (fun () ->
+      (* a macro nested 3000 parentheses deep crashed clang's JSON dumper,
+         an empty internal error; a macro nested past 256 is now left out
+         of the import like an untypable one, and the rest still imports *)
+      let deep = String.make 3000 '(' ^ "42" ^ String.make 3000 ')' in
+      let deep_import =
+        "use \"C\" as c <<C\n#define OK 7\n#define ANSWER " ^ deep ^ "\nC\n"
+      in
+      incr checks_run;
+      write (deep_import ^ "fn main() i32 { return c.OK }\n");
+      (match messages () with
+      | [] -> ()
+      | m -> failwith ("c-deep-macro: " ^ String.concat "; " m));
+      incr checks_run;
+      write (deep_import ^ "fn main() i32 { return c.ANSWER }\n");
+      (match messages () with
+      | [ m ] when contains m "unknown name `c.ANSWER`" -> ()
+      | m -> failwith ("c-deep-macro-use: " ^ String.concat "; " m));
+      (* `#define int counter` broke the macro probe C Fas generates (the
+         probe runs only when the import has macros): an internal error, now
+         a user error naming the keyword *)
+      incr checks_run;
+      write
+        "use \"C\" as c <<C\nint counter = 37;\n#define int counter\n\
+         #define ANSWER 42\nC\n\
+         fn main() i32 { return c.ANSWER }\n";
+      match messages () with
+      | [ m ]
+        when String.starts_with ~prefix:"the C import cannot work around a keyword macro: "
+               m
+             && contains m "the C keyword `int`" ->
+          ()
+      | m -> failwith ("c-keyword-macro: " ^ String.concat "; " m))
+
 let replay_unmatched_bound = 30
 
 let () =

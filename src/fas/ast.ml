@@ -480,38 +480,66 @@ and expr_precedence = function
       12
   | _ -> 13
 
-and expr_name_child parent_precedence right_child expression =
-  let text = expr_name expression and precedence = expr_precedence expression in
-  if precedence < parent_precedence || (precedence = parent_precedence && right_child)
-  then "(" ^ text ^ ")"
-  else text
+(* the source text of an expression, written into one buffer: building it
+   with `^` copies a left-deep chain's prefix at every level, quadratic in
+   its length (a 100k-term `a + 1 + ... + 1` took minutes to name in an
+   error message, a fas_refuse find) *)
+and expr_name expression =
+  let buffer = Buffer.create 64 in
+  add_expr_name buffer expression;
+  Buffer.contents buffer
 
-and expr_name = function
-  | Int_lit (s, _) -> s
-  | Float_lit (s, _) -> s
-  | Bool_lit (true, _) -> "true"
-  | Bool_lit (false, _) -> "false"
-  | Null _ -> "null"
-  | String_lit (c, s, _) -> string_literal_name c s
-  | Ident (s, _) -> s
+and add_expr_name_child buffer parent_precedence right_child expression =
+  let precedence = expr_precedence expression in
+  if precedence < parent_precedence || (precedence = parent_precedence && right_child)
+  then (
+    Buffer.add_char buffer '(';
+    add_expr_name buffer expression;
+    Buffer.add_char buffer ')')
+  else add_expr_name buffer expression
+
+and add_expr_name buffer expression =
+  let add = Buffer.add_string buffer in
+  let name = add_expr_name buffer in
+  let child = add_expr_name_child buffer in
+  let list separator add_one items =
+    List.iteri
+      (fun index item ->
+        if index > 0 then add separator;
+        add_one item)
+      items
+  in
+  match expression with
+  | Int_lit (s, _) -> add s
+  | Float_lit (s, _) -> add s
+  | Bool_lit (true, _) -> add "true"
+  | Bool_lit (false, _) -> add "false"
+  | Null _ -> add "null"
+  | String_lit (c, s, _) -> add (string_literal_name c s)
+  | Ident (s, _) -> add s
   | Unary (op, e, _) ->
-      let operator = match op with Neg -> "-" | Not -> "!" | Bit_not -> "~" in
-      let operand =
-        match (op, e) with
-        | Neg, Unary (Neg, _, _)
-        | Not, Unary (Not, _, _)
-        | Bit_not, Unary (Bit_not, _, _) ->
-            " "
-        | _ -> ""
-      in
-      operator ^ operand ^ expr_name_child 11 false e
-  | C_dereference (e, _, _) -> "*" ^ expr_name_child 11 false e
-  | C_dot_star (e, _) -> expr_name_child 12 false e ^ ".*"
-  | Parenthesized (e, _) -> "(" ^ expr_name e ^ ")"
+      add (match op with Neg -> "-" | Not -> "!" | Bit_not -> "~");
+      (match (op, e) with
+      | Neg, Unary (Neg, _, _) | Not, Unary (Not, _, _) | Bit_not, Unary (Bit_not, _, _)
+        ->
+          add " "
+      | _ -> ());
+      child 11 false e
+  | C_dereference (e, _, _) ->
+      add "*";
+      child 11 false e
+  | C_dot_star (e, _) ->
+      child 12 false e;
+      add ".*"
+  | Parenthesized (e, _) ->
+      add "(";
+      name e;
+      add ")"
   | Binary (op, l, r, _) ->
-      expr_name_child (binop_precedence op) false l
-      ^ " "
-      ^ (match op with
+      child (binop_precedence op) false l;
+      add " ";
+      add
+        (match op with
         | Add -> "+"
         | Sub -> "-"
         | Mul -> "*"
@@ -529,53 +557,117 @@ and expr_name = function
         | And -> "&&"
         | Or -> "||"
         | Shl -> "<<"
-        | Shr -> ">>")
-      ^ " "
-      ^ expr_name_child (binop_precedence op) true r
+        | Shr -> ">>");
+      add " ";
+      child (binop_precedence op) true r
   | Call (f, xs, _) ->
-      expr_name_child 12 false f ^ "("
-      ^ String.concat ", " (List.map expr_name xs)
-      ^ ")"
+      child 12 false f;
+      add "(";
+      list ", " name xs;
+      add ")"
   | Generic_args (f, xs, _) ->
-      expr_name_child 12 false f ^ "["
-      ^ String.concat ", " (List.map generic_arg_name xs)
-      ^ "]"
+      child 12 false f;
+      add "[";
+      list ", " (fun x -> add (generic_arg_name x)) xs;
+      add "]"
   | Cast (k, t, e, _) ->
-      (match k with
+      add
+        (match k with
         | Zext -> "zext"
         | Sext -> "sext"
         | Trunc -> "trunc"
         | Bitcast -> "bitcast"
-        | Float_widen -> "fpext")
-      ^ "[" ^ type_name t ^ "](" ^ expr_name e ^ ")"
+        | Float_widen -> "fpext");
+      add "[";
+      add (type_name t);
+      add "](";
+      name e;
+      add ")"
   | Select (a, args, _) ->
-      expr_name_child 12 false a ^ "["
-      ^ String.concat ", " (List.map generic_arg_name args)
-      ^ "]"
-  | Field (a, n, _) -> expr_name_child 12 false a ^ "." ^ n
-  | Arrow_field (a, n, _, _) -> expr_name_child 12 false a ^ "->" ^ n
-  | Addr_of ((Addr_of _ as e), _) -> "&(" ^ expr_name e ^ ")"
-  | Addr_of (e, _) -> "&" ^ expr_name_child 11 false e
+      child 12 false a;
+      add "[";
+      list ", " (fun x -> add (generic_arg_name x)) args;
+      add "]"
+  | Field (a, n, _) ->
+      child 12 false a;
+      add ".";
+      add n
+  | Arrow_field (a, n, _, _) ->
+      child 12 false a;
+      add "->";
+      add n
+  | Addr_of ((Addr_of _ as e), _) ->
+      add "&(";
+      name e;
+      add ")"
+  | Addr_of (e, _) ->
+      add "&";
+      child 11 false e
   | Handle_from_addr (t, e, _) ->
-      "handle_from_addr[" ^ type_name t ^ "](" ^ expr_name e ^ ")"
-  | Sizeof (t, _) -> "sizeof[" ^ type_name t ^ "]"
-  | Sizeof_value (e, _) -> "sizeof " ^ expr_name_child 11 false e
-  | Alignof (t, _) -> "alignof[" ^ type_name t ^ "]"
-  | Offsetof (t, f, _, _) -> "offsetof[" ^ type_name t ^ ", " ^ f ^ "]"
-  | Splat (e, _) -> "splat(" ^ expr_name e ^ ")"
+      add "handle_from_addr[";
+      add (type_name t);
+      add "](";
+      name e;
+      add ")"
+  | Sizeof (t, _) ->
+      add "sizeof[";
+      add (type_name t);
+      add "]"
+  | Sizeof_value (e, _) ->
+      add "sizeof ";
+      child 11 false e
+  | Alignof (t, _) ->
+      add "alignof[";
+      add (type_name t);
+      add "]"
+  | Offsetof (t, f, _, _) ->
+      add "offsetof[";
+      add (type_name t);
+      add ", ";
+      add f;
+      add "]"
+  | Splat (e, _) ->
+      add "splat(";
+      name e;
+      add ")"
   | Ternary (c, a, b, _) ->
-      "if " ^ expr_name c ^ " { " ^ expr_name a ^ " } else { " ^ expr_name b ^ " }"
-  | Array_lit (xs, _) -> "{" ^ String.concat ", " (List.map expr_name xs) ^ "}"
-  | Designated_field (name, _, value, _) -> "." ^ name ^ " = " ^ expr_name value
+      add "if ";
+      name c;
+      add " { ";
+      name a;
+      add " } else { ";
+      name b;
+      add " }"
+  | Array_lit (xs, _) ->
+      add "{";
+      list ", " name xs;
+      add "}"
+  | Designated_field (field, _, value, _) ->
+      add ".";
+      add field;
+      add " = ";
+      name value
   | Designated_index (index, value, _) ->
-      "[" ^ expr_name index ^ "] = " ^ expr_name value
-  | Try (call, _) -> "try " ^ expr_name call
+      add "[";
+      name index;
+      add "] = ";
+      name value
+  | Try (call, _) ->
+      add "try ";
+      name call
   | Catch (call, Catch_value value, _) ->
-      expr_name call ^ " catch " ^ expr_name value
+      name call;
+      add " catch ";
+      name value
   | Catch (call, Catch_block (binding, _), _) ->
-      expr_name call ^ " catch "
-      ^ Option.fold ~none:"" ~some:(fun (name, _) -> name ^ " ") binding
-      ^ "{ ... }"
+      name call;
+      add " catch ";
+      Option.iter
+        (fun (binding, _) ->
+          add binding;
+          add " ")
+        binding;
+      add "{ ... }"
 
 let aggregate_length expression span = { expression; text = expr_name expression; span }
 

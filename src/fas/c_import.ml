@@ -387,6 +387,101 @@ let c_import_args ~cc ~c_flags ~source =
   @ c_flags
   @ [ "-iquote"; Filename.dirname source ]
 
+(* the most JSON a clang AST dump may write: real headers take a few MiB
+   (fifteen common system headers: 9 MiB), while the dump of a deeply nested
+   expression grows with the square of its depth (each level indents its
+   lines), and a 10k-term macro filled gigabytes of /tmp (a fas_refuse find) *)
+let max_ast_bytes = 512 * 1024 * 1024
+
+let ast_too_large_prefix = "the C import is too large to read: "
+
+let ast_too_large (_ : Process.failure) =
+  Printf.sprintf
+    "%sclang's AST output for it is over %d MiB; a declaration or macro may be \
+     nested too deeply"
+    ast_too_large_prefix
+    (max_ast_bytes / (1024 * 1024))
+
+(* clang killed by a signal: its own crash (the JSON AST dumper recurses
+   per nesting level and overflows clang's stack near 3000 levels, a
+   fas_refuse find) on the program's C, not a Fas bug *)
+let clang_crashed_prefix = "clang crashed on this C import: "
+
+let clang_crashed_message signal =
+  Printf.sprintf
+    "%sit was killed by signal %d; a declaration or macro may be nested too deeply"
+    clang_crashed_prefix signal
+
+(* the C keywords (C23) *)
+let c_keywords =
+  [ "alignas"; "alignof"; "auto"; "bool"; "break"; "case"; "char"; "const";
+    "constexpr"; "continue"; "default"; "do"; "double"; "else"; "enum";
+    "extern"; "false"; "float"; "for"; "goto"; "if"; "inline"; "int"; "long";
+    "nullptr"; "register"; "restrict"; "return"; "short"; "signed"; "sizeof";
+    "static"; "static_assert"; "struct"; "switch"; "thread_local"; "true";
+    "typedef"; "typeof"; "typeof_unqual"; "union"; "unsigned"; "void";
+    "volatile"; "while"; "_Alignas"; "_Alignof"; "_Atomic"; "_BitInt";
+    "_Bool"; "_Complex"; "_Decimal128"; "_Decimal32"; "_Decimal64";
+    "_Generic"; "_Imaginary"; "_Noreturn"; "_Static_assert"; "_Thread_local" ]
+
+(* a C block that defines a keyword as a macro (`#define int counter`)
+   changes the C that Fas generates to probe its types and macros, so an
+   error in that C coming from such a macro is the program's *)
+let keyword_macro_prefix = "the C import cannot work around a keyword macro: "
+
+let keyword_macro_message stderr =
+  List.find_map
+    (fun keyword ->
+      match find_text stderr (Printf.sprintf "expanded from macro '%s'" keyword) 0 with
+      | Some _ ->
+          Some
+            (Printf.sprintf
+               "%sthe C defines the C keyword `%s` as a macro, which breaks the C \
+                Fas generates to read the import"
+               keyword_macro_prefix keyword)
+      | None -> None)
+    c_keywords
+
+(* why a clang run on C that Fas generated failed: the program's input
+   (too large, crashing clang, a keyword macro) or else the generated C,
+   an internal error *)
+let stage_failure (failure : Process.failure) =
+  if Process.output_limit_exceeded failure then ast_too_large failure
+  else
+    match failure.status with
+    | Unix.WSIGNALED signal -> clang_crashed_message signal
+    | _ -> Option.value (keyword_macro_message failure.stderr) ~default:failure.stderr
+
+let user_failure_prefixes =
+  [ ast_too_large_prefix; clang_crashed_prefix; keyword_macro_prefix ]
+
+(* the deepest nesting of (), [] and {} in a macro expansion (outside
+   string and character literals) *)
+let nesting_depth text =
+  let depth = ref 0 and deepest = ref 0 and quote = ref None and escaped = ref false in
+  String.iter
+    (fun c ->
+      match !quote with
+      | Some q ->
+          if !escaped then escaped := false
+          else if c = '\\' then escaped := true
+          else if c = q then quote := None
+      | None -> (
+          match c with
+          | '"' | '\'' -> quote := Some c
+          | '(' | '[' | '{' ->
+              incr depth;
+              if !depth > !deepest then deepest := !depth
+          | ')' | ']' | '}' -> decr depth
+          | _ -> ()))
+    text;
+  !deepest
+
+(* object-like macros nested deeper than this are not imported: clang's own
+   bracket limit (-fbracket-depth) defaults to 256, C promises 63 levels of
+   parentheses, and clang's AST dump crashes on a few thousand *)
+let max_macro_nesting = 256
+
 let imported_macro_definitions ~cc ~c_flags ~source ~unit_path ~macro_names =
   if macro_names = [] then Ok []
   else
@@ -394,7 +489,7 @@ let imported_macro_definitions ~cc ~c_flags ~source ~unit_path ~macro_names =
       Array.of_list (c_import_args ~cc ~c_flags ~source @ [ "-E"; "-dD"; unit_path ])
     in
     match Process.run argv with
-    | Error failure -> Error failure.stderr
+    | Error failure -> Error (stage_failure failure)
     | Ok (text, _) -> Ok (macro_definitions text macro_names)
 
 let imported_macro_expansions ~cc ~c_flags ~source ~unit_path ~paths candidates =
@@ -415,7 +510,7 @@ let imported_macro_expansions ~cc ~c_flags ~source ~unit_path ~paths candidates 
       Process.run
         (Array.of_list (c_import_args ~cc ~c_flags ~source @ [ "-E"; "-P"; probe ]))
     with
-    | Error failure -> Error failure.stderr
+    | Error failure -> Error (stage_failure failure)
     | Ok (text, _) ->
         let lines = String.split_on_char '\n' text in
         Ok
@@ -519,20 +614,6 @@ let builtin_info_of_name = function
 
 let unnamed_file file = file
 
-(* the most JSON a clang AST dump may write: real headers take a few MiB
-   (fifteen common system headers: 9 MiB), while the dump of a deeply nested
-   expression grows with the square of its depth (each level indents its
-   lines), and a 10k-term macro filled gigabytes of /tmp (a fas_refuse find) *)
-let max_ast_bytes = 512 * 1024 * 1024
-
-let ast_too_large_prefix = "the C import is too large to read: "
-
-let ast_too_large (_ : Process.failure) =
-  Printf.sprintf
-    "%sclang's AST output for it is over %d MiB; a declaration or macro may be \
-     nested too deeply"
-    ast_too_large_prefix
-    (max_ast_bytes / (1024 * 1024))
 
 let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     ?referenced_names ~probe_all_declarations ~macro_candidates declarations =
@@ -905,9 +986,9 @@ let imported_structured_type_nodes ~cc ~c_flags ~source ~unit_path ~paths
     errors;
   let structured_failure =
     Option.bind failure (fun (failure : Process.failure) ->
-        if Process.output_limit_exceeded failure then Some (ast_too_large failure)
-        else if errors <> [] && List.for_all macro_error errors then None
-        else Some failure.stderr)
+        match failure.status with
+        | Unix.WEXITED _ when errors <> [] && List.for_all macro_error errors -> None
+        | _ -> Some (stage_failure failure))
   in
   match structured_failure with
   | Some message -> Error message
@@ -1288,7 +1369,7 @@ let imported_probe_nodes ~cc ~c_flags ~source ~unit_path ~paths ~definitions
         @ [ "-Xclang=-skip-function-bodies"; probe ])
     in
     match Process.run argv with
-    | Error failure -> Error failure.stderr
+    | Error failure -> Error (stage_failure failure)
     | Ok (ir, _) ->
         let integers = llvm_integer_index ir in
         let enum_types =
@@ -1676,6 +1757,8 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
       match run with
       | Error failure when Process.output_limit_exceeded failure ->
           Error [ Diag.error (List.hd headers).span (ast_too_large failure) ]
+      | Error { status = Unix.WSIGNALED signal; _ } ->
+          Error [ Diag.error (List.hd headers).span (clang_crashed_message signal) ]
       | Error failure ->
           Error
             [
@@ -1741,8 +1824,10 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
               | Ok value -> Ok value
               (* an input too large to import is the program's limit, not
                  an internal error *)
-              | Error message when String.starts_with ~prefix:ast_too_large_prefix message
-                ->
+              | Error message
+                when List.exists
+                       (fun prefix -> String.starts_with ~prefix message)
+                       user_failure_prefixes ->
                   Error ("", message)
               | Error message -> Error (stage, message)
             in
@@ -1765,6 +1850,23 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
                 map_error "internal error: C macro expansion failed: "
                   (imported_macro_expansions ~cc ~c_flags ~source ~unit_path
                      ~paths:macro_paths macro_candidates)
+              in
+              (* too deeply nested to probe: not imported, like a macro
+                 clang cannot type *)
+              let too_deep =
+                List.filter_map
+                  (fun (name, expansion) ->
+                    match expansion with
+                    | Some text when nesting_depth text > max_macro_nesting -> Some name
+                    | _ -> None)
+                  macro_expansions
+              in
+              let macro_candidates =
+                List.filter
+                  (fun (name, _, _, _) -> not (List.mem name too_deep))
+                  macro_candidates
+              and macro_expansions =
+                List.filter (fun (name, _) -> not (List.mem name too_deep)) macro_expansions
               in
               let* structured_ast, macro_infos =
                 map_error "internal error: C structured type import failed: "
