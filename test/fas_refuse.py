@@ -141,7 +141,9 @@ def deep(rng, text):
 def classify(code, err):
     if code == 0:
         return None
-    low = err.lower()
+    # only the messages: a diagnostic's indented excerpt quotes the source,
+    # whose comments may say "internal error" themselves
+    low = "\n".join(l for l in err.splitlines() if l[:1] not in (" ", "\t")).lower()
     if code == 1 and "internal error" not in low and "fatal error" not in low \
             and "exception" not in low and "stack overflow" not in low:
         return None
