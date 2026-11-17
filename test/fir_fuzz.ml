@@ -152,30 +152,72 @@ let having g p = List.filter (fun (_, t) -> p t) g.env
 
 (* [v] with any NaN replaced by the default quiet NaN, lane-wise: a NaN
    computed by an operation has an unspecified sign and payload (SPEC §6),
-   so its bits are never observed *)
+   so its bits are never observed. The test is on the integer bits: LLVM
+   sees through a float one (llc turns `select (x < 0), qnan, sqrt x`,
+   which `isnan (sqrt x)` becomes, into a bare sqrtss and its negative
+   NaN; opt folds a canonicalizing `x * 1` to `x`) *)
 let canon g t v =
+  (* sign mask, infinity and quiet NaN bits of a float lane *)
+  let lane = function
+    | F16 -> Some (16, "32767", "31744", "32256")
+    | F32 -> Some (32, "2147483647", "2139095040", "2143289344")
+    | F64 -> Some (64, "9223372036854775807", "9218868437227405312", "9221120237041090560")
+    | _ -> None
+  in
+  let ints n w k = if n = 0 then Printf.sprintf "i%d %s" w k else Printf.sprintf "<%d x i%d> [%s]" n w (String.concat ", " (List.init n (fun _ -> Printf.sprintf "i%d %s" w k))) in
+  let ity n w = if n = 0 then Printf.sprintf "i%d" w else Printf.sprintf "<%d x i%d>" n w in
+  let bty n = if n = 0 then "i1" else Printf.sprintf "<%d x i1>" n in
+  let by_bits n e =
+    match lane e with
+    | None -> None
+    | Some (w, mask, inf, qn) ->
+        let b = fresh g and m = fresh g and u = fresh g and r = fresh g and c = fresh g in
+        line g "%s = bitcast %s %s" b (ity n w) v;
+        line g "%s = and %s %s, %s" m (ity n w) b (ints n w mask);
+        line g "%s = icmp ugt %s %s, %s" u (bty n) m (ints n w inf);
+        line g "%s = select %s %s, %s, %s" r (ity n w) u (ints n w qn) b;
+        line g "%s = bitcast %s %s" c (ty_text t) r;
+        Some c
+  in
   match t with
   | F80 ->
-      (* an f80 loaded from bits that are not a canonical encoding (a
-         pseudo-denormal: exponent 0 with the integer bit set) holds its
-         value in an unspecified encoding (SPEC §6): x87 keeps the bits,
-         LLVM's constant folding rewrites them. A multiply by 1 encodes it
-         canonically on both and keeps -0 *)
-      let m = fresh g and u = fresh g and c = fresh g in
-      line g "%s = fmul f80 %s, f80 0x3fff8000000000000000" m v;
-      line g "%s = fcmp une i1 %s, %s" u m m;
-      line g "%s = select f80 %s, %s, %s" c u (qnan F80) m;
+      (* also the encodings that are not canonical (SPEC §6): a
+         pseudo-denormal (exponent 0, integer bit set) gets exponent 1, as
+         LLVM's constant folding writes it while x87 keeps the bits; an
+         unnormal, pseudo-NaN or pseudo-infinity (exponent not 0, integer
+         bit clear) counts as a NaN *)
+      let b = fresh g and e0 = fresh g and e = fresh g and j0 = fresh g and j = fresh g and f = fresh g in
+      let ez = fresh g and jz = fresh g and emax = fresh g and fnz = fresh g in
+      let unnormal = fresh g and nan = fresh g and bad = fresh g and pd = fresh g in
+      let fixed = fresh g and b1 = fresh g and r = fresh g and c = fresh g in
+      line g "%s = bitcast i80 %s" b v;
+      line g "%s = lshr i80 %s, i80 64" e0 b;
+      line g "%s = and i80 %s, i80 32767" e e0;
+      line g "%s = lshr i80 %s, i80 63" j0 b;
+      line g "%s = and i80 %s, i80 1" j j0;
+      line g "%s = and i80 %s, i80 9223372036854775807" f b;
+      line g "%s = icmp eq i1 %s, i80 0" ez e;
+      line g "%s = icmp eq i1 %s, i80 0" jz j;
+      line g "%s = icmp eq i1 %s, i80 32767" emax e;
+      line g "%s = icmp ne i1 %s, i80 0" fnz f;
+      line g "%s = select i1 %s, i1 0, %s" unnormal ez jz;
+      line g "%s = and i1 %s, %s" nan emax fnz;
+      line g "%s = or i1 %s, %s" bad unnormal nan;
+      line g "%s = select i1 %s, i1 0, %s" pd jz ez;
+      line g "%s = or i80 %s, i80 0x10000000000000000" fixed b;
+      line g "%s = select i80 %s, %s, %s" b1 pd fixed b;
+      line g "%s = select i80 %s, i80 0x7fffc000000000000000, %s" r bad b1;
+      line g "%s = bitcast f80 %s" c r;
       c
-  | F16 | F32 | F64 ->
-      let u = fresh g and c = fresh g in
-      line g "%s = fcmp une i1 %s, %s" u v v;
-      line g "%s = select %s %s, %s, %s" c (ty_text t) u (qnan t) v;
-      c
-  | V (n, e) when is_float e ->
-      let u = fresh g and c = fresh g in
-      line g "%s = fcmp une <%d x i1> %s, %s" u n v v;
-      line g "%s = select %s %s, %s [%s], %s" c (ty_text t) u (ty_text t) (String.concat ", " (List.init n (fun _ -> qnan e))) v;
-      c
+  | F16 | F32 | F64 -> Option.get (by_bits 0 t)
+  | V (n, e) when is_float e -> (
+      match by_bits n e with
+      | Some c -> c
+      | None ->
+          let u = fresh g and c = fresh g in
+          line g "%s = fcmp une <%d x i1> %s, %s" u n v v;
+          line g "%s = select %s %s, %s [%s], %s" c (ty_text t) u (ty_text t) (String.concat ", " (List.init n (fun _ -> qnan e))) v;
+          c)
   | _ -> v
 
 (* An integer value of type [I w], converting from another width if useful *)
