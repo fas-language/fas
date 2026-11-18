@@ -6,6 +6,11 @@
                                   module must define @main, which _start
                                   calls with (argc i32, argv ptr) and whose
                                   i32 result becomes the exit status
+     fas-fir --hosted prog.fir -o prog   the same executable on the system
+                                  C runtime ($FAS_CC's startup files and
+                                  libc, found with `$FAS_CC -###`, linked by
+                                  the Fas linker): libc's _start calls @main,
+                                  and @main may call printf, calloc, ...
      fas-fir -c prog.fir -o prog.o   position-independent ELF object
      fas-fir --check prog.fir     parse and verify only; prints the module
                                   back in canonical form
@@ -39,11 +44,13 @@
         "fas-fir: internal error: ..." *)
 
 let usage_text =
-  "usage: fas-fir [-c [-fPIC] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--llvm]\n\
+  "usage: fas-fir [-c [-fPIC] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
   \              INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
   \  (no flag)    build a static position-independent executable (default output: a.out);\n\
   \               OBJECTS (.o and .a files) are linked in\n\
   \  --no-pie     build a static executable at a fixed address instead\n\
+  \  --hosted     link the executable on the C runtime (the startup files and libc of\n\
+  \               $FAS_CC, default clang), for modules that call the C library\n\
   \  -c           build a position-independent ELF object (default output: INPUT with .o)\n\
   \  -fPIC        with -c: an object for a shared library (general-dynamic TLS, which\n\
   \               dlopen needs; the default, initial-exec, suits executables)\n\
@@ -81,8 +88,59 @@ let read_all ic =
   go ();
   Buffer.contents b
 
+(* A freestanding link has no C library: an undefined symbol there is most
+   often a C function, so the message points at --hosted. *)
+let freestanding_hint e =
+  let has sub =
+    let n = String.length sub in
+    let rec at i = i + n <= String.length e && (String.sub e i n = sub || at (i + 1)) in
+    at 0
+  in
+  if String.starts_with ~prefix:"native backend: linker: " e
+     && (has "undefined symbol" || has "undefined non-default visibility symbol")
+  then
+    e ^ " (fas-fir links without the C library; use --hosted to link on libc)"
+  else e
+
+(* --hosted: the object without the Fas startup, then the C compiler's own
+   link plan (`$FAS_CC -### ...`: crt1.o, crti.o, libc.a, libgcc ...) read as
+   data and carried out by the Fas linker, as `fas --hosted` does
+   (src/driver/hosted_link.ml). Static like the default link: -static-pie,
+   or -static with --no-pie. *)
+let hosted_link ~debug ~pie ~output ~extra m =
+  let module L = Fas_linker in
+  match Mir_emit.compile_object ~debug m with
+  | Error _ as e -> e
+  | Ok obj -> (
+      let object_path = Filename.temp_file "fas-fir-hosted-" ".o" in
+      Fun.protect
+        ~finally:(fun () -> try Sys.remove object_path with Sys_error _ -> ())
+        (fun () ->
+          try
+            Out_channel.with_open_bin object_path (fun oc -> Out_channel.output_bytes oc obj);
+            let cc = Option.value (Sys.getenv_opt "FAS_CC") ~default:"clang" in
+            let argv =
+              [ cc; "-###"; "-fno-use-linker-plugin"; (if pie then "-static-pie" else "-static"); object_path ]
+              @ extra @ [ "-lm"; "-o"; output ]
+            in
+            match Process.run (Array.of_list argv) with
+            | Error failure ->
+                Error (Printf.sprintf "--hosted: %s -### failed: %s" cc (String.trim failure.Process.stderr))
+            | Ok (_, plan) ->
+                let link = Hosted_link.linker_plan ~object_path plan in
+                if link.output <> output || link.relocatable then
+                  Error "--hosted: the C compiler changed the requested output"
+                else begin
+                  L.Static_link.link_input_files ~options:link.options ~entry:link.entry ?map_file:link.map_file
+                    ~output link.inputs;
+                  Ok ()
+                end
+          with
+          | L.Error.Error msg -> Error ("--hosted: linker: " ^ msg)
+          | Sys_error msg -> Error ("--hosted: " ^ msg)))
+
 let main () =
-  let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
   let set_mode m flag =
     match !mode with
     | Some (_, f) when f <> flag -> usage_error "%s and %s do not go together" f flag
@@ -96,6 +154,7 @@ let main () =
     | "--emit-llvm" :: rest -> set_mode Emit_llvm "--emit-llvm"; args rest
     | "--llvm" :: rest -> llvm := true; args rest
     | "--mir" :: rest -> args rest
+    | "--hosted" :: rest -> hosted := true; args rest
     | "--pie" :: rest -> pie := Some true; args rest
     | "--no-pie" :: rest -> pie := Some false; args rest
     | "-g" :: rest -> debug := true; args rest
@@ -122,6 +181,8 @@ let main () =
   if !extra <> [] && mode <> Exe then usage_error "%s takes no object inputs (%s)" flag (List.hd (List.rev !extra));
   if !fpic && mode <> Obj then usage_error "-fPIC is for objects (-c)";
   if !pie <> None && mode <> Exe then usage_error "--pie and --no-pie are for executables";
+  if !hosted && mode <> Exe then usage_error "--hosted is for executables";
+  (* --llvm links through the C compiler: it is always hosted *)
   if !llvm && (mode = Check || mode = Legalize || mode = Emit_llvm) then usage_error "--llvm builds; it does not go with %s" flag;
   let mode = ref mode and pie = ref (Option.value !pie ~default:true) in
   let path = match !input with Some p -> p | None -> usage_error "no input file" in
@@ -203,9 +264,13 @@ let main () =
     | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~tls_gd:!fpic m)
     | Exe | Check | Legalize | Emit_llvm ->
         need_main ();
-        let inputs = List.rev_map Fas_linker.Input.file !extra in
-        let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in
-        Mir_emit.link_files ~debug:!debug ~inputs ?options ~output:(Option.value !output ~default:"a.out") m
+        let output = Option.value !output ~default:"a.out" in
+        if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) m
+        else
+          let inputs = List.rev_map Fas_linker.Input.file !extra in
+          let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in
+          Result.map_error freestanding_hint
+            (Mir_emit.link_files ~debug:!debug ~inputs ?options ~output m)
   in
   match result with
   | Ok () -> ()

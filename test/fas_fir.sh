@@ -11,6 +11,8 @@
 # to the link. FAS_FIR_FLAGS are passed to every tool run.
 # Each executable program is built twice: as a static PIE (the default, whose
 # _start relocates itself) and with --no-pie (a fixed-address executable).
+# test/fas_fir/hosted/NAME.fir is built with --hosted (on the C runtime of
+# FAS_CC) and checked like the programs above, against hosted/NAME.out.
 # FAS_FIR_FLAGS=--llvm runs them all through the LLVM path instead (Fir_llvm,
 # then FAS_CC); a program with a "; llvm: skip REASON" line is skipped then.
 set -eu
@@ -68,8 +70,24 @@ if command -v "$cc" >/dev/null 2>&1; then
       echo "FAIL c/$name: $(cat "$tmp/c_$name.stdout")"; fail=1
     fi
   done
+  # --hosted: libc's startup calls @main, which calls the C library
+  for f in "$here"/fas_fir/hosted/*.fir; do
+   for pie in "" --no-pie; do
+    name=$(basename "$f" .fir)
+    n=$((n + 1))
+    want=$(sed -n 's/^; exit: *\([0-9]*\).*/\1/p' "$f"); want=${want:-0}
+    if ! FAS_CC=$cc "$tool" $flags --hosted $pie "$f" -o "$tmp/h_$name" 2>"$tmp/err"; then
+      echo "FAIL hosted/$name${pie:+ ($pie)}: $(cat "$tmp/err")"; fail=1; continue
+    fi
+    set +e; "$tmp/h_$name" > "$tmp/h_$name.stdout"; rc=$?; set -e
+    if [ "$rc" != "$want" ]; then echo "FAIL hosted/$name${pie:+ ($pie)}: exit $rc, expected $want"; fail=1
+    elif ! cmp -s "$tmp/h_$name.stdout" "$here/fas_fir/hosted/$name.out"; then
+      echo "FAIL hosted/$name${pie:+ ($pie)}: stdout differs"; fail=1
+    fi
+   done
+  done
 else
-  echo "fas-fir: no C compiler ($cc), C interop programs skipped"
+  echo "fas-fir: no C compiler ($cc), C interop and hosted programs skipped"
 fi
 note=; [ $skipped = 0 ] || note=", $skipped skipped"
 [ $fail = 0 ] && echo "fas-fir: $n programs ok$note"

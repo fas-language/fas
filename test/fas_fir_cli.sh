@@ -41,6 +41,7 @@ run 2 -fPIC sum_loop.fir && has err '-fPIC is for objects' "-fPIC without -c"
 run 2 -c --no-pie sum_loop.fir && has err 'for executables' "-c --no-pie"
 run 2 -c sum_loop.fir putnum.o && has err 'takes no object inputs' "-c with objects"
 run 2 --llvm --check sum_loop.fir && has err 'does not go with --check' "--llvm --check"
+run 2 -c --hosted sum_loop.fir && has err '--hosted is for executables' "-c --hosted"
 
 # refused input: exit 1 with a located message
 run 1 missing.fir && has err 'missing.fir' "missing file"
@@ -50,6 +51,8 @@ printf 'func @main() -> (i32) {\n^0:\n  ret i64 0\n}\n' > verify.fir
 run 1 --check verify.fir && has err 'verifier' "verifier error"
 printf 'func @f() -> (i32) {\n^0:\n  ret i32 0\n}\n' > nomain.fir
 run 1 nomain.fir && has err 'no @main' "executable without @main"
+printf 'declare @calloc (i64, i64) -> (ptr) global\nfunc @main () -> (i32) global {\n^0:\n  %%p = call (i64, i64) -> (ptr) @calloc(i64 1, i64 1)\n  ret i32 0\n}\n' > libc.fir
+run 1 libc.fir && has err 'use --hosted' "libc call without --hosted"
 run 0 -c nomain.fir -o nomain.o
 
 # --check: canonical text on stdout or to -o, a fixed point; stdin as -
