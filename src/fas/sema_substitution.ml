@@ -702,7 +702,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         | Ast.Catch_assign target ->
             let* () = validate_target_names value_names type_names target in
             Ok (value_names, scope_names)
-        | Ast.Catch_discard -> Ok (value_names, scope_names))
+        | Ast.Catch_discard | Ast.Catch_return -> Ok (value_names, scope_names))
     | Ast.Break _ | Ast.Continue _ -> Ok (value_names, scope_names)
   and validate_statement_block_names ?(scope_names = String_set.empty) value_names
       type_names = function
@@ -788,7 +788,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             if String_set.mem name scope_names then
               error span (Printf.sprintf "duplicate local `%s`" name)
             else Ok (String_set.add name scope_names)
-        | Ast.Catch_assign _ | Ast.Catch_discard -> Ok scope_names)
+        | Ast.Catch_assign _ | Ast.Catch_discard | Ast.Catch_return -> Ok scope_names)
     | Ast.Assign _ | Ast.Compound_assign _ | Ast.Return _ | Ast.Expr_stmt _
     | Ast.Break _ | Ast.Continue _ | Ast.Fail _ | Ast.Const_assert_stmt _ ->
         Ok scope_names
@@ -2160,7 +2160,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
               (name, source_ty) :: List.remove_assoc name !dependent_local_types;
             set_inference_type name (Some source_ty);
             Ok (name :: dependent)
-        | Ast.Catch_assign _ | Ast.Catch_discard -> Ok dependent)
+        | Ast.Catch_assign _ | Ast.Catch_discard | Ast.Catch_return -> Ok dependent)
   and validate_error_handler c dependent expected_return binding body span =
     push c;
     let result =
@@ -3523,7 +3523,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                     target
                 in
                 Ok (Ast.Catch_assign target)
-            | Ast.Catch_discard -> Ok Ast.Catch_discard
+            | (Ast.Catch_discard | Ast.Catch_return) as t -> Ok t
           in
           Ok (Ast.Catch_stmt { target; call; binding; body; span })
     in

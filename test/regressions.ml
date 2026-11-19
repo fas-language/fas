@@ -11994,6 +11994,34 @@ let () =
     "fn f(a u8, b u8) u8 fails { return try checked_add(a, b) }\n\
      fn g(a i64) u16 { return checked_trunc[u16](a) catch 0 }\n\
      fn h(a i32) bool { checked_mul(a, a) catch e { return e == Overflow }\nreturn false }\n";
+  (* a catch block is the whole value of a statement, `return` included *)
+  semantic_accept "catch-block-return"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) i64 { return f(x) catch e { return 7 } }\n\
+     fn h(x i32) i32 { return (f(x) catch { return 8 }) }\n\
+     fn v(x i32) fails { if x < 0 { fail Bad } }\n\
+     fn w(x i32) void { return v(x) catch { return } }\n\
+     fn k[T](x i32, d T) T { return checked_trunc[T](x) catch { return d } }\n\
+     fn m(x i32) u8 { return k[u8](x, 1) }\n";
+  semantic_message "catch-block-mid-expression"
+    "a `catch` block must be the whole value of a statement: an expression statement, a \
+     declaration, an assignment or a `return`"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) i32 { return 1 + f(x) catch { return 0 } }\n";
+  semantic_message "catch-block-return-falls-through"
+    "this `catch` block can fall through, but the call's value is used"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) i32 { return f(x) catch e { x = 1 } }\n";
+  semantic_message "catch-block-return-void-value" "void function cannot return a value of type `i32`"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) void { return f(x) catch { return } }\n";
+  semantic_message "catch-block-return-in-defer" "return is not allowed inside defer"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) i32 { defer { return f(x) catch { return 0 } }\nreturn 1 }\n";
+  (* the hint never names the compiler's temporary for the call's value *)
+  semantic_error "catch-block-conversion-help" "write `trunc[u8](value)` if intended"
+    "error Bad\nfn f(x i32) i32 fails { if x < 0 { fail Bad }\nreturn x }\n\
+     fn g(x i32) u8 { return f(x) catch { return 0 } }\n";
   semantic_accept "checked-overflow-redeclared"
     "error Overflow\nfn f(a u8) u8 { return checked_sub(a, 1) catch 0 }\n";
   semantic_message "checked-unhandled" "`checked_add` can fail and the error is not handled"

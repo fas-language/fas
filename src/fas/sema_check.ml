@@ -2595,8 +2595,8 @@ and check_expr_inner ?destination (c : context) expected expression =
       Error
         [
           Diag.error ~help:"use `catch VALUE` inside an expression" s
-            "a `catch` block must be a whole statement, a declaration's value or an \
-             assignment's value";
+            "a `catch` block must be the whole value of a statement: an expression \
+             statement, a declaration, an assignment or a `return`";
         ]
   | Ast.Generic_args (Ast.Ident ("call_addr", _), _, s) ->
       error s "call_addr is a builtin and has no address"
@@ -5445,7 +5445,7 @@ let rec statement_changes_name name = function
       match target with
       | Ast.Catch_assign (Ast.Target_ident (found, _)) -> found = name
       | Ast.Catch_assign target -> target_takes_name_address name target
-      | Ast.Catch_let _ | Ast.Catch_discard -> false)
+      | Ast.Catch_let _ | Ast.Catch_discard | Ast.Catch_return -> false)
 
 let stable_loop_operand body = function
   | Hir.EInt _ -> true
@@ -5782,12 +5782,14 @@ and check_catch_stmt c = function
             | Ok checked -> Ok (target_ty c checked.target)
             | Error _ -> Ok None)
         | Ast.Catch_discard -> Ok None
+        | Ast.Catch_return -> Ok (Some c.ret_ty)
       in
       let* inner = check_handled_call c expected "catch" call in
       let ty = Hir.expr_ty inner in
       let* () =
         match target with
         | Ast.Catch_discard -> Ok ()
+        | Ast.Catch_return when c.ret_ty = Hir.Void -> Ok ()
         | _ when ty = Hir.Void ->
             error (Ast.expr_span call) "the call has no result to store"
         | _ -> Ok ()
@@ -5865,6 +5867,10 @@ and check_catch_stmt c = function
             Ok [ x ]
         | Ast.Catch_assign target ->
             let* x = check_stmt c (Ast.Assign (target, Ast.Ident (tmp_name, span), span)) in
+            Ok [ x ]
+        | Ast.Catch_return ->
+            let value = if ty = Hir.Void then None else Some (Ast.Ident (tmp_name, span)) in
+            let* x = check_stmt c (Ast.Return (value, span)) in
             Ok [ x ]
       in
       Ok ([ first; value_stmt; handler ] @ rest)

@@ -67,6 +67,15 @@ half 2.5 1.5
 flag 1 1
 ptr ok fallback
 small 200 1 wide -5000000000 7
+ret_catch defer
+ret_catch defer
+ret_catch defer
+ret 1 2 4 3 6
+errdefer BadDigit
+ret_void caught
+ret_gen 9 300
+ret_fails Overflow
+ret_fails 8
 name NotFound code 2
 EOF
 cmp "$ERR_TMP/errors-native.out" "$ERR_TMP/errors.want" ||

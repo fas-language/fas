@@ -1550,7 +1550,14 @@ module P = struct
             Ok (Some e)
         in
         let* () = end_stmt p in
-        Ok (Ast.Return (x, s))
+        (* parentheses around the whole value change nothing *)
+        let rec bare = function Ast.Parenthesized (e, _) -> bare e | e -> e in
+        (match Option.map bare x with
+        | Some (Ast.Catch (call, Ast.Catch_block (binding, body), _)) ->
+            Ok
+              (Ast.Catch_stmt
+                 { target = Ast.Catch_return; call; binding; body; span = s })
+        | _ -> Ok (Ast.Return (x, s)))
     | Token.Kw_if ->
         let s = span p in
         ignore (bump p);

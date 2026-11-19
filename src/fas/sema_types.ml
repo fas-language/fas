@@ -1332,7 +1332,13 @@ let ensure_expected ?(context = "value") ?expression ?checked_expression ?leaf_t
           Printf.sprintf "cannot %s `%s` %s `%s`: %s" action source relation destination
             reason
     in
-    let operand = Option.fold ~none:"value" ~some:Ast.expr_name expression in
+    (* a compiler temporary (`tmp#N`, the value of a `catch` block statement)
+       has no source spelling *)
+    let operand =
+      match expression with
+      | Some (Ast.Ident (name, _)) when String.contains name '#' -> "value"
+      | _ -> Option.fold ~none:"value" ~some:Ast.expr_name expression
+    in
     let lane_index_help =
       match (expression, actual, expected) with
       | Some expression, Hir.Int _, Hir.Int target_kind

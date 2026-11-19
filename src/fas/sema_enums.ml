@@ -243,7 +243,7 @@ and stmt = function
         match c.target with
         | Ast.Catch_let l -> Ast.Catch_let { l with ty = ty l.ty }
         | Ast.Catch_assign t -> Ast.Catch_assign (target t)
-        | Ast.Catch_discard -> Ast.Catch_discard
+        | (Ast.Catch_discard | Ast.Catch_return) as t -> t
       in
       Ast.Catch_stmt { c with target; call = expr c.call; body = stmts c.body }
 

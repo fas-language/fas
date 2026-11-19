@@ -74,6 +74,29 @@ fn indirect(p addr) i32 {
     return bitcast[i32](v + w)
 }
 
+// a `catch` block as the whole `return` value, with a defer, a void
+// call, a generic and a `fails` caller
+fn ret_catch(s addr) u32 {
+    defer { libc.printf(c"ret_catch defer\n") }
+    return parse_u32(s) catch e {
+        if e == Empty { return 1 }
+        return 2
+    }
+}
+fn ret_paren(s addr) u32 { return (parse_u32(s) catch { return 3 }) }
+fn ret_void(n i32) void {
+    return closes(n) catch { libc.printf(c"ret_void caught\n") }
+}
+fn ret_gen[T](s addr, d T) T { return checked_trunc[T](parse_u32(s) catch 0) catch { return d } }
+fn ret_fails(s addr) u32 fails {
+    return parse_u32(s) catch { fail Overflow }
+}
+
+fn show_ret_fails() void {
+    n u32 = ret_fails(c"x") catch e { libc.printf(c"ret_fails %s\n", err_name(e)); return }
+    libc.printf(c"unreachable %u\n", n)
+}
+
 fn sw(e error) i32 {
     switch e {
         case Empty: return 1
@@ -121,6 +144,12 @@ fn main() i32 {
     libc.printf(c"flag %d %d\n", flag(3) catch false, flag(0) catch true)
     libc.printf(c"ptr %s %s\n", ptr(1) catch c"no", ptr(0) catch c"fallback")
     libc.printf(c"small %u %u wide %ld %ld\n", small(1) catch 1, small(0) catch 1, wide(1) catch 0, wide(0) catch 7)
+    libc.printf(c"ret %u %u %u %u %u\n", ret_catch(c""), ret_catch(c"x"), ret_catch(c"4"), ret_paren(c"x"), ret_paren(c"6"))
+    ret_void(1)
+    ret_void(-1)
+    libc.printf(c"ret_gen %u %u\n", ret_gen[u8](c"300", 9), ret_gen[u16](c"300", 9))
+    show_ret_fails()
+    libc.printf(c"ret_fails %u\n", ret_fails(c"8") catch 0)
     q addr = ptr(0) catch e { libc.printf(c"name %s code %u\n", err_name(e), bitcast[u32](e)); return 10 }
     return 0
 }

@@ -312,7 +312,7 @@ and count_expanded_stmt_type_nodes stmt cap total =
           match target with
           | Ast.Catch_let { ty; _ } -> count_expanded_type_nodes ty cap total
           | Ast.Catch_assign target -> count_expanded_target_type_nodes target cap total
-          | Ast.Catch_discard -> total
+          | Ast.Catch_discard | Ast.Catch_return -> total
         in
         count_expanded_stmts_type_nodes body cap
           (count_expanded_expr_type_nodes call cap total)

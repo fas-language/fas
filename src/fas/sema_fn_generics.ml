@@ -728,7 +728,7 @@ let desugar (program : Ast.program) =
                   declare ctx l.name ty;
                   Ast.Catch_let { l with ty }
               | Ast.Catch_assign t -> Ast.Catch_assign (rw_target ctx t)
-              | Ast.Catch_discard -> Ast.Catch_discard
+              | (Ast.Catch_discard | Ast.Catch_return) as t -> t
             in
             Ast.Catch_stmt { c with target; call; body }
       in

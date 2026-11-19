@@ -58,9 +58,11 @@ and expr =
   | Try of expr * Span.t
   | Catch of expr * catch_handler * Span.t
 
-(* `catch VALUE` substitutes a value. A `catch [e] { }` block is only valid as a
-   whole statement, a declaration's value or an assignment's value: the parser
-   turns those into [Catch_stmt]; anywhere else sema refuses it. *)
+(* `catch VALUE` substitutes a value. A `catch [e] { }` block is only valid as
+   the whole value of a statement: a whole expression statement, a declaration's
+   value, an assignment's value or a `return` value. The parser turns those into
+   [Catch_stmt]; anywhere else sema refuses it, since inside an expression the
+   block would leave with operands half evaluated. *)
 and catch_handler =
   | Catch_value of expr
   | Catch_block of (string * Span.t) option * stmt list
@@ -69,6 +71,8 @@ and catch_target =
   | Catch_let of { name : string; ty : ty; ty_span : Span.t }
   | Catch_assign of assign_target
   | Catch_discard
+  (* `return CALL catch [e] { BODY }`: returns the call's value *)
+  | Catch_return
 
 and unop = Neg | Not | Bit_not
 
@@ -1099,7 +1103,8 @@ let render_program program =
             add_name name;
             text " = "
         | Catch_assign _ -> text "<target> = "
-        | Catch_discard -> ());
+        | Catch_discard -> ()
+        | Catch_return -> text "return ");
         emit_expr call;
         text " catch ";
         Option.iter
@@ -1421,7 +1426,7 @@ let expanded_walker ~identifiers ~limit =
           (match target with
           | Catch_let { ty; _ } -> go_ty span ty
           | Catch_assign t -> go_target t
-          | Catch_discard -> ());
+          | Catch_discard | Catch_return -> ());
           go_expr call;
           go_stmts body)
   and go_field (f : field) =
@@ -1651,7 +1656,7 @@ and map_stmt m st =
         match c.target with
         | Catch_let l -> Catch_let { l with ty = map_ty m l.ty }
         | Catch_assign t -> Catch_assign (map_target m t)
-        | Catch_discard -> Catch_discard
+        | (Catch_discard | Catch_return) as t -> t
       in
       Catch_stmt { c with target; call = ex c.call; body = sts c.body }
 
@@ -1742,6 +1747,7 @@ let item_span_by_name program name =
 
 let rec stmt_terminates = function
   | Return _ | Break _ | Continue _ | Fail _ -> true
+  | Catch_stmt { target = Catch_return; _ } -> true
   (* `unreachable()` never falls through (D3); the name is reserved *)
   | Expr_stmt (Call (Ident ("unreachable", _), [], _), _, _) -> true
   | Block (body, _) -> block_terminates body
