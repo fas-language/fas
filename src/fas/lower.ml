@@ -1483,7 +1483,8 @@ and lower_builtin s b args t span =
             | Add_sat, false -> Ok "llvm.sadd.sat."
             | Sub_sat, true -> Ok "llvm.usub.sat."
             | Sub_sat, false -> Ok "llvm.ssub.sat."
-            | ( ( Rotl | Rotr | Popcount | Bswap | Ctz | Clz | Mul_hi | Any | All | Select
+            | ( ( Rotl | Rotr | Popcount | Bswap | Ctz | Clz | Mul_hi | Clmul | Clmul_hi | Any
+                | All | Select
                 | Shuffle | Permute | Reduce_sum | Reduce_min | Reduce_max | Reduce_and
                 | Reduce_or | Reduce_xor | Compress | Expand | Addr_bits | Syscall
                 | Addr_from_bits | Cvt _ | Float_math _ | Handle_addr
@@ -1546,6 +1547,13 @@ and lower_builtin s b args t span =
           let id = fresh s in
           E.cast s.fn id "trunc" wide (Low.Local (high, wide)) rt;
           Ok (Low.Local (id, rt)))
+  | (Clmul | Clmul_hi), [ x; y ] ->
+      (* Fir's clmul/clmul_hi (lower_emit) *)
+      let id = fresh s in
+      E.call s.fn (Some id) Low.No_extension rt
+        (if b = Clmul then "llvm.fas.clmul" else "llvm.fas.clmul_hi")
+        [ (rt, Low.No_extension, x); (rt, Low.No_extension, y) ];
+      Ok (Low.Local (id, rt))
   | Select, [ m; y; z ] ->
       let id = fresh s in
       E.select s.fn id m y z;

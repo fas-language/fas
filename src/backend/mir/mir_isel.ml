@@ -289,6 +289,7 @@ let ibin c (op : F.ibin) w a b =
   | Smax -> minmax true L
   | Umin -> minmax false A
   | Umax -> minmax false B
+  | Clmul | Clmul_hi -> unsupported "clmul reaching selection (Fir_wide calls __fir_clmul)"
   | Smulh | Umulh ->
       let signed = op = Smulh in
       if w = 64 then begin

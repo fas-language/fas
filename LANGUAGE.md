@@ -974,7 +974,7 @@ fn main() i32 {
 
 - **`secret[T]`** marks an integer, `bool` or integer/bool vector as secret: its value must not decide timing. Locals, parameters, results, struct fields and array elements may be secret (`arr[4, secret[u32]]`, `secret[vec[4, u32]]`). Globals, `addr`, floats, structs as a whole and C declarations never are. A typed access reads or writes a secret with `p[secret[u32], i]`.
 - **Flow.** A public value becomes secret implicitly. A secret becomes public only through `declassify(x)`. Every result with a secret operand is secret, comparisons included (`secret[bool]`).
-- **Allowed on secrets:** `+ - *`, `& | ^ ~ !`, shifts and rotates (secret counts too), comparisons, `zext sext trunc bitcast`, `bswap`, `mul_hi`, `add_sat sub_sat` and `select`. `select(c, a, b)` with a `bool` `c` picks between two scalars (integers, `bool`s, floats or addresses) with no branch, so it is how constant-time code chooses.
+- **Allowed on secrets:** `+ - *`, `& | ^ ~ !`, shifts and rotates (secret counts too), comparisons, `zext sext trunc bitcast`, `bswap`, `mul_hi`, `clmul clmul_hi`, `add_sat sub_sat` and `select`. `select(c, a, b)` with a `bool` `c` picks between two scalars (integers, `bool`s, floats or addresses) with no branch, so it is how constant-time code chooses.
 - **Errors**, each naming the rule:
   - a secret condition: `if`, `while`, `for`, `switch`, an if-expression, `&&`, `||`, `assert`;
   - a secret index, offset or address;
@@ -1475,6 +1475,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 | | `bswap(x)` | type of `x` | reverses the byte order of a 16-, 32- or 64-bit integer, lane-wise; a big-endian load is `bswap(p[u32])` |
 | **Arithmetic** | `add_sat(a, b)` `sub_sat(a, b)` | type of `a` | clamp to the type's range, lane-wise |
 | | `mul_hi(a, b)` | type of `a` | high half of the double-width product, lane-wise |
+| | `clmul(a, b)` `clmul_hi(a, b)` | type of `a` | low and high half of the double-width carry-less (XOR) product of the bit patterns; scalar integers of one type. `clmul(quotes, ~0)` is the prefix XOR that marks the bytes inside quotes |
 | | `checked_add(a, b)` `checked_sub` `checked_mul` | type of `a`, `fails` | the exact result, or the error `Overflow` when it does not fit; scalar integers, needs `try` or `catch` |
 | | `checked_trunc[T](x)` | `T`, `fails` | integer `x` as integer `T`, or `Overflow` when its value is out of `T`'s range |
 | **Memory** | `copy(dst, src)` | statement | arrays or structs of one type, overlap is safe |
@@ -1523,7 +1524,7 @@ All of these use alignment 1, are little-endian, and are never bounds-checked. D
 
 In the masked, gather and scatter forms, `T` is the lane type, every vector has the same `N`, inactive lanes touch no memory, and bool lanes take one byte each.
 
-When every operand of `rotl`, `rotr`, `popcount`, `bswap`, `clz`, `ctz`, `add_sat`, `sub_sat` or `mul_hi` is an untyped literal, the literals take the destination type: `x u32 = rotl(0x80000001, 1)` is `3`, and `s u8 = add_sat(250, 10)` saturates at `255`. A typed operand still decides the type, and with no destination the literals are `i32`.
+When every operand of `rotl`, `rotr`, `popcount`, `bswap`, `clz`, `ctz`, `add_sat`, `sub_sat`, `mul_hi`, `clmul` or `clmul_hi` is an untyped literal, the literals take the destination type: `x u32 = rotl(0x80000001, 1)` is `3`, and `s u8 = add_sat(250, 10)` saturates at `255`. A typed operand still decides the type, and with no destination the literals are `i32`.
 
 Every builtin name in this table, `cvt` and the float builtins included, is reserved: a variable, parameter, field, function or const named `sqrt` or `popcount` is an error (`` `sqrt` is a builtin and cannot be used as a name ``), and so are type names (`u8`, `f32`), literals (`true`, `null`) and `view`, `use` and `var`. A C declaration with such a name is imported but cannot be used from Fas.
 

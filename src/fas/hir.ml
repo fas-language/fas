@@ -148,6 +148,9 @@ type builtin =
   | Add_sat
   | Sub_sat
   | Mul_hi
+  (* carry-less product: low and high half *)
+  | Clmul
+  | Clmul_hi
   | Any
   | All
   | Select

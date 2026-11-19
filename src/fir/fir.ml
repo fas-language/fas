@@ -100,6 +100,10 @@ type ibin =
   | Uadd_sat
   | Ssub_sat
   | Usub_sat
+  (* carry-less (GF(2) polynomial) product of two scalars: its low and its
+     high half; the double-width product has 2w - 1 bits *)
+  | Clmul
+  | Clmul_hi
 
 type iun = Ctz | Clz | Popcnt | Bswap | Bitrev | Abs
 type fbin = Fadd | Fsub | Fmul | Fdiv | Frem | Fmin | Fmax | Copysign

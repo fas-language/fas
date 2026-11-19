@@ -266,7 +266,7 @@ and gen_int_op g w =
   | 0 | 1 ->
       (* no i128 mul-high: the oracle's Ir has no i256 to compute it in
          (test/fas_fir/c/wide covers it against clang instead) *)
-      let ops = [ "add"; "sub"; "mul" ] @ if w = 128 then [] else [ "umulh"; "smulh" ] in
+      let ops = [ "add"; "sub"; "mul"; "clmul"; "clmul_hi" ] @ if w = 128 then [] else [ "umulh"; "smulh" ] in
       line g "%s = %s %s %s, %s" r (choose g ops) t a b
   | 2 -> line g "%s = %s %s %s, %s" r (choose g [ "and"; "or"; "xor" ]) t a b
   | 3 ->
@@ -349,7 +349,7 @@ and gen_ct g w =
         line g "%s = icmp %s i1 %s, %s" c (choose g [ "eq"; "ult"; "slt"; "uge" ]) a b;
         line g "%s = select %s %s, %s, %s" r t c a b
     | 6 -> line g "%s = %s %s %s" r (choose g ("abs" :: (if w mod 16 = 0 then [ "bswap" ] else []))) t a
-    | 7 when w < 128 -> line g "%s = %s %s %s, %s" r (choose g [ "umulh"; "smulh" ]) t a b
+    | 7 when w < 128 -> line g "%s = %s %s %s, %s" r (choose g [ "umulh"; "smulh"; "clmul"; "clmul_hi" ]) t a b
     | _ ->
         (* through another width and back *)
         let w2 = choose g (List.filter (fun x -> x <> w) [ 8; 16; 32; 64; 128 ]) in

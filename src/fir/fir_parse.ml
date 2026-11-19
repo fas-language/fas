@@ -197,7 +197,7 @@ let ibin_of = function
   | "xor" -> Some Xor | "smin" -> Some Smin | "smax" -> Some Smax | "umin" -> Some Umin
   | "umax" -> Some Umax | "smulh" -> Some Smulh | "umulh" -> Some Umulh
   | "sadd_sat" -> Some Sadd_sat | "uadd_sat" -> Some Uadd_sat | "ssub_sat" -> Some Ssub_sat
-  | "usub_sat" -> Some Usub_sat | _ -> None
+  | "usub_sat" -> Some Usub_sat | "clmul" -> Some Clmul | "clmul_hi" -> Some Clmul_hi | _ -> None
 
 let iun_of = function
   | "ctz" -> Some Ctz | "clz" -> Some Clz | "popcnt" -> Some Popcnt | "bswap" -> Some Bswap

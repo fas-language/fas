@@ -1411,11 +1411,47 @@ func @__fir_low3 (ptr) -> (i64) local {
 }
 |}
 
+(* The carry-less product of two i64: its low half, or its high half when
+   %hi is nonzero. Baseline x86-64 has no pclmulqdq, so it is the
+   schoolbook loop: for each bit i of b, XOR in a << i (low half) and
+   a >> (64 - i) (high half; written (a >> 1) >> (63 - i), which is 0 for
+   i = 0). Every step masks instead of branching, so the time does not
+   depend on the operands (fir_ct allows clmul on secrets). *)
+let clmul =
+  {|
+func @__fir_clmul (i64, i64, i64) -> (i64) local {
+^e(%a: i64, %b: i64, %hi: i64):
+  %a1 = lshr i64 %a, i64 1
+  jump ^l(i64 0, i64 0, i64 0)
+^l(%i: i64, %lo: i64, %h: i64):
+  %d = icmp eq i1 %i, i64 64
+  br %d, ^done, ^body
+^body:
+  %bs = lshr i64 %b, %i
+  %bit = and i64 %bs, i64 1
+  %m = sub i64 i64 0, %bit
+  %sl = shl i64 %a, %i
+  %tl = and i64 %sl, %m
+  %lo1 = xor i64 %lo, %tl
+  %s = sub i64 i64 63, %i
+  %sr = lshr i64 %a1, %s
+  %th = and i64 %sr, %m
+  %h1 = xor i64 %h, %th
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %lo1, %h1)
+^done:
+  %want = icmp ne i1 %hi, i64 0
+  %r = select i64 %want, %h, %lo
+  ret %r
+}
+|}
+
 (* name -> (text, helpers it calls) *)
 let all =
   [
     ("__fir_udivmod", (udivmod, []));
     ("__fir_mul", (mul, []));
+    ("__fir_clmul", (clmul, []));
     ("__fir_wide_top", (wide_top, []));
     ("__fir_utof64", (utof64, [ "__fir_wide_top" ]));
     ("__fir_utof32", (utof32, [ "__fir_wide_top" ]));

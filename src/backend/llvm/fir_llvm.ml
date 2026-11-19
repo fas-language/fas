@@ -425,6 +425,7 @@ type fcx = {
   allocas : Buffer.t;  (** entry-block slots, written before the body *)
   mutable nslot : int;
   fsig : lsig;  (** this function's lowered signature *)
+  pclmul : bool;  (** the target has pclmulqdq (clmul) *)
 }
 
 let temp cx =
@@ -946,6 +947,57 @@ let emit_inst cx (ir : inst_rec) =
             match t with Vec (n, _) -> Printf.sprintf "<%s>" (String.concat ", " (List.init n (fun _ -> Printf.sprintf "i%d %d" (2 * w) w))) | _ -> string_of_int w
           in
           line cx (Printf.sprintf "%s = lshr %s %s, %s" h (lty wide) p amount);
+          def (Printf.sprintf "trunc %s %s to %s" (lty wide) h (lty t))
+      | Clmul | Clmul_hi when cx.pclmul && int_width t <= 64 ->
+          (* pclmulqdq on the low qwords: the 127-bit product in two i64.
+             Below 64 bits the whole product is in the low one *)
+          let w = int_width t in
+          let q x =
+            if w = 64 then v cx x
+            else begin
+              let z = temp cx in
+              line cx (Printf.sprintf "%s = zext %s to i64" z (tv cx x));
+              z
+            end
+          in
+          let vec x =
+            let r = temp cx in
+            line cx (Printf.sprintf "%s = insertelement <2 x i64> poison, i64 %s, i32 0" r (q x));
+            r
+          in
+          let va = vec a and vb = vec b in
+          let p = temp cx in
+          line cx
+            (Printf.sprintf "%s = %s" p
+               (call_intrinsic cx "llvm.x86.pclmulqdq" "<2 x i64>"
+                  [ (Vec (2, Int 64), va); (Vec (2, Int 64), vb); (Int 8, "0") ]));
+          let lane = if w = 64 && k = Clmul_hi then 1 else 0 in
+          if w = 64 then def (Printf.sprintf "extractelement <2 x i64> %s, i32 %d" p lane)
+          else begin
+            let lo = temp cx in
+            line cx (Printf.sprintf "%s = extractelement <2 x i64> %s, i32 0" lo p);
+            let part =
+              if k = Clmul then lo
+              else begin
+                let h = temp cx in
+                line cx (Printf.sprintf "%s = lshr i64 %s, %d" h lo w);
+                h
+              end
+            in
+            def (Printf.sprintf "trunc i64 %s to %s" part (lty t))
+          end
+      | Clmul -> intr "llvm.clmul"
+      | Clmul_hi ->
+          (* llvm.clmul in double width, then its high half *)
+          let w = int_width t in
+          let wide = Int (2 * w) in
+          let xa = temp cx and xb = temp cx and p = temp cx and h = temp cx in
+          line cx (Printf.sprintf "%s = zext %s to %s" xa (tv cx a) (lty wide));
+          line cx (Printf.sprintf "%s = zext %s to %s" xb (tv cx b) (lty wide));
+          line cx
+            (Printf.sprintf "%s = %s" p
+               (call_intrinsic cx ("llvm.clmul." ^ sfx wide) (lty wide) [ (wide, xa); (wide, xb) ]));
+          line cx (Printf.sprintf "%s = lshr %s %s, %d" h (lty wide) p w);
           def (Printf.sprintf "trunc %s %s to %s" (lty wide) h (lty t)))
   | Iun (k, fl, a) -> (
       let t = tyv cx a in
@@ -1852,6 +1904,11 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
             Some { g with target_features = Some (match g.target_features with Some t -> t ^ ",+cx16" | None -> "+cx16") }
         | None -> Some { target_cpu = "x86-64"; target_tune = None; target_features = Some "+cx16" }
     in
+    let pclmul =
+      match target with
+      | Some { target_features = Some t; _ } -> List.mem "+pclmul" (String.split_on_char ',' t)
+      | _ -> false
+    in
     let o = { buf = Buffer.create 65536; counted = 0; budget } in
     let sym n = global_name (redirect n) in
     let d =
@@ -2045,7 +2102,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
               { m; f; o = { buf = Buffer.create 4096; counted = o.counted; budget = o.budget }; sym; intrinsics;
                 intrinsic_order; tmp = 0; d; sp = Option.map (fun (id, file, _) -> (id, file)) sp;
                 cur = (match sp with Some (_, file, line) -> (file, line, 0) | None -> ("", 0, 0));
-                allocas = Buffer.create 256; nslot = 0; fsig }
+                allocas = Buffer.create 256; nslot = 0; fsig; pclmul }
             in
             (* LLVM parameters: %a<k> for a plain one, %a<k>.<j> for the
                parts of an agg, %a<k>.p for a byval pointer to a vector or

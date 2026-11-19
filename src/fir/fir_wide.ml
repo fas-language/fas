@@ -548,6 +548,26 @@ let ovf cx n k a b =
       (r, not1 cx (eq cx p (extend cx ~signed:true n r (Array.length p))))
 
 (* high half of the 2n-bit product: bits n .. 2n-1 *)
+(* one half of the carry-less product of two i64 limbs (__fir_clmul) *)
+let clmul64 cx ~high a b =
+  (call_helper cx "__fir_clmul" [ i64; i64; i64 ] [ i64 ] [| a; b; c64 cx (if high then 1L else 0L) |]).(0)
+
+(* clmul/clmul_hi of n-bit limbs: the schoolbook product without carries,
+   2k limbs, then its low or high n bits. Limbs are normalized (zero above
+   n), so the product has 2n - 1 bits *)
+let clmul cx n ~high a b =
+  let nk = nlimbs n in
+  let p = Array.make (2 * nk) (zero64 cx) in
+  let add_at i v = p.(i) <- ib cx Xor p.(i) v in
+  for i = 0 to nk - 1 do
+    for j = 0 to nk - 1 do
+      add_at (i + j) (clmul64 cx ~high:false a.(i) b.(j));
+      add_at (i + j + 1) (clmul64 cx ~high:true a.(i) b.(j))
+    done
+  done;
+  if high then mask cx n (Array.sub (shr_const cx p n (zero64 cx)) 0 nk)
+  else mask cx n (Array.sub p 0 nk)
+
 let mulh cx n ~signed a b =
   let p = mul_full cx ~signed n a b in
   let k = nlimbs n in
@@ -577,6 +597,8 @@ let ibin cx n k a b =
   | Smax -> select_l cx (slt cx n b a) a b
   | Umulh -> mulh cx n ~signed:false a b
   | Smulh -> mulh cx n ~signed:true a b
+  | Clmul -> clmul cx n ~high:false a b
+  | Clmul_hi -> clmul cx n ~high:true a b
   | Uadd_sat ->
       let r, o = ovf cx n Uadd_ovf a b in
       select_l cx o (all_ones cx n) r
@@ -879,6 +901,16 @@ let convert_inst cx (i : inst) =
      inexact from x87 frndint) *)
   | Fun (((Floor | Ceil | Ftrunc | Roundeven) as k), _, a) when (match rty 0 with F32 | F64 | F80 -> true | _ -> false) ->
       set cx (r 0) [| rint cx k (rty 0) (get1 cx a) |]
+  (* clmul of a register width: __fir_clmul (no pclmulqdq at baseline). Below
+     64 bits the whole 2n - 1 bit product fits the low half *)
+  | Ibin (((Clmul | Clmul_hi) as k), _, a, b) when (match rty 0 with Int n -> legal_width n | _ -> false) ->
+      let n = match rty 0 with Int n -> n | _ -> assert false in
+      let high = k = Clmul_hi in
+      if n = 64 then set cx (r 0) [| clmul64 cx ~high (get1 cx a) (get1 cx b) |]
+      else
+        let full = clmul64 cx ~high:false (zext64 cx (get1 cx a)) (zext64 cx (get1 cx b)) in
+        let part = if high then ib cx Lshr full (c64 cx (Int64.of_int n)) else full in
+        set cx (r 0) [| conv cx Trunc part (Int n) |]
   | _ when not any_odd -> copy_inst cx ir
   | Nop | Dbg_value _ -> ()
   (* f16: see the header *)
@@ -1083,6 +1115,7 @@ let func_needs (f : func) =
          | Call c when sig_changes c.sig_ -> found := true
          | Fma _ when ty_of f ir.results.(0) = F80 -> found := true
          | Fun ((Floor | Ceil | Ftrunc | Roundeven), _, _) -> found := true
+         | Ibin ((Clmul | Clmul_hi), _, _, _) -> found := true
          | _ -> ())
        f.insts;
      !found)

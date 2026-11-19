@@ -10887,6 +10887,25 @@ let () =
         "4294967295",
         "mul_hi",
         "ret i32 -2\n" );
+      (* carry-less products of the bit patterns, signed or not *)
+      ("clmul-u8", "u8", "255", "255", "clmul", "ret i8 85\n");
+      ("clmul-hi-u8", "u8", "255", "255", "clmul_hi", "ret i8 85\n");
+      ("clmul-hi-i8", "i8", "-128", "-128", "clmul_hi", "ret i8 64\n");
+      ("clmul-i8", "i8", "-128", "-128", "clmul", "ret i8 0\n");
+      ("clmul-u32", "u32", "2147483649", "3", "clmul", "ret i32 -2147483645\n");
+      ("clmul-hi-u32", "u32", "2147483649", "3", "clmul_hi", "ret i32 1\n");
+      ( "clmul-u64",
+        "u64",
+        "18446744073709551615",
+        "18446744073709551615",
+        "clmul",
+        "ret i64 6148914691236517205\n" );
+      ( "clmul-hi-u64",
+        "u64",
+        "18446744073709551615",
+        "18446744073709551615",
+        "clmul_hi",
+        "ret i64 6148914691236517205\n" );
     ];
   let sat_vec_add =
     llvm_of
@@ -12024,6 +12043,17 @@ let () =
      fn g(x i32) u8 { return f(x) catch { return 0 } }\n";
   semantic_accept "checked-overflow-redeclared"
     "error Overflow\nfn f(a u8) u8 { return checked_sub(a, 1) catch 0 }\n";
+  semantic_accept "clmul-secret"
+    "fn f(k secret[u64], m u64) secret[u64] { return clmul_hi(k, m) ^ clmul(k, k) }\n";
+  semantic_accept "clmul-literals" "fn f() u8 { x u8 = clmul(0x87, 0x13)\n return x }\n";
+  semantic_message "clmul-mixed" "argument 2 of `clmul` is `u64`, expected the type of argument 1 (`u32`)"
+    "fn f(a u32, b u64) u32 { return clmul(a, b) }\n";
+  semantic_message "clmul-float" "`clmul_hi` needs an integer, got `f64`"
+    "fn f(a f64) f64 { return clmul_hi(a, a) }\n";
+  semantic_message "clmul-vector" "`clmul` needs an integer, got `vec[4, u32]`"
+    "fn f(a vec[4, u32]) vec[4, u32] { return clmul(a, a) }\n";
+  semantic_message "clmul-arity" "builtin `clmul` expects two arguments"
+    "fn f(a u8) u8 { return clmul(a) }\n";
   semantic_message "checked-unhandled" "`checked_add` can fail and the error is not handled"
     "fn f(a u8, b u8) u8 { return checked_add(a, b) }\n";
   semantic_message "checked-mixed" "argument 2 of `checked_add` is `u16`, expected `u8`"

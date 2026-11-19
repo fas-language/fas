@@ -74,6 +74,8 @@ let builtin_name : Hir.builtin -> string = function
   | Add_sat -> "`add_sat`"
   | Sub_sat -> "`sub_sat`"
   | Mul_hi -> "`mul_hi`"
+  | Clmul -> "`clmul`"
+  | Clmul_hi -> "`clmul_hi`"
   | Any -> "`any`"
   | All -> "`all`"
   | Select -> "`select`"
@@ -281,7 +283,9 @@ and builtin c (b : Hir.builtin) args span =
               Public
           | _ -> joined)
       | _ -> joined)
-  | Rotl | Rotr | Bswap | Add_sat | Sub_sat | Mul_hi -> joined
+  (* clmul: pclmulqdq, LLVM's multiply expansion or __fir_clmul's masked
+     loop, none of which depends on the operands' values *)
+  | Rotl | Rotr | Bswap | Add_sat | Sub_sat | Mul_hi | Clmul | Clmul_hi -> joined
   | Declassify -> Public
   | Popcount | Ctz | Clz | Permute | Shuffle | Compress | Expand | Any | All
   | Reduce_sum | Reduce_min | Reduce_max | Reduce_and | Reduce_or | Reduce_xor

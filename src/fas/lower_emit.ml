@@ -526,6 +526,8 @@ let intrinsic fn name (ret : Low.ty) (args : (Low.ty * Low.extension * Low.value
     Some (emit fn.f fn.cur ~loc:fn.loc (Ovf (k, x, a 1)) [| ty_of fn.f x; i1 |]).(1)
   end
   else if name = "llvm.fas.umulh" then one (Ibin (Umulh, 0, a 0, a 1))
+  else if name = "llvm.fas.clmul" then one (Ibin (Clmul, 0, a 0, a 1))
+  else if name = "llvm.fas.clmul_hi" then one (Ibin (Clmul_hi, 0, a 0, a 1))
   else if name = "llvm.fas.smulh" then one (Ibin (Smulh, 0, a 0, a 1))
   else if starts "llvm.experimental.vector.compress." name then begin
     (match List.nth args 2 with

@@ -150,7 +150,10 @@ let verify_func (f : func) =
                 if nres = 1 then begin
                   if not (is_int_like (r 0)) then err "%s: integer op on %s" where (ty_to_string (r 0));
                   same "lhs" a (r 0);
-                  same "rhs" x (r 0)
+                  same "rhs" x (r 0);
+                  match (k, r 0) with
+                  | (Clmul | Clmul_hi), Vec _ -> err "%s: clmul needs scalar integers" where
+                  | _ -> ()
                 end;
                 only_flags fl
                   (match k with

@@ -15,7 +15,7 @@ let ibin_name = function
   | And -> "and" | Or -> "or" | Xor -> "xor" | Smin -> "smin" | Smax -> "smax"
   | Umin -> "umin" | Umax -> "umax" | Smulh -> "smulh" | Umulh -> "umulh"
   | Sadd_sat -> "sadd_sat" | Uadd_sat -> "uadd_sat" | Ssub_sat -> "ssub_sat"
-  | Usub_sat -> "usub_sat"
+  | Usub_sat -> "usub_sat" | Clmul -> "clmul" | Clmul_hi -> "clmul_hi"
 
 let iun_name = function
   | Ctz -> "ctz" | Clz -> "clz" | Popcnt -> "popcnt" | Bswap -> "bswap"

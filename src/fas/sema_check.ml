@@ -4263,6 +4263,8 @@ and check_call_inner c expected fn args s =
         | Some Names.Add_sat -> Some Hir.Add_sat
         | Some Names.Sub_sat -> Some Hir.Sub_sat
         | Some Names.Mul_hi -> Some Hir.Mul_hi
+        | Some Names.Clmul -> Some Hir.Clmul
+        | Some Names.Clmul_hi -> Some Hir.Clmul_hi
         | Some Names.Any -> Some Hir.Any
         | Some Names.All -> Some Hir.All
         | Some Names.Select -> Some Hir.Select
@@ -4361,6 +4363,31 @@ and check_call_inner c expected fn args s =
                        (Hir.ty_name (Hir.expr_ty a)))
               | Hir.Int _ -> Ok (Hir.Call (Hir.Builtin b, [ a ], Hir.expr_ty a, s))
               | _ -> error s "builtin argument must be an integer or an integer vector")
+        | Hir.Clmul | Hir.Clmul_hi ->
+            (* carry-less product of two integers of one type, on their
+               bits (signedness changes nothing); scalars only: the
+               vector instructions pick 64-bit lanes, not every lane *)
+            if List.length args <> 2 then
+              error s (Printf.sprintf "builtin `%s` expects two arguments" name)
+            else
+              let* a, b2 =
+                check_same_operands ?expected:result_context c (List.hd args)
+                  (List.hd (List.tl args))
+              in
+              if not (is_int (Hir.expr_ty a)) then
+                error
+                  (Ast.expr_span (List.nth args 0))
+                  (Printf.sprintf "`%s` needs an integer, got `%s`" name
+                     (Sema_types.diagnostic_ty_name (Hir.expr_ty a)))
+              else if Hir.expr_ty b2 <> Hir.expr_ty a then
+                error
+                  (Ast.expr_span (List.nth args 1))
+                  (Printf.sprintf
+                     "argument 2 of `%s` is `%s`, expected the type of argument 1 (`%s`)"
+                     name
+                     (Sema_types.diagnostic_ty_name (Hir.expr_ty b2))
+                     (Sema_types.diagnostic_ty_name (Hir.expr_ty a)))
+              else Ok (Hir.Call (Hir.Builtin b, [ a; b2 ], Hir.expr_ty a, s))
         | Hir.Add_sat | Hir.Sub_sat | Hir.Mul_hi ->
             if List.length args <> 2 then
               error s (Printf.sprintf "builtin `%s` expects two arguments" name)

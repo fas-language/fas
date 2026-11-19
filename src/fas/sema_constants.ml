@@ -205,6 +205,24 @@ let mulhi_apply kind x y =
     Int64.add (Int64.mul x1 y1)
       (Int64.add (Int64.shift_right t 32) (Int64.shift_right z1 32))
 
+(* clmul / clmul_hi on the bits of two [kind] values: XOR of x << i over
+   the set bits i of y, as a 128-bit (lo, hi) product, then the low or
+   the high [bits] of its 2 * bits *)
+let clmul_apply ~high kind x y =
+  let bits = int_bits kind in
+  let keep v = if bits = 64 then v else Int64.logand v (Int64.pred (Int64.shift_left 1L bits)) in
+  let x = keep x and y = keep y in
+  let lo = ref 0L and hi = ref 0L in
+  for i = 0 to bits - 1 do
+    if Int64.logand (Int64.shift_right_logical y i) 1L <> 0L then begin
+      lo := Int64.logxor !lo (Int64.shift_left x i);
+      if i > 0 then hi := Int64.logxor !hi (Int64.shift_right_logical x (64 - i))
+    end
+  done;
+  if not high then !lo
+  else if bits = 64 then !hi
+  else Int64.shift_right_logical !lo bits
+
 let sat_or_mulhi name kind x y =
   if name = "mul_hi" then mulhi_apply kind x y else sat_apply name kind x y
 
@@ -1505,8 +1523,10 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
             let b = match t with Hir.Int q -> int_bits q | _ -> 64 in
             Ok (t, Int64.of_int (leading64 x - (64 - b)))
           else error s "builtin argument must be an integer or an integer vector"
-      | ("add_sat" | "sub_sat" | "mul_hi"), [ (t, x); (t2, y) ] -> (
+      | ("add_sat" | "sub_sat" | "mul_hi" | "clmul" | "clmul_hi"), [ (t, x); (t2, y) ] -> (
           match t with
+          | Hir.Int kind when t = t2 && (name = "clmul" || name = "clmul_hi") ->
+              Ok (t, mask_value t (clmul_apply ~high:(name = "clmul_hi") kind x y))
           | Hir.Int kind when t = t2 -> Ok (t, mask_value t (sat_or_mulhi name kind x y))
           | Hir.Int _ ->
               error

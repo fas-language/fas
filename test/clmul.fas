@@ -1,0 +1,91 @@
+// clmul / clmul_hi against a bit-by-bit reference, every integer width and
+// both signednesses, on xorshift values and edge cases (test/clmul.sh).
+use "C" <stdio.h> as c
+
+// the reference: the 2w-bit carry-less product of the low w bits of a and
+// b, as (lo, hi) 64-bit halves, then the w-bit half asked for
+fn ref(a u64, b u64, w u64, high bool) u64 {
+    m u64 = 0xffffffffffffffff
+    if w < 64 { m = (1 << w) - 1 }
+    a = a & m
+    b = b & m
+    lo u64 = 0
+    hi u64 = 0
+    i u64 = 0
+    while i < w {
+        if (b >> i) & 1 == 1 {
+            lo ^= a << i
+            if i > 0 { hi ^= a >> (64 - i) }
+        }
+        i += 1
+    }
+    if !high { return lo & m }
+    if w == 64 { return hi }
+    return (lo >> w) & m
+}
+
+var state u64 = 0x9e3779b97f4a7c15
+fn next() u64 {
+    state ^= state << 13
+    state ^= state >> 7
+    state ^= state << 17
+    return state
+}
+
+var bad i32 = 0
+fn check(what addr, a u64, b u64, w u64, high bool, got u64) void {
+    want u64 = ref(a, b, w, high)
+    if got != want {
+        if bad < 10 { c.printf(c"%s %llx %llx: got %llx want %llx\n", what, a, b, got, want) }
+        bad += 1
+    }
+}
+
+fn one(a u64, b u64) void {
+    check(c"u8", a, b, 8, false, zext[u64](clmul(trunc[u8](a), trunc[u8](b))))
+    check(c"u8 hi", a, b, 8, true, zext[u64](clmul_hi(trunc[u8](a), trunc[u8](b))))
+    check(c"i8", a, b, 8, false, zext[u64](bitcast[u8](clmul(bitcast[i8](trunc[u8](a)), bitcast[i8](trunc[u8](b))))))
+    check(c"i8 hi", a, b, 8, true, zext[u64](bitcast[u8](clmul_hi(bitcast[i8](trunc[u8](a)), bitcast[i8](trunc[u8](b))))))
+    check(c"u16", a, b, 16, false, zext[u64](clmul(trunc[u16](a), trunc[u16](b))))
+    check(c"u16 hi", a, b, 16, true, zext[u64](clmul_hi(trunc[u16](a), trunc[u16](b))))
+    check(c"i16 hi", a, b, 16, true, zext[u64](bitcast[u16](clmul_hi(bitcast[i16](trunc[u16](a)), bitcast[i16](trunc[u16](b))))))
+    check(c"u32", a, b, 32, false, zext[u64](clmul(trunc[u32](a), trunc[u32](b))))
+    check(c"u32 hi", a, b, 32, true, zext[u64](clmul_hi(trunc[u32](a), trunc[u32](b))))
+    check(c"i32", a, b, 32, false, zext[u64](bitcast[u32](clmul(bitcast[i32](trunc[u32](a)), bitcast[i32](trunc[u32](b))))))
+    check(c"u64", a, b, 64, false, clmul(a, b))
+    check(c"u64 hi", a, b, 64, true, clmul_hi(a, b))
+    check(c"i64", a, b, 64, false, bitcast[u64](clmul(bitcast[i64](a), bitcast[i64](b))))
+    check(c"i64 hi", a, b, 64, true, bitcast[u64](clmul_hi(bitcast[i64](a), bitcast[i64](b))))
+    check(c"usize hi", a, b, 64, true, bitcast[u64](clmul_hi(bitcast[usize](a), bitcast[usize](b))))
+}
+
+// compile-time folding agrees with the runtime
+const K_LO u64 = clmul(0x8000000000000001, 0x8000000000000003)
+const K_HI u64 = clmul_hi(0xffffffffffffffff, 0xffffffffffffffff)
+const K8 u8 = clmul_hi(0xff, 0xff)
+
+fn main() i32 {
+    edges arr[6, u64] = { 0, 1, 0xffffffffffffffff, 0x8000000000000000, 0x5555555555555555, 0x8000000180000001 }
+    i usize = 0
+    while i < 6 {
+        j usize = 0
+        while j < 6 {
+            one(edges[i], edges[j])
+            j += 1
+        }
+        i += 1
+    }
+    n i32 = 0
+    while n < 20000 {
+        one(next(), next())
+        n += 1
+    }
+    check(c"const lo", 0x8000000000000001, 0x8000000000000003, 64, false, K_LO)
+    check(c"const hi", 0xffffffffffffffff, 0xffffffffffffffff, 64, true, K_HI)
+    check(c"const u8", 0xff, 0xff, 8, true, zext[u64](K8))
+    // a quote mask's prefix XOR: the CSV use
+    quotes u64 = 0x0000100000001000
+    if clmul(quotes, 0xffffffffffffffff) != 0x00000ffffffff000 { bad += 1 }
+    c.printf(c"clmul bad %d\n", bad)
+    return bad
+}

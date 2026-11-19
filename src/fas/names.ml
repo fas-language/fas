@@ -21,6 +21,8 @@ type value_operation =
   | Add_sat
   | Sub_sat
   | Mul_hi
+  | Clmul
+  | Clmul_hi
   | Any
   | All
   | Select
@@ -163,6 +165,8 @@ let operations =
     ("add_sat", Value Add_sat);
     ("sub_sat", Value Sub_sat);
     ("mul_hi", Value Mul_hi);
+    ("clmul", Value Clmul);
+    ("clmul_hi", Value Clmul_hi);
     ("reduce_sum", Value Reduce_sum);
     ("reduce_min", Value Reduce_min);
     ("reduce_max", Value Reduce_max);

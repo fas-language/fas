@@ -289,6 +289,7 @@ Text form: `%r = OPCODE [FLAGS] RESULT_TYPE operands...`. An instruction with no
 | `and or xor ty a, b` | Bitwise operations. | `disjoint` (or): the operands share no set bits |
 | `smin smax umin umax ty a, b` | Minimum and maximum. | |
 | `smulh umulh ty a, b` | The high half of the double-width product. | |
+| `clmul clmul_hi ty a, b` | The low and the high half of the double-width carry-less product (the XOR of `a << i` over the set bits `i` of `b`). Scalars only. | |
 | `sadd_sat uadd_sat ssub_sat usub_sat ty a, b` | Saturating arithmetic. | |
 | `ctz clz popcnt ty a` | Count trailing zeros, leading zeros, or set bits. | `zero_poison` (ctz, clz): an input of 0 gives poison |
 | `bswap ty a` | Byte swap. The width must be a multiple of 16. | |

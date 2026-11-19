@@ -1144,7 +1144,16 @@ let ibin_lane k flags w a b : lane =
       | Uadd_sat ->
           let r = W.add w a b in
           Bits (if W.ult r a then W.all_ones w else r)
-      | Usub_sat -> Bits (if W.ult a b then W.zero w else W.sub w a b))
+      | Usub_sat -> Bits (if W.ult a b then W.zero w else W.sub w a b)
+      | Clmul | Clmul_hi ->
+          (* XOR of a << i over the set bits i of b, in double width *)
+          let ww = 2 * w in
+          let wide = W.zext ww a in
+          let acc = ref (W.zero ww) in
+          for i = 0 to w - 1 do
+            if W.bit b i then acc := W.logxor !acc (W.shl ww wide i)
+          done;
+          Bits (W.trunc w (if k = Clmul then !acc else W.lshr ww !acc w)))
 
 let iun_lane k flags w a =
   match a with
