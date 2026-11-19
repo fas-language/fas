@@ -18,6 +18,7 @@ struct Lx {
     place addr        // Place per section
     alias addr        // u64 per section: canonical (file << 32 | section) + 1, 0 when none
     gotref addr       // u32 per relocation: GOT slot, NONE when none
+    eh addr           // the normalized .eh_frame bytes (unwind.fas), or null
     status u32        // parse: 0 ok, 1 failed, 2 refused
 }
 
@@ -28,7 +29,7 @@ struct Place {
     address u64
 }
 
-const MAX_OBJECTS u64 = 1100   // 1024 inputs and the synthesized objects
+const MAX_OBJECTS u64 = 65552  // 65536 objects and the synthesized ones
 
 var objs addr = null           // Obj * MAX_OBJECTS
 var lxs addr = null            // Lx * MAX_OBJECTS
@@ -138,7 +139,10 @@ fn parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
 
 // ---------- reading ----------
 
+var reading bool = true   // the inputs are being read (objects staged)
+
 fn input_die() void {
+    if !reading { die() }
     // the message is in ld_msg: parse the earlier objects first
     keep Buf = {}
     k handle[Buf] = handle_from_addr[Buf](&keep)
@@ -207,7 +211,27 @@ fn is_script(d Bytes) bool {
     return true
 }
 
-fn read_input(path Bytes) void {
+// the prepared inputs, parallel to the command-line items
+const P_OBJECT u8 = 0
+const P_ARCHIVE u8 = 1
+const P_GROUP u8 = 2
+
+struct PNode {
+    kind u8
+    loaded bool
+    ref u32         // P_OBJECT: staged object; P_ARCHIVE: archive
+    count u32       // P_GROUP: the nodes inside
+}
+
+var pnodes Vec[PNode] = {}
+
+fn pnode_add(kind u8, ref u64) void {
+    n handle[PNode] = vec_new[PNode](handle_from_addr[Vec[PNode]](&pnodes))
+    n.kind = kind
+    n.ref = trunc[u32](ref)
+}
+
+fn read_input(path Bytes, whole bool) void {
     file_count += 1
     if file_count > 1024 {
         m handle[Buf] = msg()
@@ -246,8 +270,24 @@ fn read_input(path Bytes) void {
     }
     buf_free(rh)
     input_bytes += data.n
-    if data.n >= 8 && (mem_eq(data.p, c"!<arch>\n", 8) || mem_eq(data.p, c"!<thin>\n", 8)) {
-        refuse(c"archives")
+    if is_archive_data(data) {
+        archive_parse(path, data, whole)
+        ai u64 = archives.n - 1
+        a handle[Archive] = archive(ai)
+        for k u64 in 0..a.members.n {
+            m handle[Member] = member(a, k)
+            if m.ext.n != 0 && os_exists(m.ext.p) {
+                vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), m.ext)
+            }
+        }
+        if !whole && !a.indexed && a.members.n != 0 {
+            m handle[Buf] = msg()
+            bb(m, path)
+            bs(m, c": archive has no symbol index (run ar s, or use --whole-archive)")
+            input_die()
+        }
+        pnode_add(P_ARCHIVE, ai)
+        return
     }
     if data.n >= 18 && mem_eq(data.p, c"\x7fELF", 4) && rd16(data.p, 16) == 3 {
         // Static output: requires_static_inputs
@@ -257,10 +297,38 @@ fn read_input(path Bytes) void {
         input_die()
     }
     if is_script(data) { refuse(c"linker scripts") }
+    pnode_add(P_OBJECT, nobj)
     o handle[Obj] = new_object(c"")
     o.path = path
     o.data = data.p
     o.len = data.n
+}
+
+// read_extra: a thin archive's member file (read once per canonical path)
+var extra_files Vec[Snapshot] = {}
+
+fn read_extra(path Bytes) Bytes {
+    real Buf = {}
+    rh handle[Buf] = handle_from_addr[Buf](&real)
+    path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
+    xs handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&extra_files)
+    for k u64 in 0..xs.n {
+        sn handle[Snapshot] = vec_ref[Snapshot](xs, k)
+        if bytes_eq(sn.real, buf_bytes(rh)) {
+            buf_free(rh)
+            return sn.data
+        }
+    }
+    file_count += 1
+    if file_count > 1024 { input_die_c(c"input count exceeds 1024 file limit") }
+    vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), path)
+    data Bytes = input_read(path, umin(MAX_FILE_SIZE, 268435456 - input_bytes))
+    input_bytes += data.n
+    sn handle[Snapshot] = vec_new[Snapshot](xs)
+    sn.real = nul_dup(rh.p, rh.n)
+    sn.data = data
+    buf_free(rh)
+    return data
 }
 
 // Reads every input in command-line order, then parses them all.
@@ -276,6 +344,8 @@ fn read_inputs() void {
         depth u64 = eh.n
         if it.kind == IT_GROUP {
             vec_push[u64](eh, i + 1 + zext[u64](it.count))
+            pnode_add(P_GROUP, 0)
+            vec_ref[PNode](handle_from_addr[Vec[PNode]](&pnodes), i).count = it.count
             continue
         }
         // Input.As_needed and Input.Static each add one level of policy
@@ -288,10 +358,58 @@ fn read_inputs() void {
             bs(m, c"input policy nesting exceeds 16")
             input_die()
         }
-        if it.kind == IT_LIBRARY { refuse(c"library search (-l)") }
-        read_input(it.text)
+        path Bytes = it.text
+        if it.kind == IT_LIBRARY {
+            // static output: only archives (requires_static_inputs)
+            path = library_find(it.text, false, handle_from_addr[Vec[Bytes]](&ldirs))
+        }
+        read_input(path, it.whole)
     }
     parse_flush()
+    reading = false
+}
+
+// ---------- processing (Resolver.process) ----------
+
+var staged_objs addr = null
+var staged_lxs addr = null
+
+fn process_range(b u64, e u64) void {
+    nodes handle[Vec[PNode]] = handle_from_addr[Vec[PNode]](&pnodes)
+    i u64 = b
+    while i < e {
+        n handle[PNode] = vec_ref[PNode](nodes, i)
+        if n.kind == P_GROUP {
+            inner u64 = zext[u64](n.count)
+            previous u64 = NONE64
+            while previous != nobj {
+                previous = nobj
+                process_range(i + 1, i + 1 + inner)
+            }
+            i += 1 + inner
+            continue
+        }
+        if n.kind == P_OBJECT {
+            if !n.loaded {
+                n.loaded = true
+                add_member(handle_from_addr[Obj](staged_objs + zext[u64](n.ref) * sizeof[Obj]))
+            }
+        } else {
+            extract(zext[u64](n.ref))
+        }
+        i += 1
+    }
+}
+
+// Moves the staged input objects aside and adds the objects in the OCaml
+// linker's order: inputs and extracted members as the walk reaches them.
+fn process_inputs() void {
+    staged_objs = objs
+    staged_lxs = lxs
+    objs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Obj])
+    lxs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Lx])
+    nobj = 0
+    process_range(0, pnodes.n)
     ninput_objects = nobj
 }
 
@@ -299,20 +417,14 @@ fn read_inputs() void {
 
 fn check_supported(i u64) void {
     o handle[Obj] = obj(i)
-    for k u64 in 0..zext[u64](o.ngroup) {
-        g handle[Group] = handle_from_addr[Group](o.groups + k * sizeof[Group])
-        if g.comdat { refuse(c"COMDAT groups") }
-    }
     for k u64 in 0..zext[u64](o.nsec) {
         s handle[Sec] = sec(o, k)
         if (s.flags & 0x400) != 0 { refuse(c"TLS") }
-        if bytes_is(s.name, c".eh_frame") { refuse(c".eh_frame") }
     }
     for k u64 in 1..zext[u64](o.nsym) {
         y handle[Sym] = sym(o, k)
         if y.kind == 6 { refuse(c"TLS") }
         if y.kind == 10 { refuse(c"IFUNC") }
-        if y.binding != 0 && bytes_contains(y.name, 64) { refuse(c"symbol versions") }
         if bytes_is(y.name, c"_TLS_MODULE_BASE_") { refuse(c"TLS") }
     }
     for k u64 in 0..zext[u64](o.nrel) {
@@ -327,14 +439,35 @@ fn check_supported(i u64) void {
 var predefined_file u64 = NONE64
 const NONE64 u64 = 0xffffffffffffffff
 
+var ldirs Vec[Bytes] = {}
+
 var symbol_total u64 = 0
 var relocation_total u64 = 0
+
+// COMDAT signatures seen so far: the first group with a signature wins
+var signatures Vec[Bytes] = {}
+var signature_index KeyIndex = {}
 
 fn add_object(f u64) void {
     o handle[Obj] = obj(f)
     l handle[Lx] = lx(f)
     n u64 = zext[u64](o.nsec)
     l.discarded = heap_alloc_zeroed(n + 1)
+    sv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&signatures)
+    sx handle[KeyIndex] = handle_from_addr[KeyIndex](&signature_index)
+    for k u64 in 0..zext[u64](o.ngroup) {
+        g handle[Group] = handle_from_addr[Group](o.groups + k * sizeof[Group])
+        if !g.comdat { continue }
+        hash u64 = bytes_hash(g.signature)
+        e u32 = kx_first(sx, hash)
+        while e != NONE && !bytes_eq(vec_get[Bytes](sv, zext[u64](e)), g.signature) { e = kx_next(sx, e) }
+        if e != NONE {
+            for j u64 in 0..zext[u64](g.n) { l.discarded[u8, zext[u64](g.members[u32, j])] = 1 }
+        } else {
+            kx_add(sx, hash, trunc[u32](sv.n))
+            vec_push[Bytes](sv, g.signature)
+        }
+    }
     symbol_total = chk_add(c"combined symbol count", 4000000, symbol_total, zext[u64](o.nsym))
     relocation_total = chk_add(c"combined relocation count", 4000000, relocation_total, zext[u64](o.nrel))
     l.gid = heap_alloc_zeroed(zext[u64](o.nsym) * 4 + 4)
@@ -347,8 +480,7 @@ fn add_object(f u64) void {
         l.gid[u32, index] = id
         s handle[GSym] = gsym(id)
         if visibility_rank(y.visibility) > visibility_rank(s.visibility) { s.visibility = y.visibility }
-        // no COMDAT groups yet, so no section is removed
-        if y.section == 0 {
+        if y.section == 0 || (zext[u64](y.section) < n && l.discarded[u8, zext[u64](y.section)] != 0) {
             if y.binding == 1 { s.strong = 1 }
             continue
         }
@@ -517,11 +649,18 @@ fn synth_sym(o handle[Obj], index u64, name Bytes) handle[Sym] {
 fn resolve() void {
     c handle[Config] = config()
     if c.entry.n == 0 { die_c(c"entry symbol must not be empty") }
-    // library search directories (only validated: -l is refused)
+    // library search directories (Sysroot.directory without a root)
     dirs handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.library_paths)
+    lh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ldirs)
     for k u64 in 0..dirs.n {
         d Bytes = vec_get[Bytes](dirs, k)
         if d.n > 65536 || bytes_contains(d, 0) { die_c(c"invalid or oversized sysroot/search path") }
+        if bytes_prefix(d, c"=") {
+            d = bytes(d.p + 1, d.n - 1)
+        } else if bytes_prefix(d, c"$SYSROOT") {
+            d = bytes(d.p + 8, d.n - 8)
+        }
+        vec_push[Bytes](lh, d)
     }
     if dirs.n > 4096 { die_c(c"library search exceeds 4096 directories") }
     // Input.paths: every path item
@@ -532,7 +671,6 @@ fn resolve() void {
     }
     if paths > 1024 { die_c(c"input count exceeds 1024 file limit") }
     read_inputs()
-    for f u64 in 0..nobj { check_supported(f) }
 
     // the entry and -u roots
     if c.mode != MODE_SHARED { gsym(get(c.entry)).strong = 1 }
@@ -542,7 +680,7 @@ fn resolve() void {
         if name.n == 0 { die_c(c"undefined root symbol must not be empty") }
         gsym(get(name)).strong = 1
     }
-    for f u64 in 0..ninput_objects { add_object(f) }
+    process_inputs()
 
     // definitions, commons and linker-defined symbols, in state order
     common_file u64 = nobj

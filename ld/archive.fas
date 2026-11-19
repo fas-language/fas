@@ -1,0 +1,753 @@
+// SysV/GNU archives, library search and archive extraction: a port of
+// src/linker/archive.ml, library_search.ml and the extraction half of
+// resolver.ml.
+//
+// The container is parsed and validated eagerly, in input order, while
+// the inputs are read. Members are parsed lazily: when the extraction walk
+// first reaches an unparsed member of a regular archive, every member
+// still pending is parsed in parallel, and each member's parse result is
+// reported only when the walk actually extracts it, so the diagnostics
+// are the serial OCaml ones.
+
+struct Member {
+    name Bytes
+    header u64
+    offset u64
+    size u64
+    ext Bytes           // a thin archive's external file (empty when embedded)
+    nested u64          // a nested member's header offset, NONE64 when none
+    exp_start u32       // its exports: archive exports [exp_start, exp_start + exp_n)
+    exp_n u32
+    o addr              // the parsed Obj, or null
+    status u32          // MS_*
+    loaded bool
+}
+
+const MS_UNPARSED u32 = 0
+const MS_PARSED u32 = 1     // parsed, the index not checked yet
+const MS_FAILED u32 = 2
+const MS_REFUSED u32 = 3
+const MS_READY u32 = 4      // parsed and checked against the index
+
+// one symbol index name (aliases included), in index order
+struct AEntry {
+    name Bytes
+    member u32
+}
+
+struct Archive {
+    path Bytes
+    data addr
+    len u64
+    members Vec[Member]
+    entries Vec[AEntry]
+    exports Vec[Bytes]      // per member, contiguous, in index order
+    index KeyIndex          // name hash -> entry
+    indexed bool
+    thin bool
+    whole bool
+    pending addr            // u64 bitmaps over the members
+    deferred addr
+    npending u64
+    ndeferred u64
+}
+
+var archives Vec[Archive] = {}
+
+fn archive(i u64) handle[Archive] { return vec_ref[Archive](handle_from_addr[Vec[Archive]](&archives), i) }
+fn member(a handle[Archive], i u64) handle[Member] { return vec_ref[Member](handle_from_addr[Vec[Member]](&a.members), i) }
+
+fn is_archive_data(d Bytes) bool {
+    return d.n >= 8 && (mem_eq(d.p, c"!<arch>\n", 8) || mem_eq(d.p, c"!<thin>\n", 8))
+}
+
+// ---------- the container (Archive.parse) ----------
+
+fn ar_msg(path Bytes) handle[Buf] {
+    m handle[Buf] = msg()
+    bb(m, path)
+    bs(m, c": archive: ")
+    return m
+}
+
+fn ar_die(path Bytes, text addr) void {
+    bs(ar_msg(path), text)
+    input_die()
+}
+
+fn ar_span(path Bytes, offset u64, size u64, length u64) void {
+    if offset > length || size > length - offset {
+        m handle[Buf] = ar_msg(path)
+        bs(m, c"byte range (")
+        bu(m, offset)
+        bs(m, c", ")
+        bu(m, size)
+        bs(m, c") exceeds size ")
+        bu(m, length)
+        input_die()
+    }
+}
+
+fn ocaml_space(c u8) bool { return c == 32 || c == 12 || c == 10 || c == 13 || c == 9 }
+
+// a decimal header field, String.trim'd
+fn ar_decimal(path Bytes, limit u64, field Bytes) u64 {
+    b u64 = 0
+    e u64 = field.n
+    while b < e && ocaml_space(field.p[u8, b]) { b += 1 }
+    while e > b && ocaml_space(field.p[u8, e - 1]) { e -= 1 }
+    text Bytes = bytes(field.p + b, e - b)
+    if text.n == 0 { ar_die(path, c"empty decimal field") }
+    value u64 = 0
+    for i u64 in 0..text.n {
+        c u8 = text.p[u8, i]
+        if c < 48 || c > 57 {
+            m handle[Buf] = ar_msg(path)
+            bs(m, c"invalid decimal field ")
+            bq(m, text)
+            input_die()
+        }
+        d u64 = zext[u64](c) - 48
+        // OCaml: value > (limit - d) / 10, division truncating toward zero
+        bound i64 = (bitcast[i64](limit) - bitcast[i64](d)) / 10
+        if bitcast[i64](value) > bound { ar_die(path, c"decimal field exceeds supported size") }
+        value = value * 10 + d
+    }
+    return value
+}
+
+fn be32(p addr, at u64) u64 {
+    return (rd8(p, at) << 24) | (rd8(p, at + 1) << 16) | (rd8(p, at + 2) << 8) | rd8(p, at + 3)
+}
+
+fn be64(p addr, at u64) u64 { return (be32(p, at) << 32) | be32(p, at + 4) }
+
+struct LongName {
+    key u64
+    name Bytes
+}
+
+// Symver.aliases: a default version alias adds the plain name and name@version
+fn symver_aliases(name Bytes, out handle[Vec[Bytes]]) void {
+    at u64 = NONE64
+    for i u64 in 0..name.n {
+        if name.p[u8, i] == 64 {
+            at = i
+            break
+        }
+    }
+    if at == NONE64 { return }
+    is_default bool = at + 1 < name.n && name.p[u8, at + 1] == 64
+    start u64 = if is_default { at + 2 } else { at + 1 }
+    version Bytes = bytes(name.p + start, name.n - start)
+    if version.n == 0 {
+        m handle[Buf] = msg()
+        bs(m, c"empty/base symbol version aliases are unsupported: ")
+        bb(m, name)
+        input_die()
+    }
+    if at == 0 || bytes_contains(version, 64) {
+        m handle[Buf] = msg()
+        bs(m, c"invalid symbol version alias ")
+        bb(m, name)
+        input_die()
+    }
+    if is_default {
+        vec_push[Bytes](out, bytes(name.p, at))
+        // name@version: the name without one of the two @
+        b Buf = {}
+        bh handle[Buf] = handle_from_addr[Buf](&b)
+        bb(bh, bytes(name.p, at + 1))
+        bb(bh, version)
+        vec_push[Bytes](out, nul_dup(bh.p, bh.n))
+        buf_free(bh)
+    }
+}
+
+struct RawMember {
+    name Bytes
+    header u64
+    offset u64
+    size u64
+}
+
+// Archive.parse; `whole` is the input's --whole-archive
+fn archive_parse(path Bytes, data Bytes, whole bool) void {
+    a handle[Archive] = vec_new[Archive](handle_from_addr[Vec[Archive]](&archives))
+    a.path = path
+    a.data = data.p
+    a.len = data.n
+    a.whole = whole
+    d addr = data.p
+    length u64 = data.n
+    thin bool = mem_eq(d, c"!<thin>\n", 8)
+    a.thin = thin
+    raw Vec[RawMember] = {}
+    rh handle[Vec[RawMember]] = handle_from_addr[Vec[RawMember]](&raw)
+    has_names bool = false
+    names_offset u64 = 0
+    names_size u64 = 0
+    has_symbols bool = false
+    sym_offset u64 = 0
+    sym_size u64 = 0
+    sym_width u64 = 0
+    cursor u64 = 8
+    count u64 = 0
+    while cursor < length {
+        ar_span(path, cursor, 60, length)
+        if rd8(d, cursor + 58) != 96 || rd8(d, cursor + 59) != 10 {
+            m handle[Buf] = ar_msg(path)
+            bs(m, c"invalid member header at offset ")
+            bu(m, cursor)
+            input_die()
+        }
+        nl u64 = 16
+        while nl > 0 && rd8(d, cursor + nl - 1) == 32 { nl -= 1 }
+        name Bytes = bytes(d + cursor, nl)
+        special bool = bytes_is(name, c"//") || bytes_is(name, c"/") || bytes_is(name, c"/SYM64/")
+        embedded bool = !thin || special
+        limit u64 = if embedded { length } else { MAX_FILE_SIZE }
+        size u64 = ar_decimal(path, limit, bytes(d + cursor + 48, 10))
+        offset u64 = cursor + 60
+        if embedded { ar_span(path, offset, size, length) }
+        if bytes_is(name, c"//") {
+            if has_names { ar_die(path, c"duplicate long name table") }
+            has_names = true
+            names_offset = offset
+            names_size = size
+        } else if bytes_is(name, c"/") || bytes_is(name, c"/SYM64/") {
+            if has_symbols { ar_die(path, c"duplicate symbol index") }
+            has_symbols = true
+            sym_offset = offset
+            sym_size = size
+            sym_width = if bytes_is(name, c"/") { 4 } else { 8 }
+        } else {
+            count += 1
+            if count > 65536 { ar_die(path, c"member count exceeds 65536 limit") }
+            r handle[RawMember] = vec_new[RawMember](rh)
+            r.name = name
+            r.header = cursor
+            r.offset = offset
+            r.size = size
+        }
+        cursor = offset + (if embedded { size } else { 0 })
+        if embedded && (size & 1) != 0 {
+            ar_span(path, cursor, 1, length)
+            if rd8(d, cursor) != 10 { ar_die(path, c"invalid member padding") }
+            cursor += 1
+        }
+    }
+
+    // the long name table
+    longs Vec[LongName] = {}
+    lh handle[Vec[LongName]] = handle_from_addr[Vec[LongName]](&longs)
+    long_keys Map[u64, u32, u64_hash, u64_eq] = {}
+    lk handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&long_keys)
+    if has_names {
+        ending u64 = names_offset + names_size
+        pos u64 = names_offset
+        while pos < ending {
+            // GNU ar may include one final newline in the declared table size
+            if pos == ending - 1 && rd8(d, pos) == 10 {
+                pos += 1
+                continue
+            }
+            start u64 = pos
+            while pos + 1 < ending && !(rd8(d, pos) == 47 && rd8(d, pos + 1) == 10) {
+                if pos - start >= 65535 { ar_die(path, c"member name exceeds 65535 bytes") }
+                pos += 1
+            }
+            if pos + 1 >= ending { ar_die(path, c"unterminated long member name") }
+            if pos == start { ar_die(path, c"empty long member name") }
+            if lh.n >= 65536 { ar_die(path, c"long name table exceeds 65536 entry limit") }
+            map_put(lk, start - names_offset, trunc[u32](lh.n))
+            ln handle[LongName] = vec_new[LongName](lh)
+            ln.key = start - names_offset
+            ln.name = bytes(d + start, pos - start)
+            pos += 2
+        }
+    }
+
+    // the members
+    mh handle[Vec[Member]] = handle_from_addr[Vec[Member]](&a.members)
+    by_header Map[u64, u32, u64_hash, u64_eq] = {}
+    bh handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&by_header)
+    for i u64 in 0..rh.n {
+        r handle[RawMember] = vec_ref[RawMember](rh, i)
+        raw_name Bytes = r.name
+        name Bytes = raw_name
+        nested u64 = NONE64
+        if bytes_prefix(raw_name, c"#1/") {
+            ar_die(path, c"BSD extended names/indexes are not supported yet")
+        } else if bytes_prefix(raw_name, c"/") {
+            reference Bytes = bytes(raw_name.p + 1, raw_name.n - 1)
+            for j u64 in 0..reference.n {
+                if reference.p[u8, j] == 58 {
+                    if !thin { ar_die(path, c"nested member reference requires a thin archive") }
+                    origin u64 = ar_decimal(path, MAX_FILE_SIZE, bytes(reference.p + j + 1, reference.n - j - 1))
+                    if origin < 8 { ar_die(path, c"invalid nested member header offset") }
+                    nested = origin
+                    reference = bytes(reference.p, j)
+                    break
+                }
+            }
+            key u64 = ar_decimal(path, length, reference)
+            la addr = map_val_addr(lk, key)
+            if la == null {
+                m handle[Buf] = ar_msg(path)
+                bs(m, c"invalid long member name offset ")
+                bu(m, key)
+                input_die()
+            }
+            name = vec_ref[LongName](lh, zext[u64](la[u32])).name
+        } else if raw_name.n != 0 && raw_name.p[u8, raw_name.n - 1] == 47 {
+            name = bytes(raw_name.p, raw_name.n - 1)
+        }
+        if name.n == 0 || bytes_contains(name, 0) { ar_die(path, c"invalid member name") }
+        if bytes_prefix(name, c"__.SYMDEF") { ar_die(path, c"BSD symbol indexes are not supported yet") }
+        m handle[Member] = vec_new[Member](mh)
+        m.name = name
+        m.header = r.header
+        m.offset = r.offset
+        m.size = r.size
+        m.nested = nested
+        if thin {
+            if path_is_relative(name) {
+                b Buf = {}
+                pb handle[Buf] = handle_from_addr[Buf](&b)
+                path_concat(pb, path_dirname(path), name)
+                m.ext = nul_dup(pb.p, pb.n)
+                buf_free(pb)
+            } else {
+                m.ext = nul_dup(name.p, name.n)
+            }
+        }
+        map_put(bh, r.header, trunc[u32](i))
+    }
+    vec_free[RawMember](rh)
+    map_free(lk)
+    vec_free[LongName](lh)
+
+    // the symbol index
+    eh handle[Vec[AEntry]] = handle_from_addr[Vec[AEntry]](&a.entries)
+    if has_symbols {
+        a.indexed = true
+        offset u64 = sym_offset
+        size u64 = sym_size
+        width u64 = sym_width
+        ar_span(path, offset, width, offset + size)
+        n u64 = ar_index_int(path, d, offset, width, length)
+        if n > 1000000 { ar_die(path, c"symbol index exceeds 1000000 entry limit") }
+        ar_span(path, offset + width, n * width, offset + size)
+        at u64 = offset + width + n * width
+        aliases Vec[Bytes] = {}
+        al handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&aliases)
+        for k u64 in 0..n {
+            mo u64 = ar_index_int(path, d, offset + width + k * width, width, length)
+            ma addr = map_val_addr(bh, mo)
+            if ma == null {
+                m handle[Buf] = ar_msg(path)
+                bs(m, c"symbol index points outside a member header: ")
+                bu(m, mo)
+                input_die()
+            }
+            index u32 = ma[u32]
+            // Binary.string_at
+            no u64 = at - offset
+            if no >= size {
+                m handle[Buf] = ar_msg(path)
+                bs(m, c"string offset ")
+                bu(m, no)
+                bs(m, c" exceeds string table size ")
+                bu(m, size)
+                input_die()
+            }
+            start u64 = at
+            lim u64 = umin(offset + size, start + 65536)
+            e u64 = start
+            while e < lim && rd8(d, e) != 0 { e += 1 }
+            if e == lim {
+                m handle[Buf] = ar_msg(path)
+                bs(m, c"unterminated string or name exceeds 65535 bytes")
+                input_die()
+            }
+            name Bytes = bytes(d + start, e - start)
+            if name.n == 0 { ar_die(path, c"empty symbol in archive index") }
+            at = at + name.n + 1
+            vec_clear[Bytes](al)
+            vec_push[Bytes](al, name)
+            symver_aliases(name, al)
+            for j u64 in 0..al.n {
+                en handle[AEntry] = vec_new[AEntry](eh)
+                en.name = vec_get[Bytes](al, j)
+                en.member = index
+            }
+        }
+        vec_free[Bytes](al)
+        for k u64 in at..offset + size {
+            if rd8(d, k) != 0 { ar_die(path, c"trailing garbage in symbol index") }
+        }
+    }
+    map_free(bh)
+
+    // each member's exports, contiguous, in index order; the name index
+    nm u64 = mh.n
+    for i u64 in 0..eh.n {
+        m handle[Member] = member(a, zext[u64](vec_ref[AEntry](eh, i).member))
+        m.exp_n += 1
+    }
+    total u32 = 0
+    for i u64 in 0..nm {
+        m handle[Member] = member(a, i)
+        m.exp_start = total
+        total += m.exp_n
+        m.exp_n = 0
+    }
+    xh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&a.exports)
+    vec_reserve[Bytes](xh, zext[u64](total))
+    xh.n = zext[u64](total)
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&a.index)
+    for i u64 in 0..eh.n {
+        en handle[AEntry] = vec_ref[AEntry](eh, i)
+        m handle[Member] = member(a, zext[u64](en.member))
+        vec_set[Bytes](xh, zext[u64](m.exp_start + m.exp_n), en.name)
+        m.exp_n += 1
+        kx_add(kx, bytes_hash(en.name), trunc[u32](i))
+    }
+    words u64 = (nm + 63) / 64 + 1
+    a.pending = heap_alloc_zeroed(words * 8)
+    a.deferred = heap_alloc_zeroed(words * 8)
+}
+
+// a symbol index integer: u32 or i64, big-endian (Binary.index)
+fn ar_index_int(path Bytes, d addr, at u64, width u64, limit u64) u64 {
+    v u64 = if width == 4 { be32(d, at) } else { be64(d, at) }
+    if bitcast[i64](v) < 0 || v > limit {
+        m handle[Buf] = ar_msg(path)
+        bs(m, c"value 0x")
+        bx(m, v)
+        bs(m, c" exceeds supported limit ")
+        bu(m, limit)
+        input_die()
+    }
+    return v
+}
+
+// ---------- library search (Library_search.find) ----------
+
+var probes u64 = 0
+
+fn lib_exists(path Bytes) bool {
+    probes += 1
+    if probes > 1000000 { die_c(c"library search exceeds 1000000 probes") }
+    if path.n > 65536 || bytes_contains(path, 0) { die_c(c"invalid or oversized sysroot/search path") }
+    p addr = cstr_dup(path)
+    r bool = os_exists(p)
+    heap_free(p)
+    return r
+}
+
+// Filename.basename file <> file: only a name without '/' (or "/" itself)
+fn lib_file_ok(f Bytes) bool {
+    if f.n == 0 { return false }
+    return bytes_eq(path_basename(f), f)
+}
+
+// the path of -l<name>, searched in `dirs`; dies when there is none
+fn library_find(name Bytes, dynamic bool, dirs handle[Vec[Bytes]]) Bytes {
+    if name.n == 0 { input_die_c(c"empty library name") }
+    files Vec[Bytes] = {}
+    fh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&files)
+    if name.p[u8, 0] == 58 {
+        vec_push[Bytes](fh, bytes(name.p + 1, name.n - 1))
+    } else {
+        b Buf = {}
+        bh handle[Buf] = handle_from_addr[Buf](&b)
+        if dynamic {
+            bs(bh, c"lib")
+            bb(bh, name)
+            bs(bh, c".so")
+            vec_push[Bytes](fh, nul_dup(bh.p, bh.n))
+            buf_clear(bh)
+        }
+        bs(bh, c"lib")
+        bb(bh, name)
+        bs(bh, c".a")
+        vec_push[Bytes](fh, nul_dup(bh.p, bh.n))
+        buf_free(bh)
+    }
+    for i u64 in 0..fh.n {
+        if !lib_file_ok(vec_get[Bytes](fh, i)) {
+            m handle[Buf] = msg()
+            bs(m, c"invalid library name ")
+            bb(m, name)
+            input_die()
+        }
+    }
+    p Buf = {}
+    ph handle[Buf] = handle_from_addr[Buf](&p)
+    for k u64 in 0..dirs.n {
+        for i u64 in 0..fh.n {
+            buf_clear(ph)
+            path_concat(ph, vec_get[Bytes](dirs, k), vec_get[Bytes](fh, i))
+            if lib_exists(buf_bytes(ph)) {
+                found Bytes = nul_dup(ph.p, ph.n)
+                buf_free(ph)
+                vec_free[Bytes](fh)
+                return found
+            }
+        }
+    }
+    m handle[Buf] = msg()
+    bs(m, c"cannot find -l")
+    bb(m, name)
+    bs(m, c" in explicit -L directories")
+    input_die()
+    return bytes_empty()
+}
+
+fn input_die_c(s addr) void {
+    m handle[Buf] = msg()
+    bs(m, s)
+    input_die()
+}
+
+// ---------- members ----------
+
+fn member_path(a handle[Archive], m handle[Member]) Bytes {
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    bb(bh, a.path)
+    buf_u8(bh, 40)
+    bb(bh, m.name)
+    buf_u8(bh, 41)
+    r Bytes = nul_dup(bh.p, bh.n)
+    buf_free(bh)
+    return r
+}
+
+// sets up a member's Obj (the bytes of a regular archive's member)
+fn member_obj(a handle[Archive], m handle[Member]) handle[Obj] {
+    o handle[Obj] = handle_from_addr[Obj](heap_alloc_zeroed(sizeof[Obj]))
+    o.path = member_path(a, m)
+    o.data = a.data + m.offset
+    o.len = m.size
+    m.o = handle_addr(o)
+    return o
+}
+
+fn member_parse(m handle[Member]) void {
+    o handle[Obj] = handle_from_addr[Obj](m.o)
+    m.status = MS_PARSED
+    elf_parse(o) catch err {
+        m.status = if err == Refused { MS_REFUSED } else { MS_FAILED }
+        return
+    }
+    symver_expand(o) catch err { m.status = MS_FAILED }
+}
+
+fn member_parse_job(ctx addr, b u64, e u64, worker u32) void {
+    for i u64 in b..e { member_parse(handle_from_addr[Member](ctx[addr, i])) }
+}
+
+// parses member `first` and every unparsed pending or deferred member
+// (whole archives: every member), in parallel
+fn archive_prefetch(a handle[Archive], first u64) void {
+    batch Vec[addr] = {}
+    bh handle[Vec[addr]] = handle_from_addr[Vec[addr]](&batch)
+    nm u64 = a.members.n
+    if a.whole {
+        for i u64 in first..nm {
+            m handle[Member] = member(a, i)
+            if m.status == MS_UNPARSED && m.o == null && !m.loaded {
+                member_obj(a, m)
+                vec_push[addr](bh, handle_addr(m))
+            }
+        }
+    } else {
+        f handle[Member] = member(a, first)
+        member_obj(a, f)
+        vec_push[addr](bh, handle_addr(f))
+    }
+    for w u64 in 0..(nm + 63) / 64 {
+        bits u64 = a.pending[u64, w] | a.deferred[u64, w]
+        if a.whole { bits = 0 }
+        while bits != 0 {
+            i u64 = w * 64 + ctz(bits)
+            bits = bits & (bits - 1)
+            m handle[Member] = member(a, i)
+            if m.status == MS_UNPARSED && m.o == null && !m.loaded {
+                member_obj(a, m)
+                vec_push[addr](bh, handle_addr(m))
+            }
+        }
+    }
+    if bh.n > 1 {
+        pool_for(pool, bh.n, 1, &member_parse_job, bh.p)
+    } else if bh.n == 1 {
+        member_parse(handle_from_addr[Member](bh.p[addr, 0]))
+    }
+    vec_free[addr](bh)
+}
+
+// Archive.object_: the member's parsed object; dies with its diagnostic
+fn archive_object(a handle[Archive], i u64) handle[Obj] {
+    m handle[Member] = member(a, i)
+    if m.status == MS_UNPARSED {
+        if a.thin {
+            if m.nested != NONE64 { refuse(c"nested thin archive members") }
+            data Bytes = read_extra(m.ext)
+            o handle[Obj] = member_obj(a, m)
+            o.data = data.p
+            o.len = data.n
+            member_parse(m)
+        } else {
+            archive_prefetch(a, i)
+        }
+    }
+    o handle[Obj] = handle_from_addr[Obj](m.o)
+    if m.status == MS_FAILED { die_buf(handle_from_addr[Buf](&o.msg)) }
+    if m.status == MS_REFUSED { refuse(buf_cstr(handle_from_addr[Buf](&o.msg))) }
+    if m.status == MS_PARSED {
+        // every advertised name must be defined (exports in OCaml's list
+        // order: the index order reversed)
+        n u64 = zext[u64](m.exp_n)
+        k u64 = n
+        while k > 0 {
+            k -= 1
+            name Bytes = a.exports.p[Bytes, zext[u64](m.exp_start) + k]
+            found bool = false
+            for s u64 in 0..zext[u64](o.nsym) {
+                y handle[Sym] = sym(o, s)
+                if y.binding != 0 && y.section != 0 && bytes_eq(y.name, name) {
+                    found = true
+                    break
+                }
+            }
+            if !found {
+                b handle[Buf] = msg()
+                bb(b, o.path)
+                bs(b, c": archive index advertises missing definition ")
+                bb(b, name)
+                die()
+            }
+        }
+        m.status = MS_READY
+    }
+    return o
+}
+
+// ---------- extraction (Resolver.extract) ----------
+
+fn needed(id u32) bool {
+    s handle[GSym] = gsym(id)
+    if s.def_kind == DEF_NONE { return s.strong != 0 }
+    return s.def_kind == DEF_COMMON
+}
+
+fn bit_set(bits addr, i u64) bool { return (bits[u64, i / 64] >> (i % 64)) & 1 != 0 }
+
+fn enqueue(a handle[Archive], id u32, cursor u64) void {
+    if !needed(id) { return }
+    name Bytes = gsym(id).name
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&a.index)
+    e u32 = kx_first(kx, bytes_hash(name))
+    while e != NONE {
+        en handle[AEntry] = vec_ref[AEntry](handle_from_addr[Vec[AEntry]](&a.entries), zext[u64](e))
+        if bytes_eq(en.name, name) {
+            i u64 = zext[u64](en.member)
+            if !member(a, i).loaded {
+                if i >= cursor {
+                    if !bit_set(a.pending, i) {
+                        a.pending[u64, i / 64] = a.pending[u64, i / 64] | (1 << (i % 64))
+                        a.npending += 1
+                    }
+                } else if !bit_set(a.deferred, i) {
+                    a.deferred[u64, i / 64] = a.deferred[u64, i / 64] | (1 << (i % 64))
+                    a.ndeferred += 1
+                }
+            }
+        }
+        e = kx_next(kx, e)
+    }
+}
+
+// adds a parsed member: copies its Obj into the object table
+fn add_member(o handle[Obj]) void {
+    f u64 = nobj
+    mem_copy(handle_addr(obj(f)), handle_addr(o), sizeof[Obj])
+    // Resolver.add_object: Symver.expand (a no-op for archive members,
+    // already expanded) comes before the object limit
+    symver_expand(obj(f)) catch err { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+    if nobj >= 65536 { die_c(c"extracted object count exceeds 65536 limit") }
+    nobj += 1
+    check_supported(f)
+    add_object(f)
+}
+
+fn extract(ai u64) void {
+    a handle[Archive] = archive(ai)
+    nm u64 = a.members.n
+    if a.whole {
+        for i u64 in 0..nm {
+            if member(a, i).loaded { continue }
+            o handle[Obj] = archive_object(a, i)
+            add_member(o)
+            member(a, i).loaded = true
+        }
+        return
+    }
+    // GNU's forward archive passes: newly needed earlier members wait for
+    // the next pass; immediately jumping backwards changes weak binding
+    // decisions. The index avoids scanning unrelated members.
+    cursor u64 = 0
+    words u64 = (nm + 63) / 64
+    for id u64 in 0..gsyms.n { enqueue(a, trunc[u32](id), cursor) }
+    while a.npending != 0 || a.ndeferred != 0 {
+        if a.npending == 0 {
+            t addr = a.pending
+            a.pending = a.deferred
+            a.deferred = t
+            a.npending = a.ndeferred
+            a.ndeferred = 0
+            cursor = 0
+        }
+        // the smallest pending member is at or after the cursor
+        w u64 = cursor / 64
+        while a.pending[u64, w] == 0 { w += 1 }
+        index u64 = w * 64 + ctz(a.pending[u64, w])
+        a.pending[u64, w] = a.pending[u64, w] & ~(1 << (index % 64))
+        a.npending -= 1
+        cursor = index + 1
+        m handle[Member] = member(a, index)
+        // List.exists over the exports, which creates their states
+        still_needed bool = false
+        k u64 = zext[u64](m.exp_n)
+        while k > 0 && !still_needed {
+            k -= 1
+            still_needed = needed(get(a.exports.p[Bytes, zext[u64](m.exp_start) + k]))
+        }
+        if m.loaded || !still_needed { continue }
+        o handle[Obj] = archive_object(a, index)
+        provides bool = false
+        for s u64 in 0..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, s)
+            if y.binding == 0 || y.section == 0 { continue }
+            g handle[GSym] = gsym(get(y.name))
+            if g.def_kind == DEF_NONE {
+                provides = needed(get(y.name))
+            } else if g.def_kind == DEF_COMMON {
+                provides = y.binding == 1 && y.section != 0xfff2
+            }
+            if provides { break }
+        }
+        if !provides { continue }
+        f u64 = nobj
+        add_member(o)
+        member(a, index).loaded = true
+        fo handle[Obj] = obj(f)
+        for s u64 in 0..zext[u64](fo.nsym) {
+            if sym(fo, s).binding != 0 { enqueue(a, lx(f).gid[u32, s], cursor) }
+        }
+    }
+}

@@ -12,8 +12,14 @@ use "util.fas"
 use "elf.fas"
 use "cli.fas"
 use "resolve.fas"
+use "archive.fas"
 use "layout.fas"
 use "link.fas"
+use "unwind.fas"
+use "symver.fas"
+use "property.fas"
+use "gc.fas"
+use "buildid.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
@@ -27,8 +33,6 @@ fn main(argc i32, argv addr) i32 {
     if c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
     if c.statistics { refuse(c"--stats") }
     if c.has_map { refuse(c"-Map") }
-    if c.gc_sections { refuse(c"--gc-sections") }
-    if c.build_id != BUILD_ID_NONE { refuse(c"--build-id") }
     if c.has_sysroot { refuse(c"--sysroot") }
     threads u32 = 0
     t addr = os_getenv(c"FAS_LD_THREADS")

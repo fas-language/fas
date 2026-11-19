@@ -1,0 +1,191 @@
+// --build-id (Build_id): a GNU build-id note whose descriptor is the
+// SHA-1 or MD5 of the whole output image, digest field still zero.
+
+fn rol32(x u32, n u32) u32 { return (x << n) | (x >> (32 - n)) }
+
+fn sha_be32(p addr, at u64) u32 {
+    return (zext[u32](p[u8, at]) << 24) | (zext[u32](p[u8, at + 1]) << 16) | (zext[u32](p[u8, at + 2]) << 8) | zext[u32](p[u8, at + 3])
+}
+
+fn sha1_block(st addr, p addr) void {
+    w arr[80, u32] = {}
+    for n u64 in 0..16 { w[n] = sha_be32(p, n * 4) }
+    for n u64 in 16..80 { w[n] = rol32(w[n - 3] ^ w[n - 8] ^ w[n - 14] ^ w[n - 16], 1) }
+    a u32 = st[u32, 0]
+    b u32 = st[u32, 1]
+    c u32 = st[u32, 2]
+    d u32 = st[u32, 3]
+    e u32 = st[u32, 4]
+    for n u64 in 0..80 {
+        f u32 = 0
+        k u32 = 0
+        if n < 20 {
+            f = (b & c) | (~b & d)
+            k = 0x5a827999
+        } else if n < 40 {
+            f = b ^ c ^ d
+            k = 0x6ed9eba1
+        } else if n < 60 {
+            f = (b & c) | (b & d) | (c & d)
+            k = 0x8f1bbcdc
+        } else {
+            f = b ^ c ^ d
+            k = 0xca62c1d6
+        }
+        next u32 = rol32(a, 5) + f + e + k + w[n]
+        e = d
+        d = c
+        c = rol32(b, 30)
+        b = a
+        a = next
+    }
+    st[u32, 0] = st[u32, 0] + a
+    st[u32, 1] = st[u32, 1] + b
+    st[u32, 2] = st[u32, 2] + c
+    st[u32, 3] = st[u32, 3] + d
+    st[u32, 4] = st[u32, 4] + e
+}
+
+const MD5_S arr[64, u32] = {
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+}
+
+const MD5_K arr[64, u32] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+}
+
+fn md5_block(st addr, p addr) void {
+    a u32 = st[u32, 0]
+    b u32 = st[u32, 1]
+    c u32 = st[u32, 2]
+    d u32 = st[u32, 3]
+    for i u64 in 0..64 {
+        f u32 = 0
+        g u64 = 0
+        if i < 16 {
+            f = (b & c) | (~b & d)
+            g = i
+        } else if i < 32 {
+            f = (d & b) | (~d & c)
+            g = (5 * i + 1) & 15
+        } else if i < 48 {
+            f = b ^ c ^ d
+            g = (3 * i + 5) & 15
+        } else {
+            f = c ^ (b | ~d)
+            g = (7 * i) & 15
+        }
+        f = f + a + MD5_K[i] + (p + g * 4)[u32]
+        a = d
+        d = c
+        c = b
+        b = b + rol32(f, MD5_S[i])
+    }
+    st[u32, 0] = st[u32, 0] + a
+    st[u32, 1] = st[u32, 1] + b
+    st[u32, 2] = st[u32, 2] + c
+    st[u32, 3] = st[u32, 3] + d
+}
+
+// the digest of data[0..n] into out: 20 bytes (sha1) or 16 (md5)
+fn digest(sha bool, data addr, n u64, out addr) void {
+    st arr[5, u32] = {}
+    if sha {
+        st[0] = 0x67452301
+        st[1] = 0xefcdab89
+        st[2] = 0x98badcfe
+        st[3] = 0x10325476
+        st[4] = 0xc3d2e1f0
+    } else {
+        st[0] = 0x67452301
+        st[1] = 0xefcdab89
+        st[2] = 0x98badcfe
+        st[3] = 0x10325476
+    }
+    sp addr = &st
+    whole u64 = n / 64
+    for i u64 in 0..whole {
+        if sha { sha1_block(sp, data + i * 64) } else { md5_block(sp, data + i * 64) }
+    }
+    tail arr[128, u8] = {}
+    tp addr = &tail
+    rest u64 = n - whole * 64
+    mem_copy(tp, data + whole * 64, rest)
+    tp[u8, rest] = 0x80
+    blocks u64 = if rest + 9 > 64 { 2 } else { 1 }
+    bits u64 = n * 8
+    end u64 = blocks * 64
+    for i u64 in 0..8 {
+        if sha {
+            tp[u8, end - 1 - i] = trunc[u8](bits >> (i * 8))
+        } else {
+            tp[u8, end - 8 + i] = trunc[u8](bits >> (i * 8))
+        }
+    }
+    for i u64 in 0..blocks {
+        if sha { sha1_block(sp, tp + i * 64) } else { md5_block(sp, tp + i * 64) }
+    }
+    if sha {
+        for i u64 in 0..5 {
+            x u32 = st[i]
+            for j u64 in 0..4 { out[u8, i * 4 + j] = trunc[u8](x >> trunc[u32]((3 - j) * 8)) }
+        }
+    } else {
+        mem_copy(out, sp, 16)
+    }
+}
+
+var build_id_file u64 = NONE64
+
+fn build_id_prepare() void {
+    c handle[Config] = config()
+    if c.build_id == BUILD_ID_NONE { return }
+    size u64 = if c.build_id == BUILD_ID_SHA1 { 20 } else { 16 }
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<build identifier>")
+    o.nsec = 2
+    o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
+    sec(o, 0).group = -1
+    sec(o, 0).alignment = 4
+    h handle[Sec] = sec(o, 1)
+    h.name = bytes_c(c".note.gnu.build-id")
+    h.kind = 7
+    h.flags = 2
+    h.size = 16 + size
+    h.alignment = 4
+    h.group = -1
+    d addr = heap_alloc_zeroed(16 + size + 1)
+    wr32(d, 0, 4)
+    wr32(d, 4, size)
+    wr32(d, 8, 3)
+    wr32(d, 12, 0x00554e47)
+    o.data = d
+    o.len = 16 + size
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(2)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(2)
+    l.kept[u8, 1] = 1
+    l.alias = heap_alloc_zeroed(16)
+    l.gotref = heap_alloc_zeroed(4)
+    build_id_file = file
+}
+
+fn build_id_emit() void {
+    if build_id_file == NONE64 { return }
+    at u64 = get_placement(build_id_file, 1).offset + 16
+    digest(config().build_id == BUILD_ID_SHA1, image, image_size, image + at)
+}

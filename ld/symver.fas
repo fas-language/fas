@@ -1,0 +1,152 @@
+// Symbol-version aliases (Symver.expand). GNU as keeps `name@VER` and
+// `name@@VER` in ET_REL symbol names; a default version (`@@`) also
+// defines `name` and `name@VER`, which are appended as extra symbols.
+
+// Symver.parse: NONE64 when the name has no '@', else the '@' position.
+// A malformed version fails with the message (no path prefix) in m.
+fn symver_at(name Bytes, m handle[Buf]) u64 fails {
+    at u64 = NONE64
+    for i u64 in 0..name.n {
+        if name.p[u8, i] == 64 {
+            at = i
+            break
+        }
+    }
+    if at == NONE64 { return NONE64 }
+    start u64 = at + 1
+    if at + 1 < name.n && name.p[u8, at + 1] == 64 { start = at + 2 }
+    version Bytes = bytes(name.p + start, name.n - start)
+    if version.n == 0 {
+        buf_clear(m)
+        bs(m, c"empty/base symbol version aliases are unsupported: ")
+        bb(m, name)
+        fail Bad
+    }
+    if at == 0 || bytes_contains(version, 64) {
+        buf_clear(m)
+        bs(m, c"invalid symbol version alias ")
+        bb(m, name)
+        fail Bad
+    }
+    return at
+}
+
+fn symver_default(name Bytes, at u64) bool { return at + 1 < name.n && name.p[u8, at + 1] == 64 }
+
+// the symbol behind index i: the object's own symbols, then the aliases
+fn symver_sym(o handle[Obj], extra handle[Vec[Sym]], i u64) handle[Sym] {
+    if i < zext[u64](o.nsym) { return sym(o, i) }
+    return handle_from_addr[Sym](vec_at[Sym](extra, i - zext[u64](o.nsym)))
+}
+
+// finds the latest definition named `name`, or NONE
+fn symver_find(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids handle[Vec[u32]], name Bytes) u32 {
+    e u32 = kx_first(kx, bytes_hash(name))
+    while e != NONE {
+        id u32 = vec_get[u32](ids, zext[u64](e))
+        if bytes_eq(symver_sym(o, extra, zext[u64](id)).name, name) { return e }
+        e = kx_next(kx, e)
+    }
+    return NONE
+}
+
+// Hashtbl.replace: the entry for `name` now points at symbol i
+fn symver_define(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids handle[Vec[u32]], name Bytes, i u64) void {
+    e u32 = symver_find(o, extra, kx, ids, name)
+    if e != NONE {
+        vec_set[u32](ids, zext[u64](e), trunc[u32](i))
+        return
+    }
+    kx_add(kx, bytes_hash(name), trunc[u32](ids.n))
+    vec_push[u32](ids, trunc[u32](i))
+}
+
+fn symver_fail(o handle[Obj], text addr, name Bytes) void fails {
+    m handle[Buf] = ef(o)
+    bs(m, text)
+    bb(m, name)
+    fail Bad
+}
+
+// one alias of default-version symbol s (index i)
+fn symver_alias(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids handle[Vec[u32]], i u64, name Bytes) void fails {
+    s handle[Sym] = symver_sym(o, extra, i)
+    e u32 = symver_find(o, extra, kx, ids, name)
+    if e != NONE {
+        old handle[Sym] = symver_sym(o, extra, zext[u64](vec_get[u32](ids, zext[u64](e))))
+        if old.section == s.section && old.value == s.value && old.kind == s.kind { return }
+        try symver_fail(o, c"conflicting default symbol version ", name)
+    }
+    a addr = vec_push_zeroed[Sym](extra)
+    // s may move when extra grows: copy from its current address
+    mem_copy(a, handle_addr(symver_sym(o, extra, i)), sizeof[Sym])
+    alias handle[Sym] = handle_from_addr[Sym](a)
+    alias.name = name
+    symver_define(o, extra, kx, ids, name, zext[u64](o.nsym) + extra.n - 1)
+}
+
+fn symver_expand(o handle[Obj]) void fails {
+    n u64 = zext[u64](o.nsym)
+    versioned bool = false
+    for k u64 in 0..n {
+        y handle[Sym] = sym(o, k)
+        if y.binding != 0 && bytes_contains(y.name, 64) {
+            versioned = true
+            break
+        }
+    }
+    if !versioned { return }
+    extra Vec[Sym] = {}
+    xh handle[Vec[Sym]] = handle_from_addr[Vec[Sym]](&extra)
+    ids Vec[u32] = {}
+    ih handle[Vec[u32]] = handle_from_addr[Vec[u32]](&ids)
+    index KeyIndex = {}
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&index)
+    for k u64 in 0..n {
+        y handle[Sym] = sym(o, k)
+        if y.binding != 0 && y.section != 0 { symver_define(o, xh, kx, ih, y.name, k) }
+    }
+    m handle[Buf] = handle_from_addr[Buf](&o.msg)
+    for k u64 in 0..n {
+        y handle[Sym] = sym(o, k)
+        if y.binding == 0 { continue }
+        at u64 = try symver_at(y.name, m)
+        if at == NONE64 || !symver_default(y.name, at) { continue }
+        if y.section == 0 { try symver_fail(o, c"undefined default symbol version ", y.name) }
+        // aliases: name, then name@VER (the name without one of the two @)
+        try symver_alias(o, xh, kx, ih, k, bytes(y.name.p, at))
+        nv u64 = y.name.n - 1
+        p addr = heap_alloc(nv)
+        mem_copy(p, y.name.p, at + 1)
+        mem_copy(p + at + 1, y.name.p + at + 2, y.name.n - at - 2)
+        try symver_alias(o, xh, kx, ih, k, bytes(p, nv))
+    }
+    if extra.n != 0 {
+        total u64 = n + extra.n
+        s addr = heap_alloc_zeroed(total * sizeof[Sym])
+        mem_copy(s, o.syms, n * sizeof[Sym])
+        mem_copy(s + n * sizeof[Sym], extra.p, extra.n * sizeof[Sym])
+        o.syms = s
+        o.nsym = trunc[u32](total)
+    }
+    vec_free[Sym](xh)
+    vec_free[u32](ih)
+    kx_free(kx)
+}
+
+// Shared_output.prepare: a versioned definition needs a version node,
+// which only shared output has. OCaml reports the first name in random
+// Hashtbl order; this reports the first in definition order.
+fn check_static_versions() void {
+    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
+    for i u64 in 0..v.n {
+        g handle[GSym] = gsym(trunc[u32](i))
+        if g.has_res != 0 && bytes_contains(g.name, 64) {
+            m handle[Buf] = msg()
+            bs(m, c"defined symbol version ")
+            bb(m, g.name)
+            bs(m, c" requires shared output")
+            die()
+        }
+    }
+}

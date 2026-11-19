@@ -29,6 +29,35 @@ fn bu(b handle[Buf], x u64) void { buf_dec_u64(b, x) }
 // OCaml's %x / %Lx: lowercase, no padding, the bits as unsigned
 fn bx(b handle[Buf], x u64) void { buf_hex(b, x, 0) }
 
+// OCaml's %S: String.escaped between quotes
+fn bq(m handle[Buf], s Bytes) void {
+    buf_u8(m, 34)
+    for i u64 in 0..s.n {
+        c u8 = s.p[u8, i]
+        if c == 34 || c == 92 {
+            buf_u8(m, 92)
+            buf_u8(m, c)
+        } else if c == 10 {
+            bs(m, c"\\n")
+        } else if c == 9 {
+            bs(m, c"\\t")
+        } else if c == 13 {
+            bs(m, c"\\r")
+        } else if c == 8 {
+            bs(m, c"\\b")
+        } else if c >= 32 && c <= 126 {
+            buf_u8(m, c)
+        } else {
+            v u64 = zext[u64](c)
+            buf_u8(m, 92)
+            buf_u8(m, trunc[u8](48 + v / 100))
+            buf_u8(m, trunc[u8](48 + (v / 10) % 10))
+            buf_u8(m, trunc[u8](48 + v % 10))
+        }
+    }
+    buf_u8(m, 34)
+}
+
 // "fas-ld: <message>\n" on stderr and exit status 1, like the OCaml
 // linker's top-level Error handler
 fn die_buf(b handle[Buf]) void {

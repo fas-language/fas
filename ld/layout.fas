@@ -1,5 +1,5 @@
 // Output layout: a port of src/linker/layout.ml for static executables
-// (base 0x400000, no RELRO; TLS is refused before layout).
+// (base 0x400000, no RELRO).
 //
 // Every section is a (file, section) pair packed as file << 32 | section.
 
@@ -32,6 +32,8 @@ var headers Vec[OutSec] = {}
 var content Vec[u64] = {}    // placed sections in placement order
 var segments Vec[Seg] = {}
 var lay_cursor u64 = 0
+// the TLS template segment; tls_seg.alignment == 0 when there is none
+var tls_seg Seg = {}
 
 fn pk(f u64, s u64) u64 { return (f << 32) | s }
 fn pk_file(x u64) u64 { return x >> 32 }
@@ -276,12 +278,37 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 {
             cursor = out_add(cursor, s.size)
         }
     }
+    // the TLS template: initialized TLS data, then (below) TLS BSS first
+    // among the NOBITS sections
+    tls_alignment u64 = 1
+    has_tls bool = false
+    for i u64 in 0..sh.n {
+        s handle[Sec] = pk_section(vec_get[u64](sh, i))
+        if (s.flags & 0x400) != 0 {
+            has_tls = true
+            tls_alignment = umax(tls_alignment, s.alignment)
+        }
+    }
+    if has_tls { cursor = out_align(cursor, tls_alignment) }
+    tls_start u64 = cursor
+    for i u64 in 0..sh.n {
+        x u64 = vec_get[u64](sh, i)
+        s handle[Sec] = pk_section(x)
+        if (s.flags & 0x400) == 0 || s.kind == 8 { continue }
+        cursor = out_align(cursor, s.alignment)
+        add_section(x, cursor, LAYOUT_BASE + cursor)
+        cursor = out_add(cursor, s.size)
+    }
     file_end u64 = cursor
     memory_end u64 = cursor
+    tls_done bool = false
+    // NOBITS: TLS ones first, keeping selection order otherwise
+    for pass u64 in 0..2 {
     for i u64 in 0..sh.n {
         x u64 = vec_get[u64](sh, i)
         s handle[Sec] = pk_section(x)
         if s.kind != 8 { continue }
+        if ((s.flags & 0x400) != 0) != (pass == 0) { continue }
         id u32 = g.gid.p[u32, i]
         if id != NONE {
             k u64 = zext[u64](id)
@@ -306,7 +333,23 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 {
             memory_end = chk_align(c"BSS layout", MAX_IMAGE, memory_end, s.alignment)
             add_section(x, memory_end, LAYOUT_BASE + memory_end)
             memory_end = chk_add(c"BSS layout", MAX_IMAGE, memory_end, s.size)
+            if (s.flags & 0x400) != 0 {
+                tls_seg.flags = 4
+                tls_seg.offset = tls_start
+                tls_seg.file_size = file_end - tls_start
+                tls_seg.memory_size = memory_end - tls_start
+                tls_seg.alignment = tls_alignment
+                tls_done = true
+            }
         }
+    }
+    }
+    if has_tls && !tls_done {
+        tls_seg.flags = 4
+        tls_seg.offset = tls_start
+        tls_seg.file_size = file_end - tls_start
+        tls_seg.memory_size = file_end - tls_start
+        tls_seg.alignment = tls_alignment
     }
     sg handle[Seg] = vec_new[Seg](handle_from_addr[Vec[Seg]](&segments))
     sg.flags = flags

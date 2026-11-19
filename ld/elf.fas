@@ -203,6 +203,81 @@ fn string_table(o handle[Obj], index u64) void fails {
     }
 }
 
+// ---------- SDT notes (Sdt_note.pointers) ----------
+
+fn sdt_fail(o handle[Obj], text addr) void fails {
+    m handle[Buf] = ef(o)
+    bs(m, c".note.stapsdt: ")
+    bs(m, text)
+    fail Bad
+}
+
+// Nonallocatable SystemTap v3 probe metadata. Appends (section, offset)
+// pairs of the three address fields per probe, the only places that
+// accept relocations.
+fn sdt_pointers(o handle[Obj], index u64, offset u64, size u64, out handle[Vec[u64]]) void fails {
+    if offset > o.len || size > o.len - offset { try span_fail(o, bytes_c(c"SDT notes"), offset, size, o.len) }
+    d addr = o.data
+    ending u64 = offset + size
+    cursor u64 = offset
+    count u64 = 0
+    while cursor < ending {
+        count += 1
+        if count > 1000000 { try sdt_fail(o, c"probe count exceeds 1000000") }
+        if ending - cursor < 20 { try sdt_fail(o, c"truncated probe header") }
+        if rd32(d, cursor) != 8 || rd32(d, cursor + 8) != 3 || !mem_eq(d + cursor + 12, c"stapsdt", 8) {
+            try sdt_fail(o, c"invalid probe owner or type")
+        }
+        length u64 = rd32(d, cursor + 4)
+        if length < 27 || length > ending - cursor - 20 { try sdt_fail(o, c"invalid probe descriptor length") }
+        descriptor u64 = cursor + 20
+        for n u64 in 0..3 {
+            vec_push[u64](out, index)
+            vec_push[u64](out, descriptor - offset + n * 8)
+        }
+        text u64 = descriptor + 24
+        for n u64 in 0..3 {
+            tsize u64 = descriptor + length - text
+            if tsize == 0 {
+                m handle[Buf] = ef(o)
+                bs(m, c"SDT string: string offset 0 exceeds string table size 0")
+                fail Bad
+            }
+            limit u64 = umin(text + tsize, text + 65536)
+            e u64 = text
+            while e < limit && d[u8, e] != 0 { e += 1 }
+            if e == limit { try efail(o, c"SDT string: unterminated string or name exceeds 65535 bytes") }
+            if n < 2 && e == text { try sdt_fail(o, c"empty probe provider or name") }
+            text = e + 1
+        }
+        if text != descriptor + length { try sdt_fail(o, c"trailing probe descriptor bytes") }
+        // Binary.align ~limit:(ending - descriptor) length 4
+        padding u64 = (0 - length) & 3
+        limit u64 = ending - descriptor
+        if padding > limit - length {
+            m handle[Buf] = ef(o)
+            bs(m, c"SDT descriptor: size exceeds supported limit ")
+            bu(m, limit)
+            fail Bad
+        }
+        cursor = descriptor + length + padding
+    }
+}
+
+// binary search of the sorted (section, offset) pairs
+fn sdt_has(v handle[Vec[u64]], index u64, offset u64) bool {
+    lo u64 = 0
+    hi u64 = v.n / 2
+    while lo < hi {
+        mid u64 = (lo + hi) / 2
+        s u64 = vec_get[u64](v, mid * 2)
+        f u64 = vec_get[u64](v, mid * 2 + 1)
+        if s == index && f == offset { return true }
+        if s < index || (s == index && f < offset) { lo = mid + 1 } else { hi = mid }
+    }
+    return false
+}
+
 fn relocation_width(kind u32) u64 {
     switch kind {
         case 0: return 0
@@ -392,6 +467,9 @@ fn elf_parse(o handle[Obj]) void fails {
 
     // per-section validation
     symtab_index u64 = 0
+    sdt Vec[u64] = {}
+    sdth handle[Vec[u64]] = handle_from_addr[Vec[u64]](&sdt)
+    defer { vec_free[u64](sdth) }
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
         if bytes_prefix(s.name, c".gnu.lto") || bytes_prefix(s.name, c".llvm.lto") {
@@ -480,7 +558,7 @@ fn elf_parse(o handle[Obj]) void fails {
                 if s.flags != 0 || s.alignment != 4 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported SDT note metadata")
                 }
-                try erefuse(o, c"SDT notes")
+                try sdt_pointers(o, index, s.offset, s.size, sdth)
             } else if bytes_is(s.name, c".note.ABI-tag") {
                 if s.flags != 2 || s.alignment != 4 || s.link != 0 || s.info != 0 || s.entsize != 0 || s.size != 32 ||
                     rd32(d, s.offset) != 4 || rd32(d, s.offset + 4) != 16 || rd32(d, s.offset + 8) != 1 ||
@@ -492,7 +570,7 @@ fn elf_parse(o handle[Obj]) void fails {
                     s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported note metadata")
                 }
-                try erefuse(o, c"GNU property notes")
+                try gp_check(o, s)
             }
         } else if k == 17 {
             if s.flags != 0 || s.entsize != 4 || s.size < 8 || s.size % 4 != 0 {
@@ -730,6 +808,10 @@ fn elf_parse(o handle[Obj]) void fails {
             kind u64 = info & 0xffffffff
             symbol u64 = try idx(o, c"relocation symbol index", bitcast[i64](symbol_count) - 1, info >> 32)
             offset u64 = try idx(o, c"relocation offset", bitcast[i64](t.size), rd64(d, at))
+            if kind != 0 && bytes_is(t.name, c".note.stapsdt") &&
+                (kind != 1 || !sdt_has(sdth, zext[u64](s.info), offset)) {
+                try efail(o, c"section .note.stapsdt: relocation must target a probe address field")
+            }
             width u64 = relocation_width(trunc[u32](kind))
             if width == 99 {
                 m handle[Buf] = ef(o)

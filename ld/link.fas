@@ -9,9 +9,14 @@ fn alloc_tables() void {
         o handle[Obj] = obj(f)
         l handle[Lx] = lx(f)
         n u64 = zext[u64](o.nsec)
-        // Section_gc without --gc-sections: every section not discarded
-        l.kept = heap_alloc(n + 1)
-        for k u64 in 0..n { l.kept[u8, k] = if l.discarded[u8, k] != 0 { 0 } else { 1 } }
+        // Section_gc: every section not discarded, or under --gc-sections
+        // only the non-allocated ones; gc_sections marks the rest
+        gc bool = config().gc_sections
+        l.kept = heap_alloc_zeroed(n + 1)
+        for k u64 in 0..n {
+            if l.discarded[u8, k] != 0 { continue }
+            if !gc || (sec(o, k).flags & 2) == 0 { l.kept[u8, k] = 1 }
+        }
         l.alias = heap_alloc_zeroed(n * 8 + 8)
     }
 }
@@ -169,16 +174,17 @@ fn got_prepare() void {
 // ---------- merged sections (Merge_sections.plan) ----------
 
 // Merge_sections' key: (name, flags, entsize, alignment, bytes)
-fn merge_hash(o handle[Obj], s handle[Sec]) u64 {
-    return hash_mix(bytes_hash(s.name) ^ bytes_hash(bytes(o.data + s.offset, s.size)) ^
+fn merge_hash(o_file u64, s handle[Sec]) u64 {
+    return hash_mix(bytes_hash(s.name) ^ bytes_hash(bytes(sec_data(o_file, s), s.size)) ^
         hash_mix((s.flags & ~0x200) ^ (s.entsize << 20) ^ (s.alignment << 40)))
 }
 
-fn merge_same(o handle[Obj], s handle[Sec], x u64) bool {
-    co handle[Obj] = obj(pk_file(x))
+fn merge_same(o_file u64, s handle[Sec], x u64) bool {
+    c_file u64 = pk_file(x)
+    co handle[Obj] = obj(c_file)
     c handle[Sec] = sec(co, pk_sec(x))
     return (c.flags & ~0x200) == (s.flags & ~0x200) && c.entsize == s.entsize && c.alignment == s.alignment &&
-        c.size == s.size && bytes_eq(c.name, s.name) && mem_eq(co.data + c.offset, o.data + s.offset, s.size)
+        c.size == s.size && bytes_eq(c.name, s.name) && mem_eq(sec_data(c_file, c), sec_data(o_file, s), s.size)
 }
 
 fn merge_plan() void {
@@ -200,9 +206,9 @@ fn merge_plan() void {
                 registry_eligible(s) || relocated[u8, k] != 0 {
                 continue
             }
-            hash u64 = merge_hash(o, s)
+            hash u64 = merge_hash(f, s)
             id u32 = kx_first(kx, hash)
-            while id != NONE && !merge_same(o, s, ch.p[u64, zext[u64](id)]) { id = kx_next(kx, id) }
+            while id != NONE && !merge_same(f, s, ch.p[u64, zext[u64](id)]) { id = kx_next(kx, id) }
             if id == NONE {
                 kx_add(kx, hash, trunc[u32](ch.n))
                 vec_push[u64](ch, pk(f, k))
@@ -528,7 +534,7 @@ fn blit_job(ctx addr, b u64, e u64, worker u32) void {
         k u64 = pk_sec(x)
         s handle[Sec] = sec(obj(f), k)
         if s.kind == 8 || s.size == 0 { continue }
-        mem_copy(image + place(f, k).offset, obj(f).data + s.offset, s.size)
+        mem_copy(image + place(f, k).offset, sec_data(f, s), s.size)
     }
 }
 
@@ -616,9 +622,15 @@ fn entry_address() u64 {
 fn build_image() void {
     c handle[Config] = config()
     check_legacy_sections()
+    check_static_versions()
+    unwind_normalize()
     alloc_tables()
+    if c.gc_sections { gc_sections() }
     check_non_alloc_references()
+    properties_prepare()
+    build_id_prepare()
     got_prepare()
+    unwind_prepare()
     if c.runpath != 0 { die_c(c"-rpath requires dynamic output") }
     if nobj == 0 { die_c(c"no input objects") }
     merge_plan()
@@ -707,6 +719,7 @@ fn build_image() void {
     for f u64 in 0..nobj {
         if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
+    unwind_emit()
 
     // the ELF header
     mem_copy(image, c"\x7fELF\x02\x01\x01", 7)
@@ -720,6 +733,9 @@ fn build_image() void {
     wr16(image, 54, 56)
     sv handle[Vec[Seg]] = handle_from_addr[Vec[Seg]](&segments)
     phnum u64 = sv.n + 2
+    if unwind_file != NONE64 { phnum += 1 }
+    if property_file != NONE64 { phnum += 2 }
+    if build_id_file != NONE64 { phnum += 1 }
     header_size u64 = 64 + phnum * 56
     wr16(image, 56, phnum)
     wr16(image, 58, 64)
@@ -729,6 +745,26 @@ fn build_image() void {
     for i u64 in 0..sv.n {
         s handle[Seg] = vec_ref[Seg](sv, i)
         program_header(i + 1, 1, s.flags, s.offset, LAYOUT_BASE + s.offset, s.file_size, s.memory_size, s.alignment)
+    }
+    extra_header u64 = sv.n + 1
+    if unwind_file != NONE64 {
+        hp handle[Place] = get_placement(unwind_file, 1)
+        hs u64 = sec(obj(unwind_file), 1).size
+        program_header(extra_header, 0x6474e550, 4, hp.offset, hp.address, hs, hs, 4)
+        extra_header += 1
+    }
+    if property_file != NONE64 {
+        pp handle[Place] = get_placement(property_file, 1)
+        ps u64 = sec(obj(property_file), 1).size
+        program_header(extra_header, 4, 4, pp.offset, pp.address, ps, ps, 8)
+        program_header(extra_header + 1, 0x6474e553, 4, pp.offset, pp.address, ps, ps, 8)
+        extra_header += 2
+    }
+    if build_id_file != NONE64 {
+        bp handle[Place] = get_placement(build_id_file, 1)
+        bz u64 = sec(obj(build_id_file), 1).size
+        program_header(extra_header, 4, 4, bp.offset, bp.address, bz, bz, 4)
+        extra_header += 1
     }
     program_header(phnum - 1, 0x6474e551, 6, 0, 0, 0, 0, 16)
 
@@ -821,6 +857,7 @@ fn link_and_publish() void {
     discard bool = exists && null_output(output, sth)
     resolve()
     build_image()
+    build_id_emit()
     st2 Stat = {}
     check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
     if discard { return }

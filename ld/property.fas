@@ -1,0 +1,205 @@
+// GNU property notes (Gnu_property + Properties). The supported x86
+// properties carry a four-byte bitmask; inputs are combined by the
+// property's operation and the result is one synthetic note.
+
+const GP_AND u8 = 0
+const GP_OR u8 = 1
+const GP_OR_AND u8 = 2
+const GP_BAD u8 = 3
+
+fn gp_operation(kind u64) u8 {
+    if kind == 0xc0000002 { return GP_AND }
+    if kind == 0xc0008001 || kind == 0xc0008002 { return GP_OR }
+    if kind == 0xc0010001 || kind == 0xc0010002 { return GP_OR_AND }
+    return GP_BAD
+}
+
+fn gp_fail(o handle[Obj], text addr) void fails {
+    m handle[Buf] = ef(o)
+    bs(m, c".note.gnu.property: ")
+    bs(m, text)
+    fail Bad
+}
+
+// Gnu_property.parse: appends (kind, value) pairs to out, one per kind
+// (repeated kinds are or-ed), sorted by kind
+fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fails {
+    if offset > o.len || size > o.len - offset { try span_fail(o, bytes_c(c"GNU properties"), offset, size, o.len) }
+    if size < 16 || size % 8 != 0 { try gp_fail(o, c"invalid note size") }
+    d addr = o.data
+    note u64 = offset
+    ending u64 = offset + size
+    base u64 = out.n
+    while note < ending {
+        if ending - note < 16 { try gp_fail(o, c"truncated note header") }
+        if rd32(d, note) != 4 || rd32(d, note + 8) != 5 || rd32(d, note + 12) != 0x00554e47 {
+            try gp_fail(o, c"expected NT_GNU_PROPERTY_TYPE_0 note")
+        }
+        descriptor u64 = rd32(d, note + 4)
+        if descriptor > ending - note - 16 || descriptor % 16 != 0 { try gp_fail(o, c"invalid descriptor size") }
+        stop u64 = note + 16 + descriptor
+        cursor u64 = note + 16
+        previous u64 = NONE64
+        while cursor < stop {
+            kind u64 = rd32(d, cursor)
+            if previous != NONE64 && kind <= previous { try gp_fail(o, c"properties must be unique and ordered by type") }
+            previous = kind
+            if gp_operation(kind) == GP_BAD {
+                m handle[Buf] = handle_from_addr[Buf](&o.msg)
+                buf_clear(m)
+                bs(m, c"unsupported GNU property type 0x")
+                bx(m, kind)
+                fail Bad
+            }
+            if rd32(d, cursor + 4) != 4 { try gp_fail(o, c"invalid bitmask property size") }
+            if rd32(d, cursor + 12) != 0 { try gp_fail(o, c"nonzero property padding") }
+            value u64 = rd32(d, cursor + 8)
+            found bool = false
+            j u64 = base
+            while j < out.n {
+                if vec_get[u64](out, j) == kind {
+                    vec_set[u64](out, j + 1, vec_get[u64](out, j + 1) | value)
+                    found = true
+                    break
+                }
+                j += 2
+            }
+            if !found {
+                // insertion keeps the pairs sorted by kind
+                vec_push[u64](out, 0)
+                vec_push[u64](out, 0)
+                k u64 = out.n - 2
+                while k > base && vec_get[u64](out, k - 2) > kind {
+                    vec_set[u64](out, k, vec_get[u64](out, k - 2))
+                    vec_set[u64](out, k + 1, vec_get[u64](out, k - 1))
+                    k -= 2
+                }
+                vec_set[u64](out, k, kind)
+                vec_set[u64](out, k + 1, value)
+            }
+            cursor += 16
+        }
+        note = stop
+    }
+}
+
+// the input validation in Elf_reader.parse
+fn gp_check(o handle[Obj], s handle[Sec]) void fails {
+    scratch Vec[u64] = {}
+    sh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&scratch)
+    defer { vec_free[u64](sh) }
+    try gp_parse(o, s.offset, s.size, sh)
+}
+
+var property_file u64 = NONE64
+
+// Properties.prepare
+fn properties_prepare() void {
+    // combined (kind, value, count) triples sorted by kind
+    acc Vec[u64] = {}
+    ah handle[Vec[u64]] = handle_from_addr[Vec[u64]](&acc)
+    pairs Vec[u64] = {}
+    ph handle[Vec[u64]] = handle_from_addr[Vec[u64]](&pairs)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        seen bool = false
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if s.kind != 7 || !bytes_is(s.name, c".note.gnu.property") { continue }
+            if seen {
+                m handle[Buf] = msg()
+                bb(m, o.path)
+                bs(m, c": multiple GNU property notes")
+                die()
+            }
+            seen = true
+            lx(f).kept[u8, k] = 0
+            vec_clear[u64](ph)
+            gp_parse(o, s.offset, s.size, ph) catch err { die_buf(handle_from_addr[Buf](&o.msg)) }
+            i u64 = 0
+            while i < ph.n {
+                kind u64 = vec_get[u64](ph, i)
+                value u64 = vec_get[u64](ph, i + 1)
+                j u64 = 0
+                while j < ah.n && vec_get[u64](ah, j) < kind { j += 3 }
+                if j < ah.n && vec_get[u64](ah, j) == kind {
+                    old u64 = vec_get[u64](ah, j + 1)
+                    vec_set[u64](ah, j + 1, if gp_operation(kind) == GP_AND { old & value } else { old | value })
+                    vec_set[u64](ah, j + 2, vec_get[u64](ah, j + 2) + 1)
+                } else {
+                    vec_push[u64](ah, 0)
+                    vec_push[u64](ah, 0)
+                    vec_push[u64](ah, 0)
+                    t u64 = ah.n - 3
+                    while t > j {
+                        vec_set[u64](ah, t, vec_get[u64](ah, t - 3))
+                        vec_set[u64](ah, t + 1, vec_get[u64](ah, t - 2))
+                        vec_set[u64](ah, t + 2, vec_get[u64](ah, t - 1))
+                        t -= 3
+                    }
+                    vec_set[u64](ah, j, kind)
+                    vec_set[u64](ah, j + 1, value)
+                    vec_set[u64](ah, j + 2, 1)
+                }
+                i += 2
+            }
+        }
+    }
+    vec_free[u64](ph)
+    // present: or-properties always, and/or-and ones only when every input has them
+    count u64 = 0
+    j u64 = 0
+    while j < ah.n {
+        present bool = gp_operation(vec_get[u64](ah, j)) == GP_OR || vec_get[u64](ah, j + 2) == ninput_objects
+        if present && vec_get[u64](ah, j + 1) != 0 {
+            vec_set[u64](ah, count * 3, vec_get[u64](ah, j))
+            vec_set[u64](ah, count * 3 + 1, vec_get[u64](ah, j + 1))
+            count += 1
+        }
+        j += 3
+    }
+    if count == 0 {
+        vec_free[u64](ah)
+        return
+    }
+    size u64 = 16 + count * 16
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<GNU properties>")
+    o.nsec = 2
+    o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
+    n0 handle[Sec] = sec(o, 0)
+    n0.alignment = 8
+    n0.group = -1
+    h handle[Sec] = sec(o, 1)
+    h.name = bytes_c(c".note.gnu.property")
+    h.kind = 7
+    h.flags = 2
+    h.size = size
+    h.alignment = 8
+    h.group = -1
+    d addr = heap_alloc_zeroed(size + 1)
+    wr32(d, 0, 4)
+    wr32(d, 4, size - 16)
+    wr32(d, 8, 5)
+    wr32(d, 12, 0x00554e47)
+    for i u64 in 0..count {
+        at u64 = 16 + i * 16
+        wr32(d, at, vec_get[u64](ah, i * 3))
+        wr32(d, at + 4, 4)
+        wr32(d, at + 8, vec_get[u64](ah, i * 3 + 1))
+    }
+    vec_free[u64](ah)
+    o.data = d
+    o.len = size
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(2)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(2)
+    l.kept[u8, 1] = 1
+    l.alias = heap_alloc_zeroed(16)
+    l.gotref = heap_alloc_zeroed(4)
+    property_file = file
+}

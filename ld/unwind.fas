@@ -1,0 +1,595 @@
+// .eh_frame: a port of src/linker/unwind.ml.
+//
+// normalize validates every .eh_frame section, records its FDEs and
+// replaces the section by a copy without the terminator, padded to 8 bytes
+// (one object per pool item; the first failing object in input order
+// wins). prepare keeps the FDEs of live code and adds the <unwind header>
+// object holding .eh_frame_hdr; emit fills that header after relocation.
+
+struct Frame {
+    file u32
+    section u32
+    offset u64          // the record, from the section start
+    initial u64         // the FDE initial-location field, from the section start
+    range u64
+    relocation u32      // the relocation of the initial location
+    encoding u32
+    meta_start u32      // relocations the FDE keeps alive (for --gc-sections)
+    meta_n u32
+}
+
+struct Cie {
+    encoding u32
+    augmented u32
+    lsda u32
+    meta_start u32
+    meta_n u32
+}
+
+// per-object normalize results
+struct UObj {
+    frames Vec[Frame]
+    meta Vec[u32]
+    eh Buf              // the normalized .eh_frame sections, back to back
+}
+
+var uobjs addr = null
+var unorm_count u64 = 0
+var uframes Vec[Frame] = {}     // the frames of live code, in input order
+var unwind_file u64 = NONE64    // the <unwind header> object
+
+fn uobj(f u64) handle[UObj] { return handle_from_addr[UObj](uobjs + f * sizeof[UObj]) }
+
+// the bytes of a placed section (normalized .eh_frame sections live after
+// the object's data, as in the OCaml linker's appended data)
+fn sec_data(f u64, s handle[Sec]) addr {
+    o handle[Obj] = obj(f)
+    e addr = lx(f).eh
+    if e != null && s.offset >= o.len { return e + (s.offset - o.len) }
+    return o.data + s.offset
+}
+
+// ---------- failures: "path: .eh_frame: text" ----------
+
+fn um(o handle[Obj]) handle[Buf] {
+    m handle[Buf] = ef(o)
+    bs(m, c".eh_frame: ")
+    return m
+}
+
+fn ufail(o handle[Obj], text addr) void fails {
+    bs(um(o), text)
+    fail Bad
+}
+
+fn ufail_hex(o handle[Obj], text addr, x u64) void fails {
+    m handle[Buf] = um(o)
+    bs(m, text)
+    bx(m, x)
+    fail Bad
+}
+
+fn ufail_aug(o handle[Obj], aug Bytes) void fails {
+    m handle[Buf] = um(o)
+    bs(m, c"unsupported CIE augmentation ")
+    bq(m, aug)
+    fail Bad
+}
+
+// ---------- operands ----------
+
+fn ubyte(o handle[Obj], d addr, at u64, ending u64) u64 fails {
+    if at >= ending { try ufail(o, c"truncated CIE operand") }
+    return rd8(d, at)
+}
+
+fn uleb(o handle[Obj], d addr, cur addr, ending u64) u64 fails {
+    value u64 = 0
+    shift u64 = 0
+    more bool = true
+    while more {
+        if shift >= 70 { try ufail(o, c"oversized LEB128 operand") }
+        b u64 = try ubyte(o, d, cur[u64], ending)
+        cur[u64] = cur[u64] + 1
+        if shift == 63 && (b & 0x7e) != 0 && (b & 0x7f) != 0x7f { try ufail(o, c"LEB128 overflow") }
+        value = value | ((b & 127) << shift)
+        shift += 7
+        more = (b & 128) != 0
+    }
+    return value
+}
+
+fn uaug_end(o handle[Obj], d addr, cur addr, ending u64) u64 fails {
+    size u64 = try uleb(o, d, cur, ending)
+    if size > ending - cur[u64] { try ufail(o, c"invalid augmentation length") }
+    return cur[u64] + size
+}
+
+// an augmentation pointer: its relocation index, or NONE for a zero field
+fn upointer(o handle[Obj], d addr, rmap handle[Map[u64, u32, u64_hash, u64_eq]],
+    cmap handle[Map[u64, u32, u64_hash, u64_eq]], indirect bool, encoding u64, cur addr, ending u64) u32 fails {
+    plain u64 = encoding & 0x7f
+    if !indirect && (encoding & 0x80) != 0 { try ufail_hex(o, c"unsupported indirect pointer encoding 0x", encoding) }
+    width u64 = 0
+    expected u32 = 0
+    if plain == 0 || plain == 4 || plain == 12 {
+        width = 8
+        expected = 1
+    } else if plain == 3 {
+        width = 4
+        expected = 10
+    } else if plain == 11 {
+        width = 4
+        expected = 11
+    } else if plain == 0x1b {
+        width = 4
+        expected = 2
+    } else if plain == 0x1c {
+        width = 8
+        expected = 24
+    } else {
+        try ufail_hex(o, c"unsupported augmentation pointer encoding 0x", encoding)
+    }
+    offset u64 = cur[u64]
+    if offset > ending || width > ending - offset { try ufail(o, c"truncated augmentation pointer") }
+    cur[u64] = offset + width
+    a addr = map_val_addr(rmap, offset)
+    if a != null {
+        index u32 = a[u32]
+        if rel(o, zext[u64](index)).kind != expected {
+            try ufail(o, c"augmentation relocation does not match its pointer encoding")
+        }
+        map_put(cmap, offset, 1)
+        return index
+    }
+    value u64 = if width == 4 { rd32(d, offset) } else { rd64(d, offset) }
+    if value != 0 { try ufail(o, c"augmentation pointer needs a relocation") }
+    return NONE
+}
+
+fn lsda_supported(x u64) bool {
+    return x == 0xff || x == 0 || x == 3 || x == 4 || x == 11 || x == 12 || x == 0x1b || x == 0x1c
+}
+
+// ---------- normalize ----------
+
+fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
+    o handle[Obj] = obj(f)
+    s handle[Sec] = sec(o, k)
+    d addr = sec_data(f, s)
+    size u64 = s.size
+    relocated Map[u64, u32, u64_hash, u64_eq] = {}
+    rmap handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&relocated)
+    consumed Map[u64, u32, u64_hash, u64_eq] = {}
+    cmap handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&consumed)
+    cies Map[u64, u32, u64_hash, u64_eq] = {}
+    ch handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&cies)
+    cie_list Vec[Cie] = {}
+    cl handle[Vec[Cie]] = handle_from_addr[Vec[Cie]](&cie_list)
+    cie_meta Vec[u32] = {}
+    cm handle[Vec[u32]] = handle_from_addr[Vec[u32]](&cie_meta)
+    mh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&u.meta)
+    for i u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, i)
+        if zext[u64](r.target) == k && r.kind != 0 { map_put(rmap, r.offset, trunc[u32](i)) }
+    }
+    at u64 = 0
+    has_last bool = false
+    last_at u64 = 0
+    last_length u64 = 0
+    finished bool = false
+    cur u64 = 0
+    while at < size && !finished {
+        if size - at < 4 { try ufail(o, c"truncated record length") }
+        length u64 = rd32(d, at)
+        if length == 0 {
+            for i u64 in at..size {
+                if rd8(d, i) != 0 { try ufail(o, c"nonzero bytes after unwind terminator") }
+            }
+            finished = true
+            continue
+        }
+        if length == 0xffffffff { try ufail(o, c"64-bit DWARF record lengths are unsupported") }
+        if length < 4 || length > size - at - 4 || length % 4 != 0 {
+            try ufail_hex(o, c"invalid record length at 0x", at)
+        }
+        ending u64 = at + 4 + length
+        id u64 = rd32(d, at + 4)
+        if id == 0 {
+            // a CIE
+            cur = at + 8
+            version u64 = try ubyte(o, d, cur, ending)
+            cur += 1
+            if version != 1 && version != 3 && version != 4 {
+                m handle[Buf] = um(o)
+                bs(m, c"unsupported CIE version ")
+                bu(m, version)
+                fail Bad
+            }
+            astart u64 = cur
+            while true {
+                b u64 = try ubyte(o, d, cur, ending)
+                if b == 0 { break }
+                if cur - astart >= 32 { try ufail(o, c"oversized CIE augmentation string") }
+                cur += 1
+            }
+            aug Bytes = bytes(d + astart, cur - astart)
+            cur += 1
+            if aug.n != 0 && aug.p[u8, 0] != 122 { try ufail_aug(o, aug) }
+            if version == 4 {
+                b0 u64 = try ubyte(o, d, cur, ending)
+                if b0 != 8 { try ufail(o, c"unsupported CIE address or segment size") }
+                b1 u64 = try ubyte(o, d, cur + 1, ending)
+                if b1 != 0 { try ufail(o, c"unsupported CIE address or segment size") }
+                cur += 2
+            }
+            try uleb(o, d, &cur, ending)
+            try uleb(o, d, &cur, ending)
+            if version == 1 {
+                try ubyte(o, d, cur, ending)
+                cur += 1
+            } else {
+                try uleb(o, d, &cur, ending)
+            }
+            encoding u64 = 0
+            lsda u64 = 0xff
+            meta_start u64 = cm.n
+            if aug.n != 0 {
+                aend u64 = try uaug_end(o, d, &cur, ending)
+                for n u64 in 1..aug.n {
+                    code u8 = aug.p[u8, n]
+                    for j u64 in 1..n {
+                        if aug.p[u8, j] == code { try ufail(o, c"duplicate CIE augmentation") }
+                    }
+                    if code == 80 {
+                        // 'P'
+                        value u64 = try ubyte(o, d, cur, aend)
+                        cur += 1
+                        index u32 = try upointer(o, d, rmap, cmap, true, value, &cur, aend)
+                        if index != NONE { vec_push[u32](cm, index) }
+                    } else if code == 76 {
+                        // 'L'
+                        lsda = try ubyte(o, d, cur, aend)
+                        cur += 1
+                        if !lsda_supported(lsda) { try ufail_hex(o, c"unsupported LSDA pointer encoding 0x", lsda) }
+                    } else if code == 82 {
+                        // 'R'
+                        encoding = try ubyte(o, d, cur, aend)
+                        cur += 1
+                    } else if code != 83 {
+                        try ufail_aug(o, aug)
+                    }
+                }
+                if cur != aend { try ufail(o, c"invalid CIE augmentation length") }
+            }
+            if encoding != 0 && encoding != 0x1b && encoding != 0x1c {
+                try ufail_hex(o, c"unsupported FDE pointer encoding 0x", encoding)
+            }
+            map_put(ch, at, trunc[u32](cl.n))
+            c handle[Cie] = vec_new[Cie](cl)
+            c.encoding = trunc[u32](encoding)
+            c.augmented = if aug.n != 0 { 1 } else { 0 }
+            c.lsda = trunc[u32](lsda)
+            c.meta_start = trunc[u32](meta_start)
+            c.meta_n = trunc[u32](cm.n - meta_start)
+        } else {
+            // an FDE
+            if id > at + 4 || at + 4 - id > at { try ufail(o, c"invalid FDE CIE pointer") }
+            ca addr = map_val_addr(ch, at + 4 - id)
+            if ca == null { try ufail(o, c"FDE references a missing CIE") }
+            c handle[Cie] = vec_ref[Cie](cl, zext[u64](ca[u32]))
+            encoding u64 = zext[u64](c.encoding)
+            width u64 = if encoding == 0x1b { 4 } else { 8 }
+            initial u64 = at + 8
+            if width * 2 > ending - initial { try ufail(o, c"truncated FDE fields") }
+            ra addr = map_val_addr(rmap, initial)
+            if ra == null { try ufail(o, c"FDE initial location needs a relocation") }
+            relocation u32 = ra[u32]
+            expected u32 = if encoding == 0 { 1 } else if encoding == 0x1b { 2 } else { 24 }
+            if rel(o, zext[u64](relocation)).kind != expected {
+                try ufail(o, c"FDE relocation does not match its pointer encoding")
+            }
+            map_put(cmap, initial, 1)
+            range u64 = if width == 4 { rd32(d, initial + 4) } else { rd64(d, initial + 8) }
+            if (range >> 63) != 0 { try ufail(o, c"FDE address range exceeds supported limit") }
+            meta_start u64 = mh.n
+            for j u64 in 0..zext[u64](c.meta_n) {
+                vec_push[u32](mh, cm.p[u32, zext[u64](c.meta_start) + j])
+            }
+            if c.augmented != 0 {
+                cur = initial + width * 2
+                aend u64 = try uaug_end(o, d, &cur, ending)
+                if c.lsda != 0xff {
+                    index u32 = try upointer(o, d, rmap, cmap, false, zext[u64](c.lsda), &cur, aend)
+                    if index != NONE { vec_push[u32](mh, index) }
+                }
+                if cur != aend { try ufail(o, c"invalid FDE augmentation length") }
+            }
+            fr handle[Frame] = vec_new[Frame](handle_from_addr[Vec[Frame]](&u.frames))
+            fr.file = trunc[u32](f)
+            fr.section = trunc[u32](k)
+            fr.offset = at
+            fr.initial = initial
+            fr.range = range
+            fr.relocation = relocation
+            fr.encoding = trunc[u32](encoding)
+            fr.meta_start = trunc[u32](meta_start)
+            fr.meta_n = trunc[u32](mh.n - meta_start)
+        }
+        has_last = true
+        last_at = at
+        last_length = length
+        at = ending
+    }
+    for i u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, i)
+        if zext[u64](r.target) == k && r.kind != 0 && !map_has(cmap, r.offset) {
+            try ufail(o, c"unsupported relocation outside an unwind pointer field")
+        }
+    }
+    padding u64 = (8 - at % 8) % 8
+    nlen u64 = at + padding
+    for i u64 in 1..zext[u64](o.nsym) {
+        y handle[Sym] = sym(o, i)
+        if zext[u64](y.section) == k && bitcast[i64](y.value + y.size) > bitcast[i64](nlen) {
+            m handle[Buf] = um(o)
+            bs(m, c"symbol ")
+            bb(m, y.name)
+            bs(m, c" extends into removed unwind terminator")
+            fail Bad
+        }
+    }
+    e handle[Buf] = handle_from_addr[Buf](&u.eh)
+    start u64 = e.n
+    buf_raw(e, d, at)
+    buf_zeros(e, padding)
+    if has_last { wr32(e.p, start + last_at, last_length + padding) }
+    s.offset = o.len + start
+    s.size = nlen
+    s.alignment = 8
+    map_free(rmap)
+    map_free(cmap)
+    map_free(ch)
+    vec_free[Cie](cl)
+    vec_free[u32](cm)
+}
+
+fn unwind_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e {
+        o handle[Obj] = obj(f)
+        u handle[UObj] = uobj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            if !bytes_is(sec(o, k).name, c".eh_frame") { continue }
+            unwind_section(f, k, u) catch {
+                lx(f).status = 1
+                return
+            }
+        }
+        if u.eh.n != 0 { lx(f).eh = u.eh.p }
+    }
+}
+
+fn unwind_normalize() void {
+    unorm_count = nobj
+    uobjs = heap_alloc_zeroed(nobj * sizeof[UObj] + sizeof[UObj])
+    for f u64 in 0..nobj { lx(f).status = 0 }
+    pool_for(pool, nobj, 1, &unwind_job, null)
+    for f u64 in 0..nobj {
+        if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+    }
+}
+
+// ---------- prepare ----------
+
+fn unwind_active(fr handle[Frame]) bool {
+    f u64 = zext[u64](fr.file)
+    if !kept(f, zext[u64](fr.section)) { return false }
+    o handle[Obj] = obj(f)
+    r handle[Rel] = rel(o, zext[u64](fr.relocation))
+    si u64 = zext[u64](r.symbol)
+    df u64 = 0
+    ds u64 = 0
+    if !definition(f, si, &df, &ds) { return sym(o, si).binding != 2 }
+    y handle[Sym] = sym(obj(df), ds)
+    if y.section == 0xfff1 { return fr.range != 0 }
+    if y.section == 0 || zext[u64](y.section) >= zext[u64](obj(df).nsec) { return false }
+    if !kept(df, zext[u64](y.section)) || fr.range == 0 { return false }
+    t handle[Sec] = sec(obj(df), zext[u64](y.section))
+    offset i64 = bitcast[i64](y.value + r.addend)
+    if (t.flags & 6) != 6 || offset < 0 || offset > bitcast[i64](t.size) ||
+        fr.range > t.size - bitcast[u64](offset) {
+        m handle[Buf] = msg()
+        bb(m, o.path)
+        bs(m, c": .eh_frame: FDE code range exceeds executable section")
+        die()
+    }
+    return true
+}
+
+fn unwind_prepare() void {
+    fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
+    for f u64 in 0..unorm_count {
+        v handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uobj(f).frames)
+        for i u64 in 0..v.n {
+            fr handle[Frame] = vec_ref[Frame](v, i)
+            if unwind_active(fr) { mem_copy(vec_push_zeroed[Frame](fh), handle_addr(fr), sizeof[Frame]) }
+        }
+    }
+    if fh.n == 0 { return }
+    size u64 = 12 + fh.n * 8
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<unwind header>")
+    o.nsec = 2
+    o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
+    n0 handle[Sec] = sec(o, 0)
+    n0.alignment = 4
+    n0.group = -1
+    h handle[Sec] = sec(o, 1)
+    h.name = bytes_c(c".eh_frame_hdr")
+    h.kind = 1
+    h.flags = 2
+    h.size = size
+    h.alignment = 4
+    h.group = -1
+    o.data = heap_alloc_zeroed(size + 1)
+    o.len = size
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(2)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(2)
+    l.kept[u8, 1] = 1
+    l.alias = heap_alloc_zeroed(16)
+    l.gotref = heap_alloc_zeroed(4)
+    unwind_file = file
+}
+
+// ---------- emit ----------
+
+// OCaml's Array.sort (a heap sort) on (key, value) pairs by unsigned key:
+// equal keys come out in the same order as in the OCaml linker
+fn hs_key(p addr, i u64) u64 { return p[u64, i * 2] }
+
+fn hs_set(p addr, i u64, k u64, v u64) void {
+    p[u64, i * 2] = k
+    p[u64, i * 2 + 1] = v
+}
+
+const HS_BOTTOM u64 = 0x8000000000000000
+
+fn hs_maxson(p addr, l u64, i u64) u64 {
+    i31 u64 = i + i + i + 1
+    x u64 = i31
+    if i31 + 2 < l {
+        if hs_key(p, i31) < hs_key(p, i31 + 1) { x = i31 + 1 }
+        if hs_key(p, x) < hs_key(p, i31 + 2) { x = i31 + 2 }
+        return x
+    }
+    if i31 + 1 < l && hs_key(p, i31) < hs_key(p, i31 + 1) { return i31 + 1 }
+    if i31 < l { return i31 }
+    return HS_BOTTOM | i
+}
+
+fn hs_trickle(p addr, l u64, start u64, ek u64, ev u64) void {
+    i u64 = start
+    while true {
+        j u64 = hs_maxson(p, l, i)
+        if (j & HS_BOTTOM) != 0 {
+            hs_set(p, j & ~HS_BOTTOM, ek, ev)
+            return
+        }
+        if hs_key(p, j) > ek {
+            hs_set(p, i, p[u64, j * 2], p[u64, j * 2 + 1])
+            i = j
+        } else {
+            hs_set(p, i, ek, ev)
+            return
+        }
+    }
+}
+
+fn hs_bubble(p addr, l u64, start u64) u64 {
+    i u64 = start
+    while true {
+        j u64 = hs_maxson(p, l, i)
+        if (j & HS_BOTTOM) != 0 { return j & ~HS_BOTTOM }
+        hs_set(p, i, p[u64, j * 2], p[u64, j * 2 + 1])
+        i = j
+    }
+    return i
+}
+
+fn hs_trickleup(p addr, start u64, ek u64, ev u64) void {
+    i u64 = start
+    while true {
+        father u64 = (i - 1) / 3
+        if hs_key(p, father) < ek {
+            hs_set(p, i, p[u64, father * 2], p[u64, father * 2 + 1])
+            if father > 0 {
+                i = father
+            } else {
+                hs_set(p, 0, ek, ev)
+                return
+            }
+        } else {
+            hs_set(p, i, ek, ev)
+            return
+        }
+    }
+}
+
+fn ocaml_heap_sort(p addr, l u64) void {
+    i i64 = bitcast[i64]((l + 1) / 3) - 1
+    while i >= 0 {
+        u u64 = bitcast[u64](i)
+        hs_trickle(p, l, u, p[u64, u * 2], p[u64, u * 2 + 1])
+        i -= 1
+    }
+    j u64 = l
+    while j > 2 {
+        j -= 1
+        ek u64 = p[u64, j * 2]
+        ev u64 = p[u64, j * 2 + 1]
+        hs_set(p, j, p[u64, 0], p[u64, 1])
+        hs_trickleup(p, hs_bubble(p, j, 0), ek, ev)
+    }
+    if l > 1 {
+        ek u64 = p[u64, 2]
+        ev u64 = p[u64, 3]
+        hs_set(p, 1, p[u64, 0], p[u64, 1])
+        hs_set(p, 0, ek, ev)
+    }
+}
+
+fn unwind_relative(at u64, value u64, place u64) void {
+    x u64 = value - place
+    sx i64 = bitcast[i64](x)
+    if sx < -2147483648 || sx > 2147483647 {
+        m handle[Buf] = msg()
+        bs(m, c"unwind header: R_X86_64_PC32 overflow: result 0x")
+        bx(m, x)
+        die()
+    }
+    wr32(image, at, x)
+}
+
+fn unwind_emit() void {
+    if unwind_file == NONE64 { return }
+    hp handle[Place] = get_placement(unwind_file, 1)
+    fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
+    n u64 = fh.n
+    ents addr = heap_alloc(n * 16 + 16)
+    for i u64 in 0..n {
+        fr handle[Frame] = vec_ref[Frame](fh, i)
+        p handle[Place] = get_placement(zext[u64](fr.file), zext[u64](fr.section))
+        field u64 = p.offset + fr.initial
+        raw u64 = 0
+        if fr.encoding == 0x1b {
+            raw = rd32(image, field)
+            if raw >= 0x80000000 { raw = raw | 0xffffffff00000000 }
+        } else {
+            raw = rd64(image, field)
+        }
+        address u64 = if fr.encoding == 0 { raw } else { raw + p.address + fr.initial }
+        hs_set(ents, i, address, p.address + fr.offset)
+    }
+    ocaml_heap_sort(ents, n)
+    mem_copy(image + hp.offset, c"\x01\x1b\x03\x3b", 4)
+    first u64 = OCAML_MAX_INT
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            if !bytes_is(sec(o, k).name, c".eh_frame") || place(f, k).valid == 0 { continue }
+            a u64 = place(f, k).address
+            if a < first { first = a }
+        }
+    }
+    unwind_relative(hp.offset + 4, first, hp.address + 4)
+    wr32(image, hp.offset + 8, n)
+    for i u64 in 0..n {
+        unwind_relative(hp.offset + 12 + i * 8, ents[u64, i * 2], hp.address)
+        unwind_relative(hp.offset + 16 + i * 8, ents[u64, i * 2 + 1], hp.address)
+    }
+}

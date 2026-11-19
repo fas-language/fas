@@ -1,0 +1,199 @@
+// --gc-sections (Section_gc.select). The kept set is the closure of the
+// roots over relocation edges, so it does not depend on visiting order:
+// the per-object edge tables are built in parallel, the marking is a
+// work list.
+
+struct GcObj {
+    first addr          // u32 per section + 1: the section's edges start
+    rels addr           // u32: relocation indices grouped by target section
+}
+
+var gc_objs addr = null
+var gc_queue Vec[u64] = {}
+// frame edges: section (file << 32 | section) -> (frame file << 32 | symbol)
+var gc_frame_head Map[u64, u32, u64_hash, u64_eq] = {}
+var gc_frame_next Vec[u32] = {}
+var gc_frame_edge Vec[u64] = {}
+// boundary section names already marked
+var gc_boundaries Vec[Bytes] = {}
+
+fn gc_obj(f u64) handle[GcObj] { return handle_from_addr[GcObj](gc_objs + f * sizeof[GcObj]) }
+
+fn gc_edges_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e {
+        o handle[Obj] = obj(f)
+        g handle[GcObj] = gc_obj(f)
+        n u64 = zext[u64](o.nsec)
+        first addr = heap_alloc_zeroed(n * 4 + 8)
+        nr u64 = zext[u64](o.nrel)
+        for k u64 in 0..nr {
+            r handle[Rel] = rel(o, k)
+            if r.kind == 0 || bytes_is(sec(o, zext[u64](r.target)).name, c".eh_frame") { continue }
+            first[u32, zext[u64](r.target) + 1] += 1
+        }
+        for s u64 in 0..n { first[u32, s + 1] += first[u32, s] }
+        rels addr = heap_alloc(zext[u64](first[u32, n]) * 4 + 4)
+        fill addr = heap_alloc(n * 4 + 4)
+        mem_copy(fill, first, n * 4)
+        for k u64 in 0..nr {
+            r handle[Rel] = rel(o, k)
+            if r.kind == 0 || bytes_is(sec(o, zext[u64](r.target)).name, c".eh_frame") { continue }
+            t u64 = zext[u64](r.target)
+            rels[u32, zext[u64](fill[u32, t])] = trunc[u32](k)
+            fill[u32, t] += 1
+        }
+        heap_free(fill)
+        g.first = first
+        g.rels = rels
+    }
+}
+
+fn gc_mark(f u64, k u64) void {
+    if k == 0 || k >= 0xff00 { return }
+    l handle[Lx] = lx(f)
+    if l.discarded[u8, k] != 0 || l.kept[u8, k] != 0 { return }
+    l.kept[u8, k] = 1
+    vec_push[u64](handle_from_addr[Vec[u64]](&gc_queue), (f << 32) | k)
+}
+
+// a resolved definition: boundary symbols keep every contribution
+fn gc_definition(df u64, ds u64) void {
+    y handle[Sym] = sym(obj(df), ds)
+    if df == predefined_file {
+        last u8 = 0
+        section Bytes = boundary(y.name, &last)
+        if section.n != NONE64 {
+            bv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&gc_boundaries)
+            for i u64 in 0..bv.n {
+                if bytes_eq(vec_get[Bytes](bv, i), section) { return }
+            }
+            vec_push[Bytes](bv, section)
+            for f u64 in 0..nobj {
+                o handle[Obj] = obj(f)
+                for k u64 in 0..zext[u64](o.nsec) {
+                    if bytes_eq(sec(o, k).name, section) { gc_mark(f, k) }
+                }
+            }
+            return
+        }
+    }
+    gc_mark(df, zext[u64](y.section))
+}
+
+fn gc_symbol(f u64, i u64) void {
+    y handle[Sym] = sym(obj(f), i)
+    if y.binding == 0 {
+        gc_mark(f, zext[u64](y.section))
+        return
+    }
+    id u32 = gid_of(f, i)
+    if id == NONE { return }
+    g handle[GSym] = gsym(id)
+    if g.has_res != 0 { gc_definition(zext[u64](g.res_file), zext[u64](g.res_sym)) }
+}
+
+fn gc_root(name Bytes) void {
+    id u32 = find(name)
+    if id == NONE { return }
+    g handle[GSym] = gsym(id)
+    if g.has_res != 0 { gc_definition(zext[u64](g.res_file), zext[u64](g.res_sym)) }
+}
+
+fn gc_frame_add(dst u64, edge u64) void {
+    hh handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&gc_frame_head)
+    nv handle[Vec[u32]] = handle_from_addr[Vec[u32]](&gc_frame_next)
+    ev handle[Vec[u64]] = handle_from_addr[Vec[u64]](&gc_frame_edge)
+    id u32 = trunc[u32](ev.n)
+    vec_push[u64](ev, edge)
+    a addr = map_val_addr(hh, dst)
+    if a == null {
+        vec_push[u32](nv, NONE)
+        map_put(hh, dst, id)
+    } else {
+        vec_push[u32](nv, a[u32])
+        a[u32] = id
+    }
+}
+
+// An FDE describes code; its initial-location relocation must not root
+// that code. Live code keeps its personality and LSDA.
+fn gc_frames() void {
+    for f u64 in 0..unorm_count {
+        u handle[UObj] = uobj(f)
+        fv handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&u.frames)
+        mh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&u.meta)
+        for i u64 in 0..fv.n {
+            fr handle[Frame] = vec_ref[Frame](fv, i)
+            ff u64 = zext[u64](fr.file)
+            if lx(ff).discarded[u8, zext[u64](fr.section)] != 0 { continue }
+            o handle[Obj] = obj(ff)
+            si u64 = zext[u64](rel(o, zext[u64](fr.relocation)).symbol)
+            df u64 = 0
+            ds u64 = 0
+            if !definition(ff, si, &df, &ds) { continue }
+            y handle[Sym] = sym(obj(df), ds)
+            if y.section != 0 && y.section < 0xff00 {
+                for j u64 in 0..zext[u64](fr.meta_n) {
+                    mr u64 = zext[u64](vec_get[u32](mh, zext[u64](fr.meta_start) + j))
+                    gc_frame_add((df << 32) | zext[u64](y.section), (ff << 32) | zext[u64](rel(o, mr).symbol))
+                }
+            } else if y.section == 0xfff1 && fr.range != 0 {
+                for j u64 in 0..zext[u64](fr.meta_n) {
+                    mr u64 = zext[u64](vec_get[u32](mh, zext[u64](fr.meta_start) + j))
+                    gc_symbol(ff, zext[u64](rel(o, mr).symbol))
+                }
+            }
+        }
+    }
+}
+
+fn gc_sections() void {
+    c handle[Config] = config()
+    gc_objs = heap_alloc_zeroed(nobj * sizeof[GcObj] + 8)
+    pool_for(pool, nobj, 1, &gc_edges_job, null)
+    // roots (static output: no _init/_fini or exported definitions)
+    gc_root(c.entry)
+    uv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
+    for i u64 in 0..uv.n { gc_root(vec_get[Bytes](uv, i)) }
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if (s.flags & 0x200000) != 0 || s.kind == 14 || s.kind == 15 || s.kind == 16 ||
+                bytes_is(s.name, c".init") || bytes_is(s.name, c".fini") || bytes_is(s.name, c".note.ABI-tag") ||
+                (bytes_is(s.name, c".eh_frame") && (s.flags & 0x200) == 0) {
+                gc_mark(f, k)
+            }
+        }
+    }
+    gc_frames()
+    qh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&gc_queue)
+    hh handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&gc_frame_head)
+    nv handle[Vec[u32]] = handle_from_addr[Vec[u32]](&gc_frame_next)
+    ev handle[Vec[u64]] = handle_from_addr[Vec[u64]](&gc_frame_edge)
+    while qh.n != 0 {
+        item u64 = vec_pop[u64](qh)
+        f u64 = item >> 32
+        k u64 = item & 0xffffffff
+        o handle[Obj] = obj(f)
+        // the whole group of a live section is live
+        gi i32 = sec(o, k).group
+        if gi >= 0 {
+            gp handle[Group] = handle_from_addr[Group](o.groups + zext[u64](bitcast[u32](gi)) * sizeof[Group])
+            for j u64 in 0..zext[u64](gp.n) { gc_mark(f, zext[u64](gp.members[u32, j])) }
+        }
+        g handle[GcObj] = gc_obj(f)
+        for j u64 in zext[u64](g.first[u32, k])..zext[u64](g.first[u32, k + 1]) {
+            gc_symbol(f, zext[u64](rel(o, zext[u64](g.rels[u32, j])).symbol))
+        }
+        a addr = map_val_addr(hh, item)
+        if a != null {
+            e u32 = a[u32]
+            while e != NONE {
+                edge u64 = vec_get[u64](ev, zext[u64](e))
+                gc_symbol(edge >> 32, edge & 0xffffffff)
+                e = vec_get[u32](nv, zext[u64](e))
+            }
+        }
+    }
+}
