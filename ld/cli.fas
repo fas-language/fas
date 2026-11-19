@@ -1,0 +1,575 @@
+// The command line: a literal port of src/linker/command_line.ml and
+// response_file.ml. Options are matched in the OCaml pattern order, so
+// every accepted spelling and every diagnostic is the same.
+
+// ---------- arguments ----------
+//
+// Every argument is Bytes whose byte after the end is a NUL, so it can be
+// passed to the kernel as a path without a copy.
+
+fn nul_dup(p addr, n u64) Bytes {
+    q addr = heap_alloc(n + 1)
+    mem_copy(q, p, n)
+    q[u8, n] = 0
+    return bytes(q, n)
+}
+
+fn arg_tail(a Bytes, from u64) Bytes { return bytes(a.p + from, a.n - from) }
+
+// ---------- File_io.read ----------
+//
+// Reads a whole regular file with the OCaml linker's checks and messages.
+// The result is a private read-only mapping (never written, never
+// unmapped: process exit frees it).
+fn ld_read(path Bytes, max_size u64) Bytes {
+    fd i32 = os_open(path.p, O_RDONLY | O_NONBLOCK, 0) catch e {
+        die_io(c"open", path, e)
+        return bytes_empty()
+    }
+    st Stat = {}
+    os_fstat(fd, handle_from_addr[Stat](&st)) catch e {
+        die_io(c"fstat", bytes_empty(), e)
+    }
+    if (st.mode & S_IFMT) != S_IFREG {
+        m handle[Buf] = msg()
+        bb(m, path)
+        bs(m, c": input must be a regular file")
+        die()
+    }
+    size u64 = bitcast[u64](st.size)
+    if size > max_size {
+        m handle[Buf] = msg()
+        bb(m, path)
+        bs(m, c": input exceeds ")
+        bu(m, max_size)
+        bs(m, c" byte limit or remaining input budget")
+        die()
+    }
+    data addr = null
+    if size != 0 {
+        data = os_mmap(null, size, PROT_READ, MAP_PRIVATE, fd, 0) catch e {
+            die_io(c"read", path, e)
+            return bytes_empty()
+        }
+    }
+    os_close(fd)
+    return bytes(data, size)
+}
+
+// ---------- response files ----------
+
+fn rsp_fail(path Bytes, text addr) void {
+    m handle[Buf] = msg()
+    bb(m, path)
+    bs(m, text)
+    die()
+}
+
+// GNU-style quoting without shell substitution or comments
+fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void {
+    word Buf = {}
+    w handle[Buf] = handle_from_addr[Buf](&word)
+    active bool = false
+    quote u8 = 0          // 0: none
+    i u64 = 0
+    while i < data.n {
+        c u8 = data.p[u8, i]
+        if c == 0 { rsp_fail(path, c": NUL in response file") }
+        if c == 92 {
+            i += 1
+            if i >= data.n { rsp_fail(path, c": trailing backslash in response file") }
+            if data.p[u8, i] == 0 { rsp_fail(path, c": NUL in response file") }
+            buf_u8(w, data.p[u8, i])
+            active = true
+        } else if (c == 39 || c == 34) && quote == 0 {
+            quote = c
+            active = true
+        } else if quote != 0 && c == quote {
+            quote = 0
+        } else if quote == 0 && (c == 32 || c == 9 || c == 13 || c == 10 || c == 12) {
+            if active {
+                vec_push[Bytes](out, nul_dup(w.p, w.n))
+                buf_clear(w)
+                active = false
+            }
+        } else {
+            buf_u8(w, c)
+            active = true
+        }
+        i += 1
+    }
+    if quote != 0 { rsp_fail(path, c": unterminated quote in response file") }
+    if active { vec_push[Bytes](out, nul_dup(w.p, w.n)) }
+    buf_free(w)
+}
+
+struct Rsp {
+    bytes u64
+    count u64
+    stack Vec[Bytes]      // realpaths of the files being expanded
+}
+
+fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void {
+    if argument.n != 0 && argument.p[u8, 0] == 64 {
+        stack handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&r.stack)
+        if stack.n >= 16 { die_c(c"response file nesting exceeds 16") }
+        path Bytes = arg_tail(argument, 1)
+        real Buf = {}
+        rh handle[Buf] = handle_from_addr[Buf](&real)
+        path_realpath(path.p, rh) catch e { die_io(c"realpath", path, e) }
+        identity Bytes = buf_bytes(rh)
+        for k u64 in 0..stack.n {
+            if bytes_eq(vec_get[Bytes](stack, k), identity) {
+                rsp_fail(path, c": recursive response file")
+            }
+        }
+        data Bytes = ld_read(path, 16777216 - r.bytes)
+        r.bytes += data.n
+        words Vec[Bytes] = {}
+        wh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&words)
+        rsp_tokenize(path, data, wh)
+        vec_push[Bytes](stack, identity)
+        for k u64 in 0..words.n { rsp_expand(r, vec_get[Bytes](wh, k), out) }
+        stack.n -= 1
+        vec_free[Bytes](wh)
+    } else {
+        r.count += 1
+        if r.count > 100000 { die_c(c"expanded argument count exceeds 100000") }
+        vec_push[Bytes](out, argument)
+    }
+}
+
+// ---------- the parse ----------
+
+const IT_PATH u8 = 0
+const IT_LIBRARY u8 = 1
+const IT_GROUP u8 = 2      // the group's items follow; `count` of them (all levels)
+
+// One input item, flattened: a group is followed by its items.
+struct Item {
+    text Bytes
+    kind u8
+    whole bool
+    static_lib bool       // a path or library under -Bstatic / -static
+    as_needed bool
+    count u32             // IT_GROUP: items inside, nested ones included
+}
+
+const MODE_STATIC u8 = 0
+const MODE_STATIC_PIE u8 = 1
+const MODE_DYNAMIC u8 = 2
+const MODE_SHARED u8 = 3
+
+const BUILD_ID_NONE u8 = 0
+const BUILD_ID_SHA1 u8 = 1
+const BUILD_ID_MD5 u8 = 2
+
+struct Config {
+    output Bytes
+    entry Bytes
+    items Vec[Item]
+    top_items u64         // items at the top level (groups count once)
+    statistics bool
+    print_version bool
+    map_file Bytes
+    has_map bool
+    relocatable bool
+    gc_sections bool
+    undefined Vec[Bytes]  // in command-line order
+    mode u8
+    pie bool
+    interpreter Bytes
+    has_interpreter bool
+    no_interpreter bool
+    runpath u64           // count of -rpath values
+    new_dtags bool
+    allow_shlib_undefined bool
+    rpath_link u64
+    export_dynamic bool
+    library_paths Vec[Bytes]
+    sysroot Bytes
+    has_sysroot bool
+    nostdlib bool
+    relro bool
+    shared bool
+    soname Bytes
+    has_soname bool
+    no_undefined bool
+    allow_multiple_definition bool
+    version_script Bytes
+    has_version_script bool
+    hash_style u8
+    build_id u8
+}
+
+var cfg Config = {}
+
+fn config() handle[Config] { return handle_from_addr[Config](&cfg) }
+
+struct Parser {
+    args Vec[Bytes]
+    at u64
+    whole bool
+    as_needed bool
+    static_libraries bool
+    states Vec[u8]        // pushed (whole, as_needed, static) as bits
+}
+
+fn usage_text() addr {
+    return c"Usage: fas-ld [OPTIONS] OBJECT_OR_ARCHIVE...
+Linux x86-64 ELF linker.
+-o, --output PATH        output executable (default: a.out)
+-e, --entry SYMBOL       entry point (default: _start)
+-r, --relocatable        combine inputs into a relocatable ELF object
+-L DIR, -LDIR            library search directory
+--sysroot DIR           root for =/$SYSROOT search and script paths
+--library-path DIR      long form of -L (also --library-path=DIR)
+-l NAME, -lNAME          search libraries (-l:FILE for exact name)
+--start-group/--end-group rescan archives to resolve cycles
+--whole-archive          include every member of following archives
+--no-whole-archive       return to lazy archive extraction
+--as-needed/--no-as-needed conditional following shared dependencies
+--push-state/--pop-state save/restore dependency selection policy
+-Bstatic/-Bdynamic      select archive-only / shared-first library search
+-static                 static output and archive-only library search
+-static-pie             static PIE with CRT-owned self-relocation
+--no-dynamic-linker     omit interpreter (with -pie, select static PIE)
+@FILE                   read arguments from a quoted response file
+--stats                 write timing/allocation statistics as JSON to stderr
+-Map PATH               write a deterministic section/symbol map
+--gc-sections           discard unreachable allocatable sections
+--no-gc-sections        retain allocatable sections (default)
+-u SYMBOL               archive extraction and section-GC root
+-pie / -no-pie          enable/disable loader-backed PIE output
+-shared                 emit a shared library (entry address zero)
+-soname NAME            runtime shared-library identity
+--version-script PATH   bounded export/version policy for a shared library
+--no-undefined          reject unresolved strong shared-library references
+--allow-multiple-definition, -z muldefs  keep the first strong definition
+-z relro/norelro        enable/disable RELRO (dynamic default: enabled)
+-z now/defs/undefs      eager binding / strict / permissive undefined policy
+--dynamic-linker PATH   program interpreter (PIE default: glibc x86-64)
+-rpath PATH             runtime library search path ($ORIGIN preserved)
+--enable-new-dtags      emit RUNPATH (default); --disable-new-dtags: RPATH
+--no-allow-shlib-undefined validate transitive DSO dependencies and references
+-rpath-link PATH        explicit search paths for strict DSO validation
+-E, --export-dynamic    export visible executable definitions
+--no-export-dynamic     export only definitions referenced by DSOs
+--hash-style=sysv/gnu/both dynamic symbol lookup tables (default: sysv)
+--build-id[=sha1/md5/none] deterministic GNU build identifier
+-m elf_x86_64           explicit target emulation
+--eh-frame-hdr          accepted; unwind indexes are generated by default
+-nostdlib               ignore script SEARCH_DIR paths; retain explicit -L
+--                      end options
+--help                  show this help
+-v                      show version and continue linking inputs
+--version               show version and exit
+"
+}
+
+fn print_stdout(s addr) void {
+    os_write_all(STDOUT, s, cstr_len(s)) catch {}
+}
+
+fn print_version() void { print_stdout(c"fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)\n") }
+
+// the next argument as the value of `flag`
+fn take_value(p handle[Parser], flag Bytes) Bytes {
+    args handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&p.args)
+    if p.at >= args.n {
+        m handle[Buf] = msg()
+        bb(m, flag)
+        bs(m, c" requires an argument")
+        die()
+    }
+    v Bytes = vec_get[Bytes](args, p.at)
+    p.at += 1
+    return v
+}
+
+fn add_item(p handle[Parser], kind u8, text Bytes) void {
+    c handle[Config] = config()
+    it handle[Item] = vec_new[Item](handle_from_addr[Vec[Item]](&c.items))
+    it.text = text
+    it.kind = kind
+    it.whole = p.whole
+    it.static_lib = p.static_libraries
+    it.as_needed = p.as_needed
+}
+
+fn is(a Bytes, s addr) bool { return bytes_eq_c(a, s) }
+
+fn fail_with(prefix addr, x Bytes) void {
+    m handle[Buf] = msg()
+    bs(m, prefix)
+    bb(m, x)
+    die()
+}
+
+// Parses one level of options until the end of the arguments (depth 0) or
+// its --end-group. Returns the number of items at this level.
+fn parse_level(p handle[Parser], depth u64) u64 {
+    c handle[Config] = config()
+    args handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&p.args)
+    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
+    level u64 = 0
+    positional bool = false
+    while p.at < args.n {
+        a Bytes = vec_get[Bytes](args, p.at)
+        p.at += 1
+        if positional {
+            add_item(p, IT_PATH, a)
+            level += 1
+            continue
+        }
+        if is(a, c"--help") || is(a, c"-h") {
+            print_stdout(usage_text())
+            os_exit(0)
+        } else if is(a, c"--version") {
+            print_version()
+            os_exit(0)
+        } else if is(a, c"-v") {
+            c.print_version = true
+        } else if is(a, c"--") {
+            positional = true
+        } else if is(a, c"-r") || is(a, c"--relocatable") {
+            c.relocatable = true
+        } else if is(a, c"--as-needed") || is(a, c"--no-as-needed") {
+            p.as_needed = is(a, c"--as-needed")
+        } else if is(a, c"--push-state") {
+            states handle[Vec[u8]] = handle_from_addr[Vec[u8]](&p.states)
+            if states.n >= 64 { die_c(c"option state nesting exceeds 64") }
+            bits u8 = 0
+            if p.whole { bits = bits | 1 }
+            if p.as_needed { bits = bits | 2 }
+            if p.static_libraries { bits = bits | 4 }
+            vec_push[u8](states, bits)
+        } else if is(a, c"--pop-state") {
+            states handle[Vec[u8]] = handle_from_addr[Vec[u8]](&p.states)
+            if states.n == 0 { die_c(c"--pop-state without --push-state") }
+            bits u8 = vec_pop[u8](states)
+            p.whole = (bits & 1) != 0
+            p.as_needed = (bits & 2) != 0
+            p.static_libraries = (bits & 4) != 0
+        } else if is(a, c"-Bstatic") || is(a, c"-Bdynamic") {
+            p.static_libraries = is(a, c"-Bstatic")
+        } else if is(a, c"-static") {
+            p.static_libraries = true
+            c.pie = false
+            c.has_interpreter = false
+            c.no_interpreter = false
+        } else if is(a, c"-static-pie") {
+            p.static_libraries = true
+            c.pie = true
+            c.has_interpreter = false
+            c.no_interpreter = true
+        } else if is(a, c"--no-dynamic-linker") {
+            c.has_interpreter = false
+            c.no_interpreter = true
+        } else if is(a, c"-m") {
+            emulation Bytes = take_value(p, a)
+            if !is(emulation, c"elf_x86_64") { fail_with(c"unsupported emulation ", emulation) }
+        } else if is(a, c"--eh-frame-hdr") {
+        } else if is(a, c"-nostdlib") {
+            c.nostdlib = true
+        } else if is(a, c"--sysroot") {
+            c.sysroot = take_value(p, a)
+            c.has_sysroot = true
+        } else if bytes_prefix(a, c"--sysroot=") {
+            c.sysroot = arg_tail(a, 10)
+            c.has_sysroot = true
+        } else if is(a, c"--library-path") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), take_value(p, a))
+        } else if bytes_prefix(a, c"--library-path=") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), arg_tail(a, 15))
+        } else if is(a, c"--build-id") {
+            c.build_id = BUILD_ID_SHA1
+        } else if bytes_prefix(a, c"--build-id=") {
+            style Bytes = arg_tail(a, 11)
+            if is(style, c"none") {
+                c.build_id = BUILD_ID_NONE
+            } else if is(style, c"sha1") {
+                c.build_id = BUILD_ID_SHA1
+            } else if is(style, c"md5") {
+                c.build_id = BUILD_ID_MD5
+            } else {
+                fail_with(c"unsupported build identifier style ", style)
+            }
+        } else if bytes_prefix(a, c"--hash-style=") {
+            style Bytes = arg_tail(a, 13)
+            if is(style, c"sysv") {
+                c.hash_style = 0
+            } else if is(style, c"gnu") {
+                c.hash_style = 1
+            } else if is(style, c"both") {
+                c.hash_style = 2
+            } else {
+                fail_with(c"unsupported hash style ", style)
+            }
+        } else if is(a, c"--end-group") || is(a, c"-)") {
+            if depth == 0 { die_c(c"--end-group without --start-group") }
+            return level
+        } else if is(a, c"--start-group") || is(a, c"-(") {
+            if depth >= 16 { die_c(c"archive group nesting exceeds 16") }
+            at u64 = items.n
+            add_item(p, IT_GROUP, bytes_empty())
+            inner u64 = parse_level(p, depth + 1)
+            // running out of arguments inside a group dies with "missing
+            // --end-group" in the inner level
+            g handle[Item] = handle_from_addr[Item](vec_at[Item](items, at))
+            g.count = trunc[u32](items.n - at - 1)
+            level += 1
+        } else if is(a, c"--whole-archive") {
+            p.whole = true
+        } else if is(a, c"--no-whole-archive") {
+            p.whole = false
+        } else if is(a, c"-pie") {
+            c.pie = true
+        } else if is(a, c"-shared") {
+            c.shared = true
+        } else if is(a, c"--no-undefined") {
+            c.no_undefined = true
+        } else if is(a, c"--allow-multiple-definition") {
+            c.allow_multiple_definition = true
+        } else if is(a, c"--version-script") {
+            c.version_script = take_value(p, a)
+            c.has_version_script = true
+        } else if bytes_prefix(a, c"--version-script=") {
+            c.version_script = arg_tail(a, 17)
+            c.has_version_script = true
+        } else if is(a, c"-soname") || is(a, c"--soname") {
+            c.soname = take_value(p, a)
+            c.has_soname = true
+        } else if bytes_prefix(a, c"--soname=") {
+            c.soname = arg_tail(a, 9)
+            c.has_soname = true
+        } else if is(a, c"-no-pie") {
+            c.pie = false
+        } else if is(a, c"-z") {
+            policy Bytes = take_value(p, a)
+            if is(policy, c"relro") {
+                c.relro = true
+            } else if is(policy, c"norelro") {
+                c.relro = false
+            } else if is(policy, c"text") || is(policy, c"now") {
+                // all output modes already reject text relocations; binding is eager
+            } else if is(policy, c"defs") {
+                c.no_undefined = true
+            } else if is(policy, c"undefs") {
+                c.no_undefined = false
+            } else if is(policy, c"muldefs") {
+                c.allow_multiple_definition = true
+            } else if is(policy, c"lazy") {
+                die_c(c"lazy binding is not supported")
+            } else {
+                fail_with(c"unsupported -z policy ", policy)
+            }
+        } else if is(a, c"-E") || is(a, c"-export-dynamic") || is(a, c"--export-dynamic") || is(a, c"--no-export-dynamic") {
+            c.export_dynamic = !is(a, c"--no-export-dynamic")
+        } else if is(a, c"--dynamic-linker") || is(a, c"-dynamic-linker") {
+            c.no_interpreter = false
+            c.interpreter = take_value(p, a)
+            c.has_interpreter = true
+        } else if is(a, c"-rpath") || is(a, c"--rpath") {
+            v Bytes = take_value(p, a)
+            c.runpath += 1
+        } else if is(a, c"--enable-new-dtags") || is(a, c"--disable-new-dtags") {
+            c.new_dtags = is(a, c"--enable-new-dtags")
+        } else if is(a, c"--allow-shlib-undefined") || is(a, c"--no-allow-shlib-undefined") {
+            c.allow_shlib_undefined = is(a, c"--allow-shlib-undefined")
+        } else if is(a, c"-rpath-link") || is(a, c"--rpath-link") {
+            v Bytes = take_value(p, a)
+            c.rpath_link += 1
+        } else if bytes_prefix(a, c"--rpath-link=") || bytes_prefix(a, c"-rpath-link=") {
+            c.rpath_link += 1
+        } else if bytes_prefix(a, c"--rpath=") {
+            c.runpath += 1
+        } else if bytes_prefix(a, c"--dynamic-linker=") {
+            c.no_interpreter = false
+            c.interpreter = arg_tail(a, 17)
+            c.has_interpreter = true
+        } else if is(a, c"--stats") {
+            c.statistics = true
+        } else if is(a, c"--gc-sections") || is(a, c"--no-gc-sections") {
+            c.gc_sections = is(a, c"--gc-sections")
+        } else if is(a, c"-u") || is(a, c"--undefined") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), take_value(p, a))
+        } else if bytes_prefix(a, c"--undefined=") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), arg_tail(a, 12))
+        } else if bytes_prefix(a, c"-u") && a.n > 2 {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), arg_tail(a, 2))
+        } else if is(a, c"-Map") || is(a, c"--Map") {
+            c.map_file = take_value(p, a)
+            c.has_map = true
+        } else if bytes_prefix(a, c"-Map=") || bytes_prefix(a, c"--Map=") {
+            prefix u64 = if a.p[u8, 1] == 45 { 6 } else { 5 }
+            c.map_file = arg_tail(a, prefix)
+            c.has_map = true
+        } else if is(a, c"-o") || is(a, c"--output") {
+            c.output = take_value(p, a)
+        } else if is(a, c"-e") || is(a, c"--entry") {
+            c.entry = take_value(p, a)
+        } else if is(a, c"-L") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), take_value(p, a))
+        } else if is(a, c"-l") {
+            add_item(p, IT_LIBRARY, take_value(p, a))
+            level += 1
+        } else if bytes_prefix(a, c"-L") {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), arg_tail(a, 2))
+        } else if bytes_prefix(a, c"-l") {
+            add_item(p, IT_LIBRARY, arg_tail(a, 2))
+            level += 1
+        } else if bytes_prefix(a, c"-") {
+            fail_with(c"unsupported option ", a)
+        } else {
+            add_item(p, IT_PATH, a)
+            level += 1
+        }
+    }
+    if depth != 0 { die_c(c"missing --end-group") }
+    if p.states.n != 0 { die_c(c"missing --pop-state") }
+    return level
+}
+
+fn parse_command_line() void {
+    c handle[Config] = config()
+    c.output = bytes_c(c"a.out")
+    c.entry = bytes_c(c"_start")
+    c.new_dtags = true
+    c.allow_shlib_undefined = true
+    c.relro = true
+    p Parser = {}
+    ph handle[Parser] = handle_from_addr[Parser](&p)
+    raw Vec[Bytes] = {}
+    for i u64 in 1..os_argc { vec_push[Bytes](handle_from_addr[Vec[Bytes]](&raw), bytes_c(os_arg(i))) }
+    r Rsp = {}
+    rh handle[Rsp] = handle_from_addr[Rsp](&r)
+    for i u64 in 0..raw.n {
+        rsp_expand(rh, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&raw), i), handle_from_addr[Vec[Bytes]](&p.args))
+    }
+    c.top_items = parse_level(ph, 0)
+    if c.print_version && c.items.n == 0 {
+        print_version()
+        os_exit(0)
+    }
+    if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
+        c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||
+        c.has_soname || c.runpath != 0 || c.rpath_link != 0 ||
+        !c.allow_shlib_undefined || c.export_dynamic || !is(c.entry, c"_start")) {
+        die_c(c"-r cannot be combined with final-image, GC, map or version options")
+    }
+    if c.shared && c.pie { die_c(c"-shared cannot be combined with -pie") }
+    if c.has_soname && !c.shared { die_c(c"-soname requires -shared") }
+    if c.has_version_script && !c.shared { die_c(c"--version-script requires -shared") }
+    // a version script implies -shared, which this linker refuses below
+    if c.has_version_script { refuse(c"version scripts") }
+    if c.shared {
+        c.mode = MODE_SHARED
+    } else if c.pie && c.no_interpreter {
+        c.mode = MODE_STATIC_PIE
+    } else if c.pie || c.has_interpreter {
+        c.mode = MODE_DYNAMIC
+    } else {
+        c.mode = MODE_STATIC
+    }
+}

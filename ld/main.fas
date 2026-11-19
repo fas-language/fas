@@ -1,0 +1,40 @@
+// fas-ld: the Fas linker. A rewrite of the OCaml linker (src/linker) that
+// produces byte-identical output with the same diagnostics and exit codes;
+// see ld/DESIGN.md. Features not ported yet are refused with exit code 3
+// ("not yet supported by the Fas linker").
+//
+// FAS_LD_THREADS sets the thread count (default: one per CPU). The output
+// never depends on it.
+
+use "../lib/core.fas"
+use "../lib/thread.fas"
+use "util.fas"
+use "elf.fas"
+use "cli.fas"
+use "resolve.fas"
+use "layout.fas"
+use "link.fas"
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    objs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Obj])
+    lxs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Lx])
+    parse_command_line()
+    c handle[Config] = config()
+    if c.print_version { print_version() }
+    // features the skeleton does not have yet
+    if c.relocatable { refuse(c"relocatable output (-r)") }
+    if c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
+    if c.statistics { refuse(c"--stats") }
+    if c.has_map { refuse(c"-Map") }
+    if c.gc_sections { refuse(c"--gc-sections") }
+    if c.build_id != BUILD_ID_NONE { refuse(c"--build-id") }
+    if c.has_sysroot { refuse(c"--sysroot") }
+    threads u32 = 0
+    t addr = os_getenv(c"FAS_LD_THREADS")
+    if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }
+    pool = pool_start(threads)
+    link_and_publish()
+    pool_stop(pool)
+    return 0
+}

@@ -1,0 +1,830 @@
+// The static executable: a port of the Static paths of
+// src/linker/static_link.ml, got.ml and merge_sections.ml, and of
+// File_io.publish.
+
+// ---------- per-object tables ----------
+
+fn alloc_tables() void {
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        l handle[Lx] = lx(f)
+        n u64 = zext[u64](o.nsec)
+        // Section_gc without --gc-sections: every section not discarded
+        l.kept = heap_alloc(n + 1)
+        for k u64 in 0..n { l.kept[u8, k] = if l.discarded[u8, k] != 0 { 0 } else { 1 } }
+        l.alias = heap_alloc_zeroed(n * 8 + 8)
+    }
+}
+
+// the defining (file, symbol) of a symbol: itself when local, else the
+// resolved definition; false when there is none
+fn definition(f u64, i u64, out_file addr, out_sym addr) bool {
+    y handle[Sym] = sym(obj(f), i)
+    if y.binding == 0 {
+        out_file[u64] = f
+        out_sym[u64] = i
+        return true
+    }
+    id u32 = gid_of(f, i)
+    if id == NONE { return false }
+    g handle[GSym] = gsym(id)
+    if g.has_res == 0 { return false }
+    out_file[u64] = zext[u64](g.res_file)
+    out_sym[u64] = zext[u64](g.res_sym)
+    return true
+}
+
+// Hashtbl.mem definitions name, for any symbol (locals look up by name too)
+fn name_defined(name Bytes) bool {
+    id u32 = find(name)
+    return id != NONE && gsym(id).has_res != 0
+}
+
+fn check_legacy_sections() void {
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if s.size != 0 && (s.flags & 2) != 0 && lx(f).discarded[u8, k] == 0 &&
+                (bytes_is(s.name, c".ctors") || bytes_prefix(s.name, c".ctors.") ||
+                    bytes_is(s.name, c".dtors") || bytes_prefix(s.name, c".dtors.")) {
+                m handle[Buf] = msg()
+                bb(m, o.path)
+                bs(m, c": legacy lifecycle section ")
+                bb(m, s.name)
+                bs(m, c" is unsupported in final output; use .init_array/.fini_array")
+                die()
+            }
+        }
+    }
+}
+
+fn check_non_alloc_references() void {
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            t u64 = zext[u64](r.target)
+            if r.kind == 0 || !kept(f, t) || (sec(o, t).flags & 2) == 0 { continue }
+            df u64 = 0
+            ds u64 = 0
+            if !definition(f, zext[u64](r.symbol), &df, &ds) { continue }
+            d handle[Sym] = sym(obj(df), ds)
+            if d.section != 0 && d.section < 0xff00 && (sec(obj(df), zext[u64](d.section)).flags & 2) == 0 {
+                m handle[Buf] = msg()
+                bb(m, o.path)
+                bs(m, c": allocatable section ")
+                bb(m, sec(o, t).name)
+                bs(m, c" references non-allocatable symbol ")
+                bb(m, d.name)
+                die()
+            }
+        }
+    }
+}
+
+// ---------- the GOT ----------
+
+var got_file u64 = NONE64
+var got_slots Vec[u64] = {}    // (file, symbol) packed
+
+fn got_relocation(kind u32) bool {
+    return kind == 9 || kind == 19 || kind == 20 || kind == 22 || kind == 34 || kind == 41 || kind == 42
+}
+
+fn base_relocation(kind u32) bool { return kind == 26 || kind == 29 }
+
+fn got_prepare() void {
+    indices Map[u64, u32, u64_hash, u64_eq] = {}
+    ih handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&indices)
+    slots handle[Vec[u64]] = handle_from_addr[Vec[u64]](&got_slots)
+    needs_base bool = false
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        l handle[Lx] = lx(f)
+        l.gotref = heap_alloc(zext[u64](o.nrel) * 4 + 4)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            l.gotref[u32, k] = NONE
+            if base_relocation(r.kind) { needs_base = true }
+            if !got_relocation(r.kind) || !kept(f, zext[u64](r.target)) { continue }
+            si u64 = zext[u64](r.symbol)
+            key u64 = 0
+            if si == 0 || r.kind == 20 {
+                key = NONE64
+            } else if sym(o, si).binding == 0 {
+                key = (1 << 63) | pk(f, si)
+            } else {
+                key = zext[u64](gid_of(f, si))
+            }
+            a addr = map_val_addr(ih, key)
+            slot u32 = 0
+            if a == null {
+                slot = trunc[u32](slots.n)
+                map_put(ih, key, slot)
+                vec_push[u64](slots, pk(f, si))
+            } else {
+                slot = a[u32]
+            }
+            l.gotref[u32, k] = slot
+        }
+    }
+    map_free(ih)
+    if predefined_file != NONE64 {
+        id u32 = find(bytes_c(c"_GLOBAL_OFFSET_TABLE_"))
+        if id != NONE && gsym(id).has_res != 0 && zext[u64](gsym(id).res_file) == predefined_file { needs_base = true }
+    }
+    if slots.n == 0 && !needs_base { return }
+    size u64 = slots.n * 8
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<GOT>")
+    o.nsec = 2
+    o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
+    n0 handle[Sec] = sec(o, 0)
+    n0.alignment = 8
+    n0.group = -1
+    g handle[Sec] = sec(o, 1)
+    g.name = bytes_c(c".got")
+    g.kind = 1
+    g.flags = 3
+    g.size = size
+    g.alignment = 8
+    g.entsize = 8
+    g.group = -1
+    o.data = heap_alloc_zeroed(size + 1)
+    o.len = size
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(2)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(2)
+    l.kept[u8, 1] = 1
+    l.alias = heap_alloc_zeroed(16)
+    l.gotref = heap_alloc_zeroed(4)
+    got_file = file
+}
+
+// ---------- merged sections (Merge_sections.plan) ----------
+
+// Merge_sections' key: (name, flags, entsize, alignment, bytes)
+fn merge_hash(o handle[Obj], s handle[Sec]) u64 {
+    return hash_mix(bytes_hash(s.name) ^ bytes_hash(bytes(o.data + s.offset, s.size)) ^
+        hash_mix((s.flags & ~0x200) ^ (s.entsize << 20) ^ (s.alignment << 40)))
+}
+
+fn merge_same(o handle[Obj], s handle[Sec], x u64) bool {
+    co handle[Obj] = obj(pk_file(x))
+    c handle[Sec] = sec(co, pk_sec(x))
+    return (c.flags & ~0x200) == (s.flags & ~0x200) && c.entsize == s.entsize && c.alignment == s.alignment &&
+        c.size == s.size && bytes_eq(c.name, s.name) && mem_eq(co.data + c.offset, o.data + s.offset, s.size)
+}
+
+fn merge_plan() void {
+    index KeyIndex = {}
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&index)
+    canonical Vec[u64] = {}
+    ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&canonical)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        n u64 = zext[u64](o.nsec)
+        relocated addr = heap_alloc_zeroed(n + 1)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            if r.kind != 0 { relocated[u8, zext[u64](r.target)] = 1 }
+        }
+        for k u64 in 0..n {
+            s handle[Sec] = sec(o, k)
+            if !kept(f, k) || s.kind != 1 || (s.flags & 0x11) != 0x10 || s.size == 0 ||
+                registry_eligible(s) || relocated[u8, k] != 0 {
+                continue
+            }
+            hash u64 = merge_hash(o, s)
+            id u32 = kx_first(kx, hash)
+            while id != NONE && !merge_same(o, s, ch.p[u64, zext[u64](id)]) { id = kx_next(kx, id) }
+            if id == NONE {
+                kx_add(kx, hash, trunc[u32](ch.n))
+                vec_push[u64](ch, pk(f, k))
+            } else {
+                lx(f).alias[u64, k] = ch.p[u64, zext[u64](id)] + 1
+            }
+        }
+        heap_free(relocated)
+    }
+    kx_free(kx)
+    vec_free[u64](ch)
+}
+
+// ---------- symbol values ----------
+
+fn get_placement(f u64, s u64) handle[Place] {
+    p handle[Place] = place(f, s)
+    if p.valid == 0 {
+        m handle[Buf] = msg()
+        bb(m, obj(f).path)
+        bs(m, c": symbol references a section excluded from output")
+        die()
+    }
+    return p
+}
+
+fn live(f u64, y handle[Sym]) bool {
+    if y.section == 0xfff1 { return true }
+    if y.section == 0 || y.section >= 0xff00 { return false }
+    k u64 = zext[u64](y.section)
+    kind u32 = sec(obj(f), k).kind
+    return (kind == 1 || kind == 7 || kind == 8 || kind == 14 || kind == 15 || kind == 16) &&
+        kept(f, k) && place(f, k).valid != 0
+}
+
+// for live symbols only (their placement exists)
+fn sym_address(f u64, y handle[Sym]) u64 {
+    if y.section == 0xfff1 { return y.value }
+    return place(f, zext[u64](y.section)).address + y.value
+}
+
+// values: per object, a u64 per symbol and a u8 "has a value"
+struct Values {
+    v addr
+    has addr
+}
+
+var values addr = null   // Values per object
+
+fn vals(f u64) handle[Values] { return handle_from_addr[Values](values + f * sizeof[Values]) }
+
+fn values_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e {
+        o handle[Obj] = obj(f)
+        n u64 = zext[u64](o.nsym)
+        vv handle[Values] = vals(f)
+        vv.v = heap_alloc_zeroed(n * 8 + 8)
+        vv.has = heap_alloc_zeroed(n + 1)
+        if n != 0 { vv.has[u8, 0] = 1 }
+        for i u64 in 1..n {
+            y handle[Sym] = sym(o, i)
+            if y.binding == 0 {
+                if live(f, y) {
+                    vv.v[u64, i] = sym_address(f, y)
+                    vv.has[u8, i] = 1
+                }
+                continue
+            }
+            g handle[GSym] = gsym(gid_of(f, i))
+            if g.has_res != 0 {
+                df u64 = zext[u64](g.res_file)
+                d handle[Sym] = sym(obj(df), zext[u64](g.res_sym))
+                if live(df, d) {
+                    vv.v[u64, i] = sym_address(df, d)
+                    vv.has[u8, i] = 1
+                }
+            } else if y.binding == 2 && g.strong == 0 {
+                vv.has[u8, i] = 1
+            }
+        }
+    }
+}
+
+// ---------- predefined symbols ----------
+
+fn seg_ending(text_only bool, memory bool) u64 {
+    value u64 = LAYOUT_BASE + PAGE
+    for i u64 in 0..segments.n {
+        s handle[Seg] = vec_ref[Seg](handle_from_addr[Vec[Seg]](&segments), i)
+        if text_only && (s.flags & 1) == 0 { continue }
+        e u64 = LAYOUT_BASE + s.offset + (if memory { s.memory_size } else { s.file_size })
+        value = umax(value, e)
+    }
+    return value
+}
+
+fn array_boundary(kind u32, last bool) u64 {
+    found bool = false
+    value u64 = 0
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if s.kind != kind { continue }
+            p handle[Place] = place(f, k)
+            if p.valid == 0 { continue }
+            a u64 = p.address + (if last { s.size } else { 0 })
+            if !found {
+                value = a
+                found = true
+            } else if last {
+                value = umax(value, a)
+            } else {
+                value = umin(value, a)
+            }
+        }
+    }
+    return value
+}
+
+fn predefined_value(n Bytes) u64 {
+    if bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") { return LAYOUT_BASE }
+    if bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end") { return 0 }
+    if bytes_is(n, c"__bss_start") || bytes_is(n, c"_edata") || bytes_is(n, c"edata") { return seg_ending(false, false) }
+    if bytes_is(n, c"_etext") || bytes_is(n, c"etext") { return seg_ending(true, true) }
+    if bytes_is(n, c"_end") || bytes_is(n, c"end") { return seg_ending(false, true) }
+    if bytes_is(n, c"__preinit_array_start") { return array_boundary(16, false) }
+    if bytes_is(n, c"__preinit_array_end") { return array_boundary(16, true) }
+    if bytes_is(n, c"__init_array_start") { return array_boundary(14, false) }
+    if bytes_is(n, c"__init_array_end") { return array_boundary(14, true) }
+    if bytes_is(n, c"__fini_array_start") { return array_boundary(15, false) }
+    if bytes_is(n, c"__fini_array_end") { return array_boundary(15, true) }
+    if bytes_is(n, c"_GLOBAL_OFFSET_TABLE_") { return place(got_file, 1).address }
+    last u8 = 0
+    section Bytes = boundary(n, &last)
+    // the last output header with that name
+    h handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
+    k u64 = h.n
+    while k > 0 {
+        k -= 1
+        o handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](h, k))
+        if bytes_eq(o.name, section) {
+            return o.address + (if last != 0 { o.size } else { 0 })
+        }
+    }
+    return 0
+}
+
+fn set_predefined() void {
+    if predefined_file == NONE64 { return }
+    o handle[Obj] = obj(predefined_file)
+    for i u64 in 1..zext[u64](o.nsym) {
+        y handle[Sym] = sym(o, i)
+        y.value = predefined_value(y.name)
+    }
+}
+
+// ---------- relocations (X86_64.apply_lazy) ----------
+
+fn reloc_name(b handle[Buf], kind u32) void {
+    s addr = null
+    switch kind {
+        case 0: s = c"NONE"
+        case 1: s = c"64"
+        case 2: s = c"PC32"
+        case 4: s = c"PLT32"
+        case 9: s = c"GOTPCREL"
+        case 17: s = c"DTPOFF64"
+        case 19: s = c"TLSGD"
+        case 20: s = c"TLSLD"
+        case 21: s = c"DTPOFF32"
+        case 22: s = c"GOTTPOFF"
+        case 23: s = c"TPOFF32"
+        case 24: s = c"PC64"
+        case 26: s = c"GOTPC32"
+        case 29: s = c"GOTPC64"
+        case 34: s = c"GOTPC32_TLSDESC"
+        case 35: s = c"TLSDESC_CALL"
+        case 41: s = c"GOTPCRELX"
+        case 42: s = c"REX_GOTPCRELX"
+        case 10: s = c"32"
+        case 11: s = c"32S"
+        default:
+    }
+    if s == null {
+        bs(b, c"x86-64 relocation ")
+        bu(b, zext[u64](kind))
+    } else {
+        bs(b, c"R_X86_64_")
+        bs(b, s)
+    }
+}
+
+// "path: section+0xoffset referencing name"
+fn reloc_context(b handle[Buf], f u64, r handle[Rel]) void {
+    o handle[Obj] = obj(f)
+    buf_clear(b)
+    bb(b, o.path)
+    bs(b, c": ")
+    bb(b, sec(o, zext[u64](r.target)).name)
+    bs(b, c"+0x")
+    bx(b, r.offset)
+    bs(b, c" referencing ")
+    y handle[Sym] = sym(o, zext[u64](r.symbol))
+    if y.name.n == 0 {
+        bs(b, c"symbol #")
+        bu(b, zext[u64](r.symbol))
+    } else {
+        bb(b, y.name)
+    }
+}
+
+var image addr = null
+var image_size u64 = 0
+
+// Relocates one object; on failure its message is in the object's msg and
+// the result is false. The OCaml linker stops at the first failure in
+// (file, relocation) order: each object stops at its own first one, and
+// the caller reports the lowest object's.
+fn relocate_object(f u64) bool {
+    o handle[Obj] = obj(f)
+    m handle[Buf] = handle_from_addr[Buf](&o.msg)
+    vv handle[Values] = vals(f)
+    got_address u64 = if got_file != NONE64 { place(got_file, 1).address } else { 0 }
+    for k u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, k)
+        t u64 = zext[u64](r.target)
+        if r.kind == 0 || r.kind == 35 || !kept(f, t) { continue }
+        target handle[Place] = place(f, t)
+        if target.valid == 0 {
+            buf_clear(m)
+            bb(m, o.path)
+            bs(m, c": symbol references a section excluded from output")
+            return false
+        }
+        ts handle[Sec] = sec(o, t)
+        si u64 = zext[u64](r.symbol)
+        y handle[Sym] = sym(o, si)
+        value u64 = 0
+        if base_relocation(r.kind) {
+            value = got_address
+        } else if got_relocation(r.kind) {
+            value = got_address + zext[u64](lx(f).gotref[u32, k]) * 8
+        } else if vv.has[u8, si] != 0 {
+            value = vv.v[u64, si]
+        } else if (y.section != 0 || name_defined(y.name)) &&
+            ((ts.flags & 2) == 0 || bytes_is(ts.name, c".eh_frame")) {
+            value = 0
+        } else {
+            reloc_context(m, f, r)
+            bs(m, c": undefined symbol ")
+            bb(m, y.name)
+            return false
+        }
+        addend u64 = r.addend
+        if (bytes_is(ts.name, c".eh_frame") || bytes_is(ts.name, c".note.stapsdt")) && vv.has[u8, si] == 0 {
+            addend = 0
+        }
+        width u64 = relocation_width(r.kind)
+        if width == 99 {
+            reloc_context(m, f, r)
+            bs(m, c": unsupported ")
+            reloc_name(m, r.kind)
+            return false
+        }
+        offset u64 = target.offset + r.offset
+        if offset > image_size || width > image_size - offset {
+            reloc_context(m, f, r)
+            bs(m, c": byte range (")
+            bu(m, offset)
+            bs(m, c", ")
+            bu(m, width)
+            bs(m, c") exceeds size ")
+            bu(m, image_size)
+            return false
+        }
+        x u64 = value + addend
+        kind u32 = r.kind
+        if kind == 2 || kind == 4 || kind == 24 || got_relocation(kind) || base_relocation(kind) {
+            x = x - (target.address + r.offset)
+        }
+        sx i64 = bitcast[i64](x)
+        fits bool = true
+        if kind == 1 || kind == 17 || kind == 24 || kind == 29 {
+            fits = true
+        } else if kind == 10 {
+            fits = x <= 0xffffffff
+        } else {
+            fits = sx >= -2147483648 && sx <= 2147483647
+        }
+        if !fits {
+            reloc_context(m, f, r)
+            bs(m, c": ")
+            reloc_name(m, kind)
+            bs(m, c" overflow: result 0x")
+            bx(m, x)
+            return false
+        }
+        if width == 8 {
+            wr64(image, offset, x)
+        } else if width == 4 {
+            wr32(image, offset, x)
+        } else if width == 2 {
+            wr16(image, offset, x)
+        } else if width == 1 {
+            wr8(image, offset, x)
+        }
+    }
+    return true
+}
+
+fn relocate_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e {
+        lx(f).status = if relocate_object(f) { 0 } else { 1 }
+    }
+}
+
+// copies every placed section's bytes into the image
+fn blit_job(ctx addr, b u64, e u64, worker u32) void {
+    for i u64 in b..e {
+        x u64 = content.p[u64, i]
+        f u64 = pk_file(x)
+        k u64 = pk_sec(x)
+        s handle[Sec] = sec(obj(f), k)
+        if s.kind == 8 || s.size == 0 { continue }
+        mem_copy(image + place(f, k).offset, obj(f).data + s.offset, s.size)
+    }
+}
+
+// ---------- the image ----------
+
+struct SymOut {
+    file u32
+    name u32       // strtab offset
+    sym u64
+}
+
+fn add_string(b handle[Buf], s Bytes) u32 {
+    offset u64 = b.n
+    out_add(offset, s.n + 1)
+    bb(b, s)
+    buf_u8(b, 0)
+    return trunc[u32](offset)
+}
+
+fn section_header(at u64, name u64, kind u64, flags u64, address u64, offset u64, size u64,
+    link u64, info u64, alignment u64, entsize u64) void {
+    wr32(image, at, name)
+    wr32(image, at + 4, kind)
+    wr64(image, at + 8, flags)
+    wr64(image, at + 16, address)
+    wr64(image, at + 24, offset)
+    wr64(image, at + 32, size)
+    wr32(image, at + 40, link)
+    wr32(image, at + 44, info)
+    wr64(image, at + 48, alignment)
+    wr64(image, at + 56, entsize)
+}
+
+fn program_header(index u64, kind u64, flags u64, offset u64, address u64, file_size u64,
+    memory_size u64, alignment u64) void {
+    at u64 = 64 + index * 56
+    wr32(image, at, kind)
+    wr32(image, at + 4, flags)
+    wr64(image, at + 8, offset)
+    wr64(image, at + 16, address)
+    wr64(image, at + 24, address)
+    wr64(image, at + 32, file_size)
+    wr64(image, at + 40, memory_size)
+    wr64(image, at + 48, alignment)
+}
+
+fn entry_address() u64 {
+    c handle[Config] = config()
+    entry Bytes = c.entry
+    id u32 = find(entry)
+    if id == NONE || gsym(id).has_res == 0 {
+        m handle[Buf] = msg()
+        bs(m, c"undefined entry symbol ")
+        bb(m, entry)
+        die()
+    }
+    g handle[GSym] = gsym(id)
+    f u64 = zext[u64](g.res_file)
+    y handle[Sym] = sym(obj(f), zext[u64](g.res_sym))
+    if y.kind == 10 {
+        m handle[Buf] = msg()
+        bs(m, c"entry symbol ")
+        bb(m, entry)
+        bs(m, c" cannot be an IFUNC")
+        die()
+    }
+    if y.section == 0xfff1 {
+        m handle[Buf] = msg()
+        bs(m, c"entry symbol ")
+        bb(m, entry)
+        bs(m, c" must be defined in executable code")
+        die()
+    }
+    s handle[Sec] = sec(obj(f), zext[u64](y.section))
+    if (s.flags & 6) != 6 || y.value >= s.size {
+        m handle[Buf] = msg()
+        bs(m, c"entry symbol ")
+        bb(m, entry)
+        bs(m, c" must be inside an executable section")
+        die()
+    }
+    return get_placement(f, zext[u64](y.section)).address + y.value
+}
+
+fn build_image() void {
+    c handle[Config] = config()
+    check_legacy_sections()
+    alloc_tables()
+    check_non_alloc_references()
+    got_prepare()
+    if c.runpath != 0 { die_c(c"-rpath requires dynamic output") }
+    if nobj == 0 { die_c(c"no input objects") }
+    merge_plan()
+    layout_make()
+    set_predefined()
+
+    values = heap_alloc_zeroed(nobj * sizeof[Values])
+    pool_for(pool, nobj, 1, &values_job, null)
+    entry u64 = entry_address()
+
+    // the symbol table: live canonical symbols, locals first
+    strtab Buf = {}
+    st handle[Buf] = handle_from_addr[Buf](&strtab)
+    buf_u8(st, 0)
+    shstrtab Buf = {}
+    sh handle[Buf] = handle_from_addr[Buf](&shstrtab)
+    buf_u8(sh, 0)
+    locals Vec[SymOut] = {}
+    lh handle[Vec[SymOut]] = handle_from_addr[Vec[SymOut]](&locals)
+    globals Vec[SymOut] = {}
+    gh handle[Vec[SymOut]] = handle_from_addr[Vec[SymOut]](&globals)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for i u64 in 1..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if !live(f, y) { continue }
+            if y.binding != 0 {
+                g handle[GSym] = gsym(gid_of(f, i))
+                if g.has_res == 0 || zext[u64](g.res_file) != f || zext[u64](g.res_sym) != i { continue }
+            }
+            name u32 = add_string(st, y.name)
+            e handle[SymOut] = vec_new[SymOut](if y.binding == 0 { lh } else { gh })
+            e.file = trunc[u32](f)
+            e.name = name
+            e.sym = i
+        }
+    }
+    symbol_count u64 = lh.n + gh.n + 1
+    symtab_size u64 = chk_add(c"output symbol count", MAX_OUTPUT / 24, 0, symbol_count) * 24
+    hv handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
+    content_count u64 = hv.n
+    name_offsets addr = heap_alloc(content_count * 4 + 4)
+    for k u64 in 0..content_count {
+        name_offsets[u32, k] = add_string(sh, handle_from_addr[OutSec](vec_at[OutSec](hv, k)).name)
+    }
+    symtab_name u64 = zext[u64](add_string(sh, bytes_c(c".symtab")))
+    strtab_name u64 = zext[u64](add_string(sh, bytes_c(c".strtab")))
+    shstrtab_name u64 = zext[u64](add_string(sh, bytes_c(c".shstrtab")))
+    symtab_offset u64 = out_align(lay_cursor, 8)
+    strtab_offset u64 = out_add(symtab_offset, symtab_size)
+    shstrtab_offset u64 = out_add(strtab_offset, st.n)
+    shoff u64 = out_align(out_add(shstrtab_offset, sh.n), 8)
+    section_count u64 = content_count + 4
+    size u64 = out_add(shoff, section_count * 64)
+    image_size = size
+    image = heap_alloc_zeroed(size + 8)
+
+    for k u64 in 0..content_count {
+        s handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](hv, k))
+        if (s.flags & 4) != 0 && (bytes_is(s.name, c".init") || bytes_is(s.name, c".fini")) {
+            mem_set(image + s.offset, 144, s.size)
+        }
+    }
+    pool_for(pool, content.n, 64, &blit_job, null)
+
+    // GOT slots: static, address model only
+    if got_file != NONE64 {
+        p handle[Place] = get_placement(got_file, 1)
+        for slot u64 in 0..got_slots.n {
+            x u64 = got_slots.p[u64, slot]
+            sf u64 = pk_file(x)
+            si u64 = pk_sec(x)
+            vv handle[Values] = vals(sf)
+            if vv.has[u8, si] == 0 {
+                m handle[Buf] = msg()
+                bb(m, obj(sf).path)
+                bs(m, c": GOT references undefined symbol ")
+                bb(m, sym(obj(sf), si).name)
+                die()
+            }
+            wr64(image, p.offset + slot * 8, vv.v[u64, si])
+        }
+    }
+
+    pool_for(pool, nobj, 1, &relocate_job, null)
+    for f u64 in 0..nobj {
+        if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+    }
+
+    // the ELF header
+    mem_copy(image, c"\x7fELF\x02\x01\x01", 7)
+    wr16(image, 16, 2)
+    wr16(image, 18, 62)
+    wr32(image, 20, 1)
+    wr64(image, 24, entry)
+    wr64(image, 32, 64)
+    wr64(image, 40, shoff)
+    wr16(image, 52, 64)
+    wr16(image, 54, 56)
+    sv handle[Vec[Seg]] = handle_from_addr[Vec[Seg]](&segments)
+    phnum u64 = sv.n + 2
+    header_size u64 = 64 + phnum * 56
+    wr16(image, 56, phnum)
+    wr16(image, 58, 64)
+    wr16(image, 60, section_count)
+    wr16(image, 62, content_count + 3)
+    program_header(0, 1, 4, 0, LAYOUT_BASE, header_size, header_size, PAGE)
+    for i u64 in 0..sv.n {
+        s handle[Seg] = vec_ref[Seg](sv, i)
+        program_header(i + 1, 1, s.flags, s.offset, LAYOUT_BASE + s.offset, s.file_size, s.memory_size, s.alignment)
+    }
+    program_header(phnum - 1, 0x6474e551, 6, 0, 0, 0, 0, 16)
+
+    // symbols
+    for j u64 in 0..lh.n + gh.n {
+        e handle[SymOut] = if j < lh.n { vec_ref[SymOut](lh, j) } else { vec_ref[SymOut](gh, j - lh.n) }
+        f u64 = zext[u64](e.file)
+        y handle[Sym] = sym(obj(f), e.sym)
+        at u64 = symtab_offset + (j + 1) * 24
+        wr32(image, at, zext[u64](e.name))
+        wr8(image, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
+        vis u8 = y.visibility
+        if y.binding != 0 { vis = gsym(gid_of(f, e.sym)).res_vis }
+        wr8(image, at + 5, zext[u64](vis))
+        shndx u64 = if y.section == 0xfff1 { 0xfff1 } else { zext[u64](get_placement(f, zext[u64](y.section)).output_index) }
+        wr16(image, at + 6, shndx)
+        wr64(image, at + 8, sym_address(f, y))
+        wr64(image, at + 16, y.size)
+    }
+    mem_copy(image + strtab_offset, st.p, st.n)
+    mem_copy(image + shstrtab_offset, sh.p, sh.n)
+
+    for k u64 in 0..content_count {
+        s handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](hv, k))
+        section_header(shoff + (k + 1) * 64, zext[u64](name_offsets[u32, k]), zext[u64](s.kind), s.flags, s.address,
+            s.offset, s.size, 0, 0, s.alignment, s.entsize)
+    }
+    section_header(shoff + (content_count + 1) * 64, symtab_name, 2, 0, 0, symtab_offset, symtab_size,
+        content_count + 2, lh.n + 1, 8, 24)
+    section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, st.n, 0, 0, 1, 0)
+    section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, sh.n, 0, 0, 1, 0)
+}
+
+// ---------- publishing (File_io) ----------
+
+fn stat_or_die(path Bytes, st handle[Stat]) void {
+    os_stat(path.p, st, true) catch e { die_io(c"stat", path, e) }
+}
+
+// File_io.null_output
+fn null_output(path Bytes, st handle[Stat]) bool {
+    if (st.mode & S_IFMT) != 0x2000 { return false }
+    real Buf = {}
+    rh handle[Buf] = handle_from_addr[Buf](&real)
+    path_realpath(path.p, rh) catch e { die_io(c"realpath", path, e) }
+    return bytes_is(buf_bytes(rh), c"/dev/null")
+}
+
+// File_io.check_output; inputs in the order they are checked. Returns
+// whether the output exists.
+fn check_output(output Bytes, inputs handle[Vec[Bytes]], reverse bool, out_st handle[Stat]) bool {
+    os_stat(output.p, out_st, true) catch e {
+        if e == NotFound { return false }
+        die_io(c"stat", output, e)
+    }
+    if (out_st.mode & S_IFMT) != S_IFREG && !null_output(output, out_st) {
+        m handle[Buf] = msg()
+        bb(m, output)
+        bs(m, c": output must be a regular file")
+        die()
+    }
+    for j u64 in 0..inputs.n {
+        path Bytes = vec_get[Bytes](inputs, if reverse { inputs.n - 1 - j } else { j })
+        st Stat = {}
+        stat_or_die(path, handle_from_addr[Stat](&st))
+        if st.dev == out_st.dev && st.ino == out_st.ino {
+            m handle[Buf] = msg()
+            bb(m, output)
+            bs(m, c": output would overwrite input ")
+            bb(m, path)
+            die()
+        }
+    }
+    return true
+}
+
+fn link_and_publish() void {
+    c handle[Config] = config()
+    output Bytes = c.output
+    paths Vec[Bytes] = {}
+    ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&paths)
+    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
+    for k u64 in 0..items.n {
+        it handle[Item] = vec_ref[Item](items, k)
+        if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
+    }
+    st Stat = {}
+    sth handle[Stat] = handle_from_addr[Stat](&st)
+    exists bool = check_output(output, ph, false, sth)
+    discard bool = exists && null_output(output, sth)
+    resolve()
+    build_image()
+    st2 Stat = {}
+    check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
+    if discard { return }
+    file_write_atomic(output.p, bytes(image, image_size), 0o755) catch e {
+        die_io(c"write", output, e)
+    }
+}

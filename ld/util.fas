@@ -1,0 +1,228 @@
+// Diagnostics, checked arithmetic and small helpers shared by every pass.
+//
+// Every message is the OCaml linker's message, byte for byte: the OCaml
+// linker (src/linker) is the specification, and the differential harness
+// compares stderr and exit codes as well as output bytes.
+
+// OCaml's max_int: the limit several OCaml checks print
+const OCAML_MAX_INT u64 = 4611686018427387903
+
+const NONE u32 = 0xffffffff
+
+// ---------- messages ----------
+
+// the message being built by serial code (parallel passes use one Buf per
+// item instead)
+var ld_msg Buf = {}
+
+// clears the shared message buffer and returns it
+fn msg() handle[Buf] {
+    b handle[Buf] = handle_from_addr[Buf](&ld_msg)
+    buf_clear(b)
+    return b
+}
+
+fn bs(b handle[Buf], s addr) void { buf_str(b, s) }
+fn bb(b handle[Buf], s Bytes) void { buf_append(b, s) }
+fn bd(b handle[Buf], x i64) void { buf_dec_i64(b, x) }
+fn bu(b handle[Buf], x u64) void { buf_dec_u64(b, x) }
+// OCaml's %x / %Lx: lowercase, no padding, the bits as unsigned
+fn bx(b handle[Buf], x u64) void { buf_hex(b, x, 0) }
+
+// "fas-ld: <message>\n" on stderr and exit status 1, like the OCaml
+// linker's top-level Error handler
+fn die_buf(b handle[Buf]) void {
+    out Buf = {}
+    o handle[Buf] = handle_from_addr[Buf](&out)
+    bs(o, c"fas-ld: ")
+    bb(o, buf_bytes(b))
+    buf_u8(o, 10)
+    buf_write(o, STDERR) catch {}
+    os_exit(1)
+}
+
+// dies with the shared message buffer
+fn die() void { die_buf(handle_from_addr[Buf](&ld_msg)) }
+
+fn die_c(s addr) void {
+    m handle[Buf] = msg()
+    bs(m, s)
+    die()
+}
+
+// Input the Fas linker cannot link yet: exit status 3, which the
+// differential harness counts as a skip rather than a mismatch.
+fn refuse(what addr) void {
+    out Buf = {}
+    o handle[Buf] = handle_from_addr[Buf](&out)
+    bs(o, c"fas-ld: not yet supported by the Fas linker: ")
+    bs(o, what)
+    buf_u8(o, 10)
+    buf_write(o, STDERR) catch {}
+    os_exit(3)
+}
+
+// ---------- system errors ----------
+
+// glibc's strerror text, which OCaml's Unix.error_message prints
+fn strerror(code u32) addr {
+    switch code {
+        case 1: return c"Operation not permitted"
+        case 2: return c"No such file or directory"
+        case 4: return c"Interrupted system call"
+        case 5: return c"Input/output error"
+        case 6: return c"No such device or address"
+        case 9: return c"Bad file descriptor"
+        case 11: return c"Resource temporarily unavailable"
+        case 12: return c"Cannot allocate memory"
+        case 13: return c"Permission denied"
+        case 14: return c"Bad address"
+        case 16: return c"Device or resource busy"
+        case 17: return c"File exists"
+        case 18: return c"Invalid cross-device link"
+        case 19: return c"No such device"
+        case 20: return c"Not a directory"
+        case 21: return c"Is a directory"
+        case 22: return c"Invalid argument"
+        case 23: return c"Too many open files in system"
+        case 24: return c"Too many open files"
+        case 26: return c"Text file busy"
+        case 27: return c"File too large"
+        case 28: return c"No space left on device"
+        case 30: return c"Read-only file system"
+        case 31: return c"Too many links"
+        case 36: return c"File name too long"
+        case 40: return c"Too many levels of symbolic links"
+        case 75: return c"Value too large for defined data type"
+        case 122: return c"Disk quota exceeded"
+        default: return null
+    }
+}
+
+// Error.io's form of a Unix error: "call: path: strerror"
+fn io_message(b handle[Buf], call addr, path Bytes, e error) void {
+    bs(b, call)
+    bs(b, c": ")
+    bb(b, path)
+    bs(b, c": ")
+    code u32 = bitcast[u32](e)
+    text addr = if code >= 1 && code <= 4095 { strerror(code) } else { null }
+    if text != null {
+        bs(b, text)
+    } else if code >= 1 && code <= 4095 {
+        bs(b, c"Unknown error ")
+        bu(b, zext[u64](code))
+    } else {
+        bs(b, err_name(e))
+    }
+}
+
+fn die_io(call addr, path Bytes, e error) void {
+    m handle[Buf] = msg()
+    io_message(m, call, path, e)
+    die()
+}
+
+// ---------- checked layout arithmetic (Binary.add / Binary.align) ----------
+
+fn chk_add(ctx addr, limit u64, a u64, b u64) u64 {
+    if a > limit || b > limit - a {
+        m handle[Buf] = msg()
+        bs(m, ctx)
+        bs(m, c": size exceeds supported limit ")
+        bu(m, limit)
+        die()
+    }
+    return a + b
+}
+
+fn chk_align(ctx addr, limit u64, value u64, alignment u64) u64 {
+    if alignment == 0 || (alignment & (alignment - 1)) != 0 {
+        m handle[Buf] = msg()
+        bs(m, ctx)
+        bs(m, c": invalid alignment ")
+        bu(m, alignment)
+        die()
+    }
+    return chk_add(ctx, limit, value, (0 - value) & (alignment - 1))
+}
+
+fn align_up(value u64, alignment u64) u64 { return (value + alignment - 1) & ~(alignment - 1) }
+
+fn umax(a u64, b u64) u64 { return if a > b { a } else { b } }
+fn umin(a u64, b u64) u64 { return if a < b { a } else { b } }
+
+// ---------- little-endian access (raw accesses may be unaligned) ----------
+
+fn rd8(p addr, at u64) u64 { return zext[u64](p[u8, at]) }
+fn rd16(p addr, at u64) u64 { return zext[u64]((p + at)[u16]) }
+fn rd32(p addr, at u64) u64 { return zext[u64]((p + at)[u32]) }
+fn rd64(p addr, at u64) u64 { return (p + at)[u64] }
+fn wr8(p addr, at u64, x u64) void { p[u8, at] = trunc[u8](x) }
+fn wr16(p addr, at u64, x u64) void { (p + at)[u16] = trunc[u16](x) }
+fn wr32(p addr, at u64, x u64) void { (p + at)[u32] = trunc[u32](x) }
+fn wr64(p addr, at u64, x u64) void { (p + at)[u64] = x }
+
+// ---------- bytes ----------
+
+fn bytes_is(b Bytes, s addr) bool { return bytes_eq_c(b, s) }
+
+fn bytes_prefix(b Bytes, s addr) bool { return bytes_starts_with(b, bytes_c(s)) }
+
+// a NUL-terminated copy of `b`, from the heap
+fn cstr_dup(b Bytes) addr {
+    p addr = heap_alloc(b.n + 1)
+    mem_copy(p, b.p, b.n)
+    p[u8, b.n] = 0
+    return p
+}
+
+// ---------- compound-key lookup ----------
+//
+// Keys wider than a value struct live in the caller's vector; this index
+// maps a key hash to the chain of entry ids with that hash, so a lookup
+// compares only real candidates.
+
+struct KeyIndex {
+    heads Map[u64, u32, u64_hash, u64_eq]
+    next Vec[u32]
+}
+
+fn kx_heads(k handle[KeyIndex]) handle[Map[u64, u32, u64_hash, u64_eq]] {
+    return handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&k.heads)
+}
+
+// the first entry with this hash, or NONE
+fn kx_first(k handle[KeyIndex], hash u64) u32 {
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    a addr = map_val_addr(h, hash)
+    return if a == null { NONE } else { a[u32] }
+}
+
+fn kx_next(k handle[KeyIndex], id u32) u32 { return k.next.p[u32, zext[u64](id)] }
+
+// adds entry `id` (the next id: ids are 0, 1, 2, ...) under this hash
+fn kx_add(k handle[KeyIndex], hash u64, id u32) void {
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    a addr = map_val_addr(h, hash)
+    if a == null {
+        vec_push[u32](handle_from_addr[Vec[u32]](&k.next), NONE)
+        map_put(h, hash, id)
+    } else {
+        vec_push[u32](handle_from_addr[Vec[u32]](&k.next), a[u32])
+        a[u32] = id
+    }
+}
+
+fn kx_free(k handle[KeyIndex]) void {
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    map_free(h)
+    vec_free[u32](handle_from_addr[Vec[u32]](&k.next))
+}
+
+// ---------- vectors of plain structs ----------
+
+// appends a zeroed element and returns it
+fn vec_new[T](v handle[Vec[T]]) handle[T] { return handle_from_addr[T](vec_push_zeroed[T](v)) }
+
+fn vec_ref[T](v handle[Vec[T]], i usize) handle[T] { return handle_from_addr[T](vec_at[T](v, i)) }

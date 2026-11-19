@@ -1,0 +1,637 @@
+// Inputs and symbol resolution: a port of the object-only paths of
+// src/linker/resolver.ml (reading, parsing, global symbol states, common
+// symbols, linker-defined symbols).
+//
+// Inputs are read serially in command-line order (the order the OCaml
+// linker reads them in) and parsed in parallel. The OCaml linker parses
+// each input before reading the next, so before any diagnostic of the
+// serial walk, every object before it is parsed and its failure, if any,
+// wins.
+
+// ---------- the object table ----------
+
+// per-object link data, parallel to the Obj table
+struct Lx {
+    gid addr          // u32 per symbol: global id, NONE for locals and index 0
+    discarded addr    // u8 per section
+    kept addr         // u8 per section
+    place addr        // Place per section
+    alias addr        // u64 per section: canonical (file << 32 | section) + 1, 0 when none
+    gotref addr       // u32 per relocation: GOT slot, NONE when none
+    status u32        // parse: 0 ok, 1 failed, 2 refused
+}
+
+struct Place {
+    output_index u32
+    valid u32
+    offset u64
+    address u64
+}
+
+const MAX_OBJECTS u64 = 1100   // 1024 inputs and the synthesized objects
+
+var objs addr = null           // Obj * MAX_OBJECTS
+var lxs addr = null            // Lx * MAX_OBJECTS
+var nobj u64 = 0
+var ninput_objects u64 = 0     // objects from inputs (the rest are synthesized)
+
+fn obj(i u64) handle[Obj] { return handle_from_addr[Obj](objs + i * sizeof[Obj]) }
+fn lx(i u64) handle[Lx] { return handle_from_addr[Lx](lxs + i * sizeof[Lx]) }
+
+fn gid_of(f u64, i u64) u32 { return lx(f).gid[u32, i] }
+fn kept(f u64, s u64) bool { return lx(f).kept[u8, s] != 0 }
+fn place(f u64, s u64) handle[Place] { return handle_from_addr[Place](lx(f).place + s * sizeof[Place]) }
+
+fn new_object(path addr) handle[Obj] {
+    if nobj >= MAX_OBJECTS { die_c(c"extracted object count exceeds 65536 limit") }
+    o handle[Obj] = obj(nobj)
+    nobj += 1
+    o.path = bytes_c(path)
+    return o
+}
+
+// ---------- global symbols ----------
+
+const DEF_NONE u8 = 0
+const DEF_REGULAR u8 = 1
+const DEF_COMMON u8 = 2
+
+struct GSym {
+    name Bytes
+    def_kind u8
+    def_binding u8
+    strong u8             // strong_undefined
+    visibility u8
+    def_file u32
+    def_sym u32
+    csize u64             // common size and alignment
+    calign u64
+    // the resolved definition (Resolver.definitions)
+    has_res u8
+    res_vis u8
+    res_file u32
+    res_sym u32
+}
+
+var names Intern = {}
+var gsyms Vec[GSym] = {}
+
+fn gsym(id u32) handle[GSym] {
+    return handle_from_addr[GSym](vec_at[GSym](handle_from_addr[Vec[GSym]](&gsyms), zext[u64](id)))
+}
+
+// the state of `name`, created in first-use order (the OCaml `order`)
+fn get(name Bytes) u32 {
+    id u32 = intern(handle_from_addr[Intern](&names), name)
+    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
+    if zext[u64](id) == v.n {
+        g handle[GSym] = handle_from_addr[GSym](vec_push_zeroed[GSym](v))
+        g.name = name
+    }
+    return id
+}
+
+fn find(name Bytes) u32 {
+    return intern_find(handle_from_addr[Intern](&names), name) catch NONE
+}
+
+fn visibility_rank(v u8) u8 {
+    if v == 0 { return 0 }
+    if v == 3 { return 1 }
+    if v == 2 { return 2 }
+    return 3
+}
+
+// ---------- parsing ----------
+
+var pool handle[Pool] = null
+var parsed u64 = 0      // objects [0, parsed) are parsed and checked
+
+fn parse_job(ctx addr, b u64, e u64, worker u32) void {
+    for i u64 in b..e {
+        o handle[Obj] = obj(i)
+        elf_parse(o) catch err {
+            lx(i).status = if err == Refused { 2 } else { 1 }
+        }
+    }
+}
+
+// Parses every object read so far; the first failure in input order is
+// the OCaml linker's diagnostic.
+fn parse_flush() void {
+    if parsed == nobj { return }
+    pool_for(pool, nobj - parsed, 1, &parse_job_offset, &parsed)
+    for i u64 in parsed..nobj {
+        st u32 = lx(i).status
+        if st == 1 { die_buf(handle_from_addr[Buf](&obj(i).msg)) }
+        if st == 2 {
+            refuse(buf_cstr(handle_from_addr[Buf](&obj(i).msg)))
+        }
+    }
+    parsed = nobj
+}
+
+fn parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
+    base u64 = ctx[u64]
+    parse_job(null, base + b, base + e, worker)
+}
+
+// ---------- reading ----------
+
+fn input_die() void {
+    // the message is in ld_msg: parse the earlier objects first
+    keep Buf = {}
+    k handle[Buf] = handle_from_addr[Buf](&keep)
+    bb(k, buf_bytes(handle_from_addr[Buf](&ld_msg)))
+    parse_flush()
+    die_buf(k)
+}
+
+fn input_die_io(call addr, path Bytes, e error) void {
+    m handle[Buf] = msg()
+    io_message(m, call, path, e)
+    input_die()
+}
+
+// File_io.read for an input
+fn input_read(path Bytes, max_size u64) Bytes {
+    fd i32 = os_open(path.p, O_RDONLY | O_NONBLOCK, 0) catch e {
+        input_die_io(c"open", path, e)
+        return bytes_empty()
+    }
+    st Stat = {}
+    os_fstat(fd, handle_from_addr[Stat](&st)) catch e { input_die_io(c"fstat", bytes_empty(), e) }
+    if (st.mode & S_IFMT) != S_IFREG {
+        m handle[Buf] = msg()
+        bb(m, path)
+        bs(m, c": input must be a regular file")
+        input_die()
+    }
+    size u64 = bitcast[u64](st.size)
+    if size > max_size {
+        m handle[Buf] = msg()
+        bb(m, path)
+        bs(m, c": input exceeds ")
+        bu(m, max_size)
+        bs(m, c" byte limit or remaining input budget")
+        input_die()
+    }
+    data addr = null
+    if size != 0 {
+        data = os_mmap(null, size, PROT_READ, MAP_PRIVATE, fd, 0) catch e {
+            input_die_io(c"read", path, e)
+            return bytes_empty()
+        }
+    }
+    os_close(fd)
+    return bytes(data, size)
+}
+
+struct Snapshot {
+    real Bytes
+    data Bytes
+}
+
+var snapshots Vec[Snapshot] = {}
+var input_bytes u64 = 0
+var file_count u64 = 0
+// every input path in the order the inputs were read (File_io's on_input)
+var expanded Vec[Bytes] = {}
+
+fn is_script(d Bytes) bool {
+    if d.n == 0 { return false }
+    for i u64 in 0..d.n {
+        c u8 = d.p[u8, i]
+        if !(c == 10 || c == 13 || c == 9 || (c >= 32 && c != 127)) { return false }
+    }
+    return true
+}
+
+fn read_input(path Bytes) void {
+    file_count += 1
+    if file_count > 1024 {
+        m handle[Buf] = msg()
+        bs(m, c"input count exceeds 1024 file limit")
+        input_die()
+    }
+    vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), path)
+    real Buf = {}
+    rh handle[Buf] = handle_from_addr[Buf](&real)
+    path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
+    max_size u64 = umin(MAX_FILE_SIZE, 268435456 - input_bytes)
+    snaps handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&snapshots)
+    data Bytes = bytes_empty()
+    found bool = false
+    for k u64 in 0..snaps.n {
+        sn handle[Snapshot] = vec_ref[Snapshot](snaps, k)
+        if bytes_eq(sn.real, buf_bytes(rh)) {
+            data = sn.data
+            found = true
+            if data.n > max_size {
+                m handle[Buf] = msg()
+                bb(m, path)
+                bs(m, c": input exceeds ")
+                bu(m, max_size)
+                bs(m, c" byte limit or remaining input budget")
+                input_die()
+            }
+            break
+        }
+    }
+    if !found {
+        data = input_read(path, max_size)
+        sn handle[Snapshot] = vec_new[Snapshot](snaps)
+        sn.real = nul_dup(rh.p, rh.n)
+        sn.data = data
+    }
+    buf_free(rh)
+    input_bytes += data.n
+    if data.n >= 8 && (mem_eq(data.p, c"!<arch>\n", 8) || mem_eq(data.p, c"!<thin>\n", 8)) {
+        refuse(c"archives")
+    }
+    if data.n >= 18 && mem_eq(data.p, c"\x7fELF", 4) && rd16(data.p, 16) == 3 {
+        // Static output: requires_static_inputs
+        m handle[Buf] = msg()
+        bb(m, path)
+        bs(m, c": shared input requires -pie or --dynamic-linker")
+        input_die()
+    }
+    if is_script(data) { refuse(c"linker scripts") }
+    o handle[Obj] = new_object(c"")
+    o.path = path
+    o.data = data.p
+    o.len = data.n
+}
+
+// Reads every input in command-line order, then parses them all.
+fn read_inputs() void {
+    c handle[Config] = config()
+    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
+    // enclosing group count of each item: groups end after `count` items
+    ends Vec[u64] = {}
+    eh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&ends)
+    for i u64 in 0..items.n {
+        while eh.n != 0 && vec_last[u64](eh) == i { vec_pop[u64](eh) }
+        it handle[Item] = vec_ref[Item](items, i)
+        depth u64 = eh.n
+        if it.kind == IT_GROUP {
+            vec_push[u64](eh, i + 1 + zext[u64](it.count))
+            continue
+        }
+        // Input.As_needed and Input.Static each add one level of policy
+        // nesting (the OCaml prepare checks them before the file)
+        static_wrap bool = it.kind == IT_PATH && it.static_lib
+        extra u64 = 0
+        if it.as_needed { extra = 1 }
+        if (it.as_needed && depth >= 16) || (static_wrap && depth + extra >= 16) {
+            m handle[Buf] = msg()
+            bs(m, c"input policy nesting exceeds 16")
+            input_die()
+        }
+        if it.kind == IT_LIBRARY { refuse(c"library search (-l)") }
+        read_input(it.text)
+    }
+    parse_flush()
+    ninput_objects = nobj
+}
+
+// ---------- features the skeleton refuses ----------
+
+fn check_supported(i u64) void {
+    o handle[Obj] = obj(i)
+    for k u64 in 0..zext[u64](o.ngroup) {
+        g handle[Group] = handle_from_addr[Group](o.groups + k * sizeof[Group])
+        if g.comdat { refuse(c"COMDAT groups") }
+    }
+    for k u64 in 0..zext[u64](o.nsec) {
+        s handle[Sec] = sec(o, k)
+        if (s.flags & 0x400) != 0 { refuse(c"TLS") }
+        if bytes_is(s.name, c".eh_frame") { refuse(c".eh_frame") }
+    }
+    for k u64 in 1..zext[u64](o.nsym) {
+        y handle[Sym] = sym(o, k)
+        if y.kind == 6 { refuse(c"TLS") }
+        if y.kind == 10 { refuse(c"IFUNC") }
+        if y.binding != 0 && bytes_contains(y.name, 64) { refuse(c"symbol versions") }
+        if bytes_is(y.name, c"_TLS_MODULE_BASE_") { refuse(c"TLS") }
+    }
+    for k u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, k)
+        if r.kind >= 16 && r.kind <= 23 { refuse(c"TLS") }
+        if r.kind >= 34 && r.kind <= 36 { refuse(c"TLS") }
+    }
+}
+
+// ---------- resolution ----------
+
+var predefined_file u64 = NONE64
+const NONE64 u64 = 0xffffffffffffffff
+
+var symbol_total u64 = 0
+var relocation_total u64 = 0
+
+fn add_object(f u64) void {
+    o handle[Obj] = obj(f)
+    l handle[Lx] = lx(f)
+    n u64 = zext[u64](o.nsec)
+    l.discarded = heap_alloc_zeroed(n + 1)
+    symbol_total = chk_add(c"combined symbol count", 4000000, symbol_total, zext[u64](o.nsym))
+    relocation_total = chk_add(c"combined relocation count", 4000000, relocation_total, zext[u64](o.nrel))
+    l.gid = heap_alloc_zeroed(zext[u64](o.nsym) * 4 + 4)
+    c handle[Config] = config()
+    for index u64 in 0..zext[u64](o.nsym) {
+        y handle[Sym] = sym(o, index)
+        l.gid[u32, index] = NONE
+        if y.binding == 0 { continue }
+        id u32 = get(y.name)
+        l.gid[u32, index] = id
+        s handle[GSym] = gsym(id)
+        if visibility_rank(y.visibility) > visibility_rank(s.visibility) { s.visibility = y.visibility }
+        // no COMDAT groups yet, so no section is removed
+        if y.section == 0 {
+            if y.binding == 1 { s.strong = 1 }
+            continue
+        }
+        if y.section == 0xfff2 {
+            size u64 = y.size
+            alignment u64 = umax(1, y.value)
+            if s.def_kind == DEF_NONE {
+                s.def_kind = DEF_COMMON
+                s.csize = size
+                s.calign = alignment
+            } else if s.def_kind == DEF_COMMON {
+                s.csize = umax(s.csize, size)
+                s.calign = umax(s.calign, alignment)
+            } else if s.def_binding == 2 {
+                s.def_kind = DEF_COMMON
+                s.csize = size
+                s.calign = alignment
+            }
+        } else {
+            replace bool = false
+            if s.def_kind == DEF_NONE {
+                replace = true
+            } else if s.def_kind == DEF_COMMON {
+                replace = y.binding == 1
+            } else {
+                if s.def_binding == 1 && y.binding == 1 && !c.allow_multiple_definition {
+                    m handle[Buf] = msg()
+                    bs(m, c"duplicate symbol ")
+                    bb(m, s.name)
+                    bs(m, c": ")
+                    bb(m, obj(zext[u64](s.def_file)).path)
+                    bs(m, c" and ")
+                    bb(m, o.path)
+                    die()
+                }
+                replace = s.def_binding == 2 && y.binding == 1
+            }
+            if replace {
+                s.def_kind = DEF_REGULAR
+                s.def_file = trunc[u32](f)
+                s.def_sym = trunc[u32](index)
+                s.def_binding = y.binding
+            }
+        }
+    }
+}
+
+fn identifier(b Bytes) bool {
+    if b.n == 0 { return false }
+    for i u64 in 0..b.n {
+        c u8 = b.p[u8, i]
+        alpha bool = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95
+        if !alpha && !(i != 0 && c >= 48 && c <= 57) { return false }
+    }
+    return true
+}
+
+// Section_registry.boundary: the section named by __start_X / __stop_X
+fn boundary(name Bytes, last addr) Bytes {
+    if bytes_prefix(name, c"__start_") {
+        rest Bytes = bytes_from(name, 8)
+        if identifier(rest) {
+            last[u8] = 0
+            return rest
+        }
+    }
+    if bytes_prefix(name, c"__stop_") {
+        rest Bytes = bytes_from(name, 7)
+        if identifier(rest) {
+            last[u8] = 1
+            return rest
+        }
+    }
+    return bytes(null, NONE64)
+}
+
+fn has_boundary(name Bytes) bool {
+    l u8 = 0
+    return boundary(name, &l).n != NONE64
+}
+
+fn registry_eligible(s handle[Sec]) bool {
+    return identifier(s.name) && (s.kind == 1 || s.kind == 8) && (s.flags & 2) != 0 && (s.flags & 0x400) == 0
+}
+
+fn same_signature(a handle[Sec], b handle[Sec]) bool {
+    mask u64 = ~(0x200 | 0x200000)
+    return a.kind == b.kind && (a.flags & mask) == (b.flags & mask) && a.entsize == b.entsize
+}
+
+// Section_registry.available, over the input objects (members in reverse
+// file order: the OCaml list is built by prepending)
+fn registry_available(name Bytes) bool {
+    l u8 = 0
+    section Bytes = boundary(name, &l)
+    if section.n == NONE64 { return false }
+    first handle[Sec] = null
+    found bool = false
+    f u64 = ninput_objects
+    while f > 0 {
+        f -= 1
+        o handle[Obj] = obj(f)
+        k u64 = zext[u64](o.nsec)
+        while k > 0 {
+            k -= 1
+            s handle[Sec] = sec(o, k)
+            if !bytes_eq(s.name, section) || lx(f).discarded[u8, k] != 0 { continue }
+            if !found {
+                first = s
+                found = true
+            }
+            if !registry_eligible(s) {
+                m handle[Buf] = msg()
+                bb(m, name)
+                bs(m, c": section boundaries require allocatable non-TLS PROGBITS or NOBITS section ")
+                bb(m, section)
+                die()
+            }
+            if !same_signature(s, first) {
+                m handle[Buf] = msg()
+                bb(m, name)
+                bs(m, c": incompatible contributions to registry section ")
+                bb(m, section)
+                die()
+            }
+        }
+    }
+    return found
+}
+
+fn predefined_name(n Bytes) bool {
+    return bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") ||
+        bytes_is(n, c"__bss_start") || bytes_is(n, c"_etext") || bytes_is(n, c"etext") ||
+        bytes_is(n, c"_edata") || bytes_is(n, c"edata") || bytes_is(n, c"_end") ||
+        bytes_is(n, c"end") || bytes_is(n, c"_GLOBAL_OFFSET_TABLE_") ||
+        bytes_is(n, c"__preinit_array_start") || bytes_is(n, c"__preinit_array_end") ||
+        bytes_is(n, c"__init_array_start") || bytes_is(n, c"__init_array_end") ||
+        bytes_is(n, c"__fini_array_start") || bytes_is(n, c"__fini_array_end") ||
+        bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end")
+}
+
+fn hidden_predefined(n Bytes) bool {
+    return has_boundary(n) || bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") ||
+        bytes_is(n, c"_GLOBAL_OFFSET_TABLE_") || bytes_is(n, c"_DYNAMIC") ||
+        bytes_is(n, c"__preinit_array_start") || bytes_is(n, c"__preinit_array_end") ||
+        bytes_is(n, c"__init_array_start") || bytes_is(n, c"__init_array_end") ||
+        bytes_is(n, c"__fini_array_start") || bytes_is(n, c"__fini_array_end") ||
+        bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end")
+}
+
+fn set_res(id u32, file u64, symbol u64, vis u8) void {
+    g handle[GSym] = gsym(id)
+    g.has_res = 1
+    g.res_file = trunc[u32](file)
+    g.res_sym = trunc[u32](symbol)
+    g.res_vis = vis
+}
+
+// Builds a synthesized object's symbol (the rest of the Sym is zero)
+fn synth_sym(o handle[Obj], index u64, name Bytes) handle[Sym] {
+    y handle[Sym] = sym(o, index)
+    y.name = name
+    return y
+}
+
+fn resolve() void {
+    c handle[Config] = config()
+    if c.entry.n == 0 { die_c(c"entry symbol must not be empty") }
+    // library search directories (only validated: -l is refused)
+    dirs handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.library_paths)
+    for k u64 in 0..dirs.n {
+        d Bytes = vec_get[Bytes](dirs, k)
+        if d.n > 65536 || bytes_contains(d, 0) { die_c(c"invalid or oversized sysroot/search path") }
+    }
+    if dirs.n > 4096 { die_c(c"library search exceeds 4096 directories") }
+    // Input.paths: every path item
+    paths u64 = 0
+    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
+    for k u64 in 0..items.n {
+        if vec_ref[Item](items, k).kind == IT_PATH { paths += 1 }
+    }
+    if paths > 1024 { die_c(c"input count exceeds 1024 file limit") }
+    read_inputs()
+    for f u64 in 0..nobj { check_supported(f) }
+
+    // the entry and -u roots
+    if c.mode != MODE_SHARED { gsym(get(c.entry)).strong = 1 }
+    und handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
+    for k u64 in 0..und.n {
+        name Bytes = vec_get[Bytes](und, k)
+        if name.n == 0 { die_c(c"undefined root symbol must not be empty") }
+        gsym(get(name)).strong = 1
+    }
+    for f u64 in 0..ninput_objects { add_object(f) }
+
+    // definitions, commons and linker-defined symbols, in state order
+    common_file u64 = nobj
+    commons Vec[u32] = {}
+    ch handle[Vec[u32]] = handle_from_addr[Vec[u32]](&commons)
+    common_size u64 = 0
+    common_alignment u64 = 1
+    predefined Vec[u32] = {}
+    ph handle[Vec[u32]] = handle_from_addr[Vec[u32]](&predefined)
+    count u64 = gsyms.n
+    for i u64 in 0..count {
+        id u32 = trunc[u32](i)
+        s handle[GSym] = gsym(id)
+        if s.def_kind == DEF_NONE {
+            if predefined_name(s.name) || registry_available(s.name) {
+                vec_push[u32](ph, id)
+            } else if s.strong != 0 && s.visibility != 0 && !c.gc_sections {
+                m handle[Buf] = msg()
+                bs(m, c"undefined non-default visibility symbol ")
+                bb(m, s.name)
+                die()
+            }
+        } else if s.def_kind == DEF_REGULAR {
+            set_res(id, zext[u64](s.def_file), zext[u64](s.def_sym), s.visibility)
+        } else {
+            common_size = chk_align(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.calign)
+            vec_push[u32](ch, id)
+            // the symbol's value is its offset; kept in csize's place until
+            // the object is built
+            set_res(id, common_file, ch.n, s.visibility)
+            s.def_sym = trunc[u32](common_size)
+            common_size = chk_add(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.csize)
+            common_alignment = umax(common_alignment, s.calign)
+        }
+    }
+    if ch.n != 0 {
+        o handle[Obj] = new_object(c"<common>")
+        o.nsec = 2
+        o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
+        n0 handle[Sec] = sec(o, 0)
+        n0.alignment = 1
+        n0.group = -1
+        b handle[Sec] = sec(o, 1)
+        b.name = bytes_c(c".bss.common")
+        b.kind = 8
+        b.flags = 3
+        b.size = common_size
+        b.alignment = common_alignment
+        b.group = -1
+        o.nsym = trunc[u32](ch.n + 1)
+        o.syms = heap_alloc_zeroed((ch.n + 1) * sizeof[Sym])
+        l handle[Lx] = lx(common_file)
+        l.discarded = heap_alloc_zeroed(2)
+        l.gid = heap_alloc_zeroed((ch.n + 1) * 4)
+        l.gid[u32, 0] = NONE
+        for k u64 in 0..ch.n {
+            id u32 = vec_get[u32](ch, k)
+            g handle[GSym] = gsym(id)
+            y handle[Sym] = synth_sym(o, k + 1, g.name)
+            y.binding = 1
+            y.kind = 1
+            y.visibility = g.visibility
+            y.section = 1
+            y.value = zext[u64](g.def_sym)
+            y.size = g.csize
+            l.gid[u32, k + 1] = id
+        }
+    }
+    if ph.n != 0 {
+        file u64 = nobj
+        o handle[Obj] = new_object(c"<linker symbols>")
+        o.nsym = trunc[u32](ph.n + 1)
+        o.syms = heap_alloc_zeroed((ph.n + 1) * sizeof[Sym])
+        l handle[Lx] = lx(file)
+        l.discarded = heap_alloc_zeroed(1)
+        l.gid = heap_alloc_zeroed((ph.n + 1) * 4)
+        l.gid[u32, 0] = NONE
+        for k u64 in 0..ph.n {
+            id u32 = vec_get[u32](ph, k)
+            g handle[GSym] = gsym(id)
+            vis u8 = g.visibility
+            if hidden_predefined(g.name) && visibility_rank(vis) < 2 { vis = 2 }
+            set_res(id, file, k + 1, vis)
+            y handle[Sym] = synth_sym(o, k + 1, g.name)
+            y.binding = 1
+            y.visibility = vis
+            y.section = 0xfff1
+            l.gid[u32, k + 1] = id
+        }
+        predefined_file = file
+    }
+}

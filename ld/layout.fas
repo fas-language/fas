@@ -1,0 +1,413 @@
+// Output layout: a port of src/linker/layout.ml for static executables
+// (base 0x400000, no RELRO; TLS is refused before layout).
+//
+// Every section is a (file, section) pair packed as file << 32 | section.
+
+const LAYOUT_BASE u64 = 0x400000
+const PAGE u64 = 4096
+const MAX_OUTPUT u64 = 536870912   // 512 MiB
+const MAX_IMAGE u64 = 1073741824   // 1 GiB
+
+struct OutSec {
+    name Bytes
+    kind u32
+    pad u32
+    flags u64
+    offset u64
+    address u64
+    size u64
+    alignment u64
+    entsize u64
+}
+
+struct Seg {
+    flags u64
+    offset u64
+    file_size u64
+    memory_size u64
+    alignment u64
+}
+
+var headers Vec[OutSec] = {}
+var content Vec[u64] = {}    // placed sections in placement order
+var segments Vec[Seg] = {}
+var lay_cursor u64 = 0
+
+fn pk(f u64, s u64) u64 { return (f << 32) | s }
+fn pk_file(x u64) u64 { return x >> 32 }
+fn pk_sec(x u64) u64 { return x & 0xffffffff }
+fn pk_section(x u64) handle[Sec] { return sec(obj(pk_file(x)), pk_sec(x)) }
+
+fn out_add(a u64, b u64) u64 { return chk_add(c"output layout", MAX_OUTPUT, a, b) }
+fn out_align(v u64, a u64) u64 { return chk_align(c"output layout", MAX_OUTPUT, v, a) }
+
+fn header(name Bytes, s handle[Sec], offset u64, address u64, size u64, alignment u64) u32 {
+    h handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
+    count u64 = h.n + 1
+    if count + 4 >= 0xff00 { die_c(c"output requires unsupported extended section numbering") }
+    o handle[OutSec] = handle_from_addr[OutSec](vec_push_zeroed[OutSec](h))
+    o.name = name
+    o.kind = s.kind
+    o.flags = s.flags & ~0x200
+    o.offset = offset
+    o.address = address
+    o.size = size
+    o.alignment = alignment
+    o.entsize = s.entsize
+    return trunc[u32](count)
+}
+
+fn chunk(x u64, output_index u32, offset u64, address u64) void {
+    p handle[Place] = place(pk_file(x), pk_sec(x))
+    p.output_index = output_index
+    p.valid = 1
+    p.offset = offset
+    p.address = address
+    vec_push[u64](handle_from_addr[Vec[u64]](&content), x)
+}
+
+fn add_section(x u64, offset u64, address u64) void {
+    s handle[Sec] = pk_section(x)
+    index u32 = header(s.name, s, offset, address, s.size, s.alignment)
+    chunk(x, index, offset, address)
+}
+
+fn init_name(kind u32) addr {
+    if kind == 14 { return c".init_array" }
+    if kind == 15 { return c".fini_array" }
+    if kind == 16 { return c".preinit_array" }
+    return null
+}
+
+const NO_NAME u64 = 0xffffffffffffffff
+
+// Layout.combined_name; n == NO_NAME when there is none
+fn combined_name(s handle[Sec]) Bytes {
+    none Bytes = bytes(null, NO_NAME)
+    if (s.flags & 0x400) != 0 { return none }
+    iname addr = init_name(s.kind)
+    if iname != null { return bytes_c(iname) }
+    if registry_eligible(s) { return s.name }
+    if s.kind == 1 && (s.flags & 6) == 6 && (bytes_is(s.name, c".text") || bytes_prefix(s.name, c".text.")) {
+        return bytes_c(c".text")
+    }
+    if (s.flags & 2) != 0 && (s.kind == 1 || s.kind == 8) && conventional(s.name) { return s.name }
+    if bytes_is(s.name, c".init") || bytes_is(s.name, c".fini") || bytes_is(s.name, c".eh_frame") { return s.name }
+    return none
+}
+
+fn conventional(n Bytes) bool {
+    return bytes_is(n, c".data") || bytes_is(n, c".rodata") || bytes_is(n, c".bss") ||
+        bytes_is(n, c".sdata") || bytes_is(n, c".sbss")
+}
+
+fn init_priority_of(x u64) u64 {
+    s handle[Sec] = pk_section(x)
+    iname addr = init_name(s.kind)
+    if iname == null { return 65535 }
+    b u64 = cstr_len(iname)
+    if s.name.n <= b { return 65535 }
+    v u64 = 0
+    for i u64 in b + 1..s.name.n { v = v * 10 + zext[u64](s.name.p[u8, i] - 48) }
+    return v
+}
+
+fn priority_less(a u64, b u64) bool { return init_priority_of(a) < init_priority_of(b) }
+
+struct GKey {
+    name Bytes
+    kind u64
+    flags u64
+    entsize u64
+}
+
+// distinct group keys; a key's id is its index
+struct GTab {
+    index KeyIndex
+    keys Vec[GKey]
+}
+
+// the id of the key (name, kind, flags, entsize), added when new
+fn gtab_id(t handle[GTab], name Bytes, kind u64, flags u64, entsize u64) u32 {
+    hash u64 = hash_mix(bytes_hash(name) ^ hash_mix(kind ^ (flags << 32)) ^ (entsize * 0x9e3779b97f4a7c15))
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&t.index)
+    id u32 = kx_first(kx, hash)
+    while id != NONE {
+        k handle[GKey] = handle_from_addr[GKey](t.keys.p + zext[u64](id) * sizeof[GKey])
+        if k.kind == kind && k.flags == flags && k.entsize == entsize && bytes_eq(k.name, name) { return id }
+        id = kx_next(kx, id)
+    }
+    id = trunc[u32](t.keys.n)
+    k handle[GKey] = vec_new[GKey](handle_from_addr[Vec[GKey]](&t.keys))
+    k.name = name
+    k.kind = kind
+    k.flags = flags
+    k.entsize = entsize
+    kx_add(kx, hash, id)
+    return id
+}
+
+fn gtab_free(t handle[GTab]) void {
+    kx_free(handle_from_addr[KeyIndex](&t.index))
+    vec_free[GKey](handle_from_addr[Vec[GKey]](&t.keys))
+}
+
+// Layout's `key`: the name, plus the signature for registry sections and
+// the conventional names
+fn group_id(t handle[GTab], s handle[Sec], name Bytes) u32 {
+    if registry_eligible(s) || bytes_is(name, c".text") || conventional(name) {
+        return gtab_id(t, name, zext[u64](s.kind), s.flags & ~(0x200 | 0x200000), s.entsize)
+    }
+    return gtab_id(t, name, 0, 0, 0)
+}
+
+fn selectable(f u64, s handle[Sec], k u64) bool {
+    kind u32 = s.kind
+    ok bool = kind == 1 || kind == 7 || kind == 8 || kind == 14 || kind == 15 || kind == 16
+    if !ok && (s.flags & 2) != 0 {
+        ok = kind == 3 || kind == 4 || kind == 5 || kind == 6 || kind == 11 || kind == 0x6fffffff ||
+            kind == 0x6ffffffe || kind == 0x6ffffffd || kind == 0x6ffffff6
+    }
+    return ok && kept(f, k) && lx(f).alias[u64, k] == 0 && !bytes_is(s.name, c".note.GNU-stack")
+}
+
+fn class_of(s handle[Sec]) u64 {
+    if (s.flags & 4) != 0 { return 1 }
+    if (s.flags & 1) != 0 { return 2 }
+    return 0
+}
+
+// The members of every group, in selection order: group g's members are
+// members[first[g] .. first[g + 1]].
+struct Groups {
+    gid Vec[u32]       // per selected section: its group, or NONE
+    first Vec[u64]
+    members Vec[u64]
+    combined Vec[u8]
+}
+
+fn build_groups(sel handle[Vec[u64]], g handle[Groups]) void {
+    keys GTab = {}
+    kh handle[GTab] = handle_from_addr[GTab](&keys)
+    gid handle[Vec[u32]] = handle_from_addr[Vec[u32]](&g.gid)
+    count Vec[u64] = {}
+    ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&count)
+    for i u64 in 0..sel.n {
+        s handle[Sec] = pk_section(vec_get[u64](sel, i))
+        name Bytes = combined_name(s)
+        if name.n == NO_NAME {
+            vec_push[u32](gid, NONE)
+            continue
+        }
+        id u32 = group_id(kh, s, name)
+        if zext[u64](id) == ch.n { vec_push[u64](ch, 0) }
+        vec_push[u32](gid, id)
+        ch.p[u64, zext[u64](id)] += 1
+    }
+    first handle[Vec[u64]] = handle_from_addr[Vec[u64]](&g.first)
+    at u64 = 0
+    for k u64 in 0..ch.n {
+        vec_push[u64](first, at)
+        at += ch.p[u64, k]
+        ch.p[u64, k] = first.p[u64, k]
+    }
+    vec_push[u64](first, at)
+    members handle[Vec[u64]] = handle_from_addr[Vec[u64]](&g.members)
+    vec_reserve[u64](members, at)
+    members.n = at
+    for i u64 in 0..sel.n {
+        id u32 = vec_get[u32](gid, i)
+        if id == NONE { continue }
+        members.p[u64, ch.p[u64, zext[u64](id)]] = vec_get[u64](sel, i)
+        ch.p[u64, zext[u64](id)] += 1
+    }
+    combined handle[Vec[u8]] = handle_from_addr[Vec[u8]](&g.combined)
+    for k u64 in 0..ch.n { vec_push[u8](combined, 0) }
+    vec_free[u64](ch)
+    gtab_free(kh)
+}
+
+fn layout_class(wanted u64, flags u64, cursor u64) u64 {
+    sel Vec[u64] = {}
+    sh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&sel)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if (s.flags & 2) != 0 && class_of(s) == wanted && selectable(f, s, k) { vec_push[u64](sh, pk(f, k)) }
+        }
+    }
+    if sh.n == 0 { return cursor }
+    alignment u64 = PAGE
+    for i u64 in 0..sh.n { alignment = umax(alignment, pk_section(vec_get[u64](sh, i)).alignment) }
+    start u64 = out_align(cursor, alignment)
+    cursor = start
+    gr Groups = {}
+    g handle[Groups] = handle_from_addr[Groups](&gr)
+    build_groups(sh, g)
+    for i u64 in 0..sh.n {
+        x u64 = vec_get[u64](sh, i)
+        s handle[Sec] = pk_section(x)
+        if s.kind == 8 { continue }
+        id u32 = g.gid.p[u32, i]
+        if id != NONE {
+            k u64 = zext[u64](id)
+            if g.combined.p[u8, k] != 0 { continue }
+            g.combined.p[u8, k] = 1
+            b u64 = g.first.p[u64, k]
+            n u64 = g.first.p[u64, k + 1] - b
+            m addr = g.members.p + b * 8
+            sort[u64, priority_less](m, n)
+            ga u64 = 1
+            for j u64 in 0..n { ga = umax(ga, pk_section(m[u64, j]).alignment) }
+            cursor = out_align(cursor, ga)
+            beginning u64 = cursor
+            output_index u32 = trunc[u32](headers.n + 1)
+            for j u64 in 0..n {
+                member handle[Sec] = pk_section(m[u64, j])
+                cursor = out_align(cursor, member.alignment)
+                chunk(m[u64, j], output_index, cursor, LAYOUT_BASE + cursor)
+                cursor = out_add(cursor, member.size)
+            }
+            header(combined_name(s), s, beginning, LAYOUT_BASE + beginning, cursor - beginning, ga)
+        } else if (s.flags & 0x400) == 0 {
+            cursor = out_align(cursor, s.alignment)
+            add_section(x, cursor, LAYOUT_BASE + cursor)
+            cursor = out_add(cursor, s.size)
+        }
+    }
+    file_end u64 = cursor
+    memory_end u64 = cursor
+    for i u64 in 0..sh.n {
+        x u64 = vec_get[u64](sh, i)
+        s handle[Sec] = pk_section(x)
+        if s.kind != 8 { continue }
+        id u32 = g.gid.p[u32, i]
+        if id != NONE {
+            k u64 = zext[u64](id)
+            if g.combined.p[u8, k] != 0 { continue }
+            g.combined.p[u8, k] = 1
+            b u64 = g.first.p[u64, k]
+            n u64 = g.first.p[u64, k + 1] - b
+            m addr = g.members.p + b * 8
+            ga u64 = 1
+            for j u64 in 0..n { ga = umax(ga, pk_section(m[u64, j]).alignment) }
+            memory_end = chk_align(c"registry BSS layout", MAX_IMAGE, memory_end, ga)
+            beginning u64 = memory_end
+            output_index u32 = trunc[u32](headers.n + 1)
+            for j u64 in 0..n {
+                member handle[Sec] = pk_section(m[u64, j])
+                memory_end = chk_align(c"registry BSS layout", MAX_IMAGE, memory_end, member.alignment)
+                chunk(m[u64, j], output_index, memory_end, LAYOUT_BASE + memory_end)
+                memory_end = chk_add(c"registry BSS layout", MAX_IMAGE, memory_end, member.size)
+            }
+            header(s.name, s, beginning, LAYOUT_BASE + beginning, memory_end - beginning, ga)
+        } else {
+            memory_end = chk_align(c"BSS layout", MAX_IMAGE, memory_end, s.alignment)
+            add_section(x, memory_end, LAYOUT_BASE + memory_end)
+            memory_end = chk_add(c"BSS layout", MAX_IMAGE, memory_end, s.size)
+        }
+    }
+    sg handle[Seg] = vec_new[Seg](handle_from_addr[Vec[Seg]](&segments))
+    sg.flags = flags
+    sg.offset = start
+    sg.file_size = file_end - start
+    sg.memory_size = memory_end - start
+    sg.alignment = alignment
+    vec_free[u64](sh)
+    vec_free[u32](handle_from_addr[Vec[u32]](&gr.gid))
+    vec_free[u64](handle_from_addr[Vec[u64]](&gr.first))
+    vec_free[u64](handle_from_addr[Vec[u64]](&gr.members))
+    vec_free[u8](handle_from_addr[Vec[u8]](&gr.combined))
+    return if wanted == 2 { file_end } else { memory_end }
+}
+
+fn layout_make() void {
+    for f u64 in 0..nobj {
+        l handle[Lx] = lx(f)
+        l.place = heap_alloc_zeroed(zext[u64](obj(f).nsec) * sizeof[Place] + sizeof[Place])
+    }
+    cursor u64 = PAGE
+    cursor = layout_class(1, 5, cursor)
+    cursor = layout_class(0, 4, cursor)
+    cursor = layout_class(2, 6, cursor)
+
+    // non-allocatable sections, grouped by (name, kind, flags, entsize) in
+    // first-seen order; a contribution's address is its offset in the group
+    sel Vec[u64] = {}
+    sh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&sel)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if (s.flags & 2) == 0 && selectable(f, s, k) { vec_push[u64](sh, pk(f, k)) }
+        }
+    }
+    keys GTab = {}
+    kh handle[GTab] = handle_from_addr[GTab](&keys)
+    gid Vec[u32] = {}
+    gh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&gid)
+    ngroups u32 = 0
+    for i u64 in 0..sh.n {
+        s handle[Sec] = pk_section(vec_get[u64](sh, i))
+        id u32 = gtab_id(kh, s.name, zext[u64](s.kind), s.flags & ~0x200, s.entsize)
+        if id == ngroups { ngroups += 1 }
+        vec_push[u32](gh, id)
+    }
+    // members of each group in order: one pass per group start, using a
+    // linked list through `next`
+    next Vec[u64] = {}
+    nh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&next)
+    heads Vec[u64] = {}
+    hh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&heads)
+    tails Vec[u64] = {}
+    th handle[Vec[u64]] = handle_from_addr[Vec[u64]](&tails)
+    for k u32 in 0..ngroups {
+        vec_push[u64](hh, NONE64)
+        vec_push[u64](th, NONE64)
+    }
+    for i u64 in 0..sh.n {
+        vec_push[u64](nh, NONE64)
+        k u64 = zext[u64](vec_get[u32](gh, i))
+        if hh.p[u64, k] == NONE64 {
+            hh.p[u64, k] = i
+        } else {
+            nh.p[u64, th.p[u64, k]] = i
+        }
+        th.p[u64, k] = i
+    }
+    for k u64 in 0..zext[u64](ngroups) {
+        ga u64 = 1
+        i u64 = hh.p[u64, k]
+        while i != NONE64 {
+            ga = umax(ga, pk_section(vec_get[u64](sh, i)).alignment)
+            i = nh.p[u64, i]
+        }
+        cursor = out_align(cursor, ga)
+        start u64 = cursor
+        output_index u32 = trunc[u32](headers.n + 1)
+        i = hh.p[u64, k]
+        while i != NONE64 {
+            x u64 = vec_get[u64](sh, i)
+            s handle[Sec] = pk_section(x)
+            cursor = out_align(cursor, s.alignment)
+            chunk(x, output_index, cursor, cursor - start)
+            cursor = out_add(cursor, s.size)
+            i = nh.p[u64, i]
+        }
+        firsts handle[Sec] = pk_section(vec_get[u64](sh, hh.p[u64, k]))
+        header(firsts.name, firsts, start, 0, cursor - start, ga)
+    }
+    // merged sections take their canonical section's placement
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            a u64 = lx(f).alias[u64, k]
+            if a != 0 {
+                c u64 = a - 1
+                mem_copy(handle_addr(place(f, k)), handle_addr(place(pk_file(c), pk_sec(c))), sizeof[Place])
+            }
+        }
+    }
+    lay_cursor = cursor
+}
