@@ -16367,6 +16367,43 @@ let () =
   assert (headers = [] && errors = []);
   print_endline "C export declaration matrix: passed"
 
+(* `fails` exports: a result typedef per function under a free name, the
+   error codes, `uint32_t` for no result; an import stays refused *)
+let () =
+  let generate text =
+    let text, _, errors =
+      C_exports.declarations [] (expect_ok (Sema.check (parse_file "fails.fas" text)))
+    in
+    assert (errors = []);
+    text
+  in
+  let has text part =
+    if not (contains text part) then failwith ("fails-export: no " ^ part ^ " in\n" ^ text)
+  in
+  let text =
+    generate
+      "error Bad = 7\n\
+       struct get_result { x i32 }\n\
+       extern \"C\" {\n\
+       fn get(x i32) u8 fails { if x < 0 { fail Bad } return 1 }\n\
+       fn run(p addr) fails { }\n\
+       fn plain() i32 { return 0 }\n\
+       }\n"
+  in
+  List.iter (has text)
+    [
+      "#define FAS_ERROR_Bad ((uint32_t)0x7U)\n";
+      "typedef struct get_result_ {\n  uint8_t value;\n  alignas(8) uint32_t err;\n} get_result_;\n";
+      "static_assert(sizeof(get_result_) == 16, \"get_result_ size\");\n";
+      "static_assert(offsetof(get_result_, err) == 8, \"get_result_.err offset\");\n";
+      "get_result_ get(int32_t x);\n";
+      "uint32_t run(void * p);\n";
+      "int32_t plain(void);\n";
+    ];
+  if contains (generate "extern \"C\" { fn f() i32 { return 0 } }\n") "FAS_ERROR" then
+    failwith "fails-export: error codes without a fails export";
+  print_endline "C export of fails functions: passed"
+
 let () =
   let generate text =
     C_exports.declarations [] (expect_ok (Sema.check (parse_file "exports.fas" text)))

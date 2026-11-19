@@ -1019,10 +1019,13 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
                 in
                 let* () =
                   if not func.fails then Ok ()
-                  else if linkage = Ast.External_c then
+                  (* an export (a body) may be `fails`: C gets the result struct
+                     of LANGUAGE.md "With C"; an import never is *)
+                  else if linkage = Ast.External_c && func.body = Ast.Declaration then
                     error span
-                      "a C function is never `fails`; wrap the call and use \
-                       `errno_err()`"
+                      "an imported C function is never `fails`; wrap the call \
+                       and use `errno_err()`, or call it with `call_addr[T fails]` \
+                       if it returns the `fails` result struct"
                   else
                     match rt with
                     | Hir.Void | Hir.Bool | Hir.Int _ | Hir.Float _ | Hir.Addr

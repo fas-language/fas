@@ -304,6 +304,54 @@ let declarations ?(reserved = []) ?specializations records (program : program) =
           static_assert(alignof(%s) == %d, \"%s alignment\");\n"
          name size name name align name)
   in
+  (* a free C name: not a struct, an export, a reserved name or one already
+     emitted *)
+  let rec free_name name =
+    if
+      reserved_identifier name || List.mem name reserved
+      || List.exists (fun (structure : struct_def) -> structure.name = name) program.structs
+      || List.exists (fun (export, _, _) -> export = name) exports
+      || Hashtbl.mem seen ("name:" ^ name)
+    then free_name (name ^ "_")
+    else (
+      Hashtbl.add seen ("name:" ^ name) ();
+      name)
+  in
+  (* the error codes, for C callers of `fails` exports: `FAS_ERROR_Name`.
+     A code is a hash of the name unless the program gives one, so two
+     headers define a shared name identically, as C allows, and two that
+     disagree make C report the clash *)
+  if List.exists (fun (_, _, export) -> match export with `Function f -> f.fails | _ -> false) exports
+  then
+    List.iter
+      (fun (name, code) ->
+        add (Printf.sprintf "#define FAS_ERROR_%s ((uint32_t)0x%LxU)\n" name code))
+      (List.sort compare program.errors);
+  (* the C result of a `fails` export (LANGUAGE.md, "With C"): the value,
+     then the error at the next multiple of 8, 0 on success; `uint32_t`
+     alone when there is no value *)
+  let result_type (f : func) =
+    if not f.fails then base f.ret
+    else if f.ret = Void then "uint32_t"
+    else
+      let value = base f.ret in
+      let size, align =
+        match layout program.structs f.ret with
+        | Ok x -> x
+        | Error e -> failwith ("internal error: " ^ e)
+      in
+      let err = (size + 7) / 8 * 8 and align = max 8 align in
+      let total = (err + 4 + align - 1) / align * align in
+      let name = free_name (f.name ^ "_result") in
+      add
+        (Printf.sprintf
+           "typedef struct %s {\n  %s value;\n  alignas(8) uint32_t err;\n} %s;\n\
+            static_assert(sizeof(%s) == %d, \"%s size\");\n\
+            static_assert(alignof(%s) == %d, \"%s alignment\");\n\
+            static_assert(offsetof(%s, err) == %d, \"%s.err offset\");\n"
+           name value name name total name name align name name err name);
+      name
+  in
   let decls =
     List.map
       (fun (_, _, export) ->
@@ -316,7 +364,7 @@ let declarations ?(reserved = []) ?specializations records (program : program) =
                   declarator p.ty (if reserved_identifier p.name then "" else p.name))
                 f.params
             in
-            base f.ret ^ " " ^ f.name ^ "("
+            result_type f ^ " " ^ f.name ^ "("
             ^ (if params = [] then "void" else String.concat ", " params)
             ^ ");\n")
       exports

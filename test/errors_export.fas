@@ -1,0 +1,29 @@
+// `fails` functions exported to C: C includes the --emit-header output and
+// calls them directly (test/errors_export.c, run by test/errors.sh).
+error NotFound = 2
+error Bad
+
+value struct Pair { a i32, b i32 }
+value struct Big { a i64, b i64 }
+enum Mode u8 { Off = 1, On = 2 }
+
+extern "C" {
+    fn ex_i32(x i32) i32 fails { if x < 0 { fail NotFound } return x * 2 }
+    fn ex_u8(x i32) u8 fails { if x < 0 { fail Bad } return trunc[u8](x) + 200 }
+    fn ex_i64(x i32) i64 fails { if x < 0 { fail Bad } return sext[i64](x) * -3000000000 }
+    fn ex_f64(x i32) f64 fails { if x < 0 { fail Bad } return 1.25 }
+    fn ex_f32(x i32) f32 fails { if x < 0 { fail Bad } return 2.5 }
+    fn ex_ptr(x i32) addr fails { if x < 0 { fail Bad } return c"fas" }
+    fn ex_bool(x i32) bool fails { if x < 0 { fail Bad } return x > 5 }
+    fn ex_void(x i32) fails { if x < 0 { fail Overflow } }
+    fn ex_err(x i32) error fails { if x < 0 { fail Bad } return NotFound }
+    fn ex_mode(x i32) Mode fails { if x < 0 { fail Bad } return Mode.On }
+    fn ex_pair(x i32) Pair fails { if x < 0 { fail Bad } return {x, x + 1} }
+    fn ex_big(x i64) Big fails { if x < 0 { fail Bad } return {x, -x} }
+    // the import side: C runs the checks
+    fn c_check() i32
+}
+
+fn main() i32 {
+    return c_check()
+}

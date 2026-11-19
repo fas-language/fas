@@ -393,7 +393,7 @@ sum failed: Empty
 empty
 ```
 
-**With C.** A C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result). The error sits at offset 8 or the next multiple of 8 after the value, so a result of up to 8 bytes (a scalar, `addr`, or a value struct of at most 8 bytes) comes back in two registers, and a value struct over 8 bytes comes back through memory, as C returns that struct. C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. Exporting a `fails` function from an `extern "C"` block is not supported yet.
+**With C.** An imported C function is never `fails`; wrap the call and use `errno_err()`. The result of a `fails` function has the C type `struct { _Alignas(8) T value; _Alignas(8) uint32_t err; }` (`uint32_t` alone for no result). The error sits at offset 8 or the next multiple of 8 after the value, so a result of up to 8 bytes (a scalar, `addr`, or a value struct of at most 8 bytes) comes back in two registers, and a value struct over 8 bytes comes back through memory, as C returns that struct. C can call one through its address and Fas can call such a C function with `call_addr[T fails]`. A `fails` function in an `extern "C"` block is exported with that C result, and `--emit-header` names it: `fn parse(s addr) i32 fails` becomes `typedef struct parse_result { int32_t value; alignas(8) uint32_t err; } parse_result;` and `parse_result parse(void *s);` (`uint32_t parse(...)` for no result). The header also defines each error code as `FAS_ERROR_Name`, so C can compare `r.err` with them; 0 means success.
 
 ## Enums
 

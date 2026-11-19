@@ -106,6 +106,18 @@ grep -q -x BadFd "$ERR_TMP/syscall_fails-native.err" ||
 # The fails result ABI, checked from both sides against clang.
 run errors_abi 0 errors_abi.fas errors_abi.c
 
+# Exported `fails` functions, called from C through the --emit-header output.
+cp errors_export.fas errors_export.c "$ERR_TMP/"
+"$OCAML_FAS" --emit-header "$ERR_TMP/errors_export.fas" -o "$ERR_TMP/errors_export.h"
+"$CC" -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c "$ERR_TMP/errors_export.h" ||
+  fail "errors_export.h is not valid C11"
+(
+  cd "$ERR_TMP"
+  run errors_export 0 errors_export.fas errors_export.c
+)
+grep -qx "export bad 0" "$ERR_TMP/errors_export-native.out" ||
+  fail "errors_export: $(cat "$ERR_TMP/errors_export-native.out")"
+
 # A fails main: the error name goes to stderr and the exit status is 1.
 cat >"$ERR_TMP/main_try.fas" <<'EOF'
 error Broken
@@ -209,8 +221,8 @@ reject switch_default 'a switch on an error needs a `default` arm' \
  case B: return 2
  }
  return 0 }'
-reject extern_c 'a C function is never `fails`' \
-  'extern "C" { fn ex() i32 fails { return 1 } }
+reject extern_c 'an imported C function is never `fails`' \
+  'extern "C" { fn ex() i32 fails }
 fn main() i32 { return 0 }'
 reject bitcast_width 'illegal `bitcast` from `error` to `u64`' \
   'fn main() i32 { x u64 = bitcast[u64](A)
