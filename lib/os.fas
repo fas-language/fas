@@ -246,3 +246,40 @@ fn os_getenv(name addr) addr {
     }
     return null
 }
+
+// ---------- futexes and locks ----------
+
+const SYS_FUTEX u64 = 202
+const FUTEX_WAIT_PRIVATE u64 = 128
+const FUTEX_WAKE_PRIVATE u64 = 129
+const FUTEX_WAIT_SHARED u64 = 0
+
+// Waits while *p == expected (it may return early: callers loop).
+fn os_futex_wait(p addr, expected u32) void {
+    r i64 = syscall(SYS_FUTEX, p, FUTEX_WAIT_PRIVATE, expected, 0, 0, 0)
+}
+
+fn os_futex_wake(p addr, n u32) void {
+    r i64 = syscall(SYS_FUTEX, p, FUTEX_WAKE_PRIVATE, n, 0, 0, 0)
+}
+
+// A lock is a u32: 0 free, 1 held, 2 held with waiters (Drepper's
+// "Futexes Are Tricky", mutex 2).
+
+fn os_lock(l addr) void {
+    c u32 = atomic_cas[u32, acquire](l, 0, 1)
+    if c == 0 { return }
+    if c != 2 { c = atomic_xchg[u32, acquire](l, 2) }
+    while c != 0 {
+        os_futex_wait(l, 2)
+        c = atomic_xchg[u32, acquire](l, 2)
+    }
+}
+
+fn os_unlock(l addr) void {
+    if atomic_sub[u32, release](l, 1) != 1 {
+        atomic_store[u32, release](l, 0)
+        os_futex_wake(l, 1)
+    }
+}
+

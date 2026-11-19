@@ -2,7 +2,8 @@
 # The library core (lib/*.fas): test/lib/lib.fas checks every module against
 # reference implementations; its path results must match OCaml's Filename
 # (test/lib/paths.out, made by OCaml) and its realpath the system's. Native
-# and LLVM, at O0 and O2.
+# and LLVM, at O0 and O2. test/lib/thread.fas runs the thread pool with 1,
+# 2, 3, 16 threads and one per CPU.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 OCAML_FAS=${OCAML_FAS:-$ROOT/_build/default/bin/main.exe}
@@ -29,9 +30,15 @@ run() {
     { ls -A "$dir" >&2; echo "lib: $label: stray files" >&2; exit 1; }
   [ -z "$(ls -A "$COMPONENT_TMP/cwd")" ] ||
     { echo "lib: $label: stray files in the current directory" >&2; exit 1; }
+  "$@" -o "$COMPONENT_TMP/thread" "$ROOT/test/lib/thread.fas"
+  for threads in 1 2 3 16 0; do
+    timeout 120 "$COMPONENT_TMP/thread" $threads >"$COMPONENT_TMP/out" &&
+      grep -qx "thread bad 0" "$COMPONENT_TMP/out" ||
+      { cat "$COMPONENT_TMP/out" >&2; echo "lib: $label: thread pool with $threads threads failed" >&2; exit 1; }
+  done
 }
 for level in 0 2; do
   run "native O$level" env -u FAS_ORACLE "$OCAML_FAS" -O$level
   run "llvm O$level" env FAS_ORACLE=llvm "$OCAML_FAS" -O$level
 done
-echo 'lib: library core on native and llvm at O0/O2: ok'
+echo 'lib: library core and thread pool on native and llvm at O0/O2: ok'

@@ -1,0 +1,215 @@
+// Threads without libc: clone(2) through a small assembly trampoline,
+// futexes for waiting, and a pool of workers that run parallel loops.
+//
+// A pool runs one job at a time: `pool_for` splits 0..n into chunks of
+// `grain` items that the workers (and the calling thread) take in turn
+// from an atomic counter, and returns when every chunk is done. Which
+// worker runs which chunk is not deterministic, so a job that must give
+// the same result every time writes each item's result to that item's own
+// place (or merges per-chunk results in chunk order afterwards).
+//
+// Fas has no thread-local storage: a job learns its worker number (0 is
+// the calling thread) and keeps per-worker state in arrays indexed by it.
+
+use "mem.fas"
+
+use "asm" <<S
+    .text
+    .globl fas_lib_clone
+    .type fas_lib_clone, @function
+# long fas_lib_clone(u64 flags, void *stack_top, void *fn, void *arg, u32 *ctid)
+# The child runs fn(arg) on the new stack, then exits its thread (the
+# kernel clears *ctid and wakes its futex: that is the join).
+fas_lib_clone:
+    subq $16, %rsi
+    movq %rdx, 0(%rsi)
+    movq %rcx, 8(%rsi)
+    movq %r8, %r10
+    xorl %edx, %edx
+    xorl %r8d, %r8d
+    movl $56, %eax
+    syscall
+    testq %rax, %rax
+    jnz 1f
+    popq %rax
+    popq %rdi
+    andq $-16, %rsp
+    xorl %ebp, %ebp
+    call *%rax
+    movl $60, %eax
+    xorl %edi, %edi
+    syscall
+    hlt
+1:
+    ret
+    .size fas_lib_clone, .-fas_lib_clone
+    .section .note.GNU-stack,"",@progbits
+S
+
+extern "C" {
+    fn fas_lib_clone(flags u64, stack_top addr, f addr, arg addr, ctid addr) i64
+}
+
+const SYS_CLONE u64 = 56
+const SYS_SCHED_GETAFFINITY u64 = 204
+
+// CLONE_VM | FS | FILES | SIGHAND | THREAD | SYSVSEM | CHILD_CLEARTID
+const THREAD_CLONE_FLAGS u64 = 0x250f00
+
+// the CPUs this process may run on
+fn thread_cpu_count() u32 {
+    mask arr[128, u64] = {}
+    r i64 = syscall(SYS_SCHED_GETAFFINITY, 0, 1024, &mask)
+    if r <= 0 { return 1 }
+    n u32 = 0
+    for i usize in 0..bitcast[u64](r) / 8 { n += trunc[u32](popcount(mask[i])) }
+    return if n == 0 { 1 } else { n }
+}
+
+// ---------- the pool ----------
+
+const POOL_MAX usize = 256
+// loads of a futex word before sleeping on it: linker passes come back to
+// back, and a wake costs far more than a short spin
+const POOL_SPIN u32 = 4000
+const POOL_STACK usize = 8388608
+
+struct Pool {
+    workers u32           // threads, the caller included
+    // the current job
+    job_fn addr           // fn(ctx addr, begin usize, end usize, worker u32) void
+    job_ctx addr
+    job_n usize
+    job_grain usize
+    next usize            // the next unclaimed item (atomic)
+    pending u32           // workers still inside the job (atomic)
+    generation u32        // bumped to start a job (futex)
+    done u32              // bumped when a job ends (futex)
+    quit u32
+    tids arr[256, u32]    // CHILD_CLEARTID words, for the join
+    stacks arr[256, addr]
+}
+
+struct PoolWorker {
+    pool addr
+    index u32
+}
+
+var pool_global Pool = {}
+var pool_worker_args arr[256, PoolWorker] = {}
+
+// Spins a while for *w to differ from `old`, then sleeps on it; returns
+// the value it saw (possibly still `old`: callers loop).
+fn pool_wait_change(w addr, old u32) u32 {
+    for i u32 in 0..POOL_SPIN {
+        v u32 = atomic_load[u32, acquire](w)
+        if v != old { return v }
+    }
+    os_futex_wait(w, old)
+    return atomic_load[u32, acquire](w)
+}
+
+fn pool_run_chunks(p handle[Pool], worker u32) void {
+    while true {
+        begin usize = atomic_add[usize, relaxed](&p.next, p.job_grain)
+        if begin >= p.job_n { return }
+        end usize = if p.job_n - begin < p.job_grain { p.job_n } else { begin + p.job_grain }
+        call_addr[void](p.job_fn, p.job_ctx, begin, end, worker)
+    }
+}
+
+fn pool_worker_main(arg addr) void {
+    w handle[PoolWorker] = handle_from_addr[PoolWorker](arg)
+    p handle[Pool] = handle_from_addr[Pool](w.pool)
+    seen u32 = 0
+    while true {
+        g u32 = pool_wait_change(&p.generation, seen)
+        if g == seen { continue }
+        seen = g
+        if atomic_load[u32, acquire](&p.quit) != 0 { return }
+        pool_run_chunks(p, w.index)
+        if atomic_sub[u32, acq_rel](&p.pending, 1) == 1 {
+            atomic_add[u32, release](&p.done, 1)
+            os_futex_wake(&p.done, 1)
+        }
+    }
+}
+
+// Starts the pool with `threads` threads in all (0: one per CPU, at most
+// POOL_MAX); the calling thread is worker 0.
+fn pool_start(threads u32) handle[Pool] {
+    p handle[Pool] = handle_from_addr[Pool](&pool_global)
+    n u32 = if threads == 0 { thread_cpu_count() } else { threads }
+    if zext[usize](n) > POOL_MAX { n = trunc[u32](POOL_MAX) }
+    p.workers = n
+    for i u32 in 1..n {
+        k usize = zext[usize](i)
+        stack addr = mem_pages(POOL_STACK)
+        p.stacks[k] = stack
+        pool_worker_args[k].pool = handle_addr(p)
+        pool_worker_args[k].index = i
+        p.tids[k] = 1
+        r i64 = fas_lib_clone(THREAD_CLONE_FLAGS, stack + POOL_STACK, &pool_worker_main,
+            &pool_worker_args[k], &p.tids[k])
+        if r < 0 {
+            eprint_raw(c"fas library: cannot start a thread\n")
+            os_exit(2)
+        }
+    }
+    return p
+}
+
+fn eprint_raw(s addr) void {
+    n usize = 0
+    while s[u8, n] != 0 { n += 1 }
+    os_write_all(STDERR, s, n) catch {}
+}
+
+// Runs f(ctx, begin, end, worker) over 0..n in chunks of `grain`, on every
+// worker, and returns when all are done. Not reentrant: a job must not
+// start another.
+fn pool_for(p handle[Pool], n usize, grain usize, f addr, ctx addr) void {
+    if n == 0 { return }
+    g usize = if grain == 0 { 1 } else { grain }
+    if p.workers <= 1 || n <= g {
+        // one chunk or one thread: no handoff
+        b usize = 0
+        while b < n {
+            e usize = if n - b < g { n } else { b + g }
+            call_addr[void](f, ctx, b, e, 0)
+            b = e
+        }
+        return
+    }
+    p.job_fn = f
+    p.job_ctx = ctx
+    p.job_n = n
+    p.job_grain = g
+    atomic_store[usize, relaxed](&p.next, 0)
+    atomic_store[u32, relaxed](&p.pending, p.workers - 1)
+    d u32 = atomic_load[u32, acquire](&p.done)
+    atomic_add[u32, release](&p.generation, 1)
+    os_futex_wake(&p.generation, p.workers)
+    pool_run_chunks(p, 0)
+    while pool_wait_change(&p.done, d) == d {}
+}
+
+// Stops and joins every worker, and frees their stacks.
+fn pool_stop(p handle[Pool]) void {
+    atomic_store[u32, release](&p.quit, 1)
+    atomic_add[u32, release](&p.generation, 1)
+    os_futex_wake(&p.generation, p.workers)
+    for i u32 in 1..p.workers {
+        k usize = zext[usize](i)
+        while true {
+            t u32 = atomic_load[u32, acquire](&p.tids[k])
+            if t == 0 { break }
+            // the kernel's CHILD_CLEARTID wake is a shared futex wake,
+            // which a private wait does not see
+            r i64 = syscall(SYS_FUTEX, &p.tids[k], FUTEX_WAIT_SHARED, t, 0, 0, 0)
+        }
+        os_munmap(p.stacks[k], POOL_STACK)
+    }
+    p.workers = 1
+    atomic_store[u32, relaxed](&p.quit, 0)
+}

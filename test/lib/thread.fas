@@ -1,0 +1,95 @@
+// lib/thread.fas: parallel loops cover every item exactly once, many short
+// jobs hand off cleanly, the heap and os_lock work from workers, and
+// pool_stop joins. Prints "thread bad N" (N must be 0).
+
+use "../../lib/core.fas"
+use "../../lib/thread.fas"
+
+struct Job {
+    out addr          // one u64 per item
+    seen addr         // per-item visit counters
+    per_worker addr   // 64 bytes per worker: chunks run
+    lock u32
+    total u64         // under lock
+    rounds u64
+}
+
+fn mix(i usize) u64 {
+    x u64 = i
+    for k usize in 0..50 { x = x * 6364136223846793005 + 1442695040888963407 }
+    return x
+}
+
+fn work(ctx addr, b usize, e usize, w u32) void {
+    j handle[Job] = handle_from_addr[Job](ctx)
+    s u64 = 0
+    for i usize in b..e {
+        j.out[u64, i] = mix(i)
+        r u32 = atomic_add[u32, relaxed](j.seen + i * 4, 1)
+        s += i
+    }
+    // heap traffic from every worker
+    p addr = heap_alloc(16 + (b % 7) * 100)
+    mem_set(p, 0xab, 16)
+    q addr = heap_realloc(p, 70000)
+    heap_free(q)
+    os_lock(&j.lock)
+    j.total += s
+    os_unlock(&j.lock)
+    c u64 = atomic_add[u64, relaxed](j.per_worker + zext[usize](w) * 64, 1)
+}
+
+fn tiny(ctx addr, b usize, e usize, w u32) void {
+    j handle[Job] = handle_from_addr[Job](ctx)
+    r u64 = atomic_add[u64, relaxed](&j.rounds, e - b)
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    bad u64 = 0
+    threads u32 = 0
+    if argc > 1 { threads = trunc[u32](bytes_to_u64(bytes_c(os_arg(1))) catch 0) }
+    p handle[Pool] = pool_start(threads)
+    workers u32 = p.workers
+    n usize = 300007
+    out addr = mem_pages(n * 8)
+    seen addr = mem_pages(n * 4)
+    pw addr = mem_pages(256 * 64)
+    j Job = {out, seen, pw, 0, 0, 0}
+    jh handle[Job] = handle_from_addr[Job](&j)
+    for rep usize in 0..5 {
+        pool_for(p, n, 1000, &work, &j)
+    }
+    for i usize in 0..n {
+        if out[u64, i] != mix(i) { bad += 1 }
+        if seen[u32, i] != 5 { bad += 1 }
+    }
+    if j.total != 5 * (n * (n - 1) / 2) { bad += 1 }
+    chunks u64 = 0
+    for w usize in 0..256 { chunks += pw[u64, w * 8] }
+    if chunks != 5 * ((n + 999) / 1000) { bad += 1 }
+    // many tiny jobs: grain 1 over a few items, so workers race the handoff
+    for rep usize in 0..20000 { pool_for(p, 3 + rep % 5, 1, &tiny, &j) }
+    want u64 = 0
+    for rep usize in 0..20000 { want += 3 + rep % 5 }
+    if j.rounds != want { bad += 1 }
+    // grain 0 and n 0 edge cases
+    pool_for(p, 0, 10, &tiny, &j)
+    pool_for(p, 4, 0, &tiny, &j)
+    if j.rounds != want + 4 { bad += 1 }
+    pool_stop(p)
+    // a second pool after a stop
+    p = pool_start(threads)
+    pool_for(p, 100, 1, &tiny, &j)
+    if j.rounds != want + 104 { bad += 1 }
+    pool_stop(p)
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    buf_str(bh, c"thread workers ")
+    buf_dec_u64(bh, zext[u64](workers))
+    buf_str(bh, c"\nthread bad ")
+    buf_dec_u64(bh, bad)
+    buf_u8(bh, 10)
+    buf_write(bh, STDOUT) catch {}
+    return if bad == 0 { 0 } else { 1 }
+}

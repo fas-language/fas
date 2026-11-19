@@ -14,6 +14,8 @@ fn mem_out_of_memory() void {
 }
 
 // Fresh zeroed pages from the kernel, `n` rounded up to the page size.
+// The arena functions are for one thread at a time: give each worker its
+// own arena.
 fn mem_pages(n usize) addr {
     p addr = os_mmap(null, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) catch {
         mem_out_of_memory()
@@ -97,6 +99,9 @@ const HEAP_SLAB usize = 1048576
 var heap_free_lists arr[13, addr] = {}
 var heap_slab addr = null
 var heap_slab_left usize = 0
+// one lock for the whole heap: hot multithreaded paths use per-worker
+// arenas instead
+var heap_lock u32 = 0
 
 fn heap_class(n usize) usize {
     k usize = 0
@@ -104,7 +109,7 @@ fn heap_class(n usize) usize {
     return k
 }
 
-// `n` bytes, not zeroed.
+// `n` bytes, not zeroed. Any thread may call the heap functions.
 fn heap_alloc(n usize) addr {
     if n > HEAP_SMALL_MAX {
         size usize = mem_round_pages(n + 16)
@@ -114,9 +119,11 @@ fn heap_alloc(n usize) addr {
         return p + 16
     }
     k usize = heap_class(n)
+    os_lock(&heap_lock)
     head addr = heap_free_lists[k]
     if head != null {
         heap_free_lists[k] = head[addr]
+        os_unlock(&heap_lock)
         return head
     }
     block usize = (zext[usize](16) << k) + 16
@@ -128,6 +135,7 @@ fn heap_alloc(n usize) addr {
     p addr = heap_slab
     heap_slab = heap_slab + block
     heap_slab_left -= block
+    os_unlock(&heap_lock)
     p[u64, 0] = k
     return p + 16
 }
@@ -153,8 +161,10 @@ fn heap_free(p addr) void {
         os_munmap(p - 16, (p - 16)[u64, 1])
         return
     }
+    os_lock(&heap_lock)
     p[addr] = heap_free_lists[k]
     heap_free_lists[k] = p
+    os_unlock(&heap_lock)
 }
 
 // Resizes to `n` bytes, keeping the first min(old, n) bytes; null `p`
