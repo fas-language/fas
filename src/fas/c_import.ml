@@ -482,6 +482,34 @@ let nesting_depth text =
    parentheses, and clang's AST dump crashes on a few thousand *)
 let max_macro_nesting = 256
 
+(* After a stage on generated C failed without clang naming a keyword macro
+   (`#define struct counter` breaks the cast to a struct pointer in a probe, and clang
+   points at the probe, not at the macro): does the import define a C
+   keyword as a macro? The standard headers' own spellings are not counted:
+   a replacement in the implementation's namespace (`bool` -> `_Bool`), a
+   number (`true` -> `1`) or a parenthesized cast (`((_Bool)+1u)`). *)
+let defined_keyword_macro ~cc ~c_flags ~source ~unit_path =
+  let argv =
+    Array.of_list (c_import_args ~cc ~c_flags ~source @ [ "-E"; "-dD"; unit_path ])
+  in
+  match Process.run argv with
+  | Error _ -> None
+  | Ok (text, _) ->
+      String.split_on_char '\n' text
+      |> List.find_map (fun line ->
+          match String.split_on_char ' ' (String.trim line) with
+          | "#define" :: name :: replacement when List.mem name c_keywords -> (
+              match String.trim (String.concat " " replacement) with
+              | "" -> Some name
+              | r when r.[0] = '_' || r.[0] = '(' || ('0' <= r.[0] && r.[0] <= '9') -> None
+              | _ -> Some name)
+          | _ -> None)
+      |> Option.map (fun keyword ->
+          Printf.sprintf
+            "%sthe C defines the C keyword `%s` as a macro, which breaks the C Fas \
+             generates to read the import"
+            keyword_macro_prefix keyword)
+
 let imported_macro_definitions ~cc ~c_flags ~source ~unit_path ~macro_names =
   if macro_names = [] then Ok []
   else
@@ -1829,7 +1857,10 @@ let import_fresh ~cc ~keep ?alloc_size_out ?(retain = false) ?(c_flags = [])
                        (fun prefix -> String.starts_with ~prefix message)
                        user_failure_prefixes ->
                   Error ("", message)
-              | Error message -> Error (stage, message)
+              | Error message -> (
+                  match defined_keyword_macro ~cc ~c_flags ~source ~unit_path with
+                  | Some keyword_message -> Error ("", keyword_message)
+                  | None -> Error (stage, message))
             in
             let ( let* ) result next =
               match result with Ok value -> next value | Error error -> Error error

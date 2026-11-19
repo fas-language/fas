@@ -20200,13 +20200,28 @@ let () =
         "use \"C\" as c <<C\nint counter = 37;\n#define int counter\n\
          #define ANSWER 42\nC\n\
          fn main() i32 { return c.ANSWER }\n";
-      match messages () with
+      (match messages () with
       | [ m ]
         when String.starts_with ~prefix:"the C import cannot work around a keyword macro: "
                m
              && contains m "the C keyword `int`" ->
           ()
-      | m -> failwith ("c-keyword-macro: " ^ String.concat "; " m))
+      | m -> failwith ("c-keyword-macro: " ^ String.concat "; " m));
+      (* `#define struct counter` broke the struct probe for <stdio.h>'s
+         FILE, and clang's errors point at the probe without naming the
+         macro (campaign-9 fas_refuse 113_96347): still the keyword error *)
+      incr checks_run;
+      write
+        "use \"C\" <stdio.h> as c\nuse \"C\" as c <<C\nint counter = 37;\n\
+         #define struct counter\n#define ANSWER 42\nC\n\
+         fn main() i32 { return c.ANSWER }\n";
+      match messages () with
+      | [ m ]
+        when String.starts_with ~prefix:"the C import cannot work around a keyword macro: "
+               m
+             && contains m "the C keyword `struct`" ->
+          ()
+      | m -> failwith ("c-keyword-macro-struct: " ^ String.concat "; " m))
 
 let replay_unmatched_bound = 30
 
