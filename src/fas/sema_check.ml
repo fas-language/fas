@@ -4709,11 +4709,24 @@ and check_call_inner c expected fn args s =
             else
               let* checked =
                 Result_list.map
-                  (fun a ->
-                    let* a = check_expr c None a in
+                  (fun arg ->
+                    let* a = check_expr c None arg in
                     match Hir.expr_ty a with
                     | Hir.Int _ | Hir.Addr -> Ok a
-                    | _ -> error s "syscall arguments must be integers or addrs")
+                    | ty ->
+                        (* an array or struct goes by address, as for an
+                           `addr` parameter *)
+                        let help =
+                          match arg with
+                          | Ast.Ident (name, _) when aggregate_value_type ty ->
+                              Some (Printf.sprintf "pass `&%s`" name)
+                          | _ -> None
+                        in
+                        Error
+                          [
+                            Diag.error ?help (Ast.expr_span arg)
+                              "syscall arguments must be integers or addrs";
+                          ])
                   args
               in
               Ok (Hir.Call (Hir.Builtin b, checked, Hir.Int Hir.I64, s))

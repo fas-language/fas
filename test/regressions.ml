@@ -279,7 +279,7 @@ let replay_join (left : Span.t) (right : Span.t) =
     end_offset = max left.Span.end_offset right.Span.end_offset;
   }
 
-let replay_target text tokens nodes (primary : Span.t) message names =
+let replay_target ~code text tokens nodes (primary : Span.t) message names =
   let inside (outer : Span.t) (inner : Span.t) =
     outer.Span.start_offset <= inner.Span.start_offset
     && inner.Span.end_offset <= outer.Span.end_offset
@@ -295,6 +295,12 @@ let replay_target text tokens nodes (primary : Span.t) message names =
     |> List.filter (fun node -> replay_names (replay_span_text text node) = names)
     |> List.stable_sort (fun left right -> compare (size right) (size left))
   with
+  (* `&name` for the flagged name itself takes the address of just that
+     node: a builtin call around it (no program name of its own) would
+     match the same names *)
+  | candidates
+    when code = "&" ^ replay_span_text text primary && List.exists same candidates ->
+      List.find_opt same candidates
   | node :: _ -> Some node
   | [] -> (
       match List.find_opt same nodes with
@@ -493,7 +499,8 @@ let replay_diagnostics ~run ~program ~text diagnostics =
                     | Some program -> replay_nodes index program
                   in
                   match
-                    replay_target text tokens nodes primary diagnostic.Diag.message
+                    replay_target ~code:(String.trim code) text tokens nodes primary
+                      diagnostic.Diag.message
                       (replay_names code)
                   with
                   | None ->
@@ -2185,6 +2192,12 @@ let () =
   semantic_pin "aggregate-argument-name" aggregate_argument_text 4 9 8
     "aggregate argument `snapshot` of type `State` cannot be passed by value"
     (Some "pass `&snapshot` to a function that accepts `addr`");
+  (* syscall gives the same `&` help as an `addr` parameter *)
+  semantic_pin "syscall-aggregate-argument"
+    "fn run() void { digits arr[4, u8] = {}\n\
+     x i64 = syscall(1, 1, digits, 4)\n\
+     return }\n"
+    2 23 6 "syscall arguments must be integers or addrs" (Some "pass `&digits`");
   semantic_accept "aggregate-argument-address-twin"
     (String.concat "\n"
        [
