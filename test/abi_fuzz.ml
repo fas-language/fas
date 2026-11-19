@@ -283,9 +283,47 @@ and gen_agg depth ~packed =
     in
     Struct (id, ms, attr)
 
+(* [gen_member]'s array rule sees an element type alone, as if the array
+   started at an aligned offset; inside a packed struct it need not (struct
+   {u8 a; struct {u8 b; u16 c;} packed s[3];} has s[0].c at byte 2 but
+   s[1].c at byte 5). gcc classifies an array by its first element at the
+   array's offset and passes that in registers, while clang and Fir (SPEC
+   §5) check every element and pass it in memory (campaign-9 abi finds
+   160591, 176203, 426429, 646520, 694009). So, at the members' offsets in
+   the whole type: an array whose later elements misalign a member while
+   its first does not keeps one element. Shrinking an array moves the
+   members after it, so this repeats until nothing changes. A first
+   element misaligned at its offset is MEMORY for gcc too. A clang C side
+   (ABI_FUZZ_CC=clang) keeps them all. *)
+let cc = ref "gcc"
+
+(* a C side built by clang passes these arrays as Fir does: keep them *)
+let c_side_is_clang () =
+  let base = Filename.basename !cc in
+  String.length base >= 5 && String.sub base 0 5 = "clang"
+
+let rec gcc_agreed_arrays t =
+  let rec pass off = function
+    | Arr (m, n) ->
+        let m = pass off m in
+        let s, _ = size_align m in
+        let ls = leaves ~all:true m "" 0 in
+        let misaligned k = List.exists (fun (o, e, _) -> (off + (k * s) + o) mod sc_align e <> 0) ls in
+        let later = List.exists misaligned (List.init (max 0 (n - 1)) (fun k -> k + 1)) in
+        Arr (m, if later && not (misaligned 0) then 1 else n)
+    | Struct (id, ms, attr) ->
+        Struct (id, List.map2 (fun m o -> pass (off + o) m) ms (offsets ms attr), attr)
+    | Union (id, ms) -> Union (id, List.map (pass off) ms)
+    | t -> t
+  in
+  if c_side_is_clang () then t
+  else
+    let t' = pass 0 t in
+    if t' = t then t else gcc_agreed_arrays t'
+
 let gen_param () =
   match int 10 with
-  | 0 | 1 | 2 | 3 -> gen_agg 2 ~packed:false
+  | 0 | 1 | 2 | 3 -> gcc_agreed_arrays (gen_agg 2 ~packed:false)
   | 4 ->
       let n, e = choose vecs in
       Vec (n, e)
@@ -295,7 +333,7 @@ let gen_param () =
 (* through `...`, only what the default argument promotions leave alone *)
 let gen_va () =
   match int 10 with
-  | 0 | 1 | 2 -> gen_agg 2 ~packed:false
+  | 0 | 1 | 2 -> gcc_agreed_arrays (gen_agg 2 ~packed:false)
   | 3 ->
       let n, e = choose (List.filter (fun (n, e) -> n * sc_size e >= 8) vecs) in
       Vec (n, e)
@@ -750,7 +788,6 @@ let read path =
   s
 
 let keep = ref (Filename.get_temp_dir_name ())
-let cc = ref "gcc"
 let llvm_cc = ref (Option.value (Sys.getenv_opt "FAS_CC") ~default:"clang-22")
 let verbose = ref false
 let ncases = ref 6
