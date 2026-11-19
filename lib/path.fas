@@ -1,0 +1,60 @@
+// File names, with the exact results of OCaml's Filename (Unix flavour)
+// so the Fas linker prints and records the same paths as the OCaml one.
+// Results borrow from the argument, except "." and "/" which are static.
+
+use "buf.fas"
+
+fn path_is_sep(b Bytes, i usize) bool { return b.p[u8, i] == 47 }
+
+// Filename.dirname: "a/b/" -> "a", "a" -> ".", "/" -> "/", "a//b" -> "a"
+fn path_dirname(name Bytes) Bytes {
+    if name.n == 0 { return bytes_c(c".") }
+    n usize = name.n
+    // trailing separators
+    while n > 0 && path_is_sep(name, n - 1) { n -= 1 }
+    if n == 0 { return bytes_sub(name, 0, 1) }
+    // the base name
+    while n > 0 && !path_is_sep(name, n - 1) { n -= 1 }
+    if n == 0 { return bytes_c(c".") }
+    // the separators before it
+    while n > 0 && path_is_sep(name, n - 1) { n -= 1 }
+    if n == 0 { return bytes_sub(name, 0, 1) }
+    return bytes_sub(name, 0, n)
+}
+
+// Filename.basename: "a/b/" -> "b", "/" -> "/", "" -> "."
+fn path_basename(name Bytes) Bytes {
+    if name.n == 0 { return bytes_c(c".") }
+    end usize = name.n
+    while end > 0 && path_is_sep(name, end - 1) { end -= 1 }
+    if end == 0 { return bytes_sub(name, 0, 1) }
+    beg usize = end
+    while beg > 0 && !path_is_sep(name, beg - 1) { beg -= 1 }
+    return bytes_sub(name, beg, end - beg)
+}
+
+// Filename.concat, appended to `out`
+fn path_concat(out handle[Buf], dir Bytes, file Bytes) void {
+    buf_append(out, dir)
+    if dir.n != 0 && !path_is_sep(dir, dir.n - 1) { buf_u8(out, 47) }
+    buf_append(out, file)
+}
+
+fn path_is_relative(name Bytes) bool { return name.n == 0 || !path_is_sep(name, 0) }
+
+// Unix.realpath (the canonical absolute path, every symbolic link
+// resolved; the file must exist), appended to `out`. `path` is a
+// NUL-terminated string. Uses the kernel's own name for an O_PATH
+// descriptor of the file.
+fn path_realpath(path addr, out handle[Buf]) void fails {
+    fd i32 = try os_open(path, O_PATH, 0)
+    defer { os_close(fd) }
+    link Buf = {}
+    lh handle[Buf] = handle_from_addr[Buf](&link)
+    defer { buf_free(lh) }
+    buf_str(lh, c"/proc/self/fd/")
+    buf_dec_u64(lh, zext[u64](bitcast[u32](fd)))
+    buf_reserve(out, 4096)
+    n usize = try os_readlink(buf_cstr(lh), out.p + out.n, out.cap - out.n)
+    out.n += n
+}

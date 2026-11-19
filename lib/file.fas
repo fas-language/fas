@@ -1,0 +1,71 @@
+// Whole files: read one into a buffer, write one atomically (a temporary
+// file in the same directory, then rename), with the same rules as the
+// OCaml linker's File_io.
+
+use "buf.fas"
+
+error NotRegular     // not a regular file
+error TooBig         // bigger than the caller's limit
+error Truncated      // the file shrank while it was being read
+
+const O_NONBLOCK u64 = 0x800
+
+// Appends the contents of the regular file `path` to `out`. O_NONBLOCK
+// keeps a named pipe from hanging the open before fstat rejects it.
+fn file_read(path addr, max_size usize, out handle[Buf]) void fails {
+    fd i32 = try os_open(path, O_RDONLY | O_NONBLOCK, 0)
+    defer { os_close(fd) }
+    st Stat = {}
+    try os_fstat(fd, handle_from_addr[Stat](&st))
+    if (st.mode & S_IFMT) != S_IFREG { fail NotRegular }
+    size usize = bitcast[usize](st.size)
+    if size > max_size { fail TooBig }
+    buf_reserve(out, size)
+    got usize = try os_read_full(fd, out.p + out.n, size)
+    if got != size { fail Truncated }
+    out.n += size
+}
+
+var file_temp_counter u64 = 0
+
+// Writes `data` to `path` through a temporary file in the same directory
+// and a rename, so readers see the old file or the new one, never a part.
+// The new file gets `mode` limited by the umask (as open applies it), and
+// stays 0600 until it is complete. The temporary file is removed on
+// failure.
+fn file_write_atomic(path addr, data Bytes, mode u32) void fails {
+    tmp Buf = {}
+    th handle[Buf] = handle_from_addr[Buf](&tmp)
+    defer { buf_free(th) }
+    p Bytes = bytes_c(path)
+    dir_len usize = 0
+    slash usize = bytes_rindex(p, 47) catch p.n
+    if slash != p.n { dir_len = slash + 1 }
+    fd i32 = -1
+    while true {
+        buf_clear(th)
+        buf_raw(th, path, dir_len)
+        buf_str(th, c".fas-ld-")
+        file_temp_counter += 1
+        buf_hex(th, hash_mix(zext[u64](os_getpid()) ^ os_clock_ns(CLOCK_MONOTONIC) ^ (file_temp_counter << 40)), 12)
+        buf_str(th, c".tmp")
+        fd = os_open(buf_cstr(th), O_WRONLY | O_CREAT | O_EXCL, mode) catch e {
+            if e == Exists { continue }
+            fail e
+        }
+        break
+    }
+    published bool = false
+    defer {
+        os_close(fd)
+        if !published { os_unlink(tmp.p) catch {} }
+    }
+    st Stat = {}
+    try os_fstat(fd, handle_from_addr[Stat](&st))
+    final u32 = st.mode & 0o7777 & mode
+    try os_fchmod(fd, 0o600)
+    try os_write_all(fd, data.p, data.n)
+    try os_fchmod(fd, final)
+    try os_rename(tmp.p, path)
+    published = true
+}

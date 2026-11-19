@@ -1,0 +1,54 @@
+// String interning: each distinct byte string gets a dense u32 id (0, 1,
+// 2, ... in first-seen order), and its bytes live in the table's arena
+// until intern_free.
+
+use "map.fas"
+
+struct Intern {
+    ids Map[Bytes, u32, bytes_hash, bytes_eq]
+    names Vec[Bytes]
+    arena Arena
+}
+
+fn intern_ids(t handle[Intern]) handle[Map[Bytes, u32, bytes_hash, bytes_eq]] {
+    return handle_from_addr[Map[Bytes, u32, bytes_hash, bytes_eq]](&t.ids)
+}
+
+fn intern_names(t handle[Intern]) handle[Vec[Bytes]] {
+    return handle_from_addr[Vec[Bytes]](&t.names)
+}
+
+// the id of `s`, adding a copy of it when it is new
+fn intern(t handle[Intern], s Bytes) u32 {
+    ids handle[Map[Bytes, u32, bytes_hash, bytes_eq]] = intern_ids(t)
+    id u32 = map_get(ids, s) catch {
+        dup Bytes = bytes_dup(handle_from_addr[Arena](&t.arena), s)
+        fresh u32 = trunc[u32](t.names.n)
+        names handle[Vec[Bytes]] = intern_names(t)
+        vec_push(names, dup)
+        r bool = map_put(ids, dup, fresh)
+        return fresh
+    }
+    return id
+}
+
+// the id of `s`, or NotFound when it was never interned
+fn intern_find(t handle[Intern], s Bytes) u32 fails {
+    ids handle[Map[Bytes, u32, bytes_hash, bytes_eq]] = intern_ids(t)
+    return try map_get(ids, s)
+}
+
+fn intern_name(t handle[Intern], id u32) Bytes {
+    names handle[Vec[Bytes]] = intern_names(t)
+    return vec_get(names, zext[usize](id))
+}
+
+fn intern_count(t handle[Intern]) usize { return t.names.n }
+
+fn intern_free(t handle[Intern]) void {
+    ids handle[Map[Bytes, u32, bytes_hash, bytes_eq]] = intern_ids(t)
+    names handle[Vec[Bytes]] = intern_names(t)
+    map_free(ids)
+    vec_free(names)
+    arena_free(handle_from_addr[Arena](&t.arena))
+}

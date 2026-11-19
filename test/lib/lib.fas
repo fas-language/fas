@@ -1,0 +1,562 @@
+// The library core against reference implementations: every module, with
+// random operations checked step by step. Prints the path results (compared
+// with OCaml's Filename by test/lib.sh) and "lib bad N" (N failed checks).
+// argv[1] is an empty scratch directory for the file tests.
+
+use "../../lib/core.fas"
+
+var bad u64 = 0
+var out Buf = {}
+
+fn o() handle[Buf] { return handle_from_addr[Buf](&out) }
+
+fn check(ok bool, what addr) void {
+    if !ok {
+        bad += 1
+        eprint(c"lib: failed: ")
+        eprint(what)
+        eprint(c"\n")
+    }
+}
+
+var rng u64 = 0x9e3779b97f4a7c15
+
+fn rand() u64 {
+    rng ^= rng << 13
+    rng ^= rng >> 7
+    rng ^= rng << 17
+    return rng
+}
+
+fn below(n u64) u64 { return rand() % n }
+
+// ---------- mem ----------
+
+fn test_mem() void {
+    a arr[300, u8] = {}
+    r arr[300, u8] = {}
+    for rnd usize in 0..3000 {
+        for i usize in 0..300 {
+            a[i] = trunc[u8](rand())
+            r[i] = a[i]
+        }
+        n usize = below(140)
+        s usize = below(300 - n)
+        d usize = below(300 - n)
+        // reference: through a temporary copy
+        t arr[300, u8] = {}
+        for i usize in 0..n { t[i] = r[s + i] }
+        for i usize in 0..n { r[d + i] = t[i] }
+        mem_move(&a[d], &a[s], n)
+        check(mem_eq(&a, &r, 300), c"mem_move")
+        if s + n <= d || d + n <= s {
+            for i usize in 0..300 { a[i] = r[i] }
+            mem_copy(&a[d], &a[s], n)
+            check(mem_eq(&a, &r, 300), c"mem_copy")
+        }
+        x usize = below(300)
+        old u8 = a[x]
+        a[x] = old + 1
+        check(!mem_eq(&a, &r, 300), c"mem_eq difference")
+        a[x] = old
+    }
+}
+
+// ---------- heap ----------
+
+fn fill(p addr, n usize, seed u64) void {
+    for i usize in 0..n { p[u8, i] = trunc[u8](seed + i * 31) }
+}
+
+fn filled(p addr, n usize, seed u64) bool {
+    for i usize in 0..n {
+        if p[u8, i] != trunc[u8](seed + i * 31) { return false }
+    }
+    return true
+}
+
+fn test_heap() void {
+    ptrs arr[64, addr] = {}
+    sizes arr[64, usize] = {}
+    seeds arr[64, u64] = {}
+    for step usize in 0..20000 {
+        k usize = below(64)
+        if ptrs[k] != null {
+            check(filled(ptrs[k], sizes[k], seeds[k]), c"heap contents")
+            check(addr_bits(ptrs[k]) & 15 == 0, c"heap alignment")
+            check(heap_size(ptrs[k]) >= sizes[k], c"heap_size")
+        }
+        op u64 = below(3)
+        // mostly small, sometimes past the size classes
+        n usize = if below(20) == 0 { 65000 + below(300000) } else { below(3000) }
+        if op == 0 || ptrs[k] == null {
+            heap_free(ptrs[k])
+            ptrs[k] = heap_alloc(n)
+            sizes[k] = n
+            seeds[k] = rand()
+            fill(ptrs[k], n, seeds[k])
+        } else if op == 1 {
+            keep usize = if n < sizes[k] { n } else { sizes[k] }
+            ptrs[k] = heap_realloc(ptrs[k], n)
+            check(filled(ptrs[k], keep, seeds[k]), c"heap_realloc keeps")
+            sizes[k] = n
+            fill(ptrs[k], n, seeds[k])
+        } else {
+            heap_free(ptrs[k])
+            ptrs[k] = null
+        }
+    }
+    for k usize in 0..64 { heap_free(ptrs[k]) }
+    z addr = heap_alloc_zeroed(5000)
+    nz bool = false
+    for i usize in 0..5000 { nz = nz || z[u8, i] != 0 }
+    check(!nz, c"heap_alloc_zeroed")
+    heap_free(z)
+}
+
+// ---------- arena ----------
+
+fn test_arena() void {
+    a Arena = {}
+    ah handle[Arena] = handle_from_addr[Arena](&a)
+    for rnd usize in 0..2 {
+        prev addr = null
+        sum usize = 0
+        for i usize in 0..5000 {
+            align usize = zext[usize](1) << below(13)
+            n usize = if below(500) == 0 { 2000000 } else { below(700) }
+            p addr = arena_alloc(ah, n, align)
+            check(addr_bits(p) & (align - 1) == 0, c"arena alignment")
+            zero bool = true
+            for j usize in 0..n { zero = zero && p[u8, j] == 0 }
+            check(zero, c"arena zeroed")
+            fill(p, n, 7)
+            if prev != null { check(filled(prev, 1, 7), c"arena overlap") }
+            prev = if n > 0 { p } else { null }
+            sum += n
+        }
+        check(a.total == sum, c"arena total")
+        arena_free(ah)
+        check(a.chunk == null && a.total == 0, c"arena_free")
+    }
+    s Bytes = bytes_dup(ah, bytes_c(c"dup me"))
+    check(bytes_eq_c(s, c"dup me") && s.p[u8, 6] == 0, c"bytes_dup")
+    arena_free(ah)
+}
+
+// ---------- bytes ----------
+
+fn test_bytes() void {
+    hello Bytes = bytes_c(c"hello, world")
+    check(hello.n == 12, c"bytes_c")
+    check(bytes_eq(bytes_sub(hello, 7, 5), bytes_c(c"world")), c"bytes_sub")
+    check(bytes_eq(bytes_from(hello, 12), bytes_empty()), c"bytes_from end")
+    check(bytes_starts_with(hello, bytes_c(c"hell")), c"starts_with")
+    check(!bytes_starts_with(bytes_c(c"he"), bytes_c(c"hell")), c"starts_with short")
+    check(bytes_ends_with(hello, bytes_c(c"world")), c"ends_with")
+    check(!bytes_ends_with(hello, bytes_c(c"worle")), c"ends_with other")
+    check((bytes_index(hello, 111) catch 99) == 4, c"index")
+    check((bytes_rindex(hello, 111) catch 99) == 8, c"rindex")
+    check((bytes_index(hello, 122) catch 99) == 99, c"index missing")
+    check((bytes_index_from(hello, 5, 111) catch 99) == 8, c"index_from")
+    check(bytes_contains(hello, 44) && !bytes_contains(hello, 33), c"contains")
+    check((bytes_find(hello, bytes_c(c"o, w")) catch 99) == 4, c"find")
+    check((bytes_find(hello, bytes_c(c"")) catch 99) == 0, c"find empty")
+    check((bytes_find(hello, bytes_c(c"worlds")) catch 99) == 99, c"find missing")
+    check((bytes_find(bytes_c(c"aab"), bytes_c(c"ab")) catch 99) == 1, c"find overlap")
+    // unsigned bytes, then length: like String.compare
+    check(bytes_cmp(bytes_c(c"a"), bytes_c(c"b")) == -1, c"cmp a b")
+    check(bytes_cmp(bytes_c(c"ab"), bytes_c(c"a")) == 1, c"cmp prefix")
+    check(bytes_cmp(bytes_c(c"\xff"), bytes_c(c"\x01")) == 1, c"cmp unsigned")
+    check(bytes_cmp(bytes_c(c"abc"), bytes_c(c"abc")) == 0, c"cmp equal")
+    check(bytes_less(bytes_empty(), bytes_c(c"a")), c"less empty")
+    // FNV-1a 64 of "a" is af63dc4c8601ec8c; check the mix on top of it
+    check(bytes_hash(bytes_c(c"a")) == hash_mix(0xaf63dc4c8601ec8c), c"hash fnv")
+    check(bytes_hash(bytes_empty()) == hash_mix(0xcbf29ce484222325), c"hash empty")
+    check(bytes_hash(bytes_c(c"ab")) != bytes_hash(bytes_c(c"ba")), c"hash order")
+    max u64 = 18446744073709551615
+    check((bytes_to_u64(bytes_c(c"18446744073709551615")) catch 0) == max, c"to_u64 max")
+    check((bytes_to_u64(bytes_c(c"0")) catch 1) == 0, c"to_u64 0")
+    check((bytes_to_u64(bytes_c(c"0042")) catch 1) == 42, c"to_u64 zeros")
+    check(to_u64_err(c"18446744073709551616") == Overflow, c"to_u64 overflow")
+    check(to_u64_err(c"99999999999999999999") == Overflow, c"to_u64 overflow mul")
+    check(to_u64_err(c"") == BadNumber, c"to_u64 empty")
+    check(to_u64_err(c"-1") == BadNumber, c"to_u64 sign")
+    check(to_u64_err(c"1 ") == BadNumber, c"to_u64 space")
+    check((bytes_hex_to_u64(bytes_c(c"fFfFffffFFFFffff")) catch 0) == max, c"hex max")
+    check((bytes_hex_to_u64(bytes_c(c"0a9F")) catch 0) == 0xa9f, c"hex")
+    check(hex_err(c"10000000000000000") == Overflow, c"hex overflow")
+    check(hex_err(c"0x1") == BadNumber, c"hex prefix")
+    check(hex_err(c"g") == BadNumber, c"hex digit")
+}
+
+fn to_u64_err(s addr) error {
+    v u64 = bytes_to_u64(bytes_c(s)) catch e { return e }
+    return Unexpected
+}
+
+fn hex_err(s addr) error {
+    v u64 = bytes_hex_to_u64(bytes_c(s)) catch e { return e }
+    return Unexpected
+}
+
+// ---------- buf ----------
+
+fn buf_is(b handle[Buf], s addr) bool { return bytes_eq_c(buf_bytes(b), s) }
+
+fn test_buf() void {
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    buf_dec_u64(bh, 0)
+    buf_u8(bh, 32)
+    buf_dec_u64(bh, 18446744073709551615)
+    buf_u8(bh, 32)
+    min i64 = -9223372036854775807 - 1
+    buf_dec_i64(bh, min)
+    buf_u8(bh, 32)
+    buf_dec_i64(bh, -1)
+    buf_u8(bh, 32)
+    buf_dec_i64(bh, 9223372036854775807)
+    buf_u8(bh, 32)
+    buf_hex(bh, 0, 0)
+    buf_u8(bh, 32)
+    buf_hex(bh, 0xabc, 8)
+    buf_u8(bh, 32)
+    buf_hex(bh, 0xfedcba9876543210, 4)
+    check(buf_is(bh, c"0 18446744073709551615 -9223372036854775808 -1 9223372036854775807 0 00000abc fedcba9876543210"), c"buf numbers")
+    buf_clear(bh)
+    buf_u16le(bh, 0x0201)
+    buf_u32le(bh, 0x06050403)
+    buf_u64le(bh, 0x0e0d0c0b0a090807)
+    buf_align(bh, 16)
+    check(b.n == 16, c"buf_align")
+    ok bool = true
+    for i usize in 0..14 { ok = ok && b.p[u8, i] == trunc[u8](i + 1) }
+    check(ok && b.p[u8, 14] == 0 && b.p[u8, 15] == 0, c"buf little-endian")
+    buf_set_u32le(bh, 4, 0xaabbccdd)
+    check(b.p[u8, 4] == 0xdd && b.p[u8, 7] == 0xaa, c"buf_set_u32le")
+    buf_set_u64le(bh, 8, 0)
+    check(b.p[u64, 1] == 0, c"buf_set_u64le")
+    buf_align(bh, 16)
+    check(b.n == 16, c"buf_align aligned")
+    buf_truncate(bh, 3)
+    buf_str(bh, c"xyz")
+    check(b.n == 6 && b.p[u8, 3] == 120, c"buf_truncate")
+    check(cstr_len(buf_cstr(bh)) == 6 && b.n == 6, c"buf_cstr")
+    // growth through the size classes and into large blocks
+    buf_clear(bh)
+    for i usize in 0..300000 { buf_u8(bh, trunc[u8](i)) }
+    ok = b.n == 300000
+    for i usize in 0..300000 { ok = ok && b.p[u8, i] == trunc[u8](i) }
+    check(ok, c"buf growth")
+    buf_free(bh)
+    check(b.p == null && b.n == 0 && b.cap == 0, c"buf_free")
+}
+
+// ---------- vec ----------
+
+value struct Pair { key u32, idx u32 }
+
+fn test_vec() void {
+    v Vec[u64] = {}
+    vh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&v)
+    for i u64 in 0..10000 { vec_push(vh, i * i) }
+    ok bool = v.n == 10000
+    for i usize in 0..10000 { ok = ok && vec_get(vh, i) == i * i }
+    check(ok, c"vec push/get")
+    vec_set(vh, 5, 7)
+    check(vec_get(vh, 5) == 7 && vec_at(vh, 5)[u64] == 7, c"vec_set/at")
+    check(vec_pop(vh) == 9999 * 9999 && v.n == 9999, c"vec_pop")
+    check(vec_last(vh) == 9998 * 9998, c"vec_last")
+    vec_truncate(vh, 2)
+    check(v.n == 2 && vec_last(vh) == 1, c"vec_truncate")
+    vec_free(vh)
+    w Vec[Pair] = {}
+    wh handle[Vec[Pair]] = handle_from_addr[Vec[Pair]](&w)
+    for i u32 in 0..100 { vec_push(wh, {i % 7, i}) }
+    p Pair = vec_get(wh, 99)
+    check(p.key == 1 && p.idx == 99, c"vec value struct")
+    z addr = vec_push_zeroed(wh)
+    check(w.n == 101 && z[u32, 0] == 0 && z[u32, 1] == 0, c"vec_push_zeroed")
+    vec_free(wh)
+}
+
+// ---------- map ----------
+
+const KEYS usize = 700
+
+fn test_map() void {
+    m Map[u64, u64, u64_hash, u64_eq] = {}
+    mh handle[Map[u64, u64, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u64, u64_hash, u64_eq]](&m)
+    // reference: a direct table over a small key space (keys are spread
+    // out so they hash anywhere)
+    has arr[700, bool] = {}
+    val arr[700, u64] = {}
+    count usize = 0
+    for step usize in 0..200000 {
+        k usize = below(KEYS)
+        key u64 = k * 0x10001
+        op u64 = below(10)
+        if op < 5 {
+            x u64 = rand()
+            fresh bool = map_put(mh, key, x)
+            check(fresh == !has[k], c"map_put fresh")
+            if !has[k] { count += 1 }
+            has[k] = true
+            val[k] = x
+        } else if op < 8 {
+            removed bool = map_remove(mh, key)
+            check(removed == has[k], c"map_remove")
+            if has[k] { count -= 1 }
+            has[k] = false
+        } else {
+            got u64 = map_get(mh, key) catch e {
+                check(!has[k] && e == NotFound, c"map_get missing")
+                continue
+            }
+            check(has[k] && got == val[k], c"map_get")
+        }
+        check(m.n == count, c"map count")
+        if step % 20000 == 0 {
+            // full sweep: every key, and iteration sees each entry once
+            ok bool = true
+            for j usize in 0..KEYS {
+                ok = ok && map_has(mh, j * 0x10001) == has[j]
+            }
+            check(ok, c"map sweep")
+            seen usize = 0
+            i usize = map_next(mh, 0)
+            while i < m.cap {
+                kk u64 = map_key_at(mh, i)
+                j usize = kk / 0x10001
+                check(has[j] && map_val_at(mh, i) == val[j], c"map iteration")
+                seen += 1
+                i = map_next(mh, i + 1)
+            }
+            check(seen == count, c"map iteration count")
+            if step == 100000 {
+                map_clear(mh)
+                count = 0
+                for j usize in 0..KEYS { has[j] = false }
+            }
+        }
+    }
+    a addr = map_val_addr(mh, 1)
+    if a == null {
+        r bool = map_put(mh, 1, 0)
+        a = map_val_addr(mh, 1)
+    }
+    a[u64] = 1234
+    check((map_get(mh, 1) catch 0) == 1234, c"map_val_addr")
+    check(map_val_addr(mh, 0x1234567) == null, c"map_val_addr missing")
+    map_free(mh)
+}
+
+fn test_intern() void {
+    t Intern = {}
+    th handle[Intern] = handle_from_addr[Intern](&t)
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    for rnd usize in 0..2 {
+        for i u64 in 0..5000 {
+            buf_clear(bh)
+            buf_str(bh, c"sym")
+            buf_dec_u64(bh, i)
+            id u32 = intern(th, buf_bytes(bh))
+            check(zext[u64](id) == i, c"intern id")
+        }
+    }
+    // the table keeps its own copies
+    buf_clear(bh)
+    buf_str(bh, c"sym4321")
+    check(bytes_eq(intern_name(th, 4321), buf_bytes(bh)), c"intern_name")
+    check(intern_count(th) == 5000, c"intern_count")
+    check((intern_find(th, bytes_c(c"sym17")) catch 0) == 17, c"intern_find")
+    check((intern_find(th, bytes_c(c"sym5000")) catch 7) == 7, c"intern_find missing")
+    intern_free(th)
+    buf_free(bh)
+}
+
+// ---------- sort ----------
+
+fn pair_less(a Pair, b Pair) bool { return a.key < b.key }
+fn u64_less(a u64, b u64) bool { return a < b }
+
+fn test_sort() void {
+    for rnd usize in 0..300 {
+        n usize = if rnd < 40 { rnd } else { below(3000) }
+        v Vec[Pair] = {}
+        vh handle[Vec[Pair]] = handle_from_addr[Vec[Pair]](&v)
+        // few distinct keys, so stability matters
+        range u64 = if rnd % 2 == 0 { 5 } else { 1000000 }
+        for i usize in 0..n { vec_push(vh, {trunc[u32](below(range)), trunc[u32](i)}) }
+        sort_vec[Pair, pair_less](vh)
+        ok bool = v.n == n
+        for i usize in 1..n {
+            a Pair = vec_get(vh, i - 1)
+            b Pair = vec_get(vh, i)
+            ok = ok && (a.key < b.key || (a.key == b.key && a.idx < b.idx))
+        }
+        // a permutation: every index once
+        seen Vec[u8] = {}
+        sh handle[Vec[u8]] = handle_from_addr[Vec[u8]](&seen)
+        for i usize in 0..n { vec_push(sh, 0) }
+        for i usize in 0..n {
+            j usize = zext[usize](vec_get(vh, i).idx)
+            ok = ok && vec_get(sh, j) == 0
+            vec_set(sh, j, 1)
+        }
+        check(ok, c"sort stable permutation")
+        vec_free(sh)
+        vec_free(vh)
+    }
+    a arr[5, u64] = {5, 1, 4, 1, 0}
+    sort[u64, u64_less](&a, 5)
+    check(a[0] == 0 && a[1] == 1 && a[2] == 1 && a[3] == 4 && a[4] == 5, c"sort array")
+}
+
+// ---------- path ----------
+
+fn show_path(name addr) void {
+    s Bytes = bytes_c(name)
+    buf_str(o(), c"[")
+    buf_append(o(), s)
+    buf_str(o(), c"] dirname=[")
+    buf_append(o(), path_dirname(s))
+    buf_str(o(), c"] basename=[")
+    buf_append(o(), path_basename(s))
+    buf_str(o(), c"] concat=[")
+    path_concat(o(), s, bytes_c(c"f"))
+    buf_str(o(), c"] relative=")
+    buf_str(o(), if path_is_relative(s) { c"true" } else { c"false" })
+    buf_u8(o(), 10)
+}
+
+fn test_path() void {
+    names arr[22, addr] = {c"", c"/", c"//", c"///", c"a", c"a/", c"a//", c"/a", c"//a",
+        c"a/b", c"a//b", c"a/b/", c"a/b//", c"/a/b", c"//a//b//", c".", c"..", c"./a",
+        c"../a/b", c"a/./b", c"/usr/lib/libc.so.6", c"dir/.hidden"}
+    for i usize in 0..22 { show_path(names[i]) }
+}
+
+// ---------- file and os ----------
+
+fn read_err(path addr, max usize) error {
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    file_read(path, max, bh) catch e {
+        buf_free(bh)
+        return e
+    }
+    buf_free(bh)
+    return Unexpected
+}
+
+fn write_err(path addr) error {
+    file_write_atomic(path, bytes_c(c"x"), 0o644) catch e { return e }
+    return Unexpected
+}
+
+fn in_dir(b handle[Buf], dir addr, name addr) addr {
+    buf_clear(b)
+    path_concat(b, bytes_c(dir), bytes_c(name))
+    return buf_cstr(b)
+}
+
+fn test_file(dir addr) void {
+    p Buf = {}
+    ph handle[Buf] = handle_from_addr[Buf](&p)
+    data Buf = {}
+    dh handle[Buf] = handle_from_addr[Buf](&data)
+    for i usize in 0..100000 { buf_u8(dh, trunc[u8](i * 7)) }
+    a addr = in_dir(ph, dir, c"a.bin")
+    file_write_atomic(a, buf_bytes(dh), 0o755) catch e { check(false, c"write a") }
+    back Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&back)
+    file_read(a, 1000000, bh) catch { check(false, c"read a") }
+    check(bytes_eq(buf_bytes(bh), buf_bytes(dh)), c"read back")
+    st Stat = {}
+    os_stat(a, handle_from_addr[Stat](&st), true) catch { check(false, c"stat a") }
+    perm u32 = st.mode & 0o777
+    check(perm & ~0o755 == 0 && perm & 0o700 == 0o700, c"write mode")
+    check(st.size == 100000, c"stat size")
+    // replace with less: the old contents must be gone
+    file_write_atomic(a, bytes_c(c"short"), 0o644) catch { check(false, c"rewrite a") }
+    buf_clear(bh)
+    file_read(a, 1000000, bh) catch { check(false, c"reread a") }
+    check(bytes_eq_c(buf_bytes(bh), c"short"), c"rewrite contents")
+    // appends to what the buffer holds
+    file_read(a, 1000000, bh) catch { check(false, c"append read") }
+    check(bytes_eq_c(buf_bytes(bh), c"shortshort"), c"read appends")
+    check(read_err(a, 4) == TooBig, c"read TooBig")
+    check(read_err(in_dir(ph, dir, c"missing"), 100) == NotFound, c"read NotFound")
+    check(read_err(dir, 100) == NotRegular, c"read directory")
+    check(write_err(in_dir(ph, dir, c"no/such/dir")) == NotFound, c"write into missing dir")
+    // the rename onto a directory fails after the temporary file exists:
+    // it must be removed (the script checks for stray files)
+    check(write_err(in_dir(ph, dir, c"sub")) == IsDir, c"write over a directory")
+    check(os_exists(dir) && !os_exists(in_dir(ph, dir, c"missing")), c"os_exists")
+    os_unlink(in_dir(ph, dir, c"missing")) catch e { check(e == NotFound, c"unlink missing") }
+    // a relative name, written in the current directory
+    file_write_atomic(c"lib-test-rel.tmp", bytes_c(c"rel"), 0o600) catch { check(false, c"write relative") }
+    os_rename(c"lib-test-rel.tmp", in_dir(ph, dir, c"rel")) catch { check(false, c"rename") }
+    buf_clear(bh)
+    file_read(in_dir(ph, dir, c"rel"), 10, bh) catch { check(false, c"read renamed") }
+    check(bytes_eq_c(buf_bytes(bh), c"rel"), c"renamed contents")
+    // realpath through the symbolic link the script made, and of "."
+    buf_str(o(), c"realpath=")
+    path_realpath(in_dir(ph, dir, c"link/../link"), o()) catch { check(false, c"realpath") }
+    buf_u8(o(), 10)
+    cwd arr[4096, u8] = {}
+    n usize = os_getcwd(&cwd, 4096) catch 0
+    buf_clear(bh)
+    path_realpath(c".", bh) catch { check(false, c"realpath .") }
+    check(n > 0 && bytes_eq(buf_bytes(bh), bytes(&cwd, n)), c"getcwd")
+    e error = Unexpected
+    path_realpath(in_dir(ph, dir, c"missing"), bh) catch err { e = err }
+    check(e == NotFound, c"realpath missing")
+    buf_free(ph)
+    buf_free(dh)
+    buf_free(bh)
+}
+
+fn test_os() void {
+    v addr = os_getenv(c"LIB_TEST_ENV")
+    check(v != null && bytes_eq_c(bytes_c(v), c"a=b"), c"getenv")
+    check(os_getenv(c"LIB_TEST_EN") == null, c"getenv prefix")
+    check(os_getenv(c"LIB_TEST_ENV_NOT_SET") == null, c"getenv missing")
+    t0 u64 = os_clock_ns(CLOCK_MONOTONIC)
+    t1 u64 = os_clock_ns(CLOCK_MONOTONIC)
+    check(t1 >= t0, c"clock")
+    check(os_clock_ns(CLOCK_REALTIME) > 1600000000000000000, c"realtime")
+    b arr[4, u8] = {}
+    check((os_read(-1, &b, 4) catch 9) == 9, c"read bad fd")
+    e error = Unexpected
+    os_write_all(12345, &b, 4) catch err { e = err }
+    check(e == BadFd, c"errno BadFd")
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    if os_argc < 2 {
+        eprint(c"usage: lib DIR\n")
+        return 2
+    }
+    test_mem()
+    test_heap()
+    test_arena()
+    test_bytes()
+    test_buf()
+    test_vec()
+    test_map()
+    test_intern()
+    test_sort()
+    test_path()
+    test_file(os_arg(1))
+    test_os()
+    buf_str(o(), c"lib bad ")
+    buf_dec_u64(o(), bad)
+    buf_u8(o(), 10)
+    buf_write(o(), STDOUT) catch { return 3 }
+    return if bad == 0 { 0 } else { 1 }
+}

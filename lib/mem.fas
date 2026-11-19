@@ -1,0 +1,237 @@
+// Memory: raw byte helpers, a heap for blocks that grow and shrink, and
+// arenas for data that lives until the arena is dropped.
+//
+// Allocation never fails: when the kernel refuses memory, the library
+// writes "out of memory" to stderr and exits with status 2 (like OCaml's
+// Out_of_memory in the tools it replaces). Callers never write `try` for
+// memory.
+
+use "os.fas"
+
+fn mem_out_of_memory() void {
+    os_write_all(STDERR, c"fas library: out of memory\n", 27) catch {}
+    os_exit(2)
+}
+
+// Fresh zeroed pages from the kernel, `n` rounded up to the page size.
+fn mem_pages(n usize) addr {
+    p addr = os_mmap(null, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) catch {
+        mem_out_of_memory()
+        return null
+    }
+    return p
+}
+
+fn mem_round_pages(n usize) usize { return (n + 4095) & ~4095 }
+
+// Copies `n` bytes; the ranges must not overlap.
+fn mem_copy(dst addr, src addr, n usize) void {
+    i usize = 0
+    while i + 8 <= n {
+        dst[u64, 0] = src[u64, 0]
+        dst = dst + 8
+        src = src + 8
+        i += 8
+    }
+    while i < n {
+        dst[u8] = src[u8]
+        dst = dst + 1
+        src = src + 1
+        i += 1
+    }
+}
+
+// Copies `n` bytes; the ranges may overlap.
+fn mem_move(dst addr, src addr, n usize) void {
+    if addr_bits(dst) <= addr_bits(src) || addr_bits(dst) >= addr_bits(src) + n {
+        mem_copy(dst, src, n)
+        return
+    }
+    // dst inside (src, src + n): copy from the end
+    i usize = n
+    while i >= 8 {
+        i -= 8
+        (dst + i)[u64] = (src + i)[u64]
+    }
+    while i > 0 {
+        i -= 1
+        (dst + i)[u8] = (src + i)[u8]
+    }
+}
+
+fn mem_set(dst addr, byte u8, n usize) void {
+    i usize = 0
+    while i < n {
+        dst[u8, i] = byte
+        i += 1
+    }
+}
+
+fn mem_eq(a addr, b addr, n usize) bool {
+    i usize = 0
+    while i + 8 <= n {
+        if (a + i)[u64] != (b + i)[u64] { return false }
+        i += 8
+    }
+    while i < n {
+        if a[u8, i] != b[u8, i] { return false }
+        i += 1
+    }
+    return true
+}
+
+// ---------- heap ----------
+//
+// Blocks of up to HEAP_SMALL_MAX bytes come from 13 power-of-two size
+// classes (16 B .. 64 KiB) carved from 1 MiB slabs, and go back on a free
+// list per class. Bigger blocks are their own mapping, so they return to
+// the kernel when freed and grow with mremap. Each block has a 16-byte
+// header just before it: the class index, or HEAP_LARGE and the mapping's
+// size. Payloads are 16-byte aligned.
+
+const HEAP_CLASSES usize = 13
+const HEAP_SMALL_MAX usize = 65536
+const HEAP_LARGE u64 = 0xffff
+const HEAP_SLAB usize = 1048576
+
+var heap_free_lists arr[13, addr] = {}
+var heap_slab addr = null
+var heap_slab_left usize = 0
+
+fn heap_class(n usize) usize {
+    k usize = 0
+    while (zext[usize](16) << k) < n { k += 1 }
+    return k
+}
+
+// `n` bytes, not zeroed.
+fn heap_alloc(n usize) addr {
+    if n > HEAP_SMALL_MAX {
+        size usize = mem_round_pages(n + 16)
+        p addr = mem_pages(size)
+        p[u64, 0] = HEAP_LARGE
+        p[u64, 1] = size
+        return p + 16
+    }
+    k usize = heap_class(n)
+    head addr = heap_free_lists[k]
+    if head != null {
+        heap_free_lists[k] = head[addr]
+        return head
+    }
+    block usize = (zext[usize](16) << k) + 16
+    if heap_slab_left < block {
+        // the rest of the old slab is dropped: at most one block's worth
+        heap_slab = mem_pages(HEAP_SLAB)
+        heap_slab_left = HEAP_SLAB
+    }
+    p addr = heap_slab
+    heap_slab = heap_slab + block
+    heap_slab_left -= block
+    p[u64, 0] = k
+    return p + 16
+}
+
+// `n` zeroed bytes.
+fn heap_alloc_zeroed(n usize) addr {
+    p addr = heap_alloc(n)
+    mem_set(p, 0, n)
+    return p
+}
+
+// the usable size of a block from heap_alloc
+fn heap_size(p addr) usize {
+    k u64 = (p - 16)[u64]
+    if k == HEAP_LARGE { return (p - 16)[u64, 1] - 16 }
+    return zext[usize](16) << k
+}
+
+fn heap_free(p addr) void {
+    if p == null { return }
+    k u64 = (p - 16)[u64]
+    if k == HEAP_LARGE {
+        os_munmap(p - 16, (p - 16)[u64, 1])
+        return
+    }
+    p[addr] = heap_free_lists[k]
+    heap_free_lists[k] = p
+}
+
+// Resizes to `n` bytes, keeping the first min(old, n) bytes; null `p`
+// allocates. The block may move.
+fn heap_realloc(p addr, n usize) addr {
+    if p == null { return heap_alloc(n) }
+    have usize = heap_size(p)
+    if n <= have && (n > HEAP_SMALL_MAX || have <= HEAP_SMALL_MAX) { return p }
+    if (p - 16)[u64] == HEAP_LARGE && n > HEAP_SMALL_MAX {
+        size usize = mem_round_pages(n + 16)
+        q addr = os_mremap(p - 16, (p - 16)[u64, 1], size) catch {
+            mem_out_of_memory()
+            return null
+        }
+        q[u64, 1] = size
+        return q + 16
+    }
+    q addr = heap_alloc(n)
+    mem_copy(q, p, if have < n { have } else { n })
+    heap_free(p)
+    return q
+}
+
+// ---------- arenas ----------
+//
+// An arena hands out zeroed memory from 1 MiB chunks (a bigger request
+// gets a chunk of its own) and frees all of it at once. Chunks are linked
+// through their first 16 bytes: the previous chunk and this chunk's size.
+
+const ARENA_CHUNK usize = 1048576
+
+struct Arena {
+    chunk addr      // the current chunk, or null
+    used usize      // bytes used in it, header included
+    cap usize       // its size
+    total usize     // bytes handed out, for statistics
+}
+
+fn arena_new_chunk(a handle[Arena], need usize) void {
+    size usize = if need + 16 > ARENA_CHUNK { mem_round_pages(need + 16) } else { ARENA_CHUNK }
+    c addr = mem_pages(size)
+    c[addr, 0] = a.chunk
+    c[u64, 1] = size
+    a.chunk = c
+    a.used = 16
+    a.cap = size
+}
+
+// `n` zeroed bytes aligned to `align` (a power of two, at most 4096).
+fn arena_alloc(a handle[Arena], n usize, align usize) addr {
+    start usize = (a.used + align - 1) & ~(align - 1)
+    if a.chunk == null || start + n > a.cap {
+        arena_new_chunk(a, n + align)
+        start = (a.used + align - 1) & ~(align - 1)
+    }
+    a.used = start + n
+    a.total += n
+    return a.chunk + start
+}
+
+// Unmaps every chunk; the arena is empty and usable again.
+fn arena_free(a handle[Arena]) void {
+    c addr = a.chunk
+    while c != null {
+        prev addr = c[addr, 0]
+        os_munmap(c, c[u64, 1])
+        c = prev
+    }
+    a.chunk = null
+    a.used = 0
+    a.cap = 0
+    a.total = 0
+}
+
+// a copy of `n` bytes at `p`, plus a NUL after them
+fn arena_dup(a handle[Arena], p addr, n usize) addr {
+    q addr = arena_alloc(a, n + 1, 1)
+    mem_copy(q, p, n)
+    return q
+}

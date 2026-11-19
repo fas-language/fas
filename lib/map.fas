@@ -1,0 +1,164 @@
+// Hash maps: open addressing with linear probing, a power-of-two table,
+// at most 3/4 full, and backward-shift deletion (no tombstones). `Map`
+// starts as `{}` and owns its table until map_free.
+//
+// K and V are passed by value (scalars, `addr`, handles, value structs);
+// HASH and EQ are the key's hash and equality, given as generic arguments:
+// `Map[Bytes, u32, bytes_hash, bytes_eq]`, `Map[u64, addr, u64_hash, u64_eq]`.
+//
+// Iteration (map_next) runs in table order, which depends on the hash and
+// on the insertion history: sort the keys when the order matters.
+
+use "bytes.fas"
+
+struct MapSlot[K, V] {
+    hash u64        // 0: empty; else the key's hash with the top bit set
+    key K
+    val V
+}
+
+struct Map[K, V, HASH fn(K) u64, EQ fn(K, K) bool] {
+    slots addr
+    cap usize       // 0 or a power of two
+    n usize
+}
+
+fn u64_hash(x u64) u64 { return hash_mix(x) }
+fn u64_eq(a u64, b u64) bool { return a == b }
+fn u32_hash(x u32) u64 { return hash_mix(zext[u64](x)) }
+fn u32_eq(a u32, b u32) bool { return a == b }
+
+fn map_slot_hash(h u64) u64 { return h | 0x8000000000000000 }
+
+// the slot holding `k`, or m.cap when there is none
+fn map_find[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K) usize {
+    if m.n == 0 { return m.cap }
+    h u64 = map_slot_hash(HASH(k))
+    mask usize = m.cap - 1
+    i usize = h & mask
+    while true {
+        sh u64 = m.slots[MapSlot[K, V], i].hash
+        if sh == 0 { return m.cap }
+        if sh == h && EQ(m.slots[MapSlot[K, V], i].key, k) { return i }
+        i = (i + 1) & mask
+    }
+    unreachable()
+}
+
+fn map_has[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K) bool {
+    return map_find(m, k) != m.cap
+}
+
+// the value for `k`, or NotFound
+fn map_get[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K) V fails {
+    i usize = map_find(m, k)
+    if i == m.cap { fail NotFound }
+    return m.slots[MapSlot[K, V], i].val
+}
+
+// the address of the value for `k` (to update it in place), or null;
+// valid until the next insertion or removal
+fn map_val_addr[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K) addr {
+    i usize = map_find(m, k)
+    if i == m.cap { return null }
+    return &m.slots[MapSlot[K, V], i].val
+}
+
+fn map_grow[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]]) void {
+    old addr = m.slots
+    old_cap usize = m.cap
+    cap usize = if old_cap == 0 { 16 } else { old_cap * 2 }
+    m.slots = heap_alloc_zeroed(cap * sizeof[MapSlot[K, V]])
+    m.cap = cap
+    mask usize = cap - 1
+    for j usize in 0..old_cap {
+        h u64 = old[MapSlot[K, V], j].hash
+        if h != 0 {
+            i usize = h & mask
+            while m.slots[MapSlot[K, V], i].hash != 0 { i = (i + 1) & mask }
+            m.slots[MapSlot[K, V], i].hash = h
+            m.slots[MapSlot[K, V], i].key = old[MapSlot[K, V], j].key
+            m.slots[MapSlot[K, V], i].val = old[MapSlot[K, V], j].val
+        }
+    }
+    heap_free(old)
+}
+
+// sets the value for `k`, replacing an old one; true when `k` is new
+fn map_put[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K, v V) bool {
+    if (m.n + 1) * 4 > m.cap * 3 { map_grow(m) }
+    h u64 = map_slot_hash(HASH(k))
+    mask usize = m.cap - 1
+    i usize = h & mask
+    while true {
+        sh u64 = m.slots[MapSlot[K, V], i].hash
+        if sh == 0 {
+            m.slots[MapSlot[K, V], i].hash = h
+            m.slots[MapSlot[K, V], i].key = k
+            m.slots[MapSlot[K, V], i].val = v
+            m.n += 1
+            return true
+        }
+        if sh == h && EQ(m.slots[MapSlot[K, V], i].key, k) {
+            m.slots[MapSlot[K, V], i].val = v
+            return false
+        }
+        i = (i + 1) & mask
+    }
+    unreachable()
+}
+
+// removes `k`; false when it was not there
+fn map_remove[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], k K) bool {
+    i usize = map_find(m, k)
+    if i == m.cap { return false }
+    mask usize = m.cap - 1
+    // backward shift: move later entries of the probe run into the hole
+    // when their home slot is not inside (hole, entry]
+    j usize = i
+    while true {
+        j = (j + 1) & mask
+        h u64 = m.slots[MapSlot[K, V], j].hash
+        if h == 0 { break }
+        home usize = h & mask
+        // the distance from home to j, and from home to the hole
+        if ((j - home) & mask) >= ((j - i) & mask) {
+            m.slots[MapSlot[K, V], i].hash = h
+            m.slots[MapSlot[K, V], i].key = m.slots[MapSlot[K, V], j].key
+            m.slots[MapSlot[K, V], i].val = m.slots[MapSlot[K, V], j].val
+            i = j
+        }
+    }
+    mem_set(&m.slots[MapSlot[K, V], i], 0, sizeof[MapSlot[K, V]])
+    m.n -= 1
+    return true
+}
+
+// The first occupied slot at or after `i`, or m.cap: iterate with
+// `for i = map_next(m, 0); i < m.cap; i = map_next(m, i + 1)`.
+fn map_next[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], i usize) usize {
+    while i < m.cap && m.slots[MapSlot[K, V], i].hash == 0 { i += 1 }
+    return i
+}
+
+fn map_key_at[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], i usize) K {
+    assert(i < m.cap && m.slots[MapSlot[K, V], i].hash != 0)
+    return m.slots[MapSlot[K, V], i].key
+}
+
+fn map_val_at[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]], i usize) V {
+    assert(i < m.cap && m.slots[MapSlot[K, V], i].hash != 0)
+    return m.slots[MapSlot[K, V], i].val
+}
+
+fn map_clear[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]]) void {
+    if m.cap > 0 { mem_set(m.slots, 0, m.cap * sizeof[MapSlot[K, V]]) }
+    m.n = 0
+}
+
+fn map_free[K, V, HASH fn(K) u64, EQ fn(K, K) bool](m handle[Map[K, V, HASH, EQ]]) void {
+    heap_free(m.slots)
+    m.slots = null
+    m.cap = 0
+    m.n = 0
+}

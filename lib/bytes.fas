@@ -1,0 +1,158 @@
+// Byte strings: `Bytes` is a borrowed (address, length) pair, like an
+// OCaml string without ownership. Comparisons are on unsigned bytes, so
+// bytes_cmp orders like OCaml's String.compare and C's memcmp.
+
+use "mem.fas"
+
+value struct Bytes { p addr, n usize }
+
+fn bytes(p addr, n usize) Bytes { return {p, n} }
+
+fn bytes_empty() Bytes { return {null, 0} }
+
+fn cstr_len(s addr) usize {
+    n usize = 0
+    while s[u8, n] != 0 { n += 1 }
+    return n
+}
+
+// a NUL-terminated string, without its NUL
+fn bytes_c(s addr) Bytes { return {s, cstr_len(s)} }
+
+fn bytes_at(b Bytes, i usize) u8 {
+    assert(i < b.n)
+    return b.p[u8, i]
+}
+
+// `n` bytes from `start`; the range must be inside `b`
+fn bytes_sub(b Bytes, start usize, n usize) Bytes {
+    assert(start <= b.n && n <= b.n - start)
+    return {b.p + start, n}
+}
+
+// from `start` to the end
+fn bytes_from(b Bytes, start usize) Bytes { return bytes_sub(b, start, b.n - start) }
+
+fn bytes_eq(a Bytes, b Bytes) bool {
+    return a.n == b.n && mem_eq(a.p, b.p, a.n)
+}
+
+fn bytes_eq_c(a Bytes, s addr) bool { return bytes_eq(a, bytes_c(s)) }
+
+// -1, 0 or 1: unsigned bytes first, then the shorter string first
+fn bytes_cmp(a Bytes, b Bytes) i32 {
+    n usize = if a.n < b.n { a.n } else { b.n }
+    for i usize in 0..n {
+        x u8 = a.p[u8, i]
+        y u8 = b.p[u8, i]
+        if x != y { return if x < y { -1 } else { 1 } }
+    }
+    if a.n == b.n { return 0 }
+    return if a.n < b.n { -1 } else { 1 }
+}
+
+fn bytes_less(a Bytes, b Bytes) bool { return bytes_cmp(a, b) < 0 }
+
+fn bytes_starts_with(b Bytes, prefix Bytes) bool {
+    return prefix.n <= b.n && mem_eq(b.p, prefix.p, prefix.n)
+}
+
+fn bytes_ends_with(b Bytes, suffix Bytes) bool {
+    return suffix.n <= b.n && mem_eq(b.p + (b.n - suffix.n), suffix.p, suffix.n)
+}
+
+// the first index of `byte` at or after `from`
+fn bytes_index_from(b Bytes, from usize, byte u8) usize fails {
+    for i usize in from..b.n {
+        if b.p[u8, i] == byte { return i }
+    }
+    fail NotFound
+}
+
+fn bytes_index(b Bytes, byte u8) usize fails { return try bytes_index_from(b, 0, byte) }
+
+// the last index of `byte`
+fn bytes_rindex(b Bytes, byte u8) usize fails {
+    i usize = b.n
+    while i > 0 {
+        i -= 1
+        if b.p[u8, i] == byte { return i }
+    }
+    fail NotFound
+}
+
+fn bytes_contains(b Bytes, byte u8) bool {
+    i usize = bytes_index(b, byte) catch { return false }
+    return true
+}
+
+// the first index of `needle` (0 for an empty needle)
+fn bytes_find(hay Bytes, needle Bytes) usize fails {
+    if needle.n > hay.n { fail NotFound }
+    for i usize in 0..hay.n - needle.n + 1 {
+        if mem_eq(hay.p + i, needle.p, needle.n) { return i }
+    }
+    fail NotFound
+}
+
+// 64-bit FNV-1a, then a final mix so the low bits (the table index) depend
+// on every byte
+fn bytes_hash(b Bytes) u64 {
+    h u64 = 0xcbf29ce484222325
+    for i usize in 0..b.n {
+        h = (h ^ zext[u64](b.p[u8, i])) * 0x100000001b3
+    }
+    return hash_mix(h)
+}
+
+// the murmur3 64-bit finalizer
+fn hash_mix(x u64) u64 {
+    x ^= x >> 33
+    x *= 0xff51afd7ed558ccd
+    x ^= x >> 33
+    x *= 0xc4ceb9fe1a85ec53
+    x ^= x >> 33
+    return x
+}
+
+// a copy in `a`, with a NUL after it (so `.p` is also a C string)
+fn bytes_dup(a handle[Arena], b Bytes) Bytes {
+    return {arena_dup(a, b.p, b.n), b.n}
+}
+
+error BadNumber
+
+// A decimal u64 (digits only, no sign, no spaces); BadNumber for anything
+// else, including an empty string, and Overflow past 2^64 - 1.
+fn bytes_to_u64(b Bytes) u64 fails {
+    if b.n == 0 { fail BadNumber }
+    v u64 = 0
+    for i usize in 0..b.n {
+        ch u8 = b.p[u8, i]
+        if ch < 48 || ch > 57 { fail BadNumber }
+        v = try checked_add(try checked_mul(v, 10), zext[u64](ch - 48))
+    }
+    return v
+}
+
+// A hexadecimal u64 without a prefix; BadNumber or Overflow as above.
+fn bytes_hex_to_u64(b Bytes) u64 fails {
+    if b.n == 0 { fail BadNumber }
+    v u64 = 0
+    for i usize in 0..b.n {
+        ch u8 = b.p[u8, i]
+        d u64 = 0
+        if ch >= 48 && ch <= 57 {
+            d = zext[u64](ch - 48)
+        } else if ch >= 97 && ch <= 102 {
+            d = zext[u64](ch - 87)
+        } else if ch >= 65 && ch <= 70 {
+            d = zext[u64](ch - 55)
+        } else {
+            fail BadNumber
+        }
+        if v >> 60 != 0 { fail Overflow }
+        v = (v << 4) | d
+    }
+    return v
+}

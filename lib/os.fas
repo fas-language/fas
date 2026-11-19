@@ -1,0 +1,248 @@
+// The OS layer: Linux x86-64 system calls, no libc. Every call that can
+// fail is `fails` with the kernel's errno as the error (the names below pin
+// the common codes; any other errno arrives as an undeclared code, which
+// `err_name` prints as "errno N"). EINTR is retried inside the loops that
+// read or write a whole buffer, and nowhere else.
+//
+// Part of the compiler's library (lib/README.md): no stability promise
+// until Fas hosts itself.
+
+error Perm = 1, NotFound = 2, Intr = 4, Io = 5, BadFd = 9, Again = 11
+error NoMem = 12, Access = 13, Exists = 17, NotDir = 20, IsDir = 21
+error Inval = 22, NoSpace = 28, NameTooLong = 36, Loop = 40
+
+// a short write that made no progress (the kernel returned 0)
+error ShortWrite
+
+const SYS_READ u64 = 0
+const SYS_WRITE u64 = 1
+const SYS_CLOSE u64 = 3
+const SYS_FSTAT u64 = 5
+const SYS_LSEEK u64 = 8
+const SYS_MMAP u64 = 9
+const SYS_MUNMAP u64 = 11
+const SYS_MREMAP u64 = 25
+const SYS_GETPID u64 = 39
+const SYS_GETCWD u64 = 79
+const SYS_FCHMOD u64 = 91
+const SYS_CLOCK_GETTIME u64 = 228
+const SYS_EXIT_GROUP u64 = 231
+const SYS_OPENAT u64 = 257
+const SYS_UNLINKAT u64 = 263
+const SYS_RENAMEAT u64 = 264
+const SYS_READLINKAT u64 = 267
+const SYS_NEWFSTATAT u64 = 262
+
+const AT_FDCWD i64 = -100
+const AT_SYMLINK_NOFOLLOW u64 = 0x100
+
+const O_RDONLY u64 = 0
+const O_WRONLY u64 = 1
+const O_RDWR u64 = 2
+const O_CREAT u64 = 0x40
+const O_EXCL u64 = 0x80
+const O_TRUNC u64 = 0x200
+const O_APPEND u64 = 0x400
+const O_DIRECTORY u64 = 0x10000
+const O_NOFOLLOW u64 = 0x20000
+const O_CLOEXEC u64 = 0x80000
+const O_PATH u64 = 0x200000
+
+const STDIN i32 = 0
+const STDOUT i32 = 1
+const STDERR i32 = 2
+
+// st_mode file types
+const S_IFMT u32 = 0xf000
+const S_IFREG u32 = 0x8000
+const S_IFDIR u32 = 0x4000
+const S_IFLNK u32 = 0xa000
+
+// The kernel's `struct stat` on x86-64 (144 bytes)
+struct Stat {
+    dev u64
+    ino u64
+    nlink u64
+    mode u32
+    uid u32
+    gid u32
+    pad0 u32
+    rdev u64
+    size i64
+    blksize i64
+    blocks i64
+    atime_sec i64
+    atime_nsec i64
+    mtime_sec i64
+    mtime_nsec i64
+    ctime_sec i64
+    ctime_nsec i64
+    reserved arr[3, i64]
+}
+
+const assert(sizeof[Stat] == 144)
+
+fn os_exit(code i32) void {
+    r i64 = syscall(SYS_EXIT_GROUP, code)
+    unreachable()
+}
+
+// Reads at most `n` bytes; 0 means end of file.
+fn os_read(fd i32, p addr, n usize) usize fails {
+    return try syscall[usize fails](SYS_READ, fd, p, n)
+}
+
+// Writes at most `n` bytes and returns how many were written.
+fn os_write(fd i32, p addr, n usize) usize fails {
+    return try syscall[usize fails](SYS_WRITE, fd, p, n)
+}
+
+// Writes all `n` bytes, retrying short writes and EINTR.
+fn os_write_all(fd i32, p addr, n usize) void fails {
+    done usize = 0
+    while done < n {
+        w usize = os_write(fd, p + done, n - done) catch e {
+            if e == Intr { continue }
+            fail e
+        }
+        if w == 0 { fail ShortWrite }
+        done += w
+    }
+}
+
+// Reads until `n` bytes or end of file, retrying EINTR; returns the count.
+fn os_read_full(fd i32, p addr, n usize) usize fails {
+    done usize = 0
+    while done < n {
+        r usize = os_read(fd, p + done, n - done) catch e {
+            if e == Intr { continue }
+            fail e
+        }
+        if r == 0 { break }
+        done += r
+    }
+    return done
+}
+
+// `path` is a NUL-terminated string, relative to the current directory.
+fn os_open(path addr, flags u64, mode u32) i32 fails {
+    return trunc[i32](try syscall[fails](SYS_OPENAT, AT_FDCWD, path, flags | O_CLOEXEC, mode))
+}
+
+fn os_close(fd i32) void {
+    // close always releases the descriptor on Linux, even when it reports
+    // an error, so there is nothing to retry or report
+    r i64 = syscall(SYS_CLOSE, fd)
+}
+
+fn os_fstat(fd i32, st handle[Stat]) void fails {
+    r i64 = try syscall[fails](SYS_FSTAT, fd, handle_addr(st))
+}
+
+// stat (follows symbolic links) or lstat (`follow` false)
+fn os_stat(path addr, st handle[Stat], follow bool) void fails {
+    flags u64 = if follow { 0 } else { AT_SYMLINK_NOFOLLOW }
+    r i64 = try syscall[fails](SYS_NEWFSTATAT, AT_FDCWD, path, handle_addr(st), flags)
+}
+
+fn os_exists(path addr) bool {
+    st Stat = {}
+    os_stat(path, handle_from_addr[Stat](&st), true) catch { return false }
+    return true
+}
+
+fn os_lseek(fd i32, offset i64, whence u32) i64 fails {
+    return try syscall[fails](SYS_LSEEK, fd, offset, whence)
+}
+
+fn os_fchmod(fd i32, mode u32) void fails {
+    r i64 = try syscall[fails](SYS_FCHMOD, fd, mode)
+}
+
+fn os_rename(from addr, to addr) void fails {
+    r i64 = try syscall[fails](SYS_RENAMEAT, AT_FDCWD, from, AT_FDCWD, to)
+}
+
+fn os_unlink(path addr) void fails {
+    r i64 = try syscall[fails](SYS_UNLINKAT, AT_FDCWD, path, 0)
+}
+
+// readlink into `buf` (`cap` bytes); returns the length, without a NUL.
+// A target that fills the whole buffer may be truncated: NameTooLong
+fn os_readlink(path addr, buf addr, cap usize) usize fails {
+    n usize = try syscall[usize fails](SYS_READLINKAT, AT_FDCWD, path, buf, cap)
+    if n >= cap { fail NameTooLong }
+    return n
+}
+
+// The current directory into `buf` (`cap` bytes) with its NUL; returns the
+// length without the NUL.
+fn os_getcwd(buf addr, cap usize) usize fails {
+    r usize = try syscall[usize fails](SYS_GETCWD, buf, cap)
+    n usize = 0
+    while buf[u8, n] != 0 { n += 1 }
+    return n
+}
+
+fn os_getpid() u32 {
+    return trunc[u32](bitcast[u64](syscall(SYS_GETPID)))
+}
+
+const PROT_READ u64 = 1
+const PROT_WRITE u64 = 2
+const MAP_SHARED u64 = 1
+const MAP_PRIVATE u64 = 2
+const MAP_ANONYMOUS u64 = 0x20
+const MREMAP_MAYMOVE u64 = 1
+
+fn os_mmap(p addr, n usize, prot u64, flags u64, fd i32, offset u64) addr fails {
+    return try syscall[addr fails](SYS_MMAP, p, n, prot, flags, fd, offset)
+}
+
+fn os_munmap(p addr, n usize) void {
+    r i64 = syscall(SYS_MUNMAP, p, n)
+}
+
+fn os_mremap(p addr, old usize, n usize) addr fails {
+    return try syscall[addr fails](SYS_MREMAP, p, old, n, MREMAP_MAYMOVE)
+}
+
+const CLOCK_REALTIME u32 = 0
+const CLOCK_MONOTONIC u32 = 1
+const CLOCK_PROCESS_CPUTIME_ID u32 = 2
+
+// nanoseconds on `clock`
+fn os_clock_ns(clock u32) u64 {
+    ts arr[2, i64] = {}
+    r i64 = syscall(SYS_CLOCK_GETTIME, clock, &ts)
+    return bitcast[u64](ts[0]) * 1000000000 + bitcast[u64](ts[1])
+}
+
+// The process arguments and environment, from `main(argc, argv)`: call
+// os_init(argc, argv) first thing in main.
+var os_argc usize = 0
+var os_argv addr = null
+
+fn os_init(argc i32, argv addr) void {
+    os_argc = zext[usize](bitcast[u32](argc))
+    os_argv = argv
+}
+
+// argument `i` (0 is the program) as a NUL-terminated string
+fn os_arg(i usize) addr {
+    return os_argv[addr, i]
+}
+
+// The value of environment variable `name` (a NUL-terminated string), or
+// null. The environment follows argv's terminating null.
+fn os_getenv(name addr) addr {
+    i usize = os_argc + 1
+    while os_argv[addr, i] != null {
+        e addr = os_argv[addr, i]
+        k usize = 0
+        while name[u8, k] != 0 && e[u8, k] == name[u8, k] { k += 1 }
+        if name[u8, k] == 0 && e[u8, k] == 61 { return e + k + 1 }
+        i += 1
+    }
+    return null
+}

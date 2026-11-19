@@ -1,0 +1,165 @@
+// Growable byte buffers on the heap: output files, messages, formatted
+// numbers. A `Buf` starts as `{}` (empty, no memory) and owns its block
+// until buf_free. Integers are appended little-endian, as ELF wants them on
+// x86-64.
+
+use "bytes.fas"
+
+struct Buf {
+    p addr
+    n usize
+    cap usize
+}
+
+// room for `extra` more bytes
+fn buf_reserve(b handle[Buf], extra usize) void {
+    need usize = b.n + extra
+    if need <= b.cap { return }
+    cap usize = if b.cap < 64 { 64 } else { b.cap }
+    while cap < need { cap *= 2 }
+    b.p = heap_realloc(b.p, cap)
+    b.cap = cap
+}
+
+fn buf_free(b handle[Buf]) void {
+    heap_free(b.p)
+    b.p = null
+    b.n = 0
+    b.cap = 0
+}
+
+// empties the buffer and keeps its memory
+fn buf_clear(b handle[Buf]) void { b.n = 0 }
+
+fn buf_bytes(b handle[Buf]) Bytes { return {b.p, b.n} }
+
+fn buf_u8(b handle[Buf], x u8) void {
+    buf_reserve(b, 1)
+    b.p[u8, b.n] = x
+    b.n += 1
+}
+
+fn buf_raw(b handle[Buf], p addr, n usize) void {
+    buf_reserve(b, n)
+    mem_copy(b.p + b.n, p, n)
+    b.n += n
+}
+
+fn buf_append(b handle[Buf], s Bytes) void { buf_raw(b, s.p, s.n) }
+
+// a NUL-terminated string, without its NUL
+fn buf_str(b handle[Buf], s addr) void { buf_raw(b, s, cstr_len(s)) }
+
+fn buf_u16le(b handle[Buf], x u16) void {
+    buf_reserve(b, 2)
+    (b.p + b.n)[u16] = x
+    b.n += 2
+}
+
+fn buf_u32le(b handle[Buf], x u32) void {
+    buf_reserve(b, 4)
+    (b.p + b.n)[u32] = x
+    b.n += 4
+}
+
+fn buf_u64le(b handle[Buf], x u64) void {
+    buf_reserve(b, 8)
+    (b.p + b.n)[u64] = x
+    b.n += 8
+}
+
+fn buf_zeros(b handle[Buf], n usize) void {
+    buf_reserve(b, n)
+    mem_set(b.p + b.n, 0, n)
+    b.n += n
+}
+
+// zero bytes up to a multiple of `align` (a power of two)
+fn buf_align(b handle[Buf], align usize) void {
+    buf_zeros(b, ((b.n + align - 1) & ~(align - 1)) - b.n)
+}
+
+// overwrite bytes already in the buffer
+fn buf_set_u32le(b handle[Buf], at usize, x u32) void {
+    assert(at + 4 <= b.n)
+    (b.p + at)[u32] = x
+}
+
+fn buf_set_u64le(b handle[Buf], at usize, x u64) void {
+    assert(at + 8 <= b.n)
+    (b.p + at)[u64] = x
+}
+
+// keeps the first `n` bytes
+fn buf_truncate(b handle[Buf], n usize) void {
+    assert(n <= b.n)
+    b.n = n
+}
+
+// a NUL after the contents (not counted in `n`), so `b.p` is a C string
+fn buf_cstr(b handle[Buf]) addr {
+    buf_reserve(b, 1)
+    b.p[u8, b.n] = 0
+    return b.p
+}
+
+// ---------- numbers as text ----------
+
+fn buf_dec_u64(b handle[Buf], x u64) void {
+    tmp arr[20, u8] = {}
+    i usize = 20
+    while true {
+        i -= 1
+        tmp[i] = trunc[u8](x % 10) + 48
+        x = x / 10
+        if x == 0 { break }
+    }
+    buf_raw(b, &tmp[i], 20 - i)
+}
+
+fn buf_dec_i64(b handle[Buf], x i64) void {
+    if x < 0 {
+        buf_u8(b, 45)
+        // -x wraps for i64 min, and its bits read as u64 are then right
+        buf_dec_u64(b, bitcast[u64](0 - x))
+        return
+    }
+    buf_dec_u64(b, bitcast[u64](x))
+}
+
+// lowercase hex, at least `digits` digits (zero-padded), no prefix: like
+// printf's %0*llx
+fn buf_hex(b handle[Buf], x u64, digits usize) void {
+    tmp arr[16, u8] = {}
+    i usize = 16
+    while true {
+        i -= 1
+        d u8 = trunc[u8](x & 15)
+        tmp[i] = if d < 10 { d + 48 } else { d + 87 }
+        x = x >> 4
+        if x == 0 { break }
+    }
+    n usize = 16 - i
+    while n < digits {
+        buf_u8(b, 48)
+        n += 1
+    }
+    buf_raw(b, &tmp[i], 16 - i)
+}
+
+// ---------- output ----------
+
+// writes the whole buffer to `fd`
+fn buf_write(b handle[Buf], fd i32) void fails {
+    try os_write_all(fd, b.p, b.n)
+}
+
+// writes a message to stderr, ignoring failures (there is nowhere left to
+// report them)
+fn eprint(s addr) void {
+    os_write_all(STDERR, s, cstr_len(s)) catch {}
+}
+
+fn eprint_bytes(s Bytes) void {
+    os_write_all(STDERR, s.p, s.n) catch {}
+}

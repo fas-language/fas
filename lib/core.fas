@@ -1,0 +1,12 @@
+// The compiler's library: everything at once. See lib/README.md.
+
+use "os.fas"
+use "mem.fas"
+use "bytes.fas"
+use "buf.fas"
+use "vec.fas"
+use "map.fas"
+use "sort.fas"
+use "intern.fas"
+use "file.fas"
+use "path.fas"

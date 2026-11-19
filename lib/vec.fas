@@ -1,0 +1,77 @@
+// Growable arrays on the heap. `Vec[T]` starts as `{}` and owns its block
+// until vec_free. vec_push/vec_get take and give `T` by value, so they need
+// a scalar, `addr`, handle or value struct; any T works through vec_at (an
+// element's address) and vec_push_zeroed (a new zeroed element).
+// Addresses from vec_at stay valid only until the vector grows.
+
+use "mem.fas"
+
+struct Vec[T] {
+    p addr
+    n usize
+    cap usize
+}
+
+fn vec_reserve[T](v handle[Vec[T]], extra usize) void {
+    need usize = v.n + extra
+    if need <= v.cap { return }
+    cap usize = if v.cap < 8 { 8 } else { v.cap }
+    while cap < need { cap *= 2 }
+    v.p = heap_realloc(v.p, cap * sizeof[T])
+    v.cap = cap
+}
+
+fn vec_push[T](v handle[Vec[T]], x T) void {
+    vec_reserve(v, 1)
+    v.p[T, v.n] = x
+    v.n += 1
+}
+
+// a new zeroed element at the end, and its address
+fn vec_push_zeroed[T](v handle[Vec[T]]) addr {
+    vec_reserve(v, 1)
+    p addr = v.p + v.n * sizeof[T]
+    mem_set(p, 0, sizeof[T])
+    v.n += 1
+    return p
+}
+
+fn vec_get[T](v handle[Vec[T]], i usize) T {
+    assert(i < v.n)
+    return v.p[T, i]
+}
+
+fn vec_set[T](v handle[Vec[T]], i usize, x T) void {
+    assert(i < v.n)
+    v.p[T, i] = x
+}
+
+fn vec_at[T](v handle[Vec[T]], i usize) addr {
+    assert(i < v.n)
+    return v.p + i * sizeof[T]
+}
+
+fn vec_last[T](v handle[Vec[T]]) T {
+    assert(v.n > 0)
+    return v.p[T, v.n - 1]
+}
+
+fn vec_pop[T](v handle[Vec[T]]) T {
+    assert(v.n > 0)
+    v.n -= 1
+    return v.p[T, v.n]
+}
+
+fn vec_truncate[T](v handle[Vec[T]], n usize) void {
+    assert(n <= v.n)
+    v.n = n
+}
+
+fn vec_clear[T](v handle[Vec[T]]) void { v.n = 0 }
+
+fn vec_free[T](v handle[Vec[T]]) void {
+    heap_free(v.p)
+    v.p = null
+    v.n = 0
+    v.cap = 0
+}

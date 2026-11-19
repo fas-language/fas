@@ -1,0 +1,75 @@
+// Stable sorting (like OCaml's List.sort / List.stable_sort): bottom-up
+// merge sort over `n` elements of T at `p`, with LESS as the strict order.
+// Equal elements keep their order, so output never depends on anything but
+// the input. T is passed by value (a scalar, `addr`, handle or value
+// struct); to sort big records, sort their indices or addresses.
+
+use "vec.fas"
+
+const SORT_RUN usize = 16
+
+fn sort[T, LESS fn(T, T) bool](p addr, n usize) void {
+    if n < 2 { return }
+    // short runs by insertion sort first
+    lo usize = 0
+    while lo < n {
+        hi usize = if n - lo < SORT_RUN { n } else { lo + SORT_RUN }
+        for i usize in lo + 1..hi {
+            x T = p[T, i]
+            j usize = i
+            while j > lo && LESS(x, p[T, j - 1]) {
+                p[T, j] = p[T, j - 1]
+                j -= 1
+            }
+            p[T, j] = x
+        }
+        lo = hi
+    }
+    if n <= SORT_RUN { return }
+    tmp addr = heap_alloc(n * sizeof[T])
+    src addr = p
+    dst addr = tmp
+    width usize = SORT_RUN
+    while width < n {
+        lo = 0
+        while lo < n {
+            mid usize = if n - lo < width { n } else { lo + width }
+            hi usize = if n - mid < width { n } else { mid + width }
+            i usize = lo
+            j usize = mid
+            k usize = lo
+            while i < mid && j < hi {
+                // take from the right only when strictly less: stability
+                if LESS(src[T, j], src[T, i]) {
+                    dst[T, k] = src[T, j]
+                    j += 1
+                } else {
+                    dst[T, k] = src[T, i]
+                    i += 1
+                }
+                k += 1
+            }
+            while i < mid {
+                dst[T, k] = src[T, i]
+                i += 1
+                k += 1
+            }
+            while j < hi {
+                dst[T, k] = src[T, j]
+                j += 1
+                k += 1
+            }
+            lo = hi
+        }
+        t addr = src
+        src = dst
+        dst = t
+        width *= 2
+    }
+    if src != p { mem_copy(p, src, n * sizeof[T]) }
+    heap_free(tmp)
+}
+
+fn sort_vec[T, LESS fn(T, T) bool](v handle[Vec[T]]) void {
+    sort[T, LESS](v.p, v.n)
+}
