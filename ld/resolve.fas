@@ -245,7 +245,9 @@ fn pnode_add(kind u8, ref u64) void {
     n.ref = trunc[u32](ref)
 }
 
-fn read_input(path Bytes, whole bool) void {
+// one input file, prepared at script/group nesting `depth`; `scripts` are
+// the canonical paths of the scripts being expanded (for cycles)
+fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) void {
     file_count += 1
     if file_count > 1024 {
         m handle[Buf] = msg()
@@ -310,7 +312,10 @@ fn read_input(path Bytes, whole bool) void {
         bs(m, c": shared input requires -pie or --dynamic-linker")
         input_die()
     }
-    if is_script(data) { refuse(c"linker scripts") }
+    if is_script(data) {
+        script_input(path, data, whole, depth, scripts)
+        return
+    }
     pnode_add(P_OBJECT, nobj)
     o handle[Obj] = new_object(c"")
     o.path = path
@@ -352,17 +357,29 @@ fn read_extra(path Bytes) Bytes {
 fn read_inputs() void {
     c handle[Config] = config()
     items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
-    // enclosing group count of each item: groups end after `count` items
+    nodes handle[Vec[PNode]] = handle_from_addr[Vec[PNode]](&pnodes)
+    scripts Vec[Bytes] = {}
+    sh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&scripts)
+    // the enclosing groups: they end after `count` items; a script input
+    // expands to any number of nodes, so a group's node count is only
+    // known at its end
     ends Vec[u64] = {}
     eh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&ends)
-    for i u64 in 0..items.n {
-        while eh.n != 0 && vec_last[u64](eh) == i { vec_pop[u64](eh) }
+    starts Vec[u64] = {}
+    gh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&starts)
+    for i u64 in 0..items.n + 1 {
+        while eh.n != 0 && vec_last[u64](eh) == i {
+            vec_pop[u64](eh)
+            g u64 = vec_pop[u64](gh)
+            vec_ref[PNode](nodes, g).count = trunc[u32](nodes.n - g - 1)
+        }
+        if i == items.n { break }
         it handle[Item] = vec_ref[Item](items, i)
         depth u64 = eh.n
         if it.kind == IT_GROUP {
             vec_push[u64](eh, i + 1 + zext[u64](it.count))
+            vec_push[u64](gh, nodes.n)
             pnode_add(P_GROUP, 0)
-            vec_ref[PNode](handle_from_addr[Vec[PNode]](&pnodes), i).count = it.count
             continue
         }
         // Input.As_needed and Input.Static each add one level of policy
@@ -380,8 +397,13 @@ fn read_inputs() void {
             // static output: only archives (requires_static_inputs)
             path = library_find(it.text, false, handle_from_addr[Vec[Bytes]](&ldirs))
         }
-        read_input(path, it.whole)
+        // the file's own depth: inside As_needed, then Static
+        fd u64 = depth + extra
+        if static_wrap { fd += 1 }
+        read_input(path, it.whole, fd, sh)
     }
+    vec_free[u64](eh)
+    vec_free[u64](gh)
     parse_flush()
     reading = false
 }
@@ -653,17 +675,9 @@ fn resolve() void {
     if c.entry.n == 0 { die_c(c"entry symbol must not be empty") }
     // library search directories (Sysroot.directory without a root)
     dirs handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.library_paths)
+    if c.has_sysroot { sysroot_normalize(c.sysroot) }
     lh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ldirs)
-    for k u64 in 0..dirs.n {
-        d Bytes = vec_get[Bytes](dirs, k)
-        if d.n > 65536 || bytes_contains(d, 0) { die_c(c"invalid or oversized sysroot/search path") }
-        if bytes_prefix(d, c"=") {
-            d = bytes(d.p + 1, d.n - 1)
-        } else if bytes_prefix(d, c"$SYSROOT") {
-            d = bytes(d.p + 8, d.n - 8)
-        }
-        vec_push[Bytes](lh, d)
-    }
+    for k u64 in 0..dirs.n { vec_push[Bytes](lh, root_directory(vec_get[Bytes](dirs, k))) }
     if dirs.n > 4096 { die_c(c"library search exceeds 4096 directories") }
     // Input.paths: every path item
     paths u64 = 0

@@ -825,6 +825,7 @@ fn build_image() void {
         content_count + 2, lh.n + 1, 8, 24)
     section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, st.n, 0, 0, 1, 0)
     section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, sh.n, 0, 0, 1, 0)
+    if c.has_map { map_build(entry, lh, gh) }
 }
 
 // ---------- publishing (File_io) ----------
@@ -880,6 +881,13 @@ fn link_and_publish() void {
         it handle[Item] = vec_ref[Item](items, k)
         if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
     }
+    // the map is checked before the executable, and published (inside the
+    // executable's publication) just before it
+    if c.has_map {
+        distinct_outputs(output, c.map_file)
+        ms Stat = {}
+        check_output(c.map_file, ph, false, handle_from_addr[Stat](&ms))
+    }
     st Stat = {}
     sth handle[Stat] = handle_from_addr[Stat](&st)
     exists bool = check_output(output, ph, false, sth)
@@ -889,6 +897,15 @@ fn link_and_publish() void {
     build_id_emit()
     st2 Stat = {}
     check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
+    if c.has_map {
+        ms2 Stat = {}
+        msh handle[Stat] = handle_from_addr[Stat](&ms2)
+        if !(check_output(c.map_file, handle_from_addr[Vec[Bytes]](&expanded), true, msh) && null_output(c.map_file, msh)) {
+            file_write_atomic(c.map_file.p, buf_bytes(handle_from_addr[Buf](&map_text)), 0o644) catch e {
+                die_io(c"write", c.map_file, e)
+            }
+        }
+    }
     if discard { return }
     file_write_atomic(output.p, bytes(image, image_size), 0o755) catch e {
         die_io(c"write", output, e)

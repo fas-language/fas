@@ -23,6 +23,8 @@ use "buildid.fas"
 use "tls.fas"
 use "ifunc.fas"
 use "zlib.fas"
+use "script.fas"
+use "map.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
@@ -35,8 +37,6 @@ fn main(argc i32, argv addr) i32 {
     if c.relocatable { refuse(c"relocatable output (-r)") }
     if c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
     if c.statistics { refuse(c"--stats") }
-    if c.has_map { refuse(c"-Map") }
-    if c.has_sysroot { refuse(c"--sysroot") }
     threads u32 = 0
     t addr = os_getenv(c"FAS_LD_THREADS")
     if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }
