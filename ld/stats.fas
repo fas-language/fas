@@ -1,0 +1,247 @@
+// --stats: the OCaml linker's statistics JSON (src/linker/stats.ml) on
+// stderr, after the link or before its diagnostic. The counts are the
+// OCaml linker's, exactly; the phases are timed here (wall and process CPU
+// time, summed over every run of a phase). The Fas linker has no garbage
+// collector: "allocated_words" is the memory it mapped for its heap and
+// tables, in 8-byte words (per phase: mapped while it ran), and the
+// other gc fields are 0.
+
+const ST_ARCHIVES u64 = 0
+const ST_COPY_RELOCATIONS u64 = 1
+const ST_COPY_STORAGE_BYTES u64 = 2
+const ST_DECODED_DEBUG_BYTES u64 = 3
+const ST_DISCARDED_COMDAT_GROUPS u64 = 4
+const ST_DISCARDED_OUTPUT_BYTES u64 = 5
+const ST_DISCARDED_SECTIONS u64 = 6
+const ST_DYNAMIC_EXPORTS u64 = 7
+const ST_DYNAMIC_IMPORTS u64 = 8
+const ST_DYNAMIC_RELATIVE_RELOCATIONS u64 = 9
+const ST_EXTRACTED_MEMBERS u64 = 10
+const ST_GNU_PROPERTIES u64 = 11
+const ST_GOT_ENTRIES u64 = 12
+const ST_GOTPCRELX_RELAXATIONS u64 = 13
+const ST_IN_MEMORY_OBJECTS u64 = 14
+const ST_INDEXED_UNWIND_FDES u64 = 15
+const ST_INPUT_BYTES u64 = 16
+const ST_INPUT_FILES u64 = 17
+const ST_INPUT_READ_CACHE_HITS u64 = 18
+const ST_LINKER_SCRIPTS u64 = 19
+const ST_LINKER_SYMBOLS u64 = 20
+const ST_MERGED_BYTES u64 = 21
+const ST_MERGED_SECTIONS u64 = 22
+const ST_OBJECTS u64 = 23
+const ST_OUTPUT_BYTES u64 = 24
+const ST_PLT_ENTRIES u64 = 25
+const ST_RELOCATIONS u64 = 26
+const ST_SHARED_LIBRARIES u64 = 27
+const ST_STATIC_IFUNC_RESOLVERS u64 = 28
+const ST_SYMBOLS u64 = 29
+const ST_THIN_MEMBER_FILES u64 = 30
+const ST_TRANSITIVE_SHARED_LIBRARIES u64 = 31
+const ST_UNWIND_FDES u64 = 32
+const ST_N u64 = 33
+
+const PH_EMIT u64 = 0
+const PH_GC u64 = 1
+const PH_MERGE u64 = 2
+const PH_PARSE u64 = 3
+const PH_PARSE_DEPENDENCY u64 = 4
+const PH_READ u64 = 5
+const PH_RELOCATE u64 = 6
+const PH_RESOLVE u64 = 7
+const PH_UNWIND u64 = 8
+const PH_WRITE u64 = 9
+const PH_N u64 = 10
+
+var stats_on bool = false
+var stats_start_wall u64 = 0
+var stats_start_cpu u64 = 0
+
+// the counters and phase flags, which a parse failure found late rolls
+// back to the moment the failing input was read (StatSnap)
+struct StatSnap {
+    count arr[33, u64]
+    seen arr[33, bool]
+    phase_seen arr[10, bool]
+}
+var stat_now StatSnap = {}
+var phase_wall arr[10, u64] = {}
+var phase_cpu arr[10, u64] = {}
+var phase_mem arr[10, u64] = {}
+
+fn stat_name(k u64) addr {
+    switch k {
+        case 0: return c"archives"
+        case 1: return c"copy_relocations"
+        case 2: return c"copy_storage_bytes"
+        case 3: return c"decoded_debug_bytes"
+        case 4: return c"discarded_comdat_groups"
+        case 5: return c"discarded_output_bytes"
+        case 6: return c"discarded_sections"
+        case 7: return c"dynamic_exports"
+        case 8: return c"dynamic_imports"
+        case 9: return c"dynamic_relative_relocations"
+        case 10: return c"extracted_members"
+        case 11: return c"gnu_properties"
+        case 12: return c"got_entries"
+        case 13: return c"gotpcrelx_relaxations"
+        case 14: return c"in_memory_objects"
+        case 15: return c"indexed_unwind_fdes"
+        case 16: return c"input_bytes"
+        case 17: return c"input_files"
+        case 18: return c"input_read_cache_hits"
+        case 19: return c"linker_scripts"
+        case 20: return c"linker_symbols"
+        case 21: return c"merged_bytes"
+        case 22: return c"merged_sections"
+        case 23: return c"objects"
+        case 24: return c"output_bytes"
+        case 25: return c"plt_entries"
+        case 26: return c"relocations"
+        case 27: return c"shared_libraries"
+        case 28: return c"static_ifunc_resolvers"
+        case 29: return c"symbols"
+        case 30: return c"thin_member_files"
+        case 31: return c"transitive_shared_libraries"
+        case 32: return c"unwind_fdes"
+    }
+    return c""
+}
+
+fn phase_name(k u64) addr {
+    switch k {
+        case 0: return c"emit"
+        case 1: return c"gc"
+        case 2: return c"merge"
+        case 3: return c"parse"
+        case 4: return c"parse_dependency"
+        case 5: return c"read"
+        case 6: return c"relocate"
+        case 7: return c"resolve"
+        case 8: return c"unwind"
+        case 9: return c"write"
+    }
+    return c""
+}
+
+fn stats_start() void {
+    stats_on = true
+    stats_start_wall = os_clock_ns(CLOCK_REALTIME)
+    stats_start_cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
+}
+
+// Stats.add (main thread only)
+fn stat_add(k u64, v u64) void {
+    if !stats_on { return }
+    stat_now.count[k] += v
+    stat_now.seen[k] = true
+}
+
+// Stats.measure: phase_begin marks the phase (a phase that fails still
+// appears) and stores its start at `p`; phase_end adds its time
+struct PhaseStart {
+    wall u64
+    cpu u64
+    mem u64
+}
+
+// a phase that ran without being timed here (timed elsewhere)
+fn stat_mark(k u64) void {
+    if stats_on { stat_now.phase_seen[k] = true }
+}
+
+fn phase_begin(k u64, p addr) void {
+    if !stats_on { return }
+    t handle[PhaseStart] = handle_from_addr[PhaseStart](p)
+    stat_now.phase_seen[k] = true
+    t.wall = os_clock_ns(CLOCK_REALTIME)
+    t.cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
+    t.mem = atomic_load[u64, relaxed](&mem_mapped)
+}
+
+fn phase_end(k u64, p addr) void {
+    if !stats_on { return }
+    t handle[PhaseStart] = handle_from_addr[PhaseStart](p)
+    w u64 = os_clock_ns(CLOCK_REALTIME)
+    // backwards clock adjustments are clamped
+    if w > t.wall { phase_wall[k] += w - t.wall }
+    phase_cpu[k] += os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - t.cpu
+    phase_mem[k] += atomic_load[u64, relaxed](&mem_mapped) - t.mem
+}
+
+// a copy of the counters, or null without --stats
+fn stat_snapshot() addr {
+    if !stats_on { return null }
+    p addr = heap_alloc(sizeof[StatSnap])
+    mem_copy(p, &stat_now, sizeof[StatSnap])
+    return p
+}
+
+// rolls back to `p`, keeping the decoded debug bytes (charged in parse
+// order, which already stops at the failing input)
+fn stat_restore(p addr) void {
+    if p == null { return }
+    decoded u64 = stat_now.count[ST_DECODED_DEBUG_BYTES]
+    decoded_seen bool = stat_now.seen[ST_DECODED_DEBUG_BYTES]
+    mem_copy(&stat_now, p, sizeof[StatSnap])
+    stat_now.count[ST_DECODED_DEBUG_BYTES] = decoded
+    stat_now.seen[ST_DECODED_DEBUG_BYTES] = decoded_seen
+}
+
+// %.9f of a nanosecond count
+fn stat_seconds(b handle[Buf], ns u64) void {
+    bu(b, ns / 1000000000)
+    buf_u8(b, 46)
+    f u64 = ns % 1000000000
+    d u64 = 100000000
+    while d > 0 {
+        buf_u8(b, trunc[u8](48 + (f / d) % 10))
+        d = d / 10
+    }
+}
+
+fn stats_print() void {
+    if !stats_on { return }
+    stats_on = false
+    wall u64 = os_clock_ns(CLOCK_REALTIME)
+    wall = if wall > stats_start_wall { wall - stats_start_wall } else { 0 }
+    cpu u64 = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - stats_start_cpu
+    o Buf = {}
+    b handle[Buf] = handle_from_addr[Buf](&o)
+    bs(b, c"{\"wall_seconds\":")
+    stat_seconds(b, wall)
+    bs(b, c",\"cpu_seconds\":")
+    stat_seconds(b, cpu)
+    bs(b, c",\"phases\":{")
+    first bool = true
+    for k u64 in 0..PH_N {
+        if !stat_now.phase_seen[k] { continue }
+        if !first { buf_u8(b, 44) }
+        first = false
+        buf_u8(b, 34)
+        bs(b, phase_name(k))
+        bs(b, c"\":{\"wall_seconds\":")
+        stat_seconds(b, phase_wall[k])
+        bs(b, c",\"cpu_seconds\":")
+        stat_seconds(b, phase_cpu[k])
+        bs(b, c",\"allocated_words\":")
+        bu(b, phase_mem[k] / 8)
+        bs(b, c",\"promoted_words\":0}")
+    }
+    bs(b, c"},\"counts\":{")
+    first = true
+    for k u64 in 0..ST_N {
+        if !stat_now.seen[k] { continue }
+        if !first { buf_u8(b, 44) }
+        first = false
+        buf_u8(b, 34)
+        bs(b, stat_name(k))
+        bs(b, c"\":")
+        bu(b, stat_now.count[k])
+    }
+    bs(b, c"},\"gc\":{\"allocated_words\":")
+    bu(b, atomic_load[u64, relaxed](&mem_mapped) / 8)
+    bs(b, c",\"promoted_words\":0,\"minor_collections\":0,\"major_collections\":0}}\n")
+    buf_write(b, STDERR) catch {}
+    buf_free(b)
+}

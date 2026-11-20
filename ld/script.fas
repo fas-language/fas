@@ -419,6 +419,7 @@ fn script_input(path Bytes, data Bytes, whole bool, depth u64, scripts handle[Ve
             input_die()
         }
     }
+    stat_add(ST_LINKER_SCRIPTS, 1)
     cmds Vec[SCmd] = {}
     ch handle[Vec[SCmd]] = handle_from_addr[Vec[SCmd]](&cmds)
     script_parse(path, data, ch)

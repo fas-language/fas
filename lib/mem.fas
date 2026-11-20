@@ -16,11 +16,15 @@ fn mem_out_of_memory() void {
 // Fresh zeroed pages from the kernel, `n` rounded up to the page size.
 // The arena functions are for one thread at a time: give each worker its
 // own arena.
+// bytes mem_pages has mapped so far (statistics)
+var mem_mapped u64 = 0
+
 fn mem_pages(n usize) addr {
     p addr = os_mmap(null, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) catch {
         mem_out_of_memory()
         return null
     }
+    atomic_add[u64, relaxed](&mem_mapped, n)
     return p
 }
 
@@ -63,6 +67,11 @@ fn mem_move(dst addr, src addr, n usize) void {
 
 fn mem_set(dst addr, byte u8, n usize) void {
     i usize = 0
+    w u64 = zext[u64](byte) * 0x0101010101010101
+    while i + 8 <= n {
+        (dst + i)[u64] = w
+        i += 8
+    }
     while i < n {
         dst[u8, i] = byte
         i += 1
@@ -143,7 +152,9 @@ fn heap_alloc(n usize) addr {
 // `n` zeroed bytes.
 fn heap_alloc_zeroed(n usize) addr {
     p addr = heap_alloc(n)
-    mem_set(p, 0, n)
+    // a large block is always a fresh mapping, which the kernel has
+    // zeroed; clearing it again would touch every page up front
+    if n <= HEAP_SMALL_MAX { mem_set(p, 0, n) }
     return p
 }
 

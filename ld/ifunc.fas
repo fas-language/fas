@@ -99,6 +99,7 @@ fn ifunc_prepare() void {
     bytes_n u64 = chk_add(c"static IFUNC tables", MAX_OUTPUT / 48, 0, count) * 48
     file u64 = nobj
     o handle[Obj] = new_object(c"<static IFUNC>")
+    stat_add(ST_STATIC_IFUNC_RESOLVERS, count)
     o.nsec = 4
     o.secs = heap_alloc_zeroed(4 * sizeof[Sec])
     sec(o, 0).alignment = 1

@@ -165,6 +165,7 @@ fn properties_prepare() void {
     size u64 = 16 + count * 16
     file u64 = nobj
     o handle[Obj] = new_object(c"<GNU properties>")
+    stat_add(ST_GNU_PROPERTIES, count)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)

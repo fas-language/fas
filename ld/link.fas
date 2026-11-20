@@ -146,6 +146,7 @@ fn got_prepare() void {
     size u64 = slots.n * 8
     file u64 = nobj
     o handle[Obj] = new_object(c"<GOT>")
+    stat_add(ST_GOT_ENTRIES, slots.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)
@@ -217,6 +218,8 @@ fn merge_plan() void {
                 vec_push[u64](ch, pk(f, k))
             } else {
                 lx(f).alias[u64, k] = ch.p[u64, zext[u64](id)] + 1
+                stat_add(ST_MERGED_SECTIONS, 1)
+                stat_add(ST_MERGED_BYTES, s.size)
             }
         }
         heap_free(relocated)
@@ -631,14 +634,35 @@ fn entry_address() u64 {
     return get_placement(f, zext[u64](y.section)).address + y.value
 }
 
+var emit_start PhaseStart = {}
+
 fn build_image() void {
     c handle[Config] = config()
+    phase_begin(PH_EMIT, &emit_start)
     check_legacy_sections()
     tls_prepare()
     check_static_versions()
+    ut PhaseStart = {}
+    phase_begin(PH_UNWIND, &ut)
     unwind_normalize()
+    phase_end(PH_UNWIND, &ut)
+    gt PhaseStart = {}
+    phase_begin(PH_GC, &gt)
     alloc_tables()
     if c.gc_sections { gc_sections() }
+    if stats_on {
+        // Section_gc counts the discarded progbits/nobits/array sections
+        for f u64 in 0..nobj {
+            o handle[Obj] = obj(f)
+            for k u64 in 0..zext[u64](o.nsec) {
+                kd u32 = sec(o, k).kind
+                if (kd == 1 || kd == 7 || kd == 8 || kd == 14 || kd == 15 || kd == 16) && !kept(f, k) {
+                    stat_add(ST_DISCARDED_SECTIONS, 1)
+                }
+            }
+        }
+    }
+    phase_end(PH_GC, &gt)
     check_non_alloc_references()
     tls_validate()
     properties_prepare()
@@ -648,7 +672,10 @@ fn build_image() void {
     ifunc_prepare()
     if c.runpath != 0 { die_c(c"-rpath requires dynamic output") }
     if nobj == 0 { die_c(c"no input objects") }
+    mt PhaseStart = {}
+    phase_begin(PH_MERGE, &mt)
     merge_plan()
+    phase_end(PH_MERGE, &mt)
     layout_make()
     set_predefined()
 
@@ -737,10 +764,14 @@ fn build_image() void {
         }
     }
 
+    rt PhaseStart = {}
+
+    phase_begin(PH_RELOCATE, &rt)
     pool_for(pool, nobj, 1, &relocate_job, null)
     for f u64 in 0..nobj {
         if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
+    phase_end(PH_RELOCATE, &rt)
     unwind_emit()
     ifunc_emit()
 
@@ -826,6 +857,7 @@ fn build_image() void {
     section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, st.n, 0, 0, 1, 0)
     section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, sh.n, 0, 0, 1, 0)
     if c.has_map { map_build(entry, lh, gh) }
+    stat_add(ST_OUTPUT_BYTES, image_size)
 }
 
 // ---------- publishing (File_io) ----------
@@ -895,6 +927,7 @@ fn link_and_publish() void {
     resolve()
     build_image()
     build_id_emit()
+    phase_end(PH_EMIT, &emit_start)
     st2 Stat = {}
     check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
     if c.has_map {
@@ -906,8 +939,14 @@ fn link_and_publish() void {
             }
         }
     }
-    if discard { return }
+    wt PhaseStart = {}
+    phase_begin(PH_WRITE, &wt)
+    if discard {
+        stat_add(ST_DISCARDED_OUTPUT_BYTES, image_size)
+        return
+    }
     file_write_atomic(output.p, bytes(image, image_size), 0o755) catch e {
         die_io(c"write", output, e)
     }
+    phase_end(PH_WRITE, &wt)
 }

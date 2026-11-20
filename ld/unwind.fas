@@ -377,6 +377,11 @@ fn unwind_normalize() void {
     for f u64 in 0..nobj {
         if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
+    if stats_on {
+        n u64 = 0
+        for f u64 in 0..nobj { n += uobj(f).frames.n }
+        stat_add(ST_UNWIND_FDES, n)
+    }
 }
 
 // ---------- prepare ----------
@@ -419,6 +424,7 @@ fn unwind_prepare() void {
     size u64 = 12 + fh.n * 8
     file u64 = nobj
     o handle[Obj] = new_object(c"<unwind header>")
+    stat_add(ST_INDEXED_UNWIND_FDES, fh.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)

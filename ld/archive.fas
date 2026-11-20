@@ -600,11 +600,19 @@ fn archive_object(a handle[Archive], i u64) handle[Obj] {
             o handle[Obj] = member_obj(a, m)
             o.data = data.p
             o.len = data.n
+            t PhaseStart = {}
+            phase_begin(PH_PARSE, &t)
             member_parse(m)
+            phase_end(PH_PARSE, &t)
         } else {
+            t PhaseStart = {}
+            phase_begin(PH_PARSE, &t)
             archive_prefetch(a, i)
+            phase_end(PH_PARSE, &t)
         }
     }
+    // Archive.object_ parses a member the first time it is asked for it
+    if m.status != MS_READY { stat_mark(PH_PARSE) }
     o handle[Obj] = handle_from_addr[Obj](m.o)
     if m.status != MS_READY { decoded_charge(o) }
     if m.status == MS_FAILED { die_buf(handle_from_addr[Buf](&o.msg)) }
@@ -695,6 +703,7 @@ fn extract(ai u64) void {
             o handle[Obj] = archive_object(a, i)
             add_member(o)
             member(a, i).loaded = true
+            stat_add(ST_EXTRACTED_MEMBERS, 1)
         }
         return
     }
@@ -746,6 +755,7 @@ fn extract(ai u64) void {
         f u64 = nobj
         add_member(o)
         member(a, index).loaded = true
+        stat_add(ST_EXTRACTED_MEMBERS, 1)
         fo handle[Obj] = obj(f)
         for s u64 in 0..zext[u64](fo.nsym) {
             if sym(fo, s).binding != 0 { enqueue(a, lx(f).gid[u32, s], cursor) }

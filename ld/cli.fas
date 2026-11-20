@@ -30,6 +30,13 @@ fn ld_read(path Bytes, max_size u64) Bytes {
     os_fstat(fd, handle_from_addr[Stat](&st)) catch e {
         die_io(c"fstat", bytes_empty(), e)
     }
+    // OCaml 5's Unix.in_channel_of_descr refuses a directory with EINVAL
+    // before File_io's own regular-file check runs
+    if (st.mode & S_IFMT) == S_IFDIR {
+        m handle[Buf] = msg()
+        bs(m, c"in_channel_of_descr: : Invalid argument")
+        die()
+    }
     if (st.mode & S_IFMT) != S_IFREG {
         m handle[Buf] = msg()
         bb(m, path)

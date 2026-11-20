@@ -61,6 +61,8 @@ fn bq(m handle[Buf], s Bytes) void {
 // "fas-ld: <message>\n" on stderr and exit status 1, like the OCaml
 // linker's top-level Error handler
 fn die_buf(b handle[Buf]) void {
+    // --stats: the statistics come before the diagnostic
+    stats_print()
     out Buf = {}
     o handle[Buf] = handle_from_addr[Buf](&out)
     bs(o, c"fas-ld: ")
