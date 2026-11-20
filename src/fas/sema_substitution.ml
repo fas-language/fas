@@ -10,6 +10,15 @@ let simd_memory_names =
 open Sema_context
 module String_set = Set.Make (String)
 
+(* expressions keyed by physical identity; the structural hash only
+   spreads them, equality never looks inside *)
+module Phys_expr = Hashtbl.Make (struct
+  type t = Ast.expr
+
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
 let error span message = Error [ Diag.error span message ]
 let ( let* ) r f = match r with Error e -> Error e | Ok x -> f x
 
@@ -231,6 +240,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       | None when String_set.mem name global_value_names -> Some (`Value None)
       | None -> None
   in
+  let mentions_cache : (string list * bool Phys_expr.t) option ref = ref None in
   let rec type_mentions names = function
     | Ast.Array (length, ty) | Ast.Vec (length, ty) ->
         expression_mentions names length.Ast.expression || type_mentions names ty
@@ -243,7 +253,21 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Type_arg ty | Ast.Type_or_index ty -> type_mentions names ty
     | Ast.Const_arg expression -> expression_mentions names expression
     | Ast.Name_arg (name, _) -> List.mem name names
-  and expression_mentions names = function
+  (* validate_non_dependent_expression asks this of every node on its way
+     down, so for one dependent-name list each node's answer is memoized
+     (by physical identity; the AST is immutable). Without it a long
+     left-nested chain in a generic body is quadratic. *)
+  and expression_mentions names expression =
+    match !mentions_cache with
+    | Some (cached_names, table) when cached_names == names -> (
+        match Phys_expr.find_opt table expression with
+        | Some found -> found
+        | None ->
+            let found = expression_mentions_uncached names expression in
+            Phys_expr.replace table expression found;
+            found)
+    | _ -> expression_mentions_uncached names expression
+  and expression_mentions_uncached names = function
     | Ast.Ident (name, _) -> List.mem name names
     | Ast.Unary (_, expression, _)
     | Ast.C_dereference (expression, _, _)
@@ -1461,6 +1485,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         Ok ()
   in
   let rec validate_non_dependent_expression c dependent expected expression =
+    (match !mentions_cache with
+    | Some (cached_names, _) when cached_names == dependent -> ()
+    | _ -> mentions_cache := Some (dependent, Phys_expr.create 64));
     if
       (not (expression_mentions dependent expression))
       && not (has_generic_arguments expression)
