@@ -136,17 +136,28 @@ fn symver_expand(o handle[Obj]) void fails {
 
 // Shared_output.prepare: a versioned definition needs a version node,
 // which only shared output has. OCaml reports the first name in random
-// Hashtbl order; this reports the first in definition order.
+// Hashtbl order; this reports the first in definition order, preferring
+// a name as written (name@@VER) over its synthesized name@VER alias.
+fn has_default_at(b Bytes) bool {
+    if b.n < 2 { return false }
+    for i u64 in 0..b.n - 1 {
+        if b.p[u8, i] == 64 && b.p[u8, i + 1] == 64 { return true }
+    }
+    return false
+}
+
 fn check_static_versions() void {
     v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
+    for pass u64 in 0..2 {
     for i u64 in 0..v.n {
         g handle[GSym] = gsym(trunc[u32](i))
-        if g.has_res != 0 && bytes_contains(g.name, 64) {
+        if g.has_res != 0 && bytes_contains(g.name, 64) && (pass == 1 || has_default_at(g.name)) {
             m handle[Buf] = msg()
             bs(m, c"defined symbol version ")
             bb(m, g.name)
             bs(m, c" requires shared output")
             die()
         }
+    }
     }
 }

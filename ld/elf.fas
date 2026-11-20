@@ -70,6 +70,8 @@ struct Obj {
     groups addr         // Group
     ngroup u32
     name_bytes u64
+    dec addr            // u64 sizes of the decoded debug sections, in order
+    ndec u32            // not yet charged to the combined input budget
     msg Buf             // the failure message, when the parse failed
 }
 
@@ -342,6 +344,69 @@ fn is_digits(b Bytes) bool {
     return true
 }
 
+// Elf_reader: SHF_COMPRESSED debug sections are decoded, in section
+// order, and appended to a copy of the object's data. Each decoded size
+// is recorded for the combined input budget, charged in input order by
+// the caller (decoded_charge).
+fn decompress(o handle[Obj], count u64) void fails {
+    original addr = o.data
+    total u64 = o.len
+    cap u64 = total + 64
+    data addr = heap_alloc(cap)
+    mem_copy(data, original, total)
+    o.dec = heap_alloc(count * 8)
+    o.ndec = 0
+    decoded u64 = 0
+    for index u64 in 0..count {
+        s handle[Sec] = sec(o, index)
+        if (s.flags & 0x800) == 0 { continue }
+        if s.kind != 1 || (s.flags & 2) != 0 || !bytes_prefix(s.name, c".debug_") {
+            try sfail(o, s, c"compression requires non-allocatable debug PROGBITS")
+        }
+        if s.size < 24 { try sfail(o, s, c"truncated compression header") }
+        if rd32(original, s.offset) != 1 { try sfail(o, s, c"unsupported compression type (only zlib)") }
+        if rd32(original, s.offset + 4) != 0 { try sfail(o, s, c"nonzero compression reserved field") }
+        size u64 = try idx(o, c"uncompressed debug size", bitcast[i64](MAX_FILE_SIZE), rd64(original, s.offset + 8))
+        if decoded > MAX_FILE_SIZE || size > MAX_FILE_SIZE - decoded {
+            m handle[Buf] = ef(o)
+            bs(m, c"decoded debug storage: size exceeds supported limit 134217728")
+            fail Bad
+        }
+        decoded += size
+        o.dec[u64, zext[u64](o.ndec)] = size
+        o.ndec += 1
+        alignment u64 = try idx(o, c"uncompressed debug alignment", bitcast[i64](MAX_ALIGNMENT), rd64(original, s.offset + 16))
+        if alignment != 0 && (alignment & (alignment - 1)) != 0 { try sfail(o, s, c"invalid uncompressed alignment") }
+        if size > cap - total {
+            cap = umax(cap * 2, total + size)
+            data = heap_realloc(data, cap)
+        }
+        try zlib_decode(o, s.name, original, s.offset + 24, s.size - 24, data + total, size)
+        s.flags = s.flags & ~0x800
+        s.offset = total
+        s.size = size
+        s.alignment = umax(1, alignment)
+        total += size
+    }
+    o.data = data
+    o.len = total
+}
+
+// whether an input object may have compressed sections (a cheap header
+// scan; anything unexpected answers true)
+fn may_compress(data Bytes) bool {
+    if data.n < 64 || !mem_eq(data.p, c"\x7fELF", 4) { return false }
+    shoff u64 = rd64(data.p, 40)
+    count u64 = rd16(data.p, 60)
+    if shoff > data.n || data.n - shoff < 64 { return true }
+    if count == 0 { count = rd64(data.p, shoff + 32) }
+    if count > (data.n - shoff) / 64 { return true }
+    for i u64 in 0..count {
+        if (rd64(data.p, shoff + i * 64 + 8) & 0x800) != 0 { return true }
+    }
+    return false
+}
+
 // Parses o.data (o.len bytes) into o's tables.
 fn elf_parse(o handle[Obj]) void fails {
     d addr = o.data
@@ -462,7 +527,11 @@ fn elf_parse(o handle[Obj]) void fails {
         }
     }
     for index u64 in 0..count {
-        if (sec(o, index).flags & 0x800) != 0 { try erefuse(o, c"compressed sections") }
+        if (sec(o, index).flags & 0x800) != 0 {
+            try decompress(o, count)
+            d = o.data
+            break
+        }
     }
 
     // per-section validation

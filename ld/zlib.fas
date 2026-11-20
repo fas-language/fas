@@ -1,0 +1,327 @@
+// RFC 1950 / RFC 1951 decoder (Zlib_decode) for compressed debug
+// sections. The OCaml decoder reads one bit at a time; this one keeps a
+// 64-bit bit buffer and decodes Huffman codes of up to ZT_BITS bits with
+// one table lookup. Longer codes, and codes near the end of the stream,
+// take the canonical bit-by-bit walk, so every diagnostic (and the point
+// where it is raised) is the OCaml one.
+
+const ZT_BITS u64 = 10
+const ZT_SIZE u64 = 1024
+
+struct Ztree {
+    counts arr[16, u32]
+    first arr[16, i64]
+    starts arr[16, u32]
+    symbols arr[320, u16]
+    table arr[1024, u16]    // (symbol << 4) | length, 0: walk the code
+}
+
+// the stream: bits [0, cnt) of buf are the next unread bits, then the
+// bytes from p to ending (the Adler-32 trailer excluded)
+struct Zs {
+    o addr
+    name Bytes
+    src addr
+    p u64
+    ending u64
+    buf u64
+    cnt u64
+}
+
+const Z_LENGTH_BASE arr[29, u16] = {
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+    35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258
+}
+const Z_LENGTH_EXTRA arr[29, u8] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+    3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
+}
+const Z_DISTANCE_BASE arr[30, u16] = {
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+    257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577
+}
+const Z_DISTANCE_EXTRA arr[30, u8] = {
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+    7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
+}
+const Z_ORDER arr[19, u8] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 }
+
+// "path: NAME: zlib: <text>"
+fn zfail(z handle[Zs], text addr) void fails {
+    m handle[Buf] = ef(handle_from_addr[Obj](z.o))
+    bb(m, z.name)
+    bs(m, c": zlib: ")
+    bs(m, text)
+    fail Bad
+}
+
+// loads whole bytes until more than 56 bits are buffered or the stream
+// ends; bits above cnt are always the stream's next bits (or zero)
+fn zrefill(z handle[Zs]) void {
+    if z.ending - z.p >= 8 {
+        z.buf = z.buf | (rd64(z.src, z.p) << z.cnt)
+        z.p += (63 - z.cnt) >> 3
+        z.cnt = z.cnt | 56
+        return
+    }
+    while z.cnt <= 56 && z.p < z.ending {
+        z.buf = z.buf | (zext[u64](z.src[u8, z.p]) << z.cnt)
+        z.p += 1
+        z.cnt += 8
+    }
+}
+
+fn zdrop(z handle[Zs], n u64) void {
+    z.buf = z.buf >> n
+    z.cnt -= n
+}
+
+// the next n (at most 16) bits, least significant first
+fn zbits(z handle[Zs], n u64) u64 fails {
+    if z.cnt < n {
+        zrefill(z)
+        if z.cnt < n { try zfail(z, c"truncated deflate stream") }
+    }
+    v u64 = z.buf & ((1 << n) - 1)
+    zdrop(z, n)
+    return v
+}
+
+// the canonical Huffman tree of lengths[0, n)
+fn ztree(z handle[Zs], t handle[Ztree], lengths addr, n u64, complete bool) void fails {
+    for i u64 in 0..16 { t.counts[i] = 0 }
+    for i u64 in 0..n {
+        l u64 = zext[u64](lengths[u8, i])
+        if l != 0 { t.counts[l] += 1 }
+    }
+    left i64 = 1
+    total u32 = 0
+    t.first[0] = 0
+    t.starts[0] = 0
+    for ln u64 in 1..16 {
+        left = (left << 1) - zext[i64](t.counts[ln])
+        if left < 0 { try zfail(z, c"oversubscribed Huffman tree") }
+        t.first[ln] = (t.first[ln - 1] + zext[i64](t.counts[ln - 1])) << 1
+        t.starts[ln] = total
+        total += t.counts[ln]
+    }
+    if left != 0 && (complete || (total != 0 && !(total == 1 && t.counts[1] == 1))) {
+        try zfail(z, c"incomplete Huffman tree")
+    }
+    next arr[16, u32] = {}
+    for ln u64 in 0..16 { next[ln] = t.starts[ln] }
+    for i u64 in 0..n {
+        l u64 = zext[u64](lengths[u8, i])
+        if l != 0 {
+            t.symbols[zext[u64](next[l])] = trunc[u16](i)
+            next[l] += 1
+        }
+    }
+    // the first-level table: codes are stored most significant bit first,
+    // the stream delivers them least significant first
+    for i u64 in 0..ZT_SIZE { t.table[i] = 0 }
+    for ln u64 in 1..ZT_BITS + 1 {
+        for k u64 in 0..zext[u64](t.counts[ln]) {
+            code u64 = bitcast[u64](t.first[ln]) + k
+            r u64 = 0
+            for b u64 in 0..ln { r = r | (((code >> b) & 1) << (ln - 1 - b)) }
+            e u16 = trunc[u16]((zext[u64](t.symbols[zext[u64](t.starts[ln]) + k]) << 4) | ln)
+            j u64 = r
+            while j < ZT_SIZE {
+                t.table[j] = e
+                j += 1 << ln
+            }
+        }
+    }
+}
+
+// the next symbol of tree t
+fn zsym(z handle[Zs], t handle[Ztree]) u64 fails {
+    if z.cnt < 15 { zrefill(z) }
+    e u64 = zext[u64](t.table[z.buf & (ZT_SIZE - 1)])
+    l u64 = e & 15
+    if l != 0 && l <= z.cnt {
+        zdrop(z, l)
+        return e >> 4
+    }
+    code i64 = 0
+    for n u64 in 1..16 {
+        if n > z.cnt { try zfail(z, c"truncated deflate stream") }
+        code = (code << 1) | bitcast[i64]((z.buf >> (n - 1)) & 1)
+        index i64 = code - t.first[n]
+        if index >= 0 && index < zext[i64](t.counts[n]) {
+            zdrop(z, n)
+            return zext[u64](t.symbols[zext[u64](t.starts[n]) + bitcast[u64](index)])
+        }
+    }
+    try zfail(z, c"invalid Huffman code")
+    return 0
+}
+
+fn zfixed(z handle[Zs], literals handle[Ztree], distances handle[Ztree]) void fails {
+    lengths arr[288, u8] = {}
+    for n u64 in 0..288 {
+        lengths[n] = if n < 144 { 8 } else if n < 256 { 9 } else if n < 280 { 7 } else { 8 }
+    }
+    try ztree(z, literals, &lengths, 288, true)
+    for n u64 in 0..32 { lengths[n] = 5 }
+    try ztree(z, distances, &lengths, 32, true)
+}
+
+fn zdynamic(z handle[Zs], literals handle[Ztree], distances handle[Ztree]) void fails {
+    literal_count u64 = try zbits(z, 5)
+    literal_count += 257
+    distance_count u64 = try zbits(z, 5)
+    distance_count += 1
+    code_count u64 = try zbits(z, 4)
+    code_count += 4
+    if literal_count > 286 { try zfail(z, c"reserved literal/length alphabet size") }
+    codes arr[19, u8] = {}
+    for n u64 in 0..code_count {
+        v u64 = try zbits(z, 3)
+        codes[zext[u64](Z_ORDER[n])] = trunc[u8](v)
+    }
+    code_tree Ztree = {}
+    ct handle[Ztree] = handle_from_addr[Ztree](&code_tree)
+    try ztree(z, ct, &codes, 19, true)
+    lengths arr[320, u8] = {}
+    total u64 = literal_count + distance_count
+    n u64 = 0
+    while n < total {
+        code u64 = try zsym(z, ct)
+        if code < 16 {
+            lengths[n] = trunc[u8](code)
+            n += 1
+            continue
+        }
+        value u8 = 0
+        repeats u64 = 0
+        if code == 16 {
+            if n == 0 { try zfail(z, c"repeat without previous code") }
+            repeats = try zbits(z, 2)
+            repeats += 3
+            value = lengths[n - 1]
+        } else if code == 17 {
+            repeats = try zbits(z, 3)
+            repeats += 3
+        } else if code == 18 {
+            repeats = try zbits(z, 7)
+            repeats += 11
+        } else {
+            try zfail(z, c"invalid code-length symbol")
+        }
+        if repeats > total - n { try zfail(z, c"code-length repeat exceeds alphabet") }
+        for k u64 in 0..repeats { lengths[n + k] = value }
+        n += repeats
+    }
+    if lengths[256] == 0 { try zfail(z, c"missing end-of-block code") }
+    // OCaml builds the pair's right element first
+    lp addr = &lengths
+    try ztree(z, distances, lp + literal_count, distance_count, false)
+    try ztree(z, literals, lp, literal_count, false)
+}
+
+// Zlib_decode.decode: decodes src[offset, offset + length) into out,
+// which must hold exactly `size` bytes
+fn zlib_decode(o handle[Obj], name Bytes, src addr, offset u64, length u64, out addr, size u64) void fails {
+    state Zs = {}
+    z handle[Zs] = handle_from_addr[Zs](&state)
+    z.o = handle_addr(o)
+    z.name = name
+    z.src = src
+    if length < 6 { try zfail(z, c"truncated header or checksum") }
+    cmf u64 = zext[u64](src[u8, offset])
+    flg u64 = zext[u64](src[u8, offset + 1])
+    if (cmf & 15) != 8 || (cmf >> 4) > 7 { try zfail(z, c"unsupported compression method/window") }
+    if ((cmf << 8) | flg) % 31 != 0 { try zfail(z, c"invalid header check") }
+    if (flg & 32) != 0 { try zfail(z, c"preset dictionaries are unsupported") }
+    window u64 = 1 << ((cmf >> 4) + 8)
+    ending u64 = offset + length - 4
+    z.p = offset + 2
+    z.ending = ending
+    literals Ztree = {}
+    lt handle[Ztree] = handle_from_addr[Ztree](&literals)
+    distances Ztree = {}
+    dt handle[Ztree] = handle_from_addr[Ztree](&distances)
+    cursor u64 = 0
+    final bool = false
+    while !final {
+        fb u64 = try zbits(z, 1)
+        final = fb != 0
+        kind u64 = try zbits(z, 2)
+        if kind == 0 {
+            zdrop(z, z.cnt & 7)
+            n u64 = try zbits(z, 16)
+            complement u64 = try zbits(z, 16)
+            if (n ^ complement) != 0xffff { try zfail(z, c"invalid stored block length") }
+            if n > size - cursor { try zfail(z, c"stored block exceeds declared size") }
+            if n * 8 > z.cnt + (z.ending - z.p) * 8 { try zfail(z, c"truncated deflate stream") }
+            while n > 0 && z.cnt >= 8 {
+                out[u8, cursor] = trunc[u8](z.buf)
+                zdrop(z, 8)
+                cursor += 1
+                n -= 1
+            }
+            if n > 0 {
+                mem_copy(out + cursor, src + z.p, n)
+                z.p += n
+                cursor += n
+                z.buf = 0
+            }
+            continue
+        }
+        if kind == 3 { try zfail(z, c"reserved block type") }
+        if kind == 1 { try zfixed(z, lt, dt) } else { try zdynamic(z, lt, dt) }
+        while true {
+            code u64 = try zsym(z, lt)
+            if code < 256 {
+                if cursor >= size { try zfail(z, c"decoded data exceeds declared size") }
+                out[u8, cursor] = trunc[u8](code)
+                cursor += 1
+                continue
+            }
+            if code == 256 { break }
+            if code > 285 { try zfail(z, c"reserved length code") }
+            i u64 = code - 257
+            n u64 = try zbits(z, zext[u64](Z_LENGTH_EXTRA[i]))
+            n += zext[u64](Z_LENGTH_BASE[i])
+            d u64 = try zsym(z, dt)
+            if d > 29 { try zfail(z, c"reserved distance code") }
+            distance u64 = try zbits(z, zext[u64](Z_DISTANCE_EXTRA[d]))
+            distance += zext[u64](Z_DISTANCE_BASE[d])
+            if distance > cursor || distance > window { try zfail(z, c"invalid back-reference distance") }
+            if n > size - cursor { try zfail(z, c"back-reference exceeds declared size") }
+            // 8-byte steps read only bytes already written when distance >= 8
+            if distance >= 8 {
+                while n >= 8 {
+                    wr64(out, cursor, rd64(out, cursor - distance))
+                    cursor += 8
+                    n -= 8
+                }
+            }
+            while n > 0 {
+                out[u8, cursor] = out[u8, cursor - distance]
+                cursor += 1
+                n -= 1
+            }
+        }
+    }
+    if (z.p * 8 - z.cnt + 7) / 8 != ending { try zfail(z, c"trailing bytes after deflate stream") }
+    if cursor != size { try zfail(z, c"decoded size differs from declared size") }
+    a u64 = 1
+    b u64 = 0
+    i u64 = 0
+    while i < size {
+        stop u64 = umin(size, i + 5552)
+        while i < stop {
+            a += zext[u64](out[u8, i])
+            b += a
+            i += 1
+        }
+        a = a % 65521
+        b = b % 65521
+    }
+    expected u64 = (zext[u64](src[u8, ending]) << 24) | (zext[u64](src[u8, ending + 1]) << 16) |
+        (zext[u64](src[u8, ending + 2]) << 8) | zext[u64](src[u8, ending + 3])
+    if ((b << 16) | a) != expected { try zfail(z, c"Adler-32 checksum mismatch") }
+}

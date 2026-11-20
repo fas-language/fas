@@ -92,6 +92,7 @@ fn check_non_alloc_references() void {
 
 var got_file u64 = NONE64
 var got_slots Vec[u64] = {}    // (file, symbol) packed
+var got_thread Vec[u8] = {}    // per slot: 1 for a thread-offset (GOTTPOFF) slot
 
 fn got_relocation(kind u32) bool {
     return kind == 9 || kind == 19 || kind == 20 || kind == 22 || kind == 34 || kind == 41 || kind == 42
@@ -122,12 +123,14 @@ fn got_prepare() void {
             } else {
                 key = zext[u64](gid_of(f, si))
             }
+            if r.kind == 22 { key = key ^ (1 << 62) }
             a addr = map_val_addr(ih, key)
             slot u32 = 0
             if a == null {
                 slot = trunc[u32](slots.n)
                 map_put(ih, key, slot)
                 vec_push[u64](slots, pk(f, si))
+                vec_push[u8](handle_from_addr[Vec[u8]](&got_thread), if r.kind == 22 { 1 } else { 0 })
             } else {
                 slot = a[u32]
             }
@@ -247,6 +250,10 @@ fn live(f u64, y handle[Sym]) bool {
 // for live symbols only (their placement exists)
 fn sym_address(f u64, y handle[Sym]) u64 {
     if y.section == 0xfff1 { return y.value }
+    if y.kind == 6 {
+        if module_base != NONE64 && f == pk_file(module_base) && handle_addr(y) == handle_addr(sym(obj(f), pk_sec(module_base))) { return 0 }
+        return place(f, zext[u64](y.section)).address - (LAYOUT_BASE + tls_seg.offset) + y.value
+    }
     return place(f, zext[u64](y.section)).address + y.value
 }
 
@@ -331,7 +338,8 @@ fn array_boundary(kind u32, last bool) u64 {
 
 fn predefined_value(n Bytes) u64 {
     if bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") { return LAYOUT_BASE }
-    if bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end") { return 0 }
+    if bytes_is(n, c"__rela_iplt_start") { return ifunc_boundary(false) }
+    if bytes_is(n, c"__rela_iplt_end") { return ifunc_boundary(true) }
     if bytes_is(n, c"__bss_start") || bytes_is(n, c"_edata") || bytes_is(n, c"edata") { return seg_ending(false, false) }
     if bytes_is(n, c"_etext") || bytes_is(n, c"etext") { return seg_ending(true, true) }
     if bytes_is(n, c"_end") || bytes_is(n, c"end") { return seg_ending(false, true) }
@@ -448,7 +456,10 @@ fn relocate_object(f u64) bool {
         si u64 = zext[u64](r.symbol)
         y handle[Sym] = sym(o, si)
         value u64 = 0
-        if base_relocation(r.kind) {
+        stub bool = !bytes_is(ts.name, c".eh_frame") && !got_relocation(r.kind) && !base_relocation(r.kind) &&
+            ifunc_stub(f, si, &value)
+        if stub {
+        } else if base_relocation(r.kind) {
             value = got_address
         } else if got_relocation(r.kind) {
             value = got_address + zext[u64](lx(f).gotref[u32, k]) * 8
@@ -463,6 +474,7 @@ fn relocate_object(f u64) bool {
             bb(m, y.name)
             return false
         }
+        if r.kind == 23 && !thread_offset(m, value, &value) { return false }
         addend u64 = r.addend
         if (bytes_is(ts.name, c".eh_frame") || bytes_is(ts.name, c".note.stapsdt")) && vv.has[u8, si] == 0 {
             addend = 0
@@ -622,15 +634,18 @@ fn entry_address() u64 {
 fn build_image() void {
     c handle[Config] = config()
     check_legacy_sections()
+    tls_prepare()
     check_static_versions()
     unwind_normalize()
     alloc_tables()
     if c.gc_sections { gc_sections() }
     check_non_alloc_references()
+    tls_validate()
     properties_prepare()
     build_id_prepare()
     got_prepare()
     unwind_prepare()
+    ifunc_prepare()
     if c.runpath != 0 { die_c(c"-rpath requires dynamic output") }
     if nobj == 0 { die_c(c"no input objects") }
     merge_plan()
@@ -704,6 +719,11 @@ fn build_image() void {
             sf u64 = pk_file(x)
             si u64 = pk_sec(x)
             vv handle[Values] = vals(sf)
+            sv u64 = 0
+            if ifunc_stub(sf, si, &sv) {
+                wr64(image, p.offset + slot * 8, sv)
+                continue
+            }
             if vv.has[u8, si] == 0 {
                 m handle[Buf] = msg()
                 bb(m, obj(sf).path)
@@ -711,7 +731,9 @@ fn build_image() void {
                 bb(m, sym(obj(sf), si).name)
                 die()
             }
-            wr64(image, p.offset + slot * 8, vv.v[u64, si])
+            v u64 = vv.v[u64, si]
+            if got_thread.p[u8, slot] != 0 && !thread_offset(msg(), v, &v) { die() }
+            wr64(image, p.offset + slot * 8, v)
         }
     }
 
@@ -720,6 +742,7 @@ fn build_image() void {
         if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
     unwind_emit()
+    ifunc_emit()
 
     // the ELF header
     mem_copy(image, c"\x7fELF\x02\x01\x01", 7)
@@ -735,6 +758,7 @@ fn build_image() void {
     phnum u64 = sv.n + 2
     if unwind_file != NONE64 { phnum += 1 }
     if property_file != NONE64 { phnum += 2 }
+    if tls_seg.alignment != 0 { phnum += 1 }
     if build_id_file != NONE64 { phnum += 1 }
     header_size u64 = 64 + phnum * 56
     wr16(image, 56, phnum)
@@ -747,6 +771,11 @@ fn build_image() void {
         program_header(i + 1, 1, s.flags, s.offset, LAYOUT_BASE + s.offset, s.file_size, s.memory_size, s.alignment)
     }
     extra_header u64 = sv.n + 1
+    if tls_seg.alignment != 0 {
+        program_header(extra_header, 7, 4, tls_seg.offset, LAYOUT_BASE + tls_seg.offset, tls_seg.file_size,
+            tls_seg.memory_size, tls_seg.alignment)
+        extra_header += 1
+    }
     if unwind_file != NONE64 {
         hp handle[Place] = get_placement(unwind_file, 1)
         hs u64 = sec(obj(unwind_file), 1).size

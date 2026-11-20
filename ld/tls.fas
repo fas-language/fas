@@ -1,0 +1,153 @@
+// Thread-local storage for static executables (Tls): the
+// _TLS_MODULE_BASE_ definition, the relocation checks and thread offsets.
+// Static output supports local-exec and initial-exec TLS; the TLS template
+// is placed by layout_class (layout.fas) as tls_seg.
+
+// the defined _TLS_MODULE_BASE_ (file << 32 | symbol), or NONE64; its
+// address is 0
+var module_base u64 = NONE64
+
+// Tls.prepare: an undefined _TLS_MODULE_BASE_ is defined, hidden, at the
+// start of the first non-discarded TLS section
+fn tls_prepare() void {
+    name Bytes = bytes_c(c"_TLS_MODULE_BASE_")
+    id u32 = find(name)
+    if id == NONE || gsym(id).has_res != 0 { return }
+    requested bool = false
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for i u64 in 0..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if y.section == 0 && bytes_eq(y.name, name) {
+                requested = true
+                break
+            }
+        }
+        if requested { break }
+    }
+    if !requested { return }
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            if (sec(o, k).flags & 0x402) != 0x402 || lx(f).discarded[u8, k] != 0 { continue }
+            n u64 = zext[u64](o.nsym)
+            syms addr = heap_alloc_zeroed((n + 1) * sizeof[Sym])
+            mem_copy(syms, o.syms, n * sizeof[Sym])
+            o.syms = syms
+            o.nsym = trunc[u32](n + 1)
+            y handle[Sym] = sym(o, n)
+            y.name = name
+            y.binding = 1
+            y.kind = 6
+            y.visibility = 2
+            y.section = trunc[u32](k)
+            l handle[Lx] = lx(f)
+            gid addr = heap_alloc((n + 1) * 4 + 4)
+            mem_copy(gid, l.gid, n * 4)
+            gid[u32, n] = id
+            l.gid = gid
+            g handle[GSym] = gsym(id)
+            g.has_res = 1
+            g.res_file = trunc[u32](f)
+            g.res_sym = trunc[u32](n)
+            g.res_vis = 2
+            module_base = (f << 32) | n
+            return
+        }
+    }
+}
+
+// Tls.symbol: whether a relocation's symbol is thread-local
+fn tls_symbol(f u64, i u64) bool {
+    y handle[Sym] = sym(obj(f), i)
+    if y.binding == 0 { return y.kind == 6 }
+    id u32 = gid_of(f, i)
+    if id != NONE {
+        g handle[GSym] = gsym(id)
+        if g.has_res != 0 { return sym(obj(zext[u64](g.res_file)), zext[u64](g.res_sym)).kind == 6 }
+    }
+    return y.kind == 6
+}
+
+fn tls_relocation(kind u32) bool {
+    return kind == 17 || (kind >= 19 && kind <= 23) || kind == 34 || kind == 35
+}
+
+var tls_template bool = false
+
+fn tls_fail(o handle[Obj], text addr, name Bytes) bool {
+    m handle[Buf] = handle_from_addr[Buf](&o.msg)
+    buf_clear(m)
+    bb(m, o.path)
+    bs(m, text)
+    if name.n != NONE64 { bb(m, name) }
+    return false
+}
+
+fn tls_validate_object(f u64) bool {
+    o handle[Obj] = obj(f)
+    none Bytes = bytes(null, NONE64)
+    for k u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, k)
+        t u64 = zext[u64](r.target)
+        if r.kind == 0 || !kept(f, t) { continue }
+        si u64 = zext[u64](r.symbol)
+        tls bool = tls_symbol(f, si)
+        if tls_relocation(r.kind) {
+            if r.kind == 20 && !tls_template { return tls_fail(o, c": TLSLD requires a local TLS template", none) }
+            if r.kind != 17 && r.kind != 21 && r.kind != 22 && r.kind != 23 {
+                return tls_fail(o, c": this TLS relocation requires dynamic output", none)
+            }
+            if r.kind != 20 && !tls { return tls_fail(o, c": TLS relocation references non-TLS symbol ", sym(o, si).name) }
+        } else if tls && (sec(o, t).flags & 2) != 0 {
+            return tls_fail(o, c": non-TLS relocation references TLS symbol ", sym(o, si).name)
+        }
+    }
+    return true
+}
+
+fn tls_validate_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e {
+        lx(f).status = if tls_validate_object(f) { 0 } else { 1 }
+    }
+}
+
+// Tls.validate; the first failure in (file, relocation) order
+fn tls_validate() void {
+    tls_template = false
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            if kept(f, k) && (sec(o, k).flags & 0x400) != 0 {
+                tls_template = true
+                break
+            }
+        }
+        if tls_template { break }
+    }
+    pool_for(pool, nobj, 1, &tls_validate_job, null)
+    for f u64 in 0..nobj {
+        if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+    }
+}
+
+// Tls.thread_offset: value - the aligned TLS block size, or false with
+// the message in m (no TLS template, or the size overflows)
+fn thread_offset(m handle[Buf], value u64, out addr) bool {
+    if tls_seg.alignment == 0 {
+        buf_clear(m)
+        bs(m, c"local TLS reference without a TLS template")
+        return false
+    }
+    size u64 = tls_seg.memory_size
+    a u64 = tls_seg.alignment
+    pad u64 = (0 - size) & (a - 1)
+    if size > MAX_IMAGE || pad > MAX_IMAGE - size {
+        buf_clear(m)
+        bs(m, c"TLS block: size exceeds supported limit ")
+        bu(m, MAX_IMAGE)
+        return false
+    }
+    out[u64] = value - (size + pad)
+    return true
+}

@@ -1,0 +1,180 @@
+// IFUNC in static executables (Static_ifunc): there is no ELF interpreter,
+// so the startup code applies IRELATIVE records (.rela.iplt, bounded by
+// __rela_iplt_start/__rela_iplt_end) before an IFUNC is called. Every
+// referenced IFUNC gets a .iplt stub jumping through its .got.iplt slot.
+
+var ifunc_file u64 = NONE64
+var ifunc_syms Vec[u64] = {}     // the resolvers, (file << 32 | symbol)
+var ifunc_refs addr = null       // per object: an addr to u32 per symbol, NONE when not an IFUNC
+
+// Got.ifunc
+fn is_ifunc(f u64, i u64) bool {
+    y handle[Sym] = sym(obj(f), i)
+    if y.binding == 0 { return y.kind == 10 }
+    id u32 = gid_of(f, i)
+    if id == NONE { return false }
+    g handle[GSym] = gsym(id)
+    if g.has_res == 0 { return false }
+    return sym(obj(zext[u64](g.res_file)), zext[u64](g.res_sym)).kind == 10
+}
+
+fn ifunc_fail(o handle[Obj], name Bytes, text addr) void {
+    m handle[Buf] = msg()
+    bb(m, o.path)
+    bs(m, c": IFUNC resolver ")
+    bb(m, name)
+    bs(m, text)
+    die()
+}
+
+fn ifunc_prepare() void {
+    candidates Vec[u64] = {}
+    ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&candidates)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for i u64 in 0..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if y.kind != 10 { continue }
+            if y.section >= 0xff00 { ifunc_fail(o, y.name, c" must be defined in an executable section") }
+            if y.section == 0 || !kept(f, zext[u64](y.section)) { continue }
+            df u64 = 0
+            ds u64 = 0
+            if !definition(f, i, &df, &ds) || df != f || ds != i { continue }
+            s handle[Sec] = sec(o, zext[u64](y.section))
+            if (s.flags & 6) != 6 || y.value >= s.size { ifunc_fail(o, y.name, c" must be in executable code") }
+            vec_push[u64](ch, (f << 32) | i)
+        }
+    }
+    if ch.n == 0 { return }
+    // the referenced resolvers
+    referenced Map[u64, u32, u64_hash, u64_eq] = {}
+    rh handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&referenced)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            t u64 = zext[u64](r.target)
+            if r.kind == 0 || !kept(f, t) { continue }
+            ts handle[Sec] = sec(o, t)
+            if (ts.flags & 2) == 0 || bytes_is(ts.name, c".eh_frame") { continue }
+            si u64 = zext[u64](r.symbol)
+            if !is_ifunc(f, si) { continue }
+            df u64 = 0
+            ds u64 = 0
+            if definition(f, si, &df, &ds) { map_put(rh, (df << 32) | ds, 0) }
+        }
+    }
+    sh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&ifunc_syms)
+    indices Map[u64, u32, u64_hash, u64_eq] = {}
+    ih handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&indices)
+    for j u64 in 0..ch.n {
+        key u64 = vec_get[u64](ch, j)
+        if map_val_addr(rh, key) == null { continue }
+        map_put(ih, key, trunc[u32](sh.n))
+        vec_push[u64](sh, key)
+    }
+    map_free(rh)
+    vec_free[u64](ch)
+    count u64 = sh.n
+    if count == 0 {
+        map_free(ih)
+        return
+    }
+    ifunc_refs = heap_alloc_zeroed(nobj * 8 + 8)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        n u64 = zext[u64](o.nsym)
+        refs addr = heap_alloc(n * 4 + 4)
+        for i u64 in 0..n {
+            refs[u32, i] = NONE
+            df u64 = 0
+            ds u64 = 0
+            if !definition(f, i, &df, &ds) { continue }
+            a addr = map_val_addr(ih, (df << 32) | ds)
+            if a != null { refs[u32, i] = a[u32] }
+        }
+        ifunc_refs[addr, f] = refs
+    }
+    map_free(ih)
+    bytes_n u64 = chk_add(c"static IFUNC tables", MAX_OUTPUT / 48, 0, count) * 48
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<static IFUNC>")
+    o.nsec = 4
+    o.secs = heap_alloc_zeroed(4 * sizeof[Sec])
+    sec(o, 0).alignment = 1
+    sec(o, 0).group = -1
+    ifunc_section(sec(o, 1), c".iplt", 1, 6, 0, 16 * count, 16, 0)
+    ifunc_section(sec(o, 2), c".got.iplt", 1, 3, 16 * count, 8 * count, 8, 8)
+    ifunc_section(sec(o, 3), c".rela.iplt", 4, 2, 24 * count, 24 * count, 8, 24)
+    o.data = heap_alloc_zeroed(bytes_n + 1)
+    o.len = bytes_n
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(4)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(4)
+    l.kept[u8, 1] = 1
+    l.kept[u8, 2] = 1
+    l.kept[u8, 3] = 1
+    l.alias = heap_alloc_zeroed(32)
+    l.gotref = heap_alloc_zeroed(4)
+    ifunc_file = file
+}
+
+fn ifunc_section(s handle[Sec], name addr, kind u32, flags u64, offset u64, size u64, alignment u64, entsize u64) void {
+    s.name = bytes_c(name)
+    s.kind = kind
+    s.flags = flags
+    s.offset = offset
+    s.size = size
+    s.alignment = alignment
+    s.entsize = entsize
+    s.group = -1
+}
+
+// the .iplt stub standing for (file, symbol), or false
+fn ifunc_stub(f u64, i u64, out addr) bool {
+    if ifunc_file == NONE64 || f >= ifunc_file { return false }
+    index u32 = ifunc_refs[addr, f][u32, i]
+    if index == NONE { return false }
+    out[u64] = place(ifunc_file, 1).address + zext[u64](index) * 16
+    return true
+}
+
+fn ifunc_boundary(last bool) u64 {
+    if ifunc_file == NONE64 { return 0 }
+    return place(ifunc_file, 3).address + (if last { ifunc_syms.n * 24 } else { 0 })
+}
+
+fn ifunc_emit() void {
+    if ifunc_file == NONE64 { return }
+    plt handle[Place] = place(ifunc_file, 1)
+    got handle[Place] = place(ifunc_file, 2)
+    rela handle[Place] = place(ifunc_file, 3)
+    for i u64 in 0..ifunc_syms.n {
+        stub u64 = plt.offset + i * 16
+        address u64 = plt.address + i * 16
+        mem_copy(image + stub, c"\xf3\x0f\x1e\xfa\xff\x25", 6)
+        x u64 = got.address + i * 8 - 4 - (address + 6)
+        sx i64 = bitcast[i64](x)
+        if sx < -2147483648 || sx > 2147483647 {
+            m handle[Buf] = msg()
+            bs(m, c"static IPLT: R_X86_64_PC32 overflow: result 0x")
+            bx(m, x)
+            die()
+        }
+        wr32(image, stub + 6, x)
+        // nopw 0(%rax,%rax)
+        mem_copy(image + stub + 10, c"\x66\x0f\x1f\x44", 4)
+        wr16(image, stub + 14, 0)
+        at u64 = rela.offset + i * 24
+        wr64(image, at, got.address + i * 8)
+        wr64(image, at + 8, 37)
+        key u64 = vec_get[u64](handle_from_addr[Vec[u64]](&ifunc_syms), i)
+        vv handle[Values] = vals(key >> 32)
+        if vv.has[u8, key & 0xffffffff] == 0 { die_c(c"static IFUNC resolver has no live address") }
+        wr64(image, at + 16, vv.v[u64, key & 0xffffffff])
+    }
+}

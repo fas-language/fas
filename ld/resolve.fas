@@ -123,6 +123,7 @@ fn parse_flush() void {
     if parsed == nobj { return }
     pool_for(pool, nobj - parsed, 1, &parse_job_offset, &parsed)
     for i u64 in parsed..nobj {
+        decoded_charge(obj(i))
         st u32 = lx(i).status
         if st == 1 { die_buf(handle_from_addr[Buf](&obj(i).msg)) }
         if st == 2 {
@@ -130,6 +131,19 @@ fn parse_flush() void {
         }
     }
     parsed = nobj
+}
+
+// on_decoded: the decoded debug sizes count against the combined input
+// budget, in the OCaml linker's parse order
+fn decoded_charge(o handle[Obj]) void {
+    for k u64 in 0..zext[u64](o.ndec) {
+        size u64 = o.dec[u64, k]
+        if input_bytes > 268435456 || size > 268435456 - input_bytes {
+            die_c(c"combined input and decoded debug size: size exceeds supported limit 268435456")
+        }
+        input_bytes += size
+    }
+    o.ndec = 0
 }
 
 fn parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
@@ -302,6 +316,9 @@ fn read_input(path Bytes, whole bool) void {
     o.path = path
     o.data = data.p
     o.len = data.n
+    // the OCaml linker parses each object as it is read: decoded debug
+    // sizes shrink the budget of the inputs read after it
+    if may_compress(data) { parse_flush() }
 }
 
 // read_extra: a thin archive's member file (read once per canonical path)
@@ -417,21 +434,6 @@ fn process_inputs() void {
 
 fn check_supported(i u64) void {
     o handle[Obj] = obj(i)
-    for k u64 in 0..zext[u64](o.nsec) {
-        s handle[Sec] = sec(o, k)
-        if (s.flags & 0x400) != 0 { refuse(c"TLS") }
-    }
-    for k u64 in 1..zext[u64](o.nsym) {
-        y handle[Sym] = sym(o, k)
-        if y.kind == 6 { refuse(c"TLS") }
-        if y.kind == 10 { refuse(c"IFUNC") }
-        if bytes_is(y.name, c"_TLS_MODULE_BASE_") { refuse(c"TLS") }
-    }
-    for k u64 in 0..zext[u64](o.nrel) {
-        r handle[Rel] = rel(o, k)
-        if r.kind >= 16 && r.kind <= 23 { refuse(c"TLS") }
-        if r.kind >= 34 && r.kind <= 36 { refuse(c"TLS") }
-    }
 }
 
 // ---------- resolution ----------

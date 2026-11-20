@@ -20,6 +20,9 @@ use "symver.fas"
 use "property.fas"
 use "gc.fas"
 use "buildid.fas"
+use "tls.fas"
+use "ifunc.fas"
+use "zlib.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)

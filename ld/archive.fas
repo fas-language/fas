@@ -606,6 +606,7 @@ fn archive_object(a handle[Archive], i u64) handle[Obj] {
         }
     }
     o handle[Obj] = handle_from_addr[Obj](m.o)
+    if m.status != MS_READY { decoded_charge(o) }
     if m.status == MS_FAILED { die_buf(handle_from_addr[Buf](&o.msg)) }
     if m.status == MS_REFUSED { refuse(buf_cstr(handle_from_addr[Buf](&o.msg))) }
     if m.status == MS_PARSED {
