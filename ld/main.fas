@@ -26,6 +26,7 @@ use "zlib.fas"
 use "script.fas"
 use "map.fas"
 use "stats.fas"
+use "partial.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
@@ -36,13 +37,12 @@ fn main(argc i32, argv addr) i32 {
     if c.statistics { stats_start() }
     if c.print_version { print_version() }
     // features the skeleton does not have yet
-    if c.relocatable { refuse(c"relocatable output (-r)") }
-    if c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
+    if !c.relocatable && c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
     threads u32 = 0
     t addr = os_getenv(c"FAS_LD_THREADS")
     if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }
     pool = pool_start(threads)
-    link_and_publish()
+    if c.relocatable { partial_link_and_publish() } else { link_and_publish() }
     stats_print()
     pool_stop(pool)
     return 0

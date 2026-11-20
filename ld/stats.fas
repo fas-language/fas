@@ -42,16 +42,17 @@ const ST_UNWIND_FDES u64 = 32
 const ST_N u64 = 33
 
 const PH_EMIT u64 = 0
-const PH_GC u64 = 1
-const PH_MERGE u64 = 2
-const PH_PARSE u64 = 3
-const PH_PARSE_DEPENDENCY u64 = 4
-const PH_READ u64 = 5
-const PH_RELOCATE u64 = 6
-const PH_RESOLVE u64 = 7
-const PH_UNWIND u64 = 8
-const PH_WRITE u64 = 9
-const PH_N u64 = 10
+const PH_EMIT_RELOCATABLE u64 = 1
+const PH_GC u64 = 2
+const PH_MERGE u64 = 3
+const PH_PARSE u64 = 4
+const PH_PARSE_DEPENDENCY u64 = 5
+const PH_READ u64 = 6
+const PH_RELOCATE u64 = 7
+const PH_RESOLVE u64 = 8
+const PH_UNWIND u64 = 9
+const PH_WRITE u64 = 10
+const PH_N u64 = 11
 
 var stats_on bool = false
 var stats_start_wall u64 = 0
@@ -62,12 +63,12 @@ var stats_start_cpu u64 = 0
 struct StatSnap {
     count arr[33, u64]
     seen arr[33, bool]
-    phase_seen arr[10, bool]
+    phase_seen arr[11, bool]
 }
 var stat_now StatSnap = {}
-var phase_wall arr[10, u64] = {}
-var phase_cpu arr[10, u64] = {}
-var phase_mem arr[10, u64] = {}
+var phase_wall arr[11, u64] = {}
+var phase_cpu arr[11, u64] = {}
+var phase_mem arr[11, u64] = {}
 
 fn stat_name(k u64) addr {
     switch k {
@@ -111,15 +112,16 @@ fn stat_name(k u64) addr {
 fn phase_name(k u64) addr {
     switch k {
         case 0: return c"emit"
-        case 1: return c"gc"
-        case 2: return c"merge"
-        case 3: return c"parse"
-        case 4: return c"parse_dependency"
-        case 5: return c"read"
-        case 6: return c"relocate"
-        case 7: return c"resolve"
-        case 8: return c"unwind"
-        case 9: return c"write"
+        case 1: return c"emit_relocatable"
+        case 2: return c"gc"
+        case 3: return c"merge"
+        case 4: return c"parse"
+        case 5: return c"parse_dependency"
+        case 6: return c"read"
+        case 7: return c"relocate"
+        case 8: return c"resolve"
+        case 9: return c"unwind"
+        case 10: return c"write"
     }
     return c""
 }

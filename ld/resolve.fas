@@ -710,6 +710,9 @@ fn synth_sym(o handle[Obj], index u64, name Bytes) handle[Sym] {
     return y
 }
 
+// -r: no entry root, no linker-defined symbols, commons stay SHN_COMMON
+var partial bool = false
+
 fn resolve() void {
     c handle[Config] = config()
     if c.entry.n == 0 { die_c(c"entry symbol must not be empty") }
@@ -729,7 +732,7 @@ fn resolve() void {
     read_inputs()
 
     // the entry and -u roots
-    if c.mode != MODE_SHARED { gsym(get(c.entry)).strong = 1 }
+    if !partial && c.mode != MODE_SHARED { gsym(get(c.entry)).strong = 1 }
     und handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
     for k u64 in 0..und.n {
         name Bytes = vec_get[Bytes](und, k)
@@ -751,7 +754,9 @@ fn resolve() void {
         id u32 = trunc[u32](i)
         s handle[GSym] = gsym(id)
         if s.def_kind == DEF_NONE {
-            if predefined_name(s.name) || registry_available(s.name) {
+            if partial {
+                // nothing: undefined symbols stay undefined
+            } else if predefined_name(s.name) || registry_available(s.name) {
                 vec_push[u32](ph, id)
             } else if s.strong != 0 && s.visibility != 0 && !c.gc_sections {
                 m handle[Buf] = msg()
@@ -762,13 +767,15 @@ fn resolve() void {
         } else if s.def_kind == DEF_REGULAR {
             set_res(id, zext[u64](s.def_file), zext[u64](s.def_sym), s.visibility)
         } else {
-            common_size = chk_align(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.calign)
+            if !partial { common_size = chk_align(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.calign) }
             vec_push[u32](ch, id)
             // the symbol's value is its offset; kept in csize's place until
             // the object is built
             set_res(id, common_file, ch.n, s.visibility)
-            s.def_sym = trunc[u32](common_size)
-            common_size = chk_add(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.csize)
+            if !partial {
+                s.def_sym = trunc[u32](common_size)
+                common_size = chk_add(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.csize)
+            }
             common_alignment = umax(common_alignment, s.calign)
         }
     }
@@ -799,8 +806,9 @@ fn resolve() void {
             y.binding = 1
             y.kind = 1
             y.visibility = g.visibility
-            y.section = 1
-            y.value = zext[u64](g.def_sym)
+            y.section = if partial { 0xfff2 } else { 1 }
+            // under -r the SHN_COMMON value is the alignment
+            y.value = if partial { g.calign } else { zext[u64](g.def_sym) }
             y.size = g.csize
             l.gid[u32, k + 1] = id
         }
