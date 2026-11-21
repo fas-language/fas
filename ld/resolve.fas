@@ -416,7 +416,7 @@ fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) voi
 // read_extra: a thin archive's member file (read once per canonical path)
 var extra_files Vec[Snapshot] = {}
 
-fn read_extra(path Bytes) Bytes {
+fn read_extra_counted(path Bytes, counter u64) Bytes {
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
     path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
@@ -436,13 +436,17 @@ fn read_extra(path Bytes) Bytes {
     data Bytes = input_read(path, umin(MAX_FILE_SIZE, 268435456 - input_bytes))
     phase_end(PH_READ, &rt)
     input_bytes += data.n
-    stat_add(ST_THIN_MEMBER_FILES, 1)
+    stat_add(counter, 1)
     stat_add(ST_INPUT_BYTES, data.n)
     sn handle[Snapshot] = vec_new[Snapshot](xs)
     sn.real = nul_dup(rh.p, rh.n)
     sn.data = data
     buf_free(rh)
     return data
+}
+
+fn read_extra(path Bytes) Bytes {
+    return read_extra_counted(path, ST_THIN_MEMBER_FILES)
 }
 
 // Reads every input in command-line order, then parses them all.

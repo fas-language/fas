@@ -1,0 +1,212 @@
+// Differential test dumper for ld/shared.fas (ports Shared_object.parse).
+// Usage: sodump <file1> [<file2> ...]
+// Prints every parsed field in a canonical format matching the OCaml dumper.
+
+use "../../lib/core.fas"
+use "../../lib/sort.fas"
+use "../util.fas"
+use "../stats.fas"
+use "../shared.fas"
+
+fn read_raw(path addr) Bytes fails {
+    fd i32 = try os_open(path, O_RDONLY, 0)
+    defer { os_close(fd) }
+    st Stat = {}
+    try os_fstat(fd, handle_from_addr[Stat](&st))
+    size u64 = bitcast[u64](st.size)
+    if size == 0 { return bytes_empty() }
+    p addr = try os_mmap(null, size, PROT_READ, MAP_PRIVATE, fd, 0)
+    return bytes(p, size)
+}
+
+fn ver_out(o handle[Buf], v Bytes) void {
+    if v.n == SH_NONE {
+        bs(o, c"NONE")
+    } else {
+        bb(o, v)
+    }
+}
+
+fn bool_out(o handle[Buf], b bool) void {
+    if b { bs(o, c"true") } else { bs(o, c"false") }
+}
+
+fn dump_one(o handle[Buf], path Bytes) void {
+    bs(o, c"=== ")
+    bb(o, path)
+    bs(o, c" ===\n")
+    data Bytes = read_raw(path.p) catch e {
+        bs(o, c"READ_ERROR\n")
+        return
+    }
+    bs(o, c"is_shared: ")
+    bool_out(o, shared_is(data))
+    buf_u8(o, 10)
+
+    lib ShLib = {}
+    lh handle[ShLib] = handle_from_addr[ShLib](&lib)
+    defer { sh_free(lh) }
+    shared_parse(lh, path, data) catch {
+        bs(o, c"ERROR ")
+        bb(o, buf_bytes(handle_from_addr[Buf](&lh.msg)))
+        buf_u8(o, 10)
+        return
+    }
+
+    bs(o, c"path: ")
+    bb(o, lh.path)
+    buf_u8(o, 10)
+    bs(o, c"needed: ")
+    bb(o, lh.needed)
+    buf_u8(o, 10)
+    bs(o, c"rpath: ")
+    ver_out(o, lh.rpath)
+    buf_u8(o, 10)
+    bs(o, c"runpath: ")
+    ver_out(o, lh.runpath)
+    buf_u8(o, 10)
+
+    bs(o, c"dependencies:\n")
+    for i u64 in 0..lh.dependencies.n {
+        bs(o, c"  ")
+        bb(o, sh_dep(lh, i))
+        buf_u8(o, 10)
+    }
+
+    // Sort defined_versions because OCaml's Hashtbl.fold order is randomized
+    dv Vec[Bytes] = {}
+    dvh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&dv)
+    defer { vec_free[Bytes](dvh) }
+    for i u64 in 0..lh.defined_versions.n {
+        vec_push[Bytes](dvh, sh_defver(lh, i))
+    }
+    if dvh.n > 1 { sort[Bytes, bytes_less](dvh.p, dvh.n) }
+    bs(o, c"defined_versions:\n")
+    for i u64 in 0..dvh.n {
+        bs(o, c"  ")
+        bb(o, vec_get[Bytes](dvh, i))
+        buf_u8(o, 10)
+    }
+
+    bs(o, c"version_requirements:\n")
+    for i u64 in 0..lh.version_requirements.n {
+        vr handle[ShVerReq] = sh_verreq(lh, i)
+        bs(o, c"  ")
+        bb(o, vr.provider)
+        bs(o, c" ")
+        bb(o, vr.version)
+        bs(o, c" weak=")
+        bool_out(o, vr.weak)
+        buf_u8(o, 10)
+    }
+
+    bs(o, c"exports:\n")
+    for i u64 in 0..lh.exports.n {
+        ex handle[ShExport] = sh_export(lh, i)
+        bs(o, c"  ")
+        bb(o, ex.name)
+        bs(o, c" ver=")
+        ver_out(o, ex.version)
+        bs(o, c" kind=")
+        bu(o, zext[u64](ex.kind))
+        bs(o, c" bind=")
+        bu(o, zext[u64](ex.binding))
+        bs(o, c" size=")
+        bd(o, bitcast[i64](ex.size))
+        bs(o, c" def=")
+        bool_out(o, ex.is_default)
+        buf_u8(o, 10)
+    }
+
+    bs(o, c"references:\n")
+    for i u64 in 0..lh.references.n {
+        rf handle[ShRef] = sh_ref(lh, i)
+        bs(o, c"  ")
+        bb(o, rf.name)
+        bs(o, c" ver=")
+        ver_out(o, rf.version)
+        bs(o, c" undef=")
+        bool_out(o, rf.undefined)
+        bs(o, c" bind=")
+        bu(o, zext[u64](rf.binding))
+        bs(o, c" kind=")
+        bu(o, zext[u64](rf.kind))
+        buf_u8(o, 10)
+    }
+
+    // Verify sh_find_location for every entry, then sort for canonical output
+    for i u64 in 0..lh.locations.n {
+        loc handle[ShLoc] = sh_loc(lh, i)
+        found handle[ShLoc] = sh_find_location(lh, loc.name, loc.version)
+        if found == null || handle_addr(found) != handle_addr(loc) {
+            bs(o, c"LOC_LOOKUP_MISMATCH\n")
+        }
+    }
+    // Sort a vector of location indices (ShLoc is a plain struct, not value struct)
+    lidx Vec[u64] = {}
+    lxh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&lidx)
+    defer { vec_free[u64](lxh) }
+    for i u64 in 0..lh.locations.n { vec_push[u64](lxh, i) }
+    // Sort indices by insertion/quicksort using a small helper
+    if lxh.n > 1 { sort_loc_indices(lh, lxh.p, lxh.n) }
+    bs(o, c"locations:\n")
+    for i u64 in 0..lxh.n {
+        loc handle[ShLoc] = sh_loc(lh, lxh.p[u64, i])
+        bs(o, c"  ")
+        bb(o, loc.name)
+        bs(o, c" ver=")
+        ver_out(o, loc.version)
+        bs(o, c" sec=")
+        bu(o, zext[u64](loc.section))
+        bs(o, c" val=")
+        bd(o, bitcast[i64](loc.value))
+        bs(o, c" sz=")
+        bd(o, bitcast[i64](loc.size))
+        bs(o, c" start=")
+        bd(o, bitcast[i64](loc.start))
+        bs(o, c" len=")
+        bu(o, zext[u64](loc.length))
+        bs(o, c" kind=")
+        bu(o, zext[u64](loc.kind))
+        bs(o, c" flags=")
+        bd(o, bitcast[i64](loc.flags))
+        bs(o, c" align=")
+        bd(o, bitcast[i64](loc.alignment))
+        bs(o, c" vis=")
+        bu(o, zext[u64](loc.visibility))
+        bs(o, c" ro=")
+        bool_out(o, loc.read_only)
+        buf_u8(o, 10)
+    }
+}
+
+var sort_lib handle[ShLib] = null
+
+fn loc_idx_less(a u64, b u64) bool {
+    la handle[ShLoc] = sh_loc(sort_lib, a)
+    lb handle[ShLoc] = sh_loc(sort_lib, b)
+    c i32 = bytes_cmp(la.name, lb.name)
+    if c != 0 { return c < 0 }
+    if la.version.n == SH_NONE && lb.version.n == SH_NONE { return false }
+    if la.version.n == SH_NONE { return true }
+    if lb.version.n == SH_NONE { return false }
+    return bytes_cmp(la.version, lb.version) < 0
+}
+
+fn sort_loc_indices(lh handle[ShLib], p addr, n u64) void {
+    sort_lib = lh
+    sort[u64, loc_idx_less](p, n)
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    out Buf = {}
+    oh handle[Buf] = handle_from_addr[Buf](&out)
+    for i u64 in 1..os_argc {
+        buf_clear(oh)
+        dump_one(oh, bytes_c(os_arg(i)))
+        buf_write(oh, STDOUT) catch {}
+    }
+    buf_free(oh)
+    return 0
+}

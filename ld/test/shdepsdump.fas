@@ -1,0 +1,170 @@
+// Differential test dumper for ld/shdeps.fas (ports Shared_dependencies).
+// Usage: shdepsdump [--sysroot DIR] [--rpath-link PATH]... [--allow-shlib-undefined]
+//                   [--def NAME[@VER]:KIND]... -- <direct1.so> [<direct2.so> ...]
+// Prints loaded libraries, dependency edges (sorted), and validation result.
+// On error, fas-ld's die() prints "fas-ld: <message>" on stderr and exits 1.
+
+use "../../lib/core.fas"
+use "../../lib/thread.fas"
+use "../../lib/sort.fas"
+use "../util.fas"
+use "../elf.fas"
+use "../shared.fas"
+use "../cli.fas"
+use "../verscript.fas"
+use "../resolve.fas"
+use "../archive.fas"
+use "../shdeps.fas"
+use "../layout.fas"
+use "../link.fas"
+use "../unwind.fas"
+use "../symver.fas"
+use "../property.fas"
+use "../gc.fas"
+use "../buildid.fas"
+use "../tls.fas"
+use "../ifunc.fas"
+use "../relax.fas"
+use "../dynamic.fas"
+use "../zlib.fas"
+use "../script.fas"
+use "../map.fas"
+use "../stats.fas"
+use "../partial.fas"
+
+struct DefSym {
+    name Bytes
+    version Bytes
+    kind i32
+    pad u32
+}
+
+var test_defs Vec[DefSym] = {}
+
+fn test_defined(name Bytes, version Bytes) i32 {
+    dv handle[Vec[DefSym]] = handle_from_addr[Vec[DefSym]](&test_defs)
+    for i u64 in 0..dv.n {
+        d handle[DefSym] = vec_ref[DefSym](dv, i)
+        if sh_sym_eq(d.name, d.version, name, version) { return d.kind }
+    }
+    return -1
+}
+
+fn add_def(spec Bytes) void {
+    colon u64 = bytes_rindex(spec, 58) catch { return }
+    lhs Bytes = bytes_sub(spec, 0, colon)
+    rhs Bytes = bytes_from(spec, colon + 1)
+    kind u64 = bytes_to_u64(rhs) catch 0
+    d handle[DefSym] = vec_new[DefSym](handle_from_addr[Vec[DefSym]](&test_defs))
+    d.kind = trunc[i32](kind)
+    at u64 = bytes_index(lhs, 64) catch SH_NONE
+    if at == SH_NONE {
+        d.name = lhs
+        d.version = bytes(null, SH_NONE)
+    } else {
+        d.name = bytes_sub(lhs, 0, at)
+        d.version = bytes_from(lhs, at + 1)
+    }
+}
+
+var edge_graph handle[ShDeps] = null
+
+fn edge_idx_less(a u64, b u64) bool {
+    ev handle[Vec[ShDepEdge]] = handle_from_addr[Vec[ShDepEdge]](&edge_graph.edges)
+    ea handle[ShDepEdge] = vec_ref[ShDepEdge](ev, a)
+    eb handle[ShDepEdge] = vec_ref[ShDepEdge](ev, b)
+    c i32 = bytes_cmp(ea.from_path, eb.from_path)
+    if c != 0 { return c < 0 }
+    return bytes_cmp(ea.dep_name, eb.dep_name) < 0
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    reading = false
+    c handle[Config] = config()
+    c.allow_shlib_undefined = false
+    direct_paths Vec[Bytes] = {}
+    dph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&direct_paths)
+    i u64 = 1
+    in_files bool = false
+    while i < os_argc {
+        a Bytes = bytes_c(os_arg(i))
+        i += 1
+        if in_files {
+            vec_push[Bytes](dph, a)
+            continue
+        }
+        if bytes_is(a, c"--") {
+            in_files = true
+        } else if bytes_is(a, c"--allow-shlib-undefined") {
+            c.allow_shlib_undefined = true
+        } else if bytes_is(a, c"--sysroot") && i < os_argc {
+            c.sysroot = bytes_c(os_arg(i))
+            c.has_sysroot = true
+            i += 1
+        } else if bytes_is(a, c"--rpath-link") && i < os_argc {
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.rpath_links), bytes_c(os_arg(i)))
+            c.rpath_link += 1
+            i += 1
+        } else if bytes_is(a, c"--def") && i < os_argc {
+            add_def(bytes_c(os_arg(i)))
+            i += 1
+        } else {
+            vec_push[Bytes](dph, a)
+        }
+    }
+
+    if c.has_sysroot { sysroot_normalize(c.sysroot) }
+
+    direct_libs Vec[addr] = {}
+    dlh handle[Vec[addr]] = handle_from_addr[Vec[addr]](&direct_libs)
+    for k u64 in 0..dph.n {
+        p Bytes = vec_get[Bytes](dph, k)
+        data Bytes = ld_read(p, MAX_FILE_SIZE)
+        lp addr = heap_alloc_zeroed(sizeof[ShLib])
+        lib handle[ShLib] = handle_from_addr[ShLib](lp)
+        shared_parse(lib, p, data) catch { die_buf(handle_from_addr[Buf](&lib.msg)) }
+        vec_push[addr](dlh, lp)
+    }
+
+    graph ShDeps = {}
+    gh handle[ShDeps] = handle_from_addr[ShDeps](&graph)
+    shdeps_load(gh, dlh.p, dlh.n)
+    shdeps_validate[test_defined](gh)
+
+    out Buf = {}
+    oh handle[Buf] = handle_from_addr[Buf](&out)
+    bs(oh, c"libraries:\n")
+    for k u64 in 0..gh.libraries.n {
+        lib handle[ShLib] = shdeps_lib(gh, k)
+        bs(oh, c"  ")
+        bb(oh, lib.path)
+        bs(oh, c" needed=")
+        bb(oh, lib.needed)
+        buf_u8(oh, 10)
+    }
+
+    eidx Vec[u64] = {}
+    exh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&eidx)
+    for k u64 in 0..gh.edges.n { vec_push[u64](exh, k) }
+    edge_graph = gh
+    if exh.n > 1 { sort[u64, edge_idx_less](exh.p, exh.n) }
+    bs(oh, c"edges:\n")
+    ev handle[Vec[ShDepEdge]] = handle_from_addr[Vec[ShDepEdge]](&gh.edges)
+    for k u64 in 0..exh.n {
+        e handle[ShDepEdge] = vec_ref[ShDepEdge](ev, exh.p[u64, k])
+        t handle[ShLib] = handle_from_addr[ShLib](e.target)
+        bs(oh, c"  ")
+        bb(oh, e.from_path)
+        bs(oh, c" -> ")
+        bb(oh, e.dep_name)
+        bs(oh, c" = ")
+        bb(oh, t.path)
+        buf_u8(oh, 10)
+    }
+    bs(oh, c"VALID\n")
+    buf_write(oh, STDOUT) catch {}
+    buf_free(oh)
+    shdeps_free(gh)
+    return 0
+}

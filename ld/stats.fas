@@ -10,36 +10,37 @@ const ST_ARCHIVES u64 = 0
 const ST_COPY_RELOCATIONS u64 = 1
 const ST_COPY_STORAGE_BYTES u64 = 2
 const ST_DECODED_DEBUG_BYTES u64 = 3
-const ST_DISCARDED_COMDAT_GROUPS u64 = 4
-const ST_DISCARDED_OUTPUT_BYTES u64 = 5
-const ST_DISCARDED_SECTIONS u64 = 6
-const ST_DYNAMIC_EXPORTS u64 = 7
-const ST_DYNAMIC_IMPORTS u64 = 8
-const ST_DYNAMIC_RELATIVE_RELOCATIONS u64 = 9
-const ST_EXTRACTED_MEMBERS u64 = 10
-const ST_GNU_PROPERTIES u64 = 11
-const ST_GOT_ENTRIES u64 = 12
-const ST_GOTPCRELX_RELAXATIONS u64 = 13
-const ST_IN_MEMORY_OBJECTS u64 = 14
-const ST_INDEXED_UNWIND_FDES u64 = 15
-const ST_INPUT_BYTES u64 = 16
-const ST_INPUT_FILES u64 = 17
-const ST_INPUT_READ_CACHE_HITS u64 = 18
-const ST_LINKER_SCRIPTS u64 = 19
-const ST_LINKER_SYMBOLS u64 = 20
-const ST_MERGED_BYTES u64 = 21
-const ST_MERGED_SECTIONS u64 = 22
-const ST_OBJECTS u64 = 23
-const ST_OUTPUT_BYTES u64 = 24
-const ST_PLT_ENTRIES u64 = 25
-const ST_RELOCATIONS u64 = 26
-const ST_SHARED_LIBRARIES u64 = 27
-const ST_STATIC_IFUNC_RESOLVERS u64 = 28
-const ST_SYMBOLS u64 = 29
-const ST_THIN_MEMBER_FILES u64 = 30
-const ST_TRANSITIVE_SHARED_LIBRARIES u64 = 31
-const ST_UNWIND_FDES u64 = 32
-const ST_N u64 = 33
+const ST_DEPENDENCY_FILES u64 = 4
+const ST_DISCARDED_COMDAT_GROUPS u64 = 5
+const ST_DISCARDED_OUTPUT_BYTES u64 = 6
+const ST_DISCARDED_SECTIONS u64 = 7
+const ST_DYNAMIC_EXPORTS u64 = 8
+const ST_DYNAMIC_IMPORTS u64 = 9
+const ST_DYNAMIC_RELATIVE_RELOCATIONS u64 = 10
+const ST_EXTRACTED_MEMBERS u64 = 11
+const ST_GNU_PROPERTIES u64 = 12
+const ST_GOT_ENTRIES u64 = 13
+const ST_GOTPCRELX_RELAXATIONS u64 = 14
+const ST_IN_MEMORY_OBJECTS u64 = 15
+const ST_INDEXED_UNWIND_FDES u64 = 16
+const ST_INPUT_BYTES u64 = 17
+const ST_INPUT_FILES u64 = 18
+const ST_INPUT_READ_CACHE_HITS u64 = 19
+const ST_LINKER_SCRIPTS u64 = 20
+const ST_LINKER_SYMBOLS u64 = 21
+const ST_MERGED_BYTES u64 = 22
+const ST_MERGED_SECTIONS u64 = 23
+const ST_OBJECTS u64 = 24
+const ST_OUTPUT_BYTES u64 = 25
+const ST_PLT_ENTRIES u64 = 26
+const ST_RELOCATIONS u64 = 27
+const ST_SHARED_LIBRARIES u64 = 28
+const ST_STATIC_IFUNC_RESOLVERS u64 = 29
+const ST_SYMBOLS u64 = 30
+const ST_THIN_MEMBER_FILES u64 = 31
+const ST_TRANSITIVE_SHARED_LIBRARIES u64 = 32
+const ST_UNWIND_FDES u64 = 33
+const ST_N u64 = 34
 
 const PH_EMIT u64 = 0
 const PH_EMIT_RELOCATABLE u64 = 1
@@ -61,8 +62,8 @@ var stats_start_cpu u64 = 0
 // the counters and phase flags, which a parse failure found late rolls
 // back to the moment the failing input was read (StatSnap)
 struct StatSnap {
-    count arr[33, u64]
-    seen arr[33, bool]
+    count arr[34, u64]
+    seen arr[34, bool]
     phase_seen arr[11, bool]
 }
 var stat_now StatSnap = {}
@@ -76,35 +77,36 @@ fn stat_name(k u64) addr {
         case 1: return c"copy_relocations"
         case 2: return c"copy_storage_bytes"
         case 3: return c"decoded_debug_bytes"
-        case 4: return c"discarded_comdat_groups"
-        case 5: return c"discarded_output_bytes"
-        case 6: return c"discarded_sections"
-        case 7: return c"dynamic_exports"
-        case 8: return c"dynamic_imports"
-        case 9: return c"dynamic_relative_relocations"
-        case 10: return c"extracted_members"
-        case 11: return c"gnu_properties"
-        case 12: return c"got_entries"
-        case 13: return c"gotpcrelx_relaxations"
-        case 14: return c"in_memory_objects"
-        case 15: return c"indexed_unwind_fdes"
-        case 16: return c"input_bytes"
-        case 17: return c"input_files"
-        case 18: return c"input_read_cache_hits"
-        case 19: return c"linker_scripts"
-        case 20: return c"linker_symbols"
-        case 21: return c"merged_bytes"
-        case 22: return c"merged_sections"
-        case 23: return c"objects"
-        case 24: return c"output_bytes"
-        case 25: return c"plt_entries"
-        case 26: return c"relocations"
-        case 27: return c"shared_libraries"
-        case 28: return c"static_ifunc_resolvers"
-        case 29: return c"symbols"
-        case 30: return c"thin_member_files"
-        case 31: return c"transitive_shared_libraries"
-        case 32: return c"unwind_fdes"
+        case 4: return c"dependency_files"
+        case 5: return c"discarded_comdat_groups"
+        case 6: return c"discarded_output_bytes"
+        case 7: return c"discarded_sections"
+        case 8: return c"dynamic_exports"
+        case 9: return c"dynamic_imports"
+        case 10: return c"dynamic_relative_relocations"
+        case 11: return c"extracted_members"
+        case 12: return c"gnu_properties"
+        case 13: return c"got_entries"
+        case 14: return c"gotpcrelx_relaxations"
+        case 15: return c"in_memory_objects"
+        case 16: return c"indexed_unwind_fdes"
+        case 17: return c"input_bytes"
+        case 18: return c"input_files"
+        case 19: return c"input_read_cache_hits"
+        case 20: return c"linker_scripts"
+        case 21: return c"linker_symbols"
+        case 22: return c"merged_bytes"
+        case 23: return c"merged_sections"
+        case 24: return c"objects"
+        case 25: return c"output_bytes"
+        case 26: return c"plt_entries"
+        case 27: return c"relocations"
+        case 28: return c"shared_libraries"
+        case 29: return c"static_ifunc_resolvers"
+        case 30: return c"symbols"
+        case 31: return c"thin_member_files"
+        case 32: return c"transitive_shared_libraries"
+        case 33: return c"unwind_fdes"
     }
     return c""
 }
