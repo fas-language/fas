@@ -43,6 +43,7 @@ struct Archive {
     entries Vec[AEntry]
     exports Vec[Bytes]      // per member, contiguous, in index order
     index KeyIndex          // name hash -> entry
+    nested Map[Bytes, addr, bytes_hash, bytes_eq]  // canonical path -> parsed container
     indexed bool
     thin bool
     whole bool
@@ -174,10 +175,15 @@ struct RawMember {
 // Archive.parse; `whole` is the input's --whole-archive
 fn archive_parse(path Bytes, data Bytes, whole bool) void {
     a handle[Archive] = vec_new[Archive](handle_from_addr[Vec[Archive]](&archives))
+    a.whole = whole
+    archive_parse_into(a, path, data)
+}
+
+fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void {
+    if !is_archive_data(data) { ar_die(path, c"invalid magic") }
     a.path = path
     a.data = data.p
     a.len = data.n
-    a.whole = whole
     d addr = data.p
     length u64 = data.n
     thin bool = mem_eq(d, c"!<thin>\n", 8)
@@ -536,6 +542,45 @@ fn member_obj(a handle[Archive], m handle[Member]) handle[Obj] {
     return o
 }
 
+fn nested_member_data(a handle[Archive], m handle[Member], path Bytes) Bytes {
+    real Buf = {}
+    rh handle[Buf] = handle_from_addr[Buf](&real)
+    path_realpath(m.ext.p, rh) catch e { input_die_io(c"realpath", m.ext, e) }
+    cache handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&a.nested)
+    container addr = map_get(cache, buf_bytes(rh)) catch null
+    if container == null {
+        data Bytes = read_extra(m.ext)
+        // Keep the parsed container separate from the command-line archive vector.
+        container = heap_alloc_zeroed(sizeof[Archive])
+        archive_parse_into(handle_from_addr[Archive](container), m.ext, data)
+        map_put(cache, nul_dup(rh.p, rh.n), container)
+    }
+    buf_free(rh)
+    nested handle[Archive] = handle_from_addr[Archive](container)
+    if nested.thin {
+        b handle[Buf] = msg()
+        bb(b, path)
+        bs(b, c": nested container must be a regular archive")
+        die()
+    }
+
+    // Headers are in file order. Only an exact header offset names a member.
+    lo u64 = 0
+    hi u64 = nested.members.n
+    while lo < hi {
+        mid u64 = lo + (hi - lo) / 2
+        target handle[Member] = member(nested, mid)
+        if target.header == m.nested { return bytes(nested.data + target.offset, target.size) }
+        if target.header < m.nested { lo = mid + 1 } else { hi = mid }
+    }
+    b handle[Buf] = msg()
+    bb(b, path)
+    bs(b, c": invalid nested member header offset ")
+    bu(b, m.nested)
+    die()
+    return bytes_empty()
+}
+
 fn member_parse(m handle[Member]) void {
     o handle[Obj] = handle_from_addr[Obj](m.o)
     m.status = MS_PARSED
@@ -595,9 +640,8 @@ fn archive_object(a handle[Archive], i u64) handle[Obj] {
     m handle[Member] = member(a, i)
     if m.status == MS_UNPARSED {
         if a.thin {
-            if m.nested != NONE64 { refuse(c"nested thin archive members") }
-            data Bytes = read_extra(m.ext)
             o handle[Obj] = member_obj(a, m)
+            data Bytes = if m.nested == NONE64 { read_extra(m.ext) } else { nested_member_data(a, m, o.path) }
             o.data = data.p
             o.len = data.n
             t PhaseStart = {}
