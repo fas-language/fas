@@ -47,6 +47,11 @@ fn mem_copy(dst addr, src addr, n usize) void {
     }
 }
 
+// Copies a whole struct between non-overlapping regions of the same type.
+fn copy_into[T](dst handle[T], src handle[T]) void {
+    mem_copy(handle_addr(dst), handle_addr(src), sizeof[T])
+}
+
 // Copies `n` bytes; the ranges may overlap.
 fn mem_move(dst addr, src addr, n usize) void {
     if addr_bits(dst) <= addr_bits(src) || addr_bits(dst) >= addr_bits(src) + n {
@@ -197,6 +202,28 @@ fn heap_realloc(p addr, n usize) addr {
     mem_copy(q, p, if have < n { have } else { n })
     heap_free(p)
     return q
+}
+
+// Allocates `n` bytes at a power-of-two alignment, optionally zeroed.
+fn heap_alloc_aligned(n usize, alignment usize, zeroed bool) addr {
+    if alignment <= 16 {
+        return if zeroed { heap_alloc_zeroed(n) } else { heap_alloc(n) }
+    }
+    // Save the original allocation immediately before the aligned payload.
+    size usize = n + alignment - 1 + sizeof[addr]
+    base addr = if zeroed { heap_alloc_zeroed(size) } else { heap_alloc(size) }
+    start addr = base + sizeof[addr]
+    offset usize = (0 - addr_bits(start)) & (alignment - 1)
+    p addr = start + offset
+    (p - sizeof[addr])[addr] = base
+    return p
+}
+
+// Frees a block allocated with heap_alloc_aligned using the same alignment.
+fn heap_free_aligned(p addr, alignment usize) void {
+    if p == null { return }
+    if alignment > 16 { p = (p - sizeof[addr])[addr] }
+    heap_free(p)
 }
 
 // ---------- arenas ----------

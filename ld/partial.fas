@@ -271,7 +271,7 @@ fn partial_combine() void {
             out.name = g.name
             out.visibility = g.res_vis
         } else {
-            mem_copy(handle_addr(oh), vec_at[Sym](dh, j), sizeof[Sym])
+            copy_into[Sym](oh, vec_at[Sym](dh, j))
             out.section = 0
             out.value = 0
             out.binding = if g.strong != 0 { 1 } else { 2 }

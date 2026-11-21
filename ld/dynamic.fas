@@ -666,8 +666,8 @@ fn dyn_prepare() void {
     }
     dyn_relative_count = rv.n
     fx handle[Vec[Fixup]] = handle_from_addr[Vec[Fixup]](&dyn_fixups)
-    for j u64 in 0..rv.n { mem_copy(vec_push_zeroed[Fixup](fx), vec_at[Fixup](rv, j), sizeof[Fixup]) }
-    for j u64 in 0..sy.n { mem_copy(vec_push_zeroed[Fixup](fx), vec_at[Fixup](sy, j), sizeof[Fixup]) }
+    for j u64 in 0..rv.n { copy_into[Fixup](vec_add[Fixup](fx), vec_at[Fixup](rv, j)) }
+    for j u64 in 0..sy.n { copy_into[Fixup](vec_add[Fixup](fx), vec_at[Fixup](sy, j)) }
     vec_free[Fixup](rv)
     vec_free[Fixup](sy)
 

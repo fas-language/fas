@@ -437,7 +437,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             inner u64 = parse_level(p, depth + 1)
             // running out of arguments inside a group dies with "missing
             // --end-group" in the inner level
-            g handle[Item] = handle_from_addr[Item](vec_at[Item](items, at))
+            g handle[Item] = vec_at[Item](items, at)
             g.count = trunc[u32](items.n - at - 1)
             level += 1
         } else if is(a, c"--whole-archive") {

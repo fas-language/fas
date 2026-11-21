@@ -1,8 +1,8 @@
 // Growable arrays on the heap. `Vec[T]` starts as `{}` and owns its block
-// until vec_free. vec_push/vec_get take and give `T` by value, so they need
-// a scalar, `addr`, handle or value struct; any T works through vec_at (an
-// element's address) and vec_push_zeroed (a new zeroed element).
-// Addresses from vec_at stay valid only until the vector grows.
+// until vec_free. Value operations work with scalars, addresses, handles,
+// and value structs. For any struct, vec_add and vec_at give direct access
+// to an element. Use vec_push_zeroed when a raw address is needed.
+// Element handles and addresses can be invalidated by growth.
 
 use "mem.fas"
 
@@ -12,22 +12,36 @@ struct Vec[T] {
     cap usize
 }
 
+// Reserves room for at least `extra` more elements.
 fn vec_reserve[T](v handle[Vec[T]], extra usize) void {
     need usize = v.n + extra
     if need <= v.cap { return }
     cap usize = if v.cap < 8 { 8 } else { v.cap }
     while cap < need { cap *= 2 }
-    v.p = heap_realloc(v.p, cap * sizeof[T])
+    if alignof[T] <= 16 {
+        v.p = heap_realloc(v.p, cap * sizeof[T])
+    } else {
+        p addr = heap_alloc_aligned(cap * sizeof[T], alignof[T], false)
+        if v.n != 0 { mem_copy(p, v.p, v.n * sizeof[T]) }
+        heap_free_aligned(v.p, alignof[T])
+        v.p = p
+    }
     v.cap = cap
 }
 
+// Appends an element by value.
 fn vec_push[T](v handle[Vec[T]], x T) void {
     vec_reserve(v, 1)
     v.p[T, v.n] = x
     v.n += 1
 }
 
-// a new zeroed element at the end, and its address
+// Appends a zeroed struct and returns a handle to fill it in place.
+fn vec_add[T](v handle[Vec[T]]) handle[T] {
+    return handle_from_addr[T](vec_push_zeroed[T](v))
+}
+
+// Appends a zeroed element and returns its raw address.
 fn vec_push_zeroed[T](v handle[Vec[T]]) addr {
     vec_reserve(v, 1)
     p addr = v.p + v.n * sizeof[T]
@@ -36,41 +50,49 @@ fn vec_push_zeroed[T](v handle[Vec[T]]) addr {
     return p
 }
 
+// Reads the element at `i` by value.
 fn vec_get[T](v handle[Vec[T]], i usize) T {
     assert(i < v.n)
     return v.p[T, i]
 }
 
+// Replaces the element at `i` by value.
 fn vec_set[T](v handle[Vec[T]], i usize, x T) void {
     assert(i < v.n)
     v.p[T, i] = x
 }
 
-fn vec_at[T](v handle[Vec[T]], i usize) addr {
+// Returns a handle to the struct at `i`.
+fn vec_at[T](v handle[Vec[T]], i usize) handle[T] {
     assert(i < v.n)
-    return v.p + i * sizeof[T]
+    return handle_from_addr[T](v.p + i * sizeof[T])
 }
 
+// Reads the last element by value.
 fn vec_last[T](v handle[Vec[T]]) T {
     assert(v.n > 0)
     return v.p[T, v.n - 1]
 }
 
+// Removes and returns the last element by value.
 fn vec_pop[T](v handle[Vec[T]]) T {
     assert(v.n > 0)
     v.n -= 1
     return v.p[T, v.n]
 }
 
+// Keeps the first `n` elements and retains the allocation.
 fn vec_truncate[T](v handle[Vec[T]], n usize) void {
     assert(n <= v.n)
     v.n = n
 }
 
+// Removes all elements and retains the allocation.
 fn vec_clear[T](v handle[Vec[T]]) void { v.n = 0 }
 
+// Frees the allocation and resets the vector for reuse.
 fn vec_free[T](v handle[Vec[T]]) void {
-    heap_free(v.p)
+    heap_free_aligned(v.p, alignof[T])
     v.p = null
     v.n = 0
     v.cap = 0
