@@ -318,6 +318,38 @@ fn range_who(r Range) i64 { return bitcast[i64](r.rest & 0xffffff) - 2 }
 
 fn range_less(a Range, b Range) bool { return a.start < b.start }
 
+fn ranges_in_order(o handle[Obj], count u64, names_index u64, shoff u64) bool {
+    // Clang typically places the section names and headers last, and emits
+    // two runs in file order, split at the first relocation section's offset.
+    // Section indexes can interleave the runs. Check each run independently.
+    names handle[Sec] = sec(o, names_index)
+    limit u64 = shoff
+    if names.kind != 8 && names.size != 0 {
+        if names.offset < 64 || names.offset + names.size > shoff { return false }
+        limit = names.offset
+    }
+    split u64 = limit
+    low_end u64 = 64
+    high_end u64 = limit
+    for index u64 in 0..count {
+        s handle[Sec] = sec(o, index)
+        if index == names_index || s.kind == 8 || s.size == 0 { continue }
+        if split == limit && (s.kind == 4 || s.kind == 9) {
+            if s.offset < low_end || s.offset >= limit { return false }
+            split = s.offset
+            high_end = split
+        }
+        if s.offset < split {
+            if s.offset < low_end { return false }
+            low_end = s.offset + s.size
+        } else {
+            if split == limit || s.offset < high_end { return false }
+            high_end = s.offset + s.size
+        }
+    }
+    return low_end <= split && high_end <= limit
+}
+
 value struct RelKey { target u32, kind u32, offset u64 }
 
 fn relkey_less(a RelKey, b RelKey) bool {
@@ -487,29 +519,32 @@ fn elf_parse(o handle[Obj]) void fails {
     }
 
     // no two file ranges overlap
-    ranges Vec[Range] = {}
-    rh handle[Vec[Range]] = handle_from_addr[Vec[Range]](&ranges)
-    defer { vec_free(rh) }
-    vec_push(rh, range(0, 64, -2))
-    vec_push(rh, range(shoff, shoff + count * 64, -1))
-    for index u64 in 0..count {
-        s handle[Sec] = sec(o, index)
-        if s.kind != 8 && s.size != 0 { vec_push(rh, range(s.offset, s.offset + s.size, bitcast[i64](index))) }
-    }
-    sort[Range, range_less](ranges.p, ranges.n)
-    previous_end u64 = 0
-    previous_who i64 = -3
-    for i usize in 0..ranges.n {
-        r Range = vec_get(rh, i)
-        if r.start < previous_end {
-            m handle[Buf] = ef(o)
-            range_name(m, range_who(r))
-            bs(m, c" overlaps ")
-            range_name(m, previous_who)
-            fail Bad
+    if !ranges_in_order(o, count, names_index, shoff) {
+        // Unusual layouts and overlaps use the stable sort so diagnostic order is unchanged.
+        ranges Vec[Range] = {}
+        rh handle[Vec[Range]] = handle_from_addr[Vec[Range]](&ranges)
+        defer { vec_free(rh) }
+        vec_push(rh, range(0, 64, -2))
+        vec_push(rh, range(shoff, shoff + count * 64, -1))
+        for index u64 in 0..count {
+            s handle[Sec] = sec(o, index)
+            if s.kind != 8 && s.size != 0 { vec_push(rh, range(s.offset, s.offset + s.size, bitcast[i64](index))) }
         }
-        previous_end = range_end(r)
-        previous_who = range_who(r)
+        sort[Range, range_less](ranges.p, ranges.n)
+        previous_end u64 = 0
+        previous_who i64 = -3
+        for i usize in 0..ranges.n {
+            r Range = vec_get(rh, i)
+            if r.start < previous_end {
+                m handle[Buf] = ef(o)
+                range_name(m, range_who(r))
+                bs(m, c" overlaps ")
+                range_name(m, previous_who)
+                fail Bad
+            }
+            previous_end = range_end(r)
+            previous_who = range_who(r)
+        }
     }
 
     names handle[Sec] = sec(o, names_index)

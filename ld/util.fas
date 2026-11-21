@@ -198,7 +198,14 @@ fn wr64(p addr, at u64, x u64) void { (p + at)[u64] = x }
 
 fn bytes_is(b Bytes, s addr) bool { return bytes_eq_c(b, s) }
 
-fn bytes_prefix(b Bytes, s addr) bool { return bytes_starts_with(b, bytes_c(s)) }
+fn bytes_prefix(b Bytes, s addr) bool {
+    for i usize in 0..b.n {
+        ch u8 = s[u8, i]
+        if ch == 0 { return true }
+        if b.p[u8, i] != ch { return false }
+    }
+    return s[u8, b.n] == 0
+}
 
 // a NUL-terminated copy of `b`, from the heap
 fn cstr_dup(b Bytes) addr {
