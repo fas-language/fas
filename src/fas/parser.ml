@@ -2411,6 +2411,10 @@ module P = struct
         let sp = span p in
         ignore (bump p);
         Ok (Ast.String_lit (true, s, sp))
+    | Token.BString s ->
+        let sp = span p in
+        ignore (bump p);
+        Ok (Ast.Byte_string (s, sp))
     | Token.Dot
       when match ((peek_n p 1).kind, (peek_n p 2).kind) with
            | Token.Ident _, Token.Assign -> true

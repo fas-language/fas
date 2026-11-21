@@ -1296,6 +1296,8 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
       if cstr && String.contains v '\000' then
         error s "C string literal cannot contain embedded NUL"
       else Ok (Hir.Int Hir.U64, Int64.of_int (String.length v))
+  | Ast.Call (Ast.Ident ("len", _), [ Ast.Byte_string (v, _) ], _) ->
+      Ok (Hir.Int Hir.U64, Int64.of_int (String.length v))
   | Ast.Call (Ast.Ident ("len", _), [ Ast.Ident (name, _) ], s) -> (
       match lookup name arrays with
       | Some (_, Hir.Array (n, _), _) -> Ok (Hir.Int Hir.U64, Int64.of_int n)

@@ -2192,6 +2192,9 @@ and check_expr_inner ?destination (c : context) expected expression =
         let value = if cstr then v ^ "\000" else v in
         let* id = intern_string c s value in
         Ok (Hir.EString (id, cstr, s))
+  | Ast.Byte_string (_, s) ->
+      error s
+        "byte string literal can only initialize `arr[N, u8]` or be passed to `len`"
   | Ast.Ident (n, s)
     when Option.is_none (lookup_local n c)
          && Option.is_some (List.assoc_opt n c.c_unsupported) ->
@@ -3251,6 +3254,29 @@ and check_initializer ?(constant = false) ?destination c expected expression =
           | Some entry -> Error [ Sema_types.invalid_designator_error expected entry ]
           | None -> vector_value ())
       | _ -> aggregate_entries expected entries span)
+  | Ast.Byte_string (bytes, span) -> (
+      match expected with
+      | Hir.Array (length, Hir.Int Hir.U8) ->
+          if String.length bytes <> length then
+            error span
+              (Sema_types.array_element_count_message length (String.length bytes))
+          else
+            let entries =
+              List.init length (fun i ->
+                  Hir.Init_value
+                    (Hir.EInt
+                       (Int64.of_int (Char.code bytes.[i]), Hir.Int Hir.U8, span)))
+            in
+            Ok (`Aggregate (expected, entries, span, false))
+      | Hir.Array (_, elem) ->
+          error span
+            (Printf.sprintf
+               "byte string initializer requires `arr[N, u8]`, got `arr[_, %s]`"
+               (Sema_types.diagnostic_ty_name elem))
+      | _ ->
+          error span
+            (Printf.sprintf "byte string initializer requires `arr[N, u8]`, got `%s`"
+               (Sema_types.diagnostic_ty_name expected)))
   | _ when match expected with Hir.Vec _ -> true | _ -> false -> vector_value ()
   | _ ->
       let* value = check_expr c (Some expected) expression in
@@ -4231,6 +4257,7 @@ and check_call_inner c expected fn args s =
               if cstr && String.contains value '\000' then
                 error s "C string literal cannot contain embedded NUL"
               else Ok (String.length value)
+          | Ast.Byte_string (value, _) -> Ok (String.length value)
           | _ -> (
               (* `len` only needs the type, so a place (`digits`, `s.buf`)
                  may still be uninitialized: look it up as a place, which
@@ -5478,7 +5505,7 @@ let rec expression_mentions_name name = function
   | Ast.Designated_index (index, value, _) ->
       expression_mentions_name name index || expression_mentions_name name value
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_mentions_name name value
   | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
@@ -5524,7 +5551,7 @@ let rec expression_takes_name_address name = function
       expression_takes_name_address name index
       || expression_takes_name_address name value
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_takes_name_address name value
   | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->

@@ -169,7 +169,7 @@ let rec count_expanded_expr_type_nodes expr cap total =
   else
     match expr with
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-    | Ast.Ident _ ->
+    | Ast.Byte_string _ | Ast.Ident _ ->
         total
     | Ast.Unary (_, value, _)
     | Ast.C_dereference (value, _, _)

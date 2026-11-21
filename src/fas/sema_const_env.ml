@@ -33,6 +33,19 @@ let collect ?(global_names = []) ?(array_lengths = []) ?(generic_structs = [])
           let* t = source_obj ty_span ty in
           let result =
             match (t, value) with
+            | Hir.Array (n, Hir.Int Hir.U8), Ast.Byte_string (bytes, s) ->
+                if String.length bytes <> n then
+                  error s (Sema_types.array_element_count_message n (String.length bytes))
+                else
+                  let vs = List.init n (fun i -> Int64.of_int (Char.code bytes.[i])) in
+                  arrays := (name, t, vs) :: !arrays;
+                  arrays_names := String_set.add name !arrays_names;
+                  Ok ()
+            | Hir.Array (_, elem), Ast.Byte_string (_, s) ->
+                error s
+                  (Printf.sprintf
+                     "byte string initializer requires `arr[N, u8]`, got `arr[_, %s]`"
+                     (Sema_types.diagnostic_ty_name elem))
             | Hir.Array (_, (Hir.Bool | Hir.Int _)), Ast.Array_lit ([], _) -> (
                 let zero = Hir.zero_initializer t in
                 match Hir.zero_integer_array_values zero with

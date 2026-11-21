@@ -156,7 +156,7 @@ let rec expr e =
                  (Printf.sprintf "enum `%s` has no member `%s`" enum member);
              ])
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Ident _ ->
+  | Ast.Byte_string _ | Ast.Ident _ ->
       e
   | Ast.Unary (op, a, s) -> Ast.Unary (op, expr a, s)
   | Ast.C_dereference (a, n, s) -> Ast.C_dereference (expr a, n, s)

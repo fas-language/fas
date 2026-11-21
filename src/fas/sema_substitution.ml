@@ -308,7 +308,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         expression_mentions names call || expression_mentions names value
     | Ast.Catch (call, Ast.Catch_block _, _) -> expression_mentions names call
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      ->
+    | Ast.Byte_string _ ->
         false
   in
   let shadowed_constant_error expression =
@@ -552,7 +552,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         (* a catch block inside an expression is refused by the checker *)
         | Ast.Catch_block _ -> Ok ())
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      ->
+    | Ast.Byte_string _ ->
         Ok ()
   in
   let rec validate_target_names value_names type_names = function
@@ -1398,7 +1398,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Catch (call, Ast.Catch_value value, _) ->
         has_generic_arguments call || has_generic_arguments value
     | Ast.Ident _ | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _
-    | Ast.String_lit _ ->
+    | Ast.String_lit _ | Ast.Byte_string _ ->
         false
   in
   let rec substitute_validation_type type_substitutions const_substitutions = function
@@ -1881,7 +1881,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           let* () = validate_non_dependent_call_arguments c dependent call in
           validate_non_dependent_expression c dependent expected value
       | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ | Ast.Ident _ | Ast.Int_lit _
-      | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _ ->
+      | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
+      | Ast.Byte_string _ ->
           Ok ()
   and validate_non_dependent_call_arguments c dependent = function
     | Ast.Call (_, arguments, _) ->
@@ -2628,7 +2629,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     in
     match expression with
     | ( Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      | Ast.Ident _ ) as expression ->
+      | Ast.Byte_string _ | Ast.Ident _ ) as expression ->
         Ok expression
     | Ast.Unary (op, expression, span) ->
         let* expression =

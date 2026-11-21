@@ -61,16 +61,32 @@ let collect ~array_lengths ~source_obj ~structs ~named_types ~generic_structs ~c
           error (Ast.expr_span expression) (constant_initializer_type_message actual ty)
         else Ok (Hir.Global_vector values)
     | Hir.Array (length, element) -> (
-        match array_items with
-        | Some [] -> Ok (Hir.Global_zero (Hir.zero_initializer ty))
-        | Some items when List.length items = length ->
-            map (fun xs -> Hir.Global_array xs) element items
-        | Some items ->
-            error
-              (Sema_types.aggregate_count_error_span (Ast.expr_span expression) length
-                 items)
-              (Sema_types.array_element_count_message length (List.length items))
-        | None -> global_error span "global initializer must be a constant expression")
+        match (element, expression) with
+        | Hir.Int Hir.U8, Ast.Byte_string (bytes, s) ->
+            if String.length bytes <> length then
+              error s
+                (Sema_types.array_element_count_message length (String.length bytes))
+            else
+              Ok
+                (Hir.Global_array
+                   (List.init length (fun i ->
+                        Hir.Global_int (Int64.of_int (Char.code bytes.[i])))))
+        | elem, Ast.Byte_string (_, s) ->
+            error s
+              (Printf.sprintf
+                 "byte string initializer requires `arr[N, u8]`, got `arr[_, %s]`"
+                 (Sema_types.diagnostic_ty_name elem))
+        | _ -> (
+            match array_items with
+            | Some [] -> Ok (Hir.Global_zero (Hir.zero_initializer ty))
+            | Some items when List.length items = length ->
+                map (fun xs -> Hir.Global_array xs) element items
+            | Some items ->
+                error
+                  (Sema_types.aggregate_count_error_span (Ast.expr_span expression) length
+                     items)
+                  (Sema_types.array_element_count_message length (List.length items))
+            | None -> global_error span "global initializer must be a constant expression"))
     | Hir.Struct name -> (
         let items = match struct_items with Some items -> Some items | _ -> None in
         match

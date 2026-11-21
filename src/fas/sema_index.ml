@@ -284,7 +284,7 @@ and argument_expressions = function
 
 let expression_children = function
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       []
   | Ast.Unary (_, e, _)
   | Ast.C_dereference (e, _, _)
