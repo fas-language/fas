@@ -52,7 +52,7 @@ fn out_align(v u64, a u64) u64 fails { return try chk_align(c"output layout", MA
 fn header(name Bytes, s handle[Sec], offset u64, address u64, size u64, alignment u64) u32 fails {
     count u64 = headers.n + 1
     if count + 4 >= 0xff00 { try die_c(c"output requires unsupported extended section numbering") }
-    o handle[OutSec] = vec_add[OutSec](&headers)
+    o handle[OutSec] = vec_add(&headers)
     o.name = name
     o.kind = s.kind
     o.flags = s.flags & ~0x200
@@ -70,7 +70,7 @@ fn chunk(x u64, output_index u32, offset u64, address u64) void {
     p.valid = 1
     p.offset = offset
     p.address = address
-    vec_push[u64](&content, x)
+    vec_push(&content, x)
 }
 
 fn add_section(x u64, offset u64, address u64) void fails {
@@ -139,12 +139,12 @@ fn gtab_id(t handle[GTab], name Bytes, kind u64, flags u64, entsize u64) u32 {
     hash u64 = hash_mix(bytes_hash(name) ^ hash_mix(kind ^ (flags << 32)) ^ (entsize * 0x9e3779b97f4a7c15))
     id u32 = kx_first(&t.index, hash)
     while id != NONE {
-        k handle[GKey] = vec_at[GKey](&t.keys, zext[u64](id))
+        k handle[GKey] = vec_at(&t.keys, zext[u64](id))
         if k.kind == kind && k.flags == flags && k.entsize == entsize && bytes_eq(k.name, name) { return id }
         id = kx_next(&t.index, id)
     }
     id = trunc[u32](t.keys.n)
-    k handle[GKey] = vec_add[GKey](&t.keys)
+    k handle[GKey] = vec_add(&t.keys)
     k.name = name
     k.kind = kind
     k.flags = flags
@@ -155,7 +155,7 @@ fn gtab_id(t handle[GTab], name Bytes, kind u64, flags u64, entsize u64) u32 {
 
 fn gtab_free(t handle[GTab]) void {
     kx_free(&t.index)
-    vec_free[GKey](&t.keys)
+    vec_free(&t.keys)
 }
 
 // Layout's `key`: the name, plus the signature for registry sections and
@@ -196,34 +196,34 @@ fn build_groups(sel handle[Vec[u64]], g handle[Groups]) void {
     keys GTab = {}
     count Vec[u64] = {}
     for i u64 in 0..sel.n {
-        s handle[Sec] = pk_section(vec_get[u64](sel, i))
+        s handle[Sec] = pk_section(vec_get(sel, i))
         name Bytes = combined_name(s)
         if name.n == NO_NAME {
-            vec_push[u32](&g.gid, NONE)
+            vec_push(&g.gid, NONE)
             continue
         }
         id u32 = group_id(&keys, s, name)
-        if zext[u64](id) == count.n { vec_push[u64](&count, 0) }
-        vec_push[u32](&g.gid, id)
+        if zext[u64](id) == count.n { vec_push(&count, 0) }
+        vec_push(&g.gid, id)
         count.p[u64, zext[u64](id)] += 1
     }
     at u64 = 0
     for k u64 in 0..count.n {
-        vec_push[u64](&g.first, at)
+        vec_push(&g.first, at)
         at += count.p[u64, k]
         count.p[u64, k] = g.first.p[u64, k]
     }
-    vec_push[u64](&g.first, at)
-    vec_reserve[u64](&g.members, at)
+    vec_push(&g.first, at)
+    vec_reserve(&g.members, at)
     g.members.n = at
     for i u64 in 0..sel.n {
-        id u32 = vec_get[u32](&g.gid, i)
+        id u32 = vec_get(&g.gid, i)
         if id == NONE { continue }
-        g.members.p[u64, count.p[u64, zext[u64](id)]] = vec_get[u64](sel, i)
+        g.members.p[u64, count.p[u64, zext[u64](id)]] = vec_get(sel, i)
         count.p[u64, zext[u64](id)] += 1
     }
-    for k u64 in 0..count.n { vec_push[u8](&g.combined, 0) }
-    vec_free[u64](&count)
+    for k u64 in 0..count.n { vec_push(&g.combined, 0) }
+    vec_free(&count)
     gtab_free(&keys)
 }
 
@@ -249,7 +249,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
                 if (s.flags & 2) != 0 && class_of(s) == wanted && selectable(f, s, k) {
                     r bool = is_relro(s)
                     if r { has_relro = true }
-                    if !lay_relro || r == (pass == 0) { vec_push[u64](sh, pk(f, k)) }
+                    if !lay_relro || r == (pass == 0) { vec_push(sh, pk(f, k)) }
                 }
             }
         }
@@ -257,14 +257,14 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     }
     if sh.n == 0 { return cursor }
     alignment u64 = PAGE
-    for i u64 in 0..sh.n { alignment = umax(alignment, pk_section(vec_get[u64](sh, i)).alignment) }
+    for i u64 in 0..sh.n { alignment = umax(alignment, pk_section(vec_get(sh, i)).alignment) }
     start u64 = try out_align(cursor, alignment)
     cursor = start
     gr Groups = {}
     g handle[Groups] = &gr
     build_groups(sh, g)
     for i u64 in 0..sh.n {
-        x u64 = vec_get[u64](sh, i)
+        x u64 = vec_get(sh, i)
         s handle[Sec] = pk_section(x)
         if has_relro && !has_relro_seg && !is_relro(s) { cursor = try end_relro(start, cursor) }
         if s.kind == 8 { continue }
@@ -301,7 +301,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     tls_alignment u64 = 1
     has_tls bool = false
     for i u64 in 0..sh.n {
-        s handle[Sec] = pk_section(vec_get[u64](sh, i))
+        s handle[Sec] = pk_section(vec_get(sh, i))
         if (s.flags & 0x400) != 0 {
             has_tls = true
             tls_alignment = umax(tls_alignment, s.alignment)
@@ -310,7 +310,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     if has_tls { cursor = try out_align(cursor, tls_alignment) }
     tls_start u64 = cursor
     for i u64 in 0..sh.n {
-        x u64 = vec_get[u64](sh, i)
+        x u64 = vec_get(sh, i)
         s handle[Sec] = pk_section(x)
         if (s.flags & 0x400) == 0 || s.kind == 8 { continue }
         cursor = try out_align(cursor, s.alignment)
@@ -323,7 +323,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     // NOBITS: TLS ones first, keeping selection order otherwise
     for pass u64 in 0..2 {
     for i u64 in 0..sh.n {
-        x u64 = vec_get[u64](sh, i)
+        x u64 = vec_get(sh, i)
         s handle[Sec] = pk_section(x)
         if s.kind != 8 { continue }
         if ((s.flags & 0x400) != 0) != (pass == 0) { continue }
@@ -369,17 +369,17 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
         tls_seg.memory_size = file_end - tls_start
         tls_seg.alignment = tls_alignment
     }
-    sg handle[Seg] = vec_add[Seg](&segments)
+    sg handle[Seg] = vec_add(&segments)
     sg.flags = flags
     sg.offset = start
     sg.file_size = file_end - start
     sg.memory_size = memory_end - start
     sg.alignment = alignment
-    vec_free[u64](sh)
-    vec_free[u32](&gr.gid)
-    vec_free[u64](&gr.first)
-    vec_free[u64](&gr.members)
-    vec_free[u8](&gr.combined)
+    vec_free(sh)
+    vec_free(&gr.gid)
+    vec_free(&gr.first)
+    vec_free(&gr.members)
+    vec_free(&gr.combined)
     return if wanted == 2 { file_end } else { memory_end }
 }
 
@@ -412,17 +412,17 @@ fn layout_make() void fails {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
-            if (s.flags & 2) == 0 && selectable(f, s, k) { vec_push[u64](&sel, pk(f, k)) }
+            if (s.flags & 2) == 0 && selectable(f, s, k) { vec_push(&sel, pk(f, k)) }
         }
     }
     keys GTab = {}
     gid Vec[u32] = {}
     ngroups u32 = 0
     for i u64 in 0..sel.n {
-        s handle[Sec] = pk_section(vec_get[u64](&sel, i))
+        s handle[Sec] = pk_section(vec_get(&sel, i))
         id u32 = gtab_id(&keys, s.name, zext[u64](s.kind), s.flags & ~0x200, s.entsize)
         if id == ngroups { ngroups += 1 }
-        vec_push[u32](&gid, id)
+        vec_push(&gid, id)
     }
     // members of each group in order: one pass per group start, using a
     // linked list through `next`
@@ -430,12 +430,12 @@ fn layout_make() void fails {
     heads Vec[u64] = {}
     tails Vec[u64] = {}
     for k u32 in 0..ngroups {
-        vec_push[u64](&heads, NONE64)
-        vec_push[u64](&tails, NONE64)
+        vec_push(&heads, NONE64)
+        vec_push(&tails, NONE64)
     }
     for i u64 in 0..sel.n {
-        vec_push[u64](&next, NONE64)
-        k u64 = zext[u64](vec_get[u32](&gid, i))
+        vec_push(&next, NONE64)
+        k u64 = zext[u64](vec_get(&gid, i))
         if heads.p[u64, k] == NONE64 {
             heads.p[u64, k] = i
         } else {
@@ -447,7 +447,7 @@ fn layout_make() void fails {
         ga u64 = 1
         i u64 = heads.p[u64, k]
         while i != NONE64 {
-            ga = umax(ga, pk_section(vec_get[u64](&sel, i)).alignment)
+            ga = umax(ga, pk_section(vec_get(&sel, i)).alignment)
             i = next.p[u64, i]
         }
         cursor = try out_align(cursor, ga)
@@ -455,14 +455,14 @@ fn layout_make() void fails {
         output_index u32 = trunc[u32](headers.n + 1)
         i = heads.p[u64, k]
         while i != NONE64 {
-            x u64 = vec_get[u64](&sel, i)
+            x u64 = vec_get(&sel, i)
             s handle[Sec] = pk_section(x)
             cursor = try out_align(cursor, s.alignment)
             chunk(x, output_index, cursor, cursor - start)
             cursor = try out_add(cursor, s.size)
             i = next.p[u64, i]
         }
-        firsts handle[Sec] = pk_section(vec_get[u64](&sel, heads.p[u64, k]))
+        firsts handle[Sec] = pk_section(vec_get(&sel, heads.p[u64, k]))
         try header(firsts.name, firsts, start, 0, cursor - start, ga)
     }
     // merged sections take their canonical section's placement

@@ -55,8 +55,8 @@ struct Archive {
 
 var archives Vec[Archive] = {}
 
-fn archive(i u64) handle[Archive] { return vec_at[Archive](&archives, i) }
-fn member(a handle[Archive], i u64) handle[Member] { return vec_at[Member](&a.members, i) }
+fn archive(i u64) handle[Archive] { return vec_at(&archives, i) }
+fn member(a handle[Archive], i u64) handle[Member] { return vec_at(&a.members, i) }
 
 fn is_archive_data(d Bytes) bool {
     return d.n >= 8 && (mem_eq(d.p, c"!<arch>\n", 8) || mem_eq(d.p, c"!<thin>\n", 8))
@@ -154,12 +154,12 @@ fn symver_aliases(name Bytes, out handle[Vec[Bytes]]) void fails {
         try input_die()
     }
     if is_default {
-        vec_push[Bytes](out, bytes(name.p, at))
+        vec_push(out, bytes(name.p, at))
         // name@version: the name without one of the two @
         b Buf = {}
         bb(&b, bytes(name.p, at + 1))
         bb(&b, version)
-        vec_push[Bytes](out, nul_dup(b.p, b.n))
+        vec_push(out, nul_dup(b.p, b.n))
         buf_free(&b)
     }
 }
@@ -173,7 +173,7 @@ struct RawMember {
 
 // Archive.parse; `whole` is the input's --whole-archive
 fn archive_parse(path Bytes, data Bytes, whole bool) void fails {
-    a handle[Archive] = vec_add[Archive](&archives)
+    a handle[Archive] = vec_add(&archives)
     a.whole = whole
     try archive_parse_into(a, path, data)
 }
@@ -228,7 +228,7 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
         } else {
             count += 1
             if count > 65536 { try ar_die(path, c"member count exceeds 65536 limit") }
-            r handle[RawMember] = vec_add[RawMember](&raw)
+            r handle[RawMember] = vec_add(&raw)
             r.name = name
             r.header = cursor
             r.offset = offset
@@ -264,7 +264,7 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
             if pos == start { try ar_die(path, c"empty long member name") }
             if longs.n >= 65536 { try ar_die(path, c"long name table exceeds 65536 entry limit") }
             map_put(lk, start - names_offset, trunc[u32](longs.n))
-            ln handle[LongName] = vec_add[LongName](&longs)
+            ln handle[LongName] = vec_add(&longs)
             ln.key = start - names_offset
             ln.name = bytes(d + start, pos - start)
             pos += 2
@@ -275,7 +275,7 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
     by_header U64Map = {}
     bh handle[U64Map] = &by_header
     for i u64 in 0..raw.n {
-        r handle[RawMember] = vec_at[RawMember](&raw, i)
+        r handle[RawMember] = vec_at(&raw, i)
         raw_name Bytes = r.name
         name Bytes = raw_name
         nested u64 = NONE64
@@ -301,13 +301,13 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
                 bu(m, key)
                 try input_die()
             }
-            name = vec_at[LongName](&longs, zext[u64](la[u32])).name
+            name = vec_at(&longs, zext[u64](la[u32])).name
         } else if raw_name.n != 0 && raw_name.p[u8, raw_name.n - 1] == 47 {
             name = bytes(raw_name.p, raw_name.n - 1)
         }
         if name.n == 0 || bytes_contains(name, 0) { try ar_die(path, c"invalid member name") }
         if bytes_prefix(name, c"__.SYMDEF") { try ar_die(path, c"BSD symbol indexes are not supported yet") }
-        m handle[Member] = vec_add[Member](&a.members)
+        m handle[Member] = vec_add(&a.members)
         m.name = name
         m.header = r.header
         m.offset = r.offset
@@ -325,9 +325,9 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
         }
         map_put(bh, r.header, trunc[u32](i))
     }
-    vec_free[RawMember](&raw)
+    vec_free(&raw)
     map_free(lk)
-    vec_free[LongName](&longs)
+    vec_free(&longs)
 
     // the symbol index
     if has_symbols {
@@ -373,16 +373,16 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
             name Bytes = bytes(d + start, e - start)
             if name.n == 0 { try ar_die(path, c"empty symbol in archive index") }
             at = at + name.n + 1
-            vec_clear[Bytes](&aliases)
-            vec_push[Bytes](&aliases, name)
+            vec_clear(&aliases)
+            vec_push(&aliases, name)
             try symver_aliases(name, &aliases)
             for j u64 in 0..aliases.n {
-                en handle[AEntry] = vec_add[AEntry](&a.entries)
-                en.name = vec_get[Bytes](&aliases, j)
+                en handle[AEntry] = vec_add(&a.entries)
+                en.name = vec_get(&aliases, j)
                 en.member = index
             }
         }
-        vec_free[Bytes](&aliases)
+        vec_free(&aliases)
         for k u64 in at..offset + size {
             if rd8(d, k) != 0 { try ar_die(path, c"trailing garbage in symbol index") }
         }
@@ -392,7 +392,7 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
     // each member's exports, contiguous, in index order; the name index
     nm u64 = a.members.n
     for i u64 in 0..a.entries.n {
-        m handle[Member] = member(a, zext[u64](vec_at[AEntry](&a.entries, i).member))
+        m handle[Member] = member(a, zext[u64](vec_at(&a.entries, i).member))
         m.exp_n += 1
     }
     total u32 = 0
@@ -402,12 +402,12 @@ fn archive_parse_into(a handle[Archive], path Bytes, data Bytes) void fails {
         total += m.exp_n
         m.exp_n = 0
     }
-    vec_reserve[Bytes](&a.exports, zext[u64](total))
+    vec_reserve(&a.exports, zext[u64](total))
     a.exports.n = zext[u64](total)
     for i u64 in 0..a.entries.n {
-        en handle[AEntry] = vec_at[AEntry](&a.entries, i)
+        en handle[AEntry] = vec_at(&a.entries, i)
         m handle[Member] = member(a, zext[u64](en.member))
-        vec_set[Bytes](&a.exports, zext[u64](m.exp_start + m.exp_n), en.name)
+        vec_set(&a.exports, zext[u64](m.exp_start + m.exp_n), en.name)
         m.exp_n += 1
         kx_add(&a.index, bytes_hash(en.name), trunc[u32](i))
     }
@@ -456,24 +456,24 @@ fn library_find(name Bytes, dynamic bool, dirs handle[Vec[Bytes]]) Bytes fails {
     if name.n == 0 { try input_die_c(c"empty library name") }
     files Vec[Bytes] = {}
     if name.p[u8, 0] == 58 {
-        vec_push[Bytes](&files, bytes(name.p + 1, name.n - 1))
+        vec_push(&files, bytes(name.p + 1, name.n - 1))
     } else {
         b Buf = {}
         if dynamic {
             bs(&b, c"lib")
             bb(&b, name)
             bs(&b, c".so")
-            vec_push[Bytes](&files, nul_dup(b.p, b.n))
+            vec_push(&files, nul_dup(b.p, b.n))
             buf_clear(&b)
         }
         bs(&b, c"lib")
         bb(&b, name)
         bs(&b, c".a")
-        vec_push[Bytes](&files, nul_dup(b.p, b.n))
+        vec_push(&files, nul_dup(b.p, b.n))
         buf_free(&b)
     }
     for i u64 in 0..files.n {
-        if !lib_file_ok(vec_get[Bytes](&files, i)) {
+        if !lib_file_ok(vec_get(&files, i)) {
             m handle[Buf] = msg()
             bs(m, c"invalid library name ")
             bb(m, name)
@@ -484,11 +484,11 @@ fn library_find(name Bytes, dynamic bool, dirs handle[Vec[Bytes]]) Bytes fails {
     for k u64 in 0..dirs.n {
         for i u64 in 0..files.n {
             buf_clear(&p)
-            path_concat(&p, vec_get[Bytes](dirs, k), vec_get[Bytes](&files, i))
+            path_concat(&p, vec_get(dirs, k), vec_get(&files, i))
             if try lib_exists(buf_bytes(&p)) {
                 found Bytes = nul_dup(p.p, p.n)
                 buf_free(&p)
-                vec_free[Bytes](&files)
+                vec_free(&files)
                 return found
             }
         }
@@ -592,13 +592,13 @@ fn archive_prefetch(a handle[Archive], first u64) void {
             m handle[Member] = member(a, i)
             if m.status == MS_UNPARSED && m.o == null && !m.loaded {
                 member_obj(a, m)
-                vec_push[handle[Member]](&batch, m)
+                vec_push(&batch, m)
             }
         }
     } else {
         f handle[Member] = member(a, first)
         member_obj(a, f)
-        vec_push[handle[Member]](&batch, f)
+        vec_push(&batch, f)
     }
     for w u64 in 0..(nm + 63) / 64 {
         bits u64 = a.pending[u64, w] | a.deferred[u64, w]
@@ -609,16 +609,16 @@ fn archive_prefetch(a handle[Archive], first u64) void {
             m handle[Member] = member(a, i)
             if m.status == MS_UNPARSED && m.o == null && !m.loaded {
                 member_obj(a, m)
-                vec_push[handle[Member]](&batch, m)
+                vec_push(&batch, m)
             }
         }
     }
     if batch.n > 1 {
         pool_for(pool, batch.n, 1, &member_parse_job, batch.p)
     } else if batch.n == 1 {
-        member_parse(vec_get[handle[Member]](&batch, 0))
+        member_parse(vec_get(&batch, 0))
     }
-    vec_free[handle[Member]](&batch)
+    vec_free(&batch)
 }
 
 // Archive.object_: the member's parsed object; dies with its diagnostic
@@ -691,7 +691,7 @@ fn enqueue(a handle[Archive], id u32, cursor u64) void {
     name Bytes = gsym(id).name
     e u32 = kx_first(&a.index, bytes_hash(name))
     while e != NONE {
-        en handle[AEntry] = vec_at[AEntry](&a.entries, zext[u64](e))
+        en handle[AEntry] = vec_at(&a.entries, zext[u64](e))
         if bytes_eq(en.name, name) {
             i u64 = zext[u64](en.member)
             if !member(a, i).loaded {

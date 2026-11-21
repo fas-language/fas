@@ -109,15 +109,15 @@ fn dyn_string(name Bytes) u32 fails {
     h u64 = bytes_hash(name)
     e u32 = kx_first(&ds_index, h)
     while e != NONE {
-        if bytes_eq(vec_get[Bytes](&ds_names, zext[u64](e)), name) { return ds_offsets.p[u32, zext[u64](e)] }
+        if bytes_eq(vec_get(&ds_names, zext[u64](e)), name) { return ds_offsets.p[u32, zext[u64](e)] }
         e = kx_next(&ds_index, e)
     }
     offset u32 = trunc[u32](ds_buf.n)
     buf_append(&ds_buf, name)
     buf_u8(&ds_buf, 0)
     kx_add(&ds_index, h, trunc[u32](ds_names.n))
-    vec_push[Bytes](&ds_names, name)
-    vec_push[u32](&ds_offsets, offset)
+    vec_push(&ds_names, name)
+    vec_push(&ds_offsets, offset)
     return offset
 }
 
@@ -223,8 +223,7 @@ fn canonical_ifunc(f u64, i u64) bool {
     df u64 = 0
     ds u64 = 0
     if !definition(f, i, &df, &ds) { return false }
-    h handle[U64Map] = &got_canonical
-    return map_has(h, pk(df, ds))
+    return map_has(&got_canonical, pk(df, ds))
 }
 
 fn strong_undefined(name Bytes) bool {
@@ -259,7 +258,7 @@ fn dyn_stub(symbol u32, slot u32) void fails {
     if slot == NONE { try die_c(c"missing GOT slot for dynamic function call") }
     if dyn_stub_index[u32, zext[u64](slot)] != NONE { return }
     dyn_stub_index[u32, zext[u64](slot)] = trunc[u32](dyn_stubs.n)
-    vec_push[u64](&dyn_stubs, (zext[u64](symbol) << 32) | zext[u64](slot))
+    vec_push(&dyn_stubs, (zext[u64](symbol) << 32) | zext[u64](slot))
 }
 
 fn lifecycle_prepare() void fails {
@@ -273,12 +272,12 @@ fn lifecycle_prepare() void fails {
             o handle[Obj] = obj(f)
             for k u64 in 0..zext[u64](o.nsec) {
                 s handle[Sec] = sec(o, k)
-                if s.kind == kinds[j] && s.size != 0 && kept(f, k) { vec_push[u64](&lc_members, pk(f, k)) }
+                if s.kind == kinds[j] && s.size != 0 && kept(f, k) { vec_push(&lc_members, pk(f, k)) }
             }
         }
         if lc_members.n != before {
-            vec_push[u32](&lc_array_kinds, kinds[j])
-            vec_push[u64](&lc_array_ends, lc_members.n)
+            vec_push(&lc_array_kinds, kinds[j])
+            vec_push(&lc_array_ends, lc_members.n)
         }
     }
     for j u64 in 0..2 {
@@ -301,8 +300,8 @@ fn lifecycle_prepare() void fails {
             bs(m, c" must be inside executable code")
             try die()
         }
-        vec_push[u64](&lc_tags, 12 + j)
-        vec_push[u64](&lc_funcs, pk(df, dsym))
+        vec_push(&lc_tags, 12 + j)
+        vec_push(&lc_funcs, pk(df, dsym))
     }
 }
 
@@ -313,7 +312,7 @@ fn dyn_version_id(library u32, version Bytes) u32 fails {
     h u64 = hash_mix((zext[u64](library) << 32) ^ bytes_hash(version))
     eid u32 = kx_first(&dyn_ver_index, h)
     while eid != NONE {
-        e handle[DynVerNeed] = vec_at[DynVerNeed](&dyn_ver_entries, zext[u64](eid))
+        e handle[DynVerNeed] = vec_at(&dyn_ver_entries, zext[u64](eid))
         if e.library == library && bytes_eq(e.text, version) { return e.id }
         eid = kx_next(&dyn_ver_index, eid)
     }
@@ -322,7 +321,7 @@ fn dyn_version_id(library u32, version Bytes) u32 fails {
     if id >= 0x8000 { try die_c(c"too many required symbol versions") }
     name_off u32 = try dyn_string(version)
     new_idx u32 = trunc[u32](dyn_ver_entries.n)
-    e handle[DynVerNeed] = vec_add[DynVerNeed](&dyn_ver_entries)
+    e handle[DynVerNeed] = vec_add(&dyn_ver_entries)
     e.library = library
     e.id = trunc[u32](id)
     e.name_off = name_off
@@ -354,7 +353,7 @@ fn dyn_import(id u32, for_copy bool) u32 fails {
     if p.library != NONE && p.version.n != NONE64 {
         ver = try dyn_version_id(p.library, p.version)
     }
-    x handle[DImp] = vec_add[DImp](&dyn_imports)
+    x handle[DImp] = vec_add(&dyn_imports)
     x.key = key
     x.version = ver
     x.name = try dyn_string(p.name)
@@ -484,13 +483,13 @@ fn dyn_prepare() void fails {
     }
     buf_u8(&ds_buf, 0)
     for j u64 in 0..shlibs.n {
-        vec_push[u32](&dyn_needed, try dyn_string(shlib(j).needed))
+        vec_push(&dyn_needed, try dyn_string(shlib(j).needed))
     }
     if c.runpath != 0 {
         rp Buf = {}
         for j u64 in 0..c.runpaths.n {
             if j != 0 { buf_u8(&rp, 58) }
-            bb(&rp, vec_get[Bytes](&c.runpaths, j))
+            bb(&rp, vec_get(&c.runpaths, j))
         }
         dyn_runpath = try dyn_string(buf_bytes(&rp))
         dyn_has_runpath = true
@@ -514,7 +513,7 @@ fn dyn_prepare() void fails {
         if y.binding != 0 && dyn_imported(y.name) { continue }
         key u64 = try dyn_bound_definition(pk_file(x), pk_sec(x))
         if map_val_addr(bh, key) != null { continue }
-        vec_push[u64](&dyn_bound, key)
+        vec_push(&dyn_bound, key)
         map_put(bh, key, trunc[u32](dyn_bound.n))
     }
     local_count u64 = dyn_bound.n
@@ -524,7 +523,7 @@ fn dyn_prepare() void fails {
     relative Vec[Fixup] = {}
     symbolic Vec[Fixup] = {}
     for j u64 in 0..copy_entries.n {
-        ent handle[CopyEntry] = vec_at[CopyEntry](&copy_entries, j)
+        ent handle[CopyEntry] = vec_at(&copy_entries, j)
         sym_idx u32 = try dyn_import(ent.key_id, true)
         add_fixup(&symbolic, FX_COPY, pk(zext[u64](ent.file), zext[u64](ent.symbol)), sym_idx, 5)
     }
@@ -652,15 +651,15 @@ fn dyn_prepare() void fails {
         }
     }
     dyn_relative_count = relative.n
-    for j u64 in 0..relative.n { copy_into[Fixup](vec_add[Fixup](&dyn_fixups), vec_at[Fixup](&relative, j)) }
-    for j u64 in 0..symbolic.n { copy_into[Fixup](vec_add[Fixup](&dyn_fixups), vec_at[Fixup](&symbolic, j)) }
-    vec_free[Fixup](&relative)
-    vec_free[Fixup](&symbolic)
+    for j u64 in 0..relative.n { copy_into[Fixup](vec_add(&dyn_fixups), vec_at(&relative, j)) }
+    for j u64 in 0..symbolic.n { copy_into[Fixup](vec_add(&dyn_fixups), vec_at(&symbolic, j)) }
+    vec_free(&relative)
+    vec_free(&symbolic)
 
     // exports
     dnames Vec[Bytes] = {}
-    for j u64 in 0..local_count + 1 { vec_push[Bytes](&dnames, bytes(null, 0)) }
-    for j u64 in 0..dyn_imports.n { vec_push[Bytes](&dnames, imp(vec_at[DImp](&dyn_imports, j).key).name) }
+    for j u64 in 0..local_count + 1 { vec_push(&dnames, bytes(null, 0)) }
+    for j u64 in 0..dyn_imports.n { vec_push(&dnames, imp(vec_at(&dyn_imports, j).key).name) }
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         for i u64 in 1..zext[u64](o.nsym) {
@@ -693,7 +692,7 @@ fn dyn_prepare() void fails {
             } else {
                 version = try dyn_export_version(f, i, id)
             }
-            e handle[Export] = vec_add[Export](&dyn_exports)
+            e handle[Export] = vec_add(&dyn_exports)
             e.source = trunc[u32](f)
             e.symbol = trunc[u32](i)
             e.index = trunc[u32](index)
@@ -702,7 +701,7 @@ fn dyn_prepare() void fails {
             e.image_relative = if f == predefined_file { 1 } else { 0 }
             e.visibility = g.res_vis
             if fresh {
-                vec_push[Bytes](&dnames, dynamic_name)
+                vec_push(&dnames, dynamic_name)
             } else {
                 dnames.p[Bytes, index] = dynamic_name
             }
@@ -722,17 +721,17 @@ fn dyn_prepare() void fails {
     for n u64 in 0..symbol_count { ordered[Bytes, zext[u64](remap[u32, n])] = dnames.p[Bytes, n] }
     dyn_ifunc_symbols = heap_alloc_zeroed(symbol_count + 1)
     for j u64 in 0..dyn_exports.n {
-        e handle[Export] = vec_at[Export](&dyn_exports, j)
+        e handle[Export] = vec_at(&dyn_exports, j)
         e.index = remap[u32, zext[u64](e.index)]
         if sym(obj(zext[u64](e.source)), zext[u64](e.symbol)).kind == 10 { dyn_ifunc_symbols[u8, zext[u64](e.index)] = 1 }
     }
     for j u64 in 0..dyn_imports.n {
-        x handle[DImp] = vec_at[DImp](&dyn_imports, j)
+        x handle[DImp] = vec_at(&dyn_imports, j)
         x.index = remap[u32, zext[u64](x.index)]
         if imp(x.key).kind == 10 { dyn_ifunc_symbols[u8, zext[u64](x.index)] = 1 }
     }
     for j u64 in 0..dyn_fixups.n {
-        x handle[Fixup] = vec_at[Fixup](&dyn_fixups, j)
+        x handle[Fixup] = vec_at(&dyn_fixups, j)
         x.symbol = remap[u32, zext[u64](x.symbol)]
     }
     for j u64 in 0..dyn_stubs.n {
@@ -749,18 +748,18 @@ fn dyn_prepare() void fails {
         for lib_idx u64 in 0..shlibs.n {
             cnt u64 = 0
             for j u64 in 0..dyn_ver_entries.n {
-                if zext[u64](vec_at[DynVerNeed](&dyn_ver_entries, j).library) == lib_idx { cnt += 1 }
+                if zext[u64](vec_at(&dyn_ver_entries, j).library) == lib_idx { cnt += 1 }
             }
-            if cnt != 0 { vec_push[u64](&nonempty, lib_idx) }
+            if cnt != 0 { vec_push(&nonempty, lib_idx) }
         }
         dyn_verneed_count = nonempty.n
         for gi u64 in 0..nonempty.n {
-            lib_idx u64 = vec_get[u64](&nonempty, gi)
+            lib_idx u64 = vec_get(&nonempty, gi)
             group_ids Vec[u64] = {}
             j u64 = dyn_ver_entries.n
             while j > 0 {
                 j -= 1
-                if zext[u64](vec_at[DynVerNeed](&dyn_ver_entries, j).library) == lib_idx { vec_push[u64](&group_ids, j) }
+                if zext[u64](vec_at(&dyn_ver_entries, j).library) == lib_idx { vec_push(&group_ids, j) }
             }
             vcnt u64 = group_ids.n
             start u64 = verneed.n
@@ -772,16 +771,16 @@ fn dyn_prepare() void fails {
             wr32(verneed.p, start + 8, 16)
             wr32(verneed.p, start + 12, if gi + 1 == nonempty.n { 0 } else { gsize })
             for k u64 in 0..vcnt {
-                e handle[DynVerNeed] = vec_at[DynVerNeed](&dyn_ver_entries, vec_get[u64](&group_ids, k))
+                e handle[DynVerNeed] = vec_at(&dyn_ver_entries, vec_get(&group_ids, k))
                 at u64 = start + 16 + k * 16
                 wr32(verneed.p, at, sysv_hash(e.text))
                 wr16(verneed.p, at + 6, zext[u64](e.id))
                 wr32(verneed.p, at + 8, zext[u64](e.name_off))
                 wr32(verneed.p, at + 12, if k + 1 == vcnt { 0 } else { 16 })
             }
-            vec_free[u64](&group_ids)
+            vec_free(&group_ids)
         }
-        vec_free[u64](&nonempty)
+        vec_free(&nonempty)
     }
 
     // the metadata object
@@ -808,7 +807,7 @@ fn dyn_prepare() void fails {
     dsy u64 = d.n
     dyn_section(o, d, DYN_DYNSYM, c".dynsym", 11, 2, 8, 24, symbol_count * 24)
     for j u64 in 0..dyn_imports.n {
-        x handle[DImp] = vec_at[DImp](&dyn_imports, j)
+        x handle[DImp] = vec_at(&dyn_imports, j)
         p handle[Imp] = imp(x.key)
         at u64 = dsy + zext[u64](x.index) * 24
         wr32(d.p, at, zext[u64](x.name))
@@ -845,11 +844,11 @@ fn dyn_prepare() void fails {
     vs u64 = d.n
     dyn_section(o, d, DYN_VERSYM, c".gnu.version", 0x6fffffff, 2, 2, 2, symbol_count * 2)
     for j u64 in 0..dyn_imports.n {
-        x handle[DImp] = vec_at[DImp](&dyn_imports, j)
+        x handle[DImp] = vec_at(&dyn_imports, j)
         wr16(d.p, vs + zext[u64](x.index) * 2, zext[u64](x.version))
     }
     for j u64 in 0..dyn_exports.n {
-        e handle[Export] = vec_at[Export](&dyn_exports, j)
+        e handle[Export] = vec_at(&dyn_exports, j)
         wr16(d.p, vs + zext[u64](e.index) * 2, zext[u64](e.version))
     }
     vns handle[Sec] = sec(o, DYN_VERNEED)
@@ -939,8 +938,7 @@ fn dyn_ifunc_stub(f u64, i u64, out addr) bool {
     df u64 = 0
     ds u64 = 0
     if !definition(f, i, &df, &ds) { return false }
-    h handle[U64Map] = &dyn_ifunc_slots
-    a addr = map_val_addr(h, pk(df, ds))
+    a addr = map_val_addr(&dyn_ifunc_slots, pk(df, ds))
     if a == null { return false }
     return dyn_stub_address(a[u32], out)
 }
@@ -950,7 +948,7 @@ fn image_symbol_section(value u64) u64 fails {
     first u64 = NONE64
     containing u64 = NONE64
     for k u64 in 0..headers.n {
-        s handle[OutSec] = vec_at[OutSec](&headers, k)
+        s handle[OutSec] = vec_at(&headers, k)
         if (s.flags & 2) == 0 || (s.flags & 0x400) != 0 { continue }
         if first == NONE64 { first = k + 1 }
         if value >= s.address && value <= s.address + s.size { containing = k + 1 }
@@ -1014,7 +1012,7 @@ fn dyn_emit() void fails {
         wr64(image, at + 16, y.size)
     }
     for j u64 in 0..dyn_exports.n {
-        e handle[Export] = vec_at[Export](&dyn_exports, j)
+        e handle[Export] = vec_at(&dyn_exports, j)
         f u64 = zext[u64](e.source)
         y handle[Sym] = sym(obj(f), zext[u64](e.symbol))
         section u64 = 0
@@ -1049,7 +1047,7 @@ fn dyn_emit() void fails {
         ga = g.address
     }
     for j u64 in 0..dyn_fixups.n {
-        x handle[Fixup] = vec_at[Fixup](&dyn_fixups, j)
+        x handle[Fixup] = vec_at(&dyn_fixups, j)
         a u64 = 0
         fx_target(x, gp, ga, &a)
         rank u64 = 1
@@ -1058,13 +1056,13 @@ fn dyn_emit() void fails {
         } else if x.kind == 37 || dyn_ifunc_symbols[u8, zext[u64](x.symbol)] != 0 {
             rank = 2
         }
-        vec_push[FxOut](&outs, {(rank << 62) | j, a})
+        vec_push(&outs, {(rank << 62) | j, a})
     }
     sort_vec[FxOut, fx_less](&outs)
     rela handle[Place] = dyn_place(DYN_RELA)
     for j u64 in 0..outs.n {
-        t FxOut = vec_get[FxOut](&outs, j)
-        x handle[Fixup] = vec_at[Fixup](&dyn_fixups, t.meta & 0x3fffffffffffffff)
+        t FxOut = vec_get(&outs, j)
+        x handle[Fixup] = vec_at(&dyn_fixups, t.meta & 0x3fffffffffffffff)
         address u64 = 0
         offset u64 = fx_target(x, gp, ga, &address)
         at u64 = rela.offset + j * 24
@@ -1159,5 +1157,5 @@ fn dyn_emit() void fails {
     if dyn_static_tls { flags = 24 }
     at = dyn_tag(at, 30, flags)
     at = dyn_tag(at, 0, 0)
-    vec_free[FxOut](&outs)
+    vec_free(&outs)
 }

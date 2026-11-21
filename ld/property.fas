@@ -57,8 +57,8 @@ fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fail
             found bool = false
             j u64 = base
             while j < out.n {
-                if vec_get[u64](out, j) == kind {
-                    vec_set[u64](out, j + 1, vec_get[u64](out, j + 1) | value)
+                if vec_get(out, j) == kind {
+                    vec_set(out, j + 1, vec_get(out, j + 1) | value)
                     found = true
                     break
                 }
@@ -66,16 +66,16 @@ fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fail
             }
             if !found {
                 // insertion keeps the pairs sorted by kind
-                vec_push[u64](out, 0)
-                vec_push[u64](out, 0)
+                vec_push(out, 0)
+                vec_push(out, 0)
                 k u64 = out.n - 2
-                while k > base && vec_get[u64](out, k - 2) > kind {
-                    vec_set[u64](out, k, vec_get[u64](out, k - 2))
-                    vec_set[u64](out, k + 1, vec_get[u64](out, k - 1))
+                while k > base && vec_get(out, k - 2) > kind {
+                    vec_set(out, k, vec_get(out, k - 2))
+                    vec_set(out, k + 1, vec_get(out, k - 1))
                     k -= 2
                 }
-                vec_set[u64](out, k, kind)
-                vec_set[u64](out, k + 1, value)
+                vec_set(out, k, kind)
+                vec_set(out, k + 1, value)
             }
             cursor += 16
         }
@@ -86,7 +86,7 @@ fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fail
 // the input validation in Elf_reader.parse
 fn gp_check(o handle[Obj], s handle[Sec]) void fails {
     scratch Vec[u64] = {}
-    defer { vec_free[u64](&scratch) }
+    defer { vec_free(&scratch) }
     try gp_parse(o, s.offset, s.size, &scratch)
 }
 
@@ -113,52 +113,52 @@ fn properties_prepare() void fails {
             }
             seen = true
             lx(f).kept[u8, k] = 0
-            vec_clear[u64](ph)
+            vec_clear(ph)
             gp_parse(o, s.offset, s.size, ph) catch err { try die_buf(&o.msg) }
             i u64 = 0
             while i < ph.n {
-                kind u64 = vec_get[u64](ph, i)
-                value u64 = vec_get[u64](ph, i + 1)
+                kind u64 = vec_get(ph, i)
+                value u64 = vec_get(ph, i + 1)
                 j u64 = 0
-                while j < ah.n && vec_get[u64](ah, j) < kind { j += 3 }
-                if j < ah.n && vec_get[u64](ah, j) == kind {
-                    old u64 = vec_get[u64](ah, j + 1)
-                    vec_set[u64](ah, j + 1, if gp_operation(kind) == GP_AND { old & value } else { old | value })
-                    vec_set[u64](ah, j + 2, vec_get[u64](ah, j + 2) + 1)
+                while j < ah.n && vec_get(ah, j) < kind { j += 3 }
+                if j < ah.n && vec_get(ah, j) == kind {
+                    old u64 = vec_get(ah, j + 1)
+                    vec_set(ah, j + 1, if gp_operation(kind) == GP_AND { old & value } else { old | value })
+                    vec_set(ah, j + 2, vec_get(ah, j + 2) + 1)
                 } else {
-                    vec_push[u64](ah, 0)
-                    vec_push[u64](ah, 0)
-                    vec_push[u64](ah, 0)
+                    vec_push(ah, 0)
+                    vec_push(ah, 0)
+                    vec_push(ah, 0)
                     t u64 = ah.n - 3
                     while t > j {
-                        vec_set[u64](ah, t, vec_get[u64](ah, t - 3))
-                        vec_set[u64](ah, t + 1, vec_get[u64](ah, t - 2))
-                        vec_set[u64](ah, t + 2, vec_get[u64](ah, t - 1))
+                        vec_set(ah, t, vec_get(ah, t - 3))
+                        vec_set(ah, t + 1, vec_get(ah, t - 2))
+                        vec_set(ah, t + 2, vec_get(ah, t - 1))
                         t -= 3
                     }
-                    vec_set[u64](ah, j, kind)
-                    vec_set[u64](ah, j + 1, value)
-                    vec_set[u64](ah, j + 2, 1)
+                    vec_set(ah, j, kind)
+                    vec_set(ah, j + 1, value)
+                    vec_set(ah, j + 2, 1)
                 }
                 i += 2
             }
         }
     }
-    vec_free[u64](ph)
+    vec_free(ph)
     // present: or-properties always, and/or-and ones only when every input has them
     count u64 = 0
     j u64 = 0
     while j < ah.n {
-        present bool = gp_operation(vec_get[u64](ah, j)) == GP_OR || vec_get[u64](ah, j + 2) == ninput_objects
-        if present && vec_get[u64](ah, j + 1) != 0 {
-            vec_set[u64](ah, count * 3, vec_get[u64](ah, j))
-            vec_set[u64](ah, count * 3 + 1, vec_get[u64](ah, j + 1))
+        present bool = gp_operation(vec_get(ah, j)) == GP_OR || vec_get(ah, j + 2) == ninput_objects
+        if present && vec_get(ah, j + 1) != 0 {
+            vec_set(ah, count * 3, vec_get(ah, j))
+            vec_set(ah, count * 3 + 1, vec_get(ah, j + 1))
             count += 1
         }
         j += 3
     }
     if count == 0 {
-        vec_free[u64](ah)
+        vec_free(ah)
         return
     }
     size u64 = 16 + count * 16
@@ -184,11 +184,11 @@ fn properties_prepare() void fails {
     wr32(d, 12, 0x00554e47)
     for i u64 in 0..count {
         at u64 = 16 + i * 16
-        wr32(d, at, vec_get[u64](ah, i * 3))
+        wr32(d, at, vec_get(ah, i * 3))
         wr32(d, at + 4, 4)
-        wr32(d, at + 8, vec_get[u64](ah, i * 3 + 1))
+        wr32(d, at + 8, vec_get(ah, i * 3 + 1))
     }
-    vec_free[u64](ah)
+    vec_free(ah)
     o.data = d
     o.len = size
     o.nsym = 1

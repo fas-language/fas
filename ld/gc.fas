@@ -53,7 +53,7 @@ fn gc_mark(f u64, k u64) void {
     l handle[Lx] = lx(f)
     if l.discarded[u8, k] != 0 || l.kept[u8, k] != 0 { return }
     l.kept[u8, k] = 1
-    vec_push[u64](&gc_queue, (f << 32) | k)
+    vec_push(&gc_queue, (f << 32) | k)
 }
 
 // a resolved definition: boundary symbols keep every contribution
@@ -64,9 +64,9 @@ fn gc_definition(df u64, ds u64) void {
         section Bytes = boundary(y.name, &last)
         if section.n != NONE64 {
             for i u64 in 0..gc_boundaries.n {
-                if bytes_eq(vec_get[Bytes](&gc_boundaries, i), section) { return }
+                if bytes_eq(vec_get(&gc_boundaries, i), section) { return }
             }
-            vec_push[Bytes](&gc_boundaries, section)
+            vec_push(&gc_boundaries, section)
             for f u64 in 0..nobj {
                 o handle[Obj] = obj(f)
                 for k u64 in 0..zext[u64](o.nsec) {
@@ -101,13 +101,13 @@ fn gc_root(name Bytes) void {
 fn gc_frame_add(dst u64, edge u64) void {
     hh handle[U64Map] = &gc_frame_head
     id u32 = trunc[u32](gc_frame_edge.n)
-    vec_push[u64](&gc_frame_edge, edge)
+    vec_push(&gc_frame_edge, edge)
     a addr = map_val_addr(hh, dst)
     if a == null {
-        vec_push[u32](&gc_frame_next, NONE)
+        vec_push(&gc_frame_next, NONE)
         map_put(hh, dst, id)
     } else {
-        vec_push[u32](&gc_frame_next, a[u32])
+        vec_push(&gc_frame_next, a[u32])
         a[u32] = id
     }
 }
@@ -118,7 +118,7 @@ fn gc_frames() void {
     for f u64 in 0..unorm_count {
         u handle[UObj] = uobj(f)
         for i u64 in 0..u.frames.n {
-            fr handle[Frame] = vec_at[Frame](&u.frames, i)
+            fr handle[Frame] = vec_at(&u.frames, i)
             ff u64 = zext[u64](fr.file)
             if lx(ff).discarded[u8, zext[u64](fr.section)] != 0 { continue }
             o handle[Obj] = obj(ff)
@@ -129,12 +129,12 @@ fn gc_frames() void {
             y handle[Sym] = sym(obj(df), ds)
             if y.section != 0 && y.section < 0xff00 {
                 for j u64 in 0..zext[u64](fr.meta_n) {
-                    mr u64 = zext[u64](vec_get[u32](&u.meta, zext[u64](fr.meta_start) + j))
+                    mr u64 = zext[u64](vec_get(&u.meta, zext[u64](fr.meta_start) + j))
                     gc_frame_add((df << 32) | zext[u64](y.section), (ff << 32) | zext[u64](rel(o, mr).symbol))
                 }
             } else if y.section == 0xfff1 && fr.range != 0 {
                 for j u64 in 0..zext[u64](fr.meta_n) {
-                    mr u64 = zext[u64](vec_get[u32](&u.meta, zext[u64](fr.meta_start) + j))
+                    mr u64 = zext[u64](vec_get(&u.meta, zext[u64](fr.meta_start) + j))
                     gc_symbol(ff, zext[u64](rel(o, mr).symbol))
                 }
             }
@@ -149,7 +149,7 @@ fn gc_sections() void {
     // roots: the entry, -u symbols and, in dynamic output, _init/_fini
     // and the exported definitions
     if c.mode != MODE_SHARED { gc_root(c.entry) }
-    for i u64 in 0..c.undefined.n { gc_root(vec_get[Bytes](&c.undefined, i)) }
+    for i u64 in 0..c.undefined.n { gc_root(vec_get(&c.undefined, i)) }
     if c.mode != MODE_STATIC {
         gc_root(bytes_c(c"_init"))
         gc_root(bytes_c(c"_fini"))
@@ -177,7 +177,7 @@ fn gc_sections() void {
     gc_frames()
     hh handle[U64Map] = &gc_frame_head
     while gc_queue.n != 0 {
-        item u64 = vec_pop[u64](&gc_queue)
+        item u64 = vec_pop(&gc_queue)
         f u64 = item >> 32
         k u64 = item & 0xffffffff
         o handle[Obj] = obj(f)
@@ -195,9 +195,9 @@ fn gc_sections() void {
         if a != null {
             e u32 = a[u32]
             while e != NONE {
-                edge u64 = vec_get[u64](&gc_frame_edge, zext[u64](e))
+                edge u64 = vec_get(&gc_frame_edge, zext[u64](e))
                 gc_symbol(edge >> 32, edge & 0xffffffff)
-                e = vec_get[u32](&gc_frame_next, zext[u64](e))
+                e = vec_get(&gc_frame_next, zext[u64](e))
             }
         }
     }

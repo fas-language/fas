@@ -279,11 +279,14 @@ let desugar (program : Ast.program) =
       let queue = Queue.create () in
       let globals = Hashtbl.create 16 in
       let fn_returns = Hashtbl.create 16 in
+      let structs = Hashtbl.create 16 in
       List.iter
         (function
           | Ast.Global { name; ty; _ } -> Hashtbl.replace globals name ty
           | Ast.Func { name; generic_params = []; ret; _ } ->
               Hashtbl.replace fn_returns name ret
+          | Ast.Struct { name; generic_params; fields; _ } ->
+              Hashtbl.replace structs name (generic_params, fields)
           | _ -> ())
         program.Ast.items;
       let needs_arguments name span =
@@ -629,8 +632,103 @@ let desugar (program : Ast.program) =
         let exprs, hidden, _ = abstract ctx.owner fns in
         let i = instantiate t exprs hidden cs in
         Ast.Ident (i.i_name, ns)
+      (* the type of `base.field` from declared struct definitions *)
+      and field_ty ctx base_ty field_name =
+        let rec unwrap = function
+          | Ast.Handle t | Ast.Secret t -> unwrap t
+          | t -> t
+        in
+        let lookup_field fields =
+          List.find_opt (fun (f : Ast.field) -> f.name = field_name) fields
+          |> Option.map (fun (f : Ast.field) -> f.ty)
+        in
+        let subst_ty bound fn_bound ty =
+          let m =
+            {
+              Ast.identity_mapper with
+              on_ty =
+                (function
+                | Ast.Named_type (n, _) -> (
+                    match List.assoc_opt n bound with
+                    | Some (Ast.Type_arg t | Ast.Type_or_index t) -> Some t
+                    | Some (Ast.Name_arg (x, s)) -> Some (Ast.Named_type (x, s))
+                    | _ -> None)
+                | _ -> None);
+              on_arg =
+                (fun a ->
+                  match fn_param_reference a with
+                  | Some n when List.mem_assoc n bound -> Some (List.assoc n bound)
+                  | Some n when List.mem_assoc n fn_bound ->
+                      Some (Ast.Const_arg (List.assoc n fn_bound))
+                  | _ -> None);
+              on_expr =
+                (function
+                | Ast.Ident (n, _) -> (
+                    match List.assoc_opt n bound with
+                    | Some (Ast.Const_arg e) -> Some e
+                    | Some (Ast.Name_arg (x, s)) -> Some (Ast.Ident (x, s))
+                    | _ -> None)
+                | _ -> None);
+            }
+          in
+          rw_ty
+            { owner = ctx.owner; scope = []; checks = []; in_function = false }
+            (Ast.map_ty m ty)
+        in
+        match unwrap base_ty with
+        | Ast.Named_type (sn, _) -> (
+            match Hashtbl.find_opt by_name sn with
+            | Some i -> (
+                match i.i_template.t_item with
+                | Ast.Struct { fields; _ } ->
+                    Option.map (subst_ty [] i.i_args) (lookup_field fields)
+                | _ -> None)
+            | None -> (
+                match Hashtbl.find_opt structs sn with
+                | Some ([], fields) ->
+                    Option.map
+                      (rw_ty
+                         {
+                           owner = ctx.owner;
+                           scope = [];
+                           checks = [];
+                           in_function = false;
+                         })
+                      (lookup_field fields)
+                | _ -> None))
+        | Ast.Applied_type (sn, _, aargs, _) -> (
+            match Hashtbl.find_opt by_name sn with
+            | Some i -> (
+                match i.i_template.t_item with
+                | Ast.Struct { generic_params; fields; _ } ->
+                    let kept_a, hidden_a =
+                      split_at (List.length aargs - List.length i.i_hidden) aargs
+                    in
+                    let others =
+                      List.filter
+                        (function Ast.Fn_param _ -> false | _ -> true)
+                        generic_params
+                    in
+                    if List.length others <> List.length kept_a then None
+                    else
+                      let bound = List.combine (List.map param_name others) kept_a in
+                      let fn_bound =
+                        List.map (fun (n, e) -> (n, concretize hidden_a e)) i.i_args
+                      in
+                      Option.map (subst_ty bound fn_bound) (lookup_field fields)
+                | _ -> None)
+            | None -> (
+                match Hashtbl.find_opt structs sn with
+                | Some (generic_params, fields)
+                  when List.length generic_params = List.length aargs ->
+                    let bound =
+                      List.combine (List.map param_name generic_params) aargs
+                    in
+                    Option.map (subst_ty bound []) (lookup_field fields)
+                | _ -> None))
+        | _ -> None
       (* the type an argument has on its face: a declared variable, `&x`,
-         `handle_from_addr[T](p)` or a cast *)
+         `x.field`, `if c { a } else { b }`, `handle_from_addr[T](p)` or a cast *)
       and expr_ty ctx = function
         | Ast.Ident (n, _) -> (
             match List.assoc_opt n ctx.scope with
@@ -642,6 +740,13 @@ let desugar (program : Ast.program) =
                   (Hashtbl.find_opt globals n))
         | Ast.Parenthesized (e, _) -> expr_ty ctx e
         | Ast.Addr_of (e, _) -> Option.map (fun t -> Ast.Handle t) (expr_ty ctx e)
+        | Ast.Field (e, field, _) ->
+            Option.bind (expr_ty ctx e) (fun ty -> field_ty ctx ty field)
+        | Ast.Ternary (_, yes, no, _) -> (
+            match (expr_ty ctx yes, expr_ty ctx no) with
+            | Some ty_y, Some ty_n when Ast.type_name ty_y = Ast.type_name ty_n ->
+                Some ty_y
+            | _ -> None)
         | Ast.Handle_from_addr (t, _, _) -> Some (Ast.Handle t)
         | Ast.Cast (_, t, _, _) -> Some t
         | Ast.Call (Ast.Ident (n, _), _, _) ->

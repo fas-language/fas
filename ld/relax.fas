@@ -21,7 +21,7 @@ fn relax_protected(iv handle[Vec[Iv]], section u64, offset u64) bool {
     key u64 = (section << 40) | offset
     while low < high {
         middle u64 = low + (high - low) / 2
-        x Iv = vec_get[Iv](iv, middle)
+        x Iv = vec_get(iv, middle)
         if x.key <= key {
             low = middle + 1
         } else {
@@ -29,7 +29,7 @@ fn relax_protected(iv handle[Vec[Iv]], section u64, offset u64) bool {
         }
     }
     if low == 0 { return false }
-    x Iv = vec_get[Iv](iv, low - 1)
+    x Iv = vec_get(iv, low - 1)
     return (x.key >> 40) == section && offset < x.finish
 }
 

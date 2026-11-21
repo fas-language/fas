@@ -52,6 +52,29 @@ fn if_ops(c bool, x u64) u64 {
     return r + s + (x & (if c { 0xff } else { 0x0f }))
 }
 
+type U64Map = Map[u64, u32, u64_hash, u64_eq]
+
+struct KIndex {
+    heads U64Map
+    next Vec[u32]
+}
+
+fn kindex_put(k handle[KIndex], key u64, val u32) void {
+    slot addr = map_val_addr(&k.heads, key)
+    if slot == null {
+        map_put(&k.heads, key, val)
+    } else {
+        slot[u32] = val
+    }
+    vec_push(&k.next, val)
+}
+
+fn kindex_pick(c bool, a handle[Vec[Point]], b handle[Vec[Point]], x u64) u64 {
+    p handle[Point] = vec_add(if c { a } else { b })
+    p.x = x
+    return vec_at(if c { a } else { b }, (if c { a } else { b }).n - 1).x
+}
+
 // 7. Keywords and builtin names as struct field names
 struct Keywords {
     len u64
@@ -200,6 +223,32 @@ fn main() i32 {
     wrap_sort_vec_by[Rec, rec_less](&rv)
     if vec_at(&rv, 0).key != 1 || vec_at(&rv, 1).key != 2 || vec_at(&rv, 2).key != 3 { return 34 }
     vec_free(&rv)
+
+    // 10: generic inference on &x.field and if-expr with matching arm types
+    ki KIndex = {}
+    kindex_put(&ki, 42, 7)
+    kindex_put(&ki, 42, 9)
+    if !map_has(&ki.heads, 42) { return 35 }
+    if (map_get(&ki.heads, 42) catch 0) != 9 { return 36 }
+    if ki.next.n != 2 || vec_get(&ki.next, 0) != 7 || vec_get(&ki.next, 1) != 9 { return 37 }
+    pa Vec[Point] = {}
+    pb Vec[Point] = {}
+    if kindex_pick(true, &pa, &pb, 11) != 11 || pa.n != 1 || pb.n != 0 { return 38 }
+    if kindex_pick(false, &pa, &pb, 22) != 22 || pa.n != 1 || pb.n != 1 { return 39 }
+    vec_free(&pa)
+    vec_free(&pb)
+    va Vec[u32] = {}
+    vb Vec[u32] = {}
+    vec_push(if true { &va } else { &vb }, 33)
+    if va.n != 1 || vec_get(&va, 0) != 33 { return 40 }
+    m2 U64Map = {}
+    map_put(&m2, 99, 1)
+    if !map_has(if false { &ki.heads } else { &m2 }, 99) { return 41 }
+    map_free(&m2)
+    map_free(&ki.heads)
+    vec_free(&ki.next)
+    vec_free(&va)
+    vec_free(&vb)
 
     return 0
 }

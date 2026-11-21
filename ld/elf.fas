@@ -233,8 +233,8 @@ fn sdt_pointers(o handle[Obj], index u64, offset u64, size u64, out handle[Vec[u
         if length < 27 || length > ending - cursor - 20 { try sdt_fail(o, c"invalid probe descriptor length") }
         descriptor u64 = cursor + 20
         for n u64 in 0..3 {
-            vec_push[u64](out, index)
-            vec_push[u64](out, descriptor - offset + n * 8)
+            vec_push(out, index)
+            vec_push(out, descriptor - offset + n * 8)
         }
         text u64 = descriptor + 24
         for n u64 in 0..3 {
@@ -271,8 +271,8 @@ fn sdt_has(v handle[Vec[u64]], index u64, offset u64) bool {
     hi u64 = v.n / 2
     while lo < hi {
         mid u64 = (lo + hi) / 2
-        s u64 = vec_get[u64](v, mid * 2)
-        f u64 = vec_get[u64](v, mid * 2 + 1)
+        s u64 = vec_get(v, mid * 2)
+        f u64 = vec_get(v, mid * 2 + 1)
         if s == index && f == offset { return true }
         if s < index || (s == index && f < offset) { lo = mid + 1 } else { hi = mid }
     }
@@ -571,7 +571,7 @@ fn elf_parse(o handle[Obj]) void fails {
     // per-section validation
     symtab_index u64 = 0
     sdt Vec[u64] = {}
-    defer { vec_free[u64](&sdt) }
+    defer { vec_free(&sdt) }
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
         if bytes_prefix(s.name, c".gnu.lto") || bytes_prefix(s.name, c".llvm.lto") {
@@ -830,7 +830,7 @@ fn elf_parse(o handle[Obj]) void fails {
             t.group = trunc[i32](bitcast[i64](groups.n))
             members[u32, i] = trunc[u32](member)
         }
-        g handle[Group] = vec_add[Group](&groups)
+        g handle[Group] = vec_add(&groups)
         g.signature = signature
         g.comdat = flags == 1
         g.members = members

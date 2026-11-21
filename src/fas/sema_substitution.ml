@@ -942,8 +942,12 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | (Ast.Addr | Ast.Bool | Ast.Void | Ast.Int _ | Ast.Float _) as ty -> ty
   in
   let generic_field_type source_type field_name =
+    let rec unwrap = function
+      | Ast.Handle ty | Ast.Secret ty -> unwrap ty
+      | ty -> ty
+    in
     let instance =
-      match source_type with
+      match unwrap source_type with
       | Ast.Applied_type (template, _, arguments, _) -> Some (template, arguments)
       | Ast.Named_type (name, source_span) -> (
           match specialized_args name source_span with
@@ -953,26 +957,31 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     in
     match instance with
     | None -> None
-    | Some (template, arguments) ->
-        List.find_map
-          (function
-            | Ast.Struct { name; generic_params; fields; _ } when name = template ->
-                let rec substitutions parameters arguments =
-                  match (parameters, arguments) with
-                  | [], [] -> []
-                  | ( Ast.Type_param { name; _ } :: rest,
-                      (Ast.Type_arg ty | Ast.Type_or_index ty) :: args ) ->
-                      (name, ty) :: substitutions rest args
-                  | Ast.Const_param _ :: rest, _ :: args -> substitutions rest args
-                  | _ -> []
-                in
-                let substitutions = substitutions generic_params arguments in
-                fields
-                |> List.find_opt (fun (field : Ast.field) -> field.name = field_name)
-                |> Option.map (fun (field : Ast.field) ->
-                    substitute_field_type substitutions field.ty)
-            | _ -> None)
-          generic_structs
+    | Some (template, arguments) -> (
+        let find_in items =
+          List.find_map
+            (function
+              | Ast.Struct { name; generic_params; fields; _ } when name = template ->
+                  let rec substitutions parameters arguments =
+                    match (parameters, arguments) with
+                    | [], [] -> []
+                    | ( Ast.Type_param { name; _ } :: rest,
+                        (Ast.Type_arg ty | Ast.Type_or_index ty) :: args ) ->
+                        (name, ty) :: substitutions rest args
+                    | Ast.Const_param _ :: rest, _ :: args -> substitutions rest args
+                    | _ -> []
+                  in
+                  let substitutions = substitutions generic_params arguments in
+                  fields
+                  |> List.find_opt (fun (field : Ast.field) -> field.name = field_name)
+                  |> Option.map (fun (field : Ast.field) ->
+                      substitute_field_type substitutions field.ty)
+              | _ -> None)
+            items
+        in
+        match find_in generic_structs with
+        | Some _ as ty -> ty
+        | None -> find_in program.items)
   in
   let global_source_type name =
     List.find_map
@@ -1013,6 +1022,10 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           | _ -> None)
     | Ast.Field (base, field, _) ->
         Option.bind (source_place_type base) (fun ty -> generic_field_type ty field)
+    | Ast.Ternary (_, yes, no, _) -> (
+        match (source_place_type yes, source_place_type no) with
+        | Some ty_y, Some ty_n when Ast.type_name ty_y = Ast.type_name ty_n -> Some ty_y
+        | _ -> None)
     | Ast.Select (base, [ Ast.Const_arg _ ], _)
     | Ast.Select (base, [ Ast.Name_arg _ ], _) ->
         Option.bind (source_place_type base) (function
@@ -1231,6 +1244,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                     (Ast.Type_arg a | Ast.Type_or_index a) :: rest ) ->
                     let* () = match_type argument p a in
                     args es rest
+                | (Ast.Type_arg p | Ast.Type_or_index p) :: es, Ast.Name_arg (a, s) :: rest ->
+                    let* () = match_type argument p (Ast.Named_type (a, s)) in
+                    args es rest
                 | ( ( Ast.Name_arg (n, _)
                     | Ast.Const_arg (Ast.Ident (n, _))
                     | Ast.Type_or_index (Ast.Named_type (n, _)) )
@@ -1242,9 +1258,13 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                       with Failure _ -> Ok ()
                     in
                     args es rest
-                | Ast.Name_arg (n, _) :: es, Ast.Type_arg a :: rest
+                | Ast.Name_arg (n, _) :: es, (Ast.Type_arg a | Ast.Type_or_index a) :: rest
                   when List.mem n type_params ->
                     let* () = bind_type n a argument in
+                    args es rest
+                | Ast.Name_arg (n, _) :: es, Ast.Name_arg (a, s) :: rest
+                  when List.mem n type_params ->
+                    let* () = bind_type n (Ast.Named_type (a, s)) argument in
                     args es rest
                 | _ -> Ok ()
               in
@@ -1277,19 +1297,49 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
       | Ast.Parenthesized (e, _) -> unwrap_parens e
       | e -> e
     in
+    let rec normalize_ty = function
+      | Ast.Handle t -> Ast.Handle (normalize_ty t)
+      | Ast.Secret t -> Ast.Secret (normalize_ty t)
+      | Ast.Array (l, t) -> Ast.Array (l, normalize_ty t)
+      | Ast.Vec (l, t) -> Ast.Vec (l, normalize_ty t)
+      | Ast.Named_type (n, s) as t -> (
+          match specialized_args n span with
+          | Some (base, args) -> Ast.Applied_type (base, s, args, s)
+          | None -> t)
+      | Ast.Applied_type (n, s1, args, s2) ->
+          let args =
+            List.map
+              (function
+                | Ast.Type_arg t -> Ast.Type_arg (normalize_ty t)
+                | Ast.Type_or_index t -> Ast.Type_or_index (normalize_ty t)
+                | a -> a)
+              args
+          in
+          Ast.Applied_type (n, s1, args, s2)
+      | t -> t
+    in
+    let rec infer_arg_type expect_handle expr =
+      match unwrap_parens expr with
+      | Ast.Addr_of (inner, _) when expect_handle ->
+          Option.map (fun t -> Ast.Handle t) (actual_type inner)
+      | Ast.Ternary (_, yes, no, _) -> (
+          match (infer_arg_type expect_handle yes, infer_arg_type expect_handle no) with
+          | Some ty_y, Some ty_n
+            when Ast.type_name (normalize_ty ty_y) = Ast.type_name (normalize_ty ty_n) ->
+              Some (normalize_ty ty_y)
+          | _ -> None)
+      | _ -> actual_type expr
+    in
     let* () =
       List.fold_left2
         (fun result (parameter : Ast.param) argument ->
           let* () = result in
-          match (parameter.ty, unwrap_parens argument) with
-          | Ast.Handle p, Ast.Addr_of (inner, _) -> (
-              match actual_type inner with
-              | Some inner_ty -> match_type argument p inner_ty
-              | None -> Ok ())
-          | _ -> (
-              match actual_type argument with
-              | Some actual -> match_type argument parameter.ty actual
-              | None -> Ok ()))
+          let expect_handle =
+            match parameter.ty with Ast.Handle _ -> true | _ -> false
+          in
+          match infer_arg_type expect_handle argument with
+          | Some actual -> match_type argument parameter.ty actual
+          | None -> Ok ())
         (Ok ()) params arguments
     in
     let literal_only parameter =

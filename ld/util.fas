@@ -265,8 +265,7 @@ struct KeyIndex {
 
 // the first entry with this hash, or NONE
 fn kx_first(k handle[KeyIndex], hash u64) u32 {
-    h handle[U64Map] = &k.heads
-    a addr = map_val_addr(h, hash)
+    a addr = map_val_addr(&k.heads, hash)
     return if a == null { NONE } else { a[u32] }
 }
 
@@ -274,26 +273,24 @@ fn kx_next(k handle[KeyIndex], id u32) u32 { return k.next.p[u32, zext[u64](id)]
 
 // adds entry `id` (the next id: ids are 0, 1, 2, ...) under this hash
 fn kx_add(k handle[KeyIndex], hash u64, id u32) void {
-    h handle[U64Map] = &k.heads
-    a addr = map_val_addr(h, hash)
+    a addr = map_val_addr(&k.heads, hash)
     if a == null {
-        vec_push[u32](&k.next, NONE)
-        map_put(h, hash, id)
+        vec_push(&k.next, NONE)
+        map_put(&k.heads, hash, id)
     } else {
-        vec_push[u32](&k.next, a[u32])
+        vec_push(&k.next, a[u32])
         a[u32] = id
     }
 }
 
 fn kx_free(k handle[KeyIndex]) void {
-    h handle[U64Map] = &k.heads
-    map_free(h)
-    vec_free[u32](&k.next)
+    map_free(&k.heads)
+    vec_free(&k.next)
 }
 
 // ---------- vectors of plain structs ----------
 
 // appends a zeroed element and returns it
-fn vec_new[T](v handle[Vec[T]]) handle[T] { return vec_add[T](v) }
+fn vec_new[T](v handle[Vec[T]]) handle[T] { return vec_add(v) }
 
-fn vec_ref[T](v handle[Vec[T]], i usize) handle[T] { return vec_at[T](v, i) }
+fn vec_ref[T](v handle[Vec[T]], i usize) handle[T] { return vec_at(v, i) }

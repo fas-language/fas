@@ -20341,6 +20341,48 @@ let () =
           ()
       | m -> failwith ("c-keyword-macro-struct: " ^ String.concat "; " m))
 
+let () =
+  semantic_accept "generic-infer-addr-of-field-and-handle-field"
+    "struct Box[T] { v T }\n\
+     struct Holder { b Box[u32] }\n\
+     fn bump[T](b handle[Box[T]], x T) T { b.v = x\n return b.v }\n\
+     fn use_val() u32 { h Holder = {}\n return bump(&h.b, 7) }\n\
+     fn use_handle(h handle[Holder]) u32 { return bump(&h.b, 9) }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_accept "generic-infer-addr-of-fn-generic-field"
+    "fn id_hash(k u64) u64 { return k }\n\
+     fn id_eq(a u64, b u64) bool { return a == b }\n\
+     struct Table[K, V, H fn(K) u64, E fn(K, K) bool] { key K\n val V }\n\
+     type U64Table = Table[u64, u32, id_hash, id_eq]\n\
+     struct Index { heads U64Table }\n\
+     fn lookup[K, V, H fn(K) u64, E fn(K, K) bool](t handle[Table[K, V, H, E]], k K) V {\n\
+       if E(t.key, k) { return t.val }\n\
+       return t.val\n\
+     }\n\
+     fn find(idx handle[Index], k u64) u32 { return lookup(&idx.heads, k) }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_accept "generic-infer-if-expr-same-type"
+    "struct Box[T] { v T }\n\
+     fn id_hash(k u64) u64 { return k }\n\
+     fn id_eq(a u64, b u64) bool { return a == b }\n\
+     struct Table[K, V, H fn(K) u64, E fn(K, K) bool] { key K\n val V }\n\
+     type U64Table = Table[u64, u32, id_hash, id_eq]\n\
+     fn peek[T](b handle[Box[T]]) T { return b.v }\n\
+     fn has[K, V, H fn(K) u64, E fn(K, K) bool](t handle[Table[K, V, H, E]], k K) bool {\n\
+       return E(t.key, k) && H(k) != 0\n\
+     }\n\
+     fn f(c bool, a handle[Box[u32]], b handle[Box[u32]]) u32 {\n\
+       x Box[u32] = {}\n\
+       y Box[u32] = {}\n\
+       m1 U64Table = {}\n\
+       m2 U64Table = {}\n\
+       r1 u32 = peek(if c { a } else { b })\n\
+       r2 u32 = peek(if c { &x } else { &y })\n\
+       if has(if c { &m1 } else { &m2 }, 1) { return r1 + r2 }\n\
+       return r1\n\
+     }\n\
+     fn main() i32 { return 0 }\n"
+
 let replay_unmatched_bound = 30
 
 let () =

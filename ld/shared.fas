@@ -139,27 +139,27 @@ fn sh_sec(secs addr, i u64) handle[ShSec] { return handle_from_addr(secs + i * s
 fn sh_raw(raw addr, i u64) handle[ShRawSym] { return handle_from_addr(raw + i * sizeof[ShRawSym]) }
 
 fn sh_export(lib handle[ShLib], i u64) handle[ShExport] {
-    return vec_at[ShExport](&lib.exports, i)
+    return vec_at(&lib.exports, i)
 }
 
 fn sh_ref(lib handle[ShLib], i u64) handle[ShRef] {
-    return vec_at[ShRef](&lib.references, i)
+    return vec_at(&lib.references, i)
 }
 
 fn sh_verreq(lib handle[ShLib], i u64) handle[ShVerReq] {
-    return vec_at[ShVerReq](&lib.version_requirements, i)
+    return vec_at(&lib.version_requirements, i)
 }
 
 fn sh_loc(lib handle[ShLib], i u64) handle[ShLoc] {
-    return vec_at[ShLoc](&lib.locations, i)
+    return vec_at(&lib.locations, i)
 }
 
 fn sh_dep(lib handle[ShLib], i u64) Bytes {
-    return vec_get[Bytes](&lib.dependencies, i)
+    return vec_get(&lib.dependencies, i)
 }
 
 fn sh_defver(lib handle[ShLib], i u64) Bytes {
-    return vec_get[Bytes](&lib.defined_versions, i)
+    return vec_get(&lib.defined_versions, i)
 }
 
 fn sh_sym_hash(name Bytes, version Bytes) u64 {
@@ -180,7 +180,7 @@ fn sh_find_location(lib handle[ShLib], name Bytes, version Bytes) handle[ShLoc] 
     h u64 = sh_sym_hash(name, version)
     id u32 = kx_first(&lib.loc_index, h)
     while id != NONE {
-        loc handle[ShLoc] = vec_at[ShLoc](&lib.locations, zext[u64](id))
+        loc handle[ShLoc] = vec_at(&lib.locations, zext[u64](id))
         if sh_sym_eq(loc.name, loc.version, name, version) { return loc }
         id = kx_next(&lib.loc_index, id)
     }
@@ -188,12 +188,12 @@ fn sh_find_location(lib handle[ShLib], name Bytes, version Bytes) handle[ShLoc] 
 }
 
 fn sh_free(lib handle[ShLib]) void {
-    vec_free[Bytes](&lib.dependencies)
-    vec_free[Bytes](&lib.defined_versions)
-    vec_free[ShVerReq](&lib.version_requirements)
-    vec_free[ShExport](&lib.exports)
-    vec_free[ShRef](&lib.references)
-    vec_free[ShLoc](&lib.locations)
+    vec_free(&lib.dependencies)
+    vec_free(&lib.defined_versions)
+    vec_free(&lib.version_requirements)
+    vec_free(&lib.exports)
+    vec_free(&lib.references)
+    vec_free(&lib.locations)
     kx_free(&lib.loc_index)
     buf_free(&lib.msg)
 }
@@ -465,12 +465,12 @@ fn sh_put_location(lib handle[ShLib], name Bytes, version Bytes) handle[ShLoc] {
     h u64 = sh_sym_hash(name, version)
     id u32 = kx_first(&lib.loc_index, h)
     while id != NONE {
-        loc handle[ShLoc] = vec_at[ShLoc](&lib.locations, zext[u64](id))
+        loc handle[ShLoc] = vec_at(&lib.locations, zext[u64](id))
         if sh_sym_eq(loc.name, loc.version, name, version) { return loc }
         id = kx_next(&lib.loc_index, id)
     }
     new_id u32 = trunc[u32](lib.locations.n)
-    loc handle[ShLoc] = vec_add[ShLoc](&lib.locations)
+    loc handle[ShLoc] = vec_add(&lib.locations)
     loc.name = name
     loc.version = version
     kx_add(&lib.loc_index, h, new_id)
@@ -574,7 +574,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 if dep.n == 0 || dep.n > 65535 {
                     try sh_fail(lib, c"invalid DT_NEEDED name")
                 }
-                vec_push[Bytes](&lib.dependencies, dep)
+                vec_push(&lib.dependencies, dep)
             } else {
                 if map_has(th, tag_id) {
                     m handle[Buf] = sh_f(lib)
@@ -643,7 +643,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
         cursor u64 = s.offset
         ending u64 = s.offset + s.size
         intervals Vec[ShInterval] = {}
-        defer { vec_free[ShInterval](&intervals) }
+        defer { vec_free(&intervals) }
         for n u64 in 0..amount {
             try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version definition", c"version definitions", cursor, 20)
             id u64 = rd16(d, cursor + 4)
@@ -671,7 +671,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 try sh_fail(lib, c"invalid version name or hash")
             }
             map_put(vh, id, ver)
-            vec_push[Bytes](&lib.defined_versions, ver)
+            vec_push(&lib.defined_versions, ver)
             next u64 = try sh_index(lib, c"version definition link", s.size, rd32(d, cursor + 16))
             if n == amount - 1 {
                 if next != 0 { try sh_fail(lib, c"unterminated version definition list") }
@@ -708,7 +708,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
         cursor u64 = s.offset
         ending u64 = s.offset + s.size
         intervals Vec[ShInterval] = {}
-        defer { vec_free[ShInterval](&intervals) }
+        defer { vec_free(&intervals) }
         for n u64 in 0..amount {
             try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version requirement", c"version requirements", cursor, 16)
             cnt u64 = rd16(d, cursor + 2)
@@ -729,7 +729,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                     try sh_fail(lib, c"invalid version requirement auxiliary record")
                 }
                 map_put(rvh, id, ver)
-                vr handle[ShVerReq] = vec_add[ShVerReq](&lib.version_requirements)
+                vr handle[ShVerReq] = vec_add(&lib.version_requirements)
                 vr.provider = provider
                 vr.version = ver
                 vr.weak = (vflags & 2) != 0
@@ -952,7 +952,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 loc.visibility = r.visibility
                 loc.read_only = ro
             }
-            ex handle[ShExport] = vec_add[ShExport](&lib.exports)
+            ex handle[ShExport] = vec_add(&lib.exports)
             ex.name = r.name
             ex.kind = r.kind
             ex.binding = r.binding
@@ -989,7 +989,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 return
             }
         }
-        rf handle[ShRef] = vec_add[ShRef](&lib.references)
+        rf handle[ShRef] = vec_add(&lib.references)
         rf.name = r.name
         rf.undefined = r.section == 0
         rf.binding = r.binding

@@ -244,7 +244,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
                         value u64 = try ubyte(o, d, cur, aend)
                         cur += 1
                         index u32 = try upointer(o, d, rmap, cmap, true, value, &cur, aend)
-                        if index != NONE { vec_push[u32](&cie_meta, index) }
+                        if index != NONE { vec_push(&cie_meta, index) }
                     } else if code == 76 {
                         // 'L'
                         lsda = try ubyte(o, d, cur, aend)
@@ -264,7 +264,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
                 try ufail_hex(o, c"unsupported FDE pointer encoding 0x", encoding)
             }
             map_put(ch, at, trunc[u32](cie_list.n))
-            c handle[Cie] = vec_add[Cie](&cie_list)
+            c handle[Cie] = vec_add(&cie_list)
             c.encoding = trunc[u32](encoding)
             c.augmented = if aug.n != 0 { 1 } else { 0 }
             c.lsda = trunc[u32](lsda)
@@ -275,7 +275,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             if id > at + 4 || at + 4 - id > at { try ufail(o, c"invalid FDE CIE pointer") }
             ca addr = map_val_addr(ch, at + 4 - id)
             if ca == null { try ufail(o, c"FDE references a missing CIE") }
-            c handle[Cie] = vec_at[Cie](&cie_list, zext[u64](ca[u32]))
+            c handle[Cie] = vec_at(&cie_list, zext[u64](ca[u32]))
             encoding u64 = zext[u64](c.encoding)
             width u64 = if encoding == 0x1b { 4 } else { 8 }
             initial u64 = at + 8
@@ -292,18 +292,18 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             if (range >> 63) != 0 { try ufail(o, c"FDE address range exceeds supported limit") }
             meta_start u64 = mh.n
             for j u64 in 0..zext[u64](c.meta_n) {
-                vec_push[u32](mh, cie_meta.p[u32, zext[u64](c.meta_start) + j])
+                vec_push(mh, cie_meta.p[u32, zext[u64](c.meta_start) + j])
             }
             if c.augmented != 0 {
                 cur = initial + width * 2
                 aend u64 = try uaug_end(o, d, &cur, ending)
                 if c.lsda != 0xff {
                     index u32 = try upointer(o, d, rmap, cmap, false, zext[u64](c.lsda), &cur, aend)
-                    if index != NONE { vec_push[u32](mh, index) }
+                    if index != NONE { vec_push(mh, index) }
                 }
                 if cur != aend { try ufail(o, c"invalid FDE augmentation length") }
             }
-            fr handle[Frame] = vec_add[Frame](&u.frames)
+            fr handle[Frame] = vec_add(&u.frames)
             fr.file = trunc[u32](f)
             fr.section = trunc[u32](k)
             fr.offset = at
@@ -348,8 +348,8 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
     map_free(rmap)
     map_free(cmap)
     map_free(ch)
-    vec_free[Cie](&cie_list)
-    vec_free[u32](&cie_meta)
+    vec_free(&cie_list)
+    vec_free(&cie_meta)
 }
 
 fn unwind_job(ctx addr, b u64, e u64, worker u32) void {
@@ -414,7 +414,7 @@ fn unwind_prepare() void fails {
         v handle[Vec[Frame]] = &uobj(f).frames
         for i u64 in 0..v.n {
             fr handle[Frame] = vec_at(v, i)
-            if try unwind_active(fr) { copy_into(vec_add[Frame](&uframes), fr) }
+            if try unwind_active(fr) { copy_into(vec_add(&uframes), fr) }
         }
     }
     if uframes.n == 0 { return }
@@ -566,7 +566,7 @@ fn unwind_emit() void fails {
     n u64 = uframes.n
     ents addr = heap_alloc(n * 16 + 16)
     for i u64 in 0..n {
-        fr handle[Frame] = vec_at[Frame](&uframes, i)
+        fr handle[Frame] = vec_at(&uframes, i)
         p handle[Place] = try get_placement(zext[u64](fr.file), zext[u64](fr.section))
         field u64 = p.offset + fr.initial
         raw u64 = 0

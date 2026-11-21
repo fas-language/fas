@@ -107,7 +107,7 @@ fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void fails {
             quote = 0
         } else if quote == 0 && (c == 32 || c == 9 || c == 13 || c == 10 || c == 12) {
             if active {
-                vec_push[Bytes](out, nul_dup(w.p, w.n))
+                vec_push(out, nul_dup(w.p, w.n))
                 buf_clear(w)
                 active = false
             }
@@ -118,7 +118,7 @@ fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void fails {
         i += 1
     }
     if quote != 0 { try rsp_fail(path, c": unterminated quote in response file") }
-    if active { vec_push[Bytes](out, nul_dup(w.p, w.n)) }
+    if active { vec_push(out, nul_dup(w.p, w.n)) }
     buf_free(w)
 }
 
@@ -136,7 +136,7 @@ fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void fails 
         ld_realpath(path, &real) catch e { try die_io(c"realpath", path, e) }
         identity Bytes = buf_bytes(&real)
         for k u64 in 0..r.stack.n {
-            if bytes_eq(vec_get[Bytes](&r.stack, k), identity) {
+            if bytes_eq(vec_get(&r.stack, k), identity) {
                 try rsp_fail(path, c": recursive response file")
             }
         }
@@ -144,14 +144,14 @@ fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void fails 
         r.bytes += data.n
         words Vec[Bytes] = {}
         try rsp_tokenize(path, data, &words)
-        vec_push[Bytes](&r.stack, identity)
-        for k u64 in 0..words.n { try rsp_expand(r, vec_get[Bytes](&words, k), out) }
+        vec_push(&r.stack, identity)
+        for k u64 in 0..words.n { try rsp_expand(r, vec_get(&words, k), out) }
         r.stack.n -= 1
-        vec_free[Bytes](&words)
+        vec_free(&words)
     } else {
         r.count += 1
         if r.count > 100000 { try die_c(c"expanded argument count exceeds 100000") }
-        vec_push[Bytes](out, argument)
+        vec_push(out, argument)
     }
 }
 
@@ -299,14 +299,14 @@ fn take_value(p handle[Parser], flag Bytes) Bytes fails {
         bs(m, c" requires an argument")
         try die()
     }
-    v Bytes = vec_get[Bytes](&p.args, p.at)
+    v Bytes = vec_get(&p.args, p.at)
     p.at += 1
     return v
 }
 
 fn add_item(p handle[Parser], kind u8, text Bytes) void {
     c handle[Config] = config()
-    it handle[Item] = vec_add[Item](&c.items)
+    it handle[Item] = vec_add(&c.items)
     it.text = text
     it.kind = kind
     it.whole = p.whole
@@ -330,7 +330,7 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
     level u64 = 0
     positional bool = false
     while p.at < p.args.n {
-        a Bytes = vec_get[Bytes](&p.args, p.at)
+        a Bytes = vec_get(&p.args, p.at)
         p.at += 1
         if positional {
             add_item(p, IT_PATH, a)
@@ -357,10 +357,10 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             if p.whole { bits = bits | 1 }
             if p.as_needed { bits = bits | 2 }
             if p.static_libraries { bits = bits | 4 }
-            vec_push[u8](&p.states, bits)
+            vec_push(&p.states, bits)
         } else if is(a, c"--pop-state") {
             if p.states.n == 0 { try die_c(c"--pop-state without --push-state") }
-            bits u8 = vec_pop[u8](&p.states)
+            bits u8 = vec_pop(&p.states)
             p.whole = (bits & 1) != 0
             p.as_needed = (bits & 2) != 0
             p.static_libraries = (bits & 4) != 0
@@ -392,9 +392,9 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.sysroot = arg_tail(a, 10)
             c.has_sysroot = true
         } else if is(a, c"--library-path") {
-            vec_push[Bytes](&c.library_paths, try take_value(p, a))
+            vec_push(&c.library_paths, try take_value(p, a))
         } else if bytes_prefix(a, c"--library-path=") {
-            vec_push[Bytes](&c.library_paths, arg_tail(a, 15))
+            vec_push(&c.library_paths, arg_tail(a, 15))
         } else if is(a, c"--build-id") {
             c.build_id = BUILD_ID_SHA1
         } else if bytes_prefix(a, c"--build-id=") {
@@ -429,7 +429,7 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             inner u64 = try parse_level(p, depth + 1)
             // running out of arguments inside a group dies with "missing
             // --end-group" in the inner level
-            g handle[Item] = vec_at[Item](&c.items, at)
+            g handle[Item] = vec_at(&c.items, at)
             g.count = trunc[u32](c.items.n - at - 1)
             level += 1
         } else if is(a, c"--whole-archive") {
@@ -486,7 +486,7 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
         } else if is(a, c"-rpath") || is(a, c"--rpath") {
             v Bytes = try take_value(p, a)
             c.runpath += 1
-            vec_push[Bytes](&c.runpaths, v)
+            vec_push(&c.runpaths, v)
         } else if is(a, c"--enable-new-dtags") || is(a, c"--disable-new-dtags") {
             c.new_dtags = is(a, c"--enable-new-dtags")
         } else if is(a, c"--allow-shlib-undefined") || is(a, c"--no-allow-shlib-undefined") {
@@ -494,14 +494,14 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
         } else if is(a, c"-rpath-link") || is(a, c"--rpath-link") {
             v Bytes = try take_value(p, a)
             c.rpath_link += 1
-            vec_push[Bytes](&c.rpath_links, v)
+            vec_push(&c.rpath_links, v)
         } else if bytes_prefix(a, c"--rpath-link=") || bytes_prefix(a, c"-rpath-link=") {
             prefix u64 = if a.p[u8, 1] == 45 { 13 } else { 12 }
             c.rpath_link += 1
-            vec_push[Bytes](&c.rpath_links, arg_tail(a, prefix))
+            vec_push(&c.rpath_links, arg_tail(a, prefix))
         } else if bytes_prefix(a, c"--rpath=") {
             c.runpath += 1
-            vec_push[Bytes](&c.runpaths, arg_tail(a, 8))
+            vec_push(&c.runpaths, arg_tail(a, 8))
         } else if bytes_prefix(a, c"--dynamic-linker=") {
             c.no_interpreter = false
             c.interpreter = arg_tail(a, 17)
@@ -511,11 +511,11 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
         } else if is(a, c"--gc-sections") || is(a, c"--no-gc-sections") {
             c.gc_sections = is(a, c"--gc-sections")
         } else if is(a, c"-u") || is(a, c"--undefined") {
-            vec_push[Bytes](&c.undefined, try take_value(p, a))
+            vec_push(&c.undefined, try take_value(p, a))
         } else if bytes_prefix(a, c"--undefined=") {
-            vec_push[Bytes](&c.undefined, arg_tail(a, 12))
+            vec_push(&c.undefined, arg_tail(a, 12))
         } else if bytes_prefix(a, c"-u") && a.n > 2 {
-            vec_push[Bytes](&c.undefined, arg_tail(a, 2))
+            vec_push(&c.undefined, arg_tail(a, 2))
         } else if is(a, c"-Map") || is(a, c"--Map") {
             c.map_file = try take_value(p, a)
             c.has_map = true
@@ -528,12 +528,12 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
         } else if is(a, c"-e") || is(a, c"--entry") {
             c.entry = try take_value(p, a)
         } else if is(a, c"-L") {
-            vec_push[Bytes](&c.library_paths, try take_value(p, a))
+            vec_push(&c.library_paths, try take_value(p, a))
         } else if is(a, c"-l") {
             add_item(p, IT_LIBRARY, try take_value(p, a))
             level += 1
         } else if bytes_prefix(a, c"-L") {
-            vec_push[Bytes](&c.library_paths, arg_tail(a, 2))
+            vec_push(&c.library_paths, arg_tail(a, 2))
         } else if bytes_prefix(a, c"-l") {
             add_item(p, IT_LIBRARY, arg_tail(a, 2))
             level += 1
@@ -558,16 +558,16 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     c.relro = true
     p Parser = {}
     raw Vec[Bytes] = {}
-    for i u64 in 0..argc { vec_push[Bytes](&raw, bytes_c(argv[addr, i])) }
+    for i u64 in 0..argc { vec_push(&raw, bytes_c(argv[addr, i])) }
     r Rsp = {}
     for i u64 in 0..raw.n {
-        try rsp_expand(&r, vec_get[Bytes](&raw, i), &p.args)
+        try rsp_expand(&r, vec_get(&raw, i), &p.args)
     }
-    vec_free[Bytes](&raw)
-    vec_free[Bytes](&r.stack)
+    vec_free(&raw)
+    vec_free(&r.stack)
     c.top_items = try parse_level(&p, 0)
-    vec_free[Bytes](&p.args)
-    vec_free[u8](&p.states)
+    vec_free(&p.args)
+    vec_free(&p.states)
     if c.print_version && c.items.n == 0 {
         print_version()
         fail LinkDone

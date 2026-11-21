@@ -171,17 +171,17 @@ fn got_prepare(static_ifunc bool) void fails {
             if a == null {
                 slot = trunc[u32](got_slots.n)
                 map_put(ih, key, slot)
-                vec_push[u64](&got_slots, pk(f, si))
-                vec_push[u8](&got_model, model)
+                vec_push(&got_slots, pk(f, si))
+                vec_push(&got_model, model)
                 if r.kind == 19 || r.kind == 20 || r.kind == 34 {
-                    vec_push[u64](&got_slots, pk(f, si))
+                    vec_push(&got_slots, pk(f, si))
                     second u8 = GM_LOCAL_OFFSET
                     if r.kind == 19 {
                         second = GM_DYNAMIC_OFFSET
                     } else if r.kind == 34 {
                         second = GM_DESCRIPTOR_ARGUMENT
                     }
-                    vec_push[u8](&got_model, second)
+                    vec_push(&got_model, second)
                 }
             } else {
                 slot = a[u32]
@@ -265,7 +265,7 @@ fn merge_plan() void {
             while id != NONE && !merge_same(f, s, canonical.p[u64, zext[u64](id)]) { id = kx_next(&index, id) }
             if id == NONE {
                 kx_add(&index, hash, trunc[u32](canonical.n))
-                vec_push[u64](&canonical, pk(f, k))
+                vec_push(&canonical, pk(f, k))
             } else {
                 lx(f).alias[u64, k] = canonical.p[u64, zext[u64](id)] + 1
                 stat_add(ST_MERGED_SECTIONS, 1)
@@ -275,7 +275,7 @@ fn merge_plan() void {
         heap_free(relocated)
     }
     kx_free(&index)
-    vec_free[u64](&canonical)
+    vec_free(&canonical)
 }
 
 // ---------- symbol values ----------
@@ -358,7 +358,7 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
 fn seg_ending(text_only bool, memory bool) u64 {
     value u64 = lay_base + PAGE
     for i u64 in 0..segments.n {
-        s handle[Seg] = vec_at[Seg](&segments, i)
+        s handle[Seg] = vec_at(&segments, i)
         if text_only && (s.flags & 1) == 0 { continue }
         e u64 = lay_base + s.offset + (if memory { s.memory_size } else { s.file_size })
         value = umax(value, e)
@@ -411,7 +411,7 @@ fn predefined_value(n Bytes) u64 {
     k u64 = headers.n
     while k > 0 {
         k -= 1
-        o handle[OutSec] = vec_at[OutSec](&headers, k)
+        o handle[OutSec] = vec_at(&headers, k)
         if bytes_eq(o.name, section) {
             return o.address + (if last != 0 { o.size } else { 0 })
         }
@@ -784,9 +784,7 @@ fn build_image() void fails {
     shstrtab Buf = {}
     buf_u8(&shstrtab, 0)
     locals Vec[SymOut] = {}
-    lh handle[Vec[SymOut]] = &locals
     globals Vec[SymOut] = {}
-    gh handle[Vec[SymOut]] = &globals
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         for i u64 in 1..zext[u64](o.nsym) {
@@ -797,18 +795,18 @@ fn build_image() void fails {
                 if g.has_res == 0 || zext[u64](g.res_file) != f || zext[u64](g.res_sym) != i { continue }
             }
             name u32 = try add_string(&strtab, y.name)
-            e handle[SymOut] = vec_add[SymOut](if y.binding == 0 { lh } else { gh })
+            e handle[SymOut] = vec_add(if y.binding == 0 { &locals } else { &globals })
             e.file = trunc[u32](f)
             e.name = name
             e.sym = i
         }
     }
-    symbol_count u64 = lh.n + gh.n + 1
+    symbol_count u64 = locals.n + globals.n + 1
     symtab_size u64 = try chk_add(c"output symbol count", MAX_OUTPUT / 24, 0, symbol_count) * 24
     content_count u64 = headers.n
     name_offsets addr = heap_alloc(content_count * 4 + 4)
     for k u64 in 0..content_count {
-        name_offsets[u32, k] = try add_string(&shstrtab, vec_at[OutSec](&headers, k).name)
+        name_offsets[u32, k] = try add_string(&shstrtab, vec_at(&headers, k).name)
     }
     symtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".symtab")))
     strtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".strtab")))
@@ -823,7 +821,7 @@ fn build_image() void fails {
     image = heap_alloc_zeroed(size + 8)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at[OutSec](&headers, k)
+        s handle[OutSec] = vec_at(&headers, k)
         if (s.flags & 4) != 0 && (bytes_is(s.name, c".init") || bytes_is(s.name, c".fini")) {
             mem_set(image + s.offset, 144, s.size)
         }
@@ -927,7 +925,7 @@ fn build_image() void fails {
     }
     program_header(prefix, 1, 4, 0, lay_base, header_size, header_size, PAGE)
     for i u64 in 0..segments.n {
-        s handle[Seg] = vec_at[Seg](&segments, i)
+        s handle[Seg] = vec_at(&segments, i)
         program_header(prefix + i + 1, 1, s.flags, s.offset, lay_base + s.offset, s.file_size, s.memory_size, s.alignment)
     }
     extra_header u64 = prefix + segments.n + 1
@@ -969,8 +967,8 @@ fn build_image() void fails {
     program_header(phnum - 1, 0x6474e551, 6, 0, 0, 0, 0, 16)
 
     // symbols
-    for j u64 in 0..lh.n + gh.n {
-        e handle[SymOut] = if j < lh.n { vec_at(lh, j) } else { vec_at(gh, j - lh.n) }
+    for j u64 in 0..locals.n + globals.n {
+        e handle[SymOut] = if j < locals.n { vec_at(&locals, j) } else { vec_at(&globals, j - locals.n) }
         f u64 = zext[u64](e.file)
         y handle[Sym] = sym(obj(f), e.sym)
         at u64 = symtab_offset + (j + 1) * 24
@@ -988,7 +986,7 @@ fn build_image() void fails {
     mem_copy(image + shstrtab_offset, shstrtab.p, shstrtab.n)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at[OutSec](&headers, k)
+        s handle[OutSec] = vec_at(&headers, k)
         link u64 = 0
         info u64 = 0
         if !dyn_metadata(k + 1, &link, &info) {
@@ -999,10 +997,10 @@ fn build_image() void fails {
             s.offset, s.size, link, info, s.alignment, s.entsize)
     }
     section_header(shoff + (content_count + 1) * 64, symtab_name, 2, 0, 0, symtab_offset, symtab_size,
-        content_count + 2, lh.n + 1, 8, 24)
+        content_count + 2, locals.n + 1, 8, 24)
     section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, strtab.n, 0, 0, 1, 0)
     section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, shstrtab.n, 0, 0, 1, 0)
-    if c.has_map { try map_build(entry, lh, gh) }
+    if c.has_map { try map_build(entry, &locals, &globals) }
     stat_add(ST_OUTPUT_BYTES, image_size)
 }
 
@@ -1034,7 +1032,7 @@ fn check_output(output Bytes, inputs handle[Vec[Bytes]], reverse bool, out_st ha
         try die()
     }
     for j u64 in 0..inputs.n {
-        path Bytes = vec_get[Bytes](inputs, if reverse { inputs.n - 1 - j } else { j })
+        path Bytes = vec_get(inputs, if reverse { inputs.n - 1 - j } else { j })
         if ld_vfs_has(path) { continue }
         st Stat = {}
         try stat_or_die(path, &st)
@@ -1055,14 +1053,14 @@ fn link_and_publish() void fails {
     in_mem bool = ld_vfs_in_memory()
     paths Vec[Bytes] = {}
     for k u64 in 0..c.items.n {
-        it handle[Item] = vec_at[Item](&c.items, k)
-        if it.kind == IT_PATH { vec_push[Bytes](&paths, it.text) }
+        it handle[Item] = vec_at(&c.items, k)
+        if it.kind == IT_PATH { vec_push(&paths, it.text) }
     }
     // the version script is a metadata input: checked after the inputs,
     // and first in the expanded list
     if c.has_version_script {
-        vec_push[Bytes](&paths, c.version_script)
-        vec_push[Bytes](&expanded, c.version_script)
+        vec_push(&paths, c.version_script)
+        vec_push(&expanded, c.version_script)
     }
     discard bool = false
     if !in_mem {
@@ -1077,7 +1075,7 @@ fn link_and_publish() void fails {
         exists bool = try check_output(output, &paths, false, &st)
         discard = exists && try null_output(output, &st)
     }
-    vec_free[Bytes](&paths)
+    vec_free(&paths)
     try resolve()
     try build_image()
     try build_id_emit()

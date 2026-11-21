@@ -43,7 +43,7 @@ fn symver_sym(o handle[Obj], extra handle[Vec[Sym]], i u64) handle[Sym] {
 fn symver_find(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids handle[Vec[u32]], name Bytes) u32 {
     e u32 = kx_first(kx, bytes_hash(name))
     while e != NONE {
-        id u32 = vec_get[u32](ids, zext[u64](e))
+        id u32 = vec_get(ids, zext[u64](e))
         if bytes_eq(symver_sym(o, extra, zext[u64](id)).name, name) { return e }
         e = kx_next(kx, e)
     }
@@ -54,11 +54,11 @@ fn symver_find(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids h
 fn symver_define(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids handle[Vec[u32]], name Bytes, i u64) void {
     e u32 = symver_find(o, extra, kx, ids, name)
     if e != NONE {
-        vec_set[u32](ids, zext[u64](e), trunc[u32](i))
+        vec_set(ids, zext[u64](e), trunc[u32](i))
         return
     }
     kx_add(kx, bytes_hash(name), trunc[u32](ids.n))
-    vec_push[u32](ids, trunc[u32](i))
+    vec_push(ids, trunc[u32](i))
 }
 
 fn symver_fail(o handle[Obj], text addr, name Bytes) void fails {
@@ -73,7 +73,7 @@ fn symver_alias(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids 
     s handle[Sym] = symver_sym(o, extra, i)
     e u32 = symver_find(o, extra, kx, ids, name)
     if e != NONE {
-        old handle[Sym] = symver_sym(o, extra, zext[u64](vec_get[u32](ids, zext[u64](e))))
+        old handle[Sym] = symver_sym(o, extra, zext[u64](vec_get(ids, zext[u64](e))))
         if old.section == s.section && old.value == s.value && old.kind == s.kind { return }
         try symver_fail(o, c"conflicting default symbol version ", name)
     }
@@ -124,8 +124,8 @@ fn symver_expand(o handle[Obj]) void fails {
         o.syms = s
         o.nsym = trunc[u32](total)
     }
-    vec_free[Sym](&extra)
-    vec_free[u32](&ids)
+    vec_free(&extra)
+    vec_free(&ids)
     kx_free(&index)
 }
 

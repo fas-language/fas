@@ -14,8 +14,7 @@ var copy_names U32Set = {}
 
 fn copy_has(id u32) bool {
     if copy_entries.n == 0 { return false }
-    h handle[U32Set] = &copy_names
-    return map_has(h, id)
+    return map_has(&copy_names, id)
 }
 
 var copy_sort_lib handle[ShLib] = null
@@ -112,13 +111,13 @@ fn copy_prepare() void fails {
             if p.kind == 1 && p.library != NONE {
                 if !map_has(cn, id) {
                     map_put(cn, id, 1)
-                    vec_push[u32](rh, id)
+                    vec_push(rh, id)
                 }
             }
         }
     }
     if rh.n == 0 {
-        vec_free[u32](rh)
+        vec_free(rh)
         return
     }
 
@@ -151,7 +150,7 @@ fn copy_prepare() void fails {
     allocated u64 = 0
 
     for i u64 in 0..count {
-        id u32 = vec_get[u32](rh, i)
+        id u32 = vec_get(rh, i)
         g handle[GSym] = gsym(id)
         key Bytes = g.name
         p handle[Imp] = imp(id)
@@ -214,7 +213,7 @@ fn copy_prepare() void fails {
         set_res(id, file, sec_idx, 0)
         shref_add(key)
 
-        ent handle[CopyEntry] = vec_add[CopyEntry](&copy_entries)
+        ent handle[CopyEntry] = vec_add(&copy_entries)
         ent.key_id = id
         ent.file = trunc[u32](file)
         ent.symbol = trunc[u32](sec_idx)
@@ -230,5 +229,5 @@ fn copy_prepare() void fails {
     }
     heap_free(ov_cache)
     map_free(idh)
-    vec_free[u32](rh)
+    vec_free(rh)
 }

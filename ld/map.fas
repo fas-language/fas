@@ -54,7 +54,7 @@ fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]])
     bs(lh, c"# section: address file-offset file-size memory-size alignment flags name input\n")
     try map_line(lh)
     for i u64 in 0..content.n {
-        x u64 = vec_get[u64](&content, i)
+        x u64 = vec_get(&content, i)
         f u64 = pk_file(x)
         k u64 = pk_sec(x)
         s handle[Sec] = sec(obj(f), k)

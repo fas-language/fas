@@ -135,7 +135,7 @@ fn vs_identifier(word Bytes) void fails {
 
 fn vs_has_node(name Bytes) bool {
     for i u64 in 0..vs_nodes.n {
-        if bytes_eq(vec_at[VsNode](&vs_nodes, i).name, name) { return true }
+        if bytes_eq(vec_at(&vs_nodes, i).name, name) { return true }
     }
     return false
 }
@@ -205,7 +205,7 @@ fn vs_parse(path Bytes, data Bytes) void fails {
                 }
                 rule_count += 1
                 if rule_count > 1024 { try vs_fail_c(c"pattern count exceeds 1024") }
-                r handle[VsRule] = vec_add[VsRule](&vs_rules)
+                r handle[VsRule] = vec_add(&vs_rules)
                 r.pattern = pattern
                 r.local = local
                 r.version = version
@@ -231,7 +231,7 @@ fn vs_parse(path Bytes, data Bytes) void fails {
             has_parent = 1
         }
         try vs_expect(59)
-        n handle[VsNode] = vec_add[VsNode](&vs_nodes)
+        n handle[VsNode] = vec_add(&vs_nodes)
         n.name = name
         n.parent = parent
         n.has_parent = has_parent
@@ -241,7 +241,7 @@ fn vs_parse(path Bytes, data Bytes) void fails {
     lh handle[BytesU32Map] = &vs_locals
     gh handle[BytesU32Map] = &vs_globals
     for i u64 in 0..vs_rules.n {
-        r handle[VsRule] = vec_at[VsRule](&vs_rules, i)
+        r handle[VsRule] = vec_at(&vs_rules, i)
         if bytes_contains(r.pattern, 42) { continue }
         if r.local != 0 { map_put(lh, r.pattern, 1) } else { map_put(gh, r.pattern, 1) }
     }
@@ -250,7 +250,7 @@ fn vs_parse(path Bytes, data Bytes) void fails {
 fn vs_node_count() u64 { return vs_nodes.n }
 
 fn vs_node(i u64) handle[VsNode] {
-    return vec_at[VsNode](&vs_nodes, i)
+    return vec_at(&vs_nodes, i)
 }
 
 // Version_script.named
@@ -258,9 +258,7 @@ fn vs_named() bool { return vs_nodes.n != 0 && vs_node(0).name.n != 0 }
 
 // Version_script.exact_local
 fn vs_exact_local(name Bytes) bool {
-    lh handle[BytesU32Map] = &vs_locals
-    gh handle[BytesU32Map] = &vs_globals
-    return map_val_addr(lh, name) != null && map_val_addr(gh, name) == null
+    return map_val_addr(&vs_locals, name) != null && map_val_addr(&vs_globals, name) == null
 }
 
 // Version_script.policy (instance inst): 0 = Local, otherwise Global version
@@ -274,7 +272,7 @@ fn vs_policy(inst u64, name Bytes) u32 fails {
     sel_rank u64 = 0
     sel u64 = 0
     for i u64 in 0..vs_rules.n {
-        r handle[VsRule] = vec_at[VsRule](&vs_rules, i)
+        r handle[VsRule] = vec_at(&vs_rules, i)
         b u64 = name.n + r.pattern.n
         work u64 = vs_work[inst]
         if work > limit || b > limit - work {
@@ -298,7 +296,7 @@ fn vs_policy(inst u64, name Bytes) u32 fails {
         if !matches { continue }
         if has && rank < sel_rank { continue }
         if has && rank == sel_rank {
-            old handle[VsRule] = vec_at[VsRule](&vs_rules, sel)
+            old handle[VsRule] = vec_at(&vs_rules, sel)
             if old.local == 0 && r.local == 0 && old.version != r.version {
                 m handle[Buf] = msg()
                 bb(m, vs_path)
@@ -315,7 +313,7 @@ fn vs_policy(inst u64, name Bytes) u32 fails {
     }
     binding u32 = 1
     if has {
-        r handle[VsRule] = vec_at[VsRule](&vs_rules, sel)
+        r handle[VsRule] = vec_at(&vs_rules, sel)
         binding = if r.local != 0 { 0 } else { r.version }
     }
     map_put(ch, name, binding)
