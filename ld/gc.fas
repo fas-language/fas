@@ -151,10 +151,25 @@ fn gc_sections() void {
     c handle[Config] = config()
     gc_objs = heap_alloc_zeroed(nobj * sizeof[GcObj] + 8)
     pool_for(pool, nobj, 1, &gc_edges_job, null)
-    // roots (static output: no _init/_fini or exported definitions)
+    // roots: the entry, -u symbols and, in dynamic output, _init/_fini
+    // and the exported definitions
     gc_root(c.entry)
     uv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
     for i u64 in 0..uv.n { gc_root(vec_get[Bytes](uv, i)) }
+    if c.mode != MODE_STATIC {
+        gc_root(bytes_c(c"_init"))
+        gc_root(bytes_c(c"_fini"))
+        // no shared_references without shared inputs (static PIE)
+        if c.mode == MODE_SHARED || c.export_dynamic {
+            gv handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
+            for i u64 in 0..gv.n {
+                g handle[GSym] = gsym(trunc[u32](i))
+                if g.has_res != 0 && (g.res_vis == 0 || g.res_vis == 3) {
+                    gc_definition(zext[u64](g.res_file), zext[u64](g.res_sym))
+                }
+            }
+        }
+    }
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {

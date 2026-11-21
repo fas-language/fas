@@ -189,6 +189,7 @@ struct Config {
     has_interpreter bool
     no_interpreter bool
     runpath u64           // count of -rpath values
+    runpaths Vec[Bytes]   // the -rpath values, in command-line order
     new_dtags bool
     allow_shlib_undefined bool
     rpath_link u64
@@ -480,6 +481,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         } else if is(a, c"-rpath") || is(a, c"--rpath") {
             v Bytes = take_value(p, a)
             c.runpath += 1
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths), v)
         } else if is(a, c"--enable-new-dtags") || is(a, c"--disable-new-dtags") {
             c.new_dtags = is(a, c"--enable-new-dtags")
         } else if is(a, c"--allow-shlib-undefined") || is(a, c"--no-allow-shlib-undefined") {
@@ -491,6 +493,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             c.rpath_link += 1
         } else if bytes_prefix(a, c"--rpath=") {
             c.runpath += 1
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths), arg_tail(a, 8))
         } else if bytes_prefix(a, c"--dynamic-linker=") {
             c.no_interpreter = false
             c.interpreter = arg_tail(a, 17)

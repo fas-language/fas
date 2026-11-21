@@ -329,10 +329,14 @@ fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) voi
         return
     }
     if data.n >= 18 && mem_eq(data.p, c"\x7fELF", 4) && rd16(data.p, 16) == 3 {
-        // Static output: requires_static_inputs
+        // Static and static-PIE output: requires_static_inputs
         m handle[Buf] = msg()
         bb(m, path)
-        bs(m, c": shared input requires -pie or --dynamic-linker")
+        if config().mode == MODE_STATIC_PIE {
+            bs(m, c": static PIE cannot use shared-library inputs")
+        } else {
+            bs(m, c": shared input requires -pie or --dynamic-linker")
+        }
         input_die()
     }
     if is_script(data) {
@@ -683,7 +687,8 @@ fn predefined_name(n Bytes) bool {
         bytes_is(n, c"__preinit_array_start") || bytes_is(n, c"__preinit_array_end") ||
         bytes_is(n, c"__init_array_start") || bytes_is(n, c"__init_array_end") ||
         bytes_is(n, c"__fini_array_start") || bytes_is(n, c"__fini_array_end") ||
-        bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end")
+        bytes_is(n, c"__rela_iplt_start") || bytes_is(n, c"__rela_iplt_end") ||
+        (bytes_is(n, c"_DYNAMIC") && config().mode != MODE_STATIC)
 }
 
 fn hidden_predefined(n Bytes) bool {

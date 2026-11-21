@@ -1,0 +1,119 @@
+// Relax.static_pie: the static-PIE CRT entry runs before its GOT has been
+// relocated. Marked x86-64 GOTPCRELX instructions whose local target is
+// known at link time become direct (mov -> lea, call *got -> addr32 call)
+// with the same lengths, and their relocation becomes PC32. An object's
+// data and relocations are copied before its first patch (the data is a
+// read-only mapping).
+
+// a relocated field: (target << 40 | start) and its end (input offsets are
+// below 2^40)
+value struct Iv { key u64, finish u64 }
+
+fn iv_less(a Iv, b Iv) bool {
+    if a.key != b.key { return a.key < b.key }
+    return a.finish < b.finish
+}
+
+// whether (section, offset) is inside a relocated field
+fn relax_protected(iv handle[Vec[Iv]], section u64, offset u64) bool {
+    low u64 = 0
+    high u64 = iv.n
+    key u64 = (section << 40) | offset
+    while low < high {
+        middle u64 = low + (high - low) / 2
+        x Iv = vec_get[Iv](iv, middle)
+        if x.key <= key {
+            low = middle + 1
+        } else {
+            high = middle
+        }
+    }
+    if low == 0 { return false }
+    x Iv = vec_get[Iv](iv, low - 1)
+    return (x.key >> 40) == section && offset < x.finish
+}
+
+// Relax's local_address
+fn relax_local_address(f u64, i u64) bool {
+    df u64 = 0
+    ds u64 = 0
+    if !definition(f, i, &df, &ds) { return false }
+    d handle[Sym] = sym(obj(df), ds)
+    return d.section > 0 && d.section < 0xff00 && d.kind != 6 && d.kind != 10
+}
+
+var relax_counts addr = null   // u64 per object
+
+fn relax_object(f u64) void {
+    o handle[Obj] = obj(f)
+    n u64 = zext[u64](o.nrel)
+    if n == 0 { return }
+    candidate bool = false
+    for k u64 in 0..n {
+        kd u32 = rel(o, k).kind
+        if kd == 41 || kd == 42 { candidate = true }
+    }
+    if !candidate { return }
+    ivs Vec[Iv] = {}
+    iv handle[Vec[Iv]] = handle_from_addr[Vec[Iv]](&ivs)
+    for k u64 in 0..n {
+        r handle[Rel] = rel(o, k)
+        w u64 = relocation_width(r.kind)
+        if w == 0 || w == 99 { continue }
+        vec_push[Iv](iv, {(zext[u64](r.target) << 40) | r.offset, r.offset + w})
+    }
+    sort_vec[Iv, iv_less](iv)
+    minus4 u64 = 0xfffffffffffffffc
+    copied bool = false
+    data addr = o.data
+    count u64 = 0
+    for k u64 in 0..n {
+        r handle[Rel] = rel(o, k)
+        if r.kind != 41 && r.kind != 42 { continue }
+        t u64 = zext[u64](r.target)
+        s handle[Sec] = sec(o, t)
+        if r.addend != minus4 || !kept(f, t) || (s.flags & 4) == 0 { continue }
+        if !relax_local_address(f, zext[u64](r.symbol)) || r.offset < 2 { continue }
+        if relax_protected(iv, t, r.offset - 2) || relax_protected(iv, t, r.offset - 1) { continue }
+        at u64 = s.offset + r.offset
+        b1 u8 = data[u8, at - 1]
+        b2 u8 = data[u8, at - 2]
+        mov bool = r.kind == 42 && r.offset >= 3 && !relax_protected(iv, t, r.offset - 3) &&
+            (data[u8, at - 3] & 0xf8) == 0x48 && b2 == 0x8b && (b1 & 0xc7) == 5
+        call bool = !mov && r.kind == 41 && b2 == 0xff && b1 == 0x15
+        if !mov && !call { continue }
+        if !copied {
+            copied = true
+            nd addr = heap_alloc(o.len + 1)
+            mem_copy(nd, o.data, o.len)
+            o.data = nd
+            data = nd
+            nr addr = heap_alloc(n * sizeof[Rel])
+            mem_copy(nr, o.rels, n * sizeof[Rel])
+            o.rels = nr
+            r = rel(o, k)
+        }
+        if mov {
+            data[u8, at - 2] = 0x8d
+        } else {
+            data[u8, at - 2] = 0x67
+            data[u8, at - 1] = 0xe8
+        }
+        r.kind = 2
+        count += 1
+    }
+    vec_free[Iv](iv)
+    relax_counts[u64, f] = count
+}
+
+fn relax_job(ctx addr, b u64, e u64, worker u32) void {
+    for f u64 in b..e { relax_object(f) }
+}
+
+fn relax_static_pie() void {
+    relax_counts = heap_alloc_zeroed(nobj * 8 + 8)
+    pool_for(pool, nobj, 1, &relax_job, null)
+    for f u64 in 0..nobj {
+        if relax_counts[u64, f] != 0 { stat_add(ST_GOTPCRELX_RELAXATIONS, relax_counts[u64, f]) }
+    }
+}

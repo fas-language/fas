@@ -22,6 +22,8 @@ use "gc.fas"
 use "buildid.fas"
 use "tls.fas"
 use "ifunc.fas"
+use "relax.fas"
+use "dynamic.fas"
 use "zlib.fas"
 use "script.fas"
 use "map.fas"
@@ -37,7 +39,7 @@ fn main(argc i32, argv addr) i32 {
     if c.statistics { stats_start() }
     if c.print_version { print_version() }
     // features the skeleton does not have yet
-    if !c.relocatable && c.mode != MODE_STATIC { refuse(c"dynamic, PIE and shared output") }
+    if !c.relocatable && c.mode != MODE_STATIC && c.mode != MODE_STATIC_PIE { refuse(c"dynamic and shared output") }
     threads u32 = 0
     t addr = os_getenv(c"FAS_LD_THREADS")
     if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }

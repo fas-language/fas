@@ -1,4 +1,4 @@
-// Thread-local storage for static executables (Tls): the
+// Thread-local storage for static and static-PIE executables (Tls): the
 // _TLS_MODULE_BASE_ definition, the relocation checks and thread offsets.
 // Static output supports local-exec and initial-exec TLS; the TLS template
 // is placed by layout_class (layout.fas) as tls_seg.
@@ -96,6 +96,9 @@ fn tls_validate_object(f u64) bool {
         if tls_relocation(r.kind) {
             if r.kind == 20 && !tls_template { return tls_fail(o, c": TLSLD requires a local TLS template", none) }
             if r.kind != 17 && r.kind != 21 && r.kind != 22 && r.kind != 23 {
+                if config().mode == MODE_STATIC_PIE {
+                    return tls_fail(o, c": static PIE supports only local-exec/initial-exec TLS", none)
+                }
                 return tls_fail(o, c": this TLS relocation requires dynamic output", none)
             }
             if r.kind != 20 && !tls { return tls_fail(o, c": TLS relocation references non-TLS symbol ", sym(o, si).name) }

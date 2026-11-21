@@ -1,0 +1,807 @@
+// Loader-facing metadata (Dynamic, Lifecycle, Gnu_hash): .dynamic, .dynsym,
+// .dynstr, the hash tables, .rela.dyn and the direct PLT, built as the
+// synthesized "<dynamic metadata>" object and filled after relocation.
+// Static PIE only for now: no shared inputs, so nothing is imported.
+
+const DYN_INTERP u64 = 1
+const DYN_DYNSTR u64 = 2
+const DYN_DYNSYM u64 = 3
+const DYN_HASH u64 = 4
+const DYN_RELA u64 = 5
+const DYN_DYNAMIC u64 = 6
+const DYN_PLT u64 = 7
+const DYN_VERSYM u64 = 8
+const DYN_VERNEED u64 = 9
+const DYN_VERDEF u64 = 10
+const DYN_GNU_HASH u64 = 11
+
+const HASH_SYSV u8 = 0
+const HASH_GNU u8 = 1
+const HASH_BOTH u8 = 2
+
+// a fixup's target: an input relocation, or a GOT slot
+const FX_INPUT u8 = 0
+const FX_GOT u8 = 1
+
+struct Fixup {
+    target u64      // FX_INPUT: (file << 32 | relocation); FX_GOT: the slot
+    symbol u32
+    kind u32
+    tkind u8
+    pad1 u8
+    pad2 u16
+    pad3 u32
+}
+
+struct Export {
+    source u32
+    symbol u32
+    index u32
+    name u32
+    image_relative u8
+    visibility u8
+    pad u16
+}
+
+var dyn_file u64 = NONE64
+var dyn_pie bool = false
+var dyn_shared bool = false
+var dyn_static_tls bool = false
+var dyn_fixups Vec[Fixup] = {}
+var dyn_relative_count u64 = 0
+var dyn_exports Vec[Export] = {}
+var dyn_stubs Vec[u64] = {}          // (symbol << 32 | slot), in first-use order
+var dyn_stub_index addr = null       // per GOT slot: its stub's index or NONE
+var dyn_ifunc_slots Map[u64, u32, u64_hash, u64_eq] = {}   // IFUNC definition -> GOT slot
+var dyn_ifunc_symbols addr = null    // per dynsym index: 1 for an IFUNC
+var dyn_symbol_count u64 = 0
+var dyn_runpath u32 = 0
+var dyn_has_runpath bool = false
+var dyn_soname u32 = 0
+var dyn_has_soname bool = false
+
+// Lifecycle: _init/_fini (tag 12/13, packed definition) and the arrays of
+// kinds 16, 14, 15 (each its kept nonempty sections, in object order)
+var lc_tags Vec[u64] = {}
+var lc_funcs Vec[u64] = {}
+var lc_array_kinds Vec[u32] = {}
+var lc_members Vec[u64] = {}       // every array's sections, array after array
+var lc_array_ends Vec[u64] = {}    // per array: the end of its members
+
+// ---------- strings ----------
+
+var ds_buf Buf = {}
+var ds_names Vec[Bytes] = {}
+var ds_offsets Vec[u32] = {}
+var ds_index KeyIndex = {}
+
+fn dyn_string(name Bytes) u32 {
+    if bytes_contains(name, 0) || name.n > 65535 { die_c(c"invalid or oversized dynamic name") }
+    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&ds_index)
+    dn handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ds_names)
+    h u64 = bytes_hash(name)
+    e u32 = kx_first(kx, h)
+    while e != NONE {
+        if bytes_eq(vec_get[Bytes](dn, zext[u64](e)), name) { return ds_offsets.p[u32, zext[u64](e)] }
+        e = kx_next(kx, e)
+    }
+    b handle[Buf] = handle_from_addr[Buf](&ds_buf)
+    offset u32 = trunc[u32](b.n)
+    buf_append(b, name)
+    buf_u8(b, 0)
+    kx_add(kx, h, trunc[u32](dn.n))
+    vec_push[Bytes](dn, name)
+    vec_push[u32](handle_from_addr[Vec[u32]](&ds_offsets), offset)
+    return offset
+}
+
+// ---------- hashes ----------
+
+// Symbol_hash.sysv, computed like the OCaml linker's (64-bit, the bits
+// above 31 that carries leave are kept)
+fn sysv_hash(name Bytes) u64 {
+    h u64 = 0
+    for i u64 in 0..name.n {
+        h = (h << 4) + zext[u64](name.p[u8, i])
+        high u64 = h & 0xf0000000
+        h = (h ^ (high >> 24)) & (high ^ 0xffffffffffffffff)
+    }
+    return h
+}
+
+fn gnu_hash(name Bytes) u64 {
+    h u64 = 5381
+    for i u64 in 0..name.n { h = (h * 33 + zext[u64](name.p[u8, i])) & 0xffffffff }
+    return h
+}
+
+// Gnu_hash.build: the old-to-new dynsym indices (remap, u32 per symbol)
+// and the table (out)
+fn gnu_hash_build(first u64, names addr, total u64, remap addr, out handle[Buf]) void {
+    count u64 = total - first
+    buckets u64 = umax(1, count / 4)
+    hashes addr = heap_alloc(count * 8 + 8)
+    counts addr = heap_alloc_zeroed(buckets * 8)
+    for n u64 in 0..count {
+        h u64 = gnu_hash(names[Bytes, first + n])
+        hashes[u64, n] = h
+        counts[u64, h % buckets] += 1
+    }
+    starts addr = heap_alloc(buckets * 8)
+    next addr = heap_alloc(buckets * 8)
+    cursor u64 = first
+    for b u64 in 0..buckets {
+        starts[u64, b] = cursor
+        next[u64, b] = cursor
+        cursor += counts[u64, b]
+    }
+    for n u64 in 0..total { remap[u32, n] = trunc[u32](n) }
+    for n u64 in 0..count {
+        b u64 = hashes[u64, n] % buckets
+        remap[u32, first + n] = trunc[u32](next[u64, b])
+        next[u64, b] += 1
+    }
+    bloom u64 = 1
+    while bloom < umax(1, (count + 7) / 8) { bloom = bloom * 2 }
+    bucket_start u64 = 16 + bloom * 8
+    chain_start u64 = bucket_start + buckets * 4
+    buf_zeros(out, chain_start + count * 4)
+    p addr = out.p
+    wr32(p, 0, buckets)
+    wr32(p, 4, first)
+    wr32(p, 8, bloom)
+    wr32(p, 12, 6)
+    for b u64 in 0..buckets {
+        wr32(p, bucket_start + b * 4, if counts[u64, b] == 0 { 0 } else { starts[u64, b] })
+    }
+    for n u64 in 0..count {
+        h u64 = hashes[u64, n]
+        word u64 = (h / 64) & (bloom - 1)
+        one u64 = 1
+        mask u64 = (one << (h & 63)) | (one << ((h >> 6) & 63))
+        at u64 = 16 + word * 8
+        wr64(p, at, rd64(p, at) | mask)
+        index u64 = zext[u64](remap[u32, first + n])
+        b u64 = h % buckets
+        last u64 = if index + 1 == starts[u64, b] + counts[u64, b] { 1 } else { 0 }
+        wr32(p, chain_start + (index - first) * 4, (h & 0xfffffffe) | last)
+    }
+}
+
+// ---------- Symver.name (Symver.plan is in partial.fas) ----------
+
+// Symver.name: the name before its version
+fn symver_name(name Bytes) Bytes {
+    for j u64 in 0..name.n {
+        if name.p[u8, j] == 64 { return bytes(name.p, j) }
+    }
+    return name
+}
+
+// ---------- Dynamic.prepare ----------
+
+// Dynamic.relative_symbol
+fn relative_symbol(f u64, i u64) bool {
+    if i == 0 { return false }
+    df u64 = 0
+    ds u64 = 0
+    if !definition(f, i, &df, &ds) { return false }
+    if df == predefined_file { return true }
+    d handle[Sym] = sym(obj(df), ds)
+    if d.section == 0 || d.section >= 0xff00 || d.kind == 6 { return false }
+    return (sec(obj(df), zext[u64](d.section)).flags & 2) != 0
+}
+
+// Got.canonical_ifunc
+fn canonical_ifunc(f u64, i u64) bool {
+    df u64 = 0
+    ds u64 = 0
+    if !definition(f, i, &df, &ds) { return false }
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&got_canonical)
+    return map_has(h, pk(df, ds))
+}
+
+fn strong_undefined(name Bytes) bool {
+    id u32 = find(name)
+    return id != NONE && gsym(id).strong != 0
+}
+
+fn dyn_rfail(o handle[Obj], ts handle[Sec], r handle[Rel], y handle[Sym], text addr) void {
+    m handle[Buf] = msg()
+    bb(m, o.path)
+    bs(m, c": ")
+    bb(m, ts.name)
+    bs(m, c"+0x")
+    bx(m, r.offset)
+    bs(m, c" referencing ")
+    bb(m, y.name)
+    bs(m, c": ")
+    bs(m, text)
+    bs(m, c" is unsupported in dynamic output")
+    die()
+}
+
+fn add_fixup(v handle[Vec[Fixup]], tkind u8, target u64, symbol u32, kind u32) void {
+    x handle[Fixup] = vec_new[Fixup](v)
+    x.tkind = tkind
+    x.target = target
+    x.symbol = symbol
+    x.kind = kind
+}
+
+fn dyn_stub(symbol u32, slot u32) void {
+    if slot == NONE { die_c(c"missing GOT slot for dynamic function call") }
+    if dyn_stub_index[u32, zext[u64](slot)] != NONE { return }
+    dyn_stub_index[u32, zext[u64](slot)] = trunc[u32](dyn_stubs.n)
+    vec_push[u64](handle_from_addr[Vec[u64]](&dyn_stubs), (zext[u64](symbol) << 32) | zext[u64](slot))
+}
+
+fn lifecycle_prepare() void {
+    kinds arr[3, u32] = {}
+    kinds[0] = 16
+    kinds[1] = 14
+    kinds[2] = 15
+    for j u64 in 0..3 {
+        mh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&lc_members)
+        before u64 = mh.n
+        for f u64 in 0..nobj {
+            o handle[Obj] = obj(f)
+            for k u64 in 0..zext[u64](o.nsec) {
+                s handle[Sec] = sec(o, k)
+                if s.kind == kinds[j] && s.size != 0 && kept(f, k) { vec_push[u64](mh, pk(f, k)) }
+            }
+        }
+        if mh.n != before {
+            vec_push[u32](handle_from_addr[Vec[u32]](&lc_array_kinds), kinds[j])
+            vec_push[u64](handle_from_addr[Vec[u64]](&lc_array_ends), mh.n)
+        }
+    }
+    for j u64 in 0..2 {
+        name addr = if j == 0 { c"_init" } else { c"_fini" }
+        id u32 = find(bytes_c(name))
+        if id == NONE || gsym(id).has_res == 0 { continue }
+        g handle[GSym] = gsym(id)
+        df u64 = zext[u64](g.res_file)
+        dsym u64 = zext[u64](g.res_sym)
+        y handle[Sym] = sym(obj(df), dsym)
+        bad bool = y.section == 0 || y.section >= 0xff00
+        if !bad {
+            k u64 = zext[u64](y.section)
+            s handle[Sec] = sec(obj(df), k)
+            bad = !kept(df, k) || (s.flags & 6) != 6 || y.value >= s.size
+        }
+        if bad {
+            m handle[Buf] = msg()
+            bs(m, name)
+            bs(m, c" must be inside executable code")
+            die()
+        }
+        vec_push[u64](handle_from_addr[Vec[u64]](&lc_tags), 12 + j)
+        vec_push[u64](handle_from_addr[Vec[u64]](&lc_funcs), pk(df, dsym))
+    }
+}
+
+fn dyn_section(o handle[Obj], data handle[Buf], index u64, name addr, kind u32, flags u64, alignment u64,
+    entsize u64, size u64) void {
+    s handle[Sec] = sec(o, index)
+    s.name = bytes_c(name)
+    s.kind = kind
+    s.flags = flags
+    s.offset = data.n
+    s.size = size
+    s.alignment = alignment
+    s.entsize = entsize
+    s.group = -1
+    buf_zeros(data, size)
+}
+
+fn dyn_prepare() void {
+    c handle[Config] = config()
+    dyn_shared = c.mode == MODE_SHARED
+    static_pie bool = c.mode == MODE_STATIC_PIE
+    dyn_pie = true
+    dyn_static_tls = false
+    if dyn_shared {
+        for slot u64 in 0..got_slots.n {
+            if got_model.p[u8, slot] == GM_THREAD { dyn_static_tls = true }
+        }
+    }
+    lifecycle_prepare()
+    buf_u8(handle_from_addr[Buf](&ds_buf), 0)
+    if c.runpath != 0 {
+        rp Buf = {}
+        rb handle[Buf] = handle_from_addr[Buf](&rp)
+        for j u64 in 0..c.runpaths.n {
+            if j != 0 { buf_u8(rb, 58) }
+            bb(rb, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths), j))
+        }
+        dyn_runpath = dyn_string(buf_bytes(rb))
+        dyn_has_runpath = true
+    }
+    if c.has_soname {
+        dyn_soname = dyn_string(c.soname)
+        dyn_has_soname = true
+        if !dyn_shared { die_c(c"SONAME requires shared output") }
+        if c.soname.n == 0 { die_c(c"empty SONAME") }
+    }
+    relative Vec[Fixup] = {}
+    rv handle[Vec[Fixup]] = handle_from_addr[Vec[Fixup]](&relative)
+    symbolic Vec[Fixup] = {}
+    sy handle[Vec[Fixup]] = handle_from_addr[Vec[Fixup]](&symbolic)
+    dyn_stub_index = heap_alloc(got_slots.n * 4 + 4)
+    for slot u64 in 0..got_slots.n { dyn_stub_index[u32, slot] = NONE }
+    isl handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&dyn_ifunc_slots)
+    for slot u64 in 0..got_slots.n {
+        if got_model.p[u8, slot] != GM_IFUNC { continue }
+        x u64 = got_slots.p[u64, slot]
+        df u64 = 0
+        ds u64 = 0
+        if definition(pk_file(x), pk_sec(x), &df, &ds) { map_put(isl, pk(df, ds), trunc[u32](slot)) }
+    }
+    eh_frame addr = c".eh_frame"
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            t u64 = zext[u64](r.target)
+            if r.kind == 0 || r.kind == 35 || !kept(f, t) { continue }
+            ts handle[Sec] = sec(o, t)
+            if (ts.flags & 2) == 0 { continue }
+            si u64 = zext[u64](r.symbol)
+            y handle[Sym] = sym(o, si)
+            slot u32 = lx(f).gotref[u32, k]
+            if is_ifunc(f, si) && !bytes_is(ts.name, eh_frame) {
+                if r.kind == 4 || r.kind == 2 {
+                    dyn_stub(0, slot)
+                } else if r.kind == 1 {
+                    if (ts.flags & 1) == 0 { dyn_rfail(o, ts, r, y, c"IFUNC relocation in read-only memory") }
+                    canonical bool = canonical_ifunc(f, si)
+                    if r.addend != 0 && !canonical { dyn_rfail(o, ts, r, y, c"nonzero addend on local IFUNC address") }
+                    if !canonical {
+                        add_fixup(sy, FX_INPUT, pk(f, k), 0, 37)
+                    } else if dyn_pie {
+                        add_fixup(rv, FX_INPUT, pk(f, k), 0, 8)
+                    }
+                } else if !got_relocation(r.kind) {
+                    dyn_rfail(o, ts, r, y, c"direct local IFUNC reference")
+                }
+                continue
+            }
+            if y.section == 0 && y.binding != 0 && strong_undefined(y.name) && !name_defined(y.name) {
+                m handle[Buf] = msg()
+                bb(m, o.path)
+                bs(m, c": undefined symbol ")
+                bb(m, y.name)
+                die()
+            }
+            rs bool = relative_symbol(f, si)
+            if dyn_pie && rs && r.kind == 1 {
+                if (ts.flags & 1) == 0 { dyn_rfail(o, ts, r, y, c"absolute relocation in read-only memory") }
+                add_fixup(rv, FX_INPUT, pk(f, k), 0, 8)
+            } else if dyn_pie && rs && (r.kind == 10 || r.kind == 11) {
+                dyn_rfail(o, ts, r, y, c"narrow absolute address relocation (compile position-independent code)")
+            } else if dyn_pie && !rs && (r.kind == 2 || r.kind == 4 || r.kind == 24) {
+                weak_call bool = static_pie && r.kind == 4 && (ts.flags & 4) != 0 && y.section == 0 &&
+                    y.binding == 2 && !name_defined(y.name) && !strong_undefined(y.name)
+                if !weak_call { dyn_rfail(o, ts, r, y, c"PC-relative reference to an absolute or undefined address") }
+            }
+        }
+    }
+    for slot u64 in 0..got_slots.n {
+        x u64 = got_slots.p[u64, slot]
+        f u64 = pk_file(x)
+        si u64 = pk_sec(x)
+        model u8 = got_model.p[u8, slot]
+        if model == GM_DESCRIPTOR_ARGUMENT { continue }
+        ifn bool = is_ifunc(f, si)
+        if model == GM_ADDRESS && dyn_pie && relative_symbol(f, si) && (!ifn || canonical_ifunc(f, si)) {
+            add_fixup(rv, FX_GOT, slot, 0, 8)
+        } else if dyn_shared && (model == GM_MODULE_ID || model == GM_LOCAL_MODULE) {
+            add_fixup(sy, FX_GOT, slot, 0, 16)
+        } else if dyn_shared && model == GM_THREAD {
+            add_fixup(sy, FX_GOT, slot, 0, 18)
+        } else if model == GM_DESCRIPTOR {
+            die_c(c"TLS descriptors require dynamic output")
+        } else if (model == GM_IFUNC || (model == GM_ADDRESS && !canonical_ifunc(f, si))) && ifn {
+            add_fixup(sy, FX_GOT, slot, 0, 37)
+        }
+    }
+    dyn_relative_count = rv.n
+    fx handle[Vec[Fixup]] = handle_from_addr[Vec[Fixup]](&dyn_fixups)
+    for j u64 in 0..rv.n { mem_copy(vec_push_zeroed[Fixup](fx), vec_at[Fixup](rv, j), sizeof[Fixup]) }
+    for j u64 in 0..sy.n { mem_copy(vec_push_zeroed[Fixup](fx), vec_at[Fixup](sy, j), sizeof[Fixup]) }
+    vec_free[Fixup](rv)
+    vec_free[Fixup](sy)
+
+    // exports
+    symver_plan()
+    dnames Vec[Bytes] = {}
+    nh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&dnames)
+    vec_push[Bytes](nh, bytes(null, 0))
+    ex handle[Vec[Export]] = handle_from_addr[Vec[Export]](&dyn_exports)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for i u64 in 1..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if y.binding == 0 { continue }
+            id u32 = gid_of(f, i)
+            if id == NONE { continue }
+            g handle[GSym] = gsym(id)
+            if g.has_res == 0 || zext[u64](g.res_file) != f || zext[u64](g.res_sym) != i { continue }
+            if sv_alias[u32, zext[u64](id)] != NONE || (g.res_vis != 0 && g.res_vis != 3) { continue }
+            if !dyn_shared && !c.export_dynamic { continue }
+            if y.section != 0xfff1 {
+                if y.section == 0 || y.section >= 0xff00 { continue }
+                k u64 = zext[u64](y.section)
+                if !kept(f, k) || (sec(o, k).flags & 2) == 0 { continue }
+            }
+            dynamic_name Bytes = symver_name(y.name)
+            // the record's fields evaluate right to left: the index, then the
+            // version (a versioned name needs a version node), then the name
+            index u64 = nh.n
+            if dynamic_name.n != y.name.n {
+                at u64 = dynamic_name.n + 1
+                if at < y.name.n && y.name.p[u8, at] == 64 { at += 1 }
+                m handle[Buf] = msg()
+                bs(m, c"symbol ")
+                bb(m, y.name)
+                bs(m, c" references missing version node ")
+                bb(m, bytes(y.name.p + at, y.name.n - at))
+                die()
+            }
+            e handle[Export] = vec_new[Export](ex)
+            e.source = trunc[u32](f)
+            e.symbol = trunc[u32](i)
+            e.index = trunc[u32](index)
+            e.name = dyn_string(dynamic_name)
+            e.image_relative = if f == predefined_file { 1 } else { 0 }
+            e.visibility = g.res_vis
+            vec_push[Bytes](nh, dynamic_name)
+        }
+    }
+    symbol_count u64 = nh.n
+    dyn_symbol_count = symbol_count
+    if symbol_count > 1000000 { die_c(c"too many dynamic symbols") }
+    remap addr = heap_alloc(symbol_count * 4 + 4)
+    gnu Buf = {}
+    gb handle[Buf] = handle_from_addr[Buf](&gnu)
+    if c.hash_style == HASH_SYSV {
+        for n u64 in 0..symbol_count { remap[u32, n] = trunc[u32](n) }
+    } else {
+        gnu_hash_build(1, nh.p, symbol_count, remap, gb)
+    }
+    ordered addr = heap_alloc_zeroed(symbol_count * sizeof[Bytes] + 8)
+    for n u64 in 0..symbol_count { ordered[Bytes, zext[u64](remap[u32, n])] = nh.p[Bytes, n] }
+    dyn_ifunc_symbols = heap_alloc_zeroed(symbol_count + 1)
+    for j u64 in 0..ex.n {
+        e handle[Export] = vec_ref[Export](ex, j)
+        e.index = remap[u32, zext[u64](e.index)]
+        if sym(obj(zext[u64](e.source)), zext[u64](e.symbol)).kind == 10 { dyn_ifunc_symbols[u8, zext[u64](e.index)] = 1 }
+    }
+    for j u64 in 0..fx.n {
+        x handle[Fixup] = vec_ref[Fixup](fx, j)
+        x.symbol = remap[u32, zext[u64](x.symbol)]
+    }
+    for j u64 in 0..dyn_stubs.n {
+        s u64 = dyn_stubs.p[u64, j]
+        dyn_stubs.p[u64, j] = (zext[u64](remap[u32, s >> 32]) << 32) | (s & 0xffffffff)
+    }
+
+    // the metadata object
+    file u64 = nobj
+    o handle[Obj] = new_object(c"<dynamic metadata>")
+    o.nsec = 12
+    o.secs = heap_alloc_zeroed(12 * sizeof[Sec])
+    data Buf = {}
+    d handle[Buf] = handle_from_addr[Buf](&data)
+    s0 handle[Sec] = sec(o, 0)
+    s0.alignment = 1
+    s0.group = -1
+    dyn_section(o, d, DYN_INTERP, c".interp", 1, 2, 1, 0, 0)
+    ds handle[Sec] = sec(o, DYN_DYNSTR)
+    dyn_section(o, d, DYN_DYNSTR, c".dynstr", 3, 2, 1, 0, 0)
+    buf_append(d, buf_bytes(handle_from_addr[Buf](&ds_buf)))
+    ds.size = ds_buf.n
+    dyn_section(o, d, DYN_DYNSYM, c".dynsym", 11, 2, 8, 24, symbol_count * 24)
+    if c.hash_style == HASH_GNU {
+        dyn_section(o, d, DYN_HASH, c".hash", 5, 2, 4, 4, 0)
+    } else {
+        buckets u64 = umax(1, (symbol_count - 1) / 4)
+        at u64 = d.n
+        dyn_section(o, d, DYN_HASH, c".hash", 5, 2, 4, 4, 8 + (buckets + symbol_count) * 4)
+        wr32(d.p, at, buckets)
+        wr32(d.p, at + 4, symbol_count)
+        for n u64 in 1..symbol_count {
+            h i64 = bitcast[i64](sysv_hash(ordered[Bytes, n]))
+            bucket i64 = h % bitcast[i64](buckets)
+            if bucket < 0 { die_c(c"SysV hash bucket out of range") }
+            b u64 = at + 8 + bitcast[u64](bucket) * 4
+            wr32(d.p, at + 8 + (buckets + n) * 4, zext[u64]((d.p + b)[u32]))
+            wr32(d.p, b, n)
+        }
+    }
+    dyn_section(o, d, DYN_RELA, c".rela.dyn", 4, 2, 8, 24, 24 * fx.n)
+    tag_count u64 = 13 + lc_funcs.n + 2 * lc_array_ends.n
+    if c.hash_style == HASH_BOTH { tag_count += 1 }
+    if dyn_has_runpath { tag_count += 1 }
+    if dyn_has_soname { tag_count += 1 }
+    if dyn_shared { tag_count -= 1 }
+    dyn_section(o, d, DYN_DYNAMIC, c".dynamic", 6, 3, 8, 16, tag_count * 16)
+    dyn_section(o, d, DYN_PLT, c".plt", 1, 6, 16, 16, dyn_stubs.n * 16)
+    vs u64 = d.n
+    dyn_section(o, d, DYN_VERSYM, c".gnu.version", 0x6fffffff, 2, 2, 2, symbol_count * 2)
+    for j u64 in 0..ex.n { wr16(d.p, vs + zext[u64](vec_ref[Export](ex, j).index) * 2, 1) }
+    dyn_section(o, d, DYN_VERNEED, c".gnu.version_r", 0x6ffffffe, 2, 8, 0, 0)
+    dyn_section(o, d, DYN_VERDEF, c".gnu.version_d", 0x6ffffffd, 2, 8, 0, 0)
+    gs handle[Sec] = sec(o, DYN_GNU_HASH)
+    dyn_section(o, d, DYN_GNU_HASH, c".gnu.hash", 0x6ffffff6, 2, 8, 0, 0)
+    buf_append(d, buf_bytes(gb))
+    gs.size = gb.n
+    o.data = d.p
+    o.len = d.n
+    o.nsym = 1
+    o.syms = heap_alloc_zeroed(sizeof[Sym])
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(13)
+    l.gid = heap_alloc_zeroed(4)
+    l.gid[u32, 0] = NONE
+    l.kept = heap_alloc_zeroed(13)
+    for k u64 in 1..12 {
+        keep bool = true
+        if (dyn_shared || static_pie) && k == DYN_INTERP { keep = false }
+        if k == DYN_VERSYM || k == DYN_VERNEED || k == DYN_VERDEF { keep = false }
+        if k == DYN_HASH && c.hash_style == HASH_GNU { keep = false }
+        if k == DYN_GNU_HASH && c.hash_style == HASH_SYSV { keep = false }
+        if keep { l.kept[u8, k] = 1 }
+    }
+    l.alias = heap_alloc_zeroed(12 * 8 + 8)
+    l.gotref = heap_alloc_zeroed(4)
+    dyn_file = file
+    stat_add(ST_DYNAMIC_RELATIVE_RELOCATIONS, dyn_relative_count)
+    stat_add(ST_DYNAMIC_IMPORTS, 0)
+    stat_add(ST_DYNAMIC_EXPORTS, ex.n)
+    stat_add(ST_PLT_ENTRIES, dyn_stubs.n)
+}
+
+// ---------- after layout ----------
+
+fn dyn_place(k u64) handle[Place] { return place(dyn_file, k) }
+
+// Dynamic.metadata: an output section's (link, info), or false
+fn dyn_metadata(output_index u64, link addr, info addr) bool {
+    if dyn_file == NONE64 { return false }
+    which u64 = NONE64
+    for k u64 in 1..12 {
+        p handle[Place] = dyn_place(k)
+        if p.valid != 0 && zext[u64](p.output_index) == output_index {
+            which = k
+            break
+        }
+    }
+    if which == NONE64 { return false }
+    dynstr u64 = zext[u64](dyn_place(DYN_DYNSTR).output_index)
+    if which == DYN_DYNSYM {
+        link[u64] = dynstr
+        info[u64] = 1
+    } else if which == DYN_HASH || which == DYN_GNU_HASH || which == DYN_RELA || which == DYN_VERSYM {
+        link[u64] = zext[u64](dyn_place(DYN_DYNSYM).output_index)
+        info[u64] = 0
+    } else if which == DYN_DYNAMIC || which == DYN_VERNEED || which == DYN_VERDEF {
+        link[u64] = dynstr
+        info[u64] = 0
+    } else {
+        return false
+    }
+    return true
+}
+
+// the PLT stub for a GOT slot (Dynamic.stub), or false
+fn dyn_stub_address(slot u32, out addr) bool {
+    if dyn_file == NONE64 || slot == NONE { return false }
+    index u32 = dyn_stub_index[u32, zext[u64](slot)]
+    if index == NONE { return false }
+    out[u64] = dyn_place(DYN_PLT).address + zext[u64](index) * 16
+    return true
+}
+
+// Dynamic.ifunc_stub
+fn dyn_ifunc_stub(f u64, i u64, out addr) bool {
+    if dyn_file == NONE64 { return false }
+    df u64 = 0
+    ds u64 = 0
+    if !definition(f, i, &df, &ds) { return false }
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&dyn_ifunc_slots)
+    a addr = map_val_addr(h, pk(df, ds))
+    if a == null { return false }
+    return dyn_stub_address(a[u32], out)
+}
+
+// Layout.image_symbol_section
+fn image_symbol_section(value u64) u64 {
+    hv handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
+    first u64 = NONE64
+    containing u64 = NONE64
+    for k u64 in 0..hv.n {
+        s handle[OutSec] = vec_ref[OutSec](hv, k)
+        if (s.flags & 2) == 0 || (s.flags & 0x400) != 0 { continue }
+        if first == NONE64 { first = k + 1 }
+        if value >= s.address && value <= s.address + s.size { containing = k + 1 }
+    }
+    if containing != NONE64 { return containing }
+    if first != NONE64 { return first }
+    die_c(c"image-relative symbol has no allocatable output section")
+    return 0
+}
+
+// a fixup to sort: (rank << 62 | its index in dyn_fixups) and its address
+value struct FxOut { meta u64, address u64 }
+
+fn fx_less(a FxOut, b FxOut) bool {
+    if (a.meta >> 62) != (b.meta >> 62) { return (a.meta >> 62) < (b.meta >> 62) }
+    return a.address < b.address
+}
+
+// a fixup's file offset and address
+fn fx_target(x handle[Fixup], gp u64, ga u64, address addr) u64 {
+    if x.tkind == FX_INPUT {
+        f u64 = pk_file(x.target)
+        r handle[Rel] = rel(obj(f), pk_sec(x.target))
+        p handle[Place] = place(f, zext[u64](r.target))
+        address[u64] = p.address + r.offset
+        return p.offset + r.offset
+    }
+    address[u64] = ga + x.target * 8
+    return gp + x.target * 8
+}
+
+fn dyn_tag(at u64, tag u64, value u64) u64 {
+    wr64(image, at, tag)
+    wr64(image, at + 8, value)
+    return at + 16
+}
+
+// Dynamic.emit, after relocation
+fn dyn_emit() void {
+    if dyn_file == NONE64 { return }
+    c handle[Config] = config()
+    dynsym handle[Place] = dyn_place(DYN_DYNSYM)
+    ex handle[Vec[Export]] = handle_from_addr[Vec[Export]](&dyn_exports)
+    for j u64 in 0..ex.n {
+        e handle[Export] = vec_ref[Export](ex, j)
+        f u64 = zext[u64](e.source)
+        y handle[Sym] = sym(obj(f), zext[u64](e.symbol))
+        section u64 = 0
+        value u64 = 0
+        if e.image_relative != 0 {
+            section = image_symbol_section(y.value)
+            value = y.value
+        } else if y.section == 0xfff1 {
+            section = 0xfff1
+            value = y.value
+        } else {
+            p handle[Place] = place(f, zext[u64](y.section))
+            section = zext[u64](p.output_index)
+            a u64 = p.address
+            if y.kind == 6 { a = a - (lay_base + tls_seg.offset) }
+            value = a + y.value
+        }
+        at u64 = dynsym.offset + zext[u64](e.index) * 24
+        wr32(image, at, zext[u64](e.name))
+        wr8(image, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
+        wr8(image, at + 5, zext[u64](e.visibility))
+        wr16(image, at + 6, section)
+        wr64(image, at + 8, value)
+        wr64(image, at + 16, y.size)
+    }
+    fx handle[Vec[Fixup]] = handle_from_addr[Vec[Fixup]](&dyn_fixups)
+    outs Vec[FxOut] = {}
+    oh handle[Vec[FxOut]] = handle_from_addr[Vec[FxOut]](&outs)
+    gp u64 = 0
+    ga u64 = 0
+    if got_file != NONE64 {
+        g handle[Place] = place(got_file, 1)
+        gp = g.offset
+        ga = g.address
+    }
+    for j u64 in 0..fx.n {
+        x handle[Fixup] = vec_ref[Fixup](fx, j)
+        a u64 = 0
+        fx_target(x, gp, ga, &a)
+        rank u64 = 1
+        if x.kind == 8 {
+            rank = 0
+        } else if x.kind == 37 || dyn_ifunc_symbols[u8, zext[u64](x.symbol)] != 0 {
+            rank = 2
+        }
+        vec_push[FxOut](oh, {(rank << 62) | j, a})
+    }
+    sort_vec[FxOut, fx_less](oh)
+    rela handle[Place] = dyn_place(DYN_RELA)
+    for j u64 in 0..oh.n {
+        t FxOut = vec_get[FxOut](oh, j)
+        x handle[Fixup] = vec_ref[Fixup](fx, t.meta & 0x3fffffffffffffff)
+        address u64 = 0
+        offset u64 = fx_target(x, gp, ga, &address)
+        at u64 = rela.offset + j * 24
+        addend u64 = 0
+        if x.kind == 5 || x.kind == 6 || x.kind == 16 || x.kind == 36 {
+            addend = 0
+        } else if x.tkind == FX_INPUT && x.kind == 1 {
+            addend = rel(obj(pk_file(x.target)), pk_sec(x.target)).addend
+        } else {
+            addend = rd64(image, offset)
+        }
+        wr64(image, at, t.address)
+        wr64(image, at + 8, (zext[u64](x.symbol) << 32) | zext[u64](x.kind))
+        wr64(image, at + 16, addend)
+        if x.kind != 5 { wr64(image, offset, 0) }
+    }
+    plt handle[Place] = dyn_place(DYN_PLT)
+    for j u64 in 0..dyn_stubs.n {
+        slot u64 = dyn_stubs.p[u64, j] & 0xffffffff
+        stub u64 = plt.offset + j * 16
+        address u64 = plt.address + j * 16
+        mem_copy(image + stub, c"\xf3\x0f\x1e\xfa\xff\x25", 6)
+        v u64 = ga + slot * 8 - 4 - (address + 6)
+        sv i64 = bitcast[i64](v)
+        if sv < -2147483648 || sv > 2147483647 {
+            m handle[Buf] = msg()
+            bs(m, c"dynamic PLT: R_X86_64_PC32 overflow: result 0x")
+            bx(m, v)
+            die()
+        }
+        wr32(image, stub + 6, v)
+        mem_copy(image + stub + 10, c"\x66\x0f\x1f\x44", 4)
+        wr16(image, stub + 14, 0)
+    }
+    at u64 = dyn_place(DYN_DYNAMIC).offset
+    for j u64 in 0..lc_funcs.n {
+        x u64 = lc_funcs.p[u64, j]
+        y handle[Sym] = sym(obj(pk_file(x)), pk_sec(x))
+        at = dyn_tag(at, lc_tags.p[u64, j], place(pk_file(x), zext[u64](y.section)).address + y.value)
+    }
+    for j u64 in 0..lc_array_ends.n {
+        first u64 = 0xffffffffffffffff
+        last u64 = 0
+        from u64 = if j == 0 { 0 } else { lc_array_ends.p[u64, j - 1] }
+        for m u64 in from..lc_array_ends.p[u64, j] {
+            x u64 = lc_members.p[u64, m]
+            p handle[Place] = place(pk_file(x), pk_sec(x))
+            first = umin(first, p.address)
+            last = umax(last, p.address + sec(obj(pk_file(x)), pk_sec(x)).size)
+        }
+        kind u32 = lc_array_kinds.p[u32, j]
+        ta u64 = 32
+        ts u64 = 33
+        if kind == 14 {
+            ta = 25
+            ts = 27
+        } else if kind == 15 {
+            ta = 26
+            ts = 28
+        }
+        at = dyn_tag(at, ta, first)
+        at = dyn_tag(at, ts, last - first)
+    }
+    if dyn_has_runpath { at = dyn_tag(at, if c.new_dtags { 29 } else { 15 }, zext[u64](dyn_runpath)) }
+    if dyn_has_soname { at = dyn_tag(at, 14, zext[u64](dyn_soname)) }
+    if !dyn_shared { at = dyn_tag(at, 21, 0) }
+    if c.hash_style != HASH_GNU { at = dyn_tag(at, 4, dyn_place(DYN_HASH).address) }
+    if c.hash_style != HASH_SYSV { at = dyn_tag(at, 0x6ffffef5, dyn_place(DYN_GNU_HASH).address) }
+    at = dyn_tag(at, 5, dyn_place(DYN_DYNSTR).address)
+    at = dyn_tag(at, 6, dynsym.address)
+    at = dyn_tag(at, 10, sec(obj(dyn_file), DYN_DYNSTR).size)
+    at = dyn_tag(at, 11, 24)
+    at = dyn_tag(at, 7, rela.address)
+    at = dyn_tag(at, 8, 24 * oh.n)
+    at = dyn_tag(at, 9, 24)
+    at = dyn_tag(at, 0x6ffffff9, dyn_relative_count)
+    flags1 u64 = 1
+    if dyn_pie && !dyn_shared { flags1 = 0x08000001 }
+    at = dyn_tag(at, 0x6ffffffb, flags1)
+    flags u64 = 8
+    if dyn_static_tls { flags = 24 }
+    at = dyn_tag(at, 30, flags)
+    at = dyn_tag(at, 0, 0)
+    vec_free[FxOut](oh)
+}
