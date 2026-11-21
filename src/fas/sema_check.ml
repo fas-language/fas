@@ -4967,38 +4967,139 @@ and check_fn_argument c parameter types target span =
       (Printf.sprintf "`%s` given for function parameter `%s` is not a function" shown
          parameter)
   in
-  let* address =
-    match target with
-    | Ast.Addr_of (Ast.Ident (name, s), _)
-      when Option.is_none (lookup_local name c) && List.mem_assoc name c.signatures ->
-        (* specialised generics (`less[i32]`) are not top-level bindings *)
-        Ok (Hir.Function_address (name, s))
-    | _ -> check_expr c None target
+  let check_sig actual actual_ret actual_fails variadic =
+    if variadic then
+      error span
+        (Printf.sprintf
+           "variadic C function `%s` cannot be given for function parameter `%s`" shown
+           parameter)
+    else if
+      List.length actual = List.length params
+      && List.for_all2 Hir.ty_equal actual params
+      && Hir.ty_equal actual_ret ret && actual_fails = fails
+    then Ok (Hir.Block ([], span))
+    else
+      error span
+        (Printf.sprintf
+           "`%s` does not match function parameter `%s`: it is `%s`, `%s` needs `%s`"
+           shown parameter
+           (text actual actual_ret actual_fails)
+           parameter (text params ret fails))
   in
-  match address with
-  | Hir.Function_address (name, _) -> (
-      match List.assoc_opt name c.signatures with
-      | None -> not_function ()
-      | Some (sig_ : Sema_context.signature) ->
-          let actual = List.map snd sig_.params in
-          if sig_.variadic then
+  match target with
+  | Ast.Addr_of (Ast.Generic_args (Ast.Ident (name, _), generic_args, application_span), _)
+    when Option.is_none (lookup_local name c) -> (
+      match List.assoc_opt name c.templates with
+      | Some (Ast.Func { generic_params; fails = tpl_fails; variadic; _ } as item)
+        when not (has_type_params generic_params) ->
+          let const_params = const_params generic_params in
+          if List.length generic_args <> List.length const_params then
             error span
-              (Printf.sprintf
-                 "variadic C function `%s` cannot be given for function parameter `%s`"
-                 shown parameter)
-          else if
-            List.length actual = List.length params
-            && List.for_all2 Hir.ty_equal actual params
-            && Hir.ty_equal sig_.ret ret && sig_.fails = fails
-          then Ok (Hir.Block ([], span))
+              (generic_arity_message "generic function" name (List.length const_params)
+                 (List.length generic_args))
           else
-            error span
-              (Printf.sprintf
-                 "`%s` does not match function parameter `%s`: it is `%s`, `%s` needs `%s`"
-                 shown parameter
-                 (text actual sig_.ret sig_.fails)
-                 parameter (text params ret fails)))
-  | _ -> not_function ()
+            let* cargs = Result_list.map (generic_const_argument span) generic_args in
+            let rec eval acc cps actual =
+              match (cps, actual) with
+              | [], [] -> Ok (List.rev acc)
+              | cp :: cs, a :: rest ->
+                  let* ct = source_ty_diag c.named_types (Ast.expr_span a) cp.Ast.ty in
+                  let* vt, v =
+                    const_expr
+                      ~array_lengths:
+                        (static_array_lengths c.top_level_bindings c.globals)
+                      ~structs:c.structs ~named_types:c.named_types
+                      ~generic_structs:c.generic_structs
+                      ~globals:(List.map (fun (name, _, _) -> name) c.globals)
+                      ~arrays:c.arrays c.consts (Some ct) a
+                  in
+                  if equal vt ct then eval ((cp.name, ct, v) :: acc) cs rest
+                  else error (Ast.expr_span a) "const argument type mismatch"
+              | _ -> error span "const argument arity mismatch"
+            in
+            let* values = eval [] const_params cargs in
+            let* staged = staged_specialization_identity c.specializations name values in
+            let* mangled, key =
+              match staged with
+              | None ->
+                  let* declaration_id =
+                    specialization_declaration_id c.top_level_bindings Top_function span
+                      name
+                  in
+                  Ok
+                    ( mangle_specialization name values,
+                      function_specialization_key declaration_id values )
+              | Some (origin_id, origin_name, arguments, _, _) ->
+                  Ok
+                    ( mangle_mixed_specialization origin_name arguments,
+                      (Function_specialization, origin_id, arguments) )
+            in
+            let frame_name, frame_arguments, frame_span =
+              match staged with
+              | None ->
+                  ( name,
+                    List.map
+                      (fun (_, ty, value) -> Diagnostic_const_argument (ty, value))
+                      values,
+                    application_span )
+              | Some (_, origin_name, _, arguments, span) ->
+                  (origin_name, arguments, span)
+            in
+            let frame =
+              {
+                template_name = frame_name;
+                arguments = frame_arguments;
+                application_span = frame_span;
+              }
+            in
+            let spec =
+              {
+                key;
+                name = mangled;
+                depth = c.spec_depth;
+                payload =
+                  Function_payload
+                    { item; substitutions = []; values; staged_args = None };
+                trace = c.spec_trace @ [ frame ];
+                pending_frame = None;
+              }
+            in
+            let* specialization =
+              Sema_specialization.request c.specializations ~limits:c.limits
+                ~depth:c.spec_depth ~span ~description:"const specialization" spec
+            in
+            let tpl_params, tpl_ret =
+              match specialization.payload with
+              | Function_payload
+                  { item = Ast.Func { params; ret; _ }; substitutions = []; _ } ->
+                  (params, ret)
+              | _ -> assert false
+            in
+            let* actual =
+              Result_list.map
+                (fun (p : Ast.param) ->
+                  source_ty_with_values c.named_types values p.span p.ty)
+                tpl_params
+            in
+            let* actual_ret = source_ty_with_values c.named_types values span tpl_ret in
+            check_sig actual actual_ret tpl_fails variadic
+      | _ -> not_function ())
+  | _ -> (
+      let* address =
+        match target with
+        | Ast.Addr_of (Ast.Ident (name, s), _)
+          when Option.is_none (lookup_local name c) && List.mem_assoc name c.signatures ->
+            (* specialised generics (`less[i32]`) are not top-level bindings *)
+            Ok (Hir.Function_address (name, s))
+        | _ -> check_expr c None target
+      in
+      match address with
+      | Hir.Function_address (name, _) -> (
+          match List.assoc_opt name c.signatures with
+          | None -> not_function ()
+          | Some (sig_ : Sema_context.signature) ->
+              check_sig (List.map snd sig_.params) sig_.ret sig_.fails sig_.variadic)
+      | _ -> not_function ())
 
 and check_indirect_target c fact arguments result_ty span =
   let signature name (sig_ : Sema_context.signature) =

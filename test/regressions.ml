@@ -14444,9 +14444,19 @@ let () =
            (source_lines [ "use \"C\" <sys/types.h> as c" ]));
       (* a file sees only the C its own headers declare: `pthread_create`
          comes from the other file's <pthread.h> *)
+      let split_other_file_root =
+        source_lines
+          [
+            "fn main() i32 {";
+            "    tid c.pthread_t";
+            "    st i32 = c.pthread_create(&tid, null, null, null)";
+            "    return st";
+            "}";
+          ]
+      in
       (match
          split_run ~a_header:"" ~b_header:""
-           (split_with_include "use \"C\" <sys/types.h> as c" split_pthread_create_root)
+           (split_with_include "use \"C\" <sys/types.h> as c" split_other_file_root)
            (source_lines [ "use \"C\" <pthread.h> as c" ])
        with
       | Error diagnostics

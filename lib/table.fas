@@ -176,8 +176,7 @@ fn table_free[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
     t handle[Table[K, V, HASH, EQ]]
 ) void {
     heap_free_aligned(t.slots, alignof[TableSlot[K, V]])
-    empty addr = null
-    t.slots = empty
+    t.slots = null
     t.cap = 0
     t.n = 0
 }

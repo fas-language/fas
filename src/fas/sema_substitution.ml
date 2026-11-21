@@ -2098,7 +2098,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                 | Error _ -> (None, false))
           in
           if
-            placeholder && not (match value with Ast.Array_lit _ -> true | _ -> false)
+            (placeholder && not (match value with Ast.Array_lit _ -> true | _ -> false))
+            || (Option.is_none expected
+               && unresolved_shape_of value = Some Unresolved_null)
           then Ok dependent
           else
             let* () =
