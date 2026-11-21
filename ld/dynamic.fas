@@ -104,8 +104,8 @@ var ds_names Vec[Bytes] = {}
 var ds_offsets Vec[u32] = {}
 var ds_index KeyIndex = {}
 
-fn dyn_string(name Bytes) u32 {
-    if bytes_contains(name, 0) || name.n > 65535 { die_c(c"invalid or oversized dynamic name") }
+fn dyn_string(name Bytes) u32 fails {
+    if bytes_contains(name, 0) || name.n > 65535 { try die_c(c"invalid or oversized dynamic name") }
     kx handle[KeyIndex] = handle_from_addr[KeyIndex](&ds_index)
     dn handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ds_names)
     h u64 = bytes_hash(name)
@@ -235,7 +235,7 @@ fn strong_undefined(name Bytes) bool {
     return id != NONE && gsym(id).strong != 0
 }
 
-fn dyn_rfail(o handle[Obj], ts handle[Sec], r handle[Rel], y handle[Sym], text addr) void {
+fn dyn_rfail(o handle[Obj], ts handle[Sec], r handle[Rel], y handle[Sym], text addr) void fails {
     m handle[Buf] = msg()
     bb(m, o.path)
     bs(m, c": ")
@@ -247,7 +247,7 @@ fn dyn_rfail(o handle[Obj], ts handle[Sec], r handle[Rel], y handle[Sym], text a
     bs(m, c": ")
     bs(m, text)
     bs(m, c" is unsupported in dynamic output")
-    die()
+    try die()
 }
 
 fn add_fixup(v handle[Vec[Fixup]], tkind u8, target u64, symbol u32, kind u32) void {
@@ -258,14 +258,14 @@ fn add_fixup(v handle[Vec[Fixup]], tkind u8, target u64, symbol u32, kind u32) v
     x.kind = kind
 }
 
-fn dyn_stub(symbol u32, slot u32) void {
-    if slot == NONE { die_c(c"missing GOT slot for dynamic function call") }
+fn dyn_stub(symbol u32, slot u32) void fails {
+    if slot == NONE { try die_c(c"missing GOT slot for dynamic function call") }
     if dyn_stub_index[u32, zext[u64](slot)] != NONE { return }
     dyn_stub_index[u32, zext[u64](slot)] = trunc[u32](dyn_stubs.n)
     vec_push[u64](handle_from_addr[Vec[u64]](&dyn_stubs), (zext[u64](symbol) << 32) | zext[u64](slot))
 }
 
-fn lifecycle_prepare() void {
+fn lifecycle_prepare() void fails {
     kinds arr[3, u32] = {}
     kinds[0] = 16
     kinds[1] = 14
@@ -303,7 +303,7 @@ fn lifecycle_prepare() void {
             m handle[Buf] = msg()
             bs(m, name)
             bs(m, c" must be inside executable code")
-            die()
+            try die()
         }
         vec_push[u64](handle_from_addr[Vec[u64]](&lc_tags), 12 + j)
         vec_push[u64](handle_from_addr[Vec[u64]](&lc_funcs), pk(df, dsym))
@@ -312,7 +312,7 @@ fn lifecycle_prepare() void {
 
 // Dynamic.version_id: assigns a required symbol version ID (starting at
 // 2 + definition_count) for `(library, version)` and interns `version`.
-fn dyn_version_id(library u32, version Bytes) u32 {
+fn dyn_version_id(library u32, version Bytes) u32 fails {
     c handle[Config] = config()
     ev handle[Vec[DynVerNeed]] = handle_from_addr[Vec[DynVerNeed]](&dyn_ver_entries)
     kx handle[KeyIndex] = handle_from_addr[KeyIndex](&dyn_ver_index)
@@ -325,8 +325,8 @@ fn dyn_version_id(library u32, version Bytes) u32 {
     }
     def_count u64 = if c.has_version_script && vs_named() { vs_node_count() } else { 0 }
     id u64 = 2 + def_count + ev.n
-    if id >= 0x8000 { die_c(c"too many required symbol versions") }
-    name_off u32 = dyn_string(version)
+    if id >= 0x8000 { try die_c(c"too many required symbol versions") }
+    name_off u32 = try dyn_string(version)
     new_idx u32 = trunc[u32](ev.n)
     e handle[DynVerNeed] = vec_new[DynVerNeed](ev)
     e.library = library
@@ -338,7 +338,7 @@ fn dyn_version_id(library u32, version Bytes) u32 {
 }
 
 // Dynamic.import: the dynsym index of a global id's import, or NONE
-fn dyn_import(id u32, for_copy bool) u32 {
+fn dyn_import(id u32, for_copy bool) u32 fails {
     if id == NONE { return NONE }
     key u32 = symver_key(id)
     if !for_copy && copy_has(key) { return NONE }
@@ -349,28 +349,28 @@ fn dyn_import(id u32, for_copy bool) u32 {
         m handle[Buf] = msg()
         bs(m, c"undefined non-default visibility symbol ")
         bb(m, g.name)
-        die()
+        try die()
     }
     index u32 = dyn_index[u32, zext[u64](key)]
     if index != NONE { return index }
     dyn_import_count += 1
-    if dyn_import_count > 1000000 { die_c(c"too many dynamic imports") }
+    if dyn_import_count > 1000000 { try die_c(c"too many dynamic imports") }
     index = trunc[u32](dyn_import_count)
     ver u32 = 1
     if p.library != NONE && p.version.n != NONE64 {
-        ver = dyn_version_id(p.library, p.version)
+        ver = try dyn_version_id(p.library, p.version)
     }
     x handle[DImp] = vec_new[DImp](handle_from_addr[Vec[DImp]](&dyn_imports))
     x.key = key
     x.version = ver
-    x.name = dyn_string(p.name)
+    x.name = try dyn_string(p.name)
     x.index = index
     dyn_index[u32, zext[u64](key)] = index
     return index
 }
 
 // Dynamic.export_version of a definition (f, i)
-fn dyn_export_version(f u64, i u64, id u32) u64 {
+fn dyn_export_version(f u64, i u64, id u32) u64 fails {
     c handle[Config] = config()
     key Bytes = {}
     at u64 = sv_version(id, &key)
@@ -391,18 +391,18 @@ fn dyn_export_version(f u64, i u64, id u32) u64 {
             bb(m, sym(obj(f), i).name)
             bs(m, c" references missing version node ")
             bb(m, version)
-            die()
+            try die()
         }
         if !symver_default(key, at) { vid = vid | 0x8000 }
         return vid
     }
     if !c.has_version_script { return 1 }
-    return zext[u64](vs_policy(1, sym(obj(f), i).name))
+    return zext[u64](try vs_policy(1, sym(obj(f), i).name))
 }
 
 // Dynamic's definition_data (.gnu.version_d): the base record (the
 // SONAME) and one per named node; its strings are interned in record order
-fn dyn_verdef_build(out handle[Buf]) void {
+fn dyn_verdef_build(out handle[Buf]) void fails {
     c handle[Config] = config()
     if !c.has_version_script || !vs_named() { return }
     count u64 = vs_node_count()
@@ -433,16 +433,16 @@ fn dyn_verdef_build(out handle[Buf]) void {
         wr32(out.p, at + 8, sysv_hash(name))
         wr32(out.p, at + 12, 20)
         wr32(out.p, at + 16, if n == count { 0 } else { size })
-        wr32(out.p, at + 20, zext[u64](dyn_string(name)))
+        wr32(out.p, at + 20, zext[u64](try dyn_string(name)))
         if has_parent {
             wr32(out.p, at + 24, 8)
-            wr32(out.p, at + 28, zext[u64](dyn_string(parent)))
+            wr32(out.p, at + 28, zext[u64](try dyn_string(parent)))
         }
     }
 }
 
 // Dynamic.bound_definition: a descriptor symbol's canonical definition
-fn dyn_bound_definition(f u64, i u64) u64 {
+fn dyn_bound_definition(f u64, i u64) u64 fails {
     y handle[Sym] = sym(obj(f), i)
     if y.binding == 0 { return pk(f, i) }
     id u32 = gid_of(f, i)
@@ -454,7 +454,7 @@ fn dyn_bound_definition(f u64, i u64) u64 {
     bb(m, obj(f).path)
     bs(m, c": undefined TLS symbol ")
     bb(m, y.name)
-    die()
+    try die()
     return 0
 }
 
@@ -472,7 +472,7 @@ fn dyn_section(o handle[Obj], data handle[Buf], index u64, name addr, kind u32, 
     buf_zeros(data, size)
 }
 
-fn dyn_prepare() void {
+fn dyn_prepare() void fails {
     c handle[Config] = config()
     dyn_shared = c.mode == MODE_SHARED
     static_pie bool = c.mode == MODE_STATIC_PIE
@@ -483,15 +483,15 @@ fn dyn_prepare() void {
             if got_model.p[u8, slot] == GM_THREAD { dyn_static_tls = true }
         }
     }
-    lifecycle_prepare()
+    try lifecycle_prepare()
     interp Bytes = if dyn_shared || static_pie { bytes_empty() } else { c.interpreter }
     if (!dyn_shared && !static_pie && interp.n == 0) || interp.n > 4095 || bytes_contains(interp, 0) {
-        die_c(c"dynamic interpreter must be a nonempty path of at most 4095 bytes")
+        try die_c(c"dynamic interpreter must be a nonempty path of at most 4095 bytes")
     }
     buf_u8(handle_from_addr[Buf](&ds_buf), 0)
     nh_need handle[Vec[u32]] = handle_from_addr[Vec[u32]](&dyn_needed)
     for j u64 in 0..shlibs.n {
-        vec_push[u32](nh_need, dyn_string(shlib(j).needed))
+        vec_push[u32](nh_need, try dyn_string(shlib(j).needed))
     }
     if c.runpath != 0 {
         rp Buf = {}
@@ -500,18 +500,18 @@ fn dyn_prepare() void {
             if j != 0 { buf_u8(rb, 58) }
             bb(rb, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths), j))
         }
-        dyn_runpath = dyn_string(buf_bytes(rb))
+        dyn_runpath = try dyn_string(buf_bytes(rb))
         dyn_has_runpath = true
     }
     if c.has_soname {
-        dyn_soname = dyn_string(c.soname)
+        dyn_soname = try dyn_string(c.soname)
         dyn_has_soname = true
-        if !dyn_shared { die_c(c"SONAME requires shared output") }
-        if c.soname.n == 0 { die_c(c"empty SONAME") }
+        if !dyn_shared { try die_c(c"SONAME requires shared output") }
+        if c.soname.n == 0 { try die_c(c"empty SONAME") }
     }
     verdef Buf = {}
     vd handle[Buf] = handle_from_addr[Buf](&verdef)
-    dyn_verdef_build(vd)
+    try dyn_verdef_build(vd)
     // local descriptors still need a TLS dynsym (symbol 0 is an undefined
     // weak descriptor to the loader): their canonical definitions come
     // before every global symbol
@@ -522,7 +522,7 @@ fn dyn_prepare() void {
         x u64 = got_slots.p[u64, slot]
         y handle[Sym] = sym(obj(pk_file(x)), pk_sec(x))
         if y.binding != 0 && dyn_imported(y.name) { continue }
-        key u64 = dyn_bound_definition(pk_file(x), pk_sec(x))
+        key u64 = try dyn_bound_definition(pk_file(x), pk_sec(x))
         if map_val_addr(bh, key) != null { continue }
         vec_push[u64](bv, key)
         map_put(bh, key, trunc[u32](bv.n))
@@ -538,7 +538,7 @@ fn dyn_prepare() void {
     ce handle[Vec[CopyEntry]] = handle_from_addr[Vec[CopyEntry]](&copy_entries)
     for j u64 in 0..ce.n {
         ent handle[CopyEntry] = vec_ref[CopyEntry](ce, j)
-        sym_idx u32 = dyn_import(ent.key_id, true)
+        sym_idx u32 = try dyn_import(ent.key_id, true)
         add_fixup(sy, FX_COPY, pk(zext[u64](ent.file), zext[u64](ent.symbol)), sym_idx, 5)
     }
     dyn_stub_index = heap_alloc(got_slots.n * 4 + 4)
@@ -573,36 +573,36 @@ fn dyn_prepare() void {
                     imp(id).library == NONE && imp(id).binding == 2 {
                     // an absent weak provider: the address is 0
                 } else {
-                    imported = dyn_import(id, false)
+                    imported = try dyn_import(id, false)
                 }
             }
             if imported != NONE {
                 if r.kind == 4 {
                     pk_kind u8 = imp(symver_key(gid_of(f, si))).kind
-                    if pk_kind != 0 && pk_kind != 2 && pk_kind != 10 { dyn_rfail(o, ts, r, y, c"function call to a data symbol") }
-                    dyn_stub(imported, slot)
+                    if pk_kind != 0 && pk_kind != 2 && pk_kind != 10 { try dyn_rfail(o, ts, r, y, c"function call to a data symbol") }
+                    try dyn_stub(imported, slot)
                 } else if r.kind == 1 {
-                    if (ts.flags & 1) == 0 { dyn_rfail(o, ts, r, y, c"import relocation in read-only memory") }
+                    if (ts.flags & 1) == 0 { try dyn_rfail(o, ts, r, y, c"import relocation in read-only memory") }
                     add_fixup(sy, FX_INPUT, pk(f, k), imported, 1)
                 } else if !got_relocation(r.kind) {
-                    dyn_rfail(o, ts, r, y, c"direct import relocation (compile position-independent code)")
+                    try dyn_rfail(o, ts, r, y, c"direct import relocation (compile position-independent code)")
                 }
                 continue
             }
             if is_ifunc(f, si) && !bytes_is(ts.name, eh_frame) {
                 if r.kind == 4 || r.kind == 2 {
-                    dyn_stub(0, slot)
+                    try dyn_stub(0, slot)
                 } else if r.kind == 1 {
-                    if (ts.flags & 1) == 0 { dyn_rfail(o, ts, r, y, c"IFUNC relocation in read-only memory") }
+                    if (ts.flags & 1) == 0 { try dyn_rfail(o, ts, r, y, c"IFUNC relocation in read-only memory") }
                     canonical bool = canonical_ifunc(f, si)
-                    if r.addend != 0 && !canonical { dyn_rfail(o, ts, r, y, c"nonzero addend on local IFUNC address") }
+                    if r.addend != 0 && !canonical { try dyn_rfail(o, ts, r, y, c"nonzero addend on local IFUNC address") }
                     if !canonical {
                         add_fixup(sy, FX_INPUT, pk(f, k), 0, 37)
                     } else if dyn_pie {
                         add_fixup(rv, FX_INPUT, pk(f, k), 0, 8)
                     }
                 } else if !got_relocation(r.kind) {
-                    dyn_rfail(o, ts, r, y, c"direct local IFUNC reference")
+                    try dyn_rfail(o, ts, r, y, c"direct local IFUNC reference")
                 }
                 continue
             }
@@ -611,18 +611,18 @@ fn dyn_prepare() void {
                 bb(m, o.path)
                 bs(m, c": undefined symbol ")
                 bb(m, y.name)
-                die()
+                try die()
             }
             rs bool = relative_symbol(f, si)
             if dyn_pie && rs && r.kind == 1 {
-                if (ts.flags & 1) == 0 { dyn_rfail(o, ts, r, y, c"absolute relocation in read-only memory") }
+                if (ts.flags & 1) == 0 { try dyn_rfail(o, ts, r, y, c"absolute relocation in read-only memory") }
                 add_fixup(rv, FX_INPUT, pk(f, k), 0, 8)
             } else if dyn_pie && rs && (r.kind == 10 || r.kind == 11) {
-                dyn_rfail(o, ts, r, y, c"narrow absolute address relocation (compile position-independent code)")
+                try dyn_rfail(o, ts, r, y, c"narrow absolute address relocation (compile position-independent code)")
             } else if dyn_pie && !rs && (r.kind == 2 || r.kind == 4 || r.kind == 24) {
                 weak_call bool = static_pie && r.kind == 4 && (ts.flags & 4) != 0 && y.section == 0 &&
                     y.binding == 2 && !name_defined(y.name) && !strong_undefined(y.name)
-                if !weak_call { dyn_rfail(o, ts, r, y, c"PC-relative reference to an absolute or undefined address") }
+                if !weak_call { try dyn_rfail(o, ts, r, y, c"PC-relative reference to an absolute or undefined address") }
             }
         }
     }
@@ -633,7 +633,7 @@ fn dyn_prepare() void {
         model u8 = got_model.p[u8, slot]
         imported u32 = NONE
         if sym(obj(f), si).binding != 0 && model != GM_LOCAL_MODULE && model != GM_LOCAL_OFFSET {
-            imported = dyn_import(gid_of(f, si), false)
+            imported = try dyn_import(gid_of(f, si), false)
         }
         if model == GM_DESCRIPTOR_ARGUMENT { continue }
         if imported != NONE {
@@ -658,7 +658,7 @@ fn dyn_prepare() void {
         } else if dyn_shared && model == GM_THREAD {
             add_fixup(sy, FX_GOT, slot, 0, 18)
         } else if model == GM_DESCRIPTOR {
-            a addr = map_val_addr(bh, dyn_bound_definition(f, si))
+            a addr = map_val_addr(bh, try dyn_bound_definition(f, si))
             add_fixup(sy, FX_GOT, slot, a[u32], 36)
         } else if (model == GM_IFUNC || (model == GM_ADDRESS && !canonical_ifunc(f, si))) && ifn {
             add_fixup(sy, FX_GOT, slot, 0, 37)
@@ -705,17 +705,17 @@ fn dyn_prepare() void {
             if copy_has(id) {
                 p handle[Imp] = imp(id)
                 if p.library != NONE && p.version.n != NONE64 {
-                    version = zext[u64](dyn_version_id(p.library, p.version))
+                    version = zext[u64](try dyn_version_id(p.library, p.version))
                 }
             } else {
-                version = dyn_export_version(f, i, id)
+                version = try dyn_export_version(f, i, id)
             }
             e handle[Export] = vec_new[Export](ex)
             e.source = trunc[u32](f)
             e.symbol = trunc[u32](i)
             e.index = trunc[u32](index)
             e.version = trunc[u16](version)
-            e.name = dyn_string(dynamic_name)
+            e.name = try dyn_string(dynamic_name)
             e.image_relative = if f == predefined_file { 1 } else { 0 }
             e.visibility = g.res_vis
             if fresh {
@@ -727,7 +727,7 @@ fn dyn_prepare() void {
     }
     symbol_count u64 = nh.n
     dyn_symbol_count = symbol_count
-    if symbol_count > 1000000 { die_c(c"too many dynamic symbols") }
+    if symbol_count > 1000000 { try die_c(c"too many dynamic symbols") }
     remap addr = heap_alloc(symbol_count * 4 + 4)
     gnu Buf = {}
     gb handle[Buf] = handle_from_addr[Buf](&gnu)
@@ -808,7 +808,7 @@ fn dyn_prepare() void {
 
     // the metadata object
     file u64 = nobj
-    o handle[Obj] = new_object(c"<dynamic metadata>")
+    o handle[Obj] = try new_object(c"<dynamic metadata>")
     o.nsec = 12
     o.secs = heap_alloc_zeroed(12 * sizeof[Sec])
     data Buf = {}
@@ -847,7 +847,7 @@ fn dyn_prepare() void {
         for n u64 in local_count + 1..symbol_count {
             h i64 = bitcast[i64](sysv_hash(ordered[Bytes, n]))
             bucket i64 = h % bitcast[i64](buckets)
-            if bucket < 0 { die_c(c"SysV hash bucket out of range") }
+            if bucket < 0 { try die_c(c"SysV hash bucket out of range") }
             b u64 = at + 8 + bitcast[u64](bucket) * 4
             wr32(d.p, at + 8 + (buckets + n) * 4, zext[u64]((d.p + b)[u32]))
             wr32(d.p, b, n)
@@ -968,7 +968,7 @@ fn dyn_ifunc_stub(f u64, i u64, out addr) bool {
 }
 
 // Layout.image_symbol_section
-fn image_symbol_section(value u64) u64 {
+fn image_symbol_section(value u64) u64 fails {
     hv handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
     first u64 = NONE64
     containing u64 = NONE64
@@ -980,7 +980,7 @@ fn image_symbol_section(value u64) u64 {
     }
     if containing != NONE64 { return containing }
     if first != NONE64 { return first }
-    die_c(c"image-relative symbol has no allocatable output section")
+    try die_c(c"image-relative symbol has no allocatable output section")
     return 0
 }
 
@@ -1019,7 +1019,7 @@ fn dyn_tag(at u64, tag u64, value u64) u64 {
 }
 
 // Dynamic.emit, after relocation
-fn dyn_emit() void {
+fn dyn_emit() void fails {
     if dyn_file == NONE64 { return }
     c handle[Config] = config()
     dynsym handle[Place] = dyn_place(DYN_DYNSYM)
@@ -1044,7 +1044,7 @@ fn dyn_emit() void {
         section u64 = 0
         value u64 = 0
         if e.image_relative != 0 {
-            section = image_symbol_section(y.value)
+            section = try image_symbol_section(y.value)
             value = y.value
         } else if y.section == 0xfff1 {
             section = 0xfff1
@@ -1119,7 +1119,7 @@ fn dyn_emit() void {
             m handle[Buf] = msg()
             bs(m, c"dynamic PLT: R_X86_64_PC32 overflow: result 0x")
             bx(m, v)
-            die()
+            try die()
         }
         wr32(image, stub + 6, v)
         mem_copy(image + stub + 10, c"\x66\x0f\x1f\x44", 4)

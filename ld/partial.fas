@@ -73,9 +73,9 @@ struct PSec {
 var psecs Vec[PSec] = {}
 
 // `add`: the next output section (index = position + 1)
-fn padd(h handle[Sec], data addr, file u64, src u64) u64 {
+fn padd(h handle[Sec], data addr, file u64, src u64) u64 fails {
     v handle[Vec[PSec]] = handle_from_addr[Vec[PSec]](&psecs)
-    if v.n + 1 >= 0xff00 - 4 { die_c(c"partial link: too many output sections") }
+    if v.n + 1 >= 0xff00 - 4 { try die_c(c"partial link: too many output sections") }
     p handle[PSec] = handle_from_addr[PSec](vec_push_zeroed[PSec](v))
     mem_copy(handle_addr(handle_from_addr[Sec](&p.hdr)), handle_addr(h), sizeof[Sec])
     p.data = data
@@ -89,7 +89,7 @@ fn psec(i u64) handle[PSec] {
 }
 
 // `fresh`: a synthesized section header
-fn pfresh(name addr, kind u32, flags u64, alignment u64, entsize u64, size u64, data addr) u64 {
+fn pfresh(name addr, kind u32, flags u64, alignment u64, entsize u64, size u64, data addr) u64 fails {
     h Sec = {}
     h.name = bytes_c(name)
     h.kind = kind
@@ -97,16 +97,16 @@ fn pfresh(name addr, kind u32, flags u64, alignment u64, entsize u64, size u64, 
     h.alignment = alignment
     h.entsize = entsize
     h.size = size
-    return padd(handle_from_addr[Sec](&h), data, NONE64, 0)
+    return try padd(handle_from_addr[Sec](&h), data, NONE64, 0)
 }
 
 // ---------- symbols ----------
 
 var psyms Vec[Sym] = {}
 
-fn psym_add(y handle[Sym]) u32 {
+fn psym_add(y handle[Sym]) u32 fails {
     v handle[Vec[Sym]] = handle_from_addr[Vec[Sym]](&psyms)
-    if v.n + 1 >= 1000000 { die_c(c"partial link: too many output symbols") }
+    if v.n + 1 >= 1000000 { try die_c(c"partial link: too many output symbols") }
     a addr = vec_push_zeroed[Sym](v)
     mem_copy(a, handle_addr(y), sizeof[Sym])
     return trunc[u32](v.n)
@@ -129,26 +129,26 @@ fn premap(f u64, y handle[Sym], out handle[Sym]) void {
 }
 
 // Binary.add with the partial string context
-fn pstring(b handle[Buf], name Bytes) u64 {
+fn pstring(b handle[Buf], name Bytes) u64 fails {
     offset u64 = b.n
-    chk_add(c"partial string storage", MAX_FILE_SIZE, offset, name.n + 1)
+    try chk_add(c"partial string storage", MAX_FILE_SIZE, offset, name.n + 1)
     buf_append(b, name)
     buf_u8(b, 0)
     return offset
 }
 
-fn pfail_name(text addr, name Bytes) void {
+fn pfail_name(text addr, name Bytes) void fails {
     m handle[Buf] = msg()
     bs(m, text)
     bb(m, name)
-    die()
+    try die()
 }
 
 // ---------- combine ----------
 
-fn partial_combine() void {
+fn partial_combine() void fails {
     alloc_tables()
-    properties_prepare()
+    try properties_prepare()
     pmaps = heap_alloc_zeroed(nobj * 8 + 8)
     psmaps = heap_alloc_zeroed(nobj * 8 + 8)
     for f u64 in 0..nobj {
@@ -175,7 +175,7 @@ fn partial_combine() void {
                 }
             }
             if !keep { continue }
-            index u64 = padd(s, heap_alloc_zeroed(s.size + 1), f, k)
+            index u64 = try padd(s, heap_alloc_zeroed(s.size + 1), f, k)
             pmap(f)[u32, k] = trunc[u32](index)
             vec_push[u64](gh, index)
         }
@@ -191,7 +191,7 @@ fn partial_combine() void {
             if bytes_is(s.name, c".note.GNU-stack") { continue }
             if f >= ninput_objects && bytes_is(o.path, c"<common>") { continue }
             data addr = if kd == 8 { null } else { o.data + s.offset }
-            pmap(f)[u32, k] = trunc[u32](padd(s, data, f, k))
+            pmap(f)[u32, k] = trunc[u32](try padd(s, data, f, k))
         }
     }
     // relocation sections whose target was kept
@@ -204,7 +204,7 @@ fn partial_combine() void {
             if s.kind != 4 || !kept(f, k) || pmap(f)[u32, zext[u64](s.info)] == 0 { continue }
             d addr = heap_alloc(s.size + 1)
             mem_copy(d, o.data + s.offset, s.size)
-            index u64 = padd(s, d, f, k)
+            index u64 = try padd(s, d, f, k)
             pmap(f)[u32, k] = trunc[u32](index)
             vec_push[u64](rh, index)
         }
@@ -220,7 +220,7 @@ fn partial_combine() void {
             if y.binding != 0 { continue }
             if !(y.section >= 0xff00 || (y.section != 0 && pmap(f)[u32, zext[u64](y.section)] != 0)) { continue }
             premap(f, y, oh)
-            psmap(f)[u32, n] = psym_add(oh)
+            psmap(f)[u32, n] = try psym_add(oh)
         }
     }
     first_global u64 = handle_from_addr[Vec[Sym]](&psyms).n + 1
@@ -266,7 +266,7 @@ fn partial_combine() void {
                 bs(m, c"partial link: definition ")
                 bb(m, g.name)
                 bs(m, c" lost its section")
-                die()
+                try die()
             }
             out.name = g.name
             out.visibility = g.res_vis
@@ -276,7 +276,7 @@ fn partial_combine() void {
             out.value = 0
             out.binding = if g.strong != 0 { 1 } else { 2 }
         }
-        gidx[u32, zext[u64](key)] = psym_add(oh)
+        gidx[u32, zext[u64](key)] = try psym_add(oh)
     }
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
@@ -312,7 +312,7 @@ fn partial_combine() void {
                     bb(m, o.path)
                     bs(m, c": partial relocation references discarded local symbol ")
                     bb(m, sym(o, old).name)
-                    die()
+                    try die()
                 }
                 wr64(p.data, at + 16, 0)
             }
@@ -331,7 +331,7 @@ fn partial_combine() void {
         wr32(p.data, 0, rd32(o.data, original.offset))
         for n u64 in 0..original.size / 4 - 1 {
             mapped u32 = pmap(f)[u32, rd32(o.data, original.offset + 4 + n * 4)]
-            if mapped == 0 { die_c(c"partial link: incomplete group membership") }
+            if mapped == 0 { try die_c(c"partial link: incomplete group membership") }
             wr32(p.data, 4 + n * 4, zext[u64](mapped))
         }
         p.hdr.info = psmap(f)[u32, zext[u64](original.info)]
@@ -393,9 +393,9 @@ fn partial_combine() void {
     heap_free(significant)
     sig_index u64 = 0
     if has_significance {
-        sig_index = pfresh(c".llvm_addrsig", 0x6fff4c03, 0x80000000, 1, 0, sh.n, sh.p)
+        sig_index = try pfresh(c".llvm_addrsig", 0x6fff4c03, 0x80000000, 1, 0, sh.n, sh.p)
     }
-    pfresh(c".note.GNU-stack", 1, 0, 1, 0, 0, null)
+    try pfresh(c".note.GNU-stack", 1, 0, 1, 0, 0, null)
 
     // .symtab and .strtab (names are not shared)
     strings Buf = {}
@@ -405,29 +405,29 @@ fn partial_combine() void {
     for n u64 in 0..count {
         y handle[Sym] = vec_ref[Sym](handle_from_addr[Vec[Sym]](&psyms), n)
         at u64 = (n + 1) * 24
-        wr32(symbol_data, at, pstring(sth, y.name))
+        wr32(symbol_data, at, try pstring(sth, y.name))
         wr8(symbol_data, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
         wr8(symbol_data, at + 5, zext[u64](y.visibility))
         wr16(symbol_data, at + 6, zext[u64](y.section))
         wr64(symbol_data, at + 8, y.value)
         wr64(symbol_data, at + 16, y.size)
     }
-    symtab u64 = pfresh(c".symtab", 2, 0, 8, 24, (count + 1) * 24, symbol_data)
+    symtab u64 = try pfresh(c".symtab", 2, 0, 8, 24, (count + 1) * 24, symbol_data)
     psec(symtab).hdr.info = trunc[u32](first_global)
-    strtab u64 = pfresh(c".strtab", 3, 0, 1, 0, sth.n, sth.p)
+    strtab u64 = try pfresh(c".strtab", 3, 0, 1, 0, sth.n, sth.p)
     psec(symtab).hdr.link = trunc[u32](strtab)
     for j u64 in 0..rh.n { psec(vec_get[u64](rh, j)).hdr.link = trunc[u32](symtab) }
     for j u64 in 0..gh.n { psec(vec_get[u64](gh, j)).hdr.link = trunc[u32](symtab) }
     if sig_index != 0 { psec(sig_index).hdr.link = trunc[u32](symtab) }
 
     // .shstrtab, every name appended in section order
-    shstrtab u64 = pfresh(c".shstrtab", 3, 0, 1, 0, 0, null)
+    shstrtab u64 = try pfresh(c".shstrtab", 3, 0, 1, 0, 0, null)
     total u64 = pv.n
     shs Buf = {}
     shh handle[Buf] = handle_from_addr[Buf](&shs)
     buf_u8(shh, 0)
     names addr = heap_alloc(total * 8 + 8)
-    for i u64 in 1..total + 1 { names[u64, i - 1] = pstring(shh, psec(i).hdr.name) }
+    for i u64 in 1..total + 1 { names[u64, i - 1] = try pstring(shh, psec(i).hdr.name) }
     psec(shstrtab).data = shh.p
     psec(shstrtab).hdr.size = shh.n
 
@@ -435,12 +435,12 @@ fn partial_combine() void {
     cursor u64 = 64
     for i u64 in 1..total + 1 {
         h handle[Sec] = handle_from_addr[Sec](&psec(i).hdr)
-        cursor = chk_align(c"partial output layout", MAX_FILE_SIZE, cursor, umax(1, h.alignment))
+        cursor = try chk_align(c"partial output layout", MAX_FILE_SIZE, cursor, umax(1, h.alignment))
         h.offset = cursor
-        if h.kind != 8 { cursor = chk_add(c"partial output size", MAX_FILE_SIZE, cursor, h.size) }
+        if h.kind != 8 { cursor = try chk_add(c"partial output size", MAX_FILE_SIZE, cursor, h.size) }
     }
-    shoff u64 = chk_align(c"partial output layout", MAX_FILE_SIZE, cursor, 8)
-    size u64 = chk_add(c"partial output size", MAX_FILE_SIZE, shoff, (total + 1) * 64)
+    shoff u64 = try chk_align(c"partial output layout", MAX_FILE_SIZE, cursor, 8)
+    size u64 = try chk_add(c"partial output size", MAX_FILE_SIZE, shoff, (total + 1) * 64)
     output addr = heap_alloc_zeroed(size + 1)
     mem_copy(output, c"\x7fELF\x02\x01\x01", 7)
     wr16(output, 16, 1)
@@ -473,14 +473,14 @@ fn partial_combine() void {
     check.path = bytes_c(c"<partial output>")
     check.data = output
     check.len = size
-    elf_parse(check) catch err { die_buf(handle_from_addr[Buf](&check.msg)) }
+    elf_parse(check) catch err { try die_buf(handle_from_addr[Buf](&check.msg)) }
     stat_add(ST_OUTPUT_BYTES, size)
     image = output
     image_size = size
 }
 
 // Partial_link.link_input_files
-fn partial_link_and_publish() void {
+fn partial_link_and_publish() void fails {
     c handle[Config] = config()
     output Bytes = c.output
     in_mem bool = ld_vfs_in_memory()
@@ -495,28 +495,28 @@ fn partial_link_and_publish() void {
         }
         st Stat = {}
         sth handle[Stat] = handle_from_addr[Stat](&st)
-        exists bool = check_output(output, ph, false, sth)
-        discard = exists && null_output(output, sth)
+        exists bool = try check_output(output, ph, false, sth)
+        discard = exists && try null_output(output, sth)
         vec_free[Bytes](ph)
     }
     // link_inputs' policy (the command line already rejects all of it)
     if c.mode != MODE_STATIC || c.gc_sections || c.has_version_script || c.build_id != 0 {
-        die_c(c"partial link requires relocatable output policy")
+        try die_c(c"partial link requires relocatable output policy")
     }
     partial = true
-    resolve()
-    if ninput_objects == 0 { die_c(c"partial link: no input objects extracted") }
+    try resolve()
+    if ninput_objects == 0 { try die_c(c"partial link: no input objects extracted") }
     et PhaseStart = {}
     phase_begin(PH_EMIT_RELOCATABLE, &et)
     symver_plan()
-    partial_combine()
+    try partial_combine()
     phase_end(PH_EMIT_RELOCATABLE, &et)
     if in_mem {
         ld_capture_output(image, image_size, false, bytes_empty())
         return
     }
     st2 Stat = {}
-    check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
+    try check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
     wt PhaseStart = {}
     phase_begin(PH_WRITE, &wt)
     if discard {
@@ -524,7 +524,7 @@ fn partial_link_and_publish() void {
         return
     }
     file_write_atomic(output.p, bytes(image, image_size), 0o644) catch e {
-        die_io(c"write", output, e)
+        try die_io(c"write", output, e)
     }
     phase_end(PH_WRITE, &wt)
 }

@@ -369,13 +369,13 @@ fn unwind_job(ctx addr, b u64, e u64, worker u32) void {
     }
 }
 
-fn unwind_normalize() void {
+fn unwind_normalize() void fails {
     unorm_count = nobj
     uobjs = heap_alloc_zeroed(nobj * sizeof[UObj] + sizeof[UObj])
     for f u64 in 0..nobj { lx(f).status = 0 }
     pool_for(pool, nobj, 1, &unwind_job, null)
     for f u64 in 0..nobj {
-        if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+        if lx(f).status != 0 { try die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
     if stats_on {
         n u64 = 0
@@ -386,7 +386,7 @@ fn unwind_normalize() void {
 
 // ---------- prepare ----------
 
-fn unwind_active(fr handle[Frame]) bool {
+fn unwind_active(fr handle[Frame]) bool fails {
     f u64 = zext[u64](fr.file)
     if !kept(f, zext[u64](fr.section)) { return false }
     o handle[Obj] = obj(f)
@@ -406,24 +406,24 @@ fn unwind_active(fr handle[Frame]) bool {
         m handle[Buf] = msg()
         bb(m, o.path)
         bs(m, c": .eh_frame: FDE code range exceeds executable section")
-        die()
+        try die()
     }
     return true
 }
 
-fn unwind_prepare() void {
+fn unwind_prepare() void fails {
     fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
     for f u64 in 0..unorm_count {
         v handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uobj(f).frames)
         for i u64 in 0..v.n {
             fr handle[Frame] = vec_ref[Frame](v, i)
-            if unwind_active(fr) { mem_copy(vec_push_zeroed[Frame](fh), handle_addr(fr), sizeof[Frame]) }
+            if try unwind_active(fr) { mem_copy(vec_push_zeroed[Frame](fh), handle_addr(fr), sizeof[Frame]) }
         }
     }
     if fh.n == 0 { return }
     size u64 = 12 + fh.n * 8
     file u64 = nobj
-    o handle[Obj] = new_object(c"<unwind header>")
+    o handle[Obj] = try new_object(c"<unwind header>")
     stat_add(ST_INDEXED_UNWIND_FDES, fh.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
@@ -549,27 +549,27 @@ fn ocaml_heap_sort(p addr, l u64) void {
     }
 }
 
-fn unwind_relative(at u64, value u64, place u64) void {
+fn unwind_relative(at u64, value u64, place u64) void fails {
     x u64 = value - place
     sx i64 = bitcast[i64](x)
     if sx < -2147483648 || sx > 2147483647 {
         m handle[Buf] = msg()
         bs(m, c"unwind header: R_X86_64_PC32 overflow: result 0x")
         bx(m, x)
-        die()
+        try die()
     }
     wr32(image, at, x)
 }
 
-fn unwind_emit() void {
+fn unwind_emit() void fails {
     if unwind_file == NONE64 { return }
-    hp handle[Place] = get_placement(unwind_file, 1)
+    hp handle[Place] = try get_placement(unwind_file, 1)
     fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
     n u64 = fh.n
     ents addr = heap_alloc(n * 16 + 16)
     for i u64 in 0..n {
         fr handle[Frame] = vec_ref[Frame](fh, i)
-        p handle[Place] = get_placement(zext[u64](fr.file), zext[u64](fr.section))
+        p handle[Place] = try get_placement(zext[u64](fr.file), zext[u64](fr.section))
         field u64 = p.offset + fr.initial
         raw u64 = 0
         if fr.encoding == 0x1b {
@@ -592,10 +592,10 @@ fn unwind_emit() void {
             if a < first { first = a }
         }
     }
-    unwind_relative(hp.offset + 4, first, hp.address + 4)
+    try unwind_relative(hp.offset + 4, first, hp.address + 4)
     wr32(image, hp.offset + 8, n)
     for i u64 in 0..n {
-        unwind_relative(hp.offset + 12 + i * 8, ents[u64, i * 2], hp.address)
-        unwind_relative(hp.offset + 16 + i * 8, ents[u64, i * 2 + 1], hp.address)
+        try unwind_relative(hp.offset + 12 + i * 8, ents[u64, i * 2], hp.address)
+        try unwind_relative(hp.offset + 16 + i * 8, ents[u64, i * 2 + 1], hp.address)
     }
 }

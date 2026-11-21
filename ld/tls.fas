@@ -141,7 +141,7 @@ fn tls_validate_job(ctx addr, b u64, e u64, worker u32) void {
 }
 
 // Tls.validate; the first failure in (file, relocation) order
-fn tls_validate() void {
+fn tls_validate() void fails {
     tls_template = false
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
@@ -155,7 +155,7 @@ fn tls_validate() void {
     }
     pool_for(pool, nobj, 1, &tls_validate_job, null)
     for f u64 in 0..nobj {
-        if lx(f).status != 0 { die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+        if lx(f).status != 0 { try die_buf(handle_from_addr[Buf](&obj(f).msg)) }
     }
 }
 

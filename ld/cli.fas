@@ -21,7 +21,7 @@ fn arg_tail(a Bytes, from u64) Bytes { return bytes(a.p + from, a.n - from) }
 // Reads a whole regular file with the OCaml linker's checks and messages.
 // The result is a private read-only mapping (never written, never
 // unmapped: process exit frees it).
-fn ld_read(path Bytes, max_size u64) Bytes {
+fn ld_read(path Bytes, max_size u64) Bytes fails {
     vdata Bytes = {}
     if ld_vfs_get(path, handle_from_addr[Bytes](&vdata)) {
         if vdata.n > max_size {
@@ -30,30 +30,30 @@ fn ld_read(path Bytes, max_size u64) Bytes {
             bs(m, c": input exceeds ")
             bu(m, max_size)
             bs(m, c" byte limit or remaining input budget")
-            die()
+            try die()
         }
         return vdata
     }
     fd i32 = os_open(path.p, O_RDONLY | O_NONBLOCK, 0) catch e {
-        die_io(c"open", path, e)
+        try die_io(c"open", path, e)
         return bytes_empty()
     }
     st Stat = {}
     os_fstat(fd, handle_from_addr[Stat](&st)) catch e {
-        die_io(c"fstat", bytes_empty(), e)
+        try die_io(c"fstat", bytes_empty(), e)
     }
     // OCaml 5's Unix.in_channel_of_descr refuses a directory with EINVAL
     // before File_io's own regular-file check runs
     if (st.mode & S_IFMT) == S_IFDIR {
         m handle[Buf] = msg()
         bs(m, c"in_channel_of_descr: : Invalid argument")
-        die()
+        try die()
     }
     if (st.mode & S_IFMT) != S_IFREG {
         m handle[Buf] = msg()
         bb(m, path)
         bs(m, c": input must be a regular file")
-        die()
+        try die()
     }
     size u64 = bitcast[u64](st.size)
     if size > max_size {
@@ -62,12 +62,12 @@ fn ld_read(path Bytes, max_size u64) Bytes {
         bs(m, c": input exceeds ")
         bu(m, max_size)
         bs(m, c" byte limit or remaining input budget")
-        die()
+        try die()
     }
     data addr = null
     if size != 0 {
         data = os_mmap(null, size, PROT_READ, MAP_PRIVATE, fd, 0) catch e {
-            die_io(c"read", path, e)
+            try die_io(c"read", path, e)
             return bytes_empty()
         }
     }
@@ -77,15 +77,15 @@ fn ld_read(path Bytes, max_size u64) Bytes {
 
 // ---------- response files ----------
 
-fn rsp_fail(path Bytes, text addr) void {
+fn rsp_fail(path Bytes, text addr) void fails {
     m handle[Buf] = msg()
     bb(m, path)
     bs(m, text)
-    die()
+    try die()
 }
 
 // GNU-style quoting without shell substitution or comments
-fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void {
+fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void fails {
     word Buf = {}
     w handle[Buf] = handle_from_addr[Buf](&word)
     active bool = false
@@ -93,11 +93,11 @@ fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void {
     i u64 = 0
     while i < data.n {
         c u8 = data.p[u8, i]
-        if c == 0 { rsp_fail(path, c": NUL in response file") }
+        if c == 0 { try rsp_fail(path, c": NUL in response file") }
         if c == 92 {
             i += 1
-            if i >= data.n { rsp_fail(path, c": trailing backslash in response file") }
-            if data.p[u8, i] == 0 { rsp_fail(path, c": NUL in response file") }
+            if i >= data.n { try rsp_fail(path, c": trailing backslash in response file") }
+            if data.p[u8, i] == 0 { try rsp_fail(path, c": NUL in response file") }
             buf_u8(w, data.p[u8, i])
             active = true
         } else if (c == 39 || c == 34) && quote == 0 {
@@ -117,7 +117,7 @@ fn rsp_tokenize(path Bytes, data Bytes, out handle[Vec[Bytes]]) void {
         }
         i += 1
     }
-    if quote != 0 { rsp_fail(path, c": unterminated quote in response file") }
+    if quote != 0 { try rsp_fail(path, c": unterminated quote in response file") }
     if active { vec_push[Bytes](out, nul_dup(w.p, w.n)) }
     buf_free(w)
 }
@@ -128,32 +128,32 @@ struct Rsp {
     stack Vec[Bytes]      // realpaths of the files being expanded
 }
 
-fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void {
+fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void fails {
     if argument.n != 0 && argument.p[u8, 0] == 64 {
         stack handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&r.stack)
-        if stack.n >= 16 { die_c(c"response file nesting exceeds 16") }
+        if stack.n >= 16 { try die_c(c"response file nesting exceeds 16") }
         path Bytes = arg_tail(argument, 1)
         real Buf = {}
         rh handle[Buf] = handle_from_addr[Buf](&real)
-        ld_realpath(path, rh) catch e { die_io(c"realpath", path, e) }
+        ld_realpath(path, rh) catch e { try die_io(c"realpath", path, e) }
         identity Bytes = buf_bytes(rh)
         for k u64 in 0..stack.n {
             if bytes_eq(vec_get[Bytes](stack, k), identity) {
-                rsp_fail(path, c": recursive response file")
+                try rsp_fail(path, c": recursive response file")
             }
         }
-        data Bytes = ld_read(path, 16777216 - r.bytes)
+        data Bytes = try ld_read(path, 16777216 - r.bytes)
         r.bytes += data.n
         words Vec[Bytes] = {}
         wh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&words)
-        rsp_tokenize(path, data, wh)
+        try rsp_tokenize(path, data, wh)
         vec_push[Bytes](stack, identity)
-        for k u64 in 0..words.n { rsp_expand(r, vec_get[Bytes](wh, k), out) }
+        for k u64 in 0..words.n { try rsp_expand(r, vec_get[Bytes](wh, k), out) }
         stack.n -= 1
         vec_free[Bytes](wh)
     } else {
         r.count += 1
-        if r.count > 100000 { die_c(c"expanded argument count exceeds 100000") }
+        if r.count > 100000 { try die_c(c"expanded argument count exceeds 100000") }
         vec_push[Bytes](out, argument)
     }
 }
@@ -295,13 +295,13 @@ fn print_stdout(s addr) void {
 fn print_version() void { print_stdout(c"fas-ld 0.7-dev (ELF64 x86-64 Linux compatibility work)\n") }
 
 // the next argument as the value of `flag`
-fn take_value(p handle[Parser], flag Bytes) Bytes {
+fn take_value(p handle[Parser], flag Bytes) Bytes fails {
     args handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&p.args)
     if p.at >= args.n {
         m handle[Buf] = msg()
         bb(m, flag)
         bs(m, c" requires an argument")
-        die()
+        try die()
     }
     v Bytes = vec_get[Bytes](args, p.at)
     p.at += 1
@@ -320,16 +320,16 @@ fn add_item(p handle[Parser], kind u8, text Bytes) void {
 
 fn is(a Bytes, s addr) bool { return bytes_eq_c(a, s) }
 
-fn fail_with(prefix addr, x Bytes) void {
+fn fail_with(prefix addr, x Bytes) void fails {
     m handle[Buf] = msg()
     bs(m, prefix)
     bb(m, x)
-    die()
+    try die()
 }
 
 // Parses one level of options until the end of the arguments (depth 0) or
 // its --end-group. Returns the number of items at this level.
-fn parse_level(p handle[Parser], depth u64) u64 {
+fn parse_level(p handle[Parser], depth u64) u64 fails {
     c handle[Config] = config()
     args handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&p.args)
     items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
@@ -345,10 +345,10 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         }
         if is(a, c"--help") || is(a, c"-h") {
             print_stdout(usage_text())
-            ld_exit(0)
+            fail LinkDone
         } else if is(a, c"--version") {
             print_version()
-            ld_exit(0)
+            fail LinkDone
         } else if is(a, c"-v") {
             c.print_version = true
         } else if is(a, c"--") {
@@ -359,7 +359,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             p.as_needed = is(a, c"--as-needed")
         } else if is(a, c"--push-state") {
             states handle[Vec[u8]] = handle_from_addr[Vec[u8]](&p.states)
-            if states.n >= 64 { die_c(c"option state nesting exceeds 64") }
+            if states.n >= 64 { try die_c(c"option state nesting exceeds 64") }
             bits u8 = 0
             if p.whole { bits = bits | 1 }
             if p.as_needed { bits = bits | 2 }
@@ -367,7 +367,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             vec_push[u8](states, bits)
         } else if is(a, c"--pop-state") {
             states handle[Vec[u8]] = handle_from_addr[Vec[u8]](&p.states)
-            if states.n == 0 { die_c(c"--pop-state without --push-state") }
+            if states.n == 0 { try die_c(c"--pop-state without --push-state") }
             bits u8 = vec_pop[u8](states)
             p.whole = (bits & 1) != 0
             p.as_needed = (bits & 2) != 0
@@ -388,19 +388,19 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             c.has_interpreter = false
             c.no_interpreter = true
         } else if is(a, c"-m") {
-            emulation Bytes = take_value(p, a)
-            if !is(emulation, c"elf_x86_64") { fail_with(c"unsupported emulation ", emulation) }
+            emulation Bytes = try take_value(p, a)
+            if !is(emulation, c"elf_x86_64") { try fail_with(c"unsupported emulation ", emulation) }
         } else if is(a, c"--eh-frame-hdr") {
         } else if is(a, c"-nostdlib") {
             c.nostdlib = true
         } else if is(a, c"--sysroot") {
-            c.sysroot = take_value(p, a)
+            c.sysroot = try take_value(p, a)
             c.has_sysroot = true
         } else if bytes_prefix(a, c"--sysroot=") {
             c.sysroot = arg_tail(a, 10)
             c.has_sysroot = true
         } else if is(a, c"--library-path") {
-            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), take_value(p, a))
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), try take_value(p, a))
         } else if bytes_prefix(a, c"--library-path=") {
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), arg_tail(a, 15))
         } else if is(a, c"--build-id") {
@@ -414,7 +414,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             } else if is(style, c"md5") {
                 c.build_id = BUILD_ID_MD5
             } else {
-                fail_with(c"unsupported build identifier style ", style)
+                try fail_with(c"unsupported build identifier style ", style)
             }
         } else if bytes_prefix(a, c"--hash-style=") {
             style Bytes = arg_tail(a, 13)
@@ -425,16 +425,16 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             } else if is(style, c"both") {
                 c.hash_style = 2
             } else {
-                fail_with(c"unsupported hash style ", style)
+                try fail_with(c"unsupported hash style ", style)
             }
         } else if is(a, c"--end-group") || is(a, c"-)") {
-            if depth == 0 { die_c(c"--end-group without --start-group") }
+            if depth == 0 { try die_c(c"--end-group without --start-group") }
             return level
         } else if is(a, c"--start-group") || is(a, c"-(") {
-            if depth >= 16 { die_c(c"archive group nesting exceeds 16") }
+            if depth >= 16 { try die_c(c"archive group nesting exceeds 16") }
             at u64 = items.n
             add_item(p, IT_GROUP, bytes_empty())
-            inner u64 = parse_level(p, depth + 1)
+            inner u64 = try parse_level(p, depth + 1)
             // running out of arguments inside a group dies with "missing
             // --end-group" in the inner level
             g handle[Item] = vec_at[Item](items, at)
@@ -453,13 +453,13 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         } else if is(a, c"--allow-multiple-definition") {
             c.allow_multiple_definition = true
         } else if is(a, c"--version-script") {
-            c.version_script = take_value(p, a)
+            c.version_script = try take_value(p, a)
             c.has_version_script = true
         } else if bytes_prefix(a, c"--version-script=") {
             c.version_script = arg_tail(a, 17)
             c.has_version_script = true
         } else if is(a, c"-soname") || is(a, c"--soname") {
-            c.soname = take_value(p, a)
+            c.soname = try take_value(p, a)
             c.has_soname = true
         } else if bytes_prefix(a, c"--soname=") {
             c.soname = arg_tail(a, 9)
@@ -467,7 +467,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         } else if is(a, c"-no-pie") {
             c.pie = false
         } else if is(a, c"-z") {
-            policy Bytes = take_value(p, a)
+            policy Bytes = try take_value(p, a)
             if is(policy, c"relro") {
                 c.relro = true
             } else if is(policy, c"norelro") {
@@ -481,18 +481,18 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             } else if is(policy, c"muldefs") {
                 c.allow_multiple_definition = true
             } else if is(policy, c"lazy") {
-                die_c(c"lazy binding is not supported")
+                try die_c(c"lazy binding is not supported")
             } else {
-                fail_with(c"unsupported -z policy ", policy)
+                try fail_with(c"unsupported -z policy ", policy)
             }
         } else if is(a, c"-E") || is(a, c"-export-dynamic") || is(a, c"--export-dynamic") || is(a, c"--no-export-dynamic") {
             c.export_dynamic = !is(a, c"--no-export-dynamic")
         } else if is(a, c"--dynamic-linker") || is(a, c"-dynamic-linker") {
             c.no_interpreter = false
-            c.interpreter = take_value(p, a)
+            c.interpreter = try take_value(p, a)
             c.has_interpreter = true
         } else if is(a, c"-rpath") || is(a, c"--rpath") {
-            v Bytes = take_value(p, a)
+            v Bytes = try take_value(p, a)
             c.runpath += 1
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths), v)
         } else if is(a, c"--enable-new-dtags") || is(a, c"--disable-new-dtags") {
@@ -500,7 +500,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         } else if is(a, c"--allow-shlib-undefined") || is(a, c"--no-allow-shlib-undefined") {
             c.allow_shlib_undefined = is(a, c"--allow-shlib-undefined")
         } else if is(a, c"-rpath-link") || is(a, c"--rpath-link") {
-            v Bytes = take_value(p, a)
+            v Bytes = try take_value(p, a)
             c.rpath_link += 1
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.rpath_links), v)
         } else if bytes_prefix(a, c"--rpath-link=") || bytes_prefix(a, c"-rpath-link=") {
@@ -519,26 +519,26 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         } else if is(a, c"--gc-sections") || is(a, c"--no-gc-sections") {
             c.gc_sections = is(a, c"--gc-sections")
         } else if is(a, c"-u") || is(a, c"--undefined") {
-            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), take_value(p, a))
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), try take_value(p, a))
         } else if bytes_prefix(a, c"--undefined=") {
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), arg_tail(a, 12))
         } else if bytes_prefix(a, c"-u") && a.n > 2 {
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined), arg_tail(a, 2))
         } else if is(a, c"-Map") || is(a, c"--Map") {
-            c.map_file = take_value(p, a)
+            c.map_file = try take_value(p, a)
             c.has_map = true
         } else if bytes_prefix(a, c"-Map=") || bytes_prefix(a, c"--Map=") {
             prefix u64 = if a.p[u8, 1] == 45 { 6 } else { 5 }
             c.map_file = arg_tail(a, prefix)
             c.has_map = true
         } else if is(a, c"-o") || is(a, c"--output") {
-            c.output = take_value(p, a)
+            c.output = try take_value(p, a)
         } else if is(a, c"-e") || is(a, c"--entry") {
-            c.entry = take_value(p, a)
+            c.entry = try take_value(p, a)
         } else if is(a, c"-L") {
-            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), take_value(p, a))
+            vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), try take_value(p, a))
         } else if is(a, c"-l") {
-            add_item(p, IT_LIBRARY, take_value(p, a))
+            add_item(p, IT_LIBRARY, try take_value(p, a))
             level += 1
         } else if bytes_prefix(a, c"-L") {
             vec_push[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths), arg_tail(a, 2))
@@ -546,18 +546,18 @@ fn parse_level(p handle[Parser], depth u64) u64 {
             add_item(p, IT_LIBRARY, arg_tail(a, 2))
             level += 1
         } else if bytes_prefix(a, c"-") {
-            fail_with(c"unsupported option ", a)
+            try fail_with(c"unsupported option ", a)
         } else {
             add_item(p, IT_PATH, a)
             level += 1
         }
     }
-    if depth != 0 { die_c(c"missing --end-group") }
-    if p.states.n != 0 { die_c(c"missing --pop-state") }
+    if depth != 0 { try die_c(c"missing --end-group") }
+    if p.states.n != 0 { try die_c(c"missing --pop-state") }
     return level
 }
 
-fn parse_command_line_argv(argv addr, argc u64) void {
+fn parse_command_line_argv(argv addr, argc u64) void fails {
     c handle[Config] = config()
     c.output = bytes_c(c"a.out")
     c.entry = bytes_c(c"_start")
@@ -571,27 +571,27 @@ fn parse_command_line_argv(argv addr, argc u64) void {
     r Rsp = {}
     rh handle[Rsp] = handle_from_addr[Rsp](&r)
     for i u64 in 0..raw.n {
-        rsp_expand(rh, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&raw), i), handle_from_addr[Vec[Bytes]](&p.args))
+        try rsp_expand(rh, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&raw), i), handle_from_addr[Vec[Bytes]](&p.args))
     }
     vec_free[Bytes](handle_from_addr[Vec[Bytes]](&raw))
     vec_free[Bytes](handle_from_addr[Vec[Bytes]](&r.stack))
-    c.top_items = parse_level(ph, 0)
+    c.top_items = try parse_level(ph, 0)
     vec_free[Bytes](handle_from_addr[Vec[Bytes]](&p.args))
     vec_free[u8](handle_from_addr[Vec[u8]](&p.states))
     if c.print_version && c.items.n == 0 {
         print_version()
-        ld_exit(0)
+        fail LinkDone
     }
     if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
         c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||
         c.has_soname || c.runpath != 0 || c.rpath_link != 0 ||
         !c.allow_shlib_undefined || c.export_dynamic || !is(c.entry, c"_start")) {
-        die_c(c"-r cannot be combined with final-image, GC, map or version options")
+        try die_c(c"-r cannot be combined with final-image, GC, map or version options")
     }
-    if c.shared && c.pie { die_c(c"-shared cannot be combined with -pie") }
-    if c.has_soname && !c.shared { die_c(c"-soname requires -shared") }
-    if c.has_version_script && !c.shared { die_c(c"--version-script requires -shared") }
-    if c.has_version_script { vs_parse(c.version_script, input_read(c.version_script, 1024 * 1024)) }
+    if c.shared && c.pie { try die_c(c"-shared cannot be combined with -pie") }
+    if c.has_soname && !c.shared { try die_c(c"-soname requires -shared") }
+    if c.has_version_script && !c.shared { try die_c(c"--version-script requires -shared") }
+    if c.has_version_script { try vs_parse(c.version_script, try input_read(c.version_script, 1024 * 1024)) }
     if c.shared {
         c.mode = MODE_SHARED
     } else if c.pie && c.no_interpreter {
@@ -604,10 +604,10 @@ fn parse_command_line_argv(argv addr, argc u64) void {
     }
 }
 
-fn parse_command_line() void {
+fn parse_command_line() void fails {
     if os_argc > 1 {
-        parse_command_line_argv(os_argv + sizeof[addr], os_argc - 1)
+        try parse_command_line_argv(os_argv + sizeof[addr], os_argc - 1)
     } else {
-        parse_command_line_argv(null, 0)
+        try parse_command_line_argv(null, 0)
     }
 }

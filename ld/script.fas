@@ -11,8 +11,8 @@ var sysroot Bytes = {}
 var has_root bool = false
 
 // Sysroot.validate
-fn root_validate(path Bytes) void {
-    if path.n > 65536 || bytes_contains(path, 0) { input_die_c(c"invalid or oversized sysroot/search path") }
+fn root_validate(path Bytes) void fails {
+    if path.n > 65536 || bytes_contains(path, 0) { try input_die_c(c"invalid or oversized sysroot/search path") }
 }
 
 // the lexical normalization of an absolute path when it does not exist
@@ -41,15 +41,15 @@ fn path_simplify(p Bytes, out handle[Buf]) void {
 }
 
 // Sysroot.normalize of --sysroot
-fn sysroot_normalize(path Bytes) void {
-    root_validate(path)
+fn sysroot_normalize(path Bytes) void fails {
+    try root_validate(path)
     if path.n == 0 { return }
     full Buf = {}
     fh handle[Buf] = handle_from_addr[Buf](&full)
     if path_is_relative(path) {
         cwd arr[4096, u8] = {}
         n usize = os_getcwd(&cwd, 4096) catch e {
-            input_die_io(c"getcwd", bytes_empty(), e)
+            try input_die_io(c"getcwd", bytes_empty(), e)
             return
         }
         // the kernel's length counts the terminating NUL
@@ -65,11 +65,11 @@ fn sysroot_normalize(path Bytes) void {
             buf_clear(oh)
             path_simplify(buf_bytes(fh), oh)
         } else {
-            input_die_io(c"realpath", nul_dup(fh.p, fh.n), e)
+            try input_die_io(c"realpath", nul_dup(fh.p, fh.n), e)
         }
     }
     sysroot = nul_dup(oh.p, oh.n)
-    root_validate(sysroot)
+    try root_validate(sysroot)
     has_root = true
 }
 
@@ -89,8 +89,8 @@ fn root_prefixed(path Bytes, suffix handle[Bytes]) bool {
 }
 
 // Sysroot.target: root ^ path
-fn root_target(path Bytes) Bytes {
-    root_validate(path)
+fn root_target(path Bytes) Bytes fails {
+    try root_validate(path)
     if !has_root { return nul_dup(path.p, path.n) }
     b Buf = {}
     bh handle[Buf] = handle_from_addr[Buf](&b)
@@ -98,13 +98,13 @@ fn root_target(path Bytes) Bytes {
     bb(bh, path)
     r Bytes = nul_dup(bh.p, bh.n)
     buf_free(bh)
-    root_validate(r)
+    try root_validate(r)
     return r
 }
 
 // Sysroot.directory: a -L or SEARCH_DIR path
-fn root_directory(path Bytes) Bytes {
-    root_validate(path)
+fn root_directory(path Bytes) Bytes fails {
+    try root_validate(path)
     suffix Bytes = {}
     if !root_prefixed(path, handle_from_addr[Bytes](&suffix)) { return path }
     if !has_root { return nul_dup(suffix.p, suffix.n) }
@@ -115,7 +115,7 @@ fn root_directory(path Bytes) Bytes {
     path_concat(bh, sysroot, bytes(suffix.p + i, suffix.n - i))
     r Bytes = nul_dup(bh.p, bh.n)
     buf_free(bh)
-    root_validate(r)
+    try root_validate(r)
     return r
 }
 
@@ -128,10 +128,10 @@ fn root_contains(canonical Bytes) bool {
 }
 
 // the Resolver's add_directory
-fn add_directory(path Bytes) void {
+fn add_directory(path Bytes) void fails {
     lh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ldirs)
-    if lh.n >= 4096 { input_die_c(c"library search exceeds 4096 directories") }
-    vec_push[Bytes](lh, root_directory(path))
+    if lh.n >= 4096 { try input_die_c(c"library search exceeds 4096 directories") }
+    vec_push[Bytes](lh, try root_directory(path))
 }
 
 // ---------- the lexer ----------
@@ -153,7 +153,7 @@ struct Lex {
     word Bytes      // its text, NUL-terminated
 }
 
-fn lfail2(l handle[Lex], text addr, extra Bytes) void {
+fn lfail2(l handle[Lex], text addr, extra Bytes) void fails {
     m handle[Buf] = msg()
     bb(m, l.path)
     bs(m, c": linker script byte ")
@@ -161,16 +161,16 @@ fn lfail2(l handle[Lex], text addr, extra Bytes) void {
     bs(m, c": ")
     bs(m, text)
     bb(m, extra)
-    input_die()
+    try input_die()
 }
 
-fn lfail(l handle[Lex], text addr) void { lfail2(l, text, bytes_empty()) }
+fn lfail(l handle[Lex], text addr) void fails { try lfail2(l, text, bytes_empty()) }
 
 fn lstarts(l handle[Lex], a u8, b u8) bool {
     return l.cursor + 2 <= l.n && l.d[u8, l.cursor] == a && l.d[u8, l.cursor + 1] == b
 }
 
-fn lspace(l handle[Lex]) void {
+fn lspace(l handle[Lex]) void fails {
     while l.cursor < l.n {
         c u8 = l.d[u8, l.cursor]
         if c == 32 || c == 10 || c == 13 || c == 9 {
@@ -180,7 +180,7 @@ fn lspace(l handle[Lex]) void {
         } else if c == 47 && lstarts(l, 47, 42) {
             l.cursor += 2
             while l.cursor < l.n && !lstarts(l, 42, 47) { l.cursor += 1 }
-            if l.cursor == l.n { lfail(l, c"unterminated comment") }
+            if l.cursor == l.n { try lfail(l, c"unterminated comment") }
             l.cursor += 2
         } else {
             return
@@ -192,10 +192,10 @@ fn ldelim(c u8) bool {
     return c == 32 || c == 10 || c == 13 || c == 9 || c == 40 || c == 41 || c == 44 || c == 59 || c == 34 || c == 39
 }
 
-fn lnext(l handle[Lex]) void {
-    lspace(l)
+fn lnext(l handle[Lex]) void fails {
+    try lspace(l)
     l.tokens += 1
-    if l.tokens > 100000 { lfail(l, c"token count exceeds 100000") }
+    if l.tokens > 100000 { try lfail(l, c"token count exceeds 100000") }
     l.word = bytes_empty()
     if l.cursor == l.n {
         l.kind = T_END
@@ -217,12 +217,12 @@ fn lnext(l handle[Lex]) void {
         while l.cursor < l.n && l.d[u8, l.cursor] != c {
             if l.d[u8, l.cursor] == 92 {
                 l.cursor += 1
-                if l.cursor == l.n { lfail(l, c"unterminated quoted escape") }
+                if l.cursor == l.n { try lfail(l, c"unterminated quoted escape") }
             }
             buf_u8(th, l.d[u8, l.cursor])
             l.cursor += 1
         }
-        if l.cursor == l.n { lfail(l, c"unterminated quoted filename") }
+        if l.cursor == l.n { try lfail(l, c"unterminated quoted filename") }
         l.cursor += 1
         l.kind = T_WORD
         l.word = nul_dup(th.p, th.n)
@@ -235,9 +235,9 @@ fn lnext(l handle[Lex]) void {
     }
 }
 
-fn lexpect(l handle[Lex], kind u8) void {
-    if l.kind != kind { lfail(l, c"unexpected token") }
-    lnext(l)
+fn lexpect(l handle[Lex], kind u8) void fails {
+    if l.kind != kind { try lfail(l, c"unexpected token") }
+    try lnext(l)
 }
 
 fn lword(l handle[Lex], s addr) bool { return l.kind == T_WORD && bytes_is(l.word, s) }
@@ -264,75 +264,75 @@ fn scmd(out handle[Vec[SCmd]], kind u8, text Bytes) void {
     e.text = text
 }
 
-fn script_items(l handle[Lex], out handle[Vec[SCmd]], depth u64) void {
-    if depth > 16 { lfail(l, c"AS_NEEDED nesting exceeds 16") }
+fn script_items(l handle[Lex], out handle[Vec[SCmd]], depth u64) void fails {
+    if depth > 16 { try lfail(l, c"AS_NEEDED nesting exceeds 16") }
     while true {
         if l.kind == T_RIGHT {
-            lnext(l)
+            try lnext(l)
             scmd(out, SC_END, bytes_empty())
             return
         }
-        if l.kind == T_END { lfail(l, c"missing closing parenthesis") }
+        if l.kind == T_END { try lfail(l, c"missing closing parenthesis") }
         if l.kind == T_COMMA {
-            lnext(l)
+            try lnext(l)
         } else if lword(l, c"AS_NEEDED") {
-            lnext(l)
-            lexpect(l, T_LEFT)
+            try lnext(l)
+            try lexpect(l, T_LEFT)
             scmd(out, SC_AS_NEEDED, bytes_empty())
-            script_items(l, out, depth + 1)
+            try script_items(l, out, depth + 1)
         } else if l.kind == T_WORD {
             name Bytes = l.word
-            if name.n == 0 || name.n > 65535 || bytes_contains(name, 0) { lfail(l, c"invalid or oversized filename") }
-            lnext(l)
+            if name.n == 0 || name.n > 65535 || bytes_contains(name, 0) { try lfail(l, c"invalid or oversized filename") }
+            try lnext(l)
             scmd(out, SC_FILE, name)
         } else {
-            lfail(l, c"expected input filename")
+            try lfail(l, c"expected input filename")
         }
     }
 }
 
 // Linker_script.parse
-fn script_parse(path Bytes, data Bytes, out handle[Vec[SCmd]]) void {
+fn script_parse(path Bytes, data Bytes, out handle[Vec[SCmd]]) void fails {
     if data.n > 4 * 1024 * 1024 {
         m handle[Buf] = msg()
         bb(m, path)
         bs(m, c": script exceeds 4 MiB")
-        input_die()
+        try input_die()
     }
     lex Lex = {}
     l handle[Lex] = handle_from_addr[Lex](&lex)
     l.path = path
     l.d = data.p
     l.n = data.n
-    lnext(l)
+    try lnext(l)
     while l.kind != T_END {
         if l.kind == T_SEMI {
-            lnext(l)
+            try lnext(l)
         } else if lword(l, c"INPUT") || lword(l, c"GROUP") {
             kind u8 = if bytes_is(l.word, c"INPUT") { SC_INPUT } else { SC_GROUP }
-            lnext(l)
-            lexpect(l, T_LEFT)
+            try lnext(l)
+            try lexpect(l, T_LEFT)
             scmd(out, kind, bytes_empty())
-            script_items(l, out, 0)
+            try script_items(l, out, 0)
         } else if lword(l, c"OUTPUT_FORMAT") {
-            lnext(l)
-            lexpect(l, T_LEFT)
-            if !lword(l, c"elf64-x86-64") { lfail(l, c"only OUTPUT_FORMAT(elf64-x86-64) is supported") }
-            lnext(l)
-            lexpect(l, T_RIGHT)
+            try lnext(l)
+            try lexpect(l, T_LEFT)
+            if !lword(l, c"elf64-x86-64") { try lfail(l, c"only OUTPUT_FORMAT(elf64-x86-64) is supported") }
+            try lnext(l)
+            try lexpect(l, T_RIGHT)
         } else if lword(l, c"SEARCH_DIR") {
-            lnext(l)
-            lexpect(l, T_LEFT)
-            if l.kind != T_WORD || l.word.n == 0 || bytes_contains(l.word, 0) { lfail(l, c"expected search directory") }
-            if l.word.n > 65535 { lfail(l, c"oversized search directory") }
+            try lnext(l)
+            try lexpect(l, T_LEFT)
+            if l.kind != T_WORD || l.word.n == 0 || bytes_contains(l.word, 0) { try lfail(l, c"expected search directory") }
+            if l.word.n > 65535 { try lfail(l, c"oversized search directory") }
             dir Bytes = l.word
-            lnext(l)
-            lexpect(l, T_RIGHT)
+            try lnext(l)
+            try lexpect(l, T_RIGHT)
             scmd(out, SC_SEARCH, dir)
         } else if l.kind == T_WORD {
-            lfail2(l, c"unsupported command ", l.word)
+            try lfail2(l, c"unsupported command ", l.word)
         } else {
-            lfail(l, c"expected INPUT, GROUP, OUTPUT_FORMAT or SEARCH_DIR")
+            try lfail(l, c"expected INPUT, GROUP, OUTPUT_FORMAT or SEARCH_DIR")
         }
     }
 }
@@ -340,19 +340,19 @@ fn script_parse(path Bytes, data Bytes, out handle[Vec[SCmd]]) void {
 // ---------- script inputs (Resolver.prepare) ----------
 
 // the file a script names
-fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes {
+fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes fails {
     if bytes_prefix(name, c"-l") {
-        return library_find(bytes(name.p + 2, name.n - 2), library_dynamic(), handle_from_addr[Vec[Bytes]](&ldirs))
+        return try library_find(bytes(name.p + 2, name.n - 2), library_dynamic(), handle_from_addr[Vec[Bytes]](&ldirs))
     }
     cands Vec[Bytes] = {}
     ch handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&cands)
     suffix Bytes = {}
     if root_prefixed(name, handle_from_addr[Bytes](&suffix)) {
-        vec_push[Bytes](ch, root_target(suffix))
+        vec_push[Bytes](ch, try root_target(suffix))
     } else {
-        root_validate(name)
+        try root_validate(name)
         if !path_is_relative(name) {
-            vec_push[Bytes](ch, if root_contains(canonical) { root_target(name) } else { name })
+            vec_push[Bytes](ch, if root_contains(canonical) { try root_target(name) } else { name })
         } else {
             b Buf = {}
             bh handle[Buf] = handle_from_addr[Buf](&b)
@@ -370,7 +370,7 @@ fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes {
     }
     for k u64 in 0..ch.n {
         candidate Bytes = vec_get[Bytes](ch, k)
-        if lib_exists(candidate) {
+        if try lib_exists(candidate) {
             vec_free[Bytes](ch)
             return candidate
         }
@@ -379,36 +379,36 @@ fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes {
     bb(m, path)
     bs(m, c": cannot find script input ")
     bb(m, name)
-    input_die()
+    try input_die()
     return name
 }
 
 // the items of one list, from cmds[i] to its END; the index after it
-fn script_walk(cmds handle[Vec[SCmd]], i u64, path Bytes, canonical Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) u64 {
+fn script_walk(cmds handle[Vec[SCmd]], i u64, path Bytes, canonical Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) u64 fails {
     while true {
         e handle[SCmd] = vec_ref[SCmd](cmds, i)
         if e.kind == SC_END { return i + 1 }
         if e.kind == SC_FILE {
-            read_input(script_locate(path, canonical, e.text), whole, as_needed, depth + 1, scripts)
+            try read_input(try script_locate(path, canonical, e.text), whole, as_needed, depth + 1, scripts)
             i += 1
         } else {
-            i = script_walk(cmds, i + 1, path, canonical, whole, true, depth, scripts)
+            i = try script_walk(cmds, i + 1, path, canonical, whole, true, depth, scripts)
         }
     }
     return i
 }
 
 // a script input: its commands become inputs in place of the script
-fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void {
+fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void fails {
     if depth >= 16 {
         m handle[Buf] = msg()
         bb(m, path)
         bs(m, c": script nesting exceeds 16")
-        input_die()
+        try input_die()
     }
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    ld_realpath(path, rh) catch e { input_die_io(c"realpath", path, e) }
+    ld_realpath(path, rh) catch e { try input_die_io(c"realpath", path, e) }
     canonical Bytes = nul_dup(rh.p, rh.n)
     buf_free(rh)
     for k u64 in 0..scripts.n {
@@ -416,17 +416,17 @@ fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, s
             m handle[Buf] = msg()
             bb(m, path)
             bs(m, c": cyclic linker script")
-            input_die()
+            try input_die()
         }
     }
     stat_add(ST_LINKER_SCRIPTS, 1)
     cmds Vec[SCmd] = {}
     ch handle[Vec[SCmd]] = handle_from_addr[Vec[SCmd]](&cmds)
-    script_parse(path, data, ch)
+    try script_parse(path, data, ch)
     if !config().nostdlib {
         for k u64 in 0..ch.n {
             e handle[SCmd] = vec_ref[SCmd](ch, k)
-            if e.kind == SC_SEARCH { add_directory(e.text) }
+            if e.kind == SC_SEARCH { try add_directory(e.text) }
         }
     }
     vec_push[Bytes](scripts, canonical)
@@ -439,10 +439,10 @@ fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, s
         } else if e.kind == SC_GROUP {
             g u64 = nodes.n
             pnode_add(P_GROUP, 0)
-            i = script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
+            i = try script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
             vec_ref[PNode](nodes, g).count = trunc[u32](nodes.n - g - 1)
         } else {
-            i = script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
+            i = try script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
         }
     }
     vec_pop[Bytes](scripts)

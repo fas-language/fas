@@ -94,9 +94,10 @@ For embedding `fas-ld` in a single-process toolchain (C/Fas compiler + backend
   (and optional `-Map` output in `vfs.map_data/map_size`) without writing disk.
 - **`ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32`**: Runs a complete
   link using `argv[0..argc)` and `vfs`. Diagnostics (`die`/`refuse`) and
-  `--help`/`--version` unwind via freestanding `fas_ld_setjmp`/`fas_ld_longjmp`
-  rather than `os_exit`, returning the exact exit code (`0`, `1`, or `3`) with
-  diagnostic text captured in `vfs.diag`.
+  `--help`/`--version` propagate through Fas `fails` functions. The entry point
+  maps the termination reason to exit code `0`, `1`, or `3`, with diagnostic
+  text captured in `vfs.diag`. Worker jobs still report through per-item
+  state, so the main thread chooses the first diagnostic after the join.
 - **Re-entrancy (`ld_reset`)**: Every module-level `var` across `ld/*.fas`
   is freed and reset before and after each `ld_link` call so repeated links
   in one process produce identical bytes and do not leak per-link tables.

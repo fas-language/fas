@@ -18,16 +18,16 @@ fn is_ifunc(f u64, i u64) bool {
     return sym(obj(zext[u64](g.res_file)), zext[u64](g.res_sym)).kind == 10
 }
 
-fn ifunc_fail(o handle[Obj], name Bytes, text addr) void {
+fn ifunc_fail(o handle[Obj], name Bytes, text addr) void fails {
     m handle[Buf] = msg()
     bb(m, o.path)
     bs(m, c": IFUNC resolver ")
     bb(m, name)
     bs(m, text)
-    die()
+    try die()
 }
 
-fn ifunc_prepare() void {
+fn ifunc_prepare() void fails {
     candidates Vec[u64] = {}
     ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&candidates)
     for f u64 in 0..nobj {
@@ -35,13 +35,13 @@ fn ifunc_prepare() void {
         for i u64 in 0..zext[u64](o.nsym) {
             y handle[Sym] = sym(o, i)
             if y.kind != 10 { continue }
-            if y.section >= 0xff00 { ifunc_fail(o, y.name, c" must be defined in an executable section") }
+            if y.section >= 0xff00 { try ifunc_fail(o, y.name, c" must be defined in an executable section") }
             if y.section == 0 || !kept(f, zext[u64](y.section)) { continue }
             df u64 = 0
             ds u64 = 0
             if !definition(f, i, &df, &ds) || df != f || ds != i { continue }
             s handle[Sec] = sec(o, zext[u64](y.section))
-            if (s.flags & 6) != 6 || y.value >= s.size { ifunc_fail(o, y.name, c" must be in executable code") }
+            if (s.flags & 6) != 6 || y.value >= s.size { try ifunc_fail(o, y.name, c" must be in executable code") }
             vec_push[u64](ch, (f << 32) | i)
         }
     }
@@ -96,9 +96,9 @@ fn ifunc_prepare() void {
         ifunc_refs[addr, f] = refs
     }
     map_free(ih)
-    bytes_n u64 = chk_add(c"static IFUNC tables", MAX_OUTPUT / 48, 0, count) * 48
+    bytes_n u64 = try chk_add(c"static IFUNC tables", MAX_OUTPUT / 48, 0, count) * 48
     file u64 = nobj
-    o handle[Obj] = new_object(c"<static IFUNC>")
+    o handle[Obj] = try new_object(c"<static IFUNC>")
     stat_add(ST_STATIC_IFUNC_RESOLVERS, count)
     o.nsec = 4
     o.secs = heap_alloc_zeroed(4 * sizeof[Sec])
@@ -149,7 +149,7 @@ fn ifunc_boundary(last bool) u64 {
     return place(ifunc_file, 3).address + (if last { ifunc_syms.n * 24 } else { 0 })
 }
 
-fn ifunc_emit() void {
+fn ifunc_emit() void fails {
     if ifunc_file == NONE64 { return }
     plt handle[Place] = place(ifunc_file, 1)
     got handle[Place] = place(ifunc_file, 2)
@@ -164,7 +164,7 @@ fn ifunc_emit() void {
             m handle[Buf] = msg()
             bs(m, c"static IPLT: R_X86_64_PC32 overflow: result 0x")
             bx(m, x)
-            die()
+            try die()
         }
         wr32(image, stub + 6, x)
         // nopw 0(%rax,%rax)
@@ -175,7 +175,7 @@ fn ifunc_emit() void {
         wr64(image, at + 8, 37)
         key u64 = vec_get[u64](handle_from_addr[Vec[u64]](&ifunc_syms), i)
         vv handle[Values] = vals(key >> 32)
-        if vv.has[u8, key & 0xffffffff] == 0 { die_c(c"static IFUNC resolver has no live address") }
+        if vv.has[u8, key & 0xffffffff] == 0 { try die_c(c"static IFUNC resolver has no live address") }
         wr64(image, at + 16, vv.v[u64, key & 0xffffffff])
     }
 }

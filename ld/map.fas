@@ -32,16 +32,16 @@ fn map_quoted(b handle[Buf], s Bytes) void {
 }
 
 // appends one formatted line, failing past 128 MiB like the OCaml buffer
-fn map_line(line handle[Buf]) void {
+fn map_line(line handle[Buf]) void fails {
     m handle[Buf] = handle_from_addr[Buf](&map_text)
-    if m.n + line.n > 128 * 1024 * 1024 { die_c(c"map output exceeds 128 MiB limit") }
+    if m.n + line.n > 128 * 1024 * 1024 { try die_c(c"map output exceeds 128 MiB limit") }
     buf_append(m, buf_bytes(line))
     buf_clear(line)
 }
 
 // the map of the finished layout; `entry` is the entry address and the
 // symbols are the symbol table's, in its order
-fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]]) void {
+fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]]) void fails {
     c handle[Config] = config()
     l Buf = {}
     lh handle[Buf] = handle_from_addr[Buf](&l)
@@ -50,9 +50,9 @@ fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]])
     bs(lh, c" ")
     map_quoted(lh, c.entry)
     bs(lh, c"\n")
-    map_line(lh)
+    try map_line(lh)
     bs(lh, c"# section: address file-offset file-size memory-size alignment flags name input\n")
-    map_line(lh)
+    try map_line(lh)
     ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&content)
     for i u64 in 0..ch.n {
         x u64 = vec_get[u64](ch, i)
@@ -77,10 +77,10 @@ fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]])
         bs(lh, c" ")
         map_quoted(lh, obj(f).path)
         bs(lh, c"\n")
-        map_line(lh)
+        try map_line(lh)
     }
     bs(lh, c"# symbol: address size binding name input\n")
-    map_line(lh)
+    try map_line(lh)
     for j u64 in 0..locals.n + globals.n {
         e handle[SymOut] = if j < locals.n { vec_ref[SymOut](locals, j) } else { vec_ref[SymOut](globals, j - locals.n) }
         f u64 = zext[u64](e.file)
@@ -94,34 +94,34 @@ fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]])
         bs(lh, c" ")
         map_quoted(lh, obj(f).path)
         bs(lh, c"\n")
-        map_line(lh)
+        try map_line(lh)
     }
     buf_free(lh)
 }
 
 // File_io.distinct_outputs: the executable and the map
-fn map_canonical(path Bytes, out handle[Buf]) void {
+fn map_canonical(path Bytes, out handle[Buf]) void fails {
     dir Bytes = path_dirname(path)
     d Bytes = nul_dup(dir.p, dir.n)
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(d.p, rh) catch e { die_io(c"realpath", d, e) }
+    path_realpath(d.p, rh) catch e { try die_io(c"realpath", d, e) }
     path_concat(out, buf_bytes(rh), path_basename(path))
     buf_free(rh)
 }
 
-fn distinct_outputs(first Bytes, second Bytes) void {
+fn distinct_outputs(first Bytes, second Bytes) void fails {
     same bool = false
     a Stat = {}
     b Stat = {}
     ok bool = true
     os_stat(first.p, handle_from_addr[Stat](&a), true) catch e {
-        if e != NotFound { die_io(c"stat", first, e) }
+        if e != NotFound { try die_io(c"stat", first, e) }
         ok = false
     }
     if ok {
         os_stat(second.p, handle_from_addr[Stat](&b), true) catch e {
-            if e != NotFound { die_io(c"stat", second, e) }
+            if e != NotFound { try die_io(c"stat", second, e) }
             ok = false
         }
     }
@@ -129,12 +129,12 @@ fn distinct_outputs(first Bytes, second Bytes) void {
     // OCaml evaluates the operands of `=` right to left
     cs Buf = {}
     csh handle[Buf] = handle_from_addr[Buf](&cs)
-    map_canonical(second, csh)
+    try map_canonical(second, csh)
     cf Buf = {}
     cfh handle[Buf] = handle_from_addr[Buf](&cf)
-    map_canonical(first, cfh)
+    try map_canonical(first, cfh)
     if bytes_eq(buf_bytes(cfh), buf_bytes(csh)) || same {
-        die_c(c"executable and map outputs must be different files")
+        try die_c(c"executable and map outputs must be different files")
     }
     buf_free(csh)
     buf_free(cfh)

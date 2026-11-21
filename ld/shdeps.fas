@@ -12,7 +12,7 @@
 //
 //   fn shdeps_expand(origin Bytes, text Bytes) Bytes
 //   fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]]) void
-//   fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndirect u64) void
+//   fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr, ndirect u64) void
 //   fn shdeps_load(out handle[ShDeps], direct addr, ndirect u64) void
 //   fn shdeps_lib(graph handle[ShDeps], i u64) handle[ShLib]
 //   fn shdeps_find_edge(graph handle[ShDeps], from_path Bytes, dep_name Bytes) handle[ShLib]
@@ -112,10 +112,10 @@ fn shdeps_free(graph handle[ShDeps]) void {
     kx_free(handle_from_addr[KeyIndex](&graph.edge_index))
 }
 
-fn shdeps_getcwd() Bytes {
+fn shdeps_getcwd() Bytes fails {
     cwd arr[4096, u8] = {}
     n usize = os_getcwd(&cwd, 4096) catch e {
-        die_io(c"getcwd", bytes_empty(), e)
+        try die_io(c"getcwd", bytes_empty(), e)
         return bytes_empty()
     }
     if n != 0 && cwd[n - 1] == 0 { n -= 1 }
@@ -133,8 +133,8 @@ fn shdeps_prefix_at(text Bytes, at u64, lit addr, lit_len u64) bool {
 
 // Expands `$ORIGIN` and `${ORIGIN}` tokens in `text`, rejecting any other
 // `$`-token and enforcing the 65536-byte limit. Returns NUL-terminated Bytes.
-fn shdeps_expand(origin Bytes, text Bytes) Bytes {
-    if text.n > 65536 { die_c(c"dependency search path exceeds 65536 bytes") }
+fn shdeps_expand(origin Bytes, text Bytes) Bytes fails {
+    if text.n > 65536 { try die_c(c"dependency search path exceeds 65536 bytes") }
     out Buf = {}
     oh handle[Buf] = handle_from_addr[Buf](&out)
     at u64 = 0
@@ -144,7 +144,7 @@ fn shdeps_expand(origin Bytes, text Bytes) Bytes {
             if shdeps_prefix_at(text, at, c"${ORIGIN}", 9) {
                 if origin.n > 65536 - oh.n {
                     buf_free(oh)
-                    die_c(c"dependency search path exceeds 65536 bytes")
+                    try die_c(c"dependency search path exceeds 65536 bytes")
                 }
                 buf_append(oh, origin)
                 at += 9
@@ -152,7 +152,7 @@ fn shdeps_expand(origin Bytes, text Bytes) Bytes {
                 (at + 7 == text.n || !shdeps_is_ident_char(text.p[u8, at + 7])) {
                 if origin.n > 65536 - oh.n {
                     buf_free(oh)
-                    die_c(c"dependency search path exceeds 65536 bytes")
+                    try die_c(c"dependency search path exceeds 65536 bytes")
                 }
                 buf_append(oh, origin)
                 at += 7
@@ -161,13 +161,13 @@ fn shdeps_expand(origin Bytes, text Bytes) Bytes {
                 m handle[Buf] = msg()
                 bs(m, c"unsupported dependency path token in ")
                 bb(m, text)
-                die()
+                try die()
             }
         } else {
             buf_u8(oh, c)
             if oh.n > 65536 {
                 buf_free(oh)
-                die_c(c"dependency search path exceeds 65536 bytes")
+                try die_c(c"dependency search path exceeds 65536 bytes")
             }
             at += 1
         }
@@ -179,8 +179,8 @@ fn shdeps_expand(origin Bytes, text Bytes) Bytes {
 
 // Splits a colon-separated search path, applies sysroot prefix/target rules,
 // expands `$ORIGIN`, and appends the resulting directories to `out`.
-fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]]) void {
-    if text.n > 65536 { die_c(c"dependency search path exceeds 65536 bytes") }
+fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]]) void fails {
+    if text.n > 65536 { try die_c(c"dependency search path exceeds 65536 bytes") }
     parts Vec[Bytes] = {}
     ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&parts)
     start u64 = 0
@@ -193,33 +193,33 @@ fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]])
     vec_push[Bytes](ph, bytes(text.p + start, text.n - start))
     if ph.n > 4096 {
         vec_free[Bytes](ph)
-        die_c(c"dependency search exceeds 4096 directories")
+        try die_c(c"dependency search exceeds 4096 directories")
     }
     for i u64 in 0..ph.n {
         part Bytes = vec_get[Bytes](ph, i)
         t Bytes = part
         if prefixes {
-            t = root_directory(part)
+            t = try root_directory(part)
         } else if !path_is_relative(part) {
-            t = root_target(part)
+            t = try root_target(part)
         }
         if t.n == 0 {
             vec_push[Bytes](out, bytes_c(c"."))
         } else {
-            vec_push[Bytes](out, shdeps_expand(origin, t))
+            vec_push[Bytes](out, try shdeps_expand(origin, t))
         }
     }
     vec_free[Bytes](ph)
 }
 
-fn shdeps_check_dir_limit(n u64) void {
-    if n > 4096 { die_c(c"dependency search exceeds 4096 directories") }
+fn shdeps_check_dir_limit(n u64) void fails {
+    if n > 4096 { try die_c(c"dependency search exceeds 4096 directories") }
 }
 
-fn shdeps_probe(probes addr, path Bytes) bool {
+fn shdeps_probe(probes addr, path Bytes) bool fails {
     p u64 = probes[u64] + 1
     probes[u64] = p
-    if p > 1000000 { die_c(c"dependency search exceeds 1000000 probes") }
+    if p > 1000000 { try die_c(c"dependency search exceeds 1000000 probes") }
     return ld_exists(path)
 }
 
@@ -233,17 +233,17 @@ fn shdeps_copy_paths(src handle[Vec[Bytes]], dst handle[Vec[Bytes]]) void {
 
 // Default read callback for the linker: reads a dependency file once per
 // canonical path and counts it under the OCaml "dependency_files" stat.
-fn shdeps_read_dep(path Bytes) Bytes {
-    return read_extra_counted(path, ST_DEPENDENCY_FILES)
+fn shdeps_read_dep(path Bytes) Bytes fails {
+    return try read_extra_counted(path, ST_DEPENDENCY_FILES)
 }
 
 // Loads all transitive DT_NEEDED dependencies of `direct` (an array of
 // `ndirect` `handle[ShLib]` stored as `addr`), using `READ` to load newly
 // discovered files. Populates `out` (which should be zero-initialized).
-fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndirect u64) void {
+fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr, ndirect u64) void fails {
     c handle[Config] = config()
     if c.allow_shlib_undefined { return }
-    if c.has_sysroot && !has_root { sysroot_normalize(c.sysroot) }
+    if c.has_sysroot && !has_root { try sysroot_normalize(c.sysroot) }
 
     known Map[Bytes, addr, bytes_hash, bytes_eq] = {}
     kh handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&known)
@@ -273,14 +273,14 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
         pe.lib = direct[addr, i]
     }
 
-    cwd Bytes = shdeps_getcwd()
+    cwd Bytes = try shdeps_getcwd()
     explicit Vec[Bytes] = {}
     eh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&explicit)
     defer { vec_free[Bytes](eh) }
     rlinks handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.rpath_links)
     for i u64 in 0..rlinks.n {
-        shdeps_paths(true, cwd, vec_get[Bytes](rlinks, i), eh)
-        shdeps_check_dir_limit(eh.n)
+        try shdeps_paths(true, cwd, vec_get[Bytes](rlinks, i), eh)
+        try shdeps_check_dir_limit(eh.n)
     }
 
     libs_out handle[Vec[addr]] = handle_from_addr[Vec[addr]](&out.libraries)
@@ -298,11 +298,11 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
 
         if map_has(vh, lib.path) { continue }
         map_put(vh, lib.path, 1)
-        if vh.n > 1024 { die_c(c"transitive shared-library count exceeds 1024") }
+        if vh.n > 1024 { try die_c(c"transitive shared-library count exceeds 1024") }
         vec_push[addr](libs_out, lp)
 
         sym_delta u64 = lib.exports.n + lib.references.n + lib.defined_versions.n + lib.version_requirements.n
-        symbols = chk_add(c"transitive shared symbol count", 4000000, symbols, sym_delta)
+        symbols = try chk_add(c"transitive shared symbol count", 4000000, symbols, sym_delta)
 
         // Absolute path for $ORIGIN
         origin Bytes = bytes_empty()
@@ -322,9 +322,9 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
         new_inh Vec[Bytes] = {}
         nih handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&new_inh)
         if lib.runpath.n == SH_NONE && lib.rpath.n != SH_NONE {
-            shdeps_paths(false, origin, lib.rpath, nih)
+            try shdeps_paths(false, origin, lib.rpath, nih)
             shdeps_copy_paths(cur_inh, nih)
-            shdeps_check_dir_limit(nih.n)
+            try shdeps_check_dir_limit(nih.n)
         } else {
             shdeps_copy_paths(cur_inh, nih)
         }
@@ -334,25 +334,25 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
         sh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&search)
         shdeps_copy_paths(eh, sh)
         if lib.runpath.n != SH_NONE {
-            shdeps_paths(false, origin, lib.runpath, sh)
+            try shdeps_paths(false, origin, lib.runpath, sh)
         } else {
             shdeps_copy_paths(nih, sh)
         }
-        shdeps_check_dir_limit(sh.n)
+        try shdeps_check_dir_limit(sh.n)
 
         deps handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&lib.dependencies)
         for di u64 in 0..deps.n {
             name Bytes = vec_get[Bytes](deps, di)
             edge_count += 1
-            if edge_count > 65536 { die_c(c"transitive dependency count exceeds 65536") }
-            expanded Bytes = if !path_is_relative(name) { root_target(name) } else { shdeps_expand(origin, name) }
+            if edge_count > 65536 { try die_c(c"transitive dependency count exceeds 65536") }
+            expanded Bytes = if !path_is_relative(name) { try root_target(name) } else { try shdeps_expand(origin, name) }
 
             dep_addr addr = map_get(kh, expanded) catch null
             if dep_addr == null {
                 found_path Bytes = bytes(null, SH_NONE)
                 has_slash bool = bytes_contains(expanded, 47)
                 if has_slash {
-                    if shdeps_probe(&probes, expanded) { found_path = expanded }
+                    if try shdeps_probe(&probes, expanded) { found_path = expanded }
                 } else {
                     for si u64 in 0..sh.n {
                         dir Bytes = vec_get[Bytes](sh, si)
@@ -361,7 +361,7 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
                         path_concat(cbh, dir, expanded)
                         cand Bytes = nul_dup(cbh.p, cbh.n)
                         buf_free(cbh)
-                        if shdeps_probe(&probes, cand) {
+                        if try shdeps_probe(&probes, cand) {
                             found_path = cand
                             break
                         }
@@ -373,16 +373,16 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
                     bs(m, c": cannot find DT_NEEDED ")
                     bb(m, name)
                     bs(m, c" (use -rpath-link)")
-                    die()
+                    try die()
                 }
-                data Bytes = READ(found_path)
+                data Bytes = try READ(found_path)
                 pt PhaseStart = {}
                 phase_begin(PH_PARSE_DEPENDENCY, &pt)
                 sp addr = heap_alloc_zeroed(sizeof[ShLib])
                 s handle[ShLib] = handle_from_addr[ShLib](sp)
                 shared_parse(s, found_path, data) catch {
                     phase_end(PH_PARSE_DEPENDENCY, &pt)
-                    die_buf(handle_from_addr[Buf](&s.msg))
+                    try die_buf(handle_from_addr[Buf](&s.msg))
                 }
                 phase_end(PH_PARSE_DEPENDENCY, &pt)
                 vec_push[addr](owned_out, sp)
@@ -415,8 +415,8 @@ fn shdeps_load_with[READ fn(Bytes) Bytes](out handle[ShDeps], direct addr, ndire
     }
 }
 
-fn shdeps_load(out handle[ShDeps], direct addr, ndirect u64) void {
-    shdeps_load_with[shdeps_read_dep](out, direct, ndirect)
+fn shdeps_load(out handle[ShDeps], direct addr, ndirect u64) void fails {
+    try shdeps_load_with[shdeps_read_dep](out, direct, ndirect)
 }
 
 // ---------- validation ----------
@@ -477,7 +477,7 @@ fn shdeps_has_defver(dv handle[Vec[ShDefVer]], kx handle[KeyIndex], path Bytes, 
 // Validates all required versions and strong undefined references across the
 // loaded dependency graph. `DEFINED(name, version)` returns the output-defined
 // symbol's ELF type (`0..255`), or `-1` if not defined by the output.
-fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void {
+fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void fails {
     libs handle[Vec[addr]] = handle_from_addr[Vec[addr]](&graph.libraries)
     if libs.n == 0 { return }
 
@@ -532,7 +532,7 @@ fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void {
                     bb(m, req.version)
                     bs(m, c" not found in ")
                     bb(m, req.provider)
-                    die()
+                    try die()
                 }
             }
         }
@@ -553,7 +553,7 @@ fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void {
                         buf_u8(m, 64)
                         bb(m, rf.version)
                     }
-                    die()
+                    try die()
                 } else if (kind == 6) != (rf.kind == 6) {
                     m handle[Buf] = msg()
                     bb(m, lib.path)
@@ -563,7 +563,7 @@ fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void {
                         buf_u8(m, 64)
                         bb(m, rf.version)
                     }
-                    die()
+                    try die()
                 }
             }
         }

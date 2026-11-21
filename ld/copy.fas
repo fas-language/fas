@@ -27,7 +27,7 @@ fn copy_loc_less(a u64, b u64) bool {
     return la.value < lb.value
 }
 
-fn copy_fail(source handle[ShLib], key Bytes, reason addr) void {
+fn copy_fail(source handle[ShLib], key Bytes, reason addr) void fails {
     m handle[Buf] = msg()
     bb(m, source.path)
     bs(m, c": COPY relocation for ")
@@ -35,7 +35,7 @@ fn copy_fail(source handle[ShLib], key Bytes, reason addr) void {
     bs(m, c": ")
     bs(m, reason)
     bs(m, c"; compile position-independent code")
-    die()
+    try die()
 }
 
 // Computes the overlap bitmap (1 byte per location index in `source.locations`)
@@ -84,7 +84,7 @@ fn copy_compute_overlaps(source handle[ShLib]) addr {
     return flags
 }
 
-fn copy_prepare() void {
+fn copy_prepare() void fails {
     c handle[Config] = config()
     if c.mode != MODE_DYNAMIC { return }
     cn handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](&copy_names)
@@ -130,7 +130,7 @@ fn copy_prepare() void {
 
     file u64 = nobj
     count u64 = rh.n
-    o handle[Obj] = new_object(c"<COPY storage>")
+    o handle[Obj] = try new_object(c"<COPY storage>")
     o.nsec = trunc[u32](count + 1)
     o.secs = heap_alloc_zeroed((count + 1) * sizeof[Sec])
     o.nsym = trunc[u32](count + 1)
@@ -159,17 +159,17 @@ fn copy_prepare() void {
         lib_idx u64 = zext[u64](p.library)
         source handle[ShLib] = shlib(lib_idx)
         loc handle[ShLoc] = sh_find_location(source, p.name, p.version)
-        if loc == null { copy_fail(source, key, c"data has no regular storage") }
-        if loc.visibility != 0 { copy_fail(source, key, c"protected data cannot be copied") }
-        if p.binding == 10 { copy_fail(source, key, c"GNU unique data cannot be copied") }
+        if loc == null { try copy_fail(source, key, c"data has no regular storage") }
+        if loc.visibility != 0 { try copy_fail(source, key, c"protected data cannot be copied") }
+        if p.binding == 10 { try copy_fail(source, key, c"GNU unique data cannot be copied") }
         if (loc.kind != 1 && loc.kind != 8) || (loc.flags & 0x402) != 2 {
-            copy_fail(source, key, c"data requires allocatable non-TLS PROGBITS or NOBITS")
+            try copy_fail(source, key, c"data requires allocatable non-TLS PROGBITS or NOBITS")
         }
         delta i64 = bitcast[i64](loc.value - loc.start)
         ssz i64 = bitcast[i64](p.size)
         len_i64 i64 = bitcast[i64](zext[u64](loc.length))
         if ssz <= 0 || p.size > MAX_SECTION_SIZE || delta < 0 || delta > len_i64 || ssz > len_i64 - delta {
-            copy_fail(source, key, c"zero-sized or out-of-bounds data storage")
+            try copy_fail(source, key, c"zero-sized or out-of-bounds data storage")
         }
         ov addr = ov_cache[addr, lib_idx]
         if ov == null {
@@ -178,20 +178,20 @@ fn copy_prepare() void {
         }
         loc_idx u64 = (addr_bits(handle_addr(loc)) - addr_bits(source.locations.p)) / sizeof[ShLoc]
         if ov[u8, loc_idx] != 0 {
-            copy_fail(source, key, c"overlapping exported data aliases are unsupported")
+            try copy_fail(source, key, c"overlapping exported data aliases are unsupported")
         }
         ident u64 = (lib_idx << 32) | loc_idx
         if map_has(idh, ident) {
-            copy_fail(source, key, c"mixed version spellings of copied data are unsupported")
+            try copy_fail(source, key, c"mixed version spellings of copied data are unsupported")
         }
         map_put(idh, ident, 1)
-        if bitcast[i64](loc.alignment) < 0 { copy_fail(source, key, c"invalid storage alignment") }
+        if bitcast[i64](loc.alignment) < 0 { try copy_fail(source, key, c"invalid storage alignment") }
         align u64 = umax(1, loc.alignment)
         if align > MAX_ALIGNMENT || (align & (align - 1)) != 0 || (loc.start & (align - 1)) != 0 {
-            copy_fail(source, key, c"invalid or unsupported storage alignment")
+            try copy_fail(source, key, c"invalid or unsupported storage alignment")
         }
         while (loc.value & (align - 1)) != 0 { align = align / 2 }
-        allocated = chk_add(c"COPY storage", 268435456, allocated, p.size)
+        allocated = try chk_add(c"COPY storage", 268435456, allocated, p.size)
 
         sec_idx u64 = i + 1
         s handle[Sec] = sec(o, sec_idx)

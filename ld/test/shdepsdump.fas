@@ -82,6 +82,11 @@ fn edge_idx_less(a u64, b u64) bool {
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
+    dump_dependencies() catch e { return ld_exit_code(e) }
+    return 0
+}
+
+fn dump_dependencies() void fails {
     reading = false
     c handle[Config] = config()
     c.allow_shlib_undefined = false
@@ -116,23 +121,23 @@ fn main(argc i32, argv addr) i32 {
         }
     }
 
-    if c.has_sysroot { sysroot_normalize(c.sysroot) }
+    if c.has_sysroot { try sysroot_normalize(c.sysroot) }
 
     direct_libs Vec[addr] = {}
     dlh handle[Vec[addr]] = handle_from_addr[Vec[addr]](&direct_libs)
     for k u64 in 0..dph.n {
         p Bytes = vec_get[Bytes](dph, k)
-        data Bytes = ld_read(p, MAX_FILE_SIZE)
+        data Bytes = try ld_read(p, MAX_FILE_SIZE)
         lp addr = heap_alloc_zeroed(sizeof[ShLib])
         lib handle[ShLib] = handle_from_addr[ShLib](lp)
-        shared_parse(lib, p, data) catch { die_buf(handle_from_addr[Buf](&lib.msg)) }
+        shared_parse(lib, p, data) catch { try die_buf(handle_from_addr[Buf](&lib.msg)) }
         vec_push[addr](dlh, lp)
     }
 
     graph ShDeps = {}
     gh handle[ShDeps] = handle_from_addr[ShDeps](&graph)
-    shdeps_load(gh, dlh.p, dlh.n)
-    shdeps_validate[test_defined](gh)
+    try shdeps_load(gh, dlh.p, dlh.n)
+    try shdeps_validate[test_defined](gh)
 
     out Buf = {}
     oh handle[Buf] = handle_from_addr[Buf](&out)
@@ -168,5 +173,4 @@ fn main(argc i32, argv addr) i32 {
     buf_write(oh, STDOUT) catch {}
     buf_free(oh)
     shdeps_free(gh)
-    return 0
 }

@@ -146,7 +146,7 @@ fn has_default_at(b Bytes) bool {
     return false
 }
 
-fn check_static_versions() void {
+fn check_static_versions() void fails {
     v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
     for pass u64 in 0..2 {
     for i u64 in 0..v.n {
@@ -156,7 +156,7 @@ fn check_static_versions() void {
             bs(m, c"defined symbol version ")
             bb(m, g.name)
             bs(m, c" requires shared output")
-            die()
+            try die()
         }
     }
     }
@@ -210,12 +210,12 @@ fn shared_output_add(f u64, i u64, id u32) void {
 // definitions; OCaml visits its hash table in no fixed order), the
 // version-script locals, and in shared output every default-visibility
 // definition and undefined reference as an import
-fn shared_output_prepare() void {
+fn shared_output_prepare() void fails {
     c handle[Config] = config()
     shared bool = c.mode == MODE_SHARED
-    if c.has_version_script && !shared { die_c(c"version scripts require shared output") }
+    if c.has_version_script && !shared { try die_c(c"version scripts require shared output") }
     if !shared {
-        check_static_versions()
+        try check_static_versions()
         return
     }
     v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
@@ -243,7 +243,7 @@ fn shared_output_prepare() void {
                 bb(m, g.name)
                 bs(m, c" references missing version node ")
                 bb(m, version)
-                die()
+                try die()
             }
         }
     }
@@ -258,7 +258,7 @@ fn shared_output_prepare() void {
             if at != NONE64 {
                 local = vs_exact_local(bytes(key.p, at))
             } else {
-                local = vs_policy(0, g.name) == 0
+                local = try vs_policy(0, g.name) == 0
             }
             if local { g.res_vis = 2 }
         }
@@ -271,7 +271,7 @@ fn shared_output_prepare() void {
                 m handle[Buf] = msg()
                 bb(m, o.path)
                 bs(m, c": preinit arrays are invalid in shared output")
-                die()
+                try die()
             }
         }
         for i u64 in 1..zext[u64](o.nsym) {
@@ -291,7 +291,7 @@ fn shared_output_prepare() void {
                     bs(m, c": undefined versioned symbol ")
                     bb(m, y.name)
                     bs(m, c" requires a provider")
-                    die()
+                    try die()
                 }
                 shared_output_add(f, i, id)
             }

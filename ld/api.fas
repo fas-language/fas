@@ -467,18 +467,7 @@ fn ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32 {
     pool = pool_start(threads)
 
     code i32 = 0
-    j i32 = fas_ld_setjmp(&ld_api_jmp)
-    if j != 0 {
-        code = j - 1
-    } else {
-        parse_command_line_argv(argv, argc)
-        c handle[Config] = config()
-        if c.statistics { stats_start() }
-        if c.print_version { print_version() }
-        if c.relocatable { partial_link_and_publish() } else { link_and_publish() }
-        stats_print()
-        code = 0
-    }
+    ld_run(argv, argc) catch e { code = ld_exit_code(e) }
 
     if vfs != null && ld_api_diag.n != 0 {
         dh handle[Buf] = handle_from_addr[Buf](&vfs.diag)
@@ -493,6 +482,15 @@ fn ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32 {
     ld_api_vfs = null
     ld_reset()
     return code
+}
+
+fn ld_run(argv addr, argc u64) void fails {
+    try parse_command_line_argv(argv, argc)
+    c handle[Config] = config()
+    if c.statistics { stats_start() }
+    if c.print_version { print_version() }
+    if c.relocatable { try partial_link_and_publish() } else { try link_and_publish() }
+    stats_print()
 }
 
 // ---------- incremental early-parse session ----------
