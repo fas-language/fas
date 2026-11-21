@@ -279,7 +279,12 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
         expanded Vec[Token] = {}
         vec_push[Token](&expanded, first)
         try expand_list(p, args.p + sizeof[Token], args.n - 1, &expanded, false)
-        pp_message(n, &expanded, &b)
+        // Expanded tokens may be adjacent without space flags even when
+        // their concatenation would lex as a different token.
+        for i usize in 0..expanded.n {
+            if i != 0 { buf_u8(&b, 32) }
+            buf_append(&b, cc_spelling(n, expanded.p[Token, i]))
+        }
     } else {
         pp_message(n, args, &b)
     }

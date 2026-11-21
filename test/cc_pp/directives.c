@@ -27,3 +27,5 @@ __FILE__ __FILE_NAME__ __LINE__ __INCLUDE_LEVEL__
 PRAGMA(GCC diagnostic push)
 #pragma GCC diagnostic pop
 __COUNTER__ __COUNTER__
+#define GT >
+#pragma omp for schedule(static, 2 GT> 1)
