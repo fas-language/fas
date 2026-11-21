@@ -67,20 +67,33 @@ fn pa_local_labels(p handle[Parser]) handle[Ast] fails {
     return null
 }
 
+fn pa_asm_string(p handle[Parser]) handle[Ast] fails {
+    text handle[Ast] = try pa_strings(p)
+    if ty_node(ty_unqual(text.ty)).elem != TY_CHAR {
+        try pa_error(p, text.loc, c"asm requires an ordinary string literal")
+    }
+    return text
+}
+
 fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
     t Token = try pa_take(p)
     n handle[Ast] = pa_node(ND_ASM, t.loc, TY_VOID)
     while true {
         a Token = try pa_peek(p)
-        if pa_is(p, a, c"goto") { n.flags |= 1 }
-        else if pa_qual(p, a) == Q_VOLATILE { n.flags |= 2 }
-        else if pa_inline(p, a) { n.flags |= 4 }
+        flag u32
+        if pa_is(p, a, c"goto") { flag = 1 }
+        else if pa_qual(p, a) == Q_VOLATILE { flag = 2 }
+        else if pa_inline(p, a) { flag = 4 }
         else { break }
+        if file || (n.flags & flag) != 0 { try pa_error(p, a.loc, c"invalid or duplicate asm qualifier") }
+        n.flags |= flag
         try pa_take(p)
     }
     try pa_expect(p, c"(")
-    n.a = try pa_strings(p)
+    n.a = try pa_asm_string(p)
     section u8 = 0
+    names TagMap = {}
+    defer { map_free(&names) }
     // The lexer can produce a single :: preprocessing token for empty adjacent sections.
     while (try pa_at(p, c":")) || (try pa_at(p, c"::")) {
         sep Token = try pa_take(p)
@@ -100,15 +113,26 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
             } else {
                 opname u32 = 0
                 if section <= 2 && (try pa_accept(p, c"[")) {
-                    opname = try pa_ident(p, try pa_take(p))
+                    tok Token = try pa_take(p)
+                    opname = try pa_ident(p, tok)
+                    if !map_put(&names, opname, 1) { try pa_error(p, tok.loc, c"duplicate named asm operand") }
                     try pa_expect(p, c"]")
                 }
-                constraint handle[Ast] = try pa_strings(p)
+                constraint handle[Ast] = try pa_asm_string(p)
                 if section <= 2 {
                     try pa_expect(p, c"(")
                     e handle[Ast] = try pa_expression(p, 1)
                     try pa_expect(p, c")")
                     if section == 1 { try se_modifiable(p, e) }
+                    spelling Bytes = cc_name(p.names, constraint.op)
+                    if bytes_eq_c(spelling, c"\"m\"") || bytes_eq_c(spelling, c"\"=m\"") ||
+                        bytes_eq_c(spelling, c"\"+m\"") {
+                        decl handle[Symbol] = e.decl
+                        if !se_addressable(e) || (e.flags & NF_BITFIELD) != 0 ||
+                            (decl != null && decl.storage == SC_REGISTER) {
+                            try pa_error(p, e.loc, c"asm memory operand requires an addressable object")
+                        }
+                    }
                     item handle[Ast] = pa_node(ND_ASM, e.loc, e.ty)
                     item.op = opname
                     item.a = constraint

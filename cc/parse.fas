@@ -83,6 +83,7 @@ struct Symbol {
     params addr // Param list
     attrs handle[Attr]
     asm_name u32
+    cleanup addr // Symbol for a GNU cleanup function
     flags u32
 }
 

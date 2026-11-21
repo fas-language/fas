@@ -15,6 +15,30 @@ fn se_bind(p handle[Parser], s handle[Symbol]) void {
     map_put(&scope.ordinary, s.name, handle_addr(s))
 }
 
+fn se_cleanup_attribute(p handle[Parser], s handle[Symbol], file bool, func bool) void fails {
+    a handle[Attr] = s.attrs
+    while a != null && !pa_attr_name(p, a, c"cleanup") { a = a.next }
+    if a == null { return }
+    if file || func || s.linkage != 0 || s.storage == SC_STATIC || s.storage == SC_TYPEDEF || s.thread_local {
+        cc_diag(p.names, a.loc, c"warning: ", bytes_c(c"cleanup attribute requires an automatic object"))
+        return
+    }
+    if a.args.n != 1 || a.args.p[Token].kind != TK_IDENT {
+        try pa_error(p, a.loc, c"cleanup attribute requires a function identifier")
+    }
+    target handle[Symbol] = pa_lookup(p, cc_ident(p.names, a.args.p[Token]))
+    if target == null || !ty_is_func(target.ty) { try pa_error(p, a.loc, c"cleanup attribute names no visible function") }
+    ft handle[TypeNode] = ty_node(ty_unqual(target.ty))
+    if ft.aux2 > 1 || (ft.aux2 == 0 && (ft.flags & TYF_VARIADIC) == 0) {
+        try pa_error(p, a.loc, c"cleanup function must accept one argument")
+    }
+    if ft.aux2 == 1 && s.ty != TY_INVALID {
+        arg handle[Ast] = pa_node(ND_UNARY, a.loc, ty_ptr(s.ty))
+        try se_conversion(p, tc.fn_params.p[u32, zext[usize](ft.aux1)], arg)
+    }
+    s.cleanup = handle_addr(target)
+}
+
 fn se_local(p handle[Parser], name u32) handle[Symbol] {
     scope handle[Scope] = p.scope
     a addr = map_get(&scope.ordinary, name) catch null

@@ -109,6 +109,7 @@ fn pa_attributes(p handle[Parser]) handle[Attr] fails {
             if try pa_accept(p, c"(") {
                 try pa_collect(p, &a.args, c")")
                 try pa_expect(p, c")")
+                if bracket && a.ns == 0 { try pa_check_attr_args(p, a) }
             }
             if tail == null { head = a } else { tail.next = a }
             tail = a
@@ -122,6 +123,20 @@ fn pa_attributes(p handle[Parser]) handle[Attr] fails {
 fn pa_attr_name(p handle[Parser], a handle[Attr], name addr) bool {
     if a.ns != 0 && !bytes_eq_c(feature_attr(cc_name(p.names, a.ns)), c"gnu") { return false }
     return bytes_eq_c(feature_attr(cc_name(p.names, a.name)), name)
+}
+
+fn pa_check_attr_args(p handle[Parser], a handle[Attr]) void fails {
+    if pa_attr_name(p, a, c"deprecated") || pa_attr_name(p, a, c"nodiscard") {
+        if a.args.n == 0 { try pa_error(p, a.loc, c"attribute argument must be a string literal") }
+        for i usize in 0..a.args.n {
+            if a.args.p[Token, i].kind != TK_STR {
+                try pa_error(p, a.loc, c"attribute argument must be a string literal")
+            }
+        }
+    } else if pa_attr_name(p, a, c"maybe_unused") || pa_attr_name(p, a, c"fallthrough") ||
+        pa_attr_name(p, a, c"noreturn") || pa_attr_name(p, a, c"_Noreturn") {
+        try pa_error(p, a.loc, c"attribute does not take arguments")
+    }
 }
 
 fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
@@ -884,7 +899,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         if pa_asm_word(p, try pa_peek(p)) {
             try pa_take(p)
             try pa_expect(p, c"(")
-            asm_name = (try pa_strings(p)).op
+            asm_name = (try pa_asm_string(p)).op
             try pa_expect(p, c")")
             attrs = pa_join_attrs(try pa_attributes(p), attrs)
         }
@@ -918,6 +933,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
                 s.linkage = 2
             }
         }
+        try se_cleanup_attribute(p, s, file, func)
         if spec.thread_local && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
             spec.storage == SC_CONSTEXPR || (!file && spec.storage != SC_STATIC && spec.storage != SC_EXTERN)) {
             try pa_error(p, d.loc, c"invalid thread-local declaration")
