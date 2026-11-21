@@ -94,7 +94,7 @@ fn se_set_complex(a handle[Ast], real f64, imag f64) void {
 }
 
 fn se_promote_expr(a handle[Ast]) u32 {
-    if (a.flags & NF_BITFIELD) != 0 && a.value < 32 && !ty_is_bitint(a.ty) { return TY_INT }
+    if (a.flags & NF_BITFIELD) != 0 && a.field_width < 32 && !ty_is_bitint(a.ty) { return TY_INT }
     return ty_integer_promote(se_decay(a.ty))
 }
 
@@ -365,6 +365,11 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         }
         if pa_is_gnu(p) && ptr_x && ptr_y {
             cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"comparison of distinct pointer types"))
+            n.ty = TY_INT
+            return n
+        }
+        if pa_is_gnu(p) && ((ptr_x && ty_is_integer(y)) || (ptr_y && ty_is_integer(x))) {
+            cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"comparison between pointer and integer"))
             n.ty = TY_INT
             return n
         }

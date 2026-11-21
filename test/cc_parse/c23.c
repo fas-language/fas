@@ -50,6 +50,14 @@ done:
     return r.n + (int)u + (int)bytes + T;
 }
 static_assert((constexpr int){42} == 42);
+constexpr struct {
+    int row[4];
+    struct { int x, y; } inner;
+    unsigned bit : 3;
+} constant_record = {.row[2] = 7, .inner = {1, 2}, .inner.y = 9, .bit = 5};
+static_assert(constant_record.row[2] == 7 && constant_record.row[0] == 0);
+static_assert(constant_record.inner.x == 1 && constant_record.inner.y == 9);
+static_assert(constant_record.bit == 5);
 static_assert(sizeof (static int){2} == sizeof(int));
 static int *compound_address(void) { return &(static int){4}; }
 

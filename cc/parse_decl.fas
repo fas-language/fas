@@ -168,9 +168,7 @@ fn pa_has_attr(p handle[Parser], a handle[Attr], name addr) bool {
     return false
 }
 
-fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr], alignment u32) u32 fails {
-    al u32 = try pa_attr_align(p, a, alignment)
-    if al != 0 { ty = ty_aligned(ty, al) }
+fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
     while a != null {
         if pa_attr_name(p, a, c"vector_size") {
             bytes u32 = try pa_attr_integer(p, a, 0)
@@ -178,7 +176,7 @@ fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr], alignment u32) u32 fa
             if !ty_is_arith(ty) || size == 0 || bytes == 0 || zext[u64](bytes) % size != 0 {
                 try pa_error(p, a.loc, c"invalid vector_size attribute")
             }
-            ty = ty_vector(ty, bytes)
+            ty = ty_qual(ty_vector(ty, bytes), ty_quals(ty))
         }
         if pa_attr_name(p, a, c"mode") && a.args.n == 1 && ty_is_integer(ty) {
             mode Bytes = feature_attr(cc_spelling(p.names, a.args.p[Token]))
@@ -189,7 +187,7 @@ fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr], alignment u32) u32 fa
             else if bytes_eq_c(mode, c"DI") || bytes_eq_c(mode, c"word") { k = TY_LONG }
             else if bytes_eq_c(mode, c"TI") { k = TY_INT128 }
             if ty_is_unsigned(ty) { k = ty_make_unsigned(k) }
-            ty = k
+            ty = ty_qual(k, ty_quals(ty))
         }
         a = a.next
     }
@@ -391,7 +389,6 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
         while true {
             d Declarator = {}
             if !(try pa_at(p, c":")) && !(try pa_at(p, c";")) { try pa_declarator(p, &d, true) }
-            ft u32 = try pa_apply(p, d.first, spec.ty)
             attr handle[Attr] = pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs))
             aligned u32 = try pa_attr_align(p, attr, spec.alignment)
             bit bool = try pa_accept(p, c":")
@@ -401,9 +398,10 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
                 width = try se_ice(p, w)
                 attr = pa_join_attrs(try pa_attributes(p), attr)
                 aligned = try pa_attr_align(p, attr, aligned)
-                if !ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0) {
-                    try pa_error(p, w.loc, c"invalid bit-field width or type")
-                }
+            }
+            ft u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, attr))
+            if bit && (!ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0)) {
+                try pa_error(p, t.loc, c"invalid bit-field width or type")
             }
             anon bool = d.name == 0 && !bit && ty_is_record(ft)
             if d.name == 0 && !bit && !anon { try pa_error(p, t.loc, c"member declaration has no declarator") }
@@ -413,7 +411,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             if (!se_complete(ft) && !flex) || se_vla(ft) { try pa_error(p, t.loc, c"member has incomplete or variable type") }
             f handle[FieldDef] = vec_add[FieldDef](&fields)
             f.name_id = d.name
-            f.ty = try pa_type_attrs(p, ft, attr, 0)
+            f.ty = ft
             f.bit_width = trunc[u32](width)
             f.is_bitfield = bit
             f.is_anon = anon
@@ -605,7 +603,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         if sign == 0 && longs == 0 && !short && !complex {
             try pa_error(p, out.loc, c"C23 requires an explicit type specifier (implicit int is unsupported)")
         }
-        ty = if complex { TY_DOUBLE } else { TY_INT }
+        ty = if complex && sign == 0 && longs == 0 && !short { TY_DOUBLE } else { TY_INT }
     }
     if bitint_spec {
         width u32 = ty_int_bits(ty)
@@ -681,7 +679,7 @@ fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
         }
         d Declarator = {}
         try pa_declarator(p, &d, true)
-        t u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0))
+        t u32 = try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
         adjusted u32 = t
         n handle[TypeNode] = ty_node(ty_unqual(t))
         if n.kind == TYK_ARRAY {
@@ -827,7 +825,15 @@ fn pa_type_name(p handle[Parser]) u32 fails {
         spec.is_inline || spec.is_noreturn {
         try pa_error(p, spec.loc, c"expected a type name")
     }
-    return try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0))
+    return try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
+}
+
+// Mode and vector-size attributes describe the base type. Alignment
+// describes the declared entity and therefore applies after the declarator.
+fn pa_apply_attrs(p handle[Parser], op handle[DeclOp], base u32, a handle[Attr], alignment u32) u32 fails {
+    ty u32 = try pa_apply(p, op, try pa_type_attrs(p, base, a))
+    al u32 = try pa_attr_align(p, a, alignment)
+    return if al != 0 { ty_aligned(ty, al) } else { ty }
 }
 
 fn pa_builtin_types(p handle[Parser]) void fails {
@@ -884,8 +890,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         }
         ty u32 = TY_INVALID
         if !spec.inferred {
-            ty = try pa_apply(p, d.first, spec.ty)
-            ty = try pa_type_attrs(p, ty, attrs, spec.alignment)
+            ty = try pa_apply_attrs(p, d.first, spec.ty, attrs, spec.alignment)
             if spec.storage == SC_TYPEDEF && pa_has_attr(p, attrs, c"aligned") {
                 ty = ty_typedef_aligned(ty, ty_align_attr(ty))
             }
@@ -961,9 +966,13 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             result InitResult = {}
             try pa_initializer(p, s.ty, file || spec.storage == SC_STATIC || spec.storage == SC_CONSTEXPR, &result)
             if spec.inferred {
-                s.ty = try pa_type_attrs(p, ty_qual(se_decay(result.ty), spec.quals), attrs, spec.alignment)
+                s.ty = try pa_apply_attrs(p, null, ty_qual(se_decay(result.ty), spec.quals), attrs, spec.alignment)
                 if ty_is_void(s.ty) { try pa_error(p, d.loc, c"cannot infer void object type") }
             } else { s.ty = result.ty }
+            if spec.storage == SC_CONSTEXPR {
+                try se_constexpr_type(p, s.ty, d.loc)
+                try se_check_constexpr(p, result.tree)
+            }
             s.value = handle_addr(result.tree)
             if spec.inferred { s = try se_declare(p, s, true, false) }
         }

@@ -56,6 +56,134 @@ fn se_init_elem(ty u32, index u64) u32 {
     return ty
 }
 
+// A named constant can be reached through any number of ordinary member and
+// array accesses. Walk the initializer in source order so a later designator
+// overrides the corresponding part of an earlier initializer.
+struct ConstPath { index u64, rest handle[ConstPath] }
+
+fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {
+    if path == null {
+        if init != null { return init }
+        if ty_is_integer(ty) { return se_int(0, ty, 0) }
+        if ty_is_real_float(ty) || ty_is_complex(ty) {
+            n handle[Ast] = pa_node(ND_FLOAT, 0, ty)
+            se_set_fp(n, 0.0)
+            return n
+        }
+        return null
+    }
+    if path.index >= se_init_count(ty) { return null }
+    elem u32 = se_init_elem(ty, path.index)
+    union_type bool = ty_kind(ty) == TYK_UNION
+    result handle[Ast] = if !union_type || path.index == se_init_next(ty, 0) {
+        se_const_value(elem, null, path.rest)
+    } else { null }
+    if init == null { return result }
+    if init.kind != ND_INIT { return null }
+    item handle[Ast] = init.a
+    while item != null {
+        designator handle[Ast] = item.b
+        if designator == null {
+            if item.value == path.index { result = se_const_value(elem, item.a, path.rest) }
+            else if union_type { result = null }
+        } else {
+            query handle[ConstPath] = path
+            target u32 = elem
+            matched bool = true
+            while designator != null {
+                lo u64 = designator.value
+                if designator.b != null {
+                    index handle[Ast] = designator.a
+                    lo = index.value
+                }
+                if query == null || query.index < lo || query.index > designator.value {
+                    matched = false
+                    break
+                }
+                target = designator.ty
+                query = query.rest
+                designator = designator.next
+            }
+            if matched { result = se_const_value(target, item.a, query) }
+            else if union_type && item.value != path.index { result = null }
+        }
+        item = item.next
+    }
+    return result
+}
+
+fn se_const_lvalue(n handle[Ast], path handle[ConstPath]) handle[Ast] {
+    if n.kind == ND_NAME {
+        s handle[Symbol] = n.decl
+        if s != null && s.storage == SC_CONSTEXPR && s.value != null {
+            return se_const_value(s.ty, handle_from_addr(s.value), path)
+        }
+    } else if n.kind == ND_COMPOUND && n.op == zext[u32](SC_CONSTEXPR) {
+        return se_const_value(n.ty, n.a, path)
+    } else if n.kind == ND_MEMBER {
+        base handle[Ast] = n.a
+        if !ty_is_record(base.ty) { return null }
+        r handle[RecordDef] = ty_record(ty_node(ty_unqual(base.ty)).aux1)
+        if n.op < r.fields_start || n.op - r.fields_start >= r.fields_len { return null }
+        index ConstPath = {zext[u64](n.op - r.fields_start), path}
+        return se_const_lvalue(base, &index)
+    } else if n.kind == ND_SUBSCRIPT {
+        base handle[Ast] = n.a
+        subscript handle[Ast] = n.b
+        if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || subscript.wide != null { return null }
+        index ConstPath = {subscript.value, path}
+        return se_const_lvalue(base, &index)
+    }
+    return null
+}
+
+fn se_const_load(n handle[Ast]) void {
+    if !ty_is_scalar(n.ty) { return }
+    value handle[Ast] = se_const_lvalue(n, null)
+    if value != null { se_cast_constant(n, value) }
+}
+
+fn se_constexpr_type(p handle[Parser], ty u32, loc u32) void fails {
+    if (ty_quals(ty) & (Q_VOLATILE | Q_ATOMIC | Q_RESTRICT)) != 0 {
+        try pa_error(p, loc, c"constexpr object has a disallowed type qualifier")
+    }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY {
+        try se_constexpr_type(p, n.elem, loc)
+    } else if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        r handle[RecordDef] = ty_record(n.aux1)
+        for i u32 in 0..r.fields_len {
+            f handle[FieldDef] = ty_field(r.fields_start + i)
+            try se_constexpr_type(p, f.ty, loc)
+        }
+    }
+}
+
+fn se_check_constexpr(p handle[Parser], e handle[Ast]) void fails {
+    if e.kind == ND_INIT {
+        item handle[Ast] = e.a
+        while item != null {
+            try se_check_constexpr(p, item.a)
+            item = item.next
+        }
+        return
+    }
+    if ty_is_ptr(e.ty) && (e.flags & NF_ICE) == 0 {
+        try pa_error(p, e.loc, c"constexpr pointer initializer must be null")
+    }
+    if e.kind != ND_CAST || (e.flags & NF_IMPLICIT) == 0 { return }
+    source handle[Ast] = e.a
+    if (source.flags & NF_ICE) != 0 && (e.flags & NF_ICE) != 0 &&
+        ty_is_integer(source.ty) && ty_is_integer(e.ty) {
+        a u32 = ty_int_bits(source.ty)
+        b u32 = ty_int_bits(e.ty)
+        width u32 = (if a > b { a } else { b }) + 1
+        if wi_cmp(wi_from_ast(source, width), wi_from_ast(e, width)) != 0 {
+            try pa_error(p, source.loc, c"constexpr initializer is not exactly representable")
+        }
+    }
+}
+
 fn se_init_next(ty u32, index u64) u64 {
     if ty_kind(ty) == TYK_UNION {
         if index == 0 { return 0 }

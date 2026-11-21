@@ -360,6 +360,9 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast]) u32 {
     if bytes_eq_c(name, c"__builtin_extract_return_addr") || bytes_eq_c(name, c"__builtin_frob_return_addr") {
         return ty_ptr(TY_VOID)
     }
+    if bytes_eq_c(name, c"__builtin_complex") && a != null && ty_is_real_float(a.ty) {
+        return ty_complex(a.ty)
+    }
     if bytes_eq_c(name, c"__builtin_printf") || bytes_eq_c(name, c"__builtin_sprintf") ||
         bytes_eq_c(name, c"__builtin_fprintf") { return TY_INT }
     if bytes_starts_with(name, bytes_c(c"__c11_atomic_")) {
@@ -384,6 +387,10 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast]) u32 {
         bytes_eq_c(name, c"__builtin_malloc") || bytes_eq_c(name, c"__builtin_alloca") ||
         bytes_eq_c(name, c"__builtin_alloca_with_align") || bytes_eq_c(name, c"__builtin_frame_address") ||
         bytes_eq_c(name, c"__builtin_return_address") || bytes_eq_c(name, c"__builtin_assume_aligned") {
+        return ty_ptr(TY_VOID)
+    }
+    if bytes_eq_c(name, c"__builtin___memcpy_chk") || bytes_eq_c(name, c"__builtin___memmove_chk") ||
+        bytes_eq_c(name, c"__builtin___mempcpy_chk") || bytes_eq_c(name, c"__builtin___memset_chk") {
         return ty_ptr(TY_VOID)
     }
     if bytes_starts_with(name, bytes_c(c"__builtin_str")) && !bytes_starts_with(name, bytes_c(c"__builtin_strcmp")) &&
@@ -455,6 +462,17 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
             bytes_starts_with(word, bytes_c(c"__builtin_nan")) {
             fp u64 = if bytes_starts_with(word, bytes_c(c"__builtin_nan")) { 0x7ff8000000000000 } else { 0x7ff0000000000000 }
             se_set_fp(n, bitcast[f64](fp))
+        }
+        if bytes_eq_c(word, c"__builtin_complex") {
+            real handle[Ast] = xs.first
+            if count != 2 || !ty_is_complex(ret) {
+                try pa_error(p, t.loc, c"__builtin_complex requires two real floating operands")
+            }
+            imag handle[Ast] = real.next
+            if ty_unqual(real.ty) != ty_unqual(imag.ty) {
+                try pa_error(p, t.loc, c"__builtin_complex requires matching operand types")
+            }
+            if (real.flags & imag.flags & NF_FLOAT_CONST) != 0 { se_set_complex(n, se_fp(real), se_fp(imag)) }
         }
     }
     return n
@@ -550,7 +568,7 @@ fn pa_paren_type(p handle[Parser], spec handle[DeclSpec]) u32 fails {
     if (spec.storage != SC_NONE || spec.thread_local) && !(try pa_at(p, c"{")) {
         try pa_error(p, spec.loc, c"storage class requires a compound literal")
     }
-    return try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0))
+    return try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
 }
 
 fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
@@ -599,7 +617,11 @@ fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[
     n.op = zext[u32](spec.storage)
     if spec.thread_local { n.op |= 256 }
     if static_duration && !spec.thread_local { n.flags |= NF_ADDR }
-    if spec.storage == SC_CONSTEXPR && ty_is_scalar(result.ty) { se_cast_constant(n, result.tree) }
+    if spec.storage == SC_CONSTEXPR {
+        try se_constexpr_type(p, result.ty, t.loc)
+        try se_check_constexpr(p, result.tree)
+        if ty_is_scalar(result.ty) { se_cast_constant(n, result.tree) }
+    }
     if (n.flags & NF_ADDR) != 0 && ty_is_array(result.ty) { n.flags |= NF_STATIC }
     return n
 }
@@ -686,6 +708,9 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             }
             n.a = a
             n.b = b
+            if ty_is_array(a.ty) && (b.flags & NF_ICE) != 0 && b.wide == null {
+                se_const_load(n)
+            }
             a = n
         } else if (try pa_accept(p, c".")) || (try pa_accept(p, c"->")) {
             ty u32 = a.ty
@@ -703,12 +728,13 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             n.op = field.field_idx
             n.a = a
             if arrow || (a.flags & NF_LVALUE) != 0 { n.flags |= NF_LVALUE }
-            if field.is_bitfield { n.flags |= NF_BITFIELD; n.value = zext[u64](field.bit_width) }
-            else { n.value = field.byte_off }
+            n.field_offset = field.bit_off
+            if field.is_bitfield { n.flags |= NF_BITFIELD; n.field_width = field.bit_width }
             if (arrow && (a.flags & NF_STATIC) != 0) || (!arrow && (a.flags & NF_ADDR) != 0) {
                 n.flags |= NF_ADDR
                 if ty_is_array(n.ty) { n.flags |= NF_STATIC }
             }
+            if !arrow { se_const_load(n) }
             a = n
         } else if (try pa_accept(p, c"++")) || (try pa_accept(p, c"--")) { a = try se_unary(p, t, a, true) }
         else { return a }

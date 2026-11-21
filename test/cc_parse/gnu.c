@@ -24,6 +24,10 @@ local:
     return x ?: 7;
 }
 typedef long lowered_alignment __attribute__((aligned(1)));
+static __attribute__((vector_size(16))) float make_vector(void) {
+    return (__attribute__((vector_size(16))) float){1, 2, 3, 4};
+}
+static double _Complex from_builtin = __builtin_complex(2.0, 3.0);
 static_assert(alignof(lowered_alignment) == 1);
 static_assert(sizeof(lowered_alignment) == sizeof(long));
 struct WithLoweredAlignment { char c; lowered_alignment value; };

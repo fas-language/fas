@@ -152,6 +152,10 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
         f u32 = ty_unqual(ty_node(ty_unqual(from)).elem)
         ptr_signedness bool = ty_is_integer(d) && ty_is_integer(f) && ty_int_bits(d) == ty_int_bits(f) &&
             (ty_make_unsigned(d) == ty_make_unsigned(f) || (ty_int_bits(d) == 8 && ty_int_rank(d) == ty_int_rank(f)))
+        if (ty_is_void(d) && ty_is_func(f)) || (ty_is_func(d) && ty_is_void(f)) {
+            cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"conversion between void pointer and function pointer"))
+            return
+        }
         if se_ptr_compatible(dest, from, false) || ptr_signedness {
             cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"pointer conversion changes pointed-to qualifiers or signedness"))
             return
