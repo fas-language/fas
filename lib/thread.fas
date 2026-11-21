@@ -8,8 +8,8 @@
 // the same result every time writes each item's result to that item's own
 // place (or merges per-chunk results in chunk order afterwards).
 //
-// Fas has no thread-local storage: a job learns its worker number (0 is
-// the calling thread) and keeps per-worker state in arrays indexed by it.
+// A job learns its worker number (0 is the calling thread). Workers also
+// get independent TLS and, when requested, their own heap-region chunks.
 
 use "mem.fas"
 
@@ -131,9 +131,17 @@ const POOL_MAX usize = 256
 const POOL_SPIN u32 = 4000
 const POOL_STACK usize = 8388608
 
+struct PoolWorker {
+    pool addr
+    index u32
+    region Region
+}
+
 struct Pool {
+    region handle[Region]
     workers u32           // threads, the caller included
     // the current job
+    job_init addr         // optional fn(ctx addr) void on each background worker
     job_fn addr           // fn(ctx addr, begin usize, end usize, worker u32) void
     job_ctx addr
     job_n usize
@@ -143,19 +151,14 @@ struct Pool {
     generation u32        // bumped to start a job (futex)
     done u32              // bumped when a job ends (futex)
     quit u32
+    args arr[256, PoolWorker]
     tids arr[256, u32]    // CHILD_CLEARTID words, for the join
     stacks arr[256, addr]
     tls_bases arr[256, addr]
     tls_sizes arr[256, usize]
 }
 
-struct PoolWorker {
-    pool addr
-    index u32
-}
-
-var pool_global Pool = {}
-var pool_worker_args arr[256, PoolWorker] = {}
+thread var pool_global Pool = {}
 
 // Spins a while for *w to differ from `old`, then sleeps on it; returns
 // the value it saw (possibly still `old`: callers loop).
@@ -180,12 +183,14 @@ fn pool_run_chunks(p handle[Pool], worker u32) void {
 fn pool_worker_main(arg addr) void {
     w handle[PoolWorker] = handle_from_addr[PoolWorker](arg)
     p handle[Pool] = handle_from_addr[Pool](w.pool)
+    if p.region != null { region_switch(&w.region) }
     seen u32 = 0
     while true {
         g u32 = pool_wait_change(&p.generation, seen)
         if g == seen { continue }
         seen = g
         if atomic_load[u32, acquire](&p.quit) != 0 { return }
+        if p.job_init != null { call_addr[void](p.job_init, p.job_ctx) }
         pool_run_chunks(p, w.index)
         if atomic_sub[u32, acq_rel](&p.pending, 1) == 1 {
             atomic_add[u32, release](&p.done, 1)
@@ -197,16 +202,24 @@ fn pool_worker_main(arg addr) void {
 // Starts the pool with `threads` threads in all (0: one per CPU, at most
 // POOL_MAX); the calling thread is worker 0.
 fn pool_start(threads u32) handle[Pool] {
-    p handle[Pool] = handle_from_addr[Pool](&pool_global)
+    return pool_start_on(&pool_global, threads)
+}
+
+// Starts a caller-owned pool. Keep p alive and at a stable address until
+// pool_stop. A thread can use this while it owns another pool.
+fn pool_start_on(p handle[Pool], threads u32) handle[Pool] {
     n u32 = if threads == 0 { thread_cpu_count() } else { threads }
     if zext[usize](n) > POOL_MAX { n = trunc[u32](POOL_MAX) }
     p.workers = n
+    p.region = current_region
+    atomic_store[u32, relaxed](&p.generation, 0)
+    atomic_store[u32, relaxed](&p.pending, 0)
     for i u32 in 1..n {
         k usize = zext[usize](i)
         stack addr = mem_pages(POOL_STACK)
         p.stacks[k] = stack
-        pool_worker_args[k].pool = handle_addr(p)
-        pool_worker_args[k].index = i
+        p.args[k].pool = handle_addr(p)
+        p.args[k].index = i
         tb TlsBlock = {}
         thread_tls_alloc(&tb)
         p.tls_bases[k] = tb.base
@@ -214,7 +227,7 @@ fn pool_start(threads u32) handle[Pool] {
         flags u64 = if tb.tp != null { THREAD_CLONE_FLAGS | CLONE_SETTLS } else { THREAD_CLONE_FLAGS }
         p.tids[k] = 1
         r i64 = fas_lib_clone(flags, stack + POOL_STACK, &pool_worker_main,
-            &pool_worker_args[k], &p.tids[k], tb.tp)
+            &p.args[k], &p.tids[k], tb.tp)
         if r < 0 {
             eprint_raw(c"fas library: cannot start a thread\n")
             os_exit(2)
@@ -230,9 +243,15 @@ fn eprint_raw(s addr) void {
 }
 
 // Runs f(ctx, begin, end, worker) over 0..n in chunks of `grain`, on every
-// worker, and returns when all are done. Not reentrant: a job must not
-// start another.
+// worker, and returns when all are done. A job can dispatch work on
+// another pool, but must not recursively dispatch onto p.
 fn pool_for(p handle[Pool], n usize, grain usize, f addr, ctx addr) void {
+    pool_for_init(p, n, grain, f, ctx, null)
+}
+
+// Like pool_for, with an optional setup call on each background worker
+// before it takes any chunks. Setup is skipped on the caller.
+fn pool_for_init(p handle[Pool], n usize, grain usize, f addr, ctx addr, init addr) void {
     if n == 0 { return }
     g usize = if grain == 0 { 1 } else { grain }
     if p.workers <= 1 || n <= g {
@@ -245,6 +264,7 @@ fn pool_for(p handle[Pool], n usize, grain usize, f addr, ctx addr) void {
         }
         return
     }
+    p.job_init = init
     p.job_fn = f
     p.job_ctx = ctx
     p.job_n = n
@@ -258,7 +278,8 @@ fn pool_for(p handle[Pool], n usize, grain usize, f addr, ctx addr) void {
     while pool_wait_change(&p.done, d) == d {}
 }
 
-// Stops and joins every worker, and frees their stacks.
+// Stops and joins every worker, frees their stacks and TLS blocks,
+// and transfers their arena chunks to the parent region.
 fn pool_stop(p handle[Pool]) void {
     atomic_store[u32, release](&p.quit, 1)
     atomic_add[u32, release](&p.generation, 1)
@@ -279,6 +300,10 @@ fn pool_stop(p handle[Pool]) void {
             p.tls_sizes[k] = 0
         }
     }
+    if p.region != null {
+        for i usize in 1..zext[usize](p.workers) { region_adopt(p.region, &p.args[i].region) }
+    }
+    p.region = null
     p.workers = 1
     atomic_store[u32, relaxed](&p.quit, 0)
 }

@@ -108,6 +108,7 @@ fn mem_eq(a addr, b addr, n usize) bool {
 const HEAP_CLASSES usize = 13
 const HEAP_SMALL_MAX usize = 65536
 const HEAP_LARGE u64 = 0xffff
+const HEAP_REGION u64 = 0xfffe
 const HEAP_SLAB usize = 1048576
 
 var heap_free_lists arr[13, addr] = {}
@@ -125,6 +126,16 @@ fn heap_class(n usize) usize {
 
 // `n` bytes, not zeroed. Any thread may call the heap functions.
 fn heap_alloc(n usize) addr {
+    r handle[Region] = current_region
+    if r == null { return heap_alloc_plain(n) }
+    block addr = arena_alloc(&r.arena, n + 16, 16)
+    block[u64, 0] = HEAP_REGION
+    block[u64, 1] = n
+    return block + 16
+}
+
+// Allocates on the ordinary heap even inside a region, for values that escape it.
+fn heap_alloc_plain(n usize) addr {
     if n > HEAP_SMALL_MAX {
         size usize = mem_round_pages(n + 16)
         p addr = mem_pages(size)
@@ -167,12 +178,14 @@ fn heap_alloc_zeroed(n usize) addr {
 fn heap_size(p addr) usize {
     k u64 = (p - 16)[u64]
     if k == HEAP_LARGE { return (p - 16)[u64, 1] - 16 }
+    if k == HEAP_REGION { return (p - 16)[u64, 1] }
     return zext[usize](16) << k
 }
 
 fn heap_free(p addr) void {
     if p == null { return }
     k u64 = (p - 16)[u64]
+    if k == HEAP_REGION { return }
     if k == HEAP_LARGE {
         os_munmap(p - 16, (p - 16)[u64, 1])
         return
@@ -198,7 +211,8 @@ fn heap_realloc(p addr, n usize) addr {
         q[u64, 1] = size
         return q + 16
     }
-    q addr = heap_alloc(n)
+    // Growing an ordinary heap block must not tie it to a temporary region.
+    q addr = if (p - 16)[u64] == HEAP_REGION { heap_alloc(n) } else { heap_alloc_plain(n) }
     mem_copy(q, p, if have < n { have } else { n })
     heap_free(p)
     return q
@@ -282,4 +296,43 @@ fn arena_dup(a handle[Arena], p addr, n usize) addr {
     q addr = arena_alloc(a, n + 1, 1)
     mem_copy(q, p, n)
     return q
+}
+
+// A heap allocation scope owns a bump arena. Individual frees of its blocks
+// are deferred until disposal, including frees on a different thread. A
+// region may be installed on only one thread at a time.
+struct Region {
+    arena Arena
+}
+
+thread var current_region handle[Region] = null
+
+// Installs r (null selects the regular heap) and returns the previous scope.
+// Restore it before disposing of r.
+fn region_switch(r handle[Region]) handle[Region] {
+    previous handle[Region] = current_region
+    current_region = r
+    return previous
+}
+
+// Releases all memory in an inactive region and empties it for reuse.
+fn region_dispose(r handle[Region]) void {
+    arena_free(&r.arena)
+}
+
+// Transfers all blocks from an inactive child after its worker has joined.
+// The parent's current bump chunk stays at the head of its list.
+fn region_adopt(parent handle[Region], child handle[Region]) void {
+    first addr = child.arena.chunk
+    if first == null { return }
+    if parent.arena.chunk == null {
+        copy_into[Arena](&parent.arena, &child.arena)
+    } else {
+        last addr = first
+        while last[addr, 0] != null { last = last[addr, 0] }
+        last[addr, 0] = parent.arena.chunk[addr, 0]
+        parent.arena.chunk[addr, 0] = first
+        parent.arena.total += child.arena.total
+    }
+    mem_set(&child.arena, 0, sizeof[Arena])
 }

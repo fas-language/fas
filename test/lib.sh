@@ -3,7 +3,8 @@
 # reference implementations; its path results must match OCaml's Filename
 # (test/lib/paths.out, made by OCaml) and its realpath the system's. Native
 # and LLVM, at O0 and O2. test/lib/thread.fas runs the thread pool with 1,
-# 2, 3, 16 threads and one per CPU.
+# 2, 3, 16 threads and one per CPU. test/lib/region.fas checks heap scopes
+# and worker allocation ownership.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 OCAML_FAS=${OCAML_FAS:-$ROOT/_build/default/bin/main.exe}
@@ -36,9 +37,12 @@ run() {
       grep -qx "thread bad 0" "$COMPONENT_TMP/out" ||
       { cat "$COMPONENT_TMP/out" >&2; echo "lib: $label: thread pool with $threads threads failed" >&2; exit 1; }
   done
+  "$@" -o "$COMPONENT_TMP/region" "$ROOT/test/lib/region.fas"
+  timeout 120 "$COMPONENT_TMP/region" ||
+    { echo "lib: $label: heap regions failed" >&2; exit 1; }
 }
 for level in 0 2; do
   run "native O$level" env -u FAS_ORACLE "$OCAML_FAS" -O$level
   run "llvm O$level" env FAS_ORACLE=llvm "$OCAML_FAS" -O$level
 done
-echo 'lib: library core and thread pool on native and llvm at O0/O2: ok'
+echo 'lib: library core, thread pool and heap regions on native and llvm at O0/O2: ok'

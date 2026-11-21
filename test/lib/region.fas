@@ -1,0 +1,112 @@
+// Heap region lifetime, ownership and worker adoption.
+use "../../lib/core.fas"
+use "../../lib/thread.fas"
+
+const TEST_MINCORE u64 = 27
+
+// Linux reports whether an address is mapped without dereferencing it.
+fn mapped(p addr) bool {
+    status u8 = 0
+    page addr = addr_from_bits(addr_bits(p) & ~4095)
+    return syscall(TEST_MINCORE, page, 4096, &status) == 0
+}
+
+struct RegionJob {
+    owner handle[Region]
+    parent_block addr
+    worker_block addr
+    ready u32
+    checked u32
+}
+
+fn region_worker(ctx addr) void {
+    j handle[RegionJob] = handle_from_addr(ctx)
+    worker_region handle[Region] = current_region
+    assert(worker_region != null && worker_region != j.owner)
+
+    // Free a block owned by the caller while it remains live in its region.
+    heap_free(j.parent_block)
+    j.worker_block = heap_alloc(70000)
+    j.worker_block[u64] = 22
+
+    // Keep a separate region active here while the caller uses its own.
+    independent Region = {}
+    before handle[Region] = region_switch(&independent)
+    assert(before == worker_region)
+    private_block addr = heap_alloc(70000)
+    private_block[u64] = 33
+    atomic_store[u32, release](&j.ready, 1)
+    os_futex_wake(&j.ready, 1)
+    while atomic_load[u32, acquire](&j.checked) == 0 { os_futex_wait(&j.checked, 0) }
+    assert(private_block[u64] == 33)
+    region_switch(before)
+    region_dispose(&independent)
+}
+
+fn region_caller(ctx addr, b usize, e usize, worker u32) void {
+    if worker != 0 || b != 0 { return }
+    j handle[RegionJob] = handle_from_addr(ctx)
+    while atomic_load[u32, acquire](&j.ready) == 0 { os_futex_wait(&j.ready, 0) }
+    assert(current_region == j.owner)
+    assert(mapped(j.parent_block))
+    assert(j.parent_block[u64] == 11)
+    // Allocate while the worker has a different region installed.
+    p addr = heap_alloc(32)
+    p[u64] = 44
+    assert(j.worker_block[u64] == 22)
+    assert(p[u64] == 44)
+    atomic_store[u32, release](&j.checked, 1)
+    os_futex_wake(&j.checked, 1)
+}
+
+fn main() i32 {
+    plain addr = heap_alloc(8)
+    plain[u64] = 55
+    region Region = {}
+    owner handle[Region] = &region
+    assert(region_switch(owner) == null)
+
+    parent_block addr = heap_alloc_zeroed(70000)
+    assert(parent_block[u64] == 0)
+    assert(parent_block[u8, 69999] == 0)
+    parent_block[u64] = 11
+
+    small addr = heap_alloc(8)
+    small[u64] = 66
+    grown addr = heap_realloc(small, 70000)
+    assert(grown[u64] == 66)
+    plain = heap_realloc(plain, 70000)
+    assert(plain[u64] == 55)
+    escaped addr = heap_alloc_plain(70000)
+    escaped[u64] = 77
+
+    job RegionJob = {owner, parent_block, null, 0, 0}
+    pool Pool = {}
+    p handle[Pool] = pool_start_on(&pool, 2)
+    pool_for_init(p, 2, 1, &region_caller, &job, &region_worker)
+    pool_stop(p)
+    // Adopted allocations are still readable after the worker's TLS is gone.
+    assert(mapped(job.worker_block))
+    heap_free(job.worker_block)
+    assert(mapped(job.worker_block))
+    assert(job.worker_block[u64] == 22)
+
+    assert(region_switch(null) == owner)
+    region_dispose(owner)
+    assert(!mapped(parent_block))
+    assert(!mapped(grown))
+    assert(!mapped(job.worker_block))
+    assert(mapped(plain) && mapped(escaped))
+    assert(plain[u64] == 55 && escaped[u64] == 77)
+    heap_free(plain)
+    heap_free(escaped)
+
+    // A disposed region can start allocating again.
+    region_switch(owner)
+    fresh addr = heap_alloc_zeroed(16)
+    assert(fresh[u64] == 0)
+    region_switch(null)
+    region_dispose(owner)
+    assert(!mapped(fresh))
+    return 0
+}
