@@ -19,6 +19,7 @@ struct Lexer {
     comment u32
     in_comment bool
     header bool
+    skipping bool
 }
 
 fn newline_width(p addr) usize {
@@ -121,10 +122,18 @@ fn lex_ident(n handle[CNames], l handle[Lexer], start addr, loc u32) u32 fails {
     p addr = start
     part addr = start
     normalized Buf = {}
+    starter u32 = 0
+    ccc u32 = 0
+    nfc bool = true
     while true {
         ch u8 = p[u8]
         first bool = p == start
-        if cc_id_ascii(ch, first, n.gnu) { p = p + 1; continue }
+        if cc_id_ascii(ch, first, n.gnu) {
+            starter = zext[u32](ch)
+            ccc = 0
+            p = p + 1
+            continue
+        }
         ucn bool = ch == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85)
         if !ucn && ch < 128 { break }
         r Rune = if ucn { cc_ucn(p) } else { utf8(p) }
@@ -132,12 +141,23 @@ fn lex_ident(n handle[CNames], l handle[Lexer], start addr, loc u32) u32 fails {
             o u32 = lex_loc(n, l, l.at + addr_bits(p) - addr_bits(start))
             try cc_error(n, o, c"invalid character in identifier")
         }
+        cls u32 = combining_class(r.cp)
+        if (cls != 0 && cls < ccc) || ((ccc == 0 || ccc < cls) && canonical_pair(starter, r.cp)) ||
+            unicode_range(&NFC_NO, 148 / 2, r.cp) {
+            nfc = false
+        }
+        if cls == 0 { starter = r.cp }
+        ccc = cls
         if ucn {
             buf_raw(&normalized, part, addr_bits(p) - addr_bits(part))
             utf8_append(&normalized, r.cp)
             part = p + zext[usize](r.width)
         }
         p = p + zext[usize](r.width)
+    }
+    if !nfc {
+        if !n.gnu { try cc_error(n, loc, c"identifier is not in Unicode NFC") }
+        cc_diag(n, loc, c"warning: ", bytes_c(c"identifier is not in Unicode NFC"))
     }
     width usize = addr_bits(p) - addr_bits(start)
     id u32 = cc_intern(n, bytes(start, width))
@@ -245,7 +265,14 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
         width = prefix + 1
         while start[u8, width] != delimiter {
             c u8 = start[u8, width]
-            if c == 0 || c == 10 { try cc_error(n, loc, c"unterminated literal") }
+            if c == 0 || c == 10 {
+                if l.skipping {
+                    kind = TK_PUNCT
+                    width = prefix
+                    break
+                }
+                try cc_error(n, loc, c"unterminated literal")
+            }
             if c == 92 && start[u8, width + 1] != 0 && start[u8, width + 1] != 10 { width += 1 }
             width += 1
         }

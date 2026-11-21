@@ -1,0 +1,93 @@
+struct Embed {
+    limit usize
+    prefix Arg
+    suffix Arg
+    empty Arg
+    has_limit bool
+}
+
+fn embed_spec(p handle[Pp], tokens handle[Vec[Token]], start usize, loc u32, spec handle[Embed], query bool) bool fails {
+    n handle[CNames] = &p.names
+    i usize = start
+    while i < tokens.n {
+        word Token = tokens.p[Token, i]
+        name Bytes = feature_attr(cc_spelling(n, word))
+        i += 1
+        supported bool = true
+        if i < tokens.n && cc_is(n, tokens.p[Token, i], c"::") {
+            supported = false
+            i += 2
+        }
+        if i == tokens.n || !cc_is(n, tokens.p[Token, i], c"(") { try cc_error(n, loc, c"expected '(' after embed parameter") }
+        i += 1
+        first usize = i
+        depth usize = 1
+        while i < tokens.n {
+            t Token = tokens.p[Token, i]
+            if cc_is(n, t, c"(") { depth += 1 }
+            if cc_is(n, t, c")") { depth -= 1 }
+            if depth == 0 { break }
+            i += 1
+        }
+        if depth != 0 { try cc_error(n, loc, c"unterminated embed parameter") }
+        a Arg = {first, i - first}
+        i += 1
+        if supported && bytes_eq_c(name, c"limit") {
+            if spec.has_limit { try cc_error(n, loc, c"duplicate embed limit") }
+            spec.has_limit = true
+            expr Vec[Token] = {}
+            expr.p = tokens.p + a.start * sizeof[Token]
+            expr.n = a.size
+            v PpInt = try pp_int(p, &expr, loc)
+            if !v.uns && bitcast[i64](v.bits) < 0 { try cc_error(n, loc, c"negative embed limit") }
+            spec.limit = v.bits
+        } else if supported && bytes_eq_c(name, c"prefix") {
+            if spec.prefix.start != 0 { try cc_error(n, loc, c"duplicate embed prefix") }
+            spec.prefix = a
+        } else if supported && bytes_eq_c(name, c"suffix") {
+            if spec.suffix.start != 0 { try cc_error(n, loc, c"duplicate embed suffix") }
+            spec.suffix = a
+        } else if supported && bytes_eq_c(name, c"if_empty") {
+            if spec.empty.start != 0 { try cc_error(n, loc, c"duplicate embed if_empty") }
+            spec.empty = a
+        } else {
+            if query { return false }
+            try cc_error(n, loc, c"unsupported embed parameter")
+        }
+    }
+    return true
+}
+
+fn embed_copy(p handle[Pp], tokens handle[Vec[Token]], a Arg) void {
+    for j usize in a.start..a.start + a.size { vec_push[Token](&p.pending.tokens, tokens.p[Token, j]) }
+}
+
+fn pp_embed(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
+    n handle[CNames] = &p.names
+    expanded Vec[Token] = {}
+    start usize = 0
+    if args.n > 0 && args.p[Token].kind == TK_HEADER {
+        vec_push[Token](&expanded, args.p[Token])
+        start = 1
+    }
+    try expand_list(p, args.p + start * sizeof[Token], args.n - start, &expanded, false)
+    h Header = {}
+    try pp_header(p, &expanded, loc, &h)
+    spec Embed = {}
+    spec.limit = ~0
+    try embed_spec(p, &expanded, h.used, loc, &spec, false)
+    found Found = pp_find(p, h.name, h.quote, false)
+    if found.file == null { try cc_error(n, loc, c"embed resource not found") }
+    pp_depend(p, found.path, found.system)
+    file handle[Input] = handle_from_addr(found.file)
+    size usize = if file.content.n < spec.limit { file.content.n } else { spec.limit }
+    if size == 0 { embed_copy(p, &expanded, spec.empty); return }
+    embed_copy(p, &expanded, spec.prefix)
+    t Token = cc_token(TK_NUM, F_SPACE, loc, 0)
+    comma Token = cc_token(TK_PUNCT, 0, loc, cc_intern(n, bytes_c(c",")))
+    for i usize in 0..size {
+        if i != 0 { vec_push[Token](&p.pending.tokens, comma) }
+        vec_push[Token](&p.pending.tokens, pp_number(n, t, zext[u64](file.content.p[u8, i])))
+    }
+    embed_copy(p, &expanded, spec.suffix)
+}

@@ -1,0 +1,208 @@
+fn pp_destringize(s Bytes) Bytes {
+    b Buf = {}
+    i usize = literal_prefix(s.p) + 1
+    while i + 1 < s.n {
+        c u8 = s.p[u8, i]
+        if c == 92 && i + 2 < s.n && (s.p[u8, i + 1] == 92 || s.p[u8, i + 1] == 34) {
+            i += 1
+            c = s.p[u8, i]
+        }
+        buf_u8(&b, c)
+        i += 1
+    }
+    return buf_bytes(&b)
+}
+
+fn builtin_object(s Bytes) bool {
+    return bytes_eq_c(s, c"__LINE__") || bytes_eq_c(s, c"__FILE__") ||
+        bytes_eq_c(s, c"__BASE_FILE__") || bytes_eq_c(s, c"__FILE_NAME__") ||
+        bytes_eq_c(s, c"__COUNTER__") || bytes_eq_c(s, c"__INCLUDE_LEVEL__") ||
+        bytes_eq_c(s, c"__DATE__") || bytes_eq_c(s, c"__TIME__") ||
+        bytes_eq_c(s, c"_Pragma") || builtin_query(s)
+}
+
+fn builtin_query(s Bytes) bool {
+    return bytes_eq_c(s, c"__has_include") || bytes_eq_c(s, c"__has_include_next") ||
+        bytes_eq_c(s, c"__has_embed") || bytes_eq_c(s, c"__has_attribute") ||
+        bytes_eq_c(s, c"__has_c_attribute") || bytes_eq_c(s, c"__has_builtin") ||
+        bytes_eq_c(s, c"__has_feature") || bytes_eq_c(s, c"__has_extension") ||
+        bytes_eq_c(s, c"__has_declspec_attribute") || bytes_eq_c(s, c"__is_identifier")
+}
+
+fn pp_number(n handle[CNames], t Token, count u64) Token {
+    b Buf = {}
+    buf_dec_u64(&b, count)
+    return cc_token(TK_NUM, t.flags, t.loc, cc_intern(n, buf_bytes(&b)))
+}
+
+fn pp_quote(b handle[Buf], s Bytes) void {
+    buf_u8(b, 34)
+    for i usize in 0..s.n {
+        c u8 = s.p[u8, i]
+        if c == 34 || c == 92 { buf_u8(b, 92) }
+        buf_u8(b, c)
+    }
+    buf_u8(b, 34)
+}
+
+fn builtin_two(b handle[Buf], v u64, pad u8) void {
+    if v < 10 { buf_u8(b, pad) }
+    buf_dec_u64(b, v)
+}
+
+fn builtin_timestamp(p handle[Pp], b handle[Buf], date bool) void {
+    s u64 = p.timestamp
+    buf_u8(b, 34)
+    if date {
+        // Convert days from the Unix epoch to civil date, arranging the
+        // leap day at the end of each March-based year.
+        day u64 = s / 86400 + 719468
+        era u64 = day / 146097
+        doe u64 = day % 146097
+        yoe u64 = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+        doy u64 = doe - (365 * yoe + yoe / 4 - yoe / 100)
+        mp u64 = (5 * doy + 2) / 153
+        d u64 = doy - (153 * mp + 2) / 5 + 1
+        month u64 = if mp < 10 { mp + 2 } else { mp - 10 }
+        year u64 = yoe + era * 400
+        if month < 2 { year += 1 }
+        buf_raw(b, c"JanFebMarAprMayJunJulAugSepOctNovDec" + (month * 3), 3)
+        buf_u8(b, 32)
+        builtin_two(b, d, 32)
+        buf_u8(b, 32)
+        buf_dec_u64(b, year)
+    } else {
+        builtin_two(b, (s / 3600) % 24, 48)
+        buf_u8(b, 58)
+        builtin_two(b, (s / 60) % 60, 48)
+        buf_u8(b, 58)
+        builtin_two(b, s % 60, 48)
+    }
+    buf_u8(b, 34)
+}
+
+fn builtin_defined(p handle[Pp], e handle[Expand], t Token) Token fails {
+    n handle[CNames] = &p.names
+    a Token = try expand_raw(p, e)
+    paren bool = a.kind == TK_PUNCT && cc_is(n, a, c"(")
+    if paren { a = try expand_raw(p, e) }
+    if a.kind != TK_IDENT { try cc_error(n, t.loc, c"'defined' requires a macro name") }
+    if paren {
+        stop Token = try expand_raw(p, e)
+        if stop.kind != TK_PUNCT || !cc_is(n, stop, c")") { try cc_error(n, t.loc, c"missing ')' after defined") }
+    }
+    return pp_number(n, t, if pp_defined(p, cc_ident(n, a)) { 1 } else { 0 })
+}
+
+fn builtin_args(p handle[Pp], e handle[Expand], t Token, args handle[Vec[Token]]) void fails {
+    n handle[CNames] = &p.names
+    opening Token = try expand_raw(p, e)
+    while opening.kind == TK_NL { opening = try expand_raw(p, e) }
+    if opening.kind != TK_PUNCT || !cc_is(n, opening, c"(") { try cc_error(n, t.loc, c"expected '(' after preprocessing operator") }
+    depth usize = 0
+    while true {
+        a Token = try expand_raw(p, e)
+        if a.kind == TK_EOF { try cc_error(n, t.loc, c"unterminated preprocessing operator") }
+        if a.kind == TK_NL { continue }
+        if a.kind == TK_PUNCT && cc_is(n, a, c"(") { depth += 1 }
+        if a.kind == TK_PUNCT && cc_is(n, a, c")") {
+            if depth == 0 { return }
+            depth -= 1
+        }
+        vec_push[Token](args, a)
+    }
+}
+
+fn builtin_test(p handle[Pp], e handle[Expand], t Token, which Bytes) Token fails {
+    n handle[CNames] = &p.names
+    args Vec[Token] = {}
+    try builtin_args(p, e, t, &args)
+    expanded Vec[Token] = {}
+    header bool = bytes_eq_c(which, c"__has_include") || bytes_eq_c(which, c"__has_include_next") || bytes_eq_c(which, c"__has_embed")
+    // Identifiers within a literal angle header name must not be expanded.
+    if header && args.n != 0 && cc_is(n, args.p[Token], c"<") {
+        copy_into[Vec[Token]](&expanded, &args)
+    } else {
+        try expand_list(p, args.p, args.n, &expanded, false)
+    }
+    value u64 = 0
+    if header {
+        h Header = {}
+        try pp_header(p, &expanded, t.loc, &h)
+        found Found = pp_find(p, h.name, h.quote, bytes_eq_c(which, c"__has_include_next"))
+        if bytes_eq_c(which, c"__has_embed") {
+            spec Embed = {}
+            spec.limit = ~0
+            if try embed_spec(p, &expanded, h.used, t.loc, &spec, true) {
+                if found.file != null {
+                    file handle[Input] = handle_from_addr(found.file)
+                    value = if file.content.n == 0 || spec.limit == 0 { 2 } else { 1 }
+                }
+            }
+        } else if found.file != null { value = 1 }
+    } else if expanded.n != 0 {
+        a Token = expanded.p[Token]
+        name Bytes = cc_spelling(n, a)
+        if bytes_eq_c(which, c"__has_c_attribute") {
+            scope Bytes = bytes_empty()
+            if expanded.n == 3 && cc_is(n, expanded.p[Token, 1], c"::") {
+                scope = name
+                name = cc_spelling(n, expanded.p[Token, 2])
+            }
+            value = feature_c_attr(name, scope)
+        } else if bytes_eq_c(which, c"__has_attribute") {
+            value = if feature_in(C_ATTRIBUTES, feature_attr(name)) { 1 } else { 0 }
+        } else if bytes_eq_c(which, c"__has_builtin") {
+            value = if feature_in(C_BUILTINS, name) { 1 } else { 0 }
+        } else if bytes_eq_c(which, c"__is_identifier") {
+            value = if a.kind == TK_IDENT && !feature_in(c" alignas alignof auto bool char const constexpr double enum extern false float int long nullptr register restrict short signed sizeof static struct thread_local true typedef typeof typeof_unqual union unsigned void volatile _Atomic _BitInt ", name) { 1 } else { 0 }
+        }
+    }
+    if value >= 100000 && bytes_eq_c(which, c"__has_c_attribute") {
+        b Buf = {}
+        buf_dec_u64(&b, value)
+        buf_u8(&b, 76)
+        return cc_token(TK_NUM, t.flags, t.loc, cc_intern(n, buf_bytes(&b)))
+    }
+    return pp_number(n, t, value)
+}
+
+fn builtin_expand(p handle[Pp], e handle[Expand], t Token, name Bytes) Token fails {
+    n handle[CNames] = &p.names
+    if e.expression && bytes_eq_c(name, c"defined") { return try builtin_defined(p, e, t) }
+    if name.n == 0 || name.p[u8] != 95 { return t }
+    if !builtin_object(name) { return t }
+    if builtin_query(name) { return try builtin_test(p, e, t, name) }
+    if bytes_eq_c(name, c"_Pragma") {
+        args Vec[Token] = {}
+        try builtin_args(p, e, t, &args)
+        expanded Vec[Token] = {}
+        try expand_list(p, args.p, args.n, &expanded, false)
+        if expanded.n != 1 || expanded.p[Token].kind != TK_STR {
+            try cc_error(n, t.loc, c"_Pragma requires one string literal")
+        }
+        contents Vec[Token] = {}
+        try pragma_tokens(p, pp_destringize(cc_spelling(n, expanded.p[Token])), t.loc, &contents)
+        pragma Token = try pp_pragma(p, &contents, t.loc)
+        if pragma.kind == TK_PLACE { return try expand_next(p, e) }
+        return pragma
+    }
+    pos CLoc = vec_get[CLoc](&n.locations, zext[usize](t.loc))
+    if bytes_eq_c(name, c"__LINE__") { return pp_number(n, t, zext[u64](pos.line)) }
+    if bytes_eq_c(name, c"__INCLUDE_LEVEL__") { return pp_number(n, t, zext[u64](pos.level)) }
+    if bytes_eq_c(name, c"__COUNTER__") {
+        k u64 = p.counter
+        p.counter += 1
+        return pp_number(n, t, k)
+    }
+    b Buf = {}
+    if bytes_eq_c(name, c"__DATE__") || bytes_eq_c(name, c"__TIME__") {
+        builtin_timestamp(p, &b, bytes_eq_c(name, c"__DATE__"))
+    } else {
+        f u32 = if bytes_eq_c(name, c"__BASE_FILE__") { p.base_logical } else { pos.file }
+        path Bytes = cc_name(n, f)
+        if bytes_eq_c(name, c"__FILE_NAME__") { path = path_basename(path) }
+        pp_quote(&b, path)
+    }
+    return cc_token(TK_STR, t.flags, t.loc, cc_intern(n, buf_bytes(&b)))
+}

@@ -10,6 +10,10 @@ const TK_NL u8 = 6
 const TK_HEADER u8 = 7
 const TK_PRAGMA u8 = 8
 const TK_PLACE u8 = 9
+const TK_ENTER u8 = 10
+const TK_LEAVE u8 = 11
+const TK_MARK u8 = 12
+const TK_DIRECT u8 = 13
 
 const F_SPACE u8 = 1
 const F_BOL u8 = 2
