@@ -37,6 +37,19 @@ def decode_ucn(match):
     return chr(cp).encode()
 
 
+def identifier_pieces(word):
+    """Separate Unicode characters outside C23's identifier classes."""
+    text = word.decode("utf-8", errors="surrogateescape")
+    start = 0
+    while start < len(text):
+        end = start + 1
+        if text[start].isidentifier() or text[start] == "$":
+            while end < len(text) and (("_" + text[end]).isidentifier() or text[end] == "$"):
+                end += 1
+        yield text[start:end].encode("utf-8", errors="surrogateescape")
+        start = end
+
+
 def tokens(source):
     # A pragma's line boundary matters even though normal C whitespace does not.
     source = DIRECTIVES.sub(lambda m: m[0].rstrip() + b"\x01\n", source)
@@ -45,9 +58,16 @@ def tokens(source):
     result = []
     for match in TOKEN.finditer(source):
         word = match[1]
-        if word is not None:
-            if b"\\" in word and not any(c in word for c in (b'"', b"'")):
-                word = UCN_RE.sub(decode_ucn, word)
+        if word is None:
+            continue
+        if any(c in word for c in (b'"', b"'")):
+            result.append(word)
+            continue
+        if b"\\" in word:
+            word = UCN_RE.sub(decode_ucn, word)
+        if not word.isascii() and not word[:1].isdigit() and not word.startswith(b"."):
+            result.extend(identifier_pieces(word))
+        else:
             result.append(word)
     return result
 
@@ -235,7 +255,7 @@ def main():
         # Normalize the compiler's identity and data model. The extra shared-
         # header comparison holds the actual resource headers fixed as well.
         normalized = ["-undef", "-Wno-macro-redefined", "-Wno-builtin-macro-redefined",
-                      "-imacros", str(defs)]
+                      "-U__has_warning", "-imacros", str(defs)]
         shared_headers = ["-nostdinc", "-isystem", str(ROOT / "cc/include"),
                           "-isystem", "/usr/local/include",
                           "-isystem", "/usr/include/x86_64-linux-gnu",
