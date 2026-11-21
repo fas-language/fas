@@ -101,6 +101,37 @@ fn parse_reg_token() u16 fails {
     return r
 }
 
+// Parses optional AVX-512 operand decorators: {%k1..%k7}, {z}, {1toN}.
+fn parse_op_decorators(out handle[Operand]) void fails {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    while true {
+        skip_hspace()
+        if ac.pos >= n || p[u8, ac.pos] != 123 { break } // '{'
+        ac.pos += 1
+        skip_hspace()
+        if ac.pos < n && p[u8, ac.pos] == 37 { // %k1..%k7
+            r u16 = try parse_reg_token()
+            if reg_class(r) != RC_K { try as_err(c"expected mask register %k0..%k7 in decorator") }
+            out.opmask = reg_num(r)
+        } else {
+            start u64 = ac.pos
+            while ac.pos < n && p[u8, ac.pos] != 125 && !is_hspace(p[u8, ac.pos]) { ac.pos += 1 }
+            d Bytes = bytes(p + start, ac.pos - start)
+            if bytes_is(d, c"z") {
+                out.zeroing = true
+            } else if d.n >= 4 && d.p[u8, 0] == 49 && d.p[u8, 1] == 116 && d.p[u8, 2] == 111 {
+                out.bcast = true
+            } else {
+                try as_err_b(c"unsupported operand decorator: ", d)
+            }
+        }
+        skip_hspace()
+        if ac.pos >= n || p[u8, ac.pos] != 125 { try as_err(c"expected '}' after operand decorator") }
+        ac.pos += 1
+    }
+}
+
 // Parses a single AT&T instruction operand.
 fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
     mem_set(handle_addr(out), 0, sizeof[Operand])
@@ -137,6 +168,7 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         } else {
             out.kind = OPK_REG
             out.reg = r
+            try parse_op_decorators(out)
             return
         }
     }
@@ -180,6 +212,7 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
             try as_err(c"expected ')' in memory operand")
         }
         ac.pos += 1
+        try parse_op_decorators(out)
         return
     }
 
@@ -188,6 +221,7 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         out.kind = OPK_BRANCH
     } else {
         out.kind = OPK_MEM
+        try parse_op_decorators(out)
     }
 }
 

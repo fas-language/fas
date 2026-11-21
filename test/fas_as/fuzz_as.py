@@ -23,6 +23,11 @@ R32_IDX = [r for r in R32 if r != '%esp']
 ST = [f'%st({i})' for i in range(8)]
 XMM = [f'%xmm{i}' for i in range(16)]
 YMM = [f'%ymm{i}' for i in range(16)]
+XMM32 = [f'%xmm{i}' for i in range(32)]
+YMM32 = [f'%ymm{i}' for i in range(32)]
+ZMM = [f'%zmm{i}' for i in range(32)]
+KREG = [f'%k{i}' for i in range(8)]
+KMASK = [f'%k{i}' for i in range(1, 8)]
 
 EDGE_IMM8 = [0, 1, -1, 2, 7, 127, -128, 255]
 EDGE_IMM16 = [0, 1, -1, 127, 128, -128, -129, 32767, -32768, 65535]
@@ -64,7 +69,7 @@ def rand_mem(rng, allow_rip=True, allow_seg=True):
     return f"{seg}{rng.choice([0, 0x1000, -0x100])}"
 
 def rand_insn(rng):
-    cat = rng.randint(0, 21)
+    cat = rng.randint(0, 23)
     if cat == 0: # ALU 8/16/32/64
         op = rng.choice(['add', 'or', 'adc', 'sbb', 'and', 'sub', 'xor', 'cmp'])
         sz = rng.choice(['b', 'w', 'l', 'q'])
@@ -377,13 +382,71 @@ def rand_insn(rng):
         regs = YMM if (sfx in ('ps', 'pd') and rng.random() < 0.5) else XMM
         src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
         return f"{fam}{order}{sfx} {src}, {rng.choice(regs)}, {rng.choice(regs)}"
-    # cat == 21: AVX scalar & AES/PCLMUL VEX
+    if cat == 21: # AVX scalar & AES/PCLMUL VEX
+        return rng.choice([
+            f"vaddss {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"vmulsd {rand_mem(rng)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"vcvtsi2sdq {rng.choice(R64)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"vaesenc {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"vpclmulqdq $0x01, {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        ])
+    if cat == 22: # AVX-512 EVEX (zmm0..31, xmm16..31, ymm16..31, opmasking, {z}, {1toN}, disp8*N)
+        sub = rng.randint(0, 5)
+        mask = ''
+        if rng.random() < 0.45:
+            mask = '{' + rng.choice(KMASK) + '}' + ('{z}' if rng.random() < 0.4 else '')
+        if sub == 0:
+            op = rng.choice(['vaddps', 'vaddpd', 'vsubps', 'vmulpd', 'vdivps', 'vxorps', 'vandpd',
+                             'vpaddd', 'vpaddq', 'vpsubd', 'vpmulld', 'vpmullq', 'vpxord', 'vpandq',
+                             'vpminsd', 'vpmaxuq', 'vpermd', 'vpsllvd', 'vpsravq',
+                             'vfmadd213ps', 'vfmadd231pd', 'vfmsub132ps', 'vfnmadd213pd'])
+            regs = rng.choice([ZMM, YMM32, XMM32])
+            if rng.random() < 0.5:
+                src = rng.choice(regs)
+            else:
+                d = rng.choice([0, 64, -64, 128, 16, 32, 4, 8, 512, 10000])
+                src = f"{d}({rng.choice(R64)})"
+                if op in ('vaddps', 'vpaddd', 'vfmadd213ps') and rng.random() < 0.35:
+                    src += '{1to16}' if regs is ZMM else ('{1to8}' if regs is YMM32 else '{1to4}')
+            return f"{op} {src}, {rng.choice(regs)}, {rng.choice(regs)}{mask}"
+        if sub == 1:
+            op = rng.choice(['vmovaps', 'vmovups', 'vmovapd', 'vmovdqa32', 'vmovdqa64', 'vmovdqu32', 'vmovdqu64'])
+            regs = rng.choice([ZMM, YMM32, XMM32])
+            d = rng.choice([0, 64, -64, 128, 16, 32, 1000])
+            if rng.random() < 0.5:
+                return f"{op} {d}({rng.choice(R64)}), {rng.choice(regs)}{mask}"
+            return f"{op} {rng.choice(regs)}, {d}({rng.choice(R64)})"
+        if sub == 2:
+            op = rng.choice(['vsqrtps', 'vsqrtpd', 'vpabsd', 'vpabsq'])
+            return f"{op} {rng.choice(ZMM)}, {rng.choice(ZMM)}{mask}"
+        if sub == 3:
+            op = rng.choice(['vpslld', 'vpsrld', 'vpsrad', 'vpsllq', 'vpsrlq', 'vpsraq'])
+            return f"{op} ${rng.choice([1, 3, 7])}, {rng.choice(ZMM)}, {rng.choice(ZMM)}{mask}"
+        if sub == 4:
+            op = rng.choice(['vpcmpd', 'vpcmpq', 'vpcmpud', 'vcmpps', 'vcmppd'])
+            km = '{' + rng.choice(KMASK) + '}' if rng.random() < 0.4 else ''
+            return f"{op} ${rng.choice([0, 1, 2, 4])}, {rng.choice(ZMM)}, {rng.choice(ZMM)}, {rng.choice(KREG)}{km}"
+        return rng.choice([
+            f"vpshufd $0xe4, {rng.choice(ZMM)}, {rng.choice(ZMM)}{mask}",
+            f"vpermq $0x1b, {rng.choice(ZMM)}, {rng.choice(ZMM)}{mask}",
+            f"vbroadcastss 4({rng.choice(R64)}), {rng.choice(ZMM)}{mask}",
+            f"vpbroadcastq {rng.choice(R64)}, {rng.choice(ZMM)}{mask}",
+        ])
+    # cat == 23: AVX-512 opmask k0..k7 instructions
     return rng.choice([
-        f"vaddss {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
-        f"vmulsd {rand_mem(rng)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
-        f"vcvtsi2sdq {rng.choice(R64)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
-        f"vaesenc {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
-        f"vpclmulqdq $0x01, {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        f"kmovw {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kmovw {rng.choice(R32)}, {rng.choice(KREG)}",
+        f"kmovw {rng.choice(KREG)}, {rng.choice(R32)}",
+        f"kmovq {rng.choice(R64)}, {rng.choice(KREG)}",
+        f"kmovq {rng.choice(KREG)}, {rng.choice(R64)}",
+        f"kandw {rng.choice(KREG)}, {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kandnq {rng.choice(KREG)}, {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"korb {rng.choice(KREG)}, {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kxord {rng.choice(KREG)}, {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"knotw {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kortestq {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kshiftlw $3, {rng.choice(KREG)}, {rng.choice(KREG)}",
+        f"kshiftrq $5, {rng.choice(KREG)}, {rng.choice(KREG)}",
     ])
 
 def parse_elf_text_and_relas(data):

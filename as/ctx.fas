@@ -176,7 +176,10 @@ struct Operand {
     base u16        // OPK_MEM: base reg id (0 = none)
     index u16       // OPK_MEM: index reg id (0 = none)
     scale u8        // OPK_MEM: 0, 1, 2, 4, 8
-    pad u8
+    opmask u8       // AVX-512 { %k1..%k7 } (0 = none)
+    zeroing bool    // AVX-512 {z}
+    bcast bool      // AVX-512 {1toN} broadcast
+    pad u16
     expr u32        // ExprNode id for IMM, MEM disp, or BRANCH target (AS_NONE if none)
 }
 

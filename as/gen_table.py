@@ -46,6 +46,16 @@ OT_CR = 35
 OT_DR = 36
 OT_IND_RM64 = 37
 OT_M_ANY = 38
+OT_ZMM = 39
+OT_ZM = 40
+OT_K = 41
+OT_KM = 42
+
+EF2_EVEX = 1 << 0
+EF2_EVEX128 = 0 << 1
+EF2_EVEX256 = 1 << 1
+EF2_EVEX512 = 2 << 1
+def ef2_disp8(shift): return (shift & 0x1f) << 3
 
 # Encoding flags
 EF_REXW = 1 << 0
@@ -88,9 +98,9 @@ MAP_0F3A = 3
 
 entries = defaultdict(list)
 
-def add(mnem, ops, omap, opcode, ext, flags):
+def add(mnem, ops, omap, opcode, ext, flags, ef2=0):
     op4 = list(ops) + [OT_NONE] * (4 - len(ops))
-    entries[mnem].append((len(ops), op4, omap, opcode, ext, flags))
+    entries[mnem].append((len(ops), op4, omap, opcode, ext, flags, ef2))
 
 def add_alias(mnem, *aliases):
     for a in aliases:
@@ -1100,6 +1110,137 @@ for base, op132, op213, op231, has_scalar in FMA_FAMILIES:
                 m = base + order + sfx
                 add(m, [OT_XM, OT_XMM, OT_XMM], MAP_0F38, op_p + 1, 0, EF_VEX | EF_66 | w | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG)
 
+# ==============================================================================
+# Milestone 5: AVX-512 (EVEX: AVX-512F / BW / DQ / VL + opmask k0..k7)
+# ==============================================================================
+
+def add_evex_bin(name, omap, op, pfx, w_flag=0, has_vl=True):
+    """EVEX 3-op binary (rm, vvvv, r) for 512-bit (and optional 128/256-bit VL)."""
+    if has_vl:
+        add(name, [OT_XM, OT_XMM, OT_XMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG, EF2_EVEX | EF2_EVEX128 | ef2_disp8(4))
+        add(name, [OT_YM, OT_YMM, OT_YMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG, EF2_EVEX | EF2_EVEX256 | ef2_disp8(5))
+    add(name, [OT_ZM, OT_ZMM, OT_ZMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(6))
+
+def add_evex_un(name, omap, op, pfx, w_flag=0, has_vl=True):
+    """EVEX 2-op unary (rm, r) for 512-bit (and optional 128/256-bit VL)."""
+    if has_vl:
+        add(name, [OT_XM, OT_XMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX128 | ef2_disp8(4))
+        add(name, [OT_YM, OT_YMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX256 | ef2_disp8(5))
+    add(name, [OT_ZM, OT_ZMM], omap, op, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(6))
+
+def add_evex_mov(name, op_ld, op_st, pfx, w_flag=0):
+    for rm, r, vl, sh in [(OT_XM, OT_XMM, EF2_EVEX128, 4), (OT_YM, OT_YMM, EF2_EVEX256, 5), (OT_ZM, OT_ZMM, EF2_EVEX512, 6)]:
+        add(name, [rm, r], MAP_0F, op_ld, 0, pfx | w_flag | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | vl | ef2_disp8(sh))
+        add(name, [r, OT_M], MAP_0F, op_st, 0, pfx | w_flag | EF_MODRM | EF_OP0_REG | EF_OP1_RM, EF2_EVEX | vl | ef2_disp8(sh))
+
+# AVX-512 moves
+add_evex_mov('vmovaps', 0x28, 0x29, 0, 0)
+add_evex_mov('vmovups', 0x10, 0x11, 0, 0)
+add_evex_mov('vmovapd', 0x28, 0x29, EF_66, EF_VEX_W1)
+add_evex_mov('vmovupd', 0x10, 0x11, EF_66, EF_VEX_W1)
+add_evex_mov('vmovdqa32', 0x6f, 0x7f, EF_66, 0)
+add_evex_mov('vmovdqa64', 0x6f, 0x7f, EF_66, EF_VEX_W1)
+add_evex_mov('vmovdqu32', 0x6f, 0x7f, EF_F3, 0)
+add_evex_mov('vmovdqu64', 0x6f, 0x7f, EF_F3, EF_VEX_W1)
+add_evex_mov('vmovdqu8',  0x6f, 0x7f, EF_F2, 0)
+add_evex_mov('vmovdqu16', 0x6f, 0x7f, EF_F2, EF_VEX_W1)
+
+# AVX-512 FP binary & unary (512 + VL 128/256)
+for base, op in [('vadd', 0x58), ('vmul', 0x59), ('vsub', 0x5c), ('vmin', 0x5d), ('vdiv', 0x5e), ('vmax', 0x5f),
+                 ('vand', 0x54), ('vandn', 0x55), ('vor', 0x56), ('vxor', 0x57), ('vunpckl', 0x14), ('vunpckh', 0x15)]:
+    add_evex_bin(base + 'ps', MAP_0F, op, 0, 0)
+    add_evex_bin(base + 'pd', MAP_0F, op, EF_66, EF_VEX_W1)
+add_evex_un('vsqrtps', MAP_0F, 0x51, 0, 0)
+add_evex_un('vsqrtpd', MAP_0F, 0x51, EF_66, EF_VEX_W1)
+
+# AVX-512 integer SIMD (512 + VL 128/256)
+for name, omap, op, w in [
+    ('vpaddb', MAP_0F, 0xfc, 0), ('vpaddw', MAP_0F, 0xfd, 0), ('vpaddd', MAP_0F, 0xfe, 0), ('vpaddq', MAP_0F, 0xd4, EF_VEX_W1),
+    ('vpsubb', MAP_0F, 0xf8, 0), ('vpsubw', MAP_0F, 0xf9, 0), ('vpsubd', MAP_0F, 0xfa, 0), ('vpsubq', MAP_0F, 0xfb, EF_VEX_W1),
+    ('vpmullw', MAP_0F, 0xd5, 0), ('vpmulld', MAP_0F38, 0x40, 0), ('vpmullq', MAP_0F38, 0x40, EF_VEX_W1),
+    ('vpandd', MAP_0F, 0xdb, 0), ('vpandq', MAP_0F, 0xdb, EF_VEX_W1),
+    ('vpandnd', MAP_0F, 0xdf, 0), ('vpandnq', MAP_0F, 0xdf, EF_VEX_W1),
+    ('vpord', MAP_0F, 0xeb, 0), ('vporq', MAP_0F, 0xeb, EF_VEX_W1),
+    ('vpxord', MAP_0F, 0xef, 0), ('vpxorq', MAP_0F, 0xef, EF_VEX_W1),
+    ('vpminsd', MAP_0F38, 0x39, 0), ('vpminsq', MAP_0F38, 0x39, EF_VEX_W1),
+    ('vpminud', MAP_0F38, 0x3b, 0), ('vpminuq', MAP_0F38, 0x3b, EF_VEX_W1),
+    ('vpmaxsd', MAP_0F38, 0x3d, 0), ('vpmaxsq', MAP_0F38, 0x3d, EF_VEX_W1),
+    ('vpmaxud', MAP_0F38, 0x3f, 0), ('vpmaxuq', MAP_0F38, 0x3f, EF_VEX_W1),
+    ('vpermd', MAP_0F38, 0x36, 0), ('vpermq', MAP_0F38, 0x36, EF_VEX_W1),
+    ('vpsllvd', MAP_0F38, 0x47, 0), ('vpsllvq', MAP_0F38, 0x47, EF_VEX_W1),
+    ('vpsrlvd', MAP_0F38, 0x45, 0), ('vpsrlvq', MAP_0F38, 0x45, EF_VEX_W1),
+    ('vpsravd', MAP_0F38, 0x46, 0), ('vpsravq', MAP_0F38, 0x46, EF_VEX_W1),
+]:
+    add_evex_bin(name, omap, op, EF_66, w)
+
+add_evex_un('vpabsd', MAP_0F38, 0x1e, EF_66, 0)
+add_evex_un('vpabsq', MAP_0F38, 0x1f, EF_66, EF_VEX_W1)
+
+# AVX-512 immediate shifts & shuffles
+for name, op, ext, w in [
+    ('vpsrld', 0x72, 2, 0), ('vpsrad', 0x72, 4, 0), ('vpslld', 0x72, 6, 0),
+    ('vpsrlq', 0x73, 2, EF_VEX_W1), ('vpsraq', 0x72, 4, EF_VEX_W1), ('vpsllq', 0x73, 6, EF_VEX_W1),
+]:
+    for rm, r, vl, sh in [(OT_XM, OT_XMM, EF2_EVEX128, 4), (OT_YM, OT_YMM, EF2_EVEX256, 5), (OT_ZM, OT_ZMM, EF2_EVEX512, 6)]:
+        add(name, [OT_IMM8, rm, r], MAP_0F, op, ext, EF_66 | w | EF_MODRM | EF_REG_EXT | EF_OP1_RM | EF_VEX_VVVV_2 | EF_IMM_U8, EF2_EVEX | vl | ef2_disp8(sh))
+
+add('vpshufd', [OT_IMM8, OT_ZM, OT_ZMM], MAP_0F, 0x70, 0, EF_66 | EF_MODRM | EF_OP1_RM | EF_OP2_REG | EF_IMM_U8, EF2_EVEX | EF2_EVEX512 | ef2_disp8(6))
+add('vpermq', [OT_IMM8, OT_ZM, OT_ZMM], MAP_0F3A, 0x00, 0, EF_66 | EF_VEX_W1 | EF_MODRM | EF_OP1_RM | EF_OP2_REG | EF_IMM_U8, EF2_EVEX | EF2_EVEX512 | ef2_disp8(6))
+
+# AVX-512 FMA3 (512 + VL 128/256)
+for base, op132, op213, op231, _ in FMA_FAMILIES:
+    for order, op_p in [('132', op132), ('213', op213), ('231', op231)]:
+        add_evex_bin(base + order + 'ps', MAP_0F38, op_p, EF_66, 0)
+        add_evex_bin(base + order + 'pd', MAP_0F38, op_p, EF_66, EF_VEX_W1)
+
+# AVX-512 broadcasts
+add('vbroadcastss', [OT_XM, OT_ZMM], MAP_0F38, 0x18, 0, EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(2))
+add('vbroadcastsd', [OT_XM, OT_ZMM], MAP_0F38, 0x19, 0, EF_66 | EF_VEX_W1 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(3))
+add('vpbroadcastd', [OT_XM, OT_ZMM], MAP_0F38, 0x58, 0, EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(2))
+add('vpbroadcastq', [OT_XM, OT_ZMM], MAP_0F38, 0x59, 0, EF_66 | EF_VEX_W1 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512 | ef2_disp8(3))
+add('vpbroadcastd', [OT_R32, OT_ZMM], MAP_0F38, 0x7c, 0, EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512)
+add('vpbroadcastq', [OT_R64, OT_ZMM], MAP_0F38, 0x7c, 0, EF_66 | EF_VEX_W1 | EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_EVEX | EF2_EVEX512)
+
+# AVX-512 compare-to-mask (vpcmpd/q/ud/uq, vcmpps/pd -> %k)
+for name, omap, op, pfx, w in [
+    ('vcmpps', MAP_0F, 0xc2, 0, 0), ('vcmppd', MAP_0F, 0xc2, EF_66, EF_VEX_W1),
+    ('vpcmpd', MAP_0F3A, 0x1f, EF_66, 0), ('vpcmpq', MAP_0F3A, 0x1f, EF_66, EF_VEX_W1),
+    ('vpcmpud', MAP_0F3A, 0x1e, EF_66, 0), ('vpcmpuq', MAP_0F3A, 0x1e, EF_66, EF_VEX_W1),
+]:
+    for rm, r, vl, sh in [(OT_XM, OT_XMM, EF2_EVEX128, 4), (OT_YM, OT_YMM, EF2_EVEX256, 5), (OT_ZM, OT_ZMM, EF2_EVEX512, 6)]:
+        add(name, [OT_IMM8, rm, r, OT_K], omap, op, 0, pfx | w | EF_MODRM | EF_OP1_RM | EF_VEX_VVVV_2 | EF_OP3_REG | EF_IMM_U8, EF2_EVEX | vl | ef2_disp8(sh))
+
+# AVX-512 opmask k0..k7 instructions (VEX-encoded!)
+for sfx, pfx, w, r_gp in [('w', 0, 0, OT_R32), ('b', EF_66, 0, OT_R32), ('q', 0, EF_VEX_W1, OT_R64), ('d', EF_66, EF_VEX_W1, OT_R32)]:
+    # kmov{w,b,d,q}
+    add('kmov' + sfx, [OT_KM, OT_K], MAP_0F, 0x90, 0, EF_VEX | pfx | w | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    add('kmov' + sfx, [OT_K, OT_M], MAP_0F, 0x91, 0, EF_VEX | pfx | w | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+    if sfx == 'w':
+        add('kmovw', [OT_R32, OT_K], MAP_0F, 0x92, 0, EF_VEX | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+        add('kmovw', [OT_K, OT_R32], MAP_0F, 0x93, 0, EF_VEX | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    elif sfx == 'b':
+        add('kmovb', [OT_R32, OT_K], MAP_0F, 0x92, 0, EF_VEX | EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+        add('kmovb', [OT_K, OT_R32], MAP_0F, 0x93, 0, EF_VEX | EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    elif sfx == 'd':
+        add('kmovd', [OT_R32, OT_K], MAP_0F, 0x92, 0, EF_VEX | EF_F2 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+        add('kmovd', [OT_K, OT_R32], MAP_0F, 0x93, 0, EF_VEX | EF_F2 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    elif sfx == 'q':
+        add('kmovq', [OT_R64, OT_K], MAP_0F, 0x92, 0, EF_VEX | EF_F2 | EF_VEX_W1 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+        add('kmovq', [OT_K, OT_R64], MAP_0F, 0x93, 0, EF_VEX | EF_F2 | EF_VEX_W1 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    # kand/kandn/kor/kxor/kxnor/kadd (VEX.L1!)
+    for opname, op in [('kand', 0x41), ('kandn', 0x42), ('kor', 0x45), ('kxnor', 0x46), ('kxor', 0x47), ('kadd', 0x4a)]:
+        add(opname + sfx, [OT_K, OT_K, OT_K], MAP_0F, op, 0, EF_VEX | EF_VEX256 | pfx | w | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG)
+    # knot/kortest/ktest (VEX.L0)
+    add('knot' + sfx, [OT_K, OT_K], MAP_0F, 0x44, 0, EF_VEX | pfx | w | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    add('kortest' + sfx, [OT_K, OT_K], MAP_0F, 0x98, 0, EF_VEX | pfx | w | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    add('ktest' + sfx, [OT_K, OT_K], MAP_0F, 0x99, 0, EF_VEX | pfx | w | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+
+for name, op, w in [
+    ('kshiftrb', 0x30, 0), ('kshiftrw', 0x30, EF_VEX_W1), ('kshiftrd', 0x31, 0), ('kshiftrq', 0x31, EF_VEX_W1),
+    ('kshiftlb', 0x32, 0), ('kshiftlw', 0x32, EF_VEX_W1), ('kshiftld', 0x33, 0), ('kshiftlq', 0x33, EF_VEX_W1),
+]:
+    add(name, [OT_IMM8, OT_K, OT_K], MAP_0F3A, op, 0, EF_VEX | EF_66 | w | EF_MODRM | EF_OP1_RM | EF_OP2_REG | EF_IMM_U8)
+
 # Emit as/table.fas
 mnems = sorted(entries.keys())
 flat_descs = []
@@ -1133,7 +1274,7 @@ lines.append("    omap u8")
 lines.append("    opcode u8")
 lines.append("    ext u8")
 lines.append("    flags u32")
-lines.append("    pad u32")
+lines.append("    ef2 u32")
 lines.append("}")
 lines.append("")
 lines.append("struct MnemEntry {")
@@ -1160,8 +1301,8 @@ lines.append("}")
 lines.append("")
 
 lines.append(f"const INSTR_TABLE arr[{len(flat_descs)}, InstrDesc] = {{")
-for cnt, op4, omap, opcode, ext, flags in flat_descs:
-    lines.append(f"    {{ {cnt}, {op4[0]}, {op4[1]}, {op4[2]}, {op4[3]}, {omap}, 0x{opcode:02x}, 0x{ext:02x}, 0x{flags:08x}, 0 }},")
+for cnt, op4, omap, opcode, ext, flags, ef2 in flat_descs:
+    lines.append(f"    {{ {cnt}, {op4[0]}, {op4[1]}, {op4[2]}, {op4[3]}, {omap}, 0x{opcode:02x}, 0x{ext:02x}, 0x{flags:08x}, 0x{ef2:08x} }},")
 lines.append("}")
 lines.append("")
 
