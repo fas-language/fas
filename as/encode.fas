@@ -1,0 +1,525 @@
+// Table-driven x86-64 instruction matcher and encoder.
+//
+// Matches parsed AT&T operands against INSTR_TABLE (as/table.fas) and emits
+// exact x86-64 machine code + Fixups matching llvm-mc-22 byte for byte.
+
+// Operand type constants (must match as/gen_table.py)
+const OT_NONE u8 = 0
+const OT_R8 u8 = 1
+const OT_R16 u8 = 2
+const OT_R32 u8 = 3
+const OT_R64 u8 = 4
+const OT_RM8 u8 = 5
+const OT_RM16 u8 = 6
+const OT_RM32 u8 = 7
+const OT_RM64 u8 = 8
+const OT_M u8 = 9
+const OT_IMM8 u8 = 10
+const OT_IMM8S u8 = 11
+const OT_IMM16 u8 = 12
+const OT_IMM32 u8 = 13
+const OT_IMM32S u8 = 14
+const OT_IMM64 u8 = 15
+const OT_AL u8 = 16
+const OT_AX u8 = 17
+const OT_EAX u8 = 18
+const OT_RAX u8 = 19
+const OT_CL u8 = 20
+const OT_DX u8 = 21
+const OT_IMM1 u8 = 22
+const OT_REL8 u8 = 23
+const OT_REL32 u8 = 24
+const OT_RELAX u8 = 25
+const OT_SREG u8 = 26
+const OT_ST u8 = 27
+const OT_ST0 u8 = 28
+const OT_XMM u8 = 29
+const OT_XM u8 = 30
+const OT_YMM u8 = 31
+const OT_YM u8 = 32
+const OT_MMX u8 = 33
+const OT_MM u8 = 34
+const OT_CR u8 = 35
+const OT_DR u8 = 36
+const OT_IND_RM64 u8 = 37
+const OT_M_ANY u8 = 38
+
+// Encoding flags (must match as/gen_table.py)
+const EF_REXW u32 = 1 << 0
+const EF_66 u32 = 1 << 1
+const EF_F2 u32 = 1 << 2
+const EF_F3 u32 = 1 << 3
+const EF_MODRM u32 = 1 << 4
+const EF_REG_EXT u32 = 1 << 5
+const EF_PLUS_R u32 = 1 << 6
+const EF_OP0_REG u32 = 1 << 7
+const EF_OP0_RM u32 = 1 << 8
+const EF_OP1_REG u32 = 1 << 9
+const EF_OP1_RM u32 = 1 << 10
+const EF_OP2_REG u32 = 1 << 11
+const EF_OP2_RM u32 = 1 << 12
+const EF_IMM_U8 u32 = 1 << 13
+const EF_IMM_S8 u32 = 1 << 14
+const EF_IMM_16 u32 = 1 << 15
+const EF_IMM_32 u32 = 1 << 16
+const EF_IMM_32S u32 = 1 << 17
+const EF_IMM_64 u32 = 1 << 18
+const EF_VEX u32 = 1 << 19
+const EF_VEX256 u32 = 1 << 20
+const EF_VEX_W1 u32 = 1 << 21
+const EF_VEX_VVVV_0 u32 = 1 << 22
+const EF_VEX_VVVV_1 u32 = 1 << 23
+const EF_VEX_VVVV_2 u32 = 1 << 24
+const EF_IS_JCC u32 = 1 << 25
+const EF_GOTPCRELX u32 = 1 << 26
+const EF_FIXED2 u32 = 1 << 27
+const EF_FIXED3 u32 = 1 << 28
+const EF_PLUS_ST u32 = 1 << 29
+const EF_IMM_REG u32 = 1 << 30
+
+const MAP_1 u8 = 0
+const MAP_0F u8 = 1
+const MAP_0F38 u8 = 2
+const MAP_0F3A u8 = 3
+
+// ---------- Mnemonic binary search ----------
+
+fn mnem_cmp_ci(query Bytes, off u32, ln u16) i32 {
+    n u64 = zext[u64](ln)
+    m u64 = if query.n < n { query.n } else { n }
+    for i u64 in 0..m {
+        a u8 = ascii_lower(query.p[u8, i])
+        b u8 = MNEM_STR[zext[u64](off) + i]
+        if a < b { return -1 }
+        if a > b { return 1 }
+    }
+    if query.n < n { return -1 }
+    if query.n > n { return 1 }
+    return 0
+}
+
+// Returns index into MNEM_TABLE, or AS_NONE if not found.
+fn mnem_find(name Bytes) u32 {
+    lo i64 = 0
+    hi i64 = bitcast[i64](MNEM_COUNT) - 1
+    while lo <= hi {
+        mid i64 = lo + (hi - lo) / 2
+        e handle[MnemEntry] = &MNEM_TABLE[bitcast[u64](mid)]
+        c i32 = mnem_cmp_ci(name, e.name_off, e.name_len)
+        if c == 0 { return trunc[u32](bitcast[u64](mid)) }
+        if c < 0 { hi = mid - 1 } else { lo = mid + 1 }
+    }
+    return AS_NONE
+}
+
+// ---------- Operand matching ----------
+
+fn fits_i8(v i64) bool { return v >= -128 && v <= 127 }
+fn fits_u8_or_i8(v i64) bool { return v >= -128 && v <= 255 }
+fn fits_i16_or_u16(v i64) bool { return v >= -32768 && v <= 65535 }
+fn fits_i32(v i64) bool { return v >= -2147483648 && v <= 2147483647 }
+fn fits_i32_or_u32(v i64) bool { return v >= -2147483648 && v <= 4294967295 }
+
+fn fits_i8_for_flags(v i64, flags u32) bool {
+    if (flags & EF_66) != 0 {
+        s i64 = sext[i64](trunc[i16](bitcast[u64](v)))
+        return s >= -128 && s <= 127
+    }
+    if (flags & EF_REXW) == 0 {
+        s i64 = sext[i64](trunc[i32](bitcast[u64](v)))
+        return s >= -128 && s <= 127
+    }
+    return v >= -128 && v <= 127
+}
+
+fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
+    k u8 = op.kind
+    if ot == OT_NONE { return k == OPK_NONE }
+    if ot == OT_R8 { return k == OPK_REG && !op.indirect && reg_is_gp8(op.reg) }
+    if ot == OT_R16 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP16 }
+    if ot == OT_R32 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP32 }
+    if ot == OT_R64 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP64 }
+    if ot == OT_RM8 { return (!op.indirect) && ((k == OPK_REG && reg_is_gp8(op.reg)) || k == OPK_MEM) }
+    if ot == OT_RM16 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP16) || k == OPK_MEM) }
+    if ot == OT_RM32 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
+    if ot == OT_RM64 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
+    if ot == OT_M || ot == OT_M_ANY { return k == OPK_MEM && !op.indirect }
+    if ot == OT_IND_RM64 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
+    if ot == OT_AL { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP8, 0) }
+    if ot == OT_AX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP16, 0) }
+    if ot == OT_EAX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP32, 0) }
+    if ot == OT_RAX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP64, 0) }
+    if ot == OT_CL { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP8, 1) }
+    if ot == OT_DX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP16, 2) }
+    if ot == OT_SREG { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_SEG }
+    if ot == OT_ST { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_X87 }
+    if ot == OT_ST0 { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_X87, 0) }
+    if ot == OT_XMM { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_XMM }
+    if ot == OT_XM { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_XMM) || k == OPK_MEM) }
+    if ot == OT_YMM { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_YMM }
+    if ot == OT_YM { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_YMM) || k == OPK_MEM) }
+    if ot == OT_MMX { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_MMX }
+    if ot == OT_MM { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_MMX) || k == OPK_MEM) }
+    if ot == OT_CR { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_CR }
+    if ot == OT_DR { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_DR }
+    if ot == OT_REL8 || ot == OT_REL32 || ot == OT_RELAX {
+        return !op.indirect && (k == OPK_BRANCH || k == OPK_MEM) && op.base == 0 && op.index == 0 && op.seg == 0
+    }
+    if k == OPK_IMM {
+        ev EvalVal = {}
+        eval_expr(op.expr, false, &ev)
+        if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
+        if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
+        if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
+        if ot == OT_IMM16 { return ev.kind != EV_CONST || fits_i16_or_u16(ev.val) }
+        if ot == OT_IMM32 { return ev.kind != EV_CONST || fits_i32_or_u32(ev.val) }
+        if ot == OT_IMM32S { return ev.kind != EV_CONST || fits_i32(ev.val) }
+        if ot == OT_IMM64 { return true }
+    }
+    return false
+}
+
+fn desc_op(d handle[InstrDesc], i u8) u8 {
+    if i == 0 { return d.op0 }
+    if i == 1 { return d.op1 }
+    if i == 2 { return d.op2 }
+    return d.op3
+}
+
+fn desc_imm_size(flags u32) u32 {
+    if (flags & (EF_IMM_U8 | EF_IMM_S8)) != 0 { return 1 }
+    if (flags & EF_IMM_16) != 0 { return 2 }
+    if (flags & (EF_IMM_32 | EF_IMM_32S)) != 0 { return 4 }
+    if (flags & EF_IMM_64) != 0 { return 8 }
+    return 0
+}
+
+fn seg_prefix_byte(seg u8) u8 {
+    if seg == 1 { return 0x26 } // es
+    if seg == 2 { return 0x2e } // cs
+    if seg == 3 { return 0x36 } // ss
+    if seg == 4 { return 0x3e } // ds
+    if seg == 5 { return 0x64 } // fs
+    if seg == 6 { return 0x65 } // gs
+    return 0
+}
+
+// ---------- Instruction emission ----------
+
+fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
+    flags u32 = d.flags
+
+    // Handle relaxable branches (jmp/jcc) directly via FK_RELAX_JMP
+    if nops == 1 && d.op0 == OT_RELAX {
+        op0 handle[Operand] = handle_from_addr(ops)
+        emit_relax_jmp(d.opcode, d.ext, (flags & EF_IS_JCC) != 0, op0.expr)
+        return
+    }
+    // Handle fixed rel8 branches (loop/jrcxz)
+    if nops == 1 && d.op0 == OT_REL8 {
+        op0 handle[Operand] = handle_from_addr(ops)
+        emit_u8(d.opcode)
+        fid u32 = frag_ensure_data()
+        f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+        foff u32 = f.data_len
+        emit_u8(0)
+        emit_fixup(fid, foff, 1, FIX_PC, 1, 1, op0.expr)
+        return
+    }
+    // Handle direct near call (e8 rel32)
+    if nops == 1 && d.op0 == OT_REL32 {
+        op0 handle[Operand] = handle_from_addr(ops)
+        emit_u8(d.opcode)
+        fid u32 = frag_ensure_data()
+        f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+        foff u32 = f.data_len
+        emit_u32(0)
+        emit_fixup(fid, foff, 4, FIX_PLT, 1, 4, op0.expr)
+        return
+    }
+
+    // Identify which operands fill reg, rm, and imm roles
+    reg_op handle[Operand] = null
+    rm_op handle[Operand] = null
+    imm_op handle[Operand] = null
+
+    if (flags & EF_OP0_REG) != 0 { reg_op = handle_from_addr(ops) }
+    else if (flags & EF_OP1_REG) != 0 { reg_op = handle_from_addr(ops + sizeof[Operand]) }
+    else if (flags & EF_OP2_REG) != 0 { reg_op = handle_from_addr(ops + 2 * sizeof[Operand]) }
+
+    if (flags & EF_OP0_RM) != 0 { rm_op = handle_from_addr(ops) }
+    else if (flags & EF_OP1_RM) != 0 { rm_op = handle_from_addr(ops + sizeof[Operand]) }
+    else if (flags & EF_OP2_RM) != 0 { rm_op = handle_from_addr(ops + 2 * sizeof[Operand]) }
+
+    for i u8 in 0..nops {
+        op handle[Operand] = handle_from_addr(ops + zext[u64](i) * sizeof[Operand])
+        if op.kind == OPK_IMM { imm_op = op }
+    }
+
+    // Segment override and 32-bit address-size override (0x67)
+    seg_b u8 = 0
+    addr32 bool = false
+    if rm_op != null && rm_op.kind == OPK_MEM {
+        if rm_op.seg != 0 { seg_b = seg_prefix_byte(rm_op.seg) }
+        if (rm_op.base != 0 && (reg_class(rm_op.base) == RC_GP32 || rm_op.base == reg_make(RC_RIP, 1))) ||
+           (rm_op.index != 0 && reg_class(rm_op.index) == RC_GP32) {
+            addr32 = true
+        }
+    }
+
+    // Compute REX prefix
+    rex u8 = 0
+    has_hi8 bool = false
+    if (flags & EF_REXW) != 0 { rex = rex | 0x48 }
+    if reg_op != null && reg_op.kind == OPK_REG {
+        if reg_is_hi8(reg_op.reg) { has_hi8 = true }
+        if reg_needs_rex(reg_op.reg) { rex = rex | 0x40 }
+        if reg_num(reg_op.reg) >= 8 { rex = rex | 0x44 } // REX.R
+    }
+    if rm_op != null {
+        if rm_op.kind == OPK_REG {
+            if reg_is_hi8(rm_op.reg) { has_hi8 = true }
+            if reg_needs_rex(rm_op.reg) { rex = rex | 0x40 }
+            if reg_num(rm_op.reg) >= 8 { rex = rex | 0x41 } // REX.B
+        } else if rm_op.kind == OPK_MEM {
+            if rm_op.base != 0 && reg_class(rm_op.base) != RC_RIP && reg_num(rm_op.base) >= 8 {
+                rex = rex | 0x41 // REX.B
+            }
+            if rm_op.index != 0 && reg_num(rm_op.index) >= 8 {
+                rex = rex | 0x42 // REX.X
+            }
+        }
+    }
+    if has_hi8 && rex != 0 {
+        try as_err(c"cannot encode high 8-bit register (ah/bh/ch/dh) with REX prefix")
+    }
+
+    // Emit prefixes in llvm-mc canonical order: seg, 0x67, 0x66/F2/F3, lock/rep, REX
+    if seg_b != 0 { emit_u8(seg_b) }
+    if addr32 { emit_u8(0x67) }
+    if (flags & EF_66) != 0 { emit_u8(0x66) }
+    if (flags & EF_F2) != 0 { emit_u8(0xf2) }
+    if (flags & EF_F3) != 0 { emit_u8(0xf3) }
+    if prefix_lock { emit_u8(0xf0) }
+    if prefix_rep != 0 { emit_u8(prefix_rep) }
+    if rex != 0 { emit_u8(rex) }
+
+    // Emit opcode bytes
+    if (flags & EF_FIXED2) != 0 {
+        emit_u8(d.opcode)
+        emit_u8(d.ext)
+        return
+    }
+    if (flags & EF_FIXED3) != 0 {
+        emit_u8(0x0f)
+        emit_u8(d.opcode)
+        emit_u8(d.ext)
+        return
+    }
+    if (flags & EF_PLUS_ST) != 0 {
+        st u8 = if rm_op != null { reg_num(rm_op.reg) & 7 } else { 0 }
+        emit_u8(d.opcode)
+        emit_u8(d.ext + st)
+        return
+    }
+
+    if d.omap == MAP_0F { emit_u8(0x0f) }
+    else if d.omap == MAP_0F38 { emit_u8(0x0f); emit_u8(0x38) }
+    else if d.omap == MAP_0F3A { emit_u8(0x0f); emit_u8(0x3a) }
+
+    if (flags & EF_PLUS_R) != 0 {
+        rnum u8 = if rm_op != null { reg_num(rm_op.reg) & 7 } else { 0 }
+        emit_u8(d.opcode + rnum)
+    } else {
+        emit_u8(d.opcode)
+    }
+
+    // Emit ModRM + SIB + displacement
+    imm_sz u32 = desc_imm_size(flags)
+    if (flags & EF_MODRM) != 0 {
+        reg_field u8 = if (flags & EF_REG_EXT) != 0 {
+            d.ext & 7
+        } else if reg_op != null {
+            reg_num(reg_op.reg) & 7
+        } else {
+            0
+        }
+
+        if rm_op.kind == OPK_REG {
+            rm_field u8 = reg_num(rm_op.reg) & 7
+            emit_u8(0xc0 | (reg_field << 3) | rm_field)
+        } else {
+            // Memory operand
+            try emit_mem_modrm(rm_op, reg_field, imm_sz, (flags & EF_GOTPCRELX) != 0, rex != 0)
+        }
+    }
+
+    // Emit immediate
+    if imm_sz != 0 && imm_op != null {
+        ev EvalVal = {}
+        eval_expr(imm_op.expr, false, &ev)
+        if ev.kind == EV_CONST {
+            if imm_sz == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
+            else if imm_sz == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
+            else if imm_sz == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
+            else { emit_u64(bitcast[u64](ev.val)) }
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            for k u32 in 0..imm_sz { emit_u8(0) }
+            fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
+            emit_fixup(fid, foff, trunc[u8](imm_sz), fkind, 0, imm_sz, imm_op.expr)
+        }
+    }
+}
+
+fn scale_bits(s u8) u8 {
+    if s == 2 { return 1 }
+    if s == 4 { return 2 }
+    if s == 8 { return 3 }
+    return 0
+}
+
+fn emit_mem_modrm(m handle[Operand], reg_field u8, trailing_imm u32, gotpcrelx bool, has_rex bool) void fails {
+    base u16 = m.base
+    index u16 = m.index
+    scale u8 = m.scale
+
+    // Case 1: RIP-relative addressing: disp(%rip) or disp(%eip)
+    if base != 0 && reg_class(base) == RC_RIP {
+        if index != 0 { try as_err(c"cannot use index register with %rip") }
+        emit_u8((reg_field << 3) | 5)
+        fid u32 = frag_ensure_data()
+        f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+        foff u32 = f.data_len
+        emit_u32(0)
+        if m.has_disp && m.expr != AS_NONE {
+            fkind u8 = FIX_PC
+            if gotpcrelx {
+                fkind = if has_rex { FIX_REX_GOTPCRELX } else { FIX_GOTPCRELX }
+            }
+            emit_fixup(fid, foff, 4, fkind, 1, 4 + trailing_imm, m.expr)
+        }
+        return
+    }
+
+    // Evaluate displacement if present
+    disp_is_const bool = true
+    disp_val i64 = 0
+    if m.has_disp && m.expr != AS_NONE {
+        ev EvalVal = {}
+        eval_expr(m.expr, false, &ev)
+        if ev.kind == EV_CONST {
+            disp_val = ev.val
+        } else {
+            disp_is_const = false
+        }
+    }
+
+    // Case 2: No base and no index -> absolute disp32 (SIB 0x25: mod=00 rm=4, ss=00 idx=4 base=5)
+    if base == 0 && index == 0 {
+        emit_u8((reg_field << 3) | 4)
+        emit_u8(0x25)
+        if disp_is_const {
+            emit_u32(trunc[u32](bitcast[u64](disp_val) & 0xffffffff))
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            emit_u32(0)
+            emit_fixup(fid, foff, 4, FIX_IMM32S, 1, 4 + trailing_imm, m.expr)
+        }
+        return
+    }
+
+    // Case 3: No base, with index (and scale) -> mod=00 rm=4, SIB(scale, idx, 5) + disp32
+    if base == 0 && index != 0 {
+        idx_low u8 = reg_num(index) & 7
+        if reg_num(index) == 4 { try as_err(c"%rsp cannot be used as index register") }
+        emit_u8((reg_field << 3) | 4)
+        emit_u8((scale_bits(scale) << 6) | (idx_low << 3) | 5)
+        if disp_is_const {
+            emit_u32(trunc[u32](bitcast[u64](disp_val) & 0xffffffff))
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            emit_u32(0)
+            emit_fixup(fid, foff, 4, FIX_IMM32S, 1, 4 + trailing_imm, m.expr)
+        }
+        return
+    }
+
+    // Case 4: Has base (and optional index)
+    base_low u8 = reg_num(base) & 7
+    need_sib bool = index != 0 || base_low == 4
+    if index != 0 && reg_num(index) == 4 {
+        try as_err(c"%rsp cannot be used as index register")
+    }
+
+    // Choose mod & disp size:
+    //   disp_size = 0 if disp==0 and base_low != 5 (rbp/r13 requires at least disp8=0)
+    //   disp_size = 1 if const and fits_i8(disp)
+    //   disp_size = 4 otherwise
+    disp_sz u8 = 4
+    mod u8 = 2
+    if disp_is_const {
+        if disp_val == 0 && base_low != 5 {
+            disp_sz = 0
+            mod = 0
+        } else if fits_i8(disp_val) {
+            disp_sz = 1
+            mod = 1
+        }
+    }
+
+    if need_sib {
+        idx_low u8 = if index != 0 { reg_num(index) & 7 } else { 4 }
+        emit_u8((mod << 6) | (reg_field << 3) | 4)
+        emit_u8((scale_bits(scale) << 6) | (idx_low << 3) | base_low)
+    } else {
+        emit_u8((mod << 6) | (reg_field << 3) | base_low)
+    }
+
+    if disp_sz == 1 {
+        emit_u8(trunc[u8](bitcast[u64](disp_val) & 0xff))
+    } else if disp_sz == 4 {
+        if disp_is_const {
+            emit_u32(trunc[u32](bitcast[u64](disp_val) & 0xffffffff))
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            emit_u32(0)
+            emit_fixup(fid, foff, 4, FIX_IMM32S, 1, 4 + trailing_imm, m.expr)
+        }
+    }
+}
+
+// ---------- Top-level instruction dispatch ----------
+
+fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
+    midx u32 = mnem_find(mnem)
+    if midx == AS_NONE {
+        try as_err_b(c"unknown instruction: ", mnem)
+    }
+    me handle[MnemEntry] = &MNEM_TABLE[zext[u64](midx)]
+    for i u32 in 0..zext[u32](me.count) {
+        d handle[InstrDesc] = &INSTR_TABLE[zext[u64](me.start + i)]
+        if d.op_count != nops { continue }
+        ok bool = true
+        for k u8 in 0..nops {
+            op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
+            if !op_matches(desc_op(d, k), op, d.flags) {
+                ok = false
+                break
+            }
+        }
+        if ok {
+            try encode_desc(d, ops, nops, prefix_lock, prefix_rep)
+            return
+        }
+    }
+    try as_err_b(c"invalid operand(s) for instruction: ", mnem)
+}

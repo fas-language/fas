@@ -1,0 +1,110 @@
+// fas-as: freestanding x86-64 AT&T assembler in Fas.
+//
+// Usage: fas-as [-o out.o] [--64] [-I dir] [-g] [--noexecstack] file.s|-
+
+use "../lib/core.fas"
+use "ctx.fas"
+use "regs.fas"
+use "expr.fas"
+use "frag.fas"
+use "table.fas"
+use "encode.fas"
+use "parse.fas"
+use "elf_out.fas"
+use "api.fas"
+
+fn read_stdin(out handle[Buf]) void fails {
+    tmp arr[8192, u8] = {}
+    while true {
+        n usize = try os_read(STDIN, &tmp, 8192)
+        if n == 0 { break }
+        buf_append(out, bytes(&tmp, n))
+    }
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    out_path Bytes = bytes_c(c"a.out")
+    in_path Bytes = bytes_empty()
+    has_input bool = false
+    noexecstack bool = false
+    inc_dirs Vec[Bytes] = {}
+
+    i u64 = 1
+    while i < os_argc {
+        a Bytes = bytes_c(os_arg(i))
+        i += 1
+        if bytes_is(a, c"-o") {
+            if i >= os_argc {
+                os_write_all(STDERR, c"fas-as: error: -o requires an argument\n", 39) catch {}
+                return 1
+            }
+            out_path = bytes_c(os_arg(i))
+            i += 1
+        } else if bytes_is(a, c"-I") {
+            if i >= os_argc {
+                os_write_all(STDERR, c"fas-as: error: -I requires an argument\n", 39) catch {}
+                return 1
+            }
+            vec_push(&inc_dirs, bytes_c(os_arg(i)))
+            i += 1
+        } else if a.n > 2 && a.p[u8, 0] == 45 && a.p[u8, 1] == 73 {
+            vec_push(&inc_dirs, bytes(a.p + 2, a.n - 2))
+        } else if bytes_is(a, c"--64") || bytes_is(a, c"-g") || bytes_is(a, c"-gdwarf-2") ||
+                  bytes_is(a, c"-gdwarf-3") || bytes_is(a, c"-gdwarf-4") || bytes_is(a, c"-gdwarf-5") {
+            continue
+        } else if bytes_is(a, c"--noexecstack") {
+            noexecstack = true
+        } else if bytes_is(a, c"-h") || bytes_is(a, c"--help") {
+            os_write_all(STDOUT, c"Usage: fas-as [-o out.o] [--64] [-I dir] [-g] [--noexecstack] file.s|-\n", 71) catch {}
+            return 0
+        } else if bytes_is(a, c"--version") || bytes_is(a, c"-v") {
+            os_write_all(STDOUT, c"fas-as 0.1 (x86-64 ELF64)\n", 26) catch {}
+            if bytes_is(a, c"--version") { return 0 }
+        } else if bytes_is(a, c"-") {
+            in_path = a
+            has_input = true
+        } else if a.n > 0 && a.p[u8, 0] == 45 {
+            os_write_all(STDERR, c"fas-as: error: unknown option: ", 31) catch {}
+            os_write_all(STDERR, a.p, a.n) catch {}
+            os_write_all(STDERR, c"\n", 1) catch {}
+            return 1
+        } else {
+            in_path = a
+            has_input = true
+        }
+    }
+
+    src_buf Buf = {}
+    fname Bytes = bytes_c(c"<stdin>")
+    if !has_input || bytes_is(in_path, c"-") {
+        read_stdin(&src_buf) catch {
+            os_write_all(STDERR, c"fas-as: error: failed to read stdin\n", 36) catch {}
+            return 1
+        }
+    } else {
+        fname = in_path
+        file_read(in_path.p, 256 * 1024 * 1024, &src_buf) catch {
+            os_write_all(STDERR, c"fas-as: error: cannot read input file: ", 39) catch {}
+            os_write_all(STDERR, in_path.p, in_path.n) catch {}
+            os_write_all(STDERR, c"\n", 1) catch {}
+            return 1
+        }
+    }
+
+    res AsResult = {}
+    defer { as_result_free(&res) }
+    ok bool = as_assemble(buf_bytes(&src_buf), fname, &inc_dirs, noexecstack, &res)
+    if !ok {
+        if res.diag.n != 0 {
+            os_write_all(STDERR, res.diag.p, res.diag.n) catch {}
+        }
+        return 1
+    }
+
+    file_write_atomic(out_path.p, bytes(res.obj_data, res.obj_size), 0o644) catch {
+        os_write_all(STDERR, c"fas-as: error: failed to write output file\n", 43) catch {}
+        return 1
+    }
+    return 0
+}

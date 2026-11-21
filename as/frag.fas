@@ -1,0 +1,595 @@
+// Fragment-based section representation, canonical NOP padding,
+// iterative branch relaxation, and fixup-to-relocation resolution.
+
+fn sec_at(id u32) handle[Section] {
+    return vec_at(&ac.sections, zext[u64](id))
+}
+
+fn cur_sec() handle[Section] {
+    return sec_at(ac.cur_sec)
+}
+
+fn sec_get_or_create(name Bytes, sh_type u32, sh_flags u64, sh_entsize u64, group_name Bytes, comdat bool) u32 {
+    existing u32 = map_get(&ac.sec_map, name) catch AS_NONE
+    if existing != AS_NONE && group_name.n == 0 {
+        return existing
+    }
+    id u32 = trunc[u32](ac.sections.n)
+    s handle[Section] = vec_add(&ac.sections)
+    iid u32 = intern(&ac.names, name)
+    sname Bytes = intern_name(&ac.names, iid)
+    s.name = sname
+    s.sh_type = sh_type
+    s.sh_flags = sh_flags
+    s.sh_entsize = sh_entsize
+    s.sh_align = 1
+    if group_name.n != 0 {
+        gid u32 = intern(&ac.names, group_name)
+        s.group_name = intern_name(&ac.names, gid)
+    }
+    s.comdat = comdat
+    s.elf_idx = AS_NONE
+    s.sym_idx = AS_NONE
+    if existing == AS_NONE {
+        map_put(&ac.sec_map, sname, id)
+    }
+    return id
+}
+
+fn sec_switch(id u32) void {
+    if ac.cur_sec != id {
+        ac.prev_sec = ac.cur_sec
+        ac.cur_sec = id
+    }
+}
+
+fn sec_push(id u32) void {
+    e handle[SecStackEntry] = vec_add(&ac.sec_stack)
+    e.sec_id = ac.cur_sec
+    e.prev_sec_id = ac.prev_sec
+    ac.prev_sec = ac.cur_sec
+    ac.cur_sec = id
+}
+
+fn sec_pop() void fails {
+    if ac.sec_stack.n == 0 { try as_err(c".popsection without matching .pushsection") }
+    e SecStackEntry = vec_pop(&ac.sec_stack)
+    ac.cur_sec = e.sec_id
+    ac.prev_sec = e.prev_sec_id
+}
+
+fn sec_previous() void {
+    tmp u32 = ac.cur_sec
+    ac.cur_sec = ac.prev_sec
+    ac.prev_sec = tmp
+}
+
+fn as_init_sections() void {
+    // Default .text section (index 0)
+    t u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
+    ac.cur_sec = t
+    ac.prev_sec = t
+}
+
+// ---------- Fragment construction ----------
+
+fn frag_ensure_data() u32 {
+    s handle[Section] = cur_sec()
+    if s.frags.n != 0 {
+        last u32 = trunc[u32](s.frags.n - 1)
+        f handle[Frag] = vec_at(&s.frags, zext[u64](last))
+        if f.kind == FK_DATA { return last }
+    }
+    id u32 = trunc[u32](s.frags.n)
+    f handle[Frag] = vec_add(&s.frags)
+    f.kind = FK_DATA
+    f.data_off = trunc[u32](s.data.n)
+    f.data_len = 0
+    f.expr = AS_NONE
+    f.line = ac.line
+    return id
+}
+
+fn as_current_dot() u32 {
+    fid u32 = frag_ensure_data()
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+    return expr_dot(ac.cur_sec, fid, f.data_len)
+}
+
+fn emit_u8(v u8) void {
+    fid u32 = frag_ensure_data()
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+    buf_u8(&s.data, v)
+    f.data_len += 1
+}
+
+fn emit_u16(v u16) void {
+    emit_u8(trunc[u8](v & 0xff))
+    emit_u8(trunc[u8]((v >> 8) & 0xff))
+}
+
+fn emit_u32(v u32) void {
+    emit_u8(trunc[u8](v & 0xff))
+    emit_u8(trunc[u8]((v >> 8) & 0xff))
+    emit_u8(trunc[u8]((v >> 16) & 0xff))
+    emit_u8(trunc[u8]((v >> 24) & 0xff))
+}
+
+fn emit_u64(v u64) void {
+    emit_u32(trunc[u32](v & 0xffffffff))
+    emit_u32(trunc[u32]((v >> 32) & 0xffffffff))
+}
+
+fn emit_bytes(b Bytes) void {
+    if b.n == 0 { return }
+    fid u32 = frag_ensure_data()
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+    buf_append(&s.data, b)
+    f.data_len += trunc[u32](b.n)
+}
+
+fn emit_fixup(fid u32, foff u32, size u8, kind u8, is_signed u8, next_off u32, expr u32) void {
+    s handle[Section] = cur_sec()
+    fx handle[Fixup] = vec_add(&s.fixups)
+    fx.frag_id = fid
+    fx.frag_off = foff
+    fx.size = size
+    fx.kind = kind
+    fx.signed = is_signed
+    fx.next_off = next_off
+    fx.expr = expr
+    fx.line = ac.line
+}
+
+fn emit_relax_jmp(short_op u8, long_op u8, is_jcc bool, expr u32) void {
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_add(&s.frags)
+    f.kind = FK_RELAX_JMP
+    f.is_long = 0
+    f.data_off = zext[u32](short_op) | (zext[u32](long_op) << 8) | (if is_jcc { 0x10000 } else { 0 })
+    f.expr = expr
+    f.line = ac.line
+}
+
+fn emit_align(align u32, fill u8, has_fill bool, max_skip u32) void {
+    if align <= 1 { return }
+    s handle[Section] = cur_sec()
+    if zext[u64](align) > s.sh_align { s.sh_align = zext[u64](align) }
+    f handle[Frag] = vec_add(&s.frags)
+    f.kind = FK_ALIGN
+    f.data_len = align
+    f.has_fill = if has_fill { 1 } else { 0 }
+    f.is_code = if (s.sh_flags & SHF_EXECINSTR) != 0 { 1 } else { 0 }
+    f.fill = zext[u64](fill) | (zext[u64](max_skip) << 32)
+    f.expr = AS_NONE
+    f.line = ac.line
+}
+
+fn emit_fill(count_expr u32, elem_size u32, fill_val u64) void {
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_add(&s.frags)
+    f.kind = FK_FILL
+    f.data_len = elem_size
+    f.expr = count_expr
+    f.fill = fill_val
+    f.line = ac.line
+}
+
+fn emit_leb(expr u32, is_signed bool) void {
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_add(&s.frags)
+    f.kind = if is_signed { FK_SLEB } else { FK_ULEB }
+    f.expr = expr
+    f.line = ac.line
+}
+
+fn as_define_label(sym_id u32) void fails {
+    sym handle[Symbol] = sym_at(sym_id)
+    if sym.defined && !sym.is_equ {
+        try as_err_b(c"duplicate symbol definition: ", sym.name)
+    }
+    fid u32 = frag_ensure_data()
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+    sym.defined = true
+    sym.is_equ = false
+    sym.sec_id = ac.cur_sec
+    sym.frag_id = fid
+    sym.frag_off = f.data_len
+}
+
+// ---------- Canonical multi-byte NOPs (matching llvm-mc-22) ----------
+
+fn emit_nop_chunk(out handle[Buf], n u64) void {
+    if n == 1 {
+        buf_u8(out, 0x90)
+    } else if n == 2 {
+        buf_u8(out, 0x66); buf_u8(out, 0x90)
+    } else if n == 3 {
+        buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x00)
+    } else if n == 4 {
+        buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x40); buf_u8(out, 0x00)
+    } else if n == 5 {
+        buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x44); buf_u8(out, 0x00); buf_u8(out, 0x00)
+    } else if n == 6 {
+        buf_u8(out, 0x66); buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x44); buf_u8(out, 0x00); buf_u8(out, 0x00)
+    } else if n == 7 {
+        buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x80)
+        buf_u32le(out, 0)
+    } else if n == 8 {
+        buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x84); buf_u8(out, 0x00)
+        buf_u32le(out, 0)
+    } else if n == 9 {
+        buf_u8(out, 0x66); buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x84); buf_u8(out, 0x00)
+        buf_u32le(out, 0)
+    } else {
+        // 10..15: (n - 9) copies of 0x66, then 2e 0f 1f 84 00 00 00 00 00
+        for k u64 in 0..n - 9 { buf_u8(out, 0x66) }
+        buf_u8(out, 0x2e); buf_u8(out, 0x0f); buf_u8(out, 0x1f); buf_u8(out, 0x84); buf_u8(out, 0x00)
+        buf_u32le(out, 0)
+    }
+}
+
+fn emit_nops(out handle[Buf], count u64) void {
+    rem u64 = count
+    while rem > 0 {
+        chunk u64 = if rem > 15 { 15 } else { rem }
+        emit_nop_chunk(out, chunk)
+        rem -= chunk
+    }
+}
+
+fn uleb_size(v u64) u64 {
+    n u64 = 1
+    x u64 = v >> 7
+    while x != 0 { n += 1; x = x >> 7 }
+    return n
+}
+
+fn sleb_size(v i64) u64 {
+    n u64 = 0
+    x i64 = v
+    while true {
+        byte u8 = trunc[u8](x & 0x7f)
+        x = x >> 7
+        n += 1
+        if (x == 0 && (byte & 0x40) == 0) || (x == -1 && (byte & 0x40) != 0) { break }
+    }
+    return n
+}
+
+fn emit_uleb_bytes(out handle[Buf], v u64) void {
+    x u64 = v
+    while true {
+        byte u8 = trunc[u8](x & 0x7f)
+        x = x >> 7
+        if x != 0 { byte = byte | 0x80 }
+        buf_u8(out, byte)
+        if x == 0 { break }
+    }
+}
+
+fn emit_sleb_bytes(out handle[Buf], v i64) void {
+    x i64 = v
+    while true {
+        byte u8 = trunc[u8](x & 0x7f)
+        x = x >> 7
+        done bool = (x == 0 && (byte & 0x40) == 0) || (x == -1 && (byte & 0x40) != 0)
+        if !done { byte = byte | 0x80 }
+        buf_u8(out, byte)
+        if done { break }
+    }
+}
+
+// ---------- Relaxation & layout ----------
+
+fn layout_section_frags(s handle[Section]) void {
+    off u64 = 0
+    for fi u64 in 0..s.frags.n {
+        f handle[Frag] = vec_at(&s.frags, fi)
+        f.addr = off
+        if f.kind == FK_DATA {
+            f.size = zext[u64](f.data_len)
+        } else if f.kind == FK_RELAX_JMP {
+            if f.is_long == 0 {
+                f.size = 2
+            } else {
+                is_jcc bool = (f.data_off & 0x10000) != 0
+                f.size = if is_jcc { 6 } else { 5 }
+            }
+        } else if f.kind == FK_ALIGN {
+            align u64 = zext[u64](f.data_len)
+            rem u64 = off & (align - 1)
+            pad u64 = if rem == 0 { 0 } else { align - rem }
+            max_skip u64 = f.fill >> 32
+            if max_skip != 0 && pad > max_skip { pad = 0 }
+            f.size = pad
+        } else if f.kind == FK_FILL {
+            ev EvalVal = {}
+            eval_expr(f.expr, true, &ev)
+            cnt u64 = if ev.kind == EV_CONST && ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
+            f.size = cnt * zext[u64](f.data_len)
+        } else if f.kind == FK_ULEB {
+            ev EvalVal = {}
+            eval_expr(f.expr, true, &ev)
+            f.size = if ev.kind == EV_CONST { uleb_size(bitcast[u64](ev.val)) } else { 1 }
+        } else if f.kind == FK_SLEB {
+            ev EvalVal = {}
+            eval_expr(f.expr, true, &ev)
+            f.size = if ev.kind == EV_CONST { sleb_size(ev.val) } else { 1 }
+        }
+        off += f.size
+    }
+    s.size = off
+}
+
+fn update_symbol_values() void {
+    for si u64 in 0..ac.syms.n {
+        sym handle[Symbol] = vec_at(&ac.syms, si)
+        if sym.defined && !sym.is_equ && !sym.is_common && sym.sec_id != AS_NONE && sym.frag_id != AS_NONE {
+            s handle[Section] = sec_at(sym.sec_id)
+            f handle[Frag] = vec_at(&s.frags, zext[u64](sym.frag_id))
+            sym.value = f.addr + zext[u64](sym.frag_off)
+        }
+    }
+}
+
+fn check_undefined_local_labels() void fails {
+    for si u64 in 0..ac.syms.n {
+        sym handle[Symbol] = vec_at(&ac.syms, si)
+        if sym.is_local_label && !sym.defined {
+            try as_err(c"undefined forward local label")
+        }
+    }
+}
+
+fn patch_le(out handle[Buf], off u64, size u8, val u64) void {
+    for k u8 in 0..size {
+        out.p[u8, off + zext[u64](k)] = trunc[u8]((val >> (zext[u64](k) * 8)) & 0xff)
+    }
+}
+
+fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64) void {
+    r handle[Rela] = vec_add(&s.relas)
+    r.offset = off
+    r.sym_id = sym_id
+    r.rtype = rtype
+    r.addend = addend
+}
+
+fn resolve_variant_reloc(variant u8, size u8, kind u8) u32 {
+    if variant == VAR_PLT { return R_X86_64_PLT32 }
+    if variant == VAR_GOTPCREL {
+        if kind == FIX_REX_GOTPCRELX { return R_X86_64_REX_GOTPCRELX }
+        if kind == FIX_GOTPCRELX { return R_X86_64_GOTPCRELX }
+        return R_X86_64_GOTPCREL
+    }
+    if variant == VAR_GOTPCRELX { return R_X86_64_GOTPCRELX }
+    if variant == VAR_REX_GOTPCRELX { return R_X86_64_REX_GOTPCRELX }
+    if variant == VAR_GOTTPOFF { return R_X86_64_GOTTPOFF }
+    if variant == VAR_TPOFF { return R_X86_64_TPOFF32 }
+    if variant == VAR_TLSGD { return R_X86_64_TLSGD }
+    if variant == VAR_TLSLD { return R_X86_64_TLSLD }
+    if variant == VAR_DTPOFF { return R_X86_64_DTPOFF32 }
+    if variant == VAR_GOTOFF { return R_X86_64_GOTOFF64 }
+    if variant == VAR_GOT { return R_X86_64_GOT32 }
+    if variant == VAR_SIZE { return if size == 8 { R_X86_64_SIZE64 } else { R_X86_64_SIZE32 } }
+    // Default by kind and size
+    if kind == FIX_PLT { return R_X86_64_PLT32 }
+    if kind == FIX_PC || kind == FIX_GOTPCRELX || kind == FIX_REX_GOTPCRELX {
+        if size == 8 { return R_X86_64_PC64 }
+        if size == 4 { return R_X86_64_PC32 }
+        if size == 2 { return R_X86_64_PC16 }
+        return R_X86_64_PC8
+    }
+    if kind == FIX_IMM32S { return R_X86_64_32S }
+    if size == 8 { return R_X86_64_64 }
+    if size == 4 { return R_X86_64_32 }
+    if size == 2 { return R_X86_64_16 }
+    return R_X86_64_8
+}
+
+fn as_layout_and_relax() void fails {
+    try check_undefined_local_labels()
+
+    // Iterative relaxation loop (monotone widening, converges quickly)
+    for iter u32 in 0..64 {
+        for si u64 in 0..ac.sections.n {
+            layout_section_frags(sec_at(trunc[u32](si)))
+        }
+        update_symbol_values()
+
+        changed bool = false
+        for si u64 in 0..ac.sections.n {
+            s handle[Section] = sec_at(trunc[u32](si))
+            for fi u64 in 0..s.frags.n {
+                f handle[Frag] = vec_at(&s.frags, fi)
+                if f.kind != FK_RELAX_JMP || f.is_long != 0 { continue }
+                ev EvalVal = {}
+                eval_expr(f.expr, true, &ev)
+                can_short bool = false
+                if ev.kind == EV_SYM && ev.variant == VAR_NONE {
+                    tsec u32 = eval_sym_sec(ev.sym_a)
+                    if tsec == trunc[u32](si) {
+                        taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
+                        disp i64 = taddr - bitcast[i64](f.addr + 2)
+                        if disp >= -128 && disp <= 127 {
+                            can_short = true
+                        }
+                    }
+                }
+                if !can_short {
+                    f.is_long = 1
+                    changed = true
+                }
+            }
+        }
+        if !changed { break }
+    }
+
+    // Finalize section bytes and apply fixups
+    for si u64 in 0..ac.sections.n {
+        s handle[Section] = sec_at(trunc[u32](si))
+        is_nobits bool = s.sh_type == SHT_NOBITS
+        if !is_nobits {
+            buf_clear(&s.out)
+            for fi u64 in 0..s.frags.n {
+                f handle[Frag] = vec_at(&s.frags, fi)
+                if f.kind == FK_DATA {
+                    if f.data_len != 0 {
+                        buf_append(&s.out, bytes(s.data.p + zext[u64](f.data_off), zext[u64](f.data_len)))
+                    }
+                } else if f.kind == FK_RELAX_JMP {
+                    short_op u8 = trunc[u8](f.data_off & 0xff)
+                    long_op u8 = trunc[u8]((f.data_off >> 8) & 0xff)
+                    is_jcc bool = (f.data_off & 0x10000) != 0
+                    ev EvalVal = {}
+                    eval_expr(f.expr, true, &ev)
+                    if f.is_long == 0 {
+                        taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
+                        disp i64 = taddr - bitcast[i64](f.addr + 2)
+                        buf_u8(&s.out, short_op)
+                        buf_u8(&s.out, trunc[u8](bitcast[u64](disp) & 0xff))
+                    } else {
+                        if is_jcc {
+                            buf_u8(&s.out, 0x0f)
+                            buf_u8(&s.out, long_op)
+                        } else {
+                            buf_u8(&s.out, long_op)
+                        }
+                        rel_off u64 = s.out.n
+                        buf_u32le(&s.out, 0)
+                        // Resolve directly if same section & no variant, else emit PLT32/PC32 reloc
+                        if ev.kind == EV_SYM && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == trunc[u32](si) {
+                            taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
+                            disp i64 = taddr - bitcast[i64](rel_off + 4)
+                            patch_le(&s.out, rel_off, 4, bitcast[u64](disp))
+                        } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
+                            rtype u32 = if ev.variant == VAR_PLT || ev.variant == VAR_NONE { R_X86_64_PLT32 } else { resolve_variant_reloc(ev.variant, 4, FIX_PC) }
+                            add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4)
+                        } else {
+                            try as_err_line(f.line, c"unresolved branch target")
+                        }
+                    }
+                } else if f.kind == FK_ALIGN {
+                    if f.size != 0 {
+                        if f.is_code != 0 && f.has_fill == 0 {
+                            emit_nops(&s.out, f.size)
+                        } else {
+                            fb u8 = trunc[u8](f.fill & 0xff)
+                            for k u64 in 0..f.size { buf_u8(&s.out, fb) }
+                        }
+                    }
+                } else if f.kind == FK_FILL {
+                    ev EvalVal = {}
+                    eval_expr(f.expr, true, &ev)
+                    cnt u64 = if ev.kind == EV_CONST && ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
+                    esz u32 = f.data_len
+                    for k u64 in 0..cnt {
+                        for b u32 in 0..esz {
+                            buf_u8(&s.out, trunc[u8]((f.fill >> (zext[u64](b) * 8)) & 0xff))
+                        }
+                    }
+                } else if f.kind == FK_ULEB {
+                    ev EvalVal = {}
+                    eval_expr(f.expr, true, &ev)
+                    if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant .uleb128 expression") }
+                    emit_uleb_bytes(&s.out, bitcast[u64](ev.val))
+                } else if f.kind == FK_SLEB {
+                    ev EvalVal = {}
+                    eval_expr(f.expr, true, &ev)
+                    if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant .sleb128 expression") }
+                    emit_sleb_bytes(&s.out, ev.val)
+                }
+            }
+        }
+
+        // Resolve fixups in this section
+        for xi u64 in 0..s.fixups.n {
+            fx handle[Fixup] = vec_at(&s.fixups, xi)
+            f handle[Frag] = vec_at(&s.frags, zext[u64](fx.frag_id))
+            off u64 = f.addr + zext[u64](fx.frag_off)
+            ev EvalVal = {}
+            eval_expr(fx.expr, true, &ev)
+            if ev.kind == EV_CONST {
+                if fx.kind == FIX_PC || fx.kind == FIX_PLT {
+                    // Constant PC-rel (rare)
+                    patch_le(&s.out, off, fx.size, bitcast[u64](ev.val))
+                } else {
+                    patch_le(&s.out, off, fx.size, bitcast[u64](ev.val))
+                }
+            } else if ev.kind == EV_SYM {
+                is_pc bool = fx.kind == FIX_PC || fx.kind == FIX_PLT || fx.kind == FIX_GOTPCRELX || fx.kind == FIX_REX_GOTPCRELX
+                // Same-section PC-relative without variant: resolve directly unless it's a call to a global symbol
+                can_resolve_pc bool = false
+                if is_pc && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == trunc[u32](si) {
+                    if fx.kind == FIX_PLT {
+                        // llvm-mc resolves `call local_sym` directly, emits PLT32 for global/weak
+                        if (ev.sym_a & 0x80000000) != 0 || sym_at(ev.sym_a).binding == STB_LOCAL {
+                            can_resolve_pc = true
+                        }
+                    } else {
+                        can_resolve_pc = true
+                    }
+                }
+                if can_resolve_pc {
+                    taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
+                    disp i64 = taddr - bitcast[i64](off + zext[u64](fx.next_off))
+                    patch_le(&s.out, off, fx.size, bitcast[u64](disp))
+                } else if (ev.sym_a & 0x80000000) == 0 {
+                    rtype u32 = resolve_variant_reloc(ev.variant, fx.size, fx.kind)
+                    addend i64 = ev.val
+                    if is_pc || rtype == R_X86_64_PC32 || rtype == R_X86_64_PC64 || rtype == R_X86_64_PLT32 ||
+                       rtype == R_X86_64_GOTPCREL || rtype == R_X86_64_GOTPCRELX || rtype == R_X86_64_REX_GOTPCRELX ||
+                       rtype == R_X86_64_GOTTPOFF || rtype == R_X86_64_TLSGD || rtype == R_X86_64_TLSLD {
+                        addend -= zext[i64](fx.next_off)
+                    }
+                    add_rela(s, off, ev.sym_a, rtype, addend)
+                } else {
+                    try as_err_line(fx.line, c"cannot emit relocation against section-local dot")
+                }
+            } else if ev.kind == EV_DIFF {
+                // sym_a - dot_in_this_section -> PC-relative relocation!
+                if (ev.sym_b & 0x80000000) != 0 && (ev.sym_b & 0x7fffffff) == trunc[u32](si) && (ev.sym_a & 0x80000000) == 0 {
+                    rtype u32 = if fx.size == 8 { R_X86_64_PC64 } else { R_X86_64_PC32 }
+                    // ev.val already has (sym_a_addend - dot_offset); convert to relative to `off`
+                    addend i64 = ev.val + bitcast[i64](off)
+                    add_rela(s, off, ev.sym_a, rtype, addend)
+                } else {
+                    try as_err_line(fx.line, c"cannot evaluate cross-section symbol difference")
+                }
+            } else {
+                try as_err_line(fx.line, c"unresolved expression")
+            }
+        }
+    }
+
+    // Finalize .equ and .size expressions
+    for si u64 in 0..ac.syms.n {
+        sym handle[Symbol] = vec_at(&ac.syms, si)
+        if sym.is_equ && sym.equ_expr != AS_NONE {
+            ev EvalVal = {}
+            eval_expr(sym.equ_expr, true, &ev)
+            if ev.kind == EV_CONST {
+                sym.defined = true
+                sym.sec_id = AS_NONE
+                sym.value = bitcast[u64](ev.val)
+            } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
+                target handle[Symbol] = sym_at(ev.sym_a)
+                sym.defined = target.defined
+                sym.sec_id = target.sec_id
+                sym.value = target.value + bitcast[u64](ev.val)
+            }
+        }
+        if sym.size_expr != AS_NONE {
+            ev EvalVal = {}
+            eval_expr(sym.size_expr, true, &ev)
+            if ev.kind == EV_CONST && ev.val >= 0 {
+                sym.size = bitcast[u64](ev.val)
+            }
+        }
+    }
+}

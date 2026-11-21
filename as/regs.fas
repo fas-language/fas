@@ -1,0 +1,196 @@
+// x86-64 register representation and case-insensitive AT&T register parser.
+//
+// Register IDs are packed u16 values: (class << 8) | number.
+// Class 0 means "no register".
+
+const RC_NONE u8 = 0
+const RC_GP8 u8 = 1       // al..dil (0..7), r8b..r15b (8..15)
+const RC_GP8_HI u8 = 2    // ah=4, ch=5, dh=6, bh=7 (cannot be encoded with REX!)
+const RC_GP16 u8 = 3      // ax..di (0..7), r8w..r15w (8..15)
+const RC_GP32 u8 = 4      // eax..edi (0..7), r8d..r15d (8..15)
+const RC_GP64 u8 = 5      // rax..rdi (0..7), r8..r15 (8..15)
+const RC_RIP u8 = 6       // rip=0, eip=1
+const RC_SEG u8 = 7       // es=0, cs=1, ss=2, ds=3, fs=4, gs=5
+const RC_X87 u8 = 8       // st(0)..st(7)
+const RC_MMX u8 = 9       // mm0..mm7
+const RC_XMM u8 = 10      // xmm0..xmm31
+const RC_YMM u8 = 11      // ymm0..ymm31
+const RC_ZMM u8 = 12      // zmm0..zmm31
+const RC_K u8 = 13        // k0..k7
+const RC_CR u8 = 14       // cr0..cr15
+const RC_DR u8 = 15       // dr0..dr15
+
+fn reg_make(cls u8, num u8) u16 {
+    return (zext[u16](cls) << 8) | zext[u16](num)
+}
+
+fn reg_class(r u16) u8 { return trunc[u8](r >> 8) }
+fn reg_num(r u16) u8 { return trunc[u8](r & 0xff) }
+
+fn reg_is_gp8(r u16) bool {
+    c u8 = reg_class(r)
+    return c == RC_GP8 || c == RC_GP8_HI
+}
+
+// True if this register requires a REX prefix even if its number is < 8 (spl/bpl/sil/dil).
+fn reg_needs_rex(r u16) bool {
+    c u8 = reg_class(r)
+    n u8 = reg_num(r)
+    if c == RC_GP8 && n >= 4 { return true }
+    if (c == RC_GP16 || c == RC_GP32 || c == RC_GP64 || c == RC_XMM || c == RC_YMM) && n >= 8 { return true }
+    return false
+}
+
+fn reg_is_hi8(r u16) bool { return reg_class(r) == RC_GP8_HI }
+
+fn ascii_lower(c u8) u8 {
+    return if c >= 65 && c <= 90 { c + 32 } else { c }
+}
+
+fn reg_eq_ci(s Bytes, lit addr, n u64) bool {
+    if s.n != n { return false }
+    for i u64 in 0..n {
+        if ascii_lower(s.p[u8, i]) != lit[u8, i] { return false }
+    }
+    return true
+}
+
+// Parses a decimal unsigned integer 0..31; returns -1 on failure.
+fn reg_parse_uint(s Bytes, start u64, end u64) i32 {
+    if start >= end || end - start > 2 { return -1 }
+    v i32 = 0
+    for i u64 in start..end {
+        c u8 = s.p[u8, i]
+        if c < 48 || c > 57 { return -1 }
+        v = v * 10 + zext[i32](c - 48)
+    }
+    return v
+}
+
+// Parses a register name (without leading '%'). Returns 0 if not a valid register.
+fn reg_parse(s Bytes) u16 {
+    if s.n < 2 || s.n > 6 { return 0 }
+    c0 u8 = ascii_lower(s.p[u8, 0])
+    c1 u8 = ascii_lower(s.p[u8, 1])
+
+    // 2-character registers
+    if s.n == 2 {
+        if c0 == 97 { // a*
+            if c1 == 108 { return reg_make(RC_GP8, 0) }     // al
+            if c1 == 104 { return reg_make(RC_GP8_HI, 4) }  // ah
+            if c1 == 120 { return reg_make(RC_GP16, 0) }    // ax
+        } else if c0 == 99 { // c*
+            if c1 == 108 { return reg_make(RC_GP8, 1) }     // cl
+            if c1 == 104 { return reg_make(RC_GP8_HI, 5) }  // ch
+            if c1 == 120 { return reg_make(RC_GP16, 1) }    // cx
+            if c1 == 115 { return reg_make(RC_SEG, 1) }     // cs
+        } else if c0 == 100 { // d*
+            if c1 == 108 { return reg_make(RC_GP8, 2) }     // dl
+            if c1 == 104 { return reg_make(RC_GP8_HI, 6) }  // dh
+            if c1 == 120 { return reg_make(RC_GP16, 2) }    // dx
+            if c1 == 105 { return reg_make(RC_GP16, 7) }    // di
+            if c1 == 115 { return reg_make(RC_SEG, 3) }     // ds
+        } else if c0 == 98 { // b*
+            if c1 == 108 { return reg_make(RC_GP8, 3) }     // bl
+            if c1 == 104 { return reg_make(RC_GP8_HI, 7) }  // bh
+            if c1 == 120 { return reg_make(RC_GP16, 3) }    // bx
+            if c1 == 112 { return reg_make(RC_GP16, 5) }    // bp
+        } else if c0 == 115 { // s*
+            if c1 == 112 { return reg_make(RC_GP16, 4) }    // sp
+            if c1 == 105 { return reg_make(RC_GP16, 6) }    // si
+            if c1 == 115 { return reg_make(RC_SEG, 2) }     // ss
+            if c1 == 116 { return reg_make(RC_X87, 0) }     // st
+        } else if c0 == 101 && c1 == 115 { return reg_make(RC_SEG, 0) } // es
+        else if c0 == 102 && c1 == 115 { return reg_make(RC_SEG, 4) }   // fs
+        else if c0 == 103 && c1 == 115 { return reg_make(RC_SEG, 5) }   // gs
+        else if c0 == 114 && (c1 == 56 || c1 == 57) {                   // r8, r9
+            return reg_make(RC_GP64, c1 - 48)
+        } else if c0 == 107 && c1 >= 48 && c1 <= 55 {                   // k0..k7
+            return reg_make(RC_K, c1 - 48)
+        }
+        return 0
+    }
+
+    // 3-character registers
+    if s.n == 3 {
+        c2 u8 = ascii_lower(s.p[u8, 2])
+        if c0 == 101 { // e* (32-bit GP or eip)
+            if c1 == 97 && c2 == 120 { return reg_make(RC_GP32, 0) }  // eax
+            if c1 == 99 && c2 == 120 { return reg_make(RC_GP32, 1) }  // ecx
+            if c1 == 100 && c2 == 120 { return reg_make(RC_GP32, 2) } // edx
+            if c1 == 98 && c2 == 120 { return reg_make(RC_GP32, 3) }  // ebx
+            if c1 == 115 && c2 == 112 { return reg_make(RC_GP32, 4) } // esp
+            if c1 == 98 && c2 == 112 { return reg_make(RC_GP32, 5) }  // ebp
+            if c1 == 115 && c2 == 105 { return reg_make(RC_GP32, 6) } // esi
+            if c1 == 100 && c2 == 105 { return reg_make(RC_GP32, 7) } // edi
+            if c1 == 105 && c2 == 112 { return reg_make(RC_RIP, 1) }  // eip
+        } else if c0 == 114 { // r* (64-bit GP, rip, r8b/w/d, r9b/w/d, r10..r15)
+            if c1 == 97 && c2 == 120 { return reg_make(RC_GP64, 0) }  // rax
+            if c1 == 99 && c2 == 120 { return reg_make(RC_GP64, 1) }  // rcx
+            if c1 == 100 && c2 == 120 { return reg_make(RC_GP64, 2) } // rdx
+            if c1 == 98 && c2 == 120 { return reg_make(RC_GP64, 3) }  // rbx
+            if c1 == 115 && c2 == 112 { return reg_make(RC_GP64, 4) } // rsp
+            if c1 == 98 && c2 == 112 { return reg_make(RC_GP64, 5) }  // rbp
+            if c1 == 115 && c2 == 105 { return reg_make(RC_GP64, 6) } // rsi
+            if c1 == 100 && c2 == 105 { return reg_make(RC_GP64, 7) } // rdi
+            if c1 == 105 && c2 == 112 { return reg_make(RC_RIP, 0) }  // rip
+            if c1 == 56 || c1 == 57 { // r8b/w/d, r9b/w/d
+                n u8 = c1 - 48
+                if c2 == 98 { return reg_make(RC_GP8, n) }
+                if c2 == 119 { return reg_make(RC_GP16, n) }
+                if c2 == 100 { return reg_make(RC_GP32, n) }
+            }
+            if c1 == 49 && c2 >= 48 && c2 <= 53 { // r10..r15
+                return reg_make(RC_GP64, 10 + (c2 - 48))
+            }
+        } else if c0 == 115 && c1 == 112 && c2 == 108 { return reg_make(RC_GP8, 4) } // spl
+        else if c0 == 98 && c1 == 112 && c2 == 108 { return reg_make(RC_GP8, 5) }   // bpl
+        else if c0 == 115 && c1 == 105 && c2 == 108 { return reg_make(RC_GP8, 6) }  // sil
+        else if c0 == 100 && c1 == 105 && c2 == 108 { return reg_make(RC_GP8, 7) }  // dil
+        else if c0 == 109 && c1 == 109 && c2 >= 48 && c2 <= 55 {                    // mm0..mm7
+            return reg_make(RC_MMX, c2 - 48)
+        } else if c0 == 99 && c1 == 114 && c2 >= 48 && c2 <= 57 {                   // cr0..cr9
+            return reg_make(RC_CR, c2 - 48)
+        } else if c0 == 100 && c1 == 114 && c2 >= 48 && c2 <= 57 {                  // dr0..dr9
+            return reg_make(RC_DR, c2 - 48)
+        }
+        return 0
+    }
+
+    // 4+ character registers: r10b/w/d..r15b/w/d, xmm0..31, ymm0..31, zmm0..31, cr10..15, dr10..15, st(0)..st(7)
+    if c0 == 114 && s.n == 4 {
+        c2 u8 = ascii_lower(s.p[u8, 2])
+        c3 u8 = ascii_lower(s.p[u8, 3])
+        if c1 == 49 && c2 >= 48 && c2 <= 53 {
+            n u8 = 10 + (c2 - 48)
+            if c3 == 98 { return reg_make(RC_GP8, n) }
+            if c3 == 119 { return reg_make(RC_GP16, n) }
+            if c3 == 100 { return reg_make(RC_GP32, n) }
+        }
+        return 0
+    }
+
+    if (c0 == 120 || c0 == 121 || c0 == 122) && c1 == 109 && ascii_lower(s.p[u8, 2]) == 109 {
+        v i32 = reg_parse_uint(s, 3, s.n)
+        if v >= 0 && v <= 31 {
+            cls u8 = if c0 == 120 { RC_XMM } else if c0 == 121 { RC_YMM } else { RC_ZMM }
+            return reg_make(cls, trunc[u8](v))
+        }
+        return 0
+    }
+
+    if (c0 == 99 || c0 == 100) && c1 == 114 && s.n == 4 {
+        v i32 = reg_parse_uint(s, 2, 4)
+        if v >= 10 && v <= 15 {
+            return reg_make(if c0 == 99 { RC_CR } else { RC_DR }, trunc[u8](v))
+        }
+        return 0
+    }
+
+    if c0 == 115 && c1 == 116 && s.n == 5 && s.p[u8, 2] == 40 && s.p[u8, 4] == 41 {
+        d u8 = s.p[u8, 3]
+        if d >= 48 && d <= 55 { return reg_make(RC_X87, d - 48) }
+    }
+
+    return 0
+}

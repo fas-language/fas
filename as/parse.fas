@@ -1,0 +1,676 @@
+// AT&T x86-64 statement, directive, and operand parser.
+
+fn parse_string_lit(out handle[Buf]) void fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n || ac.src.p[u8, ac.pos] != 34 {
+        try as_err(c"expected string literal")
+    }
+    ac.pos += 1
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    while ac.pos < n {
+        c u8 = p[u8, ac.pos]
+        ac.pos += 1
+        if c == 34 { return }
+        if c == 92 && ac.pos < n {
+            e u8 = p[u8, ac.pos]
+            ac.pos += 1
+            if e == 110 { buf_u8(out, 10) }
+            else if e == 116 { buf_u8(out, 9) }
+            else if e == 114 { buf_u8(out, 13) }
+            else if e == 98 { buf_u8(out, 8) }
+            else if e == 102 { buf_u8(out, 12) }
+            else if e == 92 { buf_u8(out, 92) }
+            else if e == 34 { buf_u8(out, 34) }
+            else if e == 120 { // \xHH
+                v u8 = 0
+                cnt u32 = 0
+                while ac.pos < n && cnt < 2 && is_hex(p[u8, ac.pos]) {
+                    v = trunc[u8]((zext[u64](v) << 4) | hex_val(p[u8, ac.pos]))
+                    ac.pos += 1
+                    cnt += 1
+                }
+                buf_u8(out, v)
+            } else if e >= 48 && e <= 55 { // octal \NNN
+                v u32 = zext[u32](e - 48)
+                cnt u32 = 1
+                while ac.pos < n && cnt < 3 && p[u8, ac.pos] >= 48 && p[u8, ac.pos] <= 55 {
+                    v = (v << 3) | zext[u32](p[u8, ac.pos] - 48)
+                    ac.pos += 1
+                    cnt += 1
+                }
+                buf_u8(out, trunc[u8](v & 0xff))
+            } else {
+                buf_u8(out, e)
+            }
+        } else {
+            buf_u8(out, c)
+        }
+    }
+    try as_err(c"unterminated string literal")
+}
+
+fn parse_ident() Bytes fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n { try as_err(c"expected identifier") }
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    if p[u8, ac.pos] == 34 {
+        b Buf = {}
+        try parse_string_lit(&b)
+        iid u32 = intern(&ac.names, buf_bytes(&b))
+        return intern_name(&ac.names, iid)
+    }
+    if !is_ident_start(p[u8, ac.pos]) { try as_err(c"expected identifier") }
+    start u64 = ac.pos
+    while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
+    return bytes(p + start, ac.pos - start)
+}
+
+fn parse_reg_token() u16 fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n || ac.src.p[u8, ac.pos] != 37 {
+        try as_err(c"expected '%' before register")
+    }
+    ac.pos += 1
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    start u64 = ac.pos
+    while ac.pos < n && (is_ident_char(p[u8, ac.pos]) || p[u8, ac.pos] == 40 || p[u8, ac.pos] == 41) {
+        c u8 = p[u8, ac.pos]
+        // Stop at ')' only after matching st(N); don't consume ')' of memory operand!
+        if c == 40 {
+            // Only allow '(' inside st(0)..st(7)
+            if ac.pos - start == 2 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
+                ac.pos += 1
+                continue
+            }
+            break
+        }
+        if c == 41 {
+            if ac.pos - start == 4 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
+                ac.pos += 1
+            }
+            break
+        }
+        ac.pos += 1
+    }
+    rname Bytes = bytes(p + start, ac.pos - start)
+    r u16 = reg_parse(rname)
+    if r == 0 { try as_err_b(c"unknown register: %", rname) }
+    return r
+}
+
+// Parses a single AT&T instruction operand.
+fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
+    mem_set(handle_addr(out), 0, sizeof[Operand])
+    out.expr = AS_NONE
+    skip_hspace()
+    if ac.pos >= ac.src.n { try as_err(c"expected operand") }
+    p addr = ac.src.p
+    n u64 = ac.src.n
+
+    // Indirect '*' prefix (for call *%rax, jmp *(%rax), etc.)
+    if p[u8, ac.pos] == 42 {
+        out.indirect = true
+        ac.pos += 1
+        skip_hspace()
+    }
+
+    // Immediate: $expr
+    if ac.pos < n && p[u8, ac.pos] == 36 {
+        ac.pos += 1
+        out.kind = OPK_IMM
+        out.expr = try parse_expr()
+        return
+    }
+
+    // Register or segment-prefixed memory operand: %reg or %seg:disp(base,idx,scale)
+    if ac.pos < n && p[u8, ac.pos] == 37 {
+        r u16 = try parse_reg_token()
+        skip_hspace()
+        if ac.pos < n && p[u8, ac.pos] == 58 { // ':' -> segment override
+            if reg_class(r) != RC_SEG { try as_err(c"expected segment register before ':'") }
+            ac.pos += 1
+            out.seg = reg_num(r) + 1
+            // Fall through to parse memory operand after %seg:
+        } else {
+            out.kind = OPK_REG
+            out.reg = r
+            return
+        }
+    }
+
+    // Memory operand or branch target: [disp][(base[,index[,scale]])]
+    skip_hspace()
+    if ac.pos < n && p[u8, ac.pos] != 40 {
+        out.expr = try parse_expr()
+        out.has_disp = true
+        skip_hspace()
+    }
+
+    if ac.pos < n && p[u8, ac.pos] == 40 {
+        // Check whether this '(' starts a memory base/index tuple like (%rax), (,%rcx,4), (%rip)
+        ac.pos += 1
+        skip_hspace()
+        out.kind = OPK_MEM
+        if ac.pos < n && p[u8, ac.pos] == 37 {
+            out.base = try parse_reg_token()
+            skip_hspace()
+        }
+        if ac.pos < n && p[u8, ac.pos] == 44 { // ','
+            ac.pos += 1
+            skip_hspace()
+            if ac.pos < n && p[u8, ac.pos] == 37 {
+                out.index = try parse_reg_token()
+                out.scale = 1
+                skip_hspace()
+            }
+            if ac.pos < n && p[u8, ac.pos] == 44 { // ',' scale
+                ac.pos += 1
+                sc i64 = try eval_const_now(try parse_expr())
+                if sc != 1 && sc != 2 && sc != 4 && sc != 8 {
+                    try as_err(c"memory index scale must be 1, 2, 4, or 8")
+                }
+                out.scale = trunc[u8](bitcast[u64](sc))
+                skip_hspace()
+            }
+        }
+        if ac.pos >= n || p[u8, ac.pos] != 41 {
+            try as_err(c"expected ')' in memory operand")
+        }
+        ac.pos += 1
+        return
+    }
+
+    // Bare expression with no '(...)': either a branch target or an absolute memory address
+    if is_branch_mnem && !out.indirect && out.seg == 0 {
+        out.kind = OPK_BRANCH
+    } else {
+        out.kind = OPK_MEM
+    }
+}
+
+fn is_branch_mnemonic(m Bytes) bool {
+    if m.n == 0 { return false }
+    c0 u8 = ascii_lower(m.p[u8, 0])
+    if c0 == 106 { return true } // j* (jmp, jcc, jrcxz)
+    if m.n == 4 && ascii_lower(m.p[u8, 0]) == 99 && ascii_lower(m.p[u8, 1]) == 97 && ascii_lower(m.p[u8, 2]) == 108 && ascii_lower(m.p[u8, 3]) == 108 { return true } // call
+    if m.n == 5 && ascii_lower(m.p[u8, 0]) == 99 && ascii_lower(m.p[u8, 1]) == 97 && ascii_lower(m.p[u8, 2]) == 108 && ascii_lower(m.p[u8, 3]) == 108 && ascii_lower(m.p[u8, 4]) == 113 { return true } // callq
+    if m.n >= 4 && ascii_lower(m.p[u8, 0]) == 108 && ascii_lower(m.p[u8, 1]) == 111 && ascii_lower(m.p[u8, 2]) == 111 && ascii_lower(m.p[u8, 3]) == 112 { return true } // loop*
+    return false
+}
+
+// ---------- Directives ----------
+
+fn parse_data_directive(size u8) void fails {
+    while true {
+        e u32 = try parse_expr()
+        ev EvalVal = {}
+        eval_expr(e, false, &ev)
+        if ev.kind == EV_CONST {
+            if size == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
+            else if size == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
+            else if size == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
+            else { emit_u64(bitcast[u64](ev.val)) }
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            for k u8 in 0..size { emit_u8(0) }
+            emit_fixup(fid, foff, size, FIX_ABS, 0, zext[u32](size), e)
+        }
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            continue
+        }
+        break
+    }
+}
+
+fn parse_section_directive(push bool) void fails {
+    skip_hspace()
+    name Bytes = bytes_empty()
+    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 {
+        b Buf = {}
+        try parse_string_lit(&b)
+        iid u32 = intern(&ac.names, buf_bytes(&b))
+        name = intern_name(&ac.names, iid)
+    } else {
+        start u64 = ac.pos
+        while ac.pos < ac.src.n {
+            c u8 = ac.src.p[u8, ac.pos]
+            if c == 44 || is_hspace(c) || c == 10 || c == 59 || c == 35 { break }
+            ac.pos += 1
+        }
+        name = bytes(ac.src.p + start, ac.pos - start)
+    }
+    if name.n == 0 { try as_err(c"expected section name") }
+
+    sh_type u32 = SHT_PROGBITS
+    sh_flags u64 = 0
+    sh_entsize u64 = 0
+    group_name Bytes = bytes_empty()
+    comdat bool = false
+
+    // Default flags for well-known sections when omitted
+    if bytes_is(name, c".text") { sh_flags = SHF_ALLOC | SHF_EXECINSTR }
+    else if bytes_is(name, c".data") { sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if bytes_is(name, c".rodata") { sh_flags = SHF_ALLOC }
+    else if bytes_is(name, c".bss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if bytes_is(name, c".tdata") { sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if bytes_is(name, c".tbss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if bytes_is(name, c".init_array") { sh_type = SHT_INIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if bytes_is(name, c".fini_array") { sh_type = SHT_FINI_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+
+    skip_hspace()
+    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+        ac.pos += 1
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 {
+            fb Buf = {}
+            try parse_string_lit(&fb)
+            sh_flags = 0
+            for i u64 in 0..fb.n {
+                fc u8 = fb.p[u8, i]
+                if fc == 97 { sh_flags = sh_flags | SHF_ALLOC }        // 'a'
+                else if fc == 119 { sh_flags = sh_flags | SHF_WRITE }  // 'w'
+                else if fc == 120 { sh_flags = sh_flags | SHF_EXECINSTR } // 'x'
+                else if fc == 77 { sh_flags = sh_flags | SHF_MERGE }   // 'M'
+                else if fc == 83 { sh_flags = sh_flags | SHF_STRINGS } // 'S'
+                else if fc == 84 { sh_flags = sh_flags | SHF_TLS }     // 'T'
+                else if fc == 71 { sh_flags = sh_flags | SHF_GROUP }   // 'G'
+            }
+        }
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            skip_hspace()
+            if ac.pos < ac.src.n && (ac.src.p[u8, ac.pos] == 64 || ac.src.p[u8, ac.pos] == 37) {
+                ac.pos += 1
+            }
+            tname Bytes = try parse_ident()
+            if bytes_is(tname, c"progbits") { sh_type = SHT_PROGBITS }
+            else if bytes_is(tname, c"nobits") { sh_type = SHT_NOBITS }
+            else if bytes_is(tname, c"note") { sh_type = SHT_NOTE }
+            else if bytes_is(tname, c"init_array") { sh_type = SHT_INIT_ARRAY }
+            else if bytes_is(tname, c"fini_array") { sh_type = SHT_FINI_ARRAY }
+            else if bytes_is(tname, c"preinit_array") { sh_type = SHT_PREINIT_ARRAY }
+            // Optional entsize / group / comdat
+            if (sh_flags & SHF_MERGE) != 0 {
+                skip_hspace()
+                if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+                    ac.pos += 1
+                    sh_entsize = bitcast[u64](try eval_const_now(try parse_expr()))
+                }
+            }
+            if (sh_flags & SHF_GROUP) != 0 {
+                skip_hspace()
+                if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+                    ac.pos += 1
+                    group_name = try parse_ident()
+                    skip_hspace()
+                    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+                        ac.pos += 1
+                        cn Bytes = try parse_ident()
+                        if bytes_is(cn, c"comdat") { comdat = true }
+                    }
+                }
+            }
+        }
+    }
+
+    sid u32 = sec_get_or_create(name, sh_type, sh_flags, sh_entsize, group_name, comdat)
+    if push { sec_push(sid) } else { sec_switch(sid) }
+}
+
+fn parse_align_directive(is_p2 bool) void fails {
+    v i64 = try eval_const_now(try parse_expr())
+    if v < 0 || v > 30 && is_p2 { try as_err(c"invalid alignment") }
+    align u32 = if is_p2 { trunc[u32](zext[u64](1) << bitcast[u64](v)) } else { trunc[u32](bitcast[u64](v)) }
+    fill u8 = 0
+    has_fill bool = false
+    max_skip u32 = 0
+    skip_hspace()
+    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+        ac.pos += 1
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] != 44 && !at_eol() {
+            fv i64 = try eval_const_now(try parse_expr())
+            fill = trunc[u8](bitcast[u64](fv) & 0xff)
+            has_fill = true
+        }
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            mv i64 = try eval_const_now(try parse_expr())
+            if mv > 0 { max_skip = trunc[u32](bitcast[u64](mv)) }
+        }
+    }
+    emit_align(align, fill, has_fill, max_skip)
+}
+
+fn parse_directive(dir Bytes) void fails {
+    if bytes_is(dir, c".text") {
+        sid u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
+        sec_switch(sid)
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".data") {
+        sid u32 = sec_get_or_create(bytes_c(c".data"), SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 0, bytes_empty(), false)
+        sec_switch(sid)
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".bss") {
+        sid u32 = sec_get_or_create(bytes_c(c".bss"), SHT_NOBITS, SHF_ALLOC | SHF_WRITE, 0, bytes_empty(), false)
+        sec_switch(sid)
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".rodata") {
+        sid u32 = sec_get_or_create(bytes_c(c".rodata"), SHT_PROGBITS, SHF_ALLOC, 0, bytes_empty(), false)
+        sec_switch(sid)
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".section") { try parse_section_directive(false); skip_to_eol(); return }
+    if bytes_is(dir, c".pushsection") { try parse_section_directive(true); skip_to_eol(); return }
+    if bytes_is(dir, c".popsection") { try sec_pop(); skip_to_eol(); return }
+    if bytes_is(dir, c".previous") { sec_previous(); skip_to_eol(); return }
+
+    if bytes_is(dir, c".globl") || bytes_is(dir, c".global") {
+        while true {
+            name Bytes = try parse_ident()
+            sym_at(sym_get_or_create(name)).binding = STB_GLOBAL
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".local") {
+        while true {
+            name Bytes = try parse_ident()
+            sym_at(sym_get_or_create(name)).binding = STB_LOCAL
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".weak") {
+        while true {
+            name Bytes = try parse_ident()
+            sym_at(sym_get_or_create(name)).binding = STB_WEAK
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".hidden") || bytes_is(dir, c".protected") || bytes_is(dir, c".internal") {
+        vis u8 = if bytes_is(dir, c".hidden") { STV_HIDDEN } else if bytes_is(dir, c".protected") { STV_PROTECTED } else { STV_INTERNAL }
+        while true {
+            name Bytes = try parse_ident()
+            sym_at(sym_get_or_create(name)).vis = vis
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".type") {
+        name Bytes = try parse_ident()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        skip_hspace()
+        if ac.pos < ac.src.n && (ac.src.p[u8, ac.pos] == 64 || ac.src.p[u8, ac.pos] == 37) { ac.pos += 1 }
+        tname Bytes = try parse_ident()
+        st u8 = STT_NOTYPE
+        if bytes_is(tname, c"function") { st = STT_FUNC }
+        else if bytes_is(tname, c"object") { st = STT_OBJECT }
+        else if bytes_is(tname, c"tls_object") { st = STT_TLS }
+        else if bytes_is(tname, c"common") { st = STT_COMMON }
+        else if bytes_is(tname, c"gnu_indirect_function") { st = STT_GNU_IFUNC }
+        sym_at(sym_get_or_create(name)).stype = st
+        return
+    }
+    if bytes_is(dir, c".size") {
+        name Bytes = try parse_ident()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        e u32 = try parse_expr()
+        sym_at(sym_get_or_create(name)).size_expr = e
+        return
+    }
+    if bytes_is(dir, c".set") || bytes_is(dir, c".equ") {
+        name Bytes = try parse_ident()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        e u32 = try parse_expr()
+        s handle[Symbol] = sym_at(sym_get_or_create(name))
+        s.is_equ = true
+        s.defined = true
+        s.equ_expr = e
+        return
+    }
+    if bytes_is(dir, c".byte") { try parse_data_directive(1); return }
+    if bytes_is(dir, c".short") || bytes_is(dir, c".word") || bytes_is(dir, c".value") || bytes_is(dir, c".2byte") {
+        try parse_data_directive(2); return
+    }
+    if bytes_is(dir, c".long") || bytes_is(dir, c".int") || bytes_is(dir, c".4byte") {
+        try parse_data_directive(4); return
+    }
+    if bytes_is(dir, c".quad") || bytes_is(dir, c".8byte") {
+        try parse_data_directive(8); return
+    }
+    if bytes_is(dir, c".ascii") || bytes_is(dir, c".asciz") || bytes_is(dir, c".string") {
+        nul bool = !bytes_is(dir, c".ascii")
+        while true {
+            b Buf = {}
+            try parse_string_lit(&b)
+            emit_bytes(buf_bytes(&b))
+            if nul { emit_u8(0) }
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".zero") || bytes_is(dir, c".skip") || bytes_is(dir, c".space") {
+        cnt u32 = try parse_expr()
+        fill u64 = 0
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            fill = bitcast[u64](try eval_const_now(try parse_expr())) & 0xff
+        }
+        emit_fill(cnt, 1, fill)
+        return
+    }
+    if bytes_is(dir, c".fill") {
+        cnt u32 = try parse_expr()
+        esz u32 = 1
+        fill u64 = 0
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            esz = trunc[u32](bitcast[u64](try eval_const_now(try parse_expr())))
+            if esz > 8 { esz = 8 }
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+                ac.pos += 1
+                fill = bitcast[u64](try eval_const_now(try parse_expr()))
+            }
+        }
+        emit_fill(cnt, esz, fill)
+        return
+    }
+    if bytes_is(dir, c".p2align") { try parse_align_directive(true); return }
+    if bytes_is(dir, c".balign") || bytes_is(dir, c".align") { try parse_align_directive(false); return }
+    if bytes_is(dir, c".uleb128") { emit_leb(try parse_expr(), false); return }
+    if bytes_is(dir, c".sleb128") { emit_leb(try parse_expr(), true); return }
+    if bytes_is(dir, c".comm") || bytes_is(dir, c".lcomm") {
+        is_local bool = bytes_is(dir, c".lcomm")
+        name Bytes = try parse_ident()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        sz u64 = bitcast[u64](try eval_const_now(try parse_expr()))
+        al u64 = 1
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
+            ac.pos += 1
+            al = bitcast[u64](try eval_const_now(try parse_expr()))
+        }
+        s handle[Symbol] = sym_at(sym_get_or_create(name))
+        if is_local {
+            // Place in .bss
+            prev u32 = ac.cur_sec
+            bss u32 = sec_get_or_create(bytes_c(c".bss"), SHT_NOBITS, SHF_ALLOC | SHF_WRITE, 0, bytes_empty(), false)
+            ac.cur_sec = bss
+            if al > 1 { emit_align(trunc[u32](al), 0, false, 0) }
+            try as_define_label(sym_get_or_create(name))
+            s.binding = STB_LOCAL
+            s.size = sz
+            emit_fill(expr_const(bitcast[i64](sz)), 1, 0)
+            ac.cur_sec = prev
+        } else {
+            s.is_common = true
+            s.binding = STB_GLOBAL
+            s.stype = STT_OBJECT
+            s.size = sz
+            s.common_align = if al == 0 { 1 } else { al }
+        }
+        return
+    }
+    if bytes_is(dir, c".att_syntax") { skip_to_eol(); return }
+    if bytes_is(dir, c".intel_syntax") { try as_err(c".intel_syntax is not supported"); return }
+    if bytes_is(dir, c".err") || bytes_is(dir, c".error") { try as_err(c".error directive encountered"); return }
+    if bytes_is(dir, c".warning") { skip_to_eol(); return }
+    // Accepted and ignored for now (no DWARF line emission yet)
+    if bytes_is(dir, c".file") || bytes_is(dir, c".loc") || bytes_is(dir, c".ident") ||
+       bytes_is(dir, c".addrsig") || bytes_is(dir, c".addrsig_sym") ||
+       bytes_is(dir, c".build_version") || bytes_is(dir, c".subsections_via_symbols") {
+        skip_to_eol()
+        return
+    }
+    try as_err_b(c"unsupported directive: ", dir)
+}
+
+// ---------- Statement loop ----------
+
+fn as_parse_all() void fails {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    while ac.pos < n {
+        skip_hspace()
+        if ac.pos >= n { break }
+        c u8 = p[u8, ac.pos]
+        if c == 10 { ac.pos += 1; ac.line += 1; continue }
+        if c == 59 { ac.pos += 1; continue }
+        if c == 35 || (c == 47 && ac.pos + 1 < n && p[u8, ac.pos + 1] == 47) {
+            skip_to_eol()
+            continue
+        }
+
+        // Numeric local label definition: digits followed by ':'
+        if is_digit(c) {
+            start u64 = ac.pos
+            j u64 = start
+            while j < n && is_digit(p[u8, j]) { j += 1 }
+            if j < n && p[u8, j] == 58 {
+                num u64 = 0
+                for k u64 in start..j { num = num * 10 + zext[u64](p[u8, k] - 48) }
+                ac.pos = j + 1
+                sid u32 = local_label_define(trunc[u32](num))
+                try as_define_label(sid)
+                continue
+            }
+            try as_err(c"unexpected number at start of statement")
+        }
+
+        // Scan leading identifier / directive / mnemonic
+        if !is_ident_start(c) {
+            try as_err(c"unexpected character at start of statement")
+        }
+        start u64 = ac.pos
+        while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
+        tok Bytes = bytes(p + start, ac.pos - start)
+        skip_hspace()
+
+        // Label: `name:`
+        if ac.pos < n && p[u8, ac.pos] == 58 {
+            ac.pos += 1
+            sid u32 = sym_get_or_create(tok)
+            try as_define_label(sid)
+            continue
+        }
+
+        // Assignment: `name = expr`
+        if ac.pos < n && p[u8, ac.pos] == 61 {
+            ac.pos += 1
+            e u32 = try parse_expr()
+            s handle[Symbol] = sym_at(sym_get_or_create(tok))
+            s.is_equ = true
+            s.defined = true
+            s.equ_expr = e
+            continue
+        }
+
+        // Directive: `.foo`
+        if tok.p[u8, 0] == 46 {
+            try parse_directive(tok)
+            continue
+        }
+
+        // Instruction prefixes: lock / rep / repe / repz / repne / repnz
+        prefix_lock bool = false
+        prefix_rep u8 = 0
+        while true {
+            if bytes_is(tok, c"lock") {
+                prefix_lock = true
+            } else if bytes_is(tok, c"rep") || bytes_is(tok, c"repe") || bytes_is(tok, c"repz") {
+                prefix_rep = 0xf3
+            } else if bytes_is(tok, c"repne") || bytes_is(tok, c"repnz") {
+                prefix_rep = 0xf2
+            } else {
+                break
+            }
+            skip_hspace()
+            if at_eol() {
+                // Standalone prefix on its own line (rare, emit raw byte)
+                if prefix_lock { emit_u8(0xf0) }
+                if prefix_rep != 0 { emit_u8(prefix_rep) }
+                tok = bytes_empty()
+                break
+            }
+            start = ac.pos
+            while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
+            tok = bytes(p + start, ac.pos - start)
+            skip_hspace()
+        }
+        if tok.n == 0 { continue }
+
+        // Parse 0..4 operands
+        ops arr[4, Operand] = {}
+        nops u8 = 0
+        is_br bool = is_branch_mnemonic(tok)
+        if !at_eol() {
+            while true {
+                if nops >= 4 { try as_err(c"too many operands") }
+                try parse_operand(&ops[zext[u64](nops)], is_br)
+                nops += 1
+                skip_hspace()
+                if ac.pos < n && p[u8, ac.pos] == 44 {
+                    ac.pos += 1
+                    continue
+                }
+                break
+            }
+        }
+        try as_encode_insn(tok, &ops, nops, prefix_lock, prefix_rep)
+    }
+}

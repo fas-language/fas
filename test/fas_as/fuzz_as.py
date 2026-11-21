@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Seeded differential fuzzer comparing fas-as against llvm-mc-22.
+
+Generates random valid x86-64 AT&T instructions across the entire table
+(GP 8/16/32/64-bit, REX/hi8 rules, system, x87, addressing modes, edge
+immediates, relocations, branch relaxation) and compares .text bytes +
+relocations byte-for-byte with `llvm-mc-22 -triple=x86_64-unknown-linux-gnu -filetype=obj`.
+"""
+
+import os, random, struct, subprocess, sys, tempfile
+
+R8 = ['%al', '%cl', '%dl', '%bl', '%spl', '%bpl', '%sil', '%dil',
+      '%r8b', '%r9b', '%r10b', '%r11b', '%r12b', '%r13b', '%r14b', '%r15b']
+R8_NO_REX = ['%al', '%cl', '%dl', '%bl', '%ah', '%ch', '%dh', '%bh']
+R16 = ['%ax', '%cx', '%dx', '%bx', '%sp', '%bp', '%si', '%di',
+       '%r8w', '%r9w', '%r10w', '%r11w', '%r12w', '%r13w', '%r14w', '%r15w']
+R32 = ['%eax', '%ecx', '%edx', '%ebx', '%esp', '%ebp', '%esi', '%edi',
+       '%r8d', '%r9d', '%r10d', '%r11d', '%r12d', '%r13d', '%r14d', '%r15d']
+R64 = ['%rax', '%rcx', '%rdx', '%rbx', '%rsp', '%rbp', '%rsi', '%rdi',
+       '%r8', '%r9', '%r10', '%r11', '%r12', '%r13', '%r14', '%r15']
+R64_IDX = [r for r in R64 if r != '%rsp']
+R32_IDX = [r for r in R32 if r != '%esp']
+ST = [f'%st({i})' for i in range(8)]
+
+EDGE_IMM8 = [0, 1, -1, 2, 7, 127, -128, 255]
+EDGE_IMM16 = [0, 1, -1, 127, 128, -128, -129, 32767, -32768, 65535]
+EDGE_IMM32S = [0, 1, -1, 127, 128, -128, -129, 0x7fff, -0x8000, 0x7fffffff, -0x80000000]
+EDGE_IMM32 = EDGE_IMM32S + [0x80000000, 0xffffffff]
+EDGE_IMM64 = EDGE_IMM32 + [0x123456789abcdef0, -0x123456789abcdef0]
+DISPS = [0, 1, -1, 8, -8, 127, -128, 128, -129, 0x1234, -0x1234]
+CCS = ['o', 'no', 'b', 'ae', 'e', 'ne', 'be', 'a', 's', 'ns', 'p', 'np', 'l', 'ge', 'le', 'g']
+
+def rand_mem(rng, allow_rip=True, allow_seg=True):
+    kind = rng.randint(0, 7)
+    seg = ''
+    if allow_seg and rng.random() < 0.12:
+        seg = rng.choice(['%fs:', '%gs:'])
+    if kind == 0:
+        return f"{seg}({rng.choice(R64)})"
+    if kind == 1:
+        d = rng.choice(DISPS)
+        return f"{seg}{d}({rng.choice(R64)})"
+    if kind == 2:
+        sc = rng.choice([1, 2, 4, 8])
+        d = rng.choice(DISPS)
+        return f"{seg}{d}({rng.choice(R64)},{rng.choice(R64_IDX)},{sc})"
+    if kind == 3:
+        sc = rng.choice([1, 2, 4, 8])
+        d = rng.choice(DISPS)
+        return f"{seg}{d}(,{rng.choice(R64_IDX)},{sc})"
+    if kind == 4 and allow_rip:
+        d = rng.choice([0, 4, -4, 0x100])
+        if rng.random() < 0.5:
+            return f"{seg}ext_sym({ '%rip' })" if d == 0 else f"{seg}ext_sym+{d}(%rip)"
+        return f"{seg}{d}(%rip)"
+    if kind == 5:
+        d = rng.choice([0, 16, -16, 0x200])
+        return f"{seg}{d}({rng.choice(R32)})"
+    if kind == 6:
+        sc = rng.choice([1, 2, 4, 8])
+        return f"{seg}({rng.choice(R32)},{rng.choice(R32_IDX)},{sc})"
+    return f"{seg}{rng.choice([0, 0x1000, -0x100])}"
+
+def rand_insn(rng):
+    cat = rng.randint(0, 14)
+    if cat == 0: # ALU 8/16/32/64
+        op = rng.choice(['add', 'or', 'adc', 'sbb', 'and', 'sub', 'xor', 'cmp'])
+        sz = rng.choice(['b', 'w', 'l', 'q'])
+        m = op + (sz if rng.random() < 0.7 else '')
+        form = rng.randint(0, 3)
+        if sz == 'b':
+            if form == 0: return f"{op}b ${rng.choice(EDGE_IMM8)}, {rng.choice(R8)}"
+            if form == 1: return f"{op}b ${rng.choice(EDGE_IMM8)}, {rand_mem(rng)}"
+            if form == 2: return f"{m} {rng.choice(R8)}, {rng.choice(R8)}"
+            return f"{m} {rng.choice(R8)}, {rand_mem(rng)}"
+        elif sz == 'w':
+            if form == 0: return f"{op}w ${rng.choice(EDGE_IMM16)}, {rng.choice(R16)}"
+            if form == 1: return f"{op}w ${rng.choice(EDGE_IMM16)}, {rand_mem(rng)}"
+            if form == 2: return f"{m} {rng.choice(R16)}, {rng.choice(R16)}"
+            return f"{m} {rand_mem(rng)}, {rng.choice(R16)}"
+        elif sz == 'l':
+            if form == 0: return f"{op}l ${rng.choice(EDGE_IMM32)}, {rng.choice(R32)}"
+            if form == 1: return f"{op}l ${rng.choice(EDGE_IMM32)}, {rand_mem(rng)}"
+            if form == 2: return f"{m} {rng.choice(R32)}, {rng.choice(R32)}"
+            return f"{m} {rand_mem(rng)}, {rng.choice(R32)}"
+        else:
+            if form == 0: return f"{op}q ${rng.choice(EDGE_IMM32S)}, {rng.choice(R64)}"
+            if form == 1: return f"{op}q ${rng.choice(EDGE_IMM32S)}, {rand_mem(rng)}"
+            if form == 2: return f"{m} {rng.choice(R64)}, {rng.choice(R64)}"
+            return f"{m} {rand_mem(rng)}, {rng.choice(R64)}"
+    if cat == 1: # MOV / MOVABS / MOVSX / MOVZX / LEA
+        sub = rng.randint(0, 6)
+        if sub == 0: return f"movb ${rng.choice(EDGE_IMM8)}, {rng.choice(R8)}"
+        if sub == 1: return f"movl ${rng.choice(EDGE_IMM32)}, {rng.choice(R32)}"
+        if sub == 2: return f"movq ${rng.choice(EDGE_IMM32S)}, {rng.choice(R64)}"
+        if sub == 3: return f"movabsq ${rng.choice(EDGE_IMM64)}, {rng.choice(R64)}"
+        if sub == 4:
+            pair = rng.choice([
+                ('movsbw', R8, R16), ('movsbl', R8, R32), ('movsbq', R8, R64),
+                ('movswl', R16, R32), ('movswq', R16, R64), ('movslq', R32, R64),
+                ('movzbw', R8, R16), ('movzbl', R8, R32), ('movzbq', R8, R64),
+                ('movzwl', R16, R32), ('movzwq', R16, R64),
+            ])
+            src = rng.choice(pair[1]) if rng.random() < 0.5 else rand_mem(rng)
+            return f"{pair[0]} {src}, {rng.choice(pair[2])}"
+        if sub == 5:
+            return f"leaq {rand_mem(rng, allow_seg=False)}, {rng.choice(R64)}"
+        return f"movq {rand_mem(rng)}, {rng.choice(R64)}"
+    if cat == 2: # TEST
+        sz = rng.choice(['b', 'w', 'l', 'q'])
+        if sz == 'b': return f"testb ${rng.choice(EDGE_IMM8)}, {rng.choice(R8)}"
+        if sz == 'w': return f"testw {rng.choice(R16)}, {rng.choice(R16)}"
+        if sz == 'l': return f"testl ${rng.choice(EDGE_IMM32)}, {rng.choice(R32)}"
+        return f"testq ${rng.choice(EDGE_IMM32S)}, {rng.choice(R64)}"
+    if cat == 3: # Unary: not/neg/mul/imul/div/idiv/inc/dec
+        op = rng.choice(['not', 'neg', 'mul', 'imul', 'div', 'idiv', 'inc', 'dec'])
+        sz, regs = rng.choice([('b', R8), ('w', R16), ('l', R32), ('q', R64)])
+        target = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+        return f"{op}{sz} {target}"
+    if cat == 4: # IMUL 2-op / 3-op
+        sz, regs, imms = rng.choice([('w', R16, EDGE_IMM16), ('l', R32, EDGE_IMM32), ('q', R64, EDGE_IMM32S)])
+        form = rng.randint(0, 2)
+        if form == 0: return f"imul{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+        if form == 1: return f"imul{sz} ${rng.choice(imms)}, {rng.choice(regs)}, {rng.choice(regs)}"
+        return f"imul{sz} ${rng.choice(imms)}, {rand_mem(rng)}, {rng.choice(regs)}"
+    if cat == 5: # Shifts & rotates
+        op = rng.choice(['rol', 'ror', 'rcl', 'rcr', 'shl', 'shr', 'sar'])
+        sz, regs = rng.choice([('b', R8), ('w', R16), ('l', R32), ('q', R64)])
+        cnt = rng.choice(['$1', '$0', '$7', '$31', '%cl'])
+        return f"{op}{sz} {cnt}, {rng.choice(regs)}"
+    if cat == 6: # SHLD / SHRD
+        op = rng.choice(['shld', 'shrd'])
+        sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+        cnt = rng.choice(['$1', '$5', '%cl'])
+        return f"{op}{sz} {cnt}, {rng.choice(regs)}, {rng.choice(regs)}"
+    if cat == 7: # PUSH / POP
+        op = rng.choice(['pushq', 'popq'])
+        if op == 'pushq' and rng.random() < 0.3:
+            return f"pushq ${rng.choice(EDGE_IMM32S)}"
+        return f"{op} {rng.choice(R64) if rng.random() < 0.7 else rand_mem(rng)}"
+    if cat == 8: # XCHG / CMPXCHG / XADD / BSWAP / BT* / BSF / BSR
+        sub = rng.randint(0, 5)
+        if sub == 0:
+            sz, regs = rng.choice([('b', R8), ('w', R16), ('l', R32), ('q', R64)])
+            return f"xchg{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+        if sub == 1:
+            op = rng.choice(['cmpxchg', 'xadd'])
+            sz, regs = rng.choice([('b', R8), ('w', R16), ('l', R32), ('q', R64)])
+            pfx = 'lock ' if rng.random() < 0.4 else ''
+            return f"{pfx}{op}{sz} {rng.choice(regs)}, {rand_mem(rng)}"
+        if sub == 2:
+            return rng.choice([f"bswapl {rng.choice(R32)}", f"bswapq {rng.choice(R64)}"])
+        if sub == 3:
+            op = rng.choice(['bt', 'bts', 'btr', 'btc'])
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            if rng.random() < 0.5: return f"{op}{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+            return f"{op}{sz} ${rng.choice([0, 1, 7, 31])}, {rng.choice(regs)}"
+        if sub == 4:
+            op = rng.choice(['bsf', 'bsr'])
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            return f"{op}{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+        return f"cmpxchg16b {rand_mem(rng)}"
+    if cat == 9: # CMOVcc / SETcc
+        cc = rng.choice(CCS)
+        if rng.random() < 0.5:
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            return f"cmov{cc}{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+        return f"set{cc} {rng.choice(R8)}"
+    if cat == 10: # Branches / calls / indirect / relocs
+        sub = rng.randint(0, 5)
+        if sub == 0: return f"j{rng.choice(CCS)} 1f"
+        if sub == 1: return "jmp 1f"
+        if sub == 2: return rng.choice(["call ext_fn", "call ext_fn@PLT", "call 1f"])
+        if sub == 3: return f"{rng.choice(['call', 'jmp'])} *{rng.choice(R64)}"
+        if sub == 4: return f"{rng.choice(['call', 'jmp'])} *ext_sym@GOTPCREL(%rip)"
+        return rng.choice([
+            f"movq ext_sym@GOTPCREL(%rip), {rng.choice(R64)}",
+            f"movl ext_sym@GOTPCREL(%rip), {rng.choice(R32)}",
+            f"addq ext_sym@GOTPCREL(%rip), {rng.choice(R64)}",
+            f"movq ext_sym@GOTTPOFF(%rip), {rng.choice(R64)}",
+            f"leaq ext_sym@TLSGD(%rip), %rdi",
+            f"leaq ext_sym@TLSLD(%rip), %rdi",
+            f"leaq ext_sym@DTPOFF(%rax), %rax",
+            f"movq $ext_sym@TPOFF, {rng.choice(R64)}",
+        ])
+    if cat == 11: # High 8-bit registers without REX
+        op = rng.choice(['addb', 'subb', 'xorb', 'movb', 'cmpb', 'testb'])
+        r1 = rng.choice(R8_NO_REX)
+        r2 = rng.choice(R8_NO_REX)
+        return f"{op} {r1}, {r2}"
+    if cat == 12: # System & zero-op instructions
+        return rng.choice([
+            'nop', 'ret', 'leave', 'int3', 'clc', 'stc', 'cmc', 'cld', 'std',
+            'cbw', 'cwde', 'cdqe', 'cwd', 'cdq', 'cqo',
+            'movsb', 'movsq', 'rep movsb', 'rep stosq', 'repe cmpsb', 'repne scasb',
+            'syscall', 'cpuid', 'rdtsc', 'rdtscp', 'xgetbv',
+            'lfence', 'mfence', 'sfence', 'pause', 'ud2', 'endbr64',
+            f'clflush {rand_mem(rng)}', f'prefetcht0 {rand_mem(rng)}',
+        ])
+    if cat == 13: # x87
+        return rng.choice([
+            'fldz', 'fld1', 'fldpi', 'fchs', 'fabs', 'fsqrt', 'fsin', 'fcos', 'frndint', 'fcompp', 'fucompp',
+            f'flds {rand_mem(rng)}', f'fldl {rand_mem(rng)}', f'fldt {rand_mem(rng)}',
+            f'fstps {rand_mem(rng)}', f'fstpl {rand_mem(rng)}', f'fstpt {rand_mem(rng)}',
+            f'fildl {rand_mem(rng)}', f'fildll {rand_mem(rng)}', f'fistpl {rand_mem(rng)}', f'fistpll {rand_mem(rng)}',
+            f'fadds {rand_mem(rng)}', f'faddl {rand_mem(rng)}', f'fmull {rand_mem(rng)}',
+            f'fsubl {rand_mem(rng)}', f'fdivl {rand_mem(rng)}',
+            f'fld {rng.choice(ST)}', f'fstp {rng.choice(ST)}', f'fxch {rng.choice(ST)}',
+            f'fadd {rng.choice(ST)}, %st(0)', f'fadd %st(0), {rng.choice(ST)}',
+            f'faddp %st(0), {rng.choice(ST)}', f'fmulp %st(0), {rng.choice(ST)}',
+            f'fsub {rng.choice(ST)}, %st(0)', f'fsub %st(0), {rng.choice(ST)}',
+            f'fsubp %st(0), {rng.choice(ST)}', f'fsubrp %st(0), {rng.choice(ST)}',
+            f'fdiv {rng.choice(ST)}, %st(0)', f'fdiv %st(0), {rng.choice(ST)}',
+            f'fdivp %st(0), {rng.choice(ST)}', f'fdivrp %st(0), {rng.choice(ST)}',
+            f'fucomi {rng.choice(ST)}, %st(0)', f'fucomip {rng.choice(ST)}, %st(0)',
+            'fnstsw %ax', f'fldcw {rand_mem(rng)}', f'fnstcw {rand_mem(rng)}',
+        ])
+    # cat == 14: Alignment & relaxation stress
+    return rng.choice([
+        '.p2align 4',
+        '.balign 8',
+        'jnz 1f\n  .zero 140\n1:',
+        'jmp 1f\n  .zero 140\n1:',
+    ])
+
+def parse_elf_text_and_relas(data):
+    """Minimal ELF64 reader returning (.text bytes, sorted list of (off, rtype, sym_name, addend))."""
+    e_shoff = struct.unpack_from('<Q', data, 40)[0]
+    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from('<HHH', data, 58)
+    shdrs = []
+    for i in range(e_shnum):
+        shdrs.append(struct.unpack_from('<IIQQQQIIQQ', data, e_shoff + i * e_shentsize))
+    shstr_off = shdrs[e_shstrndx][4]
+    def get_str(base, idx):
+        end = data.index(b'\x00', base + idx)
+        return data[base + idx:end].decode('utf-8', 'replace')
+
+    text_bytes = b''
+    symtab = None
+    strtab_off = 0
+    rela_text = None
+    for i, sh in enumerate(shdrs):
+        name = get_str(shstr_off, sh[0])
+        if name == '.text':
+            text_bytes = data[sh[4]:sh[4] + sh[5]]
+        elif name == '.symtab':
+            symtab = sh
+        elif name == '.strtab':
+            strtab_off = sh[4]
+        elif name == '.rela.text':
+            rela_text = sh
+
+    relas = []
+    if rela_text is not None and symtab is not None:
+        r_off, r_sz = rela_text[4], rela_text[5]
+        s_off = symtab[4]
+        for off in range(r_off, r_off + r_sz, 24):
+            r_offset, r_info, r_addend = struct.unpack_from('<QQq', data, off)
+            sym_idx = r_info >> 32
+            rtype = r_info & 0xffffffff
+            st_name, st_info, _, st_shndx, st_val, _ = struct.unpack_from('<IBBHQQ', data, s_off + sym_idx * 24)
+            stype = st_info & 0xf
+            if stype == 3: # STT_SECTION
+                sname = get_str(shstr_off, shdrs[st_shndx][0])
+            else:
+                sname = get_str(strtab_off, st_name)
+            relas.append((r_offset, rtype, sname, r_addend))
+    return text_bytes, relas
+
+def run_tool(cmd, asm_text, out_path):
+    p = subprocess.run(cmd, input=asm_text.encode(), capture_output=True)
+    if p.returncode != 0:
+        return None, p.stderr.decode('utf-8', 'replace')
+    with open(out_path, 'rb') as f:
+        return f.read(), ''
+
+def main():
+    fas_as = sys.argv[1]
+    seed = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    cases = int(sys.argv[3]) if len(sys.argv) > 3 else 500
+    rng = random.Random(seed)
+
+    passed = 0
+    failed = 0
+    with tempfile.TemporaryDirectory() as td:
+        fas_o = os.path.join(td, 'fas.o')
+        mc_o = os.path.join(td, 'mc.o')
+        for ci in range(cases):
+            lines = ['.text']
+            n_insns = rng.randint(1, 8)
+            for _ in range(n_insns):
+                lines.append('  ' + rand_insn(rng))
+            lines.append('1:')
+            lines.append('  nop')
+            asm = '\n'.join(lines) + '\n'
+
+            mc_data, mc_err = run_tool(['llvm-mc-22', '-triple=x86_64-unknown-linux-gnu', '-filetype=obj', '-o', mc_o, '-'], asm, mc_o)
+            if mc_data is None:
+                # Skip invalid random combination rejected by llvm-mc
+                continue
+            fas_data, fas_err = run_tool([fas_as, '-o', fas_o, '-'], asm, fas_o)
+            if fas_data is None:
+                failed += 1
+                if failed <= 10:
+                    print(f"FAIL case {ci} (fas-as error):\n{asm}--- stderr ---\n{fas_err}")
+                continue
+            mt, mr = parse_elf_text_and_relas(mc_data)
+            ft, fr = parse_elf_text_and_relas(fas_data)
+            if mt != ft or mr != fr:
+                failed += 1
+                if failed <= 10:
+                    print(f"DIFF case {ci}:\n{asm}  mc  text: {mt.hex()}\n  fas text: {ft.hex()}\n  mc  relas: {mr}\n  fas relas: {fr}")
+            else:
+                passed += 1
+    print(f"fuzz_as (seed={seed}): passed={passed} failed={failed}")
+    return 0 if failed == 0 else 1
+
+if __name__ == '__main__':
+    sys.exit(main())

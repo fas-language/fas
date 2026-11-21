@@ -1,0 +1,591 @@
+// AT&T assembly expression parser, symbol lookup, numeric local labels,
+// and constant/post-layout expression evaluator.
+
+// ---------- character classification ----------
+
+fn is_ident_start(c u8) bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 46 || c == 36
+}
+
+fn is_ident_char(c u8) bool {
+    return is_ident_start(c) || (c >= 48 && c <= 57) || c == 64
+}
+
+fn is_digit(c u8) bool { return c >= 48 && c <= 57 }
+fn is_hex(c u8) bool { return is_digit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) }
+fn is_hspace(c u8) bool { return c == 32 || c == 9 || c == 13 }
+
+fn hex_val(c u8) u64 {
+    if c >= 48 && c <= 57 { return zext[u64](c - 48) }
+    if c >= 65 && c <= 70 { return zext[u64](c - 55) }
+    return zext[u64](c - 87)
+}
+
+fn skip_hspace() void {
+    while ac.pos < ac.src.n {
+        c u8 = ac.src.p[u8, ac.pos]
+        if is_hspace(c) {
+            ac.pos += 1
+        } else if c == 47 && ac.pos + 1 < ac.src.n && ac.src.p[u8, ac.pos + 1] == 42 {
+            // /* ... */ block comment
+            ac.pos += 2
+            while ac.pos + 1 < ac.src.n {
+                if ac.src.p[u8, ac.pos] == 10 { ac.line += 1 }
+                if ac.src.p[u8, ac.pos] == 42 && ac.src.p[u8, ac.pos + 1] == 47 {
+                    ac.pos += 2
+                    break
+                }
+                ac.pos += 1
+            }
+        } else {
+            break
+        }
+    }
+}
+
+fn at_eol() bool {
+    skip_hspace()
+    if ac.pos >= ac.src.n { return true }
+    c u8 = ac.src.p[u8, ac.pos]
+    return c == 10 || c == 59 || c == 35 || (c == 47 && ac.pos + 1 < ac.src.n && ac.src.p[u8, ac.pos + 1] == 47)
+}
+
+fn skip_to_eol() void {
+    while ac.pos < ac.src.n {
+        c u8 = ac.src.p[u8, ac.pos]
+        if c == 10 || c == 59 { return }
+        ac.pos += 1
+    }
+}
+
+// ---------- symbol table helpers ----------
+
+fn sym_get_or_create(name Bytes) u32 {
+    existing u32 = map_get(&ac.sym_map, name) catch AS_NONE
+    if existing != AS_NONE { return existing }
+    id u32 = trunc[u32](ac.syms.n)
+    s handle[Symbol] = vec_add(&ac.syms)
+    // Copy name into interned arena so it has stable backing memory
+    iid u32 = intern(&ac.names, name)
+    sname Bytes = intern_name(&ac.names, iid)
+    s.name = sname
+    s.binding = STB_LOCAL
+    s.stype = STT_NOTYPE
+    s.vis = STV_DEFAULT
+    s.sec_id = AS_NONE
+    s.frag_id = AS_NONE
+    s.equ_expr = AS_NONE
+    s.size_expr = AS_NONE
+    s.elf_idx = AS_NONE
+    map_put(&ac.sym_map, sname, id)
+    return id
+}
+
+fn sym_at(id u32) handle[Symbol] {
+    return vec_at(&ac.syms, zext[u64](id))
+}
+
+// Synthetic name for numeric local label N generation g: ".L\x01<N>.<g>"
+fn local_label_name(n u32, gen u32, out handle[Buf]) Bytes {
+    buf_clear(out)
+    buf_u8(out, 46)
+    buf_u8(out, 76)
+    buf_u8(out, 1)
+    buf_dec_u64(out, zext[u64](n))
+    buf_u8(out, 46)
+    buf_dec_u64(out, zext[u64](gen))
+    return buf_bytes(out)
+}
+
+fn local_label_define(n u32) u32 {
+    gen u32 = map_get(&ac.local_gen, n) catch 0
+    b Buf = {}
+    name Bytes = local_label_name(n, gen, &b)
+    id u32 = sym_get_or_create(name)
+    sym_at(id).is_local_label = true
+    map_put(&ac.local_gen, n, gen + 1)
+    map_put(&ac.local_fwd, n, AS_NONE)
+    return id
+}
+
+fn local_label_ref(n u32, forward bool) u32 fails {
+    gen u32 = map_get(&ac.local_gen, n) catch 0
+    if !forward {
+        if gen == 0 { try as_err(c"undefined backward local label") }
+        b Buf = {}
+        name Bytes = local_label_name(n, gen - 1, &b)
+        id u32 = sym_get_or_create(name)
+        sym_at(id).is_local_label = true
+        return id
+    }
+    b Buf = {}
+    name Bytes = local_label_name(n, gen, &b)
+    id u32 = sym_get_or_create(name)
+    sym_at(id).is_local_label = true
+    map_put(&ac.local_fwd, n, id)
+    return id
+}
+
+// ---------- ExprNode constructors ----------
+
+fn expr_const(v i64) u32 {
+    id u32 = trunc[u32](ac.exprs.n)
+    e handle[ExprNode] = vec_add(&ac.exprs)
+    e.kind = EX_CONST
+    e.val = v
+    return id
+}
+
+fn expr_sym(sym_id u32, variant u8) u32 {
+    id u32 = trunc[u32](ac.exprs.n)
+    e handle[ExprNode] = vec_add(&ac.exprs)
+    e.kind = EX_SYM
+    e.lhs = sym_id
+    e.variant = variant
+    return id
+}
+
+fn expr_dot(sec_id u32, frag_id u32, frag_off u32) u32 {
+    id u32 = trunc[u32](ac.exprs.n)
+    e handle[ExprNode] = vec_add(&ac.exprs)
+    e.kind = EX_DOT
+    e.lhs = sec_id
+    e.rhs = frag_id
+    e.val = zext[i64](frag_off)
+    return id
+}
+
+fn expr_unary(op u8, child u32) u32 {
+    id u32 = trunc[u32](ac.exprs.n)
+    e handle[ExprNode] = vec_add(&ac.exprs)
+    e.kind = EX_UNARY
+    e.op = op
+    e.lhs = child
+    return id
+}
+
+fn expr_binary(op u8, lhs u32, rhs u32) u32 {
+    id u32 = trunc[u32](ac.exprs.n)
+    e handle[ExprNode] = vec_add(&ac.exprs)
+    e.kind = EX_BINARY
+    e.op = op
+    e.lhs = lhs
+    e.rhs = rhs
+    return id
+}
+
+// ---------- Variant parsing (@PLT, @GOTPCREL, ...) ----------
+
+fn parse_variant_name(v Bytes) u8 {
+    if bytes_is(v, c"PLT") || bytes_is(v, c"plt") { return VAR_PLT }
+    if bytes_is(v, c"GOTPCREL") || bytes_is(v, c"gotpcrel") { return VAR_GOTPCREL }
+    if bytes_is(v, c"GOTPCRELX") || bytes_is(v, c"gotpcrelx") { return VAR_GOTPCRELX }
+    if bytes_is(v, c"REX_GOTPCRELX") { return VAR_REX_GOTPCRELX }
+    if bytes_is(v, c"GOTTPOFF") || bytes_is(v, c"gottpoff") { return VAR_GOTTPOFF }
+    if bytes_is(v, c"TPOFF") || bytes_is(v, c"tpoff") { return VAR_TPOFF }
+    if bytes_is(v, c"TLSGD") || bytes_is(v, c"tlsgd") { return VAR_TLSGD }
+    if bytes_is(v, c"TLSLD") || bytes_is(v, c"tlsld") { return VAR_TLSLD }
+    if bytes_is(v, c"DTPOFF") || bytes_is(v, c"dtpoff") { return VAR_DTPOFF }
+    if bytes_is(v, c"GOTOFF") || bytes_is(v, c"gotoff") { return VAR_GOTOFF }
+    if bytes_is(v, c"GOT") || bytes_is(v, c"got") { return VAR_GOT }
+    if bytes_is(v, c"SIZE") || bytes_is(v, c"size") { return VAR_SIZE }
+    return VAR_NONE
+}
+
+// ---------- Recursive-descent expression parser ----------
+// Precedence matches GNU as / llvm-mc:
+//   primary: int | char | '.' | local_label | ident[@variant] | '(' expr ')'
+//   unary:   - | + | ~ | !
+//   mul:     * / % << >>
+//   add:     + - & | ^
+//   cmp:     == != < <= > >=
+//   logic:   && ||
+
+fn parse_int_lit() i64 fails {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    v u64 = 0
+    if p[u8, ac.pos] == 48 && ac.pos + 1 < n {
+        c1 u8 = p[u8, ac.pos + 1]
+        if c1 == 120 || c1 == 88 { // 0x
+            ac.pos += 2
+            if ac.pos >= n || !is_hex(p[u8, ac.pos]) { try as_err(c"invalid hex literal") }
+            while ac.pos < n && is_hex(p[u8, ac.pos]) {
+                v = (v << 4) | hex_val(p[u8, ac.pos])
+                ac.pos += 1
+            }
+            return bitcast[i64](v)
+        }
+        if c1 == 98 || c1 == 66 { // 0b
+            ac.pos += 2
+            while ac.pos < n && (p[u8, ac.pos] == 48 || p[u8, ac.pos] == 49) {
+                v = (v << 1) | zext[u64](p[u8, ac.pos] - 48)
+                ac.pos += 1
+            }
+            return bitcast[i64](v)
+        }
+        if c1 >= 48 && c1 <= 55 { // octal 0...
+            ac.pos += 1
+            while ac.pos < n && p[u8, ac.pos] >= 48 && p[u8, ac.pos] <= 55 {
+                v = (v << 3) | zext[u64](p[u8, ac.pos] - 48)
+                ac.pos += 1
+            }
+            return bitcast[i64](v)
+        }
+    }
+    while ac.pos < n && is_digit(p[u8, ac.pos]) {
+        v = v * 10 + zext[u64](p[u8, ac.pos] - 48)
+        ac.pos += 1
+    }
+    return bitcast[i64](v)
+}
+
+fn parse_char_lit() i64 fails {
+    // GAS char literal: 'a' or 'a (GAS allows single-quote without closing quote!)
+    ac.pos += 1
+    if ac.pos >= ac.src.n { try as_err(c"unterminated character literal") }
+    c u8 = ac.src.p[u8, ac.pos]
+    ac.pos += 1
+    v i64 = zext[i64](c)
+    if c == 92 && ac.pos < ac.src.n {
+        e u8 = ac.src.p[u8, ac.pos]
+        ac.pos += 1
+        if e == 110 { v = 10 }
+        else if e == 116 { v = 9 }
+        else if e == 114 { v = 13 }
+        else if e == 48 { v = 0 }
+        else { v = zext[i64](e) }
+    }
+    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 39 { ac.pos += 1 }
+    return v
+}
+
+fn parse_expr_primary() u32 fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n { try as_err(c"expected expression") }
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    c u8 = p[u8, ac.pos]
+
+    if c == 40 { // '('
+        ac.pos += 1
+        e u32 = try parse_expr()
+        skip_hspace()
+        if ac.pos >= n || p[u8, ac.pos] != 41 { try as_err(c"expected ')' in expression") }
+        ac.pos += 1
+        return e
+    }
+    if c == 39 { // '\''
+        return expr_const(try parse_char_lit())
+    }
+    if is_digit(c) {
+        // Check for numeric local label reference: digits followed by 'f' or 'b'
+        start u64 = ac.pos
+        j u64 = start
+        while j < n && is_digit(p[u8, j]) { j += 1 }
+        if j < n && (p[u8, j] == 102 || p[u8, j] == 98 || p[u8, j] == 70 || p[u8, j] == 66) {
+            if j + 1 >= n || !is_ident_char(p[u8, j + 1]) {
+                num u64 = 0
+                for k u64 in start..j { num = num * 10 + zext[u64](p[u8, k] - 48) }
+                fwd bool = p[u8, j] == 102 || p[u8, j] == 70
+                ac.pos = j + 1
+                sid u32 = try local_label_ref(trunc[u32](num), fwd)
+                return expr_sym(sid, VAR_NONE)
+            }
+        }
+        return expr_const(try parse_int_lit())
+    }
+    if is_ident_start(c) {
+        start u64 = ac.pos
+        // Scan symbol name up to '@' (for @PLT etc.) or non-ident char
+        while ac.pos < n && is_ident_char(p[u8, ac.pos]) && p[u8, ac.pos] != 64 {
+            ac.pos += 1
+        }
+        name Bytes = bytes(p + start, ac.pos - start)
+        if bytes_is(name, c".") {
+            return as_current_dot()
+        }
+        variant u8 = VAR_NONE
+        if ac.pos < n && p[u8, ac.pos] == 64 {
+            ac.pos += 1
+            vstart u64 = ac.pos
+            while ac.pos < n && is_ident_char(p[u8, ac.pos]) && p[u8, ac.pos] != 64 {
+                ac.pos += 1
+            }
+            vname Bytes = bytes(p + vstart, ac.pos - vstart)
+            variant = parse_variant_name(vname)
+            if variant == VAR_NONE {
+                // Versioned symbol like foo@GLIBC_2.2.5 — include @version in name
+                name = bytes(p + start, ac.pos - start)
+            }
+        }
+        sid u32 = sym_get_or_create(name)
+        sym_at(sid).referenced = true
+        return expr_sym(sid, variant)
+    }
+    try as_err(c"unexpected token in expression")
+    return 0
+}
+
+fn parse_expr_unary() u32 fails {
+    skip_hspace()
+    if ac.pos < ac.src.n {
+        c u8 = ac.src.p[u8, ac.pos]
+        if c == 45 { ac.pos += 1; return expr_unary(UOP_NEG, try parse_expr_unary()) }
+        if c == 43 { ac.pos += 1; return expr_unary(UOP_POS, try parse_expr_unary()) }
+        if c == 126 { ac.pos += 1; return expr_unary(UOP_NOT, try parse_expr_unary()) }
+        if c == 33 { ac.pos += 1; return expr_unary(UOP_LNOT, try parse_expr_unary()) }
+    }
+    return try parse_expr_primary()
+}
+
+fn parse_expr_mul() u32 fails {
+    lhs u32 = try parse_expr_unary()
+    while true {
+        skip_hspace()
+        if ac.pos >= ac.src.n { break }
+        p addr = ac.src.p
+        c u8 = p[u8, ac.pos]
+        if c == 42 { ac.pos += 1; lhs = expr_binary(BOP_MUL, lhs, try parse_expr_unary()) }
+        else if c == 47 && (ac.pos + 1 >= ac.src.n || (p[u8, ac.pos + 1] != 47 && p[u8, ac.pos + 1] != 42)) {
+            ac.pos += 1; lhs = expr_binary(BOP_DIV, lhs, try parse_expr_unary())
+        }
+        else if c == 37 { ac.pos += 1; lhs = expr_binary(BOP_MOD, lhs, try parse_expr_unary()) }
+        else if c == 60 && ac.pos + 1 < ac.src.n && p[u8, ac.pos + 1] == 60 {
+            ac.pos += 2; lhs = expr_binary(BOP_SHL, lhs, try parse_expr_unary())
+        }
+        else if c == 62 && ac.pos + 1 < ac.src.n && p[u8, ac.pos + 1] == 62 {
+            ac.pos += 2; lhs = expr_binary(BOP_SHR, lhs, try parse_expr_unary())
+        }
+        else { break }
+    }
+    return lhs
+}
+
+fn parse_expr_bit() u32 fails {
+    lhs u32 = try parse_expr_mul()
+    while true {
+        skip_hspace()
+        if ac.pos >= ac.src.n { break }
+        p addr = ac.src.p
+        c u8 = p[u8, ac.pos]
+        if c == 38 && (ac.pos + 1 >= ac.src.n || p[u8, ac.pos + 1] != 38) {
+            ac.pos += 1; lhs = expr_binary(BOP_AND, lhs, try parse_expr_mul())
+        }
+        else if c == 124 && (ac.pos + 1 >= ac.src.n || p[u8, ac.pos + 1] != 124) {
+            ac.pos += 1; lhs = expr_binary(BOP_OR, lhs, try parse_expr_mul())
+        }
+        else if c == 94 {
+            ac.pos += 1; lhs = expr_binary(BOP_XOR, lhs, try parse_expr_mul())
+        }
+        else { break }
+    }
+    return lhs
+}
+
+fn parse_expr_add() u32 fails {
+    lhs u32 = try parse_expr_bit()
+    while true {
+        skip_hspace()
+        if ac.pos >= ac.src.n { break }
+        c u8 = ac.src.p[u8, ac.pos]
+        if c == 43 { ac.pos += 1; lhs = expr_binary(BOP_ADD, lhs, try parse_expr_bit()) }
+        else if c == 45 { ac.pos += 1; lhs = expr_binary(BOP_SUB, lhs, try parse_expr_bit()) }
+        else { break }
+    }
+    return lhs
+}
+
+fn parse_expr_cmp() u32 fails {
+    lhs u32 = try parse_expr_add()
+    while true {
+        skip_hspace()
+        if ac.pos >= ac.src.n { break }
+        p addr = ac.src.p
+        c u8 = p[u8, ac.pos]
+        c1 u8 = if ac.pos + 1 < ac.src.n { p[u8, ac.pos + 1] } else { 0 }
+        if c == 61 && c1 == 61 { ac.pos += 2; lhs = expr_binary(BOP_EQ, lhs, try parse_expr_add()) }
+        else if c == 33 && c1 == 61 { ac.pos += 2; lhs = expr_binary(BOP_NE, lhs, try parse_expr_add()) }
+        else if c == 60 && c1 == 61 { ac.pos += 2; lhs = expr_binary(BOP_LE, lhs, try parse_expr_add()) }
+        else if c == 62 && c1 == 61 { ac.pos += 2; lhs = expr_binary(BOP_GE, lhs, try parse_expr_add()) }
+        else if c == 60 && c1 != 60 { ac.pos += 1; lhs = expr_binary(BOP_LT, lhs, try parse_expr_add()) }
+        else if c == 62 && c1 != 62 { ac.pos += 1; lhs = expr_binary(BOP_GT, lhs, try parse_expr_add()) }
+        else { break }
+    }
+    return lhs
+}
+
+fn parse_expr() u32 fails {
+    lhs u32 = try parse_expr_cmp()
+    while true {
+        skip_hspace()
+        if ac.pos + 1 >= ac.src.n { break }
+        p addr = ac.src.p
+        c u8 = p[u8, ac.pos]
+        c1 u8 = p[u8, ac.pos + 1]
+        if c == 38 && c1 == 38 { ac.pos += 2; lhs = expr_binary(BOP_LAND, lhs, try parse_expr_cmp()) }
+        else if c == 124 && c1 == 124 { ac.pos += 2; lhs = expr_binary(BOP_LOR, lhs, try parse_expr_cmp()) }
+        else { break }
+    }
+    return lhs
+}
+
+// ---------- Expression evaluator ----------
+
+// Evaluates an ExprNode into `out`. If `laid_out` is true, symbol fragment
+// addresses are known and same-section symbol differences fold to constants.
+fn eval_set_const(out handle[EvalVal], v i64) void {
+    out.kind = EV_CONST
+    out.variant = VAR_NONE
+    out.sym_a = 0
+    out.sym_b = 0
+    out.val = v
+}
+
+fn eval_set_unres(out handle[EvalVal]) void {
+    out.kind = EV_UNRESOLVED
+    out.variant = VAR_NONE
+    out.sym_a = 0
+    out.sym_b = 0
+    out.val = 0
+}
+
+fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
+    eval_set_unres(out)
+    if id == AS_NONE || depth > 64 { return }
+    e handle[ExprNode] = vec_at(&ac.exprs, zext[u64](id))
+    if e.kind == EX_CONST {
+        eval_set_const(out, e.val)
+        return
+    }
+    if e.kind == EX_DOT {
+        if !laid_out { return }
+        sec handle[Section] = vec_at(&ac.sections, zext[u64](e.lhs))
+        f handle[Frag] = vec_at(&sec.frags, zext[u64](e.rhs))
+        out.kind = EV_SYM
+        out.sym_a = 0x80000000 | e.lhs
+        out.val = bitcast[i64](f.addr) + e.val
+        return
+    }
+    if e.kind == EX_SYM {
+        s handle[Symbol] = sym_at(e.lhs)
+        if s.is_equ && s.equ_expr != AS_NONE {
+            eval_expr_depth(s.equ_expr, laid_out, depth + 1, out)
+            if out.kind == EV_SYM && e.variant != VAR_NONE { out.variant = e.variant }
+            return
+        }
+        out.kind = EV_SYM
+        out.variant = e.variant
+        out.sym_a = e.lhs
+        out.val = 0
+        return
+    }
+    if e.kind == EX_UNARY {
+        c EvalVal = {}
+        eval_expr_depth(e.lhs, laid_out, depth + 1, &c)
+        if c.kind != EV_CONST { return }
+        if e.op == UOP_NEG { eval_set_const(out, 0 - c.val) }
+        else if e.op == UOP_NOT { eval_set_const(out, ~c.val) }
+        else if e.op == UOP_LNOT { eval_set_const(out, if c.val == 0 { 1 } else { 0 }) }
+        else { eval_set_const(out, c.val) }
+        return
+    }
+    if e.kind == EX_BINARY {
+        l EvalVal = {}
+        r EvalVal = {}
+        eval_expr_depth(e.lhs, laid_out, depth + 1, &l)
+        eval_expr_depth(e.rhs, laid_out, depth + 1, &r)
+        if l.kind == EV_CONST && r.kind == EV_CONST {
+            a i64 = l.val
+            b i64 = r.val
+            if e.op == BOP_ADD { eval_set_const(out, a + b) }
+            else if e.op == BOP_SUB { eval_set_const(out, a - b) }
+            else if e.op == BOP_MUL { eval_set_const(out, a * b) }
+            else if e.op == BOP_DIV { if b != 0 { eval_set_const(out, a / b) } }
+            else if e.op == BOP_MOD { if b != 0 { eval_set_const(out, a % b) } }
+            else if e.op == BOP_SHL { eval_set_const(out, bitcast[i64](bitcast[u64](a) << bitcast[u64](b))) }
+            else if e.op == BOP_SHR { eval_set_const(out, bitcast[i64](bitcast[u64](a) >> bitcast[u64](b))) }
+            else if e.op == BOP_AND { eval_set_const(out, a & b) }
+            else if e.op == BOP_OR { eval_set_const(out, a | b) }
+            else if e.op == BOP_XOR { eval_set_const(out, a ^ b) }
+            else if e.op == BOP_EQ { eval_set_const(out, if a == b { -1 } else { 0 }) }
+            else if e.op == BOP_NE { eval_set_const(out, if a != b { -1 } else { 0 }) }
+            else if e.op == BOP_LT { eval_set_const(out, if a < b { -1 } else { 0 }) }
+            else if e.op == BOP_LE { eval_set_const(out, if a <= b { -1 } else { 0 }) }
+            else if e.op == BOP_GT { eval_set_const(out, if a > b { -1 } else { 0 }) }
+            else if e.op == BOP_GE { eval_set_const(out, if a >= b { -1 } else { 0 }) }
+            else if e.op == BOP_LAND { eval_set_const(out, if a != 0 && b != 0 { 1 } else { 0 }) }
+            else if e.op == BOP_LOR { eval_set_const(out, if a != 0 || b != 0 { 1 } else { 0 }) }
+            return
+        }
+        // sym + const or const + sym
+        if e.op == BOP_ADD {
+            if l.kind == EV_SYM && r.kind == EV_CONST {
+                out.kind = EV_SYM
+                out.variant = l.variant
+                out.sym_a = l.sym_a
+                out.val = l.val + r.val
+                return
+            }
+            if l.kind == EV_CONST && r.kind == EV_SYM {
+                out.kind = EV_SYM
+                out.variant = r.variant
+                out.sym_a = r.sym_a
+                out.val = r.val + l.val
+                return
+            }
+        }
+        // sym - const or sym_a - sym_b
+        if e.op == BOP_SUB {
+            if l.kind == EV_SYM && r.kind == EV_CONST {
+                out.kind = EV_SYM
+                out.variant = l.variant
+                out.sym_a = l.sym_a
+                out.val = l.val - r.val
+                return
+            }
+            if l.kind == EV_SYM && r.kind == EV_SYM {
+                if laid_out {
+                    sa_sec u32 = eval_sym_sec(l.sym_a)
+                    sb_sec u32 = eval_sym_sec(r.sym_a)
+                    if sa_sec != AS_NONE && sa_sec == sb_sec {
+                        va i64 = eval_sym_addr(l.sym_a) + l.val
+                        vb i64 = eval_sym_addr(r.sym_a) + r.val
+                        eval_set_const(out, va - vb)
+                        return
+                    }
+                }
+                out.kind = EV_DIFF
+                out.sym_a = l.sym_a
+                out.sym_b = r.sym_a
+                out.val = l.val - r.val
+                return
+            }
+        }
+    }
+}
+
+fn eval_sym_sec(sym_ref u32) u32 {
+    if (sym_ref & 0x80000000) != 0 { return sym_ref & 0x7fffffff }
+    s handle[Symbol] = sym_at(sym_ref)
+    if !s.defined || s.is_common { return AS_NONE }
+    return s.sec_id
+}
+
+fn eval_sym_addr(sym_ref u32) i64 {
+    if (sym_ref & 0x80000000) != 0 { return 0 }
+    s handle[Symbol] = sym_at(sym_ref)
+    return bitcast[i64](s.value)
+}
+
+fn eval_expr(id u32, laid_out bool, out handle[EvalVal]) void {
+    eval_expr_depth(id, laid_out, 0, out)
+}
+
+// Evaluates a required compile-time constant expression immediately.
+fn eval_const_now(id u32) i64 fails {
+    ev EvalVal = {}
+    eval_expr(id, false, &ev)
+    if ev.kind != EV_CONST { try as_err(c"expected constant expression") }
+    return ev.val
+}

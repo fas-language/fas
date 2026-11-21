@@ -1,0 +1,141 @@
+// In-process library API for fas-as.
+//
+// Two entry points:
+//   1. as_assemble(src, filename, inc_dirs, noexecstack, out):
+//      Assembles full AT&T x86-64 text into an in-memory ELF64 relocatable object.
+//   2. as_assemble_template(src, out):
+//      Lower-level inline-asm / backend handoff: assembles one finished template
+//      string into raw .text bytes + relocations + referenced symbol names.
+
+fn as_result_free(r handle[AsResult]) void {
+    if r.obj_data != null { heap_free(r.obj_data) }
+    r.obj_data = null
+    r.obj_size = 0
+    buf_free(&r.diag)
+    r.ok = false
+}
+
+fn as_template_result_free(r handle[AsTemplateResult]) void {
+    if r.code_data != null { heap_free(r.code_data) }
+    r.code_data = null
+    r.code_size = 0
+    for i u64 in 0..r.relocs.n {
+        heap_free(vec_at(&r.relocs, i).sym.p)
+    }
+    vec_free(&r.relocs)
+    for i u64 in 0..r.sym_refs.n {
+        heap_free(vec_get(&r.sym_refs, i).p)
+    }
+    vec_free(&r.sym_refs)
+    buf_free(&r.diag)
+    r.ok = false
+}
+
+fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, template_mode bool) void fails {
+    ac.filename = filename
+    ac.src = src
+    ac.pos = 0
+    ac.line = 1
+    ac.noexecstack = noexecstack
+    ac.template_mode = template_mode
+    ac.inc_dirs = inc_dirs
+    as_init_sections()
+    try as_parse_all()
+    try as_layout_and_relax()
+}
+
+fn as_assemble(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, out handle[AsResult]) bool {
+    as_result_free(out)
+
+    reg Region = {}
+    prev_reg handle[Region] = region_switch(&reg)
+    prev_ac handle[As] = ac
+
+    ctx handle[As] = handle_from_addr(heap_alloc_zeroed(sizeof[As]))
+    ac = ctx
+
+    ok bool = true
+    as_run_pipeline(src, filename, inc_dirs, noexecstack, false) catch { ok = false }
+
+    elf Buf = {}
+    if ok {
+        as_emit_elf(&elf)
+    }
+
+    // Copy outputs & diagnostics outside the link's region so they survive region_dispose
+    region_switch(prev_reg)
+    if ok {
+        out.ok = true
+        if elf.n != 0 {
+            out.obj_data = heap_alloc_plain(elf.n)
+            mem_copy(out.obj_data, elf.p, elf.n)
+        }
+        out.obj_size = elf.n
+    } else {
+        out.ok = false
+        if ac.diag.n != 0 {
+            buf_append(&out.diag, buf_bytes(&ac.diag))
+        }
+    }
+
+    intern_free(&ac.names)
+    ac = prev_ac
+    region_dispose(&reg)
+    return out.ok
+}
+
+fn as_assemble_template(src Bytes, out handle[AsTemplateResult]) bool {
+    as_template_result_free(out)
+
+    reg Region = {}
+    prev_reg handle[Region] = region_switch(&reg)
+    prev_ac handle[As] = ac
+
+    ctx handle[As] = handle_from_addr(heap_alloc_zeroed(sizeof[As]))
+    ac = ctx
+
+    ok bool = true
+    as_run_pipeline(src, bytes_c(c"<inline-asm>"), null, false, true) catch { ok = false }
+
+    region_switch(prev_reg)
+    if ok {
+        out.ok = true
+        text handle[Section] = sec_at(0)
+        if text.out.n != 0 {
+            out.code_data = heap_alloc_plain(text.out.n)
+            mem_copy(out.code_data, text.out.p, text.out.n)
+        }
+        out.code_size = text.out.n
+        for ri u64 in 0..text.relas.n {
+            r handle[Rela] = vec_at(&text.relas, ri)
+            sym handle[Symbol] = sym_at(r.sym_id)
+            ar handle[AsReloc] = vec_add(&out.relocs)
+            ar.offset = trunc[u32](r.offset)
+            ar.rtype = r.rtype
+            ar.addend = r.addend
+            p addr = heap_alloc_plain(sym.name.n + 1)
+            mem_copy(p, sym.name.p, sym.name.n)
+            p[u8, sym.name.n] = 0
+            ar.sym = bytes(p, sym.name.n)
+        }
+        for si u64 in 0..ac.syms.n {
+            sym handle[Symbol] = vec_at(&ac.syms, si)
+            if sym.referenced && !sym.is_local_label {
+                p addr = heap_alloc_plain(sym.name.n + 1)
+                mem_copy(p, sym.name.p, sym.name.n)
+                p[u8, sym.name.n] = 0
+                vec_push(&out.sym_refs, bytes(p, sym.name.n))
+            }
+        }
+    } else {
+        out.ok = false
+        if ac.diag.n != 0 {
+            buf_append(&out.diag, buf_bytes(&ac.diag))
+        }
+    }
+
+    intern_free(&ac.names)
+    ac = prev_ac
+    region_dispose(&reg)
+    return out.ok
+}

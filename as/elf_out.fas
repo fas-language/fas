@@ -1,0 +1,258 @@
+// ELF64 x86-64 relocatable object (ET_REL) writer.
+//
+// Produces a clean ELF64 object matching llvm-mc-22's structure:
+//   - Section 0: SHT_NULL
+//   - User sections (.text, .data, .bss, .rodata, .eh_frame, .note.GNU-stack, ...)
+//   - .symtab (locals first, then globals/weaks; sh_info = first global index)
+//   - .strtab
+//   - .rela.<sec> for each section with relocations
+//   - .shstrtab
+
+fn strtab_add(tab handle[Buf], s Bytes) u32 {
+    if s.n == 0 { return 0 }
+    off u32 = trunc[u32](tab.n)
+    buf_append(tab, s)
+    buf_u8(tab, 0)
+    return off
+}
+
+fn align_up(v u64, a u64) u64 {
+    if a <= 1 { return v }
+    return (v + a - 1) & ~(a - 1)
+}
+
+fn elf_shdr(out handle[Buf], name u32, sh_type u32, flags u64, sh_addr u64, off u64, size u64, link u32, info u32, align u64, entsize u64) void {
+    buf_u32le(out, name)
+    buf_u32le(out, sh_type)
+    buf_u64le(out, flags)
+    buf_u64le(out, sh_addr)
+    buf_u64le(out, off)
+    buf_u64le(out, size)
+    buf_u32le(out, link)
+    buf_u32le(out, info)
+    buf_u64le(out, align)
+    buf_u64le(out, entsize)
+}
+
+fn elf_sym(out handle[Buf], name u32, binding u8, stype u8, vis u8, shndx u16, value u64, size u64) void {
+    buf_u32le(out, name)
+    buf_u8(out, (binding << 4) | (stype & 0xf))
+    buf_u8(out, vis & 0x3)
+    buf_u16le(out, shndx)
+    buf_u64le(out, value)
+    buf_u64le(out, size)
+}
+
+fn as_emit_elf(out handle[Buf]) void {
+    if ac.noexecstack {
+        sec_get_or_create(bytes_c(c".note.GNU-stack"), SHT_PROGBITS, 0, 0, bytes_empty(), false)
+    }
+
+    shstrtab Buf = {}
+    buf_u8(&shstrtab, 0)
+    strtab Buf = {}
+    buf_u8(&strtab, 0)
+
+    // Assign ELF section indices (1..N) to user sections
+    nsec u64 = ac.sections.n
+    sec_name_offs Vec[u32] = {}
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        s.elf_idx = trunc[u32](i + 1)
+        vec_push(&sec_name_offs, strtab_add(&shstrtab, s.name))
+    }
+
+    // Build .symtab:
+    //   0: STN_UNDEF
+    //   1..: STT_SECTION for sections referenced by relocations or local symbols
+    //   then local symbols (non-temporary, or temporary if referenced by a relocation)
+    //   then global/weak symbols
+    symtab Buf = {}
+    elf_sym(&symtab, 0, 0, 0, 0, 0, 0, 0) // index 0: null symbol
+
+    // Mark which symbols are referenced by relocations
+    sym_in_reloc Vec[u8] = {}
+    for i u64 in 0..ac.syms.n { vec_push(&sym_in_reloc, 0) }
+    for si u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](si))
+        for ri u64 in 0..s.relas.n {
+            r handle[Rela] = vec_at(&s.relas, ri)
+            if zext[u64](r.sym_id) < sym_in_reloc.n {
+                sym_in_reloc.p[u8, zext[u64](r.sym_id)] = 1
+            }
+        }
+    }
+
+    // Emit STT_SECTION symbols for all user sections (matching llvm-mc when referenced)
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        s.sym_idx = trunc[u32](symtab.n / 24)
+        elf_sym(&symtab, 0, STB_LOCAL, STT_SECTION, STV_DEFAULT, trunc[u16](s.elf_idx), 0, 0)
+    }
+
+    // Emit local symbols (skip .L* and synthetic numeric local labels unless referenced by reloc)
+    for i u64 in 0..ac.syms.n {
+        sym handle[Symbol] = vec_at(&ac.syms, i)
+        if sym.binding != STB_LOCAL { continue }
+        if !sym.defined && sym_in_reloc.p[u8, i] == 0 && !sym.is_common { continue }
+        is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
+        if (sym.is_local_label || is_dot_l) && sym_in_reloc.p[u8, i] == 0 { continue }
+        sym.elf_idx = trunc[u32](symtab.n / 24)
+        noff u32 = strtab_add(&strtab, sym.name)
+        shndx u16 = SHN_UNDEF
+        val u64 = sym.value
+        if sym.is_common {
+            shndx = SHN_COMMON
+            val = sym.common_align
+        } else if sym.defined {
+            shndx = if sym.sec_id == AS_NONE { SHN_ABS } else { trunc[u16](sec_at(sym.sec_id).elf_idx) }
+        }
+        elf_sym(&symtab, noff, STB_LOCAL, sym.stype, sym.vis, shndx, val, sym.size)
+    }
+
+    first_global u32 = trunc[u32](symtab.n / 24)
+
+    // Emit global & weak symbols (plus undefined symbols referenced by relocations)
+    for i u64 in 0..ac.syms.n {
+        sym handle[Symbol] = vec_at(&ac.syms, i)
+        is_undef_ref bool = !sym.defined && !sym.is_common && sym_in_reloc.p[u8, i] != 0
+        if sym.binding == STB_LOCAL && !is_undef_ref { continue }
+        if sym.elf_idx != AS_NONE { continue }
+        binding u8 = if sym.binding == STB_LOCAL { STB_GLOBAL } else { sym.binding }
+        sym.elf_idx = trunc[u32](symtab.n / 24)
+        noff u32 = strtab_add(&strtab, sym.name)
+        shndx u16 = SHN_UNDEF
+        val u64 = sym.value
+        if sym.is_common {
+            shndx = SHN_COMMON
+            val = sym.common_align
+        } else if sym.defined {
+            shndx = if sym.sec_id == AS_NONE { SHN_ABS } else { trunc[u16](sec_at(sym.sec_id).elf_idx) }
+        }
+        elf_sym(&symtab, noff, binding, sym.stype, sym.vis, shndx, val, sym.size)
+    }
+
+    // Build .rela.<sec> buffers
+    rela_secs Vec[u32] = {}       // section index i for each non-empty rela section
+    rela_name_offs Vec[u32] = {}
+    rela_bufs Vec[Buf] = {}
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        if s.relas.n == 0 { continue }
+        vec_push(&rela_secs, trunc[u32](i))
+        rname Buf = {}
+        buf_str(&rname, c".rela")
+        buf_append(&rname, s.name)
+        vec_push(&rela_name_offs, strtab_add(&shstrtab, buf_bytes(&rname)))
+        rb handle[Buf] = vec_add(&rela_bufs)
+        for ri u64 in 0..s.relas.n {
+            r handle[Rela] = vec_at(&s.relas, ri)
+            sym handle[Symbol] = sym_at(r.sym_id)
+            sym_idx u32 = sym.elf_idx
+            addend i64 = r.addend
+            // Convert relocation against defined local .L / numeric label to section + offset
+            is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
+            if sym.binding == STB_LOCAL && sym.defined && sym.sec_id != AS_NONE && (sym.is_local_label || is_dot_l) {
+                sym_idx = sec_at(sym.sec_id).sym_idx
+                addend += bitcast[i64](sym.value)
+            }
+            buf_u64le(rb, r.offset)
+            buf_u64le(rb, (zext[u64](sym_idx) << 32) | zext[u64](r.rtype))
+            buf_u64le(rb, bitcast[u64](addend))
+        }
+    }
+
+    symtab_name u32 = strtab_add(&shstrtab, bytes_c(c".symtab"))
+    strtab_name u32 = strtab_add(&shstrtab, bytes_c(c".strtab"))
+    shstrtab_name u32 = strtab_add(&shstrtab, bytes_c(c".shstrtab"))
+
+    symtab_idx u32 = trunc[u32](1 + nsec)
+    strtab_idx u32 = symtab_idx + 1
+    rela_base_idx u32 = strtab_idx + 1
+    shstrtab_idx u32 = rela_base_idx + trunc[u32](rela_secs.n)
+    shnum u32 = shstrtab_idx + 1
+
+    // Layout file offsets starting at 64 (after ELF64 header)
+    cur u64 = 64
+    sec_offs Vec[u64] = {}
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        if s.sh_type == SHT_NOBITS {
+            vec_push(&sec_offs, cur)
+        } else {
+            cur = align_up(cur, s.sh_align)
+            vec_push(&sec_offs, cur)
+            cur += s.out.n
+        }
+    }
+    cur = align_up(cur, 8)
+    symtab_off u64 = cur
+    cur += symtab.n
+    strtab_off u64 = cur
+    cur += strtab.n
+    rela_offs Vec[u64] = {}
+    for ri u64 in 0..rela_secs.n {
+        cur = align_up(cur, 8)
+        vec_push(&rela_offs, cur)
+        cur += vec_at(&rela_bufs, ri).n
+    }
+    shstrtab_off u64 = cur
+    cur += shstrtab.n
+    cur = align_up(cur, 8)
+    shoff u64 = cur
+
+    // Emit ELF64 header
+    buf_clear(out)
+    ident arr[16, u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    buf_append(out, bytes(&ident, 16))
+    buf_u16le(out, 1)              // ET_REL
+    buf_u16le(out, 62)             // EM_X86_64
+    buf_u32le(out, 1)              // EV_CURRENT
+    buf_u64le(out, 0)              // e_entry
+    buf_u64le(out, 0)              // e_phoff
+    buf_u64le(out, shoff)          // e_shoff
+    buf_u32le(out, 0)              // e_flags
+    buf_u16le(out, 64)             // e_ehsize
+    buf_u16le(out, 0)              // e_phentsize
+    buf_u16le(out, 0)              // e_phnum
+    buf_u16le(out, 64)             // e_shentsize
+    buf_u16le(out, trunc[u16](shnum))
+    buf_u16le(out, trunc[u16](shstrtab_idx))
+
+    // Emit section payloads
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        if s.sh_type == SHT_NOBITS { continue }
+        off u64 = vec_get(&sec_offs, i)
+        while out.n < off { buf_u8(out, 0) }
+        buf_append(out, buf_bytes(&s.out))
+    }
+    while out.n < symtab_off { buf_u8(out, 0) }
+    buf_append(out, buf_bytes(&symtab))
+    buf_append(out, buf_bytes(&strtab))
+    for ri u64 in 0..rela_secs.n {
+        off u64 = vec_get(&rela_offs, ri)
+        while out.n < off { buf_u8(out, 0) }
+        buf_append(out, buf_bytes(vec_at(&rela_bufs, ri)))
+    }
+    buf_append(out, buf_bytes(&shstrtab))
+    while out.n < shoff { buf_u8(out, 0) }
+
+    // Emit section headers
+    elf_shdr(out, 0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0)
+    for i u64 in 0..nsec {
+        s handle[Section] = sec_at(trunc[u32](i))
+        sz u64 = if s.sh_type == SHT_NOBITS { s.size } else { s.out.n }
+        elf_shdr(out, vec_get(&sec_name_offs, i), s.sh_type, s.sh_flags, 0,
+            vec_get(&sec_offs, i), sz, 0, 0, s.sh_align, s.sh_entsize)
+    }
+    elf_shdr(out, symtab_name, SHT_SYMTAB, 0, 0, symtab_off, symtab.n, strtab_idx, first_global, 8, 24)
+    elf_shdr(out, strtab_name, SHT_STRTAB, 0, 0, strtab_off, strtab.n, 0, 0, 1, 0)
+    for ri u64 in 0..rela_secs.n {
+        target_sec u32 = vec_get(&rela_secs, ri)
+        rb handle[Buf] = vec_at(&rela_bufs, ri)
+        elf_shdr(out, vec_get(&rela_name_offs, ri), SHT_RELA, SHF_INFO_LINK, 0,
+            vec_get(&rela_offs, ri), rb.n, symtab_idx, sec_at(target_sec).elf_idx, 8, 24)
+    }
+    elf_shdr(out, shstrtab_name, SHT_STRTAB, 0, 0, shstrtab_off, shstrtab.n, 0, 0, 1, 0)
+}

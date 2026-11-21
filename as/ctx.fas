@@ -1,0 +1,395 @@
+// Per-run assembler state (struct As) behind a single thread-local handle.
+//
+// Follows the same architecture as ld/ctx.fas: every pass accesses state
+// through `ac.<field>` so multiple assemblies can run concurrently in one
+// process, each inside its own Region.
+
+type StrU32Map = Map[Bytes, u32, bytes_hash, bytes_eq]
+type U32U32Map = Map[u32, u32, u32_hash, u32_eq]
+
+error AsFailed
+
+fn bytes_is(a Bytes, s addr) bool { return bytes_eq(a, bytes_c(s)) }
+
+const AS_NONE u32 = 0xffffffff
+
+// ---------- ELF64 constants ----------
+
+const SHT_NULL u32 = 0
+const SHT_PROGBITS u32 = 1
+const SHT_SYMTAB u32 = 2
+const SHT_STRTAB u32 = 3
+const SHT_RELA u32 = 4
+const SHT_NOTE u32 = 7
+const SHT_NOBITS u32 = 8
+const SHT_INIT_ARRAY u32 = 14
+const SHT_FINI_ARRAY u32 = 15
+const SHT_PREINIT_ARRAY u32 = 16
+const SHT_GROUP u32 = 17
+
+const SHF_WRITE u64 = 0x1
+const SHF_ALLOC u64 = 0x2
+const SHF_EXECINSTR u64 = 0x4
+const SHF_MERGE u64 = 0x10
+const SHF_STRINGS u64 = 0x20
+const SHF_INFO_LINK u64 = 0x40
+const SHF_GROUP u64 = 0x200
+const SHF_TLS u64 = 0x400
+
+const STB_LOCAL u8 = 0
+const STB_GLOBAL u8 = 1
+const STB_WEAK u8 = 2
+
+const STT_NOTYPE u8 = 0
+const STT_OBJECT u8 = 1
+const STT_FUNC u8 = 2
+const STT_SECTION u8 = 3
+const STT_FILE u8 = 4
+const STT_COMMON u8 = 5
+const STT_TLS u8 = 6
+const STT_GNU_IFUNC u8 = 10
+
+const STV_DEFAULT u8 = 0
+const STV_INTERNAL u8 = 1
+const STV_HIDDEN u8 = 2
+const STV_PROTECTED u8 = 3
+
+const SHN_UNDEF u16 = 0
+const SHN_ABS u16 = 0xfff1
+const SHN_COMMON u16 = 0xfff2
+
+// x86-64 relocation types
+const R_X86_64_NONE u32 = 0
+const R_X86_64_64 u32 = 1
+const R_X86_64_PC32 u32 = 2
+const R_X86_64_GOT32 u32 = 3
+const R_X86_64_PLT32 u32 = 4
+const R_X86_64_GOTPCREL u32 = 9
+const R_X86_64_32 u32 = 10
+const R_X86_64_32S u32 = 11
+const R_X86_64_16 u32 = 12
+const R_X86_64_PC16 u32 = 13
+const R_X86_64_8 u32 = 14
+const R_X86_64_PC8 u32 = 15
+const R_X86_64_TLSGD u32 = 19
+const R_X86_64_TLSLD u32 = 20
+const R_X86_64_DTPOFF32 u32 = 21
+const R_X86_64_GOTTPOFF u32 = 22
+const R_X86_64_TPOFF32 u32 = 23
+const R_X86_64_PC64 u32 = 24
+const R_X86_64_GOTOFF64 u32 = 25
+const R_X86_64_GOTPC32 u32 = 26
+const R_X86_64_SIZE32 u32 = 32
+const R_X86_64_SIZE64 u32 = 33
+const R_X86_64_GOTPCRELX u32 = 41
+const R_X86_64_REX_GOTPCRELX u32 = 42
+
+// ---------- Relocation variants (@PLT, @GOTPCREL, ...) ----------
+
+const VAR_NONE u8 = 0
+const VAR_PLT u8 = 1
+const VAR_GOTPCREL u8 = 2
+const VAR_GOTPCRELX u8 = 3
+const VAR_REX_GOTPCRELX u8 = 4
+const VAR_GOTTPOFF u8 = 5
+const VAR_TPOFF u8 = 6
+const VAR_TLSGD u8 = 7
+const VAR_TLSLD u8 = 8
+const VAR_DTPOFF u8 = 9
+const VAR_GOTOFF u8 = 10
+const VAR_GOT u8 = 11
+const VAR_SIZE u8 = 12
+
+// ---------- Expression AST ----------
+
+const EX_CONST u8 = 0
+const EX_SYM u8 = 1
+const EX_DOT u8 = 2
+const EX_UNARY u8 = 3
+const EX_BINARY u8 = 4
+
+// Unary ops
+const UOP_NEG u8 = 1
+const UOP_NOT u8 = 2      // ~
+const UOP_LNOT u8 = 3     // !
+const UOP_POS u8 = 4
+
+// Binary ops
+const BOP_ADD u8 = 1
+const BOP_SUB u8 = 2
+const BOP_MUL u8 = 3
+const BOP_DIV u8 = 4
+const BOP_MOD u8 = 5
+const BOP_SHL u8 = 6
+const BOP_SHR u8 = 7
+const BOP_AND u8 = 8
+const BOP_OR u8 = 9
+const BOP_XOR u8 = 10
+const BOP_EQ u8 = 11
+const BOP_NE u8 = 12
+const BOP_LT u8 = 13
+const BOP_LE u8 = 14
+const BOP_GT u8 = 15
+const BOP_GE u8 = 16
+const BOP_LAND u8 = 17
+const BOP_LOR u8 = 18
+
+struct ExprNode {
+    kind u8
+    op u8
+    variant u8
+    pad u8
+    lhs u32         // EX_SYM: sym_id; EX_DOT: sec_id; EX_UNARY/BINARY: child node id
+    rhs u32         // EX_DOT: frag_id; EX_BINARY: rhs node id
+    val i64         // EX_CONST: value; EX_DOT: frag_off
+}
+
+// Evaluated expression result (after layout or constant folding)
+const EV_CONST u8 = 0
+const EV_SYM u8 = 1        // sym_a + addend (with variant)
+const EV_DIFF u8 = 2       // sym_a - sym_b + addend (unresolved cross-section or undefined)
+const EV_UNRESOLVED u8 = 3
+
+struct EvalVal {
+    kind u8
+    variant u8
+    pad u16
+    sym_a u32
+    sym_b u32
+    val i64
+}
+
+// ---------- Operands ----------
+
+const OPK_NONE u8 = 0
+const OPK_REG u8 = 1
+const OPK_IMM u8 = 2
+const OPK_MEM u8 = 3
+const OPK_BRANCH u8 = 4    // bare symbol/expr target (for call/jmp/jcc)
+
+struct Operand {
+    kind u8
+    seg u8          // 0 or segment override reg number + 1 (1=es..6=gs)
+    indirect bool   // '*' prefix (for indirect call/jmp)
+    has_disp bool
+    reg u16         // OPK_REG: reg id
+    base u16        // OPK_MEM: base reg id (0 = none)
+    index u16       // OPK_MEM: index reg id (0 = none)
+    scale u8        // OPK_MEM: 0, 1, 2, 4, 8
+    pad u8
+    expr u32        // ExprNode id for IMM, MEM disp, or BRANCH target (AS_NONE if none)
+}
+
+// ---------- Fragments & Fixups ----------
+
+const FK_DATA u8 = 0
+const FK_RELAX_JMP u8 = 1   // short 2-byte vs long 5/6-byte branch
+const FK_ALIGN u8 = 2
+const FK_FILL u8 = 3
+const FK_ULEB u8 = 4
+const FK_SLEB u8 = 5
+
+struct Frag {
+    kind u8
+    is_long u8      // FK_RELAX_JMP: 0=short, 1=long
+    has_fill u8     // FK_ALIGN: 1 if explicit fill byte
+    is_code u8      // FK_ALIGN: 1 if NOP fill in executable section
+    data_off u32    // FK_DATA: offset in sec.data; FK_RELAX_JMP: short_op | (long_op << 8) | (is_jcc << 16)
+    data_len u32    // FK_DATA: length in sec.data; FK_ALIGN: align bytes; FK_FILL: elem size
+    expr u32        // FK_RELAX_JMP/ULEB/SLEB: target ExprNode; FK_FILL: repeat count
+    fill u64        // FK_ALIGN: fill byte | (max_skip << 32); FK_FILL: fill value
+    addr u64        // computed byte offset in section during relaxation
+    size u64        // computed byte size in section during relaxation
+    line u32        // source line for diagnostics
+    pad u32
+}
+
+const FIX_ABS u8 = 0        // absolute data/imm (size = 1, 2, 4, 8)
+const FIX_PC u8 = 1         // PC-relative (disp relative to end of fixup or next_insn)
+const FIX_PLT u8 = 2        // call/jmp target -> R_X86_64_PLT32 when external
+const FIX_IMM32S u8 = 3     // sign-extended 32-bit immediate (R_X86_64_32S)
+const FIX_GOTPCRELX u8 = 4  // relaxable @GOTPCREL without REX
+const FIX_REX_GOTPCRELX u8 = 5 // relaxable @GOTPCREL with REX
+
+struct Fixup {
+    frag_id u32
+    frag_off u32    // offset within frag
+    size u8         // 1, 2, 4, 8
+    kind u8         // FIX_*
+    signed u8       // 1 if signed range check
+    pad u8
+    next_off u32    // offset of end of instruction relative to frag_off (for PC-rel addend: -(next_off))
+    expr u32        // ExprNode id
+    line u32
+}
+
+struct Rela {
+    offset u64
+    sym_id u32
+    rtype u32
+    addend i64
+}
+
+// ---------- Sections ----------
+
+struct Section {
+    name Bytes
+    sh_type u32
+    pad u32
+    sh_flags u64
+    sh_entsize u64
+    sh_align u64
+    group_name Bytes    // non-empty for COMDAT group member
+    comdat bool
+    pad2 arr[7, u8]
+    data Buf            // raw bytes for FK_DATA fragments
+    frags Vec[Frag]
+    fixups Vec[Fixup]
+    out Buf             // finalized section bytes after relaxation
+    relas Vec[Rela]
+    size u64            // finalized size (including NOBITS)
+    elf_idx u32         // assigned ELF section index
+    sym_idx u32         // assigned STT_SECTION symbol index in .symtab
+}
+
+// ---------- Symbols ----------
+
+struct Symbol {
+    name Bytes
+    binding u8          // STB_LOCAL / STB_GLOBAL / STB_WEAK
+    stype u8            // STT_*
+    vis u8              // STV_*
+    defined bool
+    is_equ bool         // defined via .set/.equ/=
+    is_common bool
+    is_local_label bool // synthetic numeric local label (omitted from .symtab unless needed)
+    referenced bool
+    sec_id u32          // section index, or AS_NONE for undef/abs/common
+    frag_id u32         // fragment index where label was defined
+    frag_off u32        // byte offset within fragment
+    equ_expr u32        // ExprNode id for .set/.equ/=
+    size_expr u32       // ExprNode id for .size (AS_NONE if none)
+    value u64           // resolved value / offset
+    size u64            // resolved size (or common size)
+    common_align u64    // alignment for .comm/.lcomm
+    elf_idx u32         // assigned index in .symtab
+    pad u32
+}
+
+// ---------- Public API result structs ----------
+
+struct AsResult {
+    ok bool
+    pad arr[7, u8]
+    obj_data addr       // heap_alloc_plain buffer (caller frees via as_result_free)
+    obj_size u64
+    diag Buf
+}
+
+struct AsReloc {
+    offset u32
+    rtype u32
+    sym Bytes           // heap_alloc_plain copy of symbol name
+    addend i64
+}
+
+struct AsTemplateResult {
+    ok bool
+    pad arr[7, u8]
+    code_data addr      // heap_alloc_plain buffer
+    code_size u64
+    relocs Vec[AsReloc]
+    sym_refs Vec[Bytes]
+    diag Buf
+}
+
+// ---------- Per-run Assembler Context ----------
+
+value struct SecStackEntry {
+    sec_id u32
+    prev_sec_id u32
+}
+
+struct As {
+    // Source & diagnostics
+    filename Bytes
+    src Bytes
+    pos u64
+    line u32
+    template_mode bool
+    noexecstack bool
+    had_error bool
+    pad u8
+    diag Buf
+    inc_dirs handle[Vec[Bytes]]
+
+    // Sections
+    sections Vec[Section]
+    sec_map StrU32Map
+    cur_sec u32
+    prev_sec u32
+    sec_stack Vec[SecStackEntry]
+
+    // Symbols & local numeric labels
+    syms Vec[Symbol]
+    sym_map StrU32Map
+    local_gen U32U32Map     // numeric label N -> next generation count
+    local_fwd U32U32Map     // numeric label N -> sym_id of pending Nf reference (AS_NONE if none)
+
+    // Expression AST pool
+    exprs Vec[ExprNode]
+
+    // String interning / arena-owned copies for names
+    names Intern
+
+    // Mnemonic lookup table (initialized once per As or lazily)
+    mnem_map StrU32Map
+}
+
+thread var ac handle[As] = null
+
+fn as_err(msg addr) void fails {
+    b handle[Buf] = &ac.diag
+    if ac.filename.n != 0 {
+        buf_append(b, ac.filename)
+        buf_u8(b, 58)
+        buf_dec_u64(b, zext[u64](ac.line))
+        buf_str(b, c": error: ")
+    } else {
+        buf_str(b, c"<input>:")
+        buf_dec_u64(b, zext[u64](ac.line))
+        buf_str(b, c": error: ")
+    }
+    buf_str(b, msg)
+    buf_u8(b, 10)
+    ac.had_error = true
+    fail AsFailed
+}
+
+fn as_err_line(line u32, msg addr) void fails {
+    saved u32 = ac.line
+    ac.line = line
+    as_err(msg) catch e {
+        ac.line = saved
+        fail e
+    }
+}
+
+fn as_err_b(prefix addr, tok Bytes) void fails {
+    b handle[Buf] = &ac.diag
+    if ac.filename.n != 0 {
+        buf_append(b, ac.filename)
+        buf_u8(b, 58)
+        buf_dec_u64(b, zext[u64](ac.line))
+        buf_str(b, c": error: ")
+    } else {
+        buf_str(b, c"<input>:")
+        buf_dec_u64(b, zext[u64](ac.line))
+        buf_str(b, c": error: ")
+    }
+    buf_str(b, prefix)
+    buf_append(b, tok)
+    buf_u8(b, 10)
+    ac.had_error = true
+    fail AsFailed
+}

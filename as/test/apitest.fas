@@ -1,0 +1,78 @@
+// Library API & template-assembly test for as/api.fas.
+
+use "../../lib/core.fas"
+use "../ctx.fas"
+use "../regs.fas"
+use "../expr.fas"
+use "../frag.fas"
+use "../table.fas"
+use "../encode.fas"
+use "../parse.fas"
+use "../elf_out.fas"
+use "../api.fas"
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+
+    // 1. Full ELF64 assembly via as_assemble
+    src Bytes = bytes_c(c".text\n.globl _start\n_start:\n  movq $42, %rdi\n  movq $60, %rax\n  syscall\n")
+    res AsResult = {}
+    if !as_assemble(src, bytes_c(c"test.s"), null, true, &res) {
+        os_write_all(STDERR, c"as apitest: FAIL as_assemble\n", 29) catch {}
+        return 1
+    }
+    if res.obj_size < 64 || res.obj_data[u8, 0] != 0x7f || res.obj_data[u8, 1] != 69 {
+        os_write_all(STDERR, c"as apitest: FAIL bad ELF magic\n", 31) catch {}
+        return 1
+    }
+    as_result_free(&res)
+
+    // 2. Lower-level template assembly via as_assemble_template
+    tpl Bytes = bytes_c(c"movq ext_sym@GOTPCREL(%rip), %rax\naddq $1, %rax\ncall ext_fn\n")
+    tres AsTemplateResult = {}
+    if !as_assemble_template(tpl, &tres) {
+        os_write_all(STDERR, c"as apitest: FAIL as_assemble_template\n", 38) catch {}
+        return 1
+    }
+    // 7 (movq) + 4 (addq) + 5 (call) = 16 bytes, 2 relocs, 2 sym_refs
+    if tres.code_size != 16 || tres.relocs.n != 2 || tres.sym_refs.n != 2 {
+        os_write_all(STDERR, c"as apitest: FAIL template counts\n", 33) catch {}
+        return 1
+    }
+    if vec_at(&tres.relocs, 0).rtype != R_X86_64_REX_GOTPCRELX || vec_at(&tres.relocs, 1).rtype != R_X86_64_PLT32 {
+        os_write_all(STDERR, c"as apitest: FAIL template reloc types\n", 38) catch {}
+        return 1
+    }
+    as_template_result_free(&tres)
+
+    // 3. Diagnostics: unknown mnemonic, bad operand, undefined local label, .intel_syntax, REX+ah
+    bad1 Bytes = bytes_c(c".text\n  bogus_op %rax\n")
+    if as_assemble(bad1, bytes_c(c"bad.s"), null, false, &res) || res.diag.n == 0 {
+        os_write_all(STDERR, c"as apitest: FAIL expected error on unknown mnemonic\n", 52) catch {}
+        return 1
+    }
+    bad2 Bytes = bytes_c(c".text\n  movq %al, %rax\n")
+    if as_assemble(bad2, bytes_c(c"bad.s"), null, false, &res) || res.diag.n == 0 {
+        os_write_all(STDERR, c"as apitest: FAIL expected error on bad operand\n", 47) catch {}
+        return 1
+    }
+    bad3 Bytes = bytes_c(c".text\n  jmp 1f\n")
+    if as_assemble(bad3, bytes_c(c"bad.s"), null, false, &res) || res.diag.n == 0 {
+        os_write_all(STDERR, c"as apitest: FAIL expected error on undef local label\n", 53) catch {}
+        return 1
+    }
+    bad4 Bytes = bytes_c(c".intel_syntax noprefix\n  nop\n")
+    if as_assemble(bad4, bytes_c(c"bad.s"), null, false, &res) || res.diag.n == 0 {
+        os_write_all(STDERR, c"as apitest: FAIL expected error on .intel_syntax\n", 49) catch {}
+        return 1
+    }
+    bad5 Bytes = bytes_c(c".text\n  movb %ah, %r8b\n")
+    if as_assemble(bad5, bytes_c(c"bad.s"), null, false, &res) || res.diag.n == 0 {
+        os_write_all(STDERR, c"as apitest: FAIL expected error on REX+ah\n", 42) catch {}
+        return 1
+    }
+    as_result_free(&res)
+
+    os_write_all(STDOUT, c"as apitest: ok (3/3 checks)\n", 28) catch {}
+    return 0
+}
