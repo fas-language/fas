@@ -319,8 +319,8 @@ let replay_nodes index (program : Ast.program) =
     let own = extend (expr_span value) in
     let inner =
       match value with
-      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Ident _
-      | Sizeof _ | Alignof _ | Offsetof _ ->
+      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Byte_string _
+      | Ident _ | Sizeof _ | Alignof _ | Offsetof _ ->
           []
       | Unary (_, operand, _)
       | C_dereference (operand, _, _)
