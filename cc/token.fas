@@ -14,6 +14,7 @@ const TK_ENTER u8 = 10
 const TK_LEAVE u8 = 11
 const TK_MARK u8 = 12
 const TK_DIRECT u8 = 13
+const TK_OTHER u8 = 14
 
 const F_SPACE u8 = 1
 const F_BOL u8 = 2
@@ -45,6 +46,7 @@ struct CNames {
     index Map[Bytes, u32, bytes_hash, bytes_eq]
     spellings Vec[Bytes]
     identifiers Vec[u32]  // normalized spelling id for identifier tokens
+    undefined Vec[u8]      // explicit #undef of a virtual macro
     macros Vec[addr]       // replacement indexed by normalized spelling id
     locations Vec[CLoc]
     gnu bool
@@ -58,6 +60,7 @@ fn cc_intern(n handle[CNames], spelling Bytes) u32 {
         vec_push[Bytes](&n.spellings, s)
         vec_push[u32](&n.identifiers, fresh)
         vec_push[addr](&n.macros, null)
+        vec_push[u8](&n.undefined, 0)
         map_put(index, s, fresh)
         return fresh
     }

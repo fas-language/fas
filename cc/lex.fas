@@ -106,6 +106,7 @@ fn cc_ucn(p addr) Rune {
         if d == 16 { return {0, 0} }
         cp = (cp << 4) | d
     }
+    if cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) { return {0, 0} }
     return {cp, count + 2}
 }
 
@@ -113,10 +114,7 @@ fn cc_id_ascii(ch u8, first bool, gnu bool) bool {
     return cc_alpha(ch) || ch == 95 || (!first && cc_digit(ch)) || (gnu && ch == 36)
 }
 
-fn cc_id_head(p addr, gnu bool) bool {
-    ch u8 = p[u8]
-    return cc_id_ascii(ch, true, gnu) || ch >= 128 || (ch == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85))
-}
+fn cc_is_ucn(p addr) bool { return p[u8] == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85) }
 
 fn lex_ident(n handle[CNames], l handle[Lexer], start addr, loc u32) u32 fails {
     p addr = start
@@ -134,13 +132,10 @@ fn lex_ident(n handle[CNames], l handle[Lexer], start addr, loc u32) u32 fails {
             p = p + 1
             continue
         }
-        ucn bool = ch == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85)
+        ucn bool = cc_is_ucn(p)
         if !ucn && ch < 128 { break }
         r Rune = if ucn { cc_ucn(p) } else { utf8(p) }
-        if r.width == 0 || !xid(r.cp, first) {
-            o u32 = lex_loc(n, l, l.at + addr_bits(p) - addr_bits(start))
-            try cc_error(n, o, c"invalid character in identifier")
-        }
+        if r.width == 0 || !xid(r.cp, first) { break }
         cls u32 = combining_class(r.cp)
         if (cls != 0 && cls < ccc) || ((ccc == 0 || ccc < cls) && canonical_pair(starter, r.cp)) ||
             unicode_range(&NFC_NO, 148 / 2, r.cp) {
@@ -277,7 +272,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
             width += 1
         }
         width += 1
-    } else if cc_id_head(start, n.gnu) {
+    } else if cc_id_ascii(ch, true, n.gnu) {
         l.header = false
         id u32 = try lex_ident(n, l, start, loc)
         return cc_token(TK_IDENT, flags, loc, id)
@@ -297,8 +292,22 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
                 width += zext[usize](r.width)
             } else { break }
         }
+    } else if ch >= 128 || cc_is_ucn(start) {
+        ucn bool = cc_is_ucn(start)
+        r Rune = if ucn { cc_ucn(start) } else { utf8(start) }
+        if r.width == 0 { try cc_error(n, loc, c"invalid UTF-8 or universal character name") }
+        if xid(r.cp, true) {
+            l.header = false
+            id u32 = try lex_ident(n, l, start, loc)
+            return cc_token(TK_IDENT, flags, loc, id)
+        }
+        // A valid character outside XID_Start is still a standalone
+        // preprocessing token. The parser may reject it in phase 7.
+        width = zext[usize](r.width)
+        kind = TK_OTHER
     } else {
         width = punct_width(start)
+        if width == 1 && !bytes_contains(bytes_c(c"[](){}.&*+-~!/%<>^|?:;=,#"), ch) { kind = TK_OTHER }
     }
     l.header = false
     l.at += width

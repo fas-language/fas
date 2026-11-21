@@ -2,7 +2,7 @@ fn pp_lex_line(n handle[CNames], l handle[Lexer], tokens handle[Vec[Token]], hea
     l.header = header
     while true {
         t Token = try lex_next(n, l, false)
-        if t.kind == TK_NL || t.kind == TK_EOF { return }
+        if t.kind == TK_NL || t.kind == TK_EOF { l.header = false; return }
         vec_push[Token](tokens, t)
     }
 }
@@ -44,6 +44,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
     n handle[CNames] = &p.names
     if args.n == 0 || args.p[Token].kind != TK_IDENT { try cc_error(n, loc, c"expected macro name") }
     id u32 = cc_ident(n, args.p[Token])
+    if cc_is(n, args.p[Token], c"defined") { try cc_error(n, loc, c"cannot define the preprocessor operator defined") }
     a addr = heap_alloc_zeroed(sizeof[Macro])
     m handle[Macro] = handle_from_addr(a)
     i usize = 1
@@ -79,6 +80,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
     try pp_check_replacement(n, m, args.p, i, args.n, false)
     for j usize in i..args.n { vec_push[Token](&m.body, args.p[Token, j]) }
     n.macros.p[addr, zext[usize](id)] = a
+    n.undefined.p[u8, zext[usize](id)] = 0
 }
 
 fn pp_single_name(p handle[Pp], args handle[Vec[Token]], loc u32) u32 fails {
@@ -209,7 +211,7 @@ fn pp_condition(p handle[Pp], f handle[Frame], word Token, args handle[Vec[Token
     return true
 }
 
-value struct SavedMacro { macro addr, id u32 }
+value struct SavedMacro { macro addr, id u32, disabled u8 }
 
 fn pragma_tokens(p handle[Pp], source Bytes, loc u32, tokens handle[Vec[Token]]) void fails {
     n handle[CNames] = &p.names
@@ -254,7 +256,7 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
         }
         id u32 = cc_intern(n, pp_destringize(cc_spelling(n, args.p[Token, 2])))
         if push {
-            vec_push[SavedMacro](&p.macro_stack, {pp_macro(p, id), id})
+            vec_push[SavedMacro](&p.macro_stack, {pp_macro(p, id), id, n.undefined.p[u8, zext[usize](id)]})
         } else {
             i usize = p.macro_stack.n
             while i != 0 {
@@ -262,6 +264,7 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
                 saved SavedMacro = p.macro_stack.p[SavedMacro, i]
                 if saved.id == id {
                     n.macros.p[addr, zext[usize](id)] = saved.macro
+                    n.undefined.p[u8, zext[usize](id)] = saved.disabled
                     pos addr = p.macro_stack.p + i * sizeof[SavedMacro]
                     mem_move(pos, pos + sizeof[SavedMacro], (p.macro_stack.n - i - 1) * sizeof[SavedMacro])
                     p.macro_stack.n -= 1
@@ -325,7 +328,7 @@ fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
     importing bool = n.gnu && cc_is(n, word, c"import")
     args Vec[Token] = {}
     if word.kind == TK_NUM { vec_push[Token](&args, word) }
-    try pp_lex_line(n, l, &args, inc || next || embed || importing)
+    try pp_lex_line(n, l, &args, pp_active(p) && (inc || next || embed || importing))
     pp_guard(p, f, word, &args)
     if try pp_condition(p, f, word, &args, loc) { return }
     if !pp_active(p) { return }
@@ -337,6 +340,7 @@ fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
     } else if cc_is(n, word, c"undef") {
         id u32 = try pp_single_name(p, &args, loc)
         n.macros.p[addr, zext[usize](id)] = null
+        n.undefined.p[u8, zext[usize](id)] = 1
     } else if cc_is(n, word, c"line") || (word.kind == TK_NUM && n.gnu) {
         try pp_line(p, f, &args, loc, word.kind == TK_NUM)
     } else if cc_is(n, word, c"pragma") {

@@ -34,7 +34,7 @@ fn output_marker(n handle[CNames], out handle[Output], pos CLoc, flag u8, system
 fn output_stream(p handle[Pp], out handle[Output], discard bool) void fails {
     n handle[CNames] = &p.names
     while true {
-        t Token = try pp_next(p)
+        t Token = try pp_next_text(p)
         if t.kind == TK_EOF { break }
         if discard { continue }
         if t.kind == TK_NL {

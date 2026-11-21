@@ -71,7 +71,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-std=gnu23") { o.gnu = true }
         else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
-            o.user_deps = bytes_contains(word, 77) && word.n > 2 && arg[u8, 2] == 77
+            o.user_deps = word.n > 2 && arg[u8, 2] == 77
         } else if bytes_eq_c(word, c"-MP") { o.phony = true }
         else if bytes_starts_with(word, bytes_c(c"-MF")) { o.dep_file = try cli_arg(argc, &pos, arg, c"-MF") }
         else if bytes_starts_with(word, bytes_c(c"-MT")) { vec_push[addr](&o.targets, try cli_arg(argc, &pos, arg, c"-MT")) }
@@ -141,9 +141,12 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.stream.source = true
     p.timestamp = os_clock_ns(0) / 1000000000
     epoch addr = os_getenv(c"SOURCE_DATE_EPOCH")
-    if epoch != null { p.timestamp = bytes_to_u64(bytes_c(epoch)) catch p.timestamp }
+    if epoch != null {
+        p.timestamp = bytes_to_u64(bytes_c(epoch)) catch p.timestamp
+        p.timestamp_explicit = true
+    }
     if !o.no_builtins {
-        try cli_definitions(p, bytes_c(C_TARGET), c"<built-in>")
+        for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
         try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
     } else {
         try cli_definitions(p, bytes_c(c"__STDC__ 1\n__STDC_VERSION__ 202311L\n__STDC_HOSTED__ 1\n"), c"<built-in>")
@@ -154,6 +157,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         if m.kind == 1 {
             id u32 = cc_intern(&p.names, s)
             p.names.macros.p[addr, zext[usize](id)] = null
+            p.names.undefined.p[u8, zext[usize](id)] = 1
         } else {
             b Buf = {}
             sep usize = bytes_index(s, 61) catch s.n

@@ -40,6 +40,7 @@ struct Pp {
     base_logical u32
     counter u64
     timestamp u64
+    timestamp_explicit bool
     line_markers bool
 }
 
@@ -139,7 +140,7 @@ fn pp_find(p handle[Pp], file Bytes, quote bool, next bool) Found {
     }
     for i usize in start..p.dirs.n {
         d SearchDir = vec_get[SearchDir](&p.dirs, i)
-        if !quote && !next && d.rank == 0 { continue }
+        if !quote && d.rank == 0 { continue }
         buf_clear(&path)
         path_concat(&path, cc_name(&p.names, d.path), file)
         f Found = pp_lookup(p, buf_bytes(&path), bitcast[i16](trunc[u16](i)), d.rank >= 2)
@@ -202,4 +203,11 @@ fn prev_directive(n handle[CNames], t Token) bool {
 
 // Pull a single fully expanded token. Includes and directives are processed
 // lazily when the rescan reaches the underlying file stream.
-fn pp_next(p handle[Pp]) Token fails { return try expand_next(p, &p.stream) }
+fn pp_next_text(p handle[Pp]) Token fails { return try expand_next(p, &p.stream) }
+
+fn pp_next(p handle[Pp]) Token fails {
+    while true {
+        t Token = try pp_next_text(p)
+        if t.kind != TK_NL && t.kind != TK_ENTER && t.kind != TK_LEAVE && t.kind != TK_MARK { return t }
+    }
+}

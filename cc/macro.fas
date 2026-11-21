@@ -20,7 +20,7 @@ struct Expand {
 fn pp_macro(p handle[Pp], id u32) addr { return p.names.macros.p[addr, zext[usize](id)] }
 
 fn pp_defined(p handle[Pp], id u32) bool {
-    return pp_macro(p, id) != null || builtin_object(cc_name(&p.names, id))
+    return pp_macro(p, id) != null || (p.names.undefined.p[u8, zext[usize](id)] == 0 && builtin_object(cc_name(&p.names, id)))
 }
 
 fn hide_has(p handle[Pp], set u32, id u32) bool {
@@ -262,18 +262,19 @@ fn expand_substitute(p handle[Pp], e handle[Expand], m handle[Macro], data handl
                 try expand_substitute(p, e, m, data, args, caches, &part, &content, call, omitted)
             }
             i = stop + 1
-            while content.n != 0 && content.p[Token, content.n - 1].kind == TK_PLACE { content.n -= 1 }
-            used usize = 0
-            for j usize in 0..content.n {
-                part Token = content.p[Token, j]
-                if part.kind != TK_PLACE { content.p[Token, used] = part; used += 1 }
-            }
             if quoted {
+                used usize = 0
+                for j usize in 0..content.n {
+                    part Token = content.p[Token, j]
+                    if part.kind != TK_PLACE { content.p[Token, used] = part; used += 1 }
+                }
                 vec_push[Token](out, expand_stringize(p, content.p, used, t))
-            } else if used == 0 {
+            } else if content.n == 0 {
                 vec_push[Token](out, cc_token(TK_PLACE, t.flags, t.loc, 0))
             } else {
-                for j usize in 0..used {
+                // A trailing placemarker must survive an external paste:
+                // __VA_OPT__(a X##X) ## b with empty X becomes a b.
+                for j usize in 0..content.n {
                     part Token = content.p[Token, j]
                     if j == 0 { part.flags = t.flags }
                     vec_push[Token](out, part)
@@ -340,6 +341,7 @@ fn expand_next(p handle[Pp], e handle[Expand]) Token fails {
         if hide_has(p, t.hide, id) { return t }
         a addr = pp_macro(p, id)
         if a == null {
+            if p.names.undefined.p[u8, zext[usize](id)] != 0 { return t }
             return try builtin_expand(p, e, t, cc_name(n, id))
         }
         m handle[Macro] = handle_from_addr(a)
