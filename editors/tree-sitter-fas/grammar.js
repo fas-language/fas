@@ -124,6 +124,7 @@ module.exports = grammar({
         $.function_declaration,
         $.error_declaration,
         $.enum_declaration,
+        $.type_alias_declaration,
       ),
 
     use_declaration: ($) =>
@@ -189,7 +190,11 @@ module.exports = grammar({
       ),
 
     field_declaration: ($) =>
-      seq(field('name', $.identifier), field('type', $._type)),
+      seq(field('name', $._field_name), field('type', $._type)),
+
+    // type SymMap = Map[Bytes, u64, bytes_hash, bytes_eq]: `type` is a keyword only here
+    type_alias_declaration: ($) =>
+      seq('type', field('name', $.identifier), '=', field('type', $._type)),
 
 
     // enum Tok u8 { Eof, Ident, Plus = 10 }: `enum` is a keyword only here
@@ -566,6 +571,7 @@ module.exports = grammar({
         $.character,
         $.string,
         $.cstring,
+        $.bstring,
         $.boolean,
         $.null,
         $.array_literal,
@@ -578,7 +584,7 @@ module.exports = grammar({
 
     _array_element: ($) =>
       choice(
-        seq('.', field('name', $.identifier), '=', NL, $._expression),
+        seq('.', field('name', $._field_name), '=', NL, $._expression),
         seq('[', $._expression, ']', '=', NL, $._expression),
         $._expression,
       ),
@@ -656,6 +662,8 @@ module.exports = grammar({
     string: (_) => token(seq('"', repeat(choice(string_char, escape)), '"')),
 
     cstring: (_) => token(seq('c"', repeat(choice(string_char, escape)), '"')),
+
+    bstring: (_) => token(seq('b"', repeat(choice(string_char, escape)), '"')),
 
     comment: (_) =>
       token(

@@ -43,6 +43,7 @@ let desugar ?index (program : Ast.program) =
   else
     let resolved : (string, Ast.ty) Hashtbl.t = Hashtbl.create 16 in
     let rec expand_alias visiting span name =
+      Option.iter (fun idx -> Sema_index.refer_name idx span name) index;
       match Hashtbl.find_opt resolved name with
       | Some ty -> Ok ty
       | None ->

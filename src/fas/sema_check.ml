@@ -5095,21 +5095,25 @@ and check_fn_argument c parameter types target span =
               Sema_specialization.request c.specializations ~limits:c.limits
                 ~depth:c.spec_depth ~span ~description:"const specialization" spec
             in
-            let tpl_params, tpl_ret =
-              match specialization.payload with
-              | Function_payload
-                  { item = Ast.Func { params; ret; _ }; substitutions = []; _ } ->
-                  (params, ret)
-              | _ -> assert false
-            in
-            let* actual =
-              Result_list.map
-                (fun (p : Ast.param) ->
-                  source_ty_with_values c.named_types values p.span p.ty)
-                tpl_params
-            in
-            let* actual_ret = source_ty_with_values c.named_types values span tpl_ret in
-            check_sig actual actual_ret tpl_fails variadic
+            (match List.assoc_opt specialization.name c.signatures with
+            | Some (sig_ : Sema_context.signature) ->
+                check_sig (List.map snd sig_.params) sig_.ret sig_.fails sig_.variadic
+            | None ->
+                let tpl_params, tpl_ret =
+                  match specialization.payload with
+                  | Function_payload
+                      { item = Ast.Func { params; ret; _ }; substitutions = []; _ } ->
+                      (params, ret)
+                  | _ -> assert false
+                in
+                let* actual =
+                  Result_list.map
+                    (fun (p : Ast.param) ->
+                      source_ty_with_values c.named_types values p.span p.ty)
+                    tpl_params
+                in
+                let* actual_ret = source_ty_with_values c.named_types values span tpl_ret in
+                check_sig actual actual_ret tpl_fails variadic)
       | _ -> not_function ())
   | _ -> (
       let* address =

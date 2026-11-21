@@ -1681,6 +1681,17 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                   Result_list.iter
                     (validate_non_dependent_expression c dependent None)
                     arguments
+              | Some (substitutions, _)
+                when List.exists
+                       (fun (parameter : Ast.param) ->
+                         has_generic_type
+                           (substitute_validation_type substitutions [] parameter.ty))
+                       params
+                     || has_generic_type (substitute_validation_type substitutions [] ret)
+                ->
+                  Result_list.iter
+                    (validate_non_dependent_expression c dependent None)
+                    arguments
               | Some (substitutions, values) -> (
                   let* formals =
                     Result_list.map

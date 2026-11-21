@@ -1,0 +1,7 @@
+use "../lib/core.fas"
+
+type Word = u64
+type WordAlias = Word
+type SymMap = Map[Bytes, WordAlias, bytes_hash, bytes_eq]
+type SymMapHandle = handle[SymMap]
+type Magic4 = arr[4, u8]
