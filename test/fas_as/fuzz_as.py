@@ -21,6 +21,8 @@ R64 = ['%rax', '%rcx', '%rdx', '%rbx', '%rsp', '%rbp', '%rsi', '%rdi',
 R64_IDX = [r for r in R64 if r != '%rsp']
 R32_IDX = [r for r in R32 if r != '%esp']
 ST = [f'%st({i})' for i in range(8)]
+XMM = [f'%xmm{i}' for i in range(16)]
+YMM = [f'%ymm{i}' for i in range(16)]
 
 EDGE_IMM8 = [0, 1, -1, 2, 7, 127, -128, 255]
 EDGE_IMM16 = [0, 1, -1, 127, 128, -128, -129, 32767, -32768, 65535]
@@ -62,7 +64,7 @@ def rand_mem(rng, allow_rip=True, allow_seg=True):
     return f"{seg}{rng.choice([0, 0x1000, -0x100])}"
 
 def rand_insn(rng):
-    cat = rng.randint(0, 14)
+    cat = rng.randint(0, 21)
     if cat == 0: # ALU 8/16/32/64
         op = rng.choice(['add', 'or', 'adc', 'sbb', 'and', 'sub', 'xor', 'cmp'])
         sz = rng.choice(['b', 'w', 'l', 'q'])
@@ -215,12 +217,173 @@ def rand_insn(rng):
             f'fucomi {rng.choice(ST)}, %st(0)', f'fucomip {rng.choice(ST)}, %st(0)',
             'fnstsw %ax', f'fldcw {rand_mem(rng)}', f'fnstcw {rand_mem(rng)}',
         ])
-    # cat == 14: Alignment & relaxation stress
+    if cat == 14: # Alignment & relaxation stress
+        return rng.choice([
+            '.p2align 4',
+            '.balign 8',
+            'jnz 1f\n  .zero 140\n1:',
+            'jmp 1f\n  .zero 140\n1:',
+        ])
+    if cat == 15: # POPCNT, LZCNT, TZCNT, MOVBE, ADX, RDRAND, RDSEED, CRC32
+        sub = rng.randint(0, 5)
+        if sub == 0:
+            op = rng.choice(['popcnt', 'lzcnt', 'tzcnt'])
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op}{sz} {src}, {rng.choice(regs)}"
+        if sub == 1:
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            return rng.choice([f"movbe{sz} {rand_mem(rng)}, {rng.choice(regs)}", f"movbe{sz} {rng.choice(regs)}, {rand_mem(rng)}"])
+        if sub == 2:
+            op = rng.choice(['adcx', 'adox'])
+            sz, regs = rng.choice([('l', R32), ('q', R64)])
+            return f"{op}{sz} {rng.choice(regs)}, {rng.choice(regs)}"
+        if sub == 3:
+            op = rng.choice(['rdrand', 'rdseed'])
+            sz, regs = rng.choice([('w', R16), ('l', R32), ('q', R64)])
+            return f"{op}{sz} {rng.choice(regs)}"
+        return rng.choice([
+            f"crc32b {rng.choice(R8)}, {rng.choice(R32)}",
+            f"crc32b {rng.choice(R8)}, {rng.choice(R64)}",
+            f"crc32w {rng.choice(R16)}, {rng.choice(R32)}",
+            f"crc32l {rng.choice(R32)}, {rng.choice(R32)}",
+            f"crc32q {rng.choice(R64)}, {rng.choice(R64)}",
+        ])
+    if cat == 16: # BMI1 & BMI2
+        sz, regs = rng.choice([('l', R32), ('q', R64)])
+        sub = rng.randint(0, 4)
+        if sub == 0:
+            op = rng.choice(['andn', 'mulx', 'pdep', 'pext'])
+            src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op}{sz} {src}, {rng.choice(regs)}, {rng.choice(regs)}"
+        if sub == 1:
+            op = rng.choice(['bextr', 'bzhi', 'shlx', 'sarx', 'shrx'])
+            src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op}{sz} {rng.choice(regs)}, {src}, {rng.choice(regs)}"
+        if sub == 2:
+            op = rng.choice(['blsr', 'blsmsk', 'blsi'])
+            src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op}{sz} {src}, {rng.choice(regs)}"
+        return f"rorx{sz} ${rng.choice([0, 1, 7, 31])}, {rng.choice(regs)}, {rng.choice(regs)}"
+    if cat == 17: # SSE..SSE4.2 FP & conversions
+        sub = rng.randint(0, 4)
+        if sub == 0:
+            op = rng.choice(['addps', 'addpd', 'addss', 'addsd', 'subps', 'subpd', 'subss', 'subsd',
+                             'mulps', 'mulpd', 'mulss', 'mulsd', 'divps', 'divpd', 'divss', 'divsd',
+                             'minps', 'maxpd', 'andps', 'xorpd', 'orps', 'haddps', 'hsubpd', 'addsubps'])
+            src = rng.choice(XMM) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op} {src}, {rng.choice(XMM)}"
+        if sub == 1:
+            op = rng.choice(['movaps', 'movups', 'movapd', 'movupd', 'movss', 'movsd', 'movdqa', 'movdqu'])
+            if rng.random() < 0.5:
+                return f"{op} {rng.choice(XMM) if rng.random() < 0.5 else rand_mem(rng)}, {rng.choice(XMM)}"
+            return f"{op} {rng.choice(XMM)}, {rand_mem(rng)}"
+        if sub == 2:
+            op = rng.choice(['shufps', 'shufpd', 'cmpps', 'cmppd', 'cmpss', 'cmpsd', 'blendps', 'blendpd', 'dpps', 'roundps', 'roundsd'])
+            return f"{op} ${rng.choice([0, 1, 3, 7, 0xe4])}, {rng.choice(XMM)}, {rng.choice(XMM)}"
+        if sub == 3:
+            return rng.choice([
+                f"cvtsi2ssl {rng.choice(R32)}, {rng.choice(XMM)}",
+                f"cvtsi2sdq {rng.choice(R64)}, {rng.choice(XMM)}",
+                f"cvttss2sil {rng.choice(XMM)}, {rng.choice(R32)}",
+                f"cvttsd2siq {rng.choice(XMM)}, {rng.choice(R64)}",
+                f"cvtss2sd {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"cvtdq2ps {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"ucomisd {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"movd {rng.choice(R32)}, {rng.choice(XMM)}",
+                f"movq {rng.choice(R64)}, {rng.choice(XMM)}",
+                f"movq {rng.choice(XMM)}, {rng.choice(R64)}",
+            ])
+        return rng.choice([
+            f"movmskps {rng.choice(XMM)}, {rng.choice(R32)}",
+            f"pmovmskb {rng.choice(XMM)}, {rng.choice(R32)}",
+            f"movsldup {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"movddup {rand_mem(rng)}, {rng.choice(XMM)}",
+        ])
+    if cat == 18: # SSE2/SSSE3/SSE4.1/4.2 Integer SIMD + AES + PCLMUL + SHA
+        sub = rng.randint(0, 4)
+        if sub == 0:
+            op = rng.choice(['paddb', 'paddw', 'paddd', 'paddq', 'psubd', 'pmulld', 'pmullw', 'pmuludq',
+                             'pand', 'pandn', 'por', 'pxor', 'pcmpeqb', 'pcmpgtd', 'pminsd', 'pmaxud',
+                             'pshufb', 'phaddd', 'pmaddubsw', 'pabsd', 'ptest', 'pmovsxbw', 'pmovzxbd'])
+            src = rng.choice(XMM) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op} {src}, {rng.choice(XMM)}"
+        if sub == 1:
+            op = rng.choice(['psllw', 'pslld', 'psllq', 'psrlw', 'psrld', 'psrlq', 'psrad', 'pslldq', 'psrldq'])
+            return f"{op} ${rng.choice([0, 1, 4, 15])}, {rng.choice(XMM)}"
+        if sub == 2:
+            return rng.choice([
+                f"pshufd $0xe4, {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"palignr $4, {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"pinsrd $1, {rng.choice(R32)}, {rng.choice(XMM)}",
+                f"pinsrq $1, {rng.choice(R64)}, {rng.choice(XMM)}",
+                f"pextrd $2, {rng.choice(XMM)}, {rng.choice(R32)}",
+                f"pextrq $1, {rng.choice(XMM)}, {rng.choice(R64)}",
+                f"pcmpistri $0x08, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            ])
+        if sub == 3: # AES & PCLMUL
+            return rng.choice([
+                f"aesenc {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"aesenclast {rand_mem(rng)}, {rng.choice(XMM)}",
+                f"aesdec {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"aesimc {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"aeskeygenassist $1, {rng.choice(XMM)}, {rng.choice(XMM)}",
+                f"pclmulqdq $0x11, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            ])
+        # SHA
+        return rng.choice([
+            f"sha1rnds4 $2, {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"sha1nexte {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"sha1msg1 {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"sha256msg1 {rng.choice(XMM)}, {rng.choice(XMM)}",
+            f"sha256msg2 {rand_mem(rng)}, {rng.choice(XMM)}",
+        ])
+    if cat == 19: # AVX / AVX2 (128-bit & 256-bit)
+        regs = rng.choice([XMM, YMM])
+        sub = rng.randint(0, 4)
+        if sub == 0:
+            op = rng.choice(['vaddps', 'vaddpd', 'vsubps', 'vmulpd', 'vdivps', 'vxorps', 'vandpd',
+                             'vpaddd', 'vpaddq', 'vpsubw', 'vpmulld', 'vpxor', 'vpand', 'vpor',
+                             'vpshufb', 'vpcmpeqd', 'vpmaxsd', 'vpminud', 'vpsllvd', 'vpsrlvq', 'vpsravd'])
+            src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+            return f"{op} {src}, {rng.choice(regs)}, {rng.choice(regs)}"
+        if sub == 1:
+            op = rng.choice(['vmovaps', 'vmovups', 'vmovapd', 'vmovdqa', 'vmovdqu'])
+            if rng.random() < 0.5:
+                return f"{op} {rng.choice(regs) if rng.random() < 0.5 else rand_mem(rng)}, {rng.choice(regs)}"
+            return f"{op} {rng.choice(regs)}, {rand_mem(rng)}"
+        if sub == 2:
+            op = rng.choice(['vshufps', 'vcmpps', 'vblendps', 'vpalignr'])
+            return f"{op} ${rng.choice([0, 1, 5, 0x1b])}, {rng.choice(regs)}, {rng.choice(regs)}, {rng.choice(regs)}"
+        if sub == 3:
+            op = rng.choice(['vblendvps', 'vblendvpd', 'vpblendvb'])
+            return f"{op} {rng.choice(regs)}, {rng.choice(regs)}, {rng.choice(regs)}, {rng.choice(regs)}"
+        return rng.choice([
+            'vzeroupper', 'vzeroall',
+            f"vbroadcastss {rng.choice(XMM)}, {rng.choice(YMM)}",
+            f"vpbroadcastd {rng.choice(XMM)}, {rng.choice(YMM)}",
+            f"vperm2f128 $0x21, {rng.choice(YMM)}, {rng.choice(YMM)}, {rng.choice(YMM)}",
+            f"vpermq $0xe4, {rng.choice(YMM)}, {rng.choice(YMM)}",
+            f"vpermd {rng.choice(YMM)}, {rng.choice(YMM)}, {rng.choice(YMM)}",
+            f"vinserti128 $1, {rng.choice(XMM)}, {rng.choice(YMM)}, {rng.choice(YMM)}",
+            f"vextracti128 $1, {rng.choice(YMM)}, {rng.choice(XMM)}",
+            f"vpslld $3, {rng.choice(regs)}, {rng.choice(regs)}",
+            f"vpshufd $0x4e, {rng.choice(regs)}, {rng.choice(regs)}",
+        ])
+    if cat == 20: # FMA3
+        fam = rng.choice(['vfmadd', 'vfmsub', 'vfnmadd', 'vfnmsub'])
+        order = rng.choice(['132', '213', '231'])
+        sfx = rng.choice(['ps', 'pd', 'ss', 'sd'])
+        regs = YMM if (sfx in ('ps', 'pd') and rng.random() < 0.5) else XMM
+        src = rng.choice(regs) if rng.random() < 0.6 else rand_mem(rng)
+        return f"{fam}{order}{sfx} {src}, {rng.choice(regs)}, {rng.choice(regs)}"
+    # cat == 21: AVX scalar & AES/PCLMUL VEX
     return rng.choice([
-        '.p2align 4',
-        '.balign 8',
-        'jnz 1f\n  .zero 140\n1:',
-        'jmp 1f\n  .zero 140\n1:',
+        f"vaddss {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        f"vmulsd {rand_mem(rng)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        f"vcvtsi2sdq {rng.choice(R64)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        f"vaesenc {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
+        f"vpclmulqdq $0x01, {rng.choice(XMM)}, {rng.choice(XMM)}, {rng.choice(XMM)}",
     ])
 
 def parse_elf_text_and_relas(data):
