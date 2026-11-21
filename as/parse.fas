@@ -467,6 +467,116 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".quad") || bytes_is(dir, c".8byte") {
         try parse_data_directive(8); return
     }
+    if bytes_is(dir, c".octa") {
+        while true {
+            v i64 = try eval_const_now(try parse_expr())
+            emit_u64(bitcast[u64](v))
+            emit_u64(if v < 0 { 0xffffffffffffffff } else { 0 })
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        return
+    }
+    if bytes_is(dir, c".subsection") {
+        try eval_const_now(try parse_expr())
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".symver") {
+        orig Bytes = try parse_ident()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        ver Bytes = try parse_ident()
+        s handle[Symbol] = sym_at(sym_get_or_create(ver))
+        s.is_equ = true
+        s.defined = true
+        s.binding = STB_GLOBAL
+        s.equ_expr = expr_sym(sym_get_or_create(orig), VAR_NONE)
+        skip_to_eol()
+        return
+    }
+    if dir.n >= 5 && dir.p[u8, 0] == 46 && dir.p[u8, 1] == 99 && dir.p[u8, 2] == 102 && dir.p[u8, 3] == 105 && dir.p[u8, 4] == 95 {
+        try parse_cfi_directive(dir)
+        return
+    }
+    if bytes_is(dir, c".macro") { try parse_macro_def(); return }
+    if bytes_is(dir, c".endm") { try as_err(c".endm without matching .macro"); return }
+    if bytes_is(dir, c".rept") { try parse_rept_directive(); return }
+    if bytes_is(dir, c".irp") { try parse_irp_directive(false); return }
+    if bytes_is(dir, c".irpc") { try parse_irp_directive(true); return }
+    if bytes_is(dir, c".endr") { try as_err(c".endr without matching .rept/.irp/.irpc"); return }
+    if bytes_is(dir, c".include") { try parse_include_directive(); return }
+    if bytes_is(dir, c".incbin") { try parse_incbin_directive(); return }
+    if bytes_is(dir, c".if") {
+        cond i64 = try eval_const_now(try parse_expr())
+        skip_to_eol()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        if cond != 0 { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        return
+    }
+    if bytes_is(dir, c".ifdef") || bytes_is(dir, c".ifndef") {
+        neg bool = bytes_is(dir, c".ifndef")
+        name Bytes = try parse_ident()
+        sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
+        defd bool = sid != AS_NONE && sym_at(sid).defined
+        if neg { defd = !defd }
+        skip_to_eol()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        if defd { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        return
+    }
+    if bytes_is(dir, c".ifb") || bytes_is(dir, c".ifnb") {
+        neg bool = bytes_is(dir, c".ifnb")
+        skip_hspace()
+        blank bool = at_eol()
+        if neg { blank = !blank }
+        skip_to_eol()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        if blank { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        return
+    }
+    if bytes_is(dir, c".ifeqs") || bytes_is(dir, c".ifnes") {
+        neg bool = bytes_is(dir, c".ifnes")
+        b1 Buf = {}
+        try parse_string_lit(&b1)
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        b2 Buf = {}
+        try parse_string_lit(&b2)
+        eq bool = bytes_eq(buf_bytes(&b1), buf_bytes(&b2))
+        if neg { eq = !eq }
+        skip_to_eol()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        if eq { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        return
+    }
+    if bytes_is(dir, c".else") || bytes_is(dir, c".elseif") {
+        if ac.if_stack.n == 0 { try as_err(c".else/.elseif without matching .if") }
+        vec_pop(&ac.if_stack)
+        skip_to_eol()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        try skip_false_branch(false)
+        return
+    }
+    if bytes_is(dir, c".endif") {
+        if ac.if_stack.n == 0 { try as_err(c".endif without matching .if") }
+        vec_pop(&ac.if_stack)
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".ident") {
+        b Buf = {}
+        try parse_string_lit(&b)
+        prev u32 = ac.cur_sec
+        cid u32 = sec_get_or_create(bytes_c(c".comment"), SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, bytes_empty(), false)
+        ac.cur_sec = cid
+        if cur_sec().data.n == 0 { emit_u8(0) }
+        emit_bytes(buf_bytes(&b))
+        emit_u8(0)
+        ac.cur_sec = prev
+        return
+    }
     if bytes_is(dir, c".ascii") || bytes_is(dir, c".asciz") || bytes_is(dir, c".string") {
         nul bool = !bytes_is(dir, c".ascii")
         while true {
@@ -551,7 +661,7 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".err") || bytes_is(dir, c".error") { try as_err(c".error directive encountered"); return }
     if bytes_is(dir, c".warning") { skip_to_eol(); return }
     // Accepted and ignored for now (no DWARF line emission yet)
-    if bytes_is(dir, c".file") || bytes_is(dir, c".loc") || bytes_is(dir, c".ident") ||
+    if bytes_is(dir, c".file") || bytes_is(dir, c".loc") ||
        bytes_is(dir, c".addrsig") || bytes_is(dir, c".addrsig_sym") ||
        bytes_is(dir, c".build_version") || bytes_is(dir, c".subsections_via_symbols") {
         skip_to_eol()
@@ -563,11 +673,14 @@ fn parse_directive(dir Bytes) void fails {
 // ---------- Statement loop ----------
 
 fn as_parse_all() void fails {
-    p addr = ac.src.p
-    n u64 = ac.src.n
-    while ac.pos < n {
+    while true {
         skip_hspace()
-        if ac.pos >= n { break }
+        if ac.pos >= ac.src.n {
+            if pop_source_frame() { continue }
+            break
+        }
+        p addr = ac.src.p
+        n u64 = ac.src.n
         c u8 = p[u8, ac.pos]
         if c == 10 { ac.pos += 1; ac.line += 1; continue }
         if c == 59 { ac.pos += 1; continue }
@@ -623,6 +736,11 @@ fn as_parse_all() void fails {
         // Directive: `.foo`
         if tok.p[u8, 0] == 46 {
             try parse_directive(tok)
+            continue
+        }
+
+        // Macro invocation
+        if try try_invoke_macro(tok) {
             continue
         }
 

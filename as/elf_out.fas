@@ -77,7 +77,7 @@ fn as_emit_elf(out handle[Buf]) void {
         s handle[Section] = sec_at(trunc[u32](si))
         for ri u64 in 0..s.relas.n {
             r handle[Rela] = vec_at(&s.relas, ri)
-            if zext[u64](r.sym_id) < sym_in_reloc.n {
+            if (r.sym_id & 0x80000000) == 0 && zext[u64](r.sym_id) < sym_in_reloc.n {
                 sym_in_reloc.p[u8, zext[u64](r.sym_id)] = 1
             }
         }
@@ -147,14 +147,20 @@ fn as_emit_elf(out handle[Buf]) void {
         rb handle[Buf] = vec_add(&rela_bufs)
         for ri u64 in 0..s.relas.n {
             r handle[Rela] = vec_at(&s.relas, ri)
-            sym handle[Symbol] = sym_at(r.sym_id)
-            sym_idx u32 = sym.elf_idx
+            sym_idx u32 = 0
             addend i64 = r.addend
-            // Convert relocation against defined local .L / numeric label to section + offset
-            is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
-            if sym.binding == STB_LOCAL && sym.defined && sym.sec_id != AS_NONE && (sym.is_local_label || is_dot_l) {
-                sym_idx = sec_at(sym.sec_id).sym_idx
-                addend += bitcast[i64](sym.value)
+            if (r.sym_id & 0x80000000) != 0 {
+                // Direct STT_SECTION reference (used by .eh_frame FDEs)
+                sym_idx = sec_at(r.sym_id & 0x7fffffff).sym_idx
+            } else {
+                sym handle[Symbol] = sym_at(r.sym_id)
+                sym_idx = sym.elf_idx
+                // Convert relocation against defined local .L / numeric label to section + offset
+                is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
+                if sym.binding == STB_LOCAL && sym.defined && sym.sec_id != AS_NONE && (sym.is_local_label || is_dot_l) {
+                    sym_idx = sec_at(sym.sec_id).sym_idx
+                    addend += bitcast[i64](sym.value)
+                }
             }
             buf_u64le(rb, r.offset)
             buf_u64le(rb, (zext[u64](sym_idx) << 32) | zext[u64](r.rtype))

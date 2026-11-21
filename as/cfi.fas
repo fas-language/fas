@@ -1,0 +1,491 @@
+// Full .cfi_* directive support and .eh_frame (SHT_X86_64_UNWIND) generation,
+// matching llvm-mc-22 byte for byte.
+
+const SHT_X86_64_UNWIND u32 = 0x70000001
+
+// CFI instruction opcodes recorded per FDE
+const CFI_DEF_CFA u8 = 1
+const CFI_DEF_CFA_REG u8 = 2
+const CFI_DEF_CFA_OFF u8 = 3
+const CFI_OFFSET u8 = 4
+const CFI_RESTORE u8 = 5
+const CFI_REMEMBER_STATE u8 = 6
+const CFI_RESTORE_STATE u8 = 7
+const CFI_REGISTER u8 = 8
+const CFI_ESCAPE u8 = 9
+const CFI_UNDEFINED u8 = 10
+const CFI_SAME_VALUE u8 = 11
+
+struct CfiInsn {
+    kind u8
+    pad u8
+    reg1 u16
+    reg2 u16
+    pad2 u16
+    frag_id u32
+    frag_off u32
+    val i64         // offset, or escape_off | (escape_len << 32)
+}
+
+struct CfiFde {
+    sec_id u32
+    start_frag u32
+    start_off u32
+    end_frag u32
+    end_off u32
+    insn_start u32
+    insn_count u32
+    pers_enc u8
+    lsda_enc u8
+    signal_frame bool
+    is_simple bool
+    pers_sym u32    // AS_NONE if none
+    lsda_sym u32    // AS_NONE if none
+    cfa_offset i64
+    saved_cfa_offset i64
+    line u32
+    pad u32
+}
+
+// Converts an x86-64 register ID to its System V AMD64 DWARF register number.
+fn reg_to_dwarf(r u16) i32 {
+    c u8 = reg_class(r)
+    n u8 = reg_num(r)
+    if c == RC_GP64 || c == RC_GP32 || c == RC_GP16 || c == RC_GP8 {
+        if n == 0 { return 0 }  // rax
+        if n == 1 { return 2 }  // rcx
+        if n == 2 { return 1 }  // rdx
+        if n == 3 { return 3 }  // rbx
+        if n == 4 { return 7 }  // rsp
+        if n == 5 { return 6 }  // rbp
+        if n == 6 { return 4 }  // rsi
+        if n == 7 { return 5 }  // rdi
+        return zext[i32](n)     // r8..r15 -> 8..15
+    }
+    if c == RC_RIP { return 16 }
+    if c == RC_XMM && n < 16 { return 17 + zext[i32](n) }
+    if c == RC_YMM && n < 16 { return 17 + zext[i32](n) }
+    if c == RC_X87 { return 33 + zext[i32](n) }
+    if c == RC_MMX { return 41 + zext[i32](n) }
+    return -1
+}
+
+// Parses a CFI register argument: %reg, bare reg name, or integer DWARF reg number.
+fn parse_cfi_reg() u16 fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n { try as_err(c"expected register in .cfi directive") }
+    if ac.src.p[u8, ac.pos] == 37 {
+        r u16 = try parse_reg_token()
+        d i32 = reg_to_dwarf(r)
+        if d < 0 { try as_err(c"unsupported register in .cfi directive") }
+        return trunc[u16](bitcast[u32](d))
+    }
+    if is_digit(ac.src.p[u8, ac.pos]) {
+        v i64 = try eval_const_now(try parse_expr())
+        if v < 0 || v > 255 { try as_err(c"invalid DWARF register number") }
+        return trunc[u16](bitcast[u64](v))
+    }
+    name Bytes = try parse_ident()
+    r u16 = reg_parse(name)
+    if r != 0 {
+        d i32 = reg_to_dwarf(r)
+        if d >= 0 { return trunc[u16](bitcast[u32](d)) }
+    }
+    try as_err_b(c"unknown register in .cfi directive: ", name)
+    return 0
+}
+
+fn cfi_add_insn(kind u8, reg1 u16, reg2 u16, val i64) void fails {
+    if !ac.cfi_active { try as_err(c".cfi directive outside .cfi_startproc") }
+    fid u32 = frag_ensure_data()
+    s handle[Section] = cur_sec()
+    f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+    ins handle[CfiInsn] = vec_add(&ac.cfi_insns)
+    ins.kind = kind
+    ins.reg1 = reg1
+    ins.reg2 = reg2
+    ins.frag_id = fid
+    ins.frag_off = f.data_len
+    ins.val = val
+    fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+    fde.insn_count += 1
+}
+
+fn parse_cfi_directive(dir Bytes) void fails {
+    if bytes_is(dir, c".cfi_sections") {
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".cfi_startproc") {
+        if ac.cfi_active { try as_err(c"nested .cfi_startproc") }
+        ac.cfi_active = true
+        fid u32 = frag_ensure_data()
+        s handle[Section] = cur_sec()
+        f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+        fde handle[CfiFde] = vec_add(&ac.cfi_fdes)
+        fde.sec_id = ac.cur_sec
+        fde.start_frag = fid
+        fde.start_off = f.data_len
+        fde.end_frag = fid
+        fde.end_off = f.data_len
+        fde.insn_start = trunc[u32](ac.cfi_insns.n)
+        fde.insn_count = 0
+        fde.pers_sym = AS_NONE
+        fde.lsda_sym = AS_NONE
+        fde.cfa_offset = 8
+        fde.saved_cfa_offset = 8
+        fde.line = ac.line
+        skip_hspace()
+        if !at_eol() {
+            arg Bytes = try parse_ident()
+            if bytes_is(arg, c"simple") { fde.is_simple = true }
+        }
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".cfi_endproc") {
+        if !ac.cfi_active { try as_err(c".cfi_endproc without .cfi_startproc") }
+        fid u32 = frag_ensure_data()
+        s handle[Section] = cur_sec()
+        f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.end_frag = fid
+        fde.end_off = f.data_len
+        ac.cfi_active = false
+        skip_to_eol()
+        return
+    }
+    if bytes_is(dir, c".cfi_def_cfa") {
+        r u16 = try parse_cfi_reg()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        off i64 = try eval_const_now(try parse_expr())
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.cfa_offset = off
+        try cfi_add_insn(CFI_DEF_CFA, r, 0, off)
+        return
+    }
+    if bytes_is(dir, c".cfi_def_cfa_register") {
+        r u16 = try parse_cfi_reg()
+        try cfi_add_insn(CFI_DEF_CFA_REG, r, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_def_cfa_offset") {
+        off i64 = try eval_const_now(try parse_expr())
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.cfa_offset = off
+        try cfi_add_insn(CFI_DEF_CFA_OFF, 0, 0, off)
+        return
+    }
+    if bytes_is(dir, c".cfi_adjust_cfa_offset") {
+        delta i64 = try eval_const_now(try parse_expr())
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.cfa_offset += delta
+        try cfi_add_insn(CFI_DEF_CFA_OFF, 0, 0, fde.cfa_offset)
+        return
+    }
+    if bytes_is(dir, c".cfi_offset") || bytes_is(dir, c".cfi_rel_offset") {
+        is_rel bool = bytes_is(dir, c".cfi_rel_offset")
+        r u16 = try parse_cfi_reg()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        off i64 = try eval_const_now(try parse_expr())
+        if is_rel {
+            fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+            off = off - fde.cfa_offset
+        }
+        try cfi_add_insn(CFI_OFFSET, r, 0, off)
+        return
+    }
+    if bytes_is(dir, c".cfi_restore") {
+        r u16 = try parse_cfi_reg()
+        try cfi_add_insn(CFI_RESTORE, r, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_remember_state") {
+        if ac.cfi_active {
+            fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+            fde.saved_cfa_offset = fde.cfa_offset
+        }
+        try cfi_add_insn(CFI_REMEMBER_STATE, 0, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_restore_state") {
+        if ac.cfi_active {
+            fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+            fde.cfa_offset = fde.saved_cfa_offset
+        }
+        try cfi_add_insn(CFI_RESTORE_STATE, 0, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_register") {
+        r1 u16 = try parse_cfi_reg()
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        r2 u16 = try parse_cfi_reg()
+        try cfi_add_insn(CFI_REGISTER, r1, r2, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_undefined") {
+        r u16 = try parse_cfi_reg()
+        try cfi_add_insn(CFI_UNDEFINED, r, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_same_value") {
+        r u16 = try parse_cfi_reg()
+        try cfi_add_insn(CFI_SAME_VALUE, r, 0, 0)
+        return
+    }
+    if bytes_is(dir, c".cfi_escape") {
+        start u64 = ac.cfi_escapes.n
+        while true {
+            v i64 = try eval_const_now(try parse_expr())
+            buf_u8(&ac.cfi_escapes, trunc[u8](bitcast[u64](v) & 0xff))
+            skip_hspace()
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            break
+        }
+        ln u64 = ac.cfi_escapes.n - start
+        try cfi_add_insn(CFI_ESCAPE, 0, 0, bitcast[i64](start | (ln << 32)))
+        return
+    }
+    if bytes_is(dir, c".cfi_personality") {
+        if !ac.cfi_active { try as_err(c".cfi_personality outside .cfi_startproc") }
+        enc i64 = try eval_const_now(try parse_expr())
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        sname Bytes = try parse_ident()
+        sid u32 = sym_get_or_create(sname)
+        sym_at(sid).referenced = true
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.pers_enc = trunc[u8](bitcast[u64](enc) & 0xff)
+        fde.pers_sym = sid
+        return
+    }
+    if bytes_is(dir, c".cfi_lsda") {
+        if !ac.cfi_active { try as_err(c".cfi_lsda outside .cfi_startproc") }
+        enc i64 = try eval_const_now(try parse_expr())
+        skip_hspace()
+        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        sname Bytes = try parse_ident()
+        sid u32 = sym_get_or_create(sname)
+        sym_at(sid).referenced = true
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.lsda_enc = trunc[u8](bitcast[u64](enc) & 0xff)
+        fde.lsda_sym = sid
+        return
+    }
+    if bytes_is(dir, c".cfi_signal_frame") {
+        if !ac.cfi_active { try as_err(c".cfi_signal_frame outside .cfi_startproc") }
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, ac.cfi_fdes.n - 1)
+        fde.signal_frame = true
+        return
+    }
+    skip_to_eol()
+}
+
+// ---------- .eh_frame emission (called after as_layout_and_relax) ----------
+
+fn cfi_emit_advance(out handle[Buf], delta u64) void {
+    if delta == 0 { return }
+    if delta < 64 {
+        buf_u8(out, trunc[u8](0x40 | delta))
+    } else if delta <= 255 {
+        buf_u8(out, 0x02) // DW_CFA_advance_loc1
+        buf_u8(out, trunc[u8](delta))
+    } else if delta <= 65535 {
+        buf_u8(out, 0x03) // DW_CFA_advance_loc2
+        buf_u16le(out, trunc[u16](delta))
+    } else {
+        buf_u8(out, 0x04) // DW_CFA_advance_loc4
+        buf_u32le(out, trunc[u32](delta))
+    }
+}
+
+struct CieKey {
+    pers_enc u8
+    lsda_enc u8
+    signal_frame bool
+    is_simple bool
+    pers_sym u32
+    offset u64
+}
+
+fn cfi_emit_cie(eh handle[Section], fde handle[CfiFde], cies handle[Vec[CieKey]]) u64 {
+    // Reuse matching CIE if already emitted
+    for i u64 in 0..cies.n {
+        k handle[CieKey] = vec_at(cies, i)
+        if k.pers_enc == fde.pers_enc && k.lsda_enc == fde.lsda_enc &&
+           k.signal_frame == fde.signal_frame && k.is_simple == fde.is_simple &&
+           k.pers_sym == fde.pers_sym {
+            return k.offset
+        }
+    }
+    cie_off u64 = eh.out.n
+    k handle[CieKey] = vec_add(cies)
+    k.pers_enc = fde.pers_enc
+    k.lsda_enc = fde.lsda_enc
+    k.signal_frame = fde.signal_frame
+    k.is_simple = fde.is_simple
+    k.pers_sym = fde.pers_sym
+    k.offset = cie_off
+
+    buf_u32le(&eh.out, 0)       // length placeholder
+    buf_u32le(&eh.out, 0)       // CIE_id = 0
+    buf_u8(&eh.out, 1)          // version = 1
+
+    // Augmentation string: "z" + optional "P", "L", "R", "S" + NUL
+    buf_u8(&eh.out, 122) // 'z'
+    if fde.pers_sym != AS_NONE { buf_u8(&eh.out, 80) } // 'P'
+    if fde.lsda_sym != AS_NONE { buf_u8(&eh.out, 76) } // 'L'
+    buf_u8(&eh.out, 82) // 'R'
+    if fde.signal_frame { buf_u8(&eh.out, 83) } // 'S'
+    buf_u8(&eh.out, 0)
+
+    emit_uleb_bytes(&eh.out, 1)     // code alignment factor = 1
+    emit_sleb_bytes(&eh.out, -8)    // data alignment factor = -8
+    emit_uleb_bytes(&eh.out, 16)    // return address register = rip (16)
+
+    // Augmentation data
+    aug_len u64 = 1 // R encoding (0x1b)
+    if fde.pers_sym != AS_NONE { aug_len += 5 } // 1 enc + 4 pcrel/sdata4
+    if fde.lsda_sym != AS_NONE { aug_len += 1 }
+    emit_uleb_bytes(&eh.out, aug_len)
+    if fde.pers_sym != AS_NONE {
+        buf_u8(&eh.out, fde.pers_enc)
+        poff u64 = eh.out.n
+        buf_u32le(&eh.out, 0)
+        rtype u32 = if (fde.pers_enc & 0x80) != 0 { R_X86_64_GOTPCREL } else { R_X86_64_PC32 }
+        add_rela(eh, poff, fde.pers_sym, rtype, 0)
+    }
+    if fde.lsda_sym != AS_NONE {
+        buf_u8(&eh.out, fde.lsda_enc)
+    }
+    buf_u8(&eh.out, 0x1b) // DW_EH_PE_pcrel | DW_EH_PE_sdata4
+
+    // Initial instructions (unless .cfi_startproc simple)
+    if !fde.is_simple {
+        buf_u8(&eh.out, 0x0c) // DW_CFA_def_cfa
+        emit_uleb_bytes(&eh.out, 7) // rsp
+        emit_uleb_bytes(&eh.out, 8) // offset 8
+        buf_u8(&eh.out, 0x80 | 16) // DW_CFA_offset rip
+        emit_uleb_bytes(&eh.out, 1) // factor 1 => -8
+    }
+
+    // Pad to 8-byte boundary with DW_CFA_nop (0x00)
+    while (eh.out.n & 7) != 0 { buf_u8(&eh.out, 0) }
+    rec_len u64 = eh.out.n - cie_off - 4
+    patch_le(&eh.out, cie_off, 4, rec_len)
+    return cie_off
+}
+
+fn as_emit_eh_frame() void fails {
+    if ac.cfi_active { try as_err(c"unterminated .cfi_startproc (missing .cfi_endproc)") }
+    if ac.cfi_fdes.n == 0 { return }
+
+    eh_id u32 = sec_get_or_create(bytes_c(c".eh_frame"), SHT_X86_64_UNWIND, SHF_ALLOC, 0, bytes_empty(), false)
+    eh handle[Section] = sec_at(eh_id)
+    eh.sh_align = 8
+    cies Vec[CieKey] = {}
+
+    for i u64 in 0..ac.cfi_fdes.n {
+        fde handle[CfiFde] = vec_at(&ac.cfi_fdes, i)
+        cie_off u64 = cfi_emit_cie(eh, fde, &cies)
+
+        tsec handle[Section] = sec_at(fde.sec_id)
+        start_addr u64 = vec_at(&tsec.frags, zext[u64](fde.start_frag)).addr + zext[u64](fde.start_off)
+        end_addr u64 = vec_at(&tsec.frags, zext[u64](fde.end_frag)).addr + zext[u64](fde.end_off)
+
+        fde_off u64 = eh.out.n
+        buf_u32le(&eh.out, 0)                                   // length placeholder
+        cie_ptr_off u64 = eh.out.n
+        buf_u32le(&eh.out, trunc[u32](cie_ptr_off - cie_off))   // CIE pointer
+
+        // PC begin: R_X86_64_PC32 against a synthetic section-local symbol
+        pc_off u64 = eh.out.n
+        buf_u32le(&eh.out, 0)
+        // Encode section-symbol reference via high bit (handled in elf_out.fas)
+        add_rela(eh, pc_off, 0x80000000 | fde.sec_id, R_X86_64_PC32, bitcast[i64](start_addr))
+
+        // PC range
+        buf_u32le(&eh.out, trunc[u32](end_addr - start_addr))
+
+        // Augmentation data
+        if fde.lsda_sym != AS_NONE {
+            emit_uleb_bytes(&eh.out, 4)
+            loff u64 = eh.out.n
+            buf_u32le(&eh.out, 0)
+            add_rela(eh, loff, fde.lsda_sym, R_X86_64_PC32, 0)
+        } else {
+            emit_uleb_bytes(&eh.out, 0)
+        }
+
+        // Emit CFI instructions
+        cur_pc u64 = start_addr
+        for j u32 in 0..fde.insn_count {
+            ins handle[CfiInsn] = vec_at(&ac.cfi_insns, zext[u64](fde.insn_start + j))
+            ipc u64 = vec_at(&tsec.frags, zext[u64](ins.frag_id)).addr + zext[u64](ins.frag_off)
+            if ipc > cur_pc {
+                cfi_emit_advance(&eh.out, ipc - cur_pc)
+                cur_pc = ipc
+            }
+            if ins.kind == CFI_DEF_CFA {
+                buf_u8(&eh.out, 0x0c)
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+                emit_uleb_bytes(&eh.out, bitcast[u64](ins.val))
+            } else if ins.kind == CFI_DEF_CFA_REG {
+                buf_u8(&eh.out, 0x0d)
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+            } else if ins.kind == CFI_DEF_CFA_OFF {
+                buf_u8(&eh.out, 0x0e)
+                emit_uleb_bytes(&eh.out, bitcast[u64](ins.val))
+            } else if ins.kind == CFI_OFFSET {
+                if ins.val <= 0 && ((0 - ins.val) & 7) == 0 {
+                    fact u64 = bitcast[u64]((0 - ins.val) / 8)
+                    if ins.reg1 < 64 {
+                        buf_u8(&eh.out, trunc[u8](0x80 | ins.reg1))
+                    } else {
+                        buf_u8(&eh.out, 0x05) // DW_CFA_offset_extended
+                        emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+                    }
+                    emit_uleb_bytes(&eh.out, fact)
+                } else {
+                    buf_u8(&eh.out, 0x11) // DW_CFA_offset_extended_sf
+                    emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+                    emit_sleb_bytes(&eh.out, ins.val / -8)
+                }
+            } else if ins.kind == CFI_RESTORE {
+                if ins.reg1 < 64 {
+                    buf_u8(&eh.out, trunc[u8](0xc0 | ins.reg1))
+                } else {
+                    buf_u8(&eh.out, 0x06) // DW_CFA_restore_extended
+                    emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+                }
+            } else if ins.kind == CFI_REMEMBER_STATE {
+                buf_u8(&eh.out, 0x0a)
+            } else if ins.kind == CFI_RESTORE_STATE {
+                buf_u8(&eh.out, 0x0b)
+            } else if ins.kind == CFI_REGISTER {
+                buf_u8(&eh.out, 0x09)
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg2))
+            } else if ins.kind == CFI_UNDEFINED {
+                buf_u8(&eh.out, 0x07)
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+            } else if ins.kind == CFI_SAME_VALUE {
+                buf_u8(&eh.out, 0x08)
+                emit_uleb_bytes(&eh.out, zext[u64](ins.reg1))
+            } else if ins.kind == CFI_ESCAPE {
+                eoff u64 = bitcast[u64](ins.val) & 0xffffffff
+                elen u64 = bitcast[u64](ins.val) >> 32
+                buf_append(&eh.out, bytes(ac.cfi_escapes.p + eoff, elen))
+            }
+        }
+
+        // Pad FDE to 8-byte boundary
+        while (eh.out.n & 7) != 0 { buf_u8(&eh.out, 0) }
+        rec_len u64 = eh.out.n - fde_off - 4
+        patch_le(&eh.out, fde_off, 4, rec_len)
+    }
+    eh.size = eh.out.n
+}

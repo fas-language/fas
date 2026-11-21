@@ -344,6 +344,19 @@ struct As {
 
     // Mnemonic lookup table (initialized once per As or lazily)
     mnem_map StrU32Map
+
+    // Preprocessor: include/macro/repeat source stack & conditionals
+    src_stack Vec[SourceFrame]
+    macros Vec[MacroDef]
+    macro_map StrU32Map
+    macro_uid u64
+    if_stack Vec[u8]
+
+    // CFI / .eh_frame state
+    cfi_fdes Vec[CfiFde]
+    cfi_insns Vec[CfiInsn]
+    cfi_escapes Buf
+    cfi_active bool
 }
 
 thread var ac handle[As] = null

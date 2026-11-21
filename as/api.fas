@@ -42,6 +42,7 @@ fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexe
     as_init_sections()
     try as_parse_all()
     try as_layout_and_relax()
+    try as_emit_eh_frame()
 }
 
 fn as_assemble(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, out handle[AsResult]) bool {
