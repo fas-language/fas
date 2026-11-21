@@ -96,13 +96,13 @@ let rec unresolved_vector_elements expression =
       unresolved_vector_elements yes && unresolved_vector_elements no
   | _ -> false
 
-let rec is_if_operand = function
-  | Ast.Ternary _ -> true
-  | Ast.Parenthesized (expression, _) -> is_if_operand expression
+let rec is_typed_if_operand = function
+  | Ast.Ternary _ as e -> Option.is_none (unresolved_shape_of e)
+  | Ast.Parenthesized (expression, _) -> is_typed_if_operand expression
   | _ -> false
 
 let operand_type_hint operation expected left right =
-  if is_if_operand left || is_if_operand right then None
+  if is_typed_if_operand left || is_typed_if_operand right then None
   else
     match operation with
     | Ast.Add | Ast.Sub -> (
@@ -118,7 +118,7 @@ let operand_type_hint operation expected left right =
     | Ast.Shl | Ast.Shr -> None
 
 let contextual_peer_type operation peer operand =
-  if is_if_operand operand then None
+  if is_typed_if_operand operand then None
   else
     match (peer, unresolved_shape_of operand, operation) with
     | Hir.Addr, Some Unresolved_null, (Ast.Eq | Ast.Ne) -> Some Hir.Addr
@@ -787,7 +787,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
       let* t, v =
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
           ~globals ?resolve consts
-          (if is_if_operand e then None else expected)
+          (if is_typed_if_operand e then None else expected)
           ~check_only ~validate_dead ~allow_widen:false e
       in
       if is_float t then
@@ -801,7 +801,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
       let* t, v =
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
           ~globals ?resolve consts
-          (if is_if_operand e then None else expected)
+          (if is_typed_if_operand e then None else expected)
           ~check_only ~validate_dead ~allow_widen:false e
       in
       if not (is_int t) then error s "bitwise not requires an integer"
@@ -850,7 +850,7 @@ and const_expr_inner ?(structs = []) ?(named_types = []) ?(generic_structs = [])
       let* lt, lv =
         const_expr ~structs ~named_types ~generic_structs ~arrays ~array_lengths
           ~globals ?resolve consts
-          (if is_if_operand l then None
+          (if is_typed_if_operand l then None
            else match expected with Some (Hir.Int _) -> expected | _ -> None)
           ~check_only ~validate_dead ~allow_widen:false l
       in

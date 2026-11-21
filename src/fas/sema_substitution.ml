@@ -982,8 +982,27 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         | _ -> None)
       program.items
   in
+  let call_return_type callee =
+    match find_by_name specializations Function_specialization callee with
+    | Some
+        {
+          payload = Function_payload { item = Ast.Func { ret; _ }; substitutions; _ };
+          _;
+        } ->
+        Some (substitute_field_type substitutions ret)
+    | _ ->
+        List.find_map
+          (function
+            | Ast.Func { name; generic_params = []; ret; _ } when name = callee ->
+                Some ret
+            | _ -> None)
+          program.items
+  in
   let rec source_place_type = function
     | Ast.Parenthesized (expression, _) -> source_place_type expression
+    | Ast.Handle_from_addr (ty, _, _) -> Some (Ast.Handle ty)
+    | Ast.Cast (_, ty, _, _) -> Some ty
+    | Ast.Call (Ast.Ident (callee, _), _, _) -> call_return_type callee
     | Ast.Ident (name, _)
       when String_set.mem name !local_values || List.mem_assoc name !inference_types ->
         Option.join (List.assoc_opt name !inference_types)

@@ -278,9 +278,13 @@ let desugar (program : Ast.program) =
       let instances = Hashtbl.create 16 and by_name = Hashtbl.create 16 in
       let queue = Queue.create () in
       let globals = Hashtbl.create 16 in
+      let fn_returns = Hashtbl.create 16 in
       List.iter
         (function
-          | Ast.Global { name; ty; _ } -> Hashtbl.replace globals name ty | _ -> ())
+          | Ast.Global { name; ty; _ } -> Hashtbl.replace globals name ty
+          | Ast.Func { name; generic_params = []; ret; _ } ->
+              Hashtbl.replace fn_returns name ret
+          | _ -> ())
         program.Ast.items;
       let needs_arguments name span =
         let t = Option.get (template name) in
@@ -640,6 +644,10 @@ let desugar (program : Ast.program) =
         | Ast.Addr_of (e, _) -> Option.map (fun t -> Ast.Handle t) (expr_ty ctx e)
         | Ast.Handle_from_addr (t, _, _) -> Some (Ast.Handle t)
         | Ast.Cast (_, t, _, _) -> Some t
+        | Ast.Call (Ast.Ident (n, _), _, _) ->
+            Option.map
+              (rw_ty { owner = []; scope = []; checks = []; in_function = false })
+              (Hashtbl.find_opt fn_returns n)
         | _ -> None
       and rw_block ctx body =
         let saved = ctx.scope in

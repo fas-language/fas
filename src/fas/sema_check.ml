@@ -1468,13 +1468,15 @@ let rec unresolved_vector_elements c expression =
   | Ast.Binary ((Ast.Shl | Ast.Shr), _, _, _) -> false
   | _ -> false
 
-let rec is_if_operand = function
-  | Ast.Ternary _ -> true
-  | Ast.Parenthesized (expression, _) -> is_if_operand expression
+let rec is_typed_if_operand c = function
+  | Ast.Ternary _ as e -> Option.is_none (unresolved_shape_of c e)
+  | Ast.Parenthesized (expression, _) -> is_typed_if_operand c expression
   | _ -> false
 
 let operand_type_hint c operation expected left right =
-  let expected = if is_if_operand left || is_if_operand right then None else expected in
+  let expected =
+    if is_typed_if_operand c left || is_typed_if_operand c right then None else expected
+  in
   match operation with
   | Ast.Add | Ast.Sub -> (
       match expected with Some Hir.Addr -> Some (Hir.Int Hir.U64) | e -> e)
@@ -1489,7 +1491,7 @@ let operand_type_hint c operation expected left right =
   | Ast.Shl | Ast.Shr -> None
 
 let contextual_peer_type c operation peer operand =
-  if is_if_operand operand then None
+  if is_typed_if_operand c operand then None
   else
     match (peer, unresolved_shape_of c operand, operation) with
     | Hir.Addr, Some Unresolved_null, (Ast.Eq | Ast.Ne) -> Some Hir.Addr
@@ -2262,7 +2264,8 @@ and check_expr_inner ?destination (c : context) expected expression =
       let* te =
         check_expr ~allow_widen:false c
           (match (op, expected) with
-          | (Ast.Neg | Ast.Bit_not), _ -> if is_if_operand e then None else expected
+          | (Ast.Neg | Ast.Bit_not), _ ->
+              if is_typed_if_operand c e then None else expected
           | Ast.Not, Some (Hir.Vec (_, Hir.Bool)) -> expected
           | Ast.Not, _ -> None)
           e
@@ -2363,7 +2366,7 @@ and check_expr_inner ?destination (c : context) expected expression =
       else if op = Ast.Shl || op = Ast.Shr then
         let* a =
           check_expr ~allow_widen:false c
-            (if is_if_operand l then None
+            (if is_typed_if_operand c l then None
              else match expected with Some (Hir.Int _) -> expected | _ -> None)
             l
         in
@@ -6231,7 +6234,7 @@ and check_stmt (c : context) = function
       in
       let* v =
         check_expr c
-          (if is_shift || is_addr_step || is_if_operand e then None else Some et)
+          (if is_shift || is_addr_step || is_typed_if_operand c e then None else Some et)
           e
       in
       let* () =
