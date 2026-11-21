@@ -1,0 +1,42 @@
+// fcc: a freestanding C23 compiler front end.
+use "../lib/core.fas"
+use "token.fas"
+use "unicode.fas"
+use "lex.fas"
+
+fn lex_cli(n handle[CNames]) void fails {
+    input Buf = {}
+    output Buf = {}
+    f CFile = {}
+    l Lexer = {}
+    l.file = &f
+    l.flags = F_BOL
+    l.path = cc_intern(n, bytes_c(os_arg(1)))
+    try file_read(os_arg(1), 1073741824, &input)
+    data Bytes = buf_bytes(&input)
+    buf_zeros(&input, 8)
+    data.p = input.p
+    splice_source(&f, data, n.gnu)
+    while true {
+        t Token = try lex_next(n, &l, false)
+        if t.kind == TK_EOF { break }
+        if t.kind == TK_NL { buf_u8(&output, 10); continue }
+        if (t.flags & F_BOL) == 0 { buf_u8(&output, 32) }
+        buf_append(&output, cc_spelling(n, t))
+    }
+    try buf_write(&output, STDOUT)
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    if argc != 2 { return 1 }
+    region Region = {}
+    region_switch(&region)
+    defer { region_switch(null); region_dispose(&region) }
+    names CNames = {}
+    defer { arena_free(&names.data) }
+    names.gnu = true
+    cc_intern(&names, bytes_empty())
+    lex_cli(&names) catch { return 1 }
+    return 0
+}

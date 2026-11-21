@@ -1,0 +1,98 @@
+// Compact preprocessing tokens. Payloads name immutable spellings and ident
+// records have a macro slot. Location and hide-set indices are TU-local.
+const TK_EOF u8 = 0
+const TK_IDENT u8 = 1
+const TK_NUM u8 = 2
+const TK_STR u8 = 3
+const TK_CHAR u8 = 4
+const TK_PUNCT u8 = 5
+const TK_NL u8 = 6
+const TK_HEADER u8 = 7
+const TK_PRAGMA u8 = 8
+const TK_PLACE u8 = 9
+
+const F_SPACE u8 = 1
+const F_BOL u8 = 2
+const F_NOEXPAND u8 = 4
+const F_SYSTEM u8 = 8
+
+value struct Token {
+    kind u8
+    flags u8
+    reserved u16
+    loc u32
+    payload u32
+    hide u32
+}
+
+fn cc_token(kind u8, flags u8, loc u32, payload u32) Token {
+    return {kind, flags, 0, loc, payload, 0}
+}
+
+value struct CLoc {
+    file u32
+    line u32
+    column u32
+    level u32
+}
+
+struct CNames {
+    data Arena
+    index Map[Bytes, u32, bytes_hash, bytes_eq]
+    spellings Vec[Bytes]
+    identifiers Vec[u32]  // normalized spelling id for identifier tokens
+    macros Vec[addr]       // replacement indexed by normalized spelling id
+    locations Vec[CLoc]
+    gnu bool
+}
+
+fn cc_intern(n handle[CNames], spelling Bytes) u32 {
+    index handle[Map[Bytes, u32, bytes_hash, bytes_eq]] = &n.index
+    id u32 = map_get(index, spelling) catch {
+        fresh u32 = trunc[u32](n.spellings.n)
+        s Bytes = bytes(arena_dup(&n.data, spelling.p, spelling.n), spelling.n)
+        vec_push[Bytes](&n.spellings, s)
+        vec_push[u32](&n.identifiers, fresh)
+        vec_push[addr](&n.macros, null)
+        map_put(index, s, fresh)
+        return fresh
+    }
+    return id
+}
+
+fn cc_name(n handle[CNames], id u32) Bytes {
+    return vec_get[Bytes](&n.spellings, zext[usize](id))
+}
+
+fn cc_spelling(n handle[CNames], t Token) Bytes { return cc_name(n, t.payload) }
+
+fn cc_ident(n handle[CNames], t Token) u32 { return n.identifiers.p[u32, zext[usize](t.payload)] }
+
+fn cc_is(n handle[CNames], t Token, word addr) bool {
+    return bytes_eq_c(cc_spelling(n, t), word)
+}
+
+fn cc_diag(n handle[CNames], loc u32, label addr, message Bytes) void {
+    out Buf = {}
+    a handle[Buf] = &out
+    if loc < trunc[u32](n.locations.n) {
+        pos CLoc = vec_get[CLoc](&n.locations, zext[usize](loc))
+        buf_append(a, cc_name(n, pos.file))
+        buf_u8(a, 58)
+        buf_dec_u64(a, zext[u64](pos.line))
+        buf_u8(a, 58)
+        buf_dec_u64(a, zext[u64](pos.column))
+        buf_str(a, c": ")
+    }
+    buf_str(a, label)
+    buf_append(a, message)
+    buf_u8(a, 10)
+    buf_write(a, STDERR) catch {}
+}
+
+error CError
+
+fn cc_error(n handle[CNames], loc u32, message addr) void fails {
+    cc_diag(n, loc, c"error: ", bytes_c(message))
+    fail CError
+}
