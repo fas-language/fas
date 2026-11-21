@@ -351,6 +351,32 @@ fn parse_align_directive(is_p2 bool) void fails {
     emit_align(align, fill, has_fill, max_skip)
 }
 
+fn b64_val(c u8) i32 {
+    if c >= 65 && c <= 90 { return zext[i32](c - 65) }
+    if c >= 97 && c <= 122 { return zext[i32](c - 71) }
+    if c >= 48 && c <= 57 { return zext[i32](c + 4) }
+    if c == 43 { return 62 }
+    if c == 47 { return 63 }
+    return -1
+}
+
+fn emit_base64(s Bytes) void fails {
+    acc u32 = 0
+    bits u32 = 0
+    for i u64 in 0..s.n {
+        c u8 = s.p[u8, i]
+        if c == 61 { break }
+        v i32 = b64_val(c)
+        if v < 0 { continue }
+        acc = (acc << 6) | bitcast[u32](v)
+        bits += 6
+        if bits >= 8 {
+            bits -= 8
+            emit_u8(trunc[u8]((acc >> bits) & 0xff))
+        }
+    }
+}
+
 fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".text") {
         sid u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
@@ -394,7 +420,9 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".local") {
         while true {
             name Bytes = try parse_ident()
-            sym_at(sym_get_or_create(name)).binding = STB_LOCAL
+            s handle[Symbol] = sym_at(sym_get_or_create(name))
+            s.binding = STB_LOCAL
+            s.explicit_local = true
             skip_hspace()
             if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
             break
@@ -577,6 +605,12 @@ fn parse_directive(dir Bytes) void fails {
         ac.cur_sec = prev
         return
     }
+    if bytes_is(dir, c".base64") {
+        b Buf = {}
+        try parse_string_lit(&b)
+        try emit_base64(buf_bytes(&b))
+        return
+    }
     if bytes_is(dir, c".ascii") || bytes_is(dir, c".asciz") || bytes_is(dir, c".string") {
         nul bool = !bytes_is(dir, c".ascii")
         while true {
@@ -636,7 +670,7 @@ fn parse_directive(dir Bytes) void fails {
             al = bitcast[u64](try eval_const_now(try parse_expr()))
         }
         s handle[Symbol] = sym_at(sym_get_or_create(name))
-        if is_local {
+        if is_local || s.explicit_local {
             // Place in .bss
             prev u32 = ac.cur_sec
             bss u32 = sec_get_or_create(bytes_c(c".bss"), SHT_NOBITS, SHF_ALLOC | SHF_WRITE, 0, bytes_empty(), false)
@@ -644,6 +678,7 @@ fn parse_directive(dir Bytes) void fails {
             if al > 1 { emit_align(trunc[u32](al), 0, false, 0) }
             try as_define_label(sym_get_or_create(name))
             s.binding = STB_LOCAL
+            s.stype = STT_OBJECT
             s.size = sz
             emit_fill(expr_const(bitcast[i64](sz)), 1, 0)
             ac.cur_sec = prev
@@ -744,7 +779,7 @@ fn as_parse_all() void fails {
             continue
         }
 
-        // Instruction prefixes: lock / rep / repe / repz / repne / repnz
+        // Instruction prefixes: lock / rep / repe / repz / repne / repnz / notrack
         prefix_lock bool = false
         prefix_rep u8 = 0
         while true {
@@ -754,6 +789,8 @@ fn as_parse_all() void fails {
                 prefix_rep = 0xf3
             } else if bytes_is(tok, c"repne") || bytes_is(tok, c"repnz") {
                 prefix_rep = 0xf2
+            } else if bytes_is(tok, c"notrack") {
+                emit_u8(0x3e)
             } else {
                 break
             }

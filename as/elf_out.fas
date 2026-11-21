@@ -90,11 +90,11 @@ fn as_emit_elf(out handle[Buf]) void {
         elf_sym(&symtab, 0, STB_LOCAL, STT_SECTION, STV_DEFAULT, trunc[u16](s.elf_idx), 0, 0)
     }
 
-    // Emit local symbols (skip .L* and synthetic numeric local labels unless referenced by reloc)
+    // Emit local symbols (skip undefined symbols, and skip .L* / numeric local labels unless referenced)
     for i u64 in 0..ac.syms.n {
         sym handle[Symbol] = vec_at(&ac.syms, i)
         if sym.binding != STB_LOCAL { continue }
-        if !sym.defined && sym_in_reloc.p[u8, i] == 0 && !sym.is_common { continue }
+        if !sym.defined && !sym.is_common { continue }
         is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
         if (sym.is_local_label || is_dot_l) && sym_in_reloc.p[u8, i] == 0 { continue }
         sym.elf_idx = trunc[u32](symtab.n / 24)

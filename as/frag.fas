@@ -352,6 +352,10 @@ fn patch_le(out handle[Buf], off u64, size u8, val u64) void {
     }
 }
 
+fn rela_less(a handle[Rela], b handle[Rela]) bool {
+    return a.offset < b.offset
+}
+
 fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64) void {
     r handle[Rela] = vec_add(&s.relas)
     r.offset = off
@@ -413,7 +417,8 @@ fn as_layout_and_relax() void fails {
                 can_short bool = false
                 if ev.kind == EV_SYM && ev.variant == VAR_NONE {
                     tsec u32 = eval_sym_sec(ev.sym_a)
-                    if tsec == trunc[u32](si) {
+                    is_loc bool = (ev.sym_a & 0x80000000) != 0 || sym_at(ev.sym_a).binding == STB_LOCAL
+                    if is_loc && tsec == trunc[u32](si) {
                         taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
                         disp i64 = taddr - bitcast[i64](f.addr + 2)
                         if disp >= -128 && disp <= 127 {
@@ -462,8 +467,9 @@ fn as_layout_and_relax() void fails {
                         }
                         rel_off u64 = s.out.n
                         buf_u32le(&s.out, 0)
-                        // Resolve directly if same section & no variant, else emit PLT32/PC32 reloc
-                        if ev.kind == EV_SYM && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == trunc[u32](si) {
+                        // Resolve directly if local & same section & no variant, else emit PLT32/PC32 reloc
+                        is_loc bool = ev.kind == EV_SYM && ((ev.sym_a & 0x80000000) != 0 || sym_at(ev.sym_a).binding == STB_LOCAL)
+                        if is_loc && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == trunc[u32](si) {
                             taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
                             disp i64 = taddr - bitcast[i64](rel_off + 4)
                             patch_le(&s.out, rel_off, 4, bitcast[u64](disp))
@@ -523,15 +529,10 @@ fn as_layout_and_relax() void fails {
                 }
             } else if ev.kind == EV_SYM {
                 is_pc bool = fx.kind == FIX_PC || fx.kind == FIX_PLT || fx.kind == FIX_GOTPCRELX || fx.kind == FIX_REX_GOTPCRELX
-                // Same-section PC-relative without variant: resolve directly unless it's a call to a global symbol
+                // Same-section PC-relative without variant: resolve directly only for local symbols
                 can_resolve_pc bool = false
                 if is_pc && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == trunc[u32](si) {
-                    if fx.kind == FIX_PLT {
-                        // llvm-mc resolves `call local_sym` directly, emits PLT32 for global/weak
-                        if (ev.sym_a & 0x80000000) != 0 || sym_at(ev.sym_a).binding == STB_LOCAL {
-                            can_resolve_pc = true
-                        }
-                    } else {
+                    if (ev.sym_a & 0x80000000) != 0 || sym_at(ev.sym_a).binding == STB_LOCAL {
                         can_resolve_pc = true
                     }
                 }
@@ -552,11 +553,12 @@ fn as_layout_and_relax() void fails {
                     try as_err_line(fx.line, c"cannot emit relocation against section-local dot")
                 }
             } else if ev.kind == EV_DIFF {
-                // sym_a - dot_in_this_section -> PC-relative relocation!
-                if (ev.sym_b & 0x80000000) != 0 && (ev.sym_b & 0x7fffffff) == trunc[u32](si) && (ev.sym_a & 0x80000000) == 0 {
+                // sym_a - sym_b (or sym_a - dot) where sym_b is defined in this section -> PC-relative relocation!
+                sb_sec u32 = eval_sym_sec(ev.sym_b)
+                if sb_sec == trunc[u32](si) && (ev.sym_a & 0x80000000) == 0 {
                     rtype u32 = if fx.size == 8 { R_X86_64_PC64 } else { R_X86_64_PC32 }
-                    // ev.val already has (sym_a_addend - dot_offset); convert to relative to `off`
-                    addend i64 = ev.val + bitcast[i64](off)
+                    sb_addr i64 = eval_sym_addr(ev.sym_b)
+                    addend i64 = ev.val - sb_addr + bitcast[i64](off)
                     add_rela(s, off, ev.sym_a, rtype, addend)
                 } else {
                     try as_err_line(fx.line, c"cannot evaluate cross-section symbol difference")
@@ -564,6 +566,9 @@ fn as_layout_and_relax() void fails {
             } else {
                 try as_err_line(fx.line, c"unresolved expression")
             }
+        }
+        if s.relas.n > 1 {
+            sort_vec_by[Rela, rela_less](&s.relas)
         }
     }
 
@@ -582,6 +587,8 @@ fn as_layout_and_relax() void fails {
                 sym.defined = target.defined
                 sym.sec_id = target.sec_id
                 sym.value = target.value + bitcast[u64](ev.val)
+                if sym.stype == STT_NOTYPE { sym.stype = target.stype }
+                if sym.size == 0 && sym.size_expr == AS_NONE { sym.size = target.size }
             }
         }
         if sym.size_expr != AS_NONE {

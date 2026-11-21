@@ -470,8 +470,21 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
     if e.kind == EX_SYM {
         s handle[Symbol] = sym_at(e.lhs)
         if s.is_equ && s.equ_expr != AS_NONE {
-            eval_expr_depth(s.equ_expr, laid_out, depth + 1, out)
-            if out.kind == EV_SYM && e.variant != VAR_NONE { out.variant = e.variant }
+            ev EvalVal = {}
+            eval_expr_depth(s.equ_expr, laid_out, depth + 1, &ev)
+            // Keep global/weak symbol aliases intact so relocations reference the alias itself
+            if ev.kind == EV_SYM && s.binding != STB_LOCAL {
+                out.kind = EV_SYM
+                out.variant = e.variant
+                out.sym_a = e.lhs
+                out.val = 0
+                return
+            }
+            out.kind = ev.kind
+            out.variant = if ev.kind == EV_SYM && e.variant != VAR_NONE { e.variant } else { ev.variant }
+            out.sym_a = ev.sym_a
+            out.sym_b = ev.sym_b
+            out.val = ev.val
             return
         }
         out.kind = EV_SYM

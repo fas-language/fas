@@ -492,6 +492,30 @@ ZERO_OP_3 = [
 for m, op, ext, fl in ZERO_OP_3:
     add(m, [], MAP_0F, op, ext, fl | EF_FIXED3)
 
+# Intel CET shadow-stack instructions
+add('rdsspd', [OT_R32], MAP_0F, 0x1e, 1, EF_F3 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+add('rdsspq', [OT_R64], MAP_0F, 0x1e, 1, EF_F3 | EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+add('incsspd', [OT_R32], MAP_0F, 0xae, 5, EF_F3 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+add('incsspq', [OT_R64], MAP_0F, 0xae, 5, EF_F3 | EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+
+# Optional explicit-operand forms of string instructions (e.g. movsq (%rsi), %es:(%rdi))
+for m, op, fl in [
+    ('movsb', 0xa4, 0), ('movsw', 0xa5, EF_66), ('movsl', 0xa5, 0), ('movsq', 0xa5, EF_REXW),
+    ('cmpsb', 0xa6, 0), ('cmpsw', 0xa7, EF_66), ('cmpsl', 0xa7, 0), ('cmpsq', 0xa7, EF_REXW),
+]:
+    add(m, [OT_M, OT_M], MAP_1, op, 0, fl)
+for m, op, fl, acc in [
+    ('stosb', 0xaa, 0, OT_AL), ('stosw', 0xab, EF_66, OT_AX), ('stosl', 0xab, 0, OT_EAX), ('stosq', 0xab, EF_REXW, OT_RAX),
+]:
+    add(m, [acc, OT_M], MAP_1, op, 0, fl)
+    add(m, [OT_M], MAP_1, op, 0, fl)
+for m, op, fl, acc in [
+    ('lodsb', 0xac, 0, OT_AL), ('lodsw', 0xad, EF_66, OT_AX), ('lodsl', 0xad, 0, OT_EAX), ('lodsq', 0xad, EF_REXW, OT_RAX),
+    ('scasb', 0xae, 0, OT_AL), ('scasw', 0xaf, EF_66, OT_AX), ('scasl', 0xaf, 0, OT_EAX), ('scasq', 0xaf, EF_REXW, OT_RAX),
+]:
+    add(m, [OT_M, acc], MAP_1, op, 0, fl)
+    add(m, [OT_M], MAP_1, op, 0, fl)
+
 # Memory-operand system instructions
 add('clflush', [OT_M], MAP_0F, 0xae, 7, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 add('clflushopt', [OT_M], MAP_0F, 0xae, 7, EF_66 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
@@ -611,10 +635,28 @@ add('fcomi', [OT_ST, OT_ST0], MAP_1, 0xdb, 0xf0, EF_PLUS_ST | EF_OP0_RM)
 add('fcomi', [OT_ST], MAP_1, 0xdb, 0xf0, EF_PLUS_ST | EF_OP0_RM)
 add('fcomip', [OT_ST, OT_ST0], MAP_1, 0xdf, 0xf0, EF_PLUS_ST | EF_OP0_RM)
 add('fcomip', [OT_ST], MAP_1, 0xdf, 0xf0, EF_PLUS_ST | EF_OP0_RM)
+add_alias('fcomip', 'fcompi')
 add('fucomi', [OT_ST, OT_ST0], MAP_1, 0xdb, 0xe8, EF_PLUS_ST | EF_OP0_RM)
 add('fucomi', [OT_ST], MAP_1, 0xdb, 0xe8, EF_PLUS_ST | EF_OP0_RM)
 add('fucomip', [OT_ST, OT_ST0], MAP_1, 0xdf, 0xe8, EF_PLUS_ST | EF_OP0_RM)
 add('fucomip', [OT_ST], MAP_1, 0xdf, 0xe8, EF_PLUS_ST | EF_OP0_RM)
+add_alias('fucomip', 'fucompi')
+
+# x87 integer-memory arithmetic (fiadd/fimul/ficom/ficomp/fisub/fisubr/fidiv/fidivr)
+for name, mext in [
+    ('fiadd', 0), ('fimul', 1), ('ficom', 2), ('ficomp', 3),
+    ('fisub', 4), ('fisubr', 5), ('fidiv', 6), ('fidivr', 7),
+]:
+    add(name + 's', [OT_M], MAP_1, 0xde, mext, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+    add(name + 'l', [OT_M], MAP_1, 0xda, mext, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+
+# x87 conditional moves (fcmov*)
+for name, b1, b2 in [
+    ('fcmovb', 0xda, 0xc0), ('fcmove', 0xda, 0xc8), ('fcmovbe', 0xda, 0xd0), ('fcmovu', 0xda, 0xd8),
+    ('fcmovnb', 0xdb, 0xc0), ('fcmovne', 0xdb, 0xc8), ('fcmovnbe', 0xdb, 0xd0), ('fcmovnu', 0xdb, 0xd8),
+]:
+    add(name, [OT_ST, OT_ST0], MAP_1, b1, b2, EF_PLUS_ST | EF_OP0_RM)
+    add(name, [OT_ST], MAP_1, b1, b2, EF_PLUS_ST | EF_OP0_RM)
 
 # ==============================================================================
 # Milestone 2: BMI1/2, ADX, LZCNT/TZCNT/POPCNT, MOVBE, RDRAND/RDSEED,
@@ -827,11 +869,21 @@ add_sse_avx_un('ucomisd', MAP_0F, 0x2e, EF_66, has_256=False)
 add_sse_avx_un('comiss', MAP_0F, 0x2f, 0, has_256=False)
 add_sse_avx_un('comisd', MAP_0F, 0x2f, EF_66, has_256=False)
 
-# cmpps/pd/ss/sd + shufps/pd + roundps/pd/ss/sd + dpps/pd + blendps/pd
+# cmpps/pd/ss/sd + predicate aliases (cmpeq*, cmplt*, cmple*, cmpunord*, cmpneq*, cmpnlt*, cmpnle*, cmpord*)
 add_sse_avx_bin_imm('cmpps', MAP_0F, 0xc2, 0)
 add_sse_avx_bin_imm('cmppd', MAP_0F, 0xc2, EF_66)
 add_sse_avx_bin_imm('cmpss', MAP_0F, 0xc2, EF_F3, has_256=False, scalar=True)
 add_sse_avx_bin_imm('cmpsd', MAP_0F, 0xc2, EF_F2, has_256=False, scalar=True)
+for pred_name, pred_imm in [
+    ('eq', 0), ('lt', 1), ('le', 2), ('unord', 3),
+    ('neq', 4), ('nlt', 5), ('nle', 6), ('ord', 7),
+]:
+    for sfx, pfx, has_256 in [('ps', 0, True), ('pd', EF_66, True), ('ss', EF_F3, False), ('sd', EF_F2, False)]:
+        m = 'cmp' + pred_name + sfx
+        add(m, [OT_XM, OT_XMM], MAP_0F, 0xc2, pred_imm, pfx | EF_MODRM | EF_OP0_RM | EF_OP1_REG | EF_IMM_U8)
+        add('v' + m, [OT_XM, OT_XMM, OT_XMM], MAP_0F, 0xc2, pred_imm, EF_VEX | pfx | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG | EF_IMM_U8)
+        if has_256:
+            add('v' + m, [OT_YM, OT_YMM, OT_YMM], MAP_0F, 0xc2, pred_imm, EF_VEX | EF_VEX256 | pfx | EF_MODRM | EF_OP0_RM | EF_VEX_VVVV_1 | EF_OP2_REG | EF_IMM_U8)
 add_sse_avx_bin_imm('shufps', MAP_0F, 0xc6, 0)
 add_sse_avx_bin_imm('shufpd', MAP_0F, 0xc6, EF_66)
 add_sse_avx_un_imm('roundps', MAP_0F3A, 0x08, EF_66)

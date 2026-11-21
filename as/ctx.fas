@@ -263,6 +263,7 @@ struct Symbol {
     is_equ bool         // defined via .set/.equ/=
     is_common bool
     is_local_label bool // synthetic numeric local label (omitted from .symtab unless needed)
+    explicit_local bool // marked with .local (makes .comm place in .bss)
     referenced bool
     sec_id u32          // section index, or AS_NONE for undef/abs/common
     frag_id u32         // fragment index where label was defined

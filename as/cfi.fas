@@ -482,8 +482,9 @@ fn as_emit_eh_frame() void fails {
             }
         }
 
-        // Pad FDE to 8-byte boundary
-        while (eh.out.n & 7) != 0 { buf_u8(&eh.out, 0) }
+        // Non-last FDEs pad to 4-byte boundary; last FDE pads to 8-byte boundary (matching llvm-mc-22)
+        mask u64 = if i + 1 == ac.cfi_fdes.n { 7 } else { 3 }
+        while (eh.out.n & mask) != 0 { buf_u8(&eh.out, 0) }
         rec_len u64 = eh.out.n - fde_off - 4
         patch_le(&eh.out, fde_off, 4, rec_len)
     }

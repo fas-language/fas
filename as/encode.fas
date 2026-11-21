@@ -381,17 +381,21 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
             // Mask register encoded in bits [7:4] of imm8 (AT&T op0)
             mo handle[Operand] = handle_from_addr(ops)
             emit_u8((reg_num(mo.reg) & 0xf) << 4)
-        } else if imm_sz != 0 && imm_op != null {
-            ev EvalVal = {}
-            eval_expr(imm_op.expr, false, &ev)
-            if ev.kind == EV_CONST {
-                emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff))
+        } else if imm_sz != 0 {
+            if imm_op == null {
+                emit_u8(d.ext)
             } else {
-                fid u32 = frag_ensure_data()
-                f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-                foff u32 = f.data_len
-                emit_u8(0)
-                emit_fixup(fid, foff, 1, FIX_ABS, 0, 1, imm_op.expr)
+                ev EvalVal = {}
+                eval_expr(imm_op.expr, false, &ev)
+                if ev.kind == EV_CONST {
+                    emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff))
+                } else {
+                    fid u32 = frag_ensure_data()
+                    f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+                    foff u32 = f.data_len
+                    emit_u8(0)
+                    emit_fixup(fid, foff, 1, FIX_ABS, 0, 1, imm_op.expr)
+                }
             }
         }
         return
@@ -485,21 +489,25 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
     }
 
     // Emit immediate
-    if imm_sz != 0 && imm_op != null {
-        ev EvalVal = {}
-        eval_expr(imm_op.expr, false, &ev)
-        if ev.kind == EV_CONST {
-            if imm_sz == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
-            else if imm_sz == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
-            else if imm_sz == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
-            else { emit_u64(bitcast[u64](ev.val)) }
+    if imm_sz != 0 {
+        if imm_op == null {
+            emit_u8(d.ext)
         } else {
-            fid u32 = frag_ensure_data()
-            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-            foff u32 = f.data_len
-            for k u32 in 0..imm_sz { emit_u8(0) }
-            fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
-            emit_fixup(fid, foff, trunc[u8](imm_sz), fkind, 0, imm_sz, imm_op.expr)
+            ev EvalVal = {}
+            eval_expr(imm_op.expr, false, &ev)
+            if ev.kind == EV_CONST {
+                if imm_sz == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
+                else if imm_sz == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
+                else if imm_sz == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
+                else { emit_u64(bitcast[u64](ev.val)) }
+            } else {
+                fid u32 = frag_ensure_data()
+                f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+                foff u32 = f.data_len
+                for k u32 in 0..imm_sz { emit_u8(0) }
+                fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
+                emit_fixup(fid, foff, trunc[u8](imm_sz), fkind, 0, imm_sz, imm_op.expr)
+            }
         }
     }
 }
