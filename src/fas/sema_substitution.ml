@@ -1273,13 +1273,23 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           let checked = checked_type argument in
           match checked with Some _ as ty -> ty | None -> place)
     in
+    let rec unwrap_parens = function
+      | Ast.Parenthesized (e, _) -> unwrap_parens e
+      | e -> e
+    in
     let* () =
       List.fold_left2
         (fun result (parameter : Ast.param) argument ->
           let* () = result in
-          match actual_type argument with
-          | Some actual -> match_type argument parameter.ty actual
-          | None -> Ok ())
+          match (parameter.ty, unwrap_parens argument) with
+          | Ast.Handle p, Ast.Addr_of (inner, _) -> (
+              match actual_type inner with
+              | Some inner_ty -> match_type argument p inner_ty
+              | None -> Ok ())
+          | _ -> (
+              match actual_type argument with
+              | Some actual -> match_type argument parameter.ty actual
+              | None -> Ok ()))
         (Ok ()) params arguments
     in
     let literal_only parameter =

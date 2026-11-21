@@ -1140,11 +1140,9 @@ let imported_record_type c name =
     (function _, C_record_name (record, None) when record = name -> true | _ -> false)
     c.named_types
 
-let address_type_for_expected c expected place =
+let address_type_for_expected _c expected place =
   match (expected, Hir.expr_ty place) with
-  | Some (Hir.Handle record as ty), Hir.Struct actual
-    when record = actual && imported_record_type c record ->
-      ty
+  | Some (Hir.Handle record as ty), Hir.Struct actual when record = actual -> ty
   | _ -> Hir.Addr
 
 let rec rooted_in_constant c = function
@@ -4029,6 +4027,13 @@ and check_call_inner c expected fn args s =
                (Sema_types.diagnostic_ty_name target))
   | Ast.Ident (name, _) when Option.is_some (Names.float_math name) ->
       check_float_math c expected (Option.get (Names.float_math name)) name args s
+  | Ast.Ident ("handle_from_addr", name_span) -> (
+      match expected with
+      | Some (Hir.Handle target_name) ->
+          check_handle_from_addr c "handle_from_addr" target_name args s
+      | _ ->
+          error name_span
+            (Option.get (Names.missing_type_arguments_message "handle_from_addr")))
   | Ast.Ident (name, name_span)
     when Option.is_some (Names.missing_type_arguments_message name) ->
       error name_span (Option.get (Names.missing_type_arguments_message name))

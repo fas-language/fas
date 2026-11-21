@@ -141,7 +141,9 @@ let address_value c ty expression =
         with
         | Some value -> Some (name, span, value)
         | None -> None)
-    | Ast.Handle_from_addr (_, value, _) -> address_constant_read value
+    | Ast.Handle_from_addr (_, value, _)
+    | Ast.Call (Ast.Ident ("handle_from_addr", _), [ value ], _) ->
+        address_constant_read value
     | _ -> None
   in
   let address_constant_error (name, span, value) =
