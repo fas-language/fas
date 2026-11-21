@@ -9,19 +9,16 @@ struct CopyEntry {
     pad u32
 }
 
-var copy_entries Vec[CopyEntry] = {}
-var copy_names U32Set = {}
 
 fn copy_has(id u32) bool {
-    if copy_entries.n == 0 { return false }
-    return map_has(&copy_names, id)
+    if ld.copy_entries.n == 0 { return false }
+    return map_has(&ld.copy_names, id)
 }
 
-var copy_sort_lib handle[ShLib] = null
 
 fn copy_loc_less(a u64, b u64) bool {
-    la handle[ShLoc] = sh_loc(copy_sort_lib, a)
-    lb handle[ShLoc] = sh_loc(copy_sort_lib, b)
+    la handle[ShLoc] = sh_loc(ld.copy_sort_lib, a)
+    lb handle[ShLoc] = sh_loc(ld.copy_sort_lib, b)
     if la.section != lb.section { return la.section < lb.section }
     return la.value < lb.value
 }
@@ -45,7 +42,7 @@ fn copy_compute_overlaps(source handle[ShLib]) addr {
     if n <= 1 { return flags }
     order addr = heap_alloc(n * 8)
     for i u64 in 0..n { order[u64, i] = i }
-    copy_sort_lib = source
+    ld.copy_sort_lib = source
     sort[u64, copy_loc_less](order, n)
     has_prev bool = false
     prev_idx u64 = 0
@@ -86,10 +83,10 @@ fn copy_compute_overlaps(source handle[ShLib]) addr {
 fn copy_prepare() void fails {
     c handle[Config] = config()
     if c.mode != MODE_DYNAMIC { return }
-    cn handle[U32Set] = &copy_names
+    cn handle[U32Set] = &ld.copy_names
     req Vec[u32] = {}
     rh handle[Vec[u32]] = &req
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nrel) {
             r handle[Rel] = rel(o, k)
@@ -122,12 +119,12 @@ fn copy_prepare() void fails {
     }
 
     // Per-library lazy overlap bitmaps
-    ov_cache addr = heap_alloc_zeroed(shlibs.n * sizeof[addr] + 8)
+    ov_cache addr = heap_alloc_zeroed(ld.shlibs.n * sizeof[addr] + 8)
     // Duplicate-identity check across copied symbols: (library << 32 | loc_idx)
     identities U64Set = {}
     idh handle[U64Set] = &identities
 
-    file u64 = nobj
+    file u64 = ld.nobj
     count u64 = rh.n
     o handle[Obj] = try new_object(c"<COPY storage>")
     o.nsec = trunc[u32](count + 1)
@@ -213,7 +210,7 @@ fn copy_prepare() void fails {
         set_res(id, file, sec_idx, 0)
         shref_add(key)
 
-        ent handle[CopyEntry] = vec_add(&copy_entries)
+        ent handle[CopyEntry] = vec_add(&ld.copy_entries)
         ent.key_id = id
         ent.file = trunc[u32](file)
         ent.symbol = trunc[u32](sec_idx)
@@ -224,7 +221,7 @@ fn copy_prepare() void fails {
     stat_add(ST_COPY_RELOCATIONS, count)
     stat_add(ST_COPY_STORAGE_BYTES, allocated)
 
-    for k u64 in 0..shlibs.n {
+    for k u64 in 0..ld.shlibs.n {
         if ov_cache[addr, k] != null { heap_free(ov_cache[addr, k]) }
     }
     heap_free(ov_cache)

@@ -53,9 +53,8 @@ struct Archive {
     ndeferred u64
 }
 
-var archives Vec[Archive] = {}
 
-fn archive(i u64) handle[Archive] { return vec_at(&archives, i) }
+fn archive(i u64) handle[Archive] { return vec_at(&ld.archives, i) }
 fn member(a handle[Archive], i u64) handle[Member] { return vec_at(&a.members, i) }
 
 fn is_archive_data(d Bytes) bool {
@@ -173,7 +172,7 @@ struct RawMember {
 
 // Archive.parse; `whole` is the input's --whole-archive
 fn archive_parse(path Bytes, data Bytes, whole bool) void fails {
-    a handle[Archive] = vec_add(&archives)
+    a handle[Archive] = vec_add(&ld.archives)
     a.whole = whole
     try archive_parse_into(a, path, data)
 }
@@ -432,11 +431,10 @@ fn ar_index_int(path Bytes, d addr, at u64, width u64, limit u64) u64 fails {
 
 // ---------- library search (Library_search.find) ----------
 
-var probes u64 = 0
 
 fn lib_exists(path Bytes) bool fails {
-    probes += 1
-    if probes > 1000000 { try die_c(c"library search exceeds 1000000 probes") }
+    ld.probes += 1
+    if ld.probes > 1000000 { try die_c(c"library search exceeds 1000000 probes") }
     if path.n > 65536 || bytes_contains(path, 0) { try die_c(c"invalid or oversized sysroot/search path") }
     if ld_vfs_has(path) { return true }
     p addr = cstr_dup(path)
@@ -614,7 +612,7 @@ fn archive_prefetch(a handle[Archive], first u64) void {
         }
     }
     if batch.n > 1 {
-        pool_for(pool, batch.n, 1, &member_parse_job, batch.p)
+        ld_pool_for(batch.n, 1, &member_parse_job, batch.p)
     } else if batch.n == 1 {
         member_parse(vec_get(&batch, 0))
     }
@@ -712,13 +710,13 @@ fn enqueue(a handle[Archive], id u32, cursor u64) void {
 
 // adds a parsed member: copies its Obj into the object table
 fn add_member(o handle[Obj]) void fails {
-    f u64 = nobj
+    f u64 = ld.nobj
     copy_into(obj(f), o)
     // Resolver.add_object: Symver.expand (a no-op for archive members,
     // already expanded) comes before the object limit
     symver_expand(obj(f)) catch err { try die_buf(&obj(f).msg) }
-    if nobj >= 65536 { try die_c(c"extracted object count exceeds 65536 limit") }
-    nobj += 1
+    if ld.nobj >= 65536 { try die_c(c"extracted object count exceeds 65536 limit") }
+    ld.nobj += 1
     check_supported(f)
     try add_object(f)
 }
@@ -741,7 +739,7 @@ fn extract(ai u64) void fails {
     // decisions. The index avoids scanning unrelated members.
     cursor u64 = 0
     words u64 = (nm + 63) / 64
-    for id u64 in 0..gsyms.n { enqueue(a, trunc[u32](id), cursor) }
+    for id u64 in 0..ld.gsyms.n { enqueue(a, trunc[u32](id), cursor) }
     while a.npending != 0 || a.ndeferred != 0 {
         if a.npending == 0 {
             t addr = a.pending
@@ -781,7 +779,7 @@ fn extract(ai u64) void fails {
             if provides { break }
         }
         if !provides { continue }
-        f u64 = nobj
+        f u64 = ld.nobj
         try add_member(o)
         member(a, index).loaded = true
         stat_add(ST_EXTRACTED_MEMBERS, 1)

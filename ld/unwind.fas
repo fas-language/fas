@@ -33,12 +33,8 @@ struct UObj {
     eh Buf              // the normalized .eh_frame sections, back to back
 }
 
-var uobjs addr = null
-var unorm_count u64 = 0
-var uframes Vec[Frame] = {}     // the frames of live code, in input order
-var unwind_file u64 = NONE64    // the <unwind header> object
 
-fn uobj(f u64) handle[UObj] { return handle_from_addr(uobjs + f * sizeof[UObj]) }
+fn uobj(f u64) handle[UObj] { return handle_from_addr(ld.uobjs + f * sizeof[UObj]) }
 
 // the bytes of a placed section (normalized .eh_frame sections live after
 // the object's data, as in the OCaml linker's appended data)
@@ -368,16 +364,16 @@ fn unwind_job(ctx addr, b u64, e u64, worker u32) void {
 }
 
 fn unwind_normalize() void fails {
-    unorm_count = nobj
-    uobjs = heap_alloc_zeroed(nobj * sizeof[UObj] + sizeof[UObj])
-    for f u64 in 0..nobj { lx(f).status = 0 }
-    pool_for(pool, nobj, 1, &unwind_job, null)
-    for f u64 in 0..nobj {
+    ld.unorm_count = ld.nobj
+    ld.uobjs = heap_alloc_zeroed(ld.nobj * sizeof[UObj] + sizeof[UObj])
+    for f u64 in 0..ld.nobj { lx(f).status = 0 }
+    ld_pool_for(ld.nobj, 1, &unwind_job, null)
+    for f u64 in 0..ld.nobj {
         if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
-    if stats_on {
+    if ld.stats_on {
         n u64 = 0
-        for f u64 in 0..nobj { n += uobj(f).frames.n }
+        for f u64 in 0..ld.nobj { n += uobj(f).frames.n }
         stat_add(ST_UNWIND_FDES, n)
     }
 }
@@ -410,18 +406,18 @@ fn unwind_active(fr handle[Frame]) bool fails {
 }
 
 fn unwind_prepare() void fails {
-    for f u64 in 0..unorm_count {
+    for f u64 in 0..ld.unorm_count {
         v handle[Vec[Frame]] = &uobj(f).frames
         for i u64 in 0..v.n {
             fr handle[Frame] = vec_at(v, i)
-            if try unwind_active(fr) { copy_into(vec_add(&uframes), fr) }
+            if try unwind_active(fr) { copy_into(vec_add(&ld.uframes), fr) }
         }
     }
-    if uframes.n == 0 { return }
-    size u64 = 12 + uframes.n * 8
-    file u64 = nobj
+    if ld.uframes.n == 0 { return }
+    size u64 = 12 + ld.uframes.n * 8
+    file u64 = ld.nobj
     o handle[Obj] = try new_object(c"<unwind header>")
-    stat_add(ST_INDEXED_UNWIND_FDES, uframes.n)
+    stat_add(ST_INDEXED_UNWIND_FDES, ld.uframes.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)
@@ -446,7 +442,7 @@ fn unwind_prepare() void fails {
     l.kept[u8, 1] = 1
     l.alias = heap_alloc_zeroed(16)
     l.gotref = heap_alloc_zeroed(4)
-    unwind_file = file
+    ld.unwind_file = file
 }
 
 // ---------- emit ----------
@@ -555,34 +551,34 @@ fn unwind_relative(at u64, value u64, place u64) void fails {
         bx(m, x)
         try die()
     }
-    wr32(image, at, x)
+    wr32(ld.image, at, x)
 }
 
 const EH_HDR_PREFIX arr[4, u8] = b"\x01\x1b\x03\x3b"
 
 fn unwind_emit() void fails {
-    if unwind_file == NONE64 { return }
-    hp handle[Place] = try get_placement(unwind_file, 1)
-    n u64 = uframes.n
+    if ld.unwind_file == NONE64 { return }
+    hp handle[Place] = try get_placement(ld.unwind_file, 1)
+    n u64 = ld.uframes.n
     ents addr = heap_alloc(n * 16 + 16)
     for i u64 in 0..n {
-        fr handle[Frame] = vec_at(&uframes, i)
+        fr handle[Frame] = vec_at(&ld.uframes, i)
         p handle[Place] = try get_placement(zext[u64](fr.file), zext[u64](fr.section))
         field u64 = p.offset + fr.initial
         raw u64 = 0
         if fr.encoding == 0x1b {
-            raw = rd32(image, field)
+            raw = rd32(ld.image, field)
             if raw >= 0x80000000 { raw = raw | 0xffffffff00000000 }
         } else {
-            raw = rd64(image, field)
+            raw = rd64(ld.image, field)
         }
         address u64 = if fr.encoding == 0 { raw } else { raw + p.address + fr.initial }
         hs_set(ents, i, address, p.address + fr.offset)
     }
     ocaml_heap_sort(ents, n)
-    mem_copy(image + hp.offset, &EH_HDR_PREFIX, 4)
+    mem_copy(ld.image + hp.offset, &EH_HDR_PREFIX, 4)
     first u64 = OCAML_MAX_INT
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             if !bytes_is(sec(o, k).name, c".eh_frame") || place(f, k).valid == 0 { continue }
@@ -591,7 +587,7 @@ fn unwind_emit() void fails {
         }
     }
     try unwind_relative(hp.offset + 4, first, hp.address + 4)
-    wr32(image, hp.offset + 8, n)
+    wr32(ld.image, hp.offset + 8, n)
     for i u64 in 0..n {
         try unwind_relative(hp.offset + 12 + i * 8, ents[u64, i * 2], hp.address)
         try unwind_relative(hp.offset + 16 + i * 8, ents[u64, i * 2 + 1], hp.address)

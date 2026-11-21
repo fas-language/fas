@@ -33,6 +33,7 @@ use "../map.fas"
 use "../stats.fas"
 use "../partial.fas"
 use "../api.fas"
+use "../ctx.fas"
 
 struct DefSym {
     name Bytes
@@ -87,7 +88,10 @@ fn main(argc i32, argv addr) i32 {
 }
 
 fn dump_dependencies() void fails {
-    reading = false
+    ctx Ld = {}
+    ld_init(&ctx)
+    ld = &ctx
+    ld.reading = false
     c handle[Config] = config()
     c.allow_shlib_undefined = false
     direct_paths Vec[Bytes] = {}

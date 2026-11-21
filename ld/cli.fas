@@ -70,6 +70,7 @@ fn ld_read(path Bytes, max_size u64) Bytes fails {
             try die_io(c"read", path, e)
             return bytes_empty()
         }
+        ld_track_mmap(data, size)
     }
     os_close(fd)
     return bytes(data, size)
@@ -220,9 +221,8 @@ struct Config {
     build_id u8
 }
 
-var cfg Config = {}
 
-fn config() handle[Config] { return &cfg }
+fn config() handle[Config] { return &ld.cfg }
 
 struct Parser {
     args Vec[Bytes]

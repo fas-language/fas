@@ -8,6 +8,10 @@
 //      ld_add_input / ld_finish) and verifies byte-identity.
 //   4. Tests library-mode error recovery (returns exit code 1 with diagnostic
 //      in vfs.diag without terminating the process, then links cleanly again).
+//   5. Runs 1000 failing + 1000 succeeding links in a loop and verifies RSS
+//      growth stays under 4 MiB after warm-up (/proc/self/statm).
+//   6. Runs 4 concurrent links on separate threads (pool_start_on, each with
+//      its own worker pool) and verifies byte-identical output to sequential runs.
 //
 // Usage: apitest <ref_static> <ref_shared> <start.o> <main.o> <libfoo.a> <shared.o> <ver.map>
 
@@ -39,6 +43,7 @@ use "../map.fas"
 use "../stats.fas"
 use "../partial.fas"
 use "../api.fas"
+use "../ctx.fas"
 
 fn slurp(path addr) Bytes {
     fd i32 = os_open(path, O_RDONLY, 0) catch e {
@@ -58,6 +63,101 @@ fn slurp(path addr) Bytes {
     }
     os_close(fd)
     return bytes(p, sz)
+}
+
+fn read_rss_bytes() u64 {
+    fd i32 = os_open(c"/proc/self/statm", O_RDONLY, 0) catch { return 0 }
+    defer { os_close(fd) }
+    buf arr[128, u8] = {}
+    n usize = os_read(fd, &buf, 127) catch { return 0 }
+    i usize = 0
+    while i < n && buf[i] != 32 { i += 1 }
+    while i < n && buf[i] == 32 { i += 1 }
+    pages u64 = 0
+    while i < n && buf[i] >= 48 && buf[i] <= 57 {
+        pages = pages * 10 + zext[u64](buf[i] - 48)
+        i += 1
+    }
+    return pages * 4096
+}
+
+struct ConcurrentCtx {
+    ref_static Bytes
+    ref_shared Bytes
+    start_b Bytes
+    main_b Bytes
+    lib_b Bytes
+    shared_b Bytes
+    ver_b Bytes
+    failed arr[4, u32]
+}
+
+fn concurrent_link_job(arg addr, b usize, e usize, worker u32) void {
+    cc handle[ConcurrentCtx] = handle_from_addr(arg)
+    for slot usize in b..e {
+        vfs LdVfs = {}
+        vfs.in_memory = true
+        vfs.quiet = true
+        vfs.threads = 2
+        vfs_add(&vfs, bytes_c(c"__vfs__/start.o"), cc.start_b)
+        vfs_add(&vfs, bytes_c(c"__vfs__/main.o"), cc.main_b)
+        vfs_add(&vfs, bytes_c(c"__vfs__/lib/libfoo.a"), cc.lib_b)
+        vfs_add(&vfs, bytes_c(c"__vfs__/shared.o"), cc.shared_b)
+        vfs_add(&vfs, bytes_c(c"__vfs__/ver.map"), cc.ver_b)
+
+        args_st arr[6, addr] = {}
+        args_st[0] = c"-o"
+        args_st[1] = c"__vfs__/out_static"
+        args_st[2] = c"__vfs__/start.o"
+        args_st[3] = c"__vfs__/main.o"
+        args_st[4] = c"-L__vfs__/lib"
+        args_st[5] = c"-lfoo"
+
+        args_sh arr[5, addr] = {}
+        args_sh[0] = c"-shared"
+        args_sh[1] = c"-o"
+        args_sh[2] = c"__vfs__/out_shared.so"
+        args_sh[3] = c"--version-script=__vfs__/ver.map"
+        args_sh[4] = c"__vfs__/shared.o"
+
+        bad arr[2, addr] = {}
+        bad[0] = c"-o"
+        bad[1] = c"__vfs__/bad_out"
+
+        err u32 = 0
+        for iter u64 in 0..8 {
+            if ld_link(&args_st, 6, &vfs) != 0 || !bytes_eq(bytes(vfs.out_data, vfs.out_size), cc.ref_static) {
+                err = 1
+                break
+            }
+            if ld_link(&args_sh, 5, &vfs) != 0 || !bytes_eq(bytes(vfs.out_data, vfs.out_size), cc.ref_shared) {
+                err = 2
+                break
+            }
+            if ld_link(&bad, 2, &vfs) != 1 || vfs.diag.n == 0 {
+                err = 3
+                break
+            }
+        }
+        vfs_free(&vfs)
+        if err == 0 {
+            // Also exercise an incremental LdSession concurrently
+            vfs_s LdVfs = {}
+            vfs_s.in_memory = true
+            vfs_s.quiet = true
+            vfs_s.threads = 2
+            sess LdSession = {}
+            ld_session_begin(&sess, &vfs_s)
+            ld_add_input(&sess, bytes_c(c"__vfs__/start.o"), cc.start_b)
+            ld_add_input(&sess, bytes_c(c"__vfs__/main.o"), cc.main_b)
+            ld_add_input(&sess, bytes_c(c"__vfs__/lib/libfoo.a"), cc.lib_b)
+            if ld_finish(&sess, &args_st, 6) != 0 || !bytes_eq(bytes(vfs_s.out_data, vfs_s.out_size), cc.ref_static) {
+                err = 4
+            }
+            vfs_free(&vfs_s)
+        }
+        cc.failed[slot] = err
+    }
 }
 
 fn check_eq(label addr, got Bytes, want Bytes) void {
@@ -176,6 +276,77 @@ fn main(argc i32, argv addr) i32 {
     check_eq(c"incremental session static", bytes(vh2.out_data, vh2.out_size), ref_static)
     vfs_free(vh2)
 
-    os_write_all(STDOUT, c"apitest: ok (6/6 checks)\n", 25) catch {}
+    // 7. Memory stability: 1000 failing + 1000 succeeding links, RSS growth < 4 MiB after warm-up
+    vfs3 LdVfs = {}
+    vfs3.in_memory = true
+    vfs3.quiet = true
+    vfs3.threads = 2
+    vfs_add(&vfs3, bytes_c(c"__vfs__/start.o"), start_b)
+    vfs_add(&vfs3, bytes_c(c"__vfs__/main.o"), main_b)
+    vfs_add(&vfs3, bytes_c(c"__vfs__/lib/libfoo.a"), lib_b)
+    // Warm-up
+    for w u64 in 0..16 {
+        if ld_link(&bad_args, 2, &vfs3) != 1 || vfs3.diag.n == 0 {
+            os_write_all(STDERR, c"apitest: warmup failing link unexpected result\n", 47) catch {}
+            return 1
+        }
+        if ld_link(&args1, 6, &vfs3) != 0 || !bytes_eq(bytes(vfs3.out_data, vfs3.out_size), ref_static) {
+            os_write_all(STDERR, c"apitest: warmup succeeding link failed\n", 39) catch {}
+            return 1
+        }
+    }
+    rss_before u64 = read_rss_bytes()
+    for i u64 in 0..1000 {
+        if ld_link(&bad_args, 2, &vfs3) != 1 || vfs3.diag.n == 0 {
+            os_write_all(STDERR, c"apitest: loop failing link unexpected result\n", 45) catch {}
+            return 1
+        }
+        if ld_link(&args1, 6, &vfs3) != 0 || !bytes_eq(bytes(vfs3.out_data, vfs3.out_size), ref_static) {
+            os_write_all(STDERR, c"apitest: loop succeeding link failed\n", 37) catch {}
+            return 1
+        }
+    }
+    rss_after u64 = read_rss_bytes()
+    vfs_free(&vfs3)
+    if rss_after > rss_before + 4 * 1024 * 1024 {
+        b Buf = {}
+        bs(&b, c"apitest: FAIL RSS grew from ")
+        bu(&b, rss_before)
+        bs(&b, c" to ")
+        bu(&b, rss_after)
+        bs(&b, c" bytes\n")
+        buf_write(&b, STDERR) catch {}
+        return 1
+    }
+
+    // 8. 4 concurrent links on separate threads (pool_start_on, own worker pools)
+    cctx ConcurrentCtx = {
+        .ref_static = ref_static,
+        .ref_shared = ref_shared,
+        .start_b = start_b,
+        .main_b = main_b,
+        .lib_b = lib_b,
+        .shared_b = shared_b,
+        .ver_b = ver_b,
+    }
+    outer_p handle[Pool] = handle_from_addr(heap_alloc_zeroed(sizeof[Pool]))
+    outer handle[Pool] = pool_start_on(outer_p, 4)
+    pool_for(outer, 4, 1, &concurrent_link_job, &cctx)
+    pool_stop(outer)
+    heap_free(handle_addr(outer_p))
+    for k usize in 0..4 {
+        if cctx.failed[k] != 0 {
+            b Buf = {}
+            bs(&b, c"apitest: FAIL concurrent thread ")
+            bu(&b, k)
+            bs(&b, c" error ")
+            bu(&b, zext[u64](cctx.failed[k]))
+            bs(&b, c"\n")
+            buf_write(&b, STDERR) catch {}
+            return 1
+        }
+    }
+
+    os_write_all(STDOUT, c"apitest: ok (8/8 checks)\n", 25) catch {}
     return 0
 }

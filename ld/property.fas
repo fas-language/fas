@@ -90,7 +90,6 @@ fn gp_check(o handle[Obj], s handle[Sec]) void fails {
     try gp_parse(o, s.offset, s.size, &scratch)
 }
 
-var property_file u64 = NONE64
 
 // Properties.prepare
 fn properties_prepare() void fails {
@@ -99,7 +98,7 @@ fn properties_prepare() void fails {
     ah handle[Vec[u64]] = &acc
     pairs Vec[u64] = {}
     ph handle[Vec[u64]] = &pairs
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         seen bool = false
         for k u64 in 0..zext[u64](o.nsec) {
@@ -149,7 +148,7 @@ fn properties_prepare() void fails {
     count u64 = 0
     j u64 = 0
     while j < ah.n {
-        present bool = gp_operation(vec_get(ah, j)) == GP_OR || vec_get(ah, j + 2) == ninput_objects
+        present bool = gp_operation(vec_get(ah, j)) == GP_OR || vec_get(ah, j + 2) == ld.ninput_objects
         if present && vec_get(ah, j + 1) != 0 {
             vec_set(ah, count * 3, vec_get(ah, j))
             vec_set(ah, count * 3 + 1, vec_get(ah, j + 1))
@@ -162,7 +161,7 @@ fn properties_prepare() void fails {
         return
     }
     size u64 = 16 + count * 16
-    file u64 = nobj
+    file u64 = ld.nobj
     o handle[Obj] = try new_object(c"<GNU properties>")
     stat_add(ST_GNU_PROPERTIES, count)
     o.nsec = 2
@@ -201,5 +200,5 @@ fn properties_prepare() void fails {
     l.kept[u8, 1] = 1
     l.alias = heap_alloc_zeroed(16)
     l.gotref = heap_alloc_zeroed(4)
-    property_file = file
+    ld.property_file = file
 }

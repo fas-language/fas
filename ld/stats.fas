@@ -55,9 +55,6 @@ const PH_UNWIND u64 = 9
 const PH_WRITE u64 = 10
 const PH_N u64 = 11
 
-var stats_on bool = false
-var stats_start_wall u64 = 0
-var stats_start_cpu u64 = 0
 
 // the counters and phase flags, which a parse failure found late rolls
 // back to the moment the failing input was read (StatSnap)
@@ -66,10 +63,6 @@ struct StatSnap {
     seen arr[34, bool]
     phase_seen arr[11, bool]
 }
-var stat_now StatSnap = {}
-var phase_wall arr[11, u64] = {}
-var phase_cpu arr[11, u64] = {}
-var phase_mem arr[11, u64] = {}
 
 fn stat_name(k u64) addr {
     switch k {
@@ -129,16 +122,16 @@ fn phase_name(k u64) addr {
 }
 
 fn stats_start() void {
-    stats_on = true
-    stats_start_wall = os_clock_ns(CLOCK_REALTIME)
-    stats_start_cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
+    ld.stats_on = true
+    ld.stats_start_wall = os_clock_ns(CLOCK_REALTIME)
+    ld.stats_start_cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
 }
 
 // Stats.add (main thread only)
 fn stat_add(k u64, v u64) void {
-    if !stats_on { return }
-    stat_now.count[k] += v
-    stat_now.seen[k] = true
+    if !ld.stats_on { return }
+    ld.stat_now.count[k] += v
+    ld.stat_now.seen[k] = true
 }
 
 // Stats.measure: phase_begin marks the phase (a phase that fails still
@@ -151,31 +144,31 @@ struct PhaseStart {
 
 // a phase that ran without being timed here (timed elsewhere)
 fn stat_mark(k u64) void {
-    if stats_on { stat_now.phase_seen[k] = true }
+    if ld.stats_on { ld.stat_now.phase_seen[k] = true }
 }
 
 fn phase_begin(k u64, t handle[PhaseStart]) void {
-    if !stats_on { return }
-    stat_now.phase_seen[k] = true
+    if !ld.stats_on { return }
+    ld.stat_now.phase_seen[k] = true
     t.wall = os_clock_ns(CLOCK_REALTIME)
     t.cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
     t.mem = atomic_load[u64, relaxed](&mem_mapped)
 }
 
 fn phase_end(k u64, t handle[PhaseStart]) void {
-    if !stats_on { return }
+    if !ld.stats_on { return }
     w u64 = os_clock_ns(CLOCK_REALTIME)
     // backwards clock adjustments are clamped
-    if w > t.wall { phase_wall[k] += w - t.wall }
-    phase_cpu[k] += os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - t.cpu
-    phase_mem[k] += atomic_load[u64, relaxed](&mem_mapped) - t.mem
+    if w > t.wall { ld.phase_wall[k] += w - t.wall }
+    ld.phase_cpu[k] += os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - t.cpu
+    ld.phase_mem[k] += atomic_load[u64, relaxed](&mem_mapped) - t.mem
 }
 
 // a copy of the counters, or null without --stats
 fn stat_snapshot() addr {
-    if !stats_on { return null }
+    if !ld.stats_on { return null }
     p addr = heap_alloc(sizeof[StatSnap])
-    mem_copy(p, &stat_now, sizeof[StatSnap])
+    mem_copy(p, &ld.stat_now, sizeof[StatSnap])
     return p
 }
 
@@ -183,11 +176,11 @@ fn stat_snapshot() addr {
 // order, which already stops at the failing input)
 fn stat_restore(p addr) void {
     if p == null { return }
-    decoded u64 = stat_now.count[ST_DECODED_DEBUG_BYTES]
-    decoded_seen bool = stat_now.seen[ST_DECODED_DEBUG_BYTES]
-    mem_copy(&stat_now, p, sizeof[StatSnap])
-    stat_now.count[ST_DECODED_DEBUG_BYTES] = decoded
-    stat_now.seen[ST_DECODED_DEBUG_BYTES] = decoded_seen
+    decoded u64 = ld.stat_now.count[ST_DECODED_DEBUG_BYTES]
+    decoded_seen bool = ld.stat_now.seen[ST_DECODED_DEBUG_BYTES]
+    mem_copy(&ld.stat_now, p, sizeof[StatSnap])
+    ld.stat_now.count[ST_DECODED_DEBUG_BYTES] = decoded
+    ld.stat_now.seen[ST_DECODED_DEBUG_BYTES] = decoded_seen
 }
 
 // %.9f of a nanosecond count
@@ -203,11 +196,11 @@ fn stat_seconds(b handle[Buf], ns u64) void {
 }
 
 fn stats_print() void {
-    if !stats_on { return }
-    stats_on = false
+    if !ld.stats_on { return }
+    ld.stats_on = false
     wall u64 = os_clock_ns(CLOCK_REALTIME)
-    wall = if wall > stats_start_wall { wall - stats_start_wall } else { 0 }
-    cpu u64 = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - stats_start_cpu
+    wall = if wall > ld.stats_start_wall { wall - ld.stats_start_wall } else { 0 }
+    cpu u64 = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - ld.stats_start_cpu
     o Buf = {}
     b handle[Buf] = &o
     bs(b, c"{\"wall_seconds\":")
@@ -217,29 +210,29 @@ fn stats_print() void {
     bs(b, c",\"phases\":{")
     first bool = true
     for k u64 in 0..PH_N {
-        if !stat_now.phase_seen[k] { continue }
+        if !ld.stat_now.phase_seen[k] { continue }
         if !first { buf_u8(b, 44) }
         first = false
         buf_u8(b, 34)
         bs(b, phase_name(k))
         bs(b, c"\":{\"wall_seconds\":")
-        stat_seconds(b, phase_wall[k])
+        stat_seconds(b, ld.phase_wall[k])
         bs(b, c",\"cpu_seconds\":")
-        stat_seconds(b, phase_cpu[k])
+        stat_seconds(b, ld.phase_cpu[k])
         bs(b, c",\"allocated_words\":")
-        bu(b, phase_mem[k] / 8)
+        bu(b, ld.phase_mem[k] / 8)
         bs(b, c",\"promoted_words\":0}")
     }
     bs(b, c"},\"counts\":{")
     first = true
     for k u64 in 0..ST_N {
-        if !stat_now.seen[k] { continue }
+        if !ld.stat_now.seen[k] { continue }
         if !first { buf_u8(b, 44) }
         first = false
         buf_u8(b, 34)
         bs(b, stat_name(k))
         bs(b, c"\":")
-        bu(b, stat_now.count[k])
+        bu(b, ld.stat_now.count[k])
     }
     bs(b, c"},\"gc\":{\"allocated_words\":")
     bu(b, atomic_load[u64, relaxed](&mem_mapped) / 8)

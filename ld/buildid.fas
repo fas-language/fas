@@ -145,13 +145,12 @@ fn digest(sha bool, data addr, n u64, out addr) void {
     }
 }
 
-var build_id_file u64 = NONE64
 
 fn build_id_prepare() void fails {
     c handle[Config] = config()
     if c.build_id == BUILD_ID_NONE { return }
     size u64 = if c.build_id == BUILD_ID_SHA1 { 20 } else { 16 }
-    file u64 = nobj
+    file u64 = ld.nobj
     o handle[Obj] = try new_object(c"<build identifier>")
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
@@ -181,11 +180,11 @@ fn build_id_prepare() void fails {
     l.kept[u8, 1] = 1
     l.alias = heap_alloc_zeroed(16)
     l.gotref = heap_alloc_zeroed(4)
-    build_id_file = file
+    ld.build_id_file = file
 }
 
 fn build_id_emit() void fails {
-    if build_id_file == NONE64 { return }
-    at u64 = (try get_placement(build_id_file, 1)).offset + 16
-    digest(config().build_id == BUILD_ID_SHA1, image, image_size, image + at)
+    if ld.build_id_file == NONE64 { return }
+    at u64 = (try get_placement(ld.build_id_file, 1)).offset + 16
+    digest(config().build_id == BUILD_ID_SHA1, ld.image, ld.image_size, ld.image + at)
 }

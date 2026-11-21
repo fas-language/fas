@@ -238,7 +238,7 @@ fn shdeps_read_dep(path Bytes) Bytes fails {
 fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr, ndirect u64) void fails {
     c handle[Config] = config()
     if c.allow_shlib_undefined { return }
-    if c.has_sysroot && !has_root { try sysroot_normalize(c.sysroot) }
+    if c.has_sysroot && !ld.has_root { try sysroot_normalize(c.sysroot) }
 
     known ShLibMap = {}
     kh handle[ShLibMap] = &known

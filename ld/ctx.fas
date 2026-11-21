@@ -1,0 +1,258 @@
+// Per-link state container (struct Ld) and thread-local active pointer.
+//
+// Every pass accesses its per-link state through `ld.<field>` so multiple
+// links can run concurrently in the same process on separate threads, each
+// inside its own Region and with its own worker pool.
+
+struct MmapSpan {
+    p addr
+    n u64
+}
+
+struct Ld {
+    // ld/util.fas — diagnostics and library-mode flags
+    ld_api_active bool
+    ld_api_quiet bool
+    ld_api_diag Buf
+    ld_msg Buf
+
+    // ld/api.fas — active VFS and incremental session
+    ld_api_vfs handle[LdVfs]
+    ld_api_session handle[LdSession]
+
+    // input file mmaps to unmap at link end
+    mmaps Vec[MmapSpan]
+
+    // ld/stats.fas — --stats counters and phase timings
+    stats_on bool
+    stats_start_wall u64
+    stats_start_cpu u64
+    stat_now StatSnap
+    phase_wall arr[11, u64]
+    phase_cpu arr[11, u64]
+    phase_mem arr[11, u64]
+
+    // ld/cli.fas — parsed command-line configuration
+    cfg Config
+
+    // ld/script.fas — sysroot state
+    sysroot Bytes
+    has_root bool
+
+    // ld/verscript.fas — version script parser & policy cache
+    vs_path Bytes
+    vs_nodes Vec[VsNode]
+    vs_rules Vec[VsRule]
+    vs_cache0 BytesU32Map
+    vs_cache1 BytesU32Map
+    vs_work arr[2, u64]
+    vs_locals BytesU32Map
+    vs_globals BytesU32Map
+    vs_data Bytes
+    vs_pos u64
+    vs_count u64
+    vs_tk u8
+    vs_ch u8
+    vs_word Bytes
+
+    // ld/archive.fas — archive extraction
+    archives Vec[Archive]
+    probes u64
+
+    // ld/resolve.fas — objects, symbols, shared libraries, staging
+    objs addr                   // Obj * MAX_OBJECTS
+    lxs addr                    // Lx * MAX_OBJECTS
+    nobj u64
+    ninput_objects u64          // objects from inputs (the rest are synthesized)
+    names Intern
+    gsyms Vec[GSym]
+    imps Vec[Imp]
+    pool handle[Pool]
+    parsed u64                  // objects [0, parsed) are parsed and checked
+    staged_sh Vec[StagedSh]
+    parsed_sh u64
+    parse_seq u64
+    reading bool                // the inputs are being read (objects staged)
+    snapshots Vec[Snapshot]
+    input_bytes u64
+    file_count u64
+    expanded Vec[Bytes]
+    pnodes Vec[PNode]
+    shlibs Vec[addr]            // handle[ShLib] as addr (resolved.shared)
+    sh_names BytesSet           // loaded SONAMEs
+    shared_refs BytesSet
+    sh_providers SymMap         // name -> (lib_idx << 32 | exp_idx)
+    sh_sym_total u64
+    shdeps_graph ShDeps
+    input_static bool
+    extra_files Vec[Snapshot]
+    staged_objs addr
+    staged_lxs addr
+    predefined_file u64
+    ldirs Vec[Bytes]
+    symbol_total u64
+    relocation_total u64
+    signatures Vec[Bytes]
+    signature_index KeyIndex
+    partial bool
+
+    // ld/tls.fas — TLS layout state
+    module_base u64
+    tls_template bool
+
+    // ld/unwind.fas — .eh_frame normalization & index
+    uobjs addr
+    unorm_count u64
+    uframes Vec[Frame]          // the frames of live code, in input order
+    unwind_file u64             // the <unwind header> object
+
+    // ld/gc.fas — section garbage collection
+    gc_objs addr
+    gc_queue Vec[u64]
+    gc_frame_head U64Map
+    gc_frame_next Vec[u32]
+    gc_frame_edge Vec[u64]
+    gc_boundaries Vec[Bytes]
+
+    // ld/copy.fas — COPY relocations
+    copy_entries Vec[CopyEntry]
+    copy_names U32Set
+    copy_sort_lib handle[ShLib]
+
+    // ld/relax.fas — GOTPCRELX relaxation counts
+    relax_counts addr           // u64 per object
+
+    // ld/property.fas & ld/buildid.fas — synthetic note objects
+    property_file u64
+    build_id_file u64
+
+    // ld/ifunc.fas — static/local IFUNC resolvers
+    ifunc_file u64
+    ifunc_syms Vec[u64]         // the resolvers, (file << 32 | symbol)
+    ifunc_refs addr             // per object: addr to u32 per symbol, NONE when not an IFUNC
+
+    // ld/dynamic.fas — dynamic linking, PLT/GOT/dynsym/versym/dynstr
+    dyn_file u64
+    dyn_pie bool
+    dyn_shared bool
+    dyn_static_tls bool
+    dyn_fixups Vec[Fixup]
+    dyn_relative_count u64
+    dyn_exports Vec[Export]
+    dyn_stubs Vec[u64]          // (symbol << 32 | slot), in first-use order
+    dyn_stub_index addr         // per GOT slot: its stub's index or NONE
+    dyn_ifunc_slots U64Map      // IFUNC definition -> GOT slot
+    dyn_ifunc_symbols addr      // per dynsym index: 1 for an IFUNC
+    dyn_symbol_count u64
+    dyn_runpath u32
+    dyn_has_runpath bool
+    dyn_soname u32
+    dyn_has_soname bool
+    dyn_imports Vec[DImp]
+    dyn_import_count u64
+    dyn_index addr              // per global id: its import's dynsym index or NONE
+    dyn_bound Vec[u64]          // the bound TLS definitions (file << 32 | symbol)
+    dyn_bound_index U64Map      // definition -> dynsym index
+    dyn_needed Vec[u32]
+    dyn_verdef_count u64
+    dyn_verneed_count u64
+    dyn_ver_entries Vec[DynVerNeed]
+    dyn_ver_index KeyIndex
+    lc_tags Vec[u64]
+    lc_funcs Vec[u64]
+    lc_array_kinds Vec[u32]
+    lc_members Vec[u64]         // every array's sections, array after array
+    lc_array_ends Vec[u64]      // per array: the end of its members
+    ds_buf Buf
+    ds_names Vec[Bytes]
+    ds_offsets Vec[u32]
+    ds_index KeyIndex
+
+    // ld/layout.fas — output section & segment layout
+    headers Vec[OutSec]
+    content Vec[u64]            // placed sections in placement order
+    segments Vec[Seg]
+    lay_cursor u64
+    lay_base u64
+    lay_relro bool
+    relro_seg Seg
+    has_relro_seg bool
+    tls_seg Seg
+
+    // ld/link.fas — GOT, symbol values, output image emission
+    got_file u64
+    got_slots Vec[u64]          // (file, symbol) packed
+    got_model Vec[u8]           // per slot: its Got.model (GM_*)
+    got_canonical U64Map
+    values addr                 // Values per object
+    image addr
+    image_size u64
+    emit_start PhaseStart
+
+    // ld/map.fas — -Map output buffer
+    map_text Buf
+
+    // ld/partial.fas — relocatable (-r) output
+    sv_alias addr
+    psecs Vec[PSec]
+    psyms Vec[Sym]
+    pmaps addr
+    psmaps addr
+}
+
+thread var ld handle[Ld] = null
+
+// Sets the non-zero default fields of a zero-initialized Ld.
+fn ld_init(ctx handle[Ld]) void {
+    ctx.reading = true
+    ctx.predefined_file = NONE64
+    ctx.module_base = NONE64
+    ctx.unwind_file = NONE64
+    ctx.property_file = NONE64
+    ctx.build_id_file = NONE64
+    ctx.ifunc_file = NONE64
+    ctx.dyn_file = NONE64
+    ctx.got_file = NONE64
+    ctx.lay_base = LAYOUT_BASE
+}
+
+// ---------- worker pool dispatch ----------
+
+struct LdJob {
+    ctx_ld handle[Ld]
+    f addr
+    ctx addr
+}
+
+fn ld_worker_init(arg addr) void {
+    j handle[LdJob] = handle_from_addr(arg)
+    ld = j.ctx_ld
+}
+
+fn ld_job_run(arg addr, b usize, e usize, worker u32) void {
+    j handle[LdJob] = handle_from_addr(arg)
+    call_addr[void](j.f, j.ctx, b, e, worker)
+}
+
+// Runs a parallel job on ld.pool, publishing `ld` to each worker via pool_for_init.
+fn ld_pool_for(n usize, grain usize, f addr, ctx addr) void {
+    j LdJob = { ld, f, ctx }
+    pool_for_init(ld.pool, n, grain, &ld_job_run, &j, &ld_worker_init)
+}
+
+// ---------- input mmap tracking ----------
+
+fn ld_track_mmap(p addr, n u64) void {
+    if p == null || n == 0 { return }
+    m handle[MmapSpan] = vec_add(&ld.mmaps)
+    m.p = p
+    m.n = n
+}
+
+fn ld_unmap_all() void {
+    for i u64 in 0..ld.mmaps.n {
+        m handle[MmapSpan] = vec_at(&ld.mmaps, i)
+        os_munmap(m.p, m.n)
+    }
+    ld.mmaps.n = 0
+}

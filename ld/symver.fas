@@ -143,7 +143,7 @@ fn has_default_at(b Bytes) bool {
 
 fn check_static_versions() void fails {
     for pass u64 in 0..2 {
-    for i u64 in 0..gsyms.n {
+    for i u64 in 0..ld.gsyms.n {
         g handle[GSym] = gsym(trunc[u32](i))
         if g.has_res != 0 && bytes_contains(g.name, 64) && (pass == 1 || has_default_at(g.name)) {
             m handle[Buf] = msg()
@@ -213,7 +213,7 @@ fn shared_output_prepare() void fails {
         return
     }
     for pass u64 in 0..3 {
-        for i u64 in 0..gsyms.n {
+        for i u64 in 0..ld.gsyms.n {
             id u32 = trunc[u32](i)
             g handle[GSym] = gsym(id)
             if g.has_res == 0 { continue }
@@ -241,7 +241,7 @@ fn shared_output_prepare() void fails {
         }
     }
     if c.has_version_script {
-        for i u64 in 0..gsyms.n {
+        for i u64 in 0..ld.gsyms.n {
             id u32 = trunc[u32](i)
             g handle[GSym] = gsym(id)
             if g.has_res == 0 { continue }
@@ -256,7 +256,7 @@ fn shared_output_prepare() void fails {
             if local { g.res_vis = 2 }
         }
     }
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
@@ -274,7 +274,7 @@ fn shared_output_prepare() void fails {
             if id == NONE { continue }
             g handle[GSym] = gsym(id)
             if g.has_res != 0 {
-                if zext[u64](g.res_file) == f && zext[u64](g.res_sym) == i && g.res_vis == 0 && f != predefined_file {
+                if zext[u64](g.res_file) == f && zext[u64](g.res_sym) == i && g.res_vis == 0 && f != ld.predefined_file {
                     shared_output_add(f, i, id)
                 }
             } else if y.section == 0 && y.visibility == 0 && (!c.no_undefined || y.binding == 2) && g.imp == 0 {

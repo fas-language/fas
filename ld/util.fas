@@ -24,9 +24,6 @@ type BytesSet = Map[Bytes, u8, bytes_hash, bytes_eq]
 // then the main thread reports the first failing item in input order.
 error LinkFailed, LinkRefused, LinkDone
 
-var ld_api_active bool = false
-var ld_api_quiet bool = false
-var ld_api_diag Buf = {}
 
 fn ld_exit_code(e error) i32 {
     if e == LinkDone { return 0 }
@@ -35,26 +32,25 @@ fn ld_exit_code(e error) i32 {
 }
 
 fn ld_record_diag(b Bytes) void {
-    if ld_api_active {
-        buf_clear(&ld_api_diag)
-        bb(&ld_api_diag, b)
+    if ld.ld_api_active {
+        buf_clear(&ld.ld_api_diag)
+        bb(&ld.ld_api_diag, b)
     }
 }
 
 fn ld_quiet() bool {
-    return ld_api_active && ld_api_quiet
+    return ld.ld_api_active && ld.ld_api_quiet
 }
 
 // ---------- messages ----------
 
 // the message being built by serial code (parallel passes use one Buf per
 // item instead)
-var ld_msg Buf = {}
 
 // clears the shared message buffer and returns it
 fn msg() handle[Buf] {
-    buf_clear(&ld_msg)
-    return &ld_msg
+    buf_clear(&ld.ld_msg)
+    return &ld.ld_msg
 }
 
 fn bs(b handle[Buf], s addr) void { buf_str(b, s) }
@@ -109,7 +105,7 @@ fn die_buf(b handle[Buf]) void fails {
 }
 
 // dies with the shared message buffer
-fn die() void fails { try die_buf(&ld_msg) }
+fn die() void fails { try die_buf(&ld.ld_msg) }
 
 fn die_c(s addr) void fails {
     m handle[Buf] = msg()

@@ -1,7 +1,6 @@
 // -Map: the deterministic section/symbol map (Static_link's map buffer)
 // and its publication beside the executable (File_io).
 
-var map_text Buf = {}
 
 // OCaml's %S: String.escaped between double quotes
 fn map_quoted(b handle[Buf], s Bytes) void {
@@ -33,7 +32,7 @@ fn map_quoted(b handle[Buf], s Bytes) void {
 
 // appends one formatted line, failing past 128 MiB like the OCaml buffer
 fn map_line(line handle[Buf]) void fails {
-    m handle[Buf] = &map_text
+    m handle[Buf] = &ld.map_text
     if m.n + line.n > 128 * 1024 * 1024 { try die_c(c"map output exceeds 128 MiB limit") }
     buf_append(m, buf_bytes(line))
     buf_clear(line)
@@ -53,8 +52,8 @@ fn map_build(entry u64, locals handle[Vec[SymOut]], globals handle[Vec[SymOut]])
     try map_line(lh)
     bs(lh, c"# section: address file-offset file-size memory-size alignment flags name input\n")
     try map_line(lh)
-    for i u64 in 0..content.n {
-        x u64 = vec_get(&content, i)
+    for i u64 in 0..ld.content.n {
+        x u64 = vec_get(&ld.content, i)
         f u64 = pk_file(x)
         k u64 = pk_sec(x)
         s handle[Sec] = sec(obj(f), k)

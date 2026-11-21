@@ -34,6 +34,7 @@ use "map.fas"
 use "stats.fas"
 use "partial.fas"
 use "api.fas"
+use "ctx.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
@@ -42,8 +43,21 @@ fn main(argc i32, argv addr) i32 {
 }
 
 fn run_cli() void fails {
-    objs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Obj])
-    lxs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Lx])
+    reg Region = {}
+    prev_reg handle[Region] = region_switch(&reg)
+    prev_ld handle[Ld] = ld
+    ctx handle[Ld] = handle_from_addr(heap_alloc_zeroed(sizeof[Ld]))
+    ld_init(ctx)
+    ld = ctx
+    defer {
+        intern_free(&ld.names)
+        ld_unmap_all()
+        ld = prev_ld
+        region_switch(prev_reg)
+        region_dispose(&reg)
+    }
+    ld.objs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Obj])
+    ld.lxs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Lx])
     try parse_command_line()
     c handle[Config] = config()
     if c.statistics { stats_start() }
@@ -51,8 +65,9 @@ fn run_cli() void fails {
     threads u32 = 0
     t addr = os_getenv(c"FAS_LD_THREADS")
     if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }
-    pool = pool_start(threads)
-    defer { pool_stop(pool) }
+    pool_p handle[Pool] = handle_from_addr(heap_alloc_zeroed(sizeof[Pool]))
+    ld.pool = pool_start_on(pool_p, threads)
+    defer { pool_stop(ld.pool) }
     if c.relocatable { try partial_link_and_publish() } else { try link_and_publish() }
     stats_print()
 }

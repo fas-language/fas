@@ -5,7 +5,7 @@
 // ---------- per-object tables ----------
 
 fn alloc_tables() void {
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         l handle[Lx] = lx(f)
         n u64 = zext[u64](o.nsec)
@@ -46,7 +46,7 @@ fn name_defined(name Bytes) bool {
 }
 
 fn check_legacy_sections() void fails {
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
@@ -65,7 +65,7 @@ fn check_legacy_sections() void fails {
 }
 
 fn check_non_alloc_references() void fails {
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nrel) {
             r handle[Rel] = rel(o, k)
@@ -90,11 +90,7 @@ fn check_non_alloc_references() void fails {
 
 // ---------- the GOT ----------
 
-var got_file u64 = NONE64
-var got_slots Vec[u64] = {}    // (file, symbol) packed
-var got_model Vec[u8] = {}     // per slot: its Got.model (GM_*)
 // Got.canonical_ifuncs: IFUNC definitions whose address is taken by PC32
-var got_canonical U64Map = {}
 
 const GM_ADDRESS u8 = 0
 const GM_THREAD u8 = 1              // Thread_offset
@@ -113,14 +109,14 @@ fn got_relocation(kind u32) bool {
 fn base_relocation(kind u32) bool { return kind == 26 || kind == 29 }
 
 // Hashtbl.mem resolved.imports
-fn dyn_imported(name Bytes) bool { return imps.n != 0 && import_id(name) != NONE }
+fn dyn_imported(name Bytes) bool { return ld.imps.n != 0 && import_id(name) != NONE }
 
 fn got_prepare(static_ifunc bool) void fails {
-    canon handle[U64Map] = &got_canonical
+    canon handle[U64Map] = &ld.got_canonical
     indices U64Map = {}
     ih handle[U64Map] = &indices
     needs_base bool = false
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         l handle[Lx] = lx(f)
         l.gotref = heap_alloc(zext[u64](o.nrel) * 4 + 4)
@@ -169,19 +165,19 @@ fn got_prepare(static_ifunc bool) void fails {
             a addr = map_val_addr(ih, key)
             slot u32 = 0
             if a == null {
-                slot = trunc[u32](got_slots.n)
+                slot = trunc[u32](ld.got_slots.n)
                 map_put(ih, key, slot)
-                vec_push(&got_slots, pk(f, si))
-                vec_push(&got_model, model)
+                vec_push(&ld.got_slots, pk(f, si))
+                vec_push(&ld.got_model, model)
                 if r.kind == 19 || r.kind == 20 || r.kind == 34 {
-                    vec_push(&got_slots, pk(f, si))
+                    vec_push(&ld.got_slots, pk(f, si))
                     second u8 = GM_LOCAL_OFFSET
                     if r.kind == 19 {
                         second = GM_DYNAMIC_OFFSET
                     } else if r.kind == 34 {
                         second = GM_DESCRIPTOR_ARGUMENT
                     }
-                    vec_push(&got_model, second)
+                    vec_push(&ld.got_model, second)
                 }
             } else {
                 slot = a[u32]
@@ -190,15 +186,15 @@ fn got_prepare(static_ifunc bool) void fails {
         }
     }
     map_free(ih)
-    if predefined_file != NONE64 {
+    if ld.predefined_file != NONE64 {
         id u32 = find(bytes_c(c"_GLOBAL_OFFSET_TABLE_"))
-        if id != NONE && gsym(id).has_res != 0 && zext[u64](gsym(id).res_file) == predefined_file { needs_base = true }
+        if id != NONE && gsym(id).has_res != 0 && zext[u64](gsym(id).res_file) == ld.predefined_file { needs_base = true }
     }
-    if got_slots.n == 0 && !needs_base { return }
-    size u64 = got_slots.n * 8
-    file u64 = nobj
+    if ld.got_slots.n == 0 && !needs_base { return }
+    size u64 = ld.got_slots.n * 8
+    file u64 = ld.nobj
     o handle[Obj] = try new_object(c"<GOT>")
-    stat_add(ST_GOT_ENTRIES, got_slots.n)
+    stat_add(ST_GOT_ENTRIES, ld.got_slots.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)
@@ -224,7 +220,7 @@ fn got_prepare(static_ifunc bool) void fails {
     l.kept[u8, 1] = 1
     l.alias = heap_alloc_zeroed(16)
     l.gotref = heap_alloc_zeroed(4)
-    got_file = file
+    ld.got_file = file
 }
 
 // ---------- merged sections (Merge_sections.plan) ----------
@@ -246,7 +242,7 @@ fn merge_same(o_file u64, s handle[Sec], x u64) bool {
 fn merge_plan() void {
     index KeyIndex = {}
     canonical Vec[u64] = {}
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         n u64 = zext[u64](o.nsec)
         relocated addr = heap_alloc_zeroed(n + 1)
@@ -304,8 +300,8 @@ fn live(f u64, y handle[Sym]) bool {
 fn sym_address(f u64, y handle[Sym]) u64 {
     if y.section == 0xfff1 { return y.value }
     if y.kind == 6 {
-        if module_base != NONE64 && f == pk_file(module_base) && handle_addr(y) == handle_addr(sym(obj(f), pk_sec(module_base))) { return 0 }
-        return place(f, zext[u64](y.section)).address - (lay_base + tls_seg.offset) + y.value
+        if ld.module_base != NONE64 && f == pk_file(ld.module_base) && handle_addr(y) == handle_addr(sym(obj(f), pk_sec(ld.module_base))) { return 0 }
+        return place(f, zext[u64](y.section)).address - (ld.lay_base + ld.tls_seg.offset) + y.value
     }
     return place(f, zext[u64](y.section)).address + y.value
 }
@@ -316,9 +312,8 @@ struct Values {
     has addr
 }
 
-var values addr = null   // Values per object
 
-fn vals(f u64) handle[Values] { return handle_from_addr(values + f * sizeof[Values]) }
+fn vals(f u64) handle[Values] { return handle_from_addr(ld.values + f * sizeof[Values]) }
 
 fn values_job(ctx addr, b u64, e u64, worker u32) void {
     for f u64 in b..e {
@@ -356,11 +351,11 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
 // ---------- predefined symbols ----------
 
 fn seg_ending(text_only bool, memory bool) u64 {
-    value u64 = lay_base + PAGE
-    for i u64 in 0..segments.n {
-        s handle[Seg] = vec_at(&segments, i)
+    value u64 = ld.lay_base + PAGE
+    for i u64 in 0..ld.segments.n {
+        s handle[Seg] = vec_at(&ld.segments, i)
         if text_only && (s.flags & 1) == 0 { continue }
-        e u64 = lay_base + s.offset + (if memory { s.memory_size } else { s.file_size })
+        e u64 = ld.lay_base + s.offset + (if memory { s.memory_size } else { s.file_size })
         value = umax(value, e)
     }
     return value
@@ -369,7 +364,7 @@ fn seg_ending(text_only bool, memory bool) u64 {
 fn array_boundary(kind u32, last bool) u64 {
     found bool = false
     value u64 = 0
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
@@ -391,7 +386,7 @@ fn array_boundary(kind u32, last bool) u64 {
 }
 
 fn predefined_value(n Bytes) u64 {
-    if bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") { return lay_base }
+    if bytes_is(n, c"__executable_start") || bytes_is(n, c"__ehdr_start") { return ld.lay_base }
     if bytes_is(n, c"__rela_iplt_start") { return ifunc_boundary(false) }
     if bytes_is(n, c"__rela_iplt_end") { return ifunc_boundary(true) }
     if bytes_is(n, c"__bss_start") || bytes_is(n, c"_edata") || bytes_is(n, c"edata") { return seg_ending(false, false) }
@@ -403,15 +398,15 @@ fn predefined_value(n Bytes) u64 {
     if bytes_is(n, c"__init_array_end") { return array_boundary(14, true) }
     if bytes_is(n, c"__fini_array_start") { return array_boundary(15, false) }
     if bytes_is(n, c"__fini_array_end") { return array_boundary(15, true) }
-    if bytes_is(n, c"_GLOBAL_OFFSET_TABLE_") { return place(got_file, 1).address }
-    if bytes_is(n, c"_DYNAMIC") { return place(dyn_file, DYN_DYNAMIC).address }
+    if bytes_is(n, c"_GLOBAL_OFFSET_TABLE_") { return place(ld.got_file, 1).address }
+    if bytes_is(n, c"_DYNAMIC") { return place(ld.dyn_file, DYN_DYNAMIC).address }
     last u8 = 0
     section Bytes = boundary(n, &last)
     // the last output header with that name
-    k u64 = headers.n
+    k u64 = ld.headers.n
     while k > 0 {
         k -= 1
-        o handle[OutSec] = vec_at(&headers, k)
+        o handle[OutSec] = vec_at(&ld.headers, k)
         if bytes_eq(o.name, section) {
             return o.address + (if last != 0 { o.size } else { 0 })
         }
@@ -420,8 +415,8 @@ fn predefined_value(n Bytes) u64 {
 }
 
 fn set_predefined() void {
-    if predefined_file == NONE64 { return }
-    o handle[Obj] = obj(predefined_file)
+    if ld.predefined_file == NONE64 { return }
+    o handle[Obj] = obj(ld.predefined_file)
     for i u64 in 1..zext[u64](o.nsym) {
         y handle[Sym] = sym(o, i)
         y.value = predefined_value(y.name)
@@ -483,8 +478,6 @@ fn reloc_context(b handle[Buf], f u64, r handle[Rel]) void {
     }
 }
 
-var image addr = null
-var image_size u64 = 0
 
 // Relocates one object; on failure its message is in the object's msg and
 // the result is false. The OCaml linker stops at the first failure in
@@ -494,7 +487,7 @@ fn relocate_object(f u64) bool {
     o handle[Obj] = obj(f)
     m handle[Buf] = &o.msg
     vv handle[Values] = vals(f)
-    got_address u64 = if got_file != NONE64 { place(got_file, 1).address } else { 0 }
+    got_address u64 = if ld.got_file != NONE64 { place(ld.got_file, 1).address } else { 0 }
     for k u64 in 0..zext[u64](o.nrel) {
         r handle[Rel] = rel(o, k)
         t u64 = zext[u64](r.target)
@@ -512,7 +505,7 @@ fn relocate_object(f u64) bool {
         value u64 = 0
         stub bool = !bytes_is(ts.name, c".eh_frame") && !got_relocation(r.kind) && !base_relocation(r.kind) &&
             ifunc_stub(f, si, &value)
-        if !stub && dyn_file != NONE64 {
+        if !stub && ld.dyn_file != NONE64 {
             if (r.kind == 4 || r.kind == 2) && lx(f).gotref[u32, k] != NONE {
                 stub = dyn_stub_address(lx(f).gotref[u32, k], &value)
             } else if r.kind == 1 && canonical_ifunc(f, si) {
@@ -548,14 +541,14 @@ fn relocate_object(f u64) bool {
             return false
         }
         offset u64 = target.offset + r.offset
-        if offset > image_size || width > image_size - offset {
+        if offset > ld.image_size || width > ld.image_size - offset {
             reloc_context(m, f, r)
             bs(m, c": byte range (")
             bu(m, offset)
             bs(m, c", ")
             bu(m, width)
             bs(m, c") exceeds size ")
-            bu(m, image_size)
+            bu(m, ld.image_size)
             return false
         }
         x u64 = value + addend
@@ -581,13 +574,13 @@ fn relocate_object(f u64) bool {
             return false
         }
         if width == 8 {
-            wr64(image, offset, x)
+            wr64(ld.image, offset, x)
         } else if width == 4 {
-            wr32(image, offset, x)
+            wr32(ld.image, offset, x)
         } else if width == 2 {
-            wr16(image, offset, x)
+            wr16(ld.image, offset, x)
         } else if width == 1 {
-            wr8(image, offset, x)
+            wr8(ld.image, offset, x)
         }
     }
     return true
@@ -602,12 +595,12 @@ fn relocate_job(ctx addr, b u64, e u64, worker u32) void {
 // copies every placed section's bytes into the image
 fn blit_job(ctx addr, b u64, e u64, worker u32) void {
     for i u64 in b..e {
-        x u64 = content.p[u64, i]
+        x u64 = ld.content.p[u64, i]
         f u64 = pk_file(x)
         k u64 = pk_sec(x)
         s handle[Sec] = sec(obj(f), k)
         if s.kind == 8 || s.size == 0 { continue }
-        mem_copy(image + place(f, k).offset, sec_data(f, s), s.size)
+        mem_copy(ld.image + place(f, k).offset, sec_data(f, s), s.size)
     }
 }
 
@@ -629,29 +622,29 @@ fn add_string(b handle[Buf], s Bytes) u32 fails {
 
 fn section_header(at u64, name u64, kind u64, flags u64, address u64, offset u64, size u64,
     link u64, info u64, alignment u64, entsize u64) void {
-    wr32(image, at, name)
-    wr32(image, at + 4, kind)
-    wr64(image, at + 8, flags)
-    wr64(image, at + 16, address)
-    wr64(image, at + 24, offset)
-    wr64(image, at + 32, size)
-    wr32(image, at + 40, link)
-    wr32(image, at + 44, info)
-    wr64(image, at + 48, alignment)
-    wr64(image, at + 56, entsize)
+    wr32(ld.image, at, name)
+    wr32(ld.image, at + 4, kind)
+    wr64(ld.image, at + 8, flags)
+    wr64(ld.image, at + 16, address)
+    wr64(ld.image, at + 24, offset)
+    wr64(ld.image, at + 32, size)
+    wr32(ld.image, at + 40, link)
+    wr32(ld.image, at + 44, info)
+    wr64(ld.image, at + 48, alignment)
+    wr64(ld.image, at + 56, entsize)
 }
 
 fn program_header(index u64, kind u64, flags u64, offset u64, address u64, file_size u64,
     memory_size u64, alignment u64) void {
     at u64 = 64 + index * 56
-    wr32(image, at, kind)
-    wr32(image, at + 4, flags)
-    wr64(image, at + 8, offset)
-    wr64(image, at + 16, address)
-    wr64(image, at + 24, address)
-    wr64(image, at + 32, file_size)
-    wr64(image, at + 40, memory_size)
-    wr64(image, at + 48, alignment)
+    wr32(ld.image, at, kind)
+    wr32(ld.image, at + 4, flags)
+    wr64(ld.image, at + 8, offset)
+    wr64(ld.image, at + 16, address)
+    wr64(ld.image, at + 24, address)
+    wr64(ld.image, at + 32, file_size)
+    wr64(ld.image, at + 40, memory_size)
+    wr64(ld.image, at + 48, alignment)
 }
 
 fn entry_address() u64 fails {
@@ -693,7 +686,6 @@ fn entry_address() u64 fails {
     return (try get_placement(f, zext[u64](y.section))).address + y.value
 }
 
-var emit_start PhaseStart = {}
 
 fn shdeps_find_def(name Bytes) i32 {
     id u32 = find(name)
@@ -722,12 +714,12 @@ fn shdeps_defined_cb(name Bytes, version Bytes) i32 {
 
 fn build_image() void fails {
     c handle[Config] = config()
-    phase_begin(PH_EMIT, &emit_start)
+    phase_begin(PH_EMIT, &ld.emit_start)
     try check_legacy_sections()
     tls_prepare()
     symver_plan()
     try shared_output_prepare()
-    try shdeps_validate[shdeps_defined_cb](&shdeps_graph)
+    try shdeps_validate[shdeps_defined_cb](&ld.shdeps_graph)
     ut PhaseStart = {}
     phase_begin(PH_UNWIND, &ut)
     try unwind_normalize()
@@ -736,9 +728,9 @@ fn build_image() void fails {
     phase_begin(PH_GC, &gt)
     alloc_tables()
     if c.gc_sections { gc_sections() }
-    if stats_on {
+    if ld.stats_on {
         // Section_gc counts the discarded progbits/nobits/array sections
-        for f u64 in 0..nobj {
+        for f u64 in 0..ld.nobj {
             o handle[Obj] = obj(f)
             for k u64 in 0..zext[u64](o.nsec) {
                 kd u32 = sec(o, k).kind
@@ -764,9 +756,9 @@ fn build_image() void fails {
         try dyn_prepare()
     }
     // Dynamic.pie: shared output is position independent too
-    lay_base = if c.pie || c.mode == MODE_SHARED { 0 } else { LAYOUT_BASE }
-    lay_relro = dyn_file != NONE64 && c.relro
-    if nobj == 0 { try die_c(c"no input objects") }
+    ld.lay_base = if c.pie || c.mode == MODE_SHARED { 0 } else { LAYOUT_BASE }
+    ld.lay_relro = ld.dyn_file != NONE64 && c.relro
+    if ld.nobj == 0 { try die_c(c"no input objects") }
     mt PhaseStart = {}
     phase_begin(PH_MERGE, &mt)
     merge_plan()
@@ -774,8 +766,8 @@ fn build_image() void fails {
     try layout_make()
     set_predefined()
 
-    values = heap_alloc_zeroed(nobj * sizeof[Values])
-    pool_for(pool, nobj, 1, &values_job, null)
+    ld.values = heap_alloc_zeroed(ld.nobj * sizeof[Values])
+    ld_pool_for(ld.nobj, 1, &values_job, null)
     entry u64 = try entry_address()
 
     // the symbol table: live canonical symbols, locals first
@@ -785,7 +777,7 @@ fn build_image() void fails {
     buf_u8(&shstrtab, 0)
     locals Vec[SymOut] = {}
     globals Vec[SymOut] = {}
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for i u64 in 1..zext[u64](o.nsym) {
             y handle[Sym] = sym(o, i)
@@ -803,52 +795,52 @@ fn build_image() void fails {
     }
     symbol_count u64 = locals.n + globals.n + 1
     symtab_size u64 = try chk_add(c"output symbol count", MAX_OUTPUT / 24, 0, symbol_count) * 24
-    content_count u64 = headers.n
+    content_count u64 = ld.headers.n
     name_offsets addr = heap_alloc(content_count * 4 + 4)
     for k u64 in 0..content_count {
-        name_offsets[u32, k] = try add_string(&shstrtab, vec_at(&headers, k).name)
+        name_offsets[u32, k] = try add_string(&shstrtab, vec_at(&ld.headers, k).name)
     }
     symtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".symtab")))
     strtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".strtab")))
     shstrtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".shstrtab")))
-    symtab_offset u64 = try out_align(lay_cursor, 8)
+    symtab_offset u64 = try out_align(ld.lay_cursor, 8)
     strtab_offset u64 = try out_add(symtab_offset, symtab_size)
     shstrtab_offset u64 = try out_add(strtab_offset, strtab.n)
     shoff u64 = try out_align(try out_add(shstrtab_offset, shstrtab.n), 8)
     section_count u64 = content_count + 4
     size u64 = try out_add(shoff, section_count * 64)
-    image_size = size
-    image = heap_alloc_zeroed(size + 8)
+    ld.image_size = size
+    ld.image = heap_alloc_zeroed(size + 8)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at(&headers, k)
+        s handle[OutSec] = vec_at(&ld.headers, k)
         if (s.flags & 4) != 0 && (bytes_is(s.name, c".init") || bytes_is(s.name, c".fini")) {
-            mem_set(image + s.offset, 144, s.size)
+            mem_set(ld.image + s.offset, 144, s.size)
         }
     }
-    pool_for(pool, content.n, 64, &blit_job, null)
+    ld_pool_for(ld.content.n, 64, &blit_job, null)
 
     // GOT slots
-    if got_file != NONE64 {
-        p handle[Place] = try get_placement(got_file, 1)
-        for slot u64 in 0..got_slots.n {
-            x u64 = got_slots.p[u64, slot]
+    if ld.got_file != NONE64 {
+        p handle[Place] = try get_placement(ld.got_file, 1)
+        for slot u64 in 0..ld.got_slots.n {
+            x u64 = ld.got_slots.p[u64, slot]
             sf u64 = pk_file(x)
             si u64 = pk_sec(x)
             vv handle[Values] = vals(sf)
             sv u64 = 0
             if ifunc_stub(sf, si, &sv) {
-                wr64(image, p.offset + slot * 8, sv)
+                wr64(ld.image, p.offset + slot * 8, sv)
                 continue
             }
-            model u8 = got_model.p[u8, slot]
+            model u8 = ld.got_model.p[u8, slot]
             if model == GM_LOCAL_MODULE || model == GM_LOCAL_OFFSET || model == GM_DESCRIPTOR || model == GM_DESCRIPTOR_ARGUMENT {
-                wr64(image, p.offset + slot * 8, if model == GM_LOCAL_MODULE { 1 } else { 0 })
+                wr64(ld.image, p.offset + slot * 8, if model == GM_LOCAL_MODULE { 1 } else { 0 })
                 continue
             }
             if model == GM_ADDRESS && canonical_ifunc(sf, si) {
                 if !dyn_ifunc_stub(sf, si, &sv) { try die_c(c"missing canonical IFUNC stub") }
-                wr64(image, p.offset + slot * 8, sv)
+                wr64(ld.image, p.offset + slot * 8, sv)
                 continue
             }
             if vv.has[u8, si] == 0 {
@@ -860,20 +852,20 @@ fn build_image() void fails {
             }
             v u64 = vv.v[u64, si]
             if model != GM_ADDRESS && dyn_imported(sym(obj(sf), si).name) {
-                wr64(image, p.offset + slot * 8, 0)
+                wr64(ld.image, p.offset + slot * 8, 0)
                 continue
             }
             if model == GM_THREAD && c.mode != MODE_SHARED && !thread_offset(msg(), v, &v) { try die() }
             if model == GM_MODULE_ID { v = 1 }
-            wr64(image, p.offset + slot * 8, v)
+            wr64(ld.image, p.offset + slot * 8, v)
         }
     }
 
     rt PhaseStart = {}
 
     phase_begin(PH_RELOCATE, &rt)
-    pool_for(pool, nobj, 1, &relocate_job, null)
-    for f u64 in 0..nobj {
+    ld_pool_for(ld.nobj, 1, &relocate_job, null)
+    for f u64 in 0..ld.nobj {
         if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
     phase_end(PH_RELOCATE, &rt)
@@ -883,23 +875,23 @@ fn build_image() void fails {
 
     // the ELF header
     ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
-    mem_copy(image, &ident, 7)
-    wr16(image, 16, if c.pie || c.mode == MODE_SHARED { 3 } else { 2 })
-    wr16(image, 18, 62)
-    wr32(image, 20, 1)
-    wr64(image, 24, entry)
-    wr64(image, 32, 64)
-    wr64(image, 40, shoff)
-    wr16(image, 52, 64)
-    wr16(image, 54, 56)
-    phnum u64 = segments.n + 2
-    if unwind_file != NONE64 { phnum += 1 }
-    if property_file != NONE64 { phnum += 2 }
-    if tls_seg.alignment != 0 { phnum += 1 }
-    if build_id_file != NONE64 { phnum += 1 }
-    if has_relro_seg { phnum += 1 }
+    mem_copy(ld.image, &ident, 7)
+    wr16(ld.image, 16, if c.pie || c.mode == MODE_SHARED { 3 } else { 2 })
+    wr16(ld.image, 18, 62)
+    wr32(ld.image, 20, 1)
+    wr64(ld.image, 24, entry)
+    wr64(ld.image, 32, 64)
+    wr64(ld.image, 40, shoff)
+    wr16(ld.image, 52, 64)
+    wr16(ld.image, 54, 56)
+    phnum u64 = ld.segments.n + 2
+    if ld.unwind_file != NONE64 { phnum += 1 }
+    if ld.property_file != NONE64 { phnum += 2 }
+    if ld.tls_seg.alignment != 0 { phnum += 1 }
+    if ld.build_id_file != NONE64 { phnum += 1 }
+    if ld.has_relro_seg { phnum += 1 }
     prefix u64 = 0
-    if dyn_file != NONE64 {
+    if ld.dyn_file != NONE64 {
         if c.mode == MODE_SHARED {
             phnum += 1
         } else if c.mode == MODE_STATIC_PIE {
@@ -911,56 +903,56 @@ fn build_image() void fails {
         }
     }
     header_size u64 = 64 + phnum * 56
-    wr16(image, 56, phnum)
-    wr16(image, 58, 64)
-    wr16(image, 60, section_count)
-    wr16(image, 62, content_count + 3)
-    if dyn_file != NONE64 && c.mode != MODE_SHARED {
-        program_header(0, 6, 4, 64, lay_base + 64, phnum * 56, phnum * 56, 8)
+    wr16(ld.image, 56, phnum)
+    wr16(ld.image, 58, 64)
+    wr16(ld.image, 60, section_count)
+    wr16(ld.image, 62, content_count + 3)
+    if ld.dyn_file != NONE64 && c.mode != MODE_SHARED {
+        program_header(0, 6, 4, 64, ld.lay_base + 64, phnum * 56, phnum * 56, 8)
         if c.mode != MODE_STATIC_PIE {
             ip handle[Place] = dyn_place(DYN_INTERP)
-            is u64 = sec(obj(dyn_file), DYN_INTERP).size
+            is u64 = sec(obj(ld.dyn_file), DYN_INTERP).size
             program_header(1, 3, 4, ip.offset, ip.address, is, is, 1)
         }
     }
-    program_header(prefix, 1, 4, 0, lay_base, header_size, header_size, PAGE)
-    for i u64 in 0..segments.n {
-        s handle[Seg] = vec_at(&segments, i)
-        program_header(prefix + i + 1, 1, s.flags, s.offset, lay_base + s.offset, s.file_size, s.memory_size, s.alignment)
+    program_header(prefix, 1, 4, 0, ld.lay_base, header_size, header_size, PAGE)
+    for i u64 in 0..ld.segments.n {
+        s handle[Seg] = vec_at(&ld.segments, i)
+        program_header(prefix + i + 1, 1, s.flags, s.offset, ld.lay_base + s.offset, s.file_size, s.memory_size, s.alignment)
     }
-    extra_header u64 = prefix + segments.n + 1
-    if has_relro_seg {
-        program_header(extra_header, 0x6474e552, 4, relro_seg.offset, lay_base + relro_seg.offset, relro_seg.file_size,
-            relro_seg.memory_size, 1)
+    extra_header u64 = prefix + ld.segments.n + 1
+    if ld.has_relro_seg {
+        program_header(extra_header, 0x6474e552, 4, ld.relro_seg.offset, ld.lay_base + ld.relro_seg.offset, ld.relro_seg.file_size,
+            ld.relro_seg.memory_size, 1)
         extra_header += 1
     }
-    if tls_seg.alignment != 0 {
-        program_header(extra_header, 7, 4, tls_seg.offset, lay_base + tls_seg.offset, tls_seg.file_size,
-            tls_seg.memory_size, tls_seg.alignment)
+    if ld.tls_seg.alignment != 0 {
+        program_header(extra_header, 7, 4, ld.tls_seg.offset, ld.lay_base + ld.tls_seg.offset, ld.tls_seg.file_size,
+            ld.tls_seg.memory_size, ld.tls_seg.alignment)
         extra_header += 1
     }
-    if dyn_file != NONE64 {
+    if ld.dyn_file != NONE64 {
         dp handle[Place] = dyn_place(DYN_DYNAMIC)
-        dz u64 = sec(obj(dyn_file), DYN_DYNAMIC).size
+        dz u64 = sec(obj(ld.dyn_file), DYN_DYNAMIC).size
         program_header(extra_header, 2, 6, dp.offset, dp.address, dz, dz, 8)
         extra_header += 1
     }
-    if unwind_file != NONE64 {
-        hp handle[Place] = try get_placement(unwind_file, 1)
-        hs u64 = sec(obj(unwind_file), 1).size
+    if ld.unwind_file != NONE64 {
+        hp handle[Place] = try get_placement(ld.unwind_file, 1)
+        hs u64 = sec(obj(ld.unwind_file), 1).size
         program_header(extra_header, 0x6474e550, 4, hp.offset, hp.address, hs, hs, 4)
         extra_header += 1
     }
-    if property_file != NONE64 {
-        pp handle[Place] = try get_placement(property_file, 1)
-        ps u64 = sec(obj(property_file), 1).size
+    if ld.property_file != NONE64 {
+        pp handle[Place] = try get_placement(ld.property_file, 1)
+        ps u64 = sec(obj(ld.property_file), 1).size
         program_header(extra_header, 4, 4, pp.offset, pp.address, ps, ps, 8)
         program_header(extra_header + 1, 0x6474e553, 4, pp.offset, pp.address, ps, ps, 8)
         extra_header += 2
     }
-    if build_id_file != NONE64 {
-        bp handle[Place] = try get_placement(build_id_file, 1)
-        bz u64 = sec(obj(build_id_file), 1).size
+    if ld.build_id_file != NONE64 {
+        bp handle[Place] = try get_placement(ld.build_id_file, 1)
+        bz u64 = sec(obj(ld.build_id_file), 1).size
         program_header(extra_header, 4, 4, bp.offset, bp.address, bz, bz, 4)
         extra_header += 1
     }
@@ -972,21 +964,21 @@ fn build_image() void fails {
         f u64 = zext[u64](e.file)
         y handle[Sym] = sym(obj(f), e.sym)
         at u64 = symtab_offset + (j + 1) * 24
-        wr32(image, at, zext[u64](e.name))
-        wr8(image, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
+        wr32(ld.image, at, zext[u64](e.name))
+        wr8(ld.image, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
         vis u8 = y.visibility
         if y.binding != 0 { vis = gsym(gid_of(f, e.sym)).res_vis }
-        wr8(image, at + 5, zext[u64](vis))
+        wr8(ld.image, at + 5, zext[u64](vis))
         shndx u64 = if y.section == 0xfff1 { 0xfff1 } else { zext[u64]((try get_placement(f, zext[u64](y.section))).output_index) }
-        wr16(image, at + 6, shndx)
-        wr64(image, at + 8, sym_address(f, y))
-        wr64(image, at + 16, y.size)
+        wr16(ld.image, at + 6, shndx)
+        wr64(ld.image, at + 8, sym_address(f, y))
+        wr64(ld.image, at + 16, y.size)
     }
-    mem_copy(image + strtab_offset, strtab.p, strtab.n)
-    mem_copy(image + shstrtab_offset, shstrtab.p, shstrtab.n)
+    mem_copy(ld.image + strtab_offset, strtab.p, strtab.n)
+    mem_copy(ld.image + shstrtab_offset, shstrtab.p, shstrtab.n)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at(&headers, k)
+        s handle[OutSec] = vec_at(&ld.headers, k)
         link u64 = 0
         info u64 = 0
         if !dyn_metadata(k + 1, &link, &info) {
@@ -1001,7 +993,7 @@ fn build_image() void fails {
     section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, strtab.n, 0, 0, 1, 0)
     section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, shstrtab.n, 0, 0, 1, 0)
     if c.has_map { try map_build(entry, &locals, &globals) }
-    stat_add(ST_OUTPUT_BYTES, image_size)
+    stat_add(ST_OUTPUT_BYTES, ld.image_size)
 }
 
 // ---------- publishing (File_io) ----------
@@ -1060,7 +1052,7 @@ fn link_and_publish() void fails {
     // and first in the expanded list
     if c.has_version_script {
         vec_push(&paths, c.version_script)
-        vec_push(&expanded, c.version_script)
+        vec_push(&ld.expanded, c.version_script)
     }
     discard bool = false
     if !in_mem {
@@ -1079,17 +1071,17 @@ fn link_and_publish() void fails {
     try resolve()
     try build_image()
     try build_id_emit()
-    phase_end(PH_EMIT, &emit_start)
+    phase_end(PH_EMIT, &ld.emit_start)
     if in_mem {
-        ld_capture_output(image, image_size, c.has_map, buf_bytes(&map_text))
+        ld_capture_output(ld.image, ld.image_size, c.has_map, buf_bytes(&ld.map_text))
         return
     }
     st2 Stat = {}
-    try check_output(output, &expanded, true, &st2)
+    try check_output(output, &ld.expanded, true, &st2)
     if c.has_map {
         ms2 Stat = {}
-        if !(try check_output(c.map_file, &expanded, true, &ms2) && try null_output(c.map_file, &ms2)) {
-            file_write_atomic(c.map_file.p, buf_bytes(&map_text), 0o644) catch e {
+        if !(try check_output(c.map_file, &ld.expanded, true, &ms2) && try null_output(c.map_file, &ms2)) {
+            file_write_atomic(c.map_file.p, buf_bytes(&ld.map_text), 0o644) catch e {
                 try die_io(c"write", c.map_file, e)
             }
         }
@@ -1097,11 +1089,11 @@ fn link_and_publish() void fails {
     wt PhaseStart = {}
     phase_begin(PH_WRITE, &wt)
     if discard {
-        stat_add(ST_DISCARDED_OUTPUT_BYTES, image_size)
+        stat_add(ST_DISCARDED_OUTPUT_BYTES, ld.image_size)
         return
     }
     permissions u32 = if c.mode == MODE_SHARED { 0o644 } else { 0o755 }
-    file_write_atomic(output.p, bytes(image, image_size), permissions) catch e {
+    file_write_atomic(output.p, bytes(ld.image, ld.image_size), permissions) catch e {
         try die_io(c"write", output, e)
     }
     phase_end(PH_WRITE, &wt)

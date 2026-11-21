@@ -14,35 +14,21 @@ struct VsNode {
     has_parent u8
 }
 
-var vs_path Bytes = {}
-var vs_nodes Vec[VsNode] = {}
-var vs_rules Vec[VsRule] = {}
 // two policy instances (Shared_output's and Dynamic's), each with its
 // own cache (0 = local, otherwise the global version) and work count
-var vs_cache0 BytesU32Map = {}
-var vs_cache1 BytesU32Map = {}
-var vs_work arr[2, u64] = {}
 // exact_local's non-wildcard pattern sets
-var vs_locals BytesU32Map = {}
-var vs_globals BytesU32Map = {}
 
 // the lexer
-var vs_data Bytes = {}
-var vs_pos u64 = 0
-var vs_count u64 = 0
 const VT_END u8 = 0
 const VT_PUNCT u8 = 1
 const VT_WORD u8 = 2
-var vs_tk u8 = 0
-var vs_ch u8 = 0
-var vs_word Bytes = {}
 
 // "<path>: version script byte <pos>: " in the message buffer
 fn vs_fail() handle[Buf] {
     m handle[Buf] = msg()
-    bb(m, vs_path)
+    bb(m, ld.vs_path)
     bs(m, c": version script byte ")
-    bu(m, vs_pos)
+    bu(m, ld.vs_pos)
     bs(m, c": ")
     return m
 }
@@ -54,22 +40,22 @@ fn vs_fail_c(s addr) void fails {
 }
 
 fn vs_starts(a u8, b u8) bool {
-    return vs_pos + 2 <= vs_data.n && vs_data.p[u8, vs_pos] == a && vs_data.p[u8, vs_pos + 1] == b
+    return ld.vs_pos + 2 <= ld.vs_data.n && ld.vs_data.p[u8, ld.vs_pos] == a && ld.vs_data.p[u8, ld.vs_pos + 1] == b
 }
 
 fn vs_space() void fails {
-    length u64 = vs_data.n
-    while vs_pos < length {
-        c u8 = vs_data.p[u8, vs_pos]
+    length u64 = ld.vs_data.n
+    while ld.vs_pos < length {
+        c u8 = ld.vs_data.p[u8, ld.vs_pos]
         if c == 32 || c == 10 || c == 13 || c == 9 {
-            vs_pos += 1
+            ld.vs_pos += 1
         } else if c == 35 {
-            while vs_pos < length && vs_data.p[u8, vs_pos] != 10 { vs_pos += 1 }
+            while ld.vs_pos < length && ld.vs_data.p[u8, ld.vs_pos] != 10 { ld.vs_pos += 1 }
         } else if c == 47 && vs_starts(47, 42) {
-            vs_pos += 2
-            while vs_pos < length && !vs_starts(42, 47) { vs_pos += 1 }
-            if vs_pos == length { try vs_fail_c(c"unterminated comment") }
-            vs_pos += 2
+            ld.vs_pos += 2
+            while ld.vs_pos < length && !vs_starts(42, 47) { ld.vs_pos += 1 }
+            if ld.vs_pos == length { try vs_fail_c(c"unterminated comment") }
+            ld.vs_pos += 2
         } else {
             return
         }
@@ -80,32 +66,32 @@ fn vs_punct(c u8) bool { return c == 123 || c == 125 || c == 58 || c == 59 }
 
 fn vs_next() void fails {
     try vs_space()
-    vs_count += 1
-    if vs_count > 10000 { try vs_fail_c(c"token count exceeds 10000") }
-    length u64 = vs_data.n
-    if vs_pos == length {
-        vs_tk = VT_END
+    ld.vs_count += 1
+    if ld.vs_count > 10000 { try vs_fail_c(c"token count exceeds 10000") }
+    length u64 = ld.vs_data.n
+    if ld.vs_pos == length {
+        ld.vs_tk = VT_END
         return
     }
-    c u8 = vs_data.p[u8, vs_pos]
+    c u8 = ld.vs_data.p[u8, ld.vs_pos]
     if vs_punct(c) {
-        vs_pos += 1
-        vs_tk = VT_PUNCT
-        vs_ch = c
+        ld.vs_pos += 1
+        ld.vs_tk = VT_PUNCT
+        ld.vs_ch = c
         return
     }
-    start u64 = vs_pos
-    while vs_pos < length {
-        d u8 = vs_data.p[u8, vs_pos]
+    start u64 = ld.vs_pos
+    while ld.vs_pos < length {
+        d u8 = ld.vs_data.p[u8, ld.vs_pos]
         if d == 32 || d == 10 || d == 13 || d == 9 || vs_punct(d) || vs_starts(47, 42) { break }
-        vs_pos += 1
+        ld.vs_pos += 1
     }
-    vs_word = bytes_sub(vs_data, start, vs_pos - start)
-    if vs_word.n == 0 || vs_word.n > 65535 { try vs_fail_c(c"invalid word") }
-    vs_tk = VT_WORD
+    ld.vs_word = bytes_sub(ld.vs_data, start, ld.vs_pos - start)
+    if ld.vs_word.n == 0 || ld.vs_word.n > 65535 { try vs_fail_c(c"invalid word") }
+    ld.vs_tk = VT_WORD
 }
 
-fn vs_is_punct(c u8) bool { return vs_tk == VT_PUNCT && vs_ch == c }
+fn vs_is_punct(c u8) bool { return ld.vs_tk == VT_PUNCT && ld.vs_ch == c }
 
 fn vs_expect(c u8) void fails {
     if !vs_is_punct(c) {
@@ -134,8 +120,8 @@ fn vs_identifier(word Bytes) void fails {
 }
 
 fn vs_has_node(name Bytes) bool {
-    for i u64 in 0..vs_nodes.n {
-        if bytes_eq(vec_at(&vs_nodes, i).name, name) { return true }
+    for i u64 in 0..ld.vs_nodes.n {
+        if bytes_eq(vec_at(&ld.vs_nodes, i).name, name) { return true }
     }
     return false
 }
@@ -152,18 +138,18 @@ fn vs_parse(path Bytes, data Bytes) void fails {
         bs(m, c": version script exceeds 1 MiB")
         try die()
     }
-    vs_path = path
-    vs_data = data
-    vs_pos = 0
-    vs_count = 0
+    ld.vs_path = path
+    ld.vs_data = data
+    ld.vs_pos = 0
+    ld.vs_count = 0
     try vs_next()
     rule_count u64 = 0
     anonymous bool = false
-    while vs_tk != VT_END {
-        if vs_nodes.n >= 256 { try vs_fail_c(c"node count exceeds 256") }
+    while ld.vs_tk != VT_END {
+        if ld.vs_nodes.n >= 256 { try vs_fail_c(c"node count exceeds 256") }
         name Bytes = bytes_empty()
-        if vs_tk == VT_WORD {
-            name = vs_word
+        if ld.vs_tk == VT_WORD {
+            name = ld.vs_word
             try vs_identifier(name)
             try vs_next()
         } else if vs_is_punct(123) {
@@ -177,19 +163,19 @@ fn vs_parse(path Bytes, data Bytes) void fails {
             bb(m, name)
             try die()
         }
-        if anonymous && (vs_nodes.n != 0 || name.n != 0) { try vs_fail_c(c"anonymous node must stand alone") }
+        if anonymous && (ld.vs_nodes.n != 0 || name.n != 0) { try vs_fail_c(c"anonymous node must stand alone") }
         version u32 = 1
-        if name.n != 0 { version = trunc[u32](vs_nodes.n + 2) }
+        if name.n != 0 { version = trunc[u32](ld.vs_nodes.n + 2) }
         try vs_expect(123)
         local u8 = 0
         while !vs_is_punct(125) {
-            if vs_tk == VT_WORD && (bytes_is(vs_word, c"global") || bytes_is(vs_word, c"local")) {
-                is_local bool = bytes_is(vs_word, c"local")
+            if ld.vs_tk == VT_WORD && (bytes_is(ld.vs_word, c"global") || bytes_is(ld.vs_word, c"local")) {
+                is_local bool = bytes_is(ld.vs_word, c"local")
                 try vs_next()
                 try vs_expect(58)
                 local = if is_local { 1 } else { 0 }
-            } else if vs_tk == VT_WORD {
-                pattern Bytes = vs_word
+            } else if ld.vs_tk == VT_WORD {
+                pattern Bytes = ld.vs_word
                 for i u64 in 0..pattern.n {
                     if vs_bad_pattern_char(pattern.p[u8, i]) {
                         m handle[Buf] = vs_fail()
@@ -205,7 +191,7 @@ fn vs_parse(path Bytes, data Bytes) void fails {
                 }
                 rule_count += 1
                 if rule_count > 1024 { try vs_fail_c(c"pattern count exceeds 1024") }
-                r handle[VsRule] = vec_add(&vs_rules)
+                r handle[VsRule] = vec_add(&ld.vs_rules)
                 r.pattern = pattern
                 r.local = local
                 r.version = version
@@ -218,8 +204,8 @@ fn vs_parse(path Bytes, data Bytes) void fails {
         try vs_next()
         parent Bytes = bytes_empty()
         has_parent u8 = 0
-        if vs_tk == VT_WORD {
-            parent = vs_word
+        if ld.vs_tk == VT_WORD {
+            parent = ld.vs_word
             if name.n == 0 || !vs_has_node(parent) {
                 m handle[Buf] = vs_fail()
                 bs(m, c"parent ")
@@ -231,58 +217,58 @@ fn vs_parse(path Bytes, data Bytes) void fails {
             has_parent = 1
         }
         try vs_expect(59)
-        n handle[VsNode] = vec_add(&vs_nodes)
+        n handle[VsNode] = vec_add(&ld.vs_nodes)
         n.name = name
         n.parent = parent
         n.has_parent = has_parent
     }
-    if vs_nodes.n == 0 { try vs_fail_c(c"empty script") }
+    if ld.vs_nodes.n == 0 { try vs_fail_c(c"empty script") }
     // exact_local's tables
-    lh handle[BytesU32Map] = &vs_locals
-    gh handle[BytesU32Map] = &vs_globals
-    for i u64 in 0..vs_rules.n {
-        r handle[VsRule] = vec_at(&vs_rules, i)
+    lh handle[BytesU32Map] = &ld.vs_locals
+    gh handle[BytesU32Map] = &ld.vs_globals
+    for i u64 in 0..ld.vs_rules.n {
+        r handle[VsRule] = vec_at(&ld.vs_rules, i)
         if bytes_contains(r.pattern, 42) { continue }
         if r.local != 0 { map_put(lh, r.pattern, 1) } else { map_put(gh, r.pattern, 1) }
     }
 }
 
-fn vs_node_count() u64 { return vs_nodes.n }
+fn vs_node_count() u64 { return ld.vs_nodes.n }
 
 fn vs_node(i u64) handle[VsNode] {
-    return vec_at(&vs_nodes, i)
+    return vec_at(&ld.vs_nodes, i)
 }
 
 // Version_script.named
-fn vs_named() bool { return vs_nodes.n != 0 && vs_node(0).name.n != 0 }
+fn vs_named() bool { return ld.vs_nodes.n != 0 && vs_node(0).name.n != 0 }
 
 // Version_script.exact_local
 fn vs_exact_local(name Bytes) bool {
-    return map_val_addr(&vs_locals, name) != null && map_val_addr(&vs_globals, name) == null
+    return map_val_addr(&ld.vs_locals, name) != null && map_val_addr(&ld.vs_globals, name) == null
 }
 
 // Version_script.policy (instance inst): 0 = Local, otherwise Global version
 fn vs_policy(inst u64, name Bytes) u32 fails {
-    ch handle[BytesU32Map] = &vs_cache0
-    if inst != 0 { ch = &vs_cache1 }
+    ch handle[BytesU32Map] = &ld.vs_cache0
+    if inst != 0 { ch = &ld.vs_cache1 }
     a addr = map_val_addr(ch, name)
     if a != null { return a[u32] }
     limit u64 = 64 * 1024 * 1024
     has bool = false
     sel_rank u64 = 0
     sel u64 = 0
-    for i u64 in 0..vs_rules.n {
-        r handle[VsRule] = vec_at(&vs_rules, i)
+    for i u64 in 0..ld.vs_rules.n {
+        r handle[VsRule] = vec_at(&ld.vs_rules, i)
         b u64 = name.n + r.pattern.n
-        work u64 = vs_work[inst]
+        work u64 = ld.vs_work[inst]
         if work > limit || b > limit - work {
             m handle[Buf] = msg()
-            bb(m, vs_path)
+            bb(m, ld.vs_path)
             bs(m, c": version matching work: size exceeds supported limit ")
             bu(m, limit)
             try die()
         }
-        vs_work[inst] = work + b
+        ld.vs_work[inst] = work + b
         wildcard bool = r.pattern.n != 0 && r.pattern.p[u8, r.pattern.n - 1] == 42
         matches bool = false
         rank u64 = 0xffffffffffffffff
@@ -296,10 +282,10 @@ fn vs_policy(inst u64, name Bytes) u32 fails {
         if !matches { continue }
         if has && rank < sel_rank { continue }
         if has && rank == sel_rank {
-            old handle[VsRule] = vec_at(&vs_rules, sel)
+            old handle[VsRule] = vec_at(&ld.vs_rules, sel)
             if old.local == 0 && r.local == 0 && old.version != r.version {
                 m handle[Buf] = msg()
-                bb(m, vs_path)
+                bb(m, ld.vs_path)
                 bs(m, c": ambiguous versions for ")
                 bb(m, name)
                 try die()
@@ -313,7 +299,7 @@ fn vs_policy(inst u64, name Bytes) u32 fails {
     }
     binding u32 = 1
     if has {
-        r handle[VsRule] = vec_at(&vs_rules, sel)
+        r handle[VsRule] = vec_at(&ld.vs_rules, sel)
         binding = if r.local != 0 { 0 } else { r.version }
     }
     map_put(ch, name, binding)

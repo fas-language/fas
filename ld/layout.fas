@@ -28,18 +28,9 @@ struct Seg {
     alignment u64
 }
 
-var headers Vec[OutSec] = {}
-var content Vec[u64] = {}    // placed sections in placement order
-var segments Vec[Seg] = {}
-var lay_cursor u64 = 0
 // the image base (Layout.make's ~base) and whether RELRO is wanted (~relro)
-var lay_base u64 = LAYOUT_BASE
-var lay_relro bool = false
 // the RELRO segment; has_relro_seg when there is one
-var relro_seg Seg = {}
-var has_relro_seg bool = false
 // the TLS template segment; tls_seg.alignment == 0 when there is none
-var tls_seg Seg = {}
 
 fn pk(f u64, s u64) u64 { return (f << 32) | s }
 fn pk_file(x u64) u64 { return x >> 32 }
@@ -50,9 +41,9 @@ fn out_add(a u64, b u64) u64 fails { return try chk_add(c"output layout", MAX_OU
 fn out_align(v u64, a u64) u64 fails { return try chk_align(c"output layout", MAX_OUTPUT, v, a) }
 
 fn header(name Bytes, s handle[Sec], offset u64, address u64, size u64, alignment u64) u32 fails {
-    count u64 = headers.n + 1
+    count u64 = ld.headers.n + 1
     if count + 4 >= 0xff00 { try die_c(c"output requires unsupported extended section numbering") }
-    o handle[OutSec] = vec_add(&headers)
+    o handle[OutSec] = vec_add(&ld.headers)
     o.name = name
     o.kind = s.kind
     o.flags = s.flags & ~0x200
@@ -70,7 +61,7 @@ fn chunk(x u64, output_index u32, offset u64, address u64) void {
     p.valid = 1
     p.offset = offset
     p.address = address
-    vec_push(&content, x)
+    vec_push(&ld.content, x)
 }
 
 fn add_section(x u64, offset u64, address u64) void fails {
@@ -229,7 +220,7 @@ fn build_groups(sel handle[Vec[u64]], g handle[Groups]) void {
 
 // Layout's is_relro
 fn is_relro(s handle[Sec]) bool {
-    if !lay_relro || (s.flags & 3) != 3 || (s.flags & 0x400) != 0 || s.kind == 8 { return false }
+    if !ld.lay_relro || (s.flags & 3) != 3 || (s.flags & 0x400) != 0 || s.kind == 8 { return false }
     n Bytes = s.name
     return bytes_is(n, c".got") || bytes_is(n, c".got.plt") || bytes_is(n, c".dynamic") ||
         s.kind == 14 || s.kind == 15 || s.kind == 16 ||
@@ -242,18 +233,18 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     // RELRO sections first, keeping selection order otherwise (stable)
     has_relro bool = false
     for pass u64 in 0..2 {
-        for f u64 in 0..nobj {
+        for f u64 in 0..ld.nobj {
             o handle[Obj] = obj(f)
             for k u64 in 0..zext[u64](o.nsec) {
                 s handle[Sec] = sec(o, k)
                 if (s.flags & 2) != 0 && class_of(s) == wanted && selectable(f, s, k) {
                     r bool = is_relro(s)
                     if r { has_relro = true }
-                    if !lay_relro || r == (pass == 0) { vec_push(sh, pk(f, k)) }
+                    if !ld.lay_relro || r == (pass == 0) { vec_push(sh, pk(f, k)) }
                 }
             }
         }
-        if !lay_relro { break }
+        if !ld.lay_relro { break }
     }
     if sh.n == 0 { return cursor }
     alignment u64 = PAGE
@@ -266,7 +257,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
     for i u64 in 0..sh.n {
         x u64 = vec_get(sh, i)
         s handle[Sec] = pk_section(x)
-        if has_relro && !has_relro_seg && !is_relro(s) { cursor = try end_relro(start, cursor) }
+        if has_relro && !ld.has_relro_seg && !is_relro(s) { cursor = try end_relro(start, cursor) }
         if s.kind == 8 { continue }
         id u32 = g.gid.p[u32, i]
         if id != NONE {
@@ -281,21 +272,21 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
             for j u64 in 0..n { ga = umax(ga, pk_section(m[u64, j]).alignment) }
             cursor = try out_align(cursor, ga)
             beginning u64 = cursor
-            output_index u32 = trunc[u32](headers.n + 1)
+            output_index u32 = trunc[u32](ld.headers.n + 1)
             for j u64 in 0..n {
                 member handle[Sec] = pk_section(m[u64, j])
                 cursor = try out_align(cursor, member.alignment)
-                chunk(m[u64, j], output_index, cursor, lay_base + cursor)
+                chunk(m[u64, j], output_index, cursor, ld.lay_base + cursor)
                 cursor = try out_add(cursor, member.size)
             }
-            try header(combined_name(s), s, beginning, lay_base + beginning, cursor - beginning, ga)
+            try header(combined_name(s), s, beginning, ld.lay_base + beginning, cursor - beginning, ga)
         } else if (s.flags & 0x400) == 0 {
             cursor = try out_align(cursor, s.alignment)
-            try add_section(x, cursor, lay_base + cursor)
+            try add_section(x, cursor, ld.lay_base + cursor)
             cursor = try out_add(cursor, s.size)
         }
     }
-    if has_relro && !has_relro_seg { cursor = try end_relro(start, cursor) }
+    if has_relro && !ld.has_relro_seg { cursor = try end_relro(start, cursor) }
     // the TLS template: initialized TLS data, then (below) TLS BSS first
     // among the NOBITS sections
     tls_alignment u64 = 1
@@ -314,7 +305,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
         s handle[Sec] = pk_section(x)
         if (s.flags & 0x400) == 0 || s.kind == 8 { continue }
         cursor = try out_align(cursor, s.alignment)
-        try add_section(x, cursor, lay_base + cursor)
+        try add_section(x, cursor, ld.lay_base + cursor)
         cursor = try out_add(cursor, s.size)
     }
     file_end u64 = cursor
@@ -339,37 +330,37 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
             for j u64 in 0..n { ga = umax(ga, pk_section(m[u64, j]).alignment) }
             memory_end = try chk_align(c"registry BSS layout", MAX_IMAGE, memory_end, ga)
             beginning u64 = memory_end
-            output_index u32 = trunc[u32](headers.n + 1)
+            output_index u32 = trunc[u32](ld.headers.n + 1)
             for j u64 in 0..n {
                 member handle[Sec] = pk_section(m[u64, j])
                 memory_end = try chk_align(c"registry BSS layout", MAX_IMAGE, memory_end, member.alignment)
-                chunk(m[u64, j], output_index, memory_end, lay_base + memory_end)
+                chunk(m[u64, j], output_index, memory_end, ld.lay_base + memory_end)
                 memory_end = try chk_add(c"registry BSS layout", MAX_IMAGE, memory_end, member.size)
             }
-            try header(s.name, s, beginning, lay_base + beginning, memory_end - beginning, ga)
+            try header(s.name, s, beginning, ld.lay_base + beginning, memory_end - beginning, ga)
         } else {
             memory_end = try chk_align(c"BSS layout", MAX_IMAGE, memory_end, s.alignment)
-            try add_section(x, memory_end, lay_base + memory_end)
+            try add_section(x, memory_end, ld.lay_base + memory_end)
             memory_end = try chk_add(c"BSS layout", MAX_IMAGE, memory_end, s.size)
             if (s.flags & 0x400) != 0 {
-                tls_seg.flags = 4
-                tls_seg.offset = tls_start
-                tls_seg.file_size = file_end - tls_start
-                tls_seg.memory_size = memory_end - tls_start
-                tls_seg.alignment = tls_alignment
+                ld.tls_seg.flags = 4
+                ld.tls_seg.offset = tls_start
+                ld.tls_seg.file_size = file_end - tls_start
+                ld.tls_seg.memory_size = memory_end - tls_start
+                ld.tls_seg.alignment = tls_alignment
                 tls_done = true
             }
         }
     }
     }
     if has_tls && !tls_done {
-        tls_seg.flags = 4
-        tls_seg.offset = tls_start
-        tls_seg.file_size = file_end - tls_start
-        tls_seg.memory_size = file_end - tls_start
-        tls_seg.alignment = tls_alignment
+        ld.tls_seg.flags = 4
+        ld.tls_seg.offset = tls_start
+        ld.tls_seg.file_size = file_end - tls_start
+        ld.tls_seg.memory_size = file_end - tls_start
+        ld.tls_seg.alignment = tls_alignment
     }
-    sg handle[Seg] = vec_add(&segments)
+    sg handle[Seg] = vec_add(&ld.segments)
     sg.flags = flags
     sg.offset = start
     sg.file_size = file_end - start
@@ -386,17 +377,17 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
 // Layout's end_relro: the RELRO segment ends at the next page boundary
 fn end_relro(start u64, cursor u64) u64 fails {
     cursor = try out_align(cursor, PAGE)
-    relro_seg.flags = 4
-    relro_seg.offset = start
-    relro_seg.file_size = cursor - start
-    relro_seg.memory_size = cursor - start
-    relro_seg.alignment = 1
-    has_relro_seg = true
+    ld.relro_seg.flags = 4
+    ld.relro_seg.offset = start
+    ld.relro_seg.file_size = cursor - start
+    ld.relro_seg.memory_size = cursor - start
+    ld.relro_seg.alignment = 1
+    ld.has_relro_seg = true
     return cursor
 }
 
 fn layout_make() void fails {
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         l handle[Lx] = lx(f)
         l.place = heap_alloc_zeroed(zext[u64](obj(f).nsec) * sizeof[Place] + sizeof[Place])
     }
@@ -408,7 +399,7 @@ fn layout_make() void fails {
     // non-allocatable sections, grouped by (name, kind, flags, entsize) in
     // first-seen order; a contribution's address is its offset in the group
     sel Vec[u64] = {}
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
@@ -452,7 +443,7 @@ fn layout_make() void fails {
         }
         cursor = try out_align(cursor, ga)
         start u64 = cursor
-        output_index u32 = trunc[u32](headers.n + 1)
+        output_index u32 = trunc[u32](ld.headers.n + 1)
         i = heads.p[u64, k]
         while i != NONE64 {
             x u64 = vec_get(&sel, i)
@@ -466,7 +457,7 @@ fn layout_make() void fails {
         try header(firsts.name, firsts, start, 0, cursor - start, ga)
     }
     // merged sections take their canonical section's placement
-    for f u64 in 0..nobj {
+    for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             a u64 = lx(f).alias[u64, k]
@@ -476,5 +467,5 @@ fn layout_make() void fails {
             }
         }
     }
-    lay_cursor = cursor
+    ld.lay_cursor = cursor
 }
