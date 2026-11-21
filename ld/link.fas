@@ -700,6 +700,32 @@ fn entry_address() u64 {
 
 var emit_start PhaseStart = {}
 
+fn shdeps_find_def(name Bytes) i32 {
+    id u32 = find(name)
+    if id == NONE { return -1 }
+    g handle[GSym] = gsym(id)
+    if g.has_res == 0 || (g.res_vis != 0 && g.res_vis != 3) { return -1 }
+    return zext[i32](sym(obj(zext[u64](g.res_file)), zext[u64](g.res_sym)).kind)
+}
+
+fn shdeps_defined_cb(name Bytes, version Bytes) i32 {
+    if version.n == SH_NONE { return shdeps_find_def(name) }
+    b Buf = {}
+    bh handle[Buf] = handle_from_addr[Buf](&b)
+    bb(bh, name)
+    buf_u8(bh, 64)
+    bb(bh, version)
+    k i32 = shdeps_find_def(buf_bytes(bh))
+    buf_free(bh)
+    if k >= 0 { return k }
+    id u32 = find(name)
+    if id != NONE {
+        key Bytes = {}
+        if sv_version(id, &key) != NONE64 { return -1 }
+    }
+    return shdeps_find_def(name)
+}
+
 fn build_image() void {
     c handle[Config] = config()
     phase_begin(PH_EMIT, &emit_start)
@@ -707,6 +733,7 @@ fn build_image() void {
     tls_prepare()
     symver_plan()
     shared_output_prepare()
+    shdeps_validate[shdeps_defined_cb](handle_from_addr[ShDeps](&shdeps_graph))
     ut PhaseStart = {}
     phase_begin(PH_UNWIND, &ut)
     unwind_normalize()
@@ -728,6 +755,7 @@ fn build_image() void {
         }
     }
     phase_end(PH_GC, &gt)
+    copy_prepare()
     check_non_alloc_references()
     tls_validate()
     if c.mode == MODE_STATIC_PIE { relax_static_pie() }

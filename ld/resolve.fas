@@ -20,6 +20,7 @@ struct Lx {
     gotref addr       // u32 per relocation: GOT slot, NONE when none
     eh addr           // the normalized .eh_frame bytes (unwind.fas), or null
     status u32        // parse: 0 ok, 1 failed, 2 refused
+    seq u64           // input order across objects and shared libraries
     snap addr         // --stats: the counters when the input was read
 }
 
@@ -63,6 +64,7 @@ struct GSym {
     def_kind u8
     def_binding u8
     strong u8             // strong_undefined
+    shared_undef u8       // shared_undefined
     visibility u8
     def_file u32
     def_sym u32
@@ -152,6 +154,29 @@ fn visibility_rank(v u8) u8 {
 var pool handle[Pool] = null
 var parsed u64 = 0      // objects [0, parsed) are parsed and checked
 
+struct StagedSh {
+    lib ShLib
+    data Bytes
+    seq u64
+    status u32
+    pad u32
+    snap addr
+}
+
+var staged_sh Vec[StagedSh] = {}
+var parsed_sh u64 = 0
+var parse_seq u64 = 0
+
+fn sh_parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
+    base u64 = ctx[u64]
+    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
+    for i u64 in base + b..base + e {
+        st handle[StagedSh] = vec_ref[StagedSh](shv, i)
+        lh handle[ShLib] = handle_from_addr[ShLib](&st.lib)
+        shared_parse(lh, lh.path, st.data) catch { st.status = 1 }
+    }
+}
+
 fn parse_job(ctx addr, b u64, e u64, worker u32) void {
     for i u64 in b..e {
         o handle[Obj] = obj(i)
@@ -161,24 +186,40 @@ fn parse_job(ctx addr, b u64, e u64, worker u32) void {
     }
 }
 
-// Parses every object read so far; the first failure in input order is
-// the OCaml linker's diagnostic.
+// Parses every object and shared library read so far; the first failure in
+// input order is the OCaml linker's diagnostic.
 fn parse_flush() void {
-    if parsed == nobj { return }
+    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
+    if parsed == nobj && parsed_sh == shv.n { return }
     t PhaseStart = {}
     phase_begin(PH_PARSE, &t)
-    pool_for(pool, nobj - parsed, 1, &parse_job_offset, &parsed)
+    if parsed < nobj { pool_for(pool, nobj - parsed, 1, &parse_job_offset, &parsed) }
+    if parsed_sh < shv.n { pool_for(pool, shv.n - parsed_sh, 1, &sh_parse_job_offset, &parsed_sh) }
     phase_end(PH_PARSE, &t)
-    for i u64 in parsed..nobj {
-        decoded_charge(obj(i))
-        st u32 = lx(i).status
-        if st != 0 { stat_restore(lx(i).snap) }
-        if st == 1 { die_buf(handle_from_addr[Buf](&obj(i).msg)) }
-        if st == 2 {
-            refuse(buf_cstr(handle_from_addr[Buf](&obj(i).msg)))
+    oi u64 = parsed
+    si u64 = parsed_sh
+    while oi < nobj || si < shv.n {
+        take_obj bool = si == shv.n || (oi < nobj && lx(oi).seq < vec_ref[StagedSh](shv, si).seq)
+        if take_obj {
+            decoded_charge(obj(oi))
+            st u32 = lx(oi).status
+            if st != 0 { stat_restore(lx(oi).snap) }
+            if st == 1 { die_buf(handle_from_addr[Buf](&obj(oi).msg)) }
+            if st == 2 {
+                refuse(buf_cstr(handle_from_addr[Buf](&obj(oi).msg)))
+            }
+            oi += 1
+        } else {
+            sh handle[StagedSh] = vec_ref[StagedSh](shv, si)
+            if sh.status != 0 {
+                stat_restore(sh.snap)
+                die_buf(handle_from_addr[Buf](&sh.lib.msg))
+            }
+            si += 1
         }
     }
     parsed = nobj
+    parsed_sh = shv.n
 }
 
 // on_decoded: the decoded debug sizes count against the combined input
@@ -285,11 +326,13 @@ fn is_script(d Bytes) bool {
 const P_OBJECT u8 = 0
 const P_ARCHIVE u8 = 1
 const P_GROUP u8 = 2
+const P_SHARED u8 = 3
 
 struct PNode {
     kind u8
     loaded bool
-    ref u32         // P_OBJECT: staged object; P_ARCHIVE: archive
+    as_needed bool
+    ref u32         // P_OBJECT: staged object; P_ARCHIVE: archive; P_SHARED: staged_sh
     count u32       // P_GROUP: the nodes inside
 }
 
@@ -299,6 +342,66 @@ fn pnode_add(kind u8, ref u64) void {
     n handle[PNode] = vec_new[PNode](handle_from_addr[Vec[PNode]](&pnodes))
     n.kind = kind
     n.ref = trunc[u32](ref)
+}
+
+fn pnode_add_shared(ref u64, as_needed bool) void {
+    n handle[PNode] = vec_new[PNode](handle_from_addr[Vec[PNode]](&pnodes))
+    n.kind = P_SHARED
+    n.ref = trunc[u32](ref)
+    n.as_needed = as_needed
+}
+
+// ---------- shared library resolution state ----------
+
+var shlibs Vec[addr] = {}                               // handle[ShLib] as addr (resolved.shared)
+var sh_names Map[Bytes, u8, bytes_hash, bytes_eq] = {}  // loaded SONAMEs
+var shared_refs Map[Bytes, u8, bytes_hash, bytes_eq] = {}
+var sh_providers Map[Bytes, u64, bytes_hash, bytes_eq] = {} // name -> (lib_idx << 32 | exp_idx)
+var sh_sym_total u64 = 0
+var shdeps_graph ShDeps = {}
+
+fn shlib(i u64) handle[ShLib] {
+    return handle_from_addr[ShLib](vec_get[addr](handle_from_addr[Vec[addr]](&shlibs), i))
+}
+
+fn shref_add(name Bytes) void {
+    h handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&shared_refs)
+    map_put(h, name, 1)
+}
+
+fn is_shared_ref(name Bytes) bool {
+    if shared_refs.n == 0 { return false }
+    h handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&shared_refs)
+    return map_has(h, name)
+}
+
+fn has_provider(name Bytes) bool {
+    if sh_providers.n == 0 { return false }
+    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    return map_has(h, name)
+}
+
+fn prov_find(name Bytes) u64 {
+    if sh_providers.n == 0 { return NONE64 }
+    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    return map_get(h, name) catch NONE64
+}
+
+fn prov_add(name Bytes, lib_idx u64, exp_idx u64) void {
+    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    if !map_has(h, name) {
+        map_put(h, name, (lib_idx << 32) | exp_idx)
+    }
+}
+
+fn alloc_at_name(name Bytes, ver Bytes) Bytes {
+    n u64 = name.n + 1 + ver.n
+    p addr = heap_alloc(n + 1)
+    mem_copy(p, name.p, name.n)
+    p[u8, name.n] = 64
+    mem_copy(p + name.n + 1, ver.p, ver.n)
+    p[u8, n] = 0
+    return bytes(p, n)
 }
 
 // one input file, prepared at script/group nesting `depth`; `scripts` are
@@ -313,7 +416,7 @@ fn library_dynamic() bool {
     return !input_static && m != MODE_STATIC && m != MODE_STATIC_PIE
 }
 
-fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) void {
+fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void {
     file_count += 1
     if file_count > 1024 {
         m handle[Buf] = msg()
@@ -381,21 +484,34 @@ fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) voi
         pnode_add(P_ARCHIVE, ai)
         return
     }
-    if data.n >= 18 && mem_eq(data.p, c"\x7fELF", 4) && rd16(data.p, 16) == 3 {
-        // shared-library inputs: not ported yet
-        if config().mode == MODE_SHARED { refuse(c"shared-library inputs") }
-        // Static and static-PIE output: requires_static_inputs
-        m handle[Buf] = msg()
-        bb(m, path)
-        if config().mode == MODE_STATIC_PIE {
-            bs(m, c": static PIE cannot use shared-library inputs")
-        } else {
-            bs(m, c": shared input requires -pie or --dynamic-linker")
+    if shared_is(data) {
+        m_mode u8 = config().mode
+        if m_mode == MODE_STATIC_PIE || m_mode == MODE_STATIC {
+            m handle[Buf] = msg()
+            bb(m, path)
+            if m_mode == MODE_STATIC_PIE {
+                bs(m, c": static PIE cannot use shared-library inputs")
+            } else {
+                bs(m, c": shared input requires -pie or --dynamic-linker")
+            }
+            input_die()
         }
-        input_die()
+        shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
+        idx u64 = shv.n
+        st handle[StagedSh] = vec_new[StagedSh](shv)
+        st.lib.path = path
+        st.data = data
+        st.seq = parse_seq
+        parse_seq += 1
+        pnode_add_shared(idx, as_needed)
+        if stats_on {
+            stat_mark(PH_PARSE)
+            st.snap = stat_snapshot()
+        }
+        return
     }
     if is_script(data) {
-        script_input(path, data, whole, depth, scripts)
+        script_input(path, data, whole, as_needed, depth, scripts)
         return
     }
     pnode_add(P_OBJECT, nobj)
@@ -403,6 +519,8 @@ fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) voi
     o.path = path
     o.data = data.p
     o.len = data.n
+    lx(nobj - 1).seq = parse_seq
+    parse_seq += 1
     // the OCaml linker parses (and counts) each object as it is read
     if stats_on {
         stat_mark(PH_PARSE)
@@ -497,7 +615,7 @@ fn read_inputs() void {
         // the file's own depth: inside As_needed, then Static
         fd u64 = depth + extra
         if static_wrap { fd += 1 }
-        read_input(path, it.whole, fd, sh)
+        read_input(path, it.whole, it.as_needed, fd, sh)
     }
     vec_free[u64](eh)
     vec_free[u64](gh)
@@ -510,16 +628,43 @@ fn read_inputs() void {
 var staged_objs addr = null
 var staged_lxs addr = null
 
+fn sh_is_required(lib handle[ShLib]) bool {
+    tmp Buf = {}
+    th handle[Buf] = handle_from_addr[Buf](&tmp)
+    defer { buf_free(th) }
+    for ei u64 in 0..lib.exports.n {
+        ex handle[ShExport] = sh_export(lib, ei)
+        if ex.is_default {
+            id u32 = find(ex.name)
+            if id != NONE && needed(id) { return true }
+        }
+        if ex.version.n != SH_NONE {
+            buf_clear(th)
+            bb(th, ex.name)
+            buf_u8(th, 64)
+            bb(th, ex.version)
+            id u32 = find(buf_bytes(th))
+            if id != NONE && needed(id) { return true }
+        }
+    }
+    return false
+}
+
 fn process_range(b u64, e u64) void {
     nodes handle[Vec[PNode]] = handle_from_addr[Vec[PNode]](&pnodes)
+    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
+    snh handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&sh_names)
+    slh handle[Vec[addr]] = handle_from_addr[Vec[addr]](&shlibs)
     i u64 = b
     while i < e {
         n handle[PNode] = vec_ref[PNode](nodes, i)
         if n.kind == P_GROUP {
             inner u64 = zext[u64](n.count)
-            previous u64 = NONE64
-            while previous != nobj {
-                previous = nobj
+            prev_obj u64 = NONE64
+            prev_sh u64 = NONE64
+            while prev_obj != nobj || prev_sh != slh.n {
+                prev_obj = nobj
+                prev_sh = slh.n
                 process_range(i + 1, i + 1 + inner)
             }
             i += 1 + inner
@@ -529,6 +674,30 @@ fn process_range(b u64, e u64) void {
             if !n.loaded {
                 n.loaded = true
                 add_member(handle_from_addr[Obj](staged_objs + zext[u64](n.ref) * sizeof[Obj]))
+            }
+        } else if n.kind == P_SHARED {
+            st handle[StagedSh] = vec_ref[StagedSh](shv, zext[u64](n.ref))
+            lib handle[ShLib] = handle_from_addr[ShLib](&st.lib)
+            req bool = !n.as_needed || sh_is_required(lib)
+            if req && !n.loaded && !map_has(snh, lib.needed) {
+                map_put(snh, lib.needed, 1)
+                idx u64 = slh.n
+                vec_push[addr](slh, handle_addr(lib))
+                n.loaded = true
+                stat_add(ST_SHARED_LIBRARIES, 1)
+                sh_sym_total = chk_add(c"combined shared symbol count", 4000000, sh_sym_total, lib.exports.n + lib.references.n)
+                for ri u64 in 0..lib.references.n {
+                    rf handle[ShRef] = sh_ref(lib, ri)
+                    shref_add(rf.name)
+                    if rf.undefined && rf.binding == 1 {
+                        gsym(get(rf.name)).shared_undef = 1
+                    }
+                }
+                for ei u64 in 0..lib.exports.n {
+                    ex handle[ShExport] = sh_export(lib, ei)
+                    if ex.is_default { prov_add(ex.name, idx, ei) }
+                    if ex.version.n != SH_NONE { prov_add(alloc_at_name(ex.name, ex.version), idx, ei) }
+                }
             }
         } else {
             extract(zext[u64](n.ref))
@@ -824,15 +993,29 @@ fn resolve() void {
             } else if predefined_name(s.name) || registry_available(s.name) {
                 vec_push[u32](ph, id)
             } else {
-                // no shared providers yet: an undefined weak (non-strong)
-                // default-visibility reference is a runtime import
-                if c.mode != MODE_STATIC && c.mode != MODE_STATIC_PIE && s.strong == 0 && s.visibility == 0 {
+                pv u64 = prov_find(s.name)
+                if pv != NONE64 {
+                    if s.strong != 0 || s.visibility == 0 {
+                        lib_idx u64 = pv >> 32
+                        exp_idx u64 = pv & 0xffffffff
+                        ex handle[ShExport] = sh_export(shlib(lib_idx), exp_idx)
+                        p handle[Imp] = imp_put(id)
+                        p.name = ex.name
+                        p.version = ex.version
+                        p.size = ex.size
+                        p.library = trunc[u32](lib_idx)
+                        p.kind = ex.kind
+                        p.binding = if s.strong != 0 { 1 } else { 2 }
+                        p.visibility = s.visibility
+                        p.is_default = if ex.is_default { 1 } else { 0 }
+                    }
+                } else if c.mode != MODE_STATIC && c.mode != MODE_STATIC_PIE && s.strong == 0 && s.visibility == 0 {
                     p handle[Imp] = imp_put(id)
                     p.name = s.name
                     p.binding = 2
                     p.is_default = 1
                 }
-                if s.strong != 0 && s.visibility != 0 && !c.gc_sections {
+                if !partial && s.strong != 0 && s.visibility != 0 && !c.gc_sections {
                     m handle[Buf] = msg()
                     bs(m, c"undefined non-default visibility symbol ")
                     bb(m, s.name)
@@ -911,5 +1094,19 @@ fn resolve() void {
             l.gid[u32, k + 1] = id
         }
         predefined_file = file
+    }
+    if !partial {
+        gh handle[ShDeps] = handle_from_addr[ShDeps](&shdeps_graph)
+        shdeps_load(gh, shlibs.p, shlibs.n)
+        for li u64 in 0..gh.libraries.n {
+            lib handle[ShLib] = shdeps_lib(gh, li)
+            for ri u64 in 0..lib.references.n {
+                rf handle[ShRef] = sh_ref(lib, ri)
+                shref_add(rf.name)
+                if rf.version.n != SH_NONE {
+                    shref_add(alloc_at_name(rf.name, rf.version))
+                }
+            }
+        }
     }
 }

@@ -650,7 +650,7 @@ fn archive_object(a handle[Archive], i u64) handle[Obj] {
 
 fn needed(id u32) bool {
     s handle[GSym] = gsym(id)
-    if s.def_kind == DEF_NONE { return s.strong != 0 }
+    if s.def_kind == DEF_NONE { return (s.strong != 0 || s.shared_undef != 0) && !has_provider(s.name) }
     return s.def_kind == DEF_COMMON
 }
 

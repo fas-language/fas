@@ -159,12 +159,12 @@ fn gc_sections() void {
     if c.mode != MODE_STATIC {
         gc_root(bytes_c(c"_init"))
         gc_root(bytes_c(c"_fini"))
-        // no shared_references without shared inputs (static PIE)
-        if c.mode == MODE_SHARED || c.export_dynamic {
+        if c.mode == MODE_SHARED || c.export_dynamic || shared_refs.n != 0 {
             gv handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
             for i u64 in 0..gv.n {
                 g handle[GSym] = gsym(trunc[u32](i))
-                if g.has_res != 0 && (g.res_vis == 0 || g.res_vis == 3) {
+                if g.has_res != 0 && (g.res_vis == 0 || g.res_vis == 3) &&
+                    (c.mode == MODE_SHARED || c.export_dynamic || is_shared_ref(g.name)) {
                     gc_definition(zext[u64](g.res_file), zext[u64](g.res_sym))
                 }
             }

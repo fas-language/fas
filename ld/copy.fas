@@ -1,0 +1,235 @@
+// Copy relocations (Copy_relocation.prepare): direct executable references to
+// DSO data get storage in the executable initialized with R_X86_64_COPY.
+// Literal port of src/linker/copy_relocation.ml.
+
+struct CopyEntry {
+    key_id u32
+    file u32
+    symbol u32
+    pad u32
+}
+
+var copy_entries Vec[CopyEntry] = {}
+var copy_names Map[u32, u8, u32_hash, u32_eq] = {}
+
+fn copy_has(id u32) bool {
+    if copy_entries.n == 0 { return false }
+    h handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](&copy_names)
+    return map_has(h, id)
+}
+
+var copy_sort_lib handle[ShLib] = null
+
+fn copy_loc_less(a u64, b u64) bool {
+    la handle[ShLoc] = sh_loc(copy_sort_lib, a)
+    lb handle[ShLoc] = sh_loc(copy_sort_lib, b)
+    if la.section != lb.section { return la.section < lb.section }
+    return la.value < lb.value
+}
+
+fn copy_fail(source handle[ShLib], key Bytes, reason addr) void {
+    m handle[Buf] = msg()
+    bb(m, source.path)
+    bs(m, c": COPY relocation for ")
+    bb(m, key)
+    bs(m, c": ")
+    bs(m, reason)
+    bs(m, c"; compile position-independent code")
+    die()
+}
+
+// Computes the overlap bitmap (1 byte per location index in `source.locations`)
+// for a shared library, matching Copy_relocation's sweep.
+fn copy_compute_overlaps(source handle[ShLib]) addr {
+    n u64 = source.locations.n
+    flags addr = heap_alloc_zeroed(n + 1)
+    if n <= 1 { return flags }
+    order addr = heap_alloc(n * 8)
+    for i u64 in 0..n { order[u64, i] = i }
+    copy_sort_lib = source
+    sort[u64, copy_loc_less](order, n)
+    has_prev bool = false
+    prev_idx u64 = 0
+    prev_sec u32 = 0
+    prev_end u64 = 0
+    for i u64 in 0..n {
+        idx u64 = order[u64, i]
+        loc handle[ShLoc] = sh_loc(source, idx)
+        sz u64 = if bitcast[i64](loc.size) > 0 { loc.size } else { 1 }
+        delta i64 = bitcast[i64](loc.value - loc.start)
+        len_i64 i64 = bitcast[i64](zext[u64](loc.length))
+        if delta >= 0 && delta <= len_i64 {
+            avail u64 = bitcast[u64](len_i64 - delta)
+            if avail < sz { sz = avail }
+        } else {
+            sz = 0
+        }
+        ending u64 = loc.value + sz
+        if has_prev && prev_sec == loc.section && loc.value < prev_end {
+            flags[u8, prev_idx] = 1
+            flags[u8, idx] = 1
+            if ending > prev_end {
+                prev_idx = idx
+                prev_sec = loc.section
+                prev_end = ending
+            }
+        } else {
+            has_prev = true
+            prev_idx = idx
+            prev_sec = loc.section
+            prev_end = ending
+        }
+    }
+    heap_free(order)
+    return flags
+}
+
+fn copy_prepare() void {
+    c handle[Config] = config()
+    if c.mode != MODE_DYNAMIC { return }
+    cn handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](&copy_names)
+    req Vec[u32] = {}
+    rh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&req)
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            t u64 = zext[u64](r.target)
+            if !kept(f, t) { continue }
+            ts handle[Sec] = sec(o, t)
+            if (ts.flags & 2) == 0 { continue }
+            direct bool = r.kind == 2 || r.kind == 10 || r.kind == 11 || r.kind == 24 ||
+                (r.kind == 1 && (ts.flags & 1) == 0)
+            if !direct { continue }
+            si u64 = zext[u64](r.symbol)
+            y handle[Sym] = sym(o, si)
+            if y.binding == 0 { continue }
+            id u32 = gid_of(f, si)
+            if id == NONE { continue }
+            g handle[GSym] = gsym(id)
+            if g.has_res != 0 || g.imp == 0 { continue }
+            p handle[Imp] = imp(id)
+            if p.kind == 1 && p.library != NONE {
+                if !map_has(cn, id) {
+                    map_put(cn, id, 1)
+                    vec_push[u32](rh, id)
+                }
+            }
+        }
+    }
+    if rh.n == 0 {
+        vec_free[u32](rh)
+        return
+    }
+
+    // Per-library lazy overlap bitmaps
+    ov_cache addr = heap_alloc_zeroed(shlibs.n * sizeof[addr] + 8)
+    // Duplicate-identity check across copied symbols: (library << 32 | loc_idx)
+    identities Map[u64, u8, u64_hash, u64_eq] = {}
+    idh handle[Map[u64, u8, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u8, u64_hash, u64_eq]](&identities)
+
+    file u64 = nobj
+    count u64 = rh.n
+    o handle[Obj] = new_object(c"<COPY storage>")
+    o.nsec = trunc[u32](count + 1)
+    o.secs = heap_alloc_zeroed((count + 1) * sizeof[Sec])
+    o.nsym = trunc[u32](count + 1)
+    o.syms = heap_alloc_zeroed((count + 1) * sizeof[Sym])
+    n0 handle[Sec] = sec(o, 0)
+    n0.alignment = 1
+    n0.group = -1
+
+    l handle[Lx] = lx(file)
+    l.discarded = heap_alloc_zeroed(count + 2)
+    l.kept = heap_alloc_zeroed(count + 2)
+    l.gid = heap_alloc_zeroed((count + 1) * 4 + 4)
+    l.gid[u32, 0] = NONE
+    l.alias = heap_alloc_zeroed((count + 1) * 8 + 8)
+
+    data Buf = {}
+    dh handle[Buf] = handle_from_addr[Buf](&data)
+    allocated u64 = 0
+    ce handle[Vec[CopyEntry]] = handle_from_addr[Vec[CopyEntry]](&copy_entries)
+
+    for i u64 in 0..count {
+        id u32 = vec_get[u32](rh, i)
+        g handle[GSym] = gsym(id)
+        key Bytes = g.name
+        p handle[Imp] = imp(id)
+        lib_idx u64 = zext[u64](p.library)
+        source handle[ShLib] = shlib(lib_idx)
+        loc handle[ShLoc] = sh_find_location(source, p.name, p.version)
+        if loc == null { copy_fail(source, key, c"data has no regular storage") }
+        if loc.visibility != 0 { copy_fail(source, key, c"protected data cannot be copied") }
+        if p.binding == 10 { copy_fail(source, key, c"GNU unique data cannot be copied") }
+        if (loc.kind != 1 && loc.kind != 8) || (loc.flags & 0x402) != 2 {
+            copy_fail(source, key, c"data requires allocatable non-TLS PROGBITS or NOBITS")
+        }
+        delta i64 = bitcast[i64](loc.value - loc.start)
+        ssz i64 = bitcast[i64](p.size)
+        len_i64 i64 = bitcast[i64](zext[u64](loc.length))
+        if ssz <= 0 || p.size > MAX_SECTION_SIZE || delta < 0 || delta > len_i64 || ssz > len_i64 - delta {
+            copy_fail(source, key, c"zero-sized or out-of-bounds data storage")
+        }
+        ov addr = ov_cache[addr, lib_idx]
+        if ov == null {
+            ov = copy_compute_overlaps(source)
+            ov_cache[addr, lib_idx] = ov
+        }
+        loc_idx u64 = (addr_bits(handle_addr(loc)) - addr_bits(source.locations.p)) / sizeof[ShLoc]
+        if ov[u8, loc_idx] != 0 {
+            copy_fail(source, key, c"overlapping exported data aliases are unsupported")
+        }
+        ident u64 = (lib_idx << 32) | loc_idx
+        if map_has(idh, ident) {
+            copy_fail(source, key, c"mixed version spellings of copied data are unsupported")
+        }
+        map_put(idh, ident, 1)
+        if bitcast[i64](loc.alignment) < 0 { copy_fail(source, key, c"invalid storage alignment") }
+        align u64 = umax(1, loc.alignment)
+        if align > MAX_ALIGNMENT || (align & (align - 1)) != 0 || (loc.start & (align - 1)) != 0 {
+            copy_fail(source, key, c"invalid or unsupported storage alignment")
+        }
+        while (loc.value & (align - 1)) != 0 { align = align / 2 }
+        allocated = chk_add(c"COPY storage", 268435456, allocated, p.size)
+
+        sec_idx u64 = i + 1
+        s handle[Sec] = sec(o, sec_idx)
+        s.name = if loc.read_only { bytes_c(c".data.rel.ro.copy") } else { bytes_c(c".bss.copy") }
+        s.kind = if loc.read_only { 1 } else { 8 }
+        s.flags = 3
+        s.offset = dh.n
+        s.size = p.size
+        s.alignment = align
+        s.group = -1
+        if loc.read_only { buf_zeros(dh, p.size) }
+
+        y handle[Sym] = synth_sym(o, sec_idx, key)
+        y.binding = p.binding
+        y.kind = 1
+        y.section = trunc[u32](sec_idx)
+        y.size = p.size
+
+        l.kept[u8, sec_idx] = 1
+        l.gid[u32, sec_idx] = id
+        set_res(id, file, sec_idx, 0)
+        shref_add(key)
+
+        ent handle[CopyEntry] = vec_new[CopyEntry](ce)
+        ent.key_id = id
+        ent.file = trunc[u32](file)
+        ent.symbol = trunc[u32](sec_idx)
+    }
+
+    o.data = dh.p
+    o.len = dh.n
+    stat_add(ST_COPY_RELOCATIONS, count)
+    stat_add(ST_COPY_STORAGE_BYTES, allocated)
+
+    for k u64 in 0..shlibs.n {
+        if ov_cache[addr, k] != null { heap_free(ov_cache[addr, k]) }
+    }
+    heap_free(ov_cache)
+    map_free(idh)
+    vec_free[u32](rh)
+}

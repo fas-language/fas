@@ -582,6 +582,7 @@ fn parse_command_line() void {
         c.mode = MODE_STATIC_PIE
     } else if c.pie || c.has_interpreter {
         c.mode = MODE_DYNAMIC
+        if !c.has_interpreter { c.interpreter = bytes_c(c"/lib64/ld-linux-x86-64.so.2") }
     } else {
         c.mode = MODE_STATIC
     }

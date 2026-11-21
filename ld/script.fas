@@ -384,22 +384,22 @@ fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes {
 }
 
 // the items of one list, from cmds[i] to its END; the index after it
-fn script_walk(cmds handle[Vec[SCmd]], i u64, path Bytes, canonical Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) u64 {
+fn script_walk(cmds handle[Vec[SCmd]], i u64, path Bytes, canonical Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) u64 {
     while true {
         e handle[SCmd] = vec_ref[SCmd](cmds, i)
         if e.kind == SC_END { return i + 1 }
         if e.kind == SC_FILE {
-            read_input(script_locate(path, canonical, e.text), whole, depth + 1, scripts)
+            read_input(script_locate(path, canonical, e.text), whole, as_needed, depth + 1, scripts)
             i += 1
         } else {
-            i = script_walk(cmds, i + 1, path, canonical, whole, depth, scripts)
+            i = script_walk(cmds, i + 1, path, canonical, whole, true, depth, scripts)
         }
     }
     return i
 }
 
 // a script input: its commands become inputs in place of the script
-fn script_input(path Bytes, data Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) void {
+fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void {
     if depth >= 16 {
         m handle[Buf] = msg()
         bb(m, path)
@@ -439,10 +439,10 @@ fn script_input(path Bytes, data Bytes, whole bool, depth u64, scripts handle[Ve
         } else if e.kind == SC_GROUP {
             g u64 = nodes.n
             pnode_add(P_GROUP, 0)
-            i = script_walk(ch, i + 1, path, canonical, whole, depth, scripts)
+            i = script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
             vec_ref[PNode](nodes, g).count = trunc[u32](nodes.n - g - 1)
         } else {
-            i = script_walk(ch, i + 1, path, canonical, whole, depth, scripts)
+            i = script_walk(ch, i + 1, path, canonical, whole, as_needed, depth, scripts)
         }
     }
     vec_pop[Bytes](scripts)
