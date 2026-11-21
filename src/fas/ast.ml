@@ -31,6 +31,7 @@ and expr =
   | Bool_lit of bool * Span.t
   | Null of Span.t
   | String_lit of bool * string * Span.t
+  | Byte_string of string * Span.t
   | Ident of string * Span.t
   | Unary of unop * expr * Span.t
   | C_dereference of expr * string option * Span.t
@@ -248,6 +249,14 @@ and item =
       extent : Span.t;
     }
   | Opaque of { name : string; name_span : Span.t; span : Span.t; extent : Span.t }
+  | Type_alias of {
+      name : string;
+      name_span : Span.t;
+      ty : ty;
+      ty_span : Span.t;
+      span : Span.t;
+      extent : Span.t;
+    }
   (* `enum Name K { A  B = 5 }`: each member with its span and optional
      value (an integer literal) *)
   | Enum of {
@@ -292,6 +301,7 @@ let with_extent extent = function
   | Global g -> Global { g with extent }
   | Struct s -> Struct { s with extent }
   | Opaque o -> Opaque { o with extent }
+  | Type_alias t -> Type_alias { t with extent }
   | Error_decl e -> Error_decl { e with extent }
   | Enum e -> Enum { e with extent }
   | Func f -> Func { f with extent }
@@ -303,6 +313,7 @@ let stored_expr_span = function
   | Bool_lit (_, s)
   | Null s
   | String_lit (_, _, s)
+  | Byte_string (_, s)
   | Ident (_, s)
   | Call (_, _, s)
   | Generic_args (_, _, s)
@@ -520,6 +531,7 @@ and add_expr_name buffer expression =
   | Bool_lit (false, _) -> add "false"
   | Null _ -> add "null"
   | String_lit (c, s, _) -> add (string_literal_name c s)
+  | Byte_string (s, _) -> add ("b" ^ string_literal_name false s)
   | Ident (s, _) -> add s
   | Unary (op, e, _) ->
       add (match op with Neg -> "-" | Not -> "!" | Bit_not -> "~");
@@ -686,6 +698,7 @@ let item_span = function
   | Global { span; _ }
   | Struct { span; _ }
   | Opaque { span; _ }
+  | Type_alias { span; _ }
   | Error_decl { span; _ }
   | Enum { span; _ }
   | Func { span; _ } ->
@@ -788,6 +801,10 @@ let render_program program =
     | Null _ -> text "null"
     | String_lit (c, s, _) ->
         text (if c then "c\"" else "\"");
+        add_escaped s;
+        text "\""
+    | Byte_string (s, _) ->
+        text "b\"";
         add_escaped s;
         text "\""
     | Ident (name, _) -> add_name name
@@ -1182,6 +1199,11 @@ let render_program program =
             text
               (Printf.sprintf " <<%s\n%s\n%s" fragment.tag fragment.text fragment.tag))
     | Const_assert { cond; message; _ } -> emit_const_assert cond message
+    | Type_alias { name; ty; _ } ->
+        text "type ";
+        add_name name;
+        text " = ";
+        emit_ty ty
     | Const { name; ty; value; fill; _ } -> (
         text "const ";
         add_name name;
@@ -1324,7 +1346,7 @@ let expanded_walker ~identifiers ~limit =
       count at;
       match e with
       | Ident (name, _) -> identifiers := name :: !identifiers
-      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ -> ()
+      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Byte_string _ -> ()
       | Unary (_, x, _) | C_dereference (x, _, _) | C_dot_star (x, _) -> go_expr x
       | Parenthesized (x, _) -> go_expr x
       | Binary (_, l, r, _) ->
@@ -1464,6 +1486,7 @@ let expanded_walker ~identifiers ~limit =
           List.iter go_generic_param generic_params;
           List.iter go_field fields
       | Opaque _ -> ()
+      | Type_alias { ty; span; _ } -> go_ty span ty
       | Error_decl { names; _ } ->
           List.iter (fun (_, _, pinned) -> Option.iter go_expr pinned) names
       | Enum { members; repr; span; _ } ->
@@ -1586,7 +1609,9 @@ and map_expr m e =
   | None -> (
       let ex = map_expr m in
       match e with
-      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Ident _ -> e
+      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Byte_string _
+      | Ident _ ->
+          e
       | Unary (op, x, s) -> Unary (op, ex x, s)
       | C_dereference (x, n, s) -> C_dereference (ex x, n, s)
       | C_dot_star (x, s) -> C_dot_star (ex x, s)
@@ -1690,6 +1715,7 @@ let map_item m item =
           fields = List.map (fun (f : field) -> { f with ty = ty f.ty }) s.fields;
         }
   | Opaque o -> Opaque { o with name = nm o.name }
+  | Type_alias t -> Type_alias { t with name = nm t.name; ty = ty t.ty }
   | Enum e ->
       Enum
         {

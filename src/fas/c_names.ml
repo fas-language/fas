@@ -43,6 +43,7 @@ let top_level_names items =
       | Ast.Global { name; name_span; _ }
       | Ast.Struct { name; name_span; _ }
       | Ast.Opaque { name; name_span; _ }
+      | Ast.Type_alias { name; name_span; _ }
       | Ast.Enum { name; name_span; _ }
       | Ast.Func { name; name_span; _ } ->
           [ (name, name_span) ]

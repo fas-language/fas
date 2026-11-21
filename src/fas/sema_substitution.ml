@@ -308,7 +308,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         expression_mentions names call || expression_mentions names value
     | Ast.Catch (call, Ast.Catch_block _, _) -> expression_mentions names call
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      ->
+    | Ast.Byte_string _ ->
         false
   in
   let shadowed_constant_error expression =
@@ -552,7 +552,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         (* a catch block inside an expression is refused by the checker *)
         | Ast.Catch_block _ -> Ok ())
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      ->
+    | Ast.Byte_string _ ->
         Ok ()
   in
   let rec validate_target_names value_names type_names = function
@@ -982,8 +982,27 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         | _ -> None)
       program.items
   in
+  let call_return_type callee =
+    match find_by_name specializations Function_specialization callee with
+    | Some
+        {
+          payload = Function_payload { item = Ast.Func { ret; _ }; substitutions; _ };
+          _;
+        } ->
+        Some (substitute_field_type substitutions ret)
+    | _ ->
+        List.find_map
+          (function
+            | Ast.Func { name; generic_params = []; ret; _ } when name = callee ->
+                Some ret
+            | _ -> None)
+          program.items
+  in
   let rec source_place_type = function
     | Ast.Parenthesized (expression, _) -> source_place_type expression
+    | Ast.Handle_from_addr (ty, _, _) -> Some (Ast.Handle ty)
+    | Ast.Cast (_, ty, _, _) -> Some ty
+    | Ast.Call (Ast.Ident (callee, _), _, _) -> call_return_type callee
     | Ast.Ident (name, _)
       when String_set.mem name !local_values || List.mem_assoc name !inference_types ->
         Option.join (List.assoc_opt name !inference_types)
@@ -1254,13 +1273,23 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           let checked = checked_type argument in
           match checked with Some _ as ty -> ty | None -> place)
     in
+    let rec unwrap_parens = function
+      | Ast.Parenthesized (e, _) -> unwrap_parens e
+      | e -> e
+    in
     let* () =
       List.fold_left2
         (fun result (parameter : Ast.param) argument ->
           let* () = result in
-          match actual_type argument with
-          | Some actual -> match_type argument parameter.ty actual
-          | None -> Ok ())
+          match (parameter.ty, unwrap_parens argument) with
+          | Ast.Handle p, Ast.Addr_of (inner, _) -> (
+              match actual_type inner with
+              | Some inner_ty -> match_type argument p inner_ty
+              | None -> Ok ())
+          | _ -> (
+              match actual_type argument with
+              | Some actual -> match_type argument parameter.ty actual
+              | None -> Ok ()))
         (Ok ()) params arguments
     in
     let literal_only parameter =
@@ -1369,7 +1398,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     | Ast.Catch (call, Ast.Catch_value value, _) ->
         has_generic_arguments call || has_generic_arguments value
     | Ast.Ident _ | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _
-    | Ast.String_lit _ ->
+    | Ast.String_lit _ | Ast.Byte_string _ ->
         false
   in
   let rec substitute_validation_type type_substitutions const_substitutions = function
@@ -1652,6 +1681,17 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                   Result_list.iter
                     (validate_non_dependent_expression c dependent None)
                     arguments
+              | Some (substitutions, _)
+                when List.exists
+                       (fun (parameter : Ast.param) ->
+                         has_generic_type
+                           (substitute_validation_type substitutions [] parameter.ty))
+                       params
+                     || has_generic_type (substitute_validation_type substitutions [] ret)
+                ->
+                  Result_list.iter
+                    (validate_non_dependent_expression c dependent None)
+                    arguments
               | Some (substitutions, values) -> (
                   let* formals =
                     Result_list.map
@@ -1852,7 +1892,8 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
           let* () = validate_non_dependent_call_arguments c dependent call in
           validate_non_dependent_expression c dependent expected value
       | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ | Ast.Ident _ | Ast.Int_lit _
-      | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _ ->
+      | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
+      | Ast.Byte_string _ ->
           Ok ()
   and validate_non_dependent_call_arguments c dependent = function
     | Ast.Call (_, arguments, _) ->
@@ -2069,7 +2110,9 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
                 | Error _ -> (None, false))
           in
           if
-            placeholder && not (match value with Ast.Array_lit _ -> true | _ -> false)
+            (placeholder && not (match value with Ast.Array_lit _ -> true | _ -> false))
+            || (Option.is_none expected
+               && unresolved_shape_of value = Some Unresolved_null)
           then Ok dependent
           else
             let* () =
@@ -2597,7 +2640,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
     in
     match expression with
     | ( Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-      | Ast.Ident _ ) as expression ->
+      | Ast.Byte_string _ | Ast.Ident _ ) as expression ->
         Ok expression
     | Ast.Unary (op, expression, span) ->
         let* expression =
@@ -3678,7 +3721,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             fields
         in
         Ok (Ast.Struct { item with fields })
-    | Ast.Opaque _ as item -> Ok item
+    | (Ast.Opaque _ | Ast.Type_alias _) as item -> Ok item
     | Ast.Const ({ ty; value; ty_span; _ } as item) ->
         let* ty = resolve_ty ~values:eval_consts [] 0 ty_span ty in
         let* value =

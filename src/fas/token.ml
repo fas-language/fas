@@ -4,6 +4,7 @@ type kind =
   | Float of string
   | String of string
   | CString of string
+  | BString of string
   | Kw_fn
   | Kw_return
   | Kw_if
@@ -81,6 +82,7 @@ let show = function
   | Int s | Float s -> "`" ^ s ^ "`"
   | String s -> "\"" ^ s ^ "\""
   | CString s -> "c\"" ^ s ^ "\""
+  | BString s -> "b\"" ^ s ^ "\""
   | Kw_fn -> "`fn`"
   | Kw_return -> "`return`"
   | Kw_if -> "`if`"

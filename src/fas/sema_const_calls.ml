@@ -73,6 +73,7 @@ let item_name = function
   | Ast.Func { name; _ }
   | Ast.Struct { name; _ }
   | Ast.Opaque { name; _ }
+  | Ast.Type_alias { name; _ }
   | Ast.Enum { name; _ } ->
       Some name
   | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ | Ast.Const_assert _ -> None
@@ -82,7 +83,7 @@ let item_name = function
 let always_kept = function
   | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ -> true
   | Ast.Func { body = Ast.Declaration; _ } -> true
-  | Ast.Struct _ | Ast.Opaque _ | Ast.Enum _ -> true
+  | Ast.Struct _ | Ast.Opaque _ | Ast.Type_alias _ | Ast.Enum _ -> true
   | Ast.Const _ | Ast.Global _ | Ast.Func _ | Ast.Const_assert _ -> false
 
 (* the literal for a scalar's bits, by its type; [None] for a type a scalar

@@ -4,6 +4,7 @@
 (float) @number
 (string) @string
 (cstring) @string
+(bstring) @string
 (character) @string
 (system_header) @string
 (boolean) @boolean
@@ -14,6 +15,7 @@
 (pkg_declaration "pkg" @keyword)
 (struct_declaration "value" @keyword)
 (enum_declaration "enum" @keyword)
+(type_alias_declaration "type" @keyword)
 (const_for_statement "in" @keyword)
 (range_for_statement "in" @keyword)
 
@@ -99,6 +101,7 @@
 (array_literal name: (identifier) @property)
 (struct_declaration name: (identifier) @type)
 (enum_declaration name: (identifier) @type)
+(type_alias_declaration name: (identifier) @type)
 (enum_member name: (identifier) @constant)
 (named_type name: (type_identifier) @type)
 (generic_param name: (identifier) @type)

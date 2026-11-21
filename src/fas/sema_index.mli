@@ -69,6 +69,7 @@ val has_c_import : t -> bool
 val c_unsupported : t -> (string * string) list
 val c_origin_named : t -> string -> (string * int) option
 val declare_program : t -> c_aliases:string list -> Ast.program -> unit
+val record_type_alias : t -> string -> Span.t -> Span.t -> string -> unit
 val reference_program : t -> instantiated:(string -> bool) -> Ast.program -> unit
 val enter_body : t -> template:string option -> instance:string list -> unit
 val bind_local : t -> int -> Hir.ty -> Span.t -> unit

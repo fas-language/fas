@@ -1,0 +1,205 @@
+use "ergonomics_defs.fas"
+
+// 6. Byte strings
+const ELF_MAGIC Magic4 = b"\x7fELF"
+const WITH_NUL arr[6, u8] = b"a\x00b\0\n\xff"
+const MAGIC_LEN usize = len(b"\x7fELF")
+
+struct Header {
+    magic arr[4, u8]
+    ver u32
+}
+
+var G_BYTES arr[4, u8] = b"\x00\x01\x02\x03"
+var G_HDR Header = { b"\x7fELF", 7 }
+const C_HDR Header = { b"\x7fELF", 9 }
+
+// 1 & 2. Contextual &x handles and handle_from_addr(p) inference
+struct Point {
+    x u64
+    y u64
+}
+
+fn read_point(p handle[Point]) u64 {
+    return p.x + p.y
+}
+
+fn make_point_handle(p addr) handle[Point] {
+    return handle_from_addr(p)
+}
+
+fn take_generic_handle[T](h handle[T]) addr {
+    return handle_addr(h)
+}
+
+fn take_u64_vec(v handle[Vec[u64]]) usize {
+    return v.n
+}
+
+fn put_sym(m SymMapHandle, k Bytes, v Word) bool {
+    return map_put(m, k, v)
+}
+
+// 4. Literal if-expressions inside binary, unary, shift, compound-assign ops
+fn uleb_byte(value u64) u64 {
+    return (value & 127) | (if value > 127 { 128 } else { 0 })
+}
+
+fn if_ops(c bool, x u64) u64 {
+    r u64 = (if c { 10 } else { 20 }) + (if c { 30 } else { 40 })
+    r += if c { 1 } else { 2 }
+    s u64 = (if c { 1 } else { 2 }) << 3
+    return r + s + (x & (if c { 0xff } else { 0x0f }))
+}
+
+// 7. Keywords and builtin names as struct field names
+struct Keywords {
+    len u64
+    any u64
+    copy u64
+    default u64
+    error u64
+    if u64
+    fn u64
+    struct u64
+    return u64
+}
+
+fn read_keywords(h handle[Keywords]) u64 {
+    return h.len + h.any + h.copy + h.default + h.error + h.if + h.fn + h.struct + h.return
+}
+
+// 8. Forwarding generic fn parameters & const-generic fn args
+struct KeyN[N const usize] {
+    words arr[N, u64]
+}
+
+fn keyn_hash[N const usize](k handle[KeyN[N]]) u64 {
+    h u64 = 0
+    for i usize in 0..N { h = (h * 31) ^ k.words[i] }
+    return h
+}
+
+fn keyn_eq[N const usize](a handle[KeyN[N]], b handle[KeyN[N]]) bool {
+    for i usize in 0..N {
+        if a.words[i] != b.words[i] { return false }
+    }
+    return true
+}
+
+struct Rec {
+    key u64
+    tag u64
+}
+
+fn rec_less(a handle[Rec], b handle[Rec]) bool {
+    return a.key < b.key
+}
+
+fn wrap_sort_vec_by[T, LESS fn(handle[T], handle[T]) bool](v handle[Vec[T]]) void {
+    sort_vec_by[T, LESS](v)
+}
+
+// 9. Assigning null directly to an addr field of a generic struct
+fn clear_table_slots[K, V, H fn(handle[K]) u64, E fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, H, E]]
+) void {
+    table_free(t)
+    t.slots = null
+}
+
+fn main() i32 {
+    // 1 & 2: contextual &x handles and handle_from_addr(p) inference
+    p Point = { 10, 32 }
+    hp handle[Point] = &p
+    if hp.x != 10 { return 1 }
+    hp2 handle[Point] = null
+    hp2 = &p
+    if hp2.y != 32 { return 2 }
+    if read_point(&p) != 42 { return 3 }
+    if take_generic_handle(&p) != &p { return 4 }
+
+    raw addr = &p
+    h1 handle[Point] = handle_from_addr(raw)
+    if h1.x != 10 { return 5 }
+    h2 handle[Point] = null
+    h2 = handle_from_addr(raw)
+    if h2.y != 32 { return 6 }
+    if read_point(handle_from_addr(raw)) != 42 { return 7 }
+    if make_point_handle(raw).x != 10 { return 8 }
+    if handle_from_addr[Point](raw).y != 32 { return 9 }
+    a addr = &p
+    if a != raw { return 10 }
+
+    // 3: type aliases (cross-use, alias-to-alias, generic instance, transparent identity)
+    if sizeof[Word] != 8 || sizeof[WordAlias] != 8 || sizeof[Magic4] != 4 { return 11 }
+    v Vec[Word] = {}
+    vec_push(&v, 100)
+    vec_push(&v, 200)
+    if take_u64_vec(&v) != 2 { return 12 }
+    if vec_get(&v, 0) != 100 || vec_get(&v, 1) != 200 { return 13 }
+    vec_free(&v)
+
+    sm SymMap = {}
+    k Bytes = bytes_c(c"hello")
+    if !put_sym(&sm, k, 99) { return 14 }
+    if (map_get(&sm, k) catch 0) != 99 { return 15 }
+    sm_raw addr = &sm
+    smh SymMapHandle = handle_from_addr(sm_raw)
+    if !map_has(smh, k) { return 16 }
+    map_free(&sm)
+
+    // 4: if-expression literals in binary/unary/shift/compound-assign
+    if uleb_byte(200) != 200 || uleb_byte(50) != 50 { return 17 }
+    if if_ops(true, 0x123) != (10 + 30 + 1 + 8 + 0x23) { return 18 }
+    if if_ops(false, 0x123) != (20 + 40 + 2 + 16 + 0x03) { return 19 }
+
+    // 5: generic inference on call-result arguments
+    m Map[u64, u32, u64_hash, u64_eq] = {}
+    map_put(handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&m), 7, 123)
+    if !map_has(handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&m), 7) { return 20 }
+    map_free(handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&m))
+
+    // 6: byte strings
+    if MAGIC_LEN != 4 || len(b"a\x00b") != 3 { return 21 }
+    if ELF_MAGIC[0] != 0x7f || ELF_MAGIC[1] != 69 || ELF_MAGIC[2] != 76 || ELF_MAGIC[3] != 70 { return 22 }
+    mp addr = &ELF_MAGIC
+    if mp[u8, 0] != 0x7f || mp[u8, 3] != 70 { return 23 }
+    if WITH_NUL[0] != 97 || WITH_NUL[1] != 0 || WITH_NUL[2] != 98 || WITH_NUL[3] != 0 || WITH_NUL[4] != 10 || WITH_NUL[5] != 255 { return 24 }
+    if G_BYTES[0] != 0 || G_BYTES[1] != 1 || G_BYTES[2] != 2 || G_BYTES[3] != 3 { return 25 }
+    if G_HDR.magic[0] != 0x7f || G_HDR.ver != 7 { return 26 }
+    if C_HDR.magic[3] != 70 || C_HDR.ver != 9 { return 27 }
+    loc arr[4, u8] = b"\xde\xad\xbe\xef"
+    if loc[0] != 0xde || loc[3] != 0xef { return 28 }
+
+    // 7: keywords and builtins as struct field names
+    kw Keywords = { .len = 1, .any = 2, .copy = 3, .default = 4, .error = 5, .if = 6, .fn = 7, .struct = 8, .return = 9 }
+    kw.default = 14
+    kw.len = 11
+    if read_keywords(&kw) != 65 { return 29 }
+    if offsetof[Keywords, default] != 24 || offsetof[Keywords, len] != 0 { return 30 }
+
+    // 8 & 9: const-generic fn args, forwarded generic fn params, null to generic addr field
+    t Table[KeyN[2], u64, keyn_hash[2], keyn_eq[2]] = {}
+    kn KeyN[2] = { { 11, 22 } }
+    if !table_put(&t, &kn, 555) { return 31 }
+    if (table_get(&t, &kn) catch 0) != 555 { return 32 }
+    clear_table_slots(&t)
+    if t.slots != null || t.n != 0 { return 33 }
+
+    rv Vec[Rec] = {}
+    r1 handle[Rec] = vec_add(&rv)
+    r1.key = 3
+    r1.tag = 1
+    r2 handle[Rec] = vec_add(&rv)
+    r2.key = 1
+    r2.tag = 2
+    r3 handle[Rec] = vec_add(&rv)
+    r3.key = 2
+    r3.tag = 3
+    wrap_sort_vec_by[Rec, rec_less](&rv)
+    if vec_at(&rv, 0).key != 1 || vec_at(&rv, 1).key != 2 || vec_at(&rv, 2).key != 3 { return 34 }
+    vec_free(&rv)
+
+    return 0
+}

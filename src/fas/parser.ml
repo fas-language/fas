@@ -898,6 +898,10 @@ module P = struct
                    name name name)
               (span p) "`opaque` types were removed; `handle[T]` takes any struct";
           ]
+    | Token.Ident "type" ->
+        let start = span p in
+        let* x = type_alias_item p in
+        Ok [ Ast.with_extent (extent p start) x ]
     | Token.Kw_extern -> extern_block p
     | Token.Kw_fn ->
         let start = span p in
@@ -1004,6 +1008,20 @@ module P = struct
     Ok
       (Ast.Global { name; name_span; ty_span; ty; init; linkage; span = s; extent = s })
 
+  and type_alias_item p =
+    let s = span p in
+    ignore (bump p);
+    let name_span = span p in
+    let* name = ident p in
+    if at p Token.Lbracket then
+      error (span p) "type aliases cannot have generic parameters"
+    else
+      let* () = expected p Token.Assign in
+      let ty_span = span p in
+      let* target = ty p in
+      let* () = end_stmt p in
+      Ok (Ast.Type_alias { name; name_span; ty = target; ty_span; span = s; extent = s })
+
   and enum_item p =
     let s = span p in
     ignore (bump p);
@@ -1091,7 +1109,7 @@ module P = struct
       if at p Token.Rbrace then Ok (List.rev acc)
       else
         let fs = span p in
-        let* n = ident p in
+        let* n, _ = field_ident p in
         let ty_span = span p in
         let* t = ty p in
         let* () =
@@ -2063,7 +2081,7 @@ module P = struct
           ignore (bump p);
           ignore (bump p);
           let field_span = span p in
-          let* field = ident p in
+          let* field, _ = field_ident p in
           go (Ast.Arrow_field (lhs, field, operator_span, field_span))
       | k when List.mem_assoc k ops ->
           let op = List.assoc k ops in
@@ -2411,6 +2429,10 @@ module P = struct
         let sp = span p in
         ignore (bump p);
         Ok (Ast.String_lit (true, s, sp))
+    | Token.BString s ->
+        let sp = span p in
+        ignore (bump p);
+        Ok (Ast.Byte_string (s, sp))
     | Token.Dot
       when match ((peek_n p 1).kind, (peek_n p 2).kind) with
            | Token.Ident _, Token.Assign -> true
@@ -2485,7 +2507,7 @@ module P = struct
                     if operation = Names.Offsetof then
                       let* () = expected p Token.Comma in
                       let field_span = (peek p).span in
-                      let* f = ident p in
+                      let* f, _ = field_ident p in
                       let* () = expected p Token.Rbracket in
                       Ok (Ast.Offsetof (t, f, field_span, sp))
                     else
@@ -2508,7 +2530,7 @@ module P = struct
         Error [ Diag.error (span p) ("expected an expression, found " ^ Token.show t) ]
 end
 
-let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error" ]
+let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error"; "type" ]
 
 let item_starts text =
   let n = String.length text in

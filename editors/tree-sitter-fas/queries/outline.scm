@@ -6,6 +6,10 @@
   "struct" @context
   name: (identifier) @name) @item
 
+(type_alias_declaration
+  "type" @context
+  name: (identifier) @name) @item
+
 (const_declaration
   "const" @context
   name: (identifier) @name) @item

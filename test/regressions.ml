@@ -319,8 +319,8 @@ let replay_nodes index (program : Ast.program) =
     let own = extend (expr_span value) in
     let inner =
       match value with
-      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Ident _
-      | Sizeof _ | Alignof _ | Offsetof _ ->
+      | Int_lit _ | Float_lit _ | Bool_lit _ | Null _ | String_lit _ | Byte_string _
+      | Ident _ | Sizeof _ | Alignof _ | Offsetof _ ->
           []
       | Unary (_, operand, _)
       | C_dereference (operand, _, _)
@@ -13125,7 +13125,7 @@ let () =
   parse_message "global-reserved-var" "expected identifier, found `var`" "var var i32\n";
   syntax_pin "keyword-identifier-caret" "var var i32\n" 1 5 3
     "expected identifier, found `var`";
-  parse_message "native-struct-keyword-field-rejected" "expected identifier, found `fn`"
+  semantic_accept "native-struct-keyword-field-accepted"
     "struct S { fn i32 }\n";
   semantic_message "global-initializer-not-constant"
     "global initializer must be a constant expression for `Value`; `dynamic()` is not \
@@ -14444,9 +14444,19 @@ let () =
            (source_lines [ "use \"C\" <sys/types.h> as c" ]));
       (* a file sees only the C its own headers declare: `pthread_create`
          comes from the other file's <pthread.h> *)
+      let split_other_file_root =
+        source_lines
+          [
+            "fn main() i32 {";
+            "    tid c.pthread_t";
+            "    st i32 = c.pthread_create(&tid, null, null, null)";
+            "    return st";
+            "}";
+          ]
+      in
       (match
          split_run ~a_header:"" ~b_header:""
-           (split_with_include "use \"C\" <sys/types.h> as c" split_pthread_create_root)
+           (split_with_include "use \"C\" <sys/types.h> as c" split_other_file_root)
            (source_lines [ "use \"C\" <pthread.h> as c" ])
        with
       | Error diagnostics

@@ -1140,11 +1140,9 @@ let imported_record_type c name =
     (function _, C_record_name (record, None) when record = name -> true | _ -> false)
     c.named_types
 
-let address_type_for_expected c expected place =
+let address_type_for_expected _c expected place =
   match (expected, Hir.expr_ty place) with
-  | Some (Hir.Handle record as ty), Hir.Struct actual
-    when record = actual && imported_record_type c record ->
-      ty
+  | Some (Hir.Handle record as ty), Hir.Struct actual when record = actual -> ty
   | _ -> Hir.Addr
 
 let rec rooted_in_constant c = function
@@ -1468,13 +1466,15 @@ let rec unresolved_vector_elements c expression =
   | Ast.Binary ((Ast.Shl | Ast.Shr), _, _, _) -> false
   | _ -> false
 
-let rec is_if_operand = function
-  | Ast.Ternary _ -> true
-  | Ast.Parenthesized (expression, _) -> is_if_operand expression
+let rec is_typed_if_operand c = function
+  | Ast.Ternary _ as e -> Option.is_none (unresolved_shape_of c e)
+  | Ast.Parenthesized (expression, _) -> is_typed_if_operand c expression
   | _ -> false
 
 let operand_type_hint c operation expected left right =
-  let expected = if is_if_operand left || is_if_operand right then None else expected in
+  let expected =
+    if is_typed_if_operand c left || is_typed_if_operand c right then None else expected
+  in
   match operation with
   | Ast.Add | Ast.Sub -> (
       match expected with Some Hir.Addr -> Some (Hir.Int Hir.U64) | e -> e)
@@ -1489,7 +1489,7 @@ let operand_type_hint c operation expected left right =
   | Ast.Shl | Ast.Shr -> None
 
 let contextual_peer_type c operation peer operand =
-  if is_if_operand operand then None
+  if is_typed_if_operand c operand then None
   else
     match (peer, unresolved_shape_of c operand, operation) with
     | Hir.Addr, Some Unresolved_null, (Ast.Eq | Ast.Ne) -> Some Hir.Addr
@@ -2192,6 +2192,9 @@ and check_expr_inner ?destination (c : context) expected expression =
         let value = if cstr then v ^ "\000" else v in
         let* id = intern_string c s value in
         Ok (Hir.EString (id, cstr, s))
+  | Ast.Byte_string (_, s) ->
+      error s
+        "byte string literal can only initialize `arr[N, u8]` or be passed to `len`"
   | Ast.Ident (n, s)
     when Option.is_none (lookup_local n c)
          && Option.is_some (List.assoc_opt n c.c_unsupported) ->
@@ -2262,7 +2265,8 @@ and check_expr_inner ?destination (c : context) expected expression =
       let* te =
         check_expr ~allow_widen:false c
           (match (op, expected) with
-          | (Ast.Neg | Ast.Bit_not), _ -> if is_if_operand e then None else expected
+          | (Ast.Neg | Ast.Bit_not), _ ->
+              if is_typed_if_operand c e then None else expected
           | Ast.Not, Some (Hir.Vec (_, Hir.Bool)) -> expected
           | Ast.Not, _ -> None)
           e
@@ -2363,7 +2367,7 @@ and check_expr_inner ?destination (c : context) expected expression =
       else if op = Ast.Shl || op = Ast.Shr then
         let* a =
           check_expr ~allow_widen:false c
-            (if is_if_operand l then None
+            (if is_typed_if_operand c l then None
              else match expected with Some (Hir.Int _) -> expected | _ -> None)
             l
         in
@@ -3250,6 +3254,29 @@ and check_initializer ?(constant = false) ?destination c expected expression =
           | Some entry -> Error [ Sema_types.invalid_designator_error expected entry ]
           | None -> vector_value ())
       | _ -> aggregate_entries expected entries span)
+  | Ast.Byte_string (bytes, span) -> (
+      match expected with
+      | Hir.Array (length, Hir.Int Hir.U8) ->
+          if String.length bytes <> length then
+            error span
+              (Sema_types.array_element_count_message length (String.length bytes))
+          else
+            let entries =
+              List.init length (fun i ->
+                  Hir.Init_value
+                    (Hir.EInt
+                       (Int64.of_int (Char.code bytes.[i]), Hir.Int Hir.U8, span)))
+            in
+            Ok (`Aggregate (expected, entries, span, false))
+      | Hir.Array (_, elem) ->
+          error span
+            (Printf.sprintf
+               "byte string initializer requires `arr[N, u8]`, got `arr[_, %s]`"
+               (Sema_types.diagnostic_ty_name elem))
+      | _ ->
+          error span
+            (Printf.sprintf "byte string initializer requires `arr[N, u8]`, got `%s`"
+               (Sema_types.diagnostic_ty_name expected)))
   | _ when match expected with Hir.Vec _ -> true | _ -> false -> vector_value ()
   | _ ->
       let* value = check_expr c (Some expected) expression in
@@ -4026,6 +4053,13 @@ and check_call_inner c expected fn args s =
                (Sema_types.diagnostic_ty_name target))
   | Ast.Ident (name, _) when Option.is_some (Names.float_math name) ->
       check_float_math c expected (Option.get (Names.float_math name)) name args s
+  | Ast.Ident ("handle_from_addr", name_span) -> (
+      match expected with
+      | Some (Hir.Handle target_name) ->
+          check_handle_from_addr c "handle_from_addr" target_name args s
+      | _ ->
+          error name_span
+            (Option.get (Names.missing_type_arguments_message "handle_from_addr")))
   | Ast.Ident (name, name_span)
     when Option.is_some (Names.missing_type_arguments_message name) ->
       error name_span (Option.get (Names.missing_type_arguments_message name))
@@ -4223,6 +4257,7 @@ and check_call_inner c expected fn args s =
               if cstr && String.contains value '\000' then
                 error s "C string literal cannot contain embedded NUL"
               else Ok (String.length value)
+          | Ast.Byte_string (value, _) -> Ok (String.length value)
           | _ -> (
               (* `len` only needs the type, so a place (`digits`, `s.buf`)
                  may still be uninitialized: look it up as a place, which
@@ -4959,38 +4994,143 @@ and check_fn_argument c parameter types target span =
       (Printf.sprintf "`%s` given for function parameter `%s` is not a function" shown
          parameter)
   in
-  let* address =
-    match target with
-    | Ast.Addr_of (Ast.Ident (name, s), _)
-      when Option.is_none (lookup_local name c) && List.mem_assoc name c.signatures ->
-        (* specialised generics (`less[i32]`) are not top-level bindings *)
-        Ok (Hir.Function_address (name, s))
-    | _ -> check_expr c None target
+  let check_sig actual actual_ret actual_fails variadic =
+    if variadic then
+      error span
+        (Printf.sprintf
+           "variadic C function `%s` cannot be given for function parameter `%s`" shown
+           parameter)
+    else if
+      List.length actual = List.length params
+      && List.for_all2 Hir.ty_equal actual params
+      && Hir.ty_equal actual_ret ret && actual_fails = fails
+    then Ok (Hir.Block ([], span))
+    else
+      error span
+        (Printf.sprintf
+           "`%s` does not match function parameter `%s`: it is `%s`, `%s` needs `%s`"
+           shown parameter
+           (text actual actual_ret actual_fails)
+           parameter (text params ret fails))
   in
-  match address with
-  | Hir.Function_address (name, _) -> (
-      match List.assoc_opt name c.signatures with
-      | None -> not_function ()
-      | Some (sig_ : Sema_context.signature) ->
-          let actual = List.map snd sig_.params in
-          if sig_.variadic then
+  match target with
+  | Ast.Addr_of (Ast.Generic_args (Ast.Ident (name, _), generic_args, application_span), _)
+    when Option.is_none (lookup_local name c) -> (
+      match List.assoc_opt name c.templates with
+      | Some (Ast.Func { generic_params; fails = tpl_fails; variadic; _ } as item)
+        when not (has_type_params generic_params) ->
+          let const_params = const_params generic_params in
+          if List.length generic_args <> List.length const_params then
             error span
-              (Printf.sprintf
-                 "variadic C function `%s` cannot be given for function parameter `%s`"
-                 shown parameter)
-          else if
-            List.length actual = List.length params
-            && List.for_all2 Hir.ty_equal actual params
-            && Hir.ty_equal sig_.ret ret && sig_.fails = fails
-          then Ok (Hir.Block ([], span))
+              (generic_arity_message "generic function" name (List.length const_params)
+                 (List.length generic_args))
           else
-            error span
-              (Printf.sprintf
-                 "`%s` does not match function parameter `%s`: it is `%s`, `%s` needs `%s`"
-                 shown parameter
-                 (text actual sig_.ret sig_.fails)
-                 parameter (text params ret fails)))
-  | _ -> not_function ()
+            let* cargs = Result_list.map (generic_const_argument span) generic_args in
+            let rec eval acc cps actual =
+              match (cps, actual) with
+              | [], [] -> Ok (List.rev acc)
+              | cp :: cs, a :: rest ->
+                  let* ct = source_ty_diag c.named_types (Ast.expr_span a) cp.Ast.ty in
+                  let* vt, v =
+                    const_expr
+                      ~array_lengths:
+                        (static_array_lengths c.top_level_bindings c.globals)
+                      ~structs:c.structs ~named_types:c.named_types
+                      ~generic_structs:c.generic_structs
+                      ~globals:(List.map (fun (name, _, _) -> name) c.globals)
+                      ~arrays:c.arrays c.consts (Some ct) a
+                  in
+                  if equal vt ct then eval ((cp.name, ct, v) :: acc) cs rest
+                  else error (Ast.expr_span a) "const argument type mismatch"
+              | _ -> error span "const argument arity mismatch"
+            in
+            let* values = eval [] const_params cargs in
+            let* staged = staged_specialization_identity c.specializations name values in
+            let* mangled, key =
+              match staged with
+              | None ->
+                  let* declaration_id =
+                    specialization_declaration_id c.top_level_bindings Top_function span
+                      name
+                  in
+                  Ok
+                    ( mangle_specialization name values,
+                      function_specialization_key declaration_id values )
+              | Some (origin_id, origin_name, arguments, _, _) ->
+                  Ok
+                    ( mangle_mixed_specialization origin_name arguments,
+                      (Function_specialization, origin_id, arguments) )
+            in
+            let frame_name, frame_arguments, frame_span =
+              match staged with
+              | None ->
+                  ( name,
+                    List.map
+                      (fun (_, ty, value) -> Diagnostic_const_argument (ty, value))
+                      values,
+                    application_span )
+              | Some (_, origin_name, _, arguments, span) ->
+                  (origin_name, arguments, span)
+            in
+            let frame =
+              {
+                template_name = frame_name;
+                arguments = frame_arguments;
+                application_span = frame_span;
+              }
+            in
+            let spec =
+              {
+                key;
+                name = mangled;
+                depth = c.spec_depth;
+                payload =
+                  Function_payload
+                    { item; substitutions = []; values; staged_args = None };
+                trace = c.spec_trace @ [ frame ];
+                pending_frame = None;
+              }
+            in
+            let* specialization =
+              Sema_specialization.request c.specializations ~limits:c.limits
+                ~depth:c.spec_depth ~span ~description:"const specialization" spec
+            in
+            (match List.assoc_opt specialization.name c.signatures with
+            | Some (sig_ : Sema_context.signature) ->
+                check_sig (List.map snd sig_.params) sig_.ret sig_.fails sig_.variadic
+            | None ->
+                let tpl_params, tpl_ret =
+                  match specialization.payload with
+                  | Function_payload
+                      { item = Ast.Func { params; ret; _ }; substitutions = []; _ } ->
+                      (params, ret)
+                  | _ -> assert false
+                in
+                let* actual =
+                  Result_list.map
+                    (fun (p : Ast.param) ->
+                      source_ty_with_values c.named_types values p.span p.ty)
+                    tpl_params
+                in
+                let* actual_ret = source_ty_with_values c.named_types values span tpl_ret in
+                check_sig actual actual_ret tpl_fails variadic)
+      | _ -> not_function ())
+  | _ -> (
+      let* address =
+        match target with
+        | Ast.Addr_of (Ast.Ident (name, s), _)
+          when Option.is_none (lookup_local name c) && List.mem_assoc name c.signatures ->
+            (* specialised generics (`less[i32]`) are not top-level bindings *)
+            Ok (Hir.Function_address (name, s))
+        | _ -> check_expr c None target
+      in
+      match address with
+      | Hir.Function_address (name, _) -> (
+          match List.assoc_opt name c.signatures with
+          | None -> not_function ()
+          | Some (sig_ : Sema_context.signature) ->
+              check_sig (List.map snd sig_.params) sig_.ret sig_.fails sig_.variadic)
+      | _ -> not_function ())
 
 and check_indirect_target c fact arguments result_ty span =
   let signature name (sig_ : Sema_context.signature) =
@@ -5369,7 +5509,7 @@ let rec expression_mentions_name name = function
   | Ast.Designated_index (index, value, _) ->
       expression_mentions_name name index || expression_mentions_name name value
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_mentions_name name value
   | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
@@ -5415,7 +5555,7 @@ let rec expression_takes_name_address name = function
       expression_takes_name_address name index
       || expression_takes_name_address name value
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       false
   | Ast.Sizeof_value (value, _) -> expression_takes_name_address name value
   | Ast.Try (call, _) | Ast.Catch (call, Ast.Catch_block _, _) ->
@@ -6231,7 +6371,7 @@ and check_stmt (c : context) = function
       in
       let* v =
         check_expr c
-          (if is_shift || is_addr_step || is_if_operand e then None else Some et)
+          (if is_shift || is_addr_step || is_typed_if_operand c e then None else Some et)
           e
       in
       let* () =

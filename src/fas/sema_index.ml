@@ -284,7 +284,7 @@ and argument_expressions = function
 
 let expression_children = function
   | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-  | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
+  | Ast.Byte_string _ | Ast.Ident _ | Ast.Sizeof _ | Ast.Alignof _ | Ast.Offsetof _ ->
       []
   | Ast.Unary (_, e, _)
   | Ast.C_dereference (e, _, _)
@@ -376,6 +376,14 @@ let struct_header keyword name generic_params align =
   keyword ^ " " ^ name ^ generic_text generic_params
   ^ match align with None -> "" | Some n -> Printf.sprintf " @align(%d)" n
 
+let record_type_alias index name name_span item_span target_text =
+  let declaration =
+    { name; kind = Type_alias; name_span; item_span; container = None; c_origin = None }
+  in
+  index.declared <- declaration :: index.declared;
+  if not (Hashtbl.mem index.top name) then Hashtbl.replace index.top name declaration;
+  Hashtbl.replace index.c_aliases name target_text
+
 let declare_program index ~c_aliases (program : Ast.program) =
   let origin name = Hashtbl.find_opt index.origins name in
   let add ?container ?c_origin name kind name_span item_span =
@@ -432,6 +440,8 @@ let declare_program index ~c_aliases (program : Ast.program) =
           top ?c_origin:(origin name) name Global name_span extent
       | Ast.Opaque { name; name_span; extent; _ } ->
           top ?c_origin:(origin name) name Opaque name_span extent
+      | Ast.Type_alias { name; name_span; ty; extent; _ } ->
+          record_type_alias index name name_span extent (Ast.type_name ty)
       | Ast.Error_decl { names; extent; _ } ->
           List.iter (fun (name, name_span, _) -> top name Const name_span extent) names
       | Ast.Enum { name; name_span; members; extent; _ } ->
@@ -624,6 +634,7 @@ let reference_program index ~instantiated (program : Ast.program) =
           ty None [] global_ty;
           Option.iter (static_expression None []) init
       | Ast.Opaque _ -> ()
+      | Ast.Type_alias { ty = alias_ty; _ } -> ty None [] alias_ty
       | Ast.Struct { name; generic_params; fields; _ } ->
           if generic_params = [] || instantiated name then
             List.iter (fun (field : Ast.field) -> ty (Some name) [] field.ty) fields

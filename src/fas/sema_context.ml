@@ -169,7 +169,7 @@ let rec count_expanded_expr_type_nodes expr cap total =
   else
     match expr with
     | Ast.Int_lit _ | Ast.Float_lit _ | Ast.Bool_lit _ | Ast.Null _ | Ast.String_lit _
-    | Ast.Ident _ ->
+    | Ast.Byte_string _ | Ast.Ident _ ->
         total
     | Ast.Unary (_, value, _)
     | Ast.C_dereference (value, _, _)
@@ -376,7 +376,7 @@ and count_expanded_item_type_nodes item cap total =
                count_expanded_type_nodes field.ty cap total)
              total fields)
           generic_params
-    | Ast.Opaque _ | Ast.Enum _ -> total
+    | Ast.Opaque _ | Ast.Type_alias _ | Ast.Enum _ -> total
     | Ast.Error_decl { names; _ } ->
         List.fold_left
           (fun total (_, _, pinned) ->
