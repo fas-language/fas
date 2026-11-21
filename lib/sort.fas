@@ -2,12 +2,13 @@
 // merge sort over `n` elements of T at `p`, with LESS as the strict order.
 // Equal elements keep their order, so output never depends on anything but
 // the input. T is passed by value (a scalar, `addr`, handle or value
-// struct); to sort big records, sort their indices or addresses.
+// struct). sort_by compares records through handles.
 
 use "vec.fas"
 
 const SORT_RUN usize = 16
 
+// Stably sorts `n` elements at `p` using a strict value comparator.
 fn sort[T, LESS fn(T, T) bool](p addr, n usize) void {
     if n < 2 { return }
     // short runs by insertion sort first
@@ -70,6 +71,77 @@ fn sort[T, LESS fn(T, T) bool](p addr, n usize) void {
     heap_free(tmp)
 }
 
+// Stably sorts a vector using a strict value comparator.
 fn sort_vec[T, LESS fn(T, T) bool](v handle[Vec[T]]) void {
     sort[T, LESS](v.p, v.n)
+}
+
+// Stably sorts n records at p using a strict comparator on record handles.
+// Uses O(n log n) comparisons and O(n) scratch records.
+// The comparator reads record contents. Handles may refer to scratch storage.
+fn sort_by[T, LESS fn(handle[T], handle[T]) bool](p addr, n usize) void {
+    size usize = sizeof[T]
+    if n < 2 || size == 0 { return }
+
+    // Insertion sort for the initial short runs. Reuse the merge buffer
+    // for the one record held out of the array at each step.
+    scratch_count usize = if n <= SORT_RUN { 1 } else { n }
+    tmp addr = heap_alloc_aligned(scratch_count * size, alignof[T], false)
+    defer { heap_free_aligned(tmp, alignof[T]) }
+    x handle[T] = handle_from_addr[T](tmp)
+    lo usize = 0
+    while lo < n {
+        hi usize = if n - lo < SORT_RUN { n } else { lo + SORT_RUN }
+        for i usize in lo + 1..hi {
+            mem_copy(tmp, p + i * size, size)
+            j usize = i
+            while j > lo && LESS(x, handle_from_addr[T](p + (j - 1) * size)) {
+                mem_copy(p + j * size, p + (j - 1) * size, size)
+                j -= 1
+            }
+            mem_copy(p + j * size, tmp, size)
+        }
+        lo = hi
+    }
+
+    src addr = p
+    dst addr = tmp
+    width usize = SORT_RUN
+    while width < n {
+        lo = 0
+        while lo < n {
+            mid usize = if n - lo < width { n } else { lo + width }
+            hi usize = if n - mid < width { n } else { mid + width }
+            i usize = lo
+            j usize = mid
+            k usize = lo
+            while i < mid && j < hi {
+                left addr = src + i * size
+                right addr = src + j * size
+                // Equal records come from the left run first.
+                if LESS(handle_from_addr[T](right), handle_from_addr[T](left)) {
+                    mem_copy(dst + k * size, right, size)
+                    j += 1
+                } else {
+                    mem_copy(dst + k * size, left, size)
+                    i += 1
+                }
+                k += 1
+            }
+            if i < mid { mem_copy(dst + k * size, src + i * size, (mid - i) * size) }
+            if j < hi { mem_copy(dst + k * size, src + j * size, (hi - j) * size) }
+            lo = hi
+        }
+        prev addr = src
+        src = dst
+        dst = prev
+        if width >= n - width { break }
+        width *= 2
+    }
+    if src != p { mem_copy(p, src, n * size) }
+}
+
+// Stably sorts a vector using a strict comparator on record handles.
+fn sort_vec_by[T, LESS fn(handle[T], handle[T]) bool](v handle[Vec[T]]) void {
+    sort_by[T, LESS](v.p, v.n)
 }

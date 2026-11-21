@@ -331,6 +331,6 @@ fn kx_free(k handle[KeyIndex]) void {
 // ---------- vectors of plain structs ----------
 
 // appends a zeroed element and returns it
-fn vec_new[T](v handle[Vec[T]]) handle[T] { return handle_from_addr[T](vec_push_zeroed[T](v)) }
+fn vec_new[T](v handle[Vec[T]]) handle[T] { return vec_add[T](v) }
 
-fn vec_ref[T](v handle[Vec[T]], i usize) handle[T] { return handle_from_addr[T](vec_at[T](v, i)) }
+fn vec_ref[T](v handle[Vec[T]], i usize) handle[T] { return vec_at[T](v, i) }

@@ -36,7 +36,7 @@ fn symver_default(name Bytes, at u64) bool { return at + 1 < name.n && name.p[u8
 // the symbol behind index i: the object's own symbols, then the aliases
 fn symver_sym(o handle[Obj], extra handle[Vec[Sym]], i u64) handle[Sym] {
     if i < zext[u64](o.nsym) { return sym(o, i) }
-    return handle_from_addr[Sym](vec_at[Sym](extra, i - zext[u64](o.nsym)))
+    return vec_at[Sym](extra, i - zext[u64](o.nsym))
 }
 
 // finds the latest definition named `name`, or NONE

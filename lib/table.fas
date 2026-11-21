@@ -1,0 +1,183 @@
+// Hash tables for struct keys. Like Map, Table uses linear probing, a
+// power-of-two capacity, a maximum load of 3/4, and backward-shift deletion.
+// A zero-initialized table owns its slots until table_free. Each slot owns
+// a byte copy of its key. HASH and EQ read the key through a handle, and
+// equal keys must hash alike. Values are passed and returned by value.
+// Iteration is in slot order, which depends on hash and insertion history.
+
+use "map.fas"
+
+struct TableSlot[K, V] {
+    hash u64       // 0: empty; else the key hash with its top bit set
+    key K
+    val V
+}
+
+struct Table[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool] {
+    slots addr
+    cap usize
+    n usize
+}
+
+// Finds an equal key or the first empty slot in its probe sequence.
+// The table must already have allocated slots.
+fn table_probe[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K], h u64
+) usize {
+    mask usize = t.cap - 1
+    i usize = h & mask
+    while true {
+        sh u64 = t.slots[TableSlot[K, V], i].hash
+        if sh == 0 { return i }
+        if sh == h && EQ(handle_from_addr[K](&t.slots[TableSlot[K, V], i].key), k) { return i }
+        i = (i + 1) & mask
+    }
+    unreachable()
+}
+
+// Finds the occupied slot for k, or returns t.cap if k is absent.
+fn table_find[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K]
+) usize {
+    if t.n == 0 { return t.cap }
+    i usize = table_probe(t, k, map_slot_hash(HASH(k)))
+    if t.slots[TableSlot[K, V], i].hash == 0 { return t.cap }
+    return i
+}
+
+// Reports whether the table contains k.
+fn table_has[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K]
+) bool {
+    return table_find(t, k) != t.cap
+}
+
+// Returns the value for k, or fails with NotFound.
+fn table_get[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K]
+) V fails {
+    i usize = table_find(t, k)
+    if i == t.cap { fail NotFound }
+    return t.slots[TableSlot[K, V], i].val
+}
+
+// Returns the address of the value for k, or null. Insertions, removals,
+// clear, and free can invalidate it.
+fn table_val_addr[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K]
+) addr {
+    i usize = table_find(t, k)
+    if i == t.cap { return null }
+    return &t.slots[TableSlot[K, V], i].val
+}
+
+// Grows and rehashes the slots. The caller frees the previous allocation
+// after it finishes reading the incoming key, which may point into it.
+fn table_grow[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]]
+) addr {
+    old addr = t.slots
+    old_cap usize = t.cap
+    cap usize = if old_cap == 0 { 16 } else { old_cap * 2 }
+    size usize = sizeof[TableSlot[K, V]]
+    t.slots = heap_alloc_aligned(cap * size, alignof[TableSlot[K, V]], true)
+    t.cap = cap
+    mask usize = cap - 1
+    for j usize in 0..old_cap {
+        h u64 = old[TableSlot[K, V], j].hash
+        if h != 0 {
+            i usize = h & mask
+            while t.slots[TableSlot[K, V], i].hash != 0 { i = (i + 1) & mask }
+            mem_copy(t.slots + i * size, old + j * size, size)
+        }
+    }
+    return old
+}
+
+// Inserts a copy of k with value v, or updates the existing value.
+// Returns true on insertion and false on replacement.
+fn table_put[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K], v V
+) bool {
+    old addr = null
+    if (t.n + 1) * 4 > t.cap * 3 { old = table_grow(t) }
+    defer { heap_free_aligned(old, alignof[TableSlot[K, V]]) }
+    h u64 = map_slot_hash(HASH(k))
+    i usize = table_probe(t, k, h)
+    t.slots[TableSlot[K, V], i].val = v
+    if t.slots[TableSlot[K, V], i].hash != 0 { return false }
+    t.slots[TableSlot[K, V], i].hash = h
+    mem_copy(&t.slots[TableSlot[K, V], i].key, handle_addr(k), sizeof[K])
+    t.n += 1
+    return true
+}
+
+// Removes k if present and returns whether it was removed.
+fn table_remove[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], k handle[K]
+) bool {
+    i usize = table_find(t, k)
+    if i == t.cap { return false }
+    mask usize = t.cap - 1
+    size usize = sizeof[TableSlot[K, V]]
+    j usize = i
+    while true {
+        j = (j + 1) & mask
+        h u64 = t.slots[TableSlot[K, V], j].hash
+        if h == 0 { break }
+        home usize = h & mask
+        // Move the entry into the hole if its probe sequence crosses it.
+        if ((j - home) & mask) >= ((j - i) & mask) {
+            mem_copy(t.slots + i * size, t.slots + j * size, size)
+            i = j
+        }
+    }
+    mem_set(t.slots + i * size, 0, size)
+    t.n -= 1
+    return true
+}
+
+// Returns the first occupied slot at or after i, or t.cap at the end.
+// Start at zero and continue with the previous result plus one while below t.cap.
+fn table_next[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], i usize
+) usize {
+    while i < t.cap && t.slots[TableSlot[K, V], i].hash == 0 { i += 1 }
+    return i
+}
+
+// Borrows the key at an occupied slot. Treat the key as read-only.
+// Insertions, removals, clear, and free can invalidate the handle.
+fn table_key_at[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], i usize
+) handle[K] {
+    assert(i < t.cap && t.slots[TableSlot[K, V], i].hash != 0)
+    return handle_from_addr[K](&t.slots[TableSlot[K, V], i].key)
+}
+
+// Returns the value at an occupied slot.
+fn table_val_at[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]], i usize
+) V {
+    assert(i < t.cap && t.slots[TableSlot[K, V], i].hash != 0)
+    return t.slots[TableSlot[K, V], i].val
+}
+
+// Removes every entry and retains the allocation for reuse.
+fn table_clear[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]]
+) void {
+    if t.cap > 0 { mem_set(t.slots, 0, t.cap * sizeof[TableSlot[K, V]]) }
+    t.n = 0
+}
+
+// Frees the allocation and resets the table for reuse.
+fn table_free[K, V, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool](
+    t handle[Table[K, V, HASH, EQ]]
+) void {
+    heap_free_aligned(t.slots, alignof[TableSlot[K, V]])
+    empty addr = null
+    t.slots = empty
+    t.cap = 0
+    t.n = 0
+}

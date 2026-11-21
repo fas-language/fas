@@ -416,7 +416,7 @@ fn predefined_value(n Bytes) u64 {
     k u64 = h.n
     while k > 0 {
         k -= 1
-        o handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](h, k))
+        o handle[OutSec] = vec_at[OutSec](h, k)
         if bytes_eq(o.name, section) {
             return o.address + (if last != 0 { o.size } else { 0 })
         }
@@ -817,7 +817,7 @@ fn build_image() void {
     content_count u64 = hv.n
     name_offsets addr = heap_alloc(content_count * 4 + 4)
     for k u64 in 0..content_count {
-        name_offsets[u32, k] = add_string(sh, handle_from_addr[OutSec](vec_at[OutSec](hv, k)).name)
+        name_offsets[u32, k] = add_string(sh, vec_at[OutSec](hv, k).name)
     }
     symtab_name u64 = zext[u64](add_string(sh, bytes_c(c".symtab")))
     strtab_name u64 = zext[u64](add_string(sh, bytes_c(c".strtab")))
@@ -832,7 +832,7 @@ fn build_image() void {
     image = heap_alloc_zeroed(size + 8)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](hv, k))
+        s handle[OutSec] = vec_at[OutSec](hv, k)
         if (s.flags & 4) != 0 && (bytes_is(s.name, c".init") || bytes_is(s.name, c".fini")) {
             mem_set(image + s.offset, 144, s.size)
         }
@@ -997,7 +997,7 @@ fn build_image() void {
     mem_copy(image + shstrtab_offset, sh.p, sh.n)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = handle_from_addr[OutSec](vec_at[OutSec](hv, k))
+        s handle[OutSec] = vec_at[OutSec](hv, k)
         link u64 = 0
         info u64 = 0
         if !dyn_metadata(k + 1, &link, &info) {

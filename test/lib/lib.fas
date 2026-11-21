@@ -265,17 +265,20 @@ fn test_vec() void {
     for i usize in 0..10000 { ok = ok && vec_get(vh, i) == i * i }
     check(ok, c"vec push/get")
     vec_set(vh, 5, 7)
-    check(vec_get(vh, 5) == 7 && vec_at(vh, 5)[u64] == 7, c"vec_set/at")
+    check(vec_get(vh, 5) == 7, c"vec_set")
     check(vec_pop(vh) == 9999 * 9999 && v.n == 9999, c"vec_pop")
     check(vec_last(vh) == 9998 * 9998, c"vec_last")
     vec_truncate(vh, 2)
     check(v.n == 2 && vec_last(vh) == 1, c"vec_truncate")
+    z64 addr = vec_push_zeroed(vh)
+    check(z64[u64] == 0 && v.n == 3, c"vec_push_zeroed scalar")
     vec_free(vh)
     w Vec[Pair] = {}
     wh handle[Vec[Pair]] = handle_from_addr[Vec[Pair]](&w)
     for i u32 in 0..100 { vec_push(wh, {i % 7, i}) }
     p Pair = vec_get(wh, 99)
     check(p.key == 1 && p.idx == 99, c"vec value struct")
+    check(vec_at[Pair](wh, 99).idx == 99, c"vec_at value struct")
     z addr = vec_push_zeroed(wh)
     check(w.n == 101 && z[u32, 0] == 0 && z[u32, 1] == 0, c"vec_push_zeroed")
     vec_free(wh)
@@ -377,6 +380,117 @@ fn test_intern() void {
     buf_free(bh)
 }
 
+// ---------- struct-key table ----------
+
+// With N of 2 or 4 the keys occupy 24 or 40 bytes. Most fields are
+// shared across keys; the last word distinguishes keys within a group.
+struct TestKey[N const usize] {
+    group usize
+    payload arr[N, usize]
+}
+
+fn test_key_hash[N const usize](k handle[TestKey[N]]) u64 {
+    // Force collisions and runs that wrap around the end of the table.
+    high u64 = 0xffffffffffffffff
+    return high - k.group
+}
+
+fn test_key_eq[N const usize](a handle[TestKey[N]], b handle[TestKey[N]]) bool {
+    if a.group != b.group { return false }
+    for i usize in 0..N {
+        if a.payload[i] != b.payload[i] { return false }
+    }
+    return true
+}
+
+fn test_key_set[N const usize](k handle[TestKey[N]], i usize) void {
+    k.group = i % 4
+    for j usize in 0..N - 1 { k.payload[j] = 100 + j }
+    k.payload[N - 1] = i
+}
+
+fn test_key_id[N const usize](k handle[TestKey[N]]) usize { return k.payload[N - 1] }
+
+// Forward concrete callbacks so the compiler can resolve their signatures.
+fn key24_hash(k handle[TestKey[2]]) u64 { return test_key_hash[2](k) }
+fn key24_eq(a handle[TestKey[2]], b handle[TestKey[2]]) bool { return test_key_eq[2](a, b) }
+fn key24_set(k handle[TestKey[2]], i usize) void { test_key_set[2](k, i) }
+fn key24_id(k handle[TestKey[2]]) usize { return test_key_id[2](k) }
+
+fn key40_hash(k handle[TestKey[4]]) u64 { return test_key_hash[4](k) }
+fn key40_eq(a handle[TestKey[4]], b handle[TestKey[4]]) bool { return test_key_eq[4](a, b) }
+fn key40_set(k handle[TestKey[4]], i usize) void { test_key_set[4](k, i) }
+fn key40_id(k handle[TestKey[4]]) usize { return test_key_id[4](k) }
+
+fn test_table[K, HASH fn(handle[K]) u64, EQ fn(handle[K], handle[K]) bool, SET fn(handle[K], usize) void, ID fn(handle[K]) usize]() void {
+    t Table[K, u64, HASH, EQ] = {}
+    th handle[Table[K, u64, HASH, EQ]] = handle_from_addr[Table[K, u64, HASH, EQ]](&t)
+    key K = {}
+    k handle[K] = handle_from_addr[K](&key)
+    check(!table_has(th, k) && !table_remove(th, k), c"table initially empty")
+    check(table_val_addr(th, k) == null, c"table missing value address")
+
+    for i usize in 0..12 {
+        SET(k, i)
+        check(table_put(th, k, i * 3), c"table new key")
+    }
+    // Replacement at the growth threshold with a key borrowed from the
+    // old table. The incoming key must remain live throughout table_put.
+    slot usize = table_next(th, 0)
+    borrowed handle[K] = table_key_at(th, slot)
+    value u64 = table_val_at(th, slot)
+    check(!table_put(th, borrowed, value) && t.n == 12, c"table replace borrowed key")
+    for i usize in 12..96 {
+        SET(k, i)
+        check(table_put(th, k, i * 3), c"table insert across growth")
+    }
+    check(t.cap >= 128, c"table grew")
+    for i usize in 0..96 {
+        SET(k, i)
+        check((table_get(th, k) catch 999) == i * 3, c"table owns key and preserves value")
+        if i % 2 == 0 {
+            check(table_remove(th, k) && !table_remove(th, k), c"table remove")
+        }
+    }
+    for i usize in 0..96 {
+        SET(k, i)
+        check(table_has(th, k) == (i % 2 == 1), c"table backward shift")
+        if i % 2 == 0 { check(table_put(th, k, i + 7), c"table reinsert") }
+        p addr = table_val_addr(th, k)
+        check(p != null, c"table value address")
+        if p != null { p[u64] = i + 20 }
+    }
+
+    seen arr[96, bool] = {}
+    slot = table_next(th, 0)
+    count usize = 0
+    while slot < t.cap {
+        stored handle[K] = table_key_at(th, slot)
+        id usize = ID(stored)
+        check(id < 96 && !seen[id], c"table iteration unique key")
+        if id < 96 { seen[id] = true }
+        SET(k, id)
+        check(EQ(stored, k), c"table iteration key fields")
+        check(table_val_at(th, slot) == id + 20, c"table iteration value")
+        count += 1
+        slot = table_next(th, slot + 1)
+    }
+    check(count == 96 && t.n == 96, c"table iteration count")
+    cap usize = t.cap
+    table_clear(th)
+    check(t.n == 0 && t.cap == cap && table_next(th, 0) == cap && !table_has(th, k), c"table clear")
+    check(table_put(th, k, 123), c"table reuse after clear")
+    table_free(th)
+    check(t.slots == null && t.n == 0 && t.cap == 0, c"table free")
+    check(table_put(th, k, 321) && (table_get(th, k) catch 0) == 321, c"table reuse after free")
+    table_free(th)
+    table_get(th, k) catch e {
+        check(e == NotFound, c"table missing get error")
+        return
+    }
+    check(false, c"table missing get must fail")
+}
+
 // ---------- sort ----------
 
 fn pair_less(a Pair, b Pair) bool { return a.key < b.key }
@@ -413,6 +527,99 @@ fn test_sort() void {
     a arr[5, u64] = {5, 1, 4, 1, 0}
     sort[u64, u64_less](&a, 5)
     check(a[0] == 0 && a[1] == 1 && a[2] == 1 && a[3] == 4 && a[4] == 5, c"sort array")
+}
+
+struct Record40 { key usize, order usize, a u64, b u64, c u64 }
+
+fn record_less(a handle[Record40], b handle[Record40]) bool { return a.key < b.key }
+
+fn record_set(r handle[Record40], i usize) void {
+    r.key = (10 - i % 11) % 5
+    r.order = i
+    r.a = i * 19
+    r.b = ~i
+    r.c = i ^ 0xabcdef
+}
+
+fn test_sort_by() void {
+    check(sizeof[Record40] == 40, c"record size")
+    v Vec[Record40] = {}
+    vh handle[Vec[Record40]] = handle_from_addr[Vec[Record40]](&v)
+    want Record40 = {}
+    w handle[Record40] = handle_from_addr[Record40](&want)
+    for trial usize in 0..37 {
+        n usize = if trial < 34 { trial } else { trial * 10 - 83 }
+        for i usize in 0..n {
+            r handle[Record40] = vec_add(vh)
+            check(r.key == 0 && r.order == 0 && r.a == 0 && r.b == 0 && r.c == 0,
+                  c"vec_add clears the whole record")
+            record_set(r, i)
+        }
+        if n > 0 {
+            r handle[Record40] = vec_at(vh, n - 1)
+            copy_into(w, r)
+            check(mem_eq(&want, handle_addr(r), sizeof[Record40]), c"copy_into whole record")
+            w.c = 0
+            check(r.c != w.c, c"copy_into independent storage")
+        }
+        if trial % 2 == 0 {
+            sort_by[Record40, record_less](v.p, v.n)
+        } else {
+            sort_vec_by[Record40, record_less](vh)
+        }
+        // Reference order by buckets, visiting the original indices in
+        // order. Compare every word to catch corruption as well as misordering.
+        j usize = 0
+        for bucket usize in 0..5 {
+            for i usize in 0..n {
+                record_set(w, i)
+                if w.key == bucket {
+                    r handle[Record40] = vec_at(vh, j)
+                    check(mem_eq(&want, handle_addr(r), sizeof[Record40]), c"sort_by stable reference order")
+                    j += 1
+                }
+            }
+        }
+        check(j == v.n && v.n == n, c"sort_by length")
+        vec_clear(vh)
+    }
+    vec_free(vh)
+}
+
+struct AlignedKey @align(32) { key u64 }
+
+fn aligned_key_less(a handle[AlignedKey], b handle[AlignedKey]) bool {
+    check((addr_bits(handle_addr(a)) | addr_bits(handle_addr(b))) & 31 == 0, c"sort comparator alignment")
+    return a.key < b.key
+}
+
+fn aligned_key_hash(k handle[AlignedKey]) u64 { return k.key }
+fn aligned_key_eq(a handle[AlignedKey], b handle[AlignedKey]) bool { return a.key == b.key }
+
+fn test_aligned_containers() void {
+    v Vec[AlignedKey] = {}
+    vh handle[Vec[AlignedKey]] = handle_from_addr[Vec[AlignedKey]](&v)
+    t Table[AlignedKey, u64, aligned_key_hash, aligned_key_eq] = {}
+    th handle[Table[AlignedKey, u64, aligned_key_hash, aligned_key_eq]] = handle_from_addr[Table[AlignedKey, u64, aligned_key_hash, aligned_key_eq]](&t)
+    for i usize in 0..65 {
+        k handle[AlignedKey] = vec_add(vh)
+        check(addr_bits(handle_addr(k)) & 31 == 0, c"vec_add over-aligned record")
+        k.key = 64 - i
+        check(table_put(th, k, i), c"table insert over-aligned key")
+    }
+    sort_vec_by[AlignedKey, aligned_key_less](vh)
+    for i usize in 0..65 {
+        k handle[AlignedKey] = vec_at(vh, i)
+        check(k.key == i && (table_get(th, k) catch 999) == 64 - i, c"aligned vector and table after growth")
+    }
+    i usize = table_next(th, 0)
+    while i < t.cap {
+        k handle[AlignedKey] = table_key_at(th, i)
+        check(addr_bits(handle_addr(k)) & 31 == 0, c"table over-aligned inline key")
+        i = table_next(th, i + 1)
+    }
+    table_free(th)
+    vec_free(vh)
 }
 
 // ---------- path ----------
@@ -550,7 +757,12 @@ fn main(argc i32, argv addr) i32 {
     test_vec()
     test_map()
     test_intern()
+    check(sizeof[TestKey[2]] == 24 && sizeof[TestKey[4]] == 40, c"table key sizes")
+    test_table[TestKey[2], key24_hash, key24_eq, key24_set, key24_id]()
+    test_table[TestKey[4], key40_hash, key40_eq, key40_set, key40_id]()
     test_sort()
+    test_sort_by()
+    test_aligned_containers()
     test_path()
     test_file(os_arg(1))
     test_os()

@@ -109,7 +109,7 @@ fn imp_put(id u32) handle[Imp] {
         vec_new[Imp](iv)
         g.imp = trunc[u32](iv.n)
     }
-    mem_set(vec_at[Imp](iv, zext[u64](g.imp) - 1), 0, sizeof[Imp])
+    mem_set(handle_addr(vec_at[Imp](iv, zext[u64](g.imp) - 1)), 0, sizeof[Imp])
     p handle[Imp] = imp(id)
     p.version = bytes(null, NONE64)
     p.library = NONE
@@ -124,7 +124,7 @@ fn import_id(name Bytes) u32 {
 }
 
 fn gsym(id u32) handle[GSym] {
-    return handle_from_addr[GSym](vec_at[GSym](handle_from_addr[Vec[GSym]](&gsyms), zext[u64](id)))
+    return vec_at[GSym](handle_from_addr[Vec[GSym]](&gsyms), zext[u64](id))
 }
 
 // the state of `name`, created in first-use order (the OCaml `order`)
