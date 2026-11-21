@@ -1,0 +1,36 @@
+// Keep advertised target features in one place. These are the attributes
+// and builtins selected by the system headers on x86-64 Linux.
+const C_ATTRIBUTES addr = c" alias aligned alloc_align alloc_size always_inline artificial cold const deprecated error fallthrough format format_arg gnu_inline leaf malloc may_alias noinline nonnull noreturn nothrow packed pure restrict returns_nonnull section sentinel transparent_union unused used visibility warn_unused_result warning weak "
+const C_FEATURES addr = c" attribute_deprecated_with_message c_alignas c_alignof c_atomic c_generic_selections c_static_assert c_thread_local c_variadic_macros "
+const C_BUILTINS addr = c" __atomic_load_n __atomic_store_n __builtin_add_overflow __builtin_assume_aligned __builtin_bswap16 __builtin_bswap32 __builtin_bswap64 __builtin_clz __builtin_clzl __builtin_clzll __builtin_constant_p __builtin_ctz __builtin_ctzl __builtin_ctzll __builtin_expect __builtin_expect_with_probability __builtin_isinf_sign __builtin_memcpy __builtin_memmove __builtin_memset __builtin_mul_overflow __builtin_object_size __builtin_offsetof __builtin_popcount __builtin_popcountl __builtin_popcountll __builtin_sub_overflow __builtin_trap __builtin_types_compatible_p __builtin_unreachable __builtin_va_arg __builtin_va_copy __builtin_va_end __builtin_va_start "
+
+fn feature_in(table addr, name Bytes) bool {
+    b Buf = {}
+    buf_u8(&b, 32)
+    buf_append(&b, name)
+    buf_u8(&b, 32)
+    bytes_find(bytes_c(table), buf_bytes(&b)) catch { return false }
+    return true
+}
+
+fn feature_attr(name Bytes) Bytes {
+    if name.n > 4 && bytes_starts_with(name, bytes_c(c"__")) && bytes_ends_with(name, bytes_c(c"__")) {
+        return bytes_sub(name, 2, name.n - 4)
+    }
+    return name
+}
+
+fn feature_c_attr(name Bytes, space Bytes) u64 {
+    a Bytes = feature_attr(name)
+    if space.n != 0 {
+        if bytes_eq_c(feature_attr(space), c"gnu") && feature_in(C_ATTRIBUTES, a) { return 1 }
+        return 0
+    }
+    if bytes_eq_c(a, c"fallthrough") { return 201910 }
+    if bytes_eq_c(a, c"maybe_unused") { return 202106 }
+    if bytes_eq_c(a, c"deprecated") { return 201904 }
+    if bytes_eq_c(a, c"nodiscard") { return 202003 }
+    if bytes_eq_c(a, c"noreturn") || bytes_eq_c(a, c"_Noreturn") { return 202202 }
+    if bytes_eq_c(a, c"reproducible") || bytes_eq_c(a, c"unsequenced") { return 202311 }
+    return 0
+}

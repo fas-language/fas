@@ -1,0 +1,342 @@
+// Translation phase 2 removes line continuations before token recognition.
+// Each discontinuity records the physical line and column of the next byte.
+// The lexer follows the sparse map forward as it emits token locations.
+value struct LineMark { offset usize, line u32, column u32 }
+
+struct CFile {
+    data Bytes
+    marks Vec[LineMark]
+}
+
+struct Lexer {
+    file handle[CFile]
+    path u32
+    level u32
+    line_bias i64
+    at usize
+    mark usize
+    flags u8
+    comment u32
+    in_comment bool
+    header bool
+    skipping bool
+}
+
+fn newline_width(p addr) usize {
+    if p[u8] == 10 { return 1 }
+    if p[u8] != 13 { return 0 }
+    return if p[u8, 1] == 10 { 2 } else { 1 }
+}
+
+// original must have at least eight zero bytes after the logical input.
+fn splice_source(file handle[CFile], original Bytes, gnu bool) void {
+    out addr = heap_alloc_zeroed(original.n + 8)
+    src usize = 0
+    dst usize = 0
+    line u32 = 1
+    vec_push[LineMark](&file.marks, {0, 1, 1})
+    if original.n >= 3 && original.p[u8] == 239 && original.p[u8, 1] == 187 && original.p[u8, 2] == 191 {
+        src = 3
+    }
+    while src < original.n {
+        ch u8 = original.p[u8, src]
+        if ch == 92 {
+            end usize = src + 1
+            if gnu {
+                while original.p[u8, end] == 32 || original.p[u8, end] == 9 { end += 1 }
+            }
+            width usize = newline_width(original.p + end)
+            if width != 0 {
+                src = end + width
+                line += 1
+                vec_push[LineMark](&file.marks, {dst, line, 1})
+                continue
+            }
+        }
+        width usize = newline_width(original.p + src)
+        if width != 0 {
+            out[u8, dst] = 10
+            dst += 1
+            src += width
+            line += 1
+            vec_push[LineMark](&file.marks, {dst, line, 1})
+        } else {
+            out[u8, dst] = ch
+            src += 1
+            dst += 1
+        }
+    }
+    file.data = bytes(out, dst)
+}
+
+fn lex_pos(l handle[Lexer], at usize) CLoc {
+    f handle[CFile] = l.file
+    marks handle[Vec[LineMark]] = &f.marks
+    while l.mark + 1 < marks.n && vec_get[LineMark](marks, l.mark + 1).offset <= at {
+        l.mark += 1
+    }
+    m LineMark = vec_get[LineMark](marks, l.mark)
+    line u32 = trunc[u32](bitcast[u64](bitcast[i64](zext[u64](m.line)) + l.line_bias))
+    return {l.path, line, m.column + trunc[u32](at - m.offset), l.level}
+}
+
+fn lex_loc(n handle[CNames], l handle[Lexer], at usize) u32 {
+    pos CLoc = lex_pos(l, at)
+    id u32 = trunc[u32](n.locations.n)
+    vec_push[CLoc](&n.locations, pos)
+    return id
+}
+
+// Classify byte ranges once. Non-ASCII identifier characters are classified
+// separately by Unicode scalar value.
+const B_DIGIT u8 = 1
+const B_ID u8 = 2
+const B_SPACE u8 = 4
+const B_UTF8 u8 = 8
+const B_PUNCT u8 = 16
+const B_CLASS arr[256, u8] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    4, 16, 0, 16, 0, 16, 16, 0, 16, 16, 16, 16, 16, 16, 16, 16,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 16, 16, 16, 16, 16, 16,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 16, 0, 16, 16, 2,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 16, 16, 16, 16, 0,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+}
+
+fn cc_digit(c u8) bool { return (B_CLASS[zext[usize](c)] & B_DIGIT) != 0 }
+fn cc_space(c u8) bool { return (B_CLASS[zext[usize](c)] & B_SPACE) != 0 }
+
+fn cc_hex(c u8) u32 {
+    if cc_digit(c) { return zext[u32](c - 48) }
+    if (c | 32) >= 97 && (c | 32) <= 102 { return zext[u32]((c | 32) - 87) }
+    return 16
+}
+
+// Universal character names in identifiers have exactly 4 or 8 digits.
+fn cc_ucn(p addr) Rune {
+    count u32 = if p[u8, 1] == 117 { 4 } else { 8 }
+    cp u32 = 0
+    for i u32 in 0..count {
+        d u32 = cc_hex(p[u8, zext[usize](i) + 2])
+        if d == 16 { return {0, 0} }
+        cp = (cp << 4) | d
+    }
+    if cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) { return {0, 0} }
+    return {cp, count + 2}
+}
+
+fn cc_id_ascii(ch u8, first bool, gnu bool) bool {
+    class u8 = B_CLASS[zext[usize](ch)]
+    return (class & B_ID) != 0 || (!first && (class & B_DIGIT) != 0) || (gnu && ch == 36)
+}
+
+fn cc_is_ucn(p addr) bool { return p[u8] == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85) }
+
+fn lex_ident(n handle[CNames], l handle[Lexer], start addr, loc u32) u32 fails {
+    p addr = start
+    part addr = start
+    normalized Buf = {}
+    starter u32 = 0
+    ccc u32 = 0
+    nfc bool = true
+    while true {
+        ch u8 = p[u8]
+        first bool = p == start
+        if cc_id_ascii(ch, first, n.gnu) {
+            starter = zext[u32](ch)
+            ccc = 0
+            p = p + 1
+            continue
+        }
+        ucn bool = cc_is_ucn(p)
+        if !ucn && ch < 128 { break }
+        r Rune = if ucn { cc_ucn(p) } else { utf8(p) }
+        if r.width == 0 || !xid(r.cp, first) { break }
+        cls u32 = combining_class(r.cp)
+        if (cls != 0 && cls < ccc) || ((ccc == 0 || ccc < cls) && canonical_pair(starter, r.cp)) ||
+            unicode_range(&NFC_NO, 148 / 2, r.cp) {
+            nfc = false
+        }
+        if cls == 0 { starter = r.cp }
+        ccc = cls
+        if ucn {
+            buf_raw(&normalized, part, addr_bits(p) - addr_bits(part))
+            utf8_append(&normalized, r.cp)
+            part = p + zext[usize](r.width)
+        }
+        p = p + zext[usize](r.width)
+    }
+    if !nfc {
+        if !n.gnu { try cc_error(n, loc, c"identifier is not in Unicode NFC") }
+        cc_diag(n, loc, c"warning: ", bytes_c(c"identifier is not in Unicode NFC"))
+    }
+    width usize = addr_bits(p) - addr_bits(start)
+    id u32 = cc_intern(n, bytes(start, width))
+    if part != start {
+        buf_raw(&normalized, part, addr_bits(p) - addr_bits(part))
+        canonical u32 = cc_intern(n, buf_bytes(&normalized))
+        n.identifiers.p[u32, zext[usize](id)] = canonical
+    }
+    l.at += width
+    return id
+}
+
+// Longest punctuator first. Digraph spellings survive in tokens and are
+// interpreted as their ordinary counterparts by directive/macro consumers.
+fn punct_width(p addr) usize {
+    a u8 = p[u8]
+    b u8 = p[u8, 1]
+    c u8 = p[u8, 2]
+    if a == 37 && b == 58 && c == 37 && p[u8, 3] == 58 { return 4 }
+    if (a == 46 && b == 46 && c == 46) ||
+        ((a == 60 || a == 62) && b == a && c == 61) { return 3 }
+    if (b == 61 && (a == 43 || a == 45 || a == 42 || a == 47 || a == 37 ||
+        a == 60 || a == 62 || a == 61 || a == 33 || a == 38 || a == 124 || a == 94)) ||
+        (b == a && (a == 43 || a == 45 || a == 60 || a == 62 || a == 38 || a == 124 || a == 35 || a == 58)) ||
+        (a == 45 && b == 62) || (a == 60 && (b == 58 || b == 37)) ||
+        ((a == 58 || a == 37) && b == 62) || (a == 37 && b == 58) { return 2 }
+    return 1
+}
+
+fn literal_prefix(p addr) usize {
+    a u8 = p[u8]
+    b u8 = p[u8, 1]
+    if a == 34 || a == 39 { return 0 }
+    if (a == 76 || a == 85 || a == 117) && (b == 34 || b == 39) { return 1 }
+    if a == 117 && b == 56 && (p[u8, 2] == 34 || p[u8, 2] == 39) { return 2 }
+    return 3
+}
+
+fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
+    f handle[CFile] = l.file
+    p addr = f.data.p
+    while true {
+        at usize = l.at
+        ch u8 = p[u8, at]
+        if ch == 0 && at >= f.data.n {
+            if l.in_comment { try cc_error(n, l.comment, c"unterminated block comment") }
+            return cc_token(TK_EOF, l.flags, lex_loc(n, l, at), 0)
+        }
+        if l.in_comment {
+            if ch == 42 && p[u8, at + 1] == 47 {
+                l.at += 2
+                l.in_comment = false
+                l.flags |= F_SPACE
+            } else {
+                l.at += 1
+            }
+            continue
+        }
+        if ch == 10 {
+            l.at += 1
+            l.flags = F_BOL
+            return cc_token(TK_NL, 0, lex_loc(n, l, at), 0)
+        }
+        if cc_space(ch) || ch == 0 {
+            l.at += 1
+            l.flags |= F_SPACE
+            continue
+        }
+        if !pasted && ch == 47 {
+            k u8 = p[u8, at + 1]
+            if k == 47 {
+                l.at += 2
+                while p[u8, l.at] != 0 && p[u8, l.at] != 10 { l.at += 1 }
+                l.flags |= F_SPACE
+                continue
+            }
+            if k == 42 {
+                l.comment = lex_loc(n, l, at)
+                l.in_comment = true
+                l.at += 2
+                continue
+            }
+        }
+        break
+    }
+    at usize = l.at
+    start addr = p + at
+    loc u32 = lex_loc(n, l, at)
+    flags u8 = l.flags
+    l.flags = 0
+    ch u8 = start[u8]
+    class u8 = B_CLASS[zext[usize](ch)]
+    prefix usize = literal_prefix(start)
+    kind u8 = TK_PUNCT
+    width usize = 0
+    if l.header && (ch == 60 || ch == 34) {
+        close u8 = if ch == 60 { 62 } else { 34 }
+        width = 1
+        while start[u8, width] != close && start[u8, width] != 0 && start[u8, width] != 10 { width += 1 }
+        if start[u8, width] != close { try cc_error(n, loc, c"unterminated header name") }
+        width += 1
+        kind = TK_HEADER
+    } else if prefix != 3 {
+        delimiter u8 = start[u8, prefix]
+        kind = if delimiter == 34 { TK_STR } else { TK_CHAR }
+        width = prefix + 1
+        while start[u8, width] != delimiter {
+            c u8 = start[u8, width]
+            if c == 0 || c == 10 {
+                if l.skipping {
+                    kind = TK_PUNCT
+                    width = prefix
+                    break
+                }
+                try cc_error(n, loc, c"unterminated literal")
+            }
+            if c == 92 && start[u8, width + 1] != 0 && start[u8, width + 1] != 10 { width += 1 }
+            width += 1
+        }
+        width += 1
+    } else if cc_id_ascii(ch, true, n.gnu) {
+        l.header = false
+        id u32 = try lex_ident(n, l, start, loc)
+        return cc_token(TK_IDENT, flags, loc, id)
+    } else if (class & B_DIGIT) != 0 || (ch == 46 && cc_digit(start[u8, 1])) {
+        kind = TK_NUM
+        width = 1
+        while true {
+            c u8 = start[u8, width]
+            prev u8 = start[u8, width - 1] | 32
+            if cc_id_ascii(c, false, n.gnu) || c == 46 ||
+                ((prev == 101 || prev == 112) && (c == 43 || c == 45)) ||
+                (c == 39 && cc_id_ascii(start[u8, width + 1], false, n.gnu)) {
+                width += 1
+            } else if c >= 128 || (c == 92 && (start[u8, width + 1] == 117 || start[u8, width + 1] == 85)) {
+                r Rune = if c == 92 { cc_ucn(start + width) } else { utf8(start + width) }
+                if r.width == 0 || !xid(r.cp, false) { break }
+                width += zext[usize](r.width)
+            } else { break }
+        }
+    } else if (class & B_UTF8) != 0 || cc_is_ucn(start) {
+        ucn bool = cc_is_ucn(start)
+        r Rune = if ucn { cc_ucn(start) } else { utf8(start) }
+        if r.width == 0 { try cc_error(n, loc, c"invalid UTF-8 or universal character name") }
+        if xid(r.cp, true) {
+            l.header = false
+            id u32 = try lex_ident(n, l, start, loc)
+            return cc_token(TK_IDENT, flags, loc, id)
+        }
+        // A valid character outside XID_Start is still a standalone
+        // preprocessing token. The parser may reject it in phase 7.
+        width = zext[usize](r.width)
+        kind = TK_OTHER
+    } else {
+        width = punct_width(start)
+        if width == 1 && (class & B_PUNCT) == 0 { kind = TK_OTHER }
+    }
+    l.header = false
+    l.at += width
+    return cc_token(kind, flags, loc, cc_intern(n, bytes(start, width)))
+}

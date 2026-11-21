@@ -1,0 +1,245 @@
+// fcc: freestanding C23 preprocessing driver.
+use "../lib/core.fas"
+use "token.fas"
+use "unicode.fas"
+use "lex.fas"
+use "pp.fas"
+use "macro.fas"
+use "directive.fas"
+use "expr.fas"
+use "builtin.fas"
+use "features.fas"
+use "embed.fas"
+use "target.fas"
+use "search.fas"
+use "output.fas"
+
+value struct Command { value addr, kind u8 }
+struct Options {
+    path addr
+    output addr
+    dep_file addr
+    targets Vec[addr]
+    macros Vec[Command]
+    force Vec[Command]
+    dirs Vec[SearchDir]
+    gnu bool
+    no_markers bool
+    no_builtins bool
+    macro_dump bool
+    deps u8  // 1 = only dependencies, 2 = side output
+    user_deps bool
+    phony bool
+}
+
+fn cli_error(message addr, arg addr) void fails {
+    eprint(message)
+    if arg != null { eprint(arg) }
+    eprint(c"\n")
+    fail CError
+}
+
+fn cli_arg(argc usize, pos handle[ArgPosition], arg addr, word addr) addr fails {
+    if arg[u8, cstr_len(word)] != 0 { return arg + cstr_len(word) }
+    pos.i += 1
+    if pos.i == argc { try cli_error(c"fcc: missing argument for ", word) }
+    return os_arg(pos.i)
+}
+
+struct ArgPosition { i usize }
+
+fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
+    pos ArgPosition = {1}
+    options bool = true
+    o.gnu = true
+    while pos.i < argc {
+        arg addr = os_arg(pos.i)
+        word Bytes = bytes_c(arg)
+        if !options || arg[u8] != 45 || arg[u8, 1] == 0 {
+            if o.path != null { try cli_error(c"fcc: expected one input file, got ", arg) }
+            o.path = arg
+        } else if bytes_eq_c(word, c"--") { options = false }
+        else if bytes_eq_c(word, c"-E") || bytes_eq_c(word, c"-x") || bytes_eq_c(word, c"-pipe") {
+            if bytes_eq_c(word, c"-x") {
+                lang addr = try cli_arg(argc, &pos, arg, c"-x")
+                if !bytes_eq_c(bytes_c(lang), c"c") && !bytes_eq_c(bytes_c(lang), c"c-header") { try cli_error(c"fcc: unsupported input language ", lang) }
+            }
+        } else if bytes_eq_c(word, c"-P") { o.no_markers = true }
+        else if bytes_eq_c(word, c"-dM") { o.macro_dump = true }
+        else if bytes_eq_c(word, c"-undef") { o.no_builtins = true }
+        else if bytes_eq_c(word, c"-std=c23") { o.gnu = false }
+        else if bytes_eq_c(word, c"-std=gnu23") { o.gnu = true }
+        else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
+            o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
+            o.user_deps = word.n > 2 && arg[u8, 2] == 77
+        } else if bytes_eq_c(word, c"-MP") { o.phony = true }
+        else if bytes_starts_with(word, bytes_c(c"-MF")) { o.dep_file = try cli_arg(argc, &pos, arg, c"-MF") }
+        else if bytes_starts_with(word, bytes_c(c"-MT")) { vec_push[addr](&o.targets, try cli_arg(argc, &pos, arg, c"-MT")) }
+        else if bytes_starts_with(word, bytes_c(c"-o")) { o.output = try cli_arg(argc, &pos, arg, c"-o") }
+        else if bytes_starts_with(word, bytes_c(c"-D")) { vec_push[Command](&o.macros, {try cli_arg(argc, &pos, arg, c"-D"), 0}) }
+        else if bytes_starts_with(word, bytes_c(c"-U")) { vec_push[Command](&o.macros, {try cli_arg(argc, &pos, arg, c"-U"), 1}) }
+        else if bytes_eq_c(word, c"-include") || bytes_eq_c(word, c"-imacros") {
+            kind u8 = if bytes_eq_c(word, c"-include") { 0 } else { 1 }
+            vec_push[Command](&o.force, {try cli_arg(argc, &pos, arg, arg), kind})
+        } else {
+            prefix addr = c"-I"
+            rank u8 = 1
+            if bytes_starts_with(word, bytes_c(c"-iquote")) { rank = 0; prefix = c"-iquote" }
+            else if bytes_starts_with(word, bytes_c(c"-isystem")) { rank = 2; prefix = c"-isystem" }
+            else if bytes_starts_with(word, bytes_c(c"-idirafter")) { rank = 3; prefix = c"-idirafter" }
+            else if !bytes_starts_with(word, bytes_c(c"-I")) { try cli_error(c"fcc: unknown option ", arg) }
+            path addr = try cli_arg(argc, &pos, arg, prefix)
+            vec_push[SearchDir](&o.dirs, {cc_intern(&p.names, bytes_c(path)), rank})
+        }
+        pos.i += 1
+    }
+    if o.path == null { try cli_error(c"usage: fcc -E [-P] [-std=c23|gnu23] [options] input", null) }
+}
+
+fn cli_dir(p handle[Pp], path addr, rank u8) void {
+    vec_push[SearchDir](&p.dirs, {cc_intern(&p.names, bytes_c(path)), rank})
+}
+
+fn cli_search_paths(p handle[Pp], o handle[Options]) void {
+    for rank u8 in 0..4 {
+        for i usize in 0..o.dirs.n {
+            d SearchDir = o.dirs.p[SearchDir, i]
+            if d.rank == rank { vec_push[SearchDir](&p.dirs, d) }
+        }
+        if rank == 2 {
+            include addr = os_getenv(c"FCC_INCLUDE")
+            if include == null { include = c"cc/include" }
+            cli_dir(p, include, rank)
+            cli_dir(p, c"/usr/local/include", rank)
+            cli_dir(p, c"/usr/include/x86_64-linux-gnu", rank)
+            cli_dir(p, c"/usr/include", rank)
+            gcc addr = gcc_include()
+            if gcc != null && gcc[u8] != 0 { cli_dir(p, gcc, rank) }
+        }
+    }
+}
+
+fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
+    b addr = heap_alloc_zeroed(source.n + 8)
+    mem_copy(b, source.p, source.n)
+    f CFile = {}
+    splice_source(&f, bytes(b, source.n), p.names.gnu)
+    l Lexer = {}
+    l.file = &f
+    l.path = cc_intern(&p.names, bytes_c(filename))
+    l.flags = F_BOL
+    tokens Vec[Token] = {}
+    while l.at < f.data.n {
+        vec_clear[Token](&tokens)
+        try pp_lex_line(&p.names, &l, &tokens, false)
+        if tokens.n != 0 { try pp_define(p, &tokens, tokens.p[Token].loc) }
+    }
+}
+
+fn cli_setup(p handle[Pp], o handle[Options]) void fails {
+    p.names.gnu = o.gnu
+    p.stream.source = true
+    p.timestamp = os_clock_ns(0) / 1000000000
+    epoch addr = os_getenv(c"SOURCE_DATE_EPOCH")
+    if epoch != null {
+        p.timestamp = bytes_to_u64(bytes_c(epoch)) catch p.timestamp
+        p.timestamp_explicit = true
+    }
+    if !o.no_builtins {
+        for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
+        try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
+    } else {
+        try cli_definitions(p, bytes_c(c"__STDC__ 1\n__STDC_VERSION__ 202311L\n__STDC_HOSTED__ 1\n"), c"<built-in>")
+    }
+    for i usize in 0..o.macros.n {
+        m Command = o.macros.p[Command, i]
+        s Bytes = bytes_c(m.value)
+        if m.kind == 1 {
+            id u32 = cc_intern(&p.names, s)
+            p.names.macros.p[addr, zext[usize](id)] = null
+            p.names.undefined.p[u8, zext[usize](id)] = 1
+        } else {
+            b Buf = {}
+            sep usize = bytes_index(s, 61) catch s.n
+            buf_append(&b, bytes_sub(s, 0, sep))
+            if sep == s.n { buf_str(&b, c" 1") }
+            else {
+                buf_u8(&b, 32)
+                buf_append(&b, bytes_from(s, sep + 1))
+            }
+            try cli_definitions(p, buf_bytes(&b), c"<command line>")
+        }
+    }
+    cli_search_paths(p, o)
+}
+
+fn stdin_file() handle[Input] fails {
+    f handle[Input] = handle_from_addr(heap_alloc_zeroed(sizeof[Input]))
+    b Buf = {}
+    while true {
+        buf_reserve(&b, 16384)
+        got usize = try os_read(STDIN, b.p + b.n, 16384)
+        if got == 0 { break }
+        b.n += got
+    }
+    size usize = b.n
+    buf_zeros(&b, 8)
+    f.content = bytes(b.p, size)
+    return f
+}
+
+fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
+    cc_intern(&p.names, bytes_empty())
+    try cli_parse(p, o, argc)
+    try cli_setup(p, o)
+    name Bytes = bytes_c(o.path)
+    stdin bool = bytes_eq_c(name, c"-")
+    p.base_file = cc_intern(&p.names, if stdin { bytes_c(c"<stdin>") } else { name })
+    p.base_logical = p.base_file
+    p.line_markers = !o.no_markers && !o.macro_dump && o.deps != 1
+    main_input handle[Input]
+    if stdin { main_input = try stdin_file() }
+    else if bytes_eq_c(name, c"/dev/null") {
+        main_input = handle_from_addr(heap_alloc_zeroed(sizeof[Input]))
+    }
+    else {
+        main_input = pp_read(p, name) catch {
+            try cli_error(c"fcc: cannot open ", o.path)
+            return
+        }
+    }
+    pp_depend(p, p.base_file, false)
+    out Output = {}
+    // Macro-only forced files are visited before any of the textual inputs.
+    for order u8 in 0..2 {
+        for i usize in 0..o.force.n {
+            inc Command = o.force.p[Command, i]
+            if inc.kind != 1 - order { continue }
+            path Bytes = bytes_c(inc.value)
+            found Found = pp_lookup(p, path, -1, false)
+            if found.file == null { found = pp_find(p, path, true, false) }
+            if found.file == null { try cli_error(c"fcc: cannot open forced include ", inc.value) }
+            try pp_push_file(p, handle_from_addr(found.file), found.path, sext[i32](found.dir), found.system, 0)
+            try output_stream(p, &out, o.macro_dump || o.deps == 1 || inc.kind == 1)
+        }
+    }
+    try pp_push_file(p, main_input, p.base_file, -1, false, 0)
+    try output_stream(p, &out, o.macro_dump || o.deps == 1)
+    if o.macro_dump { output_macros(p, &out.text) }
+    if o.deps != 1 { try output_file(o.output, buf_bytes(&out.text)) }
+    if o.deps != 0 { try output_dependencies(p, o) }
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    region Region = {}
+    region_switch(&region)
+    defer { region_switch(null); region_dispose(&region) }
+    pp Pp = {}
+    options Options = {}
+    cli_main(&pp, &options, zext[usize](bitcast[u32](argc))) catch e {
+        if e != CError { eprint(c"fcc: I/O error\n") }
+        return 1
+    }
+    return 0
+}

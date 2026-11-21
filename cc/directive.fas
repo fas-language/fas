@@ -1,0 +1,370 @@
+fn pp_lex_line(n handle[CNames], l handle[Lexer], tokens handle[Vec[Token]], header bool) void fails {
+    l.header = header
+    while true {
+        t Token = try lex_next(n, l, false)
+        if t.kind == TK_NL || t.kind == TK_EOF { l.header = false; return }
+        vec_push[Token](tokens, t)
+    }
+}
+
+fn pp_check_replacement(n handle[CNames], m handle[Macro], data addr, first usize, stop usize, inner bool) void fails {
+    i usize = first
+    while i < stop {
+        t Token = data[Token, i]
+        if (i == first || i + 1 == stop) && expand_paste_op(n, t) {
+            try cc_error(n, t.loc, c"'##' at edge of macro replacement")
+        }
+        if t.kind == TK_IDENT && cc_is(n, t, c"__VA_OPT__") {
+            if inner || !m.variadic || i + 1 >= stop || !cc_is(n, data[Token, i + 1], c"(") {
+                try cc_error(n, t.loc, c"invalid __VA_OPT__")
+            }
+            i += 2
+            begin usize = i
+            depth usize = 1
+            while i < stop {
+                part Token = data[Token, i]
+                if cc_is(n, part, c"(") { depth += 1 }
+                if cc_is(n, part, c")") { depth -= 1 }
+                if depth == 0 { break }
+                i += 1
+            }
+            if depth != 0 { try cc_error(n, t.loc, c"unterminated __VA_OPT__") }
+            try pp_check_replacement(n, m, data, begin, i, true)
+        } else if m.function && expand_string_op(n, t) {
+            if i + 1 == stop || (expand_arg_index(n, m, data[Token, i + 1]) == m.params.n &&
+                !cc_is(n, data[Token, i + 1], c"__VA_OPT__")) {
+                try cc_error(n, t.loc, c"'#' must precede a macro parameter")
+            }
+        }
+        i += 1
+    }
+}
+
+fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
+    n handle[CNames] = &p.names
+    if args.n == 0 || args.p[Token].kind != TK_IDENT { try cc_error(n, loc, c"expected macro name") }
+    id u32 = cc_ident(n, args.p[Token])
+    if cc_is(n, args.p[Token], c"defined") { try cc_error(n, loc, c"cannot define the preprocessor operator defined") }
+    a addr = heap_alloc_zeroed(sizeof[Macro])
+    m handle[Macro] = handle_from_addr(a)
+    i usize = 1
+    if i < args.n && (args.p[Token, i].flags & F_SPACE) == 0 && cc_is(n, args.p[Token, i], c"(") {
+        m.function = true
+        i += 1
+        while i < args.n && !cc_is(n, args.p[Token, i], c")") {
+            t Token = args.p[Token, i]
+            i += 1
+            if cc_is(n, t, c"...") {
+                m.variadic = true
+                vec_push[u32](&m.params, cc_intern(n, bytes_c(c"__VA_ARGS__")))
+                break
+            }
+            if t.kind != TK_IDENT { try cc_error(n, t.loc, c"expected macro parameter") }
+            param u32 = cc_ident(n, t)
+            for j usize in 0..m.params.n {
+                if m.params.p[u32, j] == param { try cc_error(n, t.loc, c"duplicate macro parameter") }
+            }
+            vec_push[u32](&m.params, param)
+            if i < args.n && n.gnu && cc_is(n, args.p[Token, i], c"...") {
+                m.variadic = true
+                i += 1
+                break
+            }
+            if i == args.n || !cc_is(n, args.p[Token, i], c",") { break }
+            i += 1
+            if i < args.n && cc_is(n, args.p[Token, i], c")") { try cc_error(n, loc, c"expected macro parameter after comma") }
+        }
+        if i == args.n || !cc_is(n, args.p[Token, i], c")") { try cc_error(n, loc, c"expected ')' in macro parameters") }
+        i += 1
+    }
+    try pp_check_replacement(n, m, args.p, i, args.n, false)
+    for j usize in i..args.n { vec_push[Token](&m.body, args.p[Token, j]) }
+    n.macros.p[addr, zext[usize](id)] = a
+    n.undefined.p[u8, zext[usize](id)] = 0
+}
+
+fn pp_single_name(p handle[Pp], args handle[Vec[Token]], loc u32) u32 fails {
+    if args.n == 0 || args.p[Token].kind != TK_IDENT { try cc_error(&p.names, loc, c"expected identifier") }
+    return cc_ident(&p.names, args.p[Token])
+}
+
+fn pp_message(n handle[CNames], args handle[Vec[Token]], out handle[Buf]) void {
+    for i usize in 0..args.n {
+        t Token = args.p[Token, i]
+        if i != 0 && (t.flags & F_SPACE) != 0 { buf_u8(out, 32) }
+        buf_append(out, cc_spelling(n, t))
+    }
+}
+
+struct Header { name Bytes, quote bool, used usize }
+fn pp_header(p handle[Pp], tokens handle[Vec[Token]], loc u32, out handle[Header]) void fails {
+    n handle[CNames] = &p.names
+    if tokens.n != 0 {
+        first Token = tokens.p[Token]
+        s Bytes = cc_spelling(n, first)
+        if (first.kind == TK_HEADER || first.kind == TK_STR) && s.n >= 2 && (s.p[u8] == 34 || s.p[u8] == 60) {
+            out.name = bytes_sub(s, 1, s.n - 2)
+            out.quote = s.p[u8] == 34
+            out.used = 1
+            return
+        }
+        if cc_is(n, first, c"<") {
+            name Buf = {}
+            for i usize in 1..tokens.n {
+                t Token = tokens.p[Token, i]
+                if (t.flags & F_SPACE) != 0 { buf_u8(&name, 32) }
+                if cc_is(n, t, c">") { out.name = buf_bytes(&name); out.used = i + 1; return }
+                buf_append(&name, cc_spelling(n, t))
+            }
+        }
+    }
+    try cc_error(n, loc, c"expected header name")
+}
+
+fn pp_include(p handle[Pp], args handle[Vec[Token]], loc u32, next bool, importing bool) void fails {
+    n handle[CNames] = &p.names
+    expanded Vec[Token] = {}
+    if args.n > 0 && args.p[Token].kind == TK_HEADER {
+        expanded.p = args.p
+        expanded.n = args.n
+    } else {
+        try expand_list(p, args.p, args.n, &expanded, false)
+    }
+    h Header = {}
+    try pp_header(p, &expanded, loc, &h)
+    if h.used != expanded.n { try cc_error(n, loc, c"extra tokens after header name") }
+    found Found = pp_find(p, h.name, h.quote, next)
+    if found.file == null {
+        m Buf = {}
+        buf_u8(&m, 39)
+        buf_append(&m, h.name)
+        buf_str(&m, c"' file not found")
+        cc_diag(n, loc, c"error: ", buf_bytes(&m))
+        fail CError
+    }
+    file handle[Input] = handle_from_addr(found.file)
+    if importing && file.read {
+        file.once = true
+        pp_depend(p, found.path, found.system)
+        return
+    }
+    try pp_push_file(p, file, found.path, sext[i32](found.dir), found.system, loc)
+    if importing { file.once = true }
+}
+
+// A guard is reusable only if its conditional encloses the whole file and
+// has no alternate branch. A trailing token invalidates the candidate.
+fn pp_guard(p handle[Pp], f handle[Frame], word Token, args handle[Vec[Token]]) void {
+    n handle[CNames] = &p.names
+    depth usize = p.conditions.n - f.base
+    if f.guard_stage == 0 && cc_is(n, word, c"ifndef") && args.n == 1 && args.p[Token].kind == TK_IDENT {
+        f.guard = cc_ident(n, args.p[Token])
+        f.guard_stage = 1
+    } else if f.guard_stage == 1 && depth == 1 && cc_is(n, word, c"define") && args.n != 0 &&
+        args.p[Token].kind == TK_IDENT && cc_ident(n, args.p[Token]) == f.guard {
+        f.guard_stage = 2
+    } else if f.guard_stage == 2 && depth == 1 && cc_is(n, word, c"endif") {
+        f.guard_stage = 3
+    } else if f.guard_stage != 2 || (depth == 1 && (cc_is(n, word, c"else") || cc_is(n, word, c"elif")
+        || cc_is(n, word, c"elifdef") || cc_is(n, word, c"elifndef"))) {
+        f.guard_stage = 4
+    }
+}
+
+fn pp_condition(p handle[Pp], f handle[Frame], word Token, args handle[Vec[Token]], loc u32) bool fails {
+    n handle[CNames] = &p.names
+    if cc_is(n, word, c"if") || cc_is(n, word, c"ifdef") || cc_is(n, word, c"ifndef") {
+        parent bool = pp_active(p)
+        yes bool = false
+        if parent {
+            if cc_is(n, word, c"if") { yes = (try pp_eval(p, args, loc)).bits != 0 }
+            else {
+                yes = pp_defined(p, try pp_single_name(p, args, loc))
+                if cc_is(n, word, c"ifndef") { yes = !yes }
+            }
+        }
+        vec_push[Cond](&p.conditions, {loc, parent, yes, yes, false})
+        return true
+    }
+    close bool = cc_is(n, word, c"endif")
+    alt bool = cc_is(n, word, c"else")
+    expr bool = cc_is(n, word, c"elif")
+    def bool = cc_is(n, word, c"elifdef")
+    undef bool = cc_is(n, word, c"elifndef")
+    if !close && !alt && !expr && !def && !undef { return false }
+    if p.conditions.n == f.base { try cc_error(n, loc, c"conditional directive without matching #if") }
+    if close {
+        vec_truncate[Cond](&p.conditions, p.conditions.n - 1)
+        return true
+    }
+    cond handle[Cond] = vec_at[Cond](&p.conditions, p.conditions.n - 1)
+    if cond.otherwise { try cc_error(n, loc, c"conditional branch after #else") }
+    cond.otherwise = alt
+    cond.active = false
+    if cond.parent && !cond.taken {
+        yes bool = alt
+        if expr { yes = (try pp_eval(p, args, loc)).bits != 0 }
+        if def || undef { yes = pp_defined(p, try pp_single_name(p, args, loc)) != undef }
+        cond.active = yes
+        cond.taken = yes
+    }
+    return true
+}
+
+value struct SavedMacro { macro addr, id u32, disabled u8 }
+
+fn pragma_tokens(p handle[Pp], source Bytes, loc u32, tokens handle[Vec[Token]]) void fails {
+    n handle[CNames] = &p.names
+    b addr = heap_alloc_zeroed(source.n + 8)
+    mem_copy(b, source.p, source.n)
+    f CFile = {}
+    f.data = bytes(b, source.n)
+    pos CLoc = vec_get[CLoc](&n.locations, zext[usize](loc))
+    vec_push[LineMark](&f.marks, {0, pos.line, pos.column})
+    l Lexer = {}
+    l.file = &f
+    l.path = pos.file
+    l.level = pos.level
+    try pp_lex_line(n, &l, tokens, false)
+}
+
+fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
+    n handle[CNames] = &p.names
+    drop Token = cc_token(TK_PLACE, 0, loc, 0)
+    if args.n == 0 { return drop }
+    first Token = args.p[Token]
+    if cc_is(n, first, c"once") && p.frames.n != 0 {
+        f handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
+        file handle[Input] = f.input_handle
+        file.once = true
+        return drop
+    }
+    if cc_is(n, first, c"GCC") && args.n > 1 {
+        command Token = args.p[Token, 1]
+        if cc_is(n, command, c"system_header") && p.frames.n > 1 {
+            f handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
+            f.system = true
+            return drop
+        }
+        if cc_is(n, command, c"dependency") || cc_is(n, command, c"system_header") { return drop }
+    }
+    push bool = cc_is(n, first, c"push_macro")
+    if push || cc_is(n, first, c"pop_macro") {
+        if args.n != 4 || !cc_is(n, args.p[Token, 1], c"(") || args.p[Token, 2].kind != TK_STR ||
+            !cc_is(n, args.p[Token, 3], c")") {
+            try cc_error(n, loc, c"macro pragma expects a parenthesized string")
+        }
+        id u32 = cc_intern(n, pp_destringize(cc_spelling(n, args.p[Token, 2])))
+        if push {
+            vec_push[SavedMacro](&p.macro_stack, {pp_macro(p, id), id, n.undefined.p[u8, zext[usize](id)]})
+        } else {
+            i usize = p.macro_stack.n
+            while i != 0 {
+                i -= 1
+                saved SavedMacro = p.macro_stack.p[SavedMacro, i]
+                if saved.id == id {
+                    n.macros.p[addr, zext[usize](id)] = saved.macro
+                    n.undefined.p[u8, zext[usize](id)] = saved.disabled
+                    pos addr = p.macro_stack.p + i * sizeof[SavedMacro]
+                    mem_move(pos, pos + sizeof[SavedMacro], (p.macro_stack.n - i - 1) * sizeof[SavedMacro])
+                    p.macro_stack.n -= 1
+                    break
+                }
+            }
+        }
+        return drop
+    }
+    b Buf = {}
+    if cc_is(n, first, c"omp") || cc_is(n, first, c"acc") {
+        expanded Vec[Token] = {}
+        vec_push[Token](&expanded, first)
+        try expand_list(p, args.p + sizeof[Token], args.n - 1, &expanded, false)
+        // Expanded tokens may be adjacent without space flags even when
+        // their concatenation would lex as a different token.
+        for i usize in 0..expanded.n {
+            if i != 0 { buf_u8(&b, 32) }
+            buf_append(&b, cc_spelling(n, expanded.p[Token, i]))
+        }
+    } else {
+        pp_message(n, args, &b)
+    }
+    return cc_token(TK_PRAGMA, F_BOL, loc, cc_intern(n, buf_bytes(&b)))
+}
+
+fn pp_line(p handle[Pp], f handle[Frame], args handle[Vec[Token]], loc u32, marker bool) void fails {
+    n handle[CNames] = &p.names
+    l handle[Lexer] = &f.lexer
+    expanded Vec[Token] = {}
+    try expand_list(p, args.p, args.n, &expanded, false)
+    if expanded.n == 0 { try cc_error(n, loc, c"expected line number") }
+    number u64 = bytes_to_u64(cc_spelling(n, expanded.p[Token])) catch {
+        try cc_error(n, loc, c"invalid line number")
+        return
+    }
+    if number == 0 || number > 2147483647 {
+        if !n.gnu { try cc_error(n, loc, c"line number out of range") }
+        cc_diag(n, loc, c"warning: ", bytes_c(c"line number out of range"))
+        number &= 0xffffffff
+    }
+    if expanded.n > 1 {
+        name Token = expanded.p[Token, 1]
+        if name.kind != TK_STR { try cc_error(n, loc, c"expected filename string") }
+        l.path = cc_intern(n, pp_destringize(cc_spelling(n, name)))
+        if f.physical == p.base_file { p.base_logical = l.path }
+    }
+    if marker && expanded.n > 2 {
+        for i usize in 2..expanded.n {
+            if cc_is(n, expanded.p[Token, i], c"3") { f.system = true }
+        }
+    }
+    pos CLoc = lex_pos(l, l.at)
+    l.line_bias += bitcast[i64](number) - bitcast[i64](zext[u64](pos.line))
+    if p.line_markers { vec_push[Token](&p.pending.tokens, cc_token(TK_MARK, if f.system { F_SYSTEM } else { 0 }, lex_loc(n, l, l.at), 0)) }
+}
+
+fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
+    n handle[CNames] = &p.names
+    l handle[Lexer] = &f.lexer
+    word Token = try lex_next(n, l, false)
+    if word.kind == TK_NL || word.kind == TK_EOF { return }
+    inc bool = cc_is(n, word, c"include")
+    next bool = cc_is(n, word, c"include_next")
+    embed bool = cc_is(n, word, c"embed")
+    importing bool = n.gnu && cc_is(n, word, c"import")
+    args Vec[Token] = {}
+    if word.kind == TK_NUM { vec_push[Token](&args, word) }
+    try pp_lex_line(n, l, &args, pp_active(p) && (inc || next || embed || importing))
+    pp_guard(p, f, word, &args)
+    if try pp_condition(p, f, word, &args, loc) { return }
+    if !pp_active(p) { return }
+    if inc || next || importing {
+        if next && !n.gnu && !f.system { try cc_error(n, loc, c"#include_next requires GNU mode") }
+        try pp_include(p, &args, loc, next, importing)
+    } else if cc_is(n, word, c"define") {
+        try pp_define(p, &args, loc)
+    } else if cc_is(n, word, c"undef") {
+        id u32 = try pp_single_name(p, &args, loc)
+        n.macros.p[addr, zext[usize](id)] = null
+        n.undefined.p[u8, zext[usize](id)] = 1
+    } else if cc_is(n, word, c"line") || (word.kind == TK_NUM && n.gnu) {
+        try pp_line(p, f, &args, loc, word.kind == TK_NUM)
+    } else if cc_is(n, word, c"pragma") {
+        t Token = try pp_pragma(p, &args, loc)
+        if t.kind == TK_PRAGMA { vec_push[Token](&p.pending.tokens, t) }
+    } else if n.gnu && (cc_is(n, word, c"ident") || cc_is(n, word, c"sccs")) {
+        b Buf = {}
+        buf_str(&b, c"ident ")
+        pp_message(n, &args, &b)
+        vec_push[Token](&p.pending.tokens, cc_token(TK_DIRECT, F_BOL, loc, cc_intern(n, buf_bytes(&b))))
+    } else if cc_is(n, word, c"error") || cc_is(n, word, c"warning") {
+        b Buf = {}
+        pp_message(n, &args, &b)
+        fatal bool = cc_is(n, word, c"error")
+        cc_diag(n, loc, if fatal { c"error: " } else { c"warning: " }, buf_bytes(&b))
+        if fatal { fail CError }
+    } else if embed {
+        try pp_embed(p, &args, loc)
+    } else {
+        try cc_error(n, loc, c"invalid preprocessing directive")
+    }
+}

@@ -1,0 +1,167 @@
+struct Output {
+    text Buf
+    file u32
+    line u32
+    spaced bool
+    system bool
+}
+
+fn output_eol(out handle[Output]) void {
+    if out.spaced {
+        buf_u8(&out.text, 10)
+        out.spaced = false
+        out.line += 1
+    }
+}
+
+fn output_marker(n handle[CNames], out handle[Output], pos CLoc, flag u8, system bool) void {
+    output_eol(out)
+    buf_str(&out.text, c"# ")
+    buf_dec_u64(&out.text, zext[u64](pos.line))
+    buf_u8(&out.text, 32)
+    pp_quote(&out.text, cc_name(n, pos.file))
+    if flag != 0 {
+        buf_u8(&out.text, 32)
+        buf_u8(&out.text, 48 + flag)
+    }
+    if system { buf_str(&out.text, c" 3") }
+    buf_u8(&out.text, 10)
+    out.file = pos.file
+    out.line = pos.line
+    out.system = system
+}
+
+fn output_stream(p handle[Pp], out handle[Output], discard bool) void fails {
+    n handle[CNames] = &p.names
+    while true {
+        t Token = try pp_next_text(p)
+        if t.kind == TK_EOF { break }
+        if discard { continue }
+        if t.kind == TK_NL {
+            output_eol(out)
+            continue
+        }
+        loc CLoc = vec_get[CLoc](&n.locations, zext[usize](t.loc))
+        if t.kind == TK_ENTER || t.kind == TK_LEAVE || t.kind == TK_MARK {
+            if !p.line_markers { continue }
+            flag u8 = 0
+            if t.kind == TK_ENTER && loc.level != 0 { flag = 1 }
+            if t.kind == TK_LEAVE { flag = 2 }
+            output_marker(n, out, loc, flag, (t.flags & F_SYSTEM) != 0)
+            continue
+        }
+        if (t.flags & F_BOL) != 0 || (t.kind == TK_PRAGMA || t.kind == TK_DIRECT) { output_eol(out) }
+        if p.line_markers {
+            if out.file != loc.file || (!out.spaced && (loc.line < out.line || loc.line > out.line + 5)) {
+                output_marker(n, out, loc, 0, out.system)
+            }
+            while !out.spaced && out.line < loc.line {
+                buf_u8(&out.text, 10)
+                out.line += 1
+            }
+        }
+        if t.kind == TK_PRAGMA { buf_str(&out.text, c"#pragma ") }
+        if t.kind == TK_DIRECT { buf_u8(&out.text, 35) }
+        if out.spaced { buf_u8(&out.text, 32) }
+        buf_append(&out.text, cc_spelling(n, t))
+        out.spaced = true
+        if (t.kind == TK_PRAGMA || t.kind == TK_DIRECT) { output_eol(out) }
+    }
+    output_eol(out)
+}
+
+fn output_file(path addr, data Bytes) void fails {
+    if path == null || bytes_eq_c(bytes_c(path), c"-") {
+        try os_write_all(STDOUT, data.p, data.n)
+    } else {
+        try file_write_atomic(path, data, 420)
+    }
+}
+
+fn output_macros(p handle[Pp], out handle[Buf]) void {
+    n handle[CNames] = &p.names
+    for i usize in 1..n.macros.n {
+        a addr = n.macros.p[addr, i]
+        if a == null { continue }
+        m handle[Macro] = handle_from_addr(a)
+        buf_str(out, c"#define ")
+        buf_append(out, cc_name(n, trunc[u32](i)))
+        if m.function {
+            buf_u8(out, 40)
+            for j usize in 0..m.params.n {
+                if j != 0 { buf_u8(out, 44) }
+                param Bytes = cc_name(n, m.params.p[u32, j])
+                if m.variadic && j + 1 == m.params.n {
+                    if !bytes_eq_c(param, c"__VA_ARGS__") { buf_append(out, param) }
+                    buf_str(out, c"...")
+                } else { buf_append(out, param) }
+            }
+            buf_u8(out, 41)
+        }
+        if m.body.n != 0 {
+            buf_u8(out, 32)
+            pp_message(n, &m.body, out)
+        }
+        buf_u8(out, 10)
+    }
+}
+
+fn dep_escape(b handle[Buf], name Bytes) void {
+    for i usize in 0..name.n {
+        ch u8 = name.p[u8, i]
+        if ch == 36 { buf_u8(b, 36) }
+        if ch == 32 || ch == 35 || ch == 9 { buf_u8(b, 92) }
+        buf_u8(b, ch)
+    }
+}
+
+fn output_dependencies(p handle[Pp], o handle[Options]) void fails {
+    n handle[CNames] = &p.names
+    name Bytes = path_basename(cc_name(n, p.base_file))
+    extension usize = bytes_rindex(name, 46) catch name.n
+    stem Bytes = bytes_sub(name, 0, extension)
+    b Buf = {}
+    if o.targets.n != 0 {
+        for i usize in 0..o.targets.n {
+            if i != 0 { buf_u8(&b, 32) }
+            buf_str(&b, o.targets.p[addr, i])
+        }
+    } else if o.deps == 2 && o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
+        dep_escape(&b, bytes_c(o.output))
+    } else {
+        dep_escape(&b, stem)
+        buf_str(&b, c".o")
+    }
+    buf_u8(&b, 58)
+    for i usize in 0..p.dependencies.n {
+        d Dependency = p.dependencies.p[Dependency, i]
+        if o.user_deps && d.system { continue }
+        buf_u8(&b, 32)
+        dep_escape(&b, cc_name(n, d.path))
+    }
+    buf_u8(&b, 10)
+    if o.phony {
+        for i usize in 1..p.dependencies.n {
+            d Dependency = p.dependencies.p[Dependency, i]
+            if o.user_deps && d.system { continue }
+            dep_escape(&b, cc_name(n, d.path))
+            buf_str(&b, c":\n")
+        }
+    }
+    path addr = o.dep_file
+    file Buf = {}
+    if path == null {
+        if o.deps == 1 { path = o.output }
+        else {
+            if o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
+                name = bytes_c(o.output)
+                extension = bytes_rindex(name, 46) catch name.n
+                stem = bytes_sub(name, 0, extension)
+            }
+            buf_append(&file, stem)
+            buf_str(&file, c".d")
+            path = buf_cstr(&file)
+        }
+    }
+    try output_file(path, buf_bytes(&b))
+}

@@ -1,0 +1,221 @@
+// All mutable preprocessing state belongs to a translation unit. A frame
+// retains the physical file even when #line changes the reported filename.
+struct Input {
+    source CFile
+    content Bytes
+    once bool
+    read bool
+    guard u32
+}
+
+struct Frame {
+    lexer Lexer
+    input_handle handle[Input]
+    physical u32
+    directory i32
+    system bool
+    base usize
+    guard u32
+    guard_stage u8
+}
+
+value struct Cond { loc u32, parent bool, active bool, taken bool, otherwise bool }
+value struct SearchDir { path u32, rank u8 }
+value struct Dependency { path u32, system bool }
+
+struct PendingTokens { tokens Vec[Token], at usize }
+
+struct Pp {
+    names CNames
+    frames Vec[Frame]
+    conditions Vec[Cond]
+    dirs Vec[SearchDir]
+    inputs Map[Bytes, addr, bytes_hash, bytes_eq]
+    aliases Map[Bytes, addr, bytes_hash, bytes_eq]
+    visited Map[u32, usize, u32_hash, u32_eq]
+    dependencies Vec[Dependency]
+    hides Vec[Hide]
+    stream Expand
+    pending PendingTokens
+    embedded EmbedOutput
+    byte_spellings arr[256, u32]
+    macro_stack Vec[SavedMacro]
+    base_file u32
+    base_logical u32
+    counter u64
+    timestamp u64
+    timestamp_explicit bool
+    line_markers bool
+}
+
+error MissingInput
+
+fn pp_read(p handle[Pp], path Bytes) handle[Input] fails {
+    cache handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = &p.aliases
+    cached addr = map_get(cache, path) catch {
+        name Buf = {}
+        buf_append(&name, path)
+        physical Buf = {}
+        path_realpath(buf_cstr(&name), &physical) catch {
+            canonical Bytes = bytes_dup(&p.names.data, path)
+            map_put(cache, canonical, null)
+            fail MissingInput
+        }
+        b Bytes = buf_bytes(&physical)
+        files handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = &p.inputs
+        v addr = map_get(files, b) catch {
+            content Buf = {}
+            file_read(buf_cstr(&physical), 1073741824, &content) catch {
+                map_put(cache, bytes_dup(&p.names.data, path), null)
+                fail MissingInput
+            }
+            n usize = content.n
+            buf_zeros(&content, 8)
+            fresh addr = heap_alloc_zeroed(sizeof[Input])
+            file handle[Input] = handle_from_addr(fresh)
+            file.content = bytes(content.p, n)
+            map_put(files, bytes_dup(&p.names.data, b), fresh)
+            map_put(cache, bytes_dup(&p.names.data, path), fresh)
+            return file
+        }
+        map_put(cache, bytes_dup(&p.names.data, path), v)
+        return handle_from_addr(v)
+    }
+    if cached == null { fail MissingInput }
+    return handle_from_addr(cached)
+}
+
+fn pp_depend(p handle[Pp], path u32, system bool) void {
+    visited handle[Map[u32, usize, u32_hash, u32_eq]] = &p.visited
+    i usize = map_get(visited, path) catch {
+        map_put(visited, path, p.dependencies.n)
+        vec_push[Dependency](&p.dependencies, {path, system})
+        return
+    }
+    if !system {
+        item handle[Dependency] = vec_at[Dependency](&p.dependencies, i)
+        item.system = false
+    }
+}
+
+fn pp_push_file(p handle[Pp], file handle[Input], path u32, dir i32, system bool, loc u32) void fails {
+    pp_depend(p, path, system)
+    if file.once && file.read { return }
+    if file.guard != 0 && pp_defined(p, file.guard) { return }
+    if p.frames.n == 200 { try cc_error(&p.names, loc, c"include nesting too deep") }
+    if !file.read {
+        splice_source(&file.source, file.content, p.names.gnu)
+        file.read = true
+    }
+    frame handle[Frame] = vec_add[Frame](&p.frames)
+    l handle[Lexer] = &frame.lexer
+    frame.input_handle = file
+    frame.physical = path
+    frame.directory = dir
+    frame.system = system
+    frame.base = p.conditions.n
+    l.file = &file.source
+    l.path = path
+    l.level = trunc[u32](p.frames.n - 1)
+    l.flags = F_BOL
+    vec_push[Token](&p.pending.tokens, cc_token(TK_ENTER, if system { F_SYSTEM } else { 0 }, lex_loc(&p.names, l, 0), 0))
+}
+
+value struct Found { file addr, path u32, dir i16, system bool }
+
+fn pp_lookup(p handle[Pp], path Bytes, dir i16, system bool) Found {
+    f handle[Input] = pp_read(p, path) catch { return {null, 0, 0, false} }
+    return {handle_addr(f), cc_intern(&p.names, path), dir, system}
+}
+
+fn pp_find(p handle[Pp], file Bytes, quote bool, next bool) Found {
+    if !path_is_relative(file) { return pp_lookup(p, file, -1, false) }
+    path Buf = {}
+    start usize = 0
+    if p.frames.n != 0 {
+        frame handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
+        if next {
+            if frame.directory >= 0 { start = zext[usize](bitcast[u32](frame.directory)) + 1 }
+        } else if quote {
+            path_concat(&path, path_dirname(cc_name(&p.names, frame.physical)), file)
+            f Found = pp_lookup(p, buf_bytes(&path), -1, frame.system)
+            if f.file != null { return f }
+        }
+    }
+    for i usize in start..p.dirs.n {
+        d SearchDir = vec_get[SearchDir](&p.dirs, i)
+        if !quote && d.rank == 0 { continue }
+        buf_clear(&path)
+        path_concat(&path, cc_name(&p.names, d.path), file)
+        f Found = pp_lookup(p, buf_bytes(&path), bitcast[i16](trunc[u16](i)), d.rank >= 2)
+        if f.file != null { return f }
+    }
+    return {null, 0, 0, false}
+}
+
+fn pp_active(p handle[Pp]) bool {
+    return p.conditions.n == 0 || vec_last[Cond](&p.conditions).active
+}
+
+// Newlines are kept for output, but expansion treats them as whitespace.
+fn pp_raw(p handle[Pp]) Token fails {
+    while true {
+        if p.pending.at < p.pending.tokens.n {
+            t Token = vec_get[Token](&p.pending.tokens, p.pending.at)
+            p.pending.at += 1
+            return t
+        }
+        vec_clear[Token](&p.pending.tokens)
+        p.pending.at = 0
+        if p.embedded.active {
+            item Token = embed_next(p)
+            if item.kind != TK_EOF { return item }
+        }
+        if p.frames.n == 0 { return cc_token(TK_EOF, 0, 0, 0) }
+        frame handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
+        l handle[Lexer] = &frame.lexer
+        l.skipping = !pp_active(p)
+        t Token = try lex_next(&p.names, l, false)
+        if t.kind == TK_EOF {
+            if p.conditions.n != frame.base {
+                stop Cond = vec_last[Cond](&p.conditions)
+                try cc_error(&p.names, stop.loc, c"unterminated conditional directive")
+            }
+            if frame.guard_stage == 3 {
+                file handle[Input] = frame.input_handle
+                file.guard = frame.guard
+            }
+            vec_truncate[Frame](&p.frames, p.frames.n - 1)
+            if p.frames.n != 0 {
+                prev handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
+                parent handle[Lexer] = &prev.lexer
+                return cc_token(TK_LEAVE, if prev.system { F_SYSTEM } else { 0 }, lex_loc(&p.names, parent, parent.at), 0)
+            }
+            continue
+        }
+        if prev_directive(&p.names, t) {
+            try pp_directive(p, frame, t.loc)
+            continue
+        }
+        if t.kind != TK_NL && frame.guard_stage != 2 { frame.guard_stage = 4 }
+        if pp_active(p) {
+            if frame.system { t.flags |= F_SYSTEM }
+            return t
+        }
+    }
+}
+
+fn prev_directive(n handle[CNames], t Token) bool {
+    return t.kind == TK_PUNCT && (t.flags & F_BOL) != 0 && (cc_is(n, t, c"#") || cc_is(n, t, c"%:"))
+}
+
+// Pull a single fully expanded token. Includes and directives are processed
+// lazily when the rescan reaches the underlying file stream.
+fn pp_next_text(p handle[Pp]) Token fails { return try expand_next(p, &p.stream) }
+
+fn pp_next(p handle[Pp]) Token fails {
+    while true {
+        t Token = try pp_next_text(p)
+        if t.kind != TK_NL && t.kind != TK_ENTER && t.kind != TK_LEAVE && t.kind != TK_MARK { return t }
+    }
+}
