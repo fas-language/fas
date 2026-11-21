@@ -1,0 +1,49 @@
+#!/bin/bash
+# Shadow linker wrapper: runs fas-ld, then the OCaml reference linker, on the
+# same argv and logs every comparison (SAME / DIFF / BYTES / REFUSED) to
+# $SHADOW_LOG. Returns the OCaml linker's stdout, stderr, and exit code.
+OL=${SHADOW_OCAML:?}
+FL=${SHADOW_FAS:?}
+LOG=${SHADOW_LOG:?}
+NORM=${SHADOW_NORM:?}
+
+out=a.out
+prev=
+for a in "$@"; do
+  case $prev in -o|--output) out=$a ;; esac
+  [ "$a" = -- ] && break
+  prev=$a
+done
+
+# Fault injection (LD_PRELOAD) only reaches the OCaml linker (fas-ld uses raw syscalls).
+if [ -n "${LD_PRELOAD:-}" ]; then
+  echo "PRELOAD :: $*" >>"$LOG"
+  exec "$OL" "$@"
+fi
+
+# Vary the thread count per invocation: output must never depend on it.
+export FAS_LD_THREADS=$((RANDOM % 8 + 1))
+
+d=$(/usr/bin/mktemp -d "${SHADOW_TMP:-${TMPDIR:-/tmp}}/shadow.XXXXXX")
+"$FL" "$@" >"$d/fo" 2>"$d/fe"; fx=$?
+[ $fx = 0 ] && [ -f "$out" ] && /usr/bin/cp "$out" "$d/fbin" 2>/dev/null
+"$OL" "$@" >"$d/oo" 2>"$d/oe"; ox=$?
+/usr/bin/cat "$d/oo"; /usr/bin/cat "$d/oe" >&2
+
+args=$(printf '%q ' "$@")
+if [ $fx = 3 ]; then
+  echo "REFUSED $(/usr/bin/head -c 200 "$d/fe" | /usr/bin/tr '\n' ' ') :: $args" >>"$LOG"
+elif [ $fx != $ox ] || ! /usr/bin/cmp -s "$d/fo" "$d/oo"; then
+  { echo "DIFF exit fas=$fx ocaml=$ox cwd=$PWD :: $args"
+    /usr/bin/diff "$d/oe" "$d/fe" | /usr/bin/head -8; } >>"$LOG"
+elif ! /usr/bin/cmp -s "$d/fe" "$d/oe" && ! python3 "$NORM" "$fx" "$d/oe" "$d/fe"; then
+  { echo "DIFF exit fas=$fx ocaml=$ox cwd=$PWD :: $args"
+    /usr/bin/diff "$d/oe" "$d/fe" | /usr/bin/head -8; } >>"$LOG"
+elif [ $ox = 0 ] && [ -f "$out" ] && ! /usr/bin/cmp -s "$out" "$d/fbin"; then
+  echo "BYTES cwd=$PWD :: $args" >>"$LOG"
+  /usr/bin/cp "$out" "$LOG.o.$$"; /usr/bin/cp "$d/fbin" "$LOG.f.$$" 2>/dev/null
+else
+  echo "SAME exit=$ox :: $args" >>"$LOG"
+fi
+/usr/bin/rm -rf "$d"
+exit $ox
