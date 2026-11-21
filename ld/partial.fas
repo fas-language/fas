@@ -483,17 +483,22 @@ fn partial_combine() void {
 fn partial_link_and_publish() void {
     c handle[Config] = config()
     output Bytes = c.output
-    paths Vec[Bytes] = {}
-    ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&paths)
-    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
-    for k u64 in 0..items.n {
-        it handle[Item] = vec_ref[Item](items, k)
-        if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
+    in_mem bool = ld_vfs_in_memory()
+    discard bool = false
+    if !in_mem {
+        paths Vec[Bytes] = {}
+        ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&paths)
+        items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
+        for k u64 in 0..items.n {
+            it handle[Item] = vec_ref[Item](items, k)
+            if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
+        }
+        st Stat = {}
+        sth handle[Stat] = handle_from_addr[Stat](&st)
+        exists bool = check_output(output, ph, false, sth)
+        discard = exists && null_output(output, sth)
+        vec_free[Bytes](ph)
     }
-    st Stat = {}
-    sth handle[Stat] = handle_from_addr[Stat](&st)
-    exists bool = check_output(output, ph, false, sth)
-    discard bool = exists && null_output(output, sth)
     // link_inputs' policy (the command line already rejects all of it)
     if c.mode != MODE_STATIC || c.gc_sections || c.has_version_script || c.build_id != 0 {
         die_c(c"partial link requires relocatable output policy")
@@ -506,6 +511,10 @@ fn partial_link_and_publish() void {
     symver_plan()
     partial_combine()
     phase_end(PH_EMIT_RELOCATABLE, &et)
+    if in_mem {
+        ld_capture_output(image, image_size, false, bytes_empty())
+        return
+    }
     st2 Stat = {}
     check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
     wt PhaseStart = {}

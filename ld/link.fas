@@ -1045,6 +1045,7 @@ fn check_output(output Bytes, inputs handle[Vec[Bytes]], reverse bool, out_st ha
     }
     for j u64 in 0..inputs.n {
         path Bytes = vec_get[Bytes](inputs, if reverse { inputs.n - 1 - j } else { j })
+        if ld_vfs_has(path) { continue }
         st Stat = {}
         stat_or_die(path, handle_from_addr[Stat](&st))
         if st.dev == out_st.dev && st.ino == out_st.ino {
@@ -1061,6 +1062,7 @@ fn check_output(output Bytes, inputs handle[Vec[Bytes]], reverse bool, out_st ha
 fn link_and_publish() void {
     c handle[Config] = config()
     output Bytes = c.output
+    in_mem bool = ld_vfs_in_memory()
     paths Vec[Bytes] = {}
     ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&paths)
     items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
@@ -1074,21 +1076,29 @@ fn link_and_publish() void {
         vec_push[Bytes](ph, c.version_script)
         vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), c.version_script)
     }
-    // the map is checked before the executable, and published (inside the
-    // executable's publication) just before it
-    if c.has_map {
-        distinct_outputs(output, c.map_file)
-        ms Stat = {}
-        check_output(c.map_file, ph, false, handle_from_addr[Stat](&ms))
+    discard bool = false
+    if !in_mem {
+        // the map is checked before the executable, and published (inside the
+        // executable's publication) just before it
+        if c.has_map {
+            distinct_outputs(output, c.map_file)
+            ms Stat = {}
+            check_output(c.map_file, ph, false, handle_from_addr[Stat](&ms))
+        }
+        st Stat = {}
+        sth handle[Stat] = handle_from_addr[Stat](&st)
+        exists bool = check_output(output, ph, false, sth)
+        discard = exists && null_output(output, sth)
     }
-    st Stat = {}
-    sth handle[Stat] = handle_from_addr[Stat](&st)
-    exists bool = check_output(output, ph, false, sth)
-    discard bool = exists && null_output(output, sth)
+    vec_free[Bytes](ph)
     resolve()
     build_image()
     build_id_emit()
     phase_end(PH_EMIT, &emit_start)
+    if in_mem {
+        ld_capture_output(image, image_size, c.has_map, buf_bytes(handle_from_addr[Buf](&map_text)))
+        return
+    }
     st2 Stat = {}
     check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
     if c.has_map {

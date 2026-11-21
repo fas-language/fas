@@ -22,6 +22,18 @@ fn arg_tail(a Bytes, from u64) Bytes { return bytes(a.p + from, a.n - from) }
 // The result is a private read-only mapping (never written, never
 // unmapped: process exit frees it).
 fn ld_read(path Bytes, max_size u64) Bytes {
+    vdata Bytes = {}
+    if ld_vfs_get(path, handle_from_addr[Bytes](&vdata)) {
+        if vdata.n > max_size {
+            m handle[Buf] = msg()
+            bb(m, path)
+            bs(m, c": input exceeds ")
+            bu(m, max_size)
+            bs(m, c" byte limit or remaining input budget")
+            die()
+        }
+        return vdata
+    }
     fd i32 = os_open(path.p, O_RDONLY | O_NONBLOCK, 0) catch e {
         die_io(c"open", path, e)
         return bytes_empty()
@@ -123,7 +135,7 @@ fn rsp_expand(r handle[Rsp], argument Bytes, out handle[Vec[Bytes]]) void {
         path Bytes = arg_tail(argument, 1)
         real Buf = {}
         rh handle[Buf] = handle_from_addr[Buf](&real)
-        path_realpath(path.p, rh) catch e { die_io(c"realpath", path, e) }
+        ld_realpath(path, rh) catch e { die_io(c"realpath", path, e) }
         identity Bytes = buf_bytes(rh)
         for k u64 in 0..stack.n {
             if bytes_eq(vec_get[Bytes](stack, k), identity) {
@@ -333,10 +345,10 @@ fn parse_level(p handle[Parser], depth u64) u64 {
         }
         if is(a, c"--help") || is(a, c"-h") {
             print_stdout(usage_text())
-            os_exit(0)
+            ld_exit(0)
         } else if is(a, c"--version") {
             print_version()
-            os_exit(0)
+            ld_exit(0)
         } else if is(a, c"-v") {
             c.print_version = true
         } else if is(a, c"--") {
@@ -545,7 +557,7 @@ fn parse_level(p handle[Parser], depth u64) u64 {
     return level
 }
 
-fn parse_command_line() void {
+fn parse_command_line_argv(argv addr, argc u64) void {
     c handle[Config] = config()
     c.output = bytes_c(c"a.out")
     c.entry = bytes_c(c"_start")
@@ -555,16 +567,20 @@ fn parse_command_line() void {
     p Parser = {}
     ph handle[Parser] = handle_from_addr[Parser](&p)
     raw Vec[Bytes] = {}
-    for i u64 in 1..os_argc { vec_push[Bytes](handle_from_addr[Vec[Bytes]](&raw), bytes_c(os_arg(i))) }
+    for i u64 in 0..argc { vec_push[Bytes](handle_from_addr[Vec[Bytes]](&raw), bytes_c(argv[addr, i])) }
     r Rsp = {}
     rh handle[Rsp] = handle_from_addr[Rsp](&r)
     for i u64 in 0..raw.n {
         rsp_expand(rh, vec_get[Bytes](handle_from_addr[Vec[Bytes]](&raw), i), handle_from_addr[Vec[Bytes]](&p.args))
     }
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&raw))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&r.stack))
     c.top_items = parse_level(ph, 0)
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&p.args))
+    vec_free[u8](handle_from_addr[Vec[u8]](&p.states))
     if c.print_version && c.items.n == 0 {
         print_version()
-        os_exit(0)
+        ld_exit(0)
     }
     if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
         c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||
@@ -585,5 +601,13 @@ fn parse_command_line() void {
         if !c.has_interpreter { c.interpreter = bytes_c(c"/lib64/ld-linux-x86-64.so.2") }
     } else {
         c.mode = MODE_STATIC
+    }
+}
+
+fn parse_command_line() void {
+    if os_argc > 1 {
+        parse_command_line_argv(os_argv + sizeof[addr], os_argc - 1)
+    } else {
+        parse_command_line_argv(null, 0)
     }
 }

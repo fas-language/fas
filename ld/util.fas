@@ -9,6 +9,72 @@ const OCAML_MAX_INT u64 = 4611686018427387903
 
 const NONE u32 = 0xffffffff
 
+// ---------- library-mode non-local exit ----------
+
+use "asm" <<S
+    .text
+    .globl fas_ld_setjmp
+    .type fas_ld_setjmp, @function
+fas_ld_setjmp:
+    movq %rbx, 0(%rdi)
+    movq %rbp, 8(%rdi)
+    movq %r12, 16(%rdi)
+    movq %r13, 24(%rdi)
+    movq %r14, 32(%rdi)
+    movq %r15, 40(%rdi)
+    leaq 8(%rsp), %rax
+    movq %rax, 48(%rdi)
+    movq (%rsp), %rax
+    movq %rax, 56(%rdi)
+    xorl %eax, %eax
+    ret
+    .size fas_ld_setjmp, .-fas_ld_setjmp
+
+    .globl fas_ld_longjmp
+    .type fas_ld_longjmp, @function
+fas_ld_longjmp:
+    movq 0(%rdi), %rbx
+    movq 8(%rdi), %rbp
+    movq 16(%rdi), %r12
+    movq 24(%rdi), %r13
+    movq 32(%rdi), %r14
+    movq 40(%rdi), %r15
+    movq 48(%rdi), %rsp
+    movl %esi, %eax
+    jmp *56(%rdi)
+    .size fas_ld_longjmp, .-fas_ld_longjmp
+    .section .note.GNU-stack,"",@progbits
+S
+
+extern "C" {
+    fn fas_ld_setjmp(env addr) i32
+    fn fas_ld_longjmp(env addr, val i32) void
+}
+
+var ld_api_active bool = false
+var ld_api_quiet bool = false
+var ld_api_diag Buf = {}
+var ld_api_jmp arr[8, u64] = {}
+
+fn ld_exit(code i32) void {
+    if ld_api_active {
+        fas_ld_longjmp(&ld_api_jmp, code + 1)
+    }
+    os_exit(code)
+}
+
+fn ld_record_diag(b Bytes) void {
+    if ld_api_active {
+        dh handle[Buf] = handle_from_addr[Buf](&ld_api_diag)
+        buf_clear(dh)
+        bb(dh, b)
+    }
+}
+
+fn ld_quiet() bool {
+    return ld_api_active && ld_api_quiet
+}
+
 // ---------- messages ----------
 
 // the message being built by serial code (parallel passes use one Buf per
@@ -68,8 +134,10 @@ fn die_buf(b handle[Buf]) void {
     bs(o, c"fas-ld: ")
     bb(o, buf_bytes(b))
     buf_u8(o, 10)
-    buf_write(o, STDERR) catch {}
-    os_exit(1)
+    ld_record_diag(buf_bytes(o))
+    if !ld_quiet() { buf_write(o, STDERR) catch {} }
+    buf_free(o)
+    ld_exit(1)
 }
 
 // dies with the shared message buffer
@@ -89,8 +157,10 @@ fn refuse(what addr) void {
     bs(o, c"fas-ld: not yet supported by the Fas linker: ")
     bs(o, what)
     buf_u8(o, 10)
-    buf_write(o, STDERR) catch {}
-    os_exit(3)
+    ld_record_diag(buf_bytes(o))
+    if !ld_quiet() { buf_write(o, STDERR) catch {} }
+    buf_free(o)
+    ld_exit(3)
 }
 
 // ---------- system errors ----------

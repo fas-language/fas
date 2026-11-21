@@ -36,8 +36,29 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 timeout 600 "$OCAML_FAS" -o "$WORK/fas-ld" "$ROOT/ld/main.fas"
+timeout 600 "$OCAML_FAS" -o "$WORK/apitest" "$ROOT/ld/test/apitest.fas"
 
 status=0
+
+# In-process library API / VFS / re-entrancy / incremental session check
+API_DIR="$WORK/api"
+mkdir -p "$API_DIR"
+printf '.globl _start\n_start:\n  call answer\n  mov %%eax, %%edi\n  mov $60, %%eax\n  syscall\n' >"$API_DIR/start.s"
+"$CC" -c "$API_DIR/start.s" -o "$API_DIR/start.o"
+printf 'extern int helper(void);\nint answer(void) { return helper() + 1; }\n' >"$API_DIR/main.c"
+printf 'int helper(void) { return 41; }\n' >"$API_DIR/helper.c"
+printf 'int api_fn(void) { return 7; }\nint hidden_fn(void) { return 3; }\n' >"$API_DIR/shared.c"
+printf 'V1 { global: api_fn; local: *; };\n' >"$API_DIR/ver.map"
+"$CC" -c -fno-pic -fno-pie "$API_DIR/main.c" -o "$API_DIR/main.o"
+"$CC" -c -fno-pic -fno-pie "$API_DIR/helper.c" -o "$API_DIR/helper.o"
+ar rcs "$API_DIR/libfoo.a" "$API_DIR/helper.o"
+"$CC" -c -fPIC "$API_DIR/shared.c" -o "$API_DIR/shared.o"
+"$WORK/fas-ld" -o "$API_DIR/ref_static" "$API_DIR/start.o" "$API_DIR/main.o" -L"$API_DIR" -lfoo
+"$WORK/fas-ld" -shared -o "$API_DIR/ref_shared.so" "--version-script=$API_DIR/ver.map" "$API_DIR/shared.o"
+api_line=$("$WORK/apitest" "$API_DIR/ref_static" "$API_DIR/ref_shared.so" \
+    "$API_DIR/start.o" "$API_DIR/main.o" "$API_DIR/libfoo.a" "$API_DIR/shared.o" "$API_DIR/ver.map") || status=1
+echo "$api_line"
+
 shadow_line=$(python3 "$ROOT/test/fas_ld/run_shadow.py" "$ROOT" "$WORK/shadow" "$WORK/fas-ld") || status=1
 echo "$shadow_line"
 
@@ -54,4 +75,4 @@ if [ "$status" != 0 ]; then
 fi
 
 OK=1
-echo "fas-ld: $shadow_line; fuzz $fuzz_line: ok"
+echo "fas-ld: $api_line; $shadow_line; fuzz $fuzz_line: ok"

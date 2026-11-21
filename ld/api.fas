@@ -1,0 +1,563 @@
+// In-process library API, virtual filesystem (LdVfs), re-entrant state reset,
+// and incremental early-parse session hooks for fas-ld.
+//
+// Public API:
+//   struct LdVfs {
+//       files Map[Bytes, Bytes, bytes_hash, bytes_eq]
+//       keys Vec[Bytes]
+//       in_memory bool       // true: capture output in out_data/out_size instead of disk
+//       quiet bool           // true: capture diagnostics in `diag` without writing stderr
+//       threads u32          // 0 = default (CPU count)
+//       out_data addr        // heap-allocated output image (valid until vfs_clear_output/vfs_free)
+//       out_size u64
+//       map_data addr        // heap-allocated -Map output when in_memory && -Map
+//       map_size u64
+//       diag Buf             // diagnostic text when exit code != 0
+//   }
+//
+//   fn vfs_add(v handle[LdVfs], path Bytes, data Bytes) void
+//   fn vfs_has(v handle[LdVfs], path Bytes) bool
+//   fn vfs_get(v handle[LdVfs], path Bytes, out handle[Bytes]) bool
+//   fn vfs_clear_output(v handle[LdVfs]) void
+//   fn vfs_free(v handle[LdVfs]) void
+//
+//   fn ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32
+//
+//   struct LdSession { vfs handle[LdVfs], pre_objs Vec[addr], pre_map Map[Bytes, addr, bytes_hash, bytes_eq] }
+//   fn ld_session_begin(s handle[LdSession], vfs handle[LdVfs]) void
+//   fn ld_add_input(s handle[LdSession], name Bytes, data Bytes) void
+//   fn ld_finish(s handle[LdSession], argv addr, argc u64) i32
+
+struct LdVfs {
+    files Map[Bytes, Bytes, bytes_hash, bytes_eq]
+    keys Vec[Bytes]
+    in_memory bool
+    quiet bool
+    threads u32
+    pad u32
+    out_data addr
+    out_size u64
+    map_data addr
+    map_size u64
+    diag Buf
+}
+
+struct LdPreObj {
+    obj Obj
+    status u32
+    pad u32
+}
+
+struct LdSession {
+    vfs handle[LdVfs]
+    pre_objs Vec[addr]
+    pre_map Map[Bytes, addr, bytes_hash, bytes_eq]
+}
+
+// Active library invocation state (null in CLI mode)
+var ld_api_vfs handle[LdVfs] = null
+var ld_api_session handle[LdSession] = null
+
+// ---------- VFS operations ----------
+
+fn vfs_add(v handle[LdVfs], path Bytes, data Bytes) void {
+    k Bytes = nul_dup(path.p, path.n)
+    vec_push[Bytes](handle_from_addr[Vec[Bytes]](&v.keys), k)
+    fh handle[Map[Bytes, Bytes, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, Bytes, bytes_hash, bytes_eq]](&v.files)
+    map_put(fh, k, data)
+}
+
+fn vfs_has(v handle[LdVfs], path Bytes) bool {
+    if v == null { return false }
+    fh handle[Map[Bytes, Bytes, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, Bytes, bytes_hash, bytes_eq]](&v.files)
+    return map_has(fh, path)
+}
+
+fn vfs_get(v handle[LdVfs], path Bytes, out handle[Bytes]) bool {
+    if v == null { return false }
+    fh handle[Map[Bytes, Bytes, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, Bytes, bytes_hash, bytes_eq]](&v.files)
+    d Bytes = map_get(fh, path) catch { return false }
+    out.p = d.p
+    out.n = d.n
+    return true
+}
+
+fn vfs_clear_output(v handle[LdVfs]) void {
+    if v == null { return }
+    if v.out_data != null { heap_free(v.out_data) }
+    v.out_data = null
+    v.out_size = 0
+    if v.map_data != null { heap_free(v.map_data) }
+    v.map_data = null
+    v.map_size = 0
+    buf_clear(handle_from_addr[Buf](&v.diag))
+}
+
+fn ld_free_map_bb(p addr) void {
+    h handle[Map[Bytes, Bytes, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, Bytes, bytes_hash, bytes_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_bu8(p addr) void {
+    h handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_bu32(p addr) void {
+    h handle[Map[Bytes, u32, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u32, bytes_hash, bytes_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_bu64(p addr) void {
+    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_ba(p addr) void {
+    h handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_u64_u32(p addr) void {
+    h handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](p)
+    map_free(h)
+}
+fn ld_free_map_u32_u8(p addr) void {
+    h handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](p)
+    map_free(h)
+}
+
+fn vfs_free(v handle[LdVfs]) void {
+    if v == null { return }
+    vfs_clear_output(v)
+    buf_free(handle_from_addr[Buf](&v.diag))
+    kv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&v.keys)
+    for i u64 in 0..kv.n {
+        heap_free(vec_get[Bytes](kv, i).p)
+    }
+    vec_free[Bytes](kv)
+    ld_free_map_bb(&v.files)
+}
+
+// ---------- VFS-aware hooks used by linker modules ----------
+
+fn ld_vfs_has(path Bytes) bool {
+    return vfs_has(ld_api_vfs, path)
+}
+
+fn ld_vfs_get(path Bytes, out handle[Bytes]) bool {
+    return vfs_get(ld_api_vfs, path, out)
+}
+
+fn ld_vfs_in_memory() bool {
+    return ld_api_vfs != null && ld_api_vfs.in_memory
+}
+
+// Consults the VFS before os_exists.
+fn ld_exists(path Bytes) bool {
+    if ld_vfs_has(path) { return true }
+    return os_exists(path.p)
+}
+
+// Consults the VFS before path_realpath.
+fn ld_realpath(path Bytes, out handle[Buf]) void fails {
+    if ld_vfs_has(path) {
+        bb(out, path)
+        return
+    }
+    try path_realpath(path.p, out)
+}
+
+// Captures output image (and optional map) into VFS memory when in_memory is set.
+fn ld_capture_output(img addr, sz u64, has_map bool, map_b Bytes) void {
+    v handle[LdVfs] = ld_api_vfs
+    if v == null { return }
+    if sz != 0 {
+        v.out_data = heap_alloc(sz)
+        mem_copy(v.out_data, img, sz)
+    }
+    v.out_size = sz
+    if has_map {
+        if map_b.n != 0 {
+            v.map_data = heap_alloc(map_b.n)
+            mem_copy(v.map_data, map_b.p, map_b.n)
+        }
+        v.map_size = map_b.n
+    }
+}
+
+// ---------- complete re-entrant state reset ----------
+
+fn ld_free_obj_arrays(o handle[Obj], l handle[Lx]) void {
+    heap_free(o.secs)
+    heap_free(o.syms)
+    heap_free(o.rels)
+    heap_free(o.groups)
+    heap_free(o.dec)
+    buf_free(handle_from_addr[Buf](&o.msg))
+    heap_free(l.gid)
+    heap_free(l.discarded)
+    heap_free(l.kept)
+    heap_free(l.place)
+    heap_free(l.alias)
+    heap_free(l.gotref)
+    heap_free(l.eh)
+    heap_free(l.snap)
+}
+
+// Resets and frees every module-level `var` across ld/*.fas so subsequent
+// `ld_link` calls start from a clean slate with no per-link memory growth.
+fn ld_reset() void {
+    // ld/util.fas
+    buf_free(handle_from_addr[Buf](&ld_msg))
+
+    // ld/stats.fas
+    stats_on = false
+    stats_start_wall = 0
+    stats_start_cpu = 0
+    mem_set(&stat_now, 0, sizeof[StatSnap])
+    mem_set(&phase_wall, 0, 11 * 8)
+    mem_set(&phase_cpu, 0, 11 * 8)
+    mem_set(&phase_mem, 0, 11 * 8)
+
+    // ld/cli.fas
+    c handle[Config] = config()
+    vec_free[Item](handle_from_addr[Vec[Item]](&c.items))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&c.undefined))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&c.runpaths))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&c.rpath_links))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&c.library_paths))
+    mem_set(&cfg, 0, sizeof[Config])
+
+    // ld/verscript.fas
+    vec_free[VsNode](handle_from_addr[Vec[VsNode]](&vs_nodes))
+    vec_free[VsRule](handle_from_addr[Vec[VsRule]](&vs_rules))
+    ld_free_map_bu32(&vs_cache0)
+    ld_free_map_bu32(&vs_cache1)
+    ld_free_map_bu32(&vs_locals)
+    ld_free_map_bu32(&vs_globals)
+    vs_path = bytes_empty()
+    vs_work[0] = 0
+    vs_work[1] = 0
+    vs_data = bytes_empty()
+    vs_pos = 0
+    vs_count = 0
+    vs_tk = 0
+    vs_ch = 0
+    vs_word = bytes_empty()
+
+    // ld/script.fas
+    if has_root { heap_free(sysroot.p) }
+    sysroot = bytes_empty()
+    has_root = false
+
+    // ld/archive.fas
+    ah handle[Vec[Archive]] = handle_from_addr[Vec[Archive]](&archives)
+    for ai u64 in 0..ah.n {
+        a handle[Archive] = vec_ref[Archive](ah, ai)
+        mh handle[Vec[Member]] = handle_from_addr[Vec[Member]](&a.members)
+        for mi u64 in 0..mh.n {
+            m handle[Member] = vec_ref[Member](mh, mi)
+            if m.o != null { heap_free(m.o) }
+        }
+        vec_free[Member](mh)
+        vec_free[AEntry](handle_from_addr[Vec[AEntry]](&a.entries))
+        vec_free[Bytes](handle_from_addr[Vec[Bytes]](&a.exports))
+        kx_free(handle_from_addr[KeyIndex](&a.index))
+        ld_free_map_ba(&a.nested)
+        heap_free(a.pending)
+        heap_free(a.deferred)
+    }
+    vec_free[Archive](ah)
+    probes = 0
+
+    // ld/resolve.fas
+    if objs != null && lxs != null {
+        for i u64 in 0..nobj {
+            ld_free_obj_arrays(obj(i), lx(i))
+        }
+    }
+    heap_free(objs)
+    heap_free(lxs)
+    objs = null
+    lxs = null
+    heap_free(staged_objs)
+    heap_free(staged_lxs)
+    staged_objs = null
+    staged_lxs = null
+    nobj = 0
+    ninput_objects = 0
+    intern_free(handle_from_addr[Intern](&names))
+    vec_free[GSym](handle_from_addr[Vec[GSym]](&gsyms))
+    vec_free[Imp](handle_from_addr[Vec[Imp]](&imps))
+    parsed = 0
+    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
+    for si u64 in 0..shv.n {
+        st handle[StagedSh] = vec_ref[StagedSh](shv, si)
+        sh_free(handle_from_addr[ShLib](&st.lib))
+        heap_free(st.snap)
+    }
+    vec_free[StagedSh](shv)
+    parsed_sh = 0
+    parse_seq = 0
+    reading = true
+    vec_free[Snapshot](handle_from_addr[Vec[Snapshot]](&snapshots))
+    vec_free[Snapshot](handle_from_addr[Vec[Snapshot]](&extra_files))
+    input_bytes = 0
+    file_count = 0
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&expanded))
+    vec_free[PNode](handle_from_addr[Vec[PNode]](&pnodes))
+    vec_free[addr](handle_from_addr[Vec[addr]](&shlibs))
+    ld_free_map_bu8(&sh_names)
+    ld_free_map_bu8(&shared_refs)
+    ld_free_map_bu64(&sh_providers)
+    sh_sym_total = 0
+    shdeps_free(handle_from_addr[ShDeps](&shdeps_graph))
+    mem_set(&shdeps_graph, 0, sizeof[ShDeps])
+    input_static = false
+    predefined_file = NONE64
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&ldirs))
+    symbol_total = 0
+    relocation_total = 0
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&signatures))
+    kx_free(handle_from_addr[KeyIndex](&signature_index))
+    partial = false
+
+    // ld/tls.fas
+    module_base = NONE64
+    tls_template = false
+
+    // ld/unwind.fas
+    if uobjs != null {
+        for i u64 in 0..unorm_count {
+            u handle[UObj] = uobj(i)
+            vec_free[Frame](handle_from_addr[Vec[Frame]](&u.frames))
+            vec_free[u32](handle_from_addr[Vec[u32]](&u.meta))
+        }
+        heap_free(uobjs)
+        uobjs = null
+    }
+    unorm_count = 0
+    vec_free[Frame](handle_from_addr[Vec[Frame]](&uframes))
+    unwind_file = NONE64
+
+    // ld/gc.fas
+    if gc_objs != null {
+        heap_free(gc_objs)
+        gc_objs = null
+    }
+    vec_free[u64](handle_from_addr[Vec[u64]](&gc_queue))
+    ld_free_map_u64_u32(&gc_frame_head)
+    vec_free[u32](handle_from_addr[Vec[u32]](&gc_frame_next))
+    vec_free[u64](handle_from_addr[Vec[u64]](&gc_frame_edge))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&gc_boundaries))
+
+    // ld/copy.fas
+    vec_free[CopyEntry](handle_from_addr[Vec[CopyEntry]](&copy_entries))
+    ld_free_map_u32_u8(&copy_names)
+    copy_sort_lib = null
+
+    // ld/relax.fas
+    heap_free(relax_counts)
+    relax_counts = null
+
+    // ld/property.fas & ld/buildid.fas
+    property_file = NONE64
+    build_id_file = NONE64
+
+    // ld/ifunc.fas
+    ifunc_file = NONE64
+    vec_free[u64](handle_from_addr[Vec[u64]](&ifunc_syms))
+    heap_free(ifunc_refs)
+    ifunc_refs = null
+
+    // ld/dynamic.fas
+    dyn_file = NONE64
+    dyn_pie = false
+    dyn_shared = false
+    dyn_static_tls = false
+    vec_free[Fixup](handle_from_addr[Vec[Fixup]](&dyn_fixups))
+    dyn_relative_count = 0
+    vec_free[Export](handle_from_addr[Vec[Export]](&dyn_exports))
+    vec_free[u64](handle_from_addr[Vec[u64]](&dyn_stubs))
+    heap_free(dyn_stub_index)
+    dyn_stub_index = null
+    ld_free_map_u64_u32(&dyn_ifunc_slots)
+    heap_free(dyn_ifunc_symbols)
+    dyn_ifunc_symbols = null
+    dyn_symbol_count = 0
+    dyn_runpath = 0
+    dyn_has_runpath = false
+    dyn_soname = 0
+    dyn_has_soname = false
+    vec_free[DImp](handle_from_addr[Vec[DImp]](&dyn_imports))
+    dyn_import_count = 0
+    heap_free(dyn_index)
+    dyn_index = null
+    vec_free[u64](handle_from_addr[Vec[u64]](&dyn_bound))
+    ld_free_map_u64_u32(&dyn_bound_index)
+    vec_free[u32](handle_from_addr[Vec[u32]](&dyn_needed))
+    dyn_verdef_count = 0
+    dyn_verneed_count = 0
+    vec_free[DynVerNeed](handle_from_addr[Vec[DynVerNeed]](&dyn_ver_entries))
+    kx_free(handle_from_addr[KeyIndex](&dyn_ver_index))
+    vec_free[u64](handle_from_addr[Vec[u64]](&lc_tags))
+    vec_free[u64](handle_from_addr[Vec[u64]](&lc_funcs))
+    vec_free[u32](handle_from_addr[Vec[u32]](&lc_array_kinds))
+    vec_free[u64](handle_from_addr[Vec[u64]](&lc_members))
+    vec_free[u64](handle_from_addr[Vec[u64]](&lc_array_ends))
+    buf_free(handle_from_addr[Buf](&ds_buf))
+    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&ds_names))
+    vec_free[u32](handle_from_addr[Vec[u32]](&ds_offsets))
+    kx_free(handle_from_addr[KeyIndex](&ds_index))
+
+    // ld/layout.fas
+    vec_free[OutSec](handle_from_addr[Vec[OutSec]](&headers))
+    vec_free[u64](handle_from_addr[Vec[u64]](&content))
+    vec_free[Seg](handle_from_addr[Vec[Seg]](&segments))
+    lay_cursor = 0
+    lay_base = LAYOUT_BASE
+    lay_relro = false
+    mem_set(&relro_seg, 0, sizeof[Seg])
+    has_relro_seg = false
+    mem_set(&tls_seg, 0, sizeof[Seg])
+
+    // ld/link.fas
+    got_file = NONE64
+    vec_free[u64](handle_from_addr[Vec[u64]](&got_slots))
+    vec_free[u8](handle_from_addr[Vec[u8]](&got_model))
+    ld_free_map_u64_u32(&got_canonical)
+    heap_free(values)
+    values = null
+    heap_free(image)
+    image = null
+    image_size = 0
+    mem_set(&emit_start, 0, sizeof[PhaseStart])
+
+    // ld/map.fas
+    buf_free(handle_from_addr[Buf](&map_text))
+
+    // ld/partial.fas
+    heap_free(sv_alias)
+    sv_alias = null
+    vec_free[PSec](handle_from_addr[Vec[PSec]](&psecs))
+    vec_free[Sym](handle_from_addr[Vec[Sym]](&psyms))
+    heap_free(pmaps)
+    pmaps = null
+    heap_free(psmaps)
+    psmaps = null
+}
+
+// ---------- library entry point ----------
+
+// Links using `argv[0..argc)` (C-string arguments, without argv[0] program
+// name) and optional `vfs`. Returns the linker exit code (0, 1, or 3) without
+// terminating the process, and resets all global linker state before returning.
+fn ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32 {
+    ld_reset()
+    vfs_clear_output(vfs)
+    buf_clear(handle_from_addr[Buf](&ld_api_diag))
+    ld_api_vfs = vfs
+    ld_api_active = true
+    ld_api_quiet = vfs != null && vfs.quiet
+
+    objs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Obj])
+    lxs = heap_alloc_zeroed(MAX_OBJECTS * sizeof[Lx])
+
+    threads u32 = if vfs != null { vfs.threads } else { 0 }
+    if threads == 0 {
+        t addr = os_getenv(c"FAS_LD_THREADS")
+        if t != null { threads = trunc[u32](bytes_to_u64(bytes_c(t)) catch 0) }
+    }
+    pool = pool_start(threads)
+
+    code i32 = 0
+    j i32 = fas_ld_setjmp(&ld_api_jmp)
+    if j != 0 {
+        code = j - 1
+    } else {
+        parse_command_line_argv(argv, argc)
+        c handle[Config] = config()
+        if c.statistics { stats_start() }
+        if c.print_version { print_version() }
+        if c.relocatable { partial_link_and_publish() } else { link_and_publish() }
+        stats_print()
+        code = 0
+    }
+
+    if vfs != null && ld_api_diag.n != 0 {
+        dh handle[Buf] = handle_from_addr[Buf](&vfs.diag)
+        buf_clear(dh)
+        bb(dh, buf_bytes(handle_from_addr[Buf](&ld_api_diag)))
+    }
+    buf_clear(handle_from_addr[Buf](&ld_api_diag))
+    pool_stop(pool)
+    pool = null
+    ld_api_active = false
+    ld_api_quiet = false
+    ld_api_vfs = null
+    ld_reset()
+    return code
+}
+
+// ---------- incremental early-parse session ----------
+
+// Starts an incremental session: inputs added via `ld_add_input` are stored in
+// `vfs` and relocatable objects are parsed immediately so parsing overlaps with
+// upstream compilation; `ld_finish` runs the deterministic link in argv order.
+fn ld_session_begin(s handle[LdSession], vfs handle[LdVfs]) void {
+    s.vfs = vfs
+    vec_clear[addr](handle_from_addr[Vec[addr]](&s.pre_objs))
+    pm handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&s.pre_map)
+    map_clear(pm)
+}
+
+fn ld_add_input(s handle[LdSession], name Bytes, data Bytes) void {
+    vfs_add(s.vfs, name, data)
+    if is_archive_data(data) || shared_is(data) || is_script(data) { return }
+    p addr = heap_alloc_zeroed(sizeof[LdPreObj])
+    pre handle[LdPreObj] = handle_from_addr[LdPreObj](p)
+    o handle[Obj] = handle_from_addr[Obj](&pre.obj)
+    o.path = nul_dup(name.p, name.n)
+    o.data = data.p
+    o.len = data.n
+    elf_parse(o) catch err {
+        pre.status = if err == Refused { 2 } else { 1 }
+    }
+    vec_push[addr](handle_from_addr[Vec[addr]](&s.pre_objs), p)
+    pm handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&s.pre_map)
+    map_put(pm, o.path, p)
+}
+
+// Consumes a pre-parsed object if `path` was added via `ld_add_input`.
+fn ld_take_preparsed(path Bytes, dst_obj handle[Obj], dst_lx handle[Lx]) bool {
+    if ld_api_session == null { return false }
+    pm handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&ld_api_session.pre_map)
+    p addr = map_get(pm, path) catch null
+    if p == null { return false }
+    map_remove(pm, path)
+    pre handle[LdPreObj] = handle_from_addr[LdPreObj](p)
+    mem_copy(handle_addr(dst_obj), &pre.obj, sizeof[Obj])
+    dst_obj.path = path
+    dst_lx.status = pre.status
+    // Zero out pre.obj so session cleanup does not double-free moved arrays
+    mem_set(&pre.obj, 0, sizeof[Obj])
+    return true
+}
+
+fn ld_finish(s handle[LdSession], argv addr, argc u64) i32 {
+    ld_api_session = s
+    code i32 = ld_link(argv, argc, s.vfs)
+    ld_api_session = null
+    pv handle[Vec[addr]] = handle_from_addr[Vec[addr]](&s.pre_objs)
+    for i u64 in 0..pv.n {
+        p addr = vec_get[addr](pv, i)
+        pre handle[LdPreObj] = handle_from_addr[LdPreObj](p)
+        o handle[Obj] = handle_from_addr[Obj](&pre.obj)
+        heap_free(o.secs)
+        heap_free(o.syms)
+        heap_free(o.rels)
+        heap_free(o.groups)
+        heap_free(o.dec)
+        buf_free(handle_from_addr[Buf](&o.msg))
+        heap_free(p)
+    }
+    vec_free[addr](pv)
+    ld_free_map_ba(&s.pre_map)
+    return code
+}

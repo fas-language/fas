@@ -180,6 +180,7 @@ fn sh_parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
 fn parse_job(ctx addr, b u64, e u64, worker u32) void {
     for i u64 in b..e {
         o handle[Obj] = obj(i)
+        if o.secs != null || lx(i).status != 0 { continue }
         elf_parse(o) catch err {
             lx(i).status = if err == Refused { 2 } else { 1 }
         }
@@ -263,6 +264,18 @@ fn input_die_io(call addr, path Bytes, e error) void {
 
 // File_io.read for an input
 fn input_read(path Bytes, max_size u64) Bytes {
+    vdata Bytes = {}
+    if ld_vfs_get(path, handle_from_addr[Bytes](&vdata)) {
+        if vdata.n > max_size {
+            m handle[Buf] = msg()
+            bb(m, path)
+            bs(m, c": input exceeds ")
+            bu(m, max_size)
+            bs(m, c" byte limit or remaining input budget")
+            input_die()
+        }
+        return vdata
+    }
     fd i32 = os_open(path.p, O_RDONLY | O_NONBLOCK, 0) catch e {
         input_die_io(c"open", path, e)
         return bytes_empty()
@@ -428,7 +441,7 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
     phase_begin(PH_READ, &rt)
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
+    ld_realpath(path, rh) catch e { input_die_io(c"realpath", path, e) }
     max_size u64 = umin(MAX_FILE_SIZE, 268435456 - input_bytes)
     snaps handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&snapshots)
     data Bytes = bytes_empty()
@@ -470,7 +483,7 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
         a handle[Archive] = archive(ai)
         for k u64 in 0..a.members.n {
             m handle[Member] = member(a, k)
-            if m.ext.n != 0 && os_exists(m.ext.p) {
+            if m.ext.n != 0 && ld_exists(m.ext) {
                 vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), m.ext)
             }
         }
@@ -516,9 +529,11 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
     }
     pnode_add(P_OBJECT, nobj)
     o handle[Obj] = new_object(c"")
-    o.path = path
-    o.data = data.p
-    o.len = data.n
+    if !ld_take_preparsed(path, o, lx(nobj - 1)) {
+        o.path = path
+        o.data = data.p
+        o.len = data.n
+    }
     lx(nobj - 1).seq = parse_seq
     parse_seq += 1
     // the OCaml linker parses (and counts) each object as it is read
@@ -537,7 +552,7 @@ var extra_files Vec[Snapshot] = {}
 fn read_extra_counted(path Bytes, counter u64) Bytes {
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
+    ld_realpath(path, rh) catch e { input_die_io(c"realpath", path, e) }
     xs handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&extra_files)
     for k u64 in 0..xs.n {
         sn handle[Snapshot] = vec_ref[Snapshot](xs, k)

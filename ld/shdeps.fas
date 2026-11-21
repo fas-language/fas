@@ -220,7 +220,7 @@ fn shdeps_probe(probes addr, path Bytes) bool {
     p u64 = probes[u64] + 1
     probes[u64] = p
     if p > 1000000 { die_c(c"dependency search exceeds 1000000 probes") }
-    return os_exists(path.p)
+    return ld_exists(path)
 }
 
 fn shdeps_copy_paths(src handle[Vec[Bytes]], dst handle[Vec[Bytes]]) void {

@@ -1,94 +1,110 @@
 # fas-ld in Fas: design
 
-The OCaml linker (`src/linker`, about 8,900 lines) was built to be correct:
-one thread, OCaml values for every section and symbol, files read into
-strings, the output built in memory and written once. It is the
-specification. This one is built to be fast on a modern many-core CPU from
-the first line, and it must still produce **the same bytes**.
+The OCaml linker (`src/linker`, about 8,900 lines) is the specification:
+single-threaded, byte-exact, with strict work limits and exact diagnostics.
+`fas-ld` (`ld/*.fas`) is a freestanding Fas implementation (no libc, built on
+`lib/`) designed for many-core CPUs and in-process embedding while remaining
+**byte-identical** to the OCaml linker across all thread counts.
 
 ## Contract
 
-- **Same command line, same output bytes, same diagnostics and exit
-  codes** as `src/linker/bin/main.exe`. The integration suite
-  (`src/linker/test/*_integration.py`) already takes the linker binary as
-  an argument; it runs unchanged against this one. On top of that a
-  differential harness links every test input with both linkers and
-  compares the output bytes.
-- **The output never depends on the thread count.** Every parallel step
-  either writes each item's result to that item's own place or merges in a
-  fixed order. Tested by linking with 1, 2, 3 and N threads and comparing
-  bytes.
-- **Same limits as the OCaml linker** until scale tests justify raising
-  them (they are work limits, and their rejections are part of the
-  contract).
-- Built freestanding from `lib/` (no libc), so it starts in microseconds
-  and owns its memory.
+- **Same command line, same output bytes, same diagnostics and exit codes**
+  as `_build/default/src/linker/bin/main.exe`. Verified by `test/fas_ld.sh`,
+  which runs every OCaml integration test in `src/linker/test/dune` through
+  a shadow wrapper (`test/fas_ld/shadow_ld`) and runs a seeded dynamic/shared
+  differential fuzz pass (`test/fas_ld/ldfuzz_dyn.py`).
+- **Thread-count independence:** `FAS_LD_THREADS` sets the worker pool size
+  (default: one per CPU). Parallel passes write into per-item slots and merge
+  or report errors in deterministic input order.
+- **Same limits and diagnostics** as the OCaml linker.
+- **Freestanding:** no libc; uses `lib/` syscalls, mmap, and futex-based
+  thread pool (`lib/thread.fas`).
 
-## Pipeline
+## Module Map
 
-Passes run one after another; each pass is a `pool_for` over a flat array
-(files, sections, symbols or relocations). That is mold's structure, and
-it is the one that scales: no locks on hot paths, no task graph, and a
-pass's cost is visible in `--stats`.
+| File | Responsibility |
+| --- | --- |
+| `ld/main.fas` | CLI entry point, pool lifecycle, dispatch to `link_and_publish` or `partial_link_and_publish`. |
+| `ld/api.fas` | In-process library API (`ld_link`), `LdVfs` virtual filesystem & in-memory output, `ld_reset` re-entrancy cleanup, and incremental early-parse session (`ld_session_begin`, `ld_add_input`, `ld_finish`). |
+| `ld/util.fas` | Diagnostics (`msg`/`die`/`refuse`), library-mode non-local exit (`fas_ld_setjmp`/`fas_ld_longjmp`), checked arithmetic, LE readers/writers, `KeyIndex`. |
+| `ld/cli.fas` | Command-line and `@response` file parsing (`parse_command_line_argv`, `Config`). |
+| `ld/elf.fas` | Parallel-safe ELF64 x86-64 relocatable object parser (`elf_parse`, SDT notes, zlib-compressed debug). |
+| `ld/shared.fas` | Parallel-safe ELF64 x86-64 `ET_DYN` shared-object reader (`shared_is`, `shared_parse`, SysV/GNU hash & verdef/verneed/versym validation, `sh_find_location`). |
+| `ld/archive.fas` | SysV/GNU and thin archive reader (including nested thin members), `-l` library search, lazy GNU extraction (`extract`). |
+| `ld/script.fas` | Bounded linker script lexer/parser (`INPUT`, `GROUP`, `AS_NEEDED`, `SEARCH_DIR`, `OUTPUT_FORMAT`) and `--sysroot` normalization. |
+| `ld/shdeps.fas` | `$ORIGIN`/`${ORIGIN}` expansion, transitive `DT_NEEDED` loading (`-rpath-link`, `DT_RUNPATH`, inherited `DT_RPATH`), and link-time validation. |
+| `ld/resolve.fas` | Input staging, parallel `.o`/`.so` parsing with input-order diagnostics, global symbol resolution, COMDAT, commons, predefined symbols, `shdeps_load`. |
+| `ld/verscript.fas` | Version script parser and glob/exact visibility policy. |
+| `ld/symver.fas` | `.symver` expansion, versioned aliases, and `shared_output_prepare`. |
+| `ld/tls.fas` | TLS layout validation, `_TLS_MODULE_BASE_`, thread-offset computation. |
+| `ld/unwind.fas` | `.eh_frame` normalization and `.eh_frame_hdr` generation. |
+| `ld/gc.fas` | Parallel edge construction and worklist `--gc-sections`. |
+| `ld/copy.fas` | Executable `R_X86_64_COPY` relocation planning (`<COPY storage>`). |
+| `ld/relax.fas` | Static-PIE `GOTPCRELX` relaxation. |
+| `ld/property.fas` | `.note.gnu.property` merging and validation. |
+| `ld/buildid.fas` | Deterministic SHA-1 / MD5 GNU build-id generation. |
+| `ld/ifunc.fas` | Static `R_X86_64_IRELATIVE` / `.rela.iplt` generation. |
+| `ld/dynamic.fas` | `.interp`, `.dynstr`, `.dynsym`, `.hash`/`.gnu.hash`, `.rela.dyn`, `.plt`, `.dynamic`, `.gnu.version`/`_r`/`_d`, lifecycle arrays. |
+| `ld/layout.fas` | Segment & section layout, RELRO/TLS segments, alignment and offsets. |
+| `ld/link.fas` | GOT preparation, `SHF_MERGE` deduplication, parallel symbol-value / blit / relocation passes, ELF emission and atomic publication. |
+| `ld/partial.fas` | `-r` relocatable output (`partial_link_and_publish`). |
+| `ld/map.fas` | `-Map` deterministic section/symbol map output. |
+| `ld/stats.fas` | `--stats` JSON timing/allocation/counter reporting with parse-failure rollback. |
+| `ld/zlib.fas` | Inflate decoder for `SHF_COMPRESSED` debug sections. |
 
-| Pass | Parallel over | Notes |
-| --- | --- | --- |
-| open inputs | files | `open` + `fstat` + `mmap` read-only; nothing is copied. Archive symbol indexes parsed here. |
-| parse objects | objects | section headers, symbol tables and relocation headers decoded into per-object arrays that point into the mapping |
-| intern names | symbols | name hashes computed in parallel; names go into a sharded table (shard = hash bits, one shard per worker in turn), so no locks |
-| resolve + archive extraction | (serial decisions, parallel parsing) | GNU left-to-right archive semantics decide *which* members are extracted and in what order; that decision loop works on interned ids and is cheap. Each round of newly extracted members is parsed in parallel. |
-| COMDAT, merge, GC | groups, sections | group winners by file order; GC marks with atomic flags; merged strings deduplicated per shard with first-occurrence order kept by (file, section, offset) keys |
-| scan relocations | sections | GOT/PLT/TLS/copy needs set with atomic OR on per-symbol flag words |
-| layout | output sections | sizes and offsets by prefix sums; serial only over output sections (a few dozen) |
-| write | input sections | output file sized with `fallocate`, mapped, and every input section copied and relocated straight into the map by whichever worker claims it; synthetic sections (symtab, strtab, GOT, dynamic tables) built in parallel |
-| build-id | — | must match the OCaml output, so it is the same MD5 / SHA-1 over the same bytes; SHA-1 uses SHA-NI where the CPU has it |
-| publish | — | `fchmod`, `rename`, exit without freeing anything |
+## Pipeline & Threading
 
-## Data layout
+Passes execute serially on the main thread; data-parallel passes fan out over
+`pool_for(pool, n, grain, fn, ctx)`:
 
-- **Struct of arrays with `u32` indices**, never per-symbol heap objects:
-  an object is a row in `files`, its sections are a range in `sections`,
-  its symbols a range in `symbols`. Hot loops touch only the columns they
-  need.
-- **Input bytes are never copied** until they are written into the output
-  map. Names are `Bytes` into the mapping.
-- **One arena per worker**, freed by process exit. The heap's lock is
-  only for rare, large allocations.
-- **Atomics only where workers meet**: symbol flag words, GC marks, shard
-  claims, chunk counters.
+1. **Read & stage** (`resolve.fas`): Inputs are read in command-line order
+   (consulting `LdVfs` before the filesystem). Relocatable `.o` and `.so`
+   inputs are staged with a monotonic input sequence number `seq`.
+2. **Parallel parse** (`parse_flush`): Staged `.o` (`elf_parse`) and `.so`
+   (`shared_parse`) files are parsed in parallel on `pool`. Workers write
+   errors into per-input `msg` buffers without printing; the main thread
+   walks results in `seq` order so the first error and `--stats` snapshot
+   match the serial OCaml linker.
+3. **Resolve** (`process_inputs` + `resolve`): Serial GNU left-to-right walk
+   over objects, archives (with parallel lazy member parsing), shared
+   libraries (`--as-needed`, group fixed points), COMDAT, commons, predefined
+   symbols, and transitive `DT_NEEDED` loading (`shdeps_load`).
+4. **Emit passes** (`build_image`):
+   - `tls_prepare` -> `symver_plan` -> `shared_output_prepare` -> `shdeps_validate`
+   - `unwind_normalize` -> `gc_sections` (parallel edge build) -> `copy_prepare`
+   - `check_non_alloc_references` -> `tls_validate` -> `relax_static_pie`
+   - `properties_prepare` -> `build_id_prepare` -> `got_prepare` -> `unwind_prepare`
+   - `ifunc_prepare` (static) or `dyn_prepare` (static-PIE / dynamic / shared)
+   - `merge_plan` -> `layout_make` -> `set_predefined`
+   - Parallel `values_job`, parallel `blit_job`, parallel `relocate_job`
+   - `unwind_emit`, `ifunc_emit`, `dyn_emit`, symtab/headers, `build_id_emit`
+5. **Publish**: Either captured in memory (`LdVfs.in_memory`) or atomically
+   written to disk (`file_write_atomic`).
 
-## Compared with mold and reld
+## In-Process Library API & VFS (`ld/api.fas`)
 
-| | mold | reld (wild fork) | fas-ld |
-| --- | --- | --- | --- |
-| Pass structure | serial passes of parallel-for | same | same |
-| Archive semantics | parallel liveness from roots (not GNU order) | GNU-compatible | GNU left-to-right, byte-identical to the OCaml linker |
-| Symbol table | concurrent hash map, CAS on owner | sharded maps | sharded by hash, per-worker shards, deterministic merge |
-| Output | mmap, parallel copy+relocate | mmap and buffered, byte-identical | mmap, parallel copy+relocate |
-| Determinism | commutative ops / canonical sort | byte identity is its test oracle | byte identity with the OCaml linker and across thread counts |
-| Build-id | BLAKE3 tree, parallel | — | MD5/SHA-1 like the OCaml linker (serial, SHA-NI) |
-| Runtime | C++, mimalloc, TBB | Rust, rayon | Fas, no libc, own pool and arenas |
-| Early exit | forks: parent exits when output is ready | — | later, once everything else is fast |
+For embedding `fas-ld` in a single-process toolchain (C/Fas compiler + backend
++ linker without touching disk):
 
-The deliberate differences: GNU archive order (so the output matches the
-OCaml linker and GNU ld's semantics), and build-id hashes that match the
-oracle instead of a parallel tree hash.
-
-## Stages
-
-1. **Threads in `lib/`** (done: `lib/thread.fas`).
-2. **Skeleton:** command line, inputs, objects-only static executables;
-   byte-identical on the simple integration tests.
-3. **Static links in full:** archives, groups, COMDAT, GC, merge sections,
-   `.eh_frame`, TLS, static IFUNC, build-id, map files, compressed debug.
-   This is what `fas` itself uses by default; the driver can then opt in
-   (`FAS_LD`).
-4. **Static PIE and `-r`.**
-5. **Dynamic executables, shared libraries, symbol versions, version
-   scripts, copy relocations.**
-6. **Default:** the driver calls this linker; the OCaml one stays as the
-   oracle until v1.0.
-
-Each stage ends with the integration suite for its features passing
-against this binary, the differential harness clean, and a benchmark
-against the OCaml linker, GNU ld and lld (mold and reld when installed).
+- **`LdVfs`**: Maps virtual paths to caller-owned `Bytes` (`vfs_add`,
+  `vfs_has`, `vfs_get`, `vfs_clear_output`, `vfs_free`). Every file read,
+  existence probe (`-l`, linker scripts, `DT_NEEDED`), and `realpath` check
+  consults the VFS before falling back to the host filesystem. Setting
+  `vfs.in_memory = true` returns the linked image in `(vfs.out_data, vfs.out_size)`
+  (and optional `-Map` output in `vfs.map_data/map_size`) without writing disk.
+- **`ld_link(argv addr, argc u64, vfs handle[LdVfs]) i32`**: Runs a complete
+  link using `argv[0..argc)` and `vfs`. Diagnostics (`die`/`refuse`) and
+  `--help`/`--version` unwind via freestanding `fas_ld_setjmp`/`fas_ld_longjmp`
+  rather than `os_exit`, returning the exact exit code (`0`, `1`, or `3`) with
+  diagnostic text captured in `vfs.diag`.
+- **Re-entrancy (`ld_reset`)**: Every module-level `var` across `ld/*.fas`
+  is freed and reset before and after each `ld_link` call so repeated links
+  in one process produce identical bytes and do not leak per-link tables.
+- **Incremental early-parse session (`LdSession`)**:
+  - `ld_session_begin(s, vfs)` initializes a session.
+  - `ld_add_input(s, name, data)` registers `(name, data)` in `vfs` and
+    eagerly parses relocatable ELF objects (`elf_parse`) as soon as they arrive
+    from upstream compiler threads.
+  - `ld_finish(s, argv, argc)` runs `ld_link`; `read_input` consumes the
+    pre-parsed `Obj` records (`ld_take_preparsed`) in `argv` order without
+    re-parsing, guaranteeing byte-identical output and identical error order.

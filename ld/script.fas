@@ -408,7 +408,7 @@ fn script_input(path Bytes, data Bytes, whole bool, as_needed bool, depth u64, s
     }
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(path.p, rh) catch e { input_die_io(c"realpath", path, e) }
+    ld_realpath(path, rh) catch e { input_die_io(c"realpath", path, e) }
     canonical Bytes = nul_dup(rh.p, rh.n)
     buf_free(rh)
     for k u64 in 0..scripts.n {

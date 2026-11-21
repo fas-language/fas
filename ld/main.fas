@@ -33,6 +33,7 @@ use "script.fas"
 use "map.fas"
 use "stats.fas"
 use "partial.fas"
+use "api.fas"
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)

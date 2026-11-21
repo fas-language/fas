@@ -447,6 +447,7 @@ fn lib_exists(path Bytes) bool {
     probes += 1
     if probes > 1000000 { die_c(c"library search exceeds 1000000 probes") }
     if path.n > 65536 || bytes_contains(path, 0) { die_c(c"invalid or oversized sysroot/search path") }
+    if ld_vfs_has(path) { return true }
     p addr = cstr_dup(path)
     r bool = os_exists(p)
     heap_free(p)
@@ -545,7 +546,7 @@ fn member_obj(a handle[Archive], m handle[Member]) handle[Obj] {
 fn nested_member_data(a handle[Archive], m handle[Member], path Bytes) Bytes {
     real Buf = {}
     rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(m.ext.p, rh) catch e { input_die_io(c"realpath", m.ext, e) }
+    ld_realpath(m.ext, rh) catch e { input_die_io(c"realpath", m.ext, e) }
     cache handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&a.nested)
     container addr = map_get(cache, buf_bytes(rh)) catch null
     if container == null {

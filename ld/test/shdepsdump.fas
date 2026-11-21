@@ -32,6 +32,7 @@ use "../script.fas"
 use "../map.fas"
 use "../stats.fas"
 use "../partial.fas"
+use "../api.fas"
 
 struct DefSym {
     name Bytes
