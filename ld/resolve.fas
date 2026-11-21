@@ -73,10 +73,53 @@ struct GSym {
     res_vis u8
     res_file u32
     res_sym u32
+    // the runtime import (Resolver.imports, by name): 0 for none, else
+    // its index + 1 in imps
+    imp u32
 }
 
 var names Intern = {}
 var gsyms Vec[GSym] = {}
+
+// Resolver.import: a runtime lookup descriptor (the provider's symbol)
+struct Imp {
+    name Bytes          // the provider symbol's name
+    version Bytes       // its version; n = NONE64 for none
+    size u64
+    library u32         // the providing shared library, NONE for none
+    kind u8
+    binding u8
+    visibility u8
+    is_default u8
+}
+
+var imps Vec[Imp] = {}
+
+fn imp(id u32) handle[Imp] {
+    return vec_ref[Imp](handle_from_addr[Vec[Imp]](&imps), zext[u64](gsym(id).imp) - 1)
+}
+
+// Hashtbl.replace imports: the (cleared) import of a global id
+fn imp_put(id u32) handle[Imp] {
+    g handle[GSym] = gsym(id)
+    iv handle[Vec[Imp]] = handle_from_addr[Vec[Imp]](&imps)
+    if g.imp == 0 {
+        vec_new[Imp](iv)
+        g.imp = trunc[u32](iv.n)
+    }
+    mem_set(vec_at[Imp](iv, zext[u64](g.imp) - 1), 0, sizeof[Imp])
+    p handle[Imp] = imp(id)
+    p.version = bytes(null, NONE64)
+    p.library = NONE
+    return p
+}
+
+// the global id of an imported name, or NONE
+fn import_id(name Bytes) u32 {
+    id u32 = find(name)
+    if id == NONE || gsym(id).imp == 0 { return NONE }
+    return id
+}
 
 fn gsym(id u32) handle[GSym] {
     return handle_from_addr[GSym](vec_at[GSym](handle_from_addr[Vec[GSym]](&gsyms), zext[u64](id)))
@@ -260,6 +303,16 @@ fn pnode_add(kind u8, ref u64) void {
 
 // one input file, prepared at script/group nesting `depth`; `scripts` are
 // the canonical paths of the scripts being expanded (for cycles)
+// Resolver.prepare's static_libraries for the input being read (-Bstatic
+// or -static at its position; a script's -l inherits it)
+var input_static bool = false
+
+// Library_search.find's ~dynamic: a .so before the .a
+fn library_dynamic() bool {
+    m u8 = config().mode
+    return !input_static && m != MODE_STATIC && m != MODE_STATIC_PIE
+}
+
 fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) void {
     file_count += 1
     if file_count > 1024 {
@@ -329,6 +382,8 @@ fn read_input(path Bytes, whole bool, depth u64, scripts handle[Vec[Bytes]]) voi
         return
     }
     if data.n >= 18 && mem_eq(data.p, c"\x7fELF", 4) && rd16(data.p, 16) == 3 {
+        // shared-library inputs: not ported yet
+        if config().mode == MODE_SHARED { refuse(c"shared-library inputs") }
         // Static and static-PIE output: requires_static_inputs
         m handle[Buf] = msg()
         bb(m, path)
@@ -430,9 +485,10 @@ fn read_inputs() void {
             input_die()
         }
         path Bytes = it.text
+        input_static = it.static_lib
         if it.kind == IT_LIBRARY {
-            // static output: only archives (requires_static_inputs)
-            path = library_find(it.text, false, handle_from_addr[Vec[Bytes]](&ldirs))
+            // static output takes only archives (requires_static_inputs)
+            path = library_find(it.text, library_dynamic(), handle_from_addr[Vec[Bytes]](&ldirs))
         }
         // the file's own depth: inside As_needed, then Static
         fd u64 = depth + extra
@@ -763,11 +819,21 @@ fn resolve() void {
                 // nothing: undefined symbols stay undefined
             } else if predefined_name(s.name) || registry_available(s.name) {
                 vec_push[u32](ph, id)
-            } else if s.strong != 0 && s.visibility != 0 && !c.gc_sections {
-                m handle[Buf] = msg()
-                bs(m, c"undefined non-default visibility symbol ")
-                bb(m, s.name)
-                die()
+            } else {
+                // no shared providers yet: an undefined weak (non-strong)
+                // default-visibility reference is a runtime import
+                if c.mode != MODE_STATIC && c.mode != MODE_STATIC_PIE && s.strong == 0 && s.visibility == 0 {
+                    p handle[Imp] = imp_put(id)
+                    p.name = s.name
+                    p.binding = 2
+                    p.is_default = 1
+                }
+                if s.strong != 0 && s.visibility != 0 && !c.gc_sections {
+                    m handle[Buf] = msg()
+                    bs(m, c"undefined non-default visibility symbol ")
+                    bb(m, s.name)
+                    die()
+                }
             }
         } else if s.def_kind == DEF_REGULAR {
             set_res(id, zext[u64](s.def_file), zext[u64](s.def_sym), s.visibility)

@@ -10,6 +10,21 @@ var module_base u64 = NONE64
 // Tls.prepare: an undefined _TLS_MODULE_BASE_ is defined, hidden, at the
 // start of the first non-discarded TLS section
 fn tls_prepare() void {
+    // resolution infers no type for an absent weak provider: keep the
+    // input's TLS declaration for undefined-weak descriptor lookup
+    if imps.n != 0 {
+        for f u64 in 0..nobj {
+            o handle[Obj] = obj(f)
+            for i u64 in 0..zext[u64](o.nsym) {
+                y handle[Sym] = sym(o, i)
+                if y.kind != 6 || y.binding == 0 { continue }
+                iid u32 = import_id(y.name)
+                if iid == NONE { continue }
+                p handle[Imp] = imp(iid)
+                if p.library == NONE && p.kind == 0 { p.kind = 6 }
+            }
+        }
+    }
     name Bytes = bytes_c(c"_TLS_MODULE_BASE_")
     id u32 = find(name)
     if id == NONE || gsym(id).has_res != 0 { return }
@@ -51,6 +66,7 @@ fn tls_prepare() void {
             g.res_file = trunc[u32](f)
             g.res_sym = trunc[u32](n)
             g.res_vis = 2
+            g.imp = 0
             module_base = (f << 32) | n
             return
         }
@@ -65,6 +81,7 @@ fn tls_symbol(f u64, i u64) bool {
     if id != NONE {
         g handle[GSym] = gsym(id)
         if g.has_res != 0 { return sym(obj(zext[u64](g.res_file)), zext[u64](g.res_sym)).kind == 6 }
+        if g.imp != 0 { return imp(id).kind == 6 }
     }
     return y.kind == 6
 }
@@ -95,13 +112,21 @@ fn tls_validate_object(f u64) bool {
         tls bool = tls_symbol(f, si)
         if tls_relocation(r.kind) {
             if r.kind == 20 && !tls_template { return tls_fail(o, c": TLSLD requires a local TLS template", none) }
-            if r.kind != 17 && r.kind != 21 && r.kind != 22 && r.kind != 23 {
-                if config().mode == MODE_STATIC_PIE {
+            mode u8 = config().mode
+            if (mode == MODE_STATIC || mode == MODE_STATIC_PIE) && r.kind != 17 && r.kind != 21 && r.kind != 22 && r.kind != 23 {
+                if mode == MODE_STATIC_PIE {
                     return tls_fail(o, c": static PIE supports only local-exec/initial-exec TLS", none)
                 }
                 return tls_fail(o, c": this TLS relocation requires dynamic output", none)
             }
+            if mode == MODE_SHARED && r.kind == 23 { return tls_fail(o, c": local-exec TLS is invalid in shared output", none) }
             if r.kind != 20 && !tls { return tls_fail(o, c": TLS relocation references non-TLS symbol ", sym(o, si).name) }
+            if (r.kind == 17 || r.kind == 21 || r.kind == 23) && imps.n != 0 {
+                nm Bytes = sym(o, si).name
+                if import_id(nm) != NONE && !name_defined(nm) {
+                    return tls_fail(o, c": local TLS relocation references imported symbol ", nm)
+                }
+            }
         } else if tls && (sec(o, t).flags & 2) != 0 {
             return tls_fail(o, c": non-TLS relocation references TLS symbol ", sym(o, si).name)
         }

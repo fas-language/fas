@@ -112,8 +112,8 @@ fn got_relocation(kind u32) bool {
 
 fn base_relocation(kind u32) bool { return kind == 26 || kind == 29 }
 
-// imported from a shared library (none until dynamic output)
-fn dyn_imported(name Bytes) bool { return false }
+// Hashtbl.mem resolved.imports
+fn dyn_imported(name Bytes) bool { return imps.n != 0 && import_id(name) != NONE }
 
 fn got_prepare(static_ifunc bool) void {
     canon handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&got_canonical)
@@ -349,7 +349,8 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
                     vv.v[u64, i] = sym_address(df, d)
                     vv.has[u8, i] = 1
                 }
-            } else if y.binding == 2 && g.strong == 0 {
+            } else if g.imp != 0 || (y.binding == 2 && g.strong == 0) {
+                // an import's value is 0 (dynamic output only has imports)
                 vv.has[u8, i] = 1
             }
         }
@@ -660,6 +661,7 @@ fn program_header(index u64, kind u64, flags u64, offset u64, address u64, file_
 
 fn entry_address() u64 {
     c handle[Config] = config()
+    if c.mode == MODE_SHARED { return 0 }
     entry Bytes = c.entry
     id u32 = find(entry)
     if id == NONE || gsym(id).has_res == 0 {
@@ -703,7 +705,8 @@ fn build_image() void {
     phase_begin(PH_EMIT, &emit_start)
     check_legacy_sections()
     tls_prepare()
-    check_static_versions()
+    symver_plan()
+    shared_output_prepare()
     ut PhaseStart = {}
     phase_begin(PH_UNWIND, &ut)
     unwind_normalize()
@@ -738,7 +741,8 @@ fn build_image() void {
     } else {
         dyn_prepare()
     }
-    lay_base = if c.pie { 0 } else { LAYOUT_BASE }
+    // Dynamic.pie: shared output is position independent too
+    lay_base = if c.pie || c.mode == MODE_SHARED { 0 } else { LAYOUT_BASE }
     lay_relro = dyn_file != NONE64 && c.relro
     if nobj == 0 { die_c(c"no input objects") }
     mt PhaseStart = {}
@@ -838,6 +842,10 @@ fn build_image() void {
                 die()
             }
             v u64 = vv.v[u64, si]
+            if model != GM_ADDRESS && dyn_imported(sym(obj(sf), si).name) {
+                wr64(image, p.offset + slot * 8, 0)
+                continue
+            }
             if model == GM_THREAD && c.mode != MODE_SHARED && !thread_offset(msg(), v, &v) { die() }
             if model == GM_MODULE_ID { v = 1 }
             wr64(image, p.offset + slot * 8, v)
@@ -858,7 +866,7 @@ fn build_image() void {
 
     // the ELF header
     mem_copy(image, c"\x7fELF\x02\x01\x01", 7)
-    wr16(image, 16, if c.pie { 3 } else { 2 })
+    wr16(image, 16, if c.pie || c.mode == MODE_SHARED { 3 } else { 2 })
     wr16(image, 18, 62)
     wr32(image, 20, 1)
     wr64(image, 24, entry)
@@ -1032,6 +1040,12 @@ fn link_and_publish() void {
         it handle[Item] = vec_ref[Item](items, k)
         if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
     }
+    // the version script is a metadata input: checked after the inputs,
+    // and first in the expanded list
+    if c.has_version_script {
+        vec_push[Bytes](ph, c.version_script)
+        vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), c.version_script)
+    }
     // the map is checked before the executable, and published (inside the
     // executable's publication) just before it
     if c.has_map {
@@ -1064,7 +1078,8 @@ fn link_and_publish() void {
         stat_add(ST_DISCARDED_OUTPUT_BYTES, image_size)
         return
     }
-    file_write_atomic(output.p, bytes(image, image_size), 0o755) catch e {
+    permissions u32 = if c.mode == MODE_SHARED { 0o644 } else { 0o755 }
+    file_write_atomic(output.p, bytes(image, image_size), permissions) catch e {
         die_io(c"write", output, e)
     }
     phase_end(PH_WRITE, &wt)

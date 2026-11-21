@@ -571,8 +571,7 @@ fn parse_command_line() void {
     if c.shared && c.pie { die_c(c"-shared cannot be combined with -pie") }
     if c.has_soname && !c.shared { die_c(c"-soname requires -shared") }
     if c.has_version_script && !c.shared { die_c(c"--version-script requires -shared") }
-    // a version script implies -shared, which this linker refuses below
-    if c.has_version_script { refuse(c"version scripts") }
+    if c.has_version_script { vs_parse(c.version_script, input_read(c.version_script, 1024 * 1024)) }
     if c.shared {
         c.mode = MODE_SHARED
     } else if c.pie && c.no_interpreter {

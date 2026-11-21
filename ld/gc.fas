@@ -153,7 +153,7 @@ fn gc_sections() void {
     pool_for(pool, nobj, 1, &gc_edges_job, null)
     // roots: the entry, -u symbols and, in dynamic output, _init/_fini
     // and the exported definitions
-    gc_root(c.entry)
+    if c.mode != MODE_SHARED { gc_root(c.entry) }
     uv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
     for i u64 in 0..uv.n { gc_root(vec_get[Bytes](uv, i)) }
     if c.mode != MODE_STATIC {

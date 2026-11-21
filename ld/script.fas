@@ -342,7 +342,7 @@ fn script_parse(path Bytes, data Bytes, out handle[Vec[SCmd]]) void {
 // the file a script names
 fn script_locate(path Bytes, canonical Bytes, name Bytes) Bytes {
     if bytes_prefix(name, c"-l") {
-        return library_find(bytes(name.p + 2, name.n - 2), false, handle_from_addr[Vec[Bytes]](&ldirs))
+        return library_find(bytes(name.p + 2, name.n - 2), library_dynamic(), handle_from_addr[Vec[Bytes]](&ldirs))
     }
     cands Vec[Bytes] = {}
     ch handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&cands)

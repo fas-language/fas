@@ -161,3 +161,140 @@ fn check_static_versions() void {
     }
     }
 }
+
+// ---------- Shared_output.prepare ----------
+
+// Symver.parse without its errors (every name was validated by expand):
+// the '@' position, or NONE64
+fn sv_at(name Bytes) u64 {
+    m Buf = {}
+    at u64 = symver_at(name, handle_from_addr[Buf](&m)) catch NONE64
+    buf_free(handle_from_addr[Buf](&m))
+    return at
+}
+
+// a parsed name's version text
+fn sv_version_text(name Bytes, at u64) Bytes {
+    start u64 = if symver_default(name, at) { at + 2 } else { at + 1 }
+    return bytes(name.p + start, name.n - start)
+}
+
+// Symver.version of a global id: the name of its key, and the '@'
+// position there (NONE64: no version)
+fn sv_version(id u32, key addr) u64 {
+    k Bytes = gsym(symver_key(id)).name
+    key[Bytes] = k
+    return sv_at(k)
+}
+
+// Shared_output.add: the definition or reference (f, i) as a runtime
+// lookup descriptor with no provider
+fn shared_output_add(f u64, i u64, id u32) void {
+    y handle[Sym] = sym(obj(f), i)
+    g handle[GSym] = gsym(id)
+    key Bytes = {}
+    at u64 = sv_version(id, &key)
+    p handle[Imp] = imp_put(id)
+    p.name = symver_name(y.name)
+    p.kind = y.kind
+    p.binding = if y.section == 0 && g.strong != 0 { 1 } else { y.binding }
+    p.size = y.size
+    p.is_default = 1
+    if at != NONE64 {
+        p.version = sv_version_text(key, at)
+        p.is_default = if symver_default(key, at) { 1 } else { 0 }
+    }
+}
+
+// the definition-version checks (their first failure among the
+// definitions; OCaml visits its hash table in no fixed order), the
+// version-script locals, and in shared output every default-visibility
+// definition and undefined reference as an import
+fn shared_output_prepare() void {
+    c handle[Config] = config()
+    shared bool = c.mode == MODE_SHARED
+    if c.has_version_script && !shared { die_c(c"version scripts require shared output") }
+    if !shared {
+        check_static_versions()
+        return
+    }
+    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
+    for pass u64 in 0..3 {
+        for i u64 in 0..v.n {
+            id u32 = trunc[u32](i)
+            g handle[GSym] = gsym(id)
+            if g.has_res == 0 { continue }
+            at_name bool = bytes_contains(g.name, 64)
+            if pass == 0 && !(at_name && has_default_at(g.name)) { continue }
+            if pass == 1 && !at_name { continue }
+            key Bytes = {}
+            at u64 = sv_version(id, &key)
+            if at == NONE64 { continue }
+            version Bytes = sv_version_text(key, at)
+            found bool = false
+            if c.has_version_script {
+                for n u64 in 0..vs_node_count() {
+                    if bytes_eq(vs_node(n).name, version) { found = true }
+                }
+            }
+            if !found {
+                m handle[Buf] = msg()
+                bs(m, c"symbol ")
+                bb(m, g.name)
+                bs(m, c" references missing version node ")
+                bb(m, version)
+                die()
+            }
+        }
+    }
+    if c.has_version_script {
+        for i u64 in 0..v.n {
+            id u32 = trunc[u32](i)
+            g handle[GSym] = gsym(id)
+            if g.has_res == 0 { continue }
+            key Bytes = {}
+            at u64 = sv_version(id, &key)
+            local bool = false
+            if at != NONE64 {
+                local = vs_exact_local(bytes(key.p, at))
+            } else {
+                local = vs_policy(0, g.name) == 0
+            }
+            if local { g.res_vis = 2 }
+        }
+    }
+    for f u64 in 0..nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            if s.kind == 16 && s.size != 0 {
+                m handle[Buf] = msg()
+                bb(m, o.path)
+                bs(m, c": preinit arrays are invalid in shared output")
+                die()
+            }
+        }
+        for i u64 in 1..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if y.binding == 0 { continue }
+            id u32 = gid_of(f, i)
+            if id == NONE { continue }
+            g handle[GSym] = gsym(id)
+            if g.has_res != 0 {
+                if zext[u64](g.res_file) == f && zext[u64](g.res_sym) == i && g.res_vis == 0 && f != predefined_file {
+                    shared_output_add(f, i, id)
+                }
+            } else if y.section == 0 && y.visibility == 0 && (!c.no_undefined || y.binding == 2) && g.imp == 0 {
+                if sv_at(y.name) != NONE64 {
+                    m handle[Buf] = msg()
+                    bb(m, o.path)
+                    bs(m, c": undefined versioned symbol ")
+                    bb(m, y.name)
+                    bs(m, c" requires a provider")
+                    die()
+                }
+                shared_output_add(f, i, id)
+            }
+        }
+    }
+}
