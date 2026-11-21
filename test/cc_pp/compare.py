@@ -228,6 +228,18 @@ def normalized_features():
     return ("\n".join(out) + "\n").encode()
 
 
+def read_expected(path):
+    entries = {}
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        status, case, reason = line.split(maxsplit=2)
+        if status not in {"diff", "fcc-error", "clang-skip", "timeout"} or case in entries:
+            raise ValueError(f"{path}:{number}: invalid or duplicate expectation")
+        entries[case] = (status, reason)
+    return entries
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("fcc")
@@ -237,7 +249,10 @@ def main():
     ap.add_argument("--filter", default="", help="regular expression on case names")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--json", type=Path, help="record case statuses and first mismatches")
+    ap.add_argument("--expected", type=Path, default=Path(__file__).with_name("expected_diffs.txt"))
     opt = ap.parse_args()
+    expected = read_expected(opt.expected)
+    unexpected = 0
     suites = opt.suite or ["regression", "manifest", "headers", "projects"]
     if "regression" in suites:
         extra_checks(opt.fcc)
@@ -272,9 +287,20 @@ def main():
             for number, (case, status, detail) in enumerate(work, 1):
                 counter = counts[case.category]
                 counter[status] += 1
-                records.append(dict(category=case.category, name=case.name, status=status, detail=detail))
+                key = f"{case.category}/{case.name}"
+                expectation = expected.get(key)
+                reason = expectation[1] if expectation and expectation[0] == status else None
+                failed = status in {"diff", "fcc-error", "timeout"} or (
+                    status == "clang-skip" and case.category in {"regression", "manifest"}
+                )
+                unexpected += failed and reason is None
+                record = dict(category=case.category, name=case.name, status=status, detail=detail)
+                if reason:
+                    record["expected_reason"] = reason
+                records.append(record)
                 if status not in {"same", "normalized-same", "shared-headers-same", "clang-skip"} and counter[status] <= 8:
-                    print(f"{case.category}/{case.name}: {status}: {detail}", flush=True)
+                    suffix = f" (expected: {reason})" if reason else ""
+                    print(f"{key}: {status}{suffix}: {detail}", flush=True)
                 if number % 1000 == 0:
                     print(f"compared {number}/{len(cases)} inputs", flush=True)
     columns = "same normalized-same shared-headers-same diff fcc-error clang-skip timeout".split()
@@ -284,9 +310,8 @@ def main():
         print(f"| {category} | " + " | ".join(str(count[s]) for s in columns) + " |")
     if opt.json:
         opt.json.write_text(json.dumps({"counts": counts, "cases": records}, indent=2) + "\n")
-    return any(c["diff"] or c["fcc-error"] or c["timeout"] or
-               (category in {"regression", "manifest"} and c["clang-skip"])
-               for category, c in counts.items())
+    print(f"Unexpected differences: {unexpected}")
+    return bool(unexpected)
 
 
 if __name__ == "__main__":
