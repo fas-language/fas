@@ -93,11 +93,10 @@ fn tls_relocation(kind u32) bool {
 var tls_template bool = false
 
 fn tls_fail(o handle[Obj], text addr, name Bytes) bool {
-    m handle[Buf] = handle_from_addr[Buf](&o.msg)
-    buf_clear(m)
-    bb(m, o.path)
-    bs(m, text)
-    if name.n != NONE64 { bb(m, name) }
+    buf_clear(&o.msg)
+    bb(&o.msg, o.path)
+    bs(&o.msg, text)
+    if name.n != NONE64 { bb(&o.msg, name) }
     return false
 }
 
@@ -155,7 +154,7 @@ fn tls_validate() void fails {
     }
     pool_for(pool, nobj, 1, &tls_validate_job, null)
     for f u64 in 0..nobj {
-        if lx(f).status != 0 { try die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+        if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
 }
 

@@ -75,15 +75,15 @@ struct Obj {
     msg Buf             // the failure message, when the parse failed
 }
 
-fn sec(o handle[Obj], i u64) handle[Sec] { return handle_from_addr[Sec](o.secs + i * sizeof[Sec]) }
-fn sym(o handle[Obj], i u64) handle[Sym] { return handle_from_addr[Sym](o.syms + i * sizeof[Sym]) }
-fn rel(o handle[Obj], i u64) handle[Rel] { return handle_from_addr[Rel](o.rels + i * sizeof[Rel]) }
+fn sec(o handle[Obj], i u64) handle[Sec] { return handle_from_addr(o.secs + i * sizeof[Sec]) }
+fn sym(o handle[Obj], i u64) handle[Sym] { return handle_from_addr(o.syms + i * sizeof[Sym]) }
+fn rel(o handle[Obj], i u64) handle[Rel] { return handle_from_addr(o.rels + i * sizeof[Rel]) }
 
 // ---------- failures ----------
 
 // the object's message buffer, cleared and started with "path: "
 fn ef(o handle[Obj]) handle[Buf] {
-    b handle[Buf] = handle_from_addr[Buf](&o.msg)
+    b handle[Buf] = &o.msg
     buf_clear(b)
     bb(b, o.path)
     bs(b, c": ")
@@ -117,7 +117,7 @@ fn yfail(o handle[Obj], name Bytes, text addr) void fails {
 }
 
 fn erefuse(o handle[Obj], what addr) void fails {
-    b handle[Buf] = handle_from_addr[Buf](&o.msg)
+    b handle[Buf] = &o.msg
     buf_clear(b)
     bs(b, what)
     bs(b, c" (")
@@ -160,11 +160,10 @@ fn span(o handle[Obj], what addr, offset u64, size u64) void fails {
 fn span_section(o handle[Obj], index u64, offset u64, size u64) void fails {
     if offset > o.len || size > o.len - offset {
         t Buf = {}
-        th handle[Buf] = handle_from_addr[Buf](&t)
-        defer { buf_free(th) }
-        bs(th, c"section ")
-        bu(th, index)
-        try span_fail(o, buf_bytes(th), offset, size, o.len)
+        defer { buf_free(&t) }
+        bs(&t, c"section ")
+        bu(&t, index)
+        try span_fail(o, buf_bytes(&t), offset, size, o.len)
     }
 }
 
@@ -522,7 +521,7 @@ fn elf_parse(o handle[Obj]) void fails {
     if !ranges_in_order(o, count, names_index, shoff) {
         // Unusual layouts and overlaps use the stable sort so diagnostic order is unchanged.
         ranges Vec[Range] = {}
-        rh handle[Vec[Range]] = handle_from_addr[Vec[Range]](&ranges)
+        rh handle[Vec[Range]] = &ranges
         defer { vec_free(rh) }
         vec_push(rh, range(0, 64, -2))
         vec_push(rh, range(shoff, shoff + count * 64, -1))
@@ -572,8 +571,7 @@ fn elf_parse(o handle[Obj]) void fails {
     // per-section validation
     symtab_index u64 = 0
     sdt Vec[u64] = {}
-    sdth handle[Vec[u64]] = handle_from_addr[Vec[u64]](&sdt)
-    defer { vec_free[u64](sdth) }
+    defer { vec_free[u64](&sdt) }
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
         if bytes_prefix(s.name, c".gnu.lto") || bytes_prefix(s.name, c".llvm.lto") {
@@ -662,7 +660,7 @@ fn elf_parse(o handle[Obj]) void fails {
                 if s.flags != 0 || s.alignment != 4 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported SDT note metadata")
                 }
-                try sdt_pointers(o, index, s.offset, s.size, sdth)
+                try sdt_pointers(o, index, s.offset, s.size, &sdt)
             } else if bytes_is(s.name, c".note.ABI-tag") {
                 if s.flags != 2 || s.alignment != 4 || s.link != 0 || s.info != 0 || s.entsize != 0 || s.size != 32 ||
                     rd32(d, s.offset) != 4 || rd32(d, s.offset + 4) != 16 || rd32(d, s.offset + 8) != 1 ||
@@ -800,7 +798,6 @@ fn elf_parse(o handle[Obj]) void fails {
 
     // groups
     groups Vec[Group] = {}
-    gh handle[Vec[Group]] = handle_from_addr[Vec[Group]](&groups)
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
         if s.kind != 17 { continue }
@@ -833,7 +830,7 @@ fn elf_parse(o handle[Obj]) void fails {
             t.group = trunc[i32](bitcast[i64](groups.n))
             members[u32, i] = trunc[u32](member)
         }
-        g handle[Group] = vec_new[Group](gh)
+        g handle[Group] = vec_add[Group](&groups)
         g.signature = signature
         g.comdat = flags == 1
         g.members = members
@@ -913,7 +910,7 @@ fn elf_parse(o handle[Obj]) void fails {
             symbol u64 = try idx(o, c"relocation symbol index", bitcast[i64](symbol_count) - 1, info >> 32)
             offset u64 = try idx(o, c"relocation offset", bitcast[i64](t.size), rd64(d, at))
             if kind != 0 && bytes_is(t.name, c".note.stapsdt") &&
-                (kind != 1 || !sdt_has(sdth, zext[u64](s.info), offset)) {
+                (kind != 1 || !sdt_has(&sdt, zext[u64](s.info), offset)) {
                 try efail(o, c"section .note.stapsdt: relocation must target a probe address field")
             }
             width u64 = relocation_width(trunc[u32](kind))
@@ -955,7 +952,7 @@ fn elf_parse(o handle[Obj]) void fails {
     // Toolchains usually emit ordered relocations; sort a copy otherwise
     // (diagnostics keep the original order)
     keys Vec[RelKey] = {}
-    kh handle[Vec[RelKey]] = handle_from_addr[Vec[RelKey]](&keys)
+    kh handle[Vec[RelKey]] = &keys
     defer { vec_free(kh) }
     if !sorted {
         for i u64 in 0..relocation_count {

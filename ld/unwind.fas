@@ -38,7 +38,7 @@ var unorm_count u64 = 0
 var uframes Vec[Frame] = {}     // the frames of live code, in input order
 var unwind_file u64 = NONE64    // the <unwind header> object
 
-fn uobj(f u64) handle[UObj] { return handle_from_addr[UObj](uobjs + f * sizeof[UObj]) }
+fn uobj(f u64) handle[UObj] { return handle_from_addr(uobjs + f * sizeof[UObj]) }
 
 // the bytes of a placed section (normalized .eh_frame sections live after
 // the object's data, as in the OCaml linker's appended data)
@@ -106,8 +106,8 @@ fn uaug_end(o handle[Obj], d addr, cur addr, ending u64) u64 fails {
 }
 
 // an augmentation pointer: its relocation index, or NONE for a zero field
-fn upointer(o handle[Obj], d addr, rmap handle[Map[u64, u32, u64_hash, u64_eq]],
-    cmap handle[Map[u64, u32, u64_hash, u64_eq]], indirect bool, encoding u64, cur addr, ending u64) u32 fails {
+fn upointer(o handle[Obj], d addr, rmap handle[U64Map],
+    cmap handle[U64Map], indirect bool, encoding u64, cur addr, ending u64) u32 fails {
     plain u64 = encoding & 0x7f
     if !indirect && (encoding & 0x80) != 0 { try ufail_hex(o, c"unsupported indirect pointer encoding 0x", encoding) }
     width u64 = 0
@@ -158,17 +158,15 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
     s handle[Sec] = sec(o, k)
     d addr = sec_data(f, s)
     size u64 = s.size
-    relocated Map[u64, u32, u64_hash, u64_eq] = {}
-    rmap handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&relocated)
-    consumed Map[u64, u32, u64_hash, u64_eq] = {}
-    cmap handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&consumed)
-    cies Map[u64, u32, u64_hash, u64_eq] = {}
-    ch handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&cies)
+    relocated U64Map = {}
+    rmap handle[U64Map] = &relocated
+    consumed U64Map = {}
+    cmap handle[U64Map] = &consumed
+    cies U64Map = {}
+    ch handle[U64Map] = &cies
     cie_list Vec[Cie] = {}
-    cl handle[Vec[Cie]] = handle_from_addr[Vec[Cie]](&cie_list)
     cie_meta Vec[u32] = {}
-    cm handle[Vec[u32]] = handle_from_addr[Vec[u32]](&cie_meta)
-    mh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&u.meta)
+    mh handle[Vec[u32]] = &u.meta
     for i u64 in 0..zext[u64](o.nrel) {
         r handle[Rel] = rel(o, i)
         if zext[u64](r.target) == k && r.kind != 0 { map_put(rmap, r.offset, trunc[u32](i)) }
@@ -233,7 +231,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             }
             encoding u64 = 0
             lsda u64 = 0xff
-            meta_start u64 = cm.n
+            meta_start u64 = cie_meta.n
             if aug.n != 0 {
                 aend u64 = try uaug_end(o, d, &cur, ending)
                 for n u64 in 1..aug.n {
@@ -246,7 +244,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
                         value u64 = try ubyte(o, d, cur, aend)
                         cur += 1
                         index u32 = try upointer(o, d, rmap, cmap, true, value, &cur, aend)
-                        if index != NONE { vec_push[u32](cm, index) }
+                        if index != NONE { vec_push[u32](&cie_meta, index) }
                     } else if code == 76 {
                         // 'L'
                         lsda = try ubyte(o, d, cur, aend)
@@ -265,19 +263,19 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             if encoding != 0 && encoding != 0x1b && encoding != 0x1c {
                 try ufail_hex(o, c"unsupported FDE pointer encoding 0x", encoding)
             }
-            map_put(ch, at, trunc[u32](cl.n))
-            c handle[Cie] = vec_new[Cie](cl)
+            map_put(ch, at, trunc[u32](cie_list.n))
+            c handle[Cie] = vec_add[Cie](&cie_list)
             c.encoding = trunc[u32](encoding)
             c.augmented = if aug.n != 0 { 1 } else { 0 }
             c.lsda = trunc[u32](lsda)
             c.meta_start = trunc[u32](meta_start)
-            c.meta_n = trunc[u32](cm.n - meta_start)
+            c.meta_n = trunc[u32](cie_meta.n - meta_start)
         } else {
             // an FDE
             if id > at + 4 || at + 4 - id > at { try ufail(o, c"invalid FDE CIE pointer") }
             ca addr = map_val_addr(ch, at + 4 - id)
             if ca == null { try ufail(o, c"FDE references a missing CIE") }
-            c handle[Cie] = vec_ref[Cie](cl, zext[u64](ca[u32]))
+            c handle[Cie] = vec_at[Cie](&cie_list, zext[u64](ca[u32]))
             encoding u64 = zext[u64](c.encoding)
             width u64 = if encoding == 0x1b { 4 } else { 8 }
             initial u64 = at + 8
@@ -294,7 +292,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             if (range >> 63) != 0 { try ufail(o, c"FDE address range exceeds supported limit") }
             meta_start u64 = mh.n
             for j u64 in 0..zext[u64](c.meta_n) {
-                vec_push[u32](mh, cm.p[u32, zext[u64](c.meta_start) + j])
+                vec_push[u32](mh, cie_meta.p[u32, zext[u64](c.meta_start) + j])
             }
             if c.augmented != 0 {
                 cur = initial + width * 2
@@ -305,7 +303,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
                 }
                 if cur != aend { try ufail(o, c"invalid FDE augmentation length") }
             }
-            fr handle[Frame] = vec_new[Frame](handle_from_addr[Vec[Frame]](&u.frames))
+            fr handle[Frame] = vec_add[Frame](&u.frames)
             fr.file = trunc[u32](f)
             fr.section = trunc[u32](k)
             fr.offset = at
@@ -339,7 +337,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             fail Bad
         }
     }
-    e handle[Buf] = handle_from_addr[Buf](&u.eh)
+    e handle[Buf] = &u.eh
     start u64 = e.n
     buf_raw(e, d, at)
     buf_zeros(e, padding)
@@ -350,8 +348,8 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
     map_free(rmap)
     map_free(cmap)
     map_free(ch)
-    vec_free[Cie](cl)
-    vec_free[u32](cm)
+    vec_free[Cie](&cie_list)
+    vec_free[u32](&cie_meta)
 }
 
 fn unwind_job(ctx addr, b u64, e u64, worker u32) void {
@@ -375,7 +373,7 @@ fn unwind_normalize() void fails {
     for f u64 in 0..nobj { lx(f).status = 0 }
     pool_for(pool, nobj, 1, &unwind_job, null)
     for f u64 in 0..nobj {
-        if lx(f).status != 0 { try die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+        if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
     if stats_on {
         n u64 = 0
@@ -412,19 +410,18 @@ fn unwind_active(fr handle[Frame]) bool fails {
 }
 
 fn unwind_prepare() void fails {
-    fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
     for f u64 in 0..unorm_count {
-        v handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uobj(f).frames)
+        v handle[Vec[Frame]] = &uobj(f).frames
         for i u64 in 0..v.n {
-            fr handle[Frame] = vec_ref[Frame](v, i)
-            if try unwind_active(fr) { mem_copy(vec_push_zeroed[Frame](fh), handle_addr(fr), sizeof[Frame]) }
+            fr handle[Frame] = vec_at(v, i)
+            if try unwind_active(fr) { copy_into(vec_add[Frame](&uframes), fr) }
         }
     }
-    if fh.n == 0 { return }
-    size u64 = 12 + fh.n * 8
+    if uframes.n == 0 { return }
+    size u64 = 12 + uframes.n * 8
     file u64 = nobj
     o handle[Obj] = try new_object(c"<unwind header>")
-    stat_add(ST_INDEXED_UNWIND_FDES, fh.n)
+    stat_add(ST_INDEXED_UNWIND_FDES, uframes.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)
@@ -561,14 +558,15 @@ fn unwind_relative(at u64, value u64, place u64) void fails {
     wr32(image, at, x)
 }
 
+const EH_HDR_PREFIX arr[4, u8] = b"\x01\x1b\x03\x3b"
+
 fn unwind_emit() void fails {
     if unwind_file == NONE64 { return }
     hp handle[Place] = try get_placement(unwind_file, 1)
-    fh handle[Vec[Frame]] = handle_from_addr[Vec[Frame]](&uframes)
-    n u64 = fh.n
+    n u64 = uframes.n
     ents addr = heap_alloc(n * 16 + 16)
     for i u64 in 0..n {
-        fr handle[Frame] = vec_ref[Frame](fh, i)
+        fr handle[Frame] = vec_at[Frame](&uframes, i)
         p handle[Place] = try get_placement(zext[u64](fr.file), zext[u64](fr.section))
         field u64 = p.offset + fr.initial
         raw u64 = 0
@@ -582,7 +580,7 @@ fn unwind_emit() void fails {
         hs_set(ents, i, address, p.address + fr.offset)
     }
     ocaml_heap_sort(ents, n)
-    mem_copy(image + hp.offset, c"\x01\x1b\x03\x3b", 4)
+    mem_copy(image + hp.offset, &EH_HDR_PREFIX, 4)
     first u64 = OCAML_MAX_INT
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)

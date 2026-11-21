@@ -19,7 +19,7 @@ struct Ztree {
 // the stream: bits [0, cnt) of buf are the next unread bits, then the
 // bytes from p to ending (the Adler-32 trailer excluded)
 struct Zs {
-    o addr
+    o handle[Obj]
     name Bytes
     src addr
     p u64
@@ -48,7 +48,7 @@ const Z_ORDER arr[19, u8] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13
 
 // "path: NAME: zlib: <text>"
 fn zfail(z handle[Zs], text addr) void fails {
-    m handle[Buf] = ef(handle_from_addr[Obj](z.o))
+    m handle[Buf] = ef(z.o)
     bb(m, z.name)
     bs(m, c": zlib: ")
     bs(m, text)
@@ -182,13 +182,12 @@ fn zdynamic(z handle[Zs], literals handle[Ztree], distances handle[Ztree]) void 
         codes[zext[u64](Z_ORDER[n])] = trunc[u8](v)
     }
     code_tree Ztree = {}
-    ct handle[Ztree] = handle_from_addr[Ztree](&code_tree)
-    try ztree(z, ct, &codes, 19, true)
+    try ztree(z, &code_tree, &codes, 19, true)
     lengths arr[320, u8] = {}
     total u64 = literal_count + distance_count
     n u64 = 0
     while n < total {
-        code u64 = try zsym(z, ct)
+        code u64 = try zsym(z, &code_tree)
         if code < 16 {
             lengths[n] = trunc[u8](code)
             n += 1
@@ -225,8 +224,8 @@ fn zdynamic(z handle[Zs], literals handle[Ztree], distances handle[Ztree]) void 
 // which must hold exactly `size` bytes
 fn zlib_decode(o handle[Obj], name Bytes, src addr, offset u64, length u64, out addr, size u64) void fails {
     state Zs = {}
-    z handle[Zs] = handle_from_addr[Zs](&state)
-    z.o = handle_addr(o)
+    z handle[Zs] = &state
+    z.o = o
     z.name = name
     z.src = src
     if length < 6 { try zfail(z, c"truncated header or checksum") }
@@ -240,9 +239,7 @@ fn zlib_decode(o handle[Obj], name Bytes, src addr, offset u64, length u64, out 
     z.p = offset + 2
     z.ending = ending
     literals Ztree = {}
-    lt handle[Ztree] = handle_from_addr[Ztree](&literals)
     distances Ztree = {}
-    dt handle[Ztree] = handle_from_addr[Ztree](&distances)
     cursor u64 = 0
     final bool = false
     while !final {
@@ -271,9 +268,9 @@ fn zlib_decode(o handle[Obj], name Bytes, src addr, offset u64, length u64, out 
             continue
         }
         if kind == 3 { try zfail(z, c"reserved block type") }
-        if kind == 1 { try zfixed(z, lt, dt) } else { try zdynamic(z, lt, dt) }
+        if kind == 1 { try zfixed(z, &literals, &distances) } else { try zdynamic(z, &literals, &distances) }
         while true {
-            code u64 = try zsym(z, lt)
+            code u64 = try zsym(z, &literals)
             if code < 256 {
                 if cursor >= size { try zfail(z, c"decoded data exceeds declared size") }
                 out[u8, cursor] = trunc[u8](code)
@@ -285,7 +282,7 @@ fn zlib_decode(o handle[Obj], name Bytes, src addr, offset u64, length u64, out 
             i u64 = code - 257
             n u64 = try zbits(z, zext[u64](Z_LENGTH_EXTRA[i]))
             n += zext[u64](Z_LENGTH_BASE[i])
-            d u64 = try zsym(z, dt)
+            d u64 = try zsym(z, &distances)
             if d > 29 { try zfail(z, c"reserved distance code") }
             distance u64 = try zbits(z, zext[u64](Z_DISTANCE_EXTRA[d]))
             distance += zext[u64](Z_DISTANCE_BASE[d])

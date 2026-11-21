@@ -9,6 +9,17 @@ const OCAML_MAX_INT u64 = 4611686018427387903
 
 const NONE u32 = 0xffffffff
 
+// Common map aliases shared across linker passes
+type U64Map = Map[u64, u32, u64_hash, u64_eq]
+type U64U64Map = Map[u64, u64, u64_hash, u64_eq]
+type U64BytesMap = Map[u64, Bytes, u64_hash, u64_eq]
+type U64Set = Map[u64, u8, u64_hash, u64_eq]
+type U32Set = Map[u32, u8, u32_hash, u32_eq]
+type SymMap = Map[Bytes, u64, bytes_hash, bytes_eq]
+type BytesU32Map = Map[Bytes, u32, bytes_hash, bytes_eq]
+type BytesAddrMap = Map[Bytes, addr, bytes_hash, bytes_eq]
+type BytesSet = Map[Bytes, u8, bytes_hash, bytes_eq]
+
 // Link termination reasons. Parser jobs use their own errors and messages,
 // then the main thread reports the first failing item in input order.
 error LinkFailed, LinkRefused, LinkDone
@@ -25,9 +36,8 @@ fn ld_exit_code(e error) i32 {
 
 fn ld_record_diag(b Bytes) void {
     if ld_api_active {
-        dh handle[Buf] = handle_from_addr[Buf](&ld_api_diag)
-        buf_clear(dh)
-        bb(dh, b)
+        buf_clear(&ld_api_diag)
+        bb(&ld_api_diag, b)
     }
 }
 
@@ -43,9 +53,8 @@ var ld_msg Buf = {}
 
 // clears the shared message buffer and returns it
 fn msg() handle[Buf] {
-    b handle[Buf] = handle_from_addr[Buf](&ld_msg)
-    buf_clear(b)
-    return b
+    buf_clear(&ld_msg)
+    return &ld_msg
 }
 
 fn bs(b handle[Buf], s addr) void { buf_str(b, s) }
@@ -90,18 +99,17 @@ fn die_buf(b handle[Buf]) void fails {
     // --stats: the statistics come before the diagnostic
     stats_print()
     out Buf = {}
-    o handle[Buf] = handle_from_addr[Buf](&out)
-    bs(o, c"fas-ld: ")
-    bb(o, buf_bytes(b))
-    buf_u8(o, 10)
-    ld_record_diag(buf_bytes(o))
-    if !ld_quiet() { buf_write(o, STDERR) catch {} }
-    buf_free(o)
+    bs(&out, c"fas-ld: ")
+    bb(&out, buf_bytes(b))
+    buf_u8(&out, 10)
+    ld_record_diag(buf_bytes(&out))
+    if !ld_quiet() { buf_write(&out, STDERR) catch {} }
+    buf_free(&out)
     fail LinkFailed
 }
 
 // dies with the shared message buffer
-fn die() void fails { try die_buf(handle_from_addr[Buf](&ld_msg)) }
+fn die() void fails { try die_buf(&ld_msg) }
 
 fn die_c(s addr) void fails {
     m handle[Buf] = msg()
@@ -113,13 +121,12 @@ fn die_c(s addr) void fails {
 // differential harness counts as a skip rather than a mismatch.
 fn refuse(what addr) void fails {
     out Buf = {}
-    o handle[Buf] = handle_from_addr[Buf](&out)
-    bs(o, c"fas-ld: not yet supported by the Fas linker: ")
-    bs(o, what)
-    buf_u8(o, 10)
-    ld_record_diag(buf_bytes(o))
-    if !ld_quiet() { buf_write(o, STDERR) catch {} }
-    buf_free(o)
+    bs(&out, c"fas-ld: not yet supported by the Fas linker: ")
+    bs(&out, what)
+    buf_u8(&out, 10)
+    ld_record_diag(buf_bytes(&out))
+    if !ld_quiet() { buf_write(&out, STDERR) catch {} }
+    buf_free(&out)
     fail LinkRefused
 }
 
@@ -252,17 +259,13 @@ fn cstr_dup(b Bytes) addr {
 // compares only real candidates.
 
 struct KeyIndex {
-    heads Map[u64, u32, u64_hash, u64_eq]
+    heads U64Map
     next Vec[u32]
-}
-
-fn kx_heads(k handle[KeyIndex]) handle[Map[u64, u32, u64_hash, u64_eq]] {
-    return handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&k.heads)
 }
 
 // the first entry with this hash, or NONE
 fn kx_first(k handle[KeyIndex], hash u64) u32 {
-    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    h handle[U64Map] = &k.heads
     a addr = map_val_addr(h, hash)
     return if a == null { NONE } else { a[u32] }
 }
@@ -271,21 +274,21 @@ fn kx_next(k handle[KeyIndex], id u32) u32 { return k.next.p[u32, zext[u64](id)]
 
 // adds entry `id` (the next id: ids are 0, 1, 2, ...) under this hash
 fn kx_add(k handle[KeyIndex], hash u64, id u32) void {
-    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    h handle[U64Map] = &k.heads
     a addr = map_val_addr(h, hash)
     if a == null {
-        vec_push[u32](handle_from_addr[Vec[u32]](&k.next), NONE)
+        vec_push[u32](&k.next, NONE)
         map_put(h, hash, id)
     } else {
-        vec_push[u32](handle_from_addr[Vec[u32]](&k.next), a[u32])
+        vec_push[u32](&k.next, a[u32])
         a[u32] = id
     }
 }
 
 fn kx_free(k handle[KeyIndex]) void {
-    h handle[Map[u64, u32, u64_hash, u64_eq]] = kx_heads(k)
+    h handle[U64Map] = &k.heads
     map_free(h)
-    vec_free[u32](handle_from_addr[Vec[u32]](&k.next))
+    vec_free[u32](&k.next)
 }
 
 // ---------- vectors of plain structs ----------

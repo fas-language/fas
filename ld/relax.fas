@@ -55,14 +55,13 @@ fn relax_object(f u64) void {
     }
     if !candidate { return }
     ivs Vec[Iv] = {}
-    iv handle[Vec[Iv]] = handle_from_addr[Vec[Iv]](&ivs)
     for k u64 in 0..n {
         r handle[Rel] = rel(o, k)
         w u64 = relocation_width(r.kind)
         if w == 0 || w == 99 { continue }
-        vec_push[Iv](iv, {(zext[u64](r.target) << 40) | r.offset, r.offset + w})
+        vec_push(&ivs, {(zext[u64](r.target) << 40) | r.offset, r.offset + w})
     }
-    sort_vec[Iv, iv_less](iv)
+    sort_vec[Iv, iv_less](&ivs)
     minus4 u64 = 0xfffffffffffffffc
     copied bool = false
     data addr = o.data
@@ -74,11 +73,11 @@ fn relax_object(f u64) void {
         s handle[Sec] = sec(o, t)
         if r.addend != minus4 || !kept(f, t) || (s.flags & 4) == 0 { continue }
         if !relax_local_address(f, zext[u64](r.symbol)) || r.offset < 2 { continue }
-        if relax_protected(iv, t, r.offset - 2) || relax_protected(iv, t, r.offset - 1) { continue }
+        if relax_protected(&ivs, t, r.offset - 2) || relax_protected(&ivs, t, r.offset - 1) { continue }
         at u64 = s.offset + r.offset
         b1 u8 = data[u8, at - 1]
         b2 u8 = data[u8, at - 2]
-        mov bool = r.kind == 42 && r.offset >= 3 && !relax_protected(iv, t, r.offset - 3) &&
+        mov bool = r.kind == 42 && r.offset >= 3 && !relax_protected(&ivs, t, r.offset - 3) &&
             (data[u8, at - 3] & 0xf8) == 0x48 && b2 == 0x8b && (b1 & 0xc7) == 5
         call bool = !mov && r.kind == 41 && b2 == 0xff && b1 == 0x15
         if !mov && !call { continue }
@@ -102,7 +101,7 @@ fn relax_object(f u64) void {
         r.kind = 2
         count += 1
     }
-    vec_free[Iv](iv)
+    vec_free(&ivs)
     relax_counts[u64, f] = count
 }
 

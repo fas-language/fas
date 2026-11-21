@@ -45,7 +45,7 @@ fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fail
             if previous != NONE64 && kind <= previous { try gp_fail(o, c"properties must be unique and ordered by type") }
             previous = kind
             if gp_operation(kind) == GP_BAD {
-                m handle[Buf] = handle_from_addr[Buf](&o.msg)
+                m handle[Buf] = &o.msg
                 buf_clear(m)
                 bs(m, c"unsupported GNU property type 0x")
                 bx(m, kind)
@@ -86,9 +86,8 @@ fn gp_parse(o handle[Obj], offset u64, size u64, out handle[Vec[u64]]) void fail
 // the input validation in Elf_reader.parse
 fn gp_check(o handle[Obj], s handle[Sec]) void fails {
     scratch Vec[u64] = {}
-    sh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&scratch)
-    defer { vec_free[u64](sh) }
-    try gp_parse(o, s.offset, s.size, sh)
+    defer { vec_free[u64](&scratch) }
+    try gp_parse(o, s.offset, s.size, &scratch)
 }
 
 var property_file u64 = NONE64
@@ -97,9 +96,9 @@ var property_file u64 = NONE64
 fn properties_prepare() void fails {
     // combined (kind, value, count) triples sorted by kind
     acc Vec[u64] = {}
-    ah handle[Vec[u64]] = handle_from_addr[Vec[u64]](&acc)
+    ah handle[Vec[u64]] = &acc
     pairs Vec[u64] = {}
-    ph handle[Vec[u64]] = handle_from_addr[Vec[u64]](&pairs)
+    ph handle[Vec[u64]] = &pairs
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         seen bool = false
@@ -115,7 +114,7 @@ fn properties_prepare() void fails {
             seen = true
             lx(f).kept[u8, k] = 0
             vec_clear[u64](ph)
-            gp_parse(o, s.offset, s.size, ph) catch err { try die_buf(handle_from_addr[Buf](&o.msg)) }
+            gp_parse(o, s.offset, s.size, ph) catch err { try die_buf(&o.msg) }
             i u64 = 0
             while i < ph.n {
                 kind u64 = vec_get[u64](ph, i)
