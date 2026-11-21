@@ -13125,7 +13125,7 @@ let () =
   parse_message "global-reserved-var" "expected identifier, found `var`" "var var i32\n";
   syntax_pin "keyword-identifier-caret" "var var i32\n" 1 5 3
     "expected identifier, found `var`";
-  parse_message "native-struct-keyword-field-rejected" "expected identifier, found `fn`"
+  semantic_accept "native-struct-keyword-field-accepted"
     "struct S { fn i32 }\n";
   semantic_message "global-initializer-not-constant"
     "global initializer must be a constant expression for `Value`; `dynamic()` is not \
