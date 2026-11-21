@@ -1,0 +1,204 @@
+// CLI probe for differential layout testing against clang-22.
+// Reads a compact description of records from stdin (one record per block)
+// and prints: `size align off0:bit0 off1:bit1 ...` per record.
+
+use "../../lib/core.fas"
+use "../../lib/os.fas"
+use "../../lib/buf.fas"
+use "../../lib/bytes.fas"
+use "../types.fas"
+use "../layout.fas"
+
+struct ProbeState {
+    rec_tids Vec[u32]
+    out Buf
+}
+
+fn parse_u64_bytes(b Bytes) u64 {
+    v u64 = 0
+    for i usize in 0..b.n {
+        c u8 = bytes_at(b, i)
+        if c >= 48 && c <= 57 {
+            v = v * 10 + zext[u64](c - 48)
+        }
+    }
+    return v
+}
+
+fn parse_ty(st handle[ProbeState], s Bytes) u32 {
+    if bytes_eq_c(s, c"bool") { return TY_BOOL }
+    if bytes_eq_c(s, c"char") { return TY_CHAR }
+    if bytes_eq_c(s, c"schar") { return TY_SCHAR }
+    if bytes_eq_c(s, c"uchar") { return TY_UCHAR }
+    if bytes_eq_c(s, c"short") { return TY_SHORT }
+    if bytes_eq_c(s, c"ushort") { return TY_USHORT }
+    if bytes_eq_c(s, c"int") { return TY_INT }
+    if bytes_eq_c(s, c"uint") { return TY_UINT }
+    if bytes_eq_c(s, c"long") { return TY_LONG }
+    if bytes_eq_c(s, c"ulong") { return TY_ULONG }
+    if bytes_eq_c(s, c"llong") { return TY_LLONG }
+    if bytes_eq_c(s, c"ullong") { return TY_ULLONG }
+    if bytes_eq_c(s, c"i128") { return TY_INT128 }
+    if bytes_eq_c(s, c"u128") { return TY_UINT128 }
+    if bytes_eq_c(s, c"f16") { return TY_FLOAT16 }
+    if bytes_eq_c(s, c"f32") { return TY_FLOAT }
+    if bytes_eq_c(s, c"f64") { return TY_DOUBLE }
+    if bytes_eq_c(s, c"f80") { return TY_LDOUBLE }
+    if bytes_eq_c(s, c"ptr") { return ty_ptr(TY_VOID) }
+    if bytes_eq_c(s, c"nullptr") { return TY_NULLPTR }
+    if bytes_eq_c(s, c"cf16") { return TY_COMPLEX_F16 }
+    if bytes_eq_c(s, c"cf32") { return TY_COMPLEX_F32 }
+    if bytes_eq_c(s, c"cf64") { return TY_COMPLEX_F64 }
+    if bytes_eq_c(s, c"cf80") { return TY_COMPLEX_F80 }
+
+    if s.n >= 3 && bytes_at(s, 0) == 98 && bytes_at(s, 1) == 105 { // "bi"
+        n u32 = trunc[u32](parse_u64_bytes(bytes_from(s, 2)))
+        return ty_bitint(n, false)
+    }
+    if s.n >= 4 && bytes_at(s, 0) == 117 && bytes_at(s, 1) == 98 && bytes_at(s, 2) == 105 { // "ubi"
+        n u32 = trunc[u32](parse_u64_bytes(bytes_from(s, 3)))
+        return ty_bitint(n, true)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"rec:")) {
+        idx usize = parse_u64_bytes(bytes_from(s, 4))
+        return vec_get(&st.rec_tids, idx)
+    }
+    if s.n >= 6 && bytes_starts_with(s, bytes_c(c"flex:")) {
+        elem u32 = parse_ty(st, bytes_from(s, 5))
+        return ty_array_incomplete(elem)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"arr:")) {
+        rest Bytes = bytes_from(s, 4)
+        colon usize = rest.n
+        for i usize in 0..rest.n {
+            if bytes_at(rest, i) == 58 { colon = i }
+        }
+        elem u32 = parse_ty(st, bytes_sub(rest, 0, colon))
+        n_elems u64 = parse_u64_bytes(bytes_from(rest, colon + 1))
+        return ty_array(elem, n_elems)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"vec:")) {
+        rest Bytes = bytes_from(s, 4)
+        colon usize = rest.n
+        for i usize in 0..rest.n {
+            if bytes_at(rest, i) == 58 { colon = i }
+        }
+        elem u32 = parse_ty(st, bytes_sub(rest, 0, colon))
+        vb u32 = trunc[u32](parse_u64_bytes(bytes_from(rest, colon + 1)))
+        return ty_vector(elem, vb)
+    }
+    return TY_INT
+}
+
+struct LineCur {
+    p usize
+}
+
+fn next_tok(line Bytes, lc handle[LineCur]) Bytes {
+    p usize = lc.p
+    while p < line.n && (bytes_at(line, p) == 32 || bytes_at(line, p) == 9 || bytes_at(line, p) == 13) {
+        p += 1
+    }
+    start usize = p
+    while p < line.n && bytes_at(line, p) != 32 && bytes_at(line, p) != 9 && bytes_at(line, p) != 13 {
+        p += 1
+    }
+    lc.p = p
+    return bytes_sub(line, start, p - start)
+}
+
+fn main() i32 {
+    ctx TypeCtx = {}
+    tc_init(&ctx)
+    defer { tc_free(&ctx) }
+
+    st ProbeState = {}
+    defer {
+        vec_free(&st.rec_tids)
+        buf_free(&st.out)
+    }
+
+    // Read all of stdin
+    in_buf Buf = {}
+    defer { buf_free(&in_buf) }
+    chunk arr[4096, u8] = {}
+    while true {
+        n usize = os_read(STDIN, &chunk[0], 4096) catch { break }
+        if n == 0 { break }
+        buf_raw(&in_buf, &chunk[0], n)
+    }
+
+    data Bytes = buf_bytes(&in_buf)
+    cur usize = 0
+    fields Vec[FieldDef] = {}
+    defer { vec_free(&fields) }
+
+    while cur < data.n {
+        nl usize = cur
+        while nl < data.n && bytes_at(data, nl) != 10 { nl += 1 }
+        line Bytes = bytes_sub(data, cur, nl - cur)
+        cur = if nl < data.n { nl + 1 } else { data.n }
+        if line.n == 0 { continue }
+
+        lc LineCur = {}
+        cmd Bytes = next_tok(line, &lc)
+        if bytes_eq_c(cmd, c"REC") {
+            kind_tok Bytes = next_tok(line, &lc)
+            is_union bool = bytes_eq_c(kind_tok, c"U")
+            is_packed bool = parse_u64_bytes(next_tok(line, &lc)) != 0
+            al_attr u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            pp u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            nf u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+
+            fields.n = 0
+            for i u32 in 0..nf {
+                fnl usize = cur
+                while fnl < data.n && bytes_at(data, fnl) != 10 { fnl += 1 }
+                fline Bytes = bytes_sub(data, cur, fnl - cur)
+                cur = if fnl < data.n { fnl + 1 } else { data.n }
+
+                flc LineCur = {}
+                _ Bytes = next_tok(fline, &flc) // "F"
+                ty_tok Bytes = next_tok(fline, &flc)
+                is_bf bool = parse_u64_bytes(next_tok(fline, &flc)) != 0
+                bw u32 = trunc[u32](parse_u64_bytes(next_tok(fline, &flc)))
+                f_pk bool = parse_u64_bytes(next_tok(fline, &flc)) != 0
+                f_al u32 = trunc[u32](parse_u64_bytes(next_tok(fline, &flc)))
+                f_an bool = parse_u64_bytes(next_tok(fline, &flc)) != 0
+
+                ftid u32 = parse_ty(&st, ty_tok)
+                fd handle[FieldDef] = vec_add(&fields)
+                fd.name_id = 0
+                fd.ty = ftid
+                fd.bit_width = bw
+                fd.align_attr = f_al
+                fd.is_bitfield = is_bf
+                fd.is_anon = f_an
+                fd.is_packed = f_pk
+            }
+
+            tid u32 = ty_record_new(0, is_union)
+            ty_record_complete(tid, fields.p, nf, is_packed, al_attr, pp)
+            vec_push(&st.rec_tids, tid)
+
+            sz u64 = ty_size(tid)
+            al u64 = ty_align(tid)
+            buf_dec_u64(&st.out, sz)
+            buf_u8(&st.out, 32)
+            buf_dec_u64(&st.out, al)
+
+            rec handle[RecordDef] = ty_record(ty_node(tid).aux1)
+            for i u32 in 0..rec.fields_len {
+                f handle[FieldDef] = ty_field(rec.fields_start + i)
+                buf_u8(&st.out, 32)
+                buf_dec_u64(&st.out, f.byte_off)
+                buf_u8(&st.out, 58)
+                buf_dec_u64(&st.out, f.bit_off)
+            }
+            buf_u8(&st.out, 10)
+        }
+    }
+
+    buf_write(&st.out, STDOUT) catch {}
+    return 0
+}
