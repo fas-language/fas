@@ -384,6 +384,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
     ?(c_nonnull_parameters = []) ?(c_string_parameters = [])
     ?(c_alloc_size_parameters = []) ?(c_records = []) ?(all_errors = false)
     ?specializations ?index program =
+  let* program = Sema_type_aliases.desugar ?index program in
   let* program, program_errors = desugar_errors program in
   let* program = Sema_enums.desugar program in
   let* program = Sema_fn_generics.desugar program in
@@ -425,6 +426,7 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
   let declaration = function
     | Ast.Use _ | Ast.Pkg _ | Ast.Error_decl _ | Ast.Const_assert _ -> None
     | Ast.Opaque { name; span; _ } -> Some (name, Top_type, span)
+    | Ast.Type_alias { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Enum { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Struct { name; name_span; _ } -> Some (name, Top_type, name_span)
     | Ast.Const { name; name_span; _ } -> Some (name, Top_const, name_span)

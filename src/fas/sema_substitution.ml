@@ -3710,7 +3710,7 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
             fields
         in
         Ok (Ast.Struct { item with fields })
-    | Ast.Opaque _ as item -> Ok item
+    | (Ast.Opaque _ | Ast.Type_alias _) as item -> Ok item
     | Ast.Const ({ ty; value; ty_span; _ } as item) ->
         let* ty = resolve_ty ~values:eval_consts [] 0 ty_span ty in
         let* value =

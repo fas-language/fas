@@ -249,6 +249,14 @@ and item =
       extent : Span.t;
     }
   | Opaque of { name : string; name_span : Span.t; span : Span.t; extent : Span.t }
+  | Type_alias of {
+      name : string;
+      name_span : Span.t;
+      ty : ty;
+      ty_span : Span.t;
+      span : Span.t;
+      extent : Span.t;
+    }
   (* `enum Name K { A  B = 5 }`: each member with its span and optional
      value (an integer literal) *)
   | Enum of {
@@ -293,6 +301,7 @@ let with_extent extent = function
   | Global g -> Global { g with extent }
   | Struct s -> Struct { s with extent }
   | Opaque o -> Opaque { o with extent }
+  | Type_alias t -> Type_alias { t with extent }
   | Error_decl e -> Error_decl { e with extent }
   | Enum e -> Enum { e with extent }
   | Func f -> Func { f with extent }
@@ -689,6 +698,7 @@ let item_span = function
   | Global { span; _ }
   | Struct { span; _ }
   | Opaque { span; _ }
+  | Type_alias { span; _ }
   | Error_decl { span; _ }
   | Enum { span; _ }
   | Func { span; _ } ->
@@ -1189,6 +1199,11 @@ let render_program program =
             text
               (Printf.sprintf " <<%s\n%s\n%s" fragment.tag fragment.text fragment.tag))
     | Const_assert { cond; message; _ } -> emit_const_assert cond message
+    | Type_alias { name; ty; _ } ->
+        text "type ";
+        add_name name;
+        text " = ";
+        emit_ty ty
     | Const { name; ty; value; fill; _ } -> (
         text "const ";
         add_name name;
@@ -1471,6 +1486,7 @@ let expanded_walker ~identifiers ~limit =
           List.iter go_generic_param generic_params;
           List.iter go_field fields
       | Opaque _ -> ()
+      | Type_alias { ty; span; _ } -> go_ty span ty
       | Error_decl { names; _ } ->
           List.iter (fun (_, _, pinned) -> Option.iter go_expr pinned) names
       | Enum { members; repr; span; _ } ->
@@ -1699,6 +1715,7 @@ let map_item m item =
           fields = List.map (fun (f : field) -> { f with ty = ty f.ty }) s.fields;
         }
   | Opaque o -> Opaque { o with name = nm o.name }
+  | Type_alias t -> Type_alias { t with name = nm t.name; ty = ty t.ty }
   | Enum e ->
       Enum
         {

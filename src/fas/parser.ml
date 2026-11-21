@@ -898,6 +898,10 @@ module P = struct
                    name name name)
               (span p) "`opaque` types were removed; `handle[T]` takes any struct";
           ]
+    | Token.Ident "type" ->
+        let start = span p in
+        let* x = type_alias_item p in
+        Ok [ Ast.with_extent (extent p start) x ]
     | Token.Kw_extern -> extern_block p
     | Token.Kw_fn ->
         let start = span p in
@@ -1003,6 +1007,20 @@ module P = struct
     let* () = end_stmt p in
     Ok
       (Ast.Global { name; name_span; ty_span; ty; init; linkage; span = s; extent = s })
+
+  and type_alias_item p =
+    let s = span p in
+    ignore (bump p);
+    let name_span = span p in
+    let* name = ident p in
+    if at p Token.Lbracket then
+      error (span p) "type aliases cannot have generic parameters"
+    else
+      let* () = expected p Token.Assign in
+      let ty_span = span p in
+      let* target = ty p in
+      let* () = end_stmt p in
+      Ok (Ast.Type_alias { name; name_span; ty = target; ty_span; span = s; extent = s })
 
   and enum_item p =
     let s = span p in
@@ -2512,7 +2530,7 @@ module P = struct
         Error [ Diag.error (span p) ("expected an expression, found " ^ Token.show t) ]
 end
 
-let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error" ]
+let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error"; "type" ]
 
 let item_starts text =
   let n = String.length text in

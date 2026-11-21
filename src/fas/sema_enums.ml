@@ -250,7 +250,7 @@ and stmt = function
 and stmts body = List.map stmt body
 
 let item = function
-  | (Ast.Use _ | Ast.Pkg _ | Ast.Opaque _ | Ast.Enum _) as i -> i
+  | (Ast.Use _ | Ast.Pkg _ | Ast.Opaque _ | Ast.Type_alias _ | Ast.Enum _) as i -> i
   | Ast.Const c -> Ast.Const { c with ty = ty c.ty; value = expr c.value }
   | Ast.Const_assert c -> Ast.Const_assert { c with cond = expr c.cond }
   | Ast.Global g -> Ast.Global { g with ty = ty g.ty; init = Option.map expr g.init }

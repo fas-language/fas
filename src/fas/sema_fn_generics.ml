@@ -804,7 +804,7 @@ let desugar (program : Ast.program) =
                 names =
                   List.map (fun (n, s, v) -> (n, s, Option.map (rw_expr ctx) v)) e.names;
               }
-        | (Ast.Use _ | Ast.Pkg _ | Ast.Opaque _ | Ast.Enum _) as i -> i
+        | (Ast.Use _ | Ast.Pkg _ | Ast.Opaque _ | Ast.Type_alias _ | Ast.Enum _) as i -> i
       in
       let items =
         List.filter_map
