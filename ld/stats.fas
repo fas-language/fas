@@ -154,18 +154,16 @@ fn stat_mark(k u64) void {
     if stats_on { stat_now.phase_seen[k] = true }
 }
 
-fn phase_begin(k u64, p addr) void {
+fn phase_begin(k u64, t handle[PhaseStart]) void {
     if !stats_on { return }
-    t handle[PhaseStart] = handle_from_addr[PhaseStart](p)
     stat_now.phase_seen[k] = true
     t.wall = os_clock_ns(CLOCK_REALTIME)
     t.cpu = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID)
     t.mem = atomic_load[u64, relaxed](&mem_mapped)
 }
 
-fn phase_end(k u64, p addr) void {
+fn phase_end(k u64, t handle[PhaseStart]) void {
     if !stats_on { return }
-    t handle[PhaseStart] = handle_from_addr[PhaseStart](p)
     w u64 = os_clock_ns(CLOCK_REALTIME)
     // backwards clock adjustments are clamped
     if w > t.wall { phase_wall[k] += w - t.wall }
@@ -211,7 +209,7 @@ fn stats_print() void {
     wall = if wall > stats_start_wall { wall - stats_start_wall } else { 0 }
     cpu u64 = os_clock_ns(CLOCK_PROCESS_CPUTIME_ID) - stats_start_cpu
     o Buf = {}
-    b handle[Buf] = handle_from_addr[Buf](&o)
+    b handle[Buf] = &o
     bs(b, c"{\"wall_seconds\":")
     stat_seconds(b, wall)
     bs(b, c",\"cpu_seconds\":")

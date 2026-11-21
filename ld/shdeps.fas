@@ -22,21 +22,23 @@
 struct ShDepEdge {
     from_path Bytes
     dep_name Bytes
-    target addr         // handle[ShLib] as addr
+    target handle[ShLib]
 }
 
 struct ShDeps {
-    libraries Vec[addr] // handle[ShLib] as addr, in BFS discovery order
-    owned Vec[addr]     // transitive ShLib allocations owned by this graph
+    libraries Vec[handle[ShLib]] // in BFS discovery order
+    owned Vec[handle[ShLib]]     // transitive ShLib allocations owned by this graph
     edges Vec[ShDepEdge]
     edge_index KeyIndex
 }
 
 // Internal queue entry for BFS dependency loading
 struct ShPending {
-    lib addr            // handle[ShLib] as addr
+    lib handle[ShLib]
     inherited Vec[Bytes]
 }
+
+type ShLibMap = Map[Bytes, handle[ShLib], bytes_hash, bytes_eq]
 
 // Internal provider entry for validation: (name, version) -> symbol kind
 struct ShProvider {
@@ -55,61 +57,56 @@ struct ShDefVer {
 // ---------- helpers ----------
 
 fn shdeps_lib(graph handle[ShDeps], i u64) handle[ShLib] {
-    return handle_from_addr[ShLib](vec_get[addr](handle_from_addr[Vec[addr]](&graph.libraries), i))
+    return vec_get[handle[ShLib]](&graph.libraries, i)
 }
 
 fn shdeps_pair_hash(a Bytes, b Bytes) u64 {
     return hash_mix(bytes_hash(a) ^ hash_mix(bytes_hash(b) ^ 0x517cc1b727220a95))
 }
 
-fn shdeps_put_edge(graph handle[ShDeps], from_path Bytes, dep_name Bytes, target addr) void {
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&graph.edge_index)
-    ev handle[Vec[ShDepEdge]] = handle_from_addr[Vec[ShDepEdge]](&graph.edges)
+fn shdeps_put_edge(graph handle[ShDeps], from_path Bytes, dep_name Bytes, target handle[ShLib]) void {
     h u64 = shdeps_pair_hash(from_path, dep_name)
-    id u32 = kx_first(kx, h)
+    id u32 = kx_first(&graph.edge_index, h)
     while id != NONE {
-        e handle[ShDepEdge] = vec_ref[ShDepEdge](ev, zext[u64](id))
+        e handle[ShDepEdge] = vec_at[ShDepEdge](&graph.edges, zext[u64](id))
         if bytes_eq(e.from_path, from_path) && bytes_eq(e.dep_name, dep_name) {
             e.target = target
             return
         }
-        id = kx_next(kx, id)
+        id = kx_next(&graph.edge_index, id)
     }
-    new_id u32 = trunc[u32](ev.n)
-    e handle[ShDepEdge] = vec_new[ShDepEdge](ev)
+    new_id u32 = trunc[u32](graph.edges.n)
+    e handle[ShDepEdge] = vec_add[ShDepEdge](&graph.edges)
     e.from_path = from_path
     e.dep_name = dep_name
     e.target = target
-    kx_add(kx, h, new_id)
+    kx_add(&graph.edge_index, h, new_id)
 }
 
 // Looks up `(from_path, dep_name)` in `graph.edges`; returns null if absent.
 fn shdeps_find_edge(graph handle[ShDeps], from_path Bytes, dep_name Bytes) handle[ShLib] {
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&graph.edge_index)
-    ev handle[Vec[ShDepEdge]] = handle_from_addr[Vec[ShDepEdge]](&graph.edges)
     h u64 = shdeps_pair_hash(from_path, dep_name)
-    id u32 = kx_first(kx, h)
+    id u32 = kx_first(&graph.edge_index, h)
     while id != NONE {
-        e handle[ShDepEdge] = vec_ref[ShDepEdge](ev, zext[u64](id))
+        e handle[ShDepEdge] = vec_at[ShDepEdge](&graph.edges, zext[u64](id))
         if bytes_eq(e.from_path, from_path) && bytes_eq(e.dep_name, dep_name) {
-            return handle_from_addr[ShLib](e.target)
+            return e.target
         }
-        id = kx_next(kx, id)
+        id = kx_next(&graph.edge_index, id)
     }
     return null
 }
 
 fn shdeps_free(graph handle[ShDeps]) void {
-    ov handle[Vec[addr]] = handle_from_addr[Vec[addr]](&graph.owned)
-    for i u64 in 0..ov.n {
-        p addr = vec_get[addr](ov, i)
-        sh_free(handle_from_addr[ShLib](p))
-        heap_free(p)
+    for i u64 in 0..graph.owned.n {
+        lib handle[ShLib] = vec_get[handle[ShLib]](&graph.owned, i)
+        sh_free(lib)
+        heap_free(handle_addr(lib))
     }
-    vec_free[addr](ov)
-    vec_free[addr](handle_from_addr[Vec[addr]](&graph.libraries))
-    vec_free[ShDepEdge](handle_from_addr[Vec[ShDepEdge]](&graph.edges))
-    kx_free(handle_from_addr[KeyIndex](&graph.edge_index))
+    vec_free[handle[ShLib]](&graph.owned)
+    vec_free[handle[ShLib]](&graph.libraries)
+    vec_free[ShDepEdge](&graph.edges)
+    kx_free(&graph.edge_index)
 }
 
 fn shdeps_getcwd() Bytes fails {
@@ -136,44 +133,43 @@ fn shdeps_prefix_at(text Bytes, at u64, lit addr, lit_len u64) bool {
 fn shdeps_expand(origin Bytes, text Bytes) Bytes fails {
     if text.n > 65536 { try die_c(c"dependency search path exceeds 65536 bytes") }
     out Buf = {}
-    oh handle[Buf] = handle_from_addr[Buf](&out)
     at u64 = 0
     while at < text.n {
         c u8 = text.p[u8, at]
         if c == 36 {
             if shdeps_prefix_at(text, at, c"${ORIGIN}", 9) {
-                if origin.n > 65536 - oh.n {
-                    buf_free(oh)
+                if origin.n > 65536 - out.n {
+                    buf_free(&out)
                     try die_c(c"dependency search path exceeds 65536 bytes")
                 }
-                buf_append(oh, origin)
+                buf_append(&out, origin)
                 at += 9
             } else if shdeps_prefix_at(text, at, c"$ORIGIN", 7) &&
                 (at + 7 == text.n || !shdeps_is_ident_char(text.p[u8, at + 7])) {
-                if origin.n > 65536 - oh.n {
-                    buf_free(oh)
+                if origin.n > 65536 - out.n {
+                    buf_free(&out)
                     try die_c(c"dependency search path exceeds 65536 bytes")
                 }
-                buf_append(oh, origin)
+                buf_append(&out, origin)
                 at += 7
             } else {
-                buf_free(oh)
+                buf_free(&out)
                 m handle[Buf] = msg()
                 bs(m, c"unsupported dependency path token in ")
                 bb(m, text)
                 try die()
             }
         } else {
-            buf_u8(oh, c)
-            if oh.n > 65536 {
-                buf_free(oh)
+            buf_u8(&out, c)
+            if out.n > 65536 {
+                buf_free(&out)
                 try die_c(c"dependency search path exceeds 65536 bytes")
             }
             at += 1
         }
     }
-    res Bytes = nul_dup(oh.p, oh.n)
-    buf_free(oh)
+    res Bytes = nul_dup(out.p, out.n)
+    buf_free(&out)
     return res
 }
 
@@ -182,21 +178,20 @@ fn shdeps_expand(origin Bytes, text Bytes) Bytes fails {
 fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]]) void fails {
     if text.n > 65536 { try die_c(c"dependency search path exceeds 65536 bytes") }
     parts Vec[Bytes] = {}
-    ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&parts)
     start u64 = 0
     for i u64 in 0..text.n {
         if text.p[u8, i] == 58 {
-            vec_push[Bytes](ph, bytes(text.p + start, i - start))
+            vec_push[Bytes](&parts, bytes(text.p + start, i - start))
             start = i + 1
         }
     }
-    vec_push[Bytes](ph, bytes(text.p + start, text.n - start))
-    if ph.n > 4096 {
-        vec_free[Bytes](ph)
+    vec_push[Bytes](&parts, bytes(text.p + start, text.n - start))
+    if parts.n > 4096 {
+        vec_free[Bytes](&parts)
         try die_c(c"dependency search exceeds 4096 directories")
     }
-    for i u64 in 0..ph.n {
-        part Bytes = vec_get[Bytes](ph, i)
+    for i u64 in 0..parts.n {
+        part Bytes = vec_get[Bytes](&parts, i)
         t Bytes = part
         if prefixes {
             t = try root_directory(part)
@@ -209,7 +204,7 @@ fn shdeps_paths(prefixes bool, origin Bytes, text Bytes, out handle[Vec[Bytes]])
             vec_push[Bytes](out, try shdeps_expand(origin, t))
         }
     }
-    vec_free[Bytes](ph)
+    vec_free[Bytes](&parts)
 }
 
 fn shdeps_check_dir_limit(n u64) void fails {
@@ -245,61 +240,54 @@ fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr,
     if c.allow_shlib_undefined { return }
     if c.has_sysroot && !has_root { try sysroot_normalize(c.sysroot) }
 
-    known Map[Bytes, addr, bytes_hash, bytes_eq] = {}
-    kh handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, addr, bytes_hash, bytes_eq]](&known)
+    known ShLibMap = {}
+    kh handle[ShLibMap] = &known
     defer { map_free(kh) }
 
-    visited Map[Bytes, u8, bytes_hash, bytes_eq] = {}
-    vh handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&visited)
+    visited BytesSet = {}
+    vh handle[BytesSet] = &visited
     defer { map_free(vh) }
 
     pending Vec[ShPending] = {}
-    qh handle[Vec[ShPending]] = handle_from_addr[Vec[ShPending]](&pending)
     defer {
-        for i u64 in 0..qh.n {
-            p handle[ShPending] = vec_ref[ShPending](qh, i)
-            vec_free[Bytes](handle_from_addr[Vec[Bytes]](&p.inherited))
+        for i u64 in 0..pending.n {
+            p handle[ShPending] = vec_at[ShPending](&pending, i)
+            vec_free[Bytes](&p.inherited)
         }
-        vec_free[ShPending](qh)
+        vec_free[ShPending](&pending)
     }
 
     for i u64 in 0..ndirect {
-        lp addr = direct[addr, i]
-        lib handle[ShLib] = handle_from_addr[ShLib](lp)
-        map_put(kh, lib.needed, lp)
+        lib handle[ShLib] = handle_from_addr(direct[addr, i])
+        map_put(kh, lib.needed, lib)
     }
     for i u64 in 0..ndirect {
-        pe handle[ShPending] = vec_new[ShPending](qh)
-        pe.lib = direct[addr, i]
+        pe handle[ShPending] = vec_add[ShPending](&pending)
+        pe.lib = handle_from_addr(direct[addr, i])
     }
 
     cwd Bytes = try shdeps_getcwd()
     explicit Vec[Bytes] = {}
-    eh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&explicit)
-    defer { vec_free[Bytes](eh) }
-    rlinks handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.rpath_links)
-    for i u64 in 0..rlinks.n {
-        try shdeps_paths(true, cwd, vec_get[Bytes](rlinks, i), eh)
-        try shdeps_check_dir_limit(eh.n)
+    defer { vec_free[Bytes](&explicit) }
+    for i u64 in 0..c.rpath_links.n {
+        try shdeps_paths(true, cwd, vec_get[Bytes](&c.rpath_links, i), &explicit)
+        try shdeps_check_dir_limit(explicit.n)
     }
 
-    libs_out handle[Vec[addr]] = handle_from_addr[Vec[addr]](&out.libraries)
-    owned_out handle[Vec[addr]] = handle_from_addr[Vec[addr]](&out.owned)
     symbols u64 = 0
     edge_count u64 = 0
     probes u64 = 0
     head u64 = 0
 
-    while head < qh.n {
-        cur handle[ShPending] = vec_ref[ShPending](qh, head)
-        lp addr = cur.lib
-        lib handle[ShLib] = handle_from_addr[ShLib](lp)
+    while head < pending.n {
+        cur handle[ShPending] = vec_at[ShPending](&pending, head)
+        lib handle[ShLib] = cur.lib
         head += 1
 
         if map_has(vh, lib.path) { continue }
         map_put(vh, lib.path, 1)
         if vh.n > 1024 { try die_c(c"transitive shared-library count exceeds 1024") }
-        vec_push[addr](libs_out, lp)
+        vec_push[handle[ShLib]](&out.libraries, lib)
 
         sym_delta u64 = lib.exports.n + lib.references.n + lib.defined_versions.n + lib.version_requirements.n
         symbols = try chk_add(c"transitive shared symbol count", 4000000, symbols, sym_delta)
@@ -308,59 +296,53 @@ fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr,
         origin Bytes = bytes_empty()
         if path_is_relative(lib.path) {
             pb Buf = {}
-            pbh handle[Buf] = handle_from_addr[Buf](&pb)
-            path_concat(pbh, cwd, lib.path)
-            full Bytes = nul_dup(pbh.p, pbh.n)
-            buf_free(pbh)
+            path_concat(&pb, cwd, lib.path)
+            full Bytes = nul_dup(pb.p, pb.n)
+            buf_free(&pb)
             origin = path_dirname(full)
         } else {
             origin = path_dirname(lib.path)
         }
 
         // Inherited RPATH (only when DT_RUNPATH is absent and DT_RPATH is present)
-        cur_inh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&cur.inherited)
         new_inh Vec[Bytes] = {}
-        nih handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&new_inh)
         if lib.runpath.n == SH_NONE && lib.rpath.n != SH_NONE {
-            try shdeps_paths(false, origin, lib.rpath, nih)
-            shdeps_copy_paths(cur_inh, nih)
-            try shdeps_check_dir_limit(nih.n)
+            try shdeps_paths(false, origin, lib.rpath, &new_inh)
+            shdeps_copy_paths(&cur.inherited, &new_inh)
+            try shdeps_check_dir_limit(new_inh.n)
         } else {
-            shdeps_copy_paths(cur_inh, nih)
+            shdeps_copy_paths(&cur.inherited, &new_inh)
         }
 
         // Effective search path: explicit (-rpath-link) ++ (runpath | new_inherited)
         search Vec[Bytes] = {}
-        sh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&search)
-        shdeps_copy_paths(eh, sh)
+        shdeps_copy_paths(&explicit, &search)
         if lib.runpath.n != SH_NONE {
-            try shdeps_paths(false, origin, lib.runpath, sh)
+            try shdeps_paths(false, origin, lib.runpath, &search)
         } else {
-            shdeps_copy_paths(nih, sh)
+            shdeps_copy_paths(&new_inh, &search)
         }
-        try shdeps_check_dir_limit(sh.n)
+        try shdeps_check_dir_limit(search.n)
 
-        deps handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&lib.dependencies)
-        for di u64 in 0..deps.n {
-            name Bytes = vec_get[Bytes](deps, di)
+        for di u64 in 0..lib.dependencies.n {
+            name Bytes = vec_get[Bytes](&lib.dependencies, di)
             edge_count += 1
             if edge_count > 65536 { try die_c(c"transitive dependency count exceeds 65536") }
             expanded Bytes = if !path_is_relative(name) { try root_target(name) } else { try shdeps_expand(origin, name) }
 
-            dep_addr addr = map_get(kh, expanded) catch null
-            if dep_addr == null {
+            dep handle[ShLib] = map_get(kh, expanded) catch null
+            if dep == null {
                 found_path Bytes = bytes(null, SH_NONE)
                 has_slash bool = bytes_contains(expanded, 47)
                 if has_slash {
                     if try shdeps_probe(&probes, expanded) { found_path = expanded }
                 } else {
-                    for si u64 in 0..sh.n {
-                        dir Bytes = vec_get[Bytes](sh, si)
+                    for si u64 in 0..search.n {
+                        dir Bytes = vec_get[Bytes](&search, si)
                         cb Buf = {}
-                        cbh handle[Buf] = handle_from_addr[Buf](&cb)
-                        path_concat(cbh, dir, expanded)
-                        cand Bytes = nul_dup(cbh.p, cbh.n)
-                        buf_free(cbh)
+                        path_concat(&cb, dir, expanded)
+                        cand Bytes = nul_dup(cb.p, cb.n)
+                        buf_free(&cb)
                         if try shdeps_probe(&probes, cand) {
                             found_path = cand
                             break
@@ -378,40 +360,39 @@ fn shdeps_load_with[READ fn(Bytes) Bytes fails](out handle[ShDeps], direct addr,
                 data Bytes = try READ(found_path)
                 pt PhaseStart = {}
                 phase_begin(PH_PARSE_DEPENDENCY, &pt)
-                sp addr = heap_alloc_zeroed(sizeof[ShLib])
-                s handle[ShLib] = handle_from_addr[ShLib](sp)
+                s handle[ShLib] = handle_from_addr(heap_alloc_zeroed(sizeof[ShLib]))
                 shared_parse(s, found_path, data) catch {
                     phase_end(PH_PARSE_DEPENDENCY, &pt)
-                    try die_buf(handle_from_addr[Buf](&s.msg))
+                    try die_buf(&s.msg)
                 }
                 phase_end(PH_PARSE_DEPENDENCY, &pt)
-                vec_push[addr](owned_out, sp)
+                vec_push[handle[ShLib]](&out.owned, s)
 
                 // Basename lookup reuses the first SONAME identity. Explicit
                 // expanded paths can load distinct DSOs with the same SONAME.
-                existing addr = map_get(kh, s.needed) catch null
+                existing handle[ShLib] = map_get(kh, s.needed) catch null
                 if existing != null && !has_slash {
-                    dep_addr = existing
+                    dep = existing
                 } else if existing != null {
-                    dep_addr = sp
+                    dep = s
                 } else {
-                    map_put(kh, s.needed, sp)
-                    dep_addr = sp
+                    map_put(kh, s.needed, s)
+                    dep = s
                 }
-                map_put(kh, expanded, dep_addr)
+                map_put(kh, expanded, dep)
                 stat_add(ST_TRANSITIVE_SHARED_LIBRARIES, 1)
             }
 
-            shdeps_put_edge(out, lib.path, name, dep_addr)
-            // Enqueue (dependency, new_inherited). Note: qh may reallocate,
-            // which is safe because we no longer use `cur` after this loop's
-            // `cur_inh` copy above.
-            ne handle[ShPending] = vec_new[ShPending](qh)
-            ne.lib = dep_addr
-            shdeps_copy_paths(nih, handle_from_addr[Vec[Bytes]](&ne.inherited))
+            shdeps_put_edge(out, lib.path, name, dep)
+            // Enqueue (dependency, new_inherited). Note: pending may reallocate,
+            // which is safe because we no longer use `cur` after the
+            // `cur.inherited` copy above.
+            ne handle[ShPending] = vec_add[ShPending](&pending)
+            ne.lib = dep
+            shdeps_copy_paths(&new_inh, &ne.inherited)
         }
-        vec_free[Bytes](sh)
-        vec_free[Bytes](nih)
+        vec_free[Bytes](&search)
+        vec_free[Bytes](&new_inh)
     }
 }
 
@@ -425,12 +406,12 @@ fn shdeps_add_provider(pv handle[Vec[ShProvider]], kx handle[KeyIndex], name Byt
     h u64 = sh_sym_hash(name, version)
     id u32 = kx_first(kx, h)
     while id != NONE {
-        p handle[ShProvider] = vec_ref[ShProvider](pv, zext[u64](id))
+        p handle[ShProvider] = vec_at(pv, zext[u64](id))
         if sh_sym_eq(p.name, p.version, name, version) { return }
         id = kx_next(kx, id)
     }
     new_id u32 = trunc[u32](pv.n)
-    p handle[ShProvider] = vec_new[ShProvider](pv)
+    p handle[ShProvider] = vec_add(pv)
     p.name = name
     p.version = version
     p.kind = kind
@@ -441,7 +422,7 @@ fn shdeps_find_provider(pv handle[Vec[ShProvider]], kx handle[KeyIndex], name By
     h u64 = sh_sym_hash(name, version)
     id u32 = kx_first(kx, h)
     while id != NONE {
-        p handle[ShProvider] = vec_ref[ShProvider](pv, zext[u64](id))
+        p handle[ShProvider] = vec_at(pv, zext[u64](id))
         if sh_sym_eq(p.name, p.version, name, version) { return zext[i32](p.kind) }
         id = kx_next(kx, id)
     }
@@ -452,12 +433,12 @@ fn shdeps_add_defver(dv handle[Vec[ShDefVer]], kx handle[KeyIndex], path Bytes, 
     h u64 = shdeps_pair_hash(path, version)
     id u32 = kx_first(kx, h)
     while id != NONE {
-        v handle[ShDefVer] = vec_ref[ShDefVer](dv, zext[u64](id))
+        v handle[ShDefVer] = vec_at(dv, zext[u64](id))
         if bytes_eq(v.path, path) && bytes_eq(v.version, version) { return }
         id = kx_next(kx, id)
     }
     new_id u32 = trunc[u32](dv.n)
-    v handle[ShDefVer] = vec_new[ShDefVer](dv)
+    v handle[ShDefVer] = vec_add(dv)
     v.path = path
     v.version = version
     kx_add(kx, h, new_id)
@@ -467,7 +448,7 @@ fn shdeps_has_defver(dv handle[Vec[ShDefVer]], kx handle[KeyIndex], path Bytes, 
     h u64 = shdeps_pair_hash(path, version)
     id u32 = kx_first(kx, h)
     while id != NONE {
-        v handle[ShDefVer] = vec_ref[ShDefVer](dv, zext[u64](id))
+        v handle[ShDefVer] = vec_at(dv, zext[u64](id))
         if bytes_eq(v.path, path) && bytes_eq(v.version, version) { return true }
         id = kx_next(kx, id)
     }
@@ -478,54 +459,46 @@ fn shdeps_has_defver(dv handle[Vec[ShDefVer]], kx handle[KeyIndex], path Bytes, 
 // loaded dependency graph. `DEFINED(name, version)` returns the output-defined
 // symbol's ELF type (`0..255`), or `-1` if not defined by the output.
 fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void fails {
-    libs handle[Vec[addr]] = handle_from_addr[Vec[addr]](&graph.libraries)
-    if libs.n == 0 { return }
+    if graph.libraries.n == 0 { return }
 
     providers Vec[ShProvider] = {}
-    pv handle[Vec[ShProvider]] = handle_from_addr[Vec[ShProvider]](&providers)
     prov_kx KeyIndex = {}
-    pkx handle[KeyIndex] = handle_from_addr[KeyIndex](&prov_kx)
     defer {
-        vec_free[ShProvider](pv)
-        kx_free(pkx)
+        vec_free[ShProvider](&providers)
+        kx_free(&prov_kx)
     }
 
     defvers Vec[ShDefVer] = {}
-    dv handle[Vec[ShDefVer]] = handle_from_addr[Vec[ShDefVer]](&defvers)
     ver_kx KeyIndex = {}
-    vkx handle[KeyIndex] = handle_from_addr[KeyIndex](&ver_kx)
     defer {
-        vec_free[ShDefVer](dv)
-        kx_free(vkx)
+        vec_free[ShDefVer](&defvers)
+        kx_free(&ver_kx)
     }
 
     none_ver Bytes = bytes(null, SH_NONE)
-    for li u64 in 0..libs.n {
+    for li u64 in 0..graph.libraries.n {
         lib handle[ShLib] = shdeps_lib(graph, li)
-        dvs handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&lib.defined_versions)
-        for vi u64 in 0..dvs.n {
-            shdeps_add_defver(dv, vkx, lib.path, vec_get[Bytes](dvs, vi))
+        for vi u64 in 0..lib.defined_versions.n {
+            shdeps_add_defver(&defvers, &ver_kx, lib.path, vec_get[Bytes](&lib.defined_versions, vi))
         }
-        exps handle[Vec[ShExport]] = handle_from_addr[Vec[ShExport]](&lib.exports)
-        for ei u64 in 0..exps.n {
-            ex handle[ShExport] = vec_ref[ShExport](exps, ei)
+        for ei u64 in 0..lib.exports.n {
+            ex handle[ShExport] = vec_at[ShExport](&lib.exports, ei)
             if ex.is_default {
-                shdeps_add_provider(pv, pkx, ex.name, none_ver, ex.kind)
+                shdeps_add_provider(&providers, &prov_kx, ex.name, none_ver, ex.kind)
             }
             if ex.version.n != SH_NONE {
-                shdeps_add_provider(pv, pkx, ex.name, ex.version, ex.kind)
+                shdeps_add_provider(&providers, &prov_kx, ex.name, ex.version, ex.kind)
             }
         }
     }
 
-    for li u64 in 0..libs.n {
+    for li u64 in 0..graph.libraries.n {
         lib handle[ShLib] = shdeps_lib(graph, li)
-        vreqs handle[Vec[ShVerReq]] = handle_from_addr[Vec[ShVerReq]](&lib.version_requirements)
-        for ri u64 in 0..vreqs.n {
-            req handle[ShVerReq] = vec_ref[ShVerReq](vreqs, ri)
+        for ri u64 in 0..lib.version_requirements.n {
+            req handle[ShVerReq] = vec_at[ShVerReq](&lib.version_requirements, ri)
             if !req.weak {
                 prov handle[ShLib] = shdeps_find_edge(graph, lib.path, req.provider)
-                if prov == null || !shdeps_has_defver(dv, vkx, prov.path, req.version) {
+                if prov == null || !shdeps_has_defver(&defvers, &ver_kx, prov.path, req.version) {
                     m handle[Buf] = msg()
                     bb(m, lib.path)
                     bs(m, c": required version ")
@@ -536,13 +509,12 @@ fn shdeps_validate[DEFINED fn(Bytes, Bytes) i32](graph handle[ShDeps]) void fail
                 }
             }
         }
-        refs handle[Vec[ShRef]] = handle_from_addr[Vec[ShRef]](&lib.references)
-        for ri u64 in 0..refs.n {
-            rf handle[ShRef] = vec_ref[ShRef](refs, ri)
+        for ri u64 in 0..lib.references.n {
+            rf handle[ShRef] = vec_at[ShRef](&lib.references, ri)
             if rf.undefined && rf.binding == 1 {
                 kind i32 = DEFINED(rf.name, rf.version)
                 if kind < 0 {
-                    kind = shdeps_find_provider(pv, pkx, rf.name, rf.version)
+                    kind = shdeps_find_provider(&providers, &prov_kx, rf.name, rf.version)
                 }
                 if kind < 0 {
                     m handle[Buf] = msg()

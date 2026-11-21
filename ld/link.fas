@@ -94,7 +94,7 @@ var got_file u64 = NONE64
 var got_slots Vec[u64] = {}    // (file, symbol) packed
 var got_model Vec[u8] = {}     // per slot: its Got.model (GM_*)
 // Got.canonical_ifuncs: IFUNC definitions whose address is taken by PC32
-var got_canonical Map[u64, u32, u64_hash, u64_eq] = {}
+var got_canonical U64Map = {}
 
 const GM_ADDRESS u8 = 0
 const GM_THREAD u8 = 1              // Thread_offset
@@ -116,11 +116,9 @@ fn base_relocation(kind u32) bool { return kind == 26 || kind == 29 }
 fn dyn_imported(name Bytes) bool { return imps.n != 0 && import_id(name) != NONE }
 
 fn got_prepare(static_ifunc bool) void fails {
-    canon handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&got_canonical)
-    models handle[Vec[u8]] = handle_from_addr[Vec[u8]](&got_model)
-    indices Map[u64, u32, u64_hash, u64_eq] = {}
-    ih handle[Map[u64, u32, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u32, u64_hash, u64_eq]](&indices)
-    slots handle[Vec[u64]] = handle_from_addr[Vec[u64]](&got_slots)
+    canon handle[U64Map] = &got_canonical
+    indices U64Map = {}
+    ih handle[U64Map] = &indices
     needs_base bool = false
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
@@ -171,19 +169,19 @@ fn got_prepare(static_ifunc bool) void fails {
             a addr = map_val_addr(ih, key)
             slot u32 = 0
             if a == null {
-                slot = trunc[u32](slots.n)
+                slot = trunc[u32](got_slots.n)
                 map_put(ih, key, slot)
-                vec_push[u64](slots, pk(f, si))
-                vec_push[u8](models, model)
+                vec_push[u64](&got_slots, pk(f, si))
+                vec_push[u8](&got_model, model)
                 if r.kind == 19 || r.kind == 20 || r.kind == 34 {
-                    vec_push[u64](slots, pk(f, si))
+                    vec_push[u64](&got_slots, pk(f, si))
                     second u8 = GM_LOCAL_OFFSET
                     if r.kind == 19 {
                         second = GM_DYNAMIC_OFFSET
                     } else if r.kind == 34 {
                         second = GM_DESCRIPTOR_ARGUMENT
                     }
-                    vec_push[u8](models, second)
+                    vec_push[u8](&got_model, second)
                 }
             } else {
                 slot = a[u32]
@@ -196,11 +194,11 @@ fn got_prepare(static_ifunc bool) void fails {
         id u32 = find(bytes_c(c"_GLOBAL_OFFSET_TABLE_"))
         if id != NONE && gsym(id).has_res != 0 && zext[u64](gsym(id).res_file) == predefined_file { needs_base = true }
     }
-    if slots.n == 0 && !needs_base { return }
-    size u64 = slots.n * 8
+    if got_slots.n == 0 && !needs_base { return }
+    size u64 = got_slots.n * 8
     file u64 = nobj
     o handle[Obj] = try new_object(c"<GOT>")
-    stat_add(ST_GOT_ENTRIES, slots.n)
+    stat_add(ST_GOT_ENTRIES, got_slots.n)
     o.nsec = 2
     o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
     n0 handle[Sec] = sec(o, 0)
@@ -247,9 +245,7 @@ fn merge_same(o_file u64, s handle[Sec], x u64) bool {
 
 fn merge_plan() void {
     index KeyIndex = {}
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&index)
     canonical Vec[u64] = {}
-    ch handle[Vec[u64]] = handle_from_addr[Vec[u64]](&canonical)
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         n u64 = zext[u64](o.nsec)
@@ -265,21 +261,21 @@ fn merge_plan() void {
                 continue
             }
             hash u64 = merge_hash(f, s)
-            id u32 = kx_first(kx, hash)
-            while id != NONE && !merge_same(f, s, ch.p[u64, zext[u64](id)]) { id = kx_next(kx, id) }
+            id u32 = kx_first(&index, hash)
+            while id != NONE && !merge_same(f, s, canonical.p[u64, zext[u64](id)]) { id = kx_next(&index, id) }
             if id == NONE {
-                kx_add(kx, hash, trunc[u32](ch.n))
-                vec_push[u64](ch, pk(f, k))
+                kx_add(&index, hash, trunc[u32](canonical.n))
+                vec_push[u64](&canonical, pk(f, k))
             } else {
-                lx(f).alias[u64, k] = ch.p[u64, zext[u64](id)] + 1
+                lx(f).alias[u64, k] = canonical.p[u64, zext[u64](id)] + 1
                 stat_add(ST_MERGED_SECTIONS, 1)
                 stat_add(ST_MERGED_BYTES, s.size)
             }
         }
         heap_free(relocated)
     }
-    kx_free(kx)
-    vec_free[u64](ch)
+    kx_free(&index)
+    vec_free[u64](&canonical)
 }
 
 // ---------- symbol values ----------
@@ -322,7 +318,7 @@ struct Values {
 
 var values addr = null   // Values per object
 
-fn vals(f u64) handle[Values] { return handle_from_addr[Values](values + f * sizeof[Values]) }
+fn vals(f u64) handle[Values] { return handle_from_addr(values + f * sizeof[Values]) }
 
 fn values_job(ctx addr, b u64, e u64, worker u32) void {
     for f u64 in b..e {
@@ -362,7 +358,7 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
 fn seg_ending(text_only bool, memory bool) u64 {
     value u64 = lay_base + PAGE
     for i u64 in 0..segments.n {
-        s handle[Seg] = vec_ref[Seg](handle_from_addr[Vec[Seg]](&segments), i)
+        s handle[Seg] = vec_at[Seg](&segments, i)
         if text_only && (s.flags & 1) == 0 { continue }
         e u64 = lay_base + s.offset + (if memory { s.memory_size } else { s.file_size })
         value = umax(value, e)
@@ -412,11 +408,10 @@ fn predefined_value(n Bytes) u64 {
     last u8 = 0
     section Bytes = boundary(n, &last)
     // the last output header with that name
-    h handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
-    k u64 = h.n
+    k u64 = headers.n
     while k > 0 {
         k -= 1
-        o handle[OutSec] = vec_at[OutSec](h, k)
+        o handle[OutSec] = vec_at[OutSec](&headers, k)
         if bytes_eq(o.name, section) {
             return o.address + (if last != 0 { o.size } else { 0 })
         }
@@ -497,7 +492,7 @@ var image_size u64 = 0
 // the caller reports the lowest object's.
 fn relocate_object(f u64) bool {
     o handle[Obj] = obj(f)
-    m handle[Buf] = handle_from_addr[Buf](&o.msg)
+    m handle[Buf] = &o.msg
     vv handle[Values] = vals(f)
     got_address u64 = if got_file != NONE64 { place(got_file, 1).address } else { 0 }
     for k u64 in 0..zext[u64](o.nrel) {
@@ -711,12 +706,11 @@ fn shdeps_find_def(name Bytes) i32 {
 fn shdeps_defined_cb(name Bytes, version Bytes) i32 {
     if version.n == SH_NONE { return shdeps_find_def(name) }
     b Buf = {}
-    bh handle[Buf] = handle_from_addr[Buf](&b)
-    bb(bh, name)
-    buf_u8(bh, 64)
-    bb(bh, version)
-    k i32 = shdeps_find_def(buf_bytes(bh))
-    buf_free(bh)
+    bb(&b, name)
+    buf_u8(&b, 64)
+    bb(&b, version)
+    k i32 = shdeps_find_def(buf_bytes(&b))
+    buf_free(&b)
     if k >= 0 { return k }
     id u32 = find(name)
     if id != NONE {
@@ -733,7 +727,7 @@ fn build_image() void fails {
     tls_prepare()
     symver_plan()
     try shared_output_prepare()
-    try shdeps_validate[shdeps_defined_cb](handle_from_addr[ShDeps](&shdeps_graph))
+    try shdeps_validate[shdeps_defined_cb](&shdeps_graph)
     ut PhaseStart = {}
     phase_begin(PH_UNWIND, &ut)
     try unwind_normalize()
@@ -786,15 +780,13 @@ fn build_image() void fails {
 
     // the symbol table: live canonical symbols, locals first
     strtab Buf = {}
-    st handle[Buf] = handle_from_addr[Buf](&strtab)
-    buf_u8(st, 0)
+    buf_u8(&strtab, 0)
     shstrtab Buf = {}
-    sh handle[Buf] = handle_from_addr[Buf](&shstrtab)
-    buf_u8(sh, 0)
+    buf_u8(&shstrtab, 0)
     locals Vec[SymOut] = {}
-    lh handle[Vec[SymOut]] = handle_from_addr[Vec[SymOut]](&locals)
+    lh handle[Vec[SymOut]] = &locals
     globals Vec[SymOut] = {}
-    gh handle[Vec[SymOut]] = handle_from_addr[Vec[SymOut]](&globals)
+    gh handle[Vec[SymOut]] = &globals
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         for i u64 in 1..zext[u64](o.nsym) {
@@ -804,8 +796,8 @@ fn build_image() void fails {
                 g handle[GSym] = gsym(gid_of(f, i))
                 if g.has_res == 0 || zext[u64](g.res_file) != f || zext[u64](g.res_sym) != i { continue }
             }
-            name u32 = try add_string(st, y.name)
-            e handle[SymOut] = vec_new[SymOut](if y.binding == 0 { lh } else { gh })
+            name u32 = try add_string(&strtab, y.name)
+            e handle[SymOut] = vec_add[SymOut](if y.binding == 0 { lh } else { gh })
             e.file = trunc[u32](f)
             e.name = name
             e.sym = i
@@ -813,26 +805,25 @@ fn build_image() void fails {
     }
     symbol_count u64 = lh.n + gh.n + 1
     symtab_size u64 = try chk_add(c"output symbol count", MAX_OUTPUT / 24, 0, symbol_count) * 24
-    hv handle[Vec[OutSec]] = handle_from_addr[Vec[OutSec]](&headers)
-    content_count u64 = hv.n
+    content_count u64 = headers.n
     name_offsets addr = heap_alloc(content_count * 4 + 4)
     for k u64 in 0..content_count {
-        name_offsets[u32, k] = try add_string(sh, vec_at[OutSec](hv, k).name)
+        name_offsets[u32, k] = try add_string(&shstrtab, vec_at[OutSec](&headers, k).name)
     }
-    symtab_name u64 = zext[u64](try add_string(sh, bytes_c(c".symtab")))
-    strtab_name u64 = zext[u64](try add_string(sh, bytes_c(c".strtab")))
-    shstrtab_name u64 = zext[u64](try add_string(sh, bytes_c(c".shstrtab")))
+    symtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".symtab")))
+    strtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".strtab")))
+    shstrtab_name u64 = zext[u64](try add_string(&shstrtab, bytes_c(c".shstrtab")))
     symtab_offset u64 = try out_align(lay_cursor, 8)
     strtab_offset u64 = try out_add(symtab_offset, symtab_size)
-    shstrtab_offset u64 = try out_add(strtab_offset, st.n)
-    shoff u64 = try out_align(try out_add(shstrtab_offset, sh.n), 8)
+    shstrtab_offset u64 = try out_add(strtab_offset, strtab.n)
+    shoff u64 = try out_align(try out_add(shstrtab_offset, shstrtab.n), 8)
     section_count u64 = content_count + 4
     size u64 = try out_add(shoff, section_count * 64)
     image_size = size
     image = heap_alloc_zeroed(size + 8)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at[OutSec](hv, k)
+        s handle[OutSec] = vec_at[OutSec](&headers, k)
         if (s.flags & 4) != 0 && (bytes_is(s.name, c".init") || bytes_is(s.name, c".fini")) {
             mem_set(image + s.offset, 144, s.size)
         }
@@ -885,7 +876,7 @@ fn build_image() void fails {
     phase_begin(PH_RELOCATE, &rt)
     pool_for(pool, nobj, 1, &relocate_job, null)
     for f u64 in 0..nobj {
-        if lx(f).status != 0 { try die_buf(handle_from_addr[Buf](&obj(f).msg)) }
+        if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
     phase_end(PH_RELOCATE, &rt)
     try unwind_emit()
@@ -893,7 +884,8 @@ fn build_image() void fails {
     try dyn_emit()
 
     // the ELF header
-    mem_copy(image, c"\x7fELF\x02\x01\x01", 7)
+    ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
+    mem_copy(image, &ident, 7)
     wr16(image, 16, if c.pie || c.mode == MODE_SHARED { 3 } else { 2 })
     wr16(image, 18, 62)
     wr32(image, 20, 1)
@@ -902,8 +894,7 @@ fn build_image() void fails {
     wr64(image, 40, shoff)
     wr16(image, 52, 64)
     wr16(image, 54, 56)
-    sv handle[Vec[Seg]] = handle_from_addr[Vec[Seg]](&segments)
-    phnum u64 = sv.n + 2
+    phnum u64 = segments.n + 2
     if unwind_file != NONE64 { phnum += 1 }
     if property_file != NONE64 { phnum += 2 }
     if tls_seg.alignment != 0 { phnum += 1 }
@@ -935,11 +926,11 @@ fn build_image() void fails {
         }
     }
     program_header(prefix, 1, 4, 0, lay_base, header_size, header_size, PAGE)
-    for i u64 in 0..sv.n {
-        s handle[Seg] = vec_ref[Seg](sv, i)
+    for i u64 in 0..segments.n {
+        s handle[Seg] = vec_at[Seg](&segments, i)
         program_header(prefix + i + 1, 1, s.flags, s.offset, lay_base + s.offset, s.file_size, s.memory_size, s.alignment)
     }
-    extra_header u64 = prefix + sv.n + 1
+    extra_header u64 = prefix + segments.n + 1
     if has_relro_seg {
         program_header(extra_header, 0x6474e552, 4, relro_seg.offset, lay_base + relro_seg.offset, relro_seg.file_size,
             relro_seg.memory_size, 1)
@@ -979,7 +970,7 @@ fn build_image() void fails {
 
     // symbols
     for j u64 in 0..lh.n + gh.n {
-        e handle[SymOut] = if j < lh.n { vec_ref[SymOut](lh, j) } else { vec_ref[SymOut](gh, j - lh.n) }
+        e handle[SymOut] = if j < lh.n { vec_at(lh, j) } else { vec_at(gh, j - lh.n) }
         f u64 = zext[u64](e.file)
         y handle[Sym] = sym(obj(f), e.sym)
         at u64 = symtab_offset + (j + 1) * 24
@@ -993,11 +984,11 @@ fn build_image() void fails {
         wr64(image, at + 8, sym_address(f, y))
         wr64(image, at + 16, y.size)
     }
-    mem_copy(image + strtab_offset, st.p, st.n)
-    mem_copy(image + shstrtab_offset, sh.p, sh.n)
+    mem_copy(image + strtab_offset, strtab.p, strtab.n)
+    mem_copy(image + shstrtab_offset, shstrtab.p, shstrtab.n)
 
     for k u64 in 0..content_count {
-        s handle[OutSec] = vec_at[OutSec](hv, k)
+        s handle[OutSec] = vec_at[OutSec](&headers, k)
         link u64 = 0
         info u64 = 0
         if !dyn_metadata(k + 1, &link, &info) {
@@ -1009,8 +1000,8 @@ fn build_image() void fails {
     }
     section_header(shoff + (content_count + 1) * 64, symtab_name, 2, 0, 0, symtab_offset, symtab_size,
         content_count + 2, lh.n + 1, 8, 24)
-    section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, st.n, 0, 0, 1, 0)
-    section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, sh.n, 0, 0, 1, 0)
+    section_header(shoff + (content_count + 2) * 64, strtab_name, 3, 0, 0, strtab_offset, strtab.n, 0, 0, 1, 0)
+    section_header(shoff + (content_count + 3) * 64, shstrtab_name, 3, 0, 0, shstrtab_offset, shstrtab.n, 0, 0, 1, 0)
     if c.has_map { try map_build(entry, lh, gh) }
     stat_add(ST_OUTPUT_BYTES, image_size)
 }
@@ -1025,9 +1016,8 @@ fn stat_or_die(path Bytes, st handle[Stat]) void fails {
 fn null_output(path Bytes, st handle[Stat]) bool fails {
     if (st.mode & S_IFMT) != 0x2000 { return false }
     real Buf = {}
-    rh handle[Buf] = handle_from_addr[Buf](&real)
-    path_realpath(path.p, rh) catch e { try die_io(c"realpath", path, e) }
-    return bytes_is(buf_bytes(rh), c"/dev/null")
+    path_realpath(path.p, &real) catch e { try die_io(c"realpath", path, e) }
+    return bytes_is(buf_bytes(&real), c"/dev/null")
 }
 
 // File_io.check_output; inputs in the order they are checked. Returns
@@ -1047,7 +1037,7 @@ fn check_output(output Bytes, inputs handle[Vec[Bytes]], reverse bool, out_st ha
         path Bytes = vec_get[Bytes](inputs, if reverse { inputs.n - 1 - j } else { j })
         if ld_vfs_has(path) { continue }
         st Stat = {}
-        try stat_or_die(path, handle_from_addr[Stat](&st))
+        try stat_or_die(path, &st)
         if st.dev == out_st.dev && st.ino == out_st.ino {
             m handle[Buf] = msg()
             bb(m, output)
@@ -1064,17 +1054,15 @@ fn link_and_publish() void fails {
     output Bytes = c.output
     in_mem bool = ld_vfs_in_memory()
     paths Vec[Bytes] = {}
-    ph handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&paths)
-    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
-    for k u64 in 0..items.n {
-        it handle[Item] = vec_ref[Item](items, k)
-        if it.kind == IT_PATH { vec_push[Bytes](ph, it.text) }
+    for k u64 in 0..c.items.n {
+        it handle[Item] = vec_at[Item](&c.items, k)
+        if it.kind == IT_PATH { vec_push[Bytes](&paths, it.text) }
     }
     // the version script is a metadata input: checked after the inputs,
     // and first in the expanded list
     if c.has_version_script {
-        vec_push[Bytes](ph, c.version_script)
-        vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), c.version_script)
+        vec_push[Bytes](&paths, c.version_script)
+        vec_push[Bytes](&expanded, c.version_script)
     }
     discard bool = false
     if !in_mem {
@@ -1083,29 +1071,27 @@ fn link_and_publish() void fails {
         if c.has_map {
             try distinct_outputs(output, c.map_file)
             ms Stat = {}
-            try check_output(c.map_file, ph, false, handle_from_addr[Stat](&ms))
+            try check_output(c.map_file, &paths, false, &ms)
         }
         st Stat = {}
-        sth handle[Stat] = handle_from_addr[Stat](&st)
-        exists bool = try check_output(output, ph, false, sth)
-        discard = exists && try null_output(output, sth)
+        exists bool = try check_output(output, &paths, false, &st)
+        discard = exists && try null_output(output, &st)
     }
-    vec_free[Bytes](ph)
+    vec_free[Bytes](&paths)
     try resolve()
     try build_image()
     try build_id_emit()
     phase_end(PH_EMIT, &emit_start)
     if in_mem {
-        ld_capture_output(image, image_size, c.has_map, buf_bytes(handle_from_addr[Buf](&map_text)))
+        ld_capture_output(image, image_size, c.has_map, buf_bytes(&map_text))
         return
     }
     st2 Stat = {}
-    try check_output(output, handle_from_addr[Vec[Bytes]](&expanded), true, handle_from_addr[Stat](&st2))
+    try check_output(output, &expanded, true, &st2)
     if c.has_map {
         ms2 Stat = {}
-        msh handle[Stat] = handle_from_addr[Stat](&ms2)
-        if !(try check_output(c.map_file, handle_from_addr[Vec[Bytes]](&expanded), true, msh) && try null_output(c.map_file, msh)) {
-            file_write_atomic(c.map_file.p, buf_bytes(handle_from_addr[Buf](&map_text)), 0o644) catch e {
+        if !(try check_output(c.map_file, &expanded, true, &ms2) && try null_output(c.map_file, &ms2)) {
+            file_write_atomic(c.map_file.p, buf_bytes(&map_text), 0o644) catch e {
                 try die_io(c"write", c.map_file, e)
             }
         }

@@ -10,11 +10,11 @@ struct CopyEntry {
 }
 
 var copy_entries Vec[CopyEntry] = {}
-var copy_names Map[u32, u8, u32_hash, u32_eq] = {}
+var copy_names U32Set = {}
 
 fn copy_has(id u32) bool {
     if copy_entries.n == 0 { return false }
-    h handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](&copy_names)
+    h handle[U32Set] = &copy_names
     return map_has(h, id)
 }
 
@@ -87,9 +87,9 @@ fn copy_compute_overlaps(source handle[ShLib]) addr {
 fn copy_prepare() void fails {
     c handle[Config] = config()
     if c.mode != MODE_DYNAMIC { return }
-    cn handle[Map[u32, u8, u32_hash, u32_eq]] = handle_from_addr[Map[u32, u8, u32_hash, u32_eq]](&copy_names)
+    cn handle[U32Set] = &copy_names
     req Vec[u32] = {}
-    rh handle[Vec[u32]] = handle_from_addr[Vec[u32]](&req)
+    rh handle[Vec[u32]] = &req
     for f u64 in 0..nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nrel) {
@@ -125,8 +125,8 @@ fn copy_prepare() void fails {
     // Per-library lazy overlap bitmaps
     ov_cache addr = heap_alloc_zeroed(shlibs.n * sizeof[addr] + 8)
     // Duplicate-identity check across copied symbols: (library << 32 | loc_idx)
-    identities Map[u64, u8, u64_hash, u64_eq] = {}
-    idh handle[Map[u64, u8, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u8, u64_hash, u64_eq]](&identities)
+    identities U64Set = {}
+    idh handle[U64Set] = &identities
 
     file u64 = nobj
     count u64 = rh.n
@@ -147,9 +147,8 @@ fn copy_prepare() void fails {
     l.alias = heap_alloc_zeroed((count + 1) * 8 + 8)
 
     data Buf = {}
-    dh handle[Buf] = handle_from_addr[Buf](&data)
+    dh handle[Buf] = &data
     allocated u64 = 0
-    ce handle[Vec[CopyEntry]] = handle_from_addr[Vec[CopyEntry]](&copy_entries)
 
     for i u64 in 0..count {
         id u32 = vec_get[u32](rh, i)
@@ -215,7 +214,7 @@ fn copy_prepare() void fails {
         set_res(id, file, sec_idx, 0)
         shref_add(key)
 
-        ent handle[CopyEntry] = vec_new[CopyEntry](ce)
+        ent handle[CopyEntry] = vec_add[CopyEntry](&copy_entries)
         ent.key_id = id
         ent.file = trunc[u32](file)
         ent.symbol = trunc[u32](sec_idx)

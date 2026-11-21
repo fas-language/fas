@@ -36,7 +36,7 @@ fn symver_default(name Bytes, at u64) bool { return at + 1 < name.n && name.p[u8
 // the symbol behind index i: the object's own symbols, then the aliases
 fn symver_sym(o handle[Obj], extra handle[Vec[Sym]], i u64) handle[Sym] {
     if i < zext[u64](o.nsym) { return sym(o, i) }
-    return vec_at[Sym](extra, i - zext[u64](o.nsym))
+    return vec_at(extra, i - zext[u64](o.nsym))
 }
 
 // finds the latest definition named `name`, or NONE
@@ -77,10 +77,9 @@ fn symver_alias(o handle[Obj], extra handle[Vec[Sym]], kx handle[KeyIndex], ids 
         if old.section == s.section && old.value == s.value && old.kind == s.kind { return }
         try symver_fail(o, c"conflicting default symbol version ", name)
     }
-    a addr = vec_push_zeroed[Sym](extra)
+    alias handle[Sym] = vec_add(extra)
     // s may move when extra grows: copy from its current address
-    mem_copy(a, handle_addr(symver_sym(o, extra, i)), sizeof[Sym])
-    alias handle[Sym] = handle_from_addr[Sym](a)
+    copy_into(alias, symver_sym(o, extra, i))
     alias.name = name
     symver_define(o, extra, kx, ids, name, zext[u64](o.nsym) + extra.n - 1)
 }
@@ -97,29 +96,25 @@ fn symver_expand(o handle[Obj]) void fails {
     }
     if !versioned { return }
     extra Vec[Sym] = {}
-    xh handle[Vec[Sym]] = handle_from_addr[Vec[Sym]](&extra)
     ids Vec[u32] = {}
-    ih handle[Vec[u32]] = handle_from_addr[Vec[u32]](&ids)
     index KeyIndex = {}
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&index)
     for k u64 in 0..n {
         y handle[Sym] = sym(o, k)
-        if y.binding != 0 && y.section != 0 { symver_define(o, xh, kx, ih, y.name, k) }
+        if y.binding != 0 && y.section != 0 { symver_define(o, &extra, &index, &ids, y.name, k) }
     }
-    m handle[Buf] = handle_from_addr[Buf](&o.msg)
     for k u64 in 0..n {
         y handle[Sym] = sym(o, k)
         if y.binding == 0 { continue }
-        at u64 = try symver_at(y.name, m)
+        at u64 = try symver_at(y.name, &o.msg)
         if at == NONE64 || !symver_default(y.name, at) { continue }
         if y.section == 0 { try symver_fail(o, c"undefined default symbol version ", y.name) }
         // aliases: name, then name@VER (the name without one of the two @)
-        try symver_alias(o, xh, kx, ih, k, bytes(y.name.p, at))
+        try symver_alias(o, &extra, &index, &ids, k, bytes(y.name.p, at))
         nv u64 = y.name.n - 1
         p addr = heap_alloc(nv)
         mem_copy(p, y.name.p, at + 1)
         mem_copy(p + at + 1, y.name.p + at + 2, y.name.n - at - 2)
-        try symver_alias(o, xh, kx, ih, k, bytes(p, nv))
+        try symver_alias(o, &extra, &index, &ids, k, bytes(p, nv))
     }
     if extra.n != 0 {
         total u64 = n + extra.n
@@ -129,9 +124,9 @@ fn symver_expand(o handle[Obj]) void fails {
         o.syms = s
         o.nsym = trunc[u32](total)
     }
-    vec_free[Sym](xh)
-    vec_free[u32](ih)
-    kx_free(kx)
+    vec_free[Sym](&extra)
+    vec_free[u32](&ids)
+    kx_free(&index)
 }
 
 // Shared_output.prepare: a versioned definition needs a version node,
@@ -147,9 +142,8 @@ fn has_default_at(b Bytes) bool {
 }
 
 fn check_static_versions() void fails {
-    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
     for pass u64 in 0..2 {
-    for i u64 in 0..v.n {
+    for i u64 in 0..gsyms.n {
         g handle[GSym] = gsym(trunc[u32](i))
         if g.has_res != 0 && bytes_contains(g.name, 64) && (pass == 1 || has_default_at(g.name)) {
             m handle[Buf] = msg()
@@ -168,8 +162,8 @@ fn check_static_versions() void fails {
 // the '@' position, or NONE64
 fn sv_at(name Bytes) u64 {
     m Buf = {}
-    at u64 = symver_at(name, handle_from_addr[Buf](&m)) catch NONE64
-    buf_free(handle_from_addr[Buf](&m))
+    at u64 = symver_at(name, &m) catch NONE64
+    buf_free(&m)
     return at
 }
 
@@ -218,9 +212,8 @@ fn shared_output_prepare() void fails {
         try check_static_versions()
         return
     }
-    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
     for pass u64 in 0..3 {
-        for i u64 in 0..v.n {
+        for i u64 in 0..gsyms.n {
             id u32 = trunc[u32](i)
             g handle[GSym] = gsym(id)
             if g.has_res == 0 { continue }
@@ -248,7 +241,7 @@ fn shared_output_prepare() void fails {
         }
     }
     if c.has_version_script {
-        for i u64 in 0..v.n {
+        for i u64 in 0..gsyms.n {
             id u32 = trunc[u32](i)
             g handle[GSym] = gsym(id)
             if g.has_res == 0 { continue }

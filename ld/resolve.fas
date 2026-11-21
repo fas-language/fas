@@ -38,12 +38,12 @@ var lxs addr = null            // Lx * MAX_OBJECTS
 var nobj u64 = 0
 var ninput_objects u64 = 0     // objects from inputs (the rest are synthesized)
 
-fn obj(i u64) handle[Obj] { return handle_from_addr[Obj](objs + i * sizeof[Obj]) }
-fn lx(i u64) handle[Lx] { return handle_from_addr[Lx](lxs + i * sizeof[Lx]) }
+fn obj(i u64) handle[Obj] { return handle_from_addr(objs + i * sizeof[Obj]) }
+fn lx(i u64) handle[Lx] { return handle_from_addr(lxs + i * sizeof[Lx]) }
 
 fn gid_of(f u64, i u64) u32 { return lx(f).gid[u32, i] }
 fn kept(f u64, s u64) bool { return lx(f).kept[u8, s] != 0 }
-fn place(f u64, s u64) handle[Place] { return handle_from_addr[Place](lx(f).place + s * sizeof[Place]) }
+fn place(f u64, s u64) handle[Place] { return handle_from_addr(lx(f).place + s * sizeof[Place]) }
 
 fn new_object(path addr) handle[Obj] fails {
     if nobj >= MAX_OBJECTS { try die_c(c"extracted object count exceeds 65536 limit") }
@@ -98,18 +98,17 @@ struct Imp {
 var imps Vec[Imp] = {}
 
 fn imp(id u32) handle[Imp] {
-    return vec_ref[Imp](handle_from_addr[Vec[Imp]](&imps), zext[u64](gsym(id).imp) - 1)
+    return vec_at[Imp](&imps, zext[u64](gsym(id).imp) - 1)
 }
 
 // Hashtbl.replace imports: the (cleared) import of a global id
 fn imp_put(id u32) handle[Imp] {
     g handle[GSym] = gsym(id)
-    iv handle[Vec[Imp]] = handle_from_addr[Vec[Imp]](&imps)
     if g.imp == 0 {
-        vec_new[Imp](iv)
-        g.imp = trunc[u32](iv.n)
+        vec_add[Imp](&imps)
+        g.imp = trunc[u32](imps.n)
     }
-    mem_set(handle_addr(vec_at[Imp](iv, zext[u64](g.imp) - 1)), 0, sizeof[Imp])
+    mem_set(handle_addr(vec_at[Imp](&imps, zext[u64](g.imp) - 1)), 0, sizeof[Imp])
     p handle[Imp] = imp(id)
     p.version = bytes(null, NONE64)
     p.library = NONE
@@ -124,22 +123,21 @@ fn import_id(name Bytes) u32 {
 }
 
 fn gsym(id u32) handle[GSym] {
-    return vec_at[GSym](handle_from_addr[Vec[GSym]](&gsyms), zext[u64](id))
+    return vec_at[GSym](&gsyms, zext[u64](id))
 }
 
 // the state of `name`, created in first-use order (the OCaml `order`)
 fn get(name Bytes) u32 {
-    id u32 = intern(handle_from_addr[Intern](&names), name)
-    v handle[Vec[GSym]] = handle_from_addr[Vec[GSym]](&gsyms)
-    if zext[u64](id) == v.n {
-        g handle[GSym] = handle_from_addr[GSym](vec_push_zeroed[GSym](v))
+    id u32 = intern(&names, name)
+    if zext[u64](id) == gsyms.n {
+        g handle[GSym] = vec_add[GSym](&gsyms)
         g.name = name
     }
     return id
 }
 
 fn find(name Bytes) u32 {
-    return intern_find(handle_from_addr[Intern](&names), name) catch NONE
+    return intern_find(&names, name) catch NONE
 }
 
 fn visibility_rank(v u8) u8 {
@@ -169,11 +167,9 @@ var parse_seq u64 = 0
 
 fn sh_parse_job_offset(ctx addr, b u64, e u64, worker u32) void {
     base u64 = ctx[u64]
-    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
     for i u64 in base + b..base + e {
-        st handle[StagedSh] = vec_ref[StagedSh](shv, i)
-        lh handle[ShLib] = handle_from_addr[ShLib](&st.lib)
-        shared_parse(lh, lh.path, st.data) catch { st.status = 1 }
+        st handle[StagedSh] = vec_at[StagedSh](&staged_sh, i)
+        shared_parse(&st.lib, st.lib.path, st.data) catch { st.status = 1 }
     }
 }
 
@@ -190,37 +186,36 @@ fn parse_job(ctx addr, b u64, e u64, worker u32) void {
 // Parses every object and shared library read so far; the first failure in
 // input order is the OCaml linker's diagnostic.
 fn parse_flush() void fails {
-    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
-    if parsed == nobj && parsed_sh == shv.n { return }
+    if parsed == nobj && parsed_sh == staged_sh.n { return }
     t PhaseStart = {}
     phase_begin(PH_PARSE, &t)
     if parsed < nobj { pool_for(pool, nobj - parsed, 1, &parse_job_offset, &parsed) }
-    if parsed_sh < shv.n { pool_for(pool, shv.n - parsed_sh, 1, &sh_parse_job_offset, &parsed_sh) }
+    if parsed_sh < staged_sh.n { pool_for(pool, staged_sh.n - parsed_sh, 1, &sh_parse_job_offset, &parsed_sh) }
     phase_end(PH_PARSE, &t)
     oi u64 = parsed
     si u64 = parsed_sh
-    while oi < nobj || si < shv.n {
-        take_obj bool = si == shv.n || (oi < nobj && lx(oi).seq < vec_ref[StagedSh](shv, si).seq)
+    while oi < nobj || si < staged_sh.n {
+        take_obj bool = si == staged_sh.n || (oi < nobj && lx(oi).seq < vec_at[StagedSh](&staged_sh, si).seq)
         if take_obj {
             try decoded_charge(obj(oi))
             st u32 = lx(oi).status
             if st != 0 { stat_restore(lx(oi).snap) }
-            if st == 1 { try die_buf(handle_from_addr[Buf](&obj(oi).msg)) }
+            if st == 1 { try die_buf(&obj(oi).msg) }
             if st == 2 {
-                try refuse(buf_cstr(handle_from_addr[Buf](&obj(oi).msg)))
+                try refuse(buf_cstr(&obj(oi).msg))
             }
             oi += 1
         } else {
-            sh handle[StagedSh] = vec_ref[StagedSh](shv, si)
+            sh handle[StagedSh] = vec_at[StagedSh](&staged_sh, si)
             if sh.status != 0 {
                 stat_restore(sh.snap)
-                try die_buf(handle_from_addr[Buf](&sh.lib.msg))
+                try die_buf(&sh.lib.msg)
             }
             si += 1
         }
     }
     parsed = nobj
-    parsed_sh = shv.n
+    parsed_sh = staged_sh.n
 }
 
 // on_decoded: the decoded debug sizes count against the combined input
@@ -250,10 +245,9 @@ fn input_die() void fails {
     if !reading { try die() }
     // the message is in ld_msg: parse the earlier objects first
     keep Buf = {}
-    k handle[Buf] = handle_from_addr[Buf](&keep)
-    bb(k, buf_bytes(handle_from_addr[Buf](&ld_msg)))
+    bb(&keep, buf_bytes(&ld_msg))
     try parse_flush()
-    try die_buf(k)
+    try die_buf(&keep)
 }
 
 fn input_die_io(call addr, path Bytes, e error) void fails {
@@ -265,7 +259,7 @@ fn input_die_io(call addr, path Bytes, e error) void fails {
 // File_io.read for an input
 fn input_read(path Bytes, max_size u64) Bytes fails {
     vdata Bytes = {}
-    if ld_vfs_get(path, handle_from_addr[Bytes](&vdata)) {
+    if ld_vfs_get(path, &vdata) {
         if vdata.n > max_size {
             m handle[Buf] = msg()
             bb(m, path)
@@ -281,7 +275,7 @@ fn input_read(path Bytes, max_size u64) Bytes fails {
         return bytes_empty()
     }
     st Stat = {}
-    os_fstat(fd, handle_from_addr[Stat](&st)) catch e { try input_die_io(c"fstat", bytes_empty(), e) }
+    os_fstat(fd, &st) catch e { try input_die_io(c"fstat", bytes_empty(), e) }
     // OCaml 5's Unix.in_channel_of_descr refuses a directory with EINVAL
     // before File_io's own regular-file check runs
     if (st.mode & S_IFMT) == S_IFDIR {
@@ -352,13 +346,13 @@ struct PNode {
 var pnodes Vec[PNode] = {}
 
 fn pnode_add(kind u8, ref u64) void {
-    n handle[PNode] = vec_new[PNode](handle_from_addr[Vec[PNode]](&pnodes))
+    n handle[PNode] = vec_add[PNode](&pnodes)
     n.kind = kind
     n.ref = trunc[u32](ref)
 }
 
 fn pnode_add_shared(ref u64, as_needed bool) void {
-    n handle[PNode] = vec_new[PNode](handle_from_addr[Vec[PNode]](&pnodes))
+    n handle[PNode] = vec_add[PNode](&pnodes)
     n.kind = P_SHARED
     n.ref = trunc[u32](ref)
     n.as_needed = as_needed
@@ -367,41 +361,41 @@ fn pnode_add_shared(ref u64, as_needed bool) void {
 // ---------- shared library resolution state ----------
 
 var shlibs Vec[addr] = {}                               // handle[ShLib] as addr (resolved.shared)
-var sh_names Map[Bytes, u8, bytes_hash, bytes_eq] = {}  // loaded SONAMEs
-var shared_refs Map[Bytes, u8, bytes_hash, bytes_eq] = {}
-var sh_providers Map[Bytes, u64, bytes_hash, bytes_eq] = {} // name -> (lib_idx << 32 | exp_idx)
+var sh_names BytesSet = {}                              // loaded SONAMEs
+var shared_refs BytesSet = {}
+var sh_providers SymMap = {}                            // name -> (lib_idx << 32 | exp_idx)
 var sh_sym_total u64 = 0
 var shdeps_graph ShDeps = {}
 
 fn shlib(i u64) handle[ShLib] {
-    return handle_from_addr[ShLib](vec_get[addr](handle_from_addr[Vec[addr]](&shlibs), i))
+    return handle_from_addr(vec_get[addr](&shlibs, i))
 }
 
 fn shref_add(name Bytes) void {
-    h handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&shared_refs)
+    h handle[BytesSet] = &shared_refs
     map_put(h, name, 1)
 }
 
 fn is_shared_ref(name Bytes) bool {
     if shared_refs.n == 0 { return false }
-    h handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&shared_refs)
+    h handle[BytesSet] = &shared_refs
     return map_has(h, name)
 }
 
 fn has_provider(name Bytes) bool {
     if sh_providers.n == 0 { return false }
-    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    h handle[SymMap] = &sh_providers
     return map_has(h, name)
 }
 
 fn prov_find(name Bytes) u64 {
     if sh_providers.n == 0 { return NONE64 }
-    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    h handle[SymMap] = &sh_providers
     return map_get(h, name) catch NONE64
 }
 
 fn prov_add(name Bytes, lib_idx u64, exp_idx u64) void {
-    h handle[Map[Bytes, u64, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u64, bytes_hash, bytes_eq]](&sh_providers)
+    h handle[SymMap] = &sh_providers
     if !map_has(h, name) {
         map_put(h, name, (lib_idx << 32) | exp_idx)
     }
@@ -436,19 +430,17 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
         bs(m, c"input count exceeds 1024 file limit")
         try input_die()
     }
-    vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), path)
+    vec_push[Bytes](&expanded, path)
     rt PhaseStart = {}
     phase_begin(PH_READ, &rt)
     real Buf = {}
-    rh handle[Buf] = handle_from_addr[Buf](&real)
-    ld_realpath(path, rh) catch e { try input_die_io(c"realpath", path, e) }
+    ld_realpath(path, &real) catch e { try input_die_io(c"realpath", path, e) }
     max_size u64 = umin(MAX_FILE_SIZE, 268435456 - input_bytes)
-    snaps handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&snapshots)
     data Bytes = bytes_empty()
     found bool = false
-    for k u64 in 0..snaps.n {
-        sn handle[Snapshot] = vec_ref[Snapshot](snaps, k)
-        if bytes_eq(sn.real, buf_bytes(rh)) {
+    for k u64 in 0..snapshots.n {
+        sn handle[Snapshot] = vec_at[Snapshot](&snapshots, k)
+        if bytes_eq(sn.real, buf_bytes(&real)) {
             data = sn.data
             found = true
             if data.n > max_size {
@@ -465,11 +457,11 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
     }
     if !found {
         data = try input_read(path, max_size)
-        sn handle[Snapshot] = vec_new[Snapshot](snaps)
-        sn.real = nul_dup(rh.p, rh.n)
+        sn handle[Snapshot] = vec_add[Snapshot](&snapshots)
+        sn.real = nul_dup(real.p, real.n)
         sn.data = data
     }
-    buf_free(rh)
+    buf_free(&real)
     phase_end(PH_READ, &rt)
     input_bytes += data.n
     stat_add(ST_INPUT_FILES, 1)
@@ -484,7 +476,7 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
         for k u64 in 0..a.members.n {
             m handle[Member] = member(a, k)
             if m.ext.n != 0 && ld_exists(m.ext) {
-                vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), m.ext)
+                vec_push[Bytes](&expanded, m.ext)
             }
         }
         if !whole && !a.indexed && a.members.n != 0 {
@@ -509,9 +501,8 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
             }
             try input_die()
         }
-        shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
-        idx u64 = shv.n
-        st handle[StagedSh] = vec_new[StagedSh](shv)
+        idx u64 = staged_sh.n
+        st handle[StagedSh] = vec_add[StagedSh](&staged_sh)
         st.lib.path = path
         st.data = data
         st.seq = parse_seq
@@ -551,19 +542,17 @@ var extra_files Vec[Snapshot] = {}
 
 fn read_extra_counted(path Bytes, counter u64) Bytes fails {
     real Buf = {}
-    rh handle[Buf] = handle_from_addr[Buf](&real)
-    ld_realpath(path, rh) catch e { try input_die_io(c"realpath", path, e) }
-    xs handle[Vec[Snapshot]] = handle_from_addr[Vec[Snapshot]](&extra_files)
-    for k u64 in 0..xs.n {
-        sn handle[Snapshot] = vec_ref[Snapshot](xs, k)
-        if bytes_eq(sn.real, buf_bytes(rh)) {
-            buf_free(rh)
+    ld_realpath(path, &real) catch e { try input_die_io(c"realpath", path, e) }
+    for k u64 in 0..extra_files.n {
+        sn handle[Snapshot] = vec_at[Snapshot](&extra_files, k)
+        if bytes_eq(sn.real, buf_bytes(&real)) {
+            buf_free(&real)
             return sn.data
         }
     }
     file_count += 1
     if file_count > 1024 { try input_die_c(c"input count exceeds 1024 file limit") }
-    vec_push[Bytes](handle_from_addr[Vec[Bytes]](&expanded), path)
+    vec_push[Bytes](&expanded, path)
     rt PhaseStart = {}
     phase_begin(PH_READ, &rt)
     data Bytes = try input_read(path, umin(MAX_FILE_SIZE, 268435456 - input_bytes))
@@ -571,10 +560,10 @@ fn read_extra_counted(path Bytes, counter u64) Bytes fails {
     input_bytes += data.n
     stat_add(counter, 1)
     stat_add(ST_INPUT_BYTES, data.n)
-    sn handle[Snapshot] = vec_new[Snapshot](xs)
-    sn.real = nul_dup(rh.p, rh.n)
+    sn handle[Snapshot] = vec_add[Snapshot](&extra_files)
+    sn.real = nul_dup(real.p, real.n)
     sn.data = data
-    buf_free(rh)
+    buf_free(&real)
     return data
 }
 
@@ -585,29 +574,24 @@ fn read_extra(path Bytes) Bytes fails {
 // Reads every input in command-line order, then parses them all.
 fn read_inputs() void fails {
     c handle[Config] = config()
-    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
-    nodes handle[Vec[PNode]] = handle_from_addr[Vec[PNode]](&pnodes)
     scripts Vec[Bytes] = {}
-    sh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&scripts)
     // the enclosing groups: they end after `count` items; a script input
     // expands to any number of nodes, so a group's node count is only
     // known at its end
     ends Vec[u64] = {}
-    eh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&ends)
     starts Vec[u64] = {}
-    gh handle[Vec[u64]] = handle_from_addr[Vec[u64]](&starts)
-    for i u64 in 0..items.n + 1 {
-        while eh.n != 0 && vec_last[u64](eh) == i {
-            vec_pop[u64](eh)
-            g u64 = vec_pop[u64](gh)
-            vec_ref[PNode](nodes, g).count = trunc[u32](nodes.n - g - 1)
+    for i u64 in 0..c.items.n + 1 {
+        while ends.n != 0 && vec_last[u64](&ends) == i {
+            vec_pop[u64](&ends)
+            g u64 = vec_pop[u64](&starts)
+            vec_at[PNode](&pnodes, g).count = trunc[u32](pnodes.n - g - 1)
         }
-        if i == items.n { break }
-        it handle[Item] = vec_ref[Item](items, i)
-        depth u64 = eh.n
+        if i == c.items.n { break }
+        it handle[Item] = vec_at[Item](&c.items, i)
+        depth u64 = ends.n
         if it.kind == IT_GROUP {
-            vec_push[u64](eh, i + 1 + zext[u64](it.count))
-            vec_push[u64](gh, nodes.n)
+            vec_push[u64](&ends, i + 1 + zext[u64](it.count))
+            vec_push[u64](&starts, pnodes.n)
             pnode_add(P_GROUP, 0)
             continue
         }
@@ -625,15 +609,15 @@ fn read_inputs() void fails {
         input_static = it.static_lib
         if it.kind == IT_LIBRARY {
             // static output takes only archives (requires_static_inputs)
-            path = try library_find(it.text, library_dynamic(), handle_from_addr[Vec[Bytes]](&ldirs))
+            path = try library_find(it.text, library_dynamic(), &ldirs)
         }
         // the file's own depth: inside As_needed, then Static
         fd u64 = depth + extra
         if static_wrap { fd += 1 }
-        try read_input(path, it.whole, it.as_needed, fd, sh)
+        try read_input(path, it.whole, it.as_needed, fd, &scripts)
     }
-    vec_free[u64](eh)
-    vec_free[u64](gh)
+    vec_free[u64](&ends)
+    vec_free[u64](&starts)
     try parse_flush()
     reading = false
 }
@@ -645,8 +629,7 @@ var staged_lxs addr = null
 
 fn sh_is_required(lib handle[ShLib]) bool {
     tmp Buf = {}
-    th handle[Buf] = handle_from_addr[Buf](&tmp)
-    defer { buf_free(th) }
+    defer { buf_free(&tmp) }
     for ei u64 in 0..lib.exports.n {
         ex handle[ShExport] = sh_export(lib, ei)
         if ex.is_default {
@@ -654,11 +637,11 @@ fn sh_is_required(lib handle[ShLib]) bool {
             if id != NONE && needed(id) { return true }
         }
         if ex.version.n != SH_NONE {
-            buf_clear(th)
-            bb(th, ex.name)
-            buf_u8(th, 64)
-            bb(th, ex.version)
-            id u32 = find(buf_bytes(th))
+            buf_clear(&tmp)
+            bb(&tmp, ex.name)
+            buf_u8(&tmp, 64)
+            bb(&tmp, ex.version)
+            id u32 = find(buf_bytes(&tmp))
             if id != NONE && needed(id) { return true }
         }
     }
@@ -666,20 +649,17 @@ fn sh_is_required(lib handle[ShLib]) bool {
 }
 
 fn process_range(b u64, e u64) void fails {
-    nodes handle[Vec[PNode]] = handle_from_addr[Vec[PNode]](&pnodes)
-    shv handle[Vec[StagedSh]] = handle_from_addr[Vec[StagedSh]](&staged_sh)
-    snh handle[Map[Bytes, u8, bytes_hash, bytes_eq]] = handle_from_addr[Map[Bytes, u8, bytes_hash, bytes_eq]](&sh_names)
-    slh handle[Vec[addr]] = handle_from_addr[Vec[addr]](&shlibs)
+    snh handle[BytesSet] = &sh_names
     i u64 = b
     while i < e {
-        n handle[PNode] = vec_ref[PNode](nodes, i)
+        n handle[PNode] = vec_at[PNode](&pnodes, i)
         if n.kind == P_GROUP {
             inner u64 = zext[u64](n.count)
             prev_obj u64 = NONE64
             prev_sh u64 = NONE64
-            while prev_obj != nobj || prev_sh != slh.n {
+            while prev_obj != nobj || prev_sh != shlibs.n {
                 prev_obj = nobj
-                prev_sh = slh.n
+                prev_sh = shlibs.n
                 try process_range(i + 1, i + 1 + inner)
             }
             i += 1 + inner
@@ -688,16 +668,16 @@ fn process_range(b u64, e u64) void fails {
         if n.kind == P_OBJECT {
             if !n.loaded {
                 n.loaded = true
-                try add_member(handle_from_addr[Obj](staged_objs + zext[u64](n.ref) * sizeof[Obj]))
+                try add_member(handle_from_addr(staged_objs + zext[u64](n.ref) * sizeof[Obj]))
             }
         } else if n.kind == P_SHARED {
-            st handle[StagedSh] = vec_ref[StagedSh](shv, zext[u64](n.ref))
-            lib handle[ShLib] = handle_from_addr[ShLib](&st.lib)
+            st handle[StagedSh] = vec_at[StagedSh](&staged_sh, zext[u64](n.ref))
+            lib handle[ShLib] = &st.lib
             req bool = !n.as_needed || sh_is_required(lib)
             if req && !n.loaded && !map_has(snh, lib.needed) {
                 map_put(snh, lib.needed, 1)
-                idx u64 = slh.n
-                vec_push[addr](slh, handle_addr(lib))
+                idx u64 = shlibs.n
+                vec_push[addr](&shlibs, handle_addr(lib))
                 n.loaded = true
                 stat_add(ST_SHARED_LIBRARIES, 1)
                 sh_sym_total = try chk_add(c"combined shared symbol count", 4000000, sh_sym_total, lib.exports.n + lib.references.n)
@@ -761,20 +741,18 @@ fn add_object(f u64) void fails {
     l handle[Lx] = lx(f)
     n u64 = zext[u64](o.nsec)
     l.discarded = heap_alloc_zeroed(n + 1)
-    sv handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&signatures)
-    sx handle[KeyIndex] = handle_from_addr[KeyIndex](&signature_index)
     for k u64 in 0..zext[u64](o.ngroup) {
-        g handle[Group] = handle_from_addr[Group](o.groups + k * sizeof[Group])
+        g handle[Group] = handle_from_addr(o.groups + k * sizeof[Group])
         if !g.comdat { continue }
         hash u64 = bytes_hash(g.signature)
-        e u32 = kx_first(sx, hash)
-        while e != NONE && !bytes_eq(vec_get[Bytes](sv, zext[u64](e)), g.signature) { e = kx_next(sx, e) }
+        e u32 = kx_first(&signature_index, hash)
+        while e != NONE && !bytes_eq(vec_get[Bytes](&signatures, zext[u64](e)), g.signature) { e = kx_next(&signature_index, e) }
         if e != NONE {
             for j u64 in 0..zext[u64](g.n) { l.discarded[u8, zext[u64](g.members[u32, j])] = 1 }
             stat_add(ST_DISCARDED_COMDAT_GROUPS, 1)
         } else {
-            kx_add(sx, hash, trunc[u32](sv.n))
-            vec_push[Bytes](sv, g.signature)
+            kx_add(&signature_index, hash, trunc[u32](signatures.n))
+            vec_push[Bytes](&signatures, g.signature)
         }
     }
     symbol_total = try chk_add(c"combined symbol count", 4000000, symbol_total, zext[u64](o.nsym))
@@ -966,25 +944,21 @@ fn resolve() void fails {
     c handle[Config] = config()
     if c.entry.n == 0 { try die_c(c"entry symbol must not be empty") }
     // library search directories (Sysroot.directory without a root)
-    dirs handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.library_paths)
     if c.has_sysroot { try sysroot_normalize(c.sysroot) }
-    lh handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&ldirs)
-    for k u64 in 0..dirs.n { vec_push[Bytes](lh, try root_directory(vec_get[Bytes](dirs, k))) }
-    if dirs.n > 4096 { try die_c(c"library search exceeds 4096 directories") }
+    for k u64 in 0..c.library_paths.n { vec_push[Bytes](&ldirs, try root_directory(vec_get[Bytes](&c.library_paths, k))) }
+    if c.library_paths.n > 4096 { try die_c(c"library search exceeds 4096 directories") }
     // Input.paths: every path item
     paths u64 = 0
-    items handle[Vec[Item]] = handle_from_addr[Vec[Item]](&c.items)
-    for k u64 in 0..items.n {
-        if vec_ref[Item](items, k).kind == IT_PATH { paths += 1 }
+    for k u64 in 0..c.items.n {
+        if vec_at[Item](&c.items, k).kind == IT_PATH { paths += 1 }
     }
     if paths > 1024 { try die_c(c"input count exceeds 1024 file limit") }
     try read_inputs()
 
     // the entry and -u roots
     if !partial && c.mode != MODE_SHARED { gsym(get(c.entry)).strong = 1 }
-    und handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&c.undefined)
-    for k u64 in 0..und.n {
-        name Bytes = vec_get[Bytes](und, k)
+    for k u64 in 0..c.undefined.n {
+        name Bytes = vec_get[Bytes](&c.undefined, k)
         if name.n == 0 { try die_c(c"undefined root symbol must not be empty") }
         gsym(get(name)).strong = 1
     }
@@ -993,11 +967,9 @@ fn resolve() void fails {
     // definitions, commons and linker-defined symbols, in state order
     common_file u64 = nobj
     commons Vec[u32] = {}
-    ch handle[Vec[u32]] = handle_from_addr[Vec[u32]](&commons)
     common_size u64 = 0
     common_alignment u64 = 1
     predefined Vec[u32] = {}
-    ph handle[Vec[u32]] = handle_from_addr[Vec[u32]](&predefined)
     count u64 = gsyms.n
     for i u64 in 0..count {
         id u32 = trunc[u32](i)
@@ -1006,7 +978,7 @@ fn resolve() void fails {
             if partial {
                 // nothing: undefined symbols stay undefined
             } else if predefined_name(s.name) || try registry_available(s.name) {
-                vec_push[u32](ph, id)
+                vec_push[u32](&predefined, id)
             } else {
                 pv u64 = prov_find(s.name)
                 if pv != NONE64 {
@@ -1041,10 +1013,10 @@ fn resolve() void fails {
             set_res(id, zext[u64](s.def_file), zext[u64](s.def_sym), s.visibility)
         } else {
             if !partial { common_size = try chk_align(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.calign) }
-            vec_push[u32](ch, id)
+            vec_push[u32](&commons, id)
             // the symbol's value is its offset; kept in csize's place until
             // the object is built
-            set_res(id, common_file, ch.n, s.visibility)
+            set_res(id, common_file, commons.n, s.visibility)
             if !partial {
                 s.def_sym = trunc[u32](common_size)
                 common_size = try chk_add(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.csize)
@@ -1052,7 +1024,7 @@ fn resolve() void fails {
             common_alignment = umax(common_alignment, s.calign)
         }
     }
-    if ch.n != 0 {
+    if commons.n != 0 {
         o handle[Obj] = try new_object(c"<common>")
         o.nsec = 2
         o.secs = heap_alloc_zeroed(2 * sizeof[Sec])
@@ -1066,14 +1038,14 @@ fn resolve() void fails {
         b.size = common_size
         b.alignment = common_alignment
         b.group = -1
-        o.nsym = trunc[u32](ch.n + 1)
-        o.syms = heap_alloc_zeroed((ch.n + 1) * sizeof[Sym])
+        o.nsym = trunc[u32](commons.n + 1)
+        o.syms = heap_alloc_zeroed((commons.n + 1) * sizeof[Sym])
         l handle[Lx] = lx(common_file)
         l.discarded = heap_alloc_zeroed(2)
-        l.gid = heap_alloc_zeroed((ch.n + 1) * 4)
+        l.gid = heap_alloc_zeroed((commons.n + 1) * 4)
         l.gid[u32, 0] = NONE
-        for k u64 in 0..ch.n {
-            id u32 = vec_get[u32](ch, k)
+        for k u64 in 0..commons.n {
+            id u32 = vec_get[u32](&commons, k)
             g handle[GSym] = gsym(id)
             y handle[Sym] = synth_sym(o, k + 1, g.name)
             y.binding = 1
@@ -1086,18 +1058,18 @@ fn resolve() void fails {
             l.gid[u32, k + 1] = id
         }
     }
-    if ph.n != 0 {
+    if predefined.n != 0 {
         file u64 = nobj
         o handle[Obj] = try new_object(c"<linker symbols>")
-        stat_add(ST_LINKER_SYMBOLS, ph.n)
-        o.nsym = trunc[u32](ph.n + 1)
-        o.syms = heap_alloc_zeroed((ph.n + 1) * sizeof[Sym])
+        stat_add(ST_LINKER_SYMBOLS, predefined.n)
+        o.nsym = trunc[u32](predefined.n + 1)
+        o.syms = heap_alloc_zeroed((predefined.n + 1) * sizeof[Sym])
         l handle[Lx] = lx(file)
         l.discarded = heap_alloc_zeroed(1)
-        l.gid = heap_alloc_zeroed((ph.n + 1) * 4)
+        l.gid = heap_alloc_zeroed((predefined.n + 1) * 4)
         l.gid[u32, 0] = NONE
-        for k u64 in 0..ph.n {
-            id u32 = vec_get[u32](ph, k)
+        for k u64 in 0..predefined.n {
+            id u32 = vec_get[u32](&predefined, k)
             g handle[GSym] = gsym(id)
             vis u8 = g.visibility
             if hidden_predefined(g.name) && visibility_rank(vis) < 2 { vis = 2 }
@@ -1111,10 +1083,9 @@ fn resolve() void fails {
         predefined_file = file
     }
     if !partial {
-        gh handle[ShDeps] = handle_from_addr[ShDeps](&shdeps_graph)
-        try shdeps_load(gh, shlibs.p, shlibs.n)
-        for li u64 in 0..gh.libraries.n {
-            lib handle[ShLib] = shdeps_lib(gh, li)
+        try shdeps_load(&shdeps_graph, shlibs.p, shlibs.n)
+        for li u64 in 0..shdeps_graph.libraries.n {
+            lib handle[ShLib] = shdeps_lib(&shdeps_graph, li)
             for ri u64 in 0..lib.references.n {
                 rf handle[ShRef] = sh_ref(lib, ri)
                 shref_add(rf.name)

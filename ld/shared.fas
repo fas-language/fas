@@ -135,28 +135,31 @@ struct ShInterval {
 
 // ---------- accessors ----------
 
+fn sh_sec(secs addr, i u64) handle[ShSec] { return handle_from_addr(secs + i * sizeof[ShSec]) }
+fn sh_raw(raw addr, i u64) handle[ShRawSym] { return handle_from_addr(raw + i * sizeof[ShRawSym]) }
+
 fn sh_export(lib handle[ShLib], i u64) handle[ShExport] {
-    return vec_ref[ShExport](handle_from_addr[Vec[ShExport]](&lib.exports), i)
+    return vec_at[ShExport](&lib.exports, i)
 }
 
 fn sh_ref(lib handle[ShLib], i u64) handle[ShRef] {
-    return vec_ref[ShRef](handle_from_addr[Vec[ShRef]](&lib.references), i)
+    return vec_at[ShRef](&lib.references, i)
 }
 
 fn sh_verreq(lib handle[ShLib], i u64) handle[ShVerReq] {
-    return vec_ref[ShVerReq](handle_from_addr[Vec[ShVerReq]](&lib.version_requirements), i)
+    return vec_at[ShVerReq](&lib.version_requirements, i)
 }
 
 fn sh_loc(lib handle[ShLib], i u64) handle[ShLoc] {
-    return vec_ref[ShLoc](handle_from_addr[Vec[ShLoc]](&lib.locations), i)
+    return vec_at[ShLoc](&lib.locations, i)
 }
 
 fn sh_dep(lib handle[ShLib], i u64) Bytes {
-    return vec_get[Bytes](handle_from_addr[Vec[Bytes]](&lib.dependencies), i)
+    return vec_get[Bytes](&lib.dependencies, i)
 }
 
 fn sh_defver(lib handle[ShLib], i u64) Bytes {
-    return vec_get[Bytes](handle_from_addr[Vec[Bytes]](&lib.defined_versions), i)
+    return vec_get[Bytes](&lib.defined_versions, i)
 }
 
 fn sh_sym_hash(name Bytes, version Bytes) u64 {
@@ -174,27 +177,25 @@ fn sh_sym_eq(n1 Bytes, v1 Bytes, n2 Bytes, v2 Bytes) bool {
 
 // Looks up (name, version) in `lib.locations`; returns null if absent.
 fn sh_find_location(lib handle[ShLib], name Bytes, version Bytes) handle[ShLoc] {
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&lib.loc_index)
-    lv handle[Vec[ShLoc]] = handle_from_addr[Vec[ShLoc]](&lib.locations)
     h u64 = sh_sym_hash(name, version)
-    id u32 = kx_first(kx, h)
+    id u32 = kx_first(&lib.loc_index, h)
     while id != NONE {
-        loc handle[ShLoc] = vec_ref[ShLoc](lv, zext[u64](id))
+        loc handle[ShLoc] = vec_at[ShLoc](&lib.locations, zext[u64](id))
         if sh_sym_eq(loc.name, loc.version, name, version) { return loc }
-        id = kx_next(kx, id)
+        id = kx_next(&lib.loc_index, id)
     }
     return null
 }
 
 fn sh_free(lib handle[ShLib]) void {
-    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&lib.dependencies))
-    vec_free[Bytes](handle_from_addr[Vec[Bytes]](&lib.defined_versions))
-    vec_free[ShVerReq](handle_from_addr[Vec[ShVerReq]](&lib.version_requirements))
-    vec_free[ShExport](handle_from_addr[Vec[ShExport]](&lib.exports))
-    vec_free[ShRef](handle_from_addr[Vec[ShRef]](&lib.references))
-    vec_free[ShLoc](handle_from_addr[Vec[ShLoc]](&lib.locations))
-    kx_free(handle_from_addr[KeyIndex](&lib.loc_index))
-    buf_free(handle_from_addr[Buf](&lib.msg))
+    vec_free[Bytes](&lib.dependencies)
+    vec_free[Bytes](&lib.defined_versions)
+    vec_free[ShVerReq](&lib.version_requirements)
+    vec_free[ShExport](&lib.exports)
+    vec_free[ShRef](&lib.references)
+    vec_free[ShLoc](&lib.locations)
+    kx_free(&lib.loc_index)
+    buf_free(&lib.msg)
 }
 
 // ---------- hashes (Symbol_hash) ----------
@@ -223,7 +224,7 @@ fn sh_gnu_hash(name Bytes) u64 {
 
 // Starts `lib.msg` with "<path>: shared object: "
 fn sh_f(lib handle[ShLib]) handle[Buf] {
-    b handle[Buf] = handle_from_addr[Buf](&lib.msg)
+    b handle[Buf] = &lib.msg
     buf_clear(b)
     bb(b, lib.path)
     bs(b, c": shared object: ")
@@ -254,7 +255,7 @@ fn sh_fail_sym(lib handle[ShLib], prefix addr, name Bytes, suffix addr) void fai
 // Binary.span ~context:(path ^ ": shared " ^ what)
 fn sh_span(lib handle[ShLib], what addr, offset u64, size u64) void fails {
     if offset > lib.data_len || size > lib.data_len - offset {
-        m handle[Buf] = handle_from_addr[Buf](&lib.msg)
+        m handle[Buf] = &lib.msg
         buf_clear(m)
         bb(m, lib.path)
         bs(m, c": shared ")
@@ -290,7 +291,7 @@ fn sh_name(lib handle[ShLib], str_off u64, str_size u64, decoded addr, value u64
     e u64 = start
     while e < limit && lib.data[u8, e] != 0 { e += 1 }
     if e == limit {
-        m handle[Buf] = handle_from_addr[Buf](&lib.msg)
+        m handle[Buf] = &lib.msg
         buf_clear(m)
         bb(m, lib.path)
         bs(m, c": dynamic name: unterminated string or name exceeds 65535 bytes")
@@ -300,7 +301,7 @@ fn sh_name(lib handle[ShLib], str_off u64, str_size u64, decoded addr, value u64
     cur u64 = decoded[u64]
     lim u64 = 67108864
     if cur > lim || n > lim - cur {
-        m handle[Buf] = handle_from_addr[Buf](&lib.msg)
+        m handle[Buf] = &lib.msg
         buf_clear(m)
         bs(m, c"shared decoded names: size exceeds supported limit 67108864")
         fail ShBad
@@ -344,8 +345,8 @@ fn sh_claim(lib handle[ShLib], intervals handle[Vec[ShInterval]], version_record
     if vr > 1000000 { try sh_fail(lib, c"version record count exceeds 1000000") }
     end_new u64 = at + width
     n u64 = intervals.n
-    if n == 0 || vec_ref[ShInterval](intervals, n - 1).ending <= at {
-        iv handle[ShInterval] = vec_new[ShInterval](intervals)
+    if n == 0 || vec_at(intervals, n - 1).ending <= at {
+        iv handle[ShInterval] = vec_add(intervals)
         iv.start = at
         iv.ending = end_new
         return
@@ -354,14 +355,14 @@ fn sh_claim(lib handle[ShLib], intervals handle[Vec[ShInterval]], version_record
     hi u64 = n
     while lo < hi {
         mid u64 = lo + (hi - lo) / 2
-        if vec_ref[ShInterval](intervals, mid).start < end_new {
+        if vec_at(intervals, mid).start < end_new {
             lo = mid + 1
         } else {
             hi = mid
         }
     }
     if lo > 0 {
-        prev handle[ShInterval] = vec_ref[ShInterval](intervals, lo - 1)
+        prev handle[ShInterval] = vec_at(intervals, lo - 1)
         if prev.ending > at {
             try sh_fail2(lib, c"overlapping ", desc)
         }
@@ -369,13 +370,10 @@ fn sh_claim(lib handle[ShLib], intervals handle[Vec[ShInterval]], version_record
     vec_push_zeroed[ShInterval](intervals)
     i u64 = n
     while i > lo {
-        dst handle[ShInterval] = vec_ref[ShInterval](intervals, i)
-        src handle[ShInterval] = vec_ref[ShInterval](intervals, i - 1)
-        dst.start = src.start
-        dst.ending = src.ending
+        copy_into(vec_at(intervals, i), vec_at(intervals, i - 1))
         i -= 1
     }
-    cur handle[ShInterval] = vec_ref[ShInterval](intervals, lo)
+    cur handle[ShInterval] = vec_at(intervals, lo)
     cur.start = at
     cur.ending = end_new
 }
@@ -391,7 +389,7 @@ fn sh_bounded(lib handle[ShLib], s_off u64, ending u64, intervals handle[Vec[ShI
 fn sh_unique_sec(lib handle[ShLib], secs addr, count u64, kind u64, desc addr) u64 fails {
     found u64 = SH_NONE
     for i u64 in 0..count {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + i * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, i)
         if s.kind == kind {
             if found != SH_NONE {
                 m handle[Buf] = sh_f(lib)
@@ -418,7 +416,7 @@ fn sh_unique_sec(lib handle[ShLib], secs addr, count u64, kind u64, desc addr) u
 fn sh_optional_sec(lib handle[ShLib], secs addr, count u64, kind u64, desc addr) u64 fails {
     found u64 = SH_NONE
     for i u64 in 0..count {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + i * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, i)
         if s.kind == kind {
             if found != SH_NONE {
                 m handle[Buf] = sh_f(lib)
@@ -433,7 +431,7 @@ fn sh_optional_sec(lib handle[ShLib], secs addr, count u64, kind u64, desc addr)
     return found
 }
 
-fn sh_expect_tag(lib handle[ShLib], tags handle[Map[u64, u64, u64_hash, u64_eq]], tag_id u64, expected u64) void fails {
+fn sh_expect_tag(lib handle[ShLib], tags handle[U64U64Map], tag_id u64, expected u64) void fails {
     val u64 = map_get(tags, tag_id) catch {
         m handle[Buf] = sh_f(lib)
         bs(m, c"dynamic tag 0x")
@@ -453,7 +451,7 @@ fn sh_expect_tag(lib handle[ShLib], tags handle[Map[u64, u64, u64_hash, u64_eq]]
 fn sh_check_coverage(lib handle[ShLib], raw addr, symbol_count u64, has_versym bool, versym_off u64, seen addr) void fails {
     d addr = lib.data
     for n u64 in 0..symbol_count {
-        r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + n * sizeof[ShRawSym])
+        r handle[ShRawSym] = sh_raw(raw, n)
         id u64 = if !has_versym { 1 } else { rd16(d, versym_off + n * 2) & 0x7fff }
         vis u8 = r.visibility & 3
         if n != 0 && r.binding != 0 && r.section != 0 && vis != 1 && vis != 2 && id != 0 && seen[u8, n] == 0 {
@@ -464,20 +462,18 @@ fn sh_check_coverage(lib handle[ShLib], raw addr, symbol_count u64, has_versym b
 
 // Inserts or replaces `(name, version) -> loc` in `lib.locations` + `lib.loc_index`.
 fn sh_put_location(lib handle[ShLib], name Bytes, version Bytes) handle[ShLoc] {
-    kx handle[KeyIndex] = handle_from_addr[KeyIndex](&lib.loc_index)
-    lv handle[Vec[ShLoc]] = handle_from_addr[Vec[ShLoc]](&lib.locations)
     h u64 = sh_sym_hash(name, version)
-    id u32 = kx_first(kx, h)
+    id u32 = kx_first(&lib.loc_index, h)
     while id != NONE {
-        loc handle[ShLoc] = vec_ref[ShLoc](lv, zext[u64](id))
+        loc handle[ShLoc] = vec_at[ShLoc](&lib.locations, zext[u64](id))
         if sh_sym_eq(loc.name, loc.version, name, version) { return loc }
-        id = kx_next(kx, id)
+        id = kx_next(&lib.loc_index, id)
     }
-    new_id u32 = trunc[u32](lv.n)
-    loc handle[ShLoc] = vec_new[ShLoc](lv)
+    new_id u32 = trunc[u32](lib.locations.n)
+    loc handle[ShLoc] = vec_add[ShLoc](&lib.locations)
     loc.name = name
     loc.version = version
-    kx_add(kx, h, new_id)
+    kx_add(&lib.loc_index, h, new_id)
     return loc
 }
 
@@ -529,7 +525,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     defer { heap_free(secs) }
     for n u64 in 0..count {
         at u64 = shoff + n * 64
-        s handle[ShSec] = handle_from_addr[ShSec](secs + n * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, n)
         s.kind = try sh_index(lib, c"section type", OCAML_MAX_INT, rd32(d, at + 4))
         s.size = try sh_index(lib, c"section size", 1073741824, rd64(d, at + 32))
         s.offset = if s.kind == 8 { 0 } else { try sh_index(lib, c"section offset", length, rd64(d, at + 24)) }
@@ -541,14 +537,14 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     }
 
     symbol_index u64 = try sh_unique_sec(lib, secs, count, 11, c"dynamic symbol")
-    symbols handle[ShSec] = handle_from_addr[ShSec](secs + symbol_index * sizeof[ShSec])
+    symbols handle[ShSec] = sh_sec(secs, symbol_index)
     if symbols.entsize != 24 || symbols.size == 0 || symbols.size % 24 != 0 {
         try sh_fail(lib, c"invalid dynamic symbol table size")
     }
     symbol_count u64 = symbols.size / 24
     if symbol_count > 1000000 { try sh_fail(lib, c"dynamic symbol count exceeds 1000000") }
 
-    strings handle[ShSec] = handle_from_addr[ShSec](secs + symbols.link * sizeof[ShSec])
+    strings handle[ShSec] = sh_sec(secs, symbols.link)
     if strings.kind != 3 || strings.size == 0 ||
         d[u8, strings.offset] != 0 || d[u8, strings.offset + strings.size - 1] != 0 {
         try sh_fail(lib, c"invalid dynamic string table")
@@ -556,15 +552,14 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     decoded u64 = 0
 
     dynamic_index u64 = try sh_unique_sec(lib, secs, count, 6, c"dynamic")
-    dynamic handle[ShSec] = handle_from_addr[ShSec](secs + dynamic_index * sizeof[ShSec])
+    dynamic handle[ShSec] = sh_sec(secs, dynamic_index)
     if dynamic.entsize != 16 || dynamic.size % 16 != 0 {
         try sh_fail(lib, c"invalid dynamic entry size")
     }
 
-    tags Map[u64, u64, u64_hash, u64_eq] = {}
-    th handle[Map[u64, u64, u64_hash, u64_eq]] = handle_from_addr[Map[u64, u64, u64_hash, u64_eq]](&tags)
+    tags U64U64Map = {}
+    th handle[U64U64Map] = &tags
     defer { map_free(th) }
-    deps handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&lib.dependencies)
     terminated bool = false
     dyn_entries u64 = dynamic.size / 16
     for n u64 in 0..dyn_entries {
@@ -579,7 +574,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 if dep.n == 0 || dep.n > 65535 {
                     try sh_fail(lib, c"invalid DT_NEEDED name")
                 }
-                vec_push[Bytes](deps, dep)
+                vec_push[Bytes](&lib.dependencies, dep)
             } else {
                 if map_has(th, tag_id) {
                     m handle[Buf] = sh_f(lib)
@@ -625,10 +620,9 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     version_records u64 = 0
 
     // Version definitions (SHT_GNU_verdef)
-    versions Map[u64, Bytes, u64_hash, u64_eq] = {}
-    vh handle[Map[u64, Bytes, u64_hash, u64_eq]] = handle_from_addr[Map[u64, Bytes, u64_hash, u64_eq]](&versions)
+    versions U64BytesMap = {}
+    vh handle[U64BytesMap] = &versions
     defer { map_free(vh) }
-    defvers handle[Vec[Bytes]] = handle_from_addr[Vec[Bytes]](&lib.defined_versions)
 
     verdef_idx u64 = try sh_optional_sec(lib, secs, count, 0x6ffffffd, c"version definition")
     has_vd_addr bool = map_has(th, 0x6ffffffc)
@@ -636,7 +630,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     if verdef_idx == SH_NONE && !has_vd_addr && !has_vd_num {
         // no version definitions
     } else if verdef_idx != SH_NONE && has_vd_addr && has_vd_num {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + verdef_idx * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, verdef_idx)
         vd_addr u64 = map_get(th, 0x6ffffffc) catch 0
         vd_num u64 = map_get(th, 0x6ffffffd) catch 0
         if vd_addr != s.address {
@@ -649,10 +643,9 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
         cursor u64 = s.offset
         ending u64 = s.offset + s.size
         intervals Vec[ShInterval] = {}
-        ivh handle[Vec[ShInterval]] = handle_from_addr[Vec[ShInterval]](&intervals)
-        defer { vec_free[ShInterval](ivh) }
+        defer { vec_free[ShInterval](&intervals) }
         for n u64 in 0..amount {
-            try sh_bounded(lib, s.offset, ending, ivh, &version_records, c"truncated version definition", c"version definitions", cursor, 20)
+            try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version definition", c"version definitions", cursor, 20)
             id u64 = rd16(d, cursor + 4)
             aux_count u64 = rd16(d, cursor + 6)
             if rd16(d, cursor) != 1 || id == 0 || id >= 0x8000 || map_has(vh, id) || aux_count == 0 {
@@ -663,7 +656,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
             at u64 = cursor + aux
             ver Bytes = bytes_empty()
             for j u64 in 0..aux_count {
-                try sh_bounded(lib, s.offset, ending, ivh, &version_records, c"truncated version definition", c"version definitions", at, 8)
+                try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version definition", c"version definitions", at, 8)
                 text Bytes = try sh_name(lib, strings.offset, strings.size, &decoded, rd32(d, at))
                 if j == 0 { ver = text }
                 next u64 = try sh_index(lib, c"version auxiliary link", s.size, rd32(d, at + 4))
@@ -678,7 +671,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 try sh_fail(lib, c"invalid version name or hash")
             }
             map_put(vh, id, ver)
-            vec_push[Bytes](defvers, ver)
+            vec_push[Bytes](&lib.defined_versions, ver)
             next u64 = try sh_index(lib, c"version definition link", s.size, rd32(d, cursor + 16))
             if n == amount - 1 {
                 if next != 0 { try sh_fail(lib, c"unterminated version definition list") }
@@ -692,10 +685,9 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     }
 
     // Version requirements (SHT_GNU_verneed)
-    req_versions Map[u64, Bytes, u64_hash, u64_eq] = {}
-    rvh handle[Map[u64, Bytes, u64_hash, u64_eq]] = handle_from_addr[Map[u64, Bytes, u64_hash, u64_eq]](&req_versions)
+    req_versions U64BytesMap = {}
+    rvh handle[U64BytesMap] = &req_versions
     defer { map_free(rvh) }
-    vreqs handle[Vec[ShVerReq]] = handle_from_addr[Vec[ShVerReq]](&lib.version_requirements)
 
     verneed_idx u64 = try sh_optional_sec(lib, secs, count, 0x6ffffffe, c"version requirement")
     has_vn_addr bool = map_has(th, 0x6ffffffe)
@@ -703,7 +695,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     if verneed_idx == SH_NONE && !has_vn_addr && !has_vn_num {
         // no version requirements
     } else if verneed_idx != SH_NONE && has_vn_addr && has_vn_num {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + verneed_idx * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, verneed_idx)
         vn_addr u64 = map_get(th, 0x6ffffffe) catch 0
         vn_num u64 = map_get(th, 0x6fffffff) catch 0
         if vn_addr != s.address {
@@ -716,10 +708,9 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
         cursor u64 = s.offset
         ending u64 = s.offset + s.size
         intervals Vec[ShInterval] = {}
-        ivh handle[Vec[ShInterval]] = handle_from_addr[Vec[ShInterval]](&intervals)
-        defer { vec_free[ShInterval](ivh) }
+        defer { vec_free[ShInterval](&intervals) }
         for n u64 in 0..amount {
-            try sh_bounded(lib, s.offset, ending, ivh, &version_records, c"truncated version requirement", c"version requirements", cursor, 16)
+            try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version requirement", c"version requirements", cursor, 16)
             cnt u64 = rd16(d, cursor + 2)
             if rd16(d, cursor) != 1 || cnt == 0 { try sh_fail(lib, c"invalid version requirement") }
             provider Bytes = try sh_name(lib, strings.offset, strings.size, &decoded, rd32(d, cursor + 4))
@@ -728,7 +719,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
             if aux < 16 { try sh_fail(lib, c"overlapping version requirement auxiliary record") }
             at u64 = cursor + aux
             for j u64 in 0..cnt {
-                try sh_bounded(lib, s.offset, ending, ivh, &version_records, c"truncated version requirement", c"version requirements", at, 16)
+                try sh_bounded(lib, s.offset, ending, &intervals, &version_records, c"truncated version requirement", c"version requirements", at, 16)
                 id u64 = rd16(d, at + 6) & 0x7fff
                 ver Bytes = try sh_name(lib, strings.offset, strings.size, &decoded, rd32(d, at + 8))
                 vflags u64 = rd16(d, at + 4)
@@ -738,7 +729,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                     try sh_fail(lib, c"invalid version requirement auxiliary record")
                 }
                 map_put(rvh, id, ver)
-                vr handle[ShVerReq] = vec_new[ShVerReq](vreqs)
+                vr handle[ShVerReq] = vec_add[ShVerReq](&lib.version_requirements)
                 vr.provider = provider
                 vr.version = ver
                 vr.weak = (vflags & 2) != 0
@@ -770,7 +761,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     if versym_idx == SH_NONE && !has_vs_tag {
         // no version symbol table
     } else if versym_idx != SH_NONE && has_vs_tag {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + versym_idx * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, versym_idx)
         vs_addr u64 = map_get(th, 0x6ffffff0) catch 0
         if vs_addr != s.address {
             try sh_fail(lib, c"inconsistent version symbol metadata")
@@ -795,7 +786,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     defer { heap_free(raw) }
     for n u64 in 0..symbol_count {
         at u64 = symbols.offset + n * 24
-        r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + n * sizeof[ShRawSym])
+        r handle[ShRawSym] = sh_raw(raw, n)
         info u8 = d[u8, at + 4]
         r.name = try sh_name(lib, strings.offset, strings.size, &decoded, rd32(d, at))
         r.binding = info >> 4
@@ -813,7 +804,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     if hash_idx == SH_NONE && !has_sysv_tag {
         // no SysV hash
     } else if hash_idx != SH_NONE && has_sysv_tag {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + hash_idx * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, hash_idx)
         h_addr u64 = map_get(th, 4) catch 0
         if s.address != h_addr || s.size < 8 { try sh_fail(lib, c"inconsistent hash metadata") }
         try sh_mapped(lib, phoff, phnum, s)
@@ -829,7 +820,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
             while current != 0 {
                 if seen[u8, current] != 0 { try sh_fail(lib, c"cyclic or overlapping SysV hash chains") }
                 seen[u8, current] = 1
-                r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + current * sizeof[ShRawSym])
+                r handle[ShRawSym] = sh_raw(raw, current)
                 // Signed remainder matches OCaml's Int64.rem
                 if bitcast[i64](sh_sysv_hash(r.name)) % bitcast[i64](buckets) != bitcast[i64](bucket) {
                     try sh_fail(lib, c"SysV hash name mismatch")
@@ -846,7 +837,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     if gnu_hash_idx == SH_NONE && !has_gnu_tag {
         // no GNU hash
     } else if gnu_hash_idx != SH_NONE && has_gnu_tag {
-        s handle[ShSec] = handle_from_addr[ShSec](secs + gnu_hash_idx * sizeof[ShSec])
+        s handle[ShSec] = sh_sec(secs, gnu_hash_idx)
         g_addr u64 = map_get(th, 0x6ffffef5) catch 0
         if s.address != g_addr || s.size < 16 { try sh_fail(lib, c"inconsistent hash metadata") }
         try sh_mapped(lib, phoff, phnum, s)
@@ -871,7 +862,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                     try sh_fail(lib, c"invalid or overlapping GNU hash chain")
                 }
                 seen[u8, current] = 1
-                r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + current * sizeof[ShRawSym])
+                r handle[ShRawSym] = sh_raw(raw, current)
                 h u64 = sh_gnu_hash(r.name)
                 chain u64 = rd32(d, chain_base + (current - first) * 4)
                 word u64 = rd64(d, s.offset + 16 + ((h / 64) & (bloom - 1)) * 8)
@@ -909,9 +900,8 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     }
 
     // Exports and locations
-    exps handle[Vec[ShExport]] = handle_from_addr[Vec[ShExport]](&lib.exports)
     for n u64 in 0..symbol_count {
-        r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + n * sizeof[ShRawSym])
+        r handle[ShRawSym] = sh_raw(raw, n)
         vis u8 = r.visibility & 3
         if n == 0 || r.binding == 0 || r.section == 0 || vis == 1 || vis == 2 { continue }
         if (r.binding != 1 && r.binding != 2 && r.binding != 10) ||
@@ -934,7 +924,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
         }
         if id != 0 {
             if sec_idx < count {
-                source handle[ShSec] = handle_from_addr[ShSec](secs + sec_idx * sizeof[ShSec])
+                source handle[ShSec] = sh_sec(secs, sec_idx)
                 sat u64 = shoff + sec_idx * 64
                 val u64 = rd64(d, symbols.offset + n * 24 + 8)
                 sflags u64 = rd64(d, sat + 8)
@@ -962,7 +952,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 loc.visibility = r.visibility
                 loc.read_only = ro
             }
-            ex handle[ShExport] = vec_new[ShExport](exps)
+            ex handle[ShExport] = vec_add[ShExport](&lib.exports)
             ex.name = r.name
             ex.kind = r.kind
             ex.binding = r.binding
@@ -984,9 +974,8 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
     }
 
     // References
-    refs handle[Vec[ShRef]] = handle_from_addr[Vec[ShRef]](&lib.references)
     for n u64 in 0..symbol_count {
-        r handle[ShRawSym] = handle_from_addr[ShRawSym](raw + n * sizeof[ShRawSym])
+        r handle[ShRawSym] = sh_raw(raw, n)
         if r.binding == 10 && r.section == 0 {
             try sh_fail_sym(lib, c"undefined GNU unique symbol ", r.name, c"")
         }
@@ -1000,7 +989,7 @@ fn shared_parse(lib handle[ShLib], path Bytes, data Bytes) void fails {
                 return
             }
         }
-        rf handle[ShRef] = vec_new[ShRef](refs)
+        rf handle[ShRef] = vec_add[ShRef](&lib.references)
         rf.name = r.name
         rf.undefined = r.section == 0
         rf.binding = r.binding
