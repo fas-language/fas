@@ -23,6 +23,8 @@ value struct Cond { loc u32, parent bool, active bool, taken bool, otherwise boo
 value struct SearchDir { path u32, rank u8 }
 value struct Dependency { path u32, system bool }
 
+struct PendingTokens { tokens Vec[Token], at usize }
+
 struct Pp {
     names CNames
     frames Vec[Frame]
@@ -34,7 +36,9 @@ struct Pp {
     dependencies Vec[Dependency]
     hides Vec[Hide]
     stream Expand
-    pending Expand
+    pending PendingTokens
+    embedded EmbedOutput
+    byte_spellings arr[256, u32]
     macro_stack Vec[SavedMacro]
     base_file u32
     base_logical u32
@@ -163,6 +167,10 @@ fn pp_raw(p handle[Pp]) Token fails {
         }
         vec_clear[Token](&p.pending.tokens)
         p.pending.at = 0
+        if p.embedded.active {
+            item Token = embed_next(p)
+            if item.kind != TK_EOF { return item }
+        }
         if p.frames.n == 0 { return cc_token(TK_EOF, 0, 0, 0) }
         frame handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
         l handle[Lexer] = &frame.lexer

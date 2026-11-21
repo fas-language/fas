@@ -87,9 +87,34 @@ fn lex_loc(n handle[CNames], l handle[Lexer], at usize) u32 {
     return id
 }
 
-fn cc_digit(c u8) bool { return c >= 48 && c <= 57 }
-fn cc_alpha(c u8) bool { return (c | 32) >= 97 && (c | 32) <= 122 }
-fn cc_space(c u8) bool { return c == 32 || (c >= 9 && c <= 13) }
+// Classify byte ranges once. Non-ASCII identifier characters are classified
+// separately by Unicode scalar value.
+const B_DIGIT u8 = 1
+const B_ID u8 = 2
+const B_SPACE u8 = 4
+const B_UTF8 u8 = 8
+const B_PUNCT u8 = 16
+const B_CLASS arr[256, u8] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    4, 16, 0, 16, 0, 16, 16, 0, 16, 16, 16, 16, 16, 16, 16, 16,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 16, 16, 16, 16, 16, 16,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 16, 0, 16, 16, 2,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 16, 16, 16, 16, 0,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+}
+
+fn cc_digit(c u8) bool { return (B_CLASS[zext[usize](c)] & B_DIGIT) != 0 }
+fn cc_space(c u8) bool { return (B_CLASS[zext[usize](c)] & B_SPACE) != 0 }
 
 fn cc_hex(c u8) u32 {
     if cc_digit(c) { return zext[u32](c - 48) }
@@ -111,7 +136,8 @@ fn cc_ucn(p addr) Rune {
 }
 
 fn cc_id_ascii(ch u8, first bool, gnu bool) bool {
-    return cc_alpha(ch) || ch == 95 || (!first && cc_digit(ch)) || (gnu && ch == 36)
+    class u8 = B_CLASS[zext[usize](ch)]
+    return (class & B_ID) != 0 || (!first && (class & B_DIGIT) != 0) || (gnu && ch == 36)
 }
 
 fn cc_is_ucn(p addr) bool { return p[u8] == 92 && (p[u8, 1] == 117 || p[u8, 1] == 85) }
@@ -244,6 +270,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
     flags u8 = l.flags
     l.flags = 0
     ch u8 = start[u8]
+    class u8 = B_CLASS[zext[usize](ch)]
     prefix usize = literal_prefix(start)
     kind u8 = TK_PUNCT
     width usize = 0
@@ -276,7 +303,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
         l.header = false
         id u32 = try lex_ident(n, l, start, loc)
         return cc_token(TK_IDENT, flags, loc, id)
-    } else if cc_digit(ch) || (ch == 46 && cc_digit(start[u8, 1])) {
+    } else if (class & B_DIGIT) != 0 || (ch == 46 && cc_digit(start[u8, 1])) {
         kind = TK_NUM
         width = 1
         while true {
@@ -292,7 +319,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
                 width += zext[usize](r.width)
             } else { break }
         }
-    } else if ch >= 128 || cc_is_ucn(start) {
+    } else if (class & B_UTF8) != 0 || cc_is_ucn(start) {
         ucn bool = cc_is_ucn(start)
         r Rune = if ucn { cc_ucn(start) } else { utf8(start) }
         if r.width == 0 { try cc_error(n, loc, c"invalid UTF-8 or universal character name") }
@@ -307,7 +334,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
         kind = TK_OTHER
     } else {
         width = punct_width(start)
-        if width == 1 && !bytes_contains(bytes_c(c"[](){}.&*+-~!/%<>^|?:;=,#"), ch) { kind = TK_OTHER }
+        if width == 1 && (class & B_PUNCT) == 0 { kind = TK_OTHER }
     }
     l.header = false
     l.at += width

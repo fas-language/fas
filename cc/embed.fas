@@ -62,6 +62,48 @@ fn embed_copy(p handle[Pp], tokens handle[Vec[Token]], a Arg) void {
     for j usize in a.start..a.start + a.size { vec_push[Token](&p.pending.tokens, tokens.p[Token, j]) }
 }
 
+// Yield resource bytes on demand. Text uses the same source stream as
+// the parser, so a large resource needs no materialized token vector.
+struct EmbedOutput {
+    data Bytes
+    at usize
+    comma_next bool
+    active bool
+    comma Token
+    value Token
+    suffix Span
+}
+
+fn embed_next(p handle[Pp]) Token {
+    output handle[EmbedOutput] = &p.embedded
+    if output.at != output.data.n {
+        if output.comma_next {
+            output.comma_next = false
+            return output.comma
+        }
+        byte u8 = output.data.p[u8, output.at]
+        i usize = zext[usize](byte)
+        id u32 = p.byte_spellings[i]
+        if id == 0 {
+            number Token = pp_number(&p.names, output.value, zext[u64](byte))
+            id = number.payload
+            p.byte_spellings[i] = id
+        }
+        output.at += 1
+        output.comma_next = true
+        t Token = output.value
+        t.payload = id
+        return t
+    }
+    if output.suffix.at != output.suffix.n {
+        t Token = output.suffix.p[Token, zext[usize](output.suffix.at)]
+        output.suffix.at += 1
+        return t
+    }
+    output.active = false
+    return cc_token(TK_EOF, 0, 0, 0)
+}
+
 fn pp_embed(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
     n handle[CNames] = &p.names
     expanded Vec[Token] = {}
@@ -83,11 +125,12 @@ fn pp_embed(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
     size usize = if file.content.n < spec.limit { file.content.n } else { spec.limit }
     if size == 0 { embed_copy(p, &expanded, spec.empty); return }
     embed_copy(p, &expanded, spec.prefix)
-    t Token = cc_token(TK_NUM, F_SPACE, loc, 0)
-    comma Token = cc_token(TK_PUNCT, 0, loc, cc_intern(n, bytes_c(c",")))
-    for i usize in 0..size {
-        if i != 0 { vec_push[Token](&p.pending.tokens, comma) }
-        vec_push[Token](&p.pending.tokens, pp_number(n, t, zext[u64](file.content.p[u8, i])))
-    }
-    embed_copy(p, &expanded, spec.suffix)
+    stream handle[EmbedOutput] = &p.embedded
+    stream.data = bytes(file.content.p, size)
+    stream.at = 0
+    stream.comma_next = false
+    stream.active = true
+    stream.value = cc_token(TK_NUM, F_SPACE, loc, 0)
+    stream.comma = cc_token(TK_PUNCT, 0, loc, cc_intern(n, bytes_c(c",")))
+    stream.suffix = {expanded.p + spec.suffix.start * sizeof[Token], trunc[u32](spec.suffix.size), 0}
 }

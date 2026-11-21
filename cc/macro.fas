@@ -11,8 +11,6 @@ value struct Arg { start usize, size usize }
 struct ArgCache { tokens Vec[Token], ready bool }
 struct Expand {
     spans Vec[Span]
-    tokens Vec[Token]
-    at usize
     source bool
     expression bool
 }
