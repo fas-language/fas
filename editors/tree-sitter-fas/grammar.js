@@ -161,6 +161,7 @@ module.exports = grammar({
 
     global_declaration: ($) =>
       seq(
+        optional('thread'),
         'var',
         field('name', $.identifier),
         field('type', $._type),

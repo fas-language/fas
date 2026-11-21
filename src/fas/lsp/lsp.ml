@@ -176,6 +176,7 @@ let config_for state key : Cli.t =
     all_errors = false;
     native = false;
     native_runtime = Cli.Auto;
+    pic = false;
   }
 
 let lsp_message (diag : Diag.t) =

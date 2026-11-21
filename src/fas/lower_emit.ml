@@ -842,11 +842,13 @@ let array_global mc ~name ~elem_ty ~elems ~align =
 
 (* A global variable: [bytes] is its initial image (None = zero) and
    [pointers] the (offset, symbol, addend) addresses stored in it *)
-let storage_global mc ~name ~size ~bytes ~pointers ~readonly ~align ~(linkage : Ast.global_linkage) =
+let storage_global mc ~name ~size ~bytes ~pointers ~readonly ~thread_local
+    ~align ~(linkage : Ast.global_linkage) =
   let name = link_symbol name in
   let pointers = List.map (fun (off, sym, addend) -> (off, link_symbol sym, addend)) pointers in
   let g = base_global name size align in
   g.readonly <- readonly;
+  g.thread_local <- thread_local;
   (match linkage with
   | Ast.Internal_global -> g.glinkage <- Local
   | Ast.Export_c -> g.glinkage <- Global

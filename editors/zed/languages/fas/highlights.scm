@@ -14,6 +14,7 @@
 (raw_c_body) @embedded
 (pkg_declaration "pkg" @keyword)
 (struct_declaration "value" @keyword)
+(global_declaration "thread" @keyword)
 (enum_declaration "enum" @keyword)
 (type_alias_declaration "type" @keyword)
 (const_for_statement "in" @keyword)

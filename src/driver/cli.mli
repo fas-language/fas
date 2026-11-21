@@ -23,6 +23,7 @@ type t = {
   all_errors : bool;
   native : bool;  (** built-in x86-64 code generator; false only under the LLVM oracle *)
   native_runtime : native_runtime;
+  pic : bool;
 }
 
 type lsp_options = {

@@ -934,12 +934,17 @@ let check_program ?(limits = Limits.default) ?(c_aliases = []) ?(c_unsupported =
       index = None;
     }
   in
+  let thread_locals =
+    List.filter_map
+      (function Ast.Global { name; thread_local = true; _ } -> Some name | _ -> None)
+      program.Ast.items
+  in
   let* globals =
     Sema_global_env.collect
       ~array_lengths:(Sema_static_env.source_array_lengths program.Ast.items)
       ~generic_structs:program.Ast.items ~source_obj ~structs ~named_types
       ~consts:consts_ordered ~arrays:arrays_ordered ~global_names
-      ~address_value:(Sema_static_env.address_value address_context)
+      ~address_value:(Sema_static_env.address_value ~thread_locals address_context)
       ~readonly_names:symbolic_names
       (Sema_static_env.storage_items symbolic_names program.items)
   in

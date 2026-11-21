@@ -2612,6 +2612,7 @@ and construct_into ?alignment s destination construction =
           ty = t;
           init_value = Some value;
           readonly = true;
+          thread_local = false;
           linkage = Ast.Internal_global;
         }
         :: !(s.literal_globals);
@@ -3326,7 +3327,8 @@ let global_storage mc structs (global : Hir.global) =
               Some (Bytes.to_string data)
         in
         E.storage_global mc ~name:global.name ~size ~bytes ~pointers:(List.rev !pointers)
-          ~readonly:global.readonly ~align ~linkage:global.linkage;
+          ~readonly:global.readonly ~thread_local:global.thread_local ~align
+          ~linkage:global.linkage;
         Ok ()
       with Failure message | Invalid_argument message ->
         error Span.synthetic

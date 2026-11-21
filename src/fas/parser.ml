@@ -898,6 +898,14 @@ module P = struct
                    name name name)
               (span p) "`opaque` types were removed; `handle[T]` takes any struct";
           ]
+    | Token.Ident "thread" ->
+        let start = span p in
+        ignore (bump p);
+        if not (at p Token.Kw_var) then
+          error (span p) "`thread` only applies to `var` declarations"
+        else
+          let* x = global_item p ~thread_local:true Ast.Internal_global in
+          Ok [ Ast.with_extent (extent p start) x ]
     | Token.Ident "type" ->
         let start = span p in
         let* x = type_alias_item p in
@@ -979,7 +987,7 @@ module P = struct
           (Ast.Const
              { name; name_span; ty_span; ty; value; fill; span = s; extent = s })
 
-  and global_item p linkage =
+  and global_item ?(thread_local = false) p linkage =
     let s = span p in
     let* () = expected p Token.Kw_var in
     let name_span = span p in
@@ -1006,7 +1014,8 @@ module P = struct
     in
     let* () = end_stmt p in
     Ok
-      (Ast.Global { name; name_span; ty_span; ty; init; linkage; span = s; extent = s })
+      (Ast.Global
+         { name; name_span; ty_span; ty; init; linkage; thread_local; span = s; extent = s })
 
   and type_alias_item p =
     let s = span p in
@@ -1292,6 +1301,12 @@ module P = struct
         else if at p Token.Kw_var then
           let start = span p in
           let* global = global_item p Ast.Export_c in
+          ds (Ast.with_extent (extent p start) global :: acc)
+        else if (peek p).kind = Token.Ident "thread" && (peek_n p 1).kind = Token.Kw_var
+        then
+          let start = span p in
+          ignore (bump p);
+          let* global = global_item p ~thread_local:true Ast.Export_c in
           ds (Ast.with_extent (extent p start) global :: acc)
         else
           let start = span p in
@@ -2530,7 +2545,8 @@ module P = struct
         Error [ Diag.error (span p) ("expected an expression, found " ^ Token.show t) ]
 end
 
-let item_keywords = [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error"; "type" ]
+let item_keywords =
+  [ "const"; "var"; "struct"; "extern"; "fn"; "use"; "error"; "type"; "thread" ]
 
 let item_starts text =
   let n = String.length text in

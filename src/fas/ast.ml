@@ -232,6 +232,7 @@ and item =
       ty : ty;
       init : expr option;
       linkage : global_linkage;
+      thread_local : bool;
       span : Span.t;
       extent : Span.t;
     }
@@ -1215,10 +1216,11 @@ let render_program program =
             text "const";
             emit_body (Statements xs)
         | None -> emit_expr value)
-    | Global { name; ty; init; linkage; _ } ->
+    | Global { name; ty; init; linkage; thread_local; _ } ->
         (match linkage with
-        | Internal_global -> text "var "
-        | Export_c | Import_c | Import_const_c -> text "extern var ");
+        | Internal_global -> text (if thread_local then "thread var " else "var ")
+        | Export_c | Import_c | Import_const_c ->
+            text (if thread_local then "extern thread var " else "extern var "));
         add_name name;
         text " ";
         emit_ty ty;

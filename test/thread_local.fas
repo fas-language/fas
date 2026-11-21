@@ -1,0 +1,96 @@
+use "../lib/core.fas"
+use "../lib/thread.fas"
+
+struct TlsState {
+    tag u64
+    count u64
+}
+
+thread var tls_init u64 = 0x123456789abcdef0
+thread var tls_zero u64
+thread var tls_struct TlsState = { 77, 0 }
+thread var tls_bytes arr[4, u8] = b"\x7fELF"
+
+var worker_addrs arr[16, u64] = {}
+var worker_ok arr[16, u32] = {}
+var barrier u32 = 0
+var main_addr u64 = 0
+
+fn read_state(s handle[TlsState]) u64 {
+    return s.tag + s.count
+}
+
+fn tls_job(ctx addr, begin usize, end usize, worker u32) void {
+    k usize = zext[usize](worker)
+    // Verify initial .tdata / .tbss values for this thread
+    st handle[TlsState] = &tls_struct
+    if tls_init != 0x123456789abcdef0 { return }
+    if tls_zero != 0 { return }
+    if read_state(&tls_struct) != 77 { return }
+    if st.tag != 77 || st.count != 0 { return }
+    if tls_bytes[0] != 0x7f || tls_bytes[1] != 69 || tls_bytes[3] != 70 { return }
+    tls_init = 1000 + zext[u64](worker)
+    tls_zero = 2000 + zext[u64](worker)
+    st.count = 3000 + zext[u64](worker)
+    worker_addrs[k] = addr_bits(&tls_init)
+    // Wait until all 4 threads have written their own TLS copies
+    atomic_add[u32, acq_rel](&barrier, 1)
+    while atomic_load[u32, acquire](&barrier) < 4 {}
+    // Verify none of the other threads clobbered ours
+    if tls_init != 1000 + zext[u64](worker) { return }
+    if tls_zero != 2000 + zext[u64](worker) { return }
+    if tls_struct.count != 3000 + zext[u64](worker) { return }
+    worker_ok[k] = 1
+}
+
+fn check_round(n_workers u32) i32 {
+    for i usize in 0..16 {
+        worker_addrs[i] = 0
+        worker_ok[i] = 0
+    }
+    atomic_store[u32, release](&barrier, 0)
+    // Reset main thread's own TLS before pool_for (main thread is worker 0)
+    tls_init = 0x123456789abcdef0
+    tls_zero = 0
+    tls_struct.tag = 77
+    tls_struct.count = 0
+
+    p handle[Pool] = pool_start(n_workers)
+    pool_for(p, 4, 1, &tls_job, null)
+    pool_stop(p)
+
+    // Verify main thread's TLS was updated to worker 0's values
+    if tls_init != 1000 { return 10 }
+    if tls_zero != 2000 { return 11 }
+    if tls_struct.count != 3000 { return 12 }
+
+    // Verify all 4 workers succeeded and had distinct TLS addresses
+    for i usize in 0..4 {
+        if worker_ok[i] != 1 { return 20 + trunc[i32](i) }
+        if worker_addrs[i] == 0 { return 30 + trunc[i32](i) }
+        for j usize in 0..i {
+            if worker_addrs[j] == worker_addrs[i] {
+                return 40 + trunc[i32](i)
+            }
+        }
+    }
+    return 0
+}
+
+fn main() i32 {
+    // Verify main thread's initial TLS before any pool starts
+    if tls_init != 0x123456789abcdef0 { return 1 }
+    if tls_zero != 0 { return 2 }
+    if tls_struct.tag != 77 || tls_struct.count != 0 { return 3 }
+    if tls_bytes[0] != 0x7f || tls_bytes[3] != 70 { return 4 }
+    main_addr = addr_bits(&tls_init)
+    if main_addr == 0 { return 5 }
+
+    // Round 1
+    r1 i32 = check_round(4)
+    if r1 != 0 { return r1 }
+    // Round 2: fresh workers must see fresh initializer images again
+    r2 i32 = check_round(4)
+    if r2 != 0 { return r2 + 100 }
+    return 0
+}

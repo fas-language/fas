@@ -15,9 +15,17 @@ use "mem.fas"
 
 use "asm" <<S
     .text
+    .globl fas_lib_ehdr_start
+    .type fas_lib_ehdr_start, @function
+    .weak __ehdr_start
+fas_lib_ehdr_start:
+    movq __ehdr_start@GOTPCREL(%rip), %rax
+    ret
+    .size fas_lib_ehdr_start, .-fas_lib_ehdr_start
+
     .globl fas_lib_clone
     .type fas_lib_clone, @function
-# long fas_lib_clone(u64 flags, void *stack_top, void *fn, void *arg, u32 *ctid)
+# long fas_lib_clone(u64 flags, void *stack_top, void *fn, void *arg, u32 *ctid, void *tls)
 # The child runs fn(arg) on the new stack, then exits its thread (the
 # kernel clears *ctid and wakes its futex: that is the join).
 fas_lib_clone:
@@ -26,7 +34,7 @@ fas_lib_clone:
     movq %rcx, 8(%rsi)
     movq %r8, %r10
     xorl %edx, %edx
-    xorl %r8d, %r8d
+    movq %r9, %r8
     movl $56, %eax
     syscall
     testq %rax, %rax
@@ -47,7 +55,8 @@ fas_lib_clone:
 S
 
 extern "C" {
-    fn fas_lib_clone(flags u64, stack_top addr, f addr, arg addr, ctid addr) i64
+    fn fas_lib_ehdr_start() addr
+    fn fas_lib_clone(flags u64, stack_top addr, f addr, arg addr, ctid addr, tls addr) i64
 }
 
 const SYS_CLONE u64 = 56
@@ -55,6 +64,54 @@ const SYS_SCHED_GETAFFINITY u64 = 204
 
 // CLONE_VM | FS | FILES | SIGHAND | THREAD | SYSVSEM | CHILD_CLEARTID
 const THREAD_CLONE_FLAGS u64 = 0x250f00
+const CLONE_SETTLS u64 = 0x80000
+
+struct TlsBlock {
+    base addr
+    size usize
+    tp addr
+}
+
+// Allocates and initializes a variant-II x86-64 TLS block + TCB from PT_TLS
+// so worker threads created with clone(2) each have their own copy of
+// .tdata/.tbss. Leaves out zeroed when the image has no PT_TLS segment.
+fn thread_tls_alloc(out handle[TlsBlock]) void {
+    out.base = null
+    out.size = 0
+    out.tp = null
+    ehdr addr = fas_lib_ehdr_start()
+    if ehdr == null { return }
+    e_type u16 = (ehdr + 16)[u16]
+    load_bias usize = if e_type == 3 { addr_bits(ehdr) } else { 0 }
+    phoff usize = (ehdr + 32)[usize]
+    phentsize usize = zext[usize]((ehdr + 54)[u16])
+    phnum usize = zext[usize]((ehdr + 56)[u16])
+    for i usize in 0..phnum {
+        ph addr = ehdr + phoff + i * phentsize
+        if ph[u32] == 7 {
+            p_vaddr usize = (ph + 16)[usize]
+            p_filesz usize = (ph + 32)[usize]
+            p_memsz usize = (ph + 40)[usize]
+            if p_memsz == 0 { return }
+            p_align usize = (ph + 48)[usize]
+            align usize = if p_align == 0 { 1 } else { p_align }
+            block usize = (p_memsz + align - 1) & ~(align - 1)
+            tp_align usize = if align < 64 { 64 } else { align }
+            map_size usize = block + tp_align + 64
+            base addr = mem_pages(map_size)
+            tp_bits usize = (addr_bits(base) + block + tp_align - 1) & ~(tp_align - 1)
+            tp addr = addr_from_bits(tp_bits)
+            if p_filesz > 0 {
+                mem_copy(addr_from_bits(tp_bits - block), addr_from_bits(load_bias + p_vaddr), p_filesz)
+            }
+            tp[addr] = tp
+            out.base = base
+            out.size = map_size
+            out.tp = tp
+            return
+        }
+    }
+}
 
 // the CPUs this process may run on
 fn thread_cpu_count() u32 {
@@ -88,6 +145,8 @@ struct Pool {
     quit u32
     tids arr[256, u32]    // CHILD_CLEARTID words, for the join
     stacks arr[256, addr]
+    tls_bases arr[256, addr]
+    tls_sizes arr[256, usize]
 }
 
 struct PoolWorker {
@@ -148,9 +207,14 @@ fn pool_start(threads u32) handle[Pool] {
         p.stacks[k] = stack
         pool_worker_args[k].pool = handle_addr(p)
         pool_worker_args[k].index = i
+        tb TlsBlock = {}
+        thread_tls_alloc(&tb)
+        p.tls_bases[k] = tb.base
+        p.tls_sizes[k] = tb.size
+        flags u64 = if tb.tp != null { THREAD_CLONE_FLAGS | CLONE_SETTLS } else { THREAD_CLONE_FLAGS }
         p.tids[k] = 1
-        r i64 = fas_lib_clone(THREAD_CLONE_FLAGS, stack + POOL_STACK, &pool_worker_main,
-            &pool_worker_args[k], &p.tids[k])
+        r i64 = fas_lib_clone(flags, stack + POOL_STACK, &pool_worker_main,
+            &pool_worker_args[k], &p.tids[k], tb.tp)
         if r < 0 {
             eprint_raw(c"fas library: cannot start a thread\n")
             os_exit(2)
@@ -209,6 +273,11 @@ fn pool_stop(p handle[Pool]) void {
             r i64 = syscall(SYS_FUTEX, &p.tids[k], FUTEX_WAIT_SHARED, t, 0, 0, 0)
         }
         os_munmap(p.stacks[k], POOL_STACK)
+        if p.tls_bases[k] != null {
+            os_munmap(p.tls_bases[k], p.tls_sizes[k])
+            p.tls_bases[k] = null
+            p.tls_sizes[k] = 0
+        }
     }
     p.workers = 1
     atomic_store[u32, relaxed](&p.quit, 0)

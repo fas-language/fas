@@ -1,0 +1,25 @@
+struct Slot {
+    id u64
+    val u64
+}
+
+thread var dso_init u64 = 0xfeedfacecafebeef
+thread var dso_zero u64
+thread var dso_slot Slot = { 11, 22 }
+
+extern "C" {
+    fn dso_get_init() u64 { return dso_init }
+    fn dso_set_init(v u64) void { dso_init = v }
+    fn dso_get_zero() u64 { return dso_zero }
+    fn dso_set_zero(v u64) void { dso_zero = v }
+    fn dso_get_slot_sum() u64 {
+        s handle[Slot] = &dso_slot
+        return s.id + s.val
+    }
+    fn dso_set_slot(id u64, val u64) void {
+        s handle[Slot] = &dso_slot
+        s.id = id
+        s.val = val
+    }
+    fn dso_addr() addr { return &dso_init }
+}

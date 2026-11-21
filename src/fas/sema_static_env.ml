@@ -107,6 +107,7 @@ let storage_items names items =
                  init = Some value;
                  span;
                  linkage = Ast.Internal_global;
+                 thread_local = false;
                  extent;
                })
       | Ast.Global _ as item -> Some item
@@ -126,7 +127,7 @@ let declarations ~source_obj names items =
             [ Diag.error Span.synthetic "internal error: invalid static declaration" ])
     (storage_items names items)
 
-let address_value c ty expression =
+let address_value ?(thread_locals = []) c ty expression =
   let error span message = Error [ Diag.error span message ] in
   let ( let* ) x f = match x with Ok v -> f v | Error _ as e -> e in
   let rec address_constant_read = function
@@ -169,7 +170,14 @@ let address_value c ty expression =
   let rec place = function
     | Ast.Ident (name, span) -> (
         match Sema_context.lookup_global name c.Sema_context.globals with
-        | Some (_, ty, _) -> Ok (name, ty, 0)
+        | Some (_, ty, _) ->
+            if List.mem name thread_locals then
+              error span
+                (Printf.sprintf
+                   "cannot take the address of thread-local `%s` in a constant \
+                    initializer"
+                   name)
+            else Ok (name, ty, 0)
         | None -> (
             match List.find_opt (fun (entry, _, _) -> entry = name) c.arrays with
             | Some (_, (Hir.Array _ as ty), _) -> Ok (name, ty, 0)

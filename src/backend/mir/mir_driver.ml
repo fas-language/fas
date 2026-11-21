@@ -13,7 +13,8 @@ let verified (m : Fir.modul) =
   | errs -> Error ("native backend internal error: invalid Fir:\n" ^ String.concat "\n" errs)
 
 (* a position-independent ELF object; [debug] (-g) adds DWARF line tables *)
-let compile_object ?debug ~optimization:_ m = Result.bind (verified m) (Mir_emit.compile_object ?debug)
+let compile_object ?debug ?tls_gd ~optimization:_ m =
+  Result.bind (verified m) (Mir_emit.compile_object ?debug ?tls_gd)
 
 (* a static executable, Fas startup *)
 let link_files ?debug ~optimization:_ ?inputs ?options ~output m =

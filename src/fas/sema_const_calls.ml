@@ -442,6 +442,7 @@ let resolve ~sema (program : Ast.program) =
                 ty;
                 init = None;
                 linkage = Ast.Internal_global;
+                thread_local = false;
                 span;
                 extent = span;
               }

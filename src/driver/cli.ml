@@ -23,6 +23,7 @@ type t = {
   all_errors : bool;
   native : bool;  (** built-in x86-64 code generator; false only under the LLVM oracle *)
   native_runtime : native_runtime;
+  pic : bool;
 }
 
 type lsp_options = {
@@ -162,6 +163,7 @@ let parse_invocation ~subcommand argv =
   let oracle = oracle () in
   let native = ref (not oracle) in
   let runtime = ref None in
+  let pic = ref false in
   let add_link_inputs values =
     link_inputs_rev := List.rev_append values !link_inputs_rev
   in
@@ -224,6 +226,7 @@ let parse_invocation ~subcommand argv =
                 all_errors = !all_errors;
                 native = !native;
                 native_runtime = Option.value ~default:Auto !runtime;
+                pic = !pic;
               }
             in
             Ok (if subcommand = Check_subcommand then Check config else Run config)
@@ -344,6 +347,9 @@ let parse_invocation ~subcommand argv =
                   debug)
       | "-g" ->
           loop (i + 1) input output emit keep optimization optimization_explicit true
+      | "-fPIC" | "-fpic" ->
+          pic := true;
+          loop (i + 1) input output emit keep optimization optimization_explicit debug
       | "--no-inline" ->
           Error "`--no-inline` was removed; Fas has no inliner yet"
       | ("-l" | "-L") as flag ->

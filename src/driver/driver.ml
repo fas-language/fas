@@ -2157,7 +2157,7 @@ let run_unprotected ?header_output config =
                 match
                   Result.bind (native_ir ())
                     (Mir_driver.compile_object ~debug:config.Cli.debug
-                       ~optimization:config.Cli.optimization)
+                       ~tls_gd:config.Cli.pic ~optimization:config.Cli.optimization)
                 with
                 | Error message -> Error [ Diag.error Span.synthetic message ]
                 | Ok image -> (

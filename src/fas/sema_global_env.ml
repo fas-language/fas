@@ -183,7 +183,7 @@ let collect ~array_lengths ~source_obj ~structs ~named_types ~generic_structs ~c
   in
   let rec globals acc = function
     | [] -> Ok (List.rev acc)
-    | Ast.Global { name; ty_span; ty; init; linkage; _ } :: rest ->
+    | Ast.Global { name; ty_span; ty; init; linkage; thread_local; _ } :: rest ->
         let* ty = source_obj ty_span ty in
         let* init_value =
           match init with
@@ -199,6 +199,7 @@ let collect ~array_lengths ~source_obj ~structs ~named_types ~generic_structs ~c
              init_value;
              linkage;
              readonly = List.mem name readonly_names;
+             thread_local;
            }
           :: acc)
           rest

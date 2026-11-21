@@ -1302,7 +1302,9 @@ let compile_object ?debug ?tls_gd m = generate ?debug ?tls_gd ~startup:false ~pi
 let link_files ?debug ?(inputs = []) ?options ~output m =
   let mode = match options with Some (o : Fas_linker.Options.t) -> o.mode | None -> Static in
   let pic = mode <> Static in
-  match generate ?debug ~startup:true ~pic ~self_relocate:(mode = Static_pie) m with
+  let tls_gd = mode = Shared in
+  let startup = mode <> Shared in
+  match generate ?debug ~startup ~pic ~tls_gd ~self_relocate:(mode = Static_pie) m with
   | Error _ as e -> e
   | Ok obj -> (
       try

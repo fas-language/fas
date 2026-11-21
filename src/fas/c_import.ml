@@ -4776,6 +4776,7 @@ let map_declarations ?(container = false) ?(alloc_size_parameters = [])
                        linkage =
                          (if top_level_const_node node then Ast.Import_const_c
                           else Ast.Import_c);
+                       thread_local = false;
                        span;
                        name_span = span;
                        extent = span;
@@ -5217,6 +5218,7 @@ let prune_unreferenced_records ~referenced_names imported =
                         ty;
                         init = None;
                         linkage = Ast.Import_c;
+                        thread_local = false;
                         span = Span.synthetic;
                         name_span = Span.synthetic;
                         extent = Span.synthetic;

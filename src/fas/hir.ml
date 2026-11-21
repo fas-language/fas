@@ -304,6 +304,7 @@ type global = {
   ty : ty;
   init_value : global_initializer option;
   readonly : bool;
+  thread_local : bool;
   linkage : Ast.global_linkage;
 }
 
