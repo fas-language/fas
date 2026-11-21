@@ -19,6 +19,7 @@ use "parse_expr.fas"
 use "parse_stmt.fas"
 use "sema.fas"
 use "sema_expr.fas"
+use "sema_wide.fas"
 use "sema_init.fas"
 use "parse_dump.fas"
 
@@ -252,7 +253,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
         fd i32 = STDOUT
         if o.dump_ast {
             if o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
-                fd = try os_open(o.output, 577, 0o666)
+                fd = try os_open(o.output, O_WRONLY | O_CREAT | O_TRUNC, 0o666)
             }
             parser.on_function = &pa_dump_callback
             parser.on_object = &pa_dump_callback

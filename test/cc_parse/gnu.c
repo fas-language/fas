@@ -23,3 +23,13 @@ int g(int x)
 local:
     return x ?: 7;
 }
+typedef long lowered_alignment __attribute__((aligned(1)));
+static_assert(alignof(lowered_alignment) == 1);
+static_assert(sizeof(lowered_alignment) == sizeof(long));
+struct WithLoweredAlignment { char c; lowered_alignment value; };
+static_assert(__builtin_offsetof(struct WithLoweredAlignment, value) == 1);
+
+static const int (*qualified_array(const struct Matrix { int row[3]; } *m))[3] {
+    const int (*row)[3] = &m->row;
+    return row;
+}

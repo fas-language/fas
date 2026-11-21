@@ -25,6 +25,7 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     } else {
         if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
         try se_conversion(p, ty, e)
+        out.tree = se_convert(ty, e)
     }
     if constant && (e.flags & NF_OVERFLOW) != 0 {
         try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
@@ -186,6 +187,11 @@ fn pa_add_init(xs handle[AstList], e handle[Ast], designators handle[Ast], idx u
 
 fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
     t Token = try pa_peek(p)
+    p.init_depth += 1
+    defer { p.init_depth -= 1 }
+    if se_vla(ty) && (!(try pa_at(p, c"{")) || !(try pa_at_second(p, c"}"))) {
+        try pa_error(p, t.loc, c"a variable length array can only have an empty initializer")
+    }
     if !(try pa_accept(p, c"{")) {
         try se_initializer_expr(p, ty, try pa_expression(p, 2), constant, out)
         return
@@ -220,6 +226,10 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         } else {
             if idx >= count { try pa_error(p, tok.loc, c"excess elements in initializer") }
             dest u32 = if d.first == null { se_init_elem(ty, idx) } else { d.ty }
+            if ty_is_record(ty) && ty_is_array(dest) && ty_node(ty_unqual(dest)).aux1 == ARR_INCOMPLETE &&
+                !(pa_is_gnu(p) && constant && p.init_depth == 1) {
+                try pa_error(p, tok.loc, c"initialization of a nested flexible array member")
+            }
             try pa_init_element(p, dest, constant, &elem)
         }
         pa_add_init(&xs, elem.tree, d.first, idx)
@@ -242,5 +252,7 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         e handle[Ast] = item.a
         n.flags |= e.flags & (NF_ICE | NF_FLOAT_CONST)
         n.value = e.value
+        n.wide = e.wide
+        n.imag = e.imag
     }
 }

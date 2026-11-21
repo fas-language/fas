@@ -10,12 +10,24 @@ fn se_negative(ty u32, value u64) bool {
 
 fn se_fp(a handle[Ast]) f64 {
     if (a.flags & NF_FLOAT_CONST) != 0 { return bitcast[f64](a.value) }
+    if a.wide != null {
+        w WideInt = wi_from_ast(a, ty_int_bits(a.ty))
+        negative bool = !ty_is_unsigned(a.ty) && wi_bit(w, w.width - 1) != 0
+        if negative { wi_negate(w) }
+        v f64 = 0.0
+        i u32 = w.words
+        while i > 0 {
+            i -= 1
+            v = v * 4294967296.0 + cvt[f64](w.p[u32, zext[usize](i)])
+        }
+        return if negative { -v } else { v }
+    }
     if ty_is_unsigned(a.ty) { return cvt[f64](a.value) }
     return cvt[f64](bitcast[i64](a.value))
 }
 
 fn se_set_fp(a handle[Ast], v f64) void {
-    if a.ty == TY_FLOAT { v = cvt[f64](cvt[f32](v)) }
+    if ty_real_part(a.ty) == TY_FLOAT { v = cvt[f64](cvt[f32](v)) }
     a.value = bitcast[u64](v)
     a.flags |= NF_FLOAT_CONST | NF_STATIC
 }
@@ -28,23 +40,57 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
     if !ty_is_scalar(ty) || !ty_is_scalar(from) ||
         (ty_is_ptr(ty) && ty_is_floating(from)) || (ty_is_floating(ty) && ty_is_ptr(from)) ||
         (ty_is_nullptr(ty) && !ty_is_nullptr(from)) {
-        if pa_is_gnu(p) && (ty_is_vector(ty) || ty_is_vector(from)) && ty_size(ty) == ty_size(from) { return n }
+        if pa_is_gnu(p) && (ty_is_vector(ty) || ty_is_vector(from)) && ty_size(ty) == ty_size(from) {
+            n.flags = a.flags & NF_STATIC
+            return n
+        }
         if pa_is_gnu(p) && ty_compatible(ty_unqual(ty), ty_unqual(from)) { return n }
         try pa_error(p, t.loc, c"invalid cast between these types")
     }
-    n.flags = a.flags & (NF_STATIC | NF_OVERFLOW)
+    se_cast_constant(n, a)
+    return n
+}
+
+fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
+    ty u32 = n.ty
+    from u32 = se_decay(a.ty)
+    n.flags |= a.flags & (NF_STATIC | NF_OVERFLOW)
     if ty_is_integer(ty) && (a.flags & NF_ICE) != 0 {
         n.flags |= NF_ICE
-        n.value = se_value(ty, a.value)
+        if ty_is_bool(ty) { n.value = if se_truth(a) { 1 } else { 0 } }
+        else if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(a, ty_int_bits(ty))) }
+        else { n.value = se_value(ty, a.value) }
     } else if ty_is_integer(ty) && (a.flags & NF_FLOAT_CONST) != 0 {
         v f64 = se_fp(a)
-        n.value = se_value(ty, if ty_is_unsigned(ty) { cvt[u64](v) } else { bitcast[u64](cvt[i64](v)) })
-        if a.kind == ND_FLOAT { n.flags |= NF_ICE }
-    } else if ty_is_real_float(ty) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
-        se_set_fp(n, se_fp(a))
+        if ty_is_bool(ty) { n.value = if se_truth(a) { 1 } else { 0 } }
+        else { n.value = se_value(ty, if ty_is_unsigned(ty) { cvt[u64](v) } else { bitcast[u64](cvt[i64](v)) }) }
+        if a.kind == ND_FLOAT && ty_is_real_float(from) { n.flags |= NF_ICE }
+    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
+        se_set_complex(n, se_fp(a), if ty_is_complex(ty) { se_im(a) } else { 0.0 })
     } else if ty_is_ptr(ty) && se_null(a) { n.flags |= NF_STATIC | NF_ICE }
     if ty_is_nullptr(from) && ty_is_bool(ty) { n.flags |= NF_STATIC; n.value = 0 }
+}
+
+fn se_convert(dest u32, src handle[Ast]) handle[Ast] {
+    if dest == TY_INVALID || src.ty == TY_INVALID || src.ty == dest { return src }
+    n handle[Ast] = pa_node(ND_CAST, src.loc, dest)
+    n.flags = NF_IMPLICIT
+    n.a = src
+    se_cast_constant(n, src)
     return n
+}
+
+fn se_im(a handle[Ast]) f64 {
+    if ty_is_complex(a.ty) && (a.flags & NF_FLOAT_CONST) != 0 { return bitcast[f64](a.imag) }
+    return 0.0
+}
+
+fn se_set_complex(a handle[Ast], real f64, imag f64) void {
+    se_set_fp(a, real)
+    if ty_is_complex(a.ty) {
+        if ty_real_part(a.ty) == TY_FLOAT { imag = cvt[f64](cvt[f32](imag)) }
+        a.imag = bitcast[u64](imag)
+    }
 }
 
 fn se_promote_expr(a handle[Ast]) u32 {
@@ -83,7 +129,7 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     if pa_is(p, t, c"&") {
         s handle[Symbol] = a.decl
         if !se_addressable(a) || (a.flags & NF_BITFIELD) != 0 ||
-            (s != null && s.storage == SC_REGISTER) {
+            (s != null && s.storage == SC_REGISTER) || (a.kind == ND_COMPOUND && a.op == zext[u32](SC_REGISTER)) {
             try pa_error(p, t.loc, c"cannot take the address of this expression")
         }
         n.ty = ty_ptr(a.ty)
@@ -102,7 +148,7 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     }
     if pa_is(p, t, c"++") || pa_is(p, t, c"--") {
         try se_modifiable(p, a)
-        if !ty_is_integer(ty) && !ty_is_ptr(ty) && !ty_is_real_float(ty) {
+        if !ty_is_arith(ty) && !ty_is_ptr(ty) {
             try pa_error(p, t.loc, c"invalid increment or decrement operand")
         }
         return n
@@ -111,8 +157,8 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
         try se_scalar(p, a)
         n.ty = TY_INT
         n.flags = a.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)
-        n.value = if a.value == 0 { 1 } else { 0 }
-        if (a.flags & NF_FLOAT_CONST) != 0 { n.value = if se_fp(a) == 0.0 { 1 } else { 0 } }
+        n.value = if se_truth(a) { 0 } else { 1 }
+
         return n
     }
     tilde bool = pa_is(p, t, c"~")
@@ -122,7 +168,8 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     }
     n.ty = se_promote_expr(a)
     n.flags = a.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)
-    if (a.flags & NF_ICE) != 0 {
+    if (a.flags & NF_ICE) != 0 && ty_int_bits(n.ty) > 64 { wi_unary(n, a, negate, tilde) }
+    else if (a.flags & NF_ICE) != 0 {
         raw u64 = se_value(n.ty, a.value)
         n.value = raw
         if tilde { n.value = se_value(n.ty, ~raw) }
@@ -132,22 +179,28 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
         }
     } else if (a.flags & NF_FLOAT_CONST) != 0 {
         v f64 = se_fp(a)
-        se_set_fp(n, if negate { -v } else { v })
+        im f64 = se_im(a)
+        if negate { v = -v; im = -im }
+        if tilde { im = -im }
+        se_set_complex(n, v, im)
     }
     return n
 }
 
 fn se_truth(a handle[Ast]) bool {
-    if (a.flags & NF_FLOAT_CONST) != 0 { return se_fp(a) != 0.0 }
+    if (a.flags & NF_FLOAT_CONST) != 0 { return se_fp(a) != 0.0 || se_im(a) != 0.0 }
     if ty_is_nullptr(a.ty) { return false }
+    if a.wide != null { return wi_ast_length(a) != 0 }
     return a.value != 0
 }
 
 fn se_fold_float(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast], k u8) void {
     x f64 = se_fp(a)
     y f64 = se_fp(b)
+    ix f64 = se_im(a)
+    iy f64 = se_im(b)
     if k == 8 {
-        eq bool = x == y
+        eq bool = x == y && ix == iy
         if pa_is(p, t, c"!=") { eq = !eq }
         n.value = if eq { 1 } else { 0 }
         return
@@ -160,11 +213,22 @@ fn se_fold_float(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b hand
         n.value = if yes { 1 } else { 0 }
         return
     }
-    v f64 = x + y
-    if pa_is(p, t, c"-") { v = x - y }
-    if pa_is(p, t, c"*") { v = x * y }
-    if pa_is(p, t, c"/") { v = x / y }
-    se_set_fp(n, v)
+    real f64 = 0.0
+    imag f64 = 0.0
+    if !ty_is_complex(n.ty) {
+        if pa_is(p, t, c"+") { real = x + y }
+        else if pa_is(p, t, c"-") { real = x - y }
+        else if pa_is(p, t, c"*") { real = x * y }
+        else { real = x / y }
+    } else if pa_is(p, t, c"+") { real = x + y; imag = ix + iy }
+    else if pa_is(p, t, c"-") { real = x - y; imag = ix - iy }
+    else if pa_is(p, t, c"*") { real = x * y - ix * iy; imag = x * iy + ix * y }
+    else {
+        norm f64 = y * y + iy * iy
+        real = (x * y + ix * iy) / norm
+        imag = (ix * y - x * iy) / norm
+    }
+    se_set_complex(n, real, imag)
 }
 
 fn se_fold_int(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast], ty u32, k u8) void {
@@ -196,7 +260,7 @@ fn se_fold_int(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle
         shift u32 = trunc[u32](y)
         if pa_is(p, t, c"<<") {
             raw = x << shift
-            if !uns && (sx < 0 || raw >> shift != x) { over = true }
+            if !uns && (sx < 0 || raw >> shift != x || (width < 64 && raw >> width != 0)) { over = true }
             // Shift into the sign bit is accepted by Clang for C.
         } else {
             raw = if uns { x >> shift } else { bitcast[u64](sx >> shift) }
@@ -243,12 +307,13 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     if x == TY_INVALID || y == TY_INVALID { return n }
     if se_assign_word(p, t) {
         try se_modifiable(p, a)
-        if pa_is(p, t, c"=") { try se_conversion(p, x, b) }
+        if pa_is(p, t, c"=") { try se_conversion(p, x, b); n.b = se_convert(x, b) }
         else {
             word Bytes = cc_spelling(p.names, t)
             base u32 = cc_intern(p.names, bytes_sub(word, 0, word.n - 1))
             calc handle[Ast] = try se_binary(p, cc_token(TK_PUNCT, 0, t.loc, base), a, b)
             try se_conversion(p, x, calc)
+            n.operand_ty = calc.operand_ty
         }
         n.ty = x
         return n
@@ -282,6 +347,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
             try se_pointer_math(p, t, x)
             try se_pointer_math(p, t, y)
             n.ty = TY_LONG
+            if pa_is_gnu(p) && (a.flags & NF_STATIC) != 0 && (b.flags & NF_STATIC) != 0 { n.flags |= NF_STATIC }
             return n
         }
         if (ptr_x && ty_is_integer(y)) || (ptr_y && ty_is_integer(x) && pa_is(p, t, c"+")) {
@@ -297,6 +363,11 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
             n.ty = TY_INT
             return n
         }
+        if pa_is_gnu(p) && ptr_x && ptr_y {
+            cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"comparison of distinct pointer types"))
+            n.ty = TY_INT
+            return n
+        }
         try pa_error(p, t.loc, c"incompatible operands to pointer comparison")
     }
     integer bool = (k >= 5 && k <= 7) || k == 10 || pa_is(p, t, c"%")
@@ -306,12 +377,14 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     }
     ty u32 = if k == 10 { se_promote_expr(a) } else { se_arith_type(a, b) }
     n.ty = if compare { TY_INT } else { ty }
+    n.operand_ty = ty
     n.flags = (a.flags | b.flags) & NF_OVERFLOW
     if pa_is_gnu(p) && (a.flags & NF_STATIC) != 0 && (b.flags & NF_STATIC) != 0 && k == 11 { n.flags |= NF_STATIC }
     if ty_is_integer(ty) && (a.flags & NF_ICE) != 0 && (b.flags & NF_ICE) != 0 {
         n.flags |= NF_ICE | NF_STATIC
-        se_fold_int(p, t, n, a, b, ty, k)
-    } else if ty_is_real_float(ty) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 &&
+        if ty_int_bits(ty) > 64 { wi_binary(p, t, n, a, b, ty, k) }
+        else { se_fold_int(p, t, n, a, b, ty, k) }
+    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 &&
         (b.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
         n.flags |= NF_STATIC
         se_fold_float(p, t, n, a, b, k)
@@ -343,10 +416,13 @@ fn se_conditional(p handle[Parser], t Token, cond handle[Ast], a handle[Ast], b 
     if (cond.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
         chosen handle[Ast] = if se_truth(cond) { a } else { b }
         n.flags = (chosen.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)) | (cond.flags & NF_OVERFLOW)
-        if ty_is_integer(ty) { n.value = se_value(ty, chosen.value) }
-        if ty_is_real_float(ty) && (chosen.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
+        if ty_is_integer(ty) {
+            if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(chosen, ty_int_bits(ty))) }
+            else { n.value = se_value(ty, chosen.value) }
+        }
+        if (ty_is_real_float(ty) || ty_is_complex(ty)) && (chosen.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
             n.flags &= ~NF_ICE
-            se_set_fp(n, se_fp(chosen))
+            se_set_complex(n, se_fp(chosen), se_im(chosen))
         }
     }
     return n

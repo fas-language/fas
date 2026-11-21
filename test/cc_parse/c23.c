@@ -49,3 +49,14 @@ done:
     int T = 1;
     return r.n + (int)u + (int)bytes + T;
 }
+static_assert((constexpr int){42} == 42);
+static_assert(sizeof (static int){2} == sizeof(int));
+static int *compound_address(void) { return &(static int){4}; }
+
+static int vla_switch(int n) {
+    int values[n];
+    switch (n) {
+    case 1: return sizeof values;
+    default: return 0;
+    }
+}

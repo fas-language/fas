@@ -85,6 +85,15 @@ fn se_vla(ty u32) bool {
     return n.kind == TYK_ARRAY && (n.aux1 == ARR_VLA || se_vla(n.elem))
 }
 
+fn se_variably_modified(ty u32) bool {
+    while true {
+        n handle[TypeNode] = ty_node(ty_unqual(ty))
+        if n.kind == TYK_ARRAY && n.aux1 == ARR_VLA { return true }
+        if n.kind != TYK_ARRAY && n.kind != TYK_PTR { return false }
+        ty = n.elem
+    }
+}
+
 fn se_finish_object(p handle[Parser], s handle[Symbol]) void fails {
     if !s.defined && s.tentative {
         n handle[TypeNode] = ty_node(ty_unqual(s.ty))
@@ -103,15 +112,32 @@ fn se_decay(ty u32) u32 {
 }
 
 fn se_null(e handle[Ast]) bool {
-    return ty_is_nullptr(e.ty) || (ty_is_integer(e.ty) && (e.flags & NF_ICE) != 0 && e.value == 0) ||
+    return ty_is_nullptr(e.ty) || (ty_is_integer(e.ty) && (e.flags & NF_ICE) != 0 && !se_truth(e)) ||
         (ty_is_ptr(e.ty) && (e.flags & NF_ICE) != 0 && e.value == 0 && ty_node(ty_unqual(e.ty)).elem == TY_VOID)
+}
+
+// C23 applies a qualifier on an array to the element type and vice versa.
+fn se_array_quals(ty u32) u32 {
+    quals u32 = ty_quals(ty)
+    while ty_is_array(ty) {
+        ty = ty_node(ty_unqual(ty)).elem
+        quals |= ty_quals(ty)
+    }
+    return quals
 }
 
 fn se_ptr_compatible(a u32, b u32, assign bool) bool {
     x u32 = ty_node(ty_unqual(a)).elem
     y u32 = ty_node(ty_unqual(b)).elem
-    if assign && (ty_quals(y) & ~ty_quals(x)) != 0 { return false }
+    if assign && (se_array_quals(y) & ~se_array_quals(x)) != 0 { return false }
     if ty_is_void(x) || ty_is_void(y) { return !ty_is_func(x) && !ty_is_func(y) }
+    while ty_is_array(x) && ty_is_array(y) {
+        ax handle[TypeNode] = ty_node(ty_unqual(x))
+        ay handle[TypeNode] = ty_node(ty_unqual(y))
+        if ax.aux1 == ARR_FIXED && ay.aux1 == ARR_FIXED && ax.arr_len != ay.arr_len { return false }
+        x = ax.elem
+        y = ay.elem
+    }
     return ty_compatible(ty_unqual(x), ty_unqual(y))
 }
 
@@ -121,6 +147,18 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
     if ty_is_arith(dest) && ty_is_arith(from) { return }
     if ty_compatible(ty_unqual(dest), ty_unqual(from)) { return }
     if ty_is_ptr(dest) && (se_null(src) || (ty_is_ptr(from) && se_ptr_compatible(dest, from, true))) { return }
+    if pa_is_gnu(p) && ty_is_ptr(dest) && ty_is_ptr(from) {
+        d u32 = ty_unqual(ty_node(ty_unqual(dest)).elem)
+        f u32 = ty_unqual(ty_node(ty_unqual(from)).elem)
+        ptr_signedness bool = ty_is_integer(d) && ty_is_integer(f) && ty_int_bits(d) == ty_int_bits(f) &&
+            (ty_make_unsigned(d) == ty_make_unsigned(f) || (ty_int_bits(d) == 8 && ty_int_rank(d) == ty_int_rank(f)))
+        if se_ptr_compatible(dest, from, false) || ptr_signedness {
+            cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"pointer conversion changes pointed-to qualifiers or signedness"))
+            return
+        }
+    }
+    if pa_is_gnu(p) && ty_is_vector(dest) && ty_is_vector(from) && ty_size(dest) == ty_size(from) &&
+        ty_is_integer(ty_node(ty_unqual(dest)).elem) && ty_is_integer(ty_node(ty_unqual(from)).elem) { return }
     if ty_is_bool(dest) && (ty_is_ptr(from) || ty_is_nullptr(from)) { return }
     try pa_error(p, src.loc, c"incompatible types in assignment or initialization")
 }
@@ -129,6 +167,9 @@ fn se_ice(p handle[Parser], e handle[Ast]) u64 fails {
     if (e.flags & NF_OVERFLOW) != 0 { try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant expression") }
     if !ty_is_integer(e.ty) || (e.flags & NF_ICE) == 0 {
         try pa_error(p, e.loc, c"expected an integer constant expression")
+    }
+    if e.wide != null && wi_ast_length(e) > 64 {
+        try pa_error(p, e.loc, c"integer constant exceeds this context's range")
     }
     return e.value
 }

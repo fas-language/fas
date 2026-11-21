@@ -4,12 +4,12 @@ import argparse
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import importlib.util
 import json
 import os
 from pathlib import Path
 import random
 import re
+import runpy
 import subprocess
 import tempfile
 
@@ -66,7 +66,10 @@ def cases(corpus, suites):
 def check(fcc, case):
     try:
         if case.expect is None:
-            ref = run(CLANG, case.path, case.source, ("-x", "c") if case.source is not None else ())
+            flags = ("-ferror-limit=1",)
+            if case.source is not None:
+                flags += ("-x", "c")
+            ref = run(CLANG, case.path, case.source, flags)
             if ref.returncode != 0:
                 return "clang-skip", ref.stderr.decode(errors="replace")
         got = run(fcc, case.path, case.source)
@@ -105,6 +108,24 @@ def constant_cases(seed, count):
         if value < 2**31:
             yield f"enum {{ enum_{i} = {a}u {op} {b}u }}; static_assert(enum_{i} == {value}u);"
 
+    for i in range(max(1, count // 4)):
+        width = rng.randrange(65, 194)
+        mask = (1 << width) - 1
+        a = rng.getrandbits(width)
+        b = rng.getrandbits(width - 9) or 1
+        shift = rng.randrange(width)
+        yield f"typedef unsigned _BitInt({width}) W{i};"
+        for operator, rhs, result in (
+            ("+", b, a + b), ("-", b, a - b), ("*", b, a * b),
+            ("/", b, a // b), ("%", b, a % b),
+            ("<<", shift, a << shift), (">>", shift, a >> shift),
+        ):
+            yield f"static_assert(((W{i}){a}uwb {operator} (W{i}){rhs}uwb) == {result & mask}uwb);"
+        # Stay within range on the signed side, then exercise sign extension.
+        a = rng.randrange(-(1 << 61), 1 << 61)
+        b = rng.randrange(-(1 << 61), 1 << 61)
+        yield f"static_assert(((_BitInt({width})){a}LL + {b}LL) == {a + b}LL);"
+
 
 def extra_constants(fcc, seed, count):
     lines = list(constant_cases(seed, count))
@@ -114,23 +135,53 @@ def extra_constants(fcc, seed, count):
     if ref.returncode or got.returncode:
         raise SystemExit(f"integer constant differential failed with seed {seed}\n"
                          f"clang: {ref.stderr.decode()}\nfcc: {got.stderr.decode()}")
-    print(f"Integer constant differential: {len(lines)} assertions passed (seed {seed})", flush=True)
+    assertions = sum("static_assert(" in line for line in lines)
+    print(f"Integer constant differential: {assertions} assertions passed (seed {seed})", flush=True)
+
+
+def extra_driver(fcc):
+    with tempfile.TemporaryDirectory() as scratch:
+        work = Path(scratch)
+        header = work / "forced.h"
+        source = work / "input.c"
+        dump = work / "ast.txt"
+        header.write_text("typedef int Item;\n")
+        source.write_text("Item pending[];\nint fun(int n) { Item a[n]; return sizeof a; }\n")
+        result = run(fcc, str(source), extra=("-include", str(header), "-Xfcc-dump-ast", "-o", str(dump)))
+        if result.returncode:
+            raise SystemExit(result.stderr.decode())
+        roots = [line for line in dump.read_text().splitlines() if not line.startswith(" ")]
+        if len(roots) != 2 or not roots[0].endswith(" fun") or not roots[1].endswith(" pending"):
+            raise SystemExit(f"unexpected AST callback order: {roots}")
+        if not any(line.lstrip().startswith("size ") and " runtime" in line for line in dump.read_text().splitlines()):
+            raise SystemExit("AST dump is missing the runtime VLA size")
+    print("Driver checks: forced include, function/object callbacks, runtime VLA size", flush=True)
 
 
 def extra_layout(fcc, seed, count):
     # Compare through the parser as well as through the standalone layout probe.
     # Clang supplies constants in a tiny host program that includes the declarations.
-    spec = importlib.util.spec_from_file_location("layout_fuzz", ROOT / "test/cc_types/layout_fuzz.py")
-    layout = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(layout)
-    records = layout.gen_cases(random.Random(seed), count)
+    layout = runpy.run_path(str(ROOT / "test/cc_types/layout_fuzz.py"))
+    records = layout["gen_cases"](random.Random(seed), count)
     with tempfile.TemporaryDirectory() as scratch:
         work = Path(scratch)
         source = work / "layout.c"
         executable = work / "layout"
         header = work / "records.h"
         declarations, checks = render_layout(records)
-        header.write_text(declarations)
+        header.write_text(declarations + """\
+#include <time.h>
+#include <netinet/in.h>
+#include <sys/epoll.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+""")
+        for record, field in (
+            ("timespec", "tv_nsec"), ("sockaddr_in6", "sin6_addr"),
+            ("epoll_event", "data"), ("stat", "st_mtim"), ("iovec", "iov_len"),
+        ):
+            checks.extend((f"sizeof(struct {record})", f"alignof(struct {record})",
+                           f"offsetof(struct {record}, {field})"))
         source.write_text('#include "records.h"\n#include <stdio.h>\nint main(void) {\n' +
                           "\n".join(f'printf("%zu\\n", (size_t)({c}));' for c in checks) + "\n}\n")
         subprocess.run([CLANG, "-std=gnu23", str(source), "-o", str(executable)],
@@ -141,7 +192,7 @@ def extra_layout(fcc, seed, count):
         actual = run(fcc, str(source))
         if actual.returncode:
             raise SystemExit(f"layout differential failed with seed {seed}\n{actual.stderr.decode()}")
-    print(f"Layout differential: {len(checks)} assertions passed across {count} records (seed {seed})", flush=True)
+    print(f"Layout differential: {len(checks)} assertions passed across {count} generated and 5 system records (seed {seed})", flush=True)
 
 
 def render_layout(records):
@@ -235,6 +286,8 @@ def main():
     print(f"Unexpected differences: {unexpected}", flush=True)
     if opt.json:
         opt.json.write_text(json.dumps(dict(counts=counts, cases=records), indent=2) + "\n")
+    if "directed" in suites and not opt.filter:
+        extra_driver(opt.fcc)
     if "constants" in suites:
         extra_constants(opt.fcc, opt.seed, opt.count)
     if "layout" in suites:

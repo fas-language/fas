@@ -190,6 +190,7 @@ fn ty_size(tid u32) u64 {
 
 fn ty_align(tid u32) u64 {
     al_attr u64 = zext[u64](ty_align_attr(tid))
+    if ty_has_typedef_alignment(tid) { return al_attr }
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind

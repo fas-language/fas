@@ -16,6 +16,7 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
     }
     first usize = i
     v u64 = 0
+    overflow bool = false
     while i < s.n {
         d u64 = zext[u64](cc_hex(s.p[u8, i]))
         if d >= base {
@@ -25,11 +26,12 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
             }
             break
         }
-        if v > (~0 - d) / base { try pa_error(p, t.loc, c"integer literal exceeds 64 bits") }
+        if v > (~0 - d) / base { overflow = true }
         v = v * base + d
         i += 1
     }
     if i == first { try pa_error(p, t.loc, c"invalid integer literal") }
+    end usize = i
     uns bool = false
     ranks u32 = 0
     bitint bool = false
@@ -43,21 +45,35 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
             (ch == 87 && i + 1 < s.n && s.p[u8, i + 1] == 66)) && ranks == 0 && !bitint {
             bitint = true
             i += 1
-        } else if pa_is_gnu(p) && (ch | 32) == 105 && i + 1 == s.n {
+        } else if pa_is_gnu(p) && ((ch | 32) == 105 || (ch | 32) == 106) && i + 1 == s.n {
             n handle[Ast] = pa_node(ND_FLOAT, t.loc, TY_COMPLEX_F64)
             n.op = t.payload
-            n.flags = NF_STATIC
+            se_set_fp(n, 0.0)
+            n.imag = bitcast[u64](cvt[f64](v))
             return n
         } else { try pa_error(p, t.loc, c"invalid integer literal suffix") }
         i += 1
     }
     ty u32 = TY_INT
+    if overflow && !bitint { try pa_error(p, t.loc, c"integer literal too large for the standard integer types") }
     if bitint {
-        width u32 = 1
-        rem u64 = v
-        while rem > 1 { width += 1; rem >>= 1 }
+        width u32 = 64 - trunc[u32](clz(v))
+        wide WideInt = {}
+        if overflow || (width == 64 && !uns) {
+            wide = wi_literal(s, first, end, base)
+            width = wi_length(wide)
+        }
+        if width == 0 { width = 1 }
         if !uns { width += 1 }
+        if width > 8388608 { try pa_error(p, t.loc, c"integer literal exceeds the supported _BitInt width") }
         ty = ty_bitint(width, uns)
+        if width > 64 {
+            n handle[Ast] = se_int(t.loc, ty, v)
+            wide.width = width
+            wide.words = (width + 31) / 32
+            wi_store(n, wide)
+            return n
+        }
     } else if ranks == 0 && !uns && v <= 2147483647 { ty = TY_INT }
     else if ranks == 0 && (uns || base != 10) && v <= 0xffffffff { ty = TY_UINT }
     else if !uns && v <= 0x7fffffffffffffff { ty = if ranks == 2 { TY_LLONG } else { TY_LONG } }
@@ -108,18 +124,31 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
         }
     } else if hex { try pa_error(p, t.loc, c"hexadecimal floating literal requires an exponent") }
     ty u32 = TY_DOUBLE
+    imaginary bool = false
+    if pa_is_gnu(p) && i < s.n && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
     if i < s.n {
         suffix u8 = s.p[u8, i] | 32
         if suffix == 102 { ty = TY_FLOAT; i += 1 }
         else if suffix == 108 { ty = TY_LDOUBLE; i += 1 }
         else if suffix == 113 && pa_is_gnu(p) { ty = TY_LDOUBLE; i += 1 }
-        if i < s.n && (s.p[u8, i] | 32) == 105 && pa_is_gnu(p) { ty = ty_complex(ty); i += 1 }
+        if i < s.n && !imaginary && pa_is_gnu(p) && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
         if i != s.n { try pa_error(p, t.loc, c"invalid floating literal suffix") }
+    }
+    if imaginary {
+        if ty == TY_FLOAT { value = cvt[f64](cvt[f32](value)) }
+        ty = ty_complex(ty)
     }
     n handle[Ast] = pa_node(ND_FLOAT, t.loc, ty)
     n.op = t.payload
-    se_set_fp(n, value)
+    if imaginary {
+        se_set_fp(n, 0.0)
+        n.imag = bitcast[u64](value)
+    } else { se_set_fp(n, value) }
     return n
+}
+
+fn pa_imaginary(ch u8) bool {
+    return (ch | 32) == 105 || (ch | 32) == 106
 }
 
 fn pa_prefix_width(s Bytes) u8 {
@@ -269,6 +298,8 @@ fn pa_generic(p handle[Parser], t Token) handle[Ast] fails {
     n handle[Ast] = pa_node(ND_GENERIC, t.loc, chosen.ty)
     n.flags = chosen.flags
     n.value = chosen.value
+    n.wide = chosen.wide
+    n.imag = chosen.imag
     n.a = key
     n.b = chosen
     n.c = alternatives.first
@@ -325,6 +356,22 @@ fn pa_builtin_call(p handle[Parser], t Token) handle[Ast] fails {
 }
 
 fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast]) u32 {
+    if bytes_eq_c(name, c"__builtin_stpcpy") || bytes_eq_c(name, c"__builtin_stpncpy") { return ty_ptr(TY_CHAR) }
+    if bytes_eq_c(name, c"__builtin_extract_return_addr") || bytes_eq_c(name, c"__builtin_frob_return_addr") {
+        return ty_ptr(TY_VOID)
+    }
+    if bytes_eq_c(name, c"__builtin_printf") || bytes_eq_c(name, c"__builtin_sprintf") ||
+        bytes_eq_c(name, c"__builtin_fprintf") { return TY_INT }
+    if bytes_starts_with(name, bytes_c(c"__c11_atomic_")) {
+        if bytes_eq_c(name, c"__c11_atomic_init") || bytes_eq_c(name, c"__c11_atomic_store") ||
+            bytes_eq_c(name, c"__c11_atomic_thread_fence") || bytes_eq_c(name, c"__c11_atomic_signal_fence") { return TY_VOID }
+        if bytes_eq_c(name, c"__c11_atomic_is_lock_free") ||
+            bytes_starts_with(name, bytes_c(c"__c11_atomic_compare_exchange_")) { return TY_BOOL }
+        if a != null {
+            ptr u32 = se_decay(a.ty)
+            if ty_is_ptr(ptr) { return ty_unqual(ty_node(ty_unqual(ptr)).elem) }
+        }
+    }
     if bytes_starts_with(name, bytes_c(c"__builtin_va_")) || bytes_starts_with(name, bytes_c(c"__builtin_ms_va_")) ||
         bytes_eq_c(name, c"__builtin_unreachable") || bytes_eq_c(name, c"__builtin_trap") ||
         bytes_eq_c(name, c"__builtin_prefetch") || bytes_eq_c(name, c"__builtin_free") { return TY_VOID }
@@ -381,11 +428,22 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
         start u32 = f.aux1
         ret = f.elem
         if count < fixed || (count > fixed && (f.flags & TYF_VARIADIC) == 0) { try pa_error(p, t.loc, c"wrong number of function arguments") }
+        converted AstList = {}
         x handle[Ast] = xs.first
-        for i u32 in 0..fixed {
-            try se_conversion(p, tc.fn_params.p[u32, zext[usize](start + i)], x)
-            x = x.next
+        for i u32 in 0..count {
+            next handle[Ast] = x.next
+            x.next = null
+            ty u32
+            if i < fixed {
+                ty = tc.fn_params.p[u32, zext[usize](start + i)]
+                try se_conversion(p, ty, x)
+            } else {
+                ty = if se_decay(x.ty) == TY_FLOAT { TY_DOUBLE } else { se_promote_expr(x) }
+            }
+            pa_append(&converted, se_convert(ty, x))
+            x = next
         }
+        xs.first = converted.first
     }
     n handle[Ast] = pa_node(ND_CALL, t.loc, ret)
     n.a = a
@@ -434,7 +492,7 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
                 return n
             }
             if bytes_starts_with(word, bytes_c(c"__builtin_")) || bytes_starts_with(word, bytes_c(c"__atomic_")) ||
-                bytes_starts_with(word, bytes_c(c"__sync_")) {
+                bytes_starts_with(word, bytes_c(c"__sync_")) || bytes_starts_with(word, bytes_c(c"__c11_atomic_")) {
                 if try pa_at(p, c"(") { return try pa_builtin_call(p, t) }
             }
             b Buf = {}
@@ -444,18 +502,27 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
             try pa_error(p, t.loc, buf_cstr(&b))
         }
         if s.storage == SC_TYPEDEF { try pa_error(p, t.loc, c"typedef name used as an expression") }
+        if pa_has_attr(p, s.attrs, c"deprecated") {
+            cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"use of a deprecated declaration"))
+        }
         n handle[Ast] = pa_node(ND_NAME, t.loc, s.ty)
         n.op = name
         n.decl = s
         val handle[Ast] = handle_from_addr(s.value)
         if s.storage == SC_ENUMERATOR {
             n.value = val.value
+            n.wide = val.wide
             n.flags = NF_ICE | NF_STATIC
         } else {
             if !ty_is_func(s.ty) { n.flags = NF_LVALUE }
             if s.storage == SC_CONSTEXPR && s.value != null {
                 n.flags |= val.flags & (NF_STATIC | NF_ICE | NF_FLOAT_CONST)
-                n.value = se_value(s.ty, val.value)
+                n.imag = val.imag
+                if ty_is_integer(s.ty) && ty_int_bits(s.ty) > 64 && (n.flags & NF_ICE) != 0 {
+                    wi_store(n, wi_from_ast(val, ty_int_bits(s.ty)))
+                } else {
+                    n.value = se_value(s.ty, val.value)
+                }
             } else if s.linkage != 0 || s.storage == SC_STATIC {
                 if !s.thread_local { n.flags |= NF_ADDR }
                 if ty_is_func(s.ty) || ty_is_array(s.ty) { n.flags |= NF_STATIC }
@@ -467,16 +534,35 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
     return null
 }
 
+// A parenthesized type can introduce a cast, a type operand or a compound
+// literal. Only the last form can carry a C23 storage class.
+fn pa_paren_type(p handle[Parser], spec handle[DeclSpec]) u32 fails {
+    try pa_specs(p, spec)
+    d Declarator = {}
+    try pa_declarator(p, &d, true)
+    if d.name != 0 || spec.inferred || spec.auto_seen || spec.alignment != 0 ||
+        spec.is_inline || spec.is_noreturn ||
+        (spec.storage != SC_NONE && spec.storage != SC_STATIC &&
+         spec.storage != SC_REGISTER && spec.storage != SC_CONSTEXPR) {
+        try pa_error(p, spec.loc, c"invalid parenthesized type name")
+    }
+    try pa_expect(p, c")")
+    if (spec.storage != SC_NONE || spec.thread_local) && !(try pa_at(p, c"{")) {
+        try pa_error(p, spec.loc, c"storage class requires a compound literal")
+    }
+    return try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0))
+}
+
 fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     align bool = !pa_is(p, t, c"sizeof")
     ty u32
     a handle[Ast] = null
     if (try pa_at(p, c"(")) && pa_decl_start(p, try pa_peek_at(p, 1)) {
         try pa_take(p)
-        ty = try pa_type_name(p)
-        try pa_expect(p, c")")
+        spec DeclSpec = {}
+        ty = try pa_paren_type(p, &spec)
         if try pa_at(p, c"{") {
-            a = try pa_compound(p, t, ty)
+            a = try pa_compound(p, t, ty, &spec)
             a = try pa_postfix(p, a)
             ty = a.ty
         }
@@ -499,13 +585,22 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     return n
 }
 
-fn pa_compound(p handle[Parser], t Token, ty u32) handle[Ast] fails {
+fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[Ast] fails {
+    if se_vla(ty) || (p.function == null && (spec.storage == SC_REGISTER || spec.thread_local)) ||
+        (spec.thread_local && spec.storage != SC_STATIC) {
+        try pa_error(p, t.loc, c"invalid compound literal storage class or type")
+    }
+    static_duration bool = p.function == null || spec.storage == SC_STATIC
     result InitResult = {}
-    try pa_initializer(p, ty, p.function == null, &result)
+    try pa_initializer(p, ty, static_duration || spec.storage == SC_CONSTEXPR, &result)
     n handle[Ast] = pa_node(ND_COMPOUND, t.loc, result.ty)
     n.a = result.tree
     n.flags = NF_LVALUE
-    if p.function == null { n.flags |= NF_STATIC | NF_ADDR }
+    n.op = zext[u32](spec.storage)
+    if spec.thread_local { n.op |= 256 }
+    if static_duration && !spec.thread_local { n.flags |= NF_ADDR }
+    if spec.storage == SC_CONSTEXPR && ty_is_scalar(result.ty) { se_cast_constant(n, result.tree) }
+    if (n.flags & NF_ADDR) != 0 && ty_is_array(result.ty) { n.flags |= NF_STATIC }
     return n
 }
 
@@ -539,6 +634,13 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
         n.op = t.payload
         n.a = a
         n.flags = a.flags & NF_LVALUE
+        if (a.flags & NF_FLOAT_CONST) != 0 {
+            im bool = pa_is(p, t, c"__imag__") || pa_is(p, t, c"__imag")
+            se_set_fp(n, if im { se_im(a) } else { se_fp(a) })
+        } else if (a.flags & NF_ICE) != 0 {
+            n.flags |= NF_STATIC | NF_ICE
+            if pa_is(p, t, c"__real__") || pa_is(p, t, c"__real") { n.value = a.value; n.wide = a.wide }
+        }
         return n
     }
     if pa_is(p, t, c"(") {
@@ -550,9 +652,9 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
             return try pa_postfix(p, block)
         }
         if pa_decl_start(p, try pa_peek(p)) {
-            ty u32 = try pa_type_name(p)
-            try pa_expect(p, c")")
-            if try pa_at(p, c"{") { return try pa_postfix(p, try pa_compound(p, t, ty)) }
+            spec DeclSpec = {}
+            ty u32 = try pa_paren_type(p, &spec)
+            if try pa_at(p, c"{") { return try pa_postfix(p, try pa_compound(p, t, ty, &spec)) }
             return try se_cast(p, t, ty, try pa_unary(p))
         }
         a handle[Ast] = try pa_expression(p, 1)

@@ -75,6 +75,7 @@ const Q_VOLATILE u32 = 2
 const Q_RESTRICT u32 = 4
 const Q_ATOMIC u32   = 8
 const Q_PACKED u32   = 16
+const Q_TYPEDEF_ALIGN u32 = 32
 
 const TYF_UNSIGNED u32 = 1
 const TYF_VARIADIC u32 = 2
@@ -419,6 +420,16 @@ fn ty_qual(tid u32, quals u32) u32 {
 
 fn ty_aligned(tid u32, align_bytes u32) u32 {
     return ty_qual_attr(tid, 0, align_bytes)
+}
+
+// GNU typedef alignment can decrease the alignment without changing the size.
+fn ty_typedef_aligned(tid u32, align_bytes u32) u32 {
+    return ty_qual_attr(tid, Q_TYPEDEF_ALIGN, align_bytes)
+}
+
+fn ty_has_typedef_alignment(tid u32) bool {
+    n handle[TypeNode] = ty_node(tid)
+    return n.kind == TYK_QUAL && (n.flags & Q_TYPEDEF_ALIGN) != 0
 }
 
 fn ty_packed(tid u32) u32 {
@@ -846,6 +857,7 @@ fn ty_composite(a u32, b u32) u32 {
     q u32 = ty_quals(a)
     al u32 = ty_align_attr(a)
     if ty_align_attr(b) > al { al = ty_align_attr(b) }
+    if ty_has_typedef_alignment(a) || ty_has_typedef_alignment(b) { q |= Q_TYPEDEF_ALIGN }
     ua u32 = ty_unqual(a)
     ub u32 = ty_unqual(b)
     if ua == ub { return ty_qual_attr(ua, q, al) }

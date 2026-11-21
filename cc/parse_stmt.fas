@@ -1,9 +1,30 @@
+// A jump target may only use variably modified declarations already in scope
+// at its source. The barrier chain snapshots that scope at each endpoint.
+struct VmBarrier { previous handle[VmBarrier] }
+struct Jump { label handle[Label], vm handle[VmBarrier], loc u32, next handle[Jump] }
+
+fn pa_check_jump(p handle[Parser], from handle[VmBarrier], to handle[VmBarrier], loc u32) void fails {
+    while from != null && from != to { from = from.previous }
+    if from != to { try pa_error(p, loc, c"jump enters the scope of a variably modified declaration") }
+}
+
+fn pa_add_jump(p handle[Parser], label handle[Label], loc u32) void {
+    label.used = true
+    jump handle[Jump] = pa_alloc[Jump]()
+    jump.loc = loc
+    jump.vm = p.vm
+    jump.label = label
+    jump.next = p.jumps
+    p.jumps = jump
+}
+
 struct CaseRange { lo u64, hi u64, loc u32 }
 struct SwitchContext {
     parent handle[SwitchContext]
     ranges Vec[CaseRange]
     ty u32
     has_default bool
+    vm handle[VmBarrier]
 }
 
 fn pa_get_label(p handle[Parser], t Token) handle[Label] fails {
@@ -71,7 +92,7 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
             if section == 4 {
                 lt Token = try pa_take(p)
                 l handle[Label] = try pa_get_label(p, lt)
-                l.used = true
+                pa_add_jump(p, l, lt.loc)
                 item handle[Ast] = pa_node(ND_NAME, lt.loc, TY_VOID)
                 item.op = l.name
                 item.extra = handle_addr(l)
@@ -121,7 +142,8 @@ fn pa_block(p handle[Parser], scope bool) handle[Ast] fails {
         if next.kind == TK_IDENT && (try pa_at_second(p, c":")) {
             item = try pa_statement_in(p, true)
         } else if pa_decl_start(p, next) || (pa_is(p, next, c"__extension__") && pa_decl_start(p, try pa_peek_at(p, 1))) {
-            item = try pa_declaration(p, false)
+            item = try pa_declaration(p, false, leading)
+            leading = null
         } else if pa_is(p, next, c"__label__") { item = try pa_local_labels(p) }
         else { item = try pa_statement_in(p, true) }
         if item != null { item.attrs = pa_join_attrs(leading, item.attrs) }
@@ -167,6 +189,7 @@ fn pa_check_cases(p handle[Parser], sw handle[SwitchContext]) void fails {
 fn pa_case(p handle[Parser], t Token, n handle[Ast], in_block bool) void fails {
     context handle[SwitchContext] = p.switches
     if context == null { try pa_error(p, t.loc, c"case or default label outside switch") }
+    try pa_check_jump(p, context.vm, p.vm, t.loc)
     if pa_is(p, t, c"default") {
         if context.has_default { try pa_error(p, t.loc, c"duplicate default label") }
         context.has_default = true
@@ -211,6 +234,8 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
     if try pa_accept(p, c";") { return n }
     n.op = t.payload
     if try pa_accept(p, c"if") {
+        pa_enter(p)
+        defer { pa_leave(p) }
         n.a = try pa_paren_expr(p)
         try se_scalar(p, n.a)
         n.b = try pa_substatement(p)
@@ -218,12 +243,15 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         return n
     }
     if try pa_accept(p, c"switch") {
+        pa_enter(p)
+        defer { pa_leave(p) }
         key handle[Ast] = try pa_paren_expr(p)
         n.a = key
         if !ty_is_integer(key.ty) { try pa_error(p, t.loc, c"switch requires integer type") }
         sw SwitchContext = {}
         sw.parent = p.switches
         sw.ty = se_promote_expr(n.a)
+        sw.vm = p.vm
         p.switches = &sw
         defer { p.switches = sw.parent }
         n.b = try pa_substatement(p)
@@ -231,6 +259,8 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         return n
     }
     if try pa_accept(p, c"while") {
+        pa_enter(p)
+        defer { pa_leave(p) }
         n.a = try pa_paren_expr(p)
         try se_scalar(p, n.a)
         p.loops += 1
@@ -239,6 +269,8 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         return n
     }
     if try pa_accept(p, c"do") {
+        pa_enter(p)
+        defer { pa_leave(p) }
         p.loops += 1
         defer { p.loops -= 1 }
         n.b = try pa_substatement(p)
@@ -252,7 +284,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         pa_enter(p)
         defer { pa_leave(p) }
         try pa_expect(p, c"(")
-        if pa_decl_start(p, try pa_peek(p)) { n.a = try pa_declaration(p, false) }
+        if pa_decl_start(p, try pa_peek(p)) || (try pa_open_attr(p)) { n.a = try pa_declaration(p, false, null) }
         else if !(try pa_accept(p, c";")) { n.a = try pa_expression(p, 1); try pa_expect(p, c";") }
         if !(try pa_accept(p, c";")) {
             n.b = try pa_expression(p, 1)
@@ -282,7 +314,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         } else {
             label Token = try pa_take(p)
             l handle[Label] = try pa_get_label(p, label)
-            l.used = true
+            pa_add_jump(p, l, label.loc)
             n.value = zext[u64](l.name)
             n.extra = handle_addr(l)
         }
@@ -296,7 +328,10 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
             n.a = value
             if ty_is_void(ret) {
                 if !ty_is_void(value.ty) || !pa_is_gnu(p) { try pa_error(p, t.loc, c"void function cannot return a value") }
-            } else { try se_conversion(p, ret, n.a) }
+            } else {
+                try se_conversion(p, ret, value)
+                n.a = se_convert(ret, value)
+            }
         }
     } else if t.kind == TK_IDENT && !pa_keyword(p, t) && (try pa_at_second(p, c":")) {
         try pa_take(p)
@@ -304,6 +339,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         l handle[Label] = try pa_get_label(p, t)
         if l.defined { try pa_error(p, t.loc, c"duplicate label") }
         l.defined = true
+        l.vm = p.vm
         n.op = cc_intern(p.names, bytes_c(c":"))
         n.value = zext[u64](l.name)
         n.extra = handle_addr(l)
@@ -328,6 +364,7 @@ fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[A
         p.scope = scope
         map_free(&p.labels)
         p.label_list.n = 0
+        p.jumps = null
     }
     ret u32 = ty_node(ty_unqual(s.ty)).elem
     if !ty_is_void(ret) && !se_complete(ret) { try pa_error(p, s.loc, c"function returns incomplete type") }
@@ -340,6 +377,12 @@ fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[A
     for i usize in 0..p.label_list.n {
         l handle[Label] = handle_from_addr(p.label_list.p[addr, i])
         if l.used && !l.defined { try pa_error(p, l.loc, c"use of undefined label") }
+    }
+    jump handle[Jump] = p.jumps
+    while jump != null {
+        target handle[Label] = jump.label
+        try pa_check_jump(p, jump.vm, target.vm, jump.loc)
+        jump = jump.next
     }
     n handle[Ast] = pa_node(ND_DECL, s.loc, s.ty)
     n.flags = NF_DEFINITION

@@ -29,14 +29,18 @@ const NF_STATIC u32 = 4
 const NF_BITFIELD u32 = 8
 const NF_OVERFLOW u32 = 16
 const NF_DEFINITION u32 = 32
+const NF_IMPLICIT u32 = 256
 
 struct Ast {
     kind u8
     loc u32
     ty u32
     op u32
+    operand_ty u32 // common evaluation type for binary operators
     flags u32
     value u64
+    imag u64 // imaginary component of a floating constant
+    wide addr // integer limbs when the constant type exceeds 64 bits
     a handle[Ast]
     b handle[Ast]
     c handle[Ast]
@@ -87,6 +91,7 @@ struct Scope {
     parent handle[Scope]
     ordinary SymbolMap
     local_labels SymbolMap
+    vm_saved handle[VmBarrier]
     tags TagMap
 }
 
@@ -95,6 +100,7 @@ struct Label {
     defined bool
     used bool
     loc u32
+    vm handle[VmBarrier]
 }
 
 struct Parser {
@@ -104,10 +110,15 @@ struct Parser {
     scope handle[Scope]
     file_scope handle[Scope]
     external SymbolMap
+    enum_bodies TagMap
+    record_open TagMap
     objects Vec[addr]
     labels SymbolMap
     label_list Vec[addr]
     switches handle[SwitchContext]
+    vm handle[VmBarrier]
+    jumps handle[Jump]
+    init_depth u32
     loops u32
     function handle[Symbol]
     ahead arr[2, Token]
@@ -168,6 +179,18 @@ fn pa_peek_at(p handle[Parser], i u32) Token fails {
         } else { t = cc_token(TK_EOF, 0, p.location, 0) }
         if t.kind == TK_PRAGMA { pa_pragma(p, t); continue }
         if t.kind == TK_DIRECT { continue }
+        if t.kind == TK_EOF && t.loc == 0 { t.loc = p.location }
+        if t.kind == TK_PUNCT {
+            spelling Bytes = cc_spelling(p.names, t)
+            if spelling.n == 2 {
+                canonical addr = null
+                if bytes_eq_c(spelling, c"<:") { canonical = c"[" }
+                else if bytes_eq_c(spelling, c":>") { canonical = c"]" }
+                else if bytes_eq_c(spelling, c"<%") { canonical = c"{" }
+                else if bytes_eq_c(spelling, c"%>") { canonical = c"}" }
+                if canonical != null { t.payload = cc_intern(p.names, bytes_c(canonical)) }
+            }
+        }
         p.ahead[zext[usize](p.pending)] = t
         p.pending += 1
     }
@@ -259,12 +282,14 @@ fn pa_append(xs handle[AstList], n handle[Ast]) void {
 fn pa_enter(p handle[Parser]) void {
     s handle[Scope] = pa_alloc[Scope]()
     s.parent = p.scope
+    s.vm_saved = p.vm
     p.scope = s
 }
 
 fn pa_leave(p handle[Parser]) void {
     s handle[Scope] = p.scope
     p.scope = s.parent
+    p.vm = s.vm_saved
     map_free(&s.ordinary)
     map_free(&s.tags)
     map_free(&s.local_labels)
@@ -314,7 +339,10 @@ fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
     p.file_scope = p.scope
     try pa_builtin_types(p)
     while (try pa_peek(p)).kind != TK_EOF {
-        try pa_declaration(p, true)
+        item handle[Ast] = try pa_declaration(p, true, null)
+        if item != null && item.kind == ND_ASM && p.on_object != null {
+            try call_addr[fails](p.on_object, handle_addr(p), handle_addr(item), p.user)
+        }
     }
     for i usize in 0..p.objects.n {
         obj handle[Symbol] = handle_from_addr(p.objects.p[addr, i])

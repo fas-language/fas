@@ -11,6 +11,7 @@ struct DeclSpec {
     is_inline bool
     is_noreturn bool
     inferred bool
+    auto_seen bool
 }
 
 const DO_PTR u8 = 1
@@ -274,7 +275,7 @@ fn pa_assert(p handle[Parser]) void fails {
     t Token = try pa_take(p)
     try pa_expect(p, c"(")
     e handle[Ast] = try pa_expression(p, 3)
-    v u64 = try se_ice(p, e)
+    if (e.flags & NF_OVERFLOW) != 0 || !ty_is_integer(e.ty) || (e.flags & NF_ICE) == 0 { try se_ice(p, e) }
     message Bytes = bytes_c(c"static assertion failed")
     if try pa_accept(p, c",") {
         m Token = try pa_peek(p)
@@ -284,7 +285,7 @@ fn pa_assert(p handle[Parser]) void fails {
     }
     try pa_expect(p, c")")
     try pa_expect(p, c";")
-    if v == 0 {
+    if !se_truth(e) {
         cc_diag(p.names, t.loc, c"error: static assertion failed: ", message)
         fail CError
     }
@@ -316,7 +317,7 @@ fn pa_tag(p handle[Parser], tag Token, kind u8, name u32, fixed u32, define bool
 
 fn pa_enum_body(p handle[Parser], ty u32, loc u32) void fails {
     e handle[EnumDef] = ty_enum(ty_node(ty).aux1)
-    if e.is_complete && !e.has_fixed_underlying { try pa_error(p, loc, c"redefinition of enum") }
+    if !map_put(&p.enum_bodies, ty, 1) { try pa_error(p, loc, c"redefinition of enum") }
     fixed u32 = if e.has_fixed_underlying { e.underlying } else { TY_INVALID }
     next u64 = 0
     next_ty u32 = TY_INT
@@ -373,12 +374,15 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32) void fails {
 
 fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
     rec_id u32 = ty_node(ty).aux1
-    if ty_record(rec_id).is_complete { try pa_error(p, loc, c"redefinition of record") }
+    if !map_put(&p.record_open, rec_id, 1) { try pa_error(p, loc, c"nested redefinition of record") }
+    defer { map_remove(&p.record_open, rec_id) }
+    pack u32 = p.pack
     fields Vec[FieldDef] = {}
     seen TagMap = {}
     while !(try pa_at(p, c"}")) {
         t Token = try pa_peek(p)
         if pa_assert_word(p, t) { try pa_assert(p); continue }
+        if pa_is_gnu(p) && (try pa_accept(p, c";")) { continue }
         spec DeclSpec = {}
         try pa_specs(p, &spec)
         if spec.storage != SC_NONE || spec.thread_local || spec.inferred {
@@ -429,7 +433,23 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
         }
     }
     if fields.n == 0 && !pa_is_gnu(p) { try pa_error(p, loc, c"empty records require GNU mode") }
-    ty_record_complete(ty, fields.p, trunc[u32](fields.n), pa_has_attr(p, attrs, c"packed"), try pa_attr_align(p, attrs, 0), p.pack)
+    packed bool = pa_has_attr(p, attrs, c"packed")
+    alignment u32 = try pa_attr_align(p, attrs, 0)
+    old handle[RecordDef] = ty_record(rec_id)
+    if old.is_complete {
+        if zext[usize](old.fields_len) != fields.n || old.is_packed != packed ||
+            old.pragma_pack != pack || old.align_attr != alignment {
+            try pa_error(p, loc, c"incompatible redefinition of record")
+        }
+        for i u32 in 0..old.fields_len {
+            a handle[FieldDef] = ty_field(old.fields_start + i)
+            b handle[FieldDef] = vec_at[FieldDef](&fields, zext[usize](i))
+            if a.name_id != b.name_id || !ty_compatible(a.ty, b.ty) || a.is_bitfield != b.is_bitfield ||
+                a.bit_width != b.bit_width || a.align_attr != b.align_attr || a.is_packed != b.is_packed {
+                try pa_error(p, loc, c"incompatible redefinition of record member")
+            }
+        }
+    } else { ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack) }
 }
 
 fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
@@ -441,7 +461,8 @@ fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
     tag Token = try pa_peek(p)
     if tag.kind == TK_IDENT && !pa_keyword(p, tag) { name = try pa_ident(p, try pa_take(p)) }
     fixed u32 = TY_INVALID
-    if kind == TYK_ENUM && (try pa_accept(p, c":")) {
+    if kind == TYK_ENUM && (try pa_at(p, c":")) && pa_decl_start(p, try pa_peek_at(p, 1)) {
+        try pa_take(p)
         // The underlying type specifier is followed by the outer declarator.
         spec DeclSpec = {}
         try pa_specs(p, &spec)
@@ -465,10 +486,11 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
     longs u32 = 0
     sign u8 = 0
     complex bool = false
+    bitint_spec bool = false
     while true {
-        t Token = try pa_peek(p)
         a handle[Attr] = try pa_attributes(p)
         if a != null { out.attrs = pa_join_attrs(a, out.attrs); continue }
+        t Token = try pa_peek(p)
         if try pa_accept(p, c"__extension__") { continue }
         q u32 = pa_qual(p, t)
         sc u8 = pa_storage(p, t)
@@ -489,6 +511,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
             try pa_expect(p, c")")
             if bits == 0 || bits > 8388608 { try pa_error(p, e.loc, c"invalid _BitInt width") }
             base = ty_bitint(trunc[u32](bits), true)
+            bitint_spec = true
         } else if pa_typeof_word(p, t) {
             try pa_take(p)
             try pa_expect(p, c"(")
@@ -504,7 +527,13 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
             try pa_take(p)
             base = try pa_tag_spec(p, t)
         } else if base != TY_INVALID { try pa_take(p) }
-        else if sc != SC_NONE {
+        else if sc == SC_AUTO {
+            if out.auto_seen { try pa_error(p, t.loc, c"duplicate auto specifier") }
+            if pa_is(p, t, c"__auto_type") { try pa_gnu(p, t) }
+            out.auto_seen = true
+            try pa_take(p)
+            continue
+        } else if sc != SC_NONE {
             if out.storage != SC_NONE { try pa_error(p, t.loc, c"multiple storage classes") }
             out.storage = sc
             try pa_take(p)
@@ -565,13 +594,20 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
     }
     ty u32 = out.ty
     if ty == TY_INVALID {
-        if out.storage == SC_AUTO { out.inferred = true; return }
+        if out.auto_seen {
+            if out.storage == SC_TYPEDEF || out.storage == SC_EXTERN {
+                try pa_error(p, out.loc, c"auto inference cannot be combined with typedef or extern")
+            }
+            if out.storage == SC_CONSTEXPR { out.quals |= Q_CONST }
+            out.inferred = true
+            return
+        }
         if sign == 0 && longs == 0 && !short && !complex {
             try pa_error(p, out.loc, c"C23 requires an explicit type specifier (implicit int is unsupported)")
         }
         ty = if complex { TY_DOUBLE } else { TY_INT }
     }
-    if ty_is_bitint(ty) {
+    if bitint_spec {
         width u32 = ty_int_bits(ty)
         if sign != 2 && width < 2 { try pa_error(p, out.loc, c"signed _BitInt requires at least two bits") }
         ty = ty_bitint(width, sign == 2)
@@ -593,8 +629,12 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         } else if ty == TY_CHAR { ty = TY_SCHAR }
     }
     if complex {
-        if !ty_is_real_float(ty) { try pa_error(p, out.loc, c"_Complex requires a real floating type") }
+        if !ty_is_real_float(ty) && !(pa_is_gnu(p) && ty_is_integer(ty)) { try pa_error(p, out.loc, c"_Complex requires a real floating type") }
         ty = ty_complex(ty)
+    }
+    if out.auto_seen {
+        if out.storage != SC_NONE { try pa_error(p, out.loc, c"auto with an explicit type cannot be combined with another storage class") }
+        out.storage = SC_AUTO
     }
     if out.storage == SC_CONSTEXPR { out.quals |= Q_CONST }
     out.ty = ty_qual(ty, out.quals)
@@ -807,18 +847,23 @@ fn pa_builtin_types(p handle[Parser]) void fails {
     se_bind(p, se_symbol(name, 0, ty_array(r, 1), SC_TYPEDEF))
     name = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     se_bind(p, se_symbol(name, 0, ty_ptr(TY_CHAR), SC_TYPEDEF))
+    name = cc_intern(p.names, bytes_c(c"__int128_t"))
+    se_bind(p, se_symbol(name, 0, TY_INT128, SC_TYPEDEF))
+    name = cc_intern(p.names, bytes_c(c"__uint128_t"))
+    se_bind(p, se_symbol(name, 0, TY_UINT128, SC_TYPEDEF))
 }
 
 fn pa_asm_word(p handle[Parser], t Token) bool {
     return (pa_is_gnu(p) && pa_is(p, t, c"asm")) || pa_is(p, t, c"__asm") || pa_is(p, t, c"__asm__")
 }
 
-fn pa_declaration(p handle[Parser], file bool) handle[Ast] fails {
+fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast] fails {
     t Token = try pa_peek(p)
     if pa_assert_word(p, t) { try pa_assert(p); return null }
     if pa_asm_word(p, t) { return try pa_asm(p, file) }
     if file && pa_is_gnu(p) && (try pa_accept(p, c";")) { return null }
     spec DeclSpec = {}
+    spec.attrs = leading
     try pa_specs(p, &spec)
     if try pa_accept(p, c";") {
         if !ty_is_record(spec.ty) && !ty_is_enum(spec.ty) { try pa_error(p, spec.loc, c"declaration has no declarator") }
@@ -841,6 +886,9 @@ fn pa_declaration(p handle[Parser], file bool) handle[Ast] fails {
         if !spec.inferred {
             ty = try pa_apply(p, d.first, spec.ty)
             ty = try pa_type_attrs(p, ty, attrs, spec.alignment)
+            if spec.storage == SC_TYPEDEF && pa_has_attr(p, attrs, c"aligned") {
+                ty = ty_typedef_aligned(ty, ty_align_attr(ty))
+            }
         }
         s handle[Symbol] = se_symbol(d.name, d.loc, ty, spec.storage)
         s.thread_local = spec.thread_local
@@ -853,6 +901,10 @@ fn pa_declaration(p handle[Parser], file bool) handle[Ast] fails {
         if func && first != null { s.params = handle_addr(first.params) }
         if (spec.is_inline || spec.is_noreturn) && !func {
             try pa_error(p, d.loc, c"function specifier on a non-function declaration")
+        }
+        if spec.alignment != 0 && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
+            (!spec.inferred && zext[u64](spec.alignment) < ty_align(ty_unqual(ty)))) {
+            try pa_error(p, d.loc, c"invalid alignment specifier for this declaration")
         }
         if spec.storage != SC_TYPEDEF {
             if spec.storage == SC_STATIC && file { s.linkage = 1 }
@@ -884,7 +936,7 @@ fn pa_declaration(p handle[Parser], file bool) handle[Ast] fails {
         if spec.inferred && (!init || d.first != null || xs.first != null) {
             try pa_error(p, d.loc, c"auto type inference requires one initialized identifier")
         }
-        if init && (func || spec.storage == SC_TYPEDEF || (!file && spec.storage == SC_EXTERN) || se_vla(ty)) {
+        if init && (func || spec.storage == SC_TYPEDEF || (!file && spec.storage == SC_EXTERN)) {
             try pa_error(p, d.loc, c"this declaration cannot have an initializer")
         }
         if spec.storage == SC_CONSTEXPR && !init { try pa_error(p, d.loc, c"constexpr requires an initializer") }
@@ -892,14 +944,26 @@ fn pa_declaration(p handle[Parser], file bool) handle[Ast] fails {
             !(pa_is_gnu(p) && spec.storage == SC_EXTERN && !init) {
             try pa_error(p, d.loc, c"object cannot have void type")
         }
-        if file && se_vla(ty) { try pa_error(p, d.loc, c"variable length array at file scope") }
+        vm bool = se_variably_modified(ty)
+        if file && vm { try pa_error(p, d.loc, c"variably modified type at file scope") }
+        if vm && (spec.storage == SC_EXTERN || (se_vla(ty) && (spec.storage == SC_STATIC || spec.thread_local))) {
+            try pa_error(p, d.loc, c"variably modified declaration has invalid storage duration or linkage")
+        }
+        if vm {
+            barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
+            barrier.previous = p.vm
+            p.vm = barrier
+        }
         tentative bool = file && !init && !func && s.linkage != 0 && spec.storage != SC_EXTERN
         definition bool = init || (!file && !func && spec.storage != SC_TYPEDEF && spec.storage != SC_EXTERN)
         if !spec.inferred { s = try se_declare(p, s, definition, tentative) }
         if init {
             result InitResult = {}
             try pa_initializer(p, s.ty, file || spec.storage == SC_STATIC || spec.storage == SC_CONSTEXPR, &result)
-            s.ty = if spec.inferred { ty_qual(se_decay(result.ty), spec.quals) } else { result.ty }
+            if spec.inferred {
+                s.ty = try pa_type_attrs(p, ty_qual(se_decay(result.ty), spec.quals), attrs, spec.alignment)
+                if ty_is_void(s.ty) { try pa_error(p, d.loc, c"cannot infer void object type") }
+            } else { s.ty = result.ty }
             s.value = handle_addr(result.tree)
             if spec.inferred { s = try se_declare(p, s, true, false) }
         }

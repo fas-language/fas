@@ -21,7 +21,14 @@ fn pa_dump_tree(p handle[Parser], out handle[Buf], node handle[Ast], depth u32) 
     }
     if (node.flags & NF_ICE) != 0 {
         buf_str(out, c" value=")
-        if ty_is_integer(node.ty) && !ty_is_unsigned(node.ty) { buf_dec_i64(out, bitcast[i64](node.value)) }
+        if node.wide != null {
+            buf_str(out, c"0x")
+            count u32 = (ty_int_bits(node.ty) + 31) / 32
+            while count != 0 {
+                count -= 1
+                buf_hex(out, zext[u64](node.wide[u32, zext[usize](count)]), 8)
+            }
+        } else if ty_is_integer(node.ty) && !ty_is_unsigned(node.ty) { buf_dec_i64(out, bitcast[i64](node.value)) }
         else { buf_dec_u64(out, node.value) }
     }
     if node.kind == ND_SIZE && (node.flags & NF_ICE) == 0 { buf_str(out, c" runtime") }
