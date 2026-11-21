@@ -1,4 +1,4 @@
-// fcc: freestanding C23 preprocessing driver.
+// fcc: freestanding C23 front end.
 use "../lib/core.fas"
 use "token.fas"
 use "unicode.fas"
@@ -13,6 +13,14 @@ use "embed.fas"
 use "target.fas"
 use "search.fas"
 use "output.fas"
+use "parse.fas"
+use "parse_decl.fas"
+use "parse_expr.fas"
+use "parse_stmt.fas"
+use "sema.fas"
+use "sema_expr.fas"
+use "sema_init.fas"
+use "parse_dump.fas"
 
 value struct Command { value addr, kind u8 }
 struct Options {
@@ -27,6 +35,8 @@ struct Options {
     no_markers bool
     no_builtins bool
     macro_dump bool
+    syntax_only bool
+    dump_ast bool
     deps u8  // 1 = only dependencies, 2 = side output
     user_deps bool
     phony bool
@@ -64,7 +74,9 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
                 lang addr = try cli_arg(argc, &pos, arg, c"-x")
                 if !bytes_eq_c(bytes_c(lang), c"c") && !bytes_eq_c(bytes_c(lang), c"c-header") { try cli_error(c"fcc: unsupported input language ", lang) }
             }
-        } else if bytes_eq_c(word, c"-P") { o.no_markers = true }
+        } else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true }
+        else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true }
+        else if bytes_eq_c(word, c"-P") { o.no_markers = true }
         else if bytes_eq_c(word, c"-dM") { o.macro_dump = true }
         else if bytes_eq_c(word, c"-undef") { o.no_builtins = true }
         else if bytes_eq_c(word, c"-std=c23") { o.gnu = false }
@@ -93,7 +105,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         }
         pos.i += 1
     }
-    if o.path == null { try cli_error(c"usage: fcc -E [-P] [-std=c23|gnu23] [options] input", null) }
+    if o.path == null { try cli_error(c"usage: fcc [-E | -fsyntax-only] [-P] [-std=c23|gnu23] [options] input", null) }
 }
 
 fn cli_dir(p handle[Pp], path addr, rank u8) void {
@@ -196,7 +208,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     stdin bool = bytes_eq_c(name, c"-")
     p.base_file = cc_intern(&p.names, if stdin { bytes_c(c"<stdin>") } else { name })
     p.base_logical = p.base_file
-    p.line_markers = !o.no_markers && !o.macro_dump && o.deps != 1
+    p.line_markers = !o.syntax_only && !o.no_markers && !o.macro_dump && o.deps != 1
     main_input handle[Input]
     if stdin { main_input = try stdin_file() }
     else if bytes_eq_c(name, c"/dev/null") {
@@ -219,9 +231,37 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             found Found = pp_lookup(p, path, -1, false)
             if found.file == null { found = pp_find(p, path, true, false) }
             if found.file == null { try cli_error(c"fcc: cannot open forced include ", inc.value) }
+            if o.syntax_only && inc.kind == 0 && o.deps != 1 {
+                root handle[PpRoot] = vec_add[PpRoot](&p.roots)
+                root.input_handle = handle_from_addr(found.file)
+                root.path = found.path
+                root.directory = found.dir
+                root.system = found.system
+                continue
+            }
             try pp_push_file(p, handle_from_addr(found.file), found.path, sext[i32](found.dir), found.system, 0)
             try output_stream(p, &out, o.macro_dump || o.deps == 1 || inc.kind == 1)
         }
+    }
+    if o.syntax_only && o.deps != 1 {
+        root handle[PpRoot] = vec_add[PpRoot](&p.roots)
+        root.input_handle = main_input
+        root.path = p.base_file
+        root.directory = -1
+        parser Parser = {}
+        fd i32 = STDOUT
+        if o.dump_ast {
+            if o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
+                fd = try os_open(o.output, 577, 0o666)
+            }
+            parser.on_function = &pa_dump_callback
+            parser.on_object = &pa_dump_callback
+            parser.user = &fd
+        }
+        defer { if fd != STDOUT { os_close(fd) } }
+        try parse_tu(&parser, p)
+        if o.deps != 0 { try output_dependencies(p, o) }
+        return
     }
     try pp_push_file(p, main_input, p.base_file, -1, false, 0)
     try output_stream(p, &out, o.macro_dump || o.deps == 1)

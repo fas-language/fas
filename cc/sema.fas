@@ -1,0 +1,165 @@
+// Declaration semantics and C's value transformations. Symbol records are
+// allocated separately from the hash tables so references survive scope exit.
+fn se_symbol(name u32, loc u32, ty u32, storage u8) handle[Symbol] {
+    s handle[Symbol] = pa_alloc[Symbol]()
+    s.name = name
+    s.loc = loc
+    s.ty = ty
+    s.storage = storage
+    return s
+}
+
+fn se_bind(p handle[Parser], s handle[Symbol]) void {
+    if s.name == 0 { return }
+    scope handle[Scope] = p.scope
+    map_put(&scope.ordinary, s.name, handle_addr(s))
+}
+
+fn se_local(p handle[Parser], name u32) handle[Symbol] {
+    scope handle[Scope] = p.scope
+    a addr = map_get(&scope.ordinary, name) catch null
+    return handle_from_addr(a)
+}
+
+fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative bool) handle[Symbol] fails {
+    prior handle[Symbol] = se_local(p, s.name)
+    if s.linkage != 0 && prior == null {
+        if s.storage == SC_EXTERN || ty_is_func(s.ty) {
+            visible handle[Symbol] = pa_lookup(p, s.name)
+            if visible != null && visible.linkage != 0 && s.storage != SC_STATIC {
+                prior = visible
+                s.linkage = visible.linkage
+            }
+        }
+        if prior == null && s.linkage == 2 {
+            previous addr = map_get(&p.external, s.name) catch null
+            prior = handle_from_addr(previous)
+        }
+    }
+    if prior != null {
+        if prior.storage == SC_ENUMERATOR || s.storage == SC_ENUMERATOR ||
+            (prior.storage == SC_TYPEDEF) != (s.storage == SC_TYPEDEF) ||
+            (prior.linkage == 0 && s.storage != SC_TYPEDEF) {
+            try pa_error(p, s.loc, c"redeclaration of name")
+        }
+        if prior.linkage == 1 && s.linkage == 2 && (s.storage == SC_EXTERN || ty_is_func(s.ty)) { s.linkage = 1 }
+        if prior.linkage != s.linkage || prior.thread_local != s.thread_local {
+            try pa_error(p, s.loc, c"conflicting linkage or storage duration")
+        }
+        composite u32 = ty_composite(prior.ty, s.ty)
+        if composite == TY_INVALID { try pa_error(p, s.loc, c"conflicting types for declaration") }
+        if definition && prior.defined { try pa_error(p, s.loc, c"redefinition") }
+        prior.ty = composite
+        if s.attrs != null {
+            prior.attrs = pa_join_attrs(s.attrs, prior.attrs)
+        }
+        if definition {
+            prior.loc = s.loc
+            prior.params = s.params
+        }
+        if s.asm_name != 0 { prior.asm_name = s.asm_name }
+        prior.flags |= s.flags
+        s = prior
+    } else {
+        if s.linkage == 2 { map_put(&p.external, s.name, handle_addr(s)) }
+        if s.linkage != 0 && !ty_is_func(s.ty) { vec_push[addr](&p.objects, handle_addr(s)) }
+    }
+    s.defined = s.defined || definition
+    s.tentative = s.tentative || tentative
+    se_bind(p, s)
+    return s
+}
+
+fn se_complete(ty u32) bool {
+    k u8 = ty_kind(ty)
+    if k == TYK_VOID || k == TYK_FUNC || ty == TY_INVALID { return false }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if k == TYK_ARRAY { return n.aux1 != ARR_INCOMPLETE && se_complete(n.elem) }
+    if k == TYK_STRUCT || k == TYK_UNION { return ty_record(n.aux1).is_complete }
+    if k == TYK_ENUM { return ty_enum(n.aux1).is_complete }
+    return true
+}
+
+fn se_vla(ty u32) bool {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    return n.kind == TYK_ARRAY && (n.aux1 == ARR_VLA || se_vla(n.elem))
+}
+
+fn se_finish_object(p handle[Parser], s handle[Symbol]) void fails {
+    if !s.defined && s.tentative {
+        n handle[TypeNode] = ty_node(ty_unqual(s.ty))
+        if n.kind == TYK_ARRAY && n.aux1 == ARR_INCOMPLETE { s.ty = ty_array(n.elem, 1) }
+    }
+    if (s.defined || s.tentative) && !se_complete(s.ty) {
+        try pa_error(p, s.loc, c"object has incomplete type")
+    }
+}
+
+fn se_decay(ty u32) u32 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY { return ty_ptr(ty_qual(n.elem, ty_quals(ty))) }
+    if n.kind == TYK_FUNC { return ty_ptr(ty) }
+    return ty_unqual(ty)
+}
+
+fn se_null(e handle[Ast]) bool {
+    return ty_is_nullptr(e.ty) || (ty_is_integer(e.ty) && (e.flags & NF_ICE) != 0 && e.value == 0) ||
+        (ty_is_ptr(e.ty) && (e.flags & NF_ICE) != 0 && e.value == 0 && ty_node(ty_unqual(e.ty)).elem == TY_VOID)
+}
+
+fn se_ptr_compatible(a u32, b u32, assign bool) bool {
+    x u32 = ty_node(ty_unqual(a)).elem
+    y u32 = ty_node(ty_unqual(b)).elem
+    if assign && (ty_quals(y) & ~ty_quals(x)) != 0 { return false }
+    if ty_is_void(x) || ty_is_void(y) { return !ty_is_func(x) && !ty_is_func(y) }
+    return ty_compatible(ty_unqual(x), ty_unqual(y))
+}
+
+fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
+    from u32 = se_decay(src.ty)
+    if dest == TY_INVALID || from == TY_INVALID { return }
+    if ty_is_arith(dest) && ty_is_arith(from) { return }
+    if ty_compatible(ty_unqual(dest), ty_unqual(from)) { return }
+    if ty_is_ptr(dest) && (se_null(src) || (ty_is_ptr(from) && se_ptr_compatible(dest, from, true))) { return }
+    if ty_is_bool(dest) && (ty_is_ptr(from) || ty_is_nullptr(from)) { return }
+    try pa_error(p, src.loc, c"incompatible types in assignment or initialization")
+}
+
+fn se_ice(p handle[Parser], e handle[Ast]) u64 fails {
+    if (e.flags & NF_OVERFLOW) != 0 { try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant expression") }
+    if !ty_is_integer(e.ty) || (e.flags & NF_ICE) == 0 {
+        try pa_error(p, e.loc, c"expected an integer constant expression")
+    }
+    return e.value
+}
+
+fn se_scalar(p handle[Parser], e handle[Ast]) void fails {
+    if !ty_is_scalar(se_decay(e.ty)) && e.ty != TY_INVALID { try pa_error(p, e.loc, c"expected a scalar expression") }
+}
+
+fn se_value(ty u32, value u64) u64 {
+    if ty_is_bool(ty) {
+        if value != 0 { return 1 }
+        return 0
+    }
+    width u32 = ty_int_bits(ty)
+    if width == 0 || width >= 64 { return value }
+    full u64 = 1
+    full <<= width
+    low u64 = value & (full - 1)
+    if !ty_is_unsigned(ty) && low >= full / 2 { return low - full }
+    return low
+}
+
+fn se_int(loc u32, ty u32, value u64) handle[Ast] {
+    n handle[Ast] = pa_node(ND_INT, loc, ty)
+    n.value = se_value(ty, value)
+    n.flags = NF_ICE | NF_STATIC
+    return n
+}
+
+fn se_modifiable(p handle[Parser], a handle[Ast]) void fails {
+    if (a.flags & NF_LVALUE) == 0 || (ty_quals(a.ty) & Q_CONST) != 0 || ty_is_array(a.ty) || !se_complete(a.ty) {
+        try pa_error(p, a.loc, c"expression is not a modifiable lvalue")
+    }
+}

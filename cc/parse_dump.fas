@@ -1,0 +1,52 @@
+// Compact, deterministic debug output. Type IDs refer to the current TU.
+const AST_NAMES arr[21, addr] = {
+    c"invalid", c"int", c"float", c"string", c"name", c"unary", c"binary",
+    c"conditional", c"cast", c"call", c"member", c"size", c"init", c"decl",
+    c"block", c"stmt", c"subscript", c"generic", c"asm", c"designator", c"compound"
+}
+
+fn pa_dump_tree(p handle[Parser], out handle[Buf], node handle[Ast], depth u32) void {
+    for i u32 in 0..depth { buf_str(out, c"  ") }
+    buf_str(out, AST_NAMES[zext[usize](node.kind)])
+    buf_str(out, c" type=")
+    buf_dec_u64(out, zext[u64](node.ty))
+    s handle[Symbol] = node.decl
+    if s != null && s.name != 0 {
+        buf_u8(out, 32)
+        buf_append(out, cc_name(p.names, s.name))
+    } else if node.op != 0 && (node.kind == ND_NAME || node.kind == ND_STRING || node.kind == ND_FLOAT ||
+        node.kind == ND_UNARY || node.kind == ND_BINARY || node.kind == ND_STMT || node.kind == ND_CALL) {
+        buf_u8(out, 32)
+        buf_append(out, cc_name(p.names, node.op))
+    }
+    if (node.flags & NF_ICE) != 0 {
+        buf_str(out, c" value=")
+        if ty_is_integer(node.ty) && !ty_is_unsigned(node.ty) { buf_dec_i64(out, bitcast[i64](node.value)) }
+        else { buf_dec_u64(out, node.value) }
+    }
+    if node.kind == ND_SIZE && (node.flags & NF_ICE) == 0 { buf_str(out, c" runtime") }
+    if (node.flags & NF_BITFIELD) != 0 { buf_str(out, c" bit-field") }
+    buf_u8(out, 10)
+    pa_dump_list(p, out, node.a, depth + 1)
+    // The postfix flag uses b to mark a postfix unary operation without owning a second child.
+    if node.kind != ND_UNARY { pa_dump_list(p, out, node.b, depth + 1) }
+    pa_dump_list(p, out, node.c, depth + 1)
+    pa_dump_list(p, out, node.d, depth + 1)
+    if node.kind == ND_ASM && node.extra != null { pa_dump_list(p, out, handle_from_addr(node.extra), depth + 1) }
+}
+
+fn pa_dump_list(p handle[Parser], out handle[Buf], n handle[Ast], depth u32) void {
+    while n != null {
+        pa_dump_tree(p, out, n, depth)
+        n = n.next
+    }
+}
+
+fn pa_dump_callback(ctx addr, node addr, fd addr) void fails {
+    p handle[Parser] = handle_from_addr(ctx)
+    n handle[Ast] = handle_from_addr(node)
+    out Buf = {}
+    defer { buf_free(&out) }
+    pa_dump_tree(p, &out, n, 0)
+    try buf_write(&out, fd[i32])
+}

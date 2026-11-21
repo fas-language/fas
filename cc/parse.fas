@@ -1,0 +1,330 @@
+// Streaming C grammar. Two tokens suffice for label and declarator
+// disambiguation. The preprocessor owns spellings and source positions.
+use "layout.fas"
+
+const ND_INT u8 = 1
+const ND_FLOAT u8 = 2
+const ND_STRING u8 = 3
+const ND_NAME u8 = 4
+const ND_UNARY u8 = 5
+const ND_BINARY u8 = 6
+const ND_COND u8 = 7
+const ND_CAST u8 = 8
+const ND_CALL u8 = 9
+const ND_MEMBER u8 = 10
+const ND_SIZE u8 = 11
+const ND_INIT u8 = 12
+const ND_DECL u8 = 13
+const ND_BLOCK u8 = 14
+const ND_STMT u8 = 15
+const ND_SUBSCRIPT u8 = 16
+const ND_GENERIC u8 = 17
+const ND_ASM u8 = 18
+const ND_DESIGNATOR u8 = 19
+const ND_COMPOUND u8 = 20
+
+const NF_LVALUE u32 = 1
+const NF_ICE u32 = 2
+const NF_STATIC u32 = 4
+const NF_BITFIELD u32 = 8
+const NF_OVERFLOW u32 = 16
+const NF_DEFINITION u32 = 32
+
+struct Ast {
+    kind u8
+    loc u32
+    ty u32
+    op u32
+    flags u32
+    value u64
+    a handle[Ast]
+    b handle[Ast]
+    c handle[Ast]
+    d handle[Ast]
+    next handle[Ast]
+    decl handle[Symbol]
+    attrs handle[Attr]
+    extra addr
+}
+
+struct Attr {
+    name u32
+    ns u32
+    loc u32
+    args Vec[Token]
+    next handle[Attr]
+}
+
+const SC_NONE u8 = 0
+const SC_TYPEDEF u8 = 1
+const SC_EXTERN u8 = 2
+const SC_STATIC u8 = 3
+const SC_AUTO u8 = 4
+const SC_REGISTER u8 = 5
+const SC_CONSTEXPR u8 = 6
+const SC_ENUMERATOR u8 = 7
+
+struct Symbol {
+    name u32
+    loc u32
+    ty u32
+    storage u8
+    linkage u8  // 0 none, 1 internal, 2 external
+    thread_local bool
+    defined bool
+    tentative bool
+    value addr // Ast
+    params addr // Param list
+    attrs handle[Attr]
+    asm_name u32
+    flags u32
+}
+
+type SymbolMap = Map[u32, addr, u32_hash, u32_eq]
+type TagMap = Map[u32, u32, u32_hash, u32_eq]
+
+struct Scope {
+    parent handle[Scope]
+    ordinary SymbolMap
+    local_labels SymbolMap
+    tags TagMap
+}
+
+struct Label {
+    name u32
+    defined bool
+    used bool
+    loc u32
+}
+
+struct Parser {
+    pp handle[Pp]
+    names handle[CNames]
+    types TypeCtx
+    scope handle[Scope]
+    file_scope handle[Scope]
+    external SymbolMap
+    objects Vec[addr]
+    labels SymbolMap
+    label_list Vec[addr]
+    switches handle[SwitchContext]
+    loops u32
+    function handle[Symbol]
+    ahead arr[2, Token]
+    pending u32
+    replay handle[Vec[Token]] // optional balanced attribute operand
+    replay_at usize
+    location u32
+    pack u32
+    packs Vec[u32]
+    vla_bounds Vec[addr]
+    // Callback receives (Parser*, Ast*, user). Nodes remain valid in the TU region.
+    on_function addr
+    on_object addr
+    user addr
+}
+
+fn pa_trim(s Bytes) Bytes {
+    a usize = 0
+    b usize = s.n
+    while a < b && cc_space(s.p[u8, a]) { a += 1 }
+    while b > a && cc_space(s.p[u8, b - 1]) { b -= 1 }
+    return bytes_sub(s, a, b - a)
+}
+
+fn pa_pragma(p handle[Parser], t Token) void {
+    s Bytes = pa_trim(cc_spelling(p.names, t))
+    if !bytes_starts_with(s, bytes_c(c"pack")) { return }
+    s = pa_trim(bytes_from(s, 4))
+    if s.n < 2 || s.p[u8] != 40 || s.p[u8, s.n - 1] != 41 { return }
+    s = pa_trim(bytes_sub(s, 1, s.n - 2))
+    if s.n == 0 { p.pack = 0; return }
+    if bytes_starts_with(s, bytes_c(c"push")) {
+        vec_push[u32](&p.packs, p.pack)
+        s = pa_trim(bytes_from(s, 4))
+        if s.n == 0 { return }
+    } else if bytes_starts_with(s, bytes_c(c"pop")) {
+        if p.packs.n != 0 {
+            p.pack = vec_get[u32](&p.packs, p.packs.n - 1)
+            p.packs.n -= 1
+        }
+        s = pa_trim(bytes_from(s, 3))
+        if s.n == 0 { return }
+    }
+    comma usize = bytes_index(s, 44) catch s.n
+    if comma < s.n { s = pa_trim(bytes_from(s, comma + 1)) }
+    n u64 = bytes_to_u64(s) catch 0
+    if n == 1 || n == 2 || n == 4 || n == 8 || n == 16 { p.pack = trunc[u32](n) }
+}
+
+fn pa_peek_at(p handle[Parser], i u32) Token fails {
+    while p.pending <= i {
+        t Token
+        input handle[Vec[Token]] = p.replay
+        if input == null { t = try pp_next(p.pp) }
+        else if p.replay_at < input.n {
+            t = input.p[Token, p.replay_at]
+            p.replay_at += 1
+        } else { t = cc_token(TK_EOF, 0, p.location, 0) }
+        if t.kind == TK_PRAGMA { pa_pragma(p, t); continue }
+        if t.kind == TK_DIRECT { continue }
+        p.ahead[zext[usize](p.pending)] = t
+        p.pending += 1
+    }
+    return p.ahead[zext[usize](i)]
+}
+
+fn pa_peek(p handle[Parser]) Token fails { return try pa_peek_at(p, 0) }
+
+fn pa_take(p handle[Parser]) Token fails {
+    t Token = try pa_peek(p)
+    p.pending -= 1
+    if p.pending != 0 { p.ahead[0] = p.ahead[1] }
+    p.location = t.loc
+    return t
+}
+
+fn pa_is_gnu(p handle[Parser]) bool {
+    n handle[CNames] = p.names
+    return n.gnu
+}
+
+fn pa_is(p handle[Parser], t Token, word addr) bool {
+    return t.kind != TK_EOF && cc_is(p.names, t, word)
+}
+
+fn pa_at(p handle[Parser], word addr) bool fails { return pa_is(p, try pa_peek(p), word) }
+fn pa_at_second(p handle[Parser], word addr) bool fails { return pa_is(p, try pa_peek_at(p, 1), word) }
+
+fn pa_accept(p handle[Parser], word addr) bool fails {
+    if !(try pa_at(p, word)) { return false }
+    try pa_take(p)
+    return true
+}
+
+fn pa_error(p handle[Parser], loc u32, message addr) void fails {
+    try cc_error(p.names, loc, message)
+}
+
+fn pa_expect(p handle[Parser], word addr) Token fails {
+    t Token = try pa_take(p)
+    if pa_is(p, t, word) { return t }
+    b Buf = {}
+    buf_str(&b, c"expected '")
+    buf_str(&b, word)
+    buf_str(&b, c"'")
+    if t.kind != TK_EOF {
+        buf_str(&b, c", got '")
+        buf_append(&b, cc_spelling(p.names, t))
+        buf_u8(&b, 39)
+    }
+    try pa_error(p, t.loc, buf_cstr(&b))
+    return t
+}
+
+fn pa_gnu(p handle[Parser], t Token) void fails {
+    if !pa_is_gnu(p) { try pa_error(p, t.loc, c"GNU extension requires -std=gnu23") }
+}
+
+// The current Fas constant evaluator cannot apply sizeof to a recursive
+// handle type. Array indexing uses the same layout without that evaluator.
+fn pa_alloc[T]() handle[T] {
+    elements arr[2, T]
+    lo addr = &elements[0]
+    hi addr = &elements[1]
+    return handle_from_addr[T](heap_alloc_zeroed(addr_bits(hi) - addr_bits(lo)))
+}
+
+fn pa_node(kind u8, loc u32, ty u32) handle[Ast] {
+    n handle[Ast] = pa_alloc[Ast]()
+    n.kind = kind
+    n.loc = loc
+    n.ty = ty
+    return n
+}
+
+struct AstList { first handle[Ast], last handle[Ast] }
+
+fn pa_append(xs handle[AstList], n handle[Ast]) void {
+    if n == null { return }
+    if xs.last == null { xs.first = n }
+    else {
+        last handle[Ast] = xs.last
+        last.next = n
+    }
+    while n.next != null { n = n.next }
+    xs.last = n
+}
+
+fn pa_enter(p handle[Parser]) void {
+    s handle[Scope] = pa_alloc[Scope]()
+    s.parent = p.scope
+    p.scope = s
+}
+
+fn pa_leave(p handle[Parser]) void {
+    s handle[Scope] = p.scope
+    p.scope = s.parent
+    map_free(&s.ordinary)
+    map_free(&s.tags)
+    map_free(&s.local_labels)
+    heap_free(handle_addr(s))
+}
+
+fn pa_lookup(p handle[Parser], name u32) handle[Symbol] {
+    s handle[Scope] = p.scope
+    while s != null {
+        found addr = map_get(&s.ordinary, name) catch {
+            s = s.parent
+            continue
+        }
+        return handle_from_addr(found)
+    }
+    return null
+}
+
+fn pa_tag_lookup(p handle[Parser], name u32, local bool) u32 {
+    s handle[Scope] = p.scope
+    while s != null {
+        ty u32 = map_get(&s.tags, name) catch {
+            if local { return TY_INVALID }
+            s = s.parent
+            continue
+        }
+        return ty
+    }
+    return TY_INVALID
+}
+
+fn pa_typename(p handle[Parser], t Token) bool {
+    if t.kind != TK_IDENT { return false }
+    s handle[Symbol] = pa_lookup(p, cc_ident(p.names, t))
+    return s != null && s.storage == SC_TYPEDEF
+}
+
+// Callers may run separate TUs concurrently. A nested callback that starts
+// another parser on the same thread restores the outer type context.
+fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
+    p.pp = pp
+    p.names = &pp.names
+    previous handle[TypeCtx] = tc
+    defer { tc = previous }
+    tc_init(&p.types)
+    pa_enter(p)
+    p.file_scope = p.scope
+    try pa_builtin_types(p)
+    while (try pa_peek(p)).kind != TK_EOF {
+        try pa_declaration(p, true)
+    }
+    for i usize in 0..p.objects.n {
+        obj handle[Symbol] = handle_from_addr(p.objects.p[addr, i])
+        try se_finish_object(p, obj)
+        if p.on_object != null && (obj.defined || obj.tentative) {
+            n handle[Ast] = pa_node(ND_DECL, obj.loc, obj.ty)
+            n.decl = obj
+            n.a = handle_from_addr(obj.value)
+            n.attrs = obj.attrs
+            try call_addr[fails](p.on_object, handle_addr(p), handle_addr(n), p.user)
+        }
+    }
+}

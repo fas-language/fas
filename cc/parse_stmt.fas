@@ -1,0 +1,351 @@
+struct CaseRange { lo u64, hi u64, loc u32 }
+struct SwitchContext {
+    parent handle[SwitchContext]
+    ranges Vec[CaseRange]
+    ty u32
+    has_default bool
+}
+
+fn pa_get_label(p handle[Parser], t Token) handle[Label] fails {
+    if p.function == null { try pa_error(p, t.loc, c"label outside function") }
+    name u32 = try pa_ident(p, t)
+    scope handle[Scope] = p.scope
+    while scope != null {
+        a addr = map_get(&scope.local_labels, name) catch null
+        if a != null { return handle_from_addr(a) }
+        scope = scope.parent
+    }
+    a addr = map_get(&p.labels, name) catch {
+        l handle[Label] = pa_alloc[Label]()
+        l.name = name
+        l.loc = t.loc
+        map_put(&p.labels, name, handle_addr(l))
+        vec_push[addr](&p.label_list, handle_addr(l))
+        return l
+    }
+    return handle_from_addr(a)
+}
+
+fn pa_local_labels(p handle[Parser]) handle[Ast] fails {
+    t Token = try pa_take(p)
+    try pa_gnu(p, t)
+    scope handle[Scope] = p.scope
+    while true {
+        item Token = try pa_take(p)
+        name u32 = try pa_ident(p, item)
+        l handle[Label] = pa_alloc[Label]()
+        l.loc = item.loc
+        l.name = name
+        if !map_put(&scope.local_labels, name, handle_addr(l)) {
+            try pa_error(p, item.loc, c"duplicate local label declaration")
+        }
+        vec_push[addr](&p.label_list, handle_addr(l))
+        if !(try pa_accept(p, c",")) { break }
+    }
+    try pa_expect(p, c";")
+    return null
+}
+
+fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
+    t Token = try pa_take(p)
+    n handle[Ast] = pa_node(ND_ASM, t.loc, TY_VOID)
+    while true {
+        a Token = try pa_peek(p)
+        if pa_is(p, a, c"goto") { n.flags |= 1 }
+        else if pa_qual(p, a) == Q_VOLATILE { n.flags |= 2 }
+        else if pa_inline(p, a) { n.flags |= 4 }
+        else { break }
+        try pa_take(p)
+    }
+    try pa_expect(p, c"(")
+    n.a = try pa_strings(p)
+    section u8 = 0
+    // The lexer can produce a single :: preprocessing token for empty adjacent sections.
+    while (try pa_at(p, c":")) || (try pa_at(p, c"::")) {
+        sep Token = try pa_take(p)
+        section += if pa_is(p, sep, c"::") { 2 } else { 1 }
+        if file || section > 4 || (section == 4 && (n.flags & 1) == 0) { try pa_error(p, sep.loc, c"invalid asm operand section") }
+        if (try pa_at(p, c")")) || (try pa_at(p, c":")) || (try pa_at(p, c"::")) { continue }
+        xs AstList = {}
+        while true {
+            if section == 4 {
+                lt Token = try pa_take(p)
+                l handle[Label] = try pa_get_label(p, lt)
+                l.used = true
+                item handle[Ast] = pa_node(ND_NAME, lt.loc, TY_VOID)
+                item.op = l.name
+                item.extra = handle_addr(l)
+                pa_append(&xs, item)
+            } else {
+                opname u32 = 0
+                if section <= 2 && (try pa_accept(p, c"[")) {
+                    opname = try pa_ident(p, try pa_take(p))
+                    try pa_expect(p, c"]")
+                }
+                constraint handle[Ast] = try pa_strings(p)
+                if section <= 2 {
+                    try pa_expect(p, c"(")
+                    e handle[Ast] = try pa_expression(p, 1)
+                    try pa_expect(p, c")")
+                    if section == 1 { try se_modifiable(p, e) }
+                    item handle[Ast] = pa_node(ND_ASM, e.loc, e.ty)
+                    item.op = opname
+                    item.a = constraint
+                    item.b = e
+                    pa_append(&xs, item)
+                } else { pa_append(&xs, constraint) }
+            }
+            if !(try pa_accept(p, c",")) { break }
+        }
+        if section == 1 { n.b = xs.first }
+        if section == 2 { n.c = xs.first }
+        if section == 3 { n.d = xs.first }
+        if section == 4 { n.extra = handle_addr(xs.first) }
+    }
+    try pa_expect(p, c")")
+    try pa_expect(p, c";")
+    return n
+}
+
+fn pa_block(p handle[Parser], scope bool) handle[Ast] fails {
+    t Token = try pa_expect(p, c"{")
+    if scope { pa_enter(p) }
+    defer { if scope { pa_leave(p) } }
+    xs AstList = {}
+    while !(try pa_accept(p, c"}")) {
+        next Token = try pa_peek(p)
+        if next.kind == TK_EOF { try pa_error(p, next.loc, c"unterminated compound statement") }
+        item handle[Ast]
+        leading handle[Attr] = try pa_attributes(p)
+        next = try pa_peek(p)
+        if next.kind == TK_IDENT && (try pa_at_second(p, c":")) {
+            item = try pa_statement_in(p, true)
+        } else if pa_decl_start(p, next) || (pa_is(p, next, c"__extension__") && pa_decl_start(p, try pa_peek_at(p, 1))) {
+            item = try pa_declaration(p, false)
+        } else if pa_is(p, next, c"__label__") { item = try pa_local_labels(p) }
+        else { item = try pa_statement_in(p, true) }
+        if item != null { item.attrs = pa_join_attrs(leading, item.attrs) }
+        pa_append(&xs, item)
+    }
+    result u32 = TY_VOID
+    last handle[Ast] = xs.last
+    if last != null && last.kind == ND_STMT && last.op == 0 { result = se_decay(last.ty) }
+    node handle[Ast] = pa_node(ND_BLOCK, t.loc, result)
+    node.a = xs.first
+    return node
+}
+
+fn pa_paren_expr(p handle[Parser]) handle[Ast] fails {
+    try pa_expect(p, c"(")
+    e handle[Ast] = try pa_expression(p, 1)
+    try pa_expect(p, c")")
+    return e
+}
+
+fn pa_substatement(p handle[Parser]) handle[Ast] fails {
+    pa_enter(p)
+    defer { pa_leave(p) }
+    return try pa_statement(p)
+}
+
+fn pa_case_key(value u64, ty u32) u64 {
+    if ty_is_unsigned(ty) { return value }
+    return value ^ 0x8000000000000000
+}
+
+fn pa_case_less(a handle[CaseRange], b handle[CaseRange]) bool { return a.lo < b.lo }
+
+fn pa_check_cases(p handle[Parser], sw handle[SwitchContext]) void fails {
+    sort_vec_by[CaseRange, pa_case_less](&sw.ranges)
+    for i usize in 1..sw.ranges.n {
+        prev handle[CaseRange] = vec_at[CaseRange](&sw.ranges, i - 1)
+        item handle[CaseRange] = vec_at[CaseRange](&sw.ranges, i)
+        if item.lo <= prev.hi { try pa_error(p, item.loc, c"duplicate or overlapping case value") }
+    }
+}
+
+fn pa_case(p handle[Parser], t Token, n handle[Ast], in_block bool) void fails {
+    context handle[SwitchContext] = p.switches
+    if context == null { try pa_error(p, t.loc, c"case or default label outside switch") }
+    if pa_is(p, t, c"default") {
+        if context.has_default { try pa_error(p, t.loc, c"duplicate default label") }
+        context.has_default = true
+    } else {
+        n.a = try pa_expression(p, 3)
+        lo u64 = se_value(context.ty, try se_ice(p, n.a))
+        hi u64 = lo
+        if try pa_accept(p, c"...") {
+            try pa_gnu(p, t)
+            n.b = try pa_expression(p, 3)
+            hi = se_value(context.ty, try se_ice(p, n.b))
+        }
+        lo = pa_case_key(lo, context.ty)
+        hi = pa_case_key(hi, context.ty)
+        if hi >= lo {
+            range handle[CaseRange] = vec_add[CaseRange](&context.ranges)
+            range.lo = lo
+            range.hi = hi
+            range.loc = t.loc
+        }
+    }
+    try pa_expect(p, c":")
+    if !in_block { n.c = try pa_label_tail(p) }
+}
+
+fn pa_label_tail(p handle[Parser]) handle[Ast] fails {
+    next Token = try pa_peek(p)
+    if pa_is(p, next, c"}") || pa_decl_start(p, next) { return null }
+    return try pa_statement(p)
+}
+
+fn pa_statement(p handle[Parser]) handle[Ast] fails { return try pa_statement_in(p, false) }
+
+fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
+    t Token = try pa_peek(p)
+    attrs handle[Attr] = try pa_attributes(p)
+    if attrs != null { t = try pa_peek(p) }
+    if pa_is(p, t, c"{") { return try pa_block(p, true) }
+    if pa_asm_word(p, t) { return try pa_asm(p, false) }
+    n handle[Ast] = pa_node(ND_STMT, t.loc, TY_VOID)
+    n.attrs = attrs
+    if try pa_accept(p, c";") { return n }
+    n.op = t.payload
+    if try pa_accept(p, c"if") {
+        n.a = try pa_paren_expr(p)
+        try se_scalar(p, n.a)
+        n.b = try pa_substatement(p)
+        if try pa_accept(p, c"else") { n.c = try pa_substatement(p) }
+        return n
+    }
+    if try pa_accept(p, c"switch") {
+        key handle[Ast] = try pa_paren_expr(p)
+        n.a = key
+        if !ty_is_integer(key.ty) { try pa_error(p, t.loc, c"switch requires integer type") }
+        sw SwitchContext = {}
+        sw.parent = p.switches
+        sw.ty = se_promote_expr(n.a)
+        p.switches = &sw
+        defer { p.switches = sw.parent }
+        n.b = try pa_substatement(p)
+        try pa_check_cases(p, &sw)
+        return n
+    }
+    if try pa_accept(p, c"while") {
+        n.a = try pa_paren_expr(p)
+        try se_scalar(p, n.a)
+        p.loops += 1
+        defer { p.loops -= 1 }
+        n.b = try pa_substatement(p)
+        return n
+    }
+    if try pa_accept(p, c"do") {
+        p.loops += 1
+        defer { p.loops -= 1 }
+        n.b = try pa_substatement(p)
+        try pa_expect(p, c"while")
+        n.a = try pa_paren_expr(p)
+        try se_scalar(p, n.a)
+        try pa_expect(p, c";")
+        return n
+    }
+    if try pa_accept(p, c"for") {
+        pa_enter(p)
+        defer { pa_leave(p) }
+        try pa_expect(p, c"(")
+        if pa_decl_start(p, try pa_peek(p)) { n.a = try pa_declaration(p, false) }
+        else if !(try pa_accept(p, c";")) { n.a = try pa_expression(p, 1); try pa_expect(p, c";") }
+        if !(try pa_accept(p, c";")) {
+            n.b = try pa_expression(p, 1)
+            try se_scalar(p, n.b)
+            try pa_expect(p, c";")
+        }
+        if !(try pa_accept(p, c")")) { n.c = try pa_expression(p, 1); try pa_expect(p, c")") }
+        p.loops += 1
+        defer { p.loops -= 1 }
+        n.d = try pa_substatement(p)
+        return n
+    }
+    if (try pa_accept(p, c"case")) || (try pa_accept(p, c"default")) {
+        try pa_case(p, t, n, in_block)
+        return n
+    }
+    if (try pa_accept(p, c"break")) || (try pa_accept(p, c"continue")) {
+        if p.loops == 0 && (p.switches == null || pa_is(p, t, c"continue")) {
+            try pa_error(p, t.loc, c"jump statement outside an enclosing loop or switch")
+        }
+    } else if try pa_accept(p, c"goto") {
+        if try pa_accept(p, c"*") {
+            try pa_gnu(p, t)
+            dest handle[Ast] = try pa_expression(p, 1)
+            n.a = dest
+            if !ty_is_ptr(se_decay(dest.ty)) { try pa_error(p, t.loc, c"computed goto requires pointer type") }
+        } else {
+            label Token = try pa_take(p)
+            l handle[Label] = try pa_get_label(p, label)
+            l.used = true
+            n.value = zext[u64](l.name)
+            n.extra = handle_addr(l)
+        }
+    } else if try pa_accept(p, c"return") {
+        fun handle[Symbol] = p.function
+        ret u32 = ty_node(ty_unqual(fun.ty)).elem
+        if try pa_at(p, c";") {
+            if !ty_is_void(ret) { try pa_error(p, t.loc, c"non-void function must return a value") }
+        } else {
+            value handle[Ast] = try pa_expression(p, 1)
+            n.a = value
+            if ty_is_void(ret) {
+                if !ty_is_void(value.ty) || !pa_is_gnu(p) { try pa_error(p, t.loc, c"void function cannot return a value") }
+            } else { try se_conversion(p, ret, n.a) }
+        }
+    } else if t.kind == TK_IDENT && !pa_keyword(p, t) && (try pa_at_second(p, c":")) {
+        try pa_take(p)
+        try pa_expect(p, c":")
+        l handle[Label] = try pa_get_label(p, t)
+        if l.defined { try pa_error(p, t.loc, c"duplicate label") }
+        l.defined = true
+        n.op = cc_intern(p.names, bytes_c(c":"))
+        n.value = zext[u64](l.name)
+        n.extra = handle_addr(l)
+        if !in_block { n.a = try pa_label_tail(p) }
+        return n
+    } else {
+        n.op = 0
+        e handle[Ast] = try pa_expression(p, 1)
+        n.a = e
+        n.ty = e.ty
+    }
+    try pa_expect(p, c";")
+    return n
+}
+
+fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[Ast] fails {
+    p.function = s
+    scope handle[Scope] = p.scope
+    p.scope = proto
+    defer {
+        p.function = null
+        p.scope = scope
+        map_free(&p.labels)
+        p.label_list.n = 0
+    }
+    ret u32 = ty_node(ty_unqual(s.ty)).elem
+    if !ty_is_void(ret) && !se_complete(ret) { try pa_error(p, s.loc, c"function returns incomplete type") }
+    formal handle[Param] = handle_from_addr(s.params)
+    while formal != null {
+        if !se_complete(formal.ty) { try pa_error(p, formal.loc, c"parameter has incomplete type") }
+        formal = formal.next
+    }
+    body handle[Ast] = try pa_block(p, false)
+    for i usize in 0..p.label_list.n {
+        l handle[Label] = handle_from_addr(p.label_list.p[addr, i])
+        if l.used && !l.defined { try pa_error(p, l.loc, c"use of undefined label") }
+    }
+    n handle[Ast] = pa_node(ND_DECL, s.loc, s.ty)
+    n.flags = NF_DEFINITION
+    n.decl = s
+    n.a = body
+    n.attrs = s.attrs
+    if p.on_function != null { try call_addr[fails](p.on_function, handle_addr(p), handle_addr(n), p.user) }
+    return n
+}

@@ -1,0 +1,1 @@
+unexpected-reject headers/tgmath.h The absolute glibc include hits a float-type guard under the fcc GCC 4.2 compatibility macros

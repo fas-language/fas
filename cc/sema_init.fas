@@ -1,0 +1,246 @@
+// The initializer tree keeps an explicit node for each brace level and
+// each designator path. The destination type is completed from its extent.
+struct InitResult {
+    ty u32
+    tree handle[Ast]
+}
+
+fn se_char_array(ty u32, from u32) bool {
+    if !ty_is_array(ty) || !ty_is_array(from) { return false }
+    x u32 = ty_unqual(ty_node(ty_unqual(ty)).elem)
+    y u32 = ty_unqual(ty_node(ty_unqual(from)).elem)
+    if x == y { return true }
+    return (y == TY_CHAR || y == TY_UCHAR) && (x == TY_CHAR || x == TY_UCHAR || x == TY_SCHAR)
+}
+
+fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
+    out.tree = e
+    out.ty = if ty == TY_INVALID { e.ty } else { ty }
+    if e.kind == ND_STRING && se_char_array(ty, e.ty) {
+        n handle[TypeNode] = ty_node(ty_unqual(ty))
+        if n.aux1 == ARR_INCOMPLETE { out.ty = ty_array(n.elem, e.value) }
+        else if n.aux1 == ARR_FIXED && n.arr_len + 1 < e.value {
+            try pa_error(p, e.loc, c"string literal is too long for initialized array")
+        }
+    } else {
+        if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
+        try se_conversion(p, ty, e)
+    }
+    if constant && (e.flags & NF_OVERFLOW) != 0 {
+        try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
+    }
+    if constant && ((e.flags & NF_STATIC) == 0 || ((e.flags & NF_LVALUE) != 0 && !ty_is_array(e.ty) &&
+        e.kind != ND_STRING && e.kind != ND_COMPOUND && (e.flags & (NF_ICE | NF_FLOAT_CONST)) == 0)) {
+        try pa_error(p, e.loc, c"initializer is not a constant expression")
+    }
+}
+
+fn se_aggregate(ty u32) bool { return ty_is_array(ty) || ty_is_record(ty) || ty_is_vector(ty) }
+
+fn se_init_count(ty u32) u64 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY {
+        if n.aux1 == ARR_INCOMPLETE { return ~0 }
+        return n.arr_len
+    }
+    if n.kind == TYK_VECTOR { return zext[u64](n.aux1) / ty_size(n.elem) }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION { return zext[u64](ty_record(n.aux1).fields_len) }
+    return 1
+}
+
+fn se_init_elem(ty u32, index u64) u32 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY || n.kind == TYK_VECTOR { return n.elem }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION { return ty_field(ty_record(n.aux1).fields_start + trunc[u32](index)).ty }
+    return ty
+}
+
+fn se_init_next(ty u32, index u64) u64 {
+    if ty_kind(ty) == TYK_UNION {
+        if index == 0 { return 0 }
+        return se_init_count(ty)
+    }
+    if ty_kind(ty) != TYK_STRUCT { return index }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    r handle[RecordDef] = ty_record(n.aux1)
+    while index < zext[u64](r.fields_len) {
+        f handle[FieldDef] = ty_field(r.fields_start + trunc[u32](index))
+        if !f.is_bitfield || f.name_id != 0 { break }
+        index += 1
+    }
+    return index
+}
+
+struct Designation {
+    first handle[Ast]
+    ty u32
+    index u64
+}
+
+fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
+    list AstList = {}
+    colon bool = false
+    while true {
+        t Token = try pa_peek(p)
+        idx u64 = 0
+        next_ty u32
+        a handle[Ast] = null
+        b handle[Ast] = null
+        if try pa_accept(p, c"[") {
+            if !ty_is_array(ty) { try pa_error(p, t.loc, c"array designator on a non-array initializer") }
+            next_ty = ty_node(ty_unqual(ty)).elem
+            a = try pa_expression(p, 3)
+            idx = try se_ice(p, a)
+            if try pa_accept(p, c"...") {
+                try pa_gnu(p, t)
+                b = try pa_expression(p, 3)
+                hi u64 = try se_ice(p, b)
+                if hi < idx { try pa_error(p, t.loc, c"empty array designator range") }
+                idx = hi
+            }
+            if idx >= se_init_count(ty) { try pa_error(p, t.loc, c"array designator index out of bounds") }
+            try pa_expect(p, c"]")
+        } else if (try pa_at(p, c".")) || (pa_is_gnu(p) && t.kind == TK_IDENT && (try pa_at_second(p, c":"))) {
+            old bool = !pa_is(p, t, c".")
+            if !old { try pa_take(p) }
+            name u32 = try pa_ident(p, try pa_take(p))
+            if old { try pa_expect(p, c":"); colon = true }
+            field FieldLookup = {}
+            if !ty_is_record(ty) || !se_complete(ty) || !ty_offsetof(ty, name, &field) { try pa_error(p, t.loc, c"unknown member in initializer designator") }
+            next_ty = field.ty
+            record handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
+            start u32 = record.fields_start
+            idx = zext[u64](field.field_idx - start)
+            if idx >= zext[u64](record.fields_len) {
+                // The member is injected by an anonymous record.
+                idx = 0
+                while idx < zext[u64](record.fields_len) {
+                    f handle[FieldDef] = ty_field(start + trunc[u32](idx))
+                    sub FieldLookup = {}
+                    if f.is_anon && ty_offsetof(f.ty, name, &sub) { break }
+                    idx += 1
+                }
+            }
+            t.payload = name
+        } else { break }
+        if list.first == null { d.index = idx }
+        item handle[Ast] = pa_node(ND_DESIGNATOR, t.loc, next_ty)
+        item.op = t.payload
+        item.value = idx
+        item.a = a
+        item.b = b
+        pa_append(&list, item)
+        ty = next_ty
+        if colon { break }
+    }
+    d.ty = ty
+    d.first = list.first
+    if d.first != null && !colon { try pa_expect(p, c"=") }
+}
+
+fn pa_list_more(p handle[Parser]) bool fails {
+    if !(try pa_at(p, c",")) { return false }
+    t Token = try pa_peek_at(p, 1)
+    return !pa_is(p, t, c"}") && !pa_is(p, t, c".") && !pa_is(p, t, c"[")
+}
+
+fn pa_init_element(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
+    if try pa_at(p, c"{") { try pa_initializer(p, ty, constant, out); return }
+    e handle[Ast] = try pa_expression(p, 2)
+    try pa_init_elided(p, ty, constant, e, out)
+}
+
+fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out handle[InitResult]) void fails {
+    if !se_aggregate(ty) || (ty_is_record(ty) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))) ||
+        (e.kind == ND_STRING && se_char_array(ty, e.ty)) || (ty_is_vector(ty) && ty_compatible(ty, e.ty)) {
+        try se_initializer_expr(p, ty, e, constant, out)
+        return
+    }
+    idx u64 = se_init_next(ty, 0)
+    count u64 = se_init_count(ty)
+    if idx >= count { try pa_error(p, e.loc, c"excess elements in aggregate initializer") }
+    elem InitResult = {}
+    try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
+    xs AstList = {}
+    pa_add_init(&xs, elem.tree, null, idx)
+    idx = se_init_next(ty, idx + 1)
+    while idx < count && (try pa_list_more(p)) {
+        try pa_take(p)
+        try pa_init_element(p, se_init_elem(ty, idx), constant, &elem)
+        pa_add_init(&xs, elem.tree, null, idx)
+        idx = se_init_next(ty, idx + 1)
+    }
+    out.ty = ty
+    tree handle[Ast] = pa_node(ND_INIT, e.loc, ty)
+    out.tree = tree
+    tree.a = xs.first
+}
+
+fn pa_add_init(xs handle[AstList], e handle[Ast], designators handle[Ast], idx u64) void {
+    item handle[Ast] = pa_node(ND_INIT, e.loc, e.ty)
+    item.a = e
+    item.b = designators
+    item.value = idx
+    pa_append(xs, item)
+}
+
+fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
+    t Token = try pa_peek(p)
+    if !(try pa_accept(p, c"{")) {
+        try se_initializer_expr(p, ty, try pa_expression(p, 2), constant, out)
+        return
+    }
+    if ty == TY_INVALID { try pa_error(p, t.loc, c"auto cannot infer a type from a brace initializer") }
+    n handle[Ast] = pa_node(ND_INIT, t.loc, ty)
+    out.tree = n
+    out.ty = ty
+    base handle[TypeNode] = ty_node(ty_unqual(ty))
+    incomplete bool = base.kind == TYK_ARRAY && base.aux1 == ARR_INCOMPLETE
+    elem_ty u32 = base.elem
+    count u64 = se_init_count(ty)
+    idx u64 = se_init_next(ty, 0)
+    max u64 = 0
+    xs AstList = {}
+    while !(try pa_at(p, c"}")) {
+        d Designation = {}
+        try pa_designators(p, ty, &d)
+        if d.first != null { idx = d.index }
+        elem InitResult = {}
+        tok Token = try pa_peek(p)
+        if tok.kind == TK_STR && ty_is_array(ty) && idx == 0 && d.first == null {
+            e handle[Ast] = try pa_expression(p, 2)
+            if e.kind == ND_STRING && se_char_array(ty, e.ty) {
+                try se_initializer_expr(p, ty, e, constant, out)
+                if try pa_accept(p, c",") {}
+                try pa_expect(p, c"}")
+                return
+            }
+            if idx >= count { try pa_error(p, tok.loc, c"excess elements in initializer") }
+            try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
+        } else {
+            if idx >= count { try pa_error(p, tok.loc, c"excess elements in initializer") }
+            dest u32 = if d.first == null { se_init_elem(ty, idx) } else { d.ty }
+            try pa_init_element(p, dest, constant, &elem)
+        }
+        pa_add_init(&xs, elem.tree, d.first, idx)
+        if idx + 1 > max { max = idx + 1 }
+        idx = se_init_next(ty, idx + 1)
+        if !(try pa_accept(p, c",")) { break }
+    }
+    try pa_expect(p, c"}")
+    if incomplete {
+        if max == 0 && !pa_is_gnu(p) { try pa_error(p, t.loc, c"empty initializer cannot complete an unsized array") }
+        out.ty = ty_array(elem_ty, max)
+        n.ty = out.ty
+    }
+    n.a = xs.first
+    if constant { n.flags |= NF_STATIC }
+    if !se_aggregate(ty) && xs.first == null && ty_is_integer(ty) {
+        n.flags |= NF_STATIC | NF_ICE
+    } else if !se_aggregate(ty) && xs.first != null {
+        item handle[Ast] = xs.first
+        e handle[Ast] = item.a
+        n.flags |= e.flags & (NF_ICE | NF_FLOAT_CONST)
+        n.value = e.value
+    }
+}
