@@ -1091,7 +1091,7 @@ module P = struct
       if at p Token.Rbrace then Ok (List.rev acc)
       else
         let fs = span p in
-        let* n = ident p in
+        let* n, _ = field_ident p in
         let ty_span = span p in
         let* t = ty p in
         let* () =
@@ -2063,7 +2063,7 @@ module P = struct
           ignore (bump p);
           ignore (bump p);
           let field_span = span p in
-          let* field = ident p in
+          let* field, _ = field_ident p in
           go (Ast.Arrow_field (lhs, field, operator_span, field_span))
       | k when List.mem_assoc k ops ->
           let op = List.assoc k ops in
@@ -2485,7 +2485,7 @@ module P = struct
                     if operation = Names.Offsetof then
                       let* () = expected p Token.Comma in
                       let field_span = (peek p).span in
-                      let* f = ident p in
+                      let* f, _ = field_ident p in
                       let* () = expected p Token.Rbracket in
                       Ok (Ast.Offsetof (t, f, field_span, sp))
                     else
