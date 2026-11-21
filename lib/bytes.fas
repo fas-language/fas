@@ -37,7 +37,13 @@ fn bytes_eq(a Bytes, b Bytes) bool {
     return a.n == b.n && mem_eq(a.p, b.p, a.n)
 }
 
-fn bytes_eq_c(a Bytes, s addr) bool { return bytes_eq(a, bytes_c(s)) }
+fn bytes_eq_c(a Bytes, s addr) bool {
+    for i usize in 0..a.n {
+        ch u8 = s[u8, i]
+        if ch == 0 || ch != a.p[u8, i] { return false }
+    }
+    return s[u8, a.n] == 0
+}
 
 // -1, 0 or 1: unsigned bytes first, then the shorter string first
 fn bytes_cmp(a Bytes, b Bytes) i32 {
