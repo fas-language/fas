@@ -182,6 +182,9 @@ fn se_check_constexpr(p handle[Parser], e handle[Ast]) void fails {
         }
         return
     }
+    if ty_is_integer(e.ty) && (e.flags & NF_ICE) == 0 {
+        try pa_error(p, e.loc, c"constexpr integer initializer is not an integer constant expression")
+    }
     if ty_is_ptr(e.ty) && (e.flags & NF_ICE) == 0 {
         try pa_error(p, e.loc, c"constexpr pointer initializer must be null")
     }

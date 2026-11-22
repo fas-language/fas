@@ -8,6 +8,7 @@ use "../lib/vec.fas"
 use "../lib/bytes.fas"
 use "../lib/table.fas"
 use "../lib/intern.fas"
+use "../lib/sort.fas"
 
 // ---------- TypeId constants (pre-interned in tc_init) ----------
 const TY_INVALID u32     = 0
@@ -132,9 +133,17 @@ struct RecordDef {
     align u64
 }
 
+struct EnumMember {
+    name u32
+    negative bool
+    value u64
+}
+
 struct EnumDef {
     tag_id u32
     underlying u32    // underlying integer TypeId
+    members_start u32
+    members_len u32
     is_complete bool
     has_fixed_underlying bool
     _pad u16
@@ -211,6 +220,7 @@ struct TypeCtx {
     records Vec[RecordDef]
     fields Vec[FieldDef]
     enums Vec[EnumDef]
+    enum_members Vec[EnumMember]
     intern_ty Table[TyKey, u32, ty_key_hash, ty_key_eq]
     intern_fn Table[FnKey, u32, fn_key_hash, fn_key_eq]
     names Intern
@@ -286,6 +296,7 @@ fn tc_free(ctx handle[TypeCtx]) void {
     vec_free(&ctx.records)
     vec_free(&ctx.fields)
     vec_free(&ctx.enums)
+    vec_free(&ctx.enum_members)
     table_free(&ctx.intern_ty)
     table_free(&ctx.intern_fn)
     intern_free(&ctx.names)
@@ -409,6 +420,17 @@ fn ty_qual_attr(tid u32, quals u32, align_attr u32) u32 {
         if n.aux1 > al { al = n.aux1 }
     }
     if q == 0 && al == 0 { return base }
+    // C23 array qualifiers apply to the elements. Canonicalize qualification
+    // through a typedef to the same type as a qualified element declaration.
+    cv u32 = q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)
+    if cv != 0 && ty_is_array(base) {
+        array TypeNode = {}
+        copy_into(&array, ty_node(base))
+        elem u32 = ty_qual_attr(array.elem, cv, 0)
+        q &= ~cv
+        base = ty_array_replace_elem(&array, elem)
+        if q == 0 && al == 0 { return base }
+    }
     k TyKey = {}
     k.kind = TYK_QUAL
     k.flags = q
@@ -444,11 +466,26 @@ fn ty_typeof(tid u32) u32 {
     return tid
 }
 
-// C23 typeof_unqual(T): strips top-level qualifiers (const/volatile/restrict/_Atomic)
-// while keeping layout attributes if any? Per C23 6.7.2.5, typeof_unqual removes
-// all qualifiers including _Atomic.
+fn ty_array_replace_elem(array handle[TypeNode], elem u32) u32 {
+    if array.aux1 == ARR_FIXED { return ty_array(elem, array.arr_len) }
+    if array.aux1 == ARR_VLA { return ty_array_vla(elem, array.aux2) }
+    return ty_array_incomplete(elem)
+}
+
+// The atomic qualifier on an array element belongs to the element type,
+// whereas the array and element share const, volatile, and restrict.
 fn ty_typeof_unqual(tid u32) u32 {
-    return ty_unqual(tid)
+    base u32 = ty_unqual(tid)
+    if !ty_is_array(base) { return base }
+    array TypeNode = {}
+    copy_into(&array, ty_node(base))
+    elem u32 = ty_array_unqual_elem(array.elem)
+    return if elem == array.elem { base } else { ty_array_replace_elem(&array, elem) }
+}
+
+fn ty_array_unqual_elem(tid u32) u32 {
+    if ty_is_array(tid) { return ty_typeof_unqual(tid) }
+    return ty_qual(ty_unqual(tid), ty_quals(tid) & Q_ATOMIC)
 }
 
 // Function type constructor. C23: empty parameter list () means (void).
@@ -537,6 +574,38 @@ fn ty_enum_complete(tid u32, underlying u32) void {
         e.underlying = ty_unqual(underlying)
     }
     e.is_complete = true
+}
+
+fn ty_enum_member_less(a handle[EnumMember], b handle[EnumMember]) bool {
+    return a.name < b.name
+}
+
+// Keep member values sorted by identifier since enumerator order does not
+// enter type compatibility. Parser-produced definitions are never empty.
+fn ty_enum_set_members(ty u32, members handle[Vec[EnumMember]]) void {
+    sort_vec_by[EnumMember, ty_enum_member_less](members)
+    e handle[EnumDef] = ty_enum(ty_node(ty_unqual(ty)).aux1)
+    e.members_start = trunc[u32](tc.enum_members.n)
+    e.members_len = trunc[u32](members.n)
+    for i usize in 0..members.n {
+        copy_into(vec_add(&tc.enum_members), vec_at(members, i))
+    }
+}
+
+fn ty_enum_member_at(e handle[EnumDef], i u32) handle[EnumMember] {
+    return vec_at(&tc.enum_members, zext[usize](e.members_start + i))
+}
+
+fn ty_enum_find_member(e handle[EnumDef], name u32) handle[EnumMember] {
+    lo u32 = 0
+    hi u32 = e.members_len
+    while lo < hi {
+        i u32 = lo + (hi - lo) / 2
+        m handle[EnumMember] = ty_enum_member_at(e, i)
+        if name == m.name { return m }
+        if name < m.name { hi = i } else { lo = i + 1 }
+    }
+    return null
 }
 
 // ---------- Type inspection helpers ----------
@@ -800,7 +869,19 @@ fn ty_usual_arith_conv(t1 u32, t2 u32) u32 {
 
 // ---------- C23 Type Compatibility & Composite Types (6.2.7) ----------
 
+// Track record pairs along the active recursion so self-referential
+// declarations can be compared without equating unrelated nominal types.
+struct TyCompare {
+    a u32
+    b u32
+    parent handle[TyCompare]
+}
+
 fn ty_compatible(a u32, b u32) bool {
+    return ty_compatible_impl(a, b, null, false)
+}
+
+fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool {
     if a == b { return true }
     // Top-level qualifiers must match
     if ty_quals(a) != ty_quals(b) { return false }
@@ -812,19 +893,19 @@ fn ty_compatible(a u32, b u32) bool {
 
     // Enum is compatible with its underlying integer type (C23 6.7.2.2)
     if na.kind == TYK_ENUM && nb.kind != TYK_ENUM {
-        return ty_compatible(ty_enum(na.aux1).underlying, ub)
+        return ty_compatible_impl(ty_enum(na.aux1).underlying, ub, path, false)
     }
     if nb.kind == TYK_ENUM && na.kind != TYK_ENUM {
-        return ty_compatible(ua, ty_enum(nb.aux1).underlying)
+        return ty_compatible_impl(ua, ty_enum(nb.aux1).underlying, path, false)
     }
 
     if na.kind != nb.kind { return false }
 
     if na.kind == TYK_PTR {
-        return ty_compatible(na.elem, nb.elem)
+        return ty_compatible_impl(na.elem, nb.elem, path, false)
     }
     if na.kind == TYK_ARRAY {
-        if !ty_compatible(na.elem, nb.elem) { return false }
+        if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
         if na.aux1 == ARR_FIXED && nb.aux1 == ARR_FIXED {
             return na.arr_len == nb.arr_len
         }
@@ -834,21 +915,56 @@ fn ty_compatible(a u32, b u32) bool {
     if na.kind == TYK_FUNC {
         if (na.flags & TYF_VARIADIC) != (nb.flags & TYF_VARIADIC) { return false }
         if na.aux2 != nb.aux2 { return false }
-        if !ty_compatible(na.elem, nb.elem) { return false }
+        if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
         for i u32 in 0..na.aux2 {
             pa u32 = vec_get(&tc.fn_params, zext[usize](na.aux1 + i))
             pb u32 = vec_get(&tc.fn_params, zext[usize](nb.aux1 + i))
-            if !ty_compatible(ty_unqual(pa), ty_unqual(pb)) { return false }
+            if !ty_compatible_impl(ty_unqual(pa), ty_unqual(pb), path, false) { return false }
         }
         return true
     }
     if na.kind == TYK_COMPLEX {
-        return ty_compatible(na.elem, nb.elem)
+        return ty_compatible_impl(na.elem, nb.elem, path, false)
     }
     if na.kind == TYK_VECTOR {
-        return na.aux1 == nb.aux1 && ty_compatible(na.elem, nb.elem)
+        return na.aux1 == nb.aux1 && ty_compatible_impl(na.elem, nb.elem, path, false)
     }
-    // Struct/union/enum with different IDs are distinct nominal types
+    if na.kind == TYK_ENUM {
+        ea handle[EnumDef] = ty_enum(na.aux1)
+        eb handle[EnumDef] = ty_enum(nb.aux1)
+        if !ea.is_complete || !eb.is_complete || ea.tag_id == 0 || ea.tag_id != eb.tag_id ||
+            ea.members_len != eb.members_len || ea.has_fixed_underlying != eb.has_fixed_underlying ||
+            ea.underlying != eb.underlying { return false }
+        for i u32 in 0..ea.members_len {
+            ma handle[EnumMember] = ty_enum_member_at(ea, i)
+            mb handle[EnumMember] = ty_enum_member_at(eb, i)
+            if ma.name != mb.name || ma.value != mb.value || ma.negative != mb.negative { return false }
+        }
+        return true
+    }
+    if na.kind == TYK_STRUCT || na.kind == TYK_UNION {
+        ra handle[RecordDef] = ty_record(na.aux1)
+        rb handle[RecordDef] = ty_record(nb.aux1)
+        if !ra.is_complete || !rb.is_complete || ra.tag_id != rb.tag_id ||
+            (ra.tag_id == 0 && !anonymous) || ra.fields_len != rb.fields_len ||
+            ra.align_attr != rb.align_attr || ra.is_packed != rb.is_packed || ra.pragma_pack != rb.pragma_pack {
+            return false
+        }
+        q handle[TyCompare] = path
+        while q != null {
+            if (q.a == ua && q.b == ub) || (q.a == ub && q.b == ua) { return true }
+            q = q.parent
+        }
+        pair TyCompare = {ua, ub, path}
+        for i u32 in 0..ra.fields_len {
+            fa handle[FieldDef] = ty_field(ra.fields_start + i)
+            fb handle[FieldDef] = ty_field(rb.fields_start + i)
+            if fa.name_id != fb.name_id || fa.is_anon != fb.is_anon || fa.is_bitfield != fb.is_bitfield ||
+                fa.bit_width != fb.bit_width || fa.align_attr != fb.align_attr || fa.is_packed != fb.is_packed ||
+                !ty_compatible_impl(fa.ty, fb.ty, &pair, fa.is_anon) { return false }
+        }
+        return true
+    }
     return false
 }
 
@@ -856,6 +972,17 @@ fn ty_compatible(a u32, b u32) bool {
 // Returns TY_INVALID if not compatible.
 fn ty_composite(a u32, b u32) u32 {
     if !ty_compatible(a, b) { return TY_INVALID }
+    return ty_composite_impl(a, b, null)
+}
+
+struct TyComposite {
+    a u32
+    b u32
+    result u32
+    parent handle[TyComposite]
+}
+
+fn ty_composite_impl(a u32, b u32, path handle[TyComposite]) u32 {
     if a == b { return a }
     q u32 = ty_quals(a)
     al u32 = ty_align_attr(a)
@@ -865,18 +992,20 @@ fn ty_composite(a u32, b u32) u32 {
     ub u32 = ty_unqual(b)
     if ua == ub { return ty_qual_attr(ua, q, al) }
 
-    na handle[TypeNode] = ty_node(ua)
-    nb handle[TypeNode] = ty_node(ub)
+    na TypeNode = {}
+    nb TypeNode = {}
+    copy_into(&na, ty_node(ua))
+    copy_into(&nb, ty_node(ub))
 
     if na.kind == TYK_ENUM { return ty_qual_attr(ua, q, al) }
     if nb.kind == TYK_ENUM { return ty_qual_attr(ub, q, al) }
 
     if na.kind == TYK_PTR {
-        ce u32 = ty_composite(na.elem, nb.elem)
+        ce u32 = ty_composite_impl(na.elem, nb.elem, path)
         return ty_qual_attr(ty_ptr(ce), q, al)
     }
     if na.kind == TYK_ARRAY {
-        ce u32 = ty_composite(na.elem, nb.elem)
+        ce u32 = ty_composite_impl(na.elem, nb.elem, path)
         res u32 = TY_INVALID
         if na.aux1 == ARR_FIXED {
             res = ty_array(ce, na.arr_len)
@@ -892,17 +1021,42 @@ fn ty_composite(a u32, b u32) u32 {
         return ty_qual_attr(res, q, al)
     }
     if na.kind == TYK_FUNC {
-        cret u32 = ty_composite(na.elem, nb.elem)
+        cret u32 = ty_composite_impl(na.elem, nb.elem, path)
         n_p u32 = na.aux2
         tmp Vec[u32] = {}
         defer { vec_free(&tmp) }
         for i u32 in 0..n_p {
             pa u32 = vec_get(&tc.fn_params, zext[usize](na.aux1 + i))
             pb u32 = vec_get(&tc.fn_params, zext[usize](nb.aux1 + i))
-            vec_push(&tmp, ty_composite(ty_unqual(pa), ty_unqual(pb)))
+            vec_push(&tmp, ty_composite_impl(ty_unqual(pa), ty_unqual(pb), path))
         }
         res u32 = ty_func(cret, tmp.p, n_p, (na.flags & TYF_VARIADIC) != 0)
         return ty_qual_attr(res, q, al)
+    }
+    if na.kind == TYK_STRUCT || na.kind == TYK_UNION {
+        parent handle[TyComposite] = path
+        while parent != null {
+            if (parent.a == ua && parent.b == ub) || (parent.a == ub && parent.b == ua) {
+                return ty_qual_attr(parent.result, q, al)
+            }
+            parent = parent.parent
+        }
+        ra RecordDef = {}
+        rb RecordDef = {}
+        copy_into(&ra, ty_record(na.aux1))
+        copy_into(&rb, ty_record(nb.aux1))
+        fields Vec[FieldDef] = {}
+        defer { vec_free(&fields) }
+        result u32 = ty_record_new(ra.tag_id, ra.is_union)
+        pair TyComposite = {ua, ub, result, path}
+        for i u32 in 0..ra.fields_len {
+            f handle[FieldDef] = vec_add(&fields)
+            copy_into(f, ty_field(ra.fields_start + i))
+            other handle[FieldDef] = ty_field(rb.fields_start + i)
+            f.ty = ty_composite_impl(f.ty, other.ty, &pair)
+        }
+        ty_record_complete(result, fields.p, ra.fields_len, ra.is_packed, ra.align_attr, ra.pragma_pack)
+        return ty_qual_attr(result, q, al)
     }
     return ty_qual_attr(ua, q, al)
 }

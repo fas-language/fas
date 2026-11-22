@@ -332,15 +332,20 @@ fn pa_tag(p handle[Parser], tag Token, kind u8, name u32, fixed u32, define bool
     return ty
 }
 
-fn pa_enum_body(p handle[Parser], ty u32, loc u32) void fails {
-    e handle[EnumDef] = ty_enum(ty_node(ty).aux1)
-    if !map_put(&p.enum_bodies, ty, 1) { try pa_error(p, loc, c"redefinition of enum") }
+fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
+    id u32 = ty_node(ty).aux1
+    e handle[EnumDef] = ty_enum(id)
+    if !map_put(&p.enum_bodies, ty, 1) { try pa_error(p, loc, c"nested redefinition of enum") }
+    defer { map_remove(&p.enum_bodies, ty) }
+    repeat bool = e.members_len != 0
     fixed u32 = if e.has_fixed_underlying { e.underlying } else { TY_INVALID }
     next u64 = 0
     next_ty u32 = TY_INT
     min i64 = 0
     max u64 = 0
     values Vec[addr] = {}
+    members Vec[EnumMember] = {}
+    seen TagMap = {}
     while !(try pa_at(p, c"}")) {
         t Token = try pa_take(p)
         n u32 = try pa_ident(p, t)
@@ -362,31 +367,71 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32) void fails {
             (!ty_is_unsigned(member) && !neg && bitcast[i64](se_value(member, next)) < 0) {
             try pa_error(p, t.loc, c"enumerator cannot be represented by its underlying type")
         }
-        sym handle[Symbol] = se_symbol(n, t.loc, member, SC_ENUMERATOR)
-        sym.value = handle_addr(se_int(t.loc, member, next))
-        try se_declare(p, sym, true, false)
-        vec_push[addr](&values, handle_addr(sym))
+        m handle[EnumMember] = vec_add(&members)
+        m.name = n
+        m.value = next
+        m.negative = neg
+        if !map_put(&seen, n, 1) { try pa_error(p, t.loc, c"duplicate enumerator") }
+        if repeat {
+            old handle[EnumMember] = ty_enum_find_member(ty_enum(id), n)
+            if old == null || old.value != next || old.negative != neg {
+                try pa_error(p, t.loc, c"incompatible redefinition of enumerator")
+            }
+        } else {
+            sym handle[Symbol] = se_symbol(n, t.loc, member, SC_ENUMERATOR)
+            sym.value = handle_addr(se_int(t.loc, member, next))
+            try se_declare(p, sym, true, false)
+            vec_push[addr](&values, handle_addr(sym))
+        }
         if next == 2147483647 && member == TY_INT { next_ty = TY_LONG }
         else if next == 0x7fffffffffffffff { next_ty = TY_ULONG }
         next += 1
         if !(try pa_accept(p, c",")) { break }
     }
-    if values.n == 0 { try pa_error(p, loc, c"empty enum definition") }
+    if members.n == 0 { try pa_error(p, loc, c"empty enum definition") }
     try pa_expect(p, c"}")
+    attrs = pa_join_attrs(try pa_attributes(p), attrs)
     underlying u32 = TY_UINT
     if min < 0 { underlying = TY_INT }
     if (min >= 0 && max > 0xffffffff) || (min < 0 && (min < -2147483648 || max > 2147483647)) {
         underlying = if min < 0 { TY_LONG } else { TY_ULONG }
     }
+    if fixed == TY_INVALID && pa_has_attr(p, attrs, c"packed") {
+        if min >= 0 && max <= 255 { underlying = TY_UCHAR }
+        else if min >= 0 && max <= 65535 { underlying = TY_USHORT }
+        else if min >= -128 && min < 0 && max <= 127 { underlying = TY_SCHAR }
+        else if min >= -32768 && min < 0 && max <= 32767 { underlying = TY_SHORT }
+    }
+    if repeat {
+        prior handle[EnumDef] = ty_enum(id)
+        if zext[usize](prior.members_len) != members.n || (fixed == TY_INVALID && prior.underlying != underlying) {
+            try pa_error(p, loc, c"incompatible redefinition of enum")
+        }
+        return
+    }
     ty_enum_complete(ty, underlying)
+    ty_enum_set_members(ty, &members)
+    enum_constants bool = fixed != TY_INVALID || min < -2147483648 || max > 2147483647
     for i usize in 0..values.n {
         sym handle[Symbol] = handle_from_addr(values.p[addr, i])
-        if fixed != TY_INVALID || sym.ty != TY_INT {
+        if enum_constants {
             sym.ty = ty
             e handle[Ast] = handle_from_addr(sym.value)
             e.ty = ty
         }
     }
+}
+
+fn pa_redeclared_field_type(p handle[Parser], a handle[FieldDef], b handle[FieldDef]) bool {
+    if a.ty == b.ty { return true }
+    if a.is_anon && b.is_anon { return ty_compatible_impl(a.ty, b.ty, null, true) }
+    // GNU treats a trailing zero-length array as a flexible member for
+    // record redeclarations. A nonzero fixed bound changes the record type.
+    if !pa_is_gnu(p) || !ty_is_array(a.ty) || !ty_is_array(b.ty) { return false }
+    x handle[TypeNode] = ty_node(ty_unqual(a.ty))
+    y handle[TypeNode] = ty_node(ty_unqual(b.ty))
+    return x.elem == y.elem && ((x.aux1 == ARR_INCOMPLETE && y.aux1 == ARR_FIXED && y.arr_len == 0) ||
+        (y.aux1 == ARR_INCOMPLETE && x.aux1 == ARR_FIXED && x.arr_len == 0))
 }
 
 fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
@@ -461,7 +506,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
         for i u32 in 0..old.fields_len {
             a handle[FieldDef] = ty_field(old.fields_start + i)
             b handle[FieldDef] = vec_at[FieldDef](&fields, zext[usize](i))
-            if a.name_id != b.name_id || !ty_compatible(a.ty, b.ty) || a.is_bitfield != b.is_bitfield ||
+            if a.name_id != b.name_id || !pa_redeclared_field_type(p, a, b) || a.is_bitfield != b.is_bitfield ||
                 a.bit_width != b.bit_width || a.align_attr != b.align_attr || a.is_packed != b.is_packed {
                 try pa_error(p, loc, c"incompatible redefinition of record member")
             }
@@ -491,7 +536,7 @@ fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
     ty u32 = try pa_tag(p, t, kind, name, fixed, define)
     if define {
         try pa_take(p)
-        if kind == TYK_ENUM { try pa_enum_body(p, ty, t.loc) }
+        if kind == TYK_ENUM { try pa_enum_body(p, ty, t.loc, attrs) }
         else { try pa_record_body(p, ty, t.loc, attrs) }
     }
     return ty
