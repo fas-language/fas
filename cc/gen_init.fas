@@ -440,12 +440,15 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
 
-    // String literal initializing a char/wide array
+    // String literal initializing a char/wide array (zero-fill remainder in case of designator overwrite)
     if k == TYK_ARRAY && init.kind == ND_STRING {
         tmp Buf = {}
         defer { buf_free(&tmp) }
         gen_decode_string_ast(init, &tmp, true)
         arr_sz u64 = ty_size(u)
+        if arr_sz > 0 && off + arr_sz <= si.size {
+            mem_set(si.data + off, 0, arr_sz)
+        }
         copy_n u64 = tmp.n
         if arr_sz > 0 && copy_n > arr_sz { copy_n = arr_sz }
         if off + copy_n <= si.size {
@@ -454,8 +457,12 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
 
-    // Brace-enclosed aggregate initializer
+    // Brace-enclosed aggregate initializer (zero subobject first so designator overwrites clear prior fields!)
     if init.kind == ND_INIT {
+        sub_sz u64 = ty_size(u)
+        if sub_sz > 0 && off + sub_sz <= si.size {
+            mem_set(si.data + off, 0, sub_sz)
+        }
         if k == TYK_ARRAY {
             elem_ty u32 = n.elem
             elem_sz u64 = ty_size(elem_ty)
@@ -1085,7 +1092,7 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     if desig == null {
-        try gen_auto_init(base_ptr, u, val_ast, false)
+        try gen_auto_init(base_ptr, u, val_ast, true)
         return
     }
     if n.kind == TYK_ARRAY {
