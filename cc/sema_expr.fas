@@ -332,14 +332,24 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         }
         return n
     }
+    compare bool = k == 8 || k == 9
     if ty_is_vector(x) || ty_is_vector(y) {
         vec_ty u32 = if ty_is_vector(x) { x } else { y }
         other u32 = if ty_is_vector(x) { y } else { x }
         if !ty_compatible(vec_ty, other) && !ty_is_arith(other) { try pa_error(p, t.loc, c"incompatible vector operands") }
         n.ty = vec_ty
+        if compare {
+            v handle[TypeNode] = ty_node(ty_unqual(vec_ty))
+            elem u32 = v.elem
+            // A floating-point comparison produces signed integer mask lanes.
+            if ty_is_real_float(elem) {
+                size u64 = ty_size(elem)
+                elem = if size == 2 { TY_SHORT } else if size == 4 { TY_INT } else if size == 8 { TY_LONG } else { TY_INT128 }
+                n.ty = ty_vector(elem, v.aux1)
+            }
+        }
         return n
     }
-    compare bool = k == 8 || k == 9
     ptr_x bool = ty_is_ptr(x)
     ptr_y bool = ty_is_ptr(y)
     if (ptr_x || ptr_y) && k == 11 {

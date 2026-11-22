@@ -19,8 +19,8 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     if e.kind == ND_STRING && se_char_array(ty, e.ty) {
         n handle[TypeNode] = ty_node(ty_unqual(ty))
         if n.aux1 == ARR_INCOMPLETE { out.ty = ty_array(n.elem, e.value) }
-        else if n.aux1 == ARR_FIXED && n.arr_len + 1 < e.value {
-            try pa_error(p, e.loc, c"string literal is too long for initialized array")
+        else if n.aux1 == ARR_FIXED && n.arr_len < e.value - 1 {
+            try pa_init_warning(p, e.loc, c"string literal is too long for initialized array")
         }
     } else {
         if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
@@ -313,6 +313,38 @@ fn pa_add_init(xs handle[AstList], e handle[Ast], designators handle[Ast], idx u
     pa_append(xs, item)
 }
 
+fn pa_init_warning(p handle[Parser], loc u32, msg addr) void fails {
+    if !pa_is_gnu(p) { try pa_error(p, loc, msg) }
+    cc_diag(p.names, loc, c"warning: ", bytes_c(msg))
+}
+
+// GNU mode diagnoses excess elements and leaves them out of the typed
+// initializer. With no destination subobject there is no type to apply.
+fn pa_discard_init(p handle[Parser]) void fails {
+    if !(try pa_accept(p, c"{")) { try pa_expression(p, 2); return }
+    while !(try pa_at(p, c"}")) {
+        designated bool = false
+        while true {
+            if try pa_accept(p, c".") {
+                try pa_ident(p, try pa_take(p))
+            } else if try pa_accept(p, c"[") {
+                try se_require_ice(p, try pa_expression(p, 3))
+                if try pa_accept(p, c"...") { try se_require_ice(p, try pa_expression(p, 3)) }
+                try pa_expect(p, c"]")
+            } else { break }
+            designated = true
+        }
+        if designated { try pa_accept(p, c"=") }
+        else if (try pa_peek(p)).kind == TK_IDENT && (try pa_at_second(p, c":")) {
+            try pa_ident(p, try pa_take(p))
+            try pa_take(p)
+        }
+        try pa_discard_init(p)
+        if !(try pa_accept(p, c",")) { break }
+    }
+    try pa_expect(p, c"}")
+}
+
 fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
     t Token = try pa_peek(p)
     p.init_depth += 1
@@ -345,14 +377,23 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
             e handle[Ast] = try pa_expression(p, 2)
             if e.kind == ND_STRING && se_char_array(ty, e.ty) {
                 try se_initializer_expr(p, ty, e, constant, out)
-                if try pa_accept(p, c",") {}
+                try pa_accept(p, c",")
                 try pa_expect(p, c"}")
                 return
             }
-            if idx >= count { try pa_error(p, tok.loc, c"excess elements in initializer") }
+            if idx >= count {
+                try pa_init_warning(p, tok.loc, c"excess elements in initializer")
+                if !(try pa_accept(p, c",")) { break }
+                continue
+            }
             try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
         } else {
-            if idx >= count { try pa_error(p, tok.loc, c"excess elements in initializer") }
+            if idx >= count {
+                try pa_init_warning(p, tok.loc, c"excess elements in initializer")
+                try pa_discard_init(p)
+                if !(try pa_accept(p, c",")) { break }
+                continue
+            }
             dest u32 = if d.first == null { se_init_elem(ty, idx) } else { d.ty }
             if ty_is_record(ty) && ty_is_array(dest) && ty_node(ty_unqual(dest)).aux1 == ARR_INCOMPLETE &&
                 !(pa_is_gnu(p) && constant && p.init_depth == 1) {

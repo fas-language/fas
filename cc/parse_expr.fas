@@ -408,6 +408,7 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         }
     }
     if bytes_eq_c(name, c"__builtin_stpcpy") || bytes_eq_c(name, c"__builtin_stpncpy") { return ty_ptr(TY_CHAR) }
+    if bytes_eq_c(name, c"__builtin_call_with_static_chain") && a != null { return a.ty }
     if bytes_eq_c(name, c"__builtin_extract_return_addr") || bytes_eq_c(name, c"__builtin_frob_return_addr") {
         return ty_ptr(TY_VOID)
     }
@@ -434,8 +435,12 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         bytes_eq_c(name, c"__builtin_dynamic_object_size") || bytes_eq_c(name, c"__builtin_bswap64") { return TY_ULONG }
     if bytes_eq_c(name, c"__builtin_bswap32") { return TY_UINT }
     if bytes_eq_c(name, c"__builtin_bswap16") { return TY_USHORT }
-    if bytes_starts_with(name, bytes_c(c"__builtin_mem")) && !bytes_starts_with(name, bytes_c(c"__builtin_memcmp")) ||
-        bytes_eq_c(name, c"__builtin_malloc") || bytes_eq_c(name, c"__builtin_alloca") ||
+    if bytes_eq_c(name, c"__builtin_memchr") || bytes_eq_c(name, c"__builtin_memcpy") ||
+        bytes_eq_c(name, c"__builtin_memmove") || bytes_eq_c(name, c"__builtin_mempcpy") ||
+        bytes_eq_c(name, c"__builtin_memset") || bytes_eq_c(name, c"__builtin_memrchr") ||
+        bytes_eq_c(name, c"__builtin_malloc") || bytes_eq_c(name, c"__builtin_calloc") ||
+        bytes_eq_c(name, c"__builtin_realloc") || bytes_eq_c(name, c"__builtin_aligned_alloc") ||
+        bytes_eq_c(name, c"__builtin_alloca") ||
         bytes_eq_c(name, c"__builtin_alloca_with_align") || bytes_eq_c(name, c"__builtin_frame_address") ||
         bytes_eq_c(name, c"__builtin_return_address") || bytes_eq_c(name, c"__builtin_assume_aligned") {
         return ty_ptr(TY_VOID)
@@ -444,19 +449,28 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         bytes_eq_c(name, c"__builtin___mempcpy_chk") || bytes_eq_c(name, c"__builtin___memset_chk") {
         return ty_ptr(TY_VOID)
     }
-    if bytes_starts_with(name, bytes_c(c"__builtin_str")) && !bytes_starts_with(name, bytes_c(c"__builtin_strcmp")) &&
-        !bytes_starts_with(name, bytes_c(c"__builtin_strncmp")) {
+    if bytes_eq_c(name, c"__builtin_strcpy") || bytes_eq_c(name, c"__builtin_strncpy") ||
+        bytes_eq_c(name, c"__builtin_strcat") || bytes_eq_c(name, c"__builtin_strncat") ||
+        bytes_eq_c(name, c"__builtin_strchr") || bytes_eq_c(name, c"__builtin_strrchr") ||
+        bytes_eq_c(name, c"__builtin_strstr") || bytes_eq_c(name, c"__builtin_strpbrk") ||
+        bytes_eq_c(name, c"__builtin_strdup") || bytes_eq_c(name, c"__builtin_strndup") ||
+        bytes_eq_c(name, c"__builtin___strcpy_chk") || bytes_eq_c(name, c"__builtin___strncpy_chk") ||
+        bytes_eq_c(name, c"__builtin___strcat_chk") || bytes_eq_c(name, c"__builtin___strncat_chk") ||
+        bytes_eq_c(name, c"__builtin___stpcpy_chk") || bytes_eq_c(name, c"__builtin___stpncpy_chk") {
         return ty_ptr(TY_CHAR)
     }
+    if bytes_eq_c(name, c"__builtin_strspn") || bytes_eq_c(name, c"__builtin_strcspn") { return TY_ULONG }
     if bytes_starts_with(name, bytes_c(c"__builtin_huge_val")) || bytes_starts_with(name, bytes_c(c"__builtin_inf")) || bytes_starts_with(name, bytes_c(c"__builtin_nan")) ||
         bytes_starts_with(name, bytes_c(c"__builtin_fabs")) || bytes_starts_with(name, bytes_c(c"__builtin_sqrt")) {
         ch u8 = name.p[u8, name.n - 1]
+        if bytes_ends_with(name, bytes_c(c"f16")) { return TY_FLOAT16 }
         if ch == 102 && !bytes_eq_c(name, c"__builtin_inf") { return TY_FLOAT }
         if ch == 108 { return TY_LDOUBLE }
         return TY_DOUBLE
     }
     if a != null && (bytes_eq_c(name, c"__atomic_load_n") || bytes_eq_c(name, c"__atomic_exchange_n") ||
-        bytes_starts_with(name, bytes_c(c"__atomic_fetch_")) || bytes_starts_with(name, bytes_c(c"__sync_fetch_"))) {
+        bytes_starts_with(name, bytes_c(c"__atomic_fetch_")) || bytes_starts_with(name, bytes_c(c"__sync_fetch_")) ||
+        (bytes_starts_with(name, bytes_c(c"__sync_")) && bytes_ends_with(name, bytes_c(c"_and_fetch")))) {
         ty u32 = se_decay(a.ty)
         if ty_is_ptr(ty) { return ty_unqual(ty_node(ty_unqual(ty)).elem) }
     }
@@ -491,6 +505,7 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
         for i u32 in 0..count {
             next handle[Ast] = x.next
             x.next = null
+            if !se_complete(se_decay(x.ty)) { try pa_error(p, x.loc, c"function argument has incomplete or void type") }
             ty u32
             if i < fixed {
                 ty = tc.fn_params.p[u32, zext[usize](start + i)]

@@ -44,6 +44,13 @@
 #define LDBL_DECIMAL_DIG __LDBL_DECIMAL_DIG__
 #define LDBL_TRUE_MIN __LDBL_DENORM_MIN__
 #define LDBL_HAS_SUBNORM __LDBL_HAS_DENORM__
+#if __STDC_VERSION__ >= 202311L
+#define FLT_NORM_MAX __FLT_NORM_MAX__
+#define DBL_NORM_MAX __DBL_NORM_MAX__
+#define LDBL_NORM_MAX __LDBL_NORM_MAX__
+#define INFINITY (__builtin_inff())
+#define NAN (__builtin_nanf(""))
+#endif
 #define FLT_SNAN (__builtin_nansf(""))
 #define DBL_SNAN (__builtin_nans(""))
 #define LDBL_SNAN (__builtin_nansl(""))

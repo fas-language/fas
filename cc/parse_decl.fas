@@ -289,7 +289,7 @@ fn pa_assert(p handle[Parser]) void fails {
     t Token = try pa_take(p)
     try pa_expect(p, c"(")
     e handle[Ast] = try pa_expression(p, 3)
-    if (e.flags & NF_OVERFLOW) != 0 || !ty_is_integer(e.ty) || (e.flags & NF_ICE) == 0 { try se_ice(p, e) }
+    try se_require_ice(p, e)
     message Bytes = bytes_c(c"static assertion failed")
     if try pa_accept(p, c",") {
         m Token = try pa_peek(p)
@@ -533,6 +533,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
             if pa_decl_start(p, next) { base = try pa_type_name(p) }
             else {
                 e handle[Ast] = try pa_expression(p, 1)
+                if (e.flags & NF_BITFIELD) != 0 { try pa_error(p, e.loc, c"typeof cannot be applied to a bit-field") }
                 base = ty_typeof(e.ty)
             }
             try pa_expect(p, c")")
@@ -757,8 +758,13 @@ fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fai
         t = try pa_peek(p)
         if try pa_accept(p, c"[") {
             op handle[DeclOp] = pa_new_op(DO_ARRAY, t.loc)
+            has_static bool = false
             while true {
-                if try pa_accept(p, c"static") { continue }
+                if try pa_accept(p, c"static") {
+                    if has_static { try pa_error(p, t.loc, c"duplicate static array specifier") }
+                    has_static = true
+                    continue
+                }
                 q u32 = pa_qual(p, try pa_peek(p))
                 if q == 0 { break }
                 op.quals |= q
@@ -772,6 +778,7 @@ fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fai
                 op.bound = bound
                 if !ty_is_integer(bound.ty) { try pa_error(p, t.loc, c"array bound requires integer type") }
             }
+            if has_static && op.bound == null { try pa_error(p, t.loc, c"static array specifier requires an explicit bound") }
             try pa_expect(p, c"]")
             pa_add_op(d, op)
         } else if try pa_accept(p, c"(") {
