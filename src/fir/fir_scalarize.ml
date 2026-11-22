@@ -631,17 +631,32 @@ let func_needs (f : func) =
   sig_changes f.sig_
   || (f.defined
      &&
+     let has_v2i64_asm = ref false in
+     Vec.iter
+       (fun (ir : inst_rec) ->
+         match ir.op with
+         | Asm _ ->
+             if Array.exists (fun r -> ty_of f r = Vec (2, Int 64)) ir.results then has_v2i64_asm := true;
+             iter_op_uses (fun u -> if ty_of f u = Vec (2, Int 64) then has_v2i64_asm := true) ir.op
+         | _ -> ())
+       f.insts;
      let found = ref false in
      Vec.iter
        (fun (ir : inst_rec) ->
          match ir.op with
          | Call c when sig_changes c.sig_ -> found := true
-         | Load _ | Store _ | Asm _ ->
+         | Load _ | Store _ | Asm _ when !has_v2i64_asm ->
              (* 128-bit XMM asm operands (v2i64 produced by Fir_wide for i128 "x")
-                are handled directly by Mir_isel via Xload/Xstore. *)
-             let bad_vec t = match t with Vec (2, Int 64) -> false | Vec _ -> true | _ -> false in
-             if Array.exists (fun r -> bad_vec (ty_of f r)) ir.results then found := true;
-             iter_op_uses (fun u -> if bad_vec (ty_of f u) then found := true) ir.op
+                are handled directly by Mir_isel via Xload/Xstore; still scalarize
+                any vector constant or non-v2i64 vector. *)
+             let bad_vec u =
+               match ty_of f u with
+               | Vec (2, Int 64) -> const_of f u <> None
+               | Vec _ -> true
+               | _ -> false
+             in
+             if Array.exists bad_vec ir.results then found := true;
+             iter_op_uses (fun u -> if bad_vec u then found := true) ir.op
          | _ ->
              if Array.exists (fun r -> is_vec (ty_of f r)) ir.results then found := true;
              iter_op_uses (fun u -> if is_vec (ty_of f u) then found := true) ir.op)

@@ -591,5 +591,35 @@ func @main () -> (i32) global {
           incr failures;
           Printf.printf "FAIL narrow_to_huge_ext: compile_object: %s\n%!" e
       | Ok _ -> ()));
+  (* regressions from fir_fuzz: (1) v2i64 constant store must still be scalarized;
+     (2) inline asm output used in a block preceding the defining block in block order *)
+  (match
+     parse "fuzz_regressions"
+       {|
+triple "x86_64-unknown-linux-gnu"
+func @v2i64_const_store (ptr) -> () global {
+^e(%p: ptr):
+  store <2 x i64> [i64 255, i64 -2], %p, align 8
+  ret
+}
+func @asm_out_block_order (i64) -> (i64) global {
+^e(%x: i64):
+  jump ^def
+^use:
+  %z = add i64 %y, i64 1
+  ret %z
+^def:
+  %y = asm "bswapq %0" out("+r" i64 %x)
+  jump ^use
+}
+|}
+   with
+  | None -> ()
+  | Some m -> (
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL fuzz_regressions: compile_object: %s\n%!" e
+      | Ok _ -> ()));
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"
