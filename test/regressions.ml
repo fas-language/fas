@@ -13231,30 +13231,23 @@ let () =
     "`P[0]` is not an address constant; write `&G`, `&G.field`, `&G[k]`, `c\"...\"` or \
      `null`"
     None;
-  semantic_pin "address-constants-read-address-constant"
-    "var G i32\nconst A addr = &G\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
-  semantic_pin "address-constants-read-address-constant-var"
-    "var G i32\nconst A addr = &G\nvar B addr = A\n" 3 14 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
-  semantic_pin "address-constants-read-address-field"
-    "struct Point { x i32 y i32 }\nvar G Point\nconst A addr = &G.y\nconst B addr = A\n"
-    4 16 1 "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G.y`");
-  semantic_pin "address-constants-read-address-element"
-    "var G arr[2,i32]\nconst A addr = &G[1]\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G[1]`");
-  semantic_pin "address-constants-read-address-function"
-    "fn f() void { return }\nconst A addr = &f\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&f`");
-  semantic_pin "address-constants-read-address-table-element"
-    "var G i32\nconst A addr = &G\nconst Q arr[1,addr] = {A}\n" 3 24 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
+  semantic_accept "address-constants-read-address-constant"
+    "var G i32\nconst A addr = &G\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-constant-var"
+    "var G i32\nconst A addr = &G\nvar B addr = A\n";
+  semantic_accept "address-constants-read-address-field"
+    "struct Point { x i32 y i32 }\nvar G Point\nconst A addr = &G.y\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-element"
+    "var G arr[2,i32]\nconst A addr = &G[1]\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-function"
+    "fn f() void { return }\nconst A addr = &f\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-table-element"
+    "var G i32\nconst A addr = &G\nconst Q arr[1,addr] = {A}\n";
+  semantic_accept "address-constants-read-cstring-in-table"
+    "const NAME addr = c\"text\"\nconst TABLE arr[1, addr] = {NAME}\n";
+  semantic_error "address-constants-cyclic"
+    "cyclic constant dependency involving `A`"
+    "const A addr = B\nconst B addr = A\n";
   semantic_pin "address-constants-read-address-arithmetic"
     "var G i32\nconst A addr = &G\nconst B addr = A + 1\n" 3 18 1
     "address constants can only be stored in `addr` or `handle[T]` slots" None;
@@ -20381,6 +20374,60 @@ let () =
        if has(if c { &m1 } else { &m2 }, 1) { return r1 + r2 }\n\
        return r1\n\
      }\n\
+     fn main() i32 { return 0 }\n";
+
+  semantic_accept "recursive-handle-struct-sizeof-and-mutual"
+    "struct Node { next handle[Node]\n i u64 }\n\
+     struct AstList { head handle[Ast]\n tail handle[Ast] }\n\
+     struct Ast { list AstList\n sym handle[Symbol] }\n\
+     struct Symbol { ast handle[Ast]\n params AstList }\n\
+     const NODE_SZ usize = sizeof[Node]\n\
+     const AST_SZ usize = sizeof[Ast]\n\
+     const SYM_SZ usize = sizeof[Symbol]\n\
+     const LIST_SZ usize = sizeof[AstList]\n\
+     const assert(NODE_SZ == 16 && AST_SZ == 24 && SYM_SZ == 24 && LIST_SZ == 16)\n\
+     struct Box[T] { p addr\n n usize }\n\
+     fn sz_of[T](b handle[Box[T]]) usize { return sizeof[T] }\n\
+     fn main() i32 {\n\
+       b Box[Node] = {}\n\
+       bl Box[AstList] = {}\n\
+       if sz_of(&b) != 16 || sz_of(&bl) != 16 { return 1 }\n\
+       return 0\n\
+     }\n";
+  semantic_error "recursive-by-value-struct-cycle"
+    "recursive by-value struct `Bad`"
+    "struct Bad { next Bad\n i u64 }\n\
+     fn main() i32 { return trunc[i32](sizeof[Bad]) }\n";
+  semantic_error "mutually-recursive-by-value-struct-cycle"
+    "recursive by-value struct `A`"
+    "struct A { b B }\n\
+     struct B { a A }\n\
+     fn main() i32 { return trunc[i32](sizeof[A]) }\n";
+  semantic_accept "chained-handle-fields"
+    "struct CFile { marks u64 }\n\
+     struct Lexer { file handle[CFile] }\n\
+     struct Node { next handle[Node]\n val u64 }\n\
+     fn read_write(l handle[Lexer], n handle[Node], p addr) addr {\n\
+       a addr = &l.file.marks\n\
+       l.file.marks = 99\n\
+       m u64 = p[Lexer].file.marks\n\
+       n.next.next.val = m\n\
+       _ handle[Node] = n.next.next\n\
+       return a\n\
+     }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_error "chained-handle-missing-field"
+    "record `CFile` has no field `missing`"
+    "struct CFile { marks u64 }\n\
+     struct Lexer { file handle[CFile] }\n\
+     fn f(l handle[Lexer]) u64 { return l.file.missing }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_accept "generic-infer-raw-select-chained-handle"
+    "struct Box[T] { v T }\n\
+     struct CFile { marks Box[u64] }\n\
+     struct Lexer { file handle[CFile] }\n\
+     fn peek[T](b handle[Box[T]]) T { return b.v }\n\
+     fn read(p addr) u64 { return peek(&p[Lexer].file.marks) }\n\
      fn main() i32 { return 0 }\n"
 
 let replay_unmatched_bound = 30

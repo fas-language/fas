@@ -147,26 +147,6 @@ let address_value ?(thread_locals = []) c ty expression =
         address_constant_read value
     | _ -> None
   in
-  let address_constant_error (name, span, value) =
-    let rec plain = function
-      | Ast.Ident _ -> true
-      | Ast.Field (base, _, _) | Ast.Select (base, [ Ast.Const_arg _ ], _) -> plain base
-      | _ -> false
-    in
-    let help =
-      match value with
-      | Ast.Addr_of (target, _) when plain target ->
-          Some (Printf.sprintf "write `%s`" (Ast.expr_name value))
-      | _ -> None
-    in
-    Error
-      [
-        Diag.error ?help span
-          (Printf.sprintf
-             "`%s` is an address constant; another constant initializer cannot read it"
-             name);
-      ]
-  in
   let rec place = function
     | Ast.Ident (name, span) -> (
         match Sema_context.lookup_global name c.Sema_context.globals with
@@ -229,92 +209,96 @@ let address_value ?(thread_locals = []) c ty expression =
         error (Ast.expr_span value)
           "address initializer requires static storage and constant selectors"
   in
-  let rec address = function
-    | Hir.Null _ -> Ok Hir.Global_null
-    | Hir.EString (id, _, _) ->
-        (* a plain or C string literal: its pooled bytes (D12: `const KW
-           Bytes = {"if", len("if")}` is valid) *)
-        Ok (Hir.Global_address (".str." ^ string_of_int id, 0))
-    | Hir.Address _ ->
-        let rec target = function
-          | Ast.Addr_of (base, _) -> place base
-          | Ast.Handle_from_addr (_, value, _) -> target value
-          | Ast.Call (_, [ value ], _) -> target value
-          | value -> (
-              match address_constant_read value with
-              | Some read -> address_constant_error read
+  let rec resolve_expr visiting expected expression =
+    let rec address = function
+      | Hir.Null _ -> Ok Hir.Global_null
+      | Hir.EString (id, _, _) ->
+          (* a plain or C string literal: its pooled bytes (D12: `const KW
+             Bytes = {"if", len("if")}` is valid) *)
+          Ok (Hir.Global_address (".str." ^ string_of_int id, 0))
+      | Hir.Address _ ->
+          let rec target = function
+            | Ast.Addr_of (base, _) -> place base
+            | Ast.Handle_from_addr (_, value, _) -> target value
+            | Ast.Call (_, [ value ], _) -> target value
+            | value ->
+                error (Ast.expr_span value)
+                  "address constants can only be stored in `addr` or `handle[T]` slots"
+          in
+          let* name, _, offset = target expression in
+          Ok (Hir.Global_address (name, offset))
+      | Hir.Function_address (name, _) -> Ok (Hir.Global_address (name, 0))
+      | Hir.Call (Hir.Builtin (Hir.Handle_from_addr _), [ value ], _, _) -> address value
+      | value -> (
+          match expression with
+          | Ast.Binary ((Ast.Add | Ast.Sub), (Ast.Addr_of (target, _) as address), _, _)
+            ->
+              let help =
+                match place target with
+                | Ok (_, Hir.Array _, _) ->
+                    Some (Printf.sprintf "write `&%s[k]`" (Ast.expr_name target))
+                | Ok (_, Hir.Struct name, _) -> (
+                    match
+                      List.find_opt
+                        (fun (definition : Hir.struct_def) -> definition.name = name)
+                        c.structs
+                    with
+                    | Some { fields = [ field ]; _ } ->
+                        Some
+                          (Printf.sprintf "write `&%s.%s`" (Ast.expr_name target)
+                             field.name)
+                    | Some _ | None -> None)
+                | _ -> None
+              in
+              let message =
+                Printf.sprintf "address constant `%s` cannot be used in arithmetic"
+                  (Ast.expr_name address)
+              in
+              Error [ Diag.error ?help (Ast.expr_span address) message ]
+          | Ast.Select (_, [ Ast.Const_arg _ ], _) ->
+              error (Ast.expr_span expression)
+                (Printf.sprintf
+                   "`%s` is not an address constant; write `&G`, `&G.field`, `&G[k]`, \
+                    `c\"...\"` or `null`"
+                   (Ast.expr_name expression))
+          | _ -> (
+              match address_constant_read expression with
+              | Some (name, span, target_expr) ->
+                  if List.mem name visiting then
+                    error span
+                      (Printf.sprintf "cyclic constant dependency involving `%s`" name)
+                  else resolve_expr (name :: visiting) None target_expr
               | None ->
-                  error (Ast.expr_span value)
-                    "address constants can only be stored in `addr` or `handle[T]` \
-                     slots")
-        in
-        let* name, _, offset = target expression in
-        Ok (Hir.Global_address (name, offset))
-    | Hir.Function_address (name, _) -> Ok (Hir.Global_address (name, 0))
-    | Hir.Call (Hir.Builtin (Hir.Handle_from_addr _), [ value ], _, _) -> address value
-    | value -> (
-        match expression with
-        | Ast.Binary ((Ast.Add | Ast.Sub), (Ast.Addr_of (target, _) as address), _, _)
-          ->
-            let help =
-              match place target with
-              | Ok (_, Hir.Array _, _) ->
-                  Some (Printf.sprintf "write `&%s[k]`" (Ast.expr_name target))
-              | Ok (_, Hir.Struct name, _) -> (
-                  match
-                    List.find_opt
-                      (fun (definition : Hir.struct_def) -> definition.name = name)
-                      c.structs
-                  with
-                  | Some { fields = [ field ]; _ } ->
-                      Some
-                        (Printf.sprintf "write `&%s.%s`" (Ast.expr_name target)
-                           field.name)
-                  | Some _ | None -> None)
-              | _ -> None
-            in
-            let message =
-              Printf.sprintf "address constant `%s` cannot be used in arithmetic"
-                (Ast.expr_name address)
-            in
-            Error [ Diag.error ?help (Ast.expr_span address) message ]
-        | Ast.Select (_, [ Ast.Const_arg _ ], _) ->
-            error (Ast.expr_span expression)
-              (Printf.sprintf
-                 "`%s` is not an address constant; write `&G`, `&G.field`, `&G[k]`, \
-                  `c\"...\"` or `null`"
-                 (Ast.expr_name expression))
-        | _ -> (
-            match address_constant_read expression with
-            | Some read -> address_constant_error read
-            | None ->
-                error (Hir.expr_span value)
-                  "address constants can only be stored in `addr` or `handle[T]` slots")
-        )
+                  error (Hir.expr_span value)
+                    "address constants can only be stored in `addr` or `handle[T]` slots")
+          )
+    in
+    let record_handle_address =
+      match (expected, expression) with
+      | Some (Hir.Handle record), Ast.Addr_of (target, _) -> (
+          match place target with
+          | Ok (_, Hir.Struct actual, _) ->
+              actual = record
+              && List.exists
+                   (function
+                     | _, Sema_types.C_record_name (imported, _) -> imported = record
+                     | _ -> false)
+                   c.named_types
+          | _ -> false)
+      | _ -> false
+    in
+    let check_expected =
+      if record_handle_address then Some Hir.Addr else expected
+    in
+    let* checked = Sema_check.check_expr c check_expected expression in
+    match expected with
+    | Some exp
+      when not (record_handle_address || Hir.ty_equal exp (Hir.expr_ty checked)) ->
+        error (Ast.expr_span expression)
+          (constant_initializer_type_message (Hir.expr_ty checked) exp)
+    | _ -> address checked
   in
-  let record_handle_address =
-    match (ty, expression) with
-    | Hir.Handle record, Ast.Addr_of (target, _) -> (
-        match place target with
-        | Ok (_, Hir.Struct actual, _) ->
-            actual = record
-            && List.exists
-                 (function
-                   | _, Sema_types.C_record_name (imported, _) -> imported = record
-                   | _ -> false)
-                 c.named_types
-        | _ -> false)
-    | _ -> false
-  in
-  let* checked =
-    Sema_check.check_expr c
-      (Some (if record_handle_address then Hir.Addr else ty))
-      expression
-  in
-  if not (record_handle_address || Hir.ty_equal ty (Hir.expr_ty checked)) then
-    error (Ast.expr_span expression)
-      (constant_initializer_type_message (Hir.expr_ty checked) ty)
-  else address checked
+  resolve_expr [] (Some ty) expression
 
 let source_array_lengths items =
   List.filter_map

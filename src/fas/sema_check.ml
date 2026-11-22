@@ -1935,8 +1935,6 @@ let rec check_place_inner (c : context) expr =
                   path = base.path;
                 }
           | None -> missing_field_error ~base:a c s n (Hir.Struct sn))
-      | Hir.Raw_select (_, _, access_ty, _, _) ->
-          missing_field_error ~base:a c (Ast.expr_span a) n access_ty
       | _ -> (
           match Hir.expr_ty base.expr with
           | Hir.Struct sn -> (
