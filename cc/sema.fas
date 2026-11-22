@@ -339,6 +339,40 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
     return s
 }
 
+// Use the same declaration and emission path as explicit weak alias
+// attributes so conflicting definitions are diagnosed before output.
+fn se_finish_weak_aliases(p handle[Parser]) void fails {
+    for i usize in 0..p.weak_aliases.n {
+        w handle[WeakAlias] = vec_at(&p.weak_aliases, i)
+        target handle[Symbol] = pa_lookup(p, w.target)
+        if target == null || target.linkage == 0 || (!target.defined && !target.tentative) {
+            try pa_error(p, w.loc, c"weak pragma alias target must be defined in this translation unit")
+        }
+        weak handle[Attr] = pa_alloc[Attr]()
+        weak.name = cc_intern(p.names, bytes_c(c"weak"))
+        weak.loc = w.loc
+        alias handle[Attr] = pa_alloc[Attr]()
+        alias.name = cc_intern(p.names, bytes_c(c"alias"))
+        alias.loc = w.loc
+        alias.next = weak
+        spelling u32 = target.asm_name
+        if spelling == 0 {
+            name Buf = {}
+            defer { buf_free(&name) }
+            buf_u8(&name, 34)
+            buf_append(&name, cc_name(p.names, target.name))
+            buf_u8(&name, 34)
+            spelling = cc_intern(p.names, buf_bytes(&name))
+        }
+        vec_push[Token](&alias.args, cc_token(TK_STR, 0, w.loc, spelling))
+        s handle[Symbol] = se_symbol(w.name, w.loc, target.ty, SC_EXTERN)
+        s.linkage = 2
+        s.thread_local = target.thread_local
+        s.attrs = alias
+        try se_declare(p, s, false, false)
+    }
+}
+
 fn se_complete(ty u32) bool {
     k u8 = ty_kind(ty)
     if k == TYK_VOID || k == TYK_FUNC || ty == TY_INVALID { return false }
