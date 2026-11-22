@@ -84,12 +84,12 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
 
 fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
     i usize = if hex { 2 } else { 0 }
-    radix f64 = if hex { 16.0 } else { 10.0 }
     expchar u8 = if hex { 112 } else { 101 }
-    value f64 = 0.0
-    fraction f64 = 1.0
     dot bool = false
-    digits u32 = 0
+    digits i64 = 0
+    fractional i64 = 0
+    significant i64 = 0
+    first usize = 0
     while i < s.n {
         ch u8 = s.p[u8, i]
         if ch == 46 && !dot { dot = true; i += 1; continue }
@@ -98,32 +98,31 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
         d u32 = cc_hex(ch)
         if d >= (if hex { 16 } else { 10 }) { break }
         digits += 1
-        if dot { fraction /= radix; value += cvt[f64](d) * fraction }
-        else { value = value * radix + cvt[f64](d) }
+        if dot { fractional += 1 }
+        if d != 0 || significant != 0 {
+            if significant == 0 { first = i }
+            significant += 1
+        }
         i += 1
     }
     if digits == 0 { try pa_error(p, t.loc, c"invalid floating literal") }
+    end usize = i
+    exponent i64 = 0
     if i < s.n && (s.p[u8, i] | 32) == expchar {
         i += 1
         negative bool = i < s.n && s.p[u8, i] == 45
         if i < s.n && (negative || s.p[u8, i] == 43) { i += 1 }
         j usize = i
-        power u32 = 0
         while i < s.n && s.p[u8, i] >= 48 && s.p[u8, i] <= 57 {
-            if power < 100000 { power = power * 10 + zext[u32](s.p[u8, i] - 48) }
+            if exponent < 10000000000 { exponent = exponent * 10 + zext[i64](s.p[u8, i] - 48) }
             i += 1
             if i < s.n && s.p[u8, i] == 39 { i += 1 }
         }
         if j == i { try pa_error(p, t.loc, c"invalid floating exponent") }
-        scale f64 = if hex { 2.0 } else { 10.0 }
-        if negative { scale = 1.0 / scale }
-        while power != 0 {
-            if (power & 1) != 0 { value *= scale }
-            scale *= scale
-            power >>= 1
-        }
+        if negative { exponent = -exponent }
     } else if hex { try pa_error(p, t.loc, c"hexadecimal floating literal requires an exponent") }
     ty u32 = TY_DOUBLE
+    quad_suffix bool = false
     imaginary bool = false
     if pa_is_gnu(p) && i < s.n && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
     if i < s.n {
@@ -137,15 +136,24 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
             }
         }
         else if suffix == 108 { ty = TY_LDOUBLE; i += 1 }
-        else if suffix == 113 && pa_is_gnu(p) { ty = TY_LDOUBLE; i += 1 }
+        else if suffix == 113 && pa_is_gnu(p) { ty = TY_LDOUBLE; quad_suffix = true; i += 1 }
         if i < s.n && !imaginary && pa_is_gnu(p) && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
         if i != s.n { try pa_error(p, t.loc, c"invalid floating literal suffix") }
     }
-    if imaginary {
-        if ty == TY_FLOAT { value = cvt[f64](cvt[f32](value)) }
-        ty = ty_complex(ty)
+    exponent -= fractional * (if hex { 4 } else { 1 })
+    format FloatFormat = {53, -1022, 1023, false}
+    if ty == TY_FLOAT { format = {24, -126, 127, false} }
+    if ty == TY_FLOAT16 { format = {11, -14, 15, false} }
+    bits FloatBits = flt_literal(s, first, end, significant, exponent, hex, format)
+    value f64 = flt_narrow_value(bits.lo, ty)
+    n handle[Ast] = pa_node(ND_FLOAT, t.loc, if imaginary { ty_complex(ty) } else { ty })
+    if ty == TY_LDOUBLE && !quad_suffix {
+        extended handle[FloatBits] = handle_from_addr(heap_alloc(sizeof[FloatBits]))
+        exact FloatBits = flt_literal(s, first, end, significant, exponent, hex, {64, -16382, 16383, true})
+        extended.lo = exact.lo
+        extended.hi = exact.hi
+        n.float_bits = extended
     }
-    n handle[Ast] = pa_node(ND_FLOAT, t.loc, ty)
     n.op = t.payload
     if imaginary {
         se_set_fp(n, 0.0)

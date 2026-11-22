@@ -7,7 +7,6 @@ gcc/gcc/testsuite/gcc.c-torture/execute/20030330-1.c link-error: fas-ld: /tmp/fc
 gcc/gcc/testsuite/gcc.c-torture/execute/20040811-1.c exit-mismatch: fcc exit=139, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/970217-1.c exit-mismatch: fcc exit=1, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/990413-2.c fir-error: 33: asm constraint "=t": x87 register operands are not supported
-gcc/gcc/testsuite/gcc.c-torture/execute/991030-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/builtin-bitops-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/frame-address.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/ieee/pr36332.c exit-mismatch: fcc exit=134, clang exit=0
@@ -154,7 +153,6 @@ gcc/gcc/testsuite/gcc.dg/pr84309.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr87054.c fir-error: not supported by the native backend yet: asm on a wide or odd-width integer
 gcc/gcc/testsuite/gcc.dg/pr89037.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr95694.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/pr97459-6.c run-timeout: program timed out
 gcc/gcc/testsuite/gcc.dg/pr98793.c fir-error: verifier: invalid bitcast from <64 x i8> to ptr
 gcc/gcc/testsuite/gcc.dg/single-precision-constant.c exit-mismatch: fcc exit=1, clang exit=0
 gcc/gcc/testsuite/gcc.dg/special/wkali-2.c link-error: fas-ld: /tmp/fcc_1780827_1.o: undefined symbol foo

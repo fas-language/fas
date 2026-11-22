@@ -45,6 +45,7 @@ struct Ast {
     field_offset u64
     field_width u32
     imag u64 // imaginary component of a floating constant
+    float_bits handle[FloatBits] // exact x87 magnitude for a long double literal
     wide addr // integer limbs when the constant type exceeds 64 bits
     a handle[Ast]
     b handle[Ast]

@@ -155,7 +155,13 @@ def extra_driver(fcc):
             raise SystemExit(f"unexpected AST callback order: {roots}")
         if not any(line.lstrip().startswith("size ") and " runtime" in line for line in dump.read_text().splitlines()):
             raise SystemExit("AST dump is missing the runtime VLA size")
-    print("Driver checks: forced include, function/object callbacks, runtime VLA size", flush=True)
+        result = run(fcc, str(TESTS / "floating_literals.c"), extra=("-Xfcc-dump-ast", "-o", str(dump)))
+        if result.returncode:
+            raise SystemExit(result.stderr.decode())
+        bits = [line.rsplit(" bits=0x", 1)[1] for line in dump.read_text().splitlines() if " bits=0x" in line]
+        if bits != ["7ffeffffffffffffffff", "00000000000000000001", "3fff8000000000000001"]:
+            raise SystemExit(f"incorrect long double literal bits: {bits}")
+    print("Driver checks: forced include, function/object callbacks, runtime VLA size, x87 literal bits", flush=True)
 
 
 def extra_layout(fcc, seed, count):
