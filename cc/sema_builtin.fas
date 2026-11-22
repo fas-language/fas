@@ -224,6 +224,9 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if bytes_starts_with(name, bytes_c(c"__builtin_matrix_")) {
         try pa_error(p, t.loc, c"matrix builtins require the Clang matrix types extension")
     }
+    if feature_in(c" __builtin_masked_compress_store __builtin_masked_expand_load __builtin_masked_gather __builtin_masked_load __builtin_masked_scatter __builtin_masked_store ", name) {
+        try pa_error(p, t.loc, c"Clang masked vector builtins are unsupported")
+    }
     if bytes_eq_c(name, c"__builtin_tgmath") {
         try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
     }
