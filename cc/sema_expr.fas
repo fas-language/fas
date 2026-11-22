@@ -238,7 +238,8 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     }
     if pa_is(p, t, c"++") || pa_is(p, t, c"--") {
         try se_modifiable(p, a)
-        if !ty_is_arith(ty) && !ty_is_ptr(ty) {
+        if ty_is_ptr(ty) { try se_pointer_math(p, t, ty) }
+        else if !ty_is_arith(ty) {
             try pa_error(p, t.loc, c"invalid increment or decrement operand")
         }
         return n

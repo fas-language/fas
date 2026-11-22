@@ -890,6 +890,9 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             else if ty_is_ptr(x) && ty_is_integer(y) { elem = ty_node(ty_unqual(x)).elem }
             else if ty_is_ptr(y) && ty_is_integer(x) { elem = ty_node(ty_unqual(y)).elem }
             else { try pa_error(p, t.loc, c"invalid array subscript"); elem = TY_INVALID }
+            if ty_is_func(elem) { try pa_error(p, t.loc, c"cannot subscript a pointer to a function") }
+            if ty_is_ptr(x) { try se_pointer_math(p, t, x) }
+            else if ty_is_ptr(y) { try se_pointer_math(p, t, y) }
             n handle[Ast] = pa_node(ND_SUBSCRIPT, t.loc, elem)
             n.flags = NF_LVALUE
             if (a.flags & NF_STATIC) != 0 && (b.flags & NF_STATIC) != 0 {
