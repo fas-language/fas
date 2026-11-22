@@ -1044,6 +1044,14 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 
         return ty_func(elem, args.p, trunc[u32](args.n), op.variadic)
     }
     if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
+    // Array elements are separated by sizeof(element), so an aligned
+    // typedef cannot require a boundary that the stride doesn't preserve.
+    if ty_has_typedef_alignment(elem) {
+        alignment u64 = ty_align(elem)
+        if alignment != 0 && ty_size(elem) % alignment != 0 {
+            try pa_error(p, op.loc, c"array element alignment is incompatible with its size")
+        }
+    }
     b handle[Ast] = op.bound
     if b == null && !op.star { return ty_array_incomplete(elem) }
     // A block-scope bound can be a runtime expression even if folding it
