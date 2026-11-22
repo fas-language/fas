@@ -83,8 +83,66 @@ fn se_builtin_alignment(p handle[Parser], e handle[Ast], bits bool) void fails {
     }
 }
 
+fn se_builtin_atomic_fetch(name Bytes) bool {
+    if bytes_starts_with(name, bytes_c(c"__atomic_")) {
+        return bytes_starts_with(name, bytes_c(c"__atomic_fetch_")) || bytes_ends_with(name, bytes_c(c"_fetch"))
+    }
+    return bytes_starts_with(name, bytes_c(c"__sync_fetch_and_")) ||
+        (bytes_starts_with(name, bytes_c(c"__sync_")) && bytes_ends_with(name, bytes_c(c"_and_fetch")))
+}
+
+fn se_builtin_atomic_result(ty u32) u32 {
+    ptr u32 = se_decay(ty)
+    return if ty_is_ptr(ptr) { ty_unqual(ty_node(ptr).elem) } else { TY_INVALID }
+}
+
+// Check the common object and memory order constraints for GNU atomic
+// builtins. Overloaded value forms only accept integer and pointer objects.
+fn se_check_atomic(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
+    fetch bool = se_builtin_atomic_fetch(name)
+    sync bool = bytes_starts_with(name, bytes_c(c"__sync_"))
+    minimum u32 = 0
+    generic bool = false
+    if fetch { minimum = if sync { 2 } else { 3 } }
+    else if bytes_eq_c(name, c"__atomic_load_n") { minimum = 2 }
+    else if bytes_eq_c(name, c"__atomic_store_n") || bytes_eq_c(name, c"__atomic_exchange_n") { minimum = 3 }
+    else if bytes_eq_c(name, c"__atomic_compare_exchange_n") { minimum = 6 }
+    else if bytes_eq_c(name, c"__atomic_load") || bytes_eq_c(name, c"__atomic_store") {
+        minimum = 3
+        generic = true
+    } else if bytes_eq_c(name, c"__atomic_exchange") {
+        minimum = 4
+        generic = true
+    } else if bytes_eq_c(name, c"__atomic_compare_exchange") {
+        minimum = 6
+        generic = true
+    } else { return }
+    try se_builtin_count(p, t, count, minimum, if sync { 0xffffffff } else { minimum })
+    elem u32 = se_builtin_atomic_result(args.ty)
+    if !se_complete(elem) || se_vla(elem) || ty_size(elem) == 0 ||
+        (!generic && !ty_is_ptr(elem) && !ty_is_integer(elem)) ||
+        (fetch && ty_is_bool(elem)) {
+        try pa_error(p, args.loc, c"invalid object type for atomic builtin")
+    }
+    if sync { return }
+    arg handle[Ast] = args
+    for i u32 in 1..minimum {
+        arg = arg.next
+        if i + 1 == minimum || (minimum == 6 && i == 4) {
+            if !ty_is_integer(arg.ty) { try pa_error(p, arg.loc, c"atomic memory order requires an integer") }
+        } else if (generic && (i == 1 || (i == 2 && minimum >= 4))) || (minimum == 6 && i == 1) {
+            other u32 = se_builtin_atomic_result(arg.ty)
+            if !se_complete(other) || se_vla(other) || ty_size(elem) != ty_size(other) {
+                try pa_error(p, arg.loc, c"atomic builtin requires a pointer to a matching object")
+            }
+        }
+    }
+}
+
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
-    if se_builtin_overflow(name) || se_builtin_checked(name) {
+    if bytes_starts_with(name, bytes_c(c"__atomic_")) || bytes_starts_with(name, bytes_c(c"__sync_")) {
+        try se_check_atomic(p, t, name, args, count)
+    } else if se_builtin_overflow(name) || se_builtin_checked(name) {
         try se_check_overflow(p, t, args, count, se_builtin_checked(name))
     } else if bytes_eq_c(name, c"__builtin_va_start") || bytes_eq_c(name, c"__builtin_c23_va_start") ||
         bytes_eq_c(name, c"__builtin_ms_va_start") || bytes_eq_c(name, c"__builtin_va_end") ||

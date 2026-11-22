@@ -34,3 +34,8 @@ entry:
 done:
     return;
 }
+
+struct Absolute { char prefix[4]; int member; };
+static_assert((char *)&((struct Absolute *)0)->member - (char *)0 == 4);
+static_assert((__UINTPTR_TYPE__)&((struct Absolute *)8)->member == 12);
+static_assert((void *)0x86 - (void *)0x80 == 6);

@@ -92,6 +92,18 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
         try pa_error(p, t.loc, c"invalid cast between these types")
     }
     se_cast_constant(n, a)
+    if pa_is_gnu(p) && ty_is_integer(ty) && ty_is_ptr(from) {
+        absolute AddressValue = {}
+        if se_address_value(p, a, &absolute) && absolute.symbol == null {
+            raw u64 = bitcast[u64](absolute.offset)
+            n.flags |= NF_STATIC | NF_FOLD
+            if ty_is_bool(ty) { n.value = if raw == 0 { 0 } else { 1 } }
+            else {
+                n.value = se_value(ty, raw)
+                if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(n, ty_int_bits(ty))) }
+            }
+        }
+    }
     return n
 }
 
@@ -115,6 +127,9 @@ fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
     } else if ty_is_ptr(ty) && se_null(a) {
         n.flags |= NF_STATIC
         if ty_is_integer(from) { n.flags |= NF_ICE }
+    } else if ty_is_ptr(ty) && ty_is_integer(from) && (a.flags & NF_INT_VALUE) != 0 {
+        // A cast of an integer constant to a pointer is an address constant.
+        n.flags |= NF_STATIC
     }
     if ty_is_nullptr(from) && ty_is_bool(ty) { n.flags |= NF_STATIC; n.value = 0 }
 }
@@ -348,9 +363,9 @@ fn se_pointer_math(p handle[Parser], t Token, ty u32) void fails {
     }
 }
 
-// These GNU folds need the identity of an object and a known byte offset.
-// Keep relocatable pointers in the AST and only fold differences and tests
-// that can be settled independently of placement by the linker.
+// Keep relocatable pointers in the AST. Fold only comparisons and arithmetic
+// that are independent of linker placement. A null symbol denotes an absolute
+// address, so the offset then represents the whole address.
 struct AddressValue { symbol handle[Symbol], offset i64 }
 
 fn se_address_add(out handle[AddressValue], index handle[Ast], size u64, sub bool) bool {
@@ -369,7 +384,7 @@ fn se_address_add(out handle[AddressValue], index handle[Ast], size u64, sub boo
         offset += delta
     }
     symbol handle[Symbol] = out.symbol
-    if symbol == null || offset > ty_size(symbol.ty) { return false }
+    if symbol != null && offset > ty_size(symbol.ty) { return false }
     out.offset = bitcast[i64](offset)
     return true
 }
@@ -413,6 +428,12 @@ fn se_address_value(p handle[Parser], a handle[Ast], out handle[AddressValue]) b
         if se_null(base) && ty_is_ptr(a.ty) {
             out.symbol = null
             out.offset = 0
+            return true
+        }
+        if ty_is_ptr(a.ty) && ty_is_integer(base.ty) && (base.flags & NF_INT_VALUE) != 0 &&
+            (base.flags & NF_OVERFLOW) == 0 && base.wide == null && base.value <= 0x7fffffffffffffff {
+            out.symbol = null
+            out.offset = bitcast[i64](base.value)
             return true
         }
     }
@@ -511,11 +532,26 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     if ty_is_vector(x) || ty_is_vector(y) {
         vec_ty u32 = if ty_is_vector(x) { x } else { y }
         other u32 = if ty_is_vector(x) { y } else { x }
-        if !ty_compatible(vec_ty, other) && !ty_is_arith(other) { try pa_error(p, t.loc, c"incompatible vector operands") }
+        v handle[TypeNode] = ty_node(ty_unqual(vec_ty))
+        elem u32 = v.elem
+        other_elem u32 = other
+        if ty_is_vector(other) {
+            other_vec handle[TypeNode] = ty_node(ty_unqual(other))
+            other_elem = other_vec.elem
+            // GNU integer vectors with the same lane widths may differ in
+            // signedness. The left vector supplies the result type.
+            if !ty_compatible(vec_ty, other) && !(pa_is_gnu(p) && v.aux1 == other_vec.aux1 &&
+                ty_is_integer(elem) && ty_is_integer(other_elem) &&
+                ty_int_bits(elem) == ty_int_bits(other_elem)) {
+                try pa_error(p, t.loc, c"incompatible vector operands")
+            }
+        } else if !ty_is_arith(other) { try pa_error(p, t.loc, c"incompatible vector operands") }
+        if ((k >= 5 && k <= 7) || k == 10 || pa_is(p, t, c"%")) &&
+            (!ty_is_integer(elem) || !ty_is_integer(other_elem)) {
+            try pa_error(p, t.loc, c"vector operator requires integer operands")
+        }
         n.ty = vec_ty
         if compare {
-            v handle[TypeNode] = ty_node(ty_unqual(vec_ty))
-            elem u32 = v.elem
             n.operand_ty = vec_ty
             // A floating-point comparison produces signed integer mask lanes.
             if ty_is_real_float(elem) {

@@ -123,7 +123,15 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
                     try pa_expect(p, c"(")
                     e handle[Ast] = try pa_expression(p, 1)
                     try pa_expect(p, c")")
-                    if section == 1 { try se_modifiable(p, e) }
+                    if section == 1 {
+                        // GNU asm may name a complete array output, including
+                        // an input/output memory operand spanning the array.
+                        if ty_is_array(e.ty) {
+                            if !se_addressable(e) || (se_array_quals(e.ty) & Q_CONST) != 0 || !se_complete(e.ty) {
+                                try pa_error(p, e.loc, c"asm output requires a writable array lvalue")
+                            }
+                        } else { try se_modifiable(p, e) }
+                    }
                     spelling Bytes = cc_name(p.names, constraint.op)
                     if bytes_eq_c(spelling, c"\"m\"") || bytes_eq_c(spelling, c"\"=m\"") ||
                         bytes_eq_c(spelling, c"\"+m\"") {
@@ -359,7 +367,8 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
             try pa_gnu(p, t)
             dest handle[Ast] = try pa_expression(p, 1)
             n.a = dest
-            if !ty_is_ptr(se_decay(dest.ty)) { try pa_error(p, t.loc, c"computed goto requires pointer type") }
+            if se_null(dest) { n.a = se_convert(ty_ptr(TY_VOID), dest) }
+            else if !ty_is_ptr(se_decay(dest.ty)) { try pa_error(p, t.loc, c"computed goto requires pointer type") }
         } else {
             label Token = try pa_take(p)
             l handle[Label] = try pa_get_label(p, label)

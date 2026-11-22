@@ -493,11 +493,19 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         if ch == 108 { return TY_LDOUBLE }
         return TY_DOUBLE
     }
+    if bytes_eq_c(name, c"__atomic_compare_exchange") || bytes_eq_c(name, c"__atomic_compare_exchange_n") ||
+        bytes_eq_c(name, c"__atomic_test_and_set") || bytes_eq_c(name, c"__sync_bool_compare_and_swap") {
+        return TY_BOOL
+    }
+    if bytes_eq_c(name, c"__atomic_load") || bytes_eq_c(name, c"__atomic_store") || bytes_eq_c(name, c"__atomic_store_n") ||
+        bytes_eq_c(name, c"__atomic_exchange") || bytes_eq_c(name, c"__atomic_clear") ||
+        bytes_eq_c(name, c"__sync_lock_release") || bytes_eq_c(name, c"__sync_synchronize") {
+        return TY_VOID
+    }
     if a != null && (bytes_eq_c(name, c"__atomic_load_n") || bytes_eq_c(name, c"__atomic_exchange_n") ||
-        bytes_starts_with(name, bytes_c(c"__atomic_fetch_")) || bytes_starts_with(name, bytes_c(c"__sync_fetch_")) ||
-        (bytes_starts_with(name, bytes_c(c"__sync_")) && bytes_ends_with(name, bytes_c(c"_and_fetch")))) {
-        ty u32 = se_decay(a.ty)
-        if ty_is_ptr(ty) { return ty_unqual(ty_node(ty_unqual(ty)).elem) }
+        se_builtin_atomic_fetch(name) || bytes_eq_c(name, c"__sync_lock_test_and_set") ||
+        bytes_eq_c(name, c"__sync_val_compare_and_swap")) {
+        return se_builtin_atomic_result(a.ty)
     }
     return TY_INT
 }
@@ -714,6 +722,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
 
 fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[Ast] fails {
     file_scope bool = p.scope == p.file_scope
+    if !ty_is_array(ty) && !se_complete(ty) { try pa_error(p, t.loc, c"compound literal requires a complete object type") }
     if se_vla(ty) || (file_scope && (spec.storage == SC_REGISTER || spec.thread_local)) ||
         (spec.thread_local && spec.storage != SC_STATIC) {
         try pa_error(p, t.loc, c"invalid compound literal storage class or type")
