@@ -174,6 +174,7 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
                     try pa_expect(p, c"(")
                     e handle[Ast] = try pa_expression(p, 1)
                     try pa_expect(p, c")")
+                    if ty_is_void(e.ty) { try pa_error(p, e.loc, c"asm operand cannot have void type") }
                     if section == 1 {
                         // GNU asm may name a complete array output, including
                         // an input/output memory operand spanning the array.
