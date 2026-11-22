@@ -231,7 +231,28 @@ fn si_write_bitfield(si handle[StaticInit], bit_off u64, bit_width u32, val u64)
         if byte_idx < si.size {
             cur u8 = si.data[u8, byte_idx]
             mask u8 = trunc[u8](1 << bit_in_byte)
-            if ((val >> b) & 1) != 0 {
+            bit_set bool = if b < 64 { ((val >> b) & 1) != 0 } else { false }
+            if bit_set {
+                si.data[u8, byte_idx] = cur | mask
+            } else {
+                si.data[u8, byte_idx] = cur & (~mask)
+            }
+        }
+    }
+}
+
+fn si_write_bitfield_wide(si handle[StaticInit], bit_off u64, bit_width u32, wide addr, n_words u32) void {
+    for b u32 in 0..bit_width {
+        tb u64 = bit_off + zext[u64](b)
+        byte_idx u64 = tb / 8
+        bit_in_byte u32 = trunc[u32](tb % 8)
+        if byte_idx < si.size {
+            cur u8 = si.data[u8, byte_idx]
+            mask u8 = trunc[u8](1 << bit_in_byte)
+            wi u32 = b / 32
+            bi u32 = b % 32
+            bit_set bool = if wi < n_words { ((wide[u32, zext[usize](wi)] >> bi) & 1) != 0 } else { false }
+            if bit_set {
                 si.data[u8, byte_idx] = cur | mask
             } else {
                 si.data[u8, byte_idx] = cur & (~mask)
@@ -509,8 +530,13 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                     if fidx >= rec.fields_len { break }
                     f handle[FieldDef] = ty_field(rec.fields_start + fidx)
                     if f.is_bitfield {
-                        val u64 = gen_eval_const_int(item.a)
-                        si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
+                        if item.a != null && item.a.wide != null && f.bit_width > 64 {
+                            nw u32 = (f.bit_width + 31) / 32
+                            si_write_bitfield_wide(si, off * 8 + f.bit_off, f.bit_width, item.a.wide, nw)
+                        } else {
+                            val u64 = gen_eval_const_int(item.a)
+                            si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
+                        }
                     } else {
                         gen_static_fill(si, f.ty, item.a, off + f.byte_off)
                     }
