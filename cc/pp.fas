@@ -44,6 +44,7 @@ struct Pp {
     visited Map[u32, usize, u32_hash, u32_eq]
     dependencies Vec[Dependency]
     hides Vec[Hide]
+    pastes Map[u64, PastedToken, u64_hash, u64_eq]
     stream Expand
     pending PendingTokens
     embedded EmbedOutput

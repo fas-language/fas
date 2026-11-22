@@ -9,6 +9,7 @@ value struct Hide { id u32, next u32 }
 value struct Span { p addr, n u32, at u32 }
 struct ExpandSpan { p addr, n u32, at u32, owned bool }
 value struct Arg { start usize, size usize }
+value struct PastedToken { payload u32, kind u8 }
 struct ArgCache { tokens Vec[Token], ready bool }
 struct Expand {
     spans Vec[ExpandSpan]
@@ -155,6 +156,22 @@ fn expand_stringize(p handle[Pp], data addr, count usize, model Token) Token {
 fn expand_glue(p handle[Pp], left Token, right Token, loc u32) Token fails {
     if left.kind == TK_PLACE { return right }
     if right.kind == TK_PLACE { return left }
+    // Pasting the same two spellings always lexes the same token in this TU.
+    // Source locations and hide sets still come from the current invocation.
+    key u64 = (zext[u64](left.payload) << 32) | zext[u64](right.payload)
+    missing PastedToken = {}
+    pasted PastedToken = map_get(&p.pastes, key) catch missing
+    if pasted.kind == TK_EOF {
+        token Token = try expand_lex_paste(p, left, right, loc)
+        pasted = {token.payload, token.kind}
+        map_put(&p.pastes, key, pasted)
+    }
+    t Token = cc_token(pasted.kind, left.flags, loc, pasted.payload)
+    t.hide = hide_merge(p, left.hide, right.hide, true)
+    return t
+}
+
+fn expand_lex_paste(p handle[Pp], left Token, right Token, loc u32) Token fails {
     n handle[CNames] = &p.names
     b Buf = {}
     buf_append(&b, cc_spelling(n, left))
@@ -179,9 +196,6 @@ fn expand_glue(p handle[Pp], left Token, right Token, loc u32) Token fails {
         cc_diag(n, loc, c"error: ", buf_bytes(&msg))
         fail CError
     }
-    t.loc = loc
-    t.flags = left.flags
-    t.hide = hide_merge(p, left.hide, right.hide, true)
     return t
 }
 
