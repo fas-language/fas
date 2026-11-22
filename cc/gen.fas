@@ -1,0 +1,1364 @@
+// C23 -> Fir 0.3 code generator: core context, block-based function builder,
+// Fir instruction emitters, symbol/attribute helpers, and TU streaming callbacks.
+
+use "../lib/core.fas"
+use "../lib/mem.fas"
+use "../lib/vec.fas"
+use "../lib/buf.fas"
+use "../lib/bytes.fas"
+use "../lib/table.fas"
+use "../lib/intern.fas"
+use "../lib/os.fas"
+use "types.fas"
+use "layout.fas"
+use "abi.fas"
+use "fir_out.fas"
+use "parse.fas"
+
+// ---------- Hash helpers for pointer/u64 tables ----------
+
+struct U64Key { v u64 }
+
+fn gen_u64_hash(k handle[U64Key]) u64 {
+    x u64 = k.v
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+    x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+    return x ^ (x >> 31)
+}
+
+fn gen_u64_eq(a handle[U64Key], b handle[U64Key]) bool {
+    return a.v == b.v
+}
+
+// ---------- Per-function CFG block ----------
+
+struct GenBlock {
+    id u32
+    code Buf
+    term Buf
+    succs Vec[u32]
+    terminated bool
+    pinned bool
+    _pad u16
+}
+
+struct LoopFrame {
+    break_blk u32
+    continue_blk u32
+    cleanup_depth usize
+    vla_depth usize
+    is_switch bool
+    _pad u8
+    _pad2 u16
+}
+
+struct CleanupItem {
+    ptr_v u32
+    scope_depth u32
+    fn_sym handle[Symbol]
+}
+
+struct VlaScope {
+    sp_v u32
+    scope_depth u32
+}
+
+struct ExternFnRef {
+    name_id u32
+    _pad u32
+    decl_line addr
+}
+
+struct ExternObjRef {
+    name_id u32
+    size u64
+    align u64
+    linkage u8
+    tls bool
+    _pad u16
+}
+
+struct TentativeRef {
+    name_id u32
+    size u64
+    align u64
+    linkage u8
+    vis u8
+    tls bool
+    _pad u8
+    section addr
+}
+
+struct BlockAddrPatch {
+    blk_id u32        // GenBlock id containing the placeholder (or 0xffffffff if in gc.deferred)
+    off usize         // byte offset in blk.code (or gc.deferred) where placeholder digits live
+    target_blk u32    // target GenBlock id
+}
+
+struct GlobalBlockAddr {
+    fn_sym handle[Symbol]
+    target_lbl handle[Label]
+}
+
+// ---------- Main codegen context ----------
+
+struct GenCtx {
+    p handle[Parser]
+    out FirOut
+    deferred Buf
+    sym_names Intern
+
+    defined Table[U64Key, u8, gen_u64_hash, gen_u64_eq]
+    ext_fn_seen Table[U64Key, u8, gen_u64_hash, gen_u64_eq]
+    ext_obj_seen Table[U64Key, u8, gen_u64_hash, gen_u64_eq]
+    ext_fns Vec[ExternFnRef]
+    ext_objs Vec[ExternObjRef]
+
+    // Maps Symbol addr -> interned Fir symbol name (in sym_names) for static locals
+    static_locals Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
+    // Pending tentative definitions emitted at TU end if not defined
+    tentatives Vec[TentativeRef]
+
+    str_counter u32
+    tmp_counter u32
+    ctor_counter u32
+    had_error bool
+    _pad0 u8
+    _pad1 u16
+
+    // Per-function state
+    in_func bool
+    _pad2 u8
+    _pad3 u16
+    cur_fn handle[Symbol]
+    cur_fn_name u32
+    cur_ret_ty u32
+    next_ssa u32
+    cur_blk u32
+    scope_depth u32
+    blocks Vec[GenBlock]
+    locals Table[U64Key, u32, gen_u64_hash, gen_u64_eq]      // Symbol addr -> entry alloca %vN
+    vla_ptrs Table[U64Key, u32, gen_u64_hash, gen_u64_eq]    // VLA Symbol addr -> alloca holding ptr
+    vla_sizes Table[U64Key, u32, gen_u64_hash, gen_u64_eq]   // TypeId -> alloca holding u64 byte size
+    labels Table[U64Key, u32, gen_u64_hash, gen_u64_eq]      // Label addr -> GenBlock id
+    addr_taken_labels Vec[u32]
+    ba_patches Vec[BlockAddrPatch]
+    loops Vec[LoopFrame]
+    cleanups Vec[CleanupItem]
+    vla_stack Vec[VlaScope]
+}
+
+thread var gc handle[GenCtx] = null
+
+// ---------- Lifecycle ----------
+
+fn gen_init(ctx handle[GenCtx], p handle[Parser], fd i32) void {
+    mem_set(handle_addr(ctx), 0, sizeof[GenCtx])
+    gc = ctx
+    ctx.p = p
+    if fd >= 0 { fir_init_fd(&ctx.out, fd) }
+    else { fir_init_buf(&ctx.out) }
+    _ u32 = intern(&ctx.sym_names, bytes_c(c""))
+    fir_module_header(&ctx.out, c"x86_64-unknown-linux-gnu", false)
+}
+
+fn gen_free(ctx handle[GenCtx]) void {
+    fir_free(&ctx.out)
+    buf_free(&ctx.deferred)
+    intern_free(&ctx.sym_names)
+    table_free(&ctx.defined)
+    table_free(&ctx.ext_fn_seen)
+    table_free(&ctx.ext_obj_seen)
+    vec_free(&ctx.ext_fns)
+    vec_free(&ctx.ext_objs)
+    table_free(&ctx.static_locals)
+    vec_free(&ctx.tentatives)
+    gen_reset_func_state(ctx)
+    vec_free(&ctx.blocks)
+    table_free(&ctx.locals)
+    table_free(&ctx.vla_ptrs)
+    table_free(&ctx.vla_sizes)
+    table_free(&ctx.labels)
+    vec_free(&ctx.addr_taken_labels)
+    vec_free(&ctx.ba_patches)
+    vec_free(&ctx.loops)
+    vec_free(&ctx.cleanups)
+    vec_free(&ctx.vla_stack)
+    if gc == ctx { gc = null }
+}
+
+fn gen_reset_func_state(ctx handle[GenCtx]) void {
+    for i usize in 0..ctx.blocks.n {
+        b handle[GenBlock] = vec_at(&ctx.blocks, i)
+        buf_free(&b.code)
+        buf_free(&b.term)
+        vec_free(&b.succs)
+    }
+    vec_clear(&ctx.blocks)
+    table_free(&ctx.locals)
+    table_free(&ctx.vla_ptrs)
+    table_free(&ctx.vla_sizes)
+    table_free(&ctx.labels)
+    vec_clear(&ctx.addr_taken_labels)
+    vec_clear(&ctx.ba_patches)
+    vec_clear(&ctx.loops)
+    vec_clear(&ctx.cleanups)
+    vec_clear(&ctx.vla_stack)
+    ctx.in_func = false
+    ctx.cur_fn = null
+    ctx.cur_fn_name = 0
+    ctx.cur_ret_ty = TY_VOID
+    ctx.next_ssa = 0
+    ctx.cur_blk = 0
+    ctx.scope_depth = 0
+}
+
+// ---------- Symbol & Attribute Helpers ----------
+
+fn gen_intern_sym(s Bytes) u32 {
+    return intern(&gc.sym_names, s)
+}
+
+fn gen_sym_bytes(id u32) Bytes {
+    return intern_name(&gc.sym_names, id)
+}
+
+fn gen_sym_fir_name_id(s handle[Symbol]) u32 {
+    if s.asm_name != 0 {
+        raw_nm Bytes = cc_name(gc.p.names, s.asm_name)
+        start usize = 0
+        end usize = raw_nm.n
+        if end >= 2 && raw_nm.p[u8, 0] == 34 && raw_nm.p[u8, end - 1] == 34 {
+            start = 1
+            end -= 1
+        }
+        if end > start {
+            return gen_intern_sym(bytes_sub(raw_nm, start, end - start))
+        }
+    }
+    // Check if it is a static local already assigned a mangled name
+    key U64Key = {addr_bits(handle_addr(s))}
+    existing u32 = table_get(&gc.static_locals, &key) catch 0
+    if existing != 0 { return existing }
+    return gen_intern_sym(cc_name(gc.p.names, s.name))
+}
+
+fn gen_sym_fir_name(s handle[Symbol]) Bytes {
+    return gen_sym_bytes(gen_sym_fir_name_id(s))
+}
+
+fn gen_make_static_local_name(s handle[Symbol]) u32 {
+    key U64Key = {addr_bits(handle_addr(s))}
+    existing u32 = table_get(&gc.static_locals, &key) catch 0
+    if existing != 0 { return existing }
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_str(&b, c".Lstatic.")
+    if gc.cur_fn != null {
+        buf_append(&b, gen_sym_bytes(gc.cur_fn_name))
+        buf_u8(&b, 46)
+    }
+    buf_append(&b, cc_name(gc.p.names, s.name))
+    buf_u8(&b, 46)
+    buf_dec_u64(&b, zext[u64](gc.tmp_counter))
+    gc.tmp_counter += 1
+    id u32 = gen_intern_sym(buf_bytes(&b))
+    _ bool = table_put(&gc.static_locals, &key, id)
+    return id
+}
+
+fn gen_make_anon_name(prefix addr) u32 {
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_str(&b, prefix)
+    buf_dec_u64(&b, zext[u64](gc.tmp_counter))
+    gc.tmp_counter += 1
+    return gen_intern_sym(buf_bytes(&b))
+}
+
+fn gen_mark_defined(name_id u32) void {
+    k U64Key = {zext[u64](name_id)}
+    _ bool = table_put(&gc.defined, &k, 1)
+}
+
+fn gen_is_defined(name_id u32) bool {
+    k U64Key = {zext[u64](name_id)}
+    v u8 = table_get(&gc.defined, &k) catch 0
+    return v != 0
+}
+
+// Attribute inspection on Symbol.attrs
+fn gen_has_attr(attrs handle[Attr], name addr) bool {
+    a handle[Attr] = attrs
+    while a != null {
+        if pa_attr_name(gc.p, a, name) { return true }
+        a = a.next
+    }
+    return false
+}
+
+fn gen_attr_str_arg(attrs handle[Attr], name addr, out handle[Buf]) bool {
+    a handle[Attr] = attrs
+    while a != null {
+        if pa_attr_name(gc.p, a, name) && a.args.n > 0 {
+            t Token = a.args.p[Token]
+            if t.kind == TK_STR {
+                src Bytes = cc_name(gc.p.names, t.payload)
+                // Strip surrounding quotes if present
+                start usize = 0
+                while start < src.n && src.p[u8, start] != 34 { start += 1 }
+                if start < src.n { start += 1 }
+                end usize = src.n
+                if end > start && src.p[u8, end - 1] == 34 { end -= 1 }
+                buf_append(out, bytes_sub(src, start, end - start))
+                return true
+            }
+        }
+        a = a.next
+    }
+    return false
+}
+
+fn gen_attr_int_arg(attrs handle[Attr], name addr, fallback u64) u64 {
+    a handle[Attr] = attrs
+    while a != null {
+        if pa_attr_name(gc.p, a, name) {
+            if a.args.n == 0 { return fallback }
+            t Token = a.args.p[Token]
+            if t.kind == TK_NUM {
+                s Bytes = cc_name(gc.p.names, t.payload)
+                return bytes_to_u64(s) catch fallback
+            }
+            return fallback
+        }
+        a = a.next
+    }
+    return 0
+}
+
+fn gen_sym_linkage(s handle[Symbol]) u8 {
+    if gen_has_attr(s.attrs, c"weak") { return FIR_WEAK }
+    if s.linkage == 1 || s.storage == SC_STATIC { return FIR_LOCAL }
+    return FIR_GLOBAL
+}
+
+fn gen_sym_visibility(s handle[Symbol]) u8 {
+    b Buf = {}
+    defer { buf_free(&b) }
+    if gen_attr_str_arg(s.attrs, c"visibility", &b) {
+        v Bytes = buf_bytes(&b)
+        if bytes_eq_c(v, c"hidden") { return FIR_VIS_HIDDEN }
+        if bytes_eq_c(v, c"protected") { return FIR_VIS_PROTECTED }
+    }
+    return FIR_VIS_DEFAULT
+}
+
+fn gen_is_returns_twice(s handle[Symbol]) bool {
+    if s == null { return false }
+    if gen_has_attr(s.attrs, c"returns_twice") { return true }
+    nm Bytes = gen_sym_fir_name(s)
+    return bytes_eq_c(nm, c"setjmp") || bytes_eq_c(nm, c"_setjmp") ||
+           bytes_eq_c(nm, c"sigsetjmp") || bytes_eq_c(nm, c"__sigsetjmp") ||
+           bytes_eq_c(nm, c"vfork") || bytes_eq_c(nm, c"getcontext")
+}
+
+fn gen_sym_needs_quote(s Bytes) bool {
+    if s.n == 0 { return true }
+    for i usize in 0..s.n {
+        c u8 = s.p[u8, i]
+        ok bool = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
+                  (c >= 48 && c <= 57) || c == 95 || c == 46 || c == 36
+        if !ok { return true }
+    }
+    return false
+}
+
+fn gen_emit_sym_name(b handle[Buf], s Bytes) void {
+    buf_u8(b, 64) // '@'
+    if gen_sym_needs_quote(s) {
+        fir_emit_quoted_bytes(b, s.p, s.n)
+    } else {
+        buf_append(b, s)
+    }
+}
+
+fn gen_format_declare(name Bytes, fn_ty u32, linkage u8, is_noreturn bool) addr {
+    fn_node handle[TypeNode] = ty_node(ty_unqual(fn_ty))
+    if fn_node.kind != TYK_FUNC { return null }
+    ret_ty u32 = fn_node.elem
+    n_params u32 = fn_node.aux2
+    is_var bool = (fn_node.flags & TYF_VARIADIC) != 0
+    pstart usize = zext[usize](fn_node.aux1)
+    params_ptr addr = if n_params > 0 { tc.fn_params.p + pstart * 4 } else { null }
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_str(&b, c"declare ")
+    gen_emit_sym_name(&b, name)
+    buf_u8(&b, 32)
+    abi_emit_fir_sig(&b, ret_ty, params_ptr, n_params, is_var)
+    buf_u8(&b, 32)
+    fir_emit_linkage(&b, linkage, FIR_VIS_DEFAULT)
+    if is_noreturn { buf_str(&b, c" noreturn") }
+    buf_u8(&b, 10)
+    p addr = heap_alloc(b.n + 1)
+    mem_copy(p, b.p, b.n)
+    p[u8, b.n] = 0
+    return p
+}
+
+fn gen_note_extern_fn(s handle[Symbol]) void {
+    nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
+    if gen_is_defined(nid) { return }
+    alias_buf Buf = {}
+    if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
+    buf_free(&alias_buf)
+    k U64Key = {zext[u64](nid)}
+    seen u8 = table_get(&gc.ext_fn_seen, &k) catch 0
+    if seen != 0 { return }
+    _ bool = table_put(&gc.ext_fn_seen, &k, 1)
+    link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+    noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
+    r handle[ExternFnRef] = vec_add(&gc.ext_fns)
+    r.name_id = nid
+    r.decl_line = gen_format_declare(gen_sym_bytes(nid), s.ty, link, noret)
+}
+
+fn gen_note_extern_fn_raw(name Bytes, fn_ty u32) void {
+    nid u32 = gen_intern_sym(name)
+    if gen_is_defined(nid) { return }
+    k U64Key = {zext[u64](nid)}
+    seen u8 = table_get(&gc.ext_fn_seen, &k) catch 0
+    if seen != 0 { return }
+    _ bool = table_put(&gc.ext_fn_seen, &k, 1)
+    r handle[ExternFnRef] = vec_add(&gc.ext_fns)
+    r.name_id = nid
+    r.decl_line = gen_format_declare(name, fn_ty, FIR_GLOBAL, false)
+}
+
+fn gen_note_extern_obj(s handle[Symbol]) void {
+    nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
+    if gen_is_defined(nid) { return }
+    alias_buf Buf = {}
+    if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
+    buf_free(&alias_buf)
+    k U64Key = {zext[u64](nid)}
+    seen u8 = table_get(&gc.ext_obj_seen, &k) catch 0
+    if seen != 0 { return }
+    _ bool = table_put(&gc.ext_obj_seen, &k, 1)
+    r handle[ExternObjRef] = vec_add(&gc.ext_objs)
+    r.name_id = nid
+    sz u64 = ty_size(s.ty)
+    r.size = if sz > 0 { sz } else { 1 }
+    al u64 = ty_align(s.ty)
+    r.align = if al > 0 { al } else { 1 }
+    r.linkage = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+    r.tls = s.thread_local
+}
+
+// ---------- Type Classification for Fir SSA ----------
+
+// Returns true if C type `tid` is represented as an in-memory `ptr` in our codegen
+// (structs, unions, _Complex, arrays, or _BitInt > 64? Note: Fir supports iN of ANY width directly!).
+fn gen_is_mem_ty(tid u32) bool {
+    k u8 = ty_kind(tid)
+    return k == TYK_STRUCT || k == TYK_UNION || k == TYK_COMPLEX || k == TYK_ARRAY
+}
+
+// Emit the Fir scalar/vector value type for a non-memory C type `tid`.
+// Note: _Bool is i1 in SSA (stored/loaded as i8 or i1 — Fir i1 stores as 1 byte 0/1!).
+// _BitInt(N) is iN directly (Fir supports any iN up to 2^23-1 natively!).
+fn gen_emit_fir_ty(b handle[Buf], tid u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_BOOL { buf_str(b, c"i1"); return }
+    if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR { buf_str(b, c"i8"); return }
+    if k == TYK_SHORT || k == TYK_USHORT { buf_str(b, c"i16"); return }
+    if k == TYK_INT || k == TYK_UINT { buf_str(b, c"i32"); return }
+    if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG { buf_str(b, c"i64"); return }
+    if k == TYK_INT128 || k == TYK_UINT128 { buf_str(b, c"i128"); return }
+    if k == TYK_BITINT {
+        buf_u8(b, 105) // 'i'
+        buf_dec_u64(b, zext[u64](n.aux1))
+        return
+    }
+    if k == TYK_ENUM { gen_emit_fir_ty(b, ty_enum(n.aux1).underlying); return }
+    if k == TYK_FLOAT16 { buf_str(b, c"f16"); return }
+    if k == TYK_FLOAT { buf_str(b, c"f32"); return }
+    if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
+    if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_PTR || k == TYK_NULLPTR || k == TYK_FUNC { buf_str(b, c"ptr"); return }
+    if k == TYK_VECTOR {
+        abi_emit_fir_leaf(b, u)
+        return
+    }
+    buf_str(b, c"ptr")
+}
+
+// Emit Fir type string for a scalar integer of bit width `bits`
+fn gen_emit_int_ty(b handle[Buf], bits u32) void {
+    buf_u8(b, 105)
+    buf_dec_u64(b, zext[u64](bits))
+}
+
+fn gen_is_volatile(tid u32) bool {
+    return (ty_quals(tid) & Q_VOLATILE) != 0
+}
+
+fn gen_is_atomic(tid u32) bool {
+    return (ty_quals(tid) & Q_ATOMIC) != 0
+}
+
+// ---------- Block & SSA Management ----------
+
+fn gen_new_val() u32 {
+    v u32 = gc.next_ssa
+    gc.next_ssa += 1
+    return v
+}
+
+fn gen_new_block() u32 {
+    id u32 = trunc[u32](gc.blocks.n)
+    b handle[GenBlock] = vec_add(&gc.blocks)
+    b.id = id
+    return id
+}
+
+fn gen_cur_block() handle[GenBlock] {
+    return vec_at(&gc.blocks, zext[usize](gc.cur_blk))
+}
+
+fn gen_cur_buf() handle[Buf] {
+    return &gen_cur_block().code
+}
+
+fn gen_entry_buf() handle[Buf] {
+    return &vec_at(&gc.blocks, 0).code
+}
+
+fn gen_is_terminated() bool {
+    return gen_cur_block().terminated
+}
+
+fn gen_switch_block(blk_id u32) void {
+    gc.cur_blk = blk_id
+}
+
+fn gen_add_succ(blk handle[GenBlock], target u32) void {
+    vec_push(&blk.succs, target)
+}
+
+fn gen_emit_val(b handle[Buf], v u32) void {
+    buf_str(b, c"%v")
+    buf_dec_u64(b, zext[u64](v))
+}
+
+fn gen_emit_lbl(b handle[Buf], blk_id u32) void {
+    buf_str(b, c"^bb")
+    buf_dec_u64(b, zext[u64](blk_id))
+}
+
+// ---------- Entry-block & Dynamic Alloca ----------
+
+fn gen_alloca_entry(size u64, align u64) u32 {
+    sz u64 = if size > 0 { size } else { 1 }
+    al u64 = if align > 0 { align } else { 1 }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_entry_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = alloca ptr i64 ")
+    buf_dec_u64(b, sz)
+    buf_str(b, c", align ")
+    buf_dec_u64(b, al)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_alloca_dyn(size_v u32, align u64) u32 {
+    al u64 = if align > 0 { align } else { 1 }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = alloca ptr ")
+    gen_emit_val(b, size_v)
+    buf_str(b, c", align ")
+    buf_dec_u64(b, al)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_stacksave() u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = stacksave\n")
+    return v
+}
+
+fn gen_stackrestore(sp_v u32) void {
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  stackrestore ")
+    gen_emit_val(b, sp_v)
+    buf_u8(b, 10)
+}
+
+// ---------- Constant Emitters ----------
+
+fn gen_const_int(tid u32, val u64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    bits u32 = ty_int_bits(tid)
+    if bits == 0 { bits = 64 }
+    masked u64 = val
+    if bits < 64 {
+        mask u64 = (1 << bits) - 1
+        masked = val & mask
+    }
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" 0x")
+    buf_hex(b, masked, 1)
+    buf_str(b, c", ")
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" 0\n")
+    return v
+}
+
+fn gen_const_i64(val i64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add i64 i64 ")
+    buf_dec_i64(b, val)
+    buf_str(b, c", i64 0\n")
+    return v
+}
+
+fn gen_const_u64(val u64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add i64 i64 0x")
+    buf_hex(b, val, 1)
+    buf_str(b, c", i64 0\n")
+    return v
+}
+
+fn gen_const_i32(val i32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add i32 i32 ")
+    buf_dec_i64(b, sext[i64](val))
+    buf_str(b, c", i32 0\n")
+    return v
+}
+
+fn gen_const_i8(val u8) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add i8 i8 ")
+    buf_dec_u64(b, zext[u64](val))
+    buf_str(b, c", i8 0\n")
+    return v
+}
+
+fn gen_const_i1(val bool) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, if val { c" = add i1 i1 1, i1 0\n" } else { c" = add i1 i1 0, i1 0\n" })
+    return v
+}
+
+fn gen_const_zero(tid u32) u32 {
+    if gen_is_mem_ty(tid) {
+        sz u64 = ty_size(tid)
+        slot u32 = gen_alloca_entry(sz, ty_align(tid))
+        if sz > 0 { gen_memset_const(slot, 0, sz, false) }
+        return slot
+    }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    k u8 = ty_kind(tid)
+    if k == TYK_PTR || k == TYK_NULLPTR || k == TYK_FUNC {
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = ptradd ptr ptr null, i64 0, 1, 0\n")
+        return v
+    }
+    if ty_is_real_float(tid) {
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = fadd ")
+        gen_emit_fir_ty(b, tid)
+        buf_u8(b, 32)
+        gen_emit_fir_ty(b, tid)
+        buf_str(b, c" zero, ")
+        gen_emit_fir_ty(b, tid)
+        buf_str(b, c" zero\n")
+        return v
+    }
+    if k == TYK_VECTOR {
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = freeze ")
+        gen_emit_fir_ty(b, tid)
+        buf_u8(b, 32)
+        gen_emit_fir_ty(b, tid)
+        buf_str(b, c" zero\n")
+        return v
+    }
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" zero, ")
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" zero\n")
+    return v
+}
+
+fn gen_const_wide_int(tid u32, limbs addr, width u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    words u32 = (width + 31) / 32
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = add ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" 0x")
+    // Emit hex from most-significant 32-bit word down to 0
+    started bool = false
+    i u32 = words
+    while i > 0 {
+        i -= 1
+        w u32 = limbs[u32, zext[usize](i)]
+        if !started {
+            if w != 0 || i == 0 {
+                buf_hex(b, zext[u64](w), 1)
+                started = true
+            }
+        } else {
+            buf_hex(b, zext[u64](w), 8)
+        }
+    }
+    buf_str(b, c", ")
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" zero\n")
+    return v
+}
+
+// Convert f64 bits to IEEE f16 bits (round-to-nearest-even)
+fn gen_f64_to_f16_bits(bits u64) u16 {
+    f f64 = bitcast[f64](bits)
+    f32v f32 = cvt[f32](f)
+    u u32 = bitcast[u32](f32v)
+    sign u32 = (u >> 16) & 0x8000
+    exp i32 = bitcast[i32]((u >> 23) & 0xff) - 127 + 15
+    mant u32 = u & 0x7fffff
+    if exp <= 0 {
+        if exp < -10 { return trunc[u16](sign) }
+        mant = (mant | 0x800000) >> bitcast[u32](1 - exp)
+        return trunc[u16](sign | ((mant + 0x1000) >> 13))
+    }
+    if exp >= 31 {
+        if ((u >> 23) & 0xff) == 0xff && mant != 0 {
+            return trunc[u16](sign | 0x7e00 | (mant >> 13))
+        }
+        return trunc[u16](sign | 0x7c00)
+    }
+    return trunc[u16](sign | (bitcast[u32](exp) << 10) | ((mant + 0x1000) >> 13))
+}
+
+// Convert f64 bits to x87 80-bit extended (lo64 = significand, hi16 = sign+exp)
+fn gen_f64_to_f80_bits(bits u64, out_lo addr, out_hi addr) void {
+    sign u16 = trunc[u16]((bits >> 48) & 0x8000)
+    exp u64 = (bits >> 52) & 0x7ff
+    frac u64 = bits & 0x000fffffffffffff
+    if exp == 0 {
+        if frac == 0 {
+            out_lo[u64] = 0
+            out_hi[u16] = sign
+            return
+        }
+        // Subnormal f64 -> normal f80
+        shift u32 = trunc[u32](clz(frac)) - 11
+        out_lo[u64] = frac << (shift + 11)
+        out_hi[u16] = sign | trunc[u16](16383 - 1022 - zext[u64](shift))
+        return
+    }
+    if exp == 0x7ff {
+        out_hi[u16] = sign | 0x7fff
+        out_lo[u64] = 0x8000000000000000 | (frac << 11)
+        return
+    }
+    out_hi[u16] = sign | trunc[u16](exp - 1023 + 16383)
+    out_lo[u64] = 0x8000000000000000 | (frac << 11)
+}
+
+fn gen_const_float(tid u32, f64_bits u64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    k u8 = ty_kind(tid)
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = freeze ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_str(b, c" 0x")
+    if k == TYK_FLOAT16 {
+        buf_hex(b, zext[u64](gen_f64_to_f16_bits(f64_bits)), 4)
+    } else if k == TYK_FLOAT {
+        f32v f32 = cvt[f32](bitcast[f64](f64_bits))
+        buf_hex(b, zext[u64](bitcast[u32](f32v)), 8)
+    } else if k == TYK_DOUBLE {
+        buf_hex(b, f64_bits, 16)
+    } else if k == TYK_LDOUBLE {
+        lo u64 = 0
+        hi u16 = 0
+        gen_f64_to_f80_bits(f64_bits, &lo, &hi)
+        buf_hex(b, zext[u64](hi), 4)
+        buf_hex(b, lo, 16)
+    } else {
+        buf_hex(b, f64_bits, 16)
+    }
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_sym_addr(sym Bytes) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ptradd ptr ptr ")
+    gen_emit_sym_name(b, sym)
+    buf_str(b, c", i64 0, 1, 0\n")
+    return v
+}
+
+// ---------- Memory & Pointer Emitters ----------
+
+fn gen_ptradd_const(base_v u32, disp i64) u32 {
+    if disp == 0 { return base_v }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ptradd ptr ")
+    gen_emit_val(b, base_v)
+    buf_str(b, c", i64 0, 1, ")
+    buf_dec_i64(b, disp)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_ptradd_scaled(base_v u32, idx_v u32, scale i64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ptradd ptr ")
+    gen_emit_val(b, base_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, idx_v)
+    buf_str(b, c", ")
+    buf_dec_i64(b, scale)
+    buf_str(b, c", 0\n")
+    return v
+}
+
+fn gen_load_ty(tid u32, ptr_v u32, align u64, is_vol bool, is_atom bool) u32 {
+    al u64 = if align > 0 { align } else { 1 }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = load ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_val(b, ptr_v)
+    buf_str(b, c", align ")
+    buf_dec_u64(b, al)
+    if is_vol { buf_str(b, c" volatile") }
+    if is_atom { buf_str(b, c" seq_cst") }
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_store_ty(val_v u32, ptr_v u32, align u64, is_vol bool, is_atom bool) void {
+    al u64 = if align > 0 { align } else { 1 }
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  store ")
+    gen_emit_val(b, val_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, ptr_v)
+    buf_str(b, c", align ")
+    buf_dec_u64(b, al)
+    if is_vol { buf_str(b, c" volatile") }
+    if is_atom { buf_str(b, c" seq_cst") }
+    buf_u8(b, 10)
+}
+
+fn gen_load_raw(ty_cstr addr, ptr_v u32, align u64, is_vol bool) u32 {
+    al u64 = if align > 0 { align } else { 1 }
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = load ")
+    buf_str(b, ty_cstr)
+    buf_u8(b, 32)
+    gen_emit_val(b, ptr_v)
+    buf_str(b, c", align ")
+    buf_dec_u64(b, al)
+    if is_vol { buf_str(b, c" volatile") }
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_memcpy_const(dst_v u32, src_v u32, n u64, is_vol bool) void {
+    if n == 0 { return }
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, if is_vol { c"  memcpy volatile " } else { c"  memcpy " })
+    gen_emit_val(b, dst_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, src_v)
+    buf_str(b, c", i64 ")
+    buf_dec_u64(b, n)
+    buf_u8(b, 10)
+}
+
+fn gen_memcpy_dyn(dst_v u32, src_v u32, n_v u32, is_vol bool) void {
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, if is_vol { c"  memcpy volatile " } else { c"  memcpy " })
+    gen_emit_val(b, dst_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, src_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, n_v)
+    buf_u8(b, 10)
+}
+
+fn gen_memmove_dyn(dst_v u32, src_v u32, n_v u32, is_vol bool) void {
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, if is_vol { c"  memmove volatile " } else { c"  memmove " })
+    gen_emit_val(b, dst_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, src_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, n_v)
+    buf_u8(b, 10)
+}
+
+fn gen_memset_const(dst_v u32, byte_val u8, n u64, is_vol bool) void {
+    if n == 0 { return }
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, if is_vol { c"  memset volatile " } else { c"  memset " })
+    gen_emit_val(b, dst_v)
+    buf_str(b, c", i8 ")
+    buf_dec_u64(b, zext[u64](byte_val))
+    buf_str(b, c", i64 ")
+    buf_dec_u64(b, n)
+    buf_u8(b, 10)
+}
+
+fn gen_memset_dyn(dst_v u32, byte_v u32, n_v u32, is_vol bool) void {
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, if is_vol { c"  memset volatile " } else { c"  memset " })
+    gen_emit_val(b, dst_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, byte_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, n_v)
+    buf_u8(b, 10)
+}
+
+// ---------- Arithmetic, Comparison, Cast Emitters ----------
+
+fn gen_binop(op_cstr addr, tid u32, lhs u32, rhs u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ")
+    buf_str(b, op_cstr)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_val(b, lhs)
+    buf_str(b, c", ")
+    gen_emit_val(b, rhs)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_binop_raw(op_cstr addr, ty_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ")
+    buf_str(b, op_cstr)
+    buf_u8(b, 32)
+    buf_str(b, ty_cstr)
+    buf_u8(b, 32)
+    gen_emit_val(b, lhs)
+    buf_str(b, c", ")
+    gen_emit_val(b, rhs)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_unop(op_cstr addr, tid u32, src u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ")
+    buf_str(b, op_cstr)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_val(b, src)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_icmp(pred_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = icmp ")
+    buf_str(b, pred_cstr)
+    buf_str(b, c" i1 ")
+    gen_emit_val(b, lhs)
+    buf_str(b, c", ")
+    gen_emit_val(b, rhs)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_fcmp(pred_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = fcmp ")
+    buf_str(b, pred_cstr)
+    buf_str(b, c" i1 ")
+    gen_emit_val(b, lhs)
+    buf_str(b, c", ")
+    gen_emit_val(b, rhs)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_cast(op_cstr addr, dst_tid u32, src u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ")
+    buf_str(b, op_cstr)
+    buf_u8(b, 32)
+    gen_emit_fir_ty(b, dst_tid)
+    buf_u8(b, 32)
+    gen_emit_val(b, src)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_cast_raw(op_cstr addr, dst_ty_cstr addr, src u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ")
+    buf_str(b, op_cstr)
+    buf_u8(b, 32)
+    buf_str(b, dst_ty_cstr)
+    buf_u8(b, 32)
+    gen_emit_val(b, src)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_select(tid u32, cond u32, t_v u32, f_v u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = select ")
+    gen_emit_fir_ty(b, tid)
+    buf_u8(b, 32)
+    gen_emit_val(b, cond)
+    buf_str(b, c", ")
+    gen_emit_val(b, t_v)
+    buf_str(b, c", ")
+    gen_emit_val(b, f_v)
+    buf_u8(b, 10)
+    return v
+}
+
+// ---------- Terminators ----------
+
+fn gen_term_jump(target_blk u32) void {
+    blk handle[GenBlock] = gen_cur_block()
+    if blk.terminated { return }
+    blk.terminated = true
+    gen_add_succ(blk, target_blk)
+    buf_str(&blk.term, c"  jump ")
+    gen_emit_lbl(&blk.term, target_blk)
+    buf_u8(&blk.term, 10)
+}
+
+fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
+    blk handle[GenBlock] = gen_cur_block()
+    if blk.terminated { return }
+    blk.terminated = true
+    gen_add_succ(blk, t_blk)
+    gen_add_succ(blk, f_blk)
+    buf_str(&blk.term, c"  br ")
+    gen_emit_val(&blk.term, cond_v)
+    buf_str(&blk.term, c", ")
+    gen_emit_lbl(&blk.term, t_blk)
+    buf_str(&blk.term, c", ")
+    gen_emit_lbl(&blk.term, f_blk)
+    buf_u8(&blk.term, 10)
+}
+
+fn gen_term_ret_void() void {
+    blk handle[GenBlock] = gen_cur_block()
+    if blk.terminated { return }
+    blk.terminated = true
+    buf_str(&blk.term, c"  ret\n")
+}
+
+fn gen_term_ret_val(v u32) void {
+    blk handle[GenBlock] = gen_cur_block()
+    if blk.terminated { return }
+    blk.terminated = true
+    buf_str(&blk.term, c"  ret ")
+    gen_emit_val(&blk.term, v)
+    buf_u8(&blk.term, 10)
+}
+
+fn gen_term_unreachable() void {
+    blk handle[GenBlock] = gen_cur_block()
+    if blk.terminated { return }
+    blk.terminated = true
+    buf_str(&blk.term, c"  unreachable\n")
+}
+
+fn gen_emit_trap() void {
+    if gen_is_terminated() { return }
+    buf_str(gen_cur_buf(), c"  trap\n")
+}
+
+// ---------- Deferred Globals & Aliases ----------
+
+fn gen_global_buf() handle[Buf] {
+    if gc.in_func { return &gc.deferred }
+    return &gc.out.buf
+}
+
+fn gen_flush_if_top() void {
+    if !gc.in_func { fir_flush(&gc.out) }
+}
+
+fn gen_is_wide_bitint(tid u32) bool {
+    return ty_is_bitint(tid) && ty_int_bits(tid) > 64
+}
+
+fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
+    b handle[Buf] = gen_global_buf()
+    buf_str(b, c"alias ")
+    gen_emit_sym_name(b, name)
+    buf_u8(b, 32)
+    fir_emit_linkage(b, linkage, vis)
+    buf_str(b, c" = ")
+    gen_emit_sym_name(b, target)
+    buf_u8(b, 10)
+    gen_flush_if_top()
+}
+
+fn gen_emit_ctor_dtor(fn_name Bytes, is_dtor bool, prio u64) void {
+    b handle[Buf] = gen_global_buf()
+    buf_str(b, c"global @.L")
+    buf_str(b, if is_dtor { c"dtor." } else { c"ctor." })
+    buf_dec_u64(b, zext[u64](gc.ctor_counter))
+    gc.ctor_counter += 1
+    buf_str(b, c" size 8 align 8 local section \"")
+    buf_str(b, if is_dtor { c".fini_array" } else { c".init_array" })
+    if prio > 0 {
+        buf_u8(b, 46)
+        // 5-digit zero-padded priority
+        p u64 = prio
+        if p > 65535 { p = 65535 }
+        d u64 = 10000
+        while d > 0 {
+            buf_u8(b, trunc[u8](48 + (p / d) % 10))
+            d /= 10
+        }
+    }
+    buf_str(b, c"\" = { reloc @")
+    buf_append(b, fn_name)
+    buf_str(b, c" w8 }\n")
+    gen_flush_if_top()
+}
+
+// ---------- String Literal Pool ----------
+
+// Emit a read-only local global holding raw bytes `data` and return its interned symbol name id
+fn gen_emit_string_global(data Bytes, align u64) u32 {
+    nm_buf Buf = {}
+    defer { buf_free(&nm_buf) }
+    buf_str(&nm_buf, c".Lstr.")
+    buf_dec_u64(&nm_buf, zext[u64](gc.str_counter))
+    gc.str_counter += 1
+    nid u32 = gen_intern_sym(buf_bytes(&nm_buf))
+    gen_mark_defined(nid)
+    nm Bytes = gen_sym_bytes(nid)
+    b handle[Buf] = gen_global_buf()
+    sz u64 = data.n
+    al u64 = if align > 0 { align } else { 1 }
+    buf_str(b, c"global @")
+    buf_append(b, nm)
+    buf_str(b, c" size ")
+    buf_dec_u64(b, sz)
+    buf_str(b, c" align ")
+    buf_dec_u64(b, al)
+    buf_str(b, c" local readonly = ")
+    if sz == 0 {
+        buf_str(b, c"zero\n")
+    } else {
+        buf_str(b, c"{ bytes ")
+        fir_emit_quoted_bytes(b, data.p, data.n)
+        buf_str(b, c" }\n")
+    }
+    gen_flush_if_top()
+    return nid
+}
+
+// ---------- TU Streaming Callbacks & Finalization ----------
+
+fn gen_on_function_cb(ctx addr, node addr, user addr) void fails {
+    n handle[Ast] = handle_from_addr(node)
+    if n == null || n.decl == null { return }
+    try gen_function(n)
+}
+
+fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
+    n handle[Ast] = handle_from_addr(node)
+    if n == null { return }
+    if n.kind == ND_ASM {
+        // File-scope module_asm
+        if n.a != null {
+            tmp Buf = {}
+            defer { buf_free(&tmp) }
+            gen_decode_string_ast(n.a, &tmp, false)
+            fir_module_asm(&gc.out, buf_bytes(&tmp))
+        }
+        return
+    }
+    if n.kind == ND_DECL && n.decl != null {
+        s handle[Symbol] = n.decl
+        // Check for alias attribute
+        alias_buf Buf = {}
+        defer { buf_free(&alias_buf) }
+        if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
+            nid u32 = gen_sym_fir_name_id(s)
+            if !gen_is_defined(nid) {
+                gen_mark_defined(nid)
+                gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+            }
+            return
+        }
+        if ty_is_func(s.ty) { return }
+        // Tentative definition: defer until TU end in case a real definition follows
+        if (s.flags & 1) == 0 && s.value == null {
+            tr handle[TentativeRef] = vec_add(&gc.tentatives)
+            tr.name_id = gen_sym_fir_name_id(s)
+            sz u64 = ty_size(s.ty)
+            al u64 = ty_align(s.ty)
+            tr.size = if sz > 0 { sz } else { 1 }
+            tr.align = if al > 0 { al } else { 1 }
+            tr.linkage = gen_sym_linkage(s)
+            tr.vis = gen_sym_visibility(s)
+            tr.tls = s.thread_local
+            sec_buf Buf = {}
+            if gen_attr_str_arg(s.attrs, c"section", &sec_buf) && sec_buf.n > 0 {
+                sp addr = heap_alloc(sec_buf.n + 1)
+                mem_copy(sp, sec_buf.p, sec_buf.n)
+                sp[u8, sec_buf.n] = 0
+                tr.section = sp
+            }
+            buf_free(&sec_buf)
+            return
+        }
+        try gen_global_object(s)
+    }
+}
+
+fn gen_finish_tu() void fails {
+    // 1. Emit tentative definitions that were not subsequently defined
+    for i usize in 0..gc.tentatives.n {
+        tr handle[TentativeRef] = vec_at(&gc.tentatives, i)
+        if !gen_is_defined(tr.name_id) {
+            gen_mark_defined(tr.name_id)
+            sec Bytes = if tr.section != null { bytes_c(tr.section) } else { bytes_empty() }
+            fir_global_zero(&gc.out, gen_sym_bytes(tr.name_id), tr.size, tr.align,
+                            tr.linkage, tr.vis, sec, false, tr.tls)
+        }
+    }
+    // 2. Emit extern object declarations for undefined referenced globals
+    for i usize in 0..gc.ext_objs.n {
+        r handle[ExternObjRef] = vec_at(&gc.ext_objs, i)
+        if !gen_is_defined(r.name_id) {
+            fir_global_extern(&gc.out, gen_sym_bytes(r.name_id), r.size, r.align,
+                              r.linkage, FIR_VIS_DEFAULT, bytes_empty(), false, r.tls)
+        }
+    }
+    // 3. Emit function declarations for undefined referenced functions
+    for i usize in 0..gc.ext_fns.n {
+        r handle[ExternFnRef] = vec_at(&gc.ext_fns, i)
+        if !gen_is_defined(r.name_id) && r.decl_line != null {
+            buf_str(&gc.out.buf, r.decl_line)
+            fir_flush(&gc.out)
+        }
+    }
+    fir_flush(&gc.out)
+}

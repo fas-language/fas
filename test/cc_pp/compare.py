@@ -162,6 +162,16 @@ def extra_checks(fcc):
         got = run([fcc, "-E", "-P", "-"], source)
         if got.returncode != 1 or diagnostic not in got.stderr:
             raise SystemExit(f"diagnostic regression for {source!r}: {got.returncode}, {got.stderr!r}")
+    cli_errors = [
+        (("-E", "-std=gnu17", "-"), b"expected -std=c23 or -std=gnu23"),
+        (("-fsyntax-only", "-ansi", "-"), b"expected -std=c23 or -std=gnu23"),
+        (("-E", "-", "extra.c"), b"expected one input file, got extra.c"),
+        (("-fsyntax-only", "-", "extra.c"), b"expected one input file, got extra.c"),
+    ]
+    for args, diagnostic in cli_errors:
+        got = run([fcc, *args], b"int x;\n")
+        if got.returncode != 1 or diagnostic not in got.stderr:
+            raise SystemExit(f"CLI diagnostic regression for {args!r}: {got.returncode}, {got.stderr!r}")
     nfc = run([fcc, "-E", "-P", "-std=c23", "-"], "int e\u0301;\n".encode())
     if nfc.returncode != 1 or b"identifier is not in Unicode NFC" not in nfc.stderr:
         raise SystemExit("strict identifier normalization regression")
@@ -202,7 +212,7 @@ def extra_checks(fcc):
         dump = run([fcc, "-E", "-dM", "-std=c23", str(main)])
         if dump.returncode or b"#define __fcc__ 1\n" not in dump.stdout or b"#define linux " in dump.stdout:
             raise SystemExit("strict macro dump regression")
-    print(f"directed CLI and diagnostics: {len(cases) + 7} passed", flush=True)
+    print(f"directed CLI and diagnostics: {len(cases) + len(cli_errors) + 7} passed", flush=True)
 
 
 def normalized_features():

@@ -553,6 +553,12 @@ fn abi_emit_agg_field(b handle[Buf], tid u32, off u64, st handle[AggEmitState]) 
         }
         return
     }
+    if k == TYK_COMPLEX && !ty_is_real_float(n.elem) {
+        esz u64 = ty_size(n.elem)
+        abi_emit_agg_field(b, n.elem, off, st)
+        abi_emit_agg_field(b, n.elem, off + esz, st)
+        return
+    }
     if !st.first { buf_str(b, c", ") }
     st.first = false
     buf_dec_u64(b, off)
