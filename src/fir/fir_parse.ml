@@ -1222,7 +1222,18 @@ let parse_piece lx =
       let block = int_tok lx in
       expect lx ")";
       Blockref { fn; block }
-  | t -> fail lx ("expected bytes, zeros, reloc or blockaddr, got " ^ tok_text t)
+  | Ident "blockdiff" ->
+      expect lx "(";
+      let fn = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+      expect lx ",";
+      let lhs = int_tok lx in
+      expect lx ",";
+      let rhs = int_tok lx in
+      expect lx ",";
+      let width = int_tok lx in
+      expect lx ")";
+      Blockdiff { fn; lhs; rhs; width }
+  | t -> fail lx ("expected bytes, zeros, reloc, blockaddr or blockdiff, got " ^ tok_text t)
 
 (* the body of "dtype N ..." after the id; type ids are checked by the verifier *)
 let parse_dtype lx =

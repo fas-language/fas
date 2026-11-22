@@ -472,6 +472,8 @@ let piece_text = function
   | Bytes s -> "bytes " ^ quote s
   | Zeros n -> "zeros " ^ string_of_int n
   | Blockref { fn; block } -> Printf.sprintf "blockaddr(%s, %d)" (symbol fn) block
+  | Blockdiff { fn; lhs; rhs; width } ->
+      Printf.sprintf "blockdiff(%s, %d, %d, %d)" (symbol fn) lhs rhs width
   | Reloc { sym; addend; width; pcrel } ->
       Printf.sprintf "reloc %s%s%s w%d" (symbol sym)
         (if addend = 0L then ""

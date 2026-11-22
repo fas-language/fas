@@ -56,6 +56,7 @@ let apply (rename : string -> string) (m : modul) =
         let piece = function
           | Reloc r -> Reloc { r with sym = rename r.sym }
           | Blockref b -> Blockref { b with fn = rename b.fn }
+          | Blockdiff b -> Blockdiff { b with fn = rename b.fn }
           | p -> p
         in
         Vec.set m.globals i { g with gname = rename g.gname; init = Option.map (List.map piece) g.init })

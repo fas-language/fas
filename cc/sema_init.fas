@@ -18,6 +18,25 @@ fn se_aggregate_literal_init(p handle[Parser], ty u32, e handle[Ast], constant b
         (ty_is_array(ty) || ty_is_record(ty)) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))
 }
 
+struct LabelDelta { lhs u32, rhs u32 }
+
+fn se_static_label(p handle[Parser], n handle[Ast]) u32 {
+    // Casting the address to a pointer-width integer preserves its bits.
+    if n.kind == ND_CAST && ty_is_integer(n.ty) && ty_int_bits(n.ty) == 64 { n = n.a }
+    while n.kind == ND_CAST && ty_is_ptr(n.ty) { n = n.a }
+    if n.kind != ND_UNARY || !bytes_eq_c(cc_name(p.names, n.op), c"&&") { return 0 }
+    return trunc[u32](n.value)
+}
+
+fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool {
+    if n.kind != ND_BINARY || !bytes_eq_c(cc_name(p.names, n.op), c"-") { return false }
+    // Pointer subtraction here is a byte delta, including GNU void *.
+    if ty_is_ptr(n.a.ty) && ty_size(ty_node(ty_unqual(n.a.ty)).elem) > 1 { return false }
+    out.lhs = se_static_label(p, n.a)
+    out.rhs = se_static_label(p, n.b)
+    return out.lhs != 0 && out.rhs != 0
+}
+
 fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
     if constant && ty_is_record(e.ty) {
         // A constexpr record carries its initializer, so copying the
@@ -52,6 +71,14 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     }
     if constant && (e.flags & NF_OVERFLOW) != 0 {
         try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
+    }
+    if constant && ty_is_integer(ty) && ty_int_bits(ty) > 64 && (e.flags & NF_INT_VALUE) == 0 {
+        candidate handle[Ast] = e
+        while candidate.kind == ND_CAST && ty_is_integer(candidate.ty) { candidate = candidate.a }
+        delta LabelDelta = {}
+        if se_label_delta(p, candidate, &delta) {
+            try pa_error(p, e.loc, c"static label difference cannot initialize a wider-than-pointer integer")
+        }
     }
     if constant && ((e.flags & NF_STATIC) == 0 || ((e.flags & NF_LVALUE) != 0 && !ty_is_array(e.ty) &&
         e.kind != ND_STRING && e.kind != ND_COMPOUND && (e.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) == 0)) {

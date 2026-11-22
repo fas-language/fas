@@ -936,7 +936,7 @@ let place_data (d : data_out) section ~name ~align ~size write =
   d.syms <- { Elf64.name; section; offset; size; func = false } :: d.syms
 
 (* a global's bytes (padded to its size) and its pointer relocations *)
-let global_image (g : F.global) =
+let global_image block_offsets (g : F.global) =
   let b = Buffer.create (max 1 g.size) and relocs = ref [] in
   (match g.init with
   | None -> ()
@@ -955,7 +955,17 @@ let global_image (g : F.global) =
           | Reloc { width; _ } -> unsupported "@%s: a %d-byte relocation" g.gname width
           | Blockref { fn; block } ->
               relocs := (Buffer.length b, Mir_isel.block_symbol fn block, 0, false) :: !relocs;
-              Buffer.add_string b (String.make 8 '\000'))
+              Buffer.add_string b (String.make 8 '\000')
+          | Blockdiff { fn; lhs; rhs; width } ->
+              let offset block =
+                match Hashtbl.find_opt block_offsets (fn, block) with
+                | Some offset -> offset
+                | None -> unsupported "@%s: blockdiff block %d of `%s` was not emitted" g.gname block fn
+              in
+              let delta = offset lhs - offset rhs in
+              for i = 0 to width - 1 do
+                Buffer.add_char b (Char.chr ((delta asr (8 * i)) land 255))
+              done)
         pieces);
   if Buffer.length b > g.size then unsupported "@%s: initializer larger than the global" g.gname;
   Buffer.add_string b (String.make (g.size - Buffer.length b) '\000');
@@ -1118,7 +1128,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
             | None -> true
             | Some ps -> List.for_all (function F.Bytes s -> String.for_all (( = ) '\000') s | Zeros _ -> true | _ -> false) ps
           in
-          let image = lazy (global_image g) in
+          let image = lazy (global_image block_offsets g) in
           let pointers = if zero then [] else snd (Lazy.force image) in
           let align = max 1 g.galign in
           List.iter

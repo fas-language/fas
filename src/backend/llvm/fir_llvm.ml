@@ -1996,12 +1996,12 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
               match g.init with
               | None -> (Printf.sprintf "[%d x i8]" g.size, "zeroinitializer")
               | Some pieces ->
-                  let len = List.fold_left (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8) 0 pieces in
+                  let len = List.fold_left (fun acc p -> acc + init_piece_size p) 0 pieces in
                   let pieces = if len < g.size then pieces @ [ Zeros (g.size - len) ] else pieces in
                   let at = ref 0 in
                   let piece p =
                     let here = !at in
-                    (at := here + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8);
+                    at := here + init_piece_size p;
                     match p with
                     | Bytes s -> (Printf.sprintf "[%d x i8]" (String.length s), "c\"" ^ escaped s ^ "\"")
                     | Zeros k -> (Printf.sprintf "[%d x i8]" k, "zeroinitializer")
@@ -2016,6 +2016,11 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                     | Reloc { width; _ } -> unsupported "@%s: a %d-byte data relocation on the LLVM path" g.gname width
                     | Blockref { block = 0; _ } -> unsupported "@%s: blockaddr of an entry block" g.gname
                     | Blockref { fn; block } -> ("ptr", Printf.sprintf "blockaddress(%s, %%b%d)" (sym fn) block)
+                    | Blockdiff { fn; lhs; rhs; width } ->
+                        let addr block = Printf.sprintf "i64 ptrtoint (ptr blockaddress(%s, %%b%d) to i64)" (sym fn) block in
+                        let diff = Printf.sprintf "sub (%s, %s)" (addr lhs) (addr rhs) in
+                        let ty = Printf.sprintf "i%d" (width * 8) in
+                        (ty, if width = 8 then diff else Printf.sprintf "trunc (i64 %s to %s)" diff ty)
                   in
                   let all_zero = List.for_all (function Zeros _ -> true | Bytes s -> String.for_all (( = ) '\000') s | _ -> false) pieces in
                   if all_zero then (Printf.sprintf "[%d x i8]" g.size, "zeroinitializer")

@@ -664,16 +664,14 @@ let verify (m : modul) =
                   errs := Printf.sprintf "@%s: reloc @%s w4 must be pcrel (a 4-byte absolute address is not supported)" g.gname sym :: !errs
               | Reloc { sym; width = 8; pcrel = true; _ } ->
                   errs := Printf.sprintf "@%s: reloc @%s pcrel must be w4" g.gname sym :: !errs
+              | Blockdiff { width; _ } when not (List.mem width [ 1; 2; 4; 8 ]) ->
+                  errs := Printf.sprintf "@%s: blockdiff width must be 1, 2, 4 or 8" g.gname :: !errs
               | _ -> ())
             ps
       | None -> ());
       match g.init with
       | Some ps ->
-          let n =
-            List.fold_left
-              (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8)
-              0 ps
-          in
+          let n = List.fold_left (fun acc p -> acc + init_piece_size p) 0 ps in
           if n <> g.size then errs := Printf.sprintf "@%s: initializer is %d bytes, size %d" g.gname n g.size :: !errs
       | None -> ())
     m.globals;
@@ -728,7 +726,15 @@ let verify (m : modul) =
   Vec.iter
     (fun g ->
       match g.init with
-      | Some ps -> List.iter (function Blockref { fn; block } -> check_blockaddr g.gname fn block | _ -> ()) ps
+      | Some ps ->
+          List.iter
+            (function
+              | Blockref { fn; block } -> check_blockaddr g.gname fn block
+              | Blockdiff { fn; lhs; rhs; _ } ->
+                  check_blockaddr g.gname fn lhs;
+                  check_blockaddr g.gname fn rhs
+              | _ -> ())
+            ps
       | None -> ())
     m.globals;
   (* location ids index this module's table (0 = none): an id from another

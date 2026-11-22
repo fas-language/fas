@@ -198,11 +198,10 @@ struct InitReloc {
     off u64
     sym_id u32
     target_blk u32    // if is_blockaddr, GenBlock id in current function
+    base_blk u32      // if width != 0, subtract this block from target_blk
     addend i64
     is_blockaddr bool
-    _pad0 u8
-    _pad1 u16
-    _pad2 u32
+    width u8
 }
 
 struct StaticInit {
@@ -269,12 +268,32 @@ fn si_add_reloc(si handle[StaticInit], off u64, sym_id u32, addend i64) void {
     r.is_blockaddr = false
 }
 
-fn si_add_blockaddr(si handle[StaticInit], off u64, fn_sym_id u32, target_blk u32) void {
+fn si_add_blockaddr(si handle[StaticInit], off u64, fn_sym_id u32, target_blk u32) handle[InitReloc] {
     r handle[InitReloc] = vec_add(&si.relocs)
     r.off = off
     r.sym_id = fn_sym_id
     r.target_blk = target_blk
     r.is_blockaddr = true
+    return r
+}
+
+// The emitter resolves same-function label differences after laying out code.
+fn si_try_blockdiff(si handle[StaticInit], off u64, width u64, n handle[Ast]) bool {
+    if !gc.in_func || (width != 1 && width != 2 && width != 4 && width != 8) { return false }
+    while n.kind == ND_CAST && ty_is_integer(n.ty) {
+        if zext[u64](ty_int_bits(n.ty)) < width * 8 { return false }
+        n = n.a
+    }
+    delta LabelDelta = {}
+    if !se_label_delta(gc.p, n, &delta) { return false }
+    target u32 = gen_get_label_block_by_name(delta.lhs)
+    base u32 = gen_get_label_block_by_name(delta.rhs)
+    gen_mark_addr_taken(target)
+    gen_mark_addr_taken(base)
+    r handle[InitReloc] = si_add_blockaddr(si, off, gc.cur_fn_name, target)
+    r.base_blk = base
+    r.width = trunc[u8](width)
+    return true
 }
 
 struct ConstAddr {
@@ -636,15 +655,16 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
     if ty_is_integer(u) {
+        sz u64 = ty_size(u)
+        if k != TYK_BOOL && si_try_blockdiff(si, off, sz, init) { return }
         // Check for pointer-to-int constant cast (e.g. (uintptr_t)&x)
-        if ty_size(u) == 8 {
+        if sz == 8 {
             ca ConstAddr = {}
             if gen_eval_const_addr(init, &ca) {
                 si_add_reloc(si, off, ca.sym_id, ca.addend)
                 return
             }
         }
-        sz u64 = ty_size(u)
         if init.wide != null && sz > 8 {
             words u32 = (ty_int_bits(u) + 31) / 32
             copy_n u64 = zext[u64](words) * 4
@@ -1025,15 +1045,26 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
             r handle[InitReloc] = vec_at(&si.relocs, ri)
             if !first { buf_str(b, c", ") }
             first = false
+            width u64 = if r.width != 0 { zext[u64](r.width) } else { 8 }
             if r.is_blockaddr {
-                buf_str(b, c"blockaddr(@")
+                buf_str(b, if r.width != 0 { c"blockdiff(@" } else { c"blockaddr(@" })
                 buf_append(b, gen_sym_bytes(r.sym_id))
                 buf_str(b, c", ")
                 pt handle[BlockAddrPatch] = vec_add(&gc.ba_patches)
                 pt.blk_id = 0xffffffff
                 pt.off = b.n
                 pt.target_blk = r.target_blk
-                buf_str(b, c"00000000)")
+                buf_str(b, c"00000000")
+                if r.width != 0 {
+                    buf_str(b, c", ")
+                    pt = vec_add(&gc.ba_patches)
+                    pt.blk_id = 0xffffffff
+                    pt.off = b.n
+                    pt.target_blk = r.base_blk
+                    buf_str(b, c"00000000, ")
+                    buf_dec_u64(b, width)
+                }
+                buf_u8(b, 41)
             } else {
                 buf_str(b, c"reloc @")
                 buf_append(b, gen_sym_bytes(r.sym_id))
@@ -1045,7 +1076,7 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
                 }
                 buf_str(b, c" w8")
             }
-            pos += 8
+            pos += width
             ri += 1
             continue
         }

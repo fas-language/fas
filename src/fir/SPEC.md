@@ -120,6 +120,7 @@ PIECE      ::= bytes "..."                     raw bytes; escapes \"  \\  \xx (t
              | reloc @sym[+-addend] w8         8-byte absolute address of sym+addend
              | reloc @sym[+-addend] pcrel w4   4-byte sym+addend minus the address of these bytes
              | blockaddr(@f, N)                8 bytes: the constant ptr blockaddr(@f, N) (§3)
+             | blockdiff(@f, A, B, W)          W bytes: blockaddr(@f, A) minus blockaddr(@f, B)
 ```
 
 Examples:
@@ -202,7 +203,7 @@ PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (decl
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
 - **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
 - **Promises on a declaration** let a call to a function defined elsewhere be less than a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. At most one `memory(...)`. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). They are refused on a `func`, whose body says what it does. A backend may ignore them (the native backend does today); the LLVM path passes them on as `memory(none)`, `memory(read)`, `memory(argmem: readwrite)` and `willreturn`.
-- **`blockaddr` pins blocks.** A function whose blocks appear in a `blockaddr` keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations.
+- **`blockaddr` and `blockdiff` pin blocks.** A function whose blocks appear in either keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations. A `blockdiff` data piece stores the signed byte difference, truncated to 1, 2, 4 or 8 bytes, with no load-time relocation.
 
 ### Debug information
 

@@ -1011,7 +1011,9 @@ let create cfg (ms : modul list) =
                               Int64.add (sym_addr s) (Int64.of_int (!pos - start))
                             in
                             put_addr (if pcrel then Int64.sub a here else a) width
-                        | Blockref { fn; block } -> put_addr (blockaddr st fn block) 8)
+                        | Blockref { fn; block } -> put_addr (blockaddr st fn block) 8
+                        | Blockdiff { fn; lhs; rhs; width } ->
+                            put_addr (Int64.sub (blockaddr st fn lhs) (blockaddr st fn rhs)) width)
                       pieces)
             | _ -> ())
         m.globals)

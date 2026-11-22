@@ -201,6 +201,24 @@ let () =
   roundtrip "debugvars" debugvars;
   roundtrip "everything" everything;
   roundtrip "forward" forward;
+  let blockdiff width lhs =
+    Printf.sprintf
+      {|
+global @delta size %d align 4 local readonly = {blockdiff(@f, %d, 2, %d)}
+func @f () -> () local {
+^entry:
+  jump ^left
+^left:
+  jump ^right
+^right:
+  ret
+}
+|}
+      width lhs width
+  in
+  roundtrip "blockdiff" (blockdiff 4 1);
+  rejects "blockdiff invalid width" "blockdiff width" (blockdiff 3 1);
+  rejects "blockdiff entry block" "the entry block" (blockdiff 4 0);
   rejects "dominance" "does not dominate"
     {|
 func @bad (i1) -> (i64) global {

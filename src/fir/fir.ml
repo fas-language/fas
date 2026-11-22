@@ -492,6 +492,14 @@ type init_piece =
   | Blockref of { fn : string; block : int }
       (** 8 bytes: the [blockaddr(@fn, block)] constant, for C's
           [static void *t[] = {&&a, ...}] *)
+  | Blockdiff of { fn : string; lhs : int; rhs : int; width : int }
+      (** The byte offset from [rhs] to [lhs] in the same function. *)
+
+let init_piece_size = function
+  | Bytes s -> String.length s
+  | Zeros n -> n
+  | Reloc { width; _ } | Blockdiff { width; _ } -> width
+  | Blockref _ -> 8
 
 type global = {
   gname : string;
@@ -880,7 +888,8 @@ let blocks_pinned (m : modul) (f : func) =
        (fun acc (g : global) ->
          acc
          || match g.init with
-            | Some pieces -> List.exists (function Blockref { fn; _ } -> fn = f.name | _ -> false) pieces
+            | Some pieces ->
+                List.exists (function Blockref { fn; _ } | Blockdiff { fn; _ } -> fn = f.name | _ -> false) pieces
             | None -> false)
        false m.globals
 
