@@ -379,6 +379,13 @@ struct AddressValue { symbol handle[Symbol], offset i64 }
 fn se_address_add(out handle[AddressValue], index handle[Ast], size u64, sub bool) bool {
     if (index.flags & NF_INT_VALUE) == 0 || (index.flags & NF_OVERFLOW) != 0 ||
         index.wide != null || size == 0 { return false }
+    if out.symbol == null {
+        // An absolute GNU pointer uses the target's full address width.
+        base u64 = bitcast[u64](out.offset)
+        delta u64 = index.value * size
+        out.offset = bitcast[i64](if sub { base - delta } else { base + delta })
+        return true
+    }
     negative bool = !ty_is_unsigned(index.ty) && bitcast[i64](index.value) < 0
     mag u64 = if negative { 0 - index.value } else { index.value }
     if mag > 0x7fffffffffffffff / size { return false }
@@ -391,8 +398,7 @@ fn se_address_add(out handle[AddressValue], index handle[Ast], size u64, sub boo
         if delta > 0x7fffffffffffffff - offset { return false }
         offset += delta
     }
-    symbol handle[Symbol] = out.symbol
-    if symbol != null && offset > ty_size(symbol.ty) { return false }
+    if offset > ty_size(out.symbol.ty) { return false }
     out.offset = bitcast[i64](offset)
     return true
 }
@@ -431,6 +437,11 @@ fn se_address_object(p handle[Parser], a handle[Ast], out handle[AddressValue]) 
 fn se_address_value(p handle[Parser], a handle[Ast], out handle[AddressValue]) bool {
     base handle[Ast] = a.a
     if ty_is_array(a.ty) { return se_address_object(p, a, out) }
+    if (a.flags & NF_STATIC) != 0 && se_null(a) {
+        out.symbol = null
+        out.offset = 0
+        return true
+    }
     if a.kind == ND_CAST {
         if ty_is_ptr(se_decay(base.ty)) { return se_address_value(p, base, out) }
         if se_null(base) && ty_is_ptr(a.ty) {
@@ -439,7 +450,7 @@ fn se_address_value(p handle[Parser], a handle[Ast], out handle[AddressValue]) b
             return true
         }
         if ty_is_ptr(a.ty) && ty_is_integer(base.ty) && (base.flags & NF_INT_VALUE) != 0 &&
-            (base.flags & NF_OVERFLOW) == 0 && base.wide == null && base.value <= 0x7fffffffffffffff {
+            (base.flags & NF_OVERFLOW) == 0 && base.wide == null {
             out.symbol = null
             out.offset = bitcast[i64](base.value)
             return true
@@ -480,13 +491,17 @@ fn se_fold_pointer(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b ha
         elem u32 = ty_node(ty_unqual(ty)).elem
         stride u64 = if ty_is_void(elem) || ty_is_func(elem) { 1 } else { ty_size(elem) }
         if stride == 0 || stride > 0x7fffffffffffffff { return }
-        delta i64 = x.offset - y.offset
-        step i64 = bitcast[i64](stride)
-        if delta % step != 0 { return }
-        n.value = bitcast[u64](delta / step)
+        lhs u64 = bitcast[u64](x.offset)
+        rhs u64 = bitcast[u64](y.offset)
+        negative bool = lhs < rhs
+        distance u64 = if negative { rhs - lhs } else { lhs - rhs }
+        if distance % stride != 0 { return }
+        distance /= stride
+        if distance > (if negative { 0x8000000000000000 } else { 0x7fffffffffffffff }) { return }
+        n.value = if negative { 0 - distance } else { distance }
     } else {
         eq bool = equal && x.offset == y.offset
-        less bool = x.offset < y.offset
+        less bool = bitcast[u64](x.offset) < bitcast[u64](y.offset)
         yes bool = eq
         if pa_is(p, t, c"!=") { yes = !eq }
         else if pa_is(p, t, c"<") { yes = less }

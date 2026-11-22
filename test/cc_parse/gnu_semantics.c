@@ -29,3 +29,6 @@ static int gnu_negative_shift = -2 << 7;
 static _BitInt(75) gnu_negative_wide_shift = (_BitInt(75))-1 << 74;
 static_assert((-2 << 7) == -256);
 static_assert(((_BitInt(75))-2 << 71) == -((_BitInt(75))1 << 72));
+
+static_assert((char *)-1L + 1 == 0);
+static_assert((char *)-1L + 1 < (char *)-1L);
