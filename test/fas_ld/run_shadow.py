@@ -138,6 +138,10 @@ def main() -> int:
     env["SHADOW_LOG"] = str(log_path)
     env["SHADOW_TMP"] = str(tmp_dir)
     env["SHADOW_NORM"] = str(norm_stderr)
+    if env.get("FAS_REFCACHE") != "off":
+        refcache = root / "tools/refcache"
+        env["SHADOW_REFCACHE"] = str(refcache)
+        env["PATH"] = str(refcache / "shadow-bin") + os.pathsep + env["PATH"]
     env.setdefault("FAS_CC", "clang-22")
     env.setdefault("CC", "clang-22")
     env.setdefault("FAS_OPT", "opt-22")

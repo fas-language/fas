@@ -4,11 +4,16 @@ thousands of random C23 struct/union/bitfield/attribute/#pragma pack declaration
 checking sizeof, alignof, offsetof, AND exact bitfield bit offsets.
 """
 import os
+from pathlib import Path
 import random
 import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/refcache"))
+from refcache import digest, run as cached_run
+
+GENERATOR = digest(Path(__file__).read_bytes())
 CC = os.environ.get("FAS_CC", "clang-22")
 CASES = int(os.environ.get("FAS_CC_TYPES_CASES", "2000"))
 SEED = int(os.environ.get("SEED", "12345"))
@@ -295,8 +300,18 @@ def main():
         exe_path = os.path.join(d, "layout_ref")
         with open(c_path, "w") as f:
             f.write(c_src)
-        subprocess.run([CC, "-std=gnu23", "-O0", "-w", c_path, "-o", exe_path], check=True)
-        c_out = subprocess.check_output([exe_path], text=True).splitlines()
+        namespace = f"cc-types/layout/{GENERATOR}/{SEED}/0"
+        result = cached_run([CC, "-std=gnu23", "-O0", "-w", c_path, "-o", exe_path],
+                            ns=namespace, deps=[c_path], outs=[exe_path], scratch=d, c=True)
+        sys.stdout.buffer.write(result.stdout)
+        sys.stderr.buffer.write(result.stderr)
+        result.check_returncode()
+        # The executable is the product of the keyed compilation above.
+        probe = cached_run([exe_path], ns=namespace + "/run", scratch=d, text=True,
+                           deps=[exe_path], version=False)
+        sys.stderr.write(probe.stderr)
+        probe.check_returncode()
+        c_out = probe.stdout.splitlines()
 
     fas_out = subprocess.check_output([probe_bin], input=probe_in, text=True).splitlines()
 

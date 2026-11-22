@@ -8,6 +8,10 @@ relocations byte-for-byte with `llvm-mc-22 -triple=x86_64-unknown-linux-gnu -fil
 """
 
 import os, random, struct, subprocess, sys, tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/refcache"))
+from compiler import assemble
 
 R8 = ['%al', '%cl', '%dl', '%bl', '%spl', '%bpl', '%sil', '%dil',
       '%r8b', '%r9b', '%r10b', '%r11b', '%r12b', '%r13b', '%r14b', '%r15b']
@@ -493,8 +497,12 @@ def parse_elf_text_and_relas(data):
             relas.append((r_offset, rtype, sname, r_addend))
     return text_bytes, relas
 
-def run_tool(cmd, asm_text, out_path):
-    p = subprocess.run(cmd, input=asm_text.encode(), capture_output=True)
+def run_tool(cmd, asm_text, out_path, *, reference=False):
+    if reference:
+        p = assemble(cmd, ns="fas-as/fuzz-mc", input=asm_text.encode(),
+                     output=out_path, scratch=os.path.dirname(out_path))
+    else:
+        p = subprocess.run(cmd, input=asm_text.encode(), capture_output=True)
     if p.returncode != 0:
         return None, p.stderr.decode('utf-8', 'replace')
     with open(out_path, 'rb') as f:
@@ -520,7 +528,7 @@ def main():
             lines.append('  nop')
             asm = '\n'.join(lines) + '\n'
 
-            mc_data, mc_err = run_tool(['llvm-mc-22', '-triple=x86_64-unknown-linux-gnu', '-filetype=obj', '-o', mc_o, '-'], asm, mc_o)
+            mc_data, mc_err = run_tool(['llvm-mc-22', '-triple=x86_64-unknown-linux-gnu', '-filetype=obj', '-o', mc_o, '-'], asm, mc_o, reference=True)
             if mc_data is None:
                 # Skip invalid random combination rejected by llvm-mc
                 continue

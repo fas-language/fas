@@ -22,6 +22,10 @@ fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/fas-as-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
+reference_cc() {
+    python3 "$ROOT/tools/refcache/compiler.py" fas-as/fixture "$WORK" clang-22 "$@"
+}
+
 # Build fas-as, as/test/apitest, and fas-ld
 "$OCAML_FAS" -o "$WORK/fas-as" "$ROOT/as/main.fas"
 "$OCAML_FAS" -o "$WORK/as-apitest" "$ROOT/as/test/apitest.fas"
@@ -62,7 +66,7 @@ if [ -d "$UPSTREAM" ]; then
     for f in "$UPSTREAM"/c-testsuite/tests/single-exec/0000[1-9].c "$UPSTREAM"/c-testsuite/tests/single-exec/0001[0-5].c; do
         [ -f "$f" ] || continue
         for fl in "-O2 -g" "-O2 -fno-asynchronous-unwind-tables"; do
-            clang-22 -S $fl "$f" -o "$WORK/g.s"
+            reference_cc -S $fl "$f" -o "$WORK/g.s"
             "$WORK/fas-as" -g "$WORK/g.s" -o "$WORK/g.o"
             g_pass=$((g_pass + 1))
         done
@@ -79,8 +83,8 @@ if [ -d "$UPSTREAM" ]; then
     for n in 00001 00003 00005 00010 00015 00020 00025 00030 00040 00050; do
         cf="$UPSTREAM/c-testsuite/tests/single-exec/${n}.c"
         [ -f "$cf" ] || continue
-        clang-22 -O2 -fPIE "$cf" -o "$WORK/ref_${n}"
-        clang-22 -S -O2 -fPIE "$cf" -o "$WORK/f_${n}.s"
+        reference_cc -O2 -fPIE "$cf" -o "$WORK/ref_${n}"
+        reference_cc -S -O2 -fPIE "$cf" -o "$WORK/f_${n}.s"
         "$WORK/fas-as" "$WORK/f_${n}.s" -o "$WORK/f_${n}.o"
         "$WORK/fas-ld" -pie --dynamic-linker /lib64/ld-linux-x86-64.so.2 \
             -o "$WORK/fas_${n}" "$CRT1" "$CRTI" "$WORK/f_${n}.o" -L"$LIBC_DIR" -lc "$CRTN"

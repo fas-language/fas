@@ -798,6 +798,11 @@ type outcome = Same | Differ of string | Broken of string
 let sh fmt = Printf.ksprintf (fun s -> Sys.command s) fmt
 let q = Filename.quote
 
+let reference_cc tmp cc =
+  match Sys.getenv_opt "FAS_TEST_REFCACHE" with
+  | None -> cc
+  | Some path -> Printf.sprintf "python3 %s abi-fuzz %s %s" (q path) (q tmp) cc
+
 let check_cases tmp name cases =
   let ctext = c_file cases and ftext = fir_file cases in
   let save () =
@@ -808,7 +813,7 @@ let check_cases tmp name cases =
   in
   let cfile = Filename.concat tmp "c.c" and co = Filename.concat tmp "c.o" in
   write cfile ctext;
-  if sh "%s -O1 -w -c %s -o %s 2>%s" !cc (q cfile) (q co) (q (Filename.concat tmp "cc.err")) <> 0 then
+  if sh "%s -O1 -w -c %s -o %s 2>%s" (reference_cc tmp !cc) (q cfile) (q co) (q (Filename.concat tmp "cc.err")) <> 0 then
     Broken ("C: " ^ read (Filename.concat tmp "cc.err") ^ " (" ^ save () ^ ")")
   else
     let parse () =
@@ -822,7 +827,8 @@ let check_cases tmp name cases =
         (* each side linked with the C object and run *)
         let run_with name obj =
           let exe = Filename.concat tmp name in
-          if sh "%s %s %s -o %s -lm 2>%s" !cc (q co) (q obj) (q exe) (q (Filename.concat tmp "ld.err")) <> 0 then
+          let cc = if name = "l" then reference_cc tmp !cc else !cc in
+          if sh "%s %s %s -o %s -lm 2>%s" cc (q co) (q obj) (q exe) (q (Filename.concat tmp "ld.err")) <> 0 then
             Error ("link: " ^ read (Filename.concat tmp "ld.err"))
           else
             let out = Filename.concat tmp (name ^ ".out") in
@@ -835,7 +841,7 @@ let check_cases tmp name cases =
           | Ok ll ->
               let llf = Filename.concat tmp "m.ll" and lo = Filename.concat tmp "l.o" in
               write llf ll;
-              if sh "%s -O1 -w -c -x ir %s -o %s 2>%s" !llvm_cc (q llf) (q lo) (q (Filename.concat tmp "ll.err")) <> 0 then
+              if sh "%s -O1 -w -c -x ir %s -o %s 2>%s" (reference_cc tmp !llvm_cc) (q llf) (q lo) (q (Filename.concat tmp "ll.err")) <> 0 then
                 Error ("clang: " ^ read (Filename.concat tmp "ll.err"))
               else run_with "l" lo
         in

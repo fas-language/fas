@@ -10,9 +10,13 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/refcache"))
+from refcache import run as cached_run
+
 TESTS = Path(__file__).resolve().parent
 ORACLE = os.environ.get("CLANG", "clang-22")
 ENV = {**os.environ, "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0"}
@@ -88,10 +92,16 @@ def run(command, source=None):
     )
 
 
-def test_case(fcc, case, normalized, shared_headers):
+def preprocess(command, case, *, deps=(), scratch=None):
+    inputs = (*deps, case.path) if case.path != "-" else deps
+    return cached_run(command, ns="cc-pp", deps=inputs, scratch=scratch,
+                      c=True, input=case.source, cwd=ROOT, env=ENV, timeout=45)
+
+
+def test_case(fcc, case, normalized, shared_headers, defs):
     args = ["-std=gnu23", "-E", "-P", *case.args, case.path]
     try:
-        expected = run([ORACLE, *args], case.source)
+        expected = preprocess([ORACLE, *args], case)
         if expected.returncode:
             return case, "clang-skip", expected.stderr.decode(errors="replace")[:1000]
         reference = tokens(expected.stdout)
@@ -108,14 +118,14 @@ def test_case(fcc, case, normalized, shared_headers):
             detail = f"token {i}: fcc {observed[i:i+8]!r}, clang {reference[i:i+8]!r}"
             status = "diff"
         if normalized and actual.returncode == 0 and case.category != "regression":
-            baseline = run([ORACLE, *normalized, *args], case.source)
+            baseline = preprocess([ORACLE, *normalized, *args], case, deps=[defs], scratch=defs.parent)
             if baseline.returncode == 0 and observed == tokens(baseline.stdout):
                 return case, "normalized-same", detail
-            baseline = run([ORACLE, *normalized, *shared_headers, *args], case.source)
+            baseline = preprocess([ORACLE, *normalized, *shared_headers, *args], case, deps=[defs], scratch=defs.parent)
             if baseline.returncode == 0 and observed == tokens(baseline.stdout):
                 return case, "shared-headers-same", detail
         if case.category == "manifest" and status == "diff":
-            gcc = run(["gcc", *args], case.source)
+            gcc = preprocess(["gcc", *args], case)
             if gcc.returncode == 0 and reference != tokens(gcc.stdout):
                 detail += " (GCC also differs from Clang)"
         return case, status, detail
@@ -293,7 +303,7 @@ def main():
         if gcc_include and Path(gcc_include).is_dir() and not gcc_include.endswith("/include-fixed"):
             shared_headers.extend(["-isystem", gcc_include])
         with ThreadPoolExecutor(max_workers=opt.jobs) as pool:
-            work = pool.map(lambda c: test_case(opt.fcc, c, normalized, shared_headers), cases)
+            work = pool.map(lambda c: test_case(opt.fcc, c, normalized, shared_headers, defs), cases)
             for number, (case, status, detail) in enumerate(work, 1):
                 counter = counts[case.category]
                 counter[status] += 1
