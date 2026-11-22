@@ -7,10 +7,11 @@ struct Macro {
 
 value struct Hide { id u32, next u32 }
 value struct Span { p addr, n u32, at u32 }
+struct ExpandSpan { p addr, n u32, at u32, owned bool }
 value struct Arg { start usize, size usize }
 struct ArgCache { tokens Vec[Token], ready bool }
 struct Expand {
-    spans Vec[Span]
+    spans Vec[ExpandSpan]
     source bool
     expression bool
 }
@@ -46,27 +47,52 @@ fn hide_merge(p handle[Pp], a u32, b u32, intersect bool) u32 {
     return result
 }
 
-fn expand_span(e handle[Expand], data addr, count usize) void {
-    if count != 0 { vec_push[Span](&e.spans, {data, trunc[u32](count), 0}) }
+// Macro arguments and replacement lists are usually short-lived. Seed their
+// vectors on the ordinary heap so growth and release do not retain old
+// buffers in the TU region. Owned replacement buffers live until rescanned.
+fn expand_scratch[T](v handle[Vec[T]]) void {
+    v.cap = 8
+    v.p = heap_alloc_plain(v.cap * sizeof[T])
+}
+
+fn expand_span(e handle[Expand], data addr, count usize, owned bool) void {
+    if count != 0 {
+        s handle[ExpandSpan] = vec_add[ExpandSpan](&e.spans)
+        s.p = data
+        s.n = trunc[u32](count)
+        s.owned = owned
+    }
+    else if owned { heap_free(data) }
 }
 
 fn expand_back(e handle[Expand], t Token) void {
     if t.kind != TK_EOF {
-        a addr = heap_alloc(sizeof[Token])
+        a addr = heap_alloc_plain(sizeof[Token])
         a[Token] = t
-        expand_span(e, a, 1)
+        expand_span(e, a, 1, true)
     }
+}
+
+// Also releases replacements still pending if rescanning raised an error.
+fn expand_release(e handle[Expand]) void {
+    while e.spans.n != 0 {
+        e.spans.n -= 1
+        s handle[ExpandSpan] = handle_from_addr(e.spans.p + e.spans.n * sizeof[ExpandSpan])
+        if s.owned { heap_free(s.p) }
+    }
+    vec_free[ExpandSpan](&e.spans)
 }
 
 fn expand_raw(p handle[Pp], e handle[Expand]) Token fails {
     while e.spans.n != 0 {
-        s handle[Span] = vec_at[Span](&e.spans, e.spans.n - 1)
+        s handle[ExpandSpan] = vec_at[ExpandSpan](&e.spans, e.spans.n - 1)
         if s.at != s.n {
             t Token = s.p[Token, zext[usize](s.at)]
             s.at += 1
             return t
         }
-        vec_truncate[Span](&e.spans, e.spans.n - 1)
+        if s.owned { heap_free(s.p) }
+        vec_truncate[ExpandSpan](&e.spans, e.spans.n - 1)
     }
     if e.source { return try pp_raw(p) }
     return cc_token(TK_EOF, 0, 0, 0)
@@ -75,7 +101,9 @@ fn expand_raw(p handle[Pp], e handle[Expand]) Token fails {
 fn expand_list(p handle[Pp], data addr, count usize, out handle[Vec[Token]], expression bool) void fails {
     e Expand = {}
     e.expression = expression
-    expand_span(&e, data, count)
+    expand_scratch[ExpandSpan](&e.spans)
+    defer { expand_release(&e) }
+    expand_span(&e, data, count, false)
     while true {
         t Token = try expand_next(p, &e)
         if t.kind == TK_EOF { break }
@@ -131,7 +159,9 @@ fn expand_glue(p handle[Pp], left Token, right Token, loc u32) Token fails {
     file CFile = {}
     file.data = bytes(b.p, size)
     pos CLoc = vec_get[CLoc](&n.locations, zext[usize](loc))
-    vec_push[LineMark](&file.marks, {0, pos.line, pos.column})
+    mark LineMark = {0, pos.line, pos.column}
+    file.marks.p = &mark
+    file.marks.n = 1
     l Lexer = {}
     l.file = &file
     l.path = pos.file
@@ -188,6 +218,7 @@ fn expand_arguments(p handle[Pp], e handle[Expand], m handle[Macro], data handle
 
 fn expand_cached(p handle[Pp], e handle[Expand], data handle[Vec[Token]], arg Arg, cache handle[ArgCache]) void fails {
     if cache.ready { return }
+    expand_scratch[Token](&cache.tokens)
     try expand_list(p, data.p + arg.start * sizeof[Token], arg.size, &cache.tokens, e.expression)
     cache.ready = true
 }
@@ -253,6 +284,8 @@ fn expand_substitute(p handle[Pp], e handle[Expand], m handle[Macro], data handl
             va handle[ArgCache] = handle_from_addr(caches + va_index * sizeof[ArgCache])
             try expand_cached(p, e, data, vec_get[Arg](args, va_index), va)
             content Vec[Token] = {}
+            expand_scratch[Token](&content)
+            defer { vec_free[Token](&content) }
             if va.tokens.n != 0 && stop > args_start {
                 part Vec[Token] = {}
                 part.p = body.p + args_start * sizeof[Token]
@@ -314,8 +347,22 @@ fn expand_substitute(p handle[Pp], e handle[Expand], m handle[Macro], data handl
 
 fn expand_replacement(p handle[Pp], e handle[Expand], m handle[Macro], data handle[Vec[Token]],
     args handle[Vec[Arg]], call Token, hidden u32, omitted bool) void fails {
-    caches addr = if m.params.n != 0 { heap_alloc_zeroed(m.params.n * sizeof[ArgCache]) } else { null }
+    caches addr = null
+    if m.params.n != 0 {
+        size usize = m.params.n * sizeof[ArgCache]
+        caches = heap_alloc_plain(size)
+        mem_set(caches, 0, size)
+    }
+    defer {
+        for i usize in 0..m.params.n {
+            cache handle[ArgCache] = handle_from_addr(caches + i * sizeof[ArgCache])
+            vec_free[Token](&cache.tokens)
+        }
+        heap_free(caches)
+    }
     out Vec[Token] = {}
+    expand_scratch[Token](&out)
+    defer { vec_free[Token](&out) }
     try expand_substitute(p, e, m, data, args, caches, &m.body, &out, call, omitted)
     used usize = 0
     for j usize in 0..out.n {
@@ -327,7 +374,8 @@ fn expand_replacement(p handle[Pp], e handle[Expand], m handle[Macro], data hand
             used += 1
         }
     }
-    expand_span(e, out.p, used)
+    expand_span(e, out.p, used, true)
+    out.p = null
 }
 
 fn expand_next(p handle[Pp], e handle[Expand]) Token fails {
@@ -348,18 +396,24 @@ fn expand_next(p handle[Pp], e handle[Expand]) Token fails {
         hidden u32 = t.hide
         omitted bool = false
         call Token = t
+        defer { vec_free[Arg](&args); vec_free[Token](&data) }
         if m.function {
             gap Vec[Token] = {}
+            defer { vec_free[Token](&gap) }
             opening Token = try expand_raw(p, e)
+            if opening.kind == TK_NL { expand_scratch[Token](&gap) }
             while opening.kind == TK_NL {
                 vec_push[Token](&gap, opening)
                 opening = try expand_raw(p, e)
             }
             if opening.kind != TK_PUNCT || !cc_is(n, opening, c"(") {
                 expand_back(e, opening)
-                expand_span(e, gap.p, gap.n)
+                expand_span(e, gap.p, gap.n, true)
+                gap.p = null
                 return t
             }
+            expand_scratch[Token](&data)
+            expand_scratch[Arg](&args)
             close Token = try expand_arguments(p, e, m, &data, &args, t, &omitted)
             hidden = hide_merge(p, hidden, close.hide, true)
             call.loc = close.loc

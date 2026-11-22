@@ -278,6 +278,7 @@ fn main(argc i32, argv addr) i32 {
     region_switch(&region)
     defer { region_switch(null); region_dispose(&region) }
     pp Pp = {}
+    defer { expand_release(&pp.stream) }
     options Options = {}
     cli_main(&pp, &options, zext[usize](bitcast[u32](argc))) catch e {
         if e != CError { eprint(c"fcc: I/O error\n") }
