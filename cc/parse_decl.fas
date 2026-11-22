@@ -610,9 +610,10 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     packed bool = pa_has_attr(p, attrs, c"packed")
     alignment u32 = try pa_attr_align(p, attrs, 0)
     old handle[RecordDef] = ty_record(rec_id)
+    ms_layout bool = old.is_ms_layout || pa_has_attr(p, attrs, c"ms_struct")
     if old.is_complete {
         if zext[usize](old.fields_len) != fields.n || old.is_packed != packed ||
-            old.pragma_pack != pack || old.align_attr != alignment {
+            old.pragma_pack != pack || old.align_attr != alignment || old.is_ms_layout != ms_layout {
             try pa_error(p, loc, c"incompatible redefinition of record")
         }
         for i u32 in 0..old.fields_len {
@@ -623,7 +624,10 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
                 try pa_error(p, loc, c"incompatible redefinition of record member")
             }
         }
-    } else { ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack) }
+    } else {
+        old.is_ms_layout = ms_layout
+        ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack)
+    }
     if ty_kind(ty) == TYK_UNION && pa_has_attr(p, attrs, c"transparent_union") {
         old.transparent_union = true
     }
@@ -656,6 +660,9 @@ fn pa_tag_spec(p handle[Parser], t Token, spec handle[DeclSpec]) u32 fails {
             try pa_record_body(p, ty, t.loc, attrs)
             spec.anonymous_record = name == 0
         }
+    } else if kind != TYK_ENUM && pa_has_attr(p, attrs, c"ms_struct") {
+        rec handle[RecordDef] = ty_record(ty_node(ty).aux1)
+        if !rec.is_complete { rec.is_ms_layout = true }
     }
     return ty
 }

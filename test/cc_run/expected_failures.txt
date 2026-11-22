@@ -86,8 +86,6 @@ gcc/gcc/testsuite/gcc.dg/attr-ifunc-3.c link-error: /home/glonex/fas-experimenta
 gcc/gcc/testsuite/gcc.dg/attr-ifunc-4.c link-error: fas-ld: /tmp/fcc_1766405_1.o: undefined symbol magic
 gcc/gcc/testsuite/gcc.dg/attr-ifunc-5.c link-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/attr-ifunc-5.c:15:10: warning: conversion between void pointer and function pointer
 gcc/gcc/testsuite/gcc.dg/auto-type-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/bf-ms-layout-2.c exit-mismatch: fcc exit=0, clang exit=134
-gcc/gcc/testsuite/gcc.dg/bf-ms-layout-5.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/bitint-122.c fir-error: 40: expected a type, got store
 gcc/gcc/testsuite/gcc.dg/bitint-124.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/bitint-38.c fir-error: 65: expected a type, got store

@@ -44,6 +44,12 @@ fn layout_record(rec_id u32) void {
             f.bit_off = 0
 
             if f.is_bitfield {
+                if rec.is_ms_layout {
+                    // Clang reserves the full storage unit in an MS union
+                    // and takes alignment from its ordinary members.
+                    if f.bit_width != 0 { max_bits = max_u64(max_bits, f_sz * 8) }
+                    continue
+                }
                 f_al u64 = ty_align(f.ty)
                 f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
                 f_attr u64 = zext[u64](f.align_attr)
@@ -80,11 +86,39 @@ fn layout_record(rec_id u32) void {
 
     // Struct layout
     bit_off u64 = 0
+    ms_unit_bits u64 = 0
+    ms_used_bits u64 = 0
     for i u32 in 0..rec.fields_len {
         f handle[FieldDef] = ty_field(rec.fields_start + i)
         f_sz u64 = ty_size(f.ty)
 
-        if f.is_bitfield {
+        if f.is_bitfield && rec.is_ms_layout {
+            bw u64 = zext[u64](f.bit_width)
+            fa u64 = max_u64(f_sz, zext[u64](f.align_attr))
+            if bw == 0 {
+                // Natural alignment applies only after a nonzero bit-field.
+                // Neither it nor an explicit alignment is capped by packing.
+                zero_align u64 = if ms_unit_bits != 0 { fa } else { zext[u64](f.align_attr) }
+                bit_off = align_up_u64(bit_off, zero_align * 8)
+                rec_align = max_u64(rec_align, zero_align)
+                f.bit_off = bit_off
+                ms_unit_bits = 0
+            } else {
+                if pp != 0 && pp < fa { fa = pp }
+                unit u64 = f_sz * 8
+                // Equal-size consecutive fields can share this storage unit.
+                // The full unit is reserved even when some of its bits are unused.
+                if unit != ms_unit_bits || ms_used_bits + bw > unit {
+                    bit_off = align_up_u64(bit_off, fa * 8) + unit
+                    ms_unit_bits = unit
+                    ms_used_bits = 0
+                }
+                f.bit_off = bit_off - unit + ms_used_bits
+                ms_used_bits += bw
+                rec_align = max_u64(rec_align, fa)
+            }
+            f.byte_off = f.bit_off / 8
+        } else if f.is_bitfield {
             f_al u64 = ty_align(f.ty)
             f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
             f_attr u64 = zext[u64](f.align_attr)
@@ -126,6 +160,7 @@ fn layout_record(rec_id u32) void {
             bit_off += bw
             if f.name_id != 0 && fa > rec_align { rec_align = fa }
         } else {
+            ms_unit_bits = 0
             fa u64 = layout_member_align(rec, f)
             bit_off = align_up_u64(bit_off, fa * 8)
             f.bit_off = bit_off
