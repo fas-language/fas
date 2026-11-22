@@ -620,7 +620,9 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             }
             base handle[TypeNode] = ty_node(ty_unqual(ft))
             flex bool = base.kind == TYK_ARRAY && base.aux1 == ARR_INCOMPLETE
-            if (!se_complete(ft) && !flex) || se_vla(ft) { try pa_error(p, t.loc, c"member has incomplete or variable type") }
+            if (!se_complete(ft) && !flex) || se_variably_modified(ft) {
+                try pa_error(p, t.loc, c"member has incomplete or variably modified type")
+            }
             try pa_bind_member(p, &seen, d.name, ft, anon, if d.name != 0 { d.loc } else { t.loc })
             f handle[FieldDef] = vec_add[FieldDef](&fields)
             f.name_id = d.name
