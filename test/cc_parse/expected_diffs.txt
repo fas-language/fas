@@ -19,3 +19,4 @@ unexpected-reject compile-only/llvm/clang/test/C/C2y/n3260.c Exercises the C2Y t
 unexpected-reject compile-only/llvm/clang/test/Sema/c23-fixed-underlying-enum.c Exercises fixed-underlying enums with a C2Y _Generic type-name controlling operand
 unexpected-reject headers/afl/t1ha0_ia32aes_b.h AFL only includes x86intrin.h for GCC >= 4.4 or when __clang__ is defined. Clang with -U__clang__ reproduces the undeclared __m128i error.
 unexpected-reject compile-only/llvm/clang/test/Lexer/rdar-8914293.c GCC and Clang warn about quotes left unterminated in unused macro replacement lists. FCC treats unterminated literals as errors.
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/pr103207.c The case label multiplies two signed ints past INT_MAX. FCC diagnoses signed overflow in constant expressions as an error. GCC and Clang warn and continue.
