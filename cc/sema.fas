@@ -187,6 +187,10 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
     }
     if pa_is_gnu(p) && ty_is_vector(dest) && ty_is_vector(from) && ty_size(dest) == ty_size(from) &&
         ty_is_integer(ty_node(ty_unqual(dest)).elem) && ty_is_integer(ty_node(ty_unqual(from)).elem) { return }
+    // GCC permits a vector comparison mask to convert directly back to the
+    // operand vector. A standalone integer vector does not get this conversion.
+    if pa_is_gnu(p) && ty_is_vector(dest) && src.kind == ND_BINARY && src.operand_ty != TY_INVALID &&
+        ty_compatible(ty_unqual(dest), ty_unqual(src.operand_ty)) { return }
     if ty_is_bool(dest) && (ty_is_ptr(from) || ty_is_nullptr(from)) { return }
     try pa_error(p, src.loc, c"incompatible types in assignment or initialization")
 }

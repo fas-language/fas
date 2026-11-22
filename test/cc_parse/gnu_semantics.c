@@ -14,6 +14,7 @@ static_assert(__builtin_types_compatible_p(typeof(__builtin_strncmp(text, "a", 1
 typedef float floats __attribute__((vector_size(16)));
 typedef int masks __attribute__((vector_size(16)));
 masks compare(floats a, floats b) { return a < b; }
+floats comparison_as_floats(floats a, floats b) { return a < b; }
 
 int wide_cases(_BitInt(129) v) {
     switch (v) {

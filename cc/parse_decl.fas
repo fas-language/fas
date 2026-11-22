@@ -110,6 +110,9 @@ fn pa_attributes(p handle[Parser]) handle[Attr] fails {
                 try pa_collect(p, &a.args, c")")
                 try pa_expect(p, c")")
                 if bracket && a.ns == 0 { try pa_check_attr_args(p, a) }
+                if a.args.n != 0 && pa_attr_name(p, a, c"nonstring") {
+                    try pa_error(p, a.loc, c"nonstring attribute takes no arguments")
+                }
             }
             if tail == null { head = a } else { tail.next = a }
             tail = a

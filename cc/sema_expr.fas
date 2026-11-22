@@ -341,6 +341,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         if compare {
             v handle[TypeNode] = ty_node(ty_unqual(vec_ty))
             elem u32 = v.elem
+            n.operand_ty = vec_ty
             // A floating-point comparison produces signed integer mask lanes.
             if ty_is_real_float(elem) {
                 size u64 = ty_size(elem)
