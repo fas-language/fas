@@ -224,6 +224,9 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if bytes_starts_with(name, bytes_c(c"__builtin_matrix_")) {
         try pa_error(p, t.loc, c"matrix builtins require the Clang matrix types extension")
     }
+    if bytes_eq_c(name, c"__builtin_tgmath") {
+        try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
+    }
     bit_arity u32 = se_stdc_bit_arity(name)
     if bit_arity != 0 {
         try se_check_stdc_bit(p, t, args, count, bit_arity)
