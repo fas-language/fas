@@ -280,7 +280,18 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
             f.system = true
             return drop
         }
-        if cc_is(n, command, c"dependency") || cc_is(n, command, c"system_header") { return drop }
+        if cc_is(n, command, c"dependency") {
+            rest Vec[Token] = {}
+            rest.p = args.p + 2 * sizeof[Token]
+            rest.n = args.n - 2
+            h Header = {}
+            try pp_header(p, &rest, loc, &h)
+            if pp_find(p, h.name, h.quote, false).file == null {
+                try cc_error(n, loc, c"pragma dependency file not found")
+            }
+            return drop
+        }
+        if cc_is(n, command, c"system_header") { return drop }
     }
     push bool = cc_is(n, first, c"push_macro")
     if push || cc_is(n, first, c"pop_macro") {
