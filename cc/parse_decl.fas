@@ -169,7 +169,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     } else if bytes_eq_c(name, c"unavailable") {
         max = 1
         string_first = true
-    } else if feature_in(c" alloc_align assume cleanup regparm ", name) {
+    } else if feature_in(c" alloc_align assume cleanup enum_extensibility regparm ", name) {
         min = 1
         max = 1
     } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
