@@ -182,6 +182,11 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
     }
     if prior != null && prior.linkage == 1 && s.linkage == 2 &&
         (s.storage == SC_EXTERN || ty_is_func(s.ty)) { s.linkage = 1 }
+    if prior != null && ty_is_func(prior.ty) && ty_is_func(s.ty) &&
+        (ty_node(ty_unqual(prior.ty)).flags & TYF_MS_ABI) != 0 &&
+        !pa_has_attr(p, s.attrs, c"sysv_abi") && !pa_has_attr(p, s.attrs, c"cdecl") {
+        s.ty = ty_func_ms_abi(s.ty)
+    }
     // An earlier block-scope extern may have left no visible file-scope
     // declaration, but it still established the name's external linkage.
     if s.linkage == 1 && p.scope == p.file_scope && map_has(&p.external, s.name) {

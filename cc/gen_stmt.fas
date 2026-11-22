@@ -1069,6 +1069,9 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
 // ---------- Function Definition Emission ----------
 
 fn gen_function(node handle[Ast]) void fails {
+    if (ty_node(ty_unqual(node.decl.ty)).flags & TYF_MS_ABI) != 0 {
+        try pa_error(gc.p, node.loc, c"Microsoft x64 calling convention is unsupported in code generation")
+    }
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)

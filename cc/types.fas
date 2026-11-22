@@ -85,6 +85,7 @@ const Q_TRANSPARENT_UNION u32 = 64
 
 const TYF_UNSIGNED u32 = 1
 const TYF_VARIADIC u32 = 2
+const TYF_MS_ABI u32 = 4
 
 // Array sub-kinds (stored in TypeNode.sub)
 const ARR_FIXED u32      = 0
@@ -498,21 +499,38 @@ fn ty_array_unqual_elem(tid u32) u32 {
 
 // Function type constructor. C23: empty parameter list () means (void).
 fn ty_func(ret u32, params addr, n_params u32, is_variadic bool) u32 {
-    f u32 = if is_variadic { TYF_VARIADIC } else { 0 }
+    return ty_func_flags(ret, params, n_params, if is_variadic { TYF_VARIADIC } else { 0 })
+}
+
+fn ty_func_flags(ret u32, params addr, n_params u32, flags u32) u32 {
     start u32 = trunc[u32](tc.fn_params.n)
     for i u32 in 0..n_params {
         p u32 = params[u32, zext[usize](i)]
         vec_push(&tc.fn_params, p)
     }
+    id u32 = tc_intern_func(ret, start, n_params, flags)
+    if ty_node(id).aux1 != start { tc.fn_params.n = zext[usize](start) }
+    return id
+}
+
+// Calling convention is part of the function type. Reuse its interned
+// parameter slice when applying a convention to an existing prototype.
+fn ty_func_ms_abi(ty u32) u32 {
+    f handle[TypeNode] = ty_node(ty_unqual(ty))
+    return ty_qual_attr(tc_intern_func(f.elem, f.aux1, f.aux2, f.flags | TYF_MS_ABI),
+        ty_quals(ty), ty_align_attr(ty))
+}
+
+fn tc_intern_func(ret u32, start u32, n_params u32, flags u32) u32 {
     k FnKey = {}
     k.ret = ret
-    k.flags = f
+    k.flags = flags
     k.params_start = start
     k.params_len = n_params
     existing u32 = table_get(&tc.intern_fn, &k) catch {
         n TypeNode = {}
         n.kind = TYK_FUNC
-        n.flags = f
+        n.flags = flags
         n.elem = ret
         n.aux1 = start
         n.aux2 = n_params
@@ -520,8 +538,6 @@ fn ty_func(ret u32, params addr, n_params u32, is_variadic bool) u32 {
         _ bool = table_put(&tc.intern_fn, &k, id)
         return id
     }
-    // Deduplicated: roll back the temporary param slice
-    tc.fn_params.n = zext[usize](start)
     return existing
 }
 
@@ -946,7 +962,7 @@ fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool
         return true
     }
     if na.kind == TYK_FUNC {
-        if (na.flags & TYF_VARIADIC) != (nb.flags & TYF_VARIADIC) { return false }
+        if na.flags != nb.flags { return false }
         if na.aux2 != nb.aux2 { return false }
         if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
         for i u32 in 0..na.aux2 {
@@ -1080,7 +1096,7 @@ fn ty_composite_impl(a u32, b u32, path handle[TyComposite]) u32 {
             else { param = ty_composite_impl(pa, pb, path) }
             vec_push(&tmp, param)
         }
-        res u32 = ty_func(cret, tmp.p, n_p, (na.flags & TYF_VARIADIC) != 0)
+        res u32 = ty_func_flags(cret, tmp.p, n_p, na.flags)
         return ty_qual_attr(res, q, al)
     }
     if na.kind == TYK_STRUCT || na.kind == TYK_UNION {

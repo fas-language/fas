@@ -59,6 +59,9 @@ fn test_interning_and_quals() void {
     f1 u32 = ty_func(TY_VOID, &ps[0], 2, false)
     f2 u32 = ty_func(TY_VOID, &ps[0], 2, false)
     assert(f1 == f2)
+    ms u32 = ty_func_ms_abi(f1)
+    assert(ms == ty_func_ms_abi(f2))
+    assert(!ty_compatible(f1, ms))
 
     // _BitInt, _Complex, vector interning
     assert(ty_bitint(17, false) == ty_bitint(17, false))

@@ -156,7 +156,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     min u32 = 0
     max u32 = 0
     string_first bool = false
-    if feature_in(c" always_inline fastcall interrupt leaf naked no_stack_protector noinline nonstring noreturn returns_twice uninitialized unused ", name) {
+    if feature_in(c" always_inline cdecl fastcall interrupt leaf ms_abi naked no_stack_protector noinline nonstring noreturn returns_twice sysv_abi uninitialized unused ", name) {
         max = 0
     } else if feature_in(c" alias cfi_salt error function_return ifunc section target tls_model visibility warning zero_call_used_regs ", name) {
         min = 1
@@ -635,6 +635,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
                 aligned = try pa_attr_align(p, attr, aligned)
             }
             ft u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, attr), true)
+            ft = try pa_callconv(p, ft, attr)
             if bit && (!ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0)) {
                 try pa_error(p, t.loc, c"invalid bit-field width or type")
             }
@@ -1193,8 +1194,29 @@ fn pa_type_name(p handle[Parser]) u32 fails {
 // describes the declared entity and therefore applies after the declarator.
 fn pa_apply_attrs(p handle[Parser], op handle[DeclOp], base u32, a handle[Attr], alignment u32) u32 fails {
     ty u32 = try pa_apply(p, op, try pa_type_attrs(p, base, a), false)
+    ty = try pa_callconv(p, ty, a)
     al u32 = try pa_attr_align(p, a, alignment)
     return if al != 0 { ty_aligned(ty, al) } else { ty }
+}
+
+fn pa_callconv(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
+    if !pa_has_attr(p, a, c"ms_abi") { return ty }
+    if pa_has_attr(p, a, c"sysv_abi") || pa_has_attr(p, a, c"cdecl") {
+        try pa_error(p, a.loc, c"conflicting calling convention attributes")
+    }
+    return pa_ms_abi_type(ty)
+}
+
+fn pa_ms_abi_type(ty u32) u32 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_FUNC { return ty_func_ms_abi(ty) }
+    if n.kind != TYK_PTR && n.kind != TYK_ARRAY { return ty }
+    shape TypeNode = {}
+    copy_into(&shape, n)
+    elem u32 = pa_ms_abi_type(shape.elem)
+    if elem == shape.elem { return ty }
+    changed u32 = if shape.kind == TYK_PTR { ty_ptr(elem) } else { ty_array_replace_elem(&shape, elem) }
+    return ty_qual_attr(changed, ty_quals(ty), ty_align_attr(ty))
 }
 
 fn pa_builtin_types(p handle[Parser]) void fails {

@@ -1267,6 +1267,9 @@ fn gen_call(n handle[Ast]) u32 fails {
     is_var bool = false
     pstart usize = 0
     if fn_node.kind == TYK_FUNC {
+        if (fn_node.flags & TYF_MS_ABI) != 0 {
+            try pa_error(gc.p, n.loc, c"Microsoft x64 calling convention is unsupported in code generation")
+        }
         ret_ty = fn_node.elem
         n_fixed = fn_node.aux2
         is_var = (fn_node.flags & TYF_VARIADIC) != 0
