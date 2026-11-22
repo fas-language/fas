@@ -16,6 +16,15 @@ fn max_u64(a u64, b u64) u64 {
     return if a > b { a } else { b }
 }
 
+// The member's effective alignment includes packing on the member and
+// on its containing record, as well as any explicit alignment.
+fn layout_member_align(rec handle[RecordDef], field handle[FieldDef]) u64 {
+    packed bool = rec.is_packed || field.is_packed || ty_has_packed_attr(field.ty)
+    al u64 = max_u64(if packed { 1 } else { ty_align(field.ty) }, zext[u64](field.align_attr))
+    cap u64 = zext[u64](rec.pragma_pack)
+    return if cap != 0 && al > cap { cap } else { al }
+}
+
 // Compute and cache the layout of a record (struct or union).
 fn layout_record(rec_id u32) void {
     rec handle[RecordDef] = ty_record(rec_id)
@@ -30,14 +39,20 @@ fn layout_record(rec_id u32) void {
         for i u32 in 0..rec.fields_len {
             f handle[FieldDef] = ty_field(rec.fields_start + i)
             f_sz u64 = ty_size(f.ty)
-            f_al u64 = ty_align(f.ty)
-            f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
-            f_attr u64 = zext[u64](f.align_attr)
 
             f.byte_off = 0
             f.bit_off = 0
 
             if f.is_bitfield {
+                if rec.is_ms_layout {
+                    // Clang reserves the full storage unit in an MS union
+                    // and takes alignment from its ordinary members.
+                    if f.bit_width != 0 { max_bits = max_u64(max_bits, f_sz * 8) }
+                    continue
+                }
+                f_al u64 = ty_align(f.ty)
+                f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
+                f_attr u64 = zext[u64](f.align_attr)
                 if f.bit_width == 0 {
                     // Zero-width bitfield in a union contributes nothing to size or align
                     continue
@@ -45,14 +60,16 @@ fn layout_record(rec_id u32) void {
                 fa u64 = if f_packed && pp == 0 { 1 } else { f_al }
                 if f_attr > fa { fa = f_attr }
                 if pp > 0 && fa > pp { fa = pp }
-                if fa > rec_align { rec_align = fa }
+                // An unnamed bit-field occupies bits without raising the
+                // record's alignment, even with an explicit field alignment.
+                if f.name_id != 0 && fa > rec_align { rec_align = fa }
                 bw u64 = zext[u64](f.bit_width)
                 if bw > max_bits { max_bits = bw }
             } else {
-                fa u64 = if f_packed { 1 } else { f_al }
-                if f_attr > fa { fa = f_attr }
-                if pp > 0 && fa > pp { fa = pp }
+                fa u64 = layout_member_align(rec, f)
                 if fa > rec_align { rec_align = fa }
+                member handle[TypeNode] = ty_node(ty_unqual(f.ty))
+                if member.kind == TYK_ARRAY && member.aux1 == ARR_INCOMPLETE { rec.has_flex_array = true }
                 fbits u64 = f_sz * 8
                 if fbits > max_bits { max_bits = fbits }
             }
@@ -69,14 +86,42 @@ fn layout_record(rec_id u32) void {
 
     // Struct layout
     bit_off u64 = 0
+    ms_unit_bits u64 = 0
+    ms_used_bits u64 = 0
     for i u32 in 0..rec.fields_len {
         f handle[FieldDef] = ty_field(rec.fields_start + i)
         f_sz u64 = ty_size(f.ty)
-        f_al u64 = ty_align(f.ty)
-        f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
-        f_attr u64 = zext[u64](f.align_attr)
 
-        if f.is_bitfield {
+        if f.is_bitfield && rec.is_ms_layout {
+            bw u64 = zext[u64](f.bit_width)
+            fa u64 = max_u64(f_sz, zext[u64](f.align_attr))
+            if bw == 0 {
+                // Natural alignment applies only after a nonzero bit-field.
+                // Neither it nor an explicit alignment is capped by packing.
+                zero_align u64 = if ms_unit_bits != 0 { fa } else { zext[u64](f.align_attr) }
+                bit_off = align_up_u64(bit_off, zero_align * 8)
+                rec_align = max_u64(rec_align, zero_align)
+                f.bit_off = bit_off
+                ms_unit_bits = 0
+            } else {
+                if pp != 0 && pp < fa { fa = pp }
+                unit u64 = f_sz * 8
+                // Equal-size consecutive fields can share this storage unit.
+                // The full unit is reserved even when some of its bits are unused.
+                if unit != ms_unit_bits || ms_used_bits + bw > unit {
+                    bit_off = align_up_u64(bit_off, fa * 8) + unit
+                    ms_unit_bits = unit
+                    ms_used_bits = 0
+                }
+                f.bit_off = bit_off - unit + ms_used_bits
+                ms_used_bits += bw
+                rec_align = max_u64(rec_align, fa)
+            }
+            f.byte_off = f.bit_off / 8
+        } else if f.is_bitfield {
+            f_al u64 = ty_align(f.ty)
+            f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
+            f_attr u64 = zext[u64](f.align_attr)
             if f.bit_width == 0 {
                 // Zero-width bitfield aligns bit_off to the type's natural alignment
                 // (or explicit aligned attr if larger), even under packed / #pragma pack,
@@ -113,12 +158,10 @@ fn layout_record(rec_id u32) void {
             f.bit_off = bit_off
             f.byte_off = bit_off / 8
             bit_off += bw
-            if fa > rec_align { rec_align = fa }
+            if f.name_id != 0 && fa > rec_align { rec_align = fa }
         } else {
-            fa u64 = if f_packed { 1 } else { f_al }
-            if f_attr > fa { fa = f_attr }
-            if pp > 0 && fa > pp { fa = pp }
-
+            ms_unit_bits = 0
+            fa u64 = layout_member_align(rec, f)
             bit_off = align_up_u64(bit_off, fa * 8)
             f.bit_off = bit_off
             f.byte_off = bit_off / 8
@@ -151,13 +194,13 @@ fn ty_size(tid u32) u64 {
     k u8 = n.kind
     if k == TYK_VOID { return 0 }
     if k == TYK_BOOL || k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR { return 1 }
-    if k == TYK_SHORT || k == TYK_USHORT || k == TYK_FLOAT16 { return 2 }
+    if k == TYK_SHORT || k == TYK_USHORT || k == TYK_FLOAT16 || k == TYK_BFLOAT16 { return 2 }
     if k == TYK_INT || k == TYK_UINT || k == TYK_FLOAT { return 4 }
     if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG ||
        k == TYK_DOUBLE || k == TYK_PTR || k == TYK_NULLPTR {
         return 8
     }
-    if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE { return 16 }
+    if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE || k == TYK_FLOAT128 { return 16 }
     if k == TYK_BITINT {
         bits u64 = zext[u64](n.aux1)
         if bits <= 8 { return 1 }
@@ -190,20 +233,21 @@ fn ty_size(tid u32) u64 {
 
 fn ty_align(tid u32) u64 {
     al_attr u64 = zext[u64](ty_align_attr(tid))
+    if ty_has_typedef_alignment(tid) { return al_attr }
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
     base u64 = 1
     if k == TYK_VOID || k == TYK_BOOL || k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR {
         base = 1
-    } else if k == TYK_SHORT || k == TYK_USHORT || k == TYK_FLOAT16 {
+    } else if k == TYK_SHORT || k == TYK_USHORT || k == TYK_FLOAT16 || k == TYK_BFLOAT16 {
         base = 2
     } else if k == TYK_INT || k == TYK_UINT || k == TYK_FLOAT {
         base = 4
     } else if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG ||
               k == TYK_DOUBLE || k == TYK_PTR || k == TYK_NULLPTR {
         base = 8
-    } else if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE {
+    } else if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE || k == TYK_FLOAT128 {
         base = 16
     } else if k == TYK_BITINT {
         bits u64 = zext[u64](n.aux1)
@@ -235,6 +279,7 @@ struct FieldLookup {
     field_idx u32
     ty u32
     bit_width u32
+    record_id u32
     byte_off u64
     bit_off u64
 }
@@ -250,6 +295,7 @@ fn layout_find_field_rec(rec_id u32, name_id u32, base_bit_off u64, out handle[F
             out.found = true
             out.is_bitfield = f.is_bitfield
             out.field_idx = idx
+            out.record_id = rec_id
             out.ty = f.ty
             out.bit_width = f.bit_width
             out.byte_off = total_bits / 8

@@ -127,6 +127,14 @@ fn abi_classify_agg_rec(tid u32, base_off u64, eb addr, n_eb u64) bool {
         eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
         return true
     }
+    if k == TYK_FLOAT128 {
+        if base_off % 16 != 0 { return false }
+        i u64 = base_off / 8
+        if i + 1 >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
+        eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_SSEUP)
+        return true
+    }
     if k == TYK_LDOUBLE {
         if base_off % 16 != 0 { return false }
         i u64 = base_off / 8
@@ -273,6 +281,14 @@ fn abi_classify(tid u32, is_ret bool, out handle[AbiClass]) void {
         out.mode = PASS_REGS
         out.n_eb = 1
         out.eb0 = ABI_SSE
+        out.n_sse = 1
+        return
+    }
+    if k == TYK_FLOAT128 {
+        out.mode = PASS_REGS
+        out.n_eb = 2
+        out.eb0 = ABI_SSE
+        out.eb1 = ABI_SSEUP
         out.n_sse = 1
         return
     }
@@ -494,6 +510,7 @@ fn abi_emit_fir_leaf(b handle[Buf], tid u32) void {
     if k == TYK_FLOAT { buf_str(b, c"f32"); return }
     if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
     if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_FLOAT128 { buf_str(b, c"<2 x i64>"); return }
     if k == TYK_PTR || k == TYK_NULLPTR { buf_str(b, c"ptr"); return }
     if k == TYK_COMPLEX {
         buf_str(b, c"complex ")
@@ -551,6 +568,12 @@ fn abi_emit_agg_field(b handle[Buf], tid u32, off u64, st handle[AggEmitState]) 
             buf_dec_u64(b, off + l * 8)
             buf_str(b, c": i64")
         }
+        return
+    }
+    if k == TYK_COMPLEX && !ty_is_real_float(n.elem) {
+        esz u64 = ty_size(n.elem)
+        abi_emit_agg_field(b, n.elem, off, st)
+        abi_emit_agg_field(b, n.elem, off + esz, st)
         return
     }
     if !st.first { buf_str(b, c", ") }
@@ -656,6 +679,7 @@ fn abi_emit_fir_abi_ty(b handle[Buf], tid u32) void {
     if k == TYK_FLOAT { buf_str(b, c"f32"); return }
     if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
     if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_FLOAT128 { buf_str(b, c"<2 x i64>"); return }
     if k == TYK_PTR || k == TYK_NULLPTR { buf_str(b, c"ptr"); return }
     if k == TYK_COMPLEX {
         ek u8 = ty_kind(n.elem)

@@ -1,0 +1,1287 @@
+// C declarators are recorded from the identifier outward. Applying their
+// operators in reverse gives the same type for both named and abstract forms.
+struct DeclSpec {
+    ty u32
+    quals u32
+    storage u8
+    loc u32
+    attrs handle[Attr]
+    alignment u32
+    thread_local bool
+    is_inline bool
+    is_noreturn bool
+    inferred bool
+    auto_seen bool
+    member bool
+    anonymous_record bool
+    vm_operand handle[Ast] // evaluated operand of a variably modified typeof
+}
+
+const DO_PTR u8 = 1
+const DO_ARRAY u8 = 2
+const DO_FUNC u8 = 3
+
+struct Declarator {
+    name u32
+    loc u32
+    first handle[DeclOp]
+    last handle[DeclOp]
+    attrs handle[Attr]
+}
+
+struct DeclOp {
+    kind u8
+    loc u32
+    quals u32
+    bound handle[Ast]
+    star bool
+    variadic bool
+    params handle[Param]
+    proto handle[Scope]
+    next handle[DeclOp]
+}
+
+struct Param {
+    name u32
+    loc u32
+    ty u32
+    declared_ty u32 // preserves outer VLA bounds before parameter adjustment
+    decl handle[Symbol]
+    next handle[Param]
+}
+
+fn pa_join_attrs(a handle[Attr], b handle[Attr]) handle[Attr] {
+    if a == null { return b }
+    tail handle[Attr] = a
+    while tail.next != null { tail = tail.next }
+    tail.next = b
+    return a
+}
+
+fn pa_ident(p handle[Parser], t Token) u32 fails {
+    if t.kind != TK_IDENT || pa_keyword(p, t) { try pa_error(p, t.loc, c"expected an identifier") }
+    return cc_ident(p.names, t)
+}
+
+fn pa_open_attr(p handle[Parser]) bool fails {
+    return (try pa_at(p, c"[")) && (try pa_at_second(p, c"["))
+}
+
+fn pa_delimiter(p handle[Parser], t Token) addr {
+    if pa_is(p, t, c"(") { return c")" }
+    if pa_is(p, t, c"[") { return c"]" }
+    if pa_is(p, t, c"{") { return c"}" }
+    return null
+}
+
+fn pa_collect(p handle[Parser], out handle[Vec[Token]], end addr) void fails {
+    while !(try pa_at(p, end)) {
+        t Token = try pa_take(p)
+        if t.kind == TK_EOF { try pa_error(p, t.loc, c"unterminated balanced token sequence") }
+        if out != null { vec_push[Token](out, t) }
+        close addr = pa_delimiter(p, t)
+        if close != null {
+            try pa_collect(p, out, close)
+            t = try pa_expect(p, close)
+            if out != null { vec_push[Token](out, t) }
+        }
+    }
+}
+
+fn pa_attributes(p handle[Parser]) handle[Attr] fails {
+    head handle[Attr] = null
+    tail handle[Attr] = null
+    while true {
+        bracket bool = try pa_open_attr(p)
+        if bracket { try pa_take(p); try pa_take(p) }
+        else if (try pa_accept(p, c"__attribute__")) || (try pa_accept(p, c"__attribute")) {
+            try pa_expect(p, c"(")
+            try pa_expect(p, c"(")
+        } else { return head }
+        end addr = if bracket { c"]" } else { c")" }
+        while !(try pa_at(p, end)) {
+            if try pa_accept(p, c",") { continue }
+            t Token = try pa_take(p)
+            if t.kind != TK_IDENT { try pa_error(p, t.loc, c"expected attribute name") }
+            a handle[Attr] = pa_alloc[Attr]()
+            a.name = cc_ident(p.names, t)
+            a.loc = t.loc
+            if bracket && (try pa_accept(p, c"::")) {
+                a.ns = a.name
+                member Token = try pa_take(p)
+                if member.kind != TK_IDENT { try pa_error(p, member.loc, c"expected attribute name after namespace") }
+                a.name = cc_ident(p.names, member)
+            }
+            operands bool = try pa_accept(p, c"(")
+            if operands {
+                try pa_collect(p, &a.args, c")")
+                try pa_expect(p, c")")
+                if bracket && a.ns == 0 { try pa_check_attr_args(p, a) }
+            }
+            if !bracket || a.ns != 0 { try pa_check_gnu_attr_args(p, a) }
+            if tail == null { head = a } else { tail.next = a }
+            tail = a
+            if !(try pa_accept(p, c",")) { break }
+        }
+        try pa_expect(p, end)
+        try pa_expect(p, end)
+    }
+}
+
+fn pa_attr_name(p handle[Parser], a handle[Attr], name addr) bool {
+    if a.ns != 0 && !bytes_eq_c(feature_attr(cc_name(p.names, a.ns)), c"gnu") { return false }
+    return bytes_eq_c(feature_attr(cc_name(p.names, a.name)), name)
+}
+
+fn pa_check_attr_args(p handle[Parser], a handle[Attr]) void fails {
+    if pa_attr_name(p, a, c"deprecated") || pa_attr_name(p, a, c"nodiscard") {
+        if a.args.n == 0 { try pa_error(p, a.loc, c"attribute argument must be a string literal") }
+        for i usize in 0..a.args.n {
+            if a.args.p[Token, i].kind != TK_STR {
+                try pa_error(p, a.loc, c"attribute argument must be a string literal")
+            }
+        }
+    } else if pa_attr_name(p, a, c"maybe_unused") || pa_attr_name(p, a, c"fallthrough") ||
+        pa_attr_name(p, a, c"noreturn") || pa_attr_name(p, a, c"_Noreturn") {
+        try pa_error(p, a.loc, c"attribute does not take arguments")
+    }
+}
+
+// GNU attributes with known argument contracts can be checked without
+// interpreting tokens for unknown (and possibly target-specific) attributes.
+fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
+    if a.ns != 0 && !bytes_eq_c(feature_attr(cc_name(p.names, a.ns)), c"gnu") { return }
+    name Bytes = feature_attr(cc_name(p.names, a.name))
+    min u32 = 0
+    max u32 = 0
+    string_first bool = false
+    if feature_in(c" always_inline fastcall leaf naked no_stack_protector noinline nonstring noreturn returns_twice uninitialized unused ", name) {
+        max = 0
+    } else if feature_in(c" alias cfi_salt error function_return section target tls_model visibility warning zero_call_used_regs ", name) {
+        min = 1
+        max = 1
+        string_first = true
+    } else if bytes_eq_c(name, c"annotate") {
+        min = 1
+        max = 0xffffffff
+        string_first = true
+    } else if feature_in(c" alloc_align assume cleanup regparm ", name) {
+        min = 1
+        max = 1
+    } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
+        min = 1
+        max = 2
+    } else if feature_in(c" format pointer_with_type_tag ", name) {
+        min = 3
+        max = 3
+    } else { return }
+    count u32 = 0
+    depth u32 = 0
+    first_end usize = a.args.n
+    arg_empty bool = true
+    for i usize in 0..a.args.n {
+        t Token = a.args.p[Token, i]
+        if depth == 0 && pa_is(p, t, c",") {
+            if arg_empty { try pa_error(p, t.loc, c"empty attribute argument") }
+            if count == 0 { first_end = i }
+            count += 1
+            arg_empty = true
+            continue
+        }
+        if pa_delimiter(p, t) != null { depth += 1 }
+        else if pa_is(p, t, c")") || pa_is(p, t, c"]") || pa_is(p, t, c"}") { depth -= 1 }
+        arg_empty = false
+    }
+    if !arg_empty { count += 1 }
+    else if count != 0 { try pa_error(p, a.loc, c"empty attribute argument") }
+    if count < min || count > max { try pa_error(p, a.loc, c"wrong number of attribute arguments") }
+    if string_first {
+        start usize = 0
+        while start + 1 < first_end && pa_is(p, a.args.p[Token, start], c"(") &&
+            pa_is(p, a.args.p[Token, first_end - 1], c")") {
+            start += 1
+            first_end -= 1
+        }
+        if start == first_end { try pa_error(p, a.loc, c"attribute argument must be a string literal") }
+        for i usize in start..first_end {
+            if a.args.p[Token, i].kind != TK_STR {
+                try pa_error(p, a.args.p[Token, i].loc, c"attribute argument must be a string literal")
+            }
+        }
+    }
+}
+
+fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
+    if a.args.n == 0 { return fallback }
+    // The outer parser owns the source stream. The captured operand uses a
+    // bounded cursor with the same scope and the same expression semantics.
+    expr Parser = {}
+    expr.location = a.loc
+    expr.names = p.names
+    expr.pp = p.pp
+    expr.scope = p.scope
+    expr.function = p.function
+    expr.replay = &a.args
+    v u64 = try se_ice(p, try pa_expression(&expr, 3))
+    if (try pa_peek(&expr)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in attribute argument") }
+    if v > 0xffffffff { try pa_error(p, a.loc, c"attribute argument is out of range") }
+    return trunc[u32](v)
+}
+
+fn pa_alignment(p handle[Parser], loc u32, a u64) u32 fails {
+    if a > (1 << 28) || (a != 0 && (a & (a - 1)) != 0) {
+        try pa_error(p, loc, c"alignment must be a supported power of two")
+    }
+    return trunc[u32](a)
+}
+
+fn pa_attr_align(p handle[Parser], a handle[Attr], initial u32) u32 fails {
+    result u32 = initial
+    while a != null {
+        if pa_attr_name(p, a, c"aligned") {
+            n u32 = try pa_alignment(p, a.loc, zext[u64](try pa_attr_integer(p, a, 16)))
+            if n > result { result = n }
+        }
+        a = a.next
+    }
+    return result
+}
+
+fn pa_has_attr(p handle[Parser], a handle[Attr], name addr) bool {
+    while a != null {
+        if pa_attr_name(p, a, name) { return true }
+        a = a.next
+    }
+    return false
+}
+
+fn pa_mode_type(p handle[Parser], ty u32, a handle[Attr]) u32 {
+    mode Bytes = feature_attr(cc_spelling(p.names, a.args.p[Token]))
+    k u32 = ty
+    if bytes_eq_c(mode, c"QI") { k = TY_SCHAR }
+    else if bytes_eq_c(mode, c"HI") { k = TY_SHORT }
+    else if bytes_eq_c(mode, c"SI") { k = TY_INT }
+    else if bytes_eq_c(mode, c"DI") || bytes_eq_c(mode, c"word") { k = TY_LONG }
+    else if bytes_eq_c(mode, c"TI") { k = TY_INT128 }
+    if ty_is_unsigned(ty) { k = ty_make_unsigned(k) }
+    return ty_qual(k, ty_quals(ty))
+}
+
+fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
+    while a != null {
+        if pa_attr_name(p, a, c"vector_size") {
+            bytes u32 = try pa_attr_integer(p, a, 0)
+            size u64 = ty_size(ty)
+            if !ty_is_arith(ty) || size == 0 || bytes == 0 || zext[u64](bytes) % size != 0 {
+                try pa_error(p, a.loc, c"invalid vector_size attribute")
+            }
+            ty = ty_qual(ty_vector(ty, bytes), ty_quals(ty))
+        }
+        if pa_attr_name(p, a, c"mode") && a.args.n == 1 && ty_is_integer(ty) {
+            ty = pa_mode_type(p, ty, a)
+        }
+        if ty_kind(ty) == TYK_UNION && pa_attr_name(p, a, c"transparent_union") {
+            ty = ty_qual(ty, Q_TRANSPARENT_UNION)
+        }
+        a = a.next
+    }
+    return ty
+}
+
+fn pa_qual(p handle[Parser], t Token) u32 {
+    if pa_is(p, t, c"const") || pa_is(p, t, c"__const") || pa_is(p, t, c"__const__") { return Q_CONST }
+    if pa_is(p, t, c"volatile") || pa_is(p, t, c"__volatile") || pa_is(p, t, c"__volatile__") { return Q_VOLATILE }
+    if pa_is(p, t, c"restrict") || pa_is(p, t, c"__restrict") || pa_is(p, t, c"__restrict__") { return Q_RESTRICT }
+    if pa_is(p, t, c"_Atomic") { return Q_ATOMIC }
+    return 0
+}
+
+fn pa_storage(p handle[Parser], t Token) u8 {
+    if pa_is(p, t, c"typedef") { return SC_TYPEDEF }
+    if pa_is(p, t, c"extern") { return SC_EXTERN }
+    if pa_is(p, t, c"static") { return SC_STATIC }
+    if pa_is(p, t, c"auto") || pa_is(p, t, c"__auto_type") { return SC_AUTO }
+    if pa_is(p, t, c"register") { return SC_REGISTER }
+    if pa_is(p, t, c"constexpr") { return SC_CONSTEXPR }
+    return SC_NONE
+}
+
+fn pa_base(p handle[Parser], t Token) u32 {
+    if pa_is(p, t, c"void") { return TY_VOID }
+    if pa_is(p, t, c"bool") || pa_is(p, t, c"_Bool") { return TY_BOOL }
+    if pa_is(p, t, c"char") { return TY_CHAR }
+    if pa_is(p, t, c"int") { return TY_INT }
+    if pa_is(p, t, c"float") { return TY_FLOAT }
+    if pa_is(p, t, c"double") { return TY_DOUBLE }
+    if pa_is(p, t, c"_Float16") || pa_is(p, t, c"__fp16") { return TY_FLOAT16 }
+    if pa_is(p, t, c"__bf16") && pa_is_gnu(p) { return TY_BFLOAT16 }
+    if pa_is(p, t, c"__float128") { return TY_FLOAT128 }
+    if pa_is(p, t, c"__float80") { return TY_LDOUBLE }
+    if pa_is(p, t, c"__int128") { return TY_INT128 }
+    return TY_INVALID
+}
+
+fn pa_inline(p handle[Parser], t Token) bool {
+    return pa_is(p, t, c"inline") || pa_is(p, t, c"__inline") || pa_is(p, t, c"__inline__")
+}
+
+fn pa_signed(p handle[Parser], t Token) bool {
+    return pa_is(p, t, c"signed") || pa_is(p, t, c"__signed") || pa_is(p, t, c"__signed__")
+}
+
+fn pa_typeof_word(p handle[Parser], t Token) bool {
+    return pa_is(p, t, c"typeof") || pa_is(p, t, c"typeof_unqual") || pa_is(p, t, c"__typeof__") || pa_is(p, t, c"__typeof")
+}
+
+fn pa_align_word(p handle[Parser], t Token) bool {
+    return pa_is(p, t, c"alignas") || pa_is(p, t, c"_Alignas")
+}
+
+fn pa_assert_word(p handle[Parser], t Token) bool {
+    return pa_is(p, t, c"static_assert") || pa_is(p, t, c"_Static_assert")
+}
+
+fn pa_decl_word(p handle[Parser], t Token) bool {
+    if t.kind != TK_IDENT { return false }
+    return pa_qual(p, t) != 0 || pa_base(p, t) != TY_INVALID || pa_storage(p, t) != SC_NONE ||
+        pa_inline(p, t) || pa_signed(p, t) || pa_typeof_word(p, t) || pa_align_word(p, t) ||
+        pa_is(p, t, c"unsigned") || pa_is(p, t, c"short") || pa_is(p, t, c"long") ||
+        pa_is(p, t, c"_BitInt") || pa_is(p, t, c"_Complex") || (pa_is(p, t, c"__complex__") || pa_is(p, t, c"__complex")) ||
+        pa_is(p, t, c"struct") || pa_is(p, t, c"union") || pa_is(p, t, c"enum") ||
+        pa_is(p, t, c"_Thread_local") || pa_is(p, t, c"thread_local") || pa_is(p, t, c"__thread") ||
+        pa_is(p, t, c"_Noreturn") || pa_is(p, t, c"__attribute__") || pa_is(p, t, c"__attribute")
+}
+
+fn pa_keyword(p handle[Parser], t Token) bool {
+    if pa_decl_word(p, t) || pa_assert_word(p, t) { return true }
+    return pa_is(p, t, c"if") || pa_is(p, t, c"else") || pa_is(p, t, c"while") || pa_is(p, t, c"do") ||
+        pa_is(p, t, c"for") || pa_is(p, t, c"switch") || pa_is(p, t, c"case") || pa_is(p, t, c"default") ||
+        pa_is(p, t, c"goto") || pa_is(p, t, c"break") || pa_is(p, t, c"continue") || pa_is(p, t, c"return") ||
+        pa_is(p, t, c"sizeof") || pa_is(p, t, c"alignof") || pa_is(p, t, c"_Alignof") ||
+        pa_is(p, t, c"_Generic") || pa_is(p, t, c"nullptr") || pa_is(p, t, c"true") || pa_is(p, t, c"false")
+}
+
+fn pa_decl_start(p handle[Parser], t Token) bool {
+    return pa_decl_word(p, t) || pa_typename(p, t) || pa_assert_word(p, t)
+}
+
+fn pa_assert(p handle[Parser]) void fails {
+    t Token = try pa_take(p)
+    try pa_expect(p, c"(")
+    e handle[Ast] = try pa_expression(p, 3)
+    try se_require_ice(p, e)
+    message Bytes = bytes_c(c"static assertion failed")
+    if try pa_accept(p, c",") {
+        m Token = try pa_peek(p)
+        if m.kind != TK_STR { try pa_error(p, m.loc, c"expected static assertion message") }
+        try pa_strings(p)
+        message = cc_spelling(p.names, m)
+    }
+    try pa_expect(p, c")")
+    try pa_expect(p, c";")
+    if !se_truth(e) {
+        cc_diag(p.names, t.loc, c"error: static assertion failed: ", message)
+        fail CError
+    }
+}
+
+fn pa_tag(p handle[Parser], tag Token, kind u8, name u32, fixed u32, define bool) u32 fails {
+    // A bare forward declaration declares a new tag in the current scope.
+    local bool = define || (try pa_at(p, c";"))
+    ty u32 = TY_INVALID
+    if name != 0 { ty = pa_tag_lookup(p, name, local) }
+    if ty != TY_INVALID {
+        if ty_kind(ty) != kind { try pa_error(p, tag.loc, c"tag previously declared with a different kind") }
+        if kind == TYK_ENUM {
+            e handle[EnumDef] = ty_enum(ty_node(ty).aux1)
+            if fixed != TY_INVALID && (!e.has_fixed_underlying || !ty_compatible(e.underlying, fixed)) {
+                try pa_error(p, tag.loc, c"conflicting enum underlying type")
+            }
+        }
+        return ty
+    }
+    if kind == TYK_ENUM { ty = ty_enum_new(name, fixed != TY_INVALID, fixed) }
+    else { ty = ty_record_new(name, kind == TYK_UNION) }
+    if name != 0 {
+        s handle[Scope] = p.scope
+        map_put(&s.tags, name, ty)
+    }
+    return ty
+}
+
+fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
+    id u32 = ty_node(ty).aux1
+    e handle[EnumDef] = ty_enum(id)
+    if !map_put(&p.enum_bodies, ty, 1) { try pa_error(p, loc, c"nested redefinition of enum") }
+    defer { map_remove(&p.enum_bodies, ty) }
+    repeat bool = e.members_len != 0
+    fixed u32 = if e.has_fixed_underlying { e.underlying } else { TY_INVALID }
+    next u64 = 0
+    next_ty u32 = TY_INT
+    min i64 = 0
+    max u64 = 0
+    values Vec[addr] = {}
+    members Vec[EnumMember] = {}
+    seen TagMap = {}
+    while !(try pa_at(p, c"}")) {
+        t Token = try pa_take(p)
+        n u32 = try pa_ident(p, t)
+        try pa_attributes(p)
+        if try pa_accept(p, c"=") {
+            v handle[Ast] = try pa_expression(p, 3)
+            next = try se_ice(p, v)
+            next_ty = v.ty
+        }
+        neg bool = !ty_is_unsigned(next_ty) && bitcast[i64](next) < 0
+        if neg {
+            if bitcast[i64](next) < min { min = bitcast[i64](next) }
+        } else if next > max { max = next }
+        member u32 = fixed
+        if member == TY_INVALID {
+            member = next_ty
+            if (neg && bitcast[i64](next) >= -2147483648) || (!neg && next <= 2147483647) { member = TY_INT }
+        } else if se_value(member, next) != next || (ty_is_unsigned(member) && neg) ||
+            (!ty_is_unsigned(member) && !neg && bitcast[i64](se_value(member, next)) < 0) {
+            try pa_error(p, t.loc, c"enumerator cannot be represented by its underlying type")
+        }
+        m handle[EnumMember] = vec_add(&members)
+        m.name = n
+        m.value = next
+        m.negative = neg
+        if !map_put(&seen, n, 1) { try pa_error(p, t.loc, c"duplicate enumerator") }
+        if repeat {
+            old handle[EnumMember] = ty_enum_find_member(ty_enum(id), n)
+            if old == null || old.value != next || old.negative != neg {
+                try pa_error(p, t.loc, c"incompatible redefinition of enumerator")
+            }
+        } else {
+            sym handle[Symbol] = se_symbol(n, t.loc, member, SC_ENUMERATOR)
+            sym.value = handle_addr(se_int(t.loc, member, next))
+            try se_declare(p, sym, true, false)
+            vec_push[addr](&values, handle_addr(sym))
+        }
+        next_ty = member
+        if fixed == TY_INVALID {
+            if next == 2147483647 && member == TY_INT { next_ty = TY_LONG }
+            else if next == 0xffffffff && ty_int_bits(member) == 32 { next_ty = TY_ULONG }
+            else if next == 0x7fffffffffffffff { next_ty = TY_ULONG }
+        }
+        next += 1
+        if !(try pa_accept(p, c",")) { break }
+    }
+    if members.n == 0 { try pa_error(p, loc, c"empty enum definition") }
+    try pa_expect(p, c"}")
+    attrs = pa_join_attrs(try pa_attributes(p), attrs)
+    underlying u32 = TY_UINT
+    if min < 0 { underlying = TY_INT }
+    if (min >= 0 && max > 0xffffffff) || (min < 0 && (min < -2147483648 || max > 2147483647)) {
+        underlying = if min < 0 { TY_LONG } else { TY_ULONG }
+    }
+    if fixed == TY_INVALID && pa_has_attr(p, attrs, c"packed") {
+        if min >= 0 && max <= 255 { underlying = TY_UCHAR }
+        else if min >= 0 && max <= 65535 { underlying = TY_USHORT }
+        else if min >= -128 && min < 0 && max <= 127 { underlying = TY_SCHAR }
+        else if min >= -32768 && min < 0 && max <= 32767 { underlying = TY_SHORT }
+    }
+    if fixed == TY_INVALID {
+        for_attr handle[Attr] = attrs
+        while for_attr != null {
+            if pa_attr_name(p, for_attr, c"mode") && for_attr.args.n == 1 {
+                underlying = pa_mode_type(p, underlying, for_attr)
+            }
+            for_attr = for_attr.next
+        }
+    }
+    if repeat {
+        prior handle[EnumDef] = ty_enum(id)
+        if zext[usize](prior.members_len) != members.n || (fixed == TY_INVALID && prior.underlying != underlying) {
+            try pa_error(p, loc, c"incompatible redefinition of enum")
+        }
+        return
+    }
+    ty_enum_complete(ty, underlying)
+    ty_enum_set_members(ty, &members)
+    enum_constants bool = fixed != TY_INVALID || min < -2147483648 || max > 2147483647
+    for i usize in 0..values.n {
+        sym handle[Symbol] = handle_from_addr(values.p[addr, i])
+        if enum_constants {
+            sym.ty = ty
+            e handle[Ast] = handle_from_addr(sym.value)
+            e.ty = ty
+        }
+    }
+}
+
+fn pa_redeclared_field_type(p handle[Parser], a handle[FieldDef], b handle[FieldDef]) bool {
+    if a.ty == b.ty { return true }
+    if a.is_anon && b.is_anon { return ty_compatible_impl(a.ty, b.ty, null, true) }
+    // GNU treats a trailing zero-length array as a flexible member for
+    // record redeclarations. A nonzero fixed bound changes the record type.
+    if !pa_is_gnu(p) || !ty_is_array(a.ty) || !ty_is_array(b.ty) { return false }
+    x handle[TypeNode] = ty_node(ty_unqual(a.ty))
+    y handle[TypeNode] = ty_node(ty_unqual(b.ty))
+    return x.elem == y.elem && ((x.aux1 == ARR_INCOMPLETE && y.aux1 == ARR_FIXED && y.arr_len == 0) ||
+        (y.aux1 == ARR_INCOMPLETE && x.aux1 == ARR_FIXED && x.arr_len == 0))
+}
+
+fn pa_bind_member(p handle[Parser], seen handle[TagMap], name u32, ty u32, anon bool, loc u32) void fails {
+    if name != 0 && !map_put(seen, name, ty) { try pa_error(p, loc, c"duplicate record member") }
+    if anon {
+        r handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
+        for i u32 in 0..r.fields_len {
+            field handle[FieldDef] = ty_field(r.fields_start + i)
+            try pa_bind_member(p, seen, field.name_id, field.ty, field.is_anon, loc)
+        }
+    }
+}
+
+fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
+    rec_id u32 = ty_node(ty).aux1
+    if !map_put(&p.record_open, rec_id, 1) { try pa_error(p, loc, c"nested redefinition of record") }
+    defer { map_remove(&p.record_open, rec_id) }
+    pack u32 = p.pack
+    fields Vec[FieldDef] = {}
+    seen TagMap = {}
+    while !(try pa_at(p, c"}")) {
+        t Token = try pa_peek(p)
+        if pa_assert_word(p, t) { try pa_assert(p); continue }
+        if pa_is_gnu(p) && (try pa_accept(p, c";")) { continue }
+        spec DeclSpec = {}
+        spec.member = true
+        try pa_specs(p, &spec)
+        if spec.storage != SC_NONE || spec.thread_local || spec.inferred {
+            try pa_error(p, t.loc, c"invalid storage class on member declaration")
+        }
+        while true {
+            d Declarator = {}
+            if !(try pa_at(p, c":")) && !(try pa_at(p, c";")) { try pa_declarator(p, &d, true) }
+            attr handle[Attr] = pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs))
+            aligned u32 = try pa_attr_align(p, attr, spec.alignment)
+            bit bool = try pa_accept(p, c":")
+            width u64 = 0
+            if bit {
+                w handle[Ast] = try pa_expression(p, 3)
+                width = try se_ice(p, w)
+                attr = pa_join_attrs(try pa_attributes(p), attr)
+                aligned = try pa_attr_align(p, attr, aligned)
+            }
+            ft u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, attr), true)
+            if bit && (!ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0)) {
+                try pa_error(p, t.loc, c"invalid bit-field width or type")
+            }
+            anon bool = d.name == 0 && !bit && spec.anonymous_record && ty_is_record(ft)
+            if d.name == 0 && !bit && !anon {
+                if !pa_is_gnu(p) || !(try pa_at(p, c";")) {
+                    try pa_error(p, t.loc, c"member declaration has no declarator")
+                }
+                cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"member declaration does not declare anything"))
+                break
+            }
+            base handle[TypeNode] = ty_node(ty_unqual(ft))
+            flex bool = base.kind == TYK_ARRAY && base.aux1 == ARR_INCOMPLETE
+            if (!se_complete(ft) && !flex) || se_vla(ft) { try pa_error(p, t.loc, c"member has incomplete or variable type") }
+            try pa_bind_member(p, &seen, d.name, ft, anon, if d.name != 0 { d.loc } else { t.loc })
+            f handle[FieldDef] = vec_add[FieldDef](&fields)
+            f.name_id = d.name
+            f.ty = ft
+            f.bit_width = trunc[u32](width)
+            f.is_bitfield = bit
+            f.is_anon = anon
+            f.is_packed = pa_has_attr(p, attr, c"packed")
+            f.align_attr = aligned
+            if !(try pa_accept(p, c",")) { break }
+        }
+        if pa_is_gnu(p) && (try pa_at(p, c"}")) {
+            cc_diag(p.names, p.location, c"warning: ", bytes_c(c"missing semicolon at end of record"))
+            break
+        }
+        try pa_expect(p, c";")
+    }
+    try pa_expect(p, c"}")
+    attrs = pa_join_attrs(try pa_attributes(p), attrs)
+    for i usize in 0..fields.n {
+        f handle[FieldDef] = vec_at[FieldDef](&fields, i)
+        n handle[TypeNode] = ty_node(ty_unqual(f.ty))
+        if n.kind == TYK_ARRAY && n.aux1 == ARR_INCOMPLETE {
+            union bool = ty_kind(ty) == TYK_UNION
+            if (!union && i + 1 != fields.n) || (!pa_is_gnu(p) && (union || seen.n < 2)) {
+                try pa_error(p, loc, c"invalid flexible array member")
+            }
+        }
+    }
+    if fields.n == 0 && !pa_is_gnu(p) { try pa_error(p, loc, c"empty records require GNU mode") }
+    packed bool = pa_has_attr(p, attrs, c"packed")
+    alignment u32 = try pa_attr_align(p, attrs, 0)
+    old handle[RecordDef] = ty_record(rec_id)
+    ms_layout bool = old.is_ms_layout || pa_has_attr(p, attrs, c"ms_struct")
+    if old.is_complete {
+        if zext[usize](old.fields_len) != fields.n || old.is_packed != packed ||
+            old.pragma_pack != pack || old.align_attr != alignment || old.is_ms_layout != ms_layout {
+            try pa_error(p, loc, c"incompatible redefinition of record")
+        }
+        for i u32 in 0..old.fields_len {
+            a handle[FieldDef] = ty_field(old.fields_start + i)
+            b handle[FieldDef] = vec_at[FieldDef](&fields, zext[usize](i))
+            if a.name_id != b.name_id || !pa_redeclared_field_type(p, a, b) || a.is_bitfield != b.is_bitfield ||
+                a.bit_width != b.bit_width || a.align_attr != b.align_attr || a.is_packed != b.is_packed {
+                try pa_error(p, loc, c"incompatible redefinition of record member")
+            }
+        }
+    } else {
+        old.is_ms_layout = ms_layout
+        ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack)
+    }
+    if ty_kind(ty) == TYK_UNION && pa_has_attr(p, attrs, c"transparent_union") {
+        old.transparent_union = true
+    }
+}
+
+fn pa_tag_spec(p handle[Parser], t Token, spec handle[DeclSpec]) u32 fails {
+    kind u8 = TYK_STRUCT
+    if pa_is(p, t, c"union") { kind = TYK_UNION }
+    if pa_is(p, t, c"enum") { kind = TYK_ENUM }
+    attrs handle[Attr] = try pa_attributes(p)
+    name u32 = 0
+    tag Token = try pa_peek(p)
+    if tag.kind == TK_IDENT && !pa_keyword(p, tag) { name = try pa_ident(p, try pa_take(p)) }
+    fixed u32 = TY_INVALID
+    if kind == TYK_ENUM && (try pa_at(p, c":")) && pa_decl_start(p, try pa_peek_at(p, 1)) {
+        try pa_take(p)
+        // The underlying type specifier is followed by the outer declarator.
+        underlying DeclSpec = {}
+        try pa_specs(p, &underlying)
+        fixed = underlying.ty
+        if !ty_is_integer(fixed) || ty_quals(fixed) != 0 { try pa_error(p, t.loc, c"invalid enum underlying type") }
+    }
+    define bool = try pa_at(p, c"{")
+    if !define && name == 0 { try pa_error(p, t.loc, c"expected a tag or a definition") }
+    ty u32 = try pa_tag(p, t, kind, name, fixed, define)
+    if define {
+        try pa_take(p)
+        if kind == TYK_ENUM { try pa_enum_body(p, ty, t.loc, attrs) }
+        else {
+            try pa_record_body(p, ty, t.loc, attrs)
+            spec.anonymous_record = name == 0
+        }
+    } else if kind != TYK_ENUM && pa_has_attr(p, attrs, c"ms_struct") {
+        rec handle[RecordDef] = ty_record(ty_node(ty).aux1)
+        if !rec.is_complete { rec.is_ms_layout = true }
+    }
+    return ty
+}
+
+fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
+    out.loc = (try pa_peek(p)).loc
+    short bool = false
+    longs u32 = 0
+    sign u8 = 0
+    complex bool = false
+    bitint_spec bool = false
+    while true {
+        a handle[Attr] = try pa_attributes(p)
+        if a != null { out.attrs = pa_join_attrs(a, out.attrs); continue }
+        t Token = try pa_peek(p)
+        if try pa_accept(p, c"__extension__") { continue }
+        q u32 = pa_qual(p, t)
+        sc u8 = pa_storage(p, t)
+        base u32 = pa_base(p, t)
+        if pa_is(p, t, c"_Atomic") && (try pa_at_second(p, c"(")) {
+            try pa_take(p)
+            try pa_expect(p, c"(")
+            base = try pa_type_name(p)
+            try pa_expect(p, c")")
+            if ty_is_array(base) || ty_is_func(base) || ty_quals(base) != 0 { try pa_error(p, t.loc, c"invalid atomic operand type") }
+            base = ty_qual(base, Q_ATOMIC)
+            q = 0
+        } else if pa_is(p, t, c"_BitInt") {
+            try pa_take(p)
+            try pa_expect(p, c"(")
+            e handle[Ast] = try pa_expression(p, 3)
+            bits u64 = try se_ice(p, e)
+            try pa_expect(p, c")")
+            if bits == 0 || bits > 8388608 { try pa_error(p, e.loc, c"invalid _BitInt width") }
+            base = ty_bitint(trunc[u32](bits), true)
+            bitint_spec = true
+        } else if pa_typeof_word(p, t) {
+            try pa_take(p)
+            try pa_expect(p, c"(")
+            next Token = try pa_peek(p)
+            if pa_decl_start(p, next) { base = try pa_type_name(p) }
+            else {
+                e handle[Ast] = try pa_expression(p, 1)
+                if (e.flags & NF_BITFIELD) != 0 { try pa_error(p, e.loc, c"typeof cannot be applied to a bit-field") }
+                base = ty_typeof(e.ty)
+                if se_variably_modified(base) { out.vm_operand = e }
+            }
+            try pa_expect(p, c")")
+            if pa_is(p, t, c"typeof_unqual") { base = ty_typeof_unqual(base) }
+        } else if pa_is(p, t, c"struct") || pa_is(p, t, c"union") || pa_is(p, t, c"enum") {
+            try pa_take(p)
+            base = try pa_tag_spec(p, t, out)
+        } else if base != TY_INVALID { try pa_take(p) }
+        else if sc == SC_AUTO {
+            if out.auto_seen { try pa_error(p, t.loc, c"duplicate auto specifier") }
+            if pa_is(p, t, c"__auto_type") { try pa_gnu(p, t) }
+            out.auto_seen = true
+            try pa_take(p)
+            continue
+        } else if sc != SC_NONE {
+            if out.storage != SC_NONE { try pa_error(p, t.loc, c"multiple storage classes") }
+            out.storage = sc
+            try pa_take(p)
+            continue
+        } else if q != 0 {
+            out.quals |= q
+            try pa_take(p)
+            continue
+        } else if pa_is(p, t, c"long") {
+            longs += 1
+            try pa_take(p)
+            continue
+        } else if pa_is(p, t, c"short") {
+            if short { try pa_error(p, t.loc, c"duplicate short specifier") }
+            short = true
+            try pa_take(p)
+            continue
+        } else if pa_signed(p, t) || pa_is(p, t, c"unsigned") {
+            if sign != 0 { try pa_error(p, t.loc, c"conflicting signedness specifiers") }
+            sign = if pa_is(p, t, c"unsigned") { 2 } else { 1 }
+            try pa_take(p)
+            continue
+        } else if pa_is(p, t, c"_Complex") || (pa_is(p, t, c"__complex__") || pa_is(p, t, c"__complex")) {
+            complex = true
+            try pa_take(p)
+            continue
+        } else if pa_inline(p, t) || pa_is(p, t, c"_Noreturn") {
+            if pa_inline(p, t) { out.is_inline = true }
+            else { out.is_noreturn = true }
+            try pa_take(p)
+            continue
+        } else if pa_is(p, t, c"thread_local") || pa_is(p, t, c"_Thread_local") || pa_is(p, t, c"__thread") {
+            if out.thread_local { try pa_error(p, t.loc, c"duplicate thread storage specifier") }
+            out.thread_local = true
+            try pa_take(p)
+            continue
+        } else if pa_align_word(p, t) {
+            try pa_take(p)
+            try pa_expect(p, c"(")
+            val u64 = 0
+            if pa_decl_start(p, try pa_peek(p)) {
+                align_ty u32 = try pa_type_name(p)
+                if !se_complete(align_ty) { try pa_error(p, t.loc, c"alignment requires complete type") }
+                val = ty_align(align_ty)
+            }
+            else { val = try se_ice(p, try pa_expression(p, 3)) }
+            al u32 = try pa_alignment(p, t.loc, val)
+            if al > out.alignment { out.alignment = al }
+            try pa_expect(p, c")")
+            continue
+        } else if out.ty == TY_INVALID && sign == 0 && longs == 0 && !short && !complex && pa_typename(p, t) {
+            sym handle[Symbol] = pa_lookup(p, cc_ident(p.names, t))
+            base = sym.ty
+            try pa_take(p)
+        } else { break }
+        if out.ty != TY_INVALID { try pa_error(p, t.loc, c"conflicting type specifiers") }
+        out.ty = base
+    }
+    ty u32 = out.ty
+    if ty == TY_INVALID {
+        if out.auto_seen {
+            if out.storage == SC_TYPEDEF || out.storage == SC_EXTERN {
+                try pa_error(p, out.loc, c"auto inference cannot be combined with typedef or extern")
+            }
+            if out.storage == SC_CONSTEXPR { out.quals |= Q_CONST }
+            out.inferred = true
+            return
+        }
+        if sign == 0 && longs == 0 && !short && !complex {
+            if out.member && out.quals != 0 && pa_is_gnu(p) && (try pa_at(p, c";")) { return }
+            try pa_error(p, out.loc, c"C23 requires an explicit type specifier (implicit int is unsupported)")
+        }
+        ty = if complex && sign == 0 && longs == 0 && !short { TY_DOUBLE } else { TY_INT }
+    }
+    if bitint_spec {
+        width u32 = ty_int_bits(ty)
+        if sign != 2 && width < 2 { try pa_error(p, out.loc, c"signed _BitInt requires at least two bits") }
+        ty = ty_bitint(width, sign == 2)
+        sign = 0
+    }
+    if short {
+        if ty != TY_INT || longs != 0 { try pa_error(p, out.loc, c"invalid short type") }
+        ty = TY_SHORT
+    }
+    if longs != 0 {
+        if ty == TY_DOUBLE && longs == 1 { ty = TY_LDOUBLE }
+        else if ty == TY_INT && longs <= 2 { ty = if longs == 2 { TY_LLONG } else { TY_LONG } }
+        else { try pa_error(p, out.loc, c"invalid long type") }
+    }
+    if sign != 0 {
+        if !ty_is_integer(ty) || ty == TY_BOOL { try pa_error(p, out.loc, c"signedness requires an integer type") }
+        if sign == 2 {
+            if ty == TY_CHAR { ty = TY_UCHAR } else { ty = ty_make_unsigned(ty) }
+        } else if ty == TY_CHAR { ty = TY_SCHAR }
+    }
+    if complex {
+        if ty == TY_FLOAT128 { try pa_error(p, out.loc, c"complex binary128 is unsupported") }
+        if !ty_is_real_float(ty) && !(pa_is_gnu(p) && ty_is_integer(ty)) { try pa_error(p, out.loc, c"_Complex requires a real floating type") }
+        ty = ty_complex(ty)
+    }
+    if out.auto_seen {
+        if out.storage != SC_NONE { try pa_error(p, out.loc, c"auto with an explicit type cannot be combined with another storage class") }
+        out.storage = SC_AUTO
+    }
+    if out.storage == SC_CONSTEXPR { out.quals |= Q_CONST }
+    out.ty = try pa_qualified(p, ty, out.quals, out.loc)
+}
+
+fn pa_qualified(p handle[Parser], ty u32, quals u32, loc u32) u32 fails {
+    if (quals & Q_RESTRICT) != 0 {
+        base u32 = ty_unqual(ty)
+        while ty_is_array(base) { base = ty_unqual(ty_node(base).elem) }
+        if !ty_is_ptr(base) || ty_is_func(ty_node(base).elem) {
+            try pa_error(p, loc, c"restrict requires a pointer to a non-function type")
+        }
+    }
+    if ty_is_func(ty) && quals != 0 {
+        if (quals & Q_ATOMIC) != 0 || !pa_is_gnu(p) {
+            try pa_error(p, loc, c"qualifier on a function type")
+        }
+        // GNU declarations can qualify a function through a typedef.
+        // Match Clang: these qualifiers do not change its type.
+        cc_diag(p.names, loc, c"warning: ", bytes_c(c"qualifier on a function type has no effect"))
+        return ty
+    }
+    return ty_qual(ty, quals)
+}
+
+fn pa_add_op(d handle[Declarator], op handle[DeclOp]) void {
+    if d.last == null { d.first = op }
+    else {
+        last handle[DeclOp] = d.last
+        last.next = op
+    }
+    d.last = op
+}
+
+fn pa_new_op(kind u8, loc u32) handle[DeclOp] {
+    op handle[DeclOp] = pa_alloc[DeclOp]()
+    op.kind = kind
+    op.loc = loc
+    return op
+}
+
+fn pa_params(p handle[Parser], op handle[DeclOp], leading handle[Attr]) void fails {
+    outer handle[Scope] = p.scope
+    pa_enter(p)
+    op.proto = p.scope
+    defer { p.scope = outer }
+    if try pa_accept(p, c")") { return }
+    if leading == null && (try pa_at(p, c"void")) && (try pa_at_second(p, c")")) {
+        try pa_take(p); try pa_take(p)
+        return
+    }
+    tail handle[Param] = null
+    while true {
+        if try pa_accept(p, c"...") { op.variadic = true; break }
+        pt Token = try pa_peek(p)
+        if !pa_decl_start(p, pt) && !(try pa_open_attr(p)) {
+            try pa_error(p, pt.loc, c"C23 requires parameter types (K&R declarations are unsupported)")
+        }
+        spec DeclSpec = {}
+        spec.attrs = leading
+        leading = null
+        try pa_specs(p, &spec)
+        if (spec.storage != SC_NONE && spec.storage != SC_REGISTER) || spec.thread_local ||
+            spec.is_inline || spec.is_noreturn || spec.inferred || spec.alignment != 0 {
+            try pa_error(p, pt.loc, c"invalid parameter declaration")
+        }
+        d Declarator = {}
+        try pa_declarator(p, &d, true)
+        attrs handle[Attr] = pa_join_attrs(d.attrs, spec.attrs)
+        t u32 = try pa_apply_attrs(p, d.first, spec.ty, attrs, 0)
+        adjusted u32 = t
+        n handle[TypeNode] = ty_node(ty_unqual(t))
+        if n.kind == TYK_ARRAY {
+            first handle[DeclOp] = d.first
+            quals u32 = 0
+            if first != null && first.kind == DO_ARRAY { quals = first.quals }
+            adjusted = ty_qual(ty_ptr(n.elem), quals)
+        }
+        if n.kind == TYK_FUNC { adjusted = ty_ptr(t) }
+        if ty_is_void(t) {
+            if tail == null && d.name == 0 && spec.storage == SC_NONE && ty_quals(t) == 0 &&
+                (try pa_accept(p, c")")) { return }
+            try pa_error(p, pt.loc, c"parameter cannot have void type")
+        }
+        formal handle[Param] = pa_alloc[Param]()
+        formal.name = d.name
+        formal.loc = pt.loc
+        formal.ty = adjusted
+        formal.declared_ty = t
+        formal.decl = se_symbol(d.name, pt.loc, adjusted, spec.storage)
+        sym handle[Symbol] = formal.decl
+        sym.attrs = attrs
+        if d.name != 0 { formal.decl = try se_declare(p, formal.decl, false, false) }
+        if tail == null { op.params = formal }
+        else { tail.next = formal }
+        tail = formal
+        if !(try pa_accept(p, c",")) { break }
+    }
+    try pa_expect(p, c")")
+}
+
+fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fails {
+    d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)
+    t Token = try pa_peek(p)
+    if d.loc == 0 { d.loc = t.loc }
+    pointers handle[DeclOp] = null
+    while try pa_accept(p, c"*") {
+        op handle[DeclOp] = pa_new_op(DO_PTR, t.loc)
+        d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)
+        while true {
+            q u32 = pa_qual(p, try pa_peek(p))
+            if q == 0 { break }
+            op.quals |= q
+            try pa_take(p)
+        }
+        d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)
+        op.next = pointers
+        pointers = op
+        t = try pa_peek(p)
+    }
+    if pa_is(p, t, c"(") {
+        try pa_take(p)
+        // With an abstract declarator, '(' may start either a grouped
+        // declarator or a prototype. An attribute alone cannot decide.
+        leading handle[Attr] = try pa_attributes(p)
+        head Token = try pa_peek(p)
+        if abstract && (pa_is(p, head, c")") || pa_is(p, head, c"...") || pa_decl_start(p, head)) {
+            op handle[DeclOp] = pa_new_op(DO_FUNC, t.loc)
+            try pa_params(p, op, leading)
+            pa_add_op(d, op)
+        } else {
+            d.attrs = pa_join_attrs(leading, d.attrs)
+            try pa_declarator(p, d, abstract)
+            try pa_expect(p, c")")
+        }
+    } else if t.kind == TK_IDENT && !pa_keyword(p, t) {
+        d.name = try pa_ident(p, try pa_take(p))
+        d.loc = t.loc
+    } else if !abstract {
+        try pa_error(p, t.loc, c"expected a declarator")
+    }
+    d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)
+    while true {
+        t = try pa_peek(p)
+        if try pa_accept(p, c"[") {
+            op handle[DeclOp] = pa_new_op(DO_ARRAY, t.loc)
+            has_static bool = false
+            while true {
+                if try pa_accept(p, c"static") {
+                    if has_static { try pa_error(p, t.loc, c"duplicate static array specifier") }
+                    has_static = true
+                    continue
+                }
+                q u32 = pa_qual(p, try pa_peek(p))
+                if q == 0 { break }
+                op.quals |= q
+                try pa_take(p)
+            }
+            if (try pa_at(p, c"*")) && (try pa_at_second(p, c"]")) {
+                try pa_take(p)
+                op.star = true
+            } else if !(try pa_at(p, c"]")) {
+                bound handle[Ast] = try pa_expression(p, 2)
+                op.bound = bound
+                if !ty_is_integer(bound.ty) { try pa_error(p, t.loc, c"array bound requires integer type") }
+            }
+            if has_static && op.bound == null { try pa_error(p, t.loc, c"static array specifier requires an explicit bound") }
+            try pa_expect(p, c"]")
+            pa_add_op(d, op)
+        } else if try pa_accept(p, c"(") {
+            op handle[DeclOp] = pa_new_op(DO_FUNC, t.loc)
+            try pa_params(p, op, null)
+            pa_add_op(d, op)
+        } else { break }
+        d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)
+    }
+    while pointers != null {
+        op handle[DeclOp] = pointers
+        pointers = op.next
+        op.next = null
+        pa_add_op(d, op)
+    }
+}
+
+fn pa_apply(p handle[Parser], op handle[DeclOp], base u32, member bool) u32 fails {
+    if op == null { return base }
+    if op.next == null { return try pa_apply_one(p, op, base, member) }
+    order Vec[addr] = {}
+    defer { vec_free(&order) }
+    while op != null {
+        vec_push[addr](&order, handle_addr(op))
+        op = op.next
+    }
+    for i usize in 0..order.n {
+        item handle[DeclOp] = handle_from_addr(order.p[addr, order.n - i - 1])
+        base = try pa_apply_one(p, item, base, member)
+    }
+    return base
+}
+
+fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 fails {
+    if op.kind == DO_PTR { return try pa_qualified(p, ty_ptr(elem), op.quals, op.loc) }
+    if op.kind == DO_FUNC {
+        if ty_is_array(elem) || ty_is_func(elem) { try pa_error(p, op.loc, c"function cannot return array or function type") }
+        args Vec[u32] = {}
+        formal handle[Param] = op.params
+        while formal != null {
+            arg u32 = ty_unqual(formal.ty)
+            if ty_has_transparent_attr(formal.ty) { arg = ty_qual(arg, Q_TRANSPARENT_UNION) }
+            vec_push[u32](&args, arg)
+            formal = formal.next
+        }
+        return ty_func(elem, args.p, trunc[u32](args.n), op.variadic)
+    }
+    if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
+    b handle[Ast] = op.bound
+    if b == null && !op.star { return ty_array_incomplete(elem) }
+    // A block-scope bound can be a runtime expression even if folding it
+    // found undefined arithmetic. Keep the VLA and diagnose the bad bound.
+    runtime_fault bool = b != null && p.scope != p.file_scope && pa_is_gnu(p) &&
+        ((b.flags & NF_OVERFLOW) != 0)
+    if runtime_fault {
+        cc_diag(p.names, b.loc, c"warning: ", bytes_c(c"undefined arithmetic in variable array bound"))
+    }
+    // GNU accepts foldable bounds where arrays need a fixed extent:
+    // record members and file-scope declarations. Ordinary block-scope
+    // declarations keep the runtime bound when it is not an ICE.
+    if b != null && !runtime_fault && ((b.flags & NF_ICE) != 0 ||
+        ((member || p.scope == p.file_scope) && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
+        count u64 = try se_ice(p, b)
+        if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||
+            (ty_size(elem) != 0 && count > 0x7fffffffffffffff / ty_size(elem)) {
+            try pa_error(p, op.loc, c"invalid array bound")
+        }
+        return ty_array(elem, count)
+    }
+    vec_push[addr](&p.vla_bounds, handle_addr(b))
+    return ty_array_vla(elem, trunc[u32](p.vla_bounds.n))
+}
+
+fn pa_type_name(p handle[Parser]) u32 fails {
+    spec DeclSpec = {}
+    try pa_specs(p, &spec)
+    d Declarator = {}
+    try pa_declarator(p, &d, true)
+    if d.name != 0 || spec.storage != SC_NONE || spec.thread_local || spec.alignment != 0 ||
+        spec.is_inline || spec.is_noreturn {
+        try pa_error(p, spec.loc, c"expected a type name")
+    }
+    return try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
+}
+
+// Mode and vector-size attributes describe the base type. Alignment
+// describes the declared entity and therefore applies after the declarator.
+fn pa_apply_attrs(p handle[Parser], op handle[DeclOp], base u32, a handle[Attr], alignment u32) u32 fails {
+    ty u32 = try pa_apply(p, op, try pa_type_attrs(p, base, a), false)
+    al u32 = try pa_attr_align(p, a, alignment)
+    return if al != 0 { ty_aligned(ty, al) } else { ty }
+}
+
+fn pa_builtin_types(p handle[Parser]) void fails {
+    // SysV va_list is a one-element array of a 24-byte record.
+    r u32 = ty_record_new(0, false)
+    fields arr[4, FieldDef] = {}
+    fields[0].ty = TY_UINT
+    fields[1].ty = TY_UINT
+    fields[2].ty = ty_ptr(TY_VOID)
+    fields[3].ty = fields[2].ty
+    fields[0].name_id = cc_intern(p.names, bytes_c(c"gp_offset"))
+    fields[1].name_id = cc_intern(p.names, bytes_c(c"fp_offset"))
+    fields[2].name_id = cc_intern(p.names, bytes_c(c"overflow_arg_area"))
+    fields[3].name_id = cc_intern(p.names, bytes_c(c"reg_save_area"))
+    ty_record_complete(r, &fields, 4, false, 0, 0)
+    name u32 = cc_intern(p.names, bytes_c(c"__builtin_va_list"))
+    se_bind(p, se_symbol(name, 0, ty_array(r, 1), SC_TYPEDEF))
+    name = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
+    se_bind(p, se_symbol(name, 0, ty_ptr(TY_CHAR), SC_TYPEDEF))
+    name = cc_intern(p.names, bytes_c(c"__int128_t"))
+    se_bind(p, se_symbol(name, 0, TY_INT128, SC_TYPEDEF))
+    name = cc_intern(p.names, bytes_c(c"__uint128_t"))
+    se_bind(p, se_symbol(name, 0, TY_UINT128, SC_TYPEDEF))
+}
+
+fn pa_asm_word(p handle[Parser], t Token) bool {
+    return (pa_is_gnu(p) && pa_is(p, t, c"asm")) || pa_is(p, t, c"__asm") || pa_is(p, t, c"__asm__")
+}
+
+// A declaration's assembler label has a single spelling in the symbol
+// table. Fold adjacent ordinary literals the same way as a single alias.
+fn pa_asm_label(p handle[Parser]) u32 fails {
+    text handle[Ast] = try pa_asm_string(p)
+    piece handle[Ast] = text.a
+    if piece.next == null { return text.op }
+    spelling Buf = {}
+    defer { buf_free(&spelling) }
+    buf_u8(&spelling, 34)
+    while piece != null {
+        part Bytes = cc_name(p.names, piece.op)
+        buf_append(&spelling, bytes_sub(part, 1, part.n - 2))
+        piece = piece.next
+    }
+    buf_u8(&spelling, 34)
+    return cc_intern(p.names, buf_bytes(&spelling))
+}
+
+fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast] fails {
+    while try pa_accept(p, c"__extension__") {}
+    bool_attr bool = try pa_open_attr(p)
+    attrs handle[Attr] = pa_join_attrs(try pa_attributes(p), leading)
+    t Token = try pa_peek(p)
+    if pa_assert_word(p, t) { try pa_assert(p); return null }
+    if pa_asm_word(p, t) { return try pa_asm(p, file) }
+    if (bool_attr || attrs != null || (file && pa_is_gnu(p))) && (try pa_accept(p, c";")) { return null }
+    spec DeclSpec = {}
+    spec.attrs = attrs
+    try pa_specs(p, &spec)
+    if try pa_accept(p, c";") {
+        if !ty_is_record(spec.ty) && !ty_is_enum(spec.ty) { try pa_error(p, spec.loc, c"declaration has no declarator") }
+        return null
+    }
+    xs AstList = {}
+    while true {
+        d Declarator = {}
+        try pa_declarator(p, &d, false)
+        attrs handle[Attr] = pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs))
+        asm_name u32 = 0
+        if pa_asm_word(p, try pa_peek(p)) {
+            try pa_take(p)
+            try pa_expect(p, c"(")
+            asm_name = try pa_asm_label(p)
+            try pa_expect(p, c")")
+            attrs = pa_join_attrs(try pa_attributes(p), attrs)
+        }
+        ty u32 = TY_INVALID
+        if !spec.inferred {
+            ty = try pa_apply_attrs(p, d.first, spec.ty, attrs, spec.alignment)
+            if spec.storage == SC_TYPEDEF && pa_has_attr(p, attrs, c"aligned") {
+                ty = ty_typedef_aligned(ty, ty_align_attr(ty))
+            }
+        }
+        s handle[Symbol] = se_symbol(d.name, d.loc, ty, spec.storage)
+        s.thread_local = spec.thread_local
+        s.attrs = attrs
+        s.asm_name = asm_name
+        if spec.is_inline { s.flags |= 1 }
+        if spec.is_noreturn || pa_has_attr(p, attrs, c"noreturn") { s.flags |= 2 }
+        func bool = ty_is_func(ty)
+        first handle[DeclOp] = d.first
+        if func && first != null { s.params = handle_addr(first.params) }
+        if (spec.is_inline || spec.is_noreturn) && !func {
+            try pa_error(p, d.loc, c"function specifier on a non-function declaration")
+        }
+        if spec.alignment != 0 && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
+            (!spec.inferred && zext[u64](spec.alignment) < ty_align(ty_unqual(ty)))) {
+            try pa_error(p, d.loc, c"invalid alignment specifier for this declaration")
+        }
+        if spec.storage != SC_TYPEDEF {
+            if spec.storage == SC_STATIC && file { s.linkage = 1 }
+            else if spec.storage == SC_EXTERN || func ||
+                (file && spec.storage != SC_CONSTEXPR && spec.storage != SC_AUTO && spec.storage != SC_REGISTER) {
+                s.linkage = 2
+            }
+        }
+        try se_cleanup_attribute(p, s, file, func)
+        if spec.thread_local && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
+            spec.storage == SC_CONSTEXPR || (!file && spec.storage != SC_STATIC && spec.storage != SC_EXTERN)) {
+            try pa_error(p, d.loc, c"invalid thread-local declaration")
+        }
+        if file && (spec.storage == SC_REGISTER || (spec.storage == SC_AUTO && !spec.inferred)) && s.asm_name == 0 {
+            try pa_error(p, d.loc, c"invalid storage class at file scope")
+        }
+        if func && spec.storage != SC_TYPEDEF && (spec.storage == SC_AUTO ||
+            spec.storage == SC_REGISTER || spec.storage == SC_CONSTEXPR || (!file && spec.storage == SC_STATIC)) {
+            try pa_error(p, d.loc, c"invalid function storage class")
+        }
+        if func && (try pa_at(p, c"{")) {
+            if !file || xs.first != null || spec.storage == SC_TYPEDEF || first == null { try pa_error(p, d.loc, c"invalid function definition") }
+            s = try se_declare(p, s, true, false)
+            return try pa_function(p, s, first.proto)
+        }
+        if func && pa_decl_start(p, try pa_peek(p)) {
+            try pa_error(p, d.loc, c"K&R function definitions are unsupported in C23")
+        }
+        init bool = try pa_accept(p, c"=")
+        if spec.inferred && (!init || d.first != null || xs.first != null) {
+            try pa_error(p, d.loc, c"auto type inference requires one initialized identifier")
+        }
+        if init && (func || spec.storage == SC_TYPEDEF || (!file && spec.storage == SC_EXTERN)) {
+            try pa_error(p, d.loc, c"this declaration cannot have an initializer")
+        }
+        if spec.storage == SC_CONSTEXPR && !init { try pa_error(p, d.loc, c"constexpr requires an initializer") }
+        if spec.storage != SC_TYPEDEF && !func && ty_is_void(ty) && !spec.inferred &&
+            !(pa_is_gnu(p) && spec.storage == SC_EXTERN && !init) {
+            try pa_error(p, d.loc, c"object cannot have void type")
+        }
+        vm bool = se_variably_modified(ty)
+        if file && vm { try pa_error(p, d.loc, c"variably modified type at file scope") }
+        if vm && (spec.storage == SC_EXTERN || (se_vla(ty) && (spec.storage == SC_STATIC || spec.thread_local))) {
+            try pa_error(p, d.loc, c"variably modified declaration has invalid storage duration or linkage")
+        }
+        if vm {
+            barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
+            barrier.previous = p.vm
+            p.vm = barrier
+        }
+        tentative bool = file && !init && !func && s.linkage != 0 && spec.storage != SC_EXTERN
+        definition bool = init || (!file && !func && spec.storage != SC_TYPEDEF && spec.storage != SC_EXTERN)
+        if !spec.inferred { s = try se_declare(p, s, definition, tentative) }
+        if init {
+            result InitResult = {}
+            try pa_initializer(p, s.ty, file || spec.storage == SC_STATIC || spec.storage == SC_CONSTEXPR, &result)
+            if spec.inferred {
+                s.ty = try pa_apply_attrs(p, null, ty_qual(se_decay(result.ty), spec.quals), attrs, spec.alignment)
+                if ty_is_void(s.ty) { try pa_error(p, d.loc, c"cannot infer void object type") }
+            } else { s.ty = result.ty }
+            if spec.storage == SC_CONSTEXPR {
+                try se_constexpr_type(p, s.ty, d.loc)
+                try se_check_constexpr(p, result.tree)
+            }
+            s.value = handle_addr(result.tree)
+            if spec.inferred { s = try se_declare(p, s, true, false) }
+        }
+        if definition && !se_complete(s.ty) { try pa_error(p, d.loc, c"definition has incomplete type") }
+        if file && s.linkage == 0 && definition { vec_push[addr](&p.objects, handle_addr(s)) }
+        n handle[Ast] = pa_node(ND_DECL, d.loc, s.ty)
+        n.decl = s
+        n.a = handle_from_addr(s.value)
+        n.attrs = s.attrs
+        n.b = spec.vm_operand
+        if n.b != null && xs.first == null { n.flags |= NF_TYPEOF_EVAL }
+        pa_append(&xs, n)
+        if !(try pa_accept(p, c",")) { break }
+        if spec.inferred { try pa_error(p, d.loc, c"auto type inference cannot declare multiple identifiers") }
+    }
+    try pa_expect(p, c";")
+    return xs.first
+}
+
+fn pa_copy_attrs(a handle[Attr]) handle[Attr] {
+    head handle[Attr] = null
+    tail handle[Attr] = null
+    while a != null {
+        b handle[Attr] = pa_alloc[Attr]()
+        b.name = a.name
+        b.ns = a.ns
+        b.loc = a.loc
+        b.args.p = a.args.p
+        b.args.n = a.args.n
+        b.args.cap = a.args.cap
+        b.next = null
+        if tail == null { head = b } else { tail.next = b }
+        tail = b
+        a = a.next
+    }
+    return head
+}

@@ -1,0 +1,14 @@
+static_assert((1uwb << 0) == 1);
+static_assert((1uwb << 0) + 1uwb == 0);
+static_assert(((unsigned _BitInt(65))1 << 64) != 0);
+static_assert(((unsigned _BitInt(65))1 << 64) >> 64 == 1);
+static_assert(0x10000000000000000uwb == (unsigned _BitInt(65))1 << 64);
+static_assert(0x10000000000000000uwb / 4294967296uwb == 4294967296uwb);
+static_assert(0x10000000000000001uwb % 4294967296uwb == 1);
+static_assert(((_BitInt(130))-1 >> 96) == -1);
+static_assert(((_BitInt(129))1 << 80) * ((_BitInt(129))1 << 20) == ((_BitInt(129))1 << 100));
+static_assert(-0x10000000000000000wb < -0xFFFFFFFFFFFFFFFFwb);
+static_assert((_BitInt(192))37 + ((_BitInt(192))-39) == -2);
+static_assert((unsigned _BitInt(96))0x10000000000000001uwb == ((unsigned _BitInt(96))1 << 64) + 1);
+static_assert(((_BitInt(192))1 << 187) / ((_BitInt(192))-4) == -((_BitInt(192))1 << 185));
+static_assert(((_BitInt(192))(-13)) % (_BitInt(192))5 == -3);

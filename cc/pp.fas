@@ -25,9 +25,18 @@ value struct Dependency { path u32, system bool }
 
 struct PendingTokens { tokens Vec[Token], at usize }
 
+struct PpRoot {
+    input_handle handle[Input]
+    path u32
+    directory i16
+    system bool
+}
+
 struct Pp {
     names CNames
     frames Vec[Frame]
+    roots Vec[PpRoot]
+    root_at usize
     conditions Vec[Cond]
     dirs Vec[SearchDir]
     inputs Map[Bytes, addr, bytes_hash, bytes_eq]
@@ -35,6 +44,8 @@ struct Pp {
     visited Map[u32, usize, u32_hash, u32_eq]
     dependencies Vec[Dependency]
     hides Vec[Hide]
+    recent_hides arr[256, u32]
+    pastes Map[u64, PastedToken, u64_hash, u64_eq]
     stream Expand
     pending PendingTokens
     embedded EmbedOutput
@@ -171,7 +182,13 @@ fn pp_raw(p handle[Pp]) Token fails {
             item Token = embed_next(p)
             if item.kind != TK_EOF { return item }
         }
-        if p.frames.n == 0 { return cc_token(TK_EOF, 0, 0, 0) }
+        if p.frames.n == 0 {
+            if p.root_at == p.roots.n { return cc_token(TK_EOF, 0, 0, 0) }
+            root handle[PpRoot] = vec_at[PpRoot](&p.roots, p.root_at)
+            p.root_at += 1
+            try pp_push_file(p, root.input_handle, root.path, sext[i32](root.directory), root.system, 0)
+            continue
+        }
         frame handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
         l handle[Lexer] = &frame.lexer
         l.skipping = !pp_active(p)

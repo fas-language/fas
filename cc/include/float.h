@@ -20,6 +20,20 @@
 #define FLT_DECIMAL_DIG __FLT_DECIMAL_DIG__
 #define FLT_TRUE_MIN __FLT_DENORM_MIN__
 #define FLT_HAS_SUBNORM __FLT_HAS_DENORM__
+#if defined(__FLT16_MANT_DIG__) && (__STDC_VERSION__ >= 202311L || !defined(__STRICT_ANSI__))
+#define FLT16_MANT_DIG __FLT16_MANT_DIG__
+#define FLT16_DIG __FLT16_DIG__
+#define FLT16_MIN_EXP __FLT16_MIN_EXP__
+#define FLT16_MIN_10_EXP __FLT16_MIN_10_EXP__
+#define FLT16_MAX_EXP __FLT16_MAX_EXP__
+#define FLT16_MAX_10_EXP __FLT16_MAX_10_EXP__
+#define FLT16_MAX __FLT16_MAX__
+#define FLT16_EPSILON __FLT16_EPSILON__
+#define FLT16_MIN __FLT16_MIN__
+#define FLT16_DECIMAL_DIG __FLT16_DECIMAL_DIG__
+#define FLT16_TRUE_MIN __FLT16_DENORM_MIN__
+#define FLT16_NORM_MAX __FLT16_NORM_MAX__
+#endif
 #define DBL_MANT_DIG __DBL_MANT_DIG__
 #define DBL_DIG __DBL_DIG__
 #define DBL_MIN_EXP __DBL_MIN_EXP__
@@ -44,6 +58,13 @@
 #define LDBL_DECIMAL_DIG __LDBL_DECIMAL_DIG__
 #define LDBL_TRUE_MIN __LDBL_DENORM_MIN__
 #define LDBL_HAS_SUBNORM __LDBL_HAS_DENORM__
+#if __STDC_VERSION__ >= 202311L
+#define FLT_NORM_MAX __FLT_NORM_MAX__
+#define DBL_NORM_MAX __DBL_NORM_MAX__
+#define LDBL_NORM_MAX __LDBL_NORM_MAX__
+#define INFINITY (__builtin_inff())
+#define NAN (__builtin_nanf(""))
+#endif
 #define FLT_SNAN (__builtin_nansf(""))
 #define DBL_SNAN (__builtin_nans(""))
 #define LDBL_SNAN (__builtin_nansl(""))

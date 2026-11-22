@@ -1,0 +1,324 @@
+// Little-endian 32-bit limbs support _BitInt beyond the native Fas integer
+// widths. Limb arithmetic uses 64-bit intermediates. Signed values are stored
+// in two's complement at their C type width, as for the narrow evaluator.
+value struct WideInt { p addr, width u32, words u32 }
+
+fn wi_new(width u32) WideInt {
+    words u32 = (width + 31) / 32
+    return {heap_alloc_zeroed(zext[usize](words) * 4), width, words}
+}
+
+fn wi_top_mask(x WideInt) u32 {
+    rem u32 = x.width % 32
+    if rem == 0 { return ~0 }
+    mask u32 = 1
+    return (mask << rem) - 1
+}
+
+fn wi_trim(x WideInt) void {
+    x.p[u32, zext[usize](x.words - 1)] &= wi_top_mask(x)
+}
+
+fn wi_bit(x WideInt, at u32) u32 {
+    if at >= x.width { return 0 }
+    return (x.p[u32, zext[usize](at / 32)] >> (at % 32)) & 1
+}
+
+fn wi_set(x WideInt, at u32) void {
+    bit u32 = 1
+    x.p[u32, zext[usize](at / 32)] |= bit << (at % 32)
+}
+
+fn wi_length(x WideInt) u32 {
+    i u32 = x.words
+    while i != 0 {
+        i -= 1
+        limb u32 = x.p[u32, zext[usize](i)]
+        if limb != 0 { return i * 32 + 32 - clz(limb) }
+    }
+    return 0
+}
+
+fn wi_low(x WideInt) u64 {
+    v u64 = zext[u64](x.p[u32])
+    if x.words > 1 { v |= zext[u64](x.p[u32, 1]) << 32 }
+    return v
+}
+
+fn wi_from_ast(a handle[Ast], width u32) WideInt {
+    dest WideInt = wi_new(width)
+    old_width u32 = ty_int_bits(a.ty)
+    if old_width == 0 { return dest }
+    if a.wide == null {
+        narrow u64 = a.value
+        dest.p[u32] = trunc[u32](narrow)
+        if dest.words > 1 { dest.p[u32, 1] = trunc[u32](narrow >> 32) }
+        if !ty_is_unsigned(a.ty) && bitcast[i64](narrow) < 0 {
+            for i u32 in 2..dest.words { dest.p[u32, zext[usize](i)] = ~0 }
+        }
+    } else {
+        old_words u32 = (old_width + 31) / 32
+        count u32 = if old_words < dest.words { old_words } else { dest.words }
+        mem_copy(dest.p, a.wide, zext[usize](count) * 4)
+        old WideInt = {a.wide, old_width, old_words}
+        if width > old_width && !ty_is_unsigned(a.ty) && wi_bit(old, old_width - 1) != 0 {
+            dest.p[u32, zext[usize](old_words - 1)] |= ~wi_top_mask(old)
+            for i u32 in old_words..dest.words { dest.p[u32, zext[usize](i)] = ~0 }
+        }
+    }
+    wi_trim(dest)
+    return dest
+}
+
+fn wi_store(a handle[Ast], w WideInt) void {
+    a.value = se_value(a.ty, wi_low(w))
+    if w.width > 64 { a.wide = w.p }
+}
+
+fn wi_ast_length(a handle[Ast]) u32 {
+    if a.wide != null {
+        width u32 = ty_int_bits(a.ty)
+        return wi_length({a.wide, width, (width + 31) / 32})
+    }
+    if a.value == 0 { return 0 }
+    return 64 - trunc[u32](clz(a.value))
+}
+
+fn wi_cmp(a WideInt, b WideInt) i32 {
+    i u32 = a.words
+    while i != 0 {
+        i -= 1
+        x u32 = a.p[u32, zext[usize](i)]
+        y u32 = b.p[u32, zext[usize](i)]
+        if x < y { return -1 }
+        if x > y { return 1 }
+    }
+    return 0
+}
+
+fn wi_negate(a WideInt) void {
+    carry u64 = 1
+    for i u32 in 0..a.words {
+        v u64 = zext[u64](~a.p[u32, zext[usize](i)]) + carry
+        a.p[u32, zext[usize](i)] = trunc[u32](v)
+        carry = v >> 32
+    }
+    wi_trim(a)
+}
+
+fn wi_add(a WideInt, b WideInt, sub bool) void {
+    carry u64 = if sub { 1 } else { 0 }
+    for i u32 in 0..a.words {
+        j usize = zext[usize](i)
+        y u32 = b.p[u32, j]
+        if sub { y = ~y }
+        s u64 = zext[u64](a.p[u32, j]) + zext[u64](y) + carry
+        a.p[u32, j] = trunc[u32](s)
+        carry = s >> 32
+    }
+    wi_trim(a)
+}
+
+fn wi_shift(a WideInt, bits u32, left bool, sign bool) WideInt {
+    dest WideInt = wi_new(a.width)
+    words i64 = zext[i64](bits / 32)
+    rem u32 = bits % 32
+    for i u32 in 0..a.words {
+        j i64 = zext[i64](i)
+        if left {
+            j -= words
+            v u32 = wi_word(a, j, false) << rem
+            if rem != 0 { v |= wi_word(a, j - 1, false) >> (32 - rem) }
+            dest.p[u32, zext[usize](i)] = v
+        } else {
+            j += words
+            v u32 = wi_word(a, j, sign) >> rem
+            if rem != 0 { v |= wi_word(a, j + 1, sign) << (32 - rem) }
+            dest.p[u32, zext[usize](i)] = v
+        }
+    }
+    wi_trim(dest)
+    return dest
+}
+
+fn wi_word(a WideInt, word i64, sign bool) u32 {
+    if word < 0 { return 0 }
+    i usize = bitcast[usize](word)
+    if i >= zext[usize](a.words) { return if sign { ~0 } else { 0 } }
+    v u32 = a.p[u32, i]
+    if sign && i + 1 == zext[usize](a.words) { v |= ~wi_top_mask(a) }
+    return v
+}
+
+fn wi_product(a WideInt, b WideInt, width u32) WideInt {
+    dest WideInt = wi_new(width)
+    for i u32 in 0..a.words {
+        carry u64 = 0
+        ai u64 = zext[u64](a.p[u32, zext[usize](i)])
+        for j u32 in 0..b.words {
+            if i + j >= dest.words { break }
+            k usize = zext[usize](i + j)
+            v u64 = ai * zext[u64](b.p[u32, zext[usize](j)]) + zext[u64](dest.p[u32, k]) + carry
+            dest.p[u32, k] = trunc[u32](v)
+            carry = v >> 32
+        }
+        k u32 = i + b.words
+        if k < dest.words { dest.p[u32, zext[usize](k)] = trunc[u32](carry) }
+    }
+    wi_trim(dest)
+    return dest
+}
+
+fn wi_divide(a WideInt, b WideInt, modulo bool) WideInt {
+    quot WideInt = wi_new(a.width)
+    remain WideInt = wi_new(a.width + 1)
+    divisor WideInt = wi_new(remain.width)
+    mem_copy(divisor.p, b.p, zext[usize](b.words) * 4)
+    i u32 = wi_length(a)
+    while i != 0 {
+        i -= 1
+        carry u32 = wi_bit(a, i)
+        for j u32 in 0..remain.words {
+            k usize = zext[usize](j)
+            v u32 = remain.p[u32, k]
+            remain.p[u32, k] = (v << 1) | carry
+            carry = v >> 31
+        }
+        if wi_cmp(remain, divisor) >= 0 {
+            wi_add(remain, divisor, true)
+            wi_set(quot, i)
+        }
+    }
+    heap_free(divisor.p)
+    if modulo {
+        heap_free(quot.p)
+        return {remain.p, a.width, a.words}
+    }
+    heap_free(remain.p)
+    return quot
+}
+
+fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool) void {
+    width u32 = ty_int_bits(n.ty)
+    x WideInt = wi_from_ast(a, width)
+    if tilde {
+        for i u32 in 0..x.words { x.p[u32, zext[usize](i)] = ~x.p[u32, zext[usize](i)] }
+        wi_trim(x)
+    }
+    if negate {
+        sign u32 = wi_bit(x, width - 1)
+        wi_negate(x)
+        if !ty_is_unsigned(n.ty) && sign != 0 && wi_bit(x, width - 1) != 0 { n.flags |= NF_OVERFLOW }
+    }
+    wi_store(n, x)
+}
+
+fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast], ty u32, k u8) void {
+    width u32 = ty_int_bits(ty)
+    x WideInt = wi_from_ast(a, width)
+    defer { heap_free(x.p) }
+    y WideInt = wi_from_ast(b, width)
+    defer { heap_free(y.p) }
+    signed_ty bool = !ty_is_unsigned(ty)
+    sx bool = signed_ty && wi_bit(x, width - 1) != 0
+    sy bool = signed_ty && wi_bit(y, width - 1) != 0
+    if k == 8 || k == 9 {
+        cmp i32 = if sx != sy { if sx { -1 } else { 1 } } else { wi_cmp(x, y) }
+        yes bool = cmp == 0
+        if pa_is(p, t, c"!=") { yes = cmp != 0 }
+        else if pa_is(p, t, c"<") { yes = cmp < 0 }
+        else if pa_is(p, t, c">") { yes = cmp > 0 }
+        else if pa_is(p, t, c"<=") { yes = cmp <= 0 }
+        else if pa_is(p, t, c">=") { yes = cmp >= 0 }
+        n.value = if yes { 1 } else { 0 }
+        return
+    }
+    dest WideInt = x
+    if k >= 5 && k <= 7 {
+        for i u32 in 0..x.words {
+            j usize = zext[usize](i)
+            if k == 5 { x.p[u32, j] |= y.p[u32, j] }
+            else if k == 6 { x.p[u32, j] ^= y.p[u32, j] }
+            else { x.p[u32, j] &= y.p[u32, j] }
+        }
+    } else if k == 10 {
+        if b.value >= zext[u64](width) || wi_ast_length(b) > 32 { n.flags |= NF_OVERFLOW; return }
+        shift u32 = trunc[u32](b.value)
+        left bool = pa_is(p, t, c"<<")
+        dest = wi_shift(x, shift, left, sx)
+        if left && sx {
+            n.flags = (n.flags & ~NF_ICE) | NF_FOLD
+            if !pa_is_gnu(p) || wi_bit(dest, width - 1) == 0 { n.flags |= NF_OVERFLOW }
+            else {
+                restored WideInt = wi_shift(dest, shift, false, true)
+                if wi_cmp(x, restored) != 0 { n.flags |= NF_OVERFLOW }
+                heap_free(restored.p)
+            }
+        } else if left && signed_ty && wi_length(x) + shift > width {
+            n.flags |= NF_OVERFLOW
+        }
+    } else if k == 11 {
+        sub bool = pa_is(p, t, c"-")
+        wi_add(x, y, sub)
+        sz bool = wi_bit(x, width - 1) != 0
+        if signed_ty && sx != sz && (sx != sy) == sub { n.flags |= NF_OVERFLOW }
+    } else {
+        if sx { wi_negate(x) }
+        if sy { wi_negate(y) }
+        neg bool = sx != sy
+        if pa_is(p, t, c"*") {
+            dest = wi_product(x, y, if signed_ty { width * 2 } else { width })
+            if signed_ty {
+                length u32 = wi_length(dest)
+                if length >= width && (!neg || length > width || !wi_only_bit(dest, width - 1)) {
+                    n.flags |= NF_OVERFLOW
+                }
+                dest = {dest.p, width, x.words}
+                wi_trim(dest)
+            }
+        } else {
+            if wi_length(y) == 0 { n.flags |= NF_OVERFLOW; return }
+            modulo bool = pa_is(p, t, c"%")
+            if signed_ty && sx && sy && wi_length(x) == width && wi_length(y) == 1 { n.flags |= NF_OVERFLOW }
+            dest = wi_divide(x, y, modulo)
+            if modulo { neg = sx }
+        }
+        if neg { wi_negate(dest) }
+    }
+    // x is a scratch copy; transfer its words into separately owned storage
+    // if this operation reused it in place.
+    if dest.p == x.p {
+        dest = wi_new(width)
+        mem_copy(dest.p, x.p, zext[usize](dest.words) * 4)
+    }
+    wi_store(n, dest)
+}
+
+fn wi_only_bit(x WideInt, bit u32) bool {
+    for i u32 in 0..x.words {
+        v u32 = 0
+        if i == bit / 32 { v = 1; v <<= bit % 32 }
+        if x.p[u32, zext[usize](i)] != v { return false }
+    }
+    return true
+}
+
+fn wi_literal(s Bytes, first usize, end usize, base u64) WideInt {
+    w WideInt = wi_new(trunc[u32]((end - first) * 4 + 1))
+    used u32 = 1
+    for i usize in first..end {
+        if s.p[u8, i] == 39 { continue }
+        carry u64 = zext[u64](cc_hex(s.p[u8, i]))
+        for j u32 in 0..used {
+            k usize = zext[usize](j)
+            v u64 = zext[u64](w.p[u32, k]) * base + carry
+            w.p[u32, k] = trunc[u32](v)
+            carry = v >> 32
+        }
+        if carry != 0 {
+            w.p[u32, zext[usize](used)] = trunc[u32](carry)
+            used += 1
+        }
+    }
+    return w
+}

@@ -1,0 +1,9 @@
+diff manifest/gcc/gcc/testsuite/gcc.dg/cpp/avoidpaste1.c Clang's text output joins adjacent colon tokens
+diff manifest/gcc/gcc/testsuite/gcc.dg/cpp/avoidpaste2.c Clang's text output joins adjacent colon tokens
+diff manifest/gcc/gcc/testsuite/gcc.dg/cpp/c23-scope-2.c Clang's text output joins adjacent colon tokens
+fcc-error manifest/gcc/gcc/testsuite/gcc.dg/cpp/multiline.c The test contains an unterminated literal accepted by other preprocessors
+fcc-error manifest/gcc/gcc/testsuite/gcc.dg/cpp/trad/quote.c The traditional preprocessor test relies on an unterminated literal
+fcc-error manifest/gcc/gcc/testsuite/gcc.dg/cpp/trad/recurse-3.c The traditional preprocessor test relies on an unterminated literal
+diff manifest/llvm/clang/test/Preprocessor/has_c_attribute.c Clang advertises a vendor attribute outside the fcc feature table
+diff manifest/llvm/clang/test/Preprocessor/pragma.c Clang's internal debug pragma controls its output
+fcc-error headers/tgmath.h The absolute glibc include bypasses the fcc resource header and hits a float-type guard under GCC 4.2 compatibility
