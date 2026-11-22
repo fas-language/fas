@@ -100,7 +100,9 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         s = prior
     } else {
         if s.linkage == 2 { map_put(&p.external, s.name, handle_addr(s)) }
-        if s.linkage != 0 && !ty_is_func(s.ty) { vec_push[addr](&p.objects, handle_addr(s)) }
+        // Track canonical declarations so attributes on a redeclaration
+        // are visible when the TU's symbols are finalized.
+        if s.linkage != 0 { vec_push[addr](&p.objects, handle_addr(s)) }
     }
     s.defined = s.defined || definition
     s.tentative = s.tentative || tentative

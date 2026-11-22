@@ -366,8 +366,12 @@ fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
     }
     for i usize in 0..p.objects.n {
         obj handle[Symbol] = handle_from_addr(p.objects.p[addr, i])
-        try se_finish_object(p, obj)
-        if p.on_object != null && (obj.defined || obj.tentative) {
+        func bool = ty_is_func(obj.ty)
+        if !func { try se_finish_object(p, obj) }
+        // Alias and IFUNC declarations define linker symbols without a body.
+        // Ordinary functions use the streaming function callback instead.
+        attr_def bool = pa_has_attr(p, obj.attrs, c"alias") || pa_has_attr(p, obj.attrs, c"ifunc")
+        if p.on_object != null && (attr_def || !func && (obj.defined || obj.tentative)) {
             n handle[Ast] = pa_node(ND_DECL, obj.loc, obj.ty)
             n.decl = obj
             n.a = handle_from_addr(obj.value)
