@@ -33,9 +33,20 @@ fn hide_has(p handle[Pp], set u32, id u32) bool {
 }
 
 fn hide_add(p handle[Pp], set u32, id u32) u32 {
+    // Repeated invocations commonly extend the same expansion history
+    // with the same macro. Reuse immutable nodes without retaining a
+    // separate map entry for every distinct history in the translation unit.
+    slot usize = zext[usize]((id ^ (set * 0x9e3779b9)) & 255)
+    recent u32 = p.recent_hides[slot]
+    if recent != 0 {
+        node Hide = vec_get[Hide](&p.hides, zext[usize](recent - 1))
+        if node.id == id && node.next == set { return recent }
+    }
     if hide_has(p, set, id) { return set }
     vec_push[Hide](&p.hides, {id, set})
-    return trunc[u32](p.hides.n)
+    recent = trunc[u32](p.hides.n)
+    p.recent_hides[slot] = recent
+    return recent
 }
 
 fn hide_merge(p handle[Pp], a u32, b u32, intersect bool) u32 {
