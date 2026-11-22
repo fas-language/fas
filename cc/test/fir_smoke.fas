@@ -1,0 +1,120 @@
+// Smoke test for cc/fir_out.fas + cc/abi.fas:
+// Emits a complete Fir 0.3 module to stdout with:
+//   - a global struct with bytes + symbol relocation,
+//   - a function taking & returning a 12-byte struct by value,
+//   - a function taking a _BitInt(96) (8-byte aligned agg) and returning i64,
+//   - @main calling both and returning 0 on success (nonzero on mismatch).
+// Compiled with `fas-fir` and executed by test/cc_types.sh.
+
+use "../../lib/core.fas"
+use "../../lib/os.fas"
+use "../../lib/bytes.fas"
+use "../types.fas"
+use "../layout.fas"
+use "../abi.fas"
+use "../fir_out.fas"
+
+fn main() i32 {
+    ctx TypeCtx = {}
+    tc_init(&ctx)
+    defer { tc_free(&ctx) }
+
+    w FirOut = {}
+    fir_init_fd(&w, STDOUT)
+    defer { fir_free(&w) }
+
+    fir_module_header(&w, c"x86_64-unknown-linux-gnu", false)
+
+    // struct Pair { int a; long b; } -> size 16, align 8
+    flds arr[2, FieldDef] = {}
+    flds[0].ty = TY_INT
+    flds[1].ty = TY_LONG
+    pair_ty u32 = ty_record_new(tc_intern_cstr(c"Pair"), false)
+    ty_record_complete(pair_ty, &flds[0], 2, false, 0, 0)
+    assert(ty_size(pair_ty) == 16 && ty_align(pair_ty) == 8)
+
+    // Global integer target and pointer global with relocation
+    g_val arr[4, u8] = { 42, 0, 0, 0 }
+    fir_global_init_begin(&w, bytes_c(c"g_num"), 4, 4, FIR_LOCAL, FIR_VIS_DEFAULT, bytes_empty(), true, false)
+    fir_global_init_bytes(&w, &g_val[0], 4)
+    fir_global_init_end(&w)
+
+    fir_global_init_begin(&w, bytes_c(c"g_ptr"), 8, 8, FIR_LOCAL, FIR_VIS_DEFAULT, bytes_empty(), true, false)
+    fir_global_init_reloc(&w, bytes_c(c"g_num"), 0, false, 8)
+    fir_global_init_end(&w)
+
+    // fn add_pair(Pair p) -> Pair { return { p.a + 10, p.b + 20 }; }
+    p1 arr[1, u32] = { pair_ty }
+    fir_func_begin(&w, bytes_c(c"add_pair"), pair_ty, &p1[0], 1, false, FIR_LOCAL, FIR_VIS_DEFAULT)
+    a_v u32 = fir_load(&w, c"i32", 0, 4)
+    b_ptr u32 = fir_ptradd_const(&w, 0, 8)
+    b_v u32 = fir_load(&w, c"i64", b_ptr, 8)
+    c10 u32 = fir_const_int(&w, c"i32", 10)
+    c20 u32 = fir_const_int(&w, c"i64", 20)
+    a2 u32 = fir_binop(&w, c"add", c"i32", a_v, c10)
+    b2 u32 = fir_binop(&w, c"add", c"i64", b_v, c20)
+    out_p u32 = fir_alloca(&w, 16, 8)
+    fir_store(&w, c"i32", a2, out_p, 4)
+    out_b u32 = fir_ptradd_const(&w, out_p, 8)
+    fir_store(&w, c"i64", b2, out_b, 8)
+    fir_ret(&w, out_p)
+    fir_func_end(&w)
+
+    // fn sum_bi96(_BitInt(96) x) -> i64 { return lo + hi; }
+    bi96 u32 = ty_bitint(96, false)
+    p_bi arr[1, u32] = { bi96 }
+    fir_func_begin(&w, bytes_c(c"sum_bi96"), TY_LONG, &p_bi[0], 1, false, FIR_LOCAL, FIR_VIS_DEFAULT)
+    lo u32 = fir_load(&w, c"i64", 0, 8)
+    hi_p u32 = fir_ptradd_const(&w, 0, 8)
+    hi u32 = fir_load(&w, c"i64", hi_p, 8)
+    s_bi u32 = fir_binop(&w, c"add", c"i64", lo, hi)
+    fir_ret(&w, s_bi)
+    fir_func_end(&w)
+
+    // fn main(i32 argc, ptr argv) -> i32
+    m_params arr[2, u32] = { TY_INT, ty_ptr(ty_ptr(TY_CHAR)) }
+    fir_func_begin(&w, bytes_c(c"main"), TY_INT, &m_params[0], 2, false, FIR_GLOBAL, FIR_VIS_DEFAULT)
+
+    // Load *g_ptr (should be 42)
+    gp_addr u32 = fir_sym_addr(&w, bytes_c(c"g_ptr"))
+    num_ptr u32 = fir_load(&w, c"ptr", gp_addr, 8)
+    num_v u32 = fir_load(&w, c"i32", num_ptr, 4)
+
+    // Call add_pair({42, 100}) -> {52, 120}
+    in_p u32 = fir_alloca(&w, 16, 8)
+    fir_store(&w, c"i32", num_v, in_p, 4)
+    c100 u32 = fir_const_int(&w, c"i64", 100)
+    in_b u32 = fir_ptradd_const(&w, in_p, 8)
+    fir_store(&w, c"i64", c100, in_b, 8)
+    call_args arr[1, u32] = { in_p }
+    res_p u32 = fir_call(&w, bytes_c(c"add_pair"), pair_ty, &p1[0], 1, false, &call_args[0], null, 1)
+    ra u32 = fir_load(&w, c"i32", res_p, 4)
+    rb_p u32 = fir_ptradd_const(&w, res_p, 8)
+    rb u32 = fir_load(&w, c"i64", rb_p, 8)
+
+    // Call sum_bi96({3, 5}) -> 8
+    bi_p u32 = fir_alloca(&w, 16, 8)
+    c3 u32 = fir_const_int(&w, c"i64", 3)
+    c5 u32 = fir_const_int(&w, c"i64", 5)
+    fir_store(&w, c"i64", c3, bi_p, 8)
+    bi_hi u32 = fir_ptradd_const(&w, bi_p, 8)
+    fir_store(&w, c"i64", c5, bi_hi, 8)
+    bi_args arr[1, u32] = { bi_p }
+    bsum u32 = fir_call(&w, bytes_c(c"sum_bi96"), TY_LONG, &p_bi[0], 1, false, &bi_args[0], null, 1)
+
+    // Compute (ra - 52) + trunc(rb - 120) + trunc(bsum - 8) == 0
+    c52 u32 = fir_const_int(&w, c"i32", 52)
+    c120 u32 = fir_const_int(&w, c"i64", 120)
+    c8 u32 = fir_const_int(&w, c"i64", 8)
+    d1 u32 = fir_binop(&w, c"sub", c"i32", ra, c52)
+    d2_64 u32 = fir_binop(&w, c"sub", c"i64", rb, c120)
+    d2 u32 = fir_cast(&w, c"trunc", c"i32", d2_64)
+    d3_64 u32 = fir_binop(&w, c"sub", c"i64", bsum, c8)
+    d3 u32 = fir_cast(&w, c"trunc", c"i32", d3_64)
+    t1 u32 = fir_binop(&w, c"add", c"i32", d1, d2)
+    t2 u32 = fir_binop(&w, c"add", c"i32", t1, d3)
+    fir_ret(&w, t2)
+    fir_func_end(&w)
+
+    return 0
+}
