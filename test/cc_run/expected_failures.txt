@@ -8,7 +8,6 @@ gcc/gcc/testsuite/gcc.c-torture/execute/970217-1.c exit-mismatch: fcc exit=1, cl
 gcc/gcc/testsuite/gcc.c-torture/execute/990413-2.c fir-error: 33: asm constraint "=t": x87 register operands are not supported
 gcc/gcc/testsuite/gcc.c-torture/execute/991030-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/builtin-bitops-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.c-torture/execute/frame-address.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/ieee/pr36332.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/ieee/unsafe-fp-assoc.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/pr64242.c exit-mismatch: fcc exit=139, clang exit=0
@@ -24,7 +23,6 @@ gcc/gcc/testsuite/gcc.dg/auto-type-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/bf-ms-layout-2.c exit-mismatch: fcc exit=0, clang exit=134
 gcc/gcc/testsuite/gcc.dg/bf-ms-layout-5.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/bitint-124.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/builtin-addc-1.c link-error: fas-ld: /tmp/fcc_2709598_1.o: undefined symbol addc
 gcc/gcc/testsuite/gcc.dg/builtin-bswap-5.c link-error: fas-ld: /tmp/fcc_2709650_1.o: undefined symbol link_error
 gcc/gcc/testsuite/gcc.dg/builtin-dynamic-object-size-11.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/builtin-object-size-11.c exit-mismatch: fcc exit=134, clang exit=0
@@ -32,7 +30,6 @@ gcc/gcc/testsuite/gcc.dg/c11-float-7.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c11-true_min-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-auto-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-complit-1.c exit-mismatch: fcc exit=139, clang exit=0
-gcc/gcc/testsuite/gcc.dg/c23-constexpr-2a.c link-error: fas-ld: duplicate symbol a: /tmp/fcc_2710559_1.o and /tmp/fcc_2710559_3.o
 gcc/gcc/testsuite/gcc.dg/c23-float-12.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-float-7a.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-float-7b.c exit-mismatch: fcc exit=134, clang exit=0
@@ -98,7 +95,6 @@ gcc/gcc/testsuite/gcc.dg/torture/float128-extend-nan.c fcc-error: /home/glonex/f
 gcc/gcc/testsuite/gcc.dg/torture/float128-mul-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-mul-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit int
 gcc/gcc/testsuite/gcc.dg/torture/float128-truncdf-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-truncdf-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit
 gcc/gcc/testsuite/gcc.dg/torture/float128-truncsf-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-truncsf-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit
-gcc/gcc/testsuite/gcc.dg/torture/float16-builtin-issignaling-1.c link-error: fas-ld: /tmp/fcc_2728768_1.o: undefined symbol nanf16
 gcc/gcc/testsuite/gcc.dg/torture/float16-nan.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/float16-tg-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/fp-double-convert-float-1.c exit-mismatch: fcc exit=0, clang exit=134
@@ -109,15 +105,9 @@ gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128.c fcc-error: /home/glon
 gcc/gcc/testsuite/gcc.dg/torture/inline-mem-cmp-1.c link-error: fas-ld: /tmp/fcc_2729374_1.o: undefined symbol lib_memcmp
 gcc/gcc/testsuite/gcc.dg/torture/inline-mem-cpy-1.c link-error: fas-ld: /tmp/fcc_2729429_1.o: undefined symbol lib_memcmp
 gcc/gcc/testsuite/gcc.dg/torture/inline-mem-cpy-cmp-1.c link-error: fas-ld: /tmp/fcc_2729442_1.o: undefined symbol lib_memcmp
-gcc/gcc/testsuite/gcc.dg/torture/pr110228.c fir-error: verifier: asm template refers to operand 1 of 1
 gcc/gcc/testsuite/gcc.dg/torture/pr19683-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/torture/pr58670.c fir-error: verifier: asm template names %[lab], which no operand has
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-2.c link-error: fas-ld: /tmp/fcc_2739441_1.o: undefined symbol ia32_vec_init_v2si
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-3.c link-error: fas-ld: /tmp/fcc_2739444_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-5.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-5.c:9:6: error: C23 requires parameter types (K&R declarations are unsupp
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-6.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-6.c:9:6: error: C23 requires parameter types (K&R declarations are unsupp
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/push-1.c link-error: fas-ld: /tmp/fcc_2739515_1.o: undefined symbol ia32_vec_init_v2si
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/vararg-3.c link-error: fas-ld: /tmp/fcc_2739692_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/torture/vector-shift2.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/vector-shift2.c:32:17: error: incompatible vector operands
 gcc/gcc/testsuite/gcc.dg/transparent-union-5.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/transparent-union-5.c:34:10: error: incompatible types in assignment or initialization
 gcc/gcc/testsuite/gcc.dg/tree-ssa/builtin-sprintf.c exit-mismatch: fcc exit=134, clang exit=0
@@ -125,9 +115,6 @@ gcc/gcc/testsuite/gcc.dg/tree-ssa/loop-interchange-1b.c exit-mismatch: fcc exit=
 gcc/gcc/testsuite/gcc.dg/tree-ssa/vrp66.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/tree-ssa/vrp66.c:734:22: error: invalid arithmetic or signed overflow in constant initializer
 gcc/gcc/testsuite/gcc.dg/typename-vla-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/typename-vla-2.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/ubsan/pr82498.c fir-error: verifier: invalid bitcast from <2 x i64> to <8 x i8>
-gcc/gcc/testsuite/gcc.dg/ubsan/pr84508-1.c link-error: fas-ld: /tmp/fcc_2744570_1.o: undefined symbol ia32_vec_init_v2si
-gcc/gcc/testsuite/gcc.dg/ubsan/pr84508-2.c link-error: fas-ld: /tmp/fcc_2744573_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/vla-13.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-14.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-15.c exit-mismatch: fcc exit=134, clang exit=0

@@ -431,6 +431,14 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
+    if init.kind == ND_CAST && init.a != null && (gen_is_mem_ty(u) || k == TYK_VECTOR) {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
+    if init.kind == ND_NAME && init.decl != null && init.decl.storage == SC_CONSTEXPR && init.decl.value != null {
+        gen_static_fill(si, tid, handle_from_addr(init.decl.value), off)
+        return
+    }
 
     // Unwrap single-element brace around scalar (NOT vectors!)
     if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {

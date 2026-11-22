@@ -95,6 +95,12 @@ struct BlockAddrPatch {
     target_blk u32    // target GenBlock id
 }
 
+struct GnuInlineDef {
+    code Buf
+    ext_fns Vec[ExternFnRef]
+    ext_objs Vec[ExternObjRef]
+}
+
 struct GlobalBlockAddr {
     fn_sym handle[Symbol]
     target_lbl handle[Label]
@@ -118,6 +124,11 @@ struct GenCtx {
     static_locals Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     // Pending tentative definitions emitted at TU end if not defined
     tentatives Vec[TentativeRef]
+
+    // Buffered `extern inline __attribute__((gnu_inline))` definitions emitted only if referenced
+    gnu_inlines Vec[GnuInlineDef]
+    gnu_inline_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq] // sym_name_id -> 1-based idx
+    cur_gnu_inline_idx u32
 
     str_counter u32
     tmp_counter u32
@@ -173,6 +184,14 @@ fn gen_free(ctx handle[GenCtx]) void {
     vec_free(&ctx.ext_objs)
     table_free(&ctx.static_locals)
     vec_free(&ctx.tentatives)
+    for i usize in 0..ctx.gnu_inlines.n {
+        gi handle[GnuInlineDef] = vec_at(&ctx.gnu_inlines, i)
+        buf_free(&gi.code)
+        vec_free(&gi.ext_fns)
+        vec_free(&gi.ext_objs)
+    }
+    vec_free(&ctx.gnu_inlines)
+    table_free(&ctx.gnu_inline_map)
     gen_reset_func_state(ctx)
     vec_free(&ctx.blocks)
     table_free(&ctx.locals)
@@ -338,7 +357,7 @@ fn gen_attr_int_arg(attrs handle[Attr], name addr, fallback u64) u64 {
 
 fn gen_sym_linkage(s handle[Symbol]) u8 {
     if gen_has_attr(s.attrs, c"weak") { return FIR_WEAK }
-    if s.linkage == 1 || s.storage == SC_STATIC { return FIR_LOCAL }
+    if s.linkage == 1 || s.storage == SC_STATIC || s.storage == SC_CONSTEXPR { return FIR_LOCAL }
     return FIR_GLOBAL
 }
 
@@ -418,12 +437,19 @@ fn gen_note_extern_fn(s handle[Symbol]) void {
         return
     }
     buf_free(&alias_buf)
+    link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+    noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
+    if gc.cur_gnu_inline_idx != 0 {
+        gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
+        r handle[ExternFnRef] = vec_add(&gi.ext_fns)
+        r.name_id = nid
+        r.decl_line = gen_format_declare(gen_sym_bytes(nid), s.ty, link, noret)
+        return
+    }
     k U64Key = {zext[u64](nid)}
     seen u8 = table_get(&gc.ext_fn_seen, &k) catch 0
     if seen != 0 { return }
     _ bool = table_put(&gc.ext_fn_seen, &k, 1)
-    link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
-    noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
     r handle[ExternFnRef] = vec_add(&gc.ext_fns)
     r.name_id = nid
     r.decl_line = gen_format_declare(gen_sym_bytes(nid), s.ty, link, noret)
@@ -432,6 +458,13 @@ fn gen_note_extern_fn(s handle[Symbol]) void {
 fn gen_note_extern_fn_raw(name Bytes, fn_ty u32) void {
     nid u32 = gen_intern_sym(name)
     if gen_is_defined(nid) { return }
+    if gc.cur_gnu_inline_idx != 0 {
+        gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
+        r handle[ExternFnRef] = vec_add(&gi.ext_fns)
+        r.name_id = nid
+        r.decl_line = gen_format_declare(name, fn_ty, FIR_GLOBAL, false)
+        return
+    }
     k U64Key = {zext[u64](nid)}
     seen u8 = table_get(&gc.ext_fn_seen, &k) catch 0
     if seen != 0 { return }
@@ -453,15 +486,25 @@ fn gen_note_extern_obj(s handle[Symbol]) void {
         return
     }
     buf_free(&alias_buf)
+    sz u64 = ty_size(s.ty)
+    al u64 = ty_align(s.ty)
+    if gc.cur_gnu_inline_idx != 0 {
+        gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
+        r handle[ExternObjRef] = vec_add(&gi.ext_objs)
+        r.name_id = nid
+        r.size = if sz > 0 { sz } else { 1 }
+        r.align = if al > 0 { al } else { 1 }
+        r.linkage = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+        r.tls = s.thread_local
+        return
+    }
     k U64Key = {zext[u64](nid)}
     seen u8 = table_get(&gc.ext_obj_seen, &k) catch 0
     if seen != 0 { return }
     _ bool = table_put(&gc.ext_obj_seen, &k, 1)
     r handle[ExternObjRef] = vec_add(&gc.ext_objs)
     r.name_id = nid
-    sz u64 = ty_size(s.ty)
     r.size = if sz > 0 { sz } else { 1 }
-    al u64 = ty_align(s.ty)
     r.align = if al > 0 { al } else { 1 }
     r.linkage = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
     r.tls = s.thread_local
@@ -496,6 +539,7 @@ fn gen_emit_fir_ty(b handle[Buf], tid u32) void {
     }
     if k == TYK_ENUM { gen_emit_fir_ty(b, ty_enum(n.aux1).underlying); return }
     if k == TYK_FLOAT16 { buf_str(b, c"f16"); return }
+    if k == TYK_BFLOAT16 { buf_str(b, c"i16"); return }
     if k == TYK_FLOAT { buf_str(b, c"f32"); return }
     if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
     if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
@@ -1364,6 +1408,48 @@ fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
 }
 
 fn gen_finish_tu() void fails {
+    // 0. Emit any `extern inline __attribute__((gnu_inline))` functions transitively referenced
+    gi_i usize = 0
+    while gi_i < gc.ext_fns.n {
+        r handle[ExternFnRef] = vec_at(&gc.ext_fns, gi_i)
+        gi_i += 1
+        rnid u32 = r.name_id
+        if gen_is_defined(rnid) { continue }
+        gk U64Key = {zext[u64](rnid)}
+        gidx u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
+        if gidx == 0 { continue }
+        gen_mark_defined(rnid)
+        gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gidx - 1))
+        if gi.code.n > 0 {
+            buf_append(&gc.out.buf, buf_bytes(&gi.code))
+            fir_flush(&gc.out)
+        }
+        for fi usize in 0..gi.ext_fns.n {
+            fr handle[ExternFnRef] = vec_at(&gi.ext_fns, fi)
+            if gen_is_defined(fr.name_id) { continue }
+            fk U64Key = {zext[u64](fr.name_id)}
+            seen u8 = table_get(&gc.ext_fn_seen, &fk) catch 0
+            if seen != 0 { continue }
+            _ bool = table_put(&gc.ext_fn_seen, &fk, 1)
+            nr handle[ExternFnRef] = vec_add(&gc.ext_fns)
+            nr.name_id = fr.name_id
+            nr.decl_line = fr.decl_line
+        }
+        for oi usize in 0..gi.ext_objs.n {
+            or_ handle[ExternObjRef] = vec_at(&gi.ext_objs, oi)
+            if gen_is_defined(or_.name_id) { continue }
+            ok_ U64Key = {zext[u64](or_.name_id)}
+            seen u8 = table_get(&gc.ext_obj_seen, &ok_) catch 0
+            if seen != 0 { continue }
+            _ bool = table_put(&gc.ext_obj_seen, &ok_, 1)
+            no handle[ExternObjRef] = vec_add(&gc.ext_objs)
+            no.name_id = or_.name_id
+            no.size = or_.size
+            no.align = or_.align
+            no.linkage = or_.linkage
+            no.tls = or_.tls
+        }
+    }
     // 1. Emit tentative definitions that were not subsequently defined
     for i usize in 0..gc.tentatives.n {
         tr handle[TentativeRef] = vec_at(&gc.tentatives, i)

@@ -1652,9 +1652,84 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         gen_store_ty(nim, gen_ptradd_const(slot, bitcast[i64](esz)), eal, false, false)
         return slot
     }
-    if bytes_eq_c(bname, c"__builtin_return_address") || bytes_eq_c(bname, c"__builtin_frame_address") ||
-       bytes_eq_c(bname, c"__builtin_extract_return_addr") {
+    if bytes_eq_c(bname, c"__builtin_frame_address") {
+        lvl u64 = if a0 != null { gen_eval_const_int(a0) } else { 0 }
+        if lvl == 0 {
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = asm \"movq %%rbp, %0\" out(\"=r\" ptr)\n")
+            return v
+        }
         return gen_const_zero(n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_return_address") {
+        lvl u64 = if a0 != null { gen_eval_const_int(a0) } else { 0 }
+        if lvl == 0 {
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = asm \"movq 8(%%rbp), %0\" out(\"=r\" ptr)\n")
+            return v
+        }
+        return gen_const_zero(n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_extract_return_addr") {
+        return try gen_rvalue(a0)
+    }
+    if bytes_eq_c(bname, c"__builtin_addc") || bytes_eq_c(bname, c"__builtin_addcl") ||
+       bytes_eq_c(bname, c"__builtin_addcll") || bytes_eq_c(bname, c"__builtin_addcs") ||
+       bytes_eq_c(bname, c"__builtin_addcb") || bytes_eq_c(bname, c"__builtin_subc") ||
+       bytes_eq_c(bname, c"__builtin_subcl") || bytes_eq_c(bname, c"__builtin_subcll") ||
+       bytes_eq_c(bname, c"__builtin_subcs") || bytes_eq_c(bname, c"__builtin_subcb") {
+        is_sub bool = bytes_starts_with(bname, bytes_c(c"__builtin_subc"))
+        t u32 = n.ty
+        if a3 != null && ty_is_ptr(a3.ty) {
+            t = ty_unqual(ty_node(ty_unqual(a3.ty)).elem)
+            n.ty = t
+        }
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, t)
+        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, t)
+        vc u32 = gen_convert(try gen_rvalue(a2), a2.ty, t)
+        cp u32 = try gen_rvalue(a3)
+        op_cstr addr = if is_sub { c"usub_ovf" } else { c"uadd_ovf" }
+        s1 u32 = gen_new_val()
+        c1 u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, s1)
+        buf_str(b, c", ")
+        gen_emit_val(b, c1)
+        buf_str(b, c" = ")
+        buf_str(b, op_cstr)
+        buf_str(b, c" (")
+        gen_emit_fir_ty(b, t)
+        buf_str(b, c", i1) ")
+        gen_emit_val(b, v0)
+        buf_str(b, c", ")
+        gen_emit_val(b, v1)
+        buf_u8(b, 10)
+        s2 u32 = gen_new_val()
+        c2 u32 = gen_new_val()
+        buf_str(b, c"  ")
+        gen_emit_val(b, s2)
+        buf_str(b, c", ")
+        gen_emit_val(b, c2)
+        buf_str(b, c" = ")
+        buf_str(b, op_cstr)
+        buf_str(b, c" (")
+        gen_emit_fir_ty(b, t)
+        buf_str(b, c", i1) ")
+        gen_emit_val(b, s1)
+        buf_str(b, c", ")
+        gen_emit_val(b, vc)
+        buf_u8(b, 10)
+        cout1 u32 = gen_binop_raw(c"or", c"i1", c1, c2)
+        cout u32 = gen_convert(cout1, TY_BOOL, t)
+        gen_store_ty(cout, cp, ty_align(t), false, false)
+        return s2
     }
     if bytes_eq_c(bname, c"__builtin_classify_type") {
         cls i32 = -1
@@ -1671,12 +1746,48 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         }
         return gen_const_i32(cls)
     }
-    if bytes_eq_c(bname, c"__builtin_nan") || bytes_eq_c(bname, c"__builtin_nanf") || bytes_eq_c(bname, c"__builtin_nanl") {
-        return gen_const_float(n.ty, 0x7ff8000000000000)
+    if bytes_eq_c(bname, c"__builtin_nan") || bytes_eq_c(bname, c"__builtin_nanf") ||
+       bytes_eq_c(bname, c"__builtin_nanl") || bytes_eq_c(bname, c"__builtin_nanf16") ||
+       bytes_eq_c(bname, c"__builtin_nanf32") || bytes_eq_c(bname, c"__builtin_nanf64") {
+        ft u32 = n.ty
+        if !ty_is_real_float(ft) {
+            if bytes_eq_c(bname, c"__builtin_nanf16") { ft = TY_FLOAT16 }
+            else if bytes_eq_c(bname, c"__builtin_nanf") || bytes_eq_c(bname, c"__builtin_nanf32") { ft = TY_FLOAT }
+            else if bytes_eq_c(bname, c"__builtin_nanl") { ft = TY_LDOUBLE }
+            else { ft = TY_DOUBLE }
+            n.ty = ft
+        }
+        if ty_kind(ft) == TYK_FLOAT16 {
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = freeze f16 f16 0x7e00\n")
+            return v
+        }
+        return gen_const_float(ft, 0x7ff8000000000000)
     }
     if bytes_eq_c(bname, c"__builtin_inf") || bytes_eq_c(bname, c"__builtin_inff") || bytes_eq_c(bname, c"__builtin_infl") ||
-       bytes_eq_c(bname, c"__builtin_huge_val") || bytes_eq_c(bname, c"__builtin_huge_valf") || bytes_eq_c(bname, c"__builtin_huge_vall") {
-        return gen_const_float(n.ty, 0x7ff0000000000000)
+       bytes_eq_c(bname, c"__builtin_inff16") || bytes_eq_c(bname, c"__builtin_inff32") || bytes_eq_c(bname, c"__builtin_inff64") ||
+       bytes_eq_c(bname, c"__builtin_huge_val") || bytes_eq_c(bname, c"__builtin_huge_valf") || bytes_eq_c(bname, c"__builtin_huge_vall") ||
+       bytes_eq_c(bname, c"__builtin_huge_valf16") {
+        ft u32 = n.ty
+        if !ty_is_real_float(ft) {
+            if bytes_eq_c(bname, c"__builtin_inff16") || bytes_eq_c(bname, c"__builtin_huge_valf16") { ft = TY_FLOAT16 }
+            else if bytes_eq_c(bname, c"__builtin_inff") || bytes_eq_c(bname, c"__builtin_inff32") || bytes_eq_c(bname, c"__builtin_huge_valf") { ft = TY_FLOAT }
+            else if bytes_eq_c(bname, c"__builtin_infl") || bytes_eq_c(bname, c"__builtin_huge_vall") { ft = TY_LDOUBLE }
+            else { ft = TY_DOUBLE }
+            n.ty = ft
+        }
+        if ty_kind(ft) == TYK_FLOAT16 {
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = freeze f16 f16 0x7c00\n")
+            return v
+        }
+        return gen_const_float(ft, 0x7ff0000000000000)
     }
 
     // Checked overflow builtins: __builtin_add_overflow / sub / mul (and typed variants)
