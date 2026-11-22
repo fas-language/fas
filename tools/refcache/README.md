@@ -19,7 +19,9 @@ cache reads and writes.
 
 Declare every explicit input with `--dep` and every output with `--out`.
 Use `--c` for the supported GCC and Clang driver forms. The driver writes a
-private `-MD` dependency file including system headers. Hosted links also use
+private `-MD` dependency file including system headers. Clang preprocessing
+also records its include trace to cache diagnostics from missing headers. A
+subsequent appearance of a missing header invalidates those entries. Hosted links use
 the GNU linker map to record loaded files. C commands that fail to report
 dependencies, assembly that reads extra files, and linker commands with
 undeclared search or script inputs run directly. Use `--stdin` to include

@@ -109,5 +109,36 @@ cmp c e
 printf 'stdin\000\377' | "$cache" run --stdin --ns stdin -- cat >actual
 printf 'stdin\000\377' | cmp - actual
 "$cache" verify --sample 2 | grep 'verified=2 requested=2 mismatches=0'
+# Clang puts its include trace in a separate file even when a header
+# lookup fails, so we can replay the failure until the header appears.
+mkdir trace include
+ln -s ../cc trace/clang-22
+printf '#include <appears.h>\nVALUE\n' > missing.c
+missing() {
+    "$cache" run --ns missing --c --dep missing.c -- \
+        ./trace/clang-22 -Iinclude -E -P missing.c
+}
+rc1=0 rc2=0
+missing >miss.1.out 2>miss.1.err || rc1=$?
+calls_after_scan=$(wc -c <cc-calls)
+missing >miss.2.out 2>miss.2.err || rc2=$?
+[[ $rc1 == 1 && $rc2 == 1 && $(wc -c <cc-calls) == "$calls_after_scan" ]]
+cmp miss.1.out miss.2.out
+cmp miss.1.err miss.2.err
+printf '#define VALUE 303\n' >include/appears.h
+missing | grep -qx 303
+
+# Exercise replacement of a previously written output with a different byte
+# string of identical length, as in the llvm-mc fuzz loop.
+printf third > input
+run output
+cmp output input
+printf other > input
+run output
+cmp output input
+rm output
+run output
+cmp output input
+
 "$here/bench.py" self-test
 echo 'refcache: all tests passed'

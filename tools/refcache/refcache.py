@@ -30,6 +30,8 @@ crtend.o crtendS.o libc.so libc.so.6 libc.a libc_nonshared.a libgcc.a libgcc_s.s
 libm.so libm.so.6 libm.a libmvec.so.1 libatomic.so libatomic.so.1
 ld-linux-x86-64.so.2
 """.split()
+MISSING_HEADER = re.compile(rb"fatal error: '([^'\r\n]+)' file not found")
+INCLUDE_OPTIONS = ("-isystem", "-idirafter", "-iquote", "-I")
 TIME_MACRO = re.compile(rb"\b__(?:DATE|TIME|TIMESTAMP)__\b")
 
 
@@ -55,6 +57,18 @@ def atomic_write(path, data, mode=0o644):
 
 def signature(st):
     return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns]
+
+
+@lru_cache(maxsize=32)
+def clang_include_roots(argv0, cwd, env_items, identity):
+    probe_env = dict(env_items)
+    probe_env["LC_ALL"] = "C"
+    probe = subprocess.run([argv0, "-E", "-x", "c", "-v", "-"], cwd=cwd, env=probe_env,
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+    _, marker, search = os.fsdecode(probe.stderr).partition("#include <...> search starts here:\n")
+    if not marker or "End of search list." not in search or probe.returncode:
+        raise ValueError("could not read Clang's include search list")
+    return tuple(line.strip() for line in search.partition("End of search list.")[0].splitlines())
 
 
 def fingerprint(path, prior=None, scan=False):
@@ -267,7 +281,11 @@ class Cache:
             entry = self.read_json(index)
             if entry["request"] != request:
                 raise ValueError("wrong request")
+            if entry.get("format") != 2 and entry["code"] == 0 and set(descriptor["outs"]) - entry["outputs"].keys():
+                raise ValueError("incomplete output metadata")
             current = self.dependencies(inv, entry["deps"], entry["deps"])
+            if any(inv.path(inv.expand(name)).exists() for name in entry.get("missing", ())):
+                raise ValueError("previously missing header is now available")
             if self.result_key(request, current) == entry["key"]:
                 stdout, stderr, outputs = self.load_result(entry)
                 for name, data, mode in outputs:
@@ -288,6 +306,7 @@ class Cache:
         except OSError:
             return execute(inv.argv)
         started = time.time_ns()
+        missing = ()
         if inv.c:
             if (input and TIME_MACRO.search(input)) or any(
                 flag in env for flag in ("DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES")
@@ -301,7 +320,11 @@ class Cache:
                 )
                 linking = not {"-E", "-S", "-c", "-fsyntax-only"}.intersection(inv.argv)
                 mapfile = Path(tmp) / "link.map"
+                tracefile = Path(tmp) / "header-trace"
+                trace_headers = "-E" in inv.argv and bool(re.fullmatch(r"clang(?:-22)?", Path(inv.argv[0]).name))
                 flags = ["-MD", "-MF", str(depfile), "-MT", "refcache"] if source else []
+                if trace_headers:
+                    flags.extend(["-Xclang", "-header-include-file", "-Xclang", str(tracefile)])
                 if linking:
                     flags.append(f"-Wl,-Map={mapfile}")
                 # GCC uses the -o operand as the dependency destination for
@@ -316,10 +339,18 @@ class Cache:
                     exc.cmd = inv.argv
                     raise
                 result.args = inv.argv
-                if result.returncode and flags:
-                    return execute(inv.argv)
                 try:
-                    names = dependency_words(os.fsdecode(depfile.read_bytes())) if source else []
+                    if source and depfile.is_file():
+                        names = dependency_words(os.fsdecode(depfile.read_bytes()))
+                    elif source and trace_headers and result.returncode == 1:
+                        names = os.fsdecode(tracefile.read_bytes()).splitlines()
+                        missing = self.missing_headers(inv, env, identity, result.stderr, names)
+                        if not missing:
+                            return result
+                    elif source:
+                        return result
+                    else:
+                        names = []
                     if linking:
                         loads = [line[5:] for line in os.fsdecode(mapfile.read_bytes()).splitlines()
                                  if line.startswith("LOAD ")]
@@ -330,7 +361,10 @@ class Cache:
                         # compiles and links in a single invocation.
                         names.extend(name for name in loads
                                      if inv.path(name).is_file() or not name.endswith(".o"))
-                except (OSError, ValueError):
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    # Older Clang versions can lack the separate include trace.
+                    if trace_headers and not tracefile.exists():
+                        return execute(inv.argv)
                     return result
         else:
             result, names = execute(inv.argv), []
@@ -370,14 +404,41 @@ class Cache:
                 if path.startswith("$REFCACHE_SCRATCH/"):
                     source = inv.path(inv.expand(path))
                     snapshots[path] = [self.put(source.read_bytes()), stat.S_IMODE(source.stat().st_mode)]
-            entry = dict(request=request, key=self.result_key(request, deps), deps=deps,
-                         snapshots=snapshots, stdin=None if input is None else self.put(input),
+            entry = dict(format=2, request=request, key=self.result_key(request, deps), deps=deps,
+                         snapshots=snapshots, missing=missing, stdin=None if input is None else self.put(input),
                          code=result.returncode, stdout=self.put(result.stdout), stderr=self.put(result.stderr),
                          outputs=outputs, cwd=inv.canonical(inv.cwd))
             self.write_json(index, entry)
         except (OSError, ValueError):
             pass
         return result
+
+    @staticmethod
+    def missing_headers(inv, env, identity, stderr, headers):
+        absent = MISSING_HEADER.findall(stderr)
+        if not absent:
+            return ()
+        # The trace records opened files. A missing operand can become visible
+        # through an include root or as a new quoted include next to any input.
+        # Track both conservatively on subsequent hits.
+        roots = {inv.cwd, *(str(inv.path(name).parent) for name in (*inv.deps, *headers))}
+        roots.update(clang_include_roots(inv.argv[0], inv.cwd, tuple(sorted(relevant_env(env, inv.env_keys).items())),
+                                         digest(encode(identity))))
+        it = iter(inv.argv[1:])
+        for arg in it:
+            if arg.startswith(("-iwith", "-iframework", "-F", "-ivfsoverlay", "-isysroot",
+                               "--sysroot", "-resource-dir", "--target", "-target", "-nostdinc++")):
+                return ()
+            for option in INCLUDE_OPTIONS:
+                if arg.startswith(option):
+                    value = arg[len(option):] or next(it, "")
+                    roots.add(str(inv.path(value)))
+                    break
+        candidates = {inv.path(str(Path(root) / os.fsdecode(name)))
+                      for name in absent for root in roots}
+        if any(path.exists() for path in candidates):
+            return ()
+        return sorted(inv.canonical(str(path)) for path in candidates)
 
     @staticmethod
     def output_stat(path):
@@ -488,7 +549,9 @@ class Cache:
                 current = self.dependencies(inv, entry["deps"], entry["deps"])
             except OSError:
                 return None
-            if self.result_key(entry["request"], current) != entry["key"]:
+            if self.result_key(entry["request"], current) != entry["key"] or any(
+                inv.path(inv.expand(name)).exists() for name in entry.get("missing", ())
+            ):
                 return None
             # Rewrite only declared outputs, leaving live inputs untouched.
             output_args = {}
