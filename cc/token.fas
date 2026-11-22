@@ -99,6 +99,11 @@ fn cc_diag(n handle[CNames], loc u32, label addr, message Bytes) void {
 
 error CError
 
+fn cc_warning(n handle[CNames], loc u32, mode u8, message addr) void fails {
+    if mode == WARN_ERROR { try cc_error(n, loc, message) }
+    if mode == WARN_ON { cc_diag(n, loc, c"warning: ", bytes_c(message)) }
+}
+
 fn cc_error(n handle[CNames], loc u32, message addr) void fails {
     cc_diag(n, loc, c"error: ", bytes_c(message))
     fail CError

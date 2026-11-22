@@ -374,6 +374,12 @@ fn se_ice(p handle[Parser], e handle[Ast]) u64 fails {
 
 fn se_scalar(p handle[Parser], e handle[Ast]) void fails {
     if !ty_is_scalar(se_decay(e.ty)) && e.ty != TY_INVALID { try pa_error(p, e.loc, c"expected a scalar expression") }
+    if p.pp != null && p.pp.warning_modes.address != WARN_OFF &&
+        e.kind == ND_UNARY && bytes_eq_c(cc_name(p.names, e.op), c"&") &&
+        e.a.kind == ND_NAME && e.a.decl != null && !pa_has_attr(p, e.a.decl.attrs, c"weak") &&
+        !pa_has_attr(p, e.a.decl.attrs, c"weakref") {
+        try cc_warning(p.names, e.loc, p.pp.warning_modes.address, c"address of object or function always evaluates to true")
+    }
 }
 
 fn se_value(ty u32, value u64) u64 {

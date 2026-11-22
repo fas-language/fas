@@ -23,6 +23,11 @@ value struct Cond { loc u32, parent bool, active bool, taken bool, otherwise boo
 value struct SearchDir { path u32, rank u8 }
 value struct Dependency { path u32, system bool }
 
+const WARN_OFF u8 = 0
+const WARN_ON u8 = 1
+const WARN_ERROR u8 = 2
+value struct WarningModes { address u8, undef u8, named_variadic u8 }
+
 struct PendingTokens { tokens Vec[Token], at usize }
 
 struct PpRoot {
@@ -51,6 +56,8 @@ struct Pp {
     embedded EmbedOutput
     byte_spellings arr[256, u32]
     macro_stack Vec[SavedMacro]
+    warning_modes WarningModes
+    warning_stack Vec[WarningModes]
     base_file u32
     base_logical u32
     counter u64

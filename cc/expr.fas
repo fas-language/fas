@@ -1,7 +1,7 @@
 // Preprocessing arithmetic uses only the two intmax_t representations. Bits
 // are unsigned so wraparound and the conversion to uintmax_t are explicit.
 value struct PpInt { bits u64, uns bool }
-struct Expr { tokens Vec[Token], at usize, loc u32 }
+struct Expr { tokens Vec[Token], at usize, loc u32, warn_undef u8 }
 
 fn expr_peek(x handle[Expr]) Token {
     if x.at < x.tokens.n { return x.tokens.p[Token, x.at] }
@@ -177,7 +177,13 @@ fn expr_prefix(n handle[CNames], x handle[Expr], live bool) PpInt fails {
     }
     if t.kind == TK_NUM { return try expr_integer(n, t) }
     if t.kind == TK_CHAR { return try expr_char(n, t) }
-    if t.kind == TK_IDENT { return {if cc_is(n, t, c"true") { 1 } else { 0 }, false} }
+    if t.kind == TK_IDENT {
+        if cc_is(n, t, c"true") { return {1, false} }
+        if live && !cc_is(n, t, c"false") {
+            try cc_warning(n, t.loc, x.warn_undef, c"undefined macro evaluates to zero")
+        }
+        return {0, false}
+    }
     try cc_error(n, t.loc, c"invalid token in preprocessor expression")
     return {0, false}
 }
@@ -259,6 +265,7 @@ fn expr_parse(n handle[CNames], x handle[Expr], min u8, live bool) PpInt fails {
 fn pp_int(p handle[Pp], args handle[Vec[Token]], loc u32) PpInt fails {
     x Expr = {}
     x.loc = loc
+    x.warn_undef = p.warning_modes.undef
     copy_into[Vec[Token]](&x.tokens, args)
     a PpInt = try expr_parse(&p.names, &x, 1, true)
     if x.at != x.tokens.n { try cc_error(&p.names, expr_peek(&x).loc, c"extra tokens in preprocessor expression") }

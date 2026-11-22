@@ -66,6 +66,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
             }
             vec_push[u32](&m.params, param)
             if i < args.n && n.gnu && cc_is(n, args.p[Token, i], c"...") {
+                try cc_warning(n, args.p[Token, i].loc, p.warning_modes.named_variadic, c"named variadic macros are a GNU extension")
                 m.variadic = true
                 i += 1
                 break
@@ -260,11 +261,56 @@ fn pp_pragma_message(p handle[Pp], args handle[Vec[Token]], first usize, loc u32
     }
 }
 
+// Apply the supported warning groups while retaining the original pragma
+// in preprocessor output for consumers that interpret other groups.
+fn pp_pragma_diagnostic(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
+    n handle[CNames] = &p.names
+    if args.n < 3 { return }
+    action Token = args.p[Token, 2]
+    if cc_is(n, action, c"push") {
+        vec_push(&p.warning_stack, p.warning_modes)
+        return
+    }
+    if cc_is(n, action, c"pop") {
+        if p.warning_stack.n != 0 {
+            p.warning_modes = vec_last(&p.warning_stack)
+            p.warning_stack.n -= 1
+        }
+        return
+    }
+    mode u8 = WARN_OFF
+    if cc_is(n, action, c"error") || cc_is(n, action, c"fatal") { mode = WARN_ERROR }
+    else if cc_is(n, action, c"warning") { mode = WARN_ON }
+    else if !cc_is(n, action, c"ignored") { return }
+    if args.n < 4 || args.p[Token, 3].kind != TK_STR {
+        try cc_error(n, loc, c"expected a string literal in diagnostic pragma")
+    }
+    option Buf = {}
+    defer { buf_free(&option) }
+    for i usize in 3..args.n {
+        piece Token = args.p[Token, i]
+        if piece.kind != TK_STR { break }
+        buf_append(&option, pp_destringize(cc_spelling(n, piece)))
+    }
+    spelling Bytes = buf_bytes(&option)
+    if bytes_eq_c(spelling, c"-Waddress") || bytes_eq_c(spelling, c"-Wpointer-bool-conversion") {
+        p.warning_modes.address = mode
+    } else if bytes_eq_c(spelling, c"-Wundef") {
+        p.warning_modes.undef = mode
+    } else if bytes_eq_c(spelling, c"-Wvariadic-macros") || bytes_eq_c(spelling, c"-Wpedantic") {
+        p.warning_modes.named_variadic = mode
+    }
+}
+
 fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
     n handle[CNames] = &p.names
     drop Token = cc_token(TK_PLACE, 0, loc, 0)
     if args.n == 0 { return drop }
     first Token = args.p[Token]
+    if args.n > 1 && (cc_is(n, first, c"GCC") || cc_is(n, first, c"clang")) &&
+        cc_is(n, args.p[Token, 1], c"diagnostic") {
+        try pp_pragma_diagnostic(p, args, loc)
+    }
     if cc_is(n, first, c"message") { try pp_pragma_message(p, args, 1, loc, false) }
     if cc_is(n, first, c"once") && p.frames.n != 0 {
         f handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
