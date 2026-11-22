@@ -135,7 +135,7 @@ struct RecordDef {
     transparent_union bool
     is_ms_layout bool
     is_unavailable bool
-    _pad1 u8
+    is_transaction_safe bool
     size u64
     align u64
 }
@@ -1002,7 +1002,7 @@ fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool
         if !ra.is_complete || !rb.is_complete || ra.tag_id != rb.tag_id ||
             (ra.tag_id == 0 && !anonymous) || ra.fields_len != rb.fields_len ||
             ra.align_attr != rb.align_attr || ra.is_packed != rb.is_packed || ra.pragma_pack != rb.pragma_pack ||
-            ra.is_ms_layout != rb.is_ms_layout {
+            ra.is_ms_layout != rb.is_ms_layout || ra.is_transaction_safe != rb.is_transaction_safe {
             return false
         }
         q handle[TyCompare] = path
@@ -1125,6 +1125,7 @@ fn ty_composite_impl(a u32, b u32, path handle[TyComposite]) u32 {
         rec handle[RecordDef] = ty_record(ty_node(result).aux1)
         rec.transparent_union = ra.transparent_union || rb.transparent_union
         rec.is_ms_layout = ra.is_ms_layout
+        rec.is_transaction_safe = ra.is_transaction_safe
         return ty_qual_attr(result, q, al)
     }
     return ty_qual_attr(ua, q, al)

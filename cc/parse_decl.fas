@@ -704,9 +704,11 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     old handle[RecordDef] = ty_record(rec_id)
     if pa_has_attr(p, attrs, c"unavailable") { old.is_unavailable = true }
     ms_layout bool = old.is_ms_layout || pa_has_attr(p, attrs, c"ms_struct")
+    transaction_safe bool = old.is_transaction_safe || pa_has_attr(p, attrs, c"transaction_safe")
     if old.is_complete {
         if zext[usize](old.fields_len) != fields.n || old.is_packed != packed ||
-            old.pragma_pack != pack || old.align_attr != alignment || old.is_ms_layout != ms_layout {
+            old.pragma_pack != pack || old.align_attr != alignment || old.is_ms_layout != ms_layout ||
+            old.is_transaction_safe != transaction_safe {
             try pa_error(p, loc, c"incompatible redefinition of record")
         }
         for i u32 in 0..old.fields_len {
@@ -720,6 +722,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
         }
     } else {
         old.is_ms_layout = ms_layout
+        old.is_transaction_safe = transaction_safe
         ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack)
     }
     if ty_kind(ty) == TYK_UNION && pa_has_attr(p, attrs, c"transparent_union") {
@@ -764,6 +767,9 @@ fn pa_tag_spec(p handle[Parser], t Token, spec handle[DeclSpec]) u32 fails {
     } else {
         rec handle[RecordDef] = ty_record(id)
         if !define && !rec.is_complete && pa_has_attr(p, attrs, c"ms_struct") { rec.is_ms_layout = true }
+        if !define && !rec.is_complete && pa_has_attr(p, attrs, c"transaction_safe") {
+            rec.is_transaction_safe = true
+        }
         if unavailable { rec.is_unavailable = true }
         spec.unavailable_type = rec.is_unavailable
     }
