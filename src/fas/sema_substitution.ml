@@ -1026,10 +1026,14 @@ let monomorphize_types ~check_expr ~check_stmt ~check_target ~target_ty
         match (source_place_type yes, source_place_type no) with
         | Some ty_y, Some ty_n when Ast.type_name ty_y = Ast.type_name ty_n -> Some ty_y
         | _ -> None)
-    | Ast.Select (base, [ Ast.Const_arg _ ], _)
-    | Ast.Select (base, [ Ast.Name_arg _ ], _) ->
+    | Ast.Select (base, [ Ast.Const_arg _ ], _) ->
         Option.bind (source_place_type base) (function
           | Ast.Array (_, element) | Ast.Vec (_, element) -> Some element
+          | _ -> None)
+    | Ast.Select (base, [ Ast.Name_arg (name, span) ], _) ->
+        Option.bind (source_place_type base) (function
+          | Ast.Array (_, element) | Ast.Vec (_, element) -> Some element
+          | Ast.Addr -> Some (Ast.Named_type (name, span))
           | _ -> None)
     | Ast.Select (base, [ Ast.Type_arg ty ], _)
     | Ast.Select (base, [ Ast.Type_or_index ty ], _) -> (

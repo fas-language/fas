@@ -16,7 +16,7 @@ fn file_read(path addr, max_size usize, out handle[Buf]) void fails {
     fd i32 = try os_open(path, O_RDONLY | O_NONBLOCK, 0)
     defer { os_close(fd) }
     st Stat = {}
-    try os_fstat(fd, handle_from_addr[Stat](&st))
+    try os_fstat(fd, &st)
     if (st.mode & S_IFMT) != S_IFREG { fail NotRegular }
     size usize = bitcast[usize](st.size)
     if size > max_size { fail TooBig }
@@ -35,21 +35,20 @@ var file_temp_counter u64 = 0
 // failure.
 fn file_write_atomic(path addr, data Bytes, mode u32) void fails {
     tmp Buf = {}
-    th handle[Buf] = handle_from_addr[Buf](&tmp)
-    defer { buf_free(th) }
+    defer { buf_free(&tmp) }
     p Bytes = bytes_c(path)
     dir_len usize = 0
     slash usize = bytes_rindex(p, 47) catch p.n
     if slash != p.n { dir_len = slash + 1 }
     fd i32 = -1
     while true {
-        buf_clear(th)
-        buf_raw(th, path, dir_len)
-        buf_str(th, c".fas-ld-")
+        buf_clear(&tmp)
+        buf_raw(&tmp, path, dir_len)
+        buf_str(&tmp, c".fas-ld-")
         file_temp_counter += 1
-        buf_hex(th, hash_mix(zext[u64](os_getpid()) ^ os_clock_ns(CLOCK_MONOTONIC) ^ (file_temp_counter << 40)), 12)
-        buf_str(th, c".tmp")
-        fd = os_open(buf_cstr(th), O_WRONLY | O_CREAT | O_EXCL, mode) catch e {
+        buf_hex(&tmp, hash_mix(zext[u64](os_getpid()) ^ os_clock_ns(CLOCK_MONOTONIC) ^ (file_temp_counter << 40)), 12)
+        buf_str(&tmp, c".tmp")
+        fd = os_open(buf_cstr(&tmp), O_WRONLY | O_CREAT | O_EXCL, mode) catch e {
             if e == Exists { continue }
             fail e
         }
@@ -61,7 +60,7 @@ fn file_write_atomic(path addr, data Bytes, mode u32) void fails {
         if !published { os_unlink(tmp.p) catch {} }
     }
     st Stat = {}
-    try os_fstat(fd, handle_from_addr[Stat](&st))
+    try os_fstat(fd, &st)
     final u32 = st.mode & 0o7777 & mode
     try os_fchmod(fd, 0o600)
     try os_write_all(fd, data.p, data.n)
