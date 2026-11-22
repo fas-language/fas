@@ -108,6 +108,11 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
     }
     if prior != null && prior.linkage == 1 && s.linkage == 2 &&
         (s.storage == SC_EXTERN || ty_is_func(s.ty)) { s.linkage = 1 }
+    // An earlier block-scope extern may have left no visible file-scope
+    // declaration, but it still established the name's external linkage.
+    if s.linkage == 1 && p.scope == p.file_scope && map_has(&p.external, s.name) {
+        try pa_error(p, s.loc, c"static declaration follows an external declaration")
+    }
     attr_definition bool = try se_linkage_attributes(p, s, prior, definition, tentative)
     if definition && ty_is_func(s.ty) && s.storage == SC_EXTERN && (s.flags & 1) != 0 &&
         (pa_has_attr(p, s.attrs, c"gnu_inline") || (prior != null && pa_has_attr(p, prior.attrs, c"gnu_inline"))) {
