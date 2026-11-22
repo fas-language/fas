@@ -63,6 +63,27 @@ fn expr_integer(n handle[CNames], t Token) PpInt fails {
 value struct Escape { cp u32, width usize }
 fn expr_escape(n handle[CNames], s Bytes, loc u32) Escape fails {
     ch u8 = s.p[u8]
+    if n.gnu && s.n >= 3 && s.p[u8, 1] == 123 && (ch == 117 || ch == 120 || ch == 111) {
+        // In GNU mode accept the delimited forms also recognized by the
+        // reference preprocessors. A numeric escape is a code unit, while
+        // a universal character name must be a Unicode scalar value.
+        radix u32 = if ch == 111 { 8 } else { 16 }
+        cp u32 = 0
+        i usize = 2
+        while i < s.n && s.p[u8, i] != 125 {
+            d u32 = cc_hex(s.p[u8, i])
+            if d >= radix || cp > (0xffffffff - d) / radix {
+                try cc_error(n, loc, c"invalid digit or value in delimited escape sequence")
+            }
+            cp = cp * radix + d
+            i += 1
+        }
+        if i == 2 || i == s.n { try cc_error(n, loc, c"empty or unterminated delimited escape sequence") }
+        if ch == 117 && (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+            try cc_error(n, loc, c"invalid universal character name")
+        }
+        return {cp, i + 1}
+    }
     if ch == 117 || ch == 85 {
         r Rune = cc_ucn(s.p - 1)
         if r.width == 0 { try cc_error(n, loc, c"invalid universal character name") }
@@ -86,7 +107,7 @@ fn expr_escape(n handle[CNames], s Bytes, loc u32) Escape fails {
     c u32 = zext[u32](ch)
     if ch == 97 { c = 7 }
     else if ch == 98 { c = 8 }
-    else if ch == 101 && n.gnu { c = 27 }
+    else if (ch | 32) == 101 && n.gnu { c = 27 }
     else if ch == 102 { c = 12 }
     else if ch == 110 { c = 10 }
     else if ch == 114 { c = 13 }

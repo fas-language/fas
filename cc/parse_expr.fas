@@ -179,12 +179,16 @@ fn pa_string_length(p handle[Parser], t Token, s Bytes, code_width u8) u64 fails
             ch u8 = s.p[u8, i]
             esc Escape = try expr_escape(p.names, bytes_from(s, i), t.loc)
             i += esc.width
-            if (ch == 117 || ch == 85 || ch == 78) && code_width <= 1 && esc.cp >= 128 {
+            universal bool = ch == 117 || ch == 85 || ch == 78
+            if universal && code_width <= 1 && esc.cp >= 128 {
                 if esc.cp < 2048 { count += 1 }
                 else if esc.cp < 65536 { count += 2 }
                 else { count += 3 }
             }
-            if code_width == 2 && esc.cp > 65535 { count += 1 }
+            if code_width == 2 && universal && esc.cp > 65535 { count += 1 }
+            if !universal && ((code_width <= 1 && esc.cp > 255) || (code_width == 2 && esc.cp > 65535)) {
+                try pa_error(p, t.loc, c"numeric escape is out of range for this character type")
+            }
         } else if byte >= 128 && code_width >= 2 {
             rune Rune = utf8(s.p + i)
             i += zext[usize](rune.width)
