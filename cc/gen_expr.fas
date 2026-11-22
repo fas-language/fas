@@ -81,6 +81,11 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     if n.kind != TYK_ARRAY { return gen_const_u64(ty_size(u)) }
+    // A typedef, typeof operand or inner expression can already own this
+    // bound. Its size slot survives even when the bound's locals leave scope.
+    key U64Key = {zext[u64](u)}
+    cached u32 = table_get(&gc.vla_sizes, &key) catch 0
+    if cached != 0 { return gen_load_raw(c"i64", cached, 8, false) }
     elem_sz_v u32 = if gen_type_is_vla(n.elem) {
         try gen_eval_vla_size_and_cache(n.elem)
     } else {
@@ -98,7 +103,6 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
         tot_v u32 = gen_binop_raw(c"mul", c"i64", cnt_v, elem_sz_v)
         slot u32 = gen_alloca_entry(8, 8)
         gen_store_ty(tot_v, slot, 8, false, false)
-        key U64Key = {zext[u64](u)}
         _ bool = table_put(&gc.vla_sizes, &key, slot)
         return tot_v
     }
@@ -626,6 +630,7 @@ fn gen_lvalue(n handle[Ast]) u32 fails {
         return gen_sym_addr(gen_sym_bytes(nid))
     }
     if n.kind == ND_COMPOUND {
+        if n.b != null { _ u32 = try gen_rvalue(n.b) }
         try gen_eval_vm_type(n.ty)
         if (n.op & 255) == zext[u32](SC_STATIC) || (n.op & 255) == zext[u32](SC_CONSTEXPR) {
             nid u32 = gen_emit_static_compound(n)
@@ -818,12 +823,16 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             if gen_is_mem_ty(n.a.ty) { _ u32 = try gen_lvalue(n.a) }
             else { _ u32 = try gen_rvalue(n.a) }
         }
+        if n.b != null { _ u32 = try gen_rvalue(n.b) }
         sz_v u32 = try gen_vla_type_size(n.op)
         return gen_convert(sz_v, TY_ULONG, n.ty)
     }
     if n.kind == ND_CAST {
         // Explicit casts to variably-modified types must evaluate VLA bounds at the cast
-        if (n.flags & NF_IMPLICIT) == 0 { try gen_eval_vm_type(n.ty) }
+        if (n.flags & NF_IMPLICIT) == 0 {
+            if n.b != null { _ u32 = try gen_rvalue(n.b) }
+            try gen_eval_vm_type(n.ty)
+        }
         if ty_is_void(n.ty) {
             _ u32 = try gen_rvalue(n.a)
             return gen_const_i32(0)

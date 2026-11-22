@@ -741,6 +741,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     align bool = !pa_is(p, t, c"sizeof")
     ty u32
     a handle[Ast] = null
+    type_operand handle[Ast] = null
     if (try pa_at(p, c"(")) && pa_decl_start(p, try pa_peek_at(p, 1)) {
         try pa_take(p)
         spec DeclSpec = {}
@@ -749,7 +750,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
             a = try pa_compound(p, t, ty, &spec)
             a = try pa_postfix(p, a)
             ty = a.ty
-        }
+        } else { type_operand = spec.vm_operand }
     } else {
         if align && !pa_is_gnu(p) { try pa_error(p, t.loc, c"alignof requires a type name") }
         a = try pa_unary(p)
@@ -761,6 +762,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     n handle[Ast] = pa_node(ND_SIZE, t.loc, TY_ULONG)
     n.op = ty
     n.a = a
+    n.b = type_operand
     if align || !se_vla(ty) {
         n.flags = NF_ICE | NF_STATIC
         n.value = if align { pa_expr_alignment(a, ty) } else { ty_size(ty) }
@@ -781,6 +783,7 @@ fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[
     try pa_initializer(p, ty, static_duration || spec.storage == SC_CONSTEXPR, &result)
     n handle[Ast] = pa_node(ND_COMPOUND, t.loc, result.ty)
     n.a = result.tree
+    n.b = spec.vm_operand
     n.flags = NF_LVALUE
     n.op = zext[u32](spec.storage)
     if spec.thread_local { n.op |= 256 }
@@ -855,7 +858,9 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
             spec DeclSpec = {}
             ty u32 = try pa_paren_type(p, &spec)
             if try pa_at(p, c"{") { return try pa_postfix(p, try pa_compound(p, t, ty, &spec)) }
-            return try se_cast(p, t, ty, try pa_unary(p))
+            cast handle[Ast] = try se_cast(p, t, ty, try pa_unary(p))
+            cast.b = spec.vm_operand
+            return cast
         }
         a handle[Ast] = try pa_expression(p, 1)
         try pa_expect(p, c")")

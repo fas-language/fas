@@ -100,9 +100,14 @@ fn gen_pop_scope(old_cleanups usize, old_vlas usize) void fails {
 fn gen_local_decl(n handle[Ast]) void fails {
     s handle[Symbol] = n.decl
     if s == null { return }
-    inherited bool = n.b != null && ty_unqual(n.b.ty) == ty_unqual(s.ty)
+    inherited bool = (n.flags & NF_INFERRED_DECL) != 0 ||
+        (n.b != null && ty_unqual(n.b.ty) == ty_unqual(s.ty))
     if (n.flags & NF_TYPEOF_EVAL) != 0 && !gen_is_terminated() { _ u32 = try gen_rvalue(n.b) }
-    if s.storage == SC_TYPEDEF || s.storage == SC_ENUMERATOR || ty_is_func(s.ty) { return }
+    if s.storage == SC_TYPEDEF {
+        if !inherited && !gen_is_terminated() { try gen_eval_vm_type(s.ty) }
+        return
+    }
+    if s.storage == SC_ENUMERATOR || ty_is_func(s.ty) { return }
     if s.storage == SC_EXTERN {
         gen_note_extern_obj(s)
         return

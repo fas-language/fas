@@ -5,11 +5,9 @@ gcc/gcc/testsuite/gcc.c-torture/execute/20021127-1.c exit-mismatch: gcc-only -O2
 gcc/gcc/testsuite/gcc.c-torture/execute/20030330-1.c link-error: gcc-only DCE link_error() test (expects -O2 dead-code elimination)
 gcc/gcc/testsuite/gcc.c-torture/execute/pr70460.c exit-mismatch: Fir static initializer cannot encode a difference of two GNU label addresses
 gcc/gcc/testsuite/gcc.dg/addr_equal-1.c link-error: gcc-only -O2 constant-folding of extern address equality (undef_fn0)
-gcc/gcc/testsuite/gcc.dg/auto-type-1.c exit-mismatch: VLA typeof/auto_type bound caching
 gcc/gcc/testsuite/gcc.dg/builtin-bswap-5.c link-error: gcc-only DCE link_error() test (expects -O2 dead-code elimination)
 gcc/gcc/testsuite/gcc.dg/builtin-dynamic-object-size-11.c exit-mismatch: gcc -O2 __builtin_dynamic_object_size optimization test
 gcc/gcc/testsuite/gcc.dg/builtin-object-size-11.c exit-mismatch: gcc -O2 __builtin_object_size optimization test
-gcc/gcc/testsuite/gcc.dg/c23-auto-2.c exit-mismatch: VLA typeof/auto bound evaluation
 gcc/gcc/testsuite/gcc.dg/c23-float-7a.c exit-mismatch: parser #1 (80-bit long double literal precision; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/c23-float-7b.c exit-mismatch: parser #1 (80-bit long double literal precision; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/c23-float-7c.c exit-mismatch: parser #1 (80-bit long double literal precision; see cc-ast-requests.md)
@@ -30,6 +28,3 @@ gcc/gcc/testsuite/gcc.dg/torture/float16-nan.c exit-mismatch: _Float16 -fsignali
 gcc/gcc/testsuite/gcc.dg/torture/fp-double-convert-float-1.c exit-mismatch: gcc -fexcess-precision test (clang aborts at -O0)
 gcc/gcc/testsuite/gcc.dg/torture/pr19683-1.c exit-mismatch: mips-only target test (inline asm "=l" constraint)
 gcc/gcc/testsuite/gcc.dg/tree-ssa/builtin-sprintf.c exit-mismatch: gcc -O2 __builtin_sprintf constant-folding test
-gcc/gcc/testsuite/gcc.dg/vla-15.c exit-mismatch: VLA typeof(comma-expr) side-effect evaluation in sizeof
-gcc/gcc/testsuite/gcc.dg/vla-16.c exit-mismatch: VLA typeof(comma-expr) side-effect evaluation in compound literal
-gcc/gcc/testsuite/gcc.dg/vla-stexp-7.c link-error: statement-expression local VLA bound scope (undefined symbol N)

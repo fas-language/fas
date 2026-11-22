@@ -1134,6 +1134,17 @@ fn pa_asm_label(p handle[Parser]) u32 fails {
     return cc_intern(p.names, buf_bytes(&spelling))
 }
 
+fn pa_vm_declaration(p handle[Parser], spec handle[DeclSpec], ty u32, loc u32, file bool) void fails {
+    if !se_variably_modified(ty) { return }
+    if file { try pa_error(p, loc, c"variably modified type at file scope") }
+    if spec.storage == SC_EXTERN || (se_vla(ty) && (spec.storage == SC_STATIC || spec.thread_local)) {
+        try pa_error(p, loc, c"variably modified declaration has invalid storage duration or linkage")
+    }
+    barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
+    barrier.previous = p.vm
+    p.vm = barrier
+}
+
 fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast] fails {
     while try pa_accept(p, c"__extension__") {}
     bool_attr bool = try pa_open_attr(p)
@@ -1224,16 +1235,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             !(pa_is_gnu(p) && spec.storage == SC_EXTERN && !init) {
             try pa_error(p, d.loc, c"object cannot have void type")
         }
-        vm bool = se_variably_modified(ty)
-        if file && vm { try pa_error(p, d.loc, c"variably modified type at file scope") }
-        if vm && (spec.storage == SC_EXTERN || (se_vla(ty) && (spec.storage == SC_STATIC || spec.thread_local))) {
-            try pa_error(p, d.loc, c"variably modified declaration has invalid storage duration or linkage")
-        }
-        if vm {
-            barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
-            barrier.previous = p.vm
-            p.vm = barrier
-        }
+        if !spec.inferred { try pa_vm_declaration(p, &spec, ty, d.loc, file) }
         tentative bool = file && !init && !func && s.linkage != 0 && spec.storage != SC_EXTERN
         definition bool = init || (!file && !func && spec.storage != SC_TYPEDEF && spec.storage != SC_EXTERN)
         if !spec.inferred { s = try se_declare(p, s, definition, tentative) }
@@ -1243,6 +1245,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             if spec.inferred {
                 s.ty = try pa_apply_attrs(p, null, ty_qual(se_decay(result.ty), spec.quals), attrs, spec.alignment)
                 if ty_is_void(s.ty) { try pa_error(p, d.loc, c"cannot infer void object type") }
+                try pa_vm_declaration(p, &spec, s.ty, d.loc, file)
             } else { s.ty = result.ty }
             if spec.storage == SC_CONSTEXPR {
                 try se_constexpr_type(p, s.ty, d.loc)
@@ -1259,6 +1262,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         n.attrs = s.attrs
         n.b = spec.vm_operand
         if n.b != null && xs.first == null { n.flags |= NF_TYPEOF_EVAL }
+        if spec.inferred { n.flags |= NF_INFERRED_DECL }
         pa_append(&xs, n)
         if !(try pa_accept(p, c",")) { break }
         if spec.inferred { try pa_error(p, d.loc, c"auto type inference cannot declare multiple identifiers") }

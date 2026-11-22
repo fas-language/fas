@@ -34,6 +34,7 @@ const NF_IMPLICIT u32 = 256
 const NF_FOLD u32 = 512
 const NF_TYPEOF_EVAL u32 = 1024 // evaluate ND_DECL.b once for a shared typeof specifier
 const NF_PARTIAL_INIT u32 = 2048 // brace elision writes only the listed subobjects
+const NF_INFERRED_DECL u32 = 4096 // the initializer supplies variably modified type bounds
 const NF_INT_VALUE u32 = NF_ICE | NF_FOLD
 
 struct Ast {
