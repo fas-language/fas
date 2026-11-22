@@ -830,6 +830,15 @@ fn pa_qualified(p handle[Parser], ty u32, quals u32, loc u32) u32 fails {
             try pa_error(p, loc, c"restrict requires a pointer to a non-function type")
         }
     }
+    if ty_is_func(ty) && quals != 0 {
+        if (quals & Q_ATOMIC) != 0 || !pa_is_gnu(p) {
+            try pa_error(p, loc, c"qualifier on a function type")
+        }
+        // GNU declarations can qualify a function through a typedef.
+        // Match Clang: these qualifiers do not change its type.
+        cc_diag(p.names, loc, c"warning: ", bytes_c(c"qualifier on a function type has no effect"))
+        return ty
+    }
     return ty_qual(ty, quals)
 }
 

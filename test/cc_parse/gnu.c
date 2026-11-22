@@ -45,3 +45,7 @@ typedef int AnnotatedPrototype(__attribute__((unused)) int);
 int call_annotated(void *ptr) {
     return ((int (__attribute__((noinline)) *)(void))ptr)();
 }
+
+typedef void Handler(int);
+extern volatile Handler attributed_handler;
+extern Handler attributed_handler;
