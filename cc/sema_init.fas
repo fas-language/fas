@@ -28,6 +28,12 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
         else if n.aux1 == ARR_FIXED && n.arr_len < e.value - 1 {
             try pa_init_warning(p, e.loc, c"string literal is too long for initialized array")
         }
+    } else if constant && pa_is_gnu(p) && e.kind == ND_COMPOUND &&
+        ty_is_array(ty) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty)) {
+        // GNU static array initialization uses the literal's brace list
+        // directly, without forming a pointer to the unnamed object.
+        out.ty = ty_composite(ty, e.ty)
+        out.tree = e.a
     } else {
         if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
         try se_conversion(p, ty, e)
