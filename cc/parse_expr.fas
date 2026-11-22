@@ -840,16 +840,20 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
     }
     if pa_is(p, t, c"__real__") || pa_is(p, t, c"__imag__") || pa_is(p, t, c"__real") || pa_is(p, t, c"__imag") {
         a handle[Ast] = try pa_unary(p)
-        n handle[Ast] = pa_node(ND_UNARY, t.loc, ty_real_part(a.ty))
+        if !ty_is_arith(a.ty) { try pa_error(p, t.loc, c"real and imaginary parts require an arithmetic operand") }
+        im bool = pa_is(p, t, c"__imag__") || pa_is(p, t, c"__imag")
+        lvalue bool = (a.flags & NF_LVALUE) != 0 && (!im || ty_is_complex(a.ty))
+        ty u32 = ty_real_part(a.ty)
+        if lvalue { ty = ty_qual(ty, ty_quals(a.ty)) }
+        n handle[Ast] = pa_node(ND_UNARY, t.loc, ty)
         n.op = t.payload
         n.a = a
-        n.flags = a.flags & NF_LVALUE
+        if lvalue { n.flags = NF_LVALUE }
         if (a.flags & NF_FLOAT_CONST) != 0 {
-            im bool = pa_is(p, t, c"__imag__") || pa_is(p, t, c"__imag")
             se_set_fp(n, if im { se_im(a) } else { se_fp(a) })
         } else if (a.flags & NF_ICE) != 0 {
             n.flags |= NF_STATIC | NF_ICE
-            if pa_is(p, t, c"__real__") || pa_is(p, t, c"__real") { n.value = a.value; n.wide = a.wide }
+            if !im { n.value = a.value; n.wide = a.wide }
         }
         return n
     }
