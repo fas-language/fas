@@ -81,6 +81,20 @@ fn pa_asm_string(p handle[Parser]) handle[Ast] fails {
     return text
 }
 
+fn pa_asm_constraint(p handle[Parser], text handle[Ast], output bool) void fails {
+    cursor StringBytes = {}
+    cursor.piece = text.a
+    defer { buf_free(&cursor.encoded) }
+    if output {
+        first u8 = try se_next_string_byte(p, &cursor)
+        if first != 61 && first != 43 { try pa_error(p, text.loc, c"asm output constraint requires '=' or '+'") }
+    }
+    for i u64 in (if output { 1 } else { 0 })..text.value - 1 {
+        ch u8 = try se_next_string_byte(p, &cursor)
+        if ch < 32 || ch == 127 { try pa_error(p, text.loc, c"invalid control character in asm constraint") }
+    }
+}
+
 fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
     t Token = try pa_take(p)
     n handle[Ast] = pa_node(ND_ASM, t.loc, TY_VOID)
@@ -126,6 +140,7 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
                 }
                 constraint handle[Ast] = try pa_asm_string(p)
                 if section <= 2 {
+                    try pa_asm_constraint(p, constraint, section == 1)
                     try pa_expect(p, c"(")
                     e handle[Ast] = try pa_expression(p, 1)
                     try pa_expect(p, c")")
