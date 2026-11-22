@@ -775,12 +775,38 @@ fn gen_eval_const_float(n handle[Ast]) u64 {
     return 0
 }
 
+// A GNU union can have a flexible member at any field index. Its initialized
+// storage may extend beyond the union type's size without changing sizeof.
+fn gen_static_flex_union_size(tid u32, init handle[Ast], size u64) u64 {
+    rec handle[RecordDef] = ty_record(ty_node(ty_unqual(tid)).aux1)
+    item handle[Ast] = init.a
+    while item != null {
+        f handle[FieldDef] = ty_field(rec.fields_start + trunc[u32](item.value))
+        array_type handle[TypeNode] = ty_node(ty_unqual(f.ty))
+        if array_type.kind == TYK_ARRAY && array_type.aux1 == ARR_INCOMPLETE {
+            elem_size u64 = ty_size(array_type.elem)
+            extent u64 = 0
+            if item.b != null && item.b.next != null {
+                extent = (item.b.next.value + 1) * elem_size
+            } else if item.a.kind == ND_STRING {
+                extent = item.a.value * elem_size
+            } else if item.a.kind == ND_INIT {
+                extent = ty_size(item.a.ty)
+            }
+            if extent > size { size = extent }
+        }
+        item = item.next
+    }
+    return size
+}
+
 // Compute extra trailing bytes for a struct with a flexible array member initializer
 fn gen_static_effective_size(tid u32, init handle[Ast]) u64 {
     sz u64 = ty_size(tid)
     if init == null || init.kind != ND_INIT { return sz }
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
+    if n.kind == TYK_UNION { return gen_static_flex_union_size(tid, init, sz) }
     if n.kind != TYK_STRUCT { return sz }
     layout_record(n.aux1)
     rec handle[RecordDef] = ty_record(n.aux1)
