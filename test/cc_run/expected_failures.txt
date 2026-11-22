@@ -32,7 +32,7 @@ gcc/gcc/testsuite/gcc.dg/c23-float-7b.c exit-mismatch: parser #1 (80-bit long do
 gcc/gcc/testsuite/gcc.dg/c23-float-7c.c exit-mismatch: parser #1 (80-bit long double literal precision; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/c23-parm-omit-3.c exit-mismatch: parser #2 (decayed unnamed VLA parameter bound dropped; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/c2y-imaginary-constants-11.c fcc-error: parser/sema: invalid integer literal suffix (C2y imaginary constants)
-gcc/gcc/testsuite/gcc.dg/c99-math-double-1.c exit-mismatch: parser #5 / math edge case
+gcc/gcc/testsuite/gcc.dg/c99-math-double-1.c exit-mismatch: parser #5 (decimal float __DBL_MAX__ literal overflows to +inf; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/c99-math-long-double-1.c exit-mismatch: parser #1 (80-bit long double literal precision; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/cleanup-10.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-11.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
@@ -42,12 +42,11 @@ gcc/gcc/testsuite/gcc.dg/cleanup-5.c link-error: gcc -fexceptions runtime (_Unwi
 gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cpp/embed-12.c exit-mismatch: C23 #embed side-effecting overwritten designated initializer
-gcc/gcc/testsuite/gcc.dg/di-longlong64-sync-1.c exit-mismatch: legacy __sync_*_and_fetch 64-bit semantics
-gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: legacy __sync_* multithread timing/timeout in clang oracle
+gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc passes (exit=0), clang oracle timed out (exit=137)
 gcc/gcc/testsuite/gcc.dg/field-merge-10.c fcc-error: parser/sema: expression is not a modifiable lvalue
 gcc/gcc/testsuite/gcc.dg/field-merge-9.c fcc-error: parser/sema: invalid arithmetic or signed overflow in constant initializer
 gcc/gcc/testsuite/gcc.dg/fixuns-trunc-1.c exit-mismatch: parser #5 (decimal float literal 9223372036854775808.7 1-ULP off; see cc-ast-requests.md)
-gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: GNU compound literal designated initializer edge case
+gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: parser #8 (GNU nested range designator continuation & brace-elided overwrite; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/ipa/ipa-pta-19.c link-error: gcc target-clones/multiversioning (multiver_test)
 gcc/gcc/testsuite/gcc.dg/memcmp-1.c link-error: parser #4 (concatenated asm("" "memcmp") string literal; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
@@ -56,14 +55,14 @@ gcc/gcc/testsuite/gcc.dg/pr114831-2.c exit-mismatch: C23 typeof(comma-expr-of-VL
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fenv rounding-mode fma test (-frounding-math)
 gcc/gcc/testsuite/gcc.dg/pr119001-1.c fcc-error: parser/sema: invalid flexible array member
 gcc/gcc/testsuite/gcc.dg/pr119151.c link-error: gcc-specific libgcc_s internal symbol (__register_frame_info)
-gcc/gcc/testsuite/gcc.dg/pr41935.c exit-mismatch: non-constant __builtin_offsetof array index
+gcc/gcc/testsuite/gcc.dg/pr41935.c exit-mismatch: parser #7 (pa_offsetof drops element size for non-constant subscript; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr48774.c fcc-error: parser/sema: expression is not a modifiable lvalue
 gcc/gcc/testsuite/gcc.dg/pr65345-2.c exit-mismatch: parser #2 (decayed VLA parameter bound with _Atomic; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr87054.c fir-error: Fir gap #4 (inline asm on wide/odd-width integer; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/single-precision-constant.c exit-mismatch: gcc -fsingle-precision-constant flag test
 gcc/gcc/testsuite/gcc.dg/special/wkali-2.c link-error: parser #6 (extern decl with __attribute__((alias)) skipped by on_object; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/split-5.c link-error: gcc -fsplit-stack runtime (_Unwind_Resume requires libgcc_s)
-gcc/gcc/testsuite/gcc.dg/torture/bitint-21.c exit-mismatch: float/double -> wide _BitInt edge case
+gcc/gcc/testsuite/gcc.dg/torture/bitint-21.c exit-mismatch: parser #5 (decimal double literals 1-3 ULP off; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/torture/bitint-22.c exit-mismatch: parser #1 (80-bit long double literal -> wide _BitInt; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/torture/bitint-24.c exit-mismatch: parser #1 (wide _BitInt -> 80-bit long double literal comparison; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/torture/float128-div-underflow.c fcc-error: parser/sema: __float128 / _Float128 not supported
@@ -87,7 +86,7 @@ gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-6.c fcc-error: parser/sema: K
 gcc/gcc/testsuite/gcc.dg/torture/vector-shift2.c fcc-error: parser/sema: incompatible vector operands
 gcc/gcc/testsuite/gcc.dg/transparent-union-5.c fcc-error: parser/sema: transparent_union assignment compatibility
 gcc/gcc/testsuite/gcc.dg/tree-ssa/builtin-sprintf.c exit-mismatch: gcc -O2 __builtin_sprintf constant-folding test
-gcc/gcc/testsuite/gcc.dg/tree-ssa/loop-interchange-1b.c exit-mismatch: gcc loop-interchange test
+gcc/gcc/testsuite/gcc.dg/tree-ssa/loop-interchange-1b.c exit-mismatch: parser #5 (decimal float __DBL_MAX__ literal overflows to +inf; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/tree-ssa/vrp66.c fcc-error: parser/sema: invalid arithmetic or signed overflow in constant initializer
 gcc/gcc/testsuite/gcc.dg/vla-15.c exit-mismatch: VLA typeof(comma-expr) side-effect evaluation in sizeof
 gcc/gcc/testsuite/gcc.dg/vla-16.c exit-mismatch: VLA typeof(comma-expr) side-effect evaluation in compound literal

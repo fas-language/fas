@@ -2300,6 +2300,10 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_u8(b, 32)
         buf_str(b, gen_atomic_order_cstr(ord, true, false))
         buf_u8(b, 10)
+        if ty_size(n.ty) != ty_size(et) {
+            n.ty = et
+            return v
+        }
         return gen_convert(v, et, n.ty)
     }
     if bytes_eq_c(bname, c"__atomic_load") {
@@ -2436,6 +2440,10 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
             gen_store_ty(v, slot, al, false, false)
             return slot
         }
+        if ty_size(n.ty) != ty_size(et) {
+            n.ty = et
+            return v
+        }
         return gen_convert(v, et, n.ty)
     }
     if bytes_eq_c(bname, c"__atomic_exchange") {
@@ -2545,6 +2553,10 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         if bytes_eq_c(bname, c"__sync_bool_compare_and_swap") {
             return gen_convert(ok_v, TY_BOOL, n.ty)
         }
+        if ty_size(n.ty) != ty_size(et) {
+            n.ty = et
+            return old_v
+        }
         return gen_convert(old_v, et, n.ty)
     }
     if bytes_eq_c(bname, c"__sync_lock_release") {
@@ -2608,6 +2620,10 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         gen_term_br(ok, done_blk, loop_blk)
         gen_switch_block(done_blk)
         res_v u32 = gen_load_ty(et, if ret_new_n { new_slot } else { old_slot }, al, false, false)
+        if ty_size(n.ty) != ty_size(et) {
+            n.ty = et
+            return res_v
+        }
         return gen_convert(res_v, et, n.ty)
     }
     rmw_op addr = null
@@ -2653,7 +2669,15 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_u8(b, 10)
         if ret_new {
             nv u32 = gen_binop(rmw_op, rmw_ty, old_v, val)
+            if ty_size(n.ty) != ty_size(et) {
+                n.ty = et
+                return gen_convert(nv, rmw_ty, et)
+            }
             return gen_convert(nv, rmw_ty, n.ty)
+        }
+        if ty_size(n.ty) != ty_size(et) {
+            n.ty = et
+            return gen_convert(old_v, rmw_ty, et)
         }
         return gen_convert(old_v, rmw_ty, n.ty)
     }
