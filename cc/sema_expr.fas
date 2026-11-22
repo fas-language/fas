@@ -327,7 +327,15 @@ fn se_fold_int(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle
         shift u32 = trunc[u32](y)
         if pa_is(p, t, c"<<") {
             raw = x << shift
-            if !uns && (sx < 0 || raw >> shift != x || (width < 64 && raw >> width != 0)) { over = true }
+            if !uns && sx < 0 {
+                // GNU C folds negative left shifts whose mathematical
+                // result fits in the signed type.
+                shifted i64 = bitcast[i64](se_value(ty, raw))
+                over = !pa_is_gnu(p) || shifted >> shift != sx
+                n.flags = (n.flags & ~NF_ICE) | NF_FOLD
+            } else if !uns && (raw >> shift != x || (width < 64 && raw >> width != 0)) {
+                over = true
+            }
             // Shift into the sign bit is accepted by Clang for C.
         } else {
             raw = if uns { x >> shift } else { bitcast[u64](sx >> shift) }

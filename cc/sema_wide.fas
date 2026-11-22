@@ -245,8 +245,18 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
         if b.value >= zext[u64](width) || wi_ast_length(b) > 32 { n.flags |= NF_OVERFLOW; return }
         shift u32 = trunc[u32](b.value)
         left bool = pa_is(p, t, c"<<")
-        if left && signed_ty && (sx || wi_length(x) + shift > width) { n.flags |= NF_OVERFLOW }
         dest = wi_shift(x, shift, left, sx)
+        if left && sx {
+            n.flags = (n.flags & ~NF_ICE) | NF_FOLD
+            if !pa_is_gnu(p) || wi_bit(dest, width - 1) == 0 { n.flags |= NF_OVERFLOW }
+            else {
+                restored WideInt = wi_shift(dest, shift, false, true)
+                if wi_cmp(x, restored) != 0 { n.flags |= NF_OVERFLOW }
+                heap_free(restored.p)
+            }
+        } else if left && signed_ty && wi_length(x) + shift > width {
+            n.flags |= NF_OVERFLOW
+        }
     } else if k == 11 {
         sub bool = pa_is(p, t, c"-")
         wi_add(x, y, sub)
