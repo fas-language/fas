@@ -3,6 +3,7 @@
 
 import argparse
 import os
+from pathlib import Path
 import re
 import stat
 import sys
@@ -51,10 +52,13 @@ def main():
             # transparently by leaving the original process in charge.
             if not args.stdin and sys.stdin.isatty() and "-" in command[1:]:
                 os.execvpe(command[0], command, os.environ)
-            read_input = args.stdin or "-" in command[1:] and (
-                stat.S_ISFIFO(fd_mode) or stat.S_ISREG(fd_mode))
+            read_input = args.stdin or stat.S_ISFIFO(fd_mode) or stat.S_ISREG(fd_mode)
+            c_driver = args.c or (
+                re.fullmatch(r"(?:clang|gcc|cc)(?:-\d+)?", Path(command[0]).name)
+                and any(Path(dep).suffix in (".c", ".h", ".S", ".cc", ".cpp", ".cxx") for dep in args.dep)
+            )
             result = cache.run(command, ns=args.ns, deps=args.dep, outs=args.out,
-                               scratch=args.scratch, c=args.c, env_keys=args.env,
+                               scratch=args.scratch, c=bool(c_driver), env_keys=args.env,
                                cwd_sensitive=not args.no_cwd,
                                input=sys.stdin.buffer.read() if read_input else None)
         except FileNotFoundError as error:

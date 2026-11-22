@@ -18,15 +18,15 @@ Set `FAS_REFCACHE` to a directory on disk. The default is
 cache reads and writes.
 
 Declare every explicit input with `--dep` and every output with `--out`.
-Use `--c` for the supported GCC and Clang driver forms. The driver writes a
+Use `--c` for the supported GCC and Clang driver forms. The CLI also recognizes
+common driver names with a declared C source. The driver writes a
 private `-MD` dependency file including system headers. Clang preprocessing
 also records its include trace to cache diagnostics from missing headers. A
 subsequent appearance of a missing header invalidates those entries. Hosted links use
 the GNU linker map to record loaded files. C commands that fail to report
 dependencies, assembly that reads extra files, and linker commands with
-undeclared search or script inputs run directly. Use `--stdin` to include
-arbitrary piped input in the key. An explicit `-` operand also enables capture
-of piped or redirected stdin.
+undeclared search or script inputs run directly. The CLI keys piped or redirected
+stdin by its bytes. Use `--stdin` to explicitly read stdin to EOF.
 
 The key includes the namespace, full argument vector, relevant environment,
 compiler path, version output and binary hash, and dependency paths and hashes.
