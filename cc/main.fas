@@ -1,5 +1,6 @@
 // fcc: freestanding C23 compiler & gcc-compatible driver.
 use "../lib/core.fas"
+use "../as/regs.fas"
 use "token.fas"
 use "unicode.fas"
 use "lex.fas"

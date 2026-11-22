@@ -1226,8 +1226,19 @@ fn pa_asm_word(p handle[Parser], t Token) bool {
 
 // A declaration's assembler label has a single spelling in the symbol
 // table. Fold adjacent ordinary literals the same way as a single alias.
-fn pa_asm_label(p handle[Parser]) u32 fails {
+fn pa_asm_label(p handle[Parser], global_register bool) u32 fails {
     text handle[Ast] = try pa_asm_string(p)
+    if global_register {
+        cursor StringBytes = {}
+        cursor.piece = text.a
+        defer { buf_free(&cursor.encoded) }
+        register Buf = {}
+        defer { buf_free(&register) }
+        for i u64 in 0..text.value - 1 { buf_u8(&register, try se_next_string_byte(p, &cursor)) }
+        name Bytes = buf_bytes(&register)
+        if name.n > 0 && name.p[u8] == 37 { name = bytes_from(name, 1) }
+        if reg_parse(name) == 0 { try pa_error(p, text.loc, c"unknown x86-64 register in global register declaration") }
+    }
     piece handle[Ast] = text.a
     if piece.next == null { return text.op }
     spelling Buf = {}
@@ -1280,7 +1291,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         if pa_asm_word(p, try pa_peek(p)) {
             try pa_take(p)
             try pa_expect(p, c"(")
-            asm_name = try pa_asm_label(p)
+            asm_name = try pa_asm_label(p, file && spec.storage == SC_REGISTER)
             try pa_expect(p, c")")
             attrs = pa_join_attrs(try pa_attributes(p), attrs)
         }
