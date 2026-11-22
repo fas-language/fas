@@ -13,9 +13,9 @@ fn se_char_array(ty u32, from u32) bool {
     return (y == TY_CHAR || y == TY_UCHAR) && (x == TY_CHAR || x == TY_UCHAR || x == TY_SCHAR)
 }
 
-fn se_array_literal_init(p handle[Parser], ty u32, e handle[Ast], constant bool) bool {
+fn se_aggregate_literal_init(p handle[Parser], ty u32, e handle[Ast], constant bool) bool {
     return constant && pa_is_gnu(p) && e.kind == ND_COMPOUND &&
-        ty_is_array(ty) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))
+        (ty_is_array(ty) || ty_is_record(ty)) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))
 }
 
 fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
@@ -33,8 +33,8 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
         else if n.aux1 == ARR_FIXED && n.arr_len < e.value - 1 {
             try pa_init_warning(p, e.loc, c"string literal is too long for initialized array")
         }
-    } else if se_array_literal_init(p, ty, e, constant) {
-        // GNU static array initialization uses the literal's brace list
+    } else if se_aggregate_literal_init(p, ty, e, constant) {
+        // GNU static aggregate initialization uses the literal's brace list
         // directly, without forming a pointer to the unnamed object.
         out.ty = ty_composite(ty, e.ty)
         out.tree = e.a
@@ -400,7 +400,7 @@ fn pa_init_element(p handle[Parser], ty u32, constant bool, out handle[InitResul
 fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out handle[InitResult]) void fails {
     if !se_aggregate(ty) || (ty_is_record(ty) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))) ||
         (e.kind == ND_STRING && se_char_array(ty, e.ty)) || (ty_is_vector(ty) && ty_compatible(ty, e.ty)) ||
-        se_array_literal_init(p, ty, e, constant) {
+        se_aggregate_literal_init(p, ty, e, constant) {
         try se_initializer_expr(p, ty, e, constant, out)
         return
     }
