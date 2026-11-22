@@ -227,6 +227,14 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if feature_in(c" __builtin_masked_compress_store __builtin_masked_expand_load __builtin_masked_gather __builtin_masked_load __builtin_masked_scatter __builtin_masked_store ", name) {
         try pa_error(p, t.loc, c"Clang masked vector builtins are unsupported")
     }
+    // Both supported x86 header sets use addcarryx for the ADC wrapper.
+    // Catch the obsolete spellings before the generic intrinsic fallback.
+    if bytes_eq_c(name, c"__builtin_ia32_addcarry_u32") {
+        try pa_error(p, t.loc, c"unknown builtin; use __builtin_ia32_addcarryx_u32")
+    }
+    if bytes_eq_c(name, c"__builtin_ia32_addcarry_u64") {
+        try pa_error(p, t.loc, c"unknown builtin; use __builtin_ia32_addcarryx_u64")
+    }
     if bytes_eq_c(name, c"__builtin_tgmath") {
         try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
     }
