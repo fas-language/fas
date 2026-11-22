@@ -1257,7 +1257,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             } else { s.ty = result.ty }
             if spec.storage == SC_CONSTEXPR {
                 try se_constexpr_type(p, s.ty, d.loc)
-                try se_check_constexpr(p, result.tree)
+                try se_check_constexpr(p, s.ty, result.tree)
             }
             s.value = handle_addr(result.tree)
             if spec.inferred { s = try se_declare(p, s, true, false) }

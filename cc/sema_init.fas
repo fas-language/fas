@@ -281,12 +281,36 @@ fn se_constexpr_type(p handle[Parser], ty u32, loc u32) void fails {
     }
 }
 
-fn se_check_constexpr(p handle[Parser], e handle[Ast]) void fails {
+fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
     if e.kind == ND_INIT {
         item handle[Ast] = e.a
         while item != null {
-            try se_check_constexpr(p, item.a)
+            d handle[Ast] = item.b
+            ty u32 = if d == null { se_init_elem(dest, item.value) } else { d.ty }
+            while d != null {
+                ty = d.ty
+                d = d.next
+            }
+            try se_check_constexpr(p, ty, item.a)
             item = item.next
+        }
+        return
+    }
+    if e.kind == ND_STRING && se_char_array(dest, e.ty) {
+        to u32 = ty_node(ty_unqual(dest)).elem
+        from u32 = ty_node(ty_unqual(e.ty)).elem
+        if ty_is_unsigned(to) != ty_is_unsigned(from) {
+            // The ordinary string-initialization rules allow different
+            // character types. constexpr still requires every value to fit.
+            cursor StringBytes = {}
+            cursor.piece = e.a
+            defer { buf_free(&cursor.encoded) }
+            for i u64 in 0..e.value {
+                if i >= se_init_count(dest) { break }
+                if try se_next_string_byte(p, &cursor) >= 128 {
+                    try pa_error(p, e.loc, c"constexpr string element is not exactly representable")
+                }
+            }
         }
         return
     }

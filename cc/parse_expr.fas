@@ -790,7 +790,7 @@ fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[
     if static_duration && !spec.thread_local { n.flags |= NF_ADDR }
     if spec.storage == SC_CONSTEXPR {
         try se_constexpr_type(p, result.ty, t.loc)
-        try se_check_constexpr(p, result.tree)
+        try se_check_constexpr(p, result.ty, result.tree)
         if ty_is_scalar(result.ty) { se_cast_constant(n, result.tree) }
     }
     init handle[Ast] = result.tree
