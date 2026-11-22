@@ -1660,6 +1660,11 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     if bytes_eq_c(bname, c"__builtin_ia32_emms") {
         return gen_const_i32(0)
     }
+    if bytes_eq_c(bname, c"__builtin_ia32_pause") {
+        // This spin-loop hint also acts as a compiler memory barrier.
+        buf_str(gen_cur_buf(), c"  asm volatile \"pause\" clobber(\"memory\")\n")
+        return 0
+    }
     if bytes_eq_c(bname, c"__builtin_ia32_pmovmskb128") {
         // Lane i contributes its sign bit to bit i of the unsigned mask.
         v u32 = try gen_rvalue(a0)
