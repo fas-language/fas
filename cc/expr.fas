@@ -79,14 +79,14 @@ fn expr_escape(n handle[CNames], s Bytes, loc u32) Escape fails {
             i += 1
         }
         if i == 2 || i == s.n { try cc_error(n, loc, c"empty or unterminated delimited escape sequence") }
-        if ch == 117 && (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+        if ch == 117 && !cc_scalar(cp) {
             try cc_error(n, loc, c"invalid universal character name")
         }
         return {cp, i + 1}
     }
     if ch == 117 || ch == 85 {
         r Rune = cc_ucn(s.p - 1)
-        if r.width == 0 { try cc_error(n, loc, c"invalid universal character name") }
+        if r.width == 0 || !cc_scalar(r.cp) { try cc_error(n, loc, c"invalid universal character name") }
         return {r.cp, zext[usize](r.width) - 1}
     }
     if ch == 120 || (ch >= 48 && ch <= 55) {

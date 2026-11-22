@@ -7,3 +7,9 @@ static_assert(sizeof "\u{1234}" == 4);
 static_assert(sizeof u"\u{10000}" == 6);
 static_assert(U'\u{10fffd}' == U'\o{4177775}');
 static_assert('\E' == 27);
+
+// An incomplete UCN is a backslash followed by ordinary tokens. Here
+// replacement consumes them before they would need to form a C expression.
+#define DISCARD_UCN discard_ucn(
+#define discard_ucn(unused) incomplete_ucn_ok
+int DISCARD_UCN\U0000000z);
