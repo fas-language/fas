@@ -143,12 +143,22 @@ let write input =
         (56, 8, entsize);
       ]
   in
+  let section_kind name = function
+    | Bss _ -> 8
+    | Data _ ->
+        if name = ".init_array" || String.starts_with ~prefix:".init_array." name then 14
+        else if name = ".fini_array" || String.starts_with ~prefix:".fini_array." name then 15
+        else if name = ".preinit_array" || String.starts_with ~prefix:".preinit_array." name then 16
+        else if name = ".note.stapsdt" || name = ".note.ABI-tag" || name = ".note.gnu.property" then 7
+        else 1
+  in
   Array.iteri
     (fun index (s : section) ->
-      let kind, size =
+      let kind = section_kind s.name s.contents in
+      let size =
         match s.contents with
-        | Data bytes -> (1, Bytes.length bytes)
-        | Bss size -> (8, size)
+        | Data bytes -> Bytes.length bytes
+        | Bss size -> size
       in
       (match s.contents with
       | Data bytes -> Bytes.blit bytes 0 out section_offsets.(index) size

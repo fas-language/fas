@@ -48,7 +48,6 @@ gcc/gcc/testsuite/gcc.dg/cleanup-13.c fir-error: asm input 0 ("i") needs a const
 gcc/gcc/testsuite/gcc.dg/cleanup-5.c link-error: fas-ld: /tmp/fcc_2711580_1.o: undefined symbol _Unwind_ForcedUnwind
 gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: fas-ld: /tmp/fcc_2711590_1.o: undefined symbol _Unwind_ForcedUnwind
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: fas-ld: /tmp/fcc_2711591_1.o: undefined symbol _Unwind_ForcedUnwind
-gcc/gcc/testsuite/gcc.dg/constructor-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/cpp/embed-12.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/di-longlong64-sync-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc exit=0, clang exit=137
@@ -59,7 +58,6 @@ gcc/gcc/testsuite/gcc.dg/gnu89-init-1.c exit-mismatch: fcc exit=134, clang exit=
 gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/gomp/pr114075.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/ipa/ipa-pta-19.c link-error: fas-ld: /tmp/fcc_2715697_1.o: undefined symbol multiver_test
-gcc/gcc/testsuite/gcc.dg/ipa/pr70306.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/long-long-cst1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/memcmp-1.c link-error: fas-ld: /tmp/fcc_2716969_1.o: undefined symbol lib_memcmp
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: fcc exit=0, clang exit=134

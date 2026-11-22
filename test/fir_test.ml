@@ -312,5 +312,49 @@ func @bad (ptr) -> () global {
   check "intern width" (iconst f i32 5L <> iconst f i64 5L);
   check "neg limbs" (const_of f (iconst f i128 (-1L)) = Some (Cint (i128, [| -1L; -1L |])));
   check "i7 normalize" (const_of f (iconst f (Int 7) (-1L)) = Some (Cint (Int 7, [| 127L |])));
+  (* ELF sh_type for .init_array / .fini_array / .preinit_array sections *)
+  (match
+     parse "elf_lifecycle_sections"
+       {|
+triple "x86_64-unknown-linux-gnu"
+func @ctor1 () -> () local {
+^entry:
+  ret
+}
+func @ctor2 () -> () local {
+^entry:
+  ret
+}
+func @dtor1 () -> () local {
+^entry:
+  ret
+}
+func @pre1 () -> () local {
+^entry:
+  ret
+}
+global @.Lctor.0 size 8 align 8 local section ".init_array" = { reloc @ctor1 w8 }
+global @.Lctor.1 size 8 align 8 local section ".init_array.00101" = { reloc @ctor2 w8 }
+global @.Ldtor.0 size 8 align 8 local section ".fini_array" = { reloc @dtor1 w8 }
+global @.Lpre.0 size 8 align 8 local section ".preinit_array" = { reloc @pre1 w8 }
+|}
+   with
+  | None -> ()
+  | Some m -> (
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL elf_lifecycle_sections: compile_object: %s\n%!" e
+      | Ok bytes ->
+          let obj = Fas_linker.Elf_reader.parse ~path:"<elf_lifecycle_sections>" (Bytes.unsafe_to_string bytes) in
+          let find_kind name =
+            Array.to_list obj.sections
+            |> List.find_opt (fun (s : Fas_linker.Elf_reader.section) -> s.name = name)
+            |> Option.map (fun (s : Fas_linker.Elf_reader.section) -> (s.kind, s.flags))
+          in
+          check "sh_type .init_array" (find_kind ".init_array" = Some (14, 3));
+          check "sh_type .init_array.00101" (find_kind ".init_array.00101" = Some (14, 3));
+          check "sh_type .fini_array" (find_kind ".fini_array" = Some (15, 3));
+          check "sh_type .preinit_array" (find_kind ".preinit_array" = Some (16, 3))));
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"

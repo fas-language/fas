@@ -1206,9 +1206,14 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
             && (name = ".tbss" || name = ".bss" || String.starts_with ~prefix:".bss." name
                || (tls && String.starts_with ~prefix:".tbss." name))
           in
+          let is_lifecycle =
+            name = ".init_array" || String.starts_with ~prefix:".init_array." name
+            || name = ".fini_array" || String.starts_with ~prefix:".fini_array." name
+            || name = ".preinit_array" || String.starts_with ~prefix:".preinit_array." name
+          in
           {
             Native_object.name;
-            flags = 2 lor (if !writable then 1 else 0) lor if tls then 0x400 else 0;
+            flags = 2 lor (if !writable || is_lifecycle then 1 else 0) lor if tls then 0x400 else 0;
             alignment = d.alignment;
             contents =
               (if nobits then Fas_linker.Elf_object.Bss (Buffer.length d.buf)
