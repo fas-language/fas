@@ -920,7 +920,12 @@ fn gen_stmt(n handle[Ast]) void fails {
         old_cleanups usize = gc.cleanups.n
         old_vlas usize = gc.vla_stack.n
         gc.scope_depth += 1
-        if n.a != null { try gen_stmt(n.a) }
+        // A declaration initializer can contain a chain of declarators.
+        init handle[Ast] = n.a
+        while init != null {
+            try gen_stmt(init)
+            init = init.next
+        }
 
         cond_blk u32 = gen_new_block()
         body_blk u32 = gen_new_block()
