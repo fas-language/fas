@@ -403,7 +403,8 @@ fn pa_keyword(p handle[Parser], t Token) bool {
         pa_is(p, t, c"for") || pa_is(p, t, c"switch") || pa_is(p, t, c"case") || pa_is(p, t, c"default") ||
         pa_is(p, t, c"goto") || pa_is(p, t, c"break") || pa_is(p, t, c"continue") || pa_is(p, t, c"return") ||
         pa_is(p, t, c"sizeof") || pa_is(p, t, c"alignof") || pa_is(p, t, c"_Alignof") ||
-        pa_is(p, t, c"_Generic") || pa_is(p, t, c"nullptr") || pa_is(p, t, c"true") || pa_is(p, t, c"false")
+        pa_is(p, t, c"_Generic") || pa_is(p, t, c"nullptr") || pa_is(p, t, c"true") || pa_is(p, t, c"false") ||
+        pa_is(p, t, c"_Decimal32") || pa_is(p, t, c"_Decimal64") || pa_is(p, t, c"_Decimal128")
 }
 
 fn pa_decl_start(p handle[Parser], t Token) bool {
