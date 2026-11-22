@@ -81,6 +81,9 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         if prior.linkage != s.linkage || prior.thread_local != s.thread_local {
             try pa_error(p, s.loc, c"conflicting linkage or storage duration")
         }
+        if s.storage == SC_TYPEDEF && se_variably_modified(prior.ty) {
+            try pa_error(p, s.loc, c"cannot redeclare a typedef for a variably modified type")
+        }
         composite u32 = ty_composite(prior.ty, s.ty)
         if composite == TY_INVALID { try pa_error(p, s.loc, c"conflicting types for declaration") }
         if definition && prior.defined { try pa_error(p, s.loc, c"redefinition") }

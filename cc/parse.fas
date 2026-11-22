@@ -171,8 +171,8 @@ fn pa_pragma(p handle[Parser], t Token) void {
     }
     comma usize = bytes_index(s, 44) catch s.n
     if comma < s.n { s = pa_trim(bytes_from(s, comma + 1)) }
-    n u64 = bytes_to_u64(s) catch 0
-    if n == 1 || n == 2 || n == 4 || n == 8 || n == 16 { p.pack = trunc[u32](n) }
+    n u64 = bytes_to_u64(s) catch { return }
+    if n == 0 || n == 1 || n == 2 || n == 4 || n == 8 || n == 16 { p.pack = trunc[u32](n) }
 }
 
 fn pa_peek_at(p handle[Parser], i u32) Token fails {

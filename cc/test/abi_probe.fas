@@ -343,6 +343,7 @@ fn main() i32 {
 
                 ftid u32 = parse_ty(&st, ty_tok)
                 fd handle[FieldDef] = vec_add(&fields)
+                fd.name_id = if is_bf && bw == 0 { 0 } else { i + 1 }
                 fd.ty = ftid
                 fd.bit_width = bw
                 fd.align_attr = f_al

@@ -12,6 +12,8 @@ struct DeclSpec {
     is_noreturn bool
     inferred bool
     auto_seen bool
+    member bool
+    anonymous_record bool
 }
 
 const DO_PTR u8 = 1
@@ -519,6 +521,17 @@ fn pa_redeclared_field_type(p handle[Parser], a handle[FieldDef], b handle[Field
         (y.aux1 == ARR_INCOMPLETE && x.aux1 == ARR_FIXED && x.arr_len == 0))
 }
 
+fn pa_bind_member(p handle[Parser], seen handle[TagMap], name u32, ty u32, anon bool, loc u32) void fails {
+    if name != 0 && !map_put(seen, name, ty) { try pa_error(p, loc, c"duplicate record member") }
+    if anon {
+        r handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
+        for i u32 in 0..r.fields_len {
+            field handle[FieldDef] = ty_field(r.fields_start + i)
+            try pa_bind_member(p, seen, field.name_id, field.ty, field.is_anon, loc)
+        }
+    }
+}
+
 fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
     rec_id u32 = ty_node(ty).aux1
     if !map_put(&p.record_open, rec_id, 1) { try pa_error(p, loc, c"nested redefinition of record") }
@@ -531,6 +544,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
         if pa_assert_word(p, t) { try pa_assert(p); continue }
         if pa_is_gnu(p) && (try pa_accept(p, c";")) { continue }
         spec DeclSpec = {}
+        spec.member = true
         try pa_specs(p, &spec)
         if spec.storage != SC_NONE || spec.thread_local || spec.inferred {
             try pa_error(p, t.loc, c"invalid storage class on member declaration")
@@ -552,12 +566,18 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             if bit && (!ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0)) {
                 try pa_error(p, t.loc, c"invalid bit-field width or type")
             }
-            anon bool = d.name == 0 && !bit && ty_is_record(ft)
-            if d.name == 0 && !bit && !anon { try pa_error(p, t.loc, c"member declaration has no declarator") }
-            if d.name != 0 && !map_put(&seen, d.name, ft) { try pa_error(p, d.loc, c"duplicate record member") }
+            anon bool = d.name == 0 && !bit && spec.anonymous_record && ty_is_record(ft)
+            if d.name == 0 && !bit && !anon {
+                if !pa_is_gnu(p) || !(try pa_at(p, c";")) {
+                    try pa_error(p, t.loc, c"member declaration has no declarator")
+                }
+                cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"member declaration does not declare anything"))
+                break
+            }
             base handle[TypeNode] = ty_node(ty_unqual(ft))
             flex bool = base.kind == TYK_ARRAY && base.aux1 == ARR_INCOMPLETE
             if (!se_complete(ft) && !flex) || se_vla(ft) { try pa_error(p, t.loc, c"member has incomplete or variable type") }
+            try pa_bind_member(p, &seen, d.name, ft, anon, if d.name != 0 { d.loc } else { t.loc })
             f handle[FieldDef] = vec_add[FieldDef](&fields)
             f.name_id = d.name
             f.ty = ft
@@ -579,8 +599,11 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     for i usize in 0..fields.n {
         f handle[FieldDef] = vec_at[FieldDef](&fields, i)
         n handle[TypeNode] = ty_node(ty_unqual(f.ty))
-        if n.kind == TYK_ARRAY && n.aux1 == ARR_INCOMPLETE && (i == 0 || i + 1 != fields.n || ty_kind(ty) == TYK_UNION) {
-            try pa_error(p, loc, c"invalid flexible array member")
+        if n.kind == TYK_ARRAY && n.aux1 == ARR_INCOMPLETE {
+            union bool = ty_kind(ty) == TYK_UNION
+            if (!union && i + 1 != fields.n) || (!pa_is_gnu(p) && (union || seen.n < 2)) {
+                try pa_error(p, loc, c"invalid flexible array member")
+            }
         }
     }
     if fields.n == 0 && !pa_is_gnu(p) { try pa_error(p, loc, c"empty records require GNU mode") }
@@ -606,7 +629,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     }
 }
 
-fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
+fn pa_tag_spec(p handle[Parser], t Token, spec handle[DeclSpec]) u32 fails {
     kind u8 = TYK_STRUCT
     if pa_is(p, t, c"union") { kind = TYK_UNION }
     if pa_is(p, t, c"enum") { kind = TYK_ENUM }
@@ -618,9 +641,9 @@ fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
     if kind == TYK_ENUM && (try pa_at(p, c":")) && pa_decl_start(p, try pa_peek_at(p, 1)) {
         try pa_take(p)
         // The underlying type specifier is followed by the outer declarator.
-        spec DeclSpec = {}
-        try pa_specs(p, &spec)
-        fixed = spec.ty
+        underlying DeclSpec = {}
+        try pa_specs(p, &underlying)
+        fixed = underlying.ty
         if !ty_is_integer(fixed) || ty_quals(fixed) != 0 { try pa_error(p, t.loc, c"invalid enum underlying type") }
     }
     define bool = try pa_at(p, c"{")
@@ -629,7 +652,10 @@ fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
     if define {
         try pa_take(p)
         if kind == TYK_ENUM { try pa_enum_body(p, ty, t.loc, attrs) }
-        else { try pa_record_body(p, ty, t.loc, attrs) }
+        else {
+            try pa_record_body(p, ty, t.loc, attrs)
+            spec.anonymous_record = name == 0
+        }
     }
     return ty
 }
@@ -680,7 +706,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
             if pa_is(p, t, c"typeof_unqual") { base = ty_typeof_unqual(base) }
         } else if pa_is(p, t, c"struct") || pa_is(p, t, c"union") || pa_is(p, t, c"enum") {
             try pa_take(p)
-            base = try pa_tag_spec(p, t)
+            base = try pa_tag_spec(p, t, out)
         } else if base != TY_INVALID { try pa_take(p) }
         else if sc == SC_AUTO {
             if out.auto_seen { try pa_error(p, t.loc, c"duplicate auto specifier") }
@@ -758,6 +784,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
             return
         }
         if sign == 0 && longs == 0 && !short && !complex {
+            if out.member && out.quals != 0 && pa_is_gnu(p) && (try pa_at(p, c";")) { return }
             try pa_error(p, out.loc, c"C23 requires an explicit type specifier (implicit int is unsupported)")
         }
         ty = if complex && sign == 0 && longs == 0 && !short { TY_DOUBLE } else { TY_INT }
@@ -792,7 +819,18 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         out.storage = SC_AUTO
     }
     if out.storage == SC_CONSTEXPR { out.quals |= Q_CONST }
-    out.ty = ty_qual(ty, out.quals)
+    out.ty = try pa_qualified(p, ty, out.quals, out.loc)
+}
+
+fn pa_qualified(p handle[Parser], ty u32, quals u32, loc u32) u32 fails {
+    if (quals & Q_RESTRICT) != 0 {
+        base u32 = ty_unqual(ty)
+        while ty_is_array(base) { base = ty_unqual(ty_node(base).elem) }
+        if !ty_is_ptr(base) || ty_is_func(ty_node(base).elem) {
+            try pa_error(p, loc, c"restrict requires a pointer to a non-function type")
+        }
+    }
+    return ty_qual(ty, quals)
 }
 
 fn pa_add_op(d handle[Declarator], op handle[DeclOp]) void {
@@ -957,7 +995,7 @@ fn pa_apply(p handle[Parser], op handle[DeclOp], base u32) u32 fails {
 }
 
 fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
-    if op.kind == DO_PTR { return ty_qual(ty_ptr(elem), op.quals) }
+    if op.kind == DO_PTR { return try pa_qualified(p, ty_ptr(elem), op.quals, op.loc) }
     if op.kind == DO_FUNC {
         if ty_is_array(elem) || ty_is_func(elem) { try pa_error(p, op.loc, c"function cannot return array or function type") }
         args Vec[u32] = {}
@@ -973,9 +1011,16 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
     if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
     b handle[Ast] = op.bound
     if b == null && !op.star { return ty_array_incomplete(elem) }
+    // A block-scope bound can be a runtime expression even if folding it
+    // found undefined arithmetic. Keep the VLA and diagnose the bad bound.
+    runtime_fault bool = b != null && p.scope != p.file_scope && pa_is_gnu(p) &&
+        ((b.flags & NF_OVERFLOW) != 0)
+    if runtime_fault {
+        cc_diag(p.names, b.loc, c"warning: ", bytes_c(c"undefined arithmetic in variable array bound"))
+    }
     // GNU accepts foldable bounds in file-scope array declarations. In a
     // block the same non-ICE bound still forms a variable-length array.
-    if b != null && ((b.flags & NF_ICE) != 0 ||
+    if b != null && !runtime_fault && ((b.flags & NF_ICE) != 0 ||
         (p.scope == p.file_scope && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
         count u64 = try se_ice(p, b)
         if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||

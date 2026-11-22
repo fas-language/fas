@@ -18,3 +18,4 @@ unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-digit-separators-1.c
 unexpected-reject compile-only/llvm/clang/test/C/C2y/n3260.c Exercises the C2Y type-name controlling operand for _Generic
 unexpected-reject compile-only/llvm/clang/test/Sema/c23-fixed-underlying-enum.c Exercises fixed-underlying enums with a C2Y _Generic type-name controlling operand
 unexpected-reject headers/afl/t1ha0_ia32aes_b.h AFL only includes x86intrin.h for GCC >= 4.4 or when __clang__ is defined. Clang with -U__clang__ reproduces the undeclared __m128i error.
+unexpected-reject compile-only/llvm/clang/test/Lexer/rdar-8914293.c GCC and Clang warn about quotes left unterminated in unused macro replacement lists. FCC treats unterminated literals as errors.

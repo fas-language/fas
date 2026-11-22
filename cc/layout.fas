@@ -45,7 +45,9 @@ fn layout_record(rec_id u32) void {
                 fa u64 = if f_packed && pp == 0 { 1 } else { f_al }
                 if f_attr > fa { fa = f_attr }
                 if pp > 0 && fa > pp { fa = pp }
-                if fa > rec_align { rec_align = fa }
+                // An unnamed bit-field occupies bits without raising the
+                // record's alignment, even with an explicit field alignment.
+                if f.name_id != 0 && fa > rec_align { rec_align = fa }
                 bw u64 = zext[u64](f.bit_width)
                 if bw > max_bits { max_bits = bw }
             } else {
@@ -53,6 +55,8 @@ fn layout_record(rec_id u32) void {
                 if f_attr > fa { fa = f_attr }
                 if pp > 0 && fa > pp { fa = pp }
                 if fa > rec_align { rec_align = fa }
+                member handle[TypeNode] = ty_node(ty_unqual(f.ty))
+                if member.kind == TYK_ARRAY && member.aux1 == ARR_INCOMPLETE { rec.has_flex_array = true }
                 fbits u64 = f_sz * 8
                 if fbits > max_bits { max_bits = fbits }
             }
@@ -113,7 +117,7 @@ fn layout_record(rec_id u32) void {
             f.bit_off = bit_off
             f.byte_off = bit_off / 8
             bit_off += bw
-            if fa > rec_align { rec_align = fa }
+            if f.name_id != 0 && fa > rec_align { rec_align = fa }
         } else {
             fa u64 = if f_packed { 1 } else { f_al }
             if f_attr > fa { fa = f_attr }
