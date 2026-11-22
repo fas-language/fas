@@ -154,3 +154,95 @@ fn flt_narrow_value(bits u64, ty u32) f64 {
     if exp == 31 { return bitcast[f64](inf) }
     return bitcast[f64](((exp + 1008) << 52) | (frac << 42))
 }
+
+fn flt_set_bits(n handle[Ast], bits FloatBits) void {
+    slot handle[FloatBits] = handle_from_addr(heap_alloc(sizeof[FloatBits]))
+    slot.lo = bits.lo
+    slot.hi = bits.hi
+    n.float_bits = slot
+}
+
+// Decode the source into an integer significand and a power of two so the
+// conversion to binary128 rounds directly from the original precision.
+fn flt_quad_const(a handle[Ast], out handle[FloatBits]) bool {
+    scale i32 = 0
+    sign u64 = 0
+    sig WideInt = {}
+    ty u32 = ty_unqual(a.ty)
+    if (a.flags & NF_INT_VALUE) != 0 && ty_is_integer(ty) {
+        width u32 = ty_int_bits(ty)
+        // Ratio normalization shifts the numerator and denominator in place-sized limbs.
+        sig = wi_from_ast(a, width + 256)
+        if !ty_is_unsigned(ty) && wi_bit(sig, width - 1) != 0 {
+            wi_negate(sig)
+            sign = 0x8000000000000000
+        }
+    } else if (a.flags & NF_FLOAT_CONST) != 0 && ty_is_real_float(ty) {
+        if ty == TY_FLOAT128 {
+            if a.float_bits == null { return false }
+            out.lo = a.float_bits.lo
+            out.hi = a.float_bits.hi
+            return true
+        }
+        mant u64 = 0
+        if ty == TY_LDOUBLE {
+            if a.float_bits == null { return false }
+            field u64 = a.float_bits.hi & 0x7fff
+            mant = a.float_bits.lo
+            sign = (a.float_bits.hi & 0x8000) << 48
+            if field == 0x7fff {
+                mant &= 0x7fffffffffffffff
+                out.hi = sign | 0x7fff000000000000 | (mant >> 15)
+                out.lo = mant << 49
+                return true
+            }
+            scale = trunc[i32](if field == 0 { 1 } else { field }) - 16383 - 63
+        } else {
+            exponent u64 = (a.value >> 52) & 0x7ff
+            mant = a.value & 0x000fffffffffffff
+            sign = a.value & 0x8000000000000000
+            if exponent == 0x7ff {
+                out.hi = sign | 0x7fff000000000000 | (mant >> 4)
+                out.lo = mant << 60
+                return true
+            }
+            if exponent != 0 { mant |= 0x0010000000000000 }
+            scale = trunc[i32](if exponent == 0 { 1 } else { exponent }) - 1023 - 52
+        }
+        sig = wi_new(320)
+        sig.p[u64] = mant
+    } else { return false }
+    defer { heap_free(sig.p) }
+    if wi_length(sig) == 0 { out.hi = sign; out.lo = 0; return true }
+    den WideInt = wi_new(sig.width)
+    defer { heap_free(den.p) }
+    den.p[u32] = 1
+    bits FloatBits = flt_pack(sig, den, scale, false, {113, -16382, 16383, false})
+    out.lo = bits.lo
+    out.hi = sign | bits.hi
+    return true
+}
+
+fn se_fold_quad_compare(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast]) void {
+    x FloatBits = {}
+    y FloatBits = {}
+    if !flt_quad_const(a, &x) || !flt_quad_const(b, &y) { return }
+    mx u64 = x.hi & 0x7fffffffffffffff
+    my u64 = y.hi & 0x7fffffffffffffff
+    nan bool = mx > 0x7fff000000000000 || my > 0x7fff000000000000 ||
+        (mx == 0x7fff000000000000 && x.lo != 0) || (my == 0x7fff000000000000 && y.lo != 0)
+    if nan { return } // A signaling NaN comparison may raise an exception.
+    equal bool = (x.hi == y.hi && x.lo == y.lo) || (mx | my | x.lo | y.lo) == 0
+    sx bool = x.hi != mx
+    sy bool = y.hi != my
+    mag_less bool = mx < my || (mx == my && x.lo < y.lo)
+    less bool = !equal && (if sx != sy { sx } else { mag_less != sx })
+    yes bool = equal
+    if pa_is(p, t, c"!=") { yes = !equal }
+    else if pa_is(p, t, c"<") { yes = less }
+    else if pa_is(p, t, c">") { yes = !less && !equal }
+    else if pa_is(p, t, c"<=") { yes = less || equal }
+    else if pa_is(p, t, c">=") { yes = !less }
+    n.value = if yes { 1 } else { 0 }
+    n.flags |= NF_STATIC | NF_FOLD
+}

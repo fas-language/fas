@@ -182,7 +182,10 @@ fn se_ptr_compatible(a u32, b u32, assign bool) bool {
 fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
     from u32 = se_decay(src.ty)
     if dest == TY_INVALID || from == TY_INVALID { return }
-    if ty_is_arith(dest) && ty_is_arith(from) { return }
+    if ty_is_arith(dest) && ty_is_arith(from) {
+        try se_quad_conversion(p, src.loc, dest, from)
+        return
+    }
     if ty_compatible(ty_unqual(dest), ty_unqual(from)) { return }
     if ty_is_ptr(dest) && (se_null(src) || (ty_is_ptr(from) && se_ptr_compatible(dest, from, true))) { return }
     if pa_is_gnu(p) && ty_is_ptr(dest) && ty_is_ptr(from) {

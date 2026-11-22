@@ -128,7 +128,6 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
         if negative { exponent = -exponent }
     } else if hex { try pa_error(p, t.loc, c"hexadecimal floating literal requires an exponent") }
     ty u32 = TY_DOUBLE
-    quad_suffix bool = false
     imaginary bool = false
     if pa_is_gnu(p) && i < s.n && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
     if i < s.n {
@@ -142,9 +141,12 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
             }
         }
         else if suffix == 108 { ty = TY_LDOUBLE; i += 1 }
-        else if suffix == 113 && pa_is_gnu(p) { ty = TY_LDOUBLE; quad_suffix = true; i += 1 }
+        else if suffix == 113 && pa_is_gnu(p) { ty = TY_FLOAT128; i += 1 }
         if i < s.n && !imaginary && pa_is_gnu(p) && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
         if i != s.n { try pa_error(p, t.loc, c"invalid floating literal suffix") }
+    }
+    if ty == TY_FLOAT128 && imaginary {
+        try pa_error(p, t.loc, c"complex binary128 is unsupported")
     }
     exponent -= fractional * (if hex { 4 } else { 1 })
     format FloatFormat = {53, -1022, 1023, false}
@@ -153,12 +155,9 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
     bits FloatBits = flt_literal(s, first, end, significant, exponent, hex, format)
     value f64 = flt_narrow_value(bits.lo, ty)
     n handle[Ast] = pa_node(ND_FLOAT, t.loc, if imaginary { ty_complex(ty) } else { ty })
-    if ty == TY_LDOUBLE && !quad_suffix {
-        extended handle[FloatBits] = handle_from_addr(heap_alloc(sizeof[FloatBits]))
-        exact FloatBits = flt_literal(s, first, end, significant, exponent, hex, {64, -16382, 16383, true})
-        extended.lo = exact.lo
-        extended.hi = exact.hi
-        n.float_bits = extended
+    if ty == TY_LDOUBLE || ty == TY_FLOAT128 {
+        wide_format FloatFormat = if ty == TY_LDOUBLE { {64, -16382, 16383, true} } else { {113, -16382, 16383, false} }
+        flt_set_bits(n, flt_literal(s, first, end, significant, exponent, hex, wide_format))
     }
     n.op = t.payload
     if imaginary {
@@ -325,6 +324,7 @@ fn pa_generic(p handle[Parser], t Token) handle[Ast] fails {
     n.value = chosen.value
     n.wide = chosen.wide
     n.imag = chosen.imag
+    n.float_bits = chosen.float_bits
     n.a = key
     n.b = chosen
     n.c = alternatives.first
@@ -668,6 +668,7 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
             if s.storage == SC_CONSTEXPR && s.value != null {
                 n.flags |= val.flags & (NF_STATIC | NF_ICE | NF_FLOAT_CONST)
                 n.imag = val.imag
+                n.float_bits = val.float_bits
                 if ty_is_integer(s.ty) && ty_int_bits(s.ty) > 64 && (n.flags & NF_ICE) != 0 {
                     wi_store(n, wi_from_ast(val, ty_int_bits(s.ty)))
                 } else {

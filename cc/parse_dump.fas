@@ -33,7 +33,7 @@ fn pa_dump_tree(p handle[Parser], out handle[Buf], node handle[Ast], depth u32) 
     }
     if node.kind == ND_FLOAT && node.float_bits != null {
         buf_str(out, c" bits=0x")
-        buf_hex(out, node.float_bits.hi, 4)
+        buf_hex(out, node.float_bits.hi, if ty_unqual(node.ty) == TY_FLOAT128 { 16 } else { 4 })
         buf_hex(out, node.float_bits.lo, 16)
     }
     if node.kind == ND_SIZE && (node.flags & NF_ICE) == 0 { buf_str(out, c" runtime") }

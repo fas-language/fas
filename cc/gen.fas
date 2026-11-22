@@ -499,6 +499,7 @@ fn gen_emit_fir_ty(b handle[Buf], tid u32) void {
     if k == TYK_FLOAT { buf_str(b, c"f32"); return }
     if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
     if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_FLOAT128 { buf_str(b, c"<2 x i64>"); return }
     if k == TYK_PTR || k == TYK_NULLPTR || k == TYK_FUNC { buf_str(b, c"ptr"); return }
     if k == TYK_VECTOR {
         abi_emit_fir_leaf(b, u)
@@ -734,7 +735,7 @@ fn gen_const_zero(tid u32) u32 {
         buf_str(b, c" = ptradd ptr ptr null, i64 0, 1, 0\n")
         return v
     }
-    if ty_is_real_float(tid) {
+    if ty_is_real_float(tid) && k != TYK_FLOAT128 {
         buf_str(b, c"  ")
         gen_emit_val(b, v)
         buf_str(b, c" = fadd ")
@@ -746,7 +747,7 @@ fn gen_const_zero(tid u32) u32 {
         buf_str(b, c" zero\n")
         return v
     }
-    if k == TYK_VECTOR {
+    if k == TYK_VECTOR || k == TYK_FLOAT128 {
         buf_str(b, c"  ")
         gen_emit_val(b, v)
         buf_str(b, c" = freeze ")
@@ -853,6 +854,10 @@ fn gen_const_float(tid u32, f64_bits u64) u32 {
 }
 
 fn gen_const_float_exact(tid u32, f64_bits u64, exact handle[FloatBits]) u32 {
+    if ty_unqual(tid) == TY_FLOAT128 {
+        if exact != null { return gen_const_quad(exact.lo, exact.hi) }
+        return gen_to_quad(gen_const_float(TY_DOUBLE, f64_bits), TY_DOUBLE)
+    }
     v u32 = gen_new_val()
     b handle[Buf] = gen_cur_buf()
     k u8 = ty_kind(tid)

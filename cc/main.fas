@@ -28,6 +28,7 @@ use "parse_dump.fas"
 use "gen.fas"
 use "gen_init.fas"
 use "gen_expr.fas"
+use "gen_quad.fas"
 use "gen_stmt.fas"
 use "gen_driver.fas"
 

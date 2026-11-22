@@ -64,11 +64,23 @@ fn se_transparent_arg(ty u32, a handle[Ast]) handle[Ast] {
     return a
 }
 
+fn se_quad_conversion(p handle[Parser], loc u32, a u32, b u32) void fails {
+    if ty_real_part(a) != TY_FLOAT128 && ty_real_part(b) != TY_FLOAT128 { return }
+    if ty_is_complex(a) || ty_is_complex(b) {
+        try pa_error(p, loc, c"complex binary128 conversion is unsupported")
+    }
+    if ty_int_bits(a) > 128 || ty_int_bits(b) > 128 ||
+        ty_real_part(a) == TY_BFLOAT16 || ty_real_part(b) == TY_BFLOAT16 {
+        try pa_error(p, loc, c"binary128 conversion for this type is unsupported")
+    }
+}
+
 fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
     from u32 = se_decay(a.ty)
     n handle[Ast] = pa_node(ND_CAST, t.loc, ty)
     n.a = a
     if from == TY_INVALID || ty_is_void(ty) { return n }
+    try se_quad_conversion(p, t.loc, ty, from)
     if !ty_is_scalar(ty) || !ty_is_scalar(from) ||
         (ty_is_ptr(ty) && ty_is_floating(from)) || (ty_is_floating(ty) && ty_is_ptr(from)) ||
         (ty_is_nullptr(ty) && !ty_is_nullptr(from)) {
@@ -110,6 +122,20 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
 fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
     ty u32 = n.ty
     from u32 = se_decay(a.ty)
+    if ty_unqual(ty) == TY_FLOAT128 || ty_unqual(from) == TY_FLOAT128 {
+        n.flags |= a.flags & NF_OVERFLOW
+        if ty_unqual(ty) == TY_FLOAT128 {
+            bits FloatBits = {}
+            if flt_quad_const(a, &bits) {
+                flt_set_bits(n, bits)
+                n.flags |= NF_STATIC | NF_FLOAT_CONST
+            }
+        } else if ty_is_bool(ty) && (a.flags & NF_FLOAT_CONST) != 0 {
+            n.value = if se_truth(a) { 1 } else { 0 }
+            n.flags |= NF_STATIC | NF_FOLD
+        }
+        return
+    }
     n.flags |= a.flags & (NF_STATIC | NF_OVERFLOW)
     if ty_is_integer(ty) && (a.flags & NF_INT_VALUE) != 0 {
         n.flags |= a.flags & NF_INT_VALUE
@@ -244,6 +270,10 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
             n.value = se_value(n.ty, 0 - raw)
             if !ty_is_unsigned(n.ty) && n.value == raw && raw != 0 && ty_int_bits(n.ty) <= 64 { n.flags |= NF_OVERFLOW }
         }
+    } else if ty_unqual(n.ty) == TY_FLOAT128 && a.float_bits != null {
+        sign u64 = if negate { 0x8000000000000000 } else { 0 }
+        flt_set_bits(n, {a.float_bits.lo, a.float_bits.hi ^ sign})
+        n.flags |= NF_FLOAT_CONST
     } else if (a.flags & NF_FLOAT_CONST) != 0 {
         v f64 = se_fp(a)
         im f64 = se_im(a)
@@ -255,6 +285,9 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
 }
 
 fn se_truth(a handle[Ast]) bool {
+    if ty_unqual(a.ty) == TY_FLOAT128 && a.float_bits != null {
+        return ((a.float_bits.hi & 0x7fffffffffffffff) | a.float_bits.lo) != 0
+    }
     if (a.flags & NF_FLOAT_CONST) != 0 { return se_fp(a) != 0.0 || se_im(a) != 0.0 }
     if ty_is_nullptr(a.ty) { return false }
     if a.wide != null { return wi_ast_length(a) != 0 }
@@ -630,6 +663,12 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     n.ty = if compare { TY_INT } else { ty }
     n.operand_ty = ty
     n.flags = (a.flags | b.flags) & NF_OVERFLOW
+    // Quad arithmetic cannot be folded through the f64 projection.
+    if ty_real_part(ty) == TY_FLOAT128 {
+        try se_quad_conversion(p, t.loc, x, y)
+        if compare { se_fold_quad_compare(p, t, n, a, b) }
+        return n
+    }
     if pa_is_gnu(p) && (a.flags & NF_STATIC) != 0 && (b.flags & NF_STATIC) != 0 && k == 11 { n.flags |= NF_STATIC }
     if ty_is_integer(ty) && (a.flags & NF_INT_VALUE) != 0 && (b.flags & NF_INT_VALUE) != 0 {
         n.flags |= NF_STATIC | (if (a.flags & b.flags & NF_ICE) != 0 { NF_ICE } else { NF_FOLD })
@@ -650,7 +689,10 @@ fn se_conditional(p handle[Parser], t Token, cond handle[Ast], a handle[Ast], b 
     y u32 = se_decay(b.ty)
     ty u32 = TY_INVALID
     if pa_is_gnu(p) && (ty_is_void(x) || ty_is_void(y)) { ty = TY_VOID }
-    else if ty_is_arith(x) && ty_is_arith(y) { ty = se_arith_type(a, b) }
+    else if ty_is_arith(x) && ty_is_arith(y) {
+        try se_quad_conversion(p, t.loc, x, y)
+        ty = se_arith_type(a, b)
+    }
     else if ty_compatible(x, y) { ty = ty_composite(x, y) }
     else if ty_is_ptr(x) && se_null(b) { ty = x }
     else if ty_is_ptr(y) && se_null(a) { ty = y }

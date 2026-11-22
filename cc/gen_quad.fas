@@ -1,0 +1,97 @@
+// Fir has no arithmetic type for IEEE binary128. Its 16-byte vector calling
+// convention matches GNU __float128 (SSE/SSEUP), including libgcc's helpers.
+
+fn gen_quad_unary(name addr, ret_ty u32, arg_ty u32, arg u32) u32 {
+    return gen_emit_helper_call(bytes_c(name), ret_ty, &arg_ty, &arg, 1)
+}
+
+fn gen_quad_binary(name addr, ret_ty u32, lhs u32, rhs u32) u32 {
+    types arr[2, u32] = {TY_FLOAT128, TY_FLOAT128}
+    values arr[2, u32] = {lhs, rhs}
+    return gen_emit_helper_call(bytes_c(name), ret_ty, &types, &values, 2)
+}
+
+fn gen_const_quad(lo u64, hi u64) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = insert <2 x i64> <2 x i64> zero, i64 ")
+    buf_dec_u64(b, lo)
+    buf_str(b, c", i32 0\n  ")
+    out u32 = gen_new_val()
+    gen_emit_val(b, out)
+    buf_str(b, c" = insert <2 x i64> ")
+    gen_emit_val(b, v)
+    buf_str(b, c", i64 ")
+    buf_dec_u64(b, hi)
+    buf_str(b, c", i32 1\n")
+    return out
+}
+
+fn gen_quad_lane(v u32, index u32) u32 {
+    dst u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, dst)
+    buf_str(b, c" = extract i64 ")
+    gen_emit_val(b, v)
+    buf_str(b, c", i32 ")
+    buf_dec_u64(b, zext[u64](index))
+    buf_u8(b, 10)
+    return dst
+}
+
+fn gen_quad_compare(pred addr, lhs u32, rhs u32) u32 {
+    p Bytes = bytes_c(pred)
+    helper addr = c"__eqtf2"
+    test addr = c"eq"
+    if bytes_eq_c(p, c"une") { test = c"ne" }
+    else if bytes_eq_c(p, c"uno") { helper = c"__unordtf2"; test = c"ne" }
+    else if bytes_eq_c(p, c"olt") { helper = c"__lttf2"; test = c"slt" }
+    else if bytes_eq_c(p, c"ole") { helper = c"__letf2"; test = c"sle" }
+    else if bytes_eq_c(p, c"ogt") { helper = c"__gttf2"; test = c"sgt" }
+    else if bytes_eq_c(p, c"oge") { helper = c"__getf2"; test = c"sge" }
+    else if bytes_eq_c(p, c"one") {
+        below u32 = gen_quad_compare(c"olt", lhs, rhs)
+        above u32 = gen_quad_compare(c"ogt", lhs, rhs)
+        return gen_binop_raw(c"or", c"i1", below, above)
+    }
+    return gen_icmp(test, gen_quad_binary(helper, TY_LONG, lhs, rhs), gen_const_u64(0))
+}
+
+fn gen_to_quad(val u32, from u32) u32 {
+    if ty_is_integer(from) {
+        uns bool = ty_is_unsigned(from)
+        bits u32 = ty_int_bits(from)
+        abi_ty u32 = if bits <= 32 { if uns { TY_UINT } else { TY_INT } }
+            else if bits <= 64 { if uns { TY_ULONG } else { TY_LONG } }
+            else { if uns { TY_UINT128 } else { TY_INT128 } }
+        helper addr = if bits <= 32 { if uns { c"__floatunsitf" } else { c"__floatsitf" } }
+            else if bits <= 64 { if uns { c"__floatunditf" } else { c"__floatditf" } }
+            else { if uns { c"__floatuntitf" } else { c"__floattitf" } }
+        return gen_quad_unary(helper, TY_FLOAT128, abi_ty, gen_convert(val, from, abi_ty))
+    }
+    if from == TY_FLOAT16 { return gen_quad_unary(c"__extendhftf2", TY_FLOAT128, from, val) }
+    if from == TY_FLOAT { return gen_quad_unary(c"__extendsftf2", TY_FLOAT128, from, val) }
+    if from == TY_LDOUBLE { return gen_quad_unary(c"__extendxftf2", TY_FLOAT128, from, val) }
+    return gen_quad_unary(c"__extenddftf2", TY_FLOAT128, from, val)
+}
+
+fn gen_from_quad(val u32, to u32) u32 {
+    if ty_is_integer(to) {
+        uns bool = ty_is_unsigned(to)
+        bits u32 = ty_int_bits(to)
+        abi_ty u32 = if bits <= 32 { if uns { TY_UINT } else { TY_INT } }
+            else if bits <= 64 { if uns { TY_ULONG } else { TY_LONG } }
+            else { if uns { TY_UINT128 } else { TY_INT128 } }
+        helper addr = if bits <= 32 { if uns { c"__fixunstfsi" } else { c"__fixtfsi" } }
+            else if bits <= 64 { if uns { c"__fixunstfdi" } else { c"__fixtfdi" } }
+            else { if uns { c"__fixunstfti" } else { c"__fixtfti" } }
+        return gen_convert(gen_quad_unary(helper, abi_ty, TY_FLOAT128, val), abi_ty, to)
+    }
+    if to == TY_FLOAT16 { return gen_quad_unary(c"__trunctfhf2", to, TY_FLOAT128, val) }
+    if to == TY_FLOAT { return gen_quad_unary(c"__trunctfsf2", to, TY_FLOAT128, val) }
+    if to == TY_LDOUBLE { return gen_quad_unary(c"__trunctfxf2", to, TY_FLOAT128, val) }
+    return gen_quad_unary(c"__trunctfdf2", to, TY_FLOAT128, val)
+}

@@ -200,7 +200,7 @@ fn ty_size(tid u32) u64 {
        k == TYK_DOUBLE || k == TYK_PTR || k == TYK_NULLPTR {
         return 8
     }
-    if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE { return 16 }
+    if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE || k == TYK_FLOAT128 { return 16 }
     if k == TYK_BITINT {
         bits u64 = zext[u64](n.aux1)
         if bits <= 8 { return 1 }
@@ -247,7 +247,7 @@ fn ty_align(tid u32) u64 {
     } else if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG ||
               k == TYK_DOUBLE || k == TYK_PTR || k == TYK_NULLPTR {
         base = 8
-    } else if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE {
+    } else if k == TYK_INT128 || k == TYK_UINT128 || k == TYK_LDOUBLE || k == TYK_FLOAT128 {
         base = 16
     } else if k == TYK_BITINT {
         bits u64 = zext[u64](n.aux1)

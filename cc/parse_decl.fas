@@ -315,6 +315,7 @@ fn pa_base(p handle[Parser], t Token) u32 {
     if pa_is(p, t, c"double") { return TY_DOUBLE }
     if pa_is(p, t, c"_Float16") || pa_is(p, t, c"__fp16") { return TY_FLOAT16 }
     if pa_is(p, t, c"__bf16") && pa_is_gnu(p) { return TY_BFLOAT16 }
+    if pa_is(p, t, c"__float128") { return TY_FLOAT128 }
     if pa_is(p, t, c"__float80") { return TY_LDOUBLE }
     if pa_is(p, t, c"__int128") { return TY_INT128 }
     return TY_INVALID
@@ -821,6 +822,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         } else if ty == TY_CHAR { ty = TY_SCHAR }
     }
     if complex {
+        if ty == TY_FLOAT128 { try pa_error(p, out.loc, c"complex binary128 is unsupported") }
         if !ty_is_real_float(ty) && !(pa_is_gnu(p) && ty_is_integer(ty)) { try pa_error(p, out.loc, c"_Complex requires a real floating type") }
         ty = ty_complex(ty)
     }

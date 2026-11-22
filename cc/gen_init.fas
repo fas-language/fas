@@ -582,6 +582,13 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         }
         return
     }
+    if u == TY_FLOAT128 {
+        if init.float_bits != null {
+            si_write_u64(si, off, init.float_bits.lo, 8)
+            si_write_u64(si, off + 8, init.float_bits.hi, 8)
+        }
+        return
+    }
     if ty_is_real_float(u) {
         bits FloatBits = {}
         if u == TY_LDOUBLE && gen_static_f80_literal(init, &bits) {
@@ -714,7 +721,8 @@ fn gen_static_write_float(si handle[StaticInit], tid u32, f64_bits u64, off u64)
 
 fn gen_eval_const_int(n handle[Ast]) u64 {
     if n == null { return 0 }
-    if (n.flags & NF_ICE) != 0 { return n.value }
+    if (n.flags & NF_ICE) != 0 || (n.kind == ND_CAST && ty_is_bool(n.ty) &&
+        ty_unqual(n.a.ty) == TY_FLOAT128 && (n.flags & NF_FOLD) != 0) { return n.value }
     if n.kind == ND_INT { return n.value }
     if n.kind == ND_NAME && n.decl != null && n.decl.storage == SC_ENUMERATOR { return n.value }
     if n.kind == ND_FLOAT {
