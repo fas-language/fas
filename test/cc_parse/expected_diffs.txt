@@ -1,2 +1,14 @@
 unexpected-reject headers/tgmath.h The absolute glibc include hits a float-type guard under the fcc GCC 4.2 compatibility macros
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-2.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-3.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-4.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-generic-1.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-generic-2.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/gnu2y-generic-1.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-octal-constants-2.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/octal-constants-2.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/system-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
 unexpected-reject headers/afl/t1ha0_ia32aes_b.h AFL only includes x86intrin.h for GCC >= 4.4 or when __clang__ is defined. Clang with -U__clang__ reproduces the undeclared __m128i error.
