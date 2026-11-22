@@ -25,7 +25,9 @@ also records its include trace to cache diagnostics from missing headers. A
 subsequent appearance of a missing header invalidates those entries. Hosted links use
 the GNU linker map to record loaded files. C commands that fail to report
 dependencies, assembly that reads extra files, and linker commands with
-undeclared search or script inputs run directly. The CLI keys piped or redirected
+undeclared search or script inputs run directly. The OCaml linker adapter
+passes through failures because some diagnostics vary between identical runs.
+The CLI keys piped or redirected
 stdin by its bytes. Use `--stdin` to explicitly read stdin to EOF.
 
 The key includes the namespace, full argument vector, relevant environment,

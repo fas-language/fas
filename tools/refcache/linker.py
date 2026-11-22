@@ -98,8 +98,9 @@ def oracle_link(argv, *, cwd=None, scratch=None, env=None, timeout=None, librari
     output, paths = inputs
     # Include the selected search result in the request so adding a preferred
     # archive or DSO invalidates the old entry even if its files still exist.
+    # The reference linker can choose different aliases in error diagnostics.
     return cache.run(argv, ns="ocaml-ld", deps=paths, outs=[output],
-                     cwd=cwd, scratch=scratch, env=env, timeout=timeout)
+                     cwd=cwd, scratch=scratch, env=env, timeout=timeout, cache_failures=False)
 
 
 def shadow_scratch(args):

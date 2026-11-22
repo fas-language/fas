@@ -237,7 +237,7 @@ class Cache:
 
     def run(self, argv, *, ns, deps=(), outs=(), cwd=None, scratch=None, cwd_sensitive=True,
             c=False, env=None, env_keys=(), input=None, timeout=None, check=False, text=False,
-            refresh=False, inherit_stdin=False, version=True):
+            refresh=False, inherit_stdin=False, version=True, cache_failures=True):
         cwd = os.path.abspath(cwd or os.getcwd())
         inv = Invocation(ns, tuple(map(os.fspath, argv)), tuple(map(os.fspath, deps)),
                          tuple(map(os.fspath, outs)), cwd, os.path.abspath(scratch) if scratch else None,
@@ -252,7 +252,7 @@ class Cache:
         if self.root is not None and not refresh and not inherit_stdin:
             try:
                 with self.lock():
-                    result = self.cached(inv, env, input, execute)
+                    result = self.cached(inv, env, input, execute, cache_failures)
             except OSError:
                 pass
         if result is None:
@@ -267,7 +267,7 @@ class Cache:
             result.check_returncode()
         return result
 
-    def cached(self, inv, env, input, execute):
+    def cached(self, inv, env, input, execute, cache_failures):
         descriptor = inv.descriptor()
         try:
             identity = self.identity(inv, env)
@@ -281,6 +281,8 @@ class Cache:
             entry = self.read_json(index)
             if entry["request"] != request:
                 raise ValueError("wrong request")
+            if entry["code"] != 0 and not cache_failures:
+                raise ValueError("failed results are disabled for this invocation")
             if entry.get("format") != 2 and entry["code"] == 0 and set(descriptor["outs"]) - entry["outputs"].keys():
                 raise ValueError("incomplete output metadata")
             current = self.dependencies(inv, entry["deps"], entry["deps"])
@@ -368,7 +370,7 @@ class Cache:
                     return result
         else:
             result, names = execute(inv.argv), []
-        if result.returncode < 0:
+        if result.returncode < 0 or (result.returncode != 0 and not cache_failures):
             return result
 
         try:

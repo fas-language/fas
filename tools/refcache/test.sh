@@ -45,6 +45,19 @@ cmp stderr stderr.expected
 cmp output expected
 [[ $(stat -c %a output) == 751 ]]
 "$cache" verify --sample 1 | grep 'verified=1 requested=1 mismatches=0'
+# The linker adapter runs failed invocations even if an older cache has them.
+calls_before_skip=$(wc -c <calls)
+PYTHONPATH=$here python3 - <<'PY'
+from refcache import Cache
+
+cache = Cache()
+for namespace, cache_failures in (("old-error", True), ("old-error", False),
+                                  ("transient-error", False), ("transient-error", False)):
+    result = cache.run(["./oracle", "output"], ns=namespace, deps=["input"],
+                       outs=["output"], cache_failures=cache_failures)
+    assert result.returncode == 23
+PY
+[[ $(wc -c <calls) == "$((calls_before_skip + 4))" ]]
 printf x >calls
 printf second >input
 run output
