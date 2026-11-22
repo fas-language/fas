@@ -1,0 +1,1047 @@
+// C23 -> Fir 0.3 statement & function lowering:
+// blocks, declarations (locals, static locals, VLAs, cleanups), if/while/do/for,
+// switch (including GNU case ranges), goto, computed goto (blockaddr/indirect_br),
+// inline asm / asm goto, return, CFG reachability pruning, and function emission.
+
+use "../lib/core.fas"
+use "../lib/mem.fas"
+use "../lib/vec.fas"
+use "../lib/buf.fas"
+use "../lib/bytes.fas"
+use "../lib/table.fas"
+use "types.fas"
+use "layout.fas"
+use "abi.fas"
+use "fir_out.fas"
+use "parse.fas"
+use "gen.fas"
+use "gen_init.fas"
+use "gen_expr.fas"
+
+// ---------- Label & BlockAddr Management ----------
+
+fn gen_get_label_block(lbl handle[Label]) u32 {
+    key U64Key = {addr_bits(handle_addr(lbl))}
+    existing u32 = table_get(&gc.labels, &key) catch 0
+    if existing != 0 { return existing }
+    blk u32 = gen_new_block()
+    _ bool = table_put(&gc.labels, &key, blk)
+    return blk
+}
+
+fn gen_mark_addr_taken(blk_id u32) void {
+    for i usize in 0..gc.addr_taken_labels.n {
+        if vec_get(&gc.addr_taken_labels, i) == blk_id { return }
+    }
+    vec_push(&gc.addr_taken_labels, blk_id)
+    vec_at(&gc.blocks, zext[usize](blk_id)).pinned = true
+}
+
+// Emit `ptr blockaddr(@fn, 00000000)` with an 8-digit placeholder patched at func_end
+fn gen_emit_blockaddr(target_blk u32) u32 {
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = ptradd ptr ptr blockaddr(@")
+    buf_append(b, gen_sym_bytes(gc.cur_fn_name))
+    buf_str(b, c", ")
+    off usize = b.n
+    buf_str(b, c"00000000")
+    buf_str(b, c"), i64 0, 1, 0\n")
+    p handle[BlockAddrPatch] = vec_add(&gc.ba_patches)
+    p.blk_id = gc.cur_blk
+    p.off = off
+    p.target_blk = target_blk
+    return v
+}
+
+// ---------- Scope Cleanups & VLA Stack Restore ----------
+
+fn gen_run_cleanups_to(target_depth usize) void fails {
+    if gc.cleanups.n <= target_depth { return }
+    i usize = gc.cleanups.n
+    while i > target_depth {
+        i -= 1
+        c handle[CleanupItem] = vec_at(&gc.cleanups, i)
+        if c.fn_sym != null {
+            gen_note_extern_fn(c.fn_sym)
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  call (ptr) -> () @")
+            buf_append(b, gen_sym_fir_name(c.fn_sym))
+            buf_u8(b, 40)
+            gen_emit_val(b, c.ptr_v)
+            buf_str(b, c")\n")
+        }
+    }
+}
+
+fn gen_restore_vlas_to(target_depth usize) void {
+    if gc.vla_stack.n <= target_depth { return }
+    v handle[VlaScope] = vec_at(&gc.vla_stack, target_depth)
+    gen_stackrestore(v.sp_v)
+}
+
+fn gen_pop_scope(old_cleanups usize, old_vlas usize) void fails {
+    if !gen_is_terminated() {
+        try gen_run_cleanups_to(old_cleanups)
+        gen_restore_vlas_to(old_vlas)
+    }
+    gc.cleanups.n = old_cleanups
+    gc.vla_stack.n = old_vlas
+}
+
+// ---------- Local Variable Declaration ----------
+
+fn gen_local_decl(n handle[Ast]) void fails {
+    s handle[Symbol] = n.decl
+    if s == null { return }
+    if s.storage == SC_TYPEDEF || s.storage == SC_ENUMERATOR || ty_is_func(s.ty) { return }
+    if s.storage == SC_EXTERN {
+        gen_note_extern_obj(s)
+        return
+    }
+    // Static local variable: emit as a deferred local global
+    if s.storage == SC_STATIC || s.thread_local {
+        nid u32 = gen_make_static_local_name(s)
+        if !gen_is_defined(nid) {
+            gen_mark_defined(nid)
+            sz u64 = ty_size(s.ty)
+            al u64 = ty_align(s.ty)
+            init handle[Ast] = handle_from_addr(s.value)
+            gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, FIR_LOCAL, FIR_VIS_DEFAULT,
+                                        bytes_empty(), false, s.thread_local, init, s.ty)
+        }
+        return
+    }
+
+    // VLA local variable
+    if gen_type_is_vla(s.ty) {
+        sp u32 = gen_stacksave()
+        vs handle[VlaScope] = vec_add(&gc.vla_stack)
+        vs.sp_v = sp
+        vs.scope_depth = gc.scope_depth
+        sz_v u32 = try gen_eval_vla_size_and_cache(s.ty)
+        al u64 = ty_align(s.ty)
+        dyn_p u32 = gen_alloca_dyn(sz_v, al)
+        slot u32 = gen_alloca_entry(8, 8)
+        gen_store_ty(dyn_p, slot, 8, false, false)
+        key U64Key = {addr_bits(handle_addr(s))}
+        _ bool = table_put(&gc.vla_ptrs, &key, slot)
+        return
+    }
+
+    // Normal automatic local variable
+    sz u64 = ty_size(s.ty)
+    al u64 = ty_align(s.ty)
+    slot u32 = gen_alloca_entry(sz, al)
+    key U64Key = {addr_bits(handle_addr(s))}
+    _ bool = table_put(&gc.locals, &key, slot)
+
+    // Register GNU cleanup attribute if present
+    if s.cleanup != null {
+        ci handle[CleanupItem] = vec_add(&gc.cleanups)
+        ci.ptr_v = slot
+        ci.scope_depth = gc.scope_depth
+        ci.fn_sym = handle_from_addr(s.cleanup)
+    }
+
+    init handle[Ast] = handle_from_addr(s.value)
+    if init != null {
+        try gen_auto_init(slot, s.ty, init, true)
+    }
+}
+
+// ---------- Switch Statement Helpers ----------
+
+struct SwitchCase {
+    lo u64
+    hi u64
+    is_range bool
+    _pad u8
+    _pad2 u16
+    blk_id u32
+    ast handle[Ast]
+}
+
+struct SwitchInfo {
+    cases Vec[SwitchCase]
+    default_blk u32
+    has_default bool
+    _pad u8
+    _pad2 u16
+    default_ast handle[Ast]
+    case_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
+}
+
+fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
+    if n == null { return }
+    if n.kind == ND_BLOCK {
+        s handle[Ast] = n.a
+        while s != null {
+            gen_collect_switch_cases(s, sw)
+            s = s.next
+        }
+        return
+    }
+    if n.kind != ND_STMT { return }
+    if n.op == 0 { return }
+    kw Bytes = cc_name(gc.p.names, n.op)
+    // Do NOT descend into nested switch statements!
+    if bytes_eq_c(kw, c"switch") { return }
+    if bytes_eq_c(kw, c"case") {
+        blk u32 = gen_new_block()
+        sc handle[SwitchCase] = vec_add(&sw.cases)
+        sc.lo = n.a.value
+        sc.hi = if n.b != null { n.b.value } else { n.a.value }
+        sc.is_range = n.b != null && sc.hi != sc.lo
+        sc.blk_id = blk
+        sc.ast = n
+        key U64Key = {addr_bits(handle_addr(n))}
+        _ bool = table_put(&sw.case_map, &key, blk)
+        gen_collect_switch_cases(n.c, sw)
+        return
+    }
+    if bytes_eq_c(kw, c"default") {
+        blk u32 = gen_new_block()
+        sw.has_default = true
+        sw.default_blk = blk
+        sw.default_ast = n
+        key U64Key = {addr_bits(handle_addr(n))}
+        _ bool = table_put(&sw.case_map, &key, blk)
+        gen_collect_switch_cases(n.c, sw)
+        return
+    }
+    if bytes_eq_c(kw, c"if") {
+        gen_collect_switch_cases(n.b, sw)
+        gen_collect_switch_cases(n.c, sw)
+    } else if bytes_eq_c(kw, c"while") || bytes_eq_c(kw, c"do") {
+        gen_collect_switch_cases(n.b, sw)
+    } else if bytes_eq_c(kw, c"for") {
+        gen_collect_switch_cases(n.d, sw)
+    } else if bytes_eq_c(kw, c":") {
+        gen_collect_switch_cases(n.a, sw)
+    }
+}
+
+thread var cur_switch handle[SwitchInfo] = null
+
+fn gen_switch_stmt(n handle[Ast]) void fails {
+    key_v u32 = try gen_rvalue(n.a)
+    key_ty u32 = ty_unqual(n.a.ty)
+    sw SwitchInfo = {}
+    defer { vec_free(&sw.cases); table_free(&sw.case_map) }
+    gen_collect_switch_cases(n.b, &sw)
+
+    end_blk u32 = gen_new_block()
+    def_target u32 = if sw.has_default { sw.default_blk } else { end_blk }
+
+    // Emit range checks first (if any GNU `case lo ... hi` exist)
+    has_ranges bool = false
+    for i usize in 0..sw.cases.n {
+        if vec_at(&sw.cases, i).is_range { has_ranges = true; break }
+    }
+    if has_ranges {
+        is_uns bool = ty_is_unsigned(key_ty)
+        for i usize in 0..sw.cases.n {
+            sc handle[SwitchCase] = vec_at(&sw.cases, i)
+            if !sc.is_range { continue }
+            lo_v u32 = gen_const_int(key_ty, sc.lo)
+            hi_v u32 = gen_const_int(key_ty, sc.hi)
+            c1 u32 = gen_icmp(if is_uns { c"uge" } else { c"sge" }, key_v, lo_v)
+            c2 u32 = gen_icmp(if is_uns { c"ule" } else { c"sle" }, key_v, hi_v)
+            in_r u32 = gen_binop_raw(c"and", c"i1", c1, c2)
+            next_chk u32 = gen_new_block()
+            gen_term_br(in_r, sc.blk_id, next_chk)
+            gen_switch_block(next_chk)
+        }
+    }
+
+    // Emit Fir `switch` terminator for all single-value cases
+    blk handle[GenBlock] = gen_cur_block()
+    blk.terminated = true
+    gen_add_succ(blk, def_target)
+    buf_str(&blk.term, c"  switch ")
+    gen_emit_val(&blk.term, key_v)
+    buf_str(&blk.term, c", ")
+    gen_emit_lbl(&blk.term, def_target)
+    buf_str(&blk.term, c", [")
+    first bool = true
+    is_signed bool = ty_is_signed(key_ty)
+    bits u32 = ty_int_bits(key_ty)
+    for i usize in 0..sw.cases.n {
+        sc handle[SwitchCase] = vec_at(&sw.cases, i)
+        if sc.is_range { continue }
+        if !first { buf_str(&blk.term, c", ") }
+        first = false
+        gen_add_succ(blk, sc.blk_id)
+        // Print key matching signedness & width
+        if is_signed && bits <= 64 {
+            sv i64 = bitcast[i64](sc.lo)
+            if bits < 64 {
+                sh u32 = 64 - bits
+                sv = (sv << sh) >> sh
+            }
+            buf_dec_i64(&blk.term, sv)
+        } else {
+            buf_str(&blk.term, c"0x")
+            buf_hex(&blk.term, sc.lo, 1)
+        }
+        buf_str(&blk.term, c": ")
+        gen_emit_lbl(&blk.term, sc.blk_id)
+    }
+    buf_str(&blk.term, c"]\n")
+
+    // Push switch frame for `break`
+    lf handle[LoopFrame] = vec_add(&gc.loops)
+    lf.break_blk = end_blk
+    lf.continue_blk = 0
+    lf.cleanup_depth = gc.cleanups.n
+    lf.vla_depth = gc.vla_stack.n
+    lf.is_switch = true
+
+    saved_sw handle[SwitchInfo] = cur_switch
+    cur_switch = &sw
+    body_blk u32 = gen_new_block()
+    gen_switch_block(body_blk)
+    vec_at(&gc.blocks, zext[usize](body_blk)).terminated = true // unreachable until a case/default/label
+    try gen_stmt(n.b)
+    if !gen_is_terminated() { gen_term_jump(end_blk) }
+    cur_switch = saved_sw
+    gc.loops.n -= 1
+
+    gen_switch_block(end_blk)
+}
+
+// ---------- Inline Asm Lowering ----------
+
+fn gen_inline_asm(n handle[Ast]) void fails {
+    is_goto bool = (n.flags & 1) != 0
+    is_vol bool = (n.flags & 2) != 0 || n.b == null
+    tmpl Buf = {}
+    defer { buf_free(&tmpl) }
+    if n.a != null { gen_decode_string_ast(n.a, &tmpl, false) }
+
+    // Evaluate output operand lvalues and input operand rvalues
+    out_ptrs Vec[u32] = {}
+    out_tids Vec[u32] = {}
+    out_res_vs Vec[u32] = {}
+    out_is_mem Vec[u8] = {}
+    out_is_rw Vec[u8] = {}
+    out_old_vs Vec[u32] = {}
+    out_nodes Vec[addr] = {}
+    defer {
+        vec_free(&out_ptrs); vec_free(&out_tids); vec_free(&out_res_vs)
+        vec_free(&out_is_mem); vec_free(&out_is_rw); vec_free(&out_old_vs); vec_free(&out_nodes)
+    }
+    o handle[Ast] = n.b
+    while o != null {
+        cb Buf = {}
+        if o.a != null { gen_decode_string_ast(o.a, &cb, false) }
+        cs Bytes = buf_bytes(&cb)
+        has_m bool = false
+        has_r bool = false
+        is_rw bool = cs.n > 0 && cs.p[u8] == 43 // '+'
+        for k usize in 0..cs.n {
+            ch u8 = cs.p[u8, k]
+            if ch == 109 || ch == 111 || ch == 86 { has_m = true }
+            if ch == 114 || ch == 113 || ch == 81 || ch == 82 || ch == 97 || ch == 98 ||
+               ch == 99 || ch == 100 || ch == 83 || ch == 68 || ch == 65 || ch == 120 || ch == 103 { has_r = true }
+        }
+        buf_free(&cb)
+        mem_only bool = has_m && !has_r
+        ptr_v u32 = try gen_lvalue(o.b)
+        vec_push(&out_ptrs, ptr_v)
+        vec_push(&out_tids, o.b.ty)
+        vec_push(&out_is_mem, if mem_only { 1 } else { 0 })
+        vec_push(&out_is_rw, if is_rw { 1 } else { 0 })
+        vec_push(&out_nodes, handle_addr(o))
+        if is_rw && !mem_only {
+            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, ty_align(o.b.ty), false, false))
+        } else {
+            vec_push(&out_old_vs, 0)
+        }
+        if !mem_only {
+            vec_push(&out_res_vs, gen_new_val())
+        } else {
+            vec_push(&out_res_vs, 0)
+        }
+        o = o.next
+    }
+
+    in_vals Vec[u32] = {}
+    in_tids Vec[u32] = {}
+    in_nodes Vec[addr] = {}
+    defer { vec_free(&in_vals); vec_free(&in_tids); vec_free(&in_nodes) }
+    inp handle[Ast] = n.c
+    while inp != null {
+        cb Buf = {}
+        if inp.a != null { gen_decode_string_ast(inp.a, &cb, false) }
+        cs Bytes = buf_bytes(&cb)
+        is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+        buf_free(&cb)
+        iv u32 = if is_m { try gen_lvalue(inp.b) } else { try gen_rvalue(inp.b) }
+        vec_push(&in_vals, iv)
+        vec_push(&in_tids, if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty })
+        vec_push(&in_nodes, handle_addr(inp))
+        inp = inp.next
+    }
+
+    if is_goto {
+        fall_blk u32 = gen_new_block()
+        blk handle[GenBlock] = gen_cur_block()
+        blk.terminated = true
+        gen_add_succ(blk, fall_blk)
+        b handle[Buf] = &blk.term
+        buf_str(b, c"  asm_goto volatile ")
+        fir_emit_quoted_bytes(b, tmpl.p, tmpl.n)
+        if in_vals.n > 0 {
+            buf_str(b, c" in(")
+            for i usize in 0..in_vals.n {
+                if i > 0 { buf_str(b, c", ") }
+                onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
+                cb Buf = {}
+                if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+                if onode.op != 0 {
+                    buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                }
+                fir_emit_quoted_bytes(b, cb.p, cb.n)
+                buf_free(&cb)
+                buf_u8(b, 32)
+                gen_emit_fir_ty(b, vec_get(&in_tids, i))
+                buf_u8(b, 32)
+                gen_emit_val(b, vec_get(&in_vals, i))
+            }
+            buf_u8(b, 41)
+        }
+        if n.d != null {
+            buf_str(b, c" clobber(")
+            cl handle[Ast] = n.d
+            first_c bool = true
+            while cl != null {
+                if !first_c { buf_str(b, c", ") }
+                first_c = false
+                cb Buf = {}
+                gen_decode_string_ast(cl, &cb, false)
+                fir_emit_quoted_bytes(b, cb.p, cb.n)
+                buf_free(&cb)
+                cl = cl.next
+            }
+            buf_u8(b, 41)
+        }
+        buf_u8(b, 32)
+        gen_emit_lbl(b, fall_blk)
+        buf_str(b, c" [")
+        gl handle[Ast] = handle_from_addr(n.extra)
+        first_l bool = true
+        while gl != null {
+            if !first_l { buf_str(b, c", ") }
+            first_l = false
+            lbl handle[Label] = handle_from_addr(gl.extra)
+            lbl_blk u32 = gen_get_label_block(lbl)
+            gen_add_succ(blk, lbl_blk)
+            gen_emit_lbl(b, lbl_blk)
+            gl = gl.next
+        }
+        buf_str(b, c"]\n")
+        gen_switch_block(fall_blk)
+        return
+    }
+
+    // Normal `asm`
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    n_res usize = 0
+    for i usize in 0..out_res_vs.n {
+        rv u32 = vec_get(&out_res_vs, i)
+        if rv != 0 {
+            if n_res > 0 { buf_str(b, c", ") }
+            gen_emit_val(b, rv)
+            n_res += 1
+        }
+    }
+    if n_res > 0 { buf_str(b, c" = ") }
+    buf_str(b, if is_vol { c"asm volatile " } else { c"asm " })
+    fir_emit_quoted_bytes(b, tmpl.p, tmpl.n)
+    if out_nodes.n > 0 {
+        buf_str(b, c" out(")
+        for i usize in 0..out_nodes.n {
+            if i > 0 { buf_str(b, c", ") }
+            onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+            cb Buf = {}
+            if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+            if onode.op != 0 {
+                buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+            }
+            fir_emit_quoted_bytes(b, cb.p, cb.n)
+            buf_free(&cb)
+            buf_u8(b, 32)
+            if vec_get(&out_is_mem, i) != 0 {
+                buf_str(b, c"ptr ")
+                gen_emit_val(b, vec_get(&out_ptrs, i))
+            } else {
+                gen_emit_fir_ty(b, vec_get(&out_tids, i))
+                if vec_get(&out_is_rw, i) != 0 {
+                    buf_u8(b, 32)
+                    gen_emit_val(b, vec_get(&out_old_vs, i))
+                }
+            }
+        }
+        buf_u8(b, 41)
+    }
+    if in_vals.n > 0 {
+        buf_str(b, c" in(")
+        for i usize in 0..in_vals.n {
+            if i > 0 { buf_str(b, c", ") }
+            onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
+            cb Buf = {}
+            if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+            if onode.op != 0 {
+                buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+            }
+            fir_emit_quoted_bytes(b, cb.p, cb.n)
+            buf_free(&cb)
+            buf_u8(b, 32)
+            gen_emit_fir_ty(b, vec_get(&in_tids, i))
+            buf_u8(b, 32)
+            gen_emit_val(b, vec_get(&in_vals, i))
+        }
+        buf_u8(b, 41)
+    }
+    if n.d != null {
+        buf_str(b, c" clobber(")
+        cl handle[Ast] = n.d
+        first_c bool = true
+        while cl != null {
+            if !first_c { buf_str(b, c", ") }
+            first_c = false
+            cb Buf = {}
+            gen_decode_string_ast(cl, &cb, false)
+            fir_emit_quoted_bytes(b, cb.p, cb.n)
+            buf_free(&cb)
+            cl = cl.next
+        }
+        buf_u8(b, 41)
+    }
+    buf_u8(b, 10)
+    // Store register output results back to their lvalues
+    for i usize in 0..out_res_vs.n {
+        rv u32 = vec_get(&out_res_vs, i)
+        if rv != 0 {
+            t u32 = vec_get(&out_tids, i)
+            gen_store_ty(rv, vec_get(&out_ptrs, i), ty_align(t), gen_is_volatile(t), false)
+        }
+    }
+}
+
+// ---------- Statement Lowering ----------
+
+fn gen_stmt_expr(n handle[Ast]) u32 fails {
+    old_cleanups usize = gc.cleanups.n
+    old_vlas usize = gc.vla_stack.n
+    gc.scope_depth += 1
+    res u32 = gen_const_i32(0)
+    s handle[Ast] = n.a
+    while s != null {
+        if s.next == null && s.kind == ND_STMT && s.op == 0 && s.a != null && !ty_is_void(n.ty) {
+            res = try gen_rvalue(s.a)
+        } else {
+            try gen_stmt(s)
+        }
+        s = s.next
+    }
+    gc.scope_depth -= 1
+    try gen_pop_scope(old_cleanups, old_vlas)
+    return res
+}
+
+fn gen_stmt(n handle[Ast]) void fails {
+    if n == null { return }
+
+    if n.kind == ND_BLOCK {
+        old_cleanups usize = gc.cleanups.n
+        old_vlas usize = gc.vla_stack.n
+        gc.scope_depth += 1
+        s handle[Ast] = n.a
+        while s != null {
+            try gen_stmt(s)
+            s = s.next
+        }
+        gc.scope_depth -= 1
+        try gen_pop_scope(old_cleanups, old_vlas)
+        return
+    }
+    if n.kind == ND_DECL {
+        if !gen_is_terminated() { try gen_local_decl(n) }
+        return
+    }
+    if n.kind == ND_ASM {
+        if !gen_is_terminated() { try gen_inline_asm(n) }
+        return
+    }
+    if n.kind != ND_STMT {
+        if !gen_is_terminated() { _ u32 = try gen_rvalue(n) }
+        return
+    }
+
+    // Expression statement
+    if n.op == 0 {
+        if !gen_is_terminated() && n.a != null {
+            _ u32 = try gen_rvalue(n.a)
+        }
+        return
+    }
+
+    kw Bytes = cc_name(gc.p.names, n.op)
+
+    // Labels, case, default can make control flow live again even after a terminator!
+    if bytes_eq_c(kw, c":") {
+        lbl handle[Label] = handle_from_addr(n.extra)
+        if lbl != null {
+            lbl_blk u32 = gen_get_label_block(lbl)
+            if !gen_is_terminated() { gen_term_jump(lbl_blk) }
+            gen_switch_block(lbl_blk)
+        }
+        if n.a != null { try gen_stmt(n.a) }
+        return
+    }
+    if bytes_eq_c(kw, c"case") || bytes_eq_c(kw, c"default") {
+        if cur_switch != null {
+            key U64Key = {addr_bits(handle_addr(n))}
+            cblk u32 = table_get(&cur_switch.case_map, &key) catch 0
+            if cblk != 0 {
+                if !gen_is_terminated() { gen_term_jump(cblk) }
+                gen_switch_block(cblk)
+            }
+        }
+        if n.c != null { try gen_stmt(n.c) }
+        return
+    }
+
+    // All other statements are skipped if current block is already terminated
+    // EXCEPT compound statements that might contain labels or switch cases!
+    if bytes_eq_c(kw, c"if") {
+        if gen_is_terminated() {
+            try gen_stmt(n.b)
+            if n.c != null { try gen_stmt(n.c) }
+            return
+        }
+        cv u32 = try gen_rvalue(n.a)
+        cb u32 = gen_to_bool(cv, n.a.ty)
+        t_blk u32 = gen_new_block()
+        end_blk u32 = gen_new_block()
+        f_blk u32 = if n.c != null { gen_new_block() } else { end_blk }
+        gen_term_br(cb, t_blk, f_blk)
+        gen_switch_block(t_blk)
+        try gen_stmt(n.b)
+        if !gen_is_terminated() { gen_term_jump(end_blk) }
+        if n.c != null {
+            gen_switch_block(f_blk)
+            try gen_stmt(n.c)
+            if !gen_is_terminated() { gen_term_jump(end_blk) }
+        }
+        gen_switch_block(end_blk)
+        return
+    }
+
+    if bytes_eq_c(kw, c"while") {
+        cond_blk u32 = gen_new_block()
+        body_blk u32 = gen_new_block()
+        end_blk u32 = gen_new_block()
+        if !gen_is_terminated() { gen_term_jump(cond_blk) }
+        gen_switch_block(cond_blk)
+        cv u32 = try gen_rvalue(n.a)
+        cb u32 = gen_to_bool(cv, n.a.ty)
+        gen_term_br(cb, body_blk, end_blk)
+
+        lf handle[LoopFrame] = vec_add(&gc.loops)
+        lf.break_blk = end_blk
+        lf.continue_blk = cond_blk
+        lf.cleanup_depth = gc.cleanups.n
+        lf.vla_depth = gc.vla_stack.n
+        lf.is_switch = false
+
+        gen_switch_block(body_blk)
+        try gen_stmt(n.b)
+        if !gen_is_terminated() { gen_term_jump(cond_blk) }
+        gc.loops.n -= 1
+        gen_switch_block(end_blk)
+        return
+    }
+
+    if bytes_eq_c(kw, c"do") {
+        body_blk u32 = gen_new_block()
+        cond_blk u32 = gen_new_block()
+        end_blk u32 = gen_new_block()
+        if !gen_is_terminated() { gen_term_jump(body_blk) }
+
+        lf handle[LoopFrame] = vec_add(&gc.loops)
+        lf.break_blk = end_blk
+        lf.continue_blk = cond_blk
+        lf.cleanup_depth = gc.cleanups.n
+        lf.vla_depth = gc.vla_stack.n
+        lf.is_switch = false
+
+        gen_switch_block(body_blk)
+        try gen_stmt(n.b)
+        if !gen_is_terminated() { gen_term_jump(cond_blk) }
+        gc.loops.n -= 1
+
+        gen_switch_block(cond_blk)
+        cv u32 = try gen_rvalue(n.a)
+        cb u32 = gen_to_bool(cv, n.a.ty)
+        gen_term_br(cb, body_blk, end_blk)
+        gen_switch_block(end_blk)
+        return
+    }
+
+    if bytes_eq_c(kw, c"for") {
+        old_cleanups usize = gc.cleanups.n
+        old_vlas usize = gc.vla_stack.n
+        gc.scope_depth += 1
+        if n.a != null { try gen_stmt(n.a) }
+
+        cond_blk u32 = gen_new_block()
+        body_blk u32 = gen_new_block()
+        step_blk u32 = gen_new_block()
+        end_blk u32 = gen_new_block()
+        if !gen_is_terminated() { gen_term_jump(cond_blk) }
+
+        gen_switch_block(cond_blk)
+        if n.b != null {
+            cv u32 = try gen_rvalue(n.b)
+            cb u32 = gen_to_bool(cv, n.b.ty)
+            gen_term_br(cb, body_blk, end_blk)
+        } else {
+            gen_term_jump(body_blk)
+        }
+
+        lf handle[LoopFrame] = vec_add(&gc.loops)
+        lf.break_blk = end_blk
+        lf.continue_blk = step_blk
+        lf.cleanup_depth = gc.cleanups.n
+        lf.vla_depth = gc.vla_stack.n
+        lf.is_switch = false
+
+        gen_switch_block(body_blk)
+        try gen_stmt(n.d)
+        if !gen_is_terminated() { gen_term_jump(step_blk) }
+        gc.loops.n -= 1
+
+        gen_switch_block(step_blk)
+        if n.c != null { _ u32 = try gen_rvalue(n.c) }
+        if !gen_is_terminated() { gen_term_jump(cond_blk) }
+
+        gen_switch_block(end_blk)
+        gc.scope_depth -= 1
+        try gen_pop_scope(old_cleanups, old_vlas)
+        return
+    }
+
+    if bytes_eq_c(kw, c"switch") {
+        try gen_switch_stmt(n)
+        return
+    }
+
+    if gen_is_terminated() { return }
+
+    if bytes_eq_c(kw, c"break") {
+        if gc.loops.n > 0 {
+            lf handle[LoopFrame] = vec_at(&gc.loops, gc.loops.n - 1)
+            try gen_run_cleanups_to(lf.cleanup_depth)
+            gen_restore_vlas_to(lf.vla_depth)
+            gen_term_jump(lf.break_blk)
+        }
+        return
+    }
+    if bytes_eq_c(kw, c"continue") {
+        i usize = gc.loops.n
+        while i > 0 {
+            i -= 1
+            lf handle[LoopFrame] = vec_at(&gc.loops, i)
+            if !lf.is_switch {
+                try gen_run_cleanups_to(lf.cleanup_depth)
+                gen_restore_vlas_to(lf.vla_depth)
+                gen_term_jump(lf.continue_blk)
+                return
+            }
+        }
+        return
+    }
+    if bytes_eq_c(kw, c"goto") {
+        if n.a != null {
+            // Computed goto `goto *expr`
+            pv u32 = try gen_rvalue(n.a)
+            blk handle[GenBlock] = gen_cur_block()
+            blk.terminated = true
+            buf_str(&blk.term, c"  indirect_br ")
+            gen_emit_val(&blk.term, pv)
+            buf_str(&blk.term, c", [")
+            for i usize in 0..gc.addr_taken_labels.n {
+                if i > 0 { buf_str(&blk.term, c", ") }
+                tb u32 = vec_get(&gc.addr_taken_labels, i)
+                gen_add_succ(blk, tb)
+                gen_emit_lbl(&blk.term, tb)
+            }
+            buf_str(&blk.term, c"]\n")
+            return
+        }
+        lbl handle[Label] = handle_from_addr(n.extra)
+        if lbl != null {
+            gen_term_jump(gen_get_label_block(lbl))
+        }
+        return
+    }
+    if bytes_eq_c(kw, c"return") {
+        if n.a != null && !ty_is_void(gc.cur_ret_ty) {
+            rv u32 = try gen_rvalue(n.a)
+            rv = gen_convert(rv, n.a.ty, gc.cur_ret_ty)
+            if gc.cleanups.n > 0 {
+                // Save return value before running cleanups
+                if gen_is_mem_ty(gc.cur_ret_ty) {
+                    tmp u32 = gen_alloca_entry(ty_size(gc.cur_ret_ty), ty_align(gc.cur_ret_ty))
+                    gen_memcpy_const(tmp, rv, ty_size(gc.cur_ret_ty), false)
+                    try gen_run_cleanups_to(0)
+                    gen_term_ret_val(tmp)
+                } else {
+                    try gen_run_cleanups_to(0)
+                    gen_term_ret_val(rv)
+                }
+            } else {
+                gen_term_ret_val(rv)
+            }
+        } else {
+            if n.a != null { _ u32 = try gen_rvalue(n.a) }
+            try gen_run_cleanups_to(0)
+            gen_term_ret_void()
+        }
+        return
+    }
+}
+
+// ---------- Pre-scan for `&&label` so `indirect_br` sees all address-taken labels ----------
+
+fn gen_prescan_addr_taken(n handle[Ast]) void {
+    if n == null { return }
+    if n.kind == ND_UNARY {
+        op Bytes = cc_name(gc.p.names, n.op)
+        if bytes_eq_c(op, c"&&") && n.extra != null {
+            lbl handle[Label] = handle_from_addr(n.extra)
+            blk u32 = gen_get_label_block(lbl)
+            gen_mark_addr_taken(blk)
+        }
+    }
+    gen_prescan_addr_taken(n.a)
+    gen_prescan_addr_taken(n.b)
+    gen_prescan_addr_taken(n.c)
+    gen_prescan_addr_taken(n.d)
+    gen_prescan_addr_taken(n.next)
+}
+
+// ---------- Function Definition Emission ----------
+
+fn gen_function(node handle[Ast]) void fails {
+    s handle[Symbol] = node.decl
+    if s == null || node.a == null { return }
+    nid u32 = gen_sym_fir_name_id(s)
+    if gen_is_defined(nid) { return }
+    gen_mark_defined(nid)
+
+    fn_node handle[TypeNode] = ty_node(ty_unqual(s.ty))
+    if fn_node.kind != TYK_FUNC { return }
+    ret_ty u32 = fn_node.elem
+    is_var bool = (fn_node.flags & TYF_VARIADIC) != 0
+
+    // Collect parameter symbols & types
+    param_syms Vec[addr] = {}
+    param_tids Vec[u32] = {}
+    defer { vec_free(&param_syms); vec_free(&param_tids) }
+    pm handle[Param] = handle_from_addr(s.params)
+    while pm != null {
+        if pm.decl != null {
+            vec_push(&param_syms, handle_addr(pm.decl))
+            vec_push(&param_tids, pm.decl.ty)
+        } else if !ty_is_void(pm.ty) {
+            vec_push(&param_syms, null)
+            vec_push(&param_tids, pm.ty)
+        }
+        pm = pm.next
+    }
+    n_params u32 = trunc[u32](param_tids.n)
+
+    // Reset per-function state
+    gen_reset_func_state(gc)
+    gc.in_func = true
+    gc.cur_fn = s
+    gc.cur_fn_name = nid
+    gc.cur_ret_ty = ret_ty
+    gc.next_ssa = n_params + 1
+
+    // Create entry block (block 0) and first body block (block 1)
+    // Putting body in block 1 ensures nothing ever jumps to ^entry!
+    entry_blk u32 = gen_new_block()
+    body_blk u32 = gen_new_block()
+    gen_switch_block(body_blk)
+
+    // Pre-scan for `&&label` so `indirect_br` has the complete target list
+    gen_prescan_addr_taken(node.a)
+
+    // Spill all parameters into entry-block allocas so `&param` and mutation always work
+    for i u32 in 0..n_params {
+        ps handle[Symbol] = handle_from_addr(vec_get(&param_syms, zext[usize](i)))
+        if ps == null { continue }
+        pt u32 = vec_get(&param_tids, zext[usize](i))
+        sz u64 = ty_size(pt)
+        al u64 = ty_align(pt)
+        slot u32 = gen_alloca_entry(sz, al)
+        key U64Key = {addr_bits(handle_addr(ps))}
+        _ bool = table_put(&gc.locals, &key, slot)
+        if gen_is_mem_ty(pt) {
+            // Copy agg/complex parameter bytes into local slot (per Fir SPEC.md §5)
+            if sz > 0 { gen_memcpy_const(slot, i, sz, false) }
+        } else {
+            gen_store_ty(i, slot, al, false, false)
+        }
+    }
+
+    // Lower function body
+    try gen_stmt(node.a)
+
+    // Implicit return at end of function body
+    if !gen_is_terminated() {
+        try gen_run_cleanups_to(0)
+        if ty_is_void(ret_ty) {
+            gen_term_ret_void()
+        } else if bytes_eq_c(gen_sym_bytes(nid), c"main") {
+            gen_term_ret_val(gen_const_int(ret_ty, 0))
+        } else {
+            gen_term_ret_val(gen_const_zero(ret_ty))
+        }
+    }
+
+    // Terminate entry block with jump to body_blk
+    eb handle[GenBlock] = vec_at(&gc.blocks, zext[usize](entry_blk))
+    eb.terminated = true
+    gen_add_succ(eb, body_blk)
+    buf_str(&eb.term, c"  jump ")
+    gen_emit_lbl(&eb.term, body_blk)
+    buf_u8(&eb.term, 10)
+
+    // Ensure every block that might be reachable has a terminator
+    for i usize in 0..gc.blocks.n {
+        blk handle[GenBlock] = vec_at(&gc.blocks, i)
+        if !blk.terminated {
+            blk.terminated = true
+            buf_str(&blk.term, c"  unreachable\n")
+        }
+    }
+
+    // BFS reachability from entry block (block 0) so Fir verifier never sees unreachable blocks
+    n_blks usize = gc.blocks.n
+    visited addr = heap_alloc_zeroed(n_blks)
+    queue Vec[u32] = {}
+    defer { vec_free(&queue) }
+    visited[u8, 0] = 1
+    vec_push(&queue, 0)
+    qh usize = 0
+    while qh < queue.n {
+        cur u32 = vec_get(&queue, qh)
+        qh += 1
+        blk handle[GenBlock] = vec_at(&gc.blocks, zext[usize](cur))
+        for j usize in 0..blk.succs.n {
+            nxt u32 = vec_get(&blk.succs, j)
+            if zext[usize](nxt) < n_blks && visited[u8, zext[usize](nxt)] == 0 {
+                visited[u8, zext[usize](nxt)] = 1
+                vec_push(&queue, nxt)
+            }
+        }
+    }
+
+    // Assign dense emission index 0..K-1 to reachable blocks (for blockaddr(@fn, N))
+    emit_order Vec[u32] = {}
+    defer { vec_free(&emit_order) }
+    blk_to_idx addr = heap_alloc_zeroed(n_blks * 4)
+    for i usize in 0..n_blks {
+        if visited[u8, i] != 0 {
+            blk_to_idx[u32, i] = trunc[u32](emit_order.n)
+            vec_push(&emit_order, trunc[u32](i))
+        }
+    }
+
+    // Patch any `blockaddr(@fn, 00000000)` placeholders with the exact 0-based block index
+    for i usize in 0..gc.ba_patches.n {
+        pt handle[BlockAddrPatch] = vec_at(&gc.ba_patches, i)
+        if visited[u8, zext[usize](pt.blk_id)] == 0 { continue }
+        idx u32 = blk_to_idx[u32, zext[usize](pt.target_blk)]
+        code_b handle[Buf] = &vec_at(&gc.blocks, zext[usize](pt.blk_id)).code
+        // Overwrite the 8-byte placeholder with right-padded spaces + decimal digits
+        tmp Buf = {}
+        buf_dec_u64(&tmp, zext[u64](idx))
+        for k usize in 0..8 {
+            ch u8 = if k < tmp.n { tmp.p[u8, k] } else { 32 }
+            code_b.p[u8, pt.off + k] = ch
+        }
+        buf_free(&tmp)
+    }
+
+    // Emit the function to gc.out
+    out_b handle[Buf] = &gc.out.buf
+    buf_str(out_b, c"func @")
+    buf_append(out_b, gen_sym_bytes(nid))
+    buf_u8(out_b, 32)
+    abi_emit_fir_sig(out_b, ret_ty, param_tids.p, n_params, is_var)
+    buf_u8(out_b, 32)
+    fir_emit_linkage(out_b, gen_sym_linkage(s), gen_sym_visibility(s))
+    if gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn") {
+        buf_str(out_b, c" noreturn")
+    }
+    if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
+    buf_str(out_b, c" {\n")
+
+    for ei usize in 0..emit_order.n {
+        bid u32 = vec_get(&emit_order, ei)
+        blk handle[GenBlock] = vec_at(&gc.blocks, zext[usize](bid))
+        if bid == 0 {
+            buf_str(out_b, c"^entry")
+            if n_params > 0 {
+                buf_u8(out_b, 40)
+                for i u32 in 0..n_params {
+                    if i > 0 { buf_str(out_b, c", ") }
+                    gen_emit_val(out_b, i)
+                    buf_str(out_b, c": ")
+                    abi_emit_fir_ssa_ty(out_b, vec_get(&param_tids, zext[usize](i)))
+                }
+                buf_u8(out_b, 41)
+            }
+            buf_str(out_b, c":\n")
+        } else {
+            gen_emit_lbl(out_b, bid)
+            buf_str(out_b, c":\n")
+        }
+        buf_append(out_b, buf_bytes(&blk.code))
+        buf_append(out_b, buf_bytes(&blk.term))
+    }
+    buf_str(out_b, c"}\n\n")
+    fir_flush(&gc.out)
+
+    gc.in_func = false
+
+    // Flush any deferred globals (strings, static locals, compound literals) emitted during this function
+    if gc.deferred.n > 0 {
+        buf_append(&gc.out.buf, buf_bytes(&gc.deferred))
+        buf_clear(&gc.deferred)
+        fir_flush(&gc.out)
+    }
+
+    // Emit constructor / destructor entries if attributed
+    if gen_has_attr(s.attrs, c"constructor") {
+        prio u64 = gen_attr_int_arg(s.attrs, c"constructor", 0)
+        gen_emit_ctor_dtor(gen_sym_bytes(nid), false, prio)
+    }
+    if gen_has_attr(s.attrs, c"destructor") {
+        prio u64 = gen_attr_int_arg(s.attrs, c"destructor", 0)
+        gen_emit_ctor_dtor(gen_sym_bytes(nid), true, prio)
+    }
+
+    gen_reset_func_state(gc)
+}
