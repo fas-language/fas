@@ -179,6 +179,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             vec_push(&o.link_args, c"-lpthread")
         } else if bytes_eq_c(word, c"-rdynamic") {
             vec_push(&o.link_args, c"--export-dynamic")
+        } else if bytes_eq_c(word, c"-Xlinker") {
+            vec_push[addr](&o.link_args, try cli_arg(argc, &pos, arg, arg))
         } else if bytes_starts_with(word, bytes_c(c"-Wl,")) {
             cli_push_wl(o, bytes_from(word, 4))
         } else if bytes_starts_with(word, bytes_c(c"-L")) {

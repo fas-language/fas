@@ -7,9 +7,13 @@ work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
 for file in "$src"/*.c; do
-    "${CLANG:-clang-22}" -std=gnu23 "$file" -o "$work/clang"
+    flags=()
+    if [ "${file##*/}" = export_dynamic.c ]; then
+        flags=(-Xlinker -export-dynamic -ldl)
+    fi
+    "${CLANG:-clang-22}" -std=gnu23 "$file" "${flags[@]}" -o "$work/clang"
     "$work/clang" > "$work/clang.out"
-    "$FCC" "$file" -o "$work/fcc"
+    "$FCC" "$file" "${flags[@]}" -o "$work/fcc"
     "$work/fcc" > "$work/fcc.out"
     cmp "$work/clang.out" "$work/fcc.out"
     echo "PASS: ${file##*/}"
