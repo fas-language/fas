@@ -127,6 +127,51 @@ fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
     }
 }
 
+// Validate the parameter map for Clang's fortify diagnostic forwarding.
+fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
+    a handle[Attr] = s.attrs
+    while a != null {
+        if pa_attr_name(p, a, c"diagnose_as_builtin") {
+            replay Parser = {}
+            pa_attr_replay(p, a, &replay)
+            t Token = try pa_take(&replay)
+            if t.kind != TK_IDENT { try pa_error(p, t.loc, c"diagnose_as_builtin requires a builtin function") }
+            name Bytes = cc_spelling(p.names, t)
+            if bytes_starts_with(name, bytes_c(c"__builtin_")) { name = bytes_from(name, 10) }
+            expected arr[3, u32] = {}
+            n u32 = 3
+            if feature_in(c" memcpy memmove memset ", name) {
+                expected[0] = ty_ptr(TY_VOID)
+                expected[1] = if bytes_eq_c(name, c"memset") { TY_INT } else { ty_ptr(ty_qual(TY_VOID, Q_CONST)) }
+                expected[2] = TY_ULONG
+            } else if bytes_eq_c(name, c"sscanf") {
+                n = 2
+                expected[0] = ty_ptr(ty_qual(TY_CHAR, Q_CONST))
+                expected[1] = expected[0]
+            } else {
+                try pa_error(p, t.loc, c"diagnose_as_builtin names an unsupported builtin function")
+            }
+            ft handle[TypeNode] = ty_node(ty_unqual(s.ty))
+            for i u32 in 0..n {
+                try pa_expect(&replay, c",")
+                e handle[Ast] = try pa_expression(&replay, 3)
+                index u64 = try se_ice(p, e)
+                if index == 0 || index > zext[u64](ft.aux2) {
+                    try pa_error(p, e.loc, c"diagnose_as_builtin parameter index is out of range")
+                }
+                actual u32 = tc.fn_params.p[u32, zext[usize](ft.aux1) + index - 1]
+                if !ty_compatible(ty_unqual(actual), expected[zext[usize](i)]) {
+                    try pa_error(p, e.loc, c"diagnose_as_builtin parameter type disagrees with the builtin")
+                }
+            }
+            if (try pa_peek(&replay)).kind != TK_EOF {
+                try pa_error(p, a.loc, c"extra arguments in diagnose_as_builtin parameter map")
+            }
+        }
+        a = a.next
+    }
+}
+
 // Record vendor dialects for later consumers. Validate the argument positions
 // against the prototype and the format type for the narrow string dialects.
 fn se_format_attributes(p handle[Parser], s handle[Symbol]) void fails {

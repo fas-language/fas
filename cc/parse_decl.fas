@@ -1375,6 +1375,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             if pa_has_attr(p, attrs, c"interrupt") { try se_interrupt_signature(p, s) }
             try se_format_attributes(p, s)
             try se_callback_attributes(p, s)
+            try se_diagnose_as_builtin(p, s)
         }
         if spec.thread_local && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
             spec.storage == SC_CONSTEXPR || (!file && spec.storage != SC_STATIC && spec.storage != SC_EXTERN)) {
