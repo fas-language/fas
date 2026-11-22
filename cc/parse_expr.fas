@@ -275,15 +275,29 @@ fn pa_offsetof(p handle[Parser], t Token) handle[Ast] fails {
             try pa_expect(p, c"]")
             if !ty_is_array(ty) || !ty_is_integer(e.ty) { try pa_error(p, e.loc, c"invalid offsetof subscript") }
             ty = ty_node(ty_unqual(ty)).elem
-            if (e.flags & NF_ICE) != 0 { total += e.value * ty_size(ty) }
-            else { expr = e }
+            size u64 = ty_size(ty)
+            if (e.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+                total += e.value * size
+            } else {
+                // Preserve each evaluated index and scale it by the element
+                // size before adding it to the accumulated byte offset.
+                mul Token = cc_token(TK_PUNCT, 0, e.loc, cc_intern(p.names, bytes_c(c"*")))
+                part handle[Ast] = try se_binary(p, mul, se_convert(TY_ULONG, e), se_int(e.loc, TY_ULONG, size))
+                if expr == null { expr = part }
+                else {
+                    add Token = cc_token(TK_PUNCT, 0, e.loc, cc_intern(p.names, bytes_c(c"+")))
+                    expr = try se_binary(p, add, expr, part)
+                }
+            }
         }
         if !(try pa_accept(p, c".")) { break }
     }
     try pa_expect(p, c")")
     n handle[Ast] = se_int(t.loc, TY_ULONG, total)
-    if expr != null { n.flags = 0; n.a = expr }
-    return n
+    if expr == null { return n }
+    if total == 0 { return expr }
+    add Token = cc_token(TK_PUNCT, 0, t.loc, cc_intern(p.names, bytes_c(c"+")))
+    return try se_binary(p, add, expr, n)
 }
 
 fn pa_generic(p handle[Parser], t Token) handle[Ast] fails {

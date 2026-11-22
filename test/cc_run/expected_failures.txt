@@ -26,7 +26,6 @@ gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: parser #8 (GNU nested ran
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fenv rounding-mode fma test (-frounding-math)
 gcc/gcc/testsuite/gcc.dg/pr119151.c link-error: gcc-specific libgcc_s internal symbol (__register_frame_info)
-gcc/gcc/testsuite/gcc.dg/pr41935.c exit-mismatch: parser #7 (pa_offsetof drops element size for non-constant subscript; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/split-5.c link-error: gcc -fsplit-stack runtime (_Unwind_Resume requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/torture/float16-nan.c exit-mismatch: _Float16 -fsignaling-nans / fenv exception test
 gcc/gcc/testsuite/gcc.dg/torture/fp-double-convert-float-1.c exit-mismatch: gcc -fexcess-precision test (clang aborts at -O0)
