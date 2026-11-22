@@ -313,7 +313,9 @@ fn pa_generic(p handle[Parser], t Token) handle[Ast] fails {
         loc u32 = (try pa_peek(p)).loc
         if !(try pa_accept(p, c"default")) {
             ty = try pa_type_name(p)
-            if !se_complete(ty) || se_vla(ty) { try pa_error(p, loc, c"generic association requires a complete non-VLA type") }
+            if !se_complete(ty) || se_variably_modified(ty) {
+                try pa_error(p, loc, c"generic association requires a complete, non-variably-modified type")
+            }
             for i usize in 0..types.n {
                 if ty_compatible(ty, types.p[u32, i]) { try pa_error(p, loc, c"duplicate compatible generic association") }
             }
