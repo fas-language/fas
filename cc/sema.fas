@@ -51,6 +51,68 @@ fn se_interrupt_signature(p handle[Parser], s handle[Symbol]) void fails {
     }
 }
 
+fn se_malloc_attribute(p handle[Parser], a handle[Attr], count u32) void fails {
+    replay Parser = {}
+    pa_attr_replay(p, a, &replay)
+    name Token = try pa_take(&replay)
+    if name.kind != TK_IDENT { try pa_error(p, name.loc, c"malloc attribute requires a deallocator function") }
+    param u64 = 1
+    if count == 2 {
+        try pa_expect(&replay, c",")
+        param = try se_ice(p, try pa_expression(&replay, 3))
+    }
+    if (try pa_peek(&replay)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in malloc attribute") }
+    target handle[Symbol] = pa_lookup(p, cc_ident(p.names, name))
+    if target == null && pa_is(p, name, c"__builtin_free") && param == 1 { return }
+    if target == null || !ty_is_func(target.ty) { try pa_error(p, name.loc, c"malloc attribute names no visible function") }
+    ft handle[TypeNode] = ty_node(ty_unqual(target.ty))
+    if param == 0 || param > zext[u64](ft.aux2) ||
+        !ty_is_ptr(tc.fn_params.p[u32, zext[usize](ft.aux1) + (param - 1)]) {
+        try pa_error(p, a.loc, c"malloc deallocator index must name a pointer parameter")
+    }
+}
+
+// Record vendor dialects for later consumers. Validate the argument positions
+// against the prototype and the format type for the narrow string dialects.
+fn se_format_attributes(p handle[Parser], s handle[Symbol]) void fails {
+    ft handle[TypeNode] = ty_node(ty_unqual(s.ty))
+    a handle[Attr] = s.attrs
+    while a != null {
+        if pa_attr_name(p, a, c"format") {
+            replay Parser = {}
+            pa_attr_replay(p, a, &replay)
+            dialect Token = try pa_take(&replay)
+            if dialect.kind != TK_IDENT { try pa_error(p, dialect.loc, c"expected format dialect identifier") }
+            kind Bytes = feature_attr(cc_spelling(p.names, dialect))
+            try pa_expect(&replay, c",")
+            fmt u64 = try se_ice(p, try pa_expression(&replay, 3))
+            try pa_expect(&replay, c",")
+            first u64 = try se_ice(p, try pa_expression(&replay, 3))
+            if (try pa_peek(&replay)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in format attribute") }
+            params u64 = zext[u64](ft.aux2)
+            if fmt == 0 || fmt > params { try pa_error(p, a.loc, c"format index is out of range") }
+            if first != 0 {
+                if bytes_eq_c(kind, c"strftime") || bytes_eq_c(kind, c"gnu_strftime") {
+                    try pa_error(p, a.loc, c"strftime format requires a zero first argument index")
+                }
+                if first <= fmt || first > params + 1 ||
+                    ((ft.flags & TYF_VARIADIC) != 0 && first != params + 1) ||
+                    ((ft.flags & TYF_VARIADIC) == 0 && first > params) {
+                    try pa_error(p, a.loc, c"first checked format argument is out of range")
+                }
+            }
+            if feature_in(c" printf scanf strftime strfmon gnu_printf gnu_scanf gnu_strftime gnu_strfmon ms_printf ms_scanf ms_strftime ", kind) {
+                param u32 = ty_unqual(tc.fn_params.p[u32, zext[usize](ft.aux1) + (fmt - 1)])
+                elem u32 = if ty_is_ptr(param) { ty_unqual(ty_node(param).elem) } else { TY_INVALID }
+                if elem != TY_CHAR && elem != TY_SCHAR && elem != TY_UCHAR {
+                    try pa_error(p, a.loc, c"format parameter must point to a narrow string")
+                }
+            }
+        }
+        a = a.next
+    }
+}
+
 fn se_local(p handle[Parser], name u32) handle[Symbol] {
     scope handle[Scope] = p.scope
     a addr = map_get(&scope.ordinary, name) catch null

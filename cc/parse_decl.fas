@@ -183,6 +183,8 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
         max = 3
     } else if bytes_eq_c(name, c"sentinel") {
         max = 2
+    } else if bytes_eq_c(name, c"malloc") {
+        max = 2
     } else if bytes_eq_c(name, c"nonnull") {
         max = 0xffffffff
     } else if feature_in(c" format pointer_with_type_tag ", name) {
@@ -209,6 +211,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     if !arg_empty { count += 1 }
     else if count != 0 { try pa_error(p, a.loc, c"empty attribute argument") }
     if count < min || count > max { try pa_error(p, a.loc, c"wrong number of attribute arguments") }
+    if count != 0 && bytes_eq_c(name, c"malloc") { try se_malloc_attribute(p, a, count) }
     access bool = bytes_eq_c(name, c"access")
     sentinel bool = bytes_eq_c(name, c"sentinel")
     if access || sentinel || bytes_eq_c(name, c"nonnull") || bytes_eq_c(name, c"nonnull_if_nonzero") {
@@ -1316,7 +1319,10 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             }
         }
         try se_cleanup_attribute(p, s, file, func)
-        if func && pa_has_attr(p, attrs, c"interrupt") { try se_interrupt_signature(p, s) }
+        if func {
+            if pa_has_attr(p, attrs, c"interrupt") { try se_interrupt_signature(p, s) }
+            try se_format_attributes(p, s)
+        }
         if spec.thread_local && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
             spec.storage == SC_CONSTEXPR || (!file && spec.storage != SC_STATIC && spec.storage != SC_EXTERN)) {
             try pa_error(p, d.loc, c"invalid thread-local declaration")
