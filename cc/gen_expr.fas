@@ -678,6 +678,7 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
         if (n.flags & NF_ICE) != 0 {
             return gen_const_int(n.ty, n.value)
         }
+        if n.a != null { _ u32 = try gen_rvalue(n.a) }
         sz_v u32 = try gen_vla_type_size(n.op)
         return gen_convert(sz_v, TY_ULONG, n.ty)
     }

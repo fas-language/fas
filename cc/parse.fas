@@ -32,6 +32,7 @@ const NF_DEFINITION u32 = 32
 const NF_IMPLICIT u32 = 256
 // GNU folding may produce a constant value without meeting C23 ICE syntax.
 const NF_FOLD u32 = 512
+const NF_TYPEOF_EVAL u32 = 1024 // evaluate ND_DECL.b once for a shared typeof specifier
 const NF_INT_VALUE u32 = NF_ICE | NF_FOLD
 
 struct Ast {

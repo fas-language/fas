@@ -14,6 +14,7 @@ struct DeclSpec {
     auto_seen bool
     member bool
     anonymous_record bool
+    vm_operand handle[Ast] // evaluated operand of a variably modified typeof
 }
 
 const DO_PTR u8 = 1
@@ -709,6 +710,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
                 e handle[Ast] = try pa_expression(p, 1)
                 if (e.flags & NF_BITFIELD) != 0 { try pa_error(p, e.loc, c"typeof cannot be applied to a bit-field") }
                 base = ty_typeof(e.ty)
+                if se_variably_modified(base) { out.vm_operand = e }
             }
             try pa_expect(p, c")")
             if pa_is(p, t, c"typeof_unqual") { base = ty_typeof_unqual(base) }
@@ -1253,6 +1255,8 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         n.decl = s
         n.a = handle_from_addr(s.value)
         n.attrs = s.attrs
+        n.b = spec.vm_operand
+        if n.b != null && xs.first == null { n.flags |= NF_TYPEOF_EVAL }
         pa_append(&xs, n)
         if !(try pa_accept(p, c",")) { break }
         if spec.inferred { try pa_error(p, d.loc, c"auto type inference cannot declare multiple identifiers") }
