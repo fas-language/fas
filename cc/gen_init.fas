@@ -337,7 +337,7 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         if bytes_eq_c(op, c"+") {
             if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
                 elem_sz i64 = 1
-                if ty_is_ptr(n.a.ty) {
+                if ty_is_ptr(n.a.ty) || ty_is_array(n.a.ty) {
                     esz u64 = ty_size(ty_node(ty_unqual(n.a.ty)).elem)
                     if esz > 0 { elem_sz = bitcast[i64](esz) }
                 }
@@ -346,7 +346,7 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
             }
             if gen_eval_const_addr(n.b, out) && (n.a.flags & NF_ICE) != 0 {
                 elem_sz i64 = 1
-                if ty_is_ptr(n.b.ty) {
+                if ty_is_ptr(n.b.ty) || ty_is_array(n.b.ty) {
                     esz u64 = ty_size(ty_node(ty_unqual(n.b.ty)).elem)
                     if esz > 0 { elem_sz = bitcast[i64](esz) }
                 }
@@ -356,7 +356,7 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         } else if bytes_eq_c(op, c"-") {
             if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
                 elem_sz i64 = 1
-                if ty_is_ptr(n.a.ty) {
+                if ty_is_ptr(n.a.ty) || ty_is_array(n.a.ty) {
                     esz u64 = ty_size(ty_node(ty_unqual(n.a.ty)).elem)
                     if esz > 0 { elem_sz = bitcast[i64](esz) }
                 }
@@ -548,8 +548,15 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         elem_ty u32 = n.elem
         elem_sz u64 = ty_size(elem_ty)
         if (init.flags & 64) != 0 || init.kind == ND_FLOAT {
-            gen_static_write_float(si, elem_ty, init.value, off)
-            gen_static_write_float(si, elem_ty, init.imag, off + elem_sz)
+            if ty_is_real_float(elem_ty) {
+                gen_static_write_float(si, elem_ty, init.value, off)
+                gen_static_write_float(si, elem_ty, init.imag, off + elem_sz)
+            } else {
+                re_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.value)))
+                im_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.imag)))
+                si_write_u64(si, off, re_i, elem_sz)
+                si_write_u64(si, off + elem_sz, im_i, elem_sz)
+            }
         } else if init.kind == ND_INT || (init.flags & NF_ICE) != 0 {
             if ty_is_real_float(elem_ty) {
                 gen_static_write_float(si, elem_ty, bitcast[u64](cvt[f64](bitcast[i64](init.value))), off)

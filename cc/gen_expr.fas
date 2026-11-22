@@ -286,7 +286,12 @@ fn gen_convert(val_v u32, from_ty u32, to_ty u32) u32 {
         return gen_cast(c"fptrunc", tu, val_v)
     }
 
-    // Scalar -> Vector splat (for GNU vector-scalar binary ops)
+    // Vector <-> Vector / Integer bitcast (same total size, e.g. (V2SI)0LL or (long long)v)
+    if (fk == TYK_VECTOR || tk == TYK_VECTOR) && ty_size(fu) == ty_size(tu) {
+        return gen_cast(c"bitcast", tu, val_v)
+    }
+
+    // Scalar -> Vector splat (for GNU vector-scalar binary ops where sizes differ)
     if tk == TYK_VECTOR && fk != TYK_VECTOR {
         et u32 = ty_node(tu).elem
         ev u32 = gen_convert(val_v, fu, et)
@@ -300,11 +305,6 @@ fn gen_convert(val_v u32, from_ty u32, to_ty u32) u32 {
         gen_emit_val(b, ev)
         buf_u8(b, 10)
         return v
-    }
-
-    // Vector <-> Vector / Integer bitcast
-    if (fk == TYK_VECTOR || tk == TYK_VECTOR) && ty_size(fu) == ty_size(tu) {
-        return gen_cast(c"bitcast", tu, val_v)
     }
 
     return val_v

@@ -697,6 +697,12 @@ fn gen_const_i1(val bool) u32 {
 }
 
 fn gen_const_zero(tid u32) u32 {
+    if gen_is_mem_ty(tid) {
+        sz u64 = ty_size(tid)
+        slot u32 = gen_alloca_entry(sz, ty_align(tid))
+        if sz > 0 { gen_memset_const(slot, 0, sz, false) }
+        return slot
+    }
     v u32 = gen_new_val()
     b handle[Buf] = gen_cur_buf()
     k u8 = ty_kind(tid)

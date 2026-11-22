@@ -17,4 +17,30 @@ if [ ! -x "$FCC_LD" ]; then
     "$OCAML_FAS" "$ROOT/ld/main.fas" -o "$FCC_LD"
 fi
 
-exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"
+case "${1:-all}" in
+    --manifest)
+        shift
+        exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"
+        ;;
+    --projects)
+        shift
+        exec python3 "$ROOT/test/cc_run/test_projects.py" "$@"
+        ;;
+    --random)
+        shift
+        exec python3 "$ROOT/test/cc_run/rand_c.py" "$@"
+        ;;
+    all)
+        echo "=== 1. Manifest run-agree differential tests (fcc vs clang-22) ==="
+        python3 "$ROOT/test/cc_run/run_manifest.py" --show 15
+        echo ""
+        echo "=== 2. Real-world projects (zlib, lua, sqlite3) ==="
+        python3 "$ROOT/test/cc_run/test_projects.py"
+        echo ""
+        echo "=== 3. Random UB-free C differential fuzzer (100 programs) ==="
+        python3 "$ROOT/test/cc_run/rand_c.py" --count 100
+        ;;
+    *)
+        exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"
+        ;;
+esac
