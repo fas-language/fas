@@ -46,7 +46,8 @@ for pair in clang.clang gcc.gcc gcc.clang clang.gcc native.clang clang.native \
     "$clang" "$work/wide_caller.${pair%.*}.o" "$work/wide_callee.${pair#*.}.o" -o "$work/test"
     "$work/test" fixed > "$work/wide.$pair.fixed"
     cmp "$work/wide.clang.clang.fixed" "$work/wide.$pair.fixed"
-    # GCC does not share the indirect convention for vectors through ellipsis.
+    # GCC passes wide vectors through ellipsis indirectly but reads them
+    # inline in va_arg, so GCC links only check named arguments and returns.
     case $pair in
         *gcc*) ;;
         *)
@@ -55,4 +56,4 @@ for pair in clang.clang gcc.gcc gcc.clang clang.gcc native.clang clang.native \
             ;;
     esac
 done
-echo "PASS: wide vectors through Microsoft x64 ABI (13 exact-output links against Clang records)"
+echo "PASS: wide vectors through Microsoft x64 ABI (13 fixed, 6 variadic exact-output checks against Clang records)"
