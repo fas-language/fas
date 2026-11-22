@@ -506,8 +506,11 @@ fn gen_note_extern_obj(s handle[Symbol]) void {
         return
     }
     buf_free(&alias_buf)
-    sz u64 = ty_size(s.ty)
-    al u64 = ty_align(s.ty)
+    // A function can take the address of an extern object before its
+    // record type is completed. Only the symbol itself is needed here.
+    complete bool = se_complete(s.ty)
+    sz u64 = if complete { ty_size(s.ty) } else { 0 }
+    al u64 = if complete { ty_align(s.ty) } else { 1 }
     if gc.cur_gnu_inline_idx != 0 {
         gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
         r handle[ExternObjRef] = vec_add(&gi.ext_objs)
