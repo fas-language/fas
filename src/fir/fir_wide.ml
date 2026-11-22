@@ -1492,6 +1492,99 @@ let convert_inst cx (i : inst) =
           let q = e cx (Va_arg_agg (wide_agg n, get1 cx p)) ptr in
           set cx (r 0) (load_limbs cx n (plain_mem 8) q)
       | t -> unsupported "va_arg of %s" (ty_to_string t))
+  | Asm { tmpl; aflags; outs; ins; aargs; clobbers } -> (
+      let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
+      let st =
+        try Fir_asm.parse ~labels:0 ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
+        with Fir_asm.Bad m -> unsupported "%s" m
+      in
+      let is_i128_xmm (o : asm_operand) (c : Fir_asm.con) =
+        o.aty = i128 && (not (Fir_asm.indirect c)) && c.regs <> [] && List.for_all Fir_asm.is_xmm c.regs
+      in
+      let can_handle =
+        Array.for_all2
+          (fun (o : asm_operand) c ->
+            Fir_asm.indirect c || (not (mentions_odd o.aty)) || is_i128_xmm o c)
+          outs st.outs
+        && Array.for_all2
+             (fun (o : asm_operand) (c : Fir_asm.con) ->
+               let tied_ok =
+                 match c.tied with
+                 | Some t -> is_i128_xmm outs.(t) st.outs.(t)
+                 | None -> false
+               in
+               Fir_asm.indirect c || (not (mentions_odd o.aty)) || is_i128_xmm o c || tied_ok)
+             ins st.ins
+      in
+      if not can_handle then unsupported "asm on a wide or odd-width integer";
+      let v2i64 = Vec (2, i64) in
+      let pack_i128 v =
+        let limbs = get cx v in
+        let slot = e cx (Alloca (iconst cx.g i64 16L, 16)) ptr in
+        e0 cx (Store (plain_mem 8, limbs.(0), slot));
+        let p1 = e cx (Ptradd (0, slot, iconst cx.g i64 0L, 1, 8)) ptr in
+        e0 cx (Store (plain_mem 8, limbs.(1), p1));
+        e cx (Load (plain_mem 16, slot)) v2i64
+      in
+      let new_outs =
+        Array.mapi (fun k (o : asm_operand) -> if is_i128_xmm o st.outs.(k) then { o with aty = v2i64 } else o) outs
+      in
+      let new_ins =
+        Array.mapi
+          (fun k (o : asm_operand) ->
+            let c = st.ins.(k) in
+            let tied_i128 = match c.tied with Some t -> is_i128_xmm outs.(t) st.outs.(t) | None -> false in
+            if is_i128_xmm o c || tied_i128 then { o with aty = v2i64 } else o)
+          ins
+      in
+      let next_arg = ref 0 in
+      let new_args = ref [] in
+      Array.iteri
+        (fun k (o : asm_operand) ->
+          let c = st.outs.(k) in
+          if Fir_asm.output_takes_arg c then begin
+            let v = aargs.(!next_arg) in
+            incr next_arg;
+            let nv = if is_i128_xmm o c then pack_i128 v else get1 cx v in
+            new_args := nv :: !new_args
+          end)
+        outs;
+      Array.iteri
+        (fun k (o : asm_operand) ->
+          let c = st.ins.(k) in
+          let v = aargs.(!next_arg) in
+          incr next_arg;
+          let tied_i128 = match c.tied with Some t -> is_i128_xmm outs.(t) st.outs.(t) | None -> false in
+          let nv = if is_i128_xmm o c || tied_i128 then pack_i128 v else get1 cx v in
+          new_args := nv :: !new_args)
+        ins;
+      let res_tys =
+        Array.of_list
+          (List.rev
+             (let acc = ref [] in
+              Array.iteri
+                (fun k (o : asm_operand) ->
+                  if Fir_asm.output_is_result st.outs.(k) then acc := o.aty :: !acc)
+                new_outs;
+              !acc))
+      in
+      let rs =
+        emit ~loc:cx.loc cx.g cx.b
+          (Asm { tmpl; aflags; outs = new_outs; ins = new_ins; aargs = Array.of_list (List.rev !new_args); clobbers })
+          res_tys
+      in
+      Array.iteri
+        (fun k rv ->
+          if res_tys.(k) = v2i64 then begin
+            let slot = e cx (Alloca (iconst cx.g i64 16L, 16)) ptr in
+            e0 cx (Store (plain_mem 16, rv, slot));
+            let lo = e cx (Load (plain_mem 8, slot)) i64 in
+            let p1 = e cx (Ptradd (0, slot, iconst cx.g i64 0L, 1, 8)) ptr in
+            let hi = e cx (Load (plain_mem 8, p1)) i64 in
+            set cx (r k) [| lo; hi |]
+          end
+          else set cx (r k) [| rv |])
+        rs)
   | _ ->
       (* the op's mnemonic: the first word of its text *)
       let text = Fir_print.op_text cx.f (Fir_print.assign_names cx.f) ir in

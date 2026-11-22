@@ -632,10 +632,25 @@ let func_needs (f : func) =
   || (f.defined
      &&
      let found = ref false in
-     for v = 0 to num_values f - 1 do
-       if is_vec (ty_of f v) then found := true
-     done;
-     Vec.iter (fun (ir : inst_rec) -> match ir.op with Call c when sig_changes c.sig_ -> found := true | _ -> ()) f.insts;
+     Vec.iter
+       (fun (ir : inst_rec) ->
+         match ir.op with
+         | Call c when sig_changes c.sig_ -> found := true
+         | Load _ | Store _ | Asm _ ->
+             (* 128-bit XMM asm operands (v2i64 produced by Fir_wide for i128 "x")
+                are handled directly by Mir_isel via Xload/Xstore. *)
+             let bad_vec t = match t with Vec (2, Int 64) -> false | Vec _ -> true | _ -> false in
+             if Array.exists (fun r -> bad_vec (ty_of f r)) ir.results then found := true;
+             iter_op_uses (fun u -> if bad_vec (ty_of f u) then found := true) ir.op
+         | _ ->
+             if Array.exists (fun r -> is_vec (ty_of f r)) ir.results then found := true;
+             iter_op_uses (fun u -> if is_vec (ty_of f u) then found := true) ir.op)
+       f.insts;
+     Vec.iter
+       (fun (b : block_rec) ->
+         if Array.exists (fun p -> is_vec (ty_of f p)) b.params then found := true;
+         iter_term_uses (fun u -> if is_vec (ty_of f u) then found := true) b.term)
+       f.blocks;
      !found)
 
 (* every lane becomes its own value, so the lane count is bounded: 4096

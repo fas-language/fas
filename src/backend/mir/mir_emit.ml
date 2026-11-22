@@ -198,6 +198,7 @@ let render_asm fr uid (x : asm) =
         if md = Some 'z' then unsupported "inline asm: %%z of an xmm register";
         (if md = Some 'V' then "" else pre) ^ kind ^ string_of_int i
     | Areg (V _, _), _ -> invalid_arg "Mir_emit: virtual register in inline asm"
+    | Ax87 i, _ -> (if intel then "" else "%") ^ if i = 0 then "st" else Printf.sprintf "st(%d)" i
     | Amem (ad, size), _ ->
         if md = Some 'z' then size_suffix (8 * size)
         else

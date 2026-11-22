@@ -404,7 +404,12 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         vec_push(&out_is_rw, if is_rw { 1 } else { 0 })
         vec_push(&out_nodes, handle_addr(o))
         if is_rw && !mem_only {
-            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, ty_align(o.b.ty), false, false))
+            al_rw u64 = ty_align(o.b.ty)
+            if o.b.kind == ND_MEMBER && o.b.a != null {
+                pal u64 = ty_align(o.b.a.ty)
+                if pal < al_rw { al_rw = pal }
+            }
+            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, al_rw, false, false))
         } else {
             vec_push(&out_old_vs, 0)
         }
@@ -721,7 +726,13 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         rv u32 = vec_get(&out_res_vs, i)
         if rv != 0 {
             t u32 = vec_get(&out_tids, i)
-            gen_store_ty(rv, vec_get(&out_ptrs, i), ty_align(t), gen_is_volatile(t), false)
+            onode_s handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+            al_s u64 = ty_align(t)
+            if onode_s.b != null && onode_s.b.kind == ND_MEMBER && onode_s.b.a != null {
+                pal_s u64 = ty_align(onode_s.b.a.ty)
+                if pal_s < al_s { al_s = pal_s }
+            }
+            gen_store_ty(rv, vec_get(&out_ptrs, i), al_s, gen_is_volatile(t), false)
         }
     }
 }

@@ -791,6 +791,8 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
       (fun c ->
         match Fir_asm.clobber c with
         | Fir_asm.Creg r -> [ "~{" ^ r ^ "}" ]
+        | Cx87 0 -> [ "~{st}" ]
+        | Cx87 k -> [ Printf.sprintf "~{st(%d)}" k ]
         | Cmemory -> [ "~{memory}" ]
         | Cflags -> []
         | Cignored -> [ "~{" ^ String.lowercase_ascii c ^ "}" ])

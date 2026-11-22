@@ -501,5 +501,41 @@ func @bad (i32) -> (i64) global {
   ret %a
 }
 |};
+  (* x87 inline asm (=t, u, st(1) clobber) for f80/f64/f32 and i128 "x" asm *)
+  let x87_asm_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @x87_ops (f80, f80, f64, f32) -> (f80) global {
+^e(%x: f80, %y: f80, %d: f64, %s: f32):
+  %r1 = asm volatile "fsqrt" out("=t" f80) in("0" f80 %x)
+  %r2 = asm volatile "fpatan" out("=t" f80) in("0" f80 %r1, "u" f80 %y) clobber("st(1)")
+  %d2 = asm volatile "fchs" out("=t" f64) in("0" f64 %d)
+  %s2 = asm volatile "fchs" out("=t" f32) in("0" f32 %s)
+  ret %r2
+}
+func @i128_xmm (i128) -> (i128) global {
+^e(%x: i128):
+  %y = asm "" out("=x" i128) in("0" i128 %x)
+  ret %y
+}
+|}
+  in
+  (match parse "x87_and_i128_asm" x87_asm_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "x87_and_i128_asm_rt" printed with None -> () | Some _ -> ());
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "x87 llvm st" (has_sub ll "\"={st},0,{st(1)},~{st(1)},");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL x87_and_i128_asm: compile_object: %s\n%!" e
+      | Ok _ -> ()));
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"
