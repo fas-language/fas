@@ -1,0 +1,369 @@
+// CLI probe for bidirectional differential ABI testing against clang-22.
+// Reads record definitions and function signatures on stdin, and emits a
+// complete Fir 0.3 module on stdout using cc/types.fas + cc/layout.fas +
+// cc/abi.fas + cc/fir_out.fas.
+//
+// For each non-variadic function `id`:
+//   - emits `@fir_callee_<id>` (receives args from C caller, writes to @abi_out_buf,
+//     returns value loaded from @abi_in_buf + 1024)
+//   - emits `@fir_caller_<id>` (loads args from @abi_in_buf, calls @c_callee_<id>,
+//     writes return value to @abi_out_buf + 1024)
+// For each variadic function `id`:
+//   - emits `@fir_caller_<id>` (loads fixed + variadic args from @abi_in_buf,
+//     calls variadic @c_callee_<id>, writes return value to @abi_out_buf + 1024)
+
+use "../../lib/core.fas"
+use "../../lib/os.fas"
+use "../../lib/buf.fas"
+use "../../lib/bytes.fas"
+use "../types.fas"
+use "../layout.fas"
+use "../abi.fas"
+use "../fir_out.fas"
+
+struct AbiProbe {
+    rec_tids Vec[u32]
+    w FirOut
+}
+
+fn parse_u64_bytes(b Bytes) u64 {
+    v u64 = 0
+    for i usize in 0..b.n {
+        c u8 = bytes_at(b, i)
+        if c >= 48 && c <= 57 {
+            v = v * 10 + zext[u64](c - 48)
+        }
+    }
+    return v
+}
+
+struct LineCur { p usize }
+
+fn next_tok(line Bytes, lc handle[LineCur]) Bytes {
+    p usize = lc.p
+    while p < line.n && (bytes_at(line, p) == 32 || bytes_at(line, p) == 9 || bytes_at(line, p) == 13) {
+        p += 1
+    }
+    start usize = p
+    while p < line.n && bytes_at(line, p) != 32 && bytes_at(line, p) != 9 && bytes_at(line, p) != 13 {
+        p += 1
+    }
+    lc.p = p
+    return bytes_sub(line, start, p - start)
+}
+
+fn parse_ty(st handle[AbiProbe], s Bytes) u32 {
+    if bytes_eq_c(s, c"void") { return TY_VOID }
+    if bytes_eq_c(s, c"bool") { return TY_BOOL }
+    if bytes_eq_c(s, c"char") { return TY_CHAR }
+    if bytes_eq_c(s, c"schar") { return TY_SCHAR }
+    if bytes_eq_c(s, c"uchar") { return TY_UCHAR }
+    if bytes_eq_c(s, c"short") { return TY_SHORT }
+    if bytes_eq_c(s, c"ushort") { return TY_USHORT }
+    if bytes_eq_c(s, c"int") { return TY_INT }
+    if bytes_eq_c(s, c"uint") { return TY_UINT }
+    if bytes_eq_c(s, c"long") { return TY_LONG }
+    if bytes_eq_c(s, c"ulong") { return TY_ULONG }
+    if bytes_eq_c(s, c"llong") { return TY_LLONG }
+    if bytes_eq_c(s, c"ullong") { return TY_ULLONG }
+    if bytes_eq_c(s, c"i128") { return TY_INT128 }
+    if bytes_eq_c(s, c"u128") { return TY_UINT128 }
+    if bytes_eq_c(s, c"f16") { return TY_FLOAT16 }
+    if bytes_eq_c(s, c"f32") { return TY_FLOAT }
+    if bytes_eq_c(s, c"f64") { return TY_DOUBLE }
+    if bytes_eq_c(s, c"f80") { return TY_LDOUBLE }
+    if bytes_eq_c(s, c"ptr") { return ty_ptr(TY_VOID) }
+    if bytes_eq_c(s, c"nullptr") { return TY_NULLPTR }
+    if bytes_eq_c(s, c"cf16") { return TY_COMPLEX_F16 }
+    if bytes_eq_c(s, c"cf32") { return TY_COMPLEX_F32 }
+    if bytes_eq_c(s, c"cf64") { return TY_COMPLEX_F64 }
+    if bytes_eq_c(s, c"cf80") { return TY_COMPLEX_F80 }
+
+    if s.n >= 3 && bytes_at(s, 0) == 98 && bytes_at(s, 1) == 105 {
+        n u32 = trunc[u32](parse_u64_bytes(bytes_from(s, 2)))
+        return ty_bitint(n, false)
+    }
+    if s.n >= 4 && bytes_at(s, 0) == 117 && bytes_at(s, 1) == 98 && bytes_at(s, 2) == 105 {
+        n u32 = trunc[u32](parse_u64_bytes(bytes_from(s, 3)))
+        return ty_bitint(n, true)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"rec:")) {
+        idx usize = parse_u64_bytes(bytes_from(s, 4))
+        return vec_get(&st.rec_tids, idx)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"arr:")) {
+        rest Bytes = bytes_from(s, 4)
+        colon usize = rest.n
+        for i usize in 0..rest.n {
+            if bytes_at(rest, i) == 58 { colon = i }
+        }
+        elem u32 = parse_ty(st, bytes_sub(rest, 0, colon))
+        n_elems u64 = parse_u64_bytes(bytes_from(rest, colon + 1))
+        return ty_array(elem, n_elems)
+    }
+    if s.n >= 5 && bytes_starts_with(s, bytes_c(c"vec:")) {
+        rest Bytes = bytes_from(s, 4)
+        colon usize = rest.n
+        for i usize in 0..rest.n {
+            if bytes_at(rest, i) == 58 { colon = i }
+        }
+        elem u32 = parse_ty(st, bytes_sub(rest, 0, colon))
+        vb u32 = trunc[u32](parse_u64_bytes(bytes_from(rest, colon + 1)))
+        return ty_vector(elem, vb)
+    }
+    return TY_INT
+}
+
+fn ty_is_fir_ptr_abi(tid u32) bool {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_STRUCT || k == TYK_UNION || k == TYK_COMPLEX { return true }
+    if k == TYK_BITINT && n.aux1 > 64 { return true }
+    return false
+}
+
+// Load a scalar/vector value of type `tid` from `slot_ptr` (a 16-byte-aligned slot).
+// For `_Bool` (i1) and `_BitInt(N <= 64)`, loads the byte-sized storage int and
+// truncates to `iN` so memory layout matches C's byte-aligned storage.
+fn emit_load_from_slot(w handle[FirOut], tid u32, slot_ptr u32) u32 {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_BOOL {
+        b u32 = fir_load(w, c"i8", slot_ptr, 1)
+        return fir_cast(w, c"trunc", c"i1", b)
+    }
+    if k == TYK_BITINT && n.aux1 <= 64 {
+        sz u64 = ty_size(u)
+        st_ty addr = c"i8"
+        if sz == 2 { st_ty = c"i16" }
+        else if sz == 4 { st_ty = c"i32" }
+        else if sz == 8 { st_ty = c"i64" }
+        raw u32 = fir_load(w, st_ty, slot_ptr, sz)
+        if n.aux1 == trunc[u32](sz * 8) { return raw }
+        tb Buf = {}
+        defer { buf_free(&tb) }
+        buf_u8(&tb, 105)
+        buf_dec_u64(&tb, zext[u64](n.aux1))
+        return fir_cast(w, c"trunc", buf_cstr(&tb), raw)
+    }
+    tb Buf = {}
+    defer { buf_free(&tb) }
+    abi_emit_fir_ssa_ty(&tb, u)
+    al u64 = ty_align(u)
+    return fir_load(w, buf_cstr(&tb), slot_ptr, al)
+}
+
+// Store a scalar/vector value `val_v` of type `tid` into `slot_ptr`.
+fn emit_store_to_slot(w handle[FirOut], tid u32, val_v u32, slot_ptr u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_BOOL {
+        b u32 = fir_cast(w, c"zext", c"i8", val_v)
+        fir_store(w, c"i8", b, slot_ptr, 1)
+        return
+    }
+    if k == TYK_BITINT && n.aux1 <= 64 {
+        sz u64 = ty_size(u)
+        st_ty addr = c"i8"
+        if sz == 2 { st_ty = c"i16" }
+        else if sz == 4 { st_ty = c"i32" }
+        else if sz == 8 { st_ty = c"i64" }
+        v u32 = val_v
+        if n.aux1 != trunc[u32](sz * 8) {
+            op addr = if (n.flags & TYF_UNSIGNED) != 0 { c"zext" } else { c"sext" }
+            v = fir_cast(w, op, st_ty, val_v)
+        }
+        fir_store(w, st_ty, v, slot_ptr, sz)
+        return
+    }
+    tb Buf = {}
+    defer { buf_free(&tb) }
+    abi_emit_fir_ssa_ty(&tb, u)
+    al u64 = ty_align(u)
+    fir_store(w, buf_cstr(&tb), val_v, slot_ptr, al)
+}
+
+fn emit_fn_pair(st handle[AbiProbe], id u64, ret_tid u32, is_var bool,
+                param_tids addr, n_fixed u32, n_total u32) void {
+    w handle[FirOut] = &st.w
+
+    // Build symbol names
+    c_callee Buf = {}
+    f_callee Buf = {}
+    f_caller Buf = {}
+    defer {
+        buf_free(&c_callee)
+        buf_free(&f_callee)
+        buf_free(&f_caller)
+    }
+    buf_str(&c_callee, c"c_callee_")
+    buf_dec_u64(&c_callee, id)
+    buf_str(&f_callee, c"fir_callee_")
+    buf_dec_u64(&f_callee, id)
+    buf_str(&f_caller, c"fir_caller_")
+    buf_dec_u64(&f_caller, id)
+
+    // 1. Declare @c_callee_<id>
+    fir_declare(w, buf_bytes(&c_callee), ret_tid, param_tids, n_fixed, is_var, FIR_GLOBAL)
+
+    // 2. If non-variadic, define @fir_callee_<id> (C caller -> Fir callee)
+    if !is_var {
+        fir_func_begin(w, buf_bytes(&f_callee), ret_tid, param_tids, n_fixed, false, FIR_GLOBAL, FIR_VIS_DEFAULT)
+        out_base u32 = fir_sym_addr(w, bytes_c(c"abi_out_buf"))
+        for i u32 in 0..n_fixed {
+            pt u32 = param_tids[u32, zext[usize](i)]
+            slot u32 = fir_ptradd_const(w, out_base, zext[i64](i) * 256)
+            if ty_is_fir_ptr_abi(pt) {
+                sz u64 = ty_size(pt)
+                if sz > 0 { fir_memcpy(w, slot, i, sz) }
+            } else {
+                emit_store_to_slot(w, pt, i, slot)
+            }
+        }
+        if ty_is_void(ret_tid) {
+            fir_ret_void(w)
+        } else {
+            in_base u32 = fir_sym_addr(w, bytes_c(c"abi_in_buf"))
+            rslot u32 = fir_ptradd_const(w, in_base, 4096)
+            if ty_is_fir_ptr_abi(ret_tid) {
+                rsz u64 = ty_size(ret_tid)
+                ral u64 = ty_align(ret_tid)
+                asz u64 = if rsz > 0 { rsz } else { 1 }
+                rp u32 = fir_alloca(w, asz, ral)
+                if rsz > 0 { fir_memcpy(w, rp, rslot, rsz) }
+                fir_ret(w, rp)
+            } else {
+                rv u32 = emit_load_from_slot(w, ret_tid, rslot)
+                fir_ret(w, rv)
+            }
+        }
+        fir_func_end(w)
+    }
+
+    // 3. Define @fir_caller_<id> () -> () (Fir caller -> C callee)
+    fir_func_begin(w, buf_bytes(&f_caller), TY_VOID, null, 0, false, FIR_GLOBAL, FIR_VIS_DEFAULT)
+    in_base u32 = fir_sym_addr(w, bytes_c(c"abi_in_buf"))
+    arg_vals Vec[u32] = {}
+    defer { vec_free(&arg_vals) }
+    for i u32 in 0..n_total {
+        pt u32 = param_tids[u32, zext[usize](i)]
+        slot u32 = fir_ptradd_const(w, in_base, zext[i64](i) * 256)
+        if ty_is_fir_ptr_abi(pt) {
+            vec_push(&arg_vals, slot)
+        } else {
+            av u32 = emit_load_from_slot(w, pt, slot)
+            vec_push(&arg_vals, av)
+        }
+    }
+    res_v u32 = fir_call(w, buf_bytes(&c_callee), ret_tid, param_tids, n_fixed, is_var,
+                         arg_vals.p, param_tids, n_total)
+    if !ty_is_void(ret_tid) {
+        out_base u32 = fir_sym_addr(w, bytes_c(c"abi_out_buf"))
+        rslot u32 = fir_ptradd_const(w, out_base, 4096)
+        if ty_is_fir_ptr_abi(ret_tid) {
+            rsz u64 = ty_size(ret_tid)
+            if rsz > 0 { fir_memcpy(w, rslot, res_v, rsz) }
+        } else {
+            emit_store_to_slot(w, ret_tid, res_v, rslot)
+        }
+    }
+    fir_ret_void(w)
+    fir_func_end(w)
+}
+
+fn main() i32 {
+    ctx TypeCtx = {}
+    tc_init(&ctx)
+    defer { tc_free(&ctx) }
+
+    st AbiProbe = {}
+    fir_init_fd(&st.w, STDOUT)
+    defer {
+        vec_free(&st.rec_tids)
+        fir_free(&st.w)
+    }
+
+    fir_module_header(&st.w, c"x86_64-unknown-linux-gnu", false)
+    fir_global_extern(&st.w, bytes_c(c"abi_in_buf"), 8192, 16, FIR_GLOBAL, FIR_VIS_DEFAULT, bytes_empty(), false, false)
+    fir_global_extern(&st.w, bytes_c(c"abi_out_buf"), 8192, 16, FIR_GLOBAL, FIR_VIS_DEFAULT, bytes_empty(), false, false)
+
+    // Read stdin
+    in_buf Buf = {}
+    defer { buf_free(&in_buf) }
+    chunk arr[4096, u8] = {}
+    while true {
+        n usize = os_read(STDIN, &chunk[0], 4096) catch { break }
+        if n == 0 { break }
+        buf_raw(&in_buf, &chunk[0], n)
+    }
+
+    data Bytes = buf_bytes(&in_buf)
+    cur usize = 0
+    fields Vec[FieldDef] = {}
+    ptids Vec[u32] = {}
+    defer {
+        vec_free(&fields)
+        vec_free(&ptids)
+    }
+
+    while cur < data.n {
+        nl usize = cur
+        while nl < data.n && bytes_at(data, nl) != 10 { nl += 1 }
+        line Bytes = bytes_sub(data, cur, nl - cur)
+        cur = if nl < data.n { nl + 1 } else { data.n }
+        if line.n == 0 { continue }
+
+        lc LineCur = {}
+        cmd Bytes = next_tok(line, &lc)
+        if bytes_eq_c(cmd, c"REC") {
+            kind_tok Bytes = next_tok(line, &lc)
+            is_union bool = bytes_eq_c(kind_tok, c"U")
+            is_packed bool = parse_u64_bytes(next_tok(line, &lc)) != 0
+            al_attr u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            pp u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            nf u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+
+            fields.n = 0
+            for i u32 in 0..nf {
+                fnl usize = cur
+                while fnl < data.n && bytes_at(data, fnl) != 10 { fnl += 1 }
+                fline Bytes = bytes_sub(data, cur, fnl - cur)
+                cur = if fnl < data.n { fnl + 1 } else { data.n }
+
+                flc LineCur = {}
+                _ Bytes = next_tok(fline, &flc)
+                ty_tok Bytes = next_tok(fline, &flc)
+                is_bf bool = parse_u64_bytes(next_tok(fline, &flc)) != 0
+                bw u32 = trunc[u32](parse_u64_bytes(next_tok(fline, &flc)))
+                f_pk bool = parse_u64_bytes(next_tok(fline, &flc)) != 0
+                f_al u32 = trunc[u32](parse_u64_bytes(next_tok(fline, &flc)))
+
+                ftid u32 = parse_ty(&st, ty_tok)
+                fd handle[FieldDef] = vec_add(&fields)
+                fd.ty = ftid
+                fd.bit_width = bw
+                fd.align_attr = f_al
+                fd.is_bitfield = is_bf
+                fd.is_packed = f_pk
+            }
+            tid u32 = ty_record_new(0, is_union)
+            ty_record_complete(tid, fields.p, nf, is_packed, al_attr, pp)
+            vec_push(&st.rec_tids, tid)
+        } else if bytes_eq_c(cmd, c"FN") {
+            fid u64 = parse_u64_bytes(next_tok(line, &lc))
+            ret_tid u32 = parse_ty(&st, next_tok(line, &lc))
+            is_var bool = parse_u64_bytes(next_tok(line, &lc)) != 0
+            n_fixed u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            n_total u32 = trunc[u32](parse_u64_bytes(next_tok(line, &lc)))
+            ptids.n = 0
+            for i u32 in 0..n_total {
+                vec_push(&ptids, parse_ty(&st, next_tok(line, &lc)))
+            }
+            emit_fn_pair(&st, fid, ret_tid, is_var, ptids.p, n_fixed, n_total)
+        }
+    }
+    return 0
+}

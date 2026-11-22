@@ -1,0 +1,275 @@
+// Unit tests for cc/types.fas, cc/layout.fas, and cc/abi.fas:
+//   - Type interning & ID equality (all C23 structural types, qual merging, C23 ()==(void))
+//   - typeof / typeof_unqual (incl. _Atomic stripping)
+//   - C23 integer promotions (_BitInt exempt, enum with fixed _BitInt underlying exempt)
+//   - C23 usual arithmetic conversions (rank, signed/unsigned, _BitInt, _Float16, _Complex, __int128)
+//   - C23 type compatibility & composite types
+//   - Anonymous struct/union offsetof traversal
+//   - SysV x86-64 ABI classification & register exhaustion / sret / varargs %al
+
+use "../../lib/core.fas"
+use "../../lib/os.fas"
+use "../../lib/buf.fas"
+use "../../lib/bytes.fas"
+use "../types.fas"
+use "../layout.fas"
+use "../abi.fas"
+
+fn test_interning_and_quals() void {
+    // Pointer interning
+    p1 u32 = ty_ptr(TY_INT)
+    p2 u32 = ty_ptr(TY_INT)
+    p3 u32 = ty_ptr(TY_UINT)
+    assert(p1 == p2)
+    assert(p1 != p3)
+
+    // Array interning (fixed, incomplete, VLA)
+    a1 u32 = ty_array(TY_INT, 10)
+    a2 u32 = ty_array(TY_INT, 10)
+    a3 u32 = ty_array(TY_INT, 11)
+    ai1 u32 = ty_array_incomplete(TY_INT)
+    ai2 u32 = ty_array_incomplete(TY_INT)
+    av1 u32 = ty_array_vla(TY_INT, 1)
+    av2 u32 = ty_array_vla(TY_INT, 2)
+    assert(a1 == a2 && a1 != a3)
+    assert(ai1 == ai2 && ai1 != a1)
+    assert(av1 != av2 && av1 != ai1)
+
+    // Qualifier merging (never nests TYK_QUAL)
+    ci u32 = ty_qual(TY_INT, Q_CONST)
+    cvi u32 = ty_qual(ci, Q_VOLATILE)
+    cvi2 u32 = ty_qual(TY_INT, Q_CONST | Q_VOLATILE)
+    assert(cvi == cvi2)
+    assert(ty_unqual(cvi) == TY_INT)
+    assert(ty_quals(cvi) == (Q_CONST | Q_VOLATILE))
+
+    // typeof / typeof_unqual with _Atomic
+    ai u32 = ty_qual(TY_INT, Q_ATOMIC | Q_CONST)
+    assert(ty_typeof(ai) == ai)
+    assert(ty_typeof_unqual(ai) == TY_INT)
+
+    // C23 function types: () == (void), interned by (ret, params, variadic)
+    f0a u32 = ty_func0(TY_INT, false)
+    f0b u32 = ty_func(TY_INT, null, 0, false)
+    f0v u32 = ty_func0(TY_INT, true)
+    assert(f0a == f0b)
+    assert(f0a != f0v)
+
+    ps arr[2, u32] = { TY_INT, TY_DOUBLE }
+    f1 u32 = ty_func(TY_VOID, &ps[0], 2, false)
+    f2 u32 = ty_func(TY_VOID, &ps[0], 2, false)
+    assert(f1 == f2)
+
+    // _BitInt, _Complex, vector interning
+    assert(ty_bitint(17, false) == ty_bitint(17, false))
+    assert(ty_bitint(17, false) != ty_bitint(17, true))
+    assert(ty_complex(TY_FLOAT) == TY_COMPLEX_F32)
+    assert(ty_complex(TY_LDOUBLE) == TY_COMPLEX_F80)
+    assert(ty_vector(TY_FLOAT, 16) == ty_vector(TY_FLOAT, 16))
+    assert(ty_vector(TY_FLOAT, 16) != ty_vector(TY_DOUBLE, 16))
+}
+
+fn test_promotions_and_uac() void {
+    // Standard integer promotions
+    assert(ty_integer_promote(TY_BOOL) == TY_INT)
+    assert(ty_integer_promote(TY_CHAR) == TY_INT)
+    assert(ty_integer_promote(TY_SCHAR) == TY_INT)
+    assert(ty_integer_promote(TY_UCHAR) == TY_INT)
+    assert(ty_integer_promote(TY_SHORT) == TY_INT)
+    assert(ty_integer_promote(TY_USHORT) == TY_INT)
+    assert(ty_integer_promote(TY_UINT) == TY_UINT)
+    assert(ty_integer_promote(TY_LONG) == TY_LONG)
+
+    // C23: _BitInt does NOT undergo integer promotion
+    bi5 u32 = ty_bitint(5, false)
+    ubi1 u32 = ty_bitint(1, true)
+    assert(ty_integer_promote(bi5) == bi5)
+    assert(ty_integer_promote(ubi1) == ubi1)
+
+    // C23: enum with fixed _BitInt underlying does NOT promote to int
+    ebi u32 = ty_enum_new(tc_intern_cstr(c"EBi"), true, bi5)
+    assert(ty_integer_promote(ebi) == bi5)
+    // Enum with fixed unsigned short underlying promotes to int
+    eus u32 = ty_enum_new(tc_intern_cstr(c"EUs"), true, TY_USHORT)
+    assert(ty_integer_promote(eus) == TY_INT)
+
+    // Usual arithmetic conversions
+    assert(ty_usual_arith_conv(TY_INT, TY_UINT) == TY_UINT)
+    assert(ty_usual_arith_conv(TY_INT, TY_LONG) == TY_LONG)
+    assert(ty_usual_arith_conv(TY_UINT, TY_LONG) == TY_LONG)   // 64-bit long holds all 32-bit uint
+    assert(ty_usual_arith_conv(TY_ULONG, TY_LLONG) == TY_ULLONG) // equal width, llong rank > ulong -> ullong
+    assert(ty_usual_arith_conv(TY_INT128, TY_ULONG) == TY_INT128)
+
+    // _BitInt rank < standard int of same width
+    bi32 u32 = ty_bitint(32, false)
+    ubi32 u32 = ty_bitint(32, true)
+    assert(ty_usual_arith_conv(bi32, TY_INT) == TY_INT)
+    assert(ty_usual_arith_conv(ubi32, TY_INT) == TY_UINT)
+    assert(ty_usual_arith_conv(ty_bitint(33, false), TY_UINT) == ty_bitint(33, false))
+
+    // Floating & _Complex UAC
+    assert(ty_usual_arith_conv(TY_FLOAT16, TY_INT) == TY_FLOAT16)
+    assert(ty_usual_arith_conv(TY_FLOAT16, TY_FLOAT) == TY_FLOAT)
+    assert(ty_usual_arith_conv(TY_FLOAT, TY_DOUBLE) == TY_DOUBLE)
+    assert(ty_usual_arith_conv(TY_DOUBLE, TY_LDOUBLE) == TY_LDOUBLE)
+    assert(ty_usual_arith_conv(TY_COMPLEX_F32, TY_DOUBLE) == TY_COMPLEX_F64)
+    assert(ty_usual_arith_conv(TY_COMPLEX_F16, TY_LDOUBLE) == TY_COMPLEX_F80)
+}
+
+fn test_compat_and_composite() void {
+    a_inc u32 = ty_array_incomplete(TY_INT)
+    a_fix u32 = ty_array(TY_INT, 7)
+    assert(ty_compatible(a_inc, a_fix))
+    assert(ty_composite(a_inc, a_fix) == a_fix)
+    assert(!ty_compatible(ty_array(TY_INT, 7), ty_array(TY_INT, 8)))
+
+    // Enum compatible with its underlying type
+    e1 u32 = ty_enum_new(tc_intern_cstr(c"E1"), true, TY_USHORT)
+    assert(ty_compatible(e1, TY_USHORT))
+    assert(!ty_compatible(e1, TY_SHORT))
+
+    // Function compatibility ignores top-level param qualifiers
+    p1 arr[1, u32] = { ty_qual(TY_INT, Q_CONST) }
+    p2 arr[1, u32] = { TY_INT }
+    f1 u32 = ty_func(TY_VOID, &p1[0], 1, false)
+    f2 u32 = ty_func(TY_VOID, &p2[0], 1, false)
+    assert(ty_compatible(f1, f2))
+
+    // Distinct nominal structs are incompatible
+    s1 u32 = ty_record_new(tc_intern_cstr(c"S1"), false)
+    s2 u32 = ty_record_new(tc_intern_cstr(c"S2"), false)
+    assert(!ty_compatible(s1, s2))
+    assert(ty_compatible(s1, s1))
+}
+
+fn test_anon_offsetof() void {
+    // struct Outer { char a; struct { short b; union { int c; long d; }; }; };
+    uf arr[2, FieldDef] = {}
+    uf[0].name_id = tc_intern_cstr(c"c")
+    uf[0].ty = TY_INT
+    uf[1].name_id = tc_intern_cstr(c"d")
+    uf[1].ty = TY_LONG
+    u_ty u32 = ty_record_new(0, true)
+    ty_record_complete(u_ty, &uf[0], 2, false, 0, 0)
+
+    sf arr[2, FieldDef] = {}
+    sf[0].name_id = tc_intern_cstr(c"b")
+    sf[0].ty = TY_SHORT
+    sf[1].ty = u_ty
+    sf[1].is_anon = true
+    inner_ty u32 = ty_record_new(0, false)
+    ty_record_complete(inner_ty, &sf[0], 2, false, 0, 0)
+
+    of arr[2, FieldDef] = {}
+    of[0].name_id = tc_intern_cstr(c"a")
+    of[0].ty = TY_CHAR
+    of[1].ty = inner_ty
+    of[1].is_anon = true
+    outer_ty u32 = ty_record_new(tc_intern_cstr(c"Outer"), false)
+    ty_record_complete(outer_ty, &of[0], 2, false, 0, 0)
+
+    assert(ty_size(outer_ty) == 24 && ty_align(outer_ty) == 8)
+    lk FieldLookup = {}
+    assert(ty_offsetof(outer_ty, tc_intern_cstr(c"a"), &lk) && lk.byte_off == 0)
+    assert(ty_offsetof(outer_ty, tc_intern_cstr(c"b"), &lk) && lk.byte_off == 8)
+    assert(ty_offsetof(outer_ty, tc_intern_cstr(c"c"), &lk) && lk.byte_off == 16)
+    assert(ty_offsetof(outer_ty, tc_intern_cstr(c"d"), &lk) && lk.byte_off == 16)
+    assert(!ty_offsetof(outer_ty, tc_intern_cstr(c"missing"), &lk))
+}
+
+fn test_abi_rules() void {
+    // 1. Register exhaustion partway through a 2-GPR aggregate moves WHOLE agg to stack,
+    //    leaving the 6th GPR free for a subsequent 1-GPR int!
+    pf arr[2, FieldDef] = {}
+    pf[0].ty = TY_LONG
+    pf[1].ty = TY_LONG
+    s16 u32 = ty_record_new(0, false)
+    ty_record_complete(s16, &pf[0], 2, false, 0, 0)
+
+    params arr[7, u32] = { TY_INT, TY_INT, TY_INT, TY_INT, TY_INT, s16, TY_INT }
+    plan AbiCallPlan = {}
+    locs arr[7, AbiParamLoc] = {}
+    abi_plan_call(TY_INT, &params[0], 7, false, &plan, &locs[0])
+    assert(!plan.sret)
+    assert(plan.gpr_used == 6)
+    assert(!locs[4].in_mem && locs[4].gpr_idx == 4)
+    assert(locs[5].in_mem && locs[5].stack_off == 0) // whole 16-byte struct on stack!
+    assert(!locs[6].in_mem && locs[6].gpr_idx == 5)  // 6th GPR used by param 6!
+    assert(plan.stack_bytes == 16)
+
+    // 2. MEMORY return uses hidden sret pointer in rdi (consumes 1 GPR)
+    bf arr[3, FieldDef] = {}
+    bf[0].ty = TY_LONG
+    bf[1].ty = TY_LONG
+    bf[2].ty = TY_LONG
+    s24 u32 = ty_record_new(0, false)
+    ty_record_complete(s24, &bf[0], 3, false, 0, 0)
+
+    p2 arr[2, u32] = { TY_INT, TY_DOUBLE }
+    plan2 AbiCallPlan = {}
+    locs2 arr[2, AbiParamLoc] = {}
+    abi_plan_call(s24, &p2[0], 2, true, &plan2, &locs2[0])
+    assert(plan2.sret)
+    assert(locs2[0].gpr_idx == 1) // rsi, because rdi is sret!
+    assert(locs2[1].sse_idx == 0) // xmm0
+    assert(plan2.sse_used == 1)   // %al = 1 for variadic call
+
+    // 3. Nested union { long double; long } inside union { int; __int128; inner } -> MEMORY
+    in_u_f arr[2, FieldDef] = {}
+    in_u_f[0].ty = TY_LDOUBLE
+    in_u_f[1].ty = TY_LONG
+    in_u u32 = ty_record_new(0, true)
+    ty_record_complete(in_u, &in_u_f[0], 2, false, 0, 0)
+
+    out_u_f arr[3, FieldDef] = {}
+    out_u_f[0].ty = TY_INT
+    out_u_f[1].ty = TY_INT128
+    out_u_f[2].ty = in_u
+    out_u u32 = ty_record_new(0, true)
+    ty_record_complete(out_u, &out_u_f[0], 3, false, 0, 0)
+
+    cls AbiClass = {}
+    abi_classify(out_u, false, &cls)
+    assert(cls.mode == PASS_MEMORY)
+
+    // Flat union { int; __int128; long double; long } -> INTEGER + INTEGER
+    flat_f arr[4, FieldDef] = {}
+    flat_f[0].ty = TY_INT
+    flat_f[1].ty = TY_INT128
+    flat_f[2].ty = TY_LDOUBLE
+    flat_f[3].ty = TY_LONG
+    flat_u u32 = ty_record_new(0, true)
+    ty_record_complete(flat_u, &flat_f[0], 4, false, 0, 0)
+    abi_classify(flat_u, false, &cls)
+    assert(cls.mode == PASS_REGS && cls.eb0 == ABI_INTEGER && cls.eb1 == ABI_INTEGER)
+
+    // 4. Empty struct -> PASS_NONE
+    emp u32 = ty_record_new(0, false)
+    ty_record_complete(emp, null, 0, false, 0, 0)
+    abi_classify(emp, false, &cls)
+    assert(cls.mode == PASS_NONE)
+
+    // 5. _Complex long double return -> x87 (2 regs), param -> MEMORY
+    abi_classify(TY_COMPLEX_F80, true, &cls)
+    assert(cls.mode == PASS_REGS && cls.n_x87 == 2)
+    abi_classify(TY_COMPLEX_F80, false, &cls)
+    assert(cls.mode == PASS_MEMORY)
+}
+
+fn main() i32 {
+    ctx TypeCtx = {}
+    tc_init(&ctx)
+    defer { tc_free(&ctx) }
+
+    test_interning_and_quals()
+    test_promotions_and_uac()
+    test_compat_and_composite()
+    test_anon_offsetof()
+    test_abi_rules()
+
+    out Buf = {}
+    defer { buf_free(&out) }
+    buf_str(&out, c"types_test: all unit tests passed\n")
+    buf_write(&out, STDOUT) catch {}
+    return 0
+}

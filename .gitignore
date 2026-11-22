@@ -13,3 +13,5 @@ _build/
 *.out
 .DS_Store
 /fas-static/
+__pycache__/
+*.pyc
