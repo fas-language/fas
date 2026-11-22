@@ -111,6 +111,7 @@ struct FieldDef {
     ty u32            // field TypeId
     bit_width u32     // bitfield width (0 for zero-width bitfield)
     align_attr u32    // explicit __attribute__((aligned(N))), 0 = none
+    counted_by u32    // sibling field supplying the element count, 0 = none
     is_bitfield bool
     is_anon bool
     is_packed bool
@@ -999,6 +1000,7 @@ fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool
             fb handle[FieldDef] = ty_field(rb.fields_start + i)
             if fa.name_id != fb.name_id || fa.is_anon != fb.is_anon || fa.is_bitfield != fb.is_bitfield ||
                 fa.bit_width != fb.bit_width || fa.align_attr != fb.align_attr || fa.is_packed != fb.is_packed ||
+                fa.counted_by != fb.counted_by ||
                 !ty_compatible_impl(fa.ty, fb.ty, &pair, fa.is_anon) { return false }
             // A flexible member is a distinct record layout feature even
             // though an ordinary incomplete array can compose with a bound.

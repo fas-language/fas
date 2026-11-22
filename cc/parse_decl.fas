@@ -581,6 +581,25 @@ fn pa_bind_member(p handle[Parser], seen handle[TagMap], name u32, ty u32, anon 
     }
 }
 
+fn pa_counted_by(p handle[Parser], a handle[Attr], ty u32, flex bool, is_union bool) u32 fails {
+    count u32 = 0
+    while a != null {
+        if pa_attr_name(p, a, c"counted_by") {
+            if !(flex || ty_is_ptr(ty)) || is_union {
+                try pa_error(p, a.loc, c"counted_by requires a flexible array or pointer field in a structure")
+            }
+            if a.args.n != 1 || a.args.p[Token].kind != TK_IDENT {
+                try pa_error(p, a.loc, c"counted_by requires a field name")
+            }
+            name u32 = cc_ident(p.names, a.args.p[Token])
+            if count != 0 && count != name { try pa_error(p, a.loc, c"conflicting counted_by attributes") }
+            count = name
+        }
+        a = a.next
+    }
+    return count
+}
+
 fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fails {
     rec_id u32 = ty_node(ty).aux1
     if !map_put(&p.record_open, rec_id, 1) { try pa_error(p, loc, c"nested redefinition of record") }
@@ -628,6 +647,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             if (!se_complete(ft) && !flex) || se_variably_modified(ft) {
                 try pa_error(p, t.loc, c"member has incomplete or variably modified type")
             }
+            count u32 = try pa_counted_by(p, attr, ft, flex, ty_kind(ty) == TYK_UNION)
             try pa_bind_member(p, &seen, d.name, ft, anon, if d.name != 0 { d.loc } else { t.loc })
             f handle[FieldDef] = vec_add[FieldDef](&fields)
             f.name_id = d.name
@@ -637,6 +657,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             f.is_anon = anon
             f.is_packed = pa_has_attr(p, attr, c"packed")
             f.align_attr = aligned
+            f.counted_by = count
             if !(try pa_accept(p, c",")) { break }
         }
         if pa_is_gnu(p) && (try pa_at(p, c"}")) {
@@ -650,6 +671,17 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     for i usize in 0..fields.n {
         f handle[FieldDef] = vec_at[FieldDef](&fields, i)
         n handle[TypeNode] = ty_node(ty_unqual(f.ty))
+        if f.counted_by != 0 {
+            found bool = false
+            for j usize in 0..fields.n {
+                counter handle[FieldDef] = vec_at[FieldDef](&fields, j)
+                if counter.name_id == f.counted_by {
+                    found = ty_is_integer(counter.ty)
+                    break
+                }
+            }
+            if !found { try pa_error(p, loc, c"counted_by requires an integer field in the same structure") }
+        }
         if n.kind == TYK_ARRAY && n.aux1 == ARR_INCOMPLETE {
             union bool = ty_kind(ty) == TYK_UNION
             if (!union && i + 1 != fields.n) || (!pa_is_gnu(p) && (union || seen.n < 2)) {
@@ -672,7 +704,8 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             a handle[FieldDef] = ty_field(old.fields_start + i)
             b handle[FieldDef] = vec_at[FieldDef](&fields, zext[usize](i))
             if a.name_id != b.name_id || !pa_redeclared_field_type(p, a, b) || a.is_bitfield != b.is_bitfield ||
-                a.bit_width != b.bit_width || a.align_attr != b.align_attr || a.is_packed != b.is_packed {
+                a.bit_width != b.bit_width || a.align_attr != b.align_attr || a.is_packed != b.is_packed ||
+                a.counted_by != b.counted_by {
                 try pa_error(p, loc, c"incompatible redefinition of record member")
             }
         }
@@ -1256,6 +1289,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         s handle[Symbol] = se_symbol(d.name, d.loc, ty, spec.storage)
         s.thread_local = spec.thread_local
         s.attrs = attrs
+        if pa_has_attr(p, attrs, c"counted_by") { try pa_error(p, d.loc, c"counted_by requires a record field") }
         if spec.unavailable_type && !pa_has_attr(p, attrs, c"unavailable") {
             try pa_error(p, d.loc, c"declaration uses an unavailable type")
         }
