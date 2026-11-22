@@ -95,6 +95,35 @@ fn pa_asm_constraint(p handle[Parser], text handle[Ast], output bool) void fails
     }
 }
 
+// Extended asm expands named substitutions in the decoded template.
+// A doubled percent is literal, and basic asm has no substitutions.
+fn pa_asm_names(p handle[Parser], text handle[Ast], names handle[TagMap]) void fails {
+    cursor StringBytes = {}
+    cursor.piece = text.a
+    defer { buf_free(&cursor.encoded) }
+    decoded Buf = {}
+    defer { buf_free(&decoded) }
+    for i u64 in 0..text.value - 1 { buf_u8(&decoded, try se_next_string_byte(p, &cursor)) }
+    i usize = 0
+    while i + 1 < decoded.n {
+        ch u8 = decoded.p[u8, i]
+        i += 1
+        if ch != 37 { continue }
+        next u8 = decoded.p[u8, i]
+        if cc_id_ascii(next, true, false) { i += 1 }
+        if i == decoded.n { break }
+        ch = decoded.p[u8, i]
+        i += 1
+        if ch != 91 { continue }
+        start usize = i
+        while i < decoded.n && decoded.p[u8, i] != 93 { i += 1 }
+        if i == decoded.n { try pa_error(p, text.loc, c"unterminated named asm operand") }
+        name u32 = cc_intern(p.names, bytes(decoded.p + start, i - start))
+        if !map_has(names, name) { try pa_error(p, text.loc, c"undefined named asm operand") }
+        i += 1
+    }
+}
+
 fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
     t Token = try pa_take(p)
     n handle[Ast] = pa_node(ND_ASM, t.loc, TY_VOID)
@@ -126,6 +155,7 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
                 lt Token = try pa_take(p)
                 l handle[Label] = try pa_get_label(p, lt)
                 pa_add_jump(p, l, lt.loc)
+                map_put(&names, l.name, 1)
                 item handle[Ast] = pa_node(ND_NAME, lt.loc, TY_VOID)
                 item.op = l.name
                 item.extra = handle_addr(l)
@@ -176,6 +206,7 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
         if section == 3 { n.d = xs.first }
         if section == 4 { n.extra = handle_addr(xs.first) }
     }
+    if section != 0 { try pa_asm_names(p, n.a, &names) }
     try pa_expect(p, c")")
     try pa_expect(p, c";")
     return n
