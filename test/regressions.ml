@@ -20421,6 +20421,13 @@ let () =
     "struct CFile { marks u64 }\n\
      struct Lexer { file handle[CFile] }\n\
      fn f(l handle[Lexer]) u64 { return l.file.missing }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_accept "generic-infer-raw-select-chained-handle"
+    "struct Box[T] { v T }\n\
+     struct CFile { marks Box[u64] }\n\
+     struct Lexer { file handle[CFile] }\n\
+     fn peek[T](b handle[Box[T]]) T { return b.v }\n\
+     fn read(p addr) u64 { return peek(&p[Lexer].file.marks) }\n\
      fn main() i32 { return 0 }\n"
 
 let replay_unmatched_bound = 30
