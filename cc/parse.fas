@@ -135,6 +135,7 @@ struct Parser {
     location u32
     pack u32
     packs Vec[u32]
+    pack_names Vec[u32]
     vla_bounds Vec[addr]
     // Callback receives (Parser*, Ast*, user). Nodes remain valid in the TU region.
     on_function addr
@@ -157,21 +158,36 @@ fn pa_pragma(p handle[Parser], t Token) void {
     if s.n < 2 || s.p[u8] != 40 || s.p[u8, s.n - 1] != 41 { return }
     s = pa_trim(bytes_sub(s, 1, s.n - 2))
     if s.n == 0 { p.pack = 0; return }
-    if bytes_starts_with(s, bytes_c(c"push")) {
-        vec_push[u32](&p.packs, p.pack)
-        s = pa_trim(bytes_from(s, 4))
-        if s.n == 0 { return }
-    } else if bytes_starts_with(s, bytes_c(c"pop")) {
-        if p.packs.n != 0 {
-            p.pack = vec_get[u32](&p.packs, p.packs.n - 1)
-            p.packs.n -= 1
-        }
-        s = pa_trim(bytes_from(s, 3))
-        if s.n == 0 { return }
-    }
     comma usize = bytes_index(s, 44) catch s.n
-    if comma < s.n { s = pa_trim(bytes_from(s, comma + 1)) }
-    n u64 = bytes_to_u64(s) catch { return }
+    op Bytes = pa_trim(bytes_sub(s, 0, comma))
+    push bool = bytes_eq_c(op, c"push")
+    pop bool = bytes_eq_c(op, c"pop")
+    if push || pop { s = if comma == s.n { bytes(null, 0) } else { pa_trim(bytes_from(s, comma + 1)) } }
+    name u32 = 0
+    n u64 = bytes_to_u64(s) catch ~0
+    if (push || pop) && s.n != 0 && n == ~0 {
+        split usize = bytes_index(s, 44) catch s.n
+        label Bytes = pa_trim(bytes_sub(s, 0, split))
+        if label.n == 0 || !cc_id_ascii(label.p[u8], true, p.names.gnu) { return }
+        name = cc_intern(p.names, label)
+        if split < s.n { n = bytes_to_u64(pa_trim(bytes_from(s, split + 1))) catch { return } }
+    }
+    if push {
+        vec_push[u32](&p.packs, p.pack)
+        vec_push[u32](&p.pack_names, name)
+    } else if pop {
+        // A named pop discards entries through the closest matching push.
+        at usize = p.packs.n
+        while at != 0 {
+            at -= 1
+            if name == 0 || vec_get[u32](&p.pack_names, at) == name {
+                p.pack = vec_get[u32](&p.packs, at)
+                p.packs.n = at
+                p.pack_names.n = at
+                break
+            }
+        }
+    }
     if n == 0 || n == 1 || n == 2 || n == 4 || n == 8 || n == 16 { p.pack = trunc[u32](n) }
 }
 

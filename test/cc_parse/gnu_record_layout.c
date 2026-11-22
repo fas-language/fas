@@ -29,3 +29,11 @@ union FlexibleUnion { int data[]; long ordinary; };
 static_assert(sizeof(struct Flexible) == 0);
 static_assert(alignof(struct Flexible) == alignof(int));
 static_assert(sizeof(union FlexibleUnion) == sizeof(long));
+
+#pragma pack(push, byte_pack, 1)
+#pragma pack(push, half_pack, 2)
+struct HalfPacked { char c; int i; };
+#pragma pack(pop, byte_pack)
+struct Unpacked { char c; int i; };
+static_assert(__builtin_offsetof(struct HalfPacked, i) == 2);
+static_assert(__builtin_offsetof(struct Unpacked, i) == 4);
