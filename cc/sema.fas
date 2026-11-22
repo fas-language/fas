@@ -174,7 +174,9 @@ fn se_variably_modified(ty u32) bool {
     while true {
         n handle[TypeNode] = ty_node(ty_unqual(ty))
         if n.kind == TYK_ARRAY && n.aux1 == ARR_VLA { return true }
-        if n.kind != TYK_ARRAY && n.kind != TYK_PTR { return false }
+        // Parameter types don't make a prototype variably modified, but
+        // derivation from a variably modified return type still does.
+        if n.kind != TYK_ARRAY && n.kind != TYK_PTR && n.kind != TYK_FUNC { return false }
         ty = n.elem
     }
 }

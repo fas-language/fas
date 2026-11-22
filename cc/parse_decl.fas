@@ -1145,6 +1145,9 @@ fn pa_asm_label(p handle[Parser]) u32 fails {
 fn pa_vm_declaration(p handle[Parser], spec handle[DeclSpec], ty u32, loc u32, file bool) void fails {
     if !se_variably_modified(ty) { return }
     if file { try pa_error(p, loc, c"variably modified type at file scope") }
+    if ty_is_func(ty) && spec.storage != SC_TYPEDEF {
+        try pa_error(p, loc, c"function cannot return a variably modified type")
+    }
     if spec.storage == SC_EXTERN || (se_vla(ty) && (spec.storage == SC_STATIC || spec.thread_local)) {
         try pa_error(p, loc, c"variably modified declaration has invalid storage duration or linkage")
     }
