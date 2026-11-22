@@ -20381,7 +20381,35 @@ let () =
        if has(if c { &m1 } else { &m2 }, 1) { return r1 + r2 }\n\
        return r1\n\
      }\n\
-     fn main() i32 { return 0 }\n"
+     fn main() i32 { return 0 }\n";
+
+  semantic_accept "recursive-handle-struct-sizeof-and-mutual"
+    "struct Node { next handle[Node]\n i u64 }\n\
+     struct AstList { head handle[Ast]\n tail handle[Ast] }\n\
+     struct Ast { list AstList\n sym handle[Symbol] }\n\
+     struct Symbol { ast handle[Ast]\n params AstList }\n\
+     const NODE_SZ usize = sizeof[Node]\n\
+     const AST_SZ usize = sizeof[Ast]\n\
+     const SYM_SZ usize = sizeof[Symbol]\n\
+     const LIST_SZ usize = sizeof[AstList]\n\
+     const assert(NODE_SZ == 16 && AST_SZ == 24 && SYM_SZ == 24 && LIST_SZ == 16)\n\
+     struct Box[T] { p addr\n n usize }\n\
+     fn sz_of[T](b handle[Box[T]]) usize { return sizeof[T] }\n\
+     fn main() i32 {\n\
+       b Box[Node] = {}\n\
+       bl Box[AstList] = {}\n\
+       if sz_of(&b) != 16 || sz_of(&bl) != 16 { return 1 }\n\
+       return 0\n\
+     }\n";
+  semantic_error "recursive-by-value-struct-cycle"
+    "recursive by-value struct `Bad`"
+    "struct Bad { next Bad\n i u64 }\n\
+     fn main() i32 { return trunc[i32](sizeof[Bad]) }\n";
+  semantic_error "mutually-recursive-by-value-struct-cycle"
+    "recursive by-value struct `A`"
+    "struct A { b B }\n\
+     struct B { a A }\n\
+     fn main() i32 { return trunc[i32](sizeof[A]) }\n"
 
 let replay_unmatched_bound = 30
 

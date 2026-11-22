@@ -339,11 +339,59 @@ and query_layout_in_state state ~named_types ~generic_structs ~globals ~evaluate
     | Ast.Addr -> Ok Hir.Addr
     (* layout and constant contexts: a secret is laid out as its type *)
     | Ast.Secret ty -> resolve_type type_bindings const_bindings at ty
-    | Ast.Handle ty -> (
-        let* ty = resolve_type type_bindings const_bindings at ty in
-        match ty with
-        | Hir.Opaque name | Hir.Struct name -> Ok (Hir.Handle name)
-        | _ -> add_error "handle type argument must be a struct")
+    | Ast.Handle ty ->
+        (* A handle is pointer-sized regardless of its pointee's fields, so
+           validate the pointee without recursively instantiating its layout. *)
+        let rec resolve_handle_target = function
+          | Ast.Named_type (name, type_span) -> (
+              match List.assoc_opt name type_bindings with
+              | Some (Hir.Opaque target | Hir.Struct target) -> Ok (Hir.Handle target)
+              | Some _ -> add_error "handle type argument must be a struct"
+              | None -> (
+                  match List.assoc_opt name named_types with
+                  | Some Struct_name | Some Opaque_name -> Ok (Hir.Handle name)
+                  | Some (C_record_name (record, _)) -> Ok (Hir.Handle record)
+                  | Some (Alias_name target) -> resolve_handle_target target
+                  | Some Generic_struct_name ->
+                      add_error
+                        (Printf.sprintf "generic struct `%s` requires type arguments" name)
+                  | _ -> (
+                      let* ty =
+                        resolve_type type_bindings const_bindings at
+                          (Ast.Named_type (name, type_span))
+                      in
+                      match ty with
+                      | Hir.Opaque target | Hir.Struct target -> Ok (Hir.Handle target)
+                      | _ -> add_error "handle type argument must be a struct")))
+          | Ast.Applied_type (name, _, arguments, application_span) -> (
+              match List.assoc_opt name templates with
+              | None -> (
+                  match List.assoc_opt name named_types with
+                  | Some Struct_name ->
+                      add_error (Printf.sprintf "struct `%s` is not generic" name)
+                  | _ -> add_error (Printf.sprintf "unknown generic struct `%s`" name))
+              | Some (params, _, _) ->
+                  if List.length arguments <> List.length params then
+                    Error
+                      [
+                        Diag.error application_span
+                          (generic_arity_message "generic struct" name
+                             (List.length params) (List.length arguments));
+                      ]
+                  else if params = [] && arguments <> [] then
+                    Error
+                      [
+                        Diag.error application_span
+                          (Printf.sprintf "struct `%s` is not generic" name);
+                      ]
+                  else Ok (Hir.Handle name))
+          | other -> (
+              let* ty = resolve_type type_bindings const_bindings at other in
+              match ty with
+              | Hir.Opaque name | Hir.Struct name -> Ok (Hir.Handle name)
+              | _ -> add_error "handle type argument must be a struct")
+        in
+        resolve_handle_target ty
     | Ast.Array (length, ty) ->
         let* length = resolve_length "array" type_bindings const_bindings length in
         let* ty = resolve_type type_bindings const_bindings at ty in
