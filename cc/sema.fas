@@ -72,6 +72,61 @@ fn se_malloc_attribute(p handle[Parser], a handle[Attr], count u32) void fails {
     }
 }
 
+fn se_callback_index(p handle[Parser], replay handle[Parser], params handle[Param], n u32, unknown bool) u32 fails {
+    tok Token = try pa_peek(replay)
+    if tok.kind == TK_IDENT {
+        try pa_take(replay)
+        if unknown && pa_is(p, tok, c"__") { return 0 }
+        name u32 = cc_ident(p.names, tok)
+        i u32 = 1
+        while params != null {
+            if params.name == name { return i }
+            params = params.next
+            i += 1
+        }
+        try pa_error(p, tok.loc, c"callback attribute names no parameter")
+    }
+    e handle[Ast] = try pa_expression(replay, 3)
+    index u64 = try se_ice(p, e)
+    if unknown && !ty_is_unsigned(e.ty) && index == ~0 { return 0 }
+    if index == 0 || index > zext[u64](n) { try pa_error(p, tok.loc, c"callback parameter index is out of range") }
+    return trunc[u32](index)
+}
+
+// A callback attribute records a broker's callee parameter and the
+// parameters forwarded by that broker. Unknown forwarded values use -1.
+fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
+    a handle[Attr] = s.attrs
+    seen bool = false
+    while a != null {
+        if pa_attr_name(p, a, c"callback") {
+            if seen { try pa_error(p, a.loc, c"duplicate callback attribute") }
+            seen = true
+            if a.args.n == 0 { try pa_error(p, a.loc, c"callback attribute requires a callee parameter") }
+            replay Parser = {}
+            pa_attr_replay(p, a, &replay)
+            broker handle[TypeNode] = ty_node(ty_unqual(s.ty))
+            params handle[Param] = handle_from_addr(s.params)
+            index u32 = try se_callback_index(p, &replay, params, broker.aux2, false)
+            ptr u32 = ty_unqual(tc.fn_params.p[u32, zext[usize](broker.aux1 + index - 1)])
+            if !ty_is_ptr(ptr) || !ty_is_func(ty_node(ptr).elem) {
+                try pa_error(p, a.loc, c"callback callee must be a function pointer parameter")
+            }
+            callee handle[TypeNode] = ty_node(ty_unqual(ty_node(ptr).elem))
+            if (callee.flags & TYF_VARIADIC) != 0 { try pa_error(p, a.loc, c"callback callee cannot be variadic") }
+            forwarded u32 = 0
+            while try pa_accept(&replay, c",") {
+                try se_callback_index(p, &replay, params, broker.aux2, true)
+                forwarded += 1
+            }
+            if (try pa_peek(&replay)).kind != TK_EOF || forwarded != callee.aux2 {
+                try pa_error(p, a.loc, c"callback argument count disagrees with its callee prototype")
+            }
+        }
+        a = a.next
+    }
+}
+
 // Record vendor dialects for later consumers. Validate the argument positions
 // against the prototype and the format type for the narrow string dialects.
 fn se_format_attributes(p handle[Parser], s handle[Symbol]) void fails {
