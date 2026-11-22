@@ -675,6 +675,12 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
             try pa_error(p, t.loc, buf_cstr(&b))
         }
         if s.storage == SC_TYPEDEF { try pa_error(p, t.loc, c"typedef name used as an expression") }
+        if pa_has_attr(p, s.attrs, c"unavailable") {
+            current handle[Symbol] = p.function
+            if current == null || !pa_has_attr(p, current.attrs, c"unavailable") {
+                try pa_error(p, t.loc, c"use of an unavailable declaration")
+            }
+        }
         if pa_has_attr(p, s.attrs, c"deprecated") {
             cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"use of a deprecated declaration"))
         }

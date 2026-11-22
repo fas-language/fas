@@ -14,6 +14,7 @@ struct DeclSpec {
     auto_seen bool
     member bool
     anonymous_record bool
+    unavailable_type bool
     vm_operand handle[Ast] // evaluated operand of a variably modified typeof
 }
 
@@ -165,6 +166,9 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
         min = 1
         max = 0xffffffff
         string_first = true
+    } else if bytes_eq_c(name, c"unavailable") {
+        max = 1
+        string_first = true
     } else if feature_in(c" alloc_align assume cleanup regparm ", name) {
         min = 1
         max = 1
@@ -232,7 +236,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
         }
         if (try pa_peek(&expr)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in attribute argument") }
     }
-    if string_first {
+    if string_first && count != 0 {
         start usize = 0
         while start + 1 < first_end && pa_is(p, a.args.p[Token, start], c"(") &&
             pa_is(p, a.args.p[Token, first_end - 1], c")") {
@@ -513,6 +517,7 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
     if members.n == 0 { try pa_error(p, loc, c"empty enum definition") }
     try pa_expect(p, c"}")
     attrs = pa_join_attrs(try pa_attributes(p), attrs)
+    if pa_has_attr(p, attrs, c"unavailable") { ty_enum(id).is_unavailable = true }
     underlying u32 = TY_UINT
     if min < 0 { underlying = TY_INT }
     if (min >= 0 && max > 0xffffffff) || (min < 0 && (min < -2147483648 || max > 2147483647)) {
@@ -656,6 +661,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     packed bool = pa_has_attr(p, attrs, c"packed")
     alignment u32 = try pa_attr_align(p, attrs, 0)
     old handle[RecordDef] = ty_record(rec_id)
+    if pa_has_attr(p, attrs, c"unavailable") { old.is_unavailable = true }
     ms_layout bool = old.is_ms_layout || pa_has_attr(p, attrs, c"ms_struct")
     if old.is_complete {
         if zext[usize](old.fields_len) != fields.n || old.is_packed != packed ||
@@ -706,9 +712,18 @@ fn pa_tag_spec(p handle[Parser], t Token, spec handle[DeclSpec]) u32 fails {
             try pa_record_body(p, ty, t.loc, attrs)
             spec.anonymous_record = name == 0
         }
-    } else if kind != TYK_ENUM && pa_has_attr(p, attrs, c"ms_struct") {
-        rec handle[RecordDef] = ty_record(ty_node(ty).aux1)
-        if !rec.is_complete { rec.is_ms_layout = true }
+    }
+    id u32 = ty_node(ty).aux1
+    unavailable bool = pa_has_attr(p, attrs, c"unavailable")
+    if kind == TYK_ENUM {
+        en handle[EnumDef] = ty_enum(id)
+        if unavailable { en.is_unavailable = true }
+        spec.unavailable_type = en.is_unavailable
+    } else {
+        rec handle[RecordDef] = ty_record(id)
+        if !define && !rec.is_complete && pa_has_attr(p, attrs, c"ms_struct") { rec.is_ms_layout = true }
+        if unavailable { rec.is_unavailable = true }
+        spec.unavailable_type = rec.is_unavailable
     }
     return ty
 }
@@ -822,6 +837,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         } else if out.ty == TY_INVALID && sign == 0 && longs == 0 && !short && !complex && pa_typename(p, t) {
             sym handle[Symbol] = pa_lookup(p, cc_ident(p.names, t))
             base = sym.ty
+            out.unavailable_type = pa_has_attr(p, sym.attrs, c"unavailable")
             try pa_take(p)
         } else { break }
         if out.ty != TY_INVALID { try pa_error(p, t.loc, c"conflicting type specifiers") }
@@ -1125,6 +1141,7 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 
 fn pa_type_name(p handle[Parser]) u32 fails {
     spec DeclSpec = {}
     try pa_specs(p, &spec)
+    if spec.unavailable_type { try pa_error(p, spec.loc, c"use of an unavailable type") }
     d Declarator = {}
     try pa_declarator(p, &d, true)
     if d.name != 0 || spec.storage != SC_NONE || spec.thread_local || spec.alignment != 0 ||
@@ -1239,6 +1256,9 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         s handle[Symbol] = se_symbol(d.name, d.loc, ty, spec.storage)
         s.thread_local = spec.thread_local
         s.attrs = attrs
+        if spec.unavailable_type && !pa_has_attr(p, attrs, c"unavailable") {
+            try pa_error(p, d.loc, c"declaration uses an unavailable type")
+        }
         s.asm_name = asm_name
         if spec.is_inline { s.flags |= 1 }
         if spec.is_noreturn || pa_has_attr(p, attrs, c"noreturn") { s.flags |= 2 }

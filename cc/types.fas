@@ -132,6 +132,7 @@ struct RecordDef {
     has_flex_array bool
     transparent_union bool
     is_ms_layout bool
+    is_unavailable bool
     _pad1 u8
     size u64
     align u64
@@ -150,6 +151,7 @@ struct EnumDef {
     members_len u32
     is_complete bool
     has_fixed_underlying bool
+    is_unavailable bool
     _pad u16
 }
 
