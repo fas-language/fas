@@ -27,7 +27,7 @@ export FAS_LD_THREADS=$((RANDOM % 8 + 1))
 d=$(/usr/bin/mktemp -d "${SHADOW_TMP:-${TMPDIR:-/tmp}}/shadow.XXXXXX")
 "$FL" "$@" >"$d/fo" 2>"$d/fe"; fx=$?
 [ $fx = 0 ] && [ -f "$out" ] && /usr/bin/cp "$out" "$d/fbin" 2>/dev/null
-if [ -n "${SHADOW_REFCACHE:-}" ]; then
+if [ -n "${SHADOW_REFCACHE:-}" ] && command -v python3 >/dev/null 2>&1; then
   python3 "$SHADOW_REFCACHE/linker.py" "$OL" "$@" >"$d/oo" 2>"$d/oe"; ox=$?
 else
   "$OL" "$@" >"$d/oo" 2>"$d/oe"; ox=$?

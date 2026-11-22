@@ -35,7 +35,8 @@ def link_inputs(args, cwd, libraries):
             output = value if eq else next(it)
         elif key in ("--version-script", "--dynamic-list"):
             name = value if eq else next(it)
-            if b"INCLUDE" in (cwd / name).read_bytes():
+            script = cwd / name
+            if not script.is_file() or b"INCLUDE" in script.read_bytes():
                 return None
             paths.append(name)
         elif key in ("-rpath-link", "--rpath-link"):
@@ -56,6 +57,8 @@ def link_inputs(args, cwd, libraries):
         else:
             path = cwd / arg
             try:
+                if not path.is_file():
+                    return None
                 with path.open("rb") as stream:
                     if not stream.read(8).startswith((b"\x7fELF", b"!<arch>\n")):
                         return None
