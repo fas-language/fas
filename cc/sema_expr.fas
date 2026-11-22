@@ -80,7 +80,14 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
     n handle[Ast] = pa_node(ND_CAST, t.loc, ty)
     n.a = a
     try se_require_value(p, a)
-    if from == TY_INVALID || ty_is_void(ty) { return n }
+    if from == TY_INVALID { return n }
+    if ty_is_void(ty) {
+        if pa_is_gnu(p) && (a.flags & NF_LVALUE) == 0 &&
+            ((a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 || ty_is_void(from)) {
+            n.flags = a.flags & (NF_STATIC | NF_OVERFLOW)
+        }
+        return n
+    }
     try se_quad_conversion(p, t.loc, ty, from)
     if !ty_is_scalar(ty) || !ty_is_scalar(from) ||
         (ty_is_ptr(ty) && ty_is_floating(from)) || (ty_is_floating(ty) && ty_is_ptr(from)) ||
@@ -576,6 +583,18 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         try se_require_value(p, a)
         try se_require_value(p, b)
         n.ty = y
+        // GNU initializers may discard a side-effect-free arithmetic constant.
+        // The result still cannot be an ISO integer constant expression.
+        known u32 = NF_INT_VALUE | NF_FLOAT_CONST
+        if pa_is_gnu(p) && ((a.flags | b.flags) & NF_LVALUE) == 0 &&
+            (a.flags & NF_STATIC) != 0 && ((a.flags & known) != 0 || ty_is_void(x)) &&
+            (b.flags & NF_STATIC) != 0 && (b.flags & known) != 0 {
+            n.flags = NF_STATIC | ((a.flags | b.flags) & NF_OVERFLOW) | (b.flags & NF_FLOAT_CONST)
+            if (b.flags & NF_INT_VALUE) != 0 { n.flags |= NF_FOLD }
+            n.value = b.value
+            n.wide = b.wide
+            n.float_bits = b.float_bits
+        }
         return n
     }
     if k == 3 || k == 4 {
