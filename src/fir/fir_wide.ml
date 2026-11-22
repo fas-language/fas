@@ -66,6 +66,14 @@ let rec mentions_odd = function
 
 let nlimbs n = (n + 63) / 64
 
+(* integers with more than [huge_limbs] limbs (> 512 bits) are never
+   scalarized into SSA limb arrays: each SSA value lives in an 8k-byte
+   stack slot (or readonly global for constants) and every op calls a
+   loop helper in Fir_wide_runtime so code size is O(1) in k. *)
+let huge_limbs = 8
+let is_huge_width n = nlimbs n > huge_limbs
+let is_huge = function Int n -> is_huge_width n | _ -> false
+
 (* the integer a one-limb iN is stored and passed as *)
 let container n = 8 * size_of (Int n)
 
@@ -96,10 +104,11 @@ type cx = {
   m : modul;
   f : func;  (** source *)
   g : func;  (** rebuilt *)
-  map : (value, value array) Hashtbl.t;  (** source value -> its value or limbs in g *)
+  map : (value, value array) Hashtbl.t;  (** source value -> its value, limbs, or [| ptr |] (huge) in g *)
   mutable b : block;  (** insertion block in g *)
   mutable loc : int;
   helpers : (string, unit) Hashtbl.t;  (** runtime helpers called, module-wide *)
+  consts : (string, string) Hashtbl.t;  (** raw bytes -> readonly global name, module-wide *)
 }
 
 let e cx op ty = emit1 ~loc:cx.loc cx.g cx.b op ty
@@ -433,6 +442,348 @@ let to_agg cx n l =
   store_limbs cx n (plain_mem 8) l p;
   p
 
+(* ---------- huge integers (k > huge_limbs): memory-based O(1) lowering ---------- *)
+
+let huge_slot cx n = slot cx (8 * nlimbs n) 8
+let huge_slot_k cx k = slot cx (8 * k) 8
+
+let huge_copy_k cx k dst src =
+  e0 cx (Memcpy (false, dst, src, c64 cx (Int64.of_int (8 * k))))
+
+let huge_copy cx n dst src = huge_copy_k cx (nlimbs n) dst src
+
+let mask_mem cx n p =
+  let r = top_bits n in
+  if r <> 0 then begin
+    let tp = limb_ptr cx p (nlimbs n - 1) in
+    let v = e cx (Load (plain_mem 8, tp)) i64 in
+    e0 cx (Store (plain_mem 8, ib cx And v (c64 cx (low_mask r)), tp))
+  end
+
+let sign_mem cx n p =
+  let tp = limb_ptr cx p (nlimbs n - 1) in
+  let v = e cx (Load (plain_mem 8, tp)) i64 in
+  let r = top_bits n in
+  let sv =
+    if r = 0 then v
+    else
+      let s = c64 cx (Int64.of_int (64 - r)) in
+      ib cx Ashr (ib cx Shl v s) s
+  in
+  icmp cx Slt sv (zero64 cx)
+
+(* emit (or reuse) a local readonly global holding the normalized 8k bytes of [limbs] *)
+let huge_const cx n (limbs : int64 array) =
+  let norm = normalize_limbs n limbs in
+  let k = Array.length norm in
+  let bytes = Bytes.create (8 * k) in
+  for i = 0 to k - 1 do
+    Bytes.set_int64_le bytes (8 * i) norm.(i)
+  done;
+  let raw = Bytes.unsafe_to_string bytes in
+  let gname =
+    match Hashtbl.find_opt cx.consts raw with
+    | Some nm -> nm
+    | None ->
+        let nm = Printf.sprintf ".Lfir.wide.%d" (Hashtbl.length cx.consts) in
+        Hashtbl.replace cx.consts raw nm;
+        let len = String.length raw in
+        let last_nz = ref (len - 1) in
+        while !last_nz >= 0 && raw.[!last_nz] = '\000' do decr last_nz done;
+        let init =
+          if !last_nz < 0 then None
+          else if !last_nz = len - 1 then Some [ Bytes raw ]
+          else
+            let prefix = String.sub raw 0 (!last_nz + 1) in
+            Some [ Bytes prefix; Zeros (len - !last_nz - 1) ]
+        in
+        add_global cx.m
+          {
+            gname = nm;
+            glinkage = Local;
+            gvisibility = Default;
+            section = None;
+            galign = 8;
+            readonly = true;
+            thread_local = false;
+            size = len;
+            init;
+            gdefined = true;
+          };
+        nm
+  in
+  Fir.sym cx.g gname
+
+let huge_zero cx n = huge_const cx n (Array.make (nlimbs n) 0L)
+let huge_all_ones cx n = huge_const cx n (Array.make (nlimbs n) (-1L))
+
+let huge_smin cx n =
+  let k = nlimbs n in
+  huge_const cx n (Array.init k (fun i -> if i = (n - 1) / 64 then Int64.shift_left 1L ((n - 1) mod 64) else 0L))
+
+let huge_smax cx n =
+  let k = nlimbs n in
+  huge_const cx n
+    (Array.init k (fun i ->
+         if i < (n - 1) / 64 then -1L
+         else if i = (n - 1) / 64 then low_mask ((n - 1) mod 64)
+         else 0L))
+
+let huge_load cx n (m : mem) p =
+  if m.order <> Plain then unsupported "atomic access to i%d" n;
+  let dst = huge_slot cx n in
+  e0 cx (Memcpy (m.volatile, dst, p, c64 cx (Int64.of_int (8 * nlimbs n))));
+  mask_mem cx n dst;
+  dst
+
+let huge_store cx n (m : mem) vp p =
+  if m.order <> Plain then unsupported "atomic access to i%d" n;
+  e0 cx (Memcpy (m.volatile, p, vp, c64 cx (Int64.of_int (8 * nlimbs n))))
+
+let huge_select cx n c pa pb =
+  let sp = sel cx c pa pb ptr in
+  let dst = huge_slot cx n in
+  huge_copy cx n dst sp;
+  dst
+
+let huge_add cx n pa pb =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_add" [ ptr; ptr; ptr; i64 ] [] [| dst; pa; pb; c64 cx (Int64.of_int k) |]);
+  mask_mem cx n dst;
+  dst
+
+let huge_sub cx n pa pb =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_sub" [ ptr; ptr; ptr; i64 ] [] [| dst; pa; pb; c64 cx (Int64.of_int k) |]);
+  mask_mem cx n dst;
+  dst
+
+let huge_neg cx n pa =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_neg" [ ptr; ptr; i64 ] [] [| dst; pa; c64 cx (Int64.of_int k) |]);
+  mask_mem cx n dst;
+  dst
+
+let huge_bitop cx n op_code pa pb =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_bitop" [ ptr; ptr; ptr; i64; i64 ] [] [| dst; pa; pb; c64 cx (Int64.of_int k); c64 cx op_code |]);
+  dst
+
+let huge_mul cx n pa pb =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_mul" [ ptr; ptr; ptr; i64 ] [] [| dst; pa; pb; c64 cx (Int64.of_int k) |]);
+  mask_mem cx n dst;
+  dst
+
+let huge_shl cx n pa amt =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore (call_helper cx "__fir_shl" [ ptr; ptr; i64; i64 ] [] [| dst; pa; c64 cx (Int64.of_int k); amt |]);
+  mask_mem cx n dst;
+  dst
+
+let huge_shr cx n ~arith pa amt =
+  let k = nlimbs n in
+  let dst = huge_slot cx n in
+  ignore
+    (call_helper cx "__fir_shr" [ ptr; ptr; i64; i64; i64; i64 ] []
+       [| dst; pa; c64 cx (Int64.of_int k); amt; c64 cx (Int64.of_int n); c64 cx (if arith then 1L else 0L) |]);
+  dst
+
+let huge_eq_k cx k pa pb =
+  (call_helper cx "__fir_eq" [ ptr; ptr; i64 ] [ i1 ] [| pa; pb; c64 cx (Int64.of_int k) |]).(0)
+
+let huge_ult cx n pa pb =
+  (call_helper cx "__fir_ult" [ ptr; ptr; i64 ] [ i1 ] [| pa; pb; c64 cx (Int64.of_int (nlimbs n)) |]).(0)
+
+let huge_slt cx n pa pb =
+  (call_helper cx "__fir_slt" [ ptr; ptr; i64; i64 ] [ i1 ] [| pa; pb; c64 cx (Int64.of_int (nlimbs n)); c64 cx (Int64.of_int n) |]).(0)
+
+let huge_ext_call cx ~signed sn dn sp dp =
+  let sk = nlimbs sn and dk = nlimbs dn in
+  ignore
+    (call_helper cx "__fir_ext" [ ptr; ptr; i64; i64; i64; i64; i64 ] []
+       [|
+         dp;
+         sp;
+         c64 cx (Int64.of_int sk);
+         c64 cx (Int64.of_int dk);
+         c64 cx (Int64.of_int sn);
+         c64 cx (Int64.of_int dn);
+         c64 cx (if signed then 1L else 0L);
+       |])
+
+let huge_udivmod cx n pa pb =
+  let k = nlimbs n in
+  let pq = huge_slot cx n and pr = huge_slot cx n in
+  ignore (call_helper cx "__fir_udivmod" [ ptr; ptr; ptr; ptr; i64 ] [] [| pq; pr; pa; pb; c64 cx (Int64.of_int k) |]);
+  (pq, pr)
+
+let huge_sdivrem cx n pa pb ~rem =
+  let na = sign_mem cx n pa and nb = sign_mem cx n pb in
+  let abs_ p s = sel cx s (huge_neg cx n p) p ptr in
+  let pq, pr = huge_udivmod cx n (abs_ pa na) (abs_ pb nb) in
+  if rem then huge_select cx n na (huge_neg cx n pr) pr
+  else huge_select cx n (e cx (Ibin (Xor, 0, na, nb)) i1) (huge_neg cx n pq) pq
+
+let huge_mul_full cx ~signed n pa pb =
+  let k = nlimbs n in
+  let k2 = 2 * k in
+  let ea = huge_slot_k cx k2 and eb = huge_slot_k cx k2 and prod = huge_slot_k cx k2 in
+  huge_ext_call cx ~signed n (64 * k2) pa ea;
+  huge_ext_call cx ~signed n (64 * k2) pb eb;
+  ignore (call_helper cx "__fir_mul" [ ptr; ptr; ptr; i64 ] [] [| prod; ea; eb; c64 cx (Int64.of_int k2) |]);
+  (prod, k2)
+
+let huge_mulh cx n ~signed pa pb =
+  let prod, k2 = huge_mul_full cx ~signed n pa pb in
+  let shifted = huge_slot_k cx k2 in
+  ignore
+    (call_helper cx "__fir_shr" [ ptr; ptr; i64; i64; i64; i64 ] []
+       [| shifted; prod; c64 cx (Int64.of_int k2); c64 cx (Int64.of_int n); c64 cx (Int64.of_int (2 * n)); c64 cx (if signed then 1L else 0L) |]);
+  let dst = huge_slot cx n in
+  huge_copy cx n dst shifted;
+  mask_mem cx n dst;
+  dst
+
+let huge_ovf cx n k pa pb =
+  match k with
+  | Uadd_ovf ->
+      let r = huge_add cx n pa pb in
+      (r, huge_ult cx n r pa)
+  | Usub_ovf -> (huge_sub cx n pa pb, huge_ult cx n pa pb)
+  | Sadd_ovf | Ssub_ovf ->
+      let r = if k = Sadd_ovf then huge_add cx n pa pb else huge_sub cx n pa pb in
+      let sa = sign_mem cx n pa and sb = sign_mem cx n pb and sr = sign_mem cx n r in
+      let same = icmp cx Eq (zext64 cx sa) (zext64 cx sb) in
+      let operands = if k = Sadd_ovf then same else not1 cx same in
+      let flipped = icmp cx Ne (zext64 cx sr) (zext64 cx sa) in
+      (r, and1 cx operands flipped)
+  | Umul_ovf | Smul_ovf ->
+      let signed = k = Smul_ovf in
+      let prod, k2 = huge_mul_full cx ~signed n pa pb in
+      let r = huge_slot cx n in
+      huge_copy cx n r prod;
+      mask_mem cx n r;
+      let back = huge_slot_k cx k2 in
+      huge_ext_call cx ~signed n (64 * k2) r back;
+      (r, not1 cx (huge_eq_k cx k2 prod back))
+
+let huge_ibin cx n k pa pb =
+  match k with
+  | Add -> huge_add cx n pa pb
+  | Sub -> huge_sub cx n pa pb
+  | Mul -> huge_mul cx n pa pb
+  | Udiv -> fst (huge_udivmod cx n pa pb)
+  | Urem -> snd (huge_udivmod cx n pa pb)
+  | Sdiv -> huge_sdivrem cx n pa pb ~rem:false
+  | Srem -> huge_sdivrem cx n pa pb ~rem:true
+  | Shl -> huge_shl cx n pa (e cx (Load (plain_mem 8, pb)) i64)
+  | Lshr -> huge_shr cx n ~arith:false pa (e cx (Load (plain_mem 8, pb)) i64)
+  | Ashr -> huge_shr cx n ~arith:true pa (e cx (Load (plain_mem 8, pb)) i64)
+  | And -> huge_bitop cx n 0L pa pb
+  | Or -> huge_bitop cx n 1L pa pb
+  | Xor -> huge_bitop cx n 2L pa pb
+  | Umin -> huge_select cx n (huge_ult cx n pa pb) pa pb
+  | Umax -> huge_select cx n (huge_ult cx n pb pa) pa pb
+  | Smin -> huge_select cx n (huge_slt cx n pa pb) pa pb
+  | Smax -> huge_select cx n (huge_slt cx n pb pa) pa pb
+  | Umulh -> huge_mulh cx n ~signed:false pa pb
+  | Smulh -> huge_mulh cx n ~signed:true pa pb
+  | Clmul | Clmul_hi ->
+      let dst = huge_slot cx n in
+      ignore
+        (call_helper cx "__fir_clmul_wide" [ ptr; ptr; ptr; i64; i64; i64 ] []
+           [| dst; pa; pb; c64 cx (Int64.of_int (nlimbs n)); c64 cx (Int64.of_int n); c64 cx (if k = Clmul_hi then 1L else 0L) |]);
+      dst
+  | Uadd_sat ->
+      let r, o = huge_ovf cx n Uadd_ovf pa pb in
+      huge_select cx n o (huge_all_ones cx n) r
+  | Usub_sat ->
+      let r, o = huge_ovf cx n Usub_ovf pa pb in
+      huge_select cx n o (huge_zero cx n) r
+  | Sadd_sat | Ssub_sat ->
+      let r, o = huge_ovf cx n (if k = Sadd_sat then Sadd_ovf else Ssub_ovf) pa pb in
+      let bound = sel cx (sign_mem cx n pa) (huge_smin cx n) (huge_smax cx n) ptr in
+      huge_select cx n o bound r
+
+let huge_iun cx n k pa =
+  let kk = nlimbs n in
+  let store_count x =
+    let dst = huge_slot cx n in
+    e0 cx (Memset (false, dst, iconst cx.g (Int 8) 0L, c64 cx (Int64.of_int (8 * kk))));
+    e0 cx (Store (plain_mem 8, x, dst));
+    dst
+  in
+  match k with
+  | Popcnt -> store_count (call_helper cx "__fir_popcnt" [ ptr; i64 ] [ i64 ] [| pa; c64 cx (Int64.of_int kk) |]).(0)
+  | Ctz -> store_count (call_helper cx "__fir_ctz" [ ptr; i64; i64 ] [ i64 ] [| pa; c64 cx (Int64.of_int kk); c64 cx (Int64.of_int n) |]).(0)
+  | Clz -> store_count (call_helper cx "__fir_clz" [ ptr; i64; i64 ] [ i64 ] [| pa; c64 cx (Int64.of_int kk); c64 cx (Int64.of_int n) |]).(0)
+  | Bswap | Bitrev ->
+      if k = Bswap && n mod 16 <> 0 then unsupported "bswap of i%d" n;
+      let dst = huge_slot cx n in
+      ignore
+        (call_helper cx "__fir_bswap" [ ptr; ptr; i64; i64; i64 ] []
+           [| dst; pa; c64 cx (Int64.of_int kk); c64 cx (Int64.of_int n); c64 cx (if k = Bitrev then 1L else 0L) |]);
+      dst
+  | Abs -> huge_select cx n (sign_mem cx n pa) (huge_neg cx n pa) pa
+
+let huge_fsh cx n ~left pa pb pc =
+  let s =
+    if n land (n - 1) = 0 then ib cx And (e cx (Load (plain_mem 8, pc)) i64) (c64 cx (Int64.of_int (n - 1)))
+    else
+      let _, pr = huge_udivmod cx n pc (huge_const cx n [| Int64.of_int n |]) in
+      e cx (Load (plain_mem 8, pr)) i64
+  in
+  let k2 = nlimbs (2 * n) in
+  let a2 = huge_slot_k cx k2 and b2 = huge_slot_k cx k2 and cat = huge_slot_k cx k2 in
+  huge_ext_call cx ~signed:false n (2 * n) pa a2;
+  ignore (call_helper cx "__fir_shl" [ ptr; ptr; i64; i64 ] [] [| a2; a2; c64 cx (Int64.of_int k2); c64 cx (Int64.of_int n) |]);
+  huge_ext_call cx ~signed:false n (2 * n) pb b2;
+  ignore (call_helper cx "__fir_bitop" [ ptr; ptr; ptr; i64; i64 ] [] [| cat; a2; b2; c64 cx (Int64.of_int k2); c64 cx 1L |]);
+  let dst = huge_slot cx n in
+  if left then begin
+    let t = huge_slot_k cx k2 in
+    ignore (call_helper cx "__fir_shl" [ ptr; ptr; i64; i64 ] [] [| t; cat; c64 cx (Int64.of_int k2); s |]);
+    ignore (call_helper cx "__fir_shr" [ ptr; ptr; i64; i64; i64; i64 ] [] [| t; t; c64 cx (Int64.of_int k2); c64 cx (Int64.of_int n); c64 cx (Int64.of_int (2 * n)); c64 cx 0L |]);
+    huge_copy cx n dst t
+  end
+  else begin
+    let t = huge_slot_k cx k2 in
+    ignore (call_helper cx "__fir_shr" [ ptr; ptr; i64; i64; i64; i64 ] [] [| t; cat; c64 cx (Int64.of_int k2); s; c64 cx (Int64.of_int (2 * n)); c64 cx 0L |]);
+    huge_copy cx n dst t
+  end;
+  mask_mem cx n dst;
+  dst
+
+let huge_icmp cx n k pa pb =
+  let kk = nlimbs n in
+  match k with
+  | Eq -> huge_eq_k cx kk pa pb
+  | Ne -> not1 cx (huge_eq_k cx kk pa pb)
+  | Ult -> huge_ult cx n pa pb
+  | Ugt -> huge_ult cx n pb pa
+  | Ule -> not1 cx (huge_ult cx n pb pa)
+  | Uge -> not1 cx (huge_ult cx n pa pb)
+  | Slt -> huge_slt cx n pa pb
+  | Sgt -> huge_slt cx n pb pa
+  | Sle -> not1 cx (huge_slt cx n pb pa)
+  | Sge -> not1 cx (huge_slt cx n pa pb)
+
+let huge_int_to_float cx n ~signed pa ty =
+  let kk = nlimbs n in
+  if ty <> F32 && ty <> F64 && ty <> F80 then unsupported "conversion to %s" (ty_to_string ty);
+  let negative = if signed then Some (sign_mem cx n pa) else None in
+  let mag_p = match negative with Some s -> sel cx s (huge_neg cx n pa) pa ptr | None -> pa in
+  let sg = match negative with Some s -> conv cx Zext s i64 | None -> c64 cx 0L in
+  let name = match ty with F64 -> "__fir_utof64" | F80 -> "__fir_utof80" | _ -> "__fir_utof32" in
+  (call_helper cx name [ ptr; i64; i64 ] [ ty ] [| mag_p; c64 cx (Int64.of_int kk); sg |]).(0)
+
 (* ---------- values ---------- *)
 
 let src_ty cx v = ty_of cx.f v
@@ -447,6 +798,8 @@ let rec get cx (v : value) : value array =
         | Const c -> (
             let t = ty_of cx.f v in
             match (c, t) with
+            | Cint (_, limbs), Int n when is_huge_width n -> [| huge_const cx n limbs |]
+            | (Czero _ | Cpoison _), Int n when is_huge_width n -> [| huge_zero cx n |]
             | Cint (_, limbs), Int n when not (legal_width n) -> const_limbs cx n limbs
             | (Czero _ | Cpoison _), Int n when not (legal_width n) -> zeros cx (nlimbs n)
             | Cfloat (_, b), F16 -> [| iconst cx.g (Int 16) b.(0) |]
@@ -462,9 +815,13 @@ let rec get cx (v : value) : value array =
 and get1 cx v =
   match get cx v with [| x |] -> x | _ -> unsupported "a wide integer where one value is needed"
 
+let huge_ptr cx v =
+  match get cx v with [| p |] -> p | _ -> unsupported "expected huge integer pointer"
+
 (* the low 64 bits of an integer operand of any width, as an i64 *)
 let low64 cx v =
   match src_ty cx v with
+  | Int n when is_huge_width n -> e cx (Load (plain_mem 8, huge_ptr cx v)) i64
   | Int n when not (legal_width n) -> (get cx v).(0)
   | Int 64 -> get1 cx v
   | Int _ -> zext64 cx (get1 cx v)
@@ -714,6 +1071,42 @@ let float_to_int cx n kind ~src xv =
     in
     mask cx n [| r |]
   end
+  else if is_huge_width n then begin
+    let zero_f = fconst_bits cx.g ft (if ft = F80 then [| 0L; 0L |] else [| 0L |]) in
+    let negative = e cx (Fcmp (Folt, 0, x64, zero_f)) i1 in
+    let ax = e cx (Fun (Fabs, 0, x64)) ft in
+    let out = huge_slot cx n in
+    let helper = if ft = F80 then "__fir_f80tou" else "__fir_f64tou" in
+    ignore (call_helper cx helper [ ptr; ft; i64 ] [] [| out; ax; c64 cx (Int64.of_int kk) |]);
+    mask_mem cx n out;
+    let vp = if signed then huge_select cx n negative (huge_neg cx n out) out else out in
+    if not sat then begin
+      let lo_ok, hi_ok =
+        if signed then
+          (e cx (Fcmp (Foge, 0, x64, e cx (Fun (Fneg, 0, pow2 (n - 1))) ft)) i1, e cx (Fcmp (Folt, 0, x64, pow2 (n - 1))) i1)
+        else
+          let m1 = fconst_bits cx.g ft (if ft = F80 then [| Int64.min_int; 0xbfffL |] else [| 0xbff0000000000000L |]) in
+          (e cx (Fcmp (Fogt, 0, x64, m1)) i1, e cx (Fcmp (Folt, 0, x64, pow2 n)) i1)
+      in
+      let bad = not1 cx (and1 cx lo_ok hi_ok) in
+      ignore (call_helper cx "__fir_fpinvalid" [ i1 ] [] [| bad |]);
+      [| vp |]
+    end
+    else begin
+      let nan = e cx (Fcmp (Funo, 0, x64, x64)) i1 in
+      let rp =
+        if signed then
+          let too_big = e cx (Fcmp (Foge, 0, x64, pow2 (n - 1))) i1 in
+          let too_small = e cx (Fcmp (Folt, 0, x64, e cx (Fun (Fneg, 0, pow2 (n - 1))) ft)) i1 in
+          sel cx too_big (huge_smax cx n) (sel cx too_small (huge_smin cx n) vp ptr) ptr
+        else
+          let too_big = e cx (Fcmp (Foge, 0, x64, pow2 n)) i1 in
+          let positive = e cx (Fcmp (Fogt, 0, x64, zero_f)) i1 in
+          sel cx too_big (huge_all_ones cx n) (sel cx positive vp (huge_zero cx n) ptr) ptr
+      in
+      [| huge_select cx n nan (huge_zero cx n) rp |]
+    end
+  end
   else begin
     let zero_f = fconst_bits cx.g ft (if ft = F80 then [| 0L; 0L |] else [| 0L |]) in
     let negative = e cx (Fcmp (Folt, 0, x64, zero_f)) i1 in
@@ -777,9 +1170,11 @@ let bitcast_mem cx x dst_ty =
   let size = max (size_of st) (size_of dst_ty) in
   let p = slot cx ((size + 15) / 16 * 16) 16 in
   (match st with
+  | Int n when is_huge_width n -> huge_store cx n (plain_mem 16) (huge_ptr cx x) p
   | Int n when not (legal_width n) -> store_limbs cx n (plain_mem 16) (get cx x) p
   | _ -> e0 cx (Store (plain_mem 16, get1 cx x, p)));
   match dst_ty with
+  | Int n when is_huge_width n -> [| huge_load cx n (plain_mem 16) p |]
   | Int n when not (legal_width n) -> load_limbs cx n (plain_mem 16) p
   | t -> [| e cx (Load (plain_mem 16, p)) t |]
 
@@ -791,6 +1186,22 @@ let convert cx kind x dst =
   | Fpext, F16, _ -> [| conv cx Fpext (h2f cx (get1 cx x)) dst |]
   | Fptrunc, _, F16 -> [| f_to_h cx st (get1 cx x) |]
   | Bitcast, _, _ -> bitcast_mem cx x dst
+  | (Trunc | Zext | Sext), Int sn, Int dn when is_huge_width sn || is_huge_width dn ->
+      let signed = kind = Sext in
+      let sp =
+        if is_huge_width sn then huge_ptr cx x
+        else
+          let _, l = limbs_of cx x in
+          to_agg cx sn l
+      in
+      let dk = nlimbs dn in
+      let dp = huge_slot_k cx dk in
+      huge_ext_call cx ~signed sn dn sp dp;
+      if is_huge_width dn then [| dp |]
+      else if legal_width dn then
+        let x0 = e cx (Load (plain_mem 8, dp)) i64 in
+        [| (if dn = 64 then x0 else conv cx Trunc x0 (Int dn)) |]
+      else load_limbs cx dn (plain_mem 8) dp
   | (Trunc | Zext | Sext), Int sn, Int dn ->
       let _, l = limbs_of cx x in
       let signed = kind = Sext in
@@ -801,6 +1212,11 @@ let convert cx kind x dst =
         let x0 = ext.(0) in
         [| (if dn = 64 then x0 else conv cx Trunc x0 (Int dn)) |]
       else mask cx dn ext
+  | Ptrtoint, _, Int dn when is_huge_width dn ->
+      let dp = huge_slot cx dn in
+      e0 cx (Memset (false, dp, iconst cx.g (Int 8) 0L, c64 cx (Int64.of_int (8 * nlimbs dn))));
+      e0 cx (Store (plain_mem 8, conv cx Ptrtoint (get1 cx x) i64, dp));
+      [| dp |]
   | Ptrtoint, _, Int dn -> mask cx dn (resize [| conv cx Ptrtoint (get1 cx x) i64 |] (nlimbs dn) (zero64 cx))
   | Inttoptr, Int _, _ -> [| conv cx Inttoptr (low64 cx x) dst |]
   | (Fptosi | Fptoui | Fptosi_sat | Fptoui_sat), _, Int dn ->
@@ -809,6 +1225,10 @@ let convert cx kind x dst =
       let r = float_to_int cx dn kind ~src xv in
       (* a legal destination (from f16) is one value of its own type *)
       if legal_width dn && dn < 64 then [| conv cx Trunc r.(0) (Int dn) |] else r
+  | (Sitofp | Uitofp), Int sn, F16 when is_huge_width sn ->
+      [| f_to_h cx F32 (huge_int_to_float cx sn ~signed:(kind = Sitofp) (huge_ptr cx x) F32) |]
+  | (Sitofp | Uitofp), Int sn, _ when is_huge_width sn ->
+      [| huge_int_to_float cx sn ~signed:(kind = Sitofp) (huge_ptr cx x) dst |]
   | (Sitofp | Uitofp), Int sn, F16 ->
       let _, a = limbs_of cx x in
       [| f_to_h cx F32 (int_to_float cx sn ~signed:(kind = Sitofp) a F32) |]
@@ -834,6 +1254,7 @@ let odd_value cx v = mentions_odd (src_ty cx v)
    container), or as an i64 through [...]; more limbs as an agg slot. *)
 let to_abi cx (abi : abi option) (v : value) =
   match src_ty cx v with
+  | Int n when is_huge_width n -> huge_ptr cx v
   | Int n when not (legal_width n) ->
       let l = get cx v in
       if nlimbs n = 1 then
@@ -864,6 +1285,7 @@ let call_args cx (s : signature) (args : value array) =
 (* a value received through an ABI slot (parameter, call result) as limbs *)
 let from_abi cx t (x : value) =
   match t with
+  | Int n when is_huge_width n -> [| huge_load cx n (plain_mem 8) x |]
   | Int n when not (legal_width n) ->
       if nlimbs n = 1 then
         let c = container n in
@@ -950,45 +1372,69 @@ let convert_inst cx (i : inst) =
       set cx (r 1) [| rs.(1) |]
   | Ibin (k, _, a, b) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "%s" (ty_to_string t) in
-      set cx (r 0) (ibin cx n k (get cx a) (get cx b))
+      if is_huge_width n then set cx (r 0) [| huge_ibin cx n k (huge_ptr cx a) (huge_ptr cx b) |]
+      else set cx (r 0) (ibin cx n k (get cx a) (get cx b))
   | Iun (k, _, a) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "%s" (ty_to_string t) in
-      set cx (r 0) (iun cx n k (get cx a))
+      if is_huge_width n then set cx (r 0) [| huge_iun cx n k (huge_ptr cx a) |]
+      else set cx (r 0) (iun cx n k (get cx a))
   | Fsh (left, a, b, c) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "%s" (ty_to_string t) in
-      set cx (r 0) (fsh cx n ~left (get cx a) (get cx b) (get cx c))
+      if is_huge_width n then set cx (r 0) [| huge_fsh cx n ~left (huge_ptr cx a) (huge_ptr cx b) (huge_ptr cx c) |]
+      else set cx (r 0) (fsh cx n ~left (get cx a) (get cx b) (get cx c))
   | Ovf (k, a, b) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "%s" (ty_to_string t) in
-      let v, o = ovf cx n k (get cx a) (get cx b) in
-      set cx (r 0) v;
-      set cx (r 1) [| o |]
+      if is_huge_width n then begin
+        let vp, o = huge_ovf cx n k (huge_ptr cx a) (huge_ptr cx b) in
+        set cx (r 0) [| vp |];
+        set cx (r 1) [| o |]
+      end
+      else begin
+        let v, o = ovf cx n k (get cx a) (get cx b) in
+        set cx (r 0) v;
+        set cx (r 1) [| o |]
+      end
   | Icmp (k, a, b) ->
       let n = match src_ty cx a with Int n -> n | t -> unsupported "icmp on %s" (ty_to_string t) in
-      let x = get cx a and y = get cx b in
-      let c =
-        match k with
-        | Eq -> eq cx x y
-        | Ne -> not1 cx (eq cx x y)
-        | Ult -> ult cx x y
-        | Ugt -> ult cx y x
-        | Ule -> not1 cx (ult cx y x)
-        | Uge -> not1 cx (ult cx x y)
-        | Slt -> slt cx n x y
-        | Sgt -> slt cx n y x
-        | Sle -> not1 cx (slt cx n y x)
-        | Sge -> not1 cx (slt cx n x y)
-      in
-      set cx (r 0) [| c |]
-  | Select (c, a, b) -> set cx (r 0) (select_l cx (get1 cx c) (get cx a) (get cx b))
-  | Freeze a -> set cx (r 0) (Array.map (fun x -> e cx (Freeze x) i64) (get cx a))
-  | Mark (k, a) -> set cx (r 0) (Array.map (fun x -> e cx (Mark (k, x)) i64) (get cx a))
+      if is_huge_width n then set cx (r 0) [| huge_icmp cx n k (huge_ptr cx a) (huge_ptr cx b) |]
+      else begin
+        let x = get cx a and y = get cx b in
+        let c =
+          match k with
+          | Eq -> eq cx x y
+          | Ne -> not1 cx (eq cx x y)
+          | Ult -> ult cx x y
+          | Ugt -> ult cx y x
+          | Ule -> not1 cx (ult cx y x)
+          | Uge -> not1 cx (ult cx x y)
+          | Slt -> slt cx n x y
+          | Sgt -> slt cx n y x
+          | Sle -> not1 cx (slt cx n y x)
+          | Sge -> not1 cx (slt cx n x y)
+        in
+        set cx (r 0) [| c |]
+      end
+  | Select (c, a, b) -> (
+      match rty 0 with
+      | Int n when is_huge_width n -> set cx (r 0) [| huge_select cx n (get1 cx c) (huge_ptr cx a) (huge_ptr cx b) |]
+      | _ -> set cx (r 0) (select_l cx (get1 cx c) (get cx a) (get cx b)))
+  | Freeze a -> (
+      match rty 0 with
+      | Int n when is_huge_width n -> set cx (r 0) [| huge_ptr cx a |]
+      | _ -> set cx (r 0) (Array.map (fun x -> e cx (Freeze x) i64) (get cx a)))
+  | Mark (k, a) -> (
+      match rty 0 with
+      | Int n when is_huge_width n -> set cx (r 0) [| huge_ptr cx a |]
+      | _ -> set cx (r 0) (Array.map (fun x -> e cx (Mark (k, x)) i64) (get cx a)))
   | Conv (k, a) -> set cx (r 0) (convert cx k a (rty 0))
   | Load (m, p) -> (
       match rty 0 with
+      | Int n when is_huge_width n -> set cx (r 0) [| huge_load cx n m (get1 cx p) |]
       | Int n -> set cx (r 0) (load_limbs cx n m (get1 cx p))
       | t -> unsupported "load of %s" (ty_to_string t))
   | Store (m, v, p) -> (
       match src_ty cx v with
+      | Int n when is_huge_width n -> huge_store cx n m (huge_ptr cx v) (get1 cx p)
       | Int n -> store_limbs cx n m (get cx v) (get1 cx p)
       | t -> unsupported "store of %s" (ty_to_string t))
   | Alloca (sz, al) -> set cx (r 0) [| e cx (Alloca (low64 cx sz, al)) ptr |]
@@ -1039,6 +1485,9 @@ let convert_inst cx (i : inst) =
   | Va_arg p -> (
       match rty 0 with
       | Int n when nlimbs n = 1 -> set cx (r 0) (mask cx n [| e cx (Va_arg (get1 cx p)) i64 |])
+      | Int n when is_huge_width n ->
+          let q = e cx (Va_arg_agg (wide_agg n, get1 cx p)) ptr in
+          set cx (r 0) [| huge_load cx n (plain_mem 8) q |]
       | Int n ->
           let q = e cx (Va_arg_agg (wide_agg n, get1 cx p)) ptr in
           set cx (r 0) (load_limbs cx n (plain_mem 8) q)
@@ -1089,7 +1538,10 @@ let rebuild_term cx (b : block) =
         else
           Array.iteri
             (fun i (key, t) ->
-              let hit = eq cx x (const_limbs cx n key) in
+              let hit =
+                if is_huge_width n then huge_eq_k cx (nlimbs n) x.(0) (huge_const cx n key)
+                else eq cx x (const_limbs cx n key)
+              in
               if i = nc - 1 then set_term (Br (hit, t, d, -1))
               else begin
                 let next = add_block cx.g in
@@ -1120,7 +1572,7 @@ let func_needs (f : func) =
        f.insts;
      !found)
 
-let rebuild_func m helpers (f : func) : func =
+let rebuild_func m helpers consts (f : func) : func =
   let g = new_func ~linkage:f.linkage ~defined:f.defined f.name (sig_of f.sig_) in
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;
@@ -1129,13 +1581,14 @@ let rebuild_func m helpers (f : func) : func =
   if not f.defined then g
   else begin
     resolve_all f;
-    let cx = { m; f; g; map = Hashtbl.create 256; b = entry; loc = 0; helpers } in
+    let cx = { m; f; g; map = Hashtbl.create 256; b = entry; loc = 0; helpers; consts } in
     let nb = num_blocks f in
     for b = 0 to nb - 1 do
       ignore (add_block ~name:(block f b).bname g)
     done;
     (* parameters: the entry block's follow the new signature; the others
-       get one parameter per limb *)
+       get one parameter per limb (or one ptr parameter for huge values,
+       copied into a dedicated slot at block entry for loop safety) *)
     let entry_vals =
       List.map2
         (fun (a : abi) p ->
@@ -1144,15 +1597,23 @@ let rebuild_func m helpers (f : func) : func =
         (sig_of f.sig_).param_abis
         (Array.to_list (block f entry).params)
     in
+    let block_huge_params = Array.make nb [] in
     for b = 1 to nb - 1 do
+      let hps = ref [] in
       Array.iter
         (fun p ->
           match ty_of f p with
+          | Int n when is_huge_width n ->
+              let p_in = add_param g b ptr in
+              let p_copy = huge_slot cx n in
+              set cx p [| p_copy |];
+              hps := (n, p_in, p_copy) :: !hps
           | Int n when not (legal_width n) -> set cx p (Array.init (nlimbs n) (fun _ -> add_param g b i64))
           | F16 -> set cx p [| add_param g b i16 |]
           | t when mentions_odd t -> unsupported "block parameter of type %s" (ty_to_string t)
           | t -> set cx p [| add_param g b t |])
-        (block f b).params
+        (block f b).params;
+      block_huge_params.(b) <- List.rev !hps
     done;
     cx.b <- entry;
     List.iter2
@@ -1167,6 +1628,19 @@ let rebuild_func m helpers (f : func) : func =
     Array.iter
       (fun b ->
         cx.b <- b;
+        (match block_huge_params.(b) with
+        | [] -> ()
+        | [ (n, p_in, p_copy) ] -> huge_copy cx n p_copy p_in
+        | hps ->
+            let tmps =
+              List.map
+                (fun (n, p_in, p_copy) ->
+                  let tmp = huge_slot cx n in
+                  huge_copy cx n tmp p_in;
+                  (n, tmp, p_copy))
+                hps
+            in
+            List.iter (fun (n, tmp, p_copy) -> huge_copy cx n p_copy tmp) tmps);
         Vec.iter (fun i -> convert_inst cx i) (block f b).insts;
         rebuild_term cx b)
       rpo;
@@ -1214,11 +1688,12 @@ let run (m : modul) =
   (* odd-width, wide and f80 atomics first: on containers or libatomic *)
   Fir_atomic.run m;
   let helpers = Hashtbl.create 8 in
+  let consts = Hashtbl.create 16 in
   let n = Vec.length m.funcs in
   for i = 0 to n - 1 do
     let f = Vec.get m.funcs i in
     if func_needs f then begin
-      let g = rebuild_func m helpers f in
+      let g = rebuild_func m helpers consts f in
       (* limb loops split the entry block (Fir.hoist_const_allocas) *)
       hoist_const_allocas g;
       Vec.set m.funcs i g

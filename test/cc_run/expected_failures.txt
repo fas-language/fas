@@ -70,7 +70,6 @@ gcc/gcc/testsuite/gcc.dg/torture/bitint-21.c exit-mismatch: fcc exit=134, clang 
 gcc/gcc/testsuite/gcc.dg/torture/bitint-22.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-24.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-41.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/torture/bitint-66.c compile-timeout: fcc timed out under 16-way parallel load (passes solo in ~15s / 1.62 GiB RSS)
 gcc/gcc/testsuite/gcc.dg/torture/float128-div-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-div-underflow.c:15:3: error: C23 requires an explicit type specifier (implicit int
 gcc/gcc/testsuite/gcc.dg/torture/float128-extend-inf.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-extend-inf.c:20:3: error: C23 requires an explicit type specifier (implicit int is
 gcc/gcc/testsuite/gcc.dg/torture/float128-extend-nan.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-extend-nan.c:19:3: error: C23 requires an explicit type specifier (implicit int is
