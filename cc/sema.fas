@@ -311,8 +311,23 @@ fn se_int(loc u32, ty u32, value u64) handle[Ast] {
     return n
 }
 
+// A const-qualified field, including one inside an embedded aggregate,
+// prevents assignment of the enclosing record. Do not follow pointers.
+fn se_has_const_subobject(ty u32) bool {
+    if (ty_quals(ty) & Q_CONST) != 0 { return true }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY { return se_has_const_subobject(n.elem) }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        r handle[RecordDef] = ty_record(n.aux1)
+        for i u32 in 0..r.fields_len {
+            if se_has_const_subobject(ty_field(r.fields_start + i).ty) { return true }
+        }
+    }
+    return false
+}
+
 fn se_modifiable(p handle[Parser], a handle[Ast]) void fails {
-    if (a.flags & NF_LVALUE) == 0 || (ty_quals(a.ty) & Q_CONST) != 0 || ty_is_array(a.ty) || !se_complete(a.ty) {
+    if (a.flags & NF_LVALUE) == 0 || ty_is_array(a.ty) || !se_complete(a.ty) || se_has_const_subobject(a.ty) {
         try pa_error(p, a.loc, c"expression is not a modifiable lvalue")
     }
 }

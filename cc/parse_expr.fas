@@ -886,7 +886,7 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             x u32 = se_decay(a.ty)
             y u32 = se_decay(b.ty)
             elem u32
-            if ty_is_vector(a.ty) && ty_is_integer(y) { elem = ty_node(ty_unqual(a.ty)).elem }
+            if ty_is_vector(a.ty) && ty_is_integer(y) { elem = ty_qual(ty_node(ty_unqual(a.ty)).elem, ty_quals(a.ty)) }
             else if ty_is_ptr(x) && ty_is_integer(y) { elem = ty_node(ty_unqual(x)).elem }
             else if ty_is_ptr(y) && ty_is_integer(x) { elem = ty_node(ty_unqual(y)).elem }
             else { try pa_error(p, t.loc, c"invalid array subscript"); elem = TY_INVALID }
