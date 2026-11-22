@@ -1110,6 +1110,24 @@ fn pa_asm_word(p handle[Parser], t Token) bool {
     return (pa_is_gnu(p) && pa_is(p, t, c"asm")) || pa_is(p, t, c"__asm") || pa_is(p, t, c"__asm__")
 }
 
+// A declaration's assembler label has a single spelling in the symbol
+// table. Fold adjacent ordinary literals the same way as a single alias.
+fn pa_asm_label(p handle[Parser]) u32 fails {
+    text handle[Ast] = try pa_asm_string(p)
+    piece handle[Ast] = text.a
+    if piece.next == null { return text.op }
+    spelling Buf = {}
+    defer { buf_free(&spelling) }
+    buf_u8(&spelling, 34)
+    while piece != null {
+        part Bytes = cc_name(p.names, piece.op)
+        buf_append(&spelling, bytes_sub(part, 1, part.n - 2))
+        piece = piece.next
+    }
+    buf_u8(&spelling, 34)
+    return cc_intern(p.names, buf_bytes(&spelling))
+}
+
 fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast] fails {
     while try pa_accept(p, c"__extension__") {}
     bool_attr bool = try pa_open_attr(p)
@@ -1134,7 +1152,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         if pa_asm_word(p, try pa_peek(p)) {
             try pa_take(p)
             try pa_expect(p, c"(")
-            asm_name = (try pa_asm_string(p)).op
+            asm_name = try pa_asm_label(p)
             try pa_expect(p, c")")
             attrs = pa_join_attrs(try pa_attributes(p), attrs)
         }
