@@ -130,11 +130,15 @@ struct GenCtx {
     gnu_inline_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq] // sym_name_id -> 1-based idx
     cur_gnu_inline_idx u32
 
+    // String literal deduplication pool (keyed by Intern id of align_byte + data)
+    str_pool_keys Intern
+    str_pool_nids Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
+
     str_counter u32
     tmp_counter u32
     ctor_counter u32
     had_error bool
-    _pad0 u8
+    has_alloca bool
     _pad1 u16
 
     // Per-function state
@@ -192,6 +196,8 @@ fn gen_free(ctx handle[GenCtx]) void {
     }
     vec_free(&ctx.gnu_inlines)
     table_free(&ctx.gnu_inline_map)
+    intern_free(&ctx.str_pool_keys)
+    table_free(&ctx.str_pool_nids)
     gen_reset_func_state(ctx)
     vec_free(&ctx.blocks)
     table_free(&ctx.locals)
@@ -224,6 +230,7 @@ fn gen_reset_func_state(ctx handle[GenCtx]) void {
     vec_clear(&ctx.cleanups)
     vec_clear(&ctx.vla_stack)
     ctx.in_func = false
+    ctx.has_alloca = false
     ctx.cur_fn = null
     ctx.cur_fn_name = 0
     ctx.cur_ret_ty = TY_VOID
@@ -1318,6 +1325,17 @@ fn gen_emit_ctor_dtor(fn_name Bytes, is_dtor bool, prio u64) void {
 
 // Emit a read-only local global holding raw bytes `data` and return its interned symbol name id
 fn gen_emit_string_global(data Bytes, align u64) u32 {
+    al u64 = if align > 0 { align } else { 1 }
+    if gc.cur_gnu_inline_idx == 0 {
+        kb Buf = {}
+        defer { buf_free(&kb) }
+        buf_u8(&kb, trunc[u8](al & 0xff))
+        buf_append(&kb, data)
+        kid u32 = intern(&gc.str_pool_keys, buf_bytes(&kb))
+        k U64Key = {zext[u64](kid)}
+        prev u32 = table_get(&gc.str_pool_nids, &k) catch 0
+        if prev != 0 { return prev }
+    }
     nm_buf Buf = {}
     defer { buf_free(&nm_buf) }
     buf_str(&nm_buf, c".Lstr.")
@@ -1325,10 +1343,18 @@ fn gen_emit_string_global(data Bytes, align u64) u32 {
     gc.str_counter += 1
     nid u32 = gen_intern_sym(buf_bytes(&nm_buf))
     gen_mark_defined(nid)
+    if gc.cur_gnu_inline_idx == 0 {
+        kb2 Buf = {}
+        defer { buf_free(&kb2) }
+        buf_u8(&kb2, trunc[u8](al & 0xff))
+        buf_append(&kb2, data)
+        kid2 u32 = intern(&gc.str_pool_keys, buf_bytes(&kb2))
+        k2 U64Key = {zext[u64](kid2)}
+        _ bool = table_put(&gc.str_pool_nids, &k2, nid)
+    }
     nm Bytes = gen_sym_bytes(nid)
     b handle[Buf] = gen_global_buf()
     sz u64 = data.n
-    al u64 = if align > 0 { align } else { 1 }
     buf_str(b, c"global @")
     buf_append(b, nm)
     buf_str(b, c" size ")

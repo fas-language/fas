@@ -733,15 +733,51 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
         }
         v u64 = gen_eval_const_int(n.a)
         if ty_is_bool(n.ty) { return if v != 0 { 1 } else { 0 } }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            v = v & mask
+            if ty_is_signed(n.ty) && ((v >> (bits - 1)) & 1) != 0 {
+                v = v | (~mask)
+            }
+        }
         return v
     }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
+        if bytes_eq_c(op, c"&") && n.a != null && n.a.kind == ND_MEMBER {
+            base u64 = gen_eval_const_int(n.a.a)
+            return base + n.a.value
+        }
         v u64 = gen_eval_const_int(n.a)
         if bytes_eq_c(op, c"-") { return 0 - v }
         if bytes_eq_c(op, c"~") { return ~v }
         if bytes_eq_c(op, c"!") { return if v == 0 { 1 } else { 0 } }
         return v
+    }
+    if n.kind == ND_BINARY {
+        op Bytes = cc_name(gc.p.names, n.op)
+        lv u64 = gen_eval_const_int(n.a)
+        rv u64 = gen_eval_const_int(n.b)
+        res u64 = 0
+        if bytes_eq_c(op, c"+") { res = lv + rv }
+        else if bytes_eq_c(op, c"-") { res = lv - rv }
+        else if bytes_eq_c(op, c"*") { res = lv * rv }
+        else if bytes_eq_c(op, c"&") { res = lv & rv }
+        else if bytes_eq_c(op, c"|") { res = lv | rv }
+        else if bytes_eq_c(op, c"^") { res = lv ^ rv }
+        else if bytes_eq_c(op, c"<<") { res = lv << (rv & 63) }
+        else if bytes_eq_c(op, c">>") { res = lv >> (rv & 63) }
+        else { return n.value }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            res = res & mask
+            if ty_is_signed(n.ty) && ((res >> (bits - 1)) & 1) != 0 {
+                res = res | (~mask)
+            }
+        }
+        return res
     }
     if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_int(n.b) }
     return n.value

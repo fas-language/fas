@@ -81,7 +81,7 @@ fn gen_run_cleanups_to(target_depth usize) void fails {
 }
 
 fn gen_restore_vlas_to(target_depth usize) void {
-    if gc.vla_stack.n <= target_depth { return }
+    if gc.has_alloca || gc.vla_stack.n <= target_depth { return }
     v handle[VlaScope] = vec_at(&gc.vla_stack, target_depth)
     gen_stackrestore(v.sp_v)
 }

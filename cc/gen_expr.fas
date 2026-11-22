@@ -1501,6 +1501,7 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         return gen_const_i32(0)
     }
     if bytes_eq_c(bname, c"__builtin_alloca") || bytes_eq_c(bname, c"__builtin_alloca_with_align") {
+        gc.has_alloca = true
         sz_v u32 = gen_convert(try gen_rvalue(a0), a0.ty, TY_ULONG)
         al u64 = 16
         if a1 != null { al = gen_eval_const_int(a1) / 8; if al < 1 { al = 1 } }
@@ -1718,8 +1719,30 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     if bytes_eq_c(bname, c"__builtin_isinf") || bytes_eq_c(bname, c"__builtin_isinf_sign") {
         v u32 = try gen_rvalue(a0)
         av u32 = gen_unop(c"fabs", a0.ty, v)
-        inf_v u32 = gen_const_float(a0.ty, 0x7ff0000000000000)
-        return gen_convert(gen_fcmp(c"oeq", av, inf_v), TY_BOOL, n.ty)
+        inf_v u32 = 0
+        if ty_kind(a0.ty) == TYK_FLOAT16 {
+            inf_v = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  "); gen_emit_val(b, inf_v); buf_str(b, c" = freeze f16 f16 0x7c00\n")
+        } else {
+            inf_v = gen_const_float(a0.ty, 0x7ff0000000000000)
+        }
+        is_inf u32 = gen_fcmp(c"oeq", av, inf_v)
+        if bytes_eq_c(bname, c"__builtin_isinf_sign") {
+            z_v u32 = 0
+            if ty_kind(a0.ty) == TYK_FLOAT16 {
+                z_v = gen_new_val()
+                b handle[Buf] = gen_cur_buf()
+                buf_str(b, c"  "); gen_emit_val(b, z_v); buf_str(b, c" = freeze f16 f16 0x0000\n")
+            } else {
+                z_v = gen_const_zero(a0.ty)
+            }
+            is_neg u32 = gen_fcmp(c"olt", v, z_v)
+            sgn u32 = gen_select(TY_INT, is_neg, gen_const_i32(-1), gen_const_i32(1))
+            res u32 = gen_select(TY_INT, is_inf, sgn, gen_const_i32(0))
+            return gen_convert(res, TY_INT, n.ty)
+        }
+        return gen_convert(is_inf, TY_BOOL, n.ty)
     }
     if bytes_eq_c(bname, c"__builtin_isfinite") {
         v u32 = try gen_rvalue(a0)
@@ -1826,6 +1849,71 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
             return v
         }
         return gen_const_zero(n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_fma") || bytes_eq_c(bname, c"__builtin_fmaf") || bytes_eq_c(bname, c"__builtin_fmal") {
+        ft u32 = if bytes_eq_c(bname, c"__builtin_fmaf") { TY_FLOAT }
+                 else if bytes_eq_c(bname, c"__builtin_fmal") { TY_LDOUBLE }
+                 else { TY_DOUBLE }
+        n.ty = ft
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, ft)
+        v2 u32 = gen_convert(try gen_rvalue(a2), a2.ty, ft)
+        rv u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, rv)
+        buf_str(b, c" = fma ")
+        gen_emit_fir_ty(b, ft)
+        buf_u8(b, 32)
+        gen_emit_val(b, v0); buf_str(b, c", ")
+        gen_emit_val(b, v1); buf_str(b, c", ")
+        gen_emit_val(b, v2); buf_u8(b, 10)
+        return rv
+    }
+    if bytes_eq_c(bname, c"__builtin_pow") || bytes_eq_c(bname, c"__builtin_powf") || bytes_eq_c(bname, c"__builtin_powl") {
+        ft u32 = if bytes_eq_c(bname, c"__builtin_powf") { TY_FLOAT }
+                 else if bytes_eq_c(bname, c"__builtin_powl") { TY_LDOUBLE }
+                 else { TY_DOUBLE }
+        n.ty = ft
+        fn_nm Bytes = if ft == TY_FLOAT { bytes_c(c"powf") }
+                      else if ft == TY_LDOUBLE { bytes_c(c"powl") }
+                      else { bytes_c(c"pow") }
+        ptids Vec[u32] = {}
+        vec_push(&ptids, ft); vec_push(&ptids, ft)
+        ftid u32 = ty_func(ft, ptids.p, 2, false)
+        vec_free(&ptids)
+        gen_note_extern_fn_raw(fn_nm, ftid)
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, ft)
+        rv u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  "); gen_emit_val(b, rv); buf_str(b, c" = call (")
+        gen_emit_fir_ty(b, ft); buf_str(b, c", "); gen_emit_fir_ty(b, ft)
+        buf_str(b, c") -> ("); gen_emit_fir_ty(b, ft); buf_str(b, c") @")
+        buf_append(b, fn_nm); buf_u8(b, 40)
+        gen_emit_val(b, v0); buf_str(b, c", "); gen_emit_val(b, v1); buf_str(b, c")\n")
+        return rv
+    }
+    if bytes_eq_c(bname, c"__builtin_log2") || bytes_eq_c(bname, c"__builtin_log2f") || bytes_eq_c(bname, c"__builtin_log2l") {
+        ft u32 = if bytes_eq_c(bname, c"__builtin_log2f") { TY_FLOAT }
+                 else if bytes_eq_c(bname, c"__builtin_log2l") { TY_LDOUBLE }
+                 else { TY_DOUBLE }
+        n.ty = ft
+        fn_nm Bytes = if ft == TY_FLOAT { bytes_c(c"log2f") }
+                      else if ft == TY_LDOUBLE { bytes_c(c"log2l") }
+                      else { bytes_c(c"log2") }
+        ptids Vec[u32] = {}
+        vec_push(&ptids, ft)
+        ftid u32 = ty_func(ft, ptids.p, 1, false)
+        vec_free(&ptids)
+        gen_note_extern_fn_raw(fn_nm, ftid)
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        rv u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  "); gen_emit_val(b, rv); buf_str(b, c" = call (")
+        gen_emit_fir_ty(b, ft); buf_str(b, c") -> ("); gen_emit_fir_ty(b, ft); buf_str(b, c") @")
+        buf_append(b, fn_nm); buf_u8(b, 40); gen_emit_val(b, v0); buf_str(b, c")\n")
+        return rv
     }
     if bytes_eq_c(bname, c"__builtin_powi") || bytes_eq_c(bname, c"__builtin_powif") || bytes_eq_c(bname, c"__builtin_powil") {
         ft u32 = if bytes_eq_c(bname, c"__builtin_powif") { TY_FLOAT }
@@ -2030,8 +2118,15 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         v1 u32 = try gen_rvalue(a1)
         res_ptr u32 = if !is_p { try gen_rvalue(a2) } else { 0 }
         res_ty u32 = if !is_p { ty_node(ty_unqual(a2.ty)).elem } else { a2.ty }
-        // Widen both operands to i129 (per Fir SPEC.md §11) so any standard type fits without overflow
-        wide_ty u32 = ty_bitint(129, false)
+        // Widen both operands so any integer / _BitInt fits without overflow
+        b0 u32 = ty_int_bits(a0.ty)
+        b1 u32 = ty_int_bits(a1.ty)
+        br u32 = ty_int_bits(res_ty)
+        mb u32 = if b0 > b1 { b0 } else { b1 }
+        if br > mb { mb = br }
+        wide_bits u32 = if is_mul { mb * 2 + 2 } else { mb + 2 }
+        if wide_bits < 129 { wide_bits = 129 }
+        wide_ty u32 = ty_bitint(wide_bits, false)
         w0 u32 = gen_convert(v0, a0.ty, wide_ty)
         w1 u32 = gen_convert(v1, a1.ty, wide_ty)
         op_cstr addr = if is_sub { c"sub" } else if is_mul { c"mul" } else { c"add" }
