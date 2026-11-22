@@ -166,6 +166,9 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
         min = 1
         max = 0xffffffff
         string_first = true
+    } else if bytes_eq_c(name, c"availability") {
+        min = 1
+        max = 0xffffffff
     } else if bytes_eq_c(name, c"unavailable") {
         max = 1
         string_first = true
@@ -200,6 +203,9 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     arg_empty bool = true
     for i usize in 0..a.args.n {
         t Token = a.args.p[Token, i]
+        if count != 0 && arg_empty && bytes_eq_c(name, c"availability") && pa_is(p, t, c"environment") {
+            try pa_error(p, t.loc, c"availability environment is unsupported in C")
+        }
         if depth == 0 && pa_is(p, t, c",") {
             if arg_empty { try pa_error(p, t.loc, c"empty attribute argument") }
             if count == 0 { first_end = i }
