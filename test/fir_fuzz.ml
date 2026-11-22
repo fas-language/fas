@@ -926,9 +926,15 @@ let check_seed tmp seed =
               let ll = Filename.concat tmp "m.ll" in
               write ll llvm_text;
               (* -lm: without SSE4.1, LLVM lowers floor/ceil/... to libm calls *)
+              let cc =
+                match Sys.getenv_opt "FAS_TEST_REFCACHE" with
+                | None -> !cc
+                | Some path ->
+                    Printf.sprintf "python3 %s fir-fuzz %s %s" (Filename.quote path) (Filename.quote tmp) !cc
+              in
               let lstatus =
                 Sys.command
-                  (Printf.sprintf "%s -O2 -w -x ir %s -lm -latomic -o %s 2>%s" !cc (Filename.quote ll) (Filename.quote lexe)
+                  (Printf.sprintf "%s -O2 -w -x ir %s -lm -latomic -o %s 2>%s" cc (Filename.quote ll) (Filename.quote lexe)
                      (Filename.quote (Filename.concat tmp "cc.err")))
               in
               if lstatus <> 0 then

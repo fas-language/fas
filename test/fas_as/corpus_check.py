@@ -7,6 +7,11 @@ and relocations.
 """
 
 import concurrent.futures, glob, os, struct, subprocess, sys, tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/refcache"))
+from compiler import assemble
+from refcache import run as cached_run
 from collections import Counter
 
 def parse_elf(data):
@@ -110,10 +115,12 @@ def test_one(args):
         mc_o = os.path.join(td, 'mc.o')
         fas_o = os.path.join(td, 'fas.o')
         inc = ['-I', os.path.dirname(cfile)]
-        p = subprocess.run([cc, '-S'] + flags + inc + [cfile, '-o', s_path], capture_output=True)
+        p = cached_run([cc, '-S'] + flags + inc + [cfile, '-o', s_path],
+                       ns="fas-as/corpus-c", deps=[cfile], outs=[s_path], scratch=td, c=True)
         if p.returncode != 0:
             return ('SKIP', cfile, '')
-        p_mc = subprocess.run(['llvm-mc-22', '-triple=x86_64-unknown-linux-gnu', '-filetype=obj', s_path, '-o', mc_o], capture_output=True)
+        p_mc = assemble(['llvm-mc-22', '-triple=x86_64-unknown-linux-gnu', '-filetype=obj', s_path, '-o', mc_o],
+                        ns="fas-as/corpus-mc", source=s_path, output=mc_o, scratch=td)
         if p_mc.returncode != 0:
             return ('SKIP', cfile, '')
         p_fas = subprocess.run([fas_as, s_path, '-o', fas_o], capture_output=True)
