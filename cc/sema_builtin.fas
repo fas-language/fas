@@ -1,3 +1,29 @@
+// Fixed return types follow the builtin spelling, regardless of argument
+// promotions. Return TY_INVALID for a name outside these overload families.
+fn se_math_family(name Bytes, stem addr) u32 {
+    prefix Bytes = bytes_c(stem)
+    if !bytes_starts_with(name, prefix) { return TY_INVALID }
+    suffix Bytes = bytes_from(name, prefix.n)
+    if suffix.n == 0 { return TY_DOUBLE }
+    if bytes_eq_c(suffix, c"f") { return TY_FLOAT }
+    if bytes_eq_c(suffix, c"l") { return TY_LDOUBLE }
+    if bytes_eq_c(suffix, c"f16") { return TY_FLOAT16 }
+    return TY_INVALID
+}
+
+fn se_math_result(name Bytes) u32 {
+    if !bytes_starts_with(name, bytes_c(c"__builtin_")) { return TY_INVALID }
+    name = bytes_from(name, 10)
+    ty u32 = se_math_family(name, c"conj")
+    if ty != TY_INVALID { return ty_complex(ty) }
+    stems arr[9, addr] = {c"creal", c"cimag", c"copysign", c"fabs", c"sqrt", c"inf", c"huge_val", c"nan", c"nans"}
+    for i usize in 0..9 {
+        ty = se_math_family(name, stems[i])
+        if ty != TY_INVALID { return ty }
+    }
+    return TY_INVALID
+}
+
 // Builtins that have no ordinary function prototype still have argument
 // constraints. Keep their typed call nodes intact for code generation.
 fn se_builtin_count(p handle[Parser], t Token, n u32, min u32, max u32) void fails {

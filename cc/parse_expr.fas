@@ -493,14 +493,8 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         return ty_ptr(TY_CHAR)
     }
     if bytes_eq_c(name, c"__builtin_strspn") || bytes_eq_c(name, c"__builtin_strcspn") { return TY_ULONG }
-    if bytes_starts_with(name, bytes_c(c"__builtin_huge_val")) || bytes_starts_with(name, bytes_c(c"__builtin_inf")) || bytes_starts_with(name, bytes_c(c"__builtin_nan")) ||
-        bytes_starts_with(name, bytes_c(c"__builtin_fabs")) || bytes_starts_with(name, bytes_c(c"__builtin_sqrt")) {
-        ch u8 = name.p[u8, name.n - 1]
-        if bytes_ends_with(name, bytes_c(c"f16")) { return TY_FLOAT16 }
-        if ch == 102 && !bytes_eq_c(name, c"__builtin_inf") { return TY_FLOAT }
-        if ch == 108 { return TY_LDOUBLE }
-        return TY_DOUBLE
-    }
+    math u32 = se_math_result(name)
+    if math != TY_INVALID { return math }
     if bytes_eq_c(name, c"__atomic_compare_exchange") || bytes_eq_c(name, c"__atomic_compare_exchange_n") ||
         bytes_eq_c(name, c"__atomic_test_and_set") || bytes_eq_c(name, c"__sync_bool_compare_and_swap") {
         return TY_BOOL

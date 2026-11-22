@@ -1458,13 +1458,6 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     if bytes_eq_c(bname, c"__builtin_nans") || bytes_eq_c(bname, c"__builtin_nansf") ||
        bytes_eq_c(bname, c"__builtin_nansl") || bytes_eq_c(bname, c"__builtin_nansf16") {
         ft u32 = n.ty
-        if !ty_is_real_float(ft) {
-            if bytes_eq_c(bname, c"__builtin_nansf16") { ft = TY_FLOAT16 }
-            else if bytes_eq_c(bname, c"__builtin_nansf") { ft = TY_FLOAT }
-            else if bytes_eq_c(bname, c"__builtin_nansl") { ft = TY_LDOUBLE }
-            else { ft = TY_DOUBLE }
-            n.ty = ft
-        }
         v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  ")
@@ -1529,22 +1522,19 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         ovf u32 = gen_icmp(c"ne", wres, back)
         return gen_convert(ovf, TY_BOOL, n.ty)
     }
-    // Float builtins (guard against untyped TY_INT fallback from sema)
-    if bytes_eq_c(bname, c"__builtin_fabs") || bytes_eq_c(bname, c"__builtin_fabsf") || bytes_eq_c(bname, c"__builtin_fabsl") {
-        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
-        n.ty = ft
+    // Float builtins use the result type supplied by semantic analysis.
+    if se_math_family(bname, c"__builtin_fabs") != TY_INVALID {
+        ft u32 = n.ty
         v u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
         return gen_unop(c"fabs", ft, v)
     }
-    if bytes_eq_c(bname, c"__builtin_sqrt") || bytes_eq_c(bname, c"__builtin_sqrtf") || bytes_eq_c(bname, c"__builtin_sqrtl") {
-        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
-        n.ty = ft
+    if se_math_family(bname, c"__builtin_sqrt") != TY_INVALID {
+        ft u32 = n.ty
         v u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
         return gen_unop(c"sqrt", ft, v)
     }
-    if bytes_eq_c(bname, c"__builtin_copysign") || bytes_eq_c(bname, c"__builtin_copysignf") || bytes_eq_c(bname, c"__builtin_copysignl") {
-        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
-        n.ty = ft
+    if se_math_family(bname, c"__builtin_copysign") != TY_INVALID {
+        ft u32 = n.ty
         v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
         v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, ft)
         return gen_binop(c"copysign", ft, v0, v1)
@@ -1623,23 +1613,20 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         s u32 = gen_binop_raw(c"lshr", c"i8", b9, gen_const_i8(7))
         return gen_convert(s, TY_UCHAR, n.ty)
     }
-    if bytes_eq_c(bname, c"__builtin_creal") || bytes_eq_c(bname, c"__builtin_crealf") || bytes_eq_c(bname, c"__builtin_creall") {
-        cv u32 = try gen_rvalue(a0)
-        et u32 = if ty_is_complex(a0.ty) { ty_node(ty_unqual(a0.ty)).elem } else { a0.ty }
-        n.ty = et
-        if ty_is_complex(a0.ty) { return gen_load_ty(et, cv, ty_align(et), false, false) }
-        return cv
+    real u32 = se_math_family(bname, c"__builtin_creal")
+    imag u32 = se_math_family(bname, c"__builtin_cimag")
+    if real != TY_INVALID || imag != TY_INVALID {
+        val u32 = try gen_rvalue(a0)
+        if !ty_is_complex(a0.ty) {
+            if imag != TY_INVALID { return gen_const_zero(n.ty) }
+            return gen_convert(val, a0.ty, n.ty)
+        }
+        elem u32 = ty_real_part(a0.ty)
+        if imag != TY_INVALID { val = gen_ptradd_const(val, bitcast[i64](ty_size(elem))) }
+        return gen_convert(gen_load_ty(elem, val, ty_align(elem), false, false), elem, n.ty)
     }
-    if bytes_eq_c(bname, c"__builtin_cimag") || bytes_eq_c(bname, c"__builtin_cimagf") || bytes_eq_c(bname, c"__builtin_cimagl") {
-        cv u32 = try gen_rvalue(a0)
-        et u32 = if ty_is_complex(a0.ty) { ty_node(ty_unqual(a0.ty)).elem } else { a0.ty }
-        n.ty = et
-        if ty_is_complex(a0.ty) { return gen_load_ty(et, gen_ptradd_const(cv, bitcast[i64](ty_size(et))), ty_align(et), false, false) }
-        return gen_const_zero(et)
-    }
-    if bytes_eq_c(bname, c"__builtin_conj") || bytes_eq_c(bname, c"__builtin_conjf") || bytes_eq_c(bname, c"__builtin_conjl") {
-        cty u32 = if ty_is_complex(n.ty) { n.ty } else { a0.ty }
-        n.ty = cty
+    if se_math_family(bname, c"__builtin_conj") != TY_INVALID {
+        cty u32 = n.ty
         cv u32 = gen_convert(try gen_rvalue(a0), a0.ty, cty)
         et u32 = ty_node(ty_unqual(cty)).elem
         esz u64 = ty_size(et)
@@ -1671,11 +1658,11 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         }
         return gen_const_i32(cls)
     }
-    if bytes_eq_c(bname, c"__builtin_nan") || bytes_eq_c(bname, c"__builtin_nanf") || bytes_eq_c(bname, c"__builtin_nanl") {
+    if se_math_family(bname, c"__builtin_nan") != TY_INVALID {
         return gen_const_float(n.ty, 0x7ff8000000000000)
     }
-    if bytes_eq_c(bname, c"__builtin_inf") || bytes_eq_c(bname, c"__builtin_inff") || bytes_eq_c(bname, c"__builtin_infl") ||
-       bytes_eq_c(bname, c"__builtin_huge_val") || bytes_eq_c(bname, c"__builtin_huge_valf") || bytes_eq_c(bname, c"__builtin_huge_vall") {
+    if se_math_family(bname, c"__builtin_inf") != TY_INVALID ||
+       se_math_family(bname, c"__builtin_huge_val") != TY_INVALID {
         return gen_const_float(n.ty, 0x7ff0000000000000)
     }
 
