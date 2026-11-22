@@ -108,24 +108,101 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
 
 // ---------- Bitfield Load & Store ----------
 
+fn gen_bitfield_storage_ty(span_bytes u64) u32 {
+    if span_bytes == 1 { return TY_UCHAR }
+    if span_bytes == 2 { return TY_USHORT }
+    if span_bytes == 4 { return TY_UINT }
+    if span_bytes == 8 { return TY_ULONG }
+    return ty_bitint(trunc[u32](span_bytes * 8), true)
+}
+
+// Load exactly `span_bytes` bytes into `acc_ty` without reading past `bp + span_bytes`.
+// Uses 1 load for exact Fir widths (1, 2, 4, or any multiple of 8 bytes), and at most
+// 4 loads (8-byte-multiple prefix + 4/2/1-byte tail) for any other span.
+fn gen_load_exact_bytes(bp u32, span_bytes u64, acc_ty u32, is_vol bool) u32 {
+    if span_bytes == 1 || span_bytes == 2 || span_bytes == 4 || (span_bytes % 8) == 0 {
+        return gen_load_ty(acc_ty, bp, 1, is_vol, false)
+    }
+    acc u32 = gen_const_zero(acc_ty)
+    off u64 = 0
+    if span_bytes > 8 {
+        prefix_bytes u64 = (span_bytes / 8) * 8
+        pt u32 = if prefix_bytes == 8 { TY_ULONG } else { ty_bitint(trunc[u32](prefix_bytes * 8), true) }
+        pv u32 = gen_load_ty(pt, bp, 1, is_vol, false)
+        acc = gen_cast(c"zext", acc_ty, pv)
+        off = prefix_bytes
+    }
+    rem u64 = span_bytes - off
+    if rem >= 4 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        cv u32 = gen_cast(c"zext", acc_ty, gen_load_raw(c"i32", p, 1, is_vol))
+        if off > 0 { cv = gen_binop(c"shl", acc_ty, cv, gen_const_int(acc_ty, off * 8)) }
+        acc = gen_binop(c"or", acc_ty, acc, cv)
+        off += 4
+        rem -= 4
+    }
+    if rem >= 2 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        cv u32 = gen_cast(c"zext", acc_ty, gen_load_raw(c"i16", p, 1, is_vol))
+        if off > 0 { cv = gen_binop(c"shl", acc_ty, cv, gen_const_int(acc_ty, off * 8)) }
+        acc = gen_binop(c"or", acc_ty, acc, cv)
+        off += 2
+        rem -= 2
+    }
+    if rem >= 1 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        cv u32 = gen_cast(c"zext", acc_ty, gen_load_raw(c"i8", p, 1, is_vol))
+        if off > 0 { cv = gen_binop(c"shl", acc_ty, cv, gen_const_int(acc_ty, off * 8)) }
+        acc = gen_binop(c"or", acc_ty, acc, cv)
+    }
+    return acc
+}
+
+// Store exactly `span_bytes` bytes from `acc_ty` without writing past `bp + span_bytes`.
+fn gen_store_exact_bytes(bp u32, span_bytes u64, acc_ty u32, acc u32, is_vol bool) void {
+    if span_bytes == 1 || span_bytes == 2 || span_bytes == 4 || (span_bytes % 8) == 0 {
+        gen_store_ty(acc, bp, 1, is_vol, false)
+        return
+    }
+    off u64 = 0
+    if span_bytes > 8 {
+        prefix_bytes u64 = (span_bytes / 8) * 8
+        pt u32 = if prefix_bytes == 8 { TY_ULONG } else { ty_bitint(trunc[u32](prefix_bytes * 8), true) }
+        pv u32 = gen_cast(c"trunc", pt, acc)
+        gen_store_ty(pv, bp, 1, is_vol, false)
+        off = prefix_bytes
+    }
+    rem u64 = span_bytes - off
+    if rem >= 4 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        part u32 = if off > 0 { gen_binop(c"lshr", acc_ty, acc, gen_const_int(acc_ty, off * 8)) } else { acc }
+        gen_store_ty(gen_cast_raw(c"trunc", c"i32", part), p, 1, is_vol, false)
+        off += 4
+        rem -= 4
+    }
+    if rem >= 2 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        part u32 = if off > 0 { gen_binop(c"lshr", acc_ty, acc, gen_const_int(acc_ty, off * 8)) } else { acc }
+        gen_store_ty(gen_cast_raw(c"trunc", c"i16", part), p, 1, is_vol, false)
+        off += 2
+        rem -= 2
+    }
+    if rem >= 1 {
+        p u32 = if off > 0 { gen_ptradd_const(bp, bitcast[i64](off)) } else { bp }
+        part u32 = if off > 0 { gen_binop(c"lshr", acc_ty, acc, gen_const_int(acc_ty, off * 8)) } else { acc }
+        gen_store_ty(gen_cast_raw(c"trunc", c"i8", part), p, 1, is_vol, false)
+    }
+}
+
 fn gen_load_bitfield(base_ptr u32, bit_off u64, bit_width u32, field_ty u32) u32 {
     if bit_width == 0 { return gen_const_int(field_ty, 0) }
     byte_off u64 = bit_off / 8
     bit_in_byte u32 = trunc[u32](bit_off % 8)
     span_bytes u64 = (zext[u64](bit_in_byte) + zext[u64](bit_width) + 7) / 8
-    acc_bits u32 = if span_bytes <= 8 { 64 } else { trunc[u32](span_bytes * 8) }
-    acc_ty u32 = if acc_bits == 64 { TY_ULONG } else { ty_bitint(acc_bits, true) }
-    acc u32 = gen_const_zero(acc_ty)
-    for i u64 in 0..span_bytes {
-        bp u32 = gen_ptradd_const(base_ptr, bitcast[i64](byte_off + i))
-        bv u32 = gen_load_raw(c"i8", bp, 1, gen_is_volatile(field_ty))
-        ext u32 = gen_cast(c"zext", acc_ty, bv)
-        if i > 0 {
-            sh u32 = gen_const_int(acc_ty, i * 8)
-            ext = gen_binop(c"shl", acc_ty, ext, sh)
-        }
-        acc = gen_binop(c"or", acc_ty, acc, ext)
-    }
+    acc_bits u32 = trunc[u32](span_bytes * 8)
+    acc_ty u32 = gen_bitfield_storage_ty(span_bytes)
+    bp u32 = if byte_off > 0 { gen_ptradd_const(base_ptr, bitcast[i64](byte_off)) } else { base_ptr }
+    acc u32 = gen_load_exact_bytes(bp, span_bytes, acc_ty, gen_is_volatile(field_ty))
     if bit_in_byte > 0 {
         sh u32 = gen_const_int(acc_ty, zext[u64](bit_in_byte))
         acc = gen_binop(c"lshr", acc_ty, acc, sh)
@@ -136,7 +213,15 @@ fn gen_load_bitfield(base_ptr u32, bit_off u64, bit_width u32, field_ty u32) u32
         narrow u32 = gen_cast(c"trunc", narrow_ty, acc)
         return gen_convert(narrow, narrow_ty, field_ty)
     }
-    src_ty u32 = if acc_bits == 64 { (if is_s { TY_LONG } else { TY_ULONG }) } else { ty_bitint(acc_bits, !is_s) }
+    src_ty u32 = if is_s {
+        if span_bytes == 1 { TY_SCHAR }
+        else if span_bytes == 2 { TY_SHORT }
+        else if span_bytes == 4 { TY_INT }
+        else if span_bytes == 8 { TY_LONG }
+        else { ty_bitint(acc_bits, false) }
+    } else {
+        acc_ty
+    }
     return gen_convert(acc, src_ty, field_ty)
 }
 
@@ -145,24 +230,20 @@ fn gen_store_bitfield(base_ptr u32, bit_off u64, bit_width u32, field_ty u32, va
     byte_off u64 = bit_off / 8
     bit_in_byte u32 = trunc[u32](bit_off % 8)
     span_bytes u64 = (zext[u64](bit_in_byte) + zext[u64](bit_width) + 7) / 8
-    acc_bits u32 = if span_bytes <= 8 { 64 } else { trunc[u32](span_bytes * 8) }
-    acc_ty u32 = if acc_bits == 64 { TY_ULONG } else { ty_bitint(acc_bits, true) }
+    acc_bits u32 = trunc[u32](span_bytes * 8)
+    acc_ty u32 = gen_bitfield_storage_ty(span_bytes)
+    bp u32 = if byte_off > 0 { gen_ptradd_const(base_ptr, bitcast[i64](byte_off)) } else { base_ptr }
+    is_vol bool = gen_is_volatile(field_ty)
+    // Fast path: byte-aligned full-width bitfield needs no read-modify-write or shifting
+    if bit_in_byte == 0 && bit_width == acc_bits {
+        v_acc u32 = gen_convert(val_v, field_ty, acc_ty)
+        gen_store_exact_bytes(bp, span_bytes, acc_ty, v_acc, is_vol)
+        return
+    }
     narrow_ty u32 = ty_bitint(bit_width, true)
     v_narrow u32 = gen_convert(val_v, field_ty, narrow_ty)
     v_acc u32 = if bit_width < acc_bits { gen_cast(c"zext", acc_ty, v_narrow) } else { v_narrow }
-    // Load existing span bytes
-    acc u32 = gen_const_zero(acc_ty)
-    for i u64 in 0..span_bytes {
-        bp u32 = gen_ptradd_const(base_ptr, bitcast[i64](byte_off + i))
-        bv u32 = gen_load_raw(c"i8", bp, 1, gen_is_volatile(field_ty))
-        ext u32 = gen_cast(c"zext", acc_ty, bv)
-        if i > 0 {
-            sh u32 = gen_const_int(acc_ty, i * 8)
-            ext = gen_binop(c"shl", acc_ty, ext, sh)
-        }
-        acc = gen_binop(c"or", acc_ty, acc, ext)
-    }
-    // Clear target bits and insert new bits
+    acc u32 = gen_load_exact_bytes(bp, span_bytes, acc_ty, is_vol)
     ones_w u32 = gen_binop(c"sub", narrow_ty, gen_const_zero(narrow_ty), gen_const_int(narrow_ty, 1))
     fmask u32 = if bit_width < acc_bits { gen_cast(c"zext", acc_ty, ones_w) } else { ones_w }
     if bit_in_byte > 0 {
@@ -177,17 +258,7 @@ fn gen_store_bitfield(base_ptr u32, bit_off u64, bit_width u32, field_ty u32, va
         shifted = gen_binop(c"shl", acc_ty, v_acc, sh)
     }
     acc = gen_binop(c"or", acc_ty, acc, shifted)
-    // Write back bytes
-    for i u64 in 0..span_bytes {
-        bp u32 = gen_ptradd_const(base_ptr, bitcast[i64](byte_off + i))
-        part u32 = acc
-        if i > 0 {
-            sh u32 = gen_const_int(acc_ty, i * 8)
-            part = gen_binop(c"lshr", acc_ty, acc, sh)
-        }
-        b8 u32 = gen_cast_raw(c"trunc", c"i8", part)
-        gen_store_ty(b8, bp, 1, gen_is_volatile(field_ty), false)
-    }
+    gen_store_exact_bytes(bp, span_bytes, acc_ty, acc, is_vol)
 }
 
 // ---------- Type Conversions ----------

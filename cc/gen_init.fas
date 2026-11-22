@@ -1141,10 +1141,32 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
             lo u64 = if desig.a != null { desig.a.value } else { idx }
             hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in lo..(hi + 1) {
-                ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
+            if hi >= lo && (hi - lo) >= 16 {
+                // Emit a Fir loop instead of unrolling large GNU `[lo ... hi]` designator ranges
+                idx_slot u32 = gen_alloca_entry(8, 8)
+                gen_store_ty(gen_const_u64(lo), idx_slot, 8, false, false)
+                cond_blk u32 = gen_new_block()
+                body_blk u32 = gen_new_block()
+                end_blk u32 = gen_new_block()
+                gen_term_jump(cond_blk)
+                gen_switch_block(cond_blk)
+                iv u32 = gen_load_raw(c"i64", idx_slot, 8, false)
+                cmp u32 = gen_icmp(c"ule", iv, gen_const_u64(hi))
+                gen_term_br(cmp, body_blk, end_blk)
+                gen_switch_block(body_blk)
+                ep u32 = gen_ptradd_scaled(base_ptr, iv, bitcast[i64](elem_sz))
                 dummy u64 = 0
                 try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                next_iv u32 = gen_binop_raw(c"add", c"i64", iv, gen_const_u64(1))
+                gen_store_ty(next_iv, idx_slot, 8, false, false)
+                gen_term_jump(cond_blk)
+                gen_switch_block(end_blk)
+            } else {
+                for j u64 in lo..(hi + 1) {
+                    ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
+                    dummy u64 = 0
+                    try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                }
             }
         } else {
             ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](idx * elem_sz))

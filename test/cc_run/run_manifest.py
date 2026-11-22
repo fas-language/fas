@@ -7,10 +7,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
+import resource
 import shutil
 import subprocess
 import sys
 import tempfile
+
+MEM_LIMIT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB cap per compiler child
+
+
+def _limit_as():
+    resource.setrlimit(resource.RLIMIT_AS, (MEM_LIMIT_BYTES, MEM_LIMIT_BYTES))
 
 ROOT = Path(__file__).resolve().parents[2]
 CC_TESTS = ROOT.parent / "cc-tests"
@@ -65,14 +72,21 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
         }
         try:
             cp = subprocess.run(cmd, cwd=str(srcs[0].parent), env=env,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                timeout=timeout, preexec_fn=_limit_as)
         except subprocess.TimeoutExpired:
             return (rel, "compile-timeout", "fcc timed out")
 
         if cp.returncode != 0:
             err = (cp.stderr or cp.stdout).decode("utf-8", errors="replace").strip()
+            err_lo = err.lower()
             first = err.splitlines()[0] if err else f"exit {cp.returncode}"
-            if "fas-fir:" in err:
+            if ("out of memory" in err_lo or "out_of_memory" in err_lo
+                    or "cannot allocate memory" in err_lo or "bad_alloc" in err_lo
+                    or cp.returncode == -9):
+                cat = "compile-oom"
+                first = f"OOM ({cp.returncode}): {first}"
+            elif "fas-fir:" in err:
                 cat = "fir-error"
                 lines = [l.strip() for l in err.splitlines() if l.strip()]
                 for i, line in enumerate(lines):
