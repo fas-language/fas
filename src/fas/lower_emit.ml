@@ -134,6 +134,8 @@ let signature mc ~params ~ret ~ret_extension ~variadic =
     param_abis = List.map (fun (t, e) -> abi mc.lay t e) params;
     result_abis = result_abis mc.lay ret ret_extension;
     variadic;
+    ms_abi = false;
+    ms_xmm_result = false;
   }
 
 (* Symbols. A C entity's internal name is `c.NAME` and its symbol NAME. A Fas
@@ -553,7 +555,7 @@ let emit_call fn result ext (ret : Low.ty) callee args =
   let fixed = match callee with Direct n -> Hashtbl.find_opt fn.mc.variadic n | Indirect _ -> None in
   let nfixed = match fixed with Some k -> k | None -> List.length args in
   let param_abis = List.filteri (fun k _ -> k < nfixed) (List.map (fun (t, e, _) -> abi lay t e) args) in
-  let sig_ = { param_abis; result_abis = result_abis lay ret ext; variadic = fixed <> None } in
+  let sig_ = { param_abis; result_abis = result_abis lay ret ext; variadic = fixed <> None; ms_abi = false; ms_xmm_result = false } in
   let argv = Array.of_list (List.map (fun (_, _, v) -> value fn v) args) in
   (* a struct through `...` names its agg ABI on the call (SPEC §5) *)
   let va_aggs =

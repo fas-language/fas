@@ -30,15 +30,21 @@ case "${1:-all}" in
         shift
         exec python3 "$ROOT/test/cc_run/rand_c.py" "$@"
         ;;
+    --abi)
+        exec bash "$ROOT/test/cc_run/ms_abi/check.sh"
+        ;;
     all)
         echo "=== 1. Manifest run-agree differential tests (fcc vs clang-22) ==="
         python3 "$ROOT/test/cc_run/run_manifest.py" --show 15
         echo ""
-        echo "=== 2. Real-world projects (zlib, lua, sqlite3) ==="
+        echo "=== 2. Real-world differential projects ==="
         python3 "$ROOT/test/cc_run/test_projects.py"
         echo ""
         echo "=== 3. Random UB-free C differential fuzzer (100 programs) ==="
         python3 "$ROOT/test/cc_run/rand_c.py" --count 100
+        echo ""
+        echo "=== 4. Microsoft x64 ABI interoperability ==="
+        bash "$ROOT/test/cc_run/ms_abi/check.sh"
         ;;
     *)
         exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"

@@ -289,7 +289,7 @@ let run (f : func) =
     if vslot.(v) < 0 then vslot.(v) <- (if wide.(v) then new_slot f ~size:16 ~align:16 else new_slot f ~size:8 ~align:8);
     vslot.(v)
   in
-  let saved = ref [] in
+  let saved = ref (if f.ms_abi then X64.[ Rsi; Rdi ] else []) in
   let note_saved = function
     | G r when List.mem r callee_saved && not (List.mem r !saved) -> saved := r :: !saved
     | _ -> ()

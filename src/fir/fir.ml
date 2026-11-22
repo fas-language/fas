@@ -245,7 +245,15 @@ let agg_of_complex t =
    the classification of a result tells [Cplx] from [Agg] *)
 let agg_view = function Cplx t -> agg_of_complex t | a -> a
 
-type signature = { param_abis : abi list; result_abis : abi list; variadic : bool }
+type signature = {
+  param_abis : abi list;
+  result_abis : abi list;
+  variadic : bool;
+  ms_abi : bool;
+  ms_xmm_result : bool;
+      (** A Win64 vector or i128 result turned into a 16-byte aggregate
+          by native legalization. The ABI still returns it in XMM0. *)
+}
 type callee = Direct of string | Indirect of value
 
 (* call attributes *)
@@ -576,7 +584,7 @@ let create_module () =
   let alias_tags = Vec.create ("", 0) in
   ignore (Vec.push alias_tags ("", 0));
   {
-    funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false };
+    funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false };
                          linkage = Local; visibility = Default; fattrs = 0; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;

@@ -1069,9 +1069,6 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
 // ---------- Function Definition Emission ----------
 
 fn gen_function(node handle[Ast]) void fails {
-    if (ty_node(ty_unqual(node.decl.ty)).flags & TYF_MS_ABI) != 0 {
-        try pa_error(gc.p, node.loc, c"Microsoft x64 calling convention is unsupported in code generation")
-    }
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
@@ -1252,6 +1249,7 @@ fn gen_function(node handle[Ast]) void fails {
     buf_str(out_b, c"func ")
     gen_emit_sym_name(out_b, gen_sym_bytes(nid))
     buf_u8(out_b, 32)
+    if (fn_node.flags & TYF_MS_ABI) != 0 { buf_str(out_b, c"ms_abi ") }
     abi_emit_fir_sig(out_b, ret_ty, param_tids.p, n_params, is_var)
     buf_u8(out_b, 32)
     fn_link u8 = if is_gnu_inline { FIR_LOCAL } else { gen_sym_linkage(s) }

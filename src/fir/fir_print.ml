@@ -248,7 +248,7 @@ let rec abi_text = function
 
 let sig_text s =
   let ps = List.map abi_text s.param_abis @ if s.variadic then [ "..." ] else [] in
-  "(" ^ String.concat ", " ps ^ ") -> (" ^ String.concat ", " (List.map abi_text s.result_abis) ^ ")"
+  (if s.ms_abi then "ms_abi " else "") ^ (if s.ms_xmm_result then "xmm_result " else "") ^ "(" ^ String.concat ", " ps ^ ") -> (" ^ String.concat ", " (List.map abi_text s.result_abis) ^ ")"
 
 let attrs_text table bits =
   String.concat ""

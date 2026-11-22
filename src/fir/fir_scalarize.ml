@@ -45,8 +45,22 @@ let is_vec = function Vec _ -> true | _ -> false
 
 (* ---------- signatures ---------- *)
 
+(* Clang's Win64 convention on ELF passes a vector by a pointer to
+   a full 16-byte XMM image, even when it has fewer lanes. *)
+let vec_abi ms_abi t =
+  if not ms_abi then vec_agg t
+  else if vec_bytes t > 16 then unsupported "Microsoft x64 vector wider than 16 bytes"
+  else Agg { size = 16; align = 16; fields = [ (0, Leaf t) ] }
+
 let sig_of (s : signature) =
-  { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis }
+  let convert = function
+    | Scalar (Vec _ as t) | Ext ((Vec _ as t), _) -> vec_abi s.ms_abi t
+    | a -> a
+  in
+  let ms_xmm_result =
+    s.ms_xmm_result || (s.ms_abi && match s.result_abis with [ Scalar (Vec _) ] -> true | _ -> false)
+  in
+  { s with param_abis = List.map convert s.param_abis; result_abis = List.map convert s.result_abis; ms_xmm_result }
 
 let abi_has_vec = function Scalar t | Ext (t, _) -> is_vec t | Agg _ | Cplx _ -> false
 let sig_changes (s : signature) = List.exists abi_has_vec s.param_abis || List.exists abi_has_vec s.result_abis
@@ -416,7 +430,7 @@ let call_args cx (s : signature) (args : value array) =
     Array.mapi
       (fun k x ->
         if vec_value cx x then begin
-          if k >= nfixed then va := (k, vec_agg (src_ty cx x)) :: !va;
+          if k >= nfixed then va := (k, vec_abi s.ms_abi (src_ty cx x)) :: !va;
           vec_in_mem cx x
         end
         else get1 cx x)

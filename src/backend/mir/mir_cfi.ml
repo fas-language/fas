@@ -41,6 +41,8 @@ type event =
   | Pushed_rbp            (* after push rbp *)
   | Framed                (* after mov rbp, rsp *)
   | Saved of A.reg * int  (* after the i-th callee-saved push (0-based) *)
+  | Saved_xmm of int * int  (* xmm number and its downward offset from rbp *)
+  | Restored_xmm of int
   | Epilogue              (* before lea rsp, [rbp-..] of a return *)
   | Popped_rbp            (* after pop rbp *)
   | Returned              (* after ret, when code follows *)
@@ -142,6 +144,8 @@ let build (fdes : fde list) =
           | Pushed_rbp -> def_cfa_offset b 16; offset b 6 2
           | Framed -> def_cfa_register b 6
           | Saved (r, i) -> offset b (dwarf_reg r) (3 + i)
+          | Saved_xmm (x, off) -> offset b (17 + x) ((off + 16) / 8)
+          | Restored_xmm x -> u8 b (0xc0 lor (17 + x))
           | Epilogue -> remember_state b
           | Popped_rbp -> def_cfa b 7 8
           | Returned -> restore_state b)

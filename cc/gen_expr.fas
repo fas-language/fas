@@ -1267,9 +1267,6 @@ fn gen_call(n handle[Ast]) u32 fails {
     is_var bool = false
     pstart usize = 0
     if fn_node.kind == TYK_FUNC {
-        if (fn_node.flags & TYF_MS_ABI) != 0 {
-            try pa_error(gc.p, n.loc, c"Microsoft x64 calling convention is unsupported in code generation")
-        }
         ret_ty = fn_node.elem
         n_fixed = fn_node.aux2
         is_var = (fn_node.flags & TYF_VARIADIC) != 0
@@ -1369,6 +1366,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     if direct_sym != null && (gen_has_attr(direct_sym.attrs, c"noreturn") || gen_has_attr(direct_sym.attrs, c"_Noreturn")) {
         buf_str(b, c"noreturn ")
     }
+    if fn_node.kind == TYK_FUNC && (fn_node.flags & TYF_MS_ABI) != 0 { buf_str(b, c"ms_abi ") }
     abi_emit_fir_sig(b, ret_ty, sig_params, sig_n_fixed, sig_var)
     buf_u8(b, 32)
     if is_direct {
@@ -1405,6 +1403,23 @@ fn gen_type_builtin(n handle[Ast]) u32 fails {
     bname Bytes = cc_name(gc.p.names, n.op)
     if bytes_eq_c(bname, c"__builtin_va_arg") {
         try gen_eval_vm_type(n.ty)
+        if se_is_ms_va_list(gc.p, n.b) {
+            // An MS va_list is a cursor over eight-byte slots. The caller
+            // stores a pointer in slots whose object cannot fit by value.
+            ap u32 = try gen_lvalue(n.b)
+            ptr_ty u32 = ty_ptr(TY_VOID)
+            slot u32 = gen_load_ty(ptr_ty, ap, 8, false, false)
+            gen_store_ty(gen_ptradd_const(slot, 8), ap, 8, false, false)
+            size u64 = ty_size(n.ty)
+            indirect bool = ty_is_vector(n.ty) || (size != 1 && size != 2 && size != 4 && size != 8)
+            src u32 = if indirect { gen_load_ty(ptr_ty, slot, 8, false, false) } else { slot }
+            if gen_is_mem_ty(n.ty) {
+                dst u32 = gen_alloca_entry(size, ty_align(n.ty))
+                if size != 0 { gen_memcpy_const(dst, src, size, false) }
+                return dst
+            }
+            return gen_load_ty(n.ty, src, ty_align(n.ty), false, false)
+        }
         ap_v u32 = try gen_rvalue(n.b)
         v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
@@ -1516,16 +1531,23 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         while a != null { _ u32 = try gen_rvalue(a); a = a.next }
         return gen_const_i32(0)
     }
-    if bytes_eq_c(bname, c"__builtin_va_start") {
-        ap_v u32 = try gen_rvalue(a0)
+    if bytes_eq_c(bname, c"__builtin_va_start") || bytes_eq_c(bname, c"__builtin_c23_va_start") ||
+        bytes_eq_c(bname, c"__builtin_ms_va_start") {
+        ap_v u32 = if se_is_ms_va_list(gc.p, a0) { try gen_lvalue(a0) } else { try gen_rvalue(a0) }
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  va_start ")
         gen_emit_val(b, ap_v)
         buf_u8(b, 10)
         return gen_const_i32(0)
     }
-    if bytes_eq_c(bname, c"__builtin_va_end") {
+    if bytes_eq_c(bname, c"__builtin_va_end") || bytes_eq_c(bname, c"__builtin_ms_va_end") {
         if a0 != null { _ u32 = try gen_rvalue(a0) }
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__builtin_ms_va_copy") {
+        dst u32 = try gen_lvalue(a0)
+        src u32 = try gen_rvalue(a1)
+        gen_store_ty(src, dst, 8, false, false)
         return gen_const_i32(0)
     }
     if bytes_eq_c(bname, c"__builtin_va_copy") {

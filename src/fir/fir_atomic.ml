@@ -74,7 +74,7 @@ let i8 = Int 8
 let i32 = Int 32
 
 let libatomic =
-  let s params result = { param_abis = List.map (fun t -> Scalar t) params; result_abis = result; variadic = false } in
+  let s params result = { param_abis = List.map (fun t -> Scalar t) params; result_abis = result; variadic = false; ms_abi = false; ms_xmm_result = false } in
   [
     ("__atomic_load", s [ i64; ptr; ptr; i32 ] []);
     ("__atomic_store", s [ i64; ptr; ptr; i32 ] []);

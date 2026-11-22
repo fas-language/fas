@@ -33,10 +33,16 @@ let xr = function X i -> i | r -> invalid_arg ("Mir_emit: not an xmm register: "
    of 16 so a dynamic allocation below it stays 16-aligned *)
 let out_area (f : func) = Mir_isel.align_up f.out_size 16
 
-type frame = { slot_off : int array; nsaved : int; size : int  (** bytes below the saved registers *) }
+type frame = { slot_off : int array; nsaved : int; size : int; ms_xmm_off : int option }
 
 let layout (f : func) nsaved =
   let off = ref (8 * nsaved) in
+  let ms_xmm_off =
+    if f.ms_abi then begin
+      off := Mir_isel.align_up !off 16 + 160;
+      Some !off
+    end else None
+  in
   let slot_off =
     Array.init (Dynarray.length f.slots) (fun i ->
         let size, align = Dynarray.get f.slots i in
@@ -48,7 +54,7 @@ let layout (f : func) nsaved =
   let total = Mir_isel.align_up (!off + out_area f) 16 in
   (* frame offsets are 32-bit displacements off rbp *)
   if total > 0x7000_0000 then unsupported "@%s: a stack frame of %d bytes (at most 1.75 GiB)" f.name total;
-  { slot_off; nsaved; size = total - (8 * nsaved) }
+  { slot_off; nsaved; size = total - (8 * nsaved); ms_xmm_off }
 
 let mem fr (m : addr) =
   let sib base disp idx =
@@ -650,6 +656,7 @@ let zeroize a fr results =
    marker with its location id, and where its source variables live
    (Mir_dwarf.vloc, by Fir variable index) *)
 let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) =
+  if f.ms_abi && f.zeroize then unsupported "secret function with the Microsoft x64 calling convention";
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
   let events = ref [] and rows = ref [] in
@@ -665,6 +672,16 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
       event (Mir_cfi.Saved (r, i)))
     ra.saved;
   probed_frame a fr.size;
+  let saved_xmms visit =
+    Option.iter (fun base ->
+      for x = 6 to 15 do
+        let off = base - 16 * (x - 6) in
+        visit x off (A.Base (A.Rbp, -off))
+      done) fr.ms_xmm_off
+  in
+  saved_xmms (fun x off mem ->
+    A.movdqu_store a mem x;
+    event (Mir_cfi.Saved_xmm (x, off)));
   let nb = Array.length ra.items in
   let labels = Array.init nb (fun _ -> A.new_label a) in
   let slot_mem v = mem fr (at (Bslot ra.vslot.(v))) in
@@ -707,6 +724,7 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
     | Ret results ->
         event Mir_cfi.Epilogue;
         if f.zeroize then zeroize a fr results;
+        saved_xmms (fun x _ mem -> A.movdqu_load a x mem; event (Mir_cfi.Restored_xmm x));
         A.lea a A.Rsp (A.Base (A.Rbp, -8 * fr.nsaved));
         List.iter (A.pop a) (List.rev ra.saved);
         A.pop a A.Rbp;

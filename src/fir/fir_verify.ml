@@ -5,6 +5,13 @@
 
 open Fir
 
+let ms_sig_problem (s : signature) =
+  if s.ms_abi && List.length s.result_abis > 1 then Some "ms_abi requires at most one result"
+  else if s.ms_xmm_result &&
+    (not s.ms_abi || not (match s.result_abis with [ Agg { size = 16; align = 16; _ } ] -> true | _ -> false))
+  then Some "xmm_result requires an ms_abi signature returning one 16-byte, 16-aligned aggregate"
+  else None
+
 let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr
 
 (* an agg ABI describes a C struct or union: a size, a power-of-two
@@ -38,7 +45,7 @@ let rec abi_problem = function
                 | _ -> Some (Printf.sprintf "complex %s: a complex field is of f16, f32, f64 or f80" (ty_to_string t))))
           fields
 
-let verify_func (f : func) =
+let verify_func funcs (f : func) =
   let errors = ref [] in
   let nerr = ref 0 in
   let err fmt =
@@ -392,6 +399,7 @@ let verify_func (f : func) =
                   same "mask" m (mask_of (r 0))
                 end
             | Call { sig_; callee; args; attrs = _; va_aggs } ->
+                Option.iter (err "%s: %s" where) (ms_sig_problem sig_);
                 List.iter
                   (fun a -> Option.iter (err "%s: %s" where) (abi_problem a))
                   (sig_.param_abis @ sig_.result_abis @ List.map snd va_aggs);
@@ -402,7 +410,13 @@ let verify_func (f : func) =
                     if k < np0 || k >= Array.length args then err "%s: argument %d: an agg ABI is only for variadic arguments" where k
                     else if not (is_ptr (ty args.(k))) then err "%s: agg argument %d is %s, not ptr" where k (tys args.(k)))
                   va_aggs;
-                (match callee with Indirect v -> if not (is_ptr (ty v)) then err "%s: indirect callee is %s" where (tys v) | Direct _ -> ());
+                (match callee with
+                | Indirect v -> if not (is_ptr (ty v)) then err "%s: indirect callee is %s" where (tys v)
+                | Direct name ->
+                    match Hashtbl.find_opt funcs name with
+                    | Some f when f.sig_.ms_abi <> sig_.ms_abi || f.sig_.ms_xmm_result <> sig_.ms_xmm_result ->
+                        err "%s: calling convention mismatch in call to @%s" where name
+                    | _ -> ());
                 let ps = List.map abi_ty sig_.param_abis in
                 let np = List.length ps in
                 if Array.length args < np || ((not sig_.variadic) && Array.length args > np) then
@@ -638,6 +652,7 @@ let verify (m : modul) =
       | Some f ->
           if not f.defined then bad "resolver is only declared";
           if f.sig_.variadic then bad "resolver may not be variadic";
+          if f.sig_.ms_abi then bad "resolver requires the System V calling convention";
           (match f.sig_.result_abis with
           | [ Scalar (Ptr _) ] -> ()
           | _ -> bad "resolver must return a single ptr");
@@ -856,8 +871,10 @@ let verify (m : modul) =
     m.funcs;
   Vec.iter
     (fun f ->
+      let bad p = errs := Printf.sprintf "@%s: signature: %s" f.name p :: !errs in
+      Option.iter bad (ms_sig_problem f.sig_);
       List.iter
-        (fun a -> Option.iter (fun p -> errs := Printf.sprintf "@%s: signature: %s" f.name p :: !errs) (abi_problem a))
+        (fun a -> Option.iter bad (abi_problem a))
         (f.sig_.param_abis @ f.sig_.result_abis);
       (* a vector constant has one lane per lane of its type, each of the
          element type *)
@@ -875,5 +892,5 @@ let verify (m : modul) =
           | _ -> ())
         f.consts)
     m.funcs;
-  let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in
+  let fs = Vec.fold (fun acc f -> List.rev_append (verify_func funcs f) acc) [] m.funcs in
   List.rev !errs @ List.rev fs

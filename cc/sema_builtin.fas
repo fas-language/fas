@@ -30,12 +30,15 @@ fn se_builtin_count(p handle[Parser], t Token, n u32, min u32, max u32) void fai
     if n < min || n > max { try pa_error(p, t.loc, c"wrong number of builtin arguments") }
 }
 
+fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
+    name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
+    return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
+}
+
 fn se_builtin_va_list(p handle[Parser], e handle[Ast]) void fails {
     name u32 = cc_intern(p.names, bytes_c(c"__builtin_va_list"))
     sysv handle[Symbol] = pa_lookup(p, name)
-    name = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
-    ms handle[Symbol] = pa_lookup(p, name)
-    if ty_compatible(se_decay(e.ty), se_decay(sysv.ty)) || ty_compatible(se_decay(e.ty), se_decay(ms.ty)) { return }
+    if ty_compatible(se_decay(e.ty), se_decay(sysv.ty)) || se_is_ms_va_list(p, e) { return }
     try pa_error(p, e.loc, c"variadic builtin requires a va_list argument")
 }
 
@@ -264,13 +267,20 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
         bytes_eq_c(name, c"__builtin_ms_va_copy") {
         copy_args bool = bytes_ends_with(name, bytes_c(c"_copy"))
         start bool = bytes_ends_with(name, bytes_c(c"_start"))
-        try se_builtin_count(p, t, count, if copy_args { 2 } else { 1 }, if copy_args || start { 2 } else { 1 })
+        ms bool = bytes_starts_with(name, bytes_c(c"__builtin_ms_"))
+        try se_builtin_count(p, t, count, if copy_args || (ms && start) { 2 } else { 1 }, if copy_args || start { 2 } else { 1 })
         try se_builtin_va_list(p, args)
         if copy_args { try se_builtin_va_list(p, args.next) }
+        if ms != se_is_ms_va_list(p, args) || (copy_args && ms != se_is_ms_va_list(p, args.next)) {
+            try pa_error(p, args.loc, c"variadic builtin and va_list use different calling conventions")
+        }
         if start {
             func handle[Symbol] = p.function
             if func == null || (ty_node(ty_unqual(func.ty)).flags & TYF_VARIADIC) == 0 {
                 try pa_error(p, t.loc, c"va_start requires a variadic function")
+            }
+            if ms != ((ty_node(ty_unqual(func.ty)).flags & TYF_MS_ABI) != 0) {
+                try pa_error(p, t.loc, c"va_start and the enclosing function use different calling conventions")
             }
         }
     } else if se_builtin_ordered(name) {

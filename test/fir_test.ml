@@ -325,7 +325,7 @@ func @bad (ptr) -> () global {
 }
 |};
   (* constants are interned per function *)
-  let f = new_func "k" { param_abis = []; result_abis = []; variadic = false } in
+  let f = new_func "k" { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false } in
   check "intern" (iconst f i64 5L = iconst f i64 5L);
   check "intern width" (iconst f i32 5L <> iconst f i64 5L);
   check "neg limbs" (const_of f (iconst f i128 (-1L)) = Some (Cint (i128, [| -1L; -1L |])));

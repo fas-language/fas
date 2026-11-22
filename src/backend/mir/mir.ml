@@ -195,6 +195,7 @@ type home =
 
 type func = {
   name : string;
+  ms_abi : bool;
   vcls : rc Dynarray.t;  (** class of each virtual register *)
   blocks : block Dynarray.t;  (** block 0 is the entry *)
   slots : (int * int) Dynarray.t;  (** frame slots: size, alignment *)
@@ -210,8 +211,8 @@ type func = {
           registers other than the results (Mir_ra, Mir_emit) *)
 }
 
-let create name =
-  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = []; marks = Hashtbl.create 1; zeroize = false }
+let create ?(ms_abi = false) name =
+  { name; ms_abi; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = []; marks = Hashtbl.create 1; zeroize = false }
 
 let new_vreg f cls =
   Dynarray.add_last f.vcls cls;

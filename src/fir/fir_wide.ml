@@ -94,7 +94,10 @@ let abi_of (a : abi) : abi =
   | a -> a
 
 let sig_of (s : signature) =
-  { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis }
+  let ms_xmm_result =
+    s.ms_xmm_result || (s.ms_abi && match s.result_abis with [ Scalar (Int 128) ] -> true | _ -> false)
+  in
+  { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis; ms_xmm_result }
 
 let sig_changes (s : signature) = sig_of s <> s
 
@@ -130,7 +133,7 @@ let slot cx bytes align =
 
 let call_helper cx name params results args =
   Hashtbl.replace cx.helpers name ();
-  let sig_ = { param_abis = List.map (fun t -> Scalar t) params; result_abis = List.map (fun t -> Scalar t) results; variadic = false } in
+  let sig_ = { param_abis = List.map (fun t -> Scalar t) params; result_abis = List.map (fun t -> Scalar t) results; variadic = false; ms_abi = false; ms_xmm_result = false } in
   emit ~loc:cx.loc cx.g cx.b (Call { sig_; callee = Direct name; args; attrs = a_nounwind; va_aggs = [] }) (Array.of_list results)
 
 (* ---------- limb arithmetic on width n ---------- *)

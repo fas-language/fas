@@ -1388,6 +1388,8 @@ let sig_matches (a : signature) (b : signature) =
   && List.length a.result_abis = List.length b.result_abis
   && List.for_all2 same a.result_abis b.result_abis
   && a.variadic = b.variadic
+  && a.ms_abi = b.ms_abi
+  && a.ms_xmm_result = b.ms_xmm_result
 
 let tick st =
   st.steps <- st.steps + 1;
@@ -1432,7 +1434,8 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
           varargs = 0L;
         }
       in
-      (* the variadic arguments, laid out as SysV's overflow area *)
+      (* Lay out unnamed arguments as a SysV overflow area or an MS
+         array of eight-byte slots. An MS slot can point to a private copy. *)
       let varargs =
         if Array.length args <= fixed then 0L
         else begin
@@ -1448,10 +1451,11 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
                  args)
             |> List.filter_map Fun.id
           in
+          let slot = if sig_.ms_abi then fun _ -> (8, 8) else vararg_slot in
           let size =
             List.fold_left
               (fun pos (s, _) ->
-                let n, a = vararg_slot s in
+                let n, a = slot s in
                 ((pos + a - 1) / a * a) + n)
               0 items
           in
@@ -1459,12 +1463,21 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
           ignore
             (List.fold_left
                (fun pos (s, x) ->
-                 let n, a = vararg_slot s in
+                 let n, a = slot s in
                  let pos = (pos + a - 1) / a * a in
                  let at = Int64.add o.base (Int64.of_int pos) in
-                 (match s with
-                 | `Agg (size, _) -> write_raw st at (read_raw st (ptr_of x.(0)) size)
-                 | `Ty t -> write_value st t at x);
+                 let bytes, align, write =
+                   match s with
+                   | `Agg (size, align) ->
+                       (size, align, fun dst -> write_raw st dst (read_raw st (ptr_of x.(0)) size))
+                   | `Ty t -> (size_of t, 16, fun dst -> write_value st t dst x)
+                 in
+                 let vector = match s with `Ty (Vec _) -> true | _ -> false in
+                 if sig_.ms_abi && (vector || not (Fir_abi.ms_reg_size bytes)) then begin
+                   let arg = new_alloca st fr0 ~size:(max 1 bytes) ~align:(max 16 align) ~what:"variadic argument copy" in
+                   write arg.base;
+                   write_value st ptr at [| Bits [| arg.base |] |]
+                 end else write at;
                  pos + n)
                0 items);
           o.base
@@ -2036,11 +2049,14 @@ and exec st fr i =
       if fr.varargs = 0L && not fr.fi.fn.sig_.variadic then
         error "va_start in a function that is not variadic";
       let a = ptr_of (get1 st fr p) in
-      let w32 x = [| Bits [| Int64.of_int x |] |] in
-      write_value st i32 a (w32 48);
-      write_value st i32 (Int64.add a 4L) (w32 176);
-      write_value st ptr (Int64.add a 8L) [| Bits [| fr.varargs |] |];
-      write_value st ptr (Int64.add a 16L) [| Bits [| 0L |] |]
+      if fr.fi.fn.sig_.ms_abi then write_value st ptr a [| Bits [| fr.varargs |] |]
+      else begin
+        let w32 x = [| Bits [| Int64.of_int x |] |] in
+        write_value st i32 a (w32 48);
+        write_value st i32 (Int64.add a 4L) (w32 176);
+        write_value st ptr (Int64.add a 8L) [| Bits [| fr.varargs |] |];
+        write_value st ptr (Int64.add a 16L) [| Bits [| 0L |] |]
+      end
   | Va_arg p ->
       let t = rty 0 in
       let at = va_next st (ptr_of (get1 st fr p)) (`Ty t) in
@@ -2103,7 +2119,7 @@ let run_call st (target : sym) (sig_ : signature) (args : v array) =
 let run_function st ?(mi = 0) name (args : v array) =
   match lookup st mi name with
   | Fn fi as s -> run_call st s fi.fn.sig_ args
-  | Ifunc _ as s -> run_call st s { param_abis = []; result_abis = []; variadic = false } args
+  | Ifunc _ as s -> run_call st s { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false } args
   | _ -> error "@%s has no body" name
 
 let int_arg w x = [| Bits (W.of_int64 w x) |]

@@ -1238,6 +1238,8 @@ type plan =
   | Pregs of int * (int * eightbyte * reg) list  (** agg size, its parts in registers *)
   | Pstack of int * int  (** agg size, stack offset *)
   | Pmem80 of int  (** an f80 scalar (MEMORY class): its stack offset *)
+  | Pms_bits of int * loc  (** a small record coerced to an integer *)
+  | Pms_ref of F.abi * int * int * loc  (** address of the caller's copy *)
 
 (* Assigns registers and stack offsets to a list of ABI types; returns the
    plans, the stack bytes used and the number of xmm registers used *)
@@ -1295,6 +1297,32 @@ let plan_args ~sret abis =
   in
   (plans, !st, !xp)
 
+let ms_gpr_args = X64.[| Rcx; Rdx; R8; R9 |]
+
+let sret_reg ms_abi = G (if ms_abi then Rcx else Rdi)
+
+(* Each argument consumes one ordinal, including the hidden result
+   pointer. The caller always reserves all four register home slots. *)
+let plan_ms_args ~sret abis =
+  let first = if sret then 1 else 0 in
+  let plans = List.mapi (fun i (abi : F.abi) ->
+    let i = i + first in
+    let loc cls =
+      if i >= 4 then Lstack (8 * i)
+      else Lreg (match cls with Gpr -> G ms_gpr_args.(i) | Xmm -> X i)
+    in
+    match F.agg_view abi with
+    | Agg { size; _ } when Fir_abi.ms_reg_size size -> Pms_bits (size, loc Gpr)
+    | Agg { size; align; _ } -> Pms_ref (abi, size, align, loc Gpr)
+    | Scalar F.F80 -> Pms_ref (abi, 16, 16, loc Gpr)
+    | Scalar t | Ext (t, _) -> Pscalar (t, None, loc (cls_of_ty t))
+    | Cplx _ -> assert false)
+    abis
+  in
+  (plans, 8 * max 4 (first + List.length abis), 0)
+
+let call_arg_plans ms_abi = if ms_abi then plan_ms_args else plan_args
+
 type ret_plan =
   | Rnone
   | Rscalar of F.ty
@@ -1348,8 +1376,16 @@ let ret_regs = function
   | Rmulti (l, _) ->
       List.filter_map (function _, Mgpr k -> Some (G (if k = 0 then Rax else Rdx)) | _, Mxmm k -> Some (X k) | _, Mmem _ -> None) l
 
-(* true when the call passes a hidden pointer in rdi: sret or the block of
-   several results *)
+let call_ret_plan (sig_ : F.signature) =
+  if not sig_.ms_abi then plan_ret sig_.result_abis
+  else if sig_.ms_xmm_result then Rregs (16, [ (0, Esse16, X 0) ])
+  else match List.map F.agg_view sig_.result_abis with
+  | [ Agg { size; _ } ] when Fir_abi.ms_reg_size size -> Rregs (size, [ (0, Eint, G Rax) ])
+  | [ Agg { size; align; _ } ] -> Rsret (size, align)
+  | _ :: _ :: _ -> unsupported "multiple results with the Microsoft x64 calling convention"
+  | _ -> plan_ret sig_.result_abis
+
+(* True when the call passes a hidden pointer for sret or several results. *)
 let hidden_ptr = function Rsret _ | Rmulti (_, Some _) -> true | _ -> false
 
 (* the type a scalar result has inside the function *)
@@ -1458,14 +1494,14 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
         else match List.assoc_opt i va_aggs with Some abi -> abi | None -> F.Scalar (ty c a))
       (Array.to_list args)
   in
-  let rp = plan_ret sig_.result_abis in
+  let rp = call_ret_plan sig_ in
   let sret = hidden_ptr rp in
-  let plans, stack, nx = plan_args ~sret abis in
+  let plans, stack, nx = call_arg_plans sig_.ms_abi ~sret abis in
   c.mf.out_size <- max c.mf.out_size stack;
   (* an argument in memory aligned above 16 needs rsp aligned so at the
      call (the outgoing area starts at rsp) *)
   let out_align = List.fold_left (fun m (a : F.abi) -> match F.agg_view a with Agg { align; _ } -> max m align | _ -> m) 16 abis in
-  if out_align > 16 then emit c (Align_sp out_align);
+  if not sig_.ms_abi && out_align > 16 then emit c (Align_sp out_align);
   let target =
     match callee with
     | F.Direct name -> if Hashtbl.mem c.label_funcs name then Tlabel name else Tsym name
@@ -1474,6 +1510,11 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   (* memory first, then the register moves, so no temporary needs a
      register an argument already occupies *)
   let pending = ref [] in
+  let pass_gpr loc r =
+    match loc with
+    | Lreg p -> pending := Mreg (p, r) :: !pending
+    | Lstack o -> emit c (Store (8, { (at Bout) with disp = o }, r))
+  in
   List.iteri
     (fun i plan ->
       let a = args.(i) in
@@ -1482,23 +1523,41 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
           let r = use c a in
           let r = if ext = Some F.Sx then sx c (width t) r else r in
           match loc with
-          | Lreg p -> pending := Mreg (p, r) :: !pending
+          | Lreg p ->
+              pending := Mreg (p, r) :: !pending;
+              (* Floating arguments of a variadic call must also have a GPR
+                 image so an MS va_list can read them from home slots. *)
+              (match p with
+              | X k when sig_.ms_abi && sig_.variadic ->
+                  pass_gpr (Lreg (G ms_gpr_args.(k))) (to_gpr c (is_dbl t) r)
+              | _ -> ())
           | Lstack o ->
               if cls_of_ty t = Xmm then emit c (Fstore (is_dbl t, { (at Bout) with disp = o }, r))
               else emit c (Store (8, { (at Bout) with disp = o }, r)))
       | Pregs (size, l) -> pending := List.rev_append (load_eightbytes c size (use c a) l) !pending
       | Pstack (size, o) -> copy_bytes c ~src:(at_reg (use c a)) ~dst:{ (at Bout) with disp = o } size
-      | Pmem80 o -> copy_bytes c ~src:(addr80 c a) ~dst:{ (at Bout) with disp = o } 10)
+      | Pmem80 o -> copy_bytes c ~src:(addr80 c a) ~dst:{ (at Bout) with disp = o } 10
+      | Pms_bits (size, loc) ->
+          let r = fresh c Gpr in
+          emit c (Load (size, false, r, at_reg (use c a)));
+          pass_gpr loc r
+      | Pms_ref (abi, size, align, loc) ->
+          let p = aligned_mem c size (max 16 align) in
+          let src, bytes =
+            match abi with Scalar F.F80 -> (addr80 c a, 10) | _ -> (at_reg (use c a), size)
+          in
+          copy_bytes c ~src ~dst:(at_reg p) bytes;
+          pass_gpr loc p)
     plans;
   let sret_slot =
     match rp with
     | Rsret (size, align) ->
         let p = aligned_mem c size align in
-        pending := Mreg (G Rdi, p) :: !pending;
+        pending := Mreg (sret_reg sig_.ms_abi, p) :: !pending;
         Some p
     | Rmulti (_, Some (size, align)) ->
         let p = aligned_mem c size align in
-        pending := Mreg (G Rdi, p) :: !pending;
+        pending := Mreg (sret_reg sig_.ms_abi, p) :: !pending;
         Some p
     | _ -> None
   in
@@ -1506,7 +1565,7 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   emit_moves c pending;
   let arg_regs = List.map move_dst pending in
   let arg_regs =
-    if sig_.variadic then begin
+    if sig_.variadic && not sig_.ms_abi then begin
       emit c (Movi (G Rax, Int64.of_int nx));
       G Rax :: arg_regs
     end
@@ -1563,11 +1622,18 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
 
 let params c =
   let sig_ = c.fn.sig_ in
-  let rp = plan_ret sig_.result_abis in
+  let rp = call_ret_plan sig_ in
   let sret = hidden_ptr rp in
-  if sret then c.sret <- Some (copy c (G Rdi));
-  let plans, stack, _ = plan_args ~sret sig_.param_abis in
-  if sig_.variadic then begin
+  if sret then c.sret <- Some (copy c (sret_reg sig_.ms_abi));
+  let plans, stack, _ = call_arg_plans sig_.ms_abi ~sret sig_.param_abis in
+  if sig_.variadic && sig_.ms_abi then begin
+    let first = List.length plans + (if sret then 1 else 0) in
+    (* Home the unnamed register arguments in the caller's save area,
+       contiguous with the unnamed arguments that are already on stack. *)
+    for i = first to 3 do
+      emit c (Store (8, { (at Bin) with disp = 8 * i }, G ms_gpr_args.(i)))
+    done
+  end else if sig_.variadic then begin
     (* the register save area: rdi..r9 at 0..40, xmm0..7 at 48, 64, ... 160
        (all 16 bytes: a vector in a struct reads both halves back) *)
     let s = new_slot c.mf ~size:176 ~align:16 in
@@ -1586,6 +1652,13 @@ let params c =
   end;
   let ps = (F.block c.fn F.entry).params in
   if Array.length ps <> List.length plans then unsupported "entry parameters do not match the signature";
+  let receive_gpr = function
+    | Lreg p -> copy c p
+    | Lstack o ->
+        let r = fresh c Gpr in
+        emit c (Load (8, false, r, { (at Bin) with disp = o }));
+        r
+  in
   List.iteri
     (fun i plan ->
       let v = ps.(i) in
@@ -1612,12 +1685,17 @@ let params c =
           let r = fresh c Gpr in
           emit c (Lea (r, { (at Bin) with disp = o }));
           def c v r
-      | Pmem80 o -> copy80 c ~src:{ (at Bin) with disp = o } v)
+      | Pmem80 o -> copy80 c ~src:{ (at Bin) with disp = o } v
+      | Pms_bits (size, loc) ->
+          def c v (spill_eightbytes c size [ (0, Eint, receive_gpr loc) ])
+      | Pms_ref (abi, _, _, loc) ->
+          let p = receive_gpr loc in
+          match abi with Scalar F.F80 -> copy80 c ~src:(at_reg p) v | _ -> def c v p)
     plans
 
 let ret c vals =
   let sig_ = c.fn.sig_ in
-  match (plan_ret sig_.result_abis, vals) with
+  match (call_ret_plan sig_, vals) with
   | Rnone, [||] -> set_term c (Ret [])
   | Rx87 (false, 1), [| v |] ->
       fld80 c (addr80 c v);
@@ -1687,18 +1765,27 @@ let va_info c =
   match c.va with Some v -> v | None -> unsupported "va_start in a function that is not variadic"
 
 let va_start c p =
-  let gp, fp, stack, s = va_info c in
-  let rp = use c p in
-  let t1 = movi c (Int64.of_int (8 * gp)) in
-  emit c (Store (4, at_reg rp, t1));
-  let t2 = movi c (Int64.of_int (48 + (16 * fp))) in
-  emit c (Store (4, { (at_reg rp) with disp = 4 }, t2));
-  let t3 = fresh c Gpr in
-  emit c (Lea (t3, { (at Bin) with disp = stack }));
-  emit c (Store (8, { (at_reg rp) with disp = 8 }, t3));
-  let t4 = fresh c Gpr in
-  emit c (Lea (t4, slot_addr s));
-  emit c (Store (8, { (at_reg rp) with disp = 16 }, t4))
+  if c.fn.sig_.ms_abi then begin
+    let sig_ = c.fn.sig_ in
+    let first = List.length sig_.param_abis +
+      (if hidden_ptr (call_ret_plan sig_) then 1 else 0) in
+    let cursor = fresh c Gpr in
+    emit c (Lea (cursor, { (at Bin) with disp = 8 * first }));
+    emit c (Store (8, at_reg (use c p), cursor))
+  end else begin
+    let gp, fp, stack, s = va_info c in
+    let rp = use c p in
+    let t1 = movi c (Int64.of_int (8 * gp)) in
+    emit c (Store (4, at_reg rp, t1));
+    let t2 = movi c (Int64.of_int (48 + (16 * fp))) in
+    emit c (Store (4, { (at_reg rp) with disp = 4 }, t2));
+    let t3 = fresh c Gpr in
+    emit c (Lea (t3, { (at Bin) with disp = stack }));
+    emit c (Store (8, { (at_reg rp) with disp = 8 }, t3));
+    let t4 = fresh c Gpr in
+    emit c (Lea (t4, slot_addr s));
+    emit c (Store (8, { (at_reg rp) with disp = 16 }, t4))
+  end
 
 (* the next [size] bytes (rounded to 8) of the overflow area, aligned to
    [align]: returns their address and advances the va_list *)
@@ -2198,7 +2285,7 @@ let inst c i =
       (* a call to the correctly rounded helper Mir_runtime.add appended *)
       match rty () with
       | (F.F32 | F.F64) as t ->
-          let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false } in
+          let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false; ms_abi = false; ms_xmm_result = false } in
           call c ~sig_ ~callee:(F.Direct (Mir_runtime.fma_name (t = F.F64))) ~args:[| a; b; d |] ~attrs:0 ~va_aggs:[] ir.results
       | t -> unsupported "fma of %s" (F.ty_to_string t))
   | Fsh (left, a, b, n) -> set (funnel c left (width (rty ())) a b n)
@@ -2631,7 +2718,7 @@ let promotable_allocas (fn : F.func) =
   end
 
 let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
-  let mf = Mir.create fn.name in
+  let mf = Mir.create ~ms_abi:fn.sig_.ms_abi fn.name in
   for _ = 1 to F.num_blocks fn do
     ignore (new_block mf)
   done;

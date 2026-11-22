@@ -328,6 +328,8 @@ and parse_agg lx =
       Agg { size; align; fields = List.rev !fields }
 
 let parse_sig lx =
+  let ms_abi = accept_ident lx "ms_abi" in
+  let ms_xmm_result = ms_abi && accept_ident lx "xmm_result" in
   expect lx "(";
   let params = ref [] and variadic = ref false in
   if not (accept lx ")") then begin
@@ -347,7 +349,7 @@ let parse_sig lx =
     in
     go ()
   end;
-  { param_abis = List.rev !params; result_abis = List.rev !results; variadic = !variadic }
+  { param_abis = List.rev !params; result_abis = List.rev !results; variadic = !variadic; ms_abi; ms_xmm_result }
 
 (* ---------- function bodies ---------- *)
 
