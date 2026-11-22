@@ -64,14 +64,16 @@ def cases(corpus, suites):
 
 
 def check(fcc, case):
+    checking_oracle = case.expect is None
     try:
-        if case.expect is None:
+        if checking_oracle:
             flags = ("-ferror-limit=1",)
             if case.source is not None:
                 flags += ("-x", "c")
             ref = run(CLANG, case.path, case.source, flags)
             if ref.returncode != 0:
                 return "clang-skip", ref.stderr.decode(errors="replace")
+            checking_oracle = False
         got = run(fcc, case.path, case.source)
         if got.returncode == 0:
             return ("accepted" if not case.expect else "unexpected-accept"), ""
@@ -80,7 +82,7 @@ def check(fcc, case):
             return "process-error", f"exit {got.returncode}\n{detail}"
         return ("rejected" if case.expect == 1 else "unexpected-reject"), detail
     except subprocess.TimeoutExpired as timeout:
-        return "timeout", str(timeout.cmd[0])
+        return ("oracle-timeout" if checking_oracle else "timeout"), str(timeout.cmd[0])
 
 
 def constant_cases(seed, count):
@@ -245,7 +247,7 @@ def expectations(path):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         status, case, reason = line.split(maxsplit=2)
-        if status not in {"unexpected-reject", "unexpected-accept"} or case in result:
+        if status not in {"unexpected-reject", "unexpected-accept", "oracle-timeout"} or case in result:
             raise ValueError(f"{path}:{number}: invalid or duplicate expectation")
         result[case] = status, reason
     return result

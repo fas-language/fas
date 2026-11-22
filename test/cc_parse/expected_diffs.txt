@@ -1,6 +1,10 @@
 # STATUS SUITE/PATH REASON
 # Each entry records one deliberate difference from the corpus oracles.
 unexpected-reject headers/tgmath.h The absolute glibc include hits a float-type guard under the fcc GCC 4.2 compatibility macros
+oracle-timeout headers/pybind11/numpy.h Clang 22 hangs in syntax-only mode after diagnosing missing Python.h (upstream-bugs.md item 12)
+oracle-timeout headers/pybind11/eigen.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11/eigen/matrix.h
+oracle-timeout headers/pybind11/eigen/matrix.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11 Eigen support
+oracle-timeout headers/pybind11/eigen/tensor.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11 Eigen support
 unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-2.c Relies on the C2Y type-name controlling operand for _Generic
 unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-3.c Relies on the C2Y type-name controlling operand for _Generic
 unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-4.c Relies on the C2Y type-name controlling operand for _Generic
