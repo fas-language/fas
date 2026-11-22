@@ -1660,6 +1660,21 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     if bytes_eq_c(bname, c"__builtin_ia32_emms") {
         return gen_const_i32(0)
     }
+    if bytes_eq_c(bname, c"__builtin_ia32_pmovmskb128") {
+        // Lane i contributes its sign bit to bit i of the unsigned mask.
+        v u32 = try gen_rvalue(a0)
+        zero u32 = gen_const_zero(a0.ty)
+        signs u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, signs)
+        buf_str(b, c" = icmp slt <16 x i1> ")
+        gen_emit_val(b, v)
+        buf_str(b, c", ")
+        gen_emit_val(b, zero)
+        buf_u8(b, 10)
+        return gen_cast(c"zext", n.ty, gen_cast(c"bitcast", TY_USHORT, signs))
+    }
     if bytes_eq_c(bname, c"__builtin_nans") || bytes_eq_c(bname, c"__builtin_nansf") ||
        bytes_eq_c(bname, c"__builtin_nansl") || bytes_eq_c(bname, c"__builtin_nansf16") {
         ft u32 = n.ty

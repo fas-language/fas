@@ -454,13 +454,23 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     try drv_link(out_exe, &obj_inputs, &o.link_args, o.is_shared, o.is_static, o.is_no_pie, o.no_stdlib)
 }
 
-fn cli_compile_one_c(o handle[Options], dir_strs handle[Vec[addr]], dir_ranks handle[Vec[u8]],
+fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ranks handle[Vec[u8]],
                      in_path addr, fir_out_path addr) void fails {
+    // The command owns the input and output paths. Everything built from
+    // the source is only needed until this translation unit is emitted.
+    region Region = {}
+    previous handle[Region] = region_switch(&region)
+    defer { region_switch(previous); region_dispose(&region) }
+
+    options Options = {}
+    copy_into(&options, command)
+    o handle[Options] = &options
+    dirs handle[Vec[SearchDir]] = &o.dirs
+    mem_set(handle_addr(dirs), 0, sizeof[Vec[SearchDir]])
     p Pp = {}
     defer { expand_release(&p.stream) }
     cc_intern(&p.names, bytes_empty())
-    // Rebuild o.dirs interned into this TU's Pp
-    vec_clear[SearchDir](&o.dirs)
+    // Include-directory IDs belong to this TU's interner.
     for i usize in 0..dir_strs.n {
         vec_push[SearchDir](&o.dirs, {cc_intern(&p.names, bytes_c(vec_get(dir_strs, i))), vec_get(dir_ranks, i)})
     }

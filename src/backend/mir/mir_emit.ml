@@ -95,8 +95,8 @@ let fstore a dbl m x = A.sse_rm a (A.fprefix dbl) 0x11 ~reg:x m
 
    The assembler is $FAS_AS (a command line), else `as --64`, else
    `$FAS_CC -c -x assembler` (cc by default). A snippet may not put bytes in
-   another section, define a global symbol, be aligned to more than 16, or
-   refer to a place in another snippet. *)
+   another section, define a global symbol, or refer to a place in
+   another snippet. Its alignment contributes to that of .text. *)
 
 (* a snippet: its bytes, its alignment and its relocations, at offsets in
    the bytes, against an outside symbol or a place in the snippet *)
@@ -307,7 +307,6 @@ let assemble_snippets (texts : (bool * string) list) =
       if sec.(i) < 0 then { code = ""; salign = 1; srelocs = [] }
       else
         let s = o.sections.(sec.(i)) in
-        if s.alignment > 16 then unsupported "inline asm aligned to %d bytes (at most 16)" s.alignment;
         { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment; srelocs = List.rev relocs.(i) })
 
 (* Top-level asm ([module_asm]): the text is assembled in one run, and every
@@ -421,14 +420,15 @@ let asm_snippets compiled =
           | _ -> ()))
         ra.items)
     compiled;
-  match List.rev !texts with
-  | [] -> fun () -> invalid_arg "Mir_emit: no inline asm snippet left"
-  | l ->
-      let arr = assemble_snippets l and next = ref 0 in
-      fun () ->
-        let s = arr.(!next) in
-        incr next;
-        s
+  let snippets = match List.rev !texts with [] -> [||] | l -> assemble_snippets l in
+  let align = Array.fold_left (fun n s -> max n s.salign) 16 snippets in
+  let next = ref 0 in
+  let take () =
+    let s = snippets.(!next) in
+    incr next;
+    s
+  in
+  (take, align)
 
 (* Stack probes (the -fstack-clash-protection rule): rsp never drops more
    than a page below the lowest address already touched, so growing into
@@ -1066,7 +1066,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
       m.funcs;
     let compiled = List.rev !compiled in
     Mir_export.flush m;
-    let snippet = asm_snippets compiled in
+    let snippet, text_align = asm_snippets compiled in
     List.iter
       (fun ((fn : F.func), mf, ra) ->
         begin
@@ -1312,7 +1312,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
            match Hashtbl.find_opt masm.mvisibility n with
            | Some v -> v
            | None -> Option.value (Hashtbl.find_opt syms.visibility n) ~default:0)
-         ~alignments:[| 16; rodata.alignment; data.alignment; !bss_alignment |]
+         ~alignments:[| text_align; rodata.alignment; data.alignment; !bss_alignment |]
          {
            text;
            text_relocs;

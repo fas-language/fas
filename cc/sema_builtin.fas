@@ -241,6 +241,14 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if bytes_eq_c(name, c"__builtin_tgmath") {
         try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
     }
+    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb128") {
+        try se_builtin_count(p, t, count, 1, 1)
+        ty u32 = ty_unqual(args.ty)
+        elem u32 = ty_node(ty).elem
+        if !ty_is_vector(ty) || ty_size(ty) != 16 || !ty_is_integer(elem) || ty_size(elem) != 1 {
+            try pa_error(p, args.loc, c"movemask requires a vector of sixteen bytes")
+        }
+    }
     bit_arity u32 = se_stdc_bit_arity(name)
     if bit_arity != 0 {
         try se_check_stdc_bit(p, t, args, count, bit_arity)

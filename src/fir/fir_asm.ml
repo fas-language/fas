@@ -78,8 +78,31 @@ let reg_canon name =
 (* What a clobber means *)
 type clobber = Creg of string | Cx87 of int | Cmemory | Cflags | Cignored
 
+(* GNU register numbers are the target's compiler numbering, which
+   differs from the encoding order (for example, 1 is dx, not cx). *)
+let gnu_clobber_names =
+  Array.of_list
+    ([ "ax"; "dx"; "cx"; "bx"; "si"; "di"; "bp"; "sp"; "st" ]
+     @ List.init 7 (fun k -> Printf.sprintf "st(%d)" (k + 1))
+     @ [ "argp"; "flags"; "fpcr"; "fpsr"; "dirflag"; "frame" ]
+     @ List.init 8 (fun k -> "xmm" ^ string_of_int k)
+     @ List.init 8 (fun k -> "mm" ^ string_of_int k)
+     @ List.init 8 (fun k -> "r" ^ string_of_int (k + 8))
+     @ List.init 8 (fun k -> "xmm" ^ string_of_int (k + 8)))
+
 let clobber c =
-  match String.lowercase_ascii c with
+  let name = String.lowercase_ascii c in
+  let len = String.length name in
+  let base = if len > 0 && (name.[0] = '%' || name.[0] = '#') then 1 else 0 in
+  let name = String.sub name base (len - base) in
+  let name =
+    if String.for_all (function '0' .. '9' -> true | _ -> false) name then
+      match int_of_string_opt name with
+      | Some k when k < Array.length gnu_clobber_names -> gnu_clobber_names.(k)
+      | _ -> name
+    else name
+  in
+  match name with
   | "memory" -> Cmemory
   | "cc" | "flags" | "eflags" | "rflags" | "dirflag" | "fpsr" | "fpcr" -> Cflags
   | "st" | "st(0)" -> Cx87 0
@@ -90,7 +113,7 @@ let clobber c =
       Cignored
   | n when String.length n = 2 && n.[0] = 'k' -> Cignored  (* AVX-512 masks: never used *)
   | _ -> (
-      match reg_canon c with
+      match reg_canon name with
       | Some r -> Creg r
       | None -> fail "unknown register %S in an asm clobber" c)
 

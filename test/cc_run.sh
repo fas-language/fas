@@ -33,6 +33,9 @@ case "${1:-all}" in
     --abi)
         exec bash "$ROOT/test/cc_run/ms_abi/check.sh"
         ;;
+    --regressions)
+        exec bash "$ROOT/test/cc_run/regressions/check.sh"
+        ;;
     all)
         echo "=== 1. Manifest run-agree differential tests (fcc vs clang-22) ==="
         python3 "$ROOT/test/cc_run/run_manifest.py" --show 15
@@ -45,6 +48,9 @@ case "${1:-all}" in
         echo ""
         echo "=== 4. Microsoft x64 ABI interoperability ==="
         bash "$ROOT/test/cc_run/ms_abi/check.sh"
+        echo ""
+        echo "=== 5. Directed compiler regressions ==="
+        bash "$ROOT/test/cc_run/regressions/check.sh"
         ;;
     *)
         exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"
