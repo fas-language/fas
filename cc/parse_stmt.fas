@@ -1,11 +1,17 @@
-// A jump target may only use variably modified declarations already in scope
-// at its source. The barrier chain snapshots that scope at each endpoint.
-struct VmBarrier { previous handle[VmBarrier] }
+// A jump cannot enter a statement expression or skip a variably modified
+// declaration. The barrier chain snapshots the scope at each endpoint.
+struct VmBarrier {
+    previous handle[VmBarrier]
+    statement_expr bool
+}
 struct Jump { label handle[Label], vm handle[VmBarrier], loc u32, next handle[Jump] }
 
 fn pa_check_jump(p handle[Parser], from handle[VmBarrier], to handle[VmBarrier], loc u32) void fails {
     while from != null && from != to { from = from.previous }
-    if from != to { try pa_error(p, loc, c"jump enters the scope of a variably modified declaration") }
+    if from != to {
+        if to.statement_expr { try pa_error(p, loc, c"jump enters a statement expression") }
+        try pa_error(p, loc, c"jump enters the scope of a variably modified declaration")
+    }
 }
 
 fn pa_add_jump(p handle[Parser], label handle[Label], loc u32) void {
@@ -160,10 +166,16 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
     return n
 }
 
-fn pa_block(p handle[Parser], scope bool) handle[Ast] fails {
+fn pa_block(p handle[Parser], scope bool, statement_expr bool) handle[Ast] fails {
     t Token = try pa_expect(p, c"{")
     if scope { pa_enter(p) }
     defer { if scope { pa_leave(p) } }
+    if statement_expr {
+        barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
+        barrier.previous = p.vm
+        barrier.statement_expr = true
+        p.vm = barrier
+    }
     xs AstList = {}
     while !(try pa_accept(p, c"}")) {
         next Token = try pa_peek(p)
@@ -284,7 +296,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
     t Token = try pa_peek(p)
     attrs handle[Attr] = try pa_attributes(p)
     if attrs != null { t = try pa_peek(p) }
-    if pa_is(p, t, c"{") { return try pa_block(p, true) }
+    if pa_is(p, t, c"{") { return try pa_block(p, true, false) }
     if pa_asm_word(p, t) { return try pa_asm(p, false) }
     n handle[Ast] = pa_node(ND_STMT, t.loc, TY_VOID)
     n.attrs = attrs
@@ -437,7 +449,7 @@ fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[A
         if !se_complete(formal.ty) { try pa_error(p, formal.loc, c"parameter has incomplete type") }
         formal = formal.next
     }
-    body handle[Ast] = try pa_block(p, false)
+    body handle[Ast] = try pa_block(p, false, false)
     for i usize in 0..p.label_list.n {
         l handle[Label] = handle_from_addr(p.label_list.p[addr, i])
         if l.used && !l.defined { try pa_error(p, l.loc, c"use of undefined label") }

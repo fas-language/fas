@@ -850,7 +850,7 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
         if try pa_at(p, c"{") {
             try pa_gnu(p, t)
             if p.function == null { try pa_error(p, t.loc, c"statement expression outside a function") }
-            block handle[Ast] = try pa_block(p, true)
+            block handle[Ast] = try pa_block(p, true, true)
             try pa_expect(p, c")")
             return try pa_postfix(p, block)
         }
