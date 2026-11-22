@@ -52,3 +52,8 @@ static_assert(sizeof(parenthesized_string) == 5);
 struct ElidedInner { int x[2], y; };
 struct ElidedOuter { struct ElidedInner inner; };
 struct ElidedOuter brace_elision = (struct ElidedOuter){ 1, 2, 3 };
+
+static_assert(__builtin_strcmp("a", "z") == -1);
+static_assert(__builtin_strcmp("z", "a") == 1);
+static_assert(__builtin_strcmp("a\0b", "a\0c") == 0);
+static_assert(__builtin_strcmp("\303" "\251", "\u00e9") == 0);

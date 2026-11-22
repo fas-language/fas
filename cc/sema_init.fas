@@ -78,45 +78,83 @@ fn se_init_elem(ty u32, index u64) u32 {
 // overrides the corresponding part of an earlier initializer.
 struct ConstPath { index u64, rest handle[ConstPath] }
 
-// Decode bytes only when folding reads one from a narrow string. Many
-// strings are never read by the front end, so retain their token spellings.
+// Keep string token spellings in the AST. Decode only when folding a
+// read or comparison of narrow string contents.
+struct StringBytes {
+    piece handle[Ast]
+    text Bytes
+    pos usize
+    encoded Buf
+    pending usize
+}
+
+fn se_next_string_byte(p handle[Parser], s handle[StringBytes]) u8 fails {
+    if s.pending < s.encoded.n {
+        byte u8 = s.encoded.p[u8, s.pending]
+        s.pending += 1
+        return byte
+    }
+    while s.piece != null {
+        if s.pos == 0 {
+            s.text = cc_name(p.names, s.piece.op)
+            s.pos = if s.text.p[u8] == 34 { 1 } else { 3 }
+        }
+        if s.pos + 1 >= s.text.n {
+            s.piece = s.piece.next
+            s.pos = 0
+            continue
+        }
+        ch u8 = s.text.p[u8, s.pos]
+        s.pos += 1
+        if ch != 92 { return ch }
+        kind u8 = s.text.p[u8, s.pos]
+        e Escape = try expr_escape(p.names, bytes_from(s.text, s.pos), s.piece.loc)
+        s.pos += e.width
+        if kind == 117 || kind == 85 || kind == 78 {
+            s.encoded.n = 0
+            utf8_append(&s.encoded, e.cp)
+            s.pending = 1
+            return s.encoded.p[u8]
+        }
+        return trunc[u8](e.cp)
+    }
+    // The terminator and the remaining elements of a wider destination
+    // array are zero-initialized.
+    return 0
+}
+
 fn se_string_byte(p handle[Parser], n handle[Ast], index u64, elem u32) handle[Ast] {
     if ty_size(elem) != 1 { return null }
-    piece handle[Ast] = n.a
-    if piece == null {
+    if index >= n.value - 1 { return se_int(n.loc, elem, 0) }
+    if n.a == null {
         // Predefined function names use an unquoted spelling.
         s Bytes = cc_name(p.names, n.op)
-        return se_int(n.loc, elem, if index < s.n { zext[u64](s.p[u8, index]) } else { 0 })
+        return se_int(n.loc, elem, zext[u64](s.p[u8, index]))
     }
-    encoded Buf = {}
-    defer { buf_free(&encoded) }
-    while piece != null {
-        s Bytes = cc_name(p.names, piece.op)
-        i usize = if s.p[u8] == 34 { 1 } else { 3 }
-        while i + 1 < s.n {
-            ch u8 = s.p[u8, i]
-            i += 1
-            if ch == 92 {
-                kind u8 = s.p[u8, i]
-                e Escape = expr_escape(p.names, bytes_from(s, i), piece.loc) catch { return null }
-                i += e.width
-                if kind == 117 || kind == 85 {
-                    encoded.n = 0
-                    utf8_append(&encoded, e.cp)
-                    if index < encoded.n { return se_int(n.loc, elem, zext[u64](encoded.p[u8, index])) }
-                    index -= encoded.n
-                    continue
-                }
-                ch = trunc[u8](e.cp)
-            }
-            if index == 0 { return se_int(n.loc, elem, zext[u64](ch)) }
-            index -= 1
-        }
-        piece = piece.next
+    cursor StringBytes = {}
+    cursor.piece = n.a
+    defer { buf_free(&cursor.encoded) }
+    for i u64 in 0..index {
+        se_next_string_byte(p, &cursor) catch { return null }
     }
-    // The terminator and any remaining elements of a wider destination
-    // array are initialized to zero.
-    return se_int(n.loc, elem, 0)
+    byte u8 = se_next_string_byte(p, &cursor) catch { return null }
+    return se_int(n.loc, elem, zext[u64](byte))
+}
+
+fn se_builtin_strcmp(p handle[Parser], loc u32, a handle[Ast], b handle[Ast]) handle[Ast] fails {
+    if a.kind != ND_STRING || b.kind != ND_STRING || a.a == null || b.a == null ||
+        ty_node(ty_unqual(a.ty)).elem != TY_CHAR || ty_node(ty_unqual(b.ty)).elem != TY_CHAR { return null }
+    x StringBytes = {}
+    x.piece = a.a
+    y StringBytes = {}
+    y.piece = b.a
+    defer { buf_free(&x.encoded); buf_free(&y.encoded) }
+    while true {
+        m u8 = try se_next_string_byte(p, &x)
+        n u8 = try se_next_string_byte(p, &y)
+        if m != n { return se_int(loc, TY_INT, if m < n { ~0 } else { 1 }) }
+        if m == 0 { return se_int(loc, TY_INT, 0) }
+    }
 }
 
 fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {

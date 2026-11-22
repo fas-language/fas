@@ -528,6 +528,11 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
         word Bytes = cc_name(p.names, a.op)
         try se_check_builtin_call(p, t, word, xs.first, count)
         ret = pa_builtin_result(p, word, xs.first, count)
+        if bytes_eq_c(word, c"__builtin_strcmp") {
+            if count != 2 { try pa_error(p, t.loc, c"wrong number of strcmp builtin arguments") }
+            folded handle[Ast] = try se_builtin_strcmp(p, t.loc, xs.first, xs.first.next)
+            if folded != null { return folded }
+        }
         if bytes_eq_c(word, c"__builtin_ia32_paddq") || bytes_eq_c(word, c"__builtin_ia32_psubq") {
             // GCC's MMX arithmetic takes one-lane vectors. A scalar of the
             // same width can be explicitly cast, but cannot be passed as-is.
