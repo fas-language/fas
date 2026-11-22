@@ -20,13 +20,17 @@ use "gen_expr.fas"
 
 // ---------- Label & BlockAddr Management ----------
 
-fn gen_get_label_block(lbl handle[Label]) u32 {
-    key U64Key = {addr_bits(handle_addr(lbl))}
+fn gen_get_label_block_by_name(name_id u32) u32 {
+    key U64Key = {zext[u64](name_id)}
     existing u32 = table_get(&gc.labels, &key) catch 0
     if existing != 0 { return existing }
     blk u32 = gen_new_block()
     _ bool = table_put(&gc.labels, &key, blk)
     return blk
+}
+
+fn gen_get_label_block(lbl handle[Label]) u32 {
+    return gen_get_label_block_by_name(lbl.name)
 }
 
 fn gen_mark_addr_taken(blk_id u32) void {
@@ -131,7 +135,8 @@ fn gen_local_decl(n handle[Ast]) void fails {
         return
     }
 
-    // Normal automatic local variable
+    // Normal automatic local variable (always allocate entry-block slot even in dead code,
+    // since a goto/case label later in the block may jump into its scope!)
     sz u64 = ty_size(s.ty)
     al u64 = ty_align(s.ty)
     slot u32 = gen_alloca_entry(sz, al)
@@ -147,7 +152,7 @@ fn gen_local_decl(n handle[Ast]) void fails {
     }
 
     init handle[Ast] = handle_from_addr(s.value)
-    if init != null {
+    if init != null && !gen_is_terminated() {
         try gen_auto_init(slot, s.ty, init, true)
     }
 }
@@ -227,8 +232,9 @@ fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
 thread var cur_switch handle[SwitchInfo] = null
 
 fn gen_switch_stmt(n handle[Ast]) void fails {
-    key_v u32 = try gen_rvalue(n.a)
-    key_ty u32 = ty_unqual(n.a.ty)
+    raw_v u32 = try gen_rvalue(n.a)
+    key_ty u32 = ty_integer_promote(ty_unqual(n.a.ty))
+    key_v u32 = gen_convert(raw_v, n.a.ty, key_ty)
     sw SwitchInfo = {}
     defer { vec_free(&sw.cases); table_free(&sw.case_map) }
     gen_collect_switch_cases(n.b, &sw)
@@ -572,7 +578,7 @@ fn gen_stmt(n handle[Ast]) void fails {
         return
     }
     if n.kind == ND_DECL {
-        if !gen_is_terminated() { try gen_local_decl(n) }
+        try gen_local_decl(n)
         return
     }
     if n.kind == ND_ASM {
@@ -796,7 +802,12 @@ fn gen_stmt(n handle[Ast]) void fails {
         if n.a != null && !ty_is_void(gc.cur_ret_ty) {
             rv u32 = try gen_rvalue(n.a)
             rv = gen_convert(rv, n.a.ty, gc.cur_ret_ty)
-            if gc.cleanups.n > 0 {
+            if gen_is_wide_bitint(gc.cur_ret_ty) {
+                tmp u32 = gen_alloca_entry(ty_size(gc.cur_ret_ty), ty_align(gc.cur_ret_ty))
+                gen_store_ty(rv, tmp, ty_align(gc.cur_ret_ty), false, false)
+                try gen_run_cleanups_to(0)
+                gen_term_ret_val(tmp)
+            } else if gc.cleanups.n > 0 {
                 // Save return value before running cleanups
                 if gen_is_mem_ty(gc.cur_ret_ty) {
                     tmp u32 = gen_alloca_entry(ty_size(gc.cur_ret_ty), ty_align(gc.cur_ret_ty))
@@ -825,11 +836,13 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
     if n == null { return }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
-        if bytes_eq_c(op, c"&&") && n.extra != null {
-            lbl handle[Label] = handle_from_addr(n.extra)
-            blk u32 = gen_get_label_block(lbl)
+        if bytes_eq_c(op, c"&&") && n.value != 0 {
+            blk u32 = gen_get_label_block_by_name(trunc[u32](n.value))
             gen_mark_addr_taken(blk)
         }
+    }
+    if n.kind == ND_DECL && n.decl != null && n.decl.value != null {
+        gen_prescan_addr_taken(handle_from_addr(n.decl.value))
     }
     gen_prescan_addr_taken(n.a)
     gen_prescan_addr_taken(n.b)
@@ -896,8 +909,8 @@ fn gen_function(node handle[Ast]) void fails {
         slot u32 = gen_alloca_entry(sz, al)
         key U64Key = {addr_bits(handle_addr(ps))}
         _ bool = table_put(&gc.locals, &key, slot)
-        if gen_is_mem_ty(pt) {
-            // Copy agg/complex parameter bytes into local slot (per Fir SPEC.md §5)
+        if gen_is_mem_ty(pt) || gen_is_wide_bitint(pt) {
+            // Copy agg/complex/wide-BitInt parameter bytes into local slot (per Fir SPEC.md §5)
             if sz > 0 { gen_memcpy_const(slot, i, sz, false) }
         } else {
             gen_store_ty(i, slot, al, false, false)
@@ -971,9 +984,13 @@ fn gen_function(node handle[Ast]) void fails {
     // Patch any `blockaddr(@fn, 00000000)` placeholders with the exact 0-based block index
     for i usize in 0..gc.ba_patches.n {
         pt handle[BlockAddrPatch] = vec_at(&gc.ba_patches, i)
-        if visited[u8, zext[usize](pt.blk_id)] == 0 { continue }
+        if pt.blk_id != 0xffffffff && visited[u8, zext[usize](pt.blk_id)] == 0 { continue }
         idx u32 = blk_to_idx[u32, zext[usize](pt.target_blk)]
-        code_b handle[Buf] = &vec_at(&gc.blocks, zext[usize](pt.blk_id)).code
+        code_b handle[Buf] = if pt.blk_id == 0xffffffff {
+            &gc.deferred
+        } else {
+            &vec_at(&gc.blocks, zext[usize](pt.blk_id)).code
+        }
         // Overwrite the 8-byte placeholder with right-padded spaces + decimal digits
         tmp Buf = {}
         buf_dec_u64(&tmp, zext[u64](idx))
@@ -986,8 +1003,8 @@ fn gen_function(node handle[Ast]) void fails {
 
     // Emit the function to gc.out
     out_b handle[Buf] = &gc.out.buf
-    buf_str(out_b, c"func @")
-    buf_append(out_b, gen_sym_bytes(nid))
+    buf_str(out_b, c"func ")
+    gen_emit_sym_name(out_b, gen_sym_bytes(nid))
     buf_u8(out_b, 32)
     abi_emit_fir_sig(out_b, ret_ty, param_tids.p, n_params, is_var)
     buf_u8(out_b, 32)

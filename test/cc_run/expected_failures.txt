@@ -1,0 +1,2 @@
+# Expected failures for test/cc_run/run_manifest.py
+# Format: <manifest-path> <reason>

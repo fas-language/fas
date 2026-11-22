@@ -90,8 +90,8 @@ struct TentativeRef {
 }
 
 struct BlockAddrPatch {
-    blk_id u32        // GenBlock id containing the placeholder
-    off usize         // byte offset in blk.code where placeholder digits live
+    blk_id u32        // GenBlock id containing the placeholder (or 0xffffffff if in gc.deferred)
+    off usize         // byte offset in blk.code (or gc.deferred) where placeholder digits live
     target_blk u32    // target GenBlock id
 }
 
@@ -225,7 +225,16 @@ fn gen_sym_bytes(id u32) Bytes {
 
 fn gen_sym_fir_name_id(s handle[Symbol]) u32 {
     if s.asm_name != 0 {
-        return gen_intern_sym(cc_name(gc.p.names, s.asm_name))
+        raw_nm Bytes = cc_name(gc.p.names, s.asm_name)
+        start usize = 0
+        end usize = raw_nm.n
+        if end >= 2 && raw_nm.p[u8, 0] == 34 && raw_nm.p[u8, end - 1] == 34 {
+            start = 1
+            end -= 1
+        }
+        if end > start {
+            return gen_intern_sym(bytes_sub(raw_nm, start, end - start))
+        }
     }
     // Check if it is a static local already assigned a mangled name
     key U64Key = {addr_bits(handle_addr(s))}
@@ -353,6 +362,26 @@ fn gen_is_returns_twice(s handle[Symbol]) bool {
            bytes_eq_c(nm, c"vfork") || bytes_eq_c(nm, c"getcontext")
 }
 
+fn gen_sym_needs_quote(s Bytes) bool {
+    if s.n == 0 { return true }
+    for i usize in 0..s.n {
+        c u8 = s.p[u8, i]
+        ok bool = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
+                  (c >= 48 && c <= 57) || c == 95 || c == 46 || c == 36
+        if !ok { return true }
+    }
+    return false
+}
+
+fn gen_emit_sym_name(b handle[Buf], s Bytes) void {
+    buf_u8(b, 64) // '@'
+    if gen_sym_needs_quote(s) {
+        fir_emit_quoted_bytes(b, s.p, s.n)
+    } else {
+        buf_append(b, s)
+    }
+}
+
 fn gen_format_declare(name Bytes, fn_ty u32, linkage u8, is_noreturn bool) addr {
     fn_node handle[TypeNode] = ty_node(ty_unqual(fn_ty))
     if fn_node.kind != TYK_FUNC { return null }
@@ -363,8 +392,8 @@ fn gen_format_declare(name Bytes, fn_ty u32, linkage u8, is_noreturn bool) addr 
     params_ptr addr = if n_params > 0 { tc.fn_params.p + pstart * 4 } else { null }
     b Buf = {}
     defer { buf_free(&b) }
-    buf_str(&b, c"declare @")
-    buf_append(&b, name)
+    buf_str(&b, c"declare ")
+    gen_emit_sym_name(&b, name)
     buf_u8(&b, 32)
     abi_emit_fir_sig(&b, ret_ty, params_ptr, n_params, is_var)
     buf_u8(&b, 32)
@@ -379,7 +408,16 @@ fn gen_format_declare(name Bytes, fn_ty u32, linkage u8, is_noreturn bool) addr 
 
 fn gen_note_extern_fn(s handle[Symbol]) void {
     nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
     if gen_is_defined(nid) { return }
+    alias_buf Buf = {}
+    if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
+    buf_free(&alias_buf)
     k U64Key = {zext[u64](nid)}
     seen u8 = table_get(&gc.ext_fn_seen, &k) catch 0
     if seen != 0 { return }
@@ -405,7 +443,16 @@ fn gen_note_extern_fn_raw(name Bytes, fn_ty u32) void {
 
 fn gen_note_extern_obj(s handle[Symbol]) void {
     nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
     if gen_is_defined(nid) { return }
+    alias_buf Buf = {}
+    if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
+    buf_free(&alias_buf)
     k U64Key = {zext[u64](nid)}
     seen u8 = table_get(&gc.ext_obj_seen, &k) catch 0
     if seen != 0 { return }
@@ -809,8 +856,8 @@ fn gen_sym_addr(sym Bytes) u32 {
     b handle[Buf] = gen_cur_buf()
     buf_str(b, c"  ")
     gen_emit_val(b, v)
-    buf_str(b, c" = ptradd ptr ptr @")
-    buf_append(b, sym)
+    buf_str(b, c" = ptradd ptr ptr ")
+    gen_emit_sym_name(b, sym)
     buf_str(b, c", i64 0, 1, 0\n")
     return v
 }
@@ -1146,14 +1193,18 @@ fn gen_flush_if_top() void {
     if !gc.in_func { fir_flush(&gc.out) }
 }
 
+fn gen_is_wide_bitint(tid u32) bool {
+    return ty_is_bitint(tid) && ty_int_bits(tid) > 64
+}
+
 fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
     b handle[Buf] = gen_global_buf()
-    buf_str(b, c"alias @")
-    buf_append(b, name)
+    buf_str(b, c"alias ")
+    gen_emit_sym_name(b, name)
     buf_u8(b, 32)
     fir_emit_linkage(b, linkage, vis)
-    buf_str(b, c" = @")
-    buf_append(b, target)
+    buf_str(b, c" = ")
+    gen_emit_sym_name(b, target)
     buf_u8(b, 10)
     gen_flush_if_top()
 }

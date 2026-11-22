@@ -286,6 +286,22 @@ fn gen_convert(val_v u32, from_ty u32, to_ty u32) u32 {
         return gen_cast(c"fptrunc", tu, val_v)
     }
 
+    // Scalar -> Vector splat (for GNU vector-scalar binary ops)
+    if tk == TYK_VECTOR && fk != TYK_VECTOR {
+        et u32 = ty_node(tu).elem
+        ev u32 = gen_convert(val_v, fu, et)
+        v u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = splat ")
+        gen_emit_fir_ty(b, tu)
+        buf_u8(b, 32)
+        gen_emit_val(b, ev)
+        buf_u8(b, 10)
+        return v
+    }
+
     // Vector <-> Vector / Integer bitcast
     if (fk == TYK_VECTOR || tk == TYK_VECTOR) && ty_size(fu) == ty_size(tu) {
         return gen_cast(c"bitcast", tu, val_v)
@@ -344,6 +360,18 @@ fn gen_complex_binop(op Bytes, tid u32, lhs_p u32, rhs_p u32) u32 {
     return dst
 }
 
+fn gen_is_ptr_like(tid u32) bool {
+    k u8 = ty_kind(tid)
+    return k == TYK_PTR || k == TYK_ARRAY || k == TYK_FUNC || k == TYK_NULLPTR
+}
+
+fn gen_ptr_elem(tid u32) u32 {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if n.kind == TYK_PTR || n.kind == TYK_ARRAY { return n.elem }
+    return TY_CHAR
+}
+
 // ---------- Lvalue Lowering ----------
 
 fn gen_lvalue(n handle[Ast]) u32 fails {
@@ -375,10 +403,10 @@ fn gen_lvalue(n handle[Ast]) u32 fails {
         if bytes_eq_c(op, c"*") {
             return try gen_rvalue(n.a)
         }
-        if bytes_eq_c(op, c"__real__") {
+        if bytes_eq_c(op, c"__real__") || bytes_eq_c(op, c"__real") {
             return try gen_lvalue(n.a)
         }
-        if bytes_eq_c(op, c"__imag__") {
+        if bytes_eq_c(op, c"__imag__") || bytes_eq_c(op, c"__imag") {
             base u32 = try gen_lvalue(n.a)
             et u32 = ty_node(ty_unqual(n.a.ty)).elem
             return gen_ptradd_const(base, bitcast[i64](ty_size(et)))
@@ -460,8 +488,13 @@ fn gen_store_lvalue(lhs handle[Ast], rhs_v u32, rhs_ty u32) u32 fails {
     }
     ptr_v u32 = try gen_lvalue(lhs)
     if gen_is_mem_ty(lhs.ty) {
+        src_v u32 = if ty_is_complex(lhs.ty) && ty_unqual(rhs_ty) != ty_unqual(lhs.ty) {
+            gen_convert(rhs_v, rhs_ty, lhs.ty)
+        } else {
+            rhs_v
+        }
         sz u64 = ty_size(lhs.ty)
-        if sz > 0 { gen_memcpy_const(ptr_v, rhs_v, sz, gen_is_volatile(lhs.ty)) }
+        if sz > 0 { gen_memcpy_const(ptr_v, src_v, sz, gen_is_volatile(lhs.ty)) }
         return ptr_v
     }
     cv u32 = gen_convert(rhs_v, rhs_ty, lhs.ty)
@@ -492,8 +525,8 @@ fn gen_arith_op(op Bytes, eval_ty u32, lhs u32, rhs u32) u32 fails {
     }
 
     // Pointer arithmetic: ptr +/- int, ptr - ptr
-    if k == TYK_PTR {
-        elem_ty u32 = ty_node(u).elem
+    if k == TYK_PTR || k == TYK_ARRAY {
+        elem_ty u32 = gen_ptr_elem(u)
         if bytes_eq_c(op, c"+") {
             idx u32 = rhs
             if gen_type_is_vla(elem_ty) {
@@ -690,14 +723,14 @@ fn gen_unary(n handle[Ast]) u32 fails {
         nb u32 = gen_binop_raw(c"xor", c"i1", b1, gen_const_i1(true))
         return gen_convert(nb, TY_BOOL, n.ty)
     }
-    if bytes_eq_c(op, c"__real__") {
+    if bytes_eq_c(op, c"__real__") || bytes_eq_c(op, c"__real") {
         rv u32 = try gen_rvalue(n.a)
         if ty_is_complex(n.a.ty) {
             return gen_load_ty(n.ty, rv, ty_align(n.ty), false, false)
         }
         return rv
     }
-    if bytes_eq_c(op, c"__imag__") {
+    if bytes_eq_c(op, c"__imag__") || bytes_eq_c(op, c"__imag") {
         rv u32 = try gen_rvalue(n.a)
         if ty_is_complex(n.a.ty) {
             return gen_load_ty(n.ty, gen_ptradd_const(rv, bitcast[i64](ty_size(n.ty))), ty_align(n.ty), false, false)
@@ -705,10 +738,9 @@ fn gen_unary(n handle[Ast]) u32 fails {
         return gen_const_zero(n.ty)
     }
     if bytes_eq_c(op, c"&&") {
-        // GNU address-of-label `&&label`
-        lbl handle[Label] = handle_from_addr(n.extra)
-        if lbl != null {
-            blk_id u32 = gen_get_label_block(lbl)
+        // GNU address-of-label `&&label` (n.value holds interned label name)
+        if n.value != 0 {
+            blk_id u32 = gen_get_label_block_by_name(trunc[u32](n.value))
             gen_mark_addr_taken(blk_id)
             return gen_emit_blockaddr(blk_id)
         }
@@ -852,6 +884,32 @@ fn gen_binary(n handle[Ast]) u32 fails {
             if bytes_eq_c(op, c"!=") { eq = gen_binop_raw(c"xor", c"i1", eq, gen_const_i1(true)) }
             return gen_convert(eq, TY_BOOL, n.ty)
         }
+        if ty_is_vector(u) {
+            ve u32 = ty_node(u).elem
+            cnt u64 = ty_size(u) / ty_size(ve)
+            is_vflt bool = ty_is_real_float(ve)
+            is_vuns bool = ty_is_unsigned(ve)
+            pred addr = if is_vflt { c"oeq" } else { c"eq" }
+            if bytes_eq_c(op, c"!=") { pred = if is_vflt { c"une" } else { c"ne" } }
+            else if bytes_eq_c(op, c"<") { pred = if is_vflt { c"olt" } else if is_vuns { c"ult" } else { c"slt" } }
+            else if bytes_eq_c(op, c"<=") { pred = if is_vflt { c"ole" } else if is_vuns { c"ule" } else { c"sle" } }
+            else if bytes_eq_c(op, c">") { pred = if is_vflt { c"ogt" } else if is_vuns { c"ugt" } else { c"sgt" } }
+            else if bytes_eq_c(op, c">=") { pred = if is_vflt { c"oge" } else if is_vuns { c"uge" } else { c"sge" } }
+            cv u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, cv)
+            buf_str(b, if is_vflt { c" = fcmp " } else { c" = icmp " })
+            buf_str(b, pred)
+            buf_str(b, c" <")
+            buf_dec_u64(b, cnt)
+            buf_str(b, c" x i1> ")
+            gen_emit_val(b, lv)
+            buf_str(b, c", ")
+            gen_emit_val(b, rv)
+            buf_u8(b, 10)
+            return gen_cast(c"sext", n.ty, cv)
+        }
         cmp_v u32 = 0
         if ty_is_real_float(u) {
             pred addr = c"oeq"
@@ -874,14 +932,14 @@ fn gen_binary(n handle[Ast]) u32 fails {
         return gen_convert(cmp_v, TY_BOOL, n.ty)
     }
 
-    // Pointer difference `ptr - ptr`
-    if bytes_eq_c(op, c"-") && ty_is_ptr(n.a.ty) && ty_is_ptr(n.b.ty) {
+    // Pointer difference `ptr - ptr` (including array decay!)
+    if bytes_eq_c(op, c"-") && gen_is_ptr_like(n.a.ty) && gen_is_ptr_like(n.b.ty) {
         lp u32 = try gen_rvalue(n.a)
         rp u32 = try gen_rvalue(n.b)
         li u32 = gen_cast_raw(c"ptrtoint", c"i64", lp)
         ri u32 = gen_cast_raw(c"ptrtoint", c"i64", rp)
         diff u32 = gen_binop_raw(c"sub", c"i64", li, ri)
-        elem_ty u32 = ty_node(ty_unqual(n.a.ty)).elem
+        elem_ty u32 = gen_ptr_elem(n.a.ty)
         esz_v u32 = 0
         if gen_type_is_vla(elem_ty) {
             esz_v = try gen_vla_type_size(elem_ty)
@@ -893,9 +951,9 @@ fn gen_binary(n handle[Ast]) u32 fails {
         return gen_convert(q, TY_LONG, n.ty)
     }
 
-    // Pointer + int or int + pointer
-    if bytes_eq_c(op, c"+") && (ty_is_ptr(n.a.ty) || ty_is_ptr(n.b.ty)) {
-        if ty_is_ptr(n.a.ty) {
+    // Pointer + int or int + pointer (including array decay!)
+    if bytes_eq_c(op, c"+") && (gen_is_ptr_like(n.a.ty) || gen_is_ptr_like(n.b.ty)) {
+        if gen_is_ptr_like(n.a.ty) {
             lp u32 = try gen_rvalue(n.a)
             rv u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, if ty_is_signed(n.b.ty) { TY_LONG } else { TY_ULONG })
             return try gen_arith_op(op, n.a.ty, lp, rv)
@@ -905,7 +963,7 @@ fn gen_binary(n handle[Ast]) u32 fails {
             return try gen_arith_op(op, n.b.ty, rp, lv)
         }
     }
-    if bytes_eq_c(op, c"-") && ty_is_ptr(n.a.ty) {
+    if bytes_eq_c(op, c"-") && gen_is_ptr_like(n.a.ty) {
         lp u32 = try gen_rvalue(n.a)
         rv u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, if ty_is_signed(n.b.ty) { TY_LONG } else { TY_ULONG })
         return try gen_arith_op(op, n.a.ty, lp, rv)
@@ -1002,6 +1060,13 @@ fn gen_call(n handle[Ast]) u32 fails {
         }
     }
 
+    // Special case: direct call to `alloca(...)` when not defined in this TU
+    if is_direct && direct_sym != null && bytes_eq_c(gen_sym_fir_name(direct_sym), c"alloca") &&
+       !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
+        sz_v u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, TY_ULONG)
+        return gen_alloca_dyn(sz_v, 16)
+    }
+
     fp_v u32 = 0
     if !is_direct {
         fp_v = try gen_rvalue(n.a)
@@ -1065,8 +1130,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     abi_emit_fir_sig(b, ret_ty, sig_params, sig_n_fixed, sig_var)
     buf_u8(b, 32)
     if is_direct {
-        buf_u8(b, 64) // '@'
-        buf_append(b, gen_sym_fir_name(direct_sym))
+        gen_emit_sym_name(b, gen_sym_fir_name(direct_sym))
     } else {
         gen_emit_val(b, fp_v)
     }
@@ -1074,18 +1138,27 @@ fn gen_call(n handle[Ast]) u32 fails {
     for i u32 in 0..trunc[u32](arg_vals.n) {
         if i > 0 { buf_str(b, c", ") }
         at u32 = vec_get(&arg_tids, zext[usize](i))
+        av u32 = vec_get(&arg_vals, zext[usize](i))
+        if gen_is_wide_bitint(at) {
+            slot u32 = gen_alloca_entry(ty_size(at), ty_align(at))
+            gen_store_ty(av, slot, ty_align(at), false, false)
+            av = slot
+        }
         if sig_var && i >= sig_n_fixed {
             if ty_is_record(at) {
                 abi_emit_fir_agg(b, at)
                 buf_u8(b, 32)
-            } else if ty_is_complex(at) {
+            } else if ty_is_complex(at) || gen_is_wide_bitint(at) {
                 abi_emit_fir_abi_ty(b, at)
                 buf_u8(b, 32)
             }
         }
-        gen_emit_val(b, vec_get(&arg_vals, zext[usize](i)))
+        gen_emit_val(b, av)
     }
     buf_str(b, c")\n")
+    if has_ret && gen_is_wide_bitint(ret_ty) {
+        return gen_load_ty(ret_ty, res_v, ty_align(ret_ty), false, false)
+    }
     return res_v
 }
 
@@ -1178,7 +1251,8 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     a4 handle[Ast] = if a3 != null { a3.next } else { null }
 
     if bytes_eq_c(bname, c"__builtin_expect") || bytes_eq_c(bname, c"__builtin_expect_with_probability") {
-        return try gen_rvalue(a0)
+        v u32 = try gen_rvalue(a0)
+        return gen_convert(v, a0.ty, n.ty)
     }
     if bytes_eq_c(bname, c"__builtin_unreachable") {
         gen_term_unreachable()
@@ -1192,7 +1266,13 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     if bytes_eq_c(bname, c"__builtin_constant_p") {
         return gen_const_i32(0)
     }
-    if bytes_eq_c(bname, c"__builtin_assume") || bytes_eq_c(bname, c"__builtin_prefetch") {
+    if bytes_eq_c(bname, c"__builtin_assume") {
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__builtin_prefetch") {
+        // Evaluate arguments for side effects
+        a handle[Ast] = n.b
+        while a != null { _ u32 = try gen_rvalue(a); a = a.next }
         return gen_const_i32(0)
     }
     if bytes_eq_c(bname, c"__builtin_va_start") {
@@ -1270,19 +1350,102 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         p1 u32 = gen_binop(c"add", n.ty, cz, gen_const_int(n.ty, 1))
         return gen_select(n.ty, is_z, gen_const_int(n.ty, 0), p1)
     }
-    // Float builtins
+    if bytes_eq_c(bname, c"__builtin_parity") || bytes_eq_c(bname, c"__builtin_parityl") || bytes_eq_c(bname, c"__builtin_parityll") {
+        v u32 = try gen_rvalue(a0)
+        pc u32 = gen_convert(gen_unop(c"popcnt", a0.ty, v), a0.ty, n.ty)
+        return gen_binop(c"and", n.ty, pc, gen_const_int(n.ty, 1))
+    }
+    if bytes_eq_c(bname, c"__builtin_object_size") || bytes_eq_c(bname, c"__builtin_dynamic_object_size") {
+        // -O0 semantics: upper bound (type & 2 == 0) -> (size_t)-1, lower bound (type & 2 != 0) -> 0
+        tval u64 = if a1 != null { gen_eval_const_int(a1) } else { 0 }
+        res u64 = if (tval & 2) != 0 { 0 } else { ~0 }
+        return gen_const_int(n.ty, res)
+    }
+    if bytes_eq_c(bname, c"__builtin_assume_aligned") {
+        return try gen_rvalue(a0)
+    }
+    if bytes_eq_c(bname, c"__builtin_ia32_emms") {
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__builtin_nans") || bytes_eq_c(bname, c"__builtin_nansf") ||
+       bytes_eq_c(bname, c"__builtin_nansl") || bytes_eq_c(bname, c"__builtin_nansf16") {
+        ft u32 = n.ty
+        if !ty_is_real_float(ft) {
+            if bytes_eq_c(bname, c"__builtin_nansf16") { ft = TY_FLOAT16 }
+            else if bytes_eq_c(bname, c"__builtin_nansf") { ft = TY_FLOAT }
+            else if bytes_eq_c(bname, c"__builtin_nansl") { ft = TY_LDOUBLE }
+            else { ft = TY_DOUBLE }
+            n.ty = ft
+        }
+        v u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = freeze ")
+        gen_emit_fir_ty(b, ft)
+        buf_u8(b, 32)
+        gen_emit_fir_ty(b, ft)
+        fk u8 = ty_kind(ft)
+        if fk == TYK_FLOAT16 { buf_str(b, c" 0x7d00\n") }
+        else if fk == TYK_FLOAT { buf_str(b, c" 0x7fa00000\n") }
+        else if fk == TYK_LDOUBLE { buf_str(b, c" 0x7fffa000000000000000\n") }
+        else { buf_str(b, c" 0x7ff4000000000000\n") }
+        return v
+    }
+    // C23 <stdckdint.h> ckd_add / ckd_sub / ckd_mul (result ptr is FIRST arg!)
+    if bytes_eq_c(bname, c"__builtin_ckd_add") || bytes_eq_c(bname, c"__builtin_ckd_sub") ||
+       bytes_eq_c(bname, c"__builtin_ckd_mul") || bytes_eq_c(bname, c"ckd_add") ||
+       bytes_eq_c(bname, c"ckd_sub") || bytes_eq_c(bname, c"ckd_mul") {
+        is_sub bool = bytes_ends_with(bname, bytes_c(c"_sub"))
+        is_mul bool = bytes_ends_with(bname, bytes_c(c"_mul"))
+        res_ptr u32 = try gen_rvalue(a0)
+        res_ty u32 = ty_node(ty_unqual(a0.ty)).elem
+        v0 u32 = try gen_rvalue(a1)
+        v1 u32 = try gen_rvalue(a2)
+        wide_ty u32 = ty_bitint(129, false)
+        w0 u32 = gen_convert(v0, a1.ty, wide_ty)
+        w1 u32 = gen_convert(v1, a2.ty, wide_ty)
+        op_cstr addr = if is_sub { c"sub" } else if is_mul { c"mul" } else { c"add" }
+        wres u32 = gen_binop(op_cstr, wide_ty, w0, w1)
+        narrow u32 = gen_convert(wres, wide_ty, res_ty)
+        gen_store_ty(narrow, res_ptr, ty_align(res_ty), gen_is_volatile(res_ty), false)
+        back u32 = gen_convert(narrow, res_ty, wide_ty)
+        ovf u32 = gen_icmp(c"ne", wres, back)
+        return gen_convert(ovf, TY_BOOL, n.ty)
+    }
+    // Float builtins (guard against untyped TY_INT fallback from sema)
     if bytes_eq_c(bname, c"__builtin_fabs") || bytes_eq_c(bname, c"__builtin_fabsf") || bytes_eq_c(bname, c"__builtin_fabsl") {
-        v u32 = gen_convert(try gen_rvalue(a0), a0.ty, n.ty)
-        return gen_unop(c"fabs", n.ty, v)
+        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
+        n.ty = ft
+        v u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        return gen_unop(c"fabs", ft, v)
     }
     if bytes_eq_c(bname, c"__builtin_sqrt") || bytes_eq_c(bname, c"__builtin_sqrtf") || bytes_eq_c(bname, c"__builtin_sqrtl") {
-        v u32 = gen_convert(try gen_rvalue(a0), a0.ty, n.ty)
-        return gen_unop(c"sqrt", n.ty, v)
+        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
+        n.ty = ft
+        v u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        return gen_unop(c"sqrt", ft, v)
     }
     if bytes_eq_c(bname, c"__builtin_copysign") || bytes_eq_c(bname, c"__builtin_copysignf") || bytes_eq_c(bname, c"__builtin_copysignl") {
-        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, n.ty)
-        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, n.ty)
-        return gen_binop(c"copysign", n.ty, v0, v1)
+        ft u32 = if ty_is_real_float(n.ty) { n.ty } else if bytes_ends_with(bname, bytes_c(c"f")) { TY_FLOAT } else if bytes_ends_with(bname, bytes_c(c"l")) { TY_LDOUBLE } else { TY_DOUBLE }
+        n.ty = ft
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, ft)
+        return gen_binop(c"copysign", ft, v0, v1)
+    }
+    if bytes_eq_c(bname, c"__builtin_isgreater") || bytes_eq_c(bname, c"__builtin_isgreaterequal") ||
+       bytes_eq_c(bname, c"__builtin_isless") || bytes_eq_c(bname, c"__builtin_islessequal") ||
+       bytes_eq_c(bname, c"__builtin_islessgreater") {
+        ft u32 = if ty_float_rank(a0.ty) >= ty_float_rank(a1.ty) { a0.ty } else { a1.ty }
+        if !ty_is_real_float(ft) { ft = TY_DOUBLE }
+        v0 u32 = gen_convert(try gen_rvalue(a0), a0.ty, ft)
+        v1 u32 = gen_convert(try gen_rvalue(a1), a1.ty, ft)
+        pred addr = c"ogt"
+        if bytes_eq_c(bname, c"__builtin_isgreaterequal") { pred = c"oge" }
+        else if bytes_eq_c(bname, c"__builtin_isless") { pred = c"olt" }
+        else if bytes_eq_c(bname, c"__builtin_islessequal") { pred = c"ole" }
+        else if bytes_eq_c(bname, c"__builtin_islessgreater") { pred = c"one" }
+        return gen_convert(gen_fcmp(pred, v0, v1), TY_BOOL, n.ty)
     }
     if bytes_eq_c(bname, c"__builtin_isnan") {
         v u32 = try gen_rvalue(a0)
@@ -1315,6 +1478,68 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         gen_store_ty(re, slot, eal, false, false)
         gen_store_ty(im, gen_ptradd_const(slot, bitcast[i64](esz)), eal, false, false)
         return slot
+    }
+    if bytes_eq_c(bname, c"__builtin_clrsb") || bytes_eq_c(bname, c"__builtin_clrsbl") || bytes_eq_c(bname, c"__builtin_clrsbll") {
+        v u32 = try gen_rvalue(a0)
+        bits u32 = ty_int_bits(a0.ty)
+        sign u32 = gen_binop(c"ashr", a0.ty, v, gen_const_int(a0.ty, zext[u64](bits - 1)))
+        x u32 = gen_binop(c"xor", a0.ty, v, sign)
+        cz u32 = gen_convert(gen_unop(c"clz", a0.ty, x), a0.ty, n.ty)
+        return gen_binop(c"sub", n.ty, cz, gen_const_int(n.ty, 1))
+    }
+    if bytes_eq_c(bname, c"__builtin_signbit") || bytes_eq_c(bname, c"__builtin_signbitf") || bytes_eq_c(bname, c"__builtin_signbitl") {
+        v u32 = try gen_rvalue(a0)
+        ak u8 = ty_kind(a0.ty)
+        if ak == TYK_FLOAT {
+            iv u32 = gen_cast_raw(c"bitcast", c"i32", v)
+            s u32 = gen_binop_raw(c"lshr", c"i32", iv, gen_const_i32(31))
+            return gen_convert(s, TY_UINT, n.ty)
+        }
+        if ak == TYK_DOUBLE {
+            iv u32 = gen_cast_raw(c"bitcast", c"i64", v)
+            s u32 = gen_binop_raw(c"lshr", c"i64", iv, gen_const_u64(63))
+            return gen_convert(s, TY_ULONG, n.ty)
+        }
+        // f80: store to slot, read high byte (byte 9) bit 7
+        slot u32 = gen_alloca_entry(16, 16)
+        gen_store_ty(v, slot, 16, false, false)
+        b9 u32 = gen_load_raw(c"i8", gen_ptradd_const(slot, 9), 1, false)
+        s u32 = gen_binop_raw(c"lshr", c"i8", b9, gen_const_i8(7))
+        return gen_convert(s, TY_UCHAR, n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_conj") || bytes_eq_c(bname, c"__builtin_conjf") || bytes_eq_c(bname, c"__builtin_conjl") {
+        cty u32 = if ty_is_complex(n.ty) { n.ty } else { a0.ty }
+        n.ty = cty
+        cv u32 = gen_convert(try gen_rvalue(a0), a0.ty, cty)
+        et u32 = ty_node(ty_unqual(cty)).elem
+        esz u64 = ty_size(et)
+        eal u64 = ty_align(et)
+        re u32 = gen_load_ty(et, cv, eal, false, false)
+        im u32 = gen_load_ty(et, gen_ptradd_const(cv, bitcast[i64](esz)), eal, false, false)
+        slot u32 = gen_alloca_entry(2 * esz, eal)
+        gen_store_ty(re, slot, eal, false, false)
+        nim u32 = if ty_is_real_float(et) { gen_unop(c"fneg", et, im) } else { gen_binop(c"sub", et, gen_const_zero(et), im) }
+        gen_store_ty(nim, gen_ptradd_const(slot, bitcast[i64](esz)), eal, false, false)
+        return slot
+    }
+    if bytes_eq_c(bname, c"__builtin_return_address") || bytes_eq_c(bname, c"__builtin_frame_address") ||
+       bytes_eq_c(bname, c"__builtin_extract_return_addr") {
+        return gen_const_zero(n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_classify_type") {
+        cls i32 = -1
+        if a0 != null {
+            ak u8 = ty_kind(a0.ty)
+            if ak == TYK_VOID { cls = 0 }
+            else if ak == TYK_BOOL { cls = 4 }
+            else if ty_is_integer(a0.ty) { cls = 1 }
+            else if ak == TYK_PTR || ak == TYK_ARRAY || ak == TYK_FUNC || ak == TYK_NULLPTR { cls = 5 }
+            else if ty_is_real_float(a0.ty) { cls = 8 }
+            else if ak == TYK_COMPLEX { cls = 9 }
+            else if ak == TYK_STRUCT { cls = 12 }
+            else if ak == TYK_UNION { cls = 13 }
+        }
+        return gen_const_i32(cls)
     }
     if bytes_eq_c(bname, c"__builtin_nan") || bytes_eq_c(bname, c"__builtin_nanf") || bytes_eq_c(bname, c"__builtin_nanl") {
         return gen_const_float(n.ty, 0x7ff8000000000000)

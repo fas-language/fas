@@ -197,8 +197,12 @@ fn gen_decode_string_ast(n handle[Ast], out handle[Buf], include_nul bool) void 
 struct InitReloc {
     off u64
     sym_id u32
-    _pad u32
+    target_blk u32    // if is_blockaddr, GenBlock id in current function
     addend i64
+    is_blockaddr bool
+    _pad0 u8
+    _pad1 u16
+    _pad2 u32
 }
 
 struct StaticInit {
@@ -241,13 +245,24 @@ fn si_add_reloc(si handle[StaticInit], off u64, sym_id u32, addend i64) void {
     r.off = off
     r.sym_id = sym_id
     r.addend = addend
+    r.is_blockaddr = false
+}
+
+fn si_add_blockaddr(si handle[StaticInit], off u64, fn_sym_id u32, target_blk u32) void {
+    r handle[InitReloc] = vec_add(&si.relocs)
+    r.off = off
+    r.sym_id = fn_sym_id
+    r.target_blk = target_blk
+    r.is_blockaddr = true
 }
 
 struct ConstAddr {
     ok bool
-    _pad0 u8
+    is_blockaddr bool
     _pad1 u16
     sym_id u32
+    target_blk u32
+    _pad2 u32
     addend i64
 }
 
@@ -304,6 +319,16 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         op Bytes = cc_name(gc.p.names, n.op)
         if bytes_eq_c(op, c"&") {
             return gen_eval_lvalue_addr(n.a, out)
+        }
+        if bytes_eq_c(op, c"&&") && n.value != 0 && gc.in_func {
+            blk u32 = gen_get_label_block_by_name(trunc[u32](n.value))
+            gen_mark_addr_taken(blk)
+            out.ok = true
+            out.is_blockaddr = true
+            out.sym_id = gc.cur_fn_name
+            out.target_blk = blk
+            out.addend = 0
+            return true
         }
         return false
     }
@@ -508,7 +533,11 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     if k == TYK_PTR || k == TYK_NULLPTR {
         ca ConstAddr = {}
         if gen_eval_const_addr(init, &ca) {
-            si_add_reloc(si, off, ca.sym_id, ca.addend)
+            if ca.is_blockaddr {
+                si_add_blockaddr(si, off, ca.sym_id, ca.target_blk)
+            } else {
+                si_add_reloc(si, off, ca.sym_id, ca.addend)
+            }
             return
         }
         val u64 = gen_eval_const_int(init)
@@ -518,11 +547,15 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     if k == TYK_COMPLEX {
         elem_ty u32 = n.elem
         elem_sz u64 = ty_size(elem_ty)
-        if init.kind == ND_FLOAT {
+        if (init.flags & 64) != 0 || init.kind == ND_FLOAT {
             gen_static_write_float(si, elem_ty, init.value, off)
             gen_static_write_float(si, elem_ty, init.imag, off + elem_sz)
-        } else if init.kind == ND_INT {
-            gen_static_write_float(si, elem_ty, bitcast[u64](cvt[f64](bitcast[i64](init.value))), off)
+        } else if init.kind == ND_INT || (init.flags & NF_ICE) != 0 {
+            if ty_is_real_float(elem_ty) {
+                gen_static_write_float(si, elem_ty, bitcast[u64](cvt[f64](bitcast[i64](init.value))), off)
+            } else {
+                si_write_u64(si, off, init.value, elem_sz)
+            }
         }
         return
     }
@@ -660,7 +693,7 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
 
 fn gen_eval_const_float(n handle[Ast]) u64 {
     if n == null { return 0 }
-    if n.kind == ND_FLOAT { return n.value }
+    if n.kind == ND_FLOAT || (n.flags & 64) != 0 { return n.value }
     if n.kind == ND_INT || (n.flags & NF_ICE) != 0 {
         if ty_is_unsigned(n.ty) { return bitcast[u64](cvt[f64](n.value)) }
         return bitcast[u64](cvt[f64](bitcast[i64](n.value)))
@@ -688,16 +721,93 @@ fn gen_eval_const_float(n handle[Ast]) u64 {
     return 0
 }
 
+// Compute extra trailing bytes for a struct with a flexible array member initializer
+fn gen_static_effective_size(tid u32, init handle[Ast]) u64 {
+    sz u64 = ty_size(tid)
+    if init == null || init.kind != ND_INIT { return sz }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if n.kind != TYK_STRUCT { return sz }
+    layout_record(n.aux1)
+    rec handle[RecordDef] = ty_record(n.aux1)
+    if !rec.has_flex_array || rec.fields_len == 0 { return sz }
+    last_f handle[FieldDef] = ty_field(rec.fields_start + rec.fields_len - 1)
+    fn_node handle[TypeNode] = ty_node(ty_unqual(last_f.ty))
+    if fn_node.kind != TYK_ARRAY || fn_node.aux1 != ARR_INCOMPLETE { return sz }
+    // Find the initializer item corresponding to the last field
+    fidx u32 = 0
+    item handle[Ast] = init.a
+    flex_init handle[Ast] = null
+    while item != null {
+        if item.b != null {
+            fl FieldLookup = {}
+            if ty_offsetof(u, item.b.op, &fl) && fl.field_idx == rec.fields_start + rec.fields_len - 1 {
+                flex_init = item.a
+            }
+        } else {
+            while fidx < rec.fields_len {
+                f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                break
+            }
+            if fidx == rec.fields_len - 1 { flex_init = item.a }
+            fidx += 1
+        }
+        item = item.next
+    }
+    if flex_init == null { return sz }
+    flex_bytes u64 = 0
+    if flex_init.kind == ND_STRING {
+        tmp Buf = {}
+        gen_decode_string_ast(flex_init, &tmp, true)
+        flex_bytes = tmp.n
+        buf_free(&tmp)
+    } else if flex_init.kind == ND_INIT {
+        esz u64 = ty_size(fn_node.elem)
+        cnt u64 = 0
+        it handle[Ast] = flex_init.a
+        while it != null {
+            if it.b != null && it.b.value + 1 > cnt { cnt = it.b.value + 1 }
+            else { cnt += 1 }
+            it = it.next
+        }
+        flex_bytes = cnt * esz
+    }
+    tot u64 = last_f.byte_off + flex_bytes
+    if tot > sz { sz = align_up_u64(tot, if rec.align > 0 { rec.align } else { 1 }) }
+    return sz
+}
+
 // Emit a StaticInit as a Fir global definition into `b`
 fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis u8,
                                section Bytes, readonly bool, tls bool, init handle[Ast], tid u32) void {
-    b handle[Buf] = gen_global_buf()
+    eff_sz u64 = gen_static_effective_size(tid, init)
+    if eff_sz > size { size = eff_sz }
     sz u64 = if size > 0 { size } else { 1 }
     al u64 = if align > 0 { align } else { 1 }
 
+    // Evaluate static initializer FIRST so any nested string/compound globals
+    // are emitted cleanly before we write this global's header!
+    si StaticInit = {}
+    all_zero bool = true
+    if init != null {
+        si.size = sz
+        si.data = heap_alloc_zeroed(sz)
+        gen_static_fill(&si, tid, init, 0)
+        if si.relocs.n != 0 {
+            all_zero = false
+        } else {
+            for i u64 in 0..sz {
+                if si.data[u8, i] != 0 { all_zero = false; break }
+            }
+        }
+    }
+    defer { vec_free(&si.relocs) }
+
+    b handle[Buf] = gen_global_buf()
     // Emit prefix
-    buf_str(b, c"global @")
-    buf_append(b, name)
+    buf_str(b, c"global ")
+    gen_emit_sym_name(b, name)
     buf_str(b, c" size ")
     buf_dec_u64(b, sz)
     buf_str(b, c" align ")
@@ -711,29 +821,10 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
     if readonly { buf_str(b, c" readonly") }
     if tls { buf_str(b, c" thread_local") }
 
-    if init == null {
+    if init == null || all_zero {
         buf_str(b, c" = zero\n")
         gen_flush_if_top()
         return
-    }
-
-    si StaticInit = {}
-    si.size = sz
-    si.data = heap_alloc_zeroed(sz)
-    defer { vec_free(&si.relocs) }
-    gen_static_fill(&si, tid, init, 0)
-
-    // Check if entirely zero with no relocations
-    if si.relocs.n == 0 {
-        all_zero bool = true
-        for i u64 in 0..sz {
-            if si.data[u8, i] != 0 { all_zero = false; break }
-        }
-        if all_zero {
-            buf_str(b, c" = zero\n")
-            gen_flush_if_top()
-            return
-        }
     }
 
     // Sort relocations by offset
@@ -754,15 +845,26 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
             r handle[InitReloc] = vec_at(&si.relocs, ri)
             if !first { buf_str(b, c", ") }
             first = false
-            buf_str(b, c"reloc @")
-            buf_append(b, gen_sym_bytes(r.sym_id))
-            if r.addend > 0 {
-                buf_u8(b, 43)
-                buf_dec_i64(b, r.addend)
-            } else if r.addend < 0 {
-                buf_dec_i64(b, r.addend)
+            if r.is_blockaddr {
+                buf_str(b, c"blockaddr(@")
+                buf_append(b, gen_sym_bytes(r.sym_id))
+                buf_str(b, c", ")
+                pt handle[BlockAddrPatch] = vec_add(&gc.ba_patches)
+                pt.blk_id = 0xffffffff
+                pt.off = b.n
+                pt.target_blk = r.target_blk
+                buf_str(b, c"00000000)")
+            } else {
+                buf_str(b, c"reloc @")
+                buf_append(b, gen_sym_bytes(r.sym_id))
+                if r.addend > 0 {
+                    buf_u8(b, 43)
+                    buf_dec_i64(b, r.addend)
+                } else if r.addend < 0 {
+                    buf_dec_i64(b, r.addend)
+                }
+                buf_str(b, c" w8")
             }
-            buf_str(b, c" w8")
             pos += 8
             ri += 1
             continue
@@ -813,6 +915,7 @@ fn gen_emit_static_compound(n handle[Ast]) u32 {
 
 fn gen_global_object(s handle[Symbol]) void fails {
     nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
     if gen_is_defined(nid) { return }
     gen_mark_defined(nid)
     sz u64 = ty_size(s.ty)
