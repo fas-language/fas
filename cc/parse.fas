@@ -174,8 +174,10 @@ fn pa_pragma(p handle[Parser], t Token) void fails {
         // The alias target can be declared after the pragma. Resolve it at
         // file scope before finalizing the TU's linker symbols.
         if tokens.n >= 3 && pa_is(p, tokens.p[Token, 2], c"=") {
-            if tokens.n != 4 || tokens.p[Token, 1].kind != TK_IDENT || tokens.p[Token, 3].kind != TK_IDENT {
-                try pa_error(p, t.loc, c"expected '#pragma weak name = target'")
+            if tokens.n != 4 || tokens.p[Token, 1].kind != TK_IDENT || tokens.p[Token, 3].kind != TK_IDENT ||
+                pa_keyword(p, tokens.p[Token, 1]) || pa_keyword(p, tokens.p[Token, 3]) {
+                try cc_warning(p.names, t.loc, WARN_ON, c"malformed '#pragma weak' ignored")
+                return
             }
             name u32 = cc_ident(p.names, tokens.p[Token, 1])
             slot u32 = map_get(&p.weak_alias_slots, name) catch 0xffffffff
