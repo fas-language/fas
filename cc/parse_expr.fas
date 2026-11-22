@@ -346,6 +346,19 @@ fn pa_builtin_call(p handle[Parser], t Token) handle[Ast] fails {
         if type_first { a = try pa_expression(p, 2) }
         else { ty = try pa_type_name(p) }
         try pa_expect(p, c")")
+        if pa_is(p, t, c"__builtin_va_arg") {
+            try se_builtin_va_list(p, a)
+            if !se_complete(ty) || ty_is_array(ty) { try pa_error(p, t.loc, c"va_arg requires a complete scalar or record type") }
+        } else if pa_is(p, t, c"__builtin_convertvector") {
+            if !ty_is_vector(a.ty) || !ty_is_vector(ty) {
+                try pa_error(p, t.loc, c"convertvector requires two vector types")
+            }
+            x u32 = ty_node(ty_unqual(a.ty)).elem
+            y u32 = ty_node(ty_unqual(ty)).elem
+            if ty_size(a.ty) / ty_size(x) != ty_size(ty) / ty_size(y) {
+                try pa_error(p, t.loc, c"convertvector cannot change lane count")
+            }
+        }
         n handle[Ast] = pa_node(ND_CALL, t.loc, ty)
         n.op = t.payload
         n.b = a
@@ -388,6 +401,7 @@ fn pa_x86_result(name Bytes) u32 {
 }
 
 fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32 {
+    if se_builtin_overflow(name) || se_builtin_checked(name) { return TY_BOOL }
     target u32 = pa_x86_result(name)
     if target != TY_INVALID { return target }
     if a != null && ty_is_vector(a.ty) {
@@ -493,6 +507,7 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
     ret u32
     if a.ty == TY_INVALID && a.kind == ND_NAME && a.decl == null {
         word Bytes = cc_name(p.names, a.op)
+        try se_check_builtin_call(p, t, word, xs.first, count)
         ret = pa_builtin_result(p, word, xs.first, count)
         if bytes_eq_c(word, c"__builtin_ia32_paddq") || bytes_eq_c(word, c"__builtin_ia32_psubq") {
             // GCC's MMX arithmetic takes one-lane vectors. A scalar of the
