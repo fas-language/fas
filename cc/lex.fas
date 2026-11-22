@@ -71,8 +71,7 @@ fn splice_source(file handle[CFile], original Bytes, gnu bool) void {
 }
 
 fn lex_pos(l handle[Lexer], at usize) CLoc {
-    f handle[CFile] = l.file
-    marks handle[Vec[LineMark]] = &f.marks
+    marks handle[Vec[LineMark]] = &l.file.marks
     while l.mark + 1 < marks.n && vec_get[LineMark](marks, l.mark + 1).offset <= at {
         l.mark += 1
     }

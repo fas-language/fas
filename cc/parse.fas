@@ -256,13 +256,8 @@ fn pa_gnu(p handle[Parser], t Token) void fails {
     if !pa_is_gnu(p) { try pa_error(p, t.loc, c"GNU extension requires -std=gnu23") }
 }
 
-// The current Fas constant evaluator cannot apply sizeof to a recursive
-// handle type. Array indexing uses the same layout without that evaluator.
 fn pa_alloc[T]() handle[T] {
-    elements arr[2, T]
-    lo addr = &elements[0]
-    hi addr = &elements[1]
-    return handle_from_addr[T](heap_alloc_zeroed(addr_bits(hi) - addr_bits(lo)))
+    return handle_from_addr(heap_alloc_zeroed(sizeof[T]))
 }
 
 fn pa_node(kind u8, loc u32, ty u32) handle[Ast] {
