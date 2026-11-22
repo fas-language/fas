@@ -315,6 +315,9 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         }
         return false
     }
+    if (n.kind == ND_SUBSCRIPT || n.kind == ND_MEMBER) && ty_is_array(n.ty) {
+        return gen_eval_lvalue_addr(n, out)
+    }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
         if bytes_eq_c(op, c"&") {
@@ -429,20 +432,23 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
 
-    // Unwrap single-element brace around scalar
-    if init.kind == ND_INIT && !gen_is_mem_ty(u) {
+    // Unwrap single-element brace around scalar (NOT vectors!)
+    if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {
         if init.a != null && init.a.a != null {
             gen_static_fill(si, u, init.a.a, off)
         }
         return
     }
 
-    // String literal initializing a char/wide array
+    // String literal initializing a char/wide array (zero-fill remainder in case of designator overwrite)
     if k == TYK_ARRAY && init.kind == ND_STRING {
         tmp Buf = {}
         defer { buf_free(&tmp) }
         gen_decode_string_ast(init, &tmp, true)
         arr_sz u64 = ty_size(u)
+        if arr_sz > 0 && off + arr_sz <= si.size {
+            mem_set(si.data + off, 0, arr_sz)
+        }
         copy_n u64 = tmp.n
         if arr_sz > 0 && copy_n > arr_sz { copy_n = arr_sz }
         if off + copy_n <= si.size {
@@ -451,8 +457,12 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
 
-    // Brace-enclosed aggregate initializer
+    // Brace-enclosed aggregate initializer (zero subobject first so designator overwrites clear prior fields!)
     if init.kind == ND_INIT {
+        sub_sz u64 = ty_size(u)
+        if sub_sz > 0 && off + sub_sz <= si.size {
+            mem_set(si.data + off, 0, sub_sz)
+        }
         if k == TYK_ARRAY {
             elem_ty u32 = n.elem
             elem_sz u64 = ty_size(elem_ty)
@@ -482,10 +492,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                     gen_static_fill_desig(si, u, item.b, item.a, off, &next_f)
                     fidx = trunc[u32](next_f) + 1
                 } else {
-                    // Skip unnamed zero-width bitfields
+                    // Skip unnamed bitfields (both zero-width and non-zero-width)
                     while fidx < rec.fields_len {
                         f handle[FieldDef] = ty_field(rec.fields_start + fidx)
-                        if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
                         break
                     }
                     if fidx >= rec.fields_len { break }
@@ -613,11 +623,12 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
         idx u64 = desig.value
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
-        if desig.a != null && desig.a.flags != 0 {
-            // GNU range designator [lo ... hi]
-            hi u64 = desig.a.value
+        if desig.b != null {
+            // GNU range designator [lo ... hi]: desig.a = lo, desig.b = hi (desig.value == hi)
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
+            hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in idx..(hi + 1) {
+            for j u64 in lo..(hi + 1) {
                 dummy u64 = 0
                 gen_static_fill_desig(si, n.elem, desig.next, val_ast, off + j * elem_sz, &dummy)
             }
@@ -1015,7 +1026,7 @@ fn gen_auto_init(dst_ptr u32, tid u32, init handle[Ast], zero_first bool) void f
                 } else {
                     while fidx < rec.fields_len {
                         f handle[FieldDef] = ty_field(rec.fields_start + fidx)
-                        if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
                         break
                     }
                     if fidx >= rec.fields_len { break }
@@ -1081,17 +1092,18 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     if desig == null {
-        try gen_auto_init(base_ptr, u, val_ast, false)
+        try gen_auto_init(base_ptr, u, val_ast, true)
         return
     }
     if n.kind == TYK_ARRAY {
         idx u64 = desig.value
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
-        if desig.a != null && desig.a.flags != 0 {
-            hi u64 = desig.a.value
+        if desig.b != null {
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
+            hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in idx..(hi + 1) {
+            for j u64 in lo..(hi + 1) {
                 ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
                 dummy u64 = 0
                 try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
