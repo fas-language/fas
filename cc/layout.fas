@@ -16,6 +16,15 @@ fn max_u64(a u64, b u64) u64 {
     return if a > b { a } else { b }
 }
 
+// The member's effective alignment includes packing on the member and
+// on its containing record, as well as any explicit alignment.
+fn layout_member_align(rec handle[RecordDef], field handle[FieldDef]) u64 {
+    packed bool = rec.is_packed || field.is_packed || ty_has_packed_attr(field.ty)
+    al u64 = max_u64(if packed { 1 } else { ty_align(field.ty) }, zext[u64](field.align_attr))
+    cap u64 = zext[u64](rec.pragma_pack)
+    return if cap != 0 && al > cap { cap } else { al }
+}
+
 // Compute and cache the layout of a record (struct or union).
 fn layout_record(rec_id u32) void {
     rec handle[RecordDef] = ty_record(rec_id)
@@ -30,14 +39,14 @@ fn layout_record(rec_id u32) void {
         for i u32 in 0..rec.fields_len {
             f handle[FieldDef] = ty_field(rec.fields_start + i)
             f_sz u64 = ty_size(f.ty)
-            f_al u64 = ty_align(f.ty)
-            f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
-            f_attr u64 = zext[u64](f.align_attr)
 
             f.byte_off = 0
             f.bit_off = 0
 
             if f.is_bitfield {
+                f_al u64 = ty_align(f.ty)
+                f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
+                f_attr u64 = zext[u64](f.align_attr)
                 if f.bit_width == 0 {
                     // Zero-width bitfield in a union contributes nothing to size or align
                     continue
@@ -51,9 +60,7 @@ fn layout_record(rec_id u32) void {
                 bw u64 = zext[u64](f.bit_width)
                 if bw > max_bits { max_bits = bw }
             } else {
-                fa u64 = if f_packed { 1 } else { f_al }
-                if f_attr > fa { fa = f_attr }
-                if pp > 0 && fa > pp { fa = pp }
+                fa u64 = layout_member_align(rec, f)
                 if fa > rec_align { rec_align = fa }
                 member handle[TypeNode] = ty_node(ty_unqual(f.ty))
                 if member.kind == TYK_ARRAY && member.aux1 == ARR_INCOMPLETE { rec.has_flex_array = true }
@@ -76,11 +83,11 @@ fn layout_record(rec_id u32) void {
     for i u32 in 0..rec.fields_len {
         f handle[FieldDef] = ty_field(rec.fields_start + i)
         f_sz u64 = ty_size(f.ty)
-        f_al u64 = ty_align(f.ty)
-        f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
-        f_attr u64 = zext[u64](f.align_attr)
 
         if f.is_bitfield {
+            f_al u64 = ty_align(f.ty)
+            f_packed bool = rec.is_packed || f.is_packed || ty_has_packed_attr(f.ty)
+            f_attr u64 = zext[u64](f.align_attr)
             if f.bit_width == 0 {
                 // Zero-width bitfield aligns bit_off to the type's natural alignment
                 // (or explicit aligned attr if larger), even under packed / #pragma pack,
@@ -119,10 +126,7 @@ fn layout_record(rec_id u32) void {
             bit_off += bw
             if f.name_id != 0 && fa > rec_align { rec_align = fa }
         } else {
-            fa u64 = if f_packed { 1 } else { f_al }
-            if f_attr > fa { fa = f_attr }
-            if pp > 0 && fa > pp { fa = pp }
-
+            fa u64 = layout_member_align(rec, f)
             bit_off = align_up_u64(bit_off, fa * 8)
             f.bit_off = bit_off
             f.byte_off = bit_off / 8
@@ -240,6 +244,7 @@ struct FieldLookup {
     field_idx u32
     ty u32
     bit_width u32
+    record_id u32
     byte_off u64
     bit_off u64
 }
@@ -255,6 +260,7 @@ fn layout_find_field_rec(rec_id u32, name_id u32, base_bit_off u64, out handle[F
             out.found = true
             out.is_bitfield = f.is_bitfield
             out.field_idx = idx
+            out.record_id = rec_id
             out.ty = f.ty
             out.bit_width = f.bit_width
             out.byte_off = total_bits / 8

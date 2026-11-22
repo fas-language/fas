@@ -696,6 +696,24 @@ fn pa_paren_type(p handle[Parser], spec handle[DeclSpec]) u32 fails {
     return try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
 }
 
+fn pa_expr_alignment(a handle[Ast], ty u32) u64 {
+    if a != null && a.kind == ND_NAME && a.decl != null {
+        explicit u32 = ty_align_attr(a.decl.ty)
+        if explicit != 0 { return zext[u64](explicit) }
+    }
+    if a != null && a.kind == ND_MEMBER {
+        base handle[Ast] = a.a
+        record u32 = se_decay(base.ty)
+        if ty_is_ptr(record) { record = ty_node(record).elem }
+        field handle[FieldDef] = ty_field(a.op)
+        lookup FieldLookup = {}
+        if ty_offsetof(record, field.name_id, &lookup) {
+            return layout_member_align(ty_record(lookup.record_id), field)
+        }
+    }
+    return ty_align(ty)
+}
+
 fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     align bool = !pa_is(p, t, c"sizeof")
     ty u32
@@ -722,7 +740,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     n.a = a
     if align || !se_vla(ty) {
         n.flags = NF_ICE | NF_STATIC
-        n.value = if align { ty_align(ty) } else { ty_size(ty) }
+        n.value = if align { pa_expr_alignment(a, ty) } else { ty_size(ty) }
         if gnu_size && n.value == 0 { n.value = 1 }
     }
     return n
