@@ -1470,6 +1470,9 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
                    match s with
                    | `Agg (size, align) ->
                        (size, align, fun dst -> write_raw st dst (read_raw st (ptr_of x.(0)) size))
+                   | `Ty (Vec _ as t) when sig_.ms_abi ->
+                       let size = Fir_abi.vec_abi_size t in
+                       (size, size, fun dst -> write_value st t dst x)
                    | `Ty t -> (size_of t, 16, fun dst -> write_value st t dst x)
                  in
                  let vector = match s with `Ty (Vec _) -> true | _ -> false in

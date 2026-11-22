@@ -45,11 +45,10 @@ let is_vec = function Vec _ -> true | _ -> false
 
 (* ---------- signatures ---------- *)
 
-(* Clang's Win64 convention on ELF passes a vector by a pointer to
-   a full 16-byte XMM image, even when it has fewer lanes. *)
+(* Vectors that fit an XMM register pass via a full 16-byte image.
+   Wider vectors pass by reference, like an aggregate of that size. *)
 let vec_abi ms_abi t =
-  if not ms_abi then vec_agg t
-  else if vec_bytes t > 16 then unsupported "Microsoft x64 vector wider than 16 bytes"
+  if not ms_abi || vec_bytes t > 16 then vec_agg t
   else Agg { size = 16; align = 16; fields = [ (0, Leaf t) ] }
 
 let sig_of (s : signature) =
@@ -58,7 +57,8 @@ let sig_of (s : signature) =
     | a -> a
   in
   let ms_xmm_result =
-    s.ms_xmm_result || (s.ms_abi && match s.result_abis with [ Scalar (Vec _) ] -> true | _ -> false)
+    s.ms_xmm_result ||
+    (s.ms_abi && match s.result_abis with [ Scalar (Vec _ as t) ] -> vec_bytes t <= 16 | _ -> false)
   in
   { s with param_abis = List.map convert s.param_abis; result_abis = List.map convert s.result_abis; ms_xmm_result }
 

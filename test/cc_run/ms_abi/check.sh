@@ -32,3 +32,27 @@ for backend in native llvm; do
     cmp "$work/vector.expected" "$work/vector.stdout"
 done
 echo "PASS: short SIMD vector through Microsoft va_arg (native and LLVM)"
+
+for side in caller callee; do
+    file="$src/wide_$side.c"
+    "$clang" -std=gnu23 -DCLANG_RECORD_ABI -c "$file" -o "$work/wide_$side.clang.o"
+    "${GCC:-gcc}" -std=gnu23 -Wno-psabi -c "$file" -o "$work/wide_$side.gcc.o"
+    "$FCC" -c "$file" -o "$work/wide_$side.native.o"
+    "$FCC" -S "$file" -o "$work/wide_$side.fir"
+    "$FCC_FIR" --llvm -c "$work/wide_$side.fir" -o "$work/wide_$side.llvm.o"
+done
+for pair in clang.clang gcc.gcc gcc.clang clang.gcc native.clang clang.native \
+            native.gcc gcc.native llvm.clang clang.llvm llvm.gcc gcc.llvm native.llvm llvm.native; do
+    "$clang" "$work/wide_caller.${pair%.*}.o" "$work/wide_callee.${pair#*.}.o" -o "$work/test"
+    "$work/test" fixed > "$work/wide.$pair.fixed"
+    cmp "$work/wide.clang.clang.fixed" "$work/wide.$pair.fixed"
+    # GCC does not share the indirect convention for vectors through ellipsis.
+    case $pair in
+        *gcc*) ;;
+        *)
+            "$work/test" > "$work/wide.$pair.stdout"
+            cmp "$work/wide.clang.clang.stdout" "$work/wide.$pair.stdout"
+            ;;
+    esac
+done
+echo "PASS: wide vectors through Microsoft x64 ABI (13 exact-output links against Clang records)"

@@ -311,6 +311,7 @@ let lower_sig what (sig_ : signature) (abis : abi list) =
     unsupported "%s: multiple results with the Microsoft x64 calling convention" what;
   let ms_abi_view a =
     match a with
+    | Scalar (Vec _ as t) when A.vec_bytes t > 16 -> (A.vec_agg t, Some t)
     | Scalar (Vec _) -> (a, None)
     | Scalar (Int 128 as t) -> (a, Some t)
     | _ -> c_abi a
@@ -660,10 +661,15 @@ let arg_texts cx x (how, vf) =
   | Hmem (size, align) ->
       [ Printf.sprintf "ptr byval([%d x i8]) align %d %s" size (max 8 align) (agg_addr cx x vf size align) ]
   | Hms_bits size -> [ ms_load_bits cx size (agg_addr cx x vf size size) ]
-  | Hms_ref (size, align) ->
-      let a = max 16 align in
-      let p = slot cx (max 1 size) a in
-      memcpy cx p a (agg_addr cx x vf size align) align size;
+  | Hms_ref (size, source_align) ->
+      let align = max 16 source_align in
+      let p = match vf with
+        | Some _ -> agg_addr cx x vf size align
+        | None ->
+            let p = slot cx (max 1 size) align in
+            memcpy cx p align (v cx x) source_align size;
+            p
+      in
       [ "ptr " ^ p ]
   | Hparts (size, align, ps) -> if ps = [] then [] else load_parts cx (fill_parts cx x vf size align) ps
 
