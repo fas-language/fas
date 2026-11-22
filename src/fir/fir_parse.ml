@@ -1324,6 +1324,21 @@ let parse_module s =
         let addend = match peek lx with P "+" -> ignore (next lx); int64_tok lx | _ -> 0L in
         ignore (Vec.push m.aliases { a with target; addend });
         go ()
+    | Ident "ifunc" ->
+        (* ifunc @name [linkage] [visibility] = @resolver *)
+        let iname = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+        let iv = { iname; resolver = ""; ilinkage = Global; ivisibility = Default } in
+        let rec attrs () =
+          match next lx with
+          | Ident s when Option.is_some (linkage_of s) -> iv.ilinkage <- Option.get (linkage_of s); attrs ()
+          | Ident s when Option.is_some (visibility_of s) -> iv.ivisibility <- Option.get (visibility_of s); attrs ()
+          | P "=" -> ()
+          | t -> fail lx ("unexpected " ^ tok_text t ^ " in ifunc")
+        in
+        attrs ();
+        let resolver = match next lx with Sym s -> s | t -> fail lx ("expected the resolver symbol, got " ^ tok_text t) in
+        ignore (Vec.push m.ifuncs { iv with resolver });
+        go ()
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
         let sig_ = parse_sig lx in

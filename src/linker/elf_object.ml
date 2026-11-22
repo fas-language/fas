@@ -200,8 +200,8 @@ let write input =
             (section + 1, value)
       in
       if
-        (* kinds 0-4 (NOTYPE..FILE) and 6 (STT_TLS, for thread-local variables) *)
-        s.binding < 0 || s.binding > 2 || s.kind < 0 || (s.kind > 4 && s.kind <> 6) || s.visibility < 0
+        (* kinds 0-4 (NOTYPE..FILE), 6 (STT_TLS), and 10 (STT_GNU_IFUNC) *)
+        s.binding < 0 || s.binding > 2 || s.kind < 0 || (s.kind > 4 && s.kind <> 6 && s.kind <> 10) || s.visibility < 0
         || s.visibility > 3
       then Error.fail "%s: invalid symbol attributes" context;
       B.set_int out at 4 symbol_names.(original);

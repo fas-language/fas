@@ -97,6 +97,7 @@ dtype 1 base "int" signed 4                optional debug types: id, description
 alias_tag 1 "int" 0                        optional TBAA tags: id, name, parent id (0 = root)
 global ...                                 globals
 alias ...                                  symbol aliases
+ifunc ...                                  GNU indirect functions (STT_GNU_IFUNC)
 func ... / declare ...                     functions
 ```
 
@@ -157,6 +158,22 @@ alias @hook         weak hidden = @default_hook
 ```
 
 - **Verifier rules:** the target is a function or global *defined* in this module, not an alias (so there are no cycles); a function alias has no addend; an addend stays inside the global; the alias name is defined nowhere else.
+
+### Indirect functions (IFUNC)
+
+```
+ifunc @name LINKAGE [VISIBILITY] = @resolver
+```
+
+A GNU indirect function (`STT_GNU_IFUNC`), as C's `__attribute__((ifunc("resolver")))`. The dynamic loader (or CRT startup for static links) runs `@resolver` once and binds calls and address references to `@name` to the function pointer `@resolver` returns. Linkage and visibility belong to `@name` (defaulting to `global` and `default`); `@resolver` keeps its own symbol.
+
+```
+ifunc @magic global = @resolver
+ifunc @magic_local local = @resolver
+ifunc @magic_hidden global hidden = @resolver
+```
+
+- **Verifier rules:** `@name` is defined nowhere else in the module; `@resolver` is a function *defined* in this module; `@resolver` is non-variadic, returns a single `ptr`, and takes `()`, `(i64)`, or `(i64, ptr)`.
 
 ### Functions
 

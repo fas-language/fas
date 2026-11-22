@@ -443,6 +443,12 @@ fn gen_note_extern_fn(s handle[Symbol]) void {
         buf_free(&alias_buf)
         return
     }
+    if gen_attr_str_arg(s.attrs, c"ifunc", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_ifunc(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
     buf_free(&alias_buf)
     link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
     noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
@@ -489,6 +495,12 @@ fn gen_note_extern_obj(s handle[Symbol]) void {
     if gen_attr_str_arg(s.attrs, c"alias", &alias_buf) {
         gen_mark_defined(nid)
         gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+        buf_free(&alias_buf)
+        return
+    }
+    if gen_attr_str_arg(s.attrs, c"ifunc", &alias_buf) {
+        gen_mark_defined(nid)
+        gen_emit_ifunc(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
         buf_free(&alias_buf)
         return
     }
@@ -1288,6 +1300,18 @@ fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
     gen_flush_if_top()
 }
 
+fn gen_emit_ifunc(name Bytes, resolver Bytes, linkage u8, vis u8) void {
+    b handle[Buf] = gen_global_buf()
+    buf_str(b, c"ifunc ")
+    gen_emit_sym_name(b, name)
+    buf_u8(b, 32)
+    fir_emit_linkage(b, linkage, vis)
+    buf_str(b, c" = ")
+    gen_emit_sym_name(b, resolver)
+    buf_u8(b, 10)
+    gen_flush_if_top()
+}
+
 fn gen_emit_ctor_dtor(fn_name Bytes, is_dtor bool, prio u64) void {
     nm_buf Buf = {}
     defer { buf_free(&nm_buf) }
@@ -1404,6 +1428,14 @@ fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
             if !gen_is_defined(nid) {
                 gen_mark_defined(nid)
                 gen_emit_alias(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
+            }
+            return
+        }
+        if gen_attr_str_arg(s.attrs, c"ifunc", &alias_buf) {
+            nid u32 = gen_sym_fir_name_id(s)
+            if !gen_is_defined(nid) {
+                gen_mark_defined(nid)
+                gen_emit_ifunc(gen_sym_bytes(nid), buf_bytes(&alias_buf), gen_sym_linkage(s), gen_sym_visibility(s))
             }
             return
         }

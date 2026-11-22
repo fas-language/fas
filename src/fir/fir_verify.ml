@@ -575,6 +575,7 @@ let verify (m : modul) =
   Vec.iter (fun g -> check_name g.gname) m.globals;
   Vec.iter (fun f -> check_name f.name) m.funcs;
   Vec.iter (fun a -> check_name a.aname) m.aliases;
+  Vec.iter (fun iv -> check_name iv.iname) m.ifuncs;
   (* an alias names a function or global defined here, never another alias
      (so there are no cycles); an addend stays inside a global *)
   Vec.iter
@@ -592,6 +593,21 @@ let verify (m : modul) =
             bad "the addend is outside the global"
       | None, None -> bad "not a function or global defined in this module")
     m.aliases;
+  Vec.iter
+    (fun (iv : ifunc) ->
+      let bad why = errs := Printf.sprintf "ifunc @%s = @%s: %s" iv.iname iv.resolver why :: !errs in
+      match Vec.fold (fun acc f -> if f.name = iv.resolver then Some f else acc) None m.funcs with
+      | None -> bad "resolver is not a function defined in this module"
+      | Some f ->
+          if not f.defined then bad "resolver is only declared";
+          if f.sig_.variadic then bad "resolver may not be variadic";
+          (match f.sig_.result_abis with
+          | [ Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver must return a single ptr");
+          match f.sig_.param_abis with
+          | [] | [ Scalar (Int 64) ] | [ Scalar (Int 64); Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver parameters must be (), (i64), or (i64, ptr)")
+    m.ifuncs;
   Vec.iter
     (fun g ->
       if g.galign <= 0 || g.galign land (g.galign - 1) <> 0 then

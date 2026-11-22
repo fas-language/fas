@@ -514,6 +514,15 @@ type alias = {
   mutable avisibility : visibility;
 }
 
+(* A GNU indirect function (STT_GNU_IFUNC): calls and address references to
+   [iname] resolve at load/startup time by invoking [resolver]. *)
+type ifunc = {
+  iname : string;
+  resolver : string;
+  mutable ilinkage : linkage;
+  mutable ivisibility : visibility;
+}
+
 (* Debug types (roadmap v0.8). Id 0 is void; ids index [modul.dtypes]. Ids may
    refer forward (a struct member to a later struct), so recursive types
    need no special form. *)
@@ -534,6 +543,7 @@ type modul = {
   funcs : func Vec.t;
   globals : global Vec.t;
   aliases : alias Vec.t;
+  ifuncs : ifunc Vec.t;
   locs : (string * int * int) Vec.t;  (** location id -> file, line, column; 0 = none *)
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
   dtypes : dtype Vec.t;  (** debug type id -> type; 0 = void *)
@@ -565,6 +575,7 @@ let create_module () =
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
           readonly = false; thread_local = false; size = 0; init = None; gdefined = false };
     aliases = Vec.create { aname = ""; target = ""; addend = 0L; alinkage = Local; avisibility = Default };
+    ifuncs = Vec.create { iname = ""; resolver = ""; ilinkage = Local; ivisibility = Default };
     locs;
     alias_tags;
     dtypes = (let t = Vec.create Dvoid in ignore (Vec.push t Dvoid); t);

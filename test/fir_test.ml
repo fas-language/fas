@@ -356,5 +356,105 @@ global @.Lpre.0 size 8 align 8 local section ".preinit_array" = { reloc @pre1 w8
           check "sh_type .init_array.00101" (find_kind ".init_array.00101" = Some (14, 3));
           check "sh_type .fini_array" (find_kind ".fini_array" = Some (15, 3));
           check "sh_type .preinit_array" (find_kind ".preinit_array" = Some (16, 3))));
+  (* IFUNC: parse/print, verifier, interp, native ELF STT_GNU_IFUNC, and LLVM IR *)
+  let ifunc_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @impl (i32) -> (i32) local {
+^entry(%x: i32):
+  %r = add i32 %x, i32 40
+  ret %r
+}
+func @res0 () -> (ptr) local {
+^entry:
+  ret ptr @impl
+}
+func @res1 (i64) -> (ptr) local {
+^entry(%hw: i64):
+  ret ptr @impl
+}
+func @res2 (i64, ptr) -> (ptr) local {
+^entry(%hw: i64, %p: ptr):
+  ret ptr @impl
+}
+ifunc @magic global = @res0
+ifunc @magic_loc local = @res1
+ifunc @magic_hid global hidden = @res2
+func @main () -> (i32) global {
+^entry:
+  %a = call (i32) -> (i32) @magic(i32 2)
+  %b = call (i32) -> (i32) ptr @magic_loc(i32 2)
+  %c = call (i32) -> (i32) @magic_hid(i32 2)
+  %s1 = add i32 %a, %b
+  %s2 = add i32 %s1, %c
+  ret %s2
+}
+|}
+  in
+  (match parse "ifunc_ok" ifunc_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "ifunc_roundtrip" printed with None -> () | Some _ -> ());
+      let pr = Fir_interp.run_program [ m ] in
+      check "ifunc interp status" (pr.status = 126 && pr.trapped = None);
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "ifunc llvm global" (has_sub ll "@magic = ifunc void (), ptr @res0");
+      check "ifunc llvm local" (has_sub ll "@magic_loc = internal ifunc void (), ptr @res1");
+      check "ifunc llvm hidden" (has_sub ll "@magic_hid = hidden ifunc void (), ptr @res2");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL ifunc_ok: compile_object: %s\n%!" e
+      | Ok bytes ->
+          let obj = Fas_linker.Elf_reader.parse ~path:"<ifunc_ok>" (Bytes.unsafe_to_string bytes) in
+          let find_sym name =
+            Array.to_list obj.symbols
+            |> List.find_opt (fun (s : Fas_linker.Elf_reader.symbol) -> s.name = name)
+          in
+          let sym_attr name =
+            find_sym name |> Option.map (fun (s : Fas_linker.Elf_reader.symbol) -> (s.kind, s.binding, s.visibility))
+          in
+          check "ifunc elf magic" (sym_attr "magic" = Some (10, 1, 0));
+          check "ifunc elf magic_loc" (sym_attr "magic_loc" = Some (10, 0, 0));
+          check "ifunc elf magic_hid" (sym_attr "magic_hid" = Some (10, 1, 2))));
+  rejects "ifunc dup name" "symbol @dup defined twice"
+    {|
+func @dup () -> (ptr) local {
+^entry:
+  ret ptr null
+}
+ifunc @dup global = @dup
+|};
+  rejects "ifunc undef resolver" "resolver is not a function defined in this module"
+    {|
+ifunc @bad global = @missing
+|};
+  rejects "ifunc decl-only resolver" "resolver is only declared"
+    {|
+declare @res () -> (ptr) global
+ifunc @bad global = @res
+|};
+  rejects "ifunc bad return" "resolver must return a single ptr"
+    {|
+func @res () -> (i64) local {
+^entry:
+  ret i64 0
+}
+ifunc @bad global = @res
+|};
+  rejects "ifunc bad params" "resolver parameters must be"
+    {|
+func @res (i32) -> (ptr) local {
+^entry(%x: i32):
+  ret ptr null
+}
+ifunc @bad global = @res
+|};
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"

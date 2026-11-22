@@ -1396,6 +1396,7 @@ let add_static_adapters units referenced_names ir =
   Fir.Vec.iter (fun (func : Fir.func) -> Hashtbl.replace occupied func.name ()) ir.Fir.funcs;
   Fir.Vec.iter (fun (g : Fir.global) -> Hashtbl.replace occupied g.gname ()) ir.Fir.globals;
   Fir.Vec.iter (fun (a : Fir.alias) -> Hashtbl.replace occupied a.aname ()) ir.Fir.aliases;
+  Fir.Vec.iter (fun (iv : Fir.ifunc) -> Hashtbl.replace occupied iv.iname ()) ir.Fir.ifuncs;
   let all_adapters = ref [] in
   let rec collect = function
     | [] -> Ok (List.rev !all_adapters)

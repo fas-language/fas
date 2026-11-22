@@ -12,10 +12,6 @@ gcc/gcc/testsuite/gcc.c-torture/execute/ieee/unsafe-fp-assoc.c exit-mismatch: pa
 gcc/gcc/testsuite/gcc.c-torture/execute/pr70460.c fcc-error: parser/sema: initializer is not a constant expression
 gcc/gcc/testsuite/gcc.c-torture/execute/pr77767.c exit-mismatch: parser #2 (decayed VLA parameter bound dropped; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/addr_equal-1.c link-error: gcc-only -O2 constant-folding of extern address equality (undef_fn0)
-gcc/gcc/testsuite/gcc.dg/attr-ifunc-1.c link-error: Fir gap #2 (STT_GNU_IFUNC not yet in Fir; see cc-ast-requests.md)
-gcc/gcc/testsuite/gcc.dg/attr-ifunc-3.c link-error: Fir gap #2 (STT_GNU_IFUNC not yet in Fir; see cc-ast-requests.md)
-gcc/gcc/testsuite/gcc.dg/attr-ifunc-4.c link-error: Fir gap #2 (STT_GNU_IFUNC not yet in Fir; see cc-ast-requests.md)
-gcc/gcc/testsuite/gcc.dg/attr-ifunc-5.c link-error: Fir gap #2 (STT_GNU_IFUNC not yet in Fir; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/auto-type-1.c exit-mismatch: VLA typeof/auto_type bound caching
 gcc/gcc/testsuite/gcc.dg/bf-ms-layout-2.c exit-mismatch: gcc -fms-layout-bitfields test (clang also aborts without flag)
 gcc/gcc/testsuite/gcc.dg/bf-ms-layout-5.c exit-mismatch: gcc -fms-layout-bitfields test
@@ -47,7 +43,6 @@ gcc/gcc/testsuite/gcc.dg/field-merge-10.c fcc-error: parser/sema: expression is 
 gcc/gcc/testsuite/gcc.dg/field-merge-9.c fcc-error: parser/sema: invalid arithmetic or signed overflow in constant initializer
 gcc/gcc/testsuite/gcc.dg/fixuns-trunc-1.c exit-mismatch: parser #5 (decimal float literal 9223372036854775808.7 1-ULP off; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: parser #8 (GNU nested range designator continuation & brace-elided overwrite; see cc-ast-requests.md)
-gcc/gcc/testsuite/gcc.dg/ipa/ipa-pta-19.c link-error: gcc target-clones/multiversioning (multiver_test)
 gcc/gcc/testsuite/gcc.dg/memcmp-1.c link-error: parser #4 (concatenated asm("" "memcmp") string literal; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
 gcc/gcc/testsuite/gcc.dg/pr107385.c fir-error: Fir gap #3 (asm_goto with outputs unsupported; see cc-ast-requests.md)

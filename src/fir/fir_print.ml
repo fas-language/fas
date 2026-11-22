@@ -539,6 +539,13 @@ let module_to_string m =
            (if a.addend = 0L then "" else " + " ^ Int64.to_string a.addend)))
     m.aliases;
   Vec.iter
+    (fun (iv : ifunc) ->
+      Buffer.add_string buf
+        (Printf.sprintf "ifunc %s %s%s = %s\n" (symbol iv.iname) (linkage_name iv.ilinkage)
+           (if iv.ivisibility = Default then "" else " " ^ visibility_name iv.ivisibility)
+           (symbol iv.resolver)))
+    m.ifuncs;
+  Vec.iter
     (fun f ->
       Buffer.add_char buf '\n';
       print_func buf f)

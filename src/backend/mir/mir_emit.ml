@@ -1260,11 +1260,22 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           | None -> unsupported "alias `%s`: its target `%s` was not emitted" al.name al.target)
         syms.aliases
     in
+    let ifunc_names = Hashtbl.create 4 in
+    let ifunc_syms =
+      List.map
+        (fun (iv : Elf_attrs.ifunc) ->
+          Hashtbl.replace ifunc_names iv.iname ();
+          match List.find_opt (fun (s : Elf64.symbol) -> s.name = iv.resolver) defined_syms with
+          | Some s -> { s with Elf64.name = iv.iname }
+          | None -> unsupported "ifunc `%s`: its resolver `%s` was not emitted" iv.iname iv.resolver)
+        syms.ifuncs
+    in
     Ok
       (Native_object.emit
          ~eh_frame:(Mir_cfi.build (List.rev !fdes))
          ~extra:extra_sections
          ~tls:(Hashtbl.mem env.tls_syms)
+         ~ifunc:(Hashtbl.mem ifunc_names)
          ~global:(fun n -> n = "_start")
          ~binding:(fun n ->
            match Hashtbl.find_opt masm.mbinding n with Some b -> Some b | None -> Hashtbl.find_opt syms.binding n)
@@ -1281,7 +1292,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
            data = Buffer.to_bytes data.buf;
            data_relocs = data.relocs;
            bss_size = !bss;
-           symbols = defined_syms @ alias_syms;
+           symbols = defined_syms @ alias_syms @ ifunc_syms;
            entry = "_start";
          })
   with

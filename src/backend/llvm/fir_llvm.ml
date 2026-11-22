@@ -2031,6 +2031,12 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
             (Printf.sprintf "%s = %s%s%salias i8, %s\n" (sym a.aname) (linkage_text a.alinkage) (visibility_text a.alinkage a.avisibility)
                (if Hashtbl.mem tls_names a.aname then "thread_local " else "") target))
         m.aliases;
+      Vec.iter
+        (fun (iv : ifunc) ->
+          add o
+            (Printf.sprintf "%s = %s%sifunc void (), ptr %s\n" (sym iv.iname) (linkage_text iv.ilinkage)
+               (visibility_text iv.ilinkage iv.ivisibility) (sym iv.resolver)))
+        m.ifuncs;
       (* a defined global in a named section is part of the program even when
          nothing here names it (a registry walked between __start_s and
          __stop_s), so LLVM must not drop it *)
@@ -2040,7 +2046,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
           (Printf.sprintf "@llvm.compiler.used = appending global [%d x ptr] [%s], section \"llvm.metadata\"\n"
              (List.length kept)
              (String.concat ", " (List.rev_map (fun n -> "ptr " ^ sym n) kept)));
-      if Vec.length m.globals > 0 || Vec.length m.aliases > 0 then add o "\n";
+      if Vec.length m.globals > 0 || Vec.length m.aliases > 0 || Vec.length m.ifuncs > 0 then add o "\n";
       let attr_refs ~definition =
         (if no_builtin <> [] then " #0" else "") ^ if definition && target <> None then " #1" else ""
       in
