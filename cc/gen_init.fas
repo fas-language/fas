@@ -557,7 +557,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     if k == TYK_COMPLEX {
         elem_ty u32 = n.elem
         elem_sz u64 = ty_size(elem_ty)
-        if (init.flags & 64) != 0 || init.kind == ND_FLOAT {
+        if init.kind == ND_FLOAT && init.b != null && ty_is_integer(elem_ty) {
+            si_write_u64(si, off, 0, elem_sz)
+            si_write_u64(si, off + elem_sz, init.b.value, elem_sz)
+        } else if (init.flags & NF_FLOAT_CONST) != 0 || init.kind == ND_FLOAT {
             if ty_is_real_float(elem_ty) {
                 gen_static_write_float(si, elem_ty, init.value, off)
                 bits FloatBits = {}

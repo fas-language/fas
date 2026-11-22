@@ -638,8 +638,14 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             esz u64 = ty_size(et)
             eal u64 = ty_align(et)
             slot u32 = gen_alloca_entry(2 * esz, eal)
-            gen_store_ty(gen_const_float(et, n.value), slot, eal, false, false)
-            gen_store_ty(gen_const_float_exact(et, n.imag, n.float_bits), gen_ptradd_const(slot, bitcast[i64](esz)), eal, false, false)
+            imag_ptr u32 = gen_ptradd_const(slot, bitcast[i64](esz))
+            if n.b != null {
+                gen_store_ty(gen_const_int(et, 0), slot, eal, false, false)
+                gen_store_ty(gen_const_int(et, n.b.value), imag_ptr, eal, false, false)
+            } else {
+                gen_store_ty(gen_const_float(et, n.value), slot, eal, false, false)
+                gen_store_ty(gen_const_float_exact(et, n.imag, n.float_bits), imag_ptr, eal, false, false)
+            }
             return slot
         }
         return gen_const_float_exact(n.ty, n.value, n.float_bits)
