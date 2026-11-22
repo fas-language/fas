@@ -19,6 +19,7 @@ struct Lexer {
     comment u32
     in_comment bool
     header bool
+    pragma_line bool
     skipping bool
 }
 
@@ -274,11 +275,14 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
     prefix usize = literal_prefix(start)
     kind u8 = TK_PUNCT
     width usize = 0
+    header bool = false
     if l.header && (ch == 60 || ch == 34) {
         close u8 = if ch == 60 { 62 } else { 34 }
         width = 1
         while start[u8, width] != close && start[u8, width] != 0 && start[u8, width] != 10 { width += 1 }
-        if start[u8, width] != close { try cc_error(n, loc, c"unterminated header name") }
+        header = start[u8, width] == close
+    }
+    if header {
         width += 1
         kind = TK_HEADER
     } else if prefix != 3 {
@@ -288,7 +292,7 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
         while start[u8, width] != delimiter {
             c u8 = start[u8, width]
             if c == 0 || c == 10 {
-                if l.skipping {
+                if l.skipping || l.pragma_line {
                     kind = TK_PUNCT
                     width = prefix
                     break

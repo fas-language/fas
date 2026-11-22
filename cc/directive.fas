@@ -125,8 +125,11 @@ fn pp_include(p handle[Pp], args handle[Vec[Token]], loc u32, next bool, importi
     n handle[CNames] = &p.names
     expanded Vec[Token] = {}
     if args.n > 0 && args.p[Token].kind == TK_HEADER {
-        expanded.p = args.p
-        expanded.n = args.n
+        if args.n == 1 { expanded.p = args.p; expanded.n = args.n }
+        else {
+            vec_push[Token](&expanded, args.p[Token])
+            try expand_list(p, args.p + sizeof[Token], args.n - 1, &expanded, false)
+        }
     } else {
         try expand_list(p, args.p, args.n, &expanded, false)
     }
@@ -225,6 +228,7 @@ fn pragma_tokens(p handle[Pp], source Bytes, loc u32, tokens handle[Vec[Token]])
     l.file = &f
     l.path = pos.file
     l.level = pos.level
+    l.pragma_line = true
     try pp_lex_line(n, &l, tokens, false)
 }
 
@@ -343,9 +347,12 @@ fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
     next bool = cc_is(n, word, c"include_next")
     embed bool = cc_is(n, word, c"embed")
     importing bool = n.gnu && cc_is(n, word, c"import")
+    pragma bool = cc_is(n, word, c"pragma")
     args Vec[Token] = {}
     if word.kind == TK_NUM { vec_push[Token](&args, word) }
+    l.pragma_line = pragma
     try pp_lex_line(n, l, &args, pp_active(p) && (inc || next || embed || importing))
+    l.pragma_line = false
     pp_guard(p, f, word, &args)
     if try pp_condition(p, f, word, &args, loc) { return }
     if !pp_active(p) { return }
@@ -360,7 +367,7 @@ fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
         n.undefined.p[u8, zext[usize](id)] = 1
     } else if cc_is(n, word, c"line") || (word.kind == TK_NUM && n.gnu) {
         try pp_line(p, f, &args, loc, word.kind == TK_NUM)
-    } else if cc_is(n, word, c"pragma") {
+    } else if pragma {
         t Token = try pp_pragma(p, &args, loc)
         if t.kind == TK_PRAGMA { vec_push[Token](&p.pending.tokens, t) }
     } else if n.gnu && (cc_is(n, word, c"ident") || cc_is(n, word, c"sccs")) {
