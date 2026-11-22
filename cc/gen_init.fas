@@ -452,6 +452,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
+    if init.kind == ND_COMPOUND && init.a != null {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
     if init.kind == ND_CAST && init.a != null && (gen_is_mem_ty(u) || k == TYK_VECTOR) {
         gen_static_fill(si, tid, init.a, off)
         return

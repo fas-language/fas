@@ -47,9 +47,7 @@ gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc exit=0, clang 
 gcc/gcc/testsuite/gcc.dg/field-merge-10.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/field-merge-10.c:22:19: error: expression is not a modifiable lvalue
 gcc/gcc/testsuite/gcc.dg/field-merge-9.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/field-merge-9.c:20:20: error: invalid arithmetic or signed overflow in constant initializer
 gcc/gcc/testsuite/gcc.dg/fixuns-trunc-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/gnu89-init-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/gomp/pr114075.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/ipa/ipa-pta-19.c link-error: fas-ld: /tmp/fcc_2715697_1.o: undefined symbol multiver_test
 gcc/gcc/testsuite/gcc.dg/long-long-cst1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/memcmp-1.c link-error: fas-ld: /tmp/fcc_2716969_1.o: undefined symbol lib_memcmp
@@ -59,8 +57,6 @@ gcc/gcc/testsuite/gcc.dg/pr114831-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr119001-1.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/pr119001-1.c:5:1: error: invalid flexible array member
 gcc/gcc/testsuite/gcc.dg/pr119151.c link-error: fas-ld: /tmp/fcc_2718717_1.o: undefined symbol __register_frame_info
-gcc/gcc/testsuite/gcc.dg/pr19402-2.c exit-mismatch: fcc exit=139, clang exit=0
-gcc/gcc/testsuite/gcc.dg/pr30360.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr41935.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr48774.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/pr48774.c:32:28: error: expression is not a modifiable lvalue
 gcc/gcc/testsuite/gcc.dg/pr65345-2.c exit-mismatch: fcc exit=134, clang exit=0
@@ -99,15 +95,8 @@ gcc/gcc/testsuite/gcc.dg/transparent-union-5.c fcc-error: /home/glonex/fas-exper
 gcc/gcc/testsuite/gcc.dg/tree-ssa/builtin-sprintf.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/tree-ssa/loop-interchange-1b.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/tree-ssa/vrp66.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/tree-ssa/vrp66.c:734:22: error: invalid arithmetic or signed overflow in constant initializer
-gcc/gcc/testsuite/gcc.dg/typename-vla-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/typename-vla-2.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-13.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-14.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-15.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-16.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-24.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-4.c exit-mismatch: fcc exit=1, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-stexp-4.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-stexp-6.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-stexp-7.c link-error: fas-ld: /tmp/fcc_2745426_1.o: undefined symbol N
-gcc/gcc/testsuite/gcc.dg/vla-stexp-9.c link-error: fas-ld: /tmp/fcc_2745428_1.o: undefined symbol N
