@@ -55,8 +55,8 @@ fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
     ty u32 = n.ty
     from u32 = se_decay(a.ty)
     n.flags |= a.flags & (NF_STATIC | NF_OVERFLOW)
-    if ty_is_integer(ty) && (a.flags & NF_ICE) != 0 {
-        n.flags |= NF_ICE
+    if ty_is_integer(ty) && (a.flags & NF_INT_VALUE) != 0 {
+        n.flags |= a.flags & NF_INT_VALUE
         if ty_is_bool(ty) { n.value = if se_truth(a) { 1 } else { 0 } }
         else if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(a, ty_int_bits(ty))) }
         else { n.value = se_value(ty, a.value) }
@@ -64,10 +64,14 @@ fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
         v f64 = se_fp(a)
         if ty_is_bool(ty) { n.value = if se_truth(a) { 1 } else { 0 } }
         else { n.value = se_value(ty, if ty_is_unsigned(ty) { cvt[u64](v) } else { bitcast[u64](cvt[i64](v)) }) }
-        if a.kind == ND_FLOAT && ty_is_real_float(from) { n.flags |= NF_ICE }
-    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
+        if ty_is_real_float(from) && a.kind == ND_FLOAT { n.flags |= NF_ICE }
+        else { n.flags |= NF_FOLD }
+    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
         se_set_complex(n, se_fp(a), if ty_is_complex(ty) { se_im(a) } else { 0.0 })
-    } else if ty_is_ptr(ty) && se_null(a) { n.flags |= NF_STATIC | NF_ICE }
+    } else if ty_is_ptr(ty) && se_null(a) {
+        n.flags |= NF_STATIC
+        if ty_is_integer(from) { n.flags |= NF_ICE }
+    }
     if ty_is_nullptr(from) && ty_is_bool(ty) { n.flags |= NF_STATIC; n.value = 0 }
 }
 
@@ -156,8 +160,12 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     if pa_is(p, t, c"!") {
         try se_scalar(p, a)
         n.ty = TY_INT
-        n.flags = a.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)
-        n.value = if se_truth(a) { 0 } else { 1 }
+        n.flags = a.flags & (NF_INT_VALUE | NF_OVERFLOW)
+        if (a.flags & NF_FLOAT_CONST) != 0 { n.flags |= NF_FOLD }
+        if (n.flags & NF_INT_VALUE) != 0 {
+            n.flags |= NF_STATIC
+            n.value = if se_truth(a) { 0 } else { 1 }
+        }
 
         return n
     }
@@ -167,9 +175,9 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
         try pa_error(p, t.loc, c"invalid unary arithmetic operand")
     }
     n.ty = se_promote_expr(a)
-    n.flags = a.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)
-    if (a.flags & NF_ICE) != 0 && ty_int_bits(n.ty) > 64 { wi_unary(n, a, negate, tilde) }
-    else if (a.flags & NF_ICE) != 0 {
+    n.flags = a.flags & (NF_INT_VALUE | NF_STATIC | NF_OVERFLOW)
+    if (a.flags & NF_INT_VALUE) != 0 && ty_int_bits(n.ty) > 64 { wi_unary(n, a, negate, tilde) }
+    else if (a.flags & NF_INT_VALUE) != 0 {
         raw u64 = se_value(n.ty, a.value)
         n.value = raw
         if tilde { n.value = se_value(n.ty, ~raw) }
@@ -323,11 +331,13 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         try se_scalar(p, a)
         try se_scalar(p, b)
         n.ty = TY_INT
-        stop bool = (a.flags & NF_ICE) != 0 && (if k == 3 { se_truth(a) } else { !se_truth(a) })
+        known u32 = NF_INT_VALUE | NF_FLOAT_CONST
+        stop bool = (a.flags & known) != 0 && (if k == 3 { se_truth(a) } else { !se_truth(a) })
         n.flags = (a.flags | b.flags) & NF_OVERFLOW
         if stop { n.flags = a.flags & NF_OVERFLOW }
-        if stop || ((a.flags & NF_ICE) != 0 && (b.flags & NF_ICE) != 0) {
-            n.flags |= NF_ICE | NF_STATIC
+        if stop || ((a.flags & known) != 0 && (b.flags & known) != 0) {
+            ice bool = (a.flags & NF_ICE) != 0 && (stop || (b.flags & NF_ICE) != 0)
+            n.flags |= NF_STATIC | (if ice { NF_ICE } else { NF_FOLD })
             n.value = if (if k == 3 { se_truth(a) || se_truth(b) } else { se_truth(a) && se_truth(b) }) { 1 } else { 0 }
         }
         return n
@@ -396,14 +406,15 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     n.operand_ty = ty
     n.flags = (a.flags | b.flags) & NF_OVERFLOW
     if pa_is_gnu(p) && (a.flags & NF_STATIC) != 0 && (b.flags & NF_STATIC) != 0 && k == 11 { n.flags |= NF_STATIC }
-    if ty_is_integer(ty) && (a.flags & NF_ICE) != 0 && (b.flags & NF_ICE) != 0 {
-        n.flags |= NF_ICE | NF_STATIC
+    if ty_is_integer(ty) && (a.flags & NF_INT_VALUE) != 0 && (b.flags & NF_INT_VALUE) != 0 {
+        n.flags |= NF_STATIC | (if (a.flags & b.flags & NF_ICE) != 0 { NF_ICE } else { NF_FOLD })
         if ty_int_bits(ty) > 64 { wi_binary(p, t, n, a, b, ty, k) }
         else { se_fold_int(p, t, n, a, b, ty, k) }
-    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 &&
-        (b.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
+    } else if (ty_is_real_float(ty) || ty_is_complex(ty)) && (a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 &&
+        (b.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
         n.flags |= NF_STATIC
         se_fold_float(p, t, n, a, b, k)
+        if compare { n.flags |= NF_FOLD }
     }
     return n
 }
@@ -429,16 +440,12 @@ fn se_conditional(p handle[Parser], t Token, cond handle[Ast], a handle[Ast], b 
     n.a = cond
     n.b = a
     n.c = b
-    if (cond.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
+    if (cond.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
         chosen handle[Ast] = if se_truth(cond) { a } else { b }
-        n.flags = (chosen.flags & (NF_ICE | NF_STATIC | NF_OVERFLOW)) | (cond.flags & NF_OVERFLOW)
-        if ty_is_integer(ty) {
-            if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(chosen, ty_int_bits(ty))) }
-            else { n.value = se_value(ty, chosen.value) }
-        }
-        if (ty_is_real_float(ty) || ty_is_complex(ty)) && (chosen.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 {
-            n.flags &= ~NF_ICE
-            se_set_complex(n, se_fp(chosen), se_im(chosen))
+        se_cast_constant(n, chosen)
+        n.flags |= cond.flags & NF_OVERFLOW
+        if (cond.flags & NF_ICE) == 0 && (n.flags & NF_ICE) != 0 {
+            n.flags = (n.flags & ~NF_ICE) | NF_FOLD
         }
     }
     return n

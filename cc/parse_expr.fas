@@ -622,6 +622,7 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
                 if !s.thread_local { n.flags |= NF_ADDR }
                 if ty_is_func(s.ty) || ty_is_array(s.ty) { n.flags |= NF_STATIC }
             }
+            if s.storage != SC_CONSTEXPR { se_const_load(p, n) }
         }
         return n
     }
@@ -699,6 +700,15 @@ fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[
         try se_constexpr_type(p, result.ty, t.loc)
         try se_check_constexpr(p, result.tree)
         if ty_is_scalar(result.ty) { se_cast_constant(n, result.tree) }
+    }
+    init handle[Ast] = result.tree
+    if pa_is_gnu(p) && (init.flags & NF_STATIC) != 0 {
+        if ty_is_scalar(result.ty) {
+            se_cast_constant(n, init)
+            if spec.storage != SC_CONSTEXPR && (n.flags & NF_ICE) != 0 {
+                n.flags = (n.flags & ~NF_ICE) | NF_FOLD
+            }
+        } else if !ty_is_array(result.ty) { n.flags |= NF_STATIC }
     }
     if (n.flags & NF_ADDR) != 0 && ty_is_array(result.ty) { n.flags |= NF_STATIC }
     return n
@@ -787,7 +797,7 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             n.a = a
             n.b = b
             if ty_is_array(a.ty) && (b.flags & NF_ICE) != 0 && b.wide == null {
-                se_const_load(n)
+                se_const_load(p, n)
             }
             a = n
         } else if (try pa_accept(p, c".")) || (try pa_accept(p, c"->")) {
@@ -812,7 +822,7 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
                 n.flags |= NF_ADDR
                 if ty_is_array(n.ty) { n.flags |= NF_STATIC }
             }
-            if !arrow { se_const_load(n) }
+            if !arrow { se_const_load(p, n) }
             a = n
         } else if (try pa_accept(p, c"++")) || (try pa_accept(p, c"--")) { a = try se_unary(p, t, a, true) }
         else { return a }

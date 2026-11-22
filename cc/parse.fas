@@ -30,6 +30,9 @@ const NF_BITFIELD u32 = 8
 const NF_OVERFLOW u32 = 16
 const NF_DEFINITION u32 = 32
 const NF_IMPLICIT u32 = 256
+// GNU folding may produce a constant value without meeting C23 ICE syntax.
+const NF_FOLD u32 = 512
+const NF_INT_VALUE u32 = NF_ICE | NF_FOLD
 
 struct Ast {
     kind u8

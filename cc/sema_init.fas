@@ -17,7 +17,7 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     if constant && ty_is_record(e.ty) {
         // A constexpr record carries its initializer, so copying the
         // record into another static object is also a constant initializer.
-        folded handle[Ast] = se_const_lvalue(e, null)
+        folded handle[Ast] = se_const_lvalue(e, null, false)
         if folded != null { e = folded }
     }
     out.tree = e
@@ -37,7 +37,7 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
         try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
     }
     if constant && ((e.flags & NF_STATIC) == 0 || ((e.flags & NF_LVALUE) != 0 && !ty_is_array(e.ty) &&
-        e.kind != ND_STRING && e.kind != ND_COMPOUND && (e.flags & (NF_ICE | NF_FLOAT_CONST)) == 0)) {
+        e.kind != ND_STRING && e.kind != ND_COMPOUND && (e.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) == 0)) {
         try pa_error(p, e.loc, c"initializer is not a constant expression")
     }
 }
@@ -118,10 +118,10 @@ fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] 
     return result
 }
 
-fn se_const_lvalue(n handle[Ast], path handle[ConstPath]) handle[Ast] {
+fn se_const_lvalue(n handle[Ast], path handle[ConstPath], gnu bool) handle[Ast] {
     if n.kind == ND_NAME {
         s handle[Symbol] = n.decl
-        if s != null && s.storage == SC_CONSTEXPR && s.value != null {
+        if s != null && s.value != null && (s.storage == SC_CONSTEXPR || gnu) {
             return se_const_value(s.ty, handle_from_addr(s.value), path)
         }
     } else if n.kind == ND_COMPOUND && n.op == zext[u32](SC_CONSTEXPR) {
@@ -132,21 +132,29 @@ fn se_const_lvalue(n handle[Ast], path handle[ConstPath]) handle[Ast] {
         r handle[RecordDef] = ty_record(ty_node(ty_unqual(base.ty)).aux1)
         if n.op < r.fields_start || n.op - r.fields_start >= r.fields_len { return null }
         index ConstPath = {zext[u64](n.op - r.fields_start), path}
-        return se_const_lvalue(base, &index)
+        return se_const_lvalue(base, &index, gnu)
     } else if n.kind == ND_SUBSCRIPT {
         base handle[Ast] = n.a
         subscript handle[Ast] = n.b
         if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || subscript.wide != null { return null }
         index ConstPath = {subscript.value, path}
-        return se_const_lvalue(base, &index)
+        return se_const_lvalue(base, &index, gnu)
     }
     return null
 }
 
-fn se_const_load(n handle[Ast]) void {
+fn se_const_load(p handle[Parser], n handle[Ast]) void {
     if !ty_is_scalar(n.ty) { return }
-    value handle[Ast] = se_const_lvalue(n, null)
-    if value != null { se_cast_constant(n, value) }
+    value handle[Ast] = se_const_lvalue(n, null, false)
+    if value != null { se_cast_constant(n, value); return }
+    // A GNU constant load may inspect an initialized const object. Keep it
+    // distinct from a constexpr load so strict contexts retain ICE checks.
+    if !pa_is_gnu(p) || (ty_quals(n.ty) & (Q_CONST | Q_VOLATILE | Q_ATOMIC)) != Q_CONST { return }
+    value = se_const_lvalue(n, null, true)
+    if value != null && (value.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        se_cast_constant(n, value)
+        if (n.flags & NF_ICE) != 0 { n.flags = (n.flags & ~NF_ICE) | NF_FOLD }
+    }
 }
 
 fn se_constexpr_type(p handle[Parser], ty u32, loc u32) void fails {
@@ -419,7 +427,14 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         n.ty = out.ty
     }
     n.a = xs.first
-    if constant { n.flags |= NF_STATIC }
+    all_static bool = true
+    item handle[Ast] = xs.first
+    while item != null {
+        value handle[Ast] = item.a
+        if (value.flags & (NF_STATIC | NF_OVERFLOW)) != NF_STATIC { all_static = false; break }
+        item = item.next
+    }
+    if all_static { n.flags |= NF_STATIC }
     if !se_aggregate(ty) && xs.first == null && ty_is_integer(ty) {
         n.flags |= NF_STATIC | NF_ICE
     } else if !se_aggregate(ty) && xs.first != null {
