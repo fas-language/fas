@@ -104,16 +104,17 @@ fn pa_attributes(p handle[Parser]) handle[Attr] fails {
             a.loc = t.loc
             if bracket && (try pa_accept(p, c"::")) {
                 a.ns = a.name
-                a.name = try pa_ident(p, try pa_take(p))
+                member Token = try pa_take(p)
+                if member.kind != TK_IDENT { try pa_error(p, member.loc, c"expected attribute name after namespace") }
+                a.name = cc_ident(p.names, member)
             }
-            if try pa_accept(p, c"(") {
+            operands bool = try pa_accept(p, c"(")
+            if operands {
                 try pa_collect(p, &a.args, c")")
                 try pa_expect(p, c")")
                 if bracket && a.ns == 0 { try pa_check_attr_args(p, a) }
-                if a.args.n != 0 && pa_attr_name(p, a, c"nonstring") {
-                    try pa_error(p, a.loc, c"nonstring attribute takes no arguments")
-                }
             }
+            if !bracket || a.ns != 0 { try pa_check_gnu_attr_args(p, a) }
             if tail == null { head = a } else { tail.next = a }
             tail = a
             if !(try pa_accept(p, c",")) { break }
@@ -140,6 +141,57 @@ fn pa_check_attr_args(p handle[Parser], a handle[Attr]) void fails {
         pa_attr_name(p, a, c"noreturn") || pa_attr_name(p, a, c"_Noreturn") {
         try pa_error(p, a.loc, c"attribute does not take arguments")
     }
+}
+
+// GNU attributes with known argument contracts can be checked without
+// interpreting tokens for unknown (and possibly target-specific) attributes.
+fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
+    if a.ns != 0 && !bytes_eq_c(feature_attr(cc_name(p.names, a.ns)), c"gnu") { return }
+    name Bytes = feature_attr(cc_name(p.names, a.name))
+    min u32 = 0
+    max u32 = 0
+    string_first bool = false
+    if feature_in(c" always_inline fastcall leaf naked no_stack_protector noinline nonstring noreturn returns_twice uninitialized unused ", name) {
+        max = 0
+    } else if feature_in(c" alias cfi_salt error function_return section target tls_model visibility warning zero_call_used_regs ", name) {
+        min = 1
+        max = 1
+        string_first = true
+    } else if bytes_eq_c(name, c"annotate") {
+        min = 1
+        max = 0xffffffff
+        string_first = true
+    } else if feature_in(c" alloc_align cleanup regparm ", name) {
+        min = 1
+        max = 1
+    } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
+        min = 1
+        max = 2
+    } else if feature_in(c" format pointer_with_type_tag ", name) {
+        min = 3
+        max = 3
+    } else { return }
+    count u32 = 0
+    depth u32 = 0
+    arg_empty bool = true
+    for i usize in 0..a.args.n {
+        t Token = a.args.p[Token, i]
+        if depth == 0 && pa_is(p, t, c",") {
+            if arg_empty { try pa_error(p, t.loc, c"empty attribute argument") }
+            count += 1
+            arg_empty = true
+            continue
+        }
+        if string_first && count == 0 && depth == 0 && t.kind != TK_STR {
+            try pa_error(p, t.loc, c"attribute argument must be a string literal")
+        }
+        if pa_delimiter(p, t) != null { depth += 1 }
+        else if pa_is(p, t, c")") || pa_is(p, t, c"]") || pa_is(p, t, c"}") { depth -= 1 }
+        arg_empty = false
+    }
+    if !arg_empty { count += 1 }
+    else if count != 0 { try pa_error(p, a.loc, c"empty attribute argument") }
+    if count < min || count > max { try pa_error(p, a.loc, c"wrong number of attribute arguments") }
 }
 
 fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
@@ -186,6 +238,18 @@ fn pa_has_attr(p handle[Parser], a handle[Attr], name addr) bool {
     return false
 }
 
+fn pa_mode_type(p handle[Parser], ty u32, a handle[Attr]) u32 {
+    mode Bytes = feature_attr(cc_spelling(p.names, a.args.p[Token]))
+    k u32 = ty
+    if bytes_eq_c(mode, c"QI") { k = TY_SCHAR }
+    else if bytes_eq_c(mode, c"HI") { k = TY_SHORT }
+    else if bytes_eq_c(mode, c"SI") { k = TY_INT }
+    else if bytes_eq_c(mode, c"DI") || bytes_eq_c(mode, c"word") { k = TY_LONG }
+    else if bytes_eq_c(mode, c"TI") { k = TY_INT128 }
+    if ty_is_unsigned(ty) { k = ty_make_unsigned(k) }
+    return ty_qual(k, ty_quals(ty))
+}
+
 fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
     while a != null {
         if pa_attr_name(p, a, c"vector_size") {
@@ -197,15 +261,7 @@ fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
             ty = ty_qual(ty_vector(ty, bytes), ty_quals(ty))
         }
         if pa_attr_name(p, a, c"mode") && a.args.n == 1 && ty_is_integer(ty) {
-            mode Bytes = feature_attr(cc_spelling(p.names, a.args.p[Token]))
-            k u32 = ty
-            if bytes_eq_c(mode, c"QI") { k = TY_SCHAR }
-            else if bytes_eq_c(mode, c"HI") { k = TY_SHORT }
-            else if bytes_eq_c(mode, c"SI") { k = TY_INT }
-            else if bytes_eq_c(mode, c"DI") || bytes_eq_c(mode, c"word") { k = TY_LONG }
-            else if bytes_eq_c(mode, c"TI") { k = TY_INT128 }
-            if ty_is_unsigned(ty) { k = ty_make_unsigned(k) }
-            ty = ty_qual(k, ty_quals(ty))
+            ty = pa_mode_type(p, ty, a)
         }
         a = a.next
     }
@@ -383,8 +439,12 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
             try se_declare(p, sym, true, false)
             vec_push[addr](&values, handle_addr(sym))
         }
-        if next == 2147483647 && member == TY_INT { next_ty = TY_LONG }
-        else if next == 0x7fffffffffffffff { next_ty = TY_ULONG }
+        next_ty = member
+        if fixed == TY_INVALID {
+            if next == 2147483647 && member == TY_INT { next_ty = TY_LONG }
+            else if next == 0xffffffff && ty_int_bits(member) == 32 { next_ty = TY_ULONG }
+            else if next == 0x7fffffffffffffff { next_ty = TY_ULONG }
+        }
         next += 1
         if !(try pa_accept(p, c",")) { break }
     }
@@ -401,6 +461,15 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
         else if min >= 0 && max <= 65535 { underlying = TY_USHORT }
         else if min >= -128 && min < 0 && max <= 127 { underlying = TY_SCHAR }
         else if min >= -32768 && min < 0 && max <= 32767 { underlying = TY_SHORT }
+    }
+    if fixed == TY_INVALID {
+        for_attr handle[Attr] = attrs
+        while for_attr != null {
+            if pa_attr_name(p, for_attr, c"mode") && for_attr.args.n == 1 {
+                underlying = pa_mode_type(p, underlying, for_attr)
+            }
+            for_attr = for_attr.next
+        }
     }
     if repeat {
         prior handle[EnumDef] = ty_enum(id)
@@ -482,6 +551,10 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             f.is_packed = pa_has_attr(p, attr, c"packed")
             f.align_attr = aligned
             if !(try pa_accept(p, c",")) { break }
+        }
+        if pa_is_gnu(p) && (try pa_at(p, c"}")) {
+            cc_diag(p.names, p.location, c"warning: ", bytes_c(c"missing semicolon at end of record"))
+            break
         }
         try pa_expect(p, c";")
     }
@@ -875,7 +948,7 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
     if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
     b handle[Ast] = op.bound
     if b == null && !op.star { return ty_array_incomplete(elem) }
-    if b != null && (b.flags & NF_ICE) != 0 {
+    if b != null && ((b.flags & NF_ICE) != 0 || (pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
         count u64 = try se_ice(p, b)
         if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||
             (ty_size(elem) != 0 && count > 0x7fffffffffffffff / ty_size(elem)) {
@@ -935,12 +1008,15 @@ fn pa_asm_word(p handle[Parser], t Token) bool {
 }
 
 fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast] fails {
+    while try pa_accept(p, c"__extension__") {}
+    bool_attr bool = try pa_open_attr(p)
+    attrs handle[Attr] = pa_join_attrs(try pa_attributes(p), leading)
     t Token = try pa_peek(p)
     if pa_assert_word(p, t) { try pa_assert(p); return null }
     if pa_asm_word(p, t) { return try pa_asm(p, file) }
-    if file && pa_is_gnu(p) && (try pa_accept(p, c";")) { return null }
+    if (bool_attr || attrs != null || (file && pa_is_gnu(p))) && (try pa_accept(p, c";")) { return null }
     spec DeclSpec = {}
-    spec.attrs = leading
+    spec.attrs = attrs
     try pa_specs(p, &spec)
     if try pa_accept(p, c";") {
         if !ty_is_record(spec.ty) && !ty_is_enum(spec.ty) { try pa_error(p, spec.loc, c"declaration has no declarator") }

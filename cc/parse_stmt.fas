@@ -392,6 +392,12 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
         n.op = cc_intern(p.names, bytes_c(c":"))
         n.value = zext[u64](l.name)
         n.extra = handle_addr(l)
+        // GNU attributes immediately after a label appertain to the label,
+        // including when it is the final item in the compound statement.
+        next Token = try pa_peek(p)
+        if pa_is(p, next, c"__attribute__") || pa_is(p, next, c"__attribute") {
+            n.attrs = pa_join_attrs(try pa_attributes(p), n.attrs)
+        }
         if !in_block { n.a = try pa_label_tail(p) }
         return n
     } else {
