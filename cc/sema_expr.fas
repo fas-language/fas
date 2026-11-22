@@ -138,7 +138,9 @@ fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
         return
     }
     n.flags |= a.flags & (NF_STATIC | NF_OVERFLOW)
-    if ty_is_integer(ty) && (a.flags & NF_INT_VALUE) != 0 {
+    // A void pointer cast from an integer zero may carry NF_ICE as a
+    // null pointer marker. Casting it back does not form an integer ICE.
+    if ty_is_integer(ty) && ty_is_integer(from) && (a.flags & NF_INT_VALUE) != 0 {
         n.flags |= a.flags & NF_INT_VALUE
         if ty_is_bool(ty) { n.value = if se_truth(a) { 1 } else { 0 } }
         else if ty_int_bits(ty) > 64 { wi_store(n, wi_from_ast(a, ty_int_bits(ty))) }
