@@ -171,6 +171,13 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
         min = 1
         max = 2
+    } else if bytes_eq_c(name, c"nonnull_if_nonzero") {
+        min = 2
+        max = 2
+    } else if bytes_eq_c(name, c"sentinel") {
+        max = 2
+    } else if bytes_eq_c(name, c"nonnull") {
+        max = 0xffffffff
     } else if feature_in(c" format pointer_with_type_tag ", name) {
         min = 3
         max = 3
@@ -195,6 +202,20 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     if !arg_empty { count += 1 }
     else if count != 0 { try pa_error(p, a.loc, c"empty attribute argument") }
     if count < min || count > max { try pa_error(p, a.loc, c"wrong number of attribute arguments") }
+    if bytes_eq_c(name, c"nonnull") || bytes_eq_c(name, c"nonnull_if_nonzero") || bytes_eq_c(name, c"sentinel") {
+        expr Parser = {}
+        pa_attr_replay(p, a, &expr)
+        for i u32 in 0..count {
+            e handle[Ast] = try pa_expression(&expr, 3)
+            v u64 = try se_ice(p, e)
+            if bytes_eq_c(name, c"sentinel") &&
+                ((!ty_is_unsigned(e.ty) && bitcast[i64](v) < 0) || (i == 1 && v > 1)) {
+                try pa_error(p, e.loc, c"sentinel attribute argument is out of range")
+            }
+            if i + 1 != count { try pa_expect(&expr, c",") }
+        }
+        if (try pa_peek(&expr)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in attribute argument") }
+    }
     if string_first {
         start usize = 0
         while start + 1 < first_end && pa_is(p, a.args.p[Token, start], c"(") &&
@@ -211,17 +232,21 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     }
 }
 
-fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
-    if a.args.n == 0 { return fallback }
+fn pa_attr_replay(p handle[Parser], a handle[Attr], expr handle[Parser]) void {
     // The outer parser owns the source stream. The captured operand uses a
     // bounded cursor with the same scope and the same expression semantics.
-    expr Parser = {}
     expr.location = a.loc
     expr.names = p.names
     expr.pp = p.pp
     expr.scope = p.scope
     expr.function = p.function
     expr.replay = &a.args
+}
+
+fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
+    if a.args.n == 0 { return fallback }
+    expr Parser = {}
+    pa_attr_replay(p, a, &expr)
     v u64 = try se_ice(p, try pa_expression(&expr, 3))
     if (try pa_peek(&expr)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in attribute argument") }
     if v > 0xffffffff { try pa_error(p, a.loc, c"attribute argument is out of range") }
