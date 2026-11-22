@@ -432,8 +432,8 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
 
-    // Unwrap single-element brace around scalar
-    if init.kind == ND_INIT && !gen_is_mem_ty(u) {
+    // Unwrap single-element brace around scalar (NOT vectors!)
+    if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {
         if init.a != null && init.a.a != null {
             gen_static_fill(si, u, init.a.a, off)
         }
@@ -617,10 +617,11 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
         if desig.b != null {
-            // GNU range designator [lo ... hi]: desig.a = lo, desig.b = hi
+            // GNU range designator [lo ... hi]: desig.a = lo, desig.b = hi (desig.value == hi)
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
             hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in idx..(hi + 1) {
+            for j u64 in lo..(hi + 1) {
                 dummy u64 = 0
                 gen_static_fill_desig(si, n.elem, desig.next, val_ast, off + j * elem_sz, &dummy)
             }
@@ -1092,9 +1093,10 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
         if desig.b != null {
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
             hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in idx..(hi + 1) {
+            for j u64 in lo..(hi + 1) {
                 ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
                 dummy u64 = 0
                 try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)

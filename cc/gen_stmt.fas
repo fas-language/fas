@@ -304,8 +304,26 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
         if !first { buf_str(&blk.term, c", ") }
         first = false
         gen_add_succ(blk, sc.blk_id)
-        // Print key matching signedness & width
-        if is_signed && bits <= 64 {
+        // Print key matching signedness & width (including >64-bit _BitInt cases!)
+        if bits > 64 && sc.ast != null && sc.ast.a != null && sc.ast.a.wide != null {
+            words u32 = (bits + 31) / 32
+            limbs addr = sc.ast.a.wide
+            buf_str(&blk.term, c"0x")
+            started bool = false
+            wi u32 = words
+            while wi > 0 {
+                wi -= 1
+                w u32 = limbs[u32, zext[usize](wi)]
+                if !started {
+                    if w != 0 || wi == 0 {
+                        buf_hex(&blk.term, zext[u64](w), 1)
+                        started = true
+                    }
+                } else {
+                    buf_hex(&blk.term, zext[u64](w), 8)
+                }
+            }
+        } else if is_signed && bits <= 64 {
             sv i64 = bitcast[i64](sc.lo)
             if bits < 64 {
                 sh u32 = 64 - bits
