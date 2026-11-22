@@ -235,6 +235,7 @@ fn pa_base(p handle[Parser], t Token) u32 {
     if pa_is(p, t, c"float") { return TY_FLOAT }
     if pa_is(p, t, c"double") { return TY_DOUBLE }
     if pa_is(p, t, c"_Float16") || pa_is(p, t, c"__fp16") { return TY_FLOAT16 }
+    if pa_is(p, t, c"__bf16") && pa_is_gnu(p) { return TY_BFLOAT16 }
     if pa_is(p, t, c"__float80") { return TY_LDOUBLE }
     if pa_is(p, t, c"__int128") { return TY_INT128 }
     return TY_INVALID

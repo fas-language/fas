@@ -1,1 +1,2 @@
 unexpected-reject headers/tgmath.h The absolute glibc include hits a float-type guard under the fcc GCC 4.2 compatibility macros
+unexpected-reject headers/afl/t1ha0_ia32aes_b.h AFL only includes x86intrin.h for GCC >= 4.4 or when __clang__ is defined. Clang with -U__clang__ reproduces the undeclared __m128i error.

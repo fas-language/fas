@@ -35,6 +35,7 @@ const TY_COMPLEX_F16 u32 = 21
 const TY_COMPLEX_F32 u32 = 22
 const TY_COMPLEX_F64 u32 = 23
 const TY_COMPLEX_F80 u32 = 24
+const TY_BFLOAT16 u32    = 25
 
 // ---------- Type kind constants ----------
 const TYK_VOID u8      = 0
@@ -67,6 +68,7 @@ const TYK_STRUCT u8    = 26
 const TYK_UNION u8     = 27
 const TYK_ENUM u8      = 28
 const TYK_QUAL u8      = 29
+const TYK_BFLOAT16 u8  = 30
 
 // ---------- Qualifiers & flags ----------
 const Q_NONE u32     = 0
@@ -275,6 +277,7 @@ fn tc_init(ctx handle[TypeCtx]) void {
     assert(ty_complex(TY_FLOAT) == TY_COMPLEX_F32)
     assert(ty_complex(TY_DOUBLE) == TY_COMPLEX_F64)
     assert(ty_complex(TY_LDOUBLE) == TY_COMPLEX_F80)
+    assert(tc_intern_prim(TYK_BFLOAT16, 0) == TY_BFLOAT16)
 }
 
 fn tc_free(ctx handle[TypeCtx]) void {
@@ -598,12 +601,12 @@ fn ty_is_integer(tid u32) bool {
 
 fn ty_is_real_float(tid u32) bool {
     k u8 = ty_kind(tid)
-    return k >= TYK_FLOAT16 && k <= TYK_LDOUBLE
+    return (k >= TYK_FLOAT16 && k <= TYK_LDOUBLE) || k == TYK_BFLOAT16
 }
 
 fn ty_is_floating(tid u32) bool {
     k u8 = ty_kind(tid)
-    if k >= TYK_FLOAT16 && k <= TYK_LDOUBLE { return true }
+    if ty_is_real_float(tid) { return true }
     if k == TYK_COMPLEX {
         return ty_is_real_float(ty_node(ty_unqual(tid)).elem)
     }
@@ -704,7 +707,7 @@ fn ty_integer_promote(tid u32) u32 {
 
 fn ty_float_rank(tid u32) u32 {
     k u8 = ty_kind(tid)
-    if k == TYK_FLOAT16 { return 1 }
+    if k == TYK_FLOAT16 || k == TYK_BFLOAT16 { return 1 }
     if k == TYK_FLOAT { return 2 }
     if k == TYK_DOUBLE { return 3 }
     if k == TYK_LDOUBLE { return 4 }

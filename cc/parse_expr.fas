@@ -128,7 +128,14 @@ fn pa_float(p handle[Parser], t Token, s Bytes, hex bool) handle[Ast] fails {
     if pa_is_gnu(p) && i < s.n && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
     if i < s.n {
         suffix u8 = s.p[u8, i] | 32
-        if suffix == 102 { ty = TY_FLOAT; i += 1 }
+        if suffix == 102 {
+            ty = TY_FLOAT
+            i += 1
+            if i + 1 < s.n && s.p[u8, i] == 49 && s.p[u8, i + 1] == 54 {
+                ty = TY_FLOAT16
+                i += 2
+            }
+        }
         else if suffix == 108 { ty = TY_LDOUBLE; i += 1 }
         else if suffix == 113 && pa_is_gnu(p) { ty = TY_LDOUBLE; i += 1 }
         if i < s.n && !imaginary && pa_is_gnu(p) && pa_imaginary(s.p[u8, i]) { imaginary = true; i += 1 }
@@ -355,7 +362,51 @@ fn pa_builtin_call(p handle[Parser], t Token) handle[Ast] fails {
     return n
 }
 
-fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast]) u32 {
+// GCC intrinsic headers use builtins directly in casts and return statements,
+// so treating their results as int changes both vector and pointer types.
+fn pa_x86_result(name Bytes) u32 {
+    prefix Bytes = bytes_c(c"__builtin_ia32_")
+    if !bytes_starts_with(name, prefix) { return TY_INVALID }
+    suffix Bytes = {name.p + prefix.n, name.n - prefix.n}
+    lo usize = 0
+    hi usize = X86_RESULT_COUNT
+    while lo < hi {
+        i usize = lo + (hi - lo) / 2
+        cmp i32 = bytes_cmp(suffix, bytes_c(X86_RESULT_NAMES[i]))
+        if cmp < 0 { hi = i }
+        else if cmp > 0 { lo = i + 1 }
+        else {
+            code u32 = X86_RESULT_TYPES[i]
+            base u32 = code & 255
+            if (code & 256) != 0 { return ty_ptr(base) }
+            lanes u32 = code >> 9
+            if lanes != 0 { return ty_vector(base, lanes * trunc[u32](ty_size(base))) }
+            return base
+        }
+    }
+    return TY_INVALID
+}
+
+fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32 {
+    target u32 = pa_x86_result(name)
+    if target != TY_INVALID { return target }
+    if a != null && ty_is_vector(a.ty) {
+        // GCC takes a vector mask; Clang takes one index per result lane.
+        if bytes_eq_c(name, c"__builtin_shuffle") && (count == 2 || count == 3) {
+            mask handle[Ast] = a.next
+            if count == 3 { mask = mask.next }
+            if ty_is_vector(mask.ty) {
+                elem u32 = ty_node(ty_unqual(a.ty)).elem
+                m handle[TypeNode] = ty_node(ty_unqual(mask.ty))
+                lanes u64 = ty_size(mask.ty) / ty_size(m.elem)
+                return ty_vector(elem, trunc[u32](lanes * ty_size(elem)))
+            }
+        }
+        if bytes_eq_c(name, c"__builtin_shufflevector") && count >= 3 {
+            elem u32 = ty_node(ty_unqual(a.ty)).elem
+            return ty_vector(elem, (count - 2) * trunc[u32](ty_size(elem)))
+        }
+    }
     if bytes_eq_c(name, c"__builtin_stpcpy") || bytes_eq_c(name, c"__builtin_stpncpy") { return ty_ptr(TY_CHAR) }
     if bytes_eq_c(name, c"__builtin_extract_return_addr") || bytes_eq_c(name, c"__builtin_frob_return_addr") {
         return ty_ptr(TY_VOID)
@@ -427,7 +478,7 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
     if ty_is_ptr(fn_ty) { fn_ty = ty_node(ty_unqual(fn_ty)).elem }
     ret u32
     if a.ty == TY_INVALID && a.kind == ND_NAME && a.decl == null {
-        ret = pa_builtin_result(p, cc_name(p.names, a.op), xs.first)
+        ret = pa_builtin_result(p, cc_name(p.names, a.op), xs.first, count)
     } else {
         if !ty_is_func(fn_ty) { try pa_error(p, a.loc, c"called expression is not a function") }
         f handle[TypeNode] = ty_node(ty_unqual(fn_ty))
