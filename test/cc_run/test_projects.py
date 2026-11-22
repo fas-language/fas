@@ -3,10 +3,17 @@
 
 import os
 from pathlib import Path
+import resource
 import shutil
 import subprocess
 import sys
 import tempfile
+
+MEM_LIMIT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB cap per compiler child
+
+
+def _limit_as():
+    resource.setrlimit(resource.RLIMIT_AS, (MEM_LIMIT_BYTES, MEM_LIMIT_BYTES))
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM = ROOT.parent / "cc-tests" / "upstream"
@@ -21,10 +28,18 @@ ENV = {
 
 
 def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180):
+    preexec = _limit_as if cmd and str(cmd[0]) == FCC else None
     cp = subprocess.run(cmd, cwd=cwd, env=ENV, input=input_bytes,
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        timeout=timeout, preexec_fn=preexec)
     if cp.returncode != 0:
-        raise RuntimeError(f"Command failed ({cp.returncode}): {' '.join(cmd)}\n{cp.stderr.decode('utf-8', 'replace')[:600]}")
+        err = cp.stderr.decode("utf-8", "replace")
+        err_lo = err.lower()
+        if ("out of memory" in err_lo or "out_of_memory" in err_lo
+                or "cannot allocate memory" in err_lo or "bad_alloc" in err_lo
+                or cp.returncode == -9):
+            raise RuntimeError(f"compile-oom ({cp.returncode}): {' '.join(cmd)}\n{err[:600]}")
+        raise RuntimeError(f"Command failed ({cp.returncode}): {' '.join(cmd)}\n{err[:600]}")
     return cp.stdout
 
 

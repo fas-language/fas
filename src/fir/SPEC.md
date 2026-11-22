@@ -97,6 +97,7 @@ dtype 1 base "int" signed 4                optional debug types: id, description
 alias_tag 1 "int" 0                        optional TBAA tags: id, name, parent id (0 = root)
 global ...                                 globals
 alias ...                                  symbol aliases
+ifunc ...                                  GNU indirect functions (STT_GNU_IFUNC)
 func ... / declare ...                     functions
 ```
 
@@ -157,6 +158,22 @@ alias @hook         weak hidden = @default_hook
 ```
 
 - **Verifier rules:** the target is a function or global *defined* in this module, not an alias (so there are no cycles); a function alias has no addend; an addend stays inside the global; the alias name is defined nowhere else.
+
+### Indirect functions (IFUNC)
+
+```
+ifunc @name LINKAGE [VISIBILITY] = @resolver
+```
+
+A GNU indirect function (`STT_GNU_IFUNC`), as C's `__attribute__((ifunc("resolver")))`. The dynamic loader (or CRT startup for static links) runs `@resolver` once and binds calls and address references to `@name` to the function pointer `@resolver` returns. Linkage and visibility belong to `@name` (defaulting to `global` and `default`); `@resolver` keeps its own symbol.
+
+```
+ifunc @magic global = @resolver
+ifunc @magic_local local = @resolver
+ifunc @magic_hidden global hidden = @resolver
+```
+
+- **Verifier rules:** `@name` is defined nowhere else in the module; `@resolver` is a function *defined* in this module; `@resolver` is non-variadic, returns a single `ptr`, and takes `()`, `(i64)`, or `(i64, ptr)`.
 
 ### Functions
 
@@ -404,7 +421,7 @@ Alignment is a power of two. It is a promise about the address: an access whose 
 | `va_start P` | Only in a variadic function. Fills the `va_list` at `P` so that it reads this function's unnamed arguments, starting after the fixed ones. |
 | `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer, `ptr`, `f16` (an SSE slot, like `f32`), `f32`, `f64`, `f80` (C `long double`, from the overflow area, 16-aligned) or a vector (read as the `agg` that holds it, §5). Up to 64 bits it reads one 8-byte argument word and keeps its low `T` bits; a wider integer is read as the call passed it (§5: `i65`..`i128` as `__int128`, wider as MEMORY class). |
 | `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P`, `%p = va_arg complex T P` | Reads the next unnamed argument as a struct (or a bare complex number) by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
-| `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). x87, MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
+| `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… t u m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). `t` (`st(0)`) and `u` (`st(1)`) place `f80`/`f64`/`f32` operands on the x87 stack following GCC's x87 rules (including `"st"`/`"st(N)"` clobbers for popped inputs). MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"st"`/`"st(N)"`, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
 | `dbg_value VAR, V` | Debug info: the function's VAR-th `var` (1-based, one without `at`) holds V from here on (§4, "Debug information"). It has no effect on semantics. |
 
@@ -429,7 +446,7 @@ Every block ends with exactly one terminator.
 | `br C, ^t(ARGS), ^f(ARGS)[, weight W]` | Conditional branch on an `i1`. W is the probability of the true edge, out of 1000. |
 | `switch V, ^default(ARGS), [K: ^b(ARGS), ...][, weights [Wd, W1, ...]]` | Multi-way branch on an integer value. Keys are written without a type and must be distinct. The optional weights give one non-negative integer per edge, default first, then the cases in order, read relative to their sum. With `br ..., weight W` and the `cold` attribute, this is all the profile information Fir carries; like them, the weights are hints that change no behaviour (a pass that rewrites the switch may drop them). |
 | `indirect_br P, [^b1, ^b2, ...]` | Computed goto. The list holds every possible target, and those blocks take no parameters. `P` must be a `blockaddr` of this function for one of the listed blocks, possibly after arithmetic that lands back on one (`&&a + (&&b - &&a)`); anything else is undefined, and the current backends trap. |
-| `asm_goto [volatile] [intel] "TMPL" in(INS) [clobber("C", ...)] ^fall [^l1, ^l2, ...]` | GNU `asm goto`: an `asm` (§6) without outputs that may jump to one of the listed blocks, or else continues at `^fall`. The template names the list's labels after the operands, as in GCC: label K (from 0) is `%lN` with N = number of inputs + K, always with the `l` modifier; `%lN` of an operand is an error. `^fall` and the labels take no parameters, and a block may appear more than once. |
+| `[%r0, ... = ] asm_goto [volatile] [intel] "TMPL" [out(OUTS)] [in(INS)] [clobber("C", ...)] ^fall [^l1, ^l2, ...]` | GNU `asm goto` (with optional C23/GCC 11+ outputs): an `asm` (§6) that may jump to one of the listed blocks or else continues at `^fall`. Outputs follow the same `out(...)` rules as `asm` and are defined on both `^fall` and every indirect label edge `^l1, ...` (C23 / Clang 16+ semantics). The template names the list's labels after all operands, as in GCC: label K (from 0) is `%lN` with N = number of outputs + number of inputs + K, always with the `l` modifier; `%lN` of an operand is an error. `^fall` and the labels take no parameters, and a block may appear more than once. |
 | `ret` / `ret V` / `ret V1, V2` | Return. The values must match the result list. |
 | `unreachable` | Control never gets here. |
 

@@ -81,7 +81,8 @@ type x87 =
    register is physical (instruction selection chose them, see
    Mir_isel's asm rule) *)
 type asm_opnd =
-  | Areg of reg * int  (** a register and the operand's width in bits (an xmm: 32 or 64) *)
+  | Areg of reg * int  (** a register and the operand's width in bits (an xmm: 32, 64 or 128) *)
+  | Ax87 of int  (** x87 stack slot: 0 = st(0), 1 = st(1) *)
   | Amem of addr * int  (** a memory operand and its size in bytes *)
   | Aimm of int64  (** an immediate *)
   | Asym of string * int64  (** a symbol plus an addend, as an immediate *)
@@ -594,6 +595,7 @@ let ins_s i =
   | Asm a ->
       let o = function
         | Areg (x, w) -> p "%s:%d" (r x) w
+        | Ax87 i -> p "st(%d)" i
         | Amem (m, n) -> p "%s:%d" (addr_s m) n
         | Aimm k -> Int64.to_string k
         | Asym (s, k) -> p "@%s%+Ld" s k

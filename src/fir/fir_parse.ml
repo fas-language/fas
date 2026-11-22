@@ -594,6 +594,17 @@ let asm_parts st =
   in
   (!aflags, tmpl, outs, oargs, ins, iargs, clobbers)
 
+let asm_result_tys st (outs : asm_operand array) =
+  let lx = st.lx in
+  let rtys = ref [] in
+  Array.iter
+    (fun (o : asm_operand) ->
+      match Fir_asm.constr ~names:[||] ~nouts:0 ~output:true o.acon with
+      | c -> if Fir_asm.output_is_result c then rtys := o.aty :: !rtys
+      | exception Fir_asm.Bad m -> fail lx m)
+    outs;
+  Array.of_list (List.rev !rtys)
+
 (* Parses the op after "name" (already consumed); returns the op and the
    result types *)
 let parse_op st opname =
@@ -921,9 +932,10 @@ let parse_term st word =
       end;
       Indirect_br (x, Array.of_list (List.rev !bs))
   | "asm_goto" ->
-      (* asm_goto [volatile] [intel] "tmpl" in(...) clobber(...) ^fall [^l, ...] *)
-      let aflags, tmpl, outs, _, ins, iargs, clobbers = asm_parts st in
-      if outs <> [||] then fail lx "asm_goto has no outputs";
+      (* asm_goto [volatile] [intel] "tmpl" [out(...)] [in(...)] [clobber(...)] ^fall [^l, ...] *)
+      let aflags, tmpl, outs, oargs, ins, iargs, clobbers = asm_parts st in
+      let rtys = asm_result_tys st outs in
+      if rtys <> [||] then fail lx (Printf.sprintf "asm_goto defines %d values, 0 named" (Array.length rtys));
       let label () = match next lx with Label s -> block_ref st s | t -> fail lx ("expected a label, got " ^ tok_text t) in
       let fall = label () in
       expect lx "[";
@@ -935,7 +947,18 @@ let parse_term st word =
         in
         go ()
       end;
-      Asm_goto { tmpl; aflags; ins; aargs = Array.of_list iargs; clobbers; fall; labels = Array.of_list (List.rev !bs) }
+      Asm_goto
+        {
+          tmpl;
+          aflags;
+          outs;
+          ins;
+          aargs = Array.of_list (oargs @ iargs);
+          aresults = [||];
+          clobbers;
+          fall;
+          labels = Array.of_list (List.rev !bs);
+        }
   | "ret" ->
       (* "ret" alone returns nothing; otherwise a value list follows on the
          same logical statement, which ends at the next label or "}" *)
@@ -1019,14 +1042,51 @@ let parse_body lx f =
               done;
               expect lx "=";
               let opname = match next lx with Ident s -> s | t -> fail lx ("expected an instruction, got " ^ tok_text t) in
-              let op, tys = parse_op st opname in
               let names = Array.of_list (List.rev !names) in
-              if Array.length names <> Array.length tys then
-                fail lx (Printf.sprintf "%s defines %d values, %d named" opname (Array.length tys) (Array.length names));
-              let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
-              let rs = emit ~loc f b op tys in
-              Array.iteri (fun k n -> define_name st n rs.(k)) names;
-              insts ()
+              if opname = "asm_goto" then begin
+                let aflags, tmpl, outs, oargs, ins, iargs, clobbers = asm_parts st in
+                let rtys = asm_result_tys st outs in
+                if Array.length names <> Array.length rtys then
+                  fail lx (Printf.sprintf "asm_goto defines %d values, %d named" (Array.length rtys) (Array.length names));
+                let label () =
+                  match next lx with Label s -> block_ref st s | t -> fail lx ("expected a label, got " ^ tok_text t)
+                in
+                let fall = label () in
+                expect lx "[";
+                let bs = ref [] in
+                if not (accept lx "]") then begin
+                  let rec go () =
+                    bs := label () :: !bs;
+                    if accept lx "," then go () else expect lx "]"
+                  in
+                  go ()
+                end;
+                let aresults = Array.mapi (fun k ty -> new_value f (Term_result (b, k)) ty) rtys in
+                Array.iteri (fun k n -> define_name st n aresults.(k)) names;
+                let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+                set_term ~loc f b
+                  (Asm_goto
+                     {
+                       tmpl;
+                       aflags;
+                       outs;
+                       ins;
+                       aargs = Array.of_list (oargs @ iargs);
+                       aresults;
+                       clobbers;
+                       fall;
+                       labels = Array.of_list (List.rev !bs);
+                     })
+              end
+              else begin
+                let op, tys = parse_op st opname in
+                if Array.length names <> Array.length tys then
+                  fail lx (Printf.sprintf "%s defines %d values, %d named" opname (Array.length tys) (Array.length names));
+                let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+                let rs = emit ~loc f b op tys in
+                Array.iteri (fun k n -> define_name st n rs.(k)) names;
+                insts ()
+              end
           | Ident opname ->
               let op, tys = parse_op st opname in
               if tys <> [||] then
@@ -1069,7 +1129,10 @@ let parse_body lx f =
     f.blocks;
   Vec.iteri
     (fun nw (br : block_rec) ->
-      Array.iteri (fun k p -> Vec.set f.defs p (Param (nw, k))) br.params)
+      Array.iteri (fun k p -> Vec.set f.defs p (Param (nw, k))) br.params;
+      match br.term with
+      | Asm_goto { aresults; _ } -> Array.iteri (fun k r -> Vec.set f.defs r (Term_result (nw, k))) aresults
+      | _ -> ())
     f.blocks;
   resolve_all f;
   (* switch keys, now that value types are final *)
@@ -1323,6 +1386,21 @@ let parse_module s =
         let target = match next lx with Sym s -> s | t -> fail lx ("expected the aliased symbol, got " ^ tok_text t) in
         let addend = match peek lx with P "+" -> ignore (next lx); int64_tok lx | _ -> 0L in
         ignore (Vec.push m.aliases { a with target; addend });
+        go ()
+    | Ident "ifunc" ->
+        (* ifunc @name [linkage] [visibility] = @resolver *)
+        let iname = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+        let iv = { iname; resolver = ""; ilinkage = Global; ivisibility = Default } in
+        let rec attrs () =
+          match next lx with
+          | Ident s when Option.is_some (linkage_of s) -> iv.ilinkage <- Option.get (linkage_of s); attrs ()
+          | Ident s when Option.is_some (visibility_of s) -> iv.ivisibility <- Option.get (visibility_of s); attrs ()
+          | P "=" -> ()
+          | t -> fail lx ("unexpected " ^ tok_text t ^ " in ifunc")
+        in
+        attrs ();
+        let resolver = match next lx with Sym s -> s | t -> fail lx ("expected the resolver symbol, got " ^ tok_text t) in
+        ignore (Vec.push m.ifuncs { iv with resolver });
         go ()
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in

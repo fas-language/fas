@@ -231,7 +231,28 @@ fn si_write_bitfield(si handle[StaticInit], bit_off u64, bit_width u32, val u64)
         if byte_idx < si.size {
             cur u8 = si.data[u8, byte_idx]
             mask u8 = trunc[u8](1 << bit_in_byte)
-            if ((val >> b) & 1) != 0 {
+            bit_set bool = if b < 64 { ((val >> b) & 1) != 0 } else { false }
+            if bit_set {
+                si.data[u8, byte_idx] = cur | mask
+            } else {
+                si.data[u8, byte_idx] = cur & (~mask)
+            }
+        }
+    }
+}
+
+fn si_write_bitfield_wide(si handle[StaticInit], bit_off u64, bit_width u32, wide addr, n_words u32) void {
+    for b u32 in 0..bit_width {
+        tb u64 = bit_off + zext[u64](b)
+        byte_idx u64 = tb / 8
+        bit_in_byte u32 = trunc[u32](tb % 8)
+        if byte_idx < si.size {
+            cur u8 = si.data[u8, byte_idx]
+            mask u8 = trunc[u8](1 << bit_in_byte)
+            wi u32 = b / 32
+            bi u32 = b % 32
+            bit_set bool = if wi < n_words { ((wide[u32, zext[usize](wi)] >> bi) & 1) != 0 } else { false }
+            if bit_set {
                 si.data[u8, byte_idx] = cur | mask
             } else {
                 si.data[u8, byte_idx] = cur & (~mask)
@@ -431,6 +452,18 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
+    if init.kind == ND_COMPOUND && init.a != null {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
+    if init.kind == ND_CAST && init.a != null && (gen_is_mem_ty(u) || k == TYK_VECTOR) {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
+    if init.kind == ND_NAME && init.decl != null && init.decl.storage == SC_CONSTEXPR && init.decl.value != null {
+        gen_static_fill(si, tid, handle_from_addr(init.decl.value), off)
+        return
+    }
 
     // Unwrap single-element brace around scalar (NOT vectors!)
     if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {
@@ -501,8 +534,13 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                     if fidx >= rec.fields_len { break }
                     f handle[FieldDef] = ty_field(rec.fields_start + fidx)
                     if f.is_bitfield {
-                        val u64 = gen_eval_const_int(item.a)
-                        si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
+                        if item.a != null && item.a.wide != null && f.bit_width > 64 {
+                            nw u32 = (f.bit_width + 31) / 32
+                            si_write_bitfield_wide(si, off * 8 + f.bit_off, f.bit_width, item.a.wide, nw)
+                        } else {
+                            val u64 = gen_eval_const_int(item.a)
+                            si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
+                        }
                     } else {
                         gen_static_fill(si, f.ty, item.a, off + f.byte_off)
                     }
@@ -739,15 +777,51 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
         }
         v u64 = gen_eval_const_int(n.a)
         if ty_is_bool(n.ty) { return if v != 0 { 1 } else { 0 } }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            v = v & mask
+            if ty_is_signed(n.ty) && ((v >> (bits - 1)) & 1) != 0 {
+                v = v | (~mask)
+            }
+        }
         return v
     }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
+        if bytes_eq_c(op, c"&") && n.a != null && n.a.kind == ND_MEMBER {
+            base u64 = gen_eval_const_int(n.a.a)
+            return base + n.a.value
+        }
         v u64 = gen_eval_const_int(n.a)
         if bytes_eq_c(op, c"-") { return 0 - v }
         if bytes_eq_c(op, c"~") { return ~v }
         if bytes_eq_c(op, c"!") { return if v == 0 { 1 } else { 0 } }
         return v
+    }
+    if n.kind == ND_BINARY {
+        op Bytes = cc_name(gc.p.names, n.op)
+        lv u64 = gen_eval_const_int(n.a)
+        rv u64 = gen_eval_const_int(n.b)
+        res u64 = 0
+        if bytes_eq_c(op, c"+") { res = lv + rv }
+        else if bytes_eq_c(op, c"-") { res = lv - rv }
+        else if bytes_eq_c(op, c"*") { res = lv * rv }
+        else if bytes_eq_c(op, c"&") { res = lv & rv }
+        else if bytes_eq_c(op, c"|") { res = lv | rv }
+        else if bytes_eq_c(op, c"^") { res = lv ^ rv }
+        else if bytes_eq_c(op, c"<<") { res = lv << (rv & 63) }
+        else if bytes_eq_c(op, c">>") { res = lv >> (rv & 63) }
+        else { return n.value }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            res = res & mask
+            if ty_is_signed(n.ty) && ((res >> (bits - 1)) & 1) != 0 {
+                res = res | (~mask)
+            }
+        }
+        return res
     }
     if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_int(n.b) }
     return n.value
@@ -1173,10 +1247,32 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
             lo u64 = if desig.a != null { desig.a.value } else { idx }
             hi u64 = desig.b.value
             out_idx[u64] = hi
-            for j u64 in lo..(hi + 1) {
-                ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
+            if hi >= lo && (hi - lo) >= 16 {
+                // Emit a Fir loop instead of unrolling large GNU `[lo ... hi]` designator ranges
+                idx_slot u32 = gen_alloca_entry(8, 8)
+                gen_store_ty(gen_const_u64(lo), idx_slot, 8, false, false)
+                cond_blk u32 = gen_new_block()
+                body_blk u32 = gen_new_block()
+                end_blk u32 = gen_new_block()
+                gen_term_jump(cond_blk)
+                gen_switch_block(cond_blk)
+                iv u32 = gen_load_raw(c"i64", idx_slot, 8, false)
+                cmp u32 = gen_icmp(c"ule", iv, gen_const_u64(hi))
+                gen_term_br(cmp, body_blk, end_blk)
+                gen_switch_block(body_blk)
+                ep u32 = gen_ptradd_scaled(base_ptr, iv, bitcast[i64](elem_sz))
                 dummy u64 = 0
                 try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                next_iv u32 = gen_binop_raw(c"add", c"i64", iv, gen_const_u64(1))
+                gen_store_ty(next_iv, idx_slot, 8, false, false)
+                gen_term_jump(cond_blk)
+                gen_switch_block(end_blk)
+            } else {
+                for j u64 in lo..(hi + 1) {
+                    ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
+                    dummy u64 = 0
+                    try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                }
             }
         } else {
             ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](idx * elem_sz))

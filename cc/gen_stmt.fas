@@ -81,7 +81,7 @@ fn gen_run_cleanups_to(target_depth usize) void fails {
 }
 
 fn gen_restore_vlas_to(target_depth usize) void {
-    if gc.vla_stack.n <= target_depth { return }
+    if gc.has_alloca || gc.vla_stack.n <= target_depth { return }
     v handle[VlaScope] = vec_at(&gc.vla_stack, target_depth)
     gen_stackrestore(v.sp_v)
 }
@@ -406,7 +406,12 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         vec_push(&out_is_rw, if is_rw { 1 } else { 0 })
         vec_push(&out_nodes, handle_addr(o))
         if is_rw && !mem_only {
-            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, ty_align(o.b.ty), false, false))
+            al_rw u64 = ty_align(o.b.ty)
+            if o.b.kind == ND_MEMBER && o.b.a != null {
+                pal u64 = ty_align(o.b.a.ty)
+                if pal < al_rw { al_rw = pal }
+            }
+            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, al_rw, false, false))
         } else {
             vec_push(&out_old_vs, 0)
         }
@@ -450,13 +455,109 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     }
 
     if is_goto {
+        // Rewrite `%l[name]` references in template to `%l<in_vals.n + K>` (Fir only supports numbered `%lN`)
+        goto_tmpl Buf = {}
+        defer { buf_free(&goto_tmpl) }
+        ti usize = 0
+        while ti < tmpl.n {
+            if ti + 3 < tmpl.n && tmpl.p[u8, ti] == 37 && tmpl.p[u8, ti + 1] == 108 && tmpl.p[u8, ti + 2] == 91 {
+                // Find closing ']'
+                tj usize = ti + 3
+                while tj < tmpl.n && tmpl.p[u8, tj] != 93 { tj += 1 }
+                if tj < tmpl.n {
+                    lname Bytes = bytes(tmpl.p + ti + 3, tj - (ti + 3))
+                    lidx usize = 0
+                    found_l bool = false
+                    gl_s handle[Ast] = handle_from_addr(n.extra)
+                    while gl_s != null {
+                        lbl_s handle[Label] = handle_from_addr(gl_s.extra)
+                        if lbl_s != null && bytes_eq(cc_name(gc.p.names, lbl_s.name), lname) {
+                            found_l = true
+                            break
+                        }
+                        lidx += 1
+                        gl_s = gl_s.next
+                    }
+                    if found_l {
+                        buf_str(&goto_tmpl, c"%l")
+                        buf_dec_u64(&goto_tmpl, out_nodes.n + in_vals.n + lidx)
+                        ti = tj + 1
+                        continue
+                    }
+                }
+            }
+            buf_u8(&goto_tmpl, tmpl.p[u8, ti])
+            ti += 1
+        }
+        has_reg_out bool = false
+        for i usize in 0..out_res_vs.n {
+            if vec_get(&out_res_vs, i) != 0 { has_reg_out = true }
+        }
         fall_blk u32 = gen_new_block()
         blk handle[GenBlock] = gen_cur_block()
         blk.terminated = true
         gen_add_succ(blk, fall_blk)
+        // Collect target blocks (use trampoline blocks when there are register outputs so
+        // outputs are stored to their C lvalues on indirect edges too, per C23 / Clang 16+).
+        goto_tramps Vec[u32] = {}
+        goto_reals Vec[u32] = {}
+        defer { vec_free(&goto_tramps); vec_free(&goto_reals) }
+        gl_c handle[Ast] = handle_from_addr(n.extra)
+        while gl_c != null {
+            lbl_c handle[Label] = handle_from_addr(gl_c.extra)
+            real_blk u32 = gen_get_label_block(lbl_c)
+            if has_reg_out {
+                tb u32 = gen_new_block()
+                vec_push(&goto_tramps, tb)
+                vec_push(&goto_reals, real_blk)
+                gen_add_succ(blk, tb)
+            } else {
+                vec_push(&goto_tramps, real_blk)
+                vec_push(&goto_reals, real_blk)
+                gen_add_succ(blk, real_blk)
+            }
+            gl_c = gl_c.next
+        }
         b handle[Buf] = &blk.term
-        buf_str(b, c"  asm_goto volatile ")
-        fir_emit_quoted_bytes(b, tmpl.p, tmpl.n)
+        buf_str(b, c"  ")
+        if has_reg_out {
+            first_r bool = true
+            for i usize in 0..out_res_vs.n {
+                rv u32 = vec_get(&out_res_vs, i)
+                if rv != 0 {
+                    if !first_r { buf_str(b, c", ") }
+                    first_r = false
+                    gen_emit_val(b, rv)
+                }
+            }
+            buf_str(b, c" = ")
+        }
+        buf_str(b, c"asm_goto volatile ")
+        fir_emit_quoted_bytes(b, goto_tmpl.p, goto_tmpl.n)
+        if out_nodes.n > 0 {
+            buf_str(b, c" out(")
+            for i usize in 0..out_nodes.n {
+                if i > 0 { buf_str(b, c", ") }
+                onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+                cb Buf = {}
+                if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+                if onode.op != 0 {
+                    buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                }
+                fir_emit_quoted_bytes(b, cb.p, cb.n)
+                buf_free(&cb)
+                buf_u8(b, 32)
+                gen_emit_fir_ty(b, vec_get(&out_tids, i))
+                if vec_get(&out_is_mem, i) != 0 {
+                    buf_u8(b, 32)
+                    gen_emit_val(b, vec_get(&out_ptrs, i))
+                } else if vec_get(&out_is_rw, i) != 0 {
+                    buf_u8(b, 32)
+                    gen_emit_val(b, vec_get(&out_old_vs, i))
+                }
+            }
+            buf_u8(b, 41)
+        }
         if in_vals.n > 0 {
             buf_str(b, c" in(")
             for i usize in 0..in_vals.n {
@@ -494,19 +595,34 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         buf_u8(b, 32)
         gen_emit_lbl(b, fall_blk)
         buf_str(b, c" [")
-        gl handle[Ast] = handle_from_addr(n.extra)
-        first_l bool = true
-        while gl != null {
-            if !first_l { buf_str(b, c", ") }
-            first_l = false
-            lbl handle[Label] = handle_from_addr(gl.extra)
-            lbl_blk u32 = gen_get_label_block(lbl)
-            gen_add_succ(blk, lbl_blk)
-            gen_emit_lbl(b, lbl_blk)
-            gl = gl.next
+        for i usize in 0..goto_tramps.n {
+            if i > 0 { buf_str(b, c", ") }
+            gen_emit_lbl(b, vec_get(&goto_tramps, i))
         }
         buf_str(b, c"]\n")
+        if has_reg_out {
+            for i usize in 0..goto_tramps.n {
+                gen_switch_block(vec_get(&goto_tramps, i))
+                for j usize in 0..out_res_vs.n {
+                    rv u32 = vec_get(&out_res_vs, j)
+                    if rv != 0 {
+                        ot u32 = vec_get(&out_tids, j)
+                        gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                    }
+                }
+                gen_term_jump(vec_get(&goto_reals, i))
+            }
+        }
         gen_switch_block(fall_blk)
+        if has_reg_out {
+            for j usize in 0..out_res_vs.n {
+                rv u32 = vec_get(&out_res_vs, j)
+                if rv != 0 {
+                    ot u32 = vec_get(&out_tids, j)
+                    gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                }
+            }
+        }
         return
     }
 
@@ -525,6 +641,13 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     if n_res > 0 { buf_str(b, c" = ") }
     buf_str(b, if is_vol { c"asm volatile " } else { c"asm " })
     fir_emit_quoted_bytes(b, tmpl.p, tmpl.n)
+    // Count tied inputs generated from `+` read-write register outputs (appended after explicit inputs, per GCC)
+    n_rw_tied usize = 0
+    for i usize in 0..out_nodes.n {
+        if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 {
+            n_rw_tied += 1
+        }
+    }
     if out_nodes.n > 0 {
         buf_str(b, c" out(")
         for i usize in 0..out_nodes.n {
@@ -532,6 +655,10 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
             cb Buf = {}
             if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+            // Split `+c` register output into `=c` + tied input `"i"` so GCC operand numbering matches
+            if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 && cb.n > 0 && cb.p[u8] == 43 {
+                cb.p[u8] = 61 // '='
+            }
             if onode.op != 0 {
                 buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
             }
@@ -543,18 +670,16 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 gen_emit_val(b, vec_get(&out_ptrs, i))
             } else {
                 gen_emit_fir_ty(b, vec_get(&out_tids, i))
-                if vec_get(&out_is_rw, i) != 0 {
-                    buf_u8(b, 32)
-                    gen_emit_val(b, vec_get(&out_old_vs, i))
-                }
             }
         }
         buf_u8(b, 41)
     }
-    if in_vals.n > 0 {
+    if in_vals.n > 0 || n_rw_tied > 0 {
         buf_str(b, c" in(")
+        in_emitted usize = 0
         for i usize in 0..in_vals.n {
-            if i > 0 { buf_str(b, c", ") }
+            if in_emitted > 0 { buf_str(b, c", ") }
+            in_emitted += 1
             onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
             cb Buf = {}
             if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
@@ -567,6 +692,18 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             gen_emit_fir_ty(b, vec_get(&in_tids, i))
             buf_u8(b, 32)
             gen_emit_val(b, vec_get(&in_vals, i))
+        }
+        for i usize in 0..out_nodes.n {
+            if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 {
+                if in_emitted > 0 { buf_str(b, c", ") }
+                in_emitted += 1
+                buf_u8(b, 34)
+                buf_dec_u64(b, i)
+                buf_str(b, c"\" ")
+                gen_emit_fir_ty(b, vec_get(&out_tids, i))
+                buf_u8(b, 32)
+                gen_emit_val(b, vec_get(&out_old_vs, i))
+            }
         }
         buf_u8(b, 41)
     }
@@ -591,7 +728,13 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         rv u32 = vec_get(&out_res_vs, i)
         if rv != 0 {
             t u32 = vec_get(&out_tids, i)
-            gen_store_ty(rv, vec_get(&out_ptrs, i), ty_align(t), gen_is_volatile(t), false)
+            onode_s handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+            al_s u64 = ty_align(t)
+            if onode_s.b != null && onode_s.b.kind == ND_MEMBER && onode_s.b.a != null {
+                pal_s u64 = ty_align(onode_s.b.a.ty)
+                if pal_s < al_s { al_s = pal_s }
+            }
+            gen_store_ty(rv, vec_get(&out_ptrs, i), al_s, gen_is_volatile(t), false)
         }
     }
 }
@@ -925,12 +1068,28 @@ fn gen_function(node handle[Ast]) void fails {
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
-    gen_mark_defined(nid)
+    is_gnu_inline bool = gen_has_attr(s.attrs, c"gnu_inline") && s.storage == SC_EXTERN
+    if is_gnu_inline {
+        gk U64Key = {zext[u64](nid)}
+        prev u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
+        if prev != 0 { return }
+    } else {
+        gen_mark_defined(nid)
+    }
 
     fn_node handle[TypeNode] = ty_node(ty_unqual(s.ty))
     if fn_node.kind != TYK_FUNC { return }
     ret_ty u32 = fn_node.elem
     is_var bool = (fn_node.flags & TYF_VARIADIC) != 0
+
+    if is_gnu_inline {
+        gi_idx usize = gc.gnu_inlines.n
+        gi handle[GnuInlineDef] = vec_add(&gc.gnu_inlines)
+        mem_set(handle_addr(gi), 0, sizeof[GnuInlineDef])
+        gk U64Key = {zext[u64](nid)}
+        _ bool = table_put(&gc.gnu_inline_map, &gk, trunc[u32](gi_idx + 1))
+        gc.cur_gnu_inline_idx = trunc[u32](gi_idx + 1)
+    }
 
     // Collect parameter symbols & types
     param_syms Vec[addr] = {}
@@ -1076,14 +1235,19 @@ fn gen_function(node handle[Ast]) void fails {
         buf_free(&tmp)
     }
 
-    // Emit the function to gc.out
-    out_b handle[Buf] = &gc.out.buf
+    // Emit the function to gc.out (or to its buffered GnuInlineDef)
+    out_b handle[Buf] = if is_gnu_inline {
+        &vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1)).code
+    } else {
+        &gc.out.buf
+    }
     buf_str(out_b, c"func ")
     gen_emit_sym_name(out_b, gen_sym_bytes(nid))
     buf_u8(out_b, 32)
     abi_emit_fir_sig(out_b, ret_ty, param_tids.p, n_params, is_var)
     buf_u8(out_b, 32)
-    fir_emit_linkage(out_b, gen_sym_linkage(s), gen_sym_visibility(s))
+    fn_link u8 = if is_gnu_inline { FIR_LOCAL } else { gen_sym_linkage(s) }
+    fir_emit_linkage(out_b, fn_link, gen_sym_visibility(s))
     if gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn") {
         buf_str(out_b, c" noreturn")
     }
@@ -1114,15 +1278,25 @@ fn gen_function(node handle[Ast]) void fails {
         buf_append(out_b, buf_bytes(&blk.term))
     }
     buf_str(out_b, c"}\n\n")
-    fir_flush(&gc.out)
+    if !is_gnu_inline { fir_flush(&gc.out) }
 
     gc.in_func = false
 
     // Flush any deferred globals (strings, static locals, compound literals) emitted during this function
     if gc.deferred.n > 0 {
-        buf_append(&gc.out.buf, buf_bytes(&gc.deferred))
-        buf_clear(&gc.deferred)
-        fir_flush(&gc.out)
+        if is_gnu_inline {
+            buf_append(out_b, buf_bytes(&gc.deferred))
+            buf_clear(&gc.deferred)
+        } else {
+            buf_append(&gc.out.buf, buf_bytes(&gc.deferred))
+            buf_clear(&gc.deferred)
+            fir_flush(&gc.out)
+        }
+    }
+    if is_gnu_inline {
+        gc.cur_gnu_inline_idx = 0
+        gen_reset_func_state(gc)
+        return
     }
 
     // Emit constructor / destructor entries if attributed

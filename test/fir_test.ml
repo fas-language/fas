@@ -312,5 +312,266 @@ func @bad (ptr) -> () global {
   check "intern width" (iconst f i32 5L <> iconst f i64 5L);
   check "neg limbs" (const_of f (iconst f i128 (-1L)) = Some (Cint (i128, [| -1L; -1L |])));
   check "i7 normalize" (const_of f (iconst f (Int 7) (-1L)) = Some (Cint (Int 7, [| 127L |])));
+  (* ELF sh_type for .init_array / .fini_array / .preinit_array sections *)
+  (match
+     parse "elf_lifecycle_sections"
+       {|
+triple "x86_64-unknown-linux-gnu"
+func @ctor1 () -> () local {
+^entry:
+  ret
+}
+func @ctor2 () -> () local {
+^entry:
+  ret
+}
+func @dtor1 () -> () local {
+^entry:
+  ret
+}
+func @pre1 () -> () local {
+^entry:
+  ret
+}
+global @.Lctor.0 size 8 align 8 local section ".init_array" = { reloc @ctor1 w8 }
+global @.Lctor.1 size 8 align 8 local section ".init_array.00101" = { reloc @ctor2 w8 }
+global @.Ldtor.0 size 8 align 8 local section ".fini_array" = { reloc @dtor1 w8 }
+global @.Lpre.0 size 8 align 8 local section ".preinit_array" = { reloc @pre1 w8 }
+|}
+   with
+  | None -> ()
+  | Some m -> (
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL elf_lifecycle_sections: compile_object: %s\n%!" e
+      | Ok bytes ->
+          let obj = Fas_linker.Elf_reader.parse ~path:"<elf_lifecycle_sections>" (Bytes.unsafe_to_string bytes) in
+          let find_kind name =
+            Array.to_list obj.sections
+            |> List.find_opt (fun (s : Fas_linker.Elf_reader.section) -> s.name = name)
+            |> Option.map (fun (s : Fas_linker.Elf_reader.section) -> (s.kind, s.flags))
+          in
+          check "sh_type .init_array" (find_kind ".init_array" = Some (14, 3));
+          check "sh_type .init_array.00101" (find_kind ".init_array.00101" = Some (14, 3));
+          check "sh_type .fini_array" (find_kind ".fini_array" = Some (15, 3));
+          check "sh_type .preinit_array" (find_kind ".preinit_array" = Some (16, 3))));
+  (* IFUNC: parse/print, verifier, interp, native ELF STT_GNU_IFUNC, and LLVM IR *)
+  let ifunc_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @impl (i32) -> (i32) local {
+^entry(%x: i32):
+  %r = add i32 %x, i32 40
+  ret %r
+}
+func @res0 () -> (ptr) local {
+^entry:
+  ret ptr @impl
+}
+func @res1 (i64) -> (ptr) local {
+^entry(%hw: i64):
+  ret ptr @impl
+}
+func @res2 (i64, ptr) -> (ptr) local {
+^entry(%hw: i64, %p: ptr):
+  ret ptr @impl
+}
+ifunc @magic global = @res0
+ifunc @magic_loc local = @res1
+ifunc @magic_hid global hidden = @res2
+func @main () -> (i32) global {
+^entry:
+  %a = call (i32) -> (i32) @magic(i32 2)
+  %b = call (i32) -> (i32) ptr @magic_loc(i32 2)
+  %c = call (i32) -> (i32) @magic_hid(i32 2)
+  %s1 = add i32 %a, %b
+  %s2 = add i32 %s1, %c
+  ret %s2
+}
+|}
+  in
+  (match parse "ifunc_ok" ifunc_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "ifunc_roundtrip" printed with None -> () | Some _ -> ());
+      let pr = Fir_interp.run_program [ m ] in
+      check "ifunc interp status" (pr.status = 126 && pr.trapped = None);
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "ifunc llvm global" (has_sub ll "@magic = ifunc void (), ptr @res0");
+      check "ifunc llvm local" (has_sub ll "@magic_loc = internal ifunc void (), ptr @res1");
+      check "ifunc llvm hidden" (has_sub ll "@magic_hid = hidden ifunc void (), ptr @res2");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL ifunc_ok: compile_object: %s\n%!" e
+      | Ok bytes ->
+          let obj = Fas_linker.Elf_reader.parse ~path:"<ifunc_ok>" (Bytes.unsafe_to_string bytes) in
+          let find_sym name =
+            Array.to_list obj.symbols
+            |> List.find_opt (fun (s : Fas_linker.Elf_reader.symbol) -> s.name = name)
+          in
+          let sym_attr name =
+            find_sym name |> Option.map (fun (s : Fas_linker.Elf_reader.symbol) -> (s.kind, s.binding, s.visibility))
+          in
+          check "ifunc elf magic" (sym_attr "magic" = Some (10, 1, 0));
+          check "ifunc elf magic_loc" (sym_attr "magic_loc" = Some (10, 0, 0));
+          check "ifunc elf magic_hid" (sym_attr "magic_hid" = Some (10, 1, 2))));
+  rejects "ifunc dup name" "symbol @dup defined twice"
+    {|
+func @dup () -> (ptr) local {
+^entry:
+  ret ptr null
+}
+ifunc @dup global = @dup
+|};
+  rejects "ifunc undef resolver" "resolver is not a function defined in this module"
+    {|
+ifunc @bad global = @missing
+|};
+  rejects "ifunc decl-only resolver" "resolver is only declared"
+    {|
+declare @res () -> (ptr) global
+ifunc @bad global = @res
+|};
+  rejects "ifunc bad return" "resolver must return a single ptr"
+    {|
+func @res () -> (i64) local {
+^entry:
+  ret i64 0
+}
+ifunc @bad global = @res
+|};
+  rejects "ifunc bad params" "resolver parameters must be"
+    {|
+func @res (i32) -> (ptr) local {
+^entry(%x: i32):
+  ret ptr null
+}
+ifunc @bad global = @res
+|};
+  (* asm_goto with outputs: parse/print, verifier, native + LLVM *)
+  let ag_out_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @ag_out (i64) -> (i64) global {
+^e(%x: i64):
+  %a, %b = asm_goto volatile "addq $10, %0\0a\09movq $32, %1\0a\09testq %2, %2\0a\09jnz %l3" out("=r" i64, "=r" i64) in("0" i64 %x) ^fall [^taken]
+^fall:
+  %s1 = add i64 %a, %b
+  ret %s1
+^taken:
+  %s2 = add i64 %a, %b
+  %s3 = add i64 %s2, i64 100
+  ret %s3
+}
+|}
+  in
+  (match parse "asm_goto_outputs" ag_out_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "asm_goto_outputs_roundtrip" printed with None -> () | Some _ -> ());
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "asm_goto_outputs llvm callbr" (has_sub ll "callbr { i64, i64 } asm sideeffect");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL asm_goto_outputs: compile_object: %s\n%!" e
+      | Ok _ -> ()));
+  rejects "asm_goto tied mismatch" "is tied to output 0"
+    {|
+func @bad (i32) -> (i64) global {
+^e(%x: i32):
+  %a = asm_goto "" out("=r" i64) in("0" i32 %x) ^fall [^lab]
+^fall:
+  ret %a
+^lab:
+  ret %a
+}
+|};
+  (* x87 inline asm (=t, u, st(1) clobber) for f80/f64/f32 and i128 "x" asm *)
+  let x87_asm_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @x87_ops (f80, f80, f64, f32) -> (f80) global {
+^e(%x: f80, %y: f80, %d: f64, %s: f32):
+  %r1 = asm volatile "fsqrt" out("=t" f80) in("0" f80 %x)
+  %r2 = asm volatile "fpatan" out("=t" f80) in("0" f80 %r1, "u" f80 %y) clobber("st(1)")
+  %d2 = asm volatile "fchs" out("=t" f64) in("0" f64 %d)
+  %s2 = asm volatile "fchs" out("=t" f32) in("0" f32 %s)
+  ret %r2
+}
+func @i128_xmm (i128) -> (i128) global {
+^e(%x: i128):
+  %y = asm "" out("=x" i128) in("0" i128 %x)
+  ret %y
+}
+|}
+  in
+  (match parse "x87_and_i128_asm" x87_asm_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "x87_and_i128_asm_rt" printed with None -> () | Some _ -> ());
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "x87 llvm st" (has_sub ll "\"={st},0,{st(1)},~{st(1)},");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL x87_and_i128_asm: compile_object: %s\n%!" e
+      | Ok _ -> ()));
+  (* narrow -> huge integer zext/sext (regression for uninitialized upper bytes in limb 0) *)
+  (match
+     parse "narrow_to_huge_ext"
+       {|
+triple "x86_64-unknown-linux-gnu"
+func @ext_i7_i600 (i7) -> (i64) local {
+^e(%x: i7):
+  %z = zext i600 %x
+  %s = sext i600 %x
+  %lo_z = trunc i64 %z
+  %hi_s = lshr i600 %s, i600 592
+  %hi_s64 = trunc i64 %hi_s
+  %sum = add i64 %lo_z, %hi_s64
+  ret %sum
+}
+func @main () -> (i32) global {
+^e:
+  %a = call (i7) -> (i64) @ext_i7_i600(i7 5)
+  %b = call (i7) -> (i64) @ext_i7_i600(i7 -1)
+  ; a: lo_z=5, hi_s=0 -> 5; b: lo_z=127, hi_s=255 -> 382; total = 387
+  %t = add i64 %a, %b
+  %ok = icmp eq i1 %t, i64 387
+  %r = select i32 %ok, i32 0, i32 1
+  ret %r
+}
+|}
+   with
+  | None -> ()
+  | Some m ->
+      let pr = Fir_interp.run_program [ m ] in
+      check "narrow_to_huge_ext interp" (pr.status = 0 && pr.trapped = None);
+      (match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL narrow_to_huge_ext: compile_object: %s\n%!" e
+      | Ok _ -> ()));
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"

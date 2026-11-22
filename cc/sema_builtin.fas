@@ -4,8 +4,8 @@ fn se_math_family(name Bytes, stem addr) u32 {
     prefix Bytes = bytes_c(stem)
     if !bytes_starts_with(name, prefix) { return TY_INVALID }
     suffix Bytes = bytes_from(name, prefix.n)
-    if suffix.n == 0 { return TY_DOUBLE }
-    if bytes_eq_c(suffix, c"f") { return TY_FLOAT }
+    if suffix.n == 0 || bytes_eq_c(suffix, c"f64") { return TY_DOUBLE }
+    if bytes_eq_c(suffix, c"f") || bytes_eq_c(suffix, c"f32") { return TY_FLOAT }
     if bytes_eq_c(suffix, c"l") { return TY_LDOUBLE }
     if bytes_eq_c(suffix, c"f16") { return TY_FLOAT16 }
     return TY_INVALID

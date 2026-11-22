@@ -35,6 +35,8 @@ let fail fmt = Printf.ksprintf (fun s -> raise (Bad s)) fmt
 let gprs = [ "rax"; "rbx"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r10"; "r11"; "r12"; "r13"; "r14"; "r15" ]
 let xmms = List.init 16 (fun i -> "xmm" ^ string_of_int i)
 let is_xmm r = String.length r > 3 && String.sub r 0 3 = "xmm"
+let is_x87 r = r = "st" || r = "st(1)"
+let x87_idx = function "st" -> 0 | "st(1)" -> 1 | r -> invalid_arg ("x87_idx: " ^ r)
 
 (* Canonical name of a register as clobbers and "{...}" constraints may
    write it: any width of a GPR names the 64-bit register ("eax", "ax",
@@ -74,14 +76,17 @@ let reg_canon name =
   | _ -> None
 
 (* What a clobber means *)
-type clobber = Creg of string | Cmemory | Cflags | Cignored
+type clobber = Creg of string | Cx87 of int | Cmemory | Cflags | Cignored
 
 let clobber c =
   match String.lowercase_ascii c with
   | "memory" -> Cmemory
   | "cc" | "flags" | "eflags" | "rflags" | "dirflag" | "fpsr" | "fpcr" -> Cflags
+  | "st" | "st(0)" -> Cx87 0
+  | n when String.length n = 5 && String.sub n 0 3 = "st(" && n.[4] = ')' && n.[3] >= '0' && n.[3] <= '7' ->
+      Cx87 (Char.code n.[3] - Char.code '0')
   | n when String.length n >= 2 && (String.sub n 0 2 = "st" || String.sub n 0 2 = "mm") ->
-      (* x87 and MMX registers: no value lives in them between instructions *)
+      (* other x87 / MMX spellings *)
       Cignored
   | n when String.length n = 2 && n.[0] = 'k' -> Cignored  (* AVX-512 masks: never used *)
   | _ -> (
@@ -203,7 +208,9 @@ let constr ~names ~nouts ~output s =
           stop := true
         end
         else fail "asm constraint %S: unknown '@' constraint" s
-    | 't' | 'u' | 'f' -> fail "asm constraint %S: x87 register operands are not supported" s
+    | 't' -> add [ "st" ]
+    | 'u' -> add [ "st(1)" ]
+    | 'f' -> fail "asm constraint %S: generic x87 'f' constraint is not supported (use 't' or 'u')" s
     | 'y' -> fail "asm constraint %S: MMX register operands are not supported" s
     | 'k' -> fail "asm constraint %S: AVX-512 mask register operands are not supported" s
     | c -> fail "asm constraint %S: unknown constraint letter '%c'" s c

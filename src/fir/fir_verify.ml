@@ -86,7 +86,18 @@ let verify_func (f : func) =
                 def_block.(r) <- b;
                 def_pos.(r) <- pos)
               (inst f i).results)
-          br.insts)
+          br.insts;
+        (match br.term with
+        | Asm_goto { aresults; _ } ->
+            Array.iteri
+              (fun k r ->
+                (match def_of f r with
+                | Term_result (b', k') when b' = b && k' = k -> ()
+                | _ -> err "^%d: asm_goto result %d has a wrong definition record" b k);
+                def_block.(r) <- b;
+                def_pos.(r) <- max_int)
+              aresults
+        | _ -> ()))
       f.blocks;
     (* entry parameters follow the signature *)
     let entry_params = (block f entry).params in
@@ -117,7 +128,7 @@ let verify_func (f : func) =
         | Const _ -> ()
         | Unset -> err "%s: use of an undefined value" where
         | Alias _ -> ()
-        | Param _ | Result _ ->
+        | Param _ | Result _ | Term_result _ ->
             let db = def_block.(v) in
             if db < 0 then err "%s: use of a value whose definition is not in any block" where
             else if Fir_dom.reachable d b then
@@ -529,7 +540,7 @@ let verify_func (f : func) =
                 else if Array.length (block f t).params > 0 then
                   err "%s: indirect target ^%d takes parameters" where t)
               bs
-        | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } -> (
+        | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } -> (
             (* the fall-through and every label: plain blocks without parameters *)
             Array.iter
               (fun t ->
@@ -539,22 +550,48 @@ let verify_func (f : func) =
               (Array.append [| fall |] labels);
             let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
             match
-              Fir_asm.parse ~labels:(Array.length labels) ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:[||]
+              Fir_asm.parse ~labels:(Array.length labels) ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs)
                 ~ins:(pairs ins) ~clobbers
             with
             | exception Fir_asm.Bad m -> err "%s: %s" where m
             | st ->
                 if aflags land lnot (asm_volatile lor asm_intel) <> 0 then err "%s: unknown asm flags" where;
-                if Array.length aargs <> Array.length ins then
-                  err "%s: asm_goto takes %d values, its operands need %d" where (Array.length aargs)
-                    (Array.length ins)
+                let rtys = ref [] in
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.outs.(k) in
+                    if c.flag <> None && o.aty <> i1 then err "%s: asm_goto flag output %d must be i1" where k;
+                    if Fir_asm.output_is_result c then rtys := o.aty :: !rtys)
+                  outs;
+                let rtys = List.rev !rtys in
+                if List.length rtys <> Array.length aresults then
+                  err "%s: asm_goto defines %d values, its outputs give %d" where (Array.length aresults) (List.length rtys)
                 else
-                  Array.iteri
-                    (fun k (o : asm_operand) ->
-                      if st.ins.(k).tied <> None then err "%s: asm_goto input %d is tied, with no outputs" where k
-                      else same (Printf.sprintf "asm value %d" k) aargs.(k)
-                          (if Fir_asm.indirect st.ins.(k) then ptr else o.aty))
-                    ins)
+                  List.iteri
+                    (fun k t -> if ty_of f aresults.(k) <> t then err "%s: asm_goto result %d type" where k)
+                    rtys;
+                let want_args = ref [] in
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.outs.(k) in
+                    if Fir_asm.output_takes_arg c then
+                      want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args)
+                  outs;
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.ins.(k) in
+                    want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args;
+                    match c.tied with
+                    | Some t when outs.(t).aty <> o.aty ->
+                        err "%s: asm_goto input %d is %s but is tied to output %d of %s" where k
+                          (ty_to_string o.aty) t (ty_to_string outs.(t).aty)
+                    | _ -> ())
+                  ins;
+                let want_args = List.rev !want_args in
+                if List.length want_args <> Array.length aargs then
+                  err "%s: asm_goto takes %d values, its operands need %d" where (Array.length aargs)
+                    (List.length want_args)
+                else List.iteri (fun k t -> same (Printf.sprintf "asm value %d" k) aargs.(k) t) want_args)
         | Ret vs ->
             let rts = List.map abi_ty f.sig_.result_abis in
             if Array.length vs <> List.length rts then err "%s: returns %d values, signature %d" where (Array.length vs) (List.length rts)
@@ -575,6 +612,7 @@ let verify (m : modul) =
   Vec.iter (fun g -> check_name g.gname) m.globals;
   Vec.iter (fun f -> check_name f.name) m.funcs;
   Vec.iter (fun a -> check_name a.aname) m.aliases;
+  Vec.iter (fun iv -> check_name iv.iname) m.ifuncs;
   (* an alias names a function or global defined here, never another alias
      (so there are no cycles); an addend stays inside a global *)
   Vec.iter
@@ -592,6 +630,21 @@ let verify (m : modul) =
             bad "the addend is outside the global"
       | None, None -> bad "not a function or global defined in this module")
     m.aliases;
+  Vec.iter
+    (fun (iv : ifunc) ->
+      let bad why = errs := Printf.sprintf "ifunc @%s = @%s: %s" iv.iname iv.resolver why :: !errs in
+      match Vec.fold (fun acc f -> if f.name = iv.resolver then Some f else acc) None m.funcs with
+      | None -> bad "resolver is not a function defined in this module"
+      | Some f ->
+          if not f.defined then bad "resolver is only declared";
+          if f.sig_.variadic then bad "resolver may not be variadic";
+          (match f.sig_.result_abis with
+          | [ Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver must return a single ptr");
+          match f.sig_.param_abis with
+          | [] | [ Scalar (Int 64) ] | [ Scalar (Int 64); Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver parameters must be (), (i64), or (i64, ptr)")
+    m.ifuncs;
   Vec.iter
     (fun g ->
       if g.galign <= 0 || g.galign land (g.galign - 1) <> 0 then

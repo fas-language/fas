@@ -1446,12 +1446,564 @@ func @__fir_clmul (i64, i64, i64) -> (i64) local {
 }
 |}
 
+(* ---------- huge-integer helpers (k > huge_limbs = 8) ---------- *)
+
+(* d[0..k) <- a[0..k) + b[0..k) *)
+let huge_add =
+  {|
+func @__fir_add (ptr, ptr, ptr, i64) -> () local {
+^e(%d: ptr, %a: ptr, %b: ptr, %k: i64):
+  jump ^l(i64 0, i64 0)
+^l(%i: i64, %c: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %i, 8, 0
+  %bi = load i64 %pb, align 8
+  %s1 = add i64 %ai, %bi
+  %c1 = icmp ult i1 %s1, %ai
+  %s2 = add i64 %s1, %c
+  %c2 = icmp ult i1 %s2, %s1
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %s2, %pd, align 8
+  %co = or i1 %c1, %c2
+  %cn = zext i64 %co
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %cn)
+^ret:
+  ret
+}
+|}
+
+(* d[0..k) <- a[0..k) - b[0..k) *)
+let huge_sub =
+  {|
+func @__fir_sub (ptr, ptr, ptr, i64) -> () local {
+^e(%d: ptr, %a: ptr, %b: ptr, %k: i64):
+  jump ^l(i64 0, i64 0)
+^l(%i: i64, %bw: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %i, 8, 0
+  %bi = load i64 %pb, align 8
+  %d1 = sub i64 %ai, %bi
+  %w1 = icmp ult i1 %ai, %bi
+  %d2 = sub i64 %d1, %bw
+  %w2 = icmp ult i1 %d1, %bw
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %d2, %pd, align 8
+  %wo = or i1 %w1, %w2
+  %wn = zext i64 %wo
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %wn)
+^ret:
+  ret
+}
+|}
+
+(* d[0..k) <- 0 - a[0..k) *)
+let huge_neg =
+  {|
+func @__fir_neg (ptr, ptr, i64) -> () local {
+^e(%d: ptr, %a: ptr, %k: i64):
+  jump ^l(i64 0, i64 0)
+^l(%i: i64, %bw: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %d1 = sub i64 i64 0, %ai
+  %w1 = icmp ne i1 %ai, i64 0
+  %d2 = sub i64 %d1, %bw
+  %w2 = icmp ult i1 %d1, %bw
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %d2, %pd, align 8
+  %wo = or i1 %w1, %w2
+  %wn = zext i64 %wo
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %wn)
+^ret:
+  ret
+}
+|}
+
+(* d[0..k) <- a[0..k) OP b[0..k), op: 0=and, 1=or, 2=xor *)
+let huge_bitop =
+  {|
+func @__fir_bitop (ptr, ptr, ptr, i64, i64) -> () local {
+^e(%d: ptr, %a: ptr, %b: ptr, %k: i64, %op: i64):
+  %is_or = icmp eq i1 %op, i64 1
+  %is_xor = icmp eq i1 %op, i64 2
+  jump ^l(i64 0)
+^l(%i: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %i, 8, 0
+  %bi = load i64 %pb, align 8
+  %va = and i64 %ai, %bi
+  %vo = or i64 %ai, %bi
+  %vx = xor i64 %ai, %bi
+  %t1 = select i64 %is_or, %vo, %va
+  %res = select i64 %is_xor, %vx, %t1
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %res, %pd, align 8
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1)
+^ret:
+  ret
+}
+|}
+
+(* d[0..k) <- a[0..k) << amt (loops downward; safe when d == a) *)
+let huge_shl =
+  {|
+func @__fir_shl (ptr, ptr, i64, i64) -> () local {
+^e(%d: ptr, %a: ptr, %k: i64, %amt: i64):
+  %q = lshr i64 %amt, i64 6
+  %r = and i64 %amt, i64 63
+  jump ^l(%k)
+^l(%m: i64):
+  %done = icmp eq i1 %m, i64 0
+  br %done, ^ret, ^body
+^body:
+  %i = sub i64 %m, i64 1
+  %pd = ptradd ptr %d, %i, 8, 0
+  %low = icmp ult i1 %i, %q
+  br %low, ^z, ^nz
+^z:
+  store i64 0, %pd, align 8
+  jump ^l(%i)
+^nz:
+  %hi_idx = sub i64 %i, %q
+  %ph = ptradd ptr %a, %hi_idx, 8, 0
+  %hi = load i64 %ph, align 8
+  %has_lo = icmp ugt i1 %hi_idx, i64 0
+  br %has_lo, ^getlo, ^st(i64 0)
+^getlo:
+  %lo_idx = sub i64 %hi_idx, i64 1
+  %pl = ptradd ptr %a, %lo_idx, 8, 0
+  %lv = load i64 %pl, align 8
+  jump ^st(%lv)
+^st(%lo: i64):
+  %res = fshl i64 %hi, %lo, %r
+  store %res, %pd, align 8
+  jump ^l(%i)
+^ret:
+  ret
+}
+|}
+
+(* d[0..k) <- a[0..k) >> amt (arith != 0 => arithmetic shift of n-bit value,
+   with result normalized to n bits; loops upward, safe when d == a) *)
+let huge_shr =
+  {|
+func @__fir_shr (ptr, ptr, i64, i64, i64, i64) -> () local {
+^e(%d: ptr, %a: ptr, %k: i64, %amt: i64, %n: i64, %arith: i64):
+  %top_idx = sub i64 %k, i64 1
+  %pt = ptradd ptr %a, %top_idx, 8, 0
+  %top_raw = load i64 %pt, align 8
+  %rem = and i64 %n, i64 63
+  %has_rem = icmp ne i1 %rem, i64 0
+  %sh_sx = sub i64 i64 64, %rem
+  %top_s = shl i64 %top_raw, %sh_sx
+  %top_sx0 = ashr i64 %top_s, %sh_sx
+  %top_sx = select i64 %has_rem, %top_sx0, %top_raw
+  %is_arith = icmp ne i1 %arith, i64 0
+  %top_eff = select i64 %is_arith, %top_sx, %top_raw
+  %fill_a = ashr i64 %top_sx, i64 63
+  %fill = select i64 %is_arith, %fill_a, i64 0
+  %q = lshr i64 %amt, i64 6
+  %r = and i64 %amt, i64 63
+  jump ^l(i64 0)
+^l(%i: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^mask, ^body
+^body:
+  %lo_idx = add i64 %i, %q
+  %lo_oob = icmp uge i1 %lo_idx, %k
+  br %lo_oob, ^gotlo(%fill), ^loadlo
+^loadlo:
+  %lo_top = icmp eq i1 %lo_idx, %top_idx
+  br %lo_top, ^gotlo(%top_eff), ^loadlo1
+^loadlo1:
+  %pl = ptradd ptr %a, %lo_idx, 8, 0
+  %lv = load i64 %pl, align 8
+  jump ^gotlo(%lv)
+^gotlo(%lo: i64):
+  %hi_idx = add i64 %lo_idx, i64 1
+  %hi_oob = icmp uge i1 %hi_idx, %k
+  br %hi_oob, ^gothi(%fill), ^loadhi
+^loadhi:
+  %hi_top = icmp eq i1 %hi_idx, %top_idx
+  br %hi_top, ^gothi(%top_eff), ^loadhi1
+^loadhi1:
+  %ph = ptradd ptr %a, %hi_idx, 8, 0
+  %hv = load i64 %ph, align 8
+  jump ^gothi(%hv)
+^gothi(%hi: i64):
+  %res = fshr i64 %hi, %lo, %r
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %res, %pd, align 8
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1)
+^mask:
+  br %has_rem, ^domask, ^ret
+^domask:
+  %pdt = ptradd ptr %d, %top_idx, 8, 0
+  %dt = load i64 %pdt, align 8
+  %one = shl i64 i64 1, %rem
+  %msk = sub i64 %one, i64 1
+  %dm = and i64 %dt, %msk
+  store %dm, %pdt, align 8
+  jump ^ret
+^ret:
+  ret
+}
+|}
+
+(* a[0..k) == b[0..k) *)
+let huge_eq =
+  {|
+func @__fir_eq (ptr, ptr, i64) -> (i1) local {
+^e(%a: ptr, %b: ptr, %k: i64):
+  jump ^l(i64 0, i64 0)
+^l(%i: i64, %acc: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %i, 8, 0
+  %bi = load i64 %pb, align 8
+  %x = xor i64 %ai, %bi
+  %acc1 = or i64 %acc, %x
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %acc1)
+^ret:
+  %r = icmp eq i1 %acc, i64 0
+  ret %r
+}
+|}
+
+(* a[0..k) <u b[0..k) *)
+let huge_ult =
+  {|
+func @__fir_ult (ptr, ptr, i64) -> (i1) local {
+^e(%a: ptr, %b: ptr, %k: i64):
+  jump ^l(%k)
+^l(%m: i64):
+  %done = icmp eq i1 %m, i64 0
+  br %done, ^eq, ^body
+^body:
+  %i = sub i64 %m, i64 1
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %i, 8, 0
+  %bi = load i64 %pb, align 8
+  %lt = icmp ult i1 %ai, %bi
+  br %lt, ^yes, ^chkgt
+^chkgt:
+  %gt = icmp ugt i1 %ai, %bi
+  br %gt, ^eq, ^l(%i)
+^yes:
+  ret i1 1
+^eq:
+  ret i1 0
+}
+|}
+
+(* a[0..k) <s b[0..k) for normalized n-bit values *)
+let huge_slt =
+  {|
+func @__fir_slt (ptr, ptr, i64, i64) -> (i1) local {
+^e(%a: ptr, %b: ptr, %k: i64, %n: i64):
+  %top_idx = sub i64 %k, i64 1
+  %pa = ptradd ptr %a, %top_idx, 8, 0
+  %at0 = load i64 %pa, align 8
+  %pb = ptradd ptr %b, %top_idx, 8, 0
+  %bt0 = load i64 %pb, align 8
+  %rem = and i64 %n, i64 63
+  %has_rem = icmp ne i1 %rem, i64 0
+  %sh = sub i64 i64 64, %rem
+  %as1 = shl i64 %at0, %sh
+  %as2 = ashr i64 %as1, %sh
+  %bs1 = shl i64 %bt0, %sh
+  %bs2 = ashr i64 %bs1, %sh
+  %at = select i64 %has_rem, %as2, %at0
+  %bt = select i64 %has_rem, %bs2, %bt0
+  %lt = icmp slt i1 %at, %bt
+  br %lt, ^yes, ^chkgt
+^chkgt:
+  %gt = icmp sgt i1 %at, %bt
+  br %gt, ^no, ^rest
+^rest:
+  %r = call (ptr, ptr, i64) -> (i1) @__fir_ult(%a, %b, %top_idx)
+  ret %r
+^yes:
+  ret i1 1
+^no:
+  ret i1 0
+}
+|}
+
+(* d[0..dk) <- trunc/zext/sext of s[0..sk) from sn bits to dn bits (normalized) *)
+let huge_ext =
+  {|
+func @__fir_ext (ptr, ptr, i64, i64, i64, i64, i64) -> () local {
+^e(%d: ptr, %s: ptr, %sk: i64, %dk: i64, %sn: i64, %dn: i64, %signed: i64):
+  %mink = umin i64 %sk, %dk
+  %cbytes = mul i64 %mink, i64 8
+  memcpy %d, %s, %cbytes
+  %is_signed = icmp ne i1 %signed, i64 0
+  %widening = icmp ugt i1 %dn, %sn
+  %do_sx = and i1 %is_signed, %widening
+  br %do_sx, ^sx, ^fill(i8 0)
+^sx:
+  %si = sub i64 %sk, i64 1
+  %ps = ptradd ptr %d, %si, 8, 0
+  %sv0 = load i64 %ps, align 8
+  %srem = and i64 %sn, i64 63
+  %has_srem = icmp ne i1 %srem, i64 0
+  %sh = sub i64 i64 64, %srem
+  %ss1 = shl i64 %sv0, %sh
+  %ss2 = ashr i64 %ss1, %sh
+  %sv = select i64 %has_srem, %ss2, %sv0
+  store %sv, %ps, align 8
+  %neg = icmp slt i1 %sv, i64 0
+  %fb = select i8 %neg, i8 -1, i8 0
+  jump ^fill(%fb)
+^fill(%fbyte: i8):
+  %more = icmp ugt i1 %dk, %sk
+  br %more, ^dofill, ^mask
+^dofill:
+  %remk = sub i64 %dk, %sk
+  %rbytes = mul i64 %remk, i64 8
+  %dp = ptradd ptr %d, %sk, 8, 0
+  memset %dp, %fbyte, %rbytes
+  jump ^mask
+^mask:
+  %drem = and i64 %dn, i64 63
+  %has_drem = icmp ne i1 %drem, i64 0
+  br %has_drem, ^domask, ^ret
+^domask:
+  %di = sub i64 %dk, i64 1
+  %pd = ptradd ptr %d, %di, 8, 0
+  %dv = load i64 %pd, align 8
+  %one = shl i64 i64 1, %drem
+  %msk = sub i64 %one, i64 1
+  %dm = and i64 %dv, %msk
+  store %dm, %pd, align 8
+  jump ^ret
+^ret:
+  ret
+}
+|}
+
+let huge_popcnt =
+  {|
+func @__fir_popcnt (ptr, i64) -> (i64) local {
+^e(%a: ptr, %k: i64):
+  jump ^l(i64 0, i64 0)
+^l(%i: i64, %acc: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^ret, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %pc = popcnt i64 %ai
+  %acc1 = add i64 %acc, %pc
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1, %acc1)
+^ret:
+  ret %acc
+}
+|}
+
+let huge_ctz =
+  {|
+func @__fir_ctz (ptr, i64, i64) -> (i64) local {
+^e(%a: ptr, %k: i64, %n: i64):
+  jump ^l(i64 0)
+^l(%i: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^allz, ^body
+^body:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %nz = icmp ne i1 %ai, i64 0
+  br %nz, ^hit, ^next
+^hit:
+  %c = ctz i64 %ai
+  %base = mul i64 %i, i64 64
+  %r = add i64 %base, %c
+  ret %r
+^next:
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1)
+^allz:
+  ret %n
+}
+|}
+
+let huge_clz =
+  {|
+func @__fir_clz (ptr, i64, i64) -> (i64) local {
+^e(%a: ptr, %k: i64, %n: i64):
+  %k64 = mul i64 %k, i64 64
+  %unused = sub i64 %k64, %n
+  jump ^l(%k)
+^l(%m: i64):
+  %done = icmp eq i1 %m, i64 0
+  br %done, ^allz, ^body
+^body:
+  %i = sub i64 %m, i64 1
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  %nz = icmp ne i1 %ai, i64 0
+  br %nz, ^hit, ^l(%i)
+^hit:
+  %c = clz i64 %ai
+  %km1 = sub i64 %k, i64 1
+  %dist = sub i64 %km1, %i
+  %base = mul i64 %dist, i64 64
+  %r0 = add i64 %base, %c
+  %r = sub i64 %r0, %unused
+  ret %r
+^allz:
+  ret %n
+}
+|}
+
+let huge_bswap =
+  {|
+func @__fir_bswap (ptr, ptr, i64, i64, i64) -> () local {
+^e(%d: ptr, %a: ptr, %k: i64, %n: i64, %bitrev: i64):
+  %is_br = icmp ne i1 %bitrev, i64 0
+  jump ^l(i64 0)
+^l(%i: i64):
+  %done = icmp eq i1 %i, %k
+  br %done, ^shift, ^body
+^body:
+  %km1 = sub i64 %k, i64 1
+  %si = sub i64 %km1, %i
+  %pa = ptradd ptr %a, %si, 8, 0
+  %av = load i64 %pa, align 8
+  %vb = bswap i64 %av
+  %vr = bitrev i64 %av
+  %v = select i64 %is_br, %vr, %vb
+  %pd = ptradd ptr %d, %i, 8, 0
+  store %v, %pd, align 8
+  %i1 = add i64 %i, i64 1
+  jump ^l(%i1)
+^shift:
+  %k64 = mul i64 %k, i64 64
+  %unused = sub i64 %k64, %n
+  %has_u = icmp ne i1 %unused, i64 0
+  br %has_u, ^dosh, ^ret
+^dosh:
+  call (ptr, ptr, i64, i64, i64, i64) -> () @__fir_shr(%d, %d, %k, %unused, %k64, i64 0)
+  jump ^ret
+^ret:
+  ret
+}
+|}
+
+let huge_clmul_wide =
+  {|
+func @__fir_clmul_wide (ptr, ptr, ptr, i64, i64, i64) -> () local {
+^e(%d: ptr, %a: ptr, %b: ptr, %k: i64, %n: i64, %high: i64):
+  %k2 = mul i64 %k, i64 2
+  %bytes2 = mul i64 %k2, i64 8
+  %tmp = alloca ptr %bytes2, align 8
+  memset %tmp, i8 0, %bytes2
+  jump ^oi(i64 0)
+^oi(%i: i64):
+  %id = icmp eq i1 %i, %k
+  br %id, ^fin, ^ob
+^ob:
+  %pa = ptradd ptr %a, %i, 8, 0
+  %ai = load i64 %pa, align 8
+  jump ^ij(i64 0)
+^ij(%j: i64):
+  %jd = icmp eq i1 %j, %k
+  br %jd, ^onext, ^ib
+^ib:
+  %pb = ptradd ptr %b, %j, 8, 0
+  %bj = load i64 %pb, align 8
+  %lo = call (i64, i64, i64) -> (i64) @__fir_clmul(%ai, %bj, i64 0)
+  %hi = call (i64, i64, i64) -> (i64) @__fir_clmul(%ai, %bj, i64 1)
+  %ij = add i64 %i, %j
+  %p0 = ptradd ptr %tmp, %ij, 8, 0
+  %v0 = load i64 %p0, align 8
+  %n0 = xor i64 %v0, %lo
+  store %n0, %p0, align 8
+  %ij1 = add i64 %ij, i64 1
+  %p1 = ptradd ptr %tmp, %ij1, 8, 0
+  %v1 = load i64 %p1, align 8
+  %n1 = xor i64 %v1, %hi
+  store %n1, %p1, align 8
+  %j1 = add i64 %j, i64 1
+  jump ^ij(%j1)
+^onext:
+  %i1 = add i64 %i, i64 1
+  jump ^oi(%i1)
+^fin:
+  %is_hi = icmp ne i1 %high, i64 0
+  br %is_hi, ^dohi, ^copy
+^dohi:
+  %n2 = mul i64 %n, i64 2
+  call (ptr, ptr, i64, i64, i64, i64) -> () @__fir_shr(%tmp, %tmp, %k2, %n, %n2, i64 0)
+  jump ^copy
+^copy:
+  %bytes = mul i64 %k, i64 8
+  memcpy %d, %tmp, %bytes
+  %rem = and i64 %n, i64 63
+  %has_rem = icmp ne i1 %rem, i64 0
+  br %has_rem, ^domask, ^ret
+^domask:
+  %km1 = sub i64 %k, i64 1
+  %pd = ptradd ptr %d, %km1, 8, 0
+  %dv = load i64 %pd, align 8
+  %one = shl i64 i64 1, %rem
+  %msk = sub i64 %one, i64 1
+  %dm = and i64 %dv, %msk
+  store %dm, %pd, align 8
+  jump ^ret
+^ret:
+  ret
+}
+|}
+
 (* name -> (text, helpers it calls) *)
 let all =
   [
     ("__fir_udivmod", (udivmod, []));
     ("__fir_mul", (mul, []));
     ("__fir_clmul", (clmul, []));
+    ("__fir_add", (huge_add, []));
+    ("__fir_sub", (huge_sub, []));
+    ("__fir_neg", (huge_neg, []));
+    ("__fir_bitop", (huge_bitop, []));
+    ("__fir_shl", (huge_shl, []));
+    ("__fir_shr", (huge_shr, []));
+    ("__fir_eq", (huge_eq, []));
+    ("__fir_ult", (huge_ult, []));
+    ("__fir_slt", (huge_slt, [ "__fir_ult" ]));
+    ("__fir_ext", (huge_ext, []));
+    ("__fir_popcnt", (huge_popcnt, []));
+    ("__fir_ctz", (huge_ctz, []));
+    ("__fir_clz", (huge_clz, []));
+    ("__fir_bswap", (huge_bswap, [ "__fir_shr" ]));
+    ("__fir_clmul_wide", (huge_clmul_wide, [ "__fir_clmul"; "__fir_shr" ]));
     ("__fir_wide_top", (wide_top, []));
     ("__fir_utof64", (utof64, [ "__fir_wide_top" ]));
     ("__fir_utof32", (utof32, [ "__fir_wide_top" ]));

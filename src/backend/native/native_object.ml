@@ -21,7 +21,7 @@ type extra = {
    .note.GNU-stack, so the other section indices do not move. [extra]
    sections come after it. A symbol defined in an SHF_TLS section is
    STT_TLS; [tls name] marks an undefined one as STT_TLS too. *)
-let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> false) ?eh_frame
+let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> false) ?(ifunc = fun _ -> false) ?eh_frame
     ?(extra = []) ~global ~alignments (input : Elf64.input) =
   let first_extra = if eh_frame = None then 5 else 6 in
   let extra_flags = Array.of_list (List.map (fun (x : extra) -> x.flags) extra) in
@@ -54,7 +54,7 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
                (match binding s.name with
                | Some b -> b
                | None -> if global s.name then 1 else 0);
-             kind = (if s.func then 2 else if tls_section s.section then 6 else 1);
+             kind = (if ifunc s.name then 10 else if s.func then 2 else if tls_section s.section then 6 else 1);
              visibility = visibility s.name;
              definition = O.Section (section s.section, Int64.of_int s.offset);
              size = Int64.of_int s.size;

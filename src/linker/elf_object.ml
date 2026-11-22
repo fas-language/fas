@@ -143,12 +143,22 @@ let write input =
         (56, 8, entsize);
       ]
   in
+  let section_kind name = function
+    | Bss _ -> 8
+    | Data _ ->
+        if name = ".init_array" || String.starts_with ~prefix:".init_array." name then 14
+        else if name = ".fini_array" || String.starts_with ~prefix:".fini_array." name then 15
+        else if name = ".preinit_array" || String.starts_with ~prefix:".preinit_array." name then 16
+        else if name = ".note.stapsdt" || name = ".note.ABI-tag" || name = ".note.gnu.property" then 7
+        else 1
+  in
   Array.iteri
     (fun index (s : section) ->
-      let kind, size =
+      let kind = section_kind s.name s.contents in
+      let size =
         match s.contents with
-        | Data bytes -> (1, Bytes.length bytes)
-        | Bss size -> (8, size)
+        | Data bytes -> Bytes.length bytes
+        | Bss size -> size
       in
       (match s.contents with
       | Data bytes -> Bytes.blit bytes 0 out section_offsets.(index) size
@@ -190,8 +200,8 @@ let write input =
             (section + 1, value)
       in
       if
-        (* kinds 0-4 (NOTYPE..FILE) and 6 (STT_TLS, for thread-local variables) *)
-        s.binding < 0 || s.binding > 2 || s.kind < 0 || (s.kind > 4 && s.kind <> 6) || s.visibility < 0
+        (* kinds 0-4 (NOTYPE..FILE), 6 (STT_TLS), and 10 (STT_GNU_IFUNC) *)
+        s.binding < 0 || s.binding > 2 || s.kind < 0 || (s.kind > 4 && s.kind <> 6 && s.kind <> 10) || s.visibility < 0
         || s.visibility > 3
       then Error.fail "%s: invalid symbol attributes" context;
       B.set_int out at 4 symbol_names.(original);

@@ -534,6 +534,7 @@ type finfo = {
 
 type sym =
   | Fn of finfo
+  | Ifunc of { imi : int; resolver : string; addr : int64; mutable resolved : finfo option }
   | Ext_fn of string * int64
   | Obj of obj
   | Part of obj * int  (** a global inside a section object, at this offset *)
@@ -791,6 +792,7 @@ let lookup st mi name =
 let sym_addr = function
   | Fn fi -> fi.faddr
   | Ext_fn (_, a) | Ext_gl (_, a) | Addr a -> a
+  | Ifunc r -> r.addr
   | Obj o -> o.base
   | Part (o, off) -> Int64.add o.base (Int64.of_int off)
 
@@ -961,7 +963,16 @@ let create cfg (ms : modul list) =
               | s -> Addr (Int64.add (sym_addr s) a.addend)
             in
             define mi a.alinkage a.aname s)
-        m.aliases)
+        m.aliases;
+      Vec.iter
+        (fun (iv : ifunc) ->
+          if iv.iname <> "" then begin
+            let addr = fresh_fn_addr () in
+            let s = Ifunc { imi = mi; resolver = iv.resolver; addr; resolved = None } in
+            Hashtbl.replace st.by_addr addr s;
+            define mi iv.ilinkage iv.iname s
+          end)
+        m.ifuncs)
     st.modules;
   (* initializers, now that every address is known *)
   Array.iteri
@@ -1480,6 +1491,33 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
       List.iter (free_obj st) fr.allocas;
       st.depth <- st.depth - 1;
       results
+  | Ifunc r ->
+      let fi =
+        match r.resolved with
+        | Some fi -> fi
+        | None -> (
+            match lookup st r.imi r.resolver with
+            | Fn rfi as rs -> (
+                let rargs =
+                  match rfi.fn.sig_.param_abis with
+                  | [] -> [||]
+                  | [ _ ] -> [| [| Bits [| 0L |] |] |]
+                  | [ _; _ ] -> [| [| Bits [| 0L |] |]; [| Bits [| 0L |] |] |]
+                  | _ -> error "ifunc resolver @%s has unsupported parameter count" r.resolver
+                in
+                let res = call st caller rs rfi.fn.sig_ rargs [] in
+                let target_addr =
+                  if Array.length res = 1 && Array.length res.(0) = 1 then ptr_of res.(0).(0)
+                  else error "ifunc resolver @%s did not return a pointer" r.resolver
+                in
+                match Hashtbl.find_opt st.by_addr target_addr with
+                | Some (Fn fi) ->
+                    r.resolved <- Some fi;
+                    fi
+                | _ -> error "ifunc resolver @%s returned non-function address 0x%Lx" r.resolver target_addr)
+            | _ -> error "ifunc resolver @%s has no body" r.resolver)
+      in
+      call st caller (Fn fi) sig_ args va_aggs
   | Ext_fn (name, _) -> st.cfg.extern_call st name sig_ args
   | Ext_gl (name, _) -> error "calls the address of the global @%s" name
   | Obj o | Part (o, _) -> error "calls the address of %s" o.what
@@ -2063,6 +2101,7 @@ let run_call st (target : sym) (sig_ : signature) (args : v array) =
 let run_function st ?(mi = 0) name (args : v array) =
   match lookup st mi name with
   | Fn fi as s -> run_call st s fi.fn.sig_ args
+  | Ifunc _ as s -> run_call st s { param_abis = []; result_abis = []; variadic = false } args
   | _ -> error "@%s has no body" name
 
 let int_arg w x = [| Bits (W.of_int64 w x) |]

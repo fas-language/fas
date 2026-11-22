@@ -198,6 +198,7 @@ let render_asm fr uid (x : asm) =
         if md = Some 'z' then unsupported "inline asm: %%z of an xmm register";
         (if md = Some 'V' then "" else pre) ^ kind ^ string_of_int i
     | Areg (V _, _), _ -> invalid_arg "Mir_emit: virtual register in inline asm"
+    | Ax87 i, _ -> (if intel then "" else "%") ^ if i = 0 then "st" else Printf.sprintf "st(%d)" i
     | Amem (ad, size), _ ->
         if md = Some 'z' then size_suffix (8 * size)
         else
@@ -1206,9 +1207,14 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
             && (name = ".tbss" || name = ".bss" || String.starts_with ~prefix:".bss." name
                || (tls && String.starts_with ~prefix:".tbss." name))
           in
+          let is_lifecycle =
+            name = ".init_array" || String.starts_with ~prefix:".init_array." name
+            || name = ".fini_array" || String.starts_with ~prefix:".fini_array." name
+            || name = ".preinit_array" || String.starts_with ~prefix:".preinit_array." name
+          in
           {
             Native_object.name;
-            flags = 2 lor (if !writable then 1 else 0) lor if tls then 0x400 else 0;
+            flags = 2 lor (if !writable || is_lifecycle then 1 else 0) lor if tls then 0x400 else 0;
             alignment = d.alignment;
             contents =
               (if nobits then Fas_linker.Elf_object.Bss (Buffer.length d.buf)
@@ -1255,11 +1261,22 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           | None -> unsupported "alias `%s`: its target `%s` was not emitted" al.name al.target)
         syms.aliases
     in
+    let ifunc_names = Hashtbl.create 4 in
+    let ifunc_syms =
+      List.map
+        (fun (iv : Elf_attrs.ifunc) ->
+          Hashtbl.replace ifunc_names iv.iname ();
+          match List.find_opt (fun (s : Elf64.symbol) -> s.name = iv.resolver) defined_syms with
+          | Some s -> { s with Elf64.name = iv.iname }
+          | None -> unsupported "ifunc `%s`: its resolver `%s` was not emitted" iv.iname iv.resolver)
+        syms.ifuncs
+    in
     Ok
       (Native_object.emit
          ~eh_frame:(Mir_cfi.build (List.rev !fdes))
          ~extra:extra_sections
          ~tls:(Hashtbl.mem env.tls_syms)
+         ~ifunc:(Hashtbl.mem ifunc_names)
          ~global:(fun n -> n = "_start")
          ~binding:(fun n ->
            match Hashtbl.find_opt masm.mbinding n with Some b -> Some b | None -> Hashtbl.find_opt syms.binding n)
@@ -1276,7 +1293,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
            data = Buffer.to_bytes data.buf;
            data_relocs = data.relocs;
            bss_size = !bss;
-           symbols = defined_syms @ alias_syms;
+           symbols = defined_syms @ alias_syms @ ifunc_syms;
            entry = "_start";
          })
   with

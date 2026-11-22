@@ -163,7 +163,8 @@ let assign_names f =
   Vec.iter
     (fun (b : block_rec) ->
       Array.iter name b.params;
-      Vec.iter (fun i -> Array.iter name (inst f i).results) b.insts)
+      Vec.iter (fun i -> Array.iter name (inst f i).results) b.insts;
+      (match b.term with Asm_goto { aresults; _ } -> Array.iter name aresults | _ -> ()))
     f.blocks;
   let busedb = Hashtbl.create 16 in
   let bnames =
@@ -379,20 +380,27 @@ let term_text f nm = function
   | Indirect_br (x, bs) ->
       Printf.sprintf "indirect_br %s, [%s]" (value_text f nm x)
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) bs)))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
-      let body = op_text f nm { op = Asm { tmpl; aflags; outs = [||]; ins; aargs; clobbers }; results = [||]; loc = 0 } in
-      (* asm_goto prints no out(): drop it after the template, whose own
-         quotes are escaped, so the first quote-space-out() follows it *)
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } ->
+      let body = op_text f nm { op = Asm { tmpl; aflags; outs; ins; aargs; clobbers }; results = aresults; loc = 0 } in
       let body = String.sub body 4 (String.length body - 4) in
-      let pat = "\" out() " in
-      let n = String.length pat in
-      let rec find i =
-        if i + n > String.length body then body
-        else if String.sub body i n = pat then String.sub body 0 (i + 2) ^ String.sub body (i + n) (String.length body - i - n)
-        else find (i + 1)
+      (* drop empty out() when there are no outputs, keeping old compact form *)
+      let body =
+        if outs <> [||] then body
+        else
+          let pat = "\" out() " in
+          let n = String.length pat in
+          let rec find i =
+            if i + n > String.length body then body
+            else if String.sub body i n = pat then String.sub body 0 (i + 2) ^ String.sub body (i + n) (String.length body - i - n)
+            else find (i + 1)
+          in
+          find 0
       in
-      let body = find 0 in
-      Printf.sprintf "asm_goto %s %s [%s]" body (label nm.bnames.(fall))
+      let lhs =
+        if aresults = [||] then ""
+        else String.concat ", " (Array.to_list (Array.map (value_text f nm) aresults)) ^ " = "
+      in
+      Printf.sprintf "%sasm_goto %s %s [%s]" lhs body (label nm.bnames.(fall))
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) labels)))
   | Ret [||] -> "ret"
   | Ret vs -> "ret " ^ String.concat ", " (Array.to_list (Array.map (value_text f nm) vs))
@@ -538,6 +546,13 @@ let module_to_string m =
            (symbol a.target)
            (if a.addend = 0L then "" else " + " ^ Int64.to_string a.addend)))
     m.aliases;
+  Vec.iter
+    (fun (iv : ifunc) ->
+      Buffer.add_string buf
+        (Printf.sprintf "ifunc %s %s%s = %s\n" (symbol iv.iname) (linkage_name iv.ilinkage)
+           (if iv.ivisibility = Default then "" else " " ^ visibility_name iv.ivisibility)
+           (symbol iv.resolver)))
+    m.ifuncs;
   Vec.iter
     (fun f ->
       Buffer.add_char buf '\n';
