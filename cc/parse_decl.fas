@@ -849,13 +849,13 @@ fn pa_new_op(kind u8, loc u32) handle[DeclOp] {
     return op
 }
 
-fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
+fn pa_params(p handle[Parser], op handle[DeclOp], leading handle[Attr]) void fails {
     outer handle[Scope] = p.scope
     pa_enter(p)
     op.proto = p.scope
     defer { p.scope = outer }
     if try pa_accept(p, c")") { return }
-    if (try pa_at(p, c"void")) && (try pa_at_second(p, c")")) {
+    if leading == null && (try pa_at(p, c"void")) && (try pa_at_second(p, c")")) {
         try pa_take(p); try pa_take(p)
         return
     }
@@ -867,6 +867,8 @@ fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
             try pa_error(p, pt.loc, c"C23 requires parameter types (K&R declarations are unsupported)")
         }
         spec DeclSpec = {}
+        spec.attrs = leading
+        leading = null
         try pa_specs(p, &spec)
         if (spec.storage != SC_NONE && spec.storage != SC_REGISTER) || spec.thread_local ||
             spec.is_inline || spec.is_noreturn || spec.inferred || spec.alignment != 0 {
@@ -874,7 +876,8 @@ fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
         }
         d Declarator = {}
         try pa_declarator(p, &d, true)
-        t u32 = try pa_apply_attrs(p, d.first, spec.ty, pa_join_attrs(d.attrs, pa_copy_attrs(spec.attrs)), 0)
+        attrs handle[Attr] = pa_join_attrs(d.attrs, spec.attrs)
+        t u32 = try pa_apply_attrs(p, d.first, spec.ty, attrs, 0)
         adjusted u32 = t
         n handle[TypeNode] = ty_node(ty_unqual(t))
         if n.kind == TYK_ARRAY {
@@ -895,7 +898,7 @@ fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
         formal.ty = adjusted
         formal.decl = se_symbol(d.name, pt.loc, adjusted, spec.storage)
         sym handle[Symbol] = formal.decl
-        sym.attrs = d.attrs
+        sym.attrs = attrs
         if d.name != 0 { formal.decl = try se_declare(p, formal.decl, false, false) }
         if tail == null { op.params = formal }
         else { tail.next = formal }
@@ -924,11 +927,21 @@ fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fai
         pointers = op
         t = try pa_peek(p)
     }
-    if pa_is(p, t, c"(") && (!abstract || (!(try pa_at_second(p, c")")) &&
-        !(try pa_at_second(p, c"...")) && !pa_decl_start(p, try pa_peek_at(p, 1)))) {
+    if pa_is(p, t, c"(") {
         try pa_take(p)
-        try pa_declarator(p, d, abstract)
-        try pa_expect(p, c")")
+        // With an abstract declarator, '(' may start either a grouped
+        // declarator or a prototype. An attribute alone cannot decide.
+        leading handle[Attr] = try pa_attributes(p)
+        head Token = try pa_peek(p)
+        if abstract && (pa_is(p, head, c")") || pa_is(p, head, c"...") || pa_decl_start(p, head)) {
+            op handle[DeclOp] = pa_new_op(DO_FUNC, t.loc)
+            try pa_params(p, op, leading)
+            pa_add_op(d, op)
+        } else {
+            d.attrs = pa_join_attrs(leading, d.attrs)
+            try pa_declarator(p, d, abstract)
+            try pa_expect(p, c")")
+        }
     } else if t.kind == TK_IDENT && !pa_keyword(p, t) {
         d.name = try pa_ident(p, try pa_take(p))
         d.loc = t.loc
@@ -965,7 +978,7 @@ fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fai
             pa_add_op(d, op)
         } else if try pa_accept(p, c"(") {
             op handle[DeclOp] = pa_new_op(DO_FUNC, t.loc)
-            try pa_params(p, op)
+            try pa_params(p, op, null)
             pa_add_op(d, op)
         } else { break }
         d.attrs = pa_join_attrs(try pa_attributes(p), d.attrs)

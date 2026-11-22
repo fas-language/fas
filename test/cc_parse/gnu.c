@@ -37,3 +37,11 @@ static const int (*qualified_array(const struct Matrix { int row[3]; } *m))[3] {
     const int (*row)[3] = &m->row;
     return row;
 }
+
+// Attributes before the first token of a parenthesized declarator do not
+// make it a parameter list. A real parameter can start with one too.
+typedef int ( __attribute__((noinline)) *AnnotatedFunctionPointer)(void);
+typedef int AnnotatedPrototype(__attribute__((unused)) int);
+int call_annotated(void *ptr) {
+    return ((int (__attribute__((noinline)) *)(void))ptr)();
+}
