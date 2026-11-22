@@ -669,6 +669,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
     }
     try pa_expect(p, c"}")
     attrs = pa_join_attrs(try pa_attributes(p), attrs)
+    if pa_has_attr(p, attrs, c"mode") { try pa_error(p, loc, c"mode attribute requires a scalar type") }
     for i usize in 0..fields.n {
         f handle[FieldDef] = vec_at[FieldDef](&fields, i)
         n handle[TypeNode] = ty_node(ty_unqual(f.ty))
