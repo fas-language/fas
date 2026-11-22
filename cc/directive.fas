@@ -232,11 +232,40 @@ fn pragma_tokens(p handle[Pp], source Bytes, loc u32, tokens handle[Vec[Token]])
     try pp_lex_line(n, &l, tokens, false)
 }
 
+fn pp_pragma_message(p handle[Pp], args handle[Vec[Token]], first usize, loc u32, fatal bool) void fails {
+    n handle[CNames] = &p.names
+    expanded Vec[Token] = {}
+    defer { vec_free(&expanded) }
+    try expand_list(p, args.p + first * sizeof[Token], args.n - first, &expanded, false)
+    start usize = 0
+    end usize = expanded.n
+    if end != 0 && cc_is(n, expanded.p[Token], c"(") {
+        if !cc_is(n, expanded.p[Token, end - 1], c")") {
+            try cc_error(n, loc, c"missing ')' after pragma message")
+        }
+        start = 1
+        end -= 1
+    }
+    if start >= end { try cc_error(n, loc, c"expected a string in pragma message") }
+    message Buf = {}
+    defer { buf_free(&message) }
+    for i usize in start..end {
+        piece Token = expanded.p[Token, i]
+        if piece.kind != TK_STR { try cc_error(n, piece.loc, c"expected a string in pragma message") }
+        if fatal { buf_append(&message, pp_destringize(cc_spelling(n, piece))) }
+    }
+    if fatal {
+        cc_diag(n, loc, c"error: ", buf_bytes(&message))
+        fail CError
+    }
+}
+
 fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
     n handle[CNames] = &p.names
     drop Token = cc_token(TK_PLACE, 0, loc, 0)
     if args.n == 0 { return drop }
     first Token = args.p[Token]
+    if cc_is(n, first, c"message") { try pp_pragma_message(p, args, 1, loc, false) }
     if cc_is(n, first, c"once") && p.frames.n != 0 {
         f handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
         file handle[Input] = f.input_handle
@@ -245,6 +274,7 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
     }
     if cc_is(n, first, c"GCC") && args.n > 1 {
         command Token = args.p[Token, 1]
+        if cc_is(n, command, c"error") { try pp_pragma_message(p, args, 2, loc, true) }
         if cc_is(n, command, c"system_header") && p.frames.n > 1 {
             f handle[Frame] = vec_at[Frame](&p.frames, p.frames.n - 1)
             f.system = true
