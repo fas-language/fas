@@ -316,6 +316,11 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
     if n.kind == ND_GENERIC && n.b != null {
         return gen_eval_const_addr(n.b, out)
     }
+    if n.kind == ND_COND && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        // Only the selected arm contributes its symbol and offset.
+        chosen handle[Ast] = if se_truth(n.a) { n.b } else { n.c }
+        return gen_eval_const_addr(chosen, out)
+    }
     if n.kind == ND_STRING {
         tmp Buf = {}
         defer { buf_free(&tmp) }
@@ -860,6 +865,9 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
             }
         }
         return res
+    }
+    if n.kind == ND_COND && ty_is_ptr(n.ty) && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        return gen_eval_const_int(if se_truth(n.a) { n.b } else { n.c })
     }
     if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_int(n.b) }
     return n.value
