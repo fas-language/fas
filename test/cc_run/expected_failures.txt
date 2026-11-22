@@ -32,7 +32,7 @@ gcc/gcc/testsuite/gcc.dg/c99-math-long-double-1.c exit-mismatch: parser #1 (80-b
 gcc/gcc/testsuite/gcc.dg/cleanup-10.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-11.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-12.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
-gcc/gcc/testsuite/gcc.dg/cleanup-13.c fir-error: gcc -fexceptions DWARF unwind asm ("i" non-constant input)
+gcc/gcc/testsuite/gcc.dg/cleanup-13.c fir-error: gcc -fexceptions DWARF unwind test (_Unwind_ForcedUnwind + .cfi_escape inside inline asm)
 gcc/gcc/testsuite/gcc.dg/cleanup-5.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)

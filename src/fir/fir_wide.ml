@@ -1190,9 +1190,15 @@ let convert cx kind x dst =
       let signed = kind = Sext in
       let sp =
         if is_huge_width sn then huge_ptr cx x
-        else
+        else begin
           let _, l = limbs_of cx x in
-          to_agg cx sn l
+          let sk = nlimbs sn in
+          let p = huge_slot_k cx sk in
+          for i = 0 to sk - 1 do
+            e0 cx (Store (plain_mem 8, l.(i), limb_ptr cx p i))
+          done;
+          p
+        end
       in
       let dk = nlimbs dn in
       let dp = huge_slot_k cx dk in

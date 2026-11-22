@@ -537,5 +537,41 @@ func @i128_xmm (i128) -> (i128) global {
           incr failures;
           Printf.printf "FAIL x87_and_i128_asm: compile_object: %s\n%!" e
       | Ok _ -> ()));
+  (* narrow -> huge integer zext/sext (regression for uninitialized upper bytes in limb 0) *)
+  (match
+     parse "narrow_to_huge_ext"
+       {|
+triple "x86_64-unknown-linux-gnu"
+func @ext_i7_i600 (i7) -> (i64) local {
+^e(%x: i7):
+  %z = zext i600 %x
+  %s = sext i600 %x
+  %lo_z = trunc i64 %z
+  %hi_s = lshr i600 %s, i600 592
+  %hi_s64 = trunc i64 %hi_s
+  %sum = add i64 %lo_z, %hi_s64
+  ret %sum
+}
+func @main () -> (i32) global {
+^e:
+  %a = call (i7) -> (i64) @ext_i7_i600(i7 5)
+  %b = call (i7) -> (i64) @ext_i7_i600(i7 -1)
+  ; a: lo_z=5, hi_s=0 -> 5; b: lo_z=127, hi_s=255 -> 382; total = 387
+  %t = add i64 %a, %b
+  %ok = icmp eq i1 %t, i64 387
+  %r = select i32 %ok, i32 0, i32 1
+  ret %r
+}
+|}
+   with
+  | None -> ()
+  | Some m ->
+      let pr = Fir_interp.run_program [ m ] in
+      check "narrow_to_huge_ext interp" (pr.status = 0 && pr.trapped = None);
+      (match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL narrow_to_huge_ext: compile_object: %s\n%!" e
+      | Ok _ -> ()));
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"
