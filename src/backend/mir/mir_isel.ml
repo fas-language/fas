@@ -2123,33 +2123,14 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
         incr next;
         match loc.(k) with
         | Ax87 0 ->
-            let d_opt =
-              if oty k = F.F80 then None
-              else (
-                let d = fresh cx (cls_of_ty (oty k)) in
-                Hashtbl.replace cx.vals (F.resolve cx.fn res) d;
-                Some d)
-            in
+            let d_opt = if oty k = F.F80 then None else Some (vreg cx res) in
             out_st0 := Some (k, res, d_opt);
             None
         | Ax87 1 ->
-            let d_opt =
-              if oty k = F.F80 then None
-              else (
-                let d = fresh cx (cls_of_ty (oty k)) in
-                Hashtbl.replace cx.vals (F.resolve cx.fn res) d;
-                Some d)
-            in
+            let d_opt = if oty k = F.F80 then None else Some (vreg cx res) in
             out_st1 := Some (k, res, d_opt);
             None
-        | _ ->
-            let d =
-              match c.flag with
-              | Some _ -> fresh cx Gpr
-              | None -> fresh cx (cls_of_ty (oty k))
-            in
-            Hashtbl.replace cx.vals (F.resolve cx.fn res) d;
-            Some d
+        | _ -> Some (vreg cx res)
       end
       else None)
   in
