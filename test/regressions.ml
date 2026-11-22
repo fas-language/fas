@@ -20409,7 +20409,26 @@ let () =
     "recursive by-value struct `A`"
     "struct A { b B }\n\
      struct B { a A }\n\
-     fn main() i32 { return trunc[i32](sizeof[A]) }\n"
+     fn main() i32 { return trunc[i32](sizeof[A]) }\n";
+  semantic_accept "chained-handle-fields"
+    "struct CFile { marks u64 }\n\
+     struct Lexer { file handle[CFile] }\n\
+     struct Node { next handle[Node]\n val u64 }\n\
+     fn read_write(l handle[Lexer], n handle[Node], p addr) addr {\n\
+       a addr = &l.file.marks\n\
+       l.file.marks = 99\n\
+       m u64 = p[Lexer].file.marks\n\
+       n.next.next.val = m\n\
+       _ handle[Node] = n.next.next\n\
+       return a\n\
+     }\n\
+     fn main() i32 { return 0 }\n";
+  semantic_error "chained-handle-missing-field"
+    "record `CFile` has no field `missing`"
+    "struct CFile { marks u64 }\n\
+     struct Lexer { file handle[CFile] }\n\
+     fn f(l handle[Lexer]) u64 { return l.file.missing }\n\
+     fn main() i32 { return 0 }\n"
 
 let replay_unmatched_bound = 30
 
