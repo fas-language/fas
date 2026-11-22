@@ -139,6 +139,28 @@ fn se_check_atomic(p handle[Parser], t Token, name Bytes, args handle[Ast], coun
     }
 }
 
+// For the default x86-64 target, native atomic accesses are lock-free
+// for naturally aligned sizes of one, two, four, and eight bytes. As in
+// Clang, a null pointer asks for the naturally aligned case.
+fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count u32) handle[Ast] fails {
+    try se_builtin_count(p, t, count, 2, 2)
+    size u64 = try se_ice(p, args)
+    pointer handle[Ast] = args.next
+    ptr u32 = se_decay(pointer.ty)
+    if !ty_is_ptr(ptr) && !se_null(pointer) {
+        try pa_error(p, pointer.loc, c"atomic alignment argument requires a pointer")
+    }
+    if size <= 1 { return se_int(t.loc, TY_BOOL, 1) }
+    if size != 2 && size != 4 && size != 8 { return se_int(t.loc, TY_BOOL, 0) }
+
+    absolute AddressValue = {}
+    known bool = se_address_value(p, pointer, &absolute) && absolute.symbol == null
+    aligned bool = false
+    if known { aligned = bitcast[u64](absolute.offset) % size == 0 }
+    else if ty_is_ptr(ptr) { aligned = ty_align(ty_node(ptr).elem) >= size }
+    return se_int(t.loc, TY_BOOL, if aligned { 1 } else { 0 })
+}
+
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
     if bytes_starts_with(name, bytes_c(c"__atomic_")) || bytes_starts_with(name, bytes_c(c"__sync_")) {
         try se_check_atomic(p, t, name, args, count)

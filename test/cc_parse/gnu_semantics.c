@@ -32,3 +32,12 @@ static_assert(((_BitInt(75))-2 << 71) == -((_BitInt(75))1 << 72));
 
 static_assert((char *)-1L + 1 == 0);
 static_assert((char *)-1L + 1 < (char *)-1L);
+
+extern int *atomic_aligned;
+extern char *atomic_unknown_alignment;
+static_assert(__atomic_always_lock_free(1, atomic_unknown_alignment));
+static_assert(__atomic_always_lock_free(4, atomic_aligned));
+static_assert(!__atomic_always_lock_free(4, atomic_unknown_alignment));
+static_assert(__atomic_always_lock_free(8, nullptr));
+static_assert(!__atomic_always_lock_free(8, (void *)3));
+static_assert(!__atomic_always_lock_free(16, nullptr));

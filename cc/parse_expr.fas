@@ -526,6 +526,9 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
     ret u32
     if a.ty == TY_INVALID && a.kind == ND_NAME && a.decl == null {
         word Bytes = cc_name(p.names, a.op)
+        if bytes_eq_c(word, c"__atomic_always_lock_free") {
+            return try se_atomic_always_lock_free(p, t, xs.first, count)
+        }
         try se_check_builtin_call(p, t, word, xs.first, count)
         ret = pa_builtin_result(p, word, xs.first, count)
         if bytes_eq_c(word, c"__builtin_strcmp") {
