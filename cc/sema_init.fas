@@ -520,6 +520,36 @@ fn pa_discard_init(p handle[Parser]) void fails {
     try pa_expect(p, c"}")
 }
 
+// An exact, complete array-element write replaces any earlier complete
+// write to the same element. Still parse and type-check every initializer;
+// only the surviving expressions need to be evaluated at run time.
+fn se_single_array_init(item handle[Ast]) bool {
+    d handle[Ast] = item.b
+    return (d == null || (d.b == null && d.next == null)) &&
+        (item.a.flags & NF_PARTIAL_INIT) == 0
+}
+
+fn se_prune_array_init(xs handle[AstList]) void {
+    latest Map[u64, addr, u64_hash, u64_eq] = {}
+    defer { map_free(&latest) }
+    item handle[Ast] = xs.first
+    while item != null {
+        if se_single_array_init(item) { map_put(&latest, item.value, handle_addr(item)) }
+        item = item.next
+    }
+    item = xs.first
+    xs.first = null
+    xs.last = null
+    while item != null {
+        next handle[Ast] = item.next
+        if !se_single_array_init(item) || (map_get(&latest, item.value) catch null) == handle_addr(item) {
+            item.next = null
+            pa_append(xs, item)
+        }
+        item = next
+    }
+}
+
 fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
     t Token = try pa_peek(p)
     p.init_depth += 1
@@ -543,9 +573,11 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
     max u64 = 0
     xs AstList = {}
     continuation handle[Ast] = null
+    designated bool = false
     while !(try pa_at(p, c"}")) {
         d Designation = {}
         try pa_designators(p, ty, &d)
+        designated = designated || d.first != null
         if d.first == null && continuation != null {
             d.first = continuation
             last handle[Ast] = continuation
@@ -597,6 +629,7 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         out.ty = ty_array(elem_ty, max)
         n.ty = out.ty
     }
+    if !constant && designated && base.kind == TYK_ARRAY { se_prune_array_init(&xs) }
     n.a = xs.first
     if se_static_init_items(xs.first) { n.flags |= NF_STATIC }
     if !se_aggregate(ty) && xs.first == null && ty_is_integer(ty) {

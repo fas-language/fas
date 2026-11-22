@@ -18,7 +18,6 @@ gcc/gcc/testsuite/gcc.dg/cleanup-13.c fir-error: gcc -fexceptions DWARF unwind t
 gcc/gcc/testsuite/gcc.dg/cleanup-5.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
-gcc/gcc/testsuite/gcc.dg/cpp/embed-12.c exit-mismatch: C23 #embed side-effecting overwritten designated initializer
 gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc passes (exit=0), clang oracle timed out (exit=137)
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fenv rounding-mode fma test (-frounding-math)

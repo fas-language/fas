@@ -500,16 +500,13 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         if k == TYK_ARRAY {
             elem_ty u32 = n.elem
             elem_sz u64 = ty_size(elem_ty)
-            idx u64 = 0
             item handle[Ast] = init.a
             while item != null {
                 if item.b != null {
-                    // Designated initializer (may be nested)
+                    idx u64 = item.value
                     gen_static_fill_desig(si, u, item.b, item.a, off, &idx)
-                    idx += 1
                 } else {
-                    gen_static_fill(si, elem_ty, item.a, off + idx * elem_sz)
-                    idx += 1
+                    gen_static_fill(si, elem_ty, item.a, off + item.value * elem_sz)
                 }
                 item = item.next
             }
@@ -1163,16 +1160,14 @@ fn gen_auto_init(dst_ptr u32, tid u32, init handle[Ast], zero_first bool) void f
         if k == TYK_ARRAY {
             elem_ty u32 = n.elem
             elem_sz u64 = ty_size(elem_ty)
-            idx u64 = 0
             item handle[Ast] = init.a
             while item != null {
                 if item.b != null {
+                    idx u64 = item.value
                     try gen_auto_init_desig(dst_ptr, u, item.b, item.a, &idx)
-                    idx += 1
                 } else {
-                    ep u32 = gen_ptradd_const(dst_ptr, bitcast[i64](idx * elem_sz))
+                    ep u32 = gen_ptradd_const(dst_ptr, bitcast[i64](item.value * elem_sz))
                     try gen_auto_init(ep, elem_ty, item.a, false)
-                    idx += 1
                 }
                 item = item.next
             }
