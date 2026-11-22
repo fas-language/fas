@@ -292,7 +292,24 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
         try se_conversion(p, TY_INT, args)
     } else if bytes_eq_c(name, c"__builtin_cpu_supports") || bytes_eq_c(name, c"__builtin_cpu_is") {
         try se_builtin_count(p, t, count, 1, 1)
-        if args.kind != ND_STRING { try pa_error(p, args.loc, c"CPU query requires a string literal") }
+        if args.kind != ND_STRING || ty_node(ty_unqual(args.ty)).elem != TY_CHAR {
+            try pa_error(p, args.loc, c"CPU query requires an ordinary string literal")
+        }
+        if bytes_eq_c(name, c"__builtin_cpu_is") {
+            cursor StringBytes = {}
+            cursor.piece = args.a
+            defer { buf_free(&cursor.encoded) }
+            cpu Buf = {}
+            defer { buf_free(&cpu) }
+            for i u64 in 0..args.value - 1 {
+                byte u8 = try se_next_string_byte(p, &cursor)
+                if byte == 0 { break }
+                buf_u8(&cpu, byte)
+            }
+            if !feature_in(C_X86_CPU_NAMES, buf_bytes(&cpu)) {
+                try pa_error(p, args.loc, c"unknown x86-64 CPU query name")
+            }
+        }
     } else if bytes_eq_c(name, c"__builtin_call_with_static_chain") {
         try se_builtin_count(p, t, count, 2, 2)
         if args.kind != ND_CALL { try pa_error(p, args.loc, c"expected a function call for the static chain builtin") }

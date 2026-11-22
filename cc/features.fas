@@ -4,6 +4,9 @@ const C_ATTRIBUTES addr = c" alias aligned alloc_align alloc_size always_inline 
 const C_FEATURES addr = c" attribute_deprecated_with_message c_alignas c_alignof c_atomic c_generic_selections c_static_assert c_thread_local c_variadic_macros "
 const C_BUILTINS addr = c" __atomic_load_n __atomic_store_n __builtin_add_overflow __builtin_assume_aligned __builtin_bswap16 __builtin_bswap32 __builtin_bswap64 __builtin_clz __builtin_clzl __builtin_clzll __builtin_constant_p __builtin_ctz __builtin_ctzl __builtin_ctzll __builtin_expect __builtin_expect_with_probability __builtin_isinf_sign __builtin_memcpy __builtin_memmove __builtin_memset __builtin_mul_overflow __builtin_object_size __builtin_offsetof __builtin_popcount __builtin_popcountl __builtin_popcountll __builtin_sub_overflow __builtin_trap __builtin_types_compatible_p __builtin_unreachable __builtin_va_arg __builtin_va_copy __builtin_va_end __builtin_va_start "
 
+// x86-64 vendor and model strings accepted by GCC or Clang's CPU query.
+const C_X86_CPU_NAMES addr = c" alderlake amd amdfam10 arrowlake arrowlake-s atom barcelona bdver1 bdver2 bdver3 bdver4 bonnell broadwell btver1 btver2 cannonlake cascadelake clearwaterforest cooperlake core2 corei7 diamondrapids emeraldrapids goldmont goldmont-plus gracemont grandridge graniterapids graniterapids-d haswell icelake-client icelake-server intel ivybridge knl knm lujiazui lunarlake meteorlake nehalem pantherlake raptorlake rocketlake sandybridge sapphirerapids shijidadao sierraforest silvermont skylake skylake-avx512 slm tigerlake tremont westmere yongfeng znver1 znver2 znver3 znver4 znver5 "
+
 fn feature_in(table addr, name Bytes) bool {
     if name.n == 0 { return false }
     entries Bytes = bytes_c(table)
