@@ -281,6 +281,39 @@ fn se_constexpr_type(p handle[Parser], ty u32, loc u32) void fails {
     }
 }
 
+fn se_constexpr_float_fits(p handle[Parser], ty u32, source handle[Ast]) bool {
+    real u32 = ty_real_part(source.ty)
+    if ty == real { return true }
+    f FloatFormat = flt_format(ty)
+    if ty_is_integer(source.ty) && (source.flags & NF_INT_VALUE) != 0 { return flt_integer_fits(f, source) }
+    if (source.flags & NF_FLOAT_CONST) == 0 { return true }
+    if source.kind == ND_CALL {
+        callee handle[Ast] = source.a
+        if callee.kind == ND_NAME && callee.decl == null {
+            name Bytes = cc_name(p.names, callee.op)
+            // A conversion quiets a signaling NaN when its format changes.
+            if bytes_starts_with(name, bytes_c(c"__builtin_nans")) { return false }
+            if bytes_eq_c(name, c"__builtin_complex") {
+                first handle[Ast] = source.b
+                return se_constexpr_float_fits(p, ty, first) && se_constexpr_float_fits(p, ty, first.next)
+            }
+        }
+    }
+    bits FloatBits = {}
+    if !ty_is_complex(source.ty) {
+        // Some wider arithmetic still has no exact folded representation.
+        return !flt_quad_const(source, &bits) || flt_quad_fits(f, bits)
+    }
+    if real == TY_LDOUBLE || real == TY_FLOAT128 { return true }
+    part Ast = {}
+    part.ty = real
+    part.flags = NF_FLOAT_CONST
+    part.value = source.value
+    if flt_quad_const(&part, &bits) && !flt_quad_fits(f, bits) { return false }
+    part.value = source.imag
+    return !flt_quad_const(&part, &bits) || flt_quad_fits(f, bits)
+}
+
 fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
     if e.kind == ND_INIT {
         item handle[Ast] = e.a
@@ -322,6 +355,9 @@ fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
     }
     if e.kind != ND_CAST || (e.flags & NF_IMPLICIT) == 0 { return }
     source handle[Ast] = e.a
+    if ty_is_real_float(ty_real_part(e.ty)) && !se_constexpr_float_fits(p, ty_real_part(e.ty), source) {
+        try pa_error(p, source.loc, c"constexpr initializer is not exactly representable")
+    }
     if (source.flags & NF_ICE) != 0 && (e.flags & NF_ICE) != 0 &&
         ty_is_integer(source.ty) && ty_is_integer(e.ty) {
         a u32 = ty_int_bits(source.ty)

@@ -3,6 +3,47 @@
 value struct FloatFormat { precision u32, min_exp i32, max_exp i32, explicit_int bool }
 value struct FloatBits { lo u64, hi u64 }
 
+fn flt_format(ty u32) FloatFormat {
+    if ty == TY_FLOAT16 { return {11, -14, 15, false} }
+    if ty == TY_BFLOAT16 { return {8, -126, 127, false} }
+    if ty == TY_FLOAT { return {24, -126, 127, false} }
+    if ty == TY_LDOUBLE { return {64, -16382, 16383, true} }
+    if ty == TY_FLOAT128 { return {113, -16382, 16383, false} }
+    return {53, -1022, 1023, false}
+}
+
+// Test both ends of a finite significand. Subnormals have the same
+// least significant bit position as the smallest normal in that format.
+fn flt_significand_fits(f FloatFormat, top i32, bottom i32) bool {
+    fraction i32 = bitcast[i32](f.precision) - 1
+    normal i32 = if top < f.min_exp { f.min_exp } else { top }
+    return top <= f.max_exp && bottom >= normal - fraction
+}
+
+fn flt_quad_fits(f FloatFormat, n FloatBits) bool {
+    field i32 = trunc[i32]((n.hi >> 48) & 0x7fff)
+    if field == 0x7fff { return true }
+    high u64 = n.hi & 0x0000ffffffffffff
+    if field != 0 { high |= 0x0001000000000000 }
+    if high == 0 && n.lo == 0 { return true }
+    top i32 = if high != 0 { 127 - trunc[i32](clz(high)) } else { 63 - trunc[i32](clz(n.lo)) }
+    bottom i32 = if n.lo != 0 { trunc[i32](ctz(n.lo)) } else { 64 + trunc[i32](ctz(high)) }
+    scale i32 = (if field == 0 { 1 } else { field }) - 16383 - 112
+    return flt_significand_fits(f, top + scale, bottom + scale)
+}
+
+fn flt_integer_fits(f FloatFormat, n handle[Ast]) bool {
+    sig WideInt = wi_from_ast(n, ty_int_bits(n.ty))
+    defer { heap_free(sig.p) }
+    if !ty_is_unsigned(n.ty) && wi_bit(sig, sig.width - 1) != 0 { wi_negate(sig) }
+    length u32 = wi_length(sig)
+    if length == 0 { return true }
+    low u32 = 0
+    while sig.p[u32, zext[usize](low)] == 0 { low += 1 }
+    bottom u32 = low * 32 + ctz(sig.p[u32, zext[usize](low)])
+    return flt_significand_fits(f, bitcast[i32](length) - 1, bitcast[i32](bottom))
+}
+
 fn flt_mul_add(n WideInt, used u32, factor u64, carry u64) u32 {
     for i u32 in 0..used {
         at usize = zext[usize](i)
