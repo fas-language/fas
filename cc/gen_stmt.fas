@@ -982,10 +982,11 @@ fn gen_function(node handle[Ast]) void fails {
         }
     }
 
-    // Evaluate any VLA bounds on parameter types (e.g. `void f(int a, int b[a++])`)
+    // Parameter adjustment discards the outer array type from the ABI,
+    // but its bound expression still runs at entry.
     pm2 handle[Param] = handle_from_addr(s.params)
     while pm2 != null {
-        if pm2.ty != TY_INVALID { try gen_eval_vm_type(pm2.ty) }
+        if pm2.declared_ty != TY_INVALID { try gen_eval_vm_type(pm2.declared_ty) }
         pm2 = pm2.next
     }
 

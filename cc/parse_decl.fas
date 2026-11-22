@@ -44,6 +44,7 @@ struct Param {
     name u32
     loc u32
     ty u32
+    declared_ty u32 // preserves outer VLA bounds before parameter adjustment
     decl handle[Symbol]
     next handle[Param]
 }
@@ -912,6 +913,7 @@ fn pa_params(p handle[Parser], op handle[DeclOp], leading handle[Attr]) void fai
         formal.name = d.name
         formal.loc = pt.loc
         formal.ty = adjusted
+        formal.declared_ty = t
         formal.decl = se_symbol(d.name, pt.loc, adjusted, spec.storage)
         sym handle[Symbol] = formal.decl
         sym.attrs = attrs
