@@ -39,6 +39,18 @@ fn se_cleanup_attribute(p handle[Parser], s handle[Symbol], file bool, func bool
     s.cleanup = handle_addr(target)
 }
 
+// This target uses the x86-64 interrupt signature. The optional error code
+// has the same width and type as the hardware stack slot.
+fn se_interrupt_signature(p handle[Parser], s handle[Symbol]) void fails {
+    fn_type handle[TypeNode] = ty_node(ty_unqual(s.ty))
+    if !ty_is_void(fn_type.elem) || (fn_type.flags & TYF_VARIADIC) != 0 ||
+        fn_type.aux2 == 0 || fn_type.aux2 > 2 ||
+        !ty_is_ptr(tc.fn_params.p[u32, zext[usize](fn_type.aux1)]) ||
+        (fn_type.aux2 == 2 && tc.fn_params.p[u32, zext[usize](fn_type.aux1) + 1] != TY_ULONG) {
+        try pa_error(p, s.loc, c"x86-64 interrupt handler requires void return, a pointer and optional unsigned long")
+    }
+}
+
 fn se_local(p handle[Parser], name u32) handle[Symbol] {
     scope handle[Scope] = p.scope
     a addr = map_get(&scope.ordinary, name) catch null

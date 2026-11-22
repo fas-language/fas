@@ -155,7 +155,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     min u32 = 0
     max u32 = 0
     string_first bool = false
-    if feature_in(c" always_inline fastcall leaf naked no_stack_protector noinline nonstring noreturn returns_twice uninitialized unused ", name) {
+    if feature_in(c" always_inline fastcall interrupt leaf naked no_stack_protector noinline nonstring noreturn returns_twice uninitialized unused ", name) {
         max = 0
     } else if feature_in(c" alias cfi_salt error function_return ifunc section target tls_model visibility warning zero_call_used_regs ", name) {
         min = 1
@@ -1240,6 +1240,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
             }
         }
         try se_cleanup_attribute(p, s, file, func)
+        if func && pa_has_attr(p, attrs, c"interrupt") { try se_interrupt_signature(p, s) }
         if spec.thread_local && (func || spec.storage == SC_TYPEDEF || spec.storage == SC_REGISTER ||
             spec.storage == SC_CONSTEXPR || (!file && spec.storage != SC_STATIC && spec.storage != SC_EXTERN)) {
             try pa_error(p, d.loc, c"invalid thread-local declaration")
