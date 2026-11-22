@@ -158,7 +158,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     string_first bool = false
     if feature_in(c" always_inline cdecl fastcall interrupt leaf ms_abi naked no_stack_protector noinline nonstring noreturn returns_twice sysv_abi uninitialized unused ", name) {
         max = 0
-    } else if feature_in(c" alias cfi_salt error function_return ifunc section target tls_model visibility warning zero_call_used_regs ", name) {
+    } else if feature_in(c" alias capability cfi_salt error function_return ifunc section shared_capability target tls_model visibility warning zero_call_used_regs ", name) {
         min = 1
         max = 1
         string_first = true
@@ -169,9 +169,12 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     } else if bytes_eq_c(name, c"unavailable") {
         max = 1
         string_first = true
-    } else if feature_in(c" alloc_align assume cleanup enum_extensibility regparm ", name) {
+    } else if feature_in(c" alloc_align assume cleanup enum_extensibility guarded_by pt_guarded_by regparm ", name) {
         min = 1
         max = 1
+    } else if feature_in(c" requires_capability requires_shared_capability ", name) {
+        min = 1
+        max = 0xffffffff
     } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
         min = 1
         max = 2
@@ -1328,6 +1331,10 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         s.thread_local = spec.thread_local
         s.attrs = attrs
         if pa_has_attr(p, attrs, c"counted_by") { try pa_error(p, d.loc, c"counted_by requires a record field") }
+        if spec.storage != SC_TYPEDEF &&
+            (pa_has_attr(p, attrs, c"capability") || pa_has_attr(p, attrs, c"shared_capability")) {
+            try pa_error(p, d.loc, c"capability attribute requires a record type or typedef")
+        }
         if spec.unavailable_type && !pa_has_attr(p, attrs, c"unavailable") {
             try pa_error(p, d.loc, c"declaration uses an unavailable type")
         }
