@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import re
 import resource
 import subprocess
 import sys
@@ -26,29 +27,35 @@ ENV = {
 }
 
 
-def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180):
+def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False):
     preexec = _limit_as if cmd and str(cmd[0]) == FCC else None
     cp = subprocess.run(cmd, cwd=cwd, env=ENV, input=input_bytes,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         timeout=timeout, preexec_fn=preexec)
     if cp.returncode != 0:
+        command = " ".join(cmd)
+        if len(command) > 600:
+            command = command[:540] + " ... " + command[-55:]
         err = cp.stderr.decode("utf-8", "replace")
         err_lo = err.lower()
         if ("out of memory" in err_lo or "out_of_memory" in err_lo
                 or "cannot allocate memory" in err_lo or "bad_alloc" in err_lo
                 or cp.returncode == -9):
-            raise RuntimeError(f"compile-oom ({cp.returncode}): {' '.join(cmd)}\n{err[:600]}")
-        raise RuntimeError(f"Command failed ({cp.returncode}): {' '.join(cmd)}\n{err[:600]}")
-    return cp.stdout
+            raise RuntimeError(f"compile-oom ({cp.returncode}): {command}\n{err[:1200]}")
+        raise RuntimeError(f"Command failed ({cp.returncode}): {command}\n{err[:1200]}")
+    return (cp.stdout, cp.stderr) if both_streams else cp.stdout
+
+
+ZLIB_SOURCES = (
+    "adler32.c", "crc32.c", "deflate.c", "infback.c", "inffast.c",
+    "inflate.c", "inftrees.c", "trees.c", "zutil.c", "compress.c",
+    "uncompr.c", "gzclose.c", "gzlib.c", "gzread.c", "gzwrite.c",
+)
 
 
 def test_zlib(tmp: Path) -> bool:
     zdir = UPSTREAM / "zlib"
-    srcs = [
-        "adler32.c", "crc32.c", "deflate.c", "infback.c", "inffast.c",
-        "inflate.c", "inftrees.c", "trees.c", "zutil.c", "compress.c",
-        "uncompr.c", "gzclose.c", "gzlib.c", "gzread.c", "gzwrite.c",
-    ]
+    srcs = ZLIB_SOURCES
     w_fcc = tmp / "zlib_fcc"
     w_ref = tmp / "zlib_ref"
     w_fcc.mkdir()
@@ -181,22 +188,22 @@ SELECT id, name, qty FROM items ORDER BY price DESC, id ASC;
     return True
 
 
-def build_pair(tmp, name, sources, flags=(), libraries=()):
+def build_pair(tmp, name, sources, flags=(), libraries=(), *, timeout=180):
     paths = [tmp / f"{name}-{tag}" for tag in ("fcc", "clang")]
-    for compiler, out in zip((FCC, CLANG), paths):
-        warnings = ["-w"] if compiler == CLANG else []
-        run_cmd([compiler, "-std=gnu23", *warnings, *flags, *map(str, sources),
-                 *libraries, "-o", str(out)])
+    run_cmd([FCC, "-std=gnu23", *flags, *map(str, sources),
+             *libraries, "-o", str(paths[0])], timeout=timeout)
+    run_cmd([CLANG, "-std=gnu23", "-w", *flags, *map(str, sources),
+             *libraries, "-o", str(paths[1])], timeout=timeout)
     return paths
 
 
-def compare_output(paths, args=(), *, cwd=None, input_bytes=None):
-    actual, expected = [run_cmd([str(exe), *args], cwd=cwd, input_bytes=input_bytes)
+def compare_output(paths, args=(), *, cwd=None, input_bytes=None, both_streams=False):
+    actual, expected = [run_cmd([str(exe), *args], cwd=cwd, input_bytes=input_bytes,
+                                both_streams=both_streams)
                         for exe in paths]
     if actual != expected:
         raise AssertionError(f"{paths[0].name} {args} output mismatch: "
-                             f"fcc ({len(actual)} bytes)={actual[:200]!r}, "
-                             f"clang ({len(expected)} bytes)={expected[:200]!r}")
+                             f"fcc={repr(actual)[:600]}, clang={repr(expected)[:600]}")
     return actual
 
 
@@ -242,13 +249,121 @@ def test_bzip2(tmp):
     return True
 
 
+def test_zstd(tmp):
+    src = UPSTREAM / "zstd"
+    lib = src / "lib"
+    sources = [p for part in ("common", "compress", "decompress", "dictBuilder")
+               for p in sorted((lib / part).glob("*.c"))]
+    # Build the same assembly routine for both compilers. The two C
+    # libraries still select it through zstd's usual CPU detection.
+    asm = tmp / "huf_decompress_amd64.o"
+    run_cmd([CLANG, "-c", str(lib / "decompress/huf_decompress_amd64.S"), "-o", str(asm)])
+    paths = build_pair(tmp, "zstd-roundtrip", [src / "tests/roundTripCrash.c", *sources, asm],
+                       [f"-I{lib}", f"-I{lib / 'common'}", "-DZSTD_MULTITHREAD"],
+                       ["-pthread"], timeout=300)
+    sample = tmp / "zstd-payload"
+    sample.write_bytes((src / "README.md").read_bytes() * 1024 +
+                       bytes(range(256)) * 3701)
+    for args in ((), ("--cctxParams",)):
+        for payload in (src / "README.md", sample):
+            assert compare_output(paths, [*args, str(payload)], both_streams=True) == (
+                b"", b"no pb detected\n")
+    print("PASS: zstd (four upstream one-shot and streaming round-trips)")
+    return True
+
+
+def test_duktape(tmp):
+    src = UPSTREAM / "duktape"
+    print_alert = src / "extras/print-alert"
+    sources = [src / "src/duktape.c", src / "examples/cmdline/duk_cmdline.c",
+               print_alert / "duk_print_alert.c"]
+    paths = build_pair(tmp, "duktape", sources,
+                       [f"-I{src / 'src'}", f"-I{print_alert}", "-DDUK_CMDLINE_PRINTALERT_SUPPORT"],
+                       ["-lm"], timeout=300)
+    guide = src / "examples/guide"
+    compare_output(paths, [str(guide / "fib.js")], both_streams=True)
+    prime_sample = "print([2, 3, 4, 97, 221, 9973, 10000].filter(primeCheck).join(' '))"
+    assert compare_output(paths, [str(guide / "prime.js"), "-e", prime_sample],
+                          both_streams=True) == (b"2 3 97 9973\n", b"")
+    print("PASS: Duktape (upstream Fibonacci and prime examples)")
+    return True
+
+
+def test_mbedtls(tmp):
+    src = UPSTREAM / "mbedtls"
+    library = src / "library"
+    paths = build_pair(tmp, "mbedtls-selftest", [src / "programs/test/selftest.c",
+                                                 *sorted(library.glob("*.c"))],
+                       [f"-I{src / 'include'}", f"-I{library}"], timeout=300)
+    stdout, _ = compare_output(paths, both_streams=True)
+    assert b"[ All tests PASS ]" in stdout
+    print("PASS: Mbed TLS (upstream selftest)")
+    return True
+
+
+def test_oniguruma(tmp):
+    src = UPSTREAM / "oniguruma"
+    build = tmp / "onig-config"
+    run_cmd(["cmake", "-S", str(src), "-B", str(build), f"-DCMAKE_C_COMPILER={CLANG}",
+             "-DBUILD_SHARED_LIBS=OFF"])
+    # Follow the same translation units as the upstream static target.
+    listed = re.search(r"set\(_SRCS ([^)]+)\)", (src / "CMakeLists.txt").read_text())
+    sources = [src / name for name in listed[1].split() if name.endswith(".c")]
+    flags = [f"-I{src / 'src'}", f"-I{build}", "-DONIG_STATIC"]
+    cases = ("test_utf8", "test_syntax", "test_options", "test_regset", "test_back",
+             "testc", "testu")
+    binaries = {case: [] for case in cases}
+    for compiler, tag in ((FCC, "fcc"), (CLANG, "clang")):
+        out = tmp / f"onig-{tag}"
+        out.mkdir()
+        options = [compiler, "-std=gnu23", *flags, *(["-w"] if compiler == CLANG else [])]
+        objects = []
+        for source in sources:
+            obj = out / f"{source.stem}.o"
+            run_cmd([*options, "-c", str(source), "-o", str(obj)])
+            objects.append(str(obj))
+        for case in cases:
+            exe = out / case
+            run_cmd([*options, str(src / f"test/{case}.c"), *objects, "-o", str(exe)])
+            binaries[case].append(exe)
+    for case in cases:
+        compare_output(binaries[case], cwd=tmp, both_streams=True)
+    print(f"PASS: Oniguruma ({len(cases)} upstream regex tests)")
+    return True
+
+
+def test_libpng(tmp):
+    src = UPSTREAM / "libpng"
+    zlib = UPSTREAM / "zlib"
+    # Upstream's prebuilt configuration is the standard static C build.
+    (tmp / "pnglibconf.h").write_bytes((src / "scripts/pnglibconf.h.prebuilt").read_bytes())
+    sources = sorted(src.glob("png*.c")) + [zlib / name for name in ZLIB_SOURCES]
+    paths = build_pair(tmp, "pngtest", sources, [f"-I{tmp}", f"-I{zlib}", "-DHAVE_UNISTD_H"],
+                       ["-lm"], timeout=300)
+    for tag, exe in zip(("fcc", "clang"), paths):
+        cwd = tmp / f"pngtest-{tag}-output"
+        cwd.mkdir()
+        (cwd / "pngtest.png").symlink_to(src / "pngtest.png")
+        output = run_cmd([str(exe)], cwd=cwd, both_streams=True)
+        result = (cwd / "pngout.png").read_bytes()
+        if tag == "fcc":
+            fcc_output, fcc_result = output, result
+        else:
+            assert output == fcc_output, "libpng pngtest output differs"
+            assert result == fcc_result, "libpng pngtest generated different image bytes"
+    print("PASS: libpng with zlib (upstream pngtest and byte-identical output PNG)")
+    return True
+
+
 def main():
     projects = {"zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite,
-                "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2}
+                "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2,
+                "zstd": test_zstd, "duktape": test_duktape, "mbedtls": test_mbedtls,
+                "oniguruma": test_oniguruma, "libpng": test_libpng}
     wanted = set(sys.argv[1:]) or set(projects)
     if unknown := wanted - projects.keys():
         sys.exit(f"Unknown projects: {', '.join(sorted(unknown))}")
-    downloads = wanted & {"cjson", "miniz", "bzip2"}
+    downloads = wanted - {"zlib", "lua", "sqlite"}
     if downloads:
         run_cmd(["sh", str(UPSTREAM.parent / "fetch.sh"), "--projects", *sorted(downloads)])
     with tempfile.TemporaryDirectory(prefix="fcc_projects_") as tmp:
