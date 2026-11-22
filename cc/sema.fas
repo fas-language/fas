@@ -226,7 +226,16 @@ fn se_ptr_compatible(a u32, b u32, assign bool) bool {
     return ty_compatible(ty_unqual(x), ty_unqual(y))
 }
 
+// Arrays and functions may decay without reading their contents, but
+// evaluating an incomplete record as a value requires its definition.
+fn se_require_value(p handle[Parser], e handle[Ast]) void fails {
+    if ty_is_record(e.ty) && !se_complete(e.ty) {
+        try pa_error(p, e.loc, c"expression uses the value of an incomplete record")
+    }
+}
+
 fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
+    try se_require_value(p, src)
     from u32 = se_decay(src.ty)
     if dest == TY_INVALID || from == TY_INVALID { return }
     if ty_is_arith(dest) && ty_is_arith(from) {

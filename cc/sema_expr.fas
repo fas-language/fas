@@ -79,6 +79,7 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
     from u32 = se_decay(a.ty)
     n handle[Ast] = pa_node(ND_CAST, t.loc, ty)
     n.a = a
+    try se_require_value(p, a)
     if from == TY_INVALID || ty_is_void(ty) { return n }
     try se_quad_conversion(p, t.loc, ty, from)
     if !ty_is_scalar(ty) || !ty_is_scalar(from) ||
@@ -568,7 +569,12 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         n.ty = x
         return n
     }
-    if k == 1 { n.ty = y; return n }
+    if k == 1 {
+        try se_require_value(p, a)
+        try se_require_value(p, b)
+        n.ty = y
+        return n
+    }
     if k == 3 || k == 4 {
         try se_scalar(p, a)
         try se_scalar(p, b)
@@ -685,6 +691,8 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
 
 fn se_conditional(p handle[Parser], t Token, cond handle[Ast], a handle[Ast], b handle[Ast]) handle[Ast] fails {
     try se_scalar(p, cond)
+    try se_require_value(p, a)
+    try se_require_value(p, b)
     x u32 = se_decay(a.ty)
     y u32 = se_decay(b.ty)
     ty u32 = TY_INVALID

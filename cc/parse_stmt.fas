@@ -424,6 +424,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
     } else {
         n.op = 0
         e handle[Ast] = try pa_expression(p, 1)
+        try se_require_value(p, e)
         n.a = e
         n.ty = e.ty
     }
