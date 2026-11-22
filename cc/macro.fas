@@ -38,6 +38,11 @@ fn hide_add(p handle[Pp], set u32, id u32) u32 {
 }
 
 fn hide_merge(p handle[Pp], a u32, b u32, intersect bool) u32 {
+    // Most substituted tokens have no previous expansion history. The
+    // empty and identical cases can reuse an immutable list directly.
+    if a == b { return a }
+    if a == 0 { return if intersect { 0 } else { b } }
+    if b == 0 { return if intersect { 0 } else { a } }
     result u32 = if intersect { 0 } else { a }
     while b != 0 {
         h Hide = vec_get[Hide](&p.hides, zext[usize](b - 1))
