@@ -71,6 +71,10 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
             }
         }
     }
+    if definition && ty_is_func(s.ty) && s.storage == SC_EXTERN && (s.flags & 1) != 0 &&
+        (pa_has_attr(p, s.attrs, c"gnu_inline") || (prior != null && pa_has_attr(p, prior.attrs, c"gnu_inline"))) {
+        s.flags |= SF_GNU_EXTERN_INLINE
+    }
     if prior != null {
         if prior.storage == SC_ENUMERATOR || s.storage == SC_ENUMERATOR ||
             (prior.storage == SC_TYPEDEF) != (s.storage == SC_TYPEDEF) ||
@@ -86,12 +90,16 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         }
         composite u32 = ty_composite(prior.ty, s.ty)
         if composite == TY_INVALID { try pa_error(p, s.loc, c"conflicting types for declaration") }
-        if definition && prior.defined { try pa_error(p, s.loc, c"redefinition") }
+        if definition && prior.defined &&
+            ((prior.flags & SF_GNU_EXTERN_INLINE) == 0 || (s.flags & SF_GNU_EXTERN_INLINE) != 0) {
+            try pa_error(p, s.loc, c"redefinition")
+        }
         prior.ty = composite
         if s.attrs != null {
             prior.attrs = pa_join_attrs(s.attrs, prior.attrs)
         }
         if definition {
+            prior.flags &= ~SF_GNU_EXTERN_INLINE
             prior.loc = s.loc
             prior.params = s.params
         }
