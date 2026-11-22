@@ -1110,8 +1110,10 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 
     if b != null && !runtime_fault && ((b.flags & NF_ICE) != 0 ||
         ((member || p.scope == p.file_scope) && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
         count u64 = try se_ice(p, b)
+        // The layout engine tracks bit offsets in u64. Reserve enough
+        // bits for each byte of an array before its type reaches layout.
         if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||
-            (ty_size(elem) != 0 && count > 0x7fffffffffffffff / ty_size(elem)) {
+            (ty_size(elem) != 0 && count > (0xffffffffffffffff / 8) / ty_size(elem)) {
             try pa_error(p, op.loc, c"invalid array bound")
         }
         return ty_array(elem, count)
