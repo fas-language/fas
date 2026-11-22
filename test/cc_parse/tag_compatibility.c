@@ -18,3 +18,11 @@ enum values { SECOND = 1, FIRST = 0 };
 enum __attribute__((packed)) compact { NEGATIVE = -1 };
 extern signed char get_compact(void);
 extern enum compact get_compact(void);
+int (*array_link)[5];
+
+void unseen_bound(int array_link, int (*different_bound)[10]) {
+    {
+        extern int (*array_link)[];
+        array_link = different_bound;
+    }
+}

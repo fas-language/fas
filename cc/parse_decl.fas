@@ -161,7 +161,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
         min = 1
         max = 0xffffffff
         string_first = true
-    } else if feature_in(c" alloc_align cleanup regparm ", name) {
+    } else if feature_in(c" alloc_align assume cleanup regparm ", name) {
         min = 1
         max = 1
     } else if feature_in(c" alloc_size assume_aligned patchable_function_entry ", name) {
@@ -173,17 +173,16 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     } else { return }
     count u32 = 0
     depth u32 = 0
+    first_end usize = a.args.n
     arg_empty bool = true
     for i usize in 0..a.args.n {
         t Token = a.args.p[Token, i]
         if depth == 0 && pa_is(p, t, c",") {
             if arg_empty { try pa_error(p, t.loc, c"empty attribute argument") }
+            if count == 0 { first_end = i }
             count += 1
             arg_empty = true
             continue
-        }
-        if string_first && count == 0 && depth == 0 && t.kind != TK_STR {
-            try pa_error(p, t.loc, c"attribute argument must be a string literal")
         }
         if pa_delimiter(p, t) != null { depth += 1 }
         else if pa_is(p, t, c")") || pa_is(p, t, c"]") || pa_is(p, t, c"}") { depth -= 1 }
@@ -192,6 +191,20 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     if !arg_empty { count += 1 }
     else if count != 0 { try pa_error(p, a.loc, c"empty attribute argument") }
     if count < min || count > max { try pa_error(p, a.loc, c"wrong number of attribute arguments") }
+    if string_first {
+        start usize = 0
+        while start + 1 < first_end && pa_is(p, a.args.p[Token, start], c"(") &&
+            pa_is(p, a.args.p[Token, first_end - 1], c")") {
+            start += 1
+            first_end -= 1
+        }
+        if start == first_end { try pa_error(p, a.loc, c"attribute argument must be a string literal") }
+        for i usize in start..first_end {
+            if a.args.p[Token, i].kind != TK_STR {
+                try pa_error(p, a.args.p[Token, i].loc, c"attribute argument must be a string literal")
+            }
+        }
+    }
 }
 
 fn pa_attr_integer(p handle[Parser], a handle[Attr], fallback u32) u32 fails {
@@ -262,6 +275,9 @@ fn pa_type_attrs(p handle[Parser], ty u32, a handle[Attr]) u32 fails {
         }
         if pa_attr_name(p, a, c"mode") && a.args.n == 1 && ty_is_integer(ty) {
             ty = pa_mode_type(p, ty, a)
+        }
+        if ty_kind(ty) == TYK_UNION && pa_attr_name(p, a, c"transparent_union") {
+            ty = ty_qual(ty, Q_TRANSPARENT_UNION)
         }
         a = a.next
     }
@@ -585,6 +601,9 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
             }
         }
     } else { ty_record_complete(ty, fields.p, trunc[u32](fields.n), packed, alignment, pack) }
+    if ty_kind(ty) == TYK_UNION && pa_has_attr(p, attrs, c"transparent_union") {
+        old.transparent_union = true
+    }
 }
 
 fn pa_tag_spec(p handle[Parser], t Token) u32 fails {
@@ -827,7 +846,11 @@ fn pa_params(p handle[Parser], op handle[DeclOp]) void fails {
             adjusted = ty_qual(ty_ptr(n.elem), quals)
         }
         if n.kind == TYK_FUNC { adjusted = ty_ptr(t) }
-        if ty_is_void(t) { try pa_error(p, pt.loc, c"parameter cannot have void type") }
+        if ty_is_void(t) {
+            if tail == null && d.name == 0 && spec.storage == SC_NONE && ty_quals(t) == 0 &&
+                (try pa_accept(p, c")")) { return }
+            try pa_error(p, pt.loc, c"parameter cannot have void type")
+        }
         formal handle[Param] = pa_alloc[Param]()
         formal.name = d.name
         formal.loc = pt.loc
@@ -940,7 +963,9 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
         args Vec[u32] = {}
         formal handle[Param] = op.params
         while formal != null {
-            vec_push[u32](&args, ty_unqual(formal.ty))
+            arg u32 = ty_unqual(formal.ty)
+            if ty_has_transparent_attr(formal.ty) { arg = ty_qual(arg, Q_TRANSPARENT_UNION) }
+            vec_push[u32](&args, arg)
             formal = formal.next
         }
         return ty_func(elem, args.p, trunc[u32](args.n), op.variadic)
@@ -948,7 +973,10 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
     if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
     b handle[Ast] = op.bound
     if b == null && !op.star { return ty_array_incomplete(elem) }
-    if b != null && ((b.flags & NF_ICE) != 0 || (pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
+    // GNU accepts foldable bounds in file-scope array declarations. In a
+    // block the same non-ICE bound still forms a variable-length array.
+    if b != null && ((b.flags & NF_ICE) != 0 ||
+        (p.scope == p.file_scope && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
         count u64 = try se_ice(p, b)
         if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||
             (ty_size(elem) != 0 && count > 0x7fffffffffffffff / ty_size(elem)) {

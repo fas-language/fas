@@ -17,7 +17,7 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     if constant && ty_is_record(e.ty) {
         // A constexpr record carries its initializer, so copying the
         // record into another static object is also a constant initializer.
-        folded handle[Ast] = se_const_lvalue(e, null, false)
+        folded handle[Ast] = se_const_lvalue(p, e, null, false)
         if folded != null { e = folded }
     }
     out.tree = e
@@ -73,7 +73,48 @@ fn se_init_elem(ty u32, index u64) u32 {
 // overrides the corresponding part of an earlier initializer.
 struct ConstPath { index u64, rest handle[ConstPath] }
 
-fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {
+// Decode bytes only when folding reads one from a narrow string. Many
+// strings are never read by the front end, so retain their token spellings.
+fn se_string_byte(p handle[Parser], n handle[Ast], index u64, elem u32) handle[Ast] {
+    if ty_size(elem) != 1 { return null }
+    piece handle[Ast] = n.a
+    if piece == null {
+        // Predefined function names use an unquoted spelling.
+        s Bytes = cc_name(p.names, n.op)
+        return se_int(n.loc, elem, if index < s.n { zext[u64](s.p[u8, index]) } else { 0 })
+    }
+    encoded Buf = {}
+    defer { buf_free(&encoded) }
+    while piece != null {
+        s Bytes = cc_name(p.names, piece.op)
+        i usize = if s.p[u8] == 34 { 1 } else { 3 }
+        while i + 1 < s.n {
+            ch u8 = s.p[u8, i]
+            i += 1
+            if ch == 92 {
+                kind u8 = s.p[u8, i]
+                e Escape = expr_escape(p.names, bytes_from(s, i), piece.loc) catch { return null }
+                i += e.width
+                if kind == 117 || kind == 85 {
+                    encoded.n = 0
+                    utf8_append(&encoded, e.cp)
+                    if index < encoded.n { return se_int(n.loc, elem, zext[u64](encoded.p[u8, index])) }
+                    index -= encoded.n
+                    continue
+                }
+                ch = trunc[u8](e.cp)
+            }
+            if index == 0 { return se_int(n.loc, elem, zext[u64](ch)) }
+            index -= 1
+        }
+        piece = piece.next
+    }
+    // The terminator and any remaining elements of a wider destination
+    // array are initialized to zero.
+    return se_int(n.loc, elem, 0)
+}
+
+fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {
     if path == null {
         if init != null { return init }
         if ty_is_integer(ty) { return se_int(0, ty, 0) }
@@ -86,9 +127,12 @@ fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] 
     }
     if path.index >= se_init_count(ty) { return null }
     elem u32 = se_init_elem(ty, path.index)
+    if init != null && init.kind == ND_STRING && path.rest == null && ty_is_array(ty) {
+        return se_string_byte(p, init, path.index, elem)
+    }
     union_type bool = ty_kind(ty) == TYK_UNION
     result handle[Ast] = if !union_type || path.index == se_init_next(ty, 0) {
-        se_const_value(elem, null, path.rest)
+        se_const_value(p, elem, null, path.rest)
     } else { null }
     if init == null { return result }
     if init.kind != ND_INIT { return null }
@@ -96,7 +140,7 @@ fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] 
     while item != null {
         designator handle[Ast] = item.b
         if designator == null {
-            if item.value == path.index { result = se_const_value(elem, item.a, path.rest) }
+            if item.value == path.index { result = se_const_value(p, elem, item.a, path.rest) }
             else if union_type { result = null }
         } else {
             query handle[ConstPath] = path
@@ -116,7 +160,7 @@ fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] 
                 query = query.rest
                 designator = designator.next
             }
-            if matched { result = se_const_value(target, item.a, query) }
+            if matched { result = se_const_value(p, target, item.a, query) }
             else if union_type && item.value != path.index { result = null }
         }
         item = item.next
@@ -124,39 +168,43 @@ fn se_const_value(ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] 
     return result
 }
 
-fn se_const_lvalue(n handle[Ast], path handle[ConstPath], gnu bool) handle[Ast] {
+fn se_const_lvalue(p handle[Parser], n handle[Ast], path handle[ConstPath], gnu bool) handle[Ast] {
     if n.kind == ND_NAME {
         s handle[Symbol] = n.decl
         if s != null && s.value != null && (s.storage == SC_CONSTEXPR || gnu) {
-            return se_const_value(s.ty, handle_from_addr(s.value), path)
+            return se_const_value(p, s.ty, handle_from_addr(s.value), path)
         }
     } else if n.kind == ND_COMPOUND && n.op == zext[u32](SC_CONSTEXPR) {
-        return se_const_value(n.ty, n.a, path)
+        return se_const_value(p, n.ty, n.a, path)
+    } else if n.kind == ND_STRING && gnu {
+        return se_const_value(p, n.ty, n, path)
     } else if n.kind == ND_MEMBER {
         base handle[Ast] = n.a
         if !ty_is_record(base.ty) { return null }
         r handle[RecordDef] = ty_record(ty_node(ty_unqual(base.ty)).aux1)
         if n.op < r.fields_start || n.op - r.fields_start >= r.fields_len { return null }
         index ConstPath = {zext[u64](n.op - r.fields_start), path}
-        return se_const_lvalue(base, &index, gnu)
+        return se_const_lvalue(p, base, &index, gnu)
     } else if n.kind == ND_SUBSCRIPT {
         base handle[Ast] = n.a
         subscript handle[Ast] = n.b
         if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || subscript.wide != null { return null }
         index ConstPath = {subscript.value, path}
-        return se_const_lvalue(base, &index, gnu)
+        return se_const_lvalue(p, base, &index, gnu)
     }
     return null
 }
 
 fn se_const_load(p handle[Parser], n handle[Ast]) void {
     if !ty_is_scalar(n.ty) { return }
-    value handle[Ast] = se_const_lvalue(n, null, false)
+    value handle[Ast] = se_const_lvalue(p, n, null, false)
     if value != null { se_cast_constant(n, value); return }
     // A GNU constant load may inspect an initialized const object. Keep it
     // distinct from a constexpr load so strict contexts retain ICE checks.
-    if !pa_is_gnu(p) || (ty_quals(n.ty) & (Q_CONST | Q_VOLATILE | Q_ATOMIC)) != Q_CONST { return }
-    value = se_const_lvalue(n, null, true)
+    base handle[Ast] = n.a
+    literal bool = n.kind == ND_SUBSCRIPT && base.kind == ND_STRING
+    if !pa_is_gnu(p) || (!literal && (ty_quals(n.ty) & (Q_CONST | Q_VOLATILE | Q_ATOMIC)) != Q_CONST) { return }
+    value = se_const_lvalue(p, n, null, true)
     if value != null && (value.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
         se_cast_constant(n, value)
         if (n.flags & NF_ICE) != 0 { n.flags = (n.flags & ~NF_ICE) | NF_FOLD }
@@ -232,6 +280,7 @@ struct Designation {
 fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
     list AstList = {}
     colon bool = false
+    plain_subscript bool = false
     while true {
         t Token = try pa_peek(p)
         idx u64 = 0
@@ -239,6 +288,7 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
         a handle[Ast] = null
         b handle[Ast] = null
         if try pa_accept(p, c"[") {
+            plain_subscript = list.first == null
             if !ty_is_array(ty) { try pa_error(p, t.loc, c"array designator on a non-array initializer") }
             next_ty = ty_node(ty_unqual(ty)).elem
             a = try pa_expression(p, 3)
@@ -253,6 +303,7 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
             if idx >= se_init_count(ty) { try pa_error(p, t.loc, c"array designator index out of bounds") }
             try pa_expect(p, c"]")
         } else if (try pa_at(p, c".")) || (pa_is_gnu(p) && t.kind == TK_IDENT && (try pa_at_second(p, c":"))) {
+            plain_subscript = false
             old bool = !pa_is(p, t, c".")
             if !old { try pa_take(p) }
             name u32 = try pa_ident(p, try pa_take(p))
@@ -287,7 +338,8 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
     }
     d.ty = ty
     d.first = list.first
-    if d.first != null && !colon { try pa_expect(p, c"=") }
+    if d.first != null && !colon && !(pa_is_gnu(p) && plain_subscript) { try pa_expect(p, c"=") }
+    else if plain_subscript { try pa_accept(p, c"=") }
 }
 
 fn pa_list_more(p handle[Parser]) bool fails {

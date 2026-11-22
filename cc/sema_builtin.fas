@@ -23,6 +23,21 @@ fn se_builtin_checked(name Bytes) bool {
         bytes_eq_c(name, c"__builtin_ckd_mul")
 }
 
+// GCC's classification values, with Clang's bool result. The caller
+// performs the ordinary array and function conversions before classifying.
+fn se_builtin_type_class(ty u32) u64 {
+    if ty_is_void(ty) { return 0 }
+    if ty_is_bool(ty) { return 4 }
+    if ty_is_integer(ty) { return 1 }
+    if ty_is_ptr(ty) { return 5 }
+    if ty_is_real_float(ty) { return 8 }
+    if ty_is_complex(ty) { return 9 }
+    if ty_kind(ty) == TYK_STRUCT { return 12 }
+    if ty_kind(ty) == TYK_UNION { return 13 }
+    if ty_is_vector(ty) { return 19 }
+    return ~0
+}
+
 fn se_checked_integer(ty u32) bool {
     return ty_is_integer(ty) && ty_unqual(ty) != TY_CHAR && !ty_is_bool(ty) &&
         !ty_is_enum(ty) && !ty_is_bitint(ty)

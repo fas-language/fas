@@ -1,6 +1,14 @@
 #include <stdarg.h>
 #include <stdckdint.h>
 
+typedef void no_parameters;
+void declaration(no_parameters);
+void declaration(void);
+
+static int array[2];
+static_assert(__builtin_classify_type(array) == 5);
+static_assert(__builtin_classify_type((float _Complex)1) == 9);
+
 int sum_and_check(int count, ...) {
     va_list ap, saved;
     va_start(ap, count);

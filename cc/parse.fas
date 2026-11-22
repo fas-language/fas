@@ -84,6 +84,7 @@ struct Symbol {
     tentative bool
     value addr // Ast
     params addr // Param list
+    link_symbol handle[Symbol] // symbol identity for a block declaration with no visible linked declaration
     attrs handle[Attr]
     asm_name u32
     cleanup addr // Symbol for a GNU cleanup function

@@ -32,6 +32,38 @@ fn se_set_fp(a handle[Ast], v f64) void {
     a.flags |= NF_FLOAT_CONST | NF_STATIC
 }
 
+fn se_make_union(ty u32, member u64, elem u32, value handle[Ast]) handle[Ast] {
+    xs AstList = {}
+    pa_add_init(&xs, se_convert(elem, value), null, member)
+    init handle[Ast] = pa_node(ND_INIT, value.loc, ty)
+    init.a = xs.first
+    init.flags = value.flags & NF_STATIC
+    n handle[Ast] = pa_node(ND_COMPOUND, value.loc, ty)
+    n.a = init
+    n.flags = init.flags
+    return n
+}
+
+// Match exact types first, followed by ordinary pointer compatibility.
+// A null pointer or an unqualified void pointer can select any pointer
+// member when no member provides a more specific match.
+fn se_transparent_arg(ty u32, a handle[Ast]) handle[Ast] {
+    if ty_transparent_first(ty) == TY_INVALID || ty_compatible(ty_unqual(ty), ty_unqual(a.ty)) { return a }
+    r handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
+    from u32 = se_decay(a.ty)
+    fallback u32 = r.fields_len
+    for i u32 in 0..r.fields_len {
+        f handle[FieldDef] = ty_field(r.fields_start + i)
+        if ty_compatible(ty_unqual(f.ty), ty_unqual(from)) {
+            return se_make_union(ty, zext[u64](i), f.ty, a)
+        }
+        if fallback == r.fields_len && ty_is_ptr(f.ty) &&
+            (se_null(a) || (ty_is_ptr(from) && se_ptr_compatible(f.ty, from, true))) { fallback = i }
+    }
+    if fallback < r.fields_len { return se_make_union(ty, zext[u64](fallback), ty_field(r.fields_start + fallback).ty, a) }
+    return a
+}
+
 fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
     from u32 = se_decay(a.ty)
     n handle[Ast] = pa_node(ND_CAST, t.loc, ty)
@@ -53,15 +85,7 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
                     if f.name_id == 0 || !ty_compatible(ty_unqual(f.ty), ty_unqual(from)) { continue }
                     // A GNU cast to a union constructs a value with the
                     // first compatible named member as its active member.
-                    xs AstList = {}
-                    pa_add_init(&xs, se_convert(f.ty, a), null, zext[u64](i))
-                    init handle[Ast] = pa_node(ND_INIT, t.loc, ty)
-                    init.a = xs.first
-                    init.flags = a.flags & NF_STATIC
-                    n.kind = ND_COMPOUND
-                    n.a = init
-                    n.flags = init.flags
-                    return n
+                    return se_make_union(ty, zext[u64](i), f.ty, a)
                 }
             }
         }
@@ -329,10 +353,32 @@ fn se_pointer_math(p handle[Parser], t Token, ty u32) void fails {
 // that can be settled independently of placement by the linker.
 struct AddressValue { symbol handle[Symbol], offset i64 }
 
+fn se_address_add(out handle[AddressValue], index handle[Ast], size u64, sub bool) bool {
+    if (index.flags & NF_INT_VALUE) == 0 || (index.flags & NF_OVERFLOW) != 0 ||
+        index.wide != null || size == 0 { return false }
+    negative bool = !ty_is_unsigned(index.ty) && bitcast[i64](index.value) < 0
+    mag u64 = if negative { 0 - index.value } else { index.value }
+    if mag > 0x7fffffffffffffff / size { return false }
+    delta u64 = mag * size
+    offset u64 = bitcast[u64](out.offset)
+    if negative != sub {
+        if delta > offset { return false }
+        offset -= delta
+    } else {
+        if delta > 0x7fffffffffffffff - offset { return false }
+        offset += delta
+    }
+    symbol handle[Symbol] = out.symbol
+    if symbol == null || offset > ty_size(symbol.ty) { return false }
+    out.offset = bitcast[i64](offset)
+    return true
+}
+
 fn se_address_object(p handle[Parser], a handle[Ast], out handle[AddressValue]) bool {
     base handle[Ast] = a.a
     if a.kind == ND_NAME {
         s handle[Symbol] = a.decl
+        if s != null && s.link_symbol != null { s = s.link_symbol }
         if s == null || ty_is_func(s.ty) || s.asm_name != 0 || pa_has_attr(p, s.attrs, c"weak") ||
             pa_has_attr(p, s.attrs, c"alias") || pa_has_attr(p, s.attrs, c"weakref") { return false }
         out.symbol = s
@@ -350,6 +396,11 @@ fn se_address_object(p handle[Parser], a handle[Ast], out handle[AddressValue]) 
     }
     if a.kind == ND_UNARY && bytes_eq_c(cc_name(p.names, a.op), c"*") {
         return se_address_value(p, base, out)
+    }
+    if a.kind == ND_SUBSCRIPT {
+        index handle[Ast] = a.b
+        if ty_is_integer(base.ty) { base = a.b; index = a.a }
+        return se_address_value(p, base, out) && se_address_add(out, index, ty_size(a.ty), false)
     }
     return false
 }
@@ -375,38 +426,30 @@ fn se_address_value(p handle[Parser], a handle[Ast], out handle[AddressValue]) b
     index handle[Ast] = a.b
     if !sub && ty_is_integer(base.ty) { base = a.b; index = a.a }
     ptr u32 = se_decay(base.ty)
-    if !ty_is_ptr(ptr) || (index.flags & NF_INT_VALUE) == 0 ||
-        (index.flags & NF_OVERFLOW) != 0 || index.wide != null { return false }
-    size u64 = ty_size(ty_node(ty_unqual(ptr)).elem)
-    delta i64 = bitcast[i64](index.value)
-    // Bound the scalar offset to the addressable object and make the
-    // arithmetic well defined even for an out-of-range source constant.
-    if size == 0 || delta < -1 || delta > 1 || (ty_is_unsigned(index.ty) && index.value > 1) ||
-        !se_address_value(p, base, out) { return false }
-    if sub { delta = -delta }
-    if delta == 0 { return true }
-    if size > 0x7fffffffffffffff { return false }
-    if delta == 1 {
-        if size > 0x7fffffffffffffff - bitcast[u64](out.offset) { return false }
-        out.offset += bitcast[i64](size)
-    } else {
-        if size > bitcast[u64](out.offset) { return false }
-        out.offset -= bitcast[i64](size)
-    }
-    symbol handle[Symbol] = out.symbol
-    if symbol == null || bitcast[u64](out.offset) > ty_size(symbol.ty) { return false }
-    return true
+    if !ty_is_ptr(ptr) || !se_address_value(p, base, out) { return false }
+    elem u32 = ty_node(ty_unqual(ptr)).elem
+    stride u64 = if ty_is_void(elem) || ty_is_func(elem) { 1 } else { ty_size(elem) }
+    return se_address_add(out, index, stride, sub)
 }
 
 fn se_fold_pointer(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast], ty u32, k u8) void {
     if !pa_is_gnu(p) || ((a.flags & b.flags) & NF_STATIC) == 0 { return }
+    if k == 11 && a.kind == ND_UNARY && b.kind == ND_UNARY &&
+        bytes_eq_c(cc_name(p.names, a.op), c"&&") && bytes_eq_c(cc_name(p.names, b.op), c"&&") {
+        // Differences between local labels remain symbolic until code
+        // placement, except when both operands name the same label.
+        n.flags |= NF_STATIC
+        if a.extra == b.extra { n.flags |= NF_FOLD }
+        return
+    }
     x AddressValue = {}
     y AddressValue = {}
     if !se_address_value(p, a, &x) || !se_address_value(p, b, &y) { return }
     equal bool = x.symbol == y.symbol
     if !equal && (k != 8 || x.offset != 0 || y.offset != 0) { return }
     if k == 11 {
-        stride u64 = ty_size(ty_node(ty_unqual(ty)).elem)
+        elem u32 = ty_node(ty_unqual(ty)).elem
+        stride u64 = if ty_is_void(elem) || ty_is_func(elem) { 1 } else { ty_size(elem) }
         if stride == 0 || stride > 0x7fffffffffffffff { return }
         delta i64 = x.offset - y.offset
         step i64 = bitcast[i64](stride)

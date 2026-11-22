@@ -372,7 +372,14 @@ fn pa_builtin_call(p handle[Parser], t Token) handle[Ast] fails {
         try pa_expect(p, c"(")
         a handle[Ast] = try pa_expression(p, 2)
         try pa_expect(p, c")")
-        return se_int(t.loc, TY_INT, if (a.flags & (NF_ICE | NF_FLOAT_CONST)) != 0 || a.kind == ND_STRING { 1 } else { 0 })
+        folded bool = (a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 && (a.flags & NF_OVERFLOW) == 0
+        return se_int(t.loc, TY_INT, if folded || a.kind == ND_STRING { 1 } else { 0 })
+    }
+    if pa_is(p, t, c"__builtin_classify_type") {
+        try pa_expect(p, c"(")
+        a handle[Ast] = try pa_expression(p, 2)
+        try pa_expect(p, c")")
+        return se_int(t.loc, TY_INT, se_builtin_type_class(se_decay(a.ty)))
     }
     n handle[Ast] = pa_node(ND_NAME, t.loc, TY_INVALID)
     n.op = t.payload
@@ -539,6 +546,7 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
             ty u32
             if i < fixed {
                 ty = tc.fn_params.p[u32, zext[usize](start + i)]
+                x = se_transparent_arg(ty, x)
                 try se_conversion(p, ty, x)
             } else {
                 ty = if se_decay(x.ty) == TY_FLOAT { TY_DOUBLE } else { se_promote_expr(x) }
@@ -595,12 +603,16 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
         s handle[Symbol] = pa_lookup(p, name)
         if s == null {
             word Bytes = cc_spelling(p.names, t)
-            if p.function != null && (bytes_eq_c(word, c"__func__") || bytes_eq_c(word, c"__FUNCTION__") ||
+            if (p.function != null || pa_is_gnu(p)) && (bytes_eq_c(word, c"__func__") || bytes_eq_c(word, c"__FUNCTION__") ||
                 bytes_eq_c(word, c"__PRETTY_FUNCTION__")) {
                 fn_sym handle[Symbol] = p.function
-                fn_name Bytes = cc_name(p.names, fn_sym.name)
+                fn_name Bytes
+                if fn_sym == null {
+                    cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"predefined identifier is only valid inside a function"))
+                    fn_name = if bytes_eq_c(word, c"__PRETTY_FUNCTION__") { bytes_c(c"top level") } else { bytes_empty() }
+                } else { fn_name = cc_name(p.names, fn_sym.name) }
                 n handle[Ast] = pa_node(ND_STRING, t.loc, ty_array(ty_qual(TY_CHAR, Q_CONST), fn_name.n + 1))
-                n.op = fn_sym.name
+                n.op = cc_intern(p.names, fn_name)
                 n.value = fn_name.n + 1
                 n.flags = NF_LVALUE | NF_STATIC | NF_ADDR
                 return n
@@ -750,6 +762,7 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
         n handle[Ast] = pa_node(ND_UNARY, t.loc, ty_ptr(TY_VOID))
         n.op = t.payload
         n.value = zext[u64](l.name)
+        n.extra = handle_addr(l)
         n.flags = NF_STATIC
         return n
     }

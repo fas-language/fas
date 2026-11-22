@@ -58,6 +58,17 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         if prior == null && s.linkage == 2 {
             previous addr = map_get(&p.external, s.name) catch null
             prior = handle_from_addr(previous)
+            // A linked declaration in a different scope still has to be
+            // compatible, but it only supplies the visible type when the
+            // previous declaration is in scope.
+            if prior != null && p.scope != p.file_scope {
+                if prior.thread_local != s.thread_local || !ty_compatible(prior.ty, s.ty) {
+                    try pa_error(p, s.loc, c"conflicting types or storage duration for external declaration")
+                }
+                s.link_symbol = prior
+                se_bind(p, s)
+                return s
+            }
         }
     }
     if prior != null {
