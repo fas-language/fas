@@ -315,6 +315,9 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         }
         return false
     }
+    if (n.kind == ND_SUBSCRIPT || n.kind == ND_MEMBER) && ty_is_array(n.ty) {
+        return gen_eval_lvalue_addr(n, out)
+    }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
         if bytes_eq_c(op, c"&") {

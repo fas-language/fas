@@ -119,9 +119,27 @@ fn gen_local_decl(n handle[Ast]) void fails {
         return
     }
 
-    // VLA local variable
+    // VLA local variable (with per-VLA saved stack pointer so backward `goto` deallocates previous iteration!)
     if gen_type_is_vla(s.ty) {
+        sp_slot u32 = gen_alloca_entry(8, 8)
+        // Initialize sp_slot = null in entry block so first entry doesn't restore
+        eb handle[Buf] = gen_entry_buf()
+        buf_str(eb, c"  store ptr null, ")
+        gen_emit_val(eb, sp_slot)
+        buf_str(eb, c", align 8\n")
+        // If sp_slot != null (re-entered via backward goto), restore stack before re-allocating!
+        prev_sp u32 = gen_load_raw(c"ptr", sp_slot, 8, false)
+        is_nonnull u32 = gen_icmp(c"ne", prev_sp, gen_const_zero(TY_NULLPTR))
+        rest_blk u32 = gen_new_block()
+        alloc_blk u32 = gen_new_block()
+        gen_term_br(is_nonnull, rest_blk, alloc_blk)
+        gen_switch_block(rest_blk)
+        gen_stackrestore(prev_sp)
+        gen_term_jump(alloc_blk)
+        gen_switch_block(alloc_blk)
+
         sp u32 = gen_stacksave()
+        gen_store_ty(sp, sp_slot, 8, false, false)
         vs handle[VlaScope] = vec_add(&gc.vla_stack)
         vs.sp_v = sp
         vs.scope_depth = gc.scope_depth

@@ -336,6 +336,29 @@ fn gen_convert(val_v u32, from_ty u32, to_ty u32) u32 {
     return val_v
 }
 
+fn gen_splat(val_v u32, from_ty u32, vec_ty u32) u32 {
+    tu u32 = ty_unqual(vec_ty)
+    et u32 = ty_node(tu).elem
+    ev u32 = gen_convert(val_v, from_ty, et)
+    v u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, v)
+    buf_str(b, c" = splat ")
+    gen_emit_fir_ty(b, tu)
+    buf_u8(b, 32)
+    gen_emit_val(b, ev)
+    buf_u8(b, 10)
+    return v
+}
+
+fn gen_convert_for_binop(val_v u32, from_ty u32, eval_ty u32) u32 {
+    if ty_is_vector(eval_ty) && !ty_is_vector(from_ty) {
+        return gen_splat(val_v, from_ty, eval_ty)
+    }
+    return gen_convert(val_v, from_ty, eval_ty)
+}
+
 // ---------- Complex Arithmetic ----------
 
 fn gen_complex_binop(op Bytes, tid u32, lhs_p u32, rhs_p u32) u32 {
@@ -777,6 +800,35 @@ fn gen_unary(n handle[Ast]) u32 fails {
     if bytes_eq_c(op, c"++") || bytes_eq_c(op, c"--") {
         is_post bool = n.b != null
         is_inc bool = bytes_eq_c(op, c"++")
+        t u32 = ty_unqual(n.a.ty)
+        if ty_is_complex(t) {
+            ptr_v u32 = try gen_lvalue(n.a)
+            et u32 = ty_node(t).elem
+            esz u64 = ty_size(et)
+            eal u64 = ty_align(et)
+            old_re u32 = gen_load_ty(et, ptr_v, eal, gen_is_volatile(n.a.ty), false)
+            old_im u32 = gen_load_ty(et, gen_ptradd_const(ptr_v, bitcast[i64](esz)), eal, gen_is_volatile(n.a.ty), false)
+            old_slot u32 = 0
+            if is_post {
+                old_slot = gen_alloca_entry(2 * esz, eal)
+                gen_store_ty(old_re, old_slot, eal, false, false)
+                gen_store_ty(old_im, gen_ptradd_const(old_slot, bitcast[i64](esz)), eal, false, false)
+            }
+            new_re u32 = 0
+            if ty_is_real_float(et) {
+                one u32 = gen_const_float(et, 0x3ff0000000000000)
+                new_re = gen_binop(if is_inc { c"fadd" } else { c"fsub" }, et, old_re, one)
+            } else {
+                one u32 = gen_const_int(et, 1)
+                new_re = gen_binop(if is_inc { c"add" } else { c"sub" }, et, old_re, one)
+            }
+            gen_store_ty(new_re, ptr_v, eal, gen_is_volatile(n.a.ty), false)
+            if is_post { return old_slot }
+            new_slot u32 = gen_alloca_entry(2 * esz, eal)
+            gen_store_ty(new_re, new_slot, eal, false, false)
+            gen_store_ty(old_im, gen_ptradd_const(new_slot, bitcast[i64](esz)), eal, false, false)
+            return new_slot
+        }
         old_v u32 = 0
         new_v u32 = 0
         is_bf bool = n.a.kind == ND_MEMBER && (n.a.flags & NF_BITFIELD) != 0
@@ -788,7 +840,6 @@ fn gen_unary(n handle[Ast]) u32 fails {
             ptr_v = try gen_lvalue(n.a)
             old_v = gen_load_ty(n.a.ty, ptr_v, ty_align(n.a.ty), gen_is_volatile(n.a.ty), gen_is_atomic(n.a.ty))
         }
-        t u32 = ty_unqual(n.a.ty)
         if ty_is_bool(t) {
             new_v = if is_inc { gen_const_i1(true) } else { gen_binop_raw(c"xor", c"i1", old_v, gen_const_i1(true)) }
         } else if ty_is_ptr(t) {
@@ -999,8 +1050,8 @@ fn gen_binary(n handle[Ast]) u32 fails {
 
     // Standard arithmetic / bitwise / shift
     eval_ty u32 = if n.operand_ty != TY_INVALID { n.operand_ty } else { n.ty }
-    lv u32 = gen_convert(try gen_rvalue(n.a), n.a.ty, eval_ty)
-    rv u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, eval_ty)
+    lv u32 = gen_convert_for_binop(try gen_rvalue(n.a), n.a.ty, eval_ty)
+    rv u32 = gen_convert_for_binop(try gen_rvalue(n.b), n.b.ty, eval_ty)
     res u32 = try gen_arith_op(op, eval_ty, lv, rv)
     return gen_convert(res, eval_ty, n.ty)
 }
@@ -1571,6 +1622,20 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         b9 u32 = gen_load_raw(c"i8", gen_ptradd_const(slot, 9), 1, false)
         s u32 = gen_binop_raw(c"lshr", c"i8", b9, gen_const_i8(7))
         return gen_convert(s, TY_UCHAR, n.ty)
+    }
+    if bytes_eq_c(bname, c"__builtin_creal") || bytes_eq_c(bname, c"__builtin_crealf") || bytes_eq_c(bname, c"__builtin_creall") {
+        cv u32 = try gen_rvalue(a0)
+        et u32 = if ty_is_complex(a0.ty) { ty_node(ty_unqual(a0.ty)).elem } else { a0.ty }
+        n.ty = et
+        if ty_is_complex(a0.ty) { return gen_load_ty(et, cv, ty_align(et), false, false) }
+        return cv
+    }
+    if bytes_eq_c(bname, c"__builtin_cimag") || bytes_eq_c(bname, c"__builtin_cimagf") || bytes_eq_c(bname, c"__builtin_cimagl") {
+        cv u32 = try gen_rvalue(a0)
+        et u32 = if ty_is_complex(a0.ty) { ty_node(ty_unqual(a0.ty)).elem } else { a0.ty }
+        n.ty = et
+        if ty_is_complex(a0.ty) { return gen_load_ty(et, gen_ptradd_const(cv, bitcast[i64](ty_size(et))), ty_align(et), false, false) }
+        return gen_const_zero(et)
     }
     if bytes_eq_c(bname, c"__builtin_conj") || bytes_eq_c(bname, c"__builtin_conjf") || bytes_eq_c(bname, c"__builtin_conjl") {
         cty u32 = if ty_is_complex(n.ty) { n.ty } else { a0.ty }
