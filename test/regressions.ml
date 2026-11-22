@@ -13231,30 +13231,23 @@ let () =
     "`P[0]` is not an address constant; write `&G`, `&G.field`, `&G[k]`, `c\"...\"` or \
      `null`"
     None;
-  semantic_pin "address-constants-read-address-constant"
-    "var G i32\nconst A addr = &G\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
-  semantic_pin "address-constants-read-address-constant-var"
-    "var G i32\nconst A addr = &G\nvar B addr = A\n" 3 14 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
-  semantic_pin "address-constants-read-address-field"
-    "struct Point { x i32 y i32 }\nvar G Point\nconst A addr = &G.y\nconst B addr = A\n"
-    4 16 1 "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G.y`");
-  semantic_pin "address-constants-read-address-element"
-    "var G arr[2,i32]\nconst A addr = &G[1]\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G[1]`");
-  semantic_pin "address-constants-read-address-function"
-    "fn f() void { return }\nconst A addr = &f\nconst B addr = A\n" 3 16 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&f`");
-  semantic_pin "address-constants-read-address-table-element"
-    "var G i32\nconst A addr = &G\nconst Q arr[1,addr] = {A}\n" 3 24 1
-    "`A` is an address constant; another constant initializer cannot read it"
-    (Some "write `&G`");
+  semantic_accept "address-constants-read-address-constant"
+    "var G i32\nconst A addr = &G\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-constant-var"
+    "var G i32\nconst A addr = &G\nvar B addr = A\n";
+  semantic_accept "address-constants-read-address-field"
+    "struct Point { x i32 y i32 }\nvar G Point\nconst A addr = &G.y\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-element"
+    "var G arr[2,i32]\nconst A addr = &G[1]\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-function"
+    "fn f() void { return }\nconst A addr = &f\nconst B addr = A\n";
+  semantic_accept "address-constants-read-address-table-element"
+    "var G i32\nconst A addr = &G\nconst Q arr[1,addr] = {A}\n";
+  semantic_accept "address-constants-read-cstring-in-table"
+    "const NAME addr = c\"text\"\nconst TABLE arr[1, addr] = {NAME}\n";
+  semantic_error "address-constants-cyclic"
+    "cyclic constant dependency involving `A`"
+    "const A addr = B\nconst B addr = A\n";
   semantic_pin "address-constants-read-address-arithmetic"
     "var G i32\nconst A addr = &G\nconst B addr = A + 1\n" 3 18 1
     "address constants can only be stored in `addr` or `handle[T]` slots" None;
