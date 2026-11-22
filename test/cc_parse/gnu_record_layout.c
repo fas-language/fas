@@ -37,3 +37,6 @@ struct HalfPacked { char c; int i; };
 struct Unpacked { char c; int i; };
 static_assert(__builtin_offsetof(struct HalfPacked, i) == 2);
 static_assert(__builtin_offsetof(struct Unpacked, i) == 4);
+
+// A GNU-foldable address calculation can supply a fixed member bound.
+static_assert(sizeof(struct { char a[((unsigned long)(char *)3) + 1]; }) == 4);

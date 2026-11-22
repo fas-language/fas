@@ -562,7 +562,7 @@ fn pa_record_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fa
                 attr = pa_join_attrs(try pa_attributes(p), attr)
                 aligned = try pa_attr_align(p, attr, aligned)
             }
-            ft u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, attr))
+            ft u32 = try pa_apply(p, d.first, try pa_type_attrs(p, spec.ty, attr), true)
             if bit && (!ty_is_integer(ft) || width > zext[u64](ty_int_bits(ft)) || (width == 0 && d.name != 0)) {
                 try pa_error(p, t.loc, c"invalid bit-field width or type")
             }
@@ -1000,9 +1000,9 @@ fn pa_declarator(p handle[Parser], d handle[Declarator], abstract bool) void fai
     }
 }
 
-fn pa_apply(p handle[Parser], op handle[DeclOp], base u32) u32 fails {
+fn pa_apply(p handle[Parser], op handle[DeclOp], base u32, member bool) u32 fails {
     if op == null { return base }
-    if op.next == null { return try pa_apply_one(p, op, base) }
+    if op.next == null { return try pa_apply_one(p, op, base, member) }
     order Vec[addr] = {}
     defer { vec_free(&order) }
     while op != null {
@@ -1011,12 +1011,12 @@ fn pa_apply(p handle[Parser], op handle[DeclOp], base u32) u32 fails {
     }
     for i usize in 0..order.n {
         item handle[DeclOp] = handle_from_addr(order.p[addr, order.n - i - 1])
-        base = try pa_apply_one(p, item, base)
+        base = try pa_apply_one(p, item, base, member)
     }
     return base
 }
 
-fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
+fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 fails {
     if op.kind == DO_PTR { return try pa_qualified(p, ty_ptr(elem), op.quals, op.loc) }
     if op.kind == DO_FUNC {
         if ty_is_array(elem) || ty_is_func(elem) { try pa_error(p, op.loc, c"function cannot return array or function type") }
@@ -1040,10 +1040,11 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32) u32 fails {
     if runtime_fault {
         cc_diag(p.names, b.loc, c"warning: ", bytes_c(c"undefined arithmetic in variable array bound"))
     }
-    // GNU accepts foldable bounds in file-scope array declarations. In a
-    // block the same non-ICE bound still forms a variable-length array.
+    // GNU accepts foldable bounds where arrays need a fixed extent:
+    // record members and file-scope declarations. Ordinary block-scope
+    // declarations keep the runtime bound when it is not an ICE.
     if b != null && !runtime_fault && ((b.flags & NF_ICE) != 0 ||
-        (p.scope == p.file_scope && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
+        ((member || p.scope == p.file_scope) && pa_is_gnu(p) && (b.flags & NF_FOLD) != 0)) {
         count u64 = try se_ice(p, b)
         if (!ty_is_unsigned(b.ty) && bitcast[i64](count) < 0) || (count == 0 && !pa_is_gnu(p)) ||
             (ty_size(elem) != 0 && count > 0x7fffffffffffffff / ty_size(elem)) {
@@ -1070,7 +1071,7 @@ fn pa_type_name(p handle[Parser]) u32 fails {
 // Mode and vector-size attributes describe the base type. Alignment
 // describes the declared entity and therefore applies after the declarator.
 fn pa_apply_attrs(p handle[Parser], op handle[DeclOp], base u32, a handle[Attr], alignment u32) u32 fails {
-    ty u32 = try pa_apply(p, op, try pa_type_attrs(p, base, a))
+    ty u32 = try pa_apply(p, op, try pa_type_attrs(p, base, a), false)
     al u32 = try pa_attr_align(p, a, alignment)
     return if al != 0 { ty_aligned(ty, al) } else { ty }
 }
