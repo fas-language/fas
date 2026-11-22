@@ -133,6 +133,7 @@ struct Parser {
     record_open TagMap
     objects Vec[addr]
     weak_aliases Vec[WeakAlias]
+    weak_alias_slots TagMap
     labels SymbolMap
     label_list Vec[addr]
     switches handle[SwitchContext]
@@ -176,8 +177,17 @@ fn pa_pragma(p handle[Parser], t Token) void fails {
             if tokens.n != 4 || tokens.p[Token, 1].kind != TK_IDENT || tokens.p[Token, 3].kind != TK_IDENT {
                 try pa_error(p, t.loc, c"expected '#pragma weak name = target'")
             }
-            entry handle[WeakAlias] = vec_add(&p.weak_aliases)
-            entry.name = cc_ident(p.names, tokens.p[Token, 1])
+            name u32 = cc_ident(p.names, tokens.p[Token, 1])
+            slot u32 = map_get(&p.weak_alias_slots, name) catch 0xffffffff
+            if slot == 0xffffffff {
+                slot = trunc[u32](p.weak_aliases.n)
+                vec_add(&p.weak_aliases)
+                map_put(&p.weak_alias_slots, name, slot)
+            }
+            entry handle[WeakAlias] = vec_at(&p.weak_aliases, zext[usize](slot))
+            // GNU as applies repeated .set directives in order. Use the
+            // final target and emit one canonical weak alias definition.
+            entry.name = name
             entry.target = cc_ident(p.names, tokens.p[Token, 3])
             entry.loc = t.loc
         }
