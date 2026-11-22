@@ -60,6 +60,23 @@ fn gen_type_is_vla(tid u32) bool {
     return false
 }
 
+// Evaluate any variably-modified (VLA) bound expressions inside a type (e.g. cast to int (*)[k++])
+fn gen_eval_vm_type(tid u32) void fails {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if n.kind == TYK_PTR {
+        try gen_eval_vm_type(n.elem)
+        return
+    }
+    if n.kind == TYK_ARRAY {
+        if n.aux1 == ARR_VLA {
+            _ u32 = try gen_eval_vla_size_and_cache(u)
+            return
+        }
+        try gen_eval_vm_type(n.elem)
+    }
+}
+
 fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
@@ -286,8 +303,17 @@ fn gen_convert(val_v u32, from_ty u32, to_ty u32) u32 {
         return gen_cast(c"fptrunc", tu, val_v)
     }
 
-    // Vector <-> Vector / Integer bitcast (same total size, e.g. (V2SI)0LL or (long long)v)
-    if (fk == TYK_VECTOR || tk == TYK_VECTOR) && ty_size(fu) == ty_size(tu) {
+    // GNU cast to aggregate/union (e.g. `(union { V v; U u[2]; }) e`)
+    if gen_is_mem_ty(tu) && !gen_is_mem_ty(fu) {
+        slot u32 = gen_alloca_entry(ty_size(tu), ty_align(tu))
+        if ty_size(tu) > 0 { gen_memset_const(slot, 0, ty_size(tu), false) }
+        gen_store_ty(val_v, slot, ty_align(fu), false, false)
+        return slot
+    }
+
+    // Vector <-> Vector / Integer bitcast (same total size, non-memory types)
+    if !gen_is_mem_ty(fu) && !gen_is_mem_ty(tu) &&
+       (fk == TYK_VECTOR || tk == TYK_VECTOR) && ty_size(fu) == ty_size(tu) {
         return gen_cast(c"bitcast", tu, val_v)
     }
 
@@ -633,6 +659,8 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
         return gen_convert(sz_v, TY_ULONG, n.ty)
     }
     if n.kind == ND_CAST {
+        // Explicit casts to variably-modified types must evaluate VLA bounds at the cast
+        if (n.flags & NF_IMPLICIT) == 0 { try gen_eval_vm_type(n.ty) }
         if ty_is_void(n.ty) {
             _ u32 = try gen_rvalue(n.a)
             return gen_const_i32(0)
@@ -831,6 +859,7 @@ fn gen_binary(n handle[Ast]) u32 fails {
         } else {
             try gen_lvalue(n.a)
         }
+        rv u32 = try gen_rvalue(n.b)
         old_v u32 = if is_bf {
             gen_load_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty)
         } else if gen_is_mem_ty(n.a.ty) {
@@ -838,7 +867,6 @@ fn gen_binary(n handle[Ast]) u32 fails {
         } else {
             gen_load_ty(n.a.ty, ptr_v, ty_align(n.a.ty), gen_is_volatile(n.a.ty), gen_is_atomic(n.a.ty))
         }
-        rv u32 = try gen_rvalue(n.b)
         eval_ty u32 = if n.operand_ty != TY_INVALID { n.operand_ty } else { n.a.ty }
         lv_c u32 = gen_convert(old_v, n.a.ty, eval_ty)
         rv_c u32 = if ty_is_ptr(eval_ty) {
@@ -1111,6 +1139,16 @@ fn gen_call(n handle[Ast]) u32 fails {
         sig_n_fixed = trunc[u32](arg_tids.n)
     }
 
+    // Spill any wide _BitInt(>64) arguments BEFORE writing the call instruction!
+    for i usize in 0..arg_vals.n {
+        at u32 = vec_get(&arg_tids, i)
+        if gen_is_wide_bitint(at) {
+            slot u32 = gen_alloca_entry(ty_size(at), ty_align(at))
+            gen_store_ty(vec_get(&arg_vals, i), slot, ty_align(at), false, false)
+            arg_vals.p[u32, i] = slot
+        }
+    }
+
     has_ret bool = !ty_is_void(ret_ty)
     res_v u32 = 0
     b handle[Buf] = gen_cur_buf()
@@ -1139,11 +1177,6 @@ fn gen_call(n handle[Ast]) u32 fails {
         if i > 0 { buf_str(b, c", ") }
         at u32 = vec_get(&arg_tids, zext[usize](i))
         av u32 = vec_get(&arg_vals, zext[usize](i))
-        if gen_is_wide_bitint(at) {
-            slot u32 = gen_alloca_entry(ty_size(at), ty_align(at))
-            gen_store_ty(av, slot, ty_align(at), false, false)
-            av = slot
-        }
         if sig_var && i >= sig_n_fixed {
             if ty_is_record(at) {
                 abi_emit_fir_agg(b, at)
@@ -1252,6 +1285,9 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
 
     if bytes_eq_c(bname, c"__builtin_expect") || bytes_eq_c(bname, c"__builtin_expect_with_probability") {
         v u32 = try gen_rvalue(a0)
+        // Evaluate remaining arguments for side effects (e.g. __builtin_expect(x, z++))
+        rem handle[Ast] = a1
+        while rem != null { _ u32 = try gen_rvalue(rem); rem = rem.next }
         return gen_convert(v, a0.ty, n.ty)
     }
     if bytes_eq_c(bname, c"__builtin_unreachable") {
@@ -1284,6 +1320,7 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         return gen_const_i32(0)
     }
     if bytes_eq_c(bname, c"__builtin_va_end") {
+        if a0 != null { _ u32 = try gen_rvalue(a0) }
         return gen_const_i32(0)
     }
     if bytes_eq_c(bname, c"__builtin_va_copy") {
@@ -1392,19 +1429,47 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         else { buf_str(b, c" 0x7ff4000000000000\n") }
         return v
     }
-    // C23 <stdckdint.h> ckd_add / ckd_sub / ckd_mul (result ptr is FIRST arg!)
+    if bytes_eq_c(bname, c"__builtin_shufflevector") {
+        v0 u32 = try gen_rvalue(a0)
+        v1 u32 = try gen_rvalue(a1)
+        res u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, res)
+        buf_str(b, c" = shuffle ")
+        gen_emit_fir_ty(b, n.ty)
+        buf_u8(b, 32)
+        gen_emit_val(b, v0)
+        buf_str(b, c", ")
+        gen_emit_val(b, v1)
+        buf_str(b, c", [")
+        idx handle[Ast] = a2
+        first_k bool = true
+        while idx != null {
+            if !first_k { buf_str(b, c", ") }
+            first_k = false
+            buf_dec_i64(b, bitcast[i64](gen_eval_const_int(idx)))
+            idx = idx.next
+        }
+        buf_str(b, c"]\n")
+        return res
+    }
+    // C23 <stdckdint.h> ckd_add / ckd_sub / ckd_mul (cc/include/stdckdint.h passes (a, b, res); direct ckd_*(res, a, b) also supported)
     if bytes_eq_c(bname, c"__builtin_ckd_add") || bytes_eq_c(bname, c"__builtin_ckd_sub") ||
        bytes_eq_c(bname, c"__builtin_ckd_mul") || bytes_eq_c(bname, c"ckd_add") ||
        bytes_eq_c(bname, c"ckd_sub") || bytes_eq_c(bname, c"ckd_mul") {
         is_sub bool = bytes_ends_with(bname, bytes_c(c"_sub"))
         is_mul bool = bytes_ends_with(bname, bytes_c(c"_mul"))
-        res_ptr u32 = try gen_rvalue(a0)
-        res_ty u32 = ty_node(ty_unqual(a0.ty)).elem
-        v0 u32 = try gen_rvalue(a1)
-        v1 u32 = try gen_rvalue(a2)
+        res_ast handle[Ast] = if ty_is_ptr(a0.ty) { a0 } else { a2 }
+        lhs_ast handle[Ast] = if ty_is_ptr(a0.ty) { a1 } else { a0 }
+        rhs_ast handle[Ast] = if ty_is_ptr(a0.ty) { a2 } else { a1 }
+        res_ptr u32 = try gen_rvalue(res_ast)
+        res_ty u32 = ty_node(ty_unqual(res_ast.ty)).elem
+        v0 u32 = try gen_rvalue(lhs_ast)
+        v1 u32 = try gen_rvalue(rhs_ast)
         wide_ty u32 = ty_bitint(129, false)
-        w0 u32 = gen_convert(v0, a1.ty, wide_ty)
-        w1 u32 = gen_convert(v1, a2.ty, wide_ty)
+        w0 u32 = gen_convert(v0, lhs_ast.ty, wide_ty)
+        w1 u32 = gen_convert(v1, rhs_ast.ty, wide_ty)
         op_cstr addr = if is_sub { c"sub" } else if is_mul { c"mul" } else { c"add" }
         wres u32 = gen_binop(op_cstr, wide_ty, w0, w1)
         narrow u32 = gen_convert(wres, wide_ty, res_ty)
@@ -1574,8 +1639,37 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         return gen_convert(ovf, TY_BOOL, n.ty)
     }
 
-    // __atomic_* and __sync_* builtins
-    if bytes_starts_with(bname, bytes_c(c"__atomic_")) || bytes_starts_with(bname, bytes_c(c"__sync_")) {
+    if bytes_eq_c(bname, c"__builtin_issignaling") {
+        v u32 = try gen_rvalue(a0)
+        ak u8 = ty_kind(a0.ty)
+        is_nan u32 = gen_fcmp(c"uno", v, v)
+        qbit_zero u32 = gen_const_i1(false)
+        if ak == TYK_FLOAT16 {
+            iv u32 = gen_cast_raw(c"bitcast", c"i16", v)
+            q u32 = gen_binop_raw(c"and", c"i16", iv, gen_const_int(TY_USHORT, 0x0200))
+            qbit_zero = gen_icmp(c"eq", q, gen_const_int(TY_USHORT, 0))
+        } else if ak == TYK_FLOAT {
+            iv u32 = gen_cast_raw(c"bitcast", c"i32", v)
+            q u32 = gen_binop_raw(c"and", c"i32", iv, gen_const_i32(0x00400000))
+            qbit_zero = gen_icmp(c"eq", q, gen_const_i32(0))
+        } else if ak == TYK_DOUBLE {
+            iv u32 = gen_cast_raw(c"bitcast", c"i64", v)
+            q u32 = gen_binop_raw(c"and", c"i64", iv, gen_const_u64(0x0008000000000000))
+            qbit_zero = gen_icmp(c"eq", q, gen_const_u64(0))
+        } else if ak == TYK_LDOUBLE {
+            slot u32 = gen_alloca_entry(16, 16)
+            gen_store_ty(v, slot, 16, false, false)
+            lo u32 = gen_load_raw(c"i64", slot, 8, false)
+            q u32 = gen_binop_raw(c"and", c"i64", lo, gen_const_u64(0x4000000000000000))
+            qbit_zero = gen_icmp(c"eq", q, gen_const_u64(0))
+        }
+        res u32 = gen_binop_raw(c"and", c"i1", is_nan, qbit_zero)
+        return gen_convert(res, TY_BOOL, n.ty)
+    }
+    // __atomic_*, __c11_atomic_*, and __sync_* builtins
+    if bytes_starts_with(bname, bytes_c(c"__atomic_")) ||
+       bytes_starts_with(bname, bytes_c(c"__c11_atomic_")) ||
+       bytes_starts_with(bname, bytes_c(c"__sync_")) {
         return try gen_atomic_builtin(n, bname, a0, a1, a2, a3, a4)
     }
 
@@ -1621,9 +1715,28 @@ fn gen_direct_helper_call(cname Bytes, ret_ty u32, args handle[Ast]) u32 fails {
     return res_v
 }
 
+fn gen_atomic_elem_ty(ptr_ast handle[Ast]) u32 {
+    et u32 = ty_unqual(ty_node(ty_unqual(ptr_ast.ty)).elem)
+    if ty_is_void(et) { return TY_UCHAR }
+    return et
+}
+
+fn gen_atomic_int_ty_for_size(sz u64) u32 {
+    if sz <= 1 { return TY_UCHAR }
+    if sz == 2 { return TY_USHORT }
+    if sz == 4 { return TY_UINT }
+    if sz == 8 { return TY_ULONG }
+    if sz == 16 { return TY_UINT128 }
+    return ty_bitint(trunc[u32](sz * 8), true)
+}
+
 fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast], a2 handle[Ast], a3 handle[Ast], a4 handle[Ast]) u32 fails {
-    if bytes_eq_c(bname, c"__atomic_thread_fence") || bytes_eq_c(bname, c"__atomic_signal_fence") || bytes_eq_c(bname, c"__sync_synchronize") {
+    a5 handle[Ast] = if a4 != null { a4.next } else { null }
+    if bytes_eq_c(bname, c"__atomic_thread_fence") || bytes_eq_c(bname, c"__atomic_signal_fence") ||
+       bytes_eq_c(bname, c"__c11_atomic_thread_fence") || bytes_eq_c(bname, c"__c11_atomic_signal_fence") ||
+       bytes_eq_c(bname, c"__sync_synchronize") {
         ord u64 = if a0 != null { gen_eval_const_int(a0) } else { 5 }
+        if ord == 0 { return gen_const_i32(0) } // relaxed fence is a no-op
         ord_s addr = if ord <= 2 { c"acquire" } else if ord == 3 { c"release" } else if ord == 4 { c"acq_rel" } else { c"seq_cst" }
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  fence ")
@@ -1631,70 +1744,254 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_u8(b, 10)
         return gen_const_i32(0)
     }
-    if bytes_eq_c(bname, c"__atomic_load_n") {
+    if bytes_eq_c(bname, c"__atomic_always_lock_free") || bytes_eq_c(bname, c"__atomic_is_lock_free") ||
+       bytes_eq_c(bname, c"__c11_atomic_is_lock_free") {
+        sz u64 = if a0 != null { gen_eval_const_int(a0) } else { 0 }
+        ok bool = sz == 1 || sz == 2 || sz == 4 || sz == 8 || sz == 16
+        return gen_const_int(n.ty, if ok { 1 } else { 0 })
+    }
+    if bytes_eq_c(bname, c"__c11_atomic_init") {
         p u32 = try gen_rvalue(a0)
-        ord u64 = gen_eval_const_int(a1)
+        et u32 = gen_atomic_elem_ty(a0)
+        if gen_is_mem_ty(et) {
+            src u32 = try gen_rvalue(a1)
+            gen_memcpy_const(p, src, ty_size(et), false)
+        } else {
+            val u32 = gen_convert(try gen_rvalue(a1), a1.ty, et)
+            gen_store_ty(val, p, ty_align(et), false, false)
+        }
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__atomic_load_n") || bytes_eq_c(bname, c"__c11_atomic_load") {
+        p u32 = try gen_rvalue(a0)
+        et u32 = gen_atomic_elem_ty(a0)
+        ord u64 = if a1 != null { gen_eval_const_int(a1) } else { 5 }
+        if gen_is_mem_ty(et) {
+            sz u64 = ty_size(et)
+            ity u32 = gen_atomic_int_ty_for_size(sz)
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = load ")
+            gen_emit_fir_ty(b, ity)
+            buf_u8(b, 32)
+            gen_emit_val(b, p)
+            buf_str(b, c", align ")
+            buf_dec_u64(b, max_u64(1, ty_align(et)))
+            buf_u8(b, 32)
+            buf_str(b, gen_atomic_order_cstr(ord, true, false))
+            buf_u8(b, 10)
+            slot u32 = gen_alloca_entry(sz, ty_align(et))
+            gen_store_ty(v, slot, ty_align(et), false, false)
+            return slot
+        }
         v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  ")
         gen_emit_val(b, v)
         buf_str(b, c" = load ")
-        gen_emit_fir_ty(b, n.ty)
+        gen_emit_fir_ty(b, et)
         buf_u8(b, 32)
         gen_emit_val(b, p)
         buf_str(b, c", align ")
-        buf_dec_u64(b, max_u64(1, ty_align(n.ty)))
+        buf_dec_u64(b, max_u64(1, ty_align(et)))
         buf_u8(b, 32)
         buf_str(b, gen_atomic_order_cstr(ord, true, false))
         buf_u8(b, 10)
-        return v
+        return gen_convert(v, et, n.ty)
     }
-    if bytes_eq_c(bname, c"__atomic_store_n") {
+    if bytes_eq_c(bname, c"__atomic_load") {
+        // __atomic_load(ptr, ret_ptr, memorder)
         p u32 = try gen_rvalue(a0)
-        et u32 = ty_unqual(ty_node(ty_unqual(a0.ty)).elem)
-        val u32 = gen_convert(try gen_rvalue(a1), a1.ty, et)
-        ord u64 = gen_eval_const_int(a2)
+        ret_p u32 = try gen_rvalue(a1)
+        et u32 = gen_atomic_elem_ty(a0)
+        ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
+        sz u64 = ty_size(et)
+        al u64 = max_u64(1, ty_align(et))
+        lty u32 = if gen_is_mem_ty(et) { gen_atomic_int_ty_for_size(sz) } else { et }
+        v u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = load ")
+        gen_emit_fir_ty(b, lty)
+        buf_u8(b, 32)
+        gen_emit_val(b, p)
+        buf_str(b, c", align ")
+        buf_dec_u64(b, al)
+        buf_u8(b, 32)
+        buf_str(b, gen_atomic_order_cstr(ord, true, false))
+        buf_u8(b, 10)
+        gen_store_ty(v, ret_p, al, false, false)
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__atomic_store_n") || bytes_eq_c(bname, c"__c11_atomic_store") {
+        p u32 = try gen_rvalue(a0)
+        et u32 = gen_atomic_elem_ty(a0)
+        ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
+        al u64 = max_u64(1, ty_align(et))
+        val u32 = 0
+        if gen_is_mem_ty(et) {
+            src u32 = try gen_rvalue(a1)
+            ity u32 = gen_atomic_int_ty_for_size(ty_size(et))
+            val = gen_load_ty(ity, src, al, false, false)
+        } else {
+            val = gen_convert(try gen_rvalue(a1), a1.ty, et)
+        }
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  store ")
         gen_emit_val(b, val)
         buf_str(b, c", ")
         gen_emit_val(b, p)
         buf_str(b, c", align ")
-        buf_dec_u64(b, max_u64(1, ty_align(et)))
+        buf_dec_u64(b, al)
         buf_u8(b, 32)
         buf_str(b, gen_atomic_order_cstr(ord, false, true))
         buf_u8(b, 10)
         return gen_const_i32(0)
     }
-    if bytes_eq_c(bname, c"__atomic_exchange_n") || bytes_eq_c(bname, c"__sync_lock_test_and_set") {
+    if bytes_eq_c(bname, c"__atomic_store") {
+        // __atomic_store(ptr, val_ptr, memorder)
         p u32 = try gen_rvalue(a0)
-        et u32 = ty_unqual(ty_node(ty_unqual(a0.ty)).elem)
-        val u32 = gen_convert(try gen_rvalue(a1), a1.ty, et)
+        val_p u32 = try gen_rvalue(a1)
+        et u32 = gen_atomic_elem_ty(a0)
         ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
+        al u64 = max_u64(1, ty_align(et))
+        lty u32 = if gen_is_mem_ty(et) { gen_atomic_int_ty_for_size(ty_size(et)) } else { et }
+        val u32 = gen_load_ty(lty, val_p, al, false, false)
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  store ")
+        gen_emit_val(b, val)
+        buf_str(b, c", ")
+        gen_emit_val(b, p)
+        buf_str(b, c", align ")
+        buf_dec_u64(b, al)
+        buf_u8(b, 32)
+        buf_str(b, gen_atomic_order_cstr(ord, false, true))
+        buf_u8(b, 10)
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__atomic_test_and_set") {
+        p u32 = try gen_rvalue(a0)
+        ord u64 = if a1 != null { gen_eval_const_int(a1) } else { 5 }
+        v u32 = gen_new_val()
+        one u32 = gen_const_i8(1)
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = atomic_rmw xchg i8 ")
+        gen_emit_val(b, p)
+        buf_str(b, c", ")
+        gen_emit_val(b, one)
+        buf_str(b, c", align 1 ")
+        buf_str(b, gen_atomic_order_cstr(ord, false, false))
+        buf_u8(b, 10)
+        return gen_convert(v, TY_UCHAR, n.ty)
+    }
+    if bytes_eq_c(bname, c"__atomic_clear") {
+        p u32 = try gen_rvalue(a0)
+        ord u64 = if a1 != null { gen_eval_const_int(a1) } else { 5 }
+        z u32 = gen_const_i8(0)
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  store ")
+        gen_emit_val(b, z)
+        buf_str(b, c", ")
+        gen_emit_val(b, p)
+        buf_str(b, c", align 1 ")
+        buf_str(b, gen_atomic_order_cstr(ord, false, true))
+        buf_u8(b, 10)
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__atomic_exchange_n") || bytes_eq_c(bname, c"__c11_atomic_exchange") ||
+       bytes_eq_c(bname, c"__sync_lock_test_and_set") {
+        p u32 = try gen_rvalue(a0)
+        et u32 = gen_atomic_elem_ty(a0)
+        ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
+        al u64 = max_u64(1, ty_align(et))
+        lty u32 = if gen_is_mem_ty(et) { gen_atomic_int_ty_for_size(ty_size(et)) } else { et }
+        val u32 = if gen_is_mem_ty(et) {
+            gen_load_ty(lty, try gen_rvalue(a1), al, false, false)
+        } else {
+            gen_convert(try gen_rvalue(a1), a1.ty, et)
+        }
         v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  ")
         gen_emit_val(b, v)
         buf_str(b, c" = atomic_rmw xchg ")
-        gen_emit_fir_ty(b, et)
+        gen_emit_fir_ty(b, lty)
         buf_u8(b, 32)
         gen_emit_val(b, p)
         buf_str(b, c", ")
         gen_emit_val(b, val)
         buf_str(b, c", align ")
-        buf_dec_u64(b, max_u64(1, ty_align(et)))
+        buf_dec_u64(b, al)
         buf_u8(b, 32)
         buf_str(b, gen_atomic_order_cstr(ord, false, false))
         buf_u8(b, 10)
+        if gen_is_mem_ty(et) {
+            slot u32 = gen_alloca_entry(ty_size(et), al)
+            gen_store_ty(v, slot, al, false, false)
+            return slot
+        }
         return gen_convert(v, et, n.ty)
     }
-    if bytes_eq_c(bname, c"__atomic_compare_exchange_n") {
+    if bytes_eq_c(bname, c"__atomic_exchange") {
+        // __atomic_exchange(ptr, val_ptr, ret_ptr, memorder)
+        p u32 = try gen_rvalue(a0)
+        val_p u32 = try gen_rvalue(a1)
+        ret_p u32 = try gen_rvalue(a2)
+        et u32 = gen_atomic_elem_ty(a0)
+        ord u64 = if a3 != null { gen_eval_const_int(a3) } else { 5 }
+        al u64 = max_u64(1, ty_align(et))
+        lty u32 = if gen_is_mem_ty(et) { gen_atomic_int_ty_for_size(ty_size(et)) } else { et }
+        val u32 = gen_load_ty(lty, val_p, al, false, false)
+        v u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = atomic_rmw xchg ")
+        gen_emit_fir_ty(b, lty)
+        buf_u8(b, 32)
+        gen_emit_val(b, p)
+        buf_str(b, c", ")
+        gen_emit_val(b, val)
+        buf_str(b, c", align ")
+        buf_dec_u64(b, al)
+        buf_u8(b, 32)
+        buf_str(b, gen_atomic_order_cstr(ord, false, false))
+        buf_u8(b, 10)
+        gen_store_ty(v, ret_p, al, false, false)
+        return gen_const_i32(0)
+    }
+    if bytes_eq_c(bname, c"__atomic_compare_exchange_n") || bytes_eq_c(bname, c"__atomic_compare_exchange") ||
+       bytes_eq_c(bname, c"__c11_atomic_compare_exchange_strong") || bytes_eq_c(bname, c"__c11_atomic_compare_exchange_weak") {
+        is_by_ptr bool = bytes_eq_c(bname, c"__atomic_compare_exchange")
+        is_c11 bool = bytes_starts_with(bname, bytes_c(c"__c11_"))
         p u32 = try gen_rvalue(a0)
         exp_p u32 = try gen_rvalue(a1)
-        et u32 = ty_unqual(ty_node(ty_unqual(a0.ty)).elem)
-        des u32 = gen_convert(try gen_rvalue(a2), a2.ty, et)
-        ord_s u64 = if a4 != null { gen_eval_const_int(a4) } else { 5 }
-        exp_v u32 = gen_load_ty(et, exp_p, ty_align(et), false, false)
+        et u32 = gen_atomic_elem_ty(a0)
+        al u64 = max_u64(1, ty_align(et))
+        lty u32 = if gen_is_mem_ty(et) { gen_atomic_int_ty_for_size(ty_size(et)) } else { et }
+        des u32 = 0
+        if is_by_ptr || gen_is_mem_ty(et) {
+            des_p u32 = try gen_rvalue(a2)
+            des = gen_load_ty(lty, des_p, al, false, false)
+        } else {
+            des = gen_convert(try gen_rvalue(a2), a2.ty, et)
+        }
+        ord_s u64 = if is_c11 {
+            if a3 != null { gen_eval_const_int(a3) } else { 5 }
+        } else {
+            if a4 != null { gen_eval_const_int(a4) } else { 5 }
+        }
+        ord_f u64 = if is_c11 {
+            if a4 != null { gen_eval_const_int(a4) } else { 0 }
+        } else {
+            if a5 != null { gen_eval_const_int(a5) } else { 0 }
+        }
+        exp_v u32 = gen_load_ty(lty, exp_p, al, false, false)
         old_v u32 = gen_new_val()
         ok_v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
@@ -1703,7 +2000,7 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_str(b, c", ")
         gen_emit_val(b, ok_v)
         buf_str(b, c" = cmpxchg (")
-        gen_emit_fir_ty(b, et)
+        gen_emit_fir_ty(b, lty)
         buf_str(b, c", i1) ")
         gen_emit_val(b, p)
         buf_str(b, c", ")
@@ -1711,12 +2008,14 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_str(b, c", ")
         gen_emit_val(b, des)
         buf_str(b, c", align ")
-        buf_dec_u64(b, max_u64(1, ty_align(et)))
+        buf_dec_u64(b, al)
         buf_u8(b, 32)
         buf_str(b, gen_atomic_order_cstr(ord_s, false, false))
-        buf_str(b, c", fail relaxed\n")
+        buf_str(b, c", fail ")
+        buf_str(b, gen_atomic_order_cstr(ord_f, true, false))
+        buf_u8(b, 10)
         // On failure, store old_v into *exp_p
-        gen_store_ty(gen_select(et, ok_v, exp_v, old_v), exp_p, ty_align(et), false, false)
+        gen_store_ty(gen_select(lty, ok_v, exp_v, old_v), exp_p, al, false, false)
         return gen_convert(ok_v, TY_BOOL, n.ty)
     }
     if bytes_eq_c(bname, c"__sync_val_compare_and_swap") || bytes_eq_c(bname, c"__sync_bool_compare_and_swap") {
@@ -1761,14 +2060,62 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_str(b, c" release\n")
         return gen_const_i32(0)
     }
-    // Atomic fetch_OP / OP_fetch
+    // Atomic fetch_OP / OP_fetch (including __c11_atomic_fetch_* and nand)
+    is_nand bool = bytes_eq_c(bname, c"__atomic_fetch_nand") || bytes_eq_c(bname, c"__sync_fetch_and_nand") ||
+                   bytes_eq_c(bname, c"__atomic_nand_fetch") || bytes_eq_c(bname, c"__sync_nand_and_fetch")
+    if is_nand {
+        ret_new_n bool = bytes_eq_c(bname, c"__atomic_nand_fetch") || bytes_eq_c(bname, c"__sync_nand_and_fetch")
+        p u32 = try gen_rvalue(a0)
+        et u32 = gen_atomic_elem_ty(a0)
+        al u64 = max_u64(1, ty_align(et))
+        val u32 = gen_convert(try gen_rvalue(a1), a1.ty, et)
+        ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
+        all_ones u32 = gen_binop(c"sub", et, gen_const_zero(et), gen_const_int(et, 1))
+        old_slot u32 = gen_alloca_entry(ty_size(et), al)
+        new_slot u32 = gen_alloca_entry(ty_size(et), al)
+        init_v u32 = gen_load_ty(et, p, al, false, true)
+        gen_store_ty(init_v, old_slot, al, false, false)
+        loop_blk u32 = gen_new_block()
+        done_blk u32 = gen_new_block()
+        gen_term_jump(loop_blk)
+        gen_switch_block(loop_blk)
+        cur u32 = gen_load_ty(et, old_slot, al, false, false)
+        and_v u32 = gen_binop(c"and", et, cur, val)
+        nv u32 = gen_binop(c"xor", et, and_v, all_ones)
+        gen_store_ty(nv, new_slot, al, false, false)
+        ov u32 = gen_new_val()
+        ok u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, ov)
+        buf_str(b, c", ")
+        gen_emit_val(b, ok)
+        buf_str(b, c" = cmpxchg (")
+        gen_emit_fir_ty(b, et)
+        buf_str(b, c", i1) ")
+        gen_emit_val(b, p)
+        buf_str(b, c", ")
+        gen_emit_val(b, cur)
+        buf_str(b, c", ")
+        gen_emit_val(b, nv)
+        buf_str(b, c", align ")
+        buf_dec_u64(b, al)
+        buf_u8(b, 32)
+        buf_str(b, gen_atomic_order_cstr(ord, false, false))
+        buf_str(b, c", fail relaxed\n")
+        gen_store_ty(ov, old_slot, al, false, false)
+        gen_term_br(ok, done_blk, loop_blk)
+        gen_switch_block(done_blk)
+        res_v u32 = gen_load_ty(et, if ret_new_n { new_slot } else { old_slot }, al, false, false)
+        return gen_convert(res_v, et, n.ty)
+    }
     rmw_op addr = null
     ret_new bool = false
-    if bytes_eq_c(bname, c"__atomic_fetch_add") || bytes_eq_c(bname, c"__sync_fetch_and_add") { rmw_op = c"add" }
-    else if bytes_eq_c(bname, c"__atomic_fetch_sub") || bytes_eq_c(bname, c"__sync_fetch_and_sub") { rmw_op = c"sub" }
-    else if bytes_eq_c(bname, c"__atomic_fetch_and") || bytes_eq_c(bname, c"__sync_fetch_and_and") { rmw_op = c"and" }
-    else if bytes_eq_c(bname, c"__atomic_fetch_or") || bytes_eq_c(bname, c"__sync_fetch_and_or") { rmw_op = c"or" }
-    else if bytes_eq_c(bname, c"__atomic_fetch_xor") || bytes_eq_c(bname, c"__sync_fetch_and_xor") { rmw_op = c"xor" }
+    if bytes_eq_c(bname, c"__atomic_fetch_add") || bytes_eq_c(bname, c"__sync_fetch_and_add") || bytes_eq_c(bname, c"__c11_atomic_fetch_add") { rmw_op = c"add" }
+    else if bytes_eq_c(bname, c"__atomic_fetch_sub") || bytes_eq_c(bname, c"__sync_fetch_and_sub") || bytes_eq_c(bname, c"__c11_atomic_fetch_sub") { rmw_op = c"sub" }
+    else if bytes_eq_c(bname, c"__atomic_fetch_and") || bytes_eq_c(bname, c"__sync_fetch_and_and") || bytes_eq_c(bname, c"__c11_atomic_fetch_and") { rmw_op = c"and" }
+    else if bytes_eq_c(bname, c"__atomic_fetch_or") || bytes_eq_c(bname, c"__sync_fetch_and_or") || bytes_eq_c(bname, c"__c11_atomic_fetch_or") { rmw_op = c"or" }
+    else if bytes_eq_c(bname, c"__atomic_fetch_xor") || bytes_eq_c(bname, c"__sync_fetch_and_xor") || bytes_eq_c(bname, c"__c11_atomic_fetch_xor") { rmw_op = c"xor" }
     else if bytes_eq_c(bname, c"__atomic_add_fetch") || bytes_eq_c(bname, c"__sync_add_and_fetch") { rmw_op = c"add"; ret_new = true }
     else if bytes_eq_c(bname, c"__atomic_sub_fetch") || bytes_eq_c(bname, c"__sync_sub_and_fetch") { rmw_op = c"sub"; ret_new = true }
     else if bytes_eq_c(bname, c"__atomic_and_fetch") || bytes_eq_c(bname, c"__sync_and_and_fetch") { rmw_op = c"and"; ret_new = true }
@@ -1776,8 +2123,15 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
     else if bytes_eq_c(bname, c"__atomic_xor_fetch") || bytes_eq_c(bname, c"__sync_xor_and_fetch") { rmw_op = c"xor"; ret_new = true }
     if rmw_op != null {
         p u32 = try gen_rvalue(a0)
-        et u32 = ty_unqual(ty_node(ty_unqual(a0.ty)).elem)
-        val u32 = gen_convert(try gen_rvalue(a1), a1.ty, et)
+        et u32 = gen_atomic_elem_ty(a0)
+        // Pointer atomic fetch_add/sub scales by sizeof(*et)!
+        is_ptr_et bool = ty_is_ptr(et)
+        rmw_ty u32 = if is_ptr_et { TY_ULONG } else { et }
+        val u32 = gen_convert(try gen_rvalue(a1), a1.ty, rmw_ty)
+        if is_ptr_et {
+            esz u64 = ty_size(ty_node(ty_unqual(et)).elem)
+            if esz > 1 { val = gen_binop_raw(c"mul", c"i64", val, gen_const_u64(esz)) }
+        }
         ord u64 = if a2 != null { gen_eval_const_int(a2) } else { 5 }
         old_v u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
@@ -1786,7 +2140,7 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_str(b, c" = atomic_rmw ")
         buf_str(b, rmw_op)
         buf_u8(b, 32)
-        gen_emit_fir_ty(b, et)
+        gen_emit_fir_ty(b, rmw_ty)
         buf_u8(b, 32)
         gen_emit_val(b, p)
         buf_str(b, c", ")
@@ -1797,10 +2151,10 @@ fn gen_atomic_builtin(n handle[Ast], bname Bytes, a0 handle[Ast], a1 handle[Ast]
         buf_str(b, gen_atomic_order_cstr(ord, false, false))
         buf_u8(b, 10)
         if ret_new {
-            nv u32 = gen_binop(rmw_op, et, old_v, val)
-            return gen_convert(nv, et, n.ty)
+            nv u32 = gen_binop(rmw_op, rmw_ty, old_v, val)
+            return gen_convert(nv, rmw_ty, n.ty)
         }
-        return gen_convert(old_v, et, n.ty)
+        return gen_convert(old_v, rmw_ty, n.ty)
     }
     return gen_const_zero(n.ty)
 }

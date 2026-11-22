@@ -620,6 +620,27 @@ fn gen_stackrestore(sp_v u32) void {
 // ---------- Constant Emitters ----------
 
 fn gen_const_int(tid u32, val u64) u32 {
+    if ty_is_void(tid) { return gen_const_i32(0) }
+    k u8 = ty_kind(tid)
+    if k == TYK_PTR || k == TYK_NULLPTR || k == TYK_FUNC {
+        if val == 0 { return gen_const_zero(tid) }
+        iv u32 = gen_const_u64(val)
+        return gen_cast_raw(c"inttoptr", c"ptr", iv)
+    }
+    if k == TYK_VECTOR {
+        et u32 = ty_node(ty_unqual(tid)).elem
+        ev u32 = gen_const_int(et, val)
+        v u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, v)
+        buf_str(b, c" = splat ")
+        gen_emit_fir_ty(b, tid)
+        buf_u8(b, 32)
+        gen_emit_val(b, ev)
+        buf_u8(b, 10)
+        return v
+    }
     v u32 = gen_new_val()
     b handle[Buf] = gen_cur_buf()
     bits u32 = ty_int_bits(tid)
@@ -697,6 +718,7 @@ fn gen_const_i1(val bool) u32 {
 }
 
 fn gen_const_zero(tid u32) u32 {
+    if ty_is_void(tid) { return gen_const_i32(0) }
     if gen_is_mem_ty(tid) {
         sz u64 = ty_size(tid)
         slot u32 = gen_alloca_entry(sz, ty_align(tid))
@@ -1216,27 +1238,28 @@ fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
 }
 
 fn gen_emit_ctor_dtor(fn_name Bytes, is_dtor bool, prio u64) void {
-    b handle[Buf] = gen_global_buf()
-    buf_str(b, c"global @.L")
-    buf_str(b, if is_dtor { c"dtor." } else { c"ctor." })
-    buf_dec_u64(b, zext[u64](gc.ctor_counter))
-    gc.ctor_counter += 1
-    buf_str(b, c" size 8 align 8 local section \"")
-    buf_str(b, if is_dtor { c".fini_array" } else { c".init_array" })
+    // Use module_asm with @init_array/@fini_array so the ELF section gets SHT_INIT_ARRAY/SHT_FINI_ARRAY
+    a Buf = {}
+    defer { buf_free(&a) }
+    buf_str(&a, c".section ")
+    buf_str(&a, if is_dtor { c".fini_array" } else { c".init_array" })
     if prio > 0 {
-        buf_u8(b, 46)
-        // 5-digit zero-padded priority
+        buf_u8(&a, 46)
         p u64 = prio
         if p > 65535 { p = 65535 }
         d u64 = 10000
         while d > 0 {
-            buf_u8(b, trunc[u8](48 + (p / d) % 10))
+            buf_u8(&a, trunc[u8](48 + (p / d) % 10))
             d /= 10
         }
     }
-    buf_str(b, c"\" = { reloc @")
-    buf_append(b, fn_name)
-    buf_str(b, c" w8 }\n")
+    buf_str(&a, if is_dtor { c",\"aw\",@fini_array\n.p2align 3\n.quad " } else { c",\"aw\",@init_array\n.p2align 3\n.quad " })
+    buf_append(&a, fn_name)
+    buf_u8(&a, 10)
+    b handle[Buf] = gen_global_buf()
+    buf_str(b, c"module_asm ")
+    fir_emit_quoted_bytes(b, a.p, a.n)
+    buf_u8(b, 10)
     gen_flush_if_top()
 }
 

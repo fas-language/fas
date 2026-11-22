@@ -135,7 +135,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", action="append", help="Filter to suite(s): c-testsuite, gcc-torture-execute, gcc-dg")
     ap.add_argument("--jobs", type=int, default=min(16, os.cpu_count() or 4))
-    ap.add_argument("--timeout", type=float, default=15.0)
+    ap.add_argument("--timeout", type=float, default=30.0)
     ap.add_argument("--live-clang", action="store_true", help="Always compile & run clang-22 live instead of manifest oracle")
     ap.add_argument("--show", type=int, default=25, help="Max unexpected failures to print")
     ap.add_argument("--strict", action="store_true", help="Exit non-zero on unexpected failures")

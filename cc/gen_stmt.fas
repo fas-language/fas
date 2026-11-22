@@ -128,6 +128,10 @@ fn gen_local_decl(n handle[Ast]) void fails {
         sz_v u32 = try gen_eval_vla_size_and_cache(s.ty)
         al u64 = ty_align(s.ty)
         dyn_p u32 = gen_alloca_dyn(sz_v, al)
+        if s.value != null {
+            // C23 empty initializer `T vla[n] = {};` zero-initializes the VLA
+            gen_memset_dyn(dyn_p, gen_const_i8(0), sz_v, gen_is_volatile(s.ty))
+        }
         slot u32 = gen_alloca_entry(8, 8)
         gen_store_ty(dyn_p, slot, 8, false, false)
         key U64Key = {addr_bits(handle_addr(s))}
@@ -137,6 +141,7 @@ fn gen_local_decl(n handle[Ast]) void fails {
 
     // Normal automatic local variable (always allocate entry-block slot even in dead code,
     // since a goto/case label later in the block may jump into its scope!)
+    if !gen_is_terminated() { try gen_eval_vm_type(s.ty) }
     sz u64 = ty_size(s.ty)
     al u64 = ty_align(s.ty)
     slot u32 = gen_alloca_entry(sz, al)
@@ -385,10 +390,23 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         if inp.a != null { gen_decode_string_ast(inp.a, &cb, false) }
         cs Bytes = buf_bytes(&cb)
         is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+        // Check for matching constraint "0".."9" tied to an output of a different width
+        tied_idx i32 = -1
+        if cs.n == 1 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
+            tied_idx = zext[i32](cs.p[u8] - 48)
+        }
         buf_free(&cb)
         iv u32 = if is_m { try gen_lvalue(inp.b) } else { try gen_rvalue(inp.b) }
+        it u32 = if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty }
+        if !is_m && tied_idx >= 0 && zext[usize](bitcast[u32](tied_idx)) < out_tids.n {
+            ot u32 = vec_get(&out_tids, zext[usize](bitcast[u32](tied_idx)))
+            if ty_unqual(ot) != ty_unqual(it) {
+                iv = gen_convert(iv, it, ot)
+                it = ot
+            }
+        }
         vec_push(&in_vals, iv)
-        vec_push(&in_tids, if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty })
+        vec_push(&in_tids, it)
         vec_push(&in_nodes, handle_addr(inp))
         inp = inp.next
     }
@@ -628,8 +646,19 @@ fn gen_stmt(n handle[Ast]) void fails {
     // EXCEPT compound statements that might contain labels or switch cases!
     if bytes_eq_c(kw, c"if") {
         if gen_is_terminated() {
+            // Even when `if` is unreachable, a `goto` or `case` label may jump into
+            // `then` or `else`; keep them separated so `then` does not fall into `else`!
+            end_blk u32 = gen_new_block()
             try gen_stmt(n.b)
-            if n.c != null { try gen_stmt(n.c) }
+            if !gen_is_terminated() { gen_term_jump(end_blk) }
+            if n.c != null {
+                dead_else u32 = gen_new_block()
+                gen_switch_block(dead_else)
+                vec_at(&gc.blocks, zext[usize](dead_else)).terminated = true
+                try gen_stmt(n.c)
+                if !gen_is_terminated() { gen_term_jump(end_blk) }
+            }
+            gen_switch_block(end_blk)
             return
         }
         cv u32 = try gen_rvalue(n.a)
@@ -915,6 +944,13 @@ fn gen_function(node handle[Ast]) void fails {
         } else {
             gen_store_ty(i, slot, al, false, false)
         }
+    }
+
+    // Evaluate any VLA bounds on parameter types (e.g. `void f(int a, int b[a++])`)
+    pm2 handle[Param] = handle_from_addr(s.params)
+    while pm2 != null {
+        if pm2.ty != TY_INVALID { try gen_eval_vm_type(pm2.ty) }
+        pm2 = pm2.next
     }
 
     // Lower function body

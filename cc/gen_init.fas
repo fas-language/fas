@@ -482,10 +482,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                     gen_static_fill_desig(si, u, item.b, item.a, off, &next_f)
                     fidx = trunc[u32](next_f) + 1
                 } else {
-                    // Skip unnamed zero-width bitfields
+                    // Skip unnamed bitfields (both zero-width and non-zero-width)
                     while fidx < rec.fields_len {
                         f handle[FieldDef] = ty_field(rec.fields_start + fidx)
-                        if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
                         break
                     }
                     if fidx >= rec.fields_len { break }
@@ -613,9 +613,9 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
         idx u64 = desig.value
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
-        if desig.a != null && desig.a.flags != 0 {
-            // GNU range designator [lo ... hi]
-            hi u64 = desig.a.value
+        if desig.b != null {
+            // GNU range designator [lo ... hi]: desig.a = lo, desig.b = hi
+            hi u64 = desig.b.value
             out_idx[u64] = hi
             for j u64 in idx..(hi + 1) {
                 dummy u64 = 0
@@ -1015,7 +1015,7 @@ fn gen_auto_init(dst_ptr u32, tid u32, init handle[Ast], zero_first bool) void f
                 } else {
                     while fidx < rec.fields_len {
                         f handle[FieldDef] = ty_field(rec.fields_start + fidx)
-                        if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
                         break
                     }
                     if fidx >= rec.fields_len { break }
@@ -1088,8 +1088,8 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
         idx u64 = desig.value
         out_idx[u64] = idx
         elem_sz u64 = ty_size(n.elem)
-        if desig.a != null && desig.a.flags != 0 {
-            hi u64 = desig.a.value
+        if desig.b != null {
+            hi u64 = desig.b.value
             out_idx[u64] = hi
             for j u64 in idx..(hi + 1) {
                 ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
