@@ -490,10 +490,11 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
 
-    // Brace-enclosed aggregate initializer (zero subobject first so designator overwrites clear prior fields!)
+    // Explicit braces reset the destination, while brace-elided writes
+    // keep any fields already assigned by another designator.
     if init.kind == ND_INIT {
         sub_sz u64 = ty_size(u)
-        if sub_sz > 0 && off + sub_sz <= si.size {
+        if (init.flags & NF_PARTIAL_INIT) == 0 && sub_sz > 0 && off + sub_sz <= si.size {
             mem_set(si.data + off, 0, sub_sz)
         }
         if k == TYK_ARRAY {
@@ -668,6 +669,26 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
     }
 }
 
+// Explicit member designators name the member, including injected names.
+// An implicit continuation selects the direct field by its ordinal.
+fn gen_designated_field(tid u32, d handle[Ast], out handle[FieldLookup]) bool {
+    if d.op != 0 { return ty_offsetof(tid, d.op, out) }
+    id u32 = ty_node(ty_unqual(tid)).aux1
+    r handle[RecordDef] = ty_record(id)
+    if d.value >= zext[u64](r.fields_len) { return false }
+    idx u32 = r.fields_start + trunc[u32](d.value)
+    f handle[FieldDef] = ty_field(idx)
+    out.found = true
+    out.is_bitfield = f.is_bitfield
+    out.field_idx = idx
+    out.ty = f.ty
+    out.bit_width = f.bit_width
+    out.record_id = id
+    out.byte_off = f.byte_off
+    out.bit_off = f.bit_off
+    return true
+}
+
 fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_ast handle[Ast], off u64, out_idx addr) void {
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
@@ -698,7 +719,7 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
         layout_record(n.aux1)
         rec handle[RecordDef] = ty_record(n.aux1)
         fl FieldLookup = {}
-        if ty_offsetof(u, desig.op, &fl) {
+        if gen_designated_field(u, desig, &fl) {
             // Compute top-level field index for continuation
             if fl.field_idx >= rec.fields_start && fl.field_idx < rec.fields_start + rec.fields_len {
                 out_idx[u64] = zext[u64](fl.field_idx - rec.fields_start)
@@ -1135,7 +1156,7 @@ fn gen_auto_init(dst_ptr u32, tid u32, init handle[Ast], zero_first bool) void f
 
     // Brace-enclosed initializer
     if init.kind == ND_INIT {
-        if zero_first {
+        if zero_first && (init.flags & NF_PARTIAL_INIT) == 0 {
             sz u64 = ty_size(u)
             if sz > 0 { gen_memset_const(dst_ptr, 0, sz, false) }
         }
@@ -1285,7 +1306,7 @@ fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[
         layout_record(n.aux1)
         rec handle[RecordDef] = ty_record(n.aux1)
         fl FieldLookup = {}
-        if ty_offsetof(u, desig.op, &fl) {
+        if gen_designated_field(u, desig, &fl) {
             if fl.field_idx >= rec.fields_start && fl.field_idx < rec.fields_start + rec.fields_len {
                 out_idx[u64] = zext[u64](fl.field_idx - rec.fields_start)
             }

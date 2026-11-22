@@ -22,7 +22,6 @@ gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: gcc -fexceptions runtime (_Unwi
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: gcc -fexceptions runtime (_Unwind_ForcedUnwind requires libgcc_s)
 gcc/gcc/testsuite/gcc.dg/cpp/embed-12.c exit-mismatch: C23 #embed side-effecting overwritten designated initializer
 gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc passes (exit=0), clang oracle timed out (exit=137)
-gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: parser #8 (GNU nested range designator continuation & brace-elided overwrite; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fenv rounding-mode fma test (-frounding-math)
 gcc/gcc/testsuite/gcc.dg/pr119151.c link-error: gcc-specific libgcc_s internal symbol (__register_frame_info)

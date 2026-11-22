@@ -164,6 +164,10 @@ fn se_builtin_strcmp(p handle[Parser], loc u32, a handle[Ast], b handle[Ast]) ha
 }
 
 fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {
+    return se_const_value_after(p, ty, init, path, null)
+}
+
+fn se_const_value_after(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath], previous handle[Ast]) handle[Ast] {
     if path == null {
         if init != null { return init }
         if ty_is_integer(ty) { return se_int(0, ty, 0) }
@@ -184,12 +188,13 @@ fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstP
         se_const_value(p, elem, null, path.rest)
     } else { null }
     if init == null { return result }
+    if (init.flags & NF_PARTIAL_INIT) != 0 && previous != null { result = previous }
     if init.kind != ND_INIT { return null }
     item handle[Ast] = init.a
     while item != null {
         designator handle[Ast] = item.b
         if designator == null {
-            if item.value == path.index { result = se_const_value(p, elem, item.a, path.rest) }
+            if item.value == path.index { result = se_const_value_after(p, elem, item.a, path.rest, result) }
             else if union_type { result = null }
         } else {
             query handle[ConstPath] = path
@@ -209,7 +214,7 @@ fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstP
                 query = query.rest
                 designator = designator.next
             }
-            if matched { result = se_const_value(p, target, item.a, query) }
+            if matched { result = se_const_value_after(p, target, item.a, query, result) }
             else if union_type && item.value != path.index { result = null }
         }
         item = item.next
@@ -363,14 +368,22 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
             record handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
             start u32 = record.fields_start
             idx = zext[u64](field.field_idx - start)
-            if idx >= zext[u64](record.fields_len) {
-                // The member is injected by an anonymous record.
+            while idx >= zext[u64](record.fields_len) {
+                // Keep injected anonymous members as explicit path levels
+                // so the following initializer can advance within them.
                 idx = 0
-                while idx < zext[u64](record.fields_len) {
-                    f handle[FieldDef] = ty_field(start + trunc[u32](idx))
+                for i u32 in 0..record.fields_len {
+                    f handle[FieldDef] = ty_field(start + i)
                     sub FieldLookup = {}
-                    if f.is_anon && ty_offsetof(f.ty, name, &sub) { break }
-                    idx += 1
+                    if !f.is_anon || !ty_offsetof(f.ty, name, &sub) { continue }
+                    if list.first == null { d.index = zext[u64](i) }
+                    anon handle[Ast] = pa_node(ND_DESIGNATOR, t.loc, f.ty)
+                    anon.value = zext[u64](i)
+                    pa_append(&list, anon)
+                    record = ty_record(ty_node(ty_unqual(f.ty)).aux1)
+                    start = record.fields_start
+                    idx = zext[u64](sub.field_idx - start)
+                    break
                 }
             }
             t.payload = name
@@ -389,6 +402,28 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
     d.first = list.first
     if d.first != null && !colon && !(pa_is_gnu(p) && plain_subscript) { try pa_expect(p, c"=") }
     else if plain_subscript { try pa_accept(p, c"=") }
+}
+
+// Continue inside the final subobject denoted by a nested designation.
+// A range ends at its upper index at each level. Once an inner aggregate
+// is exhausted, climb back to the enclosing struct or array.
+fn pa_next_designator(ty u32, current handle[Ast], outermost bool) handle[Ast] {
+    if current.next != null {
+        child handle[Ast] = pa_next_designator(current.ty, current.next, false)
+        if child != null {
+            next handle[Ast] = pa_node(ND_DESIGNATOR, current.loc, current.ty)
+            next.op = current.op
+            next.value = current.value
+            next.next = child
+            return next
+        }
+    }
+    if outermost { return null }
+    index u64 = se_init_next(ty, current.value + 1)
+    if index >= se_init_count(ty) { return null }
+    next handle[Ast] = pa_node(ND_DESIGNATOR, current.loc, se_init_elem(ty, index))
+    next.value = index
+    return next
 }
 
 fn pa_list_more(p handle[Parser]) bool fails {
@@ -432,6 +467,7 @@ fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out ha
     tree handle[Ast] = pa_node(ND_INIT, e.loc, out.ty)
     out.tree = tree
     tree.a = xs.first
+    tree.flags |= NF_PARTIAL_INIT
     if se_static_init_items(xs.first) { tree.flags |= NF_STATIC }
 }
 
@@ -506,9 +542,17 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
     idx u64 = se_init_next(ty, 0)
     max u64 = 0
     xs AstList = {}
+    continuation handle[Ast] = null
     while !(try pa_at(p, c"}")) {
         d Designation = {}
         try pa_designators(p, ty, &d)
+        if d.first == null && continuation != null {
+            d.first = continuation
+            last handle[Ast] = continuation
+            while last.next != null { last = last.next }
+            d.ty = last.ty
+            d.index = continuation.value
+        }
         if d.first != null { idx = d.index }
         elem InitResult = {}
         tok Token = try pa_peek(p)
@@ -541,6 +585,8 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
             try pa_init_element(p, dest, constant, &elem)
         }
         pa_add_init(&xs, elem.tree, d.first, idx)
+        continuation = null
+        if d.first != null { continuation = pa_next_designator(ty, d.first, true) }
         if idx + 1 > max { max = idx + 1 }
         idx = se_init_next(ty, idx + 1)
         if !(try pa_accept(p, c",")) { break }
