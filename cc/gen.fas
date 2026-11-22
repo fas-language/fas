@@ -849,6 +849,10 @@ fn gen_f64_to_f80_bits(bits u64, out_lo addr, out_hi addr) void {
 }
 
 fn gen_const_float(tid u32, f64_bits u64) u32 {
+    return gen_const_float_exact(tid, f64_bits, null)
+}
+
+fn gen_const_float_exact(tid u32, f64_bits u64, exact handle[FloatBits]) u32 {
     v u32 = gen_new_val()
     b handle[Buf] = gen_cur_buf()
     k u8 = ty_kind(tid)
@@ -869,7 +873,8 @@ fn gen_const_float(tid u32, f64_bits u64) u32 {
     } else if k == TYK_LDOUBLE {
         lo u64 = 0
         hi u16 = 0
-        gen_f64_to_f80_bits(f64_bits, &lo, &hi)
+        if exact == null { gen_f64_to_f80_bits(f64_bits, &lo, &hi) }
+        else { lo = exact.lo; hi = trunc[u16](exact.hi) }
         buf_hex(b, zext[u64](hi), 4)
         buf_hex(b, lo, 16)
     } else {

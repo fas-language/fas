@@ -560,7 +560,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         if (init.flags & 64) != 0 || init.kind == ND_FLOAT {
             if ty_is_real_float(elem_ty) {
                 gen_static_write_float(si, elem_ty, init.value, off)
-                gen_static_write_float(si, elem_ty, init.imag, off + elem_sz)
+                bits FloatBits = {}
+                if gen_static_f80_literal(init, &bits) {
+                    gen_static_write_f80(si, bits, off + elem_sz)
+                } else { gen_static_write_float(si, elem_ty, init.imag, off + elem_sz) }
             } else {
                 re_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.value)))
                 im_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.imag)))
@@ -577,6 +580,11 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
     if ty_is_real_float(u) {
+        bits FloatBits = {}
+        if u == TY_LDOUBLE && gen_static_f80_literal(init, &bits) {
+            gen_static_write_f80(si, bits, off)
+            return
+        }
         fbits u64 = gen_eval_const_float(init)
         gen_static_write_float(si, u, fbits, off)
         return
@@ -658,6 +666,32 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
     }
 }
 
+// Preserve a literal through sign operations and type-preserving casts.
+fn gen_static_f80_literal(n handle[Ast], out handle[FloatBits]) bool {
+    sign u64 = 0
+    while n != null {
+        if n.float_bits != null {
+            out.lo = n.float_bits.lo
+            out.hi = n.float_bits.hi ^ sign
+            return true
+        }
+        if n.kind == ND_UNARY {
+            op Bytes = cc_name(gc.p.names, n.op)
+            if bytes_eq_c(op, c"-") || (bytes_eq_c(op, c"~") && ty_is_complex(n.ty)) { sign ^= 0x8000 }
+            else if !bytes_eq_c(op, c"+") { return false }
+            n = n.a
+        } else if n.kind == ND_CAST && ty_unqual(n.ty) == ty_unqual(n.a.ty) { n = n.a }
+        else if n.kind == ND_GENERIC { n = n.b }
+        else { return false }
+    }
+    return false
+}
+
+fn gen_static_write_f80(si handle[StaticInit], bits FloatBits, off u64) void {
+    si_write_u64(si, off, bits.lo, 8)
+    si_write_u64(si, off + 8, bits.hi, 2)
+}
+
 fn gen_static_write_float(si handle[StaticInit], tid u32, f64_bits u64, off u64) void {
     k u8 = ty_kind(tid)
     if k == TYK_FLOAT16 {
@@ -671,8 +705,7 @@ fn gen_static_write_float(si handle[StaticInit], tid u32, f64_bits u64, off u64)
         lo u64 = 0
         hi u16 = 0
         gen_f64_to_f80_bits(f64_bits, &lo, &hi)
-        si_write_u64(si, off, lo, 8)
-        si_write_u64(si, off + 8, zext[u64](hi), 2)
+        gen_static_write_f80(si, {lo, zext[u64](hi)}, off)
     }
 }
 
