@@ -1844,8 +1844,8 @@ let sext_const w (k : int64) = if w >= 64 then k else Int64.shift_right (Int64.s
    (as GCC allows). *)
 (* [labels]: the blocks an asm goto may jump to; the template names them
    %lN after the operands, as their block symbols *)
-let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array)
-    ~(ins : F.asm_operand array) ~aargs ~clobbers =
+let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array)
+    ~(ins : F.asm_operand array) ~aargs ~clobbers : unit -> unit =
   let intel = aflags land F.asm_intel <> 0 in
   let pairs l = Array.map (fun (o : F.asm_operand) -> (o.aname, o.acon)) l in
   let st =
@@ -2085,30 +2085,36 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
          aout;
          aclob = dedup (List.map phys_of_name clob_names);
        });
-  (* flag outputs right away, then the outputs out of their registers *)
-  let flag_vals =
-    List.filter_map
-      (fun k ->
-        match (con k).flag with
-        | Some cc ->
-            let d = fresh cx Gpr in
-            emit cx (Setcc (cond_of_cc cc, d));
-            Some (k, d)
-        | None -> None)
-      (List.init nout Fun.id)
+  (* pre-allocate virtual registers for results so asm_goto can define them on every outgoing edge *)
+  let res_vregs =
+    let next = ref 0 in
+    Array.init nout (fun k ->
+      let c = con k in
+      if Fir_asm.output_is_result c then begin
+        let res = ir.results.(!next) in
+        incr next;
+        let d =
+          match c.flag with
+          | Some _ -> fresh cx Gpr
+          | None -> fresh cx (cls_of_ty (oty k))
+        in
+        Hashtbl.replace cx.vals (F.resolve cx.fn res) d;
+        Some d
+      end
+      else None)
   in
-  let next = ref 0 in
-  for k = 0 to nout - 1 do
-    let c = con k in
-    if Fir_asm.output_is_result c then begin
-      let res = ir.results.(!next) in
-      incr next;
-      match List.assoc_opt k flag_vals with
-      | Some d -> def cx res d
-      | None -> (
+  fun () ->
+    (* flag outputs right away, then the outputs out of their registers *)
+    for k = 0 to nout - 1 do
+      match ((con k).flag, res_vregs.(k)) with
+      | Some cc, Some d -> emit cx (Setcc (cond_of_cc cc, d))
+      | _ -> ()
+    done;
+    for k = 0 to nout - 1 do
+      match ((con k).flag, res_vregs.(k)) with
+      | None, Some d ->
           let r = phys_of_name (Option.get reg_of.(k)) in
           let t = oty k in
-          let d = fresh cx (cls_of_ty t) in
           (match (r, cls_of_ty t) with
           | G _, Gpr | X _, Xmm -> emit cx (Copy (d, r))
           | X _, Gpr -> emit cx (Movxg (true, d, r))
@@ -2116,10 +2122,12 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
           | V _, _ -> assert false);
           (match t with
           | F.Int w when w < 64 -> norm cx (if w <= 8 && w > 1 then 8 else if w <= 16 && w > 1 then 16 else if w = 1 then 1 else 32) d
-          | _ -> ());
-          def cx res d)
-    end
-  done
+          | _ -> ())
+      | _ -> ()
+    done
+
+let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
+  (asm_core ~labels cx ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers) ()
 
 
 let inst c i =
@@ -2383,12 +2391,47 @@ let term c (t : F.term) =
         targets;
       emit c (Copy (G R11, use c v));
       set_term c (Jmpr (G R11, Array.to_list targets))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } ->
       Array.iter
         (fun b -> if Array.length (F.block c.fn b).params > 0 then unsupported "asm_goto to a block with parameters")
         (Array.append [| fall |] labels);
-      asm ~labels c { op = F.Nop; results = [||]; loc = 0 } ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers;
-      set_term c (Asmgoto (fall, Array.to_list labels))
+      if Array.length aresults = 0 then begin
+        asm ~labels c { op = F.Nop; results = [||]; loc = 0 } ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers;
+        set_term c (Asmgoto (fall, Array.to_list labels))
+      end
+      else begin
+        (* Output copies must execute on BOTH the fallthrough edge and every
+           indirect label edge (C23 / Clang 16+ semantics). Route every edge
+           through a dedicated trampoline block that copies outputs into their
+           virtual registers before jumping to the real target. *)
+        let fall_tramp = new_block c.mf in
+        let tramp_of = Hashtbl.create 4 in
+        let tramps = ref [ (fall_tramp, fall) ] in
+        let tramp_labels =
+          Array.map
+            (fun b ->
+              match Hashtbl.find_opt tramp_of b with
+              | Some tb -> tb
+              | None ->
+                  let tb = new_block c.mf in
+                  Hashtbl.replace tramp_of b tb;
+                  tramps := (tb, b) :: !tramps;
+                  tb)
+            labels
+        in
+        let emit_out =
+          asm_core ~labels:tramp_labels c { op = F.Nop; results = aresults; loc = 0 } ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
+        in
+        set_term c (Asmgoto (fall_tramp, Array.to_list tramp_labels));
+        let saved_cur = c.cur in
+        List.iter
+          (fun (tb, real_b) ->
+            c.cur <- tb;
+            emit_out ();
+            set_term c (Jmp real_b))
+          (List.rev !tramps);
+        c.cur <- saved_cur
+      end
 
 (* ---------- entry ---------- *)
 

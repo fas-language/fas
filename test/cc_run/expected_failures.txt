@@ -45,7 +45,6 @@ gcc/gcc/testsuite/gcc.dg/fixuns-trunc-1.c exit-mismatch: parser #5 (decimal floa
 gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: parser #8 (GNU nested range designator continuation & brace-elided overwrite; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/memcmp-1.c link-error: parser #4 (concatenated asm("" "memcmp") string literal; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: gcc -O2 UB/trap test (clang aborts at -O0)
-gcc/gcc/testsuite/gcc.dg/pr107385.c fir-error: Fir gap #3 (asm_goto with outputs unsupported; see cc-ast-requests.md)
 gcc/gcc/testsuite/gcc.dg/pr114831-2.c exit-mismatch: C23 typeof(comma-expr-of-VLA) side-effect evaluation
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fenv rounding-mode fma test (-frounding-math)
 gcc/gcc/testsuite/gcc.dg/pr119001-1.c fcc-error: parser/sema: invalid flexible array member

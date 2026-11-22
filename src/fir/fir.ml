@@ -360,13 +360,15 @@ type term =
   | Asm_goto of {
       tmpl : string;
       aflags : int;
+      outs : asm_operand array;
       ins : asm_operand array;
-      aargs : value array;  (** one per input *)
+      aargs : value array;  (** outputs that take an arg (indirect / inout), then inputs *)
+      aresults : value array;  (** one per non-indirect output, defined on fall and all label edges *)
       clobbers : string array;
       fall : block;  (** where control goes when the asm falls through *)
-      labels : block array;  (** the blocks the template may jump to: %lN, N = inputs + i *)
+      labels : block array;  (** the blocks the template may jump to: %lN, N = outs + inputs + i *)
     }
-      (** GNU asm goto without outputs; every target block has no
+      (** GNU asm goto (with optional outputs); every target block has no
           parameters *)
   | Ret of value array
   | Unreachable
@@ -406,6 +408,7 @@ let limbs_of_int64 width (x : int64) =
 type def =
   | Result of inst * int
   | Param of block * int
+  | Term_result of block * int  (** result k of a block's terminator (asm_goto outputs) *)
   | Const of const
   | Alias of value  (** replaced: read the target instead *)
   | Unset
@@ -933,7 +936,12 @@ let remove_unreachable_blocks f =
     Array.iteri
       (fun b (br : block_rec) ->
         if seen.(b) then ignore (Vec.push f.blocks br)
-        else Array.iter (fun p -> Vec.set f.defs p Unset) br.params)
+        else begin
+          Array.iter (fun p -> Vec.set f.defs p Unset) br.params;
+          match br.term with
+          | Asm_goto { aresults; _ } -> Array.iter (fun r -> Vec.set f.defs r Unset) aresults
+          | _ -> ()
+        end)
       old;
     let t (x : target) = { x with dest = renum.(x.dest) } in
     Vec.iteri
@@ -945,7 +953,9 @@ let remove_unreachable_blocks f =
           | Br (c, x, y, w) -> Br (c, t x, t y, w)
           | Switch (v, d, cases, w) -> Switch (v, t d, Array.map (fun (k, x) -> (k, t x)) cases, w)
           | Indirect_br (v, bs) -> Indirect_br (v, Array.map (fun b -> renum.(b)) bs)
-          | Asm_goto a -> Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
+          | Asm_goto a ->
+              Array.iteri (fun k r -> Vec.set f.defs r (Term_result (b, k))) a.aresults;
+              Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
           | (Ret _ | Unreachable) as term -> term))
       f.blocks;
     true

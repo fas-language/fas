@@ -456,5 +456,50 @@ func @res (i32) -> (ptr) local {
 }
 ifunc @bad global = @res
 |};
+  (* asm_goto with outputs: parse/print, verifier, native + LLVM *)
+  let ag_out_src =
+    {|
+triple "x86_64-unknown-linux-gnu"
+func @ag_out (i64) -> (i64) global {
+^e(%x: i64):
+  %a, %b = asm_goto volatile "addq $10, %0\0a\09movq $32, %1\0a\09testq %2, %2\0a\09jnz %l3" out("=r" i64, "=r" i64) in("0" i64 %x) ^fall [^taken]
+^fall:
+  %s1 = add i64 %a, %b
+  ret %s1
+^taken:
+  %s2 = add i64 %a, %b
+  %s3 = add i64 %s2, i64 100
+  ret %s3
+}
+|}
+  in
+  (match parse "asm_goto_outputs" ag_out_src with
+  | None -> ()
+  | Some m -> (
+      let printed = Fir_print.module_to_string m in
+      (match parse "asm_goto_outputs_roundtrip" printed with None -> () | Some _ -> ());
+      let ll = Fir_llvm.render m in
+      let has_sub s sub =
+        let n = String.length s and k = String.length sub in
+        let rec loop i = i + k <= n && (String.sub s i k = sub || loop (i + 1)) in
+        loop 0
+      in
+      check "asm_goto_outputs llvm callbr" (has_sub ll "callbr { i64, i64 } asm sideeffect");
+      match Mir_driver.compile_object ~optimization:0 m with
+      | Error e ->
+          incr failures;
+          Printf.printf "FAIL asm_goto_outputs: compile_object: %s\n%!" e
+      | Ok _ -> ()));
+  rejects "asm_goto tied mismatch" "is tied to output 0"
+    {|
+func @bad (i32) -> (i64) global {
+^e(%x: i32):
+  %a = asm_goto "" out("=r" i64) in("0" i32 %x) ^fall [^lab]
+^fall:
+  ret %a
+^lab:
+  ret %a
+}
+|};
   if Sys.getenv_opt "FIR_SHOW" <> None then (match Fir_parse.parse_module everything with m -> print_string (Fir_print.module_to_string m));
   if !failures > 0 then (Printf.printf "%d failures\n" !failures; exit 1) else print_endline "fir: ok"

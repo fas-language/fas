@@ -613,7 +613,16 @@ let rebuild_term cx (b : block) =
   | Switch (v, d, cases, w) ->
       set_term (Switch (get1 cx v, target_args cx d, Array.map (fun (key, t) -> (key, target_args cx t)) cases, w))
   | Indirect_br (v, bs) -> set_term (Indirect_br (get1 cx v, bs))
-  | Asm_goto g -> set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs })
+  | Asm_goto g ->
+      let aresults =
+        Array.mapi
+          (fun k r ->
+            let nr = new_value cx.g (Term_result (cx.b, k)) (ty_of cx.f r) in
+            set cx r [| nr |];
+            nr)
+          g.aresults
+      in
+      set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs; aresults })
   | Unreachable -> set_term Unreachable
 
 (* ---------- functions ---------- *)

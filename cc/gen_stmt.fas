@@ -473,7 +473,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                     }
                     if found_l {
                         buf_str(&goto_tmpl, c"%l")
-                        buf_dec_u64(&goto_tmpl, in_vals.n + lidx)
+                        buf_dec_u64(&goto_tmpl, out_nodes.n + in_vals.n + lidx)
                         ti = tj + 1
                         continue
                     }
@@ -482,13 +482,75 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             buf_u8(&goto_tmpl, tmpl.p[u8, ti])
             ti += 1
         }
+        has_reg_out bool = false
+        for i usize in 0..out_res_vs.n {
+            if vec_get(&out_res_vs, i) != 0 { has_reg_out = true }
+        }
         fall_blk u32 = gen_new_block()
         blk handle[GenBlock] = gen_cur_block()
         blk.terminated = true
         gen_add_succ(blk, fall_blk)
+        // Collect target blocks (use trampoline blocks when there are register outputs so
+        // outputs are stored to their C lvalues on indirect edges too, per C23 / Clang 16+).
+        goto_tramps Vec[u32] = {}
+        goto_reals Vec[u32] = {}
+        defer { vec_free(&goto_tramps); vec_free(&goto_reals) }
+        gl_c handle[Ast] = handle_from_addr(n.extra)
+        while gl_c != null {
+            lbl_c handle[Label] = handle_from_addr(gl_c.extra)
+            real_blk u32 = gen_get_label_block(lbl_c)
+            if has_reg_out {
+                tb u32 = gen_new_block()
+                vec_push(&goto_tramps, tb)
+                vec_push(&goto_reals, real_blk)
+                gen_add_succ(blk, tb)
+            } else {
+                vec_push(&goto_tramps, real_blk)
+                vec_push(&goto_reals, real_blk)
+                gen_add_succ(blk, real_blk)
+            }
+            gl_c = gl_c.next
+        }
         b handle[Buf] = &blk.term
-        buf_str(b, c"  asm_goto volatile ")
+        buf_str(b, c"  ")
+        if has_reg_out {
+            first_r bool = true
+            for i usize in 0..out_res_vs.n {
+                rv u32 = vec_get(&out_res_vs, i)
+                if rv != 0 {
+                    if !first_r { buf_str(b, c", ") }
+                    first_r = false
+                    gen_emit_val(b, rv)
+                }
+            }
+            buf_str(b, c" = ")
+        }
+        buf_str(b, c"asm_goto volatile ")
         fir_emit_quoted_bytes(b, goto_tmpl.p, goto_tmpl.n)
+        if out_nodes.n > 0 {
+            buf_str(b, c" out(")
+            for i usize in 0..out_nodes.n {
+                if i > 0 { buf_str(b, c", ") }
+                onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+                cb Buf = {}
+                if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+                if onode.op != 0 {
+                    buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                }
+                fir_emit_quoted_bytes(b, cb.p, cb.n)
+                buf_free(&cb)
+                buf_u8(b, 32)
+                gen_emit_fir_ty(b, vec_get(&out_tids, i))
+                if vec_get(&out_is_mem, i) != 0 {
+                    buf_u8(b, 32)
+                    gen_emit_val(b, vec_get(&out_ptrs, i))
+                } else if vec_get(&out_is_rw, i) != 0 {
+                    buf_u8(b, 32)
+                    gen_emit_val(b, vec_get(&out_old_vs, i))
+                }
+            }
+            buf_u8(b, 41)
+        }
         if in_vals.n > 0 {
             buf_str(b, c" in(")
             for i usize in 0..in_vals.n {
@@ -526,19 +588,34 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         buf_u8(b, 32)
         gen_emit_lbl(b, fall_blk)
         buf_str(b, c" [")
-        gl handle[Ast] = handle_from_addr(n.extra)
-        first_l bool = true
-        while gl != null {
-            if !first_l { buf_str(b, c", ") }
-            first_l = false
-            lbl handle[Label] = handle_from_addr(gl.extra)
-            lbl_blk u32 = gen_get_label_block(lbl)
-            gen_add_succ(blk, lbl_blk)
-            gen_emit_lbl(b, lbl_blk)
-            gl = gl.next
+        for i usize in 0..goto_tramps.n {
+            if i > 0 { buf_str(b, c", ") }
+            gen_emit_lbl(b, vec_get(&goto_tramps, i))
         }
         buf_str(b, c"]\n")
+        if has_reg_out {
+            for i usize in 0..goto_tramps.n {
+                gen_switch_block(vec_get(&goto_tramps, i))
+                for j usize in 0..out_res_vs.n {
+                    rv u32 = vec_get(&out_res_vs, j)
+                    if rv != 0 {
+                        ot u32 = vec_get(&out_tids, j)
+                        gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                    }
+                }
+                gen_term_jump(vec_get(&goto_reals, i))
+            }
+        }
         gen_switch_block(fall_blk)
+        if has_reg_out {
+            for j usize in 0..out_res_vs.n {
+                rv u32 = vec_get(&out_res_vs, j)
+                if rv != 0 {
+                    ot u32 = vec_get(&out_tids, j)
+                    gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                }
+            }
+        }
         return
     }
 

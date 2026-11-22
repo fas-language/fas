@@ -426,6 +426,8 @@ type fcx = {
   mutable nslot : int;
   fsig : lsig;  (** this function's lowered signature *)
   pclmul : bool;  (** the target has pclmulqdq (clmul) *)
+  cbr_map : (value, string * string * int) Hashtbl.t;
+  mutable cur_block : int;
 }
 
 let temp cx =
@@ -482,6 +484,9 @@ and v cx x =
   | Const c -> const_text cx c
   | Param (0, k) -> "%a" ^ string_of_int k
   | Result _ | Param _ -> "%v" ^ string_of_int x
+  | Term_result _ ->
+      if Hashtbl.mem cx.cbr_map x then Printf.sprintf "%%v%d.b%d" x cx.cur_block
+      else "%v" ^ string_of_int x
   | Alias _ | Unset -> unsupported "@%s: undefined value %d" f.name x
 
 let tyv cx x = ty_of cx.f (resolve cx.f x)
@@ -827,9 +832,15 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
   | [] -> line cx call
   | [ _ ] -> line cx (res ir 0 ^ " = " ^ call)
   | _ ->
-      let t = temp cx in
-      line cx (t ^ " = " ^ call);
-      List.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (res ir k) ret t k)) rtys
+      if goto <> None then begin
+        let t = Printf.sprintf "%%cbr%d" ir.results.(0) in
+        line cx (t ^ " = " ^ call)
+      end
+      else begin
+        let t = temp cx in
+        line cx (t ^ " = " ^ call);
+        List.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (res ir k) ret t k)) rtys
+      end
 
 let emit_inst cx (ir : inst_rec) =
   let f = cx.f in
@@ -1750,11 +1761,11 @@ let emit_term cx b (labels : string array) =
       line cx
         (Printf.sprintf "indirectbr %s, [%s]" (tv cx x)
            (String.concat ", " (Array.to_list (Array.mapi (fun k _ -> lab k) bs))))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; labels; _ } ->
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; labels; _ } ->
       emit_asm cx
         ~goto:(labels_.(0), Array.to_list (Array.mapi (fun k _ -> labels_.(k + 1)) labels))
-        { op = Nop; results = [||]; loc = 0 }
-        ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers
+        { op = Nop; results = aresults; loc = 0 }
+        ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
   | Ret [||] -> line cx "ret void"
   | Ret [| x |] -> (
       match cx.fsig.rplan with
@@ -2104,11 +2115,22 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                          fid fid line d.subroutine_type line);
                     Some (id, file, line)
             in
+            let cbr_map = Hashtbl.create 4 in
+            for b = 0 to num_blocks f - 1 do
+              match (block f b).term with
+              | Asm_goto { aresults; _ } when Array.length aresults >= 2 ->
+                  let ret_ty =
+                    "{ " ^ String.concat ", " (Array.to_list (Array.map (fun r -> lty (ty_of f r)) aresults)) ^ " }"
+                  in
+                  let t = Printf.sprintf "%%cbr%d" aresults.(0) in
+                  Array.iteri (fun k r -> Hashtbl.replace cbr_map r (t, ret_ty, k)) aresults
+              | _ -> ()
+            done;
             let cx =
               { m; f; o = { buf = Buffer.create 4096; counted = o.counted; budget = o.budget }; sym; intrinsics;
                 intrinsic_order; tmp = 0; d; sp = Option.map (fun (id, file, _) -> (id, file)) sp;
                 cur = (match sp with Some (_, file, line) -> (file, line, 0) | None -> ("", 0, 0));
-                allocas = Buffer.create 256; nslot = 0; fsig; pclmul }
+                allocas = Buffer.create 256; nslot = 0; fsig; pclmul; cbr_map; cur_block = 0 }
             in
             (* LLVM parameters: %a<k> for a plain one, %a<k>.<j> for the
                parts of an agg, %a<k>.p for a byval pointer to a vector or
@@ -2160,6 +2182,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                 | _ -> ())
               fsig.hows;
             for b = 0 to num_blocks f - 1 do
+              cx.cur_block <- b;
               let br = block f b in
               if b > 0 then begin
                 add o "\n";
@@ -2174,8 +2197,38 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                     | ins ->
                         add o
                           (Printf.sprintf "  %%v%d = phi %s %s\n" p t
-                             (String.concat ", " (List.map (fun (args, l) -> Printf.sprintf "[ %s, %%%s ]" (v cx args.(k)) l) ins))))
+                             (String.concat ", "
+                                (List.map
+                                   (fun (args, l) ->
+                                     let x = resolve f args.(k) in
+                                     let vtxt =
+                                       if Hashtbl.mem cx.cbr_map x then
+                                         let pred_b =
+                                           let s = String.sub l 1 (String.length l - 1) in
+                                           match String.index_opt s '.' with
+                                           | Some dot -> int_of_string (String.sub s 0 dot)
+                                           | None -> int_of_string s
+                                         in
+                                         Printf.sprintf "%%v%d.b%d" x pred_b
+                                       else v cx x
+                                     in
+                                     Printf.sprintf "[ %s, %%%s ]" vtxt l)
+                                   ins))))
                   br.params;
+              if Hashtbl.length cx.cbr_map > 0 then begin
+                let need = Hashtbl.create 4 in
+                let note x =
+                  let x = resolve f x in
+                  if Hashtbl.mem cx.cbr_map x then Hashtbl.replace need x ()
+                in
+                Vec.iter (fun i -> iter_op_uses note (inst f i).op) br.insts;
+                iter_term_uses note br.term;
+                Hashtbl.iter
+                  (fun x () ->
+                    let t, ret_ty, k = Hashtbl.find cx.cbr_map x in
+                    line cx (Printf.sprintf "%%v%d.b%d = extractvalue %s %s, %d" x b ret_ty t k))
+                  need
+              end;
               Vec.iter (fun i -> emit_inst cx (inst f i)) br.insts;
               emit_term cx b edge_labels.(b);
               List.iter
