@@ -45,6 +45,41 @@ fn se_local(p handle[Parser], name u32) handle[Symbol] {
     return handle_from_addr(a)
 }
 
+// Alias and IFUNC attributes create a definition even without a body or
+// initializer. Weak references name a different symbol and must be local.
+fn se_linkage_attributes(p handle[Parser], s handle[Symbol], prior handle[Symbol],
+                         definition bool, tentative bool) bool fails {
+    alias bool = pa_has_attr(p, s.attrs, c"alias")
+    ifunc bool = pa_has_attr(p, s.attrs, c"ifunc")
+    weak bool = pa_has_attr(p, s.attrs, c"weak")
+    if weak && s.linkage != 2 { try pa_error(p, s.loc, c"weak declaration requires external linkage") }
+    if ifunc && (!ty_is_func(s.ty) || weak ||
+        (prior != null && pa_has_attr(p, prior.attrs, c"weak"))) {
+        try pa_error(p, s.loc, c"ifunc requires a non-weak function declaration")
+    }
+    if weak && prior != null && pa_has_attr(p, prior.attrs, c"ifunc") {
+        try pa_error(p, s.loc, c"ifunc cannot be declared weak")
+    }
+    if alias || ifunc {
+        if (alias && ifunc) || definition || (tentative && s.linkage == 2) ||
+            (prior != null && (prior.defined || prior.tentative)) {
+            try pa_error(p, s.loc, c"alias or ifunc conflicts with another definition")
+        }
+    }
+    a handle[Attr] = s.attrs
+    while a != null && !pa_attr_name(p, a, c"weakref") { a = a.next }
+    if a != null {
+        if a.args.n == 0 && !alias {
+            try pa_error(p, a.loc, c"weakref requires an alias target")
+        }
+        if s.linkage != 1 { try pa_error(p, a.loc, c"weakref requires internal linkage") }
+    }
+    if definition && prior != null && pa_has_attr(p, prior.attrs, c"weakref") {
+        try pa_error(p, s.loc, c"definition conflicts with an earlier weakref")
+    }
+    return alias || ifunc
+}
+
 fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative bool) handle[Symbol] fails {
     prior handle[Symbol] = se_local(p, s.name)
     if s.linkage != 0 && prior == null {
@@ -71,6 +106,9 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
             }
         }
     }
+    if prior != null && prior.linkage == 1 && s.linkage == 2 &&
+        (s.storage == SC_EXTERN || ty_is_func(s.ty)) { s.linkage = 1 }
+    attr_definition bool = try se_linkage_attributes(p, s, prior, definition, tentative)
     if definition && ty_is_func(s.ty) && s.storage == SC_EXTERN && (s.flags & 1) != 0 &&
         (pa_has_attr(p, s.attrs, c"gnu_inline") || (prior != null && pa_has_attr(p, prior.attrs, c"gnu_inline"))) {
         s.flags |= SF_GNU_EXTERN_INLINE
@@ -81,7 +119,6 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
             (prior.linkage == 0 && s.storage != SC_TYPEDEF) {
             try pa_error(p, s.loc, c"redeclaration of name")
         }
-        if prior.linkage == 1 && s.linkage == 2 && (s.storage == SC_EXTERN || ty_is_func(s.ty)) { s.linkage = 1 }
         if prior.linkage != s.linkage || prior.thread_local != s.thread_local {
             try pa_error(p, s.loc, c"conflicting linkage or storage duration")
         }
@@ -112,7 +149,7 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         // are visible when the TU's symbols are finalized.
         if s.linkage != 0 { vec_push[addr](&p.objects, handle_addr(s)) }
     }
-    s.defined = s.defined || definition
+    s.defined = s.defined || definition || attr_definition
     s.tentative = s.tentative || tentative
     se_bind(p, s)
     return s
