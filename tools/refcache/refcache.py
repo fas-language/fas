@@ -269,6 +269,25 @@ class Cache:
 
     def cached(self, inv, env, input, execute, cache_failures):
         descriptor = inv.descriptor()
+        before = {}
+        if inv.outs:
+            umask = re.search(r"^Umask:\s+([0-7]+)$", Path("/proc/self/status").read_text(), re.MULTILINE)
+            if umask is None:
+                return execute(inv.argv)
+            for name in inv.outs:
+                before[name] = self.output_stat(inv.path(name))
+                if before[name] is not None and (
+                    not stat.S_ISREG(before[name].st_mode) or before[name].st_nlink != 1
+                ):
+                    return execute(inv.argv)
+            descriptor["output_context"] = {
+                "umask": int(umask[1], 8),
+                "modes": {inv.canonical(name): stat.S_IMODE(st.st_mode) if st else None
+                          for name, st in before.items()},
+            }
+        if inv.c and any(flag == "-flto" or flag.startswith("-flto=") for flag in inv.argv[1:]):
+            # GCC includes random identifiers in LTO object section names.
+            return execute(inv.argv)
         try:
             identity = self.identity(inv, env)
         except subprocess.TimeoutExpired:
@@ -302,7 +321,6 @@ class Cache:
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
-        before = {name: self.output_stat(inv.path(name)) for name in inv.outs}
         try:
             initial = self.dependencies(inv, map(lambda p: inv.canonical(str(inv.path(p))), inv.deps))
         except OSError:
@@ -393,7 +411,7 @@ class Cache:
                     continue
                 record = None
                 if current is not None:
-                    if target.is_symlink() or not stat.S_ISREG(current.st_mode):
+                    if not stat.S_ISREG(current.st_mode) or current.st_nlink != 1:
                         return result
                     data = target.read_bytes()
                     payloads.append(data)
@@ -445,7 +463,7 @@ class Cache:
     @staticmethod
     def output_stat(path):
         try:
-            return path.stat()
+            return path.lstat()
         except FileNotFoundError:
             return None
 
@@ -532,6 +550,11 @@ class Cache:
 
     def verify_entry(self, entry):
         descriptor, identity, recorded_env, _ = entry["request"]
+        output_context = descriptor.get("output_context")
+        if (descriptor["outs"] and output_context is None) or (
+            descriptor["c"] and any(flag == "-flto" or flag.startswith("-flto=") for flag in descriptor["argv"][1:])
+        ):
+            return None
         env = dict(os.environ)
         for key in relevant_env(env, descriptor["env_keys"]):
             env.pop(key)
@@ -567,17 +590,26 @@ class Cache:
                     return None
             for target in output_args.values():
                 inv.path(target).parent.mkdir(parents=True, exist_ok=True)
+            original_modes = {}
+            if output_context:
+                for name, mode in output_context["modes"].items():
+                    if mode is not None:
+                        live_name = inv.expand(name)
+                        atomic_write(inv.path(output_args[live_name]), b"", mode)
+                        original_modes[live_name] = mode
             command = tuple(output_args.get(arg, arg) for arg in inv.argv)
             input = None if entry["stdin"] is None else self.get(entry["stdin"])
             result = subprocess.run(command, cwd=inv.cwd, env=env, input=input, capture_output=True,
-                                    stdin=subprocess.DEVNULL if input is None else None, timeout=60)
+                                    stdin=subprocess.DEVNULL if input is None else None, timeout=60,
+                                    umask=output_context["umask"] if output_context else -1)
             stdout, stderr, outputs = self.load_result(entry)
             if (result.returncode, result.stdout, result.stderr) != (entry["code"], stdout, stderr):
                 return False
             expected = {inv.expand(name): (data, mode) for name, data, mode in outputs}
             for name, path in output_args.items():
                 output = Path(path) if Path(path).is_absolute() else inv.path(path)
-                data, mode = expected.get(name, (None, None))
+                prior = (b"", original_modes[name]) if name in original_modes else (None, None)
+                data, mode = expected.get(name, prior)
                 if output.exists():
                     if output.read_bytes() != data or stat.S_IMODE(output.stat().st_mode) != mode:
                         return False

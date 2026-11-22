@@ -24,8 +24,8 @@ private `-MD` dependency file including system headers. Clang preprocessing
 also records its include trace to cache diagnostics from missing headers. A
 subsequent appearance of a missing header invalidates those entries. Hosted links use
 the GNU linker map to record loaded files. C commands that fail to report
-dependencies, assembly that reads extra files, and linker commands with
-undeclared search or script inputs run directly. The OCaml linker adapter
+dependencies, LTO compiles, assembly that reads extra files, and linker commands
+with undeclared search or script inputs run directly. The OCaml linker adapter
 passes through failures because some diagnostics vary between identical runs.
 The CLI keys piped or redirected
 stdin by its bytes. Use `--stdin` to explicitly read stdin to EOF.
@@ -53,7 +53,9 @@ files when stat information changes. The store treats missing or damaged
 records as misses. Writers atomically replace files, and garbage collection
 takes an exclusive store lock before removing records and orphaned blobs.
 Use private output destinations for concurrent commands. Output publication
-on replay uses atomic rename per file.
+on replay uses atomic rename per file. The output key includes the current
+umask and permissions of any existing destination. Special files, symlinks,
+and multiply linked destinations run directly.
 
 Verification samples entries with available inputs and the same tool identity.
 It rehydrates declared scratch inputs in a private directory and checks the

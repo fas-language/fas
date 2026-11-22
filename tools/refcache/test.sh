@@ -149,9 +149,36 @@ cmp output input
 printf other > input
 run output
 cmp output input
-rm output
+printf third >output
 run output
 cmp output input
+
+# Cover creation under two masks, replacement, and a non-regular destination.
+cat > mode-oracle <<'SH_MODE'
+#!/bin/sh
+if [ "$1" = --version ]; then
+    echo mode-oracle
+    exit
+fi
+printf x >>mode-calls
+printf x >"$1"
+SH_MODE
+chmod +x mode-oracle
+mode_run() { "$cache" run --ns mode --out mode-output -- ./mode-oracle mode-output; }
+(umask 022; mode_run)
+[[ $(stat -c %a mode-output) == 644 ]]
+rm mode-output
+(umask 077; mode_run)
+[[ $(stat -c %a mode-output) == 600 ]]
+(umask 022; mode_run)
+[[ $(stat -c %a mode-output) == 600 ]]
+rm mode-output
+(umask 022; mode_run)
+[[ $(stat -c %a mode-output) == 644 && $(wc -c <mode-calls) == 3 ]]
+rm mode-output
+ln -s /dev/null mode-output
+(umask 022; mode_run)
+[[ -L mode-output && $(wc -c <mode-calls) == 4 ]]
 
 "$here/bench.py" self-test
 echo 'refcache: all tests passed'
