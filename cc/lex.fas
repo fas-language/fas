@@ -309,9 +309,13 @@ fn lex_next(n handle[CNames], l handle[Lexer], pasted bool) Token fails {
         while true {
             c u8 = start[u8, width]
             prev u8 = start[u8, width - 1] | 32
-            if cc_id_ascii(c, false, n.gnu) || c == 46 ||
-                ((prev == 101 || prev == 112) && (c == 43 || c == 45)) ||
-                (c == 39 && cc_id_ascii(start[u8, width + 1], false, n.gnu)) {
+            // A digit separator and its following character are one
+            // pp-number production. In 0x0'e-1 the e cannot take the -.
+            if c == 39 && cc_id_ascii(start[u8, width + 1], false, n.gnu) {
+                width += 2
+            } else if cc_id_ascii(c, false, n.gnu) || c == 46 ||
+                ((prev == 101 || prev == 112) && (c == 43 || c == 45) &&
+                (width < 2 || start[u8, width - 2] != 39)) {
                 width += 1
             } else if c >= 128 || (c == 92 && (start[u8, width + 1] == 117 || start[u8, width + 1] == 85)) {
                 r Rune = if c == 92 { cc_ucn(start + width) } else { utf8(start + width) }

@@ -68,3 +68,16 @@ static int vla_switch(int n) {
     default: return 0;
     }
 }
+static_assert(0x0'e-0xe == 0);
+
+struct ConstRecord { int head; int member[2]; };
+constexpr struct ConstRecord source = {2, {4, 6}};
+constexpr struct ConstRecord copy = source;
+struct ConstRecord static_copy = copy;
+static_assert(copy.head == 2);
+
+extern int length;
+void prototype(int a[(int){length}]);
+
+#line 1'23
+static_assert(__LINE__ == 123);

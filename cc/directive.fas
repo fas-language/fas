@@ -291,16 +291,28 @@ fn pp_pragma(p handle[Pp], args handle[Vec[Token]], loc u32) Token fails {
     return cc_token(TK_PRAGMA, F_BOL, loc, cc_intern(n, buf_bytes(&b)))
 }
 
+fn pp_line_number(n handle[CNames], t Token) u64 fails {
+    spelling Bytes = cc_spelling(n, t)
+    value u64 = 0
+    if t.kind != TK_NUM { try cc_error(n, t.loc, c"invalid line number") }
+    for i usize in 0..spelling.n {
+        c u8 = spelling.p[u8, i]
+        if c == 39 && i != 0 && i + 1 < spelling.n && cc_digit(spelling.p[u8, i + 1]) { continue }
+        if !cc_digit(c) { try cc_error(n, t.loc, c"invalid line number") }
+        digit u64 = zext[u64](c - 48)
+        if value > (~0 - digit) / 10 { try cc_error(n, t.loc, c"line number out of range") }
+        value = value * 10 + digit
+    }
+    return value
+}
+
 fn pp_line(p handle[Pp], f handle[Frame], args handle[Vec[Token]], loc u32, marker bool) void fails {
     n handle[CNames] = &p.names
     l handle[Lexer] = &f.lexer
     expanded Vec[Token] = {}
     try expand_list(p, args.p, args.n, &expanded, false)
     if expanded.n == 0 { try cc_error(n, loc, c"expected line number") }
-    number u64 = bytes_to_u64(cc_spelling(n, expanded.p[Token])) catch {
-        try cc_error(n, loc, c"invalid line number")
-        return
-    }
+    number u64 = try pp_line_number(n, expanded.p[Token])
     if number == 0 || number > 2147483647 {
         if !n.gnu { try cc_error(n, loc, c"line number out of range") }
         cc_diag(n, loc, c"warning: ", bytes_c(c"line number out of range"))

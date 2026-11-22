@@ -670,11 +670,12 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
 }
 
 fn pa_compound(p handle[Parser], t Token, ty u32, spec handle[DeclSpec]) handle[Ast] fails {
-    if se_vla(ty) || (p.function == null && (spec.storage == SC_REGISTER || spec.thread_local)) ||
+    file_scope bool = p.scope == p.file_scope
+    if se_vla(ty) || (file_scope && (spec.storage == SC_REGISTER || spec.thread_local)) ||
         (spec.thread_local && spec.storage != SC_STATIC) {
         try pa_error(p, t.loc, c"invalid compound literal storage class or type")
     }
-    static_duration bool = p.function == null || spec.storage == SC_STATIC
+    static_duration bool = file_scope || spec.storage == SC_STATIC
     result InitResult = {}
     try pa_initializer(p, ty, static_duration || spec.storage == SC_CONSTEXPR, &result)
     n handle[Ast] = pa_node(ND_COMPOUND, t.loc, result.ty)

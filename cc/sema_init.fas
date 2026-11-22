@@ -14,6 +14,12 @@ fn se_char_array(ty u32, from u32) bool {
 }
 
 fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
+    if constant && ty_is_record(e.ty) {
+        // A constexpr record carries its initializer, so copying the
+        // record into another static object is also a constant initializer.
+        folded handle[Ast] = se_const_lvalue(e, null)
+        if folded != null { e = folded }
+    }
     out.tree = e
     out.ty = if ty == TY_INVALID { e.ty } else { ty }
     if e.kind == ND_STRING && se_char_array(ty, e.ty) {
