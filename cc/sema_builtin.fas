@@ -49,6 +49,32 @@ fn se_builtin_checked(name Bytes) bool {
         bytes_eq_c(name, c"__builtin_ckd_mul")
 }
 
+// These GNU builtins implement the type-generic C23 <stdbit.h> operations
+// without applying the usual integer promotions to their first operand.
+fn se_stdc_bit_arity(name Bytes) u32 {
+    if !bytes_starts_with(name, bytes_c(c"__builtin_stdc_")) { return 0 }
+    op Bytes = bytes_from(name, 15)
+    if feature_in(c" rotate_left rotate_right ", op) { return 2 }
+    if feature_in(c" bit_ceil bit_floor bit_width count_ones count_zeros first_leading_one first_leading_zero first_trailing_one first_trailing_zero has_single_bit leading_ones leading_zeros trailing_ones trailing_zeros ", op) {
+        return 1
+    }
+    return 0
+}
+
+fn se_check_stdc_bit(p handle[Parser], t Token, args handle[Ast], count u32, arity u32) void fails {
+    try se_builtin_count(p, t, count, arity, arity)
+    ty u32 = ty_unqual(args.ty)
+    if !ty_is_integer(ty) || !ty_is_unsigned(ty) || ty == TY_CHAR || ty_is_bool(ty) || ty_is_enum(ty) {
+        try pa_error(p, args.loc, c"bit builtin requires an unsigned integer operand")
+    }
+    if arity == 2 {
+        shift handle[Ast] = args.next
+        if !ty_is_integer(shift.ty) || ty_is_enum(shift.ty) {
+            try pa_error(p, shift.loc, c"rotate count requires an integer operand")
+        }
+    }
+}
+
 // GCC's classification values, with Clang's bool result. The caller
 // performs the ordinary array and function conversions before classifying.
 fn se_builtin_type_class(ty u32) u64 {
@@ -188,7 +214,10 @@ fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count
 }
 
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
-    if bytes_starts_with(name, bytes_c(c"__atomic_")) || bytes_starts_with(name, bytes_c(c"__sync_")) {
+    bit_arity u32 = se_stdc_bit_arity(name)
+    if bit_arity != 0 {
+        try se_check_stdc_bit(p, t, args, count, bit_arity)
+    } else if bytes_starts_with(name, bytes_c(c"__atomic_")) || bytes_starts_with(name, bytes_c(c"__sync_")) {
         try se_check_atomic(p, t, name, args, count)
     } else if se_builtin_overflow(name) || se_builtin_checked(name) {
         try se_check_overflow(p, t, args, count, se_builtin_checked(name))

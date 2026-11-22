@@ -441,6 +441,13 @@ fn pa_x86_result(name Bytes) u32 {
 
 fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32 {
     if se_builtin_overflow(name) || se_builtin_checked(name) { return TY_BOOL }
+    bits u32 = se_stdc_bit_arity(name)
+    if bits != 0 {
+        op Bytes = bytes_from(name, 15)
+        if bits == 2 || feature_in(c" bit_ceil bit_floor ", op) { return ty_unqual(a.ty) }
+        if bytes_eq_c(op, c"has_single_bit") { return TY_BOOL }
+        return TY_UINT
+    }
     target u32 = pa_x86_result(name)
     if target != TY_INVALID { return target }
     if a != null && ty_is_vector(a.ty) {
