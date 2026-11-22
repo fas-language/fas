@@ -36,7 +36,13 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     } else if se_aggregate_literal_init(p, ty, e, constant) {
         // GNU static aggregate initialization uses the literal's brace list
         // directly, without forming a pointer to the unnamed object.
-        out.ty = ty_composite(ty, e.ty)
+        if ty_is_array(ty) {
+            dst handle[TypeNode] = ty_node(ty_unqual(ty))
+            src handle[TypeNode] = ty_node(ty_unqual(e.ty))
+            if dst.aux1 == ARR_INCOMPLETE && src.aux1 == ARR_FIXED {
+                out.ty = ty_array(dst.elem, src.arr_len)
+            }
+        }
         out.tree = e.a
         e = e.a
     } else {
