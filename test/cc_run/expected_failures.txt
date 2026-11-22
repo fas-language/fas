@@ -1,16 +1,12 @@
 # Expected failures for test/cc_run/run_manifest.py (fcc vs clang-22)
 # Format: <manifest-path> <category>: <reason>
-c-testsuite/tests/single-exec/00216.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/c-testsuite/tests/single-exec/00216.c:49:16: error: initializer is not a constant expression
 gcc/gcc/testsuite/gcc.c-torture/execute/20021127-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/20030330-1.c link-error: fas-ld: /tmp/fcc_2685482_1.o: undefined symbol link_error
-gcc/gcc/testsuite/gcc.c-torture/execute/970217-1.c exit-mismatch: fcc exit=1, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/990413-2.c fir-error: 33: asm constraint "=t": x87 register operands are not supported
 gcc/gcc/testsuite/gcc.c-torture/execute/builtin-bitops-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/frame-address.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.c-torture/execute/ieee/pr36332.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.c-torture/execute/pr64242.c exit-mismatch: fcc exit=139, clang exit=0
-gcc/gcc/testsuite/gcc.c-torture/execute/pr70460.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.c-torture/execute/pr70460.c:12:29: error: initializer is not a constant expression
-gcc/gcc/testsuite/gcc.c-torture/execute/pr77767.c exit-mismatch: fcc exit=134, clang exit=0
+gcc/gcc/testsuite/gcc.c-torture/execute/pr70460.c exit-mismatch: Fir static initializer cannot encode a difference of two GNU label addresses
 gcc/gcc/testsuite/gcc.c-torture/execute/pr84521.c exit-mismatch: fcc exit=139, clang exit=0
 gcc/gcc/testsuite/gcc.dg/addr_equal-1.c link-error: fas-ld: /tmp/fcc_2707630_1.o: undefined symbol undef_fn0
 gcc/gcc/testsuite/gcc.dg/attr-ifunc-1.c link-error: fas-ld: /tmp/fcc_2708998_1.o: undefined symbol magic
@@ -23,16 +19,11 @@ gcc/gcc/testsuite/gcc.dg/builtin-addc-1.c link-error: fas-ld: /tmp/fcc_2709598_1
 gcc/gcc/testsuite/gcc.dg/builtin-bswap-5.c link-error: fas-ld: /tmp/fcc_2709650_1.o: undefined symbol link_error
 gcc/gcc/testsuite/gcc.dg/builtin-dynamic-object-size-11.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/builtin-object-size-11.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/c11-true_min-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-auto-2.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/c23-complit-1.c exit-mismatch: fcc exit=139, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-constexpr-2a.c link-error: fas-ld: duplicate symbol a: /tmp/fcc_2710559_1.o and /tmp/fcc_2710559_3.o
 gcc/gcc/testsuite/gcc.dg/c23-float-7a.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-float-7b.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/c23-float-7c.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/c23-parm-omit-3.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/c2y-imaginary-constants-11.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/c2y-imaginary-constants-11.c:9:21: error: invalid integer literal suffix
-gcc/gcc/testsuite/gcc.dg/c99-math-long-double-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/cleanup-10.c link-error: fas-ld: /tmp/fcc_2711489_1.o: undefined symbol _Unwind_ForcedUnwind
 gcc/gcc/testsuite/gcc.dg/cleanup-11.c link-error: fas-ld: /tmp/fcc_2711491_1.o: undefined symbol _Unwind_ForcedUnwind
 gcc/gcc/testsuite/gcc.dg/cleanup-12.c link-error: fas-ld: /tmp/fcc_2711493_1.o: undefined symbol _Unwind_ForcedUnwind
@@ -42,9 +33,7 @@ gcc/gcc/testsuite/gcc.dg/cleanup-8.c link-error: fas-ld: /tmp/fcc_2711590_1.o: u
 gcc/gcc/testsuite/gcc.dg/cleanup-9.c link-error: fas-ld: /tmp/fcc_2711591_1.o: undefined symbol _Unwind_ForcedUnwind
 gcc/gcc/testsuite/gcc.dg/constructor-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/cpp/embed-12.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/di-longlong64-sync-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc exit=0, clang exit=137
-gcc/gcc/testsuite/gcc.dg/gnu89-init-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/gnu99-init-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/gomp/pr114075.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/ipa/ipa-pta-19.c link-error: fas-ld: /tmp/fcc_2715697_1.o: undefined symbol multiver_test
@@ -53,14 +42,11 @@ gcc/gcc/testsuite/gcc.dg/pr105414.c exit-mismatch: fcc exit=0, clang exit=134
 gcc/gcc/testsuite/gcc.dg/pr107385.c fir-error: verifier: asm matching constraint "0" does not name an output
 gcc/gcc/testsuite/gcc.dg/pr110731.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr111015.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/pr114831-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr116891.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/pr119001-1.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/pr119001-1.c:5:1: error: invalid flexible array member
 gcc/gcc/testsuite/gcc.dg/pr119151.c link-error: fas-ld: /tmp/fcc_2718717_1.o: undefined symbol __register_frame_info
 gcc/gcc/testsuite/gcc.dg/pr19402-2.c exit-mismatch: fcc exit=139, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr30360.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr41935.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/pr65345-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr68835-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr84309.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/pr87054.c fir-error: not supported by the native backend yet: asm on a wide or odd-width integer
@@ -71,39 +57,22 @@ gcc/gcc/testsuite/gcc.dg/split-5.c link-error: fas-ld: /usr/lib/gcc/x86_64-linux
 gcc/gcc/testsuite/gcc.dg/torture/20240517-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-11.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-13.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/torture/bitint-22.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/torture/bitint-24.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-41.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-42.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-62.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/bitint-66.c compile-timeout: fcc timed out
 gcc/gcc/testsuite/gcc.dg/torture/bitint-68.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/torture/float128-div-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-div-underflow.c:15:3: error: C23 requires an explicit type specifier (implicit int
-gcc/gcc/testsuite/gcc.dg/torture/float128-extend-inf.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-extend-inf.c:20:3: error: C23 requires an explicit type specifier (implicit int is
-gcc/gcc/testsuite/gcc.dg/torture/float128-extend-nan.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-extend-nan.c:19:3: error: C23 requires an explicit type specifier (implicit int is
-gcc/gcc/testsuite/gcc.dg/torture/float128-mul-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-mul-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit int
-gcc/gcc/testsuite/gcc.dg/torture/float128-truncdf-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-truncdf-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit
-gcc/gcc/testsuite/gcc.dg/torture/float128-truncsf-underflow.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/float128-truncsf-underflow.c:14:3: error: C23 requires an explicit type specifier (implicit
-gcc/gcc/testsuite/gcc.dg/torture/float16-builtin-issignaling-1.c link-error: fas-ld: /tmp/fcc_2728768_1.o: undefined symbol nanf16
 gcc/gcc/testsuite/gcc.dg/torture/float16-nan.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/float16-tg-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/fp-double-convert-float-1.c exit-mismatch: fcc exit=0, clang exit=134
-gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode-2.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode-2.c:20:3: error: use of undeclared identifier '__float128'
-gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode-3.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode-3.c:21:3: error: use of undeclared identifier '__float128'
-gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128-timode.c:17:76: error: C23 requires an explicit type specifier (imp
-gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/fp-int-convert-float128.c:14:87: error: C23 requires an explicit type specifier (implicit i
 gcc/gcc/testsuite/gcc.dg/torture/pr110228.c fir-error: verifier: asm template refers to operand 1 of 1
 gcc/gcc/testsuite/gcc.dg/torture/pr19683-1.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/torture/pr58670.c fir-error: verifier: asm template names %[lab], which no operand has
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-2.c link-error: fas-ld: /tmp/fcc_2739441_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-3.c link-error: fas-ld: /tmp/fcc_2739444_1.o: undefined symbol ia32_vec_init_v2si
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-5.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-5.c:9:6: error: C23 requires parameter types (K&R declarations are unsupp
-gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-6.c fcc-error: /home/glonex/fas-experimental-backend/cc-tests/upstream/gcc/gcc/testsuite/gcc.dg/torture/stackalign/alloca-6.c:9:6: error: C23 requires parameter types (K&R declarations are unsupp
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/push-1.c link-error: fas-ld: /tmp/fcc_2739515_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/torture/stackalign/vararg-3.c link-error: fas-ld: /tmp/fcc_2739692_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/tree-ssa/builtin-sprintf.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/typename-vla-1.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/typename-vla-2.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/ubsan/pr82498.c fir-error: verifier: invalid bitcast from <2 x i64> to <8 x i8>
 gcc/gcc/testsuite/gcc.dg/ubsan/pr84508-1.c link-error: fas-ld: /tmp/fcc_2744570_1.o: undefined symbol ia32_vec_init_v2si
 gcc/gcc/testsuite/gcc.dg/ubsan/pr84508-2.c link-error: fas-ld: /tmp/fcc_2744573_1.o: undefined symbol ia32_vec_init_v2si
@@ -112,8 +81,4 @@ gcc/gcc/testsuite/gcc.dg/vla-14.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-15.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-16.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-24.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-4.c exit-mismatch: fcc exit=1, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-stexp-4.c exit-mismatch: fcc exit=134, clang exit=0
-gcc/gcc/testsuite/gcc.dg/vla-stexp-6.c exit-mismatch: fcc exit=134, clang exit=0
 gcc/gcc/testsuite/gcc.dg/vla-stexp-7.c link-error: fas-ld: /tmp/fcc_2745426_1.o: undefined symbol N
-gcc/gcc/testsuite/gcc.dg/vla-stexp-9.c link-error: fas-ld: /tmp/fcc_2745428_1.o: undefined symbol N
