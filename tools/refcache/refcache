@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Command-line interface for the reference result cache."""
+
+import argparse
+import os
+import re
+import stat
+import sys
+
+from refcache import Cache
+
+
+def size(value):
+    match = re.fullmatch(r"(\d+)\s*([kmgt]?)(?:i?b)?", value.lower())
+    if not match:
+        raise argparse.ArgumentTypeError("expected a size such as 100M or 4GiB")
+    return int(match[1]) * 1024 ** (" kmgt".index(match[2] or " "))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    run = sub.add_parser("run")
+    run.add_argument("--ns", required=True)
+    run.add_argument("--dep", action="append", default=[])
+    run.add_argument("--out", action="append", default=[])
+    run.add_argument("--env", action="append", default=[])
+    run.add_argument("--scratch")
+    run.add_argument("--c", action="store_true")
+    run.add_argument("--refresh", action="store_true")
+    run.add_argument("--no-cwd", action="store_true")
+    run.add_argument("--stdin", action="store_true",
+                     help="read stdin to EOF and include it in the key")
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    sub.add_parser("stats")
+    sub.add_parser("gc").add_argument("--max-size", type=size, required=True)
+    sub.add_parser("verify").add_argument("--sample", type=int, required=True)
+    args = parser.parse_args()
+    cache = Cache()
+    if args.action == "run":
+        command = args.command
+        if command[:1] == ["--"]:
+            command = command[1:]
+        if not command:
+            parser.error("run requires a command")
+        try:
+            if cache.root is None or args.refresh:
+                os.execvpe(command[0], command, os.environ)
+            fd_mode = os.fstat(sys.stdin.fileno()).st_mode
+            # Piped input is part of the request. A terminal can only be used
+            # transparently by leaving the original process in charge.
+            if not args.stdin and sys.stdin.isatty() and "-" in command[1:]:
+                os.execvpe(command[0], command, os.environ)
+            read_input = args.stdin or "-" in command[1:] and (
+                stat.S_ISFIFO(fd_mode) or stat.S_ISREG(fd_mode))
+            result = cache.run(command, ns=args.ns, deps=args.dep, outs=args.out,
+                               scratch=args.scratch, c=args.c, env_keys=args.env,
+                               cwd_sensitive=not args.no_cwd,
+                               input=sys.stdin.buffer.read() if read_input else None)
+        except FileNotFoundError as error:
+            print(error, file=sys.stderr)
+            return 127
+        except PermissionError as error:
+            print(error, file=sys.stderr)
+            return 126
+        sys.stdout.buffer.write(result.stdout)
+        sys.stderr.buffer.write(result.stderr)
+        return result.returncode if result.returncode >= 0 else 128 - result.returncode
+    if cache.root is None:
+        print("FAS_REFCACHE=off")
+        return 0
+    if args.action == "stats":
+        with cache.lock():
+            indexes = list(cache.entries())
+            blobs = list((cache.root / "blobs").glob("*/*"))
+            metadata = list((cache.root / "identity").glob("*"))
+            print(f"entries={len(indexes)} blobs={len(blobs)} "
+                  f"bytes={sum(path.stat().st_size for path in [*blobs, *metadata, *(p for p, _ in indexes)])}")
+    elif args.action == "gc":
+        print(f"retained bytes={cache.gc(args.max_size)}")
+    else:
+        if args.sample < 0:
+            parser.error("--sample must be nonnegative")
+        checked, errors = cache.verify(args.sample)
+        print(f"verified={checked} requested={args.sample} mismatches={len(errors)}")
+        for error in errors:
+            print(error, file=sys.stderr)
+        return bool(errors)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
