@@ -180,5 +180,13 @@ ln -s /dev/null mode-output
 (umask 022; mode_run)
 [[ -L mode-output && $(wc -c <mode-calls) == 4 ]]
 
+write_later() { "$cache" run --ns new-parent --out later/out -- ./mode-oracle later/out; }
+if write_later 2>later.stderr; then
+    exit 1
+fi
+mkdir later
+write_later
+[[ $(cat later/out) == x ]]
+
 "$here/bench.py" self-test
 echo 'refcache: all tests passed'

@@ -275,7 +275,10 @@ class Cache:
             if umask is None:
                 return execute(inv.argv)
             for name in inv.outs:
-                before[name] = self.output_stat(inv.path(name))
+                target = inv.path(name)
+                if not os.access(target.parent, os.W_OK | os.X_OK):
+                    return execute(inv.argv)
+                before[name] = self.output_stat(target)
                 if before[name] is not None and (
                     not stat.S_ISREG(before[name].st_mode) or before[name].st_nlink != 1
                 ):
