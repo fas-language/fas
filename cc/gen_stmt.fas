@@ -446,6 +446,28 @@ fn gen_emit_asm_input(b handle[Buf], expr handle[Ast], ty u32, v u32) void {
     } else { gen_emit_val(b, v) }
 }
 
+// A GNU local register binding constrains direct extended-asm operands.
+// The ordinary C value still lives in its normal local slot.
+fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
+    if operand.a == null { return }
+    gen_decode_string_ast(operand.a, out, false)
+    expr handle[Ast] = operand.b
+    if expr.kind != ND_NAME { return }
+    decl handle[Symbol] = expr.decl
+    if decl == null || decl.storage != SC_REGISTER || decl.asm_name == 0 { return }
+    n usize = 0
+    while n < out.n {
+        ch u8 = out.p[u8, n]
+        if ch != 61 && ch != 43 && ch != 38 && ch != 37 { break }
+        n += 1
+    }
+    if n + 1 != out.n || (out.p[u8, n] != 114 && out.p[u8, n] != 103) { return }
+    buf_truncate(out, n)
+    buf_u8(out, 123)
+    gen_decode_string_piece(cc_name(gc.p.names, decl.asm_name), 1, out)
+    buf_u8(out, 125)
+}
+
 fn gen_inline_asm(n handle[Ast]) void fails {
     is_goto bool = (n.flags & 1) != 0
     is_vol bool = (n.flags & 2) != 0 || n.b == null
@@ -468,13 +490,14 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     o handle[Ast] = n.b
     while o != null {
         cb Buf = {}
-        if o.a != null { gen_decode_string_ast(o.a, &cb, false) }
+        gen_asm_constraint(o, &cb)
         cs Bytes = buf_bytes(&cb)
         has_m bool = false
         has_r bool = false
         is_rw bool = cs.n > 0 && cs.p[u8] == 43 // '+'
         for k usize in 0..cs.n {
             ch u8 = cs.p[u8, k]
+            if ch == 123 { has_r = true; break }
             if ch == 109 || ch == 111 || ch == 86 { has_m = true }
             if ch == 114 || ch == 113 || ch == 81 || ch == 82 || ch == 97 || ch == 98 ||
                ch == 99 || ch == 100 || ch == 83 || ch == 68 || ch == 65 || ch == 120 || ch == 103 { has_r = true }
@@ -512,7 +535,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     inp handle[Ast] = n.c
     while inp != null {
         cb Buf = {}
-        if inp.a != null { gen_decode_string_ast(inp.a, &cb, false) }
+        gen_asm_constraint(inp, &cb)
         cs Bytes = buf_bytes(&cb)
         is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
         // Check for matching constraint "0".."9" tied to an output of a different width
@@ -625,7 +648,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 if i > 0 { buf_str(b, c", ") }
                 onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
                 cb Buf = {}
-                if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+                gen_asm_constraint(onode, &cb)
                 if onode.op != 0 {
                     buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
                 }
@@ -649,7 +672,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 if i > 0 { buf_str(b, c", ") }
                 onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
                 cb Buf = {}
-                if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+                gen_asm_constraint(onode, &cb)
                 if onode.op != 0 {
                     buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
                 }
@@ -737,7 +760,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             if i > 0 { buf_str(b, c", ") }
             onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
             cb Buf = {}
-            if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+            gen_asm_constraint(onode, &cb)
             // Split `+c` register output into `=c` + tied input `"i"` so GCC operand numbering matches
             if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 && cb.n > 0 && cb.p[u8] == 43 {
                 cb.p[u8] = 61 // '='
@@ -765,7 +788,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             in_emitted += 1
             onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
             cb Buf = {}
-            if onode.a != null { gen_decode_string_ast(onode.a, &cb, false) }
+            gen_asm_constraint(onode, &cb)
             if onode.op != 0 {
                 buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
             }

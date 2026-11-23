@@ -15,6 +15,7 @@ for file in "$src"/*.c; do
         fp_rounding.c) flags=(-frounding-math -lm) ;;
         fp_exceptions.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
+        unprototyped.c) flags=(-std=c99 -Wno-deprecated-non-prototype) ;;
     esac
     "${CLANG:-clang-22}" -std=gnu23 "$file" "${flags[@]}" -o "$work/clang"
     "${runner[@]}" "$work/clang" > "$work/clang.out"

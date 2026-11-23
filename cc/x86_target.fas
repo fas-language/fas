@@ -24,7 +24,9 @@ fn x86_cpu(name Bytes) u32 {
 }
 
 fn x86_intrinsic_feature(name Bytes) addr {
-    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb128") { return c"sse2" }
+    if feature_in(c" __builtin_ia32_pmovmskb128 __builtin_ia32_pminub128 __builtin_ia32_psubusb128 ", name) {
+        return c"sse2"
+    }
     if bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") { return c"avx2" }
     if bytes_eq_c(name, c"__builtin_ia32_emms") || bytes_eq_c(name, c"__builtin_ia32_paddq") ||
        bytes_eq_c(name, c"__builtin_ia32_psubq") { return c"mmx" }

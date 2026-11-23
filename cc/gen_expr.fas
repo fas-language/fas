@@ -1309,7 +1309,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     if fn_node.kind == TYK_FUNC {
         ret_ty = fn_node.elem
         n_fixed = fn_node.aux2
-        is_var = (fn_node.flags & TYF_VARIADIC) != 0
+        is_var = (fn_node.flags & (TYF_VARIADIC | TYF_NO_PROTO)) != 0
         pstart = zext[usize](fn_node.aux1)
     }
 
@@ -1735,6 +1735,23 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         buf_u8(b, 10)
         if mask128 { return gen_cast(c"zext", n.ty, gen_cast(c"bitcast", TY_USHORT, signs)) }
         return gen_cast(c"bitcast", n.ty, signs)
+    }
+    is_sat_sub bool = bytes_eq_c(bname, c"__builtin_ia32_psubusb128")
+    if is_sat_sub || bytes_eq_c(bname, c"__builtin_ia32_pminub128") {
+        lhs u32 = try gen_rvalue(a0)
+        rhs u32 = try gen_rvalue(a1)
+        if is_sat_sub { return gen_binop(c"usub_sat", n.ty, lhs, rhs) }
+        mask u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, mask)
+        // GCC's intrinsic uses signed-char vector types, but compares unsigned lanes.
+        buf_str(b, c" = icmp ult <16 x i1> ")
+        gen_emit_val(b, lhs)
+        buf_str(b, c", ")
+        gen_emit_val(b, rhs)
+        buf_u8(b, 10)
+        return gen_select(n.ty, mask, lhs, rhs)
     }
     if bytes_starts_with(bname, bytes_c(c"__builtin_nans")) &&
         se_math_family(bytes_from(bname, 10), c"nans") != TY_INVALID {

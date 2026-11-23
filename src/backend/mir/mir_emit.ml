@@ -372,8 +372,8 @@ let assemble_snippets (texts : (bool * string) list) =
    object (after the [first] extra ones), with its symbols and relocations.
    A reference to a section (GNU as turns references to local labels into
    section plus offset) goes through a local symbol at the section's start.
-   Returns the sections, the symbols they define, and the bindings and
-   visibilities of those symbols *)
+   Returns the sections, the symbols they define, and ELF attributes from
+   the asm, including directives on undefined symbols. *)
 type masm = {
   msections : Native_object.extra list;
   msyms : Elf64.symbol list;
@@ -456,6 +456,11 @@ let module_asm ~first (texts : string list) =
               :: !msyms;
             Hashtbl.replace mbinding y.name y.binding;
             Hashtbl.replace mvisibility y.name y.visibility
+        | None when y.section = 0 && y.name <> "" ->
+            (* An ordinary asm reference uses GLOBAL and DEFAULT. Preserve
+               any explicit Fir attributes in that case. *)
+            if y.binding = 2 then Hashtbl.replace mbinding y.name y.binding;
+            if y.visibility <> 0 then Hashtbl.replace mvisibility y.name y.visibility
         | None when y.section >= 0xff00 && y.name <> "" ->
             unsupported "module asm: the absolute or common symbol %s" y.name
         | _ -> ())

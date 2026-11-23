@@ -39,6 +39,7 @@ struct DeclOp {
     bound handle[Ast]
     star bool
     variadic bool
+    unspecified_params bool
     params handle[Param]
     proto handle[Scope]
     next handle[DeclOp]
@@ -997,7 +998,10 @@ fn pa_params(p handle[Parser], op handle[DeclOp], leading handle[Attr]) void fai
     pa_enter(p)
     op.proto = p.scope
     defer { p.scope = outer }
-    if try pa_accept(p, c")") { return }
+    if try pa_accept(p, c")") {
+        op.unspecified_params = p.pp.standard != 0 && p.pp.standard != 23
+        return
+    }
     if leading == null && (try pa_at(p, c"void")) && (try pa_at_second(p, c")")) {
         try pa_take(p); try pa_take(p)
         return
@@ -1164,7 +1168,8 @@ fn pa_apply_one(p handle[Parser], op handle[DeclOp], elem u32, member bool) u32 
             vec_push[u32](&args, arg)
             formal = formal.next
         }
-        return ty_func(elem, args.p, trunc[u32](args.n), op.variadic)
+        flags u32 = if op.variadic { TYF_VARIADIC } else if op.unspecified_params { TYF_NO_PROTO } else { 0 }
+        return ty_func_flags(elem, args.p, trunc[u32](args.n), flags)
     }
     if !se_complete(elem) { try pa_error(p, op.loc, c"array element type is incomplete or not an object type") }
     // Array elements are separated by sizeof(element), so an aligned
@@ -1321,7 +1326,9 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
     t Token = try pa_peek(p)
     if pa_assert_word(p, t) { try pa_assert(p); return null }
     if pa_asm_word(p, t) { return try pa_asm(p, file) }
-    if (bool_attr || attrs != null || (file && pa_is_gnu(p))) && (try pa_accept(p, c";")) { return null }
+    // A macro that expands to a file-scope definition is often followed
+    // by a semicolon even in builds that request an ISO dialect.
+    if (bool_attr || attrs != null || file) && (try pa_accept(p, c";")) { return null }
     spec DeclSpec = {}
     spec.attrs = attrs
     try pa_specs(p, &spec)

@@ -583,7 +583,7 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
         fixed u32 = f.aux2
         start u32 = f.aux1
         ret = f.elem
-        if count < fixed || (count > fixed && (f.flags & TYF_VARIADIC) == 0) { try pa_error(p, t.loc, c"wrong number of function arguments") }
+        if count < fixed || (count > fixed && (f.flags & (TYF_VARIADIC | TYF_NO_PROTO)) == 0) { try pa_error(p, t.loc, c"wrong number of function arguments") }
         converted AstList = {}
         x handle[Ast] = xs.first
         for i u32 in 0..count {

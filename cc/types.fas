@@ -86,6 +86,7 @@ const Q_TRANSPARENT_UNION u32 = 64
 const TYF_UNSIGNED u32 = 1
 const TYF_VARIADIC u32 = 2
 const TYF_MS_ABI u32 = 4
+const TYF_NO_PROTO u32 = 8 // pre-C23 empty parameter list in a declaration
 
 // Array sub-kinds (stored in TypeNode.sub)
 const ARR_FIXED u32      = 0
@@ -963,9 +964,20 @@ fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool
         return true
     }
     if na.kind == TYK_FUNC {
-        if na.flags != nb.flags { return false }
-        if na.aux2 != nb.aux2 { return false }
         if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
+        if ((na.flags ^ nb.flags) & ~TYF_NO_PROTO) != 0 { return false }
+        if ((na.flags ^ nb.flags) & TYF_NO_PROTO) != 0 {
+            proto handle[TypeNode] = if (na.flags & TYF_NO_PROTO) == 0 { na } else { nb }
+            for i u32 in 0..proto.aux2 {
+                param u32 = ty_unqual(vec_get(&tc.fn_params, zext[usize](proto.aux1 + i)))
+                // An unprototyped caller applies the default argument
+                // promotions. A prototype is compatible only if unchanged.
+                if param == TY_FLOAT { return false }
+                if ty_is_integer(param) && !ty_compatible_impl(param, ty_integer_promote(param), path, false) { return false }
+            }
+            return true
+        }
+        if na.aux2 != nb.aux2 { return false }
         for i u32 in 0..na.aux2 {
             pa u32 = vec_get(&tc.fn_params, zext[usize](na.aux1 + i))
             pb u32 = vec_get(&tc.fn_params, zext[usize](nb.aux1 + i))
@@ -1085,6 +1097,10 @@ fn ty_composite_impl(a u32, b u32, path handle[TyComposite]) u32 {
     }
     if na.kind == TYK_FUNC {
         cret u32 = ty_composite_impl(na.elem, nb.elem, path)
+        if ((na.flags ^ nb.flags) & TYF_NO_PROTO) != 0 {
+            proto handle[TypeNode] = if (na.flags & TYF_NO_PROTO) == 0 { &na } else { &nb }
+            return ty_qual_attr(tc_intern_func(cret, proto.aux1, proto.aux2, proto.flags), q, al)
+        }
         n_p u32 = na.aux2
         tmp Vec[u32] = {}
         defer { vec_free(&tmp) }

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Build real-world C projects with fcc and Clang and compare exact output."""
 
+import http.client
 import os
 from pathlib import Path
 import re
 import resource
+import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 MEM_LIMIT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB cap per compiler child
 
@@ -488,13 +492,227 @@ def test_git(tmp):
     return True
 
 
+def test_musl(tmp):
+    src = UPSTREAM / "musl"
+    tests = UPSTREAM / "libc-test" / "src"
+    cases = ("fnmatch", "inet_pton", "memstream", "pthread_cond", "qsort", "setjmp",
+             "snprintf", "strtod", "tls_align")
+    results = []
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"musl-{label}"
+        build.mkdir()
+        prefix = build / "install"
+        wrapper = build / "cc"
+        # Both builds use the same assembler for musl's hand-written .s/.S
+        # startup and syscall code. Every C source goes to its test compiler.
+        wrapper.write_text(
+            '#!/bin/bash\n'
+            'asm=false\nargs=()\nfor arg do\n'
+            '  case "$arg" in *.s|*.S) asm=true ;; esac\n'
+            '  if [[ $arg != -fno-tree-loop-distribute-patterns ]]; then args+=("$arg"); fi\n'
+            'done\n'
+            f'if $asm; then exec {shlex.quote(CLANG)} "${{args[@]}}"; fi\n'
+            f'exec {shlex.quote(compiler)} "$@"\n')
+        wrapper.chmod(0o755)
+        run_cmd([str(src / "configure"), "--disable-shared", "--target=x86_64-linux-musl",
+                 f"--prefix={prefix}"], cwd=build, env={"CC": str(wrapper), "CFLAGS": "-O0 -g0"})
+        # x86-64 host tools can archive these objects. The target name in
+        # configure does not require an installed musl toolchain.
+        run_cmd(["make", "-j3", "AR=ar", "RANLIB=ranlib", "install"],
+                cwd=build, timeout=1800)
+        runtime = run_cmd(["gcc", "-print-libgcc-file-name"]).decode().strip()
+        lib = prefix / "lib"
+        flags = ["-std=gnu17", "-nostdinc", "-nostdlib", "-static", "-fno-pic", "-no-pie",
+                 "-isystem", str(prefix / "include"), f"-I{tests / 'common'}",
+                 str(lib / "crt1.o"), str(lib / "crti.o")]
+        probe = ROOT / "test/cc_run/projects/musl_link.c"
+        for case in cases + ("musl_link",):
+            inputs = [probe] if case == "musl_link" else [
+                tests / "functional" / f"{case}.c", tests / "common/print.c"]
+            if case == "qsort":
+                inputs.append(tests / "common/rand.c")
+            if case == "tls_align":
+                inputs.append(tests / "functional/tls_align_dso.c")
+            exe = build / case
+            run_cmd([compiler, *flags, *map(str, inputs), str(lib / "libc.a"), runtime,
+                     str(lib / "crtn.o"), "-o", str(exe)], cwd=build)
+        results.append([run_cmd([str(build / case)], cwd=build, timeout=30, both_streams=True)
+                        for case in cases + ("musl_link",)])
+    check_results("musl static libc-test and linked program", *results)
+    print(f"PASS: musl ({len(cases)} static libc-test programs and a linked client)")
+    return True
+
+
+def test_lz4(tmp):
+    results = []
+    payload = b"abcabc\x00\xff" * 15000 + bytes(range(256))
+    for compiler, src in checkout_pair(tmp, "lz4"):
+        run_cmd(["make", "-j3", "-C", "programs", "lz4", f"CC={compiler}", "CFLAGS=-O0 -g0"],
+                cwd=src, timeout=600)
+        tool = str(src / "programs/lz4")
+        frames = [run_cmd([tool, "-q", level, "-c"], input_bytes=payload) for level in ("-1", "-9")]
+        for frame in frames:
+            assert run_cmd([tool, "-q", "-d", "-c"], input_bytes=frame) == payload
+        results.append(frames)
+    check_results("LZ4 frames", *results)
+    print("PASS: lz4 (byte-identical frames and round-trips at two compression levels)")
+    return True
+
+
+def cmake_project(tmp, project, targets, options=()):
+    # CMake identifies fcc by its GNU compatibility macros. Tell it how
+    # to select C11 without changing the advertised __GNUC__ for headers.
+    rules = tmp / "fcc-cmake-rules.cmake"
+    rules.write_text('set(CMAKE_C11_STANDARD_COMPILE_OPTION "-std=c11")\n'
+                     'set(CMAKE_C11_EXTENSION_COMPILE_OPTION "-std=gnu11")\n')
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"{project}-{label}"
+        extra = [f"-DCMAKE_USER_MAKE_RULES_OVERRIDE={rules}"] if label == "fcc" else []
+        run_cmd(["cmake", "-S", str(UPSTREAM / project), "-B", str(build),
+                 f"-DCMAKE_C_COMPILER={compiler}", "-DCMAKE_C_FLAGS=-O0 -g0",
+                 *extra, *options], timeout=600)
+        run_cmd(["cmake", "--build", str(build), "-j", "3", "--target", *targets], timeout=1800)
+        yield build
+
+
+def test_xz(tmp):
+    payload = (b"exact LZMA2 stream\x00" + bytes(range(256))) * 2000
+    results = []
+    for build in cmake_project(tmp, "xz", ("xz",), ("-DXZ_NLS=OFF",)):
+        tool = str(build / "xz")
+        streams = []
+        for check in ("crc32", "crc64", "sha256"):
+            encoded = run_cmd([tool, "-T1", "-6", f"--check={check}", "-c"], input_bytes=payload)
+            assert run_cmd([tool, "-dc"], input_bytes=encoded) == payload
+            streams.append(encoded)
+        results.append(streams)
+    check_results("XZ streams", *results)
+    print("PASS: xz/liblzma (byte-identical streams and round-trips with three integrity checks)")
+    return True
+
+
+def test_libuv(tmp):
+    cases = ("loop_alive", "timer", "async", "fs_fstat", "thread_create", "walk_handles")
+    results = []
+    for build in cmake_project(tmp, "libuv", ("uv_run_tests_a",),
+                               ("-DBUILD_TESTING=ON", "-DLIBUV_BUILD_TESTS=ON")):
+        results.append([run_cmd([str(build / "uv_run_tests_a"), case], cwd=build, both_streams=True)
+                        for case in cases])
+    check_results("libuv upstream tests", *results)
+    print(f"PASS: libuv ({len(cases)} upstream tests)")
+    return True
+
+
+def nginx_requests(binary, src):
+    payload = b"nginx static compiler differential\n"
+    root = src / "html"
+    index = root / "index.html"
+    index.write_bytes(payload)
+    os.utime(index, (1700000000, 1700000000))
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    configuration = src / "fcc-test.conf"
+    configuration.write_text(f"""
+daemon off;
+master_process off;
+error_log stderr;
+pid fcc-test.pid;
+events {{}}
+http {{
+    access_log off;
+    server {{
+        listen 127.0.0.1:{port};
+        location / {{ root "{root}"; }}
+    }}
+}}
+""")
+    proc = subprocess.Popen([str(binary), "-p", str(src), "-c", str(configuration)], env=ENV,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+                    break
+            except OSError:
+                if proc.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError("nginx failed to start")
+                time.sleep(0.05)
+
+        results = []
+        for method, path, headers in (("GET", "/index.html", {}), ("HEAD", "/index.html", {}),
+                                      ("GET", "/index.html", {"Range": "bytes=0-4"}),
+                                      ("GET", "/missing.html", {})):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                conn.request(method, path, headers=headers)
+                response = conn.getresponse()
+                fields = [(k, v) for k, v in response.getheaders() if k.lower() != "date"]
+                results.append((response.status, fields, response.read()))
+            finally:
+                conn.close()
+        assert [status for status, _, _ in results] == [200, 200, 206, 404]
+        assert results[0][2] == payload and results[1][2] == b"" and results[2][2] == payload[:5]
+        return results
+    finally:
+        proc.terminate()
+        try:
+            _, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, stderr = proc.communicate()
+        if proc.returncode not in (0, -15):
+            print(stderr.decode("utf-8", "replace"), file=sys.stderr)
+
+
+def test_nginx(tmp):
+    results = []
+    for compiler, src in checkout_pair(tmp, "nginx"):
+        run_cmd(["sh", "configure", f"--with-cc={compiler}", "--without-http_rewrite_module",
+                 "--without-http_gzip_module", "--with-cc-opt=-O0 -g0"], cwd=src, timeout=600)
+        run_cmd(["make", "-j3"], cwd=src, timeout=1800)
+        results.append(nginx_requests(src / "objs/nginx", src))
+    check_results("nginx HTTP responses", *results)
+    print("PASS: nginx (localhost static GET, HEAD, byte range and 404 responses)")
+    return True
+
+
+def test_postgresql(tmp):
+    results = []
+    cases = ("test_setup", "boolean", "int2", "int4", "int8", "text")
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"postgresql-{label}"
+        build.mkdir()
+        run_cmd([str(UPSTREAM / "postgresql/configure"), "--without-icu", "--without-readline",
+                 "--without-zlib", "--without-llvm", "--without-lz4", "--without-zstd"],
+                cwd=build, env={"CC": compiler, "CFLAGS": "-O0 -g0"}, timeout=900)
+        run_cmd(["make", "-j3"], cwd=build, timeout=3600)
+        regress = build / "src/test/regress"
+        try:
+            run_cmd(["make", "check-tests", f"TESTS={' '.join(cases)}"],
+                    cwd=regress, env={"LC_ALL": "C", "PGTZ": "UTC"}, timeout=1200)
+        except RuntimeError:
+            for name in ("regression.diffs", "log/initdb.log", "log/postmaster.log"):
+                path = regress / name
+                if path.is_file() and path.stat().st_size:
+                    print(f"{label} {name}\n{path.read_text(errors='replace')[-4000:]}", file=sys.stderr)
+            raise
+        results.append([(regress / f"results/{case}.out").read_bytes() for case in cases])
+    check_results("PostgreSQL SQL results", *results)
+    print(f"PASS: PostgreSQL ({len(cases)} upstream make check tests)")
+    return True
+
+
 def main():
     projects = {"zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite,
                 "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2,
                 "zstd": test_zstd, "duktape": test_duktape, "mbedtls": test_mbedtls,
                 "oniguruma": test_oniguruma, "libpng": test_libpng,
                 "quickjs": test_quickjs, "redis": test_redis, "curl": test_curl,
-                "cpython": test_cpython, "git": test_git}
+                "cpython": test_cpython, "git": test_git,
+                "musl": test_musl, "lz4": test_lz4, "xz": test_xz,
+                "libuv": test_libuv, "nginx": test_nginx, "postgresql": test_postgresql}
     wanted = set(sys.argv[1:]) or set(projects)
     if unknown := wanted - projects.keys():
         sys.exit(f"Unknown projects: {', '.join(sorted(unknown))}")

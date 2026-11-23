@@ -289,6 +289,18 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
             try pa_error(p, args.loc, c"movemask requires a byte vector of the corresponding width")
         }
     }
+    if bytes_eq_c(name, c"__builtin_ia32_pminub128") || bytes_eq_c(name, c"__builtin_ia32_psubusb128") {
+        try se_builtin_count(p, t, count, 2, 2)
+        arg handle[Ast] = args
+        while arg != null {
+            ty u32 = ty_unqual(arg.ty)
+            if !ty_is_vector(ty) || ty_size(ty) != 16 || !ty_is_integer(ty_node(ty).elem) ||
+               ty_size(ty_node(ty).elem) != 1 {
+                try pa_error(p, arg.loc, c"intrinsic requires two 16-byte integer vectors")
+            }
+            arg = arg.next
+        }
+    }
     if bytes_eq_c(name, c"__builtin_ia32_pause") || bytes_eq_c(name, c"__builtin_flt_rounds") {
         try se_builtin_count(p, t, count, 0, 0)
     }
