@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import resource
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,9 +28,9 @@ ENV = {
 }
 
 
-def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False):
+def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False, env=None):
     preexec = _limit_as if cmd and str(cmd[0]) == FCC else None
-    cp = subprocess.run(cmd, cwd=cwd, env=ENV, input=input_bytes,
+    cp = subprocess.run(cmd, cwd=cwd, env={**ENV, **(env or {})}, input=input_bytes,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         timeout=timeout, preexec_fn=preexec)
     if cp.returncode != 0:
@@ -42,7 +43,11 @@ def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False)
                 or "cannot allocate memory" in err_lo or "bad_alloc" in err_lo
                 or cp.returncode == -9):
             raise RuntimeError(f"compile-oom ({cp.returncode}): {command}\n{err[:1200]}")
-        raise RuntimeError(f"Command failed ({cp.returncode}): {command}\n{err[:1200]}")
+        detail = err or cp.stdout.decode("utf-8", "replace")
+        errors = "\n".join(line for line in detail.splitlines()
+                           if re.search(r"error:|undefined symbol|assertion failed|\*\*\*|Segmentation fault", line))
+        raise RuntimeError(f"Command failed ({cp.returncode}): {command}\n"
+                           f"{errors[:2500]}\n{detail[-2500:]}")
     return (cp.stdout, cp.stderr) if both_streams else cp.stdout
 
 
@@ -355,11 +360,141 @@ def test_libpng(tmp):
     return True
 
 
+def checkout_pair(tmp, name):
+    # Projects that build in their source tree need one writable copy per compiler.
+    for compiler, tag in ((FCC, "fcc"), (CLANG, "clang")):
+        yield compiler, shutil.copytree(UPSTREAM / name, tmp / f"{name}-{tag}")
+
+
+def check_results(name, actual, expected):
+    if actual != expected:
+        raise AssertionError(f"{name} output mismatch:\n"
+                             f"fcc={repr(actual)[:800]}\nclang={repr(expected)[:800]}")
+
+
+def test_quickjs(tmp):
+    tests = ("tests/test_closure.js", "tests/test_language.js", "tests/test_builtin.js",
+             "tests/test_loop.js", "tests/test_bigint.js", "tests/test_cyclic_import.js",
+             "tests/test_worker.js", "tests/test_std.js", "tests/test_bjson.js",
+             "examples/test_point.js")
+    results = []
+    for compiler, src in checkout_pair(tmp, "quickjs"):
+        version = (src / "VERSION").read_text().strip()
+        defines = f'-std=gnu23 -D_GNU_SOURCE -DCONFIG_VERSION=\\"{version}\\"'
+        run_cmd(["make", "-j3", f"CC={compiler}", f"DEFINES={defines}", "qjs",
+                 "tests/bjson.so", "examples/point.so"], cwd=src, timeout=600)
+        results.append({test: run_cmd(["./qjs", *(["--std"] if test.endswith("test_builtin.js") else []), test],
+                                      cwd=src, both_streams=True) for test in tests})
+    for test in tests:
+        check_results(test, results[0][test], results[1][test])
+    print(f"PASS: QuickJS ({len(tests)} upstream JS tests, including native modules)")
+    return True
+
+
+def test_redis(tmp):
+    src = UPSTREAM / "redis/src"
+    fpconv = src.parent / "deps/fpconv"
+    files = ("sds.c", "ziplist.c", "listpack.c", "dict.c", "util.c", "zmalloc.c",
+             "redisassert.c", "sha256.c", "siphash.c", "mt19937-64.c", "adlist.c", "strl.c")
+    paths = build_pair(tmp, "redis-standalone",
+                       [ROOT / "test/cc_run/redis_standalone.c", fpconv / "fpconv_dtoa.c",
+                        *(src / file for file in files)],
+                       ["-DREDIS_TEST", f"-I{src}", f"-I{fpconv}"], ["-lm", "-pthread"])
+    stdout, _ = compare_output(paths, both_streams=True)
+    assert b"standalone collections passed\n" in stdout
+    print("PASS: Redis (upstream sds and util tests, plus standalone ziplist/listpack/dict checks)")
+    return True
+
+
+def test_curl(tmp):
+    payload = bytes(range(256)) * 32
+    file = tmp / "local data"
+    file.write_bytes(payload)
+    paths = []
+    for compiler, tag in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"curl-{tag}"
+        run_cmd(["cmake", "-S", str(UPSTREAM / "curl"), "-B", str(build),
+                 f"-DCMAKE_C_COMPILER={compiler}", "-DCMAKE_C_FLAGS=-std=gnu23",
+                 "-DBUILD_TESTING=OFF", "-DBUILD_SHARED_LIBS=OFF", "-DCURL_ENABLE_SSL=OFF",
+                 "-DCURL_USE_LIBPSL=OFF", "-DCURL_BROTLI=OFF", "-DCURL_ZSTD=OFF",
+                 "-DENABLE_ARES=OFF", "-DENABLE_MANUAL=OFF"], timeout=600)
+        run_cmd(["cmake", "--build", str(build), "-j", "3"], timeout=1200)
+        paths.append(build / "src/curl")
+    for range_arg, expected in (([], payload), (["--range", "250-263"], payload[250:264])):
+        args = ["--disable", "--silent", "--show-error", *range_arg, file.as_uri()]
+        assert compare_output(paths, args, both_streams=True) == (expected, b"")
+    print("PASS: curl (local binary transfer and byte-range request)")
+    return True
+
+
+def test_cpython(tmp):
+    src = UPSTREAM / "cpython"
+    # Per-test results are deterministic. unittest's normal summary includes timings.
+    runner = r"""
+import sys
+import unittest
+
+class Result(unittest.TestResult):
+    def addSuccess(self, test):
+        print(test.id(), 'ok')
+        super().addSuccess(test)
+
+    def addSkip(self, test, reason):
+        print(test.id(), 'skip', reason)
+        super().addSkip(test, reason)
+
+suite = unittest.defaultTestLoader.loadTestsFromNames(sys.argv[1:])
+result = Result()
+suite.run(result)
+for _, details in result.errors + result.failures:
+    print(details, file=sys.stderr)
+print('ran', result.testsRun)
+sys.exit(not result.wasSuccessful() or result.testsRun == len(result.skipped))
+"""
+    script = tmp / "run_cpython_tests.py"
+    script.write_text(runner)
+    modules = ("test.test_bisect", "test.test_heapq", "test.test_itertools", "test.test_struct")
+    results = []
+    for compiler, tag in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"cpython-{tag}"
+        build.mkdir()
+        run_cmd([str(src / "configure"), "--without-ensurepip"], cwd=build,
+                env={"CC": f"{compiler} -std=gnu23"}, timeout=1200)
+        # Use C23 for both builds even when configure adds its default C11 flag.
+        makefile = build / "Makefile"
+        makefile.write_text(makefile.read_text().replace(" -std=c11", " -std=gnu23"))
+        run_cmd(["make", "-j3"], cwd=build, timeout=2400)
+        results.append(run_cmd(["./python", "-B", str(script), *modules], cwd=build,
+                               env={"PYTHONHASHSEED": "0"}, both_streams=True))
+    check_results("CPython Lib/test", *results)
+    print(f"PASS: CPython ({len(modules)} upstream Lib/test modules)")
+    return True
+
+
+def test_git(tmp):
+    tests = ("t0001-init.sh", "t0008-ignores.sh", "t0060-path-utils.sh")
+    results = []
+    work = tmp / "git-work"
+    work.mkdir()
+    for compiler, src in checkout_pair(tmp, "git"):
+        run_cmd(["make", "-j3", f"CC={compiler} -std=gnu23", "NO_GETTEXT=YesPlease",
+                 "NO_TCLTK=YesPlease", "NO_CURL=YesPlease", "NO_OPENSSL=YesPlease"],
+                cwd=src, timeout=2400)
+        results.append({test: run_cmd(["sh", test, f"--root={work}"], cwd=src / "t", both_streams=True)
+                        for test in tests})
+    for test in tests:
+        check_results(test, results[0][test], results[1][test])
+    print(f"PASS: Git ({len(tests)} upstream shell TAP suites)")
+    return True
+
+
 def main():
     projects = {"zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite,
                 "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2,
                 "zstd": test_zstd, "duktape": test_duktape, "mbedtls": test_mbedtls,
-                "oniguruma": test_oniguruma, "libpng": test_libpng}
+                "oniguruma": test_oniguruma, "libpng": test_libpng,
+                "quickjs": test_quickjs, "redis": test_redis, "curl": test_curl,
+                "cpython": test_cpython, "git": test_git}
     wanted = set(sys.argv[1:]) or set(projects)
     if unknown := wanted - projects.keys():
         sys.exit(f"Unknown projects: {', '.join(sorted(unknown))}")
