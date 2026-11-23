@@ -140,16 +140,11 @@ let run (f : func) (ra : Mir_ra.result) =
       (fun s -> raise (Failure (Printf.sprintf "%s: block %d: %s: %s" f.name bi (ins_s ins) s)))
       fmt
   in
-  let ids = ref 0 in
-  let fresh () =
-    incr ids;
-    Pt !ids
-  in
   (* the entry: every physical register holds its incoming value *)
   let init =
     let regs = Array.make nphys Unknown and virt = Array.make nphys Unknown in
     for p = 0 to nphys - 1 do
-      let t = fresh () in
+      let t = Pt p in
       regs.(p) <- t;
       virt.(p) <- t
     done;
@@ -157,17 +152,12 @@ let run (f : func) (ra : Mir_ra.result) =
   in
   let entry_state = Array.make nb None in
   entry_state.(0) <- Some init;
-  (* identities of physical writes must be the same on every pass, so they
-     are keyed by (block, item, register) *)
-  let pt_ids = Hashtbl.create 256 in
-  let pt key =
-    match Hashtbl.find_opt pt_ids key with
-    | Some t -> t
-    | None ->
-        let t = fresh () in
-        Hashtbl.add pt_ids key t;
-        t
-  in
+  (* Give every item a position, reserving position zero for incoming
+     registers. A write keeps the same identity on every pass. *)
+  let first = Array.make nb 1 in
+  for bi = 1 to nb - 1 do
+    first.(bi) <- first.(bi - 1) + List.length ra.items.(bi - 1)
+  done;
   let step bi s =
     let st = copy_state s in
     let a = st.regs and sl = ref st.slots and vt = st.virt in
@@ -228,7 +218,7 @@ let run (f : func) (ra : Mir_ra.result) =
               (function
                 | V v -> set_vreg v (phys_index (g (V v)))
                 | p ->
-                    let t = pt (bi, k, phys_index p) in
+                    let t = Pt ((first.(bi) + k) * nphys + phys_index p) in
                     a.(phys_index p) <- t;
                     vt.(phys_index p) <- t)
               d;

@@ -417,7 +417,7 @@ type fstate = {
   f : func;
   lx : lexer;
   vals : (string, value) Hashtbl.t;  (** names seen so far *)
-  defined : (string, unit) Hashtbl.t;  (** names with a definition *)
+  keep_value_names : bool;
   blocks : (string, block) Hashtbl.t;
   bdefined : (string, unit) Hashtbl.t;
   mutable pending_keys : string array option;
@@ -444,13 +444,13 @@ let use_name st name =
 
 (* Binds %name to the newly defined value [v] *)
 let define_name st name v =
-  if Hashtbl.mem st.defined name then fail st.lx ("%" ^ name ^ " defined twice");
-  Hashtbl.replace st.defined name ();
   (match Hashtbl.find_opt st.vals name with
-  | Some placeholder -> Vec.set st.f.defs placeholder (Alias v)
+  | Some placeholder when def_of st.f placeholder = Unset ->
+      Vec.set st.f.defs placeholder (Alias v)
+  | Some _ -> fail st.lx ("%" ^ name ^ " defined twice")
   | None -> ());
   Hashtbl.replace st.vals name v;
-  if not (Fir_print.is_numeric name) then Hashtbl.replace st.f.names v name
+  if st.keep_value_names && not (Fir_print.is_numeric name) then Hashtbl.replace st.f.names v name
 
 let rec parse_const_after_ty st ty =
   let lx = st.lx in
@@ -1039,9 +1039,9 @@ let is_term = function
   | _ -> false
 
 (* Parses "{ blocks }" into [f] *)
-let parse_body lx f =
+let parse_body ~keep_value_names lx f =
   let st =
-    { f; lx; vals = Hashtbl.create 64; defined = Hashtbl.create 64; blocks = Hashtbl.create 16;
+    { f; lx; vals = Hashtbl.create 64; keep_value_names; blocks = Hashtbl.create 16;
       bdefined = Hashtbl.create 16; pending_keys = None }
   in
   let switch_fixups = ref [] in
@@ -1168,7 +1168,7 @@ let parse_body lx f =
   blocks ();
   (* every referenced block and value must be defined *)
   Hashtbl.iter (fun name _ -> if not (Hashtbl.mem st.bdefined name) then fail lx ("undefined block ^" ^ name)) st.blocks;
-  Hashtbl.iter (fun name _ -> if not (Hashtbl.mem st.defined name) then fail lx ("undefined value %" ^ name)) st.vals;
+  Hashtbl.iter (fun name v -> if def_of f v = Unset then fail lx ("undefined value %" ^ name)) st.vals;
   (* blocks were created on first reference; renumber them in text order so
      the entry block is block 0 and printing is stable *)
   let order = Array.of_list (List.rev !order) in
@@ -1371,7 +1371,7 @@ let parse_dtype lx =
       Denum { name; base; enumerators = List.rev !es }
   | t -> fail lx ("expected a debug type, got " ^ tok_text t)
 
-let parse_module_with lx on_func =
+let parse_module_with ?(keep_value_names = true) lx on_func =
   let m = create_module () in
   let rec go () =
     match next lx with
@@ -1496,7 +1496,7 @@ let parse_module_with lx on_func =
         f.unwind_cleanup <- cleanup;
         f.display <- display;
         f.decl_loc <- decl_loc;
-        if kw = "func" then parse_body lx f;
+        if kw = "func" then parse_body ~keep_value_names lx f;
         on_func m f;
         go ()
     | t -> fail lx ("unexpected " ^ tok_text t ^ " at top level")
@@ -1506,5 +1506,5 @@ let parse_module_with lx on_func =
 
 let parse_module s = parse_module_with (lexer (Text s)) add_func
 
-let read_module ch on_func =
-  parse_module_with (lexer (Channel { ch; buf = Bytes.create 65536; start = 0; len = 0 })) on_func
+let read_module ?(keep_value_names = true) ch on_func =
+  parse_module_with ~keep_value_names (lexer (Channel { ch; buf = Bytes.create 65536; start = 0; len = 0 })) on_func

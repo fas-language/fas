@@ -6,8 +6,9 @@ type t = { modul : modul; mutable bodies : func Fir_replay.t; mutable stored : i
 
 let with_input ch compile =
   let bodies = Fir_replay.create () in
+  (* Native lowering uses numeric value IDs; only the textual printer needs names. *)
   let modul =
-    try Fir_parse.read_module ch (fun m f ->
+    try Fir_parse.read_module ~keep_value_names:false ch (fun m f ->
       Fir_replay.append bodies f;
       add_func m (func_header f))
     with e -> Fir_replay.close bodies; raise e

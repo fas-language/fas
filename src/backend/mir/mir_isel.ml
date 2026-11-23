@@ -34,7 +34,7 @@ type ctx = {
   label_funcs : (string, unit) Hashtbl.t;
       (** functions defined here and called directly (not weak) *)
   tls_syms : (string, unit) Hashtbl.t;  (** thread-local variables *)
-  vals : (int, reg) Hashtbl.t;
+  vals : reg option array;  (** indexed by canonical Fir value ID *)
   mutable cur : int;  (** the Mir block instructions go to *)
   mutable fir_block : int;
   mutable sret : reg option;  (** the hidden result pointer, in a MEMORY-class function *)
@@ -93,11 +93,11 @@ let align_up x a = (x + a - 1) / a * a
 
 let vreg c v =
   let v = F.resolve c.fn v in
-  match Hashtbl.find_opt c.vals v with
+  match c.vals.(v) with
   | Some r -> r
   | None ->
       let r = fresh c (cls_of_ty (ty c v)) in
-      Hashtbl.add c.vals v r;
+      c.vals.(v) <- Some r;
       r
 
 let copy c r =
@@ -2727,7 +2727,7 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
     ignore (new_block mf)
   done;
   let c =
-    { fn; mf; pic; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Hashtbl.create 256;
+    { fn; mf; pic; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
       cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
       frame = Hashtbl.create 16;
       f80 = Hashtbl.create 8;
@@ -2765,7 +2765,7 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
            | None -> []
            | Some v -> (
                let v = F.resolve fn v in
-               match (Hashtbl.find_opt c.frame v, Hashtbl.find_opt c.cells v, Hashtbl.find_opt c.vals v) with
+               match (Hashtbl.find_opt c.frame v, Hashtbl.find_opt c.cells v, c.vals.(v)) with
                | Some s, _, _ -> [ (i, Hslot s) ]
                | _, Some (V r, _), _ -> [ (i, Hcell r) ]
                | _, _, Some (V r) -> [ (i, Hptr r) ]
