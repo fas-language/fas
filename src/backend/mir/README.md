@@ -95,6 +95,11 @@ with a PC32 relocation against the local symbol `.Lfas.text` (the start of
 still has the FDE of its own copy. `test/fas_fir/c/unwind.fir` walks the
 stack with the libgcc unwinder from a C callback.
 
+Inline assembly can use `.cfi_*` frame rules, including `.cfi_escape`.
+The assembler encodes the rules for the snippet, and the backend places
+them at the snippet's machine-code offset in the enclosing FDE. A
+snippet cannot start a new frame or change the CIE's augmentation.
+
 ## Debug info
 
 With `-g` (`fas -g`, `fas-fir -g`) the object gets DWARF 5

@@ -96,7 +96,8 @@ let fstore a dbl m x = A.sse_rm a (A.fprefix dbl) 0x11 ~reg:x m
    The assembler is $FAS_AS (a command line), else `as --64`, else
    `$FAS_CC -c -x assembler` (cc by default). A snippet may not put bytes in
    another section, define a global symbol, or refer to a place in
-   another snippet. Its alignment contributes to that of .text. *)
+   another snippet. Its alignment contributes to that of .text. An inline
+   .cfi_* rule becomes part of the enclosing function's FDE. *)
 
 (* a snippet: its bytes, its alignment and its relocations, at offsets in
    the bytes, against an outside symbol or a place in the snippet *)
@@ -104,6 +105,7 @@ type snippet = {
   code : string;
   salign : int;
   srelocs : (int * [ `Sym of string | `Here of int ] * int * int64) list;
+  sframe : string option;
 }
 
 let gpr_name width r =
@@ -254,16 +256,31 @@ let run_assembler source =
       in
       go attempts)
 
-(* assembles every statement; the snippets in order *)
+(* Assemble each sequence of inline CFI rules in a dummy FDE with an
+   empty initial state. The final DW_CFA_nop makes the assembler advance
+   to the end of the snippet. Splicing the program into the real FDE
+   preserves these relative PC advances and uses the host frame's state. *)
+let has_inline_cfi text =
+  let rec find i =
+    match String.index_from_opt text i '.' with
+    | None -> false
+    | Some j -> (j + 5 <= String.length text && String.sub text j 5 = ".cfi_") || find (j + 1)
+  in
+  find 0
+
 let assemble_snippets (texts : (bool * string) list) =
   let n = List.length texts in
   let src = Buffer.create 1024 in
+  let cfi = Array.make n false in
   List.iteri
     (fun i (intel, text) ->
       Printf.bprintf src ".section .text.fas_asm_%d,\"ax\",@progbits\n" i;
       if intel then Buffer.add_string src ".intel_syntax noprefix\n";
+      cfi.(i) <- has_inline_cfi text;
+      if cfi.(i) then Buffer.add_string src ".cfi_startproc simple\n";
       Buffer.add_string src text;
       Buffer.add_string src "\n";
+      if cfi.(i) then Buffer.add_string src ".cfi_escape 0x00\n.cfi_endproc\n";
       if intel then Buffer.add_string src ".att_syntax prefix\n")
     texts;
   let data = run_assembler (Buffer.contents src) in
@@ -271,6 +288,7 @@ let assemble_snippets (texts : (bool * string) list) =
   let o = R.parse ~path:"<inline asm>" data in
   let sec = Array.make n (-1) in
   let snippet_of = Hashtbl.create n in
+  let frame_section = ref None in
   Array.iter
     (fun (s : R.section) ->
       let p = ".text.fas_asm_" in
@@ -279,6 +297,7 @@ let assemble_snippets (texts : (bool * string) list) =
         sec.(i) <- s.index;
         Hashtbl.replace snippet_of s.index i
       end
+      else if s.name = ".eh_frame" && Array.exists Fun.id cfi then frame_section := Some s
       else if (s.kind = 1 || s.kind = 8) && s.flags land 2 <> 0 && s.size > 0 then
         unsupported "inline asm puts bytes in section %s" s.name)
     o.sections;
@@ -287,6 +306,43 @@ let assemble_snippets (texts : (bool * string) list) =
       if y.binding <> 0 && Hashtbl.mem snippet_of y.section then
         unsupported "inline asm defines the global symbol %s" y.name)
     o.symbols;
+  let frames = Array.make n None in
+  Option.iter
+    (fun (s : R.section) ->
+      let u32 off = Int32.to_int (String.get_int32_le o.data (s.offset + off)) in
+      let byte off = o.data.[s.offset + off] in
+      let bad () = unsupported "inline asm: unsupported frame entry or CIE rules" in
+      Array.iter
+        (fun (r : R.relocation) ->
+          if r.target = s.index then begin
+            let y = o.symbols.(r.symbol) in
+            let i = match Hashtbl.find_opt snippet_of y.section with
+              | Some i when cfi.(i) -> i
+              | _ -> bad ()
+            in
+            let pc = r.offset in
+            if r.kind <> 2 || Int64.add y.value r.addend <> 0L ||
+               pc < 8 || pc > s.size - 9 || frames.(i) <> None then bad ();
+            let fde = pc - 8 in
+            let last = fde + 4 + u32 fde in
+            let cie = pc - 4 - u32 (pc - 4) in
+            let first = pc + 9 in
+            let initial = "\001zR\000\001\120\016\001\027" in
+            if cie < 0 || cie > fde - 8 - String.length initial ||
+               last < first || last > s.size || byte (pc + 8) <> '\000' ||
+               u32 (pc + 4) <> o.sections.(y.section).size then bad ();
+            let rules = cie + 8 in
+            let rules_end = cie + 4 + u32 cie in
+            if u32 (cie + 4) <> 0 || rules_end < rules + String.length initial ||
+               rules_end > fde ||
+               String.sub o.data (s.offset + rules) (String.length initial) <> initial then bad ();
+            for pos = rules + String.length initial to rules_end - 1 do
+              if byte pos <> '\000' then bad ()
+            done;
+            frames.(i) <- Some (String.sub o.data (s.offset + first) (last - first))
+          end)
+        o.relocations)
+    !frame_section;
   let relocs = Array.make n [] in
   Array.iter
     (fun (r : R.relocation) ->
@@ -304,10 +360,12 @@ let assemble_snippets (texts : (bool * string) list) =
           end)
     o.relocations;
   Array.init n (fun i ->
-      if sec.(i) < 0 then { code = ""; salign = 1; srelocs = [] }
+      if cfi.(i) && frames.(i) = None then unsupported "inline asm: missing frame entry";
+      if sec.(i) < 0 then { code = ""; salign = 1; srelocs = []; sframe = frames.(i) }
       else
         let s = o.sections.(sec.(i)) in
-        { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment; srelocs = List.rev relocs.(i) })
+        { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment;
+          srelocs = List.rev relocs.(i); sframe = frames.(i) })
 
 (* Top-level asm ([module_asm]): the text is assembled in one run, and every
    allocated section of the result becomes a section of its own in our
@@ -469,7 +527,7 @@ let probed_frame a size =
     end
   end
 
-let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
+let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame (i : ins) =
   let m = mem fr in
   match i with
   | Salloc (d, n) ->
@@ -618,6 +676,7 @@ let ins a fr ~pic ~func_label ~out ~snippet (i : ins) =
       let sn : snippet = snippet () in
       while A.pos a mod sn.salign <> 0 do A.byte a 0x90 done;
       let start = A.pos a in
+      Option.iter (asm_frame start (String.length sn.code)) sn.sframe;
       A.raw a sn.code
         (List.map
            (fun (o, t, kind, addend) ->
@@ -694,23 +753,26 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
      instruction with its spills, or a block's terminator) *)
   let pend = Dynarray.create () in
   let ended () = Dynarray.add_last pend (A.pos a) in
+  let asm_frame pc len code =
+    events := (pc - start, Mir_cfi.Inline (code, pc + len - start)) :: !events in
+  let emit = ins a fr ~pic ~func_label ~out:(out_area f) ~snippet ~asm_frame in
   for b = 0 to nb - 1 do
     A.place a labels.(b);
     block_pos b (A.pos a);
     List.iter
       (function
         | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows; ended ()
-        | Mir_ra.Orig (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i; ended ()
+        | Mir_ra.Orig (_, i) -> emit i; ended ()
         | Reload (v, (G r)) -> A.load_zx a 8 r (slot_mem v)
         | Reload (v, (X x)) -> xld x (slot_mem v) ra.vslot.(v)
         | Spill (v, (G r)) -> A.store a 8 (slot_mem v) r; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
         | Spill (v, (X x)) -> xst (slot_mem v) ra.vslot.(v) x; Dynarray.set pend (Dynarray.length pend - 1) (A.pos a)
-        | Move (d, r) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet (Copy (d, r))
+        | Move (d, r) -> emit (Copy (d, r))
         | Ld (s, G r) -> A.load_zx a 8 r (mem fr (at (Bslot s)))
         | Ld (s, X x) -> xld x (mem fr (at (Bslot s))) s
         | St (s, G r) -> A.store a 8 (mem fr (at (Bslot s))) r
         | St (s, X x) -> xst (mem fr (at (Bslot s))) s x
-        | Remat (_, i) -> ins a fr ~pic ~func_label ~out:(out_area f) ~snippet i
+        | Remat (_, i) -> emit i
         | Elided _ -> ()
         | Reload (_, V _) | Spill (_, V _) | Ld (_, V _) | St (_, V _) ->
             invalid_arg "Mir_emit: virtual register after allocation")

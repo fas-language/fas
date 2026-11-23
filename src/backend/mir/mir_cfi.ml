@@ -46,6 +46,7 @@ type event =
   | Epilogue              (* before lea rsp, [rbp-..] of a return *)
   | Popped_rbp            (* after pop rbp *)
   | Returned              (* after ret, when code follows *)
+  | Inline of string * int (* assembler CFI program, advanced to this offset *)
 
 type fde = { start : int; size : int; events : (int * event) list (* offsets from start, in order *); entry : bool }
 
@@ -148,7 +149,8 @@ let build (fdes : fde list) =
           | Restored_xmm x -> u8 b (0xc0 lor (17 + x))
           | Epilogue -> remember_state b
           | Popped_rbp -> def_cfa b 7 8
-          | Returned -> restore_state b)
+          | Returned -> restore_state b
+          | Inline (program, finish) -> Buffer.add_string b program; loc := finish)
         f.events;
       pad8 b at;
       patches := (at, Buffer.length b - at - 4) :: !patches)

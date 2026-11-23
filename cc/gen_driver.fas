@@ -193,6 +193,16 @@ fn drv_assemble_fir(fir_path addr, obj_path addr, is_pic bool) void fails {
     }
 }
 
+// Take the shared unwinder only when an input references it. Save the
+// linker's dependency-selection state around the implicit library.
+fn drv_dynamic_gcc(args handle[Vec[addr]]) void {
+    vec_push(args, c"-lgcc")
+    vec_push(args, c"--push-state")
+    vec_push(args, c"--as-needed")
+    vec_push(args, c"-lgcc_s")
+    vec_push(args, c"--pop-state")
+}
+
 // Link inputs (objects, archives, shared libs) + linker args via fas-ld
 fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]],
             is_shared bool, is_static bool, is_no_pie bool, no_stdlib bool) void fails {
@@ -210,6 +220,8 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
     } else if !is_no_pie {
         vec_push(&args, c"-pie")
     }
+
+    if !is_static { vec_push(&args, c"--eh-frame-hdr") }
 
     if !is_static && !is_shared {
         vec_push(&args, c"--dynamic-linker")
@@ -255,8 +267,9 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
             vec_push(&args, c"-lc")
             vec_push(&args, c"--end-group")
         } else {
+            drv_dynamic_gcc(&args)
             vec_push(&args, c"-lc")
-            vec_push(&args, c"-lgcc")
+            drv_dynamic_gcc(&args)
         }
         crtend addr = if is_static || (is_no_pie && !is_shared) { c"crtend.o" } else { c"crtendS.o" }
         vec_push(&args, drv_join_path(gcc_dir, crtend))

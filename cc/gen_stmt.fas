@@ -369,6 +369,19 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
 
 // ---------- Inline Asm Lowering ----------
 
+// An immediate constraint needs a Fir constant, not an SSA add of a
+// constant and zero. The backend resolves asm operands before folding.
+fn gen_emit_asm_input(b handle[Buf], expr handle[Ast], ty u32, v u32) void {
+    gen_emit_fir_ty(b, ty)
+    buf_u8(b, 32)
+    if v == 0xffffffff {
+        width u32 = ty_int_bits(ty)
+        value u64 = if width < 64 { expr.value & ((1 << width) - 1) } else { expr.value }
+        buf_str(b, c"0x")
+        buf_hex(b, value, 1)
+    } else { gen_emit_val(b, v) }
+}
+
 fn gen_inline_asm(n handle[Ast]) void fails {
     is_goto bool = (n.flags & 1) != 0
     is_vol bool = (n.flags & 2) != 0 || n.b == null
@@ -443,8 +456,11 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         if cs.n == 1 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
             tied_idx = zext[i32](cs.p[u8] - 48)
         }
+        imm bool = (bytes_eq_c(cs, c"i") || bytes_eq_c(cs, c"n")) &&
+            ty_is_integer(inp.b.ty) && ty_int_bits(inp.b.ty) <= 64 &&
+            (inp.b.flags & NF_INT_VALUE) != 0 && (inp.b.flags & NF_OVERFLOW) == 0
         buf_free(&cb)
-        iv u32 = if is_m { try gen_lvalue(inp.b) } else { try gen_rvalue(inp.b) }
+        iv u32 = if imm { 0xffffffff } else if is_m { try gen_lvalue(inp.b) } else { try gen_rvalue(inp.b) }
         it u32 = if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty }
         if !is_m && tied_idx >= 0 && zext[usize](bitcast[u32](tied_idx)) < out_tids.n {
             ot u32 = vec_get(&out_tids, zext[usize](bitcast[u32](tied_idx)))
@@ -576,9 +592,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 fir_emit_quoted_bytes(b, cb.p, cb.n)
                 buf_free(&cb)
                 buf_u8(b, 32)
-                gen_emit_fir_ty(b, vec_get(&in_tids, i))
-                buf_u8(b, 32)
-                gen_emit_val(b, vec_get(&in_vals, i))
+                gen_emit_asm_input(b, onode.b, vec_get(&in_tids, i), vec_get(&in_vals, i))
             }
             buf_u8(b, 41)
         }
@@ -694,9 +708,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             fir_emit_quoted_bytes(b, cb.p, cb.n)
             buf_free(&cb)
             buf_u8(b, 32)
-            gen_emit_fir_ty(b, vec_get(&in_tids, i))
-            buf_u8(b, 32)
-            gen_emit_val(b, vec_get(&in_vals, i))
+            gen_emit_asm_input(b, onode.b, vec_get(&in_tids, i), vec_get(&in_vals, i))
         }
         for i usize in 0..out_nodes.n {
             if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 {
