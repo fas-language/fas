@@ -8,9 +8,10 @@ trap 'rm -rf -- "$work"' EXIT
 
 for file in "$src"/*.c; do
     flags=()
-    if [ "${file##*/}" = export_dynamic.c ]; then
-        flags=(-Xlinker -export-dynamic -ldl)
-    fi
+    case "${file##*/}" in
+        export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
+        flt_rounds.c) flags=(-lm) ;;
+    esac
     "${CLANG:-clang-22}" -std=gnu23 "$file" "${flags[@]}" -o "$work/clang"
     "$work/clang" > "$work/clang.out"
     "$FCC" "$file" "${flags[@]}" -o "$work/fcc"

@@ -249,7 +249,7 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
             try pa_error(p, args.loc, c"movemask requires a vector of sixteen bytes")
         }
     }
-    if bytes_eq_c(name, c"__builtin_ia32_pause") {
+    if bytes_eq_c(name, c"__builtin_ia32_pause") || bytes_eq_c(name, c"__builtin_flt_rounds") {
         try se_builtin_count(p, t, count, 0, 0)
     }
     bit_arity u32 = se_stdc_bit_arity(name)
