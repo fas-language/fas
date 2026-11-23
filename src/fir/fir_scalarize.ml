@@ -745,6 +745,15 @@ let rebuild_func (f : func) : func =
     g
   end
 
+let run_func f =
+  if func_needs f then begin
+    let g = rebuild_func f in
+    (* lane loops split the entry block (Fir.hoist_const_allocas) *)
+    hoist_const_allocas g;
+    g
+  end
+  else f
+
 (* Rewrites [m] in place. Afterwards no value, signature or memory access
    has a vector type. *)
 let run (m : modul) =
@@ -752,11 +761,5 @@ let run (m : modul) =
      calls first, so none is left here (check_mem) *)
   Fir_atomic.run m;
   for i = 0 to Vec.length m.funcs - 1 do
-    let f = Vec.get m.funcs i in
-    if func_needs f then begin
-      let g = rebuild_func f in
-      (* lane loops split the entry block (Fir.hoist_const_allocas) *)
-      hoist_const_allocas g;
-      Vec.set m.funcs i g
-    end
+    Vec.set m.funcs i (run_func (Vec.get m.funcs i))
   done

@@ -26,6 +26,22 @@ echo "=== cc_types: 2. Fir 0.3 smoke test (fir_out -> fas-fir -> run) ==="
 "$TMP/smoke_bin"
 echo "fir_smoke: passed"
 
+# The streaming lexer must retain a token straddling a refill and must
+# work on a pipe as well as a seekable file. "global" here introduces the
+# next declaration, so it uses the parser's two-token lookahead.
+python3 - <<'PY_FIR' > "$TMP/refill.fir"
+prefix = "declare @unused () -> ()\n"
+declaration = "global @value size 4 align 4 = { bytes \"\\2a\\00\\00\\00\" }\n"
+part = prefix + ";" + " " * (65536 - len(prefix) - 4) + "\n" + declaration
+part += "func @main () -> (i32) global {\n^entry:\n"
+part += "  %v = load i32 ptr @value, align 4\n  ret %v\n}\n"
+print(part, end="")
+PY_FIR
+"$FAS_FIR" -c "$TMP/refill.fir" -o "$TMP/refill-file.o"
+cat "$TMP/refill.fir" | "$FAS_FIR" -c - -o "$TMP/refill-stdin.o"
+cmp "$TMP/refill-file.o" "$TMP/refill-stdin.o"
+echo "fir_stream: file and piped input emitted identical objects"
+
 echo "=== cc_types: 3. Differential layout fuzz ($LAYOUT_CASES cases, seed=$SEED) ==="
 "$FAS" "$ROOT/cc/test/layout_probe.fas" -o "$TMP/layout_probe"
 FAS_CC_TYPES_CASES="$LAYOUT_CASES" SEED="$SEED" \

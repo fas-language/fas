@@ -628,6 +628,17 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     vars = [];
   }
 
+(* A function's symbol and ABI without its definitions, values, or debug locals. *)
+let func_header f =
+  { f with
+    defs = Vec.create ~capacity:1 Unset;
+    tys = Vec.create ~capacity:1 i1;
+    insts = Vec.create ~capacity:1 dummy_inst;
+    blocks = Vec.create ~capacity:1 dummy_block;
+    consts = Hashtbl.create 1;
+    names = Hashtbl.create 1;
+    vars = [] }
+
 let add_func m f = ignore (Vec.push m.funcs f)
 let add_global m g = ignore (Vec.push m.globals g)
 

@@ -137,11 +137,10 @@ let check_func (f : func) =
   List.rev !problems
 
 (* every defined function; the module is unchanged *)
-let check (m : modul) =
+let check ?iter_funcs (m : modul) =
+  let iter = Option.value iter_funcs ~default:(fun visit -> Vec.iter visit m.funcs) in
   let problems = ref [] in
-  Vec.iter
-    (fun (f : func) -> if f.defined then problems := !problems @ check_func f)
-    m.funcs;
+  iter (fun (f : func) -> if f.defined then problems := !problems @ check_func f);
   match !problems with
   | [] -> ()
   | ps -> raise (Failure ("constant-time violation:\n" ^ String.concat "\n" ps))

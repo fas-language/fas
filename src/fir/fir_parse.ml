@@ -23,7 +23,53 @@ type tok =
   | P of string  (** punctuation: ( ) [ ] { } < > , : = * + -> ... *)
   | Eof
 
-type lexer = { s : string; mutable pos : int; mutable line : int; mutable peeked : tok option }
+type source =
+  | Text of string
+  | Channel of { ch : in_channel; mutable buf : bytes; mutable start : int; mutable len : int }
+
+type lexer = {
+  source : source;
+  mutable pos : int;
+  mutable line : int;
+  mutable keep : int;
+  mutable peeked : (tok * int) list;
+}
+
+let lexer source = { source; pos = 0; line = 1; keep = 0; peeked = [] }
+
+(* Channel input keeps the current token only. [keep] pins the beginning
+   of a name or number if it straddles the end of the buffer. *)
+let available lx pos =
+  match lx.source with
+  | Text s -> pos < String.length s
+  | Channel c ->
+      if pos < c.start + c.len then true
+      else begin
+        let pinned = max 0 (min lx.keep lx.pos - c.start) in
+        let len = c.len - pinned in
+        if len + 3 >= Bytes.length c.buf then begin
+          let b = Bytes.create (2 * Bytes.length c.buf) in
+          Bytes.blit c.buf pinned b 0 len;
+          c.buf <- b
+        end
+        else Bytes.blit c.buf pinned c.buf 0 len;
+        c.start <- c.start + pinned;
+        c.len <- len;
+        let rec fill () =
+          let n = input c.ch c.buf c.len (Bytes.length c.buf - c.len) in
+          c.len <- c.len + n;
+          pos < c.start + c.len || (n <> 0 && fill ())
+        in
+        fill ()
+      end
+
+let byte lx pos =
+  match lx.source with Text s -> s.[pos] | Channel c -> Bytes.get c.buf (pos - c.start)
+
+let substring lx pos len =
+  match lx.source with
+  | Text s -> String.sub s pos len
+  | Channel c -> Bytes.sub_string c.buf (pos - c.start) len
 
 let fail lx msg = raise (Error (lx.line, msg))
 
@@ -35,19 +81,19 @@ let read_quoted lx =
   (* the opening quote is at lx.pos *)
   lx.pos <- lx.pos + 1;
   let b = Buffer.create 16 in
-  let n = String.length lx.s in
   let rec go () =
-    if lx.pos >= n then fail lx "unterminated string";
-    match lx.s.[lx.pos] with
+    lx.keep <- lx.pos;
+    if not (available lx lx.pos) then fail lx "unterminated string";
+    match byte lx lx.pos with
     | '"' -> lx.pos <- lx.pos + 1
     | '\\' ->
-        if lx.pos + 1 >= n then fail lx "bad escape";
-        (match lx.s.[lx.pos + 1] with
+        if not (available lx (lx.pos + 1)) then fail lx "bad escape";
+        (match byte lx (lx.pos + 1) with
         | '"' -> Buffer.add_char b '"'; lx.pos <- lx.pos + 2
         | '\\' -> Buffer.add_char b '\\'; lx.pos <- lx.pos + 2
         | _ ->
-            if lx.pos + 2 >= n then fail lx "bad escape";
-            let h = String.sub lx.s (lx.pos + 1) 2 in
+            if not (available lx (lx.pos + 2)) then fail lx "bad escape";
+            let h = substring lx (lx.pos + 1) 2 in
             (match int_of_string_opt ("0x" ^ h) with
             | Some c -> Buffer.add_char b (Char.chr c)
             | None -> fail lx "bad escape");
@@ -63,20 +109,20 @@ let read_quoted lx =
   Buffer.contents b
 
 let read_name lx =
-  let n = String.length lx.s in
-  if lx.pos < n && lx.s.[lx.pos] = '"' then read_quoted lx
+  if available lx lx.pos && byte lx lx.pos = '"' then read_quoted lx
   else begin
     let st = lx.pos in
-    while lx.pos < n && is_ident_char lx.s.[lx.pos] do lx.pos <- lx.pos + 1 done;
+    lx.keep <- st;
+    while available lx lx.pos && is_ident_char (byte lx lx.pos) do lx.pos <- lx.pos + 1 done;
     if lx.pos = st then fail lx "expected a name";
-    String.sub lx.s st (lx.pos - st)
+    substring lx st (lx.pos - st)
   end
 
 let rec lex lx =
-  let n = String.length lx.s in
-  if lx.pos >= n then Eof
+  lx.keep <- lx.pos;
+  if not (available lx lx.pos) then Eof
   else
-    match lx.s.[lx.pos] with
+    match byte lx lx.pos with
     | ' ' | '\t' | '\r' ->
         lx.pos <- lx.pos + 1;
         lex lx
@@ -86,24 +132,27 @@ let rec lex lx =
         lex lx
     | ';' ->
         (* comment to end of line *)
-        while lx.pos < n && lx.s.[lx.pos] <> '\n' do lx.pos <- lx.pos + 1 done;
+        while available lx lx.pos && byte lx lx.pos <> '\n' do
+          lx.pos <- lx.pos + 1;
+          lx.keep <- lx.pos
+        done;
         lex lx
     | '"' -> Str (read_quoted lx)
     | '%' -> lx.pos <- lx.pos + 1; Tlocal (read_name lx)
     | '@' -> lx.pos <- lx.pos + 1; Sym (read_name lx)
     | '^' -> lx.pos <- lx.pos + 1; Label (read_name lx)
     | '!' -> lx.pos <- lx.pos + 1; Bang (read_name lx)
-    | '-' when lx.pos + 1 < n && lx.s.[lx.pos + 1] = '>' -> lx.pos <- lx.pos + 2; P "->"
-    | '.' when lx.pos + 2 < n && lx.s.[lx.pos + 1] = '.' && lx.s.[lx.pos + 2] = '.' ->
+    | '-' when available lx (lx.pos + 1) && byte lx (lx.pos + 1) = '>' -> lx.pos <- lx.pos + 2; P "->"
+    | '.' when available lx (lx.pos + 2) && byte lx (lx.pos + 1) = '.' && byte lx (lx.pos + 2) = '.' ->
         lx.pos <- lx.pos + 3;
         P "..."
     | '-' | '0' .. '9' ->
         let st = lx.pos in
         lx.pos <- lx.pos + 1;
-        while lx.pos < n && (match lx.s.[lx.pos] with '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' -> true | _ -> false) do
+        while available lx lx.pos && (match byte lx lx.pos with '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' -> true | _ -> false) do
           lx.pos <- lx.pos + 1
         done;
-        Num (String.sub lx.s st (lx.pos - st))
+        Num (substring lx st (lx.pos - st))
     | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ':' | '=' | '*' | '+' as c ->
         lx.pos <- lx.pos + 1;
         P (String.make 1 c)
@@ -112,16 +161,27 @@ let rec lex lx =
 
 let peek lx =
   match lx.peeked with
-  | Some t -> t
-  | None ->
+  | (t, line) :: _ -> lx.line <- line; t
+  | [] ->
       let t = lex lx in
-      lx.peeked <- Some t;
+      lx.peeked <- [ (t, lx.line) ];
       t
 
 let next lx =
   let t = peek lx in
-  lx.peeked <- None;
+  lx.peeked <- List.tl lx.peeked;
   t
+
+let peek2 lx =
+  let t = peek lx in
+  match lx.peeked with
+  | [ _; (q, _) ] -> q
+  | _ ->
+      let line = lx.line in
+      let q = lex lx in
+      lx.peeked <- [ (t, line); (q, lx.line) ];
+      lx.line <- line;
+      q
 
 let tok_text = function
   | Ident s -> s | Num s -> s | Str s -> "\"" ^ s ^ "\"" | Tlocal s -> "%" ^ s
@@ -1155,23 +1215,13 @@ let parse_linkage_vis_attrs lx =
   let linkage = ref Global and vis = ref Default and attrs = ref 0 and display = ref None in
   let decl_loc = ref 0 and cleanup = ref None in
   let seen_linkage = ref false in
-  (* the token after the next one, without consuming either *)
-  let peek2 () =
-    let pos = lx.pos and line = lx.line and peeked = lx.peeked in
-    ignore (next lx);
-    let t = peek lx in
-    lx.pos <- pos;
-    lx.line <- line;
-    lx.peeked <- peeked;
-    t
-  in
   let rec go () =
     match peek lx with
     (* at most one linkage, and `global @x` is the next top-level global, not
        this declaration's linkage (a bodiless `declare` has no end marker) *)
     | Ident s
       when Option.is_some (linkage_of s) && (not !seen_linkage)
-           && (match peek2 () with Sym _ -> false | _ -> true) ->
+           && (match peek2 lx with Sym _ -> false | _ -> true) ->
         ignore (next lx);
         seen_linkage := true;
         linkage := Option.get (linkage_of s);
@@ -1310,8 +1360,7 @@ let parse_dtype lx =
       Denum { name; base; enumerators = List.rev !es }
   | t -> fail lx ("expected a debug type, got " ^ tok_text t)
 
-let parse_module s =
-  let lx = { s; pos = 0; line = 1; peeked = None } in
+let parse_module_with lx on_func =
   let m = create_module () in
   let rec go () =
     match next lx with
@@ -1433,9 +1482,14 @@ let parse_module s =
         f.display <- display;
         f.decl_loc <- decl_loc;
         if kw = "func" then parse_body lx f;
-        add_func m f;
+        on_func m f;
         go ()
     | t -> fail lx ("unexpected " ^ tok_text t ^ " at top level")
   in
   go ();
   m
+
+let parse_module s = parse_module_with (lexer (Text s)) add_func
+
+let read_module ch on_func =
+  parse_module_with (lexer (Channel { ch; buf = Bytes.create 65536; start = 0; len = 0 })) on_func

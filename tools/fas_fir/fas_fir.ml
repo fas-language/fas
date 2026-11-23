@@ -107,9 +107,9 @@ let freestanding_hint e =
    data and carried out by the Fas linker, as `fas --hosted` does
    (src/driver/hosted_link.ml). Static like the default link: -static-pie,
    or -static with --no-pie. *)
-let hosted_link ~debug ~pie ~output ~extra m =
+let hosted_link ~debug ~pie ~output ~extra ~iter_funcs ~has_asm m =
   let module L = Fas_linker in
-  match Mir_emit.compile_object ~debug m with
+  match Mir_emit.compile_object ~debug ~iter_funcs ~has_asm m with
   | Error _ as e -> e
   | Ok obj -> (
       let object_path = Filename.temp_file "fas-fir-hosted-" ".o" in
@@ -186,18 +186,93 @@ let main () =
   if !llvm && (mode = Check || mode = Legalize || mode = Emit_llvm) then usage_error "--llvm builds; it does not go with %s" flag;
   let mode = ref mode and pie = ref (Option.value !pie ~default:true) in
   let path = match !input with Some p -> p | None -> usage_error "no input file" in
-  let text =
-    try if path = "-" then read_all stdin else In_channel.with_open_bin path In_channel.input_all
-    with Sys_error e -> die "%s" e
-  in
   let name = if path = "-" then "<stdin>" else path in
-  let m =
-    try Fir_parse.parse_module text
-    with Fir_parse.Error (line, msg) -> die "%s:%d: %s" name line msg
+  let verify errors =
+    match errors with
+    | [] -> ()
+    | errs -> die "%s: verifier:\n%s" name (String.concat "\n" errs)
   in
-  (match Fir_verify.verify m with
-  | [] -> ()
-  | errs -> die "%s: verifier:\n%s" name (String.concat "\n" errs));
+  let input_error f =
+    try f () with
+    | Fir_parse.Error (line, msg) -> die "%s:%d: %s" name line msg
+    | Sys_error e -> die "%s" e
+  in
+  let unsupported msg = die "%s: not supported by the native backend yet: %s" name msg in
+  let run_native stream =
+    let m = stream.Fir_stream.modul in
+    let iter_funcs = Fir_stream.iter stream in
+    verify (Fir_stream.verify stream);
+    (* The CLI's initial normalization is also used by --legalize. Collect
+       all wide helpers before native runtime helpers, keeping symbol
+       order and section contents identical to the in-memory path. *)
+    (try
+      Fir_stream.normalize stream;
+      Fir_stream.wide stream
+    with Fir_scalarize.Unsupported e | Fir_wide.Unsupported e -> unsupported e);
+    (match Fir_stream.verify stream with
+    | [] -> ()
+    | errs -> internal "%s: verifier, after Fir_wide:\n%s" name (String.concat "\n" errs));
+    if !mode = Exe &&
+      not (Fir.Vec.fold (fun acc (f : Fir.func) -> acc || (f.name = "main" && f.defined)) false m.funcs)
+    then die "%s: no @main to start (use -c for an object)" name;
+    let finish () =
+      try
+        if m.triple <> Target_layout.x86_64_linux.triple then
+          Error ("native backend: only Linux x86-64 object emission is supported (target " ^ m.triple ^ ")")
+        else begin
+          Fir_stream.normalize stream;
+          if Mir_runtime.uses_fma iter_funcs then begin
+            Mir_runtime.add_helpers m;
+            Fir_stream.wide stream
+          end;
+          Fir_stream.wide stream;
+          match Fir_stream.verify stream with
+          | [] -> Fir_ct.check ~iter_funcs m; Ok ()
+          | errs -> Error ("native backend internal error: Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs)
+        end
+      with
+      | Fir_scalarize.Unsupported e | Fir_wide.Unsupported e | Fir_ct.Failure e ->
+          Error ("native backend: " ^ e)
+      | Invalid_argument e -> Error ("native backend internal error: " ^ e)
+    in
+    let result =
+      match finish () with
+      | Error _ as e -> e
+      | Ok () ->
+          let has_asm = Fir_stream.has_asm stream in
+          match !mode with
+          | Obj ->
+              let write_obj obj =
+                let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
+                Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
+              in
+              Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~tls_gd:!fpic ~iter_funcs ~has_asm m)
+          | Exe ->
+              let output = Option.value !output ~default:"a.out" in
+              if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) ~iter_funcs ~has_asm m
+              else
+                let inputs = List.rev_map Fas_linker.Input.file !extra in
+                let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in
+                Result.map_error freestanding_hint
+                  (Mir_emit.link_files ~debug:!debug ~iter_funcs ~has_asm ~inputs ?options ~output m)
+          | _ -> assert false
+    in
+    match result with
+    | Ok () -> ()
+    | Error e when String.starts_with ~prefix:"native backend internal error" e -> internal "%s" e
+    | Error e -> die "%s" e
+  in
+  if not !llvm && (!mode = Obj || !mode = Exe) then begin
+    input_error (fun () ->
+      let read ch = Fir_stream.with_input ch run_native in
+      if path = "-" then read stdin else In_channel.with_open_bin path read);
+    exit 0
+  end;
+  let text =
+    input_error (fun () -> if path = "-" then read_all stdin else In_channel.with_open_bin path In_channel.input_all)
+  in
+  let m = input_error (fun () -> Fir_parse.parse_module text) in
+  verify (Fir_verify.verify m);
   (* --check, --legalize and --emit-llvm print to -o, else stdout *)
   let print_out t =
     (match !output with
@@ -234,48 +309,13 @@ let main () =
     if status <> 0 then die "%s: %s failed" name cc;
     exit 0
   end;
-  (* trapping divisions the hardware does not trap on become a check and a
-     `trap` first: scalarization and limbs drop the flag (Mir_emit.generate
-     does the same) *)
+  (* --legalize shows Fir_wide alone, without vector scalarization. *)
   Fir_trapdiv.run ~hw:true m;
-  (* the machine-IR backend has no vectors: lanes first, so that vectors
-     of wide integers (<2 x i128>) become wide scalars for Fir_wide;
-     --legalize shows Fir_wide alone *)
-  if !mode <> Legalize then (
-    try Fir_scalarize.run m
-    with Fir_scalarize.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg);
-  (* the native backend computes in i1..i64 only *)
-  (try Fir_wide.run m
-   with Fir_wide.Unsupported msg -> die "%s: not supported by the native backend yet: %s" name msg);
+  (try Fir_wide.run m with Fir_wide.Unsupported msg -> unsupported msg);
   (match Fir_verify.verify m with
   | [] -> ()
   | errs -> internal "%s: verifier, after Fir_wide:\n%s" name (String.concat "\n" errs));
-  if !mode = Legalize then print_out (Fir_print.module_to_string m);
-  let write_obj obj =
-    let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
-    try Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj) with Sys_error e -> die "%s" e
-  in
-  let need_main () =
-    if not (Fir.Vec.fold (fun acc (f : Fir.func) -> acc || (f.name = "main" && f.defined)) false m.funcs) then
-      die "%s: no @main to start (use -c for an object)" name
-  in
-  let result =
-    match !mode with
-    | Obj -> Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~tls_gd:!fpic m)
-    | Exe | Check | Legalize | Emit_llvm ->
-        need_main ();
-        let output = Option.value !output ~default:"a.out" in
-        if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) m
-        else
-          let inputs = List.rev_map Fas_linker.Input.file !extra in
-          let options = if !pie then Some { Fas_linker.Options.default with mode = Static_pie } else None in
-          Result.map_error freestanding_hint
-            (Mir_emit.link_files ~debug:!debug ~inputs ?options ~output m)
-  in
-  match result with
-  | Ok () -> ()
-  | Error e when String.starts_with ~prefix:"native backend internal error" e -> internal "%s" e
-  | Error e -> die "%s" e
+  print_out (Fir_print.module_to_string m)
 
 (* anything that escapes is a bug: exit 3, never an OCaml backtrace *)
 let () =

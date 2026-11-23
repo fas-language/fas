@@ -1794,21 +1794,27 @@ let add_helpers (m : modul) helpers =
     Vec.iter (fun f -> add_func m f) rt.funcs
   end
 
+let run_func m helpers consts f =
+  if func_needs f then begin
+    let g = rebuild_func m helpers consts f in
+    (* limb loops split the entry block (Fir.hoist_const_allocas) *)
+    hoist_const_allocas g;
+    g
+  end
+  else f
+
+let rewrite m map =
+  let helpers = Hashtbl.create 8 in
+  let consts = Hashtbl.create 16 in
+  map (run_func m helpers consts);
+  if Hashtbl.length helpers > 0 then add_helpers m helpers
+
 (* Rewrites [m] in place. Afterwards no value, signature or memory access
    uses an integer width other than 1, 8, 16, 32 or 64. *)
 let run (m : modul) =
   (* odd-width, wide and f80 atomics first: on containers or libatomic *)
   Fir_atomic.run m;
-  let helpers = Hashtbl.create 8 in
-  let consts = Hashtbl.create 16 in
-  let n = Vec.length m.funcs in
-  for i = 0 to n - 1 do
-    let f = Vec.get m.funcs i in
-    if func_needs f then begin
-      let g = rebuild_func m helpers consts f in
-      (* limb loops split the entry block (Fir.hoist_const_allocas) *)
-      hoist_const_allocas g;
-      Vec.set m.funcs i g
-    end
-  done;
-  if Hashtbl.length helpers > 0 then add_helpers m helpers
+  rewrite m (fun transform ->
+    for i = 0 to Vec.length m.funcs - 1 do
+      Vec.set m.funcs i (transform (Vec.get m.funcs i))
+    done)

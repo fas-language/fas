@@ -629,7 +629,8 @@ let verify_func funcs (f : func) =
     List.rev !errors
   end
 
-let verify (m : modul) =
+let verify ?iter_funcs (m : modul) =
+  let iter = Option.value iter_funcs ~default:(fun visit -> Vec.iter visit m.funcs) in
   let names = Hashtbl.create 64 in
   let errs = ref [] in
   let check_name n =
@@ -739,54 +740,49 @@ let verify (m : modul) =
      an indirect_br could enter: not the entry, no parameters *)
   let funcs = Hashtbl.create 64 in
   Vec.iter (fun f -> Hashtbl.replace funcs f.name f) m.funcs;
+  let block_params = Hashtbl.create 64 in
+  let block_refs = ref [] in
+  let index_blocks f =
+    Hashtbl.replace block_params f.name
+      (if f.defined then Some (Array.init (Vec.length f.blocks) (fun b -> Array.length (block f b).params > 0))
+       else None);
+    Hashtbl.iter
+      (fun c _ -> match c with Cblockaddr (g, b) -> block_refs := (f.name, g, b) :: !block_refs | _ -> ())
+      f.consts
+  in
+  let block_errors = ref [] in
   let check_blockaddr owner g b =
-    let bad why = errs := Printf.sprintf "@%s: blockaddr(@%s, %d): %s" owner g b why :: !errs in
-    match Hashtbl.find_opt funcs g with
-    | Some gf when gf.defined ->
-        if b < 0 || b >= Vec.length gf.blocks then bad "no such block"
+    let bad why = block_errors := Printf.sprintf "@%s: blockaddr(@%s, %d): %s" owner g b why :: !block_errors in
+    match Hashtbl.find_opt block_params g with
+    | Some (Some params) ->
+        if b < 0 || b >= Array.length params then bad "no such block"
         else if b = entry then bad "the entry block"
-        else if Array.length (block gf b).params > 0 then bad "the block takes parameters"
+        else if params.(b) then bad "the block takes parameters"
     | _ -> bad "not a function defined in this module"
   in
-  Vec.iter
-    (fun f -> Hashtbl.iter (fun c _ -> match c with Cblockaddr (g, b) -> check_blockaddr f.name g b | _ -> ()) f.consts)
-    m.funcs;
-  Vec.iter
-    (fun g ->
-      match g.init with
-      | Some ps ->
-          List.iter
-            (function
-              | Blockref { fn; block } -> check_blockaddr g.gname fn block
-              | Blockdiff { fn; lhs; rhs; _ } ->
-                  check_blockaddr g.gname fn lhs;
-                  check_blockaddr g.gname fn rhs
-              | _ -> ())
-            ps
-      | None -> ())
-    m.globals;
   (* location ids index this module's table (0 = none): an id from another
      module's table would name the wrong line, or none *)
   let nlocs = Vec.length m.locs in
-  Vec.iter
-    (fun f ->
-      if f.defined then begin
-        let bad = ref 0 in
-        if f.decl_loc < 0 || f.decl_loc >= nlocs then bad := f.decl_loc;
-        Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
-        Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
-        if !bad <> 0 then
-          errs := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !errs
-      end)
-    m.funcs;
+  let loc_errors = ref [] in
+  let check_locs f =
+    if f.defined then begin
+      let bad = ref 0 in
+      if f.decl_loc < 0 || f.decl_loc >= nlocs then bad := f.decl_loc;
+      Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
+      Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
+      if !bad <> 0 then
+        loc_errors := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !loc_errors
+    end
+  in
   (* debug information (roadmap v0.8): every id in range; a scope belongs to
      one function (the function whose locations or variables name it or a
      scope inside it) *)
+  let dtype_errors = ref [] in
   let ntypes = Vec.length m.dtypes and nscopes = Vec.length m.scopes in
   let type_ok t = t >= 0 && t < ntypes in
   Vec.iteri
     (fun i t ->
-      let bad what = errs := Printf.sprintf "dtype %d: %s" i what :: !errs in
+      let bad what = dtype_errors := Printf.sprintf "dtype %d: %s" i what :: !dtype_errors in
       let ref_ok what t = if not (type_ok t) then bad (Printf.sprintf "%s type %d out of range" what t) in
       match t with
       | Dvoid -> if i <> 0 then bad "void is only type 0"
@@ -811,7 +807,7 @@ let verify (m : modul) =
     m.dtypes;
   (* DWARF strings are NUL-terminated (DW_FORM_string, the line table's
      file names), so a name with a NUL byte in it cannot be written *)
-  let nul what s = if String.contains s '\000' then errs := Printf.sprintf "%s %S has a NUL byte" what s :: !errs in
+  let nul what s = if String.contains s '\000' then dtype_errors := Printf.sprintf "%s %S has a NUL byte" what s :: !dtype_errors in
   Vec.iteri (fun i (file, _, _) -> if i > 0 then nul (Printf.sprintf "loc %d: file name" i) file) m.locs;
   Vec.iteri
     (fun i t ->
@@ -826,42 +822,42 @@ let verify (m : modul) =
           List.iter (fun (e, _) -> nul "enumerator" e) enumerators
       | Dvoid | Dpointer _ | Darray _ | Dvector _ -> ())
     m.dtypes;
-  Vec.iter
-    (fun f ->
-      Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;
-      List.iter (fun d -> nul (Printf.sprintf "@%s: var" f.name) d.vname) f.vars)
-    m.funcs;
+  let check_names f =
+    Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;
+    List.iter (fun d -> nul (Printf.sprintf "@%s: var" f.name) d.vname) f.vars
+  in
+  let loc_scope_errors = ref [] in
   Hashtbl.iter
     (fun l sc ->
-      if l <= 0 || l >= nlocs then errs := Printf.sprintf "loc %d: no such location" l :: !errs;
-      if sc <= 0 || sc >= nscopes then errs := Printf.sprintf "loc %d: scope %d out of range" l sc :: !errs)
+      if l <= 0 || l >= nlocs then loc_scope_errors := Printf.sprintf "loc %d: no such location" l :: !loc_scope_errors;
+      if sc <= 0 || sc >= nscopes then loc_scope_errors := Printf.sprintf "loc %d: scope %d out of range" l sc :: !loc_scope_errors)
     m.loc_scopes;
+  let variable_errors = ref [] in
   let owner = Array.make (max 1 nscopes) "" in
   let claim fname sc =
     let rec up sc =
       if sc > 0 && sc < nscopes then begin
         if owner.(sc) = "" then owner.(sc) <- fname
         else if owner.(sc) <> fname then
-          errs := Printf.sprintf "scope %d is used by both @%s and @%s" sc owner.(sc) fname :: !errs;
+          variable_errors := Printf.sprintf "scope %d is used by both @%s and @%s" sc owner.(sc) fname :: !variable_errors;
         up (Vec.get m.scopes sc)
       end
     in
     up sc
   in
-  Vec.iter
-    (fun f ->
-      if f.defined then begin
-        let seen = Hashtbl.create 8 in
-        let note l = if l > 0 && l < nlocs && not (Hashtbl.mem seen l) then begin
-            Hashtbl.replace seen l ();
-            claim f.name (loc_scope m l)
-          end
-        in
+  let check_vars f =
+    if f.defined then begin
+      let seen = Hashtbl.create 8 in
+      let note l = if l > 0 && l < nlocs && not (Hashtbl.mem seen l) then begin
+          Hashtbl.replace seen l ();
+          claim f.name (loc_scope m l)
+        end
+      in
         Vec.iter (fun (ir : inst_rec) -> note ir.loc) f.insts;
         Vec.iter (fun (b : block_rec) -> note b.term_loc) f.blocks;
         List.iter
           (fun d ->
-            let bad what = errs := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !errs in
+            let bad what = variable_errors := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !variable_errors in
             if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
             if d.vscope < 0 || d.vscope >= nscopes then bad (Printf.sprintf "scope %d out of range" d.vscope)
             else claim f.name d.vscope;
@@ -880,30 +876,53 @@ let verify (m : modul) =
                   | _, t -> bad ("home must be a pointer, not " ^ ty_to_string t)))
           f.vars
       end
-      else if f.vars <> [] then errs := Printf.sprintf "@%s: a declaration has no variables" f.name :: !errs)
-    m.funcs;
+      else if f.vars <> [] then variable_errors := Printf.sprintf "@%s: a declaration has no variables" f.name :: !variable_errors
+  in
+  let sig_errors = ref [] in
+  let check_sig f =
+    let bad p = sig_errors := Printf.sprintf "@%s: signature: %s" f.name p :: !sig_errors in
+    Option.iter bad (ms_sig_problem f.sig_);
+    List.iter
+      (fun a -> Option.iter bad (abi_problem a))
+      (f.sig_.param_abis @ f.sig_.result_abis);
+    (* a vector constant has one lane per lane of its type, each of the
+       element type *)
+    Hashtbl.iter
+      (fun c v ->
+        match c with
+        | Cvec (t, lanes) ->
+            let bad why = sig_errors := Printf.sprintf "@%s: vector constant %s: %s" f.name (ty_to_string t) why :: !sig_errors in
+            (match t with
+            | Vec (n, e) ->
+                if Array.length lanes <> n then bad (Printf.sprintf "%d lanes given" (Array.length lanes))
+                else if Array.exists (fun l -> ty_of f l <> e) lanes then bad "a lane of another type"
+            | _ -> bad "not a vector type");
+            if ty_of f v <> t then bad "defines a value of another type"
+        | _ -> ())
+      f.consts
+  in
+  let function_errors = ref [] in
+  iter (fun f ->
+    index_blocks f;
+    check_locs f;
+    check_names f;
+    check_vars f;
+    check_sig f;
+    function_errors := List.rev_append (verify_func funcs f) !function_errors);
+  List.iter (fun (f, g, b) -> check_blockaddr f g b) (List.rev !block_refs);
   Vec.iter
-    (fun f ->
-      let bad p = errs := Printf.sprintf "@%s: signature: %s" f.name p :: !errs in
-      Option.iter bad (ms_sig_problem f.sig_);
-      List.iter
-        (fun a -> Option.iter bad (abi_problem a))
-        (f.sig_.param_abis @ f.sig_.result_abis);
-      (* a vector constant has one lane per lane of its type, each of the
-         element type *)
-      Hashtbl.iter
-        (fun c v ->
-          match c with
-          | Cvec (t, lanes) ->
-              let bad why = errs := Printf.sprintf "@%s: vector constant %s: %s" f.name (ty_to_string t) why :: !errs in
-              (match t with
-              | Vec (n, e) ->
-                  if Array.length lanes <> n then bad (Printf.sprintf "%d lanes given" (Array.length lanes))
-                  else if Array.exists (fun l -> ty_of f l <> e) lanes then bad "a lane of another type"
-              | _ -> bad "not a vector type");
-              if ty_of f v <> t then bad "defines a value of another type"
-          | _ -> ())
-        f.consts)
-    m.funcs;
-  let fs = Vec.fold (fun acc f -> List.rev_append (verify_func funcs f) acc) [] m.funcs in
-  List.rev !errs @ List.rev fs
+    (fun g ->
+      match g.init with
+      | Some ps ->
+          List.iter
+            (function
+              | Blockref { fn; block } -> check_blockaddr g.gname fn block
+              | Blockdiff { fn; lhs; rhs; _ } ->
+                  check_blockaddr g.gname fn lhs;
+                  check_blockaddr g.gname fn rhs
+              | _ -> ())
+            ps
+      | None -> ())
+    m.globals;
+  List.concat (List.map (fun errors -> List.rev !errors)
+    [ errs; block_errors; loc_errors; dtype_errors; loc_scope_errors; variable_errors; sig_errors; function_errors ])

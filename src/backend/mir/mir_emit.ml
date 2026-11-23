@@ -465,9 +465,9 @@ let module_asm ~first (texts : string list) =
 
 (* the snippets of every inline asm statement of [compiled], in the order
    [func] meets them *)
-let asm_snippets compiled =
+let asm_snippets iter =
   let texts = ref [] and uid = ref 0 in
-  List.iter
+  iter
     (fun (_, mf, (ra : Mir_ra.result)) ->
       let fr = layout mf (List.length ra.saved) in
       Array.iter
@@ -476,8 +476,7 @@ let asm_snippets compiled =
               incr uid;
               texts := (x.intel, render_asm fr !uid x) :: !texts
           | _ -> ()))
-        ra.items)
-    compiled;
+        ra.items);
   let snippets = match List.rev !texts with [] -> [||] | l -> assemble_snippets l in
   let align = Array.fold_left (fun n s -> max n s.salign) 16 snippets in
   let next = ref 0 in
@@ -1055,33 +1054,38 @@ let global_image block_offsets (g : F.global) =
 
 (* ---------- module ---------- *)
 
+let prepare (m : F.modul) =
+  (* trapping divisions the 64-bit div/idiv does not trap on by itself
+     become a check and a `trap`, before scalarization and limbs drop
+     the flag *)
+  Fir_trapdiv.run ~hw:true m;
+  (* vectors to lanes first: lane-wise fma becomes scalar fma, which
+     the runtime helpers then serve *)
+  Fir_scalarize.run m;
+  Mir_runtime.add m;
+  (* integers wider than 64 bits (also lanes of scalarized vectors) to
+     i64 limbs: Mir_isel computes in i1..i64 only *)
+  Fir_wide.run m;
+  (match Fir_verify.verify m with
+  | [] -> ()
+  | errs -> invalid_arg ("Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs));
+  Fir_ct.check m
+
 (* [startup]: add _start (an executable without libc). [pic]: position-
    independent code (-c objects, hosted links, PIE executables). [tls_gd]:
    general-dynamic TLS (see [compile_object]).
    [self_relocate]: _start applies the image's own RELATIVE relocations (a
    static PIE has no dynamic loader to do it). [debug]: add DWARF line
    tables (Mir_dwarf); the allocated sections are the same either way. *)
-let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = false) (m : F.modul) =
+let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
+    ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
-    (* trapping divisions the 64-bit div/idiv does not trap on by itself
-       become a check and a `trap`, before scalarization and limbs drop
-       the flag *)
-    Fir_trapdiv.run ~hw:true m;
-    (* vectors to lanes first: lane-wise fma becomes scalar fma, which
-       the runtime helpers then serve *)
-    Fir_scalarize.run m;
-    Mir_runtime.add m;
-    (* integers wider than 64 bits (also lanes of scalarized vectors) to
-       i64 limbs: Mir_isel computes in i1..i64 only *)
-    Fir_wide.run m;
-    (match Fir_verify.verify m with
-    | [] -> ()
-    | errs -> invalid_arg ("Fir after scalarization and Fir_wide:\n" ^ String.concat "\n" errs));
-    (* constant time: no legalization branched on a secret or made it an
-       address (SPEC §8) *)
-    Fir_ct.check m;
+    let iter = match iter_funcs with
+      | Some iter -> iter
+      | None -> prepare m; fun visit -> F.Vec.iter visit m.funcs
+    in
     let syms = Elf_attrs.of_fir m in
     let env = Mir_isel.env m in
     let a = A.create () in
@@ -1099,58 +1103,82 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     let lines = ref [] in
     (* text offsets of every block, for blockaddr symbols *)
     let block_offsets = Hashtbl.create 256 in
-    (* every function selected and allocated first: inline asm is
-       rendered with final frame offsets and assembled in one run *)
-    let compiled = ref [] in
-    F.Vec.iter
-      (fun (fn : F.func) ->
-        if fn.defined then begin
-          let mf = Mir_isel.select ~pic ~tls_gd env fn in
-          if dump then prerr_string (Mir.to_string mf);
-          Mir_export.add_func mf;
-          let ra =
-            match Mir_import.find mf with
-            | [] ->
-                let ra = Mir_ra.run mf in
-                if dump then prerr_string (Mir_ra.to_string mf ra);
-                Mir_check.run mf ra;
-                Mir_ct.run mf ra;
-                ra
-            | cands ->
-                (* FAS_RA_IMPORT: an allocation from the lab, checked by
-                   Mir_icheck instead of Mir_check *)
-                let ra, slots = Mir_import.run mf cands in
-                if dump then prerr_string (Mir_ra.to_string mf ra);
-                Mir_icheck.run mf ra ~slots;
-                Mir_ct.run mf ra;
-                ra
-          in
-          compiled := (fn, mf, ra) :: !compiled
-        end)
-      m.funcs;
-    let compiled = List.rev !compiled in
-    Mir_export.flush m;
-    let snippet, text_align = asm_snippets compiled in
-    List.iter
-      (fun ((fn : F.func), mf, ra) ->
-        begin
-          A.align a 16;
-          let offset = A.pos a in
-          let size, events, rows, vlocs =
-            func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
-          in
-          let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
-          let cleanup = Option.map (fun (pad, resume) -> (block_offset pad, block_offset resume)) fn.unwind_cleanup in
-          fdes := { Mir_cfi.start = offset; size; events; entry = false; cleanup } :: !fdes;
-          (* rows without a file name say nothing *)
-          let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
-          lines :=
-            { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
-              size; rows; vars = fn.vars; vlocs }
-            :: !lines;
-          func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
-        end)
-      compiled;
+    (* Inline asm is rendered with final frame offsets and assembled as a
+       group. The streamed driver replays the allocations from scratch
+       instead of keeping every machine function alive until assembly. *)
+    let select visit =
+      iter
+        (fun (fn : F.func) ->
+          if fn.defined then begin
+            let mf = Mir_isel.select ~pic ~tls_gd env fn in
+            if dump then prerr_string (Mir.to_string mf);
+            Mir_export.add_func mf;
+            let ra =
+              match Mir_import.find mf with
+              | [] ->
+                  let ra = Mir_ra.run mf in
+                  if dump then prerr_string (Mir_ra.to_string mf ra);
+                  Mir_check.run mf ra;
+                  Mir_ct.run mf ra;
+                  ra
+              | cands ->
+                  (* FAS_RA_IMPORT: an allocation from the lab, checked by
+                     Mir_icheck instead of Mir_check *)
+                  let ra, slots = Mir_import.run mf cands in
+                  if dump then prerr_string (Mir_ra.to_string mf ra);
+                  Mir_icheck.run mf ra ~slots;
+                  Mir_ct.run mf ra;
+                  ra
+            in
+            visit ((fn : F.func), mf, ra)
+          end);
+      Mir_export.flush m
+    in
+    let emit snippet ((fn : F.func), mf, ra) =
+      A.align a 16;
+      let offset = A.pos a in
+      let size, events, rows, vlocs =
+        func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
+      in
+      let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
+      let cleanup = Option.map (fun (pad, resume) -> (block_offset pad, block_offset resume)) fn.unwind_cleanup in
+      fdes := { Mir_cfi.start = offset; size; events; entry = false; cleanup } :: !fdes;
+      if debug then begin
+        (* rows without a file name say nothing *)
+        let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
+        lines :=
+          { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
+            size; rows; vars = fn.vars; vlocs }
+          :: !lines
+      end;
+      func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
+    in
+    let text_align =
+      if not has_asm then begin
+        select (emit (fun () -> assert false));
+        16
+      end else begin
+        let emit_all iter =
+          let snippet, align = asm_snippets iter in
+          iter (emit snippet);
+          align
+        in
+        match iter_funcs with
+        | None ->
+            let compiled = ref [] in
+            select (fun f -> compiled := f :: !compiled);
+            let compiled = List.rev !compiled in
+            emit_all (fun visit -> List.iter visit compiled)
+        | Some _ ->
+            let compiled = Fir_replay.create () in
+            Fun.protect ~finally:(fun () -> Fir_replay.close compiled) (fun () ->
+              select (fun (fn, mf, ra) ->
+                let header = F.func_header fn in
+                header.vars <- fn.vars;
+                Fir_replay.append compiled (header, mf, ra));
+              emit_all (Fir_replay.iter compiled))
+      end
+    in
     if startup then begin
       A.align a 16;
       let offset = A.pos a in
@@ -1426,15 +1454,16 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
    (general-dynamic TLS), for objects that go into a shared library, which
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
-let compile_object ?debug ?tls_gd m = generate ?debug ?tls_gd ~startup:false ~pic:true m
+let compile_object ?debug ?tls_gd ?iter_funcs ?has_asm m =
+  generate ?debug ?tls_gd ?iter_funcs ?has_asm ~startup:false ~pic:true m
 
 (* a static executable, or a static PIE when [options] ask for one *)
-let link_files ?debug ?(inputs = []) ?options ~output m =
+let link_files ?debug ?iter_funcs ?has_asm ?(inputs = []) ?options ~output m =
   let mode = match options with Some (o : Fas_linker.Options.t) -> o.mode | None -> Static in
   let pic = mode <> Static in
   let tls_gd = mode = Shared in
   let startup = mode <> Shared in
-  match generate ?debug ~startup ~pic ~tls_gd ~self_relocate:(mode = Static_pie) m with
+  match generate ?debug ?iter_funcs ?has_asm ~startup ~pic ~tls_gd ~self_relocate:(mode = Static_pie) m with
   | Error _ as e -> e
   | Ok obj -> (
       try
