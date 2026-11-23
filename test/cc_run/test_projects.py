@@ -47,11 +47,11 @@ def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False,
                 or "cannot allocate memory" in err_lo or "bad_alloc" in err_lo
                 or cp.returncode == -9):
             raise RuntimeError(f"compile-oom ({cp.returncode}): {command}\n{err[:1200]}")
-        detail = err or cp.stdout.decode("utf-8", "replace")
-        errors = "\n".join(line for line in detail.splitlines()
-                           if re.search(r"error:|undefined symbol|assertion failed|\*\*\*|Segmentation fault", line))
+        out = cp.stdout.decode("utf-8", "replace")
+        errors = "\n".join(line for line in (out + "\n" + err).splitlines()
+                           if re.search(r"error:|^fas-ld:|assertion failed|\*\*\*|Segmentation fault", line))
         raise RuntimeError(f"Command failed ({cp.returncode}): {command}\n"
-                           f"{errors[:2500]}\n{detail[-2500:]}")
+                           f"{errors[:2500]}\n{out[-2500:]}\n{err[-2500:]}")
     return (cp.stdout, cp.stderr) if both_streams else cp.stdout
 
 
@@ -704,6 +704,139 @@ def test_postgresql(tmp):
     return True
 
 
+def test_openssl(tmp):
+    outputs = []
+    tests = ("sha_test", "bn_internal_test")
+    test_env = {"OPENSSL_TEST_RAND_SEED": "42"}
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"openssl-{label}"
+        build.mkdir()
+        run_cmd(["perl", str(UPSTREAM / "openssl/Configure"), "linux-x86_64",
+                 f"--prefix={build / 'install'}", "no-asm", "no-shared",
+                 "no-module", "-O0"], cwd=build, env={"CC": compiler})
+        run_cmd(["make", "-j3", "build_generated"], cwd=build, timeout=180)
+        run_cmd(["make", "-j3", "link-utils", "util/wrap.pl", *[f"test/{name}" for name in tests]],
+                cwd=build, timeout=1800)
+        run_cmd(["make", "run_tests", "TESTS=test_sha test_internal_bn"], cwd=build, env=test_env, timeout=120)
+        outputs.append([run_cmd([str(build / "test" / name)], cwd=build, env=test_env, both_streams=True)
+                        for name in tests])
+    check_results("OpenSSL SHA and bignum test output", *outputs)
+    print("PASS: OpenSSL with no assembly (SHA and internal bignum tests)")
+    return True
+
+
+def test_perl(tmp):
+    outputs = []
+    tests = ("arith2", "append", "array", "blocks", "concat2")
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"perl-{label}"
+        shutil.copytree(UPSTREAM / "perl", build)
+        run_cmd(["sh", "Configure", "-des", f"-Dcc={compiler}", "-Doptimize=-O0",
+                 f"-Dprefix={build / 'install'}"], cwd=build, timeout=600)
+        run_cmd(["make", "-j3", "miniperl", "lib/Config.pm"], cwd=build, timeout=1200)
+        report = [run_cmd(["../miniperl", "-I../lib", f"op/{name}.t"], cwd=build / "t",
+                          env={"PERL_HASH_SEED": "0"}, both_streams=True) for name in tests]
+        for stdout, stderr in report:
+            failures = [line for line in stdout.splitlines()
+                        if line.startswith(b"not ok ") and b" # TODO " not in line]
+            assert b"1.." in stdout and not failures, (stdout, stderr)
+        outputs.append(report)
+    check_results("miniperl core TAP", *outputs)
+    print("PASS: miniperl (five upstream TAP scripts)")
+    return True
+
+
+def test_tcl(tmp):
+    reports = []
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"tcl-{label}"
+        build.mkdir()
+        env = {"CC": compiler, "CFLAGS": "-O0", "LC_ALL": "C", "TZ": "UTC"}
+        run_cmd([str(UPSTREAM / "tcl/unix/configure"), "--disable-shared", "--disable-symbols"],
+                cwd=build, env=env, timeout=300)
+        run_cmd(["make", "-j3", "tcltest"], cwd=build, env=env, timeout=1200)
+        # tcltest prints its working directory and timestamps. Replace these
+        # fields so test names, results and skip counts compare exactly.
+        report = run_cmd(["./tcltest", str(UPSTREAM / "tcl/tests/all.tcl"), "-verbose", "ps",
+                          "-file", "append.test apply.test binary.test concat.test dict.test"],
+                         cwd=build, env={**env, "TCL_LIBRARY": str(UPSTREAM / "tcl/library")})
+        assert re.search(rb"Failed\s+0(?:\s|$)", report), report[-3000:]
+        reports.append(re.sub(rb"(?m)^(Tests began at|Tests ended at) .*$", rb"\1",
+                              report.replace(os.fsencode(build), b"<build>")))
+    check_results("Tcl tcltest output", *reports)
+    print("PASS: Tcl (five upstream tcltest files)")
+    return True
+
+
+def test_busybox(tmp):
+    reports = []
+    applets = ("printf", "cut", "sort")
+    enabled = ("PRINTF", "CUT", "SORT", "FEATURE_SORT_BIG", "FEATURE_SORT_OPTIMIZE_MEMORY")
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"busybox-{label}"
+        shutil.copytree(UPSTREAM / "busybox", build)
+        # Kbuild invokes CC for standalone .S even when the routines are disabled.
+        cc = build / "test-cc"
+        # Reject the GCC-only options in Kbuild's exit-status probes so that
+        # the shared assembly path receives compatible flags on both builds.
+        # The final link also requests two diagnostic-only GNU ld switches.
+        # Keep the map output, which both linkers support.
+        cc.write_text("#!/bin/sh\nassembly=no\nfor arg do\n  shift\n  case $arg in\n"
+                      "    -malign-data=abi|-fno-guess-branch-probability) exit 1;;\n"
+                      "    -Wl,--warn-common|-Wl,--verbose) continue;;\n"
+                      "    *.S) assembly=yes;;\n  esac\n  set -- \"$@\" \"$arg\"\ndone\n"
+                      f"if [ \"$assembly\" = yes ]; then exec {shlex.quote(CLANG)} \"$@\"; fi\n"
+                      f"exec {shlex.quote(compiler)} \"$@\"\n")
+        cc.chmod(0o755)
+        run_cmd(["make", "allnoconfig"], cwd=build)
+        config = build / ".config"
+        text = config.read_text()
+        for name in enabled:
+            text = text.replace(f"# CONFIG_{name} is not set\n", f"CONFIG_{name}=y\n")
+        config.write_text(text)
+        run_cmd(["make", "oldconfig"], cwd=build, input_bytes=b"\n" * 256)
+        run_cmd(["make", "-j3", f"CC={cc}", "busybox"], cwd=build, timeout=600)
+        report = run_cmd(["sh", "runtest", *applets], cwd=build / "testsuite",
+                         env={"LC_ALL": "C"}, both_streams=True)
+        assert report[0].count(b"PASS: ") >= len(applets), report
+        reports.append(report)
+    check_results("BusyBox applet tests", *reports)
+    print("PASS: BusyBox (printf, cut and sort upstream tests)")
+    return True
+
+
+def test_libjpeg_turbo(tmp):
+    outputs = []
+    for build in cmake_project(tmp, "libjpeg-turbo", ["tjunittest-static", "cjpeg-static", "djpeg-static"],
+                               ("-DWITH_SIMD=OFF", "-DENABLE_SHARED=OFF", "-DWITH_JAVA=OFF",
+                                "-DCMAKE_C_FLAGS=-O0 -g0 -DSPNG_DISABLE_OPT")):
+        output = run_cmd([str(build / "tjunittest-static")], cwd=build, both_streams=True)
+        image = UPSTREAM / "libjpeg-turbo/testimages/testorig.ppm"
+        compressed = run_cmd([str(build / "cjpeg-static"), "-quality", "85", str(image)], cwd=build)
+        decoded = run_cmd([str(build / "djpeg-static")], cwd=build, input_bytes=compressed)
+        outputs.append((output, compressed, decoded))
+    check_results("libjpeg-turbo tests and image bytes", *outputs)
+    print("PASS: libjpeg-turbo with no SIMD (tjunittest, cjpeg and djpeg)")
+    return True
+
+
+def test_ffmpeg(tmp):
+    outputs = []
+    tests = ("base64", "crc", "avstring")
+    for compiler, label in ((FCC, "fcc"), (CLANG, "clang")):
+        build = tmp / f"ffmpeg-{label}"
+        build.mkdir()
+        run_cmd([str(UPSTREAM / "ffmpeg/configure"), f"--cc={compiler}", "--disable-asm",
+                 "--disable-everything", "--disable-autodetect", "--disable-optimizations",
+                 "--disable-programs", "--disable-doc"], cwd=build, timeout=300)
+        run_cmd(["make", "-j3", *[f"fate-{name}" for name in tests]], cwd=build, timeout=1200)
+        outputs.append([run_cmd([str(build / "libavutil/tests" / name)], cwd=build, both_streams=True)
+                        for name in tests])
+    check_results("FFmpeg libavutil FATE output", *outputs)
+    print("PASS: FFmpeg with no assembly (three libavutil FATE tests)")
+    return True
+
+
 def main():
     projects = {"zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite,
                 "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2,
@@ -712,7 +845,10 @@ def main():
                 "quickjs": test_quickjs, "redis": test_redis, "curl": test_curl,
                 "cpython": test_cpython, "git": test_git,
                 "musl": test_musl, "lz4": test_lz4, "xz": test_xz,
-                "libuv": test_libuv, "nginx": test_nginx, "postgresql": test_postgresql}
+                "libuv": test_libuv, "nginx": test_nginx, "postgresql": test_postgresql,
+                "openssl": test_openssl, "perl": test_perl, "tcl": test_tcl,
+                "busybox": test_busybox, "libjpeg-turbo": test_libjpeg_turbo,
+                "ffmpeg": test_ffmpeg}
     wanted = set(sys.argv[1:]) or set(projects)
     if unknown := wanted - projects.keys():
         sys.exit(f"Unknown projects: {', '.join(sorted(unknown))}")

@@ -469,7 +469,7 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
     }
     if ty_compatible(ty_unqual(dest), ty_unqual(from)) { return }
     if ty_is_ptr(dest) && (se_null(src) || (ty_is_ptr(from) && se_ptr_compatible(dest, from, true))) { return }
-    if pa_is_gnu(p) && ty_is_ptr(dest) && ty_is_ptr(from) {
+    if ty_is_ptr(dest) && ty_is_ptr(from) {
         d u32 = ty_unqual(ty_node(ty_unqual(dest)).elem)
         f u32 = ty_unqual(ty_node(ty_unqual(from)).elem)
         ptr_signedness bool = ty_is_integer(d) && ty_is_integer(f) && ty_int_bits(d) == ty_int_bits(f) &&
@@ -478,7 +478,9 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
             cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"conversion between void pointer and function pointer"))
             return
         }
-        if se_ptr_compatible(dest, from, false) || ptr_signedness {
+        // Both system compilers diagnose pointer-sign conversions even in
+        // strict modes while still compiling the translation unit.
+        if ptr_signedness || (pa_is_gnu(p) && se_ptr_compatible(dest, from, false)) {
             cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"pointer conversion changes pointed-to qualifiers or signedness"))
             return
         }

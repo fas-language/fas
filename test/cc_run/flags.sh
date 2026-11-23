@@ -292,3 +292,43 @@ grep -qF 'fast-math semantics are unsupported' fcc.err
 grep -qF "warning: unsupported option '-fmade-up'" fcc.err
 grep -qF "warning: unsupported option '-mno-made-up'" fcc.err
 echo "PASS: freestanding link, include paths, and command-line diagnostics"
+
+# Kbuild uses an attached language switch, preprocessor depfiles and -r links.
+mkdir -p kbuild/system
+echo '#define SUM(head, tail...) ((head) + (tail))' > kbuild/system/args.h
+cat > kbuild/main.input <<'C'
+#include <args.h>
+int value(void);
+int main(void) { return __extension__ ({ int n = value(); SUM(n, 2); }) != 42; }
+C
+echo 'int value(void) { return 40; }' > kbuild/value.c
+for compiler in "${CLANG:-clang-22}" "$FCC"; do
+    "$compiler" -std=c11 -isystem kbuild/system -xc -Wp,-MD,kbuild/main.d \
+        -c kbuild/main.input -o kbuild/main.o
+    grep -qF 'kbuild/main.input' kbuild/main.d
+    grep -qF 'kbuild/system/args.h' kbuild/main.d
+    rm kbuild/main.d
+    "$compiler" -c kbuild/value.c -o kbuild/value.o
+    "$compiler" -r -no-pie kbuild/main.o kbuild/value.o -o kbuild/partial.o
+    readelf -h kbuild/partial.o | grep -qE 'Type:[[:space:]]+REL'
+    "$compiler" kbuild/partial.o -o kbuild/partial
+    ./kbuild/partial
+done
+echo "PASS: attached language, system macro, dependency file and relocatable link"
+
+# The archives need rescanning in order: main -> A -> B -> A.
+echo 'int f(void); int main(void) { return f() != 26; }' > kbuild/start.c
+echo 'int g(void); int f(void) { return g() + 6; }' > kbuild/a.c
+echo 'int h(void); int g(void) { return h() + 4; }' > kbuild/b.c
+echo 'int h(void) { return 16; }' > kbuild/end.c
+for compiler in "${CLANG:-clang-22}" "$FCC"; do
+    for file in a b end; do
+        "$compiler" -c "kbuild/$file.c" -o "kbuild/$file.o"
+    done
+    ar rcs kbuild/a.a kbuild/a.o kbuild/end.o
+    ar rcs kbuild/b.a kbuild/b.o
+    "$compiler" kbuild/start.c -Wl,--start-group kbuild/a.a kbuild/b.a \
+        -Wl,--end-group -o kbuild/grouped
+    ./kbuild/grouped
+done
+echo "PASS: archive group option ordering"

@@ -830,7 +830,13 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
     t Token = try pa_peek(p)
     if t.kind == TK_STR { return try pa_postfix(p, try pa_strings(p)) }
     try pa_take(p)
-    if pa_is(p, t, c"__extension__") { return try pa_unary(p) }
+    if pa_is(p, t, c"__extension__") {
+        // System headers use this around GNU expressions in ISO C mode.
+        previous bool = p.extension_expr
+        p.extension_expr = true
+        defer { p.extension_expr = previous }
+        return try pa_unary(p)
+    }
     if pa_is(p, t, c"sizeof") || pa_is(p, t, c"alignof") || pa_is(p, t, c"_Alignof") ||
         pa_is(p, t, c"__alignof") || pa_is(p, t, c"__alignof__") {
         return try pa_size_expr(p, t)

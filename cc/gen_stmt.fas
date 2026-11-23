@@ -939,6 +939,13 @@ fn gen_stmt(n handle[Ast]) void fails {
     // All other statements are skipped if current block is already terminated
     // EXCEPT compound statements that might contain labels or switch cases!
     if bytes_eq_c(kw, c"if") {
+        // Avoid emitting references from an untaken constant branch. A goto
+        // or enclosing switch can still enter it independently of the test.
+        if !gen_is_terminated() && gc.p.label_list.n == 0 && cur_switch == null &&
+            ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+            try gen_stmt(if se_truth(n.a) { n.b } else { n.c })
+            return
+        }
         if gen_is_terminated() {
             // Even when `if` is unreachable, a `goto` or `case` label may jump into
             // `then` or `else`; keep them separated so `then` does not fall into `else`!

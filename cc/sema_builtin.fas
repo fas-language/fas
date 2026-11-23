@@ -281,6 +281,14 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
         try pa_error(p, t.loc, buf_cstr(&message))
     }
     mask128 bool = bytes_eq_c(name, c"__builtin_ia32_pmovmskb128")
+    if bytes_eq_c(name, c"__builtin_ia32_vec_ext_v4si") {
+        try se_builtin_count(p, t, count, 2, 2)
+        ty u32 = ty_unqual(args.ty)
+        if !ty_is_vector(ty) || ty_size(ty) != 16 || ty_node(ty).elem != TY_INT {
+            try pa_error(p, args.loc, c"intrinsic requires a four-lane int vector")
+        }
+        if !ty_is_integer(args.next.ty) { try pa_error(p, args.next.loc, c"vector lane index must be an integer") }
+    }
     if mask128 || bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") {
         try se_builtin_count(p, t, count, 1, 1)
         ty u32 = ty_unqual(args.ty)
@@ -289,7 +297,7 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
             try pa_error(p, args.loc, c"movemask requires a byte vector of the corresponding width")
         }
     }
-    if bytes_eq_c(name, c"__builtin_ia32_pminub128") || bytes_eq_c(name, c"__builtin_ia32_psubusb128") {
+    if feature_in(c" __builtin_ia32_pminub128 __builtin_ia32_psubusb128 __builtin_ia32_pavgb128 ", name) {
         try se_builtin_count(p, t, count, 2, 2)
         arg handle[Ast] = args
         while arg != null {

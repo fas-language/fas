@@ -47,7 +47,7 @@ const IN_OBJ u8 = 1
 const IN_FIR u8 = 2
 
 value struct Command { value addr, kind u8 }
-value struct InputFile { path addr, kind u8 }
+value struct InputFile { path addr, link_at u32, kind u8 }
 
 struct Options {
     path addr
@@ -78,6 +78,7 @@ struct Options {
     default_hidden bool
     suppress_warnings bool
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
+    relocatable bool
     no_markers bool
     no_builtins bool
     macro_dump bool
@@ -187,7 +188,9 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         word Bytes = bytes_c(arg)
         if !options || arg[u8] != 45 || arg[u8, 1] == 0 {
             kind u8 = cli_classify_input(arg, o.force_lang)
-            vec_push[InputFile](&o.inputs, {arg, kind})
+            // Reserve this position among the options forwarded to the linker.
+            vec_push[InputFile](&o.inputs, {arg, trunc[u32](o.link_args.n), kind})
+            vec_push[addr](&o.link_args, arg)
             if o.path == null { o.path = arg }
         } else if bytes_eq_c(word, c"--") { options = false }
         else if bytes_eq_c(word, c"-E") { o.mode = MODE_PREPROCESS }
@@ -199,7 +202,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-frounding-math") { o.rounding_math = true }
         else if bytes_eq_c(word, c"-fno-rounding-math") { o.rounding_math = false }
         else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true; o.mode = MODE_SYNTAX }
-        else if bytes_eq_c(word, c"-x") {
+        else if bytes_starts_with(word, bytes_c(c"-x")) {
             lang addr = try cli_arg(argc, &pos, arg, c"-x")
             if bytes_eq_c(bytes_c(lang), c"c") || bytes_eq_c(bytes_c(lang), c"c-header") { o.force_lang = 1 }
             else if bytes_eq_c(bytes_c(lang), c"none") { o.force_lang = 0 }
@@ -255,6 +258,12 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
             o.user_deps = word.n > 2 && arg[u8, 2] == 77
             if o.deps == 1 { o.mode = MODE_PREPROCESS }
+        } else if bytes_starts_with(word, bytes_c(c"-Wp,-MD,")) || bytes_starts_with(word, bytes_c(c"-Wp,-MMD,")) {
+            o.deps = 2
+            o.user_deps = arg[u8, 6] == 77
+            file Bytes = bytes_from(word, if o.user_deps { 9 } else { 8 })
+            if file.n == 0 { try cli_error(c"fcc: missing dependency file in ", arg) }
+            o.dep_file = drv_cstr_dup(file)
         } else if bytes_eq_c(word, c"-MP") { o.phony = true }
         else if bytes_starts_with(word, bytes_c(c"-MF")) { o.dep_file = try cli_arg(argc, &pos, arg, c"-MF") }
         else if bytes_starts_with(word, bytes_c(c"-MT")) { vec_push[addr](&o.targets, try cli_arg(argc, &pos, arg, c"-MT")) }
@@ -264,7 +273,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-include") || bytes_eq_c(word, c"-imacros") {
             kind u8 = if bytes_eq_c(word, c"-include") { 0 } else { 1 }
             vec_push[Command](&o.force, {try cli_arg(argc, &pos, arg, arg), kind})
-        } else if bytes_eq_c(word, c"-shared") { o.is_shared = true }
+        } else if bytes_eq_c(word, c"-r") { o.relocatable = true }
+        else if bytes_eq_c(word, c"-shared") { o.is_shared = true }
         else if bytes_eq_c(word, c"-static") { o.is_static = true }
         else if bytes_eq_c(word, c"-no-pie") { o.is_no_pie = true }
         else if bytes_eq_c(word, c"-pie") { o.is_no_pie = false }
@@ -367,7 +377,7 @@ fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
     while l.at < f.data.n {
         vec_clear[Token](&tokens)
         try pp_lex_line(&p.names, &l, &tokens, false)
-        if tokens.n != 0 { try pp_define(p, &tokens, tokens.p[Token].loc) }
+        if tokens.n != 0 { try pp_define(p, &tokens, tokens.p[Token].loc, false) }
     }
 }
 
@@ -598,24 +608,21 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     }
 
     // Mode 4: Compile & Link
-    obj_inputs Vec[addr] = {}
     temp_files Vec[addr] = {}
     defer {
         for i usize in 0..temp_files.n {
             os_unlink(vec_get(&temp_files, i)) catch {}
         }
-        vec_free(&obj_inputs)
         vec_free(&temp_files)
     }
     for i usize in 0..o.inputs.n {
         inp InputFile = o.inputs.p[InputFile, i]
-        if inp.kind == IN_OBJ {
-            vec_push(&obj_inputs, inp.path)
-        } else if inp.kind == IN_FIR {
+        if inp.kind == IN_OBJ { continue }
+        if inp.kind == IN_FIR {
             tmp_o addr = drv_temp_path(c".o")
             vec_push(&temp_files, tmp_o)
             try drv_assemble_fir(inp.path, tmp_o, pic, o.debug)
-            vec_push(&obj_inputs, tmp_o)
+            vec_set(&o.link_args, zext[usize](inp.link_at), tmp_o)
         } else {
             tmp_fir addr = drv_temp_path(c".fir")
             tmp_o addr = drv_temp_path(c".o")
@@ -623,11 +630,11 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             vec_push(&temp_files, tmp_o)
             try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, tmp_fir)
             try drv_assemble_fir(tmp_fir, tmp_o, pic, o.debug)
-            vec_push(&obj_inputs, tmp_o)
+            vec_set(&o.link_args, zext[usize](inp.link_at), tmp_o)
         }
     }
     out_exe addr = if o.output != null { o.output } else { c"a.out" }
-    try drv_link(out_exe, &obj_inputs, &o.link_args, o.is_shared, o.is_static, o.is_no_pie, o.no_stdlib)
+    try drv_link(out_exe, &o.link_args, o.is_shared, o.is_static, o.is_no_pie, o.no_stdlib, o.relocatable)
 }
 
 fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ranks handle[Vec[u8]],

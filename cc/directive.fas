@@ -40,7 +40,7 @@ fn pp_check_replacement(n handle[CNames], m handle[Macro], data addr, first usiz
     }
 }
 
-fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
+fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32, system bool) void fails {
     n handle[CNames] = &p.names
     if args.n == 0 || args.p[Token].kind != TK_IDENT { try cc_error(n, loc, c"expected macro name") }
     id u32 = cc_ident(n, args.p[Token])
@@ -65,7 +65,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32) void fails {
                 if m.params.p[u32, j] == param { try cc_error(n, t.loc, c"duplicate macro parameter") }
             }
             vec_push[u32](&m.params, param)
-            if i < args.n && n.gnu && cc_is(n, args.p[Token, i], c"...") {
+            if i < args.n && (n.gnu || system) && cc_is(n, args.p[Token, i], c"...") {
                 try cc_warning(n, args.p[Token, i].loc, p.warning_modes.named_variadic, c"named variadic macros are a GNU extension")
                 m.variadic = true
                 i += 1
@@ -447,7 +447,7 @@ fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
         if next && !n.gnu && !f.system { try cc_error(n, loc, c"#include_next requires GNU mode") }
         try pp_include(p, &args, loc, next, importing)
     } else if cc_is(n, word, c"define") {
-        try pp_define(p, &args, loc)
+        try pp_define(p, &args, loc, f.system)
     } else if cc_is(n, word, c"undef") {
         id u32 = try pp_single_name(p, &args, loc)
         n.macros.p[addr, zext[usize](id)] = null

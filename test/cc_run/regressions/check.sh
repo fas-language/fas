@@ -10,6 +10,7 @@ for file in "$src"/*.c; do
     flags=()
     runner=()
     case "${file##*/}" in
+        char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
         fp_rounding.c) flags=(-frounding-math -lm) ;;

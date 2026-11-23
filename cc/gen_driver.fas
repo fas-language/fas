@@ -208,8 +208,8 @@ fn drv_dynamic_gcc(args handle[Vec[addr]]) void {
 }
 
 // Link inputs (objects, archives, shared libs) + linker args via fas-ld
-fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]],
-            is_shared bool, is_static bool, is_no_pie bool, no_stdlib bool) void fails {
+fn drv_link(out_path addr, link_args handle[Vec[addr]],
+            is_shared bool, is_static bool, is_no_pie bool, no_stdlib bool, relocatable bool) void fails {
     ld_exe addr = drv_find_fas_ld()
     crt_dir Bytes = bytes_c(drv_find_crt_dir())
     gcc_dir Bytes = bytes_c(drv_find_gcc_dir())
@@ -217,7 +217,9 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
     args Vec[addr] = {}
     defer { vec_free(&args) }
 
-    if is_shared {
+    if relocatable {
+        vec_push(&args, c"-r")
+    } else if is_shared {
         vec_push(&args, c"-shared")
     } else if is_static {
         vec_push(&args, c"-static")
@@ -225,9 +227,9 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
         vec_push(&args, c"-pie")
     }
 
-    if !is_static { vec_push(&args, c"--eh-frame-hdr") }
+    if !is_static && !relocatable { vec_push(&args, c"--eh-frame-hdr") }
 
-    if !is_static && !is_shared {
+    if !is_static && !is_shared && !relocatable {
         vec_push(&args, c"--dynamic-linker")
         vec_push(&args, c"/lib64/ld-linux-x86-64.so.2")
     }
@@ -235,7 +237,7 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
     vec_push(&args, c"-o")
     vec_push(&args, out_path)
 
-    if !no_stdlib {
+    if !no_stdlib && !relocatable {
         if !is_shared {
             crt1 addr = if is_static || is_no_pie { c"crt1.o" } else { c"Scrt1.o" }
             vec_push(&args, drv_join_path(crt_dir, crt1))
@@ -256,14 +258,11 @@ fn drv_link(out_path addr, inputs handle[Vec[addr]], link_args handle[Vec[addr]]
     vec_push(&args, c"/lib/x86_64-linux-gnu")
 
     // User object/archive inputs and -L / -l / -Wl args (in order!)
-    for i usize in 0..inputs.n {
-        vec_push(&args, vec_get(inputs, i))
-    }
     for i usize in 0..link_args.n {
         vec_push(&args, vec_get(link_args, i))
     }
 
-    if !no_stdlib {
+    if !no_stdlib && !relocatable {
         if is_static {
             vec_push(&args, c"--start-group")
             vec_push(&args, c"-lgcc")

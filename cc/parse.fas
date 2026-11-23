@@ -149,6 +149,7 @@ struct Parser {
     fenv_access bool
     fenv_default bool
     function_fenv bool
+    extension_expr bool
     ahead arr[2, Token]
     pending u32
     replay handle[Vec[Token]] // optional balanced attribute operand
@@ -322,7 +323,7 @@ fn pa_take(p handle[Parser]) Token fails {
 
 fn pa_is_gnu(p handle[Parser]) bool {
     n handle[CNames] = p.names
-    return n.gnu
+    return n.gnu || p.extension_expr
 }
 
 fn pa_is(p handle[Parser], t Token, word addr) bool {

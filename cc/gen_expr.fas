@@ -1719,6 +1719,21 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         buf_str(gen_cur_buf(), c"  asm volatile \"pause\" clobber(\"memory\")\n")
         return 0
     }
+    if bytes_eq_c(bname, c"__builtin_ia32_vec_ext_v4si") {
+        v u32 = try gen_rvalue(a0)
+        i u32 = try gen_rvalue(a1)
+        i = gen_convert(i, a1.ty, TY_INT)
+        result u32 = gen_new_val()
+        b handle[Buf] = gen_cur_buf()
+        buf_str(b, c"  ")
+        gen_emit_val(b, result)
+        buf_str(b, c" = extract i32 ")
+        gen_emit_val(b, v)
+        buf_str(b, c", ")
+        gen_emit_val(b, i)
+        buf_u8(b, 10)
+        return result
+    }
     mask128 bool = bytes_eq_c(bname, c"__builtin_ia32_pmovmskb128")
     if mask128 || bytes_eq_c(bname, c"__builtin_ia32_pmovmskb256") {
         // Lane i contributes its sign bit to bit i of the unsigned mask.
@@ -1737,10 +1752,19 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         return gen_cast(c"bitcast", n.ty, signs)
     }
     is_sat_sub bool = bytes_eq_c(bname, c"__builtin_ia32_psubusb128")
-    if is_sat_sub || bytes_eq_c(bname, c"__builtin_ia32_pminub128") {
+    is_avg bool = bytes_eq_c(bname, c"__builtin_ia32_pavgb128")
+    if is_sat_sub || is_avg || bytes_eq_c(bname, c"__builtin_ia32_pminub128") {
         lhs u32 = try gen_rvalue(a0)
         rhs u32 = try gen_rvalue(a1)
         if is_sat_sub { return gen_binop(c"usub_sat", n.ty, lhs, rhs) }
+        if is_avg {
+            // Rounded unsigned average, without overflowing the byte lanes.
+            union_bits u32 = gen_binop(c"or", n.ty, lhs, rhs)
+            diff_bits u32 = gen_binop(c"xor", n.ty, lhs, rhs)
+            ones u32 = gen_splat(gen_const_i32(1), TY_INT, n.ty)
+            half_diff u32 = gen_binop(c"lshr", n.ty, diff_bits, ones)
+            return gen_binop(c"sub", n.ty, union_bits, half_diff)
+        }
         mask u32 = gen_new_val()
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  ")
