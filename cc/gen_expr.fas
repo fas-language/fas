@@ -1095,16 +1095,18 @@ fn gen_binary(n handle[Ast]) u32 fails {
     if bytes_eq_c(op, c"==") || bytes_eq_c(op, c"!=") ||
        bytes_eq_c(op, c"<") || bytes_eq_c(op, c"<=") ||
        bytes_eq_c(op, c">") || bytes_eq_c(op, c">=") {
-        // Rvalue lowering decays arrays and functions. Compare in the
-        // resulting pointer type, including when the left operand is null.
+        // Rvalue lowering decays arrays and functions, and finalizes the
+        // result type of certain builtins. Use those types for conversions.
+        lv u32 = try gen_rvalue(n.a)
         lhs_ty u32 = se_decay(n.a.ty)
+        rv u32 = try gen_rvalue(n.b)
         rhs_ty u32 = se_decay(n.b.ty)
         eval_ty u32 = if n.operand_ty != TY_INVALID { n.operand_ty }
                       else if ty_is_ptr(lhs_ty) { lhs_ty }
                       else if ty_is_ptr(rhs_ty) { rhs_ty }
                       else { lhs_ty }
-        lv u32 = gen_convert(try gen_rvalue(n.a), lhs_ty, eval_ty)
-        rv u32 = gen_convert(try gen_rvalue(n.b), rhs_ty, eval_ty)
+        lv = gen_convert(lv, lhs_ty, eval_ty)
+        rv = gen_convert(rv, rhs_ty, eval_ty)
         u u32 = ty_unqual(eval_ty)
         if ty_is_complex(u) {
             et u32 = ty_node(u).elem
