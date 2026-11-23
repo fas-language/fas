@@ -1147,12 +1147,55 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
 
 // ---------- Function Definition Emission ----------
 
+fn gen_protect_type(tid u32, strong bool) bool {
+    n handle[TypeNode] = ty_node(ty_unqual(tid))
+    if n.kind == TYK_ARRAY {
+        if strong || n.aux1 == ARR_VLA { return true }
+        elem u32 = ty_unqual(n.elem)
+        return (ty_size(tid) >= 8 && (elem == TY_CHAR || elem == TY_SCHAR || elem == TY_UCHAR)) ||
+               gen_protect_type(elem, false)
+    }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        r handle[RecordDef] = ty_record(n.aux1)
+        for i u32 in 0..r.fields_len {
+            if gen_protect_type(ty_field(r.fields_start + i).ty, strong) { return true }
+        }
+    }
+    return false
+}
+
+fn gen_protect_body(n handle[Ast], strong bool) bool {
+    if n == null { return false }
+    if n.kind == ND_DECL && n.decl != null {
+        s handle[Symbol] = n.decl
+        if s.storage == SC_NONE || s.storage == SC_AUTO || s.storage == SC_REGISTER {
+            if gen_protect_type(s.ty, strong) || gen_protect_body(handle_from_addr(s.value), strong) { return true }
+        }
+    } else if n.kind == ND_UNARY && strong && bytes_eq_c(cc_name(gc.p.names, n.op), c"&") {
+        a handle[Ast] = n.a
+        while a.kind == ND_MEMBER && !ty_is_ptr(a.a.ty) { a = a.a }
+        if a.kind == ND_NAME && a.decl != null && a.decl.linkage == 0 &&
+            a.decl.storage != SC_STATIC && a.decl.storage != SC_EXTERN && !ty_is_func(a.ty) { return true }
+    } else if n.kind == ND_CALL && n.a != null {
+        name Bytes = cc_name(gc.p.names, n.a.op)
+        if bytes_eq_c(name, c"__builtin_alloca") || bytes_eq_c(name, c"__builtin_alloca_with_align") { return true }
+    }
+    return gen_protect_body(n.a, strong) || gen_protect_body(n.b, strong) ||
+           gen_protect_body(n.c, strong) || gen_protect_body(n.d, strong) || gen_protect_body(n.next, strong)
+}
+
 fn gen_function(node handle[Ast]) void fails {
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
-    is_gnu_inline bool = (s.flags & SF_GNU_EXTERN_INLINE) != 0
+    // An unreferenced static inline must not make its external dependencies
+    // mandatory. In particular, a shared object may include inline helpers
+    // that call private functions available only inside the main program.
+    is_gnu_inline bool = (s.flags & SF_GNU_EXTERN_INLINE) != 0 ||
+        ((s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL &&
+         !gen_has_attr(s.attrs, c"used") && !gen_has_attr(s.attrs, c"retain") &&
+         !gen_has_attr(s.attrs, c"constructor") && !gen_has_attr(s.attrs, c"destructor"))
     if is_gnu_inline {
         gk U64Key = {zext[u64](nid)}
         prev u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
@@ -1205,6 +1248,14 @@ fn gen_function(node handle[Ast]) void fails {
     entry_blk u32 = gen_new_block()
     body_blk u32 = gen_new_block()
     gen_switch_block(body_blk)
+
+    if !gen_has_attr(s.attrs, c"no_stack_protector") &&
+        (gc.stack_protector == 3 || (gc.stack_protector != 0 && gen_protect_body(node.a, gc.stack_protector == 2))) {
+        // Reserve the guard before user slots, toward the saved frame and
+        // return address. Read it before evaluating parameter VLA bounds.
+        gc.stack_guard = gen_alloca_entry(8, 8)
+        gen_store_ty(gen_read_stack_guard(), gc.stack_guard, 8, true, false)
+    }
 
     // Pre-scan for `&&label` so `indirect_br` has the complete target list
     gen_prescan_addr_taken(node.a)

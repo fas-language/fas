@@ -54,14 +54,16 @@ typedef __WCHAR_TYPE__ wchar_t;
 #undef __need_NULL
 #endif
 #ifdef __need_nullptr_t
-#ifndef _NULLPTR_T
+#if __STDC_VERSION__ >= 202311L && !defined(_NULLPTR_T)
 #define _NULLPTR_T
 typedef typeof(nullptr) nullptr_t;
 #endif
 #undef __need_nullptr_t
 #endif
 #ifdef __need_unreachable
+#if __STDC_VERSION__ >= 202311L
 #define unreachable() __builtin_unreachable()
+#endif
 #undef __need_unreachable
 #endif
 #ifdef __need_max_align_t

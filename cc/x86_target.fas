@@ -1,0 +1,59 @@
+// Command-line target features are independent of predefined macro overrides.
+// Target attributes start from the TU features and modify only their function.
+struct X86Flag { name addr, enable u64, disable u64, required u64 }
+struct X86Cpu { name addr, features u64, defines addr }
+
+fn x86_flag(name Bytes) u32 {
+    for i usize in 0..X86_FLAG_COUNT {
+        if bytes_eq_c(name, X86_FLAGS[i].name) { return trunc[u32](i + 1) }
+    }
+    return 0
+}
+
+fn x86_flag_apply(features u64, id u32, enable bool) u64 {
+    f handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
+    if enable { return features | f.enable }
+    return features & ~f.disable
+}
+
+fn x86_cpu(name Bytes) u32 {
+    for i usize in 1..X86_CPU_COUNT {
+        if bytes_eq_c(name, X86_CPUS[i].name) { return trunc[u32](i) }
+    }
+    return 0
+}
+
+fn x86_intrinsic_feature(name Bytes) addr {
+    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb128") { return c"sse2" }
+    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") { return c"avx2" }
+    if bytes_eq_c(name, c"__builtin_ia32_emms") || bytes_eq_c(name, c"__builtin_ia32_paddq") ||
+       bytes_eq_c(name, c"__builtin_ia32_psubq") { return c"mmx" }
+    return null
+}
+
+fn x86_has(features u64, name Bytes) bool {
+    id u32 = x86_flag(name)
+    if id == 0 { return false }
+    // Most switches also affect prerequisite features. Test the macro of the
+    // requested feature itself so e.g. -mno-popcnt does not disable SSE4.2.
+    f handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
+    return (features & f.required) != 0
+}
+
+fn x86_apply_target(features u64, args Bytes) u64 {
+    while args.n > 0 {
+        end usize = bytes_index(args, 44) catch args.n
+        word Bytes = pa_trim(bytes_sub(args, 0, end))
+        if bytes_starts_with(word, bytes_c(c"arch=")) {
+            cpu u32 = x86_cpu(bytes_from(word, 5))
+            if cpu != 0 { features = X86_CPUS[zext[usize](cpu)].features }
+        } else {
+            disable bool = bytes_starts_with(word, bytes_c(c"no-"))
+            id u32 = x86_flag(if disable { bytes_from(word, 3) } else { word })
+            if id != 0 { features = x86_flag_apply(features, id, !disable) }
+        }
+        if end == args.n { break }
+        args = bytes_from(args, end + 1)
+    }
+    return features
+}

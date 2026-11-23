@@ -143,6 +143,8 @@ struct Parser {
     init_depth u32
     loops u32
     function handle[Symbol]
+    x86_features u64
+    x86_feature_stack Vec[u64]
     fenv_access bool
     fenv_default bool
     function_fenv bool
@@ -171,6 +173,33 @@ fn pa_trim(s Bytes) Bytes {
 
 fn pa_pragma(p handle[Parser], t Token) void fails {
     s Bytes = pa_trim(cc_spelling(p.names, t))
+    if bytes_starts_with(s, bytes_c(c"GCC")) {
+        // GCC's intrinsic headers surround their always-inline wrappers with
+        // these pragmas. The selection is parser state, not a new TU macro set.
+        tokens Vec[Token] = {}
+        defer { vec_free(&tokens) }
+        try pragma_tokens(p.pp, s, t.loc, &tokens)
+        if tokens.n < 2 || !pa_is(p, tokens.p[Token], c"GCC") { return }
+        command Token = tokens.p[Token, 1]
+        if pa_is(p, command, c"push_options") {
+            vec_push(&p.x86_feature_stack, p.x86_features)
+        } else if pa_is(p, command, c"pop_options") {
+            if p.x86_feature_stack.n > 0 {
+                p.x86_features = vec_get(&p.x86_feature_stack, p.x86_feature_stack.n - 1)
+                p.x86_feature_stack.n -= 1
+            }
+        } else if pa_is(p, command, c"reset_options") {
+            p.x86_features = p.pp.x86_features
+        } else if pa_is(p, command, c"target") {
+            for i usize in 2..tokens.n {
+                token Token = vec_get(&tokens, i)
+                if token.kind == TK_STR {
+                    p.x86_features = x86_apply_target(p.x86_features, pp_destringize(cc_spelling(p.names, token)))
+                }
+            }
+        }
+        return
+    }
     if bytes_starts_with(s, bytes_c(c"STDC")) {
         tokens Vec[Token] = {}
         defer { vec_free(&tokens) }
@@ -296,7 +325,13 @@ fn pa_is_gnu(p handle[Parser]) bool {
 }
 
 fn pa_is(p handle[Parser], t Token, word addr) bool {
-    return t.kind != TK_EOF && cc_is(p.names, t, word)
+    if t.kind == TK_EOF || !cc_is(p.names, t, word) { return false }
+    standard u8 = p.pp.standard
+    if standard == 0 || standard == 23 || t.kind != TK_IDENT { return true }
+    name Bytes = bytes_c(word)
+    if p.names.gnu && bytes_eq_c(name, c"typeof") { return true }
+    if feature_in(C23_KEYWORDS, name) { return false }
+    return true
 }
 
 fn pa_at(p handle[Parser], word addr) bool fails { return pa_is(p, try pa_peek(p), word) }
@@ -410,9 +445,11 @@ fn pa_typename(p handle[Parser], t Token) bool {
 fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
     p.pp = pp
     p.names = &pp.names
+    p.x86_features = pp.x86_features
     previous handle[TypeCtx] = tc
     defer { tc = previous }
     tc_init(&p.types)
+    tc.unsigned_char = pp.unsigned_char
     pa_enter(p)
     p.file_scope = p.scope
     try pa_builtin_types(p)

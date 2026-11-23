@@ -2,6 +2,9 @@
 // and builtins selected by the system headers on x86-64 Linux.
 const C_ATTRIBUTES addr = c" alias aligned alloc_align alloc_size always_inline artificial cold const deprecated error fallthrough format format_arg gnu_inline leaf malloc may_alias ms_abi noinline nonnull noreturn nothrow packed pure restrict returns_nonnull section sentinel sysv_abi transparent_union unused used visibility warn_unused_result warning weak "
 const C_FEATURES addr = c" attribute_deprecated_with_message c_alignas c_alignof c_atomic c_generic_selections c_static_assert c_thread_local c_variadic_macros "
+const C23_KEYWORDS addr = c" alignas alignof bool constexpr false nullptr static_assert thread_local true typeof typeof_unqual "
+const C_LIBRARY_BUILTINS addr = c" abort abs aligned_alloc calloc exit fprintf free labs llabs malloc memchr memcmp memcpy memmove memset printf realloc snprintf sprintf strcat strchr strcmp strcpy strcspn strlen strncat strncmp strncpy strpbrk strrchr strspn strstr vfprintf vprintf vsnprintf vsprintf "
+
 const C_BUILTINS addr = c" __atomic_load_n __atomic_store_n __builtin_add_overflow __builtin_assume_aligned __builtin_bswap16 __builtin_bswap32 __builtin_bswap64 __builtin_clz __builtin_clzl __builtin_clzll __builtin_constant_p __builtin_ctz __builtin_ctzl __builtin_ctzll __builtin_expect __builtin_expect_with_probability __builtin_flt_rounds __builtin_ia32_pause __builtin_isinf_sign __builtin_memcpy __builtin_memmove __builtin_memset __builtin_ms_va_copy __builtin_ms_va_end __builtin_ms_va_start __builtin_mul_overflow __builtin_object_size __builtin_offsetof __builtin_popcount __builtin_popcountl __builtin_popcountll __builtin_sub_overflow __builtin_trap __builtin_types_compatible_p __builtin_unreachable __builtin_va_arg __builtin_va_copy __builtin_va_end __builtin_va_start "
 
 // x86-64 vendor and model strings accepted by GCC or Clang's CPU query.

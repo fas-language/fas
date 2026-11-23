@@ -522,6 +522,7 @@ type global = {
   mutable thread_local : bool;
   mutable size : int;
   mutable init : init_piece list option;  (** None = zero-filled, defined *)
+  mutable gcommon : bool;  (** ELF common storage reserved at link time *)
   mutable gdefined : bool;  (** false: external declaration *)
 }
 
@@ -595,7 +596,7 @@ let create_module () =
     globals =
       Vec.create
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
-          readonly = false; thread_local = false; size = 0; init = None; gdefined = false };
+          readonly = false; thread_local = false; size = 0; init = None; gcommon = false; gdefined = false };
     aliases = Vec.create { aname = ""; target = ""; addend = 0L; alinkage = Local; avisibility = Default };
     ifuncs = Vec.create { iname = ""; resolver = ""; ilinkage = Local; ivisibility = Default };
     locs;

@@ -173,8 +173,7 @@ def extra_checks(fcc):
         if got.returncode != 1 or diagnostic not in got.stderr:
             raise SystemExit(f"diagnostic regression for {source!r}: {got.returncode}, {got.stderr!r}")
     cli_errors = [
-        (("-E", "-std=gnu17", "-"), b"expected -std=c23 or -std=gnu23"),
-        (("-fsyntax-only", "-ansi", "-"), b"expected -std=c23 or -std=gnu23"),
+        (("-E", "-std=gnu26", "-"), b"unsupported C standard"),
         (("-E", "-", "extra.c"), b"expected one input file, got extra.c"),
         (("-fsyntax-only", "-", "extra.c"), b"expected one input file, got extra.c"),
     ]

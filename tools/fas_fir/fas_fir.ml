@@ -44,7 +44,7 @@
         "fas-fir: internal error: ..." *)
 
 let usage_text =
-  "usage: fas-fir [-c [-fPIC] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
+  "usage: fas-fir [-c [-fPIC | -fno-pic] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
   \              INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
   \  (no flag)    build a static position-independent executable (default output: a.out);\n\
   \               OBJECTS (.o and .a files) are linked in\n\
@@ -140,7 +140,7 @@ let hosted_link ~debug ~pie ~output ~extra ~iter_funcs ~has_asm m =
           | Sys_error msg -> Error ("--hosted: " ^ msg)))
 
 let main () =
-  let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
+  let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and no_pic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
   let set_mode m flag =
     match !mode with
     | Some (_, f) when f <> flag -> usage_error "%s and %s do not go together" f flag
@@ -158,7 +158,8 @@ let main () =
     | "--pie" :: rest -> pie := Some true; args rest
     | "--no-pie" :: rest -> pie := Some false; args rest
     | "-g" :: rest -> debug := true; args rest
-    | "-fPIC" :: rest -> fpic := true; args rest
+    | "-fPIC" :: rest -> fpic := true; no_pic := false; args rest
+    | "-fno-pic" :: rest -> fpic := false; no_pic := true; args rest
     | [ "-o" ] -> usage_error "-o needs a file name"
     | "-o" :: o :: rest ->
         if !output <> None then usage_error "-o given twice";
@@ -179,7 +180,7 @@ let main () =
   args (List.tl (Array.to_list Sys.argv));
   let mode, flag = Option.value !mode ~default:(Exe, "") in
   if !extra <> [] && mode <> Exe then usage_error "%s takes no object inputs (%s)" flag (List.hd (List.rev !extra));
-  if !fpic && mode <> Obj then usage_error "-fPIC is for objects (-c)";
+  if (!fpic || !no_pic) && mode <> Obj then usage_error "-fPIC and -fno-pic are for objects (-c)";
   if !pie <> None && mode <> Exe then usage_error "--pie and --no-pie are for executables";
   if !hosted && mode <> Exe then usage_error "--hosted is for executables";
   (* --llvm links through the C compiler: it is always hosted *)
@@ -246,7 +247,7 @@ let main () =
                 let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
                 Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
               in
-              Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~tls_gd:!fpic ~iter_funcs ~has_asm m)
+              Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
           | Exe ->
               let output = Option.value !output ~default:"a.out" in
               if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) ~iter_funcs ~has_asm m

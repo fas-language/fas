@@ -125,8 +125,13 @@ struct GenCtx {
     static_locals Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     // Pending tentative definitions emitted at TU end if not defined
     tentatives Vec[TentativeRef]
+    default_hidden bool
+    common bool
+    trapv bool
+    stack_protector u8
+    stack_guard u32
 
-    // Buffered `extern inline __attribute__((gnu_inline))` definitions emitted only if referenced
+    // Inline definitions emitted only if referenced
     gnu_inlines Vec[GnuInlineDef]
     gnu_inline_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq] // sym_name_id -> 1-based idx
     cur_gnu_inline_idx u32
@@ -236,6 +241,7 @@ fn gen_reset_func_state(ctx handle[GenCtx]) void {
     vec_clear(&ctx.vla_stack)
     ctx.in_func = false
     ctx.has_alloca = false
+    ctx.stack_guard = 0
     ctx.cur_fn = null
     ctx.cur_fn_name = 0
     ctx.cur_ret_ty = TY_VOID
@@ -380,7 +386,9 @@ fn gen_sym_visibility(s handle[Symbol]) u8 {
         v Bytes = buf_bytes(&b)
         if bytes_eq_c(v, c"hidden") { return FIR_VIS_HIDDEN }
         if bytes_eq_c(v, c"protected") { return FIR_VIS_PROTECTED }
+        return FIR_VIS_DEFAULT
     }
+    if gc.default_hidden && gen_sym_linkage(s) != FIR_LOCAL { return FIR_VIS_HIDDEN }
     return FIR_VIS_DEFAULT
 }
 
@@ -1270,7 +1278,32 @@ fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
     buf_u8(&blk.term, 10)
 }
 
+// x86-64 Linux stores the process canary in the TCB at %fs:0x28.
+fn gen_read_stack_guard() u32 {
+    result u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, result)
+    buf_str(b, c" = asm volatile \"movq %%fs:40, %0\" out(\"=r\" i64)\n")
+    return result
+}
+
+fn gen_check_stack_guard() void {
+    if gc.stack_guard == 0 || gen_is_terminated() { return }
+    saved u32 = gen_load_ty(TY_ULONG, gc.stack_guard, 8, true, false)
+    current u32 = gen_read_stack_guard()
+    good u32 = gen_icmp(c"eq", saved, current)
+    pass u32 = gen_new_block()
+    bad u32 = gen_new_block()
+    gen_term_br(good, pass, bad)
+    gen_switch_block(bad)
+    _ u32 = gen_emit_helper_call(bytes_c(c"__stack_chk_fail"), TY_VOID, null, null, 0)
+    gen_term_unreachable()
+    gen_switch_block(pass)
+}
+
 fn gen_term_ret_void() void {
+    gen_check_stack_guard()
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
@@ -1278,6 +1311,7 @@ fn gen_term_ret_void() void {
 }
 
 fn gen_term_ret_val(v u32) void {
+    gen_check_stack_guard()
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
@@ -1314,6 +1348,7 @@ fn gen_is_wide_bitint(tid u32) bool {
 }
 
 fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
+    gen_require_inline(target)
     b handle[Buf] = gen_global_buf()
     buf_str(b, c"alias ")
     gen_emit_sym_name(b, name)
@@ -1326,6 +1361,7 @@ fn gen_emit_alias(name Bytes, target Bytes, linkage u8, vis u8) void {
 }
 
 fn gen_emit_ifunc(name Bytes, resolver Bytes, linkage u8, vis u8) void {
+    gen_require_inline(resolver)
     b handle[Buf] = gen_global_buf()
     buf_str(b, c"ifunc ")
     gen_emit_sym_name(b, name)
@@ -1490,8 +1526,18 @@ fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
     }
 }
 
+// Aliases and ifuncs reference the named function without a call expression.
+fn gen_require_inline(name Bytes) void {
+    nid u32 = gen_intern_sym(name)
+    k U64Key = {zext[u64](nid)}
+    if gen_is_defined(nid) || table_has(&gc.ext_fn_seen, &k) { return }
+    _ bool = table_put(&gc.ext_fn_seen, &k, 1)
+    r handle[ExternFnRef] = vec_add(&gc.ext_fns)
+    r.name_id = nid
+}
+
 fn gen_finish_tu() void fails {
-    // 0. Emit any `extern inline __attribute__((gnu_inline))` functions transitively referenced
+    // 0. Emit all inline definitions reachable from the emitted code.
     gi_i usize = 0
     while gi_i < gc.ext_fns.n {
         r handle[ExternFnRef] = vec_at(&gc.ext_fns, gi_i)
@@ -1539,8 +1585,12 @@ fn gen_finish_tu() void fails {
         if !gen_is_defined(tr.name_id) {
             gen_mark_defined(tr.name_id)
             sec Bytes = if tr.section != null { bytes_c(tr.section) } else { bytes_empty() }
-            fir_global_zero(&gc.out, gen_sym_bytes(tr.name_id), tr.size, tr.align,
-                            tr.linkage, tr.vis, sec, false, tr.tls)
+            name Bytes = gen_sym_bytes(tr.name_id)
+            if gc.common && tr.linkage == FIR_GLOBAL && !tr.tls && sec.n == 0 {
+                fir_global_common(&gc.out, name, tr.size, tr.align, tr.vis)
+            } else {
+                fir_global_zero(&gc.out, name, tr.size, tr.align, tr.linkage, tr.vis, sec, false, tr.tls)
+            }
         }
     }
     // 2. Emit extern object declarations for undefined referenced globals

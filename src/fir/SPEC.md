@@ -113,6 +113,7 @@ global @name size N align A LINKAGE [VISIBILITY] [section "s"] [readonly] [threa
 LINKAGE    ::= local | global | weak
 VISIBILITY ::= hidden | protected             (default visibility is not written)
 INIT       ::= zero                            N zero bytes (.bss)
+             | common                          ELF common storage (global, no section/readonly/TLS)
              | extern                          defined elsewhere; size/align describe it
              | { PIECE, PIECE, ... }           the pieces must add up to exactly N bytes
 PIECE      ::= bytes "..."                     raw bytes; escapes \"  \\  \xx (two hex digits)

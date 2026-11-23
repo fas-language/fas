@@ -2075,7 +2075,8 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                  (visibility_text g.glinkage g.gvisibility) tls kind g.size section align)
           else begin
             let linkage =
-              match g.glinkage with Local -> if g.readonly then "private " else "internal " | l -> linkage_text l
+              if g.gcommon then "common "
+              else match g.glinkage with Local -> if g.readonly then "private " else "internal " | l -> linkage_text l
             in
             let ty, init =
               match g.init with

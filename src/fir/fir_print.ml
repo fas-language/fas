@@ -492,6 +492,7 @@ let print_global buf g =
        (if g.readonly then " readonly" else "")
        (if g.thread_local then " thread_local" else "")
        (if not g.gdefined then "extern"
+        else if g.gcommon then "common"
         else
           match g.init with
           | None -> "zero"

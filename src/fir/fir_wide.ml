@@ -512,6 +512,7 @@ let huge_const cx n (limbs : int64 array) =
             size = len;
             init;
             gdefined = true;
+            gcommon = false;
           };
         nm
   in

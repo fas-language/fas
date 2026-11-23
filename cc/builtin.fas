@@ -187,6 +187,14 @@ fn builtin_test(p handle[Pp], e handle[Expand], t Token, which Bytes) Token fail
             value = if feature_in(C_ATTRIBUTES, feature_attr(name)) { 1 } else { 0 }
         } else if bytes_eq_c(which, c"__has_builtin") {
             value = if feature_in(C_BUILTINS, name) { 1 } else { 0 }
+            required addr = x86_intrinsic_feature(name)
+            if required != null { value = if x86_has(p.x86_features, bytes_c(required)) { 1 } else { 0 } }
+            if !p.no_library_builtins && feature_in(C_LIBRARY_BUILTINS, name) {
+                value = 1
+                for i usize in 0..(if p.disabled_builtins == null { 0 } else { p.disabled_builtins.n }) {
+                    if bytes_eq(name, vec_get(p.disabled_builtins, i)) { value = 0; break }
+                }
+            }
         } else if bytes_eq_c(which, c"__has_feature") || bytes_eq_c(which, c"__has_extension") {
             value = if feature_in(C_FEATURES, feature_attr(name)) { 1 } else { 0 }
         } else if bytes_eq_c(which, c"__is_identifier") {

@@ -278,14 +278,14 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
     }
     n.ty = se_promote_expr(a)
     n.flags = a.flags & (NF_INT_VALUE | NF_STATIC | NF_OVERFLOW)
-    if (a.flags & NF_INT_VALUE) != 0 && ty_int_bits(n.ty) > 64 { wi_unary(n, a, negate, tilde) }
+    if (a.flags & NF_INT_VALUE) != 0 && ty_int_bits(n.ty) > 64 { wi_unary(n, a, negate, tilde, p.pp.wrapv) }
     else if (a.flags & NF_INT_VALUE) != 0 {
         raw u64 = se_value(n.ty, a.value)
         n.value = raw
         if tilde { n.value = se_value(n.ty, ~raw) }
         if negate {
             n.value = se_value(n.ty, 0 - raw)
-            if !ty_is_unsigned(n.ty) && n.value == raw && raw != 0 && ty_int_bits(n.ty) <= 64 { n.flags |= NF_OVERFLOW }
+            if !p.pp.wrapv && !ty_is_unsigned(n.ty) && n.value == raw && raw != 0 && ty_int_bits(n.ty) <= 64 { n.flags |= NF_OVERFLOW }
         }
     } else if ty_is_real_float(n.ty) && a.float_bits != null {
         bits FloatBits = {a.float_bits.lo, a.float_bits.hi}
@@ -418,7 +418,8 @@ fn se_fold_int(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle
         else { raw = if uns { x % y } else { bitcast[u64](sx % sy) } }
     }
     n.value = se_value(n.ty, raw)
-    if !uns && (over || ((k == 11 || k == 12) && n.value != raw)) { n.flags |= NF_OVERFLOW }
+    wrap bool = p.pp.wrapv && (pa_is(p, t, c"+") || pa_is(p, t, c"-") || pa_is(p, t, c"*"))
+    if !wrap && !uns && (over || ((k == 11 || k == 12) && n.value != raw)) { n.flags |= NF_OVERFLOW }
 }
 
 fn se_pointer_math(p handle[Parser], t Token, ty u32) void fails {

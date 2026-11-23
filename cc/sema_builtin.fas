@@ -226,6 +226,21 @@ fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count
     return se_int(t.loc, TY_BOOL, if aligned { 1 } else { 0 })
 }
 
+// GNU target attributes can enable individual features for the function.
+fn se_x86_features(p handle[Parser]) u64 {
+    features u64 = p.x86_features
+    if p.function == null { return features }
+    attr handle[Attr] = p.function.attrs
+    while attr != null {
+        if pa_attr_name(p, attr, c"target") && attr.args.n == 1 {
+            literal Bytes = cc_spelling(p.names, vec_get(&attr.args, 0))
+            features = x86_apply_target(features, pp_destringize(literal))
+        }
+        attr = attr.next
+    }
+    return features
+}
+
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
     next_ty u32 = se_nextafter_type(name)
     if next_ty != TY_INVALID {
@@ -257,12 +272,21 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if bytes_eq_c(name, c"__builtin_tgmath") {
         try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
     }
-    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb128") {
+    required addr = x86_intrinsic_feature(name)
+    if required != null && !x86_has(se_x86_features(p), bytes_c(required)) {
+        message Buf = {}
+        buf_str(&message, c"intrinsic requires x86 target feature '")
+        buf_str(&message, required)
+        buf_u8(&message, 39)
+        try pa_error(p, t.loc, buf_cstr(&message))
+    }
+    mask128 bool = bytes_eq_c(name, c"__builtin_ia32_pmovmskb128")
+    if mask128 || bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") {
         try se_builtin_count(p, t, count, 1, 1)
         ty u32 = ty_unqual(args.ty)
         elem u32 = ty_node(ty).elem
-        if !ty_is_vector(ty) || ty_size(ty) != 16 || !ty_is_integer(elem) || ty_size(elem) != 1 {
-            try pa_error(p, args.loc, c"movemask requires a vector of sixteen bytes")
+        if !ty_is_vector(ty) || ty_size(ty) != (if mask128 { 16 } else { 32 }) || !ty_is_integer(elem) || ty_size(elem) != 1 {
+            try pa_error(p, args.loc, c"movemask requires a byte vector of the corresponding width")
         }
     }
     if bytes_eq_c(name, c"__builtin_ia32_pause") || bytes_eq_c(name, c"__builtin_flt_rounds") {

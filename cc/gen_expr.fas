@@ -694,6 +694,28 @@ fn gen_load_lvalue(lhs handle[Ast]) u32 fails {
 
 // ---------- Binary Arithmetic Helper (also used by compound assign) ----------
 
+// Widen a signed operation and compare with its truncated, sign-extended
+// result. This also covers integer widths without a hardware overflow flag.
+fn gen_signed_op(op addr, ty u32, lhs u32, rhs u32) u32 {
+    if !gc.trapv || !ty_is_signed(ty) { return gen_binop(op, ty, lhs, rhs) }
+    bits u32 = ty_int_bits(ty)
+    wide_ty u32 = ty_bitint(if op[u8] == 109 { bits * 2 } else { bits + 1 }, false)
+    a u32 = gen_convert(lhs, ty, wide_ty)
+    b u32 = gen_convert(rhs, ty, wide_ty)
+    result u32 = gen_binop(op, wide_ty, a, b)
+    narrow u32 = gen_convert(result, wide_ty, ty)
+    back u32 = gen_convert(narrow, ty, wide_ty)
+    overflow u32 = gen_icmp(c"ne", result, back)
+    trap_blk u32 = gen_new_block()
+    ok_blk u32 = gen_new_block()
+    gen_term_br(overflow, trap_blk, ok_blk)
+    gen_switch_block(trap_blk)
+    gen_emit_trap()
+    gen_term_unreachable()
+    gen_switch_block(ok_blk)
+    return narrow
+}
+
 fn gen_arith_op(op Bytes, eval_ty u32, lhs u32, rhs u32) u32 fails {
     u u32 = ty_unqual(eval_ty)
     k u8 = ty_kind(u)
@@ -744,9 +766,9 @@ fn gen_arith_op(op Bytes, eval_ty u32, lhs u32, rhs u32) u32 fails {
     }
 
     is_uns bool = if k == TYK_VECTOR { ty_is_unsigned(ty_node(u).elem) } else { ty_is_unsigned(u) }
-    if bytes_eq_c(op, c"+") { return gen_binop(c"add", u, lhs, rhs) }
-    if bytes_eq_c(op, c"-") { return gen_binop(c"sub", u, lhs, rhs) }
-    if bytes_eq_c(op, c"*") { return gen_binop(c"mul", u, lhs, rhs) }
+    if bytes_eq_c(op, c"+") { return gen_signed_op(c"add", u, lhs, rhs) }
+    if bytes_eq_c(op, c"-") { return gen_signed_op(c"sub", u, lhs, rhs) }
+    if bytes_eq_c(op, c"*") { return gen_signed_op(c"mul", u, lhs, rhs) }
     if bytes_eq_c(op, c"/") { return gen_binop(if is_uns { c"udiv" } else { c"sdiv" }, u, lhs, rhs) }
     if bytes_eq_c(op, c"%") { return gen_binop(if is_uns { c"urem" } else { c"srem" }, u, lhs, rhs) }
     if bytes_eq_c(op, c"&") { return gen_binop(c"and", u, lhs, rhs) }
@@ -898,7 +920,7 @@ fn gen_unary(n handle[Ast]) u32 fails {
         if ty_is_real_float(n.ty) || (ty_is_vector(n.ty) && ty_is_real_float(ty_node(ty_unqual(n.ty)).elem)) {
             return gen_unop(c"fneg", n.ty, rv)
         }
-        return gen_binop(c"sub", n.ty, gen_const_zero(n.ty), rv)
+        return gen_signed_op(c"sub", n.ty, gen_const_zero(n.ty), rv)
     }
     if bytes_eq_c(op, c"~") {
         rv u32 = try gen_rvalue(n.a)
@@ -1000,8 +1022,11 @@ fn gen_unary(n handle[Ast]) u32 fails {
             one u32 = gen_const_float(t, 0x3ff0000000000000)
             new_v = try gen_arith_op(bytes_c(if is_inc { c"+" } else { c"-" }), t, old_v, one)
         } else {
-            one u32 = gen_const_int(t, 1)
-            new_v = gen_binop(if is_inc { c"add" } else { c"sub" }, t, old_v, one)
+            promoted u32 = se_promote_expr(n.a)
+            one u32 = gen_const_int(promoted, 1)
+            old u32 = gen_convert(old_v, t, promoted)
+            updated u32 = gen_signed_op(if is_inc { c"add" } else { c"sub" }, promoted, old, one)
+            new_v = gen_convert(updated, promoted, t)
         }
         if is_bf {
             gen_store_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty, new_v)
@@ -1694,7 +1719,8 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         buf_str(gen_cur_buf(), c"  asm volatile \"pause\" clobber(\"memory\")\n")
         return 0
     }
-    if bytes_eq_c(bname, c"__builtin_ia32_pmovmskb128") {
+    mask128 bool = bytes_eq_c(bname, c"__builtin_ia32_pmovmskb128")
+    if mask128 || bytes_eq_c(bname, c"__builtin_ia32_pmovmskb256") {
         // Lane i contributes its sign bit to bit i of the unsigned mask.
         v u32 = try gen_rvalue(a0)
         zero u32 = gen_const_zero(a0.ty)
@@ -1702,12 +1728,13 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         b handle[Buf] = gen_cur_buf()
         buf_str(b, c"  ")
         gen_emit_val(b, signs)
-        buf_str(b, c" = icmp slt <16 x i1> ")
+        buf_str(b, if mask128 { c" = icmp slt <16 x i1> " } else { c" = icmp slt <32 x i1> " })
         gen_emit_val(b, v)
         buf_str(b, c", ")
         gen_emit_val(b, zero)
         buf_u8(b, 10)
-        return gen_cast(c"zext", n.ty, gen_cast(c"bitcast", TY_USHORT, signs))
+        if mask128 { return gen_cast(c"zext", n.ty, gen_cast(c"bitcast", TY_USHORT, signs)) }
+        return gen_cast(c"bitcast", n.ty, signs)
     }
     if bytes_starts_with(bname, bytes_c(c"__builtin_nans")) &&
         se_math_family(bytes_from(bname, 10), c"nans") != TY_INVALID {

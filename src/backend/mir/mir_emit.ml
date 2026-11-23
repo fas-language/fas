@@ -1224,9 +1224,12 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
       in
       find 0 (List.rev !extra_order)
     in
+    let commons = ref [] in
     F.Vec.iter
       (fun (g : F.global) ->
-        if g.gdefined then begin
+        if g.gcommon then
+          commons := (g.gname, g.size, max 1 g.galign) :: !commons
+        else if g.gdefined then begin
           (* symbol offsets and rip-relative references are 32-bit *)
           if g.size > 0x7fff_ffff then
             unsupported "@%s: a global of %d bytes (at most 2 GiB - 1, the small code model)" g.gname g.size;
@@ -1416,6 +1419,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
       (Native_object.emit
          ~eh_frame
          ~extra:extra_sections
+         ~commons:(List.rev !commons)
          ~tls:(Hashtbl.mem env.tls_syms)
          ~ifunc:(Hashtbl.mem ifunc_names)
          ~global:(fun n -> n = "_start")
@@ -1454,8 +1458,8 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
    (general-dynamic TLS), for objects that go into a shared library, which
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
-let compile_object ?debug ?tls_gd ?iter_funcs ?has_asm m =
-  generate ?debug ?tls_gd ?iter_funcs ?has_asm ~startup:false ~pic:true m
+let compile_object ?debug ?(pic = true) ?tls_gd ?iter_funcs ?has_asm m =
+  generate ?debug ?tls_gd ?iter_funcs ?has_asm ~startup:false ~pic m
 
 (* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?debug ?iter_funcs ?has_asm ?(inputs = []) ?options ~output m =

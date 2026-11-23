@@ -177,12 +177,15 @@ fn drv_temp_path(ext addr) addr {
     return drv_cstr_dup(buf_bytes(&b))
 }
 
-fn drv_assemble_fir(fir_path addr, obj_path addr, is_pic bool) void fails {
+fn drv_assemble_fir(fir_path addr, obj_path addr, pic u8) void fails {
     fir_exe addr = drv_find_fas_fir()
     args Vec[addr] = {}
     defer { vec_free(&args) }
     vec_push(&args, c"-c")
-    if is_pic { vec_push(&args, c"-fPIC") }
+    if pic == 1 { vec_push(&args, c"-fno-pic") }
+    // The default Fir object model is position independent with initial-exec
+    // TLS. A shared object instead needs general-dynamic TLS.
+    else if pic == 2 || pic == 3 { vec_push(&args, c"-fPIC") }
     vec_push(&args, fir_path)
     vec_push(&args, c"-o")
     vec_push(&args, obj_path)

@@ -827,7 +827,7 @@ let little_endian size (x : int64) =
 
 let base_global gname size galign =
   { gname; glinkage = Local; gvisibility = Default; section = None; galign = max 1 galign;
-    readonly = true; thread_local = false; size; init = None; gdefined = true }
+    readonly = true; thread_local = false; size; init = None; gcommon = false; gdefined = true }
 
 (* string literal [index]'s bytes, as global .str.<index> *)
 let string_global mc index bytes =

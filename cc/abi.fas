@@ -637,8 +637,10 @@ fn abi_emit_fir_abi_ty(b handle[Buf], tid u32) void {
     k u8 = n.kind
     if k == TYK_VOID { return }
     if k == TYK_BOOL { buf_str(b, c"zext i1"); return }
-    if k == TYK_CHAR || k == TYK_SCHAR { buf_str(b, c"sext i8"); return }
-    if k == TYK_UCHAR { buf_str(b, c"zext i8"); return }
+    if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR {
+        buf_str(b, if ty_is_unsigned(u) { c"zext i8" } else { c"sext i8" })
+        return
+    }
     if k == TYK_SHORT { buf_str(b, c"sext i16"); return }
     if k == TYK_USHORT { buf_str(b, c"zext i16"); return }
     if k == TYK_INT || k == TYK_UINT { buf_str(b, c"i32"); return }

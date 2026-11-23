@@ -12,6 +12,8 @@ use "builtin.fas"
 use "features.fas"
 use "embed.fas"
 use "target.fas"
+use "x86_target.fas"
+use "x86_target_data.fas"
 use "search.fas"
 use "output.fas"
 use "parse.fas"
@@ -58,6 +60,21 @@ struct Options {
     dirs Vec[SearchDir]
     mode u8
     gnu bool
+    standard u8
+    x86_cpu u32
+    x86_options Vec[u32]
+    unsigned_char bool
+    common bool
+    stack_protector u8 // 0 = off, 1 = basic, 2 = strong, 3 = all
+    overflow_mode u8 // 0 = default, 1 = wrap, 2 = trap
+    short_enums bool
+    freestanding bool
+    no_stdinc bool
+    no_library_builtins bool
+    disabled_builtins Vec[Bytes]
+    default_hidden bool
+    suppress_warnings bool
+    pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     no_markers bool
     no_builtins bool
     macro_dump bool
@@ -66,7 +83,6 @@ struct Options {
     deps u8  // 1 = only dependencies, 2 = side output
     user_deps bool
     phony bool
-    is_pic bool
     is_shared bool
     is_static bool
     is_no_pie bool
@@ -124,11 +140,44 @@ fn cli_push_wl(o handle[Options], payload Bytes) void {
     }
 }
 
+fn cli_warn_option(o handle[Options], arg addr) void {
+    if o.suppress_warnings { return }
+    eprint(c"fcc: warning: unsupported option '")
+    eprint(arg)
+    eprint(c"' ignored\n")
+}
+
+fn cli_standard(o handle[Options], word Bytes) void fails {
+    if bytes_eq_c(word, c"-ansi") {
+        o.gnu = false
+        o.standard = 90
+        return
+    }
+    name Bytes = bytes_from(word, 5)
+    o.gnu = bytes_starts_with(name, bytes_c(c"gnu"))
+    if o.gnu { name = bytes_from(name, 3) }
+    else if bytes_starts_with(name, bytes_c(c"c")) { name = bytes_from(name, 1) }
+    else { try cli_error(c"fcc: unsupported C standard ", word.p) }
+    if bytes_eq_c(name, c"23") || bytes_eq_c(name, c"2x") { o.standard = 23 }
+    else if bytes_eq_c(name, c"17") || bytes_eq_c(name, c"18") { o.standard = 17 }
+    else if bytes_eq_c(name, c"11") { o.standard = 11 }
+    else if bytes_eq_c(name, c"99") || bytes_eq_c(name, c"9x") { o.standard = 99 }
+    else if bytes_eq_c(name, c"89") || bytes_eq_c(name, c"90") { o.standard = 90 }
+    else { try cli_error(c"fcc: unsupported C standard ", word.p) }
+}
+
 fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
     pos ArgPosition = {1}
     options bool = true
     o.gnu = true
+    o.standard = 23
     o.mode = MODE_LINK
+    // -w applies to the entire invocation, regardless of its position.
+    for i usize in 1..argc {
+        w Bytes = bytes_c(os_arg(i))
+        if bytes_eq_c(w, c"--") { break }
+        if bytes_eq_c(w, c"-w") { o.suppress_warnings = true }
+    }
     while pos.i < argc {
         arg addr = os_arg(pos.i)
         word Bytes = bytes_c(arg)
@@ -156,10 +205,42 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-P") { o.no_markers = true }
         else if bytes_eq_c(word, c"-dM") { o.macro_dump = true; if o.mode == MODE_LINK { o.mode = MODE_PREPROCESS } }
         else if bytes_eq_c(word, c"-undef") { o.no_builtins = true }
-        else if bytes_eq_c(word, c"-std=c23") { o.gnu = false }
-        else if bytes_eq_c(word, c"-std=gnu23") { o.gnu = true }
         else if bytes_starts_with(word, bytes_c(c"-std=")) || bytes_eq_c(word, c"-ansi") {
-            try cli_error(c"fcc: expected -std=c23 or -std=gnu23, got ", arg)
+            try cli_standard(o, word)
+        } else if bytes_eq_c(word, c"-funsigned-char") || bytes_eq_c(word, c"-fno-signed-char") { o.unsigned_char = true
+        } else if bytes_eq_c(word, c"-fsigned-char") || bytes_eq_c(word, c"-fno-unsigned-char") { o.unsigned_char = false
+        } else if bytes_eq_c(word, c"-fcommon") { o.common = true
+        } else if bytes_eq_c(word, c"-fno-common") { o.common = false
+        } else if bytes_eq_c(word, c"-fwrapv") || bytes_eq_c(word, c"-fno-strict-overflow") { o.overflow_mode = 1
+        } else if bytes_eq_c(word, c"-ftrapv") { o.overflow_mode = 2
+        } else if bytes_eq_c(word, c"-fno-wrapv") || bytes_eq_c(word, c"-fstrict-overflow") {
+            if o.overflow_mode == 1 { o.overflow_mode = 0 }
+        } else if bytes_eq_c(word, c"-fno-trapv") {
+            if o.overflow_mode == 2 { o.overflow_mode = 0 }
+        } else if bytes_eq_c(word, c"-fshort-enums") { o.short_enums = true
+        } else if bytes_eq_c(word, c"-fno-short-enums") { o.short_enums = false
+        } else if bytes_eq_c(word, c"-ffreestanding") { o.freestanding = true
+        } else if bytes_eq_c(word, c"-fhosted") { o.freestanding = false
+        } else if bytes_eq_c(word, c"-nostdinc") { o.no_stdinc = true
+        } else if bytes_eq_c(word, c"-fno-builtin") { o.no_library_builtins = true
+        } else if bytes_eq_c(word, c"-fbuiltin") { o.no_library_builtins = false
+        } else if bytes_starts_with(word, bytes_c(c"-fno-builtin-")) {
+            vec_push(&o.disabled_builtins, bytes_from(word, 13))
+        } else if bytes_eq_c(word, c"-fvisibility=hidden") { o.default_hidden = true
+        } else if bytes_eq_c(word, c"-fvisibility=default") { o.default_hidden = false
+        } else if bytes_starts_with(word, bytes_c(c"-fvisibility=")) {
+            try cli_error(c"fcc: unsupported visibility option ", arg)
+        } else if bytes_eq_c(word, c"-fstack-protector") { o.stack_protector = 1
+        } else if bytes_eq_c(word, c"-fstack-protector-strong") { o.stack_protector = 2
+        } else if bytes_eq_c(word, c"-fstack-protector-all") { o.stack_protector = 3
+        } else if bytes_eq_c(word, c"-fno-stack-protector") { o.stack_protector = 0
+        } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
+            try cli_error(c"fcc: fast-math semantics are unsupported: ", arg)
+        } else if bytes_starts_with(word, bytes_c(c"-march=")) {
+            o.x86_cpu = x86_cpu(bytes_from(word, 7))
+            if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", arg) }
+        } else if bytes_eq_c(word, c"-m32") || bytes_eq_c(word, c"-mx32") {
+            try cli_error(c"fcc: only the x86-64 LP64 target is supported: ", arg)
         } else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
             o.user_deps = word.n > 2 && arg[u8, 2] == 77
@@ -173,12 +254,17 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-include") || bytes_eq_c(word, c"-imacros") {
             kind u8 = if bytes_eq_c(word, c"-include") { 0 } else { 1 }
             vec_push[Command](&o.force, {try cli_arg(argc, &pos, arg, arg), kind})
-        } else if bytes_eq_c(word, c"-shared") { o.is_shared = true; o.is_pic = true }
+        } else if bytes_eq_c(word, c"-shared") { o.is_shared = true }
         else if bytes_eq_c(word, c"-static") { o.is_static = true }
-        else if bytes_eq_c(word, c"-no-pie") || bytes_eq_c(word, c"-fno-pie") || bytes_eq_c(word, c"-fno-PIE") { o.is_no_pie = true }
+        else if bytes_eq_c(word, c"-no-pie") { o.is_no_pie = true }
         else if bytes_eq_c(word, c"-pie") { o.is_no_pie = false }
-        else if bytes_eq_c(word, c"-fPIC") || bytes_eq_c(word, c"-fpic") || bytes_eq_c(word, c"-fPIE") || bytes_eq_c(word, c"-fpie") {
-            o.is_pic = true
+        else if bytes_eq_c(word, c"-fpic") { o.pic_mode = 2 }
+        else if bytes_eq_c(word, c"-fPIC") { o.pic_mode = 3 }
+        else if bytes_eq_c(word, c"-fpie") { o.pic_mode = 4 }
+        else if bytes_eq_c(word, c"-fPIE") { o.pic_mode = 5 }
+        else if bytes_eq_c(word, c"-fno-pic") || bytes_eq_c(word, c"-fno-PIC") ||
+                bytes_eq_c(word, c"-fno-pie") || bytes_eq_c(word, c"-fno-PIE") {
+            o.pic_mode = 1
         } else if bytes_eq_c(word, c"-nostdlib") { o.no_stdlib = true }
         else if bytes_eq_c(word, c"-pthread") {
             vec_push[Command](&o.macros, {c"_REENTRANT=1", 0})
@@ -201,9 +287,18 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             vec_push(&o.link_args, drv_cstr_dup(buf_bytes(&b)))
             buf_free(&b)
         } else if bytes_starts_with(word, bytes_c(c"-O")) || bytes_starts_with(word, bytes_c(c"-g")) ||
-                  bytes_starts_with(word, bytes_c(c"-W")) || bytes_starts_with(word, bytes_c(c"-f")) ||
-                  bytes_starts_with(word, bytes_c(c"-m")) {
-            // Silently ignore gcc optimization, debug, warning, codegen, and machine flags
+                  bytes_starts_with(word, bytes_c(c"-W")) || bytes_eq_c(word, c"-m64") ||
+                  bytes_eq_c(word, c"-fstrict-aliasing") || bytes_eq_c(word, c"-fno-strict-aliasing") ||
+                  bytes_eq_c(word, c"-fno-fast-math") {
+            // These optimization and diagnostic settings have no effect on current code generation.
+        } else if bytes_starts_with(word, bytes_c(c"-m")) {
+            disable bool = bytes_starts_with(word, bytes_c(c"-mno-"))
+            name Bytes = bytes_from(word, if disable { 5 } else { 2 })
+            feature u32 = x86_flag(name)
+            if feature == 0 { cli_warn_option(o, arg) }
+            else { vec_push(&o.x86_options, feature * 2 + (if disable { 1 } else { 0 })) }
+        } else if bytes_starts_with(word, bytes_c(c"-f")) {
+            cli_warn_option(o, arg)
         } else {
             prefix addr = c"-I"
             rank u8 = 1
@@ -234,7 +329,7 @@ fn cli_search_paths(p handle[Pp], o handle[Options]) void {
             d SearchDir = o.dirs.p[SearchDir, i]
             if d.rank == rank { vec_push[SearchDir](&p.dirs, d) }
         }
-        if rank == 2 {
+        if rank == 2 && !o.no_stdinc {
             include addr = os_getenv(c"FCC_INCLUDE")
             if include == null { include = c"cc/include" }
             cli_dir(p, include, rank)
@@ -266,6 +361,12 @@ fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
 
 fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.names.gnu = o.gnu
+    p.standard = o.standard
+    p.unsigned_char = o.unsigned_char
+    p.short_enums = o.short_enums
+    p.no_library_builtins = o.no_library_builtins || o.freestanding
+    p.disabled_builtins = &o.disabled_builtins
+    p.wrapv = o.overflow_mode == 1
     p.stream.source = true
     p.timestamp = os_clock_ns(0) / 1000000000
     epoch addr = os_getenv(c"SOURCE_DATE_EPOCH")
@@ -273,14 +374,64 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         p.timestamp = bytes_to_u64(bytes_c(epoch)) catch p.timestamp
         p.timestamp_explicit = true
     }
+    cpu handle[X86Cpu] = &X86_CPUS[zext[usize](o.x86_cpu)]
+    p.x86_features = cpu.features
+    last arr[X86_FLAG_COUNT, usize] = {}
+    for i usize in 0..o.x86_options.n {
+        feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
+        last[feature] = i + 1
+    }
+    for i usize in 0..o.x86_options.n {
+        option u32 = vec_get(&o.x86_options, i)
+        feature u32 = option >> 1
+        if last[zext[usize](feature) - 1] != i + 1 { continue }
+        p.x86_features = x86_flag_apply(p.x86_features, feature, (option & 1) == 0)
+    }
+    independent arr[2, addr] = {c"popcnt", c"crc32"}
+    for j usize in 0..2 {
+        name addr = independent[j]
+        feature u32 = x86_flag(bytes_c(name))
+        at usize = last[zext[usize](feature) - 1]
+        if at != 0 && (vec_get(&o.x86_options, at - 1) & 1) != 0 {
+            p.x86_features = x86_flag_apply(p.x86_features, feature, false)
+        }
+    }
     if !o.no_builtins {
         for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
         try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
+        try cli_definitions(p, bytes_c(cpu.defines), c"<built-in>")
+        for i usize in 0..X86_MACRO_COUNT {
+            if (p.x86_features & (1 << trunc[u32](i))) != 0 {
+                try cli_definitions(p, bytes_c(X86_MACROS[i]), c"<built-in>")
+            }
+        }
     } else {
-        try cli_definitions(p, bytes_c(c"__STDC__ 1\n__STDC_VERSION__ 202311L\n__STDC_HOSTED__ 1\n"), c"<built-in>")
+        try cli_definitions(p, bytes_c(c"__STDC__ 1\n"), c"<built-in>")
     }
-    if o.is_pic {
-        try cli_definitions(p, bytes_c(c"__PIC__ 2\n__pic__ 2\n"), c"<built-in>")
+    version addr = if o.standard == 23 { c"__STDC_VERSION__ 202311L\n" }
+                   else if o.standard == 17 { c"__STDC_VERSION__ 201710L\n" }
+                   else if o.standard == 11 { c"__STDC_VERSION__ 201112L\n" }
+                   else if o.standard == 99 { c"__STDC_VERSION__ 199901L\n" }
+                   else { null }
+    if version != null { try cli_definitions(p, bytes_c(version), c"<built-in>") }
+    hosted addr = if o.freestanding { c"__STDC_HOSTED__ 0\n" } else { c"__STDC_HOSTED__ 1\n" }
+    try cli_definitions(p, bytes_c(hosted), c"<built-in>")
+    if !o.no_builtins {
+        ssp addr = if o.stack_protector == 1 { c"__SSP__ 1\n" }
+                   else if o.stack_protector == 2 { c"__SSP_STRONG__ 2\n" }
+                   else if o.stack_protector == 3 { c"__SSP_ALL__ 3\n" }
+                   else { null }
+        if ssp != null { try cli_definitions(p, bytes_c(ssp), c"<built-in>") }
+        if o.unsigned_char { try cli_definitions(p, bytes_c(c"__CHAR_UNSIGNED__ 1\n"), c"<built-in>") }
+        pic u8 = if o.pic_mode != 0 { o.pic_mode } else if o.is_shared { 3 } else { 5 }
+        if pic >= 2 {
+            pic_def addr = if (pic & 1) == 0 { c"__PIC__ 1\n__pic__ 1\n" } else { c"__PIC__ 2\n__pic__ 2\n" }
+            try cli_definitions(p, bytes_c(pic_def), c"<built-in>")
+        }
+        if pic >= 4 {
+            pie_def addr = if pic == 4 { c"__PIE__ 1\n__pie__ 1\n" } else { c"__PIE__ 2\n__pie__ 2\n" }
+            try cli_definitions(p, bytes_c(pie_def), c"<built-in>")
+        }
     }
     if o.exceptions { try cli_definitions(p, bytes_c(c"__EXCEPTIONS 1\n"), c"<built-in>") }
     for i usize in 0..o.macros.n {
@@ -395,6 +546,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     }
 
     // Save raw search-dir strings from main's Pp so multi-file compilation re-interns them per TU
+    pic u8 = if o.pic_mode != 0 { o.pic_mode } else if o.is_shared { 3 } else { 5 }
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }
@@ -421,12 +573,12 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             inp InputFile = o.inputs.p[InputFile, i]
             out_p addr = if o.output != null { o.output } else { drv_replace_ext(bytes_c(inp.path), c".o") }
             if inp.kind == IN_FIR {
-                try drv_assemble_fir(inp.path, out_p, o.is_pic)
+                try drv_assemble_fir(inp.path, out_p, pic)
             } else if inp.kind == IN_C {
                 tmp_fir addr = drv_temp_path(c".fir")
                 defer { os_unlink(tmp_fir) catch {} }
                 try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, tmp_fir)
-                try drv_assemble_fir(tmp_fir, out_p, o.is_pic)
+                try drv_assemble_fir(tmp_fir, out_p, pic)
             }
         }
         return
@@ -449,7 +601,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if inp.kind == IN_FIR {
             tmp_o addr = drv_temp_path(c".o")
             vec_push(&temp_files, tmp_o)
-            try drv_assemble_fir(inp.path, tmp_o, o.is_pic)
+            try drv_assemble_fir(inp.path, tmp_o, pic)
             vec_push(&obj_inputs, tmp_o)
         } else {
             tmp_fir addr = drv_temp_path(c".fir")
@@ -457,7 +609,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             vec_push(&temp_files, tmp_fir)
             vec_push(&temp_files, tmp_o)
             try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, tmp_fir)
-            try drv_assemble_fir(tmp_fir, tmp_o, o.is_pic)
+            try drv_assemble_fir(tmp_fir, tmp_o, pic)
             vec_push(&obj_inputs, tmp_o)
         }
     }
@@ -540,6 +692,10 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     gctx GenCtx = {}
     gen_init(&gctx, &parser, fd)
     gctx.exceptions = o.exceptions
+    gctx.default_hidden = o.default_hidden
+    gctx.common = o.common
+    gctx.trapv = o.overflow_mode == 2
+    gctx.stack_protector = o.stack_protector
     defer { gen_free(&gctx) }
     parser.on_function = &gen_on_function_cb
     parser.on_object = &gen_on_object_cb

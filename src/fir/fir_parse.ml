@@ -1411,7 +1411,7 @@ let parse_module_with lx on_func =
         let galign = int_tok lx in
         let g =
           { gname; glinkage = Global; gvisibility = Default; section = None; galign; readonly = false;
-            thread_local = false; size; init = None; gdefined = true }
+            thread_local = false; size; init = None; gcommon = false; gdefined = true }
         in
         let rec attrs () =
           match next lx with
@@ -1426,6 +1426,10 @@ let parse_module_with lx on_func =
         attrs ();
         (match next lx with
         | Ident "zero" -> ()
+        | Ident "common" ->
+            if g.glinkage <> Global || g.section <> None || g.thread_local || g.readonly then
+              fail lx "common globals require writable global linkage without a section or TLS";
+            g.gcommon <- true
         | Ident "extern" -> g.gdefined <- false
         | P "{" ->
             let ps = ref [] in

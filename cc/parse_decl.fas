@@ -12,6 +12,7 @@ struct DeclSpec {
     is_noreturn bool
     inferred bool
     auto_seen bool
+    gnu_auto bool
     member bool
     anonymous_record bool
     unavailable_type bool
@@ -536,7 +537,7 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
     if (min >= 0 && max > 0xffffffff) || (min < 0 && (min < -2147483648 || max > 2147483647)) {
         underlying = if min < 0 { TY_LONG } else { TY_ULONG }
     }
-    if fixed == TY_INVALID && pa_has_attr(p, attrs, c"packed") {
+    if fixed == TY_INVALID && (p.pp.short_enums || pa_has_attr(p, attrs, c"packed")) {
         if min >= 0 && max <= 255 { underlying = TY_UCHAR }
         else if min >= 0 && max <= 65535 { underlying = TY_USHORT }
         else if min >= -128 && min < 0 && max <= 127 { underlying = TY_SCHAR }
@@ -833,7 +834,10 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         } else if base != TY_INVALID { try pa_take(p) }
         else if sc == SC_AUTO {
             if out.auto_seen { try pa_error(p, t.loc, c"duplicate auto specifier") }
-            if pa_is(p, t, c"__auto_type") { try pa_gnu(p, t) }
+            if pa_is(p, t, c"__auto_type") {
+                try pa_gnu(p, t)
+                out.gnu_auto = true
+            }
             out.auto_seen = true
             try pa_take(p)
             continue
@@ -900,6 +904,9 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
     ty u32 = out.ty
     if ty == TY_INVALID {
         if out.auto_seen {
+            if p.pp.standard != 0 && p.pp.standard != 23 && !out.gnu_auto {
+                try pa_error(p, out.loc, c"auto type inference requires C23")
+            }
             if out.storage == SC_TYPEDEF || out.storage == SC_EXTERN {
                 try pa_error(p, out.loc, c"auto inference cannot be combined with typedef or extern")
             }

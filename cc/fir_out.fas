@@ -128,6 +128,12 @@ fn fir_global_zero(w handle[FirOut], name Bytes, size u64, align u64,
     fir_flush(w)
 }
 
+fn fir_global_common(w handle[FirOut], name Bytes, size u64, align u64, vis u8) void {
+    fir_global_prefix(w, name, size, align, FIR_GLOBAL, vis, bytes_empty(), false, false)
+    buf_str(&w.buf, c" = common\n")
+    fir_flush(w)
+}
+
 fn fir_global_extern(w handle[FirOut], name Bytes, size u64, align u64,
                      linkage u8, vis u8, section Bytes, readonly bool, tls bool) void {
     fir_global_prefix(w, name, size, align, linkage, vis, section, readonly, tls)

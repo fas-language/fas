@@ -39,6 +39,13 @@ struct PpRoot {
 
 struct Pp {
     names CNames
+    standard u8
+    unsigned_char bool
+    short_enums bool
+    no_library_builtins bool
+    disabled_builtins handle[Vec[Bytes]]
+    wrapv bool
+    x86_features u64
     frames Vec[Frame]
     roots Vec[PpRoot]
     root_at usize

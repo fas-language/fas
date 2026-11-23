@@ -33,6 +33,9 @@ case "${1:-all}" in
     --abi)
         exec bash "$ROOT/test/cc_run/ms_abi/check.sh"
         ;;
+    --flags)
+        exec bash "$ROOT/test/cc_run/flags.sh"
+        ;;
     --regressions)
         exec bash "$ROOT/test/cc_run/regressions/check.sh"
         ;;
@@ -51,6 +54,7 @@ case "${1:-all}" in
         echo ""
         echo "=== 5. Directed compiler regressions ==="
         bash "$ROOT/test/cc_run/regressions/check.sh"
+        bash "$ROOT/test/cc_run/flags.sh"
         ;;
     *)
         exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"

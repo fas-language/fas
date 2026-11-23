@@ -224,6 +224,7 @@ fn fn_key_eq(a handle[FnKey], b handle[FnKey]) bool {
 
 struct TypeCtx {
     nodes Vec[TypeNode]
+    unsigned_char bool
     fn_params Vec[u32]
     records Vec[RecordDef]
     fields Vec[FieldDef]
@@ -741,7 +742,7 @@ fn ty_is_scalar(tid u32) bool {
 fn ty_is_unsigned(tid u32) bool {
     c u32 = ty_canon_int(tid)
     n handle[TypeNode] = ty_node(c)
-    return (n.flags & TYF_UNSIGNED) != 0
+    return (n.flags & TYF_UNSIGNED) != 0 || (n.kind == TYK_CHAR && tc.unsigned_char)
 }
 
 fn ty_is_signed(tid u32) bool {

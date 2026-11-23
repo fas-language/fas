@@ -22,7 +22,7 @@ type extra = {
    sections come after it. A symbol defined in an SHF_TLS section is
    STT_TLS; [tls name] marks an undefined one as STT_TLS too. *)
 let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> false) ?(ifunc = fun _ -> false) ?eh_frame
-    ?(extra = []) ~global ~alignments (input : Elf64.input) =
+    ?(extra = []) ?(commons = []) ~global ~alignments (input : Elf64.input) =
   let first_extra = if eh_frame = None then 5 else 6 in
   let extra_flags = Array.of_list (List.map (fun (x : extra) -> x.flags) extra) in
   let section = function
@@ -60,6 +60,19 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
              size = Int64.of_int s.size;
            }))
     input.symbols;
+  List.iter
+    (fun (name, size, align) ->
+      ignore
+        (add
+           {
+             name;
+             binding = 1;
+             kind = 1;
+             visibility = visibility name;
+             definition = O.Common (Int64.of_int align);
+             size = Int64.of_int size;
+           }))
+    commons;
   let reference name =
     match Hashtbl.find_opt definitions name with
     | Some index -> index

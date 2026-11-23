@@ -198,7 +198,7 @@ fn wi_divide(a WideInt, b WideInt, modulo bool) WideInt {
     return quot
 }
 
-fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool) void {
+fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool, wrapv bool) void {
     width u32 = ty_int_bits(n.ty)
     x WideInt = wi_from_ast(a, width)
     if tilde {
@@ -208,7 +208,7 @@ fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool) void {
     if negate {
         sign u32 = wi_bit(x, width - 1)
         wi_negate(x)
-        if !ty_is_unsigned(n.ty) && sign != 0 && wi_bit(x, width - 1) != 0 { n.flags |= NF_OVERFLOW }
+        if !wrapv && !ty_is_unsigned(n.ty) && sign != 0 && wi_bit(x, width - 1) != 0 { n.flags |= NF_OVERFLOW }
     }
     wi_store(n, x)
 }
@@ -261,7 +261,7 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
         sub bool = pa_is(p, t, c"-")
         wi_add(x, y, sub)
         sz bool = wi_bit(x, width - 1) != 0
-        if signed_ty && sx != sz && (sx != sy) == sub { n.flags |= NF_OVERFLOW }
+        if !p.pp.wrapv && signed_ty && sx != sz && (sx != sy) == sub { n.flags |= NF_OVERFLOW }
     } else {
         if sx { wi_negate(x) }
         if sy { wi_negate(y) }
@@ -270,7 +270,7 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
             dest = wi_product(x, y, if signed_ty { width * 2 } else { width })
             if signed_ty {
                 length u32 = wi_length(dest)
-                if length >= width && (!neg || length > width || !wi_only_bit(dest, width - 1)) {
+                if !p.pp.wrapv && length >= width && (!neg || length > width || !wi_only_bit(dest, width - 1)) {
                     n.flags |= NF_OVERFLOW
                 }
                 dest = {dest.p, width, x.words}

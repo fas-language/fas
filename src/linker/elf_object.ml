@@ -5,7 +5,7 @@ module B = Binary
 
 type contents = Data of bytes | Bss of int
 type section = { name : string; flags : int; alignment : int; contents : contents }
-type definition = Undefined | Absolute of int64 | Section of int * int64
+type definition = Undefined | Absolute of int64 | Common of int64 | Section of int * int64
 
 type symbol = {
   name : string;
@@ -194,6 +194,7 @@ let write input =
         match s.definition with
         | Undefined -> (0, 0L)
         | Absolute value -> (0xfff1, value)
+        | Common alignment -> (0xfff2, alignment)
         | Section (section, value) ->
             if section < 0 || section >= Array.length sections then
               Error.fail "%s: invalid symbol section index" context;
