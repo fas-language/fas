@@ -793,20 +793,24 @@ let verify ?iter_funcs (m : modul) =
       | Dstruct { size; members; _ } ->
           (match size with Some n when n < 0 -> bad "negative size" | _ -> ());
           List.iter
-            (fun (_, t, o) ->
-              ref_ok "member" t;
-              if t = 0 then bad "a member cannot be void";
-              if o < 0 then bad "negative member offset")
+            (fun m ->
+              ref_ok "member" m.member_type;
+              if m.member_type = 0 then bad "a member cannot be void";
+              if m.member_offset < 0 then bad "negative member offset";
+              Option.iter (fun bits -> if bits <= 0 then bad "nonpositive bitfield width") m.member_bits)
             members
       | Darray (t, n) | Dvector (t, n) ->
           ref_ok "element" t;
           if t = 0 then bad "an element cannot be void";
           if n < 0 then bad "negative count"
       | Dtypedef (_, t) -> ref_ok "aliased" t
+      | Dsubroutine (result, params, _) ->
+          ref_ok "result" result;
+          List.iter (fun t -> ref_ok "parameter" t; if t = 0 then bad "a parameter cannot be void") params
       | Denum { base; _ } -> ref_ok "underlying" base)
     m.dtypes;
-  (* DWARF strings are NUL-terminated (DW_FORM_string, the line table's
-     file names), so a name with a NUL byte in it cannot be written *)
+  (* DWARF strings are NUL-terminated, so a name with a NUL byte in it
+     cannot be written. *)
   let nul what s = if String.contains s '\000' then dtype_errors := Printf.sprintf "%s %S has a NUL byte" what s :: !dtype_errors in
   Vec.iteri (fun i (file, _, _) -> if i > 0 then nul (Printf.sprintf "loc %d: file name" i) file) m.locs;
   Vec.iteri
@@ -816,11 +820,11 @@ let verify ?iter_funcs (m : modul) =
       | Dbase { name; _ } | Dtypedef (name, _) -> nul "name" name
       | Dstruct { name; members; _ } ->
           nul "name" name;
-          List.iter (fun (m, _, _) -> nul "member" m) members
+          List.iter (fun m -> nul "member" m.member_name) members
       | Denum { name; enumerators; _ } ->
           nul "name" name;
           List.iter (fun (e, _) -> nul "enumerator" e) enumerators
-      | Dvoid | Dpointer _ | Darray _ | Dvector _ -> ())
+      | Dvoid | Dpointer _ | Darray _ | Dvector _ | Dsubroutine _ -> ())
     m.dtypes;
   let check_names f =
     Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;

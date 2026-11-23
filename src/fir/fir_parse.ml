@@ -1062,7 +1062,8 @@ let parse_body lx f =
             match next lx with Tlocal n -> Some (use_name st n) | t -> fail lx ("expected a value, got " ^ tok_text t)
           else None
         in
-        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home } ];
+        let vstack = accept_ident lx "stack" in
+        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home; vstack } ];
         blocks ()
     | Label name ->
         if Hashtbl.mem st.bdefined name then fail lx ("block ^" ^ name ^ " defined twice");
@@ -1304,7 +1305,8 @@ let parse_dtype lx =
         let n = str_tok lx in
         let t = int_tok lx in
         let o = int_tok lx in
-        ms := (n, t, o) :: !ms;
+        let bits = if accept_ident lx "bits" then Some (int_tok lx) else None in
+        ms := { member_name = n; member_type = t; member_offset = o; member_bits = bits } :: !ms;
         if accept lx "," then go () else expect lx "}"
       in
       go ()
@@ -1341,6 +1343,15 @@ let parse_dtype lx =
       let t = int_tok lx in
       expect_ident lx "count";
       Dvector (t, int_tok lx)
+  | Ident "subroutine" ->
+      let result = int_tok lx in
+      expect lx "{";
+      let rec params rev =
+        let rev = int_tok lx :: rev in
+        if accept lx "," then params rev else (expect lx "}"; List.rev rev)
+      in
+      let parameters = if accept lx "}" then [] else params [] in
+      Dsubroutine (result, parameters, accept_ident lx "variadic")
   | Ident "typedef" ->
       let name = str_tok lx in
       Dtypedef (name, int_tok lx)

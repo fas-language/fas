@@ -94,6 +94,7 @@ struct Symbol {
     link_symbol handle[Symbol] // symbol identity for a block declaration with no visible linked declaration
     attrs handle[Attr]
     asm_name u32
+    debug_typedef u32 // source spelling of a typedef that names this type
     cleanup addr // Symbol for a GNU cleanup function
     flags u32
 }

@@ -1148,7 +1148,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
         let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
         lines :=
           { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
-            size; rows; vars = fn.vars; vlocs }
+            decl_loc = fn.decl_loc; size; rows; vars = fn.vars; vlocs }
           :: !lines
       end;
       func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms

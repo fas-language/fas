@@ -36,6 +36,8 @@ struct GenBlock {
     id u32
     code Buf
     term Buf
+    debug_marks Vec[GenDebugMark]
+    debug_term_loc u32
     succs Vec[u32]
     terminated bool
     pinned bool
@@ -112,6 +114,7 @@ struct GlobalBlockAddr {
 struct GenCtx {
     p handle[Parser]
     out FirOut
+    debug GenDebug
     deferred Buf
     sym_names Intern
 
@@ -187,6 +190,10 @@ fn gen_init(ctx handle[GenCtx], p handle[Parser], fd i32) void {
 
 fn gen_free(ctx handle[GenCtx]) void {
     fir_free(&ctx.out)
+    buf_free(&ctx.debug.vars)
+    vec_free(&ctx.debug.types)
+    table_free(&ctx.debug.loc_ids)
+    table_free(&ctx.debug.type_ids)
     buf_free(&ctx.deferred)
     intern_free(&ctx.sym_names)
     table_free(&ctx.defined)
@@ -222,10 +229,14 @@ fn gen_free(ctx handle[GenCtx]) void {
 }
 
 fn gen_reset_func_state(ctx handle[GenCtx]) void {
+    buf_clear(&ctx.debug.vars)
+    ctx.debug.scope = 0
+    ctx.debug.loc = 0
     for i usize in 0..ctx.blocks.n {
         b handle[GenBlock] = vec_at(&ctx.blocks, i)
         buf_free(&b.code)
         buf_free(&b.term)
+        vec_free(&b.debug_marks)
         vec_free(&b.succs)
     }
     vec_clear(&ctx.blocks)
@@ -622,7 +633,9 @@ fn gen_cur_block() handle[GenBlock] {
 }
 
 fn gen_cur_buf() handle[Buf] {
-    return &gen_cur_block().code
+    blk handle[GenBlock] = gen_cur_block()
+    if gc.debug.enabled { gen_debug_mark(blk) }
+    return &blk.code
 }
 
 fn gen_entry_buf() handle[Buf] {
@@ -1257,6 +1270,7 @@ fn gen_term_jump(target_blk u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.debug_term_loc = gc.debug.loc
     gen_add_succ(blk, target_blk)
     buf_str(&blk.term, c"  jump ")
     gen_emit_lbl(&blk.term, target_blk)
@@ -1267,6 +1281,7 @@ fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.debug_term_loc = gc.debug.loc
     gen_add_succ(blk, t_blk)
     gen_add_succ(blk, f_blk)
     buf_str(&blk.term, c"  br ")
@@ -1307,6 +1322,7 @@ fn gen_term_ret_void() void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  ret\n")
 }
 
@@ -1315,6 +1331,7 @@ fn gen_term_ret_val(v u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  ret ")
     gen_emit_val(&blk.term, v)
     buf_u8(&blk.term, 10)
@@ -1324,6 +1341,7 @@ fn gen_term_unreachable() void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  unreachable\n")
 }
 
@@ -1537,6 +1555,7 @@ fn gen_require_inline(name Bytes) void {
 }
 
 fn gen_finish_tu() void fails {
+    gen_debug_finish()
     // 0. Emit all inline definitions reachable from the emitted code.
     gi_i usize = 0
     while gi_i < gc.ext_fns.n {

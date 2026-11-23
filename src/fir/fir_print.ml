@@ -430,6 +430,7 @@ let print_func buf f =
         if d.varg <> 0 then add (Printf.sprintf " arg %d" d.varg);
         if d.vloc <> 0 then add (Printf.sprintf " !loc %d" d.vloc);
         (match d.home with Some v -> add (" at " ^ value_text f nm (resolve f v)) | None -> ());
+        if d.vstack then add " stack";
         add "\n")
       f.vars;
     Vec.iteri
@@ -512,10 +513,16 @@ let dtype_text = function
         | None -> "declared"
         | Some n ->
             Printf.sprintf "size %d {%s}" n
-              (String.concat ", " (List.map (fun (m, t, o) -> Printf.sprintf "%s %d %d" (quote m) t o) members)))
+              (String.concat ", " (List.map (fun m ->
+                Printf.sprintf "%s %d %d%s" (quote m.member_name) m.member_type m.member_offset
+                  (match m.member_bits with Some bits -> Printf.sprintf " bits %d" bits | None -> "")) members)))
   | Darray (t, n) -> Printf.sprintf "array %d count %d" t n
   | Dvector (t, n) -> Printf.sprintf "vector %d count %d" t n
   | Dtypedef (name, t) -> Printf.sprintf "typedef %s %d" (quote name) t
+  | Dsubroutine (result, params, variadic) ->
+      Printf.sprintf "subroutine %d {%s}%s" result
+        (String.concat ", " (List.map string_of_int params))
+        (if variadic then " variadic" else "")
   | Denum { name; base; enumerators } ->
       Printf.sprintf "enum %s %d {%s}" (quote name) base
         (String.concat ", " (List.map (fun (e, v) -> Printf.sprintf "%s %Ld" (quote e) v) enumerators))

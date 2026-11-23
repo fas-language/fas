@@ -469,6 +469,7 @@ type dvar = {
   vscope : int;  (** lexical scope id (0 = the function's top level) *)
   vloc : int;  (** declaration location id (0 = none) *)
   varg : int;  (** 1-based parameter number; 0 for a local *)
+  vstack : bool;  (** keep the home in memory for its whole scope *)
   mutable home : value option;
 }
 
@@ -555,12 +556,20 @@ type dtype =
   | Dvoid
   | Dbase of { name : string; enc : dencoding; size : int }
   | Dpointer of int  (** pointee (0 = void) *)
-  | Dstruct of { name : string; union : bool; size : int option; members : (string * int * int) list }
+  | Dstruct of { name : string; union : bool; size : int option; members : dmember list }
       (** members: name, type, byte offset; size None = only declared *)
   | Darray of int * int  (** element, count *)
   | Dvector of int * int  (** element, lanes *)
   | Dtypedef of string * int
+  | Dsubroutine of int * int list * bool  (** return, parameters, variadic *)
   | Denum of { name : string; base : int; enumerators : (string * int64) list }
+
+and dmember = {
+  member_name : string;
+  member_type : int;
+  member_offset : int;  (** in bits for a bitfield, in bytes otherwise *)
+  member_bits : int option;
+}
 
 type modul = {
   funcs : func Vec.t;

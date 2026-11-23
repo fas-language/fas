@@ -232,6 +232,8 @@ fn gen_local_decl(n handle[Ast]) void fails {
     key U64Key = {addr_bits(handle_addr(s))}
     _ bool = table_put(&gc.locals, &key, slot)
 
+    gen_debug_var(s, slot, 0)
+
     // Register GNU cleanup attribute if present
     active_slot u32 = 0
     if s.cleanup != null {
@@ -841,6 +843,13 @@ fn gen_stmt_expr(n handle[Ast]) u32 fails {
 
 fn gen_stmt(n handle[Ast]) void fails {
     if n == null { return }
+    enclosing_scope u32 = gc.debug.scope
+    enclosing_loc u32 = gc.debug.loc
+    if gc.debug.enabled {
+        if n.kind == ND_BLOCK { gc.debug.scope = gen_debug_scope(enclosing_scope) }
+        gc.debug.loc = gen_debug_loc(n.loc, gc.debug.scope)
+    }
+    defer { gc.debug.scope = enclosing_scope; gc.debug.loc = enclosing_loc }
 
     if n.kind == ND_BLOCK {
         old_cleanups usize = gc.cleanups.n
@@ -1242,6 +1251,7 @@ fn gen_function(node handle[Ast]) void fails {
     gc.cur_fn_name = nid
     gc.cur_ret_ty = ret_ty
     gc.next_ssa = n_params + 1
+    decl_loc u32 = if gc.debug.enabled { gen_debug_loc(s.loc, 0) } else { 0 }
 
     // Create entry block (block 0) and first body block (block 1)
     // Putting body in block 1 ensures nothing ever jumps to ^entry!
@@ -1270,6 +1280,7 @@ fn gen_function(node handle[Ast]) void fails {
         slot u32 = gen_alloca_entry(sz, al)
         key U64Key = {addr_bits(handle_addr(ps))}
         _ bool = table_put(&gc.locals, &key, slot)
+        gen_debug_var(ps, slot, i + 1)
         if gen_is_mem_ty(pt) || gen_is_wide_bitint(pt) {
             // Copy agg/complex/wide-BitInt parameter bytes into local slot (per Fir SPEC.md §5)
             if sz > 0 { gen_memcpy_const(slot, i, sz, false) }
@@ -1289,6 +1300,7 @@ fn gen_function(node handle[Ast]) void fails {
     // Lower function body
     try gen_stmt(node.a)
 
+    if gc.debug.enabled { gc.debug.loc = gen_debug_loc(node.a.loc, 0) }
     // Implicit return at end of function body
     if !gen_is_terminated() {
         try gen_run_cleanups_to(0)
@@ -1403,7 +1415,13 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c", ")
         buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](gc.cur_blk)]))
     }
+    if gc.debug.enabled && !bytes_eq(gen_sym_bytes(nid), cc_name(gc.p.names, s.name)) {
+        buf_str(out_b, c" display ")
+        gen_debug_quote(out_b, cc_name(gc.p.names, s.name))
+    }
+    gen_debug_suffix(out_b, decl_loc)
     buf_str(out_b, c" {\n")
+    buf_append(out_b, buf_bytes(&gc.debug.vars))
 
     for ei usize in 0..emit_order.n {
         bid u32 = vec_get(&emit_order, ei)
@@ -1425,8 +1443,15 @@ fn gen_function(node handle[Ast]) void fails {
             gen_emit_lbl(out_b, bid)
             buf_str(out_b, c":\n")
         }
-        buf_append(out_b, buf_bytes(&blk.code))
-        buf_append(out_b, buf_bytes(&blk.term))
+        gen_debug_write_code(out_b, blk)
+        if blk.debug_term_loc != 0 && blk.term.n > 0 {
+            term Bytes = buf_bytes(&blk.term)
+            buf_append(out_b, bytes_sub(term, 0, term.n - 1))
+            gen_debug_suffix(out_b, blk.debug_term_loc)
+            buf_u8(out_b, 10)
+        } else {
+            buf_append(out_b, buf_bytes(&blk.term))
+        }
     }
     buf_str(out_b, c"}\n\n")
     if !is_gnu_inline { fir_flush(&gc.out) }

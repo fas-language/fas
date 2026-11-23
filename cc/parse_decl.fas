@@ -7,6 +7,7 @@ struct DeclSpec {
     loc u32
     attrs handle[Attr]
     alignment u32
+    debug_typedef u32
     thread_local bool
     is_inline bool
     is_noreturn bool
@@ -895,6 +896,7 @@ fn pa_specs(p handle[Parser], out handle[DeclSpec]) void fails {
         } else if out.ty == TY_INVALID && sign == 0 && longs == 0 && !short && !complex && pa_typename(p, t) {
             sym handle[Symbol] = pa_lookup(p, cc_ident(p.names, t))
             base = sym.ty
+            out.debug_typedef = sym.name
             out.unavailable_type = pa_has_attr(p, sym.attrs, c"unavailable")
             try pa_take(p)
         } else { break }
@@ -1041,6 +1043,7 @@ fn pa_params(p handle[Parser], op handle[DeclOp], leading handle[Attr]) void fai
         formal.decl = se_symbol(d.name, pt.loc, adjusted, spec.storage)
         sym handle[Symbol] = formal.decl
         sym.attrs = attrs
+        if d.first == null && adjusted == t { sym.debug_typedef = spec.debug_typedef }
         if d.name != 0 { formal.decl = try se_declare(p, formal.decl, false, false) }
         if tail == null { op.params = formal }
         else { tail.next = formal }
@@ -1348,6 +1351,7 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         }
         s handle[Symbol] = se_symbol(d.name, d.loc, ty, spec.storage)
         s.thread_local = spec.thread_local
+        if d.first == null { s.debug_typedef = spec.debug_typedef }
         s.attrs = attrs
         if pa_has_attr(p, attrs, c"counted_by") { try pa_error(p, d.loc, c"counted_by requires a record field") }
         if spec.storage != SC_TYPEDEF &&

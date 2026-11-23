@@ -2640,6 +2640,9 @@ let promotable_allocas (fn : F.func) =
   if Hashtbl.length cand > 0 then begin
     let r = F.resolve fn in
     let bad v = Hashtbl.remove cand (r v) in
+    (* An unoptimized C debug slot must remain readable after the last
+       machine use, including when the register allocator reuses registers. *)
+    List.iter (fun (d : F.dvar) -> if d.vstack then Option.iter bad d.home) fn.vars;
     let access p t =
       let p = r p in
       match Hashtbl.find_opt cand p with
