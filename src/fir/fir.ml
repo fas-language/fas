@@ -470,6 +470,8 @@ type dvar = {
   vloc : int;  (** declaration location id (0 = none) *)
   varg : int;  (** 1-based parameter number; 0 for a local *)
   vstack : bool;  (** keep the home in memory for its whole scope *)
+  vindirect : bool;  (** the home holds the address of the variable *)
+  vsymbol : (string * bool) option;  (** static storage symbol and TLS flag *)
   mutable home : value option;
 }
 
@@ -578,6 +580,7 @@ type modul = {
   ifuncs : ifunc Vec.t;
   locs : (string * int * int) Vec.t;  (** location id -> file, line, column; 0 = none *)
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
+  mutable dglobals : dvar list;
   dtypes : dtype Vec.t;  (** debug type id -> type; 0 = void *)
   scopes : int Vec.t;
       (** lexical scope id -> parent scope (0 = the function's top level, the
@@ -610,6 +613,7 @@ let create_module () =
     ifuncs = Vec.create { iname = ""; resolver = ""; ilinkage = Local; ivisibility = Default };
     locs;
     alias_tags;
+    dglobals = [];
     dtypes = (let t = Vec.create Dvoid in ignore (Vec.push t Dvoid); t);
     scopes = (let t = Vec.create 0 in ignore (Vec.push t 0); t);
     loc_scopes = Hashtbl.create 1;

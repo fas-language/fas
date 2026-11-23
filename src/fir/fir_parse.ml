@@ -1057,13 +1057,17 @@ let parse_body ~keep_value_names lx f =
         let vscope = if accept_ident lx "scope" then int_tok lx else 0 in
         let varg = if accept_ident lx "arg" then int_tok lx else 0 in
         let vloc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
-        let home =
+        let home, vsymbol =
           if accept_ident lx "at" then
-            match next lx with Tlocal n -> Some (use_name st n) | t -> fail lx ("expected a value, got " ^ tok_text t)
-          else None
+            match next lx with
+            | Tlocal n -> (Some (use_name st n), None)
+            | Sym n -> (None, Some (n, accept_ident lx "tls"))
+            | t -> fail lx ("expected a variable home, got " ^ tok_text t)
+          else (None, None)
         in
         let vstack = accept_ident lx "stack" in
-        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home; vstack } ];
+        let vindirect = vstack && accept_ident lx "indirect" in
+        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home; vstack; vindirect; vsymbol } ];
         blocks ()
     | Label name ->
         if Hashtbl.mem st.bdefined name then fail lx ("block ^" ^ name ^ " defined twice");
@@ -1401,6 +1405,15 @@ let parse_module_with ?(keep_value_names = true) lx on_func =
         if i <> Vec.length m.scopes then fail lx "scope ids must be consecutive from 1";
         if parent < 0 || parent >= i then fail lx "a scope's parent must be 0 or an earlier scope";
         ignore (add_scope m ~parent);
+        go ()
+    | Ident "dglobal" ->
+        let vname = str_tok lx in
+        let vty = int_tok lx in
+        let vloc = int_tok lx in
+        let name = match next lx with Sym n -> n | t -> fail lx ("expected a variable symbol, got " ^ tok_text t) in
+        let vsymbol = Some (name, accept_ident lx "tls") in
+        m.dglobals <- { vname; vty; vloc; vsymbol; vscope = 0; varg = 0; home = None;
+                        vstack = false; vindirect = false } :: m.dglobals;
         go ()
     | Ident "dtype" ->
         let i = int_tok lx in

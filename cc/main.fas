@@ -66,7 +66,9 @@ struct Options {
     x86_options Vec[u32]
     unsigned_char bool
     common bool
-    stack_protector u8 // 0 = off, 1 = basic, 2 = strong, 3 = all
+    x86_native bool
+    native_features u64
+    stack_protector u8 // 0 = off, 1 = basic, 2 = strong, 3 = all, 4 = explicit
     overflow_mode u8 // 0 = default, 1 = wrap, 2 = trap
     short_enums bool
     freestanding bool
@@ -235,12 +237,18 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"-fstack-protector") { o.stack_protector = 1
         } else if bytes_eq_c(word, c"-fstack-protector-strong") { o.stack_protector = 2
         } else if bytes_eq_c(word, c"-fstack-protector-all") { o.stack_protector = 3
+        } else if bytes_eq_c(word, c"-fstack-protector-explicit") { o.stack_protector = 4
         } else if bytes_eq_c(word, c"-fno-stack-protector") { o.stack_protector = 0
         } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
             try cli_error(c"fcc: fast-math semantics are unsupported: ", arg)
         } else if bytes_starts_with(word, bytes_c(c"-march=")) {
-            o.x86_cpu = x86_cpu(bytes_from(word, 7))
-            if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", arg) }
+            o.x86_native = bytes_eq_c(word, c"-march=native")
+            if o.x86_native {
+                o.x86_cpu = x86_detect_host(&o.native_features)
+            } else {
+                o.x86_cpu = x86_cpu(bytes_from(word, 7))
+                if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", arg) }
+            }
         } else if bytes_eq_c(word, c"-m32") || bytes_eq_c(word, c"-mx32") {
             try cli_error(c"fcc: only the x86-64 LP64 target is supported: ", arg)
         } else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
@@ -379,7 +387,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         p.timestamp_explicit = true
     }
     cpu handle[X86Cpu] = &X86_CPUS[zext[usize](o.x86_cpu)]
-    p.x86_features = cpu.features
+    p.x86_features = if o.x86_native { o.native_features } else { cpu.features }
     last arr[X86_FLAG_COUNT, usize] = {}
     for i usize in 0..o.x86_options.n {
         feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
@@ -424,6 +432,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         ssp addr = if o.stack_protector == 1 { c"__SSP__ 1\n" }
                    else if o.stack_protector == 2 { c"__SSP_STRONG__ 2\n" }
                    else if o.stack_protector == 3 { c"__SSP_ALL__ 3\n" }
+                   else if o.stack_protector == 4 { c"__SSP_EXPLICIT__ 4\n" }
                    else { null }
         if ssp != null { try cli_definitions(p, bytes_c(ssp), c"<built-in>") }
         if o.unsigned_char { try cli_definitions(p, bytes_c(c"__CHAR_UNSIGNED__ 1\n"), c"<built-in>") }

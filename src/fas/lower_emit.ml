@@ -261,7 +261,7 @@ let var fn ~name ~ty ~arg home =
     fn.loc <- loc_id ~scope:vscope fn.mc file line col;
     Hashtbl.replace fn.last_loc fn.cur fn.loc
   end;
-  fn.vars <- { vname = name; vty = ty; vscope; vloc = fn.loc; varg = arg; home = Some home; vstack = false } :: fn.vars
+  fn.vars <- { vname = name; vty = ty; vscope; vloc = fn.loc; varg = arg; home = Some home; vstack = false; vindirect = false; vsymbol = None } :: fn.vars
 
 let is_open fn b = not (Hashtbl.mem fn.closed b)
 

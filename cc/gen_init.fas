@@ -1153,6 +1153,7 @@ fn gen_global_object(s handle[Symbol]) void fails {
     init handle[Ast] = handle_from_addr(s.value)
     gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, gen_sym_linkage(s), gen_sym_visibility(s),
                                 buf_bytes(&sec_buf), ro && init != null && !ty_is_ptr(s.ty), s.thread_local, init, s.ty)
+    gen_debug_global(s, nid)
 }
 
 // ---------- Automatic Local Initializer Emitter ----------

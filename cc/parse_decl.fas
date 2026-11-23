@@ -159,7 +159,7 @@ fn pa_check_gnu_attr_args(p handle[Parser], a handle[Attr]) void fails {
     min u32 = 0
     max u32 = 0
     string_first bool = false
-    if feature_in(c" always_inline cdecl fastcall interrupt leaf ms_abi naked no_stack_protector noinline nonstring noreturn returns_twice sysv_abi uninitialized unused ", name) {
+    if feature_in(c" always_inline cdecl fastcall interrupt leaf ms_abi naked no_stack_protector noinline nonstring noreturn returns_twice stack_protect sysv_abi uninitialized unused ", name) {
         max = 0
     } else if feature_in(c" alias capability cfi_salt error function_return ifunc section shared_capability target tls_model visibility warning zero_call_used_regs ", name) {
         min = 1

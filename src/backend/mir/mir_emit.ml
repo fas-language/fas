@@ -1151,9 +1151,20 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
       if debug then begin
         (* rows without a file name say nothing *)
         let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
+        let vars = Array.of_list fn.vars in
         lines :=
           { Mir_dwarf.name = fn.name; display = fn.display; external_ = fn.linkage <> F.Local; start = offset;
-            decl_loc = fn.decl_loc; size; rows; vars = fn.vars; vlocs }
+            decl_loc = fn.decl_loc; size; rows; vars = fn.vars;
+            vlocs = List.map (fun (i, location) ->
+                let var = vars.(i) in
+                if not var.vindirect then (i, location)
+                else
+                  let deref e = e ^ Mir_dwarf.op_deref in
+                  (i, match location with
+                      | Mir_dwarf.Expr e -> Mir_dwarf.Expr (deref e)
+                      | Mir_dwarf.Ranges rs ->
+                          Mir_dwarf.Ranges (List.map (fun (s, e, x) -> (s, e, deref x)) rs)))
+              vlocs }
           :: !lines
       end;
       func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
@@ -1302,7 +1313,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
           ~text_size:(Bytes.length text) ~loc:(F.Vec.get m.locs)
           ~dtypes:(Array.init (F.Vec.length m.dtypes) (F.Vec.get m.dtypes))
           ~scopes:(Array.init (F.Vec.length m.scopes) (F.Vec.get m.scopes))
-          ~loc_scope:(F.loc_scope m) (List.rev !lines)
+          ~loc_scope:(F.loc_scope m) ~globals:(List.rev m.dglobals) (List.rev !lines)
     in
     let debug_syms =
       List.concat

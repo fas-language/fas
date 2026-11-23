@@ -218,7 +218,7 @@ Source variables and their types are module metadata that only `-g` reads. Nothi
   | `pointer T` | A pointer to type `T` (`pointer 0` is `void *`). |
   | `struct "NAME" size N {"F" T OFF, ...}` | A struct of `N` bytes; each member has a name, a type and a byte offset. A bitfield uses a bit offset followed by `bits WIDTH`. `union` instead of `struct` for a union. |
   | `struct "NAME" declared` | A struct (or `union`) whose layout is not known here. |
-  | `array T count N` | `N` elements of `T`. |
+  | `array T count N` | `N` elements of `T`; `-1` denotes an unspecified bound. |
   | `vector T count N` | A SIMD vector of `N` elements of `T`. |
   | `typedef "NAME" T` | Another name for `T`. |
   | `subroutine R {T, ...} [variadic]` | Function returning type `R` with the listed parameter types. |
@@ -227,6 +227,8 @@ Source variables and their types are module metadata that only `-g` reads. Nothi
 - **`scope N parent P`** declares a lexical block. Ids are consecutive from 1 and `P` is smaller than `N` (0 is the function itself). A `loc` names its innermost scope with `!scope S`; the code at that location belongs to that block. All the locations and variables that name a scope, or a scope inside it, must belong to one function. A scope with no code is dropped and its variables move to the enclosing one.
 - **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). An optional `stack` after `at %slot` keeps that home in memory for inspection even after its last machine use. A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. A `dbg_value` holds from that point along every path until the next `dbg_value` of the same variable. Where paths with different values meet, the variable is unknown (shown as optimized out) unless a `dbg_value` names the joining block's parameter. Passes that rewrite functions keep each variable and its home.
 - **No name in the debug information may contain a NUL byte** (`\00`): not a `loc` file name, a `dtype` name, member or enumerator, a `var` name, or a function's `display` name. DWARF ends these strings with a NUL, so the verifier refuses them.
+
+Use `at %slot stack indirect` when a frame slot holds the object's address, as for a variable-length array. A static local uses `at @symbol [tls]` in its `var` line. A file-scope object uses `dglobal "x" T L @symbol [tls]` at module scope, where `L` is the declaration location id. The optional `tls` marker makes the debugger resolve the address in the selected thread.
 
 ## 5. Signatures and the ABI
 

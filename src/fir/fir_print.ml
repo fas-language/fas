@@ -430,7 +430,9 @@ let print_func buf f =
         if d.varg <> 0 then add (Printf.sprintf " arg %d" d.varg);
         if d.vloc <> 0 then add (Printf.sprintf " !loc %d" d.vloc);
         (match d.home with Some v -> add (" at " ^ value_text f nm (resolve f v)) | None -> ());
+        Option.iter (fun (name, tls) -> add (" at " ^ symbol name ^ if tls then " tls" else "")) d.vsymbol;
         if d.vstack then add " stack";
+        if d.vindirect then add " indirect";
         add "\n")
       f.vars;
     Vec.iteri
@@ -548,6 +550,14 @@ let module_to_string m =
     (fun i (name, parent) ->
       if i > 0 then Buffer.add_string buf (Printf.sprintf "alias_tag %d %s %d\n" i (quote name) parent))
     m.alias_tags;
+  List.iter
+    (fun d ->
+      Option.iter
+        (fun (name, tls) ->
+          Printf.bprintf buf "dglobal %s %d %d %s%s\n" (quote d.vname) d.vty d.vloc
+            (symbol name) (if tls then " tls" else ""))
+        d.vsymbol)
+    (List.rev m.dglobals);
   Vec.iter (print_global buf) m.globals;
   Vec.iter
     (fun a ->

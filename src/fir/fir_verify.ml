@@ -799,10 +799,10 @@ let verify ?iter_funcs (m : modul) =
               if m.member_offset < 0 then bad "negative member offset";
               Option.iter (fun bits -> if bits <= 0 then bad "nonpositive bitfield width") m.member_bits)
             members
-      | Darray (t, n) | Dvector (t, n) ->
-          ref_ok "element" t;
-          if t = 0 then bad "an element cannot be void";
-          if n < 0 then bad "negative count"
+      | Darray (e, n) | Dvector (e, n) ->
+          ref_ok "element" e;
+          if e = 0 then bad "an element cannot be void";
+          if n < (match t with Darray _ -> -1 | _ -> 0) then bad "negative count"
       | Dtypedef (_, t) -> ref_ok "aliased" t
       | Dsubroutine (result, params, _) ->
           ref_ok "result" result;
@@ -837,6 +837,24 @@ let verify ?iter_funcs (m : modul) =
       if sc <= 0 || sc >= nscopes then loc_scope_errors := Printf.sprintf "loc %d: scope %d out of range" l sc :: !loc_scope_errors)
     m.loc_scopes;
   let variable_errors = ref [] in
+  let debug_objects = Hashtbl.create 16 in
+  Vec.iter (fun g -> if g.gdefined then Hashtbl.replace debug_objects g.gname g.thread_local) m.globals;
+  let check_debug_var bad d =
+    if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
+    if d.vloc < 0 || d.vloc >= nlocs then bad (Printf.sprintf "location %d out of range" d.vloc);
+    Option.iter (fun (symbol, tls) ->
+      match Hashtbl.find_opt debug_objects symbol with
+      | Some actual when actual = tls -> ()
+      | Some _ -> bad (Printf.sprintf "@%s has a different TLS setting" symbol)
+      | None -> bad (Printf.sprintf "@%s is not a defined object" symbol))
+      d.vsymbol
+  in
+  List.iter (fun d ->
+    nul "dglobal" d.vname;
+    check_debug_var
+      (fun what -> variable_errors := Printf.sprintf "dglobal %S: %s" d.vname what :: !variable_errors)
+      d)
+    m.dglobals;
   let owner = Array.make (max 1 nscopes) "" in
   let claim fname sc =
     let rec up sc =
@@ -862,10 +880,9 @@ let verify ?iter_funcs (m : modul) =
         List.iter
           (fun d ->
             let bad what = variable_errors := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !variable_errors in
-            if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
+            check_debug_var bad d;
             if d.vscope < 0 || d.vscope >= nscopes then bad (Printf.sprintf "scope %d out of range" d.vscope)
             else claim f.name d.vscope;
-            if d.vloc < 0 || d.vloc >= nlocs then bad (Printf.sprintf "location %d out of range" d.vloc);
             if d.varg < 0 || d.varg > List.length f.sig_.param_abis then
               bad (Printf.sprintf "arg %d out of range" d.varg);
             match d.home with

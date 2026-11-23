@@ -182,6 +182,7 @@ fn gen_local_decl(n handle[Ast]) void fails {
             gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, FIR_LOCAL, FIR_VIS_DEFAULT,
                                         bytes_empty(), false, s.thread_local, init, s.ty)
         }
+        gen_debug_local(s, 0, 0, false, nid)
         return
     }
 
@@ -220,6 +221,7 @@ fn gen_local_decl(n handle[Ast]) void fails {
         gen_store_ty(dyn_p, slot, 8, false, false)
         key U64Key = {addr_bits(handle_addr(s))}
         _ bool = table_put(&gc.vla_ptrs, &key, slot)
+        gen_debug_local(s, slot, 0, true, 0)
         return
     }
 
@@ -1282,8 +1284,11 @@ fn gen_function(node handle[Ast]) void fails {
     body_blk u32 = gen_new_block()
     gen_switch_block(body_blk)
 
-    if !gen_has_attr(s.attrs, c"no_stack_protector") &&
-        (gc.stack_protector == 3 || (gc.stack_protector != 0 && gen_protect_body(node.a, gc.stack_protector == 2))) {
+    protect bool = gc.stack_protector == 3 ||
+        (gc.stack_protector != 0 && gen_has_attr(s.attrs, c"stack_protect")) ||
+        ((gc.stack_protector == 1 || gc.stack_protector == 2) &&
+            gen_protect_body(node.a, gc.stack_protector == 2))
+    if protect && !gen_has_attr(s.attrs, c"no_stack_protector") {
         // Reserve the guard before user slots, toward the saved frame and
         // return address. Read it before evaluating parameter VLA bounds.
         gc.stack_guard = gen_alloca_entry(8, 8)

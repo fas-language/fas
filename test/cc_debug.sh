@@ -13,12 +13,16 @@ work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 probe="$root/test/cc_debug/probe.c"
 extra="$root/test/cc_debug/extra.c"
+storage="$root/test/cc_debug/storage.c"
 "$FCC" -g -c "$probe" -o "$work/probe.o"
 "$FCC" -g -c "$extra" -o "$work/extra.o"
 "$FCC" "$work/probe.o" "$work/extra.o" -o "$work/probe"
 "$work/probe"
+"$FCC" -g -c "$storage" -o "$work/storage.o"
+"$FCC" "$work/storage.o" -o "$work/storage"
+"$work/storage"
 
-for object in "$work/probe.o" "$work/extra.o" "$work/probe"; do
+for object in "$work/probe.o" "$work/extra.o" "$work/probe" "$work/storage.o" "$work/storage"; do
     "$dwarfdump" --verify "$object"
     readelf -SW "$object" > "$work/sections"
     for section in debug_info debug_line debug_abbrev debug_str debug_line_str eh_frame; do
@@ -58,3 +62,13 @@ grep -Eq '\$[0-9]+ = .*<extra>' "$work/gdb"
 grep -Eq '^#0 .*inspect ' "$work/gdb"
 grep -Eq '^#1 .*main ' "$work/gdb"
 echo 'PASS: FCC DWARF 5 types, lexical scopes, locations and backtrace'
+
+stop=$(grep -n 'storage-break' "$storage" | cut -d: -f1)
+"$gdb" -q -nx -batch "$work/storage" \
+    -ex 'set debuginfod enabled off' \
+    -ex "break storage.c:$((stop + 1))" -ex run \
+    -ex 'printf "vla=%d,%d static=%d,%d tls=%d,%d\n", vla[0], vla[1], global_static, local_static, global_tls, local_tls' \
+    -ex continue > "$work/gdb-storage"
+cat "$work/gdb-storage"
+grep -qx 'vla=14,28 static=64,74 tls=84,94' "$work/gdb-storage"
+echo 'PASS: FCC DWARF locations for VLAs, static locals and TLS'

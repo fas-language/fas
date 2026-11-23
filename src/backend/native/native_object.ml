@@ -106,6 +106,7 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
             | X64.Gotpcrel { offset; symbol; addend } ->
                 (* R_X86_64_REX_GOTPCRELX; same next-byte adjustment as PC32 *)
                 (offset, symbol, 42, Int64.sub (Int64.of_int addend) 4L)
+            | X64.Dtpoff32 { offset; symbol; addend } -> (offset, symbol, 21, Int64.of_int addend)
             | X64.Tpoff32 { offset; symbol; addend } -> (offset, symbol, 23, Int64.of_int addend)
             | X64.Gottpoff { offset; symbol; addend } ->
                 (offset, symbol, 22, Int64.sub (Int64.of_int addend) 4L)

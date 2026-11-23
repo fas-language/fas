@@ -180,9 +180,9 @@ let dw_lnct_directory_index = 2
 (* [loc id] gives (file, line, column) of a Fir location id (never 0).
    Returns no sections when no function has a row: nothing to describe. *)
 let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * int)
-    ~(dtypes : Fir.dtype array) ~(scopes : int array) ~(loc_scope : int -> int) (funcs : func_lines list) =
+    ~(dtypes : Fir.dtype array) ~(scopes : int array) ~(loc_scope : int -> int) ~(globals : Fir.dvar list) (funcs : func_lines list) =
   let funcs = List.filter (fun f -> f.rows <> [] && f.size > 0) funcs in
-  if funcs = [] then []
+  if funcs = [] && globals = [] then []
   else begin
     (* the primary source file is the one of the lowest location id used
        (front ends number the main file's locations first; a header's
@@ -192,7 +192,8 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
        directory 0. It is file 0; the others follow in order of first use. *)
     let primary_path =
       let lowest = List.fold_left (fun acc f -> List.fold_left (fun acc (_, l) -> min acc l) acc f.rows) max_int funcs in
-      let file, _, _ = loc lowest in
+      let lowest = List.fold_left (fun n (d : Fir.dvar) -> if d.vloc > 0 then min n d.vloc else n) lowest globals in
+      let file, _, _ = if lowest = max_int then ("", 0, 0) else loc lowest in
       file
     in
     let comp_dir = absolute_directory ~cwd primary_path in
@@ -314,7 +315,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         | Fir.Dbase { size; _ } -> size
         | Dpointer _ -> 8
         | Dstruct { size; _ } -> Option.value size ~default:0
-        | Darray (e, n) | Dvector (e, n) -> n * size_of (depth + 1) e
+        | Darray (e, n) | Dvector (e, n) -> max 0 n * size_of (depth + 1) e
         | Dtypedef (_, t) | Denum { base = t; _ } -> size_of (depth + 1) t
         | Dvoid | Dsubroutine _ -> 0
     in
@@ -355,7 +356,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           | Darray (e, n) | Dvector (e, n) ->
               let vector = match t with Dvector _ -> [ flag_present dw_at_gnu_vector ] | _ -> [] in
               die dw_tag_array_type true (typed e @ vector);
-              die dw_tag_subrange_type false [ udata dw_at_count n ];
+              die dw_tag_subrange_type false (if n >= 0 then [ udata dw_at_count n ] else []);
               u8 info 0
           | Dtypedef (name, t) -> die dw_tag_typedef false (str dw_at_name name :: typed t)
           | Dsubroutine (result, params, variadic) ->
@@ -386,7 +387,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         end)
       dtypes;
     (* one variable *)
-    let variable f i (d : Fir.dvar) =
+    let variable vloc (d : Fir.dvar) =
       let decl =
         if d.vloc = 0 then []
         else
@@ -394,10 +395,24 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           if file = "" then [] else [ udata dw_at_decl_file (file_index file); udata dw_at_decl_line line ]
       in
       let location =
-        match List.assoc_opt i f.vlocs with
-        | None -> []
-        | Some (Expr e) -> [ (dw_at_location, dw_form_exprloc, fun () -> uleb info (String.length e); Buffer.add_string info e) ]
-        | Some (Ranges rs) ->
+        match d.vsymbol, vloc with
+        | Some (symbol, tls), _ ->
+            [ (dw_at_location, dw_form_exprloc, fun () ->
+                if tls then begin
+                  uleb info 6;
+                  u8 info 0x0c (* DW_OP_const4u *);
+                  info_relocs := A.Dtpoff32 { offset = Buffer.length info; symbol; addend = 0 } :: !info_relocs;
+                  u32 info 0;
+                  u8 info 0x9b (* DW_OP_form_tls_address *)
+                end else begin
+                  uleb info 9;
+                  u8 info 0x03 (* DW_OP_addr *);
+                  info_relocs := A.Abs64 { offset = Buffer.length info; symbol; addend = 0 } :: !info_relocs;
+                  u64 info 0
+                end) ]
+        | None, None -> []
+        | None, Some (Expr e) -> [ (dw_at_location, dw_form_exprloc, fun () -> uleb info (String.length e); Buffer.add_string info e) ]
+        | None, Some (Ranges rs) ->
             [ sec_offset dw_at_location loclists_symbol loclists used_loclists;
               (* written when the attribute is, so the offset above is the entries' *)
               (0, 0, fun () ->
@@ -418,6 +433,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
       uleb info (abbrev tag false (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) attrs));
       List.iter (fun (_, _, w) -> w ()) attrs
     in
+    List.iter (variable None) globals;
     List.iter
       (fun f ->
         let file, line, _ = loc (if f.decl_loc > 0 then f.decl_loc else snd (List.hd f.rows)) in
@@ -461,7 +477,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           @ [ udata dw_at_decl_file (file_index file); udata dw_at_decl_line line;
               (dw_at_external, dw_form_flag, fun () -> u8 info (if f.external_ then 1 else 0)) ]);
         if has_children then begin
-          List.iter (fun (i, d) -> variable f i d) (params @ locals);
+          List.iter (fun (i, d) -> variable (List.assoc_opt i f.vlocs) d) (params @ locals);
           let rec block sc =
             let rs =
               List.sort_uniq compare (Hashtbl.find ranges sc)
@@ -490,7 +506,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
             uleb info (abbrev dw_tag_lexical_block has_children (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) where));
             List.iter (fun (_, _, w) -> w ()) where;
             if has_children then begin
-              List.iter (fun (i, d) -> variable f i d) locals;
+              List.iter (fun (i, d) -> variable (List.assoc_opt i f.vlocs) d) locals;
               List.iter block nested;
               u8 info 0
             end

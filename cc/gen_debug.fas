@@ -91,7 +91,7 @@ fn gen_debug_suffix(b handle[Buf], loc u32) void {
     }
 }
 
-fn gen_debug_var(s handle[Symbol], slot u32, arg u32) void {
+fn gen_debug_local(s handle[Symbol], slot u32, arg u32, indir bool, symbol u32) void {
     if !gc.debug.enabled || s.name == 0 { return }
     b handle[Buf] = &gc.debug.vars
     scope u32 = if arg == 0 { gc.debug.scope } else { 0 }
@@ -108,11 +108,35 @@ fn gen_debug_var(s handle[Symbol], slot u32, arg u32) void {
         gen_debug_uint(b, arg)
     }
     gen_debug_suffix(b, gen_debug_loc(s.loc, scope))
-    if slot != 0 {
+    if symbol != 0 {
+        buf_str(b, c" at ")
+        gen_emit_sym_name(b, gen_sym_bytes(symbol))
+        if s.thread_local { buf_str(b, c" tls") }
+    } else if slot != 0 {
         buf_str(b, c" at ")
         gen_emit_val(b, slot)
-        buf_str(b, c" stack")
+        buf_str(b, if indir { c" stack indirect" } else { c" stack" })
     }
+    buf_u8(b, 10)
+}
+
+fn gen_debug_var(s handle[Symbol], slot u32, arg u32) void {
+    gen_debug_local(s, slot, arg, false, 0)
+}
+
+fn gen_debug_global(s handle[Symbol], symbol u32) void {
+    if !gc.debug.enabled || s.name == 0 { return }
+    loc u32 = gen_debug_loc(s.loc, 0)
+    b handle[Buf] = gen_global_buf()
+    buf_str(b, c"dglobal ")
+    gen_debug_quote(b, cc_name(gc.p.names, s.name))
+    buf_u8(b, 32)
+    gen_debug_uint(b, gen_debug_type(s.ty, s.debug_typedef))
+    buf_u8(b, 32)
+    gen_debug_uint(b, loc)
+    buf_u8(b, 32)
+    gen_emit_sym_name(b, gen_sym_bytes(symbol))
+    if s.thread_local { buf_str(b, c" tls") }
     buf_u8(b, 10)
 }
 
@@ -190,7 +214,8 @@ fn gen_debug_write_type(b handle[Buf], ty u32, alias u32) void {
         gen_debug_uint(b, gen_debug_type(t.elem, 0))
         buf_str(b, c" count ")
         n u64 = if t.kind == TYK_ARRAY { t.arr_len } else { zext[u64](t.aux1) / ty_size(t.elem) }
-        buf_dec_u64(b, n)
+        if t.kind == TYK_ARRAY && t.aux1 == ARR_VLA { buf_str(b, c"-1") }
+        else { buf_dec_u64(b, n) }
     } else if t.kind == TYK_FUNC {
         buf_str(b, c"subroutine ")
         gen_debug_uint(b, gen_debug_type(t.elem, 0))

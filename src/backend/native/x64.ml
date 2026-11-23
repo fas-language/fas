@@ -114,6 +114,7 @@ type reloc =
           `mov r64, [rip + sym@GOTPCREL]` (see [load_got]); same "next byte"
           convention as [Rel32]. Position-independent objects reach symbols
           another module may define or interpose through it. *)
+  | Dtpoff32 of { offset : int; symbol : string; addend : int }
   | Tpoff32 of { offset : int; symbol : string; addend : int }
       (** R_X86_64_TPOFF32: the symbol's offset from the thread pointer
           (local-exec TLS), as a sign-extended imm32 (see [tls_offset]). *)

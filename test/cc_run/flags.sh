@@ -101,6 +101,8 @@ macro_diff -std=c11 -fpic -fno-builtin-memcpy
 macro_diff -std=c17 -fno-pic -fno-builtin
 macro_diff -std=gnu17 -ffreestanding
 macro_diff -march=x86-64-v3 -mno-avx2
+macro_diff -march=native
+macro_diff -march=native -mno-avx2
 macro_diff -mavx2
 macro_diff -msse4.2
 macro_diff -mno-sse
@@ -244,6 +246,31 @@ for mode in -fstack-protector -fstack-protector-strong -fstack-protector-all; do
     done
 done
 echo "PASS: stack guards and no_stack_protector"
+
+cat > explicit.c <<'C'
+#if __SSP_EXPLICIT__ != 4
+#error wrong stack protector mode
+#endif
+__attribute__((stack_protect))
+int marked(int x) { return x; }
+int unmarked(int x) { volatile char bytes[16]; bytes[0] = x; return bytes[0]; }
+__attribute__((no_stack_protector))
+int opted_out(int x) { volatile char bytes[16]; bytes[0] = x; return bytes[0]; }
+int main(void) { return marked(7) != 7 || unmarked(14) != 14 || opted_out(9) != 9; }
+C
+# GCC defines the explicit mode and the stack_protect attribute.
+for compiler in "${GCC:-gcc}" "$FCC"; do
+    "$compiler" -fstack-protector-explicit explicit.c -o explicit.out
+    ./explicit.out
+    objdump -d --disassemble=marked explicit.out | grep -q '__stack_chk_fail'
+    for function in unmarked opted_out; do
+        if objdump -d --disassemble="$function" explicit.out | grep -q '__stack_chk_fail'; then
+            echo "FAIL: unexpected stack guard in $function" >&2
+            exit 1
+        fi
+    done
+done
+echo "PASS: explicit stack guards"
 
 cat > bare.c <<'C'
 #include <flag-test-header.h>
