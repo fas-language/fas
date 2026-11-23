@@ -936,12 +936,13 @@ fn gen_const_float_exact(tid u32, f64_bits u64, exact handle[FloatBits]) u32 {
     gen_emit_fir_ty(b, tid)
     buf_str(b, c" 0x")
     if k == TYK_FLOAT16 {
-        buf_hex(b, zext[u64](gen_f64_to_f16_bits(f64_bits)), 4)
+        bits u64 = if exact != null { exact.lo } else { zext[u64](gen_f64_to_f16_bits(f64_bits)) }
+        buf_hex(b, bits, 4)
     } else if k == TYK_FLOAT {
-        f32v f32 = cvt[f32](bitcast[f64](f64_bits))
-        buf_hex(b, zext[u64](bitcast[u32](f32v)), 8)
+        bits u64 = if exact != null { exact.lo } else { zext[u64](bitcast[u32](cvt[f32](bitcast[f64](f64_bits)))) }
+        buf_hex(b, bits, 8)
     } else if k == TYK_DOUBLE {
-        buf_hex(b, f64_bits, 16)
+        buf_hex(b, if exact != null { exact.lo } else { f64_bits }, 16)
     } else if k == TYK_LDOUBLE {
         lo u64 = 0
         hi u16 = 0

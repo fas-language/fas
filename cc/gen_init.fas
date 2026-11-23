@@ -655,6 +655,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
             gen_static_write_f80(si, bits, off)
             return
         }
+        if u != TY_LDOUBLE && ty_unqual(init.ty) == u && init.float_bits != null {
+            si_write_u64(si, off, init.float_bits.lo, ty_size(u))
+            return
+        }
         fbits u64 = gen_eval_const_float(init)
         gen_static_write_float(si, u, fbits, off)
         return

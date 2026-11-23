@@ -1703,23 +1703,9 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         buf_u8(b, 10)
         return gen_cast(c"zext", n.ty, gen_cast(c"bitcast", TY_USHORT, signs))
     }
-    if bytes_eq_c(bname, c"__builtin_nans") || bytes_eq_c(bname, c"__builtin_nansf") ||
-       bytes_eq_c(bname, c"__builtin_nansl") || bytes_eq_c(bname, c"__builtin_nansf16") {
-        ft u32 = n.ty
-        v u32 = gen_new_val()
-        b handle[Buf] = gen_cur_buf()
-        buf_str(b, c"  ")
-        gen_emit_val(b, v)
-        buf_str(b, c" = freeze ")
-        gen_emit_fir_ty(b, ft)
-        buf_u8(b, 32)
-        gen_emit_fir_ty(b, ft)
-        fk u8 = ty_kind(ft)
-        if fk == TYK_FLOAT16 { buf_str(b, c" 0x7d00\n") }
-        else if fk == TYK_FLOAT { buf_str(b, c" 0x7fa00000\n") }
-        else if fk == TYK_LDOUBLE { buf_str(b, c" 0x7fffa000000000000000\n") }
-        else { buf_str(b, c" 0x7ff4000000000000\n") }
-        return v
+    if bytes_starts_with(bname, bytes_c(c"__builtin_nans")) &&
+        se_math_family(bytes_from(bname, 10), c"nans") != TY_INVALID {
+        return gen_const_float_exact(n.ty, n.value, n.float_bits)
     }
     if bytes_eq_c(bname, c"__builtin_shufflevector") {
         v0 u32 = try gen_rvalue(a0)

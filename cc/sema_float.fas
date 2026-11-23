@@ -3,6 +3,14 @@
 value struct FloatFormat { precision u32, min_exp i32, max_exp i32, explicit_int bool }
 value struct FloatBits { lo u64, hi u64 }
 
+// The default signaling NaN payload is the bit immediately below quiet.
+fn flt_signaling_nan(ty u32) FloatBits {
+    if ty == TY_FLOAT16 { return {0x7d00, 0} }
+    if ty == TY_FLOAT { return {0x7fa00000, 0} }
+    if ty == TY_LDOUBLE { return {0xa000000000000000, 0x7fff} }
+    return {0x7ff4000000000000, 0}
+}
+
 fn flt_format(ty u32) FloatFormat {
     if ty == TY_FLOAT16 { return {11, -14, 15, false} }
     if ty == TY_BFLOAT16 { return {8, -126, 127, false} }

@@ -130,6 +130,12 @@ fn se_cast(p handle[Parser], t Token, ty u32, a handle[Ast]) handle[Ast] fails {
 fn se_cast_constant(n handle[Ast], a handle[Ast]) void {
     ty u32 = n.ty
     from u32 = se_decay(a.ty)
+    if ty_is_real_float(ty) && ty_unqual(ty) == ty_unqual(from) && a.float_bits != null {
+        n.flags |= a.flags & (NF_STATIC | NF_FLOAT_CONST | NF_OVERFLOW)
+        n.float_bits = a.float_bits
+        n.value = a.value
+        return
+    }
     if ty_unqual(ty) == TY_FLOAT128 || ty_unqual(from) == TY_FLOAT128 {
         n.flags |= a.flags & NF_OVERFLOW
         if ty_unqual(ty) == TY_FLOAT128 {
@@ -281,9 +287,16 @@ fn se_unary(p handle[Parser], t Token, a handle[Ast], postfix bool) handle[Ast] 
             n.value = se_value(n.ty, 0 - raw)
             if !ty_is_unsigned(n.ty) && n.value == raw && raw != 0 && ty_int_bits(n.ty) <= 64 { n.flags |= NF_OVERFLOW }
         }
-    } else if ty_unqual(n.ty) == TY_FLOAT128 && a.float_bits != null {
-        sign u64 = if negate { 0x8000000000000000 } else { 0 }
-        flt_set_bits(n, {a.float_bits.lo, a.float_bits.hi ^ sign})
+    } else if ty_is_real_float(n.ty) && a.float_bits != null {
+        bits FloatBits = {a.float_bits.lo, a.float_bits.hi}
+        if negate {
+            ty u32 = ty_unqual(n.ty)
+            if ty == TY_FLOAT128 { bits.hi ^= 0x8000000000000000 }
+            else if ty == TY_LDOUBLE { bits.hi ^= 0x8000 }
+            else { bits.lo ^= 1 << trunc[u32](8 * ty_size(ty) - 1) }
+        }
+        flt_set_bits(n, bits)
+        n.value = a.value ^ (if negate { 0x8000000000000000 } else { 0 })
         n.flags |= NF_FLOAT_CONST
     } else if (a.flags & NF_FLOAT_CONST) != 0 {
         v f64 = se_fp(a)

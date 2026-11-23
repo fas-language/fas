@@ -613,6 +613,11 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
             bytes_starts_with(word, bytes_c(c"__builtin_nan")) {
             fp u64 = if bytes_starts_with(word, bytes_c(c"__builtin_nan")) { 0x7ff8000000000000 } else { 0x7ff0000000000000 }
             se_set_fp(n, bitcast[f64](fp))
+            if se_math_family(bytes_from(word, 10), c"nans") != TY_INVALID {
+                // The approximate value is for folding arithmetic. Use the
+                // exact target encoding when no arithmetic consumes the NaN.
+                flt_set_bits(n, flt_signaling_nan(ret))
+            }
         }
         if bytes_eq_c(word, c"__builtin_complex") {
             real handle[Ast] = xs.first
