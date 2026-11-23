@@ -11,13 +11,23 @@ fn se_math_family(name Bytes, stem addr) u32 {
     return TY_INVALID
 }
 
+// These libm builtins have a prototype even without <math.h>.
+fn se_nextafter_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_nextafter") { return TY_DOUBLE }
+    if bytes_eq_c(name, c"__builtin_nextafterf") { return TY_FLOAT }
+    if bytes_eq_c(name, c"__builtin_nextafterl") { return TY_LDOUBLE }
+    return TY_INVALID
+}
+
 fn se_math_result(name Bytes) u32 {
+    next_ty u32 = se_nextafter_type(name)
+    if next_ty != TY_INVALID { return next_ty }
     if !bytes_starts_with(name, bytes_c(c"__builtin_")) { return TY_INVALID }
     name = bytes_from(name, 10)
     ty u32 = se_math_family(name, c"conj")
     if ty != TY_INVALID { return ty_complex(ty) }
-    stems arr[9, addr] = {c"creal", c"cimag", c"copysign", c"fabs", c"sqrt", c"inf", c"huge_val", c"nan", c"nans"}
-    for i usize in 0..9 {
+    stems arr[10, addr] = {c"creal", c"cimag", c"copysign", c"fabs", c"fma", c"sqrt", c"inf", c"huge_val", c"nan", c"nans"}
+    for i usize in 0..10 {
         ty = se_math_family(name, stems[i])
         if ty != TY_INVALID { return ty }
     }
@@ -217,6 +227,12 @@ fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count
 }
 
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
+    next_ty u32 = se_nextafter_type(name)
+    if next_ty != TY_INVALID {
+        try se_builtin_count(p, t, count, 2, 2)
+        try se_conversion(p, next_ty, args)
+        try se_conversion(p, next_ty, args.next)
+    }
     if bytes_starts_with(name, bytes_c(c"__builtin_arm_")) ||
         bytes_starts_with(name, bytes_c(c"__builtin_aarch64_")) ||
         bytes_starts_with(name, bytes_c(c"__builtin_mips_")) ||

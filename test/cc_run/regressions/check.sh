@@ -12,6 +12,8 @@ for file in "$src"/*.c; do
     case "${file##*/}" in
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
+        fp_rounding.c) flags=(-frounding-math -lm) ;;
+        fp_exceptions.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
     esac
     "${CLANG:-clang-22}" -std=gnu23 "$file" "${flags[@]}" -o "$work/clang"

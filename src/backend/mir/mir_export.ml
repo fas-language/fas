@@ -63,7 +63,7 @@ let tied = function
 let mem_ok ins k =
   match ins with
   | Alu (X64.Cmp, _, _) | Test _ -> k = 0 || k = 1
-  | Alu _ | Imul _ | Cmov _ | Fop _ | Ucomi _ | Mul1 _ -> k = 1
+  | Alu _ | Imul _ | Cmov _ | Fop _ | Ucomi _ | Comi _ | Mul1 _ -> k = 1
   | Alui (X64.Cmp, _, _) -> k = 0
   | Ext _ | Bsf _ | Bsr _ | Fsqrt _ | Movgx _ | Cvtsi _ | Cvttsi _ | Cvtff _ -> k = 0
   | Div _ -> k = 2
@@ -123,6 +123,7 @@ let opname ins =
   | Fop (op, d, _, _) -> fop_s op ^ dq d
   | Fsqrt (d, _, _) -> "sqrt" ^ dq d
   | Ucomi (d, _, _) -> "ucomi" ^ dq d
+  | Comi (d, _, _) -> "comi" ^ dq d
   | Movgx (d, _, _) -> "movgx" ^ dq d
   | Movxg (d, _, _) -> "movxg" ^ dq d
   | Cvtsi (d, _, _) -> "cvtsi2" ^ dq d

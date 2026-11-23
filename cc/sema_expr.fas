@@ -578,6 +578,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
     n.op = t.payload
     n.a = a
     n.b = b
+    fenv u32 = if p.fenv_access && k == 9 { NF_FENV } else { 0 }
     if x == TY_INVALID || y == TY_INVALID { return n }
     if se_assign_word(p, t) {
         try se_modifiable(p, a)
@@ -652,6 +653,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
             n.operand_ty = vec_ty
             // A floating-point comparison produces signed integer mask lanes.
             if ty_is_real_float(elem) {
+                n.flags |= fenv
                 size u64 = ty_size(elem)
                 elem = if size == 2 { TY_SHORT } else if size == 4 { TY_INT } else if size == 8 { TY_LONG } else { TY_INT128 }
                 n.ty = ty_vector(elem, v.aux1)
@@ -721,6 +723,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         se_fold_float(p, t, n, a, b, k)
         if compare { n.flags |= NF_FOLD }
     }
+    n.flags |= fenv
     return n
 }
 

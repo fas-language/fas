@@ -109,6 +109,11 @@ the function. The frontend keeps active cleanup addresses in volatile
 frame slots. The pad reads them in reverse declaration order and clears
 each slot before invoking its cleanup.
 
+In dynamic floating-point environments, fcc marks C relational operators
+with the Fir `fcmp signaling` extension. It raises invalid for quiet and
+signaling NaNs using `comiss`, `comisd` or `fcomip`. Equality and
+`<math.h>` comparison predicates keep the ordinary quiet comparison.
+
 ## Debug info
 
 With `-g` (`fas -g`, `fas-fir -g`) the object gets DWARF 5

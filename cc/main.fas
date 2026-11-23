@@ -72,6 +72,7 @@ struct Options {
     is_no_pie bool
     no_stdlib bool
     exceptions bool
+    rounding_math bool
     force_lang u8 // 0 = auto, 1 = c
 }
 
@@ -142,6 +143,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
         else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
         else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
+        else if bytes_eq_c(word, c"-frounding-math") { o.rounding_math = true }
+        else if bytes_eq_c(word, c"-fno-rounding-math") { o.rounding_math = false }
         else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true; o.mode = MODE_SYNTAX }
         else if bytes_eq_c(word, c"-x") {
             lang addr = try cli_arg(argc, &pos, arg, c"-x")
@@ -367,6 +370,8 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             root.path = p.base_file
             root.directory = -1
             parser Parser = {}
+            parser.fenv_access = o.rounding_math
+            parser.fenv_default = o.rounding_math
             fd i32 = STDOUT
             if o.dump_ast {
                 if o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
@@ -530,6 +535,8 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     defer { if fd != STDOUT { os_close(fd) } }
 
     parser Parser = {}
+    parser.fenv_access = o.rounding_math
+    parser.fenv_default = o.rounding_math
     gctx GenCtx = {}
     gen_init(&gctx, &parser, fd)
     gctx.exceptions = o.exceptions

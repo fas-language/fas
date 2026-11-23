@@ -35,6 +35,7 @@ const NF_FOLD u32 = 512
 const NF_TYPEOF_EVAL u32 = 1024 // evaluate ND_DECL.b once for a shared typeof specifier
 const NF_PARTIAL_INIT u32 = 2048 // brace elision writes only the listed subobjects
 const NF_INFERRED_DECL u32 = 4096 // the initializer supplies variably modified type bounds
+const NF_FENV u32 = 8192 // dynamic floating-point environment at this node
 const NF_INT_VALUE u32 = NF_ICE | NF_FOLD
 
 struct Ast {
@@ -142,6 +143,9 @@ struct Parser {
     init_depth u32
     loops u32
     function handle[Symbol]
+    fenv_access bool
+    fenv_default bool
+    function_fenv bool
     ahead arr[2, Token]
     pending u32
     replay handle[Vec[Token]] // optional balanced attribute operand
@@ -167,6 +171,20 @@ fn pa_trim(s Bytes) Bytes {
 
 fn pa_pragma(p handle[Parser], t Token) void fails {
     s Bytes = pa_trim(cc_spelling(p.names, t))
+    if bytes_starts_with(s, bytes_c(c"STDC")) {
+        tokens Vec[Token] = {}
+        defer { vec_free(&tokens) }
+        try pragma_tokens(p.pp, s, t.loc, &tokens)
+        if tokens.n == 3 && pa_is(p, tokens.p[Token, 0], c"STDC") &&
+            pa_is(p, tokens.p[Token, 1], c"FENV_ACCESS") {
+            mode Token = tokens.p[Token, 2]
+            if pa_is(p, mode, c"ON") { p.fenv_access = true }
+            else if pa_is(p, mode, c"OFF") { p.fenv_access = false }
+            else if pa_is(p, mode, c"DEFAULT") { p.fenv_access = p.fenv_default }
+            if p.fenv_access && p.function != null { p.function_fenv = true }
+        }
+        return
+    }
     if bytes_starts_with(s, bytes_c(c"weak")) && s.n > 4 && cc_space(s.p[u8, 4]) {
         tokens Vec[Token] = {}
         defer { vec_free(&tokens) }

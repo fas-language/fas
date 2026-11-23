@@ -30,11 +30,12 @@ CLANG = os.environ.get("CLANG", "clang-22")
 
 # The cached oracle was built without dg-options. These tests abort in both
 # compilers without -fexceptions, so require successful runs with it enabled.
-UNWIND_FLAGS = {
+ORACLE_FLAGS = {
     f"gcc/gcc/testsuite/gcc.dg/cleanup-{n}.c":
         ("-fexceptions", "-fnon-call-exceptions") if 8 <= n <= 11 else ("-fexceptions",)
     for n in (5, 8, 9, 10, 11, 12, 13)
 }
+ORACLE_FLAGS["gcc/gcc/testsuite/gcc.dg/pr116891.c"] = ("-frounding-math",)
 
 
 def load_expected(path: Path) -> dict[str, str]:
@@ -71,7 +72,7 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
     try:
         out_bin = work / "prog"
         # Build command: pass -lm (many torture/dg tests use math functions)
-        flags = UNWIND_FLAGS.get(rel, ())
+        flags = ORACLE_FLAGS.get(rel, ())
         cmd = [str(FCC), "-std=gnu23", *flags, *[str(p) for p in srcs], "-lm", "-o", str(out_bin)]
         env = {
             **os.environ,
@@ -142,7 +143,7 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
             ref_exit = rrp.returncode
             ref_stdout = rrp.stdout
             if flags and ref_exit != 0:
-                return (rel, "clang-fail", f"reference unwind test exited {ref_exit}")
+                return (rel, "clang-fail", f"reference test with {flags!r} exited {ref_exit}")
 
         got_exit = rp.returncode if rp.returncode >= 0 else 128 + (-rp.returncode)
         if ref_exit < 0:

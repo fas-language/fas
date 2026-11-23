@@ -73,6 +73,7 @@ type x87 =
   | Fremloop  (** st0 = fmod(st0, st1) by an fprem loop; clobbers rax and the flags *)
   | Fsqrt87
   | Fucomip  (** flags as ucomis for st0 vs st1, pop *)
+  | Fcomip  (** like Fucomip, raising invalid for quiet NaNs too *)
   | Fpop
   | Fnstcw of addr
   | Fldcw of addr
@@ -134,6 +135,7 @@ type ins =
   | Fop of X64.fop * bool * reg * reg  (** dst op= src (scalar, double?) *)
   | Fsqrt of bool * reg * reg  (** dst = sqrt src *)
   | Ucomi of bool * reg * reg
+  | Comi of bool * reg * reg
   | Movgx of bool * reg * reg  (** xmm dst = the low 64 (true) / 32 bits of a GPR *)
   | Movxg of bool * reg * reg  (** GPR dst = the low 64 / 32 bits of an xmm (zero-extended) *)
   | Cvtsi of bool * reg * reg  (** xmm dst = float of a signed 64-bit GPR *)
@@ -243,7 +245,7 @@ let uses_defs = function
   | Spset s -> ([ s ], [])
   | Load (_, _, d, a) | Fload (_, d, a) | Xload (d, a) | Lea (d, a) -> (addr_regs a, [ d ])
   | Store (_, a, s) | Fstore (_, a, s) | Xstore (a, s) -> (s :: addr_regs a, [])
-  | Alu (X64.Cmp, x, y) | Test (x, y) | Ucomi (_, x, y) -> ([ x; y ], [])
+  | Alu (X64.Cmp, x, y) | Test (x, y) | Ucomi (_, x, y) | Comi (_, x, y) -> ([ x; y ], [])
   | Alu (_, d, s) | Imul (d, s) | Cmov (_, d, s) | Fop (_, _, d, s) -> ([ d; s ], [ d ])
   | Alui (X64.Cmp, x, _) -> ([ x ], [])
   | Alui (_, d, _) | Shifti (_, d, _) | Neg d | Not d | Bswap d -> ([ d ], [ d ])
@@ -334,6 +336,7 @@ let map_regs g ins =
   | Fop (op, dbl, d, s) -> Fop (op, dbl, g d, g s)
   | Fsqrt (dbl, d, s) -> Fsqrt (dbl, g d, g s)
   | Ucomi (dbl, x, y) -> Ucomi (dbl, g x, g y)
+  | Comi (dbl, x, y) -> Comi (dbl, g x, g y)
   | Movgx (dbl, d, s) -> Movgx (dbl, g d, g s)
   | Movxg (dbl, d, s) -> Movxg (dbl, g d, g s)
   | Cvtsi (dbl, d, s) -> Cvtsi (dbl, g d, g s)
@@ -553,6 +556,7 @@ let ins_s i =
   | Fop (op, dbl, a, b) -> p "%s%s %s, %s" (fop_s op) (d dbl) (r a) (r b)
   | Fsqrt (dbl, a, b) -> p "%s = sqrt%s %s" (r a) (d dbl) (r b)
   | Ucomi (dbl, a, b) -> p "ucomi%s %s, %s" (d dbl) (r a) (r b)
+  | Comi (dbl, a, b) -> p "comi%s %s, %s" (d dbl) (r a) (r b)
   | Movgx (dbl, a, b) -> p "%s = movgx%s %s" (r a) (d dbl) (r b)
   | Movxg (dbl, a, b) -> p "%s = movxg%s %s" (r a) (d dbl) (r b)
   | Cvtsi (dbl, a, b) -> p "%s = cvtsi2%s %s" (r a) (d dbl) (r b)
@@ -568,6 +572,7 @@ let ins_s i =
       | Fremloop -> "fprem loop"
       | Fsqrt87 -> "fsqrt"
       | Fucomip -> "fucomip"
+      | Fcomip -> "fcomip"
       | Fpop -> "fpop"
       | Fnstcw m -> p "fnstcw %s" (addr_s m)
       | Fldcw m -> p "fldcw %s" (addr_s m))

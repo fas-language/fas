@@ -13,6 +13,7 @@ use "layout.fas"
 use "abi.fas"
 use "fir_out.fas"
 use "parse.fas"
+use "sema_builtin.fas"
 use "gen.fas"
 use "gen_init.fas"
 
@@ -1139,6 +1140,7 @@ fn gen_binary(n handle[Ast]) u32 fails {
             gen_emit_val(b, cv)
             buf_str(b, if is_vflt { c" = fcmp " } else { c" = icmp " })
             buf_str(b, pred)
+            if is_vflt && (n.flags & NF_FENV) != 0 { buf_str(b, c" signaling") }
             buf_str(b, c" <")
             buf_dec_u64(b, cnt)
             buf_str(b, c" x i1> ")
@@ -1156,7 +1158,11 @@ fn gen_binary(n handle[Ast]) u32 fails {
             else if bytes_eq_c(op, c"<=") { pred = c"ole" }
             else if bytes_eq_c(op, c">") { pred = c"ogt" }
             else if bytes_eq_c(op, c">=") { pred = c"oge" }
-            cmp_v = if u == TY_FLOAT128 { gen_quad_compare(pred, lv, rv) } else { gen_fcmp(pred, lv, rv) }
+            cmp_v = if u == TY_FLOAT128 {
+                gen_quad_compare(pred, lv, rv)
+            } else {
+                gen_float_compare(pred, lv, rv, (n.flags & NF_FENV) != 0)
+            }
         } else {
             is_uns bool = ty_is_unsigned(u) || ty_is_ptr(u) || ty_is_nullptr(u)
             pred addr = c"eq"
@@ -1944,6 +1950,14 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
             return v
         }
         return gen_const_zero(n.ty)
+    }
+    next_ty u32 = se_nextafter_type(bname)
+    if next_ty != TY_INVALID {
+        types arr[2, u32] = {next_ty, next_ty}
+        first u32 = gen_convert(try gen_rvalue(a0), a0.ty, next_ty)
+        second u32 = gen_convert(try gen_rvalue(a1), a1.ty, next_ty)
+        args arr[2, u32] = {first, second}
+        return gen_emit_helper_call(bytes_from(bname, 10), next_ty, &types, &args, 2)
     }
     if bytes_eq_c(bname, c"__builtin_fma") || bytes_eq_c(bname, c"__builtin_fmaf") || bytes_eq_c(bname, c"__builtin_fmal") {
         ft u32 = if bytes_eq_c(bname, c"__builtin_fmaf") { TY_FLOAT }

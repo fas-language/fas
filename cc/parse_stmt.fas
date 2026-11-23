@@ -215,8 +215,12 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
 
 fn pa_block(p handle[Parser], scope bool, statement_expr bool) handle[Ast] fails {
     t Token = try pa_expect(p, c"{")
+    incoming_fenv bool = p.fenv_access
     if scope { pa_enter(p) }
-    defer { if scope { pa_leave(p) } }
+    defer {
+        if scope { pa_leave(p) }
+        p.fenv_access = incoming_fenv
+    }
     if statement_expr {
         barrier handle[VmBarrier] = pa_alloc[VmBarrier]()
         barrier.previous = p.vm
@@ -481,6 +485,7 @@ fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
 
 fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[Ast] fails {
     p.function = s
+    p.function_fenv = p.fenv_access
     scope handle[Scope] = p.scope
     p.scope = proto
     defer {
@@ -509,7 +514,7 @@ fn pa_function(p handle[Parser], s handle[Symbol], proto handle[Scope]) handle[A
         jump = jump.next
     }
     n handle[Ast] = pa_node(ND_DECL, s.loc, s.ty)
-    n.flags = NF_DEFINITION
+    n.flags = NF_DEFINITION | (if p.function_fenv { NF_FENV } else { 0 })
     n.decl = s
     n.a = body
     n.attrs = s.attrs

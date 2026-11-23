@@ -607,6 +607,7 @@ let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame (i : ins) =
   | Fop (op, dbl, d, s) -> A.fop_xx a ~double:dbl op (xr d) (xr s)
   | Fsqrt (dbl, d, s) -> A.fop_xx a ~double:dbl A.Fsqrt (xr d) (xr s)
   | Ucomi (dbl, x, y) -> A.ucomi a ~double:dbl (xr x) (xr y)
+  | Comi (dbl, x, y) -> A.ucomi ~signaling:true a ~double:dbl (xr x) (xr y)
   | Movgx (dbl, d, s) -> A.mov_xr a ~double:dbl (xr d) (gr s)
   | Movxg (dbl, d, s) -> A.mov_rx a ~double:dbl (gr d) (xr s)
   | Cvtsi (dbl, d, s) -> A.cvt_si2f a ~double:dbl (xr d) (gr s)
@@ -644,6 +645,7 @@ let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame (i : ins) =
           A.jcc a A.Ne loop
       | Fsqrt87 -> A.fsqrt87 a
       | Fucomip -> A.fucomip a
+      | Fcomip -> A.fucomip ~signaling:true a
       | Fpop -> A.fpop a
       | Fnstcw ad -> A.fnstcw a (m ad)
       | Fldcw ad -> A.fldcw a (m ad))

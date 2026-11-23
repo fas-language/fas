@@ -1153,11 +1153,11 @@ let emit_inst cx (ir : inst_rec) =
       line cx (Printf.sprintf "%s = extractvalue %s %s, 0" (r 0) st s);
       line cx (Printf.sprintf "%s = extractvalue %s %s, 1" (r 1) st s)
   | Icmp (k, a, b) -> def (Printf.sprintf "icmp %s %s, %s" (icmp_text k) (tv cx a) (v cx b))
-  | Fcmp (k, _, a, b) when strict cx ->
-      (* quiet, as the native ucomis: invalid only for a signaling NaN *)
+  | Fcmp (k, fl, a, b) when strict cx ->
       let t = tyv cx a in
       let rt = match t with Vec (n, _) -> Printf.sprintf "<%d x i1>" n | _ -> "i1" in
-      let name = "llvm.experimental.constrained.fcmp." ^ sfx t in
+      let op = if has fl f_signaling then "fcmps" else "fcmp" in
+      let name = "llvm.experimental.constrained." ^ op ^ "." ^ sfx t in
       intrinsic cx name rt [ lty t; lty t; "metadata"; "metadata" ];
       def
         (Printf.sprintf "call %s @%s(%s, %s, metadata !\"%s\", metadata !\"fpexcept.strict\")" rt name (tv cx a)

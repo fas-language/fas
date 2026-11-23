@@ -664,8 +664,8 @@ let fop_xm a ~double op (dst : xmm) mem =
 
 (* ucomisd/ucomiss x, y: flags as an unsigned compare of x with y; PF set
    when unordered (ZF and CF are then set too). *)
-let ucomi a ~double (x : xmm) (y : xmm) =
-  sse_rr a (if double then 0x66 else 0) 0x2e ~reg:x ~rm:y
+let ucomi ?(signaling = false) a ~double (x : xmm) (y : xmm) =
+  sse_rr a (if double then 0x66 else 0) (if signaling then 0x2f else 0x2e) ~reg:x ~rm:y
 
 (* cvtsi2sd/ss xmm, r64 *)
 let cvt_si2f a ~double (x : xmm) r =
@@ -899,7 +899,7 @@ let farithp a op =
 let fsqrt87 a = byte a 0xd9; byte a 0xfa
 
 (* fucomip st(0), st(1): ZF PF CF as ucomis sets them for st0 vs st1; pops st0 *)
-let fucomip a = byte a 0xdf; byte a 0xe9
+let fucomip ?(signaling = false) a = byte a 0xdf; byte a (if signaling then 0xf1 else 0xe9)
 
 (* Absolute 64-bit address of a symbol, as data inside code (unused for now)
    or via [mov r64, imm64] with a relocation. *)

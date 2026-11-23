@@ -1345,6 +1345,7 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
+    if (node.flags & NF_FENV) != 0 { buf_str(out_b, c" fenv") }
     if pad != 0 {
         buf_str(out_b, c" !cleanup ")
         buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](pad)]))

@@ -248,7 +248,9 @@ let verify_func funcs (f : func) =
                 if not (is_float_like t) then err "%s: fcmp on %s" where (ty_to_string t);
                 same "rhs" x t;
                 if nres = 1 && r 0 <> mask_of t then err "%s: fcmp result must be %s" where (ty_to_string (mask_of t));
-                only_flags fl f_fast
+                only_flags fl (f_fast lor f_signaling);
+                if has fl f_signaling && (has fl f_fast || not (has f.fattrs fa_fenv)) then
+                  err "%s: signaling fcmp requires fenv and excludes fast" where
             | Select (cnd, a, x) ->
                 want 1;
                 if nres = 1 then begin

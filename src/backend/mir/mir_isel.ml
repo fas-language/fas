@@ -624,9 +624,9 @@ let fcmp_with c (p : F.fcmp) ucomi ra rb =
   | Fule -> cmp ra rb Be
   | Funo -> cmp ra rb P
 
-let fcmp c p a b =
+let fcmp c p signaling a b =
   let dbl = is_dbl (ty c a) in
-  fcmp_with c p (fun x y -> emit c (Ucomi (dbl, x, y))) (use c a) (use c b)
+  fcmp_with c p (fun x y -> emit c (if signaling then Comi (dbl, x, y) else Ucomi (dbl, x, y))) (use c a) (use c b)
 
 (* ---------- conversions ---------- *)
 
@@ -866,10 +866,10 @@ let copy80 c ~src v = copy_bytes c ~src ~dst:(dst80 c v) 10
 let pow2_80 c e = const80 c Int64.min_int (Int64.of_int (16383 + e))
 
 (* flags as ucomis x, y would set them *)
-let ucomi80 c x y =
+let ucomi80 ?(signaling = false) c x y =
   fld80 c y;
   fld80 c x;
-  x87 c Fucomip;
+  x87 c (if signaling then Fcomip else Fucomip);
   x87 c Fpop
 
 (* runs [body] with the x87 rounding control set to [rc] (0 nearest,
@@ -2296,8 +2296,9 @@ let inst c i =
   | Icmp (p, a, b) ->
       (match ty c a with F.Vec _ -> unsupported "vector icmp" | _ -> ());
       set (icmp c p a b)
-  | Fcmp (p, _, a, b) when is80 (ty c a) -> set (fcmp_with c p (ucomi80 c) (addr80 c a) (addr80 c b))
-  | Fcmp (p, _, a, b) -> set (fcmp c p a b)
+  | Fcmp (p, fl, a, b) when is80 (ty c a) ->
+      set (fcmp_with c p (ucomi80 ~signaling:(F.has fl F.f_signaling) c) (addr80 c a) (addr80 c b))
+  | Fcmp (p, fl, a, b) -> set (fcmp c p (F.has fl F.f_signaling) a b)
   | Select (cnd, x, y) when is80 (rty ()) ->
       select80 c (res 0) (use c cnd) (addr80 c x) (addr80 c y)
   | (Freeze a | Mark (_, a)) when is80 (rty ()) -> copy80 c ~src:(addr80 c a) (res 0)
