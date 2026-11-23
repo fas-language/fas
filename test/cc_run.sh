@@ -30,6 +30,10 @@ case "${1:-all}" in
         shift
         exec python3 "$ROOT/test/cc_run/rand_c.py" "$@"
         ;;
+    --csmith)
+        shift
+        exec python3 "$ROOT/test/cc_run/csmith_diff.py" "$@"
+        ;;
     --abi)
         exec bash "$ROOT/test/cc_run/ms_abi/check.sh"
         ;;
