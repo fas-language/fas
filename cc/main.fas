@@ -79,6 +79,7 @@ struct Options {
     suppress_warnings bool
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     relocatable bool
+    save_temps bool
     no_markers bool
     no_builtins bool
     macro_dump bool
@@ -196,6 +197,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-E") { o.mode = MODE_PREPROCESS }
         else if bytes_eq_c(word, c"-S") || bytes_eq_c(word, c"--emit-fir") { o.mode = MODE_EMIT_FIR }
         else if bytes_eq_c(word, c"-c") { o.mode = MODE_COMPILE_OBJ }
+        else if bytes_eq_c(word, c"-save-temps") { o.save_temps = true }
         else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
         else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
         else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
@@ -334,7 +336,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         pos.i += 1
     }
     if o.inputs.n == 0 {
-        try cli_error(c"usage: fcc [-E | -S | -c | -fsyntax-only] [options] inputs...", null)
+        try cli_error(c"usage: fcc [-E | -S | -c | -fsyntax-only] [-save-temps] [options] inputs...", null)
     }
     if (o.mode == MODE_PREPROCESS || o.mode == MODE_SYNTAX) && o.inputs.n > 1 {
         try cli_error(c"fcc: expected one input file, got ", vec_get(&o.inputs, 1).path)
@@ -585,7 +587,9 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             inp InputFile = o.inputs.p[InputFile, i]
             if inp.kind != IN_C { continue }
             out_p addr = if o.output != null { o.output } else { drv_replace_ext(bytes_c(inp.path), c".s") }
-            try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, out_p)
+            if !(try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, out_p, -1)) {
+                try cli_error(c"fcc: could not write Fir output", null)
+            }
         }
         return
     }
@@ -598,16 +602,15 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             if inp.kind == IN_FIR {
                 try drv_assemble_fir(inp.path, out_p, pic, o.debug)
             } else if inp.kind == IN_C {
-                tmp_fir addr = drv_temp_path(c".fir")
-                defer { os_unlink(tmp_fir) catch {} }
-                try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, tmp_fir)
-                try drv_assemble_fir(tmp_fir, out_p, pic, o.debug)
+                saved addr = if o.save_temps { cli_saved_fir(out_p, 0, false) } else { null }
+                try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, out_p, saved, pic)
             }
         }
         return
     }
 
-    // Mode 4: Compile & Link
+    // Compile and link, keeping per-source temporary objects until the link.
+    out_exe addr = if o.output != null { o.output } else { c"a.out" }
     temp_files Vec[addr] = {}
     defer {
         for i usize in 0..temp_files.n {
@@ -624,21 +627,73 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             try drv_assemble_fir(inp.path, tmp_o, pic, o.debug)
             vec_set(&o.link_args, zext[usize](inp.link_at), tmp_o)
         } else {
-            tmp_fir addr = drv_temp_path(c".fir")
             tmp_o addr = drv_temp_path(c".o")
-            vec_push(&temp_files, tmp_fir)
             vec_push(&temp_files, tmp_o)
-            try cli_compile_one_c(o, &dir_strs, &dir_ranks, inp.path, tmp_fir)
-            try drv_assemble_fir(tmp_fir, tmp_o, pic, o.debug)
+            saved addr = if o.save_temps { cli_saved_fir(out_exe, i, o.inputs.n > 1) } else { null }
+            try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, tmp_o, saved, pic)
             vec_set(&o.link_args, zext[usize](inp.link_at), tmp_o)
         }
     }
-    out_exe addr = if o.output != null { o.output } else { c"a.out" }
     try drv_link(out_exe, &o.link_args, o.is_shared, o.is_static, o.is_no_pie, o.no_stdlib, o.relocatable)
 }
 
+// Save the text alongside the requested output. Number multiple inputs so
+// sources with the same basename each keep their own Fir file.
+fn cli_saved_fir(output addr, index usize, multiple bool) addr {
+    path Buf = {}
+    defer { buf_free(&path) }
+    buf_str(&path, output)
+    if multiple {
+        buf_u8(&path, 46)
+        buf_dec_u64(&path, index)
+    }
+    buf_str(&path, c".fir")
+    return drv_cstr_dup(buf_bytes(&path))
+}
+
+// Saved Fir is named by the driver. Check aliases of command-line inputs
+// before truncating an existing path, including sources yet to be compiled.
+fn cli_check_saved_fir(o handle[Options], saved addr) void fails {
+    st Stat = {}
+    os_stat(saved, &st, true) catch { return }
+    for i usize in 0..o.inputs.n {
+        input addr = o.inputs.p[InputFile, i].path
+        if bytes_eq_c(bytes_c(input), c"-") { continue }
+        source Stat = {}
+        os_stat(input, &source, true) catch { continue }
+        if source.dev == st.dev && source.ino == st.ino {
+            try cli_error(c"fcc: saved Fir would overwrite ", input)
+        }
+    }
+}
+
+fn cli_object_c(o handle[Options], dirs handle[Vec[addr]], ranks handle[Vec[u8]], in_path addr,
+                obj_path addr, saved addr, pic u8) void fails {
+    if saved != null {
+        try cli_check_saved_fir(o, saved)
+        if !(try cli_compile_one_c(o, dirs, ranks, in_path, saved, -1)) {
+            try cli_error(c"fcc: could not write Fir output", null)
+        }
+        try drv_assemble_fir(saved, obj_path, pic, o.debug)
+        return
+    }
+
+    child DrvFirPipe = try drv_fir_pipe(obj_path, pic, o.debug)
+    running bool = true
+    defer { if running { drv_abort_fir(child) } }
+    previous DrvSignalAction = {}
+    try drv_ignore_sigpipe(&previous)
+    defer { drv_restore_sigpipe(&previous) }
+
+    wrote bool = try cli_compile_one_c(o, dirs, ranks, in_path, null, child.write_fd)
+    os_close(child.write_fd)
+    running = false
+    try drv_finish_fir(child.pid)
+    if !wrote { try cli_error(c"fcc: could not write Fir output", null) }
+}
+
 fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ranks handle[Vec[u8]],
-                     in_path addr, fir_out_path addr) void fails {
+                     in_path addr, fir_out_path addr, output_fd i32) bool fails {
     // The command owns the input and output paths. Everything built from
     // the source is only needed until this translation unit is emitted.
     region Region = {}
@@ -670,7 +725,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     } else {
         main_input = pp_read(&p, name) catch {
             try cli_error(c"fcc: cannot open ", in_path)
-            return
+            return false
         }
     }
     pp_depend(&p, p.base_file, false)
@@ -700,11 +755,12 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     root.path = p.base_file
     root.directory = -1
 
-    fd i32 = STDOUT
-    if fir_out_path != null && !bytes_eq_c(bytes_c(fir_out_path), c"-") {
+    fd i32 = if output_fd >= 0 { output_fd } else { STDOUT }
+    open_file bool = output_fd < 0 && fir_out_path != null && !bytes_eq_c(bytes_c(fir_out_path), c"-")
+    if open_file {
         fd = try os_open(fir_out_path, O_WRONLY | O_CREAT | O_TRUNC, 0o666)
     }
-    defer { if fd != STDOUT { os_close(fd) } }
+    defer { if open_file { os_close(fd) } }
 
     parser Parser = {}
     parser.fenv_access = o.rounding_math
@@ -724,6 +780,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     try parse_tu(&parser, &p)
     try gen_finish_tu()
     if o.deps != 0 { try output_dependencies(&p, o) }
+    return !gctx.out.write_failed
 }
 
 fn main(argc i32, argv addr) i32 {

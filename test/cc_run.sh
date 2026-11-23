@@ -43,6 +43,9 @@ case "${1:-all}" in
     --regressions)
         exec bash "$ROOT/test/cc_run/regressions/check.sh"
         ;;
+    --stream)
+        exec bash "$ROOT/test/cc_run/stream.sh"
+        ;;
     all)
         echo "=== 1. Manifest run-agree differential tests (fcc vs clang-22) ==="
         python3 "$ROOT/test/cc_run/run_manifest.py" --show 15
@@ -59,6 +62,7 @@ case "${1:-all}" in
         echo "=== 5. Directed compiler regressions ==="
         bash "$ROOT/test/cc_run/regressions/check.sh"
         bash "$ROOT/test/cc_run/flags.sh"
+        bash "$ROOT/test/cc_run/stream.sh"
         ;;
     *)
         exec python3 "$ROOT/test/cc_run/run_manifest.py" "$@"

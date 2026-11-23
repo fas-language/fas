@@ -28,7 +28,7 @@ struct FirOut {
     next_lbl u32      // per-function label counter
     in_global_init bool
     global_first_item bool
-    _pad u16
+    write_failed bool
 }
 
 fn fir_init_buf(w handle[FirOut]) void {
@@ -47,7 +47,7 @@ fn fir_free(w handle[FirOut]) void {
 
 fn fir_flush(w handle[FirOut]) void {
     if w.out_fd >= 0 && w.buf.n > 0 {
-        buf_write(&w.buf, w.out_fd) catch {}
+        if !w.write_failed { buf_write(&w.buf, w.out_fd) catch { w.write_failed = true } }
         buf_clear(&w.buf)
     }
 }

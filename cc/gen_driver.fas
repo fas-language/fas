@@ -12,6 +12,29 @@ use "gen.fas"
 const SYS_FORK u64 = 57
 const SYS_EXECVE u64 = 59
 const SYS_WAIT4 u64 = 61
+const SYS_DUP2 u64 = 33
+const SYS_FCNTL u64 = 72
+const SYS_KILL u64 = 62
+const SYS_PIPE2 u64 = 293
+const SYS_RT_SIGACTION u64 = 13
+const F_DUPFD_CLOEXEC u64 = 1030
+const SIGKILL u64 = 9
+const SIGPIPE u64 = 13
+
+// Linux x86-64 kernel sigaction, whose signal set is one 64-bit word.
+struct DrvSignalAction { handler u64, flags u64, restorer u64, mask u64 }
+
+// Start with the prior disposition in the child. The driver then ignores
+// SIGPIPE so a failed backend is reported by wait4, with writes returning EPIPE.
+fn drv_ignore_sigpipe(previous handle[DrvSignalAction]) void fails {
+    action DrvSignalAction = {}
+    action.handler = 1 // SIG_IGN
+    _ i64 = try syscall[fails](SYS_RT_SIGACTION, SIGPIPE, &action, handle_addr(previous), 8)
+}
+
+fn drv_restore_sigpipe(previous handle[DrvSignalAction]) void {
+    _ i64 = syscall(SYS_RT_SIGACTION, SIGPIPE, handle_addr(previous), 0, 8)
+}
 
 fn drv_cstr_dup(s Bytes) addr {
     p addr = heap_alloc(s.n + 1)
@@ -66,8 +89,8 @@ fn drv_replace_ext(path Bytes, new_ext addr) addr {
     return drv_cstr_dup(buf_bytes(&b))
 }
 
-// Run a child process synchronously via fork + execve + wait4. Returns exit code (0 = ok).
-fn drv_run(exe addr, args handle[Vec[addr]]) i32 fails {
+// Start a child process, optionally redirecting a close-on-exec fd to stdin.
+fn drv_start(exe addr, args handle[Vec[addr]], input i32) i64 fails {
     // Build null-terminated argv
     n usize = args.n
     argv addr = heap_alloc((n + 2) * 8)
@@ -84,15 +107,24 @@ fn drv_run(exe addr, args handle[Vec[addr]]) i32 fails {
         fail CError
     }
     if pid_r == 0 {
+        if input >= 0 && syscall(SYS_DUP2, input, STDIN) < 0 {
+            eprint(c"fcc: cannot redirect backend stdin\n")
+            os_exit(127)
+        }
         _ i64 = syscall(SYS_EXECVE, addr_bits(exe), addr_bits(argv), addr_bits(envp))
         eprint(c"fcc: cannot execute ")
         eprint(exe)
         eprint(c"\n")
         os_exit(127)
     }
+    return pid_r
+}
+
+// Wait for one child. Report exit status in the same form as a shell.
+fn drv_wait(pid i64) i32 fails {
     status i32 = 0
     while true {
-        wr i64 = syscall(SYS_WAIT4, bitcast[u64](pid_r), addr_bits(&status), 0, 0)
+        wr i64 = syscall(SYS_WAIT4, bitcast[u64](pid), addr_bits(&status), 0, 0)
         if wr < 0 {
             if wr == -4 { continue } // EINTR
             eprint(c"fcc: wait4 failed\n")
@@ -105,6 +137,10 @@ fn drv_run(exe addr, args handle[Vec[addr]]) i32 fails {
         return 128 + (status & 0x7f)
     }
     return (status >> 8) & 0xff
+}
+
+fn drv_run(exe addr, args handle[Vec[addr]]) i32 fails {
+    return try drv_wait(try drv_start(exe, args, -1))
 }
 
 // Locate executable `name` via env var, relative to cwd, or relative to argv[0]
@@ -177,7 +213,7 @@ fn drv_temp_path(ext addr) addr {
     return drv_cstr_dup(buf_bytes(&b))
 }
 
-fn drv_assemble_fir(fir_path addr, obj_path addr, pic u8, debug bool) void fails {
+fn drv_start_fir(fir_path addr, obj_path addr, pic u8, debug bool, input i32) i64 fails {
     fir_exe addr = drv_find_fas_fir()
     args Vec[addr] = {}
     defer { vec_free(&args) }
@@ -190,11 +226,51 @@ fn drv_assemble_fir(fir_path addr, obj_path addr, pic u8, debug bool) void fails
     vec_push(&args, fir_path)
     vec_push(&args, c"-o")
     vec_push(&args, obj_path)
-    rc i32 = try drv_run(fir_exe, &args)
+    return try drv_start(fir_exe, &args, input)
+}
+
+fn drv_finish_fir(pid i64) void fails {
+    rc i32 = try drv_wait(pid)
     if rc != 0 {
         eprint(c"fcc: fas-fir failed\n")
         fail CError
     }
+}
+
+fn drv_assemble_fir(fir_path addr, obj_path addr, pic u8, debug bool) void fails {
+    try drv_finish_fir(try drv_start_fir(fir_path, obj_path, pic, debug, -1))
+}
+
+value struct DrvFirPipe { pid i64, write_fd i32 }
+
+fn drv_fir_pipe(obj_path addr, pic u8, debug bool) DrvFirPipe fails {
+    fds arr[2, i32] = {}
+    _ i64 = try syscall[fails](SYS_PIPE2, &fds, O_CLOEXEC)
+    // A caller can close stdio. Keep private pipe ends clear of those slots
+    // so frontend diagnostics cannot be written into the Fir stream.
+    for i usize in 0..2 {
+        if fds[i] >= 3 { continue }
+        fd i64 = syscall[fails](SYS_FCNTL, fds[i], F_DUPFD_CLOEXEC, 3) catch e {
+            os_close(fds[0])
+            os_close(fds[1])
+            fail e
+        }
+        os_close(fds[i])
+        fds[i] = trunc[i32](fd)
+    }
+    defer { os_close(fds[0]) }
+    pid i64 = drv_start_fir(c"-", obj_path, pic, debug, fds[0]) catch e {
+        os_close(fds[1])
+        fail e
+    }
+    return {pid, fds[1]}
+}
+
+fn drv_abort_fir(child DrvFirPipe) void {
+    // Prevent emitting an object from an incomplete translation unit on EOF.
+    _ i64 = syscall(SYS_KILL, child.pid, SIGKILL)
+    os_close(child.write_fd)
+    wait_status i32 = drv_wait(child.pid) catch 0
 }
 
 // Take the shared unwinder only when an input references it. Save the
