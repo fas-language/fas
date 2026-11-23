@@ -27,7 +27,7 @@ Fir --Fir_scalarize--> Fir (no vectors)
 | `mir_runtime.ml` | Appends the `fma` helpers, correctly rounded in the current rounding mode with the IEEE flags (`backend/native/runtime/fma.fas`) to a module that uses `fma`: baseline x86-64 has no FMA instruction. |
 | `mir_emit.ml` | Frame layout, encoding, data sections, `_start`, the object. |
 | `mir_driver.ml` | The driver's entry (every build; the LLVM path is only the hidden `FAS_ORACLE=llvm` test oracle): compiles the Fir module the front end lowered. |
-| `mir_cfi.ml` | The `.eh_frame`: one CIE, and one FDE per function from the frame events `Mir_emit.func` records (see "Unwind info"). |
+| `mir_cfi.ml` | The `.eh_frame` and cleanup tables, built from the frame events `Mir_emit.func` records (see "Unwind info"). |
 | `mir_dwarf.ml` | `-g`: `.debug_abbrev`, `.debug_info`, `.debug_line` and, when needed, `.debug_loclists` and `.debug_rnglists` (DWARF 5), from the line rows and variable locations `Mir_emit.func` records (see "Debug info"). |
 
 ## Running it
@@ -99,6 +99,15 @@ Inline assembly can use `.cfi_*` frame rules, including `.cfi_escape`.
 The assembler encodes the rules for the snippet, and the backend places
 them at the snippet's machine-code offset in the enclosing FDE. A
 snippet cannot start a new frame or change the CIE's augmentation.
+
+The native Fir extension `!cleanup PAD, RESUME` gives two zero-based block
+indices. An empty entry `asm_goto` declares the edge to `PAD` for CFG
+analysis. The native backend writes a `zPLR` CIE with the libgcc C
+personality and an LSDA that directs unwinding to `PAD`. Code from
+`RESUME` onward has no landing pad, so `_Unwind_Resume` continues out of
+the function. The frontend keeps active cleanup addresses in volatile
+frame slots. The pad reads them in reverse declaration order and clears
+each slot before invoking its cleanup.
 
 ## Debug info
 

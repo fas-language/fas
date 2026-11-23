@@ -2052,6 +2052,9 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
       add o "; ModuleID = 'fas'\nsource_filename = \"fas\"\n";
       Option.iter (fun dl -> add o (Printf.sprintf "target datalayout = \"%s\"\n" dl)) data_layout;
       add o (Printf.sprintf "target triple = \"%s\"\n\n" m.triple);
+      Vec.iter
+        (fun f -> if Option.is_some f.unwind_cleanup then unsupported "@%s: native cleanup landing pad" f.name)
+        m.funcs;
       (* top-level asm, one LLVM line per text line *)
       List.iter
         (fun a ->

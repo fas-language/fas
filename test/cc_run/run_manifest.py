@@ -28,6 +28,14 @@ EXPECTED = Path(__file__).resolve().parent / "expected_failures.txt"
 FCC = Path(os.environ.get("FCC", str(ROOT / "_build/fcc")))
 CLANG = os.environ.get("CLANG", "clang-22")
 
+# The cached oracle was built without dg-options. These tests abort in both
+# compilers without -fexceptions, so require successful runs with it enabled.
+UNWIND_FLAGS = {
+    f"gcc/gcc/testsuite/gcc.dg/cleanup-{n}.c":
+        ("-fexceptions", "-fnon-call-exceptions") if 8 <= n <= 11 else ("-fexceptions",)
+    for n in (5, 8, 9, 10, 11, 12, 13)
+}
+
 
 def load_expected(path: Path) -> dict[str, str]:
     out = {}
@@ -63,7 +71,8 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
     try:
         out_bin = work / "prog"
         # Build command: pass -lm (many torture/dg tests use math functions)
-        cmd = [str(FCC), "-std=gnu23", *[str(p) for p in srcs], "-lm", "-o", str(out_bin)]
+        flags = UNWIND_FLAGS.get(rel, ())
+        cmd = [str(FCC), "-std=gnu23", *flags, *[str(p) for p in srcs], "-lm", "-o", str(out_bin)]
         env = {
             **os.environ,
             "FCC_FIR": os.environ.get("FCC_FIR", str(ROOT / "_build/default/tools/fas_fir/fas_fir.exe")),
@@ -118,12 +127,12 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
         oracle = entry.get("oracles", {}).get("clang", {}).get("run")
         ref_exit = None
         ref_stdout = None
-        if oracle and not live_clang and isinstance(oracle.get("stdout"), dict) and "text" in oracle["stdout"]:
+        if oracle and not live_clang and not flags and isinstance(oracle.get("stdout"), dict) and "text" in oracle["stdout"]:
             ref_exit = oracle["exit"]
             ref_stdout = oracle["stdout"]["text"].encode("utf-8")
         else:
             ref_bin = work / "ref"
-            c_cmd = [CLANG, "-std=gnu23", "-O0", "-w", *[str(p) for p in srcs], "-lm", "-o", str(ref_bin)]
+            c_cmd = [CLANG, "-std=gnu23", "-O0", "-w", *flags, *[str(p) for p in srcs], "-lm", "-o", str(ref_bin)]
             rcp = subprocess.run(c_cmd, cwd=str(srcs[0].parent),
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
             if rcp.returncode != 0:
@@ -132,6 +141,8 @@ def run_one(entry: dict, tmp_root: Path, live_clang: bool, timeout: float) -> tu
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
             ref_exit = rrp.returncode
             ref_stdout = rrp.stdout
+            if flags and ref_exit != 0:
+                return (rel, "clang-fail", f"reference unwind test exited {ref_exit}")
 
         got_exit = rp.returncode if rp.returncode >= 0 else 128 + (-rp.returncode)
         if ref_exit < 0:

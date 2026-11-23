@@ -1137,7 +1137,9 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
           let size, events, rows, vlocs =
             func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
           in
-          fdes := { Mir_cfi.start = offset; size; events; entry = false } :: !fdes;
+          let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
+          let cleanup = Option.map (fun (pad, resume) -> (block_offset pad, block_offset resume)) fn.unwind_cleanup in
+          fdes := { Mir_cfi.start = offset; size; events; entry = false; cleanup } :: !fdes;
           (* rows without a file name say nothing *)
           let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
           lines :=
@@ -1167,7 +1169,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
       A.ud2 a;
       func_syms := { Elf64.name = "_start"; section = Elf64.Text; offset; size = A.pos a - offset; func = true }
                    :: !func_syms;
-      fdes := { Mir_cfi.start = offset; size = A.pos a - offset; events = []; entry = true } :: !fdes
+      fdes := { Mir_cfi.start = offset; size = A.pos a - offset; events = []; entry = true; cleanup = None } :: !fdes
     end;
     let text, text_relocs = A.finish a in
     let rodata = { buf = Buffer.create 256; alignment = 16; relocs = []; syms = [] } in
@@ -1320,6 +1322,25 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     in
     let masm = module_asm ~first:(List.length extra_sections) m.module_asm in
     let extra_sections = extra_sections @ masm.msections in
+    let eh_frame, lsda = Mir_cfi.build (List.rev !fdes) in
+    let extra_sections, unwind_syms =
+      if Bytes.length lsda = 0 then (extra_sections, [])
+      else
+        let index = List.length extra_sections in
+        let sections =
+          [ { Native_object.name = ".gcc_except_table"; flags = 2; alignment = 4;
+              contents = Fas_linker.Elf_object.Data lsda; relocs = [] };
+            { Native_object.name = ".data.rel.ro.fas.unwind"; flags = 3; alignment = 8;
+              contents = Fas_linker.Elf_object.Data (Bytes.make 8 '\000');
+              relocs = [ A.Abs64 { offset = 0; symbol = Mir_cfi.personality; addend = 0 } ] } ]
+        in
+        let symbol name i size =
+          { Elf64.name; section = Elf64.Extra i; offset = 0; size; func = false }
+        in
+        ( extra_sections @ sections,
+          [ symbol Mir_cfi.lsda_symbol index (Bytes.length lsda);
+            symbol Mir_cfi.personality_slot (index + 1) 8 ] )
+    in
     (* local symbols for the blocks whose address is taken, in code or data *)
     let blk_syms = Hashtbl.create 8 in
     let note_block fn b =
@@ -1341,7 +1362,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
     let defined_syms =
       text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ debug_syms @ blk_syms
-      @ masm.msyms
+      @ masm.msyms @ unwind_syms
     in
     let alias_syms =
       List.map
@@ -1363,7 +1384,7 @@ let generate ?(debug = false) ?(tls_gd = false) ~startup ~pic ?(self_relocate = 
     in
     Ok
       (Native_object.emit
-         ~eh_frame:(Mir_cfi.build (List.rev !fdes))
+         ~eh_frame
          ~extra:extra_sections
          ~tls:(Hashtbl.mem env.tls_syms)
          ~ifunc:(Hashtbl.mem ifunc_names)

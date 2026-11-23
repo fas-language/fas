@@ -56,6 +56,7 @@ struct CleanupItem {
     ptr_v u32
     scope_depth u32
     fn_sym handle[Symbol]
+    active_slot u32
 }
 
 struct VlaScope {
@@ -139,6 +140,7 @@ struct GenCtx {
     ctor_counter u32
     had_error bool
     has_alloca bool
+    exceptions bool
     _pad1 u16
 
     // Per-function state
@@ -160,6 +162,7 @@ struct GenCtx {
     ba_patches Vec[BlockAddrPatch]
     loops Vec[LoopFrame]
     cleanups Vec[CleanupItem]
+    unwind_cleanups Vec[CleanupItem]
     vla_stack Vec[VlaScope]
 }
 
@@ -208,6 +211,7 @@ fn gen_free(ctx handle[GenCtx]) void {
     vec_free(&ctx.ba_patches)
     vec_free(&ctx.loops)
     vec_free(&ctx.cleanups)
+    vec_free(&ctx.unwind_cleanups)
     vec_free(&ctx.vla_stack)
     if gc == ctx { gc = null }
 }
@@ -228,6 +232,7 @@ fn gen_reset_func_state(ctx handle[GenCtx]) void {
     vec_clear(&ctx.ba_patches)
     vec_clear(&ctx.loops)
     vec_clear(&ctx.cleanups)
+    vec_clear(&ctx.unwind_cleanups)
     vec_clear(&ctx.vla_stack)
     ctx.in_func = false
     ctx.has_alloca = false

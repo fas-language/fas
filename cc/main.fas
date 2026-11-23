@@ -71,6 +71,7 @@ struct Options {
     is_static bool
     is_no_pie bool
     no_stdlib bool
+    exceptions bool
     force_lang u8 // 0 = auto, 1 = c
 }
 
@@ -139,6 +140,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-S") || bytes_eq_c(word, c"--emit-fir") { o.mode = MODE_EMIT_FIR }
         else if bytes_eq_c(word, c"-c") { o.mode = MODE_COMPILE_OBJ }
         else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
+        else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
+        else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
         else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true; o.mode = MODE_SYNTAX }
         else if bytes_eq_c(word, c"-x") {
             lang addr = try cli_arg(argc, &pos, arg, c"-x")
@@ -276,6 +279,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     if o.is_pic {
         try cli_definitions(p, bytes_c(c"__PIC__ 2\n__pic__ 2\n"), c"<built-in>")
     }
+    if o.exceptions { try cli_definitions(p, bytes_c(c"__EXCEPTIONS 1\n"), c"<built-in>") }
     for i usize in 0..o.macros.n {
         m Command = o.macros.p[Command, i]
         s Bytes = bytes_c(m.value)
@@ -528,6 +532,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     parser Parser = {}
     gctx GenCtx = {}
     gen_init(&gctx, &parser, fd)
+    gctx.exceptions = o.exceptions
     defer { gen_free(&gctx) }
     parser.on_function = &gen_on_function_cb
     parser.on_object = &gen_on_object_cb

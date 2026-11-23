@@ -8,14 +8,16 @@ trap 'rm -rf -- "$work"' EXIT
 
 for file in "$src"/*.c; do
     flags=()
+    runner=()
     case "${file##*/}" in
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
+        pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
     esac
     "${CLANG:-clang-22}" -std=gnu23 "$file" "${flags[@]}" -o "$work/clang"
-    "$work/clang" > "$work/clang.out"
+    "${runner[@]}" "$work/clang" > "$work/clang.out"
     "$FCC" "$file" "${flags[@]}" -o "$work/fcc"
-    "$work/fcc" > "$work/fcc.out"
+    "${runner[@]}" "$work/fcc" > "$work/fcc.out"
     cmp "$work/clang.out" "$work/fcc.out"
     echo "PASS: ${file##*/}"
 done

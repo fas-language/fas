@@ -62,6 +62,20 @@ fn gen_emit_blockaddr(target_blk u32) u32 {
 
 // ---------- Scope Cleanups & VLA Stack Restore ----------
 
+fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void {
+    // Clear it first: a cleanup that itself unwinds must not run again.
+    if item.active_slot != 0 {
+        gen_store_ty(null_v, item.active_slot, 8, true, false)
+    }
+    gen_note_extern_fn(item.fn_sym)
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  call (ptr) -> () @")
+    buf_append(b, gen_sym_fir_name(item.fn_sym))
+    buf_u8(b, 40)
+    gen_emit_val(b, object)
+    buf_str(b, c")\n")
+}
+
 fn gen_run_cleanups_to(target_depth usize) void fails {
     if gc.cleanups.n <= target_depth { return }
     i usize = gc.cleanups.n
@@ -69,15 +83,60 @@ fn gen_run_cleanups_to(target_depth usize) void fails {
         i -= 1
         c handle[CleanupItem] = vec_at(&gc.cleanups, i)
         if c.fn_sym != null {
-            gen_note_extern_fn(c.fn_sym)
-            b handle[Buf] = gen_cur_buf()
-            buf_str(b, c"  call (ptr) -> () @")
-            buf_append(b, gen_sym_fir_name(c.fn_sym))
-            buf_u8(b, 40)
-            gen_emit_val(b, c.ptr_v)
-            buf_str(b, c")\n")
+            nil u32 = if c.active_slot != 0 { gen_const_zero(ty_ptr(TY_VOID)) } else { 0 }
+            gen_call_cleanup(c, c.ptr_v, nil)
         }
     }
+}
+
+// An exceptional exit can arrive from any call or trapping instruction
+// in the body. Record active objects in fixed frame slots, which remain
+// addressable even if the interrupted code allocated a VLA or used alloca.
+fn gen_unwind_slot(item handle[CleanupItem]) u32 {
+    slot u32 = gen_alloca_entry(8, 8)
+    cur u32 = gc.cur_blk
+    gen_switch_block(0)
+    gen_store_ty(gen_const_zero(ty_ptr(TY_VOID)), slot, 8, true, false)
+    gen_switch_block(cur)
+    item.active_slot = slot
+    other handle[CleanupItem] = vec_add(&gc.unwind_cleanups)
+    other.active_slot = slot
+    other.fn_sym = item.fn_sym
+    return slot
+}
+
+fn gen_unwind_landing_pad() u32 {
+    pad u32 = gen_new_block()
+    gen_switch_block(pad)
+    // The SysV x86-64 unwind ABI supplies the exception object in rax.
+    exception u32 = gen_new_val()
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, exception)
+    buf_str(b, c" = asm volatile \"\" out(\"=a\" ptr)\n")
+    pt u32 = ty_ptr(TY_VOID)
+    nil u32 = gen_const_zero(pt)
+    i usize = gc.unwind_cleanups.n
+    while i > 0 {
+        i -= 1
+        item handle[CleanupItem] = vec_at(&gc.unwind_cleanups, i)
+        object u32 = gen_load_ty(pt, item.active_slot, 8, true, false)
+        active u32 = gen_icmp(c"ne", object, nil)
+        call_blk u32 = gen_new_block()
+        next_blk u32 = gen_new_block()
+        gen_term_br(active, call_blk, next_blk)
+        gen_switch_block(call_blk)
+        gen_call_cleanup(item, object, nil)
+        gen_term_jump(next_blk)
+        gen_switch_block(next_blk)
+    }
+    gen_note_extern_fn_raw(bytes_c(c"_Unwind_Resume"), ty_func(TY_VOID, &pt, 1, false))
+    resume handle[Buf] = gen_cur_buf()
+    buf_str(resume, c"  call (ptr) -> () @_Unwind_Resume(")
+    gen_emit_val(resume, exception)
+    buf_str(resume, c")\n")
+    gen_term_unreachable()
+    return pad
 }
 
 fn gen_restore_vlas_to(target_depth usize) void {
@@ -174,17 +233,20 @@ fn gen_local_decl(n handle[Ast]) void fails {
     _ bool = table_put(&gc.locals, &key, slot)
 
     // Register GNU cleanup attribute if present
+    active_slot u32 = 0
     if s.cleanup != null {
         ci handle[CleanupItem] = vec_add(&gc.cleanups)
         ci.ptr_v = slot
         ci.scope_depth = gc.scope_depth
         ci.fn_sym = handle_from_addr(s.cleanup)
+        if gc.exceptions { active_slot = gen_unwind_slot(ci) }
     }
 
     init handle[Ast] = handle_from_addr(s.value)
     if init != null && !gen_is_terminated() {
         try gen_auto_init(slot, s.ty, init, true)
     }
+    if active_slot != 0 && !gen_is_terminated() { gen_store_ty(slot, active_slot, 8, true, false) }
 }
 
 // ---------- Switch Statement Helpers ----------
@@ -1188,12 +1250,20 @@ fn gen_function(node handle[Ast]) void fails {
         }
     }
 
-    // Terminate entry block with jump to body_blk
+    pad u32 = if gc.unwind_cleanups.n > 0 { gen_unwind_landing_pad() } else { 0 }
+    // Declare the exceptional edge to the verifier and allocator. The
+    // empty asm falls through to the body. Only libgcc enters the pad.
     eb handle[GenBlock] = vec_at(&gc.blocks, zext[usize](entry_blk))
     eb.terminated = true
     gen_add_succ(eb, body_blk)
-    buf_str(&eb.term, c"  jump ")
+    buf_str(&eb.term, if pad == 0 { c"  jump " } else { c"  asm_goto volatile \"\" " })
     gen_emit_lbl(&eb.term, body_blk)
+    if pad != 0 {
+        gen_add_succ(eb, pad)
+        buf_str(&eb.term, c" [")
+        gen_emit_lbl(&eb.term, pad)
+        buf_u8(&eb.term, 93)
+    }
     buf_u8(&eb.term, 10)
 
     // Ensure every block that might be reachable has a terminator
@@ -1275,6 +1345,12 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
+    if pad != 0 {
+        buf_str(out_b, c" !cleanup ")
+        buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](pad)]))
+        buf_str(out_b, c", ")
+        buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](gc.cur_blk)]))
+    }
     buf_str(out_b, c" {\n")
 
     for ei usize in 0..emit_order.n {

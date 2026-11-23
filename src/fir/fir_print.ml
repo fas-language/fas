@@ -413,6 +413,7 @@ let func_header f =
     (if f.visibility = Default then "" else " " ^ visibility_name f.visibility)
     ((if f.fattrs = 0 then "" else " " ^ String.trim (attrs_text func_attr_names f.fattrs))
     ^ (match f.display with Some d -> " display " ^ quote d | None -> "")
+    ^ (match f.unwind_cleanup with Some (b, r) -> Printf.sprintf " !cleanup %d, %d" b r | None -> "")
     ^ if f.decl_loc <> 0 then Printf.sprintf " !loc %d" f.decl_loc else "")
 
 let print_func buf f =

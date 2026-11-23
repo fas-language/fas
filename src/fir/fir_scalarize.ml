@@ -700,6 +700,7 @@ let rebuild_func (f : func) : func =
   let g = new_func ~linkage:f.linkage ~defined:f.defined f.name (sig_of f.sig_) in
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;
+  g.unwind_cleanup <- f.unwind_cleanup;
   g.display <- f.display;
   g.decl_loc <- f.decl_loc;
   if not f.defined then g

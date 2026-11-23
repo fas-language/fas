@@ -60,11 +60,22 @@ let verify_func funcs (f : func) =
   if f.defined && promises <> 0 then
     [ Printf.sprintf "@%s: memory(...) and willreturn are promises about a declared function" f.name ]
   else if nmem > 1 then [ Printf.sprintf "@%s: more than one memory(...)" f.name ]
+  else if not f.defined && Option.is_some f.unwind_cleanup then
+    [ Printf.sprintf "@%s: !cleanup requires a function body" f.name ]
   else if not f.defined then []
   else if num_blocks f = 0 then [ Printf.sprintf "@%s: no blocks" f.name ]
   else begin
     let nv = num_values f in
     let nb = num_blocks f in
+    Option.iter
+      (fun (b, resume) ->
+        if b <= entry || b >= nb then err "invalid !cleanup block index %d" b
+        else if resume <= b || resume >= nb then err "invalid !cleanup resume block index %d" resume
+        else
+          match (block f entry).term with
+          | Asm_goto { tmpl = ""; labels; _ } when Array.mem b labels -> ()
+          | _ -> err "!cleanup block ^%d is not declared on the entry asm_goto" b)
+      f.unwind_cleanup;
     (* where each value is defined: block and position (-1 = parameter) *)
     let def_block = Array.make nv (-1) and def_pos = Array.make nv (-1) in
     let placed = Array.make (Vec.length f.insts) false in

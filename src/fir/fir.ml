@@ -477,6 +477,8 @@ type func = {
   mutable linkage : linkage;
   mutable visibility : visibility;
   mutable fattrs : int;
+  mutable unwind_cleanup : (block * block) option;
+      (** native cleanup landing pad and the start of its non-catching resume code *)
   mutable defined : bool;  (** false: declaration only *)
   defs : def Vec.t;
   tys : ty Vec.t;
@@ -585,7 +587,7 @@ let create_module () =
   ignore (Vec.push alias_tags ("", 0));
   {
     funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false };
-                         linkage = Local; visibility = Default; fattrs = 0; defined = false;
+                         linkage = Local; visibility = Default; fattrs = 0; unwind_cleanup = None; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
                          names = Hashtbl.create 1; display = None; decl_loc = 0; vars = [] };
@@ -612,6 +614,7 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     linkage;
     visibility = Default;
     fattrs = 0;
+    unwind_cleanup = None;
     defined;
     defs = Vec.create ~capacity:64 Unset;
     tys = Vec.create ~capacity:64 i1;
