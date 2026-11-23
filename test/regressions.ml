@@ -17003,6 +17003,21 @@ let () =
     "fn f() void {\nuse \"asm\" <<END\n.text\nEND\n}\n";
   parse_message "assembly-unit-nested-path" "assembly unit must be at top level"
     "fn f() void { use \"asm\" \"file.s\" }\n";
+  let use_late = "`use` lines go at the top of the file, before any other item; move this one up" in
+  parse_message "use-after-function" use_late
+    "fn f() i32 { return 0 }\nuse \"other.fas\"\n";
+  parse_message "use-after-const" use_late "const N u32 = 1\nuse \"other.fas\"\n";
+  parse_message "use-after-const-assert" use_late
+    "const assert(true)\nuse \"C\" <stdio.h> as c\n";
+  parse_message "use-os-after-struct" use_late "struct S { x u32 }\nuse linux \"other.fas\"\n";
+  parse_message "use-pkg-after-function" use_late
+    "fn f() void {}\nuse pkg \"MODULES\"\n";
+  parse_message "use-asm-file-after-extern" use_late
+    "extern \"C\" { fn g() void }\nuse \"asm\" \"file.s\"\n";
+  semantic_accept "use-head-with-comments-and-inline-blocks"
+    "// head\nuse \"asm\" <<A\n.text\nA\n/* note */\nuse \"C\" <stdint.h> as c\n\n\
+     fn f() i32 { return 0 }\nuse \"asm\" <<B\n.text\nB\n\
+     use \"C\" as d <<C\nstatic int g(void) { return 1; }\nC\nfn main() i32 { return f() }\n";
   let assembly_root = Filename.temp_file "fas-assembly-pins-" ".fas" in
   let assembly_dependency = assembly_root ^ ".dependency.fas" in
   let assembly_cpp = assembly_root ^ ".S" in

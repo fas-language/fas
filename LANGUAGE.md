@@ -1282,6 +1282,8 @@ fn main() i32 {
 23
 ```
 
+Every `use` that names a file (a Fas file, a C header, an assembly file, or `use pkg`) goes at the top of the file. Only comments, blank lines and inline `use "asm" <<TAG` and `use "C" as c <<TAG` blocks may come before or between them; a `use` after any other item is an error. The inline blocks hold code rather than naming a file, so they may also sit next to the declarations they belong with.
+
 `use "path.fas"` is relative to the file that contains it. The whole `use` closure shares one namespace: there are no modules, qualifiers or visibility. Give the compiler only the root file.
 
 `use linux "path.fas"` makes a file part of the program only when building for that OS (`--os`, default and only value today: `linux`). It is the hook for OS-specific code once Fas has more targets: the files for other OSes are never read, so each OS file can define the same functions its own way.

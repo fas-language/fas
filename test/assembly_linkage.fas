@@ -1,3 +1,5 @@
+use "asm" "assembly_unit.S"
+
 extern "C" {
 fn add3(a i32, b i32, c i32) i32
 fn asm_echo_bool(x bool) bool
@@ -175,7 +177,6 @@ extern "C" {
     }
 }
 
-use "asm" "assembly_unit.S"
 extern "C" { fn table_first() i32
 fn table_second() i32 }
 const assembly_callback addr = &table_first
