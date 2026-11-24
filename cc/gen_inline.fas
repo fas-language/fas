@@ -19,6 +19,55 @@ fn gen_inline_def(s handle[Symbol]) handle[Ast] {
     return handle_from_addr(body)
 }
 
+// An internal inline configuration stub can be replaced by its constant
+// after evaluating the call's arguments. Keep its body for address-taking.
+fn gen_note_inline_constant(s handle[Symbol], body handle[Ast], nid u32) void {
+    if s.linkage != 1 || (s.flags & 1) == 0 || gen_has_attr(s.attrs, c"noinline") { return }
+    if body.kind != ND_BLOCK { return }
+    ty u32 = ty_node(ty_unqual(s.ty)).elem
+    stmt handle[Ast] = body.a
+    expr handle[Ast] = body
+    if stmt != null {
+        // A constant guard may return before the ordinary fallback.
+        while stmt.kind == ND_STMT && stmt.op != 0 &&
+              bytes_eq_c(cc_name(gc.p.names, stmt.op), c"if") && stmt.a != null &&
+              ty_is_integer(stmt.a.ty) && (stmt.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+            if se_truth(stmt.a) { stmt = stmt.b; break }
+            if stmt.c != null { return }
+            stmt = stmt.next
+            if stmt == null { return }
+        }
+        if stmt == null || stmt.kind != ND_STMT || stmt.op == 0 ||
+            !bytes_eq_c(cc_name(gc.p.names, stmt.op), c"return") { return }
+        if stmt.a != null { expr = stmt.a }
+    }
+    if !ty_is_void(ty) {
+        if expr == body { return }
+        if ty_is_ptr(ty) {
+            if se_variably_modified(expr.ty) { return }
+            if (expr.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE &&
+                !(expr.kind == ND_CAST && expr.b == null && expr.a != null &&
+                  (expr.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE && se_null(expr.a)) { return }
+            if !se_null(expr) && !(expr.kind == ND_CAST && expr.a != null && se_null(expr.a)) { return }
+        } else if !ty_is_integer(ty) || !ty_is_integer(expr.ty) ||
+            (expr.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return }
+    } else if expr != body { return }
+    pm handle[Param] = handle_from_addr(s.params)
+    while pm != null {
+        if se_variably_modified(pm.ty) || se_variably_modified(pm.declared_ty) { return }
+        pm = pm.next
+    }
+    key U64Key = {zext[u64](nid)}
+    _ bool = table_put(&gc.inline_constants, &key, handle_addr(expr))
+}
+
+fn gen_inline_constant(s handle[Symbol]) handle[Ast] {
+    if gc.inline_constants.n == 0 { return null }
+    key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
+    expr addr = table_get(&gc.inline_constants, &key) catch null
+    return handle_from_addr(expr)
+}
+
 fn gen_immediate_constraint(operand handle[Ast]) bool {
     text Buf = {}
     defer { buf_free(&text) }

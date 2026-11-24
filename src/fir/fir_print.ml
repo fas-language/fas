@@ -412,6 +412,7 @@ let func_header f =
     (symbol f.name) (sig_text f.sig_) (linkage_name f.linkage)
     (if f.visibility = Default then "" else " " ^ visibility_name f.visibility)
     ((if f.fattrs = 0 then "" else " " ^ String.trim (attrs_text func_attr_names f.fattrs))
+    ^ (match f.code_section with Some s -> " section " ^ quote s | None -> "")
     ^ (match f.display with Some d -> " display " ^ quote d | None -> "")
     ^ (match f.unwind_cleanup with Some (b, r) -> Printf.sprintf " !cleanup %d, %d" b r | None -> "")
     ^ if f.decl_loc <> 0 then Printf.sprintf " !loc %d" f.decl_loc else "")
@@ -533,6 +534,8 @@ let module_to_string m =
   let buf = Buffer.create 4096 in
   Buffer.add_string buf (Printf.sprintf "triple %s\n" (quote m.triple));
   if not m.strict_aliasing then Buffer.add_string buf "strict_aliasing false\n";
+  Hashtbl.to_seq_keys m.discardable |> List.of_seq |> List.sort String.compare
+  |> List.iter (fun name -> Printf.bprintf buf "discardable %s\n" (symbol name));
   List.iter (fun a -> Buffer.add_string buf (Printf.sprintf "module_asm %s\n" (quote a))) m.module_asm;
   Vec.iteri
     (fun i (file, line, col) ->

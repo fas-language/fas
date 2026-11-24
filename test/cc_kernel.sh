@@ -34,6 +34,12 @@ if [[ ! -e $build/.config ]]; then
         -e BINFMT_ELF -e BLK_DEV_INITRD -e ACPI -e PCI
     kmake olddefconfig
 fi
+# fcc can emit local inline helpers out of line, so let modpost report
+# their calls into init sections without aborting the boot experiment.
+if [[ ${1:-fcc} == fcc ]] && ! grep -qx 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' "$build/.config"; then
+    "$src/scripts/config" --file "$build/.config" -e SECTION_MISMATCH_WARN_ONLY
+    kmake olddefconfig
+fi
 jobs=${KERNEL_JOBS:-3}
 case "$jobs" in
     [1-6]) ;;

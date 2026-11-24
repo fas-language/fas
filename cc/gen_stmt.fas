@@ -182,8 +182,12 @@ fn gen_local_decl(n handle[Ast]) void fails {
             sz u64 = ty_size(s.ty)
             al u64 = ty_align(s.ty)
             init handle[Ast] = handle_from_addr(s.value)
+            sec_buf Buf = {}
+            defer { buf_free(&sec_buf) }
+            _ bool = gen_attr_str_arg(s.attrs, c"section", &sec_buf)
+            gen_emit_discardable(gen_global_buf(), s, nid)
             gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, FIR_LOCAL, FIR_VIS_DEFAULT,
-                                        bytes_empty(), false, s.thread_local, init, s.ty)
+                                        buf_bytes(&sec_buf), false, s.thread_local, init, s.ty)
         }
         gen_debug_local(s, 0, 0, false, nid)
         return
@@ -1314,6 +1318,7 @@ fn gen_function(node handle[Ast]) void fails {
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
+    gen_note_inline_constant(s, node.a, nid)
     if s.linkage == 1 && gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
         key U64Key = {zext[u64](nid)}
         _ bool = table_put(&gc.inline_defs, &key, handle_addr(node))
@@ -1521,6 +1526,7 @@ fn gen_function(node handle[Ast]) void fails {
     } else {
         &gc.out.buf
     }
+    if gen_sym_linkage(s) == FIR_LOCAL { gen_emit_discardable(out_b, s, nid) }
     buf_str(out_b, c"func ")
     gen_emit_sym_name(out_b, gen_sym_bytes(nid))
     buf_u8(out_b, 32)
@@ -1533,6 +1539,12 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
+    sec_buf Buf = {}
+    if gen_attr_str_arg(s.attrs, c"section", &sec_buf) && sec_buf.n != 0 {
+        buf_str(out_b, c" section ")
+        fir_emit_quoted_bytes(out_b, sec_buf.p, sec_buf.n)
+    }
+    buf_free(&sec_buf)
     if (node.flags & NF_FENV) != 0 { buf_str(out_b, c" fenv") }
     if pad != 0 {
         buf_str(out_b, c" !cleanup ")
@@ -1566,6 +1578,11 @@ fn gen_function(node handle[Ast]) void fails {
             buf_str(out_b, c":\n")
         } else {
             gen_emit_lbl(out_b, bid)
+            if blk.bool_param != 0 {
+                buf_u8(out_b, 40)
+                gen_emit_val(out_b, blk.bool_param)
+                buf_str(out_b, c": i1)")
+            }
             buf_str(out_b, c":\n")
         }
         gen_debug_write_code(out_b, blk)

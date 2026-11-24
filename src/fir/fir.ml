@@ -481,6 +481,7 @@ type func = {
   mutable linkage : linkage;
   mutable visibility : visibility;
   mutable fattrs : int;
+  mutable code_section : string option;
   mutable unwind_cleanup : (block * block) option;
       (** native cleanup landing pad and the start of its non-catching resume code *)
   mutable defined : bool;  (** false: declaration only *)
@@ -588,6 +589,7 @@ type modul = {
   loc_scopes : (int, int) Hashtbl.t;  (** location id -> its scope, when not 0 *)
   mutable strict_aliasing : bool;
   mutable triple : string;
+  discardable : (string, unit) Hashtbl.t; (** C-local definitions that may be omitted when unreferenced *)
   mutable module_asm : string list;  (** top-level asm text (GNU [asm("...")] outside functions), in order *)
 }
 
@@ -601,7 +603,7 @@ let create_module () =
   ignore (Vec.push alias_tags ("", 0));
   {
     funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false };
-                         linkage = Local; visibility = Default; fattrs = 0; unwind_cleanup = None; defined = false;
+                         linkage = Local; visibility = Default; fattrs = 0; code_section = None; unwind_cleanup = None; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
                          names = Hashtbl.create 1; display = None; decl_loc = 0; vars = [] };
@@ -619,6 +621,7 @@ let create_module () =
     loc_scopes = Hashtbl.create 1;
     strict_aliasing = true;
     triple = "x86_64-unknown-linux-gnu";
+    discardable = Hashtbl.create 16;
     module_asm = [];
   }
 
@@ -629,6 +632,7 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     linkage;
     visibility = Default;
     fattrs = 0;
+    code_section = None;
     unwind_cleanup = None;
     defined;
     defs = Vec.create ~capacity:64 Unset;

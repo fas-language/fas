@@ -34,6 +34,7 @@ fn gen_u64_eq(a handle[U64Key], b handle[U64Key]) bool {
 
 struct GenBlock {
     id u32
+    bool_param u32
     code Buf
     term Buf
     debug_marks Vec[GenDebugMark]
@@ -156,6 +157,7 @@ struct GenCtx {
     gnu_inline_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq] // sym_name_id -> 1-based idx
     cur_gnu_inline_idx u32
     inline_defs Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    inline_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     inline_frame handle[GenInlineFrame]
 
     // String literal deduplication pool (keyed by Intern id of align_byte + data)
@@ -232,6 +234,7 @@ fn gen_free(ctx handle[GenCtx]) void {
     vec_free(&ctx.gnu_inlines)
     table_free(&ctx.gnu_inline_map)
     table_free(&ctx.inline_defs)
+    table_free(&ctx.inline_constants)
     intern_free(&ctx.str_pool_keys)
     table_free(&ctx.str_pool_nids)
     gen_reset_func_state(ctx)
@@ -1288,18 +1291,31 @@ fn gen_select(tid u32, cond u32, t_v u32, f_v u32) u32 {
 
 // ---------- Terminators ----------
 
-fn gen_term_jump(target_blk u32) void {
+fn gen_emit_target(b handle[Buf], target_blk u32, arg u32) void {
+    gen_emit_lbl(b, target_blk)
+    if arg != 0 {
+        buf_u8(b, 40)
+        gen_emit_val(b, arg)
+        buf_u8(b, 41)
+    }
+}
+
+fn gen_term_jump_arg(target_blk u32, arg u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
     blk.debug_term_loc = gc.debug.loc
     gen_add_succ(blk, target_blk)
     buf_str(&blk.term, c"  jump ")
-    gen_emit_lbl(&blk.term, target_blk)
+    gen_emit_target(&blk.term, target_blk, arg)
     buf_u8(&blk.term, 10)
 }
 
-fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
+fn gen_term_jump(target_blk u32) void {
+    gen_term_jump_arg(target_blk, 0)
+}
+
+fn gen_term_br_args(cond_v u32, t_blk u32, t_arg u32, f_blk u32, f_arg u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
@@ -1309,10 +1325,14 @@ fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
     buf_str(&blk.term, c"  br ")
     gen_emit_val(&blk.term, cond_v)
     buf_str(&blk.term, c", ")
-    gen_emit_lbl(&blk.term, t_blk)
+    gen_emit_target(&blk.term, t_blk, t_arg)
     buf_str(&blk.term, c", ")
-    gen_emit_lbl(&blk.term, f_blk)
+    gen_emit_target(&blk.term, f_blk, f_arg)
     buf_u8(&blk.term, 10)
+}
+
+fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
+    gen_term_br_args(cond_v, t_blk, 0, f_blk, 0)
 }
 
 // x86-64 Linux stores the process canary in the TCB at %fs:0x28.
@@ -1373,6 +1393,15 @@ fn gen_emit_trap() void {
 }
 
 // ---------- Deferred Globals & Aliases ----------
+
+// C-local definitions have no references from other TUs. Explicitly
+// retained symbols must still be emitted when this TU never calls them.
+fn gen_emit_discardable(b handle[Buf], s handle[Symbol], nid u32) void {
+    if gen_has_attr(s.attrs, c"used") || gen_has_attr(s.attrs, c"retain") { return }
+    buf_str(b, c"discardable ")
+    gen_emit_sym_name(b, gen_sym_bytes(nid))
+    buf_u8(b, 10)
+}
 
 fn gen_global_buf() handle[Buf] {
     if gc.in_func { return &gc.deferred }

@@ -1137,6 +1137,7 @@ fn gen_global_object(s handle[Symbol]) void fails {
     // wait: in Fir, readonly globals with relocs may be placed in .rodata; keep readonly=false if init may have relocs
     // when it's not a pure integer/string. Actually Fir's native backend puts readonly with relocs in .data.rel.ro!
     init handle[Ast] = handle_from_addr(s.value)
+    if gen_sym_linkage(s) == FIR_LOCAL { gen_emit_discardable(gen_global_buf(), s, nid) }
     gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, gen_sym_linkage(s), gen_sym_visibility(s),
                                 buf_bytes(&sec_buf), ro && init != null && !ty_is_ptr(s.ty), s.thread_local, init, s.ty)
     gen_debug_global(s, nid)

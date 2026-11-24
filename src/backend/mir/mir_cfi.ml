@@ -24,8 +24,8 @@
    One FDE per function references a CIE for ordinary ("zR") or cleanup
    ("zPLR") frames, with PC-relative sdata4 pointers.
    pc_begin is a 32-bit PC-relative relocation against a local symbol at
-   the start of .text (not the function's own symbol: a weak function may
-   be overridden, and its FDE must still describe this copy). *)
+   the start of the code section. A weak function may be overridden, and
+   its FDE must still describe this copy. *)
 
 module A = X64
 
@@ -53,6 +53,7 @@ type event =
   | Inline of string * int (* assembler CFI program, advanced to this offset *)
 
 type fde = {
+  code_base : string;
   start : int;
   size : int;
   events : (int * event) list;  (* offsets from start, in order *)
@@ -161,7 +162,7 @@ let build (fdes : fde list) =
       u32 b 0 (* length, patched *);
       let cie = if Option.is_some f.cleanup then cleanup_cie else plain_cie in
       u32 b (Buffer.length b - cie) (* CIE pointer: back from this field to the CIE *);
-      pcrel_to text_symbol f.start (* pc_begin *);
+      pcrel_to f.code_base f.start (* pc_begin *);
       u32 b f.size (* pc_range *);
       (match f.cleanup with
       | None -> uleb b 0

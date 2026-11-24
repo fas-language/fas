@@ -90,6 +90,7 @@ A module is, in order:
 ```
 triple "x86_64-unknown-linux-gnu"          required, first
 strict_aliasing false                      optional (default: true)
+discardable @SYMBOL                       optional permission to omit an unreferenced local definition
 module_asm "TEXT"                          optional top-level asm (GNU asm("...") outside functions), any number
 loc 1 "file.c" 12 5 [!scope S]             optional location table: id, file, line, column, lexical scope
 scope 1 parent 0                           optional lexical scopes (debug info): id, enclosing scope (0 = the function)
@@ -100,6 +101,11 @@ alias ...                                  symbol aliases
 ifunc ...                                  GNU indirect functions (STT_GNU_IFUNC)
 func ... / declare ...                     functions
 ```
+
+`discardable` allows native C lowering to omit a local function or global
+when no live definition refers to it. It never changes a public definition's
+linkage. Front ends omit this marker for definitions with explicit retention
+attributes. Native lowering accounts for names present in assembly templates.
 
 `module_asm` entries are assembled together, in order, as one GNU assembler source (AT&T syntax, starting in `.text`). The text may define functions and data in any section and refer to any symbol of the module; Fir reaches what it defines through `declare` and `extern` globals. A symbol only asm text refers to must not be `local` (LLVM deletes it). Section groups (COMDAT) are rejected.
 
@@ -180,7 +186,7 @@ ifunc @magic_hidden global hidden = @resolver
 ### Functions
 
 ```
-func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src name"] {
+func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [section "name"] [display "src name"] {
   var "x" T [scope S] [arg K] [!loc L] [at %slot]      optional source variables (debug info), before the blocks
 ^entry(%a: T, ...):
   ...instructions...
@@ -203,6 +209,7 @@ PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (decl
 - **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block.
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
 - **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
+- **`section "name"`** places the definition in the named executable section. The default ELF section is `.text`.
 - **Promises on a declaration** let a call to a function defined elsewhere be less than a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. At most one `memory(...)`. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). They are refused on a `func`, whose body says what it does. A backend may ignore them (the native backend does today); the LLVM path passes them on as `memory(none)`, `memory(read)`, `memory(argmem: readwrite)` and `willreturn`.
 - **`blockaddr` and `blockdiff` pin blocks.** A function whose blocks appear in either keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations. A `blockdiff` data piece stores the signed byte difference, truncated to 1, 2, 4 or 8 bytes, with no load-time relocation.
 

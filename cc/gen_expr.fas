@@ -481,41 +481,11 @@ fn gen_complex_binop(op Bytes, tid u32, lhs_p u32, rhs_p u32) u32 {
             fn_nm Bytes = if etk == TYK_FLOAT { bytes_c(c"__divsc3") }
                           else if etk == TYK_LDOUBLE { bytes_c(c"__divxc3") }
                           else { bytes_c(c"__divdc3") }
-            ptids Vec[u32] = {}
-            vec_push(&ptids, et); vec_push(&ptids, et); vec_push(&ptids, et); vec_push(&ptids, et)
-            ftid u32 = ty_func(tid, ptids.p, 4, false)
-            vec_free(&ptids)
-            gen_note_extern_fn_raw(fn_nm, ftid)
-            buf handle[Buf] = gen_cur_buf()
-            if etk == TYK_FLOAT {
-                rv u32 = gen_new_val()
-                buf_str(buf, c"  ")
-                gen_emit_val(buf, rv)
-                buf_str(buf, c" = call (f32, f32, f32, f32) -> (<2 x f32>) @__divsc3(")
-                gen_emit_val(buf, a); buf_str(buf, c", ")
-                gen_emit_val(buf, b); buf_str(buf, c", ")
-                gen_emit_val(buf, c); buf_str(buf, c", ")
-                gen_emit_val(buf, d); buf_str(buf, c")\n")
-                gen_store_ty(rv, dst, 4, false, false)
-                return dst
-            } else {
-                re_v u32 = gen_new_val()
-                im_v u32 = gen_new_val()
-                buf_str(buf, c"  ")
-                gen_emit_val(buf, re_v); buf_str(buf, c", "); gen_emit_val(buf, im_v)
-                if etk == TYK_LDOUBLE {
-                    buf_str(buf, c" = call (f80, f80, f80, f80) -> (f80, f80) @__divxc3(")
-                } else {
-                    buf_str(buf, c" = call (f64, f64, f64, f64) -> (f64, f64) @__divdc3(")
-                }
-                gen_emit_val(buf, a); buf_str(buf, c", ")
-                gen_emit_val(buf, b); buf_str(buf, c", ")
-                gen_emit_val(buf, c); buf_str(buf, c", ")
-                gen_emit_val(buf, d); buf_str(buf, c")\n")
-                gen_store_ty(re_v, dst, eal, false, false)
-                gen_store_ty(im_v, gen_ptradd_const(dst, bitcast[i64](esz)), eal, false, false)
-                return dst
-            }
+            // Use the C complex result type so the native ABI can select
+            // SSE registers or, for long double, the x87 register pair.
+            ptids arr[4, u32] = {et, et, et, et}
+            values arr[4, u32] = {a, b, c, d}
+            return gen_emit_helper_call(fn_nm, tid, &ptids, &values, 4)
         }
         mul_op addr = if is_flt { c"fmul" } else { c"mul" }
         add_op addr = if is_flt { c"fadd" } else { c"add" }
@@ -1062,21 +1032,20 @@ fn gen_binary(n handle[Ast]) u32 fails {
     // Short-circuit && and ||
     if bytes_eq_c(op, c"&&") || bytes_eq_c(op, c"||") {
         is_and bool = bytes_eq_c(op, c"&&")
-        res_slot u32 = gen_alloca_entry(1, 1)
         lv u32 = try gen_rvalue(n.a)
+        if gen_is_terminated() { return gen_const_zero(n.ty) }
         lb u32 = gen_to_bool(lv, n.a.ty)
-        gen_store_ty(lb, res_slot, 1, false, false)
         rhs_blk u32 = gen_new_block()
         end_blk u32 = gen_new_block()
-        if is_and { gen_term_br(lb, rhs_blk, end_blk) }
-        else { gen_term_br(lb, end_blk, rhs_blk) }
+        res_b u32 = gen_new_val()
+        vec_at(&gc.blocks, zext[usize](end_blk)).bool_param = res_b
+        short_value u32 = gen_const_i1(!is_and)
+        if is_and { gen_term_br_args(lb, rhs_blk, 0, end_blk, short_value) }
+        else { gen_term_br_args(lb, end_blk, short_value, rhs_blk, 0) }
         gen_switch_block(rhs_blk)
         rv u32 = try gen_rvalue(n.b)
-        rb u32 = gen_to_bool(rv, n.b.ty)
-        gen_store_ty(rb, res_slot, 1, false, false)
-        gen_term_jump(end_blk)
+        if !gen_is_terminated() { gen_term_jump_arg(end_blk, gen_to_bool(rv, n.b.ty)) }
         gen_switch_block(end_blk)
-        res_b u32 = gen_load_raw(c"i1", res_slot, 1, false)
         return gen_convert(res_b, TY_BOOL, n.ty)
     }
 
@@ -1391,6 +1360,15 @@ fn gen_call(n handle[Ast]) u32 fails {
         vec_push(&arg_tids, at)
         arg = arg.next
         ai += 1
+    }
+
+    if is_direct {
+        result handle[Ast] = gen_inline_constant(direct_sym)
+        if result != null {
+            if ty_is_void(ret_ty) { return gen_const_i32(0) }
+            if ty_is_ptr(ret_ty) { return gen_const_zero(ret_ty) }
+            return gen_convert(try gen_rvalue(result), result.ty, ret_ty)
+        }
     }
 
     // If K&R / unprototyped call with more args than fixed params and !is_var, mark variadic or use arg_tids
@@ -2041,13 +2019,13 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         }
         return gen_const_zero(n.ty)
     }
-    next_ty u32 = se_nextafter_type(bname)
-    if next_ty != TY_INVALID {
-        types arr[2, u32] = {next_ty, next_ty}
-        first u32 = gen_convert(try gen_rvalue(a0), a0.ty, next_ty)
-        second u32 = gen_convert(try gen_rvalue(a1), a1.ty, next_ty)
+    binary_ty u32 = se_binary_libm_type(bname)
+    if binary_ty != TY_INVALID {
+        types arr[2, u32] = {binary_ty, binary_ty}
+        first u32 = gen_convert(try gen_rvalue(a0), a0.ty, binary_ty)
+        second u32 = gen_convert(try gen_rvalue(a1), a1.ty, binary_ty)
         args arr[2, u32] = {first, second}
-        return gen_emit_helper_call(bytes_from(bname, 10), next_ty, &types, &args, 2)
+        return gen_emit_helper_call(bytes_from(bname, 10), binary_ty, &types, &args, 2)
     }
     if bytes_eq_c(bname, c"__builtin_fma") || bytes_eq_c(bname, c"__builtin_fmaf") || bytes_eq_c(bname, c"__builtin_fmal") {
         ft u32 = if bytes_eq_c(bname, c"__builtin_fmaf") { TY_FLOAT }

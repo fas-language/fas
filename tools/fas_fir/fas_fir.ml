@@ -141,7 +141,7 @@ let hosted_link ~debug ~pie ~output ~extra ~iter_funcs ~has_asm m =
 
 let main () =
   let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and no_pic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
-  let red_zone = ref true and kernel_model = ref false in
+  let red_zone = ref true and kernel_model = ref false and fold_branches = ref false in
   let set_mode m flag =
     match !mode with
     | Some (_, f) when f <> flag -> usage_error "%s and %s do not go together" f flag
@@ -155,6 +155,7 @@ let main () =
     | "--emit-llvm" :: rest -> set_mode Emit_llvm "--emit-llvm"; args rest
     | "--llvm" :: rest -> llvm := true; args rest
     | "--mir" :: rest -> args rest
+    | "--fold-branches" :: rest -> fold_branches := true; args rest
     | "--hosted" :: rest -> hosted := true; args rest
     | "--pie" :: rest -> pie := Some true; args rest
     | "--no-pie" :: rest -> pie := Some false; args rest
@@ -212,6 +213,8 @@ let main () =
        all wide helpers before native runtime helpers, keeping symbol
        order and section contents identical to the in-memory path. *)
     (try
+      if !fold_branches then Fir_stream.fold stream;
+      if !fold_branches && !kernel_model then Fir_stream.fold_kernel_calls stream;
       Fir_stream.normalize stream;
       Fir_stream.wide stream
     with Fir_scalarize.Unsupported e | Fir_wide.Unsupported e -> unsupported e);

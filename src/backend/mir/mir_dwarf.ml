@@ -26,10 +26,11 @@
    its first marker; that marker's own row carries prologue_end, so a
    breakpoint on the function stops after the frame is built.
 
-   Addresses are R_X86_64_64 relocations against [text_symbol] (the start of
-   .text) plus the offset. Section offsets use R_X86_64_32 relocations
-   against local symbols at the start of the referenced sections so the
-   linker can concatenate debug sections from several objects. *)
+   Addresses are R_X86_64_64 relocations against a local symbol at the
+   start of the function's code section plus the offset. Section offsets
+   use R_X86_64_32 relocations against local symbols at the start of the
+   referenced sections so the linker can concatenate debug sections from
+   several objects. *)
 
 module A = X64
 
@@ -38,9 +39,10 @@ type func_lines = {
   display : string option;  (** the source-level name, when it differs *)
   external_ : bool;
   decl_loc : int;
-  start : int;  (** offset in .text *)
+  code_base : string;
+  start : int;  (** offset in the code section *)
   size : int;
-  rows : (int * int) list;  (** (offset in .text, location id), in code order *)
+  rows : (int * int) list;  (** (code section offset, location id), in code order *)
   vars : Fir.dvar list;  (** the function's source variables *)
   vlocs : (int * vloc) list;  (** index in [vars] -> where it lives; absent: optimized out *)
 }
@@ -249,13 +251,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
       u32 b 0
     in
     let str_offset = string_offset (Hashtbl.create 32) strings str_symbol info info_relocs in
-    let addr b relocs offset =
-      relocs := A.Abs64 { offset = Buffer.length b; symbol = text_symbol; addend = offset } :: !relocs;
+    let addr b relocs symbol offset =
+      relocs := A.Abs64 { offset = Buffer.length b; symbol; addend = offset } :: !relocs;
       u64 b 0
     in
     (* a DIE: its abbreviation, then each attribute's value *)
     let die tag children (attrs : (int * int * (unit -> unit)) list) =
-      uleb info (abbrev tag children (List.map (fun (a, f, _) -> (a, f)) attrs));
+      (* The pseudo attribute (0, 0) writes a location or range list. *)
+      uleb info (abbrev tag children (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) attrs));
       List.iter (fun (_, _, w) -> w ()) attrs
     in
     let str a s = (a, dw_form_strp, fun () -> str_offset s) in
@@ -289,6 +292,26 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           info_relocs := A.Abs32 { offset = Buffer.length info; symbol = sym; addend = Buffer.length b } :: !info_relocs;
           u32 info 0 )
     in
+    let code_range symbol start size =
+      [ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs symbol start);
+        (dw_at_high_pc, dw_form_data8, fun () -> u64 info size) ]
+    in
+    let code_ranges rs =
+      [ sec_offset dw_at_ranges rnglists_symbol rnglists used_rnglists;
+        (0, 0, fun () ->
+          List.iter
+            (fun (symbol, start, size) ->
+              u8 rnglists 0x07 (* DW_RLE_start_length *);
+              addr rnglists rng_relocs symbol start;
+              uleb rnglists size)
+            rs;
+          u8 rnglists 0 (* DW_RLE_end_of_list *)) ]
+    in
+    let cu_range =
+      if List.exists (fun f -> f.code_base <> text_symbol) funcs then
+        code_ranges (List.map (fun f -> (f.code_base, f.start, f.size)) funcs)
+      else code_range text_symbol 0 text_size
+    in
     u32 info 0 (* unit_length, patched *);
     u16 info 5;
     u8 info 1 (* DW_UT_compile *);
@@ -296,16 +319,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     info_relocs := A.Abs32 { offset = Buffer.length info; symbol = abbrev_symbol; addend = 0 } :: !info_relocs;
     u32 info 0;
     die dw_tag_compile_unit true
-      [ str dw_at_producer producer;
+      ([ str dw_at_producer producer;
         (dw_at_language, dw_form_data2, fun () -> u16 info dw_lang_c11);
         str dw_at_name (Filename.basename primary_path);
         str dw_at_comp_dir comp_dir;
         ( dw_at_stmt_list, dw_form_sec_offset,
           fun () ->
             info_relocs := A.Abs32 { offset = Buffer.length info; symbol = line_symbol; addend = 0 } :: !info_relocs;
-            u32 info 0 );
-        (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs 0);
-        (dw_at_high_pc, dw_form_data8, fun () -> u64 info text_size) ];
+            u32 info 0 ) ] @ cu_range);
     (* the types (Fir dtype i is DIE type_off.(i)); a byte size where DWARF
        wants one, from the layout (typedef and enum chains are bounded) *)
     let rec size_of depth t =
@@ -387,7 +408,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         end)
       dtypes;
     (* one variable *)
-    let variable vloc (d : Fir.dvar) =
+    let variable code_base vloc (d : Fir.dvar) =
       let decl =
         if d.vloc = 0 then []
         else
@@ -419,8 +440,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
                 List.iter
                   (fun (s, e, x) ->
                     u8 loclists 0x08 (* DW_LLE_start_length *);
-                    loc_relocs := A.Abs64 { offset = Buffer.length loclists; symbol = text_symbol; addend = s } :: !loc_relocs;
-                    u64 loclists 0;
+                    addr loclists loc_relocs code_base s;
                     uleb loclists (e - s);
                     uleb loclists (String.length x);
                     Buffer.add_string loclists x)
@@ -429,11 +449,9 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
       in
       let attrs = [ str dw_at_name d.vname ] @ typed d.vty @ decl @ location in
       let tag = if d.varg > 0 then dw_tag_formal_parameter else dw_tag_variable in
-      (* the pseudo attribute (0, 0) only writes the list *)
-      uleb info (abbrev tag false (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) attrs));
-      List.iter (fun (_, _, w) -> w ()) attrs
+      die tag false attrs
     in
-    List.iter (variable None) globals;
+    List.iter (variable text_symbol None) globals;
     List.iter
       (fun f ->
         let file, line, _ = loc (if f.decl_loc > 0 then f.decl_loc else snd (List.hd f.rows)) in
@@ -469,15 +487,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         let children sc = List.sort compare (Hashtbl.fold (fun c _ acc -> if scopes.(c) = sc then c :: acc else acc) ranges []) in
         let has_children = f.vars <> [] || Hashtbl.length ranges > 0 in
         die dw_tag_subprogram has_children
-          ([ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs f.start);
-             (dw_at_high_pc, dw_form_data8, fun () -> u64 info f.size);
-             (dw_at_frame_base, dw_form_exprloc, fun () -> uleb info 1; u8 info 0x56 (* DW_OP_reg6: rbp *));
+          (code_range f.code_base f.start f.size
+          @ [ (dw_at_frame_base, dw_form_exprloc, fun () -> uleb info 1; u8 info 0x56 (* DW_OP_reg6: rbp *));
              str dw_at_name display ]
           @ (if display <> f.name then [ str dw_at_linkage_name f.name ] else [])
           @ [ udata dw_at_decl_file (file_index file); udata dw_at_decl_line line;
               (dw_at_external, dw_form_flag, fun () -> u8 info (if f.external_ then 1 else 0)) ]);
         if has_children then begin
-          List.iter (fun (i, d) -> variable (List.assoc_opt i f.vlocs) d) (params @ locals);
+          List.iter (fun (i, d) -> variable f.code_base (List.assoc_opt i f.vlocs) d) (params @ locals);
           let rec block sc =
             let rs =
               List.sort_uniq compare (Hashtbl.find ranges sc)
@@ -486,27 +503,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
             in
             let where =
               match rs with
-              | [ (s, e) ] ->
-                  [ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs s);
-                    (dw_at_high_pc, dw_form_data8, fun () -> u64 info (e - s)) ]
-              | _ ->
-                  [ sec_offset dw_at_ranges rnglists_symbol rnglists used_rnglists;
-                    (0, 0, fun () ->
-                      List.iter
-                        (fun (s, e) ->
-                          u8 rnglists 0x07 (* DW_RLE_start_length *);
-                          rng_relocs := A.Abs64 { offset = Buffer.length rnglists; symbol = text_symbol; addend = s } :: !rng_relocs;
-                          u64 rnglists 0;
-                          uleb rnglists (e - s))
-                        rs;
-                      u8 rnglists 0 (* DW_RLE_end_of_list *)) ]
+              | [ (s, e) ] -> code_range f.code_base s (e - s)
+              | _ -> code_ranges (List.map (fun (s, e) -> (f.code_base, s, e - s)) rs)
             in
             let locals = in_scope sc and nested = children sc in
             let has_children = locals <> [] || nested <> [] in
-            uleb info (abbrev dw_tag_lexical_block has_children (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) where));
-            List.iter (fun (_, _, w) -> w ()) where;
+            die dw_tag_lexical_block has_children where;
             if has_children then begin
-              List.iter (fun (i, d) -> variable (List.assoc_opt i f.vlocs) d) locals;
+              List.iter (fun (i, d) -> variable f.code_base (List.assoc_opt i f.vlocs) d) locals;
               List.iter block nested;
               u8 info 0
             end
@@ -568,8 +572,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         u8 ln 0;
         uleb ln 9;
         u8 ln 2 (* DW_LNE_set_address *);
-        line_relocs := A.Abs64 { offset = Buffer.length ln; symbol = text_symbol; addend = f.start } :: !line_relocs;
-        u64 ln 0;
+        addr ln line_relocs f.code_base f.start;
         let cur_file = ref (-1) and cur_line = ref 1 and cur_col = ref 0 and cur_pc = ref f.start in
         let row ?(prologue_end = false) pc l =
           let file, line, col = loc l in

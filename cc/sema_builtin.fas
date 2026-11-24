@@ -12,16 +12,16 @@ fn se_math_family(name Bytes, stem addr) u32 {
 }
 
 // These libm builtins have a prototype even without <math.h>.
-fn se_nextafter_type(name Bytes) u32 {
-    if bytes_eq_c(name, c"__builtin_nextafter") { return TY_DOUBLE }
-    if bytes_eq_c(name, c"__builtin_nextafterf") { return TY_FLOAT }
-    if bytes_eq_c(name, c"__builtin_nextafterl") { return TY_LDOUBLE }
+fn se_binary_libm_type(name Bytes) u32 {
+    if feature_in(c" __builtin_nextafter __builtin_fmin __builtin_fmax ", name) { return TY_DOUBLE }
+    if feature_in(c" __builtin_nextafterf __builtin_fminf __builtin_fmaxf ", name) { return TY_FLOAT }
+    if feature_in(c" __builtin_nextafterl __builtin_fminl __builtin_fmaxl ", name) { return TY_LDOUBLE }
     return TY_INVALID
 }
 
 fn se_math_result(name Bytes) u32 {
-    next_ty u32 = se_nextafter_type(name)
-    if next_ty != TY_INVALID { return next_ty }
+    binary_ty u32 = se_binary_libm_type(name)
+    if binary_ty != TY_INVALID { return binary_ty }
     if !bytes_starts_with(name, bytes_c(c"__builtin_")) { return TY_INVALID }
     name = bytes_from(name, 10)
     ty u32 = se_math_family(name, c"conj")
@@ -255,11 +255,11 @@ fn se_x86_features(p handle[Parser]) u64 {
 }
 
 fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
-    next_ty u32 = se_nextafter_type(name)
-    if next_ty != TY_INVALID {
+    binary_ty u32 = se_binary_libm_type(name)
+    if binary_ty != TY_INVALID {
         try se_builtin_count(p, t, count, 2, 2)
-        try se_conversion(p, next_ty, args)
-        try se_conversion(p, next_ty, args.next)
+        try se_conversion(p, binary_ty, args)
+        try se_conversion(p, binary_ty, args.next)
     }
     if bytes_starts_with(name, bytes_c(c"__builtin_arm_")) ||
         bytes_starts_with(name, bytes_c(c"__builtin_aarch64_")) ||

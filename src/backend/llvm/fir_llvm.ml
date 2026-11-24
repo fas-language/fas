@@ -2252,6 +2252,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
               (Printf.sprintf "define %s%s%s%s%s %s(%s)%s%s" (linkage_text f.linkage) (visibility_text f.linkage f.visibility)
                  (cc_text f.sig_) ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:true)
                  (attr_refs ~definition:true));
+            Option.iter (fun s -> add o (Printf.sprintf " section \"%s\"" (escaped s))) f.code_section;
             Option.iter (fun (id, _, _) -> add_debug o (Printf.sprintf " !dbg !%d" id)) sp;
             add o " {\n";
             add o (label entry ^ ":\n");

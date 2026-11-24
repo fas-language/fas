@@ -89,6 +89,10 @@ let evaluate f (ir : inst_rec) =
     let rt = ty_of f ir.results.(0) in
     match ir.op with
     | Ibin (k, _, a, b) -> ( match ibin f k a b with Some v -> Some v | None -> identity f k a b)
+    | Icmp ((Eq | Ne as k), a, b)
+      when is_ptr (ty_of f a) && (match const_of f a, const_of f b with
+          | Some (Cnull _ | Czero (Ptr _)), Some (Cnull _ | Czero (Ptr _)) -> true
+          | _ -> false) -> Some (iconst f i1 (if k = Eq then 1L else 0L))
     | Icmp (k, a, b) -> icmp f k a b
     | Conv ((Zext | Trunc), a) -> (
         match (int_const f a, rt) with Some (_, x), Int tw when tw <= 64 -> Some (iconst f rt (sext tw (mask tw x))) | _ -> None)
@@ -164,12 +168,100 @@ let drop_params f =
       f.blocks
   end
 
-let fold_func f =
+(* Track ordinary nonescaped scalar slots along reachable control-flow
+   edges. A load may be replaced only when all incoming writes agree. *)
+let forward_constants f live =
+  let slots = Hashtbl.create 16 in
+  Vec.iter (fun i ->
+    let ir = inst f i in
+    match ir.op with
+    | Alloca (n, align) ->
+        (match int_value f n with
+        | Some bytes when bytes > 0L ->
+            Hashtbl.add slots ir.results.(0) (bytes, align, ref [], ref false)
+        | _ -> ())
+    | _ -> ()) (block f entry).insts;
+  let invalidate v = Hashtbl.remove slots (resolve f v) in
+  let access b align p ty store =
+    match Hashtbl.find_opt slots p with
+    | Some (bytes, natural, events, _) when align <= natural && Int64.of_int (size_of ty) <= bytes ->
+        events := (b, store) :: !events
+    | _ -> invalidate p
+  in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      Vec.iter (fun i ->
+        let ir = inst f i in
+        match ir.op with
+        | Store ({ volatile = false; order = Plain; align; _ }, v, p) ->
+            let p = resolve f p and v = resolve f v in
+            invalidate v;
+            let known = int_const f v <> None ||
+              (match const_of f v with Some (Cnull _ | Czero (Ptr _)) -> true | _ -> false)
+            in
+            if known then Option.iter (fun (_, _, _, found) -> found := true) (Hashtbl.find_opt slots p);
+            access b align p (ty_of f v) (`Store (if known then Some v else None))
+        | Load ({ volatile = false; order = Plain; align; _ }, p) ->
+            access b align (resolve f p) (ty_of f ir.results.(0)) (`Load ir)
+        | op -> iter_op_uses invalidate op) br.insts;
+      iter_term_uses invalidate br.term
+    end) f.blocks;
+  let changed = ref false in
+  let n = num_blocks f in
+  Hashtbl.iter (fun _ (_, _, events, found) ->
+    if !found then begin
+      let stores = Hashtbl.create 8 in
+      List.iter (function
+        | b, `Store v when not (Hashtbl.mem stores b) -> Hashtbl.add stores b v
+        | _ -> ()) !events;
+      let incoming = Array.make n None in
+      let pending = Queue.create () in
+      incoming.(entry) <- Some None;
+      Queue.add entry pending;
+      while not (Queue.is_empty pending) do
+        let b = Queue.take pending in
+        let outgoing =
+          match Hashtbl.find_opt stores b with
+          | Some last -> last
+          | None -> Option.get incoming.(b)
+        in
+        List.iter (fun dest ->
+          let combined =
+            match incoming.(dest) with
+            | None -> outgoing
+            | Some old when old = outgoing -> old
+            | Some _ -> None
+          in
+          if incoming.(dest) <> Some combined then begin
+            incoming.(dest) <- Some combined;
+            Queue.add dest pending
+          end) (successors (block f b).term)
+      done;
+      let state = ref None and active = ref (-1) in
+      List.iter (fun (b, event) ->
+        if b <> !active then begin
+          active := b;
+          state := Option.get incoming.(b)
+        end;
+        match event with
+        | `Store v -> state := v
+        | `Load ir ->
+            (match !state with
+            | Some v when ty_of f v = ty_of f ir.results.(0) ->
+                replace_all_uses f ir.results.(0) v;
+                ir.op <- Nop;
+                changed := true
+            | _ -> ())) (List.rev !events)
+    end) slots;
+  !changed
+
+let fold_func ?(forward = false) f =
   let changed = ref true and rounds = ref 0 in
   while !changed && !rounds < 16 do
     changed := false;
     incr rounds;
     let live = reachable f in
+    if forward && forward_constants f live then changed := true;
     (* instructions *)
     Vec.iter
       (fun (br : block_rec) ->

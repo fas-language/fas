@@ -26,7 +26,9 @@ Kbuild offset generators expect GNU assembly from `-S`. For those inputs
 the adapter extracts their `.ascii` layout markers from fcc's object
 files. LLVM 22 supplies the link and object utilities for this stage.
 
-The Clang control reaches init and powers off. The fcc build reaches the
-`vmlinux.o` link. Kbuild's `modpost` currently reports section mismatches
-because functions marked for sections such as `.init.text` are emitted in
-`.text`.
+The fcc configuration sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
+reports section references through out-of-line inline helpers as warnings.
+This Kbuild diagnostic setting does not change which code is built. The
+Clang control reaches init and powers off. The fcc build links `vmlinux`
+and produces `bzImage`. The fcc image has yet to reach the serial console
+in QEMU.

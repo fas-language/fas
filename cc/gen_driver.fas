@@ -245,6 +245,7 @@ fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input 
     args Vec[addr] = {}
     defer { vec_free(&args) }
     vec_push(&args, c"-c")
+    vec_push(&args, c"--fold-branches")
     if options.debug { vec_push(&args, c"-g") }
     if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
     if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }

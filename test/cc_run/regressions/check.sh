@@ -13,10 +13,14 @@ for file in "$src"/*.c; do
         asm_goto_inline.c) flags=(-O2 -fno-pie -no-pie) ;;
         asm_symbolic_immediate.c) flags=(-fno-pie -no-pie) ;;
         char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
+        dead_constant_branches.c) flags=(-O2) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
+        function_sections.c) flags=(-g) ;;
         fp_rounding.c) flags=(-frounding-math -lm) ;;
         fp_exceptions.c) flags=(-lm) ;;
+        kernel_constant_calls.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
+        libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
         short_wchar.c) flags=(-fshort-wchar) ;;
         unprototyped.c) flags=(-std=c99 -Wno-deprecated-non-prototype) ;;
@@ -32,6 +36,21 @@ for file in "$src"/*.c; do
             grep -qF ' __ex_table ' "$work/sections"
             grep -qF ' .altinstructions ' "$work/sections"
         done
+    fi
+    if [[ ${file##*/} == kernel_constant_calls.c ]]; then
+        llvm-nm-22 "$work/fcc" > "$work/symbols"
+        grep -q ' retained_setting$' "$work/symbols"
+    fi
+    if [[ ${file##*/} == function_sections.c ]]; then
+        for exe in "$work/clang" "$work/fcc"; do
+            readelf -SW "$exe" > "$work/sections"
+            grep -qE ' \.fas_test_exec1 .* AX ' "$work/sections"
+            grep -qE ' \.fas_test_exec2 .* AX ' "$work/sections"
+            grep -qE ' \.fas_test_init_record .* WA ' "$work/sections"
+        done
+        if command -v llvm-dwarfdump-22 >/dev/null; then
+            llvm-dwarfdump-22 --verify "$work/fcc" > "$work/dwarf"
+        fi
     fi
     echo "PASS: ${file##*/}"
 done
