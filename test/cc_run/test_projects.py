@@ -991,6 +991,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", default=3, type=int, help="total build jobs, capped at six")
     parser.add_argument("--log-dir", type=Path, help="directory for per-project build and test logs")
+    parser.add_argument("--exclude", action="append", default=[], choices=PROJECTS, help="omit a project")
     parser.add_argument("projects", nargs="*")
     args = parser.parse_args()
     if args.jobs < 1:
@@ -998,6 +999,9 @@ def main():
     wanted = set(args.projects) or set(PROJECTS)
     if unknown := wanted - PROJECTS.keys():
         parser.error(f"unknown projects: {', '.join(sorted(unknown))}")
+    wanted.difference_update(args.exclude)
+    if not wanted:
+        parser.error("no projects selected")
     log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="projects-", dir=ROOT / "_build"))
     log_dir = log_dir.resolve()
     log_dir.mkdir(parents=True, exist_ok=True)

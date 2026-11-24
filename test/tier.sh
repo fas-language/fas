@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Quick checks the compiler and the differential manifest. Push also runs
+# the shorter project builds. Milestone adds the heavyweight projects,
+# the native compiler checks, kernel boot, and fuzzers.
 # Run one tier at a time. Build products are private to each invocation.
 set -uo pipefail
 ulimit -f 524288
@@ -105,7 +108,11 @@ cc_checks() {
 }
 
 project_checks() {
-    part "$1 projects" bash test/cc_run.sh --projects --jobs "$jobs" --log-dir "$run/$1-projects" || :
+    local selection=()
+    if [[ $tier == push ]]; then
+        selection=(--exclude postgresql --exclude cpython --exclude openssl --exclude perl --exclude git)
+    fi
+    part "$1 projects" bash test/cc_run.sh --projects --jobs "$jobs" --log-dir "$run/$1-projects" "${selection[@]}" || :
 }
 
 status=0
