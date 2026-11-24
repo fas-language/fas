@@ -218,6 +218,7 @@ fn pa_strings(p handle[Parser]) handle[Ast] fails {
     if first.kind != TK_STR { try pa_error(p, first.loc, c"expected a string literal") }
     pieces AstList = {}
     width u8 = 0
+    wide bool = false
     t Token = first
     while t.kind == TK_STR {
         try pa_take(p)
@@ -225,6 +226,7 @@ fn pa_strings(p handle[Parser]) handle[Ast] fails {
         w u8 = pa_prefix_width(s)
         if width != 0 && w != 0 && width != w { try pa_error(p, t.loc, c"incompatible string literal prefixes") }
         if w != 0 { width = w }
+        if s.p[u8] == 76 { wide = true }
         piece handle[Ast] = pa_node(ND_STRING, t.loc, TY_INVALID)
         piece.op = t.payload
         pa_append(&pieces, piece)
@@ -233,16 +235,10 @@ fn pa_strings(p handle[Parser]) handle[Ast] fails {
     count u64 = 1
     piece handle[Ast] = pieces.first
     elem u32 = TY_CHAR
+    if wide && p.names.short_wchar { width = 2 }
     if width == 1 { elem = TY_UCHAR }
     if width == 2 { elem = TY_USHORT }
-    if width == 4 {
-        elem = TY_UINT
-        x handle[Ast] = pieces.first
-        while x != null {
-            if cc_name(p.names, x.op).p[u8] == 76 { elem = TY_INT; break }
-            x = x.next
-        }
-    }
+    if width == 4 { elem = if wide { TY_INT } else { TY_UINT } }
     while piece != null {
         count += try pa_string_length(p, cc_token(TK_STR, 0, piece.loc, piece.op), cc_name(p.names, piece.op), width)
         piece = piece.next
@@ -562,6 +558,11 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
         }
         try se_check_builtin_call(p, t, word, xs.first, count)
         ret = pa_builtin_result(p, word, xs.first, count)
+        if feature_in(c" __builtin_bswap16 __builtin_bswap32 __builtin_bswap64 ", word) {
+            try se_builtin_count(p, t, count, 1, 1)
+            folded handle[Ast] = se_fold_bswap(t, ret, xs.first)
+            if folded != null { return folded }
+        }
         if bytes_eq_c(word, c"__builtin_strcmp") {
             if count != 2 { try pa_error(p, t.loc, c"wrong number of strcmp builtin arguments") }
             folded handle[Ast] = try se_builtin_strcmp(p, t.loc, xs.first, xs.first.next)
@@ -641,7 +642,7 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
         width u8 = pa_prefix_width(s)
         ty u32 = TY_INT
         if width == 1 { ty = TY_UCHAR }
-        if width == 2 { ty = TY_USHORT }
+        if width == 2 || (p.names.short_wchar && s.p[u8] == 76) { ty = TY_USHORT }
         if width == 4 && s.p[u8] != 76 { ty = TY_UINT }
         v PpInt = try expr_char(p.names, t)
         return se_int(t.loc, ty, v.bits)
@@ -778,7 +779,12 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     }
     if a != null && (a.flags & NF_BITFIELD) != 0 { try pa_error(p, t.loc, c"size or alignment of a bit-field is invalid") }
     gnu_size bool = pa_is_gnu(p) && (ty_is_void(ty) || ty_is_func(ty))
-    if !se_complete(ty) && !gnu_size { try pa_error(p, t.loc, c"size or alignment requires a complete object type") }
+    // GNU expression alignment also works on a flexible member or an
+    // extern array with an unknown bound. Its element layout is known.
+    array_align bool = align && a != null && pa_is_gnu(p) && ty_is_array(ty) && se_complete(ty_node(ty_unqual(ty)).elem)
+    if !se_complete(ty) && !gnu_size && !array_align {
+        try pa_error(p, t.loc, c"size or alignment requires a complete object type")
+    }
     n handle[Ast] = pa_node(ND_SIZE, t.loc, TY_ULONG)
     n.op = ty
     n.a = a

@@ -32,6 +32,16 @@ run_diff -funsigned-char -fshort-enums types.c
 run_diff -funsigned-char -fsigned-char -fshort-enums -fno-short-enums types.c
 echo "PASS: C char signedness, enum layout, and option overrides"
 
+cat > wchar.c <<'C'
+#include <stddef.h>
+static_assert(sizeof(wchar_t) == 4);
+static_assert(_Generic(L'x', int: 1, default: 0));
+static_assert(sizeof(L"x") == 8);
+C
+"$clang" -std=gnu23 -fshort-wchar -fno-short-wchar -fsyntax-only wchar.c
+"$FCC" -fshort-wchar -fno-short-wchar -fsyntax-only wchar.c
+echo "PASS: override short wchar mode"
+
 cat > standard.c <<'C'
 #include <stddef.h>
 #if __STDC_VERSION__ < 202311L
@@ -284,8 +294,10 @@ if "$FCC" -nostdinc -E include.c > /dev/null 2> fcc.err; then
     echo "FAIL: -nostdinc searched a system include directory" >&2
     exit 1
 fi
-if "$FCC" -fsyntax-only -m32 bare.c 2> fcc.err; then exit 1; fi
-grep -qF 'only the x86-64 LP64 target is supported' fcc.err
+for mode in -m16 -m32 -mx32; do
+    if "$FCC" -fsyntax-only "$mode" bare.c 2> fcc.err; then exit 1; fi
+    grep -qF 'only the x86-64 LP64 target is supported' fcc.err
+done
 if "$FCC" -fsyntax-only -ffast-math bare.c 2> fcc.err; then exit 1; fi
 grep -qF 'fast-math semantics are unsupported' fcc.err
 "$FCC" -fsyntax-only -Iinclude -fmade-up -mno-made-up bare.c 2> fcc.err

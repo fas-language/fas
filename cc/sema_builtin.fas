@@ -40,6 +40,19 @@ fn se_builtin_count(p handle[Parser], t Token, n u32, min u32, max u32) void fai
     if n < min || n > max { try pa_error(p, t.loc, c"wrong number of builtin arguments") }
 }
 
+// Byte swaps on integer constant operands are themselves integer constants.
+// Truncate to the builtin's operand width before reversing its bytes.
+fn se_fold_bswap(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = arg.value
+    result u64 = 0
+    for i u64 in 0..ty_size(ty) {
+        result = (result << 8) | (value & 255)
+        value >>= 8
+    }
+    return se_int(t.loc, ty, result)
+}
+
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
     name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))

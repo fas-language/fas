@@ -22,3 +22,4 @@ const C_TARGET arr[19, addr] = {
 }
 const C_TARGET_GNU addr = c"linux 1\nunix 1\n"
 const C_TARGET_STRICT addr = c"__STRICT_ANSI__ 1\n"
+const C_TARGET_SHORT_WCHAR addr = c"__SIZEOF_WCHAR_T__ 2\n__WCHAR_MAX__ 65535\n__WCHAR_TYPE__ unsigned short\n__WCHAR_UNSIGNED__ 1\n__WCHAR_WIDTH__ 16\n"

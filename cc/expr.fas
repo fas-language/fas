@@ -119,6 +119,7 @@ fn expr_escape(n handle[CNames], s Bytes, loc u32) Escape fails {
 fn expr_char(n handle[CNames], t Token) PpInt fails {
     s Bytes = cc_spelling(n, t)
     first usize = literal_prefix(s.p)
+    short_wide bool = n.short_wchar && s.p[u8] == 76
     i usize = first + 1
     count usize = 0
     value u32 = 0
@@ -137,7 +138,8 @@ fn expr_char(n handle[CNames], t Token) PpInt fails {
             i += zext[usize](r.width) - 1
         }
         if first != 0 {
-            if count != 0 || (first == 2 && cp > 255) || (s.p[u8] == 117 && first == 1 && cp > 65535) {
+            if count != 0 || (first == 2 && cp > 255) ||
+                ((short_wide || (s.p[u8] == 117 && first == 1)) && cp > 65535) {
                 try cc_error(n, t.loc, c"invalid prefixed character constant")
             }
             value = cp
@@ -149,7 +151,10 @@ fn expr_char(n handle[CNames], t Token) PpInt fails {
     }
     if count == 0 { try cc_error(n, t.loc, c"empty character constant") }
     if first == 0 && count == 1 && value >= 128 { value |= 0xffffff00 }
-    if first == 0 || s.p[u8] == 76 { return {bitcast[u64](sext[i64](bitcast[i32](value))), false} }
+    if first == 0 || s.p[u8] == 76 {
+        // Both int and unsigned short wchar_t promote to signed int in #if.
+        return {bitcast[u64](sext[i64](bitcast[i32](value))), false}
+    }
     return {zext[u64](value), true}
 }
 

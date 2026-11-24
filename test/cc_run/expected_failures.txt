@@ -3,7 +3,6 @@
 
 gcc/gcc/testsuite/gcc.c-torture/execute/20021127-1.c exit-mismatch: gcc-only -O2 builtin-llabs inlining test (user llabs() calls abort)
 gcc/gcc/testsuite/gcc.dg/addr_equal-1.c link-error: gcc-only -O2 constant-folding of extern address equality (undef_fn0)
-gcc/gcc/testsuite/gcc.dg/builtin-bswap-5.c link-error: gcc-only DCE link_error() test (expects -O2 dead-code elimination)
 gcc/gcc/testsuite/gcc.dg/builtin-dynamic-object-size-11.c exit-mismatch: gcc -O2 __builtin_dynamic_object_size optimization test
 gcc/gcc/testsuite/gcc.dg/builtin-object-size-11.c exit-mismatch: gcc -O2 __builtin_object_size optimization test
 gcc/gcc/testsuite/gcc.dg/di-sync-multithread.c exit-mismatch: fcc passes (exit=0), clang oracle timed out (exit=137)

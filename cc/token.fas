@@ -50,6 +50,7 @@ struct CNames {
     macros Vec[addr]       // replacement indexed by normalized spelling id
     locations Vec[CLoc]
     gnu bool
+    short_wchar bool
 }
 
 fn cc_intern(n handle[CNames], spelling Bytes) u32 {

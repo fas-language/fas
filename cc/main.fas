@@ -65,6 +65,7 @@ struct Options {
     x86_cpu u32
     x86_options Vec[u32]
     unsigned_char bool
+    short_wchar bool
     common bool
     x86_native bool
     native_features u64
@@ -218,6 +219,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             try cli_standard(o, word)
         } else if bytes_eq_c(word, c"-funsigned-char") || bytes_eq_c(word, c"-fno-signed-char") { o.unsigned_char = true
         } else if bytes_eq_c(word, c"-fsigned-char") || bytes_eq_c(word, c"-fno-unsigned-char") { o.unsigned_char = false
+        } else if bytes_eq_c(word, c"-fshort-wchar") { o.short_wchar = true
+        } else if bytes_eq_c(word, c"-fno-short-wchar") { o.short_wchar = false
         } else if bytes_eq_c(word, c"-fcommon") { o.common = true
         } else if bytes_eq_c(word, c"-fno-common") { o.common = false
         } else if bytes_eq_c(word, c"-fwrapv") || bytes_eq_c(word, c"-fno-strict-overflow") { o.overflow_mode = 1
@@ -254,7 +257,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
                 o.x86_cpu = x86_cpu(bytes_from(word, 7))
                 if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", arg) }
             }
-        } else if bytes_eq_c(word, c"-m32") || bytes_eq_c(word, c"-mx32") {
+        } else if bytes_eq_c(word, c"-m16") || bytes_eq_c(word, c"-m32") || bytes_eq_c(word, c"-mx32") {
             try cli_error(c"fcc: only the x86-64 LP64 target is supported: ", arg)
         } else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
@@ -385,6 +388,7 @@ fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
 
 fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.names.gnu = o.gnu
+    p.names.short_wchar = o.short_wchar
     p.standard = o.standard
     p.unsigned_char = o.unsigned_char
     p.short_enums = o.short_enums
@@ -448,6 +452,9 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
                    else { null }
         if ssp != null { try cli_definitions(p, bytes_c(ssp), c"<built-in>") }
         if o.unsigned_char { try cli_definitions(p, bytes_c(c"__CHAR_UNSIGNED__ 1\n"), c"<built-in>") }
+        if o.short_wchar {
+            try cli_definitions(p, bytes_c(C_TARGET_SHORT_WCHAR), c"<built-in>")
+        }
         pic u8 = if o.pic_mode != 0 { o.pic_mode } else if o.is_shared { 3 } else { 5 }
         if pic >= 2 {
             pic_def addr = if (pic & 1) == 0 { c"__PIC__ 1\n__pic__ 1\n" } else { c"__PIC__ 2\n__pic__ 2\n" }
