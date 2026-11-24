@@ -16,6 +16,9 @@ const SYS_DUP2 u64 = 33
 const SYS_FCNTL u64 = 72
 const SYS_KILL u64 = 62
 const SYS_PIPE2 u64 = 293
+const SYS_MEMFD_CREATE u64 = 319
+const F_DUPFD u64 = 0
+const O_TMPFILE u64 = 0x410000
 const SYS_RT_SIGACTION u64 = 13
 const F_DUPFD_CLOEXEC u64 = 1030
 const SIGKILL u64 = 9
@@ -199,18 +202,35 @@ fn drv_find_crt_dir() addr {
     return c"/lib/x86_64-linux-gnu"
 }
 
-var drv_tmp_seq u64 = 0
+value struct DrvTempObject { fd i32, path addr }
 
-fn drv_temp_path(ext addr) addr {
+// The assembler and linker open the same anonymous object by descriptor.
+// TMPDIR can put large objects on disk. A memfd handles filesystems without
+// O_TMPFILE. Both are reclaimed by the kernel even if fcc is interrupted.
+fn drv_temp_object() DrvTempObject fails {
+    dir addr = os_getenv(c"TMPDIR")
+    if dir == null || dir[u8] == 0 { dir = c"/tmp" }
+    raw i64 = syscall(SYS_OPENAT, AT_FDCWD, dir, O_TMPFILE | O_RDWR | O_CLOEXEC, 0o600)
+    if raw == -95 || raw == -22 || raw == -21 {
+        raw = syscall(SYS_MEMFD_CREATE, c"fcc-object", 1) // MFD_CLOEXEC
+    }
+    if raw < 0 {
+        eprint(c"fcc: cannot create temporary object\n")
+        fail CError
+    }
+    owned i32 = trunc[i32](raw)
+    defer { os_close(owned) }
+    // Keep the descriptor across exec without taking a standard stream.
+    inherited i64 = syscall(SYS_FCNTL, owned, F_DUPFD, 3)
+    if inherited < 0 {
+        eprint(c"fcc: cannot pass temporary object to backend\n")
+        fail CError
+    }
     b Buf = {}
     defer { buf_free(&b) }
-    buf_str(&b, c"/tmp/fcc_")
-    buf_dec_u64(&b, zext[u64](os_getpid()))
-    buf_u8(&b, 95)
-    buf_dec_u64(&b, drv_tmp_seq)
-    drv_tmp_seq += 1
-    buf_str(&b, ext)
-    return drv_cstr_dup(buf_bytes(&b))
+    buf_str(&b, c"/proc/self/fd/")
+    buf_dec_u64(&b, bitcast[u64](inherited))
+    return {trunc[i32](inherited), drv_cstr_dup(buf_bytes(&b))}
 }
 
 fn drv_start_fir(fir_path addr, obj_path addr, pic u8, debug bool, input i32) i64 fails {

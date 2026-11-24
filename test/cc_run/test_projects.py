@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Build real-world C projects with fcc and Clang and compare exact output."""
 
+import argparse
+from collections import deque
+from contextlib import nullcontext
 import http.client
 import os
 from pathlib import Path
@@ -8,6 +11,7 @@ import re
 import resource
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -32,11 +36,35 @@ ENV = {
 }
 
 
+PROJECT_JOBS = 1
+PROJECT_ROOT = None
+
+sys.path.insert(0, str(ROOT / "tools/refcache"))
+from compiler import compile_command
+from refcache import Cache
+
+
 def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False, env=None):
+    cmd = list(map(os.fspath, cmd))
+    cmd_env = {**ENV, **(env or {})}
+    if PROJECT_ROOT is not None:
+        print(f"+ ({cwd or Path.cwd()}) {shlex.join(cmd)}", flush=True)
+    cp = None
+    if cmd[0] == CLANG and cwd is None and input_bytes is None and env is None and PROJECT_ROOT is not None:
+        # The reference cache fingerprints C dependencies and can relocate
+        # outputs below this project's temporary tree.
+        if Cache().root is not None:
+            cp = compile_command(cmd, ns="cc-run/projects", scratch=PROJECT_ROOT,
+                                 env=cmd_env, timeout=timeout)
     preexec = _limit_as if cmd and str(cmd[0]) == FCC else None
-    cp = subprocess.run(cmd, cwd=cwd, env={**ENV, **(env or {})}, input=input_bytes,
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                        timeout=timeout, preexec_fn=preexec)
+    if cp is None:
+        try:
+            cp = subprocess.run(cmd, cwd=cwd, env=cmd_env, input=input_bytes,
+                                capture_output=True, timeout=timeout, preexec_fn=preexec)
+        except subprocess.TimeoutExpired as exc:
+            log_streams(exc.stdout or b"", exc.stderr or b"")
+            raise
+    log_streams(cp.stdout, cp.stderr)
     if cp.returncode != 0:
         command = " ".join(cmd)
         if len(command) > 600:
@@ -53,6 +81,18 @@ def run_cmd(cmd, cwd=None, input_bytes=None, timeout=180, *, both_streams=False,
         raise RuntimeError(f"Command failed ({cp.returncode}): {command}\n"
                            f"{errors[:2500]}\n{out[-2500:]}\n{err[-2500:]}")
     return (cp.stdout, cp.stderr) if both_streams else cp.stdout
+
+
+def log_streams(stdout, stderr):
+    if PROJECT_ROOT is None:
+        return
+    for name, data in (("stdout", stdout), ("stderr", stderr)):
+        if data:
+            print(f"[{name}]", flush=True)
+            sys.stdout.buffer.write(data)
+            if not data.endswith(b"\n"):
+                sys.stdout.buffer.write(b"\n")
+            sys.stdout.buffer.flush()
 
 
 ZLIB_SOURCES = (
@@ -78,8 +118,8 @@ def test_zlib(tmp: Path) -> bool:
     run_cmd([FCC, "-DHAVE_UNISTD_H", f"-I{zdir}", str(zdir / "test/example.c"), *objs, "-o", str(w_fcc / "example")])
     run_cmd([FCC, "-DHAVE_UNISTD_H", f"-I{zdir}", str(zdir / "test/minigzip.c"), *objs, "-o", str(w_fcc / "minigzip")])
 
-    run_cmd([CLANG, "-w", "-DHAVE_UNISTD_H", f"-I{zdir}", str(zdir / "test/example.c"),
-             *[str(zdir / s) for s in srcs], "-o", str(w_ref / "example")])
+    clang_executable(w_ref / "example", [zdir / "test/example.c", *(zdir / s for s in srcs)],
+                     ["-DHAVE_UNISTD_H", f"-I{zdir}"])
 
     out_fcc = run_cmd([str(w_fcc / "example")], cwd=str(w_fcc))
     out_ref = run_cmd([str(w_ref / "example")], cwd=str(w_ref))
@@ -107,7 +147,7 @@ def test_lua(tmp: Path) -> bool:
         run_cmd([FCC, "-c", "-DLUA_USE_LINUX", f"-I{ldir}", str(p), "-o", str(obj)])
         objs.append(str(obj))
     run_cmd([FCC, *objs, "-lm", "-ldl", "-o", str(w_fcc / "lua")])
-    run_cmd([CLANG, "-w", "-DLUA_USE_LINUX", f"-I{ldir}", *[str(p) for p in srcs], "-lm", "-ldl", "-o", str(w_ref / "lua")])
+    clang_executable(w_ref / "lua", srcs, ["-DLUA_USE_LINUX", f"-I{ldir}"], ["-lm", "-ldl"])
 
     script = r"""
 -- Comprehensive Lua differential test: arithmetic, closures, tables, metamethods,
@@ -167,7 +207,7 @@ def test_sqlite(tmp: Path) -> bool:
     run_cmd([FCC, "-c", *flags, str(sdir / "shell.c"), "-o", str(w_fcc / "shell.o")], timeout=120)
     run_cmd([FCC, str(w_fcc / "sqlite3.o"), str(w_fcc / "shell.o"), "-lm", "-o", str(w_fcc / "sqlite3")], timeout=120)
 
-    run_cmd([CLANG, "-w", *flags, str(sdir / "sqlite3.c"), str(sdir / "shell.c"), "-lm", "-o", str(w_ref / "sqlite3")], timeout=120)
+    clang_executable(w_ref / "sqlite3", [sdir / "sqlite3.c", sdir / "shell.c"], flags, ["-lm"])
 
     sql = """
 CREATE TABLE items(id INTEGER PRIMARY KEY, cat TEXT, name TEXT, price REAL, qty INT);
@@ -197,12 +237,26 @@ SELECT id, name, qty FROM items ORDER BY price DESC, id ASC;
     return True
 
 
+def clang_executable(output, sources, flags, libraries=(), *, timeout=180):
+    # refcache supports a single preprocessing input per invocation. Keep
+    # temporary object names distinct even when two sources share a basename.
+    compile_flags = [*flags, *(flag for flag in libraries if flag == "-pthread")]
+    objects = []
+    for i, source in enumerate(sources):
+        if Path(source).suffix in (".c", ".S", ".s"):
+            obj = output.with_name(f"{output.name}-{i}.o")
+            run_cmd([CLANG, "-w", *compile_flags, "-c", str(source), "-o", str(obj)], timeout=timeout)
+            objects.append(str(obj))
+        else:
+            objects.append(str(source))
+    run_cmd([CLANG, *objects, *libraries, "-o", str(output)], timeout=timeout)
+
+
 def build_pair(tmp, name, sources, flags=(), libraries=(), *, timeout=180):
     paths = [tmp / f"{name}-{tag}" for tag in ("fcc", "clang")]
     run_cmd([FCC, "-std=gnu23", *flags, *map(str, sources),
              *libraries, "-o", str(paths[0])], timeout=timeout)
-    run_cmd([CLANG, "-std=gnu23", "-w", *flags, *map(str, sources),
-             *libraries, "-o", str(paths[1])], timeout=timeout)
+    clang_executable(paths[1], sources, ["-std=gnu23", *flags], libraries, timeout=timeout)
     return paths
 
 
@@ -385,7 +439,7 @@ def test_quickjs(tmp):
     for compiler, src in checkout_pair(tmp, "quickjs"):
         version = (src / "VERSION").read_text().strip()
         defines = f'-std=gnu23 -D_GNU_SOURCE -DCONFIG_VERSION=\\"{version}\\"'
-        run_cmd(["make", "-j3", f"CC={compiler}", f"DEFINES={defines}", "qjs",
+        run_cmd(["make", f"-j{PROJECT_JOBS}", f"CC={compiler}", f"DEFINES={defines}", "qjs",
                  "tests/bjson.so", "examples/point.so"], cwd=src, timeout=600)
         results.append({test: run_cmd(["./qjs", *(["--std"] if test.endswith("test_builtin.js") else []), test],
                                       cwd=src, both_streams=True) for test in tests})
@@ -422,7 +476,7 @@ def test_curl(tmp):
                  "-DBUILD_TESTING=OFF", "-DBUILD_SHARED_LIBS=OFF", "-DCURL_ENABLE_SSL=OFF",
                  "-DCURL_USE_LIBPSL=OFF", "-DCURL_BROTLI=OFF", "-DCURL_ZSTD=OFF",
                  "-DENABLE_ARES=OFF", "-DENABLE_MANUAL=OFF"], timeout=600)
-        run_cmd(["cmake", "--build", str(build), "-j", "3"], timeout=1200)
+        run_cmd(["cmake", "--build", str(build), "-j", str(PROJECT_JOBS)], timeout=1200)
         paths.append(build / "src/curl")
     for range_arg, expected in (([], payload), (["--range", "250-263"], payload[250:264])):
         args = ["--disable", "--silent", "--show-error", *range_arg, file.as_uri()]
@@ -467,7 +521,7 @@ sys.exit(not result.wasSuccessful() or result.testsRun == len(result.skipped))
         # Use C23 for both builds even when configure adds its default C11 flag.
         makefile = build / "Makefile"
         makefile.write_text(makefile.read_text().replace(" -std=c11", " -std=gnu23"))
-        run_cmd(["make", "-j3"], cwd=build, timeout=2400)
+        run_cmd(["make", f"-j{PROJECT_JOBS}"], cwd=build, timeout=2400)
         results.append(run_cmd(["./python", "-B", str(script), *modules], cwd=build,
                                env={"PYTHONHASHSEED": "0"}, both_streams=True))
     check_results("CPython Lib/test", *results)
@@ -481,7 +535,7 @@ def test_git(tmp):
     work = tmp / "git-work"
     work.mkdir()
     for compiler, src in checkout_pair(tmp, "git"):
-        run_cmd(["make", "-j3", f"CC={compiler} -std=gnu23", "NO_GETTEXT=YesPlease",
+        run_cmd(["make", f"-j{PROJECT_JOBS}", f"CC={compiler} -std=gnu23", "NO_GETTEXT=YesPlease",
                  "NO_TCLTK=YesPlease", "NO_CURL=YesPlease", "NO_OPENSSL=YesPlease"],
                 cwd=src, timeout=2400)
         results.append({test: run_cmd(["sh", test, f"--root={work}"], cwd=src / "t", both_streams=True)
@@ -518,7 +572,7 @@ def test_musl(tmp):
                  f"--prefix={prefix}"], cwd=build, env={"CC": str(wrapper), "CFLAGS": "-O0 -g0"})
         # x86-64 host tools can archive these objects. The target name in
         # configure does not require an installed musl toolchain.
-        run_cmd(["make", "-j3", "AR=ar", "RANLIB=ranlib", "install"],
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "AR=ar", "RANLIB=ranlib", "install"],
                 cwd=build, timeout=1800)
         runtime = run_cmd(["gcc", "-print-libgcc-file-name"]).decode().strip()
         lib = prefix / "lib"
@@ -547,7 +601,7 @@ def test_lz4(tmp):
     results = []
     payload = b"abcabc\x00\xff" * 15000 + bytes(range(256))
     for compiler, src in checkout_pair(tmp, "lz4"):
-        run_cmd(["make", "-j3", "-C", "programs", "lz4", f"CC={compiler}", "CFLAGS=-O0 -g0"],
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "-C", "programs", "lz4", f"CC={compiler}", "CFLAGS=-O0 -g0"],
                 cwd=src, timeout=600)
         tool = str(src / "programs/lz4")
         frames = [run_cmd([tool, "-q", level, "-c"], input_bytes=payload) for level in ("-1", "-9")]
@@ -571,7 +625,7 @@ def cmake_project(tmp, project, targets, options=()):
         run_cmd(["cmake", "-S", str(UPSTREAM / project), "-B", str(build),
                  f"-DCMAKE_C_COMPILER={compiler}", "-DCMAKE_C_FLAGS=-O0 -g0",
                  *extra, *options], timeout=600)
-        run_cmd(["cmake", "--build", str(build), "-j", "3", "--target", *targets], timeout=1800)
+        run_cmd(["cmake", "--build", str(build), "-j", str(PROJECT_JOBS), "--target", *targets], timeout=1800)
         yield build
 
 
@@ -671,7 +725,7 @@ def test_nginx(tmp):
     for compiler, src in checkout_pair(tmp, "nginx"):
         run_cmd(["sh", "configure", f"--with-cc={compiler}", "--without-http_rewrite_module",
                  "--without-http_gzip_module", "--with-cc-opt=-O0 -g0"], cwd=src, timeout=600)
-        run_cmd(["make", "-j3"], cwd=src, timeout=1800)
+        run_cmd(["make", f"-j{PROJECT_JOBS}"], cwd=src, timeout=1800)
         results.append(nginx_requests(src / "objs/nginx", src))
     check_results("nginx HTTP responses", *results)
     print("PASS: nginx (localhost static GET, HEAD, byte range and 404 responses)")
@@ -687,11 +741,12 @@ def test_postgresql(tmp):
         run_cmd([str(UPSTREAM / "postgresql/configure"), "--without-icu", "--without-readline",
                  "--without-zlib", "--without-llvm", "--without-lz4", "--without-zstd"],
                 cwd=build, env={"CC": compiler, "CFLAGS": "-O0 -g0"}, timeout=900)
-        run_cmd(["make", "-j3"], cwd=build, timeout=3600)
+        run_cmd(["make", f"-j{PROJECT_JOBS}"], cwd=build, timeout=3600)
         regress = build / "src/test/regress"
         try:
             run_cmd(["make", "check-tests", f"TESTS={' '.join(cases)}"],
-                    cwd=regress, env={"LC_ALL": "C", "PGTZ": "UTC"}, timeout=1200)
+                    cwd=regress, env={"LC_ALL": "C", "PGTZ": "UTC",
+                                      "TMPDIR": ENV["FCC_PROJECT_PG_TMPDIR"]}, timeout=1200)
         except RuntimeError:
             for name in ("regression.diffs", "log/initdb.log", "log/postmaster.log"):
                 path = regress / name
@@ -714,8 +769,8 @@ def test_openssl(tmp):
         run_cmd(["perl", str(UPSTREAM / "openssl/Configure"), "linux-x86_64",
                  f"--prefix={build / 'install'}", "no-asm", "no-shared",
                  "no-module", "-O0"], cwd=build, env={"CC": compiler})
-        run_cmd(["make", "-j3", "build_generated"], cwd=build, timeout=180)
-        run_cmd(["make", "-j3", "link-utils", "util/wrap.pl", *[f"test/{name}" for name in tests]],
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "build_generated"], cwd=build, timeout=180)
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "link-utils", "util/wrap.pl", *[f"test/{name}" for name in tests]],
                 cwd=build, timeout=1800)
         run_cmd(["make", "run_tests", "TESTS=test_sha test_internal_bn"], cwd=build, env=test_env, timeout=120)
         outputs.append([run_cmd([str(build / "test" / name)], cwd=build, env=test_env, both_streams=True)
@@ -733,7 +788,7 @@ def test_perl(tmp):
         shutil.copytree(UPSTREAM / "perl", build)
         run_cmd(["sh", "Configure", "-des", f"-Dcc={compiler}", "-Doptimize=-O0",
                  f"-Dprefix={build / 'install'}"], cwd=build, timeout=600)
-        run_cmd(["make", "-j3", "miniperl", "lib/Config.pm"], cwd=build, timeout=1200)
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "miniperl", "lib/Config.pm"], cwd=build, timeout=1200)
         report = [run_cmd(["../miniperl", "-I../lib", f"op/{name}.t"], cwd=build / "t",
                           env={"PERL_HASH_SEED": "0"}, both_streams=True) for name in tests]
         for stdout, stderr in report:
@@ -754,7 +809,7 @@ def test_tcl(tmp):
         env = {"CC": compiler, "CFLAGS": "-O0", "LC_ALL": "C", "TZ": "UTC"}
         run_cmd([str(UPSTREAM / "tcl/unix/configure"), "--disable-shared", "--disable-symbols"],
                 cwd=build, env=env, timeout=300)
-        run_cmd(["make", "-j3", "tcltest"], cwd=build, env=env, timeout=1200)
+        run_cmd(["make", f"-j{PROJECT_JOBS}", "tcltest"], cwd=build, env=env, timeout=1200)
         # tcltest prints its working directory and timestamps. Replace these
         # fields so test names, results and skip counts compare exactly.
         report = run_cmd(["./tcltest", str(UPSTREAM / "tcl/tests/all.tcl"), "-verbose", "ps",
@@ -795,7 +850,7 @@ def test_busybox(tmp):
             text = text.replace(f"# CONFIG_{name} is not set\n", f"CONFIG_{name}=y\n")
         config.write_text(text)
         run_cmd(["make", "oldconfig"], cwd=build, input_bytes=b"\n" * 256)
-        run_cmd(["make", "-j3", f"CC={cc}", "busybox"], cwd=build, timeout=600)
+        run_cmd(["make", f"-j{PROJECT_JOBS}", f"CC={cc}", "busybox"], cwd=build, timeout=600)
         report = run_cmd(["sh", "runtest", *applets], cwd=build / "testsuite",
                          env={"LC_ALL": "C"}, both_streams=True)
         assert report[0].count(b"PASS: ") >= len(applets), report
@@ -829,7 +884,7 @@ def test_ffmpeg(tmp):
         run_cmd([str(UPSTREAM / "ffmpeg/configure"), f"--cc={compiler}", "--disable-asm",
                  "--disable-everything", "--disable-autodetect", "--disable-optimizations",
                  "--disable-programs", "--disable-doc"], cwd=build, timeout=300)
-        run_cmd(["make", "-j3", *[f"fate-{name}" for name in tests]], cwd=build, timeout=1200)
+        run_cmd(["make", f"-j{PROJECT_JOBS}", *[f"fate-{name}" for name in tests]], cwd=build, timeout=1200)
         outputs.append([run_cmd([str(build / "libavutil/tests" / name)], cwd=build, both_streams=True)
                         for name in tests])
     check_results("FFmpeg libavutil FATE output", *outputs)
@@ -837,26 +892,136 @@ def test_ffmpeg(tmp):
     return True
 
 
+PROJECTS = {
+    "zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite, "cjson": test_cjson,
+    "miniz": test_miniz, "bzip2": test_bzip2, "zstd": test_zstd, "duktape": test_duktape,
+    "mbedtls": test_mbedtls, "oniguruma": test_oniguruma, "libpng": test_libpng,
+    "quickjs": test_quickjs, "redis": test_redis, "curl": test_curl, "cpython": test_cpython,
+    "git": test_git, "musl": test_musl, "lz4": test_lz4, "xz": test_xz, "libuv": test_libuv,
+    "nginx": test_nginx, "postgresql": test_postgresql, "openssl": test_openssl,
+    "perl": test_perl, "tcl": test_tcl, "busybox": test_busybox,
+    "libjpeg-turbo": test_libjpeg_turbo, "ffmpeg": test_ffmpeg,
+}
+
+# Give larger builds first use of the parallel slots. Small serial projects
+# fill spare slots without dividing the jobs of the largest build at -j3.
+LARGE = ("ffmpeg", "postgresql", "cpython", "git", "perl", "nginx", "musl", "busybox",
+         "openssl", "tcl", "libjpeg-turbo", "curl", "xz", "libuv", "quickjs", "lz4")
+
+
+def stop_group(proc):
+    # make or an upstream test can leave children after its own failure.
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait()
+
+
+def run_projects(wanted, jobs, log_dir, tmp, pg_tmp):
+    parallel = deque(name for name in LARGE if name in wanted)
+    serial = deque(name for name in PROJECTS if name in wanted and name not in LARGE)
+    running = {}
+    passed = 0
+    try:
+        while parallel or serial or running:
+            free = jobs - sum(weight for _, weight, _ in running.values())
+            if len(running) < 2 and free and (parallel or serial):
+                if parallel and (free >= 2 or not running):
+                    # At six jobs split the budget between two large builds.
+                    weight = (jobs + 1) // 2 if jobs >= 4 and len(parallel) > 1 else jobs
+                    if serial and jobs > 1:
+                        weight = min(weight, jobs - 1)
+                    weight = min(weight, free)
+                    name = parallel.popleft()
+                elif serial:
+                    weight = 1
+                    name = serial.popleft()
+                else:
+                    name = None
+            else:
+                name = None
+            if name is not None:
+                work = tmp / name
+                work.mkdir()
+                log_path = log_dir / f"{name}.log"
+                worker_env = {**ENV, "TMPDIR": str(work), "FAS_LD_THREADS": "1",
+                              "MAKEFLAGS": f"-j{weight}", "MFLAGS": "", "GNUMAKEFLAGS": "",
+                              "CMAKE_BUILD_PARALLEL_LEVEL": str(weight)}
+                if name == "postgresql":
+                    worker_env["FCC_PROJECT_PG_TMPDIR"] = str(pg_tmp)
+                with log_path.open("wb") as log:
+                    proc = subprocess.Popen(
+                        [sys.executable, __file__, "--worker", name, str(work), str(weight)],
+                        env=worker_env,
+                        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                    running[name] = (proc, weight, time.monotonic())
+                continue
+            for name, (proc, _, started) in list(running.items()):
+                if (rc := proc.poll()) is None:
+                    continue
+                stop_group(proc)
+                del running[name]
+                shutil.rmtree(tmp / name)
+                passed += rc == 0
+                print(f"{'PASS' if rc == 0 else 'FAIL'} project {name} "
+                      f"({time.monotonic() - started:.1f}s) {log_dir / (name + '.log')}", flush=True)
+            if running:
+                time.sleep(0.1)
+    finally:
+        for proc, _, _ in running.values():
+            stop_group(proc)
+    print(f"Projects: {passed}/{len(wanted)} passed")
+    return passed == len(wanted)
+
+
+def interrupted(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
 def main():
-    projects = {"zlib": test_zlib, "lua": test_lua, "sqlite": test_sqlite,
-                "cjson": test_cjson, "miniz": test_miniz, "bzip2": test_bzip2,
-                "zstd": test_zstd, "duktape": test_duktape, "mbedtls": test_mbedtls,
-                "oniguruma": test_oniguruma, "libpng": test_libpng,
-                "quickjs": test_quickjs, "redis": test_redis, "curl": test_curl,
-                "cpython": test_cpython, "git": test_git,
-                "musl": test_musl, "lz4": test_lz4, "xz": test_xz,
-                "libuv": test_libuv, "nginx": test_nginx, "postgresql": test_postgresql,
-                "openssl": test_openssl, "perl": test_perl, "tcl": test_tcl,
-                "busybox": test_busybox, "libjpeg-turbo": test_libjpeg_turbo,
-                "ffmpeg": test_ffmpeg}
-    wanted = set(sys.argv[1:]) or set(projects)
-    if unknown := wanted - projects.keys():
-        sys.exit(f"Unknown projects: {', '.join(sorted(unknown))}")
+    global PROJECT_JOBS, PROJECT_ROOT
+    if len(sys.argv) == 5 and sys.argv[1] == "--worker":
+        name, work, jobs = sys.argv[2:]
+        PROJECT_JOBS = int(jobs)
+        PROJECT_ROOT = Path(work)
+        return PROJECTS[name](PROJECT_ROOT)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGHUP, interrupted)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--jobs", default=3, type=int, help="total build jobs, capped at six")
+    parser.add_argument("--log-dir", type=Path, help="directory for per-project build and test logs")
+    parser.add_argument("projects", nargs="*")
+    args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
+    wanted = set(args.projects) or set(PROJECTS)
+    if unknown := wanted - PROJECTS.keys():
+        parser.error(f"unknown projects: {', '.join(sorted(unknown))}")
+    log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="projects-", dir=ROOT / "_build"))
+    log_dir = log_dir.resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
     downloads = wanted - {"zlib", "lua", "sqlite"}
     if downloads:
-        run_cmd(["sh", str(UPSTREAM.parent / "fetch.sh"), "--projects", *sorted(downloads)])
-    with tempfile.TemporaryDirectory(prefix="fcc_projects_") as tmp:
-        return all(test(Path(tmp)) for name, test in projects.items() if name in wanted)
+        proc = subprocess.Popen(["sh", str(UPSTREAM.parent / "fetch.sh"), "--projects", *sorted(downloads)],
+                                start_new_session=True)
+        try:
+            if proc.wait() != 0:
+                return False
+        finally:
+            stop_group(proc)
+    # PostgreSQL's Unix-domain sockets need a short path. Keep only an alias
+    # in /tmp, and own it here so it is cleaned on both failures and signals.
+    socket_dir = (tempfile.TemporaryDirectory(prefix="fcc-pg-", dir="/tmp")
+                  if "postgresql" in wanted else nullcontext(None))
+    with (
+        socket_dir as short,
+        tempfile.TemporaryDirectory(prefix="fcc_projects_", dir=os.environ.get("TMPDIR", ROOT / "_build")) as tmp,
+    ):
+        pg_tmp = Path(short) / "work" if short else None
+        if pg_tmp is not None:
+            pg_tmp.symlink_to(Path(tmp) / "postgresql", target_is_directory=True)
+        return run_projects(wanted, min(6, args.jobs), log_dir, Path(tmp), pg_tmp)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ class Case:
         self.candidate = candidate
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith("LD_") and k not in ("FAS_ORACLE", "FAS_LD_THREADS")}
-        self.threads = self.rng.randint(1, 8)
+        self.threads = min(self.rng.randint(1, 8), int(os.environ.get("FAS_LD_TEST_MAX_THREADS", "8")))
         self.commands = [
             "#!/bin/sh",
             'cd -- "$(dirname -- "$0")" || exit 1',

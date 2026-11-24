@@ -19,7 +19,7 @@ def assemble(argv, *, ns, output, scratch, source=None, input=None):
                        scratch=scratch, input=input)
 
 
-def compile_command(argv, *, ns, scratch=None):
+def compile_command(argv, *, ns, scratch=None, **options):
     """Cache the ordinary driver forms used by the shell fixtures."""
     _, *args = argv
     output = None
@@ -54,7 +54,7 @@ def compile_command(argv, *, ns, scratch=None):
         return None
     if any(Path(p).suffix == ".a" and Path(p).open("rb").read(8) == b"!<thin>\n" for p in inputs):
         return None
-    return Cache().run(argv, ns=ns, deps=inputs, outs=[output], scratch=scratch, c=True)
+    return Cache().run(argv, ns=ns, deps=inputs, outs=[output], scratch=scratch, c=True, **options)
 
 
 def main():

@@ -25,7 +25,7 @@ status=0
 for f in "$ROOT"/test/fir_fuzz/*.fir; do
   if ! "$FIR_FUZZ" -keep "$KEEP" -file "$f" >/dev/null 2>&1; then
     echo "fir fuzz: regression $(basename "$f") failed"
-    "$FIR_FUZZ" -keep "$KEEP" -file "$f" -v 2>&1 | tail -5
+    "$FIR_FUZZ" -keep "$KEEP" -file "$f" -v || :
     status=1
   fi
 done

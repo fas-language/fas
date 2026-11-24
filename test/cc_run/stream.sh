@@ -88,4 +88,38 @@ test "$status" = 1
 grep -qF 'frontend failed late' frontend.err
 cmp main.o streamed.o
 
+# Check compile-and-link cleanup on both frontend and linker errors. The
+# linker receives live object descriptors without creating directory entries.
+mkdir scratch
+export TMPDIR="$work/scratch"
+status=0
+"$FCC" answer.c many.c -o missing 2> frontend-link.err || status=$?
+test "$status" = 1
+grep -qF 'frontend failed late' frontend-link.err
+test ! -e missing
+test -z "$(ls -A scratch)"
+
+cat > failing-ld <<'SH'
+#!/bin/sh
+set -eu
+for arg do
+    case "$arg" in
+        /proc/self/fd/*)
+            test -s "$arg"
+            test -z "$(ls -A "$TMPDIR")"
+            echo 'test linker: received anonymous object' >&2
+            exit 42
+            ;;
+    esac
+done
+exit 99
+SH
+chmod +x failing-ld
+status=0
+FCC_LD="$work/failing-ld" "$FCC" answer.c -o missing 2> linker.err || status=$?
+test "$status" = 1
+grep -qF 'test linker: received anonymous object' linker.err
+test ! -e missing
+test -z "$(ls -A scratch)"
+
 echo 'PASS: streamed Fir, saved temps, stdin and failure handling'
