@@ -80,6 +80,7 @@ struct Options {
     default_hidden bool
     suppress_warnings bool
     no_red_zone bool
+    general_regs_only bool
     kernel_model bool
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     relocatable bool
@@ -286,6 +287,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-static") { o.is_static = true }
         else if bytes_eq_c(word, c"-no-pie") { o.is_no_pie = true }
         else if bytes_eq_c(word, c"-pie") { o.is_no_pie = false }
+        else if bytes_eq_c(word, c"-mgeneral-regs-only") { o.general_regs_only = true }
         else if bytes_eq_c(word, c"-mno-red-zone") { o.no_red_zone = true }
         else if bytes_eq_c(word, c"-mred-zone") { o.no_red_zone = false }
         else if bytes_eq_c(word, c"-mcmodel=kernel") { o.kernel_model = true }
@@ -399,6 +401,35 @@ fn cli_pic_mode(o handle[Options]) u8 {
     return if o.is_shared { 3 } else { 5 }
 }
 
+fn cli_x86_features(o handle[Options], cpu handle[X86Cpu]) u64 {
+    features u64 = if o.x86_native { o.native_features } else { cpu.features }
+    last arr[X86_FLAG_COUNT, usize] = {}
+    for i usize in 0..o.x86_options.n {
+        feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
+        last[feature] = i + 1
+    }
+    for i usize in 0..o.x86_options.n {
+        option u32 = vec_get(&o.x86_options, i)
+        feature u32 = option >> 1
+        if last[zext[usize](feature) - 1] != i + 1 { continue }
+        features = x86_flag_apply(features, feature, (option & 1) == 0)
+    }
+    independent arr[2, addr] = {c"popcnt", c"crc32"}
+    for j usize in 0..2 {
+        name addr = independent[j]
+        feature u32 = x86_flag(bytes_c(name))
+        at usize = last[zext[usize](feature) - 1]
+        if at != 0 && (vec_get(&o.x86_options, at - 1) & 1) != 0 {
+            features = x86_flag_apply(features, feature, false)
+        }
+    }
+    if o.general_regs_only {
+        features = x86_flag_apply(features, x86_flag(bytes_c(c"sse")), false)
+        features = x86_flag_apply(features, x86_flag(bytes_c(c"mmx")), false)
+    }
+    return features
+}
+
 fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.names.gnu = o.gnu
     p.names.short_wchar = o.short_wchar
@@ -416,27 +447,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         p.timestamp_explicit = true
     }
     cpu handle[X86Cpu] = &X86_CPUS[zext[usize](o.x86_cpu)]
-    p.x86_features = if o.x86_native { o.native_features } else { cpu.features }
-    last arr[X86_FLAG_COUNT, usize] = {}
-    for i usize in 0..o.x86_options.n {
-        feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
-        last[feature] = i + 1
-    }
-    for i usize in 0..o.x86_options.n {
-        option u32 = vec_get(&o.x86_options, i)
-        feature u32 = option >> 1
-        if last[zext[usize](feature) - 1] != i + 1 { continue }
-        p.x86_features = x86_flag_apply(p.x86_features, feature, (option & 1) == 0)
-    }
-    independent arr[2, addr] = {c"popcnt", c"crc32"}
-    for j usize in 0..2 {
-        name addr = independent[j]
-        feature u32 = x86_flag(bytes_c(name))
-        at usize = last[zext[usize](feature) - 1]
-        if at != 0 && (vec_get(&o.x86_options, at - 1) & 1) != 0 {
-            p.x86_features = x86_flag_apply(p.x86_features, feature, false)
-        }
-    }
+    p.x86_features = cli_x86_features(o, cpu)
     if !o.no_builtins {
         for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
         try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
@@ -596,7 +607,9 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     }
 
     // Save raw search-dir strings from main's Pp so multi-file compilation re-interns them per TU
-    codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model}
+    features u64 = cli_x86_features(o, &X86_CPUS[zext[usize](o.x86_cpu)])
+    no_sse bool = !x86_has(features, bytes_c(c"sse"))
+    codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model, no_sse, o.general_regs_only}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }

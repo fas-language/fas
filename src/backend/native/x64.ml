@@ -82,11 +82,11 @@ let cond_num = function
 
 (* A memory operand: [base + disp], [rip + symbol + disp], or
    [base + index * scale + disp] where the base may be absent and the
-   displacement may name a symbol (absolute, sign-extended 32 bits: the
-   executable is not position independent and lives below 2 GiB). *)
+   displacement may name an absolute, sign-extended 32-bit symbol. *)
 type mem =
   | Base of reg * int
   | Rip of string * int
+  | Abs of string * int
   | Sib of {
       base : reg option;
       index : reg;
@@ -250,6 +250,11 @@ let mem_operand a reg_field = function
          offset + 4. *)
       a.relocs <- Rel32 { offset = pos a; symbol; addend } :: a.relocs;
       int32 a 0
+  | Abs (symbol, addend) ->
+      modrm a 0 reg_field 4;
+      byte a 0x25; (* no base or index *)
+      a.relocs <- Abs32s { offset = pos a; symbol; addend } :: a.relocs;
+      int32 a 0
   | Sib { base; index; scale; disp; sym } -> (
       let i = reg_num index in
       if i = 4 then invalid_arg "x64: rsp as an index";
@@ -287,7 +292,7 @@ let mem_operand a reg_field = function
 
 let mem_b_bits = function
   | Base (base, _) | Sib { base = Some base; _ } -> reg_num base
-  | Rip _ | Sib { base = None; _ } -> 0
+  | Rip _ | Abs _ | Sib { base = None; _ } -> 0
 
 let mem_x_bits = function Sib { index; _ } -> reg_num index | _ -> 0
 

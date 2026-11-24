@@ -44,7 +44,7 @@
         "fas-fir: internal error: ..." *)
 
 let usage_text =
-  "usage: fas-fir [-c [-fPIC | -fno-pic] [-mno-red-zone] [-mcmodel=kernel] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
+  "usage: fas-fir [-c [-fPIC | -fno-pic] [-mno-red-zone] [-mcmodel=kernel] [-mno-sse | -mgeneral-regs-only] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
   \              INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
   \  (no flag)    build a static position-independent executable (default output: a.out);\n\
   \               OBJECTS (.o and .a files) are linked in\n\
@@ -141,6 +141,7 @@ let hosted_link ~debug ~pie ~output ~extra ~iter_funcs ~has_asm m =
 
 let main () =
   let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and no_pic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
+  let no_sse = ref false and general_regs_only = ref false in
   let red_zone = ref true and kernel_model = ref false and fold_branches = ref false in
   let set_mode m flag =
     match !mode with
@@ -160,6 +161,8 @@ let main () =
     | "--pie" :: rest -> pie := Some true; args rest
     | "--no-pie" :: rest -> pie := Some false; args rest
     | "-g" :: rest -> debug := true; args rest
+    | "-mno-sse" :: rest -> no_sse := true; args rest
+    | "-mgeneral-regs-only" :: rest -> no_sse := true; general_regs_only := true; args rest
     | "-mno-red-zone" :: rest -> red_zone := false; args rest
     | "-mcmodel=kernel" :: rest -> kernel_model := true; args rest
     | "-fPIC" :: rest -> fpic := true; no_pic := false; args rest
@@ -185,8 +188,8 @@ let main () =
   let mode, flag = Option.value !mode ~default:(Exe, "") in
   if !extra <> [] && mode <> Exe then usage_error "%s takes no object inputs (%s)" flag (List.hd (List.rev !extra));
   if (!fpic || !no_pic) && mode <> Obj then usage_error "-fPIC and -fno-pic are for objects (-c)";
-  if (not !red_zone || !kernel_model) && (mode <> Obj || !llvm) then
-    usage_error "-mno-red-zone and -mcmodel=kernel require native object output (-c)";
+  if (not !red_zone || !kernel_model || !no_sse) && (mode <> Obj || !llvm) then
+    usage_error "x86-64 code-model and register options require native object output (-c)";
   if !pie <> None && mode <> Exe then usage_error "--pie and --no-pie are for executables";
   if !hosted && mode <> Exe then usage_error "--hosted is for executables";
   (* --llvm links through the C compiler: it is always hosted *)
@@ -256,7 +259,7 @@ let main () =
                 Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
               in
               Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~red_zone:!red_zone ~kernel_model:!kernel_model
-                ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
+                ~no_sse:!no_sse ~general_regs_only:!general_regs_only ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
           | Exe ->
               let output = Option.value !output ~default:"a.out" in
               if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) ~iter_funcs ~has_asm m

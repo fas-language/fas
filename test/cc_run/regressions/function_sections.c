@@ -5,10 +5,10 @@ static int ordinary(int n)
     return n + 3;
 }
 
-__attribute__((section(".fas_test_exec2"), noinline))
+__attribute__((section(".fas_" "test_exec2"), noinline))
 static int in_other_section(int n)
 {
-    static int (*record)(int) __attribute__((section(".fas_test_init_record"))) = ordinary;
+    static int (*record)(int) __attribute__((section(".fas_" "test_init_" "record"))) = ordinary;
     typedef unsigned int vector __attribute__((vector_size(32)));
     vector lanes = { record(n), 1, 2, 3, 4, 5, 6, 7 };
     vector doubled = lanes + lanes;
@@ -16,7 +16,7 @@ static int in_other_section(int n)
     return (int)(((wide << 100) + doubled[1]) >> 100);
 }
 
-__attribute__((section(".fas_test_exec1"), noinline))
+__attribute__((section(".fas_test_" "exec1"), noinline))
 static int in_executable_section(int n)
 {
     int same_label;

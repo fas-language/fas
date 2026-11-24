@@ -69,6 +69,9 @@ let mem fr (m : addr) =
   | Bsym s ->
       if m.index <> None then invalid_arg "Mir_emit: rip-relative with an index";
       A.Rip (s, m.disp)
+  | Babs s ->
+      if m.index <> None then invalid_arg "Mir_emit: absolute symbol with an index";
+      A.Abs (s, m.disp)
   | Bnone -> (
       match m.index with
       | Some i -> A.Sib { base = None; index = gr i; scale = m.scale; disp = m.disp; sym = None }
@@ -169,6 +172,7 @@ let render_asm fr uid (x : asm) =
         match m with
         | A.Base (r, d) -> ([ A.reg_name r ], d, None)
         | Rip (s, d) -> ([ "rip" ], d, Some s)
+        | Abs (s, d) -> ([], d, Some s)
         | Sib { base; index; scale; disp; sym } ->
             (Option.to_list (Option.map A.reg_name base) @ [ Printf.sprintf "%s*%d" (A.reg_name index) scale ], disp, sym)
       in
@@ -181,6 +185,7 @@ let render_asm fr uid (x : asm) =
       match m with
       | A.Base (r, d) -> Printf.sprintf "%d(%%%s)" (d + extra) (A.reg_name r)
       | Rip (s, d) -> Printf.sprintf "%s(%%rip)" (sym_off s (Int64.of_int (d + extra)))
+      | Abs (s, d) -> sym_off s (Int64.of_int (d + extra))
       | Sib { base; index; scale; disp; sym } ->
           let d =
             match sym with
@@ -1174,7 +1179,7 @@ let prepare (m : F.modul) =
    static PIE has no dynamic loader to do it). [debug]: add DWARF line
    tables (Mir_dwarf); the allocated sections are the same either way. *)
 let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?(has_asm = true)
-    ~startup ~pic ?(self_relocate = false) (m : F.modul) =
+    ~startup ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
@@ -1227,7 +1232,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
       iter
         (fun (fn : F.func) ->
           if fn.defined then begin
-            let mf = Mir_isel.select ~pic ~tls_gd env fn in
+            let mf = Mir_isel.select ~pic ~tls_gd ~kernel_model ~no_sse ~general_regs_only env fn in
             if dump then prerr_string (Mir.to_string mf);
             Mir_export.add_func mf;
             let ra =
@@ -1620,14 +1625,14 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
 let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone
-    ?(kernel_model = false) ?iter_funcs ?has_asm m =
-  (* RIP-relative symbol addresses work in the high-half 2 GiB kernel model.
-     Avoid GOT indirection for external symbols in this freestanding model. *)
+    ?(kernel_model = false) ?no_sse ?general_regs_only ?iter_funcs ?has_asm m =
+  (* The kernel may run early code via an identity mapping. Normal C
+     symbol addresses must still be the link-time high-half addresses. *)
   if kernel_model && tls_gd = Some true then
     Error "native backend: -mcmodel=kernel is incompatible with -fPIC"
   else
     generate ?debug ?tls_gd ?red_zone ?iter_funcs ?has_asm ~startup:false
-      ~pic:(pic && not kernel_model) m
+      ~pic:(pic && not kernel_model) ~kernel_model ?no_sse ?general_regs_only m
 
 (* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?debug ?iter_funcs ?has_asm ?(inputs = []) ?options ~output m =

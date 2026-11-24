@@ -28,7 +28,5 @@ files. LLVM 22 supplies the link and object utilities for this stage.
 
 The fcc configuration sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.
-This Kbuild diagnostic setting does not change which code is built. The
-Clang control reaches init and powers off. The fcc build links `vmlinux`
-and produces `bzImage`. The fcc image has yet to reach the serial console
-in QEMU.
+This Kbuild diagnostic setting does not change which code is built. Both the
+Clang control and the fcc tinyconfig image reach init and power off in QEMU.

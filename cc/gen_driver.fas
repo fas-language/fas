@@ -238,6 +238,8 @@ value struct DrvCodegenOptions {
     debug bool
     no_red_zone bool
     kernel_model bool
+    no_sse bool
+    general_regs_only bool
 }
 
 fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input i32) i64 fails {
@@ -249,6 +251,8 @@ fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input 
     if options.debug { vec_push(&args, c"-g") }
     if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
     if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }
+    if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
+    else if options.no_sse { vec_push(&args, c"-mno-sse") }
     if options.pic == 1 { vec_push(&args, c"-fno-pic") }
     // The default Fir object model is position independent with initial-exec
     // TLS. A shared object instead needs general-dynamic TLS.

@@ -41,6 +41,7 @@ type base =
   | Bout  (** the outgoing argument area at rsp *)
   | Bin  (** the incoming stack arguments, at rbp + 16 *)
   | Bsym of string  (** rip-relative to a symbol; never with an index *)
+  | Babs of string  (** a sign-extended link-time symbol address *)
 
 type addr = { base : base; index : reg option; scale : int; disp : int }
 
@@ -500,7 +501,8 @@ let addr_s a =
     | Bslot s -> [ Printf.sprintf "slot%d" s ]
     | Bout -> [ "out" ]
     | Bin -> [ "in" ]
-    | Bsym s -> [ "@" ^ s ])
+    | Bsym s -> [ "@" ^ s ]
+    | Babs s -> [ "abs @" ^ s ])
     @ (match a.index with Some r -> [ Printf.sprintf "%s*%d" (reg_s r) a.scale ] | None -> [])
     @ if a.disp <> 0 then [ string_of_int a.disp ] else []
   in

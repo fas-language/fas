@@ -83,7 +83,7 @@ let writes_flags = function
 
 let remat = function
   | Movi _ | Tlsoff _ -> Some 1
-  | Lea (_, { base = Bslot _ | Bsym _ | Bnone | Bin; index = None; _ }) -> Some 1
+  | Lea (_, { base = Bslot _ | Bsym _ | Babs _ | Bnone | Bin; index = None; _ }) -> Some 1
   | Got _ | Tp _ -> Some 2
   | _ -> None
 

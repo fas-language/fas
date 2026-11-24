@@ -374,18 +374,23 @@ fn gen_attr_str_arg(attrs handle[Attr], name addr, out handle[Buf]) bool {
     a handle[Attr] = attrs
     while a != null {
         if pa_attr_name(gc.p, a, name) && a.args.n > 0 {
-            t Token = a.args.p[Token]
-            if t.kind == TK_STR {
-                src Bytes = cc_name(gc.p.names, t.payload)
-                // Strip surrounding quotes if present
-                start usize = 0
-                while start < src.n && src.p[u8, start] != 34 { start += 1 }
-                if start < src.n { start += 1 }
-                end usize = src.n
-                if end > start && src.p[u8, end - 1] == 34 { end -= 1 }
-                buf_append(out, bytes_sub(src, start, end - start))
-                return true
+            start usize = 0
+            end usize = a.args.n
+            while start + 1 < end && pa_is(gc.p, a.args.p[Token, start], c"(") &&
+                pa_is(gc.p, a.args.p[Token, end - 1], c")") {
+                start += 1
+                end -= 1
             }
+            // Adjacent literals form one name, including macro-generated
+            // names used by linker scripts to collect ordered sections.
+            for i usize in start..end {
+                if a.args.p[Token, i].kind != TK_STR { return false }
+            }
+            for i usize in start..end {
+                t Token = a.args.p[Token, i]
+                gen_decode_string_piece(cc_name(gc.p.names, t.payload), 1, out)
+            }
+            return true
         }
         a = a.next
     }

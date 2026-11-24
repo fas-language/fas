@@ -496,6 +496,25 @@ fn gen_emit_asm_input(b handle[Buf], input handle[GenAsmInput]) void {
     } else { gen_emit_val(b, input.val_id) }
 }
 
+// Tied GP operands share a register even if the C lvalues have different
+// widths. Fir represents both sides at the wider type and narrows the
+// result only when storing back to C.
+fn gen_asm_gp_width(t u32) u32 {
+    if ty_is_ptr(t) { return 64 }
+    return if ty_is_integer(t) { ty_int_bits(t) } else { 0 }
+}
+
+fn gen_store_asm_output(value u32, ptr u32, asm_ty u32, operand handle[Ast]) void {
+    expr handle[Ast] = operand.b
+    t u32 = expr.ty
+    align u64 = ty_align(t)
+    if expr.kind == ND_MEMBER && expr.a != null {
+        parent_align u64 = ty_align(expr.a.ty)
+        if parent_align < align { align = parent_align }
+    }
+    gen_store_ty(gen_convert(value, asm_ty, t), ptr, align, gen_is_volatile(t), false)
+}
+
 // A GNU local register binding constrains direct extended-asm operands.
 // The ordinary C value still lives in its normal local slot.
 fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
@@ -606,10 +625,18 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         gen_asm_constraint(inp, &cb)
         cs Bytes = buf_bytes(&cb)
         is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
-        // Check for matching constraint "0".."9" tied to an output of a different width
-        tied_idx i32 = -1
-        if cs.n == 1 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
-            tied_idx = zext[i32](cs.p[u8] - 48)
+        tied_idx usize = out_tids.n
+        if cs.n > 0 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
+            tied_idx = bytes_to_u64(cs) catch out_tids.n
+        } else if cs.n > 2 && cs.p[u8] == 91 && cs.p[u8, cs.n - 1] == 93 {
+            name Bytes = bytes_sub(cs, 1, cs.n - 2)
+            for i usize in 0..out_nodes.n {
+                node handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+                if node.op != 0 && bytes_eq(name, cc_name(gc.p.names, node.op)) {
+                    tied_idx = i
+                    break
+                }
+            }
         }
         is_sp bool = bytes_eq_c(cs, c"{rsp}")
         imm_symbol bool = bytes_eq_c(cs, c"i")
@@ -635,11 +662,18 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                            else if is_m { try gen_lvalue(inp.b) }
                            else { try gen_rvalue(inp.b) }
         }
-        if !is_m && tied_idx >= 0 && zext[usize](bitcast[u32](tied_idx)) < out_tids.n {
-            ot u32 = vec_get(&out_tids, zext[usize](bitcast[u32](tied_idx)))
-            if ty_unqual(ot) != ty_unqual(input.ty) {
-                input.val_id = gen_convert(input.val_id, input.ty, ot)
-                input.ty = ot
+        if !is_m && tied_idx < out_tids.n {
+            result_ty u32 = vec_get(&out_tids, tied_idx)
+            input_width u32 = gen_asm_gp_width(input.ty)
+            result_width u32 = gen_asm_gp_width(result_ty)
+            if result_width != 0 && result_width < input_width && input_width <= 64 {
+                if vec_get(&out_is_rw, tied_idx) != 0 {
+                    out_old_vs.p[u32, tied_idx] = gen_convert(vec_get(&out_old_vs, tied_idx), result_ty, input.ty)
+                }
+                out_tids.p[u32, tied_idx] = input.ty
+            } else if ty_unqual(result_ty) != ty_unqual(input.ty) {
+                input.val_id = gen_convert(input.val_id, input.ty, result_ty)
+                input.ty = result_ty
             }
         }
         inp = inp.next
@@ -796,8 +830,8 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 for j usize in 0..out_res_vs.n {
                     rv u32 = vec_get(&out_res_vs, j)
                     if rv != 0 && vec_get(&out_ptrs, j) != 0 {
-                        ot u32 = vec_get(&out_tids, j)
-                        gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                        onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, j))
+                        gen_store_asm_output(rv, vec_get(&out_ptrs, j), vec_get(&out_tids, j), onode)
                     }
                 }
                 gen_term_jump(vec_get(&goto_reals, i))
@@ -808,8 +842,8 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             for j usize in 0..out_res_vs.n {
                 rv u32 = vec_get(&out_res_vs, j)
                 if rv != 0 && vec_get(&out_ptrs, j) != 0 {
-                    ot u32 = vec_get(&out_tids, j)
-                    gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
+                    onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, j))
+                    gen_store_asm_output(rv, vec_get(&out_ptrs, j), vec_get(&out_tids, j), onode)
                 }
             }
         }
@@ -916,14 +950,8 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     for i usize in 0..out_res_vs.n {
         rv u32 = vec_get(&out_res_vs, i)
         if rv != 0 && vec_get(&out_ptrs, i) != 0 {
-            t u32 = vec_get(&out_tids, i)
-            onode_s handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
-            al_s u64 = ty_align(t)
-            if onode_s.b != null && onode_s.b.kind == ND_MEMBER && onode_s.b.a != null {
-                pal_s u64 = ty_align(onode_s.b.a.ty)
-                if pal_s < al_s { al_s = pal_s }
-            }
-            gen_store_ty(rv, vec_get(&out_ptrs, i), al_s, gen_is_volatile(t), false)
+            onode handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
+            gen_store_asm_output(rv, vec_get(&out_ptrs, i), vec_get(&out_tids, i), onode)
         }
     }
 }

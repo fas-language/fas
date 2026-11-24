@@ -20,6 +20,8 @@ for file in "$src"/*.c; do
         fp_rounding.c) flags=(-frounding-math -lm) ;;
         fp_exceptions.c) flags=(-lm) ;;
         kernel_constant_calls.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
+        kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
+        no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
         libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
         short_wchar.c) flags=(-fshort-wchar) ;;
@@ -40,6 +42,24 @@ for file in "$src"/*.c; do
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then
         llvm-nm-22 "$work/fcc" > "$work/symbols"
         grep -q ' retained_setting$' "$work/symbols"
+    fi
+    if [[ ${file##*/} == kernel_symbol_address.c ]]; then
+        for compiler in "${CLANG:-clang-22}" "$FCC"; do
+            "$compiler" -ffreestanding -fno-pie -mcmodel=kernel -c "$file" -o "$work/address.o"
+            readelf -Wr "$work/address.o" > "$work/relocs"
+            grep -E -q 'R_X86_64_32S +[0-9a-f]+ kernel_data ' "$work/relocs"
+            grep -E -q 'R_X86_64_PC32 +[0-9a-f]+ kernel_data ' "$work/relocs"
+        done
+    fi
+    if [[ ${file##*/} == no_sse_variadic.c ]]; then
+        for exe in "$work/clang" "$work/fcc"; do
+            llvm-objdump-22 --disassemble-symbols=sum "$exe" > "$work/sum"
+            grep -q '<sum>:' "$work/sum"
+            if grep -Eiq '%(xmm|ymm|zmm|st\()' "$work/sum"; then
+                echo "unexpected FP or vector register in $exe" >&2
+                exit 1
+            fi
+        done
     fi
     if [[ ${file##*/} == function_sections.c ]]; then
         for exe in "$work/clang" "$work/fcc"; do

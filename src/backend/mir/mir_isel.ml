@@ -28,6 +28,8 @@ type ctx = {
   fn : F.func;
   mf : Mir.func;
   pic : bool;
+  kernel_model : bool;
+  no_sse : bool;
   tls_gd : bool;  (** thread-locals through __tls_get_addr (shared-library objects) *)
   local_syms : (string, unit) Hashtbl.t;
       (** symbols defined here that no other module can preempt *)
@@ -124,8 +126,9 @@ let fconst c dbl (x : float) =
   fbits c dbl (if dbl then Int64.bits_of_float x else Int64.of_int32 (Int32.bits_of_float x))
 
 (* The address of a symbol plus an addend: through the GOT when another
-   module may define (or interpose) it, else rip-relative; a thread-local
-   variable's is the thread pointer plus its offset. Only lea after
+   module may define (or interpose) it, else rip-relative in the small model
+   or absolute in the kernel model. A TLS address is the thread pointer
+   plus its offset. Only lea after
    the GOT load, so materializing it never touches the flags. *)
 let sym_addr c name (addend : int64) =
   let t = fresh c Gpr in
@@ -154,10 +157,13 @@ let sym_addr c name (addend : int64) =
     emit c (Got (t, name));
     add_addend ()
   end
-  else if fits32 addend then emit c (Lea (t, { (at (Bsym name)) with disp = Int64.to_int addend }))
   else begin
-    emit c (Lea (t, at (Bsym name)));
-    add_addend ()
+    let base = if c.kernel_model then Babs name else Bsym name in
+    if fits32 addend then emit c (Lea (t, { (at base) with disp = Int64.to_int addend }))
+    else begin
+      emit c (Lea (t, at base));
+      add_addend ()
+    end
   end;
   t
 
@@ -1636,11 +1642,12 @@ let params c =
   end else if sig_.variadic then begin
     (* the register save area: rdi..r9 at 0..40, xmm0..7 at 48, 64, ... 160
        (all 16 bytes: a vector in a struct reads both halves back) *)
-    let s = new_slot c.mf ~size:176 ~align:16 in
+    let s = new_slot c.mf ~size:(if c.no_sse then 48 else 176) ~align:16 in
     Array.iteri (fun i r -> emit c (Store (8, slot_addr ~disp:(8 * i) s, G r))) gpr_args;
-    for i = 0 to 7 do
-      emit c (Xstore (slot_addr ~disp:(48 + (16 * i)) s, X i))
-    done;
+    if not c.no_sse then
+      for i = 0 to 7 do
+        emit c (Xstore (slot_addr ~disp:(48 + (16 * i)) s, X i))
+      done;
     let in_parts k = List.fold_left (fun n p -> match p with Pregs (_, l) -> n + k (count_parts (List.map (fun (o, e, _) -> (o, e)) l)) | _ -> n) 0 plans in
     let gp = List.length (List.filter (function Pscalar (_, _, Lreg (G _)) -> true | _ -> false) plans)
              + in_parts fst
@@ -1648,7 +1655,7 @@ let params c =
     and fp = List.length (List.filter (function Pscalar (_, _, Lreg (X _)) -> true | _ -> false) plans)
              + in_parts snd
     in
-    c.va <- Some (gp, fp, stack, s)
+    c.va <- Some (gp, (if c.no_sse then 8 else fp), stack, s)
   end;
   let ps = (F.block c.fn F.entry).params in
   if Array.length ps <> List.length plans then unsupported "entry parameters do not match the signature";
@@ -2729,13 +2736,13 @@ let promotable_allocas (fn : F.func) =
       cells
   end
 
-let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
+let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(tls_gd = false) (e : env) (fn : F.func) =
   let mf = Mir.create ~ms_abi:fn.sig_.ms_abi fn.name in
   for _ = 1 to F.num_blocks fn do
     ignore (new_block mf)
   done;
   let c =
-    { fn; mf; pic; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
+    { fn; mf; pic; kernel_model; no_sse; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
       cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
       frame = Hashtbl.create 16;
       f80 = Hashtbl.create 8;
@@ -2780,4 +2787,12 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
                | _ -> []))
          fn.vars);
   mf.zeroize <- F.has fn.fattrs F.fa_secret || Hashtbl.length mf.marks > 0;
+  if no_sse &&
+     (mf.ms_abi || mf.zeroize || Dynarray.exists ((=) Xmm) mf.vcls ||
+      Dynarray.exists (fun b -> List.exists (fun i ->
+        List.exists (function X _ -> true | _ -> false) (all_regs i)) b.code) mf.blocks)
+  then unsupported "@%s: SSE registers are disabled" fn.name;
+  if general_regs_only && Dynarray.exists (fun b ->
+      List.exists (function X87 _ -> true | _ -> false) b.code) mf.blocks
+  then unsupported "@%s: x87 registers are disabled" fn.name;
   mf
