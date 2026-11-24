@@ -110,12 +110,50 @@ hash-map lookups. About 8% is in kernel page faults and page zeroing.
    executable in one process, finished sections go straight to fas-ld's
    input structures without writing `.o` files. Separate `.o` files remain
    fully supported.
-5. **Parallelism has a fixed shape.** One thread runs the front end.
-   Finished functions go to a pool of backend workers (`lib/thread.fas`).
-   The output order is deterministic: each function's result goes to its
-   own slot and is merged in source order. Large headers do not block the
-   pipeline.
-6. **Stage-local data never leaks across the boundary.** The backend
+5. **One worker pool runs every stage.** Workers have no fixed front-end
+   or backend role. The pool starts on the main thread alone and wakes
+   workers only once a file is large or a second import appears. Each
+   worker has a work-stealing deque: it runs its own newest work first,
+   so an IR slab it just filled is compiled while still in its cache, and
+   idle workers steal the oldest work. Workers spin briefly before
+   sleeping. Work kinds, highest priority first:
+   - **Load and scan.** Read a file into the source arena with `read`
+     (not `mmap` for small files), followed by 64 zero bytes so the lexer
+     needs no end check. Scan only the file's head for imports (the
+     language requires file imports at the top) and queue unseen files.
+   - **C header import.** One job per (header, macro state), shared by
+     every file that uses it. Large headers never stall other work.
+   - **Backend.** Compile one IR slab into thread-local code chunks, then
+     recycle the slab.
+   - **Front end.** Parse and check, large files before small ones.
+6. **Fas checking runs in two phases with one barrier.** All files in a
+   `use` closure share one namespace and imports may be cyclic, so
+   waiting on a file's imports is not enough. Phase A collects every
+   file's top-level declarations in parallel. Phase B, after the barrier,
+   checks and lowers function bodies fully in parallel. Types and
+   constants resolve on demand, each with a state (not started, in
+   progress, done) that also detects cycles, since constants can call
+   functions while compiling. Generic instances are deduplicated in one
+   shared table keyed by the generic and its type arguments; the first
+   worker to ask compiles the instance.
+7. **Slabs bound memory.** The front end packs several small functions
+   into one IR slab of about 32–64 KB before handing it over; a huge
+   function is handed over alone. A worker that finds no free slab
+   compiles a queued slab itself before continuing, so memory stays
+   bounded and nothing deadlocks.
+8. **Output is deterministic.** Code chunks, diagnostics and generic
+   instances are ordered by a stable key (file index, function index,
+   generic key), never by which thread finished first.
+9. **The link is parallel.** Symbols are resolved first. A prefix sum
+   over the sorted chunks assigns final addresses, then all workers copy
+   chunks and patch relocations into the output buffer in parallel.
+   `.eh_frame`, DWARF and the build-ID hash are built per chunk as well.
+   External `.o` and `.a` inputs enter the same structures.
+10. **-O2 inlining is still open.** A callee may not be compiled yet when
+    its caller is. The likely shape: stream at -O0 and -O1, and at -O2
+    keep small inline candidates in a summary table or schedule by call
+    graph. The optimizer design (optimizer-lab) decides.
+11. **Stage-local data never leaks across the boundary.** The backend
    receives Fir plus the type and symbol tables it references. It never
    sees AST nodes. That keeps C-specific front-end code from affecting the
    backend, and the reverse.
