@@ -53,6 +53,27 @@ fn se_fold_bswap(t Token, ty u32, arg handle[Ast]) handle[Ast] {
     return se_int(t.loc, ty, result)
 }
 
+fn se_clz_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_clz") { return TY_UINT }
+    if bytes_eq_c(name, c"__builtin_clzl") { return TY_ULONG }
+    if bytes_eq_c(name, c"__builtin_clzll") { return TY_ULLONG }
+    return TY_INVALID
+}
+
+// The fixed-width clz builtins first convert to their unsigned argument
+// type. A zero argument has no defined constant result.
+fn se_fold_clz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(ty, arg).value
+    if value == 0 { return null }
+    result u64 = zext[u64](ty_int_bits(ty))
+    while value != 0 {
+        result -= 1
+        value >>= 1
+    }
+    return se_int(t.loc, TY_INT, result)
+}
+
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
     name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
@@ -392,7 +413,7 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
         try se_conversion(p, ptr, args)
         try se_conversion(p, ptr, args.next)
     } else if bytes_eq_c(name, c"__builtin_set_flt_rounds") || bytes_eq_c(name, c"__builtin_popcount") ||
-        bytes_eq_c(name, c"__builtin_clz") || bytes_eq_c(name, c"__builtin_ctz") {
+        bytes_eq_c(name, c"__builtin_ctz") {
         try se_builtin_count(p, t, count, 1, 1)
         try se_conversion(p, TY_INT, args)
     } else if bytes_eq_c(name, c"__builtin_cpu_supports") || bytes_eq_c(name, c"__builtin_cpu_is") {

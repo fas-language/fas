@@ -1635,12 +1635,9 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         r u32 = gen_unop(c"popcnt", pt, v)
         return gen_convert(r, pt, n.ty)
     }
-    if bytes_eq_c(bname, c"__builtin_clz") || bytes_eq_c(bname, c"__builtin_clzl") ||
-       bytes_eq_c(bname, c"__builtin_clzll") || bytes_eq_c(bname, c"__builtin_clzg") {
-        pt u32 = if bytes_eq_c(bname, c"__builtin_clzg") { a0.ty }
-                 else if bytes_eq_c(bname, c"__builtin_clzll") { TY_ULLONG }
-                 else if bytes_eq_c(bname, c"__builtin_clzl") { TY_ULONG }
-                 else { TY_UINT }
+    clz_ty u32 = se_clz_argument_type(bname)
+    if clz_ty != TY_INVALID || bytes_eq_c(bname, c"__builtin_clzg") {
+        pt u32 = if clz_ty == TY_INVALID { a0.ty } else { clz_ty }
         v u32 = gen_convert(try gen_rvalue(a0), a0.ty, pt)
         r u32 = gen_convert(gen_unop(c"clz", pt, v), pt, n.ty)
         if a1 != null {

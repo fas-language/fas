@@ -150,6 +150,7 @@ struct GenCtx {
     common bool
     trapv bool
     stack_protector u8
+    kernel_model bool
     stack_guard u32
 
     // Inline definitions emitted only if referenced
@@ -1340,13 +1341,15 @@ fn gen_term_br(cond_v u32, t_blk u32, f_blk u32) void {
     gen_term_br_args(cond_v, t_blk, 0, f_blk, 0)
 }
 
-// x86-64 Linux stores the process canary in the TCB at %fs:0x28.
+// x86-64 Linux stores the userspace canary in the TCB and the kernel
+// canary in per-CPU data. Both use offset 0x28.
 fn gen_read_stack_guard() u32 {
     result u32 = gen_new_val()
     b handle[Buf] = gen_cur_buf()
     buf_str(b, c"  ")
     gen_emit_val(b, result)
-    buf_str(b, c" = asm volatile \"movq %%fs:40, %0\" out(\"=r\" i64)\n")
+    buf_str(b, if gc.kernel_model { c" = asm volatile \"movq %%gs:40, %0\" out(\"=r\" i64)\n" }
+               else { c" = asm volatile \"movq %%fs:40, %0\" out(\"=r\" i64)\n" })
     return result
 }
 

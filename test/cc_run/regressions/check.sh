@@ -20,6 +20,7 @@ for file in "$src"/*.c; do
         fp_rounding.c) flags=(-frounding-math -lm) ;;
         fp_exceptions.c) flags=(-lm) ;;
         kernel_constant_calls.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
+        kernel_stack_canary.c) flags=(-fno-pie -no-pie -mcmodel=kernel -fstack-protector-all) ;;
         kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
         no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
         libm_min_max.c) flags=(-lm) ;;
@@ -42,6 +43,12 @@ for file in "$src"/*.c; do
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then
         llvm-nm-22 "$work/fcc" > "$work/symbols"
         grep -q ' retained_setting$' "$work/symbols"
+    fi
+    if [[ ${file##*/} == kernel_stack_canary.c ]]; then
+        for exe in "$work/clang" "$work/fcc"; do
+            objdump --disassemble=protected_function "$exe" > "$work/canary"
+            grep -qF '%gs:0x28' "$work/canary"
+        done
     fi
     if [[ ${file##*/} == kernel_symbol_address.c ]]; then
         for compiler in "${CLANG:-clang-22}" "$FCC"; do

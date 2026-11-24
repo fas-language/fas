@@ -30,3 +30,15 @@ The fcc configuration sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.
 This Kbuild diagnostic setting does not change which code is built. Both the
 Clang control and the fcc tinyconfig image reach init and power off in QEMU.
+
+## Defconfig and the BusyBox boot check
+
+Run `bash test/cc_kernel.sh fcc defconfig` to try upstream
+`x86_64_defconfig` under `cc-tests/kernel-build/defconfig-fcc`. The script
+builds a static BusyBox from the pinned source with Clang and packages its
+ash shell and poweroff applet. The initramfs boots into the shell, runs a
+command that prints `FCC_KERNEL_SHELL_OK`, and powers off.
+
+Upstream defconfig enables `CONFIG_IA32_EMULATION`, which builds the compat
+vDSO's C files with `-m32`. fcc currently targets x86-64 LP64, so the
+defconfig build stops at `arch/x86/entry/vdso/vdso32/vclock_gettime.o`.

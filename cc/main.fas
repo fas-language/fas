@@ -806,6 +806,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     gctx.common = o.common
     gctx.trapv = o.overflow_mode == 2
     gctx.stack_protector = o.stack_protector
+    gctx.kernel_model = o.kernel_model
     defer { gen_free(&gctx) }
     parser.on_function = &gen_on_function_cb
     parser.on_object = &gen_on_object_cb
