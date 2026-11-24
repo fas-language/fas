@@ -554,6 +554,9 @@ fn gen_lvalue(n handle[Ast]) u32 fails {
     if n == null { return gen_const_zero(TY_NULLPTR) }
     if n.kind == ND_NAME && n.decl != null {
         s handle[Symbol] = n.decl
+        if gen_stack_pointer_symbol(s) {
+            try pa_error(gc.p, n.loc, c"the stack pointer register variable has no address")
+        }
         key U64Key = {addr_bits(handle_addr(s))}
         // VLA local? Load pointer from its slot
         vla_slot u32 = table_get(&gc.vla_ptrs, &key) catch 0
@@ -812,6 +815,14 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
         return try gen_lvalue(n)
     }
     if n.kind == ND_NAME {
+        if gen_stack_pointer_symbol(n.decl) {
+            v u32 = gen_new_val()
+            b handle[Buf] = gen_cur_buf()
+            buf_str(b, c"  ")
+            gen_emit_val(b, v)
+            buf_str(b, c" = asm volatile \"movq %%rsp, %q0\" out(\"=r\" i64)\n")
+            return gen_convert(v, TY_ULONG, n.ty)
+        }
         if n.decl != null && n.decl.storage == SC_ENUMERATOR {
             if n.wide != null && ty_int_bits(n.ty) > 64 {
                 return gen_const_wide_int(n.ty, n.wide, ty_int_bits(n.ty))
@@ -962,9 +973,9 @@ fn gen_unary(n handle[Ast]) u32 fails {
         return gen_const_zero(n.ty)
     }
     if bytes_eq_c(op, c"&&") {
-        // GNU address-of-label `&&label` (n.value holds interned label name)
-        if n.value != 0 {
-            blk_id u32 = gen_get_label_block_by_name(trunc[u32](n.value))
+        // GNU address-of-label `&&label` resolves the exact scoped label.
+        if n.extra != null {
+            blk_id u32 = gen_get_label_block(handle_from_addr(n.extra))
             gen_mark_addr_taken(blk_id)
             return gen_emit_blockaddr(blk_id)
         }
@@ -1247,6 +1258,13 @@ fn gen_binary(n handle[Ast]) u32 fails {
 }
 
 fn gen_cond_expr(n handle[Ast]) u32 fails {
+    // An unevaluated arm can contain asm with an immediate constraint that
+    // is only valid in the selected arm of a __builtin_constant_p test.
+    if ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        chosen handle[Ast] = if se_truth(n.a) { n.b } else { n.c }
+        v u32 = try gen_rvalue(chosen)
+        return gen_convert(v, se_decay(chosen.ty), n.ty)
+    }
     is_void bool = ty_is_void(n.ty)
     is_mem bool = gen_is_mem_ty(n.ty)
     res_slot u32 = 0
@@ -1319,14 +1337,18 @@ fn gen_call(n handle[Ast]) u32 fails {
     if n.a.kind == ND_NAME && n.a.decl != null && ty_is_func(n.a.decl.ty) {
         is_direct = true
         direct_sym = n.a.decl
-        gen_note_extern_fn(direct_sym)
     } else if n.a.kind == ND_UNARY && n.a.a != null && n.a.a.kind == ND_NAME && n.a.a.decl != null && ty_is_func(n.a.a.decl.ty) {
         op Bytes = cc_name(gc.p.names, n.a.op)
         if bytes_eq_c(op, c"&") || bytes_eq_c(op, c"*") {
             is_direct = true
             direct_sym = n.a.a.decl
-            gen_note_extern_fn(direct_sym)
         }
+    }
+
+    if is_direct {
+        definition handle[Ast] = gen_inline_def(direct_sym)
+        if definition != null { return try gen_inline_call(n, definition) }
+        gen_note_extern_fn(direct_sym)
     }
 
     // Special case: direct call to `alloca(...)` when not defined in this TU

@@ -769,6 +769,9 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
     try Fir_asm.parse ~labels ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
     with Fir_asm.Bad m -> unsupported "@%s: %s" cx.f.name m
   in
+  if Array.exists (fun (c : Fir_asm.con) -> List.mem "rsp" c.regs) st.outs
+     || Array.exists (fun (c : Fir_asm.con) -> List.mem "rsp" c.regs) st.ins then
+    unsupported "@%s: an explicit rsp operand requires the native backend" cx.f.name;
   let sort l = List.sort_uniq compare l in
   (* registers -> LLVM letters *)
   let reg_letters regs =

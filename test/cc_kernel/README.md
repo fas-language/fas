@@ -20,25 +20,13 @@ writes `FCC_KERNEL_INIT_OK` to ttyS0 and the kernel powers off. The full
 console transcript is saved in `boot.log`.
 
 The CC adapter selects Kbuild's Clang configuration, runs Clang on assembly
-inputs, and sends target C to fcc. Three Kbuild offset generators expect
-GNU assembly from `-S`. For those inputs the adapter extracts their
-`.ascii` layout markers from fcc's object files. LLVM 22 supplies the link
-and object utilities for this stage.
+inputs and on `-m16` C in `arch/x86/boot` and `arch/x86/realmode`. All
+other target C goes to fcc, including the x86-64 decompressor. Three
+Kbuild offset generators expect GNU assembly from `-S`. For those inputs
+the adapter extracts their `.ascii` layout markers from fcc's object
+files. LLVM 22 supplies the link and object utilities for this stage.
 
-The Clang control reaches init and powers off. The fcc build has several
-remaining blockers:
-
-- `arch/x86/boot/a20.c` and the other real-mode setup files use `-m16`.
-  The `bzImage` setup link needs ELF32 i386 objects. fcc targets LP64.
-- `arch/x86/include/asm/cpufeature.h` uses `__always_inline` to bring a
-  caller's constant into an `asm goto` immediate operand.
-- The same helper passes a static object's address plus an offset as an
-  `"i"` immediate. fcc currently lowers the address to an SSA value, which
-  Fir rejects for this constraint.
-- `arch/x86/include/asm/asm.h` binds a C register variable to `rsp` and
-  uses it as an inline asm operand. Fir currently rejects that operand.
-- Inline asm in the real-mode and vDSO code contributes exception and
-  alternative-instruction records to `__ex_table` and `.altinstructions`.
-  The native backend currently rejects those extra sections.
-
-The driver also reports `-mcmodel=kernel` and `-mno-red-zone` as unsupported.
+The Clang control reaches init and powers off. The fcc build reaches the
+`vmlinux.o` link. Kbuild's `modpost` currently reports section mismatches
+because functions marked for sections such as `.init.text` are emitted in
+`.text`.

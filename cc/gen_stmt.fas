@@ -20,24 +20,27 @@ use "gen_expr.fas"
 
 // ---------- Label & BlockAddr Management ----------
 
-fn gen_get_label_block_by_name(name_id u32) u32 {
-    key U64Key = {zext[u64](name_id)}
-    existing u32 = table_get(&gc.labels, &key) catch 0
+fn gen_get_label_block(lbl handle[Label]) u32 {
+    // GNU __label__ declarations may reuse a spelling in sibling blocks.
+    key U64Key = {addr_bits(handle_addr(lbl))}
+    labels handle[GenLabelMap] = if gc.inline_frame != null { &gc.inline_frame.labels } else { &gc.labels }
+    existing u32 = table_get(labels, &key) catch 0
     if existing != 0 { return existing }
     blk u32 = gen_new_block()
-    _ bool = table_put(&gc.labels, &key, blk)
+    _ bool = table_put(labels, &key, blk)
     return blk
 }
 
-fn gen_get_label_block(lbl handle[Label]) u32 {
-    return gen_get_label_block_by_name(lbl.name)
+fn gen_address_labels() handle[Vec[u32]] {
+    return if gc.inline_frame != null { &gc.inline_frame.addr_taken } else { &gc.addr_taken_labels }
 }
 
 fn gen_mark_addr_taken(blk_id u32) void {
-    for i usize in 0..gc.addr_taken_labels.n {
-        if vec_get(&gc.addr_taken_labels, i) == blk_id { return }
+    labels handle[Vec[u32]] = gen_address_labels()
+    for i usize in 0..labels.n {
+        if vec_get(labels, i) == blk_id { return }
     }
-    vec_push(&gc.addr_taken_labels, blk_id)
+    vec_push(labels, blk_id)
     vec_at(&gc.blocks, zext[usize](blk_id)).pinned = true
 }
 
@@ -327,17 +330,7 @@ fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
 
 thread var cur_switch handle[SwitchInfo] = null
 
-fn gen_switch_stmt(n handle[Ast]) void fails {
-    raw_v u32 = try gen_rvalue(n.a)
-    key_ty u32 = ty_integer_promote(ty_unqual(n.a.ty))
-    key_v u32 = gen_convert(raw_v, n.a.ty, key_ty)
-    sw SwitchInfo = {}
-    defer { vec_free(&sw.cases); table_free(&sw.case_map) }
-    gen_collect_switch_cases(n.b, &sw)
-
-    end_blk u32 = gen_new_block()
-    def_target u32 = if sw.has_default { sw.default_blk } else { end_blk }
-
+fn gen_switch_dispatch(sw handle[SwitchInfo], key_ty u32, key_v u32, def_target u32) void {
     // Emit range checks first (if any GNU `case lo ... hi` exist)
     has_ranges bool = false
     for i usize in 0..sw.cases.n {
@@ -412,6 +405,41 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
     }
     buf_str(&blk.term, c"]\n")
 
+}
+
+fn gen_switch_stmt(n handle[Ast]) void fails {
+    key_ty u32 = ty_integer_promote(ty_unqual(n.a.ty))
+    sw SwitchInfo = {}
+    defer { vec_free(&sw.cases); table_free(&sw.case_map) }
+    gen_collect_switch_cases(n.b, &sw)
+
+    end_blk u32 = gen_new_block()
+    def_target u32 = if sw.has_default { sw.default_blk } else { end_blk }
+
+    // Emit only the reachable dispatch edge for a constant key. Still
+    // lower the body so fallthrough and jumps to C labels work normally.
+    if gen_is_terminated() {
+        // A C label in the body may still be reached by a goto.
+    } else if ty_int_bits(key_ty) <= 64 && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        key u64 = se_value(key_ty, n.a.value)
+        target u32 = def_target
+        for i usize in 0..sw.cases.n {
+            sc handle[SwitchCase] = vec_at(&sw.cases, i)
+            lo u64 = se_value(key_ty, sc.lo)
+            hi u64 = se_value(key_ty, sc.hi)
+            matches bool = if !sc.is_range { key == lo }
+                           else if ty_is_unsigned(key_ty) { key >= lo && key <= hi }
+                           else { bitcast[i64](key) >= bitcast[i64](lo) && bitcast[i64](key) <= bitcast[i64](hi) }
+            if matches { target = sc.blk_id; break }
+        }
+        gen_term_jump(target)
+    } else {
+        raw_v u32 = try gen_rvalue(n.a)
+        if !gen_is_terminated() {
+            gen_switch_dispatch(&sw, key_ty, gen_convert(raw_v, n.a.ty, key_ty), def_target)
+        }
+    }
+
     // Push switch frame for `break`
     lf handle[LoopFrame] = vec_add(&gc.loops)
     lf.break_blk = end_blk
@@ -435,17 +463,33 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
 
 // ---------- Inline Asm Lowering ----------
 
-// An immediate constraint needs a Fir constant, not an SSA add of a
-// constant and zero. The backend resolves asm operands before folding.
-fn gen_emit_asm_input(b handle[Buf], expr handle[Ast], ty u32, v u32) void {
-    gen_emit_fir_ty(b, ty)
+struct GenAsmInput {
+    operand handle[Ast]
+    ty u32
+    val_id u32
+    integer bool
+    integer_value u64
+    address ConstAddr
+}
+
+// Immediates must reach Fir as constants so instruction selection can use
+// the literal or the symbol and addend directly in the asm template.
+fn gen_emit_asm_input(b handle[Buf], input handle[GenAsmInput]) void {
+    gen_emit_fir_ty(b, input.ty)
     buf_u8(b, 32)
-    if v == 0xffffffff {
-        width u32 = ty_int_bits(ty)
-        value u64 = if width < 64 { expr.value & ((1 << width) - 1) } else { expr.value }
+    if input.address.ok {
+        gen_emit_sym_name(b, gen_sym_bytes(input.address.sym_id))
+        if input.address.addend != 0 {
+            buf_str(b, c" + ")
+            buf_dec_i64(b, input.address.addend)
+        }
+    } else if input.integer {
+        width u32 = ty_int_bits(input.ty)
+        raw u64 = input.integer_value
+        value u64 = if width < 64 { raw & ((1 << width) - 1) } else { raw }
         buf_str(b, c"0x")
         buf_hex(b, value, 1)
-    } else { gen_emit_val(b, v) }
+    } else { gen_emit_val(b, input.val_id) }
 }
 
 // A GNU local register binding constrains direct extended-asm operands.
@@ -466,7 +510,8 @@ fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
     if n + 1 != out.n || (out.p[u8, n] != 114 && out.p[u8, n] != 103) { return }
     buf_truncate(out, n)
     buf_u8(out, 123)
-    gen_decode_string_piece(cc_name(gc.p.names, decl.asm_name), 1, out)
+    if gen_stack_pointer_symbol(decl) { buf_str(out, c"rsp") }
+    else { gen_decode_string_piece(cc_name(gc.p.names, decl.asm_name), 1, out) }
     buf_u8(out, 125)
 }
 
@@ -475,7 +520,21 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     is_vol bool = (n.flags & 2) != 0 || n.b == null
     tmpl Buf = {}
     defer { buf_free(&tmpl) }
-    if n.a != null { gen_decode_string_ast(n.a, &tmpl, false) }
+    if n.a != null {
+        if (n.flags & NF_ASM_EXTENDED) != 0 { gen_decode_string_ast(n.a, &tmpl, false) }
+        else {
+            // Basic GNU asm is literal text. Escape Fir's operand and
+            // dialect markers without changing the assembler's input.
+            literal Buf = {}
+            defer { buf_free(&literal) }
+            gen_decode_string_ast(n.a, &literal, false)
+            for i usize in 0..literal.n {
+                c u8 = literal.p[u8, i]
+                if c == 37 || c == 123 || c == 124 || c == 125 { buf_u8(&tmpl, 37) }
+                buf_u8(&tmpl, c)
+            }
+        }
+    }
 
     // Evaluate output operand lvalues and input operand rvalues
     out_ptrs Vec[u32] = {}
@@ -504,9 +563,13 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             if ch == 114 || ch == 113 || ch == 81 || ch == 82 || ch == 97 || ch == 98 ||
                ch == 99 || ch == 100 || ch == 83 || ch == 68 || ch == 65 || ch == 120 || ch == 103 { has_r = true }
         }
-        buf_free(&cb)
         mem_only bool = has_m && !has_r
-        ptr_v u32 = try gen_lvalue(o.b)
+        is_sp bool = o.b.kind == ND_NAME && gen_stack_pointer_symbol(o.b.decl)
+        if is_sp && (!is_rw || !bytes_starts_with(cs, bytes_c(c"+{rsp}"))) {
+            try pa_error(gc.p, o.loc, c"the stack pointer requires a read-write register constraint")
+        }
+        buf_free(&cb)
+        ptr_v u32 = if is_sp { 0 } else { try gen_lvalue(o.b) }
         vec_push(&out_ptrs, ptr_v)
         vec_push(&out_tids, o.b.ty)
         vec_push(&out_is_mem, if mem_only { 1 } else { 0 })
@@ -518,7 +581,8 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 pal u64 = ty_align(o.b.a.ty)
                 if pal < al_rw { al_rw = pal }
             }
-            vec_push(&out_old_vs, gen_load_ty(o.b.ty, ptr_v, al_rw, false, false))
+            old u32 = if is_sp { gen_const_zero(o.b.ty) } else { gen_load_ty(o.b.ty, ptr_v, al_rw, false, false) }
+            vec_push(&out_old_vs, old)
         } else {
             vec_push(&out_old_vs, 0)
         }
@@ -530,10 +594,8 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         o = o.next
     }
 
-    in_vals Vec[u32] = {}
-    in_tids Vec[u32] = {}
-    in_nodes Vec[addr] = {}
-    defer { vec_free(&in_vals); vec_free(&in_tids); vec_free(&in_nodes) }
+    inputs Vec[GenAsmInput] = {}
+    defer { vec_free(&inputs) }
     inp handle[Ast] = n.c
     while inp != null {
         cb Buf = {}
@@ -545,27 +607,42 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         if cs.n == 1 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
             tied_idx = zext[i32](cs.p[u8] - 48)
         }
-        imm bool = (bytes_eq_c(cs, c"i") || bytes_eq_c(cs, c"n")) &&
-            ty_is_integer(inp.b.ty) && ty_int_bits(inp.b.ty) <= 64 &&
-            (inp.b.flags & NF_INT_VALUE) != 0 && (inp.b.flags & NF_OVERFLOW) == 0
+        is_sp bool = bytes_eq_c(cs, c"{rsp}")
+        imm_symbol bool = bytes_eq_c(cs, c"i")
+        imm_integer bool = imm_symbol || bytes_eq_c(cs, c"n")
         buf_free(&cb)
-        iv u32 = if imm { 0xffffffff } else if is_m { try gen_lvalue(inp.b) } else { try gen_rvalue(inp.b) }
-        it u32 = if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty }
-        if !is_m && tied_idx >= 0 && zext[usize](bitcast[u32](tied_idx)) < out_tids.n {
-            ot u32 = vec_get(&out_tids, zext[usize](bitcast[u32](tied_idx)))
-            if ty_unqual(ot) != ty_unqual(it) {
-                iv = gen_convert(iv, it, ot)
-                it = ot
+        input handle[GenAsmInput] = vec_add(&inputs)
+        input.operand = inp
+        input.ty = if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty }
+        at_entry bool = gc.inline_frame != null && gc.inline_frame.entry_asm == n
+        expr handle[Ast] = if imm_integer { try gen_inline_fold(inp.b, at_entry) } else { inp.b }
+        input.integer_value = expr.value
+        width u32 = if ty_is_integer(input.ty) { ty_int_bits(input.ty) } else { 0 }
+        input.integer = imm_integer && width > 0 && width <= 64 &&
+            (expr.flags & NF_INT_VALUE) != 0 && (expr.flags & NF_OVERFLOW) == 0
+        if !input.integer && imm_symbol && (ty_is_ptr(input.ty) || ty_is_func(input.ty) || width == 64) &&
+            (expr.flags & NF_STATIC) != 0 {
+            if !(gen_eval_const_addr(expr, &input.address)) || input.address.is_blockaddr {
+                input.address.ok = false
             }
         }
-        vec_push(&in_vals, iv)
-        vec_push(&in_tids, it)
-        vec_push(&in_nodes, handle_addr(inp))
+        if !input.integer && !input.address.ok {
+            input.val_id = if is_sp { gen_const_zero(input.ty) }
+                           else if is_m { try gen_lvalue(inp.b) }
+                           else { try gen_rvalue(inp.b) }
+        }
+        if !is_m && tied_idx >= 0 && zext[usize](bitcast[u32](tied_idx)) < out_tids.n {
+            ot u32 = vec_get(&out_tids, zext[usize](bitcast[u32](tied_idx)))
+            if ty_unqual(ot) != ty_unqual(input.ty) {
+                input.val_id = gen_convert(input.val_id, input.ty, ot)
+                input.ty = ot
+            }
+        }
         inp = inp.next
     }
 
     if is_goto {
-        // Rewrite `%l[name]` references in template to `%l<in_vals.n + K>` (Fir only supports numbered `%lN`)
+        // Rewrite `%l[name]` references in template to `%l<inputs.n + K>` (Fir only supports numbered `%lN`)
         goto_tmpl Buf = {}
         defer { buf_free(&goto_tmpl) }
         ti usize = 0
@@ -590,7 +667,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                     }
                     if found_l {
                         buf_str(&goto_tmpl, c"%l")
-                        buf_dec_u64(&goto_tmpl, out_nodes.n + in_vals.n + lidx)
+                        buf_dec_u64(&goto_tmpl, out_nodes.n + inputs.n + lidx)
                         ti = tj + 1
                         continue
                     }
@@ -668,11 +745,12 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             }
             buf_u8(b, 41)
         }
-        if in_vals.n > 0 {
+        if inputs.n > 0 {
             buf_str(b, c" in(")
-            for i usize in 0..in_vals.n {
+            for i usize in 0..inputs.n {
                 if i > 0 { buf_str(b, c", ") }
-                onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
+                input handle[GenAsmInput] = vec_at(&inputs, i)
+                onode handle[Ast] = input.operand
                 cb Buf = {}
                 gen_asm_constraint(onode, &cb)
                 if onode.op != 0 {
@@ -681,7 +759,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 fir_emit_quoted_bytes(b, cb.p, cb.n)
                 buf_free(&cb)
                 buf_u8(b, 32)
-                gen_emit_asm_input(b, onode.b, vec_get(&in_tids, i), vec_get(&in_vals, i))
+                gen_emit_asm_input(b, input)
             }
             buf_u8(b, 41)
         }
@@ -713,7 +791,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 gen_switch_block(vec_get(&goto_tramps, i))
                 for j usize in 0..out_res_vs.n {
                     rv u32 = vec_get(&out_res_vs, j)
-                    if rv != 0 {
+                    if rv != 0 && vec_get(&out_ptrs, j) != 0 {
                         ot u32 = vec_get(&out_tids, j)
                         gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
                     }
@@ -725,7 +803,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         if has_reg_out {
             for j usize in 0..out_res_vs.n {
                 rv u32 = vec_get(&out_res_vs, j)
-                if rv != 0 {
+                if rv != 0 && vec_get(&out_ptrs, j) != 0 {
                     ot u32 = vec_get(&out_tids, j)
                     gen_store_ty(rv, vec_get(&out_ptrs, j), ty_align(ot), false, false)
                 }
@@ -782,13 +860,14 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         }
         buf_u8(b, 41)
     }
-    if in_vals.n > 0 || n_rw_tied > 0 {
+    if inputs.n > 0 || n_rw_tied > 0 {
         buf_str(b, c" in(")
         in_emitted usize = 0
-        for i usize in 0..in_vals.n {
+        for i usize in 0..inputs.n {
             if in_emitted > 0 { buf_str(b, c", ") }
             in_emitted += 1
-            onode handle[Ast] = handle_from_addr(vec_get(&in_nodes, i))
+            input handle[GenAsmInput] = vec_at(&inputs, i)
+            onode handle[Ast] = input.operand
             cb Buf = {}
             gen_asm_constraint(onode, &cb)
             if onode.op != 0 {
@@ -797,7 +876,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             fir_emit_quoted_bytes(b, cb.p, cb.n)
             buf_free(&cb)
             buf_u8(b, 32)
-            gen_emit_asm_input(b, onode.b, vec_get(&in_tids, i), vec_get(&in_vals, i))
+            gen_emit_asm_input(b, input)
         }
         for i usize in 0..out_nodes.n {
             if vec_get(&out_is_rw, i) != 0 && vec_get(&out_is_mem, i) == 0 {
@@ -832,7 +911,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
     // Store register output results back to their lvalues
     for i usize in 0..out_res_vs.n {
         rv u32 = vec_get(&out_res_vs, i)
-        if rv != 0 {
+        if rv != 0 && vec_get(&out_ptrs, i) != 0 {
             t u32 = vec_get(&out_tids, i)
             onode_s handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
             al_s u64 = ty_align(t)
@@ -1118,9 +1197,10 @@ fn gen_stmt(n handle[Ast]) void fails {
             buf_str(&blk.term, c"  indirect_br ")
             gen_emit_val(&blk.term, pv)
             buf_str(&blk.term, c", [")
-            for i usize in 0..gc.addr_taken_labels.n {
+            labels handle[Vec[u32]] = gen_address_labels()
+            for i usize in 0..labels.n {
                 if i > 0 { buf_str(&blk.term, c", ") }
-                tb u32 = vec_get(&gc.addr_taken_labels, i)
+                tb u32 = vec_get(labels, i)
                 gen_add_succ(blk, tb)
                 gen_emit_lbl(&blk.term, tb)
             }
@@ -1134,6 +1214,10 @@ fn gen_stmt(n handle[Ast]) void fails {
         return
     }
     if bytes_eq_c(kw, c"return") {
+        if gc.inline_frame != null {
+            try gen_inline_return(n)
+            return
+        }
         if n.a != null && !ty_is_void(gc.cur_ret_ty) {
             rv u32 = try gen_rvalue(n.a)
             rv = gen_convert(rv, n.a.ty, gc.cur_ret_ty)
@@ -1171,8 +1255,8 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
     if n == null { return }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
-        if bytes_eq_c(op, c"&&") && n.value != 0 {
-            blk u32 = gen_get_label_block_by_name(trunc[u32](n.value))
+        if bytes_eq_c(op, c"&&") && n.extra != null {
+            blk u32 = gen_get_label_block(handle_from_addr(n.extra))
             gen_mark_addr_taken(blk)
         }
     }
@@ -1230,6 +1314,11 @@ fn gen_function(node handle[Ast]) void fails {
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
+    if s.linkage == 1 && gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
+        key U64Key = {zext[u64](nid)}
+        _ bool = table_put(&gc.inline_defs, &key, handle_addr(node))
+        return
+    }
     // An unreferenced static inline must not make its external dependencies
     // mandatory. In particular, a shared object may include inline helpers
     // that call private functions available only inside the main program.
@@ -1304,6 +1393,7 @@ fn gen_function(node handle[Ast]) void fails {
 
     // Pre-scan for `&&label` so `indirect_br` has the complete target list
     gen_prescan_addr_taken(node.a)
+    gen_asm_entry_locals(node.a)
 
     // Spill all parameters into entry-block allocas so `&param` and mutation always work
     for i u32 in 0..n_params {

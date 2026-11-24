@@ -41,7 +41,7 @@ let x87_idx = function "st" -> 0 | "st(1)" -> 1 | r -> invalid_arg ("x87_idx: " 
 (* Canonical name of a register as clobbers and "{...}" constraints may
    write it: any width of a GPR names the 64-bit register ("eax", "ax",
    "al", "ah", "r8d" -> "rax", "r8"), "ymmN"/"zmmN" name xmmN. Also "rsp"
-   and "rbp", which callers refuse. None for anything else. *)
+   and "rbp", which are reserved for frame management. None for anything else. *)
 let reg_canon name =
   let n = String.lowercase_ascii name in
   let n = if String.length n > 0 && n.[0] = '%' then String.sub n 1 (String.length n - 1) else n in
@@ -215,7 +215,7 @@ let constr ~names ~nouts ~output s =
             let r = String.sub s !i (e - !i) in
             i := e + 1;
             match reg_canon r with
-            | Some ("rsp" | "rbp") -> fail "asm constraint %S: %s cannot be an operand" s r
+            | Some "rbp" -> fail "asm constraint %S: %s cannot be an operand" s r
             | Some r -> add [ r ]
             | None -> fail "asm constraint %S: unknown register %s" s r))
     | '@' ->
@@ -238,6 +238,8 @@ let constr ~names ~nouts ~output s =
     | 'k' -> fail "asm constraint %S: AVX-512 mask register operands are not supported" s
     | c -> fail "asm constraint %S: unknown constraint letter '%c'" s c
   done;
+  if List.mem "rsp" !regs && (!regs <> ["rsp"] || !early || !mem || !imm <> None || !sym || !tied <> None) then
+    fail "asm constraint %S: rsp must be the only register choice" s;
   if output && !dir = In then fail "asm output constraint %S must start with '=' or '+'" s;
   if (not output) && !dir <> In then fail "asm input constraint %S cannot start with '=' or '+'" s;
   if !regs = [] && (not !mem) && !imm = None && (not !sym) && !tied = None && !flag = None then

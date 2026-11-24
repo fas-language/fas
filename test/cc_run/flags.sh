@@ -344,3 +344,25 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
     ./kbuild/grouped
 done
 echo "PASS: archive group option ordering"
+
+# The high-half link must resolve ordinary external code and data references.
+cat > kbuild/kernel-model.c <<'C'
+#if !__code_model_kernel__ || defined(__code_model_small__) || defined(__PIC__)
+#error wrong kernel code-model macros
+#endif
+extern int data;
+extern int next(int);
+int entry(void) { return next(data); }
+C
+echo 'int data = 42; int next(int n) { return n + 1; }' > kbuild/kernel-data.c
+for compiler in "${CLANG:-clang-22}" "$FCC"; do
+    "$compiler" -Werror -ffreestanding -mno-red-zone -mcmodel=kernel -fno-pie \
+        -c kbuild/kernel-model.c -o kbuild/kernel-model.o
+    "$compiler" -ffreestanding -mno-red-zone -mcmodel=kernel -fno-pie \
+        -c kbuild/kernel-data.c -o kbuild/kernel-data.o
+    ld.lld-22 -e entry -Ttext 0xffffffff81000000 \
+        kbuild/kernel-model.o kbuild/kernel-data.o -o kbuild/high-half
+    readelf -sW kbuild/high-half > kbuild/high-half.symbols
+    grep -qE 'ffffffff81000000 .* entry$' kbuild/high-half.symbols
+done
+echo 'PASS: freestanding high-half kernel code model'

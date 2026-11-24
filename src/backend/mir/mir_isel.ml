@@ -1890,7 +1890,7 @@ let phys_of_name n =
         match n with
         | "rax" -> Rax | "rbx" -> Rbx | "rcx" -> Rcx | "rdx" -> Rdx | "rsi" -> Rsi | "rdi" -> Rdi
         | "r8" -> R8 | "r9" -> R9 | "r10" -> R10 | "r11" -> R11 | "r12" -> R12 | "r13" -> R13
-        | "r14" -> R14 | "r15" -> R15
+        | "r14" -> R14 | "r15" -> R15 | "rsp" -> Rsp
         | _ -> invalid_arg ("Mir_isel.phys_of_name " ^ n))
 
 (* the order operands take registers in: caller-saved first, then the
@@ -2042,7 +2042,13 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
      3. immediates and other inputs, 4. memory operands *)
   for k = 0 to n - 1 do
     let c = con k in
-    if c.flag = None && (not (Fir_asm.indirect c)) && fixed k then
+    (* A named rsp operand denotes the current hardware stack pointer.
+       Neither the allocator nor an operand copy may define this register. *)
+    if c.regs = ["rsp"] then begin
+      (match oty k with F.Int 64 | F.Ptr _ -> () | _ -> unsupported "asm rsp operand must be 64-bit");
+      place k "rsp"
+    end
+    else if c.flag = None && (not (Fir_asm.indirect c)) && fixed k then
       if is_out k then begin
         let r = List.hd c.regs in
         if Hashtbl.mem out_used r then unsupported "asm outputs share %s" r;
@@ -2131,6 +2137,7 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
     let reads = (not (is_out k)) || c.dir = Fir_asm.Inout in
     if reads && not (Fir_asm.indirect c) then
       match loc.(k) with
+      | Areg (G Rsp, _) -> ()
       | Areg (r, _) -> srcs := (r, use cx (Option.get value.(k)), oty k) :: !srcs
       | Ax87 0 -> in_st0 := Some (k, Option.get value.(k))
       | Ax87 1 -> in_st1 := Some (k, Option.get value.(k))
@@ -2176,7 +2183,7 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
          (fun k ->
            let c = con k in
            if c.flag = None && not (Fir_asm.indirect c) then
-             match reg_of.(k) with Some r when not (Fir_asm.is_x87 r) -> Some (phys_of_name r) | _ -> None
+             match reg_of.(k) with Some r when r <> "rsp" && not (Fir_asm.is_x87 r) -> Some (phys_of_name r) | _ -> None
            else None)
          (List.init nout Fun.id))
   in
@@ -2254,6 +2261,7 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
           let r = phys_of_name (Option.get reg_of.(k)) in
           let t = oty k in
           (match (r, cls_of_ty t) with
+          | G Rsp, Gpr -> emit cx (Spget d)
           | G _, Gpr | X _, Xmm -> emit cx (Copy (d, r))
           | X _, Gpr -> emit cx (Movxg (true, d, r))
           | G _, Xmm -> emit cx (Movgx (t = F.F64, d, r))

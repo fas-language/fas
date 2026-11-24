@@ -104,6 +104,23 @@ struct GnuInlineDef {
     ext_objs Vec[ExternObjRef]
 }
 
+type GenLabelMap = Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
+
+struct GenInlineFrame {
+    parent handle[GenInlineFrame]
+    fn_sym handle[Symbol]
+    ret_ty u32
+    result u32
+    return_block u32
+    cleanup_depth usize
+    vla_depth usize
+    constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    entry_asm handle[Ast]
+    entry_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    labels GenLabelMap
+    addr_taken Vec[u32]
+}
+
 struct GlobalBlockAddr {
     fn_sym handle[Symbol]
     target_lbl handle[Label]
@@ -138,6 +155,8 @@ struct GenCtx {
     gnu_inlines Vec[GnuInlineDef]
     gnu_inline_map Table[U64Key, u32, gen_u64_hash, gen_u64_eq] // sym_name_id -> 1-based idx
     cur_gnu_inline_idx u32
+    inline_defs Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    inline_frame handle[GenInlineFrame]
 
     // String literal deduplication pool (keyed by Intern id of align_byte + data)
     str_pool_keys Intern
@@ -163,9 +182,10 @@ struct GenCtx {
     scope_depth u32
     blocks Vec[GenBlock]
     locals Table[U64Key, u32, gen_u64_hash, gen_u64_eq]      // Symbol addr -> entry alloca %vN
+    immediate_locals Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     vla_ptrs Table[U64Key, u32, gen_u64_hash, gen_u64_eq]    // VLA Symbol addr -> alloca holding ptr
     vla_sizes Table[U64Key, u32, gen_u64_hash, gen_u64_eq]   // TypeId -> alloca holding u64 byte size
-    labels Table[U64Key, u32, gen_u64_hash, gen_u64_eq]      // Label addr -> GenBlock id
+    labels GenLabelMap      // Label addr -> GenBlock id
     addr_taken_labels Vec[u32]
     ba_patches Vec[BlockAddrPatch]
     loops Vec[LoopFrame]
@@ -211,6 +231,7 @@ fn gen_free(ctx handle[GenCtx]) void {
     }
     vec_free(&ctx.gnu_inlines)
     table_free(&ctx.gnu_inline_map)
+    table_free(&ctx.inline_defs)
     intern_free(&ctx.str_pool_keys)
     table_free(&ctx.str_pool_nids)
     gen_reset_func_state(ctx)
@@ -241,6 +262,7 @@ fn gen_reset_func_state(ctx handle[GenCtx]) void {
     }
     vec_clear(&ctx.blocks)
     table_free(&ctx.locals)
+    table_free(&ctx.immediate_locals)
     table_free(&ctx.vla_ptrs)
     table_free(&ctx.vla_sizes)
     table_free(&ctx.labels)
@@ -1484,6 +1506,14 @@ fn gen_on_function_cb(ctx addr, node addr, user addr) void fails {
     try gen_function(n)
 }
 
+// GNU's global register variable for the x86-64 stack pointer names
+// hardware. There is no object to allocate or symbol to export.
+fn gen_stack_pointer_symbol(s handle[Symbol]) bool {
+    if s == null || s.storage != SC_REGISTER || s.asm_name == 0 { return false }
+    spelling Bytes = cc_name(gc.p.names, s.asm_name)
+    return bytes_eq_c(spelling, c"\"rsp\"") || bytes_eq_c(spelling, c"\"%rsp\"")
+}
+
 fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
     n handle[Ast] = handle_from_addr(node)
     if n == null { return }
@@ -1499,6 +1529,7 @@ fn gen_on_object_cb(ctx addr, node addr, user addr) void fails {
     }
     if n.kind == ND_DECL && n.decl != null {
         s handle[Symbol] = n.decl
+        if gen_stack_pointer_symbol(s) { return }
         // Check for alias attribute
         alias_buf Buf = {}
         defer { buf_free(&alias_buf) }

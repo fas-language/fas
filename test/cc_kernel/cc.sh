@@ -15,6 +15,8 @@ args=()
 output=false
 out_path=
 offsets=false
+mode16=false
+setup_c=false
 asm_index=-1
 for arg; do
     if $output; then
@@ -25,6 +27,7 @@ for arg; do
     fi
     case "$arg" in
         -o) output=true ;;
+        -m16) mode16=true ;;
         -S) asm_index=${#args[@]} ;;
         --target=x86_64-linux-gnu) continue ;; # fcc targets this ABI by default.
         -mpreferred-stack-boundary=*)
@@ -34,11 +37,18 @@ for arg; do
             exit 1
             ;;
         */arch/x86/kernel/asm-offsets.c|*/kernel/bounds.c|*/scripts/mod/devicetable-offsets.c) offsets=true ;;
+        arch/x86/boot/*.c|*/arch/x86/boot/*.c|arch/x86/realmode/*.c|*/arch/x86/realmode/*.c) setup_c=true ;;
         -*) ;;
         *.S|*.s|assembler|assembler-with-cpp) exec "$clang" "$@" ;;
     esac
     args+=("$arg")
 done
+
+# Setup and real-mode C are built as ELF32 with Clang. The compressed
+# kernel's ordinary x86-64 C stays on fcc.
+if $mode16 && $setup_c; then
+    exec "$clang" "$@"
+fi
 
 # Kbuild's offset generators put constant layout values in .ascii directives.
 # The native fcc backend can compile those directives directly. Recover their

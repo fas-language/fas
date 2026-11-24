@@ -34,7 +34,13 @@ if [[ ! -e $build/.config ]]; then
         -e BINFMT_ELF -e BLK_DEV_INITRD -e ACPI -e PCI
     kmake olddefconfig
 fi
-kmake -j"${KERNEL_JOBS:-6}" bzImage
+jobs=${KERNEL_JOBS:-3}
+case "$jobs" in
+    [1-6]) ;;
+    0*|*[!0-9]*) echo 'KERNEL_JOBS must be a positive integer' >&2; exit 2 ;;
+    *) jobs=6 ;;
+esac
+kmake -j"$jobs" bzImage
 
 # gen_init_cpio can add /dev/console without root privileges.
 "$CLANG" -std=gnu23 -ffreestanding -fno-stack-protector -nostdlib -static \

@@ -18,14 +18,14 @@ fn se_aggregate_literal_init(p handle[Parser], ty u32, e handle[Ast], constant b
         (ty_is_array(ty) || ty_is_record(ty)) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))
 }
 
-struct LabelDelta { lhs u32, rhs u32 }
+struct LabelDelta { lhs handle[Label], rhs handle[Label] }
 
-fn se_static_label(p handle[Parser], n handle[Ast]) u32 {
+fn se_static_label(p handle[Parser], n handle[Ast]) handle[Label] {
     // Casting the address to a pointer-width integer preserves its bits.
     if n.kind == ND_CAST && ty_is_integer(n.ty) && ty_int_bits(n.ty) == 64 { n = n.a }
     while n.kind == ND_CAST && ty_is_ptr(n.ty) { n = n.a }
-    if n.kind != ND_UNARY || !bytes_eq_c(cc_name(p.names, n.op), c"&&") { return 0 }
-    return trunc[u32](n.value)
+    if n.kind != ND_UNARY || !bytes_eq_c(cc_name(p.names, n.op), c"&&") { return null }
+    return handle_from_addr(n.extra)
 }
 
 fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool {
@@ -34,7 +34,7 @@ fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool 
     if ty_is_ptr(n.a.ty) && ty_size(ty_node(ty_unqual(n.a.ty)).elem) > 1 { return false }
     out.lhs = se_static_label(p, n.a)
     out.rhs = se_static_label(p, n.b)
-    return out.lhs != 0 && out.rhs != 0
+    return out.lhs != null && out.rhs != null
 }
 
 fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {

@@ -94,9 +94,10 @@ let fstore a dbl m x = A.sse_rm a (A.fprefix dbl) 0x11 ~reg:x m
    [ins] splices statement N's bytes and relocations into the text.
 
    The assembler is $FAS_AS (a command line), else `as --64`, else
-   `$FAS_CC -c -x assembler` (cc by default). A snippet may not put bytes in
-   another section, define a global symbol, or refer to a place in
-   another snippet. Its alignment contributes to that of .text. An inline
+   `$FAS_CC -c -x assembler` (cc by default). Section switches can add
+   records or code elsewhere in the object. A snippet may not define a
+   global symbol or refer directly to a place in another snippet. Its
+   alignment contributes to that of .text. An inline
    .cfi_* rule becomes part of the enclosing function's FDE. *)
 
 (* a snippet: its bytes, its alignment and its relocations, at offsets in
@@ -106,6 +107,7 @@ type snippet = {
   salign : int;
   srelocs : (int * [ `Sym of string | `Here of int ] * int * int64) list;
   sframe : string option;
+  mutable sstart : int;
 }
 
 let gpr_name width r =
@@ -289,6 +291,14 @@ let assemble_snippets (texts : (bool * string) list) =
   let sec = Array.make n (-1) in
   let snippet_of = Hashtbl.create n in
   let frame_section = ref None in
+  let extra = Hashtbl.create 8 in
+  let referenced = Hashtbl.create 8 in
+  (* Alternative instruction records can point to a zero-byte replacement. *)
+  Array.iter
+    (fun (r : R.relocation) ->
+      if r.kind <> 0 then Hashtbl.replace referenced o.symbols.(r.symbol).section ())
+    o.relocations;
+  if Array.length o.groups > 0 then unsupported "inline asm: section groups (COMDAT)";
   Array.iter
     (fun (s : R.section) ->
       let p = ".text.fas_asm_" in
@@ -298,12 +308,16 @@ let assemble_snippets (texts : (bool * string) list) =
         Hashtbl.replace snippet_of s.index i
       end
       else if s.name = ".eh_frame" && Array.exists Fun.id cfi then frame_section := Some s
-      else if (s.kind = 1 || s.kind = 8) && s.flags land 2 <> 0 && s.size > 0 then
-        unsupported "inline asm puts bytes in section %s" s.name)
+      else if (s.size > 0 || Hashtbl.mem referenced s.index) && (s.kind = 1 || s.kind = 8) then begin
+        if s.flags land (lnot (1 lor 2 lor 4 lor 0x400)) <> 0 then
+          unsupported "inline asm: section %s has unsupported flags %#x" s.name s.flags;
+        Hashtbl.add extra s.index (Printf.sprintf ".Lfas.inline.section.%d" s.index)
+      end else if s.size > 0 && s.flags land 2 <> 0 then
+        unsupported "inline asm: section %s has unsupported type %#x" s.name s.kind)
     o.sections;
   Array.iter
     (fun (y : R.symbol) ->
-      if y.binding <> 0 && Hashtbl.mem snippet_of y.section then
+      if y.binding <> 0 && (Hashtbl.mem snippet_of y.section || Hashtbl.mem extra y.section) then
         unsupported "inline asm defines the global symbol %s" y.name)
     o.symbols;
   let frames = Array.make n None in
@@ -344,28 +358,77 @@ let assemble_snippets (texts : (bool * string) list) =
         o.relocations)
     !frame_section;
   let relocs = Array.make n [] in
+  let extra_relocs = Hashtbl.create 8 in
+  let target (y : R.symbol) addend =
+    if y.section = 0 then (y.name, addend)
+    else match Hashtbl.find_opt extra y.section with
+      | Some name -> (name, Int64.add addend y.value)
+      | None ->
+          unsupported "inline asm refers to %s, outside its own statement"
+            (if y.name = "" then "a section" else y.name)
+  in
   Array.iter
     (fun (r : R.relocation) ->
-      match Hashtbl.find_opt snippet_of r.target with
-      | None -> ()
-      | Some i ->
-          if r.kind <> 0 then begin
+      if r.kind <> 0 then
+        match Hashtbl.find_opt snippet_of r.target with
+        | Some i ->
             let y = o.symbols.(r.symbol) in
-            let target =
-              if y.section = 0 then `Sym y.name
-              else if y.section = sec.(i) then `Here (Int64.to_int y.value)
-              else unsupported "inline asm refers to %s, outside its own statement" (if y.name = "" then "a section" else y.name)
+            let sym, addend =
+              if y.section = sec.(i) then (`Here (Int64.to_int y.value), r.addend)
+              else let name, addend = target y r.addend in (`Sym name, addend)
             in
-            relocs.(i) <- (r.offset, target, r.kind, r.addend) :: relocs.(i)
-          end)
+            relocs.(i) <- (r.offset, sym, r.kind, addend) :: relocs.(i)
+        | None when Hashtbl.mem extra r.target ->
+            let prior = Option.value (Hashtbl.find_opt extra_relocs r.target) ~default:[] in
+            Hashtbl.replace extra_relocs r.target (r :: prior)
+        | None -> ())
     o.relocations;
-  Array.init n (fun i ->
+  let snippets = Array.init n (fun i ->
       if cfi.(i) && frames.(i) = None then unsupported "inline asm: missing frame entry";
-      if sec.(i) < 0 then { code = ""; salign = 1; srelocs = []; sframe = frames.(i) }
+      if sec.(i) < 0 then { code = ""; salign = 1; srelocs = []; sframe = frames.(i); sstart = 0 }
       else
         let s = o.sections.(sec.(i)) in
         { code = String.sub o.data s.offset s.size; salign = max 1 s.alignment;
-          srelocs = List.rev relocs.(i); sframe = frames.(i) })
+          srelocs = List.rev relocs.(i); sframe = frames.(i); sstart = 0 })
+  in
+  (* Section relocations to GNU assembler local labels use the snippet's
+     section and an addend. Once text is laid out, replace that base with
+     .text and include the snippet's aligned offset. *)
+  let materialize ~first =
+    let sections = ref [] and symbols = ref [] and index = ref first in
+    Array.iter
+      (fun (s : R.section) ->
+        match Hashtbl.find_opt extra s.index with
+        | None -> ()
+        | Some name ->
+            let relocs =
+              List.rev_map
+                (fun (r : R.relocation) ->
+                  let y = o.symbols.(r.symbol) in
+                  let symbol, addend =
+                    match Hashtbl.find_opt snippet_of y.section with
+                    | Some i ->
+                        let offset = Int64.add (Int64.of_int snippets.(i).sstart) y.value in
+                        (Mir_cfi.text_symbol, Int64.add offset r.addend)
+                    | None -> target y r.addend
+                  in
+                  A.Raw { offset = r.offset; symbol; kind = r.kind; addend = Int64.to_int addend })
+                (Option.value (Hashtbl.find_opt extra_relocs s.index) ~default:[])
+            in
+            let contents =
+              if s.kind = 8 then Fas_linker.Elf_object.Bss s.size
+              else Fas_linker.Elf_object.Data (Bytes.of_string (String.sub o.data s.offset s.size))
+            in
+            sections :=
+              { Native_object.name = s.name; alignment = max 1 s.alignment; flags = s.flags; contents; relocs }
+              :: !sections;
+            symbols := { Elf64.name; section = Elf64.Extra !index; offset = 0; size = 0; func = false }
+                       :: !symbols;
+            incr index)
+      o.sections;
+    (List.rev !sections, List.rev !symbols)
+  in
+  (snippets, materialize)
 
 (* Top-level asm ([module_asm]): the text is assembled in one run, and every
    allocated section of the result becomes a section of its own in our
@@ -482,7 +545,11 @@ let asm_snippets iter =
               texts := (x.intel, render_asm fr !uid x) :: !texts
           | _ -> ()))
         ra.items);
-  let snippets = match List.rev !texts with [] -> [||] | l -> assemble_snippets l in
+  let snippets, materialize =
+    match List.rev !texts with
+    | [] -> ([||], fun ~first:_ -> ([], []))
+    | l -> assemble_snippets l
+  in
   let align = Array.fold_left (fun n s -> max n s.salign) 16 snippets in
   let next = ref 0 in
   let take () =
@@ -490,7 +557,7 @@ let asm_snippets iter =
     incr next;
     s
   in
-  (take, align)
+  (take, align, materialize)
 
 (* Stack probes (the -fstack-clash-protection rule): rsp never drops more
    than a page below the lowest address already touched, so growing into
@@ -682,6 +749,7 @@ let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame (i : ins) =
       let sn : snippet = snippet () in
       while A.pos a mod sn.salign <> 0 do A.byte a 0x90 done;
       let start = A.pos a in
+      sn.sstart <- start;
       Option.iter (asm_frame start (String.length sn.code)) sn.sframe;
       A.raw a sn.code
         (List.map
@@ -699,15 +767,23 @@ let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame (i : ins) =
    results); the flags end up set from the loop's compare.
      lea r11, [rsp - 128]; lea r10, [rbp - 8*nsaved]
    L: mov qword [r11], 0; add r11, 8; cmp r11, r10; jb L *)
-let zeroize a fr results =
-  A.lea a A.R11 (A.Base (A.Rsp, -128));
+let zeroize a ~red_zone fr results =
+  if red_zone then A.lea a A.R11 (A.Base (A.Rsp, -128))
+  else A.mov_rr a A.R11 A.Rsp;
   A.lea a A.R10 (A.Base (A.Rbp, -8 * fr.nsaved));
-  let l = A.new_label a in
+  let l = A.new_label a and done_ = A.new_label a in
+  (* A fixed frame can be empty. With the red zone disabled, leave the
+     saved registers and everything below the current stack pointer alone. *)
+  if not red_zone then begin
+    A.alu_rr a A.Cmp A.R11 A.R10;
+    A.jcc a A.Ae done_
+  end;
   A.place a l;
   A.mov_mi a 8 (A.Base (A.R11, 0)) 0;
   A.alu_ri a A.Add A.R11 8;
   A.alu_rr a A.Cmp A.R11 A.R10;
   A.jcc a A.B l;
+  if not red_zone then A.place a done_;
   List.iter
     (fun r -> if not (List.mem (G r) results) then A.alu_rr a A.Xor r r)
     Mir.caller_saved;
@@ -720,7 +796,7 @@ let zeroize a fr results =
    rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
    marker with its location id, and where its source variables live
    (Mir_dwarf.vloc, by Fir variable index) *)
-let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) =
+let func a ~red_zone ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) =
   if f.ms_abi && f.zeroize then unsupported "secret function with the Microsoft x64 calling convention";
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
@@ -791,7 +867,7 @@ let func a ~pic ~func_label ~snippet ~block_pos (f : func) (ra : Mir_ra.result) 
         if e <> next then A.jmp a labels.(e)
     | Ret results ->
         event Mir_cfi.Epilogue;
-        if f.zeroize then zeroize a fr results;
+        if f.zeroize then zeroize a ~red_zone fr results;
         saved_xmms (fun x _ mem -> A.movdqu_load a x mem; event (Mir_cfi.Restored_xmm x));
         A.lea a A.Rsp (A.Base (A.Rbp, -8 * fr.nsaved));
         List.iter (A.pop a) (List.rev ra.saved);
@@ -1082,7 +1158,7 @@ let prepare (m : F.modul) =
    [self_relocate]: _start applies the image's own RELATIVE relocations (a
    static PIE has no dynamic loader to do it). [debug]: add DWARF line
    tables (Mir_dwarf); the allocated sections are the same either way. *)
-let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
+let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?(has_asm = true)
     ~startup ~pic ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
@@ -1143,7 +1219,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
       A.align a 16;
       let offset = A.pos a in
       let size, events, rows, vlocs =
-        func a ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
+        func a ~red_zone ~pic ~func_label ~snippet ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
       in
       let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
       let cleanup = Option.map (fun (pad, resume) -> (block_offset pad, block_offset resume)) fn.unwind_cleanup in
@@ -1169,15 +1245,15 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
       end;
       func_syms := { Elf64.name = fn.name; section = Elf64.Text; offset; size; func = true } :: !func_syms
     in
-    let text_align =
+    let text_align, inline_sections =
       if not has_asm then begin
         select (emit (fun () -> assert false));
-        16
+        (16, fun ~first:_ -> ([], []))
       end else begin
         let emit_all iter =
-          let snippet, align = asm_snippets iter in
+          let snippet, align, materialize = asm_snippets iter in
           iter (emit snippet);
-          align
+          (align, materialize)
         in
         match iter_funcs with
         | None ->
@@ -1369,6 +1445,8 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
               relocs = d.relocs })
           debug_sections
     in
+    let inline_extras, inline_syms = inline_sections ~first:(List.length extra_sections) in
+    let extra_sections = extra_sections @ inline_extras in
     let masm = module_asm ~first:(List.length extra_sections) m.module_asm in
     let extra_sections = extra_sections @ masm.msections in
     let eh_frame, lsda = Mir_cfi.build (List.rev !fdes) in
@@ -1411,7 +1489,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
     let text_sym = { Elf64.name = Mir_cfi.text_symbol; section = Elf64.Text; offset = 0; size = 0; func = false } in
     let defined_syms =
       text_sym :: List.rev !func_syms @ rodata.syms @ data.syms @ !bss_syms @ extra_syms @ debug_syms @ blk_syms
-      @ masm.msyms @ unwind_syms
+      @ inline_syms @ masm.msyms @ unwind_syms
     in
     let alias_syms =
       List.map
@@ -1474,8 +1552,15 @@ let generate ?(debug = false) ?(tls_gd = false) ?iter_funcs ?(has_asm = true)
    (general-dynamic TLS), for objects that go into a shared library, which
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
-let compile_object ?debug ?(pic = true) ?tls_gd ?iter_funcs ?has_asm m =
-  generate ?debug ?tls_gd ?iter_funcs ?has_asm ~startup:false ~pic m
+let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone
+    ?(kernel_model = false) ?iter_funcs ?has_asm m =
+  (* RIP-relative symbol addresses work in the high-half 2 GiB kernel model.
+     Avoid GOT indirection for external symbols in this freestanding model. *)
+  if kernel_model && tls_gd = Some true then
+    Error "native backend: -mcmodel=kernel is incompatible with -fPIC"
+  else
+    generate ?debug ?tls_gd ?red_zone ?iter_funcs ?has_asm ~startup:false
+      ~pic:(pic && not kernel_model) m
 
 (* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?debug ?iter_funcs ?has_asm ?(inputs = []) ?options ~output m =

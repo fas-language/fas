@@ -286,8 +286,8 @@ fn si_try_blockdiff(si handle[StaticInit], off u64, width u64, n handle[Ast]) bo
     }
     delta LabelDelta = {}
     if !se_label_delta(gc.p, n, &delta) { return false }
-    target u32 = gen_get_label_block_by_name(delta.lhs)
-    base u32 = gen_get_label_block_by_name(delta.rhs)
+    target u32 = gen_get_label_block(delta.lhs)
+    base u32 = gen_get_label_block(delta.rhs)
     gen_mark_addr_taken(target)
     gen_mark_addr_taken(base)
     r handle[InitReloc] = si_add_blockaddr(si, off, gc.cur_fn_name, target)
@@ -340,25 +340,8 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         out.addend = 0
         return true
     }
-    if n.kind == ND_NAME && n.decl != null {
-        s handle[Symbol] = n.decl
-        if ty_is_func(s.ty) {
-            gen_note_extern_fn(s)
-            out.ok = true
-            out.sym_id = gen_sym_fir_name_id(s)
-            out.addend = 0
-            return true
-        }
-        if ty_is_array(s.ty) {
-            if s.linkage != 0 || s.storage == SC_STATIC || s.storage == SC_EXTERN {
-                if s.linkage != 0 { gen_note_extern_obj(s) }
-                out.ok = true
-                out.sym_id = gen_sym_fir_name_id(s)
-                out.addend = 0
-                return true
-            }
-        }
-        return false
+    if n.kind == ND_NAME && n.decl != null && (ty_is_func(n.ty) || ty_is_array(n.ty)) {
+        return gen_eval_lvalue_addr(n, out)
     }
     if (n.kind == ND_SUBSCRIPT || n.kind == ND_MEMBER) && ty_is_array(n.ty) {
         return gen_eval_lvalue_addr(n, out)
@@ -368,8 +351,8 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         if bytes_eq_c(op, c"&") {
             return gen_eval_lvalue_addr(n.a, out)
         }
-        if bytes_eq_c(op, c"&&") && n.value != 0 && gc.in_func {
-            blk u32 = gen_get_label_block_by_name(trunc[u32](n.value))
+        if bytes_eq_c(op, c"&&") && n.extra != null && gc.in_func {
+            blk u32 = gen_get_label_block(handle_from_addr(n.extra))
             gen_mark_addr_taken(blk)
             out.ok = true
             out.is_blockaddr = true
@@ -420,13 +403,16 @@ fn gen_eval_lvalue_addr(n handle[Ast], out handle[ConstAddr]) bool {
     if n == null { return false }
     if n.kind == ND_NAME && n.decl != null {
         s handle[Symbol] = n.decl
-        if ty_is_func(s.ty) {
-            gen_note_extern_fn(s)
-        } else if s.linkage != 0 || s.storage == SC_EXTERN {
-            gen_note_extern_obj(s)
+        if s.thread_local { return false }
+        key U64Key = {addr_bits(handle_addr(s))}
+        local_id u32 = table_get(&gc.static_locals, &key) catch 0
+        if local_id == 0 {
+            if ty_is_func(s.ty) { gen_note_extern_fn(s) }
+            else if s.linkage != 0 || s.storage == SC_EXTERN { gen_note_extern_obj(s) }
+            else if s.storage != SC_STATIC { return false }
         }
         out.ok = true
-        out.sym_id = gen_sym_fir_name_id(s)
+        out.sym_id = if local_id != 0 { local_id } else { gen_sym_fir_name_id(s) }
         out.addend = 0
         return true
     }

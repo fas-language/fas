@@ -593,7 +593,7 @@ let asm_parts st =
   flags ();
   let tmpl = str_tok lx in
   (* an empty list may be left out *)
-  let operands kw ~output =
+  let operands kw ~output ~names =
     let present = match peek lx with Ident k when k = kw -> ignore (next lx); true | _ -> false in
     if present then expect lx "(";
     let ops = ref [] and args = ref [] in
@@ -610,12 +610,10 @@ let asm_parts st =
         let acon = str_tok lx in
         let aty = parse_ty lx in
         let c =
-          match Fir_asm.constr ~names:[||] ~nouts:(if output then 0 else max_int) ~output acon with
-          | c -> Some c
-          | exception Fir_asm.Bad _ when not output -> None (* a [name] tie: the verifier checks *)
-          | exception Fir_asm.Bad m -> fail lx m
+          try Fir_asm.constr ~names ~nouts:(Array.length names) ~output acon
+          with Fir_asm.Bad m -> fail lx m
         in
-        let takes = (not output) || match c with Some c -> Fir_asm.output_takes_arg c | None -> false in
+        let takes = (not output) || Fir_asm.output_takes_arg c in
         (* the value; a bare constant has the operand's type (ptr for a
            memory operand) *)
         if takes then begin
@@ -624,8 +622,7 @@ let asm_parts st =
             | Tlocal _ -> parse_value st
             | t when starts_ty t -> parse_value st
             | _ ->
-                parse_const_after_ty st
-                  (match c with Some c when Fir_asm.indirect c -> ptr | _ -> aty)
+                parse_const_after_ty st (if Fir_asm.indirect c then ptr else aty)
           in
           args := x :: !args
         end;
@@ -636,8 +633,9 @@ let asm_parts st =
     end;
     (Array.of_list (List.rev !ops), List.rev !args)
   in
-  let outs, oargs = operands "out" ~output:true in
-  let ins, iargs = operands "in" ~output:false in
+  let outs, oargs = operands "out" ~output:true ~names:[||] in
+  let names = Array.map (fun (o : asm_operand) -> o.aname) outs in
+  let ins, iargs = operands "in" ~output:false ~names in
   let clobbers =
     match peek lx with
     | Ident "clobber" ->

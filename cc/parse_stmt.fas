@@ -207,7 +207,10 @@ fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
         if section == 3 { n.d = xs.first }
         if section == 4 { n.extra = handle_addr(xs.first) }
     }
-    if section != 0 { try pa_asm_names(p, n.a, &names) }
+    if section != 0 {
+        n.flags |= NF_ASM_EXTENDED
+        try pa_asm_names(p, n.a, &names)
+    }
     try pa_expect(p, c")")
     try pa_expect(p, c";")
     return n

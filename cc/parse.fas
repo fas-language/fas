@@ -37,6 +37,7 @@ const NF_PARTIAL_INIT u32 = 2048 // brace elision writes only the listed subobje
 const NF_INFERRED_DECL u32 = 4096 // the initializer supplies variably modified type bounds
 const NF_FENV u32 = 8192 // dynamic floating-point environment at this node
 const NF_INT_VALUE u32 = NF_ICE | NF_FOLD
+const NF_ASM_EXTENDED u32 = 16384 // ND_ASM only: a colon introduces operand sections
 
 struct Ast {
     kind u8

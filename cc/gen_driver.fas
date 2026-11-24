@@ -233,16 +233,25 @@ fn drv_temp_object() DrvTempObject fails {
     return {trunc[i32](inherited), drv_cstr_dup(buf_bytes(&b))}
 }
 
-fn drv_start_fir(fir_path addr, obj_path addr, pic u8, debug bool, input i32) i64 fails {
+value struct DrvCodegenOptions {
+    pic u8
+    debug bool
+    no_red_zone bool
+    kernel_model bool
+}
+
+fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input i32) i64 fails {
     fir_exe addr = drv_find_fas_fir()
     args Vec[addr] = {}
     defer { vec_free(&args) }
     vec_push(&args, c"-c")
-    if debug { vec_push(&args, c"-g") }
-    if pic == 1 { vec_push(&args, c"-fno-pic") }
+    if options.debug { vec_push(&args, c"-g") }
+    if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
+    if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }
+    if options.pic == 1 { vec_push(&args, c"-fno-pic") }
     // The default Fir object model is position independent with initial-exec
     // TLS. A shared object instead needs general-dynamic TLS.
-    else if pic == 2 || pic == 3 { vec_push(&args, c"-fPIC") }
+    else if options.pic == 2 || options.pic == 3 { vec_push(&args, c"-fPIC") }
     vec_push(&args, fir_path)
     vec_push(&args, c"-o")
     vec_push(&args, obj_path)
@@ -257,13 +266,13 @@ fn drv_finish_fir(pid i64) void fails {
     }
 }
 
-fn drv_assemble_fir(fir_path addr, obj_path addr, pic u8, debug bool) void fails {
-    try drv_finish_fir(try drv_start_fir(fir_path, obj_path, pic, debug, -1))
+fn drv_assemble_fir(fir_path addr, obj_path addr, options DrvCodegenOptions) void fails {
+    try drv_finish_fir(try drv_start_fir(fir_path, obj_path, options, -1))
 }
 
 value struct DrvFirPipe { pid i64, write_fd i32 }
 
-fn drv_fir_pipe(obj_path addr, pic u8, debug bool) DrvFirPipe fails {
+fn drv_fir_pipe(obj_path addr, options DrvCodegenOptions) DrvFirPipe fails {
     fds arr[2, i32] = {}
     _ i64 = try syscall[fails](SYS_PIPE2, &fds, O_CLOEXEC)
     // A caller can close stdio. Keep private pipe ends clear of those slots
@@ -279,7 +288,7 @@ fn drv_fir_pipe(obj_path addr, pic u8, debug bool) DrvFirPipe fails {
         fds[i] = trunc[i32](fd)
     }
     defer { os_close(fds[0]) }
-    pid i64 = drv_start_fir(c"-", obj_path, pic, debug, fds[0]) catch e {
+    pid i64 = drv_start_fir(c"-", obj_path, options, fds[0]) catch e {
         os_close(fds[1])
         fail e
     }

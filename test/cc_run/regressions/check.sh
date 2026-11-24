@@ -10,6 +10,8 @@ for file in "$src"/*.c; do
     flags=()
     runner=()
     case "${file##*/}" in
+        asm_goto_inline.c) flags=(-O2 -fno-pie -no-pie) ;;
+        asm_symbolic_immediate.c) flags=(-fno-pie -no-pie) ;;
         char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
@@ -24,6 +26,13 @@ for file in "$src"/*.c; do
     "$FCC" "$file" "${flags[@]}" -o "$work/fcc"
     "${runner[@]}" "$work/fcc" > "$work/fcc.out"
     cmp "$work/clang.out" "$work/fcc.out"
+    if [[ ${file##*/} == asm_extra_sections.c ]]; then
+        for exe in "$work/clang" "$work/fcc"; do
+            readelf -SW "$exe" > "$work/sections"
+            grep -qF ' __ex_table ' "$work/sections"
+            grep -qF ' .altinstructions ' "$work/sections"
+        done
+    fi
     echo "PASS: ${file##*/}"
 done
 
