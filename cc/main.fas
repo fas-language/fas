@@ -82,6 +82,7 @@ struct Options {
     no_red_zone bool
     general_regs_only bool
     kernel_model bool
+    auto_init_zero bool // -ftrivial-auto-var-init=zero
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     relocatable bool
     save_temps bool
@@ -258,6 +259,11 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"-fstack-protector-all") { o.stack_protector = 3
         } else if bytes_eq_c(word, c"-fstack-protector-explicit") { o.stack_protector = 4
         } else if bytes_eq_c(word, c"-fno-stack-protector") { o.stack_protector = 0
+        } else if bytes_eq_c(word, c"-ftrivial-auto-var-init=zero") { o.auto_init_zero = true
+        } else if bytes_eq_c(word, c"-ftrivial-auto-var-init=uninitialized") { o.auto_init_zero = false
+        } else if bytes_starts_with(word, bytes_c(c"-ftrivial-auto-var-init=")) {
+            // `pattern` fills with type-dependent bytes; refuse it rather than leave locals uninitialized.
+            try cli_error(c"fcc: unsupported option ", arg)
         } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
             try cli_error(c"fcc: fast-math semantics are unsupported: ", arg)
         } else if bytes_starts_with(word, bytes_c(c"-march=")) {
@@ -816,6 +822,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     gctx.trapv = o.overflow_mode == 2
     gctx.stack_protector = o.stack_protector
     gctx.kernel_model = o.kernel_model
+    gctx.auto_init_zero = o.auto_init_zero
     defer { gen_free(&gctx) }
     parser.on_function = &gen_on_function_cb
     parser.on_object = &gen_on_object_cb

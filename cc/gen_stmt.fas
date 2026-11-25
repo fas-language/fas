@@ -159,6 +159,12 @@ fn gen_pop_scope(old_cleanups usize, old_vlas usize) void fails {
 
 // ---------- Local Variable Declaration ----------
 
+// -ftrivial-auto-var-init=zero, unless the object opts out with
+// __attribute__((uninitialized)).
+fn gen_auto_init_zero(s handle[Symbol]) bool {
+    return gc.auto_init_zero && !gen_has_attr(s.attrs, c"uninitialized")
+}
+
 fn gen_local_decl(n handle[Ast]) void fails {
     s handle[Symbol] = n.decl
     if s == null { return }
@@ -220,8 +226,9 @@ fn gen_local_decl(n handle[Ast]) void fails {
         sz_v u32 = if inherited { try gen_vla_type_size(s.ty) } else { try gen_eval_vla_size_and_cache(s.ty) }
         al u64 = ty_align(s.ty)
         dyn_p u32 = gen_alloca_dyn(sz_v, al)
-        if s.value != null {
-            // C23 empty initializer `T vla[n] = {};` zero-initializes the VLA
+        if s.value != null || gen_auto_init_zero(s) {
+            // C23 empty initializer `T vla[n] = {};` zero-initializes the VLA,
+            // as -ftrivial-auto-var-init=zero does an uninitialized one
             gen_memset_dyn(dyn_p, gen_const_i8(0), sz_v, gen_is_volatile(s.ty))
         }
         slot u32 = gen_alloca_entry(8, 8)
@@ -256,6 +263,10 @@ fn gen_local_decl(n handle[Ast]) void fails {
     init handle[Ast] = handle_from_addr(s.value)
     if init != null && !gen_is_terminated() {
         try gen_auto_init(slot, s.ty, init, true)
+    } else if init == null && !gen_is_terminated() && sz > 0 && gen_auto_init_zero(s) {
+        // Each time the declaration is reached, like Clang: a jump past it
+        // leaves the object indeterminate.
+        gen_memset_const(slot, 0, sz, gen_is_volatile(s.ty))
     }
     if active_slot != 0 && !gen_is_terminated() { gen_store_ty(slot, active_slot, 8, true, false) }
 }

@@ -25,6 +25,7 @@ for file in "$src"/*.c; do
         no_sse_ms_abi.c|no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
         libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
+        auto_var_init_zero.c) flags=(-ftrivial-auto-var-init=zero) ;;
         short_wchar.c) flags=(-fshort-wchar) ;;
         unprototyped.c) flags=(-std=c99 -Wno-deprecated-non-prototype) ;;
     esac

@@ -151,6 +151,7 @@ struct GenCtx {
     trapv bool
     stack_protector u8
     kernel_model bool
+    auto_init_zero bool // -ftrivial-auto-var-init=zero
     stack_guard u32
 
     // Inline definitions emitted only if referenced
