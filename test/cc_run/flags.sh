@@ -353,6 +353,13 @@ cat > kbuild/kernel-model.c <<'C'
 extern int data;
 extern int next(int);
 int entry(void) { return next(data); }
+/* Early boot code runs from the identity map: direct and constant-offset
+ * accesses must be rip-relative, while pointer values stay absolute. */
+extern int early_flag, early_table[];
+extern void take(int *);
+int read_flag(void) { return early_flag; }
+int read_slot(void) { return early_table[3]; }
+void pass_flag(void) { take(&early_flag); }
 C
 echo 'int data = 42; int next(int n) { return n + 1; }' > kbuild/kernel-data.c
 for compiler in "${CLANG:-clang-22}" "$FCC"; do
@@ -364,6 +371,10 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
         kbuild/kernel-model.o kbuild/kernel-data.o -o kbuild/high-half
     readelf -sW kbuild/high-half > kbuild/high-half.symbols
     grep -qE 'ffffffff81000000 .* entry$' kbuild/high-half.symbols
+    readelf -rW kbuild/kernel-model.o > kbuild/kernel-model.relocs
+    grep -qE 'R_X86_64_PC32 .* early_flag - 4$' kbuild/kernel-model.relocs
+    grep -qE 'R_X86_64_PC32 .* early_table \+ 8$' kbuild/kernel-model.relocs
+    grep -qE 'R_X86_64_32S .* early_flag \+ 0$' kbuild/kernel-model.relocs
 done
 echo 'PASS: freestanding high-half kernel code model'
 

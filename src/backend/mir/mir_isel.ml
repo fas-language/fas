@@ -203,7 +203,31 @@ let use c v =
 let addr_of c p =
   match Hashtbl.find_opt c.frame (F.resolve c.fn p) with
   | Some s -> slot_addr s
-  | None -> at_reg (use c p)
+  | None -> (
+      (* a symbol plus a constant: directly, or through a constant ptradd *)
+      let sym_plus p =
+        match F.const_of c.fn p with
+        | Some (Csym (name, addend)) -> Some (name, addend)
+        | _ -> (
+            match F.def_of c.fn (F.resolve c.fn p) with
+            | Result (i, 0) -> (
+                match (F.inst c.fn i).op with
+                | Ptradd (_, base, idx, scale, disp) -> (
+                    match (F.const_of c.fn base, F.int_value c.fn idx) with
+                    | Some (Csym (name, addend)), Some k ->
+                        Some (name, Int64.add addend (Int64.add (Int64.mul k (Int64.of_int scale)) (Int64.of_int disp)))
+                    | _ -> None)
+                | _ -> None)
+            | _ -> None)
+      in
+      match if c.kernel_model then sym_plus p else None with
+      (* Like gcc and clang, the kernel model accesses a symbol (plus a
+         constant) rip-relative and keeps absolute addresses for pointer
+         values. Early boot code (head64.c) runs from the identity map and
+         relies on this to read globals before the kernel mapping exists. *)
+      | Some (name, addend) when fits32 addend && not (Hashtbl.mem c.tls_syms name) ->
+          { (at (Bsym name)) with disp = Int64.to_int addend }
+      | _ -> at_reg (use c p))
 
 let def c v r = emit c (Copy (vreg c v, r))
 
