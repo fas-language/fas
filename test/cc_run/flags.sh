@@ -360,12 +360,17 @@ extern void take(int *);
 int read_flag(void) { return early_flag; }
 int read_slot(void) { return early_table[3]; }
 void pass_flag(void) { take(&early_flag); }
+/* Paravirt call sites are patched only in the form call *pv_ops+off(%rip). */
+struct pv_ops { void (*first)(void); void (*second)(void); };
+extern struct pv_ops pv_ops;
+void call_second(void) { __asm__ volatile("call *%[op]" : : [op] "m" (pv_ops.second) : "memory"); }
 C
 cat > kbuild/kernel-data.c <<'C'
 int data = 42;
 int next(int n) { return n + 1; }
 int early_flag, early_table[4];
 void take(int *p) { (void)p; }
+struct pv_ops { void (*first)(void); void (*second)(void); } pv_ops;
 C
 for compiler in "${CLANG:-clang-22}" "$FCC"; do
     "$compiler" -Werror -ffreestanding -mno-red-zone -mcmodel=kernel -fno-pie \
@@ -380,6 +385,7 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
     grep -qE 'R_X86_64_PC32 .* early_flag - 4$' kbuild/kernel-model.relocs
     grep -qE 'R_X86_64_PC32 .* early_table \+ 8$' kbuild/kernel-model.relocs
     grep -qE 'R_X86_64_32S .* early_flag \+ 0$' kbuild/kernel-model.relocs
+    grep -qE 'R_X86_64_PC32 .* pv_ops \+ 4$' kbuild/kernel-model.relocs
 done
 echo 'PASS: freestanding high-half kernel code model'
 

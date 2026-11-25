@@ -199,28 +199,28 @@ let use c v =
           t
       | None -> vreg c v)
 
+(* [p] as a symbol plus a constant: directly, or through a constant ptradd *)
+let sym_plus fn p =
+  match F.const_of fn p with
+  | Some (Csym (name, addend)) -> Some (name, addend)
+  | _ -> (
+      match F.def_of fn (F.resolve fn p) with
+      | Result (i, 0) -> (
+          match (F.inst fn i).op with
+          | Ptradd (_, base, idx, scale, disp) -> (
+              match (F.const_of fn base, F.int_value fn idx) with
+              | Some (Csym (name, addend)), Some k ->
+                  Some (name, Int64.add addend (Int64.add (Int64.mul k (Int64.of_int scale)) (Int64.of_int disp)))
+              | _ -> None)
+          | _ -> None)
+      | _ -> None)
+
 (* the memory operand for an access through pointer [p] *)
 let addr_of c p =
   match Hashtbl.find_opt c.frame (F.resolve c.fn p) with
   | Some s -> slot_addr s
   | None -> (
-      (* a symbol plus a constant: directly, or through a constant ptradd *)
-      let sym_plus p =
-        match F.const_of c.fn p with
-        | Some (Csym (name, addend)) -> Some (name, addend)
-        | _ -> (
-            match F.def_of c.fn (F.resolve c.fn p) with
-            | Result (i, 0) -> (
-                match (F.inst c.fn i).op with
-                | Ptradd (_, base, idx, scale, disp) -> (
-                    match (F.const_of c.fn base, F.int_value c.fn idx) with
-                    | Some (Csym (name, addend)), Some k ->
-                        Some (name, Int64.add addend (Int64.add (Int64.mul k (Int64.of_int scale)) (Int64.of_int disp)))
-                    | _ -> None)
-                | _ -> None)
-            | _ -> None)
-      in
-      match if c.kernel_model then sym_plus p else None with
+      match if c.kernel_model then sym_plus c.fn p else None with
       (* Like gcc and clang, the kernel model accesses a symbol (plus a
          constant) rip-relative and keeps absolute addresses for pointer
          values. Early boot code (head64.c) runs from the identity map and
@@ -2141,8 +2141,10 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
       match Hashtbl.find_opt cx.frame (F.resolve cx.fn p) with
       | Some s -> loc.(k) <- Amem (slot_addr s, size)
       | None -> (
-          match F.const_of cx.fn p with
-          | Some (Csym (name, add))
+          (* A field of a global stays rip-relative too: the kernel's
+             paravirt call sites must be exactly call *pv_ops+off(%rip). *)
+          match sym_plus cx.fn p with
+          | Some (name, add)
             when fits32 add
                  && (not (Hashtbl.mem cx.tls_syms name))
                  && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
