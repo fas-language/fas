@@ -9,7 +9,14 @@
 // one the serial OCaml linker reports. Nothing is copied: names are Bytes
 // into the input mapping.
 
-const MAX_FILE_SIZE u64 = 134217728      // 128 MiB
+// Kernel scale: Linux's vmlinux.o is ~250 MiB with 3.8M relocations and
+// 0.5M symbols after objtool, built from ~2,800 archive members.
+const MAX_FILE_SIZE u64 = 2147483648     // 2 GiB
+const MAX_INPUT_FILES u64 = 65536
+const MAX_INPUT_BYTES u64 = 8589934592   // 8 GiB, all inputs and decoded debug data
+const MAX_SYMBOLS u64 = 16777216
+const MAX_RELOCATIONS u64 = 67108864
+const MAX_NAME_BYTES u64 = 1073741824    // 1 GiB of decoded names per object
 const MAX_ALIGNMENT u64 = 2097152        // 2 MiB
 const MAX_SECTION_SIZE u64 = 1073741824  // 1 GiB
 
@@ -183,10 +190,11 @@ fn name_at(o handle[Obj], offset u64, size u64, name_offset u64) Bytes fails {
     while e < limit && o.data[u8, e] != 0 { e += 1 }
     if e == limit { try efail(o, c"name: unterminated string or name exceeds 65535 bytes") }
     n u64 = e - start
-    lim u64 = 67108864
+    lim u64 = MAX_NAME_BYTES
     if o.name_bytes > lim || n > lim - o.name_bytes {
         m handle[Buf] = ef(o)
-        bs(m, c"decoded name storage: size exceeds supported limit 67108864")
+        bs(m, c"decoded name storage: size exceeds supported limit ")
+        bu(m, lim)
         fail Bad
     }
     o.name_bytes += n
@@ -400,7 +408,8 @@ fn decompress(o handle[Obj], count u64) void fails {
         size u64 = try idx(o, c"uncompressed debug size", bitcast[i64](MAX_FILE_SIZE), rd64(original, s.offset + 8))
         if decoded > MAX_FILE_SIZE || size > MAX_FILE_SIZE - decoded {
             m handle[Buf] = ef(o)
-            bs(m, c"decoded debug storage: size exceeds supported limit 134217728")
+            bs(m, c"decoded debug storage: size exceeds supported limit ")
+            bu(m, MAX_FILE_SIZE)
             fail Bad
         }
         decoded += size
@@ -449,7 +458,13 @@ fn elf_parse(o handle[Obj]) void fails {
             try efail(o, c"LLVM bitcode LTO is unsupported; compile native objects without -flto")
         }
     }
-    if length > MAX_FILE_SIZE { try efail(o, c"input exceeds 134217728 byte limit") }
+    if length > MAX_FILE_SIZE {
+        m handle[Buf] = ef(o)
+        bs(m, c"input exceeds ")
+        bu(m, MAX_FILE_SIZE)
+        bs(m, c" byte limit")
+        fail Bad
+    }
     try span(o, c"ELF header", 0, 64)
     if d[u32] != 0x464c457f { try efail(o, c"expected an ELF object") }
     if rd8(d, 4) != 2 { try efail(o, c"unsupported ELF class (expected ELF64)") }
@@ -700,7 +715,7 @@ fn elf_parse(o handle[Obj]) void fails {
             try efail(o, c"invalid symbol table entry size")
         }
         symbol_count u64 = symtab.size / 24
-        if symbol_count > 1000000 { try efail(o, c"symbol count exceeds supported limit") }
+        if symbol_count > MAX_SYMBOLS { try efail(o, c"symbol count exceeds supported limit") }
         first_global u64 = zext[u64](symtab.info)
         if first_global < 1 || first_global > symbol_count { try efail(o, c"invalid first global symbol index") }
         try string_table(o, zext[u64](symtab.link))
@@ -888,9 +903,10 @@ fn elf_parse(o handle[Obj]) void fails {
             try sfail(o, s, c"unsupported relocation target")
         }
         n u64 = s.size / 24
-        if relocation_count > 1000000 || n > 1000000 - relocation_count {
+        if relocation_count > MAX_RELOCATIONS || n > MAX_RELOCATIONS - relocation_count {
             m handle[Buf] = ef(o)
-            bs(m, c"relocation count: size exceeds supported limit 1000000")
+            bs(m, c"relocation count: size exceeds supported limit ")
+            bu(m, MAX_RELOCATIONS)
             fail Bad
         }
         relocation_count += n

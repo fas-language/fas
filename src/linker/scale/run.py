@@ -257,9 +257,10 @@ payload: .incbin "{payload}"
                 assert actual.hexdigest() == digest(payload), 'file-backed payload mismatch'
         oversized = self.output / 'too-large-input.o'
         with oversized.open('wb') as stream:
-            stream.truncate(128 * 1024 * 1024 + 1)
+            # Sparse; the 2 GiB limit (elf_reader.ml max_file_size) is checked before mapping.
+            stream.truncate(2 * 1024 * 1024 * 1024 + 1)
         self.reject_preserving('oversized-input', oversized,
-                               diagnostic='input exceeds 134217728 byte limit')
+                               diagnostic='input exceeds 2147483648 byte limit')
         return {'payload_bytes': size, 'all_payload_bytes_hashed': True,
                 'oversized_input_bytes': oversized.stat().st_size}
 

@@ -211,8 +211,11 @@ fn parse_flush() void fails {
 fn decoded_charge(o handle[Obj]) void fails {
     for k u64 in 0..zext[u64](o.ndec) {
         size u64 = o.dec[u64, k]
-        if ld.input_bytes > 268435456 || size > 268435456 - ld.input_bytes {
-            try die_c(c"combined input and decoded debug size: size exceeds supported limit 268435456")
+        if ld.input_bytes > MAX_INPUT_BYTES || size > MAX_INPUT_BYTES - ld.input_bytes {
+            m handle[Buf] = msg()
+            bs(m, c"combined input and decoded debug size: size exceeds supported limit ")
+            bu(m, MAX_INPUT_BYTES)
+            try die()
         }
         ld.input_bytes += size
         stat_add(ST_DECODED_DEBUG_BYTES, size)
@@ -394,11 +397,17 @@ fn library_dynamic() bool {
     return !ld.input_static && m != MODE_STATIC && m != MODE_STATIC_PIE
 }
 
+fn file_limit_message(m handle[Buf]) void {
+    bs(m, c"input count exceeds ")
+    bu(m, MAX_INPUT_FILES)
+    bs(m, c" file limit")
+}
+
 fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void fails {
     ld.file_count += 1
-    if ld.file_count > 1024 {
+    if ld.file_count > MAX_INPUT_FILES {
         m handle[Buf] = msg()
-        bs(m, c"input count exceeds 1024 file limit")
+        file_limit_message(m)
         try input_die()
     }
     vec_push(&ld.expanded, path)
@@ -406,7 +415,7 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
     phase_begin(PH_READ, &rt)
     real Buf = {}
     ld_realpath(path, &real) catch e { try input_die_io(c"realpath", path, e) }
-    max_size u64 = umin(MAX_FILE_SIZE, 268435456 - ld.input_bytes)
+    max_size u64 = umin(MAX_FILE_SIZE, MAX_INPUT_BYTES - ld.input_bytes)
     data Bytes = bytes_empty()
     found bool = false
     for k u64 in 0..ld.snapshots.n {
@@ -521,11 +530,14 @@ fn read_extra_counted(path Bytes, counter u64) Bytes fails {
         }
     }
     ld.file_count += 1
-    if ld.file_count > 1024 { try input_die_c(c"input count exceeds 1024 file limit") }
+    if ld.file_count > MAX_INPUT_FILES {
+        file_limit_message(msg())
+        try input_die()
+    }
     vec_push(&ld.expanded, path)
     rt PhaseStart = {}
     phase_begin(PH_READ, &rt)
-    data Bytes = try input_read(path, umin(MAX_FILE_SIZE, 268435456 - ld.input_bytes))
+    data Bytes = try input_read(path, umin(MAX_FILE_SIZE, MAX_INPUT_BYTES - ld.input_bytes))
     phase_end(PH_READ, &rt)
     ld.input_bytes += data.n
     stat_add(counter, 1)
@@ -913,7 +925,10 @@ fn resolve() void fails {
     for k u64 in 0..c.items.n {
         if vec_at(&c.items, k).kind == IT_PATH { paths += 1 }
     }
-    if paths > 1024 { try die_c(c"input count exceeds 1024 file limit") }
+    if paths > MAX_INPUT_FILES {
+        file_limit_message(msg())
+        try die()
+    }
     try read_inputs()
 
     // the entry and -u roots

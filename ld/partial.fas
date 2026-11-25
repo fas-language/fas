@@ -1,10 +1,11 @@
 // -r: relocatable output, a port of src/linker/partial_link.ml (and
 // Symver.plan/key, which only the partial link needs).
 //
-// ET_REL combination keeps section contributions separate: no addresses
-// are assigned and no relocation expressions are evaluated. Output
-// sections come in the OCaml order: group headers, content sections,
-// relocation sections, then the synthesized tables.
+// ET_REL combination merges same-named input sections (see the content
+// pass in partial_combine): no addresses are assigned and no relocation
+// expressions are evaluated. Output sections come in the OCaml order: group
+// headers, content sections, relocation sections, then the synthesized
+// tables.
 
 // ---------- Symver.plan / Symver.key ----------
 
@@ -98,7 +99,7 @@ fn pfresh(name addr, kind u32, flags u64, alignment u64, entsize u64, size u64, 
 
 
 fn psym_add(y handle[Sym]) u32 fails {
-    if ld.psyms.n + 1 >= 1000000 { try die_c(c"partial link: too many output symbols") }
+    if ld.psyms.n + 1 >= MAX_SYMBOLS { try die_c(c"partial link: too many output symbols") }
     copy_into[Sym](vec_add(&ld.psyms), y)
     return trunc[u32](ld.psyms.n)
 }
@@ -108,13 +109,28 @@ fn psym_add(y handle[Sym]) u32 fails {
 
 fn pmap(f u64) addr { return ld.pmaps[addr, f] }
 fn psmap(f u64) addr { return ld.psmaps[addr, f] }
+fn pbase(f u64) addr { return ld.pbases[addr, f] }
 
-// remap_symbol: the copy of y with its section index remapped
+// remap_symbol: the copy of y with its section index remapped and its
+// value moved by its input section's offset in the output section
 fn premap(f u64, y handle[Sym], out handle[Sym]) void {
     copy_into(out, y)
     if y.section != 0 && y.section < 0xff00 {
         out.section = pmap(f)[u32, zext[u64](y.section)]
+        out.value = y.value + pbase(f)[u64, zext[u64](y.section)]
     }
+}
+
+// one input relocation section's entries inside its output section
+struct RPart {
+    file u64
+    src u64
+    out u64
+    start u64
+}
+
+fn content_kind(kd u32) bool {
+    return kd == 1 || kd == 7 || kd == 8 || kd == 14 || kd == 15 || kd == 16
 }
 
 // Binary.add with the partial string context
@@ -140,10 +156,12 @@ fn partial_combine() void fails {
     try properties_prepare()
     ld.pmaps = heap_alloc_zeroed(ld.nobj * 8 + 8)
     ld.psmaps = heap_alloc_zeroed(ld.nobj * 8 + 8)
+    ld.pbases = heap_alloc_zeroed(ld.nobj * 8 + 8)
     for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         ld.pmaps[addr, f] = heap_alloc_zeroed(zext[u64](o.nsec) * 4 + 4)
         ld.psmaps[addr, f] = heap_alloc_zeroed(zext[u64](o.nsym) * 4 + 4)
+        ld.pbases[addr, f] = heap_alloc_zeroed(zext[u64](o.nsec) * 8 + 8)
     }
     // group headers first: ELF requires each to precede its members
     groups Vec[u64] = {}
@@ -166,47 +184,147 @@ fn partial_combine() void fails {
             vec_push(&groups, index)
         }
     }
-    // content sections
+    // content sections: input sections with the same name, type, entsize
+    // and flags other than SHF_WRITE/SHF_EXECINSTR share one output section
+    // whose flags are the union, as in GNU ld and lld -r (objtool finds
+    // vmlinux.o sections by name; the kernel mixes "a" assembly with "aw" C
+    // sections of one name). Group members stay separate. pbase records
+    // each input section's offset in its output section.
+    merged KeyIndex = {}
+    merged_out Vec[u64] = {}    // per merged entry: its output section
+    contents Vec[u64] = {}
     for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
-            kd u32 = s.kind
-            if !kept(f, k) { continue }
-            if !(kd == 1 || kd == 7 || kd == 8 || kd == 14 || kd == 15 || kd == 16) { continue }
+            if !kept(f, k) || !content_kind(s.kind) { continue }
             if bytes_is(s.name, c".note.GNU-stack") { continue }
             if f >= ld.ninput_objects && bytes_is(o.path, c"<common>") { continue }
-            data addr = if kd == 8 { null } else { o.data + s.offset }
-            pmap(f)[u32, k] = trunc[u32](try padd(s, data, f, k))
+            separate bool = (s.flags & 0x200) != 0
+            key_flags u64 = s.flags & ~5
+            hash u64 = hash_mix(bytes_hash(s.name) ^ (zext[u64](s.kind) << 48) ^ hash_mix(key_flags ^ (s.entsize << 32)))
+            out u64 = 0
+            if !separate {
+                id u32 = kx_first(&merged, hash)
+                while id != NONE {
+                    c handle[Sec] = &psec(vec_get(&merged_out, zext[u64](id))).hdr
+                    if c.kind == s.kind && (c.flags & ~5) == key_flags && c.entsize == s.entsize && bytes_eq(c.name, s.name) {
+                        out = vec_get(&merged_out, zext[u64](id))
+                        break
+                    }
+                    id = kx_next(&merged, id)
+                }
+            }
+            if out == 0 {
+                h Sec = {}
+                copy_into[Sec](&h, s)
+                h.size = 0
+                h.alignment = 1
+                out = try padd(&h, null, f, k)
+                vec_push(&contents, out)
+                if !separate {
+                    kx_add(&merged, hash, trunc[u32](merged_out.n))
+                    vec_push(&merged_out, out)
+                }
+            }
+            p handle[PSec] = psec(out)
+            alignment u64 = umax(1, s.alignment)
+            base u64 = try chk_align(c"partial section layout", MAX_FILE_SIZE, p.hdr.size, alignment)
+            p.hdr.size = try chk_add(c"partial section size", MAX_FILE_SIZE, base, s.size)
+            p.hdr.alignment = umax(p.hdr.alignment, alignment)
+            p.hdr.flags = p.hdr.flags | s.flags
+            pbase(f)[u64, k] = base
+            pmap(f)[u32, k] = trunc[u32](out)
         }
     }
-    // relocation sections whose target was kept
+    kx_free(&merged)
+    vec_free(&merged_out)
+    // the bytes: gaps in executable output sections are int3, others zero
+    for j u64 in 0..contents.n {
+        p handle[PSec] = psec(vec_get(&contents, j))
+        if p.hdr.kind == 8 { continue }
+        p.data = heap_alloc_zeroed(p.hdr.size + 1)
+        if (p.hdr.flags & 4) != 0 { mem_set(p.data, 0xcc, p.hdr.size) }
+    }
+    for f u64 in 0..ld.nobj {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nsec) {
+            s handle[Sec] = sec(o, k)
+            out u64 = zext[u64](pmap(f)[u32, k])
+            if out == 0 || s.kind == 8 || !content_kind(s.kind) { continue }
+            mem_copy(psec(out).data + pbase(f)[u64, k], o.data + s.offset, s.size)
+        }
+    }
+    vec_free(&contents)
+    // relocation sections whose target was kept: one output section per
+    // output target, holding each input's entries in input order
     relocs Vec[u64] = {}
+    rparts Vec[RPart] = {}
+    rmap addr = heap_alloc_zeroed(0xff00 * 4)
     for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {
             s handle[Sec] = sec(o, k)
             if s.kind != 4 || !kept(f, k) || pmap(f)[u32, zext[u64](s.info)] == 0 { continue }
-            d addr = heap_alloc(s.size + 1)
-            mem_copy(d, o.data + s.offset, s.size)
-            index u64 = try padd(s, d, f, k)
+            target u64 = zext[u64](pmap(f)[u32, zext[u64](s.info)])
+            index u64 = zext[u64](rmap[u32, target])
+            if index == 0 {
+                h Sec = {}
+                copy_into[Sec](&h, s)
+                h.size = 0
+                h.info = trunc[u32](target)
+                index = try padd(&h, null, f, k)
+                rmap[u32, target] = trunc[u32](index)
+                vec_push(&relocs, index)
+            }
+            p handle[PSec] = psec(index)
+            part handle[RPart] = vec_add(&rparts)
+            part.file = f
+            part.src = k
+            part.out = index
+            part.start = p.hdr.size
+            p.hdr.size = try chk_add(c"partial relocation size", MAX_FILE_SIZE, p.hdr.size, s.size)
             pmap(f)[u32, k] = trunc[u32](index)
-            vec_push(&relocs, index)
         }
     }
+    heap_free(rmap)
+    for j u64 in 0..relocs.n {
+        p handle[PSec] = psec(vec_get(&relocs, j))
+        p.data = heap_alloc(p.hdr.size + 1)
+    }
+    for j u64 in 0..rparts.n {
+        part handle[RPart] = vec_at(&rparts, j)
+        s handle[Sec] = sec(obj(part.file), part.src)
+        mem_copy(psec(part.out).data + part.start, obj(part.file).data + s.offset, s.size)
+    }
 
-    // locals, in object order
+    // locals, in object order; input section symbols collapse into one per
+    // output section (relocations against them get the base in the addend)
     out Sym = {}
+    section_syms addr = heap_alloc_zeroed(0xff00 * 4)
     for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for n u64 in 1..zext[u64](o.nsym) {
             y handle[Sym] = sym(o, n)
             if y.binding != 0 { continue }
             if !(y.section >= 0xff00 || (y.section != 0 && pmap(f)[u32, zext[u64](y.section)] != 0)) { continue }
+            if y.kind == 3 && y.section < 0xff00 {
+                output u64 = zext[u64](pmap(f)[u32, zext[u64](y.section)])
+                index u32 = section_syms[u32, output]
+                if index == 0 {
+                    premap(f, y, &out)
+                    out.value = 0
+                    index = try psym_add(&out)
+                    section_syms[u32, output] = index
+                }
+                psmap(f)[u32, n] = index
+                continue
+            }
             premap(f, y, &out)
             psmap(f)[u32, n] = try psym_add(&out)
         }
     }
+    heap_free(section_syms)
     first_global u64 = ld.psyms.n + 1
 
     // globals: one per key, in first-seen order, with the highest
@@ -275,19 +393,28 @@ fn partial_combine() void fails {
     // relocations, last section first (the OCaml list order): symbol
     // indices remapped; a dropped local keeps a zero addend outside
     // allocated sections and .eh_frame
-    ri u64 = relocs.n
+    // offsets move by the target's base; section-symbol addends by theirs
+    ri u64 = rparts.n
     while ri > 0 {
         ri -= 1
-        p handle[PSec] = psec(vec_get(&relocs, ri))
-        f u64 = p.file
+        part handle[RPart] = vec_at(&rparts, ri)
+        p handle[PSec] = psec(part.out)
+        f u64 = part.file
         o handle[Obj] = obj(f)
-        original handle[Sec] = sec(o, p.src)
+        original handle[Sec] = sec(o, part.src)
         target handle[Sec] = sec(o, zext[u64](original.info))
+        shift u64 = pbase(f)[u64, zext[u64](original.info)]
         for n u64 in 0..original.size / 24 {
-            at u64 = n * 24
-            info u64 = rd64(p.data, at + 8)
+            at u64 = part.start + n * 24
+            source u64 = original.offset + n * 24
+            wr64(p.data, at, rd64(o.data, source) + shift)
+            info u64 = rd64(o.data, source + 8)
             old u64 = info >> 32
             mapped u64 = zext[u64](psmap(f)[u32, old])
+            y handle[Sym] = sym(o, old)
+            if old != 0 && mapped != 0 && y.kind == 3 && y.section != 0 && y.section < 0xff00 {
+                wr64(p.data, at + 16, rd64(o.data, source + 16) + pbase(f)[u64, zext[u64](y.section)])
+            }
             if old != 0 && mapped == 0 {
                 if (target.flags & 2) != 0 && !bytes_is(target.name, c".eh_frame") {
                     m handle[Buf] = msg()
@@ -300,8 +427,8 @@ fn partial_combine() void fails {
             }
             wr64(p.data, at + 8, (mapped << 32) | (info & 0xffffffff))
         }
-        p.hdr.info = pmap(f)[u32, zext[u64](original.info)]
     }
+    vec_free(&rparts)
     // group bodies, last group first
     gi u64 = groups.n
     while gi > 0 {

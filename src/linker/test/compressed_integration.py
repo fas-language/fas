@@ -46,7 +46,7 @@ class CompressedTests(unittest.TestCase):
         mutations = [
             (at, '<I', 2, 'compression type'),
             (at + 4, '<I', 1, 'reserved field'),
-            (at + 8, '<Q', 129 * 1024 * 1024, 'size'),
+            (at + 8, '<Q', 3 * 1024 * 1024 * 1024, 'size'),
             (at + 16, '<Q', 3, 'alignment'),
             (header + 8, '<Q', section['flags'] | 2, 'non-allocatable'),
             (header + 32, '<Q', 23, 'compression header'),

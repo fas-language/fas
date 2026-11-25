@@ -207,6 +207,7 @@ let parse ?(link_only = false) arguments =
           | "norelro" -> relro := false
           | "text" -> () (* All output modes already reject text relocations. *)
           | "now" -> ()
+          | "noexecstack" -> () (* Outputs never request an executable stack. *)
           | "defs" -> no_undefined := true
           | "undefs" -> no_undefined := false
           | "muldefs" -> allow_multiple_definition := true

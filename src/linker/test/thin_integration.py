@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real GNU thin archives: lazy IO, relative paths, nesting and publication."""
 import json
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -125,8 +126,19 @@ class ThinTests(unittest.TestCase):
         self.rejected(self.simple, 'regular file', library)
         member.unlink()
         with member.open('wb') as stream:
-            stream.truncate(128*1024*1024+1)
+            sparse_or_skip(self, stream, 2*1024*1024*1024+1)
         self.rejected(self.simple, 'input exceeds', library)
+
+
+def sparse_or_skip(test, stream, size):
+    # The 2 GiB per-input limit can exceed a caller's file-size ulimit
+    # (test/fas_ld.sh caps files at 512 MiB); then this check cannot run.
+    try:
+        stream.truncate(size)
+    except OSError as error:
+        if error.errno != errno.EFBIG:
+            raise
+        test.skipTest('file-size ulimit is below the 2 GiB input limit')
 
 
 if __name__ == '__main__':

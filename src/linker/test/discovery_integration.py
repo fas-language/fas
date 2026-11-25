@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Runtime dependency search, dynamic tags and independent producer/consumers."""
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -404,9 +405,20 @@ int middle(void){return old()+7+(optional ? optional() : 0);}
                       options=('-pie', '--no-allow-shlib-undefined', '-rpath-link', other))
         bad.unlink()
         with bad.open('wb') as f:
-            f.truncate(128*1024*1024+1)
+            sparse_or_skip(self, f, 2*1024*1024*1024+1)
         self.rejected(start, 'byte limit', callback, middle,
                       options=('-pie', '--no-allow-shlib-undefined', '-rpath-link', other))
+
+
+def sparse_or_skip(test, stream, size):
+    # The 2 GiB per-input limit can exceed a caller's file-size ulimit
+    # (test/fas_ld.sh caps files at 512 MiB); then this check cannot run.
+    try:
+        stream.truncate(size)
+    except OSError as error:
+        if error.errno != errno.EFBIG:
+            raise
+        test.skipTest('file-size ulimit is below the 2 GiB input limit')
 
 
 if __name__ == '__main__':

@@ -198,6 +198,7 @@ struct Ld {
     psyms Vec[Sym]
     pmaps addr
     psmaps addr
+    pbases addr                 // per file: u64 per section, its offset in its output section
 }
 
 thread var ld handle[Ld] = null

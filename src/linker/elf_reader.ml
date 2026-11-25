@@ -2,7 +2,14 @@
    than disappearing from a seemingly successful executable. *)
 module B = Binary
 
-let max_file_size = 128 * 1024 * 1024
+(* Kernel scale: Linux's vmlinux.o is ~250 MiB with 3.8M relocations and
+   0.5M symbols after objtool, built from ~2,800 archive members. *)
+let max_file_size = 2 * 1024 * 1024 * 1024
+let max_input_files = 65536
+let max_input_bytes = 8 * 1024 * 1024 * 1024
+let max_symbols = 16 * 1024 * 1024
+let max_relocations = 64 * 1024 * 1024
+let max_name_bytes = 1024 * 1024 * 1024
 let max_alignment = 2 * 1024 * 1024
 let max_section_size = 1024 * 1024 * 1024
 
@@ -69,7 +76,7 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
     let name = B.string_at ~context:name_context data ~offset ~size name_offset in
     name_bytes :=
       B.add ~context:name_budget_context
-        ~limit:(64 * 1024 * 1024)
+        ~limit:max_name_bytes
         !name_bytes (String.length name);
     name
   in
@@ -392,7 +399,7 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
       if symtab.entsize <> 24 || symtab.size mod 24 <> 0 || symtab.size = 0 then
         fail "invalid symbol table entry size";
       let symbol_count = symtab.size / 24 in
-      if symbol_count > 1_000_000 then fail "symbol count exceeds supported limit";
+      if symbol_count > max_symbols then fail "symbol count exceeds supported limit";
       if symtab.info < 1 || symtab.info > symbol_count then
         fail "invalid first global symbol index";
       let strings = sections.(symtab.link) in
@@ -567,7 +574,7 @@ let parse ?(on_decoded = fun _ -> ()) ~path data =
             && not (target.kind = 7 && target.name = ".note.stapsdt")
             || target.name = ".note.GNU-stack"
           then fail "section %s: unsupported relocation target" s.name;
-          B.add ~context:(context "relocation count") ~limit:1_000_000 n (s.size / 24)
+          B.add ~context:(context "relocation count") ~limit:max_relocations n (s.size / 24)
         end)
       0 sections
   in

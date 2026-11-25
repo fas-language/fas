@@ -464,8 +464,9 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
                 c.relro = true
             } else if is(policy, c"norelro") {
                 c.relro = false
-            } else if is(policy, c"text") || is(policy, c"now") {
-                // all output modes already reject text relocations; binding is eager
+            } else if is(policy, c"text") || is(policy, c"now") || is(policy, c"noexecstack") {
+                // all output modes already reject text relocations; binding is
+                // eager; outputs never request an executable stack
             } else if is(policy, c"defs") {
                 c.no_undefined = true
             } else if is(policy, c"undefs") {
