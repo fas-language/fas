@@ -1053,9 +1053,13 @@ fn gen_stmt(n handle[Ast]) void fails {
     // EXCEPT compound statements that might contain labels or switch cases!
     if bytes_eq_c(kw, c"if") {
         // Avoid emitting references from an untaken constant branch. A goto
-        // or enclosing switch can still enter it independently of the test.
-        if !gen_is_terminated() && gc.p.label_list.n == 0 && cur_switch == null &&
-            ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        // or enclosing switch can still enter it independently of the test,
+        // so only drop a branch that defines no label. Ask the branch itself:
+        // the parser's label list is already cleared when a body waits in
+        // pending_bodies (the kernel's scoped_guard jumps into `if (0)`).
+        if !gen_is_terminated() && cur_switch == null &&
+            ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
+            !gen_defines_label(if se_truth(n.a) { n.c } else { n.b }) {
             try gen_stmt(if se_truth(n.a) { n.b } else { n.c })
             return
         }
@@ -1284,6 +1288,27 @@ fn gen_stmt(n handle[Ast]) void fails {
 }
 
 // ---------- Pre-scan for `&&label` so `indirect_br` sees all address-taken labels ----------
+
+// Whether a statement defines a label anywhere inside it, statement
+// expressions in initializers included. Its `next` siblings are not part
+// of it; its children's are.
+fn gen_defines_label(n handle[Ast]) bool {
+    if n == null { return false }
+    if n.kind == ND_STMT && n.op != 0 && bytes_eq_c(cc_name(gc.p.names, n.op), c":") { return true }
+    if n.kind == ND_DECL && n.decl != null && n.decl.value != null &&
+        gen_defines_label_list(handle_from_addr(n.decl.value)) { return true }
+    return gen_defines_label_list(n.a) || gen_defines_label_list(n.b) ||
+           gen_defines_label_list(n.c) || gen_defines_label_list(n.d)
+}
+
+fn gen_defines_label_list(n handle[Ast]) bool {
+    s handle[Ast] = n
+    while s != null {
+        if gen_defines_label(s) { return true }
+        s = s.next
+    }
+    return false
+}
 
 fn gen_prescan_addr_taken(n handle[Ast]) void {
     if n == null { return }
