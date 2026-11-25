@@ -200,5 +200,11 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
               { O.name = x.name; flags = x.flags; alignment = x.alignment; contents = x.contents })
             extra;
       symbols = Array.of_list (List.rev !symbols);
-      relocations = Array.of_list (List.rev !relocations);
+      (* in offset order within each section, like an assembler writes them:
+         objtool walks a jump table's entries forward from its first one *)
+      relocations =
+        Array.of_list
+          (List.stable_sort
+             (fun (a : O.relocation) (b : O.relocation) -> compare (a.section, a.offset) (b.section, b.offset))
+             (List.rev !relocations));
     }
