@@ -47,6 +47,15 @@ for file in "$src"/*.c; do
             grep -qF ' .altinstructions ' "$work/sections"
         done
     fi
+    if [[ ${file##*/} == asm_discard_sections.c ]]; then
+        "$FCC" -c "$file" -o "$work/discard.o"
+        readelf -SW "$work/discard.o" > "$work/sections"
+        [[ $(grep -c ' \.discard\.noendbr ' "$work/sections") == 1 ]]
+        [[ $(grep -c ' \.fas_data ' "$work/sections") == 1 ]]
+        readelf -rW "$work/discard.o" | sed -n "/'.rela.discard.noendbr'/,/^$/p" > "$work/relocs"
+        grep -q 'contains 2 entries' "$work/relocs"
+        grep -q '\.static_call\.text + 0' "$work/relocs"
+    fi
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then
         llvm-nm-22 "$work/fcc" > "$work/symbols"
         grep -q ' retained_setting$' "$work/symbols"

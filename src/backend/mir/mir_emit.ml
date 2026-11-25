@@ -510,6 +510,54 @@ let assemble_snippets (texts : (bool * string) list) =
   in
   (snippets, materialize)
 
+(* One section per name, as an assembler makes: the extra sections with the
+   same name, flags and kind (C data given a section attribute, inline asm,
+   top-level asm) become one, the parts in order, each at its alignment. Tools
+   that look a section up by name, as the kernel's objtool does for its
+   .discard annotations, then see all of it. Returns the sections and
+   [symbols] moved into them. *)
+let merge_extras (extras : Native_object.extra list) (symbols : Elf64.symbol list) =
+  let extras = Array.of_list extras in
+  let target = Array.make (Array.length extras) 0 and base = Array.make (Array.length extras) 0 in
+  let index = Hashtbl.create 16 and merged = ref [||] in
+  let align n a = (n + a - 1) / a * a in
+  Array.iteri
+    (fun i (e : Native_object.extra) ->
+      let bss = match e.contents with Fas_linker.Elf_object.Bss _ -> true | Data _ -> false in
+      match Hashtbl.find_opt index (e.name, e.flags, bss) with
+      | None ->
+          Hashtbl.replace index (e.name, e.flags, bss) (Array.length !merged);
+          target.(i) <- Array.length !merged;
+          merged := Array.append !merged [| e |]
+      | Some j ->
+          let (m : Native_object.extra) = !merged.(j) in
+          let contents, at =
+            match (m.contents, e.contents) with
+            | Data a, Data b ->
+                let at = align (Bytes.length a) (max 1 e.alignment) in
+                let c = Bytes.make (at + Bytes.length b) '\000' in
+                Bytes.blit a 0 c 0 (Bytes.length a);
+                Bytes.blit b 0 c at (Bytes.length b);
+                (Fas_linker.Elf_object.Data c, at)
+            | Bss a, Bss b ->
+                let at = align a (max 1 e.alignment) in
+                (Fas_linker.Elf_object.Bss (at + b), at)
+            | _ -> assert false
+          in
+          target.(i) <- j;
+          base.(i) <- at;
+          !merged.(j) <-
+            { m with alignment = max m.alignment e.alignment; contents;
+                     relocs = m.relocs @ List.map (X64.shift_reloc at) e.relocs })
+    extras;
+  ( Array.to_list !merged,
+    List.map
+      (fun (y : Elf64.symbol) ->
+        match y.section with
+        | Extra i -> { y with section = Extra target.(i); offset = y.offset + base.(i) }
+        | _ -> y)
+      symbols )
+
 (* Top-level asm ([module_asm]): the text is assembled in one run, and every
    allocated section of the result becomes a section of its own in our
    object (after the [first] extra ones), with its symbols and relocations.
@@ -534,12 +582,21 @@ let module_asm ~first (texts : string list) =
     let o = R.parse ~path:"<module asm>" data in
     if Array.length o.groups > 0 then unsupported "module asm: section groups (COMDAT)";
     (* the sections kept: allocated ones with contents (PROGBITS, NOBITS,
-       NOTE, INIT/FINI/PREINIT_ARRAY, x86-64 UNWIND) *)
+       NOTE, INIT/FINI/PREINIT_ARRAY, x86-64 UNWIND), and, as for inline asm,
+       non-allocated PROGBITS with contents or referenced: the kernel's
+       objtool annotations (.discard.noendbr on its static-call trampolines,
+       .discard.reachable ...) are such sections *)
+    let referenced = Hashtbl.create 8 in
+    Array.iter
+      (fun (r : R.relocation) ->
+        if r.kind <> 0 then Hashtbl.replace referenced o.symbols.(r.symbol).section ())
+      o.relocations;
     let kept = Hashtbl.create 8 and order = ref [] in
     Array.iter
       (fun (s : R.section) ->
         let kinds = [ 1; 7; 8; 14; 15; 16; 0x70000001 ] in
-        if s.flags land 2 <> 0 && List.mem s.kind kinds then begin
+        let unallocated = s.flags land 2 = 0 && s.kind = 1 && (s.size > 0 || Hashtbl.mem referenced s.index) in
+        if (s.flags land 2 <> 0 && List.mem s.kind kinds) || unallocated then begin
           Hashtbl.replace kept s.index (first + List.length !order);
           order := s :: !order
         end)
@@ -1696,6 +1753,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_h
           | None -> unsupported "ifunc `%s`: its resolver `%s` was not emitted" iv.iname iv.resolver)
         syms.ifuncs
     in
+    let extra_sections, symbols = merge_extras extra_sections (defined_syms @ alias_syms @ ifunc_syms) in
     Ok
       (Native_object.emit
          ?eh_frame
@@ -1720,7 +1778,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_h
            data = Buffer.to_bytes data.buf;
            data_relocs = data.relocs;
            bss_size = !bss;
-           symbols = defined_syms @ alias_syms @ ifunc_syms;
+           symbols;
            entry = "_start";
          })
   with

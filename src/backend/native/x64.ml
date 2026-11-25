@@ -131,6 +131,20 @@ type reloc =
           unadjusted): code an external assembler made, spliced in by
           [raw] (inline asm, see Mir_emit). *)
 
+(* [r] moved [d] bytes further into its section *)
+let shift_reloc d = function
+  | Rel32 r -> Rel32 { r with offset = r.offset + d }
+  | Call32 r -> Call32 { r with offset = r.offset + d }
+  | Abs64 r -> Abs64 { r with offset = r.offset + d }
+  | Abs32s r -> Abs32s { r with offset = r.offset + d }
+  | Abs32 r -> Abs32 { r with offset = r.offset + d }
+  | Gotpcrel r -> Gotpcrel { r with offset = r.offset + d }
+  | Dtpoff32 r -> Dtpoff32 { r with offset = r.offset + d }
+  | Tpoff32 r -> Tpoff32 { r with offset = r.offset + d }
+  | Gottpoff r -> Gottpoff { r with offset = r.offset + d }
+  | Tlsgd r -> Tlsgd { r with offset = r.offset + d }
+  | Raw r -> Raw { r with offset = r.offset + d }
+
 type t = {
   code : Buffer.t;
   mutable labels : int option array;
