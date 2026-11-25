@@ -100,6 +100,11 @@ let evaluate f (ir : inst_rec) =
         match (int_const f a, rt) with
         | Some (w, x), Int tw when tw <= 64 -> Some (iconst f rt (sext tw (mask tw (sext w x))))
         | _ -> None)
+    | Conv (Inttoptr, a) when int_value f a = Some 0L ->
+        Some (const f (Cnull rt) rt)
+    | Conv (Ptrtoint, a)
+      when (match const_of f a with Some (Cnull _ | Czero (Ptr _)) -> true | _ -> false) ->
+        Some (iconst f rt 0L)
     (* a bitcast to its own type is a copy *)
     | Conv (Bitcast, a) when ty_of f (resolve f a) = rt -> Some a
     (* a byte address at offset zero is its base *)
