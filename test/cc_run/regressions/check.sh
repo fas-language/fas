@@ -13,7 +13,7 @@ for file in "$src"/*.c; do
         asm_goto_inline.c) flags=(-O2 -fno-pie -no-pie) ;;
         asm_symbolic_immediate.c) flags=(-fno-pie -no-pie) ;;
         char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
-        dead_constant_branches.c|inline_asm_forward_static.c) flags=(-O2) ;;
+        asm_bool_immediate.c|dead_constant_branches.c|inline_asm_forward_static.c) flags=(-O2) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
         function_sections.c) flags=(-g) ;;

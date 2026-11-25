@@ -2060,7 +2060,10 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
     | Some v -> (
         match F.const_of cx.fn v with
         | Some (Cint (t, l)) -> (
-            let x = sext_const (match t with F.Int w -> w | _ -> 64) l.(0) in
+            (* A C _Bool true is 1, as in clang; wider integers keep their
+               sign. The kernel's jump table adds a bool "i" to a key
+               address, and -1 there marks the key as linked. *)
+            let x = match t with F.Int 1 -> Int64.logand l.(0) 1L | F.Int w -> sext_const w l.(0) | _ -> l.(0) in
             match c.imm with Some ok when ok x -> Some (Aimm x) | _ -> None)
         | Some (Czero _ | Cnull _) when c.imm <> None -> Some (Aimm 0L)
         | Some (Csym (name, add))
