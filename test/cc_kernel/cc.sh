@@ -2,6 +2,7 @@
 set -euo pipefail
 
 clang=${CLANG:-clang-22}
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 if [[ $# == 1 && $1 == --version ]]; then
     echo "fcc (Kbuild clang configuration)"
     exit 0
@@ -92,4 +93,6 @@ if [[ ${*: -5} == '-E -P -x c -' ]]; then
     exec "$FCC" "${args[@]}" <<< "$source_text"
 fi
 
-exec "$FCC" "${args[@]}"
+# Kernel fallbacks for optimizations fcc does not have yet.
+# TODO: fallbacks.h lists what removes each entry.
+exec "$FCC" -include "$here/fallbacks.h" "${args[@]}"
