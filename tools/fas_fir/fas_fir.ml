@@ -221,7 +221,11 @@ let main () =
        order and section contents identical to the in-memory path. *)
     (try
       if !fold_branches then Fir_stream.fold stream;
-      if !fold_branches && !kernel_model then Fir_stream.fold_kernel_calls stream;
+      (* Like gcc and clang at every -O level, never emit an unreferenced
+         C-local definition: header statics may call functions that a
+         freestanding image (the kernel decompressor, EFI stub) never links. *)
+      if !fold_branches && !kernel_model then Fir_stream.fold_kernel_calls stream
+      else Fir_stream.drop_unused stream;
       Fir_stream.normalize stream;
       Fir_stream.wide stream
     with Fir_scalarize.Unsupported e | Fir_wide.Unsupported e -> unsupported e);
