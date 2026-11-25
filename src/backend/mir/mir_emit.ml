@@ -35,6 +35,38 @@ let out_area (f : func) = Mir_isel.align_up f.out_size 16
 
 type frame = { slot_off : int array; nsaved : int; size : int; ms_xmm_off : int option }
 
+(* Code-generation hardening, the kernel's mitigations (gcc and clang flag
+   names):
+   - [thunk_calls] (-mretpoline-external-thunk): an indirect call or jump
+     through register R calls or jumps to the external
+     __x86_indirect_thunk_R instead;
+   - [thunk_cs_prefix] (-mindirect-branch-cs-prefix): a cs prefix on those
+     branches when R is r8..r15, so the 6 bytes can be patched at run time
+     into lfence; call *%R (gcc's rule);
+   - [return_thunk] (-mfunction-return=thunk-extern): a return is a jmp to
+     __x86_return_thunk;
+   - [endbr] (-fcf-protection=branch): endbr64 at every function entry
+     (unless nocf_check) and at every block an indirect jump may reach;
+   - [patch_entry] (-fpatchable-function-entry=N,M): N single-byte nops,
+     M of them before the entry symbol, the rest after the entry's endbr64;
+     the address of the first goes into __patchable_function_entries.
+     A function's own patchable(N, M) overrides it. *)
+type hardening = {
+  thunk_calls : bool;
+  thunk_cs_prefix : bool;
+  return_thunk : bool;
+  endbr : bool;
+  patch_entry : int * int;
+}
+
+let no_hardening =
+  { thunk_calls = false; thunk_cs_prefix = false; return_thunk = false; endbr = false; patch_entry = (0, 0) }
+
+let thunk_branch a hard ~call r =
+  if hard.thunk_cs_prefix && A.reg_num r >= 8 then A.byte a 0x2e;
+  let symbol = "__x86_indirect_thunk_" ^ A.reg_name r in
+  if call then A.call_symbol a symbol else A.jmp_symbol a symbol
+
 let layout (f : func) nsaved =
   let off = ref (8 * nsaved) in
   let ms_xmm_off =
@@ -618,7 +650,7 @@ let probed_frame a size =
     end
   end
 
-let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame ~code_base (i : ins) =
+let ins a fr ~pic ~hard ~func_label ~out ~snippet ~asm_frame ~code_base (i : ins) =
   let m = mem fr in
   match i with
   | Salloc (d, n) ->
@@ -745,7 +777,7 @@ let ins a fr ~pic ~func_label ~out ~snippet ~asm_frame ~code_base (i : ins) =
       | Tlabel name ->
           (match func_label name with Some l -> A.call_label a l | None -> A.call_symbol a name)
       | Tsym name -> A.call_symbol a name
-      | Treg r -> A.call_r a (gr r)
+      | Treg r -> if hard.thunk_calls then thunk_branch a hard ~call:true (gr r) else A.call_r a (gr r)
       | Ttlsgd name -> A.tls_get_addr a name)
   | Syscall _ -> A.syscall a
   | Rep_movsb -> A.rep_movsb a
@@ -818,13 +850,16 @@ let zeroize a ~red_zone fr results =
    rows for the .debug_line (Mir_dwarf): the text offset of each [Loc]
    marker with its location id, and where its source variables live
    (Mir_dwarf.vloc, by Fir variable index) *)
-let func a ~red_zone ~pic ~func_label ~snippet ~block_pos ~code_base (f : func) (ra : Mir_ra.result) =
+let func a ~red_zone ~pic ~hard ~endbr ~after_nops ~func_label ~snippet ~block_pos ~code_base (f : func)
+    (ra : Mir_ra.result) =
   if f.ms_abi && f.zeroize then unsupported "secret function with the Microsoft x64 calling convention";
   let fr = layout f (List.length ra.saved) in
   let start = A.pos a in
   let events = ref [] and rows = ref [] in
   let event e = events := (A.pos a - start, e) :: !events in
   A.place a (Option.get (func_label f.name));
+  if endbr then A.endbr64 a;
+  for _ = 1 to after_nops do A.byte a 0x90 done;
   A.push a A.Rbp;
   event Mir_cfi.Pushed_rbp;
   A.mov_rr a A.Rbp A.Rsp;
@@ -859,10 +894,15 @@ let func a ~red_zone ~pic ~func_label ~snippet ~block_pos ~code_base (f : func) 
   let ended () = Dynarray.add_last pend (A.pos a) in
   let asm_frame pc len code =
     events := (pc - start, Mir_cfi.Inline (code, pc + len - start)) :: !events in
-  let emit = ins a fr ~pic ~func_label ~out:(out_area f) ~snippet ~asm_frame ~code_base in
+  let emit = ins a fr ~pic ~hard ~func_label ~out:(out_area f) ~snippet ~asm_frame ~code_base in
+  (* the blocks an indirect jump may reach take a branch-target marker *)
+  let jump_targets = Array.make nb false in
+  if hard.endbr then
+    Array.iter (function Jmpr (_, ts) -> List.iter (fun t -> jump_targets.(t) <- true) ts | _ -> ()) ra.terms;
   for b = 0 to nb - 1 do
     A.place a labels.(b);
     block_pos b (A.pos a);
+    if jump_targets.(b) then A.endbr64 a;
     List.iter
       (function
         | Mir_ra.Orig (_, Loc n) -> rows := (A.pos a, n) :: !rows; ended ()
@@ -895,10 +935,11 @@ let func a ~red_zone ~pic ~func_label ~snippet ~block_pos ~code_base (f : func) 
         List.iter (A.pop a) (List.rev ra.saved);
         A.pop a A.Rbp;
         event Mir_cfi.Popped_rbp;
-        A.ret a;
+        if hard.return_thunk then A.jmp_symbol a "__x86_return_thunk" else A.ret a;
         event Mir_cfi.Returned
     | Halt -> A.ud2 a
-    | Jmpr (r, _) -> A.ext_r a ~w:false [ 0xff ] 4 (gr r));
+    | Jmpr (r, _) ->
+        if hard.thunk_calls then thunk_branch a hard ~call:false (gr r) else A.ext_r a ~w:false [ 0xff ] 4 (gr r));
     ended ()
   done;
   let size = A.pos a - start in
@@ -1182,7 +1223,7 @@ let prepare (m : F.modul) =
    tables (Mir_dwarf); the allocated sections are the same either way.
    [unwind_tables]: emit ordinary frame information in addition to the
    records needed for C exception cleanups and explicit inline CFI. *)
-let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?(has_asm = true)
+let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_hardening) ?stack_align ?iter_funcs ?(has_asm = true)
     ?(unwind_tables = true)
     ~startup ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(self_relocate = false) (m : F.modul) =
   try
@@ -1226,6 +1267,8 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
           Some l
     in
     let func_syms = ref [] in
+    (* the code base and offset of each function's first patchable nop *)
+    let patch_sites = ref [] in
     let fdes = ref [] in
     let lines = ref [] in
     (* text offsets of every block, for blockaddr symbols *)
@@ -1237,7 +1280,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
       iter
         (fun (fn : F.func) ->
           if fn.defined then begin
-            let mf = Mir_isel.select ~pic ~tls_gd ~kernel_model ~no_sse ~general_regs_only env fn in
+            let mf = Mir_isel.select ~pic ~tls_gd ~kernel_model ~no_sse ~general_regs_only ?stack_align env fn in
             if dump then prerr_string (Mir.to_string mf);
             Mir_export.add_func mf;
             let ra =
@@ -1269,9 +1312,14 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
         | None -> (a, labels, Mir_cfi.text_symbol, Elf64.Text)
       in
       A.align a 16;
+      let patch, before = Option.value fn.patchable ~default:hard.patch_entry in
+      if patch > 0 then patch_sites := (code_base, A.pos a) :: !patch_sites;
+      for _ = 1 to before do A.byte a 0x90 done;
       let offset = A.pos a in
+      let endbr = hard.endbr && not (F.has fn.fattrs F.fa_nocf_check) in
       let size, events, rows, vlocs =
-        func a ~red_zone ~pic ~func_label:(func_label a labels section) ~snippet ~code_base
+        func a ~red_zone ~pic ~hard ~endbr ~after_nops:(patch - before) ~func_label:(func_label a labels section)
+          ~snippet ~code_base
           ~block_pos:(fun b o -> Hashtbl.replace block_offsets (fn.name, b) o) mf ra
       in
       let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
@@ -1548,6 +1596,18 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
           [ symbol Mir_cfi.lsda_symbol index (Bytes.length lsda);
             symbol Mir_cfi.personality_slot (index + 1) 8 ] )
     in
+    let extra_sections =
+      match !patch_sites with
+      | [] -> extra_sections
+      | sites ->
+          let sites = List.rev sites in
+          (* gcc's "aw" form: without SHF_LINK_ORDER, which the object
+             writer does not express *)
+          extra_sections
+          @ [ { Native_object.name = "__patchable_function_entries"; flags = 3; alignment = 8;
+                contents = Fas_linker.Elf_object.Data (Bytes.make (8 * List.length sites) '\000');
+                relocs = List.mapi (fun i (symbol, addend) -> A.Abs64 { offset = 8 * i; symbol; addend }) sites } ]
+    in
     (* local symbols for the blocks whose address is taken, in code or data *)
     let blk_syms = Hashtbl.create 8 in
     let note_block fn b =
@@ -1640,14 +1700,14 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
    (general-dynamic TLS), for objects that go into a shared library, which
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
-let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone
+let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone ?hard ?stack_align
     ?(kernel_model = false) ?no_sse ?general_regs_only ?iter_funcs ?has_asm ?unwind_tables m =
   (* The kernel may run early code via an identity mapping. Normal C
      symbol addresses must still be the link-time high-half addresses. *)
   if kernel_model && tls_gd = Some true then
     Error "native backend: -mcmodel=kernel is incompatible with -fPIC"
   else
-    generate ?debug ?tls_gd ?red_zone ?iter_funcs ?has_asm ?unwind_tables ~startup:false
+    generate ?debug ?tls_gd ?red_zone ?hard ?stack_align ?iter_funcs ?has_asm ?unwind_tables ~startup:false
       ~pic:(pic && not kernel_model) ~kernel_model ?no_sse ?general_regs_only m
 
 (* a static executable, or a static PIE when [options] ask for one *)

@@ -233,7 +233,7 @@ fn drv_temp_object() DrvTempObject fails {
     return {trunc[i32](inherited), drv_cstr_dup(buf_bytes(&b))}
 }
 
-value struct DrvCodegenOptions {
+struct DrvCodegenOptions {
     pic u8
     debug bool
     no_red_zone bool
@@ -241,9 +241,15 @@ value struct DrvCodegenOptions {
     no_sse bool
     general_regs_only bool
     no_unwind_tables bool
+    thunk_calls bool
+    thunk_cs_prefix bool
+    return_thunk bool
+    endbr bool
+    patch_entry addr // -fpatchable-function-entry=N[,M], passed on as is
+    stack_align8 bool // -mstack-alignment=8: rsp only 8-aligned at entry
 }
 
-fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input i32) i64 fails {
+fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions], input i32) i64 fails {
     fir_exe addr = drv_find_fas_fir()
     args Vec[addr] = {}
     defer { vec_free(&args) }
@@ -253,6 +259,12 @@ fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input 
     if options.no_unwind_tables { vec_push(&args, c"--no-unwind-tables") }
     if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
     if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }
+    if options.thunk_calls { vec_push(&args, c"-mretpoline-external-thunk") }
+    if options.thunk_cs_prefix { vec_push(&args, c"-mindirect-branch-cs-prefix") }
+    if options.return_thunk { vec_push(&args, c"-mfunction-return=thunk-extern") }
+    if options.endbr { vec_push(&args, c"-fcf-protection=branch") }
+    if options.patch_entry != null { vec_push(&args, options.patch_entry) }
+    if options.stack_align8 { vec_push(&args, c"-mstack-alignment=8") }
     if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
     else if options.no_sse { vec_push(&args, c"-mno-sse") }
     if options.pic == 1 { vec_push(&args, c"-fno-pic") }
@@ -273,13 +285,13 @@ fn drv_finish_fir(pid i64) void fails {
     }
 }
 
-fn drv_assemble_fir(fir_path addr, obj_path addr, options DrvCodegenOptions) void fails {
+fn drv_assemble_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions]) void fails {
     try drv_finish_fir(try drv_start_fir(fir_path, obj_path, options, -1))
 }
 
 value struct DrvFirPipe { pid i64, write_fd i32 }
 
-fn drv_fir_pipe(obj_path addr, options DrvCodegenOptions) DrvFirPipe fails {
+fn drv_fir_pipe(obj_path addr, options handle[DrvCodegenOptions]) DrvFirPipe fails {
     fds arr[2, i32] = {}
     _ i64 = try syscall[fails](SYS_PIPE2, &fds, O_CLOEXEC)
     // A caller can close stdio. Keep private pipe ends clear of those slots

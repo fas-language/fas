@@ -35,6 +35,27 @@ fn pp_number(n handle[CNames], t Token, count u64) Token {
     return cc_token(TK_NUM, t.flags, t.loc, cc_intern(n, buf_bytes(&b)))
 }
 
+// -fmacro-prefix-map=OLD=NEW on __FILE__ and __BASE_FILE__, clang's rule:
+// a plain byte prefix; of the OLD prefixes that match, the greatest in byte
+// order wins, and for an OLD given twice the first NEW
+fn builtin_map_prefix(p handle[Pp], path Bytes, out handle[Buf]) bool {
+    if p.prefix_maps == null { return false }
+    best usize = p.prefix_maps.n
+    i usize = 0
+    while i + 1 < p.prefix_maps.n {
+        old Bytes = vec_get(p.prefix_maps, i)
+        if bytes_starts_with(path, old) &&
+            (best == p.prefix_maps.n || bytes_cmp(old, vec_get(p.prefix_maps, best)) > 0) {
+            best = i
+        }
+        i += 2
+    }
+    if best == p.prefix_maps.n { return false }
+    buf_append(out, vec_get(p.prefix_maps, best + 1))
+    buf_append(out, bytes_from(path, vec_get(p.prefix_maps, best).n))
+    return true
+}
+
 fn pp_quote(b handle[Buf], s Bytes) void {
     buf_u8(b, 34)
     for i usize in 0..s.n {
@@ -245,7 +266,10 @@ fn builtin_expand(p handle[Pp], e handle[Expand], t Token, name Bytes) Token fai
     } else {
         f u32 = if bytes_eq_c(name, c"__BASE_FILE__") { p.base_logical } else { pos.file }
         path Bytes = cc_name(n, f)
+        mapped Buf = {}
+        defer { buf_free(&mapped) }
         if bytes_eq_c(name, c"__FILE_NAME__") { path = path_basename(path) }
+        else if builtin_map_prefix(p, path, &mapped) { path = buf_bytes(&mapped) }
         pp_quote(&b, path)
     }
     return cc_token(TK_STR, t.flags, t.loc, cc_intern(n, buf_bytes(&b)))

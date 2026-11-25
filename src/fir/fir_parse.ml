@@ -1216,7 +1216,7 @@ let parse_body ~keep_value_names lx f =
 
 let parse_linkage_vis_attrs lx =
   let linkage = ref Global and vis = ref Default and attrs = ref 0 and display = ref None in
-  let decl_loc = ref 0 and cleanup = ref None and code_section = ref None in
+  let decl_loc = ref 0 and cleanup = ref None and code_section = ref None and patchable = ref None in
   let seen_linkage = ref false in
   let rec go () =
     match peek lx with
@@ -1237,6 +1237,18 @@ let parse_linkage_vis_attrs lx =
         let name = str_tok lx in
         if name = "" || String.contains name '\000' then fail lx "invalid function section";
         code_section := Some name;
+        go ()
+    | Ident "patchable" ->
+        ignore (next lx);
+        if Option.is_some !patchable then fail lx "duplicate patchable";
+        expect lx "(";
+        let n = int_tok lx in
+        expect lx ",";
+        let before = int_tok lx in
+        expect lx ")";
+        if n < 0 || before < 0 || before > n || n > 0xffff then
+          fail lx "patchable(N, M) needs 0 <= M <= N <= 65535";
+        patchable := Some (n, before);
         go ()
     | Bang "loc" -> ignore (next lx); decl_loc := int_tok lx; go ()
     | Bang "cleanup" ->
@@ -1262,7 +1274,7 @@ let parse_linkage_vis_attrs lx =
     | _ -> ()
   in
   go ();
-  (!linkage, !vis, !attrs, !display, !decl_loc, !cleanup, !code_section)
+  (!linkage, !vis, !attrs, !display, !decl_loc, !cleanup, !code_section, !patchable)
 
 let parse_piece lx =
   match next lx with
@@ -1510,12 +1522,14 @@ let parse_module_with ?(keep_value_names = true) lx on_func =
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
         let sig_ = parse_sig lx in
-        let linkage, vis, attrs, display, decl_loc, cleanup, code_section = parse_linkage_vis_attrs lx in
+        let linkage, vis, attrs, display, decl_loc, cleanup, code_section, patchable = parse_linkage_vis_attrs lx in
         if kw = "declare" && Option.is_some code_section then fail lx "a declaration has no code section";
+        if kw = "declare" && Option.is_some patchable then fail lx "a declaration has no patchable entry";
         let f = new_func ~linkage ~defined:(kw = "func") name sig_ in
         f.visibility <- vis;
         f.fattrs <- attrs;
         f.code_section <- code_section;
+        f.patchable <- patchable;
         f.unwind_cleanup <- cleanup;
         f.display <- display;
         f.decl_loc <- decl_loc;

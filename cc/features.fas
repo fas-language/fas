@@ -1,6 +1,6 @@
 // Keep advertised target features in one place. These are the attributes
 // and builtins selected by the system headers on x86-64 Linux.
-const C_ATTRIBUTES addr = c" alias aligned alloc_align alloc_size always_inline artificial cold const deprecated error fallthrough format format_arg gnu_inline leaf malloc may_alias ms_abi noinline nonnull noreturn nothrow packed pure restrict returns_nonnull section sentinel sysv_abi transparent_union unused used visibility warn_unused_result warning weak "
+const C_ATTRIBUTES addr = c" alias aligned alloc_align alloc_size always_inline artificial cold const deprecated error fallthrough format format_arg gnu_inline leaf malloc may_alias ms_abi nocf_check noinline nonnull noreturn nothrow packed patchable_function_entry pure restrict returns_nonnull section sentinel sysv_abi transparent_union unused used visibility warn_unused_result warning weak "
 const C_FEATURES addr = c" attribute_deprecated_with_message c_alignas c_alignof c_atomic c_generic_selections c_static_assert c_thread_local c_variadic_macros "
 const C23_KEYWORDS addr = c" alignas alignof bool constexpr false nullptr static_assert thread_local true typeof typeof_unqual "
 const C_LIBRARY_BUILTINS addr = c" abort abs aligned_alloc calloc exit fprintf free labs llabs malloc memchr memcmp memcpy memmove memset printf realloc snprintf sprintf strcat strchr strcmp strcpy strcspn strlen strncat strncmp strncpy strpbrk strrchr strspn strstr vfprintf vprintf vsnprintf vsprintf "

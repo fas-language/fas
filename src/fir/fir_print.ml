@@ -79,7 +79,7 @@ let func_attr_names =
   [ (fa_inline, "inline"); (fa_noinline, "noinline"); (fa_cold, "cold");
     (fa_noreturn, "noreturn"); (fa_fenv, "fenv"); (fa_mem_none, "memory(none)");
     (fa_mem_read, "memory(read)"); (fa_mem_argmem, "memory(argmem)"); (fa_willreturn, "willreturn");
-    (fa_secret, "secret") ]
+    (fa_secret, "secret"); (fa_nocf_check, "nocf_check") ]
 
 let linkage_name = function Local -> "local" | Global -> "global" | Weak -> "weak"
 
@@ -413,6 +413,7 @@ let func_header f =
     (if f.visibility = Default then "" else " " ^ visibility_name f.visibility)
     ((if f.fattrs = 0 then "" else " " ^ String.trim (attrs_text func_attr_names f.fattrs))
     ^ (match f.code_section with Some s -> " section " ^ quote s | None -> "")
+    ^ (match f.patchable with Some (n, m) -> Printf.sprintf " patchable(%d, %d)" n m | None -> "")
     ^ (match f.display with Some d -> " display " ^ quote d | None -> "")
     ^ (match f.unwind_cleanup with Some (b, r) -> Printf.sprintf " !cleanup %d, %d" b r | None -> "")
     ^ if f.decl_loc <> 0 then Printf.sprintf " !loc %d" f.decl_loc else "")

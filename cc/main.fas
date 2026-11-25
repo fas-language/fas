@@ -77,12 +77,23 @@ struct Options {
     no_stdinc bool
     no_library_builtins bool
     disabled_builtins Vec[Bytes]
+    prefix_maps Vec[Bytes] // -fmacro-prefix-map=OLD=NEW: OLD, NEW pairs in order
     default_hidden bool
     suppress_warnings bool
     no_red_zone bool
     general_regs_only bool
     kernel_model bool
     auto_init_zero bool // -ftrivial-auto-var-init=zero
+    // the kernel's mitigations, passed on to fas-fir (Mir_emit.hardening)
+    thunk_calls bool // -mretpoline-external-thunk, -mindirect-branch=thunk-extern
+    thunk_cs_prefix bool // -mindirect-branch-cs-prefix
+    return_thunk bool // -mfunction-return=thunk-extern
+    cf_protection u8 // -fcf-protection: bit 1 branch (endbr64), bit 2 return (__CET__)
+    patch_entry addr // the -fpatchable-function-entry=N[,M] option, or null
+    // -mstack-alignment=8 (gcc: -mpreferred-stack-boundary=3): the stack is
+    // only 8-aligned at function entry, as the kernel's entry code leaves it;
+    // a larger value is the 16 the ABI gives anyway
+    stack_align8 bool
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     relocatable bool
     save_temps bool
@@ -159,6 +170,68 @@ fn cli_warn_option(o handle[Options], arg addr) void {
     eprint(c"fcc: warning: unsupported option '")
     eprint(arg)
     eprint(c"' ignored\n")
+}
+
+// the byte alignment of -mstack-alignment=N, or of
+// -mpreferred-stack-boundary=N when [log2]: a power of two, at least 8;
+// 0 for anything else
+fn cli_stack_align(v Bytes, log2 bool) u64 {
+    if v.n == 0 || v.n > 4 { return 0 }
+    n u64 = 0
+    for i usize in 0..v.n {
+        c u8 = v.p[u8, i]
+        if c < 48 || c > 57 { return 0 }
+        n = n * 10 + zext[u64](c - 48)
+    }
+    if log2 { n = if n < 3 || n > 12 { 0 } else { 1 << n } }
+    if n < 8 || (n & (n - 1)) != 0 { return 0 }
+    return n
+}
+
+// N or N,M with M <= N, each at most 65535 (fas-fir's patchable(N, M))
+fn cli_patch_entry_ok(v Bytes) bool {
+    n u64 = 0
+    m u64 = 0
+    digits usize = 0
+    second bool = false
+    for i usize in 0..v.n {
+        c u8 = v.p[u8, i]
+        if c == 44 && !second && digits > 0 {
+            second = true
+            digits = 0
+        } else if c >= 48 && c <= 57 && digits < 5 {
+            if second { m = m * 10 + zext[u64](c - 48) } else { n = n * 10 + zext[u64](c - 48) }
+            digits += 1
+        } else { return false }
+    }
+    return digits > 0 && n <= 65535 && m <= n
+}
+
+// Options whose effect fcc's code generation already has:
+// -fintegrated-as: fcc has no separate assembler pass.
+// -mtune=generic, -falign-loops=1: no tuning, no loop alignment.
+// -falign-functions up to 16: functions are 16-aligned.
+// -fomit-frame-pointer, -fno-omit-frame-pointer: frames always keep rbp, which
+//   is always correct (omission is an optimization).
+// -fno-stack-clash-protection, -fno-stack-check: large frames are probed
+//   anyway, which only costs time.
+// -fno-delete-null-pointer-checks: no pass deletes them.
+// -fno-jump-tables: switches are compare chains.
+// -mskip-rax-setup: setting al for a variadic call is harmless.
+// -mno-3dnow: no 3DNow! code is generated.
+// -fstrict-flex-arrays=N: __builtin_object_size treats every trailing array
+//   as flexible, the conservative answer for every N.
+// -fno-function-sections, -fno-data-sections, -fno-addrsig: the defaults.
+// -foptimize-sibling-calls, -fno-optimize-sibling-calls: no tail calls are
+//   made, which is always correct.
+// -fverbose-asm: no assembly is printed.
+fn cli_noop_option(word Bytes) bool {
+    if bytes_starts_with(word, bytes_c(c"-falign-functions=")) {
+        n u64 = bytes_to_u64(bytes_from(word, 18)) catch 0xffff
+        return n <= 16 && (n & (n - 1)) == 0
+    }
+    return feature_in(c" -fintegrated-as -mtune=generic -falign-loops=1 -fomit-frame-pointer -fno-omit-frame-pointer -fno-stack-clash-protection -fno-stack-check -fno-delete-null-pointer-checks -fno-jump-tables -mskip-rax-setup -mno-3dnow -fno-function-sections -fno-data-sections -fno-addrsig -foptimize-sibling-calls -fno-optimize-sibling-calls -fverbose-asm ", word) ||
+        bytes_starts_with(word, bytes_c(c"-fstrict-flex-arrays="))
 }
 
 fn cli_standard(o handle[Options], word Bytes) void fails {
@@ -264,6 +337,38 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_starts_with(word, bytes_c(c"-ftrivial-auto-var-init=")) {
             // `pattern` fills with type-dependent bytes; refuse it rather than leave locals uninitialized.
             try cli_error(c"fcc: unsupported option ", arg)
+        } else if bytes_eq_c(word, c"-mretpoline-external-thunk") || bytes_eq_c(word, c"-mindirect-branch=thunk-extern") {
+            o.thunk_calls = true
+        } else if bytes_eq_c(word, c"-mno-retpoline-external-thunk") || bytes_eq_c(word, c"-mindirect-branch=keep") {
+            o.thunk_calls = false
+        } else if bytes_eq_c(word, c"-mindirect-branch-cs-prefix") { o.thunk_cs_prefix = true
+        } else if bytes_eq_c(word, c"-mfunction-return=thunk-extern") { o.return_thunk = true
+        } else if bytes_eq_c(word, c"-mfunction-return=keep") { o.return_thunk = false
+        } else if bytes_eq_c(word, c"-fcf-protection") || bytes_eq_c(word, c"-fcf-protection=full") { o.cf_protection = 3
+        } else if bytes_eq_c(word, c"-fcf-protection=branch") { o.cf_protection = 1
+        } else if bytes_eq_c(word, c"-fcf-protection=return") { o.cf_protection = 2
+        } else if bytes_eq_c(word, c"-fcf-protection=none") { o.cf_protection = 0
+        } else if bytes_starts_with(word, bytes_c(c"-mstack-alignment=")) ||
+                  bytes_starts_with(word, bytes_c(c"-mpreferred-stack-boundary=")) {
+            log2 bool = bytes_starts_with(word, bytes_c(c"-mpreferred-stack-boundary="))
+            align u64 = cli_stack_align(bytes_from(word, if log2 { 27 } else { 18 }), log2)
+            if align == 0 { try cli_error(c"fcc: invalid option ", arg) }
+            o.stack_align8 = align == 8
+        } else if bytes_starts_with(word, bytes_c(c"-fpatchable-function-entry=")) {
+            if !cli_patch_entry_ok(bytes_from(word, 27)) { try cli_error(c"fcc: invalid option ", arg) }
+            o.patch_entry = arg
+        } else if bytes_eq_c(word, c"-mretpoline") || bytes_starts_with(word, bytes_c(c"-mindirect-branch=")) ||
+                  bytes_starts_with(word, bytes_c(c"-mfunction-return=")) {
+            // compiler-generated (not external) thunks
+            try cli_error(c"fcc: unsupported option ", arg)
+        } else if bytes_starts_with(word, bytes_c(c"-fmacro-prefix-map=")) {
+            map Bytes = bytes_from(word, 19)
+            eq usize = bytes_index(map, 61) catch map.n
+            if eq == map.n { try cli_error(c"fcc: invalid argument (expected OLD=NEW): ", arg) }
+            vec_push(&o.prefix_maps, bytes_sub(map, 0, eq))
+            vec_push(&o.prefix_maps, bytes_from(map, eq + 1))
+        } else if cli_noop_option(word) {
+            // fcc's code generation already does what these ask
         } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
             try cli_error(c"fcc: fast-math semantics are unsupported: ", arg)
         } else if bytes_starts_with(word, bytes_c(c"-march=")) {
@@ -451,6 +556,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.short_enums = o.short_enums
     p.no_library_builtins = o.no_library_builtins || o.freestanding
     p.disabled_builtins = &o.disabled_builtins
+    p.prefix_maps = &o.prefix_maps
     p.wrapv = o.overflow_mode == 1
     p.stream.source = true
     p.timestamp = os_clock_ns(0) / 1000000000
@@ -491,6 +597,10 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         if o.unsigned_char { try cli_definitions(p, bytes_c(c"__CHAR_UNSIGNED__ 1\n"), c"<built-in>") }
         if o.short_wchar {
             try cli_definitions(p, bytes_c(C_TARGET_SHORT_WCHAR), c"<built-in>")
+        }
+        if o.cf_protection != 0 {
+            cet addr = if o.cf_protection == 1 { c"__CET__ 1\n" } else if o.cf_protection == 2 { c"__CET__ 2\n" } else { c"__CET__ 3\n" }
+            try cli_definitions(p, bytes_c(cet), c"<built-in>")
         }
         model addr = if o.kernel_model { c"__code_model_kernel__ 1\n" } else { c"__code_model_small__ 1\n" }
         try cli_definitions(p, bytes_c(model), c"<built-in>")
@@ -624,7 +734,9 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     no_sse bool = !x86_has(features, bytes_c(c"sse"))
     no_unwind_tables bool = !o.async_unwind && !o.unwind_tables
     codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model,
-                                 no_sse, o.general_regs_only, no_unwind_tables}
+                                 no_sse, o.general_regs_only, no_unwind_tables,
+                                 o.thunk_calls, o.thunk_cs_prefix, o.return_thunk,
+                                 (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }
@@ -653,10 +765,10 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             inp InputFile = o.inputs.p[InputFile, i]
             out_p addr = if o.output != null { o.output } else { drv_replace_ext(bytes_c(inp.path), c".o") }
             if inp.kind == IN_FIR {
-                try drv_assemble_fir(inp.path, out_p, codegen)
+                try drv_assemble_fir(inp.path, out_p, &codegen)
             } else if inp.kind == IN_C {
                 saved addr = if o.save_temps { cli_saved_fir(out_p, 0, false) } else { null }
-                try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, out_p, saved, codegen)
+                try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, out_p, saved, &codegen)
             }
         }
         return
@@ -675,10 +787,10 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
         temp DrvTempObject = try drv_temp_object()
         vec_push(&temp_files, temp.fd)
         if inp.kind == IN_FIR {
-            try drv_assemble_fir(inp.path, temp.path, codegen)
+            try drv_assemble_fir(inp.path, temp.path, &codegen)
         } else {
             saved addr = if o.save_temps { cli_saved_fir(out_exe, i, o.inputs.n > 1) } else { null }
-            try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, temp.path, saved, codegen)
+            try cli_object_c(o, &dir_strs, &dir_ranks, inp.path, temp.path, saved, &codegen)
         }
         vec_set(&o.link_args, zext[usize](inp.link_at), temp.path)
     }
@@ -716,7 +828,7 @@ fn cli_check_saved_fir(o handle[Options], saved addr) void fails {
 }
 
 fn cli_object_c(o handle[Options], dirs handle[Vec[addr]], ranks handle[Vec[u8]], in_path addr,
-                obj_path addr, saved addr, codegen DrvCodegenOptions) void fails {
+                obj_path addr, saved addr, codegen handle[DrvCodegenOptions]) void fails {
     if saved != null {
         try cli_check_saved_fir(o, saved)
         if !(try cli_compile_one_c(o, dirs, ranks, in_path, saved, -1)) {

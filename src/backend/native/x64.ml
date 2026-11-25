@@ -831,6 +831,15 @@ let call_symbol a symbol =
 
 let call_r a r = ext_r a ~w:false [ 0xff ] 2 r
 
+(* jmp to a symbol resolved by the linker (a tail jump to a thunk) *)
+let jmp_symbol a symbol =
+  byte a 0xe9;
+  a.relocs <- Call32 { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  int32 a 0
+
+(* the CET indirect-branch target marker *)
+let endbr64 a = List.iter (byte a) [ 0xf3; 0x0f; 0x1e; 0xfa ]
+
 (* General-dynamic TLS, the exact 16 bytes of the psABI sequence, padded
    so a linker can rewrite it in place to initial- or local-exec:
      66 48 8d 3d <sym@tlsgd>         data16 lea sym@tlsgd(%rip), %rdi

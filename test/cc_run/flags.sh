@@ -419,6 +419,180 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
 done
 echo 'PASS: freestanding high-half kernel code model'
 
+# -fmacro-prefix-map rewrites __FILE__ and __BASE_FILE__ (not
+# __FILE_NAME__): a plain byte prefix, the greatest matching OLD wins, and
+# for a repeated OLD the first NEW
+mkdir -p pm/sub/dir
+cat > pm/sub/dir/f.c <<'C'
+#include <stdio.h>
+int main(void) { puts(__FILE__); puts(__BASE_FILE__); puts(__FILE_NAME__); }
+C
+for maps in "-fmacro-prefix-map=$work/pm/=" \
+            "-fmacro-prefix-map=$work/pm/=X/ -fmacro-prefix-map=$work/pm/sub/=Y/" \
+            "-fmacro-prefix-map=$work/pm/sub/=Y/ -fmacro-prefix-map=$work/pm/=X/" \
+            "-fmacro-prefix-map=$work=A -fmacro-prefix-map=$work=B" \
+            "-fmacro-prefix-map=pm/=Z/ -fmacro-prefix-map=pm=W"; do
+    for src in "$work/pm/sub/dir/f.c" pm/sub/dir/f.c; do
+        read -ra map_flags <<< "$maps"
+        run_diff "${map_flags[@]}" "$src"
+    done
+done
+echo 'PASS: -fmacro-prefix-map'
+
+# -mstack-alignment=8: the kernel's stack is only 8-aligned at entry, so
+# objects aligned above 8 are padded and rounded up from it. The trampoline
+# enters the functions with rsp at each residue mod 32; a 32-aligned local
+# placed for a 16-aligned frame would land on the stack-protector canary.
+cat > stack8.c <<'C'
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+struct __attribute__((aligned(32))) wide { long v[4]; };
+long call_skewed(long (*f)(long), long arg, long skew);
+static int misaligned;
+static void check(const void *p, uintptr_t align) { if ((uintptr_t)p % align) misaligned++; }
+__attribute__((noinline)) long touch(void *p, long n) { memset(p, 0x5a, (size_t)n); return n; }
+__attribute__((noinline)) long wide_local(long x) {
+    struct wide w;
+    char tail[3];
+    check(&w, 32);
+    touch(&w, sizeof w);
+    touch(tail, sizeof tail);
+    return w.v[0] + w.v[3] + tail[2] + x;
+}
+__attribute__((noinline)) long sixteen(long x) {
+    _Alignas(16) char a[16];
+    __int128 b = x;
+    check(a, 16);
+    check(&b, 16);
+    touch(a, sizeof a);
+    return a[15] + (long)(b * 3);
+}
+__attribute__((noinline)) long big(long x) {
+    _Alignas(128) char page[200];
+    check(page, 128);
+    touch(page, sizeof page);
+    return page[199] + x;
+}
+int main(void) {
+    long t = 0;
+    for (long skew = 0; skew < 32; skew += 8)
+        t += call_skewed(wide_local, skew, skew) + call_skewed(sixteen, skew, skew) + call_skewed(big, skew, skew);
+    printf("%ld %d\n", t, misaligned);
+}
+C
+cat > skew.s <<'S'
+    .text
+    .globl call_skewed
+# call_skewed(f, arg, skew): f(arg) with rsp = 32k - skew - 8 at f's entry
+call_skewed:
+    push %rbp
+    mov %rsp, %rbp
+    and $-32, %rsp
+    sub %rdx, %rsp
+    mov %rdi, %rax
+    mov %rsi, %rdi
+    call *%rax
+    leave
+    ret
+    .section .note.GNU-stack,"",@progbits
+S
+"$clang" -std=gnu23 -O1 -mstack-alignment=8 -fstack-protector-all stack8.c skew.s -o clang.out
+"$FCC" -O1 -mstack-alignment=8 -fstack-protector-all -c stack8.c -o stack8.o
+"$clang" stack8.o skew.s -o fcc.out
+./clang.out > clang.txt
+./fcc.out > fcc.txt
+cmp clang.txt fcc.txt
+grep -q ' 0$' fcc.txt
+"$FCC" -mpreferred-stack-boundary=3 -c stack8.c -o pref.o
+for bad in -mstack-alignment=4 -mstack-alignment=12 -mstack-alignment= -mpreferred-stack-boundary=2; do
+    if "$FCC" "$bad" -c stack8.c -o bad.o 2>/dev/null; then echo "fcc accepted $bad" >&2; exit 1; fi
+done
+echo 'PASS: -mstack-alignment=8'
+
+# The kernel's mitigations: indirect branches through external retpoline
+# thunks (cs prefix for r8..r15), returns through the return thunk, endbr64
+# at entries and indirect-jump targets, patchable entry nops. The thunks
+# here are the plain branches they stand for, so the program must still
+# give clang's output.
+cat > hard.c <<'C'
+#include <stdio.h>
+typedef long (*op_t)(long, long);
+static long add(long a, long b) { return a + b; }
+static long sub(long a, long b) { return a - b; }
+static long mul(long a, long b) { return a * b; }
+static op_t ops[] = {add, sub, mul};
+__attribute__((nocf_check)) long noendbr_fn(long x) { return x + 7; }
+__attribute__((patchable_function_entry(0, 0))) long unpatched(long x) { return x * 5; }
+__attribute__((patchable_function_entry(3, 1))) long own_patch(long x) { return x - 9; }
+__attribute__((noinline)) long through(op_t f, long a, long b) { return f(a, b) + 1; }
+__attribute__((noinline)) long many(long a, long b, long c, long d, long e, long f) {
+    long r = 0;
+    for (int i = 0; i < 3; i++) r += ops[i](a + i, b) * ops[(i + 1) % 3](c, d - i) + ops[(i + 2) % 3](e, f);
+    return r;
+}
+int dispatch(int i) {
+    static void *const table[] = {&&zero, &&one, &&two};
+    goto *table[i % 3];
+zero: return 100;
+one: return 200;
+two: return 300;
+}
+int main(void) {
+    long t = 0;
+    for (int i = 0; i < 9; i++) t += dispatch(i) + through(ops[i % 3], i, 3);
+    printf("%ld %ld %ld %ld %ld\n", t, many(1, 2, 3, 4, 5, 6), noendbr_fn(1), unpatched(2), own_patch(3));
+}
+C
+cat > thunks.s <<'S'
+    .text
+    .irp reg, rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15
+    .globl __x86_indirect_thunk_\reg
+__x86_indirect_thunk_\reg:
+    jmp *%\reg
+    .endr
+    .globl __x86_return_thunk
+__x86_return_thunk:
+    ret
+    .section .note.GNU-stack,"",@progbits
+S
+hardening=(-mretpoline-external-thunk -mindirect-branch-cs-prefix -mfunction-return=thunk-extern
+           -fcf-protection=branch -fpatchable-function-entry=16,16)
+"$clang" -std=gnu23 -Wno-ignored-attributes hard.c -o clang.out
+"$FCC" "${hardening[@]}" -c hard.c -o hard.o
+"$clang" -c thunks.s -o thunks.o
+"$clang" hard.o thunks.o -o fcc.out
+./clang.out > clang.txt
+./fcc.out > fcc.txt
+cmp clang.txt fcc.txt
+objdump -dr --no-show-raw-insn hard.o > hard.dis
+if grep -qE $'\t(ret|call +\\*|jmp +\\*)' hard.dis; then
+    echo "a plain return or indirect branch under the thunk flags" >&2
+    grep -E $'\t(ret|call +\\*|jmp +\\*)' hard.dis >&2
+    exit 1
+fi
+grep -q '__x86_return_thunk' hard.dis
+grep -q '__x86_indirect_thunk_' hard.dis
+# the computed goto jumps through r11, with the cs prefix
+objdump -d --disassemble=dispatch hard.o | grep -qE '2e e9 .*cs jmp'
+# endbr64 first in an ordinary function, absent in a nocf_check one, and
+# at each of the three computed-goto targets
+objdump -d --disassemble=through hard.o | sed -n '/<through>:/{n;p}' | grep -q endbr64
+if objdump -d --disassemble=noendbr_fn hard.o | grep -q endbr64; then
+    echo "endbr64 in a nocf_check function" >&2
+    exit 1
+fi
+[[ $(objdump -d --disassemble=dispatch hard.o | grep -c endbr64) == 4 ]]
+# 16 nops before each entry, none for patchable_function_entry(0, 0),
+# 1 + 2 for (3, 1); one __patchable_function_entries record per patched function
+objdump -d --disassemble=unpatched hard.o | sed -n '/<unpatched>:/{n;p}' | grep -q endbr64
+objdump -d --disassemble=own_patch hard.o | sed -n '/<own_patch>:/,$p' | sed -n '2,4p' > own_patch.head
+grep -q endbr64 <(sed -n 1p own_patch.head)
+[[ $(sed -n '2,3p' own_patch.head | grep -c 'nop$') == 2 ]]
+functions=$(readelf -sW hard.o | grep -c ' FUNC ')
+[[ $(readelf -rW hard.o | sed -n "/'.rela__patchable_function_entries'/,/^$/p" | grep -c R_X86_64_64) == $((functions - 1)) ]]
+echo 'PASS: retpoline, return thunk, endbr64 and patchable entries'
+
 cat > unwind_a.c <<'C'
 int unwind_a(int x) { return x + 1; }
 C

@@ -451,6 +451,10 @@ let fa_fenv = 16
    `secret` mark *)
 let fa_secret = 512
 
+(* no branch-target marker (endbr64) at the entry, even when the backend
+   is asked for them (C's nocf_check, the kernel's __noendbr) *)
+let fa_nocf_check = 1024
+
 (* promises about a declared function (SPEC §5 "Declarations"):
    memory(none), memory(read), memory(argmem) (at most one), willreturn *)
 let fa_mem_none = 32
@@ -482,6 +486,10 @@ type func = {
   mutable visibility : visibility;
   mutable fattrs : int;
   mutable code_section : string option;
+  mutable patchable : (int * int) option;
+      (** patchable(N, M): N nop bytes for run-time patching, M of them
+          before the entry symbol (C's patchable_function_entry); None
+          leaves it to the backend's default *)
   mutable unwind_cleanup : (block * block) option;
       (** native cleanup landing pad and the start of its non-catching resume code *)
   mutable defined : bool;  (** false: declaration only *)
@@ -603,7 +611,7 @@ let create_module () =
   ignore (Vec.push alias_tags ("", 0));
   {
     funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false };
-                         linkage = Local; visibility = Default; fattrs = 0; code_section = None; unwind_cleanup = None; defined = false;
+                         linkage = Local; visibility = Default; fattrs = 0; code_section = None; patchable = None; unwind_cleanup = None; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
                          names = Hashtbl.create 1; display = None; decl_loc = 0; vars = [] };
@@ -633,6 +641,7 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     visibility = Default;
     fattrs = 0;
     code_section = None;
+    patchable = None;
     unwind_cleanup = None;
     defined;
     defs = Vec.create ~capacity:64 Unset;

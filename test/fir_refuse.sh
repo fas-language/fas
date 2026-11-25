@@ -70,6 +70,14 @@ case_ c/promises.fir 's/memory(read)$/memory(write)/' -c \
   'unknown memory(write): expected none, read or argmem'
 case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& willreturn/' -c \
   'promises about a declared function'
+case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& patchable(2, 3)/' -c \
+  'patchable(N, M) needs 0 <= M <= N <= 65535'
+case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& patchable(70000, 0)/' -c \
+  'patchable(N, M) needs 0 <= M <= N <= 65535'
+case_ c/promises.fir 's/^func @fir_run () -> (i64) global/& patchable(1, 0) patchable(2, 0)/' -c \
+  'duplicate patchable'
+case_ c/promises.fir 's/^declare @c_sum (ptr, i64) -> (i64) global/& patchable(1, 0)/' -c \
+  'a declaration has no patchable entry'
 case_ permute.fir 's/permute <6 x i32> %v, %x5/permute <4 x i32> %v, %x5/' -c \
   'permute of <4 x i32> by <6 x i32> cannot give <4 x i32>'
 case_ permute.fir 's/permute <2 x i32> %v, %s1/permute <2 x i64> %v, %s1/' -c \

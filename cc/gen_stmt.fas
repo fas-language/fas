@@ -1379,6 +1379,40 @@ fn gen_protect_body(n handle[Ast], strong bool) bool {
            gen_protect_body(n.c, strong) || gen_protect_body(n.d, strong) || gen_protect_body(n.next, strong)
 }
 
+// patchable_function_entry(N[, M]) as Fir's patchable(N, M): integer
+// literals, M <= N <= 65535
+fn gen_emit_patchable(out_b handle[Buf], attrs handle[Attr]) void fails {
+    a handle[Attr] = attrs
+    while a != null {
+        if pa_attr_name(gc.p, a, c"patchable_function_entry") {
+            n u64 = 0
+            m u64 = 0
+            ok bool = a.args.n == 1 || a.args.n == 3
+            for i usize in 0..a.args.n {
+                t Token = a.args.p[Token, i]
+                if (i & 1) == 1 {
+                    if !pa_is(gc.p, t, c",") { ok = false }
+                } else if t.kind != TK_NUM {
+                    ok = false
+                } else {
+                    v u64 = bytes_to_u64(cc_name(gc.p.names, t.payload)) catch 0x10000
+                    if i == 0 { n = v } else { m = v }
+                }
+            }
+            if !ok || n > 65535 || m > n {
+                try pa_error(gc.p, a.loc, c"patchable_function_entry takes integer literals N and M, M <= N <= 65535")
+            }
+            buf_str(out_b, c" patchable(")
+            buf_dec_u64(out_b, n)
+            buf_str(out_b, c", ")
+            buf_dec_u64(out_b, m)
+            buf_str(out_b, c")")
+            return
+        }
+        a = a.next
+    }
+}
+
 fn gen_function(node handle[Ast]) void fails {
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
@@ -1606,6 +1640,8 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
+    if gen_has_attr(s.attrs, c"nocf_check") { buf_str(out_b, c" nocf_check") }
+    try gen_emit_patchable(out_b, s.attrs)
     sec_buf Buf = {}
     if gen_attr_str_arg(s.attrs, c"section", &sec_buf) && sec_buf.n != 0 {
         buf_str(out_b, c" section ")

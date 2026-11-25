@@ -30,6 +30,11 @@ type ctx = {
   pic : bool;
   kernel_model : bool;
   no_sse : bool;
+  stack_align : int;
+      (** the alignment rsp (and so rbp) is known to have: 16 by the SysV
+          ABI, 8 under -mstack-alignment=8 (the kernel's entry code leaves
+          the stack 8-aligned). Frame slots and dynamic allocations get this
+          much for free; anything aligned above it is padded and rounded up. *)
   tls_gd : bool;  (** thread-locals through __tls_get_addr (shared-library objects) *)
   local_syms : (string, unit) Hashtbl.t;
       (** symbols defined here that no other module can preempt *)
@@ -1468,13 +1473,13 @@ let load_eightbytes c size p l =
       | Esse16 -> Mload16 (r, slot_addr ~disp:o s))
     l
 
-(* memory of [size] bytes aligned to [align], which may exceed the 16 a
-   frame slot gets: a pointer register to it *)
+(* memory of [size] bytes aligned to [align], which may exceed the
+   stack_align a frame slot gets: a pointer register to it *)
 let aligned_mem c size align =
   let p = fresh c Gpr in
-  if align <= 16 then emit c (Lea (p, slot_addr (new_slot c.mf ~size:(max 1 size) ~align:(max 8 align))))
+  if align <= c.stack_align then emit c (Lea (p, slot_addr (new_slot c.mf ~size:(max 1 size) ~align:(max 8 align))))
   else begin
-    emit c (Lea (p, slot_addr (new_slot c.mf ~size:(size + align - 16) ~align:16)));
+    emit c (Lea (p, slot_addr (new_slot c.mf ~size:(size + align - c.stack_align) ~align:(min 16 align))));
     emit c (Alui (Add, p, align - 1));
     emit c (Alui (And, p, - align))
   end;
@@ -1781,9 +1786,9 @@ let ret c vals =
       set_term c (Ret (List.map move_dst moves))
   | _ -> unsupported "return value count"
 
-(* r := r rounded up to [align] when that is more than the 16 the stack gives *)
+(* r := r rounded up to [align] when that is more than the stack gives *)
 let round_up_ptr c r align =
-  if align > 16 then begin
+  if align > c.stack_align then begin
     emit c (Alui (Add, r, align - 1));
     emit c (Alui (And, r, - align))
   end
@@ -2390,22 +2395,24 @@ let inst c i =
       match F.int_value c.fn n with
       | Some k when c.fir_block = F.entry && Int64.compare k 0L >= 0 && Int64.compare k 0x1000_0000L < 0 ->
           if align > 0x1000 then unsupported "alloca with align %d" align;
-          (* frame slots are at most 16-aligned (rbp is): a larger alignment
-             takes align - 16 extra bytes and rounds the address up *)
-          let extra = max 0 (align - 16) in
+          (* frame slots are at most stack_align-aligned (rbp is): a larger
+             alignment takes align - stack_align extra bytes and rounds the
+             address up *)
+          let extra = max 0 (align - c.stack_align) in
           let s = new_slot c.mf ~size:(max 1 (Int64.to_int k) + extra) ~align:(min 16 (max 1 align)) in
           let t = fresh c Gpr in
           emit c (Lea (t, slot_addr s));
           round_up_ptr c t align;
-          if align <= 16 then Hashtbl.replace c.frame (F.resolve c.fn (res 0)) s;
+          if align <= c.stack_align then Hashtbl.replace c.frame (F.resolve c.fn (res 0)) s;
           set t
       | _ ->
           if align > 0x1000 then unsupported "alloca with align %d" align;
-          (* Salloc returns a 16-aligned block; see above for larger alignments *)
+          (* Salloc returns a stack_align-aligned block; see above for
+             larger alignments *)
           let t = copy c (use c n) in
           emit c (Alui (Add, t, 15));
           emit c (Alui (And, t, -16));
-          if align > 16 then emit c (Alui (Add, t, align - 16));
+          if align > c.stack_align then emit c (Alui (Add, t, align - c.stack_align));
           let d = fresh c Gpr in
           emit c (Salloc (d, t));
           round_up_ptr c d align;
@@ -2766,7 +2773,7 @@ let promotable_allocas (fn : F.func) =
       cells
   end
 
-let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(tls_gd = false) (e : env) (fn : F.func) =
+let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(tls_gd = false) ?(stack_align = 16) (e : env) (fn : F.func) =
   (* Integer-only Microsoft x64 code, such as EFI stubs, keeps the integer
      calling convention but cannot touch XMM registers in the prologue. *)
   let mf = Mir.create ~ms_abi:fn.sig_.ms_abi ~no_sse fn.name in
@@ -2774,7 +2781,7 @@ let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = 
     ignore (new_block mf)
   done;
   let c =
-    { fn; mf; pic; kernel_model; no_sse; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
+    { fn; mf; pic; kernel_model; no_sse; stack_align; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
       cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
       frame = Hashtbl.create 16;
       f80 = Hashtbl.create 8;

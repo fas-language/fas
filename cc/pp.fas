@@ -44,6 +44,7 @@ struct Pp {
     short_enums bool
     no_library_builtins bool
     disabled_builtins handle[Vec[Bytes]]
+    prefix_maps handle[Vec[Bytes]] // -fmacro-prefix-map: OLD, NEW pairs in order
     wrapv bool
     x86_features u64
     frames Vec[Frame]

@@ -2168,7 +2168,12 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
            else if has f.fattrs fa_mem_read then " memory(read)"
            else if has f.fattrs fa_mem_argmem then " memory(argmem: readwrite)"
            else "")
-        ^ if has f.fattrs fa_willreturn then " willreturn" else ""
+        ^ (if has f.fattrs fa_willreturn then " willreturn" else "")
+        ^ (if definition && has f.fattrs fa_nocf_check then " nocf_check" else "")
+        ^ match f.patchable with
+          | Some (n, before) when definition ->
+              Printf.sprintf " \"patchable-function-entry\"=\"%d\" \"patchable-function-prefix\"=\"%d\"" (n - before) before
+          | _ -> ""
       in
       let declared = Hashtbl.create 64 in
       Vec.iter

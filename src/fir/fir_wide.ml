@@ -1689,6 +1689,7 @@ let rebuild_func m helpers consts (f : func) : func =
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;
   g.code_section <- f.code_section;
+  g.patchable <- f.patchable;
   g.unwind_cleanup <- f.unwind_cleanup;
   g.display <- f.display;
   g.decl_loc <- f.decl_loc;

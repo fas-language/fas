@@ -2,7 +2,7 @@
 
 Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
-**Version: Fir 0.3** (2026-11-16: `memory(...)` and `willreturn` on declarations, `switch` weights; 0.2: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
+**Version: Fir 0.4** (2026-11-25: the `nocf_check` attribute and `patchable(N, M)`; 0.3: `memory(...)` and `willreturn` on declarations, `switch` weights; 0.2: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
 
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
@@ -186,7 +186,7 @@ ifunc @magic_hidden global hidden = @resolver
 ### Functions
 
 ```
-func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [section "name"] [display "src name"] {
+func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [section "name"] [patchable(N, M)] [display "src name"] {
   var "x" T [scope S] [arg K] [!loc L] [at %slot]      optional source variables (debug info), before the blocks
 ^entry(%a: T, ...):
   ...instructions...
@@ -197,7 +197,7 @@ func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [section "name"
 
 declare @name (ABI, ...) -> (ABI, ...) LINKAGE [ATTRS] [PROMISES]   a function defined elsewhere
 
-ATTRS ::= any of: inline noinline cold noreturn fenv secret
+ATTRS ::= any of: inline noinline cold noreturn fenv secret nocf_check
 PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (declarations only)
 ```
 
@@ -210,6 +210,8 @@ PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (decl
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
 - **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
 - **`section "name"`** places the definition in the named executable section. The default ELF section is `.text`.
+- **`nocf_check`** (C `__attribute__((nocf_check))`, the kernel's `__noendbr`): under indirect-branch tracking (`fas-fir -fcf-protection=branch`) the function gets no `endbr64` at its entry, so an indirect call to it faults. Without that option it changes nothing.
+- **`patchable(N, M)`** (C `patchable_function_entry(N, M)`, 0 ≤ M ≤ N ≤ 65535, definitions only) puts N single-byte nops at the function's entry: M of them before the entry symbol, the other N − M after it (after the `endbr64`, if there is one). The address of the first nop is recorded in the `__patchable_function_entries` section, for code that patches entries at run time. `patchable(0, 0)` gives none, overriding `fas-fir -fpatchable-function-entry=N,M` for this function. The LLVM path passes it on as `"patchable-function-entry"` and `"patchable-function-prefix"`.
 - **Promises on a declaration** let a call to a function defined elsewhere be less than a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. At most one `memory(...)`. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). They are refused on a `func`, whose body says what it does. A backend may ignore them (the native backend does today); the LLVM path passes them on as `memory(none)`, `memory(read)`, `memory(argmem: readwrite)` and `willreturn`.
 - **`blockaddr` and `blockdiff` pin blocks.** A function whose blocks appear in either keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations. A `blockdiff` data piece stores the signed byte difference, truncated to 1, 2, 4 or 8 bytes, with no load-time relocation.
 
