@@ -460,11 +460,12 @@ type masm = {
   msyms : Elf64.symbol list;
   mbinding : (string, int) Hashtbl.t;
   mvisibility : (string, int) Hashtbl.t;
+  mnotype : (string, unit) Hashtbl.t;  (** plain asm labels, STT_NOTYPE like GNU as *)
 }
 
 let module_asm ~first (texts : string list) =
-  let mbinding = Hashtbl.create 8 and mvisibility = Hashtbl.create 8 in
-  if texts = [] then { msections = []; msyms = []; mbinding; mvisibility }
+  let mbinding = Hashtbl.create 8 and mvisibility = Hashtbl.create 8 and mnotype = Hashtbl.create 8 in
+  if texts = [] then { msections = []; msyms = []; mbinding; mvisibility; mnotype }
   else begin
     let data = run_assembler (String.concat "\n" texts ^ "\n") in
     let module R = Fas_linker.Elf_reader in
@@ -535,6 +536,7 @@ let module_asm ~first (texts : string list) =
               { Elf64.name = y.name; section = Elf64.Extra i; offset = Int64.to_int y.value; size = Int64.to_int y.size;
                 func = y.kind = 2 }
               :: !msyms;
+            if y.kind = 0 then Hashtbl.replace mnotype y.name ();
             Hashtbl.replace mbinding y.name y.binding;
             Hashtbl.replace mvisibility y.name y.visibility
         | None when y.section = 0 && y.name <> "" ->
@@ -546,7 +548,7 @@ let module_asm ~first (texts : string list) =
             unsupported "module asm: the absolute or common symbol %s" y.name
         | _ -> ())
       o.symbols;
-    { msections; msyms = List.rev !msyms; mbinding; mvisibility }
+    { msections; msyms = List.rev !msyms; mbinding; mvisibility; mnotype }
   end
 
 (* the snippets of every inline asm statement of [compiled], in the order
@@ -1582,6 +1584,8 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
           | None -> unsupported "alias `%s`: its target `%s` was not emitted" al.name al.target)
         syms.aliases
     in
+    (* inline asm labels without a .type are STT_NOTYPE too *)
+    List.iter (fun (l : Elf64.symbol) -> if not l.func then Hashtbl.replace masm.mnotype l.name ()) inline_labels;
     let ifunc_names = Hashtbl.create 4 in
     let ifunc_syms =
       List.map
@@ -1599,6 +1603,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
          ~commons:(List.rev !commons)
          ~tls:(Hashtbl.mem env.tls_syms)
          ~ifunc:(Hashtbl.mem ifunc_names)
+         ~notype:(Hashtbl.mem masm.mnotype)
          ~global:(fun n -> n = "_start")
          ~binding:(fun n ->
            match Hashtbl.find_opt masm.mbinding n with Some b -> Some b | None -> Hashtbl.find_opt syms.binding n)

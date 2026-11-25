@@ -368,6 +368,9 @@ void call_second(void) { __asm__ volatile("call *%[op]" : : [op] "m" (pv_ops.sec
 void call_exit_mmap(void) { __asm__ volatile("call *%[op]" : : [op] "m" (pv_ops.mmu.exit_mmap) : "memory"); }
 /* objtool reads annotations only through STT_SECTION symbols: a label
    reference must become .text + offset, never a local .L symbol. */
+/* A plain asm label is STT_NOTYPE, never STT_OBJECT (objtool's
+   STACK_FRAME_NON_STANDARD list names kprobes' asm template this way). */
+__asm__(".pushsection .rodata\nasm_template:\n nop\n.popsection");
 void annotated(void) { __asm__ volatile("1: nop\n.pushsection .discard.reachable, \"a\"\n.long 1b - .\n.popsection"); }
 C
 cat > kbuild/kernel-data.c <<'C'
@@ -394,6 +397,7 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
     grep -qE 'R_X86_64_PC32 .* pv_ops \+ 4$' kbuild/kernel-model.relocs
     grep -qE 'R_X86_64_PC32 .* pv_ops \+ 14$' kbuild/kernel-model.relocs
     grep -A3 "'.rela.discard.reachable'" kbuild/kernel-model.relocs | grep -qE 'R_X86_64_PC32 .* \.text \+ [0-9a-f]+$'
+    readelf -sW kbuild/kernel-model.o | grep -qE 'NOTYPE +LOCAL +DEFAULT +[0-9]+ asm_template$'
     if readelf -sW kbuild/kernel-model.o | grep -qE ' \.L[^ ]*$'; then
         echo "kernel-model.o keeps local .L symbols" >&2
         exit 1
