@@ -1200,22 +1200,22 @@ fn gen_binary(n handle[Ast]) u32 fails {
         return gen_convert(q, TY_LONG, n.ty)
     }
 
-    // Pointer + int or int + pointer (including array decay!)
+    // Use the result pointer type after array or function designator decay.
     if bytes_eq_c(op, c"+") && (gen_is_ptr_like(n.a.ty) || gen_is_ptr_like(n.b.ty)) {
         if gen_is_ptr_like(n.a.ty) {
             lp u32 = try gen_rvalue(n.a)
             rv u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, if ty_is_signed(n.b.ty) { TY_LONG } else { TY_ULONG })
-            return try gen_arith_op(op, n.a.ty, lp, rv)
+            return try gen_arith_op(op, n.ty, lp, rv)
         } else {
             lv u32 = gen_convert(try gen_rvalue(n.a), n.a.ty, if ty_is_signed(n.a.ty) { TY_LONG } else { TY_ULONG })
             rp u32 = try gen_rvalue(n.b)
-            return try gen_arith_op(op, n.b.ty, rp, lv)
+            return try gen_arith_op(op, n.ty, rp, lv)
         }
     }
     if bytes_eq_c(op, c"-") && gen_is_ptr_like(n.a.ty) {
         lp u32 = try gen_rvalue(n.a)
         rv u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, if ty_is_signed(n.b.ty) { TY_LONG } else { TY_ULONG })
-        return try gen_arith_op(op, n.a.ty, lp, rv)
+        return try gen_arith_op(op, n.ty, lp, rv)
     }
 
     // Standard arithmetic / bitwise / shift
