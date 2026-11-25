@@ -51,8 +51,20 @@ if [[ $mode == fcc ]]; then
 fi
 sh "$tests/fetch.sh" --projects "${projects[@]}"
 src=$tests/upstream/linux
+# KERNEL_LD=fas links vmlinux.o with fas-ld (test/cc_kernel/ld.sh).
+linker=()
+case "${KERNEL_LD:-lld}" in
+    lld) ;;
+    fas)
+        linker=(LD="$root/test/cc_kernel/ld.sh")
+        export KERNEL_LD_LOG=$build/fas-ld.tsv
+        : > "$KERNEL_LD_LOG"
+        ;;
+    *) echo 'KERNEL_LD must be lld or fas' >&2; exit 2 ;;
+esac
 kmake() {
-    make -C "$src" O="$build" ARCH=x86_64 LLVM=-22 HOSTCC="${KERNEL_HOSTCC:-gcc}" CC="$compiler" "$@"
+    make -C "$src" O="$build" ARCH=x86_64 LLVM=-22 HOSTCC="${KERNEL_HOSTCC:-gcc}" CC="$compiler" \
+        "${linker[@]}" "$@"
 }
 
 if [[ ! -e $build/.config ]]; then
