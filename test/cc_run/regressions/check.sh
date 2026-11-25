@@ -20,6 +20,8 @@ for file in "$src"/*.c; do
         fp_rounding.c) flags=(-frounding-math -lm) ;;
         fp_exceptions.c) flags=(-lm) ;;
         kernel_constant_calls.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
+        kernel_auto_init_zero.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel
+                                        -ftrivial-auto-var-init=zero) ;;
         kernel_stack_canary.c) flags=(-fno-pie -no-pie -mcmodel=kernel -fstack-protector-all) ;;
         kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
         no_sse_ms_abi.c|no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;

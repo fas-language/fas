@@ -174,7 +174,10 @@ let drop_params f =
   end
 
 (* Track ordinary nonescaped scalar slots along reachable control-flow
-   edges. A load may be replaced only when all incoming writes agree. *)
+   edges. A load may be replaced only when all incoming writes agree. A
+   memset of the whole slot to zero (-ftrivial-auto-var-init=zero on a local
+   declared without an initializer) is a known zero store: loads it reaches
+   become zero of their type. *)
 let forward_constants f live =
   let slots = Hashtbl.create 16 in
   Vec.iter (fun i ->
@@ -205,7 +208,14 @@ let forward_constants f live =
               (match const_of f v with Some (Cnull _ | Czero (Ptr _)) -> true | _ -> false)
             in
             if known then Option.iter (fun (_, _, _, found) -> found := true) (Hashtbl.find_opt slots p);
-            access b align p (ty_of f v) (`Store (if known then Some v else None))
+            access b align p (ty_of f v) (`Store (if known then Some (`Value v) else None))
+        | Memset (false, p, byte, size)
+          when (match Hashtbl.find_opt slots (resolve f p) with
+                | Some (bytes, _, _, _) -> int_const f byte = Some (8, 0L) && int_value f size = Some bytes
+                | None -> false) ->
+            let _, _, events, found = Hashtbl.find slots (resolve f p) in
+            found := true;
+            events := (b, `Store (Some `Zero)) :: !events
         | Load ({ volatile = false; order = Plain; align; _ }, p) ->
             access b align (resolve f p) (ty_of f ir.results.(0)) (`Load ir)
         | op -> iter_op_uses invalidate op) br.insts;
@@ -251,9 +261,14 @@ let forward_constants f live =
         match event with
         | `Store v -> state := v
         | `Load ir ->
+            let ty = ty_of f ir.results.(0) in
             (match !state with
-            | Some v when ty_of f v = ty_of f ir.results.(0) ->
+            | Some (`Value v) when ty_of f v = ty ->
                 replace_all_uses f ir.results.(0) v;
+                ir.op <- Nop;
+                changed := true
+            | Some `Zero when (match ty with Int w -> w <= 64 | Ptr _ -> true | _ -> false) ->
+                replace_all_uses f ir.results.(0) (zero f ty);
                 ir.op <- Nop;
                 changed := true
             | _ -> ())) (List.rev !events)
