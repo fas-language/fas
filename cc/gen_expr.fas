@@ -1667,10 +1667,8 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         v u32 = gen_convert(try gen_rvalue(a0), a0.ty, n.ty)
         return gen_unop(c"bswap", n.ty, v)
     }
-    if bytes_eq_c(bname, c"__builtin_ffs") || bytes_eq_c(bname, c"__builtin_ffsl") || bytes_eq_c(bname, c"__builtin_ffsll") {
-        pt u32 = if bytes_eq_c(bname, c"__builtin_ffsll") { TY_LLONG }
-                 else if bytes_eq_c(bname, c"__builtin_ffsl") { TY_LONG }
-                 else { TY_INT }
+    pt u32 = se_ffs_argument_type(bname)
+    if pt != TY_INVALID {
         v u32 = gen_convert(try gen_rvalue(a0), a0.ty, pt)
         is_z u32 = gen_icmp(c"eq", v, gen_const_zero(pt))
         cz u32 = gen_convert(gen_unop(c"ctz", pt, v), pt, n.ty)

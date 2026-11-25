@@ -570,6 +570,13 @@ fn pa_call(p handle[Parser], t Token, a handle[Ast]) handle[Ast] fails {
             folded handle[Ast] = se_fold_clz(t, clz_ty, xs.first)
             if folded != null { return folded }
         }
+        ffs_ty u32 = se_ffs_argument_type(word)
+        if ffs_ty != TY_INVALID {
+            try se_builtin_count(p, t, count, 1, 1)
+            try se_conversion(p, ffs_ty, xs.first)
+            folded handle[Ast] = se_fold_ffs(t, ffs_ty, xs.first)
+            if folded != null { return folded }
+        }
         if bytes_eq_c(word, c"__builtin_strcmp") {
             if count != 2 { try pa_error(p, t.loc, c"wrong number of strcmp builtin arguments") }
             folded handle[Ast] = try se_builtin_strcmp(p, t.loc, xs.first, xs.first.next)

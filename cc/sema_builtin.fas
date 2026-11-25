@@ -74,6 +74,26 @@ fn se_fold_clz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
     return se_int(t.loc, TY_INT, result)
 }
 
+fn se_ffs_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_ffs") { return TY_INT }
+    if bytes_eq_c(name, c"__builtin_ffsl") { return TY_LONG }
+    if bytes_eq_c(name, c"__builtin_ffsll") { return TY_LLONG }
+    return TY_INVALID
+}
+
+// ffs numbers bits starting at one and returns zero for an all-zero input.
+fn se_fold_ffs(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(ty, arg).value
+    if value == 0 { return se_int(t.loc, TY_INT, 0) }
+    result u64 = 1
+    while (value & 1) == 0 {
+        result += 1
+        value >>= 1
+    }
+    return se_int(t.loc, TY_INT, result)
+}
+
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
     name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
