@@ -366,3 +366,51 @@ for compiler in "${CLANG:-clang-22}" "$FCC"; do
     grep -qE 'ffffffff81000000 .* entry$' kbuild/high-half.symbols
 done
 echo 'PASS: freestanding high-half kernel code model'
+
+cat > unwind_a.c <<'C'
+int unwind_a(int x) { return x + 1; }
+C
+cat > unwind_b.c <<'C'
+int unwind_b(int x) { return x - 1; }
+C
+for compiler in "$clang" "$FCC"; do
+    "$compiler" -fno-asynchronous-unwind-tables -c unwind_a.c -o unwind.o
+    readelf -SW unwind.o > unwind.sections
+    if grep -qE ' \.eh_frame ' unwind.sections; then
+        echo "$compiler emitted unwind tables with asynchronous unwind tables disabled" >&2
+        exit 1
+    fi
+    "$compiler" -fno-asynchronous-unwind-tables -funwind-tables -c unwind_a.c -o unwind.o
+    readelf -SW unwind.o > unwind.sections
+    grep -qE ' \.eh_frame ' unwind.sections
+    "$compiler" -fno-asynchronous-unwind-tables -funwind-tables -fno-unwind-tables -c unwind_a.c -o unwind.o
+    readelf -SW unwind.o > unwind.sections
+    if grep -qE ' \.eh_frame ' unwind.sections; then
+        echo "$compiler emitted unwind tables after -fno-unwind-tables" >&2
+        exit 1
+    fi
+    # On x86-64 the asynchronous default is independent of -fno-unwind-tables.
+    "$compiler" -fno-unwind-tables -c unwind_a.c -o unwind.o
+    readelf -SW unwind.o > unwind.sections
+    grep -qE ' \.eh_frame ' unwind.sections
+    "$compiler" -fno-asynchronous-unwind-tables -fasynchronous-unwind-tables -c unwind_a.c -o unwind.o
+    readelf -SW unwind.o > unwind.sections
+    grep -qE ' \.eh_frame ' unwind.sections
+    "$compiler" -fPIC -c unwind_a.c -o unwind_a.o
+    "$compiler" -fPIC -c unwind_b.c -o unwind_b.o
+    readelf --debug-dump=frames unwind_a.o > unwind.frames
+    if grep -q 'ZERO terminator' unwind.frames; then
+        echo "$compiler put an unwind terminator in a relocatable object" >&2
+        exit 1
+    fi
+    for linker in ld.bfd ld.lld-22; do
+        "$linker" -r unwind_a.o unwind_b.o -o unwind_partial.o
+        "$linker" -shared unwind_partial.o -o unwind.so
+        readelf --debug-dump=frames unwind.so > unwind.frames
+        if [[ $(grep -c 'FDE cie=' unwind.frames) != 2 ]]; then
+            echo "$compiler and $linker lost unwind entries after a partial link" >&2
+            exit 1
+        fi
+    done
+done
+echo 'PASS: unwind-table flags and partial links'

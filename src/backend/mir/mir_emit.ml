@@ -1177,8 +1177,11 @@ let prepare (m : F.modul) =
    general-dynamic TLS (see [compile_object]).
    [self_relocate]: _start applies the image's own RELATIVE relocations (a
    static PIE has no dynamic loader to do it). [debug]: add DWARF line
-   tables (Mir_dwarf); the allocated sections are the same either way. *)
+   tables (Mir_dwarf); the allocated sections are the same either way.
+   [unwind_tables]: emit ordinary frame information in addition to the
+   records needed for C exception cleanups and explicit inline CFI. *)
 let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?(has_asm = true)
+    ?(unwind_tables = true)
     ~startup ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
@@ -1271,7 +1274,9 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
       in
       let block_offset b = Hashtbl.find block_offsets (fn.name, b) - offset in
       let cleanup = Option.map (fun (pad, resume) -> (block_offset pad, block_offset resume)) fn.unwind_cleanup in
-      fdes := { Mir_cfi.code_base; start = offset; size; events; entry = false; cleanup } :: !fdes;
+      if unwind_tables || Option.is_some cleanup ||
+         List.exists (function _, Mir_cfi.Inline _ -> true | _ -> false) events then
+        fdes := { Mir_cfi.code_base; start = offset; size; events; entry = false; cleanup } :: !fdes;
       if debug then begin
         (* rows without a file name say nothing *)
         let rows = List.filter (fun (_, n) -> let file, _, _ = F.Vec.get m.locs n in file <> "") rows in
@@ -1516,7 +1521,13 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
     let extra_sections = extra_sections @ inline_extras in
     let masm = module_asm ~first:(List.length extra_sections) m.module_asm in
     let extra_sections = extra_sections @ masm.msections in
-    let eh_frame, lsda = Mir_cfi.build (List.rev !fdes) in
+    let eh_frame, lsda =
+      match !fdes with
+      | [] -> (None, Bytes.empty)
+      | fdes ->
+          let eh_frame, lsda = Mir_cfi.build (List.rev fdes) in
+          (Some eh_frame, lsda)
+    in
     let extra_sections, unwind_syms =
       if Bytes.length lsda = 0 then (extra_sections, [])
       else
@@ -1583,7 +1594,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
     in
     Ok
       (Native_object.emit
-         ~eh_frame
+         ?eh_frame
          ~extra:extra_sections
          ~commons:(List.rev !commons)
          ~tls:(Hashtbl.mem env.tls_syms)
@@ -1625,13 +1636,13 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?iter_funcs ?
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
 let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone
-    ?(kernel_model = false) ?no_sse ?general_regs_only ?iter_funcs ?has_asm m =
+    ?(kernel_model = false) ?no_sse ?general_regs_only ?iter_funcs ?has_asm ?unwind_tables m =
   (* The kernel may run early code via an identity mapping. Normal C
      symbol addresses must still be the link-time high-half addresses. *)
   if kernel_model && tls_gd = Some true then
     Error "native backend: -mcmodel=kernel is incompatible with -fPIC"
   else
-    generate ?debug ?tls_gd ?red_zone ?iter_funcs ?has_asm ~startup:false
+    generate ?debug ?tls_gd ?red_zone ?iter_funcs ?has_asm ?unwind_tables ~startup:false
       ~pic:(pic && not kernel_model) ~kernel_model ?no_sse ?general_regs_only m
 
 (* a static executable, or a static PIE when [options] ask for one *)

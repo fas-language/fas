@@ -99,6 +99,8 @@ struct Options {
     is_no_pie bool
     no_stdlib bool
     exceptions bool
+    async_unwind bool
+    unwind_tables bool
     rounding_math bool
     force_lang u8 // 0 = auto, 1 = c
 }
@@ -183,6 +185,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
     o.gnu = true
     o.standard = 23
     o.mode = MODE_LINK
+    o.async_unwind = true
     // -w applies to the entire invocation, regardless of its position.
     for i usize in 1..argc {
         w Bytes = bytes_c(os_arg(i))
@@ -206,6 +209,10 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
         else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
         else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
+        else if bytes_eq_c(word, c"-fasynchronous-unwind-tables") { o.async_unwind = true }
+        else if bytes_eq_c(word, c"-fno-asynchronous-unwind-tables") { o.async_unwind = false }
+        else if bytes_eq_c(word, c"-funwind-tables") { o.unwind_tables = true }
+        else if bytes_eq_c(word, c"-fno-unwind-tables") { o.unwind_tables = false }
         else if bytes_eq_c(word, c"-frounding-math") { o.rounding_math = true }
         else if bytes_eq_c(word, c"-fno-rounding-math") { o.rounding_math = false }
         else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true; o.mode = MODE_SYNTAX }
@@ -609,7 +616,9 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     // Save raw search-dir strings from main's Pp so multi-file compilation re-interns them per TU
     features u64 = cli_x86_features(o, &X86_CPUS[zext[usize](o.x86_cpu)])
     no_sse bool = !x86_has(features, bytes_c(c"sse"))
-    codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model, no_sse, o.general_regs_only}
+    no_unwind_tables bool = !o.async_unwind && !o.unwind_tables
+    codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model,
+                                 no_sse, o.general_regs_only, no_unwind_tables}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }

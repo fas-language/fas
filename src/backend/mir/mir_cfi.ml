@@ -200,7 +200,8 @@ let build (fdes : fde list) =
       pad8 b at;
       patches := (at, Buffer.length b - at - 4) :: !patches)
     fdes;
-  u32 b 0 (* terminator *);
+  (* A partial link can concatenate these input sections. A terminator
+     between two inputs would hide the later FDEs from the final linker. *)
   let bytes = Buffer.to_bytes b in
   List.iter (fun (at, len) -> set_u32 bytes at len) !patches;
   ((bytes, List.rev !relocs), Buffer.to_bytes lsda)

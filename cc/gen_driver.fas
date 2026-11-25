@@ -240,6 +240,7 @@ value struct DrvCodegenOptions {
     kernel_model bool
     no_sse bool
     general_regs_only bool
+    no_unwind_tables bool
 }
 
 fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input i32) i64 fails {
@@ -249,6 +250,7 @@ fn drv_start_fir(fir_path addr, obj_path addr, options DrvCodegenOptions, input 
     vec_push(&args, c"-c")
     vec_push(&args, c"--fold-branches")
     if options.debug { vec_push(&args, c"-g") }
+    if options.no_unwind_tables { vec_push(&args, c"--no-unwind-tables") }
     if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
     if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }
     if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
