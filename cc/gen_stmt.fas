@@ -644,7 +644,9 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         buf_free(&cb)
         input handle[GenAsmInput] = vec_add(&inputs)
         input.operand = inp
-        input.ty = if is_m { ty_ptr(inp.b.ty) } else { inp.b.ty }
+        // Value operands decay, so an array designator such as a string
+        // literal can use the same symbolic immediate path as pointers.
+        input.ty = if is_m { ty_ptr(inp.b.ty) } else { se_decay(inp.b.ty) }
         at_entry bool = gc.inline_frame != null && gc.inline_frame.entry_asm == n
         expr handle[Ast] = if imm_integer { try gen_inline_fold(inp.b, at_entry) } else { inp.b }
         input.integer_value = expr.value

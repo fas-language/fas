@@ -33,6 +33,10 @@ for file in "$src"/*.c; do
     "$FCC" "$file" "${flags[@]}" -o "$work/fcc"
     "${runner[@]}" "$work/fcc" > "$work/fcc.out"
     cmp "$work/clang.out" "$work/fcc.out"
+    if [[ ${file##*/} == asm_string_immediate.c ]]; then
+        "$FCC" --emit-fir "$file" -o "$work/string.fir"
+        grep -Fq 'in("i" ptr @.Lstr.' "$work/string.fir"
+    fi
     if [[ ${file##*/} == asm_extra_sections.c ]]; then
         for exe in "$work/clang" "$work/fcc"; do
             readelf -SW "$exe" > "$work/sections"
