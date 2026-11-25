@@ -343,8 +343,46 @@ fn pa_generic(p handle[Parser], t Token) handle[Ast] fails {
     return n
 }
 
+// A string literal node for text the parser makes up (__func__,
+// __builtin_FILE()): a static char array, const for __func__
+fn pa_made_string(p handle[Parser], loc u32, text Bytes, quals u32) handle[Ast] {
+    n handle[Ast] = pa_node(ND_STRING, loc, ty_array(ty_qual(TY_CHAR, quals), text.n + 1))
+    n.op = cc_intern(p.names, text)
+    n.value = text.n + 1
+    n.flags = NF_LVALUE | NF_STATIC | NF_ADDR
+    return n
+}
+
+// clang's source-location builtins: the call's expansion site, like __FILE__
+// and __LINE__ there. LINE and COLUMN are unsigned constant expressions; FILE
+// takes -fmacro-prefix-map, FILE_NAME is its last component; FUNCTION is the
+// enclosing function's name, empty outside one. The strings are char arrays
+// as in clang (gcc makes them const).
+fn pa_source_location(p handle[Parser], t Token) handle[Ast] fails {
+    try pa_expect(p, c"(")
+    try pa_expect(p, c")")
+    pos CLoc = vec_get[CLoc](&p.names.locations, zext[usize](t.loc))
+    if pa_is(p, t, c"__builtin_LINE") { return se_int(t.loc, TY_UINT, zext[u64](pos.line)) }
+    if pa_is(p, t, c"__builtin_COLUMN") { return se_int(t.loc, TY_UINT, zext[u64](pos.column)) }
+    if pa_is(p, t, c"__builtin_FUNCTION") {
+        fn_sym handle[Symbol] = p.function
+        if fn_sym == null { return pa_made_string(p, t.loc, bytes_empty(), 0) }
+        return pa_made_string(p, t.loc, cc_name(p.names, fn_sym.name), 0)
+    }
+    path Bytes = cc_name(p.names, pos.file)
+    mapped Buf = {}
+    defer { buf_free(&mapped) }
+    if pa_is(p, t, c"__builtin_FILE_NAME") { path = path_basename(path) }
+    else if builtin_map_prefix(p.pp, path, &mapped) { path = buf_bytes(&mapped) }
+    return pa_made_string(p, t.loc, path, 0)
+}
+
 fn pa_builtin_call(p handle[Parser], t Token) handle[Ast] fails {
     if pa_is(p, t, c"__builtin_offsetof") { return try pa_offsetof(p, t) }
+    if pa_is(p, t, c"__builtin_FILE") || pa_is(p, t, c"__builtin_FILE_NAME") || pa_is(p, t, c"__builtin_LINE") ||
+        pa_is(p, t, c"__builtin_COLUMN") || pa_is(p, t, c"__builtin_FUNCTION") {
+        return try pa_source_location(p, t)
+    }
     if pa_is(p, t, c"__builtin_types_compatible_p") {
         try pa_expect(p, c"(")
         a u32 = try pa_type_name(p)
@@ -685,11 +723,7 @@ fn pa_primary(p handle[Parser], t Token) handle[Ast] fails {
                     cc_diag(p.names, t.loc, c"warning: ", bytes_c(c"predefined identifier is only valid inside a function"))
                     fn_name = if bytes_eq_c(word, c"__PRETTY_FUNCTION__") { bytes_c(c"top level") } else { bytes_empty() }
                 } else { fn_name = cc_name(p.names, fn_sym.name) }
-                n handle[Ast] = pa_node(ND_STRING, t.loc, ty_array(ty_qual(TY_CHAR, Q_CONST), fn_name.n + 1))
-                n.op = cc_intern(p.names, fn_name)
-                n.value = fn_name.n + 1
-                n.flags = NF_LVALUE | NF_STATIC | NF_ADDR
-                return n
+                return pa_made_string(p, t.loc, fn_name, Q_CONST)
             }
             if bytes_starts_with(word, bytes_c(c"__builtin_")) || bytes_starts_with(word, bytes_c(c"__atomic_")) ||
                 bytes_starts_with(word, bytes_c(c"__sync_")) || bytes_starts_with(word, bytes_c(c"__c11_atomic_")) {
