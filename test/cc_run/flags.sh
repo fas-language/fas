@@ -645,6 +645,23 @@ for retpoline in -mretpoline -mindirect-branch=thunk-inline; do
 done
 echo 'PASS: -mretpoline'
 
+# An option fcc ignores is a warning, and an error under -Werror (until
+# -Wno-error), as in clang: the kernel's cc-option probes compile /dev/null
+# with -Werror and must reject what fcc cannot do. -w silences it.
+"$FCC" -fno-such-option -c -x c /dev/null -o probe.o 2> probe.err
+grep -q "unsupported option '-fno-such-option' ignored" probe.err
+for bad in -fno-such-option -mno-such-feature; do
+    if "$FCC" -Werror "$bad" -c -x c /dev/null -o probe.o 2> probe.err; then
+        echo "-Werror accepted $bad" >&2
+        exit 1
+    fi
+    grep -q "unsupported option $bad" probe.err
+done
+"$FCC" -Werror -fno-such-option -Wno-error -c -x c /dev/null -o probe.o 2> /dev/null
+"$FCC" -w -Werror -fno-such-option -c -x c /dev/null -o probe.o
+"$FCC" -Werror -fomit-frame-pointer -c -x c /dev/null -o probe.o
+echo 'PASS: ignored options under -Werror'
+
 cat > unwind_a.c <<'C'
 int unwind_a(int x) { return x + 1; }
 C

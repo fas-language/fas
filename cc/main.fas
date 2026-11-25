@@ -80,6 +80,11 @@ struct Options {
     prefix_maps Vec[Bytes] // -fmacro-prefix-map=OLD=NEW: OLD, NEW pairs in order
     default_hidden bool
     suppress_warnings bool
+    // -Werror (until a later -Wno-error): an ignored -f/-m option is an
+    // error, as in gcc and clang, so build probes such as the kernel's
+    // cc-option see what fcc really supports. fcc's own source warnings stay
+    // warnings: they are not clang's and would fail -Werror builds clang passes.
+    option_errors bool
     no_red_zone bool
     general_regs_only bool
     // -mno-80387, -mno-x87, -mno-fp-ret-in-387: no x87 code. gcc and clang
@@ -171,8 +176,9 @@ fn cli_push_wl(o handle[Options], payload Bytes) void {
     }
 }
 
-fn cli_warn_option(o handle[Options], arg addr) void {
+fn cli_warn_option(o handle[Options], arg addr) void fails {
     if o.suppress_warnings { return }
+    if o.option_errors { try cli_error(c"fcc: error: unsupported option ", arg) }
     eprint(c"fcc: warning: unsupported option '")
     eprint(arg)
     eprint(c"' ignored\n")
@@ -271,6 +277,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         w Bytes = bytes_c(os_arg(i))
         if bytes_eq_c(w, c"--") { break }
         if bytes_eq_c(w, c"-w") { o.suppress_warnings = true }
+        if bytes_eq_c(w, c"-Werror") { o.option_errors = true }
+        if bytes_eq_c(w, c"-Wno-error") { o.option_errors = false }
     }
     while pos.i < argc {
         arg addr = os_arg(pos.i)
@@ -465,10 +473,10 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             disable bool = bytes_starts_with(word, bytes_c(c"-mno-"))
             name Bytes = bytes_from(word, if disable { 5 } else { 2 })
             feature u32 = x86_flag(name)
-            if feature == 0 { cli_warn_option(o, arg) }
+            if feature == 0 { try cli_warn_option(o, arg) }
             else { vec_push(&o.x86_options, feature * 2 + (if disable { 1 } else { 0 })) }
         } else if bytes_starts_with(word, bytes_c(c"-f")) {
-            cli_warn_option(o, arg)
+            try cli_warn_option(o, arg)
         } else {
             prefix addr = c"-I"
             rank u8 = 1
