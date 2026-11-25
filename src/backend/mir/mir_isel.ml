@@ -2773,7 +2773,7 @@ let promotable_allocas (fn : F.func) =
       cells
   end
 
-let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(tls_gd = false) ?(stack_align = 16) (e : env) (fn : F.func) =
+let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(no_x87 = false) ?(tls_gd = false) ?(stack_align = 16) (e : env) (fn : F.func) =
   (* Integer-only Microsoft x64 code, such as EFI stubs, keeps the integer
      calling convention but cannot touch XMM registers in the prologue. *)
   let mf = Mir.create ~ms_abi:fn.sig_.ms_abi ~no_sse fn.name in
@@ -2831,7 +2831,10 @@ let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = 
       Dynarray.exists (fun b -> List.exists (fun i ->
         List.exists (function X _ -> true | _ -> false) (all_regs i)) b.code) mf.blocks)
   then unsupported "@%s: SSE registers are disabled" fn.name;
-  if general_regs_only && Dynarray.exists (fun b ->
-      List.exists (function X87 _ -> true | _ -> false) b.code) mf.blocks
-  then unsupported "@%s: x87 registers are disabled" fn.name;
+  (* -mno-80387 (and -mgeneral-regs-only): no x87 instruction at all. That
+     refuses f80 (C long double, as gcc and clang do), asm x87 operands
+     and frem, which is an fprem loop here (gcc and clang call fmod) *)
+  if (no_x87 || general_regs_only) && Dynarray.exists (fun b ->
+      List.exists (function X87 _ | Frem87 _ -> true | _ -> false) b.code) mf.blocks
+  then unsupported "@%s: x87 registers are disabled (f80, or frem)" fn.name;
   mf

@@ -837,6 +837,9 @@ let jmp_symbol a symbol =
   a.relocs <- Call32 { offset = pos a; symbol; addend = 0 } :: a.relocs;
   int32 a 0
 
+let pause a = List.iter (byte a) [ 0xf3; 0x90 ]
+let lfence a = List.iter (byte a) [ 0x0f; 0xae; 0xe8 ]
+
 (* the CET indirect-branch target marker *)
 let endbr64 a = List.iter (byte a) [ 0xf3; 0x0f; 0x1e; 0xfa ]
 

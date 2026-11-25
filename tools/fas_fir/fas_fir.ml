@@ -44,7 +44,7 @@
         "fas-fir: internal error: ..." *)
 
 let usage_text =
-  "usage: fas-fir [-c [-fPIC | -fno-pic] [-mno-red-zone] [-mcmodel=kernel] [-mno-sse | -mgeneral-regs-only] [--no-unwind-tables] [HARDENING...] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
+  "usage: fas-fir [-c [-fPIC | -fno-pic] [-mno-red-zone] [-mcmodel=kernel] [-mno-sse | -mgeneral-regs-only] [-mno-80387] [--no-unwind-tables] [HARDENING...] | --check | --legalize | --emit-llvm] [-g] [--no-pie] [--hosted] [--llvm]\n\
   \              INPUT.fir [-o OUTPUT] [OBJECTS...]\n\
   \  (no flag)    build a static position-independent executable (default output: a.out);\n\
   \               OBJECTS (.o and .a files) are linked in\n\
@@ -57,10 +57,12 @@ let usage_text =
   \  -g           add DWARF debug info (lines from the loc table, variables)\n\
   \  HARDENING (with -c), the kernel's mitigations, as gcc and clang spell them:\n\
   \    -mretpoline-external-thunk   indirect calls and jumps through __x86_indirect_thunk_REG\n\
+  \    -mretpoline                  the same through local thunks __fas_retpoline_REG\n\
   \    -mindirect-branch-cs-prefix  a cs prefix on those through r8..r15\n\
   \    -mfunction-return=thunk-extern  returns jump to __x86_return_thunk\n\
   \    -fcf-protection=branch       endbr64 at function entries and indirect-jump targets\n\
   \    -fpatchable-function-entry=N[,M]  N nops at each entry, M of them before it\n\
+  \  -mno-80387   with -c: refuse x87 code (f80 values, frem)\n\
   \  -mstack-alignment=N  with -c: assume rsp only N-aligned at entry (8 or 16, the\n\
   \               default; a larger N gets 16), padding anything aligned above it\n\
   \  --check      parse and verify, print the canonical text\n\
@@ -149,7 +151,7 @@ let hosted_link ~debug ~pie ~output ~extra ~iter_funcs ~has_asm m =
 
 let main () =
   let mode = ref None and llvm = ref false and pie = ref None and debug = ref false and fpic = ref false and no_pic = ref false and hosted = ref false and input = ref None and output = ref None and extra = ref [] in
-  let no_sse = ref false and general_regs_only = ref false in
+  let no_sse = ref false and general_regs_only = ref false and no_x87 = ref false in
   let unwind_tables = ref true in
   let red_zone = ref true and kernel_model = ref false and fold_branches = ref false in
   let hard = ref Mir_emit.no_hardening in
@@ -175,9 +177,11 @@ let main () =
     | "--no-unwind-tables" :: rest -> unwind_tables := false; args rest
     | "-mno-sse" :: rest -> no_sse := true; args rest
     | "-mgeneral-regs-only" :: rest -> no_sse := true; general_regs_only := true; args rest
+    | ("-mno-80387" | "-mno-x87") :: rest -> no_x87 := true; args rest
     | "-mno-red-zone" :: rest -> red_zone := false; args rest
     | "-mcmodel=kernel" :: rest -> kernel_model := true; args rest
-    | "-mretpoline-external-thunk" :: rest -> hard := { !hard with thunk_calls = true }; args rest
+    | "-mretpoline-external-thunk" :: rest -> hard := { !hard with thunk_calls = true; thunk_local = false }; args rest
+    | "-mretpoline" :: rest -> hard := { !hard with thunk_calls = true; thunk_local = true }; args rest
     | "-mindirect-branch-cs-prefix" :: rest -> hard := { !hard with thunk_cs_prefix = true }; args rest
     | "-mfunction-return=thunk-extern" :: rest -> hard := { !hard with return_thunk = true }; args rest
     | "-mfunction-return=keep" :: rest -> hard := { !hard with return_thunk = false }; args rest
@@ -226,7 +230,7 @@ let main () =
   let mode, flag = Option.value !mode ~default:(Exe, "") in
   if !extra <> [] && mode <> Exe then usage_error "%s takes no object inputs (%s)" flag (List.hd (List.rev !extra));
   if (!fpic || !no_pic) && mode <> Obj then usage_error "-fPIC and -fno-pic are for objects (-c)";
-  if (not !red_zone || !kernel_model || !no_sse || !hard <> Mir_emit.no_hardening || !stack_align <> 16) && (mode <> Obj || !llvm) then
+  if (not !red_zone || !kernel_model || !no_sse || !no_x87 || { !hard with thunks_used = Mir_emit.no_hardening.thunks_used } <> Mir_emit.no_hardening || !stack_align <> 16) && (mode <> Obj || !llvm) then
     usage_error "x86-64 code-model and register options require native object output (-c)";
   if not !unwind_tables && (mode <> Obj || !llvm) then
     usage_error "--no-unwind-tables requires native object output (-c)";
@@ -303,7 +307,7 @@ let main () =
                 Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
               in
               Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~red_zone:!red_zone ~hard:!hard ~stack_align:!stack_align ~kernel_model:!kernel_model
-                ~unwind_tables:!unwind_tables ~no_sse:!no_sse ~general_regs_only:!general_regs_only ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
+                ~unwind_tables:!unwind_tables ~no_sse:!no_sse ~general_regs_only:!general_regs_only ~no_x87:!no_x87 ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
           | Exe ->
               let output = Option.value !output ~default:"a.out" in
               if !hosted then hosted_link ~debug:!debug ~pie:!pie ~output ~extra:(List.rev !extra) ~iter_funcs ~has_asm m

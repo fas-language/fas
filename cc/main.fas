@@ -82,10 +82,16 @@ struct Options {
     suppress_warnings bool
     no_red_zone bool
     general_regs_only bool
+    // -mno-80387, -mno-x87, -mno-fp-ret-in-387: no x87 code. gcc and clang
+    // both refuse long double under any of them on x86-64, as fcc does
+    no_x87 bool
     kernel_model bool
     auto_init_zero bool // -ftrivial-auto-var-init=zero
     // the kernel's mitigations, passed on to fas-fir (Mir_emit.hardening)
     thunk_calls bool // -mretpoline-external-thunk, -mindirect-branch=thunk-extern
+    // -mretpoline, -mindirect-branch=thunk[-inline]: the thunks are the
+    // object's own (local __fas_retpoline_REG), as the vDSO needs
+    thunk_local bool
     thunk_cs_prefix bool // -mindirect-branch-cs-prefix
     return_thunk bool // -mfunction-return=thunk-extern
     cf_protection u8 // -fcf-protection: bit 1 branch (endbr64), bit 2 return (__CET__)
@@ -339,7 +345,13 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             try cli_error(c"fcc: unsupported option ", arg)
         } else if bytes_eq_c(word, c"-mretpoline-external-thunk") || bytes_eq_c(word, c"-mindirect-branch=thunk-extern") {
             o.thunk_calls = true
-        } else if bytes_eq_c(word, c"-mno-retpoline-external-thunk") || bytes_eq_c(word, c"-mindirect-branch=keep") {
+            o.thunk_local = false
+        } else if bytes_eq_c(word, c"-mretpoline") || bytes_eq_c(word, c"-mindirect-branch=thunk") ||
+                  bytes_eq_c(word, c"-mindirect-branch=thunk-inline") {
+            o.thunk_calls = true
+            o.thunk_local = true
+        } else if bytes_eq_c(word, c"-mno-retpoline-external-thunk") || bytes_eq_c(word, c"-mno-retpoline") ||
+                  bytes_eq_c(word, c"-mindirect-branch=keep") {
             o.thunk_calls = false
         } else if bytes_eq_c(word, c"-mindirect-branch-cs-prefix") { o.thunk_cs_prefix = true
         } else if bytes_eq_c(word, c"-mfunction-return=thunk-extern") { o.return_thunk = true
@@ -357,9 +369,9 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_starts_with(word, bytes_c(c"-fpatchable-function-entry=")) {
             if !cli_patch_entry_ok(bytes_from(word, 27)) { try cli_error(c"fcc: invalid option ", arg) }
             o.patch_entry = arg
-        } else if bytes_eq_c(word, c"-mretpoline") || bytes_starts_with(word, bytes_c(c"-mindirect-branch=")) ||
+        } else if bytes_starts_with(word, bytes_c(c"-mindirect-branch=")) ||
                   bytes_starts_with(word, bytes_c(c"-mfunction-return=")) {
-            // compiler-generated (not external) thunks
+            // unknown kinds, and compiler-generated return thunks
             try cli_error(c"fcc: unsupported option ", arg)
         } else if bytes_starts_with(word, bytes_c(c"-fmacro-prefix-map=")) {
             map Bytes = bytes_from(word, 19)
@@ -406,6 +418,10 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_eq_c(word, c"-no-pie") { o.is_no_pie = true }
         else if bytes_eq_c(word, c"-pie") { o.is_no_pie = false }
         else if bytes_eq_c(word, c"-mgeneral-regs-only") { o.general_regs_only = true }
+        else if bytes_eq_c(word, c"-mno-80387") || bytes_eq_c(word, c"-mno-x87") ||
+                bytes_eq_c(word, c"-mno-fp-ret-in-387") { o.no_x87 = true }
+        else if bytes_eq_c(word, c"-m80387") || bytes_eq_c(word, c"-mx87") ||
+                bytes_eq_c(word, c"-mfp-ret-in-387") { o.no_x87 = false }
         else if bytes_eq_c(word, c"-mno-red-zone") { o.no_red_zone = true }
         else if bytes_eq_c(word, c"-mred-zone") { o.no_red_zone = false }
         else if bytes_eq_c(word, c"-mcmodel=kernel") { o.kernel_model = true }
@@ -734,8 +750,8 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     no_sse bool = !x86_has(features, bytes_c(c"sse"))
     no_unwind_tables bool = !o.async_unwind && !o.unwind_tables
     codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model,
-                                 no_sse, o.general_regs_only, no_unwind_tables,
-                                 o.thunk_calls, o.thunk_cs_prefix, o.return_thunk,
+                                 no_sse, o.general_regs_only, o.no_x87, no_unwind_tables,
+                                 o.thunk_calls, o.thunk_local, o.thunk_cs_prefix, o.return_thunk,
                                  (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}

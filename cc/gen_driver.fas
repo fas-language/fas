@@ -240,8 +240,10 @@ struct DrvCodegenOptions {
     kernel_model bool
     no_sse bool
     general_regs_only bool
+    no_x87 bool // -mno-80387: fas-fir refuses x87 code (long double)
     no_unwind_tables bool
     thunk_calls bool
+    thunk_local bool // with thunk_calls: -mretpoline, the object's own thunks
     thunk_cs_prefix bool
     return_thunk bool
     endbr bool
@@ -259,12 +261,15 @@ fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions]
     if options.no_unwind_tables { vec_push(&args, c"--no-unwind-tables") }
     if options.no_red_zone { vec_push(&args, c"-mno-red-zone") }
     if options.kernel_model { vec_push(&args, c"-mcmodel=kernel") }
-    if options.thunk_calls { vec_push(&args, c"-mretpoline-external-thunk") }
+    if options.thunk_calls {
+        vec_push(&args, if options.thunk_local { c"-mretpoline" } else { c"-mretpoline-external-thunk" })
+    }
     if options.thunk_cs_prefix { vec_push(&args, c"-mindirect-branch-cs-prefix") }
     if options.return_thunk { vec_push(&args, c"-mfunction-return=thunk-extern") }
     if options.endbr { vec_push(&args, c"-fcf-protection=branch") }
     if options.patch_entry != null { vec_push(&args, options.patch_entry) }
     if options.stack_align8 { vec_push(&args, c"-mstack-alignment=8") }
+    if options.no_x87 { vec_push(&args, c"-mno-80387") }
     if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
     else if options.no_sse { vec_push(&args, c"-mno-sse") }
     if options.pic == 1 { vec_push(&args, c"-fno-pic") }

@@ -40,6 +40,10 @@ type frame = { slot_off : int array; nsaved : int; size : int; ms_xmm_off : int 
    - [thunk_calls] (-mretpoline-external-thunk): an indirect call or jump
      through register R calls or jumps to the external
      __x86_indirect_thunk_R instead;
+   - [thunk_local] (-mretpoline, for code such as the vDSO that has no
+     kernel thunks to call): the thunks are this object's own local
+     functions __fas_retpoline_R, the retpoline sequence itself, emitted
+     once for each register used ([thunks_used]);
    - [thunk_cs_prefix] (-mindirect-branch-cs-prefix): a cs prefix on those
      branches when R is r8..r15, so the 6 bytes can be patched at run time
      into lfence; call *%R (gcc's rule);
@@ -53,6 +57,8 @@ type frame = { slot_off : int array; nsaved : int; size : int; ms_xmm_off : int 
      A function's own patchable(N, M) overrides it. *)
 type hardening = {
   thunk_calls : bool;
+  thunk_local : bool;
+  thunks_used : (A.reg, unit) Hashtbl.t;
   thunk_cs_prefix : bool;
   return_thunk : bool;
   endbr : bool;
@@ -60,12 +66,36 @@ type hardening = {
 }
 
 let no_hardening =
-  { thunk_calls = false; thunk_cs_prefix = false; return_thunk = false; endbr = false; patch_entry = (0, 0) }
+  { thunk_calls = false; thunk_local = false; thunks_used = Hashtbl.create 1; thunk_cs_prefix = false;
+    return_thunk = false; endbr = false; patch_entry = (0, 0) }
+
+let local_thunk r = "__fas_retpoline_" ^ A.reg_name r
 
 let thunk_branch a hard ~call r =
   if hard.thunk_cs_prefix && A.reg_num r >= 8 then A.byte a 0x2e;
-  let symbol = "__x86_indirect_thunk_" ^ A.reg_name r in
+  let symbol =
+    if hard.thunk_local then begin
+      Hashtbl.replace hard.thunks_used r ();
+      local_thunk r
+    end else "__x86_indirect_thunk_" ^ A.reg_name r
+  in
   if call then A.call_symbol a symbol else A.jmp_symbol a symbol
+
+(* The retpoline thunk for register [r] (clang's __llvm_retpoline_r11 for
+   any register): the call pushes a return address that the ret then
+   replaces with [r]; a mispredicted ret speculates into the pause/lfence
+   loop instead of an attacker-trained target. The ret is a plain ret even
+   under the return thunk: it is the mechanism itself. *)
+let retpoline_thunk a r =
+  let capture = A.new_label a and target = A.new_label a in
+  A.call_label a target;
+  A.place a capture;
+  A.pause a;
+  A.lfence a;
+  A.jmp a capture;
+  A.place a target;
+  A.store a 8 (A.Base (A.Rsp, 0)) r;
+  A.ret a
 
 let layout (f : func) nsaved =
   let off = ref (8 * nsaved) in
@@ -1225,10 +1255,11 @@ let prepare (m : F.modul) =
    records needed for C exception cleanups and explicit inline CFI. *)
 let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_hardening) ?stack_align ?iter_funcs ?(has_asm = true)
     ?(unwind_tables = true)
-    ~startup ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(self_relocate = false) (m : F.modul) =
+    ~startup ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?no_x87 ?(self_relocate = false) (m : F.modul) =
   try
     if m.triple <> Target_layout.x86_64_linux.triple then
       unsupported "only Linux x86-64 object emission is supported (target %s)" m.triple;
+    Hashtbl.reset hard.thunks_used;
     let iter = match iter_funcs with
       | Some iter -> iter
       | None -> prepare m; fun visit -> F.Vec.iter visit m.funcs
@@ -1280,7 +1311,7 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_h
       iter
         (fun (fn : F.func) ->
           if fn.defined then begin
-            let mf = Mir_isel.select ~pic ~tls_gd ~kernel_model ~no_sse ~general_regs_only ?stack_align env fn in
+            let mf = Mir_isel.select ~pic ~tls_gd ~kernel_model ~no_sse ~general_regs_only ?no_x87 ?stack_align env fn in
             if dump then prerr_string (Mir.to_string mf);
             Mir_export.add_func mf;
             let ra =
@@ -1374,6 +1405,15 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_h
               emit_all (Fir_replay.iter compiled))
       end
     in
+    if hard.thunk_local then
+      List.iter
+        (fun r ->
+          A.align a 16;
+          let offset = A.pos a in
+          retpoline_thunk a r;
+          func_syms := { Elf64.name = local_thunk r; section = Elf64.Text; offset; size = A.pos a - offset; func = true }
+                       :: !func_syms)
+        (List.sort compare (Hashtbl.fold (fun r () l -> r :: l) hard.thunks_used []));
     if startup then begin
       A.align a 16;
       let offset = A.pos a in
@@ -1701,14 +1741,14 @@ let generate ?(debug = false) ?(tls_gd = false) ?(red_zone = true) ?(hard = no_h
    dlopen may load after the static TLS block is laid out; otherwise
    initial-exec. Static links reject general-dynamic relocations. *)
 let compile_object ?debug ?(pic = true) ?tls_gd ?red_zone ?hard ?stack_align
-    ?(kernel_model = false) ?no_sse ?general_regs_only ?iter_funcs ?has_asm ?unwind_tables m =
+    ?(kernel_model = false) ?no_sse ?general_regs_only ?no_x87 ?iter_funcs ?has_asm ?unwind_tables m =
   (* The kernel may run early code via an identity mapping. Normal C
      symbol addresses must still be the link-time high-half addresses. *)
   if kernel_model && tls_gd = Some true then
     Error "native backend: -mcmodel=kernel is incompatible with -fPIC"
   else
     generate ?debug ?tls_gd ?red_zone ?hard ?stack_align ?iter_funcs ?has_asm ?unwind_tables ~startup:false
-      ~pic:(pic && not kernel_model) ~kernel_model ?no_sse ?general_regs_only m
+      ~pic:(pic && not kernel_model) ~kernel_model ?no_sse ?general_regs_only ?no_x87 m
 
 (* a static executable, or a static PIE when [options] ask for one *)
 let link_files ?debug ?iter_funcs ?has_asm ?(inputs = []) ?options ~output m =

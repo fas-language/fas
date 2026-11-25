@@ -510,6 +510,25 @@ for bad in -mstack-alignment=4 -mstack-alignment=12 -mstack-alignment= -mpreferr
 done
 echo 'PASS: -mstack-alignment=8'
 
+# -mno-80387 and -mno-fp-ret-in-387: no x87 code, so long double is
+# refused (gcc and clang refuse it under either flag); other code is as usual
+cat > nox87.c <<'C'
+#include <stdio.h>
+__attribute__((noinline)) long scale(long x, int k) { return (x << k) - x; }
+int main(void) { printf("%ld %f\n", scale(5, 3), 1.5 * scale(2, 1)); }
+C
+for flag in -mno-80387 -mno-fp-ret-in-387 -mno-x87; do
+    run_diff "$flag" nox87.c
+done
+printf 'long double twice(long double x) { return x * 2; }\n' > x87.c
+if "$FCC" -mno-80387 -c x87.c -o x87.o 2> x87.err; then
+    echo "fcc compiled long double under -mno-80387" >&2
+    exit 1
+fi
+grep -q 'x87 registers are disabled' x87.err
+"$FCC" -mno-80387 -m80387 -c x87.c -o x87.o
+echo 'PASS: -mno-80387'
+
 # The kernel's mitigations: indirect branches through external retpoline
 # thunks (cs prefix for r8..r15), returns through the return thunk, endbr64
 # at entries and indirect-jump targets, patchable entry nops. The thunks
@@ -592,6 +611,39 @@ grep -q endbr64 <(sed -n 1p own_patch.head)
 functions=$(readelf -sW hard.o | grep -c ' FUNC ')
 [[ $(readelf -rW hard.o | sed -n "/'.rela__patchable_function_entries'/,/^$/p" | grep -c R_X86_64_64) == $((functions - 1)) ]]
 echo 'PASS: retpoline, return thunk, endbr64 and patchable entries'
+
+# -mretpoline (the vDSO's): the thunks are the object's own local
+# functions, so the program links with nothing else. Both objects carry a
+# __fas_retpoline_REG; being local, they do not clash. Their ret stays plain
+# even under the return thunk; every other return and indirect branch goes
+# through a thunk.
+cat > rp_extra.c <<'C'
+long rp_extra(long (*f)(long, long), long a) { return f(a, a) * 2; }
+C
+for retpoline in -mretpoline -mindirect-branch=thunk-inline; do
+    "$FCC" "$retpoline" -mindirect-branch-register -c hard.c -o hard_rp.o
+    "$FCC" "$retpoline" -mfunction-return=thunk-extern -c rp_extra.c -o rp_extra.o
+    "$clang" hard_rp.o rp_extra.o thunks.o -o fcc_rp.out
+    ./fcc_rp.out > fcc_rp.txt
+    cmp clang.txt fcc_rp.txt
+    for o in hard_rp.o rp_extra.o; do
+        objdump -d --no-show-raw-insn "$o" > rp.dis
+        if grep -qE $'\t(call +\\*|jmp +\\*)' rp.dis; then
+            echo "a plain indirect branch under $retpoline in $o" >&2
+            exit 1
+        fi
+        readelf -sW "$o" | grep -E ' LOCAL .* __fas_retpoline_' > rp.syms
+        [[ -s rp.syms ]]
+        if grep -q '__x86_indirect_thunk_' rp.dis; then
+            echo "$retpoline called an external thunk" >&2
+            exit 1
+        fi
+    done
+    # the only plain ret in rp_extra.o is the thunk's
+    objdump -d --no-show-raw-insn rp_extra.o | awk '/^[0-9a-f]+ </{f=$2} /\tret/{print f}' > rp.rets
+    [[ -s rp.rets && $(grep -vc '__fas_retpoline_' rp.rets) == 0 ]]
+done
+echo 'PASS: -mretpoline'
 
 cat > unwind_a.c <<'C'
 int unwind_a(int x) { return x + 1; }
