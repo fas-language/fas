@@ -755,14 +755,21 @@ fn se_conditional(p handle[Parser], t Token, cond handle[Ast], a handle[Ast], b 
         ty = ty_ptr(ty_qual(elem, se_array_quals(px) | se_array_quals(py)))
     } else if x != TY_INVALID && y != TY_INVALID { try pa_error(p, t.loc, c"incompatible conditional operands") }
     n handle[Ast] = pa_node(ND_COND, t.loc, ty)
-    n.a = cond
+    test handle[Ast] = cond
+    if cond.kind == ND_STRING {
+        // A string literal decays to a nonnull address. Keep its truth value
+        // available to static initializers without making it an integer ICE.
+        test = se_int(cond.loc, TY_INT, 1)
+        test.flags = NF_STATIC | NF_FOLD
+    }
+    n.a = test
     n.b = a
     n.c = b
-    if (cond.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
-        chosen handle[Ast] = if se_truth(cond) { a } else { b }
+    if (test.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        chosen handle[Ast] = if se_truth(test) { a } else { b }
         se_cast_constant(n, chosen)
-        n.flags |= cond.flags & NF_OVERFLOW
-        if (cond.flags & NF_ICE) == 0 && (n.flags & NF_ICE) != 0 {
+        n.flags |= test.flags & NF_OVERFLOW
+        if (test.flags & NF_ICE) == 0 && (n.flags & NF_ICE) != 0 {
             n.flags = (n.flags & ~NF_ICE) | NF_FOLD
         }
     }

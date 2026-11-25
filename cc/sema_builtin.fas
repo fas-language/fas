@@ -74,6 +74,32 @@ fn se_fold_clz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
     return se_int(t.loc, TY_INT, result)
 }
 
+fn se_ctz_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_ctz") { return TY_UINT }
+    if bytes_eq_c(name, c"__builtin_ctzl") { return TY_ULONG }
+    if bytes_eq_c(name, c"__builtin_ctzll") { return TY_ULLONG }
+    return TY_INVALID
+}
+
+// Both ctz and ffs count the zero bits below the first set bit.
+fn se_count_trailing_zeros(value u64) u64 {
+    result u64 = 0
+    while (value & 1) == 0 {
+        result += 1
+        value >>= 1
+    }
+    return result
+}
+
+// The fixed-width ctz builtins first convert to their unsigned argument
+// type. A zero argument has no defined constant result.
+fn se_fold_ctz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(ty, arg).value
+    if value == 0 { return null }
+    return se_int(t.loc, TY_INT, se_count_trailing_zeros(value))
+}
+
 fn se_ffs_argument_type(name Bytes) u32 {
     if bytes_eq_c(name, c"__builtin_ffs") { return TY_INT }
     if bytes_eq_c(name, c"__builtin_ffsl") { return TY_LONG }
@@ -86,12 +112,7 @@ fn se_fold_ffs(t Token, ty u32, arg handle[Ast]) handle[Ast] {
     if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
     value u64 = se_convert(ty, arg).value
     if value == 0 { return se_int(t.loc, TY_INT, 0) }
-    result u64 = 1
-    while (value & 1) == 0 {
-        result += 1
-        value >>= 1
-    }
-    return se_int(t.loc, TY_INT, result)
+    return se_int(t.loc, TY_INT, se_count_trailing_zeros(value) + 1)
 }
 
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
@@ -432,8 +453,7 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
         ptr u32 = ty_ptr(ty_qual(TY_VOID, Q_CONST | Q_VOLATILE))
         try se_conversion(p, ptr, args)
         try se_conversion(p, ptr, args.next)
-    } else if bytes_eq_c(name, c"__builtin_set_flt_rounds") || bytes_eq_c(name, c"__builtin_popcount") ||
-        bytes_eq_c(name, c"__builtin_ctz") {
+    } else if bytes_eq_c(name, c"__builtin_set_flt_rounds") || bytes_eq_c(name, c"__builtin_popcount") {
         try se_builtin_count(p, t, count, 1, 1)
         try se_conversion(p, TY_INT, args)
     } else if bytes_eq_c(name, c"__builtin_cpu_supports") || bytes_eq_c(name, c"__builtin_cpu_is") {
