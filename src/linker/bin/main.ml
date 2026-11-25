@@ -33,6 +33,7 @@ let usage =
    --allow-multiple-definition, -z muldefs  keep the first strong definition\n\
    -z relro/norelro        enable/disable RELRO (dynamic default: enabled)\n\
    -z now/defs/undefs      eager binding / strict / permissive undefined policy\n\
+   -z max-page-size=N      segment alignment, a power of two (default 4096)\n\
    --dynamic-linker PATH   program interpreter (PIE default: glibc x86-64)\n\
    -rpath PATH             runtime library search path ($ORIGIN preserved)\n\
    --enable-new-dtags      emit RUNPATH (default); --disable-new-dtags: RPATH\n\

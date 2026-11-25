@@ -78,6 +78,27 @@ int main(int argc, char **argv) {
                                              b'constructor\nmain\natexit\ndestructor\n')
                             self.assertEqual(run('readelf', '-aW', out).stderr, b'')
 
+    def test_max_page_size_aligns_pie_relro_and_load_segments(self):
+        source = r'''
+#include <stdio.h>
+static const char *const message[] = { "relro", "page" };
+int main(void) { printf("%s %s\n", message[0], message[1]); return 42; }
+'''
+        obj = self.compile('hosted-page', source)
+        page = 0x200000
+        for pie in (True, False):
+            with self.subTest(pie=pie):
+                out = self.hosted(f'hosted-page-{pie}', obj, pie=pie, extra=('-z', f'max-page-size={page:#x}'))
+                self.assertEqual(run(out, expected=42).stdout, b'relro page\n')
+                segments = core.elf_segments(out.read_bytes())
+                loads = [p for p in segments if p['kind'] == 1]
+                self.assertTrue(all(p['alignment'] == page for p in loads))
+                self.assertTrue(all(p['offset'] % page == p['address'] % page for p in loads))
+                relro = [p for p in segments if p['kind'] == 0x6474e552]
+                self.assertEqual(len(relro), 1)
+                self.assertEqual((relro[0]['offset'] + relro[0]['memory_size']) % page, 0)
+                self.assertEqual(run('readelf', '-aW', out).stderr, b'')
+
     def test_nonpie_gcc_crt_and_narrow_absent_weak_references(self):
         obj = self.compile('nonpie-crt', r'''
 #include <stdio.h>

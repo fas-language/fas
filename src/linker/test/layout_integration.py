@@ -2,6 +2,7 @@
 """Independent layout-symbol and diagnostic map-file checks."""
 import os
 import shlex
+import shutil
 import struct
 import unittest
 
@@ -64,6 +65,37 @@ large_end:
         section = self.assemble('oversized-section',
                                 f'.bss\n.skip {1024*1024*1024+1}')
         self.rejected(self.simple, 'section size', self.answer, section)
+
+    def test_max_page_size_aligns_load_segments(self):
+        expected = b"fas-ld: objects, pointers, data, BSS: ok\n"
+        lld = shutil.which('ld.lld-22') or shutil.which('ld.lld')
+        for page in (0x10000, 0x200000):
+            option = ('-z', f'max-page-size={page:#x}')
+            out = self.link(f'page-{page:x}', self.start, self.support, options=option)
+            self.assertEqual(run(out).stdout, expected)
+            loads = [p for p in core.elf_segments(out.read_bytes()) if p['kind'] == 1]
+            self.assertGreater(len(loads), 1)
+            for p in loads:
+                self.assertEqual(p['alignment'], page)
+                self.assertEqual(p['offset'] % page, p['address'] % page)
+            for p in loads[1:]:
+                self.assertEqual(p['offset'] % page, 0)
+            decimal = self.link(f'page-{page}', self.start, self.support,
+                                options=('-z', f'max-page-size={page}'))
+            self.assertEqual(decimal.read_bytes(), out.read_bytes())
+            for linker in ('ld', lld):
+                if linker:
+                    reference = self.link(f'page-{page:x}-{os.path.basename(linker)}',
+                                          self.start, self.support, options=option, linker=linker)
+                    self.assertEqual(run(reference).stdout, expected)
+        default = self.link('page-default', self.start, self.support)
+        explicit = self.link('page-4096', self.start, self.support, options=('-z', 'max-page-size=4096'))
+        self.assertEqual(default.read_bytes(), explicit.read_bytes())
+        for value in ('', '0', '4095', '3000', '6144', '0x', '0x1g', '8192x', '+8192', '0X800000000',
+                      '2147483648', '99999999999999999999999999'):
+            with self.subTest(value=value):
+                self.rejected(self.simple, f'invalid -z max-page-size value {value} (expected a power',
+                              self.answer, options=('-z', 'max-page-size=' + value))
 
     def test_predefined_symbols_match_load_extents(self):
         names = ('__executable_start', '__ehdr_start', '__bss_start',

@@ -351,7 +351,7 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
 // ---------- predefined symbols ----------
 
 fn seg_ending(text_only bool, memory bool) u64 {
-    value u64 = ld.lay_base + PAGE
+    value u64 = ld.lay_base + ld.lay_page
     for i u64 in 0..ld.segments.n {
         s handle[Seg] = vec_at(&ld.segments, i)
         if text_only && (s.flags & 1) == 0 { continue }
@@ -758,6 +758,7 @@ fn build_image() void fails {
     // Dynamic.pie: shared output is position independent too
     ld.lay_base = if c.pie || c.mode == MODE_SHARED { 0 } else { LAYOUT_BASE }
     ld.lay_relro = ld.dyn_file != NONE64 && c.relro
+    ld.lay_page = c.page
     if ld.nobj == 0 { try die_c(c"no input objects") }
     mt PhaseStart = {}
     phase_begin(PH_MERGE, &mt)
@@ -915,7 +916,7 @@ fn build_image() void fails {
             program_header(1, 3, 4, ip.offset, ip.address, is, is, 1)
         }
     }
-    program_header(prefix, 1, 4, 0, ld.lay_base, header_size, header_size, PAGE)
+    program_header(prefix, 1, 4, 0, ld.lay_base, header_size, header_size, ld.lay_page)
     for i u64 in 0..ld.segments.n {
         s handle[Seg] = vec_at(&ld.segments, i)
         program_header(prefix + i + 1, 1, s.flags, s.offset, ld.lay_base + s.offset, s.file_size, s.memory_size, s.alignment)

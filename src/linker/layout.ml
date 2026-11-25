@@ -2,7 +2,6 @@ module B = Binary
 module E = Elf_reader
 
 let base = 0x400000
-let page = 4096
 let max_output = 512 * 1024 * 1024
 let max_image = 1024 * 1024 * 1024
 
@@ -93,7 +92,7 @@ let image_symbol_section sections value =
   | Some index, _ | None, Some index -> index
   | None, None -> Error.fail "image-relative symbol has no allocatable output section"
 
-let make ~base ~relro ~kept ~aliases objects =
+let make ~page ~base ~relro ~kept ~aliases objects =
   let add = B.add ~context:"output layout" ~limit:max_output in
   let align value alignment =
     B.align ~context:"output layout" ~limit:max_output value alignment

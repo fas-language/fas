@@ -104,7 +104,7 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
     B.align ~context:"output layout" ~limit:max_output value alignment
   in
   let layout =
-    Layout.make ~base ~relro:(dynamic <> None && options.relro) ~kept ~aliases objects
+    Layout.make ~page:options.max_page_size ~base ~relro:(dynamic <> None && options.relro) ~kept ~aliases objects
   in
   let placements = layout.placements and content = layout.content in
   let content_count = ref (List.length layout.sections) in
@@ -123,7 +123,7 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
             if predicate s then
               max value (base + s.offset + if memory then s.memory_size else s.file_size)
             else value)
-          (base + page) !segments
+          (base + options.max_page_size) !segments
       in
       let data_end = ending (fun _ -> true) false in
       let image_end = ending (fun _ -> true) true in
@@ -502,7 +502,7 @@ let link_objects ?stats ?map ~(options : Options.t) ~entry (resolved : Resolver.
       end)
     dynamic;
   program_header prefix ~kind:1 ~flags:4 ~offset:0 ~address:base ~file_size:header_size
-    ~memory_size:header_size ~alignment:page;
+    ~memory_size:header_size ~alignment:options.max_page_size;
   List.iteri
     (fun index s ->
       program_header

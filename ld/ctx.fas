@@ -175,6 +175,7 @@ struct Ld {
     lay_cursor u64
     lay_base u64
     lay_relro bool
+    lay_page u64                // -z max-page-size
     relro_seg Seg
     has_relro_seg bool
     tls_seg Seg

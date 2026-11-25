@@ -219,6 +219,7 @@ struct Config {
     has_version_script bool
     hash_style u8
     build_id u8
+    page u64                // -z max-page-size: segment/RELRO alignment, PT_LOAD p_align
 }
 
 
@@ -266,6 +267,7 @@ Linux x86-64 ELF linker.
 --allow-multiple-definition, -z muldefs  keep the first strong definition
 -z relro/norelro        enable/disable RELRO (dynamic default: enabled)
 -z now/defs/undefs      eager binding / strict / permissive undefined policy
+-z max-page-size=N      segment alignment, a power of two (default 4096)
 --dynamic-linker PATH   program interpreter (PIE default: glibc x86-64)
 -rpath PATH             runtime library search path ($ORIGIN preserved)
 --enable-new-dtags      emit RUNPATH (default); --disable-new-dtags: RPATH
@@ -315,6 +317,43 @@ fn add_item(p handle[Parser], kind u8, text Bytes) void {
 }
 
 fn is(a Bytes, s addr) bool { return bytes_eq_c(a, s) }
+
+// -z max-page-size=N (Command_line.page_size): decimal or 0x-prefixed
+// hexadecimal, a power of two from 4096 to 1 GiB, bounded digit by digit
+fn page_size(text Bytes) u64 fails {
+    hex bool = text.n > 2 && text.p[u8, 0] == 48 && (text.p[u8, 1] == 120 || text.p[u8, 1] == 88)
+    start u64 = if hex { 2 } else { 0 }
+    radix u64 = if hex { 16 } else { 10 }
+    ok bool = text.n > start
+    value u64 = 0
+    i u64 = start
+    while ok && i < text.n {
+        ch u8 = text.p[u8, i]
+        d u64 = 16
+        if ch >= 48 && ch <= 57 {
+            d = zext[u64](ch) - 48
+        } else if hex && ch >= 97 && ch <= 102 {
+            d = zext[u64](ch) - 87
+        } else if hex && ch >= 65 && ch <= 70 {
+            d = zext[u64](ch) - 55
+        }
+        if d >= radix {
+            ok = false
+        } else {
+            value = value * radix + d
+            if value > 1073741824 { ok = false }
+        }
+        i += 1
+    }
+    if !ok || value < 4096 || (value & (value - 1)) != 0 {
+        m handle[Buf] = msg()
+        bs(m, c"invalid -z max-page-size value ")
+        bb(m, text)
+        bs(m, c" (expected a power of two from 4096 to 1073741824)")
+        try die()
+    }
+    return value
+}
 
 fn fail_with(prefix addr, x Bytes) void fails {
     m handle[Buf] = msg()
@@ -467,6 +506,8 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             } else if is(policy, c"text") || is(policy, c"now") || is(policy, c"noexecstack") {
                 // all output modes already reject text relocations; binding is
                 // eager; outputs never request an executable stack
+            } else if bytes_prefix(policy, c"max-page-size=") {
+                c.page = try page_size(arg_tail(policy, 14))
             } else if is(policy, c"defs") {
                 c.no_undefined = true
             } else if is(policy, c"undefs") {
@@ -557,6 +598,7 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     c.new_dtags = true
     c.allow_shlib_undefined = true
     c.relro = true
+    c.page = 4096
     p Parser = {}
     raw Vec[Bytes] = {}
     for i u64 in 0..argc { vec_push(&raw, bytes_c(argv[addr, i])) }
