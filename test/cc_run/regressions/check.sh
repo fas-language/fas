@@ -22,7 +22,7 @@ for file in "$src"/*.c; do
         kernel_constant_calls.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
         kernel_stack_canary.c) flags=(-fno-pie -no-pie -mcmodel=kernel -fstack-protector-all) ;;
         kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
-        no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
+        no_sse_ms_abi.c|no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
         libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
         short_wchar.c) flags=(-fshort-wchar) ;;
@@ -62,11 +62,13 @@ for file in "$src"/*.c; do
             grep -E -q 'R_X86_64_PC32 +[0-9a-f]+ kernel_data ' "$work/relocs"
         done
     fi
-    if [[ ${file##*/} == no_sse_variadic.c ]]; then
+    if [[ ${file##*/} == no_sse_variadic.c || ${file##*/} == no_sse_ms_abi.c ]]; then
+        symbol=sum
+        if [[ ${file##*/} == no_sse_ms_abi.c ]]; then symbol=firmware_entry; fi
         for exe in "$work/clang" "$work/fcc"; do
-            llvm-objdump-22 --disassemble-symbols=sum "$exe" > "$work/sum"
-            grep -q '<sum>:' "$work/sum"
-            if grep -Eiq '%(xmm|ymm|zmm|st\()' "$work/sum"; then
+            llvm-objdump-22 --disassemble-symbols="$symbol" "$exe" > "$work/disassembly"
+            grep -q "<$symbol>:" "$work/disassembly"
+            if grep -Eiq '%(xmm|ymm|zmm|st\()' "$work/disassembly"; then
                 echo "unexpected FP or vector register in $exe" >&2
                 exit 1
             fi

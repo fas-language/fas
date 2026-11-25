@@ -38,7 +38,7 @@ type frame = { slot_off : int array; nsaved : int; size : int; ms_xmm_off : int 
 let layout (f : func) nsaved =
   let off = ref (8 * nsaved) in
   let ms_xmm_off =
-    if f.ms_abi then begin
+    if f.ms_save_xmm then begin
       off := Mir_isel.align_up !off 16 + 160;
       Some !off
     end else None

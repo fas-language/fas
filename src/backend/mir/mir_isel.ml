@@ -2737,7 +2737,9 @@ let promotable_allocas (fn : F.func) =
   end
 
 let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(tls_gd = false) (e : env) (fn : F.func) =
-  let mf = Mir.create ~ms_abi:fn.sig_.ms_abi fn.name in
+  (* Integer-only Microsoft x64 code, such as EFI stubs, keeps the integer
+     calling convention but cannot touch XMM registers in the prologue. *)
+  let mf = Mir.create ~ms_abi:fn.sig_.ms_abi ~no_sse fn.name in
   for _ = 1 to F.num_blocks fn do
     ignore (new_block mf)
   done;
@@ -2788,7 +2790,7 @@ let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = 
          fn.vars);
   mf.zeroize <- F.has fn.fattrs F.fa_secret || Hashtbl.length mf.marks > 0;
   if no_sse &&
-     (mf.ms_abi || mf.zeroize || Dynarray.exists ((=) Xmm) mf.vcls ||
+     (mf.zeroize || Dynarray.exists ((=) Xmm) mf.vcls ||
       Dynarray.exists (fun b -> List.exists (fun i ->
         List.exists (function X _ -> true | _ -> false) (all_regs i)) b.code) mf.blocks)
   then unsupported "@%s: SSE registers are disabled" fn.name;
