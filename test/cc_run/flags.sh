@@ -361,7 +361,12 @@ int read_flag(void) { return early_flag; }
 int read_slot(void) { return early_table[3]; }
 void pass_flag(void) { take(&early_flag); }
 C
-echo 'int data = 42; int next(int n) { return n + 1; }' > kbuild/kernel-data.c
+cat > kbuild/kernel-data.c <<'C'
+int data = 42;
+int next(int n) { return n + 1; }
+int early_flag, early_table[4];
+void take(int *p) { (void)p; }
+C
 for compiler in "${CLANG:-clang-22}" "$FCC"; do
     "$compiler" -Werror -ffreestanding -mno-red-zone -mcmodel=kernel -fno-pie \
         -c kbuild/kernel-model.c -o kbuild/kernel-model.o
