@@ -199,8 +199,9 @@ let use c v =
           t
       | None -> vreg c v)
 
-(* [p] as a symbol plus a constant: directly, or through a constant ptradd *)
-let sym_plus fn p =
+(* [p] as a symbol plus a constant: directly, or through a chain of
+   constant ptradds (a field of a nested struct, like pv_ops.mmu.flush) *)
+let rec sym_plus fn p =
   match F.const_of fn p with
   | Some (Csym (name, addend)) -> Some (name, addend)
   | _ -> (
@@ -208,8 +209,8 @@ let sym_plus fn p =
       | Result (i, 0) -> (
           match (F.inst fn i).op with
           | Ptradd (_, base, idx, scale, disp) -> (
-              match (F.const_of fn base, F.int_value fn idx) with
-              | Some (Csym (name, addend)), Some k ->
+              match (sym_plus fn base, F.int_value fn idx) with
+              | Some (name, addend), Some k ->
                   Some (name, Int64.add addend (Int64.add (Int64.mul k (Int64.of_int scale)) (Int64.of_int disp)))
               | _ -> None)
           | _ -> None)
