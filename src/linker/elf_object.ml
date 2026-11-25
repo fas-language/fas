@@ -65,6 +65,9 @@ let write input =
   let string buffer name =
     if String.contains name '\000' || String.length name > 65535 then
       Error.fail "%s: invalid or oversized name" context;
+    (* Both string tables start with "\000": an empty name (a section
+       symbol, which readers then name after its section) is offset 0. *)
+    if name = "" then 0 else
     let offset = Buffer.length buffer in
     ignore (add offset (String.length name + 1));
     Buffer.add_string buffer name;

@@ -44,16 +44,35 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
     symbols := symbol :: !symbols;
     index
   in
+  (* Like GNU as and llvm-mc, a local .L label is not a symbol: a relocation
+     against it goes through its section's STT_SECTION symbol with the label
+     offset in the addend. objtool reads its annotation sections only in
+     that form (and rejected the old STT_OBJECT labels, silently dropping
+     the kernel's ORC and return-site tables). *)
+  let resolved_binding name = match binding name with Some b -> b | None -> if global name then 1 else 0 in
+  let labels = Hashtbl.create 16 and section_symbols = Hashtbl.create 8 in
+  let section_symbol index =
+    match Hashtbl.find_opt section_symbols index with
+    | Some symbol -> symbol
+    | None ->
+        let symbol = !count in
+        incr count;
+        symbols :=
+          { O.name = ""; binding = 0; kind = 3; visibility = 0; definition = O.Section (index, 0L); size = 0L }
+          :: !symbols;
+        Hashtbl.add section_symbols index symbol;
+        symbol
+  in
   List.iter
     (fun (s : Elf64.symbol) ->
+      if String.starts_with ~prefix:".L" s.name && resolved_binding s.name = 0 && not (tls_section s.section) then
+        Hashtbl.replace labels s.name (section s.section, s.offset)
+      else
       ignore
         (add
            {
              name = s.name;
-             binding =
-               (match binding s.name with
-               | Some b -> b
-               | None -> if global s.name then 1 else 0);
+             binding = resolved_binding s.name;
              kind = (if ifunc s.name then 10 else if s.func then 2 else if tls_section s.section then 6 else 1);
              visibility = visibility s.name;
              definition = O.Section (section s.section, Int64.of_int s.offset);
@@ -114,7 +133,11 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
                 (offset, symbol, 19, Int64.sub (Int64.of_int addend) 4L)
             | X64.Raw { offset; symbol; kind; addend } -> (offset, symbol, kind, Int64.of_int addend)
           in
-          let symbol = reference name in
+          let symbol, addend =
+            match Hashtbl.find_opt labels name with
+            | Some (index, offset) -> (section_symbol index, Int64.add addend (Int64.of_int offset))
+            | None -> (reference name, addend)
+          in
           relocations :=
             ({ section; offset; symbol; kind; addend } : O.relocation) :: !relocations)
         rs)
