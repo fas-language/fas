@@ -1300,19 +1300,8 @@ fn gen_call(n handle[Ast]) u32 fails {
         pstart = zext[usize](fn_node.aux1)
     }
 
-    // Check for direct call to a known symbol
-    is_direct bool = false
-    direct_sym handle[Symbol] = null
-    if n.a.kind == ND_NAME && n.a.decl != null && ty_is_func(n.a.decl.ty) {
-        is_direct = true
-        direct_sym = n.a.decl
-    } else if n.a.kind == ND_UNARY && n.a.a != null && n.a.a.kind == ND_NAME && n.a.a.decl != null && ty_is_func(n.a.a.decl.ty) {
-        op Bytes = cc_name(gc.p.names, n.a.op)
-        if bytes_eq_c(op, c"&") || bytes_eq_c(op, c"*") {
-            is_direct = true
-            direct_sym = n.a.a.decl
-        }
-    }
+    direct_sym handle[Symbol] = gen_direct_callee(n.a)
+    is_direct bool = direct_sym != null
 
     if is_direct {
         definition handle[Ast] = gen_inline_def(direct_sym)

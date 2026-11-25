@@ -12,6 +12,19 @@ use "gen.fas"
 use "gen_expr.fas"
 use "gen_stmt.fas"
 
+fn gen_direct_callee(n handle[Ast]) handle[Symbol] {
+    if n == null { return null }
+    if n.kind == ND_UNARY {
+        op Bytes = cc_name(gc.p.names, n.op)
+        if !bytes_eq_c(op, c"&") && !bytes_eq_c(op, c"*") { return null }
+        n = n.a
+    }
+    if n != null && n.kind == ND_NAME && n.decl != null && ty_is_func(n.decl.ty) {
+        return n.decl
+    }
+    return null
+}
+
 fn gen_inline_def(s handle[Symbol]) handle[Ast] {
     if s == null || gc.inline_defs.n == 0 { return null }
     key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
@@ -85,8 +98,7 @@ fn gen_needs_inline_asm(n handle[Ast]) bool {
             input = input.next
         }
     }
-    if n.kind == ND_CALL && n.a != null && n.a.kind == ND_NAME &&
-       gen_inline_def(n.a.decl) != null {
+    if n.kind == ND_CALL && gen_inline_def(gen_direct_callee(n.a)) != null {
         arg handle[Ast] = n.b
         while arg != null {
             if (arg.flags & NF_STATIC) == 0 { return true }

@@ -1349,7 +1349,8 @@ fn gen_function(node handle[Ast]) void fails {
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
     gen_note_inline_constant(s, node.a, nid)
-    if s.linkage == 1 && gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
+    if s.linkage == 1 && !gc.inline_def_out_of_line &&
+       gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
         key U64Key = {zext[u64](nid)}
         _ bool = table_put(&gc.inline_defs, &key, handle_addr(node))
         return

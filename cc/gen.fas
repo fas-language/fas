@@ -160,6 +160,11 @@ struct GenCtx {
     inline_defs Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     inline_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     inline_frame handle[GenInlineFrame]
+    // Set while emitting an inline_defs body out of line because a
+    // reference survived inlining (for example, its address was taken).
+    inline_def_out_of_line bool
+    pending_bodies Vec[addr]
+    pending_body_map Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
 
     // String literal deduplication pool (keyed by Intern id of align_byte + data)
     str_pool_keys Intern
@@ -236,6 +241,8 @@ fn gen_free(ctx handle[GenCtx]) void {
     table_free(&ctx.gnu_inline_map)
     table_free(&ctx.inline_defs)
     table_free(&ctx.inline_constants)
+    table_free(&ctx.pending_body_map)
+    vec_free(&ctx.pending_bodies)
     intern_free(&ctx.str_pool_keys)
     table_free(&ctx.str_pool_nids)
     gen_reset_func_state(ctx)
@@ -1537,10 +1544,50 @@ fn gen_emit_string_global(data Bytes, align u64) u32 {
 
 // ---------- TU Streaming Callbacks & Finalization ----------
 
+// The ordinary streaming path emits immediately. A direct call to a
+// forward-declared internal function may need an immediate-asm definition
+// that becomes available only after a later parse callback.
+fn gen_visit_pending_calls(n handle[Ast], current handle[Symbol], finish bool) bool fails {
+    if n == null { return false }
+    if n.kind == ND_CALL {
+        s handle[Symbol] = gen_direct_callee(n.a)
+        if s != null && s != current && s.linkage == 1 {
+            key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
+            body addr = table_get(&gc.pending_body_map, &key) catch null
+            if finish {
+                if body != null { try gen_emit_pending(handle_from_addr(body)) }
+            } else if !s.defined || body != null {
+                return true
+            }
+        }
+    }
+    if n.kind == ND_DECL && n.decl != null &&
+       try gen_visit_pending_calls(handle_from_addr(n.decl.value), current, finish) { return true }
+    return try gen_visit_pending_calls(n.a, current, finish) ||
+           try gen_visit_pending_calls(n.b, current, finish) ||
+           try gen_visit_pending_calls(n.c, current, finish) ||
+           try gen_visit_pending_calls(n.d, current, finish) ||
+           try gen_visit_pending_calls(n.next, current, finish)
+}
+
+fn gen_emit_pending(n handle[Ast]) void fails {
+    key U64Key = {zext[u64](gen_sym_fir_name_id(n.decl))}
+    // Remove before following edges so ordinary recursive calls terminate.
+    if !table_remove(&gc.pending_body_map, &key) { return }
+    _ bool = try gen_visit_pending_calls(n.a, n.decl, true)
+    try gen_function(n)
+}
+
 fn gen_on_function_cb(ctx addr, node addr, user addr) void fails {
     n handle[Ast] = handle_from_addr(node)
     if n == null || n.decl == null { return }
-    try gen_function(n)
+    if try gen_visit_pending_calls(n.a, n.decl, false) {
+        key U64Key = {zext[u64](gen_sym_fir_name_id(n.decl))}
+        _ bool = table_put(&gc.pending_body_map, &key, node)
+        vec_push(&gc.pending_bodies, node)
+    } else {
+        try gen_function(n)
+    }
 }
 
 // GNU's global register variable for the x86-64 stack pointer names
@@ -1623,6 +1670,12 @@ fn gen_require_inline(name Bytes) void {
 }
 
 fn gen_finish_tu() void fails {
+    previous handle[TypeCtx] = tc
+    tc = &gc.p.types
+    defer { tc = previous }
+    for i usize in 0..gc.pending_bodies.n {
+        try gen_emit_pending(handle_from_addr(vec_get(&gc.pending_bodies, i)))
+    }
     gen_debug_finish()
     // 0. Emit all inline definitions reachable from the emitted code.
     gi_i usize = 0
@@ -1632,6 +1685,18 @@ fn gen_finish_tu() void fails {
         rnid u32 = r.name_id
         if gen_is_defined(rnid) { continue }
         gk U64Key = {zext[u64](rnid)}
+        // GCC and Clang emit an always_inline function out of line when a
+        // reference to it is not a call they inline, such as the cast
+        // function pointer in the kernel's BPF_CALL_x wrappers.
+        idef addr = table_get(&gc.inline_defs, &gk) catch null
+        if idef != null {
+            // A static inline body is recorded as a GNU inline definition
+            // below; any other body is emitted directly.
+            gc.inline_def_out_of_line = true
+            try gen_function(handle_from_addr(idef))
+            gc.inline_def_out_of_line = false
+            if gen_is_defined(rnid) { continue }
+        }
         gidx u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
         if gidx == 0 { continue }
         gen_mark_defined(rnid)
