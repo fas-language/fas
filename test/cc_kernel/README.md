@@ -20,13 +20,16 @@ writes `FCC_KERNEL_INIT_OK` to ttyS0 and the kernel powers off. The full
 console transcript is saved in `boot.log`.
 
 The CC adapter selects Kbuild's Clang configuration, runs Clang on assembly
-inputs and on `-m16` C in `arch/x86/boot` and `arch/x86/realmode`. All
-other target C goes to fcc, including the x86-64 decompressor. Three
+inputs, on `-m16` C in `arch/x86/boot` and `arch/x86/realmode`, and on
+`-m32` C in `arch/x86/entry/vdso/vdso32`. All other target C goes to fcc,
+including the x86-64 decompressor. The harness reports the count and paths
+of Clang-routed C inputs, retaining the list in `clang-c.tsv` for incremental
+builds. TODO: 32/16-bit x86 codegen in fcc removes this. Three
 Kbuild offset generators expect GNU assembly from `-S`. For those inputs
 the adapter extracts their `.ascii` layout markers from fcc's object
 files. LLVM 22 supplies the link and object utilities for this stage.
 
-The fcc configuration sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
+The fcc tinyconfig sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.
 This Kbuild diagnostic setting does not change which code is built. Both the
 Clang control and the fcc tinyconfig image reach init and power off in QEMU.
@@ -40,5 +43,5 @@ ash shell and poweroff applet. The initramfs boots into the shell, runs a
 command that prints `FCC_KERNEL_SHELL_OK`, and powers off.
 
 Upstream defconfig enables `CONFIG_IA32_EMULATION`, which builds the compat
-vDSO's C files with `-m32`. fcc currently targets x86-64 LP64, so the
-defconfig build stops at `arch/x86/entry/vdso/vdso32/vclock_gettime.o`.
+vDSO's C files with `-m32` through the adapter. The harness uses upstream
+`x86_64_defconfig` without changing its options.

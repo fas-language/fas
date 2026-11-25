@@ -38,6 +38,17 @@ esac
 build=$(realpath -m -- "${KERNEL_BUILD:-$tests/kernel-build/$build_name-$mode}")
 mkdir -p "$build/tmp"
 export TMPDIR=$build/tmp
+if [[ $mode == fcc ]]; then
+    export KERNEL_CLANG_C_LOG=$build/clang-c.tsv
+    touch "$KERNEL_CLANG_C_LOG"
+    report_clang_c() {
+        local -a sources=()
+        mapfile -t sources < <(LC_ALL=C sort -u "$KERNEL_CLANG_C_LOG")
+        printf 'Clang target C fallback in this build tree (%d files)\n' "${#sources[@]}"
+        if (( ${#sources[@]} )); then printf '  %s\n' "${sources[@]}"; fi
+    }
+    trap report_clang_c EXIT
+fi
 sh "$tests/fetch.sh" --projects "${projects[@]}"
 src=$tests/upstream/linux
 kmake() {
@@ -55,7 +66,7 @@ if [[ ! -e $build/.config ]]; then
 fi
 # fcc can emit local inline helpers out of line, so let modpost report
 # their calls into init sections without aborting the boot experiment.
-if [[ $mode == fcc ]] && ! grep -qx 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' "$build/.config"; then
+if [[ $mode == fcc && $profile == tinyconfig ]] && ! grep -qx 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' "$build/.config"; then
     "$src/scripts/config" --file "$build/.config" -e SECTION_MISMATCH_WARN_ONLY
     kmake olddefconfig
 fi

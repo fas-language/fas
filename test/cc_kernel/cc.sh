@@ -15,8 +15,9 @@ args=()
 output=false
 out_path=
 offsets=false
-mode16=false
-setup_c=false
+target=
+setup_c=
+vdso32_c=
 asm_index=-1
 for arg; do
     if $output; then
@@ -27,27 +28,35 @@ for arg; do
     fi
     case "$arg" in
         -o) output=true ;;
-        -m16) mode16=true ;;
+        -m16|-m32|-m64) target=$arg ;;
         -S) asm_index=${#args[@]} ;;
         --target=x86_64-linux-gnu) continue ;; # fcc targets this ABI by default.
-        -mpreferred-stack-boundary=*)
-            # Reject Kbuild's GCC-only probe. Otherwise fcc's warning lets
-            # this GCC flag reach the Clang driver for real-mode .S files.
-            echo "fcc Kbuild adapter: unsupported GCC option $arg" >&2
+        -mpreferred-stack-boundary=*|-fmin-function-alignment=*|-falign-jumps=*|-fzero-init-padding-bits=*)
+            # fcc warns and continues on these options. Fail Kbuild's
+            # capability probes so it does not add them to the shared
+            # flags and pass them to Clang on real-mode and compat inputs.
+            echo "fcc Kbuild adapter: unsupported option $arg" >&2
             exit 1
             ;;
         */arch/x86/kernel/asm-offsets.c|*/kernel/bounds.c|*/scripts/mod/devicetable-offsets.c) offsets=true ;;
-        arch/x86/boot/*.c|*/arch/x86/boot/*.c|arch/x86/realmode/*.c|*/arch/x86/realmode/*.c) setup_c=true ;;
+        arch/x86/boot/*.c|*/arch/x86/boot/*.c|arch/x86/realmode/*.c|*/arch/x86/realmode/*.c) setup_c=$arg ;;
+        arch/x86/entry/vdso/vdso32/*.c|*/arch/x86/entry/vdso/vdso32/*.c) vdso32_c=$arg ;;
         -*) ;;
         *.S|*.s|assembler|assembler-with-cpp) exec "$clang" "$@" ;;
     esac
     args+=("$arg")
 done
 
-# Setup and real-mode C are built as ELF32 with Clang. The compressed
-# kernel's ordinary x86-64 C stays on fcc.
-if $mode16 && $setup_c; then
-    exec "$clang" "$@"
+# TODO: 32/16-bit x86 codegen in fcc removes this.
+if [[ $target == -m16 && -n $setup_c || $target == -m32 && -n $vdso32_c ]]; then
+    if [[ -n ${KERNEL_CLANG_C_LOG:-} ]]; then
+        source=$setup_c
+        if [[ $target == -m32 ]]; then source=$vdso32_c; fi
+        printf '%s\tarch/x86/%s\n' "$target" "${source#*arch/x86/}" >> "$KERNEL_CLANG_C_LOG"
+    fi
+    # Kbuild selected the shared warning flags by probing fcc. Keep Clang
+    # warnings enabled, while allowing flags Clang does not recognize.
+    exec "$clang" "$@" -Wno-unknown-warning-option
 fi
 
 # Kbuild's offset generators put constant layout values in .ascii directives.
