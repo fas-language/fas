@@ -192,31 +192,162 @@ let fold_kernel_calls t =
     in
     path entry (num_blocks f)
   in
+  (* Kernel headers rely on GCC and Clang inlining small always_inline helpers
+     whose constant arguments fold away calls to deliberately undefined
+     functions (bitfield.h's __bad_mask, for example). When the call sites of
+     a small local function disagree on an argument, each constant pattern
+     gets its own clone, named like GCC's constprop clones. *)
+  let clone_limit_insts = 400 and clone_limit_per_function = 32 in
+  let clone_names = Hashtbl.create 32 and clones_of = Hashtbl.create 32 in
+  let taken = Hashtbl.create 64 in
+  iter t (fun f -> Hashtbl.replace taken f.name ());
+  Vec.iter (fun g -> Hashtbl.replace taken g.gname ()) t.modul.globals;
+  let fresh_clone_name name =
+    let rec pick n =
+      let candidate = Printf.sprintf "%s.constprop.%d" name n in
+      if Hashtbl.mem taken candidate then pick (n + 1) else candidate
+    in
+    let candidate = pick 0 in
+    Hashtbl.replace taken candidate ();
+    candidate
+  in
+  (* A parameter whose only use is a store to a private slot that is never
+     read is dead. Direct callers then pass zero, so an argument such as
+     dm.c's &dm_dax_ops given to the !CONFIG_DAX alloc_dax stub no longer
+     keeps the table and the functions it points to alive. *)
+  let dead_params f =
+    let other = Hashtbl.create 32 and stored = Hashtbl.create 8 in
+    let use v = Hashtbl.replace other (resolve f v) () in
+    (* Asm may read argument registers directly, as in a naked function. *)
+    let asm = ref false in
+    Vec.iter (fun (b : block_rec) ->
+      Vec.iter (fun i ->
+        match (inst f i).op with
+        | Store ({ volatile = false; _ }, v, p) when resolve f v <> resolve f p ->
+            Hashtbl.add stored (resolve f v) (resolve f p)
+        | Asm _ as op -> asm := true; iter_op_uses use op
+        | op -> iter_op_uses use op) b.insts;
+      (match b.term with Asm_goto _ -> asm := true | _ -> ());
+      iter_term_uses use b.term) f.blocks;
+    let private_slot a =
+      not (Hashtbl.mem other a) && not (Hashtbl.mem stored a)
+      && (match def_of f a with
+          | Result (i, _) -> (match (inst f i).op with Alloca _ -> true | _ -> false)
+          | _ -> false)
+    in
+    Array.map (fun p ->
+      match ty_of f p with
+      | (Int _ | Ptr _) when not !asm ->
+          let p = resolve f p in
+          not (Hashtbl.mem other p) && List.for_all private_slot (Hashtbl.find_all stored p)
+      | _ -> false) (block f entry).params
+  in
   let rounds = ref 0 and progress = ref true in
-  while !progress && !rounds < 6 do
+  while !progress && !rounds < 12 do
     incr rounds;
     progress := false;
     drop_unused t;
     let incoming = Hashtbl.create 32 and returns = Hashtbl.create 32 in
     let empty = Hashtbl.create 16 and escaped = Hashtbl.create 32 in
+    let cloneable = Hashtbl.create 32 and patterns = Hashtbl.create 32 in
+    let defined = Hashtbl.create 64 and unused = Hashtbl.create 32 in
     let escape name = Hashtbl.replace escaped name () in
     iter t (fun f ->
+      if f.defined then Hashtbl.replace defined f.name ();
       if callable f then begin
         Option.iter (Hashtbl.replace returns f.name) (constant_return f);
-        if empty_return f then Hashtbl.add empty f.name ()
+        if empty_return f then Hashtbl.add empty f.name ();
+        let dead = dead_params f in
+        if Array.exists Fun.id dead then Hashtbl.replace unused f.name dead;
+        if f.linkage = Local && Hashtbl.mem t.modul.discardable f.name
+           && Vec.length f.insts <= clone_limit_insts then
+          Hashtbl.replace cloneable f.name (Array.map (ty_of f) (block f entry).params)
       end;
       if f.defined then function_refs f ~address:escape ~call:(fun name args ->
         let values = Array.map (get_const f) args in
+        if Array.exists Option.is_some values then Hashtbl.replace patterns (name, values) ();
         match Hashtbl.find_opt incoming name with
-        | None -> Hashtbl.add incoming name values
+        | None -> Hashtbl.add incoming name (Array.copy values)
         | Some prev ->
             Array.iteri (fun i c ->
               if i >= Array.length values || c <> values.(i) then prev.(i) <- None) prev));
+    (* A pattern earns a clone when it fixes a parameter that the shared
+       specialization below cannot, because other call sites disagree. *)
+    let wanted = Hashtbl.create 16 in
+    Hashtbl.iter (fun (name, values) () ->
+      match Hashtbl.find_opt cloneable name, Hashtbl.find_opt incoming name with
+      | Some param_tys, Some agreed when not (Hashtbl.mem clone_names (name, values)) ->
+          let useful = ref false in
+          Array.iteri (fun i c ->
+            match c with
+            | Some c when i < Array.length param_tys && param_tys.(i) = const_type c
+                          && (i >= Array.length agreed || agreed.(i) = None)
+                          && not (match Hashtbl.find_opt unused name with
+                                  | Some dead -> i < Array.length dead && dead.(i)
+                                  | None -> false) -> useful := true
+            | _ -> ()) values;
+          let count = Option.value (Hashtbl.find_opt clones_of name) ~default:0 in
+          if !useful && count < clone_limit_per_function then begin
+            Hashtbl.replace clones_of name (count + 1);
+            let clone = fresh_clone_name name in
+            Hashtbl.replace clone_names (name, values) clone;
+            Hashtbl.replace defined clone ();
+            Hashtbl.replace wanted name ((clone, values) :: Option.value (Hashtbl.find_opt wanted name) ~default:[])
+          end
+      | _ -> ()) patterns;
+    let made = ref [] in
     Vec.iter (fun g -> if g.gdefined then global_refs g escape) t.modul.globals;
     Vec.iter (fun a -> escape a.target) t.modul.aliases;
     Vec.iter (fun f -> escape f.resolver) t.modul.ifuncs;
     List.iter (fun asm -> asm_symbols asm escape) t.modul.module_asm;
+    let substitute f values =
+      let replace = Hashtbl.create 8 in
+      Array.iteri (fun i p ->
+        if i < Array.length values then Option.iter (fun c ->
+          let ty = ty_of f p in
+          if ty = const_type c then Hashtbl.add replace p (const f c ty)) values.(i))
+        (block f entry).params;
+      let replace_use v = Option.value (Hashtbl.find_opt replace v) ~default:v in
+      Vec.iter (fun (b : block_rec) ->
+        Vec.iter (fun i -> let ir = inst f i in ir.op <- map_op_uses replace_use ir.op) b.insts;
+        b.term <- map_term_uses replace_use b.term) f.blocks
+    in
     map t (fun f ->
+      (* Clone before this round rewrites f's own calls; the clones' calls
+         are specialized in later rounds. *)
+      List.iter (fun (name, values) ->
+        let copy : func = Marshal.from_string (Marshal.to_string f []) 0 in
+        let copy = { copy with name } in
+        substitute copy values;
+        fold_body copy;
+        made := copy :: !made)
+        (Option.value (Hashtbl.find_opt wanted f.name) ~default:[]);
+      if f.defined then
+        Vec.iter (fun (b : block_rec) -> Vec.iter (fun i ->
+          let ir = inst f i in
+          match ir.op with
+          | Call ({ callee = Direct name; args; _ } as c) ->
+              let zeroed = match Hashtbl.find_opt unused name with
+                | None -> args
+                | Some dead ->
+                    Array.mapi (fun i v ->
+                      match ty_of f v with
+                      | (Int _ | Ptr _) as ty when i < Array.length dead && dead.(i) ->
+                          let zero = const f (Czero ty) ty in
+                          if resolve f v = zero then v else zero
+                      | _ -> v) args
+              in
+              let values = Array.map (get_const f) zeroed in
+              (* drop_unused may have removed a clone made in an earlier round. *)
+              let callee = match Hashtbl.find_opt clone_names (name, values) with
+                | Some clone when Hashtbl.mem defined clone -> Direct clone
+                | _ -> Direct name
+              in
+              if zeroed <> args || callee <> Direct name then begin
+                ir.op <- Call { c with args = zeroed; callee };
+                progress := true
+              end
+          | _ -> ()) b.insts) f.blocks;
       if can_fold pinned f then begin
         let replace = Hashtbl.create 8 in
         if f.linkage = Local && Hashtbl.mem t.modul.discardable f.name && not (Hashtbl.mem escaped f.name) then
@@ -256,7 +387,11 @@ let fold_kernel_calls t =
           fold_body f
         end
       end;
-      f)
+      f);
+    List.iter (fun copy ->
+      add_func t.modul copy;
+      Hashtbl.replace t.modul.discardable copy.name ()) (List.rev !made);
+    if !made <> [] then progress := true
   done;
   drop_unused t
 
