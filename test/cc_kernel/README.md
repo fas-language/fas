@@ -9,7 +9,11 @@ build or `KERNEL_JOBS` to change the parallelism.
 
 The host needs Clang/LLVM 22, GCC (or `KERNEL_HOSTCC`), GNU make, bison,
 flex, bc, Python 3, libelf development files for objtool, and
-`qemu-system-x86_64`. Use `bash test/cc_kernel.sh clang` for a control build
+`qemu-system-x86_64`. Objtool finds libelf through `pkg-config`. When the
+headers are unpacked into a private prefix rather than installed, point
+`PKG_CONFIG_PATH` at its `usr/lib/x86_64-linux-gnu/pkgconfig` and set
+`PKG_CONFIG_SYSROOT_DIR` to the prefix. The runtime `libelf.so.1` must still
+come from the host. Use `bash test/cc_kernel.sh clang` for a control build
 with the same configuration in `cc-tests/kernel-build/tiny-clang`.
 
 The configuration starts from upstream `tinyconfig`. It enables printk,
