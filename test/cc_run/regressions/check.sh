@@ -26,6 +26,7 @@ for file in "$src"/*.c; do
         kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
         no_sse_ms_abi.c|no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
         noreturn_control_flow.c) flags=(-O0 -fstack-protector-all) ;;
+        noreturn_wrappers.c) flags=(-O2 -ffreestanding -fno-pie -no-pie -mno-red-zone -mcmodel=kernel) ;;
         libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
         auto_var_init_zero.c) flags=(-ftrivial-auto-var-init=zero) ;;
@@ -143,6 +144,23 @@ for file in "$src"/*.c; do
             status=0
             "$exe" exit again || status=$?
             [[ $status == 20 ]]
+        done
+    fi
+    if [[ ${file##*/} == noreturn_wrappers.c ]]; then
+        for wrapper in stop_local stop_wrapper still_returns; do
+            objdump --no-show-raw-insn -d --disassemble="$wrapper" "$work/fcc" > "$work/wrapper"
+            awk '
+                $2 == "call" && /<stop_/ {
+                    if ((getline) != 1 || $2 != "ud2") exit 1
+                    count++
+                }
+                END { if (count != 1) exit 1 }
+            ' "$work/wrapper"
+        done
+        for exe in "$work/clang" "$work/fcc"; do
+            status=0
+            "$exe" exit || status=$?
+            [[ $status == 29 ]]
         done
     fi
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then

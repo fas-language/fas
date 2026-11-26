@@ -155,6 +155,10 @@ let fold_kernel_calls t =
     | _ -> assert false
   in
   let callable f = can_fold pinned f && f.linkage <> Weak in
+  let never_returns f =
+    Vec.fold (fun never (b : block_rec) ->
+      never && match b.term with Ret _ -> false | _ -> true) true f.blocks
+  in
   let constant_return f =
     let result = ref None and disagree = ref false in
     Vec.iter (fun (b : block_rec) ->
@@ -248,6 +252,7 @@ let fold_kernel_calls t =
     progress := false;
     drop_unused t;
     let incoming = Hashtbl.create 32 and returns = Hashtbl.create 32 in
+    let noreturn = Hashtbl.create 16 in
     let empty = Hashtbl.create 16 and escaped = Hashtbl.create 32 in
     let cloneable = Hashtbl.create 32 and patterns = Hashtbl.create 32 in
     let defined = Hashtbl.create 64 and unused = Hashtbl.create 32 in
@@ -255,6 +260,7 @@ let fold_kernel_calls t =
     iter t (fun f ->
       if f.defined then Hashtbl.replace defined f.name ();
       if callable f then begin
+        if f.linkage = Local && never_returns f then Hashtbl.replace noreturn f.name ();
         Option.iter (Hashtbl.replace returns f.name) (constant_return f);
         if empty_return f then Hashtbl.add empty f.name ();
         let dead = dead_params f in
@@ -349,6 +355,32 @@ let fold_kernel_calls t =
               end
           | _ -> ()) b.insts) f.blocks;
       if can_fold pinned f then begin
+        (* Propagate a proven non-returning local definition into its
+           callers, including wrappers that have no explicit annotation. *)
+        let terminated = ref false in
+        Vec.iter (fun (b : block_rec) ->
+          let rec search index =
+            if index < Vec.length b.insts then
+              let ir = inst f (Vec.get b.insts index) in
+              match ir.op with
+              | Call ({ callee = Direct name; attrs; _ } as c)
+                when not (has attrs a_noreturn) && Hashtbl.mem noreturn name ->
+                  ir.op <- Call { c with attrs = attrs lor a_noreturn };
+                  if index + 1 < Vec.length b.insts then begin
+                    let kept = Vec.create ~capacity:(index + 1) 0 in
+                    for i = 0 to index do ignore (Vec.push kept (Vec.get b.insts i)) done;
+                    b.insts <- kept
+                  end;
+                  b.term <- Unreachable;
+                  b.term_loc <- ir.loc;
+                  terminated := true
+              | _ -> search (index + 1)
+          in
+          search 0) f.blocks;
+        if !terminated then begin
+          progress := true;
+          ignore (remove_unreachable_blocks f)
+        end;
         let replace = Hashtbl.create 8 in
         if f.linkage = Local && Hashtbl.mem t.modul.discardable f.name && not (Hashtbl.mem escaped f.name) then
           Option.iter (fun args ->
