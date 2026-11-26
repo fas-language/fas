@@ -53,3 +53,36 @@ command that prints `FCC_KERNEL_SHELL_OK`, and powers off.
 Upstream defconfig enables `CONFIG_IA32_EMULATION`, which builds the compat
 vDSO's C files with `-m32` through the adapter. The harness uses upstream
 `x86_64_defconfig` without changing its options.
+
+### Defconfig compiler and linker baseline
+
+The Linux 6.12.119 baseline used `KERNEL_LD=fas`. The counts below come
+from the defconfig boot transcript, the build directory's `clang-c.tsv`,
+and Kbuild's saved `.cmd` commands. C counts are distinct source paths.
+Link counts cover build outputs and exclude tool-version and feature probes.
+
+| Tool path | Count | Inputs or outputs |
+| --- | ---: | --- |
+| Clang `-m16` C | 20 | `arch/x86/boot/*.c` |
+| Clang `-m16` C | 6 | `arch/x86/realmode/rm/*.c` |
+| Clang `-m32` C | 2 | Compat vDSO `vclock_gettime.c` and `vgetcpu.c` |
+| Clang assembly | 56 | 39 x86-64, 11 real-mode, 3 compat i386, and 3 generated x86-64 kallsyms objects |
+| Clang linker-script preprocessing | 5 | Main kernel, decompressor, real mode, and the two vDSOs (`.lds.S` sources) |
+| `ld.lld` i386 | 3 | `arch/x86/boot/setup.elf`, `arch/x86/realmode/rm/realmode.elf`, `arch/x86/entry/vdso/vdso32.so.dbg` |
+| `ld.lld` x86-64 | 4 | Two preliminary kallsyms links, `arch/x86/boot/compressed/vmlinux` (scripted PIE), and `arch/x86/entry/vdso/vdso64.so.dbg` (scripted shared link) |
+| `fas-ld` x86-64 | 2 | Relocatable `vmlinux.o` and the final scripted `vmlinux` |
+| `ld.lld` via Kbuild `HOSTLD` | 3 | Objtool, its x86 backend, and libsubcmd intermediate `-r` links |
+
+The CC version probe uses Clang's predefined macros. The LD version and
+capability probes also use `ld.lld`. The three C offset generators go through
+fcc. `arch/x86/tools/relocs` is a GCC-built host executable linked from
+three objects. Kbuild runs it three times, once for `realmode.elf` and twice
+for `vmlinux` (extraction and absolute-relocation checks). `llvm-objcopy-22`
+extracts `setup.bin`, `realmode.bin`, and the kernel payload, and strips the
+vDSOs. Kbuild's host `arch/x86/boot/tools/build` combines setup and the
+compressed payload into `bzImage`.
+
+The boot harness also uses Clang for one host executable (`gen_init_cpio`)
+and for the BusyBox initramfs (149 saved compiler commands and the
+`busybox_unstripped` driver link). Those builds run outside the kernel CC
+and LD adapters.
