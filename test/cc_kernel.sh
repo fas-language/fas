@@ -51,7 +51,7 @@ if [[ $mode == fcc ]]; then
 fi
 sh "$tests/fetch.sh" --projects "${projects[@]}"
 src=$tests/upstream/linux
-# KERNEL_LD=fas links vmlinux.o with fas-ld (test/cc_kernel/ld.sh).
+# KERNEL_LD=fas links vmlinux.o and the final vmlinux with fas-ld.
 linker=()
 case "${KERNEL_LD:-lld}" in
     lld) ;;

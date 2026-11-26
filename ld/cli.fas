@@ -580,6 +580,10 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
         } else if is(a, c"-e") || is(a, c"--entry") {
             c.entry = try take_value(p, a)
             c.entry_set = true
+        } else if is(a, c"-Ttext") || is(a, c"-Tdata") || is(a, c"-Tbss") ||
+            bytes_prefix(a, c"-Ttext=") || bytes_prefix(a, c"-Ttext-segment") ||
+            bytes_prefix(a, c"-Tdata=") || bytes_prefix(a, c"-Tbss=") {
+            try refuse(c"command-line section start addresses")
         } else if is(a, c"-T") || is(a, c"--script") || bytes_prefix(a, c"--script=") || bytes_prefix(a, c"-T") {
             if c.has_script { try refuse(c"multiple executable linker scripts") }
             c.has_script = true

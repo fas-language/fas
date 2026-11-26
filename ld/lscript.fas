@@ -23,6 +23,7 @@ struct LsExpr {
     right u64
     number u64
     at u64
+    height u64
 }
 
 struct LsValue {
@@ -46,6 +47,7 @@ struct LsCmd {
     arg u64                // expression, or section index
     id u64                 // script symbol, zero for dot
     increment bool
+    provide_active bool
     patterns Vec[LsPattern]
     inputs Vec[u64]        // packed (object, section)
     at u64
@@ -63,9 +65,11 @@ struct LsSection {
     align_expr u64
     body Vec[u64]
     phdrs Vec[u64]
+    phdr_source u64
     discard bool
     info bool
     used bool
+    mentioned bool
     keep bool
     count u64
     first_file u64
@@ -267,6 +271,7 @@ fn ls_expr_node(kind u8, at u64) u64 {
     e handle[LsExpr] = vec_add(&ld.lscript.exprs)
     e.kind = kind
     e.at = at
+    e.height = 1
     return ld.lscript.exprs.n
 }
 
@@ -275,6 +280,14 @@ fn ls_cmd(i u64) handle[LsCmd] { return vec_at(&ld.lscript.cmds, i - 1) }
 fn ls_sec(i u64) handle[LsSection] { return vec_at(&ld.lscript.sections, i - 1) }
 fn ls_phdr(i u64) handle[LsPhdr] { return vec_at(&ld.lscript.phdrs, i - 1) }
 fn ls_sym(i u64) handle[LsSymbol] { return vec_at(&ld.lscript.syms, i - 1) }
+
+fn ls_children(e handle[LsExpr], left u64, right u64) void fails {
+    e.left = left
+    e.right = right
+    if left != 0 { e.height = ls_expr(left).height + 1 }
+    if right != 0 { e.height = umax(e.height, ls_expr(right).height + 1) }
+    if e.height > 128 { try ls_exception(e.at, c"expression nesting limit", bytes_empty(), true) }
+}
 
 fn ls_prec(l handle[LsLex]) u64 {
     if ls_is(l, c"*") || ls_is(l, c"/") || ls_is(l, c"%") { return 11 }
@@ -302,7 +315,7 @@ fn ls_atom(l handle[LsLex]) u64 fails {
         try ls_next(l)
         rhs u64 = try ls_expression(l, 12)
         i u64 = ls_expr_node(LS_UNARY, at)
-        ls_expr(i).left = rhs
+        try ls_children(ls_expr(i), rhs, 0)
         ls_expr(i).text = op
         return i
     }
@@ -342,8 +355,7 @@ fn ls_atom(l handle[LsLex]) u64 fails {
     try ls_expect(l, c")")
     i u64 = ls_expr_node(kind, at)
     e handle[LsExpr] = ls_expr(i)
-    e.left = left
-    e.right = right
+    try ls_children(e, left, right)
     e.text = detail
     return i
 }
@@ -360,8 +372,7 @@ fn ls_expression(l handle[LsLex], min_prec u64) u64 fails {
         right u64 = try ls_expression(l, prec + 1)
         i u64 = ls_expr_node(LS_BINARY, at)
         e handle[LsExpr] = ls_expr(i)
-        e.left = left
-        e.right = right
+        try ls_children(e, left, right)
         e.text = op
         left = i
         prec = ls_prec(l)
@@ -385,8 +396,12 @@ fn ls_assignment(l handle[LsLex], name Bytes, kind u8, at u64) u64 fails {
     c.name = name
     c.arg = try ls_expression(l, 2)
     c.increment = increment
-    if kind == LS_PROVIDE { try ls_expect(l, c")") }
-    try ls_expect(l, c";")
+    if kind == LS_PROVIDE {
+        try ls_expect(l, c")")
+        try ls_take(l, c";")
+    } else {
+        try ls_expect(l, c";")
+    }
     return i
 }
 
@@ -644,6 +659,7 @@ fn ls_mark_refs(i u64) void fails {
     if e.kind == LS_ADDR || e.kind == LS_SIZE {
         s u64 = ls_lookup(&ld.lscript.section_names, e.text)
         if s == 0 { try ls_exception(e.at, c"unknown output section ", e.text, false) }
+        ls_sec(s).mentioned = true
         if e.kind == LS_ADDR { ls_sec(s).used = true }
         e.number = s
     }
@@ -668,7 +684,12 @@ fn ls_resolve_symbols() void fails {
             map_put(&sc.symbol_names, cmd.name, trunc[u32](id))
         }
         cmd.id = id
-        if cmd.kind == LS_ASSIGN { ls_sym(id).synth = NONE64 }
+        if cmd.kind == LS_ASSIGN {
+            if cmd.increment && ls_sym(id).synth == 0 {
+                try ls_exception(cmd.at, c"symbol += requires an earlier script assignment to ", cmd.name, true)
+            }
+            ls_sym(id).synth = NONE64
+        }
     }
     for i u64 in 1..sc.cmds.n + 1 {
         cmd handle[LsCmd] = ls_cmd(i)
@@ -687,26 +708,15 @@ fn ls_resolve_symbols() void fails {
         activated = false
         for i u64 in 1..sc.cmds.n + 1 {
             cmd handle[LsCmd] = ls_cmd(i)
-            if cmd.kind != LS_PROVIDE || cmd.id == 0 { continue }
+            if cmd.kind != LS_PROVIDE { continue }
             s handle[LsSymbol] = ls_sym(cmd.id)
+            if s.synth != 0 { continue }
             g u32 = find(s.name)
-            if s.synth == 0 && (s.refs || g != NONE) && (g == NONE || gsym(g).def_kind == DEF_NONE) {
+            if (s.refs || g != NONE) && (g == NONE || gsym(g).def_kind == DEF_NONE) {
                 s.synth = NONE64
+                cmd.provide_active = true
                 try ls_mark_refs(cmd.arg)
                 activated = true
-            } else {
-                cmd.id = 0
-            }
-        }
-        // A forward reference may have activated a name later in this scan.
-        // Recheck still-pending PROVIDEs on the next pass.
-        if activated {
-            for i u64 in 1..sc.cmds.n + 1 {
-                cmd handle[LsCmd] = ls_cmd(i)
-                if cmd.kind == LS_PROVIDE && cmd.id == 0 {
-                    id u64 = ls_lookup(&sc.symbol_names, cmd.name)
-                    if ls_sym(id).synth == 0 { cmd.id = id }
-                }
             }
         }
     }
@@ -797,7 +807,9 @@ fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
             k u64 = pk_sec(x)
             p handle[Place] = place(f, k)
             if p.valid != 0 || !kept(f, k) { continue }
-            if !ls_match(pat.name, sec(obj(f), k).name) { continue }
+            name Bytes = sec(obj(f), k).name
+            if !s.discard && bytes_is(name, c".note.GNU-stack") { continue }
+            if !ls_match(pat.name, name) { continue }
             if s.discard {
                 lx(f).kept[u8, k] = 0
             } else {
@@ -856,7 +868,7 @@ fn ls_match_inputs() void fails {
             c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
             if c.kind == LS_INPUT {
                 ls_select(s, i, c)
-            } else if c.kind != LS_PROVIDE || c.id != 0 {
+            } else if c.kind != LS_PROVIDE || c.provide_active {
                 s.keep = true
             }
         }
@@ -871,10 +883,8 @@ fn ls_match_inputs() void fails {
         if (s.flags & 2) != 0 {
             if s.phdrs.n != 0 {
                 def_section = i
-            } else if def_section != 0 {
-                source handle[LsSection] = ls_sec(def_section)
-                mem_copy(&s.phdrs, &source.phdrs, sizeof[Vec[u64]])
             }
+            s.phdr_source = def_section
         }
         s.input_align = s.alignment
         if s.keep { inherited = s.flags }
@@ -1058,12 +1068,15 @@ fn ls_eval_number(i u64) u64 fails {
 }
 
 fn ls_assign(c handle[LsCmd], in_section bool) void fails {
-    if c.kind == LS_PROVIDE && c.id == 0 { return }
+    if c.kind == LS_PROVIDE && !c.provide_active { return }
     v LsValue = {}
     try ls_eval(c.arg, &v)
     if c.kind == LS_CHECK { return }
     sc handle[Lscript] = &ld.lscript
     n u64 = ls_value(&v)
+    if c.increment && !ls_abs(&v) && sc.final_pass {
+        try ls_exception(c.at, c"relative right hand side of += for ", c.name, false)
+    }
     if c.id == 0 {
         if c.increment { n += sc.dot }
         if in_section && n < sc.dot {
@@ -1074,9 +1087,6 @@ fn ls_assign(c handle[LsCmd], in_section bool) void fails {
     } else {
         s handle[LsSymbol] = ls_sym(c.id)
         if c.increment {
-            if !ls_abs(&v) && sc.final_pass {
-                try ls_exception(c.at, c"relative right hand side of += for ", c.name, false)
-            }
             old handle[LsValue] = &s.value
             n += ls_value(old)
             v.sec = old.sec

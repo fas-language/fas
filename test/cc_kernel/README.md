@@ -33,9 +33,9 @@ Kbuild offset generators expect GNU assembly from `-S`. For those inputs
 the adapter extracts their `.ascii` layout markers from fcc's object
 files. LLVM 22 supplies the link and object utilities for this stage.
 With `KERNEL_LD=fas`, the LD adapter `test/cc_kernel/ld.sh` sends relocatable
-(`-r`) links, which build `vmlinux.o`, to fas-ld (`FCC_LD`). All other links
-still go to ld.lld until fas-ld supports the kernel's linker scripts. Each
-link routed to fas-ld is listed in `fas-ld.tsv` in the build directory.
+(`-r`) links and the final x86-64 `vmlinux` link to fas-ld (`FCC_LD`).
+Kbuild uses ld.lld for kallsyms passes and auxiliary images. The build
+directory's `fas-ld.tsv` lists each fas-ld invocation.
 
 The fcc tinyconfig sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.

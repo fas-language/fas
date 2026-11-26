@@ -24,7 +24,6 @@ struct LsImage {
     symbols Vec[LsOutSym]
     local_end u64
     strtab Buf
-    names BytesU32Map
     shstrtab Buf
     section_names addr      // u32 per script section
     symtab_name u64
@@ -69,7 +68,10 @@ fn ls_make_phdrs() void fails {
         s handle[LsSection] = ls_sec(i)
         if !s.keep || (s.flags & 2) == 0 { continue }
         if sc.explicit_phdrs {
-            for j u64 in 0..s.phdrs.n { try ls_add_to_phdr(i, vec_get(&s.phdrs, j)) }
+            if s.phdr_source != 0 {
+                source handle[LsSection] = ls_sec(s.phdr_source)
+                for j u64 in 0..source.phdrs.n { try ls_add_to_phdr(i, vec_get(&source.phdrs, j)) }
+            }
             if s.load == 0 && s.size != 0 { try refuse(c"allocatable section outside a PT_LOAD segment") }
         } else {
             new_load bool = true
@@ -108,6 +110,7 @@ fn ls_make_phdrs() void fails {
         p handle[LsPhdr] = vec_add(&sc.phdrs)
         p.kind = 0x6474e551
         p.flags = 6
+        p.alignment = 0
     }
 }
 
@@ -256,13 +259,9 @@ fn ls_sym_section(f u64, i u64) u64 {
 
 fn ls_add_sym(im handle[LsImage], f u64, i u64, binding u8, vis u8) void fails {
     y handle[Sym] = sym(obj(f), i)
-    name Bytes = y.name
-    offset u64 = ls_lookup(&im.names, name)
-    if offset == 0 && name.n != 0 {
-        n u32 = try add_string(&im.strtab, name)
-        map_put(&im.names, name, n)
-        offset = zext[u64](n)
-    }
+    offset u64 = 0
+    // Keep each symbol's name as a separate string, as ld.lld does.
+    if y.name.n != 0 { offset = zext[u64](try add_string(&im.strtab, y.name)) }
     o handle[LsOutSym] = vec_add(&im.symbols)
     o.file = f
     o.symbol = i
@@ -380,6 +379,35 @@ fn ls_emit_relas(im handle[LsImage]) void {
     }
 }
 
+// Support the kernel's metadata placeholders at the tail of SECTIONS.
+fn ls_explicit_metadata() bool fails {
+    names handle[BytesU32Map] = &ld.lscript.section_names
+    symtab u64 = ls_lookup(names, bytes_c(c".symtab"))
+    strtab u64 = ls_lookup(names, bytes_c(c".strtab"))
+    shstrtab u64 = ls_lookup(names, bytes_c(c".shstrtab"))
+    if symtab == 0 && strtab == 0 && shstrtab == 0 { return false }
+    if symtab == 0 || symtab >= strtab || strtab >= shstrtab {
+        try refuse(c"scripted metadata requires .symtab, .strtab, .shstrtab in order")
+    }
+    for i u64 in symtab..ld.lscript.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        if s.keep { try refuse(c"scripted metadata must follow all content sections") }
+        if i != symtab && i != strtab && i != shstrtab { continue }
+        if s.addr_expr == 0 || s.align_expr != 0 || s.lma_expr != 0 || s.info ||
+            s.mentioned || s.phdrs.n != 0 || s.fill_bytes != 0 || s.body.n != 1 {
+            try refuse(c"unsupported scripted metadata section attributes")
+        }
+        e handle[LsExpr] = ls_expr(s.addr_expr)
+        c handle[LsCmd] = ls_cmd(vec_get(&s.body, 0))
+        if e.kind != LS_NUMBER || e.number != 0 || c.kind != LS_INPUT || c.patterns.n != 1 {
+            try refuse(c"unsupported scripted metadata section body")
+        }
+        p handle[LsPattern] = vec_at(&c.patterns, 0)
+        if p.sorted || !bytes_eq(p.name, s.name) { try refuse(c"unsupported scripted metadata section pattern") }
+    }
+    return true
+}
+
 fn ls_image_layout(im handle[LsImage]) void fails {
     sc handle[Lscript] = &ld.lscript
     im.section_names = heap_alloc_zeroed((sc.sections.n + 1) * 4)
@@ -400,7 +428,7 @@ fn ls_image_layout(im handle[LsImage]) void fails {
     after_symtab u64 = try out_add(im.symtab_offset, im.symtab_size)
     // The kernel explicitly places .strtab before .shstrtab. With neither
     // mentioned, follow the default metadata order used by ld.lld.
-    explicit_strtab bool = ls_lookup(&sc.section_names, bytes_c(c".strtab")) != 0
+    explicit_strtab bool = try ls_explicit_metadata()
     if explicit_strtab {
         im.strtab_name = zext[u64](try add_string(&im.shstrtab, bytes_c(c".strtab")))
         im.shstrtab_name = zext[u64](try add_string(&im.shstrtab, bytes_c(c".shstrtab")))
