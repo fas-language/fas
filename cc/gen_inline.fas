@@ -139,7 +139,9 @@ fn gen_register_inline(node handle[Ast]) void fails {
             pm = pm.next
         }
         if def.refuse == null {
-            budget U64Key = {32}
+            // The count includes both branch arms and the syntax of each
+            // asm operand. Keep small arithmetic and asm helpers eligible.
+            budget U64Key = {96}
             def.refuse = gen_inline_blocker(node.a, def, &budget, !required)
         }
     }

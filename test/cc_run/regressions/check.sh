@@ -92,6 +92,13 @@ for file in "$src"/*.c; do
         grep -Eq '[[:space:]]stac$' "$work/smap"
         grep -Eq '[[:space:]]clac$' "$work/smap"
         [[ $(awk '$2 ~ /^j[a-z]+$/ && $2 != "jmp" { n++ } END { print n+0 }' "$work/smap") == 1 ]]
+        objdump --no-show-raw-insn -d --disassemble=smap_range "$work/smap.o" > "$work/smap"
+        grep -Eq '[[:space:]]stac$' "$work/smap"
+        grep -Eq '[[:space:]]clac$' "$work/smap"
+        if grep -Eq '[[:space:]]callq?[[:space:]]' "$work/smap"; then
+            echo "an out-of-line range check runs with user access enabled" >&2
+            exit 1
+        fi
     fi
     if [[ ${file##*/} == inline_known_callee.c ]]; then
         "$FCC" -O2 --emit-fir "$file" -o "$work/callees.fir"
