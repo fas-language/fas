@@ -643,7 +643,7 @@ fn abi_emit_fir_abi_ty(b handle[Buf], tid u32) void {
     }
     if k == TYK_SHORT { buf_str(b, c"sext i16"); return }
     if k == TYK_USHORT { buf_str(b, c"zext i16"); return }
-    if k == TYK_INT || k == TYK_UINT { buf_str(b, c"i32"); return }
+    if k == TYK_INT || k == TYK_UINT || (tc.ilp32 && (k == TYK_LONG || k == TYK_ULONG)) { buf_str(b, c"i32"); return }
     if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG {
         buf_str(b, c"i64")
         return

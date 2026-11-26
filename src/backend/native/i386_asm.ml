@@ -10,7 +10,9 @@ let refuse fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
 type location =
   | Reg of int * int
+  | Pair
   | Mem of int * int
+  | Stack of int
   | Imm of int64
   | Sym of string * int64
   | Flag of string
@@ -41,7 +43,7 @@ let render ~intel ~locations pieces =
   let bare = function Some ('c' | 'p' | 'P' | 'a') -> true | _ -> false in
   let reg r = pre ^ reg_name r 32 in
   let mem r extra =
-    if intel then Printf.sprintf "[%s%s]" (reg r) (if extra = 0 then "" else Printf.sprintf "+%d" extra)
+    if intel then Printf.sprintf "[%s%s]" (reg r) (if extra = 0 then "" else Printf.sprintf "%+d" extra)
     else Printf.sprintf "%s(%s)" (if extra = 0 then "" else string_of_int extra) (reg r)
   in
   let suffix = function
@@ -50,6 +52,17 @@ let render ~intel ~locations pieces =
   in
   let operand modifier = function
     | Flag _ -> refuse "asm template references a flag output"
+    | Pair ->
+        (match modifier with
+         | Some 'k' -> pre ^ "eax"
+         | _ -> refuse "an i386 EDX:EAX pair has no single register name")
+    | Stack disp ->
+        (match modifier with
+         | Some 'z' -> suffix 64
+         | Some 'H' -> mem 5 (disp + 8)
+         | Some 'a' -> mem 5 disp
+         | None -> (if intel then "QWORD PTR " else "") ^ mem 5 disp
+         | Some c -> refuse "asm stack modifier %%%c" c)
     | Reg (r, _) when modifier = Some 'a' -> mem r 0
     | Reg (r, bits) ->
         let bits = match modifier with Some 'k' -> 32 | Some 'w' -> 16 | Some ('b' | 'h') -> 8 | _ -> bits in
@@ -83,11 +96,12 @@ let render ~intel ~locations pieces =
 
 type plan = {
   source : string;
-  loads : (int * value) list;
+  loads : (int * value * bool) list;
+  stores : (int * value) list;
   outputs : location list;
 }
 
-let plan f ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
+let plan f ~result_slot ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   let intel = has aflags asm_intel in
   let spelling (a : asm_operand) = (a.aname, a.acon) in
   let statement =
@@ -111,6 +125,10 @@ let plan f ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
     else
       let bits = register_size operands.(i).aty in
       List.filter (fun r -> (bits <> 8 || r < 4) && List.mem regs.(r) c.A.regs) gprs
+  in
+  let pair i =
+    operands.(i).aty = Int 64 &&
+    List.mem (List.hd (String.split_on_char ',' operands.(i).acon)) ["A"; "=A"; "+A"; "=&A"; "+&A"]
   in
   let location i = Option.get locations.(i) in
   let reserved_output i owner =
@@ -146,6 +164,25 @@ let plan f ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
          | Some (Csym (s, n)) when c.sym -> locations.(i) <- Some (Sym (s, n))
          | _ -> ())
     | _ -> ()) cons;
+  (* GNU's i386 A constraint names EDX:EAX for a 64-bit operand. A
+     memory alternative for a wide output can use its own result slot. *)
+  let result = ref 0 in
+  Array.iteri (fun i c ->
+    if i < nouts && A.output_is_result c then begin
+      if operands.(i).aty = Int 64 && c.A.mem && not (pair i) then
+        locations.(i) <- Some (Stack (result_slot !result));
+      incr result
+    end;
+    if pair i then begin
+      let own r =
+        if List.mem r blocked ||
+           not (match owners.(r) with [] -> true | [o] -> reserved_output i o | _ -> false)
+        then refuse "EDX:EAX is occupied by another asm operand";
+        owners.(r) <- i :: owners.(r)
+      in
+      own 0; own 2;
+      locations.(i) <- Some Pair
+    end) cons;
   let assign fixed i c =
     if locations.(i) = None && c.A.tied = None then begin
       let choices = allowed i c in
@@ -156,19 +193,24 @@ let plan f ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   Array.iteri (assign true) cons;
   Array.iteri (assign false) cons;
   Array.iteri (fun i c -> Option.iter (fun o -> locations.(i) <- Some (location o)) c.A.tied) cons;
-  let loads = ref [] in
+  let loads = ref [] and stores = ref [] in
+  let load r v high =
+    match List.assoc_opt r !loads with
+    | None -> loads := (r, (v, high)) :: !loads
+    | Some w when w = (v, high) -> ()
+    | Some _ -> refuse "asm inputs require different values in %s" regs.(r)
+  in
   Array.iteri (fun i v ->
     match location i, v with
-    | (Reg (r, _) | Mem (r, _)), Some value ->
-        (match List.assoc_opt r !loads with
-         | None -> loads := (r, value) :: !loads
-         | Some v when v = value -> ()
-         | Some _ -> refuse "asm inputs require different values in %s" regs.(r))
+    | (Reg (r, _) | Mem (r, _)), Some value -> load r value false
+    | Pair, Some value -> load 0 value false; load 2 value true
+    | Stack disp, Some value -> stores := (disp, value) :: !stores
     | _ -> ()) args;
+  let loads = List.rev_map (fun (r, (v, high)) -> (r, v, high)) !loads in
   let outputs = Array.to_list (Array.sub (Array.map Option.get locations) 0 nouts)
     |> List.filter (function Mem _ -> false | _ -> true) in
   let source = render ~intel ~locations:(Array.map Option.get locations) statement.pieces in
-  { source = (if intel then ".intel_syntax noprefix\n" else "") ^ source; loads = List.rev !loads; outputs }
+  { source = (if intel then ".intel_syntax noprefix\n" else "") ^ source; loads; stores = List.rev !stores; outputs }
 
 type relocation = {
   at : int;

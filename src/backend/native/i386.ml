@@ -42,7 +42,7 @@ type emitter = {
   anchor : section -> int -> string;
   extra : string -> int -> bool -> int -> section;
   section : section;
-  jumps : (int * int option ref) list ref;
+  jumps : (int * int * int option ref) list ref;
 }
 
 let raw b n = Buffer.add_char b (Char.chr (n land 255))
@@ -92,36 +92,71 @@ let mem e reg base disp =
     imm e disp
   end
 
+let frame16 e base disp = e.real && base = ebp && disp >= -32768 && disp <= 32767
+
+let memory_prefix e base disp =
+  if not (frame16 e base disp) then addr32 e
+
+let memory_operand e reg base disp =
+  if frame16 e base disp then begin
+    if disp >= -128 && disp <= 127 then begin
+      modrm e 1 reg 6; byte e disp
+    end else begin
+      modrm e 2 reg 6; Buffer.add_int16_le e.section.bytes disp
+    end
+  end else mem e reg base disp
+
 let read e size dst base disp =
   if size <> 1 && size <> 2 && size <> 4 then invalid_arg "i386 read";
-  addr32 e; op32 e;
+  memory_prefix e base disp; op32 e;
   if size = 4 then byte e 0x8b else begin
     byte e 0x0f; byte e (if size = 1 then 0xb6 else 0xb7)
   end;
-  mem e dst base disp
+  memory_operand e dst base disp
 
 let write e size base disp src =
   if size <> 1 && size <> 2 && size <> 4 then invalid_arg "i386 write";
   if size = 1 && src > ebx then invalid_arg "i386 byte register";
-  addr32 e;
+  memory_prefix e base disp;
   if (size = 4 && e.real) || (size = 2 && not e.real) then byte e 0x66;
   byte e (if size = 1 then 0x88 else 0x89);
-  mem e src base disp
+  memory_operand e src base disp
 
 let lea e dst base disp =
   addr32 e; op32 e; byte e 0x8d; mem e dst base disp
+
+let address_scaled e ~index ~scale ~disp =
+  (* EAX is both the base and the result. ECX is a four-byte index. *)
+  addr32 e; op32 e; byte e 0x8d;
+  let mode = if disp = 0 then 0 else if disp >= -128 && disp <= 127 then 1 else 2 in
+  modrm e mode eax esp;
+  byte e ((scale lsl 6) lor (index lsl 3) lor eax);
+  if mode = 1 then byte e disp else if mode = 2 then imm e disp
 
 let field32 e sym kind addend =
   e.reloc e.section (pos e) sym kind addend;
   imm e 0
 
-let relative e label =
-  e.jumps := (pos e, label) :: !(e.jumps);
-  imm e 0
+let relative e width label =
+  e.jumps := (pos e, width, label) :: !(e.jumps);
+  for _ = 1 to width do byte e 0 done
 
-let jmp e label = op32 e; byte e 0xe9; relative e label
-let jcc e cc label = op32 e; byte e 0x0f; byte e (0x80 + cc); relative e label
-let call_near e label = op32 e; byte e 0xe8; relative e label
+let short_branch e label =
+  match !label with
+  | Some at -> let delta = at - pos e - 2 in delta >= -128 && delta <= 127
+  | None -> false
+
+let jmp e label =
+  if short_branch e label then begin byte e 0xeb; relative e 1 label end
+  else begin byte e 0xe9; relative e (if e.real then 2 else 4) label end
+
+let jcc e cc label =
+  if short_branch e label then begin byte e (0x70 + cc); relative e 1 label end
+  else begin
+    byte e 0x0f; byte e (0x80 + cc); relative e (if e.real then 2 else 4) label
+  end
+
+let call_near e label = op32 e; byte e 0xe8; relative e 4 label
 let here e label = label := Some (pos e)
 let cmp e x y = rr e 0x39 x y
 let test e x = rr e 0x85 x x
@@ -188,6 +223,7 @@ type frame = {
   got_at : int;
   reg_thunk : int option ref;
   uses_thunk : bool ref;
+  return_at : int option ref;
 }
 
 let bits g v = width (Vec.get g.f.tys v)
@@ -376,7 +412,8 @@ let wide_divide g kind flags =
   rr e 0x19 ebx edi;
   alu e 1 eax 1;
   here e next;
-  addr32 e; op32 e; byte e 0xff; mem e 1 ebp counter;
+  memory_prefix e ebp counter;
+  op32 e; byte e 0xff; memory_operand e 1 ebp counter;
   jcc e 5 loop;
   if remainder then begin mov e eax esi; mov e edx ebx end;
   if signed then begin
@@ -404,11 +441,41 @@ let divide g kind flags n =
   muldiv e (if signed then 7 else 6) ecx;
   if kind = Urem || kind = Srem then mov e eax edx
 
+let arithmetic_encoding = function
+  | Add -> Some (0, 0x03)
+  | Or -> Some (1, 0x0b)
+  | And -> Some (4, 0x23)
+  | Sub -> Some (5, 0x2b)
+  | Xor -> Some (6, 0x33)
+  | _ -> None
+
+let bit_constant f v =
+  match const_of f v with
+  | Some (Cint (_, [| n |])) -> Some n
+  | Some (Czero _) -> Some 0L
+  | _ -> None
+
+let arithmetic g ext code rhs =
+  let e = g.e in
+  match bit_constant g.f rhs with
+  | Some n -> alu e ext eax (Int32.to_int (Int64.to_int32 n))
+  | None ->
+      let slot = offset g rhs in
+      if slot <> 0 then begin
+        memory_prefix e ebp slot; op32 e; byte e code; memory_operand e eax ebp slot
+      end else begin
+        get g ecx rhs; op32 e; byte e code; modrm e 3 eax ecx
+      end
+
 let integer_binary g kind flags x y =
   let e = g.e and n = bits g x in
-  pair g x; get g ecx y;
-  if n > 32 then get g ~high:true edi y;
-  match kind with
+  pair g x;
+  match (if n <= 32 then arithmetic_encoding kind else None) with
+  | Some (ext, code) -> arithmetic g ext code y
+  | None ->
+    get g ecx y;
+    if n > 32 then get g ~high:true edi y;
+    match kind with
   | Add -> rr e 0x01 eax ecx; if n > 32 then rr e 0x11 edx edi
   | Sub -> rr e 0x29 eax ecx; if n > 32 then rr e 0x19 edx edi
   | Mul when n <= 32 -> imul e eax ecx
@@ -513,9 +580,11 @@ let copy_bytes e kind =
 let inline_asm g results ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   let e = g.e in
   let module A = I386_asm in
-  let p = A.plan g.f ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers in
+  let p = A.plan g.f ~result_slot:(fun i -> offset g results.(i))
+      ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers in
   let snippet = A.assemble ~real:e.real p.source in
-  List.iter (fun (reg, value) -> get g reg value) p.loads;
+  List.iter (fun (slot, value) -> copy_value g slot value) p.stores;
+  List.iter (fun (reg, value, high) -> get g ~high reg value) p.loads;
   let parts = Hashtbl.create 4 in
   let splice s (part : A.part) =
     let at = Buffer.length s.bytes in
@@ -538,9 +607,13 @@ let inline_asm g results ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   let assigned = List.combine (Array.to_list results) p.outputs in
   List.iter (function
     | (v, A.Reg (reg, _)) -> write e 4 ebp (offset g v) reg
+    | (v, A.Pair) ->
+        write e 4 ebp (offset g v) eax; write e 4 ebp (offset g v + 4) edx
+    | (_, A.Stack _) -> ()
     | (v, A.Flag cc) ->
         let cond = X64.cond_num (Mir_isel.cond_of_cc cc) in
-        addr32 e; byte e 0x0f; byte e (0x90 + cond); mem e 0 ebp (offset g v)
+        let at = offset g v in
+        memory_prefix e ebp at; byte e 0x0f; byte e (0x90 + cond); memory_operand e 0 ebp at
     | _ -> invalid_arg "i386 inline asm output") assigned;
   List.iter (fun (v, out) ->
     if bits g v < 32 then begin
@@ -548,6 +621,23 @@ let inline_asm g results ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
       read e bytes eax ebp (offset g v);
       put g v
     end) assigned
+
+let scalar_compare g kind x y =
+  let e = g.e and n = bits g x in
+  get g eax x;
+  if signed_cmp kind then sign e eax n;
+  match bit_constant g.f y with
+  | Some 0L -> test e eax
+  | Some k ->
+      let imm = Int32.to_int (Int64.to_int32 k) in
+      let imm =
+        if signed_cmp kind && n < 32 && imm land (1 lsl (n - 1)) <> 0
+        then imm - (1 lsl n) else imm in
+      alu e 7 eax imm
+  | None ->
+      get g ecx y;
+      if signed_cmp kind then sign e ecx n;
+      cmp e eax ecx
 
 let instruction g (ir : inst_rec) =
   let e = g.e in
@@ -569,12 +659,11 @@ let instruction g (ir : inst_rec) =
   | Ibin (kind, flags, x, y) -> integer_binary g kind flags x y; finish ()
   | Iun (kind, _, v) -> integer_unary g kind v; finish ()
   | Icmp (kind, x, y) ->
-      pair g x; get g ecx y;
-      let n = bits g x in
-      if n > 32 then (get g ~high:true edi y; wide_compare e kind)
-      else begin
-        if signed_cmp kind then begin sign e eax n; sign e ecx n end;
-        cmp e eax ecx; condition e (cmp_condition kind)
+      if bits g x > 32 then begin
+        pair g x; get g ecx y; get g ~high:true edi y;
+        wide_compare e kind
+      end else begin
+        scalar_compare g kind x y; condition e (cmp_condition kind)
       end;
       finish ()
   | Conv ((Trunc | Zext | Sext | Ptrtoint | Inttoptr | Bitcast) as conv, v) ->
@@ -593,10 +682,22 @@ let instruction g (ir : inst_rec) =
       finish ()
   | (Ptradd _ | Alloca _) when address g (output ()) <> None -> ()
   | Ptradd (_, ptr, index, scale, disp) ->
-      get g eax ptr; get g ecx index;
-      if scale <> 1 then begin lit e edx scale; imul e ecx edx end;
-      rr e 0x01 eax ecx;
-      if disp <> 0 then alu e 0 eax disp;
+      get g eax ptr;
+      (match bit_constant g.f index with
+       | Some n ->
+           let delta = Int64.(add (mul n (of_int scale)) (of_int disp)) in
+           let d = Int32.to_int (Int64.to_int32 delta) in
+           if d <> 0 then alu e 0 eax d
+       | None ->
+           get g ecx index;
+           (match scale with
+            | 1 -> address_scaled e ~index:ecx ~scale:0 ~disp
+            | 2 -> address_scaled e ~index:ecx ~scale:1 ~disp
+            | 4 -> address_scaled e ~index:ecx ~scale:2 ~disp
+            | 8 -> address_scaled e ~index:ecx ~scale:3 ~disp
+            | _ ->
+                lit e edx scale; imul e ecx edx; rr e 0x01 eax ecx;
+                if disp <> 0 then alu e 0 eax disp));
       finish ()
   | Alloca (count, alignment) ->
       get g eax count;
@@ -645,14 +746,27 @@ let instruction g (ir : inst_rec) =
   | Trap -> byte e 0x0f; byte e 0x0b
   | _ -> refuse "instruction %s" (Fir_print.op_text g.f (Fir_print.assign_names g.f) ir)
 
-let terminator g = function
+let conditional g next cc yes no =
+  let e = g.e in
+  if Array.length yes.args = 0 && Array.length no.args = 0 then begin
+    if yes.dest = next then jcc e (cc lxor 1) g.labels.(no.dest)
+    else begin
+      jcc e cc g.labels.(yes.dest);
+      if no.dest <> next then jmp e g.labels.(no.dest)
+    end
+  end else begin
+    let false_ = ref None in
+    jcc e (cc lxor 1) false_;
+    jump g yes;
+    here e false_;
+    if no.dest <> next || Array.length no.args <> 0 then jump g no
+  end
+
+let terminator g next = function
+  | Jump t when t.dest = next && Array.length t.args = 0 -> ()
   | Jump t -> jump g t
   | Br (cond, yes, no, _) ->
-      let false_ = ref None in
-      get g eax cond; test g.e eax; jcc g.e 4 false_;
-      jump g yes;
-      here g.e false_;
-      jump g no
+      get g eax cond; test g.e eax; conditional g next 5 yes no
   | Switch (v, otherwise, cases, _) ->
       Array.iter (fun (key, dest) ->
         let next = ref None in
@@ -668,12 +782,61 @@ let terminator g = function
        | [], [] -> ()
        | [v], [abi] -> pair g v; extend g.e eax abi
        | _ -> refuse "multiple return values");
-      read g.e 4 ebx ebp (-4);
-      read g.e 4 esi ebp (-8);
-      read g.e 4 edi ebp (-12);
-      op32 g.e; byte g.e 0xc9; op32 g.e; byte g.e 0xc3
+      if next <> num_blocks g.f then jmp g.e g.return_at
   | Unreachable -> byte g.e 0x0f; byte g.e 0x0b
   | Indirect_br _ | Asm_goto _ -> refuse "indirect branch or asm goto"
+
+let frame_slots f needed address =
+  let values = num_values f in
+  let slots = Array.make values 0 and home = Array.make values (-1) in
+  let last = Array.make values 0 and persistent = Array.make values false in
+  let uses = Array.make values 0 in
+  let define b v = if resolve f v = v then home.(v) <- b in
+  Vec.iteri (fun b (br : block_rec) ->
+    Array.iter (define b) br.params;
+    Vec.iter (fun i -> Array.iter (define b) (inst f i).results) br.insts) f.blocks;
+  let use b at v =
+    let v = resolve f v in
+    uses.(v) <- uses.(v) + 1;
+    if home.(v) = b then last.(v) <- at
+    else if home.(v) >= 0 then persistent.(v) <- true
+  in
+  Vec.iteri (fun b (br : block_rec) ->
+    Vec.iteri (fun at i -> iter_op_uses (use b (at + 1)) (inst f i).op) br.insts;
+    iter_term_uses (use b (Vec.length br.insts + 1)) br.term) f.blocks;
+  let space n =
+    needed := !needed + n;
+    - !needed in
+  let size v = if width (ty_of f v) > 32 then 8 else 4 in
+  let slot v = resolve f v = v && home.(v) >= 0 && address v = None in
+  for v = 0 to values - 1 do
+    if persistent.(v) && slot v then slots.(v) <- space (size v)
+  done;
+  (* Local lifetimes reuse a slot after the last instruction that reads it.
+     Values that cross a block boundary have their own stable slots. *)
+  let free4 = ref [] and free8 = ref [] in
+  let freelist v = if size v = 4 then free4 else free8 in
+  Vec.iter (fun (br : block_rec) ->
+    let release = Array.make (Vec.length br.insts + 2) [] in
+    let allocate at v =
+      if slot v && slots.(v) = 0 then begin
+        let free = freelist v in
+        slots.(v) <- (match !free with
+          | off :: rest -> free := rest; off
+          | [] -> space (size v));
+        let end_at = max at last.(v) in
+        release.(end_at) <- v :: release.(end_at)
+      end in
+    let expire at =
+      List.iter (fun v ->
+        let free = freelist v in free := slots.(v) :: !free) release.(at) in
+    Array.iter (allocate 0) br.params;
+    expire 0;
+    Vec.iteri (fun at i ->
+      Array.iter (allocate (at + 1)) (inst f i).results;
+      expire (at + 1)) br.insts;
+    expire (Array.length release - 1)) f.blocks;
+  slots, uses
 
 let body e (f : func) =
   result_abi f.sig_;
@@ -717,13 +880,7 @@ let body e (f : func) =
          | _ -> None)
     | _ -> None
   in
-  let slots = Array.init (num_values f) (fun v ->
-    match def_of f v, frame_address v with
-    | (Param _ | Result _), None ->
-        let n = width (Vec.get f.tys v) in
-        needed := !needed + (if n > 32 then 8 else 4);
-        - !needed
-    | _ -> 0) in
+  let slots, uses = frame_slots f needed frame_address in
   let most_params = Vec.fold (fun n b -> max n (Array.length b.params)) 0 f.blocks in
   needed := !needed + (most_params * 8);
   let copies = - !needed in
@@ -734,12 +891,14 @@ let body e (f : func) =
   let get_pc = ref None in
   let g =
     { e; f; slots; addresses; copies; local_space; labels; va_offset = 8 + stack;
-      got_at = local_space + 12; reg_thunk = ref None; uses_thunk = ref false } in
+      got_at = local_space + 12; reg_thunk = ref None; uses_thunk = ref false;
+      return_at = ref None } in
   if e.endbr && not (has f.fattrs fa_nocf_check) then begin
     byte e 0xf3; byte e 0x0f; byte e 0x1e; byte e 0xfb
   end;
-  push e ebp; mov e ebp esp; alu e 5 esp frame_size;
-  write e 4 ebp (-4) ebx; write e 4 ebp (-8) esi; write e 4 ebp (-12) edi;
+  push e ebp; mov e ebp esp;
+  push e ebx; push e esi; push e edi;
+  if frame_size > 12 then alu e 5 esp (frame_size - 12);
   Array.iteri (fun i v ->
     match arguments.(i) with
     | Stack _ -> ()
@@ -758,6 +917,7 @@ let body e (f : func) =
   end;
   Array.iteri (fun i v ->
     match arguments.(i) with
+    | Register _ when bits g v < 32 -> pair g v; put g v
     | Register _ -> ()
     | Stack off ->
         read e 4 eax ebp (off + 8);
@@ -765,8 +925,26 @@ let body e (f : func) =
         put g v) entry.params;
   Vec.iteri (fun b (block : block_rec) ->
     here e labels.(b);
-    Vec.iter (fun i -> instruction g (inst f i)) block.insts;
-    terminator g block.term) f.blocks;
+    let n = Vec.length block.insts in
+    let fused =
+      match block.term with
+      | Br (v, yes, no, _) when n <> 0 && uses.(v) = 1 ->
+          let ir = inst f (Vec.get block.insts (n - 1)) in
+          (match ir.op with
+           | Icmp (kind, x, y) when ir.results.(0) = v && bits g x <= 32 ->
+               Some (kind, x, y, yes, no)
+           | _ -> None)
+      | _ -> None in
+    let count = n - (if fused = None then 0 else 1) in
+    for at = 0 to count - 1 do instruction g (inst f (Vec.get block.insts at)) done;
+    match fused with
+    | Some (kind, x, y, yes, no) ->
+        scalar_compare g kind x y; conditional g (b + 1) (cmp_condition kind) yes no
+    | None -> terminator g (b + 1) block.term) f.blocks;
+  here e g.return_at;
+  lea e esp ebp (-12);
+  pop e edi; pop e esi; pop e ebx;
+  op32 e; byte e 0xc9; op32 e; byte e 0xc3;
   if e.pic then begin
     here e get_pc; read e 4 eax esp 0; byte e 0xc3
   end;
@@ -851,7 +1029,7 @@ let compile_object ~stack_align ~regparm ~endbr ~pic ~thunk_calls ~iter_funcs (m
       pad s (pos e) start;
       (try body e f with
       | Unsupported reason | I386_asm.Unsupported reason -> refuse "@%s: %s" f.name reason);
-      List.iter (fun (off, label) -> jumps := (s.id, off, label) :: !jumps) !(e.jumps);
+      List.iter (fun (off, width, label) -> jumps := (s.id, off, width, label) :: !jumps) !(e.jumps);
       record f.name f.linkage f.visibility 2 (location s start) (pos e - start)
     end
   in
@@ -914,9 +1092,15 @@ let compile_object ~stack_align ~regparm ~endbr ~pic ~thunk_calls ~iter_funcs (m
     Vec.iter emit_alias m.aliases;
     ignore (section ".note.GNU-stack" 0 false 1);
     let data = Array.init (Dynarray.length sections) (fun i -> Buffer.to_bytes (Dynarray.get sections i).bytes) in
-    List.iter (fun (i, off, target) ->
+    List.iter (fun (i, off, width, target) ->
       match !target with
-      | Some loc -> Bytes.set_int32_le data.(i) off (Int32.of_int (loc - off - 4))
+      | Some loc ->
+          let delta = loc - off - width in
+          (match width with
+           | 1 -> Bytes.set_int8 data.(i) off delta
+           | 2 -> Bytes.set_int16_le data.(i) off delta
+           | 4 -> Bytes.set_int32_le data.(i) off (Int32.of_int delta)
+           | _ -> invalid_arg "i386: invalid branch displacement width")
       | None -> invalid_arg "i386: unresolved control-flow label") !jumps;
     let secs = Array.mapi (fun i bytes ->
       let s = Dynarray.get sections i in

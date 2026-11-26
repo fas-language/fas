@@ -265,8 +265,12 @@ let main () =
     if ((!hard).thunk_calls && not (!hard).thunk_local) || (!hard).return_thunk ||
        (!hard).patch_entry <> (0, 0) then
       unsupported "i386 external thunks or patchable entries";
+    verify (Fir_stream.verify stream);
     Fir_stream.drop_unused stream;
     if !fold_branches then Fir_stream.fold stream;
+    let pinned = Fir_stream.pinned_functions stream in
+    Fir_stream.map stream (fun f -> if Fir_stream.can_fold pinned f then I386_opt.run f else f);
+    Fir_stream.drop_unused stream;
     verify (Fir_stream.verify stream);
     let m = stream.Fir_stream.modul in
     match I386.compile_object ~stack_align:!stack_align ~regparm:!regparm

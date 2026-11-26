@@ -32,7 +32,7 @@ Contents:
 - **Block parameters instead of phis.** A block lists typed parameters, and each edge into the block passes arguments for them. The entry block's parameters are the function's parameters.
 - **No aggregate values.** Structs and arrays exist only in memory: `alloca`, globals, `ptradd`, `load`, `store`. The front end computes layouts (sizes, alignments and field offsets). Calls are the one place aggregates appear, as ABI descriptions (§5).
 - **Integers have no signedness.** Each operation decides how to read the bits: `sdiv`/`udiv`, `slt`/`ult`, and so on.
-- **Target-neutral in form, 64-bit little-endian in fact.** Only the triple names the target, and the current backend only supports `x86_64-unknown-linux-gnu`. Every front end in this project assumes a 64-bit little-endian target with 8-byte pointers, and that will not change. On a target whose division does not trap, a backend adds the check and the `trap` itself (§6).
+- **Little-endian x86 targets.** `x86_64-unknown-linux-gnu` uses 8-byte pointers. For native relocatable output, `i386-unknown-linux-gnu` and `i386-unknown-linux-code16` use 4-byte pointers. Front ends choose the triple and lay out objects for their target. On a target whose division does not trap, a backend adds the check and the `trap` itself (§6).
 - **One function at a time.** No backend step needs another function's body to compile a function correctly; summaries of other functions (which registers a call clobbers, say) may be used when they are available. The output never depends on the order in which functions are compiled or on thread scheduling.
 - **No unwinding, ever.** Fir has no exceptions, `invoke` or landing pads. A call either returns, or never comes back to its frame (`noreturn`, `exit`, `longjmp`). Errors are ordinary values.
 - **Any control flow graph.** Critical edges and irreducible loops are legal, and there is no loop metadata.
@@ -709,6 +709,10 @@ Each C23 feature that needs code generation maps to Fir as follows. The test tha
 Not supported: `_Float128`, `_Float32x`/`_Float64x` beyond `f80`, and the decimal floats (`_Decimal32/64/128`). They are optional in C23, and Fir has no `f128` or decimal type yet.
 
 ## 12. Native backend support status
+
+The i386 backend emits ELF32 relocatable objects for integer and pointer code. It supports the i386 SysV stack calling convention and `regparm` for up to three words in EAX, EDX, and ECX. Variadic functions use the stack convention with a pointer to the next argument as `va_list`. The `code16` target uses the real-mode encoding of the same calling convention, including 32-bit return addresses. Global data relocations use 4-byte absolute fields. Floating-point operations and floating-point, vector, or aggregate parameters and results currently require x86-64.
+
+### x86-64
 
 The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3, SSSE3, SSE4, POPCNT, LZCNT, BMI, FMA or AVX), so it runs on any x86-64 CPU.
 

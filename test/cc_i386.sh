@@ -60,6 +60,19 @@ extern unsigned adjust(unsigned x);
 extern const unsigned bias;
 const unsigned * const bias_ptr = &bias;
 
+unsigned long update_long(long value, unsigned long mask)
+{
+    return (unsigned long)(value + adjust(3)) ^ mask;
+}
+
+uint64_t product(unsigned a, unsigned b)
+{
+    uint64_t result;
+    __asm__("mull %2" : "=A"(result) : "a"(a), "rm"(b));
+    __asm__("" : "=rm"(result) : "0"(result));
+    return result;
+}
+
 uint64_t mix(uint64_t a, uint64_t b, unsigned shift, unsigned mask)
 {
     uint64_t x = (a * b + mask) ^ (b >> shift);
@@ -99,6 +112,8 @@ cat > "$tmp/entry.c" <<'C'
 extern uint64_t mix(uint64_t, uint64_t, unsigned, unsigned);
 extern unsigned dispatch(unsigned (*)(unsigned), unsigned);
 extern unsigned collect(unsigned, ...);
+extern unsigned long update_long(long, unsigned long);
+extern uint64_t product(unsigned, unsigned);
 extern const unsigned * const bias_ptr;
 
 const unsigned bias = 19;
@@ -125,6 +140,10 @@ int run(void)
         return 66;
     if (bias_ptr != &bias || values + 1 - (values + 3) != -2)
         return 67;
+    if (update_long(-32, 0x80000000UL) != 0x7ffffffaUL)
+        return 68;
+    if (product(0x12345678, 0xf0123456) != UINT64_C(0x11125c7753956c50))
+        return 69;
     return 0;
 }
 C
