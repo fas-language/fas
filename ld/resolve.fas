@@ -165,7 +165,7 @@ fn parse_job(ctx addr, b u64, e u64, worker u32) void {
     for i u64 in b..e {
         o handle[Obj] = obj(i)
         if o.secs != null || lx(i).status != 0 { continue }
-        elf_parse(o) catch err {
+        elf_parse(o, config().has_script) catch err {
             lx(i).status = if err == Refused { 2 } else { 1 }
         }
     }
@@ -940,6 +940,8 @@ fn resolve() void fails {
     }
     try process_inputs()
 
+    if c.has_script { try ls_resolve_symbols() }
+
     // definitions, commons and linker-defined symbols, in state order
     common_file u64 = ld.nobj
     commons Vec[u32] = {}
@@ -950,8 +952,9 @@ fn resolve() void fails {
     for i u64 in 0..count {
         id u32 = trunc[u32](i)
         s handle[GSym] = gsym(id)
+        if c.has_script && s.has_res != 0 && zext[u64](s.res_file) == ld.script_file { continue }
         if s.def_kind == DEF_NONE {
-            if ld.partial {
+            if ld.partial || c.has_script {
                 // nothing: undefined symbols stay undefined
             } else if predefined_name(s.name) || try registry_available(s.name) {
                 vec_push(&predefined, id)
@@ -988,6 +991,7 @@ fn resolve() void fails {
         } else if s.def_kind == DEF_REGULAR {
             set_res(id, zext[u64](s.def_file), zext[u64](s.def_sym), s.visibility)
         } else {
+            if c.has_script { try refuse(c"COMMON symbols in an executable linker script") }
             if !ld.partial { common_size = try chk_align(c"common symbol layout", MAX_SECTION_SIZE, common_size, s.calign) }
             vec_push(&commons, id)
             // the symbol's value is its offset; kept in csize's place until

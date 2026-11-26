@@ -184,6 +184,12 @@ const BUILD_ID_MD5 u8 = 2
 struct Config {
     output Bytes
     entry Bytes
+    entry_set bool
+    script Bytes
+    has_script bool
+    emit_relocs bool
+    orphan_error bool
+    discard_none bool
     items Vec[Item]
     top_items u64         // items at the top level (groups count once)
     statistics bool
@@ -262,6 +268,10 @@ Linux x86-64 ELF linker.
 -pie / -no-pie          enable/disable loader-backed PIE output
 -shared                 emit a shared library (entry address zero)
 -soname NAME            runtime shared-library identity
+-T, --script PATH       lay out a static executable with a linker script
+-q, --emit-relocs        retain relocations in scripted output
+--orphan-handling=error reject input sections absent from the script
+--discard-none          retain local symbols in scripted output
 --version-script PATH   bounded export/version policy for a shared library
 --no-undefined          reject unresolved strong shared-library references
 --allow-multiple-definition, -z muldefs  keep the first strong definition
@@ -569,6 +579,24 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.output = try take_value(p, a)
         } else if is(a, c"-e") || is(a, c"--entry") {
             c.entry = try take_value(p, a)
+            c.entry_set = true
+        } else if is(a, c"-T") || is(a, c"--script") || bytes_prefix(a, c"--script=") || bytes_prefix(a, c"-T") {
+            if c.has_script { try refuse(c"multiple executable linker scripts") }
+            c.has_script = true
+            if is(a, c"-T") || is(a, c"--script") {
+                c.script = try take_value(p, a)
+            } else {
+                prefix u64 = if bytes_prefix(a, c"--script=") { 9 } else { 2 }
+                c.script = arg_tail(a, prefix)
+            }
+        } else if is(a, c"-q") || is(a, c"--emit-relocs") {
+            c.emit_relocs = true
+        } else if is(a, c"--orphan-handling=error") {
+            c.orphan_error = true
+        } else if bytes_prefix(a, c"--orphan-handling=") {
+            try refuse(c"only --orphan-handling=error is supported")
+        } else if is(a, c"--discard-none") {
+            c.discard_none = true
         } else if is(a, c"-L") {
             vec_push(&c.library_paths, try take_value(p, a))
         } else if is(a, c"-l") {
@@ -614,6 +642,13 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     if c.print_version && c.items.n == 0 {
         print_version()
         fail LinkDone
+    }
+    if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
+        try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
+    }
+    if c.has_script && (c.relocatable || c.shared || c.pie || c.has_interpreter || c.gc_sections ||
+        c.has_map || c.has_version_script || c.runpath != 0 || c.export_dynamic) {
+        try refuse(c"linker scripts require static executable output without GC or a map")
     }
     if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
         c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||
