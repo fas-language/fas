@@ -51,7 +51,7 @@ fn ls_reloc_section_kind() u32 { return if config().elf32 { 9 } else { 4 } }
 fn ls_write_header(im handle[LsImage], entry u64) void fails {
     ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
     mem_copy(ld.image, &ident, 7)
-    wr16(ld.image, 16, 2)
+    wr16(ld.image, 16, if config().pie { 3 } else { 2 })
     wr32(ld.image, 20, 1)
     phoff u64 = if ld.lscript.phdrs.n == 0 { 0 } else { ls_elf_header_size() }
     sizes u64 = 52

@@ -403,6 +403,28 @@ fn file_limit_message(m handle[Buf]) void {
     bs(m, c" file limit")
 }
 
+fn check_script_archive(a handle[Archive]) void fails {
+    if config().mode != MODE_STATIC_PIE {
+        try refuse(c"lazy archive extraction with an executable linker script")
+    }
+    // Leave extraction unchanged when all script names and references are
+    // disjoint from the archive index. Otherwise the script can change which
+    // undefined roots cause extraction or override an archive definition.
+    sc handle[Lscript] = &ld.lscript
+    for i u64 in 1..sc.cmds.n + 1 {
+        c handle[LsCmd] = ls_cmd(i)
+        if (c.kind == LS_ASSIGN || c.kind == LS_PROVIDE) && archive_defines(a, c.name) {
+            try refuse(c"script assignment overlaps a lazy archive symbol")
+        }
+    }
+    for i u64 in 1..sc.exprs.n + 1 {
+        e handle[LsExpr] = ls_expr(i)
+        if e.kind == LS_SYMBOL && archive_defines(a, e.text) {
+            try refuse(c"script expression refers to a lazy archive symbol")
+        }
+    }
+}
+
 fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[Vec[Bytes]]) void fails {
     ld.file_count += 1
     if ld.file_count > MAX_INPUT_FILES {
@@ -453,10 +475,8 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
         phase_end(PH_PARSE, &at)
         ai u64 = ld.archives.n - 1
         a handle[Archive] = archive(ai)
-        // Lazy member extraction would need the active script expressions
-        // as roots and must account for definitions overridden by the script.
         if config().has_script && !a.whole && a.members.n != 0 {
-            try refuse(c"lazy archive extraction with an executable linker script")
+            try check_script_archive(a)
         }
         for k u64 in 0..a.members.n {
             m handle[Member] = member(a, k)

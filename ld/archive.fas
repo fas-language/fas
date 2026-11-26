@@ -684,6 +684,16 @@ fn needed(id u32) bool {
 
 fn bit_set(bits addr, i u64) bool { return (bits[u64, i / 64] >> (i % 64)) & 1 != 0 }
 
+fn archive_defines(a handle[Archive], name Bytes) bool {
+    e u32 = kx_first(&a.index, bytes_hash(name))
+    while e != NONE {
+        en handle[AEntry] = vec_at(&a.entries, zext[u64](e))
+        if bytes_eq(en.name, name) { return true }
+        e = kx_next(&a.index, e)
+    }
+    return false
+}
+
 fn enqueue(a handle[Archive], id u32, cursor u64) void {
     if !needed(id) { return }
     name Bytes = gsym(id).name

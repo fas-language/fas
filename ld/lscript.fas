@@ -70,6 +70,7 @@ struct LsSection {
     phdrs Vec[u64]
     phdr_source u64
     discard bool
+    inittext_orphan bool
     info bool
     used bool
     mentioned bool
@@ -432,7 +433,9 @@ fn ls_input(l handle[LsLex], keep_input bool, at u64) u64 fails {
         if sorted { try ls_expect(l, c"(") }
         // EXCLUDE_FILE, SORT_BY_* and other wrappers fail at the next '('.
         pattern Bytes = try ls_glob_word(l)
-        if bytes_is(pattern, c"COMMON") { try ls_exception(at, c"unsupported input section ", pattern, true) }
+        if bytes_is(pattern, c"COMMON") && config().mode != MODE_STATIC_PIE {
+            try ls_exception(at, c"unsupported input section ", pattern, true)
+        }
         if sorted { try ls_expect(l, c")") }
         entry handle[LsPattern] = vec_add(&c.patterns)
         entry.name = pattern
@@ -668,6 +671,7 @@ fn ls_parse(path Bytes, data Bytes) void fails {
         c.elf32 = target == 1
     }
     if !sections_seen { try ls_bad(l, c"expected SECTIONS, got ") }
+    ls_inittext_orphan()
     for i u64 in 1..ld.lscript.sections.n + 1 {
         s handle[LsSection] = ls_sec(i)
         for j u64 in 0..s.phdrs.n {
@@ -820,6 +824,78 @@ fn ls_match(pattern Bytes, name Bytes) bool {
     return p == pattern.n
 }
 
+fn ls_discards(name Bytes) bool {
+    for i u64 in 1..ld.lscript.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        for j u64 in 0..s.body.n {
+            c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+            if c.kind != LS_INPUT { continue }
+            for k u64 in 0..c.patterns.n {
+                pat handle[LsPattern] = vec_at(&c.patterns, k)
+                if ls_match(pat.name, name) { return s.discard }
+            }
+        }
+    }
+    return false
+}
+
+// The i386 real-mode script leaves BIOS-call .inittext implicit. It shares
+// the preceding code segment, after the code-end symbols and before the
+// location-counter assignment that page-aligns the data segment.
+fn ls_inittext_orphan() void {
+    sc handle[Lscript] = &ld.lscript
+    if !config().elf32 || config().orphan_error || sc.explicit_phdrs { return }
+    name Bytes = bytes_c(c".inittext")
+    if ls_lookup(&sc.section_names, name) != 0 { return }
+    if ls_lookup(&sc.section_names, bytes_c(c".text32")) == 0 { return }
+    text64 u64 = ls_lookup(&sc.section_names, bytes_c(c".text64"))
+    if text64 == 0 { return }
+    after u64 = 0
+    for j u64 in 0..sc.top.n {
+        command handle[LsCmd] = ls_cmd(vec_get(&sc.top, j))
+        if command.kind == LS_SECTION && command.arg == text64 { after = j + 1 }
+    }
+    while after < sc.top.n {
+        command handle[LsCmd] = ls_cmd(vec_get(&sc.top, after))
+        if command.kind != LS_ASSIGN || bytes_is(command.name, c".") { break }
+        after += 1
+    }
+    if after == sc.top.n { return }
+    boundary handle[LsCmd] = ls_cmd(vec_get(&sc.top, after))
+    if boundary.kind != LS_ASSIGN || !bytes_is(boundary.name, c".") { return }
+    i u64 = text64 + 1
+    _ handle[LsSection] = vec_add(&sc.sections)
+    dst addr = handle_addr(ls_sec(i))
+    mem_move(dst + sizeof[LsSection], dst, (sc.sections.n - i) * sizeof[LsSection])
+    mem_set(dst, 0, sizeof[LsSection])
+    for j u64 in i + 1..sc.sections.n + 1 {
+        s handle[LsSection] = ls_sec(j)
+        if !s.discard { map_put(&sc.section_names, s.name, trunc[u32](j)) }
+    }
+    for j u64 in 0..sc.top.n {
+        command handle[LsCmd] = ls_cmd(vec_get(&sc.top, j))
+        if command.kind == LS_SECTION && command.arg >= i { command.arg += 1 }
+    }
+
+    // Match explicit commands first, including any later /DISCARD/.
+    s handle[LsSection] = ls_sec(i)
+    s.name = name
+    s.alignment = 1
+    s.inittext_orphan = true
+    map_put(&sc.section_names, name, trunc[u32](i))
+    matching u64 = ls_new_cmd(LS_INPUT, 0)
+    match_cmd handle[LsCmd] = ls_cmd(matching)
+    pat handle[LsPattern] = vec_add(&match_cmd.patterns)
+    pat.name = name
+    vec_push(&s.body, matching)
+    command u64 = ls_new_cmd(LS_SECTION, 0)
+    ls_cmd(command).arg = i
+    vec_push(&sc.top, command)
+    top addr = sc.top.p + after * 8
+    mem_move(top + 8, top, (sc.top.n - after - 1) * 8)
+    top[u64] = command
+}
+
 fn ls_packed_less(a u64, b u64) bool { return a < b }
 
 fn ls_name_less(a u64, b u64) bool {
@@ -840,7 +916,9 @@ fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
             k u64 = pk_sec(x)
             p handle[Place] = place(f, k)
             if p.valid != 0 || !kept(f, k) { continue }
-            name Bytes = sec(obj(f), k).name
+            h handle[Sec] = sec(obj(f), k)
+            if s.inittext_orphan && (h.kind != 1 || (h.flags & 7) != 6) { continue }
+            name Bytes = h.name
             if !s.discard && bytes_is(name, c".note.GNU-stack") { continue }
             if !ls_match(pat.name, name) { continue }
             if s.discard {
@@ -923,6 +1001,14 @@ fn ls_debug_orphan(x u64, h handle[Sec]) bool {
     return true
 }
 
+fn ls_strip_debug(s handle[Sec]) bool {
+    if (s.flags & 2) != 0 { return false }
+    n Bytes = s.name
+    return bytes_prefix(n, c".debug_") || bytes_prefix(n, c".zdebug_") ||
+        bytes_prefix(n, c".stab") || bytes_is(n, c".gdb_index") ||
+        bytes_is(n, c".debug") || bytes_is(n, c".line")
+}
+
 fn ls_match_inputs() void fails {
     sc handle[Lscript] = &ld.lscript
     for f u64 in 0..ld.nobj {
@@ -930,7 +1016,10 @@ fn ls_match_inputs() void fails {
         lx(f).place = heap_alloc_zeroed((zext[u64](o.nsec) + 1) * sizeof[Place])
         for k u64 in 1..zext[u64](o.nsec) {
             h handle[Sec] = sec(o, k)
-            if kept(f, k) && ls_input_kind(h.kind) {
+            if !kept(f, k) || !ls_input_kind(h.kind) { continue }
+            if config().strip_debug_arg.n != 0 && ls_strip_debug(h) {
+                lx(f).kept[u8, k] = 0
+            } else {
                 vec_push(&sc.candidates, (f << 32) | k)
             }
         }
@@ -943,7 +1032,7 @@ fn ls_match_inputs() void fails {
         for j u64 in 0..s.body.n {
             c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
             if c.kind == LS_INPUT {
-                ls_select(s, i, c)
+                if !s.inittext_orphan { ls_select(s, i, c) }
             } else if c.kind != LS_PROVIDE || c.provide_active {
                 s.keep = true
             }
@@ -964,6 +1053,13 @@ fn ls_match_inputs() void fails {
         }
         s.input_align = s.alignment
         if s.keep { inherited = s.flags }
+    }
+    for i u64 in 1..sc.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        if !s.inittext_orphan { continue }
+        ls_select(s, i, ls_cmd(vec_get(&s.body, 0)))
+        s.keep = s.keep || s.count != 0
+        s.input_align = s.alignment
     }
     for j u64 in 0..sc.candidates.n {
         x u64 = vec_get(&sc.candidates, j)

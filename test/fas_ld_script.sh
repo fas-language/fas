@@ -287,3 +287,121 @@ grep -q 'disagrees with linker script target' diag
 expect_exit 3 "$ld" -m elf_i386 start32.o callee32.o -o noscript 2>diag
 grep -q 'ELF32 output requires an executable linker script' diag
 printf 'fas-ld i386 script: ELF32 inference, R_386_PC32/32/16, LONG and lld binary comparison: ok\n'
+
+cat > bios32.s <<'ASM'
+.text
+.globl _start
+_start: nop
+.section .text32,"ax"
+.byte 0xf4
+.section .text64,"ax"
+.byte 0x90
+.section .inittext,"ax"
+.byte 0x66, 0xc3
+.data
+.long code_end
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > bios32.lds <<'LDS'
+OUTPUT_FORMAT("elf32-i386")
+ENTRY(_start)
+SECTIONS {
+  . = 0x1000;
+  .text : { *(.text) }
+  .text32 : { *(.text32) }
+  .text64 : { *(.text64) }
+  code_end = .;
+  . = ALIGN(0x1000);
+  .data : { *(.data) }
+}
+LDS
+"$cc" -m32 -c bios32.s -o bios32.o
+"$ld" -T bios32.lds -q bios32.o -o bios32-fas
+"${LLD:-ld.lld-22}" -T bios32.lds -q bios32.o -o bios32-lld
+for image in bios32-fas bios32-lld; do
+    "${LLVM_OBJCOPY:-llvm-objcopy-22}" -O binary "$image" "$image.bin"
+    readelf -sW "$image" > "$image.sym"
+    readelf -SW "$image" > "$image.sec"
+    grep -Eq '00001003 +0 +NOTYPE +GLOBAL +DEFAULT +[0-9]+ +code_end' "$image.sym"
+    grep -Eq '\.inittext +PROGBITS +00001003' "$image.sec"
+done
+cmp bios32-fas.bin bios32-lld.bin
+expect_exit 1 "$ld" --orphan-handling=error -T bios32.lds bios32.o -o bios32-strict 2>diag
+grep -Fq 'orphan input section .inittext' diag
+sed '/\.data :/a\  /DISCARD/ : { *(.inittext) }' bios32.lds > discard32.lds
+"$ld" -T discard32.lds bios32.o -o bios32-discard
+readelf -SW bios32-discard > bios32-discard.sec
+if grep -q '\.inittext' bios32-discard.sec; then exit 1; fi
+printf 'fas-ld i386 real-mode script: orphan placement matches lld, strict and explicit discard tested\n'
+
+cat > debug.s <<'ASM'
+.section .debug_info,"",@progbits
+.globl debug_info
+debug_info:
+.quad _start
+.section .note.GNU-stack,"",@progbits
+ASM
+"$cc" -c debug.s -o debug.o
+sed '/^  \/DISCARD\//i\  .debug_info 0 : { *(.debug_info) }' layout.lds > debug.lds
+"$ld" -T debug.lds -q main.o helper.o debug.o -o with-debug
+"$ld" -T debug.lds -q --strip-debug main.o helper.o debug.o -o strip-debug
+"$ld" -T debug.lds -q -S main.o helper.o debug.o -o strip-debug-short
+cmp strip-debug strip-debug-short
+readelf -SWs with-debug > with-debug.elf
+readelf -SWs strip-debug > strip-debug.elf
+grep -Fq '.rela.debug_info' with-debug.elf
+grep -Eq ' [0-9]+ +debug_info$' with-debug.elf
+if grep -Fq 'debug_info' strip-debug.elf; then exit 1; fi
+expect_exit 42 ./strip-debug
+printf 'fas-ld script: long and short strip-debug options remove debug sections, relocations and symbols\n'
+
+cat > pie.s <<'ASM'
+.text
+.globl _start
+_start:
+    movq helper_entry@GOTPCREL(%rip), %rax
+    call *%rax
+    mov %eax, %edi
+    mov $60, %eax
+    syscall
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > pie-helper.s <<'ASM'
+.text
+.globl helper_entry
+helper_entry:
+    mov $42, %eax
+    ret
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > pie.lds <<'LDS'
+ENTRY(_start)
+SECTIONS {
+  . = 0;
+  .text : { *(.text) }
+  .data : { *(.data) }
+  /DISCARD/ : { *(.dynamic .dynsym .dynstr .hash .gnu.hash) }
+}
+LDS
+"$cc" -c pie.s -o pie.o
+"$cc" -c pie-helper.s -o pie-helper.o
+ar rcs pie-helper.a pie-helper.o
+"$ld" -pie --no-dynamic-linker -T pie.lds pie.o pie-helper.a -o pie
+"${LLD:-ld.lld-22}" -pie --no-dynamic-linker -T pie.lds pie.o pie-helper.a -o pie-lld
+readelf -hlWr pie > pie.elf
+grep -Eq 'Type: +DYN' pie.elf
+grep -q 'There are no relocations' pie.elf
+if grep -q 'INTERP' pie.elf; then exit 1; fi
+for image in pie pie-lld; do
+    "${LLVM_OBJCOPY:-llvm-objcopy-22}" -O binary "$image" "$image.bin"
+done
+cmp pie.bin pie-lld.bin
+expect_exit 42 ./pie
+printf '.data\n.quad _start\n.section .note.GNU-stack,"",@progbits\n' > dynamic-reloc.s
+"$cc" -c dynamic-reloc.s -o dynamic-reloc.o
+expect_exit 3 "$ld" -pie --no-dynamic-linker -T pie.lds pie.o pie-helper.a dynamic-reloc.o -o unsupported 2>diag
+grep -q 'scripted PIE requires a run-time relocation' diag
+sed '/^  \.data/a\  helper_entry = .;' pie.lds > pie-overlap.lds
+expect_exit 3 "$ld" -pie --no-dynamic-linker -T pie-overlap.lds pie.o pie-helper.a -o unsupported 2>diag
+grep -q 'script assignment overlaps a lazy archive symbol' diag
+printf 'fas-ld script: loaderless PIE executes, relaxes GOTPCRELX and extracts archives, with two refusal checks\n'

@@ -192,6 +192,7 @@ struct Config {
     emit_relocs bool
     orphan_error bool
     discard_none bool
+    strip_debug_arg Bytes
     items Vec[Item]
     top_items u64         // items at the top level (groups count once)
     statistics bool
@@ -603,6 +604,8 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             try refuse(c"only --orphan-handling=error is supported")
         } else if is(a, c"--discard-none") {
             c.discard_none = true
+        } else if is(a, c"-S") || is(a, c"--strip-debug") {
+            c.strip_debug_arg = a
         } else if is(a, c"-L") {
             vec_push(&c.library_paths, try take_value(p, a))
         } else if is(a, c"-l") {
@@ -649,11 +652,12 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
         print_version()
         fail LinkDone
     }
+    if !c.has_script && c.strip_debug_arg.n != 0 { try fail_with(c"unsupported option ", c.strip_debug_arg) }
     if c.elf32 && !c.has_script { try refuse(c"ELF32 output requires an executable linker script") }
     if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
         try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
     }
-    if c.has_script && (c.relocatable || c.shared || c.pie || c.has_interpreter || c.gc_sections ||
+    if c.has_script && (c.relocatable || c.shared || (c.pie && !c.no_interpreter) || c.has_interpreter || c.gc_sections ||
         c.has_map || c.has_version_script || c.runpath != 0 || c.export_dynamic) {
         try refuse(c"linker scripts require static executable output without GC or a map")
     }

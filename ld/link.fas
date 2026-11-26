@@ -1110,15 +1110,55 @@ fn script_entry() u64 fails {
     return 0
 }
 
+fn script_check_pie() void fails {
+    if config().elf32 || config().emit_relocs { try refuse(c"scripted PIE requires ELF64 without retained relocations") }
+    for k u64 in 0..5 {
+        name addr = c".dynamic"
+        if k == 1 { name = c".dynsym" }
+        if k == 2 { name = c".dynstr" }
+        if k == 3 { name = c".hash" }
+        if k == 4 { name = c".gnu.hash" }
+        if !ls_discards(bytes_c(name)) { try refuse(c"scripted PIE requires discarded dynamic metadata") }
+    }
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for i u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, i)
+            t u64 = zext[u64](r.target)
+            p handle[Place] = place(f, t)
+            if r.kind == 0 || !kept(f, t) || p.valid == 0 || (ls_sec(zext[u64](p.output_index)).flags & 2) == 0 { continue }
+            df u64 = 0
+            ds u64 = 0
+            relative bool = false
+            if definition(f, zext[u64](r.symbol), &df, &ds) {
+                if df == ld.script_file {
+                    s u64 = ld.lscript.synth_sections[u64, ds]
+                    relative = s != 0 && (ls_sec(s).flags & 2) != 0
+                } else {
+                    y handle[Sym] = sym(obj(df), ds)
+                    if y.section != 0 && y.section < 0xff00 {
+                        q handle[Place] = place(df, zext[u64](y.section))
+                        relative = q.valid != 0 && (ls_sec(zext[u64](q.output_index)).flags & 2) != 0
+                    }
+                }
+            }
+            pc_relative bool = r.kind == 2 || r.kind == 4 || r.kind == 24
+            if relative != pc_relative { try refuse(c"scripted PIE requires a run-time relocation") }
+        }
+    }
+}
+
 fn build_image_script() void fails {
     if ld.ninput_objects == 0 { try die_c(c"no input objects") }
     phase_begin(PH_EMIT, &ld.emit_start)
     alloc_tables()
     try build_id_prepare()
     try ls_match_inputs()
+    if config().mode == MODE_STATIC_PIE && !config().elf32 { relax_static_pie() }
     try script_check_inputs()
     try check_non_alloc_references()
     try ls_addresses()
+    if config().mode == MODE_STATIC_PIE { try script_check_pie() }
     try ls_content_layout()
     entry u64 = try script_entry()
     im LsImage = {}

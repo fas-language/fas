@@ -94,8 +94,12 @@ must agree with the script when it specifies the target.
 `--emit-relocs` retains relocation records against output symbols and sections.
 `--discard-none` retains local symbols. `--orphan-handling=error` reports
 unassigned input sections as link errors. By default, ELF32 places unassigned
-non-allocated debug and comment sections at address zero. Other unsupported
-orphan placement returns exit 3.
+non-allocated debug and comment sections at address zero. In BIOS scripts
+with consecutive `.text32` and `.text64` areas, an executable `.inittext`
+orphan goes after the code-end assignments and before the data alignment.
+`-S` or `--strip-debug` removes non-allocated debug sections and their
+symbols and relocations before scripted layout. Other unsupported orphan
+placement returns exit 3.
 
 The parser recognizes the x86-64 kernel's `OUTPUT_FORMAT`, `OUTPUT_ARCH`,
 `PHDRS`, and `SECTIONS` directives. It supports `PT_LOAD` and `PT_NOTE`,
@@ -114,9 +118,13 @@ executables. ELF32 supports `R_386_32`, `R_386_PC32`, `R_386_PLT32`, `R_386_16`,
 `R_386_PC16`, `R_386_8`, and `R_386_PC8`. Unsupported
 directives and combinations return exit 3. These include `MEMORY` and
 `OVERLAY`, named input-file patterns, `COMMON`,
-TLS, IFUNC, GOT relocations, lazy archive extraction, and script mode
-combined with PIE, shared output, section GC, maps, or `-r`. Archives
-listed under `--whole-archive` are supported. The supported explicit metadata layout
+TLS, IFUNC, unrelaxed GOT relocations, and script mode combined with shared
+output, section GC, maps, or `-r`. Archives listed under `--whole-archive`
+are supported. An ELF64 script can produce `-pie --no-dynamic-linker` output
+when it discards dynamic metadata and every allocated relocation can be
+resolved without a dynamic loader. Lazy extraction in this mode requires
+script symbol assignments and references to be disjoint from the archive
+index. The supported explicit metadata layout
 places `.symtab`, `.strtab` and `.shstrtab` in order after content. The
 linker uses its existing whole-image build-ID algorithm and omits ld.lld's
 synthetic `.comment` section.
