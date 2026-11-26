@@ -747,9 +747,6 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             if vec_get(&out_res_vs, i) != 0 { has_reg_out = true }
         }
         fall_blk u32 = gen_new_block()
-        blk handle[GenBlock] = gen_cur_block()
-        blk.terminated = true
-        gen_add_succ(blk, fall_blk)
         // Collect target blocks (use trampoline blocks when there are register outputs so
         // outputs are stored to their C lvalues on indirect edges too, per C23 / Clang 16+).
         goto_tramps Vec[u32] = {}
@@ -763,13 +760,17 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 tb u32 = gen_new_block()
                 vec_push(&goto_tramps, tb)
                 vec_push(&goto_reals, real_blk)
-                gen_add_succ(blk, tb)
             } else {
                 vec_push(&goto_tramps, real_blk)
-                vec_push(&goto_reals, real_blk)
-                gen_add_succ(blk, real_blk)
             }
             gl_c = gl_c.next
+        }
+        // Allocating label and trampoline blocks can grow gc.blocks.
+        blk handle[GenBlock] = gen_cur_block()
+        blk.terminated = true
+        gen_add_succ(blk, fall_blk)
+        for i usize in 0..goto_tramps.n {
+            gen_add_succ(blk, vec_get(&goto_tramps, i))
         }
         b handle[Buf] = &blk.term
         buf_str(b, c"  ")
@@ -1233,7 +1234,8 @@ fn gen_stmt(n handle[Ast]) void fails {
 
     if bytes_eq_c(kw, c"break") {
         if gc.loops.n > 0 {
-            lf handle[LoopFrame] = vec_at(&gc.loops, gc.loops.n - 1)
+            lf LoopFrame = {}
+            copy_into(&lf, vec_at(&gc.loops, gc.loops.n - 1))
             try gen_run_cleanups_to(lf.cleanup_depth)
             gen_restore_vlas_to(lf.vla_depth)
             gen_term_jump(lf.break_blk)
@@ -1244,7 +1246,8 @@ fn gen_stmt(n handle[Ast]) void fails {
         i usize = gc.loops.n
         while i > 0 {
             i -= 1
-            lf handle[LoopFrame] = vec_at(&gc.loops, i)
+            lf LoopFrame = {}
+            copy_into(&lf, vec_at(&gc.loops, i))
             if !lf.is_switch {
                 try gen_run_cleanups_to(lf.cleanup_depth)
                 gen_restore_vlas_to(lf.vla_depth)
