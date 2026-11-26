@@ -805,6 +805,11 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             }
             return gen_const_int(n.ty, n.value)
         }
+        if gc.inline_frame != null && n.decl != null {
+            key U64Key = {addr_bits(handle_addr(n.decl))}
+            value u32 = table_get(&gc.inline_frame.pointer_args, &key) catch 0
+            if value != 0 { return value }
+        }
         return try gen_load_lvalue(n)
     }
     if n.kind == ND_MEMBER || n.kind == ND_SUBSCRIPT {
@@ -1229,8 +1234,9 @@ fn gen_binary(n handle[Ast]) u32 fails {
 fn gen_cond_expr(n handle[Ast]) u32 fails {
     // An unevaluated arm can contain asm with an immediate constraint that
     // is only valid in the selected arm of a __builtin_constant_p test.
-    if ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
-        chosen handle[Ast] = if se_truth(n.a) { n.b } else { n.c }
+    cond handle[Ast] = try gen_inline_fold(n.a, false)
+    if ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        chosen handle[Ast] = if se_truth(cond) { n.b } else { n.c }
         v u32 = try gen_rvalue(chosen)
         return gen_convert(v, se_decay(chosen.ty), n.ty)
     }
@@ -1304,7 +1310,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     is_direct bool = direct_sym != null
 
     if is_direct {
-        definition handle[Ast] = gen_inline_def(direct_sym)
+        definition handle[GenInlineDef] = try gen_inline_target(direct_sym, n.loc)
         if definition != null { return try gen_inline_call(n, definition) }
         gen_note_extern_fn(direct_sym)
     }

@@ -1,7 +1,5 @@
-// Inline the GNU always_inline helpers that need their call site's constants
-// to select immediate asm operands. Keep normal functions on the streaming
-// path. The AST and its declarations already live for the translation unit.
-
+// Lower a direct call's body into the caller using the normal C lowering
+// rules. Parameter slots, return edges and labels are private to this copy.
 use "../lib/core.fas"
 use "../lib/bytes.fas"
 use "../lib/buf.fas"
@@ -14,7 +12,7 @@ use "gen_stmt.fas"
 
 fn gen_direct_callee(n handle[Ast]) handle[Symbol] {
     if n == null { return null }
-    if n.kind == ND_UNARY {
+    while n != null && n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
         if !bytes_eq_c(op, c"&") && !bytes_eq_c(op, c"*") { return null }
         n = n.a
@@ -25,11 +23,118 @@ fn gen_direct_callee(n handle[Ast]) handle[Symbol] {
     return null
 }
 
-fn gen_inline_def(s handle[Symbol]) handle[Ast] {
-    if s == null || gc.inline_defs.n == 0 { return null }
+fn gen_lazy_inline(s handle[Symbol]) bool {
+    return (s.flags & SF_GNU_EXTERN_INLINE) != 0 ||
+        ((s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL &&
+         !gen_has_attr(s.attrs, c"used") && !gen_has_attr(s.attrs, c"retain") &&
+         !gen_has_attr(s.attrs, c"constructor") && !gen_has_attr(s.attrs, c"destructor"))
+}
+
+// These constructs observe the callee's own stack frame or can expose
+// its code addresses. Give a diagnostic if a required call uses them.
+fn gen_inline_blocker(n handle[Ast], budget handle[U64Key], optional bool) addr {
+    while n != null {
+        if optional && budget.v == 0 { return c"body exceeds the inline size limit" }
+        if optional { budget.v -= 1 }
+        if n.kind == ND_CALL {
+            callee handle[Symbol] = gen_direct_callee(n.a)
+            if callee != null && gen_is_returns_twice(callee) { return c"body calls a returns_twice function" }
+            if n.a != null && n.a.kind == ND_NAME {
+                name Bytes = cc_name(gc.p.names, n.a.op)
+                if bytes_eq_c(name, c"alloca") || bytes_eq_c(name, c"__builtin_alloca") ||
+                   bytes_eq_c(name, c"__builtin_alloca_with_align") ||
+                   bytes_eq_c(name, c"__builtin_setjmp") {
+                    return c"body uses a frame-sensitive builtin"
+                }
+            }
+        } else if n.kind == ND_UNARY && n.extra != null && bytes_eq_c(cc_name(gc.p.names, n.op), c"&&") {
+            return c"body takes the address of a label"
+        } else if n.kind == ND_DECL && n.decl != null {
+            if se_variably_modified(n.decl.ty) { return c"body declares a variably modified type" }
+        } else if ((n.kind == ND_CAST && se_variably_modified(n.ty)) ||
+                   (n.kind == ND_SIZE && (n.flags & NF_ICE) == 0)) {
+            return c"body uses a variably modified type"
+        }
+        for i u32 in 0..4 {
+            child handle[Ast] = if i == 0 { n.a } else if i == 1 { n.b } else if i == 2 { n.c } else { n.d }
+            why addr = gen_inline_blocker(child, budget, optional)
+            if why != null { return why }
+        }
+        n = n.next
+    }
+    return null
+}
+
+fn gen_register_inline(node handle[Ast]) void fails {
+    s handle[Symbol] = node.decl
     key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
-    body addr = table_get(&gc.inline_defs, &key) catch null
-    return handle_from_addr(body)
+    if gen_lazy_inline(s) {
+        _ bool = table_put(&gc.lazy_bodies, &key, handle_addr(node))
+    }
+    gen_note_inline_constant(s, node.a, trunc[u32](key.v))
+    required bool = gen_has_attr(s.attrs, c"always_inline")
+    optional bool = gc.optimize_inline && (s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL
+    if !required && !optional { return }
+    def handle[GenInlineDef] = pa_alloc[GenInlineDef]()
+    def.node = node
+    signature handle[TypeNode] = ty_node(ty_unqual(node.ty))
+    if gen_has_attr(s.attrs, c"noinline") { def.refuse = c"function is marked noinline" }
+    else if (signature.flags & TYF_VARIADIC) != 0 { def.refuse = c"function is variadic" }
+    else if gen_has_attr(s.attrs, c"naked") || gen_has_attr(s.attrs, c"interrupt") {
+        def.refuse = c"function has a special entry or return sequence"
+    } else if gen_is_returns_twice(s) { def.refuse = c"function is marked returns_twice" }
+    else {
+        pm handle[Param] = handle_from_addr(s.params)
+        while pm != null {
+            if se_variably_modified(pm.ty) || (pm.declared_ty != TY_INVALID && se_variably_modified(pm.declared_ty)) {
+                def.refuse = c"function has a variably modified parameter"
+                break
+            }
+            pm = pm.next
+        }
+        if def.refuse == null {
+            budget U64Key = {32}
+            def.refuse = gen_inline_blocker(node.a, &budget, !required)
+        }
+    }
+    if def.refuse != null && !required { return }
+    def.protect = gc.stack_protector != 0 && (gen_has_attr(s.attrs, c"stack_protect") ||
+        (gc.stack_protector <= 2 && gen_protect_body(node.a, gc.stack_protector == 2)))
+    _ bool = table_put(&gc.inline_defs, &key, handle_addr(def))
+}
+
+fn gen_inline_target(s handle[Symbol], loc u32) handle[GenInlineDef] fails {
+    key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
+    value addr = table_get(&gc.inline_defs, &key) catch null
+    required bool = gen_has_attr(s.attrs, c"always_inline")
+    if value == null && !required { return null }
+    def handle[GenInlineDef] = handle_from_addr(value)
+    why addr = if def == null { c"definition is unavailable" } else { def.refuse }
+    if why == null {
+        required = required || gen_has_attr(def.node.decl.attrs, c"always_inline")
+        if !required && (gc.optional_inlines >= 96 || gc.inline_depth >= 4) { return null }
+        if gc.cur_fn_name == trunc[u32](key.v) { why = c"recursive call" }
+        active handle[GenInlineFrame] = gc.inline_frame
+        while active != null && why == null {
+            if active.fn_sym == def.node.decl { why = c"recursive call" }
+            active = active.parent
+        }
+    }
+    if why != null {
+        if required {
+            message Buf = {}
+            defer { buf_free(&message) }
+            buf_str(&message, c"cannot inline always_inline function '")
+            buf_append(&message, gen_sym_bytes(trunc[u32](key.v)))
+            buf_str(&message, c"': ")
+            buf_str(&message, why)
+            buf_u8(&message, 0)
+            try pa_error(gc.p, loc, message.p)
+        }
+        return null
+    }
+    if !required { gc.optional_inlines += 1 }
+    return def
 }
 
 // An internal inline configuration stub can be replaced by its constant
@@ -79,36 +184,6 @@ fn gen_inline_constant(s handle[Symbol]) handle[Ast] {
     key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
     expr addr = table_get(&gc.inline_constants, &key) catch null
     return handle_from_addr(expr)
-}
-
-fn gen_immediate_constraint(operand handle[Ast]) bool {
-    text Buf = {}
-    defer { buf_free(&text) }
-    gen_asm_constraint(operand, &text)
-    spelling Bytes = buf_bytes(&text)
-    return bytes_eq_c(spelling, c"i") || bytes_eq_c(spelling, c"n")
-}
-
-fn gen_needs_inline_asm(n handle[Ast]) bool {
-    if n == null { return false }
-    if n.kind == ND_ASM {
-        input handle[Ast] = n.c
-        while input != null {
-            if (input.b.flags & NF_STATIC) == 0 && gen_immediate_constraint(input) { return true }
-            input = input.next
-        }
-    }
-    if n.kind == ND_CALL && gen_inline_def(gen_direct_callee(n.a)) != null {
-        arg handle[Ast] = n.b
-        while arg != null {
-            if (arg.flags & NF_STATIC) == 0 { return true }
-            arg = arg.next
-        }
-    }
-    if n.kind == ND_DECL && n.decl != null &&
-       gen_needs_inline_asm(handle_from_addr(n.decl.value)) { return true }
-    return gen_needs_inline_asm(n.a) || gen_needs_inline_asm(n.b) || gen_needs_inline_asm(n.c) ||
-           gen_needs_inline_asm(n.d) || gen_needs_inline_asm(n.next)
 }
 
 fn gen_inline_param_lvalue(n handle[Ast], param handle[Symbol]) bool {
@@ -216,12 +291,30 @@ fn gen_inline_fold(n handle[Ast], at_entry bool) handle[Ast] fails {
     return rewritten
 }
 
-fn gen_inline_call(call handle[Ast], node handle[Ast]) u32 fails {
-    s handle[Symbol] = node.decl
-    signature handle[TypeNode] = ty_node(ty_unqual(s.ty))
-    if (signature.flags & TYF_VARIADIC) != 0 {
-        try pa_error(gc.p, call.loc, c"cannot inline a variadic function that needs an asm immediate")
+value struct GenInlineArg {
+    value u32
+    ty u32
+    expr handle[Ast]
+}
+
+fn gen_inline_call(call handle[Ast], def handle[GenInlineDef]) u32 fails {
+    args Vec[GenInlineArg] = {}
+    defer { vec_free(&args) }
+    arg handle[Ast] = call.b
+    while arg != null {
+        av u32 = try gen_rvalue(arg)
+        if gen_is_terminated() { return gen_const_zero(call.ty) }
+        folded handle[Ast] = try gen_inline_fold(arg, false)
+        vec_push[GenInlineArg](&args, {av, arg.ty, folded})
+        arg = arg.next
     }
+    return try gen_inline_body(def, &args)
+}
+
+fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32 fails {
+    node handle[Ast] = def.node
+    s handle[Symbol] = node.decl
+    signature handle[TypeNode] = ty_node(ty_unqual(node.ty))
     outer handle[GenInlineFrame] = gc.inline_frame
     frame GenInlineFrame = {}
     frame.parent = outer
@@ -235,16 +328,11 @@ fn gen_inline_call(call handle[Ast], node handle[Ast]) u32 fails {
     }
     defer {
         table_free(&frame.constants)
+        table_free(&frame.pointer_args)
         table_free(&frame.entry_constants)
         table_free(&frame.labels)
         vec_free(&frame.addr_taken)
     }
-    active handle[GenInlineFrame] = outer
-    while active != null {
-        if active.fn_sym == s { try pa_error(gc.p, call.loc, c"recursive always_inline call needs an asm immediate") }
-        active = active.parent
-    }
-
     pm handle[Param] = handle_from_addr(s.params)
     // A bare first asm reads the incoming arguments before any of its own
     // outputs can overwrite them. It cannot be reentered through a C label.
@@ -259,49 +347,60 @@ fn gen_inline_call(call handle[Ast], node handle[Ast]) u32 fails {
             bound = bound.next
         }
     }
-    arg handle[Ast] = call.b
-    while arg != null && pm != null {
+    for i usize in 0..args.n {
+        if pm == null { break }
         ps handle[Symbol] = pm.decl
-        if ps == null { try pa_error(gc.p, call.loc, c"cannot inline a function with an unnamed argument") }
-        av u32 = gen_convert(try gen_rvalue(arg), arg.ty, ps.ty)
+        pm = pm.next
+        if ps == null { continue }
+        arg GenInlineArg = vec_get(args, i)
+        av u32 = gen_convert(arg.value, arg.ty, ps.ty)
         key U64Key = {addr_bits(handle_addr(ps))}
-        slot u32 = gen_alloca_entry(ty_size(ps.ty), ty_align(ps.ty))
-        // Use normal local slots for C reads and writes. The constants are
-        // separate and are only used to meet immediate operand constraints.
-        if gen_is_mem_ty(ps.ty) || gen_is_wide_bitint(ps.ty) {
-            gen_memcpy_const(slot, av, ty_size(ps.ty), gen_is_volatile(ps.ty))
-        } else { gen_store_ty(av, slot, ty_align(ps.ty), gen_is_volatile(ps.ty), gen_is_atomic(ps.ty)) }
-        _ bool = table_put(&gc.locals, &key, slot)
-        integer bool = ty_is_integer(ps.ty) && ty_int_bits(ps.ty) <= 64
-        if (integer || ty_is_ptr(ps.ty)) && (ty_quals(ps.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0 {
-            fixed bool = gen_inline_param_fixed(node.a, ps)
-            folded handle[Ast] = try gen_inline_fold(arg, false)
+        pointer bool = ty_is_ptr(ps.ty)
+        unqualified bool = (ty_quals(ps.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0
+        fixed bool = unqualified && (pointer || arg.expr != null) && gen_inline_param_fixed(node.a, ps)
+        if pointer && fixed {
+            // Keep a read-only pointer argument in SSA. Storing it in a
+            // private home would look like an escape of the pointee to Fir.
+            _ bool = table_put(&frame.pointer_args, &key, av)
+        } else {
+            slot u32 = gen_alloca_entry(ty_size(ps.ty), ty_align(ps.ty))
+            if gen_is_mem_ty(ps.ty) || gen_is_wide_bitint(ps.ty) {
+                gen_memcpy_const(slot, av, ty_size(ps.ty), gen_is_volatile(ps.ty))
+            } else { gen_store_ty(av, slot, ty_align(ps.ty), gen_is_volatile(ps.ty), gen_is_atomic(ps.ty)) }
+            _ bool = table_put(&gc.locals, &key, slot)
+        }
+        folded handle[Ast] = arg.expr
+        if folded != null && unqualified {
             constant handle[Ast] = null
-            if integer && (folded.flags & NF_INT_VALUE) != 0 && (folded.flags & NF_OVERFLOW) == 0 {
-                constant = pa_node(ND_INT, arg.loc, ps.ty)
+            if ty_is_integer(ps.ty) && ty_int_bits(ps.ty) <= 64 &&
+               ty_is_integer(folded.ty) && (folded.flags & (NF_INT_VALUE | NF_OVERFLOW)) == NF_INT_VALUE {
+                constant = pa_node(ND_INT, folded.loc, ps.ty)
                 constant.value = se_value(ps.ty, folded.value)
                 constant.flags = NF_ICE | NF_STATIC
             } else if ty_is_ptr(ps.ty) && (folded.flags & NF_STATIC) != 0 {
                 constant = se_convert(ps.ty, folded)
             }
-            if constant != null && fixed {
-                _ bool = table_put(&frame.constants, &key, handle_addr(constant))
-            } else if constant != null && frame.entry_asm != null {
-                _ bool = table_put(&frame.entry_constants, &key, handle_addr(constant))
+            if constant != null {
+                if fixed {
+                    _ bool = table_put(&frame.constants, &key, handle_addr(constant))
+                } else if frame.entry_asm != null {
+                    _ bool = table_put(&frame.entry_constants, &key, handle_addr(constant))
+                }
             }
         }
-        pm = pm.next
-        arg = arg.next
     }
 
+    if def.protect { gc.inline_needs_guard = true }
+    if (node.flags & NF_FENV) != 0 { gc.has_fenv = true }
+    saved_switch handle[SwitchInfo] = cur_switch
+    cur_switch = null
     gc.inline_frame = &frame
-    defer { gc.inline_frame = outer }
-    pm = handle_from_addr(s.params)
-    while pm != null {
-        if pm.declared_ty != TY_INVALID { try gen_eval_vm_type(pm.declared_ty) }
-        pm = pm.next
+    gc.inline_depth += 1
+    defer {
+        gc.inline_depth -= 1
+        gc.inline_frame = outer
+        cur_switch = saved_switch
     }
-    gen_prescan_addr_taken(node.a)
     try gen_stmt(node.a)
     if !gen_is_terminated() { gen_term_jump(frame.return_block) }
     gen_switch_block(frame.return_block)

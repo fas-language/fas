@@ -65,15 +65,24 @@ fn gen_emit_blockaddr(target_blk u32) u32 {
 
 // ---------- Scope Cleanups & VLA Stack Restore ----------
 
-fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void {
+fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void fails {
     // Clear it first: a cleanup that itself unwinds must not run again.
     if item.active_slot != 0 {
         gen_store_ty(null_v, item.active_slot, 8, true, false)
     }
-    gen_note_extern_fn(item.fn_sym)
+    sym handle[Symbol] = item.fn_sym
+    def handle[GenInlineDef] = try gen_inline_target(sym, sym.loc)
+    if def != null {
+        args Vec[GenInlineArg] = {}
+        defer { vec_free(&args) }
+        vec_push[GenInlineArg](&args, {object, ty_ptr(TY_VOID), null})
+        _ u32 = try gen_inline_body(def, &args)
+        return
+    }
+    gen_note_extern_fn(sym)
     b handle[Buf] = gen_cur_buf()
     buf_str(b, c"  call (ptr) -> () @")
-    buf_append(b, gen_sym_fir_name(item.fn_sym))
+    gen_emit_sym_name(b, gen_sym_fir_name(sym))
     buf_u8(b, 40)
     gen_emit_val(b, object)
     buf_str(b, c")\n")
@@ -87,7 +96,7 @@ fn gen_run_cleanups_to(target_depth usize) void fails {
         c handle[CleanupItem] = vec_at(&gc.cleanups, i)
         if c.fn_sym != null {
             nil u32 = if c.active_slot != 0 { gen_const_zero(ty_ptr(TY_VOID)) } else { 0 }
-            gen_call_cleanup(c, c.ptr_v, nil)
+            try gen_call_cleanup(c, c.ptr_v, nil)
         }
     }
 }
@@ -108,7 +117,7 @@ fn gen_unwind_slot(item handle[CleanupItem]) u32 {
     return slot
 }
 
-fn gen_unwind_landing_pad() u32 {
+fn gen_unwind_landing_pad() u32 fails {
     pad u32 = gen_new_block()
     gen_switch_block(pad)
     // The SysV x86-64 unwind ABI supplies the exception object in rax.
@@ -129,8 +138,8 @@ fn gen_unwind_landing_pad() u32 {
         next_blk u32 = gen_new_block()
         gen_term_br(active, call_blk, next_blk)
         gen_switch_block(call_blk)
-        gen_call_cleanup(item, object, nil)
-        gen_term_jump(next_blk)
+        try gen_call_cleanup(item, object, nil)
+        if !gen_is_terminated() { gen_term_jump(next_blk) }
         gen_switch_block(next_blk)
     }
     gen_note_extern_fn_raw(bytes_c(c"_Unwind_Resume"), ty_func(TY_VOID, &pt, 1, false))
@@ -433,10 +442,11 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
 
     // Emit only the reachable dispatch edge for a constant key. Still
     // lower the body so fallthrough and jumps to C labels work normally.
+    folded handle[Ast] = try gen_inline_fold(n.a, false)
     if gen_is_terminated() {
         // A C label in the body may still be reached by a goto.
-    } else if ty_int_bits(key_ty) <= 64 && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
-        key u64 = se_value(key_ty, n.a.value)
+    } else if ty_int_bits(key_ty) <= 64 && (folded.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        key u64 = se_value(key_ty, folded.value)
         target u32 = def_target
         for i usize in 0..sw.cases.n {
             sc handle[SwitchCase] = vec_at(&sw.cases, i)
@@ -1067,11 +1077,12 @@ fn gen_stmt(n handle[Ast]) void fails {
         // or enclosing switch can still enter it independently of the test,
         // so only drop a branch that defines no label. Ask the branch itself:
         // the parser's label list is already cleared when a body waits in
-        // pending_bodies (the kernel's scoped_guard jumps into `if (0)`).
+        // the translation unit is lowered (scoped_guard jumps into `if (0)`).
+        cond handle[Ast] = try gen_inline_fold(n.a, false)
         if !gen_is_terminated() && cur_switch == null &&
-            ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
-            !gen_defines_label(if se_truth(n.a) { n.c } else { n.b }) {
-            try gen_stmt(if se_truth(n.a) { n.b } else { n.c })
+            ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
+            !gen_defines_label(if se_truth(cond) { n.c } else { n.b }) {
+            try gen_stmt(if se_truth(cond) { n.b } else { n.c })
             return
         }
         if gen_is_terminated() {
@@ -1413,25 +1424,39 @@ fn gen_emit_patchable(out_b handle[Buf], attrs handle[Attr]) void fails {
     }
 }
 
+fn gen_guard_inline_returns() void {
+    cur u32 = gc.cur_blk
+    gen_switch_block(0)
+    gc.stack_guard = gen_alloca_entry(8, 8)
+    gen_store_ty(gen_read_stack_guard(), gc.stack_guard, 8, true, false)
+    // An inlined helper may introduce a protected local after an earlier
+    // return was lowered. Route every existing return through a check.
+    for i usize in 0..gc.blocks.n {
+        blk handle[GenBlock] = vec_at(&gc.blocks, i)
+        if !blk.returns { continue }
+        term Buf = {}
+        copy_into(&term, &blk.term)
+        loc u32 = blk.debug_term_loc
+        mem_set(&blk.term, 0, sizeof[Buf])
+        blk.terminated = false
+        blk.returns = false
+        gen_switch_block(trunc[u32](i))
+        gen_check_stack_guard()
+        pass handle[GenBlock] = gen_cur_block()
+        copy_into(&pass.term, &term)
+        pass.debug_term_loc = loc
+        pass.terminated = true
+    }
+    gen_switch_block(cur)
+}
+
 fn gen_function(node handle[Ast]) void fails {
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
-    gen_note_inline_constant(s, node.a, nid)
-    if s.linkage == 1 && !gc.inline_def_out_of_line &&
-       gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
-        key U64Key = {zext[u64](nid)}
-        _ bool = table_put(&gc.inline_defs, &key, handle_addr(node))
-        return
-    }
-    // An unreferenced static inline must not make its external dependencies
-    // mandatory. In particular, a shared object may include inline helpers
-    // that call private functions available only inside the main program.
-    is_gnu_inline bool = (s.flags & SF_GNU_EXTERN_INLINE) != 0 ||
-        ((s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL &&
-         !gen_has_attr(s.attrs, c"used") && !gen_has_attr(s.attrs, c"retain") &&
-         !gen_has_attr(s.attrs, c"constructor") && !gen_has_attr(s.attrs, c"destructor"))
+    // An unreferenced static inline must not introduce external dependencies.
+    is_gnu_inline bool = gen_lazy_inline(s)
     if is_gnu_inline {
         gk U64Key = {zext[u64](nid)}
         prev u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
@@ -1477,6 +1502,7 @@ fn gen_function(node handle[Ast]) void fails {
     gc.cur_fn = s
     gc.cur_fn_name = nid
     gc.cur_ret_ty = ret_ty
+    gc.has_fenv = (node.flags & NF_FENV) != 0
     gc.next_ssa = n_params + 1
     decl_loc u32 = if gc.debug.enabled { gen_debug_loc(s.loc, 0) } else { 0 }
 
@@ -1544,7 +1570,10 @@ fn gen_function(node handle[Ast]) void fails {
         }
     }
 
-    pad u32 = if gc.unwind_cleanups.n > 0 { gen_unwind_landing_pad() } else { 0 }
+    pad u32 = if gc.unwind_cleanups.n > 0 { try gen_unwind_landing_pad() } else { 0 }
+    if gc.inline_needs_guard && gc.stack_guard == 0 && !gen_has_attr(s.attrs, c"no_stack_protector") {
+        gen_guard_inline_returns()
+    }
     // Declare the exceptional edge to the verifier and allocator. The
     // empty asm falls through to the body. Only libgcc enters the pad.
     eb handle[GenBlock] = vec_at(&gc.blocks, zext[usize](entry_blk))
@@ -1648,7 +1677,7 @@ fn gen_function(node handle[Ast]) void fails {
         fir_emit_quoted_bytes(out_b, sec_buf.p, sec_buf.n)
     }
     buf_free(&sec_buf)
-    if (node.flags & NF_FENV) != 0 { buf_str(out_b, c" fenv") }
+    if gc.has_fenv { buf_str(out_b, c" fenv") }
     if pad != 0 {
         buf_str(out_b, c" !cleanup ")
         buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](pad)]))
