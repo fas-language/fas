@@ -248,7 +248,10 @@ struct DrvCodegenOptions {
     return_thunk bool
     endbr bool
     patch_entry addr // -fpatchable-function-entry=N[,M], passed on as is
-    stack_align8 bool // -mstack-alignment=8: rsp only 8-aligned at entry
+    stack_align8 bool // -mstack-alignment=8: stack aligned to 8 at entry
+    stack_align4 bool // -mstack-alignment=4: i386 stack aligned to 4 at entry
+    regparm u8
+    i386 bool
 }
 
 fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions], input i32) i64 fails {
@@ -269,13 +272,17 @@ fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions]
     if options.endbr { vec_push(&args, c"-fcf-protection=branch") }
     if options.patch_entry != null { vec_push(&args, options.patch_entry) }
     if options.stack_align8 { vec_push(&args, c"-mstack-alignment=8") }
+    if options.stack_align4 { vec_push(&args, c"-mstack-alignment=4") }
+    if options.regparm == 1 { vec_push(&args, c"-mregparm=1") }
+    if options.regparm == 2 { vec_push(&args, c"-mregparm=2") }
+    if options.regparm == 3 { vec_push(&args, c"-mregparm=3") }
     if options.no_x87 { vec_push(&args, c"-mno-80387") }
     if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
     else if options.no_sse { vec_push(&args, c"-mno-sse") }
     if options.pic == 1 { vec_push(&args, c"-fno-pic") }
     // The default Fir object model is position independent with initial-exec
     // TLS. A shared object instead needs general-dynamic TLS.
-    else if options.pic == 2 || options.pic == 3 { vec_push(&args, c"-fPIC") }
+    else if options.pic == 2 || options.pic == 3 || (options.i386 && options.pic > 3) { vec_push(&args, c"-fPIC") }
     vec_push(&args, fir_path)
     vec_push(&args, c"-o")
     vec_push(&args, obj_path)

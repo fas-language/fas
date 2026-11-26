@@ -22,6 +22,10 @@ type ty =
   | Ptr of int  (** address space *)
   | Vec of int * ty  (** lanes, element (integer, float or pointer) *)
 
+let i386_linux = "i386-unknown-linux-gnu"
+let i386_code16 = "i386-unknown-linux-code16"
+let is_i386 triple = triple = i386_linux || triple = i386_code16
+
 let i1 = Int 1
 let i8 = Int 8
 let i16 = Int 16

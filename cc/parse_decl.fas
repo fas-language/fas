@@ -321,7 +321,8 @@ fn pa_mode_type(p handle[Parser], ty u32, a handle[Attr]) u32 {
     if bytes_eq_c(mode, c"QI") { k = TY_SCHAR }
     else if bytes_eq_c(mode, c"HI") { k = TY_SHORT }
     else if bytes_eq_c(mode, c"SI") { k = TY_INT }
-    else if bytes_eq_c(mode, c"DI") || bytes_eq_c(mode, c"word") { k = TY_LONG }
+    else if bytes_eq_c(mode, c"DI") { k = ty_int64_type() }
+    else if bytes_eq_c(mode, c"word") { k = ty_ptrdiff_type() }
     else if bytes_eq_c(mode, c"TI") { k = TY_INT128 }
     if ty_is_unsigned(ty) { k = ty_make_unsigned(k) }
     return ty_qual(k, ty_quals(ty))
@@ -377,7 +378,7 @@ fn pa_base(p handle[Parser], t Token) u32 {
     if pa_is(p, t, c"__bf16") && pa_is_gnu(p) { return TY_BFLOAT16 }
     if pa_is(p, t, c"__float128") { return TY_FLOAT128 }
     if pa_is(p, t, c"__float80") { return TY_LDOUBLE }
-    if pa_is(p, t, c"__int128") { return TY_INT128 }
+    if !tc.ilp32 && pa_is(p, t, c"__int128") { return TY_INT128 }
     return TY_INVALID
 }
 
@@ -523,9 +524,9 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
         }
         next_ty = member
         if fixed == TY_INVALID {
-            if next == 2147483647 && member == TY_INT { next_ty = TY_LONG }
-            else if next == 0xffffffff && ty_int_bits(member) == 32 { next_ty = TY_ULONG }
-            else if next == 0x7fffffffffffffff { next_ty = TY_ULONG }
+            if next == 2147483647 && member == TY_INT { next_ty = ty_int64_type() }
+            else if next == 0xffffffff && ty_int_bits(member) == 32 { next_ty = ty_make_unsigned(ty_int64_type()) }
+            else if next == 0x7fffffffffffffff { next_ty = ty_make_unsigned(ty_int64_type()) }
         }
         next += 1
         if !(try pa_accept(p, c",")) { break }
@@ -537,7 +538,7 @@ fn pa_enum_body(p handle[Parser], ty u32, loc u32, attrs handle[Attr]) void fail
     underlying u32 = TY_UINT
     if min < 0 { underlying = TY_INT }
     if (min >= 0 && max > 0xffffffff) || (min < 0 && (min < -2147483648 || max > 2147483647)) {
-        underlying = if min < 0 { TY_LONG } else { TY_ULONG }
+        underlying = if min < 0 { ty_int64_type() } else { ty_make_unsigned(ty_int64_type()) }
     }
     if fixed == TY_INVALID && (p.pp.short_enums || pa_has_attr(p, attrs, c"packed")) {
         if min >= 0 && max <= 255 { underlying = TY_UCHAR }
@@ -1250,6 +1251,11 @@ fn pa_ms_abi_type(ty u32) u32 {
 }
 
 fn pa_builtin_types(p handle[Parser]) void fails {
+    name u32 = cc_intern(p.names, bytes_c(c"__builtin_va_list"))
+    if tc.ilp32 {
+        se_bind(p, se_symbol(name, 0, ty_ptr(TY_CHAR), SC_TYPEDEF))
+        return
+    }
     // SysV va_list is a one-element array of a 24-byte record.
     r u32 = ty_record_new(0, false)
     fields arr[4, FieldDef] = {}
@@ -1262,7 +1268,6 @@ fn pa_builtin_types(p handle[Parser]) void fails {
     fields[2].name_id = cc_intern(p.names, bytes_c(c"overflow_arg_area"))
     fields[3].name_id = cc_intern(p.names, bytes_c(c"reg_save_area"))
     ty_record_complete(r, &fields, 4, false, 0, 0)
-    name u32 = cc_intern(p.names, bytes_c(c"__builtin_va_list"))
     se_bind(p, se_symbol(name, 0, ty_array(r, 1), SC_TYPEDEF))
     name = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     se_bind(p, se_symbol(name, 0, ty_ptr(TY_CHAR), SC_TYPEDEF))

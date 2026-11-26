@@ -597,7 +597,7 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
             return
         }
         val u64 = gen_eval_const_int(init)
-        si_write_u64(si, off, val, 8)
+        si_write_u64(si, off, val, ty_size(u))
         return
     }
     if k == TYK_COMPLEX {
@@ -653,7 +653,7 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         sz u64 = ty_size(u)
         if k != TYK_BOOL && si_try_blockdiff(si, off, sz, init) { return }
         // Check for pointer-to-int constant cast (e.g. (uintptr_t)&x)
-        if sz == 8 {
+        if sz == ty_size(TY_NULLPTR) {
             ca ConstAddr = {}
             if gen_eval_const_addr(init, &ca) {
                 si_add_reloc(si, off, ca.sym_id, ca.addend)
@@ -1043,7 +1043,7 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
             r handle[InitReloc] = vec_at(&si.relocs, ri)
             if !first { buf_str(b, c", ") }
             first = false
-            width u64 = if r.width != 0 { zext[u64](r.width) } else { 8 }
+            width u64 = if r.width != 0 { zext[u64](r.width) } else if !r.is_blockaddr && tc.ilp32 { 4 } else { 8 }
             if r.is_blockaddr {
                 buf_str(b, if r.width != 0 { c"blockdiff(@" } else { c"blockaddr(@" })
                 buf_append(b, gen_sym_bytes(r.sym_id))
@@ -1072,7 +1072,7 @@ fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis 
                 } else if r.addend < 0 {
                     buf_dec_i64(b, r.addend)
                 }
-                buf_str(b, c" w8")
+                buf_str(b, if width == 4 { c" w4" } else { c" w8" })
             }
             pos += width
             ri += 1

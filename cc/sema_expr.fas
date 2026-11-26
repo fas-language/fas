@@ -656,7 +656,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
             if ty_is_real_float(elem) {
                 n.flags |= fenv
                 size u64 = ty_size(elem)
-                elem = if size == 2 { TY_SHORT } else if size == 4 { TY_INT } else if size == 8 { TY_LONG } else { TY_INT128 }
+                elem = if size == 2 { TY_SHORT } else if size == 4 { TY_INT } else if size == 8 { ty_int64_type() } else { TY_INT128 }
                 n.ty = ty_vector(elem, v.aux1)
             }
         }
@@ -668,7 +668,7 @@ fn se_binary(p handle[Parser], t Token, a handle[Ast], b handle[Ast]) handle[Ast
         if ptr_x && ptr_y && pa_is(p, t, c"-") && se_ptr_compatible(x, y, false) {
             try se_pointer_math(p, t, x)
             try se_pointer_math(p, t, y)
-            n.ty = TY_LONG
+            n.ty = ty_ptrdiff_type()
             se_fold_pointer(p, t, n, a, b, x, k)
             return n
         }

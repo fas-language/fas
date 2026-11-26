@@ -453,6 +453,7 @@ fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
     defer { tc = previous }
     tc_init(&p.types)
     tc.unsigned_char = pp.unsigned_char
+    tc.ilp32 = pp.ilp32
     pa_enter(p)
     p.file_scope = p.scope
     try pa_builtin_types(p)

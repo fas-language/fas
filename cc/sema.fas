@@ -143,7 +143,7 @@ fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
             if feature_in(c" memcpy memmove memset ", name) {
                 expected[0] = ty_ptr(TY_VOID)
                 expected[1] = if bytes_eq_c(name, c"memset") { TY_INT } else { ty_ptr(ty_qual(TY_VOID, Q_CONST)) }
-                expected[2] = TY_ULONG
+                expected[2] = ty_size_type()
             } else if bytes_eq_c(name, c"sscanf") {
                 n = 2
                 expected[0] = ty_ptr(ty_qual(TY_CHAR, Q_CONST))

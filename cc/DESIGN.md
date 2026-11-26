@@ -11,9 +11,21 @@ bash test/cc_pp.sh --json /path/to/results.json
 bash test/cc_parse.sh --json /path/to/syntax-results.json
 ```
 
-The driver follows the x86-64 Linux data model. It defaults to GNU C23 and
-accepts `-std=c23` for strict C23. The parser rejects K&R definitions and
-implicit int.
+The driver defaults to x86-64 Linux and GNU C23. It accepts `-std=c23`
+for strict C23. The parser rejects K&R definitions and implicit int.
+
+`-m32` selects Linux i386 and its ILP32 data model. `-m16` uses the same
+data model and ABI with `.code16gcc` instruction encoding. The driver
+passes `-mregparm=0` through `-mregparm=3` and the selected stack
+alignment to the native FIR backend. Variadic calls use the i386 stack
+calling convention. Both modes can emit ELF32 relocatable objects with
+`-c`. For example, run the cross-compiler checks with
+`FCC=/path/to/fcc FCC_FIR=/path/to/fas_fir bash test/cc_i386.sh`.
+
+The i386 backend supports integer and pointer code, including 64-bit
+scalar arithmetic, and uses GNU as for C inline assembly. Floating-point
+code, aggregate call signatures, DWARF, and direct linking through
+the fcc driver require further work.
 
 The translation unit owns a `Pp` and its allocation region. File buffers
 and unsuccessful file lookups are cached for the life of the translation

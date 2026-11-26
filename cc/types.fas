@@ -226,6 +226,7 @@ fn fn_key_eq(a handle[FnKey], b handle[FnKey]) bool {
 struct TypeCtx {
     nodes Vec[TypeNode]
     unsigned_char bool
+    ilp32 bool
     fn_params Vec[u32]
     records Vec[RecordDef]
     fields Vec[FieldDef]
@@ -750,6 +751,11 @@ fn ty_is_signed(tid u32) bool {
     return ty_is_integer(tid) && !ty_is_unsigned(tid)
 }
 
+fn ty_size_type() u32 { return if tc.ilp32 { TY_UINT } else { TY_ULONG } }
+fn ty_ptrdiff_type() u32 { return if tc.ilp32 { TY_INT } else { TY_LONG } }
+fn ty_int64_type() u32 { return if tc.ilp32 { TY_LLONG } else { TY_LONG } }
+fn ty_uint64_type() u32 { return if tc.ilp32 { TY_ULLONG } else { TY_ULONG } }
+
 // Bit width of an integer type (for promotions & usual arithmetic conversions)
 fn ty_int_bits(tid u32) u32 {
     c u32 = ty_canon_int(tid)
@@ -759,7 +765,7 @@ fn ty_int_bits(tid u32) u32 {
     if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR { return 8 }
     if k == TYK_SHORT || k == TYK_USHORT { return 16 }
     if k == TYK_INT || k == TYK_UINT { return 32 }
-    if k == TYK_LONG || k == TYK_ULONG { return 64 }
+    if k == TYK_LONG || k == TYK_ULONG { return if tc.ilp32 { 32 } else { 64 } }
     if k == TYK_LLONG || k == TYK_ULLONG { return 64 }
     if k == TYK_INT128 || k == TYK_UINT128 { return 128 }
     if k == TYK_BITINT { return n.aux1 }

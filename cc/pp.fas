@@ -40,6 +40,7 @@ struct PpRoot {
 struct Pp {
     names CNames
     standard u8
+    ilp32 bool
     unsigned_char bool
     short_enums bool
     no_library_builtins bool

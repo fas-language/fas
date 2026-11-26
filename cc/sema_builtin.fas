@@ -116,6 +116,7 @@ fn se_fold_ffs(t Token, ty u32, arg handle[Ast]) handle[Ast] {
 }
 
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
+    if tc.ilp32 { return false }
     name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
     return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
 }

@@ -155,7 +155,7 @@ let main () =
   let unwind_tables = ref true in
   let red_zone = ref true and kernel_model = ref false and fold_branches = ref false in
   let hard = ref Mir_emit.no_hardening in
-  let stack_align = ref 16 in
+  let stack_align = ref 16 and regparm = ref 0 in
   let set_mode m flag =
     match !mode with
     | Some (_, f) when f <> flag -> usage_error "%s and %s do not go together" f flag
@@ -204,9 +204,11 @@ let main () =
            entry is N-aligned; the backend never assumes more than 16 *)
         let v = String.sub a 18 (String.length a - 18) in
         (match int_of_string_opt v with
-         | Some n when String.for_all (fun c -> c >= '0' && c <= '9') v && n >= 8 && n land (n - 1) = 0 -> stack_align := min n 16
-         | _ -> usage_error "bad %s (a power of two, at least 8)" a);
+         | Some n when String.for_all (fun c -> c >= '0' && c <= '9') v && n >= 4 && n land (n - 1) = 0 -> stack_align := min n 16
+         | _ -> usage_error "bad %s (a power of two, at least 4)" a);
         args rest
+    | ("-mregparm=0" | "-mregparm=1" | "-mregparm=2" | "-mregparm=3" as a) :: rest ->
+        regparm := Char.code a.[10] - Char.code '0'; args rest
     | "-fPIC" :: rest -> fpic := true; no_pic := false; args rest
     | "-fno-pic" :: rest -> fpic := false; no_pic := true; args rest
     | [ "-o" ] -> usage_error "-o needs a file name"
@@ -252,7 +254,31 @@ let main () =
     | Sys_error e -> die "%s" e
   in
   let unsupported msg = die "%s: not supported by the native backend yet: %s" name msg in
-  let run_native stream =
+  let write_obj obj =
+    let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
+    Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
+  in
+  let run_i386 stream =
+    if !mode <> Obj then unsupported "i386 executable emission (use -c)";
+    if !debug then unsupported "i386 debug information";
+    if (stream.Fir_stream.modul.triple = Fir.i386_code16) && !fpic then unsupported "real-mode PIC";
+    if ((!hard).thunk_calls && not (!hard).thunk_local) || (!hard).return_thunk ||
+       (!hard).patch_entry <> (0, 0) then
+      unsupported "i386 external thunks or patchable entries";
+    Fir_stream.drop_unused stream;
+    if !fold_branches then Fir_stream.fold stream;
+    verify (Fir_stream.verify stream);
+    let m = stream.Fir_stream.modul in
+    match I386.compile_object ~stack_align:!stack_align ~regparm:!regparm
+            ~endbr:(!hard).endbr ~pic:!fpic ~thunk_calls:(!hard).thunk_calls
+            ~iter_funcs:(Fir_stream.iter stream) m with
+    | Ok obj -> write_obj obj
+    | Error e -> die "%s" e
+  in
+  let run_x86_64 stream =
+    if !regparm <> 0 then usage_error "-mregparm requires i386";
+    if !stack_align < 8 then usage_error "x86-64 stack alignment must be at least 8";
+
     let m = stream.Fir_stream.modul in
     let iter_funcs = Fir_stream.iter stream in
     verify (Fir_stream.verify stream);
@@ -302,10 +328,6 @@ let main () =
           let has_asm = Fir_stream.has_asm stream in
           match !mode with
           | Obj ->
-              let write_obj obj =
-                let out = Option.value !output ~default:(Filename.remove_extension (Filename.basename name) ^ ".o") in
-                Out_channel.with_open_bin out (fun oc -> Out_channel.output_bytes oc obj)
-              in
               Result.map write_obj (Mir_emit.compile_object ~debug:!debug ~red_zone:!red_zone ~hard:!hard ~stack_align:!stack_align ~kernel_model:!kernel_model
                 ~unwind_tables:!unwind_tables ~no_sse:!no_sse ~general_regs_only:!general_regs_only ~no_x87:!no_x87 ~pic:(not !no_pic) ~tls_gd:!fpic ~iter_funcs ~has_asm m)
           | Exe ->
@@ -325,7 +347,8 @@ let main () =
   in
   if not !llvm && (!mode = Obj || !mode = Exe) then begin
     input_error (fun () ->
-      let read ch = Fir_stream.with_input ch run_native in
+      let read ch = Fir_stream.with_input ch (fun stream ->
+        if Fir.is_i386 stream.Fir_stream.modul.triple then run_i386 stream else run_x86_64 stream) in
       if path = "-" then read stdin else In_channel.with_open_bin path read);
     exit 0
   end;

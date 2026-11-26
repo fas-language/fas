@@ -53,6 +53,7 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
         i += 1
     }
     ty u32 = TY_INT
+    long_max u64 = if tc.ilp32 { 2147483647 } else { 0x7fffffffffffffff }
     if overflow && !bitint { try pa_error(p, t.loc, c"integer literal too large for the standard integer types") }
     if bitint {
         if imaginary { try pa_error(p, t.loc, c"imaginary _BitInt literals are unsupported") }
@@ -75,8 +76,10 @@ fn pa_number(p handle[Parser], t Token) handle[Ast] fails {
         }
     } else if ranks == 0 && !uns && v <= 2147483647 { ty = TY_INT }
     else if ranks == 0 && (uns || base != 10) && v <= 0xffffffff { ty = TY_UINT }
-    else if !uns && v <= 0x7fffffffffffffff { ty = if ranks == 2 { TY_LLONG } else { TY_LONG } }
-    else if uns || base != 10 || pa_is_gnu(p) { ty = if ranks == 2 { TY_ULLONG } else { TY_ULONG } }
+    else if ranks < 2 && !uns && v <= long_max { ty = TY_LONG }
+    else if ranks < 2 && (uns || base != 10) && (!tc.ilp32 || v <= 0xffffffff) { ty = TY_ULONG }
+    else if !uns && v <= 0x7fffffffffffffff { ty = TY_LLONG }
+    else if uns || base != 10 || pa_is_gnu(p) { ty = if ranks == 2 || tc.ilp32 { TY_ULLONG } else { TY_ULONG } }
     else { try pa_error(p, t.loc, c"decimal literal cannot be represented by a signed integer type") }
     magnitude handle[Ast] = se_int(t.loc, ty, v)
     if !imaginary { return magnitude }
@@ -256,6 +259,7 @@ fn pa_offsetof(p handle[Parser], t Token) handle[Ast] fails {
     ty u32 = try pa_type_name(p)
     try pa_expect(p, c",")
     total u64 = 0
+    size_type u32 = ty_size_type()
     expr handle[Ast] = null
     while true {
         member Token = try pa_take(p)
@@ -278,7 +282,7 @@ fn pa_offsetof(p handle[Parser], t Token) handle[Ast] fails {
                 // Preserve each evaluated index and scale it by the element
                 // size before adding it to the accumulated byte offset.
                 mul Token = cc_token(TK_PUNCT, 0, e.loc, cc_intern(p.names, bytes_c(c"*")))
-                part handle[Ast] = try se_binary(p, mul, se_convert(TY_ULONG, e), se_int(e.loc, TY_ULONG, size))
+                part handle[Ast] = try se_binary(p, mul, se_convert(size_type, e), se_int(e.loc, size_type, size))
                 if expr == null { expr = part }
                 else {
                     add Token = cc_token(TK_PUNCT, 0, e.loc, cc_intern(p.names, bytes_c(c"+")))
@@ -289,7 +293,7 @@ fn pa_offsetof(p handle[Parser], t Token) handle[Ast] fails {
         if !(try pa_accept(p, c".")) { break }
     }
     try pa_expect(p, c")")
-    n handle[Ast] = se_int(t.loc, TY_ULONG, total)
+    n handle[Ast] = se_int(t.loc, size_type, total)
     if expr == null { return n }
     if total == 0 { return expr }
     add Token = cc_token(TK_PUNCT, 0, t.loc, cc_intern(p.names, bytes_c(c"+")))
@@ -528,7 +532,8 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         bytes_eq_c(name, c"__builtin_prefetch") || bytes_eq_c(name, c"__builtin_free") { return TY_VOID }
     if bytes_eq_c(name, c"__builtin_expect") || bytes_eq_c(name, c"__builtin_expect_with_probability") { return TY_LONG }
     if bytes_eq_c(name, c"__builtin_strlen") || bytes_eq_c(name, c"__builtin_object_size") ||
-        bytes_eq_c(name, c"__builtin_dynamic_object_size") || bytes_eq_c(name, c"__builtin_bswap64") { return TY_ULONG }
+        bytes_eq_c(name, c"__builtin_dynamic_object_size") { return ty_size_type() }
+    if bytes_eq_c(name, c"__builtin_bswap64") { return ty_make_unsigned(ty_int64_type()) }
     if bytes_eq_c(name, c"__builtin_bswap32") { return TY_UINT }
     if bytes_eq_c(name, c"__builtin_bswap16") { return TY_USHORT }
     if bytes_eq_c(name, c"__builtin_memchr") || bytes_eq_c(name, c"__builtin_memcpy") ||
@@ -555,7 +560,7 @@ fn pa_builtin_result(p handle[Parser], name Bytes, a handle[Ast], count u32) u32
         bytes_eq_c(name, c"__builtin___stpcpy_chk") || bytes_eq_c(name, c"__builtin___stpncpy_chk") {
         return ty_ptr(TY_CHAR)
     }
-    if bytes_eq_c(name, c"__builtin_strspn") || bytes_eq_c(name, c"__builtin_strcspn") { return TY_ULONG }
+    if bytes_eq_c(name, c"__builtin_strspn") || bytes_eq_c(name, c"__builtin_strcspn") { return ty_size_type() }
     math u32 = se_math_result(name)
     if math != TY_INVALID { return math }
     if bytes_eq_c(name, c"__atomic_compare_exchange") || bytes_eq_c(name, c"__atomic_compare_exchange_n") ||
@@ -840,7 +845,7 @@ fn pa_size_expr(p handle[Parser], t Token) handle[Ast] fails {
     if !se_complete(ty) && !gnu_size && !array_align {
         try pa_error(p, t.loc, c"size or alignment requires a complete object type")
     }
-    n handle[Ast] = pa_node(ND_SIZE, t.loc, TY_ULONG)
+    n handle[Ast] = pa_node(ND_SIZE, t.loc, ty_size_type())
     n.op = ty
     n.a = a
     n.b = type_operand

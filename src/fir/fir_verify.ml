@@ -16,36 +16,36 @@ let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr
 
 (* an agg ABI describes a C struct or union: a size, a power-of-two
    alignment, and scalar fields and nested aggs that lie inside it *)
-let rec abi_problem = function
+let rec abi_problem ~size = function
   | Scalar _ | Ext _ -> None
   | Cplx (F16 | F32 | F64 | F80) -> None
   | Cplx t -> Some (Printf.sprintf "complex %s: a complex is of f16, f32, f64 or f80" (ty_to_string t))
-  | Agg { size; align; fields } ->
-      if size < 0 then Some (Printf.sprintf "agg of %d bytes" size)
+  | Agg { size = bytes; align; fields } ->
+      if bytes < 0 then Some (Printf.sprintf "agg of %d bytes" bytes)
       else if align <= 0 || align land (align - 1) <> 0 then Some (Printf.sprintf "agg alignment %d is not a power of two" align)
       else
         List.find_map
           (fun (o, f) ->
             match f with
             | Leaf t ->
-                if o < 0 || o > size - size_of t then
-                  Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                if o < 0 || o > bytes - size t then
+                  Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o bytes)
                 else None
             | Sub (Agg { size = s; _ } as a) ->
-                if o < 0 || o > size - s then
-                  Some (Printf.sprintf "nested agg of %d bytes at offset %d is outside its %d bytes" s o size)
-                else abi_problem a
+                if o < 0 || o > bytes - s then
+                  Some (Printf.sprintf "nested agg of %d bytes at offset %d is outside its %d bytes" s o bytes)
+                else abi_problem ~size a
             | Sub (Scalar _ | Ext _ | Cplx _) -> Some "a nested agg field is not an agg"
             | Complex t -> (
                 match t with
                 | F16 | F32 | F64 | F80 ->
-                    if o < 0 || o > size - (2 * size_of t) then
-                      Some (Printf.sprintf "agg field complex %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                    if o < 0 || o > bytes - (2 * size t) then
+                      Some (Printf.sprintf "agg field complex %s at offset %d is outside its %d bytes" (ty_to_string t) o bytes)
                     else None
                 | _ -> Some (Printf.sprintf "complex %s: a complex field is of f16, f32, f64 or f80" (ty_to_string t))))
           fields
 
-let verify_func funcs (f : func) =
+let verify_func ?(size = size_of) funcs (f : func) =
   let errors = ref [] in
   let nerr = ref 0 in
   let err fmt =
@@ -414,7 +414,7 @@ let verify_func funcs (f : func) =
             | Call { sig_; callee; args; attrs = _; va_aggs } ->
                 Option.iter (err "%s: %s" where) (ms_sig_problem sig_);
                 List.iter
-                  (fun a -> Option.iter (err "%s: %s" where) (abi_problem a))
+                  (fun a -> Option.iter (err "%s: %s" where) (abi_problem ~size a))
                   (sig_.param_abis @ sig_.result_abis @ List.map snd va_aggs);
                 let np0 = List.length sig_.param_abis in
                 List.iter
@@ -510,7 +510,7 @@ let verify_func funcs (f : func) =
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
                 (match a with Agg _ | Cplx _ -> () | _ -> err "%s: va_arg with an ABI needs agg or complex" where);
-                Option.iter (err "%s: %s" where) (abi_problem a);
+                Option.iter (err "%s: %s" where) (abi_problem ~size a);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0
             | Dbg_value (var, _) -> (
@@ -630,6 +630,10 @@ let verify_func funcs (f : func) =
   end
 
 let verify ?iter_funcs (m : modul) =
+  let i386 = is_i386 m.triple in
+  let size ty =
+    if i386 then match ty with Ptr _ -> 4 | F80 -> 12 | _ -> size_of ty
+    else size_of ty in
   let iter = Option.value iter_funcs ~default:(fun visit -> Vec.iter visit m.funcs) in
   let names = Hashtbl.create 64 in
   let errs = ref [] in
@@ -689,7 +693,7 @@ let verify ?iter_funcs (m : modul) =
       | Some ps ->
           List.iter
             (function
-              | Reloc { sym; width = 4; pcrel = false; _ } ->
+              | Reloc { sym; width = 4; pcrel = false; _ } when not i386 ->
                   errs := Printf.sprintf "@%s: reloc @%s w4 must be pcrel (a 4-byte absolute address is not supported)" g.gname sym :: !errs
               | Reloc { sym; width = 8; pcrel = true; _ } ->
                   errs := Printf.sprintf "@%s: reloc @%s pcrel must be w4" g.gname sym :: !errs
@@ -904,7 +908,7 @@ let verify ?iter_funcs (m : modul) =
     let bad p = sig_errors := Printf.sprintf "@%s: signature: %s" f.name p :: !sig_errors in
     Option.iter bad (ms_sig_problem f.sig_);
     List.iter
-      (fun a -> Option.iter bad (abi_problem a))
+      (fun a -> Option.iter bad (abi_problem ~size a))
       (f.sig_.param_abis @ f.sig_.result_abis);
     (* a vector constant has one lane per lane of its type, each of the
        element type *)
@@ -929,7 +933,7 @@ let verify ?iter_funcs (m : modul) =
     check_names f;
     check_vars f;
     check_sig f;
-    function_errors := List.rev_append (verify_func funcs f) !function_errors);
+    function_errors := List.rev_append (verify_func ~size funcs f) !function_errors);
   List.iter (fun (f, g, b) -> check_blockaddr f g b) (List.rev !block_refs);
   Vec.iter
     (fun g ->

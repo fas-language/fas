@@ -207,14 +207,14 @@ thread var gc handle[GenCtx] = null
 
 // ---------- Lifecycle ----------
 
-fn gen_init(ctx handle[GenCtx], p handle[Parser], fd i32) void {
+fn gen_init(ctx handle[GenCtx], p handle[Parser], fd i32, triple addr) void {
     mem_set(handle_addr(ctx), 0, sizeof[GenCtx])
     gc = ctx
     ctx.p = p
     if fd >= 0 { fir_init_fd(&ctx.out, fd) }
     else { fir_init_buf(&ctx.out) }
     _ u32 = intern(&ctx.sym_names, bytes_c(c""))
-    fir_module_header(&ctx.out, c"x86_64-unknown-linux-gnu", false)
+    fir_module_header(&ctx.out, triple, false)
 }
 
 fn gen_free(ctx handle[GenCtx]) void {
@@ -615,7 +615,7 @@ fn gen_emit_fir_ty(b handle[Buf], tid u32) void {
     if k == TYK_BOOL { buf_str(b, c"i1"); return }
     if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR { buf_str(b, c"i8"); return }
     if k == TYK_SHORT || k == TYK_USHORT { buf_str(b, c"i16"); return }
-    if k == TYK_INT || k == TYK_UINT { buf_str(b, c"i32"); return }
+    if k == TYK_INT || k == TYK_UINT || (tc.ilp32 && (k == TYK_LONG || k == TYK_ULONG)) { buf_str(b, c"i32"); return }
     if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG { buf_str(b, c"i64"); return }
     if k == TYK_INT128 || k == TYK_UINT128 { buf_str(b, c"i128"); return }
     if k == TYK_BITINT {

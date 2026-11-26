@@ -12,6 +12,7 @@ use "builtin.fas"
 use "features.fas"
 use "embed.fas"
 use "target.fas"
+use "target_i386.fas"
 use "x86_target.fas"
 use "x86_target_data.fas"
 use "search.fas"
@@ -63,6 +64,10 @@ struct Options {
     mode u8
     gnu bool
     standard u8
+    x86_bits u8
+    regparm u8
+    soft_float bool
+    march addr
     x86_cpu u32
     x86_options Vec[u32]
     unsigned_char bool
@@ -105,6 +110,7 @@ struct Options {
     // only 8-aligned at function entry, as the kernel's entry code leaves it;
     // a larger value is the 16 the ABI gives anyway
     stack_align8 bool
+    stack_align4 bool
     pic_mode u8 // 0 = default, 1 = disabled, 2/3 = PIC, 4/5 = PIE
     relocatable bool
     save_temps bool
@@ -185,7 +191,7 @@ fn cli_warn_option(o handle[Options], arg addr) void fails {
 }
 
 // the byte alignment of -mstack-alignment=N, or of
-// -mpreferred-stack-boundary=N when [log2]: a power of two, at least 8;
+// -mpreferred-stack-boundary=N when [log2]: a power of two, at least 4;
 // 0 for anything else
 fn cli_stack_align(v Bytes, log2 bool) u64 {
     if v.n == 0 || v.n > 4 { return 0 }
@@ -195,8 +201,8 @@ fn cli_stack_align(v Bytes, log2 bool) u64 {
         if c < 48 || c > 57 { return 0 }
         n = n * 10 + zext[u64](c - 48)
     }
-    if log2 { n = if n < 3 || n > 12 { 0 } else { 1 << n } }
-    if n < 8 || (n & (n - 1)) != 0 { return 0 }
+    if log2 { n = if n < 2 || n > 12 { 0 } else { 1 << n } }
+    if n < 4 || (n & (n - 1)) != 0 { return 0 }
     return n
 }
 
@@ -270,6 +276,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
     options bool = true
     o.gnu = true
     o.standard = 23
+    o.x86_bits = 64
     o.mode = MODE_LINK
     o.async_unwind = true
     // -w applies to the entire invocation, regardless of its position.
@@ -374,6 +381,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             align u64 = cli_stack_align(bytes_from(word, if log2 { 27 } else { 18 }), log2)
             if align == 0 { try cli_error(c"fcc: invalid option ", arg) }
             o.stack_align8 = align == 8
+            o.stack_align4 = align == 4
         } else if bytes_starts_with(word, bytes_c(c"-fpatchable-function-entry=")) {
             if !cli_patch_entry_ok(bytes_from(word, 27)) { try cli_error(c"fcc: invalid option ", arg) }
             o.patch_entry = arg
@@ -392,14 +400,18 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
             try cli_error(c"fcc: fast-math semantics are unsupported: ", arg)
         } else if bytes_starts_with(word, bytes_c(c"-march=")) {
-            o.x86_native = bytes_eq_c(word, c"-march=native")
-            if o.x86_native {
-                o.x86_cpu = x86_detect_host(&o.native_features)
-            } else {
-                o.x86_cpu = x86_cpu(bytes_from(word, 7))
-                if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", arg) }
+            o.march = arg
+        } else if bytes_eq_c(word, c"-m16") { o.x86_bits = 16
+        } else if bytes_eq_c(word, c"-m32") { o.x86_bits = 32
+        } else if bytes_eq_c(word, c"-m64") { o.x86_bits = 64
+        } else if bytes_starts_with(word, bytes_c(c"-mregparm=")) {
+            if word.n != 11 || arg[u8, 10] < 48 || arg[u8, 10] > 51 {
+                try cli_error(c"fcc: invalid option ", arg)
             }
-        } else if bytes_eq_c(word, c"-m16") || bytes_eq_c(word, c"-m32") || bytes_eq_c(word, c"-mx32") {
+            o.regparm = arg[u8, 10] - 48
+        } else if bytes_eq_c(word, c"-msoft-float") { o.soft_float = true
+        } else if bytes_eq_c(word, c"-mhard-float") { o.soft_float = false
+        } else if bytes_eq_c(word, c"-mx32") {
             try cli_error(c"fcc: only the x86-64 LP64 target is supported: ", arg)
         } else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
@@ -465,7 +477,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"-g0") || bytes_eq_c(word, c"-ggdb0") { o.debug = false }
         else if bytes_starts_with(word, bytes_c(c"-g")) { o.debug = true }
         else if bytes_starts_with(word, bytes_c(c"-O")) ||
-                  bytes_starts_with(word, bytes_c(c"-W")) || bytes_eq_c(word, c"-m64") ||
+                  bytes_starts_with(word, bytes_c(c"-W")) ||
                   bytes_eq_c(word, c"-fstrict-aliasing") || bytes_eq_c(word, c"-fno-strict-aliasing") ||
                   bytes_eq_c(word, c"-fno-fast-math") {
             // These optimization and diagnostic settings have no effect on current code generation.
@@ -495,6 +507,25 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
     if (o.mode == MODE_PREPROCESS || o.mode == MODE_SYNTAX) && o.inputs.n > 1 {
         try cli_error(c"fcc: expected one input file, got ", vec_get(&o.inputs, 1).path)
     }
+    if o.x86_bits == 64 {
+        if o.regparm != 0 || o.soft_float { try cli_error(c"fcc: regparm and soft-float require i386", null) }
+        if o.stack_align4 { try cli_error(c"fcc: x86-64 stack alignment must be at least 8", null) }
+        if o.march != null {
+            word Bytes = bytes_c(o.march)
+            o.x86_native = bytes_eq_c(word, c"-march=native")
+            if o.x86_native { o.x86_cpu = x86_detect_host(&o.native_features) }
+            else {
+                o.x86_cpu = x86_cpu(bytes_from(word, 7))
+                if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", o.march) }
+            }
+        }
+    } else {
+        if o.march != null && !bytes_eq_c(bytes_c(o.march), c"-march=i386") &&
+            !bytes_eq_c(bytes_c(o.march), c"-march=i686") {
+            try cli_error(c"fcc: unsupported i386 architecture: ", o.march)
+        }
+        if o.mode == MODE_LINK { try cli_error(c"fcc: the i386 driver supports compilation only (use -c)", null) }
+    }
 }
 
 fn cli_dir(p handle[Pp], path addr, rank u8) void {
@@ -512,7 +543,7 @@ fn cli_search_paths(p handle[Pp], o handle[Options]) void {
             if include == null { include = c"cc/include" }
             cli_dir(p, include, rank)
             cli_dir(p, c"/usr/local/include", rank)
-            cli_dir(p, c"/usr/include/x86_64-linux-gnu", rank)
+            cli_dir(p, if o.x86_bits == 64 { c"/usr/include/x86_64-linux-gnu" } else { c"/usr/include/i386-linux-gnu" }, rank)
             cli_dir(p, c"/usr/include", rank)
             gcc addr = gcc_include()
             if gcc != null && gcc[u8] != 0 { cli_dir(p, gcc, rank) }
@@ -539,12 +570,13 @@ fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
 
 fn cli_pic_mode(o handle[Options]) u8 {
     if o.pic_mode != 0 { return o.pic_mode }
-    if o.kernel_model { return 1 }
+    if o.kernel_model || o.x86_bits != 64 { return 1 }
     return if o.is_shared { 3 } else { 5 }
 }
 
 fn cli_x86_features(o handle[Options], cpu handle[X86Cpu]) u64 {
     features u64 = if o.x86_native { o.native_features } else { cpu.features }
+    if o.x86_bits != 64 { features = 0 }
     last arr[X86_FLAG_COUNT, usize] = {}
     for i usize in 0..o.x86_options.n {
         feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
@@ -576,6 +608,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     p.names.gnu = o.gnu
     p.names.short_wchar = o.short_wchar
     p.standard = o.standard
+    p.ilp32 = o.x86_bits != 64
     p.unsigned_char = o.unsigned_char
     p.short_enums = o.short_enums
     p.no_library_builtins = o.no_library_builtins || o.freestanding
@@ -594,7 +627,21 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
     if !o.no_builtins {
         for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
         try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
-        try cli_definitions(p, bytes_c(cpu.defines), c"<built-in>")
+        if p.ilp32 {
+            for i usize in 0..C_TARGET_I386_REMOVED_COUNT {
+                id u32 = cc_intern(&p.names, bytes_c(C_TARGET_I386_REMOVED[i]))
+                p.names.macros.p[addr, zext[usize](id)] = null
+            }
+            for i usize in 0..C_TARGET_I386_CHANGED_COUNT {
+                try cli_definitions(p, bytes_c(C_TARGET_I386_CHANGED[i]), c"<built-in>")
+            }
+            if o.gnu { try cli_definitions(p, bytes_c(c"i386 1\n"), c"<built-in>") }
+            if o.march != null && bytes_eq_c(bytes_c(o.march), c"-march=i386") {
+                try cli_definitions(p, bytes_c(c"__tune_i386__ 1\n"), c"<built-in>")
+            } else {
+                try cli_definitions(p, bytes_c(C_TARGET_I686), c"<built-in>")
+            }
+        } else { try cli_definitions(p, bytes_c(cpu.defines), c"<built-in>") }
         for i usize in 0..X86_MACRO_COUNT {
             if (p.x86_features & (1 << trunc[u32](i))) != 0 {
                 try cli_definitions(p, bytes_c(X86_MACROS[i]), c"<built-in>")
@@ -758,9 +805,9 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     no_sse bool = !x86_has(features, bytes_c(c"sse"))
     no_unwind_tables bool = !o.async_unwind && !o.unwind_tables
     codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model,
-                                 no_sse, o.general_regs_only, o.no_x87, no_unwind_tables,
+                                 no_sse, o.general_regs_only, o.no_x87 || o.soft_float, no_unwind_tables,
                                  o.thunk_calls, o.thunk_local, o.thunk_cs_prefix, o.return_thunk,
-                                 (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8}
+                                 (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8, o.stack_align4, o.regparm, o.x86_bits != 64}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }
@@ -950,7 +997,10 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     parser.fenv_access = o.rounding_math
     parser.fenv_default = o.rounding_math
     gctx GenCtx = {}
-    gen_init(&gctx, &parser, fd)
+    triple addr = if o.x86_bits == 16 { c"i386-unknown-linux-code16" }
+                  else if o.x86_bits == 32 { c"i386-unknown-linux-gnu" }
+                  else { c"x86_64-unknown-linux-gnu" }
+    gen_init(&gctx, &parser, fd, triple)
     gctx.exceptions = o.exceptions
     gctx.debug.enabled = o.debug
     gctx.default_hidden = o.default_hidden
