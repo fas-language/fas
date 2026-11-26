@@ -580,7 +580,7 @@ fn partial_combine() void fails {
     check.path = bytes_c(c"<partial output>")
     check.data = output
     check.len = size
-    elf_parse(check) catch err { try die_buf(&check.msg) }
+    elf_parse(check, false) catch err { try die_buf(&check.msg) }
     stat_add(ST_OUTPUT_BYTES, size)
     ld.image = output
     ld.image_size = size

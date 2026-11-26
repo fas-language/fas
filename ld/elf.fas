@@ -448,7 +448,7 @@ fn may_compress(data Bytes) bool {
 }
 
 // Parses o.data (o.len bytes) into o's tables.
-fn elf_parse(o handle[Obj]) void fails {
+fn elf_parse(o handle[Obj], scripted bool) void fails {
     d addr = o.data
     length u64 = o.len
     if length >= 4 {
@@ -634,7 +634,12 @@ fn elf_parse(o handle[Obj]) void fails {
                     }
                 }
             }
-            if s.link != 0 || s.info != 0 || (!merge && s.entsize != 0) { try sfail(o, s, c"unsupported section metadata") }
+            // Objtool marks fixed-width kernel records with sh_entsize
+            // even though these sections do not have SHF_MERGE.
+            records bool = scripted && k == 1 && s.entsize != 0 && s.size % s.entsize == 0
+            if s.link != 0 || s.info != 0 || (!merge && s.entsize != 0 && !records) {
+                try sfail(o, s, c"unsupported section metadata")
+            }
         } else if k == 14 || k == 15 || k == 16 {
             expected addr = if k == 14 { c".init_array" } else if k == 15 { c".fini_array" } else { c".preinit_array" }
             if !bytes_is(s.name, expected) {
@@ -682,12 +687,13 @@ fn elf_parse(o handle[Obj]) void fails {
                     rd32(d, s.offset + 12) != 0x00554e47 || rd32(d, s.offset + 16) != 0 {
                     try sfail(o, s, c"invalid GNU Linux ABI note")
                 }
-            } else {
-                if !bytes_is(s.name, c".note.gnu.property") || s.flags != 2 || s.alignment != 8 || s.link != 0 ||
-                    s.info != 0 || s.entsize != 0 {
+            } else if bytes_is(s.name, c".note.gnu.property") {
+                if s.flags != 2 || s.alignment != 8 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported note metadata")
                 }
                 try gp_check(o, s)
+            } else if !scripted || (s.flags & ~2) != 0 || s.link != 0 || s.info != 0 || s.entsize != 0 {
+                try sfail(o, s, c"unsupported note metadata")
             }
         } else if k == 17 {
             if s.flags != 0 || s.entsize != 4 || s.size < 8 || s.size % 4 != 0 {

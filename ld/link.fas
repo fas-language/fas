@@ -999,6 +999,113 @@ fn build_image() void fails {
 
 // ---------- publishing (File_io) ----------
 
+// Script mode uses the relocator for ordinary x86-64 static relocations.
+fn script_check_inputs() void fails {
+    if ld.shlibs.n != 0 { try refuse(c"shared libraries in a static linker script") }
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for k u64 in 1..zext[u64](o.nsec) {
+            h handle[Sec] = sec(o, k)
+            if !kept(f, k) { continue }
+            if ls_input_kind(h.kind) && (h.flags & 0x4b0) != 0 {
+                try refuse(c"merge, link-order or TLS sections in a linker script")
+            }
+            if bytes_is(h.name, c".eh_frame") || bytes_is(h.name, c".note.gnu.property") {
+                try refuse(c"unwind or GNU property output in a linker script")
+            }
+            if h.kind == 9 { try refuse(c"REL input relocations in a linker script") }
+        }
+        for i u64 in 1..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if (y.kind == 6 || y.kind == 10) && (y.section == 0 || live(f, y)) {
+                try refuse(c"TLS or IFUNC symbols in a linker script")
+            }
+        }
+        for i u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, i)
+            if !kept(f, zext[u64](r.target)) { continue }
+            kind u32 = r.kind
+            if kind != 0 && bytes_prefix(sec(o, zext[u64](r.target)).name, c".debug") {
+                df u64 = 0
+                ds u64 = 0
+                if definition(f, zext[u64](r.symbol), &df, &ds) && !live(df, sym(obj(df), ds)) {
+                    try refuse(c"DWARF relocations to discarded sections in a linker script")
+                }
+            }
+            if kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
+                try refuse(c"non-static relocation in a linker script")
+            }
+        }
+    }
+}
+
+fn script_entry() u64 fails {
+    name Bytes = config().entry
+    id u32 = find(name)
+    if id != NONE && gsym(id).has_res != 0 {
+        g handle[GSym] = gsym(id)
+        f u64 = zext[u64](g.res_file)
+        y handle[Sym] = sym(obj(f), zext[u64](g.res_sym))
+        if live(f, y) { return sym_address(f, y) }
+    }
+    if config().entry_set || ld.lscript.entry_seen {
+        m handle[Buf] = msg()
+        bs(m, c"undefined entry symbol ")
+        bb(m, name)
+        try die()
+    }
+    i u64 = ls_lookup(&ld.lscript.section_names, bytes_c(c".text"))
+    if i != 0 && ls_sec(i).keep { return ls_sec(i).address }
+    return 0
+}
+
+fn build_image_script() void fails {
+    if ld.ninput_objects == 0 { try die_c(c"no input objects") }
+    phase_begin(PH_EMIT, &ld.emit_start)
+    alloc_tables()
+    try build_id_prepare()
+    try ls_match_inputs()
+    try script_check_inputs()
+    try check_non_alloc_references()
+    try ls_addresses()
+    try ls_content_layout()
+    entry u64 = try script_entry()
+    im LsImage = {}
+    try ls_rela_layout(&im)
+    try ls_image_layout(&im)
+    ls_fill()
+    ld_pool_for(ld.content.n, 64, &blit_job, null)
+    ld.values = heap_alloc_zeroed(ld.nobj * sizeof[Values])
+    ld_pool_for(ld.nobj, 1, &values_job, null)
+    rt PhaseStart = {}
+    phase_begin(PH_RELOCATE, &rt)
+    ld_pool_for(ld.nobj, 1, &relocate_job, null)
+    for f u64 in 0..ld.nobj {
+        if lx(f).status != 0 { try die_buf(&obj(f).msg) }
+    }
+    phase_end(PH_RELOCATE, &rt)
+    ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
+    mem_copy(ld.image, &ident, 7)
+    wr16(ld.image, 16, 2)
+    wr16(ld.image, 18, 62)
+    wr32(ld.image, 20, 1)
+    wr64(ld.image, 24, entry)
+    if ld.lscript.phdrs.n != 0 {
+        wr64(ld.image, 32, 64)
+        wr16(ld.image, 54, 56)
+        wr16(ld.image, 56, ld.lscript.phdrs.n)
+    }
+    wr64(ld.image, 40, im.shoff)
+    wr16(ld.image, 52, 64)
+    wr16(ld.image, 58, 64)
+    wr16(ld.image, 60, im.section_count)
+    wr16(ld.image, 62, im.shstrtab_section)
+    try ls_write_phdrs()
+    ls_emit_symbols(&im)
+    ls_emit_relas(&im)
+    ls_write_shdrs(&im)
+}
+
 fn stat_or_die(path Bytes, st handle[Stat]) void fails {
     os_stat(path.p, st, true) catch e { try die_io(c"stat", path, e) }
 }
@@ -1055,6 +1162,10 @@ fn link_and_publish() void fails {
         vec_push(&paths, c.version_script)
         vec_push(&ld.expanded, c.version_script)
     }
+    if c.has_script {
+        vec_push(&paths, c.script)
+        vec_push(&ld.expanded, c.script)
+    }
     discard bool = false
     if !in_mem {
         // the map is checked before the executable, and published (inside the
@@ -1069,8 +1180,9 @@ fn link_and_publish() void fails {
         discard = exists && try null_output(output, &st)
     }
     vec_free(&paths)
+    if c.has_script { try ls_parse(c.script, try input_read(c.script, 4 * 1024 * 1024)) }
     try resolve()
-    try build_image()
+    if c.has_script { try build_image_script() } else { try build_image() }
     try build_id_emit()
     phase_end(PH_EMIT, &ld.emit_start)
     if in_mem {

@@ -4,7 +4,8 @@ The OCaml linker (`src/linker`, about 8,900 lines) is the specification:
 single-threaded, byte-exact, with strict work limits and exact diagnostics.
 `fas-ld` (`ld/*.fas`) is a freestanding Fas implementation (no libc, built on
 `lib/`) designed for many-core CPUs and in-process embedding while remaining
-**byte-identical** to the OCaml linker across all thread counts.
+**byte-identical** to the OCaml linker across all thread counts for their
+shared modes. Executable linker scripts use ld.lld as their reference.
 
 ## Contract
 
@@ -32,6 +33,8 @@ single-threaded, byte-exact, with strict work limits and exact diagnostics.
 | `ld/shared.fas` | Parallel-safe ELF64 x86-64 `ET_DYN` shared-object reader (`shared_is`, `shared_parse`, SysV/GNU hash & verdef/verneed/versym validation, `sh_find_location`). |
 | `ld/archive.fas` | SysV/GNU and thin archive reader (including nested thin members), `-l` library search, lazy GNU extraction (`extract`). |
 | `ld/script.fas` | Bounded linker script lexer/parser (`INPUT`, `GROUP`, `AS_NEEDED`, `SEARCH_DIR`, `OUTPUT_FORMAT`) and `--sysroot` normalization. |
+| `ld/lscript.fas` | Executable linker-script parser, input section selection, script symbols, and convergent address assignment. |
+| `ld/limage.fas` | Scripted ELF file offsets, PHDRs, section fills, symbol table, and retained RELA records. |
 | `ld/shdeps.fas` | `$ORIGIN`/`${ORIGIN}` expansion, transitive `DT_NEEDED` loading (`-rpath-link`, `DT_RUNPATH`, inherited `DT_RPATH`), and link-time validation. |
 | `ld/resolve.fas` | Input staging, parallel `.o`/`.so` parsing with input-order diagnostics, global symbol resolution, COMDAT, commons, predefined symbols, `shdeps_load`. |
 | `ld/verscript.fas` | Version script parser and glob/exact visibility policy. |
@@ -80,6 +83,42 @@ Passes execute serially on the main thread; data-parallel passes fan out over
    - `unwind_emit`, `ifunc_emit`, `dyn_emit`, symtab/headers, `build_id_emit`
 5. **Publish**: Either captured in memory (`LdVfs.in_memory`) or atomically
    written to disk (`file_write_atomic`).
+
+## Executable linker scripts
+
+`-T PATH` and `--script=PATH` select the static x86-64 script path.
+`ENTRY` sets the entry symbol, with `-e` taking precedence. `-q` or
+`--emit-relocs` retains RELA records against output symbols and sections.
+`--discard-none` retains local symbols. `--orphan-handling=error` reports
+unassigned input sections as link errors. Without it, a link requiring
+orphan placement returns exit 3.
+
+The parser recognizes the x86-64 kernel's `OUTPUT_FORMAT`, `OUTPUT_ARCH`,
+`PHDRS`, and `SECTIONS` directives. It supports `PT_LOAD` and `PT_NOTE`,
+section addresses, `AT`, `ALIGN`, `(INFO)`, fixed fill patterns, and
+`/DISCARD/`. Input descriptions use the `*` file selector with section
+patterns, optionally wrapped in `KEEP` and `SORT`. Integer expressions can
+reference symbols, the location counter, section addresses and sizes.
+Assignments and referenced `PROVIDE` definitions participate in symbol
+resolution. Address assignment iterates until sections and script symbols
+stabilize, then checks assertions and applies relocations using the final
+addresses. The symbol table preserves each script symbol's output section
+and type where the expression carries them.
+
+The script path supports the Linux defconfig final link. Unsupported
+directives and combinations return exit 3. These include `MEMORY` and
+`OVERLAY`, named input-file patterns, explicit data emission, `COMMON`,
+TLS, IFUNC, GOT relocations, lazy archive extraction, and script mode
+combined with PIE, shared output, section GC, maps, or `-r`. Archives
+listed under `--whole-archive` are supported. The supported explicit metadata layout
+places `.symtab`, `.strtab` and `.shstrtab` in order after content. The
+linker uses its existing whole-image build-ID algorithm and omits ld.lld's
+synthetic `.comment` section.
+
+`bash test/fas_ld_script.sh` checks the supported layout, script symbols,
+retained relocations, entry override, thread determinism and diagnostics.
+`KERNEL_LD=fas bash test/cc_kernel.sh fcc defconfig` runs the scripted
+final-link path and boots the result.
 
 ## In-Process Library API & VFS (`ld/api.fas`)
 

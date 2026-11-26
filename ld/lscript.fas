@@ -1,0 +1,1209 @@
+// Parser and address assignment for the static ELF linker-script subset.
+// All indices in the AST are one based. Zero means "absent" or absolute.
+const LS_NUMBER u8 = 1
+const LS_SYMBOL u8 = 2
+const LS_ADDR u8 = 3
+const LS_SIZE u8 = 4
+const LS_ABSOLUTE u8 = 5
+const LS_ALIGN u8 = 6
+const LS_ASSERT u8 = 7
+const LS_UNARY u8 = 8
+const LS_BINARY u8 = 9
+
+const LS_SECTION u8 = 1
+const LS_ASSIGN u8 = 2
+const LS_INPUT u8 = 3
+const LS_CHECK u8 = 4
+const LS_PROVIDE u8 = 5
+
+struct LsExpr {
+    kind u8
+    text Bytes
+    left u64
+    right u64
+    number u64
+    at u64
+    height u64
+}
+
+struct LsValue {
+    number u64             // offset when sec != 0
+    sec u64
+    alignment u64          // zero means 1
+    force bool
+    kind u8
+}
+
+struct LsSymbol {
+    name Bytes
+    value LsValue
+    synth u64
+    refs bool
+}
+
+struct LsCmd {
+    kind u8
+    name Bytes
+    arg u64                // expression, or section index
+    id u64                 // script symbol, zero for dot
+    increment bool
+    provide_active bool
+    patterns Vec[LsPattern]
+    inputs Vec[u64]        // packed (object, section)
+    at u64
+}
+
+struct LsPattern {
+    name Bytes
+    sorted bool
+}
+
+struct LsSection {
+    name Bytes
+    addr_expr u64
+    lma_expr u64
+    align_expr u64
+    body Vec[u64]
+    phdrs Vec[u64]
+    phdr_source u64
+    discard bool
+    info bool
+    used bool
+    mentioned bool
+    keep bool
+    count u64
+    first_file u64
+    number u64
+    address u64
+    size u64
+    offset u64
+    alignment u64
+    input_align u64
+    lma u64
+    load u64
+    flags u64
+    kind u32
+    entsize u64
+    fill u64
+    fill_bytes u64
+    sec_sym u64
+}
+
+struct LsPhdr {
+    name Bytes
+    kind u64
+    flags u64
+    explicit_flags bool
+    first u64
+    last u64
+    alignment u64
+}
+
+struct Lscript {
+    path Bytes
+    exprs Vec[LsExpr]
+    cmds Vec[LsCmd]
+    sections Vec[LsSection]
+    phdrs Vec[LsPhdr]
+    syms Vec[LsSymbol]
+    section_names BytesU32Map
+    symbol_names BytesU32Map
+    top Vec[u64]
+    candidates Vec[u64]
+    synth_sections addr
+    dot u64
+    current u64
+    lma u64
+    final_pass bool
+    changed bool
+    explicit_phdrs bool
+    entry_seen bool
+    file_end u64
+}
+
+struct LsLex {
+    data Bytes
+    word Bytes
+    pos u64
+    at u64
+    depth u64
+    quoted bool
+    pattern bool
+}
+
+fn ls_exception(at u64, reason addr, detail Bytes, unsupported bool) void fails {
+    m handle[Buf] = msg()
+    bb(m, ld.lscript.path)
+    bs(m, c": linker script byte ")
+    bu(m, at)
+    bs(m, c": ")
+    bs(m, reason)
+    bb(m, detail)
+    if unsupported { try refuse(cstr_dup(buf_bytes(m))) }
+    try die()
+}
+
+fn ls_bad(l handle[LsLex], reason addr) void fails {
+    try ls_exception(l.at, reason, l.word, true)
+}
+
+fn ls_space(ch u8) bool { return ch == 32 || ch == 9 || ch == 10 || ch == 13 || ch == 12 }
+
+fn ls_name_char(ch u8) bool {
+    return (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) ||
+        (ch >= 97 && ch <= 122) || ch == 46 || ch == 95 || ch == 36
+}
+
+fn ls_next(l handle[LsLex]) void fails {
+    p addr = l.data.p
+    n u64 = l.data.n
+    i u64 = l.pos
+    while i < n {
+        ch u8 = p[u8, i]
+        if ls_space(ch) {
+            i += 1
+        } else if ch == 35 {
+            while i < n && p[u8, i] != 10 { i += 1 }
+        } else if ch == 47 && i + 1 < n && p[u8, i + 1] == 42 {
+            start u64 = i
+            i += 2
+            while i + 1 < n && !(p[u8, i] == 42 && p[u8, i + 1] == 47) { i += 1 }
+            if i + 1 >= n { try ls_exception(start, c"unterminated comment", bytes_empty(), true) }
+            i += 2
+        } else {
+            break
+        }
+    }
+    l.at = i
+    l.quoted = false
+    if i == n {
+        l.pos = i
+        l.word = bytes_empty()
+        return
+    }
+    ch u8 = p[u8, i]
+    if ch == 34 {
+        i += 1
+        start u64 = i
+        while i < n && p[u8, i] != 34 {
+            if p[u8, i] == 0 || p[u8, i] == 92 {
+                try ls_exception(i, c"unsupported quoted character", bytes_empty(), true)
+            }
+            i += 1
+        }
+        if i == n { try ls_exception(l.at, c"unterminated string", bytes_empty(), true) }
+        l.word = bytes(p + start, i - start)
+        l.pos = i + 1
+        l.quoted = true
+        return
+    }
+    if l.pattern && ch != 40 && ch != 41 {
+        while i < n && !ls_space(p[u8, i]) && p[u8, i] != 40 && p[u8, i] != 41 { i += 1 }
+    } else if ls_name_char(ch) {
+        while i < n && ls_name_char(p[u8, i]) { i += 1 }
+    } else if ch == 47 && n - i >= 9 && bytes_is(bytes(p + i, 9), c"/DISCARD/") {
+        i += 9
+    } else {
+        i += 1
+        if i < n {
+            c u8 = p[u8, i]
+            if (c == 61 && (ch == 43 || ch == 61 || ch == 33 || ch == 60 || ch == 62)) ||
+                (ch == c && (ch == 60 || ch == 62 || ch == 38 || ch == 124)) { i += 1 }
+        }
+    }
+    l.word = bytes(p + l.at, i - l.at)
+    l.pos = i
+}
+
+fn ls_is(l handle[LsLex], s addr) bool { return !l.quoted && bytes_is(l.word, s) }
+
+fn ls_take(l handle[LsLex], s addr) bool fails {
+    if !ls_is(l, s) { return false }
+    try ls_next(l)
+    return true
+}
+
+fn ls_expect(l handle[LsLex], s addr) void fails {
+    if !(try ls_take(l, s)) {
+        m Buf = {}
+        bs(&m, c"expected ")
+        bs(&m, s)
+        bs(&m, c", got ")
+        try ls_bad(l, cstr_dup(buf_bytes(&m)))
+    }
+}
+
+fn ls_name(l handle[LsLex]) Bytes fails {
+    name Bytes = l.word
+    if l.quoted || name.n == 0 || !ls_name_char(name.p[u8, 0]) ||
+        (name.p[u8, 0] >= 48 && name.p[u8, 0] <= 57) { try ls_bad(l, c"expected name, got ") }
+    try ls_next(l)
+    return name
+}
+
+fn ls_string(l handle[LsLex]) Bytes fails {
+    if !l.quoted { try ls_bad(l, c"expected string, got ") }
+    s Bytes = l.word
+    try ls_next(l)
+    return s
+}
+
+fn ls_number(l handle[LsLex]) u64 fails {
+    if l.quoted { try ls_bad(l, c"expected number, got ") }
+    raw Bytes = l.word
+    n u64 = 0
+    if bytes_prefix(raw, c"0x") || bytes_prefix(raw, c"0X") {
+        n = bytes_hex_to_u64(arg_tail(raw, 2)) catch {
+            try ls_bad(l, c"invalid number ")
+            return 0
+        }
+    } else {
+        n = bytes_to_u64(raw) catch {
+            try ls_bad(l, c"invalid number ")
+            return 0
+        }
+    }
+    try ls_next(l)
+    return n
+}
+
+fn ls_expr_node(kind u8, at u64) u64 {
+    e handle[LsExpr] = vec_add(&ld.lscript.exprs)
+    e.kind = kind
+    e.at = at
+    e.height = 1
+    return ld.lscript.exprs.n
+}
+
+fn ls_expr(i u64) handle[LsExpr] { return vec_at(&ld.lscript.exprs, i - 1) }
+fn ls_cmd(i u64) handle[LsCmd] { return vec_at(&ld.lscript.cmds, i - 1) }
+fn ls_sec(i u64) handle[LsSection] { return vec_at(&ld.lscript.sections, i - 1) }
+fn ls_phdr(i u64) handle[LsPhdr] { return vec_at(&ld.lscript.phdrs, i - 1) }
+fn ls_sym(i u64) handle[LsSymbol] { return vec_at(&ld.lscript.syms, i - 1) }
+
+fn ls_children(e handle[LsExpr], left u64, right u64) void fails {
+    e.left = left
+    e.right = right
+    if left != 0 { e.height = ls_expr(left).height + 1 }
+    if right != 0 { e.height = umax(e.height, ls_expr(right).height + 1) }
+    if e.height > 128 { try ls_exception(e.at, c"expression nesting limit", bytes_empty(), true) }
+}
+
+fn ls_prec(l handle[LsLex]) u64 {
+    if ls_is(l, c"*") || ls_is(l, c"/") || ls_is(l, c"%") { return 11 }
+    if ls_is(l, c"<<") || ls_is(l, c">>") { return 10 }
+    if ls_is(l, c"+") || ls_is(l, c"-") { return 9 }
+    if ls_is(l, c"<") || ls_is(l, c"<=") || ls_is(l, c">") || ls_is(l, c">=") { return 8 }
+    if ls_is(l, c"==") || ls_is(l, c"!=") { return 7 }
+    if ls_is(l, c"&") { return 6 }
+    if ls_is(l, c"^") { return 5 }
+    if ls_is(l, c"|") { return 4 }
+    if ls_is(l, c"&&") { return 3 }
+    if ls_is(l, c"||") { return 2 }
+    return 0
+}
+
+fn ls_atom(l handle[LsLex]) u64 fails {
+    at u64 = l.at
+    if try ls_take(l, c"(") {
+        inner u64 = try ls_expression(l, 2)
+        try ls_expect(l, c")")
+        return inner
+    }
+    if ls_is(l, c"~") || ls_is(l, c"!") || ls_is(l, c"-") || ls_is(l, c"+") {
+        op Bytes = l.word
+        try ls_next(l)
+        rhs u64 = try ls_expression(l, 12)
+        i u64 = ls_expr_node(LS_UNARY, at)
+        try ls_children(ls_expr(i), rhs, 0)
+        ls_expr(i).text = op
+        return i
+    }
+    token Bytes = l.word
+    if !l.quoted && token.n != 0 && token.p[u8, 0] >= 48 && token.p[u8, 0] <= 57 {
+        n u64 = try ls_number(l)
+        i u64 = ls_expr_node(LS_NUMBER, at)
+        ls_expr(i).number = n
+        return i
+    }
+    name Bytes = try ls_name(l)
+    if !(try ls_take(l, c"(")) {
+        i u64 = ls_expr_node(LS_SYMBOL, at)
+        ls_expr(i).text = name
+        return i
+    }
+    kind u8 = 0
+    if bytes_is(name, c"ADDR") { kind = LS_ADDR }
+    if bytes_is(name, c"SIZEOF") { kind = LS_SIZE }
+    if bytes_is(name, c"ALIGN") { kind = LS_ALIGN }
+    if bytes_is(name, c"ABSOLUTE") { kind = LS_ABSOLUTE }
+    if bytes_is(name, c"ASSERT") { kind = LS_ASSERT }
+    if kind == 0 { try ls_exception(at, c"unsupported expression function ", name, true) }
+    left u64 = 0
+    right u64 = 0
+    detail Bytes = {}
+    if kind == LS_ADDR || kind == LS_SIZE {
+        detail = try ls_name(l)
+    } else {
+        left = try ls_expression(l, 2)
+        if kind == LS_ALIGN && try ls_take(l, c",") { right = try ls_expression(l, 2) }
+        if kind == LS_ASSERT {
+            try ls_expect(l, c",")
+            detail = try ls_string(l)
+        }
+    }
+    try ls_expect(l, c")")
+    i u64 = ls_expr_node(kind, at)
+    e handle[LsExpr] = ls_expr(i)
+    try ls_children(e, left, right)
+    e.text = detail
+    return i
+}
+
+fn ls_expression(l handle[LsLex], min_prec u64) u64 fails {
+    if l.depth >= 128 { try ls_bad(l, c"expression nesting limit at ") }
+    l.depth += 1
+    left u64 = try ls_atom(l)
+    prec u64 = ls_prec(l)
+    while prec >= min_prec {
+        op Bytes = l.word
+        at u64 = l.at
+        try ls_next(l)
+        right u64 = try ls_expression(l, prec + 1)
+        i u64 = ls_expr_node(LS_BINARY, at)
+        e handle[LsExpr] = ls_expr(i)
+        try ls_children(e, left, right)
+        e.text = op
+        left = i
+        prec = ls_prec(l)
+    }
+    l.depth -= 1
+    return left
+}
+
+fn ls_new_cmd(kind u8, at u64) u64 {
+    c handle[LsCmd] = vec_add(&ld.lscript.cmds)
+    c.kind = kind
+    c.at = at
+    return ld.lscript.cmds.n
+}
+
+fn ls_assignment(l handle[LsLex], name Bytes, kind u8, at u64) u64 fails {
+    increment bool = try ls_take(l, c"+=")
+    if !increment { try ls_expect(l, c"=") }
+    i u64 = ls_new_cmd(kind, at)
+    c handle[LsCmd] = ls_cmd(i)
+    c.name = name
+    c.arg = try ls_expression(l, 2)
+    c.increment = increment
+    if kind == LS_PROVIDE {
+        try ls_expect(l, c")")
+        try ls_take(l, c";")
+    } else {
+        try ls_expect(l, c";")
+    }
+    return i
+}
+
+fn ls_glob_word(l handle[LsLex]) Bytes fails {
+    word Bytes = l.word
+    if l.quoted || word.n == 0 { try ls_bad(l, c"expected section pattern, got ") }
+    for j u64 in 0..word.n {
+        ch u8 = word.p[u8, j]
+        if !ls_name_char(ch) && ch != 42 && ch != 63 && ch != 43 && ch != 45 {
+            try ls_bad(l, c"unsupported section pattern ")
+        }
+    }
+    try ls_next(l)
+    return word
+}
+
+fn ls_input(l handle[LsLex], keep_input bool, at u64) u64 fails {
+    try ls_expect(l, c"*")
+    l.pattern = true
+    try ls_expect(l, c"(")
+    i u64 = ls_new_cmd(LS_INPUT, at)
+    c handle[LsCmd] = ls_cmd(i)
+    while !ls_is(l, c")") {
+        sorted bool = try ls_take(l, c"SORT")
+        if sorted { try ls_expect(l, c"(") }
+        // EXCLUDE_FILE, SORT_BY_* and other wrappers fail at the next '('.
+        pattern Bytes = try ls_glob_word(l)
+        if bytes_is(pattern, c"COMMON") { try ls_exception(at, c"unsupported input section ", pattern, true) }
+        if sorted { try ls_expect(l, c")") }
+        entry handle[LsPattern] = vec_add(&c.patterns)
+        entry.name = pattern
+        entry.sorted = sorted
+    }
+    if c.patterns.n == 0 { try ls_bad(l, c"empty input description at ") }
+    l.pattern = false
+    try ls_expect(l, c")")
+    if keep_input { try ls_expect(l, c")") }
+    return i
+}
+
+fn ls_phdr_index(name Bytes) u64 {
+    for i u64 in 1..ld.lscript.phdrs.n + 1 {
+        if bytes_eq(ls_phdr(i).name, name) { return i }
+    }
+    return 0
+}
+
+fn ls_parse_phdrs(l handle[LsLex]) void fails {
+    if ld.lscript.explicit_phdrs { try ls_bad(l, c"duplicate PHDRS at ") }
+    ld.lscript.explicit_phdrs = true
+    try ls_expect(l, c"{")
+    while !(try ls_take(l, c"}")) {
+        name Bytes = try ls_name(l)
+        if ls_phdr_index(name) != 0 { try ls_exception(l.at, c"duplicate program header ", name, true) }
+        p handle[LsPhdr] = vec_add(&ld.lscript.phdrs)
+        p.name = name
+        p.flags = 4
+        if try ls_take(l, c"PT_LOAD") {
+            p.kind = 1
+        } else if try ls_take(l, c"PT_NOTE") {
+            p.kind = 4
+        } else {
+            try ls_bad(l, c"unsupported program-header type ")
+        }
+        if try ls_take(l, c"FLAGS") {
+            p.explicit_flags = true
+            try ls_expect(l, c"(")
+            p.flags = try ls_number(l)
+            if p.flags > 7 { try ls_bad(l, c"unsupported program-header flags before ") }
+            try ls_expect(l, c")")
+        }
+        try ls_expect(l, c";")
+    }
+}
+
+fn ls_parse_section(l handle[LsLex], name Bytes, at u64) u64 fails {
+    s handle[LsSection] = vec_add(&ld.lscript.sections)
+    si u64 = ld.lscript.sections.n
+    s.name = name
+    s.discard = bytes_is(name, c"/DISCARD/")
+    s.alignment = 1
+    if !s.discard {
+        names handle[BytesU32Map] = &ld.lscript.section_names
+        if map_has(names, name) { try ls_exception(at, c"duplicate output section ", name, true) }
+        map_put(names, name, trunc[u32](si))
+    }
+    if ls_is(l, c"(") {
+        // (INFO) is the only accepted section type. Other parenthesized
+        // forms may still be expressions for the section start address.
+        saved u64 = l.at
+        try ls_next(l)
+        if try ls_take(l, c"INFO") {
+            s.info = true
+            try ls_expect(l, c")")
+        } else if ls_is(l, c"NOLOAD") || ls_is(l, c"READONLY") || ls_is(l, c"TYPE") ||
+            ls_is(l, c"DSECT") || ls_is(l, c"COPY") || ls_is(l, c"OVERLAY") {
+            try ls_bad(l, c"unsupported output section type ")
+        } else {
+            l.pos = saved
+            try ls_next(l)
+        }
+    }
+    if !s.info && !ls_is(l, c":") { s.addr_expr = try ls_expression(l, 2) }
+    try ls_expect(l, c":")
+    if try ls_take(l, c"AT") {
+        try ls_expect(l, c"(")
+        s.lma_expr = try ls_expression(l, 2)
+        try ls_expect(l, c")")
+    }
+    if try ls_take(l, c"ALIGN") {
+        try ls_expect(l, c"(")
+        s.align_expr = try ls_expression(l, 2)
+        try ls_expect(l, c")")
+    }
+    try ls_expect(l, c"{")
+    while !(try ls_take(l, c"}")) {
+        if try ls_take(l, c";") { continue }
+        pos u64 = l.at
+        keep_input bool = try ls_take(l, c"KEEP")
+        if keep_input { try ls_expect(l, c"(") }
+        if keep_input || ls_is(l, c"*") {
+            vec_push(&s.body, try ls_input(l, keep_input, pos))
+        } else if !s.discard && try ls_take(l, c"CONSTRUCTORS") {
+            // No constructor table is synthesized in ELF.
+        } else if !s.discard && (ls_is(l, c"PROVIDE") || ls_is(l, c"ASSERT")) {
+            vec_push(&s.body, try ls_special(l))
+        } else if !s.discard {
+            symbol Bytes = try ls_name(l)
+            vec_push(&s.body, try ls_assignment(l, symbol, LS_ASSIGN, pos))
+        } else {
+            try ls_bad(l, c"unsupported /DISCARD/ command ")
+        }
+    }
+    while try ls_take(l, c":") {
+        ph Bytes = try ls_name(l)
+        // Program headers can occur later in the script.
+        cmd u64 = ls_new_cmd(0, at)
+        ls_cmd(cmd).name = ph
+        vec_push(&s.phdrs, cmd)
+    }
+    if try ls_take(l, c"=") {
+        s.fill = try ls_number(l)
+        s.fill_bytes = 4
+        if s.fill > 0xffffffff {
+            try ls_exception(at, c"unsupported fill pattern for ", name, true)
+        }
+    }
+    if s.discard && (s.addr_expr != 0 || s.lma_expr != 0 || s.align_expr != 0 ||
+        s.info || s.phdrs.n != 0 || s.fill_bytes != 0) { try ls_exception(at, c"unsupported /DISCARD/ attributes", bytes_empty(), true) }
+    i u64 = ls_new_cmd(LS_SECTION, at)
+    ls_cmd(i).arg = si
+    return i
+}
+
+fn ls_special(l handle[LsLex]) u64 fails {
+    at u64 = l.at
+    if try ls_take(l, c"PROVIDE") {
+        try ls_expect(l, c"(")
+        name Bytes = try ls_name(l)
+        if bytes_is(name, c".") || ls_is(l, c"+=") { try ls_bad(l, c"unsupported PROVIDE assignment at ") }
+        return try ls_assignment(l, name, LS_PROVIDE, at)
+    }
+    arg u64 = try ls_atom(l)
+    if ls_expr(arg).kind != LS_ASSERT { try ls_exception(at, c"expected ASSERT", bytes_empty(), true) }
+    i u64 = ls_new_cmd(LS_CHECK, at)
+    ls_cmd(i).arg = arg
+    return i
+}
+
+fn ls_parse(path Bytes, data Bytes) void fails {
+    ld.lscript.path = path
+    lex LsLex = {}
+    l handle[LsLex] = &lex
+    l.data = data
+    try ls_next(l)
+    sections_seen bool = false
+    while l.word.n != 0 || l.quoted {
+        if try ls_take(l, c";") { continue }
+        at u64 = l.at
+        if try ls_take(l, c"SECTIONS") {
+            if sections_seen { try ls_bad(l, c"duplicate SECTIONS at ") }
+            sections_seen = true
+            try ls_expect(l, c"{")
+            while !(try ls_take(l, c"}")) {
+                if try ls_take(l, c";") { continue }
+                i u64 = 0
+                pos u64 = l.at
+                if ls_is(l, c"PROVIDE") || ls_is(l, c"ASSERT") {
+                    i = try ls_special(l)
+                } else {
+                    name Bytes = l.word
+                    if !(try ls_take(l, c"/DISCARD/")) { name = try ls_name(l) }
+                    if ls_is(l, c"=") || ls_is(l, c"+=") {
+                        i = try ls_assignment(l, name, LS_ASSIGN, pos)
+                    } else {
+                        i = try ls_parse_section(l, name, pos)
+                    }
+                }
+                vec_push(&ld.lscript.top, i)
+            }
+        } else if try ls_take(l, c"PHDRS") {
+            try ls_parse_phdrs(l)
+        } else if try ls_take(l, c"OUTPUT_FORMAT") {
+            try ls_expect(l, c"(")
+            target Bytes = try ls_string(l)
+            if !bytes_is(target, c"elf64-x86-64") { try ls_exception(at, c"unsupported output format ", target, true) }
+            try ls_expect(l, c")")
+        } else if try ls_take(l, c"OUTPUT_ARCH") {
+            try ls_expect(l, c"(")
+            try ls_expect(l, c"i386")
+            try ls_expect(l, c":")
+            try ls_expect(l, c"x86")
+            try ls_expect(l, c"-")
+            try ls_expect(l, c"64")
+            try ls_expect(l, c")")
+        } else if try ls_take(l, c"ENTRY") {
+            if ld.lscript.entry_seen { try ls_bad(l, c"duplicate ENTRY at ") }
+            ld.lscript.entry_seen = true
+            try ls_expect(l, c"(")
+            name Bytes = try ls_name(l)
+            try ls_expect(l, c")")
+            if !config().entry_set { config().entry = name }
+        } else {
+            i u64 = 0
+            if ls_is(l, c"PROVIDE") || ls_is(l, c"ASSERT") {
+                i = try ls_special(l)
+            } else {
+                name Bytes = try ls_name(l)
+                if !ls_is(l, c"=") && !ls_is(l, c"+=") {
+                    try ls_exception(at, c"unsupported directive ", name, true)
+                }
+                i = try ls_assignment(l, name, LS_ASSIGN, at)
+            }
+            vec_push(&ld.lscript.top, i)
+        }
+    }
+    if !sections_seen { try ls_bad(l, c"expected SECTIONS, got ") }
+    for i u64 in 1..ld.lscript.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        for j u64 in 0..s.phdrs.n {
+            c handle[LsCmd] = ls_cmd(vec_get(&s.phdrs, j))
+            ph u64 = ls_phdr_index(c.name)
+            if ph == 0 { try ls_exception(c.at, c"unsupported or undefined program header ", c.name, true) }
+            s.phdrs.p[u64, j] = ph
+        }
+    }
+}
+
+// ---------- binding script names ----------
+
+fn ls_lookup(names handle[BytesU32Map], name Bytes) u64 {
+    p addr = map_val_addr(names, name)
+    return if p == null { 0 } else { zext[u64](p[u32]) }
+}
+
+fn ls_mark_refs(i u64) void fails {
+    if i == 0 { return }
+    e handle[LsExpr] = ls_expr(i)
+    if e.kind == LS_ADDR || e.kind == LS_SIZE {
+        s u64 = ls_lookup(&ld.lscript.section_names, e.text)
+        if s == 0 { try ls_exception(e.at, c"unknown output section ", e.text, false) }
+        ls_sec(s).mentioned = true
+        if e.kind == LS_ADDR { ls_sec(s).used = true }
+        e.number = s
+    }
+    if e.kind == LS_SYMBOL {
+        s u64 = ls_lookup(&ld.lscript.symbol_names, e.text)
+        if s != 0 { ls_sym(s).refs = true }
+    }
+    try ls_mark_refs(e.left)
+    try ls_mark_refs(e.right)
+}
+
+fn ls_resolve_symbols() void fails {
+    sc handle[Lscript] = &ld.lscript
+    for i u64 in 1..sc.cmds.n + 1 {
+        cmd handle[LsCmd] = ls_cmd(i)
+        if (cmd.kind != LS_ASSIGN && cmd.kind != LS_PROVIDE) || bytes_is(cmd.name, c".") { continue }
+        id u64 = ls_lookup(&sc.symbol_names, cmd.name)
+        if id == 0 {
+            s handle[LsSymbol] = vec_add(&sc.syms)
+            id = sc.syms.n
+            s.name = cmd.name
+            map_put(&sc.symbol_names, cmd.name, trunc[u32](id))
+        }
+        cmd.id = id
+        if cmd.kind == LS_ASSIGN {
+            if cmd.increment && ls_sym(id).synth == 0 {
+                try ls_exception(cmd.at, c"symbol += requires an earlier script assignment to ", cmd.name, true)
+            }
+            ls_sym(id).synth = NONE64
+        }
+    }
+    for i u64 in 1..sc.cmds.n + 1 {
+        cmd handle[LsCmd] = ls_cmd(i)
+        if cmd.kind == LS_ASSIGN || cmd.kind == LS_CHECK { try ls_mark_refs(cmd.arg) }
+    }
+    for i u64 in 1..sc.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        try ls_mark_refs(s.addr_expr)
+        try ls_mark_refs(s.lma_expr)
+        try ls_mark_refs(s.align_expr)
+    }
+    // Activate PROVIDE only for undefined names that already have a reference.
+    // An activated PROVIDE can in turn reference another PROVIDE.
+    activated bool = true
+    while activated {
+        activated = false
+        for i u64 in 1..sc.cmds.n + 1 {
+            cmd handle[LsCmd] = ls_cmd(i)
+            if cmd.kind != LS_PROVIDE { continue }
+            s handle[LsSymbol] = ls_sym(cmd.id)
+            if s.synth != 0 { continue }
+            g u32 = find(s.name)
+            if (s.refs || g != NONE) && (g == NONE || gsym(g).def_kind == DEF_NONE) {
+                s.synth = NONE64
+                cmd.provide_active = true
+                try ls_mark_refs(cmd.arg)
+                activated = true
+            }
+        }
+    }
+    count u64 = 1
+    for i u64 in 1..sc.syms.n + 1 {
+        s handle[LsSymbol] = ls_sym(i)
+        if s.synth != 0 {
+            s.synth = count
+            count += 1
+        }
+    }
+    if count == 1 { return }
+    f u64 = ld.nobj
+    ld.script_file = f
+    o handle[Obj] = try new_object(c"<script symbols>")
+    o.nsym = trunc[u32](count)
+    o.syms = heap_alloc_zeroed(count * sizeof[Sym])
+    l handle[Lx] = lx(f)
+    l.discarded = heap_alloc_zeroed(1)
+    l.gid = heap_alloc_zeroed(count * 4)
+    l.gid[u32, 0] = NONE
+    sc.synth_sections = heap_alloc_zeroed(count * 8)
+    for i u64 in 1..sc.syms.n + 1 {
+        s handle[LsSymbol] = ls_sym(i)
+        n u64 = s.synth
+        if n == 0 { continue }
+        id u32 = get(s.name)
+        vis u8 = gsym(id).visibility
+        set_res(id, f, n, vis)
+        y handle[Sym] = synth_sym(o, n, s.name)
+        y.binding = 1
+        y.visibility = vis
+        y.section = 0xfff1
+        l.gid[u32, n] = id
+    }
+}
+
+// ---------- matching input sections ----------
+
+fn ls_input_kind(kind u32) bool {
+    return kind == 1 || kind == 7 || kind == 8 || kind == 14 || kind == 15 || kind == 16
+}
+
+fn ls_match(pattern Bytes, name Bytes) bool {
+    // Retry only at the rightmost '*' when the suffix fails to match.
+    p u64 = 0
+    n u64 = 0
+    star u64 = NONE64
+    retry u64 = 0
+    while n < name.n {
+        c u8 = if p < pattern.n { pattern.p[u8, p] } else { 0 }
+        if c == 42 {
+            star = p
+            retry = n
+            p += 1
+        } else if c == 63 || (p < pattern.n && c == name.p[u8, n]) {
+            p += 1
+            n += 1
+        } else if star != NONE64 {
+            retry += 1
+            n = retry
+            p = star + 1
+        } else {
+            return false
+        }
+    }
+    while p < pattern.n && pattern.p[u8, p] == 42 { p += 1 }
+    return p == pattern.n
+}
+
+fn ls_packed_less(a u64, b u64) bool { return a < b }
+
+fn ls_name_less(a u64, b u64) bool {
+    c i32 = bytes_cmp(sec(obj(pk_file(a)), pk_sec(a)).name, sec(obj(pk_file(b)), pk_sec(b)).name)
+    return c < 0 || (c == 0 && a < b)
+}
+
+fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
+    sc handle[Lscript] = &ld.lscript
+    before_sort u64 = 0
+    inputs handle[Vec[u64]] = &cmd.inputs
+    for i u64 in 0..cmd.patterns.n {
+        pat handle[LsPattern] = vec_at(&cmd.patterns, i)
+        start u64 = inputs.n
+        for j u64 in 0..sc.candidates.n {
+            x u64 = vec_get(&sc.candidates, j)
+            f u64 = pk_file(x)
+            k u64 = pk_sec(x)
+            p handle[Place] = place(f, k)
+            if p.valid != 0 || !kept(f, k) { continue }
+            name Bytes = sec(obj(f), k).name
+            if !s.discard && bytes_is(name, c".note.GNU-stack") { continue }
+            if !ls_match(pat.name, name) { continue }
+            if s.discard {
+                lx(f).kept[u8, k] = 0
+            } else {
+                p.valid = 1
+                p.output_index = trunc[u32](si)
+                vec_push(inputs, x)
+            }
+        }
+        if pat.sorted {
+            sort[u64, ls_packed_less](inputs.p + before_sort * 8, start - before_sort)
+            sort[u64, ls_name_less](inputs.p + start * 8, inputs.n - start)
+            before_sort = inputs.n
+        }
+    }
+    sort[u64, ls_packed_less](inputs.p + before_sort * 8, inputs.n - before_sort)
+    for j u64 in 0..inputs.n {
+        x u64 = vec_get(inputs, j)
+        f u64 = pk_file(x)
+        h handle[Sec] = sec(obj(f), pk_sec(x))
+        if s.count == 0 {
+            s.first_file = f
+            s.flags = h.flags
+            s.kind = h.kind
+            s.entsize = h.entsize
+        } else {
+            s.flags |= h.flags
+            if s.kind != h.kind {
+                // An ordinary PROGBITS input makes the output file-backed.
+                s.kind = 1
+            }
+            if s.entsize != h.entsize { s.entsize = 0 }
+        }
+        s.count += 1
+        s.alignment = umax(s.alignment, h.alignment)
+    }
+}
+
+fn ls_match_inputs() void fails {
+    sc handle[Lscript] = &ld.lscript
+    for f u64 in 0..ld.nobj {
+        o handle[Obj] = obj(f)
+        lx(f).place = heap_alloc_zeroed((zext[u64](o.nsec) + 1) * sizeof[Place])
+        for k u64 in 1..zext[u64](o.nsec) {
+            h handle[Sec] = sec(o, k)
+            if kept(f, k) && ls_input_kind(h.kind) {
+                vec_push(&sc.candidates, (f << 32) | k)
+            }
+        }
+    }
+    inherited u64 = 2
+    def_section u64 = 0
+    for i u64 in 1..sc.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        s.keep = s.used
+        for j u64 in 0..s.body.n {
+            c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+            if c.kind == LS_INPUT {
+                ls_select(s, i, c)
+            } else if c.kind != LS_PROVIDE || c.provide_active {
+                s.keep = true
+            }
+        }
+        if s.discard { continue }
+        s.keep = s.keep || s.count != 0
+        if s.count == 0 {
+            s.kind = 1
+            s.flags = inherited & 3
+        }
+        s.flags &= ~0x200
+        if s.info { s.flags &= ~2 }
+        if (s.flags & 2) != 0 {
+            if s.phdrs.n != 0 {
+                def_section = i
+            }
+            s.phdr_source = def_section
+        }
+        s.input_align = s.alignment
+        if s.keep { inherited = s.flags }
+    }
+    for j u64 in 0..sc.candidates.n {
+        x u64 = vec_get(&sc.candidates, j)
+        f u64 = pk_file(x)
+        k u64 = pk_sec(x)
+        if !kept(f, k) { continue }
+        h handle[Sec] = sec(obj(f), k)
+        if place(f, k).valid != 0 { continue }
+        // GNU-stack is a marker, not an output section. Empty conventional
+        // sections from an assembler can disappear without becoming orphans.
+        if bytes_is(h.name, c".note.GNU-stack") ||
+            (h.size == 0 && (bytes_is(h.name, c".text") || bytes_is(h.name, c".data") || bytes_is(h.name, c".bss"))) {
+            lx(f).kept[u8, k] = 0
+            continue
+        }
+        m handle[Buf] = msg()
+        bb(m, obj(f).path)
+        bs(m, c": orphan input section ")
+        bb(m, h.name)
+        if !config().orphan_error { try refuse(cstr_dup(buf_bytes(m))) }
+        try die()
+    }
+}
+
+// ---------- address assignment ----------
+
+fn ls_abs(v handle[LsValue]) bool { return v.force || v.sec == 0 }
+
+fn ls_base(v handle[LsValue]) u64 {
+    return if v.sec != 0 { ls_sec(v.sec).address } else { 0 }
+}
+
+fn ls_align(x u64, a u64) u64 {
+    if a <= 1 { return x }
+    rem u64 = x % a
+    return if rem == 0 { x } else { x + (a - rem) }
+}
+
+fn ls_value(v handle[LsValue]) u64 { return ls_align(ls_base(v) + v.number, v.alignment) }
+
+fn ls_named(e handle[LsExpr], out handle[LsValue]) void fails {
+    sc handle[Lscript] = &ld.lscript
+    if bytes_is(e.text, c".") {
+        out.sec = sc.current
+        out.number = sc.dot - ls_base(out)
+        return
+    }
+    id u64 = ls_lookup(&sc.symbol_names, e.text)
+    if id != 0 && ls_sym(id).synth != 0 {
+        mem_copy(handle_addr(out), &ls_sym(id).value, sizeof[LsValue])
+        return
+    }
+    g u32 = find(e.text)
+    if g != NONE && gsym(g).has_res != 0 {
+        sy handle[GSym] = gsym(g)
+        f u64 = zext[u64](sy.res_file)
+        y handle[Sym] = sym(obj(f), zext[u64](sy.res_sym))
+        out.kind = y.kind
+        if y.section == 0xfff1 {
+            out.number = y.value
+            return
+        }
+        p handle[Place] = place(f, zext[u64](y.section))
+        if p.valid != 0 {
+            out.sec = zext[u64](p.output_index)
+            out.number = p.address + y.value - ls_base(out)
+            return
+        }
+    }
+    if sc.final_pass { try ls_exception(e.at, c"undefined symbol ", e.text, false) }
+}
+
+fn ls_binary(e handle[LsExpr], out handle[LsValue]) void fails {
+    left LsValue = {}
+    right LsValue = {}
+    a handle[LsValue] = &left
+    b handle[LsValue] = &right
+    try ls_eval(e.left, a)
+    op Bytes = e.text
+    x u64 = ls_value(a)
+    if (bytes_is(op, c"&&") && x == 0) || (bytes_is(op, c"||") && x != 0) {
+        out.number = if x == 0 { 0 } else { 1 }
+        return
+    }
+    try ls_eval(e.right, b)
+    y u64 = ls_value(b)
+    if bytes_is(op, c"+") || bytes_is(op, c"&") || bytes_is(op, c"|") || bytes_is(op, c"^") {
+        if a.sec == 0 || (a.force && !ls_abs(b)) {
+            temp handle[LsValue] = a
+            a = b
+            b = temp
+            x = ls_value(a)
+            y = ls_value(b)
+        }
+        if !ls_abs(b) {
+            if ld.lscript.final_pass { try ls_exception(e.at, c"at least one side must be absolute for ", op, false) }
+            return
+        }
+        out.sec = a.sec
+        out.force = a.force
+        if bytes_is(op, c"+") { out.number = x + y - ls_base(a) }
+        else if bytes_is(op, c"&") { out.number = (x & y) - ls_base(a) }
+        else if bytes_is(op, c"|") { out.number = (x | y) - ls_base(a) }
+        else { out.number = (x ^ y) - ls_base(a) }
+    } else if bytes_is(op, c"-") {
+        if ls_abs(a) || ls_abs(b) { out.sec = a.sec }
+        out.number = x - y - ls_base(out)
+    } else if bytes_is(op, c"*") {
+        out.number = x * y
+    } else if bytes_is(op, c"/") || bytes_is(op, c"%") {
+        if y == 0 {
+            if ld.lscript.final_pass { try ls_exception(e.at, c"division by zero", bytes_empty(), false) }
+        } else {
+            out.number = if bytes_is(op, c"/") { x / y } else { x % y }
+        }
+    } else if bytes_is(op, c"<<") || bytes_is(op, c">>") {
+        if y >= 64 {
+            if ld.lscript.final_pass { try ls_exception(e.at, c"shift count out of range", bytes_empty(), false) }
+        } else {
+            out.number = if bytes_is(op, c"<<") { x << y } else { x >> y }
+        }
+    } else {
+        cond bool = false
+        if bytes_is(op, c"<") { cond = x < y }
+        else if bytes_is(op, c"<=") { cond = x <= y }
+        else if bytes_is(op, c">") { cond = x > y }
+        else if bytes_is(op, c">=") { cond = x >= y }
+        else if bytes_is(op, c"==") { cond = x == y }
+        else if bytes_is(op, c"!=") { cond = x != y }
+        else { cond = y != 0 }
+        out.number = if cond { 1 } else { 0 }
+    }
+}
+
+fn ls_eval(i u64, out handle[LsValue]) void fails {
+    e handle[LsExpr] = ls_expr(i)
+    mem_set(handle_addr(out), 0, sizeof[LsValue])
+    switch e.kind {
+        case LS_NUMBER: out.number = e.number
+        case LS_SYMBOL: try ls_named(e, out)
+        case LS_ADDR: out.sec = e.number
+        case LS_SIZE: out.number = ls_sec(e.number).size
+        case LS_ABSOLUTE:
+            try ls_eval(e.left, out)
+            out.force = true
+        case LS_ALIGN:
+            align_value LsValue = {}
+            if e.right == 0 {
+                try ls_eval(e.left, &align_value)
+                out.number = ls_align(ld.lscript.dot, ls_value(&align_value))
+            } else {
+                try ls_eval(e.left, out)
+                try ls_eval(e.right, &align_value)
+                out.alignment = ls_value(&align_value)
+            }
+        case LS_ASSERT:
+            // ASSERT evaluates to dot, so ". = ASSERT(...)" leaves it alone.
+            out.number = ld.lscript.dot
+            if ld.lscript.final_pass {
+                value u64 = try ls_eval_number(e.left)
+                if value == 0 { try ls_exception(e.at, c"assertion failed: ", e.text, false) }
+            }
+        case LS_UNARY:
+            if bytes_is(e.text, c"+") {
+                try ls_eval(e.left, out)
+            } else {
+                value u64 = try ls_eval_number(e.left)
+                if bytes_is(e.text, c"~") { out.number = ~value }
+                else if bytes_is(e.text, c"-") { out.number = 0 - value }
+                else { out.number = if value == 0 { 1 } else { 0 } }
+            }
+        case LS_BINARY: try ls_binary(e, out)
+    }
+}
+
+fn ls_eval_number(i u64) u64 fails {
+    v LsValue = {}
+    try ls_eval(i, &v)
+    return ls_value(&v)
+}
+
+fn ls_assign(c handle[LsCmd], in_section bool) void fails {
+    if c.kind == LS_PROVIDE && !c.provide_active { return }
+    v LsValue = {}
+    try ls_eval(c.arg, &v)
+    if c.kind == LS_CHECK { return }
+    sc handle[Lscript] = &ld.lscript
+    n u64 = ls_value(&v)
+    if c.increment && !ls_abs(&v) && sc.final_pass {
+        try ls_exception(c.at, c"relative right hand side of += for ", c.name, false)
+    }
+    if c.id == 0 {
+        if c.increment { n += sc.dot }
+        if in_section && n < sc.dot {
+            if sc.final_pass { try ls_exception(c.at, c"cannot move the location counter backwards", bytes_empty(), false) }
+            return
+        }
+        sc.dot = n
+    } else {
+        s handle[LsSymbol] = ls_sym(c.id)
+        if c.increment {
+            old handle[LsValue] = &s.value
+            n += ls_value(old)
+            v.sec = old.sec
+            v.force = old.force
+            v.kind = 0
+        }
+        s.value.sec = if ls_abs(&v) { 0 } else { v.sec }
+        s.value.number = n - ls_base(&s.value)
+        s.value.kind = v.kind
+    }
+}
+
+fn ls_place_section(i u64) void fails {
+    sc handle[Lscript] = &ld.lscript
+    s handle[LsSection] = ls_sec(i)
+    if !s.keep { return }
+    old_address u64 = s.address
+    old_size u64 = s.size
+    old_lma u64 = s.lma
+    old_align u64 = s.alignment
+    old_dot u64 = sc.dot
+    alloc bool = (s.flags & 2) != 0
+    if s.align_expr != 0 {
+        n u64 = try ls_eval_number(s.align_expr)
+        if n != 0 && (n & (n - 1)) == 0 {
+            s.alignment = umax(n, s.input_align)
+        } else if sc.final_pass {
+            try ls_exception(0, c"invalid section alignment for ", s.name, false)
+        }
+    }
+    if !alloc {
+        sc.dot = 0
+        if s.addr_expr != 0 { sc.dot = try ls_eval_number(s.addr_expr) }
+    } else if s.addr_expr != 0 {
+        sc.dot = try ls_eval_number(s.addr_expr)
+    } else {
+        sc.dot = align_up(sc.dot, s.alignment)
+    }
+    s.address = sc.dot
+    sc.current = i
+    if s.lma_expr != 0 { sc.lma = (try ls_eval_number(s.lma_expr)) - sc.dot }
+    s.lma = sc.lma
+    for j u64 in 0..s.body.n {
+        c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+        if c.kind != LS_INPUT {
+            try ls_assign(c, true)
+            continue
+        }
+        for k u64 in 0..c.inputs.n {
+            x u64 = vec_get(&c.inputs, k)
+            f u64 = pk_file(x)
+            si u64 = pk_sec(x)
+            h handle[Sec] = sec(obj(f), si)
+            aligned u64 = align_up(sc.dot, h.alignment)
+            end u64 = aligned + h.size
+            if sc.final_pass && (aligned < sc.dot || end < aligned) {
+                try ls_exception(c.at, c"address range overflows for ", h.name, false)
+            }
+            place(f, si).address = aligned
+            sc.dot = end
+        }
+    }
+    s.size = sc.dot - s.address
+    if !alloc { sc.dot = old_dot }
+    if old_address != s.address || old_size != s.size || old_lma != s.lma || old_align != s.alignment {
+        sc.changed = true
+    }
+}
+
+fn ls_address_pass() void fails {
+    sc handle[Lscript] = &ld.lscript
+    sc.dot = 0
+    sc.current = 0
+    sc.lma = 0
+    for i u64 in 0..sc.top.n {
+        c handle[LsCmd] = ls_cmd(vec_get(&sc.top, i))
+        if c.kind == LS_SECTION {
+            try ls_place_section(c.arg)
+        } else {
+            try ls_assign(c, false)
+        }
+    }
+}
+
+fn ls_addresses() void fails {
+    sc handle[Lscript] = &ld.lscript
+    snapshot addr = heap_alloc_zeroed(sc.syms.n * sizeof[LsValue] + 1)
+    for pass u64 in 0..30 {
+        for i u64 in 0..sc.syms.n {
+            mem_copy(snapshot + i * sizeof[LsValue], &ls_sym(i + 1).value, sizeof[LsValue])
+        }
+        sc.changed = false
+        try ls_address_pass()
+        for i u64 in 0..sc.syms.n {
+            old handle[LsValue] = handle_from_addr(snapshot + i * sizeof[LsValue])
+            v handle[LsValue] = &ls_sym(i + 1).value
+            if old.number != v.number || old.sec != v.sec || old.kind != v.kind { sc.changed = true }
+        }
+        if !sc.changed { break }
+    }
+    if sc.changed { try die_c(c"linker-script addresses did not converge") }
+    sc.final_pass = true
+    try ls_address_pass()
+    if sc.changed { try die_c(c"linker-script addresses changed in the final pass") }
+    for i u64 in 1..sc.syms.n + 1 {
+        s handle[LsSymbol] = ls_sym(i)
+        n u64 = s.synth
+        if n == 0 { continue }
+        y handle[Sym] = sym(obj(ld.script_file), n)
+        y.value = ls_value(&s.value)
+        y.kind = s.value.kind
+        sc.synth_sections[u64, n] = s.value.sec
+    }
+}
