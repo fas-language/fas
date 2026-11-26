@@ -1312,12 +1312,11 @@ fn gen_call(n handle[Ast]) u32 fails {
     if is_direct {
         definition handle[GenInlineDef] = try gen_inline_target(direct_sym, n.loc)
         if definition != null { return try gen_inline_call(n, definition) }
-        gen_note_extern_fn(direct_sym)
     }
 
     // Special case: direct call to `alloca(...)` when not defined in this TU
     if is_direct && direct_sym != null && bytes_eq_c(gen_sym_fir_name(direct_sym), c"alloca") &&
-       !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
+       !direct_sym.defined && !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
         sz_v u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, TY_ULONG)
         return gen_alloca_dyn(sz_v, 16)
     }
@@ -1364,6 +1363,7 @@ fn gen_call(n handle[Ast]) u32 fails {
             if ty_is_ptr(ret_ty) { return gen_const_zero(ret_ty) }
             return gen_convert(try gen_rvalue(result), result.ty, ret_ty)
         }
+        gen_note_extern_fn(direct_sym)
     }
 
     // If K&R / unprototyped call with more args than fixed params and !is_var, mark variadic or use arg_tids

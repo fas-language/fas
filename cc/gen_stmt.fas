@@ -559,6 +559,10 @@ fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
     buf_u8(out, 125)
 }
 
+fn gen_asm_memory_input(cs Bytes) bool {
+    return cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+}
+
 fn gen_inline_asm(n handle[Ast]) void fails {
     is_goto bool = (n.flags & 1) != 0
     is_vol bool = (n.flags & 2) != 0 || n.b == null
@@ -645,7 +649,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         cb Buf = {}
         gen_asm_constraint(inp, &cb)
         cs Bytes = buf_bytes(&cb)
-        is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+        is_m bool = gen_asm_memory_input(cs)
         tied_idx usize = out_tids.n
         if cs.n > 0 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
             tied_idx = bytes_to_u64(cs) catch out_tids.n
@@ -1011,6 +1015,7 @@ fn gen_stmt(n handle[Ast]) void fails {
     defer { gc.debug.scope = enclosing_scope; gc.debug.loc = enclosing_loc }
 
     if n.kind == ND_BLOCK {
+        if !gen_is_terminated() { try gen_asm_block_locals(n) }
         old_cleanups usize = gc.cleanups.n
         old_vlas usize = gc.vla_stack.n
         gc.scope_depth += 1
@@ -1525,7 +1530,6 @@ fn gen_function(node handle[Ast]) void fails {
 
     // Pre-scan for `&&label` so `indirect_br` has the complete target list
     gen_prescan_addr_taken(node.a)
-    gen_asm_entry_locals(node.a)
 
     // Spill all parameters into entry-block allocas so `&param` and mutation always work
     for i u32 in 0..n_params {

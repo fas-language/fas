@@ -13,7 +13,7 @@ for file in "$src"/*.c; do
         asm_goto_inline.c) flags=(-O2 -fno-pie -no-pie) ;;
         asm_symbolic_immediate.c) flags=(-fno-pie -no-pie) ;;
         char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
-        asm_bool_immediate.c|dead_constant_branches.c|goto_into_constant_if_deferred.c|inline_asm_forward_static.c) flags=(-O2) ;;
+        asm_bool_immediate.c|dead_constant_branches.c|goto_into_constant_if_deferred.c|inline_asm_forward_static.c|inline_calls.c|inline_stack_branch.c) flags=(-O2) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
         function_sections.c) flags=(-g) ;;
@@ -36,6 +36,28 @@ for file in "$src"/*.c; do
     "$FCC" "$file" "${flags[@]}" -o "$work/fcc"
     "${runner[@]}" "$work/fcc" > "$work/fcc.out"
     cmp "$work/clang.out" "$work/fcc.out"
+    if [[ ${file##*/} == inline_calls.c ]]; then
+        for opt in -O0 -O2; do
+            "$FCC" "$opt" --emit-fir "$file" -o "$work/inline.fir"
+            grep -q '^func @step ' "$work/inline.fir"
+            if grep -Eq 'call .* @(step|required_step|pointer_home)\(' "$work/inline.fir"; then
+                echo "a direct always_inline call survived at $opt" >&2
+                exit 1
+            fi
+            for sym in recurse varargs with_vla with_setjmp; do
+                grep -q "call .* @$sym(" "$work/inline.fir"
+            done
+            if [[ $opt == -O0 ]]; then
+                grep -q 'call .* @small(' "$work/inline.fir"
+                "$FCC" -O0 "$file" -o "$work/fcc-debug"
+                "$work/fcc-debug" > "$work/fcc-debug.out"
+                cmp "$work/clang.out" "$work/fcc-debug.out"
+            elif grep -q 'call .* @small(' "$work/inline.fir"; then
+                echo "small static inline call survived at $opt" >&2
+                exit 1
+            fi
+        done
+    fi
     if [[ ${file##*/} == asm_string_immediate.c ]]; then
         "$FCC" --emit-fir "$file" -o "$work/string.fir"
         grep -Fq 'in("i" ptr @.Lstr.' "$work/string.fir"
@@ -99,6 +121,28 @@ for file in "$src"/*.c; do
     fi
     echo "PASS: ${file##*/}"
 done
+
+check_inline_error() {
+    local expected=$1 code=$2
+    printf '%s\n' "$code" > "$work/inline-error.c"
+    if "$FCC" -O0 --emit-fir "$work/inline-error.c" -o "$work/inline-error.fir" 2>"$work/inline-error.txt"; then
+        echo "expected an always_inline error for: $code" >&2
+        exit 1
+    fi
+    grep -F "cannot inline always_inline function 'helper': $expected" "$work/inline-error.txt"
+}
+
+check_inline_error 'definition is unavailable' \
+    '__attribute__((always_inline)) int helper(int); int f(int n) { return helper(n); }'
+check_inline_error 'recursive call' \
+    'static inline __attribute__((always_inline)) int helper(int n) { return n ? helper(n-1) : 1; } int f(int n) { return helper(n); }'
+check_inline_error 'function is variadic' \
+    'static inline __attribute__((always_inline)) int helper(int n, ...) { return n; } int f(int n) { return helper(n, 0); }'
+check_inline_error 'body declares a variably modified type' \
+    'static inline __attribute__((always_inline)) int helper(int n) { int a[n]; return sizeof a; } int f(int n) { return helper(n); }'
+check_inline_error 'body calls a returns_twice function' \
+    '__attribute__((returns_twice)) int twice(void); static inline __attribute__((always_inline)) int helper(void) { return twice(); } int f(void) { return helper(); }'
+echo "PASS: required-inline failure diagnostics"
 
 # A single process must release each translation unit before reading the next.
 mkdir "$work/include"

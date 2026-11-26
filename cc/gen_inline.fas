@@ -103,6 +103,48 @@ fn gen_register_inline(node handle[Ast]) void fails {
     _ bool = table_put(&gc.inline_defs, &key, handle_addr(def))
 }
 
+fn gen_inline_active(name u32, def handle[GenInlineDef]) bool {
+    if gc.cur_fn_name == name { return true }
+    active handle[GenInlineFrame] = gc.inline_frame
+    while active != null {
+        if active.fn_sym == def.node.decl { return true }
+        active = active.parent
+    }
+    return false
+}
+
+// Decline an optional expansion if doing it would make a later required
+// call recursive. Traverse only required calls: another optional call
+// can make its own decision when it is reached.
+fn gen_required_reaches_active(n handle[Ast], seen handle[Vec[u32]]) bool {
+    while n != null {
+        if n.kind == ND_CALL {
+            s handle[Symbol] = gen_direct_callee(n.a)
+            if s != null {
+                name u32 = gen_sym_fir_name_id(s)
+                key U64Key = {zext[u64](name)}
+                def handle[GenInlineDef] = handle_from_addr(table_get(&gc.inline_defs, &key) catch null)
+                if def != null && def.refuse == null &&
+                   (gen_has_attr(s.attrs, c"always_inline") || gen_has_attr(def.node.decl.attrs, c"always_inline")) {
+                    if gen_inline_active(name, def) { return true }
+                    visited bool = false
+                    for i usize in 0..seen.n {
+                        if vec_get(seen, i) == name { visited = true; break }
+                    }
+                    if !visited {
+                        vec_push(seen, name)
+                        if gen_required_reaches_active(def.node.a, seen) { return true }
+                    }
+                }
+            }
+        }
+        if gen_required_reaches_active(n.a, seen) || gen_required_reaches_active(n.b, seen) ||
+           gen_required_reaches_active(n.c, seen) || gen_required_reaches_active(n.d, seen) { return true }
+        n = n.next
+    }
+    return false
+}
+
 fn gen_inline_target(s handle[Symbol], loc u32) handle[GenInlineDef] fails {
     key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
     value addr = table_get(&gc.inline_defs, &key) catch null
@@ -110,15 +152,10 @@ fn gen_inline_target(s handle[Symbol], loc u32) handle[GenInlineDef] fails {
     if value == null && !required { return null }
     def handle[GenInlineDef] = handle_from_addr(value)
     why addr = if def == null { c"definition is unavailable" } else { def.refuse }
+    if def != null { required = required || gen_has_attr(def.node.decl.attrs, c"always_inline") }
     if why == null {
-        required = required || gen_has_attr(def.node.decl.attrs, c"always_inline")
         if !required && (gc.optional_inlines >= 96 || gc.inline_depth >= 4) { return null }
-        if gc.cur_fn_name == trunc[u32](key.v) { why = c"recursive call" }
-        active handle[GenInlineFrame] = gc.inline_frame
-        while active != null && why == null {
-            if active.fn_sym == def.node.decl { why = c"recursive call" }
-            active = active.parent
-        }
+        if gen_inline_active(trunc[u32](key.v), def) { why = c"recursive call" }
     }
     if why != null {
         if required {
@@ -133,7 +170,13 @@ fn gen_inline_target(s handle[Symbol], loc u32) handle[GenInlineDef] fails {
         }
         return null
     }
-    if !required { gc.optional_inlines += 1 }
+    if !required {
+        seen Vec[u32] = {}
+        defer { vec_free(&seen) }
+        if (gc.inline_frame != null || gen_has_attr(gc.cur_fn.attrs, c"always_inline")) &&
+            gen_required_reaches_active(def.node.a, &seen) { return null }
+        gc.optional_inlines += 1
+    }
     return def
 }
 
@@ -208,28 +251,58 @@ fn gen_inline_param_fixed(n handle[Ast], param handle[Symbol]) bool {
             if gen_inline_param_lvalue(out.b, param) { return false }
             out = out.next
         }
-    } else if n.kind == ND_DECL && n.decl != null {
-        if !gen_inline_param_fixed(handle_from_addr(n.decl.value), param) { return false }
+        inp handle[Ast] = n.c
+        while inp != null {
+            if gen_inline_param_lvalue(inp.b, param) {
+                constraint Buf = {}
+                gen_asm_constraint(inp, &constraint)
+                needs_slot bool = gen_asm_memory_input(buf_bytes(&constraint))
+                buf_free(&constraint)
+                if needs_slot { return false }
+            }
+            inp = inp.next
+        }
+    } else if n.kind == ND_CALL && gen_inline_param_lvalue(n.b, param) {
+        if n.a == null && bytes_eq_c(cc_name(gc.p.names, n.op), c"__builtin_va_arg") { return false }
+        if n.a != null && n.a.kind == ND_NAME && n.a.decl == null {
+            name Bytes = cc_name(gc.p.names, n.a.op)
+            if bytes_eq_c(name, c"__builtin_ms_va_copy") || bytes_eq_c(name, c"__builtin_ms_va_start") {
+                return false
+            }
+        }
     }
     return gen_inline_param_fixed(n.a, param) && gen_inline_param_fixed(n.b, param) &&
            gen_inline_param_fixed(n.c, param) && gen_inline_param_fixed(n.d, param) &&
            gen_inline_param_fixed(n.next, param)
 }
 
-// Initializers at the top of the function dominate every use. Remember
-// immutable symbolic pointers for immediate operands and inline arguments.
-fn gen_asm_entry_locals(body handle[Ast]) void {
-    if body.kind != ND_BLOCK { return }
+// Leading declarations dominate the rest of the block when control can
+// only enter at its start. Keep immutable scalar initializers for asm
+// immediates, including locals initialized from an inlined parameter.
+fn gen_asm_block_locals(body handle[Ast]) void fails {
     decl handle[Ast] = body.a
+    checked_labels bool = false
     while decl != null && decl.kind == ND_DECL {
         s handle[Symbol] = decl.decl
-        if s != null && s.linkage == 0 && s.storage != SC_STATIC && s.storage != SC_EXTERN &&
-           s.cleanup == null && !s.thread_local && ty_is_ptr(s.ty) &&
-           (ty_quals(s.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0 && s.value != null {
-            value handle[Ast] = handle_from_addr(s.value)
-            if (value.flags & NF_STATIC) != 0 && gen_inline_param_fixed(body, s) {
+        if s != null && s.linkage == 0 && (s.storage == SC_NONE || s.storage == SC_AUTO ||
+           s.storage == SC_REGISTER || s.storage == SC_CONSTEXPR) && s.cleanup == null &&
+           !s.thread_local && (ty_quals(s.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0 && s.value != null &&
+           (ty_is_ptr(s.ty) || ty_is_integer(s.ty)) {
+            value handle[Ast] = try gen_inline_fold(handle_from_addr(s.value), false)
+            constant bool = if ty_is_ptr(s.ty) { (value.flags & NF_STATIC) != 0 }
+                            else { (value.flags & NF_INT_VALUE) != 0 && (value.flags & NF_OVERFLOW) == 0 }
+            if constant && gen_inline_param_fixed(body.a, s) {
+                if !checked_labels {
+                    if cur_switch != null || gen_defines_label(body) { return }
+                    checked_labels = true
+                }
                 key U64Key = {addr_bits(handle_addr(s))}
-                _ bool = table_put(&gc.immediate_locals, &key, handle_addr(se_convert(s.ty, value)))
+                converted handle[Ast] = se_convert(s.ty, value)
+                if gc.inline_frame != null {
+                    _ bool = table_put(&gc.inline_frame.constants, &key, handle_addr(converted))
+                } else {
+                    _ bool = table_put(&gc.immediate_locals, &key, handle_addr(converted))
+                }
             }
         }
         decl = decl.next
@@ -357,7 +430,19 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
         key U64Key = {addr_bits(handle_addr(ps))}
         pointer bool = ty_is_ptr(ps.ty)
         unqualified bool = (ty_quals(ps.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0
-        fixed bool = unqualified && (pointer || arg.expr != null) && gen_inline_param_fixed(node.a, ps)
+        folded handle[Ast] = arg.expr
+        constant handle[Ast] = null
+        if folded != null && unqualified {
+            if ty_is_integer(ps.ty) && ty_int_bits(ps.ty) <= 64 &&
+               ty_is_integer(folded.ty) && (folded.flags & NF_INT_VALUE) != 0 && (folded.flags & NF_OVERFLOW) == 0 {
+                constant = pa_node(ND_INT, folded.loc, ps.ty)
+                constant.value = se_convert(ps.ty, folded).value
+                constant.flags = NF_ICE | NF_STATIC
+            } else if pointer && (folded.flags & NF_STATIC) != 0 {
+                constant = se_convert(ps.ty, folded)
+            }
+        }
+        fixed bool = unqualified && (pointer || constant != null) && gen_inline_param_fixed(node.a, ps)
         if pointer && fixed {
             // Keep a read-only pointer argument in SSA. Storing it in a
             // private home would look like an escape of the pointee to Fir.
@@ -369,23 +454,11 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
             } else { gen_store_ty(av, slot, ty_align(ps.ty), gen_is_volatile(ps.ty), gen_is_atomic(ps.ty)) }
             _ bool = table_put(&gc.locals, &key, slot)
         }
-        folded handle[Ast] = arg.expr
-        if folded != null && unqualified {
-            constant handle[Ast] = null
-            if ty_is_integer(ps.ty) && ty_int_bits(ps.ty) <= 64 &&
-               ty_is_integer(folded.ty) && (folded.flags & (NF_INT_VALUE | NF_OVERFLOW)) == NF_INT_VALUE {
-                constant = pa_node(ND_INT, folded.loc, ps.ty)
-                constant.value = se_value(ps.ty, folded.value)
-                constant.flags = NF_ICE | NF_STATIC
-            } else if ty_is_ptr(ps.ty) && (folded.flags & NF_STATIC) != 0 {
-                constant = se_convert(ps.ty, folded)
-            }
-            if constant != null {
-                if fixed {
-                    _ bool = table_put(&frame.constants, &key, handle_addr(constant))
-                } else if frame.entry_asm != null {
-                    _ bool = table_put(&frame.entry_constants, &key, handle_addr(constant))
-                }
+        if constant != null {
+            if fixed {
+                _ bool = table_put(&frame.constants, &key, handle_addr(constant))
+            } else if frame.entry_asm != null {
+                _ bool = table_put(&frame.entry_constants, &key, handle_addr(constant))
             }
         }
     }
