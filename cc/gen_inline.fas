@@ -449,7 +449,7 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
             _ bool = table_put(&frame.pointer_args, &key, av)
         } else {
             slot u32 = gen_alloca_entry(ty_size(ps.ty), ty_align(ps.ty))
-            if gen_is_mem_ty(ps.ty) || gen_is_wide_bitint(ps.ty) {
+            if gen_is_mem_ty(ps.ty) {
                 gen_memcpy_const(slot, av, ty_size(ps.ty), gen_is_volatile(ps.ty))
             } else { gen_store_ty(av, slot, ty_align(ps.ty), gen_is_volatile(ps.ty), gen_is_atomic(ps.ty)) }
             _ bool = table_put(&gc.locals, &key, slot)
@@ -478,7 +478,7 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
     if !gen_is_terminated() { gen_term_jump(frame.return_block) }
     gen_switch_block(frame.return_block)
     if frame.result == 0 { return gen_const_i32(0) }
-    if gen_is_mem_ty(frame.ret_ty) || gen_is_wide_bitint(frame.ret_ty) { return frame.result }
+    if gen_is_mem_ty(frame.ret_ty) { return frame.result }
     return gen_load_ty(frame.ret_ty, frame.result, ty_align(frame.ret_ty), false, false)
 }
 
@@ -488,7 +488,7 @@ fn gen_inline_return(n handle[Ast]) void fails {
         v u32 = try gen_rvalue(n.a)
         if frame.result != 0 {
             converted u32 = gen_convert(v, n.a.ty, frame.ret_ty)
-            if gen_is_mem_ty(frame.ret_ty) || gen_is_wide_bitint(frame.ret_ty) {
+            if gen_is_mem_ty(frame.ret_ty) {
                 gen_memcpy_const(frame.result, converted, ty_size(frame.ret_ty), false)
             } else { gen_store_ty(converted, frame.result, ty_align(frame.ret_ty), false, false) }
         }

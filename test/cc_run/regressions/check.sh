@@ -40,7 +40,7 @@ for file in "$src"/*.c; do
         for opt in -O0 -O2; do
             "$FCC" "$opt" --emit-fir "$file" -o "$work/inline.fir"
             grep -q '^func @step ' "$work/inline.fir"
-            if grep -Eq 'call .* @(step|required_step|pointer_home)\(' "$work/inline.fir"; then
+            if grep -Eq 'call .* @(step|required_step|pointer_home|wide_value)\(' "$work/inline.fir"; then
                 echo "a direct always_inline call survived at $opt" >&2
                 exit 1
             fi

@@ -73,13 +73,20 @@ static inline __attribute__((always_inline)) int pointer_home(void *p)
     return result;
 }
 
+static inline __attribute__((always_inline)) unsigned _BitInt(97)
+wide_value(unsigned _BitInt(97) x)
+{
+    return (x << 79) | (x + 1);
+}
+
 int main(int argc, char **argv)
 {
     int first = forward(argc);
     int nested = step(2, step(3, 4));
     int indirect = escaped(1, 5);
-    printf("%d %d %d %d %d %d %d %d %d %d %d\n", first, nested, indirect, small(argc),
+    printf("%d %d %d %d %d %d %d %d %d %d %d %d\n", first, nested, indirect, small(argc),
            recurse(5), varargs(1, 4), with_vla(2), with_setjmp(), required_step(argc + 2),
-           pointer_home(argv), pointer_home(NULL));
+           pointer_home(argv), pointer_home(NULL),
+           wide_value(argc + 8) == (((unsigned _BitInt(97))9 << 79) | 10));
     return 0;
 }
