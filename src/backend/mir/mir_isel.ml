@@ -2072,9 +2072,11 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
             let x = match t with F.Int 1 -> Int64.logand l.(0) 1L | F.Int w -> sext_const w l.(0) | _ -> l.(0) in
             match c.imm with Some ok when ok x -> Some (Aimm x) | _ -> None)
         | Some (Czero _ | Cnull _) when c.imm <> None -> Some (Aimm 0L)
-        | Some (Csym (name, add))
-          when c.sym && (not (Hashtbl.mem cx.tls_syms name)) && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
-            Some (Asym (name, add))
+        | _ when c.sym -> (
+            match sym_plus cx.fn v with
+            | Some (name, add) when not (Hashtbl.mem cx.tls_syms name) &&
+                (not cx.pic || Hashtbl.mem cx.local_syms name) -> Some (Asym (name, add))
+            | _ -> None)
         | _ -> None)
   in
   let fixed k = match (con k).regs with [ _ ] -> (con k).tied = None | _ -> false in
