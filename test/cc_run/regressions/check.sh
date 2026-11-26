@@ -13,7 +13,7 @@ for file in "$src"/*.c; do
         asm_goto_inline.c) flags=(-O2 -fno-pie -no-pie) ;;
         asm_symbolic_immediate.c) flags=(-fno-pie -no-pie) ;;
         char_pointer_sign.c|void_function_pointer.c) flags=(-std=c11) ;;
-        asm_bool_immediate.c|dead_constant_branches.c|goto_into_constant_if_deferred.c|inline_asm_forward_static.c|inline_calls.c|inline_stack_branch.c) flags=(-O2) ;;
+        asm_bool_immediate.c|dead_constant_branches.c|goto_into_constant_if_deferred.c|inline_asm_forward_static.c|inline_branch_edges.c|inline_calls.c|inline_known_callee.c|inline_stack_branch.c) flags=(-O2) ;;
         export_dynamic.c) flags=(-Xlinker -export-dynamic -ldl) ;;
         flt_rounds.c) flags=(-lm) ;;
         function_sections.c) flags=(-g) ;;
@@ -77,6 +77,39 @@ for file in "$src"/*.c; do
         readelf -rW "$work/discard.o" | sed -n "/'.rela.discard.noendbr'/,/^$/p" > "$work/relocs"
         grep -q 'contains 2 entries' "$work/relocs"
         grep -q '\.static_call\.text + 0' "$work/relocs"
+    fi
+    if [[ ${file##*/} == asm_local_label_reloc.c ]]; then
+        "$FCC" -c "$file" -o "$work/local-label.o"
+        readelf -sWr "$work/local-label.o" > "$work/elf"
+        sed -n "/'.rela.discard.func_stack_frame_non_standard'/,/^$/p" "$work/elf" > "$work/relocs"
+        grep -Eq 'R_X86_64_64 .* \.rodata \+ 4$' "$work/relocs"
+        grep -Eq 'R_X86_64_64 .* asm_global_template \+ 0$' "$work/relocs"
+        grep -Eq 'NOTYPE +LOCAL .* asm_local_template$' "$work/elf"
+    fi
+    if [[ ${file##*/} == inline_branch_edges.c ]]; then
+        "$FCC" -O2 -DCHECK_SMAP -c "$file" -o "$work/smap.o"
+        objdump --no-show-raw-insn -d --disassemble=smap_guard "$work/smap.o" > "$work/smap"
+        grep -Eq '[[:space:]]stac$' "$work/smap"
+        grep -Eq '[[:space:]]clac$' "$work/smap"
+        [[ $(awk '$2 ~ /^j[a-z]+$/ && $2 != "jmp" { n++ } END { print n+0 }' "$work/smap") == 1 ]]
+    fi
+    if [[ ${file##*/} == inline_known_callee.c ]]; then
+        "$FCC" -O2 --emit-fir "$file" -o "$work/callees.fir"
+        sed -n '/^func @known_callback_path /,/^}/p' "$work/callees.fir" > "$work/callbacks.fir"
+        grep -q '^func @known_callback_path ' "$work/callbacks.fir"
+        if grep -Eq ' = call ' "$work/callbacks.fir"; then
+            echo "the known always_inline callback was not inlined" >&2
+            exit 1
+        fi
+        sed -n '/^func @mutable_callback_path /,/^}/p' "$work/callees.fir" > "$work/callbacks.fir"
+        grep -Eq ' = call .* %v[0-9]+\(' "$work/callbacks.fir"
+        "$FCC" -O2 -mretpoline-external-thunk -c "$file" -o "$work/static-call.o"
+        objdump -dr --disassemble=static_call_path "$work/static-call.o" > "$work/static-call"
+        grep -Eq 'R_X86_64_PLT32[[:space:]]+__SCT__step([+-]|$)' "$work/static-call"
+        if grep -q '__x86_indirect_thunk_' "$work/static-call"; then
+            echo "the static call uses an indirect thunk" >&2
+            exit 1
+        fi
     fi
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then
         llvm-nm-22 "$work/fcc" > "$work/symbols"

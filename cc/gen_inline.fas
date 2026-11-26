@@ -23,6 +23,48 @@ fn gen_direct_callee(n handle[Ast]) handle[Symbol] {
     return null
 }
 
+// Recover a function designator after substituting an immutable pointer
+// argument, or from the final expression of a GNU statement expression.
+// The caller still evaluates the statement expression for its side effects.
+fn gen_known_callee(n handle[Ast], callee_ty u32) handle[Symbol] fails {
+    if !ty_is_func(callee_ty) { return null }
+    if n.kind == ND_BLOCK {
+        tail handle[Ast] = n.a
+        if tail == null { return null }
+        while tail.next != null { tail = tail.next }
+        if tail.kind != ND_STMT || tail.op != 0 || tail.a == null { return null }
+        n = tail.a
+    } else {
+        n = try gen_inline_fold(n, false)
+    }
+    while n != null {
+        if n.kind == ND_CAST {
+            from u32 = se_decay(n.a.ty)
+            if !ty_is_ptr(from) || !ty_compatible(ty_node(from).elem, callee_ty) { return null }
+        } else if n.kind == ND_UNARY {
+            op Bytes = cc_name(gc.p.names, n.op)
+            if !bytes_eq_c(op, c"&") && !bytes_eq_c(op, c"*") { return null }
+        } else {
+            break
+        }
+        n = n.a
+    }
+    if n == null || n.kind != ND_NAME || n.decl == null || !ty_is_func(n.decl.ty) { return null }
+    sym handle[Symbol] = n.decl
+    if ty_node(ty_unqual(sym.ty)).flags != ty_node(callee_ty).flags ||
+       !ty_compatible(ty_unqual(sym.ty), callee_ty) || gen_is_returns_twice(sym) { return null }
+    // An indirect use of an always_inline function remains valid when
+    // its body cannot be substituted, for example on an indirect recursion.
+    name u32 = gen_sym_fir_name_id(sym)
+    key U64Key = {zext[u64](name)}
+    def handle[GenInlineDef] = handle_from_addr(table_get(&gc.inline_defs, &key) catch null)
+    if gen_has_attr(sym.attrs, c"always_inline") ||
+       (def != null && gen_has_attr(def.node.decl.attrs, c"always_inline")) {
+        if def == null || def.refuse != null || gen_inline_active(name, def) { return null }
+    }
+    return sym
+}
+
 fn gen_lazy_inline(s handle[Symbol]) bool {
     return (s.flags & SF_GNU_EXTERN_INLINE) != 0 ||
         ((s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL &&

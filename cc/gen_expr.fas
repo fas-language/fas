@@ -1311,6 +1311,13 @@ fn gen_call(n handle[Ast]) u32 fails {
     }
 
     direct_sym handle[Symbol] = gen_direct_callee(n.a)
+    if direct_sym == null {
+        direct_sym = try gen_known_callee(n.a, callee_ty)
+        if direct_sym != null && n.a.kind == ND_BLOCK {
+            _ u32 = try gen_rvalue(n.a)
+            if gen_is_terminated() { return gen_const_zero(n.ty) }
+        }
+    }
     is_direct bool = direct_sym != null
 
     if is_direct {

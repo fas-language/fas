@@ -223,6 +223,24 @@ let forward_constants f live =
     end) f.blocks;
   let changed = ref false in
   let n = num_blocks f in
+  let edge_loads = Hashtbl.create 8 in
+  let predecessors = lazy (
+    let picks = Array.init n (fun b ->
+      match (block f b).term with Br _ -> b <> entry && Vec.length (block f b).insts <= 24 | _ -> false)
+    in
+    let preds = Array.make n [] in
+    Vec.iteri (fun b (br : block_rec) ->
+      if live.(b) then
+        List.iter (fun (t : target) ->
+          if picks.(t.dest) && t.dest <> b then preds.(t.dest) <- b :: preds.(t.dest)) (targets br.term))
+      f.blocks;
+    preds)
+  in
+  let as_constant ty = function
+    | Some (`Value v) when ty_of f v = ty -> Some v
+    | Some `Zero when (match ty with Int w -> w <= 64 | Ptr _ -> true | _ -> false) -> Some (zero f ty)
+    | _ -> None
+  in
   Hashtbl.iter (fun _ (_, _, events, found) ->
     if !found then begin
       let stores = Hashtbl.create 8 in
@@ -230,16 +248,17 @@ let forward_constants f live =
         | b, `Store v when not (Hashtbl.mem stores b) -> Hashtbl.add stores b v
         | _ -> ()) !events;
       let incoming = Array.make n None in
+      let outgoing b =
+        match Hashtbl.find_opt stores b with
+        | Some last -> last
+        | None -> Option.get incoming.(b)
+      in
       let pending = Queue.create () in
       incoming.(entry) <- Some None;
       Queue.add entry pending;
       while not (Queue.is_empty pending) do
         let b = Queue.take pending in
-        let outgoing =
-          match Hashtbl.find_opt stores b with
-          | Some last -> last
-          | None -> Option.get incoming.(b)
-        in
+        let outgoing = outgoing b in
         List.iter (fun dest ->
           let combined =
             match incoming.(dest) with
@@ -261,19 +280,96 @@ let forward_constants f live =
         match event with
         | `Store v -> state := v
         | `Load ir ->
-            let ty = ty_of f ir.results.(0) in
-            (match !state with
-            | Some (`Value v) when ty_of f v = ty ->
-                replace_all_uses f ir.results.(0) v;
+            let v = ir.results.(0) in
+            let ty = ty_of f v in
+            (match as_constant ty !state with
+            | Some c ->
+                replace_all_uses f v c;
                 ir.op <- Nop;
                 changed := true
-            | Some `Zero when (match ty with Int w -> w <= 64 | Ptr _ -> true | _ -> false) ->
-                replace_all_uses f ir.results.(0) (zero f ty);
-                ir.op <- Nop;
-                changed := true
+            | None when not (Hashtbl.mem stores b) ->
+                List.iter (fun pred ->
+                  Option.iter (fun c -> Hashtbl.add edge_loads (pred, b) (v, c))
+                    (as_constant ty (outgoing pred))) (Lazy.force predecessors).(b)
             | _ -> ())) (List.rev !events)
     end) slots;
-  !changed
+  !changed, edge_loads
+
+(* A private load can have a different constant on each incoming edge.
+   Bypass a short conditional block on edges where we can evaluate all its
+   instructions and resolve the branch. Values defined there must either
+   stay in the block or leave it as explicit successor arguments. *)
+let thread_stack_branches f live edge_loads =
+  if Hashtbl.length edge_loads = 0 then false else
+  let n = num_blocks f in
+  let owners = Array.make (num_values f) (-1) in
+  let define b v = if resolve f v = v then owners.(v) <- b in
+  Vec.iteri (fun b (br : block_rec) ->
+    Array.iter (define b) br.params;
+    Vec.iter (fun i -> Array.iter (define b) (inst f i).results) br.insts) f.blocks;
+  let used_outside = Array.make n false in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      let use v =
+        let owner = owners.(resolve f v) in
+        if owner >= 0 && owner <> b then used_outside.(owner) <- true
+      in
+      Vec.iter (fun i -> iter_op_uses use (inst f i).op) br.insts;
+      iter_term_uses use br.term
+    end) f.blocks;
+  let thread pred t =
+    let b = t.dest in
+    let br = block f b in
+    match br.term, Hashtbl.find_all edge_loads (pred, b) with
+    | Br (c, yes, no, _), (_ :: _ as facts)
+      when not used_outside.(b) && Array.length br.params = Array.length t.args ->
+        let values = Hashtbl.create 8 in
+        let get v =
+          let v = resolve f v in
+          match Hashtbl.find_opt values v with
+          | Some v -> v
+          | None when owners.(v) <> b -> v
+          | None -> raise Exit
+        in
+        Array.iteri (fun k p -> if resolve f p = p then Hashtbl.add values p (resolve f t.args.(k))) br.params;
+        (try
+           Vec.iter (fun i ->
+             let ir = inst f i in
+             match ir.op with
+             | Nop -> ()
+             | _ ->
+                 let value =
+                   match ir.op with
+                   | Load _ -> List.assoc_opt ir.results.(0) facts
+                   | op -> evaluate f { ir with op = map_op_uses get op }
+                 in
+                 match value with
+                 | Some v -> Hashtbl.add values ir.results.(0) v
+                 | None -> raise Exit) br.insts;
+           match int_const f (get c) with
+           | Some (_, bits) ->
+               let dst = if bits = 0L then no else yes in
+               if dst.dest = b then t else { dst with args = Array.map get dst.args }
+           | None -> t
+         with Exit -> t)
+    | _ -> t
+  in
+  let edits = ref [] in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      let edge = thread b in
+      let term =
+        match br.term with
+        | Jump t -> Jump (edge t)
+        | Br (c, yes, no, w) -> Br (c, edge yes, edge no, w)
+        | Switch (v, d, cases, w) ->
+            Switch (v, edge d, Array.map (fun (k, t) -> k, edge t) cases, w)
+        | term -> term
+      in
+      if term <> br.term then edits := (br, term) :: !edits
+    end) f.blocks;
+  List.iter (fun (br, term) -> br.term <- term) !edits;
+  !edits <> []
 
 (* Narrow a switch on a private stack field using an earlier equality
    guard on that field. Stores to disjoint fields preserve the fact. A
@@ -481,7 +577,10 @@ let fold_func ?(forward = false) f =
     changed := false;
     incr rounds;
     let live = reachable f in
-    if forward && forward_constants f live then changed := true;
+    if forward then begin
+      let forwarded, edge_loads = forward_constants f live in
+      if thread_stack_branches f live edge_loads || forwarded then changed := true
+    end;
     (* instructions *)
     Vec.iter
       (fun (br : block_rec) ->

@@ -21,8 +21,7 @@ type extra = {
    .note.GNU-stack, so the other section indices do not move. [extra]
    sections come after it. A symbol defined in an SHF_TLS section is
    STT_TLS; [tls name] marks an undefined one as STT_TLS too. [notype name]
-   marks a defined label as STT_NOTYPE (a plain asm label: objtool accepts
-   only that or STT_FUNC in its annotation sections). *)
+   marks a defined label as STT_NOTYPE (a plain asm label). *)
 let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> false) ?(ifunc = fun _ -> false) ?(notype = fun _ -> false) ?eh_frame
     ?(extra = []) ?(commons = []) ~global ~alignments (input : Elf64.input) =
   let first_extra = if eh_frame = None then 5 else 6 in
@@ -52,7 +51,8 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
      that form (and rejected the old STT_OBJECT labels, silently dropping
      the kernel's ORC and return-site tables). *)
   let resolved_binding name = match binding name with Some b -> b | None -> if global name then 1 else 0 in
-  let labels = Hashtbl.create 16 and section_symbols = Hashtbl.create 8 in
+  let labels = Hashtbl.create 16 and asm_labels = Hashtbl.create 16 in
+  let section_symbols = Hashtbl.create 8 in
   let section_symbol index =
     match Hashtbl.find_opt section_symbols index with
     | Some symbol -> symbol
@@ -67,24 +67,30 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
   in
   List.iter
     (fun (s : Elf64.symbol) ->
-      if String.starts_with ~prefix:".L" s.name && resolved_binding s.name = 0 && not (tls_section s.section) then
-        Hashtbl.replace labels s.name (section s.section, s.offset)
-      else
-      ignore
-        (add
-           {
-             name = s.name;
-             binding = resolved_binding s.name;
-             kind =
-               (if ifunc s.name then 10
-                else if s.func then 2
-                else if tls_section s.section then 6
-                else if notype s.name then 0
-                else 1);
-             visibility = visibility s.name;
-             definition = O.Section (section s.section, Int64.of_int s.offset);
-             size = Int64.of_int s.size;
-           }))
+      let binding = resolved_binding s.name in
+      let index = section s.section in
+      if String.starts_with ~prefix:".L" s.name && binding = 0 && not (tls_section s.section) then
+        Hashtbl.replace labels s.name (index, s.offset)
+      else begin
+        let kind =
+          if ifunc s.name then 10
+          else if s.func then 2
+          else if tls_section s.section then 6
+          else if notype s.name then 0
+          else 1
+        in
+        if kind = 0 && binding = 0 then Hashtbl.replace asm_labels s.name (index, s.offset);
+        ignore
+          (add
+             {
+               name = s.name;
+               binding;
+               kind;
+               visibility = visibility s.name;
+               definition = O.Section (index, Int64.of_int s.offset);
+               size = Int64.of_int s.size;
+             })
+      end)
     input.symbols;
   List.iter
     (fun (name, size, align) ->
@@ -140,8 +146,17 @@ let emit ?(binding = fun _ -> None) ?(visibility = fun _ -> 0) ?(tls = fun _ -> 
                 (offset, symbol, 19, Int64.sub (Int64.of_int addend) 4L)
             | X64.Raw { offset; symbol; kind; addend } -> (offset, symbol, kind, Int64.of_int addend)
           in
+          (* Keep named asm labels in the symbol table, but use a section
+             relocation for plain addresses, as GAS and LLVM do. GOT, TLS,
+             calls and explicit assembler relocations keep their symbol. *)
+          let location =
+            match Hashtbl.find_opt labels name, relocation with
+            | None, (X64.Rel32 _ | X64.Abs32 _ | X64.Abs32s _ | X64.Abs64 _) ->
+                Hashtbl.find_opt asm_labels name
+            | location, _ -> location
+          in
           let symbol, addend =
-            match Hashtbl.find_opt labels name with
+            match location with
             | Some (index, offset) -> (section_symbol index, Int64.add addend (Int64.of_int offset))
             | None -> (reference name, addend)
           in
