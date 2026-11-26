@@ -81,7 +81,7 @@ fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void fails
     }
     gen_note_extern_fn(sym)
     b handle[Buf] = gen_cur_buf()
-    buf_str(b, c"  call (ptr) -> () @")
+    buf_str(b, c"  call (ptr) -> () ")
     gen_emit_sym_name(b, gen_sym_fir_name(sym))
     buf_u8(b, 40)
     gen_emit_val(b, object)
@@ -211,11 +211,12 @@ fn gen_local_decl(n handle[Ast]) void fails {
     // VLA local variable (with per-VLA saved stack pointer so backward `goto` deallocates previous iteration!)
     if gen_type_is_vla(s.ty) {
         sp_slot u32 = gen_alloca_entry(8, 8)
-        // Initialize sp_slot = null in entry block so first entry doesn't restore
-        eb handle[Buf] = gen_entry_buf()
-        buf_str(eb, c"  store ptr null, ")
-        gen_emit_val(eb, sp_slot)
-        buf_str(eb, c", align 8\n")
+        // Reset on function entry, including each execution of an inline copy.
+        current u32 = gc.cur_blk
+        entry u32 = if gc.inline_frame != null { gc.inline_frame.entry_block } else { 0 }
+        gen_switch_block(entry)
+        gen_store_ty(gen_const_zero(TY_NULLPTR), sp_slot, 8, false, false)
+        gen_switch_block(current)
         // If sp_slot != null (re-entered via backward goto), restore stack before re-allocating!
         prev_sp u32 = gen_load_raw(c"ptr", sp_slot, 8, false)
         is_nonnull u32 = gen_icmp(c"ne", prev_sp, gen_const_zero(TY_NULLPTR))

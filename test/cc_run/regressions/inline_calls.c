@@ -55,6 +55,13 @@ static inline int with_vla(int n)
     return a[n - 1] + sizeof a;
 }
 
+static inline __attribute__((always_inline)) int required_vla(unsigned n)
+{
+    int a[n];
+    a[n - 1] = n;
+    return a[n - 1] + sizeof a;
+}
+
 static inline int with_setjmp(void)
 {
     jmp_buf buf;
@@ -84,9 +91,10 @@ int main(int argc, char **argv)
     int first = forward(argc);
     int nested = step(2, step(3, 4));
     int indirect = escaped(1, 5);
-    printf("%d %d %d %d %d %d %d %d %d %d %d %d\n", first, nested, indirect, small(argc),
+    printf("%d %d %d %d %d %d %d %d %d %d %d %d %d\n", first, nested, indirect, small(argc),
            recurse(5), varargs(1, 4), with_vla(2), with_setjmp(), required_step(argc + 2),
            pointer_home(argv), pointer_home(NULL),
-           wide_value(argc + 8) == (((unsigned _BitInt(97))9 << 79) | 10));
+           wide_value(argc + 8) == (((unsigned _BitInt(97))9 << 79) | 10),
+           required_vla(argc + 1) + required_vla(argc + 2));
     return 0;
 }

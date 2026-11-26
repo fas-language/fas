@@ -40,7 +40,7 @@ for file in "$src"/*.c; do
         for opt in -O0 -O2; do
             "$FCC" "$opt" --emit-fir "$file" -o "$work/inline.fir"
             grep -q '^func @step ' "$work/inline.fir"
-            if grep -Eq 'call .* @(step|required_step|pointer_home|wide_value)\(' "$work/inline.fir"; then
+            if grep -Eq 'call .* @(step|required_step|pointer_home|required_vla|wide_value)\(' "$work/inline.fir"; then
                 echo "a direct always_inline call survived at $opt" >&2
                 exit 1
             fi
@@ -138,8 +138,6 @@ check_inline_error 'recursive call' \
     'static inline __attribute__((always_inline)) int helper(int n) { return n ? helper(n-1) : 1; } int f(int n) { return helper(n); }'
 check_inline_error 'function is variadic' \
     'static inline __attribute__((always_inline)) int helper(int n, ...) { return n; } int f(int n) { return helper(n, 0); }'
-check_inline_error 'body declares a variably modified type' \
-    'static inline __attribute__((always_inline)) int helper(int n) { int a[n]; return sizeof a; } int f(int n) { return helper(n); }'
 check_inline_error 'body calls a returns_twice function' \
     '__attribute__((returns_twice)) int twice(void); static inline __attribute__((always_inline)) int helper(void) { return twice(); } int f(void) { return helper(); }'
 echo "PASS: required-inline failure diagnostics"

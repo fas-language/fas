@@ -111,6 +111,8 @@ struct GenInlineDef {
     node handle[Ast]
     refuse addr
     protect bool
+    uses_vla bool
+    uses_alloca bool
 }
 
 struct GenInlineFrame {
@@ -119,12 +121,14 @@ struct GenInlineFrame {
     ret_ty u32
     result u32
     return_block u32
+    entry_block u32 // Used to initialize dynamic-scope slots on each call.
     cleanup_depth usize
     vla_depth usize
     constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     pointer_args Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     entry_asm handle[Ast]
     entry_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    vla_sizes Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     labels GenLabelMap
     addr_taken Vec[u32]
 }

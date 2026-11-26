@@ -32,7 +32,7 @@ fn gen_lazy_inline(s handle[Symbol]) bool {
 
 // These constructs observe the callee's own stack frame or can expose
 // its code addresses. Give a diagnostic if a required call uses them.
-fn gen_inline_blocker(n handle[Ast], budget handle[U64Key], optional bool) addr {
+fn gen_inline_blocker(n handle[Ast], def handle[GenInlineDef], budget handle[U64Key], optional bool) addr {
     while n != null {
         if optional && budget.v == 0 { return c"body exceeds the inline size limit" }
         if optional { budget.v -= 1 }
@@ -41,23 +41,24 @@ fn gen_inline_blocker(n handle[Ast], budget handle[U64Key], optional bool) addr 
             if callee != null && gen_is_returns_twice(callee) { return c"body calls a returns_twice function" }
             if n.a != null && n.a.kind == ND_NAME {
                 name Bytes = cc_name(gc.p.names, n.a.op)
-                if bytes_eq_c(name, c"alloca") || bytes_eq_c(name, c"__builtin_alloca") ||
-                   bytes_eq_c(name, c"__builtin_alloca_with_align") ||
-                   bytes_eq_c(name, c"__builtin_setjmp") {
-                    return c"body uses a frame-sensitive builtin"
+                if bytes_eq_c(name, c"__builtin_setjmp") { return c"body calls a returns_twice function" }
+                if bytes_eq_c(name, c"__builtin_alloca") || bytes_eq_c(name, c"__builtin_alloca_with_align") ||
+                   (bytes_eq_c(name, c"alloca") && (callee == null || !callee.defined)) {
+                    if optional { return c"body allocates dynamic stack storage" }
+                    def.uses_alloca = true
                 }
             }
         } else if n.kind == ND_UNARY && n.extra != null && bytes_eq_c(cc_name(gc.p.names, n.op), c"&&") {
             return c"body takes the address of a label"
-        } else if n.kind == ND_DECL && n.decl != null {
-            if se_variably_modified(n.decl.ty) { return c"body declares a variably modified type" }
-        } else if ((n.kind == ND_CAST && se_variably_modified(n.ty)) ||
-                   (n.kind == ND_SIZE && (n.flags & NF_ICE) == 0)) {
-            return c"body uses a variably modified type"
+        } else if (n.kind == ND_DECL && n.decl != null && se_variably_modified(n.decl.ty)) ||
+                   (n.kind == ND_CAST && se_variably_modified(n.ty)) ||
+                   (n.kind == ND_SIZE && (n.flags & NF_ICE) == 0) {
+            if optional { return c"body uses a variably modified type" }
+            def.uses_vla = true
         }
         for i u32 in 0..4 {
             child handle[Ast] = if i == 0 { n.a } else if i == 1 { n.b } else if i == 2 { n.c } else { n.d }
-            why addr = gen_inline_blocker(child, budget, optional)
+            why addr = gen_inline_blocker(child, def, budget, optional)
             if why != null { return why }
         }
         n = n.next
@@ -87,14 +88,17 @@ fn gen_register_inline(node handle[Ast]) void fails {
         pm handle[Param] = handle_from_addr(s.params)
         while pm != null {
             if se_variably_modified(pm.ty) || (pm.declared_ty != TY_INVALID && se_variably_modified(pm.declared_ty)) {
-                def.refuse = c"function has a variably modified parameter"
-                break
+                if !required {
+                    def.refuse = c"function has a variably modified parameter"
+                    break
+                }
+                def.uses_vla = true
             }
             pm = pm.next
         }
         if def.refuse == null {
             budget U64Key = {32}
-            def.refuse = gen_inline_blocker(node.a, &budget, !required)
+            def.refuse = gen_inline_blocker(node.a, def, &budget, !required)
         }
     }
     if def.refuse != null && !required { return }
@@ -239,6 +243,9 @@ fn gen_inline_param_lvalue(n handle[Ast], param handle[Symbol]) bool {
 // replaced before the asm, including through an escaped address.
 fn gen_inline_param_fixed(n handle[Ast], param handle[Symbol]) bool {
     if n == null { return true }
+    if (n.kind == ND_DECL && n.decl != null && se_variably_modified(n.decl.ty)) ||
+       (n.kind == ND_CAST && se_variably_modified(n.ty)) ||
+       (n.kind == ND_SIZE && (n.flags & NF_ICE) == 0) { return false }
     if n.kind == ND_UNARY {
         op Bytes = cc_name(gc.p.names, n.op)
         if (bytes_eq_c(op, c"&") || bytes_eq_c(op, c"++") || bytes_eq_c(op, c"--")) &&
@@ -403,22 +410,15 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
         table_free(&frame.constants)
         table_free(&frame.pointer_args)
         table_free(&frame.entry_constants)
+        table_free(&frame.vla_sizes)
         table_free(&frame.labels)
         vec_free(&frame.addr_taken)
     }
     pm handle[Param] = handle_from_addr(s.params)
     // A bare first asm reads the incoming arguments before any of its own
     // outputs can overwrite them. It cannot be reentered through a C label.
-    if node.a.kind == ND_BLOCK && node.a.a != null && node.a.a.kind == ND_ASM {
+    if !def.uses_vla && node.a.kind == ND_BLOCK && node.a.a != null && node.a.a.kind == ND_ASM {
         frame.entry_asm = node.a.a
-        bound handle[Param] = pm
-        while bound != null {
-            if bound.declared_ty != TY_INVALID && se_variably_modified(bound.declared_ty) {
-                frame.entry_asm = null
-                break
-            }
-            bound = bound.next
-        }
     }
     for i usize in 0..args.n {
         if pm == null { break }
@@ -429,7 +429,7 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
         av u32 = gen_convert(arg.value, arg.ty, ps.ty)
         key U64Key = {addr_bits(handle_addr(ps))}
         pointer bool = ty_is_ptr(ps.ty)
-        unqualified bool = (ty_quals(ps.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0
+        unqualified bool = (ty_quals(ps.ty) & (Q_VOLATILE | Q_ATOMIC)) == 0 && !def.uses_vla
         folded handle[Ast] = arg.expr
         constant handle[Ast] = null
         if folded != null && unqualified {
@@ -467,16 +467,35 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
     if (node.flags & NF_FENV) != 0 { gc.has_fenv = true }
     saved_switch handle[SwitchInfo] = cur_switch
     cur_switch = null
+    caller_has_alloca bool = gc.has_alloca
+    gc.has_alloca = def.uses_alloca
     gc.inline_frame = &frame
     gc.inline_depth += 1
     defer {
         gc.inline_depth -= 1
         gc.inline_frame = outer
+        gc.has_alloca = caller_has_alloca
         cur_switch = saved_switch
+    }
+    // Dynamic storage allocated by the helper belongs to this invocation.
+    saved_sp u32 = if def.uses_alloca || def.uses_vla { gen_stacksave() } else { 0 }
+    if def.uses_vla {
+        frame.entry_block = gen_new_block()
+        start u32 = gen_new_block()
+        gen_term_jump(frame.entry_block)
+        gen_switch_block(frame.entry_block)
+        gen_term_jump(start)
+        gen_switch_block(start)
+        bound handle[Param] = handle_from_addr(s.params)
+        while bound != null {
+            if bound.declared_ty != TY_INVALID { try gen_eval_vm_type(bound.declared_ty) }
+            bound = bound.next
+        }
     }
     try gen_stmt(node.a)
     if !gen_is_terminated() { gen_term_jump(frame.return_block) }
     gen_switch_block(frame.return_block)
+    if saved_sp != 0 { gen_stackrestore(saved_sp) }
     if frame.result == 0 { return gen_const_i32(0) }
     if gen_is_mem_ty(frame.ret_ty) { return frame.result }
     return gen_load_ty(frame.ret_ty, frame.result, ty_align(frame.ret_ty), false, false)

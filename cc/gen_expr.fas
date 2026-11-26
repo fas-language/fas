@@ -19,13 +19,17 @@ use "gen_init.fas"
 
 // ---------- VLA Runtime Size ----------
 
+fn gen_vla_sizes() handle[Table[U64Key, u32, gen_u64_hash, gen_u64_eq]] {
+    return if gc.inline_frame == null { &gc.vla_sizes } else { &gc.inline_frame.vla_sizes }
+}
+
 fn gen_vla_type_size(tid u32) u32 fails {
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     if n.kind == TYK_ARRAY && n.aux1 == ARR_VLA {
         // Check if we already cached this VLA type's size in the current function
         key U64Key = {zext[u64](u)}
-        slot u32 = table_get(&gc.vla_sizes, &key) catch 0
+        slot u32 = table_get(gen_vla_sizes(), &key) catch 0
         if slot != 0 {
             return gen_load_raw(c"i64", slot, 8, false)
         }
@@ -85,7 +89,7 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
     // A typedef, typeof operand or inner expression can already own this
     // bound. Its size slot survives even when the bound's locals leave scope.
     key U64Key = {zext[u64](u)}
-    cached u32 = table_get(&gc.vla_sizes, &key) catch 0
+    cached u32 = table_get(gen_vla_sizes(), &key) catch 0
     if cached != 0 { return gen_load_raw(c"i64", cached, 8, false) }
     elem_sz_v u32 = if gen_type_is_vla(n.elem) {
         try gen_eval_vla_size_and_cache(n.elem)
@@ -104,7 +108,7 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
         tot_v u32 = gen_binop_raw(c"mul", c"i64", cnt_v, elem_sz_v)
         slot u32 = gen_alloca_entry(8, 8)
         gen_store_ty(tot_v, slot, 8, false, false)
-        _ bool = table_put(&gc.vla_sizes, &key, slot)
+        _ bool = table_put(gen_vla_sizes(), &key, slot)
         return tot_v
     }
     cnt_v u32 = gen_const_u64(n.arr_len)
@@ -1318,6 +1322,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     if is_direct && direct_sym != null && bytes_eq_c(gen_sym_fir_name(direct_sym), c"alloca") &&
        !direct_sym.defined && !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
         sz_v u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, TY_ULONG)
+        gc.has_alloca = true
         return gen_alloca_dyn(sz_v, 16)
     }
 
