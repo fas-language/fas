@@ -707,6 +707,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         inp = inp.next
     }
 
+    if gen_is_terminated() { return }
     if is_goto {
         // Rewrite `%l[name]` references in template to `%l<inputs.n + K>` (Fir only supports numbered `%lN`)
         goto_tmpl Buf = {}
@@ -1170,9 +1171,16 @@ fn gen_stmt(n handle[Ast]) void fails {
         gc.loops.n -= 1
 
         gen_switch_block(cond_blk)
-        cv u32 = try gen_rvalue(n.a)
-        cb u32 = gen_to_bool(cv, n.a.ty)
-        gen_term_br(cb, body_blk, end_blk)
+        // A macro's `do { … } while (0)` has no conditional backedge,
+        // including in functions whose computed goto pins their blocks.
+        cond handle[Ast] = try gen_inline_fold(n.a, false)
+        if ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+            gen_term_jump(if se_truth(cond) { body_blk } else { end_blk })
+        } else {
+            cv u32 = try gen_rvalue(n.a)
+            cb u32 = gen_to_bool(cv, n.a.ty)
+            gen_term_br(cb, body_blk, end_blk)
+        }
         gen_switch_block(end_blk)
         return
     }
@@ -1261,6 +1269,7 @@ fn gen_stmt(n handle[Ast]) void fails {
         if n.a != null {
             // Computed goto `goto *expr`
             pv u32 = try gen_rvalue(n.a)
+            if gen_is_terminated() { return }
             blk handle[GenBlock] = gen_cur_block()
             blk.terminated = true
             buf_str(&blk.term, c"  indirect_br ")
@@ -1673,7 +1682,7 @@ fn gen_function(node handle[Ast]) void fails {
     buf_u8(out_b, 32)
     fn_link u8 = if is_gnu_inline { FIR_LOCAL } else { gen_sym_linkage(s) }
     fir_emit_linkage(out_b, fn_link, gen_sym_visibility(s))
-    if gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn") {
+    if gen_is_noreturn(s) {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
@@ -1725,6 +1734,7 @@ fn gen_function(node handle[Ast]) void fails {
             }
             buf_str(out_b, c":\n")
         }
+        if blk.unreachable_offset != 0 { blk.code.n = blk.unreachable_offset - 1 }
         gen_debug_write_code(out_b, blk)
         if blk.debug_term_loc != 0 && blk.term.n > 0 {
             term Bytes = buf_bytes(&blk.term)

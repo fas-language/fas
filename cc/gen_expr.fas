@@ -1319,10 +1319,15 @@ fn gen_call(n handle[Ast]) u32 fails {
         }
     }
     is_direct bool = direct_sym != null
+    noret bool = gen_is_noreturn(direct_sym)
 
     if is_direct {
         definition handle[GenInlineDef] = try gen_inline_target(direct_sym, n.loc)
-        if definition != null { return try gen_inline_call(n, definition) }
+        if definition != null {
+            value u32 = try gen_inline_call(n, definition)
+            if noret { gen_term_unreachable() }
+            return value
+        }
     }
 
     // Special case: direct call to `alloca(...)` when not defined in this TU
@@ -1370,7 +1375,7 @@ fn gen_call(n handle[Ast]) u32 fails {
 
     if is_direct {
         result handle[Ast] = gen_inline_constant(direct_sym)
-        if result != null {
+        if result != null && !noret {
             if ty_is_void(ret_ty) { return gen_const_i32(0) }
             if ty_is_ptr(ret_ty) { return gen_const_zero(ret_ty) }
             return gen_convert(try gen_rvalue(result), result.ty, ret_ty)
@@ -1410,7 +1415,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     if direct_sym != null && gen_is_returns_twice(direct_sym) {
         buf_str(b, c"returns_twice ")
     }
-    if direct_sym != null && (gen_has_attr(direct_sym.attrs, c"noreturn") || gen_has_attr(direct_sym.attrs, c"_Noreturn")) {
+    if noret {
         buf_str(b, c"noreturn ")
     }
     if fn_node.kind == TYK_FUNC && (fn_node.flags & TYF_MS_ABI) != 0 { buf_str(b, c"ms_abi ") }
@@ -1438,6 +1443,10 @@ fn gen_call(n handle[Ast]) u32 fails {
         gen_emit_val(b, av)
     }
     buf_str(b, c")\n")
+    if noret {
+        gen_term_unreachable()
+        return res_v
+    }
     if has_ret && gen_is_wide_bitint(ret_ty) {
         return gen_load_ty(ret_ty, res_v, ty_align(ret_ty), false, false)
     }

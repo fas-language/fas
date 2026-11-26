@@ -25,6 +25,7 @@ for file in "$src"/*.c; do
         kernel_stack_canary.c) flags=(-fno-pie -no-pie -mcmodel=kernel -fstack-protector-all) ;;
         kernel_symbol_address.c) flags=(-ffreestanding -fno-pie -no-pie -mcmodel=kernel) ;;
         no_sse_ms_abi.c|no_sse_variadic.c) flags=(-mgeneral-regs-only) ;;
+        noreturn_control_flow.c) flags=(-O0 -fstack-protector-all) ;;
         libm_min_max.c) flags=(-lm) ;;
         pthread_cancel_cleanup.c) flags=(-fexceptions -pthread); runner=(timeout 15) ;;
         auto_var_init_zero.c) flags=(-ftrivial-auto-var-init=zero) ;;
@@ -117,6 +118,32 @@ for file in "$src"/*.c; do
             echo "the static call uses an indirect thunk" >&2
             exit 1
         fi
+    fi
+    if [[ ${file##*/} == noreturn_control_flow.c ]]; then
+        "$FCC" "${flags[@]}" --emit-fir "$file" -o "$work/noreturn.fir"
+        awk '
+            /call noreturn .* @terminate(_again)?\(/ {
+                if ((getline) != 1 || $0 !~ /^  unreachable$/) exit 1
+                count++
+            }
+            END { if (count != 2) exit 1 }
+        ' "$work/noreturn.fir"
+        sed -n '/^func @dispatch /,/^}/p' "$work/noreturn.fir" > "$work/dispatch.fir"
+        grep -q 'asm volatile "ud2"' "$work/dispatch.fir"
+        grep -q '^  unreachable$' "$work/dispatch.fir"
+        [[ $(grep -c '^  indirect_br ' "$work/dispatch.fir") == 1 ]]
+        if grep -q '^  br ' "$work/dispatch.fir"; then
+            echo "a conditional backedge survived do ... while (0)" >&2
+            exit 1
+        fi
+        for exe in "$work/clang" "$work/fcc"; do
+            status=0
+            "$exe" exit || status=$?
+            [[ $status == 19 ]]
+            status=0
+            "$exe" exit again || status=$?
+            [[ $status == 20 ]]
+        done
     fi
     if [[ ${file##*/} == kernel_constant_calls.c ]]; then
         llvm-nm-22 "$work/fcc" > "$work/symbols"

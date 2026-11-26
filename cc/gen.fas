@@ -37,6 +37,7 @@ struct GenBlock {
     bool_param u32
     code Buf
     term Buf
+    unreachable_offset usize // zero if unset, otherwise the last live byte offset plus one
     debug_marks Vec[GenDebugMark]
     debug_term_loc u32
     succs Vec[u32]
@@ -468,6 +469,10 @@ fn gen_is_returns_twice(s handle[Symbol]) bool {
            bytes_eq_c(nm, c"vfork") || bytes_eq_c(nm, c"getcontext")
 }
 
+fn gen_is_noreturn(s handle[Symbol]) bool {
+    return s != null && (s.flags & SF_NORETURN) != 0
+}
+
 fn gen_sym_needs_quote(s Bytes) bool {
     if s.n == 0 { return true }
     for i usize in 0..s.n {
@@ -532,7 +537,7 @@ fn gen_note_extern_fn(s handle[Symbol]) void {
     }
     buf_free(&alias_buf)
     link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
-    noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
+    noret bool = gen_is_noreturn(s)
     if gc.cur_gnu_inline_idx != 0 {
         gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
         r handle[ExternFnRef] = vec_add(&gi.ext_fns)
@@ -1418,6 +1423,9 @@ fn gen_term_unreachable() void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    // Enclosing expressions can finish lowering after a noreturn operand.
+    // Their placeholder instructions must stay beyond the emitted code.
+    blk.unreachable_offset = blk.code.n + 1
     blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  unreachable\n")
 }

@@ -79,6 +79,7 @@ const SC_REGISTER u8 = 5
 const SC_CONSTEXPR u8 = 6
 const SC_ENUMERATOR u8 = 7
 
+const SF_NORETURN u32 = 2
 const SF_GNU_EXTERN_INLINE u32 = 4 // a body for inlining before the external definition
 
 struct Symbol {
