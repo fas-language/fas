@@ -1525,6 +1525,23 @@ fn gen_atomic_order_cstr(ord u64, is_load bool, is_store bool) addr {
     return c"seq_cst"
 }
 
+fn gen_overflow_op(op addr, t u32, lhs u32, rhs u32, result u32, overflow u32) void {
+    b handle[Buf] = gen_cur_buf()
+    buf_str(b, c"  ")
+    gen_emit_val(b, result)
+    buf_str(b, c", ")
+    gen_emit_val(b, overflow)
+    buf_str(b, c" = ")
+    buf_str(b, op)
+    buf_str(b, c" (")
+    gen_emit_fir_ty(b, t)
+    buf_str(b, c", i1) ")
+    gen_emit_val(b, lhs)
+    buf_str(b, c", ")
+    gen_emit_val(b, rhs)
+    buf_u8(b, 10)
+}
+
 fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     a0 handle[Ast] = n.b
     a1 handle[Ast] = if a0 != null { a0.next } else { null }
@@ -2179,35 +2196,10 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         op_cstr addr = if is_sub { c"usub_ovf" } else { c"uadd_ovf" }
         s1 u32 = gen_new_val()
         c1 u32 = gen_new_val()
-        b handle[Buf] = gen_cur_buf()
-        buf_str(b, c"  ")
-        gen_emit_val(b, s1)
-        buf_str(b, c", ")
-        gen_emit_val(b, c1)
-        buf_str(b, c" = ")
-        buf_str(b, op_cstr)
-        buf_str(b, c" (")
-        gen_emit_fir_ty(b, t)
-        buf_str(b, c", i1) ")
-        gen_emit_val(b, v0)
-        buf_str(b, c", ")
-        gen_emit_val(b, v1)
-        buf_u8(b, 10)
+        gen_overflow_op(op_cstr, t, v0, v1, s1, c1)
         s2 u32 = gen_new_val()
         c2 u32 = gen_new_val()
-        buf_str(b, c"  ")
-        gen_emit_val(b, s2)
-        buf_str(b, c", ")
-        gen_emit_val(b, c2)
-        buf_str(b, c" = ")
-        buf_str(b, op_cstr)
-        buf_str(b, c" (")
-        gen_emit_fir_ty(b, t)
-        buf_str(b, c", i1) ")
-        gen_emit_val(b, s1)
-        buf_str(b, c", ")
-        gen_emit_val(b, vc)
-        buf_u8(b, 10)
+        gen_overflow_op(op_cstr, t, s1, vc, s2, c2)
         cout1 u32 = gen_binop_raw(c"or", c"i1", c1, c2)
         cout u32 = gen_convert(cout1, TY_BOOL, t)
         gen_store_ty(cout, cp, ty_align(t), false, false)
@@ -2246,10 +2238,24 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
         v1 u32 = try gen_rvalue(a1)
         res_ptr u32 = if !is_p { try gen_rvalue(a2) } else { 0 }
         res_ty u32 = if !is_p { ty_node(ty_unqual(a2.ty)).elem } else { a2.ty }
-        // Widen both operands so any integer / _BitInt fits without overflow
         b0 u32 = ty_int_bits(a0.ty)
         b1 u32 = ty_int_bits(a1.ty)
         br u32 = ty_int_bits(res_ty)
+        signed bool = ty_is_signed(res_ty)
+        if tc.ilp32 && !is_mul && (br == 32 || br == 64) && b0 == br && b1 == br &&
+            ty_is_signed(a0.ty) == signed && ty_is_signed(a1.ty) == signed {
+            op addr = if is_sub {
+                if signed { c"ssub_ovf" } else { c"usub_ovf" }
+            } else {
+                if signed { c"sadd_ovf" } else { c"uadd_ovf" }
+            }
+            result u32 = gen_new_val()
+            overflow u32 = gen_new_val()
+            gen_overflow_op(op, res_ty, v0, v1, result, overflow)
+            if !is_p { gen_store_ty(result, res_ptr, ty_align(res_ty), gen_is_volatile(res_ty), false) }
+            return gen_convert(overflow, TY_BOOL, n.ty)
+        }
+        // Widen mixed-width or mixed-sign arithmetic to preserve the exact result.
         mb u32 = if b0 > b1 { b0 } else { b1 }
         if br > mb { mb = br }
         wide_bits u32 = if is_mul { mb * 2 + 2 } else { mb + 2 }

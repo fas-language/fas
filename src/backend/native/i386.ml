@@ -657,6 +657,15 @@ let instruction g (ir : inst_rec) =
   | Mark _ -> refuse "constant-time markers"
   | Freeze v -> pair g v; finish ()
   | Ibin (kind, flags, x, y) -> integer_binary g kind flags x y; finish ()
+  | Ovf (((Uadd_ovf | Sadd_ovf | Usub_ovf | Ssub_ovf) as kind), x, y)
+      when bits g x = 32 || bits g x = 64 ->
+      let op = match kind with Uadd_ovf | Sadd_ovf -> Add | _ -> Sub in
+      let cc = match kind with Uadd_ovf | Usub_ovf -> 2 | _ -> 0 in
+      integer_binary g op 0 x y;
+      (* Saving a full-width result leaves the arithmetic flags intact. *)
+      put g ir.results.(0);
+      condition e cc;
+      put g ir.results.(1)
   | Iun (kind, _, v) -> integer_unary g kind v; finish ()
   | Icmp (kind, x, y) ->
       if bits g x > 32 then begin

@@ -73,6 +73,14 @@ uint64_t product(unsigned a, unsigned b)
     return result;
 }
 
+unsigned overflow(uint64_t a, uint64_t b, int left, int right, uint64_t *sum, int *diff)
+{
+    unsigned carry = __builtin_add_overflow(a, b, sum);
+    unsigned borrow = __builtin_sub_overflow(a, b, sum + 1);
+    unsigned signed_overflow = __builtin_sub_overflow(left, right, diff);
+    return carry | (borrow << 1) | (signed_overflow << 2);
+}
+
 uint64_t mix(uint64_t a, uint64_t b, unsigned shift, unsigned mask)
 {
     uint64_t x = (a * b + mask) ^ (b >> shift);
@@ -114,6 +122,7 @@ extern unsigned dispatch(unsigned (*)(unsigned), unsigned);
 extern unsigned collect(unsigned, ...);
 extern unsigned long update_long(long, unsigned long);
 extern uint64_t product(unsigned, unsigned);
+extern unsigned overflow(uint64_t, uint64_t, int, int, uint64_t *, int *);
 extern const unsigned * const bias_ptr;
 
 const unsigned bias = 19;
@@ -144,6 +153,14 @@ int run(void)
         return 68;
     if (product(0x12345678, 0xf0123456) != UINT64_C(0x11125c7753956c50))
         return 69;
+    uint64_t sum[2];
+    int diff;
+    if (overflow(UINT64_MAX, 3, 0x7fffffff, -1, sum, &diff) != 5 ||
+        sum[0] != 2 || sum[1] != UINT64_MAX - 3 || diff != (-0x7fffffff - 1))
+        return 70;
+    if (overflow(2, 5, 13, 5, sum, &diff) != 2 ||
+        sum[0] != 7 || sum[1] != UINT64_MAX - 2 || diff != 8)
+        return 71;
     return 0;
 }
 C
