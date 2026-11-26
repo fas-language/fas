@@ -28,14 +28,14 @@ inputs, on `-m16` C in `arch/x86/boot` and `arch/x86/realmode`, and on
 `-m32` C in `arch/x86/entry/vdso/vdso32`. All other target C goes to fcc,
 including the x86-64 decompressor. The harness reports the count and paths
 of Clang-routed C inputs, retaining the list in `clang-c.tsv` for incremental
-builds. TODO: 32/16-bit x86 codegen in fcc removes this. Three
-Kbuild offset generators expect GNU assembly from `-S`. For those inputs
-the adapter extracts their `.ascii` layout markers from fcc's object
-files. LLVM 22 supplies the link and object utilities for this stage.
+builds. Three Kbuild offset generators expect GNU assembly from `-S`. For
+those inputs the adapter extracts their `.ascii` layout markers from fcc's
+object files.
 With `KERNEL_LD=fas`, the LD adapter `test/cc_kernel/ld.sh` sends relocatable
-(`-r`) links and the final x86-64 `vmlinux` link to fas-ld (`FCC_LD`).
-Kbuild uses ld.lld for kallsyms passes and auxiliary images. The build
-directory's `fas-ld.tsv` lists each fas-ld invocation.
+(`-r`) links, the preliminary kallsyms links, and the `vmlinux`,
+`setup.elf`, and `realmode.elf` scripts to fas-ld (`FCC_LD`). Kbuild uses
+ld.lld for the decompressor and the shared vDSOs. The build directory's
+`fas-ld.tsv` lists each fas-ld invocation.
 
 The fcc tinyconfig sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.

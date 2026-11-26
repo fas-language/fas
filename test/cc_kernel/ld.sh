@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Send relocatable links and the final scripted x86-64 vmlinux link to
-# fas-ld. Kbuild's version probe, kallsyms passes and auxiliary images use
-# ld.lld. Each fas-ld invocation is logged to $KERNEL_LD_LOG.
+# Send relocatable links and supported kernel linker scripts to fas-ld.
+# Each fas-ld invocation is logged to $KERNEL_LD_LOG.
 set -euo pipefail
 
 lld=${KERNEL_LLD:-ld.lld-22}
@@ -28,7 +27,13 @@ for arg; do
         -T?*) script=${arg#-T} ;;
     esac
 done
-if $relocatable || [[ ${output##*/} == vmlinux && /${script#./} == */arch/x86/kernel/vmlinux.lds ]]; then
+scripted=false
+case "${output##*/}:/${script#./}" in
+    vmlinux:*/arch/x86/kernel/vmlinux.lds|.tmp_vmlinux[123]:*/arch/x86/kernel/vmlinux.lds|\
+    setup.elf:*/arch/x86/boot/setup.ld|\
+    realmode.elf:*/arch/x86/realmode/rm/realmode.lds) scripted=true ;;
+esac
+if $relocatable || $scripted; then
     [[ -n ${KERNEL_LD_LOG:-} ]] && printf 'fas-ld\t%s\n' "$*" >> "$KERNEL_LD_LOG"
     exec "$fas_ld" "$@"
 fi
