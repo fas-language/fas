@@ -313,6 +313,27 @@ fn relocation_width(kind u32) u64 {
     }
 }
 
+fn reloc32_width(kind u32) u64 {
+    switch kind {
+        case 0: return 0
+        case 1: return 4
+        case 2: return 4
+        case 4: return 4
+        case 20: return 2
+        case 21: return 2
+        case 22: return 1
+        case 23: return 1
+        default: return 99
+    }
+}
+
+fn rel32_addend(d addr, at u64, width u64) u64 {
+    if width == 4 { return bitcast[u64](sext[i64]((d + at)[i32])) }
+    if width == 2 { return bitcast[u64](sext[i64]((d + at)[i16])) }
+    if width == 1 { return bitcast[u64](sext[i64]((d + at)[i8])) }
+    return 0
+}
+
 // ---------- the parse ----------
 
 // end << 24 | (who + 2): ends are below 2^31 (offsets are inside the file,
@@ -325,18 +346,18 @@ fn range_who(r Range) i64 { return bitcast[i64](r.rest & 0xffffff) - 2 }
 
 fn range_less(a Range, b Range) bool { return a.start < b.start }
 
-fn ranges_in_order(o handle[Obj], count u64, names_index u64, shoff u64) bool {
+fn ranges_in_order(o handle[Obj], count u64, names_index u64, shoff u64, ehsize u64) bool {
     // Clang typically places the section names and headers last, and emits
     // two runs in file order, split at the first relocation section's offset.
     // Section indexes can interleave the runs. Check each run independently.
     names handle[Sec] = sec(o, names_index)
     limit u64 = shoff
     if names.kind != 8 && names.size != 0 {
-        if names.offset < 64 || names.offset + names.size > shoff { return false }
+        if names.offset < ehsize || names.offset + names.size > shoff { return false }
         limit = names.offset
     }
     split u64 = limit
-    low_end u64 = 64
+    low_end u64 = ehsize
     high_end u64 = limit
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
@@ -449,6 +470,15 @@ fn may_compress(data Bytes) bool {
 
 // Parses o.data (o.len bytes) into o's tables.
 fn elf_parse(o handle[Obj], scripted bool) void fails {
+    try elf_parse_class(o, scripted, false)
+}
+
+fn elf_parse_class(o handle[Obj], scripted bool, narrow bool) void fails {
+    ehsize u64 = if narrow { 52 } else { 64 }
+    shsize u64 = if narrow { 40 } else { 64 }
+    symsize u64 = if narrow { 16 } else { 24 }
+    relsize u64 = if narrow { 8 } else { 24 }
+    reltype u32 = if narrow { 9 } else { 4 }
     d addr = o.data
     length u64 = o.len
     if length >= 4 {
@@ -465,9 +495,11 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
         bs(m, c" byte limit")
         fail Bad
     }
-    try span(o, c"ELF header", 0, 64)
+    try span(o, c"ELF header", 0, ehsize)
     if d[u32] != 0x464c457f { try efail(o, c"expected an ELF object") }
-    if rd8(d, 4) != 2 { try efail(o, c"unsupported ELF class (expected ELF64)") }
+    if narrow {
+        if rd8(d, 4) != 1 { try efail(o, c"unsupported ELF class (expected ELF32)") }
+    } else if rd8(d, 4) != 2 { try efail(o, c"unsupported ELF class (expected ELF64)") }
     if rd8(d, 5) != 1 { try efail(o, c"unsupported ELF byte order (expected little-endian)") }
     if rd8(d, 6) != 1 { try efail(o, c"invalid ELF identification version") }
     if (rd8(d, 7) != 0 && rd8(d, 7) != 3) || rd8(d, 8) != 0 {
@@ -477,44 +509,61 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
         if rd8(d, n) != 0 { try efail(o, c"nonzero ELF identification padding") }
     }
     if rd16(d, 16) != 1 { try efail(o, c"unsupported ELF type (expected ET_REL)") }
-    if rd16(d, 18) != 62 { try efail(o, c"unsupported ELF machine (expected x86-64)") }
+    if narrow {
+        if rd16(d, 18) != 3 { try efail(o, c"unsupported ELF machine (expected i386)") }
+    } else if rd16(d, 18) != 62 { try efail(o, c"unsupported ELF machine (expected x86-64)") }
     if rd32(d, 20) != 1 { try efail(o, c"invalid ELF version") }
-    if rd64(d, 24) != 0 || rd64(d, 32) != 0 || rd16(d, 56) != 0 {
+    phoff u64 = if narrow { rd32(d, 28) } else { rd64(d, 32) }
+    entry u64 = if narrow { rd32(d, 24) } else { rd64(d, 24) }
+    flags_at u64 = if narrow { 36 } else { 48 }
+    sizing u64 = flags_at + 4
+    if entry != 0 || phoff != 0 || rd16(d, sizing + 4) != 0 {
         try efail(o, c"ET_REL input must not have an entry point or program headers")
     }
-    if rd16(d, 54) != 0 { try efail(o, c"unsupported ET_REL program header entry size") }
-    if rd32(d, 48) != 0 { try efail(o, c"unsupported ELF flags") }
-    if rd16(d, 52) != 64 || rd16(d, 58) != 64 { try efail(o, c"invalid ELF header or section entry size") }
-    count u64 = rd16(d, 60)
-    names_index u64 = rd16(d, 62)
+    if rd16(d, sizing + 2) != 0 { try efail(o, c"unsupported ET_REL program header entry size") }
+    if rd32(d, flags_at) != 0 { try efail(o, c"unsupported ELF flags") }
+    if rd16(d, sizing) != ehsize || rd16(d, sizing + 6) != shsize {
+        try efail(o, c"invalid ELF header or section entry size")
+    }
+    count u64 = rd16(d, sizing + 8)
+    names_index u64 = rd16(d, sizing + 10)
     if count == 0 || count >= 0xff00 || names_index == 0xffff {
         try efail(o, c"unsupported extended section numbering")
     }
     if names_index == 0 || names_index >= count { try efail(o, c"missing or invalid section name table index") }
-    shoff u64 = try idx(o, c"section table offset", bitcast[i64](length), rd64(d, 40))
-    if shoff < 64 || (shoff & 7) != 0 { try efail(o, c"invalid section table offset") }
-    try span(o, c"section table", shoff, count * 64)
-    for n u64 in 0..64 {
+    table_offset u64 = if narrow { rd32(d, 32) } else { rd64(d, 40) }
+    offset_mask u64 = if narrow { 3 } else { 7 }
+    shoff u64 = try idx(o, c"section table offset", bitcast[i64](length), table_offset)
+    if shoff < ehsize || (shoff & offset_mask) != 0 { try efail(o, c"invalid section table offset") }
+    try span(o, c"section table", shoff, count * shsize)
+    for n u64 in 0..shsize {
         if rd8(d, shoff + n) != 0 { try efail(o, c"invalid null section header") }
     }
 
     o.nsec = trunc[u32](count)
     o.secs = heap_alloc_zeroed(count * sizeof[Sec])
     for index u64 in 0..count {
-        at u64 = shoff + index * 64
+        at u64 = shoff + index * shsize
         s handle[Sec] = sec(o, index)
         s.group = -1
         kind u64 = try idx(o, c"section type", bitcast[i64](OCAML_MAX_INT), rd32(d, at + 4))
         s.kind = trunc[u32](kind)
-        s.flags = try idx(o, c"section flags", bitcast[i64](OCAML_MAX_INT), rd64(d, at + 8))
-        // NOBITS sh_offset has no file interpretation: never index input by it
-        s.offset = if kind == 8 { 0 } else { try idx(o, c"section offset", bitcast[i64](length), rd64(d, at + 24)) }
-        s.size = try idx(o, c"section size", bitcast[i64](MAX_SECTION_SIZE), rd64(d, at + 32))
-        s.link = trunc[u32](try idx(o, c"section link", bitcast[i64](count) - 1, rd32(d, at + 40)))
-        s.info = trunc[u32](try idx(o, c"section info", bitcast[i64](OCAML_MAX_INT), rd32(d, at + 44)))
-        alignment u64 = try idx(o, c"section alignment", bitcast[i64](MAX_ALIGNMENT), rd64(d, at + 48))
-        s.entsize = try idx(o, c"section entry size", bitcast[i64](MAX_FILE_SIZE), rd64(d, at + 56))
-        if rd64(d, at + 16) != 0 {
+        flags u64 = if narrow { rd32(d, at + 8) } else { rd64(d, at + 8) }
+        address u64 = if narrow { rd32(d, at + 12) } else { rd64(d, at + 16) }
+        file_at u64 = if narrow { rd32(d, at + 16) } else { rd64(d, at + 24) }
+        size u64 = if narrow { rd32(d, at + 20) } else { rd64(d, at + 32) }
+        link_at u64 = if narrow { at + 24 } else { at + 40 }
+        align_field u64 = if narrow { rd32(d, at + 32) } else { rd64(d, at + 48) }
+        entsize u64 = if narrow { rd32(d, at + 36) } else { rd64(d, at + 56) }
+        s.flags = try idx(o, c"section flags", bitcast[i64](OCAML_MAX_INT), flags)
+        // NOBITS sh_offset has no file interpretation: never index input by it.
+        s.offset = if kind == 8 { 0 } else { try idx(o, c"section offset", bitcast[i64](length), file_at) }
+        s.size = try idx(o, c"section size", bitcast[i64](MAX_SECTION_SIZE), size)
+        s.link = trunc[u32](try idx(o, c"section link", bitcast[i64](count) - 1, rd32(d, link_at)))
+        s.info = trunc[u32](try idx(o, c"section info", bitcast[i64](OCAML_MAX_INT), rd32(d, link_at + 4)))
+        alignment u64 = try idx(o, c"section alignment", bitcast[i64](MAX_ALIGNMENT), align_field)
+        s.entsize = try idx(o, c"section entry size", bitcast[i64](MAX_FILE_SIZE), entsize)
+        if address != 0 {
             m handle[Buf] = ef(o)
             bs(m, c"section ")
             bu(m, index)
@@ -533,13 +582,13 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     }
 
     // no two file ranges overlap
-    if !ranges_in_order(o, count, names_index, shoff) {
+    if !ranges_in_order(o, count, names_index, shoff, ehsize) {
         // Unusual layouts and overlaps use the stable sort so diagnostic order is unchanged.
         ranges Vec[Range] = {}
         rh handle[Vec[Range]] = &ranges
         defer { vec_free(rh) }
-        vec_push(rh, range(0, 64, -2))
-        vec_push(rh, range(shoff, shoff + count * 64, -1))
+        vec_push(rh, range(0, ehsize, -2))
+        vec_push(rh, range(shoff, shoff + count * shsize, -1))
         for index u64 in 0..count {
             s handle[Sec] = sec(o, index)
             if s.kind != 8 && s.size != 0 { vec_push(rh, range(s.offset, s.offset + s.size, bitcast[i64](index))) }
@@ -565,7 +614,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     if names.kind != 3 || names.size == 0 { try efail(o, c"invalid section name string table") }
     try string_table(o, names_index)
     for index u64 in 0..count {
-        name_offset u64 = try idx(o, c"section name offset", bitcast[i64](names.size) - 1, rd32(d, shoff + index * 64))
+        name_offset u64 = try idx(o, c"section name offset", bitcast[i64](names.size) - 1, rd32(d, shoff + index * shsize))
         sec(o, index).name = try name_at(o, names.offset, names.size, name_offset)
     }
     for index u64 in 0..count {
@@ -577,6 +626,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     }
     for index u64 in 0..count {
         if (sec(o, index).flags & 0x800) != 0 {
+            if narrow { try erefuse(o, c"compressed ELF32 sections") }
             try decompress(o, count)
             d = o.data
             break
@@ -597,7 +647,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
                 bytes_is(s.name, c".note.ABI-tag")) && s.kind != 7) {
             try sfail(o, s, c"invalid metadata section type")
         }
-        allowed u64 = if s.kind == 4 { 0x240 } else if s.kind == 0x6fff4c03 { 0x80000000 }
+        allowed u64 = if s.kind == reltype { 0x240 } else if s.kind == 0x6fff4c03 { 0x80000000 }
             else if s.kind == 1 || s.kind == 8 { 0x200637 }
             else if s.kind == 14 || s.kind == 15 || s.kind == 16 { 0x200003 } else { 7 }
         if (s.flags & ~allowed) != 0 {
@@ -641,6 +691,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
                 try sfail(o, s, c"unsupported section metadata")
             }
         } else if k == 14 || k == 15 || k == 16 {
+            if narrow { try erefuse(o, c"ELF32 initialization arrays") }
             expected addr = if k == 14 { c".init_array" } else if k == 15 { c".fini_array" } else { c".preinit_array" }
             if !bytes_is(s.name, expected) {
                 e Bytes = bytes_c(expected)
@@ -674,8 +725,11 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
             if s.flags != 0 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                 try sfail(o, s, c"unsupported string table metadata")
             }
-        } else if k == 4 {
+        } else if k == reltype {
         } else if k == 7 {
+            if narrow && (bytes_is(s.name, c".note.stapsdt") || bytes_is(s.name, c".note.gnu.property")) {
+                try erefuse(o, c"ELF32 SDT or GNU property notes")
+            }
             if bytes_is(s.name, c".note.stapsdt") {
                 if s.flags != 0 || s.alignment != 4 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported SDT note metadata")
@@ -717,30 +771,31 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     // symbols
     if symtab_index != 0 {
         symtab handle[Sec] = sec(o, symtab_index)
-        if symtab.entsize != 24 || symtab.size % 24 != 0 || symtab.size == 0 {
+        if symtab.entsize != symsize || symtab.size % symsize != 0 || symtab.size == 0 {
             try efail(o, c"invalid symbol table entry size")
         }
-        symbol_count u64 = symtab.size / 24
+        symbol_count u64 = symtab.size / symsize
         if symbol_count > MAX_SYMBOLS { try efail(o, c"symbol count exceeds supported limit") }
         first_global u64 = zext[u64](symtab.info)
         if first_global < 1 || first_global > symbol_count { try efail(o, c"invalid first global symbol index") }
         try string_table(o, zext[u64](symtab.link))
         strings handle[Sec] = sec(o, zext[u64](symtab.link))
-        for n u64 in 0..24 {
+        for n u64 in 0..symsize {
             if rd8(d, symtab.offset + n) != 0 { try efail(o, c"invalid null symbol") }
         }
         o.nsym = trunc[u32](symbol_count)
         o.syms = heap_alloc_zeroed(symbol_count * sizeof[Sym])
         for index u64 in 0..symbol_count {
-            at u64 = symtab.offset + index * 24
+            at u64 = symtab.offset + index * symsize
             name_offset u64 = try idx(o, c"symbol name offset", bitcast[i64](strings.size) - 1, rd32(d, at))
             name Bytes = try name_at(o, strings.offset, strings.size, name_offset)
-            info u64 = rd8(d, at + 4)
+            info_at u64 = if narrow { at + 12 } else { at + 4 }
+            info u64 = rd8(d, info_at)
             binding u64 = info >> 4
             kind u64 = info & 15
-            section u64 = rd16(d, at + 6)
-            value u64 = rd64(d, at + 8)
-            size u64 = rd64(d, at + 16)
+            section u64 = rd16(d, info_at + 2)
+            value u64 = if narrow { rd32(d, at + 4) } else { rd64(d, at + 8) }
+            size u64 = if narrow { rd32(d, at + 8) } else { rd64(d, at + 16) }
             if binding > 2 {
                 m handle[Buf] = ef(o)
                 bs(m, c"symbol ")
@@ -750,7 +805,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
                 fail Bad
             }
             if (index < first_global) != (binding == 0) { try yfail(o, name, c"invalid local/global ordering") }
-            visibility u64 = rd8(d, at + 5)
+            visibility u64 = rd8(d, info_at + 1)
             if (kind > 6 && kind != 10) || visibility > 3 { try yfail(o, name, c"unsupported type or visibility") }
             if binding != 0 && name.n == 0 { try efail(o, c"global symbol has an empty name") }
             if kind == 5 && section != 0xfff2 { try yfail(o, name, c"STT_COMMON requires SHN_COMMON") }
@@ -840,7 +895,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
             t handle[Sec] = sec(o, member)
             tk u32 = t.kind
             if member <= index || (t.flags & 0x200) == 0 ||
-                !(tk == 1 || tk == 8 || tk == 4 || tk == 14 || tk == 15 || tk == 16) || t.group != -1 {
+                !(tk == 1 || tk == 8 || tk == reltype || tk == 14 || tk == 15 || tk == 16) || t.group != -1 {
                 m handle[Buf] = ef(o)
                 bs(m, c"section ")
                 bb(m, s.name)
@@ -862,7 +917,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
         if (s.flags & 0x200) != 0 && s.group == -1 { try sfail(o, s, c"SHF_GROUP section has no group") }
-        if s.kind == 4 && zext[u64](s.info) < count && s.group != sec(o, zext[u64](s.info)).group {
+        if s.kind == reltype && zext[u64](s.info) < count && s.group != sec(o, zext[u64](s.info)).group {
             try sfail(o, s, c"relocation and target group membership differ")
         }
     }
@@ -898,8 +953,10 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     relocation_count u64 = 0
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
-        if s.kind != 4 { continue }
-        if s.entsize != 24 || s.size % 24 != 0 { try sfail(o, s, c"invalid RELA entry size") }
+        if s.kind != reltype { continue }
+        if s.entsize != relsize || s.size % relsize != 0 {
+            try sfail(o, s, if narrow { c"invalid REL entry size" } else { c"invalid RELA entry size" })
+        }
         if symtab_index == 0 || zext[u64](s.link) != symtab_index { try sfail(o, s, c"invalid relocation symbol table") }
         if s.info == 0 || zext[u64](s.info) >= count { try sfail(o, s, c"invalid relocation target index") }
         t handle[Sec] = sec(o, zext[u64](s.info))
@@ -908,7 +965,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
             bytes_is(t.name, c".note.GNU-stack") {
             try sfail(o, s, c"unsupported relocation target")
         }
-        n u64 = s.size / 24
+        n u64 = s.size / relsize
         if relocation_count > MAX_RELOCATIONS || n > MAX_RELOCATIONS - relocation_count {
             m handle[Buf] = ef(o)
             bs(m, c"relocation count: size exceeds supported limit ")
@@ -923,27 +980,30 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
     sorted bool = true
     for index u64 in 0..count {
         s handle[Sec] = sec(o, index)
-        if s.kind != 4 { continue }
+        if s.kind != reltype { continue }
         t handle[Sec] = sec(o, zext[u64](s.info))
-        for n u64 in 0..s.size / 24 {
-            at u64 = s.offset + n * 24
-            info u64 = rd64(d, at + 8)
-            kind u64 = info & 0xffffffff
-            symbol u64 = try idx(o, c"relocation symbol index", bitcast[i64](symbol_count) - 1, info >> 32)
-            offset u64 = try idx(o, c"relocation offset", bitcast[i64](t.size), rd64(d, at))
+        for n u64 in 0..s.size / relsize {
+            at u64 = s.offset + n * relsize
+            info u64 = if narrow { rd32(d, at + 4) } else { rd64(d, at + 8) }
+            shift u64 = if narrow { 8 } else { 32 }
+            kind u64 = info & ((1 << shift) - 1)
+            symbol u64 = try idx(o, c"relocation symbol index", bitcast[i64](symbol_count) - 1, info >> shift)
+            raw_offset u64 = if narrow { rd32(d, at) } else { rd64(d, at) }
+            offset u64 = try idx(o, c"relocation offset", bitcast[i64](t.size), raw_offset)
             if kind != 0 && bytes_is(t.name, c".note.stapsdt") &&
                 (kind != 1 || !sdt_has(&sdt, zext[u64](s.info), offset)) {
                 try efail(o, c"section .note.stapsdt: relocation must target a probe address field")
             }
-            width u64 = relocation_width(trunc[u32](kind))
+            width u64 = if narrow { reloc32_width(trunc[u32](kind)) } else { relocation_width(trunc[u32](kind)) }
             if width == 99 {
                 m handle[Buf] = ef(o)
                 bs(m, c"section ")
                 bb(m, t.name)
                 bs(m, c"+0x")
                 bx(m, offset)
-                bs(m, c": unsupported x86-64 relocation ")
+                bs(m, if narrow { c": unsupported i386 relocation " } else { c": unsupported x86-64 relocation " })
                 bu(m, kind)
+                if narrow { fail Refused }
                 fail Bad
             }
             if width > t.size - offset {
@@ -960,7 +1020,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
             }
             r handle[Rel] = rel(o, next)
             r.offset = offset
-            r.addend = rd64(d, at + 16)
+            r.addend = if narrow { rel32_addend(d, t.offset + offset, width) } else { rd64(d, at + 16) }
             r.target = s.info
             r.symbol = trunc[u32](symbol)
             r.kind = trunc[u32](kind)
@@ -1004,6 +1064,7 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
             fail Bad
         }
         previous_target = zext[u64](k.target)
-        previous_end_r = k.offset + relocation_width(k.kind)
+        width u64 = if narrow { reloc32_width(k.kind) } else { relocation_width(k.kind) }
+        previous_end_r = k.offset + width
     }
 }

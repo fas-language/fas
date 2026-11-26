@@ -15,6 +15,7 @@ const LS_ASSIGN u8 = 2
 const LS_INPUT u8 = 3
 const LS_CHECK u8 = 4
 const LS_PROVIDE u8 = 5
+const LS_LONG u8 = 6
 
 struct LsExpr {
     kind u8
@@ -50,6 +51,8 @@ struct LsCmd {
     provide_active bool
     patterns Vec[LsPattern]
     inputs Vec[u64]        // packed (object, section)
+    address u64            // location of a data command
+    data u64               // resolved value of a data command
     at u64
 }
 
@@ -526,6 +529,12 @@ fn ls_parse_section(l handle[LsLex], name Bytes, at u64) u64 fails {
             vec_push(&s.body, try ls_input(l, keep_input, pos))
         } else if !s.discard && try ls_take(l, c"CONSTRUCTORS") {
             // No constructor table is synthesized in ELF.
+        } else if !s.discard && try ls_take(l, c"LONG") {
+            try ls_expect(l, c"(")
+            i u64 = ls_new_cmd(LS_LONG, pos)
+            ls_cmd(i).arg = try ls_expression(l, 2)
+            try ls_expect(l, c")")
+            vec_push(&s.body, i)
         } else if !s.discard && (ls_is(l, c"PROVIDE") || ls_is(l, c"ASSERT")) {
             vec_push(&s.body, try ls_special(l))
         } else if !s.discard {
@@ -578,6 +587,8 @@ fn ls_parse(path Bytes, data Bytes) void fails {
     l.data = data
     try ls_next(l)
     sections_seen bool = false
+    script_class u8 = 0
+    script_arch u8 = 0
     while l.word.n != 0 || l.quoted {
         if try ls_take(l, c";") { continue }
         at u64 = l.at
@@ -607,15 +618,22 @@ fn ls_parse(path Bytes, data Bytes) void fails {
         } else if try ls_take(l, c"OUTPUT_FORMAT") {
             try ls_expect(l, c"(")
             target Bytes = try ls_string(l)
-            if !bytes_is(target, c"elf64-x86-64") { try ls_exception(at, c"unsupported output format ", target, true) }
+            if script_class != 0 { try ls_exception(at, c"duplicate OUTPUT_FORMAT", bytes_empty(), true) }
+            if bytes_is(target, c"elf64-x86-64") { script_class = 2 }
+            else if bytes_is(target, c"elf32-i386") { script_class = 1 }
+            else { try ls_exception(at, c"unsupported output format ", target, true) }
             try ls_expect(l, c")")
         } else if try ls_take(l, c"OUTPUT_ARCH") {
+            if script_arch != 0 { try ls_exception(at, c"duplicate OUTPUT_ARCH", bytes_empty(), true) }
             try ls_expect(l, c"(")
             try ls_expect(l, c"i386")
-            try ls_expect(l, c":")
-            try ls_expect(l, c"x86")
-            try ls_expect(l, c"-")
-            try ls_expect(l, c"64")
+            script_arch = 1
+            if try ls_take(l, c":") {
+                try ls_expect(l, c"x86")
+                try ls_expect(l, c"-")
+                try ls_expect(l, c"64")
+                script_arch = 2
+            }
             try ls_expect(l, c")")
         } else if try ls_take(l, c"ENTRY") {
             if ld.lscript.entry_seen { try ls_bad(l, c"duplicate ENTRY at ") }
@@ -637,6 +655,17 @@ fn ls_parse(path Bytes, data Bytes) void fails {
             }
             vec_push(&ld.lscript.top, i)
         }
+    }
+    c handle[Config] = config()
+    if script_class != 0 && script_arch != 0 && script_class != script_arch {
+        try refuse(c"OUTPUT_FORMAT and OUTPUT_ARCH disagree")
+    }
+    target u8 = if script_class != 0 { script_class } else { script_arch }
+    if target != 0 {
+        if c.emulation_set && c.elf32 != (target == 1) {
+            try refuse(c"command-line emulation disagrees with linker script target")
+        }
+        c.elf32 = target == 1
     }
     if !sections_seen { try ls_bad(l, c"expected SECTIONS, got ") }
     for i u64 in 1..ld.lscript.sections.n + 1 {
@@ -697,7 +726,7 @@ fn ls_resolve_symbols() void fails {
     }
     for i u64 in 1..sc.cmds.n + 1 {
         cmd handle[LsCmd] = ls_cmd(i)
-        if cmd.kind == LS_ASSIGN || cmd.kind == LS_CHECK { try ls_mark_refs(cmd.arg) }
+        if cmd.kind == LS_ASSIGN || cmd.kind == LS_CHECK || cmd.kind == LS_LONG { try ls_mark_refs(cmd.arg) }
     }
     for i u64 in 1..sc.sections.n + 1 {
         s handle[LsSection] = ls_sec(i)
@@ -851,6 +880,49 @@ fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
     }
 }
 
+// ELF32 boot scripts leave ordinary non-allocatable debug data and compiler
+// identification sections implicit. Keep them at address zero after SECTIONS.
+fn ls_debug_orphan(x u64, h handle[Sec]) bool {
+    if !config().elf32 || config().orphan_error || (h.flags & 2) != 0 || h.kind != 1 ||
+        !(bytes_prefix(h.name, c".debug_") || bytes_is(h.name, c".comment")) { return false }
+    sc handle[Lscript] = &ld.lscript
+    i u64 = ls_lookup(&sc.section_names, h.name)
+    if i == 0 {
+        s handle[LsSection] = vec_add(&sc.sections)
+        i = sc.sections.n
+        map_put(&sc.section_names, h.name, trunc[u32](i))
+        s.name = h.name
+        s.kind = h.kind
+        s.keep = true
+        s.alignment = 1
+        s.first_file = pk_file(x)
+        s.flags = h.flags & ~0x200
+        s.entsize = h.entsize
+        c u64 = ls_new_cmd(LS_SECTION, 0)
+        ls_cmd(c).arg = i
+        vec_push(&sc.top, c)
+        vec_push(&s.body, ls_new_cmd(LS_INPUT, 0))
+    }
+    s handle[LsSection] = ls_sec(i)
+    if (s.flags & 2) != 0 || s.kind != h.kind { return false }
+    c u64 = if s.body.n == 0 { 0 } else { vec_last(&s.body) }
+    if c == 0 || ls_cmd(c).kind != LS_INPUT || ls_cmd(c).patterns.n != 0 {
+        c = ls_new_cmd(LS_INPUT, 0)
+        vec_push(&s.body, c)
+    }
+    vec_push(&ls_cmd(c).inputs, x)
+    p handle[Place] = place(pk_file(x), pk_sec(x))
+    p.valid = 1
+    p.output_index = trunc[u32](i)
+    s.count += 1
+    s.keep = true
+    s.flags |= h.flags & ~0x200
+    s.alignment = umax(s.alignment, h.alignment)
+    s.input_align = s.alignment
+    if s.entsize != h.entsize { s.entsize = 0 }
+    return true
+}
+
 fn ls_match_inputs() void fails {
     sc handle[Lscript] = &ld.lscript
     for f u64 in 0..ld.nobj {
@@ -907,12 +979,21 @@ fn ls_match_inputs() void fails {
             lx(f).kept[u8, k] = 0
             continue
         }
+        if ls_debug_orphan(x, h) { continue }
         m handle[Buf] = msg()
         bb(m, obj(f).path)
         bs(m, c": orphan input section ")
         bb(m, h.name)
         if !config().orphan_error { try refuse(cstr_dup(buf_bytes(m))) }
         try die()
+    }
+    if config().elf32 {
+        for i u64 in 1..sc.sections.n + 1 {
+            s handle[LsSection] = ls_sec(i)
+            // Merged and ordinary input can share an output section. When
+            // entry widths differ the result has no uniform merge records.
+            if s.entsize == 0 { s.flags &= ~0x30 }
+        }
     }
 }
 
@@ -1137,6 +1218,17 @@ fn ls_place_section(i u64) void fails {
     s.lma = sc.lma
     for j u64 in 0..s.body.n {
         c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+        if c.kind == LS_LONG {
+            if s.kind == 8 || s.entsize != 0 { try refuse(c"LONG in a NOBITS or fixed-record section") }
+            c.address = sc.dot
+            c.data = try ls_eval_number(c.arg)
+            if sc.final_pass && (sc.dot + 4 < sc.dot ||
+                (c.data > 0xffffffff && c.data < 0xffffffff80000000)) {
+                try ls_exception(c.at, c"LONG value or address out of range", bytes_empty(), false)
+            }
+            sc.dot += 4
+            continue
+        }
         if c.kind != LS_INPUT {
             try ls_assign(c, true)
             continue
@@ -1156,6 +1248,10 @@ fn ls_place_section(i u64) void fails {
         }
     }
     s.size = sc.dot - s.address
+    if sc.final_pass && config().elf32 &&
+        (s.address > 0xffffffff || s.size > 0xffffffff || s.address + s.size > 0x100000000) {
+        try ls_exception(0, c"section exceeds ELF32 address range for ", s.name, false)
+    }
     if !alloc { sc.dot = old_dot }
     if old_address != s.address || old_size != s.size || old_lma != s.lma || old_align != s.alignment {
         sc.changed = true
@@ -1203,6 +1299,12 @@ fn ls_addresses() void fails {
         if n == 0 { continue }
         y handle[Sym] = sym(obj(ld.script_file), n)
         y.value = ls_value(&s.value)
+        if config().elf32 && y.value > 0xffffffff {
+            if s.value.sec != 0 || y.value < 0xffffffff80000000 {
+                try ls_exception(0, c"symbol exceeds ELF32 address range for ", s.name, false)
+            }
+            y.value &= 0xffffffff
+        }
         y.kind = s.value.kind
         sc.synth_sections[u64, n] = s.value.sec
     }

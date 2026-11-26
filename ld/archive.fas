@@ -569,7 +569,7 @@ fn nested_member_data(a handle[Archive], m handle[Member], path Bytes) Bytes fai
 fn member_parse(m handle[Member]) void {
     o handle[Obj] = handle_from_addr(m.o)
     m.status = MS_PARSED
-    elf_parse(o, config().has_script) catch err {
+    elf_parse_class(o, config().has_script, config().elf32) catch err {
         m.status = if err == Refused { MS_REFUSED } else { MS_FAILED }
         return
     }

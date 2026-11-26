@@ -40,6 +40,66 @@ struct LsImage {
     symtab_size u64
 }
 
+fn ls_elf_header_size() u64 { return if config().elf32 { 52 } else { 64 } }
+fn ls_program_header_size() u64 { return if config().elf32 { 32 } else { 56 } }
+fn ls_section_header_size() u64 { return if config().elf32 { 40 } else { 64 } }
+fn ls_symbol_size() u64 { return if config().elf32 { 16 } else { 24 } }
+fn ls_reloc_size() u64 { return if config().elf32 { 8 } else { 24 } }
+fn ls_word() u64 { return if config().elf32 { 4 } else { 8 } }
+fn ls_reloc_section_kind() u32 { return if config().elf32 { 9 } else { 4 } }
+
+fn ls_write_header(im handle[LsImage], entry u64) void fails {
+    ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
+    mem_copy(ld.image, &ident, 7)
+    wr16(ld.image, 16, 2)
+    wr32(ld.image, 20, 1)
+    phoff u64 = if ld.lscript.phdrs.n == 0 { 0 } else { ls_elf_header_size() }
+    sizes u64 = 52
+    if config().elf32 {
+        if entry > 0xffffffff { try die_c(c"entry point exceeds ELF32 address range") }
+        wr8(ld.image, 4, 1)
+        wr16(ld.image, 18, 3)
+        wr32(ld.image, 24, entry)
+        wr32(ld.image, 28, phoff)
+        wr32(ld.image, 32, im.shoff)
+        sizes = 40
+    } else {
+        wr16(ld.image, 18, 62)
+        wr64(ld.image, 24, entry)
+        wr64(ld.image, 32, phoff)
+        wr64(ld.image, 40, im.shoff)
+    }
+    wr16(ld.image, sizes, ls_elf_header_size())
+    if phoff != 0 {
+        wr16(ld.image, sizes + 2, ls_program_header_size())
+        wr16(ld.image, sizes + 4, ld.lscript.phdrs.n)
+    }
+    wr16(ld.image, sizes + 6, ls_section_header_size())
+    wr16(ld.image, sizes + 8, im.section_count)
+    wr16(ld.image, sizes + 10, im.shstrtab_section)
+}
+
+fn ls_write_phdr(index u64, p handle[LsPhdr], offset u64, address u64, physical u64,
+    fsize u64, msize u64, alignment u64) void fails {
+    at u64 = ls_elf_header_size() + index * ls_program_header_size()
+    if config().elf32 {
+        if physical > 0xffffffff || msize > 0xffffffff || address + msize > 0x100000000 {
+            try die_c(c"program segment exceeds ELF32 address range")
+        }
+        wr32(ld.image, at, p.kind)
+        wr32(ld.image, at + 4, offset)
+        wr32(ld.image, at + 8, address)
+        wr32(ld.image, at + 12, physical)
+        wr32(ld.image, at + 16, fsize)
+        wr32(ld.image, at + 20, msize)
+        wr32(ld.image, at + 24, p.flags)
+        wr32(ld.image, at + 28, alignment)
+    } else {
+        program_header(index, p.kind, p.flags, offset, address, fsize, msize, alignment)
+        wr64(ld.image, at + 24, physical)
+    }
+}
+
 fn ls_section_flags(s handle[LsSection]) u64 {
     return 4 | ((s.flags & 4) >> 2) | ((s.flags & 1) << 1)
 }
@@ -139,7 +199,7 @@ fn ls_file_place(i u64, cursor u64) u64 fails {
 fn ls_content_layout() void fails {
     sc handle[Lscript] = &ld.lscript
     try ls_make_phdrs()
-    cursor u64 = 64 + sc.phdrs.n * 56
+    cursor u64 = ls_elf_header_size() + sc.phdrs.n * ls_program_header_size()
     // Segment members are laid out ahead of non-allocatable data, even
     // when the script places some of the latter between two load sections.
     for pass u64 in 0..2 {
@@ -172,7 +232,7 @@ fn ls_write_phdrs() void fails {
     for i u64 in 1..ld.lscript.phdrs.n + 1 {
         p handle[LsPhdr] = ls_phdr(i)
         if p.first == 0 {
-            program_header(i - 1, p.kind, p.flags, 0, 0, 0, 0, 0)
+            try ls_write_phdr(i - 1, p, 0, 0, 0, 0, 0, 0)
             continue
         }
         first handle[LsSection] = ls_sec(p.first)
@@ -183,8 +243,8 @@ fn ls_write_phdrs() void fails {
         fsize u64 = last.offset - first.offset
         if last.kind != 8 { fsize += last.size }
         msize u64 = last.address + last.size - first.address
-        program_header(i - 1, p.kind, p.flags, first.offset, first.address, fsize, msize, p.alignment)
-        wr64(ld.image, 64 + (i - 1) * 56 + 24, first.address + first.lma)
+        try ls_write_phdr(i - 1, p, first.offset, first.address, first.address + first.lma,
+            fsize, msize, p.alignment)
     }
 }
 
@@ -226,6 +286,17 @@ fn ls_fill() void {
     }
 }
 
+fn ls_emit_data() void {
+    for i u64 in 1..ld.lscript.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        if !s.keep { continue }
+        for j u64 in 0..s.body.n {
+            c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+            if c.kind == LS_LONG { wr32(ld.image, s.offset + c.address - s.address, c.data) }
+        }
+    }
+}
+
 fn ls_rela_layout(im handle[LsImage]) void fails {
     im.rela_by_section = heap_alloc_zeroed((ld.lscript.sections.n + 1) * 8)
     if !config().emit_relocs { return }
@@ -233,7 +304,7 @@ fn ls_rela_layout(im handle[LsImage]) void fails {
         o handle[Obj] = obj(f)
         for k u64 in 1..zext[u64](o.nsec) {
             h handle[Sec] = sec(o, k)
-            if h.kind != 4 || h.size == 0 || !kept(f, zext[u64](h.info)) { continue }
+            if h.kind != ls_reloc_section_kind() || h.size == 0 || !kept(f, zext[u64](h.info)) { continue }
             p handle[Place] = place(f, zext[u64](h.info))
             si u64 = zext[u64](p.output_index)
             if si == 0 { continue }
@@ -320,22 +391,38 @@ fn ls_make_symbols(im handle[LsImage]) void fails {
 }
 
 fn ls_emit_symbols(im handle[LsImage]) void {
+    narrow bool = config().elf32
     for j u64 in 0..im.symbols.n {
         s handle[LsOutSym] = vec_at(&im.symbols, j)
-        at u64 = im.symtab_offset + (j + 1) * 24
+        at u64 = im.symtab_offset + (j + 1) * ls_symbol_size()
         si u64 = s.section
         shndx u64 = if si == 0 { 0xfff1 } else { ls_sec(si).number }
-        wr32(ld.image, at, s.name)
-        wr16(ld.image, at + 6, shndx)
+        info u64 = 3
+        vis u64 = 0
+        value u64 = 0
+        size u64 = 0
         if s.file == NONE64 {
-            wr8(ld.image, at + 4, 3)
-            wr64(ld.image, at + 8, ls_sec(si).address)
+            value = ls_sec(si).address
         } else {
             y handle[Sym] = sym(obj(s.file), s.symbol)
-            wr8(ld.image, at + 4, (zext[u64](s.binding) << 4) | zext[u64](y.kind))
-            wr8(ld.image, at + 5, zext[u64](s.visibility))
-            wr64(ld.image, at + 8, sym_address(s.file, y))
-            wr64(ld.image, at + 16, y.size)
+            info = (zext[u64](s.binding) << 4) | zext[u64](y.kind)
+            vis = zext[u64](s.visibility)
+            value = sym_address(s.file, y)
+            size = y.size
+        }
+        wr32(ld.image, at, s.name)
+        if narrow {
+            wr32(ld.image, at + 4, value)
+            wr32(ld.image, at + 8, size)
+            wr8(ld.image, at + 12, info)
+            wr8(ld.image, at + 13, vis)
+            wr16(ld.image, at + 14, shndx)
+        } else {
+            wr8(ld.image, at + 4, info)
+            wr8(ld.image, at + 5, vis)
+            wr16(ld.image, at + 6, shndx)
+            wr64(ld.image, at + 8, value)
+            wr64(ld.image, at + 16, size)
         }
     }
     mem_copy(ld.image + im.strtab_offset, im.strtab.p, im.strtab.n)
@@ -355,7 +442,7 @@ fn ls_emit_relas(im handle[LsImage]) void {
             if x == 0 { continue }
             re handle[LsRela] = vec_at(&im.relas, x - 1)
             at u64 = re.offset + re.cursor
-            re.cursor += 24
+            re.cursor += ls_reloc_size()
             addend u64 = r.addend
             index u64 = 0
             kind u64 = zext[u64](r.kind)
@@ -378,9 +465,14 @@ fn ls_emit_relas(im handle[LsImage]) void {
                     index = zext[u64](m[u32, ds])
                 }
             }
-            wr64(ld.image, at, p.address + r.offset)
-            wr64(ld.image, at + 8, (index << 32) | kind)
-            wr64(ld.image, at + 16, addend)
+            if config().elf32 {
+                wr32(ld.image, at, p.address + r.offset)
+                wr32(ld.image, at + 4, (index << 8) | kind)
+            } else {
+                wr64(ld.image, at, p.address + r.offset)
+                wr64(ld.image, at + 8, (index << 32) | kind)
+                wr64(ld.image, at + 16, addend)
+            }
         }
     }
 }
@@ -429,8 +521,8 @@ fn ls_image_layout(im handle[LsImage]) void fails {
     }
     im.symtab_name = zext[u64](try add_string(&im.shstrtab, bytes_c(c".symtab")))
     im.symtab_section = n
-    im.symtab_offset = try out_align(sc.file_end, 8)
-    im.symtab_size = (im.symbols.n + 1) * 24
+    im.symtab_offset = try out_align(sc.file_end, ls_word())
+    im.symtab_size = (im.symbols.n + 1) * ls_symbol_size()
     after_symtab u64 = try out_add(im.symtab_offset, im.symtab_size)
     // The kernel explicitly places .strtab before .shstrtab. With neither
     // mentioned, follow the default metadata order used by ld.lld.
@@ -450,7 +542,7 @@ fn ls_image_layout(im handle[LsImage]) void fails {
         r handle[LsRela] = vec_at(&im.relas, i)
         name Bytes = ls_sec(r.target).name
         r.name = im.shstrtab.n
-        bs(&im.shstrtab, c".rela")
+        bs(&im.shstrtab, if config().elf32 { c".rel" } else { c".rela" })
         bb(&im.shstrtab, name)
         buf_u8(&im.shstrtab, 0)
     }
@@ -466,33 +558,52 @@ fn ls_image_layout(im handle[LsImage]) void fails {
     }
     for i u64 in 0..im.relas.n {
         r handle[LsRela] = vec_at(&im.relas, i)
-        r.offset = try out_align(cursor, 8)
+        r.offset = try out_align(cursor, ls_word())
         cursor = try out_add(r.offset, r.size)
     }
-    im.shoff = try out_align(cursor, 8)
+    im.shoff = try out_align(cursor, ls_word())
     im.section_count = n + 3 + im.relas.n
     if im.section_count >= 0xff00 || sc.phdrs.n >= 0xffff { try refuse(c"extended ELF header counts in scripted output") }
-    ld.image_size = try out_add(im.shoff, im.section_count * 64)
+    ld.image_size = try out_add(im.shoff, im.section_count * ls_section_header_size())
     ld.image = heap_alloc_zeroed(ld.image_size + 8)
+}
+
+fn ls_shdr(im handle[LsImage], index u64, name u64, kind u64, flags u64,
+    address u64, offset u64, size u64, link u64, info u64, alignment u64, entsize u64) void {
+    at u64 = im.shoff + index * ls_section_header_size()
+    if config().elf32 {
+        wr32(ld.image, at, name)
+        wr32(ld.image, at + 4, kind)
+        wr32(ld.image, at + 8, flags)
+        wr32(ld.image, at + 12, address)
+        wr32(ld.image, at + 16, offset)
+        wr32(ld.image, at + 20, size)
+        wr32(ld.image, at + 24, link)
+        wr32(ld.image, at + 28, info)
+        wr32(ld.image, at + 32, alignment)
+        wr32(ld.image, at + 36, entsize)
+    } else {
+        section_header(at, name, kind, flags, address, offset, size, link, info, alignment, entsize)
+    }
 }
 
 fn ls_write_shdrs(im handle[LsImage]) void {
     for i u64 in 1..ld.lscript.sections.n + 1 {
         s handle[LsSection] = ls_sec(i)
         if !s.keep { continue }
-        section_header(im.shoff + s.number * 64, zext[u64](im.section_names[u32, i]),
+        ls_shdr(im, s.number, zext[u64](im.section_names[u32, i]),
             zext[u64](s.kind), s.flags, s.address, s.offset, s.size, 0, 0, s.alignment, s.entsize)
     }
-    section_header(im.shoff + im.symtab_section * 64, im.symtab_name, 2, 0, 0,
-        im.symtab_offset, im.symtab_size, im.strtab_section, im.local_end, 8, 24)
-    section_header(im.shoff + im.strtab_section * 64, im.strtab_name, 3, 0, 0,
+    ls_shdr(im, im.symtab_section, im.symtab_name, 2, 0, 0,
+        im.symtab_offset, im.symtab_size, im.strtab_section, im.local_end, ls_word(), ls_symbol_size())
+    ls_shdr(im, im.strtab_section, im.strtab_name, 3, 0, 0,
         im.strtab_offset, im.strtab.n, 0, 0, 1, 0)
-    section_header(im.shoff + im.shstrtab_section * 64, im.shstrtab_name, 3, 0, 0,
+    ls_shdr(im, im.shstrtab_section, im.shstrtab_name, 3, 0, 0,
         im.shstrtab_offset, im.shstrtab.n, 0, 0, 1, 0)
     first_rela u64 = im.section_count - im.relas.n
     for i u64 in 0..im.relas.n {
         r handle[LsRela] = vec_at(&im.relas, i)
-        section_header(im.shoff + (first_rela + i) * 64, r.name, 4, 0x40, 0,
-            r.offset, r.size, im.symtab_section, ls_sec(r.target).number, 8, 24)
+        ls_shdr(im, first_rela + i, r.name, zext[u64](ls_reloc_section_kind()), 0x40, 0,
+            r.offset, r.size, im.symtab_section, ls_sec(r.target).number, ls_word(), ls_reloc_size())
     }
 }

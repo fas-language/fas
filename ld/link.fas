@@ -586,9 +586,59 @@ fn relocate_object(f u64) bool {
     return true
 }
 
+fn relocate_object_32(f u64) bool {
+    o handle[Obj] = obj(f)
+    m handle[Buf] = &o.msg
+    vv handle[Values] = vals(f)
+    for k u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, k)
+        t u64 = zext[u64](r.target)
+        kind u32 = r.kind
+        if kind == 0 || !kept(f, t) { continue }
+        target handle[Place] = place(f, t)
+        si u64 = zext[u64](r.symbol)
+        y handle[Sym] = sym(o, si)
+        if vv.has[u8, si] == 0 &&
+            ((sec(o, t).flags & 2) != 0 || !(y.section != 0 || name_defined(y.name))) {
+            reloc_context(m, f, r)
+            bs(m, c": undefined symbol ")
+            bb(m, y.name)
+            return false
+        }
+        x u64 = vv.v[u64, si] + r.addend
+        pc_relative bool = kind == 2 || kind == 4 || kind == 21 || kind == 23
+        if pc_relative { x -= target.address + r.offset }
+        width u64 = reloc32_width(kind)
+        if width < 4 {
+            sx i64 = bitcast[i64](x)
+            limit i64 = 1 << (width * 8 - 1)
+            upper i64 = if pc_relative { limit } else { limit * 2 }
+            if sx < 0 - limit || sx >= upper {
+                reloc_context(m, f, r)
+                bs(m, c": i386 relocation ")
+                bu(m, zext[u64](kind))
+                bs(m, c" overflow: result 0x")
+                bx(m, x)
+                return false
+            }
+        }
+        offset u64 = target.offset + r.offset
+        if target.valid == 0 || offset > ld.image_size || width > ld.image_size - offset {
+            reloc_context(m, f, r)
+            bs(m, c": relocation exceeds its output section")
+            return false
+        }
+        if width == 4 { wr32(ld.image, offset, x) }
+        else if width == 2 { wr16(ld.image, offset, x) }
+        else { wr8(ld.image, offset, x) }
+    }
+    return true
+}
+
 fn relocate_job(ctx addr, b u64, e u64, worker u32) void {
     for f u64 in b..e {
-        lx(f).status = if relocate_object(f) { 0 } else { 1 }
+        ok bool = if config().elf32 { relocate_object_32(f) } else { relocate_object(f) }
+        lx(f).status = if ok { 0 } else { 1 }
     }
 }
 
@@ -999,7 +1049,7 @@ fn build_image() void fails {
 
 // ---------- publishing (File_io) ----------
 
-// Script mode uses the relocator for ordinary x86-64 static relocations.
+// Only static relocations are allowed in an executable linker script.
 fn script_check_inputs() void fails {
     if ld.shlibs.n != 0 { try refuse(c"shared libraries in a static linker script") }
     for f u64 in 0..ld.ninput_objects {
@@ -1007,13 +1057,14 @@ fn script_check_inputs() void fails {
         for k u64 in 1..zext[u64](o.nsec) {
             h handle[Sec] = sec(o, k)
             if !kept(f, k) { continue }
-            if ls_input_kind(h.kind) && (h.flags & 0x4b0) != 0 {
+            unsupported u64 = if config().elf32 { 0x480 } else { 0x4b0 }
+            if ls_input_kind(h.kind) && (h.flags & unsupported) != 0 {
                 try refuse(c"merge, link-order or TLS sections in a linker script")
             }
             if bytes_is(h.name, c".eh_frame") || bytes_is(h.name, c".note.gnu.property") {
                 try refuse(c"unwind or GNU property output in a linker script")
             }
-            if h.kind == 9 { try refuse(c"REL input relocations in a linker script") }
+            if h.kind == 9 && !config().elf32 { try refuse(c"REL input relocations in an ELF64 script") }
         }
         for i u64 in 1..zext[u64](o.nsym) {
             y handle[Sym] = sym(o, i)
@@ -1032,7 +1083,7 @@ fn script_check_inputs() void fails {
                     try refuse(c"DWARF relocations to discarded sections in a linker script")
                 }
             }
-            if kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
+            if !config().elf32 && kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
                 try refuse(c"non-static relocation in a linker script")
             }
         }
@@ -1074,6 +1125,7 @@ fn build_image_script() void fails {
     try ls_rela_layout(&im)
     try ls_image_layout(&im)
     ls_fill()
+    ls_emit_data()
     ld_pool_for(ld.content.n, 64, &blit_job, null)
     ld.values = heap_alloc_zeroed(ld.nobj * sizeof[Values])
     ld_pool_for(ld.nobj, 1, &values_job, null)
@@ -1084,22 +1136,7 @@ fn build_image_script() void fails {
         if lx(f).status != 0 { try die_buf(&obj(f).msg) }
     }
     phase_end(PH_RELOCATE, &rt)
-    ident arr[7, u8] = b"\x7fELF\x02\x01\x01"
-    mem_copy(ld.image, &ident, 7)
-    wr16(ld.image, 16, 2)
-    wr16(ld.image, 18, 62)
-    wr32(ld.image, 20, 1)
-    wr64(ld.image, 24, entry)
-    if ld.lscript.phdrs.n != 0 {
-        wr64(ld.image, 32, 64)
-        wr16(ld.image, 54, 56)
-        wr16(ld.image, 56, ld.lscript.phdrs.n)
-    }
-    wr64(ld.image, 40, im.shoff)
-    wr16(ld.image, 52, 64)
-    wr16(ld.image, 58, 64)
-    wr16(ld.image, 60, im.section_count)
-    wr16(ld.image, 62, im.shstrtab_section)
+    try ls_write_header(&im, entry)
     try ls_write_phdrs()
     ls_emit_symbols(&im)
     ls_emit_relas(&im)

@@ -187,6 +187,8 @@ struct Config {
     entry_set bool
     script Bytes
     has_script bool
+    elf32 bool
+    emulation_set bool
     emit_relocs bool
     orphan_error bool
     discard_none bool
@@ -426,7 +428,11 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.no_interpreter = true
         } else if is(a, c"-m") {
             emulation Bytes = try take_value(p, a)
-            if !is(emulation, c"elf_x86_64") { try fail_with(c"unsupported emulation ", emulation) }
+            if !is(emulation, c"elf_x86_64") && !is(emulation, c"elf_i386") {
+                try fail_with(c"unsupported emulation ", emulation)
+            }
+            c.elf32 = is(emulation, c"elf_i386")
+            c.emulation_set = true
         } else if is(a, c"--eh-frame-hdr") {
         } else if is(a, c"-nostdlib") {
             c.nostdlib = true
@@ -643,6 +649,7 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
         print_version()
         fail LinkDone
     }
+    if c.elf32 && !c.has_script { try refuse(c"ELF32 output requires an executable linker script") }
     if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
         try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
     }

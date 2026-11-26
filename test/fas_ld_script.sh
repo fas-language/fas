@@ -234,3 +234,56 @@ grep -Fq 'lazy archive extraction' diag
 expect_exit 42 ./archive
 
 printf 'fas-ld script: 2 entry points, 3 PHDRs, retained relocations, deterministic output, whole archives, 2 orphan modes, ASSERT and 11 refusals: ok\n'
+
+cat > start32.s <<'ASM'
+.globl _start
+.text
+_start:
+    call callee32
+    mov %eax, %ebx
+    mov $1, %eax
+    int $0x80
+.section .words,"a"
+.long callee32 + 4
+.word callee32 - 1
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > callee32.s <<'ASM'
+.globl callee32
+.text
+callee32:
+    mov $42, %eax
+    ret
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > layout32.lds <<'LDS'
+OUTPUT_FORMAT("elf32-i386")
+OUTPUT_ARCH(i386)
+ENTRY(_start)
+PHDRS { code PT_LOAD FLAGS(5); }
+SECTIONS {
+  . = 0x1000;
+  .text : { *(.text) } :code
+  .words : { *(.words) LONG(0x5a5aaa55) }
+  /DISCARD/ : { *(.note.GNU-stack) }
+}
+LDS
+"$cc" -m32 -c start32.s -o start32.o
+"$cc" -m32 -c callee32.s -o callee32.o
+"$ld" -m elf_x86_64 -m elf_i386 -T layout32.lds --emit-relocs start32.o callee32.o -o image32
+"$ld" -T layout32.lds -q start32.o callee32.o -o inferred32
+cmp image32 inferred32
+"${LLD:-ld.lld-22}" -m elf_i386 -T layout32.lds -q start32.o callee32.o -o lld32
+for image in image32 lld32; do
+    "${LLVM_OBJCOPY:-llvm-objcopy-22}" -O binary "$image" "$image.bin"
+    readelf -rW "$image" > "$image.rel"
+    grep -q 'R_386_PC32.*callee32' "$image.rel"
+    grep -q 'R_386_32.*callee32' "$image.rel"
+    grep -q 'R_386_16.*callee32' "$image.rel"
+done
+cmp image32.bin lld32.bin
+expect_exit 3 "$ld" -m elf_x86_64 -T layout32.lds start32.o callee32.o -o wrongclass 2>diag
+grep -q 'disagrees with linker script target' diag
+expect_exit 3 "$ld" -m elf_i386 start32.o callee32.o -o noscript 2>diag
+grep -q 'ELF32 output requires an executable linker script' diag
+printf 'fas-ld i386 script: ELF32 inference, R_386_PC32/32/16, LONG and lld binary comparison: ok\n'

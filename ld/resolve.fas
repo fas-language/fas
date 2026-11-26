@@ -165,7 +165,7 @@ fn parse_job(ctx addr, b u64, e u64, worker u32) void {
     for i u64 in b..e {
         o handle[Obj] = obj(i)
         if o.secs != null || lx(i).status != 0 { continue }
-        elf_parse(o, config().has_script) catch err {
+        elf_parse_class(o, config().has_script, config().elf32) catch err {
             lx(i).status = if err == Refused { 2 } else { 1 }
         }
     }

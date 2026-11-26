@@ -29,12 +29,12 @@ shared modes. Executable linker scripts use ld.lld as their reference.
 | `ld/api.fas` | In-process library API (`ld_link`), `LdVfs` virtual filesystem & in-memory output, `ld_reset` re-entrancy cleanup, and incremental early-parse session (`ld_session_begin`, `ld_add_input`, `ld_finish`). |
 | `ld/util.fas` | Diagnostics (`msg`/`die`/`refuse`), library-mode non-local exit (`fas_ld_setjmp`/`fas_ld_longjmp`), checked arithmetic, LE readers/writers, `KeyIndex`. |
 | `ld/cli.fas` | Command-line and `@response` file parsing (`parse_command_line_argv`, `Config`). |
-| `ld/elf.fas` | Parallel-safe ELF64 x86-64 relocatable object parser (`elf_parse`, SDT notes, zlib-compressed debug). |
+| `ld/elf.fas` | Parallel-safe x86-64 and i386 relocatable object parser. ELF64 also supports SDT notes and zlib-compressed debug. |
 | `ld/shared.fas` | Parallel-safe ELF64 x86-64 `ET_DYN` shared-object reader (`shared_is`, `shared_parse`, SysV/GNU hash & verdef/verneed/versym validation, `sh_find_location`). |
 | `ld/archive.fas` | SysV/GNU and thin archive reader (including nested thin members), `-l` library search, lazy GNU extraction (`extract`). |
 | `ld/script.fas` | Bounded linker script lexer/parser (`INPUT`, `GROUP`, `AS_NEEDED`, `SEARCH_DIR`, `OUTPUT_FORMAT`) and `--sysroot` normalization. |
 | `ld/lscript.fas` | Executable linker-script parser, input section selection, script symbols, and convergent address assignment. |
-| `ld/limage.fas` | Scripted ELF file offsets, PHDRs, section fills, symbol table, and retained RELA records. |
+| `ld/limage.fas` | Scripted ELF file offsets, PHDRs, section fills, symbol table, and retained RELA (ELF64) or REL (ELF32) records. |
 | `ld/shdeps.fas` | `$ORIGIN`/`${ORIGIN}` expansion, transitive `DT_NEEDED` loading (`-rpath-link`, `DT_RUNPATH`, inherited `DT_RPATH`), and link-time validation. |
 | `ld/resolve.fas` | Input staging, parallel `.o`/`.so` parsing with input-order diagnostics, global symbol resolution, COMDAT, commons, predefined symbols, `shdeps_load`. |
 | `ld/verscript.fas` | Version script parser and glob/exact visibility policy. |
@@ -86,16 +86,20 @@ Passes execute serially on the main thread; data-parallel passes fan out over
 
 ## Executable linker scripts
 
-`-T PATH` and `--script=PATH` select the static x86-64 script path.
+`-T PATH` and `--script=PATH` select the static x86-64 or i386 script path.
+Select i386 with `-m elf_i386`, `OUTPUT_FORMAT("elf32-i386")`, or
+`OUTPUT_ARCH(i386)`. Repeated `-m` options select the last emulation and
+must agree with the script when it specifies the target.
 `ENTRY` sets the entry symbol, with `-e` taking precedence. `-q` or
-`--emit-relocs` retains RELA records against output symbols and sections.
+`--emit-relocs` retains relocation records against output symbols and sections.
 `--discard-none` retains local symbols. `--orphan-handling=error` reports
-unassigned input sections as link errors. Without it, a link requiring
+unassigned input sections as link errors. By default, ELF32 places unassigned
+non-allocated debug and comment sections at address zero. Other unsupported
 orphan placement returns exit 3.
 
 The parser recognizes the x86-64 kernel's `OUTPUT_FORMAT`, `OUTPUT_ARCH`,
 `PHDRS`, and `SECTIONS` directives. It supports `PT_LOAD` and `PT_NOTE`,
-section addresses, `AT`, `ALIGN`, `(INFO)`, fixed fill patterns, and
+section addresses, `AT`, `ALIGN`, `(INFO)`, fixed fill patterns, `LONG`, and
 `/DISCARD/`. Input descriptions use the `*` file selector with section
 patterns, optionally wrapped in `KEEP` and `SORT`. Integer expressions can
 reference symbols, the location counter, section addresses and sizes.
@@ -105,9 +109,11 @@ stabilize, then checks assertions and applies relocations using the final
 addresses. The symbol table preserves each script symbol's output section
 and type where the expression carries them.
 
-The script path supports the Linux defconfig final link. Unsupported
+The script path supports Linux defconfig's final link and static i386
+executables. ELF32 supports `R_386_32`, `R_386_PC32`, `R_386_PLT32`, `R_386_16`,
+`R_386_PC16`, `R_386_8`, and `R_386_PC8`. Unsupported
 directives and combinations return exit 3. These include `MEMORY` and
-`OVERLAY`, named input-file patterns, explicit data emission, `COMMON`,
+`OVERLAY`, named input-file patterns, `COMMON`,
 TLS, IFUNC, GOT relocations, lazy archive extraction, and script mode
 combined with PIE, shared output, section GC, maps, or `-r`. Archives
 listed under `--whole-archive` are supported. The supported explicit metadata layout
