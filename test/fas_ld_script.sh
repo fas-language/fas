@@ -33,7 +33,7 @@ second:
 .section .both.a,"a"
 .byte 0x41
 
-.section .note.test,"a",@progbits
+.section .note.test,"a",@note
 .p2align 2
 .long 5, 4, 1
 .asciz "Test"
@@ -57,7 +57,10 @@ data_value:
 
 .section .metadata,"",@progbits
 .byte 0xab
+.quad .Ldiscarded + 3
 .section .discard.test,"a"
+.byte 0
+.Ldiscarded:
 .globl ignored
 ignored:
     .byte 0
@@ -82,7 +85,8 @@ cat > layout.lds <<'LDS'
 OUTPUT_FORMAT("elf64-x86-64")
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
-alias = data_value;
+alias = +data_value;
+aligned_alias = ALIGN(data_value, 8);
 constant = 1;
 constant += 2;
 PHDRS {
@@ -110,6 +114,8 @@ SECTIONS {
   . = ALIGN(0x1000);
   .data : { *(.data) CONSTRUCTORS } :data
   .bss : { *(.bss) }
+  after_bss = .;
+  assert_dot = ASSERT(after_bss != 0, "dot after BSS");
   .info (INFO) : { *(.metadata) }
   .unused : { *(.no_such_section) }
   ASSERT(end - begin == 4, "rodata size")
@@ -157,7 +163,9 @@ def content(name):
     return image[sh[4]:sh[4]+sh[5]]
 
 assert content(".rodata") == b"azBA"
-assert content(".info") == b"\xab" and by_name[".info"][1][2:4] == (0, 0)
+assert struct.unpack("<BQ", content(".info")) == (0xab, 4)
+assert by_name[".info"][1][2:4] == (0, 0)
+assert struct.unpack("<3Q", content(".rela.info")) == (1, 0, 4)
 assert by_name[".bss"][1][1] == 8
 assert b"GNU\0" in content(".notes")
 assert ".unused" not in by_name and ".discard.test" not in by_name
@@ -177,6 +185,8 @@ pattern = bytes.fromhex("12345678")
 assert len(gap) >= 8 and gap == (pattern * ((len(gap) + 3) // 4))[:len(gap)]
 data = by_name[".data"]
 assert named["alias"][1][1:5] == (0x11, 0, data[0], data[1][3])
+assert named["aligned_alias"][1][1:5] == named["alias"][1][1:5]
+assert named["assert_dot"][1][3:5] == (0xfff1, named["after_bss"][1][4])
 assert named["constant"][1][3:5] == (0xfff1, 3)
 assert named["fallback"][1][3:5] == (0xfff1, data[1][3]+1)
 assert struct.unpack_from("<2Q", content(".data")) == (data[1][3]+21, data[1][3]+1)
@@ -203,6 +213,7 @@ for unsupported in \
     'SECTIONS { .text : { BYTE(7) *(.text) } }' \
     'SECTIONS { .text : { file.o(.text) } }' \
     'SECTIONS { .text : { *(SORT_BY_ALIGNMENT(.text)) } }' \
+    'SECTIONS { .text (NOLOAD) : { *(.text) } }' \
     'SECTIONS { .text : { *(.text) } > ROM }' \
     'SECTIONS { .text : { *(COMMON) } }' \
     'SECTIONS { .text : { *(.text) } :MISSING }' \
@@ -216,4 +227,10 @@ done
 expect_exit 3 "$ld" -r -T layout.lds main.o helper.o -o unsupported 2>diag
 grep -Fq 'not yet supported' diag
 
-printf 'fas-ld script: 2 entry points, 3 PHDRs, retained relocations, deterministic output, 2 orphan modes, ASSERT and 9 refusals: ok\n'
+ar rcs helper.a helper.o
+expect_exit 3 "$ld" -T layout.lds main.o helper.a -o unsupported 2>diag
+grep -Fq 'lazy archive extraction' diag
+"$ld" -T layout.lds main.o --whole-archive helper.a --no-whole-archive -o archive
+expect_exit 42 ./archive
+
+printf 'fas-ld script: 2 entry points, 3 PHDRs, retained relocations, deterministic output, whole archives, 2 orphan modes, ASSERT and 11 refusals: ok\n'

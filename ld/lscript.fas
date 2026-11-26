@@ -458,6 +458,7 @@ fn ls_parse_phdrs(l handle[LsLex]) void fails {
         if ls_phdr_index(name) != 0 { try ls_exception(l.at, c"duplicate program header ", name, true) }
         p handle[LsPhdr] = vec_add(&ld.lscript.phdrs)
         p.name = name
+        p.flags = 4
         if try ls_take(l, c"PT_LOAD") {
             p.kind = 1
         } else if try ls_take(l, c"PT_NOTE") {
@@ -495,6 +496,9 @@ fn ls_parse_section(l handle[LsLex], name Bytes, at u64) u64 fails {
         if try ls_take(l, c"INFO") {
             s.info = true
             try ls_expect(l, c")")
+        } else if ls_is(l, c"NOLOAD") || ls_is(l, c"READONLY") || ls_is(l, c"TYPE") ||
+            ls_is(l, c"DSECT") || ls_is(l, c"COPY") || ls_is(l, c"OVERLAY") {
+            try ls_bad(l, c"unsupported output section type ")
         } else {
             l.pos = saved
             try ls_next(l)
@@ -1043,20 +1047,22 @@ fn ls_eval(i u64, out handle[LsValue]) void fails {
                 try ls_eval(e.right, &align_value)
                 out.alignment = ls_value(&align_value)
             }
-            out.kind = 0
         case LS_ASSERT:
-            // The assertion result is 1 on success and has no section.
-            out.number = 1
+            // ASSERT evaluates to dot, so ". = ASSERT(...)" leaves it alone.
+            out.number = ld.lscript.dot
             if ld.lscript.final_pass {
                 value u64 = try ls_eval_number(e.left)
                 if value == 0 { try ls_exception(e.at, c"assertion failed: ", e.text, false) }
             }
         case LS_UNARY:
-            value u64 = try ls_eval_number(e.left)
-            if bytes_is(e.text, c"~") { out.number = ~value }
-            else if bytes_is(e.text, c"-") { out.number = 0 - value }
-            else if bytes_is(e.text, c"!") { out.number = if value == 0 { 1 } else { 0 } }
-            else { out.number = value }
+            if bytes_is(e.text, c"+") {
+                try ls_eval(e.left, out)
+            } else {
+                value u64 = try ls_eval_number(e.left)
+                if bytes_is(e.text, c"~") { out.number = ~value }
+                else if bytes_is(e.text, c"-") { out.number = 0 - value }
+                else { out.number = if value == 0 { 1 } else { 0 } }
+            }
         case LS_BINARY: try ls_binary(e, out)
     }
 }
@@ -1140,9 +1146,13 @@ fn ls_place_section(i u64) void fails {
             f u64 = pk_file(x)
             si u64 = pk_sec(x)
             h handle[Sec] = sec(obj(f), si)
-            sc.dot = align_up(sc.dot, h.alignment)
-            place(f, si).address = sc.dot
-            sc.dot += h.size
+            aligned u64 = align_up(sc.dot, h.alignment)
+            end u64 = aligned + h.size
+            if sc.final_pass && (aligned < sc.dot || end < aligned) {
+                try ls_exception(c.at, c"address range overflows for ", h.name, false)
+            }
+            place(f, si).address = aligned
+            sc.dot = end
         }
     }
     s.size = sc.dot - s.address

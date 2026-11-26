@@ -453,6 +453,11 @@ fn read_input(path Bytes, whole bool, as_needed bool, depth u64, scripts handle[
         phase_end(PH_PARSE, &at)
         ai u64 = ld.archives.n - 1
         a handle[Archive] = archive(ai)
+        // Lazy member extraction would need the active script expressions
+        // as roots and must account for definitions overridden by the script.
+        if config().has_script && !a.whole && a.members.n != 0 {
+            try refuse(c"lazy archive extraction with an executable linker script")
+        }
         for k u64 in 0..a.members.n {
             m handle[Member] = member(a, k)
             if m.ext.n != 0 && ld_exists(m.ext) {

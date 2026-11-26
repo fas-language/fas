@@ -358,22 +358,28 @@ fn ls_emit_relas(im handle[LsImage]) void {
             re.cursor += 24
             addend u64 = r.addend
             index u64 = 0
+            kind u64 = zext[u64](r.kind)
             df u64 = 0
             ds u64 = 0
             if definition(f, zext[u64](r.symbol), &df, &ds) {
                 y handle[Sym] = sym(obj(df), ds)
-                if y.kind == 3 && live(df, y) && y.section != 0xfff1 {
-                    src handle[Place] = place(df, zext[u64](y.section))
-                    target handle[LsSection] = ls_sec(zext[u64](src.output_index))
-                    index = target.sec_sym
-                    addend += src.address + y.value - target.address
+                if y.kind == 3 && y.section != 0xfff1 {
+                    if live(df, y) {
+                        src handle[Place] = place(df, zext[u64](y.section))
+                        target handle[LsSection] = ls_sec(zext[u64](src.output_index))
+                        index = target.sec_sym
+                        addend += src.address + y.value - target.address
+                    } else {
+                        // A discarded input section has no output section symbol.
+                        kind = 0
+                    }
                 } else {
                     m addr = im.symbol_indices[addr, df]
                     index = zext[u64](m[u32, ds])
                 }
             }
             wr64(ld.image, at, p.address + r.offset)
-            wr64(ld.image, at + 8, (index << 32) | zext[u64](r.kind))
+            wr64(ld.image, at + 8, (index << 32) | kind)
             wr64(ld.image, at + 16, addend)
         }
     }

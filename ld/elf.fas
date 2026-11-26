@@ -687,12 +687,13 @@ fn elf_parse(o handle[Obj], scripted bool) void fails {
                     rd32(d, s.offset + 12) != 0x00554e47 || rd32(d, s.offset + 16) != 0 {
                     try sfail(o, s, c"invalid GNU Linux ABI note")
                 }
-            } else {
-                if !bytes_is(s.name, c".note.gnu.property") || s.flags != 2 || s.alignment != 8 || s.link != 0 ||
-                    s.info != 0 || s.entsize != 0 {
+            } else if bytes_is(s.name, c".note.gnu.property") {
+                if s.flags != 2 || s.alignment != 8 || s.link != 0 || s.info != 0 || s.entsize != 0 {
                     try sfail(o, s, c"unsupported note metadata")
                 }
                 try gp_check(o, s)
+            } else if !scripted || (s.flags & ~2) != 0 || s.link != 0 || s.info != 0 || s.entsize != 0 {
+                try sfail(o, s, c"unsupported note metadata")
             }
         } else if k == 17 {
             if s.flags != 0 || s.entsize != 4 || s.size < 8 || s.size % 4 != 0 {

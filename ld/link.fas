@@ -1010,6 +1010,9 @@ fn script_check_inputs() void fails {
             if ls_input_kind(h.kind) && (h.flags & 0x4b0) != 0 {
                 try refuse(c"merge, link-order or TLS sections in a linker script")
             }
+            if bytes_is(h.name, c".eh_frame") || bytes_is(h.name, c".note.gnu.property") {
+                try refuse(c"unwind or GNU property output in a linker script")
+            }
             if h.kind == 9 { try refuse(c"REL input relocations in a linker script") }
         }
         for i u64 in 1..zext[u64](o.nsym) {
@@ -1022,6 +1025,13 @@ fn script_check_inputs() void fails {
             r handle[Rel] = rel(o, i)
             if !kept(f, zext[u64](r.target)) { continue }
             kind u32 = r.kind
+            if kind != 0 && bytes_prefix(sec(o, zext[u64](r.target)).name, c".debug") {
+                df u64 = 0
+                ds u64 = 0
+                if definition(f, zext[u64](r.symbol), &df, &ds) && !live(df, sym(obj(df), ds)) {
+                    try refuse(c"DWARF relocations to discarded sections in a linker script")
+                }
+            }
             if kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
                 try refuse(c"non-static relocation in a linker script")
             }

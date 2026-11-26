@@ -108,8 +108,9 @@ and type where the expression carries them.
 The script path supports the Linux defconfig final link. Unsupported
 directives and combinations return exit 3. These include `MEMORY` and
 `OVERLAY`, named input-file patterns, explicit data emission, `COMMON`,
-TLS, IFUNC, GOT relocations, and script mode combined with PIE, shared
-output, section GC, maps, or `-r`. The supported explicit metadata layout
+TLS, IFUNC, GOT relocations, lazy archive extraction, and script mode
+combined with PIE, shared output, section GC, maps, or `-r`. Archives
+listed under `--whole-archive` are supported. The supported explicit metadata layout
 places `.symtab`, `.strtab` and `.shstrtab` in order after content. The
 linker uses its existing whole-image build-ID algorithm and omits ld.lld's
 synthetic `.comment` section.
