@@ -175,7 +175,16 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
 
     // Memory operand or branch target: [disp][(base[,index[,scale]])]
     skip_hspace()
-    if ac.pos < n && p[u8, ac.pos] != 40 {
+    is_address_tuple bool = false
+    if ac.pos < n && p[u8, ac.pos] == 40 {
+        next u64 = ac.pos + 1
+        while next < n && is_hspace(p[u8, next]) { next += 1 }
+        if next < n {
+            ch u8 = p[u8, next]
+            is_address_tuple = ch == 37 || ch == 44 || ch == 41
+        }
+    }
+    if ac.pos < n && !is_address_tuple {
         out.expr = try parse_expr()
         out.has_disp = true
         skip_hspace()
@@ -412,6 +421,8 @@ fn emit_base64(s Bytes) void fails {
 }
 
 fn parse_directive(dir Bytes) void fails {
+    if bytes_is(dir, c".code32") { ac.code32 = true; return }
+    if bytes_is(dir, c".code64") { ac.code32 = false; return }
     if bytes_is(dir, c".text") {
         sid u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
         sec_switch(sid)

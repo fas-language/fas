@@ -326,7 +326,7 @@ struct As {
     template_mode bool
     noexecstack bool
     had_error bool
-    pad u8
+    code32 bool
     diag Buf
     inc_dirs handle[Vec[Bytes]]
 
