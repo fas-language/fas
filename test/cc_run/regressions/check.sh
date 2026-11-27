@@ -149,12 +149,14 @@ for file in "$src"/*.c; do
     if [[ ${file##*/} == noreturn_wrappers.c ]]; then
         for wrapper in stop_local stop_wrapper still_returns; do
             objdump --no-show-raw-insn -d --disassemble="$wrapper" "$work/fcc" > "$work/wrapper"
-            awk '
+            expected=1
+            if [[ $wrapper == still_returns ]]; then expected=2; fi
+            awk -v expected="$expected" '
                 $2 == "call" && /<stop_/ {
                     if ((getline) != 1 || $2 != "ud2") exit 1
                     count++
                 }
-                END { if (count != 1) exit 1 }
+                END { if (count != expected) exit 1 }
             ' "$work/wrapper"
         done
         for exe in "$work/clang" "$work/fcc"; do

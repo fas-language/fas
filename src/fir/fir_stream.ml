@@ -156,12 +156,10 @@ let fold_kernel_calls t =
   in
   let callable f = can_fold pinned f && f.linkage <> Weak in
   let never_returns f =
-    let no_return_edge = Vec.fold (fun never (b : block_rec) ->
-      never && match b.term with Ret _ | Asm_goto _ -> false | _ -> true) true f.blocks in
-    (* A hand-written epilogue in inline asm can return without a Fir ret. *)
-    no_return_edge && Vec.fold (fun never (b : block_rec) ->
-      never && Vec.fold (fun plain i ->
-        plain && match (inst f i).op with Asm _ -> false | _ -> true) true b.insts) true f.blocks
+    (* Fir models control-flow edges in terminators, including asm_goto.
+       A trap followed by unreachable therefore has no normal return. *)
+    Vec.fold (fun never (b : block_rec) ->
+      never && match b.term with Ret _ -> false | _ -> true) true f.blocks
   in
   let constant_return f =
     let result = ref None and disagree = ref false in
