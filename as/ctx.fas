@@ -327,6 +327,7 @@ struct As {
     line u32
     template_mode bool
     noexecstack bool
+    generic_x86_64 bool
     had_error bool
     code32 bool
     no_relax_relocs bool

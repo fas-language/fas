@@ -35,6 +35,7 @@ value struct AsOptions {
     noexecstack bool
     no_relax_relocs bool
     fatal_warnings bool
+    generic_x86_64 bool
 }
 
 fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], opts AsOptions, template_mode bool) void fails {
@@ -43,6 +44,7 @@ fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], opts 
     ac.pos = 0
     ac.line = 1
     ac.noexecstack = opts.noexecstack
+    ac.generic_x86_64 = opts.generic_x86_64
     ac.no_relax_relocs = opts.no_relax_relocs
     ac.fatal_warnings = opts.fatal_warnings
     ac.template_mode = template_mode
@@ -54,7 +56,8 @@ fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], opts 
 }
 
 fn as_assemble(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, out handle[AsResult]) bool {
-    opts AsOptions = {noexecstack, false, false}
+    opts AsOptions = {}
+    opts.noexecstack = noexecstack
     return as_assemble_with_options(src, filename, inc_dirs, opts, out)
 }
 

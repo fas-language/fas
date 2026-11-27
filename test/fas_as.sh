@@ -66,6 +66,12 @@ for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
     echo "fixture: ${fixture##*/} ok"
 done
 
+fixture="$ROOT/test/fas_as/fixtures/section_defaults.asm"
+llvm-mc-22 -triple=x86_64-unknown-linux-gnu -mcpu=x86-64 -filetype=obj "$fixture" -o "$WORK/ref.o"
+"$WORK/fas-as" -mcpu=x86-64 "$fixture" -o "$WORK/fas.o"
+python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+echo "fixture: generic x86-64 NOP padding ok"
+
 # LLVM exposes this option through the Clang assembler driver.
 printf '%s\n' '.text' 'movq external@GOTPCREL(%rip), %rax' 'movl external@GOTPCREL(%rip), %eax' > "$WORK/got.s"
 reference_cc -c -Wa,-mrelax-relocations=no "$WORK/got.s" -o "$WORK/ref.o"

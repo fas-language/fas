@@ -5,7 +5,7 @@ clang=${CLANG:-clang-22}
 original=("$@")
 cpp_args=()
 ref_args=()
-as_args=(--64)
+as_args=(--64 -mcpu=x86-64)
 source=
 out=
 mode=-m64

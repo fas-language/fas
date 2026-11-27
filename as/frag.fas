@@ -238,9 +238,11 @@ fn emit_nop_chunk(out handle[Buf], n u64) void {
 }
 
 fn emit_nops(out handle[Buf], count u64) void {
+    // Clang selects the generic x86-64 CPU, whose longest NOP is ten bytes.
+    limit u64 = if ac.generic_x86_64 { 10 } else { 15 }
     rem u64 = count
     while rem > 0 {
-        chunk u64 = if rem > 15 { 15 } else { rem }
+        chunk u64 = if rem > limit { limit } else { rem }
         emit_nop_chunk(out, chunk)
         rem -= chunk
     }
