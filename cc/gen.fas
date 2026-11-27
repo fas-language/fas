@@ -79,7 +79,8 @@ struct ExternObjRef {
     align u64
     linkage u8
     tls bool
-    _pad u16
+    vis u8
+    _pad u8
 }
 
 struct TentativeRef {
@@ -429,7 +430,7 @@ fn gen_sym_linkage(s handle[Symbol]) u8 {
     return FIR_GLOBAL
 }
 
-fn gen_sym_visibility(s handle[Symbol]) u8 {
+fn gen_visibility(s handle[Symbol], default_vis u8) u8 {
     b Buf = {}
     defer { buf_free(&b) }
     if gen_attr_str_arg(s.attrs, c"visibility", &b) {
@@ -438,8 +439,12 @@ fn gen_sym_visibility(s handle[Symbol]) u8 {
         if bytes_eq_c(v, c"protected") { return FIR_VIS_PROTECTED }
         return FIR_VIS_DEFAULT
     }
-    if gc.default_hidden && gen_sym_linkage(s) != FIR_LOCAL { return FIR_VIS_HIDDEN }
-    return FIR_VIS_DEFAULT
+    return default_vis
+}
+
+fn gen_sym_visibility(s handle[Symbol]) u8 {
+    default_vis u8 = if gc.default_hidden && gen_sym_linkage(s) != FIR_LOCAL { FIR_VIS_HIDDEN } else { FIR_VIS_DEFAULT }
+    return gen_visibility(s, default_vis)
 }
 
 fn gen_is_returns_twice(s handle[Symbol]) bool {
@@ -581,6 +586,7 @@ fn gen_note_extern_obj(s handle[Symbol]) void {
         r.size = if sz > 0 { sz } else { 1 }
         r.align = if al > 0 { al } else { 1 }
         r.linkage = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+        r.vis = gen_visibility(s, FIR_VIS_DEFAULT)
         r.tls = s.thread_local
         return
     }
@@ -593,6 +599,7 @@ fn gen_note_extern_obj(s handle[Symbol]) void {
     r.size = if sz > 0 { sz } else { 1 }
     r.align = if al > 0 { al } else { 1 }
     r.linkage = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
+    r.vis = gen_visibility(s, FIR_VIS_DEFAULT)
     r.tls = s.thread_local
 }
 
@@ -1730,6 +1737,7 @@ fn gen_finish_tu() void fails {
             no.size = or_.size
             no.align = or_.align
             no.linkage = or_.linkage
+            no.vis = or_.vis
             no.tls = or_.tls
         }
     }
@@ -1752,7 +1760,7 @@ fn gen_finish_tu() void fails {
         r handle[ExternObjRef] = vec_at(&gc.ext_objs, i)
         if !gen_is_defined(r.name_id) {
             fir_global_extern(&gc.out, gen_sym_bytes(r.name_id), r.size, r.align,
-                              r.linkage, FIR_VIS_DEFAULT, bytes_empty(), false, r.tls)
+                              r.linkage, r.vis, bytes_empty(), false, r.tls)
         }
     }
     // 3. Emit function declarations for undefined referenced functions

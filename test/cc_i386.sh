@@ -52,6 +52,16 @@ objdump=${OBJDUMP:-objdump}
 flags=(-march=i386 -std=gnu23 -ffreestanding -fno-pic -fno-stack-protector
        -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-sse -msoft-float)
 
+cat > "$tmp/hidden.c" <<'C'
+extern int vvar __attribute__((visibility("hidden")));
+int read_vvar(void) { return vvar; }
+C
+"$fcc" -m32 "${flags[@]}" -fpic -c "$tmp/hidden.c" -o "$tmp/hidden.o"
+"$readelf" -rW "$tmp/hidden.o" > "$tmp/hidden.relocs"
+"$readelf" -sW "$tmp/hidden.o" > "$tmp/hidden.syms"
+grep -Eq 'R_386_GOTOFF .* vvar$' "$tmp/hidden.relocs"
+grep -Eq 'GLOBAL +HIDDEN +UND +vvar$' "$tmp/hidden.syms"
+
 cat > "$tmp/impl.c" <<'C'
 #include <stdarg.h>
 #include <stdint.h>
