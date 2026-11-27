@@ -114,33 +114,51 @@ let mem e reg base disp =
 
 let frame16 e base disp = e.real && base = ebp && disp >= -32768 && disp <= 32767
 
-let memory_prefix e base disp =
-  if not (frame16 e base disp) then addr32 e
+let memory_prefix ?index e base disp =
+  if index <> None || not (frame16 e base disp) then addr32 e
 
-let memory_operand e reg base disp =
-  if frame16 e base disp then begin
+let memory_operand ?index e reg base disp =
+  match index with
+  | Some (idx, scale) ->
+      let mode =
+        if disp = 0 && base <> ebp then 0
+        else if disp >= -128 && disp <= 127 then 1 else 2 in
+      modrm e mode reg esp;
+      byte e ((scale lsl 6) lor (idx lsl 3) lor base);
+      if mode = 1 then byte e disp else if mode = 2 then imm e disp
+  | None when frame16 e base disp ->
     if disp >= -128 && disp <= 127 then begin
       modrm e 1 reg 6; byte e disp
     end else begin
       modrm e 2 reg 6; Buffer.add_int16_le e.section.bytes disp
     end
-  end else mem e reg base disp
+  | None -> mem e reg base disp
 
-let read e size dst base disp =
+let read ?index e size dst base disp =
   if size <> 1 && size <> 2 && size <> 4 then invalid_arg "i386 read";
-  memory_prefix e base disp; op32 e;
+  memory_prefix ?index e base disp; op32 e;
   if size = 4 then byte e 0x8b else begin
     byte e 0x0f; byte e (if size = 1 then 0xb6 else 0xb7)
   end;
-  memory_operand e dst base disp
+  memory_operand ?index e dst base disp
 
-let write e size base disp src =
+let write ?index e size base disp src =
   if size <> 1 && size <> 2 && size <> 4 then invalid_arg "i386 write";
   if size = 1 && src > ebx then invalid_arg "i386 byte register";
-  memory_prefix e base disp;
+  memory_prefix ?index e base disp;
   if (size = 4 && e.real) || (size = 2 && not e.real) then byte e 0x66;
   byte e (if size = 1 then 0x88 else 0x89);
-  memory_operand e src base disp
+  memory_operand ?index e src base disp
+
+let write_immediate ?index e size base disp value =
+  memory_prefix ?index e base disp;
+  if (size = 4 && e.real) || (size = 2 && not e.real) then byte e 0x66;
+  byte e (if size = 1 then 0xc6 else 0xc7);
+  memory_operand ?index e 0 base disp;
+  match size with
+  | 1 -> byte e (Int64.to_int value)
+  | 2 -> Buffer.add_int16_le e.section.bytes (Int64.to_int value)
+  | _ -> dword e value
 
 let lea e dst base disp =
   addr32 e; op32 e; byte e 0x8d; mem e dst base disp
@@ -148,10 +166,7 @@ let lea e dst base disp =
 let address_scaled e ~index ~scale ~disp =
   (* EAX is both the base and the result. ECX is a four-byte index. *)
   addr32 e; op32 e; byte e 0x8d;
-  let mode = if disp = 0 then 0 else if disp >= -128 && disp <= 127 then 1 else 2 in
-  modrm e mode eax esp;
-  byte e ((scale lsl 6) lor (index lsl 3) lor eax);
-  if mode = 1 then byte e disp else if mode = 2 then imm e disp
+  memory_operand ~index:(index, scale) e eax eax disp
 
 let field32 e sym kind addend =
   e.reloc e.section (pos e) sym kind addend;
@@ -278,7 +293,7 @@ type frame = {
   return_at : int option ref;
   mutable accumulator : value option;
   mutable keep_in_accumulator : value option;
-  mutable folded_address : (value * value * int) option;
+  mutable folded_address : (value * value * int * (value * int) option) option;
 }
 
 let bits g v = width (Vec.get g.f.tys v)
@@ -792,12 +807,27 @@ let inline_asm g results ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
 
 let scalar_compare g kind x y =
   let e = g.e and n = bits g x in
-  let extend_sign = signed_cmp kind && n < 32 in
+  let narrow = n = 8 || n = 16 in
+  let needs_prefix = (n = 16 && not e.real) || (not narrow && e.real) in
+  let prefix () = if needs_prefix then byte e 0x66 in
+  let extend_sign = signed_cmp kind && n < 32 && not narrow in
+  let usable r = n <> 8 || r <= ebx in
   let xreg = match register g x with
-    | Some reg when not extend_sign && g.accumulator <> Some (resolve g.f x) -> reg
+    | Some reg when usable reg && not extend_sign && g.accumulator <> Some (resolve g.f x) -> reg
     | _ -> get g eax x; if extend_sign then sign e eax n; eax in
   match bit_constant g.f y with
-  | Some 0L -> test e xreg
+  | Some 0L -> prefix (); byte e (if n = 8 then 0x84 else 0x85); modrm e 3 xreg xreg
+  | Some k when narrow ->
+      let k = Int64.to_int k in
+      prefix ();
+      if xreg = eax && n = 8 then begin byte e 0x3c; byte e k end
+      else if n = 8 then begin byte e 0x80; modrm e 3 7 xreg; byte e k end
+      else if k land 0xffff <= 127 || k land 0xffff >= 0xff80 then begin
+        byte e 0x83; modrm e 3 7 xreg; byte e k
+      end else begin
+        if xreg = eax then byte e 0x3d else begin byte e 0x81; modrm e 3 7 xreg end;
+        Buffer.add_int16_le e.section.bytes k
+      end
   | Some k ->
       let imm = Int32.to_int (Int64.to_int32 k) in
       let imm =
@@ -806,14 +836,40 @@ let scalar_compare g kind x y =
       alu e 7 xreg imm
   | None ->
       let slot = offset g y in
-      if slot <> 0 && (n = 32 || not (signed_cmp kind)) then begin
-        memory_prefix e ebp slot; op32 e; byte e 0x3b; memory_operand e xreg ebp slot
+      let opcode = if n = 8 then 0x3a else 0x3b in
+      if slot <> 0 && not extend_sign then begin
+        memory_prefix e ebp slot; prefix (); byte e opcode; memory_operand e xreg ebp slot
       end else begin
         let rhs = match register g y with
-          | Some reg when n = 32 || not (signed_cmp kind) -> reg
-          | _ -> get g ecx y; if signed_cmp kind then sign e ecx n; ecx in
-        cmp e xreg rhs
+          | Some reg when usable reg && not extend_sign -> reg
+          | _ -> get g ecx y; if extend_sign then sign e ecx n; ecx in
+        prefix (); byte e opcode; modrm e 3 xreg rhs
       end
+
+let test_mask g x mask =
+  let e = g.e in
+  let mask = Int64.to_int (Int64.logand mask 0xffffffffL) in
+  let bytes = if mask <= 0xff then 1 else if mask <= 0xffff then 2 else 4 in
+  let operand_prefix () =
+    if (bytes = 2 && not e.real) || (bytes = 4 && e.real) then byte e 0x66 in
+  let slot = offset g x in
+  let immediate () = match bytes with
+    | 1 -> byte e mask
+    | 2 -> Buffer.add_int16_le e.section.bytes mask
+    | _ -> imm e mask in
+  if slot <> 0 && g.accumulator <> Some (resolve g.f x) then begin
+    memory_prefix e ebp slot; operand_prefix ();
+    byte e (if bytes = 1 then 0xf6 else 0xf7);
+    memory_operand e 0 ebp slot
+  end else begin
+    let reg = match register g x with
+      | Some r when (bytes <> 1 || r <= ebx) && g.accumulator <> Some (resolve g.f x) -> r
+      | _ -> get g eax x; eax in
+    operand_prefix ();
+    if reg = eax then byte e (if bytes = 1 then 0xa8 else 0xa9)
+    else begin byte e (if bytes = 1 then 0xf6 else 0xf7); modrm e 3 0 reg end
+  end;
+  immediate ()
 
 let instruction g (ir : inst_rec) =
   let e = g.e in
@@ -822,20 +878,30 @@ let instruction g (ir : inst_rec) =
     ir.results.(0)
   in
   let output_bits () = bits g (output ()) in
+  let output_register () =
+    let v = output () in
+    if g.keep_in_accumulator = Some v then eax
+    else Option.value (register g v) ~default:eax in
+  let source_register size v =
+    match if g.accumulator = Some (resolve g.f v) then Some eax else register g v with
+    | Some r when size <> 1 || r <= ebx -> r
+    | _ -> get g eax v; eax in
   let finish ?(normalized = false) () = put ~normalized g (output ()) in
   let memory ?(wide_store = false) ptr =
-    let ptr, delta =
+    let ptr, delta, scaled =
       match g.folded_address with
-      | Some (v, base, displacement) when v = ptr -> base, displacement
-      | _ -> ptr, 0 in
-    if g.accumulator = Some (resolve g.f ptr) then begin
-      mov e esi eax;
-      (esi, delta)
-    end else
+      | Some (v, base, displacement, scaled) when v = ptr -> base, displacement, scaled
+      | _ -> ptr, 0, None in
+    let index = Option.map (fun (v, scale) -> get g ecx v; (ecx, scale)) scaled in
+    let base, disp =
+      if g.accumulator = Some (resolve g.f ptr) then begin
+        mov e esi eax; (esi, delta)
+      end else
       match address g ptr, register g ptr with
       | Some off, _ -> (ebp, off + delta)
       | None, Some r when r <> edx || not wide_store -> (r, delta)
-      | _ -> get g esi ptr; (esi, delta)
+      | _ -> get g esi ptr; (esi, delta) in
+    base, disp, index
   in
   match ir.op with
   | Nop | Dbg_value _ | Lifetime _ -> ()
@@ -873,9 +939,7 @@ let instruction g (ir : inst_rec) =
   | Conv ((Trunc | Zext | Sext | Ptrtoint | Inttoptr | Bitcast) as conv, v)
       when bits g v <= 32 && output_bits () <= 32 ->
       let n = bits g v and dst = output_bits () in
-      let result = output () in
-      let r = if g.keep_in_accumulator = Some result then eax
-        else Option.value (register g result) ~default:eax in
+      let r = output_register () in
       get g r v;
       if conv = Sext then sign e r n;
       if dst < n || conv = Sext then mask e r dst;
@@ -927,28 +991,38 @@ let instruction g (ir : inst_rec) =
   | Load (m, ptr) ->
       if m.order <> Plain then refuse "atomic load";
       let size = storage (output_bits ()) in
+      let dst = output_register () in
       (match const_of g.f ptr with
        | Some (Csym (symbol, at)) when not e.pic ->
-           absolute_read e (min 4 size) eax symbol at;
+           absolute_read e (min 4 size) dst symbol at;
            if size = 8 then absolute_read e 4 edx symbol (Int64.add at 4L)
        | _ ->
-           let base, at = memory ptr in
-           read e (min 4 size) eax base at;
-           if size = 8 then read e 4 edx base (at + 4));
-      finish ~normalized:(output_bits () = size * 8) ()
+           let base, at, index = memory ptr in
+           read ?index e (min 4 size) dst base at;
+           if size = 8 then read ?index e 4 edx base (at + 4));
+      let normalized = output_bits () = size * 8 in
+      if dst = eax then finish ~normalized ()
+      else if not normalized then mask e dst (output_bits ())
   | Store (m, v, ptr) ->
       if m.order <> Plain then refuse "atomic store";
       let size = storage (bits g v) in
       (match const_of g.f ptr with
        | Some (Csym (symbol, at)) when not e.pic ->
-           pair g v;
-           absolute_write e (min 4 size) eax symbol at;
-           if size = 8 then absolute_write e 4 edx symbol (Int64.add at 4L)
+           if size = 8 then begin
+             pair g v;
+             absolute_write e 4 eax symbol at;
+             absolute_write e 4 edx symbol (Int64.add at 4L)
+           end else absolute_write e size (source_register size v) symbol at
        | _ ->
-           let base, at = memory ~wide_store:(size = 8) ptr in
-           pair g v;
-           write e (min 4 size) base at eax;
-           if size = 8 then write e 4 base (at + 4) edx)
+           let base, at, index = memory ~wide_store:(size = 8) ptr in
+           if size = 8 then begin
+             pair g v;
+             write ?index e 4 base at eax;
+             write ?index e 4 base (at + 4) edx
+           end else
+             match bit_constant g.f v with
+             | Some value when size < 4 || value <> 0L -> write_immediate ?index e size base at value
+             | _ -> write ?index e size base at (source_register size v))
   | Memcpy (_, dst, src, count) | Memmove (_, dst, src, count) ->
       get g edi dst; get g esi src; get g ecx count;
       copy_bytes e (match ir.op with Memcpy _ -> `Copy | _ -> `Move)
@@ -1000,12 +1074,17 @@ let terminator g next = function
         | _ -> get g eax cond; eax in
       test g.e reg; conditional g next 5 yes no
   | Switch (v, otherwise, cases, _) ->
+      if Array.length cases <> 0 then pair g v;
+      let wide = bits g v > 32 in
       Array.iter (fun (key, dest) ->
         let next = ref None in
-        pair g v;
-        inject g.e ecx key.(0); cmp g.e eax ecx; jcc g.e 5 next;
-        if bits g v > 32 then begin
-          inject g.e ecx (hi key.(0)); cmp g.e edx ecx; jcc g.e 5 next
+        let compare_word r bits =
+          if Int64.to_int32 bits = 0l then test g.e r
+          else alu g.e 7 r (Int32.to_int (Int64.to_int32 bits));
+          jcc g.e 5 next in
+        compare_word eax key.(0);
+        if wide then begin
+          compare_word edx (hi key.(0))
         end;
         jump g dest; here g.e next) cases;
       jump ~fallthrough:next g otherwise
@@ -1020,92 +1099,9 @@ let terminator g next = function
   | Unreachable -> byte g.e 0x0f; byte g.e 0x0b
   | Indirect_br _ | Asm_goto _ -> refuse "indirect branch or asm goto"
 
-let frame_slots f needed address registers arguments =
-  let values = num_values f in
-  let slots = Array.make values 0 and home = Array.make values (-1) in
-  let last = Array.make values 0 and persistent = Array.make values false in
-  let uses = Array.make values 0 in
-  let define b v = if resolve f v = v then home.(v) <- b in
-  Vec.iteri (fun b (br : block_rec) ->
-    Array.iter (define b) br.params;
-    Vec.iter (fun i -> Array.iter (define b) (inst f i).results) br.insts) f.blocks;
-  let use b at v =
-    let v = resolve f v in
-    uses.(v) <- uses.(v) + 1;
-    if home.(v) = b then last.(v) <- at
-    else if home.(v) >= 0 then persistent.(v) <- true
-  in
-  Vec.iteri (fun b (br : block_rec) ->
-    Vec.iteri (fun at i -> iter_op_uses (use b (at + 1)) (inst f i).op) br.insts;
-    iter_term_uses (use b (Vec.length br.insts + 1)) br.term) f.blocks;
-  let space n =
-    needed := !needed + n;
-    - !needed in
-  let size v = if width (ty_of f v) > 32 then 8 else 4 in
-  let slot v = resolve f v = v && home.(v) >= 0 && address v = None && registers.(v) = None in
-  Array.iteri (fun i v ->
-    match arguments.(i) with
-    | Stack off when width (ty_of f v) >= 32 -> slots.(v) <- off + 8
-    | _ -> ()) (block f entry).params;
-  for v = 0 to values - 1 do
-    if persistent.(v) && slot v && slots.(v) = 0 then slots.(v) <- space (size v)
-  done;
-  (* Local lifetimes reuse a slot after the last instruction that reads it.
-     Values that cross a block boundary have their own stable slots. *)
-  let free4 = ref [] and free8 = ref [] in
-  let freelist v = if size v = 4 then free4 else free8 in
-  Vec.iter (fun (br : block_rec) ->
-    let release = Array.make (Vec.length br.insts + 2) [] in
-    let allocate at v =
-      if slot v && slots.(v) = 0 then begin
-        let free = freelist v in
-        slots.(v) <- (match !free with
-          | off :: rest -> free := rest; off
-          | [] -> space (size v));
-        let end_at = max at last.(v) in
-        release.(end_at) <- v :: release.(end_at)
-      end in
-    let expire at =
-      List.iter (fun v ->
-        let free = freelist v in free := slots.(v) :: !free) release.(at) in
-    Array.iter (allocate 0) br.params;
-    expire 0;
-    Vec.iteri (fun at i ->
-      Array.iter (allocate (at + 1)) (inst f i).results;
-      expire (at + 1)) br.insts;
-    expire (Array.length release - 1)) f.blocks;
-  slots, uses
-
 module Values = Set.Make (Int)
 
-let register_bit i = 1 lsl i
-let wide f v = match ty_of f v with Int n -> n > 32 | _ -> false
-
-let callee_scratch e f address =
-  let bit = register_bit in
-  function
-  | Asm _ -> bit ebx lor bit esi lor bit edi
-  | Call { callee = Indirect _; _ } -> bit edi
-  | Call { callee = Direct name; _ } when e.pic && not (e.local name) -> bit ebx
-  | Ibin ((Udiv | Sdiv | Urem | Srem), _, x, _) when wide f x -> bit ebx lor bit esi lor bit edi
-  | Ibin (_, _, x, _) | Ovf (_, x, _) | Icmp (_, x, _) when wide f x -> bit edi
-  | Iun (Popcnt, _, _) -> bit edi
-  | Iun ((Clz | Ctz), _, x) when wide f x -> bit edi
-  | Load (_, addr) | Store (_, _, addr) when address addr = None -> bit esi
-  | Memcpy _ | Memmove _ | Va_arg _ -> bit esi lor bit edi
-  | Memset _ -> bit edi
-  | Va_start _ -> bit esi
-  | _ -> 0
-
-let register_plan e f address =
-  let n = num_values f in
-  let eligible = Array.init n (fun v ->
-    let word = match ty_of f v with Ptr 0 | Int (1 | 8 | 16 | 32) -> true | _ -> false in
-    word && address v = None &&
-    match def_of f v with
-    | Param (b, _) -> b <> entry
-    | Result (i, _) -> (match (inst f i).op with Asm _ | Nop -> false | _ -> true)
-    | _ -> false) in
+let liveness f eligible =
   let add live v =
     let v = resolve f v in
     if eligible.(v) then Values.add v live else live in
@@ -1138,13 +1134,132 @@ let register_plan e f address =
       end
     done
   done;
+  add, end_of_block, walk
+
+let definition_conflicts eligible conflicts defs live =
+  Array.iter (fun v ->
+    if eligible.(v) then conflicts.(v) <- Values.union conflicts.(v) live) defs
+
+let complete_conflicts conflicts =
+  (* A backward walk can discover an edge at either end. Coloring needs
+     both directions before it assigns any locations. *)
+  Array.iteri (fun v others ->
+    Values.iter (fun other -> conflicts.(other) <- Values.add v conflicts.(other)) others) conflicts
+
+let frame_slots f needed address registers arguments =
+  let values = num_values f in
+  let slots = Array.make values 0 and home = Array.make values (-1) in
+  let last = Array.make values 0 and persistent = Array.make values false in
+  let uses = Array.make values 0 in
+  let define b v = if resolve f v = v then home.(v) <- b in
+  Vec.iteri (fun b (br : block_rec) ->
+    Array.iter (define b) br.params;
+    Vec.iter (fun i -> Array.iter (define b) (inst f i).results) br.insts) f.blocks;
+  let use b at v =
+    let v = resolve f v in
+    uses.(v) <- uses.(v) + 1;
+    if home.(v) = b then last.(v) <- at
+    else if home.(v) >= 0 then persistent.(v) <- true
+  in
+  Vec.iteri (fun b (br : block_rec) ->
+    Vec.iteri (fun at i -> iter_op_uses (use b (at + 1)) (inst f i).op) br.insts;
+    iter_term_uses (use b (Vec.length br.insts + 1)) br.term) f.blocks;
+  let space n =
+    needed := !needed + n;
+    - !needed in
+  let size v = if width (ty_of f v) > 32 then 8 else 4 in
+  let slot v = resolve f v = v && home.(v) >= 0 && address v = None && registers.(v) = None in
+  Array.iteri (fun i v ->
+    match arguments.(i) with
+    | Stack off when width (ty_of f v) >= 32 -> slots.(v) <- off + 8
+    | _ -> ()) (block f entry).params;
+  let persistent_slots = Array.init values (fun v -> persistent.(v) && slot v && slots.(v) = 0) in
+  if Array.exists Fun.id persistent_slots then begin
+    let add, _, walk = liveness f persistent_slots in
+    let conflicts = Array.make values Values.empty in
+    let define defs live =
+      definition_conflicts persistent_slots conflicts defs (Array.fold_left add live defs) in
+    Vec.iter (fun (b : block_rec) ->
+      let start = walk b (fun ir after before ->
+        let live = match ir.op with Asm _ -> Values.union before after | _ -> after in
+        define ir.results live) in
+      define b.params start) f.blocks;
+    complete_conflicts conflicts;
+    let words = ref [] and pairs = ref [] in
+    Array.iteri (fun v live_across_blocks ->
+      if live_across_blocks then begin
+        let homes = if size v = 4 then words else pairs in
+        let taken = Values.fold (fun other offsets -> Values.add slots.(other) offsets)
+            conflicts.(v) Values.empty in
+        slots.(v) <- (match List.find_opt (fun off -> not (Values.mem off taken)) !homes with
+          | Some off -> off
+          | None -> let off = space (size v) in homes := off :: !homes; off)
+      end) persistent_slots
+  end;
+  (* Local lifetimes reuse a slot after the last instruction that reads it.
+     Values that cross a block boundary have their own stable slots. *)
+  let free4 = ref [] and free8 = ref [] in
+  let freelist v = if size v = 4 then free4 else free8 in
+  Vec.iter (fun (br : block_rec) ->
+    let release = Array.make (Vec.length br.insts + 2) [] in
+    let allocate at v =
+      if slot v && slots.(v) = 0 then begin
+        let free = freelist v in
+        slots.(v) <- (match !free with
+          | off :: rest -> free := rest; off
+          | [] -> space (size v));
+        let end_at = max at last.(v) in
+        release.(end_at) <- v :: release.(end_at)
+      end in
+    let expire at =
+      List.iter (fun v ->
+        let free = freelist v in free := slots.(v) :: !free) release.(at) in
+    Array.iter (allocate 0) br.params;
+    expire 0;
+    Vec.iteri (fun at i ->
+      Array.iter (allocate (at + 1)) (inst f i).results;
+      expire (at + 1)) br.insts;
+    expire (Array.length release - 1)) f.blocks;
+  slots, uses
+
+let register_bit i = 1 lsl i
+let wide f v = match ty_of f v with Int n -> n > 32 | _ -> false
+
+let callee_scratch e f address =
+  let bit = register_bit in
+  function
+  | Asm _ -> bit ebx lor bit esi lor bit edi
+  | Call { callee = Indirect _; _ } -> bit edi
+  | Call { callee = Direct name; _ } when e.pic && not (e.local name) -> bit ebx
+  | Ibin ((Udiv | Sdiv | Urem | Srem), _, x, _) when wide f x -> bit ebx lor bit esi lor bit edi
+  | Ibin (_, _, x, _) | Ovf (_, x, _) | Icmp (_, x, _) when wide f x -> bit edi
+  | Iun (Popcnt, _, _) -> bit edi
+  | Iun ((Clz | Ctz), _, x) when wide f x -> bit edi
+  | Load (_, addr) | Store (_, _, addr) when address addr = None -> bit esi
+  | Memcpy _ | Memmove _ | Va_arg _ -> bit esi lor bit edi
+  | Memset _ -> bit edi
+  | Va_start _ -> bit esi
+  | _ -> 0
+
+let register_plan e f address incoming =
+  let n = num_values f in
+  let eligible = Array.init n (fun v ->
+    let word = match ty_of f v with Ptr 0 | Int (1 | 8 | 16 | 32) -> true | _ -> false in
+    word && address v = None &&
+    match def_of f v with
+    | Param (b, _) -> b <> entry || incoming.(v)
+    | Result (i, _) -> (match (inst f i).op with Asm _ | Nop -> false | _ -> true)
+    | _ -> false) in
+  let add, end_of_block, walk = liveness f eligible in
   (* Reserve registers used by instruction selection. EDX is additionally
      reserved for wide values and across every call. *)
   let bit = register_bit and wide = wide f in
   let scratch = callee_scratch e f address in
-  let forbidden = Array.make n 0 and adjacent = Array.make n Values.empty in
-  let define defs live =
-    Array.iter (fun v -> if eligible.(v) then adjacent.(v) <- Values.union adjacent.(v) live) defs in
+  (* Assigned argument homes cannot overwrite another incoming ABI register
+     while the prologue is still copying parameters. *)
+  let forbidden = Array.map (fun arg -> if arg then bit edx else 0) incoming in
+  let adjacent = Array.make n Values.empty in
+  let define = definition_conflicts eligible adjacent in
   let reserve live regs =
     if regs <> 0 then Values.iter (fun v -> forbidden.(v) <- forbidden.(v) lor regs) live in
   let pair_scratch ir =
@@ -1163,25 +1278,35 @@ let register_plan e f address =
       define ir.results (Array.fold_left add after ir.results);
       reserve before (scratch ir.op lor pair_scratch ir)) in
     define b.params (Array.fold_left add start b.params)) f.blocks;
-  (* The backward walk records each conflict at one definition. Add the
-     reverse edge before coloring so block order cannot affect correctness. *)
-  Array.iteri (fun v others ->
-    Values.iter (fun other ->
-      adjacent.(other) <- Values.add v adjacent.(other)) others) adjacent;
+  complete_conflicts adjacent;
   let uses = Array.make n 0 in
+  let preferences = Array.make n Values.empty in
   let count v = let v = resolve f v in uses.(v) <- uses.(v) + 1 in
   Vec.iter (fun (b : block_rec) ->
     Vec.iter (fun i -> iter_op_uses count (inst f i).op) b.insts;
-    iter_term_uses count b.term) f.blocks;
+    iter_term_uses count b.term;
+    List.iter (fun (t : target) ->
+      let params = (block f t.dest).params in
+      Array.iteri (fun i v ->
+        let src = resolve f v and dst = params.(i) in
+        if eligible.(src) && eligible.(dst) && not (Values.mem src adjacent.(dst)) then begin
+          preferences.(src) <- Values.add dst preferences.(src);
+          preferences.(dst) <- Values.add src preferences.(dst)
+        end) t.args) (Fir_fold.targets b.term)) f.blocks;
   let order =
     List.init n Fun.id
-    |> List.filter (fun v -> eligible.(v) && uses.(v) <> 0)
+    |> List.filter (fun v -> eligible.(v) && uses.(v) > (if incoming.(v) then 1 else 0))
     |> List.sort (fun x y -> compare uses.(y) uses.(x)) in
   let color = Array.make n None in
   List.iter (fun v ->
     let taken = Values.fold (fun other used -> match color.(other) with
       | None -> used | Some reg -> used lor bit reg) adjacent.(v) forbidden.(v) in
-    color.(v) <- List.find_opt (fun reg -> taken land bit reg = 0) [ebx; edi; edx; esi]) order;
+    let available r = taken land bit r = 0 in
+    let preferred = Values.to_seq preferences.(v)
+      |> Seq.filter_map (fun other -> color.(other)) |> Seq.find available in
+    color.(v) <- (match preferred with
+      | Some _ -> preferred
+      | None -> List.find_opt available [ebx; edi; edx; esi])) order;
   color
 
 (* Reuse EAX (and EDX for a pair) when the next instruction reads its
@@ -1243,7 +1368,11 @@ let body e (f : func) =
          | _ -> None)
     | _ -> None
   in
-  let registers = register_plan e f frame_address in
+  let incoming = Array.make (num_values f) false in
+  Array.iteri (fun i v ->
+    match arguments.(i) with Register _ -> incoming.(v) <- true | Stack _ -> ())
+    entry.params;
+  let registers = register_plan e f frame_address incoming in
   let slots, uses = frame_slots f needed frame_address registers arguments in
   let saved = ref 0 and division_space = ref 0 in
   let scratch = callee_scratch e f frame_address in
@@ -1279,10 +1408,16 @@ let body e (f : func) =
     | Stack _ -> ()
     | Register _ when uses.(v) = 0 -> ()
     | Register at ->
-        (* Save registers before processing any stack arguments, since
-           even narrowing an early scalar can overwrite another input. *)
-        write e 4 ebp (offset g v) regs.(at);
-        if bits g v > 32 then write e 4 ebp (offset g v + 4) regs.(at + 1))
+        let src = regs.(at) in
+        match register g v with
+        | Some r ->
+            (match bits g v with
+             | (8 | 16) as n ->
+                 op32 e; byte e 0x0f; byte e (if n = 8 then 0xb6 else 0xb7); modrm e 3 r src
+             | n -> mov e r src; mask e r n)
+        | None ->
+            write e 4 ebp (offset g v) src;
+            if bits g v > 32 then write e 4 ebp (offset g v + 4) regs.(at + 1))
     entry.params;
   if e.pic then begin
     call_near e get_pc;
@@ -1294,7 +1429,7 @@ let body e (f : func) =
   Array.iteri (fun i v ->
     match arguments.(i) with
     | _ when uses.(v) = 0 -> ()
-    | Register _ when bits g v < 32 -> pair g v; put g v
+    | Register _ when bits g v < 32 && register g v = None -> pair g v; put g v
     | Register _ -> ()
     | Stack _ when bits g v >= 32 -> ()
     | Stack off ->
@@ -1303,16 +1438,31 @@ let body e (f : func) =
   Vec.iteri (fun b (block : block_rec) ->
     here e labels.(b);
     let n = Vec.length block.insts in
-    let fused =
+    let tail =
       match block.term with
       | Br (v, yes, no, _) when n <> 0 && uses.(v) = 1 ->
           let ir = inst f (Vec.get block.insts (n - 1)) in
           (match ir.op with
            | Icmp (kind, x, y) when ir.results.(0) = v && bits g x <= 32 ->
-               Some (kind, x, y, yes, no)
-           | _ -> None)
-      | _ -> None in
-    let count = n - (if fused = None then 0 else 1) in
+               let and_mask =
+                 if n > 1 && uses.(x) = 1 && (kind = Eq || kind = Ne) && bit_constant f y = Some 0L then
+                   let prev = inst f (Vec.get block.insts (n - 2)) in
+                   match prev.op with
+                   | Ibin (And, _, value, mask) when prev.results.(0) = x ->
+                       Option.map (fun mask -> (value, mask)) (bit_constant f mask)
+                   | _ -> None
+                 else None in
+               (match and_mask with
+                | Some (value, mask) -> (2, fun () ->
+                    test_mask g value mask;
+                    conditional g (b + 1) (cmp_condition kind) yes no)
+                | None -> (1, fun () ->
+                    scalar_compare g kind x y;
+                    conditional g (b + 1) (cmp_condition kind) yes no))
+           | _ -> (0, fun () -> terminator g (b + 1) block.term))
+      | _ -> (0, fun () -> terminator g (b + 1) block.term) in
+    let removed, emit_tail = tail in
+    let count = n - removed in
     g.accumulator <- None;
     g.folded_address <- None;
     for at = 0 to count - 1 do
@@ -1327,10 +1477,13 @@ let body e (f : func) =
               | Load (_, p) -> p = ptr
               | Store (_, v, p) -> p = ptr && resolve f v <> ptr
               | _ -> false in
-            (match bit_constant f index with
-             | Some i when only_address ->
+            (match only_address, bit_constant f index, scale with
+             | true, Some i, _ ->
                  let d = Int64.(add (mul i (of_int scale)) (of_int displacement)) in
-                 Some (ptr, base, Int32.to_int (Int64.to_int32 d))
+                 Some (ptr, base, Int32.to_int (Int64.to_int32 d), None)
+             | true, None, (1 | 2 | 4 | 8) when g.accumulator <> Some (resolve f index) ->
+                 let encoded = match scale with 1 -> 0 | 2 -> 1 | 4 -> 2 | _ -> 3 in
+                 Some (ptr, base, displacement, Some (index, encoded))
              | _ -> None)
         | _ -> None in
       let next_uses v =
@@ -1347,10 +1500,7 @@ let body e (f : func) =
       g.accumulator <- g.keep_in_accumulator
     done;
     g.keep_in_accumulator <- None;
-    match fused with
-    | Some (kind, x, y, yes, no) ->
-        scalar_compare g kind x y; conditional g (b + 1) (cmp_condition kind) yes no
-    | None -> terminator g (b + 1) block.term) f.blocks;
+    emit_tail ()) f.blocks;
   here e g.return_at;
   if saved_bytes <> 0 then begin
     lea e esp ebp (-saved_bytes);

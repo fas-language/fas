@@ -125,6 +125,30 @@ uint64_t fixed_shifts(uint64_t v)
     return (v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35);
 }
 
+unsigned classify(signed char c, short s, uint64_t key)
+{
+    unsigned result = 0;
+    if (c < -17 || s > 0x4567)
+        result |= 4;
+    if (s & 0x8000)
+        result |= 8;
+    switch (key) {
+    case 0:
+        return result | 1;
+    case UINT64_C(0x100040008):
+        return result | 2;
+    default:
+        return result | 3;
+    }
+}
+
+uint64_t move_indexed(uint64_t *table, unsigned to, unsigned from)
+{
+    uint64_t value = table[from];
+    table[to] = value;
+    return value;
+}
+
 unsigned collect(unsigned n, ...)
 {
     va_list args, copy;
@@ -151,6 +175,8 @@ extern uint64_t product(unsigned, unsigned);
 extern unsigned overflow(uint64_t, uint64_t, int, int, uint64_t *, int *);
 extern unsigned rotate_local(unsigned, unsigned, unsigned, unsigned);
 extern uint64_t fixed_shifts(uint64_t);
+extern unsigned classify(signed char, short, uint64_t);
+extern uint64_t move_indexed(uint64_t *, unsigned, unsigned);
 extern const unsigned * const bias_ptr;
 
 const unsigned bias = 19;
@@ -194,6 +220,12 @@ int run(void)
     uint64_t v = UINT64_C(0xe8f7abcdee123459);
     if (fixed_shifts(v) != ((v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35)))
         return 73;
+    if (classify(-20, -2, 0) != 13 || classify(0, 0x4568, UINT64_C(0x100040008)) != 6 ||
+        classify(-17, 0, 0x40008) != 3)
+        return 74;
+    uint64_t table[] = {0, 3, v, 201};
+    if (move_indexed(table, 1, 2) != v || table[1] != v || table[2] != v || table[3] != 201)
+        return 75;
     return 0;
 }
 C
