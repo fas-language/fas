@@ -79,10 +79,14 @@ const SYM_POP u32 = 58
 const SYM_IGNORED u32 = 59
 const SYM_FATAL u32 = 60
 
-// Hash table slot: 8 bytes (hash32 + sym_id). 0 = empty slot.
-value struct SymSlot {
+// Hash table slot: 24 bytes (hash32 + sym_id + inline first 16 bytes w0, w1). 0 = empty slot.
+// Bit 0 of hash = 1 iff len <= 16, so ~95% of C identifiers match in ONE cache line
+// without touching spellings[] or arena memory!
+struct SymSlot {
     hash u32
     id u32
+    w0 u64
+    w1 u64
 }
 
 struct SymTable {
@@ -97,6 +101,7 @@ struct SymTable {
     // 8 KB (65536-bit) L1-resident Bloom filter for O(1) negative macro lookup!
     bloom arr[1024, u64]
     macro_epoch u32    // incremented on every #define / #undef / pop_macro
+    track_active bool  // true only in -E mode (for sym_lookup_active)
     spellings Vec[Bytes]
     canon Vec[u32]     // canonical SymId (same as id unless UCN-normalized)
     flags Vec[u8]      // SYM_MACRO | SYM_BUILTIN | SYM_UNDEF | SYM_DEFINED_OP
@@ -155,19 +160,23 @@ fn sym_eq_fast(a addr, b addr, n usize) bool {
 }
 
 fn sym_grow(st handle[SymTable]) void {
-    new_cap usize = if st.mask == 0 { 2048 } else { (st.mask + 1) * 2 }
+    new_cap usize = if st.mask == 0 { 8192 } else { (st.mask + 1) * 2 }
     new_mask usize = new_cap - 1
     new_slots addr = heap_alloc_zeroed(new_cap * sizeof[SymSlot])
     if st.slots != null {
         old_cap usize = st.mask + 1
         for i usize in 0..old_cap {
-            slot SymSlot = st.slots[SymSlot, i]
+            slot handle[SymSlot] = handle_from_addr(st.slots + i * sizeof[SymSlot])
             if slot.hash == 0 { continue }
             pos usize = zext[usize](slot.hash) & new_mask
-            while new_slots[SymSlot, pos].hash != 0 {
+            while (new_slots + pos * sizeof[SymSlot])[u32] != 0 {
                 pos = (pos + 1) & new_mask
             }
-            new_slots[SymSlot, pos] = slot
+            dst handle[SymSlot] = handle_from_addr(new_slots + pos * sizeof[SymSlot])
+            dst.hash = slot.hash
+            dst.id = slot.id
+            dst.w0 = slot.w0
+            dst.w1 = slot.w1
         }
         heap_free(st.slots)
     }
@@ -177,26 +186,57 @@ fn sym_grow(st handle[SymTable]) void {
 
 fn sym_intern(st handle[SymTable], p addr, n usize) u32 {
     if st.count * 10 >= (st.mask + 1) * 7 { sym_grow(st) }
-    h u32 = sym_hash_bytes(p, n)
+    w0 u64 = 0
+    w1 u64 = 0
+    h u32 = 1
+    if n != 0 {
+        if n <= 8 {
+            mask8 u64 = (~zext[u64](0)) >> ((8 - n) * 8)
+            w0 = p[u64] & mask8
+            h64 u64 = ((0xcbf29ce484222325 ^ n) ^ w0) * 0x9e3779b185ebca87
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) | 1
+        } else if n <= 16 {
+            w0 = p[u64]
+            mask16 u64 = (~zext[u64](0)) >> ((16 - n) * 8)
+            w1 = (p + 8)[u64] & mask16
+            h64 u64 = (((0xcbf29ce484222325 ^ n) ^ w0) * 0x9e3779b185ebca87 ^ w1) * 0x9e3779b185ebca87
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) | 1
+        } else {
+            w0 = p[u64]
+            w1 = (p + 8)[u64]
+            h = sym_hash_bytes(p, n) & ~1
+            if h == 0 { h = 2 }
+        }
+    }
     mask usize = st.mask
     pos usize = zext[usize](h) & mask
     while true {
-        slot SymSlot = st.slots[SymSlot, pos]
+        slot handle[SymSlot] = handle_from_addr(st.slots + pos * sizeof[SymSlot])
         if slot.hash == 0 {
             id u32 = trunc[u32](st.count)
             st.count += 1
-            dup addr = arena_alloc(&st.arena, n + 8, 1)
+            dup addr = arena_alloc(&st.arena, n + 16, 1)
             if n != 0 { mem_copy(dup, p, n) }
             vec_push[Bytes](&st.spellings, bytes(dup, n))
             vec_push[u32](&st.canon, id)
             vec_push[u8](&st.flags, 0)
             vec_push[addr](&st.macros, null)
-            st.slots[SymSlot, pos] = {h, id}
+            slot.hash = h
+            slot.id = id
+            slot.w0 = w0
+            slot.w1 = w1
             return id
         }
-        if slot.hash == h {
-            s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
-            if s.n == n && sym_eq_fast(s.p, p, n) { return slot.id }
+        if slot.hash == h && slot.w0 == w0 && slot.w1 == w1 {
+            if n <= 16 {
+                // For non-empty C identifiers of length 1..16, zero-padded (w0, w1) is unique!
+                if n != 0 || slot.id == 0 { return slot.id }
+            } else {
+                s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
+                if s.n == n && sym_eq_fast(s.p + 16, p + 16, n - 16) { return slot.id }
+            }
         }
         pos = (pos + 1) & mask
     }
@@ -209,9 +249,9 @@ fn sym_intern_b(st handle[SymTable], s Bytes) u32 {
 
 fn sym_intern_c(st handle[SymTable], s addr) u32 {
     n usize = cstr_len(s)
-    // Copy to zero-padded stack buf if short so u64 load never reads past c-string
-    if n < 8 {
-        tmp arr[8, u8] = {}
+    // Copy to zero-padded stack buf if short so u64 loads never read past c-string
+    if n < 16 {
+        tmp arr[16, u8] = {}
         for i usize in 0..n { tmp[i] = s[u8, i] }
         return sym_intern(st, &tmp[0], n)
     }
@@ -229,13 +269,17 @@ fn sym_active_grow(st handle[SymTable]) void {
     if st.active_slots != null {
         old_cap usize = st.active_mask + 1
         for i usize in 0..old_cap {
-            slot SymSlot = st.active_slots[SymSlot, i]
+            slot handle[SymSlot] = handle_from_addr(st.active_slots + i * sizeof[SymSlot])
             if slot.hash == 0 { continue }
             pos usize = zext[usize](slot.hash) & new_mask
-            while new_slots[SymSlot, pos].hash != 0 {
+            while (new_slots + pos * sizeof[SymSlot])[u32] != 0 {
                 pos = (pos + 1) & new_mask
             }
-            new_slots[SymSlot, pos] = slot
+            dst handle[SymSlot] = handle_from_addr(new_slots + pos * sizeof[SymSlot])
+            dst.hash = slot.hash
+            dst.id = slot.id
+            dst.w0 = slot.w0
+            dst.w1 = slot.w1
         }
         heap_free(st.active_slots)
     }
@@ -265,9 +309,12 @@ fn sym_active_insert(st handle[SymTable], id u32) void {
     mask usize = st.active_mask
     pos usize = zext[usize](h) & mask
     while true {
-        slot SymSlot = st.active_slots[SymSlot, pos]
+        slot handle[SymSlot] = handle_from_addr(st.active_slots + pos * sizeof[SymSlot])
         if slot.hash == 0 {
-            st.active_slots[SymSlot, pos] = {h, id}
+            slot.hash = h
+            slot.id = id
+            slot.w0 = 0
+            slot.w1 = 0
             st.active_count += 1
             return
         }
@@ -286,7 +333,7 @@ fn sym_lookup_active(st handle[SymTable], p addr, n usize) u32 {
     mask usize = st.active_mask
     pos usize = zext[usize](h) & mask
     while true {
-        slot SymSlot = st.active_slots[SymSlot, pos]
+        slot handle[SymSlot] = handle_from_addr(st.active_slots + pos * sizeof[SymSlot])
         if slot.hash == 0 { return 0 }
         if slot.hash == h {
             s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
@@ -386,6 +433,9 @@ fn sym_init(st handle[SymTable]) void {
         st.flags.p[u8, zext[usize](id)] = SYM_BUILTIN
         sym_active_insert(st, id)
     }
+
+    // Pre-intern all C23 + GNU C keywords so every keyword has SymId < 256.
+    kw_preintern(st)
 }
 
 fn sym_set_macro(st handle[SymTable], id u32, m addr) void {
@@ -394,7 +444,7 @@ fn sym_set_macro(st handle[SymTable], id u32, m addr) void {
     st.macro_epoch += 1
     if m != null {
         st.flags.p[u8, i] = (st.flags.p[u8, i] | SYM_MACRO) & ~SYM_UNDEF
-        sym_active_insert(st, id)
+        if st.track_active { sym_active_insert(st, id) }
     } else {
         st.flags.p[u8, i] &= ~SYM_MACRO
     }

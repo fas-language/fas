@@ -49,7 +49,7 @@ struct Pp {
     visited Map[u32, usize, u32_hash, u32_eq]
     dependencies Vec[Dependency]
     hides Vec[Hide]
-    recent_hides arr[256, u32]
+    recent_hides arr[2048, u32]
     pastes Map[u64, PastedToken, u64_hash, u64_eq]
     stream Expand
     pending PendingTokens
@@ -329,7 +329,7 @@ fn pp_raw(p handle[Pp]) Token fails {
         active bool = pp_active(p)
         l.skipping = !active
         // Fast AVX2 line skip inside inactive #if 0 blocks!
-        if !active && !l.in_comment && (l.flags & F_BOL) == 0 {
+        if !active && !l.in_comment && (l.flags & F_BOL) == 0 && l.at < l.n {
             pp_skip_inactive_rest_of_line(l)
             continue
         }

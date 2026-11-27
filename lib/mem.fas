@@ -134,6 +134,9 @@ fn heap_alloc(n usize) addr {
     return block + 16
 }
 
+// Single-threaded tools may opt out of heap_lock atomics.
+var heap_single_threaded bool = false
+
 // Allocates on the ordinary heap even inside a region, for values that escape it.
 fn heap_alloc_plain(n usize) addr {
     if n > HEAP_SMALL_MAX {
@@ -144,11 +147,12 @@ fn heap_alloc_plain(n usize) addr {
         return p + 16
     }
     k usize = heap_class(n)
-    os_lock(&heap_lock)
+    lock bool = !heap_single_threaded
+    if lock { os_lock(&heap_lock) }
     head addr = heap_free_lists[k]
     if head != null {
         heap_free_lists[k] = head[addr]
-        os_unlock(&heap_lock)
+        if lock { os_unlock(&heap_lock) }
         return head
     }
     block usize = (zext[usize](16) << k) + 16
@@ -160,7 +164,7 @@ fn heap_alloc_plain(n usize) addr {
     p addr = heap_slab
     heap_slab = heap_slab + block
     heap_slab_left -= block
-    os_unlock(&heap_lock)
+    if lock { os_unlock(&heap_lock) }
     p[u64, 0] = k
     return p + 16
 }
@@ -190,10 +194,11 @@ fn heap_free(p addr) void {
         os_munmap(p - 16, (p - 16)[u64, 1])
         return
     }
-    os_lock(&heap_lock)
+    lock bool = !heap_single_threaded
+    if lock { os_lock(&heap_lock) }
     p[addr] = heap_free_lists[k]
     heap_free_lists[k] = p
-    os_unlock(&heap_lock)
+    if lock { os_unlock(&heap_lock) }
 }
 
 // Resizes to `n` bytes, keeping the first min(old, n) bytes; null `p`

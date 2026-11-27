@@ -93,6 +93,7 @@ const F_NOEXPAND u8 = 4
 const F_SYSTEM u8 = 8
 const F_SYNTH u8 = 16       // spelling is in synth_texts[val] (not raw source slice)
 const F_PASTE_ADJ u8 = 32   // used in compiled Macro.body: adjacent to ##
+const F_FAST_INT u8 = 64    // TK_NUM with pre-parsed TY_INT value in val (0..999999999)
 
 const WARN_OFF u8 = 0
 const WARN_ON u8 = 1

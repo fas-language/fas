@@ -95,6 +95,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32, system bool) void f
     has_ident bool = false
     has_param bool = false
     has_hash bool = false
+    has_va_opt bool = false
     body_n usize = args.n - i
     if body_n != 0 {
         m.body.p = arena_alloc(&ctx.syms.arena, body_n * sizeof[Token], 8)
@@ -112,7 +113,7 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32, system bool) void f
                         bt.val = trunc[u32](pidx)
                         has_param = true
                     } else {
-                        if cc_ident(ctx, bt) == SYM_VA_OPT { has_param = true }
+                        if cc_ident(ctx, bt) == SYM_VA_OPT { has_param = true; has_va_opt = true }
                         has_ident = true
                     }
                 } else {
@@ -125,7 +126,8 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32, system bool) void f
     m.simple = !m.function && !has_paste
     m.const_simple = m.simple && !has_ident
     m.drop_args = m.function && !has_param && !has_hash && !has_paste
-    if (m.simple || m.drop_args) && body_n != 0 {
+    m.no_hash_paste = !has_paste && !has_hash && !has_va_opt
+    if ctx.syms.track_active && (m.simple || m.drop_args) && body_n != 0 {
         // Pre-render exact text into TU arena for zero-overhead inline -E emission!
         rb Buf = {}
         defer { buf_free(&rb) }

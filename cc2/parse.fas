@@ -1,0 +1,1473 @@
+// cc2/parse.fas: Fast streaming C23/GNU parser infrastructure.
+// - Compact 72-byte Ast + on-demand AstExtra side struct (allocated from arena)
+// - Two arenas: tu_arena (TU-lifetime) and fn_arena (reset after every function!)
+// - Binding-stack scopes: O(1) array-index lookup, O(1) enter/leave, zero per-block maps
+// - Direct p.cur / p.next_tok lookahead + O(1) keyword table (p.kw_table[t.val])
+
+const ND_INT u8 = 1
+const ND_FLOAT u8 = 2
+const ND_STRING u8 = 3
+const ND_NAME u8 = 4
+const ND_UNARY u8 = 5
+const ND_BINARY u8 = 6
+const ND_COND u8 = 7
+const ND_CAST u8 = 8
+const ND_CALL u8 = 9
+const ND_MEMBER u8 = 10
+const ND_SIZE u8 = 11
+const ND_INIT u8 = 12
+const ND_DECL u8 = 13
+const ND_BLOCK u8 = 14
+const ND_STMT u8 = 15
+const ND_SUBSCRIPT u8 = 16
+const ND_GENERIC u8 = 17
+const ND_ASM u8 = 18
+const ND_DESIGNATOR u8 = 19
+const ND_COMPOUND u8 = 20
+
+const NF_LVALUE u16 = 1
+const NF_ICE u16 = 2
+const NF_STATIC u16 = 4
+const NF_BITFIELD u16 = 8
+const NF_OVERFLOW u16 = 16
+const NF_DEFINITION u16 = 32
+const NF_FLOAT_CONST u16 = 64
+const NF_IMPLICIT u16 = 256
+const NF_FOLD u16 = 512
+const NF_TYPEOF_EVAL u16 = 1024
+const NF_PARTIAL_INIT u16 = 2048
+const NF_INFERRED_DECL u16 = 4096
+const NF_FENV u16 = 8192
+const NF_ASM_EXTENDED u16 = 16384
+const NF_INT_VALUE u16 = NF_ICE | NF_FOLD
+
+// Rare AST fields stored out-of-line in AstExtra (allocated from same arena).
+struct AstExtra {
+    c handle[Ast]
+    d handle[Ast]
+    field_offset u64
+    field_width u32
+    _pad u32
+    imag u64
+    float_bits handle[FloatBits]
+    wide addr
+    attrs handle[Attr]
+    extra addr
+}
+
+// Compact 72-byte AST node (down from 152 bytes in cc/).
+struct Ast {
+    kind u8
+    op_kind u8      // TK_* for unary/binary operators (0 otherwise)
+    flags u16
+    loc u32
+    ty u32
+    op u32          // SymId (for dump/compat) or field_idx / storage
+    operand_ty u32  // common evaluation type for binary operators
+    _pad2 u32
+    value u64
+    a handle[Ast]
+    b handle[Ast]
+    next handle[Ast]
+    decl handle[Symbol]
+    ext handle[AstExtra]
+}
+
+struct Attr {
+    name u32
+    ns u32
+    loc u32
+    args_p addr     // Token array in arena
+    args_n u32
+    _pad u32
+    next handle[Attr]
+}
+
+const SC_NONE u8 = 0
+const SC_TYPEDEF u8 = 1
+const SC_EXTERN u8 = 2
+const SC_STATIC u8 = 3
+const SC_AUTO u8 = 4
+const SC_REGISTER u8 = 5
+const SC_CONSTEXPR u8 = 6
+const SC_ENUMERATOR u8 = 7
+
+const SF_NORETURN u32 = 2
+const SF_GNU_EXTERN_INLINE u32 = 4
+const SF_UNAVAILABLE u32 = 8
+const SF_DEPRECATED u32 = 16
+
+struct Symbol {
+    name u32
+    loc u32
+    ty u32
+    storage u8
+    linkage u8      // 0 none, 1 internal, 2 external
+    thread_local bool
+    defined bool
+    tentative bool
+    _pad0 u8
+    _pad1 u16
+    value addr      // handle[Ast]
+    params addr     // handle[Param]
+    link_symbol handle[Symbol]
+    attrs handle[Attr]
+    asm_name u32
+    debug_typedef u32
+    cleanup addr    // handle[Symbol]
+    flags u32
+    _pad2 u32
+}
+
+struct Label {
+    name u32
+    defined bool
+    used bool
+    loc u32
+    vm handle[VmBarrier]
+}
+
+value struct WeakAlias {
+    name u32
+    target u32
+    loc u32
+}
+
+// Binding-stack undo records (16 bytes each)
+value struct OrdUndo { id u32, prev_depth u32, prev addr }
+value struct TagUndo { id u32, prev_ty u32, prev_depth u32 }
+struct ScopeFrame { ord_mark u32, tag_mark u32, llab_mark u32, _pad u32, vm_saved addr }
+
+type TagMap = Map[u32, u32, u32_hash, u32_eq]
+type SymbolMap = Map[u32, addr, u32_hash, u32_eq]
+
+struct Parser {
+    pp handle[Pp]
+    ctx handle[CcCtx]
+    types TypeCtx
+
+    // O(1) keyword table indexed by SymId (0..255)
+    kw_table arr[256, u8]
+    punct_syms arr[72, u32]
+
+    // Two-level arena: tu_arena survives TU; fn_arena resets after each function
+    tu_arena Arena
+    fn_arena Arena
+    expr_arena Arena
+    cur_arena handle[Arena]
+
+    // Binding-stack scopes (O(1) array-index lookup, zero per-block hash maps!)
+    scopes Vec[ScopeFrame]
+    scope_depth u32
+    sym_ord Vec[addr]
+    sym_ord_depth Vec[u32]
+    sym_file_ord Vec[addr]
+    sym_ext Vec[addr]
+    sym_tag Vec[u32]
+    sym_tag_depth Vec[u32]
+    sym_llab Vec[addr]
+    sym_llab_depth Vec[u32]
+    ord_undo Vec[OrdUndo]
+    tag_undo Vec[TagUndo]
+    llab_undo Vec[OrdUndo]
+
+    // TU-wide side tables
+    enum_bodies TagMap
+    record_open TagMap
+    objects Vec[addr]
+    weak_aliases Vec[WeakAlias]
+    weak_alias_slots TagMap
+
+    // Per-function control-flow & label state
+    labels SymbolMap
+    label_list Vec[addr]
+    switches handle[SwitchContext]
+    vm handle[VmBarrier]
+    jumps handle[Jump]
+    init_depth u32
+    loops u32
+    function handle[Symbol]
+
+    // Target / pragma / extension state
+    x86_features u64
+    x86_feature_stack Vec[u64]
+    fenv_access bool
+    fenv_default bool
+    function_fenv bool
+    extension_expr bool
+    pack u32
+    packs Vec[u32]
+    pack_names Vec[u32]
+    vla_bounds Vec[addr]
+    attr_tmp Vec[Token]
+
+    // Lookahead buffer: p.cur is always valid (zero-call peek!), backed by a
+    // 128-token L1-resident batch buffer filled by pa_refill_buf.
+    cur Token
+    buf arr[128, Token]
+    buf_at u32
+    buf_n u32
+    in_replay bool
+    replay_p addr
+    replay_n usize
+    replay_at usize
+    location u32
+
+    // Streaming callbacks: fn(Parser*, Ast*, user) void fails
+    on_function addr
+    on_object addr
+    user addr
+}
+
+// ---------- Arena helpers ----------
+
+fn pa_arena_reset(a handle[Arena]) void {
+    if a.chunk == null { return }
+    c addr = a.chunk
+    while c[addr, 0] != null {
+        prev addr = c[addr, 0]
+        os_munmap(c, c[u64, 1])
+        c = prev
+    }
+    a.chunk = c
+    a.used = 16
+    a.cap = c[u64, 1]
+    a.total = 0
+}
+
+fn pa_alloc_in[T](a handle[Arena]) handle[T] {
+    p addr = arena_alloc(a, sizeof[T], alignof[T])
+    mem_set(p, 0, sizeof[T])
+    return handle_from_addr(p)
+}
+
+fn pa_alloc[T](p handle[Parser]) handle[T] {
+    return pa_alloc_in[T](p.cur_arena)
+}
+
+fn pa_tu_alloc[T](p handle[Parser]) handle[T] {
+    return pa_alloc_in[T](&p.tu_arena)
+}
+
+fn pa_node(p handle[Parser], kind u8, loc u32, ty u32) handle[Ast] {
+    a handle[Arena] = if p.on_function == null && p.cur_arena == &p.fn_arena { &p.expr_arena } else { p.cur_arena }
+    pos usize = (a.used + 7) & ~7
+    mem addr
+    if a.chunk != null && pos + sizeof[Ast] <= a.cap {
+        mem = a.chunk + pos
+        a.used = pos + sizeof[Ast]
+    } else {
+        mem = arena_alloc(a, sizeof[Ast], 8)
+    }
+    mem[vec[4, u64], 0] = splat(0)
+    mem[vec[4, u64], 1] = splat(0)
+    (mem + 64)[u64] = 0
+    n handle[Ast] = handle_from_addr(mem)
+    n.kind = kind
+    n.loc = loc
+    n.ty = ty
+    return n
+}
+
+fn pa_tu_node(p handle[Parser], kind u8, loc u32, ty u32) handle[Ast] {
+    n handle[Ast] = pa_tu_alloc[Ast](p)
+    n.kind = kind
+    n.loc = loc
+    n.ty = ty
+    return n
+}
+
+fn ast_ext(p handle[Parser], n handle[Ast]) handle[AstExtra] {
+    if n.ext == null { n.ext = pa_alloc[AstExtra](p) }
+    return n.ext
+}
+
+fn ast_c(n handle[Ast]) handle[Ast] { return if n.ext != null { n.ext.c } else { null } }
+fn ast_d(n handle[Ast]) handle[Ast] { return if n.ext != null { n.ext.d } else { null } }
+fn ast_field_offset(n handle[Ast]) u64 { return n.value }
+fn ast_field_width(n handle[Ast]) u32 { return n.operand_ty }
+fn ast_imag(n handle[Ast]) u64 { return if n.ext != null { n.ext.imag } else { 0 } }
+fn ast_float_bits(n handle[Ast]) handle[FloatBits] { return if n.ext != null { n.ext.float_bits } else { null } }
+fn ast_wide(n handle[Ast]) addr { return if n.ext != null { n.ext.wide } else { null } }
+fn ast_attrs(n handle[Ast]) handle[Attr] { return if n.ext != null { n.ext.attrs } else { null } }
+fn ast_extra(n handle[Ast]) addr { return if n.ext != null { n.ext.extra } else { null } }
+
+fn ast_set_c(p handle[Parser], n handle[Ast], v handle[Ast]) void {
+    if v == null && n.ext == null { return }
+    ast_ext(p, n).c = v
+}
+fn ast_set_d(p handle[Parser], n handle[Ast], v handle[Ast]) void {
+    if v == null && n.ext == null { return }
+    ast_ext(p, n).d = v
+}
+fn ast_set_attrs(p handle[Parser], n handle[Ast], v handle[Attr]) void {
+    if v == null && n.ext == null { return }
+    ast_ext(p, n).attrs = v
+}
+fn ast_set_wide(p handle[Parser], n handle[Ast], v addr) void {
+    if v == null && n.ext == null { return }
+    ast_ext(p, n).wide = v
+}
+fn ast_set_imag(p handle[Parser], n handle[Ast], v u64) void {
+    if v == 0 && n.ext == null { return }
+    ast_ext(p, n).imag = v
+}
+fn ast_set_extra(p handle[Parser], n handle[Ast], v addr) void {
+    if v == null && n.ext == null { return }
+    ast_ext(p, n).extra = v
+}
+
+struct AstList { first handle[Ast], last handle[Ast] }
+
+fn pa_append(xs handle[AstList], n handle[Ast]) void {
+    if n == null { return }
+    if xs.last == null { xs.first = n }
+    else {
+        last handle[Ast] = xs.last
+        last.next = n
+    }
+    while n.next != null { n = n.next }
+    xs.last = n
+}
+
+// ---------- Keyword & token helpers ----------
+
+fn pa_kw(p handle[Parser], t Token) u8 {
+    if t.kind != TK_IDENT || t.val >= 256 { return KW_NONE }
+    return p.kw_table[zext[usize](t.val)]
+}
+
+fn pa_is_gnu(p handle[Parser]) bool {
+    return p.ctx.gnu || p.extension_expr
+}
+
+fn pa_gnu(p handle[Parser], t Token) void fails {
+    if !pa_is_gnu(p) { try pa_error(p, t.loc, c"GNU extension requires -std=gnu23") }
+}
+
+fn pa_error(p handle[Parser], loc u32, message addr) void fails {
+    try cc_error(p.ctx, loc, message)
+}
+
+fn pa_tok_sym(p handle[Parser], t Token) u32 {
+    if t.kind == TK_IDENT { return cc_ident(p.ctx, t) }
+    return sym_intern_b(&p.ctx.syms, tok_spelling(p.ctx, t))
+}
+
+fn pa_trim(s Bytes) Bytes {
+    a usize = 0
+    b usize = s.n
+    while a < b && cc_space(s.p[u8, a]) { a += 1 }
+    while b > a && cc_space(s.p[u8, b - 1]) { b -= 1 }
+    return bytes_sub(s, a, b - a)
+}
+
+fn pa_pragma(p handle[Parser], t Token) void fails {
+    s Bytes = pa_trim(tok_spelling(p.ctx, t))
+    if bytes_starts_with(s, bytes_c(c"GCC")) {
+        tokens Vec[Token] = {}
+        defer { vec_free(&tokens) }
+        try pragma_tokens(p.pp, s, t.loc, &tokens)
+        if tokens.n < 2 || !bytes_eq_c(tok_spelling(p.ctx, tokens.p[Token]), c"GCC") { return }
+        cmd Bytes = tok_spelling(p.ctx, tokens.p[Token, 1])
+        if bytes_eq_c(cmd, c"push_options") {
+            vec_push(&p.x86_feature_stack, p.x86_features)
+        } else if bytes_eq_c(cmd, c"pop_options") {
+            if p.x86_feature_stack.n > 0 {
+                p.x86_features = vec_get(&p.x86_feature_stack, p.x86_feature_stack.n - 1)
+                p.x86_feature_stack.n -= 1
+            }
+        } else if bytes_eq_c(cmd, c"reset_options") {
+            p.x86_features = p.pp.x86_features
+        } else if bytes_eq_c(cmd, c"target") {
+            for i usize in 2..tokens.n {
+                tok Token = vec_get(&tokens, i)
+                if tok.kind == TK_STR {
+                    tb Buf = {}
+                    defer { buf_free(&tb) }
+                    pp_destringize(tok_spelling(p.ctx, tok), &tb)
+                    p.x86_features = x86_apply_target(p.x86_features, buf_bytes(&tb))
+                }
+            }
+        }
+        return
+    }
+    if bytes_starts_with(s, bytes_c(c"STDC")) {
+        tokens Vec[Token] = {}
+        defer { vec_free(&tokens) }
+        try pragma_tokens(p.pp, s, t.loc, &tokens)
+        if tokens.n == 3 && bytes_eq_c(tok_spelling(p.ctx, tokens.p[Token, 0]), c"STDC") &&
+            bytes_eq_c(tok_spelling(p.ctx, tokens.p[Token, 1]), c"FENV_ACCESS") {
+            mode Bytes = tok_spelling(p.ctx, tokens.p[Token, 2])
+            if bytes_eq_c(mode, c"ON") { p.fenv_access = true }
+            else if bytes_eq_c(mode, c"OFF") { p.fenv_access = false }
+            else if bytes_eq_c(mode, c"DEFAULT") { p.fenv_access = p.fenv_default }
+            if p.fenv_access && p.function != null { p.function_fenv = true }
+        }
+        return
+    }
+    if bytes_starts_with(s, bytes_c(c"weak")) && s.n > 4 && cc_space(s.p[u8, 4]) {
+        tokens Vec[Token] = {}
+        defer { vec_free(&tokens) }
+        try pragma_tokens(p.pp, s, t.loc, &tokens)
+        if tokens.n >= 3 && tokens.p[Token, 2].kind == TK_ASSIGN {
+            if tokens.n != 4 || tokens.p[Token, 1].kind != TK_IDENT || tokens.p[Token, 3].kind != TK_IDENT ||
+                pa_keyword(p, tokens.p[Token, 1]) || pa_keyword(p, tokens.p[Token, 3]) {
+                try cc_warning(p.ctx, t.loc, WARN_ON, c"malformed '#pragma weak' ignored")
+                return
+            }
+            name u32 = cc_ident(p.ctx, tokens.p[Token, 1])
+            slot u32 = map_get(&p.weak_alias_slots, name) catch 0xffffffff
+            if slot == 0xffffffff {
+                slot = trunc[u32](p.weak_aliases.n)
+                vec_add(&p.weak_aliases)
+                map_put(&p.weak_alias_slots, name, slot)
+            }
+            entry handle[WeakAlias] = vec_at(&p.weak_aliases, zext[usize](slot))
+            entry.name = name
+            entry.target = cc_ident(p.ctx, tokens.p[Token, 3])
+            entry.loc = t.loc
+        }
+        return
+    }
+    if !bytes_starts_with(s, bytes_c(c"pack")) { return }
+    s = pa_trim(bytes_from(s, 4))
+    if s.n < 2 || s.p[u8] != 40 || s.p[u8, s.n - 1] != 41 { return }
+    s = pa_trim(bytes_sub(s, 1, s.n - 2))
+    if s.n == 0 { p.pack = 0; return }
+    comma usize = bytes_index(s, 44) catch s.n
+    op Bytes = pa_trim(bytes_sub(s, 0, comma))
+    push bool = bytes_eq_c(op, c"push")
+    pop bool = bytes_eq_c(op, c"pop")
+    if push || pop { s = if comma == s.n { bytes(null, 0) } else { pa_trim(bytes_from(s, comma + 1)) } }
+    name u32 = 0
+    n u64 = bytes_to_u64(s) catch ~0
+    if (push || pop) && s.n != 0 && n == ~0 {
+        split usize = bytes_index(s, 44) catch s.n
+        label Bytes = pa_trim(bytes_sub(s, 0, split))
+        if label.n == 0 || !cc_id_ascii(label.p[u8], true, p.ctx.gnu) { return }
+        name = sym_intern_b(&p.ctx.syms, label)
+        if split < s.n { n = bytes_to_u64(pa_trim(bytes_from(s, split + 1))) catch { return } }
+    }
+    if push {
+        vec_push[u32](&p.packs, p.pack)
+        vec_push[u32](&p.pack_names, name)
+    } else if pop {
+        at usize = p.packs.n
+        while at != 0 {
+            at -= 1
+            if name == 0 || vec_get[u32](&p.pack_names, at) == name {
+                p.pack = vec_get[u32](&p.packs, at)
+                p.packs.n = at
+                p.pack_names.n = at
+                break
+            }
+        }
+    }
+    if n == 0 || n == 1 || n == 2 || n == 4 || n == 8 || n == 16 { p.pack = trunc[u32](n) }
+}
+
+// 1-byte lookup table for unambiguous 1-char C punctuators (zero branch!)
+const SIMPLE_PUNCT arr[128, u8] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, TK_LPAREN, TK_RPAREN, 0, 0, TK_COMMA, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TK_SEMI, 0, 0, 0, TK_QUEST,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TK_LBRACK, 0, TK_RBRACK, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TK_LBRACE, 0, TK_RBRACE, TK_TILDE, 0,
+}
+
+fn pa_next_slow(p handle[Parser]) Token fails {
+    while true {
+        t Token
+        if !p.in_replay {
+            t = try pp_next(p.pp)
+        } else if p.replay_at < p.replay_n {
+            t = p.replay_p[Token, p.replay_at]
+            p.replay_at += 1
+        } else {
+            return tok_make(TK_EOF, 0, 0, p.location, 0)
+        }
+        if t.kind == TK_PRAGMA { try pa_pragma(p, t); continue }
+        if t.kind == TK_DIRECT { continue }
+        if t.kind == TK_EOF && t.loc == 0 { t.loc = p.location }
+        if t.kind >= TK_DG_LBRACK && t.kind <= TK_DG_RBRACE {
+            t.kind = t.kind - TK_DG_LBRACK + TK_LBRACK
+        }
+        return t
+    }
+    return tok_make(TK_EOF, 0, 0, p.location, 0)
+}
+
+// Fast raw skip of balanced `(...)` for empty-body function-like macros
+// like assert(...), testcase(...), DUK_ASSERT(...), DUK_DDD(...).
+// Returns new `at` past `)` if valid & arity matches, or 0 to fall back to expand_next.
+fn pa_skip_empty_macro_call(src addr, n usize, start_at usize, l handle[Lexer], m handle[Macro]) usize {
+    at usize = start_at
+    lines u32 = 0
+    while true {
+        c u8 = src[u8, at]
+        if c == 32 || c == 9 { at += 1 }
+        else if c == 10 { at += 1; lines += 1 }
+        else { break }
+    }
+    if src[u8, at] != 40 { return 0 } // not '('
+    at += 1
+    depth u32 = 1
+    commas usize = 0
+    has_tok bool = false
+    bol bool = false
+    while depth != 0 {
+        c u8 = src[u8, at]
+        if c == 0 {
+            if at >= n { return 0 }
+            at += 1
+            continue
+        }
+        if c == 10 {
+            at += 1
+            lines += 1
+            bol = true
+            continue
+        }
+        if c == 32 || c == 9 {
+            at += 1
+            continue
+        }
+        if c == 35 && bol { return 0 } // '#' directive inside macro args: bail out
+        bol = false
+        if c == 40 {
+            depth += 1
+            has_tok = true
+            at += 1
+            continue
+        }
+        if c == 41 {
+            depth -= 1
+            at += 1
+            if depth == 0 { break }
+            has_tok = true
+            continue
+        }
+        if c == 44 && depth == 1 {
+            commas += 1
+            has_tok = true
+            at += 1
+            continue
+        }
+        if c == 34 || c == 39 {
+            w usize = lex_scan_string(src + at, 1, c)
+            if src[u8, at + w] != c { return 0 }
+            at += w + 1
+            has_tok = true
+            continue
+        }
+        if c == 47 {
+            nxt u8 = src[u8, at + 1]
+            if nxt == 47 {
+                at = lex_skip_line_comment(src, at + 2)
+                continue
+            }
+            if nxt == 42 {
+                // Bail out on block comment inside empty macro args (rare)
+                return 0
+            }
+        }
+        has_tok = true
+        at += 1
+    }
+    // Verify argument count matches macro arity (exact ISO C23 check)
+    np usize = m.params.n
+    if m.variadic {
+        if np > 0 && commas + 1 < np { return 0 }
+    } else if np == 0 {
+        if has_tok { return 0 }
+    } else {
+        if commas + 1 != np { return 0 }
+    }
+    l.line += lines
+    return at
+}
+
+fn pa_refill_buf(p handle[Parser]) void fails {
+    p.buf_at = 0
+    p.buf_n = 0
+    if !p.in_replay {
+        pp handle[Pp] = p.pp
+        syms handle[SymTable] = &p.ctx.syms
+        sflags_p addr = syms.flags.p
+        canon_p addr = syms.canon.p
+        // Fast path A: drain non-macro tokens directly from active macro expansion span!
+        if pp.stream.spans.n != 0 {
+            bn u32 = 0
+            while bn < 128 && pp.stream.spans.n != 0 {
+                sp handle[ExpandSpan] = vec_at[ExpandSpan](&pp.stream.spans, pp.stream.spans.n - 1)
+                sp_p addr = sp.p
+                sp_at u32 = sp.at
+                sp_n u32 = sp.n
+                ov_loc u32 = sp.override_loc
+                blocked bool = false
+                while bn < 128 && sp_at < sp_n {
+                    bt Token = sp_p[Token, zext[usize](sp_at)]
+                    k u8 = bt.kind
+                    if k == TK_NL || k == TK_PLACE || k == TK_ENTER || k == TK_LEAVE || k == TK_MARK {
+                        sp_at += 1
+                        continue
+                    }
+                    if k == TK_IDENT {
+                        if (bt.flags & F_NOEXPAND) == 0 {
+                            cid u32 = canon_p[u32, zext[usize](bt.val)]
+                            if (sflags_p[u8, zext[usize](cid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                blocked = true
+                                break
+                            }
+                        }
+                    } else if k == TK_PRAGMA || k == TK_DIRECT || k == TK_EOF {
+                        blocked = true
+                        break
+                    } else if k >= TK_DG_LBRACK && k <= TK_DG_RBRACE {
+                        bt.kind = k - TK_DG_LBRACK + TK_LBRACK
+                    }
+                    if ov_loc != 0 { bt.loc = ov_loc }
+                    p.buf[zext[usize](bn)] = bt
+                    bn += 1
+                    sp_at += 1
+                }
+                sp.at = sp_at
+                if sp_at == sp_n {
+                    if sp.owned { heap_free(sp.p) }
+                    pp.stream.spans.n -= 1
+                }
+                if blocked { break }
+            }
+            if bn != 0 {
+                p.buf_n = bn
+                return
+            }
+        }
+        // Fast path B: direct-lex up to 64 tokens from current source frame!
+        if pp.stream.spans.n == 0 && pp.pending.at >= pp.pending.tokens.n && !pp.embedded.active && pp.frames.n != 0 && !p.ctx.assembler {
+            if pp.conditions.n == 0 || pp.conditions.p[Cond, pp.conditions.n - 1].active {
+                frame handle[Frame] = vec_at[Frame](&pp.frames, pp.frames.n - 1)
+                l handle[Lexer] = &frame.lexer
+                if !l.in_comment && !l.header {
+                    src addr = l.p
+                    n usize = l.n
+                    at usize = l.at
+                    base u32 = l.base
+                    flags u8 = l.flags
+                    sys_flag u8 = if frame.system { F_SYSTEM } else { 0 }
+                    slots addr = syms.slots
+                    sym_mask usize = syms.mask
+                    bn u32 = 0
+                    while bn < 128 {
+                        // Tight whitespace + newline skip (4 spaces/iter for indentation!)
+                        while true {
+                            c u8 = src[u8, at]
+                            if c == 32 {
+                                flags |= F_SPACE
+                                if (src + at)[u32] == 0x20202020 { at += 4 } else { at += 1 }
+                            } else if c == 9 {
+                                flags |= F_SPACE
+                                at += 1
+                            } else if c == 10 {
+                                at += 1
+                                l.line += 1
+                                flags = F_BOL
+                            } else { break }
+                        }
+                        start addr = src + at
+                        ch u8 = start[u8]
+                        // 1. Unambiguous 1-char punctuators: ( ) [ ] { } , ; ? ~
+                        if ch < 128 {
+                            sp u8 = SIMPLE_PUNCT[zext[usize](ch)]
+                            if sp != 0 {
+                                p.buf[zext[usize](bn)] = tok_make(sp, flags | sys_flag, 1, base + trunc[u32](at), 0)
+                                bn += 1
+                                at += 1
+                                flags = 0
+                                continue
+                            }
+                        }
+                        cls u8 = B_CLASS[zext[usize](ch)]
+                        // 2. Fast ASCII identifiers (non-prefix)
+                        if (cls & B_ID) != 0 {
+                            if (ch == 76 || ch == 85 || ch == 117) && literal_prefix(start) != 3 {
+                                if bn != 0 { break }
+                                l.at = at
+                                l.flags = flags
+                                l.skipping = false
+                                l.skip_nl = true
+                                t Token = try lex_next(p.ctx, l, false)
+                                l.skip_nl = false
+                                at = l.at
+                                flags = l.flags
+                                if frame.system { t.flags |= F_SYSTEM }
+                                p.buf[0] = t
+                                bn = 1
+                                continue
+                            }
+                            w usize = 1
+                            while (B_CLASS[zext[usize](start[u8, w])] & (B_ID | B_DIGIT)) != 0 { w += 1 }
+                            nxt u8 = start[u8, w]
+                            if nxt >= 128 || nxt == 92 || (nxt == 36 && p.ctx.gnu) {
+                                if bn != 0 { break }
+                                l.at = at
+                                l.flags = flags
+                                l.skipping = false
+                                l.skip_nl = true
+                                t Token = try lex_next(p.ctx, l, false)
+                                l.skip_nl = false
+                                if t.kind == TK_IDENT {
+                                    cid u32 = syms.canon.p[u32, zext[usize](t.val)]
+                                    if (syms.flags.p[u8, zext[usize](cid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                        if frame.system { t.flags |= F_SYSTEM }
+                                        vec_push[Token](&pp.pending.tokens, t)
+                                        at = l.at
+                                        flags = l.flags
+                                        break
+                                    }
+                                }
+                                at = l.at
+                                flags = l.flags
+                                if frame.system { t.flags |= F_SYSTEM }
+                                p.buf[0] = t
+                                bn = 1
+                                continue
+                            }
+                            // Inline 2-probe SymSlot hit for w <= 16 (~95% of all C identifiers!)
+                            id u32 = 0
+                            if w <= 16 {
+                                w0 u64
+                                w1 u64 = 0
+                                h64 u64
+                                if w <= 8 {
+                                    mask8 u64 = (~zext[u64](0)) >> ((8 - w) * 8)
+                                    w0 = start[u64] & mask8
+                                    h64 = ((0xcbf29ce484222325 ^ w) ^ w0) * 0x9e3779b185ebca87
+                                } else {
+                                    w0 = start[u64]
+                                    mask16 u64 = (~zext[u64](0)) >> ((16 - w) * 8)
+                                    w1 = (start + 8)[u64] & mask16
+                                    h64 = (((0xcbf29ce484222325 ^ w) ^ w0) * 0x9e3779b185ebca87 ^ w1) * 0x9e3779b185ebca87
+                                }
+                                h64 ^= h64 >> 33
+                                h u32 = trunc[u32](h64) | 1
+                                pos usize = zext[usize](h) & sym_mask
+                                slot handle[SymSlot] = handle_from_addr(slots + pos * sizeof[SymSlot])
+                                if slot.hash == h && slot.w0 == w0 && slot.w1 == w1 {
+                                    id = slot.id
+                                } else if slot.hash != 0 {
+                                    slot = handle_from_addr(slots + ((pos + 1) & sym_mask) * sizeof[SymSlot])
+                                    if slot.hash == h && slot.w0 == w0 && slot.w1 == w1 {
+                                        id = slot.id
+                                    }
+                                }
+                            }
+                            if id == 0 {
+                                id = sym_intern(syms, start, w)
+                                slots = syms.slots
+                                sym_mask = syms.mask
+                                sflags_p = syms.flags.p
+                                canon_p = syms.canon.p
+                            }
+                            cid u32 = canon_p[u32, zext[usize](id)]
+                            sf u8 = sflags_p[u8, zext[usize](cid)]
+                            loc u32 = base + trunc[u32](at)
+                            if (sf & (SYM_MACRO | SYM_BUILTIN)) == 0 {
+                                p.buf[zext[usize](bn)] = tok_make(TK_IDENT, flags | sys_flag, 0, loc, id)
+                                bn += 1
+                                at += w
+                                flags = 0
+                                continue
+                            }
+                            if (sf & SYM_MACRO) != 0 {
+                                m handle[Macro] = handle_from_addr(syms.macros.p[addr, zext[usize](cid)])
+                                if m.simple {
+                                    mbn usize = m.body.n
+                                    if mbn == 0 {
+                                        at += w
+                                        flags = 0
+                                        continue
+                                    }
+                                    if mbn <= 16 && bn + trunc[u32](mbn) <= 128 {
+                                        clean bool = m.const_simple || (m.fast_ok && m.fast_epoch == syms.macro_epoch)
+                                        if !clean {
+                                            clean = true
+                                            for mi usize in 0..mbn {
+                                                bt Token = m.body.p[Token, mi]
+                                                if bt.kind == TK_IDENT {
+                                                    bcid u32 = canon_p[u32, zext[usize](bt.val)]
+                                                    if (sflags_p[u8, zext[usize](bcid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                                        clean = false
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            m.fast_ok = clean
+                                            m.fast_epoch = syms.macro_epoch
+                                        }
+                                        if clean {
+                                            for mi usize in 0..mbn {
+                                                bt Token = m.body.p[Token, mi]
+                                                bt.loc = loc
+                                                if bt.kind >= TK_DG_LBRACK && bt.kind <= TK_DG_RBRACE {
+                                                    bt.kind = bt.kind - TK_DG_LBRACK + TK_LBRACK
+                                                }
+                                                p.buf[zext[usize](bn)] = bt
+                                                bn += 1
+                                            }
+                                            at += w
+                                            flags = 0
+                                            continue
+                                        }
+                                    }
+                                } else if m.function && m.body.n == 0 {
+                                    after usize = pa_skip_empty_macro_call(src, n, at + w, l, m)
+                                    if after != 0 {
+                                        at = after
+                                        flags = 0
+                                        continue
+                                    }
+                                } else if m.function {
+                                    // Expand function-like macro directly without re-lexing its name!
+                                    l.at = at + w
+                                    l.flags = 0
+                                    frames_n usize = pp.frames.n
+                                    call_tok Token = tok_make(TK_IDENT, flags | sys_flag, 0, loc, id)
+                                    expanded bool = try expand_func_macro(pp, &pp.stream, m, cid, call_tok)
+                                    slots = syms.slots
+                                    sym_mask = syms.mask
+                                    sflags_p = syms.flags.p
+                                    canon_p = syms.canon.p
+                                    same_frame bool = pp.frames.n == frames_n
+                                    if same_frame {
+                                        frame = vec_at[Frame](&pp.frames, frames_n - 1)
+                                        l = &frame.lexer
+                                        at = l.at
+                                        flags = l.flags
+                                    }
+                                    if !expanded {
+                                        p.buf[zext[usize](bn)] = call_tok
+                                        bn += 1
+                                        if same_frame && pp.stream.spans.n == 0 { continue }
+                                        if bn != 0 { p.buf_n = bn; return }
+                                        break
+                                    }
+                                    // Drain non-macro tokens from expanded span right into p.buf!
+                                    blocked bool = false
+                                    while bn < 128 && pp.stream.spans.n != 0 {
+                                        sp handle[ExpandSpan] = vec_at[ExpandSpan](&pp.stream.spans, pp.stream.spans.n - 1)
+                                        sp_p addr = sp.p
+                                        sp_at u32 = sp.at
+                                        sp_n u32 = sp.n
+                                        ov_loc u32 = sp.override_loc
+                                        while bn < 128 && sp_at < sp_n {
+                                            bt Token = sp_p[Token, zext[usize](sp_at)]
+                                            k u8 = bt.kind
+                                            if k == TK_NL || k == TK_PLACE || k == TK_ENTER || k == TK_LEAVE || k == TK_MARK {
+                                                sp_at += 1
+                                                continue
+                                            }
+                                            if k == TK_IDENT {
+                                                if (bt.flags & F_NOEXPAND) == 0 {
+                                                    bcid u32 = canon_p[u32, zext[usize](bt.val)]
+                                                    if (sflags_p[u8, zext[usize](bcid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                                        blocked = true
+                                                        break
+                                                    }
+                                                }
+                                            } else if k == TK_PRAGMA || k == TK_DIRECT || k == TK_EOF {
+                                                blocked = true
+                                                break
+                                            } else if k >= TK_DG_LBRACK && k <= TK_DG_RBRACE {
+                                                bt.kind = k - TK_DG_LBRACK + TK_LBRACK
+                                            }
+                                            if ov_loc != 0 { bt.loc = ov_loc }
+                                            p.buf[zext[usize](bn)] = bt
+                                            bn += 1
+                                            sp_at += 1
+                                        }
+                                        sp.at = sp_at
+                                        if sp_at == sp_n {
+                                            if sp.owned { heap_free(sp.p) }
+                                            pp.stream.spans.n -= 1
+                                        }
+                                        if blocked { break }
+                                    }
+                                    if same_frame && pp.stream.spans.n == 0 && !blocked &&
+                                        pp.pending.at >= pp.pending.tokens.n && !pp.embedded.active &&
+                                        (pp.conditions.n == 0 || pp.conditions.p[Cond, pp.conditions.n - 1].active) {
+                                        continue
+                                    }
+                                    if bn != 0 {
+                                        if same_frame && frame.guard_stage != 2 { frame.guard_stage = 4 }
+                                        p.buf_n = bn
+                                        return
+                                    }
+                                    if !same_frame { break }
+                                    break
+                                }
+                            }
+                            break
+                        }
+                        // 3. Comments (// or /*) — skip inline!
+                        if ch == 47 {
+                            k u8 = start[u8, 1]
+                            if k == 47 {
+                                at = lex_skip_line_comment(src, at + 2)
+                                flags |= F_SPACE
+                                continue
+                            }
+                            if k == 42 {
+                                l.comment_loc = base + trunc[u32](at)
+                                l.in_comment = true
+                                l.at = at + 2
+                                l.flags = flags
+                                if !lex_skip_block_comment(l) {
+                                    if bn != 0 { break }
+                                    try cc_error(p.ctx, l.comment_loc, c"unterminated block comment")
+                                }
+                                at = l.at
+                                flags = l.flags
+                                continue
+                            }
+                        }
+                        // 4. Other punctuators (excluding `#` at BOL and `.0` floats)
+                        if (cls & B_PUNCT) != 0 {
+                            if (flags & F_BOL) != 0 && (ch == 35 || (ch == 37 && start[u8, 1] == 58)) {
+                                // Directive at BOL: stop batch cleanly before '#'
+                                break
+                            }
+                            if ch == 46 && (B_CLASS[zext[usize](start[u8, 1])] & B_DIGIT) != 0 {
+                                // fall through to lex_next for .0 float
+                            } else {
+                                nxt1 u8 = start[u8, 1]
+                                if ch == 45 && nxt1 == 62 {
+                                    p.buf[zext[usize](bn)] = tok_make(TK_ARROW, flags | sys_flag, 2, base + trunc[u32](at), 0)
+                                    bn += 1; at += 2; flags = 0; continue
+                                }
+                                if ch == 61 && nxt1 != 61 {
+                                    p.buf[zext[usize](bn)] = tok_make(TK_ASSIGN, flags | sys_flag, 1, base + trunc[u32](at), 0)
+                                    bn += 1; at += 1; flags = 0; continue
+                                }
+                                if ch == 42 && nxt1 != 61 {
+                                    p.buf[zext[usize](bn)] = tok_make(TK_STAR, flags | sys_flag, 1, base + trunc[u32](at), 0)
+                                    bn += 1; at += 1; flags = 0; continue
+                                }
+                                if ch == 46 && nxt1 != 46 {
+                                    p.buf[zext[usize](bn)] = tok_make(TK_DOT, flags | sys_flag, 1, base + trunc[u32](at), 0)
+                                    bn += 1; at += 1; flags = 0; continue
+                                }
+                                pw usize = 1
+                                pk u8 = lex_punct(start, &pw)
+                                if pk >= TK_DG_LBRACK && pk <= TK_DG_RBRACE {
+                                    pk = pk - TK_DG_LBRACK + TK_LBRACK
+                                }
+                                p.buf[zext[usize](bn)] = tok_make(pk, flags | sys_flag, trunc[u16](pw), base + trunc[u32](at), 0)
+                                bn += 1
+                                at += pw
+                                flags = 0
+                                continue
+                            }
+                        }
+                        // 5. Fast integer literals (decimal, 0x hex, U/L suffixes)
+                        if (cls & B_DIGIT) != 0 {
+                            nw usize = 1
+                            if ch == 48 && (start[u8, 1] == 120 || start[u8, 1] == 88) {
+                                // Fast hex integer: 0x[0-9a-fA-F]+[uUlL]*
+                                nw = 2
+                                while (B_CLASS[zext[usize](start[u8, nw])] & (B_ID | B_DIGIT)) != 0 { nw += 1 }
+                                tail u8 = start[u8, nw]
+                                if tail != 46 && tail != 39 && tail != 43 && tail != 45 && tail < 128 && tail != 92 && nw < 0xFFFF {
+                                    p.buf[zext[usize](bn)] = tok_make(TK_NUM, flags | sys_flag, trunc[u16](nw), base + trunc[u32](at), 0)
+                                    bn += 1
+                                    at += nw
+                                    flags = 0
+                                    continue
+                                }
+                            } else {
+                                v u64 = zext[u64](ch - 48)
+                                while true {
+                                    dc u8 = start[u8, nw]
+                                    if dc < 48 || dc > 57 { break }
+                                    v = v * 10 + zext[u64](dc - 48)
+                                    nw += 1
+                                }
+                                tail u8 = start[u8, nw]
+                                if tail != 46 && tail != 39 && (B_CLASS[zext[usize](tail)] & (B_ID | B_DIGIT)) == 0 && tail < 128 && tail != 92 && nw < 0xFFFF {
+                                    if nw <= 9 && (nw == 1 || ch != 48) {
+                                        p.buf[zext[usize](bn)] = tok_make(TK_NUM, flags | sys_flag | F_FAST_INT, trunc[u16](nw), base + trunc[u32](at), trunc[u32](v))
+                                    } else {
+                                        p.buf[zext[usize](bn)] = tok_make(TK_NUM, flags | sys_flag, trunc[u16](nw), base + trunc[u32](at), 0)
+                                    }
+                                    bn += 1
+                                    at += nw
+                                    flags = 0
+                                    continue
+                                }
+                                if tail == 85 || tail == 117 || tail == 76 || tail == 108 {
+                                    while (B_CLASS[zext[usize](start[u8, nw])] & (B_ID | B_DIGIT)) != 0 { nw += 1 }
+                                    tail = start[u8, nw]
+                                    if tail != 46 && tail != 39 && tail < 128 && tail != 92 && nw < 0xFFFF {
+                                        p.buf[zext[usize](bn)] = tok_make(TK_NUM, flags | sys_flag, trunc[u16](nw), base + trunc[u32](at), 0)
+                                        bn += 1
+                                        at += nw
+                                        flags = 0
+                                        continue
+                                    }
+                                }
+                            }
+                        }
+                        // 5b. Fast ordinary string literal "..."
+                        if ch == 34 {
+                            sw usize = lex_scan_string(start, 1, 34)
+                            if start[u8, sw] == 34 && sw + 1 < 0xFFFF {
+                                p.buf[zext[usize](bn)] = tok_make(TK_STR, flags | sys_flag, trunc[u16](sw + 1), base + trunc[u32](at), 0)
+                                bn += 1
+                                at += sw + 1
+                                flags = 0
+                                continue
+                            }
+                        }
+                        // 6. EOF: stop batch cleanly!
+                        if ch == 0 && at >= n { break }
+                        // 7. Strings, chars, complex numbers, etc.: delegate to lex_next
+                        l.at = at
+                        l.flags = flags
+                        l.skipping = false
+                        l.skip_nl = true
+                        t Token = try lex_next(p.ctx, l, false)
+                        l.skip_nl = false
+                        at = l.at
+                        flags = l.flags
+                        if t.kind == TK_EOF { break }
+                        if t.kind == TK_IDENT {
+                            // e.g. GNU $ or unicode ident
+                            cid u32 = syms.canon.p[u32, zext[usize](t.val)]
+                            if (syms.flags.p[u8, zext[usize](cid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                if frame.system { t.flags |= F_SYSTEM }
+                                vec_push[Token](&pp.pending.tokens, t)
+                                break
+                            }
+                        }
+                        if frame.system { t.flags |= F_SYSTEM }
+                        p.buf[zext[usize](bn)] = t
+                        bn += 1
+                    }
+                    l.at = at
+                    l.flags = flags
+                    if bn != 0 {
+                        if frame.guard_stage != 2 { frame.guard_stage = 4 }
+                        p.buf_n = bn
+                        return
+                    }
+                }
+            }
+        }
+    }
+    p.buf[0] = try pa_next_slow(p)
+    bn u32 = 1
+    if !p.in_replay {
+        pp handle[Pp] = p.pp
+        if pp.stream.spans.n != 0 {
+            syms handle[SymTable] = &p.ctx.syms
+            sflags_p addr = syms.flags.p
+            canon_p addr = syms.canon.p
+            while bn < 128 && pp.stream.spans.n != 0 {
+                sp handle[ExpandSpan] = vec_at[ExpandSpan](&pp.stream.spans, pp.stream.spans.n - 1)
+                sp_p addr = sp.p
+                sp_at u32 = sp.at
+                sp_n u32 = sp.n
+                ov_loc u32 = sp.override_loc
+                blocked bool = false
+                while bn < 128 && sp_at < sp_n {
+                    bt Token = sp_p[Token, zext[usize](sp_at)]
+                    k u8 = bt.kind
+                    if k == TK_NL || k == TK_PLACE || k == TK_ENTER || k == TK_LEAVE || k == TK_MARK {
+                        sp_at += 1
+                        continue
+                    }
+                    if k == TK_IDENT {
+                        if (bt.flags & F_NOEXPAND) == 0 {
+                            cid u32 = canon_p[u32, zext[usize](bt.val)]
+                            if (sflags_p[u8, zext[usize](cid)] & (SYM_MACRO | SYM_BUILTIN)) != 0 {
+                                blocked = true
+                                break
+                            }
+                        }
+                    } else if k == TK_PRAGMA || k == TK_DIRECT || k == TK_EOF {
+                        blocked = true
+                        break
+                    } else if k >= TK_DG_LBRACK && k <= TK_DG_RBRACE {
+                        bt.kind = k - TK_DG_LBRACK + TK_LBRACK
+                    }
+                    if ov_loc != 0 { bt.loc = ov_loc }
+                    p.buf[zext[usize](bn)] = bt
+                    bn += 1
+                    sp_at += 1
+                }
+                sp.at = sp_at
+                if sp_at == sp_n {
+                    if sp.owned { heap_free(sp.p) }
+                    pp.stream.spans.n -= 1
+                }
+                if blocked { break }
+            }
+        }
+    }
+    p.buf_n = bn
+}
+
+fn pa_peek(p handle[Parser]) Token { return p.cur }
+
+fn pa_peek2(p handle[Parser]) Token fails {
+    if p.buf_at < p.buf_n { return p.buf[zext[usize](p.buf_at)] }
+    if p.in_replay {
+        if p.replay_at < p.replay_n {
+            t Token = p.replay_p[Token, p.replay_at]
+            if t.kind >= TK_DG_LBRACK && t.kind <= TK_DG_RBRACE { t.kind = t.kind - TK_DG_LBRACK + TK_LBRACK }
+            return t
+        }
+        return tok_make(TK_EOF, 0, 0, p.location, 0)
+    }
+    try pa_refill_buf(p)
+    return p.buf[zext[usize](p.buf_at)]
+}
+
+fn pa_bump_slow(p handle[Parser]) void fails {
+    if p.in_replay {
+        p.cur = try pa_next_slow(p)
+        return
+    }
+    try pa_refill_buf(p)
+    p.cur = p.buf[zext[usize](p.buf_at)]
+    p.buf_at += 1
+}
+
+fn pa_bump(p handle[Parser]) void fails {
+    p.location = p.cur.loc
+    if p.buf_at < p.buf_n {
+        p.cur = p.buf[zext[usize](p.buf_at)]
+        p.buf_at += 1
+        return
+    }
+    try pa_bump_slow(p)
+}
+
+fn pa_take(p handle[Parser]) Token fails {
+    t Token = p.cur
+    p.location = t.loc
+    if p.buf_at < p.buf_n {
+        p.cur = p.buf[zext[usize](p.buf_at)]
+        p.buf_at += 1
+        return t
+    }
+    try pa_bump_slow(p)
+    return t
+}
+
+fn pa_at_k(p handle[Parser], kind u8) bool { return p.cur.kind == kind }
+fn pa_at_kw(p handle[Parser], kw u8) bool { return pa_kw(p, p.cur) == kw }
+
+fn pa_at2_k(p handle[Parser], kind u8) bool fails {
+    return (try pa_peek2(p)).kind == kind
+}
+
+fn pa_accept_k(p handle[Parser], kind u8) bool fails {
+    if p.cur.kind != kind { return false }
+    p.location = p.cur.loc
+    if p.buf_at < p.buf_n {
+        p.cur = p.buf[zext[usize](p.buf_at)]
+        p.buf_at += 1
+        return true
+    }
+    try pa_bump_slow(p)
+    return true
+}
+
+fn pa_accept_kw(p handle[Parser], kw u8) bool fails {
+    if pa_kw(p, p.cur) != kw { return false }
+    p.location = p.cur.loc
+    if p.buf_at < p.buf_n {
+        p.cur = p.buf[zext[usize](p.buf_at)]
+        p.buf_at += 1
+        return true
+    }
+    try pa_bump_slow(p)
+    return true
+}
+
+fn pa_expect_k_slow(p handle[Parser], t Token, kind u8) Token fails {
+    if t.kind == kind {
+        p.location = t.loc
+        try pa_bump_slow(p)
+        return t
+    }
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_str(&b, c"expected '")
+    buf_append(&b, punct_bytes(kind))
+    buf_str(&b, c"'")
+    if t.kind != TK_EOF {
+        buf_str(&b, c", got '")
+        buf_append(&b, tok_spelling(p.ctx, t))
+        buf_u8(&b, 39)
+    }
+    try pa_error(p, t.loc, buf_cstr(&b))
+    return t
+}
+
+fn pa_expect_k(p handle[Parser], kind u8) Token fails {
+    t Token = p.cur
+    if t.kind == kind && p.buf_at < p.buf_n {
+        p.location = t.loc
+        p.cur = p.buf[zext[usize](p.buf_at)]
+        p.buf_at += 1
+        return t
+    }
+    return try pa_expect_k_slow(p, t, kind)
+}
+
+fn pa_expect_kw(p handle[Parser], kw u8, label addr) Token fails {
+    t Token = p.cur
+    if pa_kw(p, t) == kw {
+        try pa_bump(p)
+        return t
+    }
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_str(&b, c"expected '")
+    buf_str(&b, label)
+    buf_str(&b, c"'")
+    if t.kind != TK_EOF {
+        buf_str(&b, c", got '")
+        buf_append(&b, tok_spelling(p.ctx, t))
+        buf_u8(&b, 39)
+    }
+    try pa_error(p, t.loc, buf_cstr(&b))
+    return t
+}
+
+// ---------- Binding-stack scopes (O(1) lookup, zero per-block maps) ----------
+
+fn pa_ensure_ord(p handle[Parser], id u32) void {
+    need usize = zext[usize](id) + 1
+    if need <= p.sym_ord.n { return }
+    old usize = p.sym_ord.n
+    new_n usize = if need < old * 2 { old * 2 } else { need + 256 }
+    vec_reserve[addr](&p.sym_ord, new_n)
+    vec_reserve[u32](&p.sym_ord_depth, new_n)
+    vec_reserve[addr](&p.sym_file_ord, new_n)
+    vec_reserve[addr](&p.sym_ext, new_n)
+    mem_set(p.sym_ord.p + old * sizeof[addr], 0, (new_n - old) * sizeof[addr])
+    mem_set(p.sym_ord_depth.p + old * sizeof[u32], 0, (new_n - old) * sizeof[u32])
+    mem_set(p.sym_file_ord.p + old * sizeof[addr], 0, (new_n - old) * sizeof[addr])
+    mem_set(p.sym_ext.p + old * sizeof[addr], 0, (new_n - old) * sizeof[addr])
+    p.sym_ord.n = new_n
+    p.sym_ord_depth.n = new_n
+    p.sym_file_ord.n = new_n
+    p.sym_ext.n = new_n
+}
+
+fn pa_ensure_tag(p handle[Parser], id u32) void {
+    need usize = zext[usize](id) + 1
+    if need <= p.sym_tag.n { return }
+    old usize = p.sym_tag.n
+    new_n usize = if need < old * 2 { old * 2 } else { need + 256 }
+    vec_reserve[u32](&p.sym_tag, new_n)
+    vec_reserve[u32](&p.sym_tag_depth, new_n)
+    mem_set(p.sym_tag.p + old * sizeof[u32], 0, (new_n - old) * sizeof[u32])
+    mem_set(p.sym_tag_depth.p + old * sizeof[u32], 0, (new_n - old) * sizeof[u32])
+    p.sym_tag.n = new_n
+    p.sym_tag_depth.n = new_n
+}
+
+fn pa_ensure_llab(p handle[Parser], id u32) void {
+    need usize = zext[usize](id) + 1
+    if need <= p.sym_llab.n { return }
+    old usize = p.sym_llab.n
+    new_n usize = if need < old * 2 { old * 2 } else { need + 64 }
+    vec_reserve[addr](&p.sym_llab, new_n)
+    vec_reserve[u32](&p.sym_llab_depth, new_n)
+    mem_set(p.sym_llab.p + old * sizeof[addr], 0, (new_n - old) * sizeof[addr])
+    mem_set(p.sym_llab_depth.p + old * sizeof[u32], 0, (new_n - old) * sizeof[u32])
+    p.sym_llab.n = new_n
+    p.sym_llab_depth.n = new_n
+}
+
+fn pa_enter(p handle[Parser]) void {
+    f handle[ScopeFrame] = vec_add[ScopeFrame](&p.scopes)
+    f.ord_mark = trunc[u32](p.ord_undo.n)
+    f.tag_mark = trunc[u32](p.tag_undo.n)
+    f.llab_mark = trunc[u32](p.llab_undo.n)
+    f.vm_saved = handle_addr(p.vm)
+    p.scope_depth = trunc[u32](p.scopes.n)
+}
+
+fn pa_leave(p handle[Parser]) void {
+    f handle[ScopeFrame] = vec_at[ScopeFrame](&p.scopes, p.scopes.n - 1)
+    p.scopes.n -= 1
+    p.scope_depth = trunc[u32](p.scopes.n)
+    p.vm = handle_from_addr(f.vm_saved)
+    while p.ord_undo.n > zext[usize](f.ord_mark) {
+        p.ord_undo.n -= 1
+        u OrdUndo = p.ord_undo.p[OrdUndo, p.ord_undo.n]
+        idx usize = zext[usize](u.id)
+        p.sym_ord.p[addr, idx] = u.prev
+        p.sym_ord_depth.p[u32, idx] = u.prev_depth
+    }
+    while p.tag_undo.n > zext[usize](f.tag_mark) {
+        p.tag_undo.n -= 1
+        u TagUndo = p.tag_undo.p[TagUndo, p.tag_undo.n]
+        idx usize = zext[usize](u.id)
+        p.sym_tag.p[u32, idx] = u.prev_ty
+        p.sym_tag_depth.p[u32, idx] = u.prev_depth
+    }
+    while p.llab_undo.n > zext[usize](f.llab_mark) {
+        p.llab_undo.n -= 1
+        u OrdUndo = p.llab_undo.p[OrdUndo, p.llab_undo.n]
+        idx usize = zext[usize](u.id)
+        p.sym_llab.p[addr, idx] = u.prev
+        p.sym_llab_depth.p[u32, idx] = u.prev_depth
+    }
+}
+
+fn pa_lookup(p handle[Parser], id u32) handle[Symbol] {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_ord.n { return null }
+    return handle_from_addr(p.sym_ord.p[addr, idx])
+}
+
+fn pa_lookup_local(p handle[Parser], id u32) handle[Symbol] {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_ord.n || p.sym_ord_depth.p[u32, idx] != p.scope_depth { return null }
+    return handle_from_addr(p.sym_ord.p[addr, idx])
+}
+
+fn pa_lookup_file(p handle[Parser], id u32) handle[Symbol] {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_file_ord.n { return null }
+    return handle_from_addr(p.sym_file_ord.p[addr, idx])
+}
+
+fn pa_lookup_ext(p handle[Parser], id u32) handle[Symbol] {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_ext.n { return null }
+    return handle_from_addr(p.sym_ext.p[addr, idx])
+}
+
+fn pa_bind_ext(p handle[Parser], id u32, s handle[Symbol]) void {
+    if id == 0 { return }
+    pa_ensure_ord(p, id)
+    p.sym_ext.p[addr, zext[usize](id)] = handle_addr(s)
+}
+
+fn pa_bind_ord(p handle[Parser], id u32, s handle[Symbol]) void {
+    if id == 0 { return }
+    pa_ensure_ord(p, id)
+    idx usize = zext[usize](id)
+    if p.scope_depth == 1 {
+        p.sym_file_ord.p[addr, idx] = handle_addr(s)
+    } else if p.sym_ord_depth.p[u32, idx] != p.scope_depth {
+        vec_push[OrdUndo](&p.ord_undo, {id, p.sym_ord_depth.p[u32, idx], p.sym_ord.p[addr, idx]})
+    }
+    p.sym_ord.p[addr, idx] = handle_addr(s)
+    p.sym_ord_depth.p[u32, idx] = p.scope_depth
+}
+
+fn pa_tag_lookup(p handle[Parser], id u32, local bool) u32 {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_tag.n { return TY_INVALID }
+    if local && p.sym_tag_depth.p[u32, idx] != p.scope_depth { return TY_INVALID }
+    return p.sym_tag.p[u32, idx]
+}
+
+fn pa_bind_tag(p handle[Parser], id u32, ty u32) void {
+    if id == 0 { return }
+    pa_ensure_tag(p, id)
+    idx usize = zext[usize](id)
+    if p.scope_depth > 1 && p.sym_tag_depth.p[u32, idx] != p.scope_depth {
+        vec_push[TagUndo](&p.tag_undo, {id, p.sym_tag.p[u32, idx], p.sym_tag_depth.p[u32, idx]})
+    }
+    p.sym_tag.p[u32, idx] = ty
+    p.sym_tag_depth.p[u32, idx] = p.scope_depth
+}
+
+fn pa_llab_lookup(p handle[Parser], id u32, local bool) handle[Label] {
+    idx usize = zext[usize](id)
+    if idx >= p.sym_llab.n { return null }
+    if local && p.sym_llab_depth.p[u32, idx] != p.scope_depth { return null }
+    return handle_from_addr(p.sym_llab.p[addr, idx])
+}
+
+fn pa_bind_llab(p handle[Parser], id u32, lab handle[Label]) void {
+    if id == 0 { return }
+    pa_ensure_llab(p, id)
+    idx usize = zext[usize](id)
+    if p.sym_llab_depth.p[u32, idx] != p.scope_depth {
+        vec_push[OrdUndo](&p.llab_undo, {id, p.sym_llab_depth.p[u32, idx], p.sym_llab.p[addr, idx]})
+    }
+    p.sym_llab.p[addr, idx] = handle_addr(lab)
+    p.sym_llab_depth.p[u32, idx] = p.scope_depth
+}
+
+fn pa_typename(p handle[Parser], t Token) bool {
+    if t.kind != TK_IDENT { return false }
+    s handle[Symbol] = pa_lookup(p, cc_ident(p.ctx, t))
+    return s != null && s.storage == SC_TYPEDEF
+}
+
+// ---------- Translation unit entry point ----------
+
+fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
+    p.pp = pp
+    p.ctx = &pp.ctx
+    p.x86_features = pp.x86_features
+    p.cur_arena = &p.tu_arena
+    // Pre-warm 256 KB function arena, 32 KB L1 expr_arena, and PP scratch vecs
+    arena_alloc(&p.fn_arena, 262144, 16)
+    pa_arena_reset(&p.fn_arena)
+    arena_alloc(&p.expr_arena, 32768, 16)
+    pa_arena_reset(&p.expr_arena)
+    vec_reserve[Token](&pp.arg_data, 2048)
+    vec_reserve[Arg](&pp.arg_spans, 64)
+    vec_reserve[Token](&pp.subst_out, 2048)
+    vec_reserve[Token](&pp.cache_toks, 2048)
+    vec_reserve[Hide](&pp.hides, 4096)
+    kw_fill_table(&pp.ctx.syms, &p.kw_table[0], pp.standard, pp.ctx.gnu)
+    for k u8 in TK_PUNCT_FIRST..(TK_PUNCT_LAST + 1) {
+        p.punct_syms[zext[usize](k)] = sym_intern_b(&pp.ctx.syms, punct_bytes(k))
+    }
+    previous handle[TypeCtx] = tc
+    defer { tc = previous }
+    tc_init(&p.types, &pp.ctx.syms)
+    tc.unsigned_char = pp.unsigned_char
+    tc.ilp32 = pp.ilp32
+    pa_enter(p)
+    try pa_builtin_types(p)
+    // Prime the 1-token lookahead buffer
+    try pa_bump(p)
+    while p.cur.kind != TK_EOF {
+        item handle[Ast] = try pa_declaration(p, true, null)
+        if item != null && item.kind == ND_ASM && p.on_object != null {
+            try call_addr[fails](p.on_object, handle_addr(p), handle_addr(item), p.user)
+        }
+    }
+    try se_finish_weak_aliases(p)
+    for i usize in 0..p.objects.n {
+        obj handle[Symbol] = handle_from_addr(p.objects.p[addr, i])
+        func bool = ty_is_func(obj.ty)
+        if !func { try se_finish_object(p, obj) }
+        attr_def bool = pa_has_attr(p, obj.attrs, c"alias") || pa_has_attr(p, obj.attrs, c"ifunc")
+        if p.on_object != null && (attr_def || !func && (obj.defined || obj.tentative)) {
+            n handle[Ast] = pa_tu_node(p, ND_DECL, obj.loc, obj.ty)
+            n.decl = obj
+            n.a = handle_from_addr(obj.value)
+            ast_set_attrs(p, n, obj.attrs)
+            try call_addr[fails](p.on_object, handle_addr(p), handle_addr(n), p.user)
+        }
+    }
+}

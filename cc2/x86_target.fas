@@ -1,5 +1,5 @@
-// cc2/x86_target.fas: x86-64 CPUID detection and target feature flags.
-
+// Command-line target features are independent of predefined macro overrides.
+// Target attributes start from the TU features and modify only their function.
 struct X86Flag { name addr, enable u64, disable u64, required u64 }
 struct X86Cpu { name addr, features u64, defines addr }
 
@@ -36,10 +36,32 @@ fn x86_intrinsic_feature(name Bytes) addr {
 fn x86_has(features u64, name Bytes) bool {
     id u32 = x86_flag(name)
     if id == 0 { return false }
+    // Most switches also affect prerequisite features. Test the macro of the
+    // requested feature itself so e.g. -mno-popcnt does not disable SSE4.2.
     f handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
     return (features & f.required) != 0
 }
 
+fn x86_apply_target(features u64, args Bytes) u64 {
+    while args.n > 0 {
+        end usize = bytes_index(args, 44) catch args.n
+        word Bytes = pa_trim(bytes_sub(args, 0, end))
+        if bytes_starts_with(word, bytes_c(c"arch=")) {
+            cpu u32 = x86_cpu(bytes_from(word, 5))
+            if cpu != 0 { features = X86_CPUS[zext[usize](cpu)].features }
+        } else {
+            disable bool = bytes_starts_with(word, bytes_c(c"no-"))
+            id u32 = x86_flag(if disable { bytes_from(word, 3) } else { word })
+            if id != 0 { features = x86_flag_apply(features, id, !disable) }
+        }
+        if end == args.n { break }
+        args = bytes_from(args, end + 1)
+    }
+    return features
+}
+
+// Keep CPUID behind the SysV ABI so rbx is preserved and all four results
+// can be read without depending on the compiler's current ISA selection.
 use "asm" <<S
     .text
     .globl fcc_cpuid
@@ -72,8 +94,10 @@ extern "C" {
     fn fcc_xcr0() u32
 }
 
+// Names affect the CPU identity macros only. In particular a VM may report
+// a model name while withholding instructions usually present on that model.
 fn x86_host_name(vendor u32, family u32, model u32, avx512 bool) addr {
-    if vendor == 0x68747541 {
+    if vendor == 0x68747541 { // AuthenticAMD
         if family == 23 {
             if model >= 0x30 && (model <= 0x3f || (model >= 0x60 && model <= 0x7f) ||
                                  (model >= 0x84 && model <= 0x87) || model >= 0x90) { return c"znver2" }
@@ -87,7 +111,7 @@ fn x86_host_name(vendor u32, family u32, model u32, avx512 bool) addr {
         }
         if family == 26 { return c"znver5" }
     }
-    if vendor == 0x756e6547 && family == 6 {
+    if vendor == 0x756e6547 && family == 6 { // GenuineIntel
         switch model {
             case 0x1a, 0x1e, 0x1f, 0x2e: return c"nehalem"
             case 0x25, 0x2c, 0x2f: return c"westmere"
@@ -117,6 +141,8 @@ struct X86HostBit {
     xcr0 u32
 }
 
+// Words are the CPUID registers collected in x86_detect_host order. xcr0
+// requirements cover AVX state (XMM/YMM) and AVX-512 state (including masks).
 const X86_HOST_BITS arr[57, X86HostBit] = {
     { c"mmx", 0, 23, 0 },
     { c"fxsr", 0, 24, 0 },

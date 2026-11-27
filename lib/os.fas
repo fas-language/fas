@@ -196,7 +196,11 @@ const MAP_ANONYMOUS u64 = 0x20
 const MREMAP_MAYMOVE u64 = 1
 
 fn os_mmap(p addr, n usize, prot u64, flags u64, fd i32, offset u64) addr fails {
-    return try syscall[addr fails](SYS_MMAP, p, n, prot, flags, fd, offset)
+    r addr = try syscall[addr fails](SYS_MMAP, p, n, prot, flags, fd, offset)
+    if n >= 2097152 && fd == -1 {
+        _ i64 = syscall(28, r, n, 14) // madvise(MADV_HUGEPAGE)
+    }
+    return r
 }
 
 fn os_munmap(p addr, n usize) void {

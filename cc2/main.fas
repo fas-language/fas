@@ -1,8 +1,10 @@
-// cc2/main.fas: Stage 1 driver (Lexer + Preprocessor).
+// cc2/main.fas: Stage 1+2 driver (Lexer + Preprocessor + Parser + Sema).
 use "../lib/core.fas"
+use "../as/regs.fas"
 use "token.fas"
 use "src.fas"
 use "sym.fas"
+use "kw.fas"
 use "unicode.fas"
 use "diag.fas"
 use "lex.fas"
@@ -11,6 +13,7 @@ use "target.fas"
 use "target_i386.fas"
 use "x86_target_data.fas"
 use "x86_target.fas"
+use "x86_results.fas"
 use "search.fas"
 use "pp.fas"
 use "macro.fas"
@@ -19,6 +22,19 @@ use "builtin.fas"
 use "embed.fas"
 use "directive.fas"
 use "output.fas"
+use "types.fas"
+use "layout.fas"
+use "sema_wide.fas"
+use "sema_float.fas"
+use "parse.fas"
+use "parse_dump.fas"
+use "sema.fas"
+use "sema_expr.fas"
+use "sema_init.fas"
+use "sema_builtin.fas"
+use "parse_expr.fas"
+use "parse_decl.fas"
+use "parse_stmt.fas"
 
 const MODE_LINK u8        = 0
 const MODE_PREPROCESS u8  = 1
@@ -72,6 +88,8 @@ struct Options {
     no_builtins bool
     macro_dump bool
     syntax_only bool
+    dump_ast bool
+    rounding_math bool
     deps u8
     user_deps bool
     phony bool
@@ -154,6 +172,9 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"--") { options = false }
         else if bytes_eq_c(word, c"-E") { o.mode = MODE_PREPROCESS }
         else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
+        else if bytes_eq_c(word, c"-Xfcc-dump-ast") { o.syntax_only = true; o.dump_ast = true; o.mode = MODE_SYNTAX }
+        else if bytes_eq_c(word, c"-frounding-math") { o.rounding_math = true }
+        else if bytes_eq_c(word, c"-fno-rounding-math") { o.rounding_math = false }
         else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
         else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
         else if bytes_starts_with(word, bytes_c(c"-x")) {
@@ -474,6 +495,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     cc_ctx_init(&p.ctx)
     try cli_parse(p, o, argc)
     p.ctx.assembler = o.inputs.p[InputFile, 0].kind == IN_ASM_CPP
+    p.ctx.syms.track_active = !(o.syntax_only && o.deps != 1)
     try cli_setup(p, o)
     name Bytes = bytes_c(o.path)
     stdin bool = bytes_eq_c(name, c"-")
@@ -504,9 +526,39 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
             found Found = pp_lookup(p, path, -1, false)
             if found.file == null { found = pp_find(p, path, true, false) }
             if found.file == null { try cli_error(c"fcc: cannot open forced include ", inc.value) }
-            try pp_push_file(p, handle_from_addr(found.file), found.path, sext[i32](found.dir), found.system, 0)
-            try output_stream(p, &out, o.macro_dump || o.deps == 1 || inc.kind == 1)
+            if inc.kind == 0 && o.syntax_only && o.deps != 1 {
+                root handle[PpRoot] = vec_add[PpRoot](&p.roots)
+                root.file = handle_from_addr(found.file)
+                root.path = found.path
+                root.directory = found.dir
+                root.system = found.system
+            } else {
+                try pp_push_file(p, handle_from_addr(found.file), found.path, sext[i32](found.dir), found.system, 0)
+                try output_stream(p, &out, o.macro_dump || o.deps == 1 || inc.kind == 1)
+            }
         }
+    }
+    if o.syntax_only && o.deps != 1 {
+        root handle[PpRoot] = vec_add[PpRoot](&p.roots)
+        root.file = main_input
+        root.path = p.base_file
+        root.directory = -1
+        parser handle[Parser] = handle_from_addr(heap_alloc_zeroed(sizeof[Parser]))
+        parser.fenv_access = o.rounding_math
+        parser.fenv_default = o.rounding_math
+        fd i32 = STDOUT
+        if o.dump_ast {
+            if o.output != null && !bytes_eq_c(bytes_c(o.output), c"-") {
+                fd = try os_open(o.output, O_WRONLY | O_CREAT | O_TRUNC, 0o666)
+            }
+            parser.on_function = &pa_dump_callback
+            parser.on_object = &pa_dump_callback
+            parser.user = &fd
+        }
+        defer { if fd != STDOUT { os_close(fd) } }
+        try parse_tu(parser, p)
+        if o.deps != 0 { try output_dependencies(p, o) }
+        return
     }
     try pp_push_file(p, main_input, p.base_file, -1, false, 0)
     try output_stream(p, &out, o.macro_dump || o.deps == 1)
@@ -517,6 +569,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
 
 fn main(argc i32, argv addr) i32 {
     os_init(argc, argv)
+    heap_single_threaded = true
     p handle[Pp] = handle_from_addr(heap_alloc_zeroed(sizeof[Pp]))
     o Options = {}
     cli_main(p, &o, zext[usize](argc)) catch { return 1 }

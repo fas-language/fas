@@ -1,0 +1,337 @@
+// cc2/kw.fas: O(1) C23 + GNU C keyword classification table.
+// Every keyword is pre-interned at startup with SymId < 256 so keyword checks
+// are a single L1 byte load: p.kw_table[t.val].
+
+const KW_NONE u8 = 0
+
+// Storage-class specifiers
+const KW_TYPEDEF u8      = 1
+const KW_EXTERN u8       = 2
+const KW_STATIC u8       = 3
+const KW_AUTO u8         = 4
+const KW_REGISTER u8     = 5
+const KW_CONSTEXPR u8    = 6
+const KW_THREAD_LOCAL u8 = 7 // _Thread_local, thread_local, __thread
+
+// Type specifiers
+const KW_VOID u8         = 8
+const KW_CHAR u8         = 9
+const KW_SHORT u8        = 10
+const KW_INT u8          = 11
+const KW_LONG u8         = 12
+const KW_FLOAT u8        = 13
+const KW_DOUBLE u8       = 14
+const KW_SIGNED u8       = 15 // signed, __signed, __signed__
+const KW_UNSIGNED u8     = 16
+const KW_BOOL u8         = 17 // _Bool, bool
+const KW_COMPLEX u8      = 18 // _Complex, __complex, __complex__
+const KW_STRUCT u8       = 19
+const KW_UNION u8        = 20
+const KW_ENUM u8         = 21
+const KW_ATOMIC u8       = 22 // _Atomic
+const KW_BITINT u8       = 23 // _BitInt
+const KW_TYPEOF u8       = 24 // typeof, __typeof, __typeof__
+const KW_TYPEOF_UNQUAL u8 = 25 // typeof_unqual
+const KW_INT128 u8       = 26 // __int128
+const KW_FLOAT16 u8      = 27 // _Float16, __fp16
+const KW_BFLOAT16 u8     = 28 // __bf16
+const KW_FLOAT80 u8      = 29 // __float80
+const KW_FLOAT128 u8     = 30 // __float128
+const KW_AUTO_TYPE u8    = 31 // __auto_type
+const KW_DECIMAL32 u8    = 32 // _Decimal32
+const KW_DECIMAL64 u8    = 33 // _Decimal64
+const KW_DECIMAL128 u8   = 34 // _Decimal128
+
+// Type qualifiers
+const KW_CONST u8        = 35 // const, __const, __const__
+const KW_VOLATILE u8     = 36 // volatile, __volatile, __volatile__
+const KW_RESTRICT u8     = 37 // restrict, __restrict, __restrict__
+
+// Function & alignment specifiers
+const KW_INLINE u8       = 38 // inline, __inline, __inline__
+const KW_NORETURN u8     = 39 // _Noreturn
+const KW_ALIGNAS u8      = 40 // _Alignas, alignas
+
+// Extensions & attributes
+const KW_ATTRIBUTE u8    = 41 // __attribute, __attribute__
+const KW_EXTENSION u8    = 42 // __extension__
+const KW_STATIC_ASSERT u8 = 43 // _Static_assert, static_assert
+
+// Statements & control flow
+const KW_IF u8           = 44
+const KW_ELSE u8         = 45
+const KW_SWITCH u8       = 46
+const KW_CASE u8         = 47
+const KW_DEFAULT u8      = 48
+const KW_WHILE u8        = 49
+const KW_DO u8           = 50
+const KW_FOR u8          = 51
+const KW_GOTO u8         = 52
+const KW_CONTINUE u8     = 53
+const KW_BREAK u8        = 54
+const KW_RETURN u8       = 55
+const KW_ASM u8          = 56 // asm (GNU-only)
+const KW_GNU_ASM u8      = 57 // __asm, __asm__
+const KW_LABEL u8        = 58 // __label__
+
+// Expression keywords
+const KW_SIZEOF u8       = 59
+const KW_ALIGNOF u8      = 60 // _Alignof, alignof
+const KW_GNU_ALIGNOF u8  = 61 // __alignof, __alignof__
+const KW_GENERIC u8      = 62 // _Generic
+const KW_TRUE u8         = 63
+const KW_FALSE u8        = 64
+const KW_NULLPTR u8      = 65
+const KW_REAL u8         = 66 // __real, __real__
+const KW_IMAG u8         = 67 // __imag, __imag__
+
+// Special parser-handled builtins (expr-level)
+const KW_BI_VA_ARG u8    = 68 // __builtin_va_arg
+const KW_BI_OFFSETOF u8  = 69 // __builtin_offsetof
+const KW_BI_TYPES_COMPAT u8 = 70 // __builtin_types_compatible_p
+const KW_BI_CHOOSE u8    = 71 // __builtin_choose_expr
+const KW_BI_CONVERTVEC u8 = 72 // __builtin_convertvector
+const KW_BI_BIT_CAST u8  = 73 // __builtin_bit_cast
+const KW_BI_CONST_P u8   = 74 // __builtin_constant_p
+const KW_BI_CLASSIFY u8  = 75 // __builtin_classify_type
+const KW_BI_FILE u8      = 76 // __builtin_FILE
+const KW_BI_FILE_NAME u8 = 77 // __builtin_FILE_NAME
+const KW_BI_FUNCTION u8  = 78 // __builtin_FUNCTION
+const KW_BI_LINE u8      = 79 // __builtin_LINE
+const KW_BI_COLUMN u8    = 80 // __builtin_COLUMN
+
+// Keyword category bitflags (indexed by KW_*)
+const KWF_DECL_SPEC u8   = 1  // valid in declaration-specifiers
+const KWF_TYPE_QUAL u8   = 2  // const/volatile/restrict/_Atomic
+const KWF_STORAGE u8     = 4  // typedef/extern/static/auto/register/constexpr/thread_local
+const KWF_C_KEYWORD u8   = 8  // reserved C keyword (cannot be an identifier/label/param)
+const KWF_STMT u8        = 16 // statement starter
+
+const KW_FLAGS arr[84, u8] = {
+    0, // KW_NONE
+    // 1..7: storage
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // typedef
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // extern
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // static
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // auto
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // register
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // constexpr
+    KWF_DECL_SPEC | KWF_STORAGE | KWF_C_KEYWORD, // thread_local
+    // 8..34: type specifiers
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // void
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // char
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // short
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // int
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // long
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // float
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // double
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // signed
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // unsigned
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // bool
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Complex
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // struct
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // union
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // enum
+    KWF_DECL_SPEC | KWF_TYPE_QUAL | KWF_C_KEYWORD, // _Atomic
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _BitInt
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // typeof
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // typeof_unqual
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // __int128
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Float16 / __fp16
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // __bf16
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // __float80
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // __float128
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // __auto_type
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Decimal32
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Decimal64
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Decimal128
+    // 35..37: type qualifiers
+    KWF_DECL_SPEC | KWF_TYPE_QUAL | KWF_C_KEYWORD, // const
+    KWF_DECL_SPEC | KWF_TYPE_QUAL | KWF_C_KEYWORD, // volatile
+    KWF_DECL_SPEC | KWF_TYPE_QUAL | KWF_C_KEYWORD, // restrict
+    // 38..40: func & align specifiers
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // inline
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // _Noreturn
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // alignas
+    // 41..43: extensions & static_assert
+    KWF_DECL_SPEC, // __attribute__
+    KWF_DECL_SPEC, // __extension__
+    KWF_DECL_SPEC | KWF_C_KEYWORD, // static_assert
+    // 44..58: statements
+    KWF_STMT | KWF_C_KEYWORD, // if
+    KWF_C_KEYWORD,            // else
+    KWF_STMT | KWF_C_KEYWORD, // switch
+    KWF_STMT | KWF_C_KEYWORD, // case
+    KWF_STMT | KWF_C_KEYWORD, // default
+    KWF_STMT | KWF_C_KEYWORD, // while
+    KWF_STMT | KWF_C_KEYWORD, // do
+    KWF_STMT | KWF_C_KEYWORD, // for
+    KWF_STMT | KWF_C_KEYWORD, // goto
+    KWF_STMT | KWF_C_KEYWORD, // continue
+    KWF_STMT | KWF_C_KEYWORD, // break
+    KWF_STMT | KWF_C_KEYWORD, // return
+    KWF_STMT,                 // asm
+    KWF_STMT,                 // __asm / __asm__
+    0,                        // __label__
+    // 59..67: expr keywords
+    KWF_C_KEYWORD, // sizeof
+    KWF_C_KEYWORD, // alignof
+    KWF_C_KEYWORD, // __alignof
+    KWF_C_KEYWORD, // _Generic
+    KWF_C_KEYWORD, // true
+    KWF_C_KEYWORD, // false
+    KWF_C_KEYWORD, // nullptr
+    0,             // __real
+    0,             // __imag
+    // 68..80: builtins (not C keywords)
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0,
+}
+
+fn kw_bind(st handle[SymTable], table addr, word addr, kw u8) void {
+    id u32 = sym_intern_c(st, word)
+    assert(id < 256)
+    table[u8, zext[usize](id)] = kw
+}
+
+// Pre-intern all keywords right inside sym_init so they all get SymId < 256.
+// Call kw_fill_table once per TU to activate the right set for (standard, gnu).
+fn kw_preintern(st handle[SymTable]) void {
+    dummy arr[256, u8] = {}
+    kw_fill_table(st, &dummy[0], 23, true)
+}
+
+fn kw_fill_table(st handle[SymTable], table addr, standard u8, gnu bool) void {
+    mem_set(table, 0, 256)
+    c23 bool = standard == 0 || standard == 23
+
+    // Storage-class
+    kw_bind(st, table, c"typedef", KW_TYPEDEF)
+    kw_bind(st, table, c"extern", KW_EXTERN)
+    kw_bind(st, table, c"static", KW_STATIC)
+    kw_bind(st, table, c"auto", KW_AUTO)
+    kw_bind(st, table, c"register", KW_REGISTER)
+    kw_bind(st, table, c"_Thread_local", KW_THREAD_LOCAL)
+    kw_bind(st, table, c"__thread", KW_THREAD_LOCAL)
+    if c23 {
+        kw_bind(st, table, c"constexpr", KW_CONSTEXPR)
+        kw_bind(st, table, c"thread_local", KW_THREAD_LOCAL)
+    }
+
+    // Type specifiers
+    kw_bind(st, table, c"void", KW_VOID)
+    kw_bind(st, table, c"char", KW_CHAR)
+    kw_bind(st, table, c"short", KW_SHORT)
+    kw_bind(st, table, c"int", KW_INT)
+    kw_bind(st, table, c"long", KW_LONG)
+    kw_bind(st, table, c"float", KW_FLOAT)
+    kw_bind(st, table, c"double", KW_DOUBLE)
+    kw_bind(st, table, c"signed", KW_SIGNED)
+    kw_bind(st, table, c"__signed", KW_SIGNED)
+    kw_bind(st, table, c"__signed__", KW_SIGNED)
+    kw_bind(st, table, c"unsigned", KW_UNSIGNED)
+    kw_bind(st, table, c"_Bool", KW_BOOL)
+    kw_bind(st, table, c"_Complex", KW_COMPLEX)
+    kw_bind(st, table, c"__complex", KW_COMPLEX)
+    kw_bind(st, table, c"__complex__", KW_COMPLEX)
+    kw_bind(st, table, c"struct", KW_STRUCT)
+    kw_bind(st, table, c"union", KW_UNION)
+    kw_bind(st, table, c"enum", KW_ENUM)
+    kw_bind(st, table, c"_Atomic", KW_ATOMIC)
+    kw_bind(st, table, c"_BitInt", KW_BITINT)
+    kw_bind(st, table, c"__typeof", KW_TYPEOF)
+    kw_bind(st, table, c"__typeof__", KW_TYPEOF)
+    kw_bind(st, table, c"__int128", KW_INT128)
+    kw_bind(st, table, c"_Float16", KW_FLOAT16)
+    kw_bind(st, table, c"__fp16", KW_FLOAT16)
+    kw_bind(st, table, c"__bf16", KW_BFLOAT16)
+    kw_bind(st, table, c"__float80", KW_FLOAT80)
+    kw_bind(st, table, c"__float128", KW_FLOAT128)
+    kw_bind(st, table, c"__auto_type", KW_AUTO_TYPE)
+    kw_bind(st, table, c"_Decimal32", KW_DECIMAL32)
+    kw_bind(st, table, c"_Decimal64", KW_DECIMAL64)
+    kw_bind(st, table, c"_Decimal128", KW_DECIMAL128)
+    if c23 {
+        kw_bind(st, table, c"bool", KW_BOOL)
+        kw_bind(st, table, c"typeof", KW_TYPEOF)
+        kw_bind(st, table, c"typeof_unqual", KW_TYPEOF_UNQUAL)
+    } else if gnu {
+        kw_bind(st, table, c"typeof", KW_TYPEOF)
+    }
+
+    // Type qualifiers
+    kw_bind(st, table, c"const", KW_CONST)
+    kw_bind(st, table, c"__const", KW_CONST)
+    kw_bind(st, table, c"__const__", KW_CONST)
+    kw_bind(st, table, c"volatile", KW_VOLATILE)
+    kw_bind(st, table, c"__volatile", KW_VOLATILE)
+    kw_bind(st, table, c"__volatile__", KW_VOLATILE)
+    kw_bind(st, table, c"restrict", KW_RESTRICT)
+    kw_bind(st, table, c"__restrict", KW_RESTRICT)
+    kw_bind(st, table, c"__restrict__", KW_RESTRICT)
+
+    // Function & alignment specifiers
+    kw_bind(st, table, c"inline", KW_INLINE)
+    kw_bind(st, table, c"__inline", KW_INLINE)
+    kw_bind(st, table, c"__inline__", KW_INLINE)
+    kw_bind(st, table, c"_Noreturn", KW_NORETURN)
+    kw_bind(st, table, c"_Alignas", KW_ALIGNAS)
+    if c23 { kw_bind(st, table, c"alignas", KW_ALIGNAS) }
+
+    // Attributes, extension, static_assert
+    kw_bind(st, table, c"__attribute", KW_ATTRIBUTE)
+    kw_bind(st, table, c"__attribute__", KW_ATTRIBUTE)
+    kw_bind(st, table, c"__extension__", KW_EXTENSION)
+    kw_bind(st, table, c"_Static_assert", KW_STATIC_ASSERT)
+    if c23 { kw_bind(st, table, c"static_assert", KW_STATIC_ASSERT) }
+
+    // Statements
+    kw_bind(st, table, c"if", KW_IF)
+    kw_bind(st, table, c"else", KW_ELSE)
+    kw_bind(st, table, c"switch", KW_SWITCH)
+    kw_bind(st, table, c"case", KW_CASE)
+    kw_bind(st, table, c"default", KW_DEFAULT)
+    kw_bind(st, table, c"while", KW_WHILE)
+    kw_bind(st, table, c"do", KW_DO)
+    kw_bind(st, table, c"for", KW_FOR)
+    kw_bind(st, table, c"goto", KW_GOTO)
+    kw_bind(st, table, c"continue", KW_CONTINUE)
+    kw_bind(st, table, c"break", KW_BREAK)
+    kw_bind(st, table, c"return", KW_RETURN)
+    kw_bind(st, table, c"asm", KW_ASM)
+    kw_bind(st, table, c"__asm", KW_GNU_ASM)
+    kw_bind(st, table, c"__asm__", KW_GNU_ASM)
+    kw_bind(st, table, c"__label__", KW_LABEL)
+
+    // Expression keywords
+    kw_bind(st, table, c"sizeof", KW_SIZEOF)
+    kw_bind(st, table, c"_Alignof", KW_ALIGNOF)
+    kw_bind(st, table, c"__alignof", KW_GNU_ALIGNOF)
+    kw_bind(st, table, c"__alignof__", KW_GNU_ALIGNOF)
+    kw_bind(st, table, c"_Generic", KW_GENERIC)
+    kw_bind(st, table, c"__real", KW_REAL)
+    kw_bind(st, table, c"__real__", KW_REAL)
+    kw_bind(st, table, c"__imag", KW_IMAG)
+    kw_bind(st, table, c"__imag__", KW_IMAG)
+    if c23 {
+        kw_bind(st, table, c"alignof", KW_ALIGNOF)
+        kw_bind(st, table, c"true", KW_TRUE)
+        kw_bind(st, table, c"false", KW_FALSE)
+        kw_bind(st, table, c"nullptr", KW_NULLPTR)
+    }
+
+    // Special parser-handled builtins
+    kw_bind(st, table, c"__builtin_va_arg", KW_BI_VA_ARG)
+    kw_bind(st, table, c"__builtin_offsetof", KW_BI_OFFSETOF)
+    kw_bind(st, table, c"__builtin_types_compatible_p", KW_BI_TYPES_COMPAT)
+    kw_bind(st, table, c"__builtin_choose_expr", KW_BI_CHOOSE)
+    kw_bind(st, table, c"__builtin_convertvector", KW_BI_CONVERTVEC)
+    kw_bind(st, table, c"__builtin_bit_cast", KW_BI_BIT_CAST)
+    kw_bind(st, table, c"__builtin_constant_p", KW_BI_CONST_P)
+    kw_bind(st, table, c"__builtin_classify_type", KW_BI_CLASSIFY)
+    kw_bind(st, table, c"__builtin_FILE", KW_BI_FILE)
+    kw_bind(st, table, c"__builtin_FILE_NAME", KW_BI_FILE_NAME)
+    kw_bind(st, table, c"__builtin_FUNCTION", KW_BI_FUNCTION)
+    kw_bind(st, table, c"__builtin_LINE", KW_BI_LINE)
+    kw_bind(st, table, c"__builtin_COLUMN", KW_BI_COLUMN)
+}
