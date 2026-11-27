@@ -158,6 +158,7 @@ struct EvalVal {
     pad u16
     sym_a u32
     sym_b u32
+    frag_id u32     // fragment of sym_a when selecting an immediate encoding
     val i64
 }
 

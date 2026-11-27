@@ -192,7 +192,7 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     }
     if k == OPK_IMM {
         ev EvalVal = {}
-        eval_expr(op.expr, false, &ev)
+        eval_immediate(op.expr, &ev)
         if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
         if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
         if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
