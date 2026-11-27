@@ -50,6 +50,7 @@ struct CNames {
     macros Vec[addr]       // replacement indexed by normalized spelling id
     locations Vec[CLoc]
     gnu bool
+    assembler bool
     short_wchar bool
 }
 

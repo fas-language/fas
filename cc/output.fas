@@ -62,7 +62,9 @@ fn output_stream(p handle[Pp], out handle[Output], discard bool) void fails {
         }
         if t.kind == TK_PRAGMA { buf_str(&out.text, c"#pragma ") }
         if t.kind == TK_DIRECT { buf_u8(&out.text, 35) }
-        if out.spaced { buf_u8(&out.text, 32) }
+        // Register prefixes, local labels and assembler macro escapes can
+        // span preprocessing tokens, so retain their original adjacency.
+        if out.spaced && (!n.assembler || (t.flags & F_SPACE) != 0) { buf_u8(&out.text, 32) }
         buf_append(&out.text, cc_spelling(n, t))
         out.spaced = true
         if (t.kind == TK_PRAGMA || t.kind == TK_DIRECT) { output_eol(out) }

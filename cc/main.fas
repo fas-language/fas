@@ -46,6 +46,7 @@ const MODE_COMPILE_OBJ u8 = 4
 const IN_C u8   = 0
 const IN_OBJ u8 = 1
 const IN_FIR u8 = 2
+const IN_ASM_CPP u8 = 3
 
 value struct Command { value addr, kind u8 }
 value struct InputFile { path addr, link_at u32, kind u8 }
@@ -126,7 +127,7 @@ struct Options {
     unwind_tables bool
     rounding_math bool
     optimize_inline bool
-    force_lang u8 // 0 = auto, 1 = c
+    force_lang u8 // 0 = auto, 1 = c, 2 = assembler-with-cpp
 }
 
 fn cli_error(message addr, arg addr) void fails {
@@ -147,7 +148,9 @@ struct ArgPosition { i usize }
 
 fn cli_classify_input(path addr, force_lang u8) u8 {
     if force_lang == 1 { return IN_C }
+    if force_lang == 2 { return IN_ASM_CPP }
     s Bytes = bytes_c(path)
+    if bytes_ends_with(s, bytes_c(c".S")) { return IN_ASM_CPP }
     if bytes_eq_c(s, c"-") || bytes_eq_c(s, c"/dev/null") { return IN_C }
     if bytes_ends_with(s, bytes_c(c".c")) || bytes_ends_with(s, bytes_c(c".i")) ||
        bytes_ends_with(s, bytes_c(c".h")) { return IN_C }
@@ -308,6 +311,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         else if bytes_starts_with(word, bytes_c(c"-x")) {
             lang addr = try cli_arg(argc, &pos, arg, c"-x")
             if bytes_eq_c(bytes_c(lang), c"c") || bytes_eq_c(bytes_c(lang), c"c-header") { o.force_lang = 1 }
+            else if bytes_eq_c(bytes_c(lang), c"assembler-with-cpp") { o.force_lang = 2 }
             else if bytes_eq_c(bytes_c(lang), c"none") { o.force_lang = 0 }
             else { try cli_error(c"fcc: unsupported input language ", lang) }
         } else if bytes_eq_c(word, c"-pipe") || bytes_eq_c(word, c"-v") || bytes_eq_c(word, c"-w") ||
@@ -497,6 +501,12 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
     if (o.mode == MODE_PREPROCESS || o.mode == MODE_SYNTAX) && o.inputs.n > 1 {
         try cli_error(c"fcc: expected one input file, got ", vec_get(&o.inputs, 1).path)
     }
+    if o.mode != MODE_PREPROCESS {
+        for i usize in 0..o.inputs.n {
+            inp InputFile = o.inputs.p[InputFile, i]
+            if inp.kind == IN_ASM_CPP { try cli_error(c"fcc: assembly input requires -E: ", inp.path) }
+        }
+    }
 }
 
 fn cli_dir(p handle[Pp], path addr, rank u8) void {
@@ -641,6 +651,7 @@ fn cli_setup(p handle[Pp], o handle[Options]) void fails {
         }
     }
     if o.exceptions { try cli_definitions(p, bytes_c(c"__EXCEPTIONS 1\n"), c"<built-in>") }
+    if p.names.assembler { try cli_definitions(p, bytes_c(c"__ASSEMBLER__ 1\n"), c"<built-in>") }
     for i usize in 0..o.macros.n {
         m Command = o.macros.p[Command, i]
         s Bytes = bytes_c(m.value)
@@ -687,6 +698,7 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
 
     // Mode 1: Preprocess (-E) or Syntax-only (-fsyntax-only / -Xfcc-dump-ast)
     if o.mode == MODE_PREPROCESS || o.mode == MODE_SYNTAX {
+        p.names.assembler = o.inputs.p[InputFile, 0].kind == IN_ASM_CPP
         try cli_setup(p, o)
         name Bytes = bytes_c(o.path)
         stdin bool = bytes_eq_c(name, c"-")

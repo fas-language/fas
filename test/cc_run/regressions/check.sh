@@ -229,6 +229,23 @@ check_inline_error 'body calls a returns_twice function' \
     '__attribute__((returns_twice)) int twice(void); static inline __attribute__((always_inline)) int helper(void) { return twice(); } int f(void) { return helper(); }'
 echo "PASS: required-inline failure diagnostics"
 
+asm_src=$src/assembler_cpp.S
+"${CLANG:-clang-22}" -c "$asm_src" -o "$work/clang-asm.o"
+cp "$asm_src" "$work/asm.in"
+for input_mode in implicit explicit; do
+    args=("$asm_src")
+    if [[ $input_mode == explicit ]]; then
+        args=(-x assembler-with-cpp "$work/asm.in")
+    fi
+    "$FCC" -E -P "${args[@]}" -o "$work/fcc.s"
+    grep -Fq "# Don't expand VALUE here either" "$work/fcc.s"
+    "${CLANG:-clang-22}" -c "$work/fcc.s" -o "$work/fcc-asm.o"
+    llvm-objcopy-22 --dump-section=.text="$work/clang-asm.text" "$work/clang-asm.o"
+    llvm-objcopy-22 --dump-section=.text="$work/fcc-asm.text" "$work/fcc-asm.o"
+    cmp "$work/clang-asm.text" "$work/fcc-asm.text"
+done
+echo "PASS: assembler preprocessing"
+
 # A single process must release each translation unit before reading the next.
 mkdir "$work/include"
 printf '#define WIDTH 4\n' > "$work/include/width.h"
