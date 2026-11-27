@@ -327,7 +327,15 @@ fn parse_expr_primary() u32 fails {
             }
         }
         sid u32 = sym_get_or_create(name)
-        sym_at(sid).referenced = true
+        sym handle[Symbol] = sym_at(sid)
+        sym.referenced = true
+        // Capture the current value of an absolute assembler variable.
+        // In particular, the RHS of "n = n + 1" refers to the old value.
+        if variant == VAR_NONE && sym.is_equ {
+            val EvalVal = {}
+            eval_expr(sym.equ_expr, false, &val)
+            if val.kind == EV_CONST { return expr_const(val.val) }
+        }
         return expr_sym(sid, variant)
     }
     try as_err(c"unexpected token in expression")

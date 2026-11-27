@@ -24,6 +24,7 @@ start32:
         call *%edi
         jmp *external
         lret $8
+        .balign 32
         .code64
 start64:
         movl external(%eax), %ecx

@@ -503,11 +503,11 @@ fn parse_directive(dir Bytes) void fails {
         if ac.pos < ac.src.n && (ac.src.p[u8, ac.pos] == 64 || ac.src.p[u8, ac.pos] == 37) { ac.pos += 1 }
         tname Bytes = try parse_ident()
         st u8 = STT_NOTYPE
-        if bytes_is(tname, c"function") { st = STT_FUNC }
-        else if bytes_is(tname, c"object") { st = STT_OBJECT }
-        else if bytes_is(tname, c"tls_object") { st = STT_TLS }
-        else if bytes_is(tname, c"common") { st = STT_COMMON }
-        else if bytes_is(tname, c"gnu_indirect_function") { st = STT_GNU_IFUNC }
+        if bytes_is(tname, c"function") || bytes_is(tname, c"STT_FUNC") { st = STT_FUNC }
+        else if bytes_is(tname, c"object") || bytes_is(tname, c"STT_OBJECT") { st = STT_OBJECT }
+        else if bytes_is(tname, c"tls_object") || bytes_is(tname, c"STT_TLS") { st = STT_TLS }
+        else if bytes_is(tname, c"common") || bytes_is(tname, c"STT_COMMON") { st = STT_COMMON }
+        else if bytes_is(tname, c"gnu_indirect_function") || bytes_is(tname, c"STT_GNU_IFUNC") { st = STT_GNU_IFUNC }
         sym_at(sym_get_or_create(name)).stype = st
         return
     }
@@ -664,6 +664,7 @@ fn parse_directive(dir Bytes) void fails {
             if nul { emit_u8(0) }
             skip_hspace()
             if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            if !nul && ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 { continue }
             break
         }
         return
@@ -780,9 +781,11 @@ fn as_parse_all() void fails {
             start u64 = ac.pos
             j u64 = start
             while j < n && is_digit(p[u8, j]) { j += 1 }
+            end u64 = j
+            while j < n && is_hspace(p[u8, j]) { j += 1 }
             if j < n && p[u8, j] == 58 {
                 num u64 = 0
-                for k u64 in start..j { num = num * 10 + zext[u64](p[u8, k] - 48) }
+                for k u64 in start..end { num = num * 10 + zext[u64](p[u8, k] - 48) }
                 ac.pos = j + 1
                 sid u32 = local_label_define(trunc[u32](num))
                 try as_define_label(sid)

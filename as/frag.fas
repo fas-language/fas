@@ -161,9 +161,12 @@ fn emit_align(align u32, fill u8, has_fill bool, max_skip u32) void {
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_ALIGN
     f.data_len = align
-    f.has_fill = if has_fill { 1 } else { 0 }
-    f.is_code = if (s.sh_flags & SHF_EXECINSTR) != 0 { 1 } else { 0 }
-    f.fill = zext[u64](fill) | (zext[u64](max_skip) << 32)
+    is_code bool = (s.sh_flags & SHF_EXECINSTR) != 0
+    code32_nops bool = ac.code32 && is_code && !has_fill
+    f.has_fill = if has_fill || code32_nops { 1 } else { 0 }
+    f.is_code = if is_code { 1 } else { 0 }
+    fill_byte u8 = if code32_nops { 0x90 } else { fill }
+    f.fill = zext[u64](fill_byte) | (zext[u64](max_skip) << 32)
     f.expr = AS_NONE
     f.line = ac.line
 }
