@@ -272,6 +272,11 @@ fn parse_data_directive(size u8) void fails {
     }
 }
 
+fn section_named(name Bytes, prefix addr) bool {
+    stem Bytes = bytes_c(prefix)
+    return bytes_eq(name, stem) || (name.n > stem.n && name.p[u8, stem.n] == 46 && bytes_starts_with(name, stem))
+}
+
 fn parse_section_directive(push bool) void fails {
     skip_hspace()
     name Bytes = bytes_empty()
@@ -297,15 +302,17 @@ fn parse_section_directive(push bool) void fails {
     group_name Bytes = bytes_empty()
     comdat bool = false
 
-    // Default flags for well-known sections when omitted
-    if bytes_is(name, c".text") { sh_flags = SHF_ALLOC | SHF_EXECINSTR }
-    else if bytes_is(name, c".data") { sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".rodata") { sh_flags = SHF_ALLOC }
-    else if bytes_is(name, c".bss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".tdata") { sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
-    else if bytes_is(name, c".tbss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
-    else if bytes_is(name, c".init_array") { sh_type = SHT_INIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".fini_array") { sh_type = SHT_FINI_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    // Conventional section families carry these flags even with explicit flags.
+    if section_named(name, c".text") { sh_flags = SHF_ALLOC | SHF_EXECINSTR }
+    else if section_named(name, c".data") { sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".rodata") { sh_flags = SHF_ALLOC }
+    else if section_named(name, c".bss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".tdata") { sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if section_named(name, c".tbss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if section_named(name, c".note") { sh_type = SHT_NOTE }
+    else if section_named(name, c".init_array") { sh_type = SHT_INIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".fini_array") { sh_type = SHT_FINI_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".preinit_array") { sh_type = SHT_PREINIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
 
     skip_hspace()
     if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
@@ -314,7 +321,6 @@ fn parse_section_directive(push bool) void fails {
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 {
             fb Buf = {}
             try parse_string_lit(&fb)
-            sh_flags = 0
             for i u64 in 0..fb.n {
                 fc u8 = fb.p[u8, i]
                 if fc == 97 { sh_flags = sh_flags | SHF_ALLOC }        // 'a'

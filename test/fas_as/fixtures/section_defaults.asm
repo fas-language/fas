@@ -1,0 +1,21 @@
+        .section .text.named
+        .byte 0xcc
+        .p2align 4
+        ret
+        .section .text.writable,"w"
+        .byte 1
+        .section .data.named
+        .byte 2
+        .section .bss.named
+        .zero 8
+        .section .rodata.named
+        .byte 3
+        .section .tdata.named
+        .byte 4
+        .section .tbss.named
+        .zero 8
+        .section .note.named,"a"
+        .long 0
+        .section .note.GNU-stack,"",@progbits
+        .section .init_array.3
+        .quad external

@@ -67,6 +67,7 @@ fn sec_previous() void {
 fn as_init_sections() void {
     // Default .text section (index 0)
     t u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
+    sec_at(t).sh_align = 4
     ac.cur_sec = t
     ac.prev_sec = t
 }
