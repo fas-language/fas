@@ -294,10 +294,17 @@ if "$FCC" -nostdinc -E include.c > /dev/null 2> fcc.err; then
     echo "FAIL: -nostdinc searched a system include directory" >&2
     exit 1
 fi
-for mode in -m16 -m32 -mx32; do
-    if "$FCC" -fsyntax-only "$mode" bare.c 2> fcc.err; then exit 1; fi
-    grep -qF 'only the x86-64 LP64 target is supported' fcc.err
+cat > i386.c <<'C'
+_Static_assert(sizeof(void *) == 4 && sizeof(long) == 4, "i386 data model");
+int main(void) { return 0; }
+C
+for mode in -m16 -m32; do
+    "$FCC" -fsyntax-only "$mode" i386.c
+    if "$FCC" "$mode" i386.c 2> fcc.err; then exit 1; fi
+    grep -qF 'the i386 driver supports compilation only' fcc.err
 done
+if "$FCC" -fsyntax-only -mx32 i386.c 2> fcc.err; then exit 1; fi
+grep -qF 'the x32 ABI is unsupported' fcc.err
 if "$FCC" -fsyntax-only -ffast-math bare.c 2> fcc.err; then exit 1; fi
 grep -qF 'fast-math semantics are unsupported' fcc.err
 "$FCC" -fsyntax-only -Iinclude -fmade-up -mno-made-up bare.c 2> fcc.err

@@ -415,7 +415,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         } else if bytes_eq_c(word, c"-msoft-float") { o.soft_float = true
         } else if bytes_eq_c(word, c"-mhard-float") { o.soft_float = false
         } else if bytes_eq_c(word, c"-mx32") {
-            try cli_error(c"fcc: only the x86-64 LP64 target is supported: ", arg)
+            try cli_error(c"fcc: the x32 ABI is unsupported: ", arg)
         } else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
             o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
             o.user_deps = word.n > 2 && arg[u8, 2] == 77
