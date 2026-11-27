@@ -1083,7 +1083,12 @@ fn pa_postfix(p handle[Parser], a handle[Ast]) handle[Ast] fails {
             n.op = field.field_idx
             n.a = a
             if arrow || (a.flags & NF_LVALUE) != 0 { n.flags |= NF_LVALUE }
-            n.value = field.bit_off
+            if field.bit_off < 0xffffffff {
+                n.field_off = trunc[u32](field.bit_off)
+            } else {
+                n.field_off = 0xffffffff
+                ast_ext(p, n).field_offset = field.bit_off
+            }
             if field.is_bitfield { n.flags |= NF_BITFIELD; n.operand_ty = field.bit_width }
             if (arrow && (a.flags & NF_STATIC) != 0) || (!arrow && (a.flags & NF_ADDR) != 0) {
                 n.flags |= NF_ADDR

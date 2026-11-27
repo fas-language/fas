@@ -1,0 +1,755 @@
+// SysV x86-64 ABI classification (psABI 3.2.3) + Fir 0.3 ABI signature lowering.
+// All state is read from `tc` (thread-local TypeCtx); no per-TU mutable globals.
+
+
+// ---------- SysV x86-64 eightbyte classes ----------
+const ABI_NO_CLASS u8    = 0
+const ABI_INTEGER u8     = 1
+const ABI_SSE u8         = 2
+const ABI_SSEUP u8       = 3
+const ABI_X87 u8         = 4
+const ABI_X87UP u8       = 5
+const ABI_COMPLEX_X87 u8 = 6
+const ABI_MEMORY u8      = 7
+
+// Passing/returning mode for a single value
+const PASS_NONE u8   = 0   // void or empty struct (0 bytes)
+const PASS_REGS u8   = 1   // 1 or 2 eightbytes in GPR/XMM/x87 regs
+const PASS_MEMORY u8 = 2   // passed on stack / returned via hidden sret ptr
+
+struct AbiClass {
+    mode u8          // PASS_NONE, PASS_REGS, PASS_MEMORY
+    n_eb u8          // number of eightbytes (0, 1, or 2)
+    eb0 u8           // class of eightbyte 0 (ABI_*)
+    eb1 u8           // class of eightbyte 1 (ABI_*)
+    n_gpr u8         // GPRs consumed if PASS_REGS
+    n_sse u8         // XMM regs consumed if PASS_REGS
+    n_x87 u8         // x87 regs consumed (return only: 1 for f80, 2 for complex f80)
+    _pad u8
+    size u64
+    align u64
+}
+
+// Per-parameter assignment in a function call/signature
+struct AbiParamLoc {
+    cls AbiClass
+    in_mem bool
+    _pad0 u8
+    _pad1 u16
+    gpr_idx u8       // starting GPR index (0..5: rdi,rsi,rdx,rcx,r8,r9)
+    sse_idx u8       // starting XMM index (0..7: xmm0..xmm7)
+    _pad2 u16
+    stack_off u64    // byte offset on stack if in_mem
+}
+
+struct AbiCallPlan {
+    ret AbiClass
+    sret bool        // true if return value uses hidden first pointer arg in rdi
+    is_variadic bool
+    _pad u16
+    gpr_used u8      // total GPRs used (incl. sret if sret)
+    sse_used u8      // total XMMs used (= %al for variadic calls)
+    _pad2 u16
+    stack_bytes u64  // total stack argument bytes (8-byte aligned)
+}
+
+// ---------- Eightbyte class merging (psABI 3.2.3) ----------
+
+fn abi_merge(a u8, b u8) u8 {
+    if a == b { return a }
+    if a == ABI_NO_CLASS { return b }
+    if b == ABI_NO_CLASS { return a }
+    if a == ABI_MEMORY || b == ABI_MEMORY { return ABI_MEMORY }
+    if a == ABI_INTEGER || b == ABI_INTEGER { return ABI_INTEGER }
+    if a == ABI_X87 || a == ABI_X87UP || a == ABI_COMPLEX_X87 ||
+       b == ABI_X87 || b == ABI_X87UP || b == ABI_COMPLEX_X87 {
+        return ABI_MEMORY
+    }
+    return ABI_SSE
+}
+
+// Internal recursive eightbyte classifier for aggregates <= 16 bytes.
+// Writes eightbyte classes into eb[0..n_eb-1]. Returns false if MEMORY.
+fn abi_classify_agg_rec(tid u32, base_off u64, eb addr, n_eb u64) bool {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+
+    if k == TYK_VOID { return true }
+    if k == TYK_BOOL || (k >= TYK_CHAR && k <= TYK_ULLONG) ||
+       k == TYK_PTR || k == TYK_NULLPTR {
+        sz u64 = ty_size(u)
+        if base_off % sz != 0 { return false }
+        i u64 = base_off / 8
+        if i >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_INTEGER)
+        return true
+    }
+    if k == TYK_INT128 || k == TYK_UINT128 {
+        if base_off % 16 != 0 { return false }
+        i u64 = base_off / 8
+        if i + 1 >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_INTEGER)
+        eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_INTEGER)
+        return true
+    }
+    if k == TYK_BITINT {
+        bits u32 = n.aux1
+        al u64 = ty_align(u)
+        if base_off % al != 0 { return false }
+        i u64 = base_off / 8
+        if bits <= 64 {
+            if i >= n_eb { return false }
+            eb[u8, i] = abi_merge(eb[u8, i], ABI_INTEGER)
+            return true
+        }
+        if bits <= 128 {
+            if i + 1 >= n_eb { return false }
+            eb[u8, i] = abi_merge(eb[u8, i], ABI_INTEGER)
+            eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_INTEGER)
+            return true
+        }
+        return false
+    }
+    if k == TYK_ENUM {
+        return abi_classify_agg_rec(ty_enum(n.aux1).underlying, base_off, eb, n_eb)
+    }
+    if k == TYK_FLOAT16 || k == TYK_FLOAT || k == TYK_DOUBLE {
+        sz u64 = ty_size(u)
+        if base_off % sz != 0 { return false }
+        i u64 = base_off / 8
+        if i >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
+        return true
+    }
+    if k == TYK_FLOAT128 {
+        if base_off % 16 != 0 { return false }
+        i u64 = base_off / 8
+        if i + 1 >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
+        eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_SSEUP)
+        return true
+    }
+    if k == TYK_LDOUBLE {
+        if base_off % 16 != 0 { return false }
+        i u64 = base_off / 8
+        if i + 1 >= n_eb { return false }
+        eb[u8, i] = abi_merge(eb[u8, i], ABI_X87)
+        eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_X87UP)
+        return true
+    }
+    if k == TYK_COMPLEX {
+        if ty_kind(n.elem) == TYK_LDOUBLE { return false }
+        esz u64 = ty_size(n.elem)
+        if !abi_classify_agg_rec(n.elem, base_off, eb, n_eb) { return false }
+        return abi_classify_agg_rec(n.elem, base_off + esz, eb, n_eb)
+    }
+    if k == TYK_VECTOR {
+        vsz u64 = zext[u64](n.aux1)
+        if base_off % vsz != 0 { return false }
+        i u64 = base_off / 8
+        if vsz <= 4 {
+            if i >= n_eb { return false }
+            eb[u8, i] = abi_merge(eb[u8, i], ABI_INTEGER)
+            return true
+        }
+        if vsz == 8 {
+            if i >= n_eb { return false }
+            if ty_kind(n.elem) == TYK_DOUBLE { return false }
+            eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
+            return true
+        }
+        if vsz == 16 {
+            if i + 1 >= n_eb { return false }
+            eb[u8, i] = abi_merge(eb[u8, i], ABI_SSE)
+            eb[u8, i + 1] = abi_merge(eb[u8, i + 1], ABI_SSEUP)
+            return true
+        }
+        return false
+    }
+    if k == TYK_ARRAY {
+        if n.aux1 != ARR_FIXED { return true }
+        esz u64 = ty_size(n.elem)
+        for j u64 in 0..n.arr_len {
+            if !abi_classify_agg_rec(n.elem, base_off + j * esz, eb, n_eb) { return false }
+        }
+        return true
+    }
+    if k == TYK_STRUCT || k == TYK_UNION {
+        layout_record(n.aux1)
+        rec handle[RecordDef] = ty_record(n.aux1)
+        if rec.size == 0 { return true }
+        al u64 = if rec.align > 0 { rec.align } else { 1 }
+        if base_off % al != 0 { return false }
+
+        // Classify nested record into its own eightbyte slice so per-aggregate
+        // post-merger cleanup matches gcc/clang (e.g., union { long double; long }).
+        sub arr[2, u8] = {}
+        for i u32 in 0..rec.fields_len {
+            f handle[FieldDef] = ty_field(rec.fields_start + i)
+            if f.is_bitfield {
+                if f.bit_width == 0 { continue }
+                b0 u64 = (base_off * 8 + f.bit_off) / 64
+                b1 u64 = (base_off * 8 + f.bit_off + zext[u64](f.bit_width) - 1) / 64
+                if b0 >= n_eb || b1 >= n_eb { return false }
+                sub[b0] = abi_merge(sub[b0], ABI_INTEGER)
+                sub[b1] = abi_merge(sub[b1], ABI_INTEGER)
+            } else {
+                if !abi_classify_agg_rec(f.ty, base_off + f.byte_off, &sub[0], n_eb) {
+                    return false
+                }
+            }
+        }
+        // Post-merger cleanup on this record's eightbytes
+        start_eb u64 = base_off / 8
+        end_eb u64 = (base_off + rec.size - 1) / 8
+        for idx u64 in start_eb..(end_eb + 1) {
+            if sub[idx] == ABI_MEMORY { return false }
+            if sub[idx] == ABI_X87UP && (idx == start_eb || sub[idx - 1] != ABI_X87) {
+                return false
+            }
+            if sub[idx] == ABI_SSEUP && (idx == start_eb || (sub[idx - 1] != ABI_SSE && sub[idx - 1] != ABI_SSEUP)) {
+                sub[idx] = ABI_SSE
+            }
+            eb[u8, idx] = abi_merge(eb[u8, idx], sub[idx])
+        }
+        return true
+    }
+    return false
+}
+
+// Classify any C23 type for SysV x86-64 parameter passing or return.
+fn abi_classify(tid u32, is_ret bool, out handle[AbiClass]) void {
+    mem_set(handle_addr(out), 0, sizeof[AbiClass])
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+
+    if k == TYK_VOID {
+        out.mode = PASS_NONE
+        return
+    }
+    sz u64 = ty_size(u)
+    al u64 = ty_align(u)
+    out.size = sz
+    out.align = al
+
+    // Scalar integers, pointers, nullptr_t
+    if k == TYK_BOOL || (k >= TYK_CHAR && k <= TYK_ULLONG) ||
+       k == TYK_PTR || k == TYK_NULLPTR {
+        out.mode = PASS_REGS
+        out.n_eb = 1
+        out.eb0 = ABI_INTEGER
+        out.n_gpr = 1
+        return
+    }
+    if k == TYK_INT128 || k == TYK_UINT128 {
+        out.mode = PASS_REGS
+        out.n_eb = 2
+        out.eb0 = ABI_INTEGER
+        out.eb1 = ABI_INTEGER
+        out.n_gpr = 2
+        return
+    }
+    if k == TYK_BITINT {
+        if n.aux1 <= 64 {
+            out.mode = PASS_REGS
+            out.n_eb = 1
+            out.eb0 = ABI_INTEGER
+            out.n_gpr = 1
+        } else if n.aux1 <= 128 {
+            out.mode = PASS_REGS
+            out.n_eb = 2
+            out.eb0 = ABI_INTEGER
+            out.eb1 = ABI_INTEGER
+            out.n_gpr = 2
+        } else {
+            out.mode = PASS_MEMORY
+        }
+        return
+    }
+    if k == TYK_ENUM {
+        abi_classify(ty_enum(n.aux1).underlying, is_ret, out)
+        return
+    }
+    if k == TYK_FLOAT16 || k == TYK_FLOAT || k == TYK_DOUBLE {
+        out.mode = PASS_REGS
+        out.n_eb = 1
+        out.eb0 = ABI_SSE
+        out.n_sse = 1
+        return
+    }
+    if k == TYK_FLOAT128 {
+        out.mode = PASS_REGS
+        out.n_eb = 2
+        out.eb0 = ABI_SSE
+        out.eb1 = ABI_SSEUP
+        out.n_sse = 1
+        return
+    }
+    if k == TYK_LDOUBLE {
+        if is_ret {
+            out.mode = PASS_REGS
+            out.n_eb = 2
+            out.eb0 = ABI_X87
+            out.eb1 = ABI_X87UP
+            out.n_x87 = 1
+        } else {
+            out.mode = PASS_MEMORY
+        }
+        return
+    }
+    if k == TYK_COMPLEX {
+        ek u8 = ty_kind(n.elem)
+        if ek == TYK_LDOUBLE {
+            if is_ret {
+                out.mode = PASS_REGS
+                out.n_eb = 2
+                out.eb0 = ABI_COMPLEX_X87
+                out.eb1 = ABI_COMPLEX_X87
+                out.n_x87 = 2
+            } else {
+                out.mode = PASS_MEMORY
+            }
+            return
+        }
+        if ek == TYK_FLOAT16 || ek == TYK_FLOAT {
+            out.mode = PASS_REGS
+            out.n_eb = 1
+            out.eb0 = ABI_SSE
+            out.n_sse = 1
+            return
+        }
+        if ek == TYK_DOUBLE {
+            out.mode = PASS_REGS
+            out.n_eb = 2
+            out.eb0 = ABI_SSE
+            out.eb1 = ABI_SSE
+            out.n_sse = 2
+            return
+        }
+        // Integer complex: classify as struct { T re; T im; }
+        if sz > 16 {
+            out.mode = PASS_MEMORY
+            return
+        }
+        out.mode = PASS_REGS
+        out.n_eb = trunc[u8]((sz + 7) / 8)
+        out.eb0 = ABI_INTEGER
+        if out.n_eb == 2 { out.eb1 = ABI_INTEGER }
+        out.n_gpr = out.n_eb
+        return
+    }
+    if k == TYK_VECTOR {
+        if sz <= 4 {
+            out.mode = PASS_REGS
+            out.n_eb = 1
+            out.eb0 = ABI_INTEGER
+            out.n_gpr = 1
+        } else if sz == 8 {
+            if ty_kind(n.elem) == TYK_DOUBLE {
+                out.mode = PASS_MEMORY
+            } else {
+                out.mode = PASS_REGS
+                out.n_eb = 1
+                out.eb0 = ABI_SSE
+                out.n_sse = 1
+            }
+        } else if sz == 16 {
+            out.mode = PASS_REGS
+            out.n_eb = 2
+            out.eb0 = ABI_SSE
+            out.eb1 = ABI_SSEUP
+            out.n_sse = 1
+        } else {
+            out.mode = PASS_MEMORY
+        }
+        return
+    }
+
+    // Struct / Union
+    if k == TYK_STRUCT || k == TYK_UNION {
+        if sz == 0 {
+            out.mode = PASS_NONE
+            return
+        }
+        if sz > 16 {
+            out.mode = PASS_MEMORY
+            return
+        }
+        n_eb u64 = (sz + 7) / 8
+        eb arr[2, u8] = {}
+        ok bool = abi_classify_agg_rec(u, 0, &eb[0], n_eb)
+        if !ok {
+            out.mode = PASS_MEMORY
+            return
+        }
+        // Check for x87 (valid only in return as single long double)
+        has_x87 bool = false
+        for i u64 in 0..n_eb {
+            if eb[i] == ABI_MEMORY {
+                out.mode = PASS_MEMORY
+                return
+            }
+            if eb[i] == ABI_X87 || eb[i] == ABI_X87UP || eb[i] == ABI_COMPLEX_X87 {
+                has_x87 = true
+            }
+        }
+        if has_x87 {
+            if is_ret && n_eb == 2 && eb[0] == ABI_X87 && eb[1] == ABI_X87UP {
+                out.mode = PASS_REGS
+                out.n_eb = 2
+                out.eb0 = ABI_X87
+                out.eb1 = ABI_X87UP
+                out.n_x87 = 1
+            } else {
+                out.mode = PASS_MEMORY
+            }
+            return
+        }
+        out.mode = PASS_REGS
+        out.n_eb = trunc[u8](n_eb)
+        out.eb0 = eb[0]
+        out.eb1 = if n_eb > 1 { eb[1] } else { ABI_NO_CLASS }
+        g u8 = 0
+        x u8 = 0
+        if eb[0] == ABI_INTEGER { g += 1 }
+        else if eb[0] == ABI_SSE { x += 1 }
+        if n_eb > 1 {
+            if eb[1] == ABI_INTEGER { g += 1 }
+            else if eb[1] == ABI_SSE { x += 1 }
+            // SSEUP shares the XMM register of eb[0]
+        }
+        out.n_gpr = g
+        out.n_sse = x
+        return
+    }
+
+    out.mode = PASS_MEMORY
+}
+
+// Compute register & stack assignment for a full function call/signature.
+// `param_locs` (if non-null) receives `n_params` AbiParamLoc entries.
+fn abi_plan_call(ret_tid u32, param_tids addr, n_params u32, is_variadic bool,
+                 plan handle[AbiCallPlan], param_locs addr) void {
+    mem_set(handle_addr(plan), 0, sizeof[AbiCallPlan])
+    plan.is_variadic = is_variadic
+    abi_classify(ret_tid, true, &plan.ret)
+    gpr u8 = 0
+    sse u8 = 0
+    stack u64 = 0
+
+    if plan.ret.mode == PASS_MEMORY {
+        plan.sret = true
+        gpr = 1 // rdi holds hidden sret pointer
+    }
+
+    for i u32 in 0..n_params {
+        pt u32 = param_tids[u32, zext[usize](i)]
+        loc AbiParamLoc = {}
+        abi_classify(pt, false, &loc.cls)
+        if loc.cls.mode == PASS_NONE {
+            loc.in_mem = false
+        } else if loc.cls.mode == PASS_REGS &&
+                  gpr + loc.cls.n_gpr <= 6 && sse + loc.cls.n_sse <= 8 {
+            loc.in_mem = false
+            loc.gpr_idx = gpr
+            loc.sse_idx = sse
+            gpr += loc.cls.n_gpr
+            sse += loc.cls.n_sse
+        } else {
+            loc.in_mem = true
+            al u64 = if loc.cls.align > 8 { loc.cls.align } else { 8 }
+            stack = align_up_u64(stack, al)
+            loc.stack_off = stack
+            stack += align_up_u64(loc.cls.size, 8)
+        }
+        if param_locs != null {
+            mem_copy(param_locs + zext[usize](i) * sizeof[AbiParamLoc], &loc, sizeof[AbiParamLoc])
+        }
+    }
+    plan.gpr_used = gpr
+    plan.sse_used = sse
+    plan.stack_bytes = stack
+}
+
+// ---------- Fir 0.3 ABI Signature Lowering (SPEC.md §5) ----------
+
+// Emit a Fir leaf type (inside agg fields or bare non-ext scalar)
+fn abi_emit_fir_leaf(b handle[Buf], tid u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_BOOL || k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR {
+        buf_str(b, c"i8")
+        return
+    }
+    if k == TYK_SHORT || k == TYK_USHORT { buf_str(b, c"i16"); return }
+    if k == TYK_INT || k == TYK_UINT || (tc.ilp32 && (k == TYK_LONG || k == TYK_ULONG)) { buf_str(b, c"i32"); return }
+    if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG {
+        buf_str(b, c"i64")
+        return
+    }
+    if k == TYK_INT128 || k == TYK_UINT128 { buf_str(b, c"i128"); return }
+    if k == TYK_BITINT {
+        sz u64 = ty_size(u)
+        if sz == 1 { buf_str(b, c"i8") }
+        else if sz == 2 { buf_str(b, c"i16") }
+        else if sz == 4 { buf_str(b, c"i32") }
+        else if sz == 8 { buf_str(b, c"i64") }
+        else { buf_str(b, c"i64") }
+        return
+    }
+    if k == TYK_ENUM { abi_emit_fir_leaf(b, ty_enum(n.aux1).underlying); return }
+    if k == TYK_FLOAT16 { buf_str(b, c"f16"); return }
+    if k == TYK_FLOAT { buf_str(b, c"f32"); return }
+    if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
+    if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_FLOAT128 { buf_str(b, c"<2 x i64>"); return }
+    if k == TYK_PTR || k == TYK_NULLPTR { buf_str(b, c"ptr"); return }
+    if k == TYK_COMPLEX {
+        buf_str(b, c"complex ")
+        abi_emit_fir_leaf(b, n.elem)
+        return
+    }
+    if k == TYK_VECTOR {
+        esz u64 = ty_size(n.elem)
+        cnt u64 = if esz > 0 { zext[u64](n.aux1) / esz } else { 1 }
+        buf_u8(b, 60) // '<'
+        buf_dec_u64(b, cnt)
+        buf_str(b, c" x ")
+        abi_emit_fir_leaf(b, n.elem)
+        buf_u8(b, 62) // '>'
+        return
+    }
+    buf_str(b, c"i8")
+}
+
+struct AggEmitState {
+    first bool
+}
+
+// Emit comma-separated `OFF: T` entries for a field inside an agg(...)
+fn abi_emit_agg_field(b handle[Buf], tid u32, off u64, st handle[AggEmitState]) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+
+    if k == TYK_ARRAY {
+        if n.aux1 != ARR_FIXED { return }
+        esz u64 = ty_size(n.elem)
+        for j u64 in 0..n.arr_len {
+            abi_emit_agg_field(b, n.elem, off + j * esz, st)
+        }
+        return
+    }
+    if k == TYK_STRUCT || k == TYK_UNION {
+        // Emit nested record as nested agg(...) so fir_abi.ml's per-aggregate
+        // cleanup matches gcc/clang (SPEC.md §5).
+        if !st.first { buf_str(b, c", ") }
+        st.first = false
+        buf_dec_u64(b, off)
+        buf_str(b, c": ")
+        abi_emit_fir_agg(b, u)
+        return
+    }
+    if k == TYK_BITINT && n.aux1 > 64 {
+        // Emit as 8-byte aligned i64 limbs
+        sz u64 = ty_size(u)
+        limbs u64 = sz / 8
+        for l u64 in 0..limbs {
+            if !st.first { buf_str(b, c", ") }
+            st.first = false
+            buf_dec_u64(b, off + l * 8)
+            buf_str(b, c": i64")
+        }
+        return
+    }
+    if k == TYK_COMPLEX && !ty_is_real_float(n.elem) {
+        esz u64 = ty_size(n.elem)
+        abi_emit_agg_field(b, n.elem, off, st)
+        abi_emit_agg_field(b, n.elem, off + esz, st)
+        return
+    }
+    if !st.first { buf_str(b, c", ") }
+    st.first = false
+    buf_dec_u64(b, off)
+    buf_str(b, c": ")
+    abi_emit_fir_leaf(b, u)
+}
+
+// Emit `agg(SIZE, ALIGN, [OFF: T, ...])` for a struct or union type
+fn abi_emit_fir_agg(b handle[Buf], tid u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    assert(n.kind == TYK_STRUCT || n.kind == TYK_UNION)
+    layout_record(n.aux1)
+    rec handle[RecordDef] = ty_record(n.aux1)
+    sz u64 = rec.size
+    al u64 = if rec.align > 0 { rec.align } else { 1 }
+
+    buf_str(b, c"agg(")
+    buf_dec_u64(b, sz)
+    buf_str(b, c", ")
+    buf_dec_u64(b, al)
+    buf_str(b, c", [")
+
+    // If sz > 16, SysV x86-64 always passes/returns in MEMORY regardless of
+    // field list; emitting [] avoids huge flattened arrays while preserving exact
+    // size and alignment in fir_abi.ml!
+    if sz > 0 && sz <= 16 {
+        st AggEmitState = {}
+        st.first = true
+        for i u32 in 0..rec.fields_len {
+            f handle[FieldDef] = ty_field(rec.fields_start + i)
+            if f.is_bitfield {
+                if f.bit_width == 0 { continue }
+                b0 u64 = f.bit_off / 8
+                b1 u64 = (f.bit_off + zext[u64](f.bit_width) - 1) / 8
+                if !st.first { buf_str(b, c", ") }
+                st.first = false
+                buf_dec_u64(b, b0)
+                buf_str(b, c": i8")
+                if b1 / 8 != b0 / 8 {
+                    buf_str(b, c", ")
+                    buf_dec_u64(b, (b1 / 8) * 8)
+                    buf_str(b, c": i8")
+                }
+            } else {
+                abi_emit_agg_field(b, f.ty, f.byte_off, &st)
+            }
+        }
+    }
+    buf_str(b, c"])")
+}
+
+// Emit Fir 0.3 ABI parameter or return type (e.g. `sext i8`, `zext i1`,
+// `i32`, `f16`, `f80`, `complex f64`, `agg(...)`).
+// For TY_VOID, emits nothing (caller emits `()`).
+fn abi_emit_fir_abi_ty(b handle[Buf], tid u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_VOID { return }
+    if k == TYK_BOOL { buf_str(b, c"zext i1"); return }
+    if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR {
+        buf_str(b, if ty_is_unsigned(u) { c"zext i8" } else { c"sext i8" })
+        return
+    }
+    if k == TYK_SHORT { buf_str(b, c"sext i16"); return }
+    if k == TYK_USHORT { buf_str(b, c"zext i16"); return }
+    if k == TYK_INT || k == TYK_UINT || (tc.ilp32 && (k == TYK_LONG || k == TYK_ULONG)) { buf_str(b, c"i32"); return }
+    if k == TYK_LONG || k == TYK_ULONG || k == TYK_LLONG || k == TYK_ULLONG {
+        buf_str(b, c"i64")
+        return
+    }
+    if k == TYK_INT128 || k == TYK_UINT128 { buf_str(b, c"i128"); return }
+    if k == TYK_BITINT {
+        bits u32 = n.aux1
+        is_u bool = (n.flags & TYF_UNSIGNED) != 0
+        if bits <= 32 {
+            if is_u { buf_str(b, c"zext i") } else { buf_str(b, c"sext i") }
+            buf_dec_u64(b, zext[u64](bits))
+            return
+        }
+        if bits <= 64 {
+            buf_u8(b, 105) // 'i'
+            buf_dec_u64(b, zext[u64](bits))
+            return
+        }
+        if bits <= 128 {
+            // 8-byte aligned 16-byte aggregate per x86-64 psABI & SPEC.md §5
+            buf_str(b, c"agg(16, 8, [0: i64, 8: i64])")
+            return
+        }
+        sz u64 = ty_size(u)
+        buf_str(b, c"agg(")
+        buf_dec_u64(b, sz)
+        buf_str(b, c", 8, [])")
+        return
+    }
+    if k == TYK_ENUM {
+        abi_emit_fir_abi_ty(b, ty_enum(n.aux1).underlying)
+        return
+    }
+    if k == TYK_FLOAT16 { buf_str(b, c"f16"); return }
+    if k == TYK_FLOAT { buf_str(b, c"f32"); return }
+    if k == TYK_DOUBLE { buf_str(b, c"f64"); return }
+    if k == TYK_LDOUBLE { buf_str(b, c"f80"); return }
+    if k == TYK_FLOAT128 { buf_str(b, c"<2 x i64>"); return }
+    if k == TYK_PTR || k == TYK_NULLPTR { buf_str(b, c"ptr"); return }
+    if k == TYK_COMPLEX {
+        ek u8 = ty_kind(n.elem)
+        if ek == TYK_FLOAT16 || ek == TYK_FLOAT || ek == TYK_DOUBLE || ek == TYK_LDOUBLE {
+            buf_str(b, c"complex ")
+            abi_emit_fir_leaf(b, n.elem)
+            return
+        }
+        // Integer complex: lower as 2-element agg
+        esz u64 = ty_size(n.elem)
+        eal u64 = ty_align(n.elem)
+        buf_str(b, c"agg(")
+        buf_dec_u64(b, 2 * esz)
+        buf_str(b, c", ")
+        buf_dec_u64(b, eal)
+        buf_str(b, c", [0: ")
+        abi_emit_fir_leaf(b, n.elem)
+        buf_str(b, c", ")
+        buf_dec_u64(b, esz)
+        buf_str(b, c": ")
+        abi_emit_fir_leaf(b, n.elem)
+        buf_str(b, c"])")
+        return
+    }
+    if k == TYK_VECTOR {
+        abi_emit_fir_leaf(b, u)
+        return
+    }
+    if k == TYK_STRUCT || k == TYK_UNION {
+        abi_emit_fir_agg(b, u)
+        return
+    }
+    buf_str(b, c"ptr")
+}
+
+// Emit the Fir SSA value type used *inside* a function body for a parameter/result
+// of C type `tid`. Per SPEC.md §5, agg and complex values are passed/returned as `ptr`.
+fn abi_emit_fir_ssa_ty(b handle[Buf], tid u32) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if k == TYK_STRUCT || k == TYK_UNION || k == TYK_COMPLEX {
+        buf_str(b, c"ptr")
+        return
+    }
+    if k == TYK_BITINT {
+        if n.aux1 > 64 {
+            buf_str(b, c"ptr")
+            return
+        }
+        buf_u8(b, 105) // 'i'
+        buf_dec_u64(b, zext[u64](n.aux1))
+        return
+    }
+    if k == TYK_BOOL { buf_str(b, c"i1"); return }
+    abi_emit_fir_leaf(b, u)
+}
+
+// Emit a complete Fir signature `(ABI, ... [, ...]) -> (ABI)`
+fn abi_emit_fir_sig(b handle[Buf], ret_tid u32, param_tids addr, n_params u32, is_variadic bool) void {
+    buf_u8(b, 40) // '('
+    for i u32 in 0..n_params {
+        if i > 0 { buf_str(b, c", ") }
+        pt u32 = param_tids[u32, zext[usize](i)]
+        abi_emit_fir_abi_ty(b, pt)
+    }
+    if is_variadic {
+        if n_params > 0 { buf_str(b, c", ") }
+        buf_str(b, c"...")
+    }
+    buf_str(b, c") -> (")
+    if !ty_is_void(ret_tid) {
+        abi_emit_fir_abi_ty(b, ret_tid)
+    }
+    buf_u8(b, 41) // ')'
+}

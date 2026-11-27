@@ -533,9 +533,9 @@ fn pa_function(p handle[Parser], s handle[Symbol], fn_op handle[DeclOp]) handle[
         pa_bind_tag(p, pt.name, pt.ty)
         pt = pt.next
     }
-    // Switch to per-function arena so all function-body ASTs reset in O(1)!
+    // Switch to per-function arena unless codegen retains bodies for TU-wide inlining
     saved_arena handle[Arena] = p.cur_arena
-    p.cur_arena = &p.fn_arena
+    if !p.retain_bodies { p.cur_arena = &p.fn_arena }
     defer {
         p.function = null
         pa_leave(p)
@@ -543,8 +543,10 @@ fn pa_function(p handle[Parser], s handle[Symbol], fn_op handle[DeclOp]) handle[
         p.label_list.n = 0
         p.jumps = null
         p.cur_arena = saved_arena
-        pa_arena_reset(&p.fn_arena)
-        pa_arena_reset(&p.expr_arena)
+        if !p.retain_bodies {
+            pa_arena_reset(&p.fn_arena)
+            pa_arena_reset(&p.expr_arena)
+        }
     }
     ret u32 = ty_node(ty_unqual(s.ty)).elem
     if !ty_is_void(ret) && !se_complete(ret) { try pa_error(p, s.loc, c"function returns incomplete type") }

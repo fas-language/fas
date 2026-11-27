@@ -1,0 +1,487 @@
+// Streaming Fir 0.3 text emitter (src/fir/SPEC.md).
+// Supports either in-memory buffering (out_fd < 0) or streaming directly to a
+// file descriptor (out_fd >= 0), flushing each declaration/global/function as
+// soon as it is complete so peak memory stays bounded.
+
+
+// Linkage constants
+const FIR_LOCAL u8  = 0
+const FIR_GLOBAL u8 = 1
+const FIR_WEAK u8   = 2
+
+// Visibility constants
+const FIR_VIS_DEFAULT u8   = 0
+const FIR_VIS_HIDDEN u8    = 1
+const FIR_VIS_PROTECTED u8 = 2
+
+struct FirOut {
+    buf Buf
+    out_fd i32        // >= 0: flush to fd after each top-level item; < 0: keep in buf
+    next_ssa u32      // per-function SSA value counter (%0, %1, ...)
+    next_lbl u32      // per-function label counter
+    in_global_init bool
+    global_first_item bool
+    write_failed bool
+}
+
+fn fir_init_buf(w handle[FirOut]) void {
+    mem_set(handle_addr(w), 0, sizeof[FirOut])
+    w.out_fd = -1
+}
+
+fn fir_init_fd(w handle[FirOut], fd i32) void {
+    mem_set(handle_addr(w), 0, sizeof[FirOut])
+    w.out_fd = fd
+}
+
+fn fir_free(w handle[FirOut]) void {
+    buf_free(&w.buf)
+}
+
+fn fir_flush(w handle[FirOut]) void {
+    if w.out_fd >= 0 && w.buf.n > 0 {
+        if !w.write_failed { buf_write(&w.buf, w.out_fd) catch { w.write_failed = true } }
+        buf_clear(&w.buf)
+    }
+}
+
+fn fir_bytes(w handle[FirOut]) Bytes {
+    return buf_bytes(&w.buf)
+}
+
+fn fir_emit_linkage(b handle[Buf], linkage u8, vis u8) void {
+    if linkage == FIR_LOCAL { buf_str(b, c"local") }
+    else if linkage == FIR_WEAK { buf_str(b, c"weak") }
+    else { buf_str(b, c"global") }
+
+    if vis == FIR_VIS_HIDDEN { buf_str(b, c" hidden") }
+    else if vis == FIR_VIS_PROTECTED { buf_str(b, c" protected") }
+}
+
+// Emit an escaped Fir string literal `"..."` (hex-escaping non-printable bytes)
+fn fir_emit_quoted_bytes(b handle[Buf], data addr, n usize) void {
+    buf_u8(b, 34) // '"'
+    for i usize in 0..n {
+        ch u8 = data[u8, i]
+        if ch == 34 { buf_str(b, c"\\\"") }
+        else if ch == 92 { buf_str(b, c"\\\\") }
+        else if ch >= 32 && ch <= 126 { buf_u8(b, ch) }
+        else {
+            buf_u8(b, 92) // '\'
+            buf_hex(b, zext[u64](ch), 2)
+        }
+    }
+    buf_u8(b, 34) // '"'
+}
+
+// ---------- Module header ----------
+
+fn fir_module_header(w handle[FirOut], triple addr, strict_aliasing bool) void {
+    buf_str(&w.buf, c"triple \"")
+    buf_str(&w.buf, triple)
+    buf_str(&w.buf, c"\"\n")
+    if strict_aliasing {
+        buf_str(&w.buf, c"strict_aliasing\n")
+    }
+    buf_u8(&w.buf, 10)
+    fir_flush(w)
+}
+
+fn fir_module_asm(w handle[FirOut], asm_bytes Bytes) void {
+    buf_str(&w.buf, c"module_asm ")
+    fir_emit_quoted_bytes(&w.buf, asm_bytes.p, asm_bytes.n)
+    buf_u8(&w.buf, 10)
+    fir_flush(w)
+}
+
+// ---------- Globals ----------
+
+fn fir_global_prefix(w handle[FirOut], name Bytes, size u64, align u64,
+                     linkage u8, vis u8, section Bytes, readonly bool, tls bool) void {
+    buf_str(&w.buf, c"global @")
+    buf_append(&w.buf, name)
+    buf_str(&w.buf, c" size ")
+    buf_dec_u64(&w.buf, size)
+    buf_str(&w.buf, c" align ")
+    buf_dec_u64(&w.buf, if align > 0 { align } else { 1 })
+    buf_u8(&w.buf, 32)
+    fir_emit_linkage(&w.buf, linkage, vis)
+    if section.n > 0 {
+        buf_str(&w.buf, c" section ")
+        fir_emit_quoted_bytes(&w.buf, section.p, section.n)
+    }
+    if readonly { buf_str(&w.buf, c" readonly") }
+    if tls { buf_str(&w.buf, c" thread_local") }
+}
+
+fn fir_global_zero(w handle[FirOut], name Bytes, size u64, align u64,
+                   linkage u8, vis u8, section Bytes, readonly bool, tls bool) void {
+    fir_global_prefix(w, name, size, align, linkage, vis, section, readonly, tls)
+    buf_str(&w.buf, c" = zero\n")
+    fir_flush(w)
+}
+
+fn fir_global_common(w handle[FirOut], name Bytes, size u64, align u64, vis u8) void {
+    fir_global_prefix(w, name, size, align, FIR_GLOBAL, vis, bytes_empty(), false, false)
+    buf_str(&w.buf, c" = common\n")
+    fir_flush(w)
+}
+
+fn fir_global_extern(w handle[FirOut], name Bytes, size u64, align u64,
+                     linkage u8, vis u8, section Bytes, readonly bool, tls bool) void {
+    fir_global_prefix(w, name, size, align, linkage, vis, section, readonly, tls)
+    buf_str(&w.buf, c" = extern\n")
+    fir_flush(w)
+}
+
+fn fir_global_init_begin(w handle[FirOut], name Bytes, size u64, align u64,
+                         linkage u8, vis u8, section Bytes, readonly bool, tls bool) void {
+    fir_global_prefix(w, name, size, align, linkage, vis, section, readonly, tls)
+    buf_str(&w.buf, c" = { ")
+    w.in_global_init = true
+    w.global_first_item = true
+}
+
+fn fir_global_init_sep(w handle[FirOut]) void {
+    if !w.global_first_item {
+        buf_str(&w.buf, c", ")
+    }
+    w.global_first_item = false
+}
+
+fn fir_global_init_bytes(w handle[FirOut], data addr, n usize) void {
+    if n == 0 { return }
+    fir_global_init_sep(w)
+    buf_str(&w.buf, c"bytes ")
+    fir_emit_quoted_bytes(&w.buf, data, n)
+}
+
+fn fir_global_init_zeros(w handle[FirOut], n u64) void {
+    if n == 0 { return }
+    fir_global_init_sep(w)
+    buf_str(&w.buf, c"zeros ")
+    buf_dec_u64(&w.buf, n)
+}
+
+fn fir_global_init_reloc(w handle[FirOut], target Bytes, addend i64, pcrel bool, width u32) void {
+    fir_global_init_sep(w)
+    buf_str(&w.buf, c"reloc @")
+    buf_append(&w.buf, target)
+    if addend > 0 {
+        buf_u8(&w.buf, 43) // '+'
+        buf_dec_i64(&w.buf, addend)
+    } else if addend < 0 {
+        buf_dec_i64(&w.buf, addend)
+    }
+    if pcrel { buf_str(&w.buf, c" pcrel") }
+    buf_str(&w.buf, c" w")
+    buf_dec_u64(&w.buf, zext[u64](width))
+}
+
+fn fir_global_init_end(w handle[FirOut]) void {
+    buf_str(&w.buf, c" }\n")
+    w.in_global_init = false
+    fir_flush(w)
+}
+
+// ---------- Aliases & Declarations ----------
+
+fn fir_alias(w handle[FirOut], name Bytes, target Bytes, linkage u8, vis u8) void {
+    buf_str(&w.buf, c"alias @")
+    buf_append(&w.buf, name)
+    buf_str(&w.buf, c" = @")
+    buf_append(&w.buf, target)
+    buf_u8(&w.buf, 32)
+    fir_emit_linkage(&w.buf, linkage, vis)
+    buf_u8(&w.buf, 10)
+    fir_flush(w)
+}
+
+fn fir_declare(w handle[FirOut], name Bytes, ret_tid u32, param_tids addr,
+               n_params u32, is_variadic bool, linkage u8) void {
+    buf_str(&w.buf, c"declare @")
+    buf_append(&w.buf, name)
+    buf_u8(&w.buf, 32)
+    abi_emit_fir_sig(&w.buf, ret_tid, param_tids, n_params, is_variadic)
+    buf_u8(&w.buf, 32)
+    fir_emit_linkage(&w.buf, linkage, FIR_VIS_DEFAULT)
+    buf_u8(&w.buf, 10)
+    fir_flush(w)
+}
+
+// ---------- Streaming Functions ----------
+
+fn fir_new_val(w handle[FirOut]) u32 {
+    v u32 = w.next_ssa
+    w.next_ssa += 1
+    return v
+}
+
+fn fir_new_lbl(w handle[FirOut]) u32 {
+    l u32 = w.next_lbl
+    w.next_lbl += 1
+    return l
+}
+
+fn fir_emit_val(b handle[Buf], v u32) void {
+    buf_str(b, c"%v")
+    buf_dec_u64(b, zext[u64](v))
+}
+
+// Begin a function definition and emit its `^entry(%p0: T0, ...):` block header.
+// Parameter SSA values are `%v0`, `%v1`, ..., `%v{n_params-1}` (and `w.next_ssa`
+// starts at `n_params`).
+fn fir_func_begin(w handle[FirOut], name Bytes, ret_tid u32, param_tids addr,
+                  n_params u32, is_variadic bool, linkage u8, vis u8) void {
+    w.next_ssa = n_params
+    w.next_lbl = 0
+    buf_str(&w.buf, c"func @")
+    buf_append(&w.buf, name)
+    buf_u8(&w.buf, 32)
+    abi_emit_fir_sig(&w.buf, ret_tid, param_tids, n_params, is_variadic)
+    buf_u8(&w.buf, 32)
+    fir_emit_linkage(&w.buf, linkage, vis)
+    buf_str(&w.buf, c" {\n^entry")
+    if n_params > 0 {
+        buf_u8(&w.buf, 40) // '('
+        for i u32 in 0..n_params {
+            if i > 0 { buf_str(&w.buf, c", ") }
+            fir_emit_val(&w.buf, i)
+            buf_str(&w.buf, c": ")
+            abi_emit_fir_ssa_ty(&w.buf, param_tids[u32, zext[usize](i)])
+        }
+        buf_u8(&w.buf, 41) // ')'
+    }
+    buf_str(&w.buf, c":\n")
+}
+
+fn fir_func_end(w handle[FirOut]) void {
+    buf_str(&w.buf, c"}\n\n")
+    fir_flush(w)
+}
+
+fn fir_block(w handle[FirOut], lbl u32) void {
+    buf_str(&w.buf, c"^bb")
+    buf_dec_u64(&w.buf, zext[u64](lbl))
+    buf_str(&w.buf, c":\n")
+}
+
+// ---------- Instructions (Fir 0.3 syntax) ----------
+
+fn fir_alloca(w handle[FirOut], size u64, align u64) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = alloca ptr i64 ")
+    buf_dec_u64(&w.buf, size)
+    buf_str(&w.buf, c", align ")
+    buf_dec_u64(&w.buf, if align > 0 { align } else { 1 })
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_const_int(w handle[FirOut], ty_cstr addr, val i64) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = add ")
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    buf_dec_i64(&w.buf, val)
+    buf_str(&w.buf, c", ")
+    buf_str(&w.buf, ty_cstr)
+    buf_str(&w.buf, c" 0\n")
+    return v
+}
+
+fn fir_const_u64(w handle[FirOut], ty_cstr addr, val u64) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = add ")
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    buf_dec_u64(&w.buf, val)
+    buf_str(&w.buf, c", ")
+    buf_str(&w.buf, ty_cstr)
+    buf_str(&w.buf, c" 0\n")
+    return v
+}
+
+fn fir_sym_addr(w handle[FirOut], sym Bytes) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = ptradd ptr ptr @")
+    buf_append(&w.buf, sym)
+    buf_str(&w.buf, c", i64 0, 1, 0\n")
+    return v
+}
+
+fn fir_ptradd_const(w handle[FirOut], base_v u32, off i64) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = ptradd ptr ")
+    fir_emit_val(&w.buf, base_v)
+    buf_str(&w.buf, c", i64 0, 1, ")
+    buf_dec_i64(&w.buf, off)
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_load(w handle[FirOut], ty_cstr addr, ptr_v u32, align u64) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = load ")
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    fir_emit_val(&w.buf, ptr_v)
+    buf_str(&w.buf, c", align ")
+    buf_dec_u64(&w.buf, if align > 0 { align } else { 1 })
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_store(w handle[FirOut], ty_cstr addr, val_v u32, ptr_v u32, align u64) void {
+    buf_str(&w.buf, c"  store ")
+    fir_emit_val(&w.buf, val_v)
+    buf_str(&w.buf, c", ")
+    fir_emit_val(&w.buf, ptr_v)
+    buf_str(&w.buf, c", align ")
+    buf_dec_u64(&w.buf, if align > 0 { align } else { 1 })
+    buf_u8(&w.buf, 10)
+}
+
+fn fir_binop(w handle[FirOut], op_cstr addr, ty_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = ")
+    buf_str(&w.buf, op_cstr)
+    buf_u8(&w.buf, 32)
+    buf_str(&w.buf, ty_cstr)
+    buf_u8(&w.buf, 32)
+    fir_emit_val(&w.buf, lhs)
+    buf_str(&w.buf, c", ")
+    fir_emit_val(&w.buf, rhs)
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_icmp(w handle[FirOut], pred_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = icmp ")
+    buf_str(&w.buf, pred_cstr)
+    buf_str(&w.buf, c" i1 ")
+    fir_emit_val(&w.buf, lhs)
+    buf_str(&w.buf, c", ")
+    fir_emit_val(&w.buf, rhs)
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_fcmp(w handle[FirOut], pred_cstr addr, lhs u32, rhs u32) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = fcmp ")
+    buf_str(&w.buf, pred_cstr)
+    buf_str(&w.buf, c" i1 ")
+    fir_emit_val(&w.buf, lhs)
+    buf_str(&w.buf, c", ")
+    fir_emit_val(&w.buf, rhs)
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_cast(w handle[FirOut], op_cstr addr, dst_ty_cstr addr, src_v u32) u32 {
+    v u32 = fir_new_val(w)
+    buf_str(&w.buf, c"  ")
+    fir_emit_val(&w.buf, v)
+    buf_str(&w.buf, c" = ")
+    buf_str(&w.buf, op_cstr)
+    buf_u8(&w.buf, 32)
+    buf_str(&w.buf, dst_ty_cstr)
+    buf_u8(&w.buf, 32)
+    fir_emit_val(&w.buf, src_v)
+    buf_u8(&w.buf, 10)
+    return v
+}
+
+fn fir_memcpy(w handle[FirOut], dst_v u32, src_v u32, n_bytes u64) void {
+    buf_str(&w.buf, c"  memcpy ")
+    fir_emit_val(&w.buf, dst_v)
+    buf_str(&w.buf, c", ")
+    fir_emit_val(&w.buf, src_v)
+    buf_str(&w.buf, c", i64 ")
+    buf_dec_u64(&w.buf, n_bytes)
+    buf_u8(&w.buf, 10)
+}
+
+// Emit a direct call to `@callee`. Returns the result SSA value ID (or 0 for void).
+// For variadic calls, `n_fixed` is the number of fixed signature params and
+// `n_args >= n_fixed` is the total number of arguments passed.
+fn fir_call(w handle[FirOut], callee Bytes, ret_tid u32,
+            param_tids addr, n_fixed u32, is_variadic bool,
+            arg_vals addr, arg_tids addr, n_args u32) u32 {
+    has_ret bool = !ty_is_void(ret_tid)
+    res_v u32 = 0
+    buf_str(&w.buf, c"  ")
+    if has_ret {
+        res_v = fir_new_val(w)
+        fir_emit_val(&w.buf, res_v)
+        buf_str(&w.buf, c" = ")
+    }
+    buf_str(&w.buf, c"call ")
+    abi_emit_fir_sig(&w.buf, ret_tid, param_tids, n_fixed, is_variadic)
+    buf_str(&w.buf, c" @")
+    buf_append(&w.buf, callee)
+    buf_u8(&w.buf, 40) // '('
+    for i u32 in 0..n_args {
+        if i > 0 { buf_str(&w.buf, c", ") }
+        if is_variadic && i >= n_fixed && arg_tids != null {
+            at u32 = arg_tids[u32, zext[usize](i)]
+            if ty_is_record(at) || ty_is_complex(at) || (ty_is_bitint(at) && ty_node(ty_unqual(at)).aux1 > 64) {
+                abi_emit_fir_abi_ty(&w.buf, at)
+                buf_u8(&w.buf, 32)
+            }
+        }
+        fir_emit_val(&w.buf, arg_vals[u32, zext[usize](i)])
+    }
+    buf_str(&w.buf, c")\n")
+    return res_v
+}
+
+fn fir_jump(w handle[FirOut], lbl u32) void {
+    buf_str(&w.buf, c"  jump ^bb")
+    buf_dec_u64(&w.buf, zext[u64](lbl))
+    buf_u8(&w.buf, 10)
+}
+
+fn fir_br(w handle[FirOut], cond_v u32, then_lbl u32, else_lbl u32) void {
+    buf_str(&w.buf, c"  br ")
+    fir_emit_val(&w.buf, cond_v)
+    buf_str(&w.buf, c", ^bb")
+    buf_dec_u64(&w.buf, zext[u64](then_lbl))
+    buf_str(&w.buf, c", ^bb")
+    buf_dec_u64(&w.buf, zext[u64](else_lbl))
+    buf_u8(&w.buf, 10)
+}
+
+fn fir_ret(w handle[FirOut], val_v u32) void {
+    buf_str(&w.buf, c"  ret ")
+    fir_emit_val(&w.buf, val_v)
+    buf_u8(&w.buf, 10)
+}
+
+fn fir_ret_void(w handle[FirOut]) void {
+    buf_str(&w.buf, c"  ret\n")
+}

@@ -332,8 +332,11 @@ fn sf_phys_line_col(sf handle[SourceFile], off u32, out_col addr) u32 {
         }
         while lo < sf.splices.n && zext[usize](sf.splices.p[SpliceMark, lo].offset) <= end {
             line += 1
-            last_nl = zext[usize](sf.splices.p[SpliceMark, lo].offset)
-            has_nl = true
+            sp_off usize = zext[usize](sf.splices.p[SpliceMark, lo].offset)
+            if !has_nl || sp_off > last_nl {
+                last_nl = sp_off
+                has_nl = true
+            }
             lo += 1
         }
     }

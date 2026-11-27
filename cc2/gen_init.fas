@@ -1,0 +1,1338 @@
+// C23 -> Fir 0.3 initializer lowering:
+// - String literal decoder (char / UTF-8 / UTF-16 / UTF-32 / wchar_t + escapes)
+// - Static global initializer serializer (bytes + zeros + reloc + bitfields + designators)
+// - Automatic local initializer emitter (zero-fill + stores + bitfields + designators)
+
+
+// ---------- String Literal Decoder ----------
+
+fn gen_hex_digit(ch u8) i32 {
+    if ch >= 48 && ch <= 57 { return zext[i32](ch - 48) }
+    if ch >= 65 && ch <= 70 { return zext[i32](ch - 55) }
+    if ch >= 97 && ch <= 102 { return zext[i32](ch - 87) }
+    return -1
+}
+
+fn gen_append_utf8(out handle[Buf], cp u32) void {
+    if cp <= 0x7f {
+        buf_u8(out, trunc[u8](cp))
+    } else if cp <= 0x7ff {
+        buf_u8(out, trunc[u8](0xc0 | (cp >> 6)))
+        buf_u8(out, trunc[u8](0x80 | (cp & 0x3f)))
+    } else if cp <= 0xffff {
+        buf_u8(out, trunc[u8](0xe0 | (cp >> 12)))
+        buf_u8(out, trunc[u8](0x80 | ((cp >> 6) & 0x3f)))
+        buf_u8(out, trunc[u8](0x80 | (cp & 0x3f)))
+    } else {
+        buf_u8(out, trunc[u8](0xf0 | (cp >> 18)))
+        buf_u8(out, trunc[u8](0x80 | ((cp >> 12) & 0x3f)))
+        buf_u8(out, trunc[u8](0x80 | ((cp >> 6) & 0x3f)))
+        buf_u8(out, trunc[u8](0x80 | (cp & 0x3f)))
+    }
+}
+
+fn gen_append_code_unit(out handle[Buf], cp u32, elem_sz u64, is_raw_byte bool) void {
+    if elem_sz == 1 {
+        if is_raw_byte || cp <= 0x7f {
+            buf_u8(out, trunc[u8](cp & 0xff))
+        } else {
+            gen_append_utf8(out, cp)
+        }
+    } else if elem_sz == 2 {
+        if cp <= 0xffff {
+            buf_u8(out, trunc[u8](cp & 0xff))
+            buf_u8(out, trunc[u8]((cp >> 8) & 0xff))
+        } else {
+            v u32 = cp - 0x10000
+            hi u32 = 0xd800 | (v >> 10)
+            lo u32 = 0xdc00 | (v & 0x3ff)
+            buf_u8(out, trunc[u8](hi & 0xff))
+            buf_u8(out, trunc[u8]((hi >> 8) & 0xff))
+            buf_u8(out, trunc[u8](lo & 0xff))
+            buf_u8(out, trunc[u8]((lo >> 8) & 0xff))
+        }
+    } else {
+        buf_u8(out, trunc[u8](cp & 0xff))
+        buf_u8(out, trunc[u8]((cp >> 8) & 0xff))
+        buf_u8(out, trunc[u8]((cp >> 16) & 0xff))
+        buf_u8(out, trunc[u8]((cp >> 24) & 0xff))
+    }
+}
+
+fn gen_decode_utf8_at(src Bytes, pos addr) u32 {
+    i usize = pos[usize]
+    if i >= src.n { return 0 }
+    b0 u32 = zext[u32](src.p[u8, i])
+    if b0 < 0x80 { pos[usize] = i + 1; return b0 }
+    if (b0 & 0xe0) == 0xc0 && i + 1 < src.n {
+        b1 u32 = zext[u32](src.p[u8, i + 1])
+        pos[usize] = i + 2
+        return ((b0 & 0x1f) << 6) | (b1 & 0x3f)
+    }
+    if (b0 & 0xf0) == 0xe0 && i + 2 < src.n {
+        b1 u32 = zext[u32](src.p[u8, i + 1])
+        b2 u32 = zext[u32](src.p[u8, i + 2])
+        pos[usize] = i + 3
+        return ((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f)
+    }
+    if (b0 & 0xf8) == 0xf0 && i + 3 < src.n {
+        b1 u32 = zext[u32](src.p[u8, i + 1])
+        b2 u32 = zext[u32](src.p[u8, i + 2])
+        b3 u32 = zext[u32](src.p[u8, i + 3])
+        pos[usize] = i + 4
+        return ((b0 & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f)
+    }
+    pos[usize] = i + 1
+    return b0
+}
+
+fn gen_decode_string_piece(src Bytes, elem_sz u64, out handle[Buf]) void {
+    i usize = 0
+    while i < src.n && src.p[u8, i] != 34 { i += 1 }
+    if i < src.n { i += 1 }
+    end usize = src.n
+    if end > i && src.p[u8, end - 1] == 34 { end -= 1 }
+    while i < end {
+        ch u8 = src.p[u8, i]
+        if ch != 92 {
+            if elem_sz == 1 {
+                buf_u8(out, ch)
+                i += 1
+            } else {
+                cp u32 = gen_decode_utf8_at(bytes(src.p, end), &i)
+                gen_append_code_unit(out, cp, elem_sz, false)
+            }
+            continue
+        }
+        i += 1
+        if i >= end { break }
+        esc u8 = src.p[u8, i]
+        i += 1
+        if esc == 110 { gen_append_code_unit(out, 10, elem_sz, true) }      // \n
+        else if esc == 116 { gen_append_code_unit(out, 9, elem_sz, true) }  // \t
+        else if esc == 114 { gen_append_code_unit(out, 13, elem_sz, true) } // \r
+        else if esc == 97 { gen_append_code_unit(out, 7, elem_sz, true) }   // \a
+        else if esc == 98 { gen_append_code_unit(out, 8, elem_sz, true) }   // \b
+        else if esc == 102 { gen_append_code_unit(out, 12, elem_sz, true) } // \f
+        else if esc == 118 { gen_append_code_unit(out, 11, elem_sz, true) } // \v
+        else if esc == 101 || esc == 69 { gen_append_code_unit(out, 27, elem_sz, true) } // \e
+        else if esc == 92 { gen_append_code_unit(out, 92, elem_sz, true) }  // \\
+        else if esc == 34 { gen_append_code_unit(out, 34, elem_sz, true) }  // \"
+        else if esc == 39 { gen_append_code_unit(out, 39, elem_sz, true) }  // \'
+        else if esc == 63 { gen_append_code_unit(out, 63, elem_sz, true) }  // \?
+        else if esc >= 48 && esc <= 55 {
+            val u32 = zext[u32](esc - 48)
+            cnt u32 = 1
+            while cnt < 3 && i < end && src.p[u8, i] >= 48 && src.p[u8, i] <= 55 {
+                val = val * 8 + zext[u32](src.p[u8, i] - 48)
+                i += 1
+                cnt += 1
+            }
+            gen_append_code_unit(out, val, elem_sz, true)
+        } else if esc == 120 { // \x...
+            val u32 = 0
+            while i < end {
+                d i32 = gen_hex_digit(src.p[u8, i])
+                if d < 0 { break }
+                val = (val << 4) | bitcast[u32](d)
+                i += 1
+            }
+            gen_append_code_unit(out, val, elem_sz, true)
+        } else if esc == 117 || esc == 85 { // \uXXXX or \UXXXXXXXX
+            nd u32 = if esc == 117 { 4 } else { 8 }
+            val u32 = 0
+            for _ u32 in 0..nd {
+                if i >= end { break }
+                d i32 = gen_hex_digit(src.p[u8, i])
+                if d < 0 { break }
+                val = (val << 4) | bitcast[u32](d)
+                i += 1
+            }
+            gen_append_code_unit(out, val, elem_sz, false)
+        } else {
+            gen_append_code_unit(out, zext[u32](esc), elem_sz, true)
+        }
+    }
+}
+
+// Decode an ND_STRING AST node into raw bytes in `out`.
+// If `include_nul` is true, appends the trailing NUL code unit of width elem_sz.
+fn gen_decode_string_ast(n handle[Ast], out handle[Buf], include_nul bool) void {
+    elem_sz u64 = 1
+    if n.ty != TY_INVALID && ty_is_array(n.ty) {
+        elem_sz = ty_size(ty_node(ty_unqual(n.ty)).elem)
+        if elem_sz == 0 { elem_sz = 1 }
+    }
+    if n.a == null {
+        // __func__ / __FUNCTION__ / __PRETTY_FUNCTION__
+        nm Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        buf_append(out, nm)
+    } else {
+        piece handle[Ast] = n.a
+        while piece != null {
+            src Bytes = sym_name(&gc.p.ctx.syms, piece.op)
+            gen_decode_string_piece(src, elem_sz, out)
+            piece = piece.next
+        }
+    }
+    if include_nul {
+        for _ u64 in 0..elem_sz { buf_u8(out, 0) }
+    }
+}
+
+// ---------- Static Global Initializer Builder ----------
+
+struct InitReloc {
+    off u64
+    sym_id u32
+    target_blk u32    // if is_blockaddr, GenBlock id in current function
+    base_blk u32      // if width != 0, subtract this block from target_blk
+    addend i64
+    is_blockaddr bool
+    width u8
+}
+
+struct StaticInit {
+    data addr
+    size u64
+    relocs Vec[InitReloc]
+}
+
+fn si_reloc_less(a handle[InitReloc], b handle[InitReloc]) bool {
+    return a.off < b.off
+}
+
+fn si_write_u64(si handle[StaticInit], off u64, val u64, n_bytes u64) void {
+    for i u64 in 0..n_bytes {
+        if off + i < si.size {
+            si.data[u8, off + i] = trunc[u8]((val >> (i * 8)) & 0xff)
+        }
+    }
+}
+
+fn si_write_bitfield(si handle[StaticInit], bit_off u64, bit_width u32, val u64) void {
+    for b u32 in 0..bit_width {
+        tb u64 = bit_off + zext[u64](b)
+        byte_idx u64 = tb / 8
+        bit_in_byte u32 = trunc[u32](tb % 8)
+        if byte_idx < si.size {
+            cur u8 = si.data[u8, byte_idx]
+            mask u8 = trunc[u8](1 << bit_in_byte)
+            bit_set bool = if b < 64 { ((val >> b) & 1) != 0 } else { false }
+            if bit_set {
+                si.data[u8, byte_idx] = cur | mask
+            } else {
+                si.data[u8, byte_idx] = cur & (~mask)
+            }
+        }
+    }
+}
+
+fn si_write_bitfield_wide(si handle[StaticInit], bit_off u64, bit_width u32, wide addr, n_words u32) void {
+    for b u32 in 0..bit_width {
+        tb u64 = bit_off + zext[u64](b)
+        byte_idx u64 = tb / 8
+        bit_in_byte u32 = trunc[u32](tb % 8)
+        if byte_idx < si.size {
+            cur u8 = si.data[u8, byte_idx]
+            mask u8 = trunc[u8](1 << bit_in_byte)
+            wi u32 = b / 32
+            bi u32 = b % 32
+            bit_set bool = if wi < n_words { ((wide[u32, zext[usize](wi)] >> bi) & 1) != 0 } else { false }
+            if bit_set {
+                si.data[u8, byte_idx] = cur | mask
+            } else {
+                si.data[u8, byte_idx] = cur & (~mask)
+            }
+        }
+    }
+}
+
+fn si_add_reloc(si handle[StaticInit], off u64, sym_id u32, addend i64) void {
+    r handle[InitReloc] = vec_add(&si.relocs)
+    r.off = off
+    r.sym_id = sym_id
+    r.addend = addend
+    r.is_blockaddr = false
+}
+
+fn si_add_blockaddr(si handle[StaticInit], off u64, fn_sym_id u32, target_blk u32) handle[InitReloc] {
+    r handle[InitReloc] = vec_add(&si.relocs)
+    r.off = off
+    r.sym_id = fn_sym_id
+    r.target_blk = target_blk
+    r.is_blockaddr = true
+    return r
+}
+
+// The emitter resolves same-function label differences after laying out code.
+fn si_try_blockdiff(si handle[StaticInit], off u64, width u64, n handle[Ast]) bool {
+    if !gc.in_func || (width != 1 && width != 2 && width != 4 && width != 8) { return false }
+    while n.kind == ND_CAST && ty_is_integer(n.ty) {
+        if zext[u64](ty_int_bits(n.ty)) < width * 8 { return false }
+        n = n.a
+    }
+    delta LabelDelta = {}
+    if !se_label_delta(gc.p, n, &delta) { return false }
+    target u32 = gen_get_label_block(delta.lhs)
+    base u32 = gen_get_label_block(delta.rhs)
+    gen_mark_addr_taken(target)
+    gen_mark_addr_taken(base)
+    r handle[InitReloc] = si_add_blockaddr(si, off, gc.cur_fn_name, target)
+    r.base_blk = base
+    r.width = trunc[u8](width)
+    return true
+}
+
+struct ConstAddr {
+    ok bool
+    is_blockaddr bool
+    _pad1 u16
+    sym_id u32
+    target_blk u32
+    _pad2 u32
+    addend i64
+}
+
+// Try to evaluate an AST expression as a link-time constant address (symbol + addend).
+fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
+    mem_set(handle_addr(out), 0, sizeof[ConstAddr])
+    if n == null { return false }
+    if n.kind == ND_CAST {
+        return gen_eval_const_addr(n.a, out)
+    }
+    if n.kind == ND_GENERIC && n.b != null {
+        return gen_eval_const_addr(n.b, out)
+    }
+    if n.kind == ND_COND && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        // Only the selected arm contributes its symbol and offset.
+        chosen handle[Ast] = if se_truth(n.a) { n.b } else { ast_c(n) }
+        return gen_eval_const_addr(chosen, out)
+    }
+    if n.kind == ND_STRING {
+        tmp Buf = {}
+        defer { buf_free(&tmp) }
+        gen_decode_string_ast(n, &tmp, true)
+        al u64 = ty_align(n.ty)
+        nid u32 = gen_emit_string_global(buf_bytes(&tmp), al)
+        out.ok = true
+        out.sym_id = nid
+        out.addend = 0
+        return true
+    }
+    if n.kind == ND_COMPOUND {
+        // File-scope compound literal: materialize as an anonymous local global
+        nid u32 = gen_emit_static_compound(n)
+        out.ok = true
+        out.sym_id = nid
+        out.addend = 0
+        return true
+    }
+    if n.kind == ND_NAME && n.decl != null && (ty_is_func(n.ty) || ty_is_array(n.ty)) {
+        return gen_eval_lvalue_addr(n, out)
+    }
+    if (n.kind == ND_SUBSCRIPT || n.kind == ND_MEMBER) && ty_is_array(n.ty) {
+        return gen_eval_lvalue_addr(n, out)
+    }
+    if n.kind == ND_UNARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        if bytes_eq_c(op, c"&") {
+            return gen_eval_lvalue_addr(n.a, out)
+        }
+        if bytes_eq_c(op, c"&&") && ast_extra(n) != null && gc.in_func {
+            blk u32 = gen_get_label_block(handle_from_addr(ast_extra(n)))
+            gen_mark_addr_taken(blk)
+            out.ok = true
+            out.is_blockaddr = true
+            out.sym_id = gc.cur_fn_name
+            out.target_blk = blk
+            out.addend = 0
+            return true
+        }
+        return false
+    }
+    if n.kind == ND_BINARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        if bytes_eq_c(op, c"+") {
+            if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
+                elem_sz i64 = 1
+                if ty_is_ptr(n.a.ty) || ty_is_array(n.a.ty) {
+                    esz u64 = ty_size(ty_node(ty_unqual(n.a.ty)).elem)
+                    if esz > 0 { elem_sz = bitcast[i64](esz) }
+                }
+                out.addend += bitcast[i64](n.b.value) * elem_sz
+                return true
+            }
+            if gen_eval_const_addr(n.b, out) && (n.a.flags & NF_ICE) != 0 {
+                elem_sz i64 = 1
+                if ty_is_ptr(n.b.ty) || ty_is_array(n.b.ty) {
+                    esz u64 = ty_size(ty_node(ty_unqual(n.b.ty)).elem)
+                    if esz > 0 { elem_sz = bitcast[i64](esz) }
+                }
+                out.addend += bitcast[i64](n.a.value) * elem_sz
+                return true
+            }
+        } else if bytes_eq_c(op, c"-") {
+            if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
+                elem_sz i64 = 1
+                if ty_is_ptr(n.a.ty) || ty_is_array(n.a.ty) {
+                    esz u64 = ty_size(ty_node(ty_unqual(n.a.ty)).elem)
+                    if esz > 0 { elem_sz = bitcast[i64](esz) }
+                }
+                out.addend -= bitcast[i64](n.b.value) * elem_sz
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn gen_eval_lvalue_addr(n handle[Ast], out handle[ConstAddr]) bool {
+    if n == null { return false }
+    if n.kind == ND_NAME && n.decl != null {
+        s handle[Symbol] = n.decl
+        if s.thread_local { return false }
+        key U64Key = {addr_bits(handle_addr(s))}
+        local_id u32 = table_get(&gc.static_locals, &key) catch 0
+        if local_id == 0 {
+            if ty_is_func(s.ty) { gen_note_extern_fn(s) }
+            else if s.linkage != 0 || s.storage == SC_EXTERN { gen_note_extern_obj(s) }
+            else if s.storage != SC_STATIC { return false }
+        }
+        out.ok = true
+        out.sym_id = if local_id != 0 { local_id } else { gen_sym_fir_name_id(s) }
+        out.addend = 0
+        return true
+    }
+    if n.kind == ND_COMPOUND {
+        nid u32 = gen_emit_static_compound(n)
+        out.ok = true
+        out.sym_id = nid
+        out.addend = 0
+        return true
+    }
+    if n.kind == ND_UNARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        if bytes_eq_c(op, c"*") {
+            return gen_eval_const_addr(n.a, out)
+        }
+        return false
+    }
+    if n.kind == ND_MEMBER {
+        ok bool = false
+        if ty_is_ptr(n.a.ty) {
+            ok = gen_eval_const_addr(n.a, out)
+        } else {
+            ok = gen_eval_lvalue_addr(n.a, out)
+        }
+        if !ok { return false }
+        out.addend += bitcast[i64](ast_field_offset(n) / 8)
+        return true
+    }
+    if n.kind == ND_SUBSCRIPT {
+        if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
+            esz u64 = ty_size(n.ty)
+            out.addend += bitcast[i64](n.b.value) * bitcast[i64](if esz > 0 { esz } else { 1 })
+            return true
+        }
+        if gen_eval_const_addr(n.b, out) && (n.a.flags & NF_ICE) != 0 {
+            esz u64 = ty_size(n.ty)
+            out.addend += bitcast[i64](n.a.value) * bitcast[i64](if esz > 0 { esz } else { 1 })
+            return true
+        }
+    }
+    return false
+}
+
+// Fill static initializer bytes for a scalar or aggregate at byte offset `off`
+fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) void {
+    if init == null { return }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if init.kind == ND_COMPOUND && init.a != null {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
+    if init.kind == ND_CAST && init.a != null && (gen_is_mem_ty(u) || k == TYK_VECTOR) {
+        gen_static_fill(si, tid, init.a, off)
+        return
+    }
+    if init.kind == ND_NAME && init.decl != null && init.decl.storage == SC_CONSTEXPR && init.decl.value != null {
+        gen_static_fill(si, tid, handle_from_addr(init.decl.value), off)
+        return
+    }
+
+    // Unwrap single-element brace around scalar (NOT vectors!)
+    if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {
+        if init.a != null && init.a.a != null {
+            gen_static_fill(si, u, init.a.a, off)
+        }
+        return
+    }
+
+    // String literal initializing a char/wide array (zero-fill remainder in case of designator overwrite)
+    if k == TYK_ARRAY && init.kind == ND_STRING {
+        tmp Buf = {}
+        defer { buf_free(&tmp) }
+        gen_decode_string_ast(init, &tmp, true)
+        arr_sz u64 = ty_size(u)
+        if arr_sz > 0 && off + arr_sz <= si.size {
+            mem_set(si.data + off, 0, arr_sz)
+        }
+        copy_n u64 = tmp.n
+        if arr_sz > 0 && copy_n > arr_sz { copy_n = arr_sz }
+        if off + copy_n <= si.size {
+            mem_copy(si.data + off, tmp.p, copy_n)
+        }
+        return
+    }
+
+    // Explicit braces reset the destination, while brace-elided writes
+    // keep any fields already assigned by another designator.
+    if init.kind == ND_INIT {
+        sub_sz u64 = ty_size(u)
+        if (init.flags & NF_PARTIAL_INIT) == 0 && sub_sz > 0 && off + sub_sz <= si.size {
+            mem_set(si.data + off, 0, sub_sz)
+        }
+        if k == TYK_ARRAY {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            item handle[Ast] = init.a
+            while item != null {
+                if item.b != null {
+                    idx u64 = item.value
+                    gen_static_fill_desig(si, u, item.b, item.a, off, &idx)
+                } else {
+                    gen_static_fill(si, elem_ty, item.a, off + item.value * elem_sz)
+                }
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_STRUCT || k == TYK_UNION {
+            layout_record(n.aux1)
+            rec handle[RecordDef] = ty_record(n.aux1)
+            fidx u32 = 0
+            item handle[Ast] = init.a
+            while item != null {
+                if item.b != null {
+                    next_f u64 = 0
+                    gen_static_fill_desig(si, u, item.b, item.a, off, &next_f)
+                    fidx = trunc[u32](next_f) + 1
+                } else {
+                    // Skip unnamed bitfields (both zero-width and non-zero-width)
+                    while fidx < rec.fields_len {
+                        f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
+                        break
+                    }
+                    if fidx >= rec.fields_len { break }
+                    f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                    if f.is_bitfield {
+                        if item.a != null && ast_wide(item.a) != null && f.bit_width > 64 {
+                            nw u32 = (f.bit_width + 31) / 32
+                            si_write_bitfield_wide(si, off * 8 + f.bit_off, f.bit_width, ast_wide(item.a), nw)
+                        } else {
+                            val u64 = gen_eval_const_int(item.a)
+                            si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
+                        }
+                    } else {
+                        gen_static_fill(si, f.ty, item.a, off + f.byte_off)
+                    }
+                    fidx += 1
+                }
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_VECTOR {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            idx u64 = 0
+            item handle[Ast] = init.a
+            while item != null {
+                gen_static_fill(si, elem_ty, item.a, off + idx * elem_sz)
+                idx += 1
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_COMPLEX {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            item handle[Ast] = init.a
+            if item != null {
+                gen_static_fill(si, elem_ty, item.a, off)
+                if item.next != null {
+                    gen_static_fill(si, elem_ty, item.next.a, off + elem_sz)
+                }
+            }
+            return
+        }
+        return
+    }
+
+    // Scalar / pointer / float / complex / wide int
+    if k == TYK_PTR || k == TYK_NULLPTR {
+        ca ConstAddr = {}
+        if gen_eval_const_addr(init, &ca) {
+            if ca.is_blockaddr {
+                si_add_blockaddr(si, off, ca.sym_id, ca.target_blk)
+            } else {
+                si_add_reloc(si, off, ca.sym_id, ca.addend)
+            }
+            return
+        }
+        val u64 = gen_eval_const_int(init)
+        si_write_u64(si, off, val, ty_size(u))
+        return
+    }
+    if k == TYK_COMPLEX {
+        elem_ty u32 = n.elem
+        elem_sz u64 = ty_size(elem_ty)
+        if init.kind == ND_FLOAT && init.b != null && ty_is_integer(elem_ty) {
+            si_write_u64(si, off, 0, elem_sz)
+            si_write_u64(si, off + elem_sz, init.b.value, elem_sz)
+        } else if (init.flags & NF_FLOAT_CONST) != 0 || init.kind == ND_FLOAT {
+            if ty_is_real_float(elem_ty) {
+                gen_static_write_float(si, elem_ty, init.value, off)
+                bits FloatBits = {}
+                if gen_static_f80_literal(init, &bits) {
+                    gen_static_write_f80(si, bits, off + elem_sz)
+                } else { gen_static_write_float(si, elem_ty, ast_imag(init), off + elem_sz) }
+            } else {
+                re_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.value)))
+                im_i u64 = bitcast[u64](cvt[i64](bitcast[f64](ast_imag(init))))
+                si_write_u64(si, off, re_i, elem_sz)
+                si_write_u64(si, off + elem_sz, im_i, elem_sz)
+            }
+        } else if init.kind == ND_INT || (init.flags & NF_ICE) != 0 {
+            if ty_is_real_float(elem_ty) {
+                gen_static_write_float(si, elem_ty, bitcast[u64](cvt[f64](bitcast[i64](init.value))), off)
+            } else {
+                si_write_u64(si, off, init.value, elem_sz)
+            }
+        }
+        return
+    }
+    if u == TY_FLOAT128 {
+        if ast_float_bits(init) != null {
+            si_write_u64(si, off, ast_float_bits(init).lo, 8)
+            si_write_u64(si, off + 8, ast_float_bits(init).hi, 8)
+        }
+        return
+    }
+    if ty_is_real_float(u) {
+        bits FloatBits = {}
+        if u == TY_LDOUBLE && gen_static_f80_literal(init, &bits) {
+            gen_static_write_f80(si, bits, off)
+            return
+        }
+        if u != TY_LDOUBLE && ty_unqual(init.ty) == u && ast_float_bits(init) != null {
+            si_write_u64(si, off, ast_float_bits(init).lo, ty_size(u))
+            return
+        }
+        fbits u64 = gen_eval_const_float(init)
+        gen_static_write_float(si, u, fbits, off)
+        return
+    }
+    if ty_is_integer(u) {
+        sz u64 = ty_size(u)
+        if k != TYK_BOOL && si_try_blockdiff(si, off, sz, init) { return }
+        // Check for pointer-to-int constant cast (e.g. (uintptr_t)&x)
+        if sz == ty_size(TY_NULLPTR) {
+            ca ConstAddr = {}
+            if gen_eval_const_addr(init, &ca) {
+                si_add_reloc(si, off, ca.sym_id, ca.addend)
+                return
+            }
+        }
+        if ast_wide(init) != null && sz > 8 {
+            words u32 = (ty_int_bits(u) + 31) / 32
+            copy_n u64 = zext[u64](words) * 4
+            if copy_n > sz { copy_n = sz }
+            if off + copy_n <= si.size {
+                mem_copy(si.data + off, ast_wide(init), copy_n)
+            }
+            return
+        }
+        val u64 = gen_eval_const_int(init)
+        if k == TYK_BOOL { val = if val != 0 { 1 } else { 0 } }
+        si_write_u64(si, off, val, if sz <= 8 { sz } else { 8 })
+        if sz > 8 && ty_is_signed(u) && bitcast[i64](val) < 0 {
+            for b u64 in 8..sz {
+                if off + b < si.size { si.data[u8, off + b] = 0xff }
+            }
+        }
+        return
+    }
+}
+
+// Explicit member designators name the member, including injected names.
+// An implicit continuation selects the direct field by its ordinal.
+fn gen_designated_field(tid u32, d handle[Ast], out handle[FieldLookup]) bool {
+    if d.op != 0 { return ty_offsetof(tid, d.op, out) }
+    id u32 = ty_node(ty_unqual(tid)).aux1
+    r handle[RecordDef] = ty_record(id)
+    if d.value >= zext[u64](r.fields_len) { return false }
+    idx u32 = r.fields_start + trunc[u32](d.value)
+    f handle[FieldDef] = ty_field(idx)
+    out.found = true
+    out.is_bitfield = f.is_bitfield
+    out.field_idx = idx
+    out.ty = f.ty
+    out.bit_width = f.bit_width
+    out.record_id = id
+    out.byte_off = f.byte_off
+    out.bit_off = f.bit_off
+    return true
+}
+
+fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_ast handle[Ast], off u64, out_idx addr) void {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if desig == null {
+        gen_static_fill(si, u, val_ast, off)
+        return
+    }
+    if n.kind == TYK_ARRAY {
+        idx u64 = desig.value
+        out_idx[u64] = idx
+        elem_sz u64 = ty_size(n.elem)
+        if desig.b != null {
+            // GNU range designator [lo ... hi]: desig.a = lo, desig.b = hi (desig.value == hi)
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
+            hi u64 = desig.b.value
+            out_idx[u64] = hi
+            for j u64 in lo..(hi + 1) {
+                dummy u64 = 0
+                gen_static_fill_desig(si, n.elem, desig.next, val_ast, off + j * elem_sz, &dummy)
+            }
+        } else {
+            dummy u64 = 0
+            gen_static_fill_desig(si, n.elem, desig.next, val_ast, off + idx * elem_sz, &dummy)
+        }
+        return
+    }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        layout_record(n.aux1)
+        rec handle[RecordDef] = ty_record(n.aux1)
+        fl FieldLookup = {}
+        if gen_designated_field(u, desig, &fl) {
+            // Compute top-level field index for continuation
+            if fl.field_idx >= rec.fields_start && fl.field_idx < rec.fields_start + rec.fields_len {
+                out_idx[u64] = zext[u64](fl.field_idx - rec.fields_start)
+            }
+            if desig.next == null && fl.is_bitfield {
+                v u64 = gen_eval_const_int(val_ast)
+                si_write_bitfield(si, off * 8 + fl.bit_off, fl.bit_width, v)
+            } else {
+                dummy u64 = 0
+                gen_static_fill_desig(si, fl.ty, desig.next, val_ast, off + fl.byte_off, &dummy)
+            }
+        }
+    }
+}
+
+// Preserve a literal through sign operations and type-preserving casts.
+fn gen_static_f80_literal(n handle[Ast], out handle[FloatBits]) bool {
+    sign u64 = 0
+    while n != null {
+        if ast_float_bits(n) != null {
+            out.lo = ast_float_bits(n).lo
+            out.hi = ast_float_bits(n).hi ^ sign
+            return true
+        }
+        if n.kind == ND_UNARY {
+            op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+            if bytes_eq_c(op, c"-") || (bytes_eq_c(op, c"~") && ty_is_complex(n.ty)) { sign ^= 0x8000 }
+            else if !bytes_eq_c(op, c"+") { return false }
+            n = n.a
+        } else if n.kind == ND_CAST && ty_unqual(n.ty) == ty_unqual(n.a.ty) { n = n.a }
+        else if n.kind == ND_GENERIC { n = n.b }
+        else { return false }
+    }
+    return false
+}
+
+fn gen_static_write_f80(si handle[StaticInit], bits FloatBits, off u64) void {
+    si_write_u64(si, off, bits.lo, 8)
+    si_write_u64(si, off + 8, bits.hi, 2)
+}
+
+fn gen_static_write_float(si handle[StaticInit], tid u32, f64_bits u64, off u64) void {
+    k u8 = ty_kind(tid)
+    if k == TYK_FLOAT16 {
+        si_write_u64(si, off, zext[u64](gen_f64_to_f16_bits(f64_bits)), 2)
+    } else if k == TYK_FLOAT {
+        f32v f32 = cvt[f32](bitcast[f64](f64_bits))
+        si_write_u64(si, off, zext[u64](bitcast[u32](f32v)), 4)
+    } else if k == TYK_DOUBLE {
+        si_write_u64(si, off, f64_bits, 8)
+    } else if k == TYK_LDOUBLE {
+        lo u64 = 0
+        hi u16 = 0
+        gen_f64_to_f80_bits(f64_bits, &lo, &hi)
+        gen_static_write_f80(si, {lo, zext[u64](hi)}, off)
+    }
+}
+
+fn gen_eval_const_int(n handle[Ast]) u64 {
+    if n == null { return 0 }
+    if (n.flags & NF_ICE) != 0 || (n.kind == ND_CAST && ty_is_bool(n.ty) &&
+        ty_unqual(n.a.ty) == TY_FLOAT128 && (n.flags & NF_FOLD) != 0) { return n.value }
+    if n.kind == ND_INT { return n.value }
+    if n.kind == ND_NAME && n.decl != null && n.decl.storage == SC_ENUMERATOR { return n.value }
+    if n.kind == ND_FLOAT {
+        f f64 = bitcast[f64](n.value)
+        return bitcast[u64](cvt[i64](f))
+    }
+    if n.kind == ND_CAST {
+        if ty_is_real_float(n.a.ty) {
+            fb u64 = gen_eval_const_float(n.a)
+            f f64 = bitcast[f64](fb)
+            if ty_is_bool(n.ty) { return if f != 0.0 { 1 } else { 0 } }
+            if ty_is_unsigned(n.ty) { return cvt[u64](f) }
+            return bitcast[u64](cvt[i64](f))
+        }
+        v u64 = gen_eval_const_int(n.a)
+        if ty_is_bool(n.ty) { return if v != 0 { 1 } else { 0 } }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            v = v & mask
+            if ty_is_signed(n.ty) && ((v >> (bits - 1)) & 1) != 0 {
+                v = v | (~mask)
+            }
+        }
+        return v
+    }
+    if n.kind == ND_UNARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        if bytes_eq_c(op, c"&") && n.a != null && n.a.kind == ND_MEMBER {
+            base u64 = gen_eval_const_int(n.a.a)
+            return base + n.a.value
+        }
+        v u64 = gen_eval_const_int(n.a)
+        if bytes_eq_c(op, c"-") { return 0 - v }
+        if bytes_eq_c(op, c"~") { return ~v }
+        if bytes_eq_c(op, c"!") { return if v == 0 { 1 } else { 0 } }
+        return v
+    }
+    if n.kind == ND_BINARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        lv u64 = gen_eval_const_int(n.a)
+        rv u64 = gen_eval_const_int(n.b)
+        res u64 = 0
+        if bytes_eq_c(op, c"+") { res = lv + rv }
+        else if bytes_eq_c(op, c"-") { res = lv - rv }
+        else if bytes_eq_c(op, c"*") { res = lv * rv }
+        else if bytes_eq_c(op, c"&") { res = lv & rv }
+        else if bytes_eq_c(op, c"|") { res = lv | rv }
+        else if bytes_eq_c(op, c"^") { res = lv ^ rv }
+        else if bytes_eq_c(op, c"<<") { res = lv << (rv & 63) }
+        else if bytes_eq_c(op, c">>") { res = lv >> (rv & 63) }
+        else { return n.value }
+        bits u32 = ty_int_bits(n.ty)
+        if bits > 0 && bits < 64 {
+            mask u64 = (1 << bits) - 1
+            res = res & mask
+            if ty_is_signed(n.ty) && ((res >> (bits - 1)) & 1) != 0 {
+                res = res | (~mask)
+            }
+        }
+        return res
+    }
+    if n.kind == ND_COND && ty_is_ptr(n.ty) && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        return gen_eval_const_int(if se_truth(n.a) { n.b } else { ast_c(n) })
+    }
+    if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_int(n.b) }
+    return n.value
+}
+
+fn gen_eval_const_float(n handle[Ast]) u64 {
+    if n == null { return 0 }
+    if n.kind == ND_FLOAT || (n.flags & 64) != 0 { return n.value }
+    if n.kind == ND_INT || (n.flags & NF_ICE) != 0 {
+        if ty_is_unsigned(n.ty) { return bitcast[u64](cvt[f64](n.value)) }
+        return bitcast[u64](cvt[f64](bitcast[i64](n.value)))
+    }
+    if n.kind == ND_CAST {
+        if ty_is_real_float(n.a.ty) {
+            fb u64 = gen_eval_const_float(n.a)
+            if ty_kind(n.ty) == TYK_FLOAT {
+                f32v f32 = cvt[f32](bitcast[f64](fb))
+                return bitcast[u64](cvt[f64](f32v))
+            }
+            return fb
+        }
+        v u64 = gen_eval_const_int(n.a)
+        if ty_is_unsigned(n.a.ty) { return bitcast[u64](cvt[f64](v)) }
+        return bitcast[u64](cvt[f64](bitcast[i64](v)))
+    }
+    if n.kind == ND_UNARY {
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        fb u64 = gen_eval_const_float(n.a)
+        if bytes_eq_c(op, c"-") { return fb ^ 0x8000000000000000 }
+        return fb
+    }
+    if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_float(n.b) }
+    return 0
+}
+
+// A GNU union can have a flexible member at any field index. Its initialized
+// storage may extend beyond the union type's size without changing sizeof.
+fn gen_static_flex_union_size(tid u32, init handle[Ast], size u64) u64 {
+    rec handle[RecordDef] = ty_record(ty_node(ty_unqual(tid)).aux1)
+    item handle[Ast] = init.a
+    while item != null {
+        f handle[FieldDef] = ty_field(rec.fields_start + trunc[u32](item.value))
+        array_type handle[TypeNode] = ty_node(ty_unqual(f.ty))
+        if array_type.kind == TYK_ARRAY && array_type.aux1 == ARR_INCOMPLETE {
+            elem_size u64 = ty_size(array_type.elem)
+            extent u64 = 0
+            if item.b != null && item.b.next != null {
+                extent = (item.b.next.value + 1) * elem_size
+            } else if item.a.kind == ND_STRING {
+                extent = item.a.value * elem_size
+            } else if item.a.kind == ND_INIT {
+                extent = ty_size(item.a.ty)
+            }
+            if extent > size { size = extent }
+        }
+        item = item.next
+    }
+    return size
+}
+
+// Compute extra trailing bytes for a struct with a flexible array member initializer
+fn gen_static_effective_size(tid u32, init handle[Ast]) u64 {
+    sz u64 = ty_size(tid)
+    if init == null || init.kind != ND_INIT { return sz }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if n.kind == TYK_UNION { return gen_static_flex_union_size(tid, init, sz) }
+    if n.kind != TYK_STRUCT { return sz }
+    layout_record(n.aux1)
+    rec handle[RecordDef] = ty_record(n.aux1)
+    if !rec.has_flex_array || rec.fields_len == 0 { return sz }
+    last_f handle[FieldDef] = ty_field(rec.fields_start + rec.fields_len - 1)
+    fn_node handle[TypeNode] = ty_node(ty_unqual(last_f.ty))
+    if fn_node.kind != TYK_ARRAY || fn_node.aux1 != ARR_INCOMPLETE { return sz }
+    // Find the initializer item corresponding to the last field
+    fidx u32 = 0
+    item handle[Ast] = init.a
+    flex_init handle[Ast] = null
+    while item != null {
+        if item.b != null {
+            fl FieldLookup = {}
+            if ty_offsetof(u, item.b.op, &fl) && fl.field_idx == rec.fields_start + rec.fields_len - 1 {
+                flex_init = item.a
+            }
+        } else {
+            while fidx < rec.fields_len {
+                f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                if f.is_bitfield && f.bit_width == 0 { fidx += 1; continue }
+                break
+            }
+            if fidx == rec.fields_len - 1 { flex_init = item.a }
+            fidx += 1
+        }
+        item = item.next
+    }
+    if flex_init == null { return sz }
+    flex_bytes u64 = 0
+    if flex_init.kind == ND_STRING {
+        tmp Buf = {}
+        gen_decode_string_ast(flex_init, &tmp, true)
+        flex_bytes = tmp.n
+        buf_free(&tmp)
+    } else if flex_init.kind == ND_INIT {
+        esz u64 = ty_size(fn_node.elem)
+        cnt u64 = 0
+        it handle[Ast] = flex_init.a
+        while it != null {
+            if it.b != null && it.b.value + 1 > cnt { cnt = it.b.value + 1 }
+            else { cnt += 1 }
+            it = it.next
+        }
+        flex_bytes = cnt * esz
+    }
+    tot u64 = last_f.byte_off + flex_bytes
+    if tot > sz { sz = align_up_u64(tot, if rec.align > 0 { rec.align } else { 1 }) }
+    return sz
+}
+
+// Emit a StaticInit as a Fir global definition into `b`
+fn gen_emit_static_init_global(name Bytes, size u64, align u64, linkage u8, vis u8,
+                               section Bytes, readonly bool, tls bool, init handle[Ast], tid u32) void {
+    eff_sz u64 = gen_static_effective_size(tid, init)
+    if eff_sz > size { size = eff_sz }
+    sz u64 = if size > 0 { size } else { 1 }
+    al u64 = if align > 0 { align } else { 1 }
+
+    // Evaluate static initializer FIRST so any nested string/compound globals
+    // are emitted cleanly before we write this global's header!
+    si StaticInit = {}
+    all_zero bool = true
+    if init != null {
+        si.size = sz
+        si.data = heap_alloc_zeroed(sz)
+        gen_static_fill(&si, tid, init, 0)
+        if si.relocs.n != 0 {
+            all_zero = false
+        } else {
+            for i u64 in 0..sz {
+                if si.data[u8, i] != 0 { all_zero = false; break }
+            }
+        }
+    }
+    defer { vec_free(&si.relocs) }
+
+    b handle[Buf] = gen_global_buf()
+    // Emit prefix
+    buf_str(b, c"global ")
+    gen_emit_sym_name(b, name)
+    buf_str(b, c" size ")
+    buf_dec_u64(b, sz)
+    buf_str(b, c" align ")
+    buf_dec_u64(b, al)
+    buf_u8(b, 32)
+    fir_emit_linkage(b, linkage, vis)
+    if section.n > 0 {
+        buf_str(b, c" section ")
+        fir_emit_quoted_bytes(b, section.p, section.n)
+    }
+    if readonly { buf_str(b, c" readonly") }
+    if tls { buf_str(b, c" thread_local") }
+
+    if init == null || all_zero {
+        buf_str(b, c" = zero\n")
+        gen_flush_if_top()
+        return
+    }
+
+    // Sort relocations by offset
+    if si.relocs.n > 1 {
+        sort_vec_by[InitReloc, si_reloc_less](&si.relocs)
+    }
+
+    buf_str(b, c" = { ")
+    first bool = true
+    pos u64 = 0
+    ri usize = 0
+    while pos < sz {
+        // Skip any reloc at < pos (overwritten by earlier reloc)
+        while ri < si.relocs.n && vec_at(&si.relocs, ri).off < pos { ri += 1 }
+        if ri < si.relocs.n && vec_at(&si.relocs, ri).off == pos {
+            // Take the last reloc at this exact offset (later designator wins)
+            while ri + 1 < si.relocs.n && vec_at(&si.relocs, ri + 1).off == pos { ri += 1 }
+            r handle[InitReloc] = vec_at(&si.relocs, ri)
+            if !first { buf_str(b, c", ") }
+            first = false
+            width u64 = if r.width != 0 { zext[u64](r.width) } else if !r.is_blockaddr && tc.ilp32 { 4 } else { 8 }
+            if r.is_blockaddr {
+                buf_str(b, if r.width != 0 { c"blockdiff(@" } else { c"blockaddr(@" })
+                buf_append(b, gen_sym_bytes(r.sym_id))
+                buf_str(b, c", ")
+                pt handle[BlockAddrPatch] = vec_add(&gc.ba_patches)
+                pt.blk_id = 0xffffffff
+                pt.off = b.n
+                pt.target_blk = r.target_blk
+                buf_str(b, c"00000000")
+                if r.width != 0 {
+                    buf_str(b, c", ")
+                    pt = vec_add(&gc.ba_patches)
+                    pt.blk_id = 0xffffffff
+                    pt.off = b.n
+                    pt.target_blk = r.base_blk
+                    buf_str(b, c"00000000, ")
+                    buf_dec_u64(b, width)
+                }
+                buf_u8(b, 41)
+            } else {
+                buf_str(b, c"reloc @")
+                buf_append(b, gen_sym_bytes(r.sym_id))
+                if r.addend > 0 {
+                    buf_u8(b, 43)
+                    buf_dec_i64(b, r.addend)
+                } else if r.addend < 0 {
+                    buf_dec_i64(b, r.addend)
+                }
+                buf_str(b, if width == 4 { c" w4" } else { c" w8" })
+            }
+            pos += width
+            ri += 1
+            continue
+        }
+        limit u64 = if ri < si.relocs.n { vec_at(&si.relocs, ri).off } else { sz }
+        if limit > sz { limit = sz }
+        // Emit runs of zeros (length >= 8) as `zeros K`, else `bytes "..."`
+        if si.data[u8, pos] == 0 {
+            zstart u64 = pos
+            while pos < limit && si.data[u8, pos] == 0 { pos += 1 }
+            if !first { buf_str(b, c", ") }
+            first = false
+            buf_str(b, c"zeros ")
+            buf_dec_u64(b, pos - zstart)
+        } else {
+            bstart u64 = pos
+            while pos < limit {
+                if si.data[u8, pos] == 0 {
+                    // Check if a run of >= 8 zeros starts here
+                    zlen u64 = 0
+                    while pos + zlen < limit && si.data[u8, pos + zlen] == 0 && zlen < 8 { zlen += 1 }
+                    if zlen >= 8 { break }
+                }
+                pos += 1
+                if pos - bstart >= 4096 { break }
+            }
+            if !first { buf_str(b, c", ") }
+            first = false
+            buf_str(b, c"bytes ")
+            fir_emit_quoted_bytes(b, si.data + bstart, pos - bstart)
+        }
+    }
+    buf_str(b, c" }\n")
+    gen_flush_if_top()
+}
+
+fn gen_emit_static_compound(n handle[Ast]) u32 {
+    nid u32 = gen_make_anon_name(c".Lcomp.")
+    gen_mark_defined(nid)
+    sz u64 = ty_size(n.ty)
+    al u64 = ty_align(n.ty)
+    ro bool = (ty_quals(n.ty) & Q_CONST) != 0
+    tls bool = (n.op & 256) != 0
+    gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, FIR_LOCAL, FIR_VIS_DEFAULT,
+                                bytes_empty(), ro, tls, n.a, n.ty)
+    return nid
+}
+
+fn gen_global_object(s handle[Symbol]) void fails {
+    nid u32 = gen_sym_fir_name_id(s)
+    if gen_sym_bytes(nid).n == 0 { return }
+    if gen_is_defined(nid) { return }
+    gen_mark_defined(nid)
+    sz u64 = ty_size(s.ty)
+    al u64 = ty_align(s.ty)
+    sec_buf Buf = {}
+    defer { buf_free(&sec_buf) }
+    _ bool = gen_attr_str_arg(s.attrs, c"section", &sec_buf)
+    ro bool = (ty_quals(s.ty) & Q_CONST) != 0 && !s.thread_local
+    // Don't mark readonly if it has relocations in a shared library? Fir handles relocs in .data.rel.ro automatically,
+    // wait: in Fir, readonly globals with relocs may be placed in .rodata; keep readonly=false if init may have relocs
+    // when it's not a pure integer/string. Actually Fir's native backend puts readonly with relocs in .data.rel.ro!
+    init handle[Ast] = handle_from_addr(s.value)
+    if gen_sym_linkage(s) == FIR_LOCAL { gen_emit_discardable(gen_global_buf(), s, nid) }
+    gen_emit_static_init_global(gen_sym_bytes(nid), sz, al, gen_sym_linkage(s), gen_sym_visibility(s),
+                                buf_bytes(&sec_buf), ro && init != null && !ty_is_ptr(s.ty), s.thread_local, init, s.ty)
+    gen_debug_global(s, nid)
+}
+
+// ---------- Automatic Local Initializer Emitter ----------
+
+fn gen_auto_init(dst_ptr u32, tid u32, init handle[Ast], zero_first bool) void fails {
+    if init == null { return }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+
+    // Unwrap brace around scalar
+    if init.kind == ND_INIT && !gen_is_mem_ty(u) && k != TYK_VECTOR {
+        if init.a != null && init.a.a != null {
+            try gen_auto_init(dst_ptr, tid, init.a.a, false)
+        } else {
+            zv u32 = gen_const_zero(u)
+            gen_store_ty(zv, dst_ptr, ty_align(tid), gen_is_volatile(tid), gen_is_atomic(tid))
+        }
+        return
+    }
+
+    // String literal initializing a local char/wide array
+    if k == TYK_ARRAY && init.kind == ND_STRING {
+        tmp Buf = {}
+        defer { buf_free(&tmp) }
+        gen_decode_string_ast(init, &tmp, true)
+        arr_sz u64 = ty_size(u)
+        copy_n u64 = tmp.n
+        if arr_sz > 0 && copy_n > arr_sz { copy_n = arr_sz }
+        if copy_n > 0 {
+            nid u32 = gen_emit_string_global(bytes(tmp.p, copy_n), 1)
+            src_p u32 = gen_sym_addr(gen_sym_bytes(nid))
+            gen_memcpy_const(dst_ptr, src_p, copy_n, false)
+        }
+        if arr_sz > copy_n {
+            rem_p u32 = gen_ptradd_const(dst_ptr, bitcast[i64](copy_n))
+            gen_memset_const(rem_p, 0, arr_sz - copy_n, false)
+        }
+        return
+    }
+
+    // Brace-enclosed initializer
+    if init.kind == ND_INIT {
+        if zero_first && (init.flags & NF_PARTIAL_INIT) == 0 {
+            sz u64 = ty_size(u)
+            if sz > 0 { gen_memset_const(dst_ptr, 0, sz, false) }
+        }
+        if k == TYK_ARRAY {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            item handle[Ast] = init.a
+            while item != null {
+                if item.b != null {
+                    idx u64 = item.value
+                    try gen_auto_init_desig(dst_ptr, u, item.b, item.a, &idx)
+                } else {
+                    ep u32 = gen_ptradd_const(dst_ptr, bitcast[i64](item.value * elem_sz))
+                    try gen_auto_init(ep, elem_ty, item.a, false)
+                }
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_STRUCT || k == TYK_UNION {
+            layout_record(n.aux1)
+            rec handle[RecordDef] = ty_record(n.aux1)
+            fidx u32 = 0
+            item handle[Ast] = init.a
+            while item != null {
+                if item.b != null {
+                    next_f u64 = 0
+                    try gen_auto_init_desig(dst_ptr, u, item.b, item.a, &next_f)
+                    fidx = trunc[u32](next_f) + 1
+                } else {
+                    while fidx < rec.fields_len {
+                        f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                        if f.is_bitfield && (f.bit_width == 0 || f.name_id == 0) { fidx += 1; continue }
+                        break
+                    }
+                    if fidx >= rec.fields_len { break }
+                    f handle[FieldDef] = ty_field(rec.fields_start + fidx)
+                    if f.is_bitfield {
+                        rv u32 = try gen_rvalue(item.a)
+                        rv = gen_convert(rv, item.a.ty, f.ty)
+                        gen_store_bitfield(dst_ptr, f.bit_off, f.bit_width, f.ty, rv)
+                    } else {
+                        fp u32 = gen_ptradd_const(dst_ptr, bitcast[i64](f.byte_off))
+                        try gen_auto_init(fp, f.ty, item.a, false)
+                    }
+                    fidx += 1
+                }
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_VECTOR {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            idx u64 = 0
+            item handle[Ast] = init.a
+            while item != null {
+                ep u32 = gen_ptradd_const(dst_ptr, bitcast[i64](idx * elem_sz))
+                try gen_auto_init(ep, elem_ty, item.a, false)
+                idx += 1
+                item = item.next
+            }
+            return
+        }
+        if k == TYK_COMPLEX {
+            elem_ty u32 = n.elem
+            elem_sz u64 = ty_size(elem_ty)
+            item handle[Ast] = init.a
+            if item != null {
+                try gen_auto_init(dst_ptr, elem_ty, item.a, false)
+                if item.next != null {
+                    ip u32 = gen_ptradd_const(dst_ptr, bitcast[i64](elem_sz))
+                    try gen_auto_init(ip, elem_ty, item.next.a, false)
+                }
+            }
+            return
+        }
+        return
+    }
+
+    // Aggregate copy from expression (e.g., struct S s = f(); or complex)
+    if gen_is_mem_ty(u) {
+        src_p u32 = try gen_rvalue(init)
+        sz u64 = ty_size(u)
+        if sz > 0 { gen_memcpy_const(dst_ptr, src_p, sz, gen_is_volatile(tid)) }
+        return
+    }
+
+    // Scalar / vector store
+    rv u32 = try gen_rvalue(init)
+    rv = gen_convert(rv, init.ty, u)
+    gen_store_ty(rv, dst_ptr, ty_align(tid), gen_is_volatile(tid), gen_is_atomic(tid))
+}
+
+fn gen_auto_init_desig(base_ptr u32, tid u32, desig handle[Ast], val_ast handle[Ast], out_idx addr) void fails {
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    if desig == null {
+        try gen_auto_init(base_ptr, u, val_ast, true)
+        return
+    }
+    if n.kind == TYK_ARRAY {
+        idx u64 = desig.value
+        out_idx[u64] = idx
+        elem_sz u64 = ty_size(n.elem)
+        if desig.b != null {
+            lo u64 = if desig.a != null { desig.a.value } else { idx }
+            hi u64 = desig.b.value
+            out_idx[u64] = hi
+            if hi >= lo && (hi - lo) >= 16 {
+                // Emit a Fir loop instead of unrolling large GNU `[lo ... hi]` designator ranges
+                idx_slot u32 = gen_alloca_entry(8, 8)
+                gen_store_ty(gen_const_u64(lo), idx_slot, 8, false, false)
+                cond_blk u32 = gen_new_block()
+                body_blk u32 = gen_new_block()
+                end_blk u32 = gen_new_block()
+                gen_term_jump(cond_blk)
+                gen_switch_block(cond_blk)
+                iv u32 = gen_load_raw(c"i64", idx_slot, 8, false)
+                cmp u32 = gen_icmp(c"ule", iv, gen_const_u64(hi))
+                gen_term_br(cmp, body_blk, end_blk)
+                gen_switch_block(body_blk)
+                ep u32 = gen_ptradd_scaled(base_ptr, iv, bitcast[i64](elem_sz))
+                dummy u64 = 0
+                try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                next_iv u32 = gen_binop_raw(c"add", c"i64", iv, gen_const_u64(1))
+                gen_store_ty(next_iv, idx_slot, 8, false, false)
+                gen_term_jump(cond_blk)
+                gen_switch_block(end_blk)
+            } else {
+                for j u64 in lo..(hi + 1) {
+                    ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](j * elem_sz))
+                    dummy u64 = 0
+                    try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+                }
+            }
+        } else {
+            ep u32 = gen_ptradd_const(base_ptr, bitcast[i64](idx * elem_sz))
+            dummy u64 = 0
+            try gen_auto_init_desig(ep, n.elem, desig.next, val_ast, &dummy)
+        }
+        return
+    }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        layout_record(n.aux1)
+        rec handle[RecordDef] = ty_record(n.aux1)
+        fl FieldLookup = {}
+        if gen_designated_field(u, desig, &fl) {
+            if fl.field_idx >= rec.fields_start && fl.field_idx < rec.fields_start + rec.fields_len {
+                out_idx[u64] = zext[u64](fl.field_idx - rec.fields_start)
+            }
+            if desig.next == null && fl.is_bitfield {
+                rv u32 = try gen_rvalue(val_ast)
+                rv = gen_convert(rv, val_ast.ty, fl.ty)
+                gen_store_bitfield(base_ptr, fl.bit_off, fl.bit_width, fl.ty, rv)
+            } else {
+                fp u32 = gen_ptradd_const(base_ptr, bitcast[i64](fl.byte_off))
+                dummy u64 = 0
+                try gen_auto_init_desig(fp, fl.ty, desig.next, val_ast, &dummy)
+            }
+        }
+    }
+}

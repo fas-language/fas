@@ -63,8 +63,8 @@ struct Ast {
     loc u32
     ty u32
     op u32          // SymId (for dump/compat) or field_idx / storage
-    operand_ty u32  // common evaluation type for binary operators
-    _pad2 u32
+    operand_ty u32  // common evaluation type for binary operators (field_width for ND_MEMBER)
+    field_off u32   // bit offset for ND_MEMBER (0xffffffff => stored in AstExtra.field_offset)
     value u64
     a handle[Ast]
     b handle[Ast]
@@ -217,6 +217,7 @@ struct Parser {
     on_function addr
     on_object addr
     user addr
+    retain_bodies bool
 }
 
 // ---------- Arena helpers ----------
@@ -284,7 +285,10 @@ fn ast_ext(p handle[Parser], n handle[Ast]) handle[AstExtra] {
 
 fn ast_c(n handle[Ast]) handle[Ast] { return if n.ext != null { n.ext.c } else { null } }
 fn ast_d(n handle[Ast]) handle[Ast] { return if n.ext != null { n.ext.d } else { null } }
-fn ast_field_offset(n handle[Ast]) u64 { return n.value }
+fn ast_field_offset(n handle[Ast]) u64 {
+    if n.field_off == 0xffffffff && n.ext != null { return n.ext.field_offset }
+    return zext[u64](n.field_off)
+}
 fn ast_field_width(n handle[Ast]) u32 { return n.operand_ty }
 fn ast_imag(n handle[Ast]) u64 { return if n.ext != null { n.ext.imag } else { 0 } }
 fn ast_float_bits(n handle[Ast]) handle[FloatBits] { return if n.ext != null { n.ext.float_bits } else { null } }
