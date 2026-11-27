@@ -49,6 +49,7 @@ const OT_K u8 = 41
 const OT_KM u8 = 42
 const OT_IND_RM32 u8 = 43
 const OT_ABS_MEM u8 = 44
+const OT_IND_M u8 = 45
 
 // Secondary flags stored in InstrDesc.ef2 (was pad u32):
 //   bits [0]: EF2_EVEX
@@ -61,6 +62,7 @@ const EF2_EVEX512 u32 = 2 << 1
 const EF2_ONLY32 u32 = 1 << 8
 const EF2_ONLY64 u32 = 1 << 9
 const EF2_MOFFS32 u32 = 1 << 10
+const EF2_FAR_IMM u32 = 1 << 11
 
 // Encoding flags (must match as/gen_table.py)
 const EF_REXW u32 = 1 << 0
@@ -163,6 +165,7 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     if ot == OT_RM32 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
     if ot == OT_RM64 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
     if ot == OT_M || ot == OT_M_ANY { return k == OPK_MEM && !op.indirect }
+    if ot == OT_IND_M { return k == OPK_MEM && op.indirect }
     if ot == OT_IND_RM64 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
     if ot == OT_IND_RM32 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
     if ot == OT_ABS_MEM { return k == OPK_MEM && !op.indirect && op.has_disp && op.base == 0 && op.index == 0 }
@@ -231,6 +234,24 @@ fn seg_prefix_byte(seg u8) u8 {
 
 // ---------- Instruction emission ----------
 
+fn emit_insn_immediate(expr u32, size u8, kind u8) void {
+    ev EvalVal = {}
+    eval_expr(expr, false, &ev)
+    if ev.kind == EV_CONST {
+        value u64 = bitcast[u64](ev.val)
+        if size == 1 { emit_u8(trunc[u8](value)) }
+        else if size == 2 { emit_u16(trunc[u16](value)) }
+        else if size == 4 { emit_u32(trunc[u32](value)) }
+        else { emit_u64(value) }
+        return
+    }
+    fid u32 = frag_ensure_data()
+    f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+    off u32 = f.data_len
+    for k u8 in 0..size { emit_u8(0) }
+    emit_fixup(fid, off, size, kind, 0, zext[u32](size), expr)
+}
+
 fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
     flags u32 = d.flags
 
@@ -261,6 +282,17 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         emit_u32(0)
         kind u8 = if ac.code32 { FIX_PC } else { FIX_PLT }
         emit_fixup(fid, foff, 4, kind, 1, 4, op0.expr)
+        return
+    }
+
+    // A far jump encodes its offset before its segment selector.
+    if (d.ef2 & EF2_FAR_IMM) != 0 {
+        if (flags & EF_66) != 0 { emit_u8(0x66) }
+        emit_u8(d.opcode)
+        selector handle[Operand] = handle_from_addr(ops)
+        target handle[Operand] = handle_from_addr(ops + sizeof[Operand])
+        emit_insn_immediate(target.expr, trunc[u8](desc_imm_size(flags)), FIX_ABS)
+        emit_insn_immediate(selector.expr, 2, FIX_ABS)
         return
     }
 
@@ -616,21 +648,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         if imm_op == null {
             emit_u8(d.ext)
         } else {
-            ev EvalVal = {}
-            eval_expr(imm_op.expr, false, &ev)
-            if ev.kind == EV_CONST {
-                if imm_sz == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
-                else if imm_sz == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
-                else if imm_sz == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
-                else { emit_u64(bitcast[u64](ev.val)) }
-            } else {
-                fid u32 = frag_ensure_data()
-                f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-                foff u32 = f.data_len
-                for k u32 in 0..imm_sz { emit_u8(0) }
-                fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
-                emit_fixup(fid, foff, trunc[u8](imm_sz), fkind, 0, imm_sz, imm_op.expr)
-            }
+            fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
+            emit_insn_immediate(imm_op.expr, trunc[u8](imm_sz), fkind)
         }
     }
 }

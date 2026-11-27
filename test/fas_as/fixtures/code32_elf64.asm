@@ -31,6 +31,13 @@ start32:
         jmp external
         jz external
         jmp *external
+        ljmpl $16, $(1b - start32)
+        ljmp $16, $external
+        ljmpw *16(%eax)
+        ljmpw $16, $external
+        verw %ax
+        verr (%eax)
+        movnti %ebx, (%eax)
         lret $8
         .balign 32
         .code64
@@ -42,3 +49,5 @@ start64:
         movq external, %rax
         lgdtq (%rax)
         lretq
+        ljmpq *(%rax)
+        movnti %r8, (%rdi)

@@ -53,6 +53,7 @@ OT_K = 41
 OT_KM = 42
 OT_IND_RM32 = 43
 OT_ABS_MEM = 44
+OT_IND_M = 45
 
 EF2_EVEX = 1 << 0
 EF2_EVEX128 = 0 << 1
@@ -61,6 +62,7 @@ EF2_EVEX512 = 2 << 1
 EF2_ONLY32 = 1 << 8
 EF2_ONLY64 = 1 << 9
 EF2_MOFFS32 = 1 << 10
+EF2_FAR_IMM = 1 << 11
 def ef2_disp8(shift): return (shift & 0x1f) << 3
 
 # Encoding flags
@@ -455,6 +457,13 @@ for m in ('jmp', 'jmpq'):
 for m in ('jmp', 'jmpl'):
     add(m, [OT_IND_RM32], MAP_1, 0xff, 4, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY32)
 
+for m, prefix, width, kind in [('ljmp', 0, OT_IMM32, EF_IMM_32),
+                                ('ljmpl', 0, OT_IMM32, EF_IMM_32),
+                                ('ljmpw', EF_66, OT_IMM16, EF_IMM_16)]:
+    add(m, [OT_IMM16, width], MAP_1, 0xea, 0, prefix | kind, EF2_ONLY32 | EF2_FAR_IMM)
+    add(m, [OT_IND_M], MAP_1, 0xff, 5, prefix | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+add('ljmpq', [OT_IND_M], MAP_1, 0xff, 5, EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+
 for m in ('call', 'callq'):
     add(m, [OT_REL32], MAP_1, 0xe8, 0, 0, EF2_ONLY64 if m == 'callq' else 0)
     add(m, [OT_IND_RM64], MAP_1, 0xff, 2, EF_MODRM | EF_REG_EXT | EF_OP0_RM | EF_GOTPCRELX, EF2_ONLY64)
@@ -567,11 +576,15 @@ for m, op, fl, acc in [
     add(m, [OT_M, acc], MAP_1, op, 0, fl)
     add(m, [OT_M], MAP_1, op, 0, fl)
 
+for m, reg, prefix in [('movntil', OT_R32, 0), ('movntiq', OT_R64, EF_REXW)]:
+    for mnemonic in (m, 'movnti'):
+        add(mnemonic, [reg, OT_M], MAP_0F, 0xc3, 0, prefix | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+
 # Memory-operand system instructions
 for m, ext in [('sgdt', 0), ('sidt', 1), ('lgdt', 2), ('lidt', 3)]:
     for suffix, mode in [('', 0), ('l', EF2_ONLY32), ('q', EF2_ONLY64)]:
         add(m + suffix, [OT_M], MAP_0F, 0x01, ext, EF_MODRM | EF_REG_EXT | EF_OP0_RM, mode)
-for m, ext in [('sldt', 0), ('str', 1), ('lldt', 2), ('ltr', 3)]:
+for m, ext in [('sldt', 0), ('str', 1), ('lldt', 2), ('ltr', 3), ('verr', 4), ('verw', 5)]:
     for suffix in ('', 'w'):
         add(m + suffix, [OT_RM16], MAP_0F, 0x00, ext, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 add('clflush', [OT_M], MAP_0F, 0xae, 7, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
