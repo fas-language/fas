@@ -581,6 +581,10 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".endr") { try as_err(c".endr without matching .rept/.irp/.irpc"); return }
     if bytes_is(dir, c".include") { try parse_include_directive(); return }
     if bytes_is(dir, c".incbin") { try parse_incbin_directive(); return }
+    if bytes_is(dir, c".altmacro") || bytes_is(dir, c".noaltmacro") {
+        ac.altmacro = bytes_is(dir, c".altmacro")
+        return
+    }
     if bytes_is(dir, c".if") {
         cond i64 = try eval_const_now(try parse_expr())
         try begin_asm_if(cond != 0)

@@ -359,6 +359,7 @@ struct As {
     macros Vec[MacroDef]
     macro_map StrU32Map
     macro_uid u64
+    altmacro bool
     if_stack Vec[u8]
 
     // CFI / .eh_frame state

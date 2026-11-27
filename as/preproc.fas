@@ -156,6 +156,46 @@ fn macro_unquote(value Bytes) Bytes {
     return value
 }
 
+fn invocation_argument(rest bool) Bytes fails {
+    skip_hspace()
+    if ac.altmacro && !rest && !at_eol() {
+        p addr = ac.src.p
+        start u64 = ac.pos
+        if p[u8, start] == 37 { // %expr: substitute the decimal value
+            ac.pos += 1
+            value i64 = try eval_const_now(try parse_expr())
+            text Buf = {}
+            buf_dec_i64(&text, value)
+            return buf_bytes(&text)
+        }
+        if p[u8, start] == 60 { // <text>: '!' quotes the following character
+            ac.pos += 1
+            while ac.pos < ac.src.n && p[u8, ac.pos] != 10 {
+                ch u8 = p[u8, ac.pos]
+                ac.pos += 1
+                if ch == 62 { return bytes(p + start, ac.pos - start) }
+                if ch == 33 && ac.pos < ac.src.n && p[u8, ac.pos] != 10 { ac.pos += 1 }
+            }
+            try as_err(c"unterminated .altmacro argument")
+        }
+    }
+    return macro_argument(rest, true)
+}
+
+fn invocation_unquote(value Bytes) Bytes {
+    if ac.altmacro && value.n >= 2 && value.p[u8] == 60 && value.p[u8, value.n - 1] == 62 {
+        text Buf = {}
+        i u64 = 1
+        while i < value.n - 1 {
+            if value.p[u8, i] == 33 && i + 1 < value.n - 1 { i += 1 }
+            buf_u8(&text, value.p[u8, i])
+            i += 1
+        }
+        return buf_bytes(&text)
+    }
+    return macro_unquote(value)
+}
+
 fn parse_macro_def() void fails {
     name Bytes = try parse_ident()
     mid u32 = trunc[u32](ac.macros.n)
@@ -267,7 +307,7 @@ fn try_invoke_macro(name Bytes) bool fails {
         } else if keyword { try as_err(c"cannot mix positional and keyword arguments") }
         if index >= m.params.n { try as_err(c"too many macro arguments") }
         mp handle[MacroParam] = vec_at(&m.params, index)
-        args.p[Bytes, index] = macro_argument(mp.vararg, true)
+        args.p[Bytes, index] = try invocation_argument(mp.vararg)
         position += 1
         skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 44 { ac.pos += 1 }
@@ -281,7 +321,7 @@ fn try_invoke_macro(name Bytes) bool fails {
         value Bytes = vec_get(&args, k)
         if value.n == 0 && mp.required { try as_err_b(c"missing required macro argument: ", mp.name) }
         if value.n == 0 && mp.has_default { value = mp.def_val }
-        if !mp.vararg { value = macro_unquote(value) }
+        if !mp.vararg { value = invocation_unquote(value) }
         vec_push(&pvals, value)
     }
 
