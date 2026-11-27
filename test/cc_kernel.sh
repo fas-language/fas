@@ -40,18 +40,18 @@ mkdir -p "$build/tmp"
 export TMPDIR=$build/tmp
 if [[ $mode == fcc ]]; then
     export KERNEL_CLANG_C_LOG=$build/clang-c.tsv
-    touch "$KERNEL_CLANG_C_LOG"
+    : > "$KERNEL_CLANG_C_LOG"
     report_clang_c() {
         local -a sources=()
         mapfile -t sources < <(LC_ALL=C sort -u "$KERNEL_CLANG_C_LOG")
-        printf 'Clang target C fallback in this build tree (%d files)\n' "${#sources[@]}"
+        printf 'Clang target C fallback in this run (%d files)\n' "${#sources[@]}"
         if (( ${#sources[@]} )); then printf '  %s\n' "${sources[@]}"; fi
     }
     trap report_clang_c EXIT
 fi
 sh "$tests/fetch.sh" --projects "${projects[@]}"
 src=$tests/upstream/linux
-# KERNEL_LD=fas links vmlinux.o and the final vmlinux with fas-ld.
+# KERNEL_LD=fas links vmlinux.o and the supported kernel scripts with fas-ld.
 linker=()
 case "${KERNEL_LD:-lld}" in
     lld) ;;
