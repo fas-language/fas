@@ -640,6 +640,9 @@ fn as_layout_and_relax() void fails {
                 sym.defined = true
                 sym.sec_id = AS_NONE
                 sym.value = bitcast[u64](ev.val)
+            } else if ev.kind == EV_REGISTER {
+                // A register alias has no ELF symbol.
+                sym.defined = false
             } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
                 target handle[Symbol] = sym_at(ev.sym_a)
                 sym.defined = target.defined

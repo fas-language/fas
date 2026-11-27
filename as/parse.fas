@@ -73,6 +73,7 @@ fn parse_reg_token() u16 fails {
         try as_err(c"expected '%' before register")
     }
     ac.pos += 1
+    skip_hspace()
     p addr = ac.src.p
     n u64 = ac.src.n
     start u64 = ac.pos
@@ -99,6 +100,28 @@ fn parse_reg_token() u16 fails {
     r u16 = reg_parse(rname)
     if r == 0 { try as_err_b(c"unknown register: %", rname) }
     return r
+}
+
+// An AT&T operand may use a .set alias in place of a percent register.
+fn parse_optional_register() u16 fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n { return 0 }
+    c u8 = ac.src.p[u8, ac.pos]
+    if c == 37 { return try parse_reg_token() }
+    if !is_ident_start(c) { return 0 }
+    start u64 = ac.pos
+    name Bytes = try parse_ident()
+    sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
+    if sid != AS_NONE {
+        sym handle[Symbol] = sym_at(sid)
+        if sym.is_equ {
+            val EvalVal = {}
+            eval_expr(sym.equ_expr, false, &val)
+            if val.kind == EV_REGISTER { return trunc[u16](bitcast[u64](val.val)) }
+        }
+    }
+    ac.pos = start
+    return 0
 }
 
 // Parses optional AVX-512 operand decorators: {%k1..%k7}, {z}, {1toN}.
@@ -157,8 +180,8 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
     }
 
     // Register or segment-prefixed memory operand: %reg or %seg:disp(base,idx,scale)
-    if ac.pos < n && p[u8, ac.pos] == 37 {
-        r u16 = try parse_reg_token()
+    r u16 = try parse_optional_register()
+    if r != 0 {
         skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 58 { // ':' -> segment override
             if reg_class(r) != RC_SEG { try as_err(c"expected segment register before ':'") }
@@ -182,6 +205,12 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         if next < n {
             ch u8 = p[u8, next]
             is_address_tuple = ch == 37 || ch == 44 || ch == 41
+            if !is_address_tuple && is_ident_start(ch) {
+                start u64 = ac.pos
+                ac.pos = next
+                is_address_tuple = (try parse_optional_register()) != 0
+                ac.pos = start
+            }
         }
     }
     if ac.pos < n && !is_address_tuple {
@@ -195,15 +224,13 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         ac.pos += 1
         skip_hspace()
         out.kind = OPK_MEM
-        if ac.pos < n && p[u8, ac.pos] == 37 {
-            out.base = try parse_reg_token()
-            skip_hspace()
-        }
+        out.base = try parse_optional_register()
+        skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 44 { // ','
             ac.pos += 1
             skip_hspace()
-            if ac.pos < n && p[u8, ac.pos] == 37 {
-                out.index = try parse_reg_token()
+            out.index = try parse_optional_register()
+            if out.index != 0 {
                 out.scale = 1
                 skip_hspace()
             }
