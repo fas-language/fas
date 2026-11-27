@@ -234,3 +234,78 @@ let run f =
     end
   end;
   f
+
+(* Inline bounded, straight-line local helpers after scalar promotion. The
+   callee has no private stack objects or control-flow edges to clone. *)
+let inline_helpers stream pinned =
+  let candidates = Hashtbl.create 16 and calls = Hashtbl.create 32 in
+  let take_body (f : func) =
+    let safe = function
+      | Conv _ | Ibin _ | Iun _ | Icmp _ | Ovf _ | Ptradd _ | Load _ | Store _ | Select _ | Freeze _ -> true
+      | Asm { tmpl; _ } -> not (String.contains tmpl '.') && not (String.contains tmpl ':')
+      | _ -> false in
+    let rec collect budget b body =
+      if budget = 0 then None
+      else
+        let br = block f b in
+        let body = Vec.fold (fun is i -> i :: is) body br.insts in
+        match br.term with
+        | Jump t when Array.length t.args = 0 -> collect (budget - 1) t.dest body
+        | Ret vs when List.length body <= 32 && List.for_all (fun i -> safe (inst f i).op) body ->
+            Some (List.rev body, vs)
+        | _ -> None in
+    collect (num_blocks f) entry [] in
+  Fir_stream.iter stream (fun f ->
+    if Fir_stream.can_fold pinned f then begin
+      Fir_stream.function_refs f ~address:(fun _ -> ()) ~call:(fun name _ ->
+        let count = Option.value (Hashtbl.find_opt calls name) ~default:0 in
+        Hashtbl.replace calls name (count + 1));
+      if f.linkage = Local && Hashtbl.mem stream.modul.discardable f.name &&
+         not f.sig_.variadic && not f.sig_.ms_abi && f.patchable = None &&
+         not (has f.fattrs (fa_noinline lor fa_noreturn lor fa_secret lor fa_fenv)) then
+        Option.iter (fun (body, ret) -> Hashtbl.add candidates f.name (f, body, ret))
+          (take_body f)
+    end);
+  if Hashtbl.length candidates <> 0 then
+    Fir_stream.map stream (fun f ->
+      if Fir_stream.can_fold pinned f then begin
+        let changed = ref false in
+        let candidate = function
+          | Call { sig_; callee = Direct name; args; attrs; va_aggs = []; _ }
+              when not (has attrs (a_noreturn lor a_returns_twice)) ->
+              (match Hashtbl.find_opt candidates name with
+               | Some (source, body, ret) when source.sig_ = sig_ && source.code_section = f.code_section &&
+                   (List.length body <= 5 || Hashtbl.find calls name = 1) ->
+                   Some (source, body, ret, args)
+               | _ -> None)
+          | _ -> None in
+        Vec.iter (fun (b : block_rec) ->
+          let original = b.insts in
+          if Vec.fold (fun yes i -> yes || candidate (inst f i).op <> None) false original then begin
+            b.insts <- Vec.create ~capacity:(Vec.length original) 0;
+            Vec.iter (fun i ->
+              let ir = inst f i in
+              match candidate ir.op with
+              | None -> ignore (Vec.push b.insts i)
+              | Some (source, body, ret, args) ->
+                  changed := true;
+                  let translated = Hashtbl.create 16 in
+                  Array.iteri (fun k v -> Hashtbl.add translated v args.(k)) (block source entry).params;
+                  let value v =
+                    let v = resolve source v in
+                    match def_of source v with
+                    | Const c -> const f c (ty_of source v)
+                    | _ -> Hashtbl.find translated v in
+                  List.iter (fun i ->
+                    let old = inst source i in
+                    let op = map_op_uses value old.op in
+                    let new_id = make_inst ~loc:ir.loc f op (Array.map (ty_of source) old.results) in
+                    ignore (Vec.push b.insts new_id);
+                    Array.iteri (fun k v -> Hashtbl.add translated v (inst f new_id).results.(k)) old.results)
+                    body;
+                  Array.iteri (fun k v -> replace_all_uses f v (value ret.(k))) ir.results)
+              original
+          end) f.blocks;
+        if !changed then ignore (run f)
+      end;
+      f)

@@ -278,6 +278,7 @@ type frame = {
   return_at : int option ref;
   mutable accumulator : value option;
   mutable keep_in_accumulator : value option;
+  mutable folded_address : (value * value * int) option;
 }
 
 let bits g v = width (Vec.get g.f.tys v)
@@ -392,7 +393,8 @@ let call g sig_ callee args =
   let param_abis = Array.of_list sig_.param_abis in
   let place r i v =
     get g r v;
-    if i < Array.length param_abis then extend e r param_abis.(i)
+    if i < Array.length param_abis then
+      match param_abis.(i) with Ext (_, Sx) as abi -> extend e r abi | _ -> ()
   in
   let push_word arg high =
     match const_of g.f arg with
@@ -427,12 +429,20 @@ let call g sig_ callee args =
        let through_plt = e.pic && not (e.local name) in
        if through_plt then read e 4 ebx ebp g.got_at;
        op32 e; byte e 0xe8; field32 e name (if through_plt then 4 else 2) (-4L)
-   | Indirect v ->
+   | Indirect v when e.thunk_calls ->
        get g edi v;
-       if e.thunk_calls then begin
-         g.uses_thunk := true;
-         call_near e g.reg_thunk
-       end else begin op32 e; byte e 0xff; modrm e 3 2 edi end);
+       g.uses_thunk := true;
+       call_near e g.reg_thunk
+   | Indirect v ->
+       let slot = offset g v in
+       if slot <> 0 then begin
+         memory_prefix e ebp slot; op32 e; byte e 0xff; memory_operand e 2 ebp slot
+       end else begin
+         let r = match register g v with
+           | Some r -> r
+           | None -> get g edi v; edi in
+         op32 e; byte e 0xff; modrm e 3 2 r
+       end);
   if reserve <> 0 then alu e 0 esp reserve
 
 let wide_compare e k =
@@ -746,23 +756,39 @@ let inline_asm g results ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
       let symbol =
         match r.target with `Section i -> Lazy.force (Hashtbl.find parts i) | `Symbol s -> s in
       e.reloc part (off + r.at) symbol r.kind r.addend) rs) (text :: extra);
-  let assigned = List.combine (Array.to_list results) p.outputs in
-  List.iter (function
-    | (v, A.Reg (reg, _)) -> write e 4 ebp (offset g v) reg
-    | (v, A.Pair) ->
-        write e 4 ebp (offset g v) eax; write e 4 ebp (offset g v + 4) edx
-    | (_, A.Stack _) -> ()
-    | (v, A.Flag cc) ->
-        let cond = X64.cond_num (Mir_isel.cond_of_cc cc) in
-        let at = offset g v in
-        memory_prefix e ebp at; byte e 0x0f; byte e (0x90 + cond); memory_operand e 0 ebp at
-    | _ -> invalid_arg "i386 inline asm output") assigned;
-  List.iter (fun (v, out) ->
-    if bits g v < 32 then begin
-      let bytes = match out with A.Flag _ -> 1 | _ -> 4 in
-      read e bytes eax ebp (offset g v);
-      put g v
-    end) assigned
+  match Array.to_list results, p.outputs with
+  | [v], [A.Reg (reg, _)] ->
+      (match bits g v with
+       | (8 | 16) as n ->
+           op32 e; byte e 0x0f; byte e (if n = 8 then 0xb6 else 0xb7); modrm e 3 eax reg;
+           put ~normalized:true g v
+       | _ -> mov e eax reg; put g v)
+  | [v], [A.Pair] -> put ~normalized:true g v
+  | [v], [A.Flag cc] ->
+      condition e (X64.cond_num (Mir_isel.cond_of_cc cc));
+      put ~normalized:true g v
+  | [v], [A.Stack at] when g.keep_in_accumulator = Some v ->
+      read e 4 eax ebp at; read e 4 edx ebp (at + 4)
+  | results, outputs ->
+      let assigned = List.combine results outputs in
+      (* Capture every output before normalizing it, since EAX or EDX may
+         hold a different result and SETcc still needs the asm flags. *)
+      List.iter (function
+        | (v, A.Reg (reg, _)) -> write e 4 ebp (offset g v) reg
+        | (v, A.Pair) ->
+            write e 4 ebp (offset g v) eax; write e 4 ebp (offset g v + 4) edx
+        | (_, A.Stack _) -> ()
+        | (v, A.Flag cc) ->
+            let cond = X64.cond_num (Mir_isel.cond_of_cc cc) in
+            let at = offset g v in
+            memory_prefix e ebp at; byte e 0x0f; byte e (0x90 + cond); memory_operand e 0 ebp at
+        | _ -> invalid_arg "i386 inline asm output") assigned;
+      List.iter (fun (v, out) ->
+        if bits g v < 32 then begin
+          let bytes = match out with A.Flag _ -> 1 | _ -> 4 in
+          read e bytes eax ebp (offset g v);
+          put g v
+        end) assigned
 
 let scalar_compare g kind x y =
   let e = g.e and n = bits g x in
@@ -797,15 +823,19 @@ let instruction g (ir : inst_rec) =
   in
   let output_bits () = bits g (output ()) in
   let finish ?(normalized = false) () = put ~normalized g (output ()) in
-  let memory ptr =
+  let memory ?(wide_store = false) ptr =
+    let ptr, delta =
+      match g.folded_address with
+      | Some (v, base, displacement) when v = ptr -> base, displacement
+      | _ -> ptr, 0 in
     if g.accumulator = Some (resolve g.f ptr) then begin
       mov e esi eax;
-      (esi, 0)
+      (esi, delta)
     end else
       match address g ptr, register g ptr with
-      | Some off, _ -> (ebp, off)
-      | None, Some r -> (r, 0)
-      | None, None -> get g esi ptr; (esi, 0)
+      | Some off, _ -> (ebp, off + delta)
+      | None, Some r when r <> edx || not wide_store -> (r, delta)
+      | _ -> get g esi ptr; (esi, delta)
   in
   match ir.op with
   | Nop | Dbg_value _ | Lifetime _ -> ()
@@ -840,6 +870,16 @@ let instruction g (ir : inst_rec) =
         scalar_compare g kind x y; condition e (cmp_condition kind)
       end;
       finish ~normalized:true ()
+  | Conv ((Trunc | Zext | Sext | Ptrtoint | Inttoptr | Bitcast) as conv, v)
+      when bits g v <= 32 && output_bits () <= 32 ->
+      let n = bits g v and dst = output_bits () in
+      let result = output () in
+      let r = if g.keep_in_accumulator = Some result then eax
+        else Option.value (register g result) ~default:eax in
+      get g r v;
+      if conv = Sext then sign e r n;
+      if dst < n || conv = Sext then mask e r dst;
+      if r = eax then finish ~normalized:true ()
   | Conv ((Trunc | Zext | Sext | Ptrtoint | Inttoptr | Bitcast) as conv, v) ->
       let n = bits g v and dst = output_bits () in
       pair g v;
@@ -905,7 +945,7 @@ let instruction g (ir : inst_rec) =
            absolute_write e (min 4 size) eax symbol at;
            if size = 8 then absolute_write e 4 edx symbol (Int64.add at 4L)
        | _ ->
-           let base, at = memory ptr in
+           let base, at = memory ~wide_store:(size = 8) ptr in
            pair g v;
            write e (min 4 size) base at eax;
            if size = 8 then write e 4 base (at + 4) edx)
@@ -972,7 +1012,9 @@ let terminator g next = function
   | Ret vs ->
       (match Array.to_list vs, g.f.sig_.result_abis with
        | [], [] -> ()
-       | [v], [abi] -> pair g v; extend g.e eax abi
+       | [v], [abi] ->
+           pair g v;
+           (match abi with Ext (_, Sx) -> extend g.e eax abi | _ -> ())
        | _ -> refuse "multiple return values");
       if next <> num_blocks g.f then jmp g.e g.return_at
   | Unreachable -> byte g.e 0x0f; byte g.e 0x0b
@@ -1148,7 +1190,7 @@ let accumulator_producer g ir =
   Array.length ir.results = 1 && address g ir.results.(0) = None &&
   match ir.op with
   | Ibin _ | Iun _ | Icmp _ | Conv _ | Select _ | Freeze _
-  | Ptradd _ | Alloca _ | Load _ | Call _ | Stack_save | Va_arg _ -> true
+  | Ptradd _ | Alloca _ | Load _ | Call _ | Stack_save | Va_arg _ | Asm _ -> true
   | _ -> false
 
 let reads_accumulator v = function
@@ -1225,7 +1267,7 @@ let body e (f : func) =
   let g =
     { e; f; slots; registers; addresses; local_space; labels; va_offset = 8 + stack;
       got_at; reg_thunk = ref None; uses_thunk = ref false;
-      return_at = ref None; accumulator = None; keep_in_accumulator = None } in
+      return_at = ref None; accumulator = None; keep_in_accumulator = None; folded_address = None } in
   if e.endbr && not (has f.fattrs fa_nocf_check) then begin
     byte e 0xf3; byte e 0x0f; byte e 0x1e; byte e 0xfb
   end;
@@ -1235,6 +1277,7 @@ let body e (f : func) =
   Array.iteri (fun i v ->
     match arguments.(i) with
     | Stack _ -> ()
+    | Register _ when uses.(v) = 0 -> ()
     | Register at ->
         (* Save registers before processing any stack arguments, since
            even narrowing an early scalar can overwrite another input. *)
@@ -1250,6 +1293,7 @@ let body e (f : func) =
   end;
   Array.iteri (fun i v ->
     match arguments.(i) with
+    | _ when uses.(v) = 0 -> ()
     | Register _ when bits g v < 32 -> pair g v; put g v
     | Register _ -> ()
     | Stack _ when bits g v >= 32 -> ()
@@ -1270,8 +1314,25 @@ let body e (f : func) =
       | _ -> None in
     let count = n - (if fused = None then 0 else 1) in
     g.accumulator <- None;
+    g.folded_address <- None;
     for at = 0 to count - 1 do
       let ir = inst f (Vec.get block.insts at) in
+      let fold_address =
+        match ir.op, ir.results with
+        | Ptradd (_, base, index, scale, displacement), [| ptr |]
+            when at + 1 < count && uses.(ptr) = 1 && address g ptr = None &&
+                 g.accumulator <> Some (resolve f base) ->
+            let next = (inst f (Vec.get block.insts (at + 1))).op in
+            let only_address = match next with
+              | Load (_, p) -> p = ptr
+              | Store (_, v, p) -> p = ptr && resolve f v <> ptr
+              | _ -> false in
+            (match bit_constant f index with
+             | Some i when only_address ->
+                 let d = Int64.(add (mul i (of_int scale)) (of_int displacement)) in
+                 Some (ptr, base, Int32.to_int (Int64.to_int32 d))
+             | _ -> None)
+        | _ -> None in
       let next_uses v =
         if at + 1 < n then
           reads_accumulator v (inst f (Vec.get block.insts (at + 1))).op
@@ -1281,7 +1342,8 @@ let body e (f : func) =
       g.keep_in_accumulator <-
         (if accumulator_producer g ir && uses.(ir.results.(0)) = 1 && next_uses ir.results.(0)
          then Some ir.results.(0) else None);
-      instruction g ir;
+      if fold_address = None then instruction g ir else g.keep_in_accumulator <- None;
+      g.folded_address <- fold_address;
       g.accumulator <- g.keep_in_accumulator
     done;
     g.keep_in_accumulator <- None;

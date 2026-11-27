@@ -272,6 +272,7 @@ let main () =
     if !fold_branches then Fir_stream.fold stream;
     let pinned = Fir_stream.pinned_functions stream in
     Fir_stream.map stream (fun f -> if Fir_stream.can_fold pinned f then I386_opt.run f else f);
+    I386_opt.inline_helpers stream pinned;
     Fir_stream.drop_unused stream;
     verify (Fir_stream.verify stream);
     let m = stream.Fir_stream.modul in
