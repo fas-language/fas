@@ -71,8 +71,8 @@ def parse_elf(data, strict=False):
             sym_idx = r_info >> 32
             rtype = r_info & 0xffffffff
             sname, bind, stype, st_shndx, st_val = sym_names.get(sym_idx, ('?', 0, 0, 0, 0))
-            # Normalize defined local symbol reloc to (section_name, st_val + addend)
-            if bind == 0 and stype != 3 and 0 < st_shndx < len(shdrs):
+            # The older corpus allows equivalent local symbol and section targets.
+            if not strict and bind == 0 and stype != 3 and 0 < st_shndx < len(shdrs):
                 sname = get_str(shstr_off, shdrs[st_shndx][0])
                 r_addend += st_val
             lst.append((r_offset, rtype, sname, r_addend))

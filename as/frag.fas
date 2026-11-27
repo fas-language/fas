@@ -609,7 +609,7 @@ fn as_layout_and_relax() void fails {
                 // sym_a - sym_b (or sym_a - dot) where sym_b is defined in this section -> PC-relative relocation!
                 sb_sec u32 = eval_sym_sec(ev.sym_b)
                 if sb_sec == trunc[u32](si) && (ev.sym_a & 0x80000000) == 0 {
-                    rtype u32 = if fx.size == 8 { R_X86_64_PC64 } else { R_X86_64_PC32 }
+                    rtype u32 = resolve_variant_reloc(VAR_NONE, fx.size, FIX_PC)
                     sb_addr i64 = eval_sym_addr(ev.sym_b)
                     addend i64 = ev.val - sb_addr + bitcast[i64](off)
                     add_rela(s, off, ev.sym_a, rtype, addend, false)

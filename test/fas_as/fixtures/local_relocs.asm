@@ -15,3 +15,5 @@ ordinary:
         .data
         .quad .
         .long .Lother - .
+        .word .Lother - .
+        .byte .Lother - .
