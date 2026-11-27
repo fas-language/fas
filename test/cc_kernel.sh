@@ -56,7 +56,7 @@ linker=()
 case "${KERNEL_LD:-lld}" in
     lld) ;;
     fas)
-        linker=(LD="$root/test/cc_kernel/ld.sh")
+        linker=(LD="$root/test/cc_kernel/ld.sh" HOSTLD="$root/test/cc_kernel/ld.sh")
         export KERNEL_LD_LOG=$build/fas-ld.tsv
         : > "$KERNEL_LD_LOG"
         ;;
