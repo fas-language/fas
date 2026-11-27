@@ -1,19 +1,10 @@
 // Lower a direct call's body into the caller using the normal C lowering
 // rules. Parameter slots, return edges and labels are private to this copy.
-use "../lib/core.fas"
-use "../lib/bytes.fas"
-use "../lib/buf.fas"
-use "../lib/table.fas"
-use "../lib/vec.fas"
-use "sema_expr.fas"
-use "gen.fas"
-use "gen_expr.fas"
-use "gen_stmt.fas"
 
 fn gen_direct_callee(n handle[Ast]) handle[Symbol] {
     if n == null { return null }
     while n != null && n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if !bytes_eq_c(op, c"&") && !bytes_eq_c(op, c"*") { return null }
         n = n.a
     }
@@ -42,7 +33,7 @@ fn gen_known_callee(n handle[Ast], callee_ty u32) handle[Symbol] fails {
             from u32 = se_decay(n.a.ty)
             if !ty_is_ptr(from) || !ty_compatible(ty_node(from).elem, callee_ty) { return null }
         } else if n.kind == ND_UNARY {
-            op Bytes = cc_name(gc.p.names, n.op)
+            op Bytes = sym_name(&gc.p.ctx.syms, n.op)
             if !bytes_eq_c(op, c"&") && !bytes_eq_c(op, c"*") { return null }
         } else {
             break
@@ -82,7 +73,7 @@ fn gen_inline_blocker(n handle[Ast], def handle[GenInlineDef], budget handle[U64
             callee handle[Symbol] = gen_direct_callee(n.a)
             if callee != null && gen_is_returns_twice(callee) { return c"body calls a returns_twice function" }
             if n.a != null && n.a.kind == ND_NAME {
-                name Bytes = cc_name(gc.p.names, n.a.op)
+                name Bytes = sym_name(&gc.p.ctx.syms, n.a.op)
                 if bytes_eq_c(name, c"__builtin_setjmp") { return c"body calls a returns_twice function" }
                 if bytes_eq_c(name, c"__builtin_alloca") || bytes_eq_c(name, c"__builtin_alloca_with_align") ||
                    (bytes_eq_c(name, c"alloca") && (callee == null || !callee.defined)) {
@@ -90,7 +81,7 @@ fn gen_inline_blocker(n handle[Ast], def handle[GenInlineDef], budget handle[U64
                     def.uses_alloca = true
                 }
             }
-        } else if n.kind == ND_UNARY && n.extra != null && bytes_eq_c(cc_name(gc.p.names, n.op), c"&&") {
+        } else if n.kind == ND_UNARY && ast_extra(n) != null && bytes_eq_c(sym_name(&gc.p.ctx.syms, n.op), c"&&") {
             return c"body takes the address of a label"
         } else if (n.kind == ND_DECL && n.decl != null && se_variably_modified(n.decl.ty)) ||
                    (n.kind == ND_CAST && se_variably_modified(n.ty)) ||
@@ -99,7 +90,7 @@ fn gen_inline_blocker(n handle[Ast], def handle[GenInlineDef], budget handle[U64
             def.uses_vla = true
         }
         for i u32 in 0..4 {
-            child handle[Ast] = if i == 0 { n.a } else if i == 1 { n.b } else if i == 2 { n.c } else { n.d }
+            child handle[Ast] = if i == 0 { n.a } else if i == 1 { n.b } else if i == 2 { ast_c(n) } else { ast_d(n) }
             why addr = gen_inline_blocker(child, def, budget, optional)
             if why != null { return why }
         }
@@ -118,7 +109,7 @@ fn gen_register_inline(node handle[Ast]) void fails {
     required bool = gen_has_attr(s.attrs, c"always_inline")
     optional bool = gc.optimize_inline && (s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL
     if !required && !optional { return }
-    def handle[GenInlineDef] = pa_alloc[GenInlineDef]()
+    def handle[GenInlineDef] = pa_tu_alloc[GenInlineDef](gc.p)
     def.node = node
     signature handle[TypeNode] = ty_node(ty_unqual(node.ty))
     if gen_has_attr(s.attrs, c"noinline") { def.refuse = c"function is marked noinline" }
@@ -187,7 +178,7 @@ fn gen_required_reaches_active(n handle[Ast], seen handle[Vec[u32]]) bool {
             }
         }
         if gen_required_reaches_active(n.a, seen) || gen_required_reaches_active(n.b, seen) ||
-           gen_required_reaches_active(n.c, seen) || gen_required_reaches_active(n.d, seen) { return true }
+           gen_required_reaches_active(ast_c(n), seen) || gen_required_reaches_active(ast_d(n), seen) { return true }
         n = n.next
     }
     return false
@@ -239,15 +230,15 @@ fn gen_note_inline_constant(s handle[Symbol], body handle[Ast], nid u32) void {
     if stmt != null {
         // A constant guard may return before the ordinary fallback.
         while stmt.kind == ND_STMT && stmt.op != 0 &&
-              bytes_eq_c(cc_name(gc.p.names, stmt.op), c"if") && stmt.a != null &&
+              bytes_eq_c(sym_name(&gc.p.ctx.syms, stmt.op), c"if") && stmt.a != null &&
               ty_is_integer(stmt.a.ty) && (stmt.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
             if se_truth(stmt.a) { stmt = stmt.b; break }
-            if stmt.c != null { return }
+            if ast_c(stmt) != null { return }
             stmt = stmt.next
             if stmt == null { return }
         }
         if stmt == null || stmt.kind != ND_STMT || stmt.op == 0 ||
-            !bytes_eq_c(cc_name(gc.p.names, stmt.op), c"return") { return }
+            !bytes_eq_c(sym_name(&gc.p.ctx.syms, stmt.op), c"return") { return }
         if stmt.a != null { expr = stmt.a }
     }
     if !ty_is_void(ty) {
@@ -291,10 +282,10 @@ fn gen_inline_param_fixed(n handle[Ast], param handle[Symbol]) bool {
        (n.kind == ND_CAST && se_variably_modified(n.ty)) ||
        (n.kind == ND_SIZE && (n.flags & NF_ICE) == 0) { return false }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if (bytes_eq_c(op, c"&") || bytes_eq_c(op, c"++") || bytes_eq_c(op, c"--")) &&
            gen_inline_param_lvalue(n.a, param) { return false }
-    } else if n.kind == ND_BINARY && se_assign_word(gc.p, cc_token(TK_PUNCT, 0, n.loc, n.op)) {
+    } else if n.kind == ND_BINARY && se_is_assign(n.op_kind) {
         if gen_inline_param_lvalue(n.a, param) { return false }
     } else if n.kind == ND_ASM && ty_is_void(n.ty) {
         out handle[Ast] = n.b
@@ -302,7 +293,7 @@ fn gen_inline_param_fixed(n handle[Ast], param handle[Symbol]) bool {
             if gen_inline_param_lvalue(out.b, param) { return false }
             out = out.next
         }
-        inp handle[Ast] = n.c
+        inp handle[Ast] = ast_c(n)
         while inp != null {
             if gen_inline_param_lvalue(inp.b, param) {
                 constraint Buf = {}
@@ -314,16 +305,16 @@ fn gen_inline_param_fixed(n handle[Ast], param handle[Symbol]) bool {
             inp = inp.next
         }
     } else if n.kind == ND_CALL && gen_inline_param_lvalue(n.b, param) {
-        if n.a == null && bytes_eq_c(cc_name(gc.p.names, n.op), c"__builtin_va_arg") { return false }
+        if n.a == null && bytes_eq_c(sym_name(&gc.p.ctx.syms, n.op), c"__builtin_va_arg") { return false }
         if n.a != null && n.a.kind == ND_NAME && n.a.decl == null {
-            name Bytes = cc_name(gc.p.names, n.a.op)
+            name Bytes = sym_name(&gc.p.ctx.syms, n.a.op)
             if bytes_eq_c(name, c"__builtin_ms_va_copy") || bytes_eq_c(name, c"__builtin_ms_va_start") {
                 return false
             }
         }
     }
     return gen_inline_param_fixed(n.a, param) && gen_inline_param_fixed(n.b, param) &&
-           gen_inline_param_fixed(n.c, param) && gen_inline_param_fixed(n.d, param) &&
+           gen_inline_param_fixed(ast_c(n), param) && gen_inline_param_fixed(ast_d(n), param) &&
            gen_inline_param_fixed(n.next, param)
 }
 
@@ -348,7 +339,7 @@ fn gen_asm_block_locals(body handle[Ast]) void fails {
                     checked_labels = true
                 }
                 key U64Key = {addr_bits(handle_addr(s))}
-                converted handle[Ast] = se_convert(s.ty, value)
+                converted handle[Ast] = se_convert(gc.p, s.ty, value)
                 if gc.inline_frame != null {
                     _ bool = table_put(&gc.inline_frame.constants, &key, handle_addr(converted))
                 } else {
@@ -378,7 +369,7 @@ fn gen_inline_fold(n handle[Ast], at_entry bool) handle[Ast] fails {
     if n.kind == ND_COND {
         cond handle[Ast] = try gen_inline_fold(n.a, at_entry)
         if (cond.flags & NF_INT_VALUE) == 0 || (cond.flags & NF_OVERFLOW) != 0 { return n }
-        return se_convert(n.ty, try gen_inline_fold(if se_truth(cond) { n.b } else { n.c }, at_entry))
+        return se_convert(gc.p, n.ty, try gen_inline_fold(if se_truth(cond) { n.b } else { ast_c(n) }, at_entry))
     }
     if n.kind == ND_GENERIC { return try gen_inline_fold(n.b, at_entry) }
     if n.kind != ND_CAST && n.kind != ND_UNARY && n.kind != ND_BINARY &&
@@ -386,23 +377,23 @@ fn gen_inline_fold(n handle[Ast], at_entry bool) handle[Ast] fails {
     a handle[Ast] = try gen_inline_fold(n.a, at_entry)
     b handle[Ast] = try gen_inline_fold(n.b, at_entry)
     if a == n.a && b == n.b { return n }
-    op Token = cc_token(TK_PUNCT, 0, n.loc, n.op)
+    op Token = tok_make(n.op_kind, 0, 0, n.loc, 0)
     if n.kind == ND_UNARY {
-        if pa_is(gc.p, op, c"++") || pa_is(gc.p, op, c"--") { return n }
+        if op.kind == TK_INC || op.kind == TK_DEC { return n }
         return try se_unary(gc.p, op, a, false)
     }
     if n.kind == ND_BINARY {
-        if se_assign_word(gc.p, op) { return n }
+        if se_is_assign(op.kind) { return n }
         return try se_binary(gc.p, op, a, b)
     }
 
-    rewritten handle[Ast] = pa_alloc[Ast]()
+    rewritten handle[Ast] = pa_tu_alloc[Ast](gc.p)
     copy_into(rewritten, n)
     rewritten.a = a
     rewritten.b = b
     if n.kind == ND_CAST {
         rewritten.flags &= NF_IMPLICIT
-        se_cast_constant(rewritten, a)
+        se_cast_constant(gc.p, rewritten, a)
     } else {
         address bool = if n.kind == ND_SUBSCRIPT { (a.flags & b.flags & NF_STATIC) != 0 }
                        else if ty_is_ptr(a.ty) { (a.flags & NF_STATIC) != 0 }
@@ -479,11 +470,11 @@ fn gen_inline_body(def handle[GenInlineDef], args handle[Vec[GenInlineArg]]) u32
         if folded != null && unqualified {
             if ty_is_integer(ps.ty) && ty_int_bits(ps.ty) <= 64 &&
                ty_is_integer(folded.ty) && (folded.flags & NF_INT_VALUE) != 0 && (folded.flags & NF_OVERFLOW) == 0 {
-                constant = pa_node(ND_INT, folded.loc, ps.ty)
-                constant.value = se_convert(ps.ty, folded).value
+                constant = pa_node(gc.p, ND_INT, folded.loc, ps.ty)
+                constant.value = se_convert(gc.p, ps.ty, folded).value
                 constant.flags = NF_ICE | NF_STATIC
             } else if pointer && (folded.flags & NF_STATIC) != 0 {
-                constant = se_convert(ps.ty, folded)
+                constant = se_convert(gc.p, ps.ty, folded)
             }
         }
         fixed bool = unqualified && (pointer || constant != null) && gen_inline_param_fixed(node.a, ps)

@@ -1,5 +1,5 @@
-// The initializer tree keeps an explicit node for each brace level and
-// each designator path. The destination type is completed from its extent.
+// cc2/sema_init.fas: Initializer parsing, designators, constexpr validation, and constant folding.
+
 struct InitResult {
     ty u32
     tree handle[Ast]
@@ -21,16 +21,14 @@ fn se_aggregate_literal_init(p handle[Parser], ty u32, e handle[Ast], constant b
 struct LabelDelta { lhs handle[Label], rhs handle[Label] }
 
 fn se_static_label(p handle[Parser], n handle[Ast]) handle[Label] {
-    // Casting the address to a pointer-width integer preserves its bits.
     if n.kind == ND_CAST && ty_is_integer(n.ty) && ty_int_bits(n.ty) == 64 { n = n.a }
     while n.kind == ND_CAST && ty_is_ptr(n.ty) { n = n.a }
-    if n.kind != ND_UNARY || !bytes_eq_c(cc_name(p.names, n.op), c"&&") { return null }
-    return handle_from_addr(n.extra)
+    if n.kind != ND_UNARY || n.op_kind != TK_LAND { return null }
+    return handle_from_addr(ast_extra(n))
 }
 
 fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool {
-    if n.kind != ND_BINARY || !bytes_eq_c(cc_name(p.names, n.op), c"-") { return false }
-    // Pointer subtraction here is a byte delta, including GNU void *.
+    if n.kind != ND_BINARY || n.op_kind != TK_MINUS { return false }
     if ty_is_ptr(n.a.ty) && ty_size(ty_node(ty_unqual(n.a.ty)).elem) > 1 { return false }
     out.lhs = se_static_label(p, n.a)
     out.rhs = se_static_label(p, n.b)
@@ -39,8 +37,6 @@ fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool 
 
 fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
     if constant && ty_is_record(e.ty) {
-        // A constexpr record carries its initializer, so copying the
-        // record into another static object is also a constant initializer.
         folded handle[Ast] = se_const_lvalue(p, e, null, false)
         if folded != null { e = folded }
     }
@@ -53,8 +49,6 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
             try pa_init_warning(p, e.loc, c"string literal is too long for initialized array")
         }
     } else if se_aggregate_literal_init(p, ty, e, constant) {
-        // GNU static aggregate initialization uses the literal's brace list
-        // directly, without forming a pointer to the unnamed object.
         if ty_is_array(ty) {
             dst handle[TypeNode] = ty_node(ty_unqual(ty))
             src handle[TypeNode] = ty_node(ty_unqual(e.ty))
@@ -67,7 +61,7 @@ fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, o
     } else {
         if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
         try se_conversion(p, ty, e)
-        out.tree = se_convert(ty, e)
+        out.tree = se_convert(p, ty, e)
     }
     if constant && (e.flags & NF_OVERFLOW) != 0 {
         try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
@@ -106,13 +100,8 @@ fn se_init_elem(ty u32, index u64) u32 {
     return ty
 }
 
-// A named constant can be reached through any number of ordinary member and
-// array accesses. Walk the initializer in source order so a later designator
-// overrides the corresponding part of an earlier initializer.
 struct ConstPath { index u64, rest handle[ConstPath] }
 
-// Keep string token spellings in the AST. Decode only when folding a
-// read or comparison of narrow string contents.
 struct StringBytes {
     piece handle[Ast]
     text Bytes
@@ -129,7 +118,7 @@ fn se_next_string_byte(p handle[Parser], s handle[StringBytes]) u8 fails {
     }
     while s.piece != null {
         if s.pos == 0 {
-            s.text = cc_name(p.names, s.piece.op)
+            s.text = sym_name(&p.ctx.syms, s.piece.op)
             s.pos = if s.text.p[u8] == 34 { 1 } else { 3 }
         }
         if s.pos + 1 >= s.text.n {
@@ -141,7 +130,7 @@ fn se_next_string_byte(p handle[Parser], s handle[StringBytes]) u8 fails {
         s.pos += 1
         if ch != 92 { return ch }
         kind u8 = s.text.p[u8, s.pos]
-        e Escape = try expr_escape(p.names, bytes_from(s.text, s.pos), s.piece.loc)
+        e Escape = try expr_escape(p.ctx, bytes_from(s.text, s.pos), s.piece.loc)
         s.pos += e.width
         if kind == 117 || kind == 85 || kind == 78 {
             s.encoded.n = 0
@@ -151,18 +140,15 @@ fn se_next_string_byte(p handle[Parser], s handle[StringBytes]) u8 fails {
         }
         return trunc[u8](e.cp)
     }
-    // The terminator and the remaining elements of a wider destination
-    // array are zero-initialized.
     return 0
 }
 
 fn se_string_byte(p handle[Parser], n handle[Ast], index u64, elem u32) handle[Ast] {
     if ty_size(elem) != 1 { return null }
-    if index >= n.value - 1 { return se_int(n.loc, elem, 0) }
+    if index >= n.value - 1 { return se_int(p, n.loc, elem, 0) }
     if n.a == null {
-        // Predefined function names use an unquoted spelling.
-        s Bytes = cc_name(p.names, n.op)
-        return se_int(n.loc, elem, zext[u64](s.p[u8, index]))
+        s Bytes = sym_name(&p.ctx.syms, n.op)
+        return se_int(p, n.loc, elem, zext[u64](s.p[u8, index]))
     }
     cursor StringBytes = {}
     cursor.piece = n.a
@@ -171,7 +157,7 @@ fn se_string_byte(p handle[Parser], n handle[Ast], index u64, elem u32) handle[A
         se_next_string_byte(p, &cursor) catch { return null }
     }
     byte u8 = se_next_string_byte(p, &cursor) catch { return null }
-    return se_int(n.loc, elem, zext[u64](byte))
+    return se_int(p, n.loc, elem, zext[u64](byte))
 }
 
 fn se_builtin_strcmp(p handle[Parser], loc u32, a handle[Ast], b handle[Ast]) handle[Ast] fails {
@@ -185,8 +171,8 @@ fn se_builtin_strcmp(p handle[Parser], loc u32, a handle[Ast], b handle[Ast]) ha
     while true {
         m u8 = try se_next_string_byte(p, &x)
         n u8 = try se_next_string_byte(p, &y)
-        if m != n { return se_int(loc, TY_INT, if m < n { ~0 } else { 1 }) }
-        if m == 0 { return se_int(loc, TY_INT, 0) }
+        if m != n { return se_int(p, loc, TY_INT, if m < n { ~0 } else { 1 }) }
+        if m == 0 { return se_int(p, loc, TY_INT, 0) }
     }
 }
 
@@ -197,9 +183,9 @@ fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstP
 fn se_const_value_after(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath], previous handle[Ast]) handle[Ast] {
     if path == null {
         if init != null { return init }
-        if ty_is_integer(ty) { return se_int(0, ty, 0) }
+        if ty_is_integer(ty) { return se_int(p, 0, ty, 0) }
         if ty_is_real_float(ty) || ty_is_complex(ty) {
-            n handle[Ast] = pa_node(ND_FLOAT, 0, ty)
+            n handle[Ast] = pa_node(p, ND_FLOAT, 0, ty)
             se_set_fp(n, 0.0)
             return n
         }
@@ -269,7 +255,7 @@ fn se_const_lvalue(p handle[Parser], n handle[Ast], path handle[ConstPath], gnu 
     } else if n.kind == ND_SUBSCRIPT {
         base handle[Ast] = n.a
         subscript handle[Ast] = n.b
-        if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || subscript.wide != null { return null }
+        if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || ast_wide(subscript) != null { return null }
         index ConstPath = {subscript.value, path}
         return se_const_lvalue(p, base, &index, gnu)
     }
@@ -279,15 +265,13 @@ fn se_const_lvalue(p handle[Parser], n handle[Ast], path handle[ConstPath], gnu 
 fn se_const_load(p handle[Parser], n handle[Ast]) void {
     if !ty_is_scalar(n.ty) { return }
     value handle[Ast] = se_const_lvalue(p, n, null, false)
-    if value != null { se_cast_constant(n, value); return }
-    // A GNU constant load may inspect an initialized const object. Keep it
-    // distinct from a constexpr load so strict contexts retain ICE checks.
+    if value != null { se_cast_constant(p, n, value); return }
     base handle[Ast] = n.a
     literal bool = n.kind == ND_SUBSCRIPT && base.kind == ND_STRING
     if !pa_is_gnu(p) || (!literal && (ty_quals(n.ty) & (Q_CONST | Q_VOLATILE | Q_ATOMIC)) != Q_CONST) { return }
     value = se_const_lvalue(p, n, null, true)
     if value != null && (value.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
-        se_cast_constant(n, value)
+        se_cast_constant(p, n, value)
         if (n.flags & NF_ICE) != 0 { n.flags = (n.flags & ~NF_ICE) | NF_FOLD }
     }
 }
@@ -317,8 +301,7 @@ fn se_constexpr_float_fits(p handle[Parser], ty u32, source handle[Ast]) bool {
     if source.kind == ND_CALL {
         callee handle[Ast] = source.a
         if callee.kind == ND_NAME && callee.decl == null {
-            name Bytes = cc_name(p.names, callee.op)
-            // A conversion quiets a signaling NaN when its format changes.
+            name Bytes = sym_name(&p.ctx.syms, callee.op)
             if bytes_starts_with(name, bytes_c(c"__builtin_nans")) { return false }
             if bytes_eq_c(name, c"__builtin_complex") {
                 first handle[Ast] = source.b
@@ -328,7 +311,6 @@ fn se_constexpr_float_fits(p handle[Parser], ty u32, source handle[Ast]) bool {
     }
     bits FloatBits = {}
     if !ty_is_complex(source.ty) {
-        // Some wider arithmetic still has no exact folded representation.
         return !flt_quad_const(source, &bits) || flt_quad_fits(f, bits)
     }
     if real == TY_LDOUBLE || real == TY_FLOAT128 { return true }
@@ -337,7 +319,7 @@ fn se_constexpr_float_fits(p handle[Parser], ty u32, source handle[Ast]) bool {
     part.flags = NF_FLOAT_CONST
     part.value = source.value
     if flt_quad_const(&part, &bits) && !flt_quad_fits(f, bits) { return false }
-    part.value = source.imag
+    part.value = ast_imag(source)
     return !flt_quad_const(&part, &bits) || flt_quad_fits(f, bits)
 }
 
@@ -360,8 +342,6 @@ fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
         to u32 = ty_node(ty_unqual(dest)).elem
         from u32 = ty_node(ty_unqual(e.ty)).elem
         if ty_is_unsigned(to) != ty_is_unsigned(from) {
-            // The ordinary string-initialization rules allow different
-            // character types. constexpr still requires every value to fit.
             cursor StringBytes = {}
             cursor.piece = e.a
             defer { buf_free(&cursor.encoded) }
@@ -390,7 +370,12 @@ fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
         a u32 = ty_int_bits(source.ty)
         b u32 = ty_int_bits(e.ty)
         width u32 = (if a > b { a } else { b }) + 1
-        if wi_cmp(wi_from_ast(source, width), wi_from_ast(e, width)) != 0 {
+        wa WideInt = wi_from_ast(source, width)
+        wb WideInt = wi_from_ast(e, width)
+        diff bool = wi_cmp(wa, wb) != 0
+        heap_free(wa.p)
+        heap_free(wb.p)
+        if diff {
             try pa_error(p, source.loc, c"constexpr initializer is not exactly representable")
         }
     }
@@ -423,18 +408,19 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
     colon bool = false
     plain_subscript bool = false
     while true {
-        t Token = try pa_peek(p)
+        t Token = p.cur
         idx u64 = 0
-        next_ty u32
+        next_ty u32 = TY_INVALID
         a handle[Ast] = null
         b handle[Ast] = null
-        if try pa_accept(p, c"[") {
+        op_sym u32 = 0
+        if try pa_accept_k(p, TK_LBRACK) {
             plain_subscript = list.first == null
             if !ty_is_array(ty) { try pa_error(p, t.loc, c"array designator on a non-array initializer") }
             next_ty = ty_node(ty_unqual(ty)).elem
             a = try pa_expression(p, 3)
             idx = try se_ice(p, a)
-            if try pa_accept(p, c"...") {
+            if try pa_accept_k(p, TK_ELLIPSIS) {
                 try pa_gnu(p, t)
                 b = try pa_expression(p, 3)
                 hi u64 = try se_ice(p, b)
@@ -442,13 +428,14 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
                 idx = hi
             }
             if idx >= se_init_count(ty) { try pa_error(p, t.loc, c"array designator index out of bounds") }
-            try pa_expect(p, c"]")
-        } else if (try pa_at(p, c".")) || (pa_is_gnu(p) && t.kind == TK_IDENT && (try pa_at_second(p, c":"))) {
+            try pa_expect_k(p, TK_RBRACK)
+            op_sym = p.punct_syms[zext[usize](TK_LBRACK)]
+        } else if t.kind == TK_DOT || (pa_is_gnu(p) && t.kind == TK_IDENT && (try pa_at2_k(p, TK_COLON))) {
             plain_subscript = false
-            old bool = !pa_is(p, t, c".")
-            if !old { try pa_take(p) }
+            old bool = t.kind != TK_DOT
+            if !old { try pa_bump(p) }
             name u32 = try pa_ident(p, try pa_take(p))
-            if old { try pa_expect(p, c":"); colon = true }
+            if old { try pa_expect_k(p, TK_COLON); colon = true }
             field FieldLookup = {}
             if !ty_is_record(ty) || !se_complete(ty) || !ty_offsetof(ty, name, &field) { try pa_error(p, t.loc, c"unknown member in initializer designator") }
             next_ty = field.ty
@@ -456,15 +443,13 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
             start u32 = record.fields_start
             idx = zext[u64](field.field_idx - start)
             while idx >= zext[u64](record.fields_len) {
-                // Keep injected anonymous members as explicit path levels
-                // so the following initializer can advance within them.
                 idx = 0
                 for i u32 in 0..record.fields_len {
                     f handle[FieldDef] = ty_field(start + i)
                     sub FieldLookup = {}
                     if !f.is_anon || !ty_offsetof(f.ty, name, &sub) { continue }
                     if list.first == null { d.index = zext[u64](i) }
-                    anon handle[Ast] = pa_node(ND_DESIGNATOR, t.loc, f.ty)
+                    anon handle[Ast] = pa_node(p, ND_DESIGNATOR, t.loc, f.ty)
                     anon.value = zext[u64](i)
                     pa_append(&list, anon)
                     record = ty_record(ty_node(ty_unqual(f.ty)).aux1)
@@ -473,11 +458,11 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
                     break
                 }
             }
-            t.payload = name
+            op_sym = name
         } else { break }
         if list.first == null { d.index = idx }
-        item handle[Ast] = pa_node(ND_DESIGNATOR, t.loc, next_ty)
-        item.op = t.payload
+        item handle[Ast] = pa_node(p, ND_DESIGNATOR, t.loc, next_ty)
+        item.op = op_sym
         item.value = idx
         item.a = a
         item.b = b
@@ -487,18 +472,15 @@ fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
     }
     d.ty = ty
     d.first = list.first
-    if d.first != null && !colon && !(pa_is_gnu(p) && plain_subscript) { try pa_expect(p, c"=") }
-    else if plain_subscript { try pa_accept(p, c"=") }
+    if d.first != null && !colon && !(pa_is_gnu(p) && plain_subscript) { try pa_expect_k(p, TK_ASSIGN) }
+    else if plain_subscript { try pa_accept_k(p, TK_ASSIGN) }
 }
 
-// Continue inside the final subobject denoted by a nested designation.
-// A range ends at its upper index at each level. Once an inner aggregate
-// is exhausted, climb back to the enclosing struct or array.
-fn pa_next_designator(ty u32, current handle[Ast], outermost bool) handle[Ast] {
+fn pa_next_designator(p handle[Parser], ty u32, current handle[Ast], outermost bool) handle[Ast] {
     if current.next != null {
-        child handle[Ast] = pa_next_designator(current.ty, current.next, false)
+        child handle[Ast] = pa_next_designator(p, current.ty, current.next, false)
         if child != null {
-            next handle[Ast] = pa_node(ND_DESIGNATOR, current.loc, current.ty)
+            next handle[Ast] = pa_node(p, ND_DESIGNATOR, current.loc, current.ty)
             next.op = current.op
             next.value = current.value
             next.next = child
@@ -508,19 +490,19 @@ fn pa_next_designator(ty u32, current handle[Ast], outermost bool) handle[Ast] {
     if outermost { return null }
     index u64 = se_init_next(ty, current.value + 1)
     if index >= se_init_count(ty) { return null }
-    next handle[Ast] = pa_node(ND_DESIGNATOR, current.loc, se_init_elem(ty, index))
+    next handle[Ast] = pa_node(p, ND_DESIGNATOR, current.loc, se_init_elem(ty, index))
     next.value = index
     return next
 }
 
 fn pa_list_more(p handle[Parser]) bool fails {
-    if !(try pa_at(p, c",")) { return false }
-    t Token = try pa_peek_at(p, 1)
-    return !pa_is(p, t, c"}") && !pa_is(p, t, c".") && !pa_is(p, t, c"[")
+    if p.cur.kind != TK_COMMA { return false }
+    t Token = try pa_peek2(p)
+    return t.kind != TK_RBRACE && t.kind != TK_DOT && t.kind != TK_LBRACK
 }
 
 fn pa_init_element(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
-    if try pa_at(p, c"{") { try pa_initializer(p, ty, constant, out); return }
+    if p.cur.kind == TK_LBRACE { try pa_initializer(p, ty, constant, out); return }
     e handle[Ast] = try pa_expression(p, 2)
     try pa_init_elided(p, ty, constant, e, out)
 }
@@ -538,12 +520,12 @@ fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out ha
     elem InitResult = {}
     try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
     xs AstList = {}
-    pa_add_init(&xs, elem.tree, null, idx)
+    pa_add_init(p, &xs, elem.tree, null, idx)
     idx = se_init_next(ty, idx + 1)
     while idx < count && (try pa_list_more(p)) {
-        try pa_take(p)
+        try pa_bump(p)
         try pa_init_element(p, se_init_elem(ty, idx), constant, &elem)
-        pa_add_init(&xs, elem.tree, null, idx)
+        pa_add_init(p, &xs, elem.tree, null, idx)
         idx = se_init_next(ty, idx + 1)
     }
     out.ty = ty
@@ -551,7 +533,7 @@ fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out ha
         array handle[TypeNode] = ty_node(ty_unqual(ty))
         if array.aux1 == ARR_INCOMPLETE { out.ty = ty_array(array.elem, idx) }
     }
-    tree handle[Ast] = pa_node(ND_INIT, e.loc, out.ty)
+    tree handle[Ast] = pa_node(p, ND_INIT, e.loc, out.ty)
     out.tree = tree
     tree.a = xs.first
     tree.flags |= NF_PARTIAL_INIT
@@ -567,8 +549,8 @@ fn se_static_init_items(item handle[Ast]) bool {
     return true
 }
 
-fn pa_add_init(xs handle[AstList], e handle[Ast], designators handle[Ast], idx u64) void {
-    item handle[Ast] = pa_node(ND_INIT, e.loc, e.ty)
+fn pa_add_init(p handle[Parser], xs handle[AstList], e handle[Ast], designators handle[Ast], idx u64) void {
+    item handle[Ast] = pa_node(p, ND_INIT, e.loc, e.ty)
     item.a = e
     item.b = designators
     item.value = idx
@@ -577,39 +559,34 @@ fn pa_add_init(xs handle[AstList], e handle[Ast], designators handle[Ast], idx u
 
 fn pa_init_warning(p handle[Parser], loc u32, msg addr) void fails {
     if !pa_is_gnu(p) { try pa_error(p, loc, msg) }
-    cc_diag(p.names, loc, c"warning: ", bytes_c(msg))
+    cc_diag(p.ctx, loc, c"warning: ", bytes_c(msg))
 }
 
-// GNU mode diagnoses excess elements and leaves them out of the typed
-// initializer. With no destination subobject there is no type to apply.
 fn pa_discard_init(p handle[Parser]) void fails {
-    if !(try pa_accept(p, c"{")) { try pa_expression(p, 2); return }
-    while !(try pa_at(p, c"}")) {
+    if !(try pa_accept_k(p, TK_LBRACE)) { try pa_expression(p, 2); return }
+    while p.cur.kind != TK_RBRACE {
         designated bool = false
         while true {
-            if try pa_accept(p, c".") {
+            if try pa_accept_k(p, TK_DOT) {
                 try pa_ident(p, try pa_take(p))
-            } else if try pa_accept(p, c"[") {
+            } else if try pa_accept_k(p, TK_LBRACK) {
                 try se_require_ice(p, try pa_expression(p, 3))
-                if try pa_accept(p, c"...") { try se_require_ice(p, try pa_expression(p, 3)) }
-                try pa_expect(p, c"]")
+                if try pa_accept_k(p, TK_ELLIPSIS) { try se_require_ice(p, try pa_expression(p, 3)) }
+                try pa_expect_k(p, TK_RBRACK)
             } else { break }
             designated = true
         }
-        if designated { try pa_accept(p, c"=") }
-        else if (try pa_peek(p)).kind == TK_IDENT && (try pa_at_second(p, c":")) {
+        if designated { try pa_accept_k(p, TK_ASSIGN) }
+        else if p.cur.kind == TK_IDENT && (try pa_at2_k(p, TK_COLON)) {
             try pa_ident(p, try pa_take(p))
-            try pa_take(p)
+            try pa_bump(p)
         }
         try pa_discard_init(p)
-        if !(try pa_accept(p, c",")) { break }
+        if !(try pa_accept_k(p, TK_COMMA)) { break }
     }
-    try pa_expect(p, c"}")
+    try pa_expect_k(p, TK_RBRACE)
 }
 
-// An exact, complete array-element write replaces any earlier complete
-// write to the same element. Still parse and type-check every initializer;
-// only the surviving expressions need to be evaluated at run time.
 fn se_single_array_init(item handle[Ast]) bool {
     d handle[Ast] = item.b
     return (d == null || (d.b == null && d.next == null)) &&
@@ -638,18 +615,18 @@ fn se_prune_array_init(xs handle[AstList]) void {
 }
 
 fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
-    t Token = try pa_peek(p)
+    t Token = p.cur
     p.init_depth += 1
     defer { p.init_depth -= 1 }
-    if se_vla(ty) && (!(try pa_at(p, c"{")) || !(try pa_at_second(p, c"}"))) {
+    if se_vla(ty) && (p.cur.kind != TK_LBRACE || !(try pa_at2_k(p, TK_RBRACE))) {
         try pa_error(p, t.loc, c"a variable length array can only have an empty initializer")
     }
-    if !(try pa_accept(p, c"{")) {
+    if !(try pa_accept_k(p, TK_LBRACE)) {
         try se_initializer_expr(p, ty, try pa_expression(p, 2), constant, out)
         return
     }
     if ty == TY_INVALID { try pa_error(p, t.loc, c"auto cannot infer a type from a brace initializer") }
-    n handle[Ast] = pa_node(ND_INIT, t.loc, ty)
+    n handle[Ast] = pa_node(p, ND_INIT, t.loc, ty)
     out.tree = n
     out.ty = ty
     base handle[TypeNode] = ty_node(ty_unqual(ty))
@@ -661,7 +638,7 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
     xs AstList = {}
     continuation handle[Ast] = null
     designated bool = false
-    while !(try pa_at(p, c"}")) {
+    while p.cur.kind != TK_RBRACE {
         d Designation = {}
         try pa_designators(p, ty, &d)
         designated = designated || d.first != null
@@ -674,18 +651,18 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         }
         if d.first != null { idx = d.index }
         elem InitResult = {}
-        tok Token = try pa_peek(p)
-        if ty_is_array(ty) && idx == 0 && d.first == null && !pa_is(p, tok, c"{") {
+        tok Token = p.cur
+        if ty_is_array(ty) && idx == 0 && d.first == null && tok.kind != TK_LBRACE {
             e handle[Ast] = try pa_expression(p, 2)
             if e.kind == ND_STRING && se_char_array(ty, e.ty) {
                 try se_initializer_expr(p, ty, e, constant, out)
-                try pa_accept(p, c",")
-                try pa_expect(p, c"}")
+                try pa_accept_k(p, TK_COMMA)
+                try pa_expect_k(p, TK_RBRACE)
                 return
             }
             if idx >= count {
                 try pa_init_warning(p, tok.loc, c"excess elements in initializer")
-                if !(try pa_accept(p, c",")) { break }
+                if !(try pa_accept_k(p, TK_COMMA)) { break }
                 continue
             }
             try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
@@ -693,7 +670,7 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
             if idx >= count {
                 try pa_init_warning(p, tok.loc, c"excess elements in initializer")
                 try pa_discard_init(p)
-                if !(try pa_accept(p, c",")) { break }
+                if !(try pa_accept_k(p, TK_COMMA)) { break }
                 continue
             }
             dest u32 = if d.first == null { se_init_elem(ty, idx) } else { d.ty }
@@ -703,14 +680,14 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
             }
             try pa_init_element(p, dest, constant, &elem)
         }
-        pa_add_init(&xs, elem.tree, d.first, idx)
+        pa_add_init(p, &xs, elem.tree, d.first, idx)
         continuation = null
-        if d.first != null { continuation = pa_next_designator(ty, d.first, true) }
+        if d.first != null { continuation = pa_next_designator(p, ty, d.first, true) }
         if idx + 1 > max { max = idx + 1 }
         idx = se_init_next(ty, idx + 1)
-        if !(try pa_accept(p, c",")) { break }
+        if !(try pa_accept_k(p, TK_COMMA)) { break }
     }
-    try pa_expect(p, c"}")
+    try pa_expect_k(p, TK_RBRACE)
     if incomplete {
         if max == 0 && !pa_is_gnu(p) { try pa_error(p, t.loc, c"empty initializer cannot complete an unsized array") }
         out.ty = ty_array(elem_ty, max)
@@ -726,7 +703,7 @@ fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult
         e handle[Ast] = item.a
         n.flags |= e.flags & (NF_ICE | NF_FLOAT_CONST)
         n.value = e.value
-        n.wide = e.wide
-        n.imag = e.imag
+        if ast_wide(e) != null { ast_set_wide(p, n, ast_wide(e)) }
+        if ast_imag(e) != 0 { ast_set_imag(p, n, ast_imag(e)) }
     }
 }

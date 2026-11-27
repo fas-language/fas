@@ -3,20 +3,6 @@
 // switch (including GNU case ranges), goto, computed goto (blockaddr/indirect_br),
 // inline asm / asm goto, return, CFG reachability pruning, and function emission.
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "../lib/table.fas"
-use "types.fas"
-use "layout.fas"
-use "abi.fas"
-use "fir_out.fas"
-use "parse.fas"
-use "gen.fas"
-use "gen_init.fas"
-use "gen_expr.fas"
 
 // ---------- Label & BlockAddr Management ----------
 
@@ -315,7 +301,7 @@ fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
     }
     if n.kind != ND_STMT { return }
     if n.op == 0 { return }
-    kw Bytes = cc_name(gc.p.names, n.op)
+    kw Bytes = sym_name(&gc.p.ctx.syms, n.op)
     // Do NOT descend into nested switch statements!
     if bytes_eq_c(kw, c"switch") { return }
     if bytes_eq_c(kw, c"case") {
@@ -328,7 +314,7 @@ fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
         sc.ast = n
         key U64Key = {addr_bits(handle_addr(n))}
         _ bool = table_put(&sw.case_map, &key, blk)
-        gen_collect_switch_cases(n.c, sw)
+        gen_collect_switch_cases(ast_c(n), sw)
         return
     }
     if bytes_eq_c(kw, c"default") {
@@ -338,16 +324,16 @@ fn gen_collect_switch_cases(n handle[Ast], sw handle[SwitchInfo]) void {
         sw.default_ast = n
         key U64Key = {addr_bits(handle_addr(n))}
         _ bool = table_put(&sw.case_map, &key, blk)
-        gen_collect_switch_cases(n.c, sw)
+        gen_collect_switch_cases(ast_c(n), sw)
         return
     }
     if bytes_eq_c(kw, c"if") {
         gen_collect_switch_cases(n.b, sw)
-        gen_collect_switch_cases(n.c, sw)
+        gen_collect_switch_cases(ast_c(n), sw)
     } else if bytes_eq_c(kw, c"while") || bytes_eq_c(kw, c"do") {
         gen_collect_switch_cases(n.b, sw)
     } else if bytes_eq_c(kw, c"for") {
-        gen_collect_switch_cases(n.d, sw)
+        gen_collect_switch_cases(ast_d(n), sw)
     } else if bytes_eq_c(kw, c":") {
         gen_collect_switch_cases(n.a, sw)
     }
@@ -396,9 +382,9 @@ fn gen_switch_dispatch(sw handle[SwitchInfo], key_ty u32, key_v u32, def_target 
         first = false
         gen_add_succ(blk, sc.blk_id)
         // Print key matching signedness & width (including >64-bit _BitInt cases!)
-        if bits > 64 && sc.ast != null && sc.ast.a != null && sc.ast.a.wide != null {
+        if bits > 64 && sc.ast != null && sc.ast.a != null && ast_wide(sc.ast.a) != null {
             words u32 = (bits + 31) / 32
-            limbs addr = sc.ast.a.wide
+            limbs addr = ast_wide(sc.ast.a)
             buf_str(&blk.term, c"0x")
             started bool = false
             wi u32 = words
@@ -556,7 +542,7 @@ fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
     buf_truncate(out, n)
     buf_u8(out, 123)
     if gen_stack_pointer_symbol(decl) { buf_str(out, c"rsp") }
-    else { gen_decode_string_piece(cc_name(gc.p.names, decl.asm_name), 1, out) }
+    else { gen_decode_string_piece(sym_name(&gc.p.ctx.syms, decl.asm_name), 1, out) }
     buf_u8(out, 125)
 }
 
@@ -645,7 +631,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
 
     inputs Vec[GenAsmInput] = {}
     defer { vec_free(&inputs) }
-    inp handle[Ast] = n.c
+    inp handle[Ast] = ast_c(n)
     while inp != null {
         cb Buf = {}
         gen_asm_constraint(inp, &cb)
@@ -658,7 +644,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             name Bytes = bytes_sub(cs, 1, cs.n - 2)
             for i usize in 0..out_nodes.n {
                 node handle[Ast] = handle_from_addr(vec_get(&out_nodes, i))
-                if node.op != 0 && bytes_eq(name, cc_name(gc.p.names, node.op)) {
+                if node.op != 0 && bytes_eq(name, sym_name(&gc.p.ctx.syms, node.op)) {
                     tied_idx = i
                     break
                 }
@@ -722,10 +708,10 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                     lname Bytes = bytes(tmpl.p + ti + 3, tj - (ti + 3))
                     lidx usize = 0
                     found_l bool = false
-                    gl_s handle[Ast] = handle_from_addr(n.extra)
+                    gl_s handle[Ast] = handle_from_addr(ast_extra(n))
                     while gl_s != null {
-                        lbl_s handle[Label] = handle_from_addr(gl_s.extra)
-                        if lbl_s != null && bytes_eq(cc_name(gc.p.names, lbl_s.name), lname) {
+                        lbl_s handle[Label] = handle_from_addr(ast_extra(gl_s))
+                        if lbl_s != null && bytes_eq(sym_name(&gc.p.ctx.syms, lbl_s.name), lname) {
                             found_l = true
                             break
                         }
@@ -753,9 +739,9 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         goto_tramps Vec[u32] = {}
         goto_reals Vec[u32] = {}
         defer { vec_free(&goto_tramps); vec_free(&goto_reals) }
-        gl_c handle[Ast] = handle_from_addr(n.extra)
+        gl_c handle[Ast] = handle_from_addr(ast_extra(n))
         while gl_c != null {
-            lbl_c handle[Label] = handle_from_addr(gl_c.extra)
+            lbl_c handle[Label] = handle_from_addr(ast_extra(gl_c))
             real_blk u32 = gen_get_label_block(lbl_c)
             if has_reg_out {
                 tb u32 = gen_new_block()
@@ -797,7 +783,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 cb Buf = {}
                 gen_asm_constraint(onode, &cb)
                 if onode.op != 0 {
-                    buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                    buf_u8(b, 91); buf_append(b, sym_name(&gc.p.ctx.syms, onode.op)); buf_str(b, c"] ")
                 }
                 fir_emit_quoted_bytes(b, cb.p, cb.n)
                 buf_free(&cb)
@@ -822,7 +808,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 cb Buf = {}
                 gen_asm_constraint(onode, &cb)
                 if onode.op != 0 {
-                    buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                    buf_u8(b, 91); buf_append(b, sym_name(&gc.p.ctx.syms, onode.op)); buf_str(b, c"] ")
                 }
                 fir_emit_quoted_bytes(b, cb.p, cb.n)
                 buf_free(&cb)
@@ -831,9 +817,9 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             }
             buf_u8(b, 41)
         }
-        if n.d != null {
+        if ast_d(n) != null {
             buf_str(b, c" clobber(")
-            cl handle[Ast] = n.d
+            cl handle[Ast] = ast_d(n)
             first_c bool = true
             while cl != null {
                 if !first_c { buf_str(b, c", ") }
@@ -914,7 +900,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 cb.p[u8] = 61 // '='
             }
             if onode.op != 0 {
-                buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                buf_u8(b, 91); buf_append(b, sym_name(&gc.p.ctx.syms, onode.op)); buf_str(b, c"] ")
             }
             fir_emit_quoted_bytes(b, cb.p, cb.n)
             buf_free(&cb)
@@ -939,7 +925,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             cb Buf = {}
             gen_asm_constraint(onode, &cb)
             if onode.op != 0 {
-                buf_u8(b, 91); buf_append(b, cc_name(gc.p.names, onode.op)); buf_str(b, c"] ")
+                buf_u8(b, 91); buf_append(b, sym_name(&gc.p.ctx.syms, onode.op)); buf_str(b, c"] ")
             }
             fir_emit_quoted_bytes(b, cb.p, cb.n)
             buf_free(&cb)
@@ -960,9 +946,9 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         }
         buf_u8(b, 41)
     }
-    if n.d != null {
+    if ast_d(n) != null {
         buf_str(b, c" clobber(")
-        cl handle[Ast] = n.d
+        cl handle[Ast] = ast_d(n)
         first_c bool = true
         while cl != null {
             if !first_c { buf_str(b, c", ") }
@@ -1052,11 +1038,11 @@ fn gen_stmt(n handle[Ast]) void fails {
         return
     }
 
-    kw Bytes = cc_name(gc.p.names, n.op)
+    kw Bytes = sym_name(&gc.p.ctx.syms, n.op)
 
     // Labels, case, default can make control flow live again even after a terminator!
     if bytes_eq_c(kw, c":") {
-        lbl handle[Label] = handle_from_addr(n.extra)
+        lbl handle[Label] = handle_from_addr(ast_extra(n))
         if lbl != null {
             lbl_blk u32 = gen_get_label_block(lbl)
             if !gen_is_terminated() { gen_term_jump(lbl_blk) }
@@ -1074,7 +1060,7 @@ fn gen_stmt(n handle[Ast]) void fails {
                 gen_switch_block(cblk)
             }
         }
-        if n.c != null { try gen_stmt(n.c) }
+        if ast_c(n) != null { try gen_stmt(ast_c(n)) }
         return
     }
 
@@ -1089,8 +1075,8 @@ fn gen_stmt(n handle[Ast]) void fails {
         cond handle[Ast] = try gen_inline_fold(n.a, false)
         if !gen_is_terminated() && cur_switch == null &&
             ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
-            !gen_defines_label(if se_truth(cond) { n.c } else { n.b }) {
-            try gen_stmt(if se_truth(cond) { n.b } else { n.c })
+            !gen_defines_label(if se_truth(cond) { ast_c(n) } else { n.b }) {
+            try gen_stmt(if se_truth(cond) { n.b } else { ast_c(n) })
             return
         }
         if gen_is_terminated() {
@@ -1099,11 +1085,11 @@ fn gen_stmt(n handle[Ast]) void fails {
             end_blk u32 = gen_new_block()
             try gen_stmt(n.b)
             if !gen_is_terminated() { gen_term_jump(end_blk) }
-            if n.c != null {
+            if ast_c(n) != null {
                 dead_else u32 = gen_new_block()
                 gen_switch_block(dead_else)
                 vec_at(&gc.blocks, zext[usize](dead_else)).terminated = true
-                try gen_stmt(n.c)
+                try gen_stmt(ast_c(n))
                 if !gen_is_terminated() { gen_term_jump(end_blk) }
             }
             gen_switch_block(end_blk)
@@ -1113,14 +1099,14 @@ fn gen_stmt(n handle[Ast]) void fails {
         cb u32 = gen_to_bool(cv, n.a.ty)
         t_blk u32 = gen_new_block()
         end_blk u32 = gen_new_block()
-        f_blk u32 = if n.c != null { gen_new_block() } else { end_blk }
+        f_blk u32 = if ast_c(n) != null { gen_new_block() } else { end_blk }
         gen_term_br(cb, t_blk, f_blk)
         gen_switch_block(t_blk)
         try gen_stmt(n.b)
         if !gen_is_terminated() { gen_term_jump(end_blk) }
-        if n.c != null {
+        if ast_c(n) != null {
             gen_switch_block(f_blk)
-            try gen_stmt(n.c)
+            try gen_stmt(ast_c(n))
             if !gen_is_terminated() { gen_term_jump(end_blk) }
         }
         gen_switch_block(end_blk)
@@ -1219,12 +1205,12 @@ fn gen_stmt(n handle[Ast]) void fails {
         lf.is_switch = false
 
         gen_switch_block(body_blk)
-        try gen_stmt(n.d)
+        try gen_stmt(ast_d(n))
         if !gen_is_terminated() { gen_term_jump(step_blk) }
         gc.loops.n -= 1
 
         gen_switch_block(step_blk)
-        if n.c != null { _ u32 = try gen_rvalue(n.c) }
+        if ast_c(n) != null { _ u32 = try gen_rvalue(ast_c(n)) }
         if !gen_is_terminated() { gen_term_jump(cond_blk) }
 
         gen_switch_block(end_blk)
@@ -1285,7 +1271,7 @@ fn gen_stmt(n handle[Ast]) void fails {
             buf_str(&blk.term, c"]\n")
             return
         }
-        lbl handle[Label] = handle_from_addr(n.extra)
+        lbl handle[Label] = handle_from_addr(ast_extra(n))
         if lbl != null {
             gen_term_jump(gen_get_label_block(lbl))
         }
@@ -1334,11 +1320,11 @@ fn gen_stmt(n handle[Ast]) void fails {
 // of it; its children's are.
 fn gen_defines_label(n handle[Ast]) bool {
     if n == null { return false }
-    if n.kind == ND_STMT && n.op != 0 && bytes_eq_c(cc_name(gc.p.names, n.op), c":") { return true }
+    if n.kind == ND_STMT && n.op != 0 && bytes_eq_c(sym_name(&gc.p.ctx.syms, n.op), c":") { return true }
     if n.kind == ND_DECL && n.decl != null && n.decl.value != null &&
         gen_defines_label_list(handle_from_addr(n.decl.value)) { return true }
     return gen_defines_label_list(n.a) || gen_defines_label_list(n.b) ||
-           gen_defines_label_list(n.c) || gen_defines_label_list(n.d)
+           gen_defines_label_list(ast_c(n)) || gen_defines_label_list(ast_d(n))
 }
 
 fn gen_defines_label_list(n handle[Ast]) bool {
@@ -1353,9 +1339,9 @@ fn gen_defines_label_list(n handle[Ast]) bool {
 fn gen_prescan_addr_taken(n handle[Ast]) void {
     if n == null { return }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
-        if bytes_eq_c(op, c"&&") && n.extra != null {
-            blk u32 = gen_get_label_block(handle_from_addr(n.extra))
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
+        if bytes_eq_c(op, c"&&") && ast_extra(n) != null {
+            blk u32 = gen_get_label_block(handle_from_addr(ast_extra(n)))
             gen_mark_addr_taken(blk)
         }
     }
@@ -1364,8 +1350,8 @@ fn gen_prescan_addr_taken(n handle[Ast]) void {
     }
     gen_prescan_addr_taken(n.a)
     gen_prescan_addr_taken(n.b)
-    gen_prescan_addr_taken(n.c)
-    gen_prescan_addr_taken(n.d)
+    gen_prescan_addr_taken(ast_c(n))
+    gen_prescan_addr_taken(ast_d(n))
     gen_prescan_addr_taken(n.next)
 }
 
@@ -1395,17 +1381,17 @@ fn gen_protect_body(n handle[Ast], strong bool) bool {
         if s.storage == SC_NONE || s.storage == SC_AUTO || s.storage == SC_REGISTER {
             if gen_protect_type(s.ty, strong) || gen_protect_body(handle_from_addr(s.value), strong) { return true }
         }
-    } else if n.kind == ND_UNARY && strong && bytes_eq_c(cc_name(gc.p.names, n.op), c"&") {
+    } else if n.kind == ND_UNARY && strong && bytes_eq_c(sym_name(&gc.p.ctx.syms, n.op), c"&") {
         a handle[Ast] = n.a
         while a.kind == ND_MEMBER && !ty_is_ptr(a.a.ty) { a = a.a }
         if a.kind == ND_NAME && a.decl != null && a.decl.linkage == 0 &&
             a.decl.storage != SC_STATIC && a.decl.storage != SC_EXTERN && !ty_is_func(a.ty) { return true }
     } else if n.kind == ND_CALL && n.a != null {
-        name Bytes = cc_name(gc.p.names, n.a.op)
+        name Bytes = sym_name(&gc.p.ctx.syms, n.a.op)
         if bytes_eq_c(name, c"__builtin_alloca") || bytes_eq_c(name, c"__builtin_alloca_with_align") { return true }
     }
     return gen_protect_body(n.a, strong) || gen_protect_body(n.b, strong) ||
-           gen_protect_body(n.c, strong) || gen_protect_body(n.d, strong) || gen_protect_body(n.next, strong)
+           gen_protect_body(ast_c(n), strong) || gen_protect_body(ast_d(n), strong) || gen_protect_body(n.next, strong)
 }
 
 // patchable_function_entry(N[, M]) as Fir's patchable(N, M): integer
@@ -1416,15 +1402,15 @@ fn gen_emit_patchable(out_b handle[Buf], attrs handle[Attr]) void fails {
         if pa_attr_name(gc.p, a, c"patchable_function_entry") {
             n u64 = 0
             m u64 = 0
-            ok bool = a.args.n == 1 || a.args.n == 3
-            for i usize in 0..a.args.n {
-                t Token = a.args.p[Token, i]
+            ok bool = zext[usize](a.args_n) == 1 || zext[usize](a.args_n) == 3
+            for i usize in 0..zext[usize](a.args_n) {
+                t Token = a.args_p[Token, i]
                 if (i & 1) == 1 {
-                    if !pa_is(gc.p, t, c",") { ok = false }
+                    if t.kind != TK_COMMA { ok = false }
                 } else if t.kind != TK_NUM {
                     ok = false
                 } else {
-                    v u64 = bytes_to_u64(cc_name(gc.p.names, t.payload)) catch 0x10000
+                    v u64 = bytes_to_u64(tok_spelling(gc.p.ctx, t)) catch 0x10000
                     if i == 0 { n = v } else { m = v }
                 }
             }
@@ -1701,9 +1687,9 @@ fn gen_function(node handle[Ast]) void fails {
         buf_str(out_b, c", ")
         buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](gc.cur_blk)]))
     }
-    if gc.debug.enabled && !bytes_eq(gen_sym_bytes(nid), cc_name(gc.p.names, s.name)) {
+    if gc.debug.enabled && !bytes_eq(gen_sym_bytes(nid), sym_name(&gc.p.ctx.syms, s.name)) {
         buf_str(out_b, c" display ")
-        gen_debug_quote(out_b, cc_name(gc.p.names, s.name))
+        gen_debug_quote(out_b, sym_name(&gc.p.ctx.syms, s.name))
     }
     gen_debug_suffix(out_b, decl_loc)
     buf_str(out_b, c" {\n")

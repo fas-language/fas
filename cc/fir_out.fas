@@ -3,13 +3,6 @@
 // file descriptor (out_fd >= 0), flushing each declaration/global/function as
 // soon as it is complete so peak memory stays bounded.
 
-use "../lib/core.fas"
-use "../lib/os.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "types.fas"
-use "layout.fas"
-use "abi.fas"
 
 // Linkage constants
 const FIR_LOCAL u8  = 0

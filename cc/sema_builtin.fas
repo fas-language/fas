@@ -1,5 +1,5 @@
-// Fixed return types follow the builtin spelling, regardless of argument
-// promotions. Return TY_INVALID for a name outside these overload families.
+// cc2/sema_builtin.fas: Builtin function validation, constant folding, and x86 intrinsics.
+
 fn se_math_family(name Bytes, stem addr) u32 {
     prefix Bytes = bytes_c(stem)
     if !bytes_starts_with(name, prefix) { return TY_INVALID }
@@ -11,7 +11,6 @@ fn se_math_family(name Bytes, stem addr) u32 {
     return TY_INVALID
 }
 
-// These libm builtins have a prototype even without <math.h>.
 fn se_binary_libm_type(name Bytes) u32 {
     if feature_in(c" __builtin_nextafter __builtin_fmin __builtin_fmax ", name) { return TY_DOUBLE }
     if feature_in(c" __builtin_nextafterf __builtin_fminf __builtin_fmaxf ", name) { return TY_FLOAT }
@@ -34,15 +33,11 @@ fn se_math_result(name Bytes) u32 {
     return TY_INVALID
 }
 
-// Builtins that have no ordinary function prototype still have argument
-// constraints. Keep their typed call nodes intact for code generation.
 fn se_builtin_count(p handle[Parser], t Token, n u32, min u32, max u32) void fails {
     if n < min || n > max { try pa_error(p, t.loc, c"wrong number of builtin arguments") }
 }
 
-// Byte swaps on integer constant operands are themselves integer constants.
-// Truncate to the builtin's operand width before reversing its bytes.
-fn se_fold_bswap(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+fn se_fold_bswap(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
     if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
     value u64 = arg.value
     result u64 = 0
@@ -50,7 +45,7 @@ fn se_fold_bswap(t Token, ty u32, arg handle[Ast]) handle[Ast] {
         result = (result << 8) | (value & 255)
         value >>= 8
     }
-    return se_int(t.loc, ty, result)
+    return se_int(p, t.loc, ty, result)
 }
 
 fn se_clz_argument_type(name Bytes) u32 {
@@ -60,18 +55,16 @@ fn se_clz_argument_type(name Bytes) u32 {
     return TY_INVALID
 }
 
-// The fixed-width clz builtins first convert to their unsigned argument
-// type. A zero argument has no defined constant result.
-fn se_fold_clz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+fn se_fold_clz(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
     if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
-    value u64 = se_convert(ty, arg).value
+    value u64 = se_convert(p, ty, arg).value
     if value == 0 { return null }
     result u64 = zext[u64](ty_int_bits(ty))
     while value != 0 {
         result -= 1
         value >>= 1
     }
-    return se_int(t.loc, TY_INT, result)
+    return se_int(p, t.loc, TY_INT, result)
 }
 
 fn se_ctz_argument_type(name Bytes) u32 {
@@ -81,23 +74,15 @@ fn se_ctz_argument_type(name Bytes) u32 {
     return TY_INVALID
 }
 
-// Both ctz and ffs count the zero bits below the first set bit.
 fn se_count_trailing_zeros(value u64) u64 {
-    result u64 = 0
-    while (value & 1) == 0 {
-        result += 1
-        value >>= 1
-    }
-    return result
+    return ctz(value)
 }
 
-// The fixed-width ctz builtins first convert to their unsigned argument
-// type. A zero argument has no defined constant result.
-fn se_fold_ctz(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+fn se_fold_ctz(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
     if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
-    value u64 = se_convert(ty, arg).value
+    value u64 = se_convert(p, ty, arg).value
     if value == 0 { return null }
-    return se_int(t.loc, TY_INT, se_count_trailing_zeros(value))
+    return se_int(p, t.loc, TY_INT, se_count_trailing_zeros(value))
 }
 
 fn se_ffs_argument_type(name Bytes) u32 {
@@ -107,22 +92,21 @@ fn se_ffs_argument_type(name Bytes) u32 {
     return TY_INVALID
 }
 
-// ffs numbers bits starting at one and returns zero for an all-zero input.
-fn se_fold_ffs(t Token, ty u32, arg handle[Ast]) handle[Ast] {
+fn se_fold_ffs(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
     if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
-    value u64 = se_convert(ty, arg).value
-    if value == 0 { return se_int(t.loc, TY_INT, 0) }
-    return se_int(t.loc, TY_INT, se_count_trailing_zeros(value) + 1)
+    value u64 = se_convert(p, ty, arg).value
+    if value == 0 { return se_int(p, t.loc, TY_INT, 0) }
+    return se_int(p, t.loc, TY_INT, se_count_trailing_zeros(value) + 1)
 }
 
 fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
     if tc.ilp32 { return false }
-    name u32 = cc_intern(p.names, bytes_c(c"__builtin_ms_va_list"))
+    name u32 = sym_intern_c(&p.ctx.syms, c"__builtin_ms_va_list")
     return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
 }
 
 fn se_builtin_va_list(p handle[Parser], e handle[Ast]) void fails {
-    name u32 = cc_intern(p.names, bytes_c(c"__builtin_va_list"))
+    name u32 = sym_intern_c(&p.ctx.syms, c"__builtin_va_list")
     sysv handle[Symbol] = pa_lookup(p, name)
     if ty_compatible(se_decay(e.ty), se_decay(sysv.ty)) || se_is_ms_va_list(p, e) { return }
     try pa_error(p, e.loc, c"variadic builtin requires a va_list argument")
@@ -138,8 +122,6 @@ fn se_builtin_checked(name Bytes) bool {
         bytes_eq_c(name, c"__builtin_ckd_mul")
 }
 
-// These GNU builtins implement the type-generic C23 <stdbit.h> operations
-// without applying the usual integer promotions to their first operand.
 fn se_stdc_bit_arity(name Bytes) u32 {
     if !bytes_starts_with(name, bytes_c(c"__builtin_stdc_")) { return 0 }
     op Bytes = bytes_from(name, 15)
@@ -164,8 +146,6 @@ fn se_check_stdc_bit(p handle[Parser], t Token, args handle[Ast], count u32, ari
     }
 }
 
-// GCC's classification values, with Clang's bool result. The caller
-// performs the ordinary array and function conversions before classifying.
 fn se_builtin_type_class(ty u32) u64 {
     if ty_is_void(ty) { return 0 }
     if ty_is_bool(ty) { return 4 }
@@ -237,8 +217,6 @@ fn se_builtin_atomic_result(ty u32) u32 {
     return if ty_is_ptr(ptr) { ty_unqual(ty_node(ptr).elem) } else { TY_INVALID }
 }
 
-// Check the common object and memory order constraints for GNU atomic
-// builtins. Overloaded value forms only accept integer and pointer objects.
 fn se_check_atomic(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
     fetch bool = se_builtin_atomic_fetch(name)
     sync bool = bytes_starts_with(name, bytes_c(c"__sync_"))
@@ -280,9 +258,6 @@ fn se_check_atomic(p handle[Parser], t Token, name Bytes, args handle[Ast], coun
     }
 }
 
-// For the default x86-64 target, native atomic accesses are lock-free
-// for naturally aligned sizes of one, two, four, and eight bytes. As in
-// Clang, a null pointer asks for the naturally aligned case.
 fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count u32) handle[Ast] fails {
     try se_builtin_count(p, t, count, 2, 2)
     size u64 = try se_ice(p, args)
@@ -291,26 +266,27 @@ fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count
     if !ty_is_ptr(ptr) && !se_null(pointer) {
         try pa_error(p, pointer.loc, c"atomic alignment argument requires a pointer")
     }
-    if size <= 1 { return se_int(t.loc, TY_BOOL, 1) }
-    if size != 2 && size != 4 && size != 8 { return se_int(t.loc, TY_BOOL, 0) }
-
+    if size <= 1 { return se_int(p, t.loc, TY_BOOL, 1) }
+    if size != 2 && size != 4 && size != 8 { return se_int(p, t.loc, TY_BOOL, 0) }
     absolute AddressValue = {}
     known bool = se_address_value(p, pointer, &absolute) && absolute.symbol == null
     aligned bool = false
     if known { aligned = bitcast[u64](absolute.offset) % size == 0 }
     else if ty_is_ptr(ptr) { aligned = ty_align(ty_node(ptr).elem) >= size }
-    return se_int(t.loc, TY_BOOL, if aligned { 1 } else { 0 })
+    return se_int(p, t.loc, TY_BOOL, if aligned { 1 } else { 0 })
 }
 
-// GNU target attributes can enable individual features for the function.
 fn se_x86_features(p handle[Parser]) u64 {
     features u64 = p.x86_features
     if p.function == null { return features }
     attr handle[Attr] = p.function.attrs
     while attr != null {
-        if pa_attr_name(p, attr, c"target") && attr.args.n == 1 {
-            literal Bytes = cc_spelling(p.names, vec_get(&attr.args, 0))
-            features = x86_apply_target(features, pp_destringize(literal))
+        if pa_attr_name(p, attr, c"target") && attr.args_n == 1 {
+            literal Bytes = tok_spelling(p.ctx, attr.args_p[Token])
+            tb Buf = {}
+            defer { buf_free(&tb) }
+            pp_destringize(literal, &tb)
+            features = x86_apply_target(features, buf_bytes(&tb))
         }
         attr = attr.next
     }
@@ -337,8 +313,6 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     if feature_in(c" __builtin_masked_compress_store __builtin_masked_expand_load __builtin_masked_gather __builtin_masked_load __builtin_masked_scatter __builtin_masked_store ", name) {
         try pa_error(p, t.loc, c"Clang masked vector builtins are unsupported")
     }
-    // Both supported x86 header sets use addcarryx for the ADC wrapper.
-    // Catch the obsolete spellings before the generic intrinsic fallback.
     if bytes_eq_c(name, c"__builtin_ia32_addcarry_u32") {
         try pa_error(p, t.loc, c"unknown builtin; use __builtin_ia32_addcarryx_u32")
     }
@@ -351,6 +325,7 @@ fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast]
     required addr = x86_intrinsic_feature(name)
     if required != null && !x86_has(se_x86_features(p), bytes_c(required)) {
         message Buf = {}
+        defer { buf_free(&message) }
         buf_str(&message, c"intrinsic requires x86 target feature '")
         buf_str(&message, required)
         buf_u8(&message, 39)

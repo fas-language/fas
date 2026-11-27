@@ -43,18 +43,18 @@ fn gen_debug_scope(parent u32) u32 {
 }
 
 fn gen_debug_loc(source u32, scope u32) u32 {
-    if source == 0 || source >= trunc[u32](gc.p.names.locations.n) { return 0 }
+    if source == 0 { return 0 }
     key U64Key = {(zext[u64](scope) << 32) | zext[u64](source)}
     id u32 = table_get(&gc.debug.loc_ids, &key) catch {
         gc.debug.next_loc += 1
         id u32 = gc.debug.next_loc
         _ bool = table_put(&gc.debug.loc_ids, &key, id)
-        loc CLoc = vec_get(&gc.p.names.locations, zext[usize](source))
+        loc ResolvedLoc = sm_resolve(&gc.p.ctx.sm, source)
         b handle[Buf] = &gc.out.buf
         buf_str(b, c"loc ")
         gen_debug_uint(b, id)
         buf_u8(b, 32)
-        gen_debug_quote(b, cc_name(gc.p.names, loc.file))
+        gen_debug_quote(b, sym_name(&gc.p.ctx.syms, loc.file))
         buf_u8(b, 32)
         gen_debug_uint(b, loc.line)
         buf_u8(b, 32)
@@ -96,7 +96,7 @@ fn gen_debug_local(s handle[Symbol], slot u32, arg u32, indir bool, symbol u32) 
     b handle[Buf] = &gc.debug.vars
     scope u32 = if arg == 0 { gc.debug.scope } else { 0 }
     buf_str(b, c"  var ")
-    gen_debug_quote(b, cc_name(gc.p.names, s.name))
+    gen_debug_quote(b, sym_name(&gc.p.ctx.syms, s.name))
     buf_u8(b, 32)
     gen_debug_uint(b, gen_debug_type(s.ty, s.debug_typedef))
     if scope != 0 {
@@ -129,7 +129,7 @@ fn gen_debug_global(s handle[Symbol], symbol u32) void {
     loc u32 = gen_debug_loc(s.loc, 0)
     b handle[Buf] = gen_global_buf()
     buf_str(b, c"dglobal ")
-    gen_debug_quote(b, cc_name(gc.p.names, s.name))
+    gen_debug_quote(b, sym_name(&gc.p.ctx.syms, s.name))
     buf_u8(b, 32)
     gen_debug_uint(b, gen_debug_type(s.ty, s.debug_typedef))
     buf_u8(b, 32)
@@ -203,7 +203,7 @@ fn gen_debug_write_type(b handle[Buf], ty u32, alias u32) void {
     t handle[TypeNode] = ty_node(ty)
     if alias != 0 {
         buf_str(b, c"typedef ")
-        gen_debug_quote(b, cc_name(gc.p.names, alias))
+        gen_debug_quote(b, sym_name(&gc.p.ctx.syms, alias))
         buf_u8(b, 32)
         gen_debug_uint(b, gen_debug_type(ty, 0))
     } else if t.kind == TYK_PTR || t.kind == TYK_NULLPTR {
@@ -229,7 +229,7 @@ fn gen_debug_write_type(b handle[Buf], ty u32, alias u32) void {
     } else if t.kind == TYK_STRUCT || t.kind == TYK_UNION {
         rec handle[RecordDef] = ty_record(t.aux1)
         buf_str(b, if rec.is_union { c"union " } else { c"struct " })
-        gen_debug_quote(b, cc_name(gc.p.names, rec.tag_id))
+        gen_debug_quote(b, sym_name(&gc.p.ctx.syms, rec.tag_id))
         if !rec.is_complete {
             buf_str(b, c" declared")
             return
@@ -243,7 +243,7 @@ fn gen_debug_write_type(b handle[Buf], ty u32, alias u32) void {
             if f.is_bitfield && f.name_id == 0 { continue }
             if !first { buf_str(b, c", ") }
             first = false
-            gen_debug_quote(b, cc_name(gc.p.names, f.name_id))
+            gen_debug_quote(b, sym_name(&gc.p.ctx.syms, f.name_id))
             buf_u8(b, 32)
             gen_debug_uint(b, gen_debug_type(f.ty, 0))
             buf_u8(b, 32)
@@ -257,14 +257,14 @@ fn gen_debug_write_type(b handle[Buf], ty u32, alias u32) void {
     } else if t.kind == TYK_ENUM {
         e handle[EnumDef] = ty_enum(t.aux1)
         buf_str(b, c"enum ")
-        gen_debug_quote(b, cc_name(gc.p.names, e.tag_id))
+        gen_debug_quote(b, sym_name(&gc.p.ctx.syms, e.tag_id))
         buf_u8(b, 32)
         gen_debug_uint(b, gen_debug_type(e.underlying, 0))
         buf_str(b, c" {")
         for i u32 in 0..e.members_len {
             if i != 0 { buf_str(b, c", ") }
             m handle[EnumMember] = ty_enum_member_at(e, i)
-            gen_debug_quote(b, cc_name(gc.p.names, m.name))
+            gen_debug_quote(b, sym_name(&gc.p.ctx.syms, m.name))
             buf_u8(b, 32)
             bits u64 = if m.negative { 0 - m.value } else { m.value }
             buf_dec_i64(b, bitcast[i64](bits))

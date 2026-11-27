@@ -1,11 +1,6 @@
 // SysV x86-64 ABI classification (psABI 3.2.3) + Fir 0.3 ABI signature lowering.
 // All state is read from `tc` (thread-local TypeCtx); no per-TU mutable globals.
 
-use "../lib/core.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "types.fas"
-use "layout.fas"
 
 // ---------- SysV x86-64 eightbyte classes ----------
 const ABI_NO_CLASS u8    = 0

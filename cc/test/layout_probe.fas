@@ -6,6 +6,10 @@ use "../../lib/core.fas"
 use "../../lib/os.fas"
 use "../../lib/buf.fas"
 use "../../lib/bytes.fas"
+use "../../lib/table.fas"
+use "../token.fas"
+use "../sym.fas"
+use "../kw.fas"
 use "../types.fas"
 use "../layout.fas"
 
@@ -109,7 +113,9 @@ fn next_tok(line Bytes, lc handle[LineCur]) Bytes {
 
 fn main() i32 {
     ctx TypeCtx = {}
-    tc_init(&ctx)
+    syms SymTable = {}
+    sym_init(&syms)
+    tc_init(&ctx, &syms)
     defer { tc_free(&ctx) }
 
     st ProbeState = {}

@@ -2,20 +2,6 @@
 // lvalues, rvalues, conditions, conversions, bitfields, complex, vectors,
 // calls (direct/indirect/variadic/returns_twice), and GCC/C23 builtins + atomics.
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "../lib/table.fas"
-use "types.fas"
-use "layout.fas"
-use "abi.fas"
-use "fir_out.fas"
-use "parse.fas"
-use "sema_builtin.fas"
-use "gen.fas"
-use "gen_init.fas"
 
 // ---------- VLA Runtime Size ----------
 
@@ -552,7 +538,7 @@ fn gen_lvalue(n handle[Ast]) u32 fails {
         return gen_sym_addr(gen_sym_fir_name(s))
     }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if bytes_eq_c(op, c"*") {
             return try gen_rvalue(n.a)
         }
@@ -573,10 +559,10 @@ fn gen_lvalue(n handle[Ast]) u32 fails {
             base = try gen_lvalue(n.a)
         }
         if (n.flags & NF_BITFIELD) != 0 {
-            // For bitfields, gen_lvalue returns the base struct pointer; callers use n.field_offset / n.field_width
+            // For bitfields, gen_lvalue returns the base struct pointer; callers use ast_field_offset(n) / ast_field_width(n)
             return base
         }
-        return gen_ptradd_const(base, bitcast[i64](n.field_offset / 8))
+        return gen_ptradd_const(base, bitcast[i64](ast_field_offset(n) / 8))
     }
     if n.kind == ND_SUBSCRIPT {
         base_ast handle[Ast] = n.a
@@ -637,9 +623,9 @@ fn gen_store_lvalue(lhs handle[Ast], rhs_v u32, rhs_ty u32) u32 fails {
     if lhs.kind == ND_MEMBER && (lhs.flags & NF_BITFIELD) != 0 {
         base u32 = if ty_is_ptr(lhs.a.ty) { try gen_rvalue(lhs.a) } else { try gen_lvalue(lhs.a) }
         cv u32 = gen_convert(rhs_v, rhs_ty, lhs.ty)
-        gen_store_bitfield(base, lhs.field_offset, lhs.field_width, lhs.ty, cv)
+        gen_store_bitfield(base, ast_field_offset(lhs), ast_field_width(lhs), lhs.ty, cv)
         // Return the truncated/sign-extended value stored in the bitfield
-        return gen_load_bitfield(base, lhs.field_offset, lhs.field_width, lhs.ty)
+        return gen_load_bitfield(base, ast_field_offset(lhs), ast_field_width(lhs), lhs.ty)
     }
     ptr_v u32 = try gen_lvalue(lhs)
     if gen_is_mem_ty(lhs.ty) {
@@ -660,7 +646,7 @@ fn gen_store_lvalue(lhs handle[Ast], rhs_v u32, rhs_ty u32) u32 fails {
 fn gen_load_lvalue(lhs handle[Ast]) u32 fails {
     if lhs.kind == ND_MEMBER && (lhs.flags & NF_BITFIELD) != 0 {
         base u32 = if ty_is_ptr(lhs.a.ty) { try gen_rvalue(lhs.a) } else { try gen_lvalue(lhs.a) }
-        return gen_load_bitfield(base, lhs.field_offset, lhs.field_width, lhs.ty)
+        return gen_load_bitfield(base, ast_field_offset(lhs), ast_field_width(lhs), lhs.ty)
     }
     ptr_v u32 = try gen_lvalue(lhs)
     if gen_is_mem_ty(lhs.ty) || ty_is_func(lhs.ty) {
@@ -762,8 +748,8 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
     if n == null || gen_is_terminated() { return gen_const_i32(0) }
 
     if n.kind == ND_INT {
-        if n.wide != null && ty_int_bits(n.ty) > 64 {
-            return gen_const_wide_int(n.ty, n.wide, ty_int_bits(n.ty))
+        if ast_wide(n) != null && ty_int_bits(n.ty) > 64 {
+            return gen_const_wide_int(n.ty, ast_wide(n), ty_int_bits(n.ty))
         }
         return gen_const_int(n.ty, n.value)
     }
@@ -779,11 +765,11 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
                 gen_store_ty(gen_const_int(et, n.b.value), imag_ptr, eal, false, false)
             } else {
                 gen_store_ty(gen_const_float(et, n.value), slot, eal, false, false)
-                gen_store_ty(gen_const_float_exact(et, n.imag, n.float_bits), imag_ptr, eal, false, false)
+                gen_store_ty(gen_const_float_exact(et, ast_imag(n), ast_float_bits(n)), imag_ptr, eal, false, false)
             }
             return slot
         }
-        return gen_const_float_exact(n.ty, n.value, n.float_bits)
+        return gen_const_float_exact(n.ty, n.value, ast_float_bits(n))
     }
     if n.kind == ND_STRING {
         return try gen_lvalue(n)
@@ -802,14 +788,14 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             return gen_convert(v, ty_uint64_type(), n.ty)
         }
         if n.decl != null && n.decl.storage == SC_ENUMERATOR {
-            if n.wide != null && ty_int_bits(n.ty) > 64 {
-                return gen_const_wide_int(n.ty, n.wide, ty_int_bits(n.ty))
+            if ast_wide(n) != null && ty_int_bits(n.ty) > 64 {
+                return gen_const_wide_int(n.ty, ast_wide(n), ty_int_bits(n.ty))
             }
             return gen_const_int(n.ty, n.value)
         }
         if n.decl != null && n.decl.storage == SC_CONSTEXPR && (n.flags & NF_ICE) != 0 && ty_is_integer(n.ty) {
-            if n.wide != null && ty_int_bits(n.ty) > 64 {
-                return gen_const_wide_int(n.ty, n.wide, ty_int_bits(n.ty))
+            if ast_wide(n) != null && ty_int_bits(n.ty) > 64 {
+                return gen_const_wide_int(n.ty, ast_wide(n), ty_int_bits(n.ty))
             }
             return gen_const_int(n.ty, n.value)
         }
@@ -877,7 +863,7 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
 }
 
 fn gen_unary(n handle[Ast]) u32 fails {
-    op Bytes = cc_name(gc.p.names, n.op)
+    op Bytes = sym_name(&gc.p.ctx.syms, n.op)
     if bytes_eq_c(op, c"&") {
         return try gen_lvalue(n.a)
     }
@@ -957,8 +943,8 @@ fn gen_unary(n handle[Ast]) u32 fails {
     }
     if bytes_eq_c(op, c"&&") {
         // GNU address-of-label `&&label` resolves the exact scoped label.
-        if n.extra != null {
-            blk_id u32 = gen_get_label_block(handle_from_addr(n.extra))
+        if ast_extra(n) != null {
+            blk_id u32 = gen_get_label_block(handle_from_addr(ast_extra(n)))
             gen_mark_addr_taken(blk_id)
             return gen_emit_blockaddr(blk_id)
         }
@@ -1002,7 +988,7 @@ fn gen_unary(n handle[Ast]) u32 fails {
         ptr_v u32 = 0
         if is_bf {
             ptr_v = if ty_is_ptr(n.a.a.ty) { try gen_rvalue(n.a.a) } else { try gen_lvalue(n.a.a) }
-            old_v = gen_load_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty)
+            old_v = gen_load_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty)
         } else {
             ptr_v = try gen_lvalue(n.a)
             old_v = gen_load_ty(n.a.ty, ptr_v, ty_align(n.a.ty), gen_is_volatile(n.a.ty), gen_is_atomic(n.a.ty))
@@ -1023,8 +1009,8 @@ fn gen_unary(n handle[Ast]) u32 fails {
             new_v = gen_convert(updated, promoted, t)
         }
         if is_bf {
-            gen_store_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty, new_v)
-            if !is_post { new_v = gen_load_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty) }
+            gen_store_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty, new_v)
+            if !is_post { new_v = gen_load_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty) }
         } else {
             gen_store_ty(new_v, ptr_v, ty_align(n.a.ty), gen_is_volatile(n.a.ty), gen_is_atomic(n.a.ty))
         }
@@ -1034,7 +1020,7 @@ fn gen_unary(n handle[Ast]) u32 fails {
 }
 
 fn gen_binary(n handle[Ast]) u32 fails {
-    op Bytes = cc_name(gc.p.names, n.op)
+    op Bytes = sym_name(&gc.p.ctx.syms, n.op)
 
     // Comma operator
     if bytes_eq_c(op, c",") {
@@ -1081,7 +1067,7 @@ fn gen_binary(n handle[Ast]) u32 fails {
         }
         rv u32 = try gen_rvalue(n.b)
         old_v u32 = if is_bf {
-            gen_load_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty)
+            gen_load_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty)
         } else if gen_is_mem_ty(n.a.ty) {
             ptr_v
         } else {
@@ -1097,8 +1083,8 @@ fn gen_binary(n handle[Ast]) u32 fails {
         res_v u32 = try gen_arith_op(base_op, eval_ty, lv_c, rv_c)
         if is_bf {
             cv u32 = gen_convert(res_v, eval_ty, n.a.ty)
-            gen_store_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty, cv)
-            return gen_load_bitfield(ptr_v, n.a.field_offset, n.a.field_width, n.a.ty)
+            gen_store_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty, cv)
+            return gen_load_bitfield(ptr_v, ast_field_offset(n.a), ast_field_width(n.a), n.a.ty)
         }
         if gen_is_mem_ty(n.a.ty) {
             sz u64 = ty_size(n.a.ty)
@@ -1257,7 +1243,7 @@ fn gen_cond_expr(n handle[Ast]) u32 fails {
     // is only valid in the selected arm of a __builtin_constant_p test.
     cond handle[Ast] = try gen_inline_fold(n.a, false)
     if ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
-        chosen handle[Ast] = if se_truth(cond) { n.b } else { n.c }
+        chosen handle[Ast] = if se_truth(cond) { n.b } else { ast_c(n) }
         v u32 = try gen_rvalue(chosen)
         return gen_convert(v, se_decay(chosen.ty), n.ty)
     }
@@ -1286,10 +1272,10 @@ fn gen_cond_expr(n handle[Ast]) u32 fails {
     gen_term_jump(end_blk)
 
     gen_switch_block(f_blk)
-    fv u32 = try gen_rvalue(n.c)
+    fv u32 = try gen_rvalue(ast_c(n))
     if !is_void && !gen_is_terminated() {
         if is_mem { gen_memcpy_const(res_slot, fv, ty_size(n.ty), false) }
-        else { gen_store_ty(gen_convert(fv, n.c.ty, n.ty), res_slot, ty_align(n.ty), false, false) }
+        else { gen_store_ty(gen_convert(fv, ast_c(n).ty, n.ty), res_slot, ty_align(n.ty), false, false) }
     }
     gen_term_jump(end_blk)
 
@@ -1308,7 +1294,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     }
     // Name-based builtins: n.a.ty == TY_INVALID && n.a.kind == ND_NAME && n.a.decl == null
     if n.a.ty == TY_INVALID && n.a.kind == ND_NAME && n.a.decl == null {
-        bname Bytes = cc_name(gc.p.names, n.a.op)
+        bname Bytes = sym_name(&gc.p.ctx.syms, n.a.op)
         return try gen_builtin_call(n, bname)
     }
 
@@ -1473,7 +1459,7 @@ fn gen_call(n handle[Ast]) u32 fails {
 // ---------- Builtins & Atomics ----------
 
 fn gen_type_builtin(n handle[Ast]) u32 fails {
-    bname Bytes = cc_name(gc.p.names, n.op)
+    bname Bytes = sym_name(&gc.p.ctx.syms, n.op)
     if bytes_eq_c(bname, c"__builtin_va_arg") {
         try gen_eval_vm_type(n.ty)
         if se_is_ms_va_list(gc.p, n.b) {
@@ -1827,7 +1813,7 @@ fn gen_builtin_call(n handle[Ast], bname Bytes) u32 fails {
     }
     if bytes_starts_with(bname, bytes_c(c"__builtin_nans")) &&
         se_math_family(bytes_from(bname, 10), c"nans") != TY_INVALID {
-        return gen_const_float_exact(n.ty, n.value, n.float_bits)
+        return gen_const_float_exact(n.ty, n.value, ast_float_bits(n))
     }
     if bytes_eq_c(bname, c"__builtin_shufflevector") {
         v0 u32 = try gen_rvalue(a0)

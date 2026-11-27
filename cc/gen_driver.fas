@@ -1,13 +1,6 @@
 // fcc compile & link driver: subprocess runner, tool discovery (fas-fir, fas-ld),
 // system glibc crt discovery, and gcc-compatible multi-file compile + link pipeline.
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "../lib/os.fas"
-use "gen.fas"
 
 const SYS_FORK u64 = 57
 const SYS_EXECVE u64 = 59

@@ -1,9 +1,7 @@
-// Convert a spelling to bits by dividing an exact integer ratio. Rounding
-// the numerator through f64 first loses bits both in f64 and in wider formats.
+// cc2/sema_float.fas: Exact floating-point literal conversion (f16/bf16/f32/f64/x87/f128).
 value struct FloatFormat { precision u32, min_exp i32, max_exp i32, explicit_int bool }
 value struct FloatBits { lo u64, hi u64 }
 
-// The default signaling NaN payload is the bit immediately below quiet.
 fn flt_signaling_nan(ty u32) FloatBits {
     if ty == TY_FLOAT16 { return {0x7d00, 0} }
     if ty == TY_FLOAT { return {0x7fa00000, 0} }
@@ -20,8 +18,6 @@ fn flt_format(ty u32) FloatFormat {
     return {53, -1022, 1023, false}
 }
 
-// Test both ends of a finite significand. Subnormals have the same
-// least significant bit position as the smallest normal in that format.
 fn flt_significand_fits(f FloatFormat, top i32, bottom i32) bool {
     fraction i32 = bitcast[i32](f.precision) - 1
     normal i32 = if top < f.min_exp { f.min_exp } else { top }
@@ -87,9 +83,6 @@ fn flt_round_ratio(n WideInt, d WideInt, sticky bool) WideInt {
     q WideInt = wi_new(128)
     top i32 = bitcast[i32](wi_length(n)) - bitcast[i32](wi_length(d))
     if top >= 0 {
-        // The scaled quotient has at most precision + 1 bits. Start
-        // division there instead of shifting the entire numerator one bit
-        // at a time, which would walk all the limbs even for a tiny quotient.
         shifted WideInt = wi_shift(d, bitcast[u32](top), true, false)
         defer { heap_free(shifted.p) }
         while top >= 0 {
@@ -142,12 +135,9 @@ fn flt_pack(n WideInt, d WideInt, scale i32, sticky bool, f FloatFormat) FloatBi
 }
 
 fn flt_literal(s Bytes, first usize, end usize, digits i64, exponent i64, hex bool, f FloatFormat) FloatBits {
-    // The caller counts digits starting with the first nonzero digit.
     if digits == 0 { return {0, 0} }
     step i64 = if hex { 4 } else { 1 }
     magnitude i64 = exponent + step * (digits - 1)
-    // The leading digit bounds the magnitude without constructing the
-    // ratio. In decimal, 2^3 < 10 gives conservative binary bounds.
     halfway i64 = sext[i64](f.min_exp) - zext[i64](f.precision)
     if hex {
         if magnitude > sext[i64](f.max_exp) { return flt_infinity(f) }
@@ -156,15 +146,9 @@ fn flt_literal(s Bytes, first usize, end usize, digits i64, exponent i64, hex bo
         if magnitude > 5000 || magnitude * 3 > sext[i64](f.max_exp) { return flt_infinity(f) }
         if magnitude < -5100 || (magnitude + 1) * 3 <= halfway { return {0, 0} }
     }
-
-    // Even the smallest binary128 rounding boundaries terminate within
-    // 16,495 decimal places. Past 20,000 significant digits, the remaining
-    // suffix can only distinguish a midpoint from a value just above it.
     kept i64 = if digits < 20000 { digits } else { 20000 }
     scale i64 = exponent + step * (digits - kept)
     extra i64 = if hex { 0 } else if scale >= 0 { scale } else { -scale }
-    // 4 bits per mantissa digit and 3 per factor of 5, with headroom
-    // for quotient normalization and the remainder comparison.
     width u32 = trunc[u32](kept * 4 + extra * 3) + f.precision * 2 + 16
     n WideInt = wi_new(width)
     d WideInt = wi_new(width)
@@ -204,15 +188,13 @@ fn flt_narrow_value(bits u64, ty u32) f64 {
     return bitcast[f64](((exp + 1008) << 52) | (frac << 42))
 }
 
-fn flt_set_bits(n handle[Ast], bits FloatBits) void {
-    slot handle[FloatBits] = handle_from_addr(heap_alloc(sizeof[FloatBits]))
+fn flt_set_bits(p handle[Parser], n handle[Ast], bits FloatBits) void {
+    slot handle[FloatBits] = pa_alloc[FloatBits](p)
     slot.lo = bits.lo
     slot.hi = bits.hi
-    n.float_bits = slot
+    ast_ext(p, n).float_bits = slot
 }
 
-// Decode the source into an integer significand and a power of two so the
-// conversion to binary128 rounds directly from the original precision.
 fn flt_quad_const(a handle[Ast], out handle[FloatBits]) bool {
     scale i32 = 0
     sign u64 = 0
@@ -220,25 +202,25 @@ fn flt_quad_const(a handle[Ast], out handle[FloatBits]) bool {
     ty u32 = ty_unqual(a.ty)
     if (a.flags & NF_INT_VALUE) != 0 && ty_is_integer(ty) {
         width u32 = ty_int_bits(ty)
-        // Ratio normalization shifts the numerator and denominator in place-sized limbs.
         sig = wi_from_ast(a, width + 256)
         if !ty_is_unsigned(ty) && wi_bit(sig, width - 1) != 0 {
             wi_negate(sig)
             sign = 0x8000000000000000
         }
     } else if (a.flags & NF_FLOAT_CONST) != 0 && ty_is_real_float(ty) {
+        fb handle[FloatBits] = ast_float_bits(a)
         if ty == TY_FLOAT128 {
-            if a.float_bits == null { return false }
-            out.lo = a.float_bits.lo
-            out.hi = a.float_bits.hi
+            if fb == null { return false }
+            out.lo = fb.lo
+            out.hi = fb.hi
             return true
         }
         mant u64 = 0
         if ty == TY_LDOUBLE {
-            if a.float_bits == null { return false }
-            field u64 = a.float_bits.hi & 0x7fff
-            mant = a.float_bits.lo
-            sign = (a.float_bits.hi & 0x8000) << 48
+            if fb == null { return false }
+            field u64 = fb.hi & 0x7fff
+            mant = fb.lo
+            sign = (fb.hi & 0x8000) << 48
             if field == 0x7fff {
                 mant &= 0x7fffffffffffffff
                 out.hi = sign | 0x7fff000000000000 | (mant >> 15)
@@ -280,18 +262,18 @@ fn se_fold_quad_compare(p handle[Parser], t Token, n handle[Ast], a handle[Ast],
     my u64 = y.hi & 0x7fffffffffffffff
     nan bool = mx > 0x7fff000000000000 || my > 0x7fff000000000000 ||
         (mx == 0x7fff000000000000 && x.lo != 0) || (my == 0x7fff000000000000 && y.lo != 0)
-    if nan { return } // A signaling NaN comparison may raise an exception.
+    if nan { return }
     equal bool = (x.hi == y.hi && x.lo == y.lo) || (mx | my | x.lo | y.lo) == 0
     sx bool = x.hi != mx
     sy bool = y.hi != my
     mag_less bool = mx < my || (mx == my && x.lo < y.lo)
     less bool = !equal && (if sx != sy { sx } else { mag_less != sx })
     yes bool = equal
-    if pa_is(p, t, c"!=") { yes = !equal }
-    else if pa_is(p, t, c"<") { yes = less }
-    else if pa_is(p, t, c">") { yes = !less && !equal }
-    else if pa_is(p, t, c"<=") { yes = less || equal }
-    else if pa_is(p, t, c">=") { yes = !less }
+    if t.kind == TK_NE { yes = !equal }
+    else if t.kind == TK_LT { yes = less }
+    else if t.kind == TK_GT { yes = !less && !equal }
+    else if t.kind == TK_LE { yes = less || equal }
+    else if t.kind == TK_GE { yes = !less }
     n.value = if yes { 1 } else { 0 }
     n.flags |= NF_STATIC | NF_FOLD
 }

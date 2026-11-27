@@ -3,18 +3,6 @@
 // - Static global initializer serializer (bytes + zeros + reloc + bitfields + designators)
 // - Automatic local initializer emitter (zero-fill + stores + bitfields + designators)
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/buf.fas"
-use "../lib/bytes.fas"
-use "../lib/sort.fas"
-use "types.fas"
-use "layout.fas"
-use "abi.fas"
-use "fir_out.fas"
-use "parse.fas"
-use "gen.fas"
 
 // ---------- String Literal Decoder ----------
 
@@ -177,12 +165,12 @@ fn gen_decode_string_ast(n handle[Ast], out handle[Buf], include_nul bool) void 
     }
     if n.a == null {
         // __func__ / __FUNCTION__ / __PRETTY_FUNCTION__
-        nm Bytes = cc_name(gc.p.names, n.op)
+        nm Bytes = sym_name(&gc.p.ctx.syms, n.op)
         buf_append(out, nm)
     } else {
         piece handle[Ast] = n.a
         while piece != null {
-            src Bytes = cc_name(gc.p.names, piece.op)
+            src Bytes = sym_name(&gc.p.ctx.syms, piece.op)
             gen_decode_string_piece(src, elem_sz, out)
             piece = piece.next
         }
@@ -318,7 +306,7 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
     }
     if n.kind == ND_COND && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
         // Only the selected arm contributes its symbol and offset.
-        chosen handle[Ast] = if se_truth(n.a) { n.b } else { n.c }
+        chosen handle[Ast] = if se_truth(n.a) { n.b } else { ast_c(n) }
         return gen_eval_const_addr(chosen, out)
     }
     if n.kind == ND_STRING {
@@ -347,12 +335,12 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         return gen_eval_lvalue_addr(n, out)
     }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if bytes_eq_c(op, c"&") {
             return gen_eval_lvalue_addr(n.a, out)
         }
-        if bytes_eq_c(op, c"&&") && n.extra != null && gc.in_func {
-            blk u32 = gen_get_label_block(handle_from_addr(n.extra))
+        if bytes_eq_c(op, c"&&") && ast_extra(n) != null && gc.in_func {
+            blk u32 = gen_get_label_block(handle_from_addr(ast_extra(n)))
             gen_mark_addr_taken(blk)
             out.ok = true
             out.is_blockaddr = true
@@ -364,7 +352,7 @@ fn gen_eval_const_addr(n handle[Ast], out handle[ConstAddr]) bool {
         return false
     }
     if n.kind == ND_BINARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if bytes_eq_c(op, c"+") {
             if gen_eval_const_addr(n.a, out) && (n.b.flags & NF_ICE) != 0 {
                 elem_sz i64 = 1
@@ -424,7 +412,7 @@ fn gen_eval_lvalue_addr(n handle[Ast], out handle[ConstAddr]) bool {
         return true
     }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if bytes_eq_c(op, c"*") {
             return gen_eval_const_addr(n.a, out)
         }
@@ -438,7 +426,7 @@ fn gen_eval_lvalue_addr(n handle[Ast], out handle[ConstAddr]) bool {
             ok = gen_eval_lvalue_addr(n.a, out)
         }
         if !ok { return false }
-        out.addend += bitcast[i64](n.field_offset / 8)
+        out.addend += bitcast[i64](ast_field_offset(n) / 8)
         return true
     }
     if n.kind == ND_SUBSCRIPT {
@@ -542,9 +530,9 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                     if fidx >= rec.fields_len { break }
                     f handle[FieldDef] = ty_field(rec.fields_start + fidx)
                     if f.is_bitfield {
-                        if item.a != null && item.a.wide != null && f.bit_width > 64 {
+                        if item.a != null && ast_wide(item.a) != null && f.bit_width > 64 {
                             nw u32 = (f.bit_width + 31) / 32
-                            si_write_bitfield_wide(si, off * 8 + f.bit_off, f.bit_width, item.a.wide, nw)
+                            si_write_bitfield_wide(si, off * 8 + f.bit_off, f.bit_width, ast_wide(item.a), nw)
                         } else {
                             val u64 = gen_eval_const_int(item.a)
                             si_write_bitfield(si, off * 8 + f.bit_off, f.bit_width, val)
@@ -612,10 +600,10 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                 bits FloatBits = {}
                 if gen_static_f80_literal(init, &bits) {
                     gen_static_write_f80(si, bits, off + elem_sz)
-                } else { gen_static_write_float(si, elem_ty, init.imag, off + elem_sz) }
+                } else { gen_static_write_float(si, elem_ty, ast_imag(init), off + elem_sz) }
             } else {
                 re_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.value)))
-                im_i u64 = bitcast[u64](cvt[i64](bitcast[f64](init.imag)))
+                im_i u64 = bitcast[u64](cvt[i64](bitcast[f64](ast_imag(init))))
                 si_write_u64(si, off, re_i, elem_sz)
                 si_write_u64(si, off + elem_sz, im_i, elem_sz)
             }
@@ -629,9 +617,9 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
         return
     }
     if u == TY_FLOAT128 {
-        if init.float_bits != null {
-            si_write_u64(si, off, init.float_bits.lo, 8)
-            si_write_u64(si, off + 8, init.float_bits.hi, 8)
+        if ast_float_bits(init) != null {
+            si_write_u64(si, off, ast_float_bits(init).lo, 8)
+            si_write_u64(si, off + 8, ast_float_bits(init).hi, 8)
         }
         return
     }
@@ -641,8 +629,8 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
             gen_static_write_f80(si, bits, off)
             return
         }
-        if u != TY_LDOUBLE && ty_unqual(init.ty) == u && init.float_bits != null {
-            si_write_u64(si, off, init.float_bits.lo, ty_size(u))
+        if u != TY_LDOUBLE && ty_unqual(init.ty) == u && ast_float_bits(init) != null {
+            si_write_u64(si, off, ast_float_bits(init).lo, ty_size(u))
             return
         }
         fbits u64 = gen_eval_const_float(init)
@@ -660,12 +648,12 @@ fn gen_static_fill(si handle[StaticInit], tid u32, init handle[Ast], off u64) vo
                 return
             }
         }
-        if init.wide != null && sz > 8 {
+        if ast_wide(init) != null && sz > 8 {
             words u32 = (ty_int_bits(u) + 31) / 32
             copy_n u64 = zext[u64](words) * 4
             if copy_n > sz { copy_n = sz }
             if off + copy_n <= si.size {
-                mem_copy(si.data + off, init.wide, copy_n)
+                mem_copy(si.data + off, ast_wide(init), copy_n)
             }
             return
         }
@@ -751,13 +739,13 @@ fn gen_static_fill_desig(si handle[StaticInit], tid u32, desig handle[Ast], val_
 fn gen_static_f80_literal(n handle[Ast], out handle[FloatBits]) bool {
     sign u64 = 0
     while n != null {
-        if n.float_bits != null {
-            out.lo = n.float_bits.lo
-            out.hi = n.float_bits.hi ^ sign
+        if ast_float_bits(n) != null {
+            out.lo = ast_float_bits(n).lo
+            out.hi = ast_float_bits(n).hi ^ sign
             return true
         }
         if n.kind == ND_UNARY {
-            op Bytes = cc_name(gc.p.names, n.op)
+            op Bytes = sym_name(&gc.p.ctx.syms, n.op)
             if bytes_eq_c(op, c"-") || (bytes_eq_c(op, c"~") && ty_is_complex(n.ty)) { sign ^= 0x8000 }
             else if !bytes_eq_c(op, c"+") { return false }
             n = n.a
@@ -821,7 +809,7 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
         return v
     }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         if bytes_eq_c(op, c"&") && n.a != null && n.a.kind == ND_MEMBER {
             base u64 = gen_eval_const_int(n.a.a)
             return base + n.a.value
@@ -833,7 +821,7 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
         return v
     }
     if n.kind == ND_BINARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         lv u64 = gen_eval_const_int(n.a)
         rv u64 = gen_eval_const_int(n.b)
         res u64 = 0
@@ -857,7 +845,7 @@ fn gen_eval_const_int(n handle[Ast]) u64 {
         return res
     }
     if n.kind == ND_COND && ty_is_ptr(n.ty) && (n.a.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
-        return gen_eval_const_int(if se_truth(n.a) { n.b } else { n.c })
+        return gen_eval_const_int(if se_truth(n.a) { n.b } else { ast_c(n) })
     }
     if n.kind == ND_GENERIC && n.b != null { return gen_eval_const_int(n.b) }
     return n.value
@@ -884,7 +872,7 @@ fn gen_eval_const_float(n handle[Ast]) u64 {
         return bitcast[u64](cvt[f64](bitcast[i64](v)))
     }
     if n.kind == ND_UNARY {
-        op Bytes = cc_name(gc.p.names, n.op)
+        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
         fb u64 = gen_eval_const_float(n.a)
         if bytes_eq_c(op, c"-") { return fb ^ 0x8000000000000000 }
         return fb

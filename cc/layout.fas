@@ -3,8 +3,6 @@
 // struct/union/bitfield layout with packed, aligned, #pragma pack,
 // zero-width bitfields, _BitInt bitfields, and flexible array members.
 
-use "types.fas"
-
 fn align_up_u64(v u64, a u64) u64 {
     if a <= 1 { return v }
     rem u64 = v % a
@@ -286,16 +284,19 @@ struct FieldLookup {
 }
 
 fn layout_find_field_rec(rec_id u32, name_id u32, base_bit_off u64, out handle[FieldLookup]) bool {
-    layout_record(rec_id)
     rec handle[RecordDef] = ty_record(rec_id)
-    for i u32 in 0..rec.fields_len {
-        idx u32 = rec.fields_start + i
-        f handle[FieldDef] = ty_field(idx)
-        if f.name_id == name_id && name_id != 0 {
+    if !rec.layout_done { layout_record(rec_id) }
+    if name_id == 0 { return false }
+    start u32 = rec.fields_start
+    count u32 = rec.fields_len
+    fp addr = tc.fields.p + zext[usize](start) * sizeof[FieldDef]
+    for i u32 in 0..count {
+        f handle[FieldDef] = handle_from_addr(fp + zext[usize](i) * sizeof[FieldDef])
+        if f.name_id == name_id {
             total_bits u64 = base_bit_off + f.bit_off
             out.found = true
             out.is_bitfield = f.is_bitfield
-            out.field_idx = idx
+            out.field_idx = start + i
             out.record_id = rec_id
             out.ty = f.ty
             out.bit_width = f.bit_width
@@ -314,7 +315,6 @@ fn layout_find_field_rec(rec_id u32, name_id u32, base_bit_off u64, out handle[F
 }
 
 fn ty_offsetof(record_tid u32, name_id u32, out handle[FieldLookup]) bool {
-    mem_set(handle_addr(out), 0, sizeof[FieldLookup])
     u u32 = ty_unqual(record_tid)
     n handle[TypeNode] = ty_node(u)
     assert(n.kind == TYK_STRUCT || n.kind == TYK_UNION)

@@ -1,6 +1,4 @@
-// Little-endian 32-bit limbs support _BitInt beyond the native Fas integer
-// widths. Limb arithmetic uses 64-bit intermediates. Signed values are stored
-// in two's complement at their C type width, as for the narrow evaluator.
+// cc2/sema_wide.fas: Little-endian 32-bit limbs for _BitInt > 64 bits.
 value struct WideInt { p addr, width u32, words u32 }
 
 fn wi_new(width u32) WideInt {
@@ -49,7 +47,8 @@ fn wi_from_ast(a handle[Ast], width u32) WideInt {
     dest WideInt = wi_new(width)
     old_width u32 = ty_int_bits(a.ty)
     if old_width == 0 { return dest }
-    if a.wide == null {
+    aw addr = ast_wide(a)
+    if aw == null {
         narrow u64 = a.value
         dest.p[u32] = trunc[u32](narrow)
         if dest.words > 1 { dest.p[u32, 1] = trunc[u32](narrow >> 32) }
@@ -59,8 +58,8 @@ fn wi_from_ast(a handle[Ast], width u32) WideInt {
     } else {
         old_words u32 = (old_width + 31) / 32
         count u32 = if old_words < dest.words { old_words } else { dest.words }
-        mem_copy(dest.p, a.wide, zext[usize](count) * 4)
-        old WideInt = {a.wide, old_width, old_words}
+        mem_copy(dest.p, aw, zext[usize](count) * 4)
+        old WideInt = {aw, old_width, old_words}
         if width > old_width && !ty_is_unsigned(a.ty) && wi_bit(old, old_width - 1) != 0 {
             dest.p[u32, zext[usize](old_words - 1)] |= ~wi_top_mask(old)
             for i u32 in old_words..dest.words { dest.p[u32, zext[usize](i)] = ~0 }
@@ -70,15 +69,21 @@ fn wi_from_ast(a handle[Ast], width u32) WideInt {
     return dest
 }
 
-fn wi_store(a handle[Ast], w WideInt) void {
+fn wi_store(p handle[Parser], a handle[Ast], w WideInt) void {
     a.value = se_value(a.ty, wi_low(w))
-    if w.width > 64 { a.wide = w.p }
+    if w.width > 64 {
+        mem addr = arena_alloc(p.cur_arena, zext[usize](w.words) * 4, 4)
+        mem_copy(mem, w.p, zext[usize](w.words) * 4)
+        ast_set_wide(p, a, mem)
+    }
+    heap_free(w.p)
 }
 
 fn wi_ast_length(a handle[Ast]) u32 {
-    if a.wide != null {
+    aw addr = ast_wide(a)
+    if aw != null {
         width u32 = ty_int_bits(a.ty)
-        return wi_length({a.wide, width, (width + 31) / 32})
+        return wi_length({aw, width, (width + 31) / 32})
     }
     if a.value == 0 { return 0 }
     return 64 - trunc[u32](clz(a.value))
@@ -198,7 +203,7 @@ fn wi_divide(a WideInt, b WideInt, modulo bool) WideInt {
     return quot
 }
 
-fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool, wrapv bool) void {
+fn wi_unary(p handle[Parser], n handle[Ast], a handle[Ast], negate bool, tilde bool, wrapv bool) void {
     width u32 = ty_int_bits(n.ty)
     x WideInt = wi_from_ast(a, width)
     if tilde {
@@ -210,7 +215,7 @@ fn wi_unary(n handle[Ast], a handle[Ast], negate bool, tilde bool, wrapv bool) v
         wi_negate(x)
         if !wrapv && !ty_is_unsigned(n.ty) && sign != 0 && wi_bit(x, width - 1) != 0 { n.flags |= NF_OVERFLOW }
     }
-    wi_store(n, x)
+    wi_store(p, n, x)
 }
 
 fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[Ast], ty u32, k u8) void {
@@ -225,11 +230,11 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
     if k == 8 || k == 9 {
         cmp i32 = if sx != sy { if sx { -1 } else { 1 } } else { wi_cmp(x, y) }
         yes bool = cmp == 0
-        if pa_is(p, t, c"!=") { yes = cmp != 0 }
-        else if pa_is(p, t, c"<") { yes = cmp < 0 }
-        else if pa_is(p, t, c">") { yes = cmp > 0 }
-        else if pa_is(p, t, c"<=") { yes = cmp <= 0 }
-        else if pa_is(p, t, c">=") { yes = cmp >= 0 }
+        if t.kind == TK_NE { yes = cmp != 0 }
+        else if t.kind == TK_LT { yes = cmp < 0 }
+        else if t.kind == TK_GT { yes = cmp > 0 }
+        else if t.kind == TK_LE { yes = cmp <= 0 }
+        else if t.kind == TK_GE { yes = cmp >= 0 }
         n.value = if yes { 1 } else { 0 }
         return
     }
@@ -244,7 +249,7 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
     } else if k == 10 {
         if b.value >= zext[u64](width) || wi_ast_length(b) > 32 { n.flags |= NF_OVERFLOW; return }
         shift u32 = trunc[u32](b.value)
-        left bool = pa_is(p, t, c"<<")
+        left bool = t.kind == TK_SHL
         dest = wi_shift(x, shift, left, sx)
         if left && sx {
             n.flags = (n.flags & ~NF_ICE) | NF_FOLD
@@ -258,7 +263,7 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
             n.flags |= NF_OVERFLOW
         }
     } else if k == 11 {
-        sub bool = pa_is(p, t, c"-")
+        sub bool = t.kind == TK_MINUS
         wi_add(x, y, sub)
         sz bool = wi_bit(x, width - 1) != 0
         if !p.pp.wrapv && signed_ty && sx != sz && (sx != sy) == sub { n.flags |= NF_OVERFLOW }
@@ -266,7 +271,7 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
         if sx { wi_negate(x) }
         if sy { wi_negate(y) }
         neg bool = sx != sy
-        if pa_is(p, t, c"*") {
+        if t.kind == TK_STAR {
             dest = wi_product(x, y, if signed_ty { width * 2 } else { width })
             if signed_ty {
                 length u32 = wi_length(dest)
@@ -278,20 +283,18 @@ fn wi_binary(p handle[Parser], t Token, n handle[Ast], a handle[Ast], b handle[A
             }
         } else {
             if wi_length(y) == 0 { n.flags |= NF_OVERFLOW; return }
-            modulo bool = pa_is(p, t, c"%")
+            modulo bool = t.kind == TK_PERCENT
             if signed_ty && sx && sy && wi_length(x) == width && wi_length(y) == 1 { n.flags |= NF_OVERFLOW }
             dest = wi_divide(x, y, modulo)
             if modulo { neg = sx }
         }
         if neg { wi_negate(dest) }
     }
-    // x is a scratch copy; transfer its words into separately owned storage
-    // if this operation reused it in place.
     if dest.p == x.p {
         dest = wi_new(width)
         mem_copy(dest.p, x.p, zext[usize](dest.words) * 4)
     }
-    wi_store(n, dest)
+    wi_store(p, n, dest)
 }
 
 fn wi_only_bit(x WideInt, bit u32) bool {

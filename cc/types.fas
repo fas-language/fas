@@ -2,14 +2,6 @@
 // equality for all structural types; nominal identity for struct/union/enum).
 // All state lives in TypeCtx behind a single thread-local handle `tc`.
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/bytes.fas"
-use "../lib/table.fas"
-use "../lib/intern.fas"
-use "../lib/sort.fas"
-
 // ---------- TypeId constants (pre-interned in tc_init) ----------
 const TY_INVALID u32     = 0
 const TY_VOID u32        = 1
@@ -106,6 +98,8 @@ struct TypeNode {
                     // arr_kind (ARRAY)
     aux2 u32        // params_len (FUNC), vla_expr (ARRAY VLA)
     arr_len u64     // element count for ARR_FIXED
+    ptr_ty u32      // cached ty_ptr(this), 0 = not yet interned
+    const_ty u32    // cached ty_qual(this, Q_CONST), 0 = not yet interned
 }
 
 struct FieldDef {
@@ -234,7 +228,7 @@ struct TypeCtx {
     enum_members Vec[EnumMember]
     intern_ty Table[TyKey, u32, ty_key_hash, ty_key_eq]
     intern_fn Table[FnKey, u32, fn_key_hash, fn_key_eq]
-    names Intern
+    syms handle[SymTable]
 }
 
 thread var tc handle[TypeCtx] = null
@@ -260,16 +254,14 @@ fn tc_intern_prim(kind u8, flags u32) u32 {
     return id
 }
 
-fn tc_init(ctx handle[TypeCtx]) void {
+fn tc_init(ctx handle[TypeCtx], syms handle[SymTable]) void {
     mem_set(handle_addr(ctx), 0, sizeof[TypeCtx])
+    ctx.syms = syms
     tc = ctx
     // Slot 0 = TY_INVALID
     empty_node TypeNode = {}
     z0 u32 = tc_push_node(&empty_node)
     assert(z0 == 0)
-    // Intern empty string as name id 0 so 0 means unnamed
-    z1 u32 = intern(&tc.names, bytes_c(c""))
-    assert(z1 == 0)
 
     // Pre-intern all primitive types at fixed IDs 1..20
     assert(tc_intern_prim(TYK_VOID, 0) == TY_VOID)
@@ -311,20 +303,19 @@ fn tc_free(ctx handle[TypeCtx]) void {
     vec_free(&ctx.enum_members)
     table_free(&ctx.intern_ty)
     table_free(&ctx.intern_fn)
-    intern_free(&ctx.names)
     if tc == ctx { tc = null }
 }
 
 fn tc_intern_name(s Bytes) u32 {
-    return intern(&tc.names, s)
+    return sym_intern_b(tc.syms, s)
 }
 
 fn tc_intern_cstr(s addr) u32 {
-    return intern(&tc.names, bytes_c(s))
+    return sym_intern_c(tc.syms, s)
 }
 
 fn tc_name_bytes(id u32) Bytes {
-    return intern_name(&tc.names, id)
+    return sym_name(tc.syms, id)
 }
 
 // ---------- Node accessors ----------
@@ -379,10 +370,14 @@ fn ty_complex(elem u32) u32 {
 }
 
 fn ty_ptr(pointee u32) u32 {
+    cached u32 = ty_node(pointee).ptr_ty
+    if cached != 0 { return cached }
     k TyKey = {}
     k.kind = TYK_PTR
     k.elem = pointee
-    return tc_intern_struct_node(&k)
+    id u32 = tc_intern_struct_node(&k)
+    ty_node(pointee).ptr_ty = id
+    return id
 }
 
 fn ty_array(elem u32, n_elems u64) u32 {
@@ -422,10 +417,21 @@ fn ty_vector(elem u32, total_bytes u32) u32 {
 // Qualify a type with const/volatile/restrict/_Atomic/packed and/or aligned(N).
 // Merges cleanly with an existing TYK_QUAL wrapper so TYK_QUAL never nests.
 fn ty_qual_attr(tid u32, quals u32, align_attr u32) u32 {
+    if quals == 0 && align_attr == 0 { return tid }
+    n handle[TypeNode] = ty_node(tid)
+    if quals == Q_CONST && align_attr == 0 && n.kind != TYK_QUAL && n.kind != TYK_ARRAY {
+        if n.const_ty != 0 { return n.const_ty }
+        k TyKey = {}
+        k.kind = TYK_QUAL
+        k.flags = Q_CONST
+        k.elem = tid
+        id u32 = tc_intern_struct_node(&k)
+        ty_node(tid).const_ty = id
+        return id
+    }
     base u32 = tid
     q u32 = quals
     al u32 = align_attr
-    n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL {
         base = n.elem
         q = q | n.flags
@@ -638,30 +644,35 @@ fn ty_enum_find_member(e handle[EnumDef], name u32) handle[EnumMember] {
 // ---------- Type inspection helpers ----------
 
 fn ty_unqual(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return tid }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.elem }
     return tid
 }
 
 fn ty_quals(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return 0 }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.flags & 15 }
     return 0
 }
 
 fn ty_align_attr(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return 0 }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.aux1 }
     return 0
 }
 
 fn ty_has_packed_attr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return (n.flags & Q_PACKED) != 0 }
     return false
 }
 
 fn ty_has_transparent_attr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
     n handle[TypeNode] = ty_node(tid)
     return n.kind == TYK_QUAL && (n.flags & Q_TRANSPARENT_UNION) != 0
 }
@@ -699,49 +710,102 @@ fn ty_canon_int(tid u32) u32 {
     return u
 }
 
-fn ty_is_void(tid u32) bool { return ty_kind(tid) == TYK_VOID }
-fn ty_is_bool(tid u32) bool { return ty_kind(tid) == TYK_BOOL }
-fn ty_is_ptr(tid u32) bool { return ty_kind(tid) == TYK_PTR }
-fn ty_is_array(tid u32) bool { return ty_kind(tid) == TYK_ARRAY }
-fn ty_is_func(tid u32) bool { return ty_kind(tid) == TYK_FUNC }
+fn ty_is_void(tid u32) bool {
+    if tid == TY_VOID { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_VOID
+}
+fn ty_is_bool(tid u32) bool {
+    if tid == TY_BOOL { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_BOOL
+}
+fn ty_is_ptr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_PTR
+}
+fn ty_is_array(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_ARRAY
+}
+fn ty_is_func(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_FUNC
+}
 fn ty_is_record(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
     k u8 = ty_kind(tid)
     return k == TYK_STRUCT || k == TYK_UNION
 }
-fn ty_is_enum(tid u32) bool { return ty_kind(tid) == TYK_ENUM }
-fn ty_is_bitint(tid u32) bool { return ty_kind(tid) == TYK_BITINT }
-fn ty_is_vector(tid u32) bool { return ty_kind(tid) == TYK_VECTOR }
-fn ty_is_complex(tid u32) bool { return ty_kind(tid) == TYK_COMPLEX }
-fn ty_is_nullptr(tid u32) bool { return ty_kind(tid) == TYK_NULLPTR }
+fn ty_is_enum(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_ENUM
+}
+fn ty_is_bitint(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_BITINT
+}
+fn ty_is_vector(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_VECTOR
+}
+fn ty_is_complex(tid u32) bool {
+    if tid <= TY_FLOAT128 { return tid >= TY_COMPLEX_F16 && tid <= TY_COMPLEX_F80 }
+    return ty_kind(tid) == TYK_COMPLEX
+}
+fn ty_is_nullptr(tid u32) bool {
+    if tid == TY_NULLPTR { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_NULLPTR
+}
 
 fn ty_is_integer(tid u32) bool {
+    if tid >= TY_BOOL && tid <= TY_UINT128 { return true }
+    if tid <= TY_FLOAT128 { return false }
     k u8 = ty_kind(tid)
     return (k >= TYK_BOOL && k <= TYK_BITINT) || k == TYK_ENUM
 }
 
 fn ty_is_real_float(tid u32) bool {
+    if tid <= TY_FLOAT128 {
+        return (tid >= TY_FLOAT16 && tid <= TY_LDOUBLE) || tid == TY_BFLOAT16 || tid == TY_FLOAT128
+    }
     k u8 = ty_kind(tid)
     return (k >= TYK_FLOAT16 && k <= TYK_LDOUBLE) || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_floating(tid u32) bool {
-    k u8 = ty_kind(tid)
-    if ty_is_real_float(tid) { return true }
+    if tid <= TY_FLOAT128 {
+        return (tid >= TY_FLOAT16 && tid <= TY_LDOUBLE) || (tid >= TY_COMPLEX_F16 && tid <= TY_FLOAT128)
+    }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if (k >= TYK_FLOAT16 && k <= TYK_LDOUBLE) || k == TYK_BFLOAT16 || k == TYK_FLOAT128 { return true }
     if k == TYK_COMPLEX {
-        return ty_is_real_float(ty_node(ty_unqual(tid)).elem)
+        return ty_is_real_float(n.elem)
     }
     return false
 }
 
 fn ty_is_arith(tid u32) bool {
-    return ty_is_integer(tid) || ty_is_floating(tid) || ty_is_complex(tid)
+    if tid >= TY_BOOL && tid <= TY_FLOAT128 { return tid != TY_NULLPTR }
+    if tid <= TY_FLOAT128 { return false }
+    k u8 = ty_kind(tid)
+    return (k >= TYK_BOOL && k <= TYK_COMPLEX) || k == TYK_ENUM || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_scalar(tid u32) bool {
-    return ty_is_arith(tid) || ty_is_ptr(tid) || ty_is_nullptr(tid)
+    if tid >= TY_BOOL && tid <= TY_FLOAT128 { return true }
+    if tid <= TY_FLOAT128 { return false }
+    k u8 = ty_kind(tid)
+    return (k >= TYK_BOOL && k <= TYK_PTR) || k == TYK_ENUM || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_unsigned(tid u32) bool {
+    if tid == TY_INT || tid == TY_LONG || tid == TY_LLONG || tid == TY_SHORT || tid == TY_SCHAR || tid == TY_INT128 { return false }
+    if tid == TY_UINT || tid == TY_ULONG || tid == TY_ULLONG || tid == TY_USHORT || tid == TY_UCHAR || tid == TY_BOOL || tid == TY_UINT128 { return true }
+    if tid == TY_CHAR { return tc.unsigned_char }
     c u32 = ty_canon_int(tid)
     n handle[TypeNode] = ty_node(c)
     return (n.flags & TYF_UNSIGNED) != 0 || (n.kind == TYK_CHAR && tc.unsigned_char)
@@ -758,6 +822,13 @@ fn ty_uint64_type() u32 { return if tc.ilp32 { TY_ULLONG } else { TY_ULONG } }
 
 // Bit width of an integer type (for promotions & usual arithmetic conversions)
 fn ty_int_bits(tid u32) u32 {
+    if tid == TY_INT || tid == TY_UINT { return 32 }
+    if tid == TY_LONG || tid == TY_ULONG { return if tc.ilp32 { 32 } else { 64 } }
+    if tid == TY_LLONG || tid == TY_ULLONG { return 64 }
+    if tid == TY_CHAR || tid == TY_SCHAR || tid == TY_UCHAR { return 8 }
+    if tid == TY_SHORT || tid == TY_USHORT { return 16 }
+    if tid == TY_BOOL { return 1 }
+    if tid == TY_INT128 || tid == TY_UINT128 { return 128 }
     c u32 = ty_canon_int(tid)
     n handle[TypeNode] = ty_node(c)
     k u8 = n.kind

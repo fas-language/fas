@@ -1,7 +1,7 @@
-// Declaration semantics and C's value transformations. Symbol records are
-// allocated separately from the hash tables so references survive scope exit.
-fn se_symbol(name u32, loc u32, ty u32, storage u8) handle[Symbol] {
-    s handle[Symbol] = pa_alloc[Symbol]()
+// cc2/sema.fas: Declaration semantics, linkage, and value transformations.
+
+fn se_symbol(p handle[Parser], name u32, loc u32, ty u32, storage u8, tu_lifetime bool) handle[Symbol] {
+    s handle[Symbol] = if tu_lifetime { pa_tu_alloc[Symbol](p) } else { pa_alloc[Symbol](p) }
     s.name = name
     s.loc = loc
     s.ty = ty
@@ -11,8 +11,7 @@ fn se_symbol(name u32, loc u32, ty u32, storage u8) handle[Symbol] {
 
 fn se_bind(p handle[Parser], s handle[Symbol]) void {
     if s.name == 0 { return }
-    scope handle[Scope] = p.scope
-    map_put(&scope.ordinary, s.name, handle_addr(s))
+    pa_bind_ord(p, s.name, s)
 }
 
 fn se_cleanup_attribute(p handle[Parser], s handle[Symbol], file bool, func bool) void fails {
@@ -20,27 +19,25 @@ fn se_cleanup_attribute(p handle[Parser], s handle[Symbol], file bool, func bool
     while a != null && !pa_attr_name(p, a, c"cleanup") { a = a.next }
     if a == null { return }
     if file || func || s.linkage != 0 || s.storage == SC_STATIC || s.storage == SC_TYPEDEF || s.thread_local {
-        cc_diag(p.names, a.loc, c"warning: ", bytes_c(c"cleanup attribute requires an automatic object"))
+        cc_diag(p.ctx, a.loc, c"warning: ", bytes_c(c"cleanup attribute requires an automatic object"))
         return
     }
-    if a.args.n != 1 || a.args.p[Token].kind != TK_IDENT {
+    if a.args_n != 1 || a.args_p[Token].kind != TK_IDENT {
         try pa_error(p, a.loc, c"cleanup attribute requires a function identifier")
     }
-    target handle[Symbol] = pa_lookup(p, cc_ident(p.names, a.args.p[Token]))
+    target handle[Symbol] = pa_lookup(p, cc_ident(p.ctx, a.args_p[Token]))
     if target == null || !ty_is_func(target.ty) { try pa_error(p, a.loc, c"cleanup attribute names no visible function") }
     ft handle[TypeNode] = ty_node(ty_unqual(target.ty))
     if ft.aux2 > 1 || (ft.aux2 == 0 && (ft.flags & TYF_VARIADIC) == 0) {
         try pa_error(p, a.loc, c"cleanup function must accept one argument")
     }
     if ft.aux2 == 1 && s.ty != TY_INVALID {
-        arg handle[Ast] = pa_node(ND_UNARY, a.loc, ty_ptr(s.ty))
+        arg handle[Ast] = pa_node(p, ND_UNARY, a.loc, ty_ptr(s.ty))
         try se_conversion(p, tc.fn_params.p[u32, zext[usize](ft.aux1)], arg)
     }
     s.cleanup = handle_addr(target)
 }
 
-// This target uses the x86-64 interrupt signature. The optional error code
-// has the same width and type as the hardware stack slot.
 fn se_interrupt_signature(p handle[Parser], s handle[Symbol]) void fails {
     fn_type handle[TypeNode] = ty_node(ty_unqual(s.ty))
     if !ty_is_void(fn_type.elem) || (fn_type.flags & TYF_VARIADIC) != 0 ||
@@ -52,18 +49,19 @@ fn se_interrupt_signature(p handle[Parser], s handle[Symbol]) void fails {
 }
 
 fn se_malloc_attribute(p handle[Parser], a handle[Attr], count u32) void fails {
-    replay Parser = {}
-    pa_attr_replay(p, a, &replay)
-    name Token = try pa_take(&replay)
+    save ReplaySave = {}
+    try pa_attr_replay(p, a, &save)
+    defer { pa_attr_restore(p, &save) }
+    name Token = try pa_take(p)
     if name.kind != TK_IDENT { try pa_error(p, name.loc, c"malloc attribute requires a deallocator function") }
     param u64 = 1
     if count == 2 {
-        try pa_expect(&replay, c",")
-        param = try se_ice(p, try pa_expression(&replay, 3))
+        try pa_expect_k(p, TK_COMMA)
+        param = try se_ice(p, try pa_expression(p, 3))
     }
-    if (try pa_peek(&replay)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in malloc attribute") }
-    target handle[Symbol] = pa_lookup(p, cc_ident(p.names, name))
-    if target == null && pa_is(p, name, c"__builtin_free") && param == 1 { return }
+    if p.cur.kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in malloc attribute") }
+    target handle[Symbol] = pa_lookup(p, cc_ident(p.ctx, name))
+    if target == null && bytes_eq_c(tok_spelling(p.ctx, name), c"__builtin_free") && param == 1 { return }
     if target == null || !ty_is_func(target.ty) { try pa_error(p, name.loc, c"malloc attribute names no visible function") }
     ft handle[TypeNode] = ty_node(ty_unqual(target.ty))
     if param == 0 || param > zext[u64](ft.aux2) ||
@@ -72,12 +70,12 @@ fn se_malloc_attribute(p handle[Parser], a handle[Attr], count u32) void fails {
     }
 }
 
-fn se_callback_index(p handle[Parser], replay handle[Parser], params handle[Param], n u32, unknown bool) u32 fails {
-    tok Token = try pa_peek(replay)
+fn se_callback_index(p handle[Parser], params handle[Param], n u32, unknown bool) u32 fails {
+    tok Token = p.cur
     if tok.kind == TK_IDENT {
-        try pa_take(replay)
-        if unknown && pa_is(p, tok, c"__") { return 0 }
-        name u32 = cc_ident(p.names, tok)
+        try pa_bump(p)
+        if unknown && bytes_eq_c(tok_spelling(p.ctx, tok), c"__") { return 0 }
+        name u32 = cc_ident(p.ctx, tok)
         i u32 = 1
         while params != null {
             if params.name == name { return i }
@@ -86,15 +84,13 @@ fn se_callback_index(p handle[Parser], replay handle[Parser], params handle[Para
         }
         try pa_error(p, tok.loc, c"callback attribute names no parameter")
     }
-    e handle[Ast] = try pa_expression(replay, 3)
+    e handle[Ast] = try pa_expression(p, 3)
     index u64 = try se_ice(p, e)
     if unknown && !ty_is_unsigned(e.ty) && index == ~0 { return 0 }
     if index == 0 || index > zext[u64](n) { try pa_error(p, tok.loc, c"callback parameter index is out of range") }
     return trunc[u32](index)
 }
 
-// A callback attribute records a broker's callee parameter and the
-// parameters forwarded by that broker. Unknown forwarded values use -1.
 fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
     a handle[Attr] = s.attrs
     seen bool = false
@@ -102,12 +98,13 @@ fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
         if pa_attr_name(p, a, c"callback") {
             if seen { try pa_error(p, a.loc, c"duplicate callback attribute") }
             seen = true
-            if a.args.n == 0 { try pa_error(p, a.loc, c"callback attribute requires a callee parameter") }
-            replay Parser = {}
-            pa_attr_replay(p, a, &replay)
+            if a.args_n == 0 { try pa_error(p, a.loc, c"callback attribute requires a callee parameter") }
+            save ReplaySave = {}
+            try pa_attr_replay(p, a, &save)
+            defer { pa_attr_restore(p, &save) }
             broker handle[TypeNode] = ty_node(ty_unqual(s.ty))
             params handle[Param] = handle_from_addr(s.params)
-            index u32 = try se_callback_index(p, &replay, params, broker.aux2, false)
+            index u32 = try se_callback_index(p, params, broker.aux2, false)
             ptr u32 = ty_unqual(tc.fn_params.p[u32, zext[usize](broker.aux1 + index - 1)])
             if !ty_is_ptr(ptr) || !ty_is_func(ty_node(ptr).elem) {
                 try pa_error(p, a.loc, c"callback callee must be a function pointer parameter")
@@ -115,11 +112,11 @@ fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
             callee handle[TypeNode] = ty_node(ty_unqual(ty_node(ptr).elem))
             if (callee.flags & TYF_VARIADIC) != 0 { try pa_error(p, a.loc, c"callback callee cannot be variadic") }
             forwarded u32 = 0
-            while try pa_accept(&replay, c",") {
-                try se_callback_index(p, &replay, params, broker.aux2, true)
+            while try pa_accept_k(p, TK_COMMA) {
+                try se_callback_index(p, params, broker.aux2, true)
                 forwarded += 1
             }
-            if (try pa_peek(&replay)).kind != TK_EOF || forwarded != callee.aux2 {
+            if p.cur.kind != TK_EOF || forwarded != callee.aux2 {
                 try pa_error(p, a.loc, c"callback argument count disagrees with its callee prototype")
             }
         }
@@ -127,16 +124,16 @@ fn se_callback_attributes(p handle[Parser], s handle[Symbol]) void fails {
     }
 }
 
-// Validate the parameter map for Clang's fortify diagnostic forwarding.
 fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
     a handle[Attr] = s.attrs
     while a != null {
         if pa_attr_name(p, a, c"diagnose_as_builtin") {
-            replay Parser = {}
-            pa_attr_replay(p, a, &replay)
-            t Token = try pa_take(&replay)
+            save ReplaySave = {}
+            try pa_attr_replay(p, a, &save)
+            defer { pa_attr_restore(p, &save) }
+            t Token = try pa_take(p)
             if t.kind != TK_IDENT { try pa_error(p, t.loc, c"diagnose_as_builtin requires a builtin function") }
-            name Bytes = cc_spelling(p.names, t)
+            name Bytes = tok_spelling(p.ctx, t)
             if bytes_starts_with(name, bytes_c(c"__builtin_")) { name = bytes_from(name, 10) }
             expected arr[3, u32] = {}
             n u32 = 3
@@ -153,8 +150,8 @@ fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
             }
             ft handle[TypeNode] = ty_node(ty_unqual(s.ty))
             for i u32 in 0..n {
-                try pa_expect(&replay, c",")
-                e handle[Ast] = try pa_expression(&replay, 3)
+                try pa_expect_k(p, TK_COMMA)
+                e handle[Ast] = try pa_expression(p, 3)
                 index u64 = try se_ice(p, e)
                 if index == 0 || index > zext[u64](ft.aux2) {
                     try pa_error(p, e.loc, c"diagnose_as_builtin parameter index is out of range")
@@ -164,7 +161,7 @@ fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
                     try pa_error(p, e.loc, c"diagnose_as_builtin parameter type disagrees with the builtin")
                 }
             }
-            if (try pa_peek(&replay)).kind != TK_EOF {
+            if p.cur.kind != TK_EOF {
                 try pa_error(p, a.loc, c"extra arguments in diagnose_as_builtin parameter map")
             }
         }
@@ -172,23 +169,22 @@ fn se_diagnose_as_builtin(p handle[Parser], s handle[Symbol]) void fails {
     }
 }
 
-// Record vendor dialects for later consumers. Validate the argument positions
-// against the prototype and the format type for the narrow string dialects.
 fn se_format_attributes(p handle[Parser], s handle[Symbol]) void fails {
     ft handle[TypeNode] = ty_node(ty_unqual(s.ty))
     a handle[Attr] = s.attrs
     while a != null {
         if pa_attr_name(p, a, c"format") {
-            replay Parser = {}
-            pa_attr_replay(p, a, &replay)
-            dialect Token = try pa_take(&replay)
+            save ReplaySave = {}
+            try pa_attr_replay(p, a, &save)
+            defer { pa_attr_restore(p, &save) }
+            dialect Token = try pa_take(p)
             if dialect.kind != TK_IDENT { try pa_error(p, dialect.loc, c"expected format dialect identifier") }
-            kind Bytes = feature_attr(cc_spelling(p.names, dialect))
-            try pa_expect(&replay, c",")
-            fmt u64 = try se_ice(p, try pa_expression(&replay, 3))
-            try pa_expect(&replay, c",")
-            first u64 = try se_ice(p, try pa_expression(&replay, 3))
-            if (try pa_peek(&replay)).kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in format attribute") }
+            kind Bytes = feature_attr(tok_spelling(p.ctx, dialect))
+            try pa_expect_k(p, TK_COMMA)
+            fmt u64 = try se_ice(p, try pa_expression(p, 3))
+            try pa_expect_k(p, TK_COMMA)
+            first u64 = try se_ice(p, try pa_expression(p, 3))
+            if p.cur.kind != TK_EOF { try pa_error(p, a.loc, c"extra tokens in format attribute") }
             params u64 = zext[u64](ft.aux2)
             if fmt == 0 || fmt > params { try pa_error(p, a.loc, c"format index is out of range") }
             if first != 0 {
@@ -213,14 +209,6 @@ fn se_format_attributes(p handle[Parser], s handle[Symbol]) void fails {
     }
 }
 
-fn se_local(p handle[Parser], name u32) handle[Symbol] {
-    scope handle[Scope] = p.scope
-    a addr = map_get(&scope.ordinary, name) catch null
-    return handle_from_addr(a)
-}
-
-// Alias and IFUNC attributes create a definition even without a body or
-// initializer. Weak references name a different symbol and must be local.
 fn se_linkage_attributes(p handle[Parser], s handle[Symbol], prior handle[Symbol],
                          definition bool, tentative bool) bool fails {
     alias bool = pa_has_attr(p, s.attrs, c"alias")
@@ -243,7 +231,7 @@ fn se_linkage_attributes(p handle[Parser], s handle[Symbol], prior handle[Symbol
     a handle[Attr] = s.attrs
     while a != null && !pa_attr_name(p, a, c"weakref") { a = a.next }
     if a != null {
-        if a.args.n == 0 && !alias {
+        if a.args_n == 0 && !alias {
             try pa_error(p, a.loc, c"weakref requires an alias target")
         }
         if s.linkage != 1 { try pa_error(p, a.loc, c"weakref requires internal linkage") }
@@ -255,7 +243,7 @@ fn se_linkage_attributes(p handle[Parser], s handle[Symbol], prior handle[Symbol
 }
 
 fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative bool) handle[Symbol] fails {
-    prior handle[Symbol] = se_local(p, s.name)
+    prior handle[Symbol] = pa_lookup_local(p, s.name)
     if s.linkage != 0 && prior == null {
         if s.storage == SC_EXTERN || ty_is_func(s.ty) {
             visible handle[Symbol] = pa_lookup(p, s.name)
@@ -265,12 +253,8 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
             }
         }
         if prior == null && s.linkage == 2 {
-            previous addr = map_get(&p.external, s.name) catch null
-            prior = handle_from_addr(previous)
-            // A linked declaration in a different scope still has to be
-            // compatible, but it only supplies the visible type when the
-            // previous declaration is in scope.
-            if prior != null && p.scope != p.file_scope {
+            prior = pa_lookup_ext(p, s.name)
+            if prior != null && p.scope_depth != 1 {
                 if prior.thread_local != s.thread_local || !ty_compatible(prior.ty, s.ty) {
                     try pa_error(p, s.loc, c"conflicting types or storage duration for external declaration")
                 }
@@ -287,9 +271,7 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         !pa_has_attr(p, s.attrs, c"sysv_abi") && !pa_has_attr(p, s.attrs, c"cdecl") {
         s.ty = ty_func_ms_abi(s.ty)
     }
-    // An earlier block-scope extern may have left no visible file-scope
-    // declaration, but it still established the name's external linkage.
-    if s.linkage == 1 && p.scope == p.file_scope && map_has(&p.external, s.name) {
+    if s.linkage == 1 && p.scope_depth == 1 && pa_lookup_ext(p, s.name) != null {
         try pa_error(p, s.loc, c"static declaration follows an external declaration")
     }
     attr_definition bool = try se_linkage_attributes(p, s, prior, definition, tentative)
@@ -333,9 +315,7 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
         prior.flags |= s.flags
         s = prior
     } else {
-        if s.linkage == 2 { map_put(&p.external, s.name, handle_addr(s)) }
-        // Track canonical declarations so attributes on a redeclaration
-        // are visible when the TU's symbols are finalized.
+        if s.linkage == 2 { pa_bind_ext(p, s.name, s) }
         if s.linkage != 0 { vec_push[addr](&p.objects, handle_addr(s)) }
     }
     s.defined = s.defined || definition || attr_definition
@@ -344,8 +324,6 @@ fn se_declare(p handle[Parser], s handle[Symbol], definition bool, tentative boo
     return s
 }
 
-// Use the same declaration and emission path as explicit weak alias
-// attributes so conflicting definitions are diagnosed before output.
 fn se_finish_weak_aliases(p handle[Parser]) void fails {
     for i usize in 0..p.weak_aliases.n {
         w handle[WeakAlias] = vec_at(&p.weak_aliases, i)
@@ -353,11 +331,11 @@ fn se_finish_weak_aliases(p handle[Parser]) void fails {
         if target == null || target.linkage == 0 || (!target.defined && !target.tentative) {
             try pa_error(p, w.loc, c"weak pragma alias target must be defined in this translation unit")
         }
-        weak handle[Attr] = pa_alloc[Attr]()
-        weak.name = cc_intern(p.names, bytes_c(c"weak"))
+        weak handle[Attr] = pa_tu_alloc[Attr](p)
+        weak.name = sym_intern_c(&p.ctx.syms, c"weak")
         weak.loc = w.loc
-        alias handle[Attr] = pa_alloc[Attr]()
-        alias.name = cc_intern(p.names, bytes_c(c"alias"))
+        alias handle[Attr] = pa_tu_alloc[Attr](p)
+        alias.name = sym_intern_c(&p.ctx.syms, c"alias")
         alias.loc = w.loc
         alias.next = weak
         spelling u32 = target.asm_name
@@ -365,12 +343,17 @@ fn se_finish_weak_aliases(p handle[Parser]) void fails {
             name Buf = {}
             defer { buf_free(&name) }
             buf_u8(&name, 34)
-            buf_append(&name, cc_name(p.names, target.name))
+            buf_append(&name, sym_name(&p.ctx.syms, target.name))
             buf_u8(&name, 34)
-            spelling = cc_intern(p.names, buf_bytes(&name))
+            spelling = sm_add_synth(&p.ctx.sm, buf_bytes(&name))
+        } else {
+            spelling = sm_add_synth(&p.ctx.sm, sym_name(&p.ctx.syms, spelling))
         }
-        vec_push[Token](&alias.args, cc_token(TK_STR, 0, w.loc, spelling))
-        s handle[Symbol] = se_symbol(w.name, w.loc, target.ty, SC_EXTERN)
+        tok_mem addr = arena_alloc(&p.tu_arena, sizeof[Token], alignof[Token])
+        tok_mem[Token] = tok_make(TK_STR, F_SYNTH, 0xFFFF, w.loc, spelling)
+        alias.args_p = tok_mem
+        alias.args_n = 1
+        s handle[Symbol] = se_symbol(p, w.name, w.loc, target.ty, SC_EXTERN, true)
         s.linkage = 2
         s.thread_local = target.thread_local
         s.attrs = alias
@@ -397,8 +380,6 @@ fn se_variably_modified(ty u32) bool {
     while true {
         n handle[TypeNode] = ty_node(ty_unqual(ty))
         if n.kind == TYK_ARRAY && n.aux1 == ARR_VLA { return true }
-        // Parameter types don't make a prototype variably modified, but
-        // derivation from a variably modified return type still does.
         if n.kind != TYK_ARRAY && n.kind != TYK_PTR && n.kind != TYK_FUNC { return false }
         ty = n.elem
     }
@@ -415,10 +396,18 @@ fn se_finish_object(p handle[Parser], s handle[Symbol]) void fails {
 }
 
 fn se_decay(ty u32) u32 {
-    n handle[TypeNode] = ty_node(ty_unqual(ty))
-    if n.kind == TYK_ARRAY { return ty_ptr(ty_qual(n.elem, ty_quals(ty))) }
-    if n.kind == TYK_FUNC { return ty_ptr(ty) }
-    return ty_unqual(ty)
+    if ty <= TY_FLOAT128 { return ty }
+    n handle[TypeNode] = ty_node(ty)
+    k u8 = n.kind
+    if k == TYK_PTR || k == TYK_STRUCT || k == TYK_UNION || k == TYK_ENUM { return ty }
+    if k == TYK_FUNC { return ty_ptr(ty) }
+    if k == TYK_ARRAY { return ty_ptr(n.elem) }
+    u u32 = if k == TYK_QUAL { n.elem } else { ty }
+    if u <= TY_FLOAT128 { return u }
+    un handle[TypeNode] = ty_node(u)
+    if un.kind == TYK_ARRAY { return ty_ptr(ty_qual(un.elem, n.flags & 15)) }
+    if un.kind == TYK_FUNC { return ty_ptr(ty) }
+    return u
 }
 
 fn se_null(e handle[Ast]) bool {
@@ -426,7 +415,6 @@ fn se_null(e handle[Ast]) bool {
         (ty_is_ptr(e.ty) && (e.flags & NF_ICE) != 0 && e.value == 0 && ty_node(ty_unqual(e.ty)).elem == TY_VOID)
 }
 
-// C23 applies a qualifier on an array to the element type and vice versa.
 fn se_array_quals(ty u32) u32 {
     quals u32 = ty_quals(ty)
     while ty_is_array(ty) {
@@ -451,8 +439,6 @@ fn se_ptr_compatible(a u32, b u32, assign bool) bool {
     return ty_compatible(ty_unqual(x), ty_unqual(y))
 }
 
-// Arrays and functions may decay without reading their contents, but
-// evaluating an incomplete record as a value requires its definition.
 fn se_require_value(p handle[Parser], e handle[Ast]) void fails {
     if ty_is_record(e.ty) && !se_complete(e.ty) {
         try pa_error(p, e.loc, c"expression uses the value of an incomplete record")
@@ -475,20 +461,16 @@ fn se_conversion(p handle[Parser], dest u32, src handle[Ast]) void fails {
         ptr_signedness bool = ty_is_integer(d) && ty_is_integer(f) && ty_int_bits(d) == ty_int_bits(f) &&
             (ty_make_unsigned(d) == ty_make_unsigned(f) || (ty_int_bits(d) == 8 && ty_int_rank(d) == ty_int_rank(f)))
         if (ty_is_void(d) && ty_is_func(f)) || (ty_is_func(d) && ty_is_void(f)) {
-            cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"conversion between void pointer and function pointer"))
+            cc_diag(p.ctx, src.loc, c"warning: ", bytes_c(c"conversion between void pointer and function pointer"))
             return
         }
-        // Both system compilers diagnose pointer-sign conversions even in
-        // strict modes while still compiling the translation unit.
         if ptr_signedness || (pa_is_gnu(p) && se_ptr_compatible(dest, from, false)) {
-            cc_diag(p.names, src.loc, c"warning: ", bytes_c(c"pointer conversion changes pointed-to qualifiers or signedness"))
+            cc_diag(p.ctx, src.loc, c"warning: ", bytes_c(c"pointer conversion changes pointed-to qualifiers or signedness"))
             return
         }
     }
     if pa_is_gnu(p) && ty_is_vector(dest) && ty_is_vector(from) && ty_size(dest) == ty_size(from) &&
         ty_is_integer(ty_node(ty_unqual(dest)).elem) && ty_is_integer(ty_node(ty_unqual(from)).elem) { return }
-    // GCC permits a vector comparison mask to convert directly back to the
-    // operand vector. A standalone integer vector does not get this conversion.
     if pa_is_gnu(p) && ty_is_vector(dest) && src.kind == ND_BINARY && src.operand_ty != TY_INVALID &&
         ty_compatible(ty_unqual(dest), ty_unqual(src.operand_ty)) { return }
     if ty_is_bool(dest) && (ty_is_ptr(from) || ty_is_nullptr(from)) { return }
@@ -499,7 +481,7 @@ fn se_require_ice(p handle[Parser], e handle[Ast]) void fails {
     if (e.flags & NF_OVERFLOW) != 0 { try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant expression") }
     if ty_is_integer(e.ty) && (e.flags & NF_ICE) != 0 { return }
     if ty_is_integer(e.ty) && pa_is_gnu(p) && (e.flags & NF_FOLD) != 0 {
-        cc_diag(p.names, e.loc, c"warning: ", bytes_c(c"folding an expression that is not an integer constant expression"))
+        cc_diag(p.ctx, e.loc, c"warning: ", bytes_c(c"folding an expression that is not an integer constant expression"))
     } else {
         try pa_error(p, e.loc, c"expected an integer constant expression")
     }
@@ -507,7 +489,7 @@ fn se_require_ice(p handle[Parser], e handle[Ast]) void fails {
 
 fn se_ice(p handle[Parser], e handle[Ast]) u64 fails {
     try se_require_ice(p, e)
-    if e.wide != null && wi_ast_length(e) > 64 {
+    if ast_wide(e) != null && wi_ast_length(e) > 64 {
         try pa_error(p, e.loc, c"integer constant exceeds this context's range")
     }
     return e.value
@@ -516,10 +498,10 @@ fn se_ice(p handle[Parser], e handle[Ast]) u64 fails {
 fn se_scalar(p handle[Parser], e handle[Ast]) void fails {
     if !ty_is_scalar(se_decay(e.ty)) && e.ty != TY_INVALID { try pa_error(p, e.loc, c"expected a scalar expression") }
     if p.pp != null && p.pp.warning_modes.address != WARN_OFF &&
-        e.kind == ND_UNARY && bytes_eq_c(cc_name(p.names, e.op), c"&") &&
+        e.kind == ND_UNARY && e.op_kind == TK_AMP &&
         e.a.kind == ND_NAME && e.a.decl != null && !pa_has_attr(p, e.a.decl.attrs, c"weak") &&
         !pa_has_attr(p, e.a.decl.attrs, c"weakref") {
-        try cc_warning(p.names, e.loc, p.pp.warning_modes.address, c"address of object or function always evaluates to true")
+        try cc_warning(p.ctx, e.loc, p.pp.warning_modes.address, c"address of object or function always evaluates to true")
     }
 }
 
@@ -537,15 +519,13 @@ fn se_value(ty u32, value u64) u64 {
     return low
 }
 
-fn se_int(loc u32, ty u32, value u64) handle[Ast] {
-    n handle[Ast] = pa_node(ND_INT, loc, ty)
+fn se_int(p handle[Parser], loc u32, ty u32, value u64) handle[Ast] {
+    n handle[Ast] = pa_node(p, ND_INT, loc, ty)
     n.value = se_value(ty, value)
     n.flags = NF_ICE | NF_STATIC
     return n
 }
 
-// A const-qualified field, including one inside an embedded aggregate,
-// prevents assignment of the enclosing record. Do not follow pointers.
 fn se_has_const_subobject(ty u32) bool {
     if (ty_quals(ty) & Q_CONST) != 0 { return true }
     n handle[TypeNode] = ty_node(ty_unqual(ty))
