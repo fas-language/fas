@@ -327,6 +327,7 @@ struct As {
     noexecstack bool
     had_error bool
     code32 bool
+    no_relax_relocs bool
     diag Buf
     inc_dirs handle[Vec[Bytes]]
 

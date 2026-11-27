@@ -660,7 +660,7 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
         emit_u32(0)
         if m.has_disp && m.expr != AS_NONE {
             fkind u8 = FIX_PC
-            if gotpcrelx {
+            if gotpcrelx && !ac.no_relax_relocs {
                 fkind = if has_rex { FIX_REX_GOTPCRELX } else { FIX_GOTPCRELX }
             }
             emit_fixup(fid, foff, 4, fkind, 1, 4 + trailing_imm, m.expr)

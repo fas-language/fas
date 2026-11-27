@@ -54,7 +54,8 @@ check_diag "undef-local-label" ".text\n  jmp 1f"
 check_diag "intel-syntax" ".intel_syntax noprefix\n  nop"
 check_diag "rex-hi8" ".text\n  movb %ah, %r8b"
 check_diag "backwards-org" ".text\n  .long 1\n  .org 2"
-echo "diag: ok (6/6 checks)"
+check_diag "code32-rex" ".code32\n  movb %dil, (%eax)"
+echo "diag: ok (7/7 checks)"
 
 for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
     llvm-mc-22 -triple=x86_64-unknown-linux-gnu -filetype=obj "$fixture" -o "$WORK/ref.o"
@@ -62,6 +63,13 @@ for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
     python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
     echo "fixture: ${fixture##*/} ok"
 done
+
+# LLVM exposes this option through the Clang assembler driver.
+printf '%s\n' '.text' 'movq external@GOTPCREL(%rip), %rax' 'movl external@GOTPCREL(%rip), %eax' > "$WORK/got.s"
+reference_cc -c -Wa,-mrelax-relocations=no "$WORK/got.s" -o "$WORK/ref.o"
+"$WORK/fas-as" -mrelax-relocations=no "$WORK/got.s" -o "$WORK/fas.o"
+python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+echo "fixture: unrelaxed GOT relocations ok"
 
 # 3. Differential fuzzer against llvm-mc-22
 python3 "$ROOT/test/fas_as/fuzz_as.py" "$WORK/fas-as" "$FAS_AS_SEED" "$FAS_AS_CASES"
