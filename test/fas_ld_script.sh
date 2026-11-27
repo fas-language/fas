@@ -405,3 +405,45 @@ sed '/^  \.data/a\  helper_entry = .;' pie.lds > pie-overlap.lds
 expect_exit 3 "$ld" -pie --no-dynamic-linker -T pie-overlap.lds pie.o pie-helper.a -o unsupported 2>diag
 grep -q 'script assignment overlaps a lazy archive symbol' diag
 printf 'fas-ld script: loaderless PIE executes, relaxes GOTPCRELX and extracts archives, with two refusal checks\n'
+
+cat > gc32.s <<'ASM'
+.globl _start, kept, dead, kept_target, discarded_target
+.section .text.start,"ax"
+_start:
+    mov $1, %eax
+    mov $42, %ebx
+    int $0x80
+.section .data.kept,"aw"
+kept: .long kept_target
+.section .data.kept_target,"aw"
+kept_target: .long 42
+.section .data.dead,"aw"
+dead: .long 0
+.section .data.discarded_target,"aw"
+discarded_target: .long 0
+.section .discard,"a"
+.long discarded_target
+.section .note.GNU-stack,"",@progbits
+ASM
+cat > gc32.lds <<'LDS'
+OUTPUT_FORMAT("elf32-i386")
+ENTRY(_start)
+SECTIONS {
+  . = 0x401000;
+  .text : { *(.text.*) }
+  .data : { KEEP(*(.data.kept)) *(.data.*) }
+  /DISCARD/ : { *(.discard) }
+}
+LDS
+"$cc" -m32 -c gc32.s -o gc32.o
+lld=${LLD:-ld.lld-22}
+for linker in "$ld" "$lld"; do
+    "$linker" --gc-sections -T gc32.lds gc32.o -o "gc32.${linker##*/}"
+    "${LLVM_OBJCOPY:-llvm-objcopy-22}" -O binary "gc32.${linker##*/}" "gc32.${linker##*/}.bin"
+done
+cmp "gc32.${ld##*/}.bin" "gc32.${lld##*/}.bin"
+readelf -sW "gc32.${ld##*/}" > gc32.symbols
+grep -q 'kept_target$' gc32.symbols
+if grep -Eq ' (dead|discarded_target)$' gc32.symbols; then exit 1; fi
+printf 'fas-ld i386 script: KEEP roots sections, GC follows relocations and discards unused sections\n'
+

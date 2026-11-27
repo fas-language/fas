@@ -119,10 +119,13 @@ executables. ELF32 supports `R_386_32`, `R_386_PC32`, `R_386_PLT32`, `R_386_16`,
 directives and combinations return exit 3. These include `MEMORY` and
 `OVERLAY`, named input-file patterns, `COMMON`,
 TLS, IFUNC, unrelaxed GOT relocations, and script mode combined with shared
-output, section GC, maps, or `-r`. Archives listed under `--whole-archive`
+output, maps, or `-r`. Static executables support `--gc-sections`. The
+collector roots `KEEP` inputs and definitions referenced by script
+expressions. Archives listed under `--whole-archive`
 are supported. An ELF64 script can produce `-pie --no-dynamic-linker` output
 when it discards dynamic metadata and every allocated relocation can be
-resolved without a dynamic loader. Lazy extraction in this mode requires
+resolved without a dynamic loader. Relaxation of GOT references to
+section-relative script symbols uses their final layout. Lazy extraction in this mode requires
 script symbol assignments and references to be disjoint from the archive
 index. The supported explicit metadata layout
 places `.symtab`, `.strtab` and `.shstrtab` in order after content. The

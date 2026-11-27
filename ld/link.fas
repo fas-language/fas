@@ -1084,6 +1084,15 @@ fn script_check_inputs() void fails {
                 }
             }
             if !config().elf32 && kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
+                if config().mode == MODE_STATIC_PIE {
+                    m handle[Buf] = msg()
+                    bb(m, o.path)
+                    bs(m, c": unsupported scripted PIE relocation ")
+                    bu(m, zext[u64](kind))
+                    bs(m, c" against ")
+                    bb(m, sym(o, zext[u64](r.symbol)).name)
+                    try refuse(cstr_dup(buf_bytes(m)))
+                }
                 try refuse(c"non-static relocation in a linker script")
             }
         }
@@ -1152,13 +1161,18 @@ fn build_image_script() void fails {
     if ld.ninput_objects == 0 { try die_c(c"no input objects") }
     phase_begin(PH_EMIT, &ld.emit_start)
     alloc_tables()
+    if config().gc_sections { gc_sections() }
     try build_id_prepare()
     try ls_match_inputs()
-    if config().mode == MODE_STATIC_PIE && !config().elf32 { relax_static_pie() }
-    try script_check_inputs()
+    pie bool = config().mode == MODE_STATIC_PIE
+    if !pie { try script_check_inputs() }
     try check_non_alloc_references()
     try ls_addresses()
-    if config().mode == MODE_STATIC_PIE { try script_check_pie() }
+    if pie {
+        if !config().elf32 { relax_static_pie() }
+        try script_check_inputs()
+        try script_check_pie()
+    }
     try ls_content_layout()
     entry u64 = try script_entry()
     im LsImage = {}

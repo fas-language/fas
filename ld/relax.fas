@@ -38,6 +38,10 @@ fn relax_local_address(f u64, i u64) bool {
     df u64 = 0
     ds u64 = 0
     if !definition(f, i, &df, &ds) { return false }
+    if df == ld.script_file {
+        s u64 = ld.lscript.synth_sections[u64, ds]
+        return s != 0 && (ls_sec(s).flags & 2) != 0
+    }
     d handle[Sym] = sym(obj(df), ds)
     return d.section > 0 && d.section < 0xff00 && d.kind != 6 && d.kind != 10
 }

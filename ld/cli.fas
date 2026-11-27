@@ -657,9 +657,9 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
         try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
     }
-    if c.has_script && (c.relocatable || c.shared || (c.pie && !c.no_interpreter) || c.has_interpreter || c.gc_sections ||
+    if c.has_script && (c.relocatable || c.shared || (c.pie && !c.no_interpreter) || c.has_interpreter || (c.pie && c.gc_sections) ||
         c.has_map || c.has_version_script || c.runpath != 0 || c.export_dynamic) {
-        try refuse(c"linker scripts require static executable output without GC or a map")
+        try refuse(c"linker-script mode does not support this combination of output options")
     }
     if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
         c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||

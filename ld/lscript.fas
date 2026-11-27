@@ -48,6 +48,7 @@ struct LsCmd {
     arg u64                // expression, or section index
     id u64                 // script symbol, zero for dot
     increment bool
+    keep_input bool
     provide_active bool
     patterns Vec[LsPattern]
     inputs Vec[u64]        // packed (object, section)
@@ -428,6 +429,7 @@ fn ls_input(l handle[LsLex], keep_input bool, at u64) u64 fails {
     try ls_expect(l, c"(")
     i u64 = ls_new_cmd(LS_INPUT, at)
     c handle[LsCmd] = ls_cmd(i)
+    c.keep_input = keep_input
     while !ls_is(l, c")") {
         sorted bool = try ls_take(l, c"SORT")
         if sorted { try ls_expect(l, c"(") }
@@ -839,6 +841,33 @@ fn ls_discards(name Bytes) bool {
     return false
 }
 
+// Scripted GC roots KEEP inputs and definitions used by script expressions.
+fn ls_gc_roots() void {
+    for i u64 in 1..ld.lscript.sections.n + 1 {
+        s handle[LsSection] = ls_sec(i)
+        if s.discard { continue }
+        for j u64 in 0..s.body.n {
+            c handle[LsCmd] = ls_cmd(vec_get(&s.body, j))
+            if !c.keep_input { continue }
+            for f u64 in 0..ld.nobj {
+                o handle[Obj] = obj(f)
+                for k u64 in 1..zext[u64](o.nsec) {
+                    for m u64 in 0..c.patterns.n {
+                        if ls_match(vec_at(&c.patterns, m).name, sec(o, k).name) {
+                            gc_mark(f, k)
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for i u64 in 1..ld.lscript.exprs.n + 1 {
+        e handle[LsExpr] = ls_expr(i)
+        if e.kind == LS_SYMBOL && !bytes_is(e.text, c".") { gc_root(e.text) }
+    }
+}
+
 // The i386 real-mode script leaves BIOS-call .inittext implicit. It shares
 // the preceding code segment, after the code-end symbols and before the
 // location-counter assignment that page-aligns the data segment.
@@ -909,6 +938,7 @@ fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
     inputs handle[Vec[u64]] = &cmd.inputs
     for i u64 in 0..cmd.patterns.n {
         pat handle[LsPattern] = vec_at(&cmd.patterns, i)
+        if bytes_is(pat.name, c"COMMON") { continue }
         start u64 = inputs.n
         for j u64 in 0..sc.candidates.n {
             x u64 = vec_get(&sc.candidates, j)
