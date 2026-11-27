@@ -107,6 +107,7 @@ const EX_SYM u8 = 1
 const EX_DOT u8 = 2
 const EX_UNARY u8 = 3
 const EX_BINARY u8 = 4
+const EX_REGISTER u8 = 5
 
 // Unary ops
 const UOP_NEG u8 = 1
@@ -149,6 +150,7 @@ const EV_CONST u8 = 0
 const EV_SYM u8 = 1        // sym_a + addend (with variant)
 const EV_DIFF u8 = 2       // sym_a - sym_b + addend (unresolved cross-section or undefined)
 const EV_UNRESOLVED u8 = 3
+const EV_REGISTER u8 = 4
 
 struct EvalVal {
     kind u8

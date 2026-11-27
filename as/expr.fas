@@ -278,6 +278,13 @@ fn parse_expr_primary() u32 fails {
     if c == 39 { // '\''
         return expr_const(try parse_char_lit())
     }
+    if c == 37 {
+        r u16 = try parse_reg_token()
+        id u32 = expr_const(zext[i64](r))
+        e handle[ExprNode] = vec_at(&ac.exprs, zext[u64](id))
+        e.kind = EX_REGISTER
+        return id
+    }
     if is_digit(c) {
         // Check for numeric local label reference: digits followed by 'f' or 'b'
         start u64 = ac.pos
@@ -458,6 +465,11 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
         eval_set_const(out, e.val)
         return
     }
+    if e.kind == EX_REGISTER {
+        out.kind = EV_REGISTER
+        out.val = e.val
+        return
+    }
     if e.kind == EX_DOT {
         if !laid_out { return }
         sec handle[Section] = vec_at(&ac.sections, zext[u64](e.lhs))
@@ -508,6 +520,11 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
         r EvalVal = {}
         eval_expr_depth(e.lhs, laid_out, depth + 1, &l)
         eval_expr_depth(e.rhs, laid_out, depth + 1, &r)
+        if l.kind == EV_REGISTER && r.kind == EV_REGISTER {
+            if e.op == BOP_EQ { eval_set_const(out, if l.val == r.val { -1 } else { 0 }) }
+            if e.op == BOP_NE { eval_set_const(out, if l.val != r.val { -1 } else { 0 }) }
+            return
+        }
         if l.kind == EV_CONST && r.kind == EV_CONST {
             a i64 = l.val
             b i64 = r.val

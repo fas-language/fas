@@ -563,7 +563,7 @@ fn parse_directive(dir Bytes) void fails {
         return
     }
     if bytes_is(dir, c".macro") { try parse_macro_def(); return }
-    if bytes_is(dir, c".endm") { try as_err(c".endm without matching .macro"); return }
+    if bytes_is(dir, c".endm") || bytes_is(dir, c".endmacro") { try as_err(c".endm without matching .macro"); return }
     if bytes_is(dir, c".rept") { try parse_rept_directive(); return }
     if bytes_is(dir, c".irp") { try parse_irp_directive(false); return }
     if bytes_is(dir, c".irpc") { try parse_irp_directive(true); return }
@@ -572,9 +572,7 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".incbin") { try parse_incbin_directive(); return }
     if bytes_is(dir, c".if") {
         cond i64 = try eval_const_now(try parse_expr())
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if cond != 0 { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(cond != 0)
         return
     }
     if bytes_is(dir, c".ifdef") || bytes_is(dir, c".ifndef") {
@@ -583,9 +581,7 @@ fn parse_directive(dir Bytes) void fails {
         sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
         defd bool = sid != AS_NONE && sym_at(sid).defined
         if neg { defd = !defd }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if defd { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(defd)
         return
     }
     if bytes_is(dir, c".ifb") || bytes_is(dir, c".ifnb") {
@@ -593,9 +589,15 @@ fn parse_directive(dir Bytes) void fails {
         skip_hspace()
         blank bool = at_eol()
         if neg { blank = !blank }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if blank { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(blank)
+        return
+    }
+    if bytes_is(dir, c".ifc") || bytes_is(dir, c".ifnc") {
+        first Bytes = macro_argument(false, false)
+        if ac.pos >= ac.src.n || ac.src.p[u8, ac.pos] != 44 { try as_err(c"expected ',' in string comparison") }
+        ac.pos += 1
+        second Bytes = macro_argument(true, false)
+        try begin_asm_if(bytes_eq(first, second) != bytes_is(dir, c".ifnc"))
         return
     }
     if bytes_is(dir, c".ifeqs") || bytes_is(dir, c".ifnes") {
@@ -608,16 +610,13 @@ fn parse_directive(dir Bytes) void fails {
         try parse_string_lit(&b2)
         eq bool = bytes_eq(buf_bytes(&b1), buf_bytes(&b2))
         if neg { eq = !eq }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if eq { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(eq)
         return
     }
     if bytes_is(dir, c".else") || bytes_is(dir, c".elseif") {
         if ac.if_stack.n == 0 { try as_err(c".else/.elseif without matching .if") }
         vec_pop(&ac.if_stack)
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        advance_statement()
         try skip_false_branch(false)
         return
     }
@@ -761,7 +760,7 @@ fn as_parse_all() void fails {
         if c == 10 { ac.pos += 1; ac.line += 1; continue }
         if c == 59 { ac.pos += 1; continue }
         if c == 35 || (c == 47 && ac.pos + 1 < n && p[u8, ac.pos + 1] == 47) {
-            skip_to_eol()
+            advance_statement()
             continue
         }
 
