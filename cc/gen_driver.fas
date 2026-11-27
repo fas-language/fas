@@ -252,6 +252,7 @@ struct DrvCodegenOptions {
     stack_align4 bool // -mstack-alignment=4: i386 stack aligned to 4 at entry
     regparm u8
     i386 bool
+    function_sections bool
 }
 
 fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions], input i32) i64 fails {
@@ -276,6 +277,7 @@ fn drv_start_fir(fir_path addr, obj_path addr, options handle[DrvCodegenOptions]
     if options.regparm == 1 { vec_push(&args, c"-mregparm=1") }
     if options.regparm == 2 { vec_push(&args, c"-mregparm=2") }
     if options.regparm == 3 { vec_push(&args, c"-mregparm=3") }
+    if options.i386 && options.function_sections { vec_push(&args, c"-ffunction-sections") }
     if options.no_x87 { vec_push(&args, c"-mno-80387") }
     if options.general_regs_only { vec_push(&args, c"-mgeneral-regs-only") }
     else if options.no_sse { vec_push(&args, c"-mno-sse") }

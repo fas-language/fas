@@ -66,6 +66,7 @@ struct Options {
     standard u8
     x86_bits u8
     regparm u8
+    function_sections bool
     soft_float bool
     march addr
     x86_cpu u32
@@ -395,6 +396,8 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             if eq == map.n { try cli_error(c"fcc: invalid argument (expected OLD=NEW): ", arg) }
             vec_push(&o.prefix_maps, bytes_sub(map, 0, eq))
             vec_push(&o.prefix_maps, bytes_from(map, eq + 1))
+        } else if bytes_eq_c(word, c"-ffunction-sections") || bytes_eq_c(word, c"-fno-function-sections") {
+            o.function_sections = bytes_eq_c(word, c"-ffunction-sections")
         } else if cli_noop_option(word) {
             // fcc's code generation already does what these ask
         } else if bytes_eq_c(word, c"-ffast-math") || bytes_eq_c(word, c"-Ofast") {
@@ -508,6 +511,7 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
         try cli_error(c"fcc: expected one input file, got ", vec_get(&o.inputs, 1).path)
     }
     if o.x86_bits == 64 {
+        if o.function_sections { try cli_warn_option(o, c"-ffunction-sections") }
         if o.regparm != 0 || o.soft_float { try cli_error(c"fcc: regparm and soft-float require i386", null) }
         if o.stack_align4 { try cli_error(c"fcc: x86-64 stack alignment must be at least 8", null) }
         if o.march != null {
@@ -807,7 +811,8 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
     codegen DrvCodegenOptions = {cli_pic_mode(o), o.debug, o.no_red_zone, o.kernel_model,
                                  no_sse, o.general_regs_only, o.no_x87 || o.soft_float, no_unwind_tables,
                                  o.thunk_calls, o.thunk_local, o.thunk_cs_prefix, o.return_thunk,
-                                 (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8, o.stack_align4, o.regparm, o.x86_bits != 64}
+                                 (o.cf_protection & 1) != 0, o.patch_entry, o.stack_align8, o.stack_align4,
+                                 o.regparm, o.x86_bits != 64, o.function_sections}
     dir_strs Vec[addr] = {}
     dir_ranks Vec[u8] = {}
     defer { vec_free(&dir_strs); vec_free(&dir_ranks) }

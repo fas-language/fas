@@ -790,6 +790,10 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             b handle[Buf] = gen_cur_buf()
             buf_str(b, c"  ")
             gen_emit_val(b, v)
+            if tc.ilp32 {
+                buf_str(b, c" = asm volatile \"movl %%esp, %k0\" out(\"=r\" i32)\n")
+                return gen_convert(v, TY_UINT, n.ty)
+            }
             buf_str(b, c" = asm volatile \"movq %%rsp, %q0\" out(\"=r\" i64)\n")
             return gen_convert(v, ty_uint64_type(), n.ty)
         }
@@ -1185,16 +1189,29 @@ fn gen_binary(n handle[Ast]) u32 fails {
     if bytes_eq_c(op, c"-") && gen_is_ptr_like(n.a.ty) && gen_is_ptr_like(n.b.ty) {
         lp u32 = try gen_rvalue(n.a)
         rp u32 = try gen_rvalue(n.b)
+        elem_ty u32 = gen_ptr_elem(n.a.ty)
+        is_vla bool = gen_type_is_vla(elem_ty)
+        elem_size u64 = if is_vla { 0 } else { ty_size(elem_ty) }
+        if !is_vla && elem_size == 0 { elem_size = 1 }
+        if tc.ilp32 && elem_size == 1 {
+            // The byte difference itself must be representable as ptrdiff_t.
+            li u32 = gen_cast_raw(c"ptrtoint", c"i32", lp)
+            ri u32 = gen_cast_raw(c"ptrtoint", c"i32", rp)
+            return gen_convert(gen_binop_raw(c"sub", c"i32", li, ri), TY_INT, n.ty)
+        }
         li u32 = gen_cast_raw(c"ptrtoint", c"i64", lp)
         ri u32 = gen_cast_raw(c"ptrtoint", c"i64", rp)
         diff u32 = gen_binop_raw(c"sub", c"i64", li, ri)
-        elem_ty u32 = gen_ptr_elem(n.a.ty)
+        if tc.ilp32 && !is_vla && (elem_size & (elem_size - 1)) == 0 {
+            // A defined pointer subtraction has no fractional element.
+            shift u32 = gen_const_i64(bitcast[i64](ctz(elem_size)))
+            return gen_convert(gen_binop_raw(c"ashr", c"i64", diff, shift), ty_int64_type(), n.ty)
+        }
         esz_v u32 = 0
-        if gen_type_is_vla(elem_ty) {
+        if is_vla {
             esz_v = try gen_vla_type_size(elem_ty)
         } else {
-            esz u64 = ty_size(elem_ty)
-            esz_v = gen_const_i64(bitcast[i64](if esz > 0 { esz } else { 1 }))
+            esz_v = gen_const_i64(bitcast[i64](elem_size))
         }
         q u32 = gen_binop_raw(c"sdiv", c"i64", diff, esz_v)
         return gen_convert(q, ty_int64_type(), n.ty)

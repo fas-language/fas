@@ -99,6 +99,22 @@ unsigned dispatch(unsigned (*fn)(unsigned), unsigned x)
     return call_with_tail(fn, x) + 7;
 }
 
+unsigned rotate_local(unsigned n, unsigned a, unsigned b, unsigned c)
+{
+    while (n--) {
+        unsigned old = a;
+        a = b;
+        b = c;
+        c = old;
+    }
+    return a + b * 5 + c * 23;
+}
+
+uint64_t fixed_shifts(uint64_t v)
+{
+    return (v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35);
+}
+
 unsigned collect(unsigned n, ...)
 {
     va_list args, copy;
@@ -123,6 +139,8 @@ extern unsigned collect(unsigned, ...);
 extern unsigned long update_long(long, unsigned long);
 extern uint64_t product(unsigned, unsigned);
 extern unsigned overflow(uint64_t, uint64_t, int, int, uint64_t *, int *);
+extern unsigned rotate_local(unsigned, unsigned, unsigned, unsigned);
+extern uint64_t fixed_shifts(uint64_t);
 extern const unsigned * const bias_ptr;
 
 const unsigned bias = 19;
@@ -161,6 +179,11 @@ int run(void)
     if (overflow(2, 5, 13, 5, sum, &diff) != 2 ||
         sum[0] != 7 || sum[1] != UINT64_MAX - 2 || diff != 8)
         return 71;
+    if (rotate_local(9, 1, 7, 13) != 335 || rotate_local(10, 1, 7, 13) != 95)
+        return 72;
+    uint64_t v = UINT64_C(0xe8f7abcdee123459);
+    if (fixed_shifts(v) != ((v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35)))
+        return 73;
     return 0;
 }
 C
@@ -172,6 +195,11 @@ _start:
     andl $-16, %esp
     call run
     movl %eax, %ebx
+    movl $1, %eax
+    int $0x80
+.globl abort
+abort:
+    movl $127, %ebx
     movl $1, %eax
     int $0x80
 .section .note.GNU-stack,"",@progbits
@@ -200,6 +228,26 @@ for regparm in 0 3; do
     done
 done
 printf 'Eight i386 executable comparisons passed (cdecl and regparm=3)\n'
+
+# Small executable cases from the gcc-torture-execute manifest. These
+# use no libc or multilib startup files, just the syscall shim above.
+corpus=${FCC_I386_CORPUS:-$root/../cc-tests}
+if [[ -f $corpus/manifest.json ]]; then
+    suite=$corpus/upstream/gcc/gcc/testsuite/gcc.c-torture/execute
+    samples=(20140212-2.c 20170419-1.c bswap-3.c pr31072.c pr37780.c pr61306-2.c pr64718.c pr83362.c)
+    for sample in "${samples[@]}"; do
+        for compiler in "$clang" "$fcc"; do
+            "$compiler" -m32 "${flags[@]}" -O2 -Dmain=run -c "$suite/$sample" -o "$tmp/manifest.o"
+            "$lld" -m elf_i386 -o "$tmp/run" "$tmp/start.o" "$tmp/manifest.o"
+            "${runner[@]}" "$tmp/run" || {
+                status=$?
+                printf '%s %s exited %d\n' "$compiler" "$sample" "$status" >&2
+                exit "$status"
+            }
+        done
+    done
+    printf '%d freestanding manifest cases passed with fcc and Clang -m32\n' "${#samples[@]}"
+fi
 
 for compiler in "$clang" "$fcc"; do
     "$compiler" -m16 -mstack-alignment=4 -mregparm=3 "${flags[@]}" -c "$tmp/impl.c" -o "$tmp/real.o"

@@ -122,6 +122,7 @@ let plan f ~result_slot ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   let allowed i c =
     if A.indirect c then gprs
     else if c.A.regs = [] then []
+    else if c.A.regs = ["rsp"] && register_size operands.(i).aty = 32 then [4]
     else
       let bits = register_size operands.(i).aty in
       List.filter (fun r -> (bits <> 8 || r < 4) && List.mem regs.(r) c.A.regs) gprs
@@ -202,6 +203,7 @@ let plan f ~result_slot ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
   in
   Array.iteri (fun i v ->
     match location i, v with
+    | Reg (4, _), _ -> ()
     | (Reg (r, _) | Mem (r, _)), Some value -> load r value false
     | Pair, Some value -> load 0 value false; load 2 value true
     | Stack disp, Some value -> stores := (disp, value) :: !stores

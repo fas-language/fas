@@ -116,12 +116,66 @@ let promote f cfg rpo local ty =
         (match !values with [v] -> replace_all_uses f p v | _ -> ())) params;
   local.allocation.op <- Nop
 
+let simplify_values f =
+  let operand v =
+    match def_of f (resolve f v) with
+    | Result (i, _) -> (inst f i).op
+    | _ -> Nop in
+  let one = iconst f i1 1L in
+  Vec.iter (fun (b : block_rec) ->
+    Vec.iter (fun i ->
+      let ir = inst f i in
+      let replace v =
+        replace_all_uses f ir.results.(0) v;
+        ir.op <- Nop in
+      match ir.op with
+      | Ptradd (_, base, idx, scale, disp) ->
+          (match const_of f base, int_value f idx with
+           | Some (Csym (name, at)), Some idx ->
+               let off = Int64.(add at (add (mul idx (of_int scale)) (of_int disp))) in
+               let off = Int64.of_int32 (Int64.to_int32 off) in
+               replace (const f (Csym (name, off)) (Ptr 0))
+           | _ ->
+               (match operand idx with
+                | Conv ((Zext | Sext), narrowed) when ty_of f narrowed = Int 32 ->
+                    (match ir.op with
+                     | Ptradd (flags, _, _, _, _) -> ir.op <- Ptradd (flags, base, narrowed, scale, disp)
+                     | _ -> assert false)
+                | _ -> ()))
+      | Icmp ((Eq | Ne as rel), x, y) when int_value f y = Some 0L ->
+          (match operand x with
+           | Conv ((Zext | Sext), v) when ty_of f v = i1 ->
+               if rel = Ne then replace v else ir.op <- Ibin (Xor, 0, v, one)
+           | _ -> ())
+      | Ibin (Xor, _, x, y) when ty_of f x = i1 && int_value f y = Some 1L ->
+          (match operand x with Ibin (Xor, _, v, k) when int_value f k = Some 1L -> replace v | _ -> ())
+      | _ -> ()) b.insts;
+    match b.term with
+    | Br (v, yes, no, w) ->
+        (match operand v with
+         | Ibin (Xor, _, x, one) when int_value f one = Some 1L ->
+             b.term <- Br (x, no, yes, (if w < 0 then w else 1000 - w))
+         | _ -> ())
+    | _ -> ()) f.blocks
+
 let eliminate_unused f =
   let needed = Array.make (Vec.length f.insts) false in
+  let used_params = Array.make (num_values f) false in
+  let incoming = Array.make (num_blocks f) [] in
+  Vec.iter (fun (b : block_rec) ->
+    List.iter (fun (t : target) ->
+      incoming.(t.dest) <- t.args :: incoming.(t.dest)) (Fir_fold.targets b.term)) f.blocks;
   let work = Queue.create () in
   let mark i =
     if not needed.(i) then begin needed.(i) <- true; Queue.add i work end in
-  let value v = match def_of f (resolve f v) with Result (i, _) -> mark i | _ -> () in
+  let rec value v =
+    let v = resolve f v in
+    match def_of f v with
+    | Result (i, _) -> mark i
+    | Param (b, k) when b <> entry && not used_params.(v) ->
+        used_params.(v) <- true;
+        List.iter (fun args -> value args.(k)) incoming.(b)
+    | _ -> () in
   Vec.iter (fun (b : block_rec) ->
     Vec.iter (fun i ->
       match (inst f i).op with
@@ -129,13 +183,36 @@ let eliminate_unused f =
       | Mark _ -> mark i
       | op when has_side_effects op -> mark i
       | _ -> ()) b.insts;
-    iter_term_uses value b.term) f.blocks;
+    match b.term with
+    | Br (v, _, _, _) | Switch (v, _, _, _) -> value v
+    | Jump _ -> ()
+    | t -> iter_term_uses value t) f.blocks;
   while not (Queue.is_empty work) do
     iter_op_uses value (inst f (Queue.take work)).op
   done;
-  Vec.iter (fun (b : block_rec) ->
-    Vec.iter (fun i -> if not needed.(i) then (inst f i).op <- Nop) b.insts) f.blocks;
+  Vec.iteri (fun b (br : block_rec) ->
+    Vec.iter (fun i -> if not needed.(i) then (inst f i).op <- Nop) br.insts;
+    if b <> entry then Array.iter (fun v ->
+      if not used_params.(v) then replace_all_uses f v (poison f (ty_of f v))) br.params) f.blocks;
+  Fir_fold.drop_params f;
   drop_nops f
+
+let shortcut_jumps f =
+  let follow (t : target) =
+    let rec next budget t =
+      let b = block f t.dest in
+      if budget = 0 || Array.length b.params <> 0 || Vec.length b.insts <> 0 then t
+      else match b.term with Jump dest -> next (budget - 1) dest | _ -> t in
+    next (num_blocks f) t in
+  Vec.iter (fun (b : block_rec) -> match b.term with
+    | Jump t -> b.term <- Jump (follow t)
+    | Br (c, y, n, w) ->
+        let y = follow y and n = follow n in
+        b.term <- if y = n then Jump y else Br (c, y, n, w)
+    | Switch (v, d, cases, w) ->
+        b.term <- Switch (v, follow d, Array.map (fun (k, t) -> (k, follow t)) cases, w)
+    | _ -> ()) f.blocks;
+  ignore (remove_unreachable_blocks f)
 
 let run f =
   if f.defined && f.unwind_cleanup = None &&
@@ -151,7 +228,9 @@ let run f =
       |> List.iter (fun (_, local) ->
         match local.ty with Some ty -> promote f cfg rpo local ty | None -> ());
       Fir_stream.fold_body f;
-      eliminate_unused f
+      simplify_values f;
+      eliminate_unused f;
+      shortcut_jumps f
     end
   end;
   f

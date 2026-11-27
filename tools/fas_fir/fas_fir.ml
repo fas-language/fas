@@ -156,6 +156,7 @@ let main () =
   let red_zone = ref true and kernel_model = ref false and fold_branches = ref false in
   let hard = ref Mir_emit.no_hardening in
   let stack_align = ref 16 and regparm = ref 0 in
+  let function_sections = ref false in
   let set_mode m flag =
     match !mode with
     | Some (_, f) when f <> flag -> usage_error "%s and %s do not go together" f flag
@@ -170,6 +171,7 @@ let main () =
     | "--llvm" :: rest -> llvm := true; args rest
     | "--mir" :: rest -> args rest
     | "--fold-branches" :: rest -> fold_branches := true; args rest
+    | "-ffunction-sections" :: rest -> function_sections := true; args rest
     | "--hosted" :: rest -> hosted := true; args rest
     | "--pie" :: rest -> pie := Some true; args rest
     | "--no-pie" :: rest -> pie := Some false; args rest
@@ -273,7 +275,7 @@ let main () =
     Fir_stream.drop_unused stream;
     verify (Fir_stream.verify stream);
     let m = stream.Fir_stream.modul in
-    match I386.compile_object ~stack_align:!stack_align ~regparm:!regparm
+    match I386.compile_object ~stack_align:!stack_align ~regparm:!regparm ~function_sections:!function_sections
             ~endbr:(!hard).endbr ~pic:!fpic ~thunk_calls:(!hard).thunk_calls
             ~iter_funcs:(Fir_stream.iter stream) m with
     | Ok obj -> write_obj obj
@@ -281,6 +283,7 @@ let main () =
   in
   let run_x86_64 stream =
     if !regparm <> 0 then usage_error "-mregparm requires i386";
+    if !function_sections then usage_error "-ffunction-sections requires i386";
     if !stack_align < 8 then usage_error "x86-64 stack alignment must be at least 8";
 
     let m = stream.Fir_stream.modul in

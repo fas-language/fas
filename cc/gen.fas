@@ -1591,11 +1591,12 @@ fn gen_on_function_cb(ctx addr, node addr, user addr) void fails {
     }
 }
 
-// GNU's global register variable for the x86-64 stack pointer names
+// GNU's global register variable for the x86 stack pointer names
 // hardware. There is no object to allocate or symbol to export.
 fn gen_stack_pointer_symbol(s handle[Symbol]) bool {
     if s == null || s.storage != SC_REGISTER || s.asm_name == 0 { return false }
     spelling Bytes = cc_name(gc.p.names, s.asm_name)
+    if tc.ilp32 { return bytes_eq_c(spelling, c"\"esp\"") || bytes_eq_c(spelling, c"\"%esp\"") }
     return bytes_eq_c(spelling, c"\"rsp\"") || bytes_eq_c(spelling, c"\"%rsp\"")
 }
 
