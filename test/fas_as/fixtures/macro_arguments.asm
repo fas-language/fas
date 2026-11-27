@@ -30,3 +30,15 @@
     .ifc \text, rax; .byte 19; .endif
     .ifnc \text, rax; .byte 20; .endif
     .endr
+.macro emit_id
+        .byte \@
+.endm
+emit_id
+.irp value, 1 2, "3", (4 + 5)
+        .byte \value, \@
+        emit_id
+.endr
+.irpc digit, "67"
+        .byte \digit, \@
+.endr
+emit_id
