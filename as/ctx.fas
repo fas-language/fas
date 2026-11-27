@@ -330,6 +330,7 @@ struct As {
     had_error bool
     code32 bool
     no_relax_relocs bool
+    fatal_warnings bool
     diag Buf
     inc_dirs handle[Vec[Bytes]]
 

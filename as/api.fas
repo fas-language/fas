@@ -31,13 +31,20 @@ fn as_template_result_free(r handle[AsTemplateResult]) void {
     r.ok = false
 }
 
-fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, template_mode bool, no_relax_relocs bool) void fails {
+value struct AsOptions {
+    noexecstack bool
+    no_relax_relocs bool
+    fatal_warnings bool
+}
+
+fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], opts AsOptions, template_mode bool) void fails {
     ac.filename = filename
     ac.src = src
     ac.pos = 0
     ac.line = 1
-    ac.noexecstack = noexecstack
-    ac.no_relax_relocs = no_relax_relocs
+    ac.noexecstack = opts.noexecstack
+    ac.no_relax_relocs = opts.no_relax_relocs
+    ac.fatal_warnings = opts.fatal_warnings
     ac.template_mode = template_mode
     ac.inc_dirs = inc_dirs
     as_init_sections()
@@ -47,10 +54,11 @@ fn as_run_pipeline(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexe
 }
 
 fn as_assemble(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, out handle[AsResult]) bool {
-    return as_assemble_with_options(src, filename, inc_dirs, noexecstack, false, out)
+    opts AsOptions = {noexecstack, false, false}
+    return as_assemble_with_options(src, filename, inc_dirs, opts, out)
 }
 
-fn as_assemble_with_options(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], noexecstack bool, no_relax_relocs bool, out handle[AsResult]) bool {
+fn as_assemble_with_options(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes]], opts AsOptions, out handle[AsResult]) bool {
     as_result_free(out)
 
     reg Region = {}
@@ -61,7 +69,7 @@ fn as_assemble_with_options(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes
     ac = ctx
 
     ok bool = true
-    as_run_pipeline(src, filename, inc_dirs, noexecstack, false, no_relax_relocs) catch { ok = false }
+    as_run_pipeline(src, filename, inc_dirs, opts, false) catch { ok = false }
 
     elf Buf = {}
     if ok {
@@ -101,7 +109,8 @@ fn as_assemble_template(src Bytes, out handle[AsTemplateResult]) bool {
     ac = ctx
 
     ok bool = true
-    as_run_pipeline(src, bytes_c(c"<inline-asm>"), null, false, true, false) catch { ok = false }
+    opts AsOptions = {}
+    as_run_pipeline(src, bytes_c(c"<inline-asm>"), null, opts, true) catch { ok = false }
 
     region_switch(prev_reg)
     if ok {

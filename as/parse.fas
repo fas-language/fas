@@ -750,7 +750,15 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".att_syntax") { skip_to_eol(); return }
     if bytes_is(dir, c".intel_syntax") { try as_err(c".intel_syntax is not supported"); return }
     if bytes_is(dir, c".err") || bytes_is(dir, c".error") { try as_err(c".error directive encountered"); return }
-    if bytes_is(dir, c".warning") { skip_to_eol(); return }
+    if bytes_is(dir, c".warning") {
+        if ac.fatal_warnings {
+            warning Buf = {}
+            try parse_string_lit(&warning)
+            try as_err_b(c"", buf_bytes(&warning))
+        }
+        skip_to_eol()
+        return
+    }
     // Accepted and ignored for now (no DWARF line emission yet)
     if bytes_is(dir, c".file") || bytes_is(dir, c".loc") ||
        bytes_is(dir, c".addrsig") || bytes_is(dir, c".addrsig_sym") ||

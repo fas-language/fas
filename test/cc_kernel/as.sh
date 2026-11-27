@@ -28,8 +28,9 @@ while (( $# )); do
         -I*) cpp_args+=("$1"); as_args+=("$1"); ref_args+=("$1") ;;
         -include|-imacros|-iquote|-isystem|-idirafter|-D|-U)
             cpp_args+=("$1" "$2"); ref_args+=("$1" "$2"); shift ;;
-        -Wa,-mrelax-relocations=yes|-Wa,-mrelax-relocations=no)
-            as_args+=("${1#-Wa,}"); ref_args+=("$1") ;;
+        -Wa,*)
+            IFS=, read -r -a as_flags <<< "${1#-Wa,}"
+            as_args+=("${as_flags[@]}"); ref_args+=("$1") ;;
         -Wp,-MD,*|-Wp,-MMD,*) deps=true; dep_file=true; cpp_args+=("$1") ;;
         -MD|-MMD) deps=true; cpp_args+=("$1") ;;
         -MP) cpp_args+=("$1") ;;
@@ -52,6 +53,9 @@ if [[ $mode != -m64 ]]; then
 fi
 
 if $preprocess_only; then
+    if [[ $out == /dev/null ]]; then
+        exec "$FCC" -E -x assembler-with-cpp "${cpp_args[@]}" "$source" > /dev/null
+    fi
     if [[ -n $out ]]; then cpp_args+=(-o "$out"); fi
     exec "$FCC" -E -x assembler-with-cpp "${cpp_args[@]}" "$source"
 fi
@@ -74,7 +78,7 @@ if [[ $language == assembler-with-cpp || ( $language == none && $source == *.S )
 fi
 "$FCC_AS" "${as_args[@]}" "$asm_input" -o "$out"
 
-if [[ -n ${KERNEL_AS_DIFF_DIR:-} ]]; then
+if [[ -n ${KERNEL_AS_DIFF_DIR:-} && $source != - && $source != /dev/null && $out != /dev/null ]]; then
     compare=$KERNEL_AS_DIFF_DIR/${out#/}.diff
     mkdir -p -- "$(dirname -- "$compare")"
     root=$(cd -- "$(dirname -- "$0")/../.." && pwd)

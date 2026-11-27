@@ -38,8 +38,9 @@ reference_cc() {
 # 2. CLI diagnostics checks (file:line: error: ..., exit 1)
 check_diag() {
     local label="$1" src="$2"
+    shift 2
     printf '%b\n' "$src" >"$WORK/bad.s"
-    if "$WORK/fas-as" "$WORK/bad.s" -o "$WORK/bad.o" 2>"$WORK/bad.err"; then
+    if "$WORK/fas-as" "$@" "$WORK/bad.s" -o "$WORK/bad.o" 2>"$WORK/bad.err"; then
         echo "FAIL diag ($label): expected exit 1" >&2
         exit 1
     fi
@@ -55,7 +56,8 @@ check_diag "intel-syntax" ".intel_syntax noprefix\n  nop"
 check_diag "rex-hi8" ".text\n  movb %ah, %r8b"
 check_diag "backwards-org" ".text\n  .long 1\n  .org 2"
 check_diag "code32-rex" ".code32\n  movb %dil, (%eax)"
-echo "diag: ok (7/7 checks)"
+check_diag "fatal-warning" '.warning "this warning is fatal"' --fatal-warnings
+echo "diag: ok (8/8 checks)"
 
 for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
     llvm-mc-22 -triple=x86_64-unknown-linux-gnu -filetype=obj "$fixture" -o "$WORK/ref.o"

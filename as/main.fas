@@ -29,8 +29,7 @@ fn main(argc i32, argv addr) i32 {
     out_path Bytes = bytes_c(c"a.out")
     in_path Bytes = bytes_empty()
     has_input bool = false
-    noexecstack bool = false
-    no_relax_relocs bool = false
+    opts AsOptions = {}
     inc_dirs Vec[Bytes] = {}
 
     i u64 = 1
@@ -57,13 +56,15 @@ fn main(argc i32, argv addr) i32 {
                   bytes_is(a, c"-gdwarf-3") || bytes_is(a, c"-gdwarf-4") || bytes_is(a, c"-gdwarf-5") {
             continue
         } else if bytes_is(a, c"--noexecstack") {
-            noexecstack = true
+            opts.noexecstack = true
         } else if bytes_is(a, c"-mrelax-relocations=no") {
-            no_relax_relocs = true
+            opts.no_relax_relocs = true
         } else if bytes_is(a, c"-mrelax-relocations=yes") {
-            no_relax_relocs = false
+            opts.no_relax_relocs = false
+        } else if bytes_is(a, c"--fatal-warnings") {
+            opts.fatal_warnings = true
         } else if bytes_is(a, c"-h") || bytes_is(a, c"--help") {
-            msg Bytes = bytes_c(c"Usage: fas-as [-o out.o] [--64] [-I dir] [-g] [--noexecstack] [-mrelax-relocations=yes|no] file.s|-\n")
+            msg Bytes = bytes_c(c"Usage: fas-as [-o out.o] [--64] [-I dir] [-g] [--noexecstack] [--fatal-warnings] [-mrelax-relocations=yes|no] file.s|-\n")
             os_write_all(STDOUT, msg.p, msg.n) catch {}
             return 0
         } else if bytes_is(a, c"--version") || bytes_is(a, c"-v") {
@@ -102,7 +103,7 @@ fn main(argc i32, argv addr) i32 {
 
     res AsResult = {}
     defer { as_result_free(&res) }
-    ok bool = as_assemble_with_options(buf_bytes(&src_buf), fname, &inc_dirs, noexecstack, no_relax_relocs, &res)
+    ok bool = as_assemble_with_options(buf_bytes(&src_buf), fname, &inc_dirs, opts, &res)
     if !ok {
         if res.diag.n != 0 {
             os_write_all(STDERR, res.diag.p, res.diag.n) catch {}
@@ -110,6 +111,7 @@ fn main(argc i32, argv addr) i32 {
         return 1
     }
 
+    if bytes_is(out_path, c"/dev/null") { return 0 }
     file_write_atomic(out_path.p, bytes(res.obj_data, res.obj_size), 0o644) catch {
         os_write_all(STDERR, c"fas-as: error: failed to write output file\n", 43) catch {}
         return 1
