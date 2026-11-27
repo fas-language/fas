@@ -42,3 +42,9 @@ emit_id
         .byte \digit, \@
 .endr
 emit_id
+
+        .macro mixed first:req second=2 third=3
+        .byte \first, \second, \third
+        .endm
+        mixed 12 third=15
+        mixed 12, third=15, second=14

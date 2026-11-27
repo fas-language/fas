@@ -298,7 +298,6 @@ fn try_invoke_macro(name Bytes) bool fails {
         index u64 = position
         if end != start && sep < n && p[u8, sep] == 61 && (sep + 1 == n || p[u8, sep + 1] != 61) {
             param Bytes = bytes(p + start, end - start)
-            if position != 0 && !keyword { try as_err(c"cannot mix positional and keyword arguments") }
             keyword = true
             index = 0
             while index < m.params.n && !bytes_eq(vec_at(&m.params, index).name, param) { index += 1 }
