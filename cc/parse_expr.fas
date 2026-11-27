@@ -1017,6 +1017,7 @@ fn pa_unary(p handle[Parser]) handle[Ast] fails {
         label Token = try pa_take(p)
         l handle[Label] = try pa_get_label(p, label)
         l.used = true
+        if p.function != null { p.function.has_addr_label = true }
         n handle[Ast] = pa_node(p, ND_UNARY, t.loc, ty_ptr(TY_VOID))
         n.op_kind = TK_LAND
         n.op = p.punct_syms[zext[usize](TK_LAND)]

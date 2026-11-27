@@ -75,3 +75,30 @@ The syntax suite reads the frozen GCC and Clang decisions in the
 sources. It also exercises constant folding and checks layout values
 obtained from a native Clang build. Each expected difference identifies an
 individual case, its outcome, and its reason.
+
+## Fast front-end architecture
+
+The front end is structured for low memory traffic and single-pass
+translation without intermediate token or AST materialization:
+
+- **Source & locations (`cc/src.fas`)**: 32-bit `Loc` offsets into a flat
+  virtual address space over `mmap`'d source files, with sparse physical
+  line/splice tables resolved lazily on diagnostics and `__LINE__`.
+- **Unified symbol table (`cc/sym.fas`, `cc/kw.fas`)**: open-addressed
+  table of 24-byte `SymSlot` entries (`hash`, `off`, `len`, `macro_id`,
+  `flags`, `kw_id`) shared across lexer, preprocessor, and parser.
+  Identifiers carry a `SymId` with `kw_id` embedded directly in the
+  token, giving O(1) keyword, macro, and typedef dispatch with zero
+  string comparisons on the hot path.
+- **Direct pull preprocessing (`cc/lex.fas`, `cc/macro.fas`, `cc/pp.fas`)**:
+  fast-path raw scanning feeds `Parser` via a small ring buffer;
+  `#include` guard detection skips re-opening guarded headers.
+- **Binding-stack scopes & compact AST (`cc/parse*.fas`)**: ordinary,
+  tag, and local-label namespaces are dense `SymId`-indexed arrays with
+  compact 16-byte undo records per scope (no per-block hash tables).
+  `Ast` nodes are 72 bytes (`AstExtra` sidecar allocated only for cold
+  fields), allocated from a two-level `Arena` (`tu_arena` for file-scope
+  declarations, `fn_arena` reset after each function callback).
+- **Streaming FIR lowering (`cc/gen*.fas`)**: lowers each function AST to
+  Fir 0.3 directly inside `Parser.on_function` before `fn_arena` is
+  reclaimed, then hands the Fir stream to `fas_fir` for native codegen.

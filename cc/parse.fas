@@ -106,7 +106,7 @@ struct Symbol {
     thread_local bool
     defined bool
     tentative bool
-    _pad0 u8
+    has_addr_label bool
     _pad1 u16
     value addr      // handle[Ast]
     params addr     // handle[Param]

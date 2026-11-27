@@ -625,6 +625,20 @@ fn gen_is_mem_ty(tid u32) bool {
 // Note: _Bool is i1 in SSA (stored/loaded as i8 or i1 — Fir i1 stores as 1 byte 0/1!).
 // _BitInt(N) is iN directly (Fir supports any iN up to 2^23-1 natively!).
 fn gen_emit_fir_ty(b handle[Buf], tid u32) void {
+    if tid <= TY_FLOAT128 {
+        if tid == TY_INT || tid == TY_UINT { buf_str(b, c"i32"); return }
+        if tid == TY_LONG || tid == TY_ULONG {
+            buf_str(b, if tc.ilp32 { c"i32" } else { c"i64" })
+            return
+        }
+        if tid == TY_LLONG || tid == TY_ULLONG { buf_str(b, c"i64"); return }
+        if tid == TY_CHAR || tid == TY_SCHAR || tid == TY_UCHAR { buf_str(b, c"i8"); return }
+        if tid == TY_SHORT || tid == TY_USHORT { buf_str(b, c"i16"); return }
+        if tid == TY_BOOL { buf_str(b, c"i1"); return }
+        if tid == TY_DOUBLE { buf_str(b, c"f64"); return }
+        if tid == TY_FLOAT { buf_str(b, c"f32"); return }
+        if tid == TY_NULLPTR { buf_str(b, c"ptr"); return }
+    }
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     k u8 = n.kind
@@ -710,7 +724,11 @@ fn gen_add_succ(blk handle[GenBlock], target u32) void {
 }
 
 fn gen_emit_val(b handle[Buf], v u32) void {
-    buf_str(b, c"%v")
+    if b.n + 14 > b.cap { buf_reserve(b, 14) }
+    p addr = b.p + b.n
+    p[u8, 0] = 37 // '%'
+    p[u8, 1] = 118 // 'v'
+    b.n += 2
     buf_dec_u64(b, zext[u64](v))
 }
 

@@ -1337,22 +1337,23 @@ fn gen_defines_label_list(n handle[Ast]) bool {
 }
 
 fn gen_prescan_addr_taken(n handle[Ast]) void {
-    if n == null { return }
-    if n.kind == ND_UNARY {
-        op Bytes = sym_name(&gc.p.ctx.syms, n.op)
-        if bytes_eq_c(op, c"&&") && ast_extra(n) != null {
-            blk u32 = gen_get_label_block(handle_from_addr(ast_extra(n)))
+    cur handle[Ast] = n
+    while cur != null {
+        if cur.kind == ND_UNARY && cur.op_kind == TK_LAND && ast_extra(cur) != null {
+            blk u32 = gen_get_label_block(handle_from_addr(ast_extra(cur)))
             gen_mark_addr_taken(blk)
         }
+        if cur.kind == ND_DECL && cur.decl != null && cur.decl.value != null {
+            gen_prescan_addr_taken(handle_from_addr(cur.decl.value))
+        }
+        if cur.a != null { gen_prescan_addr_taken(cur.a) }
+        if cur.b != null { gen_prescan_addr_taken(cur.b) }
+        if cur.ext != null {
+            if cur.ext.c != null { gen_prescan_addr_taken(cur.ext.c) }
+            if cur.ext.d != null { gen_prescan_addr_taken(cur.ext.d) }
+        }
+        cur = cur.next
     }
-    if n.kind == ND_DECL && n.decl != null && n.decl.value != null {
-        gen_prescan_addr_taken(handle_from_addr(n.decl.value))
-    }
-    gen_prescan_addr_taken(n.a)
-    gen_prescan_addr_taken(n.b)
-    gen_prescan_addr_taken(ast_c(n))
-    gen_prescan_addr_taken(ast_d(n))
-    gen_prescan_addr_taken(n.next)
 }
 
 // ---------- Function Definition Emission ----------
@@ -1528,7 +1529,7 @@ fn gen_function(node handle[Ast]) void fails {
     }
 
     // Pre-scan for `&&label` so `indirect_br` has the complete target list
-    gen_prescan_addr_taken(node.a)
+    if s.has_addr_label { gen_prescan_addr_taken(node.a) }
 
     // Spill all parameters into entry-block allocas so `&param` and mutation always work
     for i u32 in 0..n_params {

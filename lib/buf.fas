@@ -106,7 +106,38 @@ fn buf_cstr(b handle[Buf]) addr {
 // ---------- numbers as text ----------
 
 fn buf_dec_u64(b handle[Buf], x u64) void {
-    tmp arr[20, u8] = {}
+    if b.n + 20 > b.cap { buf_reserve(b, 20) }
+    p addr = b.p + b.n
+    if x < 10 {
+        p[u8, 0] = trunc[u8](x) + 48
+        b.n += 1
+        return
+    }
+    if x < 100 {
+        p[u8, 0] = trunc[u8](x / 10) + 48
+        p[u8, 1] = trunc[u8](x % 10) + 48
+        b.n += 2
+        return
+    }
+    if x < 1000 {
+        q u64 = x / 10
+        p[u8, 0] = trunc[u8](q / 10) + 48
+        p[u8, 1] = trunc[u8](q % 10) + 48
+        p[u8, 2] = trunc[u8](x % 10) + 48
+        b.n += 3
+        return
+    }
+    if x < 10000 {
+        q1 u64 = x / 100
+        r1 u64 = x % 100
+        p[u8, 0] = trunc[u8](q1 / 10) + 48
+        p[u8, 1] = trunc[u8](q1 % 10) + 48
+        p[u8, 2] = trunc[u8](r1 / 10) + 48
+        p[u8, 3] = trunc[u8](r1 % 10) + 48
+        b.n += 4
+        return
+    }
+    tmp arr[20, u8]
     i usize = 20
     while true {
         i -= 1
@@ -114,7 +145,9 @@ fn buf_dec_u64(b handle[Buf], x u64) void {
         x = x / 10
         if x == 0 { break }
     }
-    buf_raw(b, &tmp[i], 20 - i)
+    n usize = 20 - i
+    mem_copy(p, &tmp[i], n)
+    b.n += n
 }
 
 fn buf_dec_i64(b handle[Buf], x i64) void {
