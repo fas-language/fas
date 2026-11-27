@@ -32,8 +32,10 @@ other target C, including the x86-64 decompressor. The mixed defconfig setup
 replay ends at `0x7910`. Set `KERNEL_FCC_SETUP=1` to try compiling all setup
 C with fcc. In a size measurement the all-native setup ended at `0x98b0`.
 The harness records which Clang C fallbacks it invoked in `clang-c.tsv`.
-Three Kbuild offset generators expect
-GNU assembly from `-S`. For those inputs the adapter extracts their `.ascii`
+Rebuild the setup objects when measuring fallback use or changing
+`KERNEL_FCC_SETUP`. The log covers the current invocation and Kbuild reuses
+existing objects across runs. Three Kbuild offset generators expect GNU
+assembly from `-S`. For those inputs the adapter extracts their `.ascii`
 layout markers from fcc's object files.
 With `KERNEL_LD=fas`, the LD adapter `test/cc_kernel/ld.sh` sends relocatable
 (`-r`) links, including the three objtool intermediate objects, to fas-ld
