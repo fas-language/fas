@@ -39,13 +39,20 @@ esac
 build=$(realpath -m -- "${KERNEL_BUILD:-$tests/kernel-build/$build_name-$mode}")
 mkdir -p "$build/tmp"
 export TMPDIR=$build/tmp
+case "${KERNEL_AS:-clang}" in
+    clang|fas) ;;
+    *) echo 'KERNEL_AS must be clang or fas' >&2; exit 2 ;;
+esac
 if [[ $mode == fcc ]]; then
-    if [[ ! -x $FCC_AS && $FCC_AS == "$root/_build/fas-as" ]]; then
+    if [[ ${KERNEL_AS:-clang} == fas && ! -x $FCC_AS && $FCC_AS == "$root/_build/fas-as" ]]; then
         "$root/_build/default/bin/main.exe" "$root/as/main.fas" -o "$FCC_AS"
     fi
     export KERNEL_CLANG_C_LOG=$build/clang-c.tsv
     export KERNEL_CLANG_AS_LOG=${KERNEL_CLANG_AS_LOG:-$build/clang-as.tsv}
-    touch "$KERNEL_CLANG_C_LOG" "$KERNEL_CLANG_AS_LOG"
+    touch "$KERNEL_CLANG_C_LOG"
+    if [[ ${KERNEL_AS:-clang} == fas ]]; then
+        touch "$KERNEL_CLANG_AS_LOG"
+    fi
     if [[ -n ${KERNEL_AS_DIFF_DIR:-} ]]; then
         KERNEL_AS_DIFF_DIR=$(realpath -m -- "$KERNEL_AS_DIFF_DIR")
     fi
@@ -54,9 +61,11 @@ if [[ $mode == fcc ]]; then
         mapfile -t sources < <(LC_ALL=C sort -u "$KERNEL_CLANG_C_LOG")
         printf 'Clang target C fallback in this build tree (%d files)\n' "${#sources[@]}"
         if (( ${#sources[@]} )); then printf '  %s\n' "${sources[@]}"; fi
-        mapfile -t sources < <(LC_ALL=C sort -u "$KERNEL_CLANG_AS_LOG")
-        printf 'Clang target assembly fallback in this build tree (%d files)\n' "${#sources[@]}"
-        if (( ${#sources[@]} )); then printf '  %s\n' "${sources[@]}"; fi
+        if [[ ${KERNEL_AS:-clang} == fas ]]; then
+            mapfile -t sources < <(LC_ALL=C sort -u "$KERNEL_CLANG_AS_LOG")
+            printf 'Clang target assembly fallback in this build tree (%d files)\n' "${#sources[@]}"
+            if (( ${#sources[@]} )); then printf '  %s\n' "${sources[@]}"; fi
+        fi
     }
     trap report_clang_fallbacks EXIT
 fi

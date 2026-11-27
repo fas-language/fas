@@ -42,7 +42,12 @@ for arg; do
         arch/x86/boot/*.c|*/arch/x86/boot/*.c|arch/x86/realmode/*.c|*/arch/x86/realmode/*.c) setup_c=$arg ;;
         arch/x86/entry/vdso/vdso32/*.c|*/arch/x86/entry/vdso/vdso32/*.c) vdso32_c=$arg ;;
         -*) ;;
-        *.S|*.s|assembler|assembler-with-cpp) exec "$(dirname -- "$0")/as.sh" "$@" ;;
+        *.S|*.s|assembler|assembler-with-cpp)
+            if [[ ${KERNEL_AS:-clang} == fas ]]; then
+                exec "$(dirname -- "$0")/as.sh" "$@"
+            fi
+            exec "$clang" "$@"
+            ;;
     esac
     args+=("$arg")
 done
