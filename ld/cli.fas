@@ -653,7 +653,7 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
         fail LinkDone
     }
     if !c.has_script && c.strip_debug_arg.n != 0 { try fail_with(c"unsupported option ", c.strip_debug_arg) }
-    if c.elf32 && !c.has_script { try refuse(c"ELF32 output requires an executable linker script") }
+    if c.elf32 && !c.has_script { try fail_with(c"unsupported emulation ", bytes_c(c"elf_i386")) }
     if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
         try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
     }
