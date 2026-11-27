@@ -1,0 +1,411 @@
+// cc2/src.fas: SourceMap, zero-copy/SIMD-spliced SourceFile, and lazy (file, line, col).
+//
+// Every loaded file gets a contiguous [base, base + n + 1) range in a flat 32-bit
+// SourceLoc space. No CLoc is allocated per token; line/col are computed lazily
+// from sparse 4KB line checkpoints + AVX2 newline counting only when needed
+// (diagnostics, __LINE__, __FILE__, line markers).
+
+const SRC_CHECKPOINT_SHIFT usize = 12 // 4096 bytes per checkpoint
+const SRC_CHECKPOINT_SIZE usize = 4096
+
+// Discontinuity recorded only when backslash-newline splicing or #line occurs.
+value struct SpliceMark {
+    offset u32     // byte offset in spliced buffer
+    phys_line u32  // physical 1-based line at offset
+}
+
+struct SourceFile {
+    data addr          // 64-byte zero-padded spliced (or original) buffer
+    len u32            // logical byte length
+    base u32           // base offset in SourceMap
+    path_sym u32       // physical path SymId
+    raw_data addr      // original unspliced bytes (for #embed)
+    raw_len usize
+    splices Vec[SpliceMark] // empty for files with no backslash-newline splices!
+    line_cp Vec[u32]   // line_cp[k] = 1-based physical line at byte offset (k << 12)
+    cp_built bool
+    once bool
+    read bool
+    guard u32
+}
+
+// Per-inclusion instance in SourceMap so __LINE__/__FILE__/#line work accurately
+// even when the same header is included multiple times or has #line directives.
+value struct LineOverride {
+    offset u32         // byte offset in file where #line took effect
+    logical_line u32   // logical 1-based line at offset
+    logical_file u32   // logical filename SymId
+    phys_line u32      // physical 1-based line at offset
+}
+
+struct SourceInst {
+    file handle[SourceFile]
+    base u32           // base offset in SourceMap (unique per inclusion!)
+    len u32
+    path_sym u32       // initial filename SymId
+    level u32          // include nesting level
+    overrides Vec[LineOverride]
+}
+
+value struct ResolvedLoc {
+    file u32
+    line u32
+    column u32
+    level u32
+}
+
+struct SourceMap {
+    insts Vec[SourceInst]
+    next_base u32      // starts at 1 (0 = invalid/synthetic loc)
+    last_inst usize    // 1-entry MRU cache for O(1) lookup
+    synth_arena Arena  // immutable storage for synthesized token spellings
+    synth_texts Vec[Bytes]
+}
+
+fn sm_init(sm handle[SourceMap]) void {
+    sm.next_base = 1
+    sm.last_inst = 0
+    // index 0 is empty bytes
+    vec_push[Bytes](&sm.synth_texts, bytes_empty())
+}
+
+fn sm_add_synth(sm handle[SourceMap], s Bytes) u32 {
+    id u32 = trunc[u32](sm.synth_texts.n)
+    p addr = arena_alloc(&sm.synth_arena, s.n + 1, 1)
+    if s.n != 0 { mem_copy(p, s.p, s.n) }
+    vec_push[Bytes](&sm.synth_texts, bytes(p, s.n))
+    return id
+}
+
+fn sm_alloc_inst(sm handle[SourceMap], sf handle[SourceFile], path_sym u32, level u32) u32 {
+    inst_idx u32 = trunc[u32](sm.insts.n)
+    inst handle[SourceInst] = vec_add[SourceInst](&sm.insts)
+    inst.file = sf
+    inst.base = sm.next_base
+    inst.len = sf.len
+    inst.path_sym = path_sym
+    inst.level = level
+    sm.next_base += sf.len + 2 // +2 so EOF (base + len) is distinct from next file's base
+    sm.last_inst = zext[usize](inst_idx)
+    return inst_idx
+}
+
+// Fast AVX2 splice: scans 32 bytes/iter. If the file has no UTF-8 BOM, no '\r',
+// and no '\' followed by newline (or [ \t]*newline in GNU mode), we reuse the
+// raw buffer directly with ZERO copy and ZERO splice marks!
+fn sf_newline_width(p addr) usize {
+    if p[u8] == 10 { return 1 }
+    if p[u8] != 13 { return 0 }
+    return if p[u8, 1] == 10 { 2 } else { 1 }
+}
+
+fn sf_needs_splice(p addr, n usize, gnu bool) bool {
+    if n >= 3 && p[u8] == 239 && p[u8, 1] == 187 && p[u8, 2] == 191 { return true }
+    i usize = 0
+    v_cr vec[32, u8] = splat(13)
+    v_bs vec[32, u8] = splat(92)
+    while i < n {
+        v vec[32, u8] = (p + i)[vec[32, u8]]
+        m_cr u32 = bitcast[u32](v == v_cr)
+        if m_cr != 0 {
+            pos usize = i + zext[usize](ctz(m_cr))
+            if pos < n { return true }
+        }
+        m_bs u32 = bitcast[u32](v == v_bs)
+        while m_bs != 0 {
+            bit u32 = ctz(m_bs)
+            pos usize = i + zext[usize](bit)
+            if pos >= n { break }
+            end usize = pos + 1
+            if gnu {
+                while p[u8, end] == 32 || p[u8, end] == 9 { end += 1 }
+            }
+            if p[u8, end] == 10 || p[u8, end] == 13 { return true }
+            m_bs &= m_bs - 1
+        }
+        i += 32
+    }
+    return false
+}
+
+const SF_EMPTY_BUF arr[64, u8] = {}
+
+// Single-pass AVX2 in-place splice: finds the first BOM, '\r', or '\'+newline.
+// If none exist, returns with ZERO writes. Otherwise splices in-place (dst <= src)
+// with ZERO extra buffer allocation and ZERO page faults!
+fn sf_prepare(sf handle[SourceFile], gnu bool) void {
+    if sf.read { return }
+    sf.read = true
+    src_buf addr = sf.raw_data
+    n usize = sf.raw_len
+    if n == 0 || src_buf == null {
+        sf.data = &SF_EMPTY_BUF[0]
+        sf.len = 0
+        return
+    }
+    sf.data = src_buf
+    src usize = 0
+    dst usize = 0
+    line u32 = 1
+    need_copy bool = false
+    if n >= 3 && src_buf[u8] == 239 && src_buf[u8, 1] == 187 && src_buf[u8, 2] == 191 {
+        src = 3
+        need_copy = true
+    }
+    v_nl vec[32, u8] = splat(10)
+    v_cr vec[32, u8] = splat(13)
+    v_bs vec[32, u8] = splat(92)
+    // Fast AVX2 scan until the first actual splice or '\r' (zero writes until needed!)
+    if !need_copy {
+        while src + 32 <= n {
+            v vec[32, u8] = (src_buf + src)[vec[32, u8]]
+            m_cr u32 = bitcast[u32](v == v_cr)
+            m_bs u32 = bitcast[u32](v == v_bs)
+            if m_cr == 0 && m_bs == 0 {
+                m_nl u32 = bitcast[u32](v == v_nl)
+                if m_nl != 0 { line += popcount(m_nl) }
+                src += 32
+                continue
+            }
+            if m_cr != 0 {
+                need_copy = true
+                break
+            }
+            // Check if any '\' in this 32B chunk is actually a line continuation
+            m_chk u32 = m_bs
+            while m_chk != 0 {
+                bit u32 = ctz(m_chk)
+                end usize = src + zext[usize](bit) + 1
+                if gnu {
+                    while src_buf[u8, end] == 32 || src_buf[u8, end] == 9 { end += 1 }
+                }
+                if src_buf[u8, end] == 10 || src_buf[u8, end] == 13 {
+                    need_copy = true
+                    break
+                }
+                m_chk &= m_chk - 1
+            }
+            if need_copy { break }
+            m_nl u32 = bitcast[u32](v == v_nl)
+            if m_nl != 0 { line += popcount(m_nl) }
+            src += 32
+        }
+        if !need_copy {
+            // Check scalar tail
+            t usize = src
+            while t < n {
+                ch u8 = src_buf[u8, t]
+                if ch == 13 { need_copy = true; break }
+                if ch == 92 {
+                    end usize = t + 1
+                    if gnu {
+                        while src_buf[u8, end] == 32 || src_buf[u8, end] == 9 { end += 1 }
+                    }
+                    if src_buf[u8, end] == 10 || src_buf[u8, end] == 13 { need_copy = true; break }
+                }
+                t += 1
+            }
+            if !need_copy {
+                sf.len = trunc[u32](n)
+                return
+            }
+        }
+        dst = src
+    }
+    // In-place splice from `src` onward (always dst <= src)
+    while src < n {
+        if src + 32 <= n {
+            v vec[32, u8] = (src_buf + src)[vec[32, u8]]
+            m_special u32 = bitcast[u32]((v == v_cr) | (v == v_bs))
+            if m_special == 0 {
+                (src_buf + dst)[vec[32, u8]] = v
+                m_nl u32 = bitcast[u32](v == v_nl)
+                if m_nl != 0 { line += popcount(m_nl) }
+                src += 32
+                dst += 32
+                continue
+            }
+        }
+        ch u8 = src_buf[u8, src]
+        if ch == 92 {
+            end usize = src + 1
+            if gnu {
+                while src_buf[u8, end] == 32 || src_buf[u8, end] == 9 { end += 1 }
+            }
+            w usize = sf_newline_width(src_buf + end)
+            if w != 0 {
+                src = end + w
+                line += 1
+                vec_push[SpliceMark](&sf.splices, {trunc[u32](dst), line})
+                continue
+            }
+        }
+        w usize = sf_newline_width(src_buf + src)
+        if w != 0 {
+            src_buf[u8, dst] = 10
+            dst += 1
+            src += w
+            line += 1
+        } else {
+            src_buf[u8, dst] = ch
+            src += 1
+            dst += 1
+        }
+    }
+    // Ensure 64 zero bytes after new logical end
+    mem_set(src_buf + dst, 0, 64)
+    sf.len = trunc[u32](dst)
+}
+
+// Build 4KB line checkpoints on demand (only if src_resolve is ever called on this file).
+fn sf_ensure_checkpoints(sf handle[SourceFile]) void {
+    if sf.cp_built { return }
+    sf.cp_built = true
+    n usize = zext[usize](sf.len)
+    num_cp usize = (n >> SRC_CHECKPOINT_SHIFT) + 1
+    vec_reserve[u32](&sf.line_cp, num_cp)
+    line u32 = 1
+    sp_idx usize = 0
+    v_nl vec[32, u8] = splat(10)
+    for cp usize in 0..num_cp {
+        vec_push[u32](&sf.line_cp, line)
+        chunk_start usize = cp << SRC_CHECKPOINT_SHIFT
+        chunk_end usize = chunk_start + SRC_CHECKPOINT_SIZE
+        if chunk_end > n { chunk_end = n }
+        i usize = chunk_start
+        while i + 32 <= chunk_end {
+            v vec[32, u8] = (sf.data + i)[vec[32, u8]]
+            m u32 = bitcast[u32](v == v_nl)
+            if m != 0 { line += popcount(m) }
+            i += 32
+        }
+        while i < chunk_end {
+            if sf.data[u8, i] == 10 { line += 1 }
+            i += 1
+        }
+        // Account for any backslash-newline splices inside [chunk_start, chunk_end)
+        while sp_idx < sf.splices.n && zext[usize](sf.splices.p[SpliceMark, sp_idx].offset) < chunk_end {
+            line += 1
+            sp_idx += 1
+        }
+    }
+}
+
+// Compute physical (line, col) at byte offset `off` inside `sf`.
+fn sf_phys_line_col(sf handle[SourceFile], off u32, out_col addr) u32 {
+    sf_ensure_checkpoints(sf)
+    if off > sf.len { off = sf.len }
+    cp usize = zext[usize](off) >> SRC_CHECKPOINT_SHIFT
+    line u32 = sf.line_cp.p[u32, cp]
+    start usize = cp << SRC_CHECKPOINT_SHIFT
+    end usize = zext[usize](off)
+    last_nl usize = start
+    has_nl bool = false
+    v_nl vec[32, u8] = splat(10)
+    i usize = start
+    while i + 32 <= end {
+        v vec[32, u8] = (sf.data + i)[vec[32, u8]]
+        m u32 = bitcast[u32](v == v_nl)
+        if m != 0 {
+            line += popcount(m)
+            last_nl = i + zext[usize](31 - clz(m))
+            has_nl = true
+        }
+        i += 32
+    }
+    while i < end {
+        if sf.data[u8, i] == 10 {
+            line += 1
+            last_nl = i
+            has_nl = true
+        }
+        i += 1
+    }
+    // Count splices in [start, end]
+    if sf.splices.n != 0 {
+        lo usize = 0
+        hi usize = sf.splices.n
+        while lo < hi {
+            mid usize = (lo + hi) >> 1
+            if zext[usize](sf.splices.p[SpliceMark, mid].offset) < start { lo = mid + 1 }
+            else { hi = mid }
+        }
+        while lo < sf.splices.n && zext[usize](sf.splices.p[SpliceMark, lo].offset) <= end {
+            line += 1
+            last_nl = zext[usize](sf.splices.p[SpliceMark, lo].offset)
+            has_nl = true
+            lo += 1
+        }
+    }
+    if out_col != null {
+        if has_nl {
+            // If last_nl was a newline byte, col = end - last_nl; if splice at end, col = 1
+            if last_nl < end && sf.data[u8, last_nl] == 10 {
+                out_col[u32] = trunc[u32](end - last_nl)
+            } else {
+                out_col[u32] = trunc[u32](end - last_nl + 1)
+            }
+        } else {
+            // Walk backward from start to find previous newline
+            b usize = start
+            while b > 0 && sf.data[u8, b - 1] != 10 { b -= 1 }
+            out_col[u32] = trunc[u32](end - b + 1)
+        }
+    }
+    return line
+}
+
+fn sm_find_inst(sm handle[SourceMap], loc u32) usize {
+    n usize = sm.insts.n
+    if n == 0 || loc == 0 { return n }
+    // Fast path: 1-entry MRU cache
+    if sm.last_inst < n {
+        inst handle[SourceInst] = vec_at[SourceInst](&sm.insts, sm.last_inst)
+        if loc >= inst.base && loc <= inst.base + inst.len { return sm.last_inst }
+    }
+    lo usize = 0
+    hi usize = n
+    while lo < hi {
+        mid usize = (lo + hi) >> 1
+        inst handle[SourceInst] = vec_at[SourceInst](&sm.insts, mid)
+        if loc < inst.base { hi = mid }
+        else if loc > inst.base + inst.len { lo = mid + 1 }
+        else { sm.last_inst = mid; return mid }
+    }
+    return n
+}
+
+fn sm_resolve(sm handle[SourceMap], loc u32) ResolvedLoc {
+    idx usize = sm_find_inst(sm, loc)
+    if idx >= sm.insts.n { return {0, 0, 0, 0} }
+    inst handle[SourceInst] = vec_at[SourceInst](&sm.insts, idx)
+    off u32 = loc - inst.base
+    col u32 = 1
+    phys_line u32 = sf_phys_line_col(inst.file, off, &col)
+    file u32 = inst.path_sym
+    line u32 = phys_line
+    if inst.overrides.n != 0 {
+        // Find last override with override.offset <= off
+        lo usize = 0
+        hi usize = inst.overrides.n
+        while lo < hi {
+            mid usize = (lo + hi) >> 1
+            if inst.overrides.p[LineOverride, mid].offset <= off { lo = mid + 1 }
+            else { hi = mid }
+        }
+        if lo > 0 {
+            ov LineOverride = inst.overrides.p[LineOverride, lo - 1]
+            file = ov.logical_file
+            line = ov.logical_line + (phys_line - ov.phys_line)
+        }
+    }
+    return {file, line, col, inst.level}
+}
+
+fn sm_raw_slice(sm handle[SourceMap], loc u32, n u16) Bytes {
+    idx usize = sm_find_inst(sm, loc)
+    if idx >= sm.insts.n { return bytes_empty() }
+    inst handle[SourceInst] = vec_at[SourceInst](&sm.insts, idx)
+    off usize = zext[usize](loc - inst.base)
+    return bytes(inst.file.data + off, zext[usize](n))
+}

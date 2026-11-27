@@ -1,0 +1,524 @@
+// cc2/main.fas: Stage 1 driver (Lexer + Preprocessor).
+use "../lib/core.fas"
+use "token.fas"
+use "src.fas"
+use "sym.fas"
+use "unicode.fas"
+use "diag.fas"
+use "lex.fas"
+use "features.fas"
+use "target.fas"
+use "target_i386.fas"
+use "x86_target_data.fas"
+use "x86_target.fas"
+use "search.fas"
+use "pp.fas"
+use "macro.fas"
+use "expr.fas"
+use "builtin.fas"
+use "embed.fas"
+use "directive.fas"
+use "output.fas"
+
+const MODE_LINK u8        = 0
+const MODE_PREPROCESS u8  = 1
+const MODE_SYNTAX u8      = 2
+const MODE_EMIT_FIR u8    = 3
+const MODE_COMPILE_OBJ u8 = 4
+
+const IN_C u8       = 0
+const IN_OBJ u8     = 1
+const IN_FIR u8     = 2
+const IN_ASM_CPP u8 = 3
+
+value struct Command { value addr, kind u8 }
+value struct InputFile { path addr, link_at u32, kind u8 }
+
+struct Options {
+    path addr
+    output addr
+    dep_file addr
+    inputs Vec[InputFile]
+    targets Vec[addr]
+    macros Vec[Command]
+    force Vec[Command]
+    dirs Vec[SearchDir]
+    mode u8
+    gnu bool
+    standard u8
+    x86_bits u8
+    march addr
+    x86_cpu u32
+    x86_options Vec[u32]
+    unsigned_char bool
+    short_wchar bool
+    x86_native bool
+    native_features u64
+    stack_protector u8
+    overflow_mode u8
+    short_enums bool
+    freestanding bool
+    no_stdinc bool
+    no_library_builtins bool
+    disabled_builtins Vec[Bytes]
+    prefix_maps Vec[Bytes]
+    suppress_warnings bool
+    option_errors bool
+    general_regs_only bool
+    kernel_model bool
+    cf_protection u8
+    pic_mode u8
+    no_markers bool
+    no_builtins bool
+    macro_dump bool
+    syntax_only bool
+    deps u8
+    user_deps bool
+    phony bool
+    is_shared bool
+    exceptions bool
+    force_lang u8
+}
+
+fn drv_cstr_dup(s Bytes) addr {
+    p addr = heap_alloc(s.n + 1)
+    if s.n != 0 { mem_copy(p, s.p, s.n) }
+    p[u8, s.n] = 0
+    return p
+}
+
+fn cli_error(message addr, arg addr) void fails {
+    eprint(message)
+    if arg != null { eprint(arg) }
+    eprint(c"\n")
+    fail CError
+}
+
+struct ArgPosition { i usize }
+
+fn cli_arg(argc usize, pos handle[ArgPosition], arg addr, word addr) addr fails {
+    if arg[u8, cstr_len(word)] != 0 { return arg + cstr_len(word) }
+    pos.i += 1
+    if pos.i == argc { try cli_error(c"fcc: missing argument for ", word) }
+    return os_arg(pos.i)
+}
+
+fn cli_classify_input(path addr, force_lang u8) u8 {
+    if force_lang == 1 { return IN_C }
+    if force_lang == 2 { return IN_ASM_CPP }
+    s Bytes = bytes_c(path)
+    if bytes_ends_with(s, bytes_c(c".S")) { return IN_ASM_CPP }
+    return IN_C
+}
+
+fn cli_standard(o handle[Options], word Bytes) void fails {
+    if bytes_eq_c(word, c"-ansi") {
+        o.gnu = false
+        o.standard = 90
+        return
+    }
+    name Bytes = bytes_from(word, 5)
+    o.gnu = bytes_starts_with(name, bytes_c(c"gnu"))
+    if o.gnu { name = bytes_from(name, 3) }
+    else if bytes_starts_with(name, bytes_c(c"c")) { name = bytes_from(name, 1) }
+    else { try cli_error(c"fcc: unsupported C standard ", word.p) }
+    if bytes_eq_c(name, c"23") || bytes_eq_c(name, c"2x") { o.standard = 23 }
+    else if bytes_eq_c(name, c"17") || bytes_eq_c(name, c"18") { o.standard = 17 }
+    else if bytes_eq_c(name, c"11") { o.standard = 11 }
+    else if bytes_eq_c(name, c"99") || bytes_eq_c(name, c"9x") { o.standard = 99 }
+    else if bytes_eq_c(name, c"89") || bytes_eq_c(name, c"90") { o.standard = 90 }
+    else { try cli_error(c"fcc: unsupported C standard ", word.p) }
+}
+
+fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
+    pos ArgPosition = {1}
+    options bool = true
+    o.gnu = true
+    o.standard = 23
+    o.x86_bits = 64
+    o.mode = MODE_LINK
+    for i usize in 1..argc {
+        w Bytes = bytes_c(os_arg(i))
+        if bytes_eq_c(w, c"--") { break }
+        if bytes_eq_c(w, c"-w") { o.suppress_warnings = true }
+        if bytes_eq_c(w, c"-Werror") { o.option_errors = true }
+        if bytes_eq_c(w, c"-Wno-error") { o.option_errors = false }
+    }
+    while pos.i < argc {
+        arg addr = os_arg(pos.i)
+        word Bytes = bytes_c(arg)
+        if !options || arg[u8] != 45 || arg[u8, 1] == 0 {
+            kind u8 = cli_classify_input(arg, o.force_lang)
+            vec_push[InputFile](&o.inputs, {arg, 0, kind})
+            if o.path == null { o.path = arg }
+        } else if bytes_eq_c(word, c"--") { options = false }
+        else if bytes_eq_c(word, c"-E") { o.mode = MODE_PREPROCESS }
+        else if bytes_eq_c(word, c"-fsyntax-only") { o.syntax_only = true; o.mode = MODE_SYNTAX }
+        else if bytes_eq_c(word, c"-fexceptions") || bytes_eq_c(word, c"-fnon-call-exceptions") { o.exceptions = true }
+        else if bytes_eq_c(word, c"-fno-exceptions") { o.exceptions = false }
+        else if bytes_starts_with(word, bytes_c(c"-x")) {
+            lang addr = try cli_arg(argc, &pos, arg, c"-x")
+            if bytes_eq_c(bytes_c(lang), c"c") || bytes_eq_c(bytes_c(lang), c"c-header") { o.force_lang = 1 }
+            else if bytes_eq_c(bytes_c(lang), c"assembler-with-cpp") { o.force_lang = 2 }
+            else if bytes_eq_c(bytes_c(lang), c"none") { o.force_lang = 0 }
+            else { try cli_error(c"fcc: unsupported input language ", lang) }
+        } else if bytes_eq_c(word, c"-pipe") || bytes_eq_c(word, c"-v") || bytes_eq_c(word, c"-w") ||
+                  bytes_eq_c(word, c"-pedantic") || bytes_eq_c(word, c"-pedantic-errors") {}
+        else if bytes_eq_c(word, c"-P") { o.no_markers = true }
+        else if bytes_eq_c(word, c"-dM") { o.macro_dump = true; if o.mode == MODE_LINK { o.mode = MODE_PREPROCESS } }
+        else if bytes_eq_c(word, c"-undef") { o.no_builtins = true }
+        else if bytes_starts_with(word, bytes_c(c"-std=")) || bytes_eq_c(word, c"-ansi") {
+            try cli_standard(o, word)
+        } else if bytes_eq_c(word, c"-funsigned-char") || bytes_eq_c(word, c"-fno-signed-char") { o.unsigned_char = true }
+        else if bytes_eq_c(word, c"-fsigned-char") || bytes_eq_c(word, c"-fno-unsigned-char") { o.unsigned_char = false }
+        else if bytes_eq_c(word, c"-fshort-wchar") { o.short_wchar = true }
+        else if bytes_eq_c(word, c"-fno-short-wchar") { o.short_wchar = false }
+        else if bytes_eq_c(word, c"-fwrapv") || bytes_eq_c(word, c"-fno-strict-overflow") { o.overflow_mode = 1 }
+        else if bytes_eq_c(word, c"-fshort-enums") { o.short_enums = true }
+        else if bytes_eq_c(word, c"-fno-short-enums") { o.short_enums = false }
+        else if bytes_eq_c(word, c"-ffreestanding") { o.freestanding = true }
+        else if bytes_eq_c(word, c"-fhosted") { o.freestanding = false }
+        else if bytes_eq_c(word, c"-nostdinc") { o.no_stdinc = true }
+        else if bytes_eq_c(word, c"-fno-builtin") { o.no_library_builtins = true }
+        else if bytes_eq_c(word, c"-fbuiltin") { o.no_library_builtins = false }
+        else if bytes_starts_with(word, bytes_c(c"-fno-builtin-")) {
+            vec_push(&o.disabled_builtins, bytes_from(word, 13))
+        } else if bytes_eq_c(word, c"-fstack-protector") { o.stack_protector = 1 }
+        else if bytes_eq_c(word, c"-fstack-protector-strong") { o.stack_protector = 2 }
+        else if bytes_eq_c(word, c"-fstack-protector-all") { o.stack_protector = 3 }
+        else if bytes_eq_c(word, c"-fstack-protector-explicit") { o.stack_protector = 4 }
+        else if bytes_eq_c(word, c"-fno-stack-protector") { o.stack_protector = 0 }
+        else if bytes_eq_c(word, c"-fcf-protection") || bytes_eq_c(word, c"-fcf-protection=full") { o.cf_protection = 3 }
+        else if bytes_eq_c(word, c"-fcf-protection=branch") { o.cf_protection = 1 }
+        else if bytes_eq_c(word, c"-fcf-protection=return") { o.cf_protection = 2 }
+        else if bytes_eq_c(word, c"-fcf-protection=none") { o.cf_protection = 0 }
+        else if bytes_starts_with(word, bytes_c(c"-fmacro-prefix-map=")) {
+            map Bytes = bytes_from(word, 19)
+            eq usize = bytes_index(map, 61) catch map.n
+            if eq == map.n { try cli_error(c"fcc: invalid argument (expected OLD=NEW): ", arg) }
+            vec_push(&o.prefix_maps, bytes_sub(map, 0, eq))
+            vec_push(&o.prefix_maps, bytes_from(map, eq + 1))
+        } else if bytes_starts_with(word, bytes_c(c"-march=")) { o.march = arg }
+        else if bytes_eq_c(word, c"-m16") { o.x86_bits = 16 }
+        else if bytes_eq_c(word, c"-m32") { o.x86_bits = 32 }
+        else if bytes_eq_c(word, c"-m64") { o.x86_bits = 64 }
+        else if bytes_eq_c(word, c"-mgeneral-regs-only") { o.general_regs_only = true }
+        else if bytes_eq_c(word, c"-mcmodel=kernel") { o.kernel_model = true }
+        else if bytes_eq_c(word, c"-mcmodel=small") { o.kernel_model = false }
+        else if bytes_eq_c(word, c"-fpic") { o.pic_mode = 2 }
+        else if bytes_eq_c(word, c"-fPIC") { o.pic_mode = 3 }
+        else if bytes_eq_c(word, c"-fpie") { o.pic_mode = 4 }
+        else if bytes_eq_c(word, c"-fPIE") { o.pic_mode = 5 }
+        else if bytes_eq_c(word, c"-fno-pic") || bytes_eq_c(word, c"-fno-PIC") ||
+                bytes_eq_c(word, c"-fno-pie") || bytes_eq_c(word, c"-fno-PIE") { o.pic_mode = 1 }
+        else if bytes_eq_c(word, c"-shared") { o.is_shared = true }
+        else if bytes_eq_c(word, c"-pthread") { vec_push[Command](&o.macros, {c"_REENTRANT=1", 0}) }
+        else if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") || bytes_eq_c(word, c"-MD") || bytes_eq_c(word, c"-MMD") {
+            o.deps = if bytes_eq_c(word, c"-M") || bytes_eq_c(word, c"-MM") { 1 } else { 2 }
+            o.user_deps = word.n > 2 && arg[u8, 2] == 77
+            if o.deps == 1 { o.mode = MODE_PREPROCESS }
+        } else if bytes_starts_with(word, bytes_c(c"-Wp,-MD,")) || bytes_starts_with(word, bytes_c(c"-Wp,-MMD,")) {
+            o.deps = 2
+            o.user_deps = arg[u8, 6] == 77
+            file Bytes = bytes_from(word, if o.user_deps { 9 } else { 8 })
+            if file.n == 0 { try cli_error(c"fcc: missing dependency file in ", arg) }
+            o.dep_file = drv_cstr_dup(file)
+        } else if bytes_eq_c(word, c"-MP") { o.phony = true }
+        else if bytes_starts_with(word, bytes_c(c"-MF")) { o.dep_file = try cli_arg(argc, &pos, arg, c"-MF") }
+        else if bytes_starts_with(word, bytes_c(c"-MT")) { vec_push[addr](&o.targets, try cli_arg(argc, &pos, arg, c"-MT")) }
+        else if bytes_starts_with(word, bytes_c(c"-o")) { o.output = try cli_arg(argc, &pos, arg, c"-o") }
+        else if bytes_starts_with(word, bytes_c(c"-D")) { vec_push[Command](&o.macros, {try cli_arg(argc, &pos, arg, c"-D"), 0}) }
+        else if bytes_starts_with(word, bytes_c(c"-U")) { vec_push[Command](&o.macros, {try cli_arg(argc, &pos, arg, c"-U"), 1}) }
+        else if bytes_eq_c(word, c"-include") || bytes_eq_c(word, c"-imacros") {
+            kind u8 = if bytes_eq_c(word, c"-include") { 0 } else { 1 }
+            vec_push[Command](&o.force, {try cli_arg(argc, &pos, arg, arg), kind})
+        } else if bytes_starts_with(word, bytes_c(c"-O")) || bytes_starts_with(word, bytes_c(c"-W")) || bytes_starts_with(word, bytes_c(c"-g")) {
+            // ignored in -E
+        } else if bytes_starts_with(word, bytes_c(c"-m")) {
+            disable bool = bytes_starts_with(word, bytes_c(c"-mno-"))
+            name Bytes = bytes_from(word, if disable { 5 } else { 2 })
+            feature u32 = x86_flag(name)
+            if feature != 0 { vec_push(&o.x86_options, feature * 2 + (if disable { 1 } else { 0 })) }
+        } else {
+            prefix addr = c"-I"
+            rank u8 = 1
+            if bytes_starts_with(word, bytes_c(c"-iquote")) { rank = 0; prefix = c"-iquote" }
+            else if bytes_starts_with(word, bytes_c(c"-isystem")) { rank = 2; prefix = c"-isystem" }
+            else if bytes_starts_with(word, bytes_c(c"-idirafter")) { rank = 3; prefix = c"-idirafter" }
+            else if !bytes_starts_with(word, bytes_c(c"-I")) { try cli_error(c"fcc: unknown option ", arg) }
+            path addr = try cli_arg(argc, &pos, arg, prefix)
+            vec_push[SearchDir](&o.dirs, {sym_intern_c(&p.ctx.syms, path), rank})
+        }
+        pos.i += 1
+    }
+    if o.inputs.n == 0 {
+        try cli_error(c"usage: fcc [-E] [options] input", null)
+    }
+    if (o.mode == MODE_PREPROCESS || o.mode == MODE_SYNTAX) && o.inputs.n > 1 {
+        try cli_error(c"fcc: expected one input file, got ", vec_get(&o.inputs, 1).path)
+    }
+    if o.x86_bits == 64 && o.march != null {
+        word Bytes = bytes_c(o.march)
+        o.x86_native = bytes_eq_c(word, c"-march=native")
+        if o.x86_native { o.x86_cpu = x86_detect_host(&o.native_features) }
+        else {
+            o.x86_cpu = x86_cpu(bytes_from(word, 7))
+            if o.x86_cpu == 0 { try cli_error(c"fcc: unsupported x86-64 architecture: ", o.march) }
+        }
+    }
+}
+
+fn cli_dir(p handle[Pp], path addr, rank u8) void {
+    vec_push[SearchDir](&p.dirs, {sym_intern_c(&p.ctx.syms, path), rank})
+}
+
+fn cli_search_paths(p handle[Pp], o handle[Options]) void {
+    p.no_stdinc = o.no_stdinc
+    for rank u8 in 0..4 {
+        for i usize in 0..o.dirs.n {
+            d SearchDir = o.dirs.p[SearchDir, i]
+            if d.rank == rank { vec_push[SearchDir](&p.dirs, d) }
+        }
+        if rank == 2 && !o.no_stdinc {
+            include addr = os_getenv(c"FCC_INCLUDE")
+            if include == null { include = c"cc/include" }
+            cli_dir(p, include, rank)
+            cli_dir(p, c"/usr/local/include", rank)
+            cli_dir(p, if o.x86_bits == 64 { c"/usr/include/x86_64-linux-gnu" } else { c"/usr/include/i386-linux-gnu" }, rank)
+            cli_dir(p, c"/usr/include", rank)
+        }
+    }
+}
+
+fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
+    b addr = heap_alloc_zeroed(source.n + 64)
+    if source.n != 0 { mem_copy(b, source.p, source.n) }
+    sf SourceFile = {}
+    sf.raw_data = b
+    sf.raw_len = source.n
+    sf_prepare(&sf, p.ctx.gnu)
+    inst_idx u32 = sm_alloc_inst(&p.ctx.sm, &sf, sym_intern_c(&p.ctx.syms, filename), 0)
+    inst handle[SourceInst] = vec_at[SourceInst](&p.ctx.sm.insts, zext[usize](inst_idx))
+    l Lexer = {}
+    l.p = sf.data
+    l.n = zext[usize](sf.len)
+    l.at = 0
+    l.base = inst.base
+    l.inst_idx = inst_idx
+    l.flags = F_BOL
+    tokens Vec[Token] = {}
+    defer { vec_free[Token](&tokens) }
+    while l.at < l.n {
+        vec_clear[Token](&tokens)
+        try pp_lex_line(&p.ctx, &l, &tokens, false)
+        if tokens.n != 0 { try pp_define(p, &tokens, tokens.p[Token].loc, false) }
+    }
+}
+
+fn cli_pic_mode(o handle[Options]) u8 {
+    if o.pic_mode != 0 { return o.pic_mode }
+    if o.kernel_model || o.x86_bits != 64 { return 1 }
+    return if o.is_shared { 3 } else { 5 }
+}
+
+fn cli_x86_features(o handle[Options], cpu handle[X86Cpu]) u64 {
+    features u64 = if o.x86_native { o.native_features } else { cpu.features }
+    if o.x86_bits != 64 { features = 0 }
+    last arr[X86_FLAG_COUNT, usize] = {}
+    for i usize in 0..o.x86_options.n {
+        feature usize = zext[usize](vec_get(&o.x86_options, i) >> 1) - 1
+        last[feature] = i + 1
+    }
+    for i usize in 0..o.x86_options.n {
+        option u32 = vec_get(&o.x86_options, i)
+        feature u32 = option >> 1
+        if last[zext[usize](feature) - 1] != i + 1 { continue }
+        features = x86_flag_apply(features, feature, (option & 1) == 0)
+    }
+    independent arr[2, addr] = {c"popcnt", c"crc32"}
+    for j usize in 0..2 {
+        name addr = independent[j]
+        feature u32 = x86_flag(bytes_c(name))
+        at usize = last[zext[usize](feature) - 1]
+        if at != 0 && (vec_get(&o.x86_options, at - 1) & 1) != 0 {
+            features = x86_flag_apply(features, feature, false)
+        }
+    }
+    if o.general_regs_only {
+        features = x86_flag_apply(features, x86_flag(bytes_c(c"sse")), false)
+        features = x86_flag_apply(features, x86_flag(bytes_c(c"mmx")), false)
+    }
+    return features
+}
+
+fn cli_setup(p handle[Pp], o handle[Options]) void fails {
+    p.ctx.gnu = o.gnu
+    p.ctx.short_wchar = o.short_wchar
+    p.standard = o.standard
+    p.ilp32 = o.x86_bits != 64
+    p.unsigned_char = o.unsigned_char
+    p.short_enums = o.short_enums
+    p.no_library_builtins = o.no_library_builtins || o.freestanding
+    p.disabled_builtins = &o.disabled_builtins
+    p.prefix_maps = &o.prefix_maps
+    p.wrapv = o.overflow_mode == 1
+    p.stream.source = true
+    p.timestamp = os_clock_ns(0) / 1000000000
+    epoch addr = os_getenv(c"SOURCE_DATE_EPOCH")
+    if epoch != null {
+        p.timestamp = bytes_to_u64(bytes_c(epoch)) catch p.timestamp
+        p.timestamp_explicit = true
+    }
+    cpu handle[X86Cpu] = &X86_CPUS[zext[usize](o.x86_cpu)]
+    p.x86_features = cli_x86_features(o, cpu)
+    if !o.no_builtins {
+        for i usize in 0..19 { try cli_definitions(p, bytes_c(C_TARGET[i]), c"<built-in>") }
+        try cli_definitions(p, bytes_c(if o.gnu { C_TARGET_GNU } else { C_TARGET_STRICT }), c"<built-in>")
+        if p.ilp32 {
+            for i usize in 0..C_TARGET_I386_REMOVED_COUNT {
+                id u32 = sym_intern_c(&p.ctx.syms, C_TARGET_I386_REMOVED[i])
+                sym_set_macro(&p.ctx.syms, id, null)
+            }
+            for i usize in 0..C_TARGET_I386_CHANGED_COUNT {
+                try cli_definitions(p, bytes_c(C_TARGET_I386_CHANGED[i]), c"<built-in>")
+            }
+            if o.gnu { try cli_definitions(p, bytes_c(c"i386 1\n"), c"<built-in>") }
+            if o.march != null && bytes_eq_c(bytes_c(o.march), c"-march=i386") {
+                try cli_definitions(p, bytes_c(c"__tune_i386__ 1\n"), c"<built-in>")
+            } else {
+                try cli_definitions(p, bytes_c(C_TARGET_I686), c"<built-in>")
+            }
+        } else { try cli_definitions(p, bytes_c(cpu.defines), c"<built-in>") }
+        for i usize in 0..X86_MACRO_COUNT {
+            if (p.x86_features & (1 << trunc[u32](i))) != 0 {
+                try cli_definitions(p, bytes_c(X86_MACROS[i]), c"<built-in>")
+            }
+        }
+    } else {
+        try cli_definitions(p, bytes_c(c"__STDC__ 1\n"), c"<built-in>")
+    }
+    version addr = if o.standard == 23 { c"__STDC_VERSION__ 202311L\n" }
+                   else if o.standard == 17 { c"__STDC_VERSION__ 201710L\n" }
+                   else if o.standard == 11 { c"__STDC_VERSION__ 201112L\n" }
+                   else if o.standard == 99 { c"__STDC_VERSION__ 199901L\n" }
+                   else { null }
+    if version != null { try cli_definitions(p, bytes_c(version), c"<built-in>") }
+    hosted addr = if o.freestanding { c"__STDC_HOSTED__ 0\n" } else { c"__STDC_HOSTED__ 1\n" }
+    try cli_definitions(p, bytes_c(hosted), c"<built-in>")
+    if !o.no_builtins {
+        ssp addr = if o.stack_protector == 1 { c"__SSP__ 1\n" }
+                   else if o.stack_protector == 2 { c"__SSP_STRONG__ 2\n" }
+                   else if o.stack_protector == 3 { c"__SSP_ALL__ 3\n" }
+                   else if o.stack_protector == 4 { c"__SSP_EXPLICIT__ 4\n" }
+                   else { null }
+        if ssp != null { try cli_definitions(p, bytes_c(ssp), c"<built-in>") }
+        if o.unsigned_char { try cli_definitions(p, bytes_c(c"__CHAR_UNSIGNED__ 1\n"), c"<built-in>") }
+        if o.short_wchar { try cli_definitions(p, bytes_c(C_TARGET_SHORT_WCHAR), c"<built-in>") }
+        if o.cf_protection != 0 {
+            cet addr = if o.cf_protection == 1 { c"__CET__ 1\n" } else if o.cf_protection == 2 { c"__CET__ 2\n" } else { c"__CET__ 3\n" }
+            try cli_definitions(p, bytes_c(cet), c"<built-in>")
+        }
+        model addr = if o.kernel_model { c"__code_model_kernel__ 1\n" } else { c"__code_model_small__ 1\n" }
+        try cli_definitions(p, bytes_c(model), c"<built-in>")
+        pic u8 = cli_pic_mode(o)
+        if pic >= 2 {
+            pic_def addr = if (pic & 1) == 0 { c"__PIC__ 1\n__pic__ 1\n" } else { c"__PIC__ 2\n__pic__ 2\n" }
+            try cli_definitions(p, bytes_c(pic_def), c"<built-in>")
+        }
+        if pic >= 4 {
+            pie_def addr = if pic == 4 { c"__PIE__ 1\n__pie__ 1\n" } else { c"__PIE__ 2\n__pie__ 2\n" }
+            try cli_definitions(p, bytes_c(pie_def), c"<built-in>")
+        }
+    }
+    if o.exceptions { try cli_definitions(p, bytes_c(c"__EXCEPTIONS 1\n"), c"<built-in>") }
+    if p.ctx.assembler { try cli_definitions(p, bytes_c(c"__ASSEMBLER__ 1\n"), c"<built-in>") }
+    for i usize in 0..o.macros.n {
+        m Command = o.macros.p[Command, i]
+        s Bytes = bytes_c(m.value)
+        if m.kind == 1 {
+            id u32 = sym_intern_b(&p.ctx.syms, s)
+            sym_undef(&p.ctx.syms, id)
+        } else {
+            b Buf = {}
+            defer { buf_free(&b) }
+            sep usize = bytes_index(s, 61) catch s.n
+            buf_append(&b, bytes_sub(s, 0, sep))
+            if sep == s.n { buf_str(&b, c" 1") }
+            else {
+                buf_u8(&b, 32)
+                buf_append(&b, bytes_from(s, sep + 1))
+            }
+            try cli_definitions(p, buf_bytes(&b), c"<command line>")
+        }
+    }
+    cli_search_paths(p, o)
+}
+
+fn stdin_file() handle[SourceFile] fails {
+    f handle[SourceFile] = handle_from_addr(heap_alloc_zeroed(sizeof[SourceFile]))
+    b Buf = {}
+    while true {
+        buf_reserve(&b, 16384)
+        got usize = try os_read(STDIN, b.p + b.n, 16384)
+        if got == 0 { break }
+        b.n += got
+    }
+    size usize = b.n
+    buf_zeros(&b, 64)
+    f.raw_data = b.p
+    f.raw_len = size
+    return f
+}
+
+fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
+    cc_ctx_init(&p.ctx)
+    try cli_parse(p, o, argc)
+    p.ctx.assembler = o.inputs.p[InputFile, 0].kind == IN_ASM_CPP
+    try cli_setup(p, o)
+    name Bytes = bytes_c(o.path)
+    stdin bool = bytes_eq_c(name, c"-")
+    p.base_file = sym_intern_b(&p.ctx.syms, if stdin { bytes_c(c"<stdin>") } else { name })
+    p.base_logical = p.base_file
+    p.line_markers = !o.syntax_only && !o.no_markers && !o.macro_dump && o.deps != 1
+    main_input handle[SourceFile]
+    if stdin { main_input = try stdin_file() }
+    else if bytes_eq_c(name, c"/dev/null") {
+        main_input = handle_from_addr(heap_alloc_zeroed(sizeof[SourceFile]))
+    } else {
+        main_input = pp_read(p, name) catch {
+            try cli_error(c"fcc: cannot open ", o.path)
+            return
+        }
+    }
+    pp_depend(p, p.base_file, false)
+    out Output = {}
+    stream_stdout bool = !o.macro_dump && o.deps != 1 && (o.output == null || bytes_eq_c(bytes_c(o.output), c"-"))
+    out.stream_fd = if stream_stdout { STDOUT } else { -1 }
+    if stream_stdout { buf_reserve(&out.text, 294912) }
+    else if main_input.raw_len > 4096 { buf_reserve(&out.text, main_input.raw_len) }
+    for order u8 in 0..2 {
+        for i usize in 0..o.force.n {
+            inc Command = o.force.p[Command, i]
+            if inc.kind != 1 - order { continue }
+            path Bytes = bytes_c(inc.value)
+            found Found = pp_lookup(p, path, -1, false)
+            if found.file == null { found = pp_find(p, path, true, false) }
+            if found.file == null { try cli_error(c"fcc: cannot open forced include ", inc.value) }
+            try pp_push_file(p, handle_from_addr(found.file), found.path, sext[i32](found.dir), found.system, 0)
+            try output_stream(p, &out, o.macro_dump || o.deps == 1 || inc.kind == 1)
+        }
+    }
+    try pp_push_file(p, main_input, p.base_file, -1, false, 0)
+    try output_stream(p, &out, o.macro_dump || o.deps == 1)
+    if o.macro_dump { output_macros(p, &out.text) }
+    if o.deps != 1 { try output_file(o.output, buf_bytes(&out.text)) }
+    if o.deps != 0 { try output_dependencies(p, o) }
+}
+
+fn main(argc i32, argv addr) i32 {
+    os_init(argc, argv)
+    p handle[Pp] = handle_from_addr(heap_alloc_zeroed(sizeof[Pp]))
+    o Options = {}
+    cli_main(p, &o, zext[usize](argc)) catch { return 1 }
+    return 0
+}

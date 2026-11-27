@@ -1,0 +1,569 @@
+// cc2/macro.fas: Zero-alloc object-like macro expansion, pre-compiled parameter
+// tokens, Prosser hide sets, stringizing, pasting with cache, and __VA_OPT__.
+
+struct Macro {
+    params Vec[u32]
+    body Vec[Token]
+    const_text Bytes   // pre-rendered text for direct raw emit
+    fast_epoch u32     // syms.macro_epoch when fast_ok was verified
+    function bool
+    variadic bool
+    simple bool        // object-like macro with no ##: zero-alloc direct span push!
+    const_simple bool  // simple object-like macro with no TK_IDENT in body
+    fast_ok bool       // verified no active macro/builtin idents at fast_epoch
+    drop_args bool     // function-like macro whose body uses NO params, #, ##, __VA_OPT__
+}
+
+value struct Hide { id u32, next u32 }
+value struct Span { p addr, n u32, at u32 }
+
+struct ExpandSpan {
+    p addr
+    n u32
+    at u32
+    owned bool
+    // Used by zero-alloc simple object-like macros:
+    override_loc u32   // non-zero => apply to every token in span
+    add_hide u32       // hide set to assign to every token in span
+    first_flags u8     // call.flags & (F_SPACE | F_BOL | F_SYSTEM) for at == 0
+}
+
+value struct Arg { start u32, size u32, has_macro bool }
+value struct PastedToken { val u32, kind u8, flags u8 }
+struct ArgCache { start usize, size usize, ready bool }
+
+struct Expand {
+    spans Vec[ExpandSpan]
+    stack_base addr    // non-null if spans.p starts on stack
+    source bool
+    expression bool
+}
+
+fn pp_macro(p handle[Pp], id u32) addr {
+    return p.ctx.syms.macros.p[addr, zext[usize](id)]
+}
+
+fn hide_has(p handle[Pp], set u32, id u32) bool {
+    while set != 0 {
+        h Hide = p.hides.p[Hide, zext[usize](set - 1)]
+        if h.id == id { return true }
+        set = h.next
+    }
+    return false
+}
+
+fn hide_add(p handle[Pp], set u32, id u32) u32 {
+    slot usize = zext[usize]((id ^ (set * 0x9e3779b9)) & 255)
+    recent u32 = p.recent_hides[slot]
+    if recent != 0 {
+        node Hide = p.hides.p[Hide, zext[usize](recent - 1)]
+        if node.id == id && node.next == set { return recent }
+    }
+    if hide_has(p, set, id) { return set }
+    vec_push[Hide](&p.hides, {id, set})
+    recent = trunc[u32](p.hides.n)
+    p.recent_hides[slot] = recent
+    return recent
+}
+
+fn hide_merge(p handle[Pp], a u32, b u32, intersect bool) u32 {
+    if a == b { return a }
+    if a == 0 { return if intersect { 0 } else { b } }
+    if b == 0 { return if intersect { 0 } else { a } }
+    result u32 = if intersect { 0 } else { a }
+    while b != 0 {
+        h Hide = p.hides.p[Hide, zext[usize](b - 1)]
+        if !intersect || hide_has(p, a, h.id) { result = hide_add(p, result, h.id) }
+        b = h.next
+    }
+    return result
+}
+
+fn expand_scratch[T](v handle[Vec[T]]) void {
+    v.cap = 8
+    v.p = heap_alloc_plain(v.cap * sizeof[T])
+}
+
+fn expand_span(e handle[Expand], data addr, count usize, owned bool) void {
+    if count != 0 {
+        if e.stack_base != null && e.spans.p == e.stack_base && e.spans.n == e.spans.cap {
+            new_cap usize = e.spans.cap * 2
+            np addr = heap_alloc_plain(new_cap * sizeof[ExpandSpan])
+            mem_copy(np, e.spans.p, e.spans.n * sizeof[ExpandSpan])
+            e.spans.p = np
+            e.spans.cap = new_cap
+        }
+        s handle[ExpandSpan] = vec_add[ExpandSpan](&e.spans)
+        s.p = data
+        s.n = trunc[u32](count)
+        s.at = 0
+        s.owned = owned
+        s.override_loc = 0
+        s.add_hide = 0
+        s.first_flags = 0
+    } else if owned {
+        heap_free(data)
+    }
+}
+
+fn expand_simple_span(e handle[Expand], data addr, count usize, call_loc u32, hidden u32, first_flags u8) void {
+    if count == 0 { return }
+    if e.stack_base != null && e.spans.p == e.stack_base && e.spans.n == e.spans.cap {
+        new_cap usize = e.spans.cap * 2
+        np addr = heap_alloc_plain(new_cap * sizeof[ExpandSpan])
+        mem_copy(np, e.spans.p, e.spans.n * sizeof[ExpandSpan])
+        e.spans.p = np
+        e.spans.cap = new_cap
+    }
+    s handle[ExpandSpan] = vec_add[ExpandSpan](&e.spans)
+    s.p = data
+    s.n = trunc[u32](count)
+    s.at = 0
+    s.owned = false
+    s.override_loc = call_loc
+    s.add_hide = hidden
+    s.first_flags = first_flags
+}
+
+fn expand_back(p handle[Pp], e handle[Expand], t Token) void {
+    if t.kind != TK_EOF {
+        a addr = arena_alloc(&p.macro_arena, sizeof[Token], 8)
+        a[Token] = t
+        expand_span(e, a, 1, false)
+    }
+}
+
+fn expand_release(e handle[Expand]) void {
+    while e.spans.n != 0 {
+        e.spans.n -= 1
+        s handle[ExpandSpan] = handle_from_addr(e.spans.p + e.spans.n * sizeof[ExpandSpan])
+        if s.owned { heap_free(s.p) }
+    }
+    vec_free[ExpandSpan](&e.spans)
+}
+
+fn expand_raw(p handle[Pp], e handle[Expand]) Token fails {
+    while e.spans.n != 0 {
+        s handle[ExpandSpan] = vec_at[ExpandSpan](&e.spans, e.spans.n - 1)
+        if s.at != s.n {
+            at u32 = s.at
+            t Token = s.p[Token, zext[usize](at)]
+            s.at = at + 1
+            if s.override_loc != 0 {
+                t.loc = s.override_loc
+                t.hide = s.add_hide
+                if at == 0 {
+                    t.flags = (t.flags & ~(F_SPACE | F_BOL | F_SYSTEM)) | s.first_flags
+                }
+            }
+            return t
+        }
+        if s.owned { heap_free(s.p) }
+        vec_truncate[ExpandSpan](&e.spans, e.spans.n - 1)
+    }
+    if e.source { return try pp_raw(p) }
+    return tok_make(TK_EOF, 0, 0, 0, 0)
+}
+
+fn expand_list(p handle[Pp], data addr, count usize, out handle[Vec[Token]], expression bool) void fails {
+    // Stack-allocated ExpandSpan buffer for up to 16 nested spans (zero heap_alloc!)
+    stack_spans arr[16, ExpandSpan] = {}
+    e Expand = {}
+    e.expression = expression
+    e.stack_base = &stack_spans[0]
+    e.spans.p = &stack_spans[0]
+    e.spans.cap = 16
+    defer {
+        while e.spans.n != 0 {
+            e.spans.n -= 1
+            s handle[ExpandSpan] = handle_from_addr(e.spans.p + e.spans.n * sizeof[ExpandSpan])
+            if s.owned { heap_free(s.p) }
+        }
+        if e.spans.p != &stack_spans[0] { vec_free[ExpandSpan](&e.spans) }
+    }
+    expand_span(&e, data, count, false)
+    while true {
+        t Token = try expand_next(p, &e)
+        if t.kind == TK_EOF { break }
+        vec_push[Token](out, t)
+    }
+}
+
+// Materialize a token's spelling into synth_texts so it survives loc changes.
+fn tok_materialize(ctx handle[CcCtx], t Token) Token {
+    if t.kind == TK_IDENT || tok_is_punct(t.kind) || (t.flags & F_SYNTH) != 0 || t.len == 0 {
+        return t
+    }
+    s Bytes = tok_spelling(ctx, t)
+    id u32 = sm_add_synth(&ctx.sm, s)
+    t.flags |= F_SYNTH
+    t.len = 0xFFFF
+    t.val = id
+    return t
+}
+
+fn expand_stringize(p handle[Pp], data addr, count usize, model Token) Token {
+    ctx handle[CcCtx] = &p.ctx
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_u8(&b, 34)
+    for i usize in 0..count {
+        t Token = data[Token, i]
+        if i != 0 && (t.flags & (F_SPACE | F_BOL)) != 0 { buf_u8(&b, 32) }
+        s Bytes = tok_spelling(ctx, t)
+        for j usize in 0..s.n {
+            c u8 = s.p[u8, j]
+            if (t.kind == TK_STR || t.kind == TK_CHAR) && (c == 34 || c == 92) { buf_u8(&b, 92) }
+            buf_u8(&b, c)
+        }
+    }
+    buf_u8(&b, 34)
+    id u32 = sm_add_synth(&ctx.sm, buf_bytes(&b))
+    return tok_make(TK_STR, model.flags | F_SYNTH, 0xFFFF, model.loc, id)
+}
+
+// Build a stable 32-bit key for paste caching.
+fn tok_paste_key(ctx handle[CcCtx], t Token) u32 {
+    if t.kind == TK_IDENT { return (1 << 30) | t.val }
+    if tok_is_punct(t.kind) { return (2 << 30) | zext[u32](t.kind) }
+    if (t.flags & F_SYNTH) != 0 { return (3 << 30) | t.val }
+    // Raw source slice: intern spelling into synth for key
+    s Bytes = tok_spelling(ctx, t)
+    id u32 = sym_intern_b(&ctx.syms, s)
+    return (1 << 30) | id
+}
+
+fn expand_lex_paste(p handle[Pp], left Token, right Token, loc u32) Token fails {
+    ctx handle[CcCtx] = &p.ctx
+    b Buf = {}
+    defer { buf_free(&b) }
+    buf_append(&b, tok_spelling(ctx, left))
+    buf_append(&b, tok_spelling(ctx, right))
+    size usize = b.n
+    buf_zeros(&b, 64)
+    l Lexer = {}
+    l.p = b.p
+    l.n = size
+    l.at = 0
+    l.base = 0
+    t Token = try lex_next(ctx, &l, true)
+    if l.at != size || t.kind == TK_EOF || t.kind == TK_NL {
+        msg Buf = {}
+        defer { buf_free(&msg) }
+        buf_str(&msg, c"pasting forms an invalid preprocessing token: ")
+        buf_raw(&msg, b.p, size)
+        cc_diag(ctx, loc, c"error: ", buf_bytes(&msg))
+        fail CError
+    }
+    // Materialize raw-slice tokens since `b` is about to be freed!
+    if t.kind != TK_IDENT && !tok_is_punct(t.kind) && (t.flags & F_SYNTH) == 0 {
+        id u32 = sm_add_synth(&ctx.sm, bytes(b.p, size))
+        t.flags |= F_SYNTH
+        t.len = 0xFFFF
+        t.val = id
+    }
+    return t
+}
+
+fn expand_glue(p handle[Pp], left Token, right Token, loc u32) Token fails {
+    if left.kind == TK_PLACE { return right }
+    if right.kind == TK_PLACE { return left }
+    ctx handle[CcCtx] = &p.ctx
+    k1 u32 = tok_paste_key(ctx, left)
+    k2 u32 = tok_paste_key(ctx, right)
+    key u64 = (zext[u64](k1) << 32) | zext[u64](k2)
+    missing PastedToken = {}
+    pasted PastedToken = map_get(&p.pastes, key) catch missing
+    if pasted.kind == TK_EOF {
+        token Token = try expand_lex_paste(p, left, right, loc)
+        pasted = {token.val, token.kind, token.flags & F_SYNTH}
+        map_put(&p.pastes, key, pasted)
+    }
+    flags u8 = (left.flags & ~F_SYNTH) | pasted.flags
+    tok_len u16 = if (pasted.flags & F_SYNTH) != 0 { 0xFFFF } else if tok_is_punct(pasted.kind) { zext[u16](PUNCT_LEN[zext[usize](pasted.kind)]) } else { 0 }
+    t Token = tok_make(pasted.kind, flags, tok_len, loc, pasted.val)
+    t.hide = hide_merge(p, left.hide, right.hide, true)
+    return t
+}
+
+fn expand_arguments(p handle[Pp], e handle[Expand], m handle[Macro], data handle[Vec[Token]], args handle[Vec[Arg]], call Token, omitted addr) Token fails {
+    ctx handle[CcCtx] = &p.ctx
+    syms handle[SymTable] = &ctx.syms
+    depth usize = 0
+    base_data usize = data.n
+    base_args usize = args.n
+    start usize = base_data
+    space bool = false
+    arg_macro bool = false
+    while true {
+        t Token = try expand_raw(p, e)
+        if t.kind == TK_EOF || t.kind == TK_ENTER || t.kind == TK_LEAVE {
+            try cc_error(ctx, call.loc, c"unterminated macro invocation")
+        }
+        if t.kind == TK_NL || t.kind == TK_MARK { space = true; continue }
+        if space { t.flags |= F_SPACE; space = false }
+        if t.kind == TK_LPAREN { depth += 1 }
+        if t.kind == TK_RPAREN {
+            if depth == 0 {
+                nargs usize = args.n - base_args
+                if m.variadic && m.params.n == 1 && nargs == 0 && data.n == base_data { omitted[bool] = true }
+                if data.n != start || nargs != 0 || m.params.n != 0 {
+                    vec_push[Arg](args, {trunc[u32](start), trunc[u32](data.n - start), arg_macro})
+                    nargs += 1
+                }
+                if m.variadic && nargs + 1 == m.params.n {
+                    omitted[bool] = true
+                    vec_push[Arg](args, {trunc[u32](data.n), 0, false})
+                    nargs += 1
+                }
+                if nargs != m.params.n { try cc_error(ctx, call.loc, c"wrong number of macro arguments") }
+                return t
+            }
+            depth -= 1
+        } else if depth == 0 && t.kind == TK_COMMA && (!m.variadic || (args.n - base_args) + 1 < m.params.n) {
+            vec_push[Arg](args, {trunc[u32](start), trunc[u32](data.n - start), arg_macro})
+            start = data.n
+            arg_macro = false
+            continue
+        }
+        if !arg_macro && t.kind == TK_IDENT {
+            cid u32 = syms.canon.p[u32, zext[usize](t.val)]
+            if syms.flags.p[u8, zext[usize](cid)] != 0 { arg_macro = true }
+        }
+        vec_push[Token](data, t)
+    }
+    return tok_make(TK_EOF, 0, 0, 0, 0)
+}
+
+fn expand_cached(p handle[Pp], e handle[Expand], data handle[Vec[Token]], arg Arg, cache handle[ArgCache]) void fails {
+    if cache.ready { return }
+    if !arg.has_macro {
+        cache.start = zext[usize](arg.start)
+        cache.size = zext[usize](arg.size)
+        cache.ready = true
+        return
+    }
+    cache.start = p.cache_toks.n
+    try expand_list(p, data.p + zext[usize](arg.start) * sizeof[Token], zext[usize](arg.size), &p.cache_toks, e.expression)
+    cache.size = p.cache_toks.n - cache.start
+    cache.ready = true
+}
+
+fn expand_param(p handle[Pp], data handle[Vec[Token]], arg Arg, cache handle[ArgCache], quoted bool, e handle[Expand], out handle[Vec[Token]], model Token) void fails {
+    start usize = out.n
+    a addr = data.p + zext[usize](arg.start) * sizeof[Token]
+    asize usize = zext[usize](arg.size)
+    if quoted {
+        for j usize in 0..asize { vec_push[Token](out, a[Token, j]) }
+        if asize == 0 { vec_push[Token](out, tok_make(TK_PLACE, model.flags, 0, model.loc, 0)) }
+    } else if !arg.has_macro {
+        for j usize in 0..asize { vec_push[Token](out, a[Token, j]) }
+    } else {
+        try expand_cached(p, e, data, arg, cache)
+        for j usize in 0..cache.size { vec_push[Token](out, p.cache_toks.p[Token, cache.start + j]) }
+    }
+    if out.n != start {
+        t handle[Token] = vec_at[Token](out, start)
+        t.flags = (t.flags & ~(F_SPACE | F_BOL)) | (model.flags & (F_SPACE | F_BOL))
+    }
+}
+
+fn expand_substitute(p handle[Pp], e handle[Expand], m handle[Macro], data handle[Vec[Token]],
+    args_base usize, caches addr, body handle[Vec[Token]], out handle[Vec[Token]],
+    out_base usize, call Token, omitted bool) void fails {
+    ctx handle[CcCtx] = &p.ctx
+    va_index usize = if m.params.n == 0 { 0 } else { m.params.n - 1 }
+    paste bool = false
+    i usize = 0
+    while i < body.n {
+        t Token = body.p[Token, i]
+        t.loc = call.loc
+        if tok_is_paste(t.kind) {
+            if m.variadic && ctx.gnu && i + 3 < body.n &&
+                body.p[Token, i + 1].kind == TK_COMMA &&
+                tok_is_paste(body.p[Token, i + 2].kind) &&
+                body.p[Token, i + 3].kind == TK_PARAM &&
+                zext[usize](body.p[Token, i + 3].val) == va_index {
+                i += 1
+                continue
+            }
+            paste = true
+            i += 1
+            continue
+        }
+        start usize = out.n
+        quoted bool = m.function && tok_is_hash(t.kind)
+        if quoted && i + 1 == body.n { try cc_error(ctx, call.loc, c"'#' must precede a macro parameter") }
+        index_token usize = if quoted { i + 1 } else { i }
+        key Token = body.p[Token, index_token]
+        if m.variadic && key.kind == TK_IDENT && cc_ident(ctx, key) == SYM_VA_OPT {
+            args_start usize = index_token + 2
+            stop usize = args_start
+            depth usize = 1
+            while stop < body.n {
+                part Token = body.p[Token, stop]
+                if part.kind == TK_LPAREN { depth += 1 }
+                if part.kind == TK_RPAREN { depth -= 1 }
+                if depth == 0 { break }
+                stop += 1
+            }
+            va handle[ArgCache] = handle_from_addr(caches + va_index * sizeof[ArgCache])
+            try expand_cached(p, e, data, p.arg_spans.p[Arg, args_base + va_index], va)
+            content Vec[Token] = {}
+            defer { vec_free[Token](&content) }
+            if va.size != 0 && stop > args_start {
+                part Vec[Token] = {}
+                part.p = body.p + args_start * sizeof[Token]
+                part.n = stop - args_start
+                try expand_substitute(p, e, m, data, args_base, caches, &part, &content, 0, call, omitted)
+            }
+            i = stop + 1
+            if quoted {
+                used usize = 0
+                for j usize in 0..content.n {
+                    part Token = content.p[Token, j]
+                    if part.kind != TK_PLACE { content.p[Token, used] = part; used += 1 }
+                }
+                vec_push[Token](out, expand_stringize(p, content.p, used, t))
+            } else if content.n == 0 {
+                vec_push[Token](out, tok_make(TK_PLACE, t.flags, 0, t.loc, 0))
+            } else {
+                for j usize in 0..content.n {
+                    part Token = content.p[Token, j]
+                    if j == 0 { part.flags = (part.flags & ~(F_SPACE | F_BOL)) | (t.flags & (F_SPACE | F_BOL)) }
+                    vec_push[Token](out, part)
+                }
+            }
+        } else if quoted {
+            if key.kind != TK_PARAM { try cc_error(ctx, call.loc, c"'#' must precede a macro parameter") }
+            a Arg = p.arg_spans.p[Arg, args_base + zext[usize](key.val)]
+            vec_push[Token](out, expand_stringize(p, data.p + zext[usize](a.start) * sizeof[Token], zext[usize](a.size), t))
+            i += 2
+        } else if t.kind == TK_PARAM {
+            index usize = zext[usize](t.val)
+            following bool = i + 1 < body.n && tok_is_paste(body.p[Token, i + 1].kind)
+            a Arg = p.arg_spans.p[Arg, args_base + index]
+            cache handle[ArgCache] = handle_from_addr(caches + index * sizeof[ArgCache])
+            if paste && m.variadic && ctx.gnu && index == va_index && start > out_base && out.p[Token, start - 1].kind == TK_COMMA {
+                paste = false
+                if omitted { out.n -= 1 }
+                try expand_param(p, data, a, cache, false, e, out, t)
+            } else {
+                try expand_param(p, data, a, cache, paste || following, e, out, t)
+            }
+            i += 1
+        } else {
+            vec_push[Token](out, t)
+            i += 1
+        }
+        if paste {
+            if start == out_base || out.n == start { try cc_error(ctx, call.loc, c"'##' at edge of macro expansion") }
+            out.p[Token, start - 1] = try expand_glue(p, out.p[Token, start - 1], out.p[Token, start], call.loc)
+            mem_move(out.p + start * sizeof[Token], out.p + (start + 1) * sizeof[Token], (out.n - start - 1) * sizeof[Token])
+            out.n -= 1
+            paste = false
+        }
+    }
+}
+
+fn expand_replacement(p handle[Pp], e handle[Expand], m handle[Macro], data handle[Vec[Token]],
+    args_base usize, call Token, hidden u32, omitted bool) void fails {
+    stack_caches arr[16, ArgCache] = {}
+    caches addr = &stack_caches[0]
+    heap_caches bool = false
+    if m.params.n > 16 {
+        size usize = m.params.n * sizeof[ArgCache]
+        caches = heap_alloc_plain(size)
+        mem_set(caches, 0, size)
+        heap_caches = true
+    }
+    cache_base usize = p.cache_toks.n
+    defer {
+        p.cache_toks.n = cache_base
+        if heap_caches { heap_free(caches) }
+    }
+    // Use watermark on p.subst_out (zero heap_alloc / zero os_lock!)
+    out_base usize = p.subst_out.n
+    defer { p.subst_out.n = out_base }
+    try expand_substitute(p, e, m, data, args_base, caches, &m.body, &p.subst_out, out_base, call, omitted)
+    used usize = 0
+    for j usize in out_base..p.subst_out.n {
+        t Token = p.subst_out.p[Token, j]
+        if t.kind != TK_PLACE {
+            t.hide = hide_merge(p, t.hide, hidden, false)
+            if used == 0 {
+                t.flags = (t.flags & ~(F_SPACE | F_BOL | F_SYSTEM)) | (call.flags & (F_SPACE | F_BOL | F_SYSTEM))
+            }
+            p.subst_out.p[Token, out_base + used] = t
+            used += 1
+        }
+    }
+    if used != 0 {
+        buf addr = arena_alloc(&p.macro_arena, used * sizeof[Token], 8)
+        mem_copy(buf, p.subst_out.p + out_base * sizeof[Token], used * sizeof[Token])
+        expand_span(e, buf, used, false)
+    }
+}
+
+fn expand_next(p handle[Pp], e handle[Expand]) Token fails {
+    ctx handle[CcCtx] = &p.ctx
+    syms handle[SymTable] = &ctx.syms
+    while true {
+        if e.source && e.spans.n == 0 && p.macro_arena.used > 65536 {
+            pp_macro_arena_reset(p)
+        }
+        t Token = try expand_raw(p, e)
+        if t.kind != TK_IDENT || (t.flags & F_NOEXPAND) != 0 { return t }
+        id u32 = syms.canon.p[u32, zext[usize](t.val)]
+        sflags u8 = syms.flags.p[u8, zext[usize](id)]
+        if sflags == 0 { return t }
+        if t.hide != 0 && hide_has(p, t.hide, id) { return t }
+        if (sflags & SYM_MACRO) == 0 {
+            if (sflags & SYM_DEFINED_OP) != 0 && e.expression {
+                return try builtin_defined(p, e, t)
+            }
+            if (sflags & SYM_BUILTIN) != 0 && (sflags & SYM_UNDEF) == 0 {
+                return try builtin_expand(p, e, t, id)
+            }
+            return t
+        }
+        m handle[Macro] = handle_from_addr(syms.macros.p[addr, zext[usize](id)])
+        if m.simple {
+            if m.body.n != 0 {
+                hidden u32 = hide_add(p, t.hide, id)
+                expand_simple_span(e, m.body.p, m.body.n, t.loc, hidden, t.flags & (F_SPACE | F_BOL | F_SYSTEM))
+            }
+            continue
+        }
+        data_base usize = p.arg_data.n
+        args_base usize = p.arg_spans.n
+        hidden u32 = t.hide
+        omitted bool = false
+        call Token = t
+        defer { p.arg_data.n = data_base; p.arg_spans.n = args_base }
+        if m.function {
+            gap_base usize = p.gap_buf.n
+            defer { p.gap_buf.n = gap_base }
+            opening Token = try expand_raw(p, e)
+            while opening.kind == TK_NL {
+                vec_push[Token](&p.gap_buf, opening)
+                opening = try expand_raw(p, e)
+            }
+            if opening.kind != TK_LPAREN {
+                expand_back(p, e, opening)
+                gn usize = p.gap_buf.n - gap_base
+                if gn != 0 {
+                    gb addr = arena_alloc(&p.macro_arena, gn * sizeof[Token], 8)
+                    mem_copy(gb, p.gap_buf.p + gap_base * sizeof[Token], gn * sizeof[Token])
+                    expand_span(e, gb, gn, false)
+                }
+                return t
+            }
+            close Token = try expand_arguments(p, e, m, &p.arg_data, &p.arg_spans, t, &omitted)
+            hidden = hide_merge(p, hidden, close.hide, true)
+            call.loc = close.loc
+        }
+        try expand_replacement(p, e, m, &p.arg_data, args_base, call, hide_add(p, hidden, id), omitted)
+    }
+    return tok_make(TK_EOF, 0, 0, 0, 0)
+}

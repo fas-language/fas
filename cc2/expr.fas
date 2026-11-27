@@ -1,0 +1,294 @@
+// cc2/expr.fas: #if / #elif constant integer expression evaluator.
+// Uses integer TK_* kinds everywhere — zero string compares.
+
+value struct PpInt { bits u64, uns bool }
+struct Expr { tokens Vec[Token], at usize, loc u32, warn_undef u8 }
+
+fn expr_peek(x handle[Expr]) Token {
+    if x.at < x.tokens.n { return x.tokens.p[Token, x.at] }
+    return tok_make(TK_EOF, 0, 0, x.loc, 0)
+}
+
+fn expr_accept_kind(x handle[Expr], kind u8) bool {
+    t Token = expr_peek(x)
+    if t.kind == kind { x.at += 1; return true }
+    return false
+}
+
+fn expr_integer(ctx handle[CcCtx], t Token) PpInt fails {
+    s Bytes = tok_spelling(ctx, t)
+    i usize = 0
+    radix u64 = 10
+    if s.p[u8] == 48 && s.n > 1 {
+        b u8 = s.p[u8, 1] | 32
+        radix = 8
+        if b == 120 || b == 98 {
+            radix = if b == 120 { 16 } else { 2 }
+            i = 2
+        }
+    }
+    start usize = i
+    value u64 = 0
+    while i < s.n {
+        ch u8 = s.p[u8, i]
+        if ch == 39 && i > start && i + 1 < s.n && zext[u64](cc_hex(s.p[u8, i + 1])) < radix { i += 1; continue }
+        d u64 = zext[u64](cc_hex(ch))
+        if d >= radix { break }
+        if value > (~0 - d) / radix { try cc_error(ctx, t.loc, c"integer literal too large in preprocessor expression") }
+        value = value * radix + d
+        i += 1
+    }
+    if i == start { try cc_error(ctx, t.loc, c"invalid integer literal in preprocessor expression") }
+    uns bool = false
+    rank bool = false
+    while i < s.n {
+        ch u8 = s.p[u8, i]
+        c u8 = ch | 32
+        if c == 117 && !uns {
+            uns = true
+        } else if c == 108 && !rank {
+            rank = true
+            if i + 1 < s.n && s.p[u8, i + 1] == ch { i += 1 }
+        } else if c == 119 && !rank && i + 1 < s.n &&
+            ((ch == 119 && s.p[u8, i + 1] == 98) || (ch == 87 && s.p[u8, i + 1] == 66)) {
+            rank = true
+            i += 1
+        } else {
+            try cc_error(ctx, t.loc, c"invalid integer suffix in preprocessor expression")
+        }
+        i += 1
+    }
+    return {value, uns || (value >> 63) != 0}
+}
+
+value struct Escape { cp u32, width usize }
+
+fn expr_escape(ctx handle[CcCtx], s Bytes, loc u32) Escape fails {
+    ch u8 = s.p[u8]
+    if ctx.gnu && s.n >= 3 && s.p[u8, 1] == 123 && (ch == 117 || ch == 120 || ch == 111) {
+        radix u32 = if ch == 111 { 8 } else { 16 }
+        cp u32 = 0
+        i usize = 2
+        while i < s.n && s.p[u8, i] != 125 {
+            d u32 = cc_hex(s.p[u8, i])
+            if d >= radix || cp > (0xffffffff - d) / radix {
+                try cc_error(ctx, loc, c"invalid digit or value in delimited escape sequence")
+            }
+            cp = cp * radix + d
+            i += 1
+        }
+        if i == 2 || i == s.n { try cc_error(ctx, loc, c"empty or unterminated delimited escape sequence") }
+        if ch == 117 && !cc_scalar(cp) {
+            try cc_error(ctx, loc, c"invalid universal character name")
+        }
+        return {cp, i + 1}
+    }
+    if ch == 117 || ch == 85 {
+        r Rune = cc_ucn(s.p - 1)
+        if r.width == 0 || !cc_scalar(r.cp) { try cc_error(ctx, loc, c"invalid universal character name") }
+        return {r.cp, zext[usize](r.width) - 1}
+    }
+    if ch == 120 || (ch >= 48 && ch <= 55) {
+        radix u32 = if ch == 120 { 16 } else { 8 }
+        i usize = if ch == 120 { 1 } else { 0 }
+        start usize = i
+        max usize = if ch == 120 || s.n < 3 { s.n } else { 3 }
+        cp u32 = 0
+        while i < max {
+            d u32 = cc_hex(s.p[u8, i])
+            if d >= radix { break }
+            cp = cp * radix + d
+            i += 1
+        }
+        if i == start { try cc_error(ctx, loc, c"expected digit in escape sequence") }
+        return {cp, i}
+    }
+    c u32 = zext[u32](ch)
+    if ch == 97 { c = 7 }
+    else if ch == 98 { c = 8 }
+    else if (ch | 32) == 101 && ctx.gnu { c = 27 }
+    else if ch == 102 { c = 12 }
+    else if ch == 110 { c = 10 }
+    else if ch == 114 { c = 13 }
+    else if ch == 116 { c = 9 }
+    else if ch == 118 { c = 11 }
+    return {c, 1}
+}
+
+fn expr_char(ctx handle[CcCtx], t Token) PpInt fails {
+    s Bytes = tok_spelling(ctx, t)
+    first usize = literal_prefix(s.p)
+    short_wide bool = ctx.short_wchar && s.p[u8] == 76
+    i usize = first + 1
+    count usize = 0
+    value u32 = 0
+    while i + 1 < s.n {
+        c u8 = s.p[u8, i]
+        cp u32 = zext[u32](c)
+        i += 1
+        if c == 92 {
+            escape Escape = try expr_escape(ctx, bytes_from(s, i), t.loc)
+            cp = escape.cp
+            i += escape.width
+        } else if c >= 128 {
+            r Rune = utf8(s.p + i - 1)
+            if r.width == 0 { try cc_error(ctx, t.loc, c"invalid UTF-8 in character constant") }
+            cp = r.cp
+            i += zext[usize](r.width) - 1
+        }
+        if first != 0 {
+            if count != 0 || (first == 2 && cp > 255) ||
+                ((short_wide || (s.p[u8] == 117 && first == 1)) && cp > 65535) {
+                try cc_error(ctx, t.loc, c"invalid prefixed character constant")
+            }
+            value = cp
+        } else {
+            if cp > 255 { try cc_error(ctx, t.loc, c"character too large for character constant") }
+            value = (value << 8) | cp
+        }
+        count += 1
+    }
+    if count == 0 { try cc_error(ctx, t.loc, c"empty character constant") }
+    if first == 0 && count == 1 && value >= 128 { value |= 0xffffff00 }
+    if first == 0 || s.p[u8] == 76 {
+        return {bitcast[u64](sext[i64](bitcast[i32](value))), false}
+    }
+    return {zext[u64](value), true}
+}
+
+fn expr_prefix(ctx handle[CcCtx], x handle[Expr], live bool) PpInt fails {
+    t Token = expr_peek(x)
+    if t.kind == TK_LPAREN {
+        x.at += 1
+        a PpInt = try expr_parse(ctx, x, 1, live)
+        if !expr_accept_kind(x, TK_RPAREN) { try cc_error(ctx, expr_peek(x).loc, c"expected ')'") }
+        return a
+    }
+    if t.kind == TK_EOF { try cc_error(ctx, t.loc, c"expected expression") }
+    x.at += 1
+    switch t.kind {
+        case TK_MINUS:
+            a PpInt = try expr_prefix(ctx, x, live)
+            a.bits = 0 - a.bits
+            return a
+        case TK_PLUS:
+            return try expr_prefix(ctx, x, live)
+        case TK_TILDE:
+            a PpInt = try expr_prefix(ctx, x, live)
+            a.bits = ~a.bits
+            return a
+        case TK_BANG:
+            a PpInt = try expr_prefix(ctx, x, live)
+            return {if a.bits == 0 { 1 } else { 0 }, false}
+        case TK_NUM:
+            return try expr_integer(ctx, t)
+        case TK_CHAR:
+            return try expr_char(ctx, t)
+        case TK_IDENT:
+            id u32 = cc_ident(ctx, t)
+            if id == SYM_TRUE { return {1, false} }
+            if live && id != SYM_FALSE {
+                try cc_warning(ctx, t.loc, x.warn_undef, c"undefined macro evaluates to zero")
+            }
+            return {0, false}
+        default:
+            try cc_error(ctx, t.loc, c"invalid token in preprocessor expression")
+    }
+    return {0, false}
+}
+
+fn expr_prec(kind u8) u8 {
+    switch kind {
+        case TK_COMMA: return 1
+        case TK_QUEST: return 2
+        case TK_LOR: return 3
+        case TK_LAND: return 4
+        case TK_PIPE: return 5
+        case TK_CARET: return 6
+        case TK_AMP: return 7
+        case TK_EQ, TK_NE: return 8
+        case TK_LT, TK_GT, TK_LE, TK_GE: return 9
+        case TK_SHL, TK_SHR: return 10
+        case TK_PLUS, TK_MINUS: return 11
+        case TK_STAR, TK_SLASH, TK_PERCENT: return 12
+        default: return 0
+    }
+    return 0
+}
+
+fn expr_binary(ctx handle[CcCtx], t Token, a PpInt, b PpInt, live bool) PpInt fails {
+    signless bool = a.uns || b.uns
+    x u64 = a.bits
+    y u64 = b.bits
+    sx i64 = bitcast[i64](x)
+    sy i64 = bitcast[i64](y)
+    switch t.kind {
+        case TK_COMMA: return b
+        case TK_LOR: return {if x != 0 || y != 0 { 1 } else { 0 }, false}
+        case TK_LAND: return {if x != 0 && y != 0 { 1 } else { 0 }, false}
+        case TK_PIPE: return {x | y, signless}
+        case TK_CARET: return {x ^ y, signless}
+        case TK_AMP: return {x & y, signless}
+        case TK_EQ: return {if x == y { 1 } else { 0 }, false}
+        case TK_NE: return {if x != y { 1 } else { 0 }, false}
+        case TK_LT: return {if (if signless { x < y } else { sx < sy }) { 1 } else { 0 }, false}
+        case TK_GT: return {if (if signless { x > y } else { sx > sy }) { 1 } else { 0 }, false}
+        case TK_LE: return {if (if signless { x <= y } else { sx <= sy }) { 1 } else { 0 }, false}
+        case TK_GE: return {if (if signless { x >= y } else { sx >= sy }) { 1 } else { 0 }, false}
+        case TK_SHL: return {x << (y & 63), a.uns}
+        case TK_SHR:
+            shift u64 = y & 63
+            return {if a.uns { x >> shift } else { bitcast[u64](sx >> shift) }, a.uns}
+        case TK_PLUS: return {x + y, signless}
+        case TK_MINUS: return {x - y, signless}
+        case TK_STAR: return {x * y, signless}
+        case TK_SLASH, TK_PERCENT:
+            if y == 0 {
+                if live { try cc_error(ctx, t.loc, c"division by zero in preprocessor expression") }
+                return {0, signless}
+            }
+            quot bool = t.kind == TK_SLASH
+            if signless { return {if quot { x / y } else { x % y }, true} }
+            if x == 0x8000000000000000 && sy == -1 { return {if quot { x } else { 0 }, false} }
+            return {bitcast[u64](if quot { sx / sy } else { sx % sy }), false}
+    }
+    return {0, false}
+}
+
+fn expr_parse(ctx handle[CcCtx], x handle[Expr], min u8, live bool) PpInt fails {
+    a PpInt = try expr_prefix(ctx, x, live)
+    while true {
+        t Token = expr_peek(x)
+        prec u8 = expr_prec(t.kind)
+        if prec < min { return a }
+        x.at += 1
+        if prec == 2 {
+            b PpInt = try expr_parse(ctx, x, 1, live && a.bits != 0)
+            if !expr_accept_kind(x, TK_COLON) { try cc_error(ctx, expr_peek(x).loc, c"expected ':'") }
+            c PpInt = try expr_parse(ctx, x, prec, live && a.bits == 0)
+            a = {if a.bits != 0 { b.bits } else { c.bits }, b.uns || c.uns}
+        } else {
+            next bool = live && !(prec == 3 && a.bits != 0) && !(prec == 4 && a.bits == 0)
+            b PpInt = try expr_parse(ctx, x, prec + 1, next)
+            a = try expr_binary(ctx, t, a, b, live)
+        }
+    }
+    return a
+}
+
+fn pp_int(p handle[Pp], args handle[Vec[Token]], loc u32) PpInt fails {
+    x Expr = {}
+    x.loc = loc
+    x.warn_undef = p.warning_modes.undef
+    copy_into[Vec[Token]](&x.tokens, args)
+    a PpInt = try expr_parse(&p.ctx, &x, 1, true)
+    if x.at != x.tokens.n { try cc_error(&p.ctx, expr_peek(&x).loc, c"extra tokens in preprocessor expression") }
+    return a
+}
+
+fn pp_eval(p handle[Pp], args handle[Vec[Token]], loc u32) PpInt fails {
+    expanded Vec[Token] = {}
+    defer { vec_free[Token](&expanded) }
+    try expand_list(p, args.p, args.n, &expanded, true)
+    return try pp_int(p, &expanded, loc)
+}

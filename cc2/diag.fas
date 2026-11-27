@@ -1,0 +1,63 @@
+// cc2/diag.fas: Diagnostics and token spelling retrieval.
+
+struct CcCtx {
+    sm SourceMap
+    syms SymTable
+    gnu bool
+    assembler bool
+    short_wchar bool
+}
+
+fn cc_ctx_init(ctx handle[CcCtx]) void {
+    sm_init(&ctx.sm)
+    sym_init(&ctx.syms)
+}
+
+fn cc_ident(ctx handle[CcCtx], t Token) u32 {
+    return ctx.syms.canon.p[u32, zext[usize](t.val)]
+}
+
+fn tok_spelling(ctx handle[CcCtx], t Token) Bytes {
+    if t.kind == TK_IDENT {
+        return sym_name(&ctx.syms, t.val)
+    }
+    if tok_is_punct(t.kind) {
+        return punct_bytes(t.kind)
+    }
+    if (t.flags & F_SYNTH) != 0 || t.len == 0xFFFF {
+        return ctx.sm.synth_texts.p[Bytes, zext[usize](t.val)]
+    }
+    if t.len == 0 { return bytes_empty() }
+    return sm_raw_slice(&ctx.sm, t.loc, t.len)
+}
+
+fn cc_diag(ctx handle[CcCtx], loc u32, label addr, message Bytes) void {
+    out Buf = {}
+    defer { buf_free(&out) }
+    a handle[Buf] = &out
+    if loc != 0 {
+        pos ResolvedLoc = sm_resolve(&ctx.sm, loc)
+        if pos.file != 0 {
+            buf_append(a, sym_name(&ctx.syms, pos.file))
+            buf_u8(a, 58)
+            buf_dec_u64(a, zext[u64](pos.line))
+            buf_u8(a, 58)
+            buf_dec_u64(a, zext[u64](pos.column))
+            buf_str(a, c": ")
+        }
+    }
+    buf_str(a, label)
+    buf_append(a, message)
+    buf_u8(a, 10)
+    buf_write(a, STDERR) catch {}
+}
+
+fn cc_error(ctx handle[CcCtx], loc u32, message addr) void fails {
+    cc_diag(ctx, loc, c"error: ", bytes_c(message))
+    fail CError
+}
+
+fn cc_warning(ctx handle[CcCtx], loc u32, mode u8, message addr) void fails {
+    if mode == WARN_ERROR { try cc_error(ctx, loc, message) }
+    if mode == WARN_ON { cc_diag(ctx, loc, c"warning: ", bytes_c(message)) }
+}
