@@ -43,6 +43,14 @@ fn elf_sym(out handle[Buf], name u32, binding u8, stype u8, vis u8, shndx u16, v
     buf_u64le(out, size)
 }
 
+fn rela_section(r handle[Rela]) u32 {
+    if (r.sym_id & 0x80000000) != 0 { return r.sym_id & 0x7fffffff }
+    sym handle[Symbol] = sym_at(r.sym_id)
+    if r.keep_symbol || sym.binding != STB_LOCAL || !sym.defined || sym.sec_id == AS_NONE { return AS_NONE }
+    if (sec_at(sym.sec_id).sh_flags & SHF_MERGE) != 0 && r.addend != 0 { return AS_NONE }
+    return sym.sec_id
+}
+
 fn as_emit_elf(out handle[Buf]) void {
     if ac.noexecstack {
         sec_get_or_create(bytes_c(c".note.GNU-stack"), SHT_PROGBITS, 0, 0, bytes_empty(), false)
@@ -77,7 +85,7 @@ fn as_emit_elf(out handle[Buf]) void {
         s handle[Section] = sec_at(trunc[u32](si))
         for ri u64 in 0..s.relas.n {
             r handle[Rela] = vec_at(&s.relas, ri)
-            if (r.sym_id & 0x80000000) == 0 && zext[u64](r.sym_id) < sym_in_reloc.n {
+            if rela_section(r) == AS_NONE {
                 sym_in_reloc.p[u8, zext[u64](r.sym_id)] = 1
             }
         }
@@ -149,18 +157,14 @@ fn as_emit_elf(out handle[Buf]) void {
             r handle[Rela] = vec_at(&s.relas, ri)
             sym_idx u32 = 0
             addend i64 = r.addend
-            if (r.sym_id & 0x80000000) != 0 {
-                // Direct STT_SECTION reference (used by .eh_frame FDEs)
-                sym_idx = sec_at(r.sym_id & 0x7fffffff).sym_idx
-            } else {
-                sym handle[Symbol] = sym_at(r.sym_id)
-                sym_idx = sym.elf_idx
-                // Convert relocation against defined local .L / numeric label to section + offset
-                is_dot_l bool = sym.name.n >= 2 && sym.name.p[u8, 0] == 46 && sym.name.p[u8, 1] == 76
-                if sym.binding == STB_LOCAL && sym.defined && sym.sec_id != AS_NONE && (sym.is_local_label || is_dot_l) {
-                    sym_idx = sec_at(sym.sec_id).sym_idx
-                    addend += bitcast[i64](sym.value)
+            target_sec u32 = rela_section(r)
+            if target_sec != AS_NONE {
+                sym_idx = sec_at(target_sec).sym_idx
+                if (r.sym_id & 0x80000000) == 0 {
+                    addend += bitcast[i64](sym_at(r.sym_id).value)
                 }
+            } else {
+                sym_idx = sym_at(r.sym_id).elf_idx
             }
             buf_u64le(rb, r.offset)
             buf_u64le(rb, (zext[u64](sym_idx) << 32) | zext[u64](r.rtype))

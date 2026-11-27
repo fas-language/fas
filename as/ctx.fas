@@ -234,6 +234,7 @@ struct Rela {
     sym_id u32
     rtype u32
     addend i64
+    keep_symbol bool
 }
 
 // ---------- Sections ----------

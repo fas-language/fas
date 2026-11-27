@@ -302,11 +302,13 @@ fn org_offset(sec_id u32, frag_id u64, expr u32) i64 {
     return -1
 }
 
-fn layout_section_frags(sec_id u32) void {
+fn layout_section_frags(sec_id u32) bool {
     s handle[Section] = sec_at(sec_id)
     off u64 = 0
+    changed bool = false
     for fi u64 in 0..s.frags.n {
         f handle[Frag] = vec_at(&s.frags, fi)
+        prev_size u64 = f.size
         f.addr = off
         if f.kind == FK_DATA {
             f.size = zext[u64](f.data_len)
@@ -341,9 +343,11 @@ fn layout_section_frags(sec_id u32) void {
             target i64 = org_offset(sec_id, fi, f.expr)
             f.size = if target >= 0 && bitcast[u64](target) >= off { bitcast[u64](target) - off } else { 0 }
         }
+        if f.size != prev_size { changed = true }
         off += f.size
     }
     s.size = off
+    return changed
 }
 
 fn update_symbol_values() void {
@@ -376,12 +380,13 @@ fn rela_less(a handle[Rela], b handle[Rela]) bool {
     return a.offset < b.offset
 }
 
-fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64) void {
+fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64, keep_symbol bool) void {
     r handle[Rela] = vec_add(&s.relas)
     r.offset = off
     r.sym_id = sym_id
     r.rtype = rtype
     r.addend = addend
+    r.keep_symbol = keep_symbol
 }
 
 fn resolve_variant_reloc(variant u8, size u8, kind u8) u32 {
@@ -419,12 +424,22 @@ fn resolve_variant_reloc(variant u8, size u8, kind u8) u32 {
 fn as_layout_and_relax() void fails {
     try check_undefined_local_labels()
 
-    // Iterative relaxation loop (monotone widening, converges quickly)
+    // Before widening branches, stabilize directives whose size depends on
+    // addresses in another section or a later fragment in the same section.
+    converged bool = false
     for iter u32 in 0..64 {
-        for si u64 in 0..ac.sections.n {
-            layout_section_frags(trunc[u32](si))
+        layout_stable bool = false
+        for layout_iter u32 in 0..64 {
+            layout_changed bool = false
+            for si u64 in 0..ac.sections.n {
+                if layout_section_frags(trunc[u32](si)) { layout_changed = true }
+            }
+            if !layout_changed {
+                layout_stable = true
+                break
+            }
         }
-        update_symbol_values()
+        if !layout_stable { try as_err(c"fragment sizes did not converge") }
 
         changed bool = false
         for si u64 in 0..ac.sections.n {
@@ -452,8 +467,13 @@ fn as_layout_and_relax() void fails {
                 }
             }
         }
-        if !changed { break }
+        if !changed {
+            converged = true
+            break
+        }
     }
+    if !converged { try as_err(c"branch relaxation did not converge") }
+    update_symbol_values()
 
     // Finalize section bytes and apply fixups
     for si u64 in 0..ac.sections.n {
@@ -503,7 +523,7 @@ fn as_layout_and_relax() void fails {
                             patch_le(&s.out, rel_off, 4, bitcast[u64](disp))
                         } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
                             rtype u32 = if ev.variant == VAR_PLT || ev.variant == VAR_NONE { R_X86_64_PLT32 } else { resolve_variant_reloc(ev.variant, 4, FIX_PC) }
-                            add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4)
+                            add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4, ev.variant != VAR_NONE)
                         } else {
                             try as_err_line(f.line, c"unresolved branch target")
                         }
@@ -520,7 +540,8 @@ fn as_layout_and_relax() void fails {
                 } else if f.kind == FK_FILL {
                     ev EvalVal = {}
                     eval_expr(f.expr, true, &ev)
-                    cnt u64 = if ev.kind == EV_CONST && ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
+                    if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant fill count") }
+                    cnt u64 = if ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
                     esz u32 = f.data_len
                     for k u64 in 0..cnt {
                         for b u32 in 0..esz {
@@ -572,17 +593,14 @@ fn as_layout_and_relax() void fails {
                     taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
                     disp i64 = taddr - bitcast[i64](off + zext[u64](fx.next_off))
                     patch_le(&s.out, off, fx.size, bitcast[u64](disp))
-                } else if (ev.sym_a & 0x80000000) == 0 {
+                } else {
+                    if ac.template_mode && (ev.sym_a & 0x80000000) != 0 {
+                        try as_err_line(fx.line, c"cannot emit relocation against section-local dot in a template")
+                    }
                     rtype u32 = resolve_variant_reloc(ev.variant, fx.size, fx.kind)
                     addend i64 = ev.val
-                    if is_pc || rtype == R_X86_64_PC32 || rtype == R_X86_64_PC64 || rtype == R_X86_64_PLT32 ||
-                       rtype == R_X86_64_GOTPCREL || rtype == R_X86_64_GOTPCRELX || rtype == R_X86_64_REX_GOTPCRELX ||
-                       rtype == R_X86_64_GOTTPOFF || rtype == R_X86_64_TLSGD || rtype == R_X86_64_TLSLD {
-                        addend -= zext[i64](fx.next_off)
-                    }
-                    add_rela(s, off, ev.sym_a, rtype, addend)
-                } else {
-                    try as_err_line(fx.line, c"cannot emit relocation against section-local dot")
+                    if is_pc { addend -= zext[i64](fx.next_off) }
+                    add_rela(s, off, ev.sym_a, rtype, addend, ev.variant != VAR_NONE)
                 }
             } else if ev.kind == EV_DIFF {
                 // sym_a - sym_b (or sym_a - dot) where sym_b is defined in this section -> PC-relative relocation!
@@ -591,7 +609,7 @@ fn as_layout_and_relax() void fails {
                     rtype u32 = if fx.size == 8 { R_X86_64_PC64 } else { R_X86_64_PC32 }
                     sb_addr i64 = eval_sym_addr(ev.sym_b)
                     addend i64 = ev.val - sb_addr + bitcast[i64](off)
-                    add_rela(s, off, ev.sym_a, rtype, addend)
+                    add_rela(s, off, ev.sym_a, rtype, addend, false)
                 } else {
                     try as_err_line(fx.line, c"cannot evaluate cross-section symbol difference")
                 }

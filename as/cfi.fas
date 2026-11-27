@@ -356,7 +356,7 @@ fn cfi_emit_cie(eh handle[Section], fde handle[CfiFde], cies handle[Vec[CieKey]]
         poff u64 = eh.out.n
         buf_u32le(&eh.out, 0)
         rtype u32 = if (fde.pers_enc & 0x80) != 0 { R_X86_64_GOTPCREL } else { R_X86_64_PC32 }
-        add_rela(eh, poff, fde.pers_sym, rtype, 0)
+        add_rela(eh, poff, fde.pers_sym, rtype, 0, true)
     }
     if fde.lsda_sym != AS_NONE {
         buf_u8(&eh.out, fde.lsda_enc)
@@ -405,7 +405,7 @@ fn as_emit_eh_frame() void fails {
         pc_off u64 = eh.out.n
         buf_u32le(&eh.out, 0)
         // Encode section-symbol reference via high bit (handled in elf_out.fas)
-        add_rela(eh, pc_off, 0x80000000 | fde.sec_id, R_X86_64_PC32, bitcast[i64](start_addr))
+        add_rela(eh, pc_off, 0x80000000 | fde.sec_id, R_X86_64_PC32, bitcast[i64](start_addr), false)
 
         // PC range
         buf_u32le(&eh.out, trunc[u32](end_addr - start_addr))
@@ -415,7 +415,7 @@ fn as_emit_eh_frame() void fails {
             emit_uleb_bytes(&eh.out, 4)
             loff u64 = eh.out.n
             buf_u32le(&eh.out, 0)
-            add_rela(eh, loff, fde.lsda_sym, R_X86_64_PC32, 0)
+            add_rela(eh, loff, fde.lsda_sym, R_X86_64_PC32, 0, false)
         } else {
             emit_uleb_bytes(&eh.out, 0)
         }
