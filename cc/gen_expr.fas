@@ -19,13 +19,17 @@ use "gen_init.fas"
 
 // ---------- VLA Runtime Size ----------
 
+fn gen_vla_sizes() handle[Table[U64Key, u32, gen_u64_hash, gen_u64_eq]] {
+    return if gc.inline_frame == null { &gc.vla_sizes } else { &gc.inline_frame.vla_sizes }
+}
+
 fn gen_vla_type_size(tid u32) u32 fails {
     u u32 = ty_unqual(tid)
     n handle[TypeNode] = ty_node(u)
     if n.kind == TYK_ARRAY && n.aux1 == ARR_VLA {
         // Check if we already cached this VLA type's size in the current function
         key U64Key = {zext[u64](u)}
-        slot u32 = table_get(&gc.vla_sizes, &key) catch 0
+        slot u32 = table_get(gen_vla_sizes(), &key) catch 0
         if slot != 0 {
             return gen_load_raw(c"i64", slot, 8, false)
         }
@@ -85,7 +89,7 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
     // A typedef, typeof operand or inner expression can already own this
     // bound. Its size slot survives even when the bound's locals leave scope.
     key U64Key = {zext[u64](u)}
-    cached u32 = table_get(&gc.vla_sizes, &key) catch 0
+    cached u32 = table_get(gen_vla_sizes(), &key) catch 0
     if cached != 0 { return gen_load_raw(c"i64", cached, 8, false) }
     elem_sz_v u32 = if gen_type_is_vla(n.elem) {
         try gen_eval_vla_size_and_cache(n.elem)
@@ -104,7 +108,7 @@ fn gen_eval_vla_size_and_cache(tid u32) u32 fails {
         tot_v u32 = gen_binop_raw(c"mul", c"i64", cnt_v, elem_sz_v)
         slot u32 = gen_alloca_entry(8, 8)
         gen_store_ty(tot_v, slot, 8, false, false)
-        _ bool = table_put(&gc.vla_sizes, &key, slot)
+        _ bool = table_put(gen_vla_sizes(), &key, slot)
         return tot_v
     }
     cnt_v u32 = gen_const_u64(n.arr_len)
@@ -809,6 +813,11 @@ fn gen_rvalue(n handle[Ast]) u32 fails {
             }
             return gen_const_int(n.ty, n.value)
         }
+        if gc.inline_frame != null && n.decl != null {
+            key U64Key = {addr_bits(handle_addr(n.decl))}
+            value u32 = table_get(&gc.inline_frame.pointer_args, &key) catch 0
+            if value != 0 { return value }
+        }
         return try gen_load_lvalue(n)
     }
     if n.kind == ND_MEMBER || n.kind == ND_SUBSCRIPT {
@@ -1246,8 +1255,9 @@ fn gen_binary(n handle[Ast]) u32 fails {
 fn gen_cond_expr(n handle[Ast]) u32 fails {
     // An unevaluated arm can contain asm with an immediate constraint that
     // is only valid in the selected arm of a __builtin_constant_p test.
-    if ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
-        chosen handle[Ast] = if se_truth(n.a) { n.b } else { n.c }
+    cond handle[Ast] = try gen_inline_fold(n.a, false)
+    if ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        chosen handle[Ast] = if se_truth(cond) { n.b } else { n.c }
         v u32 = try gen_rvalue(chosen)
         return gen_convert(v, se_decay(chosen.ty), n.ty)
     }
@@ -1318,18 +1328,30 @@ fn gen_call(n handle[Ast]) u32 fails {
     }
 
     direct_sym handle[Symbol] = gen_direct_callee(n.a)
+    if direct_sym == null {
+        direct_sym = try gen_known_callee(n.a, callee_ty)
+        if direct_sym != null && n.a.kind == ND_BLOCK {
+            _ u32 = try gen_rvalue(n.a)
+            if gen_is_terminated() { return gen_const_zero(n.ty) }
+        }
+    }
     is_direct bool = direct_sym != null
+    noret bool = gen_is_noreturn(direct_sym)
 
     if is_direct {
-        definition handle[Ast] = gen_inline_def(direct_sym)
-        if definition != null { return try gen_inline_call(n, definition) }
-        gen_note_extern_fn(direct_sym)
+        definition handle[GenInlineDef] = try gen_inline_target(direct_sym, n.loc)
+        if definition != null {
+            value u32 = try gen_inline_call(n, definition)
+            if noret { gen_term_unreachable() }
+            return value
+        }
     }
 
     // Special case: direct call to `alloca(...)` when not defined in this TU
     if is_direct && direct_sym != null && bytes_eq_c(gen_sym_fir_name(direct_sym), c"alloca") &&
-       !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
+       !direct_sym.defined && !gen_is_defined(gen_sym_fir_name_id(direct_sym)) && n.b != null {
         sz_v u32 = gen_convert(try gen_rvalue(n.b), n.b.ty, ty_uint64_type())
+        gc.has_alloca = true
         return gen_alloca_dyn(sz_v, 16)
     }
 
@@ -1370,11 +1392,12 @@ fn gen_call(n handle[Ast]) u32 fails {
 
     if is_direct {
         result handle[Ast] = gen_inline_constant(direct_sym)
-        if result != null {
+        if result != null && !noret {
             if ty_is_void(ret_ty) { return gen_const_i32(0) }
             if ty_is_ptr(ret_ty) { return gen_const_zero(ret_ty) }
             return gen_convert(try gen_rvalue(result), result.ty, ret_ty)
         }
+        gen_note_extern_fn(direct_sym)
     }
 
     // If K&R / unprototyped call with more args than fixed params and !is_var, mark variadic or use arg_tids
@@ -1409,7 +1432,7 @@ fn gen_call(n handle[Ast]) u32 fails {
     if direct_sym != null && gen_is_returns_twice(direct_sym) {
         buf_str(b, c"returns_twice ")
     }
-    if direct_sym != null && (gen_has_attr(direct_sym.attrs, c"noreturn") || gen_has_attr(direct_sym.attrs, c"_Noreturn")) {
+    if noret {
         buf_str(b, c"noreturn ")
     }
     if fn_node.kind == TYK_FUNC && (fn_node.flags & TYF_MS_ABI) != 0 { buf_str(b, c"ms_abi ") }
@@ -1437,6 +1460,10 @@ fn gen_call(n handle[Ast]) u32 fails {
         gen_emit_val(b, av)
     }
     buf_str(b, c")\n")
+    if noret {
+        gen_term_unreachable()
+        return res_v
+    }
     if has_ret && gen_is_wide_bitint(ret_ty) {
         return gen_load_ty(ret_ty, res_v, ty_align(ret_ty), false, false)
     }

@@ -1375,7 +1375,9 @@ fn pa_declaration(p handle[Parser], file bool, leading handle[Attr]) handle[Ast]
         }
         s.asm_name = asm_name
         if spec.is_inline { s.flags |= 1 }
-        if spec.is_noreturn || pa_has_attr(p, attrs, c"noreturn") { s.flags |= 2 }
+        if spec.is_noreturn || pa_has_attr(p, attrs, c"noreturn") || pa_has_attr(p, attrs, c"_Noreturn") {
+            s.flags |= SF_NORETURN
+        }
         func bool = ty_is_func(ty)
         first handle[DeclOp] = d.first
         if func && first != null { s.params = handle_addr(first.params) }

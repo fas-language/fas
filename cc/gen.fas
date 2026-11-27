@@ -37,12 +37,13 @@ struct GenBlock {
     bool_param u32
     code Buf
     term Buf
+    unreachable_offset usize // zero if unset, otherwise the last live byte offset plus one
     debug_marks Vec[GenDebugMark]
     debug_term_loc u32
     succs Vec[u32]
     terminated bool
     pinned bool
-    _pad u16
+    returns bool
 }
 
 struct LoopFrame {
@@ -108,17 +109,28 @@ struct GnuInlineDef {
 
 type GenLabelMap = Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
 
+struct GenInlineDef {
+    node handle[Ast]
+    refuse addr
+    protect bool
+    uses_vla bool
+    uses_alloca bool
+}
+
 struct GenInlineFrame {
     parent handle[GenInlineFrame]
     fn_sym handle[Symbol]
     ret_ty u32
     result u32
     return_block u32
+    entry_block u32 // Used to initialize dynamic-scope slots on each call.
     cleanup_depth usize
     vla_depth usize
     constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    pointer_args Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     entry_asm handle[Ast]
     entry_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    vla_sizes Table[U64Key, u32, gen_u64_hash, gen_u64_eq]
     labels GenLabelMap
     addr_taken Vec[u32]
 }
@@ -162,11 +174,13 @@ struct GenCtx {
     inline_defs Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     inline_constants Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
     inline_frame handle[GenInlineFrame]
-    // Set while emitting an inline_defs body out of line because a
-    // reference survived inlining (for example, its address was taken).
-    inline_def_out_of_line bool
-    pending_bodies Vec[addr]
-    pending_body_map Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
+    optimize_inline bool
+    optional_inlines u32
+    inline_depth u32
+    inline_needs_guard bool
+    has_fenv bool
+    function_bodies Vec[addr]
+    lazy_bodies Table[U64Key, addr, gen_u64_hash, gen_u64_eq]
 
     // String literal deduplication pool (keyed by Intern id of align_byte + data)
     str_pool_keys Intern
@@ -243,8 +257,8 @@ fn gen_free(ctx handle[GenCtx]) void {
     table_free(&ctx.gnu_inline_map)
     table_free(&ctx.inline_defs)
     table_free(&ctx.inline_constants)
-    table_free(&ctx.pending_body_map)
-    vec_free(&ctx.pending_bodies)
+    table_free(&ctx.lazy_bodies)
+    vec_free(&ctx.function_bodies)
     intern_free(&ctx.str_pool_keys)
     table_free(&ctx.str_pool_nids)
     gen_reset_func_state(ctx)
@@ -288,6 +302,10 @@ fn gen_reset_func_state(ctx handle[GenCtx]) void {
     ctx.in_func = false
     ctx.has_alloca = false
     ctx.stack_guard = 0
+    ctx.optional_inlines = 0
+    ctx.inline_depth = 0
+    ctx.inline_needs_guard = false
+    ctx.has_fenv = false
     ctx.cur_fn = null
     ctx.cur_fn_name = 0
     ctx.cur_ret_ty = TY_VOID
@@ -456,6 +474,10 @@ fn gen_is_returns_twice(s handle[Symbol]) bool {
            bytes_eq_c(nm, c"vfork") || bytes_eq_c(nm, c"getcontext")
 }
 
+fn gen_is_noreturn(s handle[Symbol]) bool {
+    return s != null && (s.flags & SF_NORETURN) != 0
+}
+
 fn gen_sym_needs_quote(s Bytes) bool {
     if s.n == 0 { return true }
     for i usize in 0..s.n {
@@ -520,7 +542,7 @@ fn gen_note_extern_fn(s handle[Symbol]) void {
     }
     buf_free(&alias_buf)
     link u8 = if gen_has_attr(s.attrs, c"weak") { FIR_WEAK } else { FIR_GLOBAL }
-    noret bool = gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn")
+    noret bool = gen_is_noreturn(s)
     if gc.cur_gnu_inline_idx != 0 {
         gi handle[GnuInlineDef] = vec_at(&gc.gnu_inlines, zext[usize](gc.cur_gnu_inline_idx - 1))
         r handle[ExternFnRef] = vec_add(&gi.ext_fns)
@@ -1387,6 +1409,7 @@ fn gen_term_ret_void() void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.returns = true
     blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  ret\n")
 }
@@ -1396,6 +1419,7 @@ fn gen_term_ret_val(v u32) void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    blk.returns = true
     blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  ret ")
     gen_emit_val(&blk.term, v)
@@ -1406,6 +1430,9 @@ fn gen_term_unreachable() void {
     blk handle[GenBlock] = gen_cur_block()
     if blk.terminated { return }
     blk.terminated = true
+    // Enclosing expressions can finish lowering after a noreturn operand.
+    // Their placeholder instructions must stay beyond the emitted code.
+    blk.unreachable_offset = blk.code.n + 1
     blk.debug_term_loc = gc.debug.loc
     buf_str(&blk.term, c"  unreachable\n")
 }
@@ -1552,50 +1579,19 @@ fn gen_emit_string_global(data Bytes, align u64) u32 {
 
 // ---------- TU Streaming Callbacks & Finalization ----------
 
-// The ordinary streaming path emits immediately. A direct call to a
-// forward-declared internal function may need an immediate-asm definition
-// that becomes available only after a later parse callback.
-fn gen_visit_pending_calls(n handle[Ast], current handle[Symbol], finish bool) bool fails {
-    if n == null { return false }
-    if n.kind == ND_CALL {
-        s handle[Symbol] = gen_direct_callee(n.a)
-        if s != null && s != current && s.linkage == 1 {
-            key U64Key = {zext[u64](gen_sym_fir_name_id(s))}
-            body addr = table_get(&gc.pending_body_map, &key) catch null
-            if finish {
-                if body != null { try gen_emit_pending(handle_from_addr(body)) }
-            } else if !s.defined || body != null {
-                return true
-            }
-        }
-    }
-    if n.kind == ND_DECL && n.decl != null &&
-       try gen_visit_pending_calls(handle_from_addr(n.decl.value), current, finish) { return true }
-    return try gen_visit_pending_calls(n.a, current, finish) ||
-           try gen_visit_pending_calls(n.b, current, finish) ||
-           try gen_visit_pending_calls(n.c, current, finish) ||
-           try gen_visit_pending_calls(n.d, current, finish) ||
-           try gen_visit_pending_calls(n.next, current, finish)
-}
-
-fn gen_emit_pending(n handle[Ast]) void fails {
-    key U64Key = {zext[u64](gen_sym_fir_name_id(n.decl))}
-    // Remove before following edges so ordinary recursive calls terminate.
-    if !table_remove(&gc.pending_body_map, &key) { return }
-    _ bool = try gen_visit_pending_calls(n.a, n.decl, true)
-    try gen_function(n)
-}
-
+// The parser retains the AST for the TU. Register bodies before lowering
+// callers so direct calls can inline definitions following a prototype.
 fn gen_on_function_cb(ctx addr, node addr, user addr) void fails {
     n handle[Ast] = handle_from_addr(node)
     if n == null || n.decl == null { return }
-    if try gen_visit_pending_calls(n.a, n.decl, false) {
-        key U64Key = {zext[u64](gen_sym_fir_name_id(n.decl))}
-        _ bool = table_put(&gc.pending_body_map, &key, node)
-        vec_push(&gc.pending_bodies, node)
-    } else {
-        try gen_function(n)
+    if (n.decl.flags & SF_GNU_EXTERN_INLINE) != 0 {
+        // A subsequent external definition updates the canonical symbol
+        // in place, including its list of parameter declarations.
+        saved handle[Symbol] = pa_alloc[Symbol]()
+        copy_into(saved, n.decl)
+        n.decl = saved
     }
+    vec_push(&gc.function_bodies, node)
 }
 
 // GNU's global register variable for the x86 stack pointer names
@@ -1682,11 +1678,14 @@ fn gen_finish_tu() void fails {
     previous handle[TypeCtx] = tc
     tc = &gc.p.types
     defer { tc = previous }
-    for i usize in 0..gc.pending_bodies.n {
-        try gen_emit_pending(handle_from_addr(vec_get(&gc.pending_bodies, i)))
+    for i usize in 0..gc.function_bodies.n {
+        try gen_register_inline(handle_from_addr(vec_get(&gc.function_bodies, i)))
     }
-    gen_debug_finish()
-    // 0. Emit all inline definitions reachable from the emitted code.
+    for i usize in 0..gc.function_bodies.n {
+        n handle[Ast] = handle_from_addr(vec_get(&gc.function_bodies, i))
+        if !gen_lazy_inline(n.decl) { try gen_function(n) }
+    }
+    // Emit the out-of-line copies of inline definitions reachable from code.
     gi_i usize = 0
     while gi_i < gc.ext_fns.n {
         r handle[ExternFnRef] = vec_at(&gc.ext_fns, gi_i)
@@ -1694,18 +1693,8 @@ fn gen_finish_tu() void fails {
         rnid u32 = r.name_id
         if gen_is_defined(rnid) { continue }
         gk U64Key = {zext[u64](rnid)}
-        // GCC and Clang emit an always_inline function out of line when a
-        // reference to it is not a call they inline, such as the cast
-        // function pointer in the kernel's BPF_CALL_x wrappers.
-        idef addr = table_get(&gc.inline_defs, &gk) catch null
-        if idef != null {
-            // A static inline body is recorded as a GNU inline definition
-            // below; any other body is emitted directly.
-            gc.inline_def_out_of_line = true
-            try gen_function(handle_from_addr(idef))
-            gc.inline_def_out_of_line = false
-            if gen_is_defined(rnid) { continue }
-        }
+        body addr = table_get(&gc.lazy_bodies, &gk) catch null
+        if body != null { try gen_function(handle_from_addr(body)) }
         gidx u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
         if gidx == 0 { continue }
         gen_mark_defined(rnid)
@@ -1741,6 +1730,7 @@ fn gen_finish_tu() void fails {
             no.tls = or_.tls
         }
     }
+    gen_debug_finish()
     // 1. Emit tentative definitions that were not subsequently defined
     for i usize in 0..gc.tentatives.n {
         tr handle[TentativeRef] = vec_at(&gc.tentatives, i)

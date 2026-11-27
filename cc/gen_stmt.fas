@@ -65,15 +65,24 @@ fn gen_emit_blockaddr(target_blk u32) u32 {
 
 // ---------- Scope Cleanups & VLA Stack Restore ----------
 
-fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void {
+fn gen_call_cleanup(item handle[CleanupItem], object u32, null_v u32) void fails {
     // Clear it first: a cleanup that itself unwinds must not run again.
     if item.active_slot != 0 {
         gen_store_ty(null_v, item.active_slot, 8, true, false)
     }
-    gen_note_extern_fn(item.fn_sym)
+    sym handle[Symbol] = item.fn_sym
+    def handle[GenInlineDef] = try gen_inline_target(sym, sym.loc)
+    if def != null {
+        args Vec[GenInlineArg] = {}
+        defer { vec_free(&args) }
+        vec_push[GenInlineArg](&args, {object, ty_ptr(TY_VOID), null})
+        _ u32 = try gen_inline_body(def, &args)
+        return
+    }
+    gen_note_extern_fn(sym)
     b handle[Buf] = gen_cur_buf()
-    buf_str(b, c"  call (ptr) -> () @")
-    buf_append(b, gen_sym_fir_name(item.fn_sym))
+    buf_str(b, c"  call (ptr) -> () ")
+    gen_emit_sym_name(b, gen_sym_fir_name(sym))
     buf_u8(b, 40)
     gen_emit_val(b, object)
     buf_str(b, c")\n")
@@ -87,7 +96,7 @@ fn gen_run_cleanups_to(target_depth usize) void fails {
         c handle[CleanupItem] = vec_at(&gc.cleanups, i)
         if c.fn_sym != null {
             nil u32 = if c.active_slot != 0 { gen_const_zero(ty_ptr(TY_VOID)) } else { 0 }
-            gen_call_cleanup(c, c.ptr_v, nil)
+            try gen_call_cleanup(c, c.ptr_v, nil)
         }
     }
 }
@@ -108,7 +117,7 @@ fn gen_unwind_slot(item handle[CleanupItem]) u32 {
     return slot
 }
 
-fn gen_unwind_landing_pad() u32 {
+fn gen_unwind_landing_pad() u32 fails {
     pad u32 = gen_new_block()
     gen_switch_block(pad)
     // The SysV x86-64 unwind ABI supplies the exception object in rax.
@@ -129,8 +138,8 @@ fn gen_unwind_landing_pad() u32 {
         next_blk u32 = gen_new_block()
         gen_term_br(active, call_blk, next_blk)
         gen_switch_block(call_blk)
-        gen_call_cleanup(item, object, nil)
-        gen_term_jump(next_blk)
+        try gen_call_cleanup(item, object, nil)
+        if !gen_is_terminated() { gen_term_jump(next_blk) }
         gen_switch_block(next_blk)
     }
     gen_note_extern_fn_raw(bytes_c(c"_Unwind_Resume"), ty_func(TY_VOID, &pt, 1, false))
@@ -202,11 +211,12 @@ fn gen_local_decl(n handle[Ast]) void fails {
     // VLA local variable (with per-VLA saved stack pointer so backward `goto` deallocates previous iteration!)
     if gen_type_is_vla(s.ty) {
         sp_slot u32 = gen_alloca_entry(8, 8)
-        // Initialize sp_slot = null in entry block so first entry doesn't restore
-        eb handle[Buf] = gen_entry_buf()
-        buf_str(eb, c"  store ptr null, ")
-        gen_emit_val(eb, sp_slot)
-        buf_str(eb, c", align 8\n")
+        // Reset on function entry, including each execution of an inline copy.
+        current u32 = gc.cur_blk
+        entry u32 = if gc.inline_frame != null { gc.inline_frame.entry_block } else { 0 }
+        gen_switch_block(entry)
+        gen_store_ty(gen_const_zero(TY_NULLPTR), sp_slot, 8, false, false)
+        gen_switch_block(current)
         // If sp_slot != null (re-entered via backward goto), restore stack before re-allocating!
         prev_sp u32 = gen_load_raw(c"ptr", sp_slot, 8, false)
         is_nonnull u32 = gen_icmp(c"ne", prev_sp, gen_const_zero(TY_NULLPTR))
@@ -433,10 +443,11 @@ fn gen_switch_stmt(n handle[Ast]) void fails {
 
     // Emit only the reachable dispatch edge for a constant key. Still
     // lower the body so fallthrough and jumps to C labels work normally.
+    folded handle[Ast] = try gen_inline_fold(n.a, false)
     if gen_is_terminated() {
         // A C label in the body may still be reached by a goto.
-    } else if ty_int_bits(key_ty) <= 64 && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
-        key u64 = se_value(key_ty, n.a.value)
+    } else if ty_int_bits(key_ty) <= 64 && (folded.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+        key u64 = se_value(key_ty, folded.value)
         target u32 = def_target
         for i usize in 0..sw.cases.n {
             sc handle[SwitchCase] = vec_at(&sw.cases, i)
@@ -549,6 +560,10 @@ fn gen_asm_constraint(operand handle[Ast], out handle[Buf]) void {
     buf_u8(out, 125)
 }
 
+fn gen_asm_memory_input(cs Bytes) bool {
+    return cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+}
+
 fn gen_inline_asm(n handle[Ast]) void fails {
     is_goto bool = (n.flags & 1) != 0
     is_vol bool = (n.flags & 2) != 0 || n.b == null
@@ -635,7 +650,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         cb Buf = {}
         gen_asm_constraint(inp, &cb)
         cs Bytes = buf_bytes(&cb)
-        is_m bool = cs.n > 0 && (cs.p[u8] == 109 || cs.p[u8] == 111 || cs.p[u8] == 86)
+        is_m bool = gen_asm_memory_input(cs)
         tied_idx usize = out_tids.n
         if cs.n > 0 && cs.p[u8] >= 48 && cs.p[u8] <= 57 {
             tied_idx = bytes_to_u64(cs) catch out_tids.n
@@ -692,6 +707,7 @@ fn gen_inline_asm(n handle[Ast]) void fails {
         inp = inp.next
     }
 
+    if gen_is_terminated() { return }
     if is_goto {
         // Rewrite `%l[name]` references in template to `%l<inputs.n + K>` (Fir only supports numbered `%lN`)
         goto_tmpl Buf = {}
@@ -732,9 +748,6 @@ fn gen_inline_asm(n handle[Ast]) void fails {
             if vec_get(&out_res_vs, i) != 0 { has_reg_out = true }
         }
         fall_blk u32 = gen_new_block()
-        blk handle[GenBlock] = gen_cur_block()
-        blk.terminated = true
-        gen_add_succ(blk, fall_blk)
         // Collect target blocks (use trampoline blocks when there are register outputs so
         // outputs are stored to their C lvalues on indirect edges too, per C23 / Clang 16+).
         goto_tramps Vec[u32] = {}
@@ -748,13 +761,17 @@ fn gen_inline_asm(n handle[Ast]) void fails {
                 tb u32 = gen_new_block()
                 vec_push(&goto_tramps, tb)
                 vec_push(&goto_reals, real_blk)
-                gen_add_succ(blk, tb)
             } else {
                 vec_push(&goto_tramps, real_blk)
-                vec_push(&goto_reals, real_blk)
-                gen_add_succ(blk, real_blk)
             }
             gl_c = gl_c.next
+        }
+        // Allocating label and trampoline blocks can grow gc.blocks.
+        blk handle[GenBlock] = gen_cur_block()
+        blk.terminated = true
+        gen_add_succ(blk, fall_blk)
+        for i usize in 0..goto_tramps.n {
+            gen_add_succ(blk, vec_get(&goto_tramps, i))
         }
         b handle[Buf] = &blk.term
         buf_str(b, c"  ")
@@ -1001,6 +1018,7 @@ fn gen_stmt(n handle[Ast]) void fails {
     defer { gc.debug.scope = enclosing_scope; gc.debug.loc = enclosing_loc }
 
     if n.kind == ND_BLOCK {
+        if !gen_is_terminated() { try gen_asm_block_locals(n) }
         old_cleanups usize = gc.cleanups.n
         old_vlas usize = gc.vla_stack.n
         gc.scope_depth += 1
@@ -1067,11 +1085,12 @@ fn gen_stmt(n handle[Ast]) void fails {
         // or enclosing switch can still enter it independently of the test,
         // so only drop a branch that defines no label. Ask the branch itself:
         // the parser's label list is already cleared when a body waits in
-        // pending_bodies (the kernel's scoped_guard jumps into `if (0)`).
+        // the translation unit is lowered (scoped_guard jumps into `if (0)`).
+        cond handle[Ast] = try gen_inline_fold(n.a, false)
         if !gen_is_terminated() && cur_switch == null &&
-            ty_is_integer(n.a.ty) && (n.a.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
-            !gen_defines_label(if se_truth(n.a) { n.c } else { n.b }) {
-            try gen_stmt(if se_truth(n.a) { n.b } else { n.c })
+            ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE &&
+            !gen_defines_label(if se_truth(cond) { n.c } else { n.b }) {
+            try gen_stmt(if se_truth(cond) { n.b } else { n.c })
             return
         }
         if gen_is_terminated() {
@@ -1152,9 +1171,16 @@ fn gen_stmt(n handle[Ast]) void fails {
         gc.loops.n -= 1
 
         gen_switch_block(cond_blk)
-        cv u32 = try gen_rvalue(n.a)
-        cb u32 = gen_to_bool(cv, n.a.ty)
-        gen_term_br(cb, body_blk, end_blk)
+        // A macro's `do { … } while (0)` has no conditional backedge,
+        // including in functions whose computed goto pins their blocks.
+        cond handle[Ast] = try gen_inline_fold(n.a, false)
+        if ty_is_integer(cond.ty) && (cond.flags & (NF_ICE | NF_OVERFLOW)) == NF_ICE {
+            gen_term_jump(if se_truth(cond) { body_blk } else { end_blk })
+        } else {
+            cv u32 = try gen_rvalue(n.a)
+            cb u32 = gen_to_bool(cv, n.a.ty)
+            gen_term_br(cb, body_blk, end_blk)
+        }
         gen_switch_block(end_blk)
         return
     }
@@ -1216,7 +1242,8 @@ fn gen_stmt(n handle[Ast]) void fails {
 
     if bytes_eq_c(kw, c"break") {
         if gc.loops.n > 0 {
-            lf handle[LoopFrame] = vec_at(&gc.loops, gc.loops.n - 1)
+            lf LoopFrame = {}
+            copy_into(&lf, vec_at(&gc.loops, gc.loops.n - 1))
             try gen_run_cleanups_to(lf.cleanup_depth)
             gen_restore_vlas_to(lf.vla_depth)
             gen_term_jump(lf.break_blk)
@@ -1227,7 +1254,8 @@ fn gen_stmt(n handle[Ast]) void fails {
         i usize = gc.loops.n
         while i > 0 {
             i -= 1
-            lf handle[LoopFrame] = vec_at(&gc.loops, i)
+            lf LoopFrame = {}
+            copy_into(&lf, vec_at(&gc.loops, i))
             if !lf.is_switch {
                 try gen_run_cleanups_to(lf.cleanup_depth)
                 gen_restore_vlas_to(lf.vla_depth)
@@ -1241,6 +1269,7 @@ fn gen_stmt(n handle[Ast]) void fails {
         if n.a != null {
             // Computed goto `goto *expr`
             pv u32 = try gen_rvalue(n.a)
+            if gen_is_terminated() { return }
             blk handle[GenBlock] = gen_cur_block()
             blk.terminated = true
             buf_str(&blk.term, c"  indirect_br ")
@@ -1413,25 +1442,39 @@ fn gen_emit_patchable(out_b handle[Buf], attrs handle[Attr]) void fails {
     }
 }
 
+fn gen_guard_inline_returns() void {
+    cur u32 = gc.cur_blk
+    gen_switch_block(0)
+    gc.stack_guard = gen_alloca_entry(8, 8)
+    gen_store_ty(gen_read_stack_guard(), gc.stack_guard, 8, true, false)
+    // An inlined helper may introduce a protected local after an earlier
+    // return was lowered. Route every existing return through a check.
+    for i usize in 0..gc.blocks.n {
+        blk handle[GenBlock] = vec_at(&gc.blocks, i)
+        if !blk.returns { continue }
+        term Buf = {}
+        copy_into(&term, &blk.term)
+        loc u32 = blk.debug_term_loc
+        mem_set(&blk.term, 0, sizeof[Buf])
+        blk.terminated = false
+        blk.returns = false
+        gen_switch_block(trunc[u32](i))
+        gen_check_stack_guard()
+        pass handle[GenBlock] = gen_cur_block()
+        copy_into(&pass.term, &term)
+        pass.debug_term_loc = loc
+        pass.terminated = true
+    }
+    gen_switch_block(cur)
+}
+
 fn gen_function(node handle[Ast]) void fails {
     s handle[Symbol] = node.decl
     if s == null || node.a == null { return }
     nid u32 = gen_sym_fir_name_id(s)
     if gen_is_defined(nid) { return }
-    gen_note_inline_constant(s, node.a, nid)
-    if s.linkage == 1 && !gc.inline_def_out_of_line &&
-       gen_has_attr(s.attrs, c"always_inline") && gen_needs_inline_asm(node.a) {
-        key U64Key = {zext[u64](nid)}
-        _ bool = table_put(&gc.inline_defs, &key, handle_addr(node))
-        return
-    }
-    // An unreferenced static inline must not make its external dependencies
-    // mandatory. In particular, a shared object may include inline helpers
-    // that call private functions available only inside the main program.
-    is_gnu_inline bool = (s.flags & SF_GNU_EXTERN_INLINE) != 0 ||
-        ((s.flags & 1) != 0 && gen_sym_linkage(s) == FIR_LOCAL &&
-         !gen_has_attr(s.attrs, c"used") && !gen_has_attr(s.attrs, c"retain") &&
-         !gen_has_attr(s.attrs, c"constructor") && !gen_has_attr(s.attrs, c"destructor"))
+    // An unreferenced static inline must not introduce external dependencies.
+    is_gnu_inline bool = gen_lazy_inline(s)
     if is_gnu_inline {
         gk U64Key = {zext[u64](nid)}
         prev u32 = table_get(&gc.gnu_inline_map, &gk) catch 0
@@ -1477,6 +1520,7 @@ fn gen_function(node handle[Ast]) void fails {
     gc.cur_fn = s
     gc.cur_fn_name = nid
     gc.cur_ret_ty = ret_ty
+    gc.has_fenv = (node.flags & NF_FENV) != 0
     gc.next_ssa = n_params + 1
     decl_loc u32 = if gc.debug.enabled { gen_debug_loc(s.loc, 0) } else { 0 }
 
@@ -1499,7 +1543,6 @@ fn gen_function(node handle[Ast]) void fails {
 
     // Pre-scan for `&&label` so `indirect_br` has the complete target list
     gen_prescan_addr_taken(node.a)
-    gen_asm_entry_locals(node.a)
 
     // Spill all parameters into entry-block allocas so `&param` and mutation always work
     for i u32 in 0..n_params {
@@ -1544,7 +1587,10 @@ fn gen_function(node handle[Ast]) void fails {
         }
     }
 
-    pad u32 = if gc.unwind_cleanups.n > 0 { gen_unwind_landing_pad() } else { 0 }
+    pad u32 = if gc.unwind_cleanups.n > 0 { try gen_unwind_landing_pad() } else { 0 }
+    if gc.inline_needs_guard && gc.stack_guard == 0 && !gen_has_attr(s.attrs, c"no_stack_protector") {
+        gen_guard_inline_returns()
+    }
     // Declare the exceptional edge to the verifier and allocator. The
     // empty asm falls through to the body. Only libgcc enters the pad.
     eb handle[GenBlock] = vec_at(&gc.blocks, zext[usize](entry_blk))
@@ -1636,7 +1682,7 @@ fn gen_function(node handle[Ast]) void fails {
     buf_u8(out_b, 32)
     fn_link u8 = if is_gnu_inline { FIR_LOCAL } else { gen_sym_linkage(s) }
     fir_emit_linkage(out_b, fn_link, gen_sym_visibility(s))
-    if gen_has_attr(s.attrs, c"noreturn") || gen_has_attr(s.attrs, c"_Noreturn") {
+    if gen_is_noreturn(s) {
         buf_str(out_b, c" noreturn")
     }
     if gen_has_attr(s.attrs, c"noinline") { buf_str(out_b, c" noinline") }
@@ -1648,7 +1694,7 @@ fn gen_function(node handle[Ast]) void fails {
         fir_emit_quoted_bytes(out_b, sec_buf.p, sec_buf.n)
     }
     buf_free(&sec_buf)
-    if (node.flags & NF_FENV) != 0 { buf_str(out_b, c" fenv") }
+    if gc.has_fenv { buf_str(out_b, c" fenv") }
     if pad != 0 {
         buf_str(out_b, c" !cleanup ")
         buf_dec_u64(out_b, zext[u64](blk_to_idx[u32, zext[usize](pad)]))
@@ -1688,6 +1734,7 @@ fn gen_function(node handle[Ast]) void fails {
             }
             buf_str(out_b, c":\n")
         }
+        if blk.unreachable_offset != 0 { blk.code.n = blk.unreachable_offset - 1 }
         gen_debug_write_code(out_b, blk)
         if blk.debug_term_loc != 0 && blk.term.n > 0 {
             term Bytes = buf_bytes(&blk.term)

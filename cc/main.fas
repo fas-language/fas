@@ -132,6 +132,7 @@ struct Options {
     async_unwind bool
     unwind_tables bool
     rounding_math bool
+    optimize_inline bool
     force_lang u8 // 0 = auto, 1 = c
 }
 
@@ -479,8 +480,9 @@ fn cli_parse(p handle[Pp], o handle[Options], argc usize) void fails {
             buf_free(&b)
         } else if bytes_eq_c(word, c"-g0") || bytes_eq_c(word, c"-ggdb0") { o.debug = false }
         else if bytes_starts_with(word, bytes_c(c"-g")) { o.debug = true }
-        else if bytes_starts_with(word, bytes_c(c"-O")) ||
-                  bytes_starts_with(word, bytes_c(c"-W")) ||
+        else if bytes_starts_with(word, bytes_c(c"-O")) {
+            o.optimize_inline = !bytes_eq_c(word, c"-O0")
+        } else if bytes_starts_with(word, bytes_c(c"-W")) ||
                   bytes_eq_c(word, c"-fstrict-aliasing") || bytes_eq_c(word, c"-fno-strict-aliasing") ||
                   bytes_eq_c(word, c"-fno-fast-math") {
             // These optimization and diagnostic settings have no effect on current code generation.
@@ -1014,6 +1016,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
     gctx.stack_protector = o.stack_protector
     gctx.kernel_model = o.kernel_model
     gctx.auto_init_zero = o.auto_init_zero
+    gctx.optimize_inline = o.optimize_inline
     defer { gen_free(&gctx) }
     parser.on_function = &gen_on_function_cb
     parser.on_object = &gen_on_object_cb

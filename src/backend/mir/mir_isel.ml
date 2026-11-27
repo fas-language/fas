@@ -1521,7 +1521,7 @@ let mem_result_out c (a : F.abi) v ad =
       | (F.F32 | F.F64) as t -> emit c (Fstore (is_dbl t, ad, use c v))
       | t -> emit c (Store (mem_size t, ad, use c v)))
 
-let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
+let call ?(discard_results = false) c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   let nfixed = List.length sig_.param_abis in
   let abis =
     List.mapi
@@ -1607,8 +1607,9 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
     end
     else arg_regs
   in
-  emit c (Call { target; args = arg_regs; rets = ret_regs rp; rtwice = attrs land F.a_returns_twice <> 0 });
-  match (rp, results) with
+  let rets = if discard_results then [] else ret_regs rp in
+  emit c (Call { target; args = arg_regs; rets; rtwice = attrs land F.a_returns_twice <> 0 });
+  if not discard_results then match (rp, results) with
   | Rnone, _ -> ()
   | Rx87 (false, 1), [| v |] -> pop80 c v
   | Rx87 (true, n), [| v |] ->
@@ -2072,9 +2073,11 @@ let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_
             let x = match t with F.Int 1 -> Int64.logand l.(0) 1L | F.Int w -> sext_const w l.(0) | _ -> l.(0) in
             match c.imm with Some ok when ok x -> Some (Aimm x) | _ -> None)
         | Some (Czero _ | Cnull _) when c.imm <> None -> Some (Aimm 0L)
-        | Some (Csym (name, add))
-          when c.sym && (not (Hashtbl.mem cx.tls_syms name)) && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
-            Some (Asym (name, add))
+        | _ when c.sym -> (
+            match sym_plus cx.fn v with
+            | Some (name, add) when not (Hashtbl.mem cx.tls_syms name) &&
+                (not cx.pic || Hashtbl.mem cx.local_syms name) -> Some (Asym (name, add))
+            | _ -> None)
         | _ -> None)
   in
   let fixed k = match (con k).regs with [ _ ] -> (con k).tied = None | _ -> false in
@@ -2318,7 +2321,7 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~outs ~ins ~aargs ~c
   (asm_core ~labels cx ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers) ()
 
 
-let inst c i =
+let inst ~before_unreachable c i =
   let ir = F.inst c.fn i in
   let res k = ir.results.(k) in
   let rty () = ty c (res 0) in
@@ -2481,7 +2484,9 @@ let inst c i =
       def c (res 1) (copy c (G Rdx));
       def c (res 2) ok
   | Fence o -> if o = Seq_cst then emit c Mfence
-  | Call { sig_; callee; args; attrs; va_aggs } -> call c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
+  | Call { sig_; callee; args; attrs; va_aggs } ->
+      let discard_results = before_unreachable && F.has attrs F.a_noreturn in
+      call ~discard_results c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
   | Syscall args ->
       let regs = [| G Rax; G Rdi; G Rsi; G Rdx; G R10; G R8; G R9 |] in
       if Array.length args > 7 then unsupported "syscall with %d operands" (Array.length args);
@@ -2805,7 +2810,10 @@ let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = 
     (fun b (blk : F.block_rec) ->
       c.cur <- b;
       c.fir_block <- b;
-      F.Vec.iter (fun i -> mark (F.inst fn i).loc; inst c i) blk.insts;
+      let last_inst = F.Vec.length blk.insts - 1 in
+      F.Vec.iteri (fun index i ->
+        mark (F.inst fn i).loc;
+        inst ~before_unreachable:(index = last_inst && blk.term = F.Unreachable) c i) blk.insts;
       mark blk.term_loc;
       term c blk.term)
     fn.blocks;
