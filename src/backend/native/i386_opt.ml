@@ -242,7 +242,6 @@ let inline_helpers stream pinned =
   let take_body (f : func) =
     let safe = function
       | Conv _ | Ibin _ | Iun _ | Icmp _ | Ovf _ | Ptradd _ | Load _ | Store _ | Select _ | Freeze _ -> true
-      | Asm { tmpl; _ } -> not (String.contains tmpl '.') && not (String.contains tmpl ':')
       | _ -> false in
     let rec collect budget b body =
       if budget = 0 then None
