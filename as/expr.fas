@@ -588,6 +588,13 @@ fn eval_sym_sec(sym_ref u32) u32 {
 fn eval_sym_addr(sym_ref u32) i64 {
     if (sym_ref & 0x80000000) != 0 { return 0 }
     s handle[Symbol] = sym_at(sym_ref)
+    // During layout the fragment can already have its current address
+    // while the symbol table still holds the previous pass's value.
+    if s.sec_id != AS_NONE && s.frag_id != AS_NONE {
+        sec handle[Section] = sec_at(s.sec_id)
+        f handle[Frag] = vec_at(&sec.frags, zext[u64](s.frag_id))
+        return bitcast[i64](f.addr + zext[u64](s.frag_off))
+    }
     return bitcast[i64](s.value)
 }
 

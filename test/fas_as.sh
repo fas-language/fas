@@ -7,6 +7,7 @@ set -euo pipefail
 #   FAS_AS_CASES   number of differential fuzz cases (default: 1000)
 #   FAS_AS_SEED    fuzzer RNG seed (default: 1)
 #   FAS_AS_CORPUS  corpus mode: quick | libs | full (default: libs)
+#   FAS_AS_JOBS    parallel corpus jobs (default: available CPUs)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OCAML_FAS="$ROOT/_build/default/bin/main.exe"
@@ -52,7 +53,15 @@ check_diag "bad-operand" ".text\n  movq %al, %rax"
 check_diag "undef-local-label" ".text\n  jmp 1f"
 check_diag "intel-syntax" ".intel_syntax noprefix\n  nop"
 check_diag "rex-hi8" ".text\n  movb %ah, %r8b"
-echo "diag: ok (5/5 checks)"
+check_diag "backwards-org" ".text\n  .long 1\n  .org 2"
+echo "diag: ok (6/6 checks)"
+
+for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
+    llvm-mc-22 -triple=x86_64-unknown-linux-gnu -filetype=obj "$fixture" -o "$WORK/ref.o"
+    "$WORK/fas-as" "$fixture" -o "$WORK/fas.o"
+    python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+    echo "fixture: ${fixture##*/} ok"
+done
 
 # 3. Differential fuzzer against llvm-mc-22
 python3 "$ROOT/test/fas_as/fuzz_as.py" "$WORK/fas-as" "$FAS_AS_SEED" "$FAS_AS_CASES"

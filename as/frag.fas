@@ -286,7 +286,24 @@ fn emit_sleb_bytes(out handle[Buf], v i64) void {
 
 // ---------- Relaxation & layout ----------
 
-fn layout_section_frags(s handle[Section]) void {
+// .org measures an offset from the section start. Its size can shrink when
+// relaxation widens a preceding branch, so recalculate it on every pass.
+fn org_offset(sec_id u32, frag_id u64, expr u32) i64 {
+    ev EvalVal = {}
+    eval_expr(expr, true, &ev)
+    if ev.kind == EV_CONST { return ev.val }
+    if ev.kind == EV_SYM && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == sec_id {
+        if (ev.sym_a & 0x80000000) == 0 {
+            sym handle[Symbol] = sym_at(ev.sym_a)
+            if zext[u64](sym.frag_id) >= frag_id { return -1 }
+        }
+        return eval_sym_addr(ev.sym_a) + ev.val
+    }
+    return -1
+}
+
+fn layout_section_frags(sec_id u32) void {
+    s handle[Section] = sec_at(sec_id)
     off u64 = 0
     for fi u64 in 0..s.frags.n {
         f handle[Frag] = vec_at(&s.frags, fi)
@@ -320,6 +337,9 @@ fn layout_section_frags(s handle[Section]) void {
             ev EvalVal = {}
             eval_expr(f.expr, true, &ev)
             f.size = if ev.kind == EV_CONST { sleb_size(ev.val) } else { 1 }
+        } else if f.kind == FK_ORG {
+            target i64 = org_offset(sec_id, fi, f.expr)
+            f.size = if target >= 0 && bitcast[u64](target) >= off { bitcast[u64](target) - off } else { 0 }
         }
         off += f.size
     }
@@ -402,7 +422,7 @@ fn as_layout_and_relax() void fails {
     // Iterative relaxation loop (monotone widening, converges quickly)
     for iter u32 in 0..64 {
         for si u64 in 0..ac.sections.n {
-            layout_section_frags(sec_at(trunc[u32](si)))
+            layout_section_frags(trunc[u32](si))
         }
         update_symbol_values()
 
@@ -439,6 +459,14 @@ fn as_layout_and_relax() void fails {
     for si u64 in 0..ac.sections.n {
         s handle[Section] = sec_at(trunc[u32](si))
         is_nobits bool = s.sh_type == SHT_NOBITS
+        for fi u64 in 0..s.frags.n {
+            f handle[Frag] = vec_at(&s.frags, fi)
+            if f.kind == FK_ORG {
+                target i64 = org_offset(trunc[u32](si), fi, f.expr)
+                if target < 0 || bitcast[u64](target) < f.addr { try as_err_line(f.line, c"invalid .org offset") }
+                if is_nobits && f.size != 0 && f.fill != 0 { try as_err_line(f.line, c"non-zero .org fill in a NOBITS section") }
+            }
+        }
         if !is_nobits {
             buf_clear(&s.out)
             for fi u64 in 0..s.frags.n {
@@ -509,6 +537,10 @@ fn as_layout_and_relax() void fails {
                     eval_expr(f.expr, true, &ev)
                     if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant .sleb128 expression") }
                     emit_sleb_bytes(&s.out, ev.val)
+                } else if f.kind == FK_ORG {
+                    buf_reserve(&s.out, f.size)
+                    mem_set(s.out.p + s.out.n, trunc[u8](f.fill), f.size)
+                    s.out.n += f.size
                 }
             }
         }

@@ -658,7 +658,7 @@ fn parse_directive(dir Bytes) void fails {
         }
         return
     }
-    if bytes_is(dir, c".zero") || bytes_is(dir, c".skip") || bytes_is(dir, c".space") {
+    if bytes_is(dir, c".zero") || bytes_is(dir, c".skip") || bytes_is(dir, c".space") || bytes_is(dir, c".org") {
         cnt u32 = try parse_expr()
         fill u64 = 0
         skip_hspace()
@@ -666,7 +666,14 @@ fn parse_directive(dir Bytes) void fails {
             ac.pos += 1
             fill = bitcast[u64](try eval_const_now(try parse_expr())) & 0xff
         }
-        emit_fill(cnt, 1, fill)
+        if bytes_is(dir, c".org") {
+            s handle[Section] = cur_sec()
+            f handle[Frag] = vec_add(&s.frags)
+            f.kind = FK_ORG
+            f.expr = cnt
+            f.fill = fill
+            f.line = ac.line
+        } else { emit_fill(cnt, 1, fill) }
         return
     }
     if bytes_is(dir, c".fill") {

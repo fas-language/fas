@@ -191,6 +191,7 @@ const FK_ALIGN u8 = 2
 const FK_FILL u8 = 3
 const FK_ULEB u8 = 4
 const FK_SLEB u8 = 5
+const FK_ORG u8 = 6
 
 struct Frag {
     kind u8
@@ -199,8 +200,8 @@ struct Frag {
     is_code u8      // FK_ALIGN: 1 if NOP fill in executable section
     data_off u32    // FK_DATA: offset in sec.data; FK_RELAX_JMP: short_op | (long_op << 8) | (is_jcc << 16)
     data_len u32    // FK_DATA: length in sec.data; FK_ALIGN: align bytes; FK_FILL: elem size
-    expr u32        // FK_RELAX_JMP/ULEB/SLEB: target ExprNode; FK_FILL: repeat count
-    fill u64        // FK_ALIGN: fill byte | (max_skip << 32); FK_FILL: fill value
+    expr u32        // FK_RELAX_JMP/ULEB/SLEB/ORG: target ExprNode; FK_FILL: repeat count
+    fill u64        // FK_ALIGN: fill byte | (max_skip << 32); FK_FILL/ORG: fill value
     addr u64        // computed byte offset in section during relaxation
     size u64        // computed byte size in section during relaxation
     line u32        // source line for diagnostics
