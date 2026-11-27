@@ -673,7 +673,7 @@ fn pa_refill_buf(p handle[Parser]) void fails {
                             if c == 32 {
                                 flags |= F_SPACE
                                 if (src + at)[u32] == 0x20202020 { at += 4 } else { at += 1 }
-                            } else if c == 9 {
+                            } else if c == 9 || c == 11 || c == 12 {
                                 flags |= F_SPACE
                                 at += 1
                             } else if c == 10 {

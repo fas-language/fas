@@ -328,7 +328,7 @@ fn expand_arguments(p handle[Pp], e handle[Expand], m handle[Macro], data handle
                     while true {
                         while true {
                             c u8 = src[u8, at]
-                            if c == 32 || c == 9 {
+                            if c == 32 || c == 9 || c == 11 || c == 12 {
                                 flags |= F_SPACE
                                 at += 1
                             } else if c == 10 {
