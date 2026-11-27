@@ -7,6 +7,7 @@ set -euo pipefail
 #   FAS_AS_CASES   number of differential fuzz cases (default: 1000)
 #   FAS_AS_SEED    fuzzer RNG seed (default: 1)
 #   FAS_AS_CORPUS  corpus mode: quick | libs | full (default: libs)
+#   FAS_AS_JOBS    parallel corpus jobs (default: available CPUs)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OCAML_FAS="$ROOT/_build/default/bin/main.exe"
@@ -37,8 +38,9 @@ reference_cc() {
 # 2. CLI diagnostics checks (file:line: error: ..., exit 1)
 check_diag() {
     local label="$1" src="$2"
+    shift 2
     printf '%b\n' "$src" >"$WORK/bad.s"
-    if "$WORK/fas-as" "$WORK/bad.s" -o "$WORK/bad.o" 2>"$WORK/bad.err"; then
+    if "$WORK/fas-as" "$@" "$WORK/bad.s" -o "$WORK/bad.o" 2>"$WORK/bad.err"; then
         echo "FAIL diag ($label): expected exit 1" >&2
         exit 1
     fi
@@ -52,7 +54,30 @@ check_diag "bad-operand" ".text\n  movq %al, %rax"
 check_diag "undef-local-label" ".text\n  jmp 1f"
 check_diag "intel-syntax" ".intel_syntax noprefix\n  nop"
 check_diag "rex-hi8" ".text\n  movb %ah, %r8b"
-echo "diag: ok (5/5 checks)"
+check_diag "backwards-org" ".text\n  .long 1\n  .org 2"
+check_diag "code32-rex" ".code32\n  movb %dil, (%eax)"
+check_diag "fatal-warning" '.warning "this warning is fatal"' --fatal-warnings
+echo "diag: ok (8/8 checks)"
+
+for fixture in "$ROOT"/test/fas_as/fixtures/*.asm; do
+    llvm-mc-22 -triple=x86_64-unknown-linux-gnu -filetype=obj "$fixture" -o "$WORK/ref.o"
+    "$WORK/fas-as" "$fixture" -o "$WORK/fas.o"
+    python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+    echo "fixture: ${fixture##*/} ok"
+done
+
+fixture="$ROOT/test/fas_as/fixtures/section_defaults.asm"
+llvm-mc-22 -triple=x86_64-unknown-linux-gnu -mcpu=x86-64 -filetype=obj "$fixture" -o "$WORK/ref.o"
+"$WORK/fas-as" -mcpu=x86-64 "$fixture" -o "$WORK/fas.o"
+python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+echo "fixture: generic x86-64 NOP padding ok"
+
+# LLVM exposes this option through the Clang assembler driver.
+printf '%s\n' '.text' 'movq external@GOTPCREL(%rip), %rax' 'movl external@GOTPCREL(%rip), %eax' > "$WORK/got.s"
+reference_cc -c -Wa,-mrelax-relocations=no "$WORK/got.s" -o "$WORK/ref.o"
+"$WORK/fas-as" -mrelax-relocations=no "$WORK/got.s" -o "$WORK/fas.o"
+python3 "$ROOT/test/fas_as/corpus_check.py" --compare "$WORK/ref.o" "$WORK/fas.o"
+echo "fixture: unrelaxed GOT relocations ok"
 
 # 3. Differential fuzzer against llvm-mc-22
 python3 "$ROOT/test/fas_as/fuzz_as.py" "$WORK/fas-as" "$FAS_AS_SEED" "$FAS_AS_CASES"

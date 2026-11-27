@@ -425,16 +425,33 @@ fn pp_line(p handle[Pp], f handle[Frame], args handle[Vec[Token]], loc u32, mark
     if p.line_markers { vec_push[Token](&p.pending.tokens, cc_token(TK_MARK, if f.system { F_SYSTEM } else { 0 }, lex_loc(n, l, l.at), 0)) }
 }
 
-fn pp_directive(p handle[Pp], f handle[Frame], loc u32) void fails {
+fn pp_directive(p handle[Pp], f handle[Frame], hash Token) void fails {
     n handle[CNames] = &p.names
     l handle[Lexer] = &f.lexer
+    loc u32 = hash.loc
+    start usize = l.at - cc_spelling(n, hash).n
+    l.pragma_line = n.assembler
     word Token = try lex_next(n, l, false)
+    l.pragma_line = false
     if word.kind == TK_NL || word.kind == TK_EOF { return }
     inc bool = cc_is(n, word, c"include")
     next bool = cc_is(n, word, c"include_next")
     embed bool = cc_is(n, word, c"embed")
     importing bool = n.gnu && cc_is(n, word, c"import")
     pragma bool = cc_is(n, word, c"pragma")
+    // The assembler also uses '#'. At the start of a line, only
+    // preprocessing directives take precedence over assembler comments.
+    if n.assembler && word.kind != TK_NUM && !inc && !next && !embed && !importing && !pragma &&
+       !cc_is(n, word, c"if") && !cc_is(n, word, c"ifdef") && !cc_is(n, word, c"ifndef") &&
+       !cc_is(n, word, c"elif") && !cc_is(n, word, c"elifdef") && !cc_is(n, word, c"elifndef") &&
+       !cc_is(n, word, c"else") && !cc_is(n, word, c"endif") &&
+       !cc_is(n, word, c"define") && !cc_is(n, word, c"undef") && !cc_is(n, word, c"line") &&
+       !cc_is(n, word, c"ident") && !cc_is(n, word, c"sccs") &&
+       !cc_is(n, word, c"error") && !cc_is(n, word, c"warning") {
+        comment Token = pp_asm_comment(n, l, hash, start)
+        if pp_active(p) { vec_push[Token](&p.pending.tokens, comment) }
+        return
+    }
     args Vec[Token] = {}
     if word.kind == TK_NUM { vec_push[Token](&args, word) }
     l.pragma_line = pragma

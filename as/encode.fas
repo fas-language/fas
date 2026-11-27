@@ -47,6 +47,9 @@ const OT_ZMM u8 = 39
 const OT_ZM u8 = 40
 const OT_K u8 = 41
 const OT_KM u8 = 42
+const OT_IND_RM32 u8 = 43
+const OT_ABS_MEM u8 = 44
+const OT_IND_M u8 = 45
 
 // Secondary flags stored in InstrDesc.ef2 (was pad u32):
 //   bits [0]: EF2_EVEX
@@ -56,6 +59,10 @@ const EF2_EVEX u32 = 1 << 0
 const EF2_EVEX128 u32 = 0 << 1
 const EF2_EVEX256 u32 = 1 << 1
 const EF2_EVEX512 u32 = 2 << 1
+const EF2_ONLY32 u32 = 1 << 8
+const EF2_ONLY64 u32 = 1 << 9
+const EF2_MOFFS32 u32 = 1 << 10
+const EF2_FAR_IMM u32 = 1 << 11
 
 // Encoding flags (must match as/gen_table.py)
 const EF_REXW u32 = 1 << 0
@@ -136,10 +143,12 @@ fn fits_i32_or_u32(v i64) bool { return v >= -2147483648 && v <= 4294967295 }
 
 fn fits_i8_for_flags(v i64, flags u32) bool {
     if (flags & EF_66) != 0 {
+        if !fits_i16_or_u16(v) { return false }
         s i64 = sext[i64](trunc[i16](bitcast[u64](v)))
         return s >= -128 && s <= 127
     }
     if (flags & EF_REXW) == 0 {
+        if !fits_i32_or_u32(v) { return false }
         s i64 = sext[i64](trunc[i32](bitcast[u64](v)))
         return s >= -128 && s <= 127
     }
@@ -158,7 +167,10 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     if ot == OT_RM32 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
     if ot == OT_RM64 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
     if ot == OT_M || ot == OT_M_ANY { return k == OPK_MEM && !op.indirect }
+    if ot == OT_IND_M { return k == OPK_MEM && op.indirect }
     if ot == OT_IND_RM64 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
+    if ot == OT_IND_RM32 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
+    if ot == OT_ABS_MEM { return k == OPK_MEM && !op.indirect && op.has_disp && op.base == 0 && op.index == 0 }
     if ot == OT_AL { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP8, 0) }
     if ot == OT_AX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP16, 0) }
     if ot == OT_EAX { return k == OPK_REG && !op.indirect && op.reg == reg_make(RC_GP32, 0) }
@@ -185,12 +197,13 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     }
     if k == OPK_IMM {
         ev EvalVal = {}
-        eval_expr(op.expr, false, &ev)
+        eval_immediate(op.expr, &ev)
         if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
         if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
         if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
-        if ot == OT_IMM16 { return ev.kind != EV_CONST || fits_i16_or_u16(ev.val) }
-        if ot == OT_IMM32 { return ev.kind != EV_CONST || fits_i32_or_u32(ev.val) }
+        // Full-width 16- and 32-bit operands keep the low bits. Sign-extending
+        // forms still have to represent the original value at operand width.
+        if ot == OT_IMM16 || ot == OT_IMM32 { return true }
         if ot == OT_IMM32S { return ev.kind != EV_CONST || fits_i32(ev.val) }
         if ot == OT_IMM64 { return true }
     }
@@ -224,6 +237,24 @@ fn seg_prefix_byte(seg u8) u8 {
 
 // ---------- Instruction emission ----------
 
+fn emit_insn_immediate(expr u32, size u8, kind u8) void {
+    ev EvalVal = {}
+    eval_expr(expr, false, &ev)
+    if ev.kind == EV_CONST {
+        value u64 = bitcast[u64](ev.val)
+        if size == 1 { emit_u8(trunc[u8](value)) }
+        else if size == 2 { emit_u16(trunc[u16](value)) }
+        else if size == 4 { emit_u32(trunc[u32](value)) }
+        else { emit_u64(value) }
+        return
+    }
+    fid u32 = frag_ensure_data()
+    f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+    off u32 = f.data_len
+    for k u8 in 0..size { emit_u8(0) }
+    emit_fixup(fid, off, size, kind, 0, zext[u32](size), expr)
+}
+
 fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
     flags u32 = d.flags
 
@@ -252,7 +283,19 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
         foff u32 = f.data_len
         emit_u32(0)
-        emit_fixup(fid, foff, 4, FIX_PLT, 1, 4, op0.expr)
+        kind u8 = if ac.code32 { FIX_PC } else { FIX_PLT }
+        emit_fixup(fid, foff, 4, kind, 1, 4, op0.expr)
+        return
+    }
+
+    // A far jump encodes its offset before its segment selector.
+    if (d.ef2 & EF2_FAR_IMM) != 0 {
+        if (flags & EF_66) != 0 { emit_u8(0x66) }
+        emit_u8(d.opcode)
+        selector handle[Operand] = handle_from_addr(ops)
+        target handle[Operand] = handle_from_addr(ops + sizeof[Operand])
+        emit_insn_immediate(target.expr, trunc[u8](desc_imm_size(flags)), FIX_ABS)
+        emit_insn_immediate(selector.expr, 2, FIX_ABS)
         return
     }
 
@@ -280,8 +323,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
     addr32 bool = false
     if rm_op != null && rm_op.kind == OPK_MEM {
         if rm_op.seg != 0 { seg_b = seg_prefix_byte(rm_op.seg) }
-        if (rm_op.base != 0 && (reg_class(rm_op.base) == RC_GP32 || rm_op.base == reg_make(RC_RIP, 1))) ||
-           (rm_op.index != 0 && reg_class(rm_op.index) == RC_GP32) {
+        if !ac.code32 && ((rm_op.base != 0 && (reg_class(rm_op.base) == RC_GP32 || rm_op.base == reg_make(RC_RIP, 1))) ||
+           (rm_op.index != 0 && reg_class(rm_op.index) == RC_GP32)) {
             addr32 = true
         }
     }
@@ -543,6 +586,16 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
     if prefix_rep != 0 { emit_u8(prefix_rep) }
     if rex != 0 { emit_u8(rex) }
 
+    if (d.ef2 & EF2_MOFFS32) != 0 {
+        emit_u8(d.opcode)
+        fid u32 = frag_ensure_data()
+        f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+        foff u32 = f.data_len
+        emit_u32(0)
+        emit_fixup(fid, foff, 4, FIX_ABS, 0, 4, rm_op.expr)
+        return
+    }
+
     // Emit opcode bytes
     if (flags & EF_FIXED2) != 0 {
         emit_u8(d.opcode)
@@ -598,21 +651,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         if imm_op == null {
             emit_u8(d.ext)
         } else {
-            ev EvalVal = {}
-            eval_expr(imm_op.expr, false, &ev)
-            if ev.kind == EV_CONST {
-                if imm_sz == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
-                else if imm_sz == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
-                else if imm_sz == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
-                else { emit_u64(bitcast[u64](ev.val)) }
-            } else {
-                fid u32 = frag_ensure_data()
-                f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-                foff u32 = f.data_len
-                for k u32 in 0..imm_sz { emit_u8(0) }
-                fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
-                emit_fixup(fid, foff, trunc[u8](imm_sz), fkind, 0, imm_sz, imm_op.expr)
-            }
+            fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
+            emit_insn_immediate(imm_op.expr, trunc[u8](imm_sz), fkind)
         }
     }
 }
@@ -643,7 +683,7 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
         emit_u32(0)
         if m.has_disp && m.expr != AS_NONE {
             fkind u8 = FIX_PC
-            if gotpcrelx {
+            if gotpcrelx && !ac.no_relax_relocs {
                 fkind = if has_rex { FIX_REX_GOTPCRELX } else { FIX_GOTPCRELX }
             }
             emit_fixup(fid, foff, 4, fkind, 1, 4 + trailing_imm, m.expr)
@@ -664,10 +704,15 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
         }
     }
 
-    // Case 2: No base and no index -> absolute disp32 (SIB 0x25: mod=00 rm=4, ss=00 idx=4 base=5)
+    // Case 2: Absolute disp32. In 64-bit mode rm=5 means RIP-relative,
+    // so use SIB 0x25 to encode an address without a base or index.
     if base == 0 && index == 0 {
-        emit_u8((reg_field << 3) | 4)
-        emit_u8(0x25)
+        if ac.code32 {
+            emit_u8((reg_field << 3) | 5)
+        } else {
+            emit_u8((reg_field << 3) | 4)
+            emit_u8(0x25)
+        }
         if disp_is_const {
             emit_u32(trunc[u32](bitcast[u64](disp_val) & 0xffffffff))
         } else {
@@ -675,7 +720,8 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
             f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
             foff u32 = f.data_len
             emit_u32(0)
-            emit_fixup(fid, foff, 4, FIX_IMM32S, 1, 4 + trailing_imm, m.expr)
+            kind u8 = if ac.code32 { FIX_ABS } else { FIX_IMM32S }
+            emit_fixup(fid, foff, 4, kind, if ac.code32 { 0 } else { 1 }, 4 + trailing_imm, m.expr)
         }
         return
     }
@@ -761,12 +807,23 @@ fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8
     need_evex bool = false
     for k u8 in 0..nops {
         op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
+        if ac.code32 {
+            if op.kind == OPK_REG && (reg_class(op.reg) == RC_GP64 || reg_num(op.reg) >= 8 || reg_needs_rex(op.reg)) {
+                try as_err(c"register requires 64-bit code mode")
+            }
+            if op.kind == OPK_MEM && ((op.base != 0 && (reg_class(op.base) != RC_GP32 || reg_num(op.base) >= 8)) ||
+                (op.index != 0 && (reg_class(op.index) != RC_GP32 || reg_num(op.index) >= 8))) {
+                try as_err(c"address requires 64-bit code mode")
+            }
+        }
         if op.opmask != 0 || op.zeroing || op.bcast { need_evex = true }
     }
     me handle[MnemEntry] = &MNEM_TABLE[zext[u64](midx)]
     for i u32 in 0..zext[u32](me.count) {
         d handle[InstrDesc] = &INSTR_TABLE[zext[u64](me.start + i)]
         if d.op_count != nops { continue }
+        if ac.code32 && ((d.flags & EF_REXW) != 0 || (d.ef2 & EF2_ONLY64) != 0) { continue }
+        if !ac.code32 && (d.ef2 & EF2_ONLY32) != 0 { continue }
         if need_evex && (d.ef2 & EF2_EVEX) == 0 { continue }
         ok bool = true
         for k u8 in 0..nops {

@@ -184,6 +184,12 @@ fn pp_active(p handle[Pp]) bool {
     return p.conditions.n == 0 || vec_last[Cond](&p.conditions).active
 }
 
+fn pp_asm_comment(n handle[CNames], l handle[Lexer], hash Token, start usize) Token {
+    data Bytes = l.file.data
+    while l.at < data.n && data.p[u8, l.at] != 10 { l.at += 1 }
+    return cc_token(TK_OTHER, hash.flags, hash.loc, cc_intern(n, bytes(data.p + start, l.at - start)))
+}
+
 // Newlines are kept for output, but expansion treats them as whitespace.
 fn pp_raw(p handle[Pp]) Token fails {
     while true {
@@ -227,8 +233,11 @@ fn pp_raw(p handle[Pp]) Token fails {
             continue
         }
         if prev_directive(&p.names, t) {
-            try pp_directive(p, frame, t.loc)
+            try pp_directive(p, frame, t)
             continue
+        }
+        if p.names.assembler && t.kind == TK_PUNCT && cc_is(&p.names, t, c"#") {
+            t = pp_asm_comment(&p.names, l, t, l.at - 1)
         }
         if t.kind != TK_NL && frame.guard_stage != 2 { frame.guard_stage = 4 }
         if pp_active(p) {

@@ -278,6 +278,13 @@ fn parse_expr_primary() u32 fails {
     if c == 39 { // '\''
         return expr_const(try parse_char_lit())
     }
+    if c == 37 {
+        r u16 = try parse_reg_token()
+        id u32 = expr_const(zext[i64](r))
+        e handle[ExprNode] = vec_at(&ac.exprs, zext[u64](id))
+        e.kind = EX_REGISTER
+        return id
+    }
     if is_digit(c) {
         // Check for numeric local label reference: digits followed by 'f' or 'b'
         start u64 = ac.pos
@@ -320,7 +327,15 @@ fn parse_expr_primary() u32 fails {
             }
         }
         sid u32 = sym_get_or_create(name)
-        sym_at(sid).referenced = true
+        sym handle[Symbol] = sym_at(sid)
+        sym.referenced = true
+        // Capture the current value of an absolute assembler variable.
+        // In particular, the RHS of "n = n + 1" refers to the old value.
+        if variant == VAR_NONE && sym.is_equ {
+            val EvalVal = {}
+            eval_expr(sym.equ_expr, false, &val)
+            if val.kind == EV_CONST { return expr_const(val.val) }
+        }
         return expr_sym(sid, variant)
     }
     try as_err(c"unexpected token in expression")
@@ -447,10 +462,15 @@ fn eval_set_unres(out handle[EvalVal]) void {
     out.variant = VAR_NONE
     out.sym_a = 0
     out.sym_b = 0
+    out.frag_id = AS_NONE
     out.val = 0
 }
 
-fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
+const EVAL_PARSE u8 = 0
+const EVAL_LAYOUT u8 = 1
+const EVAL_IMM u8 = 2
+
+fn eval_expr_depth(id u32, mode u8, depth u32, out handle[EvalVal]) void {
     eval_set_unres(out)
     if id == AS_NONE || depth > 64 { return }
     e handle[ExprNode] = vec_at(&ac.exprs, zext[u64](id))
@@ -458,20 +478,26 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
         eval_set_const(out, e.val)
         return
     }
+    if e.kind == EX_REGISTER {
+        out.kind = EV_REGISTER
+        out.val = e.val
+        return
+    }
     if e.kind == EX_DOT {
-        if !laid_out { return }
+        if mode == EVAL_PARSE { return }
         sec handle[Section] = vec_at(&ac.sections, zext[u64](e.lhs))
         f handle[Frag] = vec_at(&sec.frags, zext[u64](e.rhs))
         out.kind = EV_SYM
         out.sym_a = 0x80000000 | e.lhs
-        out.val = bitcast[i64](f.addr) + e.val
+        out.frag_id = e.rhs
+        out.val = if mode == EVAL_LAYOUT { bitcast[i64](f.addr) + e.val } else { e.val }
         return
     }
     if e.kind == EX_SYM {
         s handle[Symbol] = sym_at(e.lhs)
         if s.is_equ && s.equ_expr != AS_NONE {
             ev EvalVal = {}
-            eval_expr_depth(s.equ_expr, laid_out, depth + 1, &ev)
+            eval_expr_depth(s.equ_expr, mode, depth + 1, &ev)
             // Keep global/weak symbol aliases intact so relocations reference the alias itself
             if ev.kind == EV_SYM && s.binding != STB_LOCAL {
                 out.kind = EV_SYM
@@ -484,18 +510,20 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
             out.variant = if ev.kind == EV_SYM && e.variant != VAR_NONE { e.variant } else { ev.variant }
             out.sym_a = ev.sym_a
             out.sym_b = ev.sym_b
+            out.frag_id = ev.frag_id
             out.val = ev.val
             return
         }
         out.kind = EV_SYM
         out.variant = e.variant
         out.sym_a = e.lhs
+        if s.defined && s.sec_id != AS_NONE { out.frag_id = s.frag_id }
         out.val = 0
         return
     }
     if e.kind == EX_UNARY {
         c EvalVal = {}
-        eval_expr_depth(e.lhs, laid_out, depth + 1, &c)
+        eval_expr_depth(e.lhs, mode, depth + 1, &c)
         if c.kind != EV_CONST { return }
         if e.op == UOP_NEG { eval_set_const(out, 0 - c.val) }
         else if e.op == UOP_NOT { eval_set_const(out, ~c.val) }
@@ -506,8 +534,13 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
     if e.kind == EX_BINARY {
         l EvalVal = {}
         r EvalVal = {}
-        eval_expr_depth(e.lhs, laid_out, depth + 1, &l)
-        eval_expr_depth(e.rhs, laid_out, depth + 1, &r)
+        eval_expr_depth(e.lhs, mode, depth + 1, &l)
+        eval_expr_depth(e.rhs, mode, depth + 1, &r)
+        if l.kind == EV_REGISTER && r.kind == EV_REGISTER {
+            if e.op == BOP_EQ { eval_set_const(out, if l.val == r.val { -1 } else { 0 }) }
+            if e.op == BOP_NE { eval_set_const(out, if l.val != r.val { -1 } else { 0 }) }
+            return
+        }
         if l.kind == EV_CONST && r.kind == EV_CONST {
             a i64 = l.val
             b i64 = r.val
@@ -533,39 +566,41 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
         }
         // sym + const or const + sym
         if e.op == BOP_ADD {
-            if l.kind == EV_SYM && r.kind == EV_CONST {
-                out.kind = EV_SYM
-                out.variant = l.variant
-                out.sym_a = l.sym_a
+            if (l.kind == EV_SYM || l.kind == EV_DIFF) && r.kind == EV_CONST {
+                mem_copy(handle_addr(out), &l, sizeof[EvalVal])
                 out.val = l.val + r.val
                 return
             }
-            if l.kind == EV_CONST && r.kind == EV_SYM {
-                out.kind = EV_SYM
-                out.variant = r.variant
-                out.sym_a = r.sym_a
+            if l.kind == EV_CONST && (r.kind == EV_SYM || r.kind == EV_DIFF) {
+                mem_copy(handle_addr(out), &r, sizeof[EvalVal])
                 out.val = r.val + l.val
                 return
             }
         }
         // sym - const or sym_a - sym_b
         if e.op == BOP_SUB {
-            if l.kind == EV_SYM && r.kind == EV_CONST {
-                out.kind = EV_SYM
-                out.variant = l.variant
-                out.sym_a = l.sym_a
+            if (l.kind == EV_SYM || l.kind == EV_DIFF) && r.kind == EV_CONST {
+                mem_copy(handle_addr(out), &l, sizeof[EvalVal])
                 out.val = l.val - r.val
                 return
             }
             if l.kind == EV_SYM && r.kind == EV_SYM {
-                if laid_out {
+                if mode != EVAL_PARSE && l.variant == VAR_NONE && r.variant == VAR_NONE {
                     sa_sec u32 = eval_sym_sec(l.sym_a)
                     sb_sec u32 = eval_sym_sec(r.sym_a)
                     if sa_sec != AS_NONE && sa_sec == sb_sec {
-                        va i64 = eval_sym_addr(l.sym_a) + l.val
-                        vb i64 = eval_sym_addr(r.sym_a) + r.val
-                        eval_set_const(out, va - vb)
-                        return
+                        if mode == EVAL_LAYOUT {
+                            va i64 = eval_sym_addr(l.sym_a) + l.val
+                            vb i64 = eval_sym_addr(r.sym_a) + r.val
+                            eval_set_const(out, va - vb)
+                            return
+                        }
+                        if l.frag_id != AS_NONE && l.frag_id == r.frag_id {
+                            va i64 = eval_sym_frag_off(l.sym_a) + l.val
+                            vb i64 = eval_sym_frag_off(r.sym_a) + r.val
+                            eval_set_const(out, va - vb)
+                            return
+                        }
                     }
                 }
                 out.kind = EV_DIFF
@@ -578,6 +613,11 @@ fn eval_expr_depth(id u32, laid_out bool, depth u32, out handle[EvalVal]) void {
     }
 }
 
+fn eval_sym_frag_off(sym_ref u32) i64 {
+    if (sym_ref & 0x80000000) != 0 { return 0 }
+    return zext[i64](sym_at(sym_ref).frag_off)
+}
+
 fn eval_sym_sec(sym_ref u32) u32 {
     if (sym_ref & 0x80000000) != 0 { return sym_ref & 0x7fffffff }
     s handle[Symbol] = sym_at(sym_ref)
@@ -588,11 +628,22 @@ fn eval_sym_sec(sym_ref u32) u32 {
 fn eval_sym_addr(sym_ref u32) i64 {
     if (sym_ref & 0x80000000) != 0 { return 0 }
     s handle[Symbol] = sym_at(sym_ref)
+    // During layout the fragment can already have its current address
+    // while the symbol table still holds the previous pass's value.
+    if s.sec_id != AS_NONE && s.frag_id != AS_NONE {
+        sec handle[Section] = sec_at(s.sec_id)
+        f handle[Frag] = vec_at(&sec.frags, zext[u64](s.frag_id))
+        return bitcast[i64](f.addr + zext[u64](s.frag_off))
+    }
     return bitcast[i64](s.value)
 }
 
 fn eval_expr(id u32, laid_out bool, out handle[EvalVal]) void {
-    eval_expr_depth(id, laid_out, 0, out)
+    eval_expr_depth(id, if laid_out { EVAL_LAYOUT } else { EVAL_PARSE }, 0, out)
+}
+
+fn eval_immediate(id u32, out handle[EvalVal]) void {
+    eval_expr_depth(id, EVAL_IMM, 0, out)
 }
 
 // Evaluates a required compile-time constant expression immediately.

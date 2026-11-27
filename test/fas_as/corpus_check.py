@@ -14,7 +14,7 @@ from compiler import assemble
 from refcache import run as cached_run
 from collections import Counter
 
-def parse_elf(data):
+def parse_elf(data, strict=False):
     e_shoff = struct.unpack_from('<Q', data, 40)[0]
     e_shentsize, e_shnum, e_shstrndx = struct.unpack_from('<HHH', data, 58)
     shdrs = [struct.unpack_from('<IIQQQQIIQQ', data, e_shoff + i * e_shentsize) for i in range(e_shnum)]
@@ -34,11 +34,14 @@ def parse_elf(data):
             symtab = sh
         elif name == '.strtab':
             strtab_off = sh_off
-        elif name.startswith('.rela.'):
-            relas_raw[name[6:]] = sh
-        elif name and sh_type != 0 and name not in ('.shstrtab', '.llvm_addrsig') and not name.startswith('.debug'):
-            payload = b'\x00' * sh_size if sh_type == 8 else data[sh_off:sh_off + sh_size]
-            secs[name] = (sh_type, sh_flags, payload)
+        elif sh_type == 4:
+            target = get_str(shstr_off, shdrs[sh[7]][0])
+            relas_raw[target] = sh
+        elif name and sh_type != 0 and i != e_shstrndx and (strict or
+                (name != '.llvm_addrsig' and not name.startswith('.debug'))):
+            attributes = (sh_type, sh_flags, sh[8], sh[9], sh_size)
+            payload = b'' if sh_type == 8 else data[sh_off:sh_off + sh_size]
+            secs[name] = (attributes, payload)
 
     # Extract symbols (non-temporary)
     syms = {}
@@ -53,13 +56,13 @@ def parse_elf(data):
             else:
                 sname = get_str(strtab_off, st_name)
             sym_names[idx] = (sname, bind, stype, st_shndx, st_val)
-            if bind != 0 and sname:
+            if sname and stype != 3 and (bind != 0 or strict):
                 sec_name = get_str(shstr_off, shdrs[st_shndx][0]) if 0 < st_shndx < len(shdrs) else str(st_shndx)
                 syms[sname] = (bind, stype, st_other, sec_name, st_val, st_size)
 
     relas = {}
     for target, sh in relas_raw.items():
-        if target.startswith('.debug'):
+        if not strict and target.startswith('.debug'):
             continue
         r_off, r_sz = sh[4], sh[5]
         lst = []
@@ -68,44 +71,58 @@ def parse_elf(data):
             sym_idx = r_info >> 32
             rtype = r_info & 0xffffffff
             sname, bind, stype, st_shndx, st_val = sym_names.get(sym_idx, ('?', 0, 0, 0, 0))
-            # Normalize defined local symbol reloc to (section_name, st_val + addend)
-            if bind == 0 and stype != 3 and 0 < st_shndx < len(shdrs):
+            # The older corpus allows equivalent local symbol and section targets.
+            if not strict and bind == 0 and stype != 3 and 0 < st_shndx < len(shdrs):
                 sname = get_str(shstr_off, shdrs[st_shndx][0])
                 r_addend += st_val
             lst.append((r_offset, rtype, sname, r_addend))
         relas[target] = lst
     return secs, syms, relas
 
-def compare_objs(mc_data, fas_data):
-    ms, msy, mr = parse_elf(mc_data)
-    fs, fsy, fr = parse_elf(fas_data)
+def compare_objs(mc_data, fas_data, strict=False):
+    ms, msy, mr = parse_elf(mc_data, strict)
+    fs, fsy, fr = parse_elf(fas_data, strict)
     diffs = []
     # Compare all code/data/eh_frame sections present in mc
-    for name, (mt, mf, mb) in ms.items():
-        if name == '.note.GNU-stack' or name == '.comment':
+    for name, (meta, mb) in ms.items():
+        if not strict and name in ('.note.GNU-stack', '.comment'):
             continue
         if name not in fs:
             diffs.append(f"missing section {name}")
             continue
-        ft, ff, fb = fs[name]
+        actual_meta, fb = fs[name]
+        if strict and meta != actual_meta:
+            diffs.append(f"section {name} (type, flags, align, entsize, size): ref={meta} fas={actual_meta}")
+        elif not strict and meta[0] == 8 and meta[4] != actual_meta[4]:
+            diffs.append(f"section {name} size differs (ref={meta[4]} fas={actual_meta[4]})")
         if mb != fb:
             # Find first diff byte
             k = 0
             while k < len(mb) and k < len(fb) and mb[k] == fb[k]: k += 1
             diffs.append(f"section {name} bytes differ at 0x{k:x} (mc len={len(mb)} fas len={len(fb)}, mc={mb[k:k+8].hex()} fas={fb[k:k+8].hex()})")
-    for target, ml in mr.items():
-        if target == '.comment':
+    targets = sorted(mr.keys() | fr.keys()) if strict else mr
+    for target in targets:
+        if not strict and target == '.comment':
             continue
+        ml = mr.get(target, [])
         fl = fr.get(target, [])
         if ml != fl:
-            diffs.append(f"relas {target} differ (mc={len(ml)} fas={len(fl)}, first mc={ml[:2]} fas={fl[:2]})")
+            n = 0
+            while n < min(len(ml), len(fl)) and ml[n] == fl[n]:
+                n += 1
+            diffs.append(f"relas {target} differ at entry {n} (ref={len(ml)} fas={len(fl)}, ref={ml[n:n+2]} fas={fl[n:n+2]})")
     for sname, mval in msy.items():
         if sname not in fsy:
-            diffs.append(f"missing global sym {sname}")
+            diffs.append(f"missing symbol {sname}")
         else:
             fval = fsy[sname]
-            if mval[:5] != fval[:5]: # ignore minor size diff if any, check bind/type/vis/sec/val
+            if (mval != fval if strict else mval[:5] != fval[:5]):
                 diffs.append(f"sym {sname} differs: mc={mval} fas={fval}")
+    if strict:
+        for name in sorted(fs.keys() - ms.keys()):
+            diffs.append(f"extra section {name}")
+        for name in sorted(fsy.keys() - msy.keys()):
+            diffs.append(f"extra symbol {name}")
     return diffs
 
 def test_one(args):
@@ -136,6 +153,13 @@ def test_one(args):
         return ('PASS', cfile, '')
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == '--compare':
+        reference, actual = map(Path, sys.argv[2:])
+        diffs = compare_objs(reference.read_bytes(), actual.read_bytes(), strict=True)
+        for diff in diffs:
+            print(diff)
+        return int(bool(diffs))
+
     fas_as = sys.argv[1]
     upstream = sys.argv[2]
     mode = sys.argv[3] if len(sys.argv) > 3 else 'quick'
@@ -165,7 +189,8 @@ def main():
     err_reasons = Counter()
     samples = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
+    jobs_limit = int(os.environ.get('FAS_AS_JOBS', os.cpu_count() or 8))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs_limit) as ex:
         for status, label, msg in ex.map(test_one, jobs):
             counts[status] += 1
             if status in ('ERR', 'DIFF'):

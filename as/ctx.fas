@@ -107,6 +107,7 @@ const EX_SYM u8 = 1
 const EX_DOT u8 = 2
 const EX_UNARY u8 = 3
 const EX_BINARY u8 = 4
+const EX_REGISTER u8 = 5
 
 // Unary ops
 const UOP_NEG u8 = 1
@@ -149,6 +150,7 @@ const EV_CONST u8 = 0
 const EV_SYM u8 = 1        // sym_a + addend (with variant)
 const EV_DIFF u8 = 2       // sym_a - sym_b + addend (unresolved cross-section or undefined)
 const EV_UNRESOLVED u8 = 3
+const EV_REGISTER u8 = 4
 
 struct EvalVal {
     kind u8
@@ -156,6 +158,7 @@ struct EvalVal {
     pad u16
     sym_a u32
     sym_b u32
+    frag_id u32     // fragment of sym_a when selecting an immediate encoding
     val i64
 }
 
@@ -191,6 +194,7 @@ const FK_ALIGN u8 = 2
 const FK_FILL u8 = 3
 const FK_ULEB u8 = 4
 const FK_SLEB u8 = 5
+const FK_ORG u8 = 6
 
 struct Frag {
     kind u8
@@ -199,12 +203,12 @@ struct Frag {
     is_code u8      // FK_ALIGN: 1 if NOP fill in executable section
     data_off u32    // FK_DATA: offset in sec.data; FK_RELAX_JMP: short_op | (long_op << 8) | (is_jcc << 16)
     data_len u32    // FK_DATA: length in sec.data; FK_ALIGN: align bytes; FK_FILL: elem size
-    expr u32        // FK_RELAX_JMP/ULEB/SLEB: target ExprNode; FK_FILL: repeat count
-    fill u64        // FK_ALIGN: fill byte | (max_skip << 32); FK_FILL: fill value
+    expr u32        // FK_RELAX_JMP/ULEB/SLEB/ORG: target ExprNode; FK_FILL: repeat count
+    fill u64        // FK_ALIGN: fill byte | (max_skip << 32); FK_FILL/ORG: fill value
     addr u64        // computed byte offset in section during relaxation
     size u64        // computed byte size in section during relaxation
     line u32        // source line for diagnostics
-    pad u32
+    branch_pc32 bool // FK_RELAX_JMP: use PC32 for a plain external target in .code32
 }
 
 const FIX_ABS u8 = 0        // absolute data/imm (size = 1, 2, 4, 8)
@@ -231,6 +235,7 @@ struct Rela {
     sym_id u32
     rtype u32
     addend i64
+    keep_symbol bool
 }
 
 // ---------- Sections ----------
@@ -322,8 +327,11 @@ struct As {
     line u32
     template_mode bool
     noexecstack bool
+    generic_x86_64 bool
     had_error bool
-    pad u8
+    code32 bool
+    no_relax_relocs bool
+    fatal_warnings bool
     diag Buf
     inc_dirs handle[Vec[Bytes]]
 
@@ -354,6 +362,7 @@ struct As {
     macros Vec[MacroDef]
     macro_map StrU32Map
     macro_uid u64
+    altmacro bool
     if_stack Vec[u8]
 
     // CFI / .eh_frame state

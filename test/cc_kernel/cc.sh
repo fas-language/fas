@@ -40,7 +40,12 @@ for arg; do
         */arch/x86/kernel/asm-offsets.c|*/kernel/bounds.c|*/scripts/mod/devicetable-offsets.c) offsets=true ;;
         arch/x86/boot/*.c|*/arch/x86/boot/*.c) setup_c=$arg ;;
         -*) ;;
-        *.S|*.s|assembler|assembler-with-cpp) exec "$clang" "$@" ;;
+        *.S|*.s|assembler|assembler-with-cpp)
+            if [[ ${KERNEL_AS:-clang} == fas ]]; then
+                exec "$(dirname -- "$0")/as.sh" "$@"
+            fi
+            exec "$clang" "$@"
+            ;;
     esac
     args+=("$arg")
 done
