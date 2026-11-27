@@ -18,7 +18,6 @@ out_path=
 offsets=false
 target=
 setup_c=
-vdso32_c=
 asm_index=-1
 for arg; do
     if $output; then
@@ -40,24 +39,31 @@ for arg; do
             exit 1
             ;;
         */arch/x86/kernel/asm-offsets.c|*/kernel/bounds.c|*/scripts/mod/devicetable-offsets.c) offsets=true ;;
-        arch/x86/boot/*.c|*/arch/x86/boot/*.c|arch/x86/realmode/*.c|*/arch/x86/realmode/*.c) setup_c=$arg ;;
-        arch/x86/entry/vdso/vdso32/*.c|*/arch/x86/entry/vdso/vdso32/*.c) vdso32_c=$arg ;;
+        arch/x86/boot/*.c|*/arch/x86/boot/*.c) setup_c=$arg ;;
         -*) ;;
         *.S|*.s|assembler|assembler-with-cpp) exec "$clang" "$@" ;;
     esac
     args+=("$arg")
 done
 
-# TODO: 32/16-bit x86 codegen in fcc removes this.
-if [[ $target == -m16 && -n $setup_c || $target == -m32 && -n $vdso32_c ]]; then
-    if [[ -n ${KERNEL_CLANG_C_LOG:-} ]]; then
-        source=$setup_c
-        if [[ $target == -m32 ]]; then source=$vdso32_c; fi
-        printf '%s\tarch/x86/%s\n' "$target" "${source#*arch/x86/}" >> "$KERNEL_CLANG_C_LOG"
-    fi
-    # Kbuild selected the shared warning flags by probing fcc. Keep Clang
-    # warnings enabled, while allowing flags Clang does not recognize.
-    exec "$clang" "$@" -Wno-unknown-warning-option
+# Keep the largest setup objects small enough for the kernel's 32 KiB limit.
+if [[ $target == -m16 && -n $setup_c && ${KERNEL_FCC_SETUP:-0} != 1 ]]; then
+    case "${setup_c##*/}" in
+        cmdline.c|printf.c|string.c|video.c)
+            if [[ -n ${KERNEL_CLANG_C_LOG:-} ]]; then
+                printf '%s\tarch/x86/%s\n' "$target" "${setup_c#*arch/x86/}" >> "$KERNEL_CLANG_C_LOG"
+            fi
+            exec "$clang" "$@" -Wno-unknown-warning-option
+            ;;
+    esac
+fi
+
+# The native i386 object emitter has no DWARF writer yet. Keep the assembly
+# invocation intact (the dispatch above has already handled it).
+if [[ $target == -m16 || $target == -m32 ]]; then
+    for index in "${!args[@]}"; do
+        if [[ ${args[index]} == -g ]]; then unset 'args[index]'; fi
+    done
 fi
 
 # Kbuild's offset generators put constant layout values in .ascii directives.

@@ -31,7 +31,9 @@ scripted=false
 case "${output##*/}:/${script#./}" in
     vmlinux:*/arch/x86/kernel/vmlinux.lds|.tmp_vmlinux[123]:*/arch/x86/kernel/vmlinux.lds|\
     setup.elf:*/arch/x86/boot/setup.ld|\
-    realmode.elf:*/arch/x86/realmode/rm/realmode.lds) scripted=true ;;
+    realmode.elf:*/arch/x86/realmode/rm/realmode.lds|\
+    vdso32.so.dbg:*/arch/x86/entry/vdso/vdso32/vdso32.lds|\
+    vdso64.so.dbg:*/arch/x86/entry/vdso/vdso.lds) scripted=true ;;
 esac
 if $relocatable || $scripted; then
     [[ -n ${KERNEL_LD_LOG:-} ]] && printf 'fas-ld\t%s\n' "$*" >> "$KERNEL_LD_LOG"

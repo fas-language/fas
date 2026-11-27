@@ -23,18 +23,23 @@ firmware's PCI configuration regions. The test succeeds when the static init
 writes `FCC_KERNEL_INIT_OK` to ttyS0 and the kernel powers off. The full
 console transcript is saved in `boot.log`.
 
-The CC adapter selects Kbuild's Clang configuration, runs Clang on assembly
-inputs, on `-m16` C in `arch/x86/boot` and `arch/x86/realmode`, and on
-`-m32` C in `arch/x86/entry/vdso/vdso32`. All other target C goes to fcc,
-including the x86-64 decompressor. The harness reports the count and paths
-of Clang-routed C inputs, retaining the list in `clang-c.tsv` for incremental
-builds. Three Kbuild offset generators expect GNU assembly from `-S`. For
-those inputs the adapter extracts their `.ascii` layout markers from fcc's
-object files.
+The CC adapter selects Kbuild's Clang configuration and runs Clang on
+assembly inputs. Linux's 32 KiB BIOS setup size limit still requires Clang
+for `cmdline.c`, `printf.c`, `string.c`, and `video.c` under
+`arch/x86/boot/`. fcc compiles the other 16 setup files,
+the six `-m16` trampoline files, the two `-m32` compat vDSO files, and the
+other target C, including the x86-64 decompressor. The mixed defconfig setup
+replay ends at `0x7910`. Set `KERNEL_FCC_SETUP=1` to try compiling all setup
+C with fcc. In a size measurement the all-native setup ended at `0x98b0`.
+The harness records which Clang C fallbacks it invoked in `clang-c.tsv`.
+Three Kbuild offset generators expect
+GNU assembly from `-S`. For those inputs the adapter extracts their `.ascii`
+layout markers from fcc's object files.
 With `KERNEL_LD=fas`, the LD adapter `test/cc_kernel/ld.sh` sends relocatable
-(`-r`) links, the preliminary kallsyms links, and the `vmlinux`,
-`setup.elf`, and `realmode.elf` scripts to fas-ld (`FCC_LD`). Kbuild uses
-ld.lld for the decompressor and the shared vDSOs. The build directory's
+(`-r`) links, including the three objtool intermediate objects, to fas-ld
+(`FCC_LD`). It also handles the preliminary kallsyms links and the
+`vmlinux`, `setup.elf`, `realmode.elf`, and both shared vDSO scripts. Kbuild
+uses ld.lld for the target decompressor link. The build directory's
 `fas-ld.tsv` lists each fas-ld invocation.
 
 The fcc tinyconfig sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
