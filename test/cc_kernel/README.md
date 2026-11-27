@@ -37,10 +37,11 @@ GNU assembly from `-S`. For those inputs the adapter extracts their `.ascii`
 layout markers from fcc's object files.
 With `KERNEL_LD=fas`, the LD adapter `test/cc_kernel/ld.sh` sends relocatable
 (`-r`) links, including the three objtool intermediate objects, to fas-ld
-(`FCC_LD`). It also handles the preliminary kallsyms links and the
-`vmlinux`, `setup.elf`, `realmode.elf`, and both shared vDSO scripts. Kbuild
-uses ld.lld for the target decompressor link. The build directory's
-`fas-ld.tsv` lists each fas-ld invocation.
+(`FCC_LD`). It also handles the preliminary kallsyms links and the scripts
+for `vmlinux`, the loaderless decompressor PIE, `setup.elf`, `realmode.elf`,
+and both shared vDSOs. This covers every target link recorded in the
+defconfig audit. The build directory's `fas-ld.tsv` lists each fas-ld
+invocation.
 
 The fcc tinyconfig sets `CONFIG_SECTION_MISMATCH_WARN_ONLY` so modpost
 reports section references through out-of-line inline helpers as warnings.

@@ -30,6 +30,7 @@ done
 scripted=false
 case "${output##*/}:/${script#./}" in
     vmlinux:*/arch/x86/kernel/vmlinux.lds|.tmp_vmlinux[123]:*/arch/x86/kernel/vmlinux.lds|\
+    vmlinux:*/arch/x86/boot/compressed/vmlinux.lds|\
     setup.elf:*/arch/x86/boot/setup.ld|\
     realmode.elf:*/arch/x86/realmode/rm/realmode.lds|\
     vdso32.so.dbg:*/arch/x86/entry/vdso/vdso32/vdso32.lds|\
