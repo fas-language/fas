@@ -11,7 +11,7 @@ export FCC_LD="${FCC_LD:-$ROOT/_build/fas-ld}"
 export FCC_INCLUDE="${FCC_INCLUDE:-$ROOT/cc/include}"
 
 if [ ! -x "$FCC" ]; then
-    "$OCAML_FAS" "$ROOT/cc/main.fas" -o "$FCC"
+    "$OCAML_FAS" "$ROOT/${FCC_MAIN:-cc/main.fas}" -o "$FCC"
 fi
 if [ ! -x "$FCC_LD" ]; then
     "$OCAML_FAS" "$ROOT/ld/main.fas" -o "$FCC_LD"

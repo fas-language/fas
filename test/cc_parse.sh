@@ -8,6 +8,6 @@ else
     build=$(mktemp -d -- "${TMPDIR:-/tmp}/fcc-parse-test.XXXXXXXX")
     trap 'rm -rf -- "$build"' EXIT
     fcc=$build/fcc
-    timeout 600 _build/default/bin/main.exe -o "$fcc" cc/main.fas
+    timeout 600 _build/default/bin/main.exe -o "$fcc" "${FCC_MAIN:-cc/main.fas}"
 fi
 python3 test/cc_parse/compare.py "$fcc" "$@"

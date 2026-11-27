@@ -84,15 +84,18 @@ part() {
 export OCAML_FAS=$root/_build/default/bin/main.exe
 export FCC_FIR=$root/_build/default/tools/fas_fir/fas_fir.exe
 export FCC_INCLUDE=$root/cc/include
+# FCC_MAIN picks the C compiler entry point, so a rewrite (for example
+# cc2/main.fas) runs the same tiers. The default is the current fcc.
+fcc_main=${FCC_MAIN:-cc/main.fas}
 
 build_fcc() {
     local backend=$1
     mkdir -p -- "$run/bin/$backend" || return
     export FCC=$run/bin/$backend/fcc FCC_LD=$run/bin/$backend/fas-ld
     if [[ $backend == llvm ]]; then
-        part 'LLVM -O2 fcc build' env FAS_ORACLE=llvm timeout 600 "$OCAML_FAS" --backend=llvm -O2 cc/main.fas -o "$FCC" || return
+        part 'LLVM -O2 fcc build' env FAS_ORACLE=llvm timeout 600 "$OCAML_FAS" --backend=llvm -O2 "$fcc_main" -o "$FCC" || return
     else
-        part 'Native fcc build' timeout 600 "$OCAML_FAS" cc/main.fas -o "$FCC" || return
+        part 'Native fcc build' timeout 600 "$OCAML_FAS" "$fcc_main" -o "$FCC" || return
     fi
     part "$backend tier fas-ld build" timeout 600 "$OCAML_FAS" ld/main.fas -o "$FCC_LD"
 }
@@ -104,7 +107,11 @@ cc_checks() {
     part "$backend flags" bash test/cc_run.sh --flags || :
     part "$backend stream" bash test/cc_run.sh --stream || :
     part "$backend random C" bash test/cc_run.sh --random --count 100 --jobs "$jobs" || :
-    part "$backend cc_types" bash test/cc_types.sh || :
+    # cc_types builds white-box probes from the current fcc's own modules
+    # (cc/test/*.fas), so it says nothing about another entry point.
+    if [[ $fcc_main == cc/main.fas ]]; then
+        part "$backend cc_types" bash test/cc_types.sh || :
+    fi
 }
 
 project_checks() {
