@@ -57,10 +57,14 @@ Run `bash test/cc_kernel.sh fcc defconfig` to try upstream
 builds a static BusyBox from the pinned source with Clang and packages its
 ash shell and poweroff applet. The initramfs boots into the shell, runs a
 command that prints `FCC_KERNEL_SHELL_OK`, and powers off.
+With `KERNEL_LD=fas`, the defconfig image reached that marker and powered
+off under both SeaBIOS and OVMF in QEMU.
 
 Upstream defconfig enables `CONFIG_IA32_EMULATION`, which builds the compat
 vDSO's C files with `-m32` through the adapter. The harness uses upstream
 `x86_64_defconfig` without changing its options.
+`bash test/cc_i386.sh` exercises the ILP32 data model, cdecl, `-mregparm=3`,
+and real-mode code generation against Clang.
 
 ### Defconfig compiler and linker baseline
 
